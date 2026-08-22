@@ -104,6 +104,7 @@ export type UserSettings = {
   last_seen_display?: LastSeenDisplay;
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
   app_status_bar_enabled?: boolean;
+  resolve_session_hostnames?: boolean;
   app_status_bar_order?: AppStatusBarOrderApi;
   kanban_hidden_step_ids?: Record<string, string[]>;
   revision?: number;
@@ -169,6 +170,7 @@ export type UserSettingsUpdatePayload = {
   last_seen_display?: LastSeenDisplay;
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
   app_status_bar_enabled?: boolean;
+  resolve_session_hostnames?: boolean;
   app_status_bar_order?: AppStatusBarOrderApi;
   kanban_hidden_step_ids?: Record<string, string[]>;
 };

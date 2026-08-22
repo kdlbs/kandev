@@ -351,9 +351,10 @@ const (
 	ActionWorktreeReset               = "worktree.reset"                // Reset HEAD to a commit (soft/hard)
 
 	// User actions
-	ActionUserGet             = "user.get"
-	ActionUserSettingsUpdate  = "user.settings.update"
-	ActionUserSettingsUpdated = "user.settings.updated"
+	ActionUserGet                 = "user.get"
+	ActionUserSettingsUpdate      = "user.settings.update"
+	ActionUserSettingsUpdated     = "user.settings.updated"
+	ActionSessionHostnameResolved = "auth.session.hostname.resolved"
 
 	// ActionPluginUserStateUpdated notifies the writing user's other WS
 	// connections that one of their per-user plugin storage keys changed

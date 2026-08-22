@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/auth/hostnames"
 	authhttpmw "github.com/kandev/kandev/internal/auth/httpmw"
 	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/entityrefs"
@@ -406,6 +407,37 @@ func startServices( //nolint:cyclop
 		return false
 	}
 	warnIfExposedWithoutAuth(cfg, services.Auth, log)
+	hostnameStore, err := hostnames.NewStore(dbPool.Writer(), dbPool.Reader())
+	if err != nil {
+		log.Error("Failed to initialize session hostname cache", zap.Error(err))
+		return false
+	}
+	hostnameResolver := hostnames.NewResolver(
+		hostnameStore,
+		func(settingsCtx context.Context, userID string) (bool, error) {
+			settings, err := repos.User.GetUserSettings(settingsCtx, userID)
+			if err != nil {
+				return false, err
+			}
+			return settings.ResolveSessionHostnames, nil
+		},
+		services.Auth.SessionIPs,
+		eventBus,
+		log,
+	)
+	hostnameResolver.Start(ctx)
+	addCleanup(hostnameResolver.Close)
+	hostnameSettingsSubscription, err := eventBus.QueueSubscribe(
+		events.UserSettingsUpdated,
+		"session-hostname-resolver",
+		hostnameResolver.HandleUserSettingsUpdated,
+	)
+	if err != nil {
+		log.Error("Failed to subscribe session hostname resolver to user settings", zap.Error(err))
+		return false
+	}
+	addCleanup(hostnameSettingsSubscription.Unsubscribe)
+	services.SessionHostnameResolver = hostnameResolver
 
 	if err := runInitialAgentSetup(ctx, services.User, agentSettingsController, log); err != nil {
 		// Agent registry seeding is a hard prerequisite for every

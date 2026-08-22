@@ -328,6 +328,12 @@ export type UserSettingsUpdatedPayload = Omit<
   repository_ids: string[];
 };
 
+export type SessionHostnameResolvedPayload = {
+  ip: string;
+  hostname: string;
+  resolved_at: string | null;
+};
+
 // Session runtime payload types (extracted to reduce file size)
 export {
   type AuthMethodInfoPayload,
@@ -431,6 +437,10 @@ export type BackendMessageMap = SessionBackendMessageMap &
     "agent.profile.created": BackendMessage<"agent.profile.created", AgentProfileChangedPayload>;
     "agent.profile.updated": BackendMessage<"agent.profile.updated", AgentProfileChangedPayload>;
     "user.settings.updated": BackendMessage<"user.settings.updated", UserSettingsUpdatedPayload>;
+    "auth.session.hostname.resolved": BackendMessage<
+      "auth.session.hostname.resolved",
+      SessionHostnameResolvedPayload
+    >;
 
     "secrets.created": BackendMessage<"secrets.created", SecretListItem>;
     "secrets.updated": BackendMessage<"secrets.updated", SecretListItem>;

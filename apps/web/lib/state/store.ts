@@ -210,6 +210,8 @@ export type AppState = KanbanSlice & {
 
   // Auth slice (actions merged via AuthSliceActions intersection on AppState)
   auth: (typeof defaultAuthState)["auth"];
+  sessionHostnames: (typeof defaultAuthState)["sessionHostnames"];
+  sessionHostnamesEpoch: (typeof defaultAuthState)["sessionHostnamesEpoch"];
 
   // Automations slice
   automations: (typeof defaultAutomationsState)["automations"];

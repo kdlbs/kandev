@@ -167,3 +167,52 @@ func TestRegisterUserNotifications_PluginUserStateRoutesUnderNATSTransport(t *te
 		t.Fatal("expected the writing user's client to receive the notification even when event.Data arrives as a map (NATS transport)")
 	}
 }
+
+func TestRegisterUserNotifications_SessionHostnameResolvedRoutesAndStripsUser(t *testing.T) {
+	hub := newTestHub(t)
+	owner := newTestClient("owner")
+	other := newTestClient("other")
+	registerTestClient(hub, owner)
+	registerTestClient(hub, other)
+	hub.SubscribeToUser(owner, "user_1")
+	hub.SubscribeToUser(other, "user_2")
+
+	eventBus := bus.NewMemoryEventBus(testLoggerForUserNotifications(t))
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	RegisterUserNotifications(ctx, eventBus, hub, testLoggerForUserNotifications(t))
+	if err := eventBus.Publish(ctx, events.AuthSessionHostnameResolved, bus.NewEvent(
+		events.AuthSessionHostnameResolved, "test", map[string]any{
+			"user_id": "user_1", "ip": "192.0.2.10", "hostname": "mail.example.test",
+			"resolved_at": "2026-08-16T12:00:00.123456789Z",
+		},
+	)); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	select {
+	case raw := <-owner.send:
+		var message ws.Message
+		if err := json.Unmarshal(raw, &message); err != nil {
+			t.Fatalf("unmarshal envelope: %v", err)
+		}
+		if message.Action != ws.ActionSessionHostnameResolved {
+			t.Fatalf("Action = %q, want %q", message.Action, ws.ActionSessionHostnameResolved)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(message.Payload, &payload); err != nil {
+			t.Fatalf("unmarshal payload: %v", err)
+		}
+		if payload["ip"] != "192.0.2.10" || payload["hostname"] != "mail.example.test" || payload["resolved_at"] != "2026-08-16T12:00:00.123456789Z" {
+			t.Fatalf("payload = %#v, want hostname resolution fields", payload)
+		}
+		if _, leaked := payload["user_id"]; leaked {
+			t.Fatalf("payload leaked user_id: %#v", payload)
+		}
+	default:
+		t.Fatal("owner did not receive hostname resolution")
+	}
+	if clientReceived(other) {
+		t.Fatal("non-owner received hostname resolution")
+	}
+}

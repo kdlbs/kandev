@@ -1,7 +1,9 @@
 import type { Window as HappyDOMWindow } from "happy-dom";
 import * as React from "react";
+import { afterEach, beforeEach } from "vitest";
 
 import { initI18nForTests, loadAllLocalesForTests } from "./lib/i18n";
+import { NoopWebSocket } from "./lib/test-support/noop-websocket";
 
 // Guards against `react` production build or duplicate copy — both make `act` unavailable;
 // vitest.config.ts pins NODE_ENV=test for the common case. Namespace import is deliberate.
@@ -37,6 +39,30 @@ if (typeof React.act !== "function") {
 initI18nForTests();
 await loadAllLocalesForTests();
 
+const noNetworkWebSocket = NoopWebSocket as unknown as typeof WebSocket;
+
+// The fallback is installed as the pre-stub global rather than through
+// `vi.stubGlobal()`. Many suites call `vi.unstubAllGlobals()` during teardown;
+// restoring their WebSocket fake must return to this inert transport, not
+// happy-dom's network-backed implementation.
+Object.defineProperty(globalThis, "WebSocket", {
+  configurable: true,
+  writable: true,
+  value: noNetworkWebSocket,
+});
+beforeEach(() => {
+  globalThis.WebSocket = noNetworkWebSocket;
+  if (typeof window !== "undefined") window.WebSocket = noNetworkWebSocket;
+});
+
+afterEach(async () => {
+  globalThis.WebSocket = noNetworkWebSocket;
+  if (typeof window !== "undefined") {
+    window.WebSocket = noNetworkWebSocket;
+    await (window as unknown as HappyDOMWindow).happyDOM.abort();
+  }
+});
+
 function createLocalStorageMock(): Storage {
   const store = new Map<string, string>();
 
@@ -71,6 +97,8 @@ Object.defineProperty(globalThis, "localStorage", {
 
 if (typeof window !== "undefined") {
   const happyDOMWindow = window as unknown as HappyDOMWindow;
+  happyDOMWindow.happyDOM.settings.disableCSSFileLoading = true;
+  happyDOMWindow.happyDOM.settings.handleDisabledFileLoadingAsSuccess = true;
   happyDOMWindow.happyDOM.settings.fetch.interceptor = {
     beforeAsyncRequest: ({ window: requestWindow }) =>
       Promise.resolve(new requestWindow.Response(null, { status: 404 })),
