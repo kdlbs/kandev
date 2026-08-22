@@ -100,21 +100,24 @@ test.describe("Task creation", () => {
 
     const repositorySelector = testPage.getByTestId("repo-chip-trigger").first();
     await repositorySelector.click();
-    const repositoryOptions = testPage.getByRole("option");
+    const repositoryListbox = testPage.getByRole("listbox");
+    const repositoryOptions = repositoryListbox.getByRole("option");
     await expect(repositoryOptions.first()).toHaveAttribute("aria-selected", "true");
     await expect(repositoryOptions.first()).toHaveClass(/bg-card/);
     await testPage.keyboard.press("Escape");
 
     const agentSelector = testPage.getByTestId("agent-profile-selector");
     await agentSelector.click();
-    const agentOptions = testPage.getByRole("option");
+    const agentListbox = testPage.getByRole("listbox");
+    const agentOptions = agentListbox.getByRole("option");
     await expect(agentOptions.first()).toHaveAttribute("aria-selected", "true");
     await expect(agentOptions.first()).toHaveClass(/bg-card/);
     await testPage.keyboard.press("Escape");
 
     const branchSelector = testPage.getByTestId("branch-chip-trigger").first();
     await branchSelector.click();
-    const branchOptions = testPage.getByRole("option");
+    const branchListbox = testPage.getByRole("listbox");
+    const branchOptions = branchListbox.getByRole("option");
     await expect(branchOptions.first()).toHaveAttribute("aria-selected", "true");
     await expect(branchOptions.first()).toHaveClass(/bg-card/);
   });

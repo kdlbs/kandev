@@ -51,6 +51,7 @@ scoring, refresh/action controls, tooltip behavior, and selection handlers.
 ### Model and dependent configuration picker
 
 - `apps/web/components/model-config-selector.tsx`
+- `apps/web/components/model-config-selector-content.tsx`
 - `apps/web/components/model-config-selector.test.tsx`
 
 Prioritize the current model in the top-level model list and the current value
@@ -80,7 +81,7 @@ branch filtering/ranking, branch saving, mode persistence, or the existing
   the selected row visibly distinct, including an unavailable current value.
   **File:** `apps/web/components/combobox.test.tsx`.
   **How:** render the real combobox, open it, and assert option order,
-  selected styling, and disabled behavior.
+  selected styling, keyboard highlight transitions, and disabled behavior.
 - **What:** model and nested configuration lists show their current values
   first while preserving selection callbacks and loading/description behavior.
   **File:** `apps/web/components/model-config-selector.test.tsx`.
@@ -146,12 +147,15 @@ branch filtering/ranking, branch saving, mode persistence, or the existing
 
 Completed on 2026-08-22.
 
-- `cd apps && rtk pnpm --filter @kandev/web test -- --run lib/utils/selector-options.test.ts components/combobox.test.tsx components/model-config-selector.test.tsx components/task-create-dialog-pill.test.tsx components/task/branch-picker-list.test.tsx components/task/selector-trigger-class.test.tsx` - 6 files, 51 tests passed.
+- `cd apps && rtk pnpm --filter @kandev/web test -- --run lib/utils/selector-options.test.ts components/combobox.test.tsx components/model-config-selector.test.tsx components/task-create-dialog-pill.test.tsx components/task/branch-picker-list.test.tsx components/task/selector-trigger-class.test.tsx` - 6 files, 55 tests passed.
 - `cd apps/web && rtk pnpm run typecheck` - passed.
 - `cd apps/web && rtk pnpm e2e:run --project chromium tests/chat/model-selector-error.spec.ts tests/task/create-task.spec.ts tests/task/create-task-branch-selector.spec.ts` - fresh backend/frontend build, 35 tests passed.
 - `cd apps/web && rtk pnpm e2e:run --project mobile-chrome tests/chat/mobile-model-selector.spec.ts tests/settings/mobile-no-silent-model-fallback.spec.ts tests/task/mobile-launch-failure-recovery.spec.ts` - fresh backend/frontend build, 3 tests passed.
 - Targeted ESLint with `--max-warnings 0` and Prettier checks for all changed frontend and E2E files - passed.
 - `rtk git diff --check` - passed.
+- Fixup review findings addressed: active listbox scoping, distinct keyboard
+  highlight styling, focused module extraction for size limits, and direct
+  helper-class coverage.
 
 ## Implementation Waves And Parallel Candidates
 

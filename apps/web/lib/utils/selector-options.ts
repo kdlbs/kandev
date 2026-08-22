@@ -33,7 +33,7 @@ export function selectorOptionClassName(selected: boolean, disabled = false): st
   return [
     "relative min-h-11 border border-transparent pr-7 sm:min-h-7",
     selected &&
-      "border-primary/50 bg-card font-medium data-[selected=true]:bg-card data-[selected=true]:text-foreground",
+      "border-primary/50 bg-card font-medium data-[selected=true]:ring-2 data-[selected=true]:ring-primary/40",
     disabled && "opacity-40 cursor-not-allowed",
   ]
     .filter(Boolean)

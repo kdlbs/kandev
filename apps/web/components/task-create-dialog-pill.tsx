@@ -1,12 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { IconCheck } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { prioritizeSelectedOption, selectorOptionClassName } from "@/lib/utils/selector-options";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { Badge } from "@kandev/ui/badge";
 import {
   Command,
   CommandEmpty,
@@ -15,11 +14,10 @@ import {
   CommandItem,
   CommandList,
 } from "@kandev/ui/command";
-import type { Branch } from "@/lib/types/http";
 import { BranchRefreshButton } from "@/components/branch-refresh-button";
 import { useTaskCreateDialogPopoverContainer } from "@/hooks/use-task-create-dialog-popover-container";
+import { usePillTooltipSuppression } from "@/hooks/use-pill-tooltip-suppression";
 import { useTooltipMountGate } from "@/hooks/use-tooltip-mount-gate";
-import { t } from "@/lib/i18n";
 
 export type PillOption = {
   value: string;
@@ -149,88 +147,6 @@ function pillTriggerClass(disabled: boolean, flat: boolean, hasValue: boolean): 
     disabled ? "opacity-50 cursor-not-allowed" : pillActiveClass(flat),
     !hasValue && "text-muted-foreground",
   );
-}
-
-function usePillTooltipSuppression(open: boolean) {
-  const [suppressTooltip, setSuppressTooltip] = useState(false);
-  const suppressTooltipRef = useRef(false);
-  const pointerInsideTriggerRef = useRef(false);
-  const suppressionReleaseOnExitRef = useRef(true);
-  const suppressionReleaseArmedRef = useRef(false);
-  const suppressionReleaseFrameRef = useRef<number | null>(null);
-  const clearTooltipSuppression = useCallback(() => {
-    if (suppressionReleaseFrameRef.current !== null) {
-      cancelAnimationFrame(suppressionReleaseFrameRef.current);
-      suppressionReleaseFrameRef.current = null;
-    }
-    suppressionReleaseArmedRef.current = false;
-    suppressionReleaseOnExitRef.current = true;
-    suppressTooltipRef.current = false;
-    setSuppressTooltip(false);
-  }, []);
-  const suppressTooltipUntilLeave = useCallback(
-    (releaseOnExit = true) => {
-      if (suppressionReleaseFrameRef.current !== null) {
-        cancelAnimationFrame(suppressionReleaseFrameRef.current);
-      }
-      suppressionReleaseOnExitRef.current = releaseOnExit;
-      suppressionReleaseArmedRef.current = false;
-      suppressTooltipRef.current = true;
-      setSuppressTooltip(true);
-      suppressionReleaseFrameRef.current = requestAnimationFrame(() => {
-        suppressionReleaseFrameRef.current = requestAnimationFrame(() => {
-          suppressionReleaseFrameRef.current = null;
-          if (!pointerInsideTriggerRef.current && suppressionReleaseOnExitRef.current) {
-            clearTooltipSuppression();
-            return;
-          }
-          suppressionReleaseArmedRef.current = true;
-        });
-      });
-    },
-    [clearTooltipSuppression],
-  );
-  useEffect(
-    () => () => {
-      if (suppressionReleaseFrameRef.current !== null) {
-        cancelAnimationFrame(suppressionReleaseFrameRef.current);
-      }
-    },
-    [],
-  );
-  const handlePointerEnter = useCallback(
-    (event: React.PointerEvent) => {
-      pointerInsideTriggerRef.current = true;
-      if (
-        event.pointerType !== "touch" &&
-        !suppressionReleaseOnExitRef.current &&
-        suppressTooltipRef.current
-      ) {
-        clearTooltipSuppression();
-      }
-    },
-    [clearTooltipSuppression],
-  );
-  const handlePointerLeave = useCallback(() => {
-    pointerInsideTriggerRef.current = false;
-    if (!open && suppressionReleaseOnExitRef.current && suppressionReleaseArmedRef.current) {
-      clearTooltipSuppression();
-    }
-  }, [clearTooltipSuppression, open]);
-  const handleBlur = useCallback(() => {
-    if (!open && suppressionReleaseOnExitRef.current && suppressionReleaseArmedRef.current) {
-      clearTooltipSuppression();
-    }
-  }, [clearTooltipSuppression, open]);
-
-  return {
-    suppressTooltip,
-    suppressTooltipRef,
-    suppressTooltipUntilLeave,
-    handlePointerEnter,
-    handlePointerLeave,
-    handleBlur,
-  };
 }
 
 function DisabledPillTooltip({
@@ -411,6 +327,88 @@ function PillPopover({
   );
 }
 
+type PillPopoverShellProps = {
+  open: boolean;
+  setOpen: (open: boolean) => void;
+  triggerButton: React.ReactElement;
+  filter?: PillProps["filter"];
+  searchPlaceholder: string;
+  onRefresh?: () => void;
+  refreshing?: boolean;
+  refreshLabel?: string;
+  options: PillOption[];
+  value: string;
+  onSelect: (value: string) => void;
+  onPointerSelect: (pointerType: string) => void;
+  emptyMessage: string;
+  portalContainer: HTMLElement | null;
+  action?: PillAction;
+  tooltip?: string;
+  tooltipOpenState: boolean;
+  suppressTooltip: boolean;
+  suppressTooltipRef: { current: boolean };
+  handlePillTooltipOpenChange: (open: boolean) => void;
+  suppressForSelection: () => void;
+};
+
+function renderPillPopover({
+  open,
+  setOpen,
+  triggerButton,
+  filter,
+  searchPlaceholder,
+  onRefresh,
+  refreshing,
+  refreshLabel,
+  options,
+  value,
+  onSelect,
+  onPointerSelect,
+  emptyMessage,
+  portalContainer,
+  action,
+  tooltip,
+  tooltipOpenState,
+  suppressTooltip,
+  suppressTooltipRef,
+  handlePillTooltipOpenChange,
+  suppressForSelection,
+}: PillPopoverShellProps): React.ReactElement {
+  const popover = (
+    <PillPopover
+      open={open}
+      setOpen={setOpen}
+      triggerButton={triggerButton}
+      filter={filter}
+      searchPlaceholder={searchPlaceholder}
+      onRefresh={onRefresh}
+      refreshing={refreshing}
+      refreshLabel={refreshLabel}
+      options={options}
+      value={value}
+      onPointerSelect={onPointerSelect}
+      onSelect={(selectedValue) => {
+        if (tooltip) suppressForSelection();
+        onSelect(selectedValue);
+      }}
+      emptyMessage={emptyMessage}
+      portalContainer={portalContainer}
+      action={action}
+    />
+  );
+
+  if (!tooltip) return popover;
+
+  const tooltipOpen =
+    open || suppressTooltip || suppressTooltipRef.current ? false : tooltipOpenState;
+  return (
+    <Tooltip open={tooltipOpen} onOpenChange={handlePillTooltipOpenChange}>
+      {popover}
+      <TooltipContent className="max-w-[calc(100vw-2rem)] break-all">{tooltip}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function renderPillTriggerButton({
   icon,
   value,
@@ -548,116 +546,31 @@ export function Pill({
     );
   }
 
-  const popover = (
-    <PillPopover
-      open={open}
-      setOpen={setOpen}
-      triggerButton={
-        tooltip ? <TooltipTrigger asChild>{triggerButton}</TooltipTrigger> : triggerButton
-      }
-      filter={filter}
-      searchPlaceholder={searchPlaceholder}
-      onRefresh={onRefresh}
-      refreshing={refreshing}
-      refreshLabel={refreshLabel}
-      options={options}
-      value={selectedValue ?? value}
-      onPointerSelect={recordPointerSelection}
-      onSelect={(selectedValue) => {
-        if (tooltip) suppressForSelection();
-        onSelect(selectedValue);
-      }}
-      emptyMessage={emptyMessage}
-      portalContainer={portalContainer}
-      action={action}
-    />
-  );
-
-  if (!tooltip) return popover;
-
-  // Suppress hover tooltip while open and until the pointer leaves after close.
-  const tooltipOpen =
-    open || suppressTooltip || suppressTooltipRef.current ? false : tooltipOpenState;
-  return (
-    <Tooltip open={tooltipOpen} onOpenChange={handlePillTooltipOpenChange}>
-      {popover}
-      <TooltipContent className="max-w-[calc(100vw-2rem)] break-all">{tooltip}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-// --- Branch utilities ---
-
-// Conventional default branches surfaced at the top of the dropdown when no
-// search term is active. cmdk preserves option order on empty queries, so a
-// stable sort here lifts main/master/develop above feature branches.
-const PREFERRED_BRANCH_NAMES = ["main", "master", "develop"];
-
-function branchPriority(b: Branch): number {
-  const idx = PREFERRED_BRANCH_NAMES.indexOf(b.name);
-  if (idx === -1) return PREFERRED_BRANCH_NAMES.length;
-  return idx;
-}
-
-export function sortBranches(branches: Branch[]): Branch[] {
-  return [...branches].sort((a, b) => {
-    const pa = branchPriority(a);
-    const pb = branchPriority(b);
-    if (pa !== pb) return pa - pb;
-    // Within the same priority bucket, locals before remotes — matches the
-    // auto-select preference (`main` over `origin/main`).
-    if (a.type !== b.type) return a.type === "local" ? -1 : 1;
-    return 0;
-  });
-}
-
-const BRANCH_SEGMENT_RE = /[/_.\-\s]+/;
-
-export function buildBranchKeywords(name: string, remote?: string): string[] {
-  const out = new Set<string>();
-  out.add(name);
-  const leafIdx = name.lastIndexOf("/");
-  if (leafIdx >= 0) out.add(name.slice(leafIdx + 1));
-  for (const seg of name.split(BRANCH_SEGMENT_RE)) {
-    if (seg) out.add(seg);
-  }
-  if (remote) out.add(remote);
-  return Array.from(out);
-}
-
-export function branchToOption(b: Branch): PillOption {
-  // Remote branches keep their "origin/" prefix so they're distinguishable
-  // from local branches with the same short name (e.g. "main" vs "origin/main").
-  // Without the prefix, the dropdown shows two indistinguishable rows.
-  const display = b.type === "remote" && b.remote ? `${b.remote}/${b.name}` : b.name;
-  // `||` (not `??`) so an empty-string `remote` falls back too. Provider-backed
-  // workspace repos (URL-added) list branches without a tracking remote, so the
-  // backend sends `remote: ""`; `??` would render an invisible empty badge.
-  const badge = b.type === "local" ? "local" : b.remote || "remote";
-  return {
-    value: display,
-    label: display,
-    keywords: buildBranchKeywords(b.name, b.remote),
-    renderLabel: () => (
-      <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
-        <span className="truncate" title={display}>
-          {display}
-        </span>
-        <Badge variant="outline" className="text-xs shrink-0">
-          {badge}
-        </Badge>
-      </span>
+  return renderPillPopover({
+    open,
+    setOpen,
+    triggerButton: tooltip ? (
+      <TooltipTrigger asChild>{triggerButton}</TooltipTrigger>
+    ) : (
+      triggerButton
     ),
-  };
-}
-
-export function computeBranchPlaceholder(
-  hasRepo: boolean,
-  loading: boolean,
-  optionCount: number,
-): string {
-  if (!hasRepo) return "branch";
-  if (loading) return "loading…";
-  if (optionCount === 0) return t("task:noBranchesShort");
-  return "branch";
+    filter,
+    searchPlaceholder,
+    onRefresh,
+    refreshing,
+    refreshLabel,
+    options,
+    value: selectedValue ?? value,
+    onPointerSelect: recordPointerSelection,
+    onSelect,
+    emptyMessage,
+    portalContainer,
+    action,
+    tooltip,
+    tooltipOpenState,
+    suppressTooltip,
+    suppressTooltipRef,
+    handlePillTooltipOpenChange,
+    suppressForSelection,
+  });
 }

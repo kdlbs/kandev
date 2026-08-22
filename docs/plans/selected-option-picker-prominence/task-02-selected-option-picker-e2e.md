@@ -74,4 +74,6 @@ production-build E2E passed 3 tests covering the model picker, settings agent
 picker, and the existing launch-recovery branch sheet. The recovery fixture
 starts with a missing branch, so its assertion verifies that the first
 available replacement branch is visible, touch-sized, and viewport-contained;
-selected styling is covered by the current-value branch tests.
+selected styling is covered by the current-value branch tests. The fixup pass
+also scopes option assertions through each active listbox to avoid matching a
+different mounted picker.

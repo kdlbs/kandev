@@ -11,6 +11,7 @@ const options: ComboboxOption[] = [
   { value: "current", label: "Current" },
   { value: "last", label: "Last" },
 ];
+const selectedAttribute = "data-selected";
 
 describe("Combobox", () => {
   it("puts the current option first with a persistent selected surface", () => {
@@ -34,6 +35,17 @@ describe("Combobox", () => {
     ]);
     expect(renderedOptions[0].className).toContain("bg-card");
     expect(renderedOptions[0].className).toContain("border-primary/50");
+
+    const searchInput = document.querySelector("[cmdk-input]");
+    expect(searchInput).not.toBeNull();
+    expect(renderedOptions[0].getAttribute(selectedAttribute)).toBe("true");
+
+    fireEvent.keyDown(searchInput!, { key: "ArrowDown" });
+    expect(renderedOptions[0].getAttribute(selectedAttribute)).toBe("false");
+    expect(renderedOptions[1].getAttribute(selectedAttribute)).toBe("true");
+
+    fireEvent.keyDown(searchInput!, { key: "ArrowUp" });
+    expect(renderedOptions[0].getAttribute(selectedAttribute)).toBe("true");
   });
 
   it("keeps a disabled current option first and non-selectable", () => {

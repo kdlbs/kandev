@@ -664,7 +664,8 @@ test.describe("Branch refresh + filter", () => {
 
     // The enabled button and a rendered option together establish that both
     // the branch request and the popover's selected-repository state settled.
-    const firstBranchOption = testPage.getByRole("option").first();
+    const branchListbox = testPage.getByRole("listbox");
+    const firstBranchOption = branchListbox.getByRole("option").first();
     await expect(firstBranchOption).toBeVisible({ timeout: 10_000 });
     await expect(firstBranchOption).toHaveAttribute("data-value", "main");
     await expect(firstBranchOption).toHaveClass(/bg-card/);

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { prioritizeSelectedOption } from "@/lib/utils/selector-options";
+import {
+  configClassName,
+  prioritizeSelectedOption,
+  selectorOptionClassName,
+} from "@/lib/utils/selector-options";
 
 describe("prioritizeSelectedOption", () => {
   it("moves the selected option first without changing the source", () => {
@@ -19,5 +23,37 @@ describe("prioritizeSelectedOption", () => {
 
     expect(prioritizeSelectedOption(source, "missing", (option) => option.id)).toEqual(source);
     expect(prioritizeSelectedOption(source, "", (option) => option.id)).toEqual(source);
+  });
+});
+
+describe("selectorOptionClassName", () => {
+  it("returns only base classes when not selected", () => {
+    const className = selectorOptionClassName(false);
+
+    expect(className).toContain("border-transparent");
+    expect(className).not.toContain("border-primary");
+    expect(className).not.toContain("opacity-40");
+  });
+
+  it("adds a persistent surface and active highlight when selected", () => {
+    const className = selectorOptionClassName(true);
+
+    expect(className).toContain("border-primary/50");
+    expect(className).toContain("bg-card");
+    expect(className).toContain("data-[selected=true]:ring-2");
+  });
+
+  it("adds disabled classes to a selected option", () => {
+    const className = selectorOptionClassName(true, true);
+
+    expect(className).toContain("opacity-40");
+    expect(className).toContain("cursor-not-allowed");
+  });
+});
+
+describe("configClassName", () => {
+  it("adds the selected surface only when selected", () => {
+    expect(configClassName(true)).toContain("border-primary/50");
+    expect(configClassName(false)).not.toContain("border-primary");
   });
 });

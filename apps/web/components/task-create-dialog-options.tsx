@@ -32,7 +32,7 @@ import { getExecutorIcon } from "@/lib/executor-icons";
 import { AgentLogo } from "@/components/agent-logo";
 import { getCapabilityWarning } from "@/lib/capability-warning";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
-import { buildBranchKeywords } from "./task-create-dialog-pill";
+import { buildBranchKeywords } from "./task-create-dialog-branch-options";
 
 type OptionItem = {
   value: string;

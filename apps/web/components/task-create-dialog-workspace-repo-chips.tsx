@@ -17,14 +17,12 @@ import type { TaskRepoRow } from "@/components/task-create-dialog-types";
 import { cn, formatUserHomePath } from "@/lib/utils";
 import { scoreBranch } from "@/lib/utils/branch-filter";
 import { scoreRepo } from "@/lib/utils/repo-filter";
+import { Pill, type PillAction, type PillOption } from "@/components/task-create-dialog-pill";
 import {
-  Pill,
-  sortBranches,
   branchToOption,
   computeBranchPlaceholder,
-  type PillAction,
-  type PillOption,
-} from "@/components/task-create-dialog-pill";
+  sortBranches,
+} from "@/components/task-create-dialog-branch-options";
 import {
   computeBranchIntent,
   computeBranchPrefix,
