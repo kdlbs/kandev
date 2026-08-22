@@ -139,6 +139,44 @@ func TestReuseExistingEnvironment_WorktreeSkippedWhenNotRequested(t *testing.T) 
 	}
 }
 
+func TestWorkspaceReuseAllowedRequiresMatchingExecutorType(t *testing.T) {
+	env := &models.TaskEnvironment{ExecutorType: string(models.ExecutorTypeLocal)}
+	if workspaceReuseAllowed(env, string(models.ExecutorTypeWorktree), true) {
+		t.Fatal("workspace reuse should be disabled when the executor type changes")
+	}
+	if !workspaceReuseAllowed(env, string(models.ExecutorTypeLocal), true) {
+		t.Fatal("workspace reuse should remain enabled for the owning executor type")
+	}
+	if !workspaceReuseAllowed(&models.TaskEnvironment{}, string(models.ExecutorTypeWorktree), true) {
+		t.Fatal("legacy environments without an executor type should remain reusable")
+	}
+}
+
+func TestWaitForTaskEnvironmentReadyWaitsForMaterializer(t *testing.T) {
+	repo := newMockRepository()
+	env := &models.TaskEnvironment{ID: "env-wait", Status: models.TaskEnvironmentStatusCreating}
+	lookups := 0
+	repo.getTaskEnvironmentFunc = func(_ context.Context, id string) (*models.TaskEnvironment, error) {
+		if id != env.ID {
+			t.Fatalf("environment lookup id = %q, want %q", id, env.ID)
+		}
+		lookups++
+		if lookups > 1 {
+			env.Status = models.TaskEnvironmentStatusReady
+		}
+		return env, nil
+	}
+
+	e := newTestExecutor(t, &mockAgentManager{}, repo)
+	got, err := e.waitForTaskEnvironmentReady(context.Background(), env.ID)
+	if err != nil {
+		t.Fatalf("waitForTaskEnvironmentReady: %v", err)
+	}
+	if got.Status != models.TaskEnvironmentStatusReady || lookups < 2 {
+		t.Fatalf("ready environment = %+v after %d lookup(s)", got, lookups)
+	}
+}
+
 func TestEnvironmentReposForLaunch_PersistsRemoteWorkspaceIdentity(t *testing.T) {
 	req := &LaunchAgentRequest{
 		RepositoryID:       "repo-1",
