@@ -41,20 +41,6 @@ describe("TaskItem repository label", () => {
     expect(screen.queryByTestId(REPOSITORY_TEST_ID)).toBeNull();
   });
 
-  it("still names every repository of a multi-repo task while grouped by repository", () => {
-    // Grouped by repository, a multi-repo task lands in the unnamed "Multiple
-    // repositories" bucket, so the header cannot stand in for the row.
-    renderTaskItem({
-      repositories: [PRIMARY_REPOSITORY, "kdlbs/kandev-web"],
-      repositoryPath: PRIMARY_REPOSITORY,
-      showRepository: false,
-    });
-
-    expect(screen.getByTestId(REPOSITORY_TEST_ID).textContent).toBe(
-      "kdlbs/kandev · kdlbs/kandev-web",
-    );
-  });
-
   it("renders nothing when the task has no repository", () => {
     renderTaskItem({});
 

@@ -172,9 +172,11 @@ describe("TaskTopBar repository crumb", () => {
   it("renders no repository crumb for a task with no repository", () => {
     renderTopBar(<TaskTopBar taskId="task-1" taskTitle="Fix the sidebar" />);
 
-    expect(
-      within(screen.getByRole("navigation", { name: "breadcrumb" })).queryByTitle(/\//),
-    ).toBeNull();
+    // Any static crumb, not just a slug-shaped one: a repository with no
+    // provider falls back to a bare name like "scratchpad", which a
+    // slash-matching query would happily miss.
+    const breadcrumb = screen.getByRole("navigation", { name: "breadcrumb" });
+    expect(breadcrumb.querySelector("[title]")).toBeNull();
   });
 });
 

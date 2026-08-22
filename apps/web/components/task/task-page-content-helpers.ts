@@ -170,7 +170,7 @@ export function buildArchivedValue(task: Task | null, repository: Repository | n
     isArchived,
     archivedTaskId: isArchived ? task?.id : undefined,
     archivedTaskTitle: isArchived ? task?.title : undefined,
-    archivedTaskRepositoryPath: isArchived ? (repository?.local_path ?? undefined) : undefined,
+    archivedTaskRepositoryLabel: isArchived && repository ? repositorySlug(repository) : undefined,
     archivedTaskUpdatedAt: isArchived ? task?.updated_at : undefined,
   };
 }

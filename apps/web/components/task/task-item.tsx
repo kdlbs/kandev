@@ -95,8 +95,11 @@ type TaskItemProps = {
   subtasksCollapsed?: boolean;
   /** Toggles subtask visibility when the chevron is clicked. */
   onToggleSubtasks?: () => void;
-  repositories?: string[];
-  /** Slug (or name) of the task's repository, for the single-repository case. */
+  /**
+   * The task's repository as a stable slug (or name). A multi-repository task
+   * carries its primary repository here; enumerating the rest is deferred,
+   * since `TaskSwitcherItem.repositories` is not populated from live data.
+   */
   repositoryPath?: string;
   /**
    * Whether this row should name its repository. False when the list is grouped
@@ -112,23 +115,6 @@ type TaskItemProps = {
   isPinned?: boolean;
   agentErrorMessage?: string | null;
 };
-
-/**
- * The repository text a row shows in its stats line, or `undefined` for none.
- *
- * A multi-repository task always names its repositories: its only repository
- * group is the unnamed "Multiple repositories" bucket, so the header never
- * covers for the row. A single-repository task defers to the header when the
- * list is grouped by repository.
- */
-function resolveRowRepositoryLabel(
-  repositories: string[] | undefined,
-  repositoryPath: string | undefined,
-  showRepository: boolean,
-): string | undefined {
-  if (repositories && repositories.length > 1) return repositories.join(" · ");
-  return showRepository ? repositoryPath : undefined;
-}
 
 // Delegates to the shared classifier in task-switcher so the sidebar bucket
 // and the per-task running spinner always agree. A task whose workflow state
@@ -365,7 +351,6 @@ function TaskItemContent({
   primarySessionId,
   isArchived,
   isPinned,
-  repositories,
   repositoryPath,
   showRepository,
   updatedAt,
@@ -388,7 +373,6 @@ function TaskItemContent({
   primarySessionId?: string | null;
   isArchived?: boolean;
   isPinned?: boolean;
-  repositories?: string[];
   repositoryPath?: string;
   showRepository: boolean;
   updatedAt?: string;
@@ -439,7 +423,7 @@ function TaskItemContent({
       )}
       <TaskItemStatsRow
         updatedAt={showActivityTime ? (lastActivityAt ?? updatedAt) : updatedAt}
-        repositoryLabel={resolveRowRepositoryLabel(repositories, repositoryPath, showRepository)}
+        repositoryLabel={showRepository ? repositoryPath : undefined}
         prInfo={prInfo}
         primarySessionId={primarySessionId}
         queuedCount={queuedCount}
@@ -485,7 +469,6 @@ export const TaskItem = memo(function TaskItem({
   subtaskCount,
   subtasksCollapsed,
   onToggleSubtasks,
-  repositories,
   repositoryPath,
   showRepository = true,
   prInfo,
@@ -536,7 +519,6 @@ export const TaskItem = memo(function TaskItem({
         primarySessionId={primarySessionId}
         isArchived={isArchived}
         isPinned={isPinned}
-        repositories={repositories}
         repositoryPath={repositoryPath}
         showRepository={showRepository}
         updatedAt={updatedAt}

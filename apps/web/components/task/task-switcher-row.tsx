@@ -165,7 +165,6 @@ function TaskRowItem({
       updatedAt={task.updatedAt}
       lastActivityAt={task.lastActivityAt}
       showActivityTime={showActivityTime}
-      repositories={task.repositories}
       repositoryPath={task.repositoryPath}
       showRepository={showRepository}
       prInfo={task.prInfo}

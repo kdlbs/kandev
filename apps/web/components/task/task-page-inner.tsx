@@ -151,6 +151,7 @@ function buildTaskLayoutProps(params: {
     defaultLayouts: params.defaultLayouts,
     initialLayout: params.initialLayout,
     taskTitle: taskProps.taskTitle,
+    repositoryLabel: taskProps.repositoryLabel,
     baseBranch: taskProps.baseBranch,
     worktreeBranch: params.merged.worktreeBranch,
     isRemoteExecutor: params.remote.isRemoteExecutor,
