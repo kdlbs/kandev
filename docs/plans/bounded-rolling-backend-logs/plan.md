@@ -123,7 +123,7 @@ identifies the log directory.
   'TestBackendOnlyBundle|TestBackendCandidates' -count=1` passed.
 - `node --test scripts/validate-public-docs.test.mjs` passed all 61 tests and
   `node scripts/validate-public-docs.mjs` validated 41 pages.
-- Affected package tests passed: logger 28, WebSocket 520, logbundle 22.
+- Affected package tests passed: logger 31, WebSocket 520, logbundle 22.
 - `golangci-lint run ./... --new-from-rev="origin/main" --timeout=5m` passed
   with no issues. Changed Go files are gofmt-clean.
 

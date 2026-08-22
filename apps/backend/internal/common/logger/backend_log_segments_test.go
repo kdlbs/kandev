@@ -36,7 +36,6 @@ func TestDailyWriterEvictsOldestClosedSegment(t *testing.T) {
 	logDir := t.TempDir()
 	now := time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)
 	writer := newTestDailyWriter(t, logDir, now, 4, 8)
-	defer func() { _ = writer.Close() }()
 
 	for _, entry := range []string{"one\n", "two\n", "tri\n"} {
 		if _, err := writer.Write([]byte(entry)); err != nil {
@@ -70,8 +69,6 @@ func TestDailyWriterEvictsOldestSegmentAcrossUTCDays(t *testing.T) {
 	if _, err := writer.Write([]byte("tri\n")); err != nil {
 		t.Fatalf("write tri: %v", err)
 	}
-	defer func() { _ = writer.Close() }()
-
 	if _, err := os.Stat(filepath.Join(logDir, "backend-logs-2026-08-21-000001.log")); !os.IsNotExist(err) {
 		t.Fatalf("oldest cross-day segment remains: %v", err)
 	}
@@ -98,7 +95,6 @@ func TestDailyWriterResumesSequenceAfterRestart(t *testing.T) {
 	}
 
 	writer = newTestDailyWriter(t, logDir, now, 4, 20)
-	defer func() { _ = writer.Close() }()
 	if _, err := writer.Write([]byte("tri\n")); err != nil {
 		t.Fatalf("write tri: %v", err)
 	}
@@ -125,8 +121,7 @@ func TestDailyWriterConvertsOversizedActiveLog(t *testing.T) {
 		t.Fatalf("seed day marker: %v", err)
 	}
 
-	writer := newTestDailyWriter(t, logDir, time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC), 5, 15)
-	defer func() { _ = writer.Close() }()
+	_ = newTestDailyWriter(t, logDir, time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC), 5, 15)
 	if got := readLogFile(t, filepath.Join(logDir, "backend-logs-2026-08-22-000001.log")); got != "one-t" {
 		t.Fatalf("converted first segment = %q, want one-t", got)
 	}
@@ -144,6 +139,34 @@ func TestDailyWriterConvertsOversizedActiveLog(t *testing.T) {
 	}
 }
 
+func TestDailyWriterConversionPrefersActiveTailOverClosedLogs(t *testing.T) {
+	logDir := t.TempDir()
+	source := []byte("one-two-three\n")
+	if err := os.WriteFile(filepath.Join(logDir, "backend-logs-2026-08-21.log"), []byte("old-data"), 0o600); err != nil {
+		t.Fatalf("seed old log: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(logDir, activeBackendLogName), source, 0o600); err != nil {
+		t.Fatalf("seed active log: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(logDir, backendDayMarkerName), []byte("2026-08-22"), 0o600); err != nil {
+		t.Fatalf("seed day marker: %v", err)
+	}
+
+	_ = newTestDailyWriter(t, logDir, time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC), 5, 15)
+	if _, err := os.Stat(filepath.Join(logDir, "backend-logs-2026-08-21.log")); !os.IsNotExist(err) {
+		t.Fatalf("older log was retained while converting active log: %v", err)
+	}
+	for name, want := range map[string]string{
+		"backend-logs-2026-08-22-000001.log": "one-t",
+		"backend-logs-2026-08-22-000002.log": "wo-th",
+		"backend-logs-2026-08-22-000003.log": "ree\n",
+	} {
+		if got := readLogFile(t, filepath.Join(logDir, name)); got != want {
+			t.Fatalf("converted %s = %q, want %q", name, got, want)
+		}
+	}
+}
+
 func TestDailyWriterCleansExpiredSegmentsAndLegacyFiles(t *testing.T) {
 	logDir := t.TempDir()
 	for name := range map[string]string{
@@ -155,8 +178,7 @@ func TestDailyWriterCleansExpiredSegmentsAndLegacyFiles(t *testing.T) {
 			t.Fatalf("seed %s: %v", name, err)
 		}
 	}
-	writer := newTestDailyWriter(t, logDir, time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC), 8, 100)
-	defer func() { _ = writer.Close() }()
+	_ = newTestDailyWriter(t, logDir, time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC), 8, 100)
 	if _, err := os.Stat(filepath.Join(logDir, "backend-logs-2026-08-19.log")); !os.IsNotExist(err) {
 		t.Fatalf("expired legacy file remains: %v", err)
 	}
@@ -186,8 +208,7 @@ func TestDailyWriterRecoversInterruptedConversion(t *testing.T) {
 	if err := writeJSONOwnerFile(filepath.Join(logDir, conversionJournalName), journal); err != nil {
 		t.Fatalf("seed conversion journal: %v", err)
 	}
-	writer := newTestDailyWriter(t, logDir, time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC), 5, 20)
-	defer func() { _ = writer.Close() }()
+	_ = newTestDailyWriter(t, logDir, time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC), 5, 20)
 	if got := readLogFile(t, filepath.Join(logDir, "backend-logs-2026-08-22-000001.log")); got != "one-t" {
 		t.Fatalf("recovered first segment = %q", got)
 	}
@@ -196,6 +217,101 @@ func TestDailyWriterRecoversInterruptedConversion(t *testing.T) {
 	}
 	if _, err := os.Stat(backup); !os.IsNotExist(err) {
 		t.Fatalf("conversion source remains: %v", err)
+	}
+}
+
+func TestDailyWriterRecoversStaleConversionTemp(t *testing.T) {
+	logDir := t.TempDir()
+	source := []byte("one-two-three\n")
+	if err := os.WriteFile(filepath.Join(logDir, conversionSourceName), source, 0o600); err != nil {
+		t.Fatalf("seed conversion source: %v", err)
+	}
+	journal := &conversionJournal{
+		SourceDay: "2026-08-22", SourceSize: int64(len(source)), TailOffset: 0,
+		BackupName: conversionSourceName,
+		Outputs: []conversionOutput{
+			{Name: "backend-logs-2026-08-22-000001.log", Offset: 0, Length: 5},
+			{Name: "backend-logs-2026-08-22-000002.log", Offset: 5, Length: 5},
+			{Name: "backend-logs-2026-08-22-000003.log", Offset: 10, Length: 4},
+		},
+	}
+	if err := writeJSONOwnerFile(filepath.Join(logDir, conversionJournalName), journal); err != nil {
+		t.Fatalf("seed conversion journal: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(logDir, journal.Outputs[0].Name+".tmp"), []byte("stale"), 0o600); err != nil {
+		t.Fatalf("seed stale temporary output: %v", err)
+	}
+
+	_ = newTestDailyWriter(t, logDir, time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC), 5, 20)
+	if got := readLogFile(t, filepath.Join(logDir, journal.Outputs[0].Name)); got != "one-t" {
+		t.Fatalf("recovered first segment = %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(logDir, journal.Outputs[0].Name+".tmp")); !os.IsNotExist(err) {
+		t.Fatalf("stale temporary output remains: %v", err)
+	}
+}
+
+func TestDailyWriterResumesInterruptedConversionCompaction(t *testing.T) {
+	logDir := t.TempDir()
+	journal := &conversionJournal{
+		SourceDay: "2026-08-22", SourceSize: 14, TailOffset: 0,
+		BackupName:           conversionSourceName,
+		CompactionSourceSize: 14, CompactionPrefix: 5, CompactionCopied: 5,
+		Outputs: []conversionOutput{
+			{Name: "backend-logs-2026-08-22-000001.log", Offset: 0, Length: 5},
+			{Name: "backend-logs-2026-08-22-000002.log", Offset: 5, Length: 5},
+			{Name: "backend-logs-2026-08-22-000003.log", Offset: 10, Length: 4},
+		},
+	}
+	if err := os.WriteFile(filepath.Join(logDir, conversionSourceName), []byte("wo-thwo-three\n"), 0o600); err != nil {
+		t.Fatalf("seed partially compacted source: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(logDir, journal.Outputs[0].Name), []byte("one-t"), 0o600); err != nil {
+		t.Fatalf("seed first output: %v", err)
+	}
+	if err := writeJSONOwnerFile(filepath.Join(logDir, conversionJournalName), journal); err != nil {
+		t.Fatalf("seed conversion journal: %v", err)
+	}
+
+	_ = newTestDailyWriter(t, logDir, time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC), 5, 20)
+	for name, want := range map[string]string{
+		"backend-logs-2026-08-22-000001.log": "one-t",
+		"backend-logs-2026-08-22-000002.log": "wo-th",
+		"backend-logs-2026-08-22-000003.log": "ree\n",
+	} {
+		if got := readLogFile(t, filepath.Join(logDir, name)); got != want {
+			t.Fatalf("recovered %s = %q, want %q", name, got, want)
+		}
+	}
+}
+
+func TestDailyWriterPreservesFreshActiveLogAfterCompletedConversion(t *testing.T) {
+	logDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(logDir, activeBackendLogName), []byte("new\n"), 0o600); err != nil {
+		t.Fatalf("seed fresh active log: %v", err)
+	}
+	journal := &conversionJournal{
+		SourceDay: "2026-08-22", SourceSize: 14, TailOffset: 0,
+		BackupName: conversionSourceName,
+		Outputs: []conversionOutput{
+			{Name: "backend-logs-2026-08-22-000001.log", Offset: 0, Length: 5},
+			{Name: "backend-logs-2026-08-22-000002.log", Offset: 5, Length: 5},
+			{Name: "backend-logs-2026-08-22-000003.log", Offset: 10, Length: 4},
+		},
+	}
+	for _, output := range journal.Outputs {
+		contents := map[int64]string{0: "one-t", 5: "wo-th", 10: "ree\n"}[output.Offset]
+		if err := os.WriteFile(filepath.Join(logDir, output.Name), []byte(contents), 0o600); err != nil {
+			t.Fatalf("seed %s: %v", output.Name, err)
+		}
+	}
+	if err := writeJSONOwnerFile(filepath.Join(logDir, conversionJournalName), journal); err != nil {
+		t.Fatalf("seed conversion journal: %v", err)
+	}
+
+	_ = newTestDailyWriter(t, logDir, time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC), 5, 20)
+	if got := readLogFile(t, filepath.Join(logDir, activeBackendLogName)); got != "new\n" {
+		t.Fatalf("fresh active log = %q, want new entry", got)
 	}
 }
 
@@ -214,6 +330,7 @@ func newTestDailyWriterWithClock(
 		logDir: logDir, now: now,
 		maxBytes: segmentBytes, maxTotalBytes: totalBytes,
 	}
+	t.Cleanup(func() { _ = writer.Close() })
 	if err := writer.prepare(); err != nil {
 		t.Fatalf("prepare writer: %v", err)
 	}

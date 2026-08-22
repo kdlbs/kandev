@@ -41,7 +41,7 @@ func (s *Service) backendCandidates() []backendCandidate {
 		if parsed.Active {
 			day = todayDay
 		}
-		if !backendLogDayRetained(day, today) {
+		if !logger.BackendLogDayRetained(day, today) {
 			continue
 		}
 		candidates = append(candidates, backendCandidate{
@@ -51,15 +51,6 @@ func (s *Service) backendCandidates() []backendCandidate {
 	}
 	slices.SortFunc(candidates, compareBackendCandidates)
 	return candidates
-}
-
-func backendLogDayRetained(day string, today time.Time) bool {
-	parsed, err := time.Parse(time.DateOnly, day)
-	if err != nil {
-		return false
-	}
-	cutoff := today.UTC().Truncate(24*time.Hour).AddDate(0, 0, -2)
-	return !parsed.Before(cutoff)
 }
 
 func compareBackendCandidates(left, right backendCandidate) int {

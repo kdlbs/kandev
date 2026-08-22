@@ -148,6 +148,20 @@ func validUTCDay(value string) bool {
 	return err == nil && parsed.Format(time.DateOnly) == value
 }
 
+// BackendLogDayRetained reports whether a closed backend log is within the
+// three-UTC-day maximum age relative to today.
+func BackendLogDayRetained(day string, today time.Time) bool {
+	parsed, err := time.Parse(time.DateOnly, day)
+	if err != nil {
+		return false
+	}
+	todayUTC := today.UTC()
+	cutoff := time.Date(
+		todayUTC.Year(), todayUTC.Month(), todayUTC.Day(), 0, 0, 0, 0, time.UTC,
+	).AddDate(0, 0, -2)
+	return !parsed.Before(cutoff)
+}
+
 type rolloverJournal struct {
 	SourceDay         string `json:"source_day"`
 	SourceSize        int64  `json:"source_size"`
@@ -254,12 +268,15 @@ func copyJournaled(source io.Reader, destination io.Writer, journal *rolloverJou
 }
 
 type conversionJournal struct {
-	SourceDay         string             `json:"source_day"`
-	SourceSize        int64              `json:"source_size"`
-	SourceModUnixNano int64              `json:"source_mod_unix_nano"`
-	TailOffset        int64              `json:"tail_offset"`
-	BackupName        string             `json:"backup_name"`
-	Outputs           []conversionOutput `json:"outputs"`
+	SourceDay            string             `json:"source_day"`
+	SourceSize           int64              `json:"source_size"`
+	SourceModUnixNano    int64              `json:"source_mod_unix_nano"`
+	TailOffset           int64              `json:"tail_offset"`
+	BackupName           string             `json:"backup_name"`
+	CompactionSourceSize int64              `json:"compaction_source_size,omitempty"`
+	CompactionPrefix     int64              `json:"compaction_prefix,omitempty"`
+	CompactionCopied     int64              `json:"compaction_copied,omitempty"`
+	Outputs              []conversionOutput `json:"outputs"`
 }
 
 type conversionOutput struct {
@@ -279,7 +296,11 @@ func (w *dailyWriter) convertActive(day string, sourceSize int64) error {
 	closed := closedBackendLogFiles(files)
 	closedBytes := backendLogBytes(closed)
 	sortBackendLogFiles(closed)
-	for closedBytes >= w.maxTotalBytes && len(closed) > 0 {
+	desiredKeep := sourceSize
+	if desiredKeep > w.maxTotalBytes {
+		desiredKeep = w.maxTotalBytes
+	}
+	for closedBytes+desiredKeep > w.maxTotalBytes && len(closed) > 0 {
 		oldest := closed[0]
 		if err := os.Remove(oldest.Path); err != nil {
 			return fmt.Errorf("remove old log during conversion: %w", err)
@@ -291,7 +312,7 @@ func (w *dailyWriter) convertActive(day string, sourceSize int64) error {
 	if available <= 0 {
 		return fmt.Errorf("no budget remains for active log conversion")
 	}
-	keep := sourceSize
+	keep := desiredKeep
 	if keep > available {
 		keep = available
 	}
@@ -356,19 +377,43 @@ func (w *dailyWriter) recoverConversion() error {
 	}
 	activePath := filepath.Join(w.logDir, activeBackendLogName)
 	backupPath := filepath.Join(w.logDir, journal.BackupName)
-	if _, err := os.Lstat(backupPath); os.IsNotExist(err) {
-		if _, activeErr := os.Lstat(activePath); activeErr == nil {
-			if err := renameExclusive(activePath, backupPath); err != nil {
-				return err
-			}
-		} else if !allConversionOutputsPresent(w.logDir, journal.Outputs) {
-			return fmt.Errorf("conversion source is missing")
-		}
+	complete, err := w.ensureConversionSource(path, activePath, backupPath, &journal)
+	if err != nil {
+		return err
+	}
+	if complete {
+		return nil
 	}
 	if err := w.finishConversion(&journal); err != nil {
 		return err
 	}
 	return nil
+}
+
+func (w *dailyWriter) ensureConversionSource(
+	journalPath, activePath, backupPath string, journal *conversionJournal,
+) (bool, error) {
+	_, err := os.Lstat(backupPath)
+	if err == nil {
+		return false, nil
+	}
+	if !os.IsNotExist(err) {
+		return false, err
+	}
+	if allConversionOutputsPresent(w.logDir, journal.Outputs) {
+		return true, removeIfExists(journalPath)
+	}
+	_, activeErr := os.Lstat(activePath)
+	if activeErr == nil {
+		if err := renameExclusive(activePath, backupPath); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	if !os.IsNotExist(activeErr) {
+		return false, activeErr
+	}
+	return false, fmt.Errorf("conversion source is missing")
 }
 
 func (w *dailyWriter) finishConversion(journal *conversionJournal) error {
@@ -377,31 +422,174 @@ func (w *dailyWriter) finishConversion(journal *conversionJournal) error {
 	}
 	backupPath := filepath.Join(w.logDir, journal.BackupName)
 	for _, output := range journal.Outputs {
-		path := filepath.Join(w.logDir, output.Name)
-		info, err := os.Lstat(path)
-		if err == nil {
-			if !info.Mode().IsRegular() || info.Size() != output.Length {
-				return fmt.Errorf("conversion output %s is invalid", output.Name)
-			}
-			continue
-		}
-		if !os.IsNotExist(err) {
+		if err := w.finishConversionOutput(backupPath, journal, output); err != nil {
 			return err
-		}
-		if err := copyFileRange(backupPath, path+".tmp", journal.TailOffset+output.Offset, output.Length); err != nil {
-			return err
-		}
-		if err := renameExclusive(path+".tmp", path); err != nil {
-			if !os.IsExist(err) {
-				return err
-			}
-			_ = os.Remove(path + ".tmp")
 		}
 	}
 	if err := removeIfExists(backupPath); err != nil {
 		return err
 	}
 	return removeIfExists(filepath.Join(w.logDir, conversionJournalName))
+}
+
+func (w *dailyWriter) finishConversionOutput(
+	backupPath string, journal *conversionJournal, output conversionOutput,
+) error {
+	outputPath := filepath.Join(w.logDir, output.Name)
+	if err := removeIfExists(outputPath + ".tmp"); err != nil {
+		return err
+	}
+	backupInfo, err := os.Lstat(backupPath)
+	if err != nil {
+		return err
+	}
+	if !backupInfo.Mode().IsRegular() {
+		return fmt.Errorf("conversion source is not a regular file")
+	}
+	sourceBefore := journal.SourceSize - journal.TailOffset - output.Offset
+	compactionPrefix := output.Length
+	if output.Offset == 0 {
+		compactionPrefix += journal.TailOffset
+	}
+	sourceAfter := sourceBefore - compactionPrefix
+	if sourceBefore < 0 || sourceAfter < 0 {
+		return fmt.Errorf("invalid conversion source range")
+	}
+	if journal.CompactionPrefix != 0 {
+		if journal.CompactionSourceSize != sourceBefore || journal.CompactionPrefix != compactionPrefix {
+			return fmt.Errorf("invalid conversion compaction state")
+		}
+		if err := validateConversionOutputFile(outputPath, output); err != nil {
+			return err
+		}
+		return compactConversionSource(
+			backupPath, journal, sourceBefore, compactionPrefix,
+			filepath.Join(w.logDir, conversionJournalName),
+		)
+	}
+	if backupInfo.Size() == sourceAfter {
+		return validateConversionOutputFile(outputPath, output)
+	}
+	if backupInfo.Size() != sourceBefore {
+		return fmt.Errorf("invalid conversion source size")
+	}
+	if err := ensureConversionOutput(backupPath, outputPath, journal, output); err != nil {
+		return err
+	}
+	return compactConversionSource(
+		backupPath, journal, sourceBefore, compactionPrefix,
+		filepath.Join(w.logDir, conversionJournalName),
+	)
+}
+
+func ensureConversionOutput(
+	backupPath, outputPath string, journal *conversionJournal, output conversionOutput,
+) error {
+	if err := validateConversionOutputFile(outputPath, output); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	offset := output.Offset
+	if output.Offset == 0 {
+		offset += journal.TailOffset
+	} else {
+		offset = 0
+	}
+	if err := copyFileRange(backupPath, outputPath+".tmp", offset, output.Length); err != nil {
+		return err
+	}
+	if err := renameExclusive(outputPath+".tmp", outputPath); err != nil {
+		if !os.IsExist(err) {
+			return err
+		}
+		return removeIfExists(outputPath + ".tmp")
+	}
+	return nil
+}
+
+func validateConversionOutputFile(path string, output conversionOutput) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() || info.Size() != output.Length {
+		return fmt.Errorf("conversion output %s is invalid", output.Name)
+	}
+	return nil
+}
+
+func compactConversionSource(
+	path string, journal *conversionJournal, sourceBefore, prefix int64, journalPath string,
+) error {
+	if prefix <= 0 || sourceBefore < prefix {
+		return fmt.Errorf("invalid conversion compaction range")
+	}
+	if journal.CompactionPrefix == 0 {
+		journal.CompactionSourceSize = sourceBefore
+		journal.CompactionPrefix = prefix
+		journal.CompactionCopied = 0
+		if err := writeJSONOwnerFile(journalPath, journal); err != nil {
+			return err
+		}
+	} else if journal.CompactionSourceSize != sourceBefore || journal.CompactionPrefix != prefix {
+		return fmt.Errorf("invalid conversion compaction state")
+	}
+
+	file, err := os.OpenFile(path, os.O_RDWR, 0o600)
+	if err != nil {
+		return err
+	}
+	if err := copyCompactionChunks(file, journal, sourceBefore, prefix, journalPath); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Truncate(sourceBefore - prefix); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	journal.CompactionSourceSize = 0
+	journal.CompactionPrefix = 0
+	journal.CompactionCopied = 0
+	return writeJSONOwnerFile(journalPath, journal)
+}
+
+func copyCompactionChunks(
+	file *os.File, journal *conversionJournal, sourceBefore, prefix int64, journalPath string,
+) error {
+	if journal.CompactionCopied < 0 || journal.CompactionCopied > sourceBefore-prefix {
+		return fmt.Errorf("invalid conversion compaction progress")
+	}
+	buffer := make([]byte, 1024*1024)
+	for journal.CompactionCopied < sourceBefore-prefix {
+		remaining := sourceBefore - prefix - journal.CompactionCopied
+		chunkSize := int64(len(buffer))
+		if chunkSize > prefix {
+			chunkSize = prefix
+		}
+		if chunkSize > remaining {
+			chunkSize = remaining
+		}
+		chunk := buffer[:chunkSize]
+		if _, err := file.ReadAt(chunk, prefix+journal.CompactionCopied); err != nil {
+			return err
+		}
+		if _, err := file.WriteAt(chunk, journal.CompactionCopied); err != nil {
+			return err
+		}
+		journal.CompactionCopied += chunkSize
+		if err := writeJSONOwnerFile(journalPath, journal); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func allConversionOutputsPresent(logDir string, outputs []conversionOutput) bool {

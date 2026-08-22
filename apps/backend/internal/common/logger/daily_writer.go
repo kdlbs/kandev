@@ -16,9 +16,9 @@ type dailyWriter struct {
 	day            string
 	file           *os.File
 	size           int64
+	retainedBytes  int64
 	maxBytes       int64
 	maxTotalBytes  int64
-	sequence       int
 	closed         bool
 	maintenanceErr error
 }
@@ -76,6 +76,7 @@ func (w *dailyWriter) prepare() error {
 		return err
 	}
 	w.recordMaintenance(w.cleanup(today))
+	w.recordMaintenance(w.refreshRetainedBytes())
 	w.recordMaintenance(w.enforceBudget(0))
 	return nil
 }
@@ -108,6 +109,7 @@ func (w *dailyWriter) Write(data []byte) (int, error) {
 	}
 	written, err := w.file.Write(data)
 	w.size += int64(written)
+	w.retainedBytes += int64(written)
 	return written, err
 }
 
@@ -119,6 +121,7 @@ func (w *dailyWriter) switchDay(today string) error {
 		return err
 	}
 	w.recordMaintenance(w.cleanup(today))
+	w.recordMaintenance(w.refreshRetainedBytes())
 	w.recordMaintenance(w.enforceBudget(0))
 	return nil
 }
@@ -168,12 +171,11 @@ func (w *dailyWriter) openActive(day string) error {
 		_ = file.Close()
 		return fmt.Errorf("stat active log: %w", err)
 	}
-	sequence, err := w.nextSequence(day)
-	if err != nil {
+	if _, err := w.nextSequence(day); err != nil {
 		_ = file.Close()
 		return err
 	}
-	w.file, w.day, w.size, w.sequence = file, day, info.Size(), sequence
+	w.file, w.day, w.size = file, day, info.Size()
 	return nil
 }
 
@@ -222,6 +224,9 @@ func (w *dailyWriter) enforceBudget(additional int64) error {
 	if additional < 0 || w.maxTotalBytes <= 0 {
 		return fmt.Errorf("invalid backend log budget")
 	}
+	if w.retainedBytes+additional <= w.maxTotalBytes {
+		return nil
+	}
 	files, err := scanBackendLogFiles(w.logDir)
 	if err != nil {
 		return err
@@ -237,9 +242,19 @@ func (w *dailyWriter) enforceBudget(additional int64) error {
 		total -= oldest.Size
 		closed = closed[1:]
 	}
+	w.retainedBytes = total
 	if total+additional > w.maxTotalBytes {
 		return fmt.Errorf("backend log budget exceeded")
 	}
+	return nil
+}
+
+func (w *dailyWriter) refreshRetainedBytes() error {
+	files, err := scanBackendLogFiles(w.logDir)
+	if err != nil {
+		return err
+	}
+	w.retainedBytes = backendLogBytes(files)
 	return nil
 }
 
@@ -248,17 +263,15 @@ func (w *dailyWriter) cleanup(today string) error {
 	if err != nil {
 		return err
 	}
-	cutoff, err := time.Parse(time.DateOnly, today)
+	todayTime, err := time.Parse(time.DateOnly, today)
 	if err != nil {
 		return err
 	}
-	cutoff = cutoff.AddDate(0, 0, -2)
 	for _, file := range files {
 		if file.Active || file.Day == "" {
 			continue
 		}
-		day, err := time.Parse(time.DateOnly, file.Day)
-		if err == nil && day.Before(cutoff) {
+		if !BackendLogDayRetained(file.Day, todayTime) {
 			if err := os.Remove(file.Path); err != nil {
 				return fmt.Errorf("remove expired backend log %s: %w", file.Name, err)
 			}

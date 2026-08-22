@@ -130,10 +130,10 @@ does not mistake a best-effort bundle for complete evidence. Diagnostic bundle
 requests can be temporarily busy or coalesced instead of competing with normal
 product activity.
 
-The fixed daily file bound limits worst-case disk growth but can omit later
-same-day evidence after sustained pressure. Count and byte limits reduce how
-quickly automatic browser reports consume that budget, while UTC rollover
-restores capacity without operator action.
+The aggregate backend-log budget limits worst-case disk growth while oldest
+closed segments are evicted first, so later evidence remains available during
+sustained pressure. Count and byte limits reduce how quickly automatic browser
+reports consume that budget, while UTC age cleanup removes stale evidence.
 
 Fixed byte/profile caps mean a very large retained backend file or a fifth
 browser profile may be represented only partially. Newest backend bytes are

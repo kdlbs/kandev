@@ -24,7 +24,7 @@ existing diagnostic signal for unexpected close codes.
 ## Files Likely Touched
 
 - `apps/backend/internal/gateway/websocket/client.go`
-- `apps/backend/internal/gateway/websocket/client_pump_integration_test.go`
+- `apps/backend/internal/gateway/websocket/client_pump_close_test.go`
 
 ## Dependencies
 
@@ -40,7 +40,7 @@ delegation.
 
 - The WebSocket close requirements in the diagnostic-logging specification.
 - The confirmed root cause in `plan.md`.
-- The real WebSocket fixture in `client_pump_integration_test.go`.
+- The real WebSocket fixture helpers in the websocket test package.
 - The observed-log pattern in `terminal_wsutil_test.go`.
 
 ## Implementation

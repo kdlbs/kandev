@@ -66,14 +66,14 @@ func TestReadPumpCloseLogging(t *testing.T) {
 			joinWithin(t, pumpDone, "read pump")
 
 			records := recorded.FilterMessage("WebSocket read error").All()
-			if got := len(records) > 0; got != test.wantError {
-				t.Fatalf("read error logged = %v, want %v; records = %+v", got, test.wantError, records)
+			wantRecords := 0
+			if test.wantError {
+				wantRecords = 1
+			}
+			if len(records) != wantRecords {
+				t.Fatalf("read error records = %d, want %d; records = %+v", len(records), wantRecords, records)
 			}
 			if !test.wantError {
-				return
-			}
-			if len(records) == 0 {
-				t.Fatal("unexpected close did not produce a log record")
 				return
 			}
 			if records[0].Stack == "" {

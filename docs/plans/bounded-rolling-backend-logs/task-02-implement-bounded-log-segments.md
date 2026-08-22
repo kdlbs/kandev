@@ -93,10 +93,12 @@ the same conversation.
   rollover, strict filename parsing, legacy-file retention, and bounded
   oversized-active-file conversion.
 - Conversion renames the source to an owner-only backup, writes each bounded
-  output through a temporary file, and keeps a journal. Recovery skips complete
-  outputs, finishes missing outputs, then removes the backup and journal. Atomic
-  rename is used for normal size and day rotation, so completed segments are
-  never replaced.
+  output through a temporary file, and incrementally compacts the consumed
+  source prefix. The journal records compaction progress, so recovery can
+  resume after a stale temporary file or an interrupted in-place copy without
+  retaining a full source plus every output. Recovery checks completed outputs
+  before adopting a fresh active file. Atomic rename is used for normal size
+  and day rotation, so completed segments are never replaced.
 - Changed `backend_logger.go` so filesystem and rotation errors use the normal
   30-second retry path instead of a permanent daily-limit stop.
 - Added writer, migration, restart, UTC rollover, global-eviction, legacy,

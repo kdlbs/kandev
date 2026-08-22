@@ -72,8 +72,9 @@ remaining risks. Update this task and `plan.md` in the same conversation.
 
 ## Results
 
-- Changed `archive.go` and added `backend_candidates.go` to discover valid
-  active, numbered, and legacy files from the log directory.
+- Changed `archive.go` and added `backend_candidates.go` plus focused candidate
+  tests to discover valid active, numbered, and legacy files from the log
+  directory.
 - Candidates are restricted to the current UTC day and two preceding days,
   sorted newest-first by day and segment sequence, and filtered with `Lstat`
   so symlinks and unrelated names are excluded.
