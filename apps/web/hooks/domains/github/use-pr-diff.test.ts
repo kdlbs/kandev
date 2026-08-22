@@ -5,10 +5,13 @@ import { StateProvider } from "@/components/state-provider";
 import type { AppState } from "@/lib/state/store";
 import { resolvePRDiffView, usePRDiff, type KeyedPRDiffState } from "./use-pr-diff";
 
-const requestMock = vi.hoisted(() => vi.fn());
+const { requestMock, getWebSocketClientMock } = vi.hoisted(() => ({
+  requestMock: vi.fn(),
+  getWebSocketClientMock: vi.fn(),
+}));
 const FIRST_PR_FILENAME = "src/first-pr.ts";
 vi.mock("@/lib/ws/connection", () => ({
-  getWebSocketClient: () => ({ request: requestMock }),
+  getWebSocketClient: getWebSocketClientMock,
 }));
 
 function deferred<T>() {
@@ -23,6 +26,8 @@ function deferred<T>() {
 
 beforeEach(() => {
   requestMock.mockReset();
+  getWebSocketClientMock.mockReset();
+  getWebSocketClientMock.mockReturnValue({ request: requestMock });
 });
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -66,7 +71,7 @@ describe("resolvePRDiffView", () => {
   });
 });
 
-describe("usePRDiff same-PR refresh", () => {
+describe("usePRDiff refresh callback", () => {
   it("keeps the manual refresh callback stable when the automatic refresh key advances", () => {
     requestMock.mockResolvedValue({ files: staleState.files });
     const { result, rerender } = renderHook(
@@ -79,7 +84,46 @@ describe("usePRDiff same-PR refresh", () => {
 
     expect(result.current.refresh).toBe(refresh);
   });
+});
 
+describe("usePRDiff manual refresh", () => {
+  it("keeps resolved files mounted while a manual refresh is pending", async () => {
+    const refreshed = deferred<{ files: KeyedPRDiffState["files"] }>();
+    requestMock
+      .mockResolvedValueOnce({ files: staleState.files })
+      .mockReturnValueOnce(refreshed.promise);
+    const { result } = renderHook(() => usePRDiff("acme", "app", 1, "synced"), { wrapper });
+    await waitFor(() => expect(result.current.files[0]?.filename).toBe(FIRST_PR_FILENAME));
+
+    act(() => {
+      result.current.refresh();
+    });
+
+    expect(result.current.loading).toBe(false);
+    expect(result.current.files[0]?.filename).toBe(FIRST_PR_FILENAME);
+
+    await act(async () => {
+      refreshed.resolve({ files: staleState.files });
+      await refreshed.promise;
+    });
+  });
+
+  it("keeps resolved files mounted when a manual refresh has no WebSocket client", async () => {
+    requestMock.mockResolvedValueOnce({ files: staleState.files });
+    const { result } = renderHook(() => usePRDiff("acme", "app", 1, "synced"), { wrapper });
+    await waitFor(() => expect(result.current.files[0]?.filename).toBe(FIRST_PR_FILENAME));
+    getWebSocketClientMock.mockReturnValue(null);
+
+    act(() => {
+      result.current.refresh();
+    });
+
+    expect(result.current.loading).toBe(false);
+    expect(result.current.files[0]?.filename).toBe(FIRST_PR_FILENAME);
+  });
+});
+
+describe("usePRDiff automatic same-PR refresh", () => {
   it("keeps current files mounted without re-entering blocking loading", async () => {
     const initial = deferred<{ files: KeyedPRDiffState["files"] }>();
     const refreshed = deferred<{ files: KeyedPRDiffState["files"] }>();
