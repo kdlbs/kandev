@@ -21,19 +21,32 @@ plugin.
 
 ## Decision
 
-A plugin retains exactly two extracted versions: the active one and the version it replaced. The
-count is fixed in code, not configurable.
+A plugin converges on two extracted versions: the active one and the version it replaced. The
+retained count is fixed in code, not configurable. It is a convergent state rather than an enforced
+cap, because every precondition below can legitimately leave more versions on disk.
 
-Deletion is gated on a **confirmed start**, never on the install alone. `Install` prunes only after
-`activate` returns successfully, and boot (`StartActivePlugins`) prunes only after
-`runtime.Start` succeeds for that plugin. A failed install, a failed spawn, a disabled plugin, a
-sideload registered disabled, and a plugin in `error` therefore all keep every version they have.
-`rollbackFailedInstall` is unchanged.
+Deletion is gated on a **confirmed running process**, never on the install alone. `Install` prunes
+after `activate` returns successfully and boot (`StartActivePlugins`) prunes after `runtime.Start`
+succeeds, but in both cases `pruneSupersededVersions` itself re-checks `runtime.Running(id)` before
+deleting anything — `activate` returns nil without starting a process when no runtime is wired, so
+"activate succeeded" is not the same guarantee. A failed install, a failed spawn, a disabled plugin,
+a sideload registered disabled, and a plugin in `error` therefore all keep every version they have,
+as does a plugin whose deletion failed. `rollbackFailedInstall` is unchanged, and remains the one
+path that deletes a version directory without a prune: it removes the newly extracted version, and
+only that one, when the record cannot be persisted.
+
+Extraction is serialized and tracked. `Install` cannot take a plugin's lifecycle lock until it has
+parsed the manifest, so two overlapping installs of the same id both extract before either is
+serialized; the extraction and its in-flight registration happen under one mutex, and a prune skips
+any directory still marked in flight. Without that, the first install to acquire the lock would
+delete the second's fresh package and strand it activating a path that no longer exists.
 
 A directory is a deletion candidate only if it is a real directory (never a symlink), is not
-`data/` or one of pkgtar's `.tmp-*` staging directories, and contains a `manifest.yaml` declaring
-exactly that plugin id and that directory name as its version. The plugin's writable `data/`
-directory and the `<id>.yml` / `<id>.config.yml` records are out of scope by construction.
+`data/` or any dot-prefixed name (which covers pkgtar's `.tmp-*` staging directories), and contains
+a `manifest.yaml` declaring exactly that plugin id and that directory name as its version. Listing,
+manifest reads, and removal all go through a single `os.Root` handle on the plugin directory, so a
+path validated by the scan is removed inside the same confined tree and the `<id>.yml` /
+`<id>.config.yml` records one level up are unreachable.
 
 Pruning is best-effort: every failure is logged and swallowed, because a plugin that installed and
 started correctly must not be reported as failed because cleanup could not delete a directory.

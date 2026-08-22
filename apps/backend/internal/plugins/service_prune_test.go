@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	goruntime "runtime"
 	"sort"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/plugins/store"
 )
@@ -269,8 +271,7 @@ func TestServiceInstallPruneFailureDoesNotFailInstall(t *testing.T) {
 	installTestPlugin(t, svc, prunePluginID) // 1.0.0
 	seedVersionDir(t, dir, prunePluginID, "0.9.0")
 
-	pluginDir := filepath.Join(dir, prunePluginID)
-	requireUnwritableDir(t, pluginDir)
+	requireUnwritableVersionDir(t, filepath.Join(dir, prunePluginID), "0.9.0")
 
 	rec, err := svc.Install(context.Background(), testPackage(t, prunePluginID, "1.1.0", false))
 	if err != nil {
@@ -281,11 +282,13 @@ func TestServiceInstallPruneFailureDoesNotFailInstall(t *testing.T) {
 	}
 }
 
-// requireUnwritableDir makes dir reject child removal, skipping the test when
-// the current executor does not enforce the permission bit (root, or a
-// filesystem/OS that ignores it). New files must be creatable first, since
-// pkgtar extracts into this same directory.
-func requireUnwritableDir(t *testing.T, dir string) {
+// requireUnwritableVersionDir makes pluginDir/version reject removal of its
+// contents, skipping the test when the current executor does not enforce the
+// permission bit (root, or a filesystem/OS that ignores it). The version is a
+// parameter rather than a constant so the coupling to what the caller seeded
+// is visible at the call site: a caller that seeded a different version would
+// otherwise get a silent no-op chmod.
+func requireUnwritableVersionDir(t *testing.T, pluginDir, version string) {
 	t.Helper()
 	probeParent := filepath.Join(t.TempDir(), "probe")
 	if err := os.MkdirAll(filepath.Join(probeParent, "child"), 0o755); err != nil {
@@ -302,11 +305,165 @@ func requireUnwritableDir(t *testing.T, dir string) {
 	// The install itself must still be able to create the new version
 	// directory, so make only the superseded version's own contents
 	// undeletable rather than the plugin directory.
-	stale := filepath.Join(dir, "0.9.0")
+	stale := filepath.Join(pluginDir, version)
 	if err := os.Chmod(stale, 0o555); err != nil {
 		t.Skipf("chmod unsupported on this platform: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(stale, 0o755) })
+}
+
+// TestServiceInstallWithoutRuntimePrunesNothing pins the precondition against
+// the one path where activate reports success without starting anything: with
+// no runtime wired, activate only persists StatusActive, so there is no
+// confirmed start and no version may be discarded.
+func TestServiceInstallWithoutRuntimePrunesNothing(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewService(store.NewFSStore(dir), NewRegistry(), nil, testLogger(t))
+	svc.SetPluginsDir(dir)
+
+	for _, v := range []string{"1.0.0", "1.1.0", "1.2.0"} {
+		if _, err := svc.Install(context.Background(), testPackage(t, prunePluginID, v, false)); err != nil {
+			t.Fatalf("Install(%s): %v", v, err)
+		}
+	}
+
+	assertVersionDirs(t, dir, prunePluginID, "1.0.0", "1.1.0", "1.2.0")
+}
+
+// TestPruneSkipsInFlightExtraction pins the guard against a concurrent
+// install's freshly extracted directory. Install extracts before it can know
+// the plugin id, so it cannot hold that id's lifecycle lock yet; a prune
+// running under the lock must still leave that directory alone, and must
+// reclaim it once the install that extracted it is done.
+func TestPruneSkipsInFlightExtraction(t *testing.T) {
+	svc, dir, _, _ := newTestServiceWithDir(t)
+	installTestPlugin(t, svc, prunePluginID) // 1.0.0
+	if _, err := svc.Install(context.Background(), testPackage(t, prunePluginID, "1.1.0", false)); err != nil {
+		t.Fatalf("Install(1.1.0): %v", err)
+	}
+
+	// Exactly what a competing install has done by the time it blocks on the
+	// lifecycle lock: extracted and marked in flight, nothing else.
+	inFlight, err := svc.extractPackage(testPackage(t, prunePluginID, "1.2.0", false))
+	if err != nil {
+		t.Fatalf("extractPackage(1.2.0): %v", err)
+	}
+
+	svc.pruneSupersededVersions(prunePluginID, "1.1.0", "1.0.0")
+	assertVersionDirs(t, dir, prunePluginID, "1.0.0", "1.1.0", "1.2.0")
+
+	svc.releaseExtraction(inFlight.InstallPath)
+	svc.pruneSupersededVersions(prunePluginID, "1.1.0", "1.0.0")
+	assertVersionDirs(t, dir, prunePluginID, "1.0.0", "1.1.0")
+}
+
+// TestConcurrentInstallsKeepBothExtractions drives the interleaving end to
+// end: the first install is held inside its store write, holding the lifecycle
+// lock, while a second install for the same id extracts a different version
+// behind it. The first must not prune the second's package out from under it.
+func TestConcurrentInstallsKeepBothExtractions(t *testing.T) {
+	dir := t.TempDir()
+	barrier := &armedBarrierStore{Store: store.NewFSStore(dir)}
+	svc := NewService(barrier, NewRegistry(), nil, testLogger(t))
+	svc.SetPluginsDir(dir)
+	svc.SetRuntime(newFakeRuntime())
+
+	// 1.0.0 must be a real installed record, so the first racing install
+	// treats it as its rollback target and 1.2.0 becomes a prune candidate.
+	installTestPlugin(t, svc, prunePluginID)
+
+	entered, release := barrier.arm()
+	errs := make(chan error, 2)
+	go func() {
+		_, err := svc.Install(context.Background(), testPackage(t, prunePluginID, "1.1.0", false))
+		errs <- err
+	}()
+	<-entered // 1.1.0 extracted, lifecycle lock held, prune still ahead
+
+	go func() {
+		_, err := svc.Install(context.Background(), testPackage(t, prunePluginID, "1.2.0", false))
+		errs <- err
+	}()
+	waitForVersionDir(t, dir, prunePluginID, "1.2.0") // extracted, now blocked on the lock
+
+	close(release)
+	if err := <-errs; err != nil {
+		t.Fatalf("concurrent install error: %v", err)
+	}
+	if err := <-errs; err != nil {
+		t.Fatalf("concurrent install error: %v", err)
+	}
+
+	for _, version := range []string{"1.1.0", "1.2.0"} {
+		if _, statErr := os.Stat(filepath.Join(dir, prunePluginID, version)); statErr != nil {
+			t.Fatalf("version %s was pruned out from under a concurrent install: %v", version, statErr)
+		}
+	}
+	rec, err := svc.Get(prunePluginID)
+	if err != nil {
+		t.Fatalf("Get(): %v", err)
+	}
+	if _, statErr := os.Stat(rec.InstallPath); statErr != nil {
+		t.Fatalf("the winning record's InstallPath %q does not exist: %v", rec.InstallPath, statErr)
+	}
+}
+
+// armedBarrierStore pauses one chosen Save, so a test can pin an install
+// inside the lifecycle-locked region of Install (its record write) while a
+// competing install runs behind it. Unarmed saves pass straight through, which
+// keeps ordinary setup installs out of the barrier.
+type armedBarrierStore struct {
+	store.Store
+	mu      sync.Mutex
+	armed   bool
+	entered chan struct{}
+	release chan struct{}
+}
+
+// arm makes the next Save block; entered closes once that Save is reached and
+// the returned release channel unblocks it when closed.
+func (s *armedBarrierStore) arm() (entered <-chan struct{}, release chan struct{}) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.entered = make(chan struct{})
+	s.release = make(chan struct{})
+	s.armed = true
+	return s.entered, s.release
+}
+
+func (s *armedBarrierStore) Save(rec *store.Record) error {
+	s.mu.Lock()
+	armed := s.armed
+	s.armed = false
+	entered, release := s.entered, s.release
+	s.mu.Unlock()
+	if armed {
+		close(entered)
+		<-release
+	}
+	return s.Store.Save(rec)
+}
+
+// waitForVersionDir blocks until a version directory appears, so a test can
+// synchronize on a competing install's extraction (a real side effect) rather
+// than on a sleep.
+func waitForVersionDir(t *testing.T, pluginsDir, id, version string) {
+	t.Helper()
+	dir := filepath.Join(pluginsDir, id, version)
+	deadline := time.NewTimer(10 * time.Second)
+	defer deadline.Stop()
+	tick := time.NewTicker(time.Millisecond)
+	defer tick.Stop()
+	for {
+		if _, err := os.Stat(dir); err == nil {
+			return
+		}
+		select {
+		case <-tick.C:
+		case <-deadline.C:
+			t.Fatalf("version dir %q never appeared", dir)
+		}
+	}
 }
 
 // TestStartActivePluginsPrunesAfterHealthyStart pins boot-time recovery: an

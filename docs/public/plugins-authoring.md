@@ -46,9 +46,10 @@ Installation validates the manifest, archive paths, checksums, managed runtime,
 and the current host executable before extraction. Kandev then supervises the
 declared subprocess and injects a Host connection. Installing a new version
 does not remove the one it replaces: that version stays on disk as the rollback
-target, and only the versions before it are deleted, once the new one has
-started cleanly. Two extracted versions is therefore the steady state for an
-installed plugin; `data/` is never part of that cleanup. The UI bundle is static
+target, and only the versions before it are deleted, once the new one is
+confirmed running. Two extracted versions is therefore the steady state for a
+plugin that runs; a plugin that is disabled or failed to start keeps every
+version it has, and `data/` is never part of that cleanup. The UI bundle is static
 package content loaded by the browser; it does not run inside the backend
 subprocess. On disable or uninstall, the host calls destroy when present and
 bulk-revokes registrations, styles, routes, handlers, and navigation. Reloads and
