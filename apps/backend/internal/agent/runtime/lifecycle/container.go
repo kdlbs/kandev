@@ -564,7 +564,11 @@ exec /usr/local/bin/agentctl`,
 		AutoRemove: false, // We manage cleanup ourselves
 	}
 	if config.AllowUserNamespaces {
-		containerCfg.SecurityOpt = securityOptsForUserNamespaces()
+		securityOpt, err := securityOptsForUserNamespaces()
+		if err != nil {
+			return docker.ContainerConfig{}, err
+		}
+		containerCfg.SecurityOpt = securityOpt
 	}
 	if scope := os.Getenv(e2eDockerScopeEnv); scope != "" {
 		containerCfg.Labels[e2eDockerScopeLabel] = scope
@@ -584,27 +588,26 @@ exec /usr/local/bin/agentctl`,
 	return containerCfg, nil
 }
 
-// formatCoreutilsTimeout converts a Go duration to the single-unit format
-// accepted by GNU timeout. time.Duration.String can emit compound values such
-// as "10m0s", which GNU timeout rejects as an invalid interval.
-// securityOptsForUserNamespaces returns Docker SecurityOpt values that
-// relax seccomp and AppArmor to allow user namespace creation by processes
-// without CAP_SYS_ADMIN. Returns nil on error (the caller should treat nil
-// as "no security options" and continue without relaxing).
-func securityOptsForUserNamespaces() []string {
+// securityOptsForUserNamespaces returns Docker SecurityOpt values that relax
+// seccomp and AppArmor to allow user namespace creation by processes without
+// CAP_SYS_ADMIN. An error is returned rather than swallowed: the operator
+// explicitly opted the profile in, so silently launching a container without
+// the relaxation would reproduce the exact bwrap failure the setting exists to
+// fix, with no signal as to why.
+func securityOptsForUserNamespaces() ([]string, error) {
 	profileJSON, err := seccomp.UsernsProfileJSON()
 	if err != nil {
-		// This should never happen with the vendored profile; if it does
-		// the container will be launched without the security options,
-		// which preserves safety (stricter defaults) over functionality.
-		return nil
+		return nil, fmt.Errorf("build user namespace seccomp profile: %w", err)
 	}
 	return []string{
 		"seccomp=" + profileJSON,
 		"apparmor=unconfined",
-	}
+	}, nil
 }
 
+// formatCoreutilsTimeout converts a Go duration to the single-unit format
+// accepted by GNU timeout. time.Duration.String can emit compound values such
+// as "10m0s", which GNU timeout rejects as an invalid interval.
 func formatCoreutilsTimeout(timeout time.Duration) string {
 	return strconv.FormatFloat(timeout.Seconds(), 'f', -1, 64) + "s"
 }

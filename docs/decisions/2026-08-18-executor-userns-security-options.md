@@ -32,6 +32,7 @@ The profile is a modified copy of Docker's default seccomp profile (vendored fro
 - `clone`: the `SCMP_CMP_MASKED_EQ` namespace-flag restriction for non-CAP_SYS_ADMIN processes is removed.
 - `clone3`: the `SCMP_ACT_ERRNO` (ENOSYS) fallback for non-CAP_SYS_ADMIN processes is removed.
 - `mount`, `mount_setattr`, `move_mount`, `open_tree`, `setns`, `umount`, `umount2`, `unshare`: moved from the `CAP_SYS_ADMIN`-gated allow list into the unconditional allow list.
+- `pivot_root`: added to the unconditional allow list. Docker's default profile does not name it in any rule, so it falls through to the profile's `SCMP_ACT_ERRNO` default. `bwrap` calls `pivot_root` immediately after creating its namespace and aborts with `bwrap: pivot_root: Operation not permitted` when it is denied, so relaxing `clone`/`unshare` alone leaves the motivating use case broken. Verified against a live daemon: with `pivot_root` denied, `unshare -U true` succeeds but `bwrap --unshare-user --dev-bind / / true` exits 1; with it allowed, both exit 0.
 
 Every other syscall restriction in Docker's default profile is preserved. `kexec_load`, `bpf`, `perf_event_open`, `add_key`, and ~50 other syscalls Docker blocks for good reason remain blocked.
 

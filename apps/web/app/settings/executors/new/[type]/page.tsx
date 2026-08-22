@@ -455,6 +455,7 @@ function CreateProfileSections({
           />
           <UserNamespacesCard
             enabled={form.allowUserNamespaces}
+            baselineEnabled={false}
             onChange={form.setAllowUserNamespaces}
           />
         </>

@@ -15,6 +15,11 @@
 //   - mount, mount_setattr, move_mount, open_tree, umount, umount2, setns,
 //     unshare: moved out of the CAP_SYS_ADMIN-gated group into the
 //     unconditional allow list.
+//   - pivot_root: added to the unconditional allow list. Docker's default
+//     profile does not list it at all, so it falls through to the profile's
+//     SCMP_ACT_ERRNO default. bwrap calls pivot_root after creating its
+//     namespace and aborts when it fails, so relaxing clone/unshare alone is
+//     not enough to make user-namespace sandboxing work.
 //
 // The only changes are the namespace-related syscalls listed above. Every
 // other syscall restriction in Docker's default profile is preserved.
@@ -37,11 +42,11 @@ const (
 	seccompActionErrno = "SCMP_ACT_ERRNO"
 )
 
-// usernsRelaxedSyscalls lists the syscalls that the Docker default profile
-// gates behind CAP_SYS_ADMIN but that the Kandev userns profile allows
-// unconditionally. Each of these is safe to allow because it remains
-// capability-gated by the kernel — seccomp merely no longer pre-empts the
-// kernel check. Processes without CAP_SYS_ADMIN can create user namespaces
+// usernsRelaxedSyscalls lists the syscalls that the Kandev userns profile
+// allows unconditionally. Docker's default profile either gates them behind
+// CAP_SYS_ADMIN or (pivot_root) omits them entirely. Each of these is safe
+// to allow because it remains capability-gated by the kernel — seccomp merely
+// no longer pre-empts the kernel check. Processes without CAP_SYS_ADMIN can create user namespaces
 // and perform mounts inside them, but gain no host-level privilege.
 var usernsRelaxedSyscalls = []string{
 	"clone",
@@ -50,6 +55,7 @@ var usernsRelaxedSyscalls = []string{
 	"mount_setattr",
 	"move_mount",
 	"open_tree",
+	"pivot_root",
 	"setns",
 	"umount",
 	"umount2",
@@ -91,13 +97,16 @@ func UsernsProfileJSON() (string, error) {
 		return "", fmt.Errorf("seccomp: unmarshal default profile: %w", err)
 	}
 
-	keepRules, addedSyscalls, err := processSyscallRules(profile.Syscalls)
+	keepRules, err := processSyscallRules(profile.Syscalls)
 	if err != nil {
 		return "", err
 	}
 
-	// Merge namespace syscalls into the unconditional allow list.
-	finalSyscalls, err := mergeUnconditionalAllow(profile.Syscalls, keepRules, addedSyscalls)
+	// Merge every relaxed namespace syscall into the unconditional allow list.
+	// Seeding with the full list (rather than only the names lifted out of the
+	// CAP_SYS_ADMIN group) is what covers syscalls the base profile never
+	// mentions, such as pivot_root.
+	finalSyscalls, err := mergeUnconditionalAllow(profile.Syscalls, keepRules, usernsRelaxedSyscalls)
 	if err != nil {
 		return "", err
 	}
@@ -111,14 +120,14 @@ func UsernsProfileJSON() (string, error) {
 }
 
 // processSyscallRules iterates over the profile's syscall rules, drops the
-// clone MASKED_EQ and clone3 ERRNO rules, and splits CAP_SYS_ADMIN-gated
-// rules into namespace-relaxed vs. remaining gated parts. Returns the
-// indices of rules to keep and the moved syscall names.
-func processSyscallRules(rules []json.RawMessage) (keepRules []int, addedSyscalls []string, _ error) {
+// clone MASKED_EQ and clone3 ERRNO rules, and strips the relaxed namespace
+// syscalls out of the CAP_SYS_ADMIN-gated rules. Returns the indices of the
+// rules to keep.
+func processSyscallRules(rules []json.RawMessage) (keepRules []int, _ error) {
 	for i, raw := range rules {
 		var rule seccompRule
 		if err := json.Unmarshal(raw, &rule); err != nil {
-			return nil, nil, fmt.Errorf("seccomp: unmarshal rule %d: %w", i, err)
+			return nil, fmt.Errorf("seccomp: unmarshal rule %d: %w", i, err)
 		}
 
 		// Drop SCMP_CMP_MASKED_EQ clone rule for non-CAP_SYS_ADMIN.
@@ -133,11 +142,9 @@ func processSyscallRules(rules []json.RawMessage) (keepRules []int, addedSyscall
 
 		// CAP_SYS_ADMIN-gated group — split out namespace syscalls.
 		if rule.Action == seccompActionAllow && hasCap(rule, "CAP_SYS_ADMIN") {
-			var remaining, moved []string
+			var remaining []string
 			for _, name := range rule.Names {
-				if slices.Contains(usernsRelaxedSyscalls, name) {
-					moved = append(moved, name)
-				} else {
+				if !slices.Contains(usernsRelaxedSyscalls, name) {
 					remaining = append(remaining, name)
 				}
 			}
@@ -147,15 +154,12 @@ func processSyscallRules(rules []json.RawMessage) (keepRules []int, addedSyscall
 				rules[i] = modified
 				keepRules = append(keepRules, i)
 			}
-			if len(moved) > 0 {
-				addedSyscalls = append(addedSyscalls, moved...)
-			}
 			continue
 		}
 
 		keepRules = append(keepRules, i)
 	}
-	return keepRules, addedSyscalls, nil
+	return keepRules, nil
 }
 
 // mergeUnconditionalAllow adds the namespace syscalls to the first
@@ -169,6 +173,7 @@ func mergeUnconditionalAllow(rules []json.RawMessage, keepRules []int, addedSysc
 		}
 		return final, nil
 	}
+	addedSyscalls = slices.Clone(addedSyscalls)
 	sort.Strings(addedSyscalls)
 	merged := false
 	for i, raw := range rules {
@@ -187,14 +192,15 @@ func mergeUnconditionalAllow(rules []json.RawMessage, keepRules []int, addedSysc
 			break
 		}
 	}
-	if !merged {
-		newRule := makeRule(addedSyscalls, seccompActionAllow, nil)
-		rules = append([]json.RawMessage{newRule}, rules...)
-	}
-
-	final := make([]json.RawMessage, 0, len(keepRules))
+	// Rebuild from keepRules first: prepending to rules beforehand would shift
+	// every index keepRules refers to.
+	final := make([]json.RawMessage, 0, len(keepRules)+1)
 	for _, i := range keepRules {
 		final = append(final, rules[i])
+	}
+	if !merged {
+		newRule := makeRule(addedSyscalls, seccompActionAllow, nil)
+		final = append([]json.RawMessage{newRule}, final...)
 	}
 	return final, nil
 }

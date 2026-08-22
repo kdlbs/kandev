@@ -230,9 +230,9 @@ func TestBuildContainerConfig_SecurityOptNilByDefault(t *testing.T) {
 func TestBuildContainerConfig_SecurityOptForUserNamespaces(t *testing.T) {
 	cm := newCMTest(t)
 	cfg := ContainerConfig{
-		AgentConfig:        newConfigStubAgent(),
-		InstanceID:         "0123456789abcdef",
-		TaskID:             "task-1",
+		AgentConfig:         newConfigStubAgent(),
+		InstanceID:          "0123456789abcdef",
+		TaskID:              "task-1",
 		AllowUserNamespaces: true,
 	}
 

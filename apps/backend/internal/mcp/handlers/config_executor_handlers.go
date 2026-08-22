@@ -13,6 +13,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const allowUserNamespacesProfileConfigKey = "allow_user_namespaces"
+
 // operatorOnlyConfigKeys are executor profile Config keys that the
 // agent-exposed MCP tools (create_executor_profile, update_executor_profile)
 // must reject. These keys can only be set through the operator HTTP/WS API.
@@ -20,8 +22,6 @@ import (
 // security relaxations from within a task, without widening the surface onto
 // the operator path (which already exposes prepare_script — strictly more
 // powerful).
-const allowUserNamespacesProfileConfigKey = "allow_user_namespaces"
-
 var operatorOnlyConfigKeys = []string{
 	allowUserNamespacesProfileConfigKey,
 }

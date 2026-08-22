@@ -47,6 +47,7 @@ export function DockerSections({
       />
       <UserNamespacesCard
         enabled={allowUserNamespaces}
+        baselineEnabled={profile.config?.allow_user_namespaces === "true"}
         onChange={onAllowUserNamespacesChange}
       />
       <DockerContainersCard profileId={profile.id} />

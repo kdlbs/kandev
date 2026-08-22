@@ -1,7 +1,14 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { IconPlayerPlay, IconLoader2, IconCheck, IconX, IconTrash, IconInfoCircle } from "@tabler/icons-react";
+import {
+  IconPlayerPlay,
+  IconLoader2,
+  IconCheck,
+  IconX,
+  IconTrash,
+  IconInfoCircle,
+} from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
@@ -388,14 +395,17 @@ function ContainerRow({
 
 export function UserNamespacesCard({
   enabled,
+  baselineEnabled = false,
   onChange,
 }: {
   enabled: boolean;
+  baselineEnabled?: boolean;
   onChange: (v: boolean) => void;
 }) {
   const { t } = useTranslation();
+  const isDirty = enabled !== baselineEnabled;
   return (
-    <SettingsCard isDirty={enabled !== false}>
+    <SettingsCard isDirty={isDirty}>
       <SettingsCardHeader
         title={t("executors:allowUserNamespacesTitle")}
         description={t("executors:allowUserNamespacesDescription")}
@@ -404,7 +414,7 @@ export function UserNamespacesCard({
             id="allow-user-namespaces"
             checked={enabled}
             onCheckedChange={onChange}
-            data-settings-dirty={enabled !== false}
+            data-settings-dirty={isDirty}
           />
         }
       />
