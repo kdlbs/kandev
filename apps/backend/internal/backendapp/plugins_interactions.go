@@ -1,6 +1,6 @@
 // plugins_interactions.go adapts kandev's first-party interaction response
 // paths to the narrow interface the plugin Host interaction API needs (ADR
-// 0049). It lives in backendapp for the same reason the task-write adapters
+// 0052). It lives in backendapp for the same reason the task-write adapters
 // do: internal/plugins cannot import the orchestrator or the clarification
 // handler without an import cycle.
 //
@@ -19,7 +19,9 @@ import (
 	"net/http"
 
 	"github.com/kandev/kandev/internal/clarification"
+	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/plugins"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -48,7 +50,15 @@ func (a pluginsInteractionResponderAdapter) RespondToPermission(
 	if a.permissions == nil {
 		return status.Error(codes.Unimplemented, "permission responses are unavailable")
 	}
-	return a.permissions.RespondToPermission(ctx, sessionID, pendingID, optionID, cancelled, rejected)
+	err := a.permissions.RespondToPermission(ctx, sessionID, pendingID, optionID, cancelled, rejected)
+	var resolved *orchestrator.PermissionAlreadyResolvedError
+	if errors.As(err, &resolved) {
+		// Lost the durable claim to another responder. Same code the host
+		// returns when it detects the terminal state itself, so a plugin
+		// branches on one outcome however the race was caught.
+		return status.Error(codes.FailedPrecondition, err.Error())
+	}
+	return err
 }
 
 func (a pluginsInteractionResponderAdapter) AnswerClarification(
@@ -106,4 +116,15 @@ func interactionResponseStatus(err error) error {
 	default:
 		return status.Error(codes.Internal, respondErr.Message)
 	}
+}
+
+// ClaimPermissionResponse atomically resolves a pending permission row so only
+// one responder dispatches to the agent (ADR 0052). It hangs off the shared
+// message-creator adapter but lives here rather than in adapters.go: the claim
+// exists for this contract, and adapters.go is already past the file-length
+// limit.
+func (a *messageCreatorAdapter) ClaimPermissionResponse(
+	ctx context.Context, sessionID, pendingID string, status taskmodels.PermissionStatus,
+) (bool, taskmodels.PermissionStatus, error) {
+	return a.svc.ClaimPermissionResponse(ctx, sessionID, pendingID, status)
 }

@@ -235,3 +235,15 @@ func clarificationOptionsFromMetadata(value interface{}) []models.InteractionOpt
 	}
 	return out
 }
+
+// ClaimPermissionResponse atomically resolves a pending permission request,
+// reporting whether this caller performed the resolution and the status the
+// row carries either way. Callers must claim before dispatching a response so
+// two responders cannot both reach the agent (see the repository method).
+func (s *Service) ClaimPermissionResponse(
+	ctx context.Context,
+	sessionID, pendingID string,
+	status models.PermissionStatus,
+) (bool, models.PermissionStatus, error) {
+	return s.messages.ClaimPermissionResponse(ctx, sessionID, pendingID, status)
+}

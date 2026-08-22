@@ -821,8 +821,8 @@ with a message naming the missing capability; declare what you use.
 `api_write` is live, not advisory. Declare only the exact resource you mutate:
 `api_write: ["tasks"]` enables `host.Tasks().Create(ctx, CreateTaskInput{...})`
 and `.Update(ctx, UpdateTaskInput{...})`; `api_write: ["messages"]` enables
-`host.Messages().Send(ctx, taskID, sessionID, text)`; `api_write:
-["interactions"]` enables the interaction response methods above. A blank
+`host.Messages().Send(ctx, taskID, sessionID, text)`;
+`api_write: ["interactions"]` enables the interaction response methods above. A blank
 `sessionID` targets the task's primary session. Send queues behind a running
 session or resumes/starts it when appropriate, returning `queued`, `sent`, or
 `started`.

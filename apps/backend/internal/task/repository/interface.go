@@ -224,6 +224,11 @@ type MessageRepository interface {
 	// compact pending-action projection, under the same turn/session authority
 	// (ADR 0052). Clarification bundles come back as one row per question.
 	ListPendingInteractions(ctx context.Context, filter models.PendingInteractionFilter) ([]*models.Message, error)
+	// ClaimPermissionResponse atomically resolves a pending permission row,
+	// reporting whether this caller won the claim and, if not, the status the
+	// row already carries. Response delivery is otherwise read-then-dispatch,
+	// so concurrent responders can both reach the agent.
+	ClaimPermissionResponse(ctx context.Context, sessionID, pendingID string, status models.PermissionStatus) (bool, models.PermissionStatus, error)
 	CompleteActiveClarificationBundle(ctx context.Context, pendingID, status string, responses map[string]interface{}) ([]*models.Message, bool, error)
 	FinalizeClarificationResponseDelivery(ctx context.Context, pendingID, terminalStatus string, claimedMessages []*models.Message) ([]*models.Message, bool, error)
 	RestoreActiveClarificationBundle(ctx context.Context, pendingID, terminalStatus string, claimedMessages []*models.Message) ([]*models.Message, bool, error)

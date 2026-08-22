@@ -119,9 +119,12 @@ func (r interactionReader) Get(ctx context.Context, id string) (*pluginsdk.Inter
 func (r interactionReader) RespondToPermission(
 	ctx context.Context, in pluginsdk.PermissionResponse,
 ) (*pluginsdk.Interaction, error) {
-	responder, err := r.host.interactionWriteTarget(ctx)
+	responder, err := r.host.interactionWriteTarget()
 	if err != nil {
 		return nil, err
+	}
+	if responder == nil {
+		return r.host.UnimplementedHostData.Interactions().RespondToPermission(ctx, in)
 	}
 	interaction, err := r.host.answerableInteraction(ctx, in.InteractionID, taskmodels.InteractionKindPermission)
 	if err != nil {
@@ -136,15 +139,24 @@ func (r interactionReader) RespondToPermission(
 	); err != nil {
 		return nil, err
 	}
-	return r.host.reloadInteraction(ctx, interaction)
+	// The orchestrator records the same derivation: a cancelled or reject-kind
+	// response is rejected, anything else approved.
+	resolved := taskmodels.InteractionStatusApproved
+	if rejected || in.Cancelled {
+		resolved = taskmodels.InteractionStatusRejected
+	}
+	return r.host.reloadInteraction(ctx, interaction, resolved)
 }
 
 func (r interactionReader) AnswerClarification(
 	ctx context.Context, in pluginsdk.ClarificationResponse,
 ) (*pluginsdk.Interaction, error) {
-	responder, err := r.host.interactionWriteTarget(ctx)
+	responder, err := r.host.interactionWriteTarget()
 	if err != nil {
 		return nil, err
+	}
+	if responder == nil {
+		return r.host.UnimplementedHostData.Interactions().AnswerClarification(ctx, in)
 	}
 	interaction, err := r.host.answerableInteraction(ctx, in.InteractionID, taskmodels.InteractionKindClarification)
 	if err != nil {
@@ -167,15 +179,18 @@ func (r interactionReader) AnswerClarification(
 	if err := responder.AnswerClarification(ctx, interaction.ID, answers); err != nil {
 		return nil, err
 	}
-	return r.host.reloadInteraction(ctx, interaction)
+	return r.host.reloadInteraction(ctx, interaction, taskmodels.InteractionStatusAnswered)
 }
 
 func (r interactionReader) CancelClarification(
 	ctx context.Context, id, reason string,
 ) (*pluginsdk.Interaction, error) {
-	responder, err := r.host.interactionWriteTarget(ctx)
+	responder, err := r.host.interactionWriteTarget()
 	if err != nil {
 		return nil, err
+	}
+	if responder == nil {
+		return r.host.UnimplementedHostData.Interactions().CancelClarification(ctx, id, reason)
 	}
 	interaction, err := r.host.answerableInteraction(ctx, id, taskmodels.InteractionKindClarification)
 	if err != nil {
@@ -184,19 +199,24 @@ func (r interactionReader) CancelClarification(
 	if err := responder.DeclineClarification(ctx, interaction.ID, reason); err != nil {
 		return nil, err
 	}
-	return r.host.reloadInteraction(ctx, interaction)
+	// Cancel is delivered as a decline of the bundle, so its terminal status is
+	// rejected rather than cancelled (see the DeclineClarification adapter).
+	return r.host.reloadInteraction(ctx, interaction, taskmodels.InteractionStatusRejected)
 }
 
 // interactionWriteTarget performs the checks every write shares: the
-// api_write:interactions gate, and a wired responder.
-func (h *pluginHost) interactionWriteTarget(ctx context.Context) (interactionResponder, error) {
+// api_write:interactions gate, and both halves of the write path being wired
+// (the responder that delivers, and the reader that resolves the target and
+// its post-write state). Returns a nil responder with a nil error when the
+// host is unwired, so the caller can answer through its OWN Unimplemented
+// counterpart rather than borrowing an unrelated method's error.
+func (h *pluginHost) interactionWriteTarget() (interactionResponder, error) {
 	if !h.capabilities.CanWrite(resourceInteractions) {
 		return nil, permissionDenied(apiWriteCapability(resourceInteractions))
 	}
 	responder := h.interactionResponder()
 	if responder == nil || h.interactionData == nil {
-		_, err := h.UnimplementedHostData.Interactions().Get(ctx, "")
-		return nil, err
+		return nil, nil
 	}
 	return responder, nil
 }
@@ -248,17 +268,24 @@ func (h *pluginHost) resolveInteraction(ctx context.Context, id string) (*taskmo
 
 // reloadInteraction returns the interaction's post-write state. The write
 // already succeeded, so a failed re-read must not turn a delivered response
-// into an error the caller would retry: fall back to the pre-write snapshot
-// with the status the caller can re-check via Get.
+// into an error the caller would retry.
+//
+// The fallback stamps resolved on the pre-write snapshot rather than handing
+// it back untouched: the contract says every response method returns the
+// interaction in its NEW terminal state, and a snapshot still reading
+// "pending" invites exactly the retry of an already-delivered response that
+// terminal-once exists to prevent.
 func (h *pluginHost) reloadInteraction(
-	ctx context.Context, before *taskmodels.Interaction,
+	ctx context.Context, before *taskmodels.Interaction, resolved taskmodels.InteractionStatus,
 ) (*pluginsdk.Interaction, error) {
 	reloaded, err := h.interactionData.GetInteraction(ctx, before.ID)
-	if err != nil || reloaded == nil {
-		dto := interactionModelToDTO(before)
+	if err == nil && reloaded != nil {
+		dto := interactionModelToDTO(reloaded)
 		return &dto, nil
 	}
-	dto := interactionModelToDTO(reloaded)
+	fallback := *before
+	fallback.Status = resolved
+	dto := interactionModelToDTO(&fallback)
 	return &dto, nil
 }
 

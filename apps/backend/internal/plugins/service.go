@@ -125,7 +125,7 @@ type Service struct {
 	taskStarter taskStarter
 
 	// Interaction response path wired late via SetInteractionResponder (ADR
-	// 0049), for the same reason as messenger/taskStarter: the orchestrator
+	// 0052), for the same reason as messenger/taskStarter: the orchestrator
 	// and the clarification handler are constructed after boot-active plugins
 	// spawn. Mutex-guarded against the concurrent hostForPlugin reads.
 	interactionResponder interactionResponder

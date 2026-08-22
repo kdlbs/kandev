@@ -132,7 +132,10 @@ func TestAssembleInteractionsTerminalBundle(t *testing.T) {
 		clarificationRow("m1", "pending-3", "q1", "answered", 0, false, at),
 		clarificationRow("m2", "pending-3", "q2", "answered", 1, false, at),
 	})
-	if len(got) != 1 || got[0].Status != models.InteractionStatusAnswered {
+	if len(got) != 1 {
+		t.Fatalf("interactions = %d, want 1 (bundle collapses to one interaction)", len(got))
+	}
+	if got[0].Status != models.InteractionStatusAnswered {
 		t.Fatalf("status = %q, want answered once every question is", got[0].Status)
 	}
 	if !got[0].Status.IsTerminal() {

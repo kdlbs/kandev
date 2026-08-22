@@ -382,6 +382,18 @@ func (h *Handlers) wsRespondToPermission(ctx context.Context, msg *ws.Message) (
 		zap.Bool("rejected", req.Rejected))
 
 	if err := h.service.RespondToPermission(ctx, req.SessionID, req.PendingID, req.OptionID, req.Cancelled, req.Rejected); err != nil {
+		var resolved *orchestrator.PermissionAlreadyResolvedError
+		if errors.As(err, &resolved) {
+			// Another responder decided first. Not an internal failure, and not
+			// retryable: the durable record already carries the outcome.
+			h.logger.Info("permission already resolved by another responder",
+				zap.String("session_id", req.SessionID),
+				zap.String("pending_id", req.PendingID),
+				zap.String("status", resolved.Status))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), map[string]interface{}{
+				"status": resolved.Status,
+			})
+		}
 		h.logger.Error("failed to respond to permission", zap.String("session_id", req.SessionID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to respond to permission: "+err.Error(), nil)
 	}

@@ -181,6 +181,10 @@ func (a *testMessageCreatorAdapter) CreatePermissionRequestMessage(ctx context.C
 	return msg.ID, nil
 }
 
+func (a *testMessageCreatorAdapter) ClaimPermissionResponse(_ context.Context, _, _ string, status models.PermissionStatus) (bool, models.PermissionStatus, error) {
+	return true, status, nil
+}
+
 func (a *testMessageCreatorAdapter) UpdatePermissionMessage(ctx context.Context, sessionID, pendingID string, status models.PermissionStatus) error {
 	return a.svc.UpdatePermissionMessage(ctx, sessionID, pendingID, status)
 }

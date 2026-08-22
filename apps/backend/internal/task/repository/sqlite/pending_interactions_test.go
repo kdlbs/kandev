@@ -239,3 +239,125 @@ func TestListPendingInteractionsFilters(t *testing.T) {
 		})
 	}
 }
+
+// TestListPendingInteractionsReturnsWholeBundleWhenPartiallyAnswered pins the
+// bundle contract: the agent stays blocked until EVERY question of a
+// clarification is answered, so a bundle with one answered and one pending
+// question must come back whole. Returning only the pending row would hand a
+// caller a question set smaller than the answer path requires (the live
+// clarification request still expects one answer per original question), and
+// would disagree with GetInteraction, which resolves the bundle by pending id.
+func TestListPendingInteractionsReturnsWholeBundleWhenPartiallyAnswered(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	base := time.Date(2026, time.August, 22, 14, 0, 0, 0, time.UTC)
+
+	seedPendingActionSession(t, repo, "task-partial", "session-partial")
+	createPendingActionTurn(t, repo, "task-partial", "session-partial", "turn-partial", base, base)
+	createInteractionMessage(t, repo, "clar-answered", "task-partial", "session-partial", "turn-partial",
+		models.MessageTypeClarificationRequest, map[string]interface{}{
+			"pending_id":     "pending-partial",
+			"question_id":    "q1",
+			"question_index": 0,
+			"status":         string(models.InteractionStatusAnswered),
+		}, base)
+	createInteractionMessage(t, repo, "clar-pending", "task-partial", "session-partial", "turn-partial",
+		models.MessageTypeClarificationRequest, map[string]interface{}{
+			"pending_id":     "pending-partial",
+			"question_id":    "q2",
+			"question_index": 1,
+			"status":         string(models.InteractionStatusPending),
+		}, base.Add(time.Second))
+
+	// A fully answered bundle on the same turn must stay out entirely.
+	createInteractionMessage(t, repo, "clar-done", "task-partial", "session-partial", "turn-partial",
+		models.MessageTypeClarificationRequest, map[string]interface{}{
+			"pending_id":     "pending-done",
+			"question_id":    "q1",
+			"question_index": 0,
+			"status":         string(models.InteractionStatusAnswered),
+		}, base.Add(2*time.Second))
+
+	got, err := repo.ListPendingInteractions(ctx, models.PendingInteractionFilter{})
+	if err != nil {
+		t.Fatalf("ListPendingInteractions: %v", err)
+	}
+	ids := interactionMessageIDs(got)
+	if len(ids) != 2 {
+		t.Fatalf("ids = %v, want the whole partially-answered bundle and nothing else", ids)
+	}
+	for _, want := range []string{"clar-answered", "clar-pending"} {
+		found := false
+		for _, id := range ids {
+			if id == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("ids = %v, missing %q from the pending bundle", ids, want)
+		}
+	}
+}
+
+// TestClaimPermissionResponseIsExclusive pins the arbiter the permission
+// response path relies on: exactly one caller may move a pending row to a
+// terminal status. Without it, delivery is read-then-dispatch and two
+// responders can both reach the agent — the loser then either answers a
+// request the agent never asked again for, or fails and overwrites the
+// winner's outcome with "expired".
+func TestClaimPermissionResponseIsExclusive(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	base := time.Date(2026, time.August, 22, 15, 0, 0, 0, time.UTC)
+
+	seedPendingActionSession(t, repo, "task-claim", "session-claim")
+	createPendingActionTurn(t, repo, "task-claim", "session-claim", "turn-claim", base, base)
+	createInteractionMessage(t, repo, "perm-claim", "task-claim", "session-claim", "turn-claim",
+		models.MessageTypePermissionRequest, map[string]interface{}{"pending_id": "pending-claim"}, base)
+
+	claimed, current, err := repo.ClaimPermissionResponse(
+		ctx, "session-claim", "pending-claim", models.PermissionStatusApproved)
+	if err != nil {
+		t.Fatalf("first claim: %v", err)
+	}
+	if !claimed || current != models.PermissionStatusApproved {
+		t.Fatalf("first claim = (%v, %q), want (true, approved)", claimed, current)
+	}
+
+	// A conflicting second responder must lose and learn the real outcome.
+	claimed, current, err = repo.ClaimPermissionResponse(
+		ctx, "session-claim", "pending-claim", models.PermissionStatusRejected)
+	if err != nil {
+		t.Fatalf("second claim: %v", err)
+	}
+	if claimed {
+		t.Fatal("second claim won; two responders would both dispatch to the agent")
+	}
+	if current != models.PermissionStatusApproved {
+		t.Fatalf("second claim reported %q, want the winner's approved", current)
+	}
+
+	// The row itself must carry the winner's outcome, not the loser's.
+	interactions, err := repo.ListPendingInteractions(ctx, models.PendingInteractionFilter{})
+	if err != nil {
+		t.Fatalf("ListPendingInteractions: %v", err)
+	}
+	if len(interactions) != 0 {
+		t.Fatalf("claimed permission still reported as owed: %v", interactionMessageIDs(interactions))
+	}
+}
+
+// TestClaimPermissionResponseUnknownRow keeps a missing or already-deleted
+// permission distinguishable from a resolved one: nothing is claimed and the
+// reported status is empty rather than a stale value.
+func TestClaimPermissionResponseUnknownRow(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	claimed, current, err := repo.ClaimPermissionResponse(
+		context.Background(), "session-missing", "pending-missing", models.PermissionStatusApproved)
+	if err != nil {
+		t.Fatalf("ClaimPermissionResponse: %v", err)
+	}
+	if claimed || current != "" {
+		t.Fatalf("claim on a missing row = (%v, %q), want (false, \"\")", claimed, current)
+	}
+}
