@@ -42,7 +42,7 @@ export function TasksPageContent(props: Props) {
       <KanbanHeader {...props.header} />
       {props.isMobile && props.isMobileSearchOpen && (
         <MobileSearchBar
-          searchQuery={props.header.searchQuery}
+          searchQuery={props.header.searchQuery ?? ""}
           onSearchChange={props.header.onSearchChange!}
         />
       )}
