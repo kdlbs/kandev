@@ -765,7 +765,11 @@ resumes/starts it when appropriate, returning `queued`, `sent`, or `started`.
 Task writes use Kandev's first-party service layer, so normal task events and
 browser updates occur. Kandev stamps the source as `plugin:<id>` and reserves
 the `metadata.source` key; plugin metadata is stored under that source. A task
-write can update only title, description, state, and workflow step. Creating a
+write can update title, description, state, workflow step, priority, and
+labels. `Priority` must be one of `critical`, `high`, `medium`, or `low`.
+`Labels` is a pointer to a slice: omit it (`nil`) to leave labels unchanged,
+or pass an explicit slice (including an empty one) to replace them, which
+clears all labels. Creating a
 task can select an existing repository or provide a complete, credential-free
 remote descriptor only when the plugin owns that `repository_providers` id.
 Treat all write calls as user-visible mutations and honor `ctx.Done()`.

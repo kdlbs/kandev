@@ -22,7 +22,6 @@ import (
 	"github.com/kandev/kandev/internal/repoclone"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
-	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/pkg/pluginsdk"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -145,7 +144,7 @@ func (r taskReader) Create(ctx context.Context, in pluginsdk.CreateTaskInput) (*
 	if in.Title == "" {
 		return nil, invalidArgument("title is required")
 	}
-	if in.Priority != "" && taskservice.ValidateTaskPriority(in.Priority) != nil {
+	if in.Priority != "" && taskmodels.ValidateTaskPriority(in.Priority) != nil {
 		return nil, invalidArgument(fmt.Sprintf("invalid task priority %q", in.Priority))
 	}
 	metadata, err := r.host.pluginTaskMetadata(in.Metadata)
@@ -203,7 +202,7 @@ func (r taskReader) Update(ctx context.Context, in pluginsdk.UpdateTaskInput) (*
 	if in.ID == "" {
 		return nil, invalidArgument("id is required")
 	}
-	if in.Priority != nil && taskservice.ValidateTaskPriority(*in.Priority) != nil {
+	if in.Priority != nil && taskmodels.ValidateTaskPriority(*in.Priority) != nil {
 		return nil, invalidArgument(fmt.Sprintf("invalid task priority %q", *in.Priority))
 	}
 	updated, err := r.host.taskWriter.UpdateTask(ctx, TaskUpdateInput{

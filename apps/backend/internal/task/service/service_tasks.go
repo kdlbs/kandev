@@ -29,23 +29,15 @@ import (
 
 // defaultPriority is the default value for the task priority column.
 // Used when a caller omits priority so the DB CHECK constraint is satisfied.
-const (
-	defaultPriority      = "medium"
-	taskPriorityCritical = "critical"
-	taskPriorityHigh     = "high"
-	taskPriorityMedium   = "medium"
-	taskPriorityLow      = "low"
-)
+const defaultPriority = models.TaskPriorityMedium
 
 // ValidateTaskPriority checks the canonical priority enum. Creation callers
 // may omit priority and receive the default; updates must always name a value.
+// It delegates to models.ValidateTaskPriority so internal/plugins (which
+// cannot import internal/task/service without an import cycle, per ADR 0043)
+// can validate against the same enum via the lower-level models package.
 func ValidateTaskPriority(priority string) error {
-	switch priority {
-	case taskPriorityCritical, taskPriorityHigh, taskPriorityMedium, taskPriorityLow:
-		return nil
-	default:
-		return fmt.Errorf("invalid task priority %q", priority)
-	}
+	return models.ValidateTaskPriority(priority)
 }
 
 const (
