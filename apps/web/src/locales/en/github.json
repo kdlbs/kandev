@@ -587,7 +587,6 @@
   "mergeQueueStateMergeable": "Mergeable",
   "mergeQueueStateQueued": "Queued",
   "mergeQueueStateUnmergeable": "Unmergeable",
-  "mergeQueueStateUnknown": "Unknown",
   "mergeQueueStatus": "Merge queue: {{state}}",
   "mergeQueueSubMinuteEstimate": "Estimated merge time: less than a minute."
 }

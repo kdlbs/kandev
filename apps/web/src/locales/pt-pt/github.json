@@ -587,7 +587,6 @@
   "mergeQueueStateMergeable": "Integrável",
   "mergeQueueStateQueued": "Em fila",
   "mergeQueueStateUnmergeable": "Não integrável",
-  "mergeQueueStateUnknown": "Desconhecido",
   "mergeQueueStatus": "Fila de merge: {{state}}",
   "mergeQueueSubMinuteEstimate": "Tempo estimado até ao merge: menos de um minuto."
 }

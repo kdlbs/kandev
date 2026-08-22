@@ -46,7 +46,6 @@ export type ChangeRequestTaskSummaryStatus =
   | "queue_mergeable"
   | "queue_unmergeable"
   | "queue_locked"
-  | "queue_unknown"
   | "raw";
 
 export type ChangeRequestTaskSummaryRowDetail = {
@@ -120,7 +119,6 @@ const STATUS_LABEL_KEYS: Record<Exclude<ChangeRequestTaskSummaryStatus, "raw">, 
   queue_mergeable: "github:mergeQueueStateMergeable",
   queue_unmergeable: "github:mergeQueueStateUnmergeable",
   queue_locked: "github:mergeQueueStateLocked",
-  queue_unknown: "github:mergeQueueStateUnknown",
 };
 
 const STATUS_ICONS: Record<ChangeRequestTaskSummaryStatus, TablerIcon> = {
@@ -145,7 +143,6 @@ const STATUS_ICONS: Record<ChangeRequestTaskSummaryStatus, TablerIcon> = {
   queue_mergeable: IconClockHour4,
   queue_unmergeable: IconClockHour4,
   queue_locked: IconClockHour4,
-  queue_unknown: IconClockHour4,
   raw: IconCircleDot,
 };
 

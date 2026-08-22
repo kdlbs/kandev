@@ -85,9 +85,12 @@ function focusAfterCollapse(triggerRef?: TriggerRef) {
 }
 
 function chipStatus(pr: TaskPR): ChipStatus {
+  // Terminal PRs are filtered before this helper. For active PRs, queue
+  // membership is the authoritative non-terminal state, so stale failure,
+  // draft, or mergeability fields cannot override the queue indicator.
+  if (isPRQueued(pr)) return "queued";
   if (pr.review_state === "changes_requested" || pr.checks_state === "failure") return "failed";
   if (isPRDraft(pr)) return "draft";
-  if (isPRQueued(pr)) return "queued";
   // Merge conflicts / behind-base block the merge even when CI is green — the
   // chip must never read as a passed check in that case. Mirrors
   // getPRStatusColor + PRStatusIcon (dirty = red, behind = amber).

@@ -21,6 +21,10 @@ spec: "../../specs/github-pr-merge-queue/spec.md"
   estimated merge duration without exposing raw GitHub values.
 - All five locale catalogs, i18n checks, typecheck, and focused component tests
   cover queued, queue-exit, unknown-enum, and terminal behavior.
+- Terminal colors remain authoritative, then an active queue entry takes
+  precedence over other non-terminal failure, draft, dirty, or behind fields.
+  A failing sibling still outranks a queued sibling during multi-PR
+  aggregation, and future provider states use generic queued copy.
 
 ## Verification
 
@@ -90,8 +94,12 @@ synchronized task/plan status in this conversation.
 Passed:
 
 - Implemented the queued semantic, `#966600` color, localized queue metadata formatter, task summary detail row, compact status chip, drawer, and PR detail notice.
-- `cd apps/web && pnpm test -- components/github/pr-task-icon.test.ts components/github/pr-task-status-summary.test.ts components/github/pr-status-chip.test.tsx components/github/pr-merge-queue-status.test.tsx components/github/pr-mergeability-row.test.tsx components/github/pr-detail-panel.test.tsx` passed 155 tests across 6 files.
-- `cd apps/web && pnpm run typecheck` passed. `cd apps/web && pnpm run lint` passed with no warnings or errors. `cd apps/web && pnpm run i18n:check` passed with 7,223 referenced keys, 8,780 English entries, 48 orphans, and complete `pt-pt`, `zh-cn`, `zh-hk`, and `zh-tw` catalogs.
+- `cd apps/web && pnpm test -- components/github/pr-task-icon.test.ts components/github/pr-task-status-summary.test.ts components/github/pr-status-chip.test.tsx components/github/pr-merge-queue-status.test.tsx components/github/pr-mergeability-row.test.tsx components/github/pr-detail-panel.test.tsx` passed 160 tests across 6 files.
+- `cd apps/web && pnpm run typecheck` passed. `cd apps/web && pnpm run lint` passed with no warnings or errors. `cd apps/web && pnpm run i18n:check` passed with 7,223 referenced keys, 8,779 English entries, 48 orphans, and complete `pt-pt`, `zh-cn`, `zh-hk`, and `zh-tw` catalogs.
 - Added queue keys to English, Portuguese, Simplified Chinese, Traditional Chinese, and pseudo catalogs. `pnpm run i18n:zh-hant` reached its existing unrelated `agents:dynamicProfileSettings` residual; the namespace-specific `convert-zh-cn-to-zh-hant.mjs --locale all --namespace github --write` command generated the Traditional Chinese queue entries with zero residual queue keys. `pnpm run i18n:pseudo` generated the pseudo queue entries.
-- Desktop and mobile E2E capture runs rendered the queue state, position, and estimate. The reviewed files were `apps/web/.pr-assets/pr-merge-queue--desktop-pr-merge-queue-status.png` and `apps/web/.pr-assets/mobile-pr-merge-queue--mobile-pr-merge-queue-status.png`; both were removed by the final `pnpm e2e:clean` run after preservation for PR media publication.
+- Desktop and mobile E2E runs rendered the queue state, position, and estimate in the two display scenarios, while the two action scenarios restored API, notification, duplicate-suppression, and mobile target coverage. The reviewed files were `apps/web/.pr-assets/pr-merge-queue--desktop-pr-merge-queue-status.png` and `apps/web/.pr-assets/mobile-pr-merge-queue--mobile-pr-merge-queue-status.png`; both were removed by the final `pnpm e2e:clean` run after preservation for PR media publication.
 - No external side effects occurred. The implementation reads GitHub queue metadata and does not add queue-management actions.
+- Queue precedence regressions pass for a queued PR with failure, changes
+  requested, dirty, behind, or draft fields, while failing siblings retain
+  aggregate priority. Future provider enums resolve to `queue_queued` and the
+  generic localized `Queued` label.

@@ -49,3 +49,30 @@ func TestQueuedPullRequestRanksBelowMoreAttentionWorthySibling(t *testing.T) {
 		t.Fatalf("aggregate state = %+v, want failure over queued sibling", got.PullRequest)
 	}
 }
+
+func TestQueuedPullRequestTakesPrecedenceOverItsOtherNonTerminalStates(t *testing.T) {
+	got := BuildFromAuthoritative(RebuildInput{
+		PRObserved: true,
+		PullRequests: []PullRequestInput{{
+			Key: "queued", State: prStateOpen, Number: 1,
+			MergeQueueState: "queued", MergeableState: "dirty",
+			ReviewState: prStateChanges, ChecksState: prStateFailure,
+		}},
+	})
+	if got.PullRequest == nil || got.PullRequest.AggregateState != prStateQueued {
+		t.Fatalf("aggregate state = %+v, want queued", got.PullRequest)
+	}
+}
+
+func TestQueuedPullRequestTakesPrecedenceOverDraftMergeability(t *testing.T) {
+	got := BuildFromAuthoritative(RebuildInput{
+		PRObserved: true,
+		PullRequests: []PullRequestInput{{
+			Key: "queued", State: prStateOpen, Number: 1,
+			MergeQueueState: "queued", MergeableState: prStateDraft,
+		}},
+	})
+	if got.PullRequest == nil || got.PullRequest.AggregateState != prStateQueued {
+		t.Fatalf("aggregate state = %+v, want queued", got.PullRequest)
+	}
+}

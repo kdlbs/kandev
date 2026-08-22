@@ -12,12 +12,18 @@ spec: "../../specs/github-pr-merge-queue/spec.md"
 
 ## Acceptance
 
-- Desktop E2E proves queued semantics on the task indicator, task hover
-  summary, compact PR popover, and PR detail notice using one seeded linked PR
-  with position and estimated merge duration.
-- Mobile E2E proves the existing PR status drawer and full-height Review surface
-  expose the same queue state and metadata without hover.
-- The mobile scenario retains touch reachability and asserts no document-level
+- Desktop E2E has separate action and display scenarios. The action scenario
+  proves the existing PR UI exposes `Merge PR`, returns the queued API outcome,
+  shows the success notification, and suppresses the accepted action. The
+  display scenario proves the task indicator, task hover summary, compact PR
+  popover, and PR detail notice expose queue state, position, and estimated
+  merge duration.
+- Mobile E2E has separate action and display scenarios. The action scenario
+  reaches the queued outcome through Review using touch, verifies a minimum
+  44px action target, and checks the success notification. The display scenario
+  proves the existing PR status drawer and full-height Review surface expose the
+  same queue state and metadata without hover.
+- Both display scenarios retain touch reachability and assert no document-level
   horizontal overflow against a freshly built production bundle.
 
 ## Verification
@@ -52,8 +58,10 @@ must follow both implementation tasks.
 
 ## Risks
 
-- The test must seed queue membership, position, and estimate as authoritative
-  TaskPR state rather than infer them from the merge-button success toast.
+- The display tests must seed queue membership, position, and estimate as
+  authoritative TaskPR state rather than infer them from the merge-button
+  success toast. The action tests must seed an eligible, not-yet-queued PR so
+  the merge button and accepted response remain covered independently.
 - Desktop and mobile projects must run separately; repeating `--project` in one
   runner invocation would silently select only the final project.
 
@@ -67,7 +75,7 @@ blockers, risks, and synchronized task/plan status in this conversation.
 
 Passed:
 
-- `cd apps/web && pnpm e2e:run tests/pr/pr-merge-queue.spec.ts` built the backend, Vite production bundle, and plugin. The first assertion run exposed a strict locator ambiguity in the shared tooltip portal; the test now selects the first matching summary, and the final `pnpm e2e:run --no-build tests/pr/pr-merge-queue.spec.ts` passed 1 test in 6.2 seconds.
-- `cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/pr/mobile-pr-merge-queue.spec.ts` passed 1 test in 6.4 seconds. The scenario verified the touch drawer, full-height Review surface, queue metadata, and no document-level horizontal overflow.
-- `CAPTURE_PR_ASSETS=true pnpm e2e:run --no-build tests/pr/pr-merge-queue.spec.ts` and the matching mobile command each passed 1 test. The desktop and mobile PNGs were inspected and compressed with `pnpm dlx pngquant-bin@9.0.0 --quality 65-90 --ext .png --force`; the compressed assets were preserved outside the worktree for PR media publication.
+- `cd apps/web && pnpm e2e:run tests/pr/pr-merge-queue.spec.ts` built the backend, Vite production bundle, and plugin, then passed 2 tests: the desktop merge action and the queued-status display. The display test retains the strict-tooltip locator correction.
+- `cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/pr/mobile-pr-merge-queue.spec.ts` passed 2 tests: the mobile Review merge action with the minimum target-height assertion and the drawer/Review queue display with no document-level horizontal overflow.
+- `CAPTURE_PR_ASSETS=true pnpm e2e:run --no-build tests/pr/pr-merge-queue.spec.ts` and the matching mobile command continue to capture the display tests; the desktop and mobile PNGs were inspected and compressed with `pnpm dlx pngquant-bin@9.0.0 --quality 65-90 --ext .png --force`. Action coverage is behavioral and adds no capture asset.
 - `cd apps/web && pnpm e2e:clean` removed generated E2E results, reports, PR assets, and shard logs. Tests used mock GitHub state and temporary repositories only; no external GitHub writes occurred.

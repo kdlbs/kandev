@@ -85,7 +85,8 @@ conversation.
 Passed:
 
 - `cd apps/backend && go test -tags fts5 ./internal/github/... ./internal/task/statussummary/... ./internal/backendapp`
-  (2,189 tests passed across 3 packages).
+  (2,193 tests passed across 3 packages, including terminal → queued
+  precedence and failing-sibling ranking).
 - Focused RED run recorded the expected missing-contract compile failures before
   implementation; the focused GREEN run passed 13 queue/projection tests.
 

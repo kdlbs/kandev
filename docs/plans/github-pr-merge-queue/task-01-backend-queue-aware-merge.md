@@ -25,6 +25,11 @@ spec: "../../specs/github-pr-merge-queue/spec.md"
 - `apps/backend/internal/github/noop_client.go`
 - `apps/backend/internal/github/service_pr.go`
 - `apps/backend/internal/github/controller.go`
+- `apps/backend/internal/github/graphql.go`
+- `apps/backend/internal/github/models.go`
+- `apps/backend/internal/github/store.go`
+- `apps/backend/internal/github/service_pr_watch.go`
+- `apps/backend/internal/task/statussummary/projector_pr.go`
 - Their focused `*_test.go` files
 
 ## Acceptance
@@ -35,6 +40,10 @@ spec: "../../specs/github-pr-merge-queue/spec.md"
   including already-queued idempotency, and unknown results fail closed.
 - The workspace-scoped HTTP endpoint returns the normalized outcome while
   retaining auth routing, cache invalidation, validation, and error mapping.
+- The existing GraphQL status sync observes queue state, one-based position,
+  and optional estimate; persistence preserves queue-unaware reads, clears
+  authoritative exits and terminal states, and the bounded task projection
+  exposes the queued state with multi-PR attention ranking.
 
 ## Verification
 

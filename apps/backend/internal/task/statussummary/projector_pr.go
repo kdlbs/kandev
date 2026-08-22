@@ -122,11 +122,14 @@ func pullRequestAggregateState(pr pullRequestObservation) string {
 	mergeable := strings.ToLower(strings.TrimSpace(pr.mergeableState))
 	checks := strings.ToLower(strings.TrimSpace(pr.checksState))
 	review := strings.ToLower(strings.TrimSpace(pr.reviewState))
-	if lifecycle := pullRequestLifecycleState(state, mergeable); lifecycle != "" {
-		return lifecycle
+	if state == prStateMerged || state == prStateClosed {
+		return pullRequestLifecycleState(state, mergeable)
 	}
 	if strings.TrimSpace(pr.mergeQueueState) != "" {
 		return prStateQueued
+	}
+	if lifecycle := pullRequestLifecycleState(state, mergeable); lifecycle != "" {
+		return lifecycle
 	}
 	if mergeable == prStateBlocked || mergeable == prStateDirty {
 		return prStateBlocked

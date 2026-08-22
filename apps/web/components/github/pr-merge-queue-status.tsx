@@ -10,8 +10,7 @@ export type MergeQueueSummaryStatus =
   | "queue_awaiting_checks"
   | "queue_mergeable"
   | "queue_unmergeable"
-  | "queue_locked"
-  | "queue_unknown";
+  | "queue_locked";
 
 export type MergeQueueEstimateDescription =
   | { kind: "none" }
@@ -32,7 +31,6 @@ const QUEUE_STATE_LABEL_KEYS: Record<MergeQueueSummaryStatus, string> = {
   queue_mergeable: "github:mergeQueueStateMergeable",
   queue_unmergeable: "github:mergeQueueStateUnmergeable",
   queue_locked: "github:mergeQueueStateLocked",
-  queue_unknown: "github:mergeQueueStateUnknown",
 };
 
 export function normalizeMergeQueueState(state: string | null | undefined): string {
@@ -42,7 +40,7 @@ export function normalizeMergeQueueState(state: string | null | undefined): stri
 export function getMergeQueueSummaryStatus(
   state: string | null | undefined,
 ): MergeQueueSummaryStatus {
-  return KNOWN_QUEUE_STATES[normalizeMergeQueueState(state)] ?? "queue_unknown";
+  return KNOWN_QUEUE_STATES[normalizeMergeQueueState(state)] ?? "queue_queued";
 }
 
 export function describeMergeQueueEstimate(

@@ -593,6 +593,18 @@ describe("aggregateChipStatus", () => {
     ).toBe("queued");
   });
 
+  it("keeps queued status ahead of failure on the same PR", () => {
+    expect(
+      aggregateChipStatus([
+        makePR({
+          merge_queue_state: "queued",
+          checks_state: "failure",
+          review_state: "changes_requested",
+        }),
+      ]),
+    ).toBe("queued");
+  });
+
   it("lets a failing sibling retain chip priority over a queued PR", () => {
     expect(
       aggregateChipStatus([

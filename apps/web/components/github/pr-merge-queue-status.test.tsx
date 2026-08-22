@@ -66,17 +66,17 @@ describe("merge queue status", () => {
     ["mergeable", "queue_mergeable"],
     ["unmergeable", "queue_unmergeable"],
     ["locked", "queue_locked"],
-    ["future_state", "queue_unknown"],
+    ["future_state", "queue_queued"],
   ])("maps %s to %s", (state, expected) => {
     expect(getMergeQueueSummaryStatus(state)).toBe(expected);
   });
 
-  it("uses an unknown label for a future provider state", () => {
+  it("uses generic queued copy for a future provider state", () => {
     const { getByTestId } = render(
       <PRMergeQueueStatus pr={makePR({ merge_queue_state: "future_state" })} />,
     );
 
-    expect(getByTestId(QUEUE_STATUS_TEST_ID).textContent).toContain("Merge queue: Unknown");
+    expect(getByTestId(QUEUE_STATUS_TEST_ID).textContent).toContain("Merge queue: Queued");
   });
 
   it("renders queue state, one-based position, and an available estimate", () => {
@@ -128,6 +128,21 @@ describe("merge queue status", () => {
     expect(getPRStatusColor(makePR({ state: "closed", merge_queue_state: "queued" }))).toBe(
       "text-red-500",
     );
+  });
+
+  it("keeps queue color ahead of other non-terminal PR states", () => {
+    const overrides: Array<Partial<TaskPR>> = [
+      { checks_state: "failure" },
+      { review_state: "changes_requested" },
+      { mergeable_state: "dirty" },
+      { mergeable_state: "behind" },
+      { mergeable_state: "draft" },
+    ];
+    for (const override of overrides) {
+      expect(getPRStatusColor(makePR({ merge_queue_state: "queued", ...override }))).toBe(
+        "text-[#966600]",
+      );
+    }
   });
 
   it("lets a failing sibling outrank a queued PR in the aggregate", () => {

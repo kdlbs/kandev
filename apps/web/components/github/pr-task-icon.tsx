@@ -135,14 +135,15 @@ function openMergeBlockerColor(pr: TaskPR): string | null {
 export function getPRStatusColor(pr: TaskPR): string {
   if (pr.state === "merged") return PURPLE_500;
   if (pr.state === "closed") return RED_500;
+  // An active queue entry is the authoritative non-terminal state. Queue
+  // membership must remain visible while provider checks or mergeability
+  // fields hydrate, even when those fields still describe an earlier state.
+  if (isPRQueued(pr)) return QUEUED;
   if (pr.review_state === "changes_requested" || pr.checks_state === "failure") {
     return RED_500;
   }
   if (isPRDraft(pr)) {
     return MUTED_FOREGROUND;
-  }
-  if (isPRQueued(pr)) {
-    return QUEUED;
   }
   const blockerColor = openMergeBlockerColor(pr);
   if (blockerColor) return blockerColor;

@@ -169,7 +169,7 @@ describe("queued PR task status summaries", () => {
 
     expect(summary.rows.at(-1)).toEqual({
       kind: "merge",
-      status: "queue_unknown",
+      status: "queue_queued",
       tone: "queued",
       detail: {
         key: "github:mergeQueuePosition",

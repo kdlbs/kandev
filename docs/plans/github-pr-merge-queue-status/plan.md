@@ -159,28 +159,38 @@ action is needed.
 
 ## E2E Tests
 
+- **Scenario:** GIVEN an eligible queue-required PR, WHEN a desktop user
+  activates `Merge PR`, THEN the merge API returns `{"status":"queued"}`,
+  the success notification appears, and the accepted state suppresses the
+  duplicate action. **File:** the action test in
+  `apps/web/e2e/tests/pr/pr-merge-queue.spec.ts`.
 - **Scenario:** GIVEN a linked open PR with an active merge queue entry, WHEN a
   desktop user views the task and PR detail, THEN the task indicator has queued
   semantics, its hover summary and compact popover show queue state, position,
   and estimated merge duration, and the detail notice shows the same data.
-  **File:**
+  **File:** the display test in
   `apps/web/e2e/tests/pr/pr-merge-queue.spec.ts`.
+- **Scenario:** GIVEN an eligible queue-required PR on a phone viewport, WHEN
+  the user opens Review and activates the action, THEN the queued notification
+  appears, the action target is at least 44px high, and the document has no
+  horizontal overflow. **File:** the action test in
+  `apps/web/e2e/tests/pr/mobile-pr-merge-queue.spec.ts`.
 - **Scenario:** GIVEN the same queued PR on a phone viewport, WHEN the user
   opens the PR status drawer and the Review destination, THEN both expose queue
   status, position, and the available estimate without hover, and the document
-  retains no horizontal overflow.
-  **File:** `apps/web/e2e/tests/pr/mobile-pr-merge-queue.spec.ts`.
+  retains no horizontal overflow. **File:** the display test in
+  `apps/web/e2e/tests/pr/mobile-pr-merge-queue.spec.ts`.
 
 ## Verification Results
 
 Passed:
 
-- `cd apps/backend && go test -tags fts5 ./internal/github/... ./internal/task/statussummary/... ./internal/backendapp` passed 2,189 tests across 3 packages. The focused RED run recorded the expected missing-contract compile failures, and the focused GREEN run passed 13 queue tests.
-- `cd apps/web && pnpm test -- components/github/pr-task-icon.test.ts components/github/pr-task-status-summary.test.ts components/github/pr-status-chip.test.tsx components/github/pr-merge-queue-status.test.tsx components/github/pr-mergeability-row.test.tsx components/github/pr-detail-panel.test.tsx` passed 155 tests across 6 files.
-- `cd apps/web && pnpm run typecheck` and `cd apps/web && pnpm run lint` passed. `cd apps/web && pnpm run i18n:check` passed with 7,223 referenced keys and all five required catalogs complete.
+- `cd apps/backend && go test -tags fts5 ./internal/github/... ./internal/task/statussummary/... ./internal/backendapp` passed 2,193 tests across 3 packages. The focused RED run recorded the expected missing-contract compile failures, and the focused GREEN run passed the queue precedence tests.
+- `cd apps/web && pnpm test -- components/github/pr-task-icon.test.ts components/github/pr-task-status-summary.test.ts components/github/pr-status-chip.test.tsx components/github/pr-merge-queue-status.test.tsx components/github/pr-mergeability-row.test.tsx components/github/pr-detail-panel.test.tsx` passed 160 tests across 6 files.
+- `cd apps/web && pnpm run typecheck` and `cd apps/web && pnpm run lint` passed. `cd apps/web && pnpm run i18n:check` passed with 7,223 referenced keys, 8,779 English entries, 48 orphans, and all five required catalogs complete.
 - `node scripts/validate-public-docs.test.mjs` passed 61 tests, and `node scripts/validate-public-docs.mjs` validated 41 published pages. `docs/public/integrations.md` documents queue state, position, and estimate surfaces.
-- A fresh `cd apps/web && pnpm e2e:run tests/pr/pr-merge-queue.spec.ts` build completed the backend, Vite production bundle, and plugin. After the test locator correction, the final desktop run passed 1 test, and `pnpm e2e:run --no-build --project mobile-chrome tests/pr/mobile-pr-merge-queue.spec.ts` passed 1 test.
-- Screenshot capture runs passed 1 desktop test and 1 mobile test. They produced `apps/web/.pr-assets/pr-merge-queue--desktop-pr-merge-queue-status.png` and `apps/web/.pr-assets/mobile-pr-merge-queue--mobile-pr-merge-queue-status.png`. Both images were inspected, compressed with the `pngquant-bin` fallback, and preserved for PR media publication.
+- A fresh `cd apps/web && pnpm e2e:run tests/pr/pr-merge-queue.spec.ts` build completed the backend, Vite production bundle, and plugin. The final desktop run passed 2 tests, including the merge-action and queue-display scenarios, and `pnpm e2e:run --no-build --project mobile-chrome tests/pr/mobile-pr-merge-queue.spec.ts` passed 2 matching tests.
+- Previously captured display assets remain valid: `apps/web/.pr-assets/pr-merge-queue--desktop-pr-merge-queue-status.png` and `apps/web/.pr-assets/mobile-pr-merge-queue--mobile-pr-merge-queue-status.png`. Both were inspected, compressed with the `pngquant-bin` fallback, and preserved for PR media publication; action coverage is behavioral and adds no capture asset.
 - `cd apps/web && pnpm e2e:clean` removed E2E results, reports, PR assets, and shard logs. The E2E scenarios use mock GitHub state and created no external GitHub writes.
 
 ## Implementation Waves And Parallel Candidates
