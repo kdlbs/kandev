@@ -2257,8 +2257,9 @@ func (e *Executor) persistRecoveredBaseBranch(
 }
 
 // environmentReposForLaunch returns the environment-repository rows for a
-// launch: one per multi-repo worktree result, or a single row carrying the
-// single-repo worktree identity.
+// launch: one per multi-repo worktree result, or a single repository inventory
+// row. Rows without a WorktreeID describe a repository slot only; the worktree
+// store excludes them from physical checkout operations.
 func environmentReposForLaunch(req *LaunchAgentRequest, resp *LaunchAgentResponse) []*models.TaskEnvironmentRepo {
 	if len(resp.Worktrees) > 0 {
 		return buildTaskEnvironmentRepos(resp.Worktrees)
@@ -2297,12 +2298,22 @@ func environmentReposForLaunch(req *LaunchAgentRequest, resp *LaunchAgentRespons
 	if branchSlug == "" {
 		branchSlug = topLevelBranchIdentitySlug(req)
 	}
+	worktreeID, worktreePath, worktreeBranch := "", "", ""
+	if resp.WorktreeID != "" {
+		worktreeID = resp.WorktreeID
+		worktreePath = resp.WorktreePath
+		worktreeBranch = resp.WorktreeBranch
+	}
 	return []*models.TaskEnvironmentRepo{{
-		RepositoryID:   req.RepositoryID,
-		BranchSlug:     worktree.SanitizeBranchSlug(branchSlug),
-		WorktreeID:     resp.WorktreeID,
-		WorktreePath:   computeWorkspacePath(req, resp),
-		WorktreeBranch: resp.WorktreeBranch,
+		RepositoryID: req.RepositoryID,
+		BranchSlug:   worktree.SanitizeBranchSlug(branchSlug),
+		// A launch without a concrete worktree still needs an inventory row
+		// for reuse validation. It is not a physical worktree, so do not copy
+		// the environment-level workspace path (which may be the host's seed
+		// checkout) into the physical-worktree fields.
+		WorktreeID:     worktreeID,
+		WorktreePath:   worktreePath,
+		WorktreeBranch: worktreeBranch,
 		Position:       0,
 	}}
 }
