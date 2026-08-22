@@ -135,6 +135,40 @@ describe("ActionConfirmPopover anchor lifecycle", () => {
 
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
+
+  it("returns focus to a separate focus target on cancel", async () => {
+    function SeparateFocusHarness() {
+      const [open, setOpen] = useState(true);
+      const anchorRef = useRef<HTMLDivElement>(null);
+      const focusReturnRef = useRef<HTMLButtonElement>(null);
+      return (
+        <>
+          <div ref={anchorRef}>Positioning anchor</div>
+          <button ref={focusReturnRef} type="button">
+            More options
+          </button>
+          <ActionConfirmPopover
+            open={open}
+            anchorRef={anchorRef}
+            focusReturnRef={focusReturnRef}
+            title={deleteTitle}
+            description="This cannot be undone."
+            cancelLabel="Cancel"
+            confirmLabel="Delete"
+            onOpenChange={setOpen}
+            onConfirm={vi.fn()}
+          />
+        </>
+      );
+    }
+
+    render(<SeparateFocusHarness />);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "More options" })),
+    );
+  });
 });
 
 describe("ActionConfirmPopover focus boundaries", () => {
