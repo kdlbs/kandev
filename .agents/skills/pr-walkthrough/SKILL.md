@@ -38,8 +38,9 @@ write the complete walkthrough JSON object to that draft path. Do not write
 HTML or change source files. The Kandev runner uses
 `.pr-walkthrough/draft.json` and runs
 `python3 .agents/skills/pr-walkthrough/scripts/pr-walkthrough-render` with no
-command arguments and no JSON on standard input. Use the host-provided paths
-when they differ.
+command arguments and no JSON on standard input. Use that exact path and
+command in Kandev CI. Do not use alternate paths, command arguments, or JSON
+on standard input.
 
 If the renderer rejects the draft, correct the JSON at the same draft path and
 run the host-provided renderer command again. Finish only after the renderer

@@ -76,9 +76,10 @@ lifecycle policy.
 
 ## Generation contract
 
-The walkthrough agent compares the exact pull request head SHA with the exact
-base SHA through their merge base. It reads a trusted base checkout, a prepared
-patch, and bounded text files from the immutable PR head. It creates a draft
+The skill-local context helper resolves the merge base between the exact pull
+request head SHA and the exact base SHA. It prepares a patch and bounded text
+files from the immutable PR head. The walkthrough agent reads a trusted base
+checkout, the prepared patch, and the bounded head files. It creates a draft
 JSON file, invokes the trusted renderer, and corrects its data until both
 outputs pass renderer validation. The generated `pr` object
 includes the pull request number, title, URL, repository slug, base branch,

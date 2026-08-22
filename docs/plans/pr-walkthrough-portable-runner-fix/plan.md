@@ -129,14 +129,10 @@ contract. PR #2936 provides the live post-merge workflow test.
 ## Post-Merge Validation
 
 After the fix reaches `main`, add the `generate-pr-walkthrough` label to PR
-#2936. Require successful generation, publication, and link jobs. Open the
+`#2936`. Require successful generation, publication, and link jobs. Open the
 hosted HTML and make sure that the PR description contains the owned callout.
 
 Close PR #2936 and remove its remote branch after the live test succeeds.
-
-## Verification Results
-
-Pending. Synchronize this section with each task result during implementation.
 
 ## Implementation Waves And Parallel Candidates
 

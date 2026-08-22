@@ -81,7 +81,11 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
         self.assertIn("fetch-depth: 0", self.generation)
         self.assertIn("persist-credentials: false", self.generation)
         self.assertIn('test "$(git rev-parse HEAD)" = "$BASE_SHA"', self.generation)
-        self.assertIn('git fetch --no-tags origin "$HEAD_SHA"', self.generation)
+        self.assertIn(
+            'git fetch --no-tags --filter=blob:none '
+            '--negotiation-tip="$BASE_SHA" origin "$HEAD_SHA"',
+            self.generation,
+        )
         self.assertNotIn("--depth=1", self.generation)
         self.assertIn('test "$(git rev-parse FETCH_HEAD)" = "$HEAD_SHA"', self.generation)
         self.assertIn('git merge-base "$BASE_SHA" "$HEAD_SHA"', self.generation)

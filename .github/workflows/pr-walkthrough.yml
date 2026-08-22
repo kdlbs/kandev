@@ -47,7 +47,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$BASE_SHA"
-          git fetch --no-tags origin "$HEAD_SHA"
+          git fetch --no-tags --filter=blob:none --negotiation-tip="$BASE_SHA" origin "$HEAD_SHA"
           test "$(git rev-parse FETCH_HEAD)" = "$HEAD_SHA"
           MERGE_BASE="$(git merge-base "$BASE_SHA" "$HEAD_SHA")"
           test -n "$MERGE_BASE"
