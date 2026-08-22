@@ -209,7 +209,7 @@ func TestCloneExecutorGitMetadataPreflightMatrix(t *testing.T) {
 		{name: "Sprites Codex attests remote policy", runtime: &SpritesExecutor{}, agent: agents.NewCodexACP()},
 		{name: "SSH rejects unsupported agent", runtime: &SSHExecutor{}, agent: agents.NewClaudeACP(), wantErr: true},
 		{name: "Sprites rejects unsupported agent", runtime: &SpritesExecutor{}, agent: agents.NewClaudeACP(), wantErr: true},
-		{name: "SSH rejects stale resumed child", runtime: &SSHExecutor{}, agent: agents.NewCodexACP(), resume: true, wantErr: true},
+		{name: "SSH reattests resumed child", runtime: &SSHExecutor{}, agent: agents.NewCodexACP(), resume: true},
 		{name: "remote Docker stays unsupported before implementation", runtime: &RemoteDockerExecutor{}, agent: agents.NewCodexACP(), wantErr: true},
 	}
 	for _, tc := range tests {
