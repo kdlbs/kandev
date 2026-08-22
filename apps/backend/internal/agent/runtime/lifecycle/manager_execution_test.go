@@ -85,6 +85,9 @@ func TestPrepareExecutionCreateRequest_ReuseRequiredDockerUsesEnvironmentControl
 	if got := prepared.request.AuthToken; got != "environment-control-token" {
 		t.Fatalf("reconnect auth token = %q, want environment control token", got)
 	}
+	if !prepared.request.WorkspaceReuseRequired {
+		t.Fatal("on-demand execution for a task environment must attach rather than provision a replacement workspace")
+	}
 }
 
 func TestResolveSessionRuntimeDoesNotCreateUnsupportedExecution(t *testing.T) {
