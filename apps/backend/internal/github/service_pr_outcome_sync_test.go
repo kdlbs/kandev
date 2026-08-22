@@ -338,9 +338,7 @@ func TestPersistAndPublishTaskPRSync_PublishesReReadValueNotStaleInMemoryOne(t *
 	staleObservedAt := persistedAt.Add(-time.Minute)
 	staleTP.AutoMergeObservedAt = &staleObservedAt
 
-	if err := svc.persistAndPublishTaskPRSync(
-		ctx, &staleTP, staleTP.TaskID, nil, true, true,
-	); err != nil {
+	if err := svc.persistAndPublishTaskPRSync(ctx, staleTP.TaskID, nil, &staleTP, true, true); err != nil {
 		t.Fatalf("persistAndPublishTaskPRSync: %v", err)
 	}
 

@@ -87,6 +87,12 @@ func (s *Service) GetTaskAssigneeForTest(ctx context.Context, taskID string) (st
 	return s.repo.GetTaskAssignee(ctx, taskID)
 }
 
+// GetAgentRuntimeForTest exposes the repo's runtime lookup for service
+// package tests asserting the last_run_finished_at stamp.
+func (s *Service) GetAgentRuntimeForTest(ctx context.Context, agentID string) (*sqlite.RuntimeState, error) {
+	return s.repo.GetAgentRuntime(ctx, agentID)
+}
+
 // RunSchedulerTick runs a single scheduler tick for testing.
 // This exercises the full processRun pipeline including task launch.
 func RunSchedulerTick(svc *Service, ctx context.Context) {
