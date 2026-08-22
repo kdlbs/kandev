@@ -731,6 +731,16 @@ func (m *Manager) prepareExecutionCreateRequest(
 		autoApprove = profileInfo.AutoApprove
 		autoApproveOverride = boolPtr(profileInfo.AutoApprove)
 	}
+	authToken := m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyAuthTokenSecret)
+	if info.ExecutorType == string(models.ExecutorTypeLocalDocker) || info.ExecutorType == string(models.ExecutorTypeRemoteDocker) {
+		controlToken, err := m.revealContainerControlAuthToken(ctx, info.Metadata, getMetadataString(info.Metadata, MetadataKeyContainerID) != "")
+		if err != nil {
+			return nil, fmt.Errorf("resolve container control token: %w", err)
+		}
+		if controlToken != "" {
+			authToken = controlToken
+		}
+	}
 
 	return &executionCreatePreparation{
 		request: &ExecutorCreateRequest{
@@ -750,7 +760,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 			Metadata:                       metadata,
 			ApprovedSecretEnvKeys:          append([]string(nil), envPreparation.approvedSecretEnvKeys...),
 			PreviousExecutionID:            info.AgentExecutionID,
-			AuthToken:                      m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyAuthTokenSecret),
+			AuthToken:                      authToken,
 			BootstrapNonce:                 m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyBootstrapNonceSecret),
 			AgentctlStartupConfig:          m.agentctlStartupConfig,
 			RemoteContributions:            remoteContributions,
