@@ -375,13 +375,13 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
   /**
    * Deliberate scope limit (see docs/plans/plugins/task-*): there is no
    * fixture package for a *second* signed version, so this proves the
-   * operator-triggered check surfaces the "Update available" badge via a
+   * operator-triggered check surfaces a highlighted Update button via a
    * route-mocked catalog, and that a manual update failing against a
    * (deliberately unreachable) mocked `package_url` renders inline without
    * disturbing the rest of the row. The real, successful reinstall path is
    * covered at the unit level (use-plugin-update-action.test.tsx).
    */
-  test("marketplace update check surfaces an available-version badge, and a failing manual update shows an inline error", async ({
+  test("marketplace update check highlights the Update button, and a failing manual update shows an inline error", async ({
     testPage,
   }) => {
     test.setTimeout(60_000);
@@ -443,11 +443,10 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await testPage.getByTestId("plugins-check-updates-button").click();
 
     const latestVersion = pluginRow.getByTestId(`plugin-latest-version-${PLUGIN_ID}`);
-    const updateBadge = pluginRow.getByTestId(`plugin-update-available-${PLUGIN_ID}`);
     const updateButton = pluginRow.getByTestId(`plugin-update-${PLUGIN_ID}`);
     await expect(latestVersion).toContainText(newerVersion, { timeout: 15_000 });
-    await expect(updateBadge).toContainText(newerVersion);
     await expect(updateButton).toBeVisible();
+    await expect(updateButton).toHaveAttribute("data-variant", "default");
     await expect(testPage.getByTestId("plugins-updates-last-checked")).toBeVisible();
 
     // The update tries to install from the (deliberately unreachable) mocked

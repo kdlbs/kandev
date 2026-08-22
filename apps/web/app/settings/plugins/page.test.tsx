@@ -522,7 +522,10 @@ describe("PluginsSettingsPage marketplace updates", () => {
         "2.0.0",
       ),
     );
-    expect(screen.getByTestId(`plugin-update-available-${PLUGIN_ID}`)).toBeTruthy();
+    expect(screen.queryByTestId(`plugin-update-available-${PLUGIN_ID}`)).toBeNull();
+    expect(screen.getByTestId(`plugin-update-${PLUGIN_ID}`).getAttribute("data-variant")).toBe(
+      "default",
+    );
 
     const refreshOrder = refreshMarketplaceSpy.mock.invocationCallOrder[0];
     const catalogOrder = getMarketplaceCatalogSpy.mock.invocationCallOrder[1];
@@ -609,7 +612,7 @@ describe("PluginsSettingsPage marketplace update lifecycle", () => {
     );
   });
 
-  it("after a successful manual update, the version updates and the update button/badge disappear", async () => {
+  it("after a successful manual update, the version updates and the update button disappears", async () => {
     setStoreState([activePlugin()]);
     getMarketplaceCatalogSpy.mockResolvedValueOnce({ plugins: [catalogEntry()], sources: [] });
     installPluginFromUrlSpy.mockResolvedValueOnce({ plugin: activePlugin({ version: "2.0.0" }) });
@@ -629,7 +632,6 @@ describe("PluginsSettingsPage marketplace update lifecycle", () => {
       ),
     );
     await vi.waitFor(() => expect(screen.queryByTestId(`plugin-update-${PLUGIN_ID}`)).toBeNull());
-    expect(screen.queryByTestId(`plugin-update-available-${PLUGIN_ID}`)).toBeNull();
     expect(toast.success).toHaveBeenCalledWith(expect.stringContaining(PLUGIN_DISPLAY_NAME));
   });
 

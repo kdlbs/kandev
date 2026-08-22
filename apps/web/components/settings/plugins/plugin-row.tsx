@@ -1,6 +1,11 @@
 "use client";
 
-import { IconArrowUpCircle, IconChevronRight, IconLoader2 } from "@tabler/icons-react";
+import {
+  IconArrowUpCircle,
+  IconChevronRight,
+  IconLoader2,
+  IconSettings,
+} from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
@@ -218,13 +223,14 @@ function PluginRowIdentity({
 
 /**
  * The latest-known marketplace version for this plugin, once a catalog check
- * has completed at least once: "Latest v<x>" plus an "Update available"
- * badge when it's newer than the installed version, or a not-in-marketplace
- * hint when no source carries this plugin id at all. Renders nothing before
- * the first successful check — a stale "not in marketplace" flash would be
- * actively misleading while the marketplace hasn't been queried yet — and
- * likewise nothing when the check only reached some sources, since a plugin
- * carried solely by the source that failed is unknown, not delisted.
+ * has completed at least once: "Latest v<x>" or a not-in-marketplace hint
+ * when no source carries this plugin id at all. The update action itself is
+ * the update-available affordance, so the row does not repeat it as a badge.
+ * Renders nothing before the first successful check — a stale "not in
+ * marketplace" flash would be actively misleading while the marketplace
+ * hasn't been queried yet — and likewise nothing when the check only reached
+ * some sources, since a plugin carried solely by the source that failed is
+ * unknown, not delisted.
  */
 function PluginUpdateInfo({
   pluginId,
@@ -246,20 +252,9 @@ function PluginUpdateInfo({
   }
 
   return (
-    <>
-      <span data-testid={`plugin-latest-version-${pluginId}`}>
-        {t("plugins:latestVersion", { version: update.latest.version })}
-      </span>
-      {update.hasUpdate && (
-        <Badge
-          data-testid={`plugin-update-available-${pluginId}`}
-          variant="outline"
-          className="border-blue-500/40 bg-blue-500/10 text-blue-600 dark:text-blue-400 text-[11px]"
-        >
-          {t("plugins:updateAvailableVersion", { version: update.latest.version })}
-        </Badge>
-      )}
-    </>
+    <span data-testid={`plugin-latest-version-${pluginId}`}>
+      {t("plugins:latestVersion", { version: update.latest.version })}
+    </span>
   );
 }
 
@@ -354,10 +349,11 @@ function PluginRowActions({
     <div className="relative z-10 flex flex-wrap items-center gap-2 shrink-0">
       {updateEntry && onUpdate && (
         <Button
-          variant="outline"
+          variant="default"
           size="sm"
           data-testid={`plugin-update-${plugin.id}`}
           className="cursor-pointer gap-1 min-h-11 sm:min-h-0"
+          aria-busy={update?.busy ? "true" : undefined}
           disabled={busy}
           onClick={() => onUpdate(updateEntry)}
         >
@@ -402,6 +398,15 @@ function PluginRowActions({
       >
         {t("plugins:uninstall")}
       </Button>
+      <Link
+        href={`/settings/plugins/${encodeURIComponent(plugin.id)}`}
+        data-testid={`plugin-settings-link-${plugin.id}`}
+        aria-label={t("plugins:openSettingsFor", { name: plugin.display_name })}
+        className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer sm:min-h-0"
+      >
+        <IconSettings className="h-4 w-4" aria-hidden />
+        {t("plugins:settings")}
+      </Link>
     </div>
   );
 }

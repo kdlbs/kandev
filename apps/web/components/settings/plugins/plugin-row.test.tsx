@@ -160,6 +160,7 @@ describe("PluginRow update button", () => {
     const button = screen.getByTestId(UPDATE_BUTTON_TESTID);
     expect(button.textContent).toContain("Updating");
     expect(button.querySelector(".animate-spin")).not.toBeNull();
+    expect(button.getAttribute("aria-busy")).toBe("true");
     expect((button as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Uninstall" }) as HTMLButtonElement).disabled).toBe(
       true,
@@ -185,12 +186,11 @@ describe("PluginRow update button", () => {
 });
 
 describe("PluginRow latest version info", () => {
-  it("shows the latest version and an update-available badge when a newer version exists", () => {
+  it("shows the latest version without duplicating the update button with a badge", () => {
     render(<PluginRow {...baseProps} plugin={plugin()} update={updateState()} onUpdate={noop} />);
     expect(screen.getByTestId(LATEST_VERSION_TESTID).textContent).toContain("Latest v2.0.0");
-    expect(screen.getByTestId(UPDATE_BADGE_TESTID).textContent).toContain(
-      "Update available: v2.0.0",
-    );
+    expect(screen.queryByTestId(UPDATE_BADGE_TESTID)).toBeNull();
+    expect(screen.getByTestId(UPDATE_BUTTON_TESTID).getAttribute("data-variant")).toBe("default");
   });
 
   it("shows the latest version with no badge and no button when already up to date", () => {
@@ -250,7 +250,8 @@ describe("PluginRow latest version info", () => {
       />,
     );
     expect(screen.getByTestId(LATEST_VERSION_TESTID).textContent).toContain("Latest v2.0.0");
-    expect(screen.getByTestId(UPDATE_BADGE_TESTID)).toBeTruthy();
+    expect(screen.queryByTestId(UPDATE_BADGE_TESTID)).toBeNull();
+    expect(screen.getByTestId(UPDATE_BUTTON_TESTID).getAttribute("data-variant")).toBe("default");
   });
 
   it("shows neither the latest version nor the not-in-marketplace hint before the first successful check", () => {
@@ -298,6 +299,17 @@ describe("PluginRow repo link", () => {
       />,
     );
     expect(screen.queryByTestId(REPO_LINK_TESTID)).toBeNull();
+  });
+});
+
+describe("PluginRow settings link", () => {
+  it("shows a labeled settings link beside the row actions", () => {
+    render(<PluginRow {...baseProps} plugin={plugin()} />);
+
+    const settingsLink = screen.getByTestId("plugin-settings-link-acme");
+    expect(settingsLink.textContent).toContain("Settings");
+    expect(settingsLink.getAttribute("href")).toBe("/settings/plugins/acme");
+    expect(settingsLink.className).toContain("min-h-11");
   });
 });
 

@@ -90,13 +90,17 @@ If the marketplace cannot be reached, an inline error explains the problem.
 Your installed plugins and their Enable, Disable, and Uninstall actions remain
 available.
 
+Each installed row also has a visible **Settings** link. Select it to open the
+plugin's settings page, where you can change any configuration declared by the
+plugin.
+
 When the marketplace advertises a newer version than the one you have
-installed, the row also shows an **Update available: v`<version>`** badge and
-an **Update to v`<version>`** button. Clicking it reinstalls the newer tarball
-through the normal pipeline; while it's in progress the button shows a
-spinner and Enable/Disable/Uninstall are disabled. On success the version and
-badge refresh; on failure an inline error shows the reason and the button
-stays clickable so you can retry.
+installed, the row shows an **Update to v`<version>`** button with the primary
+action color. Clicking it reinstalls the newer tarball through the normal
+pipeline; while it's in progress the button shows a spinner and
+Enable/Disable/Uninstall are disabled. On success the version and button
+refresh; on failure an inline error shows the reason and the button stays
+clickable so you can retry.
 
 Updates are never automatic from this button; kandev surfaces the newer
 version and waits for an explicit click. Separately, an **opt-in** background
@@ -107,7 +111,7 @@ maintenance windows in either case.
 
 ### Auto-update (opt-in)
 
-Beyond the manual **Update available** button, kandev can update installed
+Beyond the manual **Update** button, kandev can update installed
 plugins in the background, **off by default**. An instance-wide
 **"Automatically update plugins"** switch (Settings > Plugins) sets the
 default for every installed plugin; each row also has its own switch that can

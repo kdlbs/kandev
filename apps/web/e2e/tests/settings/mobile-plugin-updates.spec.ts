@@ -89,12 +89,19 @@ test.describe("Mobile plugin updates", () => {
 
     const pluginRow = testPage.getByTestId(`plugin-row-${PLUGIN_ID}`);
     const updateButton = pluginRow.getByTestId(`plugin-update-${PLUGIN_ID}`);
+    const settingsLink = pluginRow.getByTestId(`plugin-settings-link-${PLUGIN_ID}`);
     await expect(updateButton).toBeVisible();
+    await expect(updateButton).toHaveAttribute("data-variant", "default");
+    await expect(settingsLink).toBeVisible();
+    await expect(settingsLink).toHaveText("Settings");
     const rowBox = await pluginRow.boundingBox();
     const updateBox = await updateButton.boundingBox();
     expect(rowBox).not.toBeNull();
     expect(updateBox).not.toBeNull();
     expect(updateBox!.height).toBeGreaterThanOrEqual(44);
+    const settingsBox = await settingsLink.boundingBox();
+    expect(settingsBox).not.toBeNull();
+    expect(settingsBox!.height).toBeGreaterThanOrEqual(44);
     expect(updateBox!.x + updateBox!.width).toBeLessThanOrEqual(rowBox!.x + rowBox!.width + 1);
     expect(
       await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),

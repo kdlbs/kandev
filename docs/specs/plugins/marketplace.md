@@ -41,7 +41,7 @@ while keeping install-by-URL and sideloading as escape hatches.
   (`POST /api/plugins/install`). No new install mechanism is introduced.
 - A catalog entry for a plugin that is already installed SHALL show an **Installed**
   state; when the catalog's latest version is newer than the installed version, it
-  SHALL show an **Update available** affordance (which reinstalls the newer tarball).
+  SHALL show a highlighted **Update** button (which reinstalls the newer tarball).
 - The **Installed** tab SHALL show each installed plugin's latest known marketplace
   version alongside its installed version — not only when an update is available — so
   an operator can see version drift without switching to Browse. This check runs once
@@ -49,6 +49,9 @@ while keeping install-by-URL and sideloading as escape hatches.
   clears the server's five-minute catalog cache before it retrieves current versions.
   **Sync** remains a separate filesystem action. A failed marketplace check degrades to
   an inline "couldn't check" state and never blocks installed-plugin management.
+- Each installed row SHALL show a visible **Settings** link that opens the plugin's
+  settings page. This link makes plugin configuration discoverable without requiring
+  the operator to know that the row itself is also navigable.
 - The catalog SHALL be assembled from **one or more marketplace sources**. kandev
   ships with the **official kandev source** enabled by default; operators MAY add
   **additional sources** (a team or corporate registry) and the catalog merges them.
@@ -289,8 +292,8 @@ response but stays `enabled`.
 - **GIVEN** a plugin is already installed at the catalog's latest version, **WHEN**
   the catalog renders, **THEN** its entry shows **Installed** and no Install button.
 - **GIVEN** a plugin is installed at a version older than the catalog's, **WHEN** the
-  catalog renders, **THEN** its entry shows **Update available**, and clicking it
-  installs the newer tarball.
+  catalog renders, **THEN** its Installed row shows a highlighted **Update** button,
+  and clicking it installs the newer tarball.
 - **GIVEN** the Installed tab, **WHEN** it loads, **THEN** every installed plugin with a
   catalog entry shows its latest known version (e.g. "Latest v2.1.0"), and a plugin with
   no catalog entry anywhere shows a "not in the marketplace" hint instead — never before
@@ -305,9 +308,11 @@ response but stays `enabled`.
   to be missing from the marketplace — nothing was queried, so nothing was learned.
 - **GIVEN** the Installed tab, **WHEN** the operator selects **Check for updates**,
   **THEN** kandev busts the marketplace cache and re-fetches the catalog, and any
-  plugin's latest-version text and **Update available** badge update in place.
+  plugin's latest-version text and highlighted **Update** button state update in place.
 - **GIVEN** the Installed tab, **WHEN** the operator selects **Sync**, **THEN** kandev
   reconciles the local plugins directory without starting a marketplace refresh.
+- **GIVEN** an installed plugin row, **WHEN** the operator selects **Settings**, **THEN**
+  kandev opens that plugin's settings page.
 - **GIVEN** the marketplace is unreachable or every enabled source reports unhealthy,
   **WHEN** a check on load or through **Check for updates** fails, **THEN** an inline error explains the
   check couldn't complete, while the installed-plugin list, enable/disable/uninstall,
@@ -336,7 +341,7 @@ response but stays `enabled`.
 
 ## Auto-update (opt-in)
 
-Beyond the manual **Update available** affordance, kandev can update installed
+Beyond the manual **Update** affordance, kandev can update installed
 plugins in the background — **off by default, opt-in**. This does not add a new
 install mechanism: an auto-update is exactly the existing verified reinstall of a
 newer catalog `package_url` (`Service.InstallFromURL`), driven automatically
