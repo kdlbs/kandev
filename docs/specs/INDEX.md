@@ -170,6 +170,7 @@ Per-workspace credentials and triage triggers for external services.
 | [worktree-branch-templates](workspaces/worktree-branch-templates.md) | building |
 | [repository-secrets](workspaces/repository-secrets.md) | shipped |
 | [secret-scope-transfer](workspaces/secret-scope-transfer.md) | shipped |
+| [visibility-and-membership](workspaces/membership.md) | draft |
 
 ## costs/ — cost tracking & budgets
 
@@ -285,6 +286,8 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [mcp-session-observability](mcp-session-observability/spec.md) | approved |
 | [subagent-context-persistence](subagent-context-persistence/spec.md) | draft |
 | [auth](auth/spec.md) | building |
+| [auth — roles and scopes](auth/roles-and-scopes.md) | draft |
+| [multi-tenancy](multi-tenancy/spec.md) | draft |
 | [create-local-repository](create-local-repository/spec.md) | shipped |
 | [workflow-cycle-guardrails](workflow-cycle-guardrails/spec.md) | building |
 | [workflow-quorum-decision-recording](workflow-quorum-decision-recording/spec.md) | draft |

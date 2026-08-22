@@ -64,6 +64,13 @@ export function mapWorkspaceItem(ws: WorkspaceItem): WorkspaceState["items"][num
     name: ws.name,
     description: ws.description ?? null,
     owner_id: ws.owner_id,
+    // Team access: visibility plus the caller's resolved role and scopes.
+    // These gate every owner-only control, so dropping them here silently
+    // renders the workspace as read-only to its own owner.
+    visibility: ws.visibility,
+    viewer_role: ws.viewer_role,
+    scopes: ws.scopes,
+    member_count: ws.member_count,
     default_executor_id: ws.default_executor_id ?? null,
     default_environment_id: ws.default_environment_id ?? null,
     default_agent_profile_id: ws.default_agent_profile_id ?? null,

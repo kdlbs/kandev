@@ -131,6 +131,9 @@ func (r *Repository) runMigrations() error {
 	if err := r.ensureRepositorySetsSchema(); err != nil {
 		return err
 	}
+	if err := r.ensureTeamAccessSchema(); err != nil {
+		return err
+	}
 	r.migrate.Apply("task_sessions.execution_profile_id", `ALTER TABLE task_sessions ADD COLUMN execution_profile_id TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("task_sessions.route_generation", `ALTER TABLE task_sessions ADD COLUMN route_generation INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("task_sessions.route_state", `ALTER TABLE task_sessions ADD COLUMN route_state TEXT NOT NULL DEFAULT ''`)

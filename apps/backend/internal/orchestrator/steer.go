@@ -84,6 +84,10 @@ func (s *Service) SteerTask(
 	if err := s.authorizeTaskSessionPair(ctx, taskID, sessionID); err != nil {
 		return nil, err
 	}
+	// Steering interrupts and redirects a running turn: session.prompt.
+	if err := s.authorizeSessionPrompt(ctx, sessionID); err != nil {
+		return nil, err
+	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil || session == nil {
 		return nil, ErrSteerNotEligible

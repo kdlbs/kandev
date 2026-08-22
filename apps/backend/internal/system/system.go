@@ -17,7 +17,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
@@ -181,7 +181,7 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 	// Destructive install-wide mutations require the admin role. With
 	// authentication disabled the synthetic single-user identity is an admin,
 	// so behavior is unchanged; with it enabled, members are read-only here.
-	admin := g.Group("", authn.RequireAdmin())
+	admin := g.Group("", authz.RequireOrgScope(authz.ScopeOrgSettingsManage))
 
 	g.GET("/info", info.Handler(s.Info))
 	if s.Storage != nil {

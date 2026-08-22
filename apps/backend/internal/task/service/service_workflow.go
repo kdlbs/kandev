@@ -11,6 +11,7 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 
 	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/steptelemetry"
@@ -169,7 +170,7 @@ func (s *Service) resolveApprovalNextStep(ctx context.Context, step *wfmodels.Wo
 // UpdateTaskState updates the state of a task, moves it to the matching column,
 // and publishes a task.state_changed event
 func (s *Service) UpdateTaskState(ctx context.Context, id string, state v1.TaskState) (*models.Task, error) {
-	if err := s.authorizeTaskID(ctx, id); err != nil {
+	if err := s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {
 		return nil, err
 	}
 	task, err := s.tasks.GetTask(ctx, id)
@@ -357,7 +358,7 @@ func (s *Service) updateTaskStateIfSessionState(
 
 // UpdateTaskMetadata updates only the metadata of a task (merges with existing)
 func (s *Service) UpdateTaskMetadata(ctx context.Context, id string, metadata map[string]interface{}) (*models.Task, error) {
-	if err := s.authorizeTaskID(ctx, id); err != nil {
+	if err := s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {
 		return nil, err
 	}
 	task, err := s.tasks.GetTask(ctx, id)
@@ -475,7 +476,7 @@ func (s *Service) MoveTaskWithOptions(
 	position int,
 	opts MoveTaskOptions,
 ) (*MoveTaskResult, error) {
-	if err := s.authorizeTaskID(ctx, id); err != nil {
+	if err := s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {
 		return nil, err
 	}
 	task, err := s.tasks.GetTask(ctx, id)

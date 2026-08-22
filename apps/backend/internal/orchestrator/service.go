@@ -504,7 +504,10 @@ type Service struct {
 
 	// sessionAccessCheck enforces per-user workspace scoping on the
 	// session-keyed WS actions. Nil = unscoped. See SetSessionAccessChecker.
-	sessionAccessCheck func(ctx context.Context, sessionID string) error
+	sessionAccessCheck  func(ctx context.Context, sessionID string) error
+	sessionControlCheck func(ctx context.Context, sessionID string) error
+	sessionPromptCheck  func(ctx context.Context, sessionID string) error
+	taskPromptCheck     func(ctx context.Context, taskID string) error
 
 	// taskAccessCheck is the task-keyed sibling of sessionAccessCheck, for
 	// entry points that name a task rather than a session (session.launch,
@@ -1406,6 +1409,11 @@ func (s *Service) authorizeSession(ctx context.Context, sessionID string) error 
 		return nil
 	}
 	return s.sessionAccessCheck(ctx, sessionID)
+}
+
+// SetSessionControlChecker installs the session.control boundary.
+func (s *Service) SetSessionControlChecker(check func(ctx context.Context, sessionID string) error) {
+	s.sessionControlCheck = check
 }
 
 // SessionTaskID returns the task that owns a session, or "" when the session

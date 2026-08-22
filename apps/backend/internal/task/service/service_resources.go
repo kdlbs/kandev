@@ -15,6 +15,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
@@ -103,6 +104,11 @@ func (s *Service) CreateWorkspace(ctx context.Context, req *CreateWorkspaceReque
 		DefaultEnvironmentID:        normalizeOptionalID(req.DefaultEnvironmentID),
 		DefaultAgentProfileID:       normalizeOptionalID(req.DefaultAgentProfileID),
 		DefaultConfigAgentProfileID: normalizeOptionalID(req.DefaultConfigAgentProfileID),
+		Visibility:                  string(s.defaultWorkspaceVisibility(ctx)),
+		// The tenant comes from the creating identity and from nowhere else.
+		// There is no org field on the request on purpose: a caller must not
+		// be able to place a workspace in another tenant.
+		OrgID: callerOrgID(ctx),
 	}
 
 	var kanbanWorkflow *models.Workflow
@@ -129,6 +135,10 @@ func (s *Service) CreateWorkspace(ctx context.Context, req *CreateWorkspaceReque
 		}
 	}
 
+	if err := s.seedWorkspaceOwnerMember(ctx, workspace); err != nil {
+		return nil, err
+	}
+
 	s.publishWorkspaceEvent(ctx, events.WorkspaceCreated, workspace)
 	s.logger.Info("workspace created", zap.String("workspace_id", workspace.ID), zap.String("name", workspace.Name))
 	if kanbanWorkflow != nil {
@@ -144,7 +154,7 @@ func (s *Service) GetWorkspace(ctx context.Context, id string) (*models.Workspac
 	if err != nil {
 		return nil, err
 	}
-	if userID, scoped := callerScope(ctx); scoped && !workspaceVisibleTo(workspace, userID) {
+	if scoped := s.workspaceDecision(ctx, workspace); !scoped.CanRead() {
 		return nil, repoerrors.ErrWorkspaceNotFound
 	}
 	return workspace, nil
@@ -156,8 +166,8 @@ func (s *Service) UpdateWorkspace(ctx context.Context, id string, req *UpdateWor
 	if err != nil {
 		return nil, err
 	}
-	if userID, scoped := callerScope(ctx); scoped && !workspaceVisibleTo(workspace, userID) {
-		return nil, repoerrors.ErrWorkspaceNotFound
+	if err := s.requireWorkspaceManage(ctx, workspace); err != nil {
+		return nil, err
 	}
 
 	if req.Name != nil {
@@ -178,6 +188,9 @@ func (s *Service) UpdateWorkspace(ctx context.Context, id string, req *UpdateWor
 	if req.DefaultConfigAgentProfileID != nil {
 		workspace.DefaultConfigAgentProfileID = normalizeOptionalID(req.DefaultConfigAgentProfileID)
 	}
+	if req.Visibility != nil {
+		workspace.Visibility = string(authz.NormalizeVisibility(*req.Visibility))
+	}
 	workspace.UpdatedAt = time.Now().UTC()
 
 	if err := s.workspaces.UpdateWorkspace(ctx, workspace); err != nil {
@@ -196,8 +209,8 @@ func (s *Service) DeleteWorkspace(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if userID, scoped := callerScope(ctx); scoped && !workspaceVisibleTo(workspace, userID) {
-		return repoerrors.ErrWorkspaceNotFound
+	if err := s.requireWorkspaceManage(ctx, workspace); err != nil {
+		return err
 	}
 	return s.deleteWorkspace(ctx, workspace, nil)
 }
@@ -209,8 +222,8 @@ func (s *Service) DeleteWorkspaceWithConfirmName(ctx context.Context, id, confir
 	if err != nil {
 		return err
 	}
-	if userID, scoped := callerScope(ctx); scoped && !workspaceVisibleTo(workspace, userID) {
-		return repoerrors.ErrWorkspaceNotFound
+	if err := s.requireWorkspaceManage(ctx, workspace); err != nil {
+		return err
 	}
 	if confirmName != workspace.Name {
 		return ErrWorkspaceConfirmNameMismatch
@@ -502,14 +515,14 @@ func (s *Service) ListWorkspaces(ctx context.Context) ([]*models.Workspace, erro
 	if err != nil {
 		return nil, err
 	}
-	return filterWorkspacesForCaller(ctx, workspaces), nil
+	return s.filterWorkspacesForCaller(ctx, workspaces), nil
 }
 
 // Workflow operations
 
 // CreateWorkflow creates a new workflow
 func (s *Service) CreateWorkflow(ctx context.Context, req *CreateWorkflowRequest) (*models.Workflow, error) {
-	if err := s.authorizeWorkspaceID(ctx, req.WorkspaceID); err != nil {
+	if err := s.AuthorizeWorkspaceScope(ctx, req.WorkspaceID, authz.ScopeRepositoryManage); err != nil {
 		return nil, err
 	}
 	workflow := &models.Workflow{
@@ -753,7 +766,7 @@ func (s *Service) createRepository(
 	localPath string,
 	resolveProvider bool,
 ) (*models.Repository, error) {
-	if err := s.authorizeWorkspaceID(ctx, req.WorkspaceID); err != nil {
+	if err := s.AuthorizeWorkspaceScope(ctx, req.WorkspaceID, authz.ScopeRepositoryManage); err != nil {
 		return nil, err
 	}
 	sourceType := req.SourceType
@@ -1054,7 +1067,7 @@ func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRe
 		return nil, err
 	}
 	if repository != nil {
-		if err := s.authorizeWorkspaceID(ctx, repository.WorkspaceID); err != nil {
+		if err := s.AuthorizeWorkspaceScope(ctx, repository.WorkspaceID, authz.ScopeRepositoryManage); err != nil {
 			return nil, repoerrors.ErrRepositoryNotFound
 		}
 	}
@@ -1224,7 +1237,10 @@ func (s *Service) DeleteRepository(ctx context.Context, id string) error {
 		return err
 	}
 	if repository != nil {
-		if err := s.authorizeWorkspaceID(ctx, repository.WorkspaceID); err != nil {
+		if err := s.AuthorizeWorkspaceScope(ctx, repository.WorkspaceID, authz.ScopeRepositoryManage); err != nil {
+			if IsForbidden(err) {
+				return err
+			}
 			return repoerrors.ErrRepositoryNotFound
 		}
 	}

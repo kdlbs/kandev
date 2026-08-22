@@ -26,6 +26,11 @@ type SubscriptionAccessPolicy struct {
 // pre-auth row, delivered to everyone).
 type WorkspaceOwnerResolver func(ctx context.Context, workspaceID string) (string, error)
 
+// WorkspaceReadersResolver resolves the set of user IDs that may currently
+// read a workspace. An empty, non-nil slice means "nobody", which is a real
+// answer and must not be treated as "everybody".
+type WorkspaceReadersResolver func(ctx context.Context, workspaceID string) ([]string, error)
+
 // AuthPolicy groups the gateway's auth hooks.
 type AuthPolicy struct {
 	// Enforced reports whether authentication is currently required
@@ -44,6 +49,14 @@ type AuthPolicy struct {
 	Subscriptions SubscriptionAccessPolicy
 	// WorkspaceOwner powers BroadcastToWorkspace owner routing.
 	WorkspaceOwner WorkspaceOwnerResolver
+	// WorkspaceReaders resolves every user that can currently read a
+	// workspace: its owner plus explicit members plus, when the workspace is
+	// visible to the organization, that organization's non-guest users.
+	//
+	// Owner-only routing predates team access and would silently deliver a
+	// shared board's updates to nobody but its owner, so this is the resolver
+	// BroadcastToWorkspace uses when it is wired.
+	WorkspaceReaders WorkspaceReadersResolver
 	// ActionEnvironment gates dispatched actions that name a task environment
 	// rather than a task or session — the user-shell actions, which treat
 	// task_id as optional. Kept off SubscriptionAccessPolicy because there is
@@ -163,4 +176,19 @@ func clientMayReceive(client *Client, owner string) bool {
 		return true
 	}
 	return client.identity.UserID == owner
+}
+
+// clientMayReceiveAny reports whether a client is one of the users allowed to
+// receive a workspace broadcast.
+//
+// Synthetic identities (authentication disabled) and identity-less clients
+// still receive everything, preserving pre-auth behavior. An authenticated
+// client receives only when its user is in the set, so a member who just lost
+// access stops receiving on the next broadcast rather than at disconnect.
+func clientMayReceiveAny(client *Client, allowed map[string]struct{}) bool {
+	if client.identity.Synthetic || client.identity.UserID == "" {
+		return true
+	}
+	_, ok := allowed[client.identity.UserID]
+	return ok
 }

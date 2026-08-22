@@ -18,6 +18,7 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
@@ -186,7 +187,7 @@ func foundOutcomeFor(task *models.Task) CreateTaskOutcome {
 // call returns, so settlement is their responsibility (see the spec's
 // "Settlement call site" section).
 func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (CreateTaskResult, error) {
-	if err := s.authorizeWorkspaceID(ctx, req.WorkspaceID); err != nil {
+	if err := s.AuthorizeWorkspaceScope(ctx, req.WorkspaceID, authz.ScopeTaskWrite); err != nil {
 		return CreateTaskResult{}, err
 	}
 
@@ -1536,7 +1537,7 @@ func (s *Service) hydrateTaskRelations(ctx context.Context, task *models.Task) {
 
 // UpdateTask updates an existing task and publishes a task.updated event
 func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequest) (*models.Task, error) {
-	if err := s.authorizeTaskID(ctx, id); err != nil {
+	if err := s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {
 		return nil, err
 	}
 	if req.Title != nil {
@@ -1905,7 +1906,7 @@ func (s *Service) RestoreTaskMessageRollback(
 func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 	start := time.Now()
 
-	if err := s.authorizeTaskID(ctx, id); err != nil {
+	if err := s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {
 		return err
 	}
 	// 1. Get task and verify it exists
@@ -2131,7 +2132,7 @@ func (s *Service) DeleteTaskWithReason(ctx context.Context, id, reason string) e
 }
 
 func (s *Service) deleteTaskWithReason(ctx context.Context, id, reason string) error {
-	if err := s.authorizeTaskID(ctx, id); err != nil {
+	if err := s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {
 		return err
 	}
 	_, err := s.deleteTaskWithReasonAndDBDelete(ctx, id, reason, models.TaskResourceCleanupTriggerDelete, func(ctx context.Context, id string) (bool, error) {

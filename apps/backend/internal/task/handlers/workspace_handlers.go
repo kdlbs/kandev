@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/dto"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -54,9 +55,10 @@ func (h *WorkspaceHandlers) listWorkspaces(ctx context.Context) (dto.ListWorkspa
 	if err != nil {
 		return dto.ListWorkspacesResponse{}, err
 	}
+	access := h.service.ProjectWorkspaceAccess(ctx, workspaces)
 	dtos := make([]dto.WorkspaceDTO, 0, len(workspaces))
 	for _, w := range workspaces {
-		dtos = append(dtos, dto.FromWorkspace(w))
+		dtos = append(dtos, dto.FromWorkspaceWithAccess(w, access.Decision(w.ID), access.MemberCounts[w.ID]))
 	}
 	return dto.ListWorkspacesResponse{Workspaces: dtos, Total: len(dtos)}, nil
 }
@@ -116,7 +118,7 @@ func (h *WorkspaceHandlers) httpGetWorkspace(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "workspace not found")
 		return
 	}
-	c.JSON(http.StatusOK, dto.FromWorkspace(workspace))
+	c.JSON(http.StatusOK, h.withAccess(c.Request.Context(), workspace))
 }
 
 type httpUpdateWorkspaceRequest struct {
@@ -248,7 +250,7 @@ func (h *WorkspaceHandlers) wsGetWorkspace(ctx context.Context, msg *ws.Message)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Workspace not found", nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, dto.FromWorkspace(workspace))
+	return ws.NewResponse(msg.ID, msg.Action, h.withAccess(ctx, workspace))
 }
 
 type wsUpdateWorkspaceRequest struct {
@@ -316,4 +318,11 @@ func (h *WorkspaceHandlers) wsDeleteWorkspaceError(msg *ws.Message, err error) (
 	default:
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to delete workspace", nil)
 	}
+}
+
+// withAccess projects one workspace together with the caller's resolved role
+// and scopes, so a detail response gates the UI exactly like a list response.
+func (h *WorkspaceHandlers) withAccess(ctx context.Context, workspace *models.Workspace) dto.WorkspaceDTO {
+	access := h.service.ProjectWorkspaceAccess(ctx, []*models.Workspace{workspace})
+	return dto.FromWorkspaceWithAccess(workspace, access.Decision(workspace.ID), access.MemberCounts[workspace.ID])
 }

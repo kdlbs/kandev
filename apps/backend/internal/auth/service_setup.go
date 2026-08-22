@@ -64,5 +64,14 @@ func (s *Service) Setup(ctx context.Context, email, password, displayName, userA
 	if s.log != nil {
 		s.log.Info("authentication setup completed", zap.String("admin_email", email))
 	}
+	// The setup wizard runs after the boot-time tenancy migration, so the
+	// admin it creates has no organization and no operator tier yet. Without
+	// this an instance that enables both features at once would come up with
+	// organizations and nobody able to manage them.
+	if s.adminCreated != nil {
+		if err := s.adminCreated(ctx, adminID); err != nil && s.log != nil {
+			s.log.Warn("failed to place the new admin in an organization", zap.Error(err))
+		}
+	}
 	return user, token, nil
 }

@@ -92,6 +92,8 @@
   "office:telegram": "Brand or product name, spelled the same in every language.",
   "office:wakeHeartbeat": "Technical term kept in English across localized developer tooling.",
   "office:webhook": "Technical term kept in English across localized developer tooling.",
+  "orgs:adminEmail": "Loanword spelled identically in Portuguese.",
+  "orgs:namePlaceholder": "Fictional company name used as an example; brand nouns are spelled the same in every language.",
   "plugins:manifestWebhooks": "Technical term kept in English across localized developer tooling.",
   "plugins:repo": "Technical term kept in English across localized developer tooling.",
   "settings:destinationGlobal": "Technical term kept in English across localized developer tooling.",

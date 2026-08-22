@@ -36,6 +36,8 @@ import { useSettingsSaveContributor } from "@/components/settings/settings-save-
 import { SettingsTarget } from "@/components/settings/settings-target";
 import { workspaceDiscoveryTarget } from "@/lib/settings-discovery/dynamic-targets";
 import { WorkspaceSectionHeader } from "@/components/settings/workspaces/workspace-section-header";
+import { WorkspaceTeamAccessCard } from "@/components/settings/workspaces/workspace-team-access-card";
+import { hasScope, SCOPE, type WorkspaceVisibility } from "@/lib/types/team-access";
 
 type WorkspaceEditClientProps = {
   workspaceId: string;
@@ -123,6 +125,7 @@ function SelectField({
 }
 
 type WorkspaceSettingsCardProps = {
+  canManage: boolean;
   workspaceId: string;
   workspaceNameDraft: string;
   nameIsDirty: boolean;
@@ -139,6 +142,7 @@ type WorkspaceSettingsCardProps = {
 };
 
 function WorkspaceSettingsCard({
+  canManage,
   workspaceId,
   workspaceNameDraft,
   nameIsDirty,
@@ -177,6 +181,7 @@ function WorkspaceSettingsCard({
             <Input
               id="workspace-name"
               value={workspaceNameDraft}
+              disabled={!canManage}
               data-settings-dirty={nameIsDirty}
               onChange={(e) => onNameChange(e.target.value)}
             />
@@ -210,6 +215,7 @@ function WorkspaceSettingsCard({
 }
 
 type DeleteWorkspaceCardProps = {
+  canManage: boolean;
   workspaceName: string;
   deleteDialogOpen: boolean;
   setDeleteDialogOpen: (open: boolean) => void;
@@ -219,6 +225,7 @@ type DeleteWorkspaceCardProps = {
 };
 
 function DeleteWorkspaceCard({
+  canManage,
   workspaceName,
   deleteDialogOpen,
   setDeleteDialogOpen,
@@ -227,6 +234,9 @@ function DeleteWorkspaceCard({
   onDelete,
 }: DeleteWorkspaceCardProps) {
   const { t } = useTranslation();
+  // Deleting a workspace is owner-only. The API refuses a member either way;
+  // hiding the card keeps the UI from offering an action it will reject.
+  if (!canManage) return null;
   return (
     <>
       <Card className="border-destructive">
@@ -523,6 +533,9 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
     handleDiscard,
     handleDeleteWorkspace,
   } = useWorkspaceEditForm(workspace);
+  // Owner-only controls are gated on the server-issued scope, never on an
+  // owner-id comparison, so the UI and the API agree on one answer.
+  const canManage = hasScope(workspace.scopes, SCOPE.workspaceManage);
   const { t } = useTranslation();
 
   useSettingsSaveContributor({
@@ -544,6 +557,7 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
       <WorkspaceSectionHeader tab="overview" description={t("workspaces:manageWorkspaceDetails")} />
       <Separator />
       <WorkspaceSettingsCard
+        canManage={canManage}
         workspaceId={currentWorkspace.id}
         workspaceNameDraft={workspaceNameDraft}
         nameIsDirty={workspaceNameDraft.trim() !== savedState.name}
@@ -559,7 +573,21 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
         agentProfiles={agentProfiles}
       />
       <Separator />
+      {/*
+        Reads the live store item rather than the form's captured snapshot:
+        scopes and visibility arrive with hydration, which can land after this
+        form mounts, and a snapshot would freeze the owner out of their own
+        workspace.
+      */}
+      <WorkspaceTeamAccessCard
+        workspaceId={workspace.id}
+        ownerId={workspace.owner_id ?? ""}
+        visibility={(workspace.visibility as WorkspaceVisibility) ?? "private"}
+        scopes={workspace.scopes}
+      />
+      <Separator />
       <DeleteWorkspaceCard
+        canManage={canManage}
         workspaceName={currentWorkspace.name}
         deleteDialogOpen={deleteDialogOpen}
         setDeleteDialogOpen={setDeleteDialogOpen}

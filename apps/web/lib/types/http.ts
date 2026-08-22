@@ -241,6 +241,13 @@ export type Workspace = {
   name: string;
   description?: string | null;
   owner_id: string;
+  /** "private" (owner + explicit members) or "org" (every non-guest user). */
+  visibility?: string;
+  /** The requesting user's role here; drives owner-only controls. */
+  viewer_role?: string;
+  /** Scopes the requesting user holds here. The server is authoritative. */
+  scopes?: string[];
+  member_count?: number;
   default_executor_id?: string | null;
   default_environment_id?: string | null;
   default_agent_profile_id?: AgentProfileId | null;

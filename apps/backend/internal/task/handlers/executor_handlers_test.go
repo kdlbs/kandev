@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/task/repository"
 	"net/http"
 	"testing"
 
@@ -19,6 +20,9 @@ import (
 
 // executorRepo backs both the executor and executor-profile handler tests.
 type executorRepo struct {
+	// Membership is not exercised by this fake; the embedded default
+	// reports no membership, which is the narrower answer.
+	repository.UnsupportedWorkspaceMembers
 	mockRepository
 
 	executors []*models.Executor

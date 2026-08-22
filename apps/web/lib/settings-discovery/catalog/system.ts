@@ -146,6 +146,14 @@ export const SYSTEM_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = [
     order: 630,
   },
   {
+    id: "system-organizations",
+    kind: "page",
+    labelKey: "orgs:navOrganizations",
+    groupId: "system",
+    href: "/settings/system/organizations",
+    order: 631,
+  },
+  {
     id: "system-updates",
     kind: "page",
     labelKey: "system:navUpdates",

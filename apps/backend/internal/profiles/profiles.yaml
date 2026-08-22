@@ -54,6 +54,15 @@ features:
     dev:  "false"
     e2e:  "false"
 
+  # Organizations: a tenant boundary above users. Requires KANDEV_FEATURES_AUTH;
+  # the backend refuses to start with this on and auth off. Off everywhere until
+  # the runtime-isolation work (per-org filesystem roots, per-org agent
+  # credentials, tenant-pinned executors) lands.
+  KANDEV_FEATURES_MULTI_TENANCY:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
   # Dynamic agent profiles and provider-error routing. Off in every shipped
   # profile until the complete guarded implementation is ready.
   KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING:

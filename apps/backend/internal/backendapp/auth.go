@@ -92,7 +92,8 @@ func gatewayAuthPolicy(authSvc *auth.Service, taskSvc *taskservice.Service, task
 			Task:    taskSvc.AuthorizeTaskAccess,
 			Session: taskSvc.AuthorizeSessionAccess,
 		},
-		WorkspaceOwner: newWorkspaceOwnerResolver(taskRepo),
+		WorkspaceOwner:   newWorkspaceOwnerResolver(taskRepo),
+		WorkspaceReaders: taskSvc.WorkspaceReaderIDs,
 		// The user-shell actions name a task environment and treat task_id as
 		// optional, so the dispatch backstop needs an environment-keyed check.
 		ActionEnvironment: taskSvc.AuthorizeEnvironmentAccess,

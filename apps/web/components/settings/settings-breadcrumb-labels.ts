@@ -62,6 +62,7 @@ const SEGMENT_LABEL_KEYS: Record<string, string> = {
   executors: "common:executors",
   "external-mcp": "common:externalMcp",
   "feature-toggles": "system:navFeatureToggles",
+  organizations: "orgs:navOrganizations",
   integrations: "common:integrations",
   "keyboard-shortcuts": "settings:keyboardShortcuts",
   layouts: "settings:layouts",

@@ -87,6 +87,12 @@ type Manager struct {
 	// surfaces (opt-in auth). Nil = no scoping. See SetSessionAccessChecker.
 	sessionAccessCheck func(ctx context.Context, sessionID string) error
 
+	// sessionExecCheck enforces the session.exec scope on surfaces that hand
+	// the caller a shell, a file write, or a port preview. Reading a
+	// transcript and running a command in the worktree are different
+	// permissions, so they get different checks.
+	sessionExecCheck func(ctx context.Context, sessionID string) error
+
 	// environmentAccessCheck is the environment-keyed sibling of
 	// sessionAccessCheck, used by the terminal environment-shell route which
 	// resolves executions by environment ID. Nil = no scoping.
@@ -435,6 +441,22 @@ func (m *Manager) SetSessionAccessChecker(check func(ctx context.Context, sessio
 	m.sessionAccessCheck = check
 }
 
+// SetSessionExecAccessChecker installs the session.exec check used by the
+// terminal, shell, file-write, VS Code and port-preview surfaces.
+func (m *Manager) SetSessionExecAccessChecker(check func(ctx context.Context, sessionID string) error) {
+	m.sessionExecCheck = check
+}
+
+// CheckSessionExecAccess authorizes an execution-capable session operation.
+// It falls back to the read check when no exec checker is wired, so an
+// unwired build is no more permissive than before this scope existed.
+func (m *Manager) CheckSessionExecAccess(ctx context.Context, sessionID string) error {
+	if m.sessionExecCheck == nil {
+		return m.CheckSessionAccess(ctx, sessionID)
+	}
+	return m.sessionExecCheck(ctx, sessionID)
+}
+
 // SetAttachmentReader wires the backend attachment reader used by prompt
 // dispatch. Claimed descriptors are streamed into the active agentctl
 // session immediately before an ACP prompt is sent.
@@ -541,4 +563,16 @@ func (m *Manager) DockerClientProvider() func() *docker.Client {
 		}
 		return dockerExec.Client()
 	}
+}
+
+// execAccessCheck returns the check that execution-capable surfaces must pass.
+//
+// It prefers the session.exec checker and falls back to the plain access check
+// when no scoped checker is wired. The fallback is never weaker than the
+// behavior before session.exec existed; production always wires both.
+func (m *Manager) execAccessCheck() func(ctx context.Context, sessionID string) error {
+	if m.sessionExecCheck != nil {
+		return m.sessionExecCheck
+	}
+	return m.sessionAccessCheck
 }

@@ -3,6 +3,7 @@ package dto
 import (
 	"time"
 
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/task/statussummary"
@@ -34,6 +35,7 @@ type WorkspaceDTO struct {
 	Name                        string    `json:"name"`
 	Description                 *string   `json:"description,omitempty"`
 	OwnerID                     string    `json:"owner_id"`
+	Visibility                  string    `json:"visibility"`
 	DefaultExecutorID           *string   `json:"default_executor_id,omitempty"`
 	DefaultEnvironmentID        *string   `json:"default_environment_id,omitempty"`
 	DefaultAgentProfileID       *string   `json:"default_agent_profile_id,omitempty"`
@@ -43,6 +45,13 @@ type WorkspaceDTO struct {
 	OfficeWorkflowID            string    `json:"office_workflow_id,omitempty"`
 	CreatedAt                   time.Time `json:"created_at"`
 	UpdatedAt                   time.Time `json:"updated_at"`
+
+	// ViewerRole and Scopes describe what the *requesting* user may do here.
+	// The frontend gates every control on Scopes rather than comparing the
+	// current user ID to OwnerID, so permission logic lives in one place.
+	ViewerRole  string   `json:"viewer_role,omitempty"`
+	Scopes      []string `json:"scopes,omitempty"`
+	MemberCount int      `json:"member_count,omitempty"`
 }
 
 type RepositoryDTO struct {
@@ -619,6 +628,7 @@ func FromWorkspace(workspace *models.Workspace) WorkspaceDTO {
 		Name:                        workspace.Name,
 		Description:                 description,
 		OwnerID:                     workspace.OwnerID,
+		Visibility:                  string(authz.NormalizeVisibility(workspace.Visibility)),
 		DefaultExecutorID:           workspace.DefaultExecutorID,
 		DefaultEnvironmentID:        workspace.DefaultEnvironmentID,
 		DefaultAgentProfileID:       workspace.DefaultAgentProfileID,
@@ -629,6 +639,16 @@ func FromWorkspace(workspace *models.Workspace) WorkspaceDTO {
 		CreatedAt:                   workspace.CreatedAt,
 		UpdatedAt:                   workspace.UpdatedAt,
 	}
+}
+
+// FromWorkspaceWithAccess projects a workspace together with the requesting
+// user's resolved role and scopes.
+func FromWorkspaceWithAccess(workspace *models.Workspace, decision authz.Decision, memberCount int) WorkspaceDTO {
+	out := FromWorkspace(workspace)
+	out.ViewerRole = string(decision.Role)
+	out.Scopes = decision.Scopes.Strings()
+	out.MemberCount = memberCount
+	return out
 }
 
 func FromRepository(repository *models.Repository) RepositoryDTO {

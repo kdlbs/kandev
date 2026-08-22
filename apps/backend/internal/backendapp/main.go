@@ -21,8 +21,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	authhttpmw "github.com/kandev/kandev/internal/auth/httpmw"
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/entityrefs"
+	"github.com/kandev/kandev/internal/org"
 	"go.uber.org/zap"
 
 	// Common packages
@@ -312,6 +314,14 @@ func setBuildInfo(build BuildInfo) {
 
 // run initializes all services and runs the server. Returns false on fatal startup error.
 func run(cfg *config.Config, log *logger.Logger, cleanups *[]func() error, runCleanups func()) bool {
+	// Organizations without authentication is the one configuration that
+	// cannot work: a tenant boundary needs identities to belong to it. Refuse
+	// at startup rather than booting an instance whose boundary is decorative.
+	if err := org.ValidateStartup(cfg.Features.MultiTenancy, cfg.Features.Auth); err != nil {
+		log.Error("Invalid feature configuration", zap.Error(err))
+		return false
+	}
+
 	addCleanup := func(fn func() error) { *cleanups = append(*cleanups, fn) }
 
 	// 3. Create context with cancellation
@@ -406,6 +416,30 @@ func startServices( //nolint:cyclop
 		return false
 	}
 	warnIfExposedWithoutAuth(cfg, services.Auth, log)
+	taskservice.SetTenancyEnforced(cfg.Features.MultiTenancy)
+	if services.Org != nil && services.Org.Enabled() {
+		services.Auth.SetAdminCreatedHook(services.Org.ClaimSetupAdmin)
+		services.Org.SetFirstAdminCreator(services.Auth.CreateUserInOrg)
+		// Workspace fan-out needs to know which organization a user belongs
+		// to, so an org-visible workspace reaches its own org only.
+		services.Task.SetUserOrgResolver(func(ctx context.Context, userID string) (string, error) {
+			user, err := repos.UserAccounts.GetUser(ctx, userID)
+			if err != nil || user == nil {
+				return "", err
+			}
+			return user.OrgID, nil
+		})
+	}
+	if services.Org != nil && services.Org.Enabled() {
+		// A suspended organization fails every session and token closed, which
+		// is what makes suspension a real lever rather than a label. An
+		// unreadable status fails closed too: an org we cannot verify does not
+		// get to keep serving requests.
+		services.Auth.SetOrgStatusChecker(func(ctx context.Context, orgID string) bool {
+			record, err := services.Org.Get(ctx, orgID)
+			return err == nil && record.Active()
+		})
+	}
 
 	if err := runInitialAgentSetup(ctx, services.User, agentSettingsController, log); err != nil {
 		// Agent registry seeding is a hard prerequisite for every
@@ -536,7 +570,16 @@ func startAgentInfrastructure(
 	// port reverse proxies (bare lookup + cache) call CheckSessionAccess at
 	// the handler.
 	lifecycleMgr.SetSessionAccessChecker(services.Task.AuthorizeSessionAccess)
-	lifecycleMgr.SetEnvironmentAccessChecker(services.Task.AuthorizeEnvironmentAccess)
+	// Execution surfaces (terminal, shell, file writes, VS Code, port
+	// previews) require session.exec, which a viewer does not hold.
+	lifecycleMgr.SetSessionExecAccessChecker(func(ctx context.Context, sessionID string) error {
+		return services.Task.AuthorizeSessionScope(ctx, sessionID, authz.ScopeSessionExec)
+	})
+	// The environment-keyed terminal route reaches an execution the same way
+	// the session-keyed ones do, so it needs the same scope.
+	lifecycleMgr.SetEnvironmentAccessChecker(func(ctx context.Context, environmentID string) error {
+		return services.Task.AuthorizeEnvironmentScope(ctx, environmentID, authz.ScopeSessionExec)
+	})
 	log.Info("Workspace info provider configured for session recovery")
 
 	// TODO(task-model-unification Phase 2, ADR 0004): wire agentruntime.New(lifecycleMgr)
@@ -2048,8 +2091,11 @@ func buildHTTPServer(
 	// packages are importable: the task service's not-found sentinel becomes
 	// the secrets sentinel (404), while raw lookup/storage errors pass through
 	// unclassified (sanitized 500).
+	// Workspace secrets are a shared credential the workspace owner is
+	// accountable for, so they require secret.manage rather than mere reach:
+	// a collaborator contributes to the workspace, they do not hold its keys.
 	secretsSvc.SetWorkspaceAuthorizer(func(ctx context.Context, workspaceID string) error {
-		err := services.Task.AuthorizeWorkspaceAccess(ctx, workspaceID)
+		err := services.Task.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeSecretManage)
 		if errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
 			return secrets.ErrWorkspaceAccessDenied
 		}

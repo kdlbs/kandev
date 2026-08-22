@@ -307,6 +307,17 @@ func (h *Hub) setAuthPolicy(policy AuthPolicy) {
 // event never disappears entirely because ownership could not be resolved;
 // it only stops crossing user boundaries once ownership is known.
 func (h *Hub) BroadcastToWorkspace(workspaceID string, msg *ws.Message) {
+	// Prefer the reach set: with team access a workspace is readable by its
+	// members and, when it is org-visible, by the whole organization. Routing
+	// to the owner alone would deliver a shared board's updates to nobody but
+	// the person who happened to create it.
+	if readers := h.authPolicy.WorkspaceReaders; readers != nil && workspaceID != "" {
+		recipients, err := readers(h.DispatchContext(), workspaceID)
+		if err == nil {
+			h.broadcastToUsers(recipients, msg)
+			return
+		}
+	}
 	resolver := h.authPolicy.WorkspaceOwner
 	if resolver == nil || workspaceID == "" {
 		h.Broadcast(msg)
@@ -318,6 +329,30 @@ func (h *Hub) BroadcastToWorkspace(workspaceID string, msg *ws.Message) {
 		return
 	}
 	h.broadcastToOwner(owner, msg)
+}
+
+// broadcastToUsers delivers to exactly the given user IDs. An empty set
+// delivers to nobody: "no one may read this workspace" is a real answer, and
+// falling back to a global broadcast would invert it.
+func (h *Hub) broadcastToUsers(userIDs []string, msg *ws.Message) {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		h.logger.Error("Failed to marshal workspace broadcast", zap.Error(err))
+		return
+	}
+	allowed := make(map[string]struct{}, len(userIDs))
+	for _, id := range userIDs {
+		allowed[id] = struct{}{}
+	}
+	h.mu.RLock()
+	recipients := make([]*Client, 0, len(h.clients))
+	for client := range h.clients {
+		if clientMayReceiveAny(client, allowed) {
+			recipients = append(recipients, client)
+		}
+	}
+	h.mu.RUnlock()
+	h.sendToClients(data, recipients, msg.Action)
 }
 
 // BroadcastToWorkspaceOrDrop is the fail-closed sibling of

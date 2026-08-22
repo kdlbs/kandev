@@ -3,9 +3,18 @@
   "areas": [
     {
       "id": "install-and-launch",
-      "audiences": ["user", "operator"],
+      "audiences": [
+        "user",
+        "operator"
+      ],
       "stability": "stable",
-      "docs": ["index", "use-kandev", "cli", "desktop-app", "run-as-a-service"],
+      "docs": [
+        "index",
+        "use-kandev",
+        "cli",
+        "desktop-app",
+        "run-as-a-service"
+      ],
       "sources": [
         "apps/cli/bin/native-shim.js",
         "apps/backend/internal/launcher/launcher.go",
@@ -18,9 +27,16 @@
     },
     {
       "id": "backend-configuration",
-      "audiences": ["operator", "contributor"],
+      "audiences": [
+        "operator",
+        "contributor"
+      ],
       "stability": "stable",
-      "docs": ["configuration", "operations", "cli"],
+      "docs": [
+        "configuration",
+        "operations",
+        "cli"
+      ],
       "sources": [
         "apps/backend/internal/common/config/config.go",
         "apps/backend/internal/agentctl/server/config/config.go",
@@ -34,9 +50,15 @@
     },
     {
       "id": "workspaces-and-repositories",
-      "audiences": ["user"],
+      "audiences": [
+        "user"
+      ],
       "stability": "stable",
-      "docs": ["use-kandev", "tasks-and-workflows", "configuration"],
+      "docs": [
+        "use-kandev",
+        "tasks-and-workflows",
+        "configuration"
+      ],
       "sources": [
         "apps/backend/internal/task/handlers/workspace_handlers.go",
         "apps/web/components/app-sidebar/app-sidebar-workspace-picker.tsx"
@@ -45,12 +67,20 @@
         "apps/backend/internal/task/handlers/workspace_handlers_test.go",
         "apps/web/components/app-sidebar/app-sidebar-workspace-picker.test.tsx"
       ],
-      "settingsRoutes": ["/settings/workspace", "/settings/workspaces"],
-      "mcpTools": ["list_repositories_kandev", "list_workspaces_kandev"]
+      "settingsRoutes": [
+        "/settings/workspace",
+        "/settings/workspaces"
+      ],
+      "mcpTools": [
+        "list_repositories_kandev",
+        "list_workspaces_kandev"
+      ]
     },
     {
       "id": "tasks-and-workflows",
-      "audiences": ["user"],
+      "audiences": [
+        "user"
+      ],
       "stability": "stable",
       "docs": [
         "tasks-and-workflows",
@@ -82,9 +112,15 @@
     },
     {
       "id": "office-and-quorum",
-      "audiences": ["user", "operator"],
+      "audiences": [
+        "user",
+        "operator"
+      ],
       "stability": "beta",
-      "docs": ["automation-and-mcp", "tasks-and-workflows"],
+      "docs": [
+        "automation-and-mcp",
+        "tasks-and-workflows"
+      ],
       "sources": [
         "apps/backend/internal/mcp/server/agent_decision_tool.go",
         "apps/backend/internal/office/dashboard/agent_decisions.go"
@@ -93,13 +129,21 @@
         "apps/backend/internal/mcp/server/agent_decision_tool_test.go",
         "apps/backend/internal/office/dashboard/agent_decisions_test.go"
       ],
-      "mcpTools": ["record_step_decision_kandev"]
+      "mcpTools": [
+        "record_step_decision_kandev"
+      ]
     },
     {
       "id": "task-lifecycle",
-      "audiences": ["user"],
+      "audiences": [
+        "user"
+      ],
       "stability": "stable",
-      "docs": ["tasks-and-workflows", "coordination", "git-operations"],
+      "docs": [
+        "tasks-and-workflows",
+        "coordination",
+        "git-operations"
+      ],
       "sources": [
         "apps/backend/internal/orchestrator/task_operations.go",
         "apps/backend/internal/mcp/handlers/config_task_handlers.go",
@@ -146,7 +190,9 @@
     },
     {
       "id": "sessions-and-coordination",
-      "audiences": ["user"],
+      "audiences": [
+        "user"
+      ],
       "stability": "stable",
       "docs": [
         "sessions-and-review",
@@ -179,9 +225,15 @@
     },
     {
       "id": "plans-walkthroughs-and-review",
-      "audiences": ["user"],
+      "audiences": [
+        "user"
+      ],
       "stability": "stable",
-      "docs": ["sessions-and-review", "developer-tools", "automation-and-mcp"],
+      "docs": [
+        "sessions-and-review",
+        "developer-tools",
+        "automation-and-mcp"
+      ],
       "sources": [
         "apps/backend/internal/mcp/handlers/review.go",
         "apps/web/components/review/review-dialog.tsx",
@@ -205,9 +257,15 @@
     },
     {
       "id": "developer-workbench-and-git",
-      "audiences": ["user"],
+      "audiences": [
+        "user"
+      ],
       "stability": "stable",
-      "docs": ["developer-tools", "git-operations", "sessions-and-review"],
+      "docs": [
+        "developer-tools",
+        "git-operations",
+        "sessions-and-review"
+      ],
       "sources": [
         "apps/web/components/session-commands.tsx",
         "apps/web/components/task/chat/messages/shell-output-disclosure.tsx",
@@ -225,9 +283,16 @@
     },
     {
       "id": "language-server-intelligence",
-      "audiences": ["user", "operator"],
+      "audiences": [
+        "user",
+        "operator"
+      ],
       "stability": "experimental",
-      "docs": ["developer-tools", "feature-status", "configuration"],
+      "docs": [
+        "developer-tools",
+        "feature-status",
+        "configuration"
+      ],
       "sources": [
         "apps/backend/internal/gateway/websocket/lsp_handler.go",
         "apps/backend/internal/agentctl/server/api/lsp.go",
@@ -245,9 +310,15 @@
     },
     {
       "id": "agents-profiles-and-prompts",
-      "audiences": ["user"],
+      "audiences": [
+        "user"
+      ],
       "stability": "stable",
-      "docs": ["agents-and-profiles", "configuration", "add-agent-cli"],
+      "docs": [
+        "agents-and-profiles",
+        "configuration",
+        "add-agent-cli"
+      ],
       "sources": [
         "apps/backend/internal/profiles/profiles.go",
         "apps/web/app/settings/agents/page.tsx",
@@ -275,9 +346,17 @@
     },
     {
       "id": "executors-and-environments",
-      "audiences": ["user", "operator"],
+      "audiences": [
+        "user",
+        "operator"
+      ],
       "stability": "stable",
-      "docs": ["executors", "remote-cloud-environment", "docker", "k8s"],
+      "docs": [
+        "executors",
+        "remote-cloud-environment",
+        "docker",
+        "k8s"
+      ],
       "sources": [
         "apps/backend/internal/agent/executor/executor.go",
         "apps/web/app/settings/executors/page.tsx"
@@ -286,7 +365,10 @@
         "apps/web/e2e/tests/docker/docker-launch.spec.ts",
         "apps/web/e2e/tests/ssh/executor-crud.spec.ts"
       ],
-      "settingsRoutes": ["/settings/executor/new", "/settings/executors"],
+      "settingsRoutes": [
+        "/settings/executor/new",
+        "/settings/executors"
+      ],
       "mcpTools": [
         "create_executor_profile_kandev",
         "delete_executor_profile_kandev",
@@ -297,9 +379,15 @@
     },
     {
       "id": "provider-integrations",
-      "audiences": ["user", "operator"],
+      "audiences": [
+        "user",
+        "operator"
+      ],
       "stability": "stable",
-      "docs": ["integrations", "configuration"],
+      "docs": [
+        "integrations",
+        "configuration"
+      ],
       "sources": [
         "apps/web/components/app-sidebar/sections/integrations-section.tsx",
         "apps/backend/internal/integrations/workspacescope/workspacescope.go",
@@ -338,9 +426,16 @@
     },
     {
       "id": "automations-and-external-mcp",
-      "audiences": ["user", "operator"],
+      "audiences": [
+        "user",
+        "operator"
+      ],
       "stability": "stable",
-      "docs": ["automation-and-mcp", "integrations", "workflow-tips"],
+      "docs": [
+        "automation-and-mcp",
+        "integrations",
+        "workflow-tips"
+      ],
       "sources": [
         "apps/backend/internal/automation/service.go",
         "apps/backend/internal/mcp/server/server.go"
@@ -349,12 +444,20 @@
         "apps/backend/internal/automation/service_test.go",
         "apps/backend/internal/mcp/server/server_test.go"
       ],
-      "settingsRoutes": ["/settings/automations", "/settings/external-mcp"],
-      "mcpTools": ["get_mcp_config_kandev", "update_mcp_config_kandev"]
+      "settingsRoutes": [
+        "/settings/automations",
+        "/settings/external-mcp"
+      ],
+      "mcpTools": [
+        "get_mcp_config_kandev",
+        "update_mcp_config_kandev"
+      ]
     },
     {
       "id": "personal-settings-and-secrets",
-      "audiences": ["user"],
+      "audiences": [
+        "user"
+      ],
       "stability": "stable",
       "docs": [
         "security",
@@ -399,7 +502,10 @@
     },
     {
       "id": "security-and-trust",
-      "audiences": ["user", "operator"],
+      "audiences": [
+        "user",
+        "operator"
+      ],
       "stability": "stable",
       "docs": [
         "security",
@@ -420,9 +526,14 @@
     },
     {
       "id": "authentication-and-access",
-      "audiences": ["user", "operator"],
+      "audiences": [
+        "user",
+        "operator"
+      ],
       "stability": "beta",
-      "docs": ["authentication"],
+      "docs": [
+        "authentication"
+      ],
       "sources": [
         "apps/backend/internal/auth/httpmw/middleware.go",
         "apps/backend/internal/auth/service.go",
@@ -441,10 +552,64 @@
       ]
     },
     {
+      "id": "team-access",
+      "audiences": [
+        "user",
+        "operator"
+      ],
+      "stability": "beta",
+      "docs": [
+        "team-access"
+      ],
+      "sources": [
+        "apps/backend/internal/authz/scopes.go",
+        "apps/backend/internal/authz/roles.go",
+        "apps/backend/internal/authz/resolve.go",
+        "apps/backend/internal/task/service/service_access.go",
+        "apps/backend/internal/task/service/service_members.go",
+        "apps/web/components/settings/workspaces/workspace-team-access-card.tsx"
+      ],
+      "tests": [
+        "apps/backend/internal/authz/resolve_test.go",
+        "apps/backend/internal/authz/registry_test.go",
+        "apps/backend/internal/task/service/service_team_access_test.go",
+        "apps/web/lib/types/team-access.test.ts"
+      ]
+    },
+    {
+      "id": "organizations",
+      "audiences": [
+        "operator"
+      ],
+      "stability": "experimental",
+      "docs": [
+        "organizations"
+      ],
+      "sources": [
+        "apps/backend/internal/org/service.go",
+        "apps/backend/internal/org/store.go",
+        "apps/backend/internal/org/controller.go",
+        "apps/web/components/settings/system/organizations/organizations-page.tsx"
+      ],
+      "tests": [
+        "apps/backend/internal/authz/resolve_test.go",
+        "apps/backend/internal/task/service/service_team_access_test.go"
+      ],
+      "settingsRoutes": [
+        "/settings/system/organizations"
+      ]
+    },
+    {
       "id": "system-health-and-maintenance",
-      "audiences": ["operator"],
+      "audiences": [
+        "operator"
+      ],
       "stability": "stable",
-      "docs": ["operations", "configuration", "feature-status"],
+      "docs": [
+        "operations",
+        "configuration",
+        "feature-status"
+      ],
       "sources": [
         "apps/backend/internal/system/settings/store.go",
         "apps/backend/internal/system/queuesettings/service.go",
@@ -478,11 +643,15 @@
         "/settings/system/storage",
         "/settings/system/updates"
       ],
-      "mcpTools": ["get_diagnostic_bundle_kandev"]
+      "mcpTools": [
+        "get_diagnostic_bundle_kandev"
+      ]
     },
     {
       "id": "deployment-and-platforms",
-      "audiences": ["operator"],
+      "audiences": [
+        "operator"
+      ],
       "stability": "stable",
       "docs": [
         "docker",
@@ -491,14 +660,26 @@
         "windows-support",
         "operations"
       ],
-      "sources": ["Dockerfile", "apps/backend/internal/launcher/service.go"],
-      "tests": ["apps/web/e2e/tests/docker/docker-launch.spec.ts"]
+      "sources": [
+        "Dockerfile",
+        "apps/backend/internal/launcher/service.go"
+      ],
+      "tests": [
+        "apps/web/e2e/tests/docker/docker-launch.spec.ts"
+      ]
     },
     {
       "id": "office-mode",
-      "audiences": ["user", "operator"],
+      "audiences": [
+        "user",
+        "operator"
+      ],
       "stability": "experimental",
-      "docs": ["coordination", "feature-status", "office-provider-routing"],
+      "docs": [
+        "coordination",
+        "feature-status",
+        "office-provider-routing"
+      ],
       "sources": [
         "apps/backend/internal/office/routes.go",
         "apps/web/src/office-routes.tsx"
@@ -510,9 +691,16 @@
     },
     {
       "id": "plugin-system",
-      "audiences": ["operator", "contributor"],
+      "audiences": [
+        "operator",
+        "contributor"
+      ],
       "stability": "experimental",
-      "docs": ["plugins", "plugins-authoring", "plugins-manifest"],
+      "docs": [
+        "plugins",
+        "plugins-authoring",
+        "plugins-manifest"
+      ],
       "sources": [
         "apps/backend/internal/plugins/handlers.go",
         "apps/backend/pkg/pluginsdk/host.go",
@@ -526,9 +714,14 @@
     },
     {
       "id": "plugin-marketplace",
-      "audiences": ["operator", "contributor"],
+      "audiences": [
+        "operator",
+        "contributor"
+      ],
       "stability": "experimental",
-      "docs": ["plugins-marketplace"],
+      "docs": [
+        "plugins-marketplace"
+      ],
       "sources": [
         "apps/backend/internal/plugins/marketplace/catalog.go",
         "apps/backend/internal/plugins/marketplace/sourcestore.go",
@@ -542,9 +735,16 @@
     },
     {
       "id": "websocket-protocol",
-      "audiences": ["contributor", "integrator"],
+      "audiences": [
+        "contributor",
+        "integrator"
+      ],
       "stability": "stable",
-      "docs": ["websocket-api", "architecture", "extending-kandev"],
+      "docs": [
+        "websocket-api",
+        "architecture",
+        "extending-kandev"
+      ],
       "sources": [
         "apps/backend/pkg/websocket/actions.go",
         "apps/backend/pkg/websocket/handler.go"
@@ -556,7 +756,9 @@
     },
     {
       "id": "contributor-workflow",
-      "audiences": ["contributor"],
+      "audiences": [
+        "contributor"
+      ],
       "stability": "stable",
       "docs": [
         "contributing",
@@ -568,7 +770,10 @@
         "extending-kandev",
         "release-process"
       ],
-      "sources": ["CONTRIBUTING.md", "Makefile"],
+      "sources": [
+        "CONTRIBUTING.md",
+        "Makefile"
+      ],
       "tests": [
         "scripts/lint-harness-files.test.py",
         ".github/scripts/lint-action-pinning_test.py"
@@ -601,7 +806,10 @@
         "route": "/settings/plugins",
         "reason": "Experimental feature intentionally omitted until its public contract stabilizes."
       },
-      { "route": "/settings/system", "reason": "Redirect to System status." },
+      {
+        "route": "/settings/system",
+        "reason": "Redirect to System status."
+      },
       {
         "route": "/settings/system/message-queue",
         "reason": "Legacy redirect to General Message Queue."

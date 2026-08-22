@@ -30,6 +30,20 @@ type WorkspaceRepository interface {
 	DeleteWorkspaceCascade(ctx context.Context, id string) ([]*models.Task, []*models.Workflow, error)
 	DeleteWorkspaceCascadeWithName(ctx context.Context, id, name string) ([]*models.Task, []*models.Workflow, error)
 	ListWorkspaces(ctx context.Context) ([]*models.Workspace, error)
+
+	// Workspace membership. Membership is the exception path next to
+	// Workspace.Visibility: it populates a private workspace, admits a guest
+	// to one workspace, and narrows a member to viewer on an org-visible one.
+	ListWorkspaceMembers(ctx context.Context, workspaceID string) ([]*models.WorkspaceMember, error)
+	GetWorkspaceMember(ctx context.Context, workspaceID, userID string) (*models.WorkspaceMember, error)
+	// ListWorkspaceIDsForMember returns workspaceID -> role for one user in a
+	// single query, so a board render resolves access without an N+1.
+	ListWorkspaceIDsForMember(ctx context.Context, userID string) (map[string]string, error)
+	UpsertWorkspaceMember(ctx context.Context, member *models.WorkspaceMember) error
+	DeleteWorkspaceMember(ctx context.Context, workspaceID, userID string) error
+	DeleteWorkspaceMembersByWorkspace(ctx context.Context, workspaceID string) error
+	CountWorkspaceMembers(ctx context.Context) (map[string]int, error)
+	TransferWorkspaceOwnership(ctx context.Context, workspaceID, fromUserID, toUserID string) error
 }
 
 // TaskRepository handles task CRUD and workflow placement.

@@ -106,6 +106,19 @@ type Service struct {
 
 	// dummyHash equalizes login timing for unknown emails.
 	dummyHash string
+
+	// orgStatus fails sessions and tokens closed for a suspended
+	// organization. Nil when organizations are off.
+	orgStatus OrgStatusChecker
+
+	// adminCreated runs after the setup wizard creates the first admin, so
+	// organizations can place them and grant the operator tier.
+	adminCreated func(ctx context.Context, userID string) error
+}
+
+// SetAdminCreatedHook installs the post-setup callback.
+func (s *Service) SetAdminCreatedHook(hook func(ctx context.Context, userID string) error) {
+	s.adminCreated = hook
 }
 
 // NewService constructs the service and computes the initial mode.
@@ -208,11 +221,60 @@ func validateEmailPassword(email, password string) error {
 	return nil
 }
 
-func roleOf(user *usermodels.User) authn.Role {
-	if user.Role == usermodels.RoleAdmin {
-		return authn.RoleAdmin
+// identityOf builds the request identity from the account record. The org and
+// the operator tier come from the stored user and from nowhere else, so no
+// caller-supplied value can influence which tenant a request belongs to.
+// ErrOrgUnavailable reports a correct credential whose organization is
+// suspended. It is deliberately distinct from ErrInvalidCredentials: the
+// password was right, and saying otherwise would send the user to reset it.
+var ErrOrgUnavailable = errors.New("your organization is currently unavailable")
+
+// OrgStatusChecker reports whether an organization may serve requests. Wired
+// from backendapp; nil on instances without organizations.
+type OrgStatusChecker func(ctx context.Context, orgID string) bool
+
+// SetOrgStatusChecker installs the suspended-organization gate.
+func (s *Service) SetOrgStatusChecker(check OrgStatusChecker) { s.orgStatus = check }
+
+// orgUsable reports whether the identity's organization may serve requests.
+// A suspended org fails every session and token closed, which is what makes
+// suspension a real lever rather than a label.
+func (s *Service) orgUsable(ctx context.Context, orgID string) bool {
+	if s.orgStatus == nil || orgID == "" {
+		return true
 	}
-	return authn.RoleMember
+	return s.orgStatus(ctx, orgID)
+}
+
+// callerOrgID returns the requesting user's organization, or "" when
+// organizations are off. Accounts and invites created by an admin inherit it,
+// which is why neither path takes an org parameter.
+func callerOrgID(ctx context.Context) string {
+	identity, ok := authn.IdentityFromContext(ctx)
+	if !ok || identity.Synthetic {
+		return ""
+	}
+	return identity.OrgID
+}
+
+func identityOf(user *usermodels.User, sessionID, tokenID string) authn.Identity {
+	return authn.Identity{
+		UserID:    user.ID,
+		Role:      roleOf(user),
+		OrgID:     user.OrgID,
+		Instance:  user.IsOperator,
+		SessionID: sessionID,
+		TokenID:   tokenID,
+	}
+}
+
+// roleOf carries the STORED role through unchanged. It deliberately does not
+// normalize: authz.NormalizeOrgRole maps an unrecognized role to guest, the
+// least privileged one, whereas usermodels.NormalizeRole defaults to member
+// for write paths. Normalizing here would turn an unknown stored value into a
+// collaborator on every org-visible workspace.
+func roleOf(user *usermodels.User) authn.Role {
+	return authn.Role(user.Role)
 }
 
 func truncateUserAgent(ua string) string {

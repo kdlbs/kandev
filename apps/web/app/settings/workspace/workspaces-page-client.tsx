@@ -11,6 +11,8 @@ import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { cn } from "@kandev/ui/lib/utils";
 import Link from "@/components/routing/app-link";
+import { mapWorkspaceItem } from "@/lib/routing/route-bootstrap";
+import { DefaultVisibilityCard } from "@/components/settings/workspaces/default-visibility-card";
 import { createWorkspaceAction } from "@/app/actions/workspaces";
 import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
@@ -137,28 +139,14 @@ export function WorkspacesPageClient() {
     try {
       const created = await createRequest.run({ name: newWorkspaceName.trim() });
       setWorkspaces([
-        {
-          id: created.id,
-          name: created.name,
-          description: created.description ?? null,
-          owner_id: created.owner_id,
-          default_executor_id: created.default_executor_id ?? null,
-          default_environment_id: created.default_environment_id ?? null,
-          default_agent_profile_id: created.default_agent_profile_id ?? null,
-          created_at: created.created_at,
-          updated_at: created.updated_at,
-        },
-        ...items.map((workspace: Workspace) => ({
-          id: workspace.id,
-          name: workspace.name,
-          description: workspace.description ?? null,
-          owner_id: workspace.owner_id,
-          default_executor_id: workspace.default_executor_id ?? null,
-          default_environment_id: workspace.default_environment_id ?? null,
-          default_agent_profile_id: workspace.default_agent_profile_id ?? null,
-          created_at: workspace.created_at,
-          updated_at: workspace.updated_at,
-        })),
+        // Both lists go through the shared mapper. Hand-copying fields here is
+        // how visibility and the caller's scopes got dropped from the store the
+        // first time, which silently rendered a workspace read-only to its own
+        // owner.
+        mapWorkspaceItem(created),
+        // Existing entries are already store items; re-listing their fields by
+        // hand is what dropped visibility and scopes before.
+        ...items,
       ]);
       setNewWorkspaceName("");
       setIsAdding(false);
@@ -185,6 +173,10 @@ export function WorkspacesPageClient() {
           {t("workspaces:addWorkspace")}
         </Button>
       </div>
+
+      <Separator />
+
+      <DefaultVisibilityCard />
 
       <Separator />
 

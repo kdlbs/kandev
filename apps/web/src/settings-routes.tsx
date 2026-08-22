@@ -44,6 +44,7 @@ import { UsersTable } from "@/components/settings/system/users-table";
 import { DataStorageSettings } from "@/components/settings/system/data-storage-settings";
 import { DiskUsageCard } from "@/components/settings/system/disk-usage-card";
 import { FeatureTogglesRoute } from "@/components/settings/system/feature-toggles-route";
+import { OrganizationsPage } from "@/components/settings/system/organizations/organizations-page";
 import { HealthIssuesCard } from "@/components/settings/system/health-issues-card";
 import { SystemPageShell } from "@/components/settings/system/system-page-shell";
 import { SystemRouteShell } from "@/components/settings/system/system-route-shell";
@@ -205,6 +206,11 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   ),
   "/settings/system/backups": () => <SettingsRedirect to={SYSTEM_DATA_STORAGE_SETTINGS_HREF} />,
   "/settings/system/database": () => <SettingsRedirect to={SYSTEM_DATA_STORAGE_SETTINGS_HREF} />,
+  "/settings/system/organizations": () => (
+    <SystemRouteShell titleKey="orgs:navOrganizations" descriptionKey="orgs:description">
+      <OrganizationsPage />
+    </SystemRouteShell>
+  ),
   "/settings/system/feature-toggles": () => (
     <SystemRouteShell
       titleKey="system:navFeatureToggles"

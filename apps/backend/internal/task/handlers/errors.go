@@ -26,6 +26,12 @@ func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback stri
 		c.JSON(http.StatusNotFound, gin.H{"error": fallback})
 		return
 	}
+	// A scope denial is 403, not 404: workspace.read was already granted, so
+	// existence is known to the caller and there is nothing left to hide.
+	if service.IsForbidden(err) {
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		return
+	}
 	if errors.Is(err, service.ErrWIPLimitExceeded) {
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		return

@@ -774,6 +774,7 @@ func (s *Service) publishWorkspaceEvent(ctx context.Context, eventType string, w
 		"name":                            workspace.Name,
 		"description":                     workspace.Description,
 		"owner_id":                        workspace.OwnerID,
+		"visibility":                      workspace.Visibility,
 		"default_executor_id":             workspace.DefaultExecutorID,
 		"default_environment_id":          workspace.DefaultEnvironmentID,
 		"default_agent_profile_id":        workspace.DefaultAgentProfileID,
@@ -783,6 +784,15 @@ func (s *Service) publishWorkspaceEvent(ctx context.Context, eventType string, w
 	}
 
 	s.publishEventToBus(ctx, eventType, "workspace", workspace.ID, data)
+}
+
+// publishWorkspaceAccessChanged tells open clients that who-can-reach-this
+// changed (visibility, membership, ownership) so they re-evaluate access
+// without a reload. It rides the existing workspace-updated event: the payload
+// already carries owner and visibility, and a client that lost access is
+// dropped from the workspace's subscriber set on the next broadcast.
+func (s *Service) publishWorkspaceAccessChanged(ctx context.Context, workspace *models.Workspace) {
+	s.publishWorkspaceEvent(ctx, events.WorkspaceUpdated, workspace)
 }
 
 func (s *Service) publishWorkflowEvent(ctx context.Context, eventType string, workflow *models.Workflow) {

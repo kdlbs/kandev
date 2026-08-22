@@ -5855,7 +5855,7 @@ type cancelAgentPreparation struct {
 }
 
 func (s *Service) CancelAgent(ctx context.Context, sessionID string) (err error) {
-	if err := s.authorizeSession(ctx, sessionID); err != nil {
+	if err := s.authorizeSessionControl(ctx, sessionID); err != nil {
 		return err
 	}
 	if s.repo == nil {

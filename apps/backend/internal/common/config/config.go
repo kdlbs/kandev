@@ -442,6 +442,14 @@ type FeaturesConfig struct {
 	// opts in.
 	Auth bool `mapstructure:"auth" json:"auth"`
 
+	// MultiTenancy gates organizations: a tenant boundary above users, where
+	// every user belongs to exactly one org and cross-org reach is a bug
+	// rather than a permission level. It requires Auth; enabling it without
+	// authentication is refused at startup, because a tenant boundary with no
+	// identity behind it is not a boundary. Set via the runtime feature toggle
+	// KANDEV_FEATURES_MULTI_TENANCY. Off in every shipped profile.
+	MultiTenancy bool `mapstructure:"multi_tenancy" json:"multiTenancy"`
+
 	// DynamicAgentRouting gates dynamic profile configuration, execution
 	// routing, and the shared route health service. It is disabled in every
 	// embedded profile until the complete feature is ready.

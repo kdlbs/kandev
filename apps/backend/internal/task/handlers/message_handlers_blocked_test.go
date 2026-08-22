@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"github.com/kandev/kandev/internal/task/repository"
 	"strings"
 	"sync"
 	"testing"
@@ -29,6 +30,9 @@ import (
 // coverage) to stay under the package's file-length limit.
 
 type messageAddSwitchRepo struct {
+	// Membership is not exercised by this fake; the embedded default
+	// reports no membership, which is the narrower answer.
+	repository.UnsupportedWorkspaceMembers
 	mockRepository
 	tasks     map[string]*models.Task
 	sessions  map[string]*models.TaskSession

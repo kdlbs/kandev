@@ -989,10 +989,17 @@ func (w *Workspace) IsImproveKandev() bool {
 
 // Workspace represents a workspace
 type Workspace struct {
-	ID                          string    `json:"id"`
-	Name                        string    `json:"name"`
-	Description                 string    `json:"description"`
-	OwnerID                     string    `json:"owner_id"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	OwnerID     string `json:"owner_id"`
+	// OrgID is the owning tenant. Empty means organizations are off or the
+	// tenancy migration has not run.
+	OrgID string `json:"org_id,omitempty"`
+	// Visibility is "private" (owner plus explicit members) or "org" (every
+	// non-guest user). Values are authz.Visibility; the field is a plain
+	// string so models stays free of an authz import.
+	Visibility                  string    `json:"visibility"`
 	DefaultExecutorID           *string   `json:"default_executor_id,omitempty"`
 	DefaultEnvironmentID        *string   `json:"default_environment_id,omitempty"`
 	DefaultAgentProfileID       *string   `json:"default_agent_profile_id,omitempty"`

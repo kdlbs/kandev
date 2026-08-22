@@ -150,6 +150,9 @@ type UpdateWorkspaceRequest struct {
 	DefaultEnvironmentID        *string `json:"default_environment_id,omitempty"`
 	DefaultAgentProfileID       *string `json:"default_agent_profile_id,omitempty"`
 	DefaultConfigAgentProfileID *string `json:"default_config_agent_profile_id,omitempty"`
+	// Visibility is "private" or "org". Unknown values normalize to private:
+	// unrecognized input must never widen access.
+	Visibility *string `json:"visibility,omitempty"`
 }
 
 // FindOrCreateRepositoryRequest contains the data for finding or creating a repository by provider info.

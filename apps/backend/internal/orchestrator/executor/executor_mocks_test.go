@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/kandev/kandev/internal/task/repository"
 	"sync"
 	"testing"
 	"time"
@@ -251,6 +252,9 @@ func (m *mockAgentManager) WaitForAgentctlReady(ctx context.Context, sessionID s
 
 // mockRepository implements executorStore for testing
 type mockRepository struct {
+	// Membership is not exercised by this fake; the embedded default
+	// reports no membership, which is the narrower answer.
+	repository.UnsupportedWorkspaceMembers
 	mu                   sync.Mutex
 	sessions             map[string]*models.TaskSession
 	tasks                map[string]*models.Task

@@ -14,6 +14,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/pkgtar"
@@ -69,7 +70,7 @@ func RegisterRoutes(router *gin.Engine, svc *Service, _ Deliverer, log *logger.L
 	ctrl := &Controller{svc: svc, log: log, actionInvoker: svc}
 
 	api := router.Group("/api/plugins")
-	api.POST("/install", authn.RequireAdmin(), ctrl.install)
+	api.POST("/install", authz.RequireOrgScope(authz.ScopeOrgConfigManage), ctrl.install)
 	api.POST("/sync", ctrl.sync)
 	// Register the static /marketplace and /settings routes before the /:id
 	// wildcard, matching the /install and /sync ordering — some gin/httprouter
