@@ -66,7 +66,7 @@ test.describe("Docker executor user namespace sandbox", () => {
       expect(dockerSecurityOpt(disabledContainer)).toBeNull();
       const disabledUnshare = dockerExec(disabledContainer, "unshare", "--user", "true");
       expect(disabledUnshare.status).not.toBe(0);
-      expect(``).toContain("Operation not permitted");
+      expect(disabledUnshare.stderr).toContain("Operation not permitted");
       const disabledBwrap = dockerExec(
         disabledContainer,
         "bwrap",
