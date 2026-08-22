@@ -39,7 +39,7 @@ Every other syscall restriction in Docker's default profile is preserved. `kexec
 The setting is:
 - **Off by default** — every existing profile produces byte-identical launch config.
 - **Per-profile** — stored as a `config` entry (`allow_user_namespaces: "true"`), not a typed DB column.
-- **Authoritative** — the profile value unconditionally overwrites any task-supplied metadata value, preventing self-escalation.
+- **Authoritative** — the profile value unconditionally overwrites any task-supplied metadata value, preventing self-escalation. Launch-config resolution clears the key before applying the profile, so the guarantee also holds for launches that attach no executor profile, carry a stale profile ID, or hit a profile lookup error; task metadata is caller-writable through the task REST/WS API and is not key-filtered there.
 - **Gated from the MCP surface** — the `create_executor_profile` and `update_executor_profile` MCP handlers reject the key with a validation error. The operator HTTP/WS API remains unguarded; this is accepted because the same operator surface already exposes `prepare_script` (arbitrary shell at every launch), a strictly more powerful primitive.
 - **Create-time only** — `SecurityOpt` cannot be changed on an existing container. Operators must reset task environments after enabling it.
 

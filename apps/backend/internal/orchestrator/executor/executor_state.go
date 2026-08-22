@@ -127,6 +127,15 @@ func (e *Executor) resolveExecutorConfig(ctx context.Context, executorID, worksp
 		metadata = make(map[string]interface{})
 	}
 
+	// Authoritative keys belong to the profile, so clear any task-supplied
+	// value up front; applyProfile re-applies the profile's own value below.
+	// Doing it here rather than only inside applyProfile is what makes the
+	// guarantee hold for launches that attach no profile, carry a stale
+	// profile ID, or hit a profile lookup error — task metadata is
+	// caller-writable through POST/PATCH /api/v1/tasks and task.create /
+	// task.update, none of which filter keys.
+	clearAuthoritativeMetadataKeys(metadata)
+
 	// When no executor ID is resolved, check if the metadata carries an
 	// executor profile. The profile references a specific executor, so we
 	// can derive the full config from it (critical for review-watch tasks
@@ -264,6 +273,15 @@ var profileConfigAuthoritativeKeys = []string{
 	// which the reader treats as disabled.
 	lifecycle.MetadataKeySSHReclaimTaskDir,
 	lifecycle.MetadataKeyAllowUserNamespaces,
+}
+
+// clearAuthoritativeMetadataKeys blanks every profile-owned key in the
+// launch metadata. The reader-side helpers treat an empty value exactly
+// as an absent one, so this is the "no profile said otherwise" state.
+func clearAuthoritativeMetadataKeys(metadata map[string]interface{}) {
+	for _, k := range profileConfigAuthoritativeKeys {
+		metadata[k] = ""
+	}
 }
 
 // applyProfileConfigToMetadata projects profile.Config keys into the

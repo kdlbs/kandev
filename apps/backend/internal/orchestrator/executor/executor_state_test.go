@@ -151,3 +151,51 @@ func TestResolveExecutorConfig_PassthroughKeys_DontClobberTaskMetadata(t *testin
 		t.Fatalf("metadata[git_user_name] = %q, want task value to survive empty profile", got)
 	}
 }
+
+// TestResolveExecutorConfig_AuthoritativeKeysClearedWithoutProfile pins
+// AC-6 for the launch paths that attach no executor profile. The
+// authoritative-key projection only runs inside applyProfile, so before
+// this test a task whose metadata carried allow_user_namespaces="true"
+// kept it whenever no profile was selected, the profile ID was stale, or
+// the profile lookup failed — and DockerExecutor.buildContainerLaunchConfig
+// reads that key verbatim, launching a relaxed container from purely
+// task-supplied metadata. Task metadata is caller-writable through
+// POST/PATCH /api/v1/tasks (task_http_handlers.go:924, :1576) and
+// task.create/task.update over WS, none of which filter keys.
+func TestResolveExecutorConfig_AuthoritativeKeysClearedWithoutProfile(t *testing.T) {
+	cases := []struct {
+		name      string
+		profileID string
+	}{
+		{name: "no_profile_selected", profileID: ""},
+		{name: "profile_id_does_not_resolve", profileID: "prof-missing"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, key := range []string{
+				lifecycle.MetadataKeyAllowUserNamespaces,
+				lifecycle.MetadataKeySSHWorkdirRoot,
+				lifecycle.MetadataKeySSHShell,
+			} {
+				t.Run(key, func(t *testing.T) {
+					repo := newMockRepository()
+					exec := newTestExecutor(t, &mockAgentManager{}, repo)
+					repo.executors["exec-docker-1"] = &models.Executor{
+						ID:   "exec-docker-1",
+						Type: models.ExecutorTypeLocalDocker,
+					}
+
+					metadata := map[string]interface{}{key: "true"}
+					if tc.profileID != "" {
+						metadata["executor_profile_id"] = tc.profileID
+					}
+					cfg := exec.resolveExecutorConfig(context.Background(), "exec-docker-1", "ws-1", metadata)
+
+					if got, _ := cfg.Metadata[key].(string); got != "" {
+						t.Fatalf("metadata[%q] = %q, want it cleared when no profile supplies it", key, got)
+					}
+				})
+			}
+		})
+	}
+}
