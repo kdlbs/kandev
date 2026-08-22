@@ -472,9 +472,13 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		Metadata:      meta.ToMap(),
 	}
 	var message *models.Message
+	created := true
 	var err error
 	if req.ClientMessageID != "" {
-		message, err = h.service.CreateMessageIdempotent(ctx, req.ClientMessageID, createRequest)
+		var result service.CreateMessageIdempotentResult
+		result, err = h.service.CreateMessageIdempotent(ctx, req.ClientMessageID, createRequest)
+		message = result.Message
+		created = result.Created
 	} else {
 		message, err = h.service.CreateMessage(ctx, createRequest)
 	}
@@ -482,7 +486,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		h.logger.Error("failed to create message", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create message", nil)
 	}
-	if turnStartResult.Queued {
+	if created && turnStartResult.Queued {
 		if err := h.orchestrator.QueueUserPrompt(
 			ctx,
 			req.TaskID,
@@ -512,7 +516,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// an orchestrator is available. This runs async so the WS request can
 	// respond immediately. Plan mode changes the execution prompt and agent
 	// behavior; it does not make message.add a record-only operation.
-	if h.orchestrator != nil && !turnStartResult.Queued {
+	if created && h.orchestrator != nil && !turnStartResult.Queued {
 		h.dispatchPromptAsync(ctx, req, sessionResp.Session.AgentProfileID, startCreatedSession, steer)
 	}
 

@@ -69,6 +69,10 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.DELETE("/workflow/steps/:id", h.httpDeleteStep)
 	api.PUT("/workflows/:id/workflow/steps/reorder", h.httpReorderSteps)
 
+	// Coordinator monitoring routes
+	api.GET("/workflows/:id/coordinator-monitoring", h.httpGetCoordinatorMonitoring)
+	api.PUT("/workflows/:id/coordinator-monitoring", h.httpSetCoordinatorMonitoring)
+
 	// Export/Import routes
 	api.GET("/workflows/:id/export", h.httpExportWorkflow)
 	api.GET("/workspaces/:id/workflows/export", h.httpExportWorkflows)
@@ -275,6 +279,55 @@ func (h *Handlers) httpReorderSteps(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+// HTTP handlers - Coordinator monitoring
+
+func (h *Handlers) httpGetCoordinatorMonitoring(c *gin.Context) {
+	resp, err := h.controller.GetCoordinatorMonitoring(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		h.logger.Error("failed to get coordinator monitoring", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get coordinator monitoring"})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+type httpSetCoordinatorMonitoringRequest struct {
+	WorkspaceID string                                  `json:"workspace_id"`
+	Entries     []controller.CoordinatorMonitoringEntry `json:"entries"`
+}
+
+func (h *Handlers) httpSetCoordinatorMonitoring(c *gin.Context) {
+	var req httpSetCoordinatorMonitoringRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request: " + err.Error()})
+		return
+	}
+	resp, err := h.controller.SetCoordinatorMonitoring(c.Request.Context(), controller.SetCoordinatorMonitoringRequest{
+		WorkflowID:  c.Param("id"),
+		WorkspaceID: req.WorkspaceID,
+		Entries:     req.Entries,
+	})
+	if err != nil {
+		h.logger.Error("failed to set coordinator monitoring", zap.Error(err))
+		h.writeCoordinatorMonitoringError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+func (h *Handlers) writeCoordinatorMonitoringError(c *gin.Context, err error) {
+	if errors.Is(err, service.ErrWorkflowReadOnly) || errors.Is(err, service.ErrWorkflowWorkspaceReadOnly) {
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		return
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "does not belong to workflow") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save coordinator monitoring"})
 }
 
 // HTTP handlers - History

@@ -18,7 +18,9 @@ export type PluginConfigFieldType =
   | "number"
   | "integer"
   | "enum"
-  | "utility_agent";
+  | "utility_agent"
+  | "agent_profile"
+  | "textarea";
 
 export interface PluginConfigField {
   name: string;
@@ -34,6 +36,10 @@ export interface PluginConfigField {
    * forms). */
   enumRawValues?: unknown[];
   defaultValue?: unknown;
+  /** Numeric minimum constraint (JSON-Schema "minimum"), for number/integer fields. */
+  minimum?: number;
+  /** Numeric maximum constraint (JSON-Schema "maximum"), for number/integer fields. */
+  maximum?: number;
 }
 
 type SchemaObject = Record<string, unknown>;
@@ -46,6 +52,8 @@ function asObject(value: unknown): SchemaObject | null {
 
 function fieldType(prop: SchemaObject): PluginConfigFieldType {
   if (prop.format === "utility-agent") return "utility_agent";
+  if (prop.format === "agent-profile") return "agent_profile";
+  if (prop.format === "textarea") return "textarea";
   const enumValues = prop.enum;
   if (Array.isArray(enumValues) && enumValues.length > 0) return "enum";
   const type = prop.type;
@@ -93,6 +101,8 @@ export function parseConfigSchema(
       enumValues: Array.isArray(prop.enum) ? prop.enum.map((v) => String(v)) : undefined,
       enumRawValues: Array.isArray(prop.enum) ? prop.enum : undefined,
       defaultValue: prop.default,
+      minimum: typeof prop.minimum === "number" ? prop.minimum : undefined,
+      maximum: typeof prop.maximum === "number" ? prop.maximum : undefined,
     });
   }
   return fields;

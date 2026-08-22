@@ -120,6 +120,15 @@ service Host {
   rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
   rpc PreviewPluginOwnedTaskTree(PreviewPluginOwnedTaskTreeRequest) returns (PreviewPluginOwnedTaskTreeResponse);
   rpc DeletePluginOwnedTaskTree(DeletePluginOwnedTaskTreeRequest) returns (DeletePluginOwnedTaskTreeResponse);
+
+  // Agent conversations — capability agent_conversation. Ensure creates or
+  // repairs one hidden workflowless ephemeral task with a primary session per
+  // (plugin_id, workspace_id, conversation_key). Dispatch sends a prompt to an
+  // ensured conversation with stable occurrence idempotency and busy-session
+  // coalescing. Delete removes only conversations owned by this plugin.
+  rpc EnsureAgentConversation(EnsureAgentConversationRequest) returns (EnsureAgentConversationResponse);
+  rpc DispatchAgentConversation(DispatchAgentConversationRequest) returns (DispatchAgentConversationResponse);
+  rpc DeleteAgentConversation(DeleteAgentConversationRequest) returns (DeleteAgentConversationResponse);
 }
 
 message Event {
@@ -419,6 +428,18 @@ message WorkflowStep {
   string name = 3;
   int32 position = 4;
   string stage_type = 5; // work | review | approval | custom
+  // coordinator_monitored and coordinator_prompt carry the Settings >
+  // Workspace > Workflow configuration policy an operator saves for this
+  // step (host-owned storage, not plugin-owned — see
+  // docs/specs/coordinator-plugin/spec.md's "Workflow monitoring policy").
+  // They are populated only for a plugin which declares both
+  // api_read:workflows and agent_conversation; ordinary workflow readers see
+  // the fields redacted as false/empty.
+  // coordinator_monitored is false and coordinator_prompt is "" for a step
+  // that was never checked. A plugin composes coordinator_prompt with its
+  // own base prompt only when coordinator_monitored is true.
+  bool coordinator_monitored = 6;
+  string coordinator_prompt = 7;
 }
 message ListWorkflowStepsRequest {
   string workflow_id = 1;
@@ -682,4 +703,73 @@ message DeletePluginOwnedTaskTreeResponse {
 // retrying the remaining idempotent cleanup.
 message DeletePluginOwnedTaskTreeProgress {
   repeated string deleted_task_ids = 1;
+}
+
+// ── Agent conversations ─────────────────────────────────────────────────
+
+// AgentConversationDescriptor identifies an existing conversation.
+message AgentConversationDescriptor {
+  string task_id = 1;
+  string session_id = 2;
+  string workspace_id = 3;
+  string conversation_key = 4;
+  // The agent_profile_id the conversation uses; empty when the profile
+  // referenced at ensure time is no longer available.
+  string agent_profile_id = 5;
+}
+
+// AgentConversationSpec controls how Ensure creates a conversation.
+message AgentConversationSpec {
+  string workspace_id = 1;
+  string conversation_key = 2;
+  // Editable base prompt baked into every dispatch to this conversation.
+  // The plugin appends its cycle/report-specific instructions.
+  string base_prompt = 3;
+  // Agent profile id to use. Empty means "use the workspace default".
+  // An explicit profile that is disabled/deleted produces a typed
+  // configuration-required result.
+  string agent_profile_id = 4;
+}
+
+// EnsureAgentConversationRequest carries the Ensure request.
+message EnsureAgentConversationRequest {
+  AgentConversationSpec spec = 1;
+}
+
+// EnsureAgentConversationResponse carries the result.
+message EnsureAgentConversationResponse {
+  AgentConversationDescriptor conv_descriptor = 1;
+  // One of "created", "exists", or "configuration_required".
+  string status = 2;
+}
+
+// DispatchAgentConversationRequest sends a prompt to an ensured conversation.
+message DispatchAgentConversationRequest {
+  string workspace_id = 1;
+  string conversation_key = 2;
+  string text = 3;
+  // Stable idempotency key derived from (trigger, due_timestamp) for
+  // scheduled occurrences, or a unique key for manual invocations.
+  // An already-claimed key returns the prior dispatch result.
+  string occurrence_key = 4;
+}
+
+// DispatchAgentConversationResponse carries the dispatch result.
+message DispatchAgentConversationResponse {
+  string session_id = 1;
+  // One of "started", "queued", "duplicate_occurrence", or "skipped_busy".
+  string status = 2;
+  AgentConversationDescriptor conv_descriptor = 3;
+}
+
+// DeleteAgentConversationRequest deletes all conversations matching the
+// request. Only conversations owned by this plugin are affected.
+message DeleteAgentConversationRequest {
+  string workspace_id = 1;
+  string conversation_key = 2;
+}
+
+// DeleteAgentConversationResponse carries the result.
+message DeleteAgentConversationResponse {
+  int32 deleted_count = 1;
 }

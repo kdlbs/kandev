@@ -373,15 +373,29 @@ type WorkflowStep struct {
 	Name       string
 	Position   int32
 	StageType  string
+	// CoordinatorMonitored and CoordinatorPrompt carry the Settings >
+	// Workspace > Workflow configuration policy an operator saves for this
+	// step (host-owned storage — see docs/specs/coordinator-plugin/spec.md's
+	// "Workflow monitoring policy"). They are populated only for a plugin
+	// with api_read:workflows plus agent_conversation; ordinary workflow
+	// readers receive false and an empty string. CoordinatorMonitored is false
+	// and CoordinatorPrompt is "" for a step that was never checked. A plugin
+	// composes CoordinatorPrompt with its own base prompt only when
+	// CoordinatorMonitored is true; an empty prompt on a monitored step adds
+	// no step-specific instruction.
+	CoordinatorMonitored bool
+	CoordinatorPrompt    string
 }
 
 func (s WorkflowStep) toProto() *pluginv1.WorkflowStep {
 	return &pluginv1.WorkflowStep{
-		Id:         s.ID,
-		WorkflowId: s.WorkflowID,
-		Name:       s.Name,
-		Position:   s.Position,
-		StageType:  s.StageType,
+		Id:                   s.ID,
+		WorkflowId:           s.WorkflowID,
+		Name:                 s.Name,
+		Position:             s.Position,
+		StageType:            s.StageType,
+		CoordinatorMonitored: s.CoordinatorMonitored,
+		CoordinatorPrompt:    s.CoordinatorPrompt,
 	}
 }
 
@@ -390,11 +404,13 @@ func workflowStepFromProto(p *pluginv1.WorkflowStep) WorkflowStep {
 		return WorkflowStep{}
 	}
 	return WorkflowStep{
-		ID:         p.GetId(),
-		WorkflowID: p.GetWorkflowId(),
-		Name:       p.GetName(),
-		Position:   p.GetPosition(),
-		StageType:  p.GetStageType(),
+		ID:                   p.GetId(),
+		WorkflowID:           p.GetWorkflowId(),
+		Name:                 p.GetName(),
+		Position:             p.GetPosition(),
+		StageType:            p.GetStageType(),
+		CoordinatorMonitored: p.GetCoordinatorMonitored(),
+		CoordinatorPrompt:    p.GetCoordinatorPrompt(),
 	}
 }
 
@@ -1086,4 +1102,93 @@ func messageDispatchFromProto(p *pluginv1.SendMessageResponse) *MessageDispatch 
 		return nil
 	}
 	return &MessageDispatch{SessionID: p.GetSessionId(), Status: p.GetStatus()}
+}
+
+// ── Agent conversations ─────────────────────────────────────────────────
+
+// AgentConversationSpec controls how Ensure creates a conversation.
+type AgentConversationSpec struct {
+	WorkspaceID     string
+	ConversationKey string
+	BasePrompt      string
+	AgentProfileID  string
+}
+
+func (s AgentConversationSpec) toProto() *pluginv1.AgentConversationSpec {
+	return &pluginv1.AgentConversationSpec{
+		WorkspaceId:     s.WorkspaceID,
+		ConversationKey: s.ConversationKey,
+		BasePrompt:      s.BasePrompt,
+		AgentProfileId:  s.AgentProfileID,
+	}
+}
+
+func agentConversationSpecFromProto(p *pluginv1.AgentConversationSpec) AgentConversationSpec {
+	if p == nil {
+		return AgentConversationSpec{}
+	}
+	return AgentConversationSpec{
+		WorkspaceID:     p.GetWorkspaceId(),
+		ConversationKey: p.GetConversationKey(),
+		BasePrompt:      p.GetBasePrompt(),
+		AgentProfileID:  p.GetAgentProfileId(),
+	}
+}
+
+// AgentConversationDescriptor identifies an existing conversation.
+type AgentConversationDescriptor struct {
+	TaskID          string
+	SessionID       string
+	WorkspaceID     string
+	ConversationKey string
+	AgentProfileID  string
+}
+
+func (d AgentConversationDescriptor) toProto() *pluginv1.AgentConversationDescriptor {
+	return &pluginv1.AgentConversationDescriptor{
+		TaskId:          d.TaskID,
+		SessionId:       d.SessionID,
+		WorkspaceId:     d.WorkspaceID,
+		ConversationKey: d.ConversationKey,
+		AgentProfileId:  d.AgentProfileID,
+	}
+}
+
+func agentConversationDescriptorFromProto(p *pluginv1.AgentConversationDescriptor) AgentConversationDescriptor {
+	if p == nil {
+		return AgentConversationDescriptor{}
+	}
+	return AgentConversationDescriptor{
+		TaskID:          p.GetTaskId(),
+		SessionID:       p.GetSessionId(),
+		WorkspaceID:     p.GetWorkspaceId(),
+		ConversationKey: p.GetConversationKey(),
+		AgentProfileID:  p.GetAgentProfileId(),
+	}
+}
+
+// AgentConversationDispatch is the outcome of DispatchAgentConversation.
+type AgentConversationDispatch struct {
+	SessionID  string
+	Status     string
+	Descriptor AgentConversationDescriptor
+}
+
+func (d AgentConversationDispatch) toProto() *pluginv1.DispatchAgentConversationResponse {
+	return &pluginv1.DispatchAgentConversationResponse{
+		SessionId:      d.SessionID,
+		Status:         d.Status,
+		ConvDescriptor: d.Descriptor.toProto(),
+	}
+}
+
+func agentConversationDispatchFromProto(p *pluginv1.DispatchAgentConversationResponse) AgentConversationDispatch {
+	if p == nil {
+		return AgentConversationDispatch{}
+	}
+	return AgentConversationDispatch{
+		SessionID:  p.GetSessionId(),
+		Status:     p.GetStatus(),
+		Descriptor: agentConversationDescriptorFromProto(p.GetConvDescriptor()),
+	}
 }

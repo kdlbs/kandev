@@ -264,5 +264,11 @@
   "workflowSyncCompleted": "Workflow sync completed",
   "loadingSteps": "Loading steps…",
   "noStepsInThisWorkflow": "No steps in this workflow",
-  "selectAWorkflowFirst": "Select a workflow first"
+  "selectAWorkflowFirst": "Select a workflow first",
+  "coordinatorMonitoring": "Coordinator monitoring",
+  "coordinatorMonitoringHelp": "Select steps the coordinator should monitor and set per-step prompts.",
+  "noStepsToMonitor": "No workflow steps to monitor.",
+  "coordinatorStepPromptPlaceholder": "Optional prompt for this step...",
+  "failedToLoadCoordinatorMonitoring": "Failed to load coordinator monitoring settings",
+  "failedToSaveCoordinatorMonitoring": "Failed to save coordinator monitoring settings"
 }

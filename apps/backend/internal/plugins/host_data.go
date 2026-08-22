@@ -150,9 +150,14 @@ type workflowLister interface {
 }
 
 // workflowStepLister is the narrow slice of internal/workflow/service.Service
-// the Workflows().ListSteps RPC needs.
+// the Workflows().ListSteps RPC needs. GetCoordinatorMonitoring backs the
+// CoordinatorMonitored/CoordinatorPrompt fields ListSteps conditionally merges
+// onto each step for plugins that explicitly declare agent_conversation. Plain
+// api_read:workflows readers receive ordinary workflow shape with the private
+// coordinator policy redacted.
 type workflowStepLister interface {
 	ListStepsByWorkflow(ctx context.Context, workflowID string) ([]*wfmodels.WorkflowStep, error)
+	GetCoordinatorMonitoring(ctx context.Context, workflowID string) ([]wfmodels.CoordinatorStepMonitor, error)
 }
 
 // agentProfileDataSource is the narrow slice of
@@ -468,9 +473,24 @@ func (r workflowReader) ListSteps(ctx context.Context, workflowID string) ([]plu
 	if err != nil {
 		return nil, err
 	}
+	if !r.host.capabilities.AgentConversation {
+		dtos := make([]pluginsdk.WorkflowStep, len(steps))
+		for i, step := range steps {
+			dtos[i] = workflowStepModelToDTO(step, wfmodels.CoordinatorStepMonitor{})
+		}
+		return dtos, nil
+	}
+	monitoring, err := r.host.workflowSteps.GetCoordinatorMonitoring(ctx, workflowID)
+	if err != nil {
+		return nil, err
+	}
+	byStepID := make(map[string]wfmodels.CoordinatorStepMonitor, len(monitoring))
+	for _, m := range monitoring {
+		byStepID[m.WorkflowStepID] = m
+	}
 	dtos := make([]pluginsdk.WorkflowStep, len(steps))
 	for i, s := range steps {
-		dtos[i] = workflowStepModelToDTO(s)
+		dtos[i] = workflowStepModelToDTO(s, byStepID[s.ID])
 	}
 	return dtos, nil
 }

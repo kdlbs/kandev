@@ -37,6 +37,15 @@ const (
 	searchPurpose          = "search"
 	submissionPurpose      = "submission"
 	fixtureTaskIDKey       = "task_id"
+
+	// conversationProbeActionKey is the fixture-side action key that proves
+	// the agent_conversation RPCs: Ensure, Dispatch with a unique occurrence,
+	// and Delete. The browser invokes this to exercise the full round trip.
+	conversationProbeActionKey  = "conversations.probe"
+	conversationEnsureActionKey = "conversations.ensure"
+
+	// conversationProbeKey is the stable conversation_key the fixture uses.
+	conversationProbeKey = "fixture-conversation"
 )
 
 // deliveryRecord is one recorded OnEvent delivery, appended as a JSON line
@@ -184,6 +193,10 @@ func (p *fixturePlugin) HandleAction(ctx context.Context, req *pluginsdk.PluginA
 		response["pull_request_id"] = fixturePullRequestID
 	case "watch-create-task":
 		return p.createWatchTask(ctx, req.Context.WorkspaceID)
+	case conversationProbeActionKey:
+		return p.handleConversationProbe(ctx, req.Context.WorkspaceID)
+	case conversationEnsureActionKey:
+		return p.handleConversationEnsure(ctx, req.Context.WorkspaceID)
 	default:
 		return nil, fmt.Errorf("plugin-fixture: unknown action %q", req.ActionKey)
 	}
@@ -211,6 +224,103 @@ func (p *fixturePlugin) createWatchTask(ctx context.Context, workspaceID string)
 	body, err := json.Marshal(map[string]any{"watch_created": true, fixtureTaskIDKey: task.ID})
 	if err != nil {
 		return nil, fmt.Errorf("plugin-fixture: marshaling watch response: %w", err)
+	}
+	return &pluginsdk.PluginActionResponse{Body: body}, nil
+}
+
+// handleConversationProbe exercises the agent_conversation RPCs end to end:
+// Ensure, Dispatch with a unique occurrence key, and Delete.  Returns a JSON
+// body carrying the conversation descriptor fields plus the dispatch status.
+// conversation_probe_test.go drives this action directly. The desktop/mobile
+// E2E specs use conversations.ensure to retain a fixture-owned conversation
+// for the host chat surface; this probe remains the direct Ensure/Dispatch/
+// Delete lifecycle exercise.
+func (p *fixturePlugin) handleConversationProbe(ctx context.Context, workspaceID string) (*pluginsdk.PluginActionResponse, error) {
+	host := p.Host()
+	if host == nil {
+		return nil, fmt.Errorf("plugin-fixture: host unavailable")
+	}
+	conv, ok := pluginsdk.AgentConversations(host)
+	if !ok {
+		return nil, fmt.Errorf("plugin-fixture: host does not support AgentConversations")
+	}
+
+	// 1. Ensure — idempotent create-or-get.
+	descriptor, ensureStatus, err := conv.Ensure(ctx, pluginsdk.AgentConversationSpec{
+		WorkspaceID:     workspaceID,
+		ConversationKey: conversationProbeKey,
+		BasePrompt:      "You are the fixture coordinator.",
+		AgentProfileID:  "",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("plugin-fixture: EnsureAgentConversation: %w", err)
+	}
+
+	// 2. Dispatch with a unique occurrence key.
+	occurrenceKey := fmt.Sprintf("probe-%d", time.Now().UnixNano())
+	dispatch, err := conv.Dispatch(ctx, workspaceID, conversationProbeKey,
+		"Fixture probe: test the conversation dispatch.",
+		occurrenceKey,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("plugin-fixture: DispatchAgentConversation: %w", err)
+	}
+
+	// 3. Clean up — delete the conversation we created.
+	deletedCount, err := conv.Delete(ctx, workspaceID, conversationProbeKey)
+	if err != nil {
+		return nil, fmt.Errorf("plugin-fixture: DeleteAgentConversation: %w", err)
+	}
+
+	result := map[string]any{
+		"ensure_status":         ensureStatus,
+		"task_id":               descriptor.TaskID,
+		"session_id":            descriptor.SessionID,
+		"workspace_id":          descriptor.WorkspaceID,
+		"conversation_key":      descriptor.ConversationKey,
+		"agent_profile_id":      descriptor.AgentProfileID,
+		"dispatch_status":       dispatch.Status,
+		"dispatch_session_id":   dispatch.SessionID,
+		"deleted_count":         deletedCount,
+		"descriptor_task_id":    dispatch.Descriptor.TaskID,
+		"descriptor_session_id": dispatch.Descriptor.SessionID,
+	}
+	body, err := json.Marshal(result)
+	if err != nil {
+		return nil, fmt.Errorf("plugin-fixture: marshaling conversation probe response: %w", err)
+	}
+	return &pluginsdk.PluginActionResponse{Body: body}, nil
+}
+
+// handleConversationEnsure retains the fixture-owned conversation so the UI
+// fixture can mount the host-owned WorkspaceAgentChat against a real resolved
+// session. Plugin uninstall owns the eventual provenance-safe cleanup.
+func (p *fixturePlugin) handleConversationEnsure(ctx context.Context, workspaceID string) (*pluginsdk.PluginActionResponse, error) {
+	host := p.Host()
+	if host == nil {
+		return nil, fmt.Errorf("plugin-fixture: host unavailable")
+	}
+	conv, ok := pluginsdk.AgentConversations(host)
+	if !ok {
+		return nil, fmt.Errorf("plugin-fixture: host does not support AgentConversations")
+	}
+	descriptor, ensureStatus, err := conv.Ensure(ctx, pluginsdk.AgentConversationSpec{
+		WorkspaceID:     workspaceID,
+		ConversationKey: conversationProbeKey,
+		BasePrompt:      "You are the fixture coordinator.",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("plugin-fixture: EnsureAgentConversation: %w", err)
+	}
+	body, err := json.Marshal(map[string]any{
+		"ensure_status":    ensureStatus,
+		"task_id":          descriptor.TaskID,
+		"session_id":       descriptor.SessionID,
+		"workspace_id":     descriptor.WorkspaceID,
+		"conversation_key": descriptor.ConversationKey,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("plugin-fixture: marshaling ensured conversation: %w", err)
 	}
 	return &pluginsdk.PluginActionResponse{Body: body}, nil
 }

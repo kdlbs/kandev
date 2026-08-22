@@ -264,5 +264,11 @@
   "workflowSyncCompleted": "Ŵōŕķƒĺōŵ śŷńć ćōḿƥĺēţēď",
   "loadingSteps": "Ĺōàďĩńĝ śţēƥś…",
   "noStepsInThisWorkflow": "Ńō śţēƥś ĩń ţĥĩś ŵōŕķƒĺōŵ",
-  "selectAWorkflowFirst": "Śēĺēćţ à ŵōŕķƒĺōŵ ƒĩŕśţ"
+  "selectAWorkflowFirst": "Śēĺēćţ à ŵōŕķƒĺōŵ ƒĩŕśţ",
+  "coordinatorMonitoring": "Ćōōŕďĩńàţōŕ ḿōńĩţōŕĩńĝ",
+  "coordinatorMonitoringHelp": "Śēĺēćţ śţēƥś ţĥē ćōōŕďĩńàţōŕ śĥōũĺď ḿōńĩţōŕ àńď śēţ ƥēŕ-śţēƥ ƥŕōḿƥţś.",
+  "noStepsToMonitor": "Ńō ŵōŕķƒĺōŵ śţēƥś ţō ḿōńĩţōŕ.",
+  "coordinatorStepPromptPlaceholder": "Ōƥţĩōńàĺ ƥŕōḿƥţ ƒōŕ ţĥĩś śţēƥ...",
+  "failedToLoadCoordinatorMonitoring": "Ƒàĩĺēď ţō ĺōàď ćōōŕďĩńàţōŕ ḿōńĩţōŕĩńĝ śēţţĩńĝś",
+  "failedToSaveCoordinatorMonitoring": "Ƒàĩĺēď ţō śàvē ćōōŕďĩńàţōŕ ḿōńĩţōŕĩńĝ śēţţĩńĝś"
 }

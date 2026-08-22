@@ -122,13 +122,14 @@ func (s *Service) listQuickChatTasks(ctx context.Context, workspaceID string) ([
 }
 
 // IsRestorableQuickChatTask reports whether a task backs a quick-chat tab.
-// Workflow-bound and automation-run tasks are ephemeral for other reasons and
-// must never surface in the tab strip.
+// Workflow-bound, automation-run, and plugin-managed conversation tasks
+// are never surfaced in the tab strip.
 func IsRestorableQuickChatTask(task *models.Task) bool {
 	return task != nil &&
 		task.IsEphemeral &&
 		task.WorkflowID == "" &&
-		task.Origin != models.TaskOriginAutomationRun
+		task.Origin != models.TaskOriginAutomationRun &&
+		!IsManagedConversationTask(task)
 }
 
 func quickChatLastActivityAt(task *models.Task, primary *models.TaskSession) time.Time {

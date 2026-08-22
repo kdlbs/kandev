@@ -156,13 +156,19 @@ func workflowModelToDTO(w *taskmodels.Workflow) pluginsdk.Workflow {
 	}
 }
 
-func workflowStepModelToDTO(s *wfmodels.WorkflowStep) pluginsdk.WorkflowStep {
+// workflowStepModelToDTO builds the wire DTO for one workflow step, merging
+// in monitoring the caller already resolved for this step (zero value when
+// the step was never checked in Settings > Workspace > Workflow
+// configuration).
+func workflowStepModelToDTO(s *wfmodels.WorkflowStep, monitoring wfmodels.CoordinatorStepMonitor) pluginsdk.WorkflowStep {
 	return pluginsdk.WorkflowStep{
-		ID:         s.ID,
-		WorkflowID: s.WorkflowID,
-		Name:       s.Name,
-		Position:   int32(s.Position),
-		StageType:  string(s.StageType),
+		ID:                   s.ID,
+		WorkflowID:           s.WorkflowID,
+		Name:                 s.Name,
+		Position:             int32(s.Position),
+		StageType:            string(s.StageType),
+		CoordinatorMonitored: monitoring.Selected,
+		CoordinatorPrompt:    monitoring.Prompt,
 	}
 }
 

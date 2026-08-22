@@ -916,6 +916,15 @@ func startGatewayAndServe(
 		services.Plugins.SetWriteDeps(messenger, pluginsTaskStarterAdapter{orch: orchestratorSvc, log: log})
 	}
 
+	// Wire the agent-conversation service's runtime dispatcher for the same
+	// boot-ordering reason as SetWriteDeps just above: AgentConversations was
+	// constructed before the orchestrator existed, so a scheduled coordinator
+	// wake could not previously reach the real agent runtime — Dispatch
+	// returns Unavailable until this line runs.
+	if services.AgentConversations != nil {
+		SetAgentConversationsDispatcher(services.AgentConversations, services.Task, orchestratorSvc, log)
+	}
+
 	// ============================================
 	// OFFICE FEATURES + GLOBAL RUN SCHEDULING
 	// ============================================

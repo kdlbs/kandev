@@ -1809,6 +1809,31 @@ func (r *Repository) ListTasksByWorkspaceWithArchiveMode(ctx context.Context, wo
 	return tasks, total, nil
 }
 
+// ListEphemeralTasksAllWorkspaces returns every ephemeral task across every
+// workspace, unpaginated. Used by plugin uninstall (Service.DeleteAllForPlugin)
+// to find every managed conversation a plugin owns regardless of which
+// workspace it lives in — ListTasksByWorkspace cannot answer that because it
+// always scopes to one workspace_id. Filtering on the boolean is_ephemeral
+// column (rather than a JSON metadata predicate) keeps this portable across
+// SQLite and Postgres; callers narrow further (e.g. by plugin ownership
+// metadata) in application code.
+func (r *Repository) ListEphemeralTasksAllWorkspaces(ctx context.Context) ([]*models.Task, error) {
+	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListEphemeralTasksAllWorkspaces")
+	defer span.End()
+
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT `+taskSelectColumns("t")+`
+		FROM tasks t
+		WHERE t.is_ephemeral = 1`+andNotAutomationOriginT+`
+	`))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	return r.scanTasks(rows)
+}
+
 // queryAllTasks fetches all tasks (no search) for a workspace with pagination.
 func (r *Repository) queryAllTasks(ctx context.Context, workspaceID, taskFilter, workflowID, repositoryID string, pageSize, offset int, sort string) (*sql.Rows, int, error) {
 	args := []interface{}{workspaceID}

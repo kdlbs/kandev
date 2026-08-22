@@ -8,6 +8,8 @@ import type {
   ListWorkflowsResponse,
   ListTasksResponse,
   ListWorkflowStepsResponse,
+  ListCoordinatorMonitoringResponse,
+  SetCoordinatorMonitoringRequest,
   RepositoryDiscoveryResponse,
   ListRepositoriesResponse,
   LocalRepositoryStatusResponse,
@@ -451,6 +453,30 @@ export async function listWorkflowStepsAction(
     steps: (response.steps ?? []).map(transformWorkflowStep),
     total: response.steps?.length ?? 0,
   };
+}
+
+// Coordinator monitoring: host-owned per-step monitoring policy (checked
+// steps + custom prompts), read by the Coordinator plugin through a
+// capability-scoped Host API. See docs/specs/coordinator-plugin/spec.md.
+export async function getCoordinatorMonitoringAction(
+  workflowId: string,
+): Promise<ListCoordinatorMonitoringResponse> {
+  return fetchJson<ListCoordinatorMonitoringResponse>(
+    `${apiBaseUrl}/api/v1/workflows/${workflowId}/coordinator-monitoring`,
+  );
+}
+
+export async function setCoordinatorMonitoringAction(
+  workflowId: string,
+  payload: SetCoordinatorMonitoringRequest,
+): Promise<ListCoordinatorMonitoringResponse> {
+  return fetchJson<ListCoordinatorMonitoringResponse>(
+    `${apiBaseUrl}/api/v1/workflows/${workflowId}/coordinator-monitoring`,
+    {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    },
+  );
 }
 
 export async function createWorkflowStepAction(payload: {

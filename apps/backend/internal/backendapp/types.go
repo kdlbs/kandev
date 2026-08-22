@@ -112,6 +112,11 @@ type Services struct {
 	// registry, event delivery, health monitoring). Always constructed
 	// (non-nil) when initialization succeeds.
 	Plugins *plugins.Service
+	// AgentConversations backs the agent_conversation Host capability
+	// (Ensure/Dispatch/Delete managed workspace-agent conversations). Nil
+	// when Plugins is nil. Its runtime dispatcher is wired late, once the
+	// orchestrator exists — see SetAgentConversationsDispatcher.
+	AgentConversations *taskservice.AgentConversationService
 	// GitCredentials is the shared provider-neutral lease broker used by the
 	// GitHub HTTP endpoint and task executor helper leases.
 	GitCredentials *gitcredentials.Broker

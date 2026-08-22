@@ -307,8 +307,11 @@ func TestHostData_Messages(t *testing.T) {
 
 func TestHostData_WorkflowsAndSteps(t *testing.T) {
 	impl := &dataRecordingHost{
-		workflows:     []Workflow{{ID: "wf-1", WorkspaceID: "ws-1", Name: "Default"}},
-		workflowSteps: []WorkflowStep{{ID: "step-1", WorkflowID: "wf-1", Name: "Review"}},
+		workflows: []Workflow{{ID: "wf-1", WorkspaceID: "ws-1", Name: "Default"}},
+		workflowSteps: []WorkflowStep{
+			{ID: "step-1", WorkflowID: "wf-1", Name: "Review", CoordinatorMonitored: true, CoordinatorPrompt: "Check the diff for missing tests."},
+			{ID: "step-2", WorkflowID: "wf-1", Name: "QA"},
+		},
 	}
 	host := dialHostOverBufconn(t, impl)
 
@@ -321,6 +324,13 @@ func TestHostData_WorkflowsAndSteps(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, impl.workflowSteps, steps)
 	require.Equal(t, "wf-1", impl.lastWorkflowID)
+	// Explicit assertions (not just the struct-equality above) so a future
+	// field reordering or accidental drop of coordinator_monitored/
+	// coordinator_prompt from the wire message fails obviously here.
+	require.True(t, steps[0].CoordinatorMonitored)
+	require.Equal(t, "Check the diff for missing tests.", steps[0].CoordinatorPrompt)
+	require.False(t, steps[1].CoordinatorMonitored, "an unchecked step must round-trip as unmonitored")
+	require.Empty(t, steps[1].CoordinatorPrompt)
 }
 
 func TestHostData_AgentProfiles(t *testing.T) {

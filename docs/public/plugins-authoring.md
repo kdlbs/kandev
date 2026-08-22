@@ -2014,6 +2014,93 @@ An empty selection is implicit "All" for that section: `matches` is only
 called once at least one option is selected, and a `matches` that throws is
 caught, logged, and treated as non-matching for that task.
 
+### 7. Workspace agent (coordinator-style) plugin
+
+A workspace-agent plugin (such as the board coordinator) runs an ongoing
+orchestration loop backed by a hidden, workflowless ephemeral task/session.
+It does not appear as a Kanban card, task-list row, or Quick Chat tab. The
+pattern uses three host contracts: the `agent_conversation` gRPC capability,
+the frontend `host.ui.WorkspaceAgentChat` component, and the Integrations
+sidebar section via `registerNavItem`.
+
+The backend declares `capabilities: { agent_conversation: true }` in
+manifest.yaml, then calls:
+
+1. **`EnsureAgentConversation`** - idempotent create-or-get the hidden
+   task/session for `(workspace_id, conversation_key)`. The returned
+   `session_id` and `task_id` are stable across restarts.
+2. **`DispatchAgentConversation`** - send cycle prompts with a stable
+   `occurrence_key` for idempotency. A busy backing session returns
+   `skipped_busy`; the plugin schedules its next eligible occurrence rather
+   than accumulating queued heartbeats.
+3. **Host data API reads** through `Host.Workspaces()`, `Host.Workflows()`,
+   `Host.WorkflowSteps()`, `Host.Tasks()`, etc. The plugin monitors
+   workflow state between cycles.
+
+Coordinator monitoring selections and their per-step prompts are redacted
+from ordinary workflow readers. A plugin must declare both
+`api_read: ["workflows"]` and `agent_conversation: true` to receive those
+fields from `ListSteps`.
+
+The frontend registers an integration nav item and a route that renders
+`host.ui.WorkspaceAgentChat`:
+
+```js
+registry.registerNavItem({
+  id: "coordinator",
+  label: "Coordinator",
+  path: "/plugins/coordinator",
+  icon: "robot",
+  section: "integrations",
+});
+
+registry.registerRoute("/plugins/coordinator", CoordinatorPage, {
+  topbar: {
+    title: "Coordinator",
+    subtitle: "Board orchestration",
+    icon: "robot",
+  },
+});
+```
+
+The `CoordinatorPage` component calls `host.api.invokeAction` to get the
+resolved `sessionId` for its workspace and conversation key, then renders
+`WorkspaceAgentChat`:
+
+```jsx
+function CoordinatorPage() {
+  const workspaceId = host.context.getActiveWorkspaceId();
+  const [sessionId, setSessionId] = useState(null);
+
+  useEffect(() => {
+    if (!workspaceId) return;
+    host.api.invokeAction("conversations.ensure", { workspaceId })
+      .then((res) => setSessionId(res.sessionId));
+  }, [workspaceId]);
+
+  if (!sessionId) return <Skeleton />;
+  return host.jsx(host.ui.WorkspaceAgentChat, {
+    workspaceId,
+    conversationKey: "coordinator",
+    sessionId,
+    placeholderOverride: "Ask the coordinator...",
+  });
+}
+```
+
+This pattern requires the manifest to declare:
+- `capabilities: { agent_conversation: true }`
+- The action `conversations.ensure` (scope: workspace) that resolves a
+  managed conversation.
+- `ui.bundle` for the frontend component.
+- An `Integrations` section nav item (not a task).
+
+The backing task/session is hidden from every kanban and task list, expires
+only through explicit `DeleteAgentConversation`, and carries
+server-stamped `source = "plugin:<id>"` provenance. See the
+[Agent conversation contract](../plans/plugins/GRPC-CONTRACT.md#5a-agent-conversation-contract)
+for the full gRPC contract and PLUGIN-API.md for `WorkspaceAgentChat`.
+
 ## Build, package, install, and test
 
 ### Plugin repository
