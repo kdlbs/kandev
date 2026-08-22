@@ -2,6 +2,8 @@ name: Update managed runtime pins
 
 on:
   schedule:
+    # Refresh the reviewed runtime pins every Monday at 06:17 UTC, then open
+    # or refresh the single grouped updater PR when a stable version changes.
     - cron: "17 6 * * 1"
   workflow_dispatch:
 
