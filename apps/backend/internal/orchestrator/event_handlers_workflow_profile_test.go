@@ -1090,7 +1090,12 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 		}
 		sg.steps["step2"] = step
 
-		agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+		agentMgr := &mockAgentManager{
+			repoForExecutionLookup: repo,
+			launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+				return &executor.LaunchAgentResponse{AgentExecutionID: "workflow-on-enter-execution"}, nil
+			},
+		}
 		log := testLogger()
 		exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
 		sched := scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.SchedulerConfig{})
