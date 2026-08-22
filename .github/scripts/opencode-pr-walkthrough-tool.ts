@@ -12,9 +12,15 @@ export default tool({
   },
   async execute(args, context) {
     const helper = path.join(context.worktree, ".opencode-walkthrough", "render")
+    const sourceEnv = globalThis.process.env
+    const childEnv = Object.fromEntries(
+      ["PATH", "PR_NUMBER", "PR_TITLE", "PR_URL", "PR_REPO", "PR_BASE", "PR_HEAD"]
+        .filter((name) => sourceEnv[name] !== undefined)
+        .map((name) => [name, sourceEnv[name] as string]),
+    )
     const child = Bun.spawn(["python3", helper], {
       cwd: context.worktree,
-      env: { ...globalThis.process.env },
+      env: childEnv,
       stdin: new Blob([args.walkthrough]),
       stdout: "pipe",
       stderr: "pipe",

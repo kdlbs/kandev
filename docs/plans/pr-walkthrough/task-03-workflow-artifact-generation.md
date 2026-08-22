@@ -10,11 +10,11 @@ spec: "../../specs/pr-walkthrough/spec.md"
 
 # Task 03: Workflow artifact generation
 
-Add a dedicated PR walkthrough workflow with a generation job. The job
-checks out the immutable PR head for context, uses only base-commit copies of
-the skill and renderer, gives OpenCode one narrow trusted rendering tool, and
-uploads the agent-generated files and logs for the separate R2 publication
-job.
+Add a dedicated PR walkthrough workflow with a generation job. The job checks
+out the immutable base commit, fetches the PR head only as a Git object, uses
+base-commit copies of the skill and helpers, gives OpenCode narrow trusted
+rendering and PR-file tools, and uploads the agent-generated files and logs for
+the separate R2 publication job.
 
 - **Acceptance:** A non-draft authorized pull request event invokes OpenCode,
   creates distinct `docs/pr-walkthrough/pr-<number>.json` and `.html` files,
@@ -25,10 +25,11 @@ job.
   modify source. OpenCode may invoke only the base-controlled rendering
   adapter, which writes the fixed walkthrough outputs. The job does not request
   `id-token`, hosting credentials, R2 credentials, or GitHub write permissions.
-- **Acceptance:** A contract test covers the trigger, immutable checkout,
-  trusted base assets, read-only agent permissions, output paths, artifact
-  upload, and generation-only boundary. The artifact handoff is explicit for
-  the dependent R2 publication job.
+- **Acceptance:** A contract test covers the trigger, immutable base checkout,
+  head-object fetch, constrained PR-file reads, trusted base assets, read-only
+  agent permissions, output paths, artifact upload, and generation-only
+  boundary. The artifact handoff is explicit for the dependent R2 publication
+  job.
 - **Acceptance:** The workflow uses `PR_WALKTHROUGH_ENABLED`, the
   `opencode-go/muse-spark-1.2-contributor#high` model reference and the model's
   native high-reasoning variant. The normal review workflow remains
@@ -68,10 +69,12 @@ job preserves logs and outputs as a uniquely keyed artifact, including on
 failure.
 
 The three OpenCode jobs now share a base-SHA-materialized setup action with one
-version and checksum. Walkthrough artifacts use a visible staging directory and
-fail when empty. Job-specific concurrency prevents a synchronize run from
-cancelling one-shot generation, and the walkthrough label no longer runs the
-normal code-review job.
+version and checksum. The walkthrough generation worktree stays on the trusted
+base commit. A bounded helper reads regular UTF-8 files from the immutable PR
+head Git object without exposing PR-controlled filesystem entries. Walkthrough
+artifacts use a visible staging directory and fail when empty. Workflow-level
+per-PR concurrency serializes generation, publication, and linking, and the
+walkthrough label no longer runs the normal code-review job.
 
 The walkthrough has its own enable variable and uses the Muse Spark contributor
 model with its native high-reasoning variant. The pinned OpenCode 1.17.7 CLI

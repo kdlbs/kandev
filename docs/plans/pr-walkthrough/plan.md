@@ -112,10 +112,10 @@ environment variables. Do not pass the bucket-scoped R2 Object Read & Write
 credentials to `cloudflare/wrangler-action`; those credentials are for the R2
 S3-compatible API. The existing Pages `CLOUDFLARE_API_TOKEN` remains separate.
 
-After upload, run an object metadata check and a public HTTPS GET against the
-reported URL. Export the validated URL for the dependent link job and write it
-to the workflow job summary. Do not upload the JSON artifact to the public
-bucket. The publication job itself has no GitHub write permission.
+After upload, run an object metadata check and a bounded-retry public HTTPS GET
+against the reported URL. Export the validated URL for the dependent link job
+and write it to the workflow job summary. Do not upload the JSON artifact to
+the public bucket. The publication job itself has no GitHub write permission.
 
 ### Pull request description link job
 
@@ -143,8 +143,9 @@ retention would require a later merge-promotion job.
 
 Add `.github/scripts/pr-walkthrough-workflow-contract_test.py` and wire it into
 `.github/workflows/lint-action-pinning.yml`. The contract test will assert the
-event gates, exact head checkout, trusted base-commit materialization, narrow
-OpenCode permissions, trusted metadata binding, generation output paths,
+event gates, exact base checkout, immutable head-object fetch, constrained
+PR-head file reads, narrow OpenCode permissions, trusted metadata binding,
+generation output paths,
 artifact handoff, R2 publication command, required secret/variable names,
 public URL validation, isolated PR-body write permissions, trusted helper use,
 and the independently gated dedicated workflow boundary.

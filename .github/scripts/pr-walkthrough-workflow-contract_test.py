@@ -12,7 +12,9 @@ REVIEW_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "opencode-code-review.ym
 LINT_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "lint-action-pinning.yml"
 SETUP_OPENCODE_ACTION = REPO_ROOT / ".github" / "actions" / "setup-opencode" / "action.yml"
 OPENCODE_RENDER_TOOL = REPO_ROOT / ".github" / "scripts" / "opencode-pr-walkthrough-tool.ts"
+OPENCODE_READ_TOOL = REPO_ROOT / ".github" / "scripts" / "opencode-pr-file-tool.ts"
 PR_BODY_HELPER = REPO_ROOT / "scripts" / "pr-walkthrough-pr-body"
+PR_FILE_HELPER = REPO_ROOT / "scripts" / "pr-walkthrough-read-file"
 
 
 def workflow_job(workflow: str, name: str) -> str:
@@ -70,11 +72,14 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
         self.assertIn('--model "$PR_WALKTHROUGH_MODEL"', self.generation)
         self.assertNotIn("reasoningEffort", self.generation)
 
-    def test_generation_checks_out_exact_head_without_credentials(self) -> None:
-        self.assertIn("ref: ${{ github.event.pull_request.head.sha }}", self.generation)
+    def test_generation_keeps_untrusted_head_out_of_secret_bearing_workspace(self) -> None:
+        self.assertIn("ref: ${{ github.event.pull_request.base.sha }}", self.generation)
+        self.assertNotIn("ref: ${{ github.event.pull_request.head.sha }}", self.generation)
         self.assertIn("fetch-depth: 0", self.generation)
         self.assertIn("persist-credentials: false", self.generation)
-        self.assertIn('test "$(git rev-parse HEAD)" = "$HEAD_SHA"', self.generation)
+        self.assertIn('test "$(git rev-parse HEAD)" = "$BASE_SHA"', self.generation)
+        self.assertIn('git fetch --no-tags --depth=1 origin "$HEAD_SHA"', self.generation)
+        self.assertIn('test "$(git rev-parse FETCH_HEAD)" = "$HEAD_SHA"', self.generation)
 
     def test_generation_uses_trusted_base_skill_renderer_and_helper(self) -> None:
         for path in (
@@ -82,7 +87,9 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
             ".agents/skills/pr-walkthrough/references/build.py",
             ".agents/skills/pr-walkthrough/references/shell.html",
             "scripts/pr-walkthrough-render",
+            "scripts/pr-walkthrough-read-file",
             ".github/scripts/opencode-pr-walkthrough-tool.ts",
+            ".github/scripts/opencode-pr-file-tool.ts",
         ):
             self.assertIn(f'git show "$BASE_SHA:{path}"', self.generation)
         self.assertIn("git diff --find-renames --find-copies", self.generation)
@@ -92,9 +99,11 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
         self.assertIn('permission:\n            "*": deny', self.generation)
         for allowed in ("read: allow", "glob: allow", "grep: allow"):
             self.assertIn(allowed, self.generation)
+        self.assertIn("external_directory: deny", self.generation)
         self.assertIn("--agent github-pr-walkthrough", self.generation)
         self.assertIn("--file .opencode-walkthrough/guidelines.md", self.generation)
         self.assertIn("render_pr_walkthrough: allow", self.generation)
+        self.assertIn("read_pr_file: allow", self.generation)
         self.assertNotIn("CLOUDFLARE_R2", self.generation)
         self.assertNotIn("pull-requests: write", self.generation)
 
@@ -103,6 +112,9 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
         tool = OPENCODE_RENDER_TOOL.read_text(encoding="utf-8")
         self.assertIn('".opencode-walkthrough", "render"', tool)
         self.assertIn('Bun.spawn(["python3", helper]', tool)
+        self.assertIn("const childEnv", tool)
+        self.assertNotIn("globalThis.process.env }", tool)
+        self.assertNotIn("OPENCODE_API_KEY", tool)
         self.assertNotIn("args.command", tool)
         for value in (
             "PR_NUMBER: ${{ github.event.pull_request.number }}",
@@ -113,6 +125,17 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
             "PR_HEAD: ${{ github.event.pull_request.head.ref }}",
         ):
             self.assertIn(value, self.generation)
+
+    def test_pr_head_reader_rejects_filesystem_access_and_uses_fixed_helper(self) -> None:
+        self.assertTrue(OPENCODE_READ_TOOL.is_file())
+        self.assertTrue(PR_FILE_HELPER.is_file())
+        tool = OPENCODE_READ_TOOL.read_text(encoding="utf-8")
+        self.assertIn('".opencode-walkthrough", "read-file"', tool)
+        self.assertIn("Bun.spawn(", tool)
+        self.assertIn('"python3", helper', tool)
+        self.assertIn('"--head-sha", headSha', tool)
+        self.assertIn('"--path", args.path', tool)
+        self.assertNotIn("OPENCODE_API_KEY", tool)
 
     def test_generation_uploads_agent_built_outputs_and_diagnostics(self) -> None:
         self.assertIn("Verify agent-built walkthrough", self.generation)
@@ -126,12 +149,12 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
         self.assertIn("path: pr-walkthrough-artifact/", self.generation)
         self.assertIn("if-no-files-found: error", self.generation)
 
-    def test_workflow_events_do_not_cancel_different_actions_for_the_same_pr(self) -> None:
+    def test_walkthrough_runs_are_serialized_for_the_entire_pr_pipeline(self) -> None:
         workflow_header = self.workflow.split("jobs:", 1)[0]
-        self.assertNotIn("concurrency:", workflow_header)
-        self.assertIn("concurrency:", self.generation)
-        self.assertIn("github.event.action", self.generation)
-        self.assertIn("github.event.label.name", self.generation)
+        self.assertIn("concurrency:", workflow_header)
+        self.assertIn("group: pr-walkthrough-${{ github.event.pull_request.number }}", workflow_header)
+        self.assertIn("cancel-in-progress: true", workflow_header)
+        self.assertNotIn("concurrency:", self.generation)
         self.assertIn("concurrency:", self.same_repo_review)
         self.assertIn("concurrency:", self.fork_review)
 
@@ -203,6 +226,10 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
 
     def test_publication_validates_public_url_before_linking(self) -> None:
         self.assertIn("curl --fail", self.publication)
+        self.assertIn("--retry 5", self.publication)
+        self.assertIn("--retry-all-errors", self.publication)
+        self.assertIn("--retry-delay 5", self.publication)
+        self.assertIn("--retry-max-time 120", self.publication)
         self.assertIn('cmp -- "$HTML_PATH" "$FETCHED_PATH"', self.publication)
         self.assertIn("GITHUB_STEP_SUMMARY", self.publication)
         self.assertIn("https://walkthrough.kandev.ai", self.publication)
@@ -229,6 +256,7 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
         for command in (
             "python3 .github/scripts/pr-walkthrough-workflow-contract_test.py",
             "python3 scripts/pr-walkthrough-pr-body.test.py",
+            "python3 scripts/pr-walkthrough-read-file.test.py",
         ):
             self.assertIn(command, lint_workflow)
 

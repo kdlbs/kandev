@@ -1,11 +1,11 @@
 ---
 name: pr-walkthrough
-description: Generate a self-contained HTML walkthrough for a pull request. Use when the user wants a visual, scrollable page that explains a PR's problem, approach, architecture, key code changes, data flow, and trade-offs for reviewers. Trigger on "walkthrough for this PR", "explain this PR visually", "generate a PR walkthrough", or a PR URL with a request to explain it. Not for code review: do not load this skill to critique a PR, post review findings, or approve or request changes. Use a code-review skill for that.
+description: Generate a single-file HTML walkthrough for a pull request. Use when the user wants a visual, scrollable page that explains a PR's problem, approach, architecture, key code changes, data flow, and trade-offs for reviewers. Trigger on "walkthrough for this PR", "explain this PR visually", "generate a PR walkthrough", or a PR URL with a request to explain it. Not for code review: do not load this skill to critique a PR, post review findings, or approve or request changes. Use a code-review skill for that.
 ---
 
 # PR Walkthrough
 
-Generate a single self-contained HTML page that orients a reviewer to a pull request. The page is a vertical, center-contained "story": the reviewer scrolls from the problem, through the architecture and the key code changes, to the data model and the trade-offs.
+Generate one HTML file that orients a reviewer to a pull request. The page is a vertical, center-contained "story": the reviewer scrolls from the problem, through the architecture and the key code changes, to the data model and the trade-offs.
 
 This skill is **not** a code-review skill. Do not produce review findings, approve/request-changes verdicts, or a full critique. Explain the change so a reviewer understands it fast.
 
@@ -45,7 +45,7 @@ The caller extracts and validates this block before invoking the renderer. Keep
 the JSON object complete and use the PR number supplied by the caller. Do not
 include Markdown fences around the block.
 
-The HTML page loads from `file://` with no dev server. All runtime code (Tailwind, Mermaid, Marked, DOMPurify, Shiki) loads from pinned CDNs. Marked output is sanitized with DOMPurify before it goes into the page. The `build.py` step runs only at generation time; it adds no runtime dependency to the page.
+The HTML page loads from `file://` with no dev server. Runtime code (Tailwind, Mermaid, Marked, DOMPurify, Shiki) loads from exact-version CDN URLs owned by the fixed shell. Marked output is sanitized with DOMPurify before it goes into the page. The `build.py` step runs only at generation time; it adds no runtime dependency to the page.
 
 ## Writing style: Simplified Technical English (ASD-STE100)
 

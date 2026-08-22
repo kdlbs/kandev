@@ -15,6 +15,7 @@ import json
 import html
 import hashlib
 from pathlib import Path
+from urllib.parse import urlparse
 
 HERE = Path(__file__).resolve().parent
 SHELL = HERE / "shell.html"
@@ -61,7 +62,11 @@ def sha256_hex(s):
 def file_url(change, pr):
     """The GitHub link for a change: an explicit URL, or the diff anchor."""
     if change.get("file_url"):
-        return change["file_url"]
+        value = change["file_url"]
+        parsed = urlparse(value)
+        require(parsed.scheme in {"http", "https"} and bool(parsed.netloc),
+                "file_url must be an HTTP or HTTPS URL")
+        return value
     return f'{pr["url"]}/files#diff-{sha256_hex(change["file"])}'
 
 

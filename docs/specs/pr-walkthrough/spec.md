@@ -84,14 +84,18 @@ merge.
 ## Permissions
 
 - The workflow may read pull request metadata and repository contents.
-- The selected agent may read the checked-out pull request and repository
-  context, but it may not run arbitrary shell commands, modify source files,
+- The selected agent reads the trusted base checkout and attached diff. A
+  narrow base-controlled tool may read bounded regular UTF-8 files directly
+  from the immutable pull request head Git object. The agent may not run
+  arbitrary shell commands, read outside the trusted worktree, modify source files,
   invoke subagents, fetch external URLs, commit, push, or publish GitHub
   changes. A managed runner may expose a narrow trusted-renderer tool that
   writes only the fixed walkthrough JSON and HTML paths.
-- The workflow uses the trusted base-commit copy of the walkthrough skill,
-  renderer, and managed rendering adapter. Pull request changes cannot replace
-  those instructions or executable generation components for the current run.
+- The workflow checks out only the trusted base commit in the secret-bearing
+  worktree. It fetches the event head SHA as a Git object without checking it
+  out, and uses base-commit copies of the walkthrough skill, renderer, managed
+  rendering adapter, and constrained file reader. Pull request changes cannot
+  replace those instructions or executable generation components.
 - The agent invokes the fixed renderer before it finishes. The workflow only
   verifies and packages the ignored walkthrough output directory.
 - The R2 publishing job receives only the bucket-scoped S3-compatible R2
@@ -117,8 +121,9 @@ merge.
 - If optional browser validation is unavailable on the runner, the workflow
   still validates the generated file structurally and reports live browser
   rendering as unverified. HTML generation itself remains a required check.
-- If the R2 upload, object metadata validation, or public URL check fails, the
-  workflow fails and does not report the walkthrough as published.
+- If the R2 upload, object metadata validation, or bounded-retry public URL
+  check fails, the workflow fails and does not report the walkthrough as
+  published.
 - If the PR body contains malformed, duplicate, or non-leading walkthrough
   markers, the link job fails closed and does not rewrite contributor content.
 
@@ -146,6 +151,9 @@ not from merge time.
 - **GIVEN** two pull requests use different numbers, **WHEN** both jobs run,
   **THEN** each output filename and R2 object key is distinct and neither run
   overwrites the other's result.
+- **GIVEN** two walkthrough triggers target the same pull request, **WHEN** the
+  newer workflow starts, **THEN** per-PR workflow concurrency cancels the older
+  pipeline so publication and PR linking cannot race across runs.
 - **GIVEN** the agent submits malformed JSON or a review verdict instead of the
   walkthrough contract, **WHEN** the managed renderer rejects it, **THEN** the
   agent must correct the data; the job fails without publishing if no valid

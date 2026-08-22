@@ -18,7 +18,8 @@ own.
 After R2 publication and public validation succeed, a separate workflow job
 places a marker-delimited walkthrough callout at the beginning of the pull
 request body. The callout uses a GitHub alert and a prominent link to the
-immutable SHA-keyed walkthrough URL.
+stable SHA-keyed walkthrough URL. A label rerun may replace the bytes at that
+URL for the same head SHA.
 
 The updater owns only the content between its start and end markers. A rerun
 replaces that block in place, so the current generated walkthrough is linked

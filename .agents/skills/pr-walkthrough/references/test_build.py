@@ -283,6 +283,18 @@ class TestFileUrl(unittest.TestCase):
         self.assertTrue(url.startswith("https://h/pr/1/files#diff-"))
         self.assertEqual(len(url.split("diff-")[1]), 64)
 
+    def test_executable_scheme_is_rejected(self):
+        with self.assertRaises(build.BuildError):
+            build.file_url(
+                {"file": "x", "file_url": "javascript:alert(1)"},
+                {"url": "https://h/pr/1"})
+
+    def test_non_http_scheme_is_rejected(self):
+        with self.assertRaises(build.BuildError):
+            build.file_url(
+                {"file": "x", "file_url": "data:text/html,payload"},
+                {"url": "https://h/pr/1"})
+
 
 class TestLayout(unittest.TestCase):
     def test_ids_assigned_and_two_column_grid(self):
@@ -413,6 +425,18 @@ class TestBuild(unittest.TestCase):
         self.assertIn("font-family: 'Geist Mono'", out)
         self.assertIn('class="wt-topbar sticky', out)
         self.assertIn('class="wt-brand-mark"', out)
+
+    def test_runtime_cdn_dependencies_use_exact_versions(self):
+        out = build.build(minimal_data())
+        for url in (
+            "https://cdn.tailwindcss.com/3.4.17",
+            "https://cdn.jsdelivr.net/npm/mermaid@11.17.0/dist/mermaid.esm.min.mjs",
+            "https://cdn.jsdelivr.net/npm/marked@12.0.2/+esm",
+            "https://cdn.jsdelivr.net/npm/dompurify@3.4.14/+esm",
+            "https://cdn.jsdelivr.net/npm/shiki@3.23.0/+esm",
+        ):
+            self.assertIn(url, out)
+        self.assertNotIn('src="https://cdn.tailwindcss.com"', out)
 
     def test_shell_has_mobile_section_navigation(self):
         out = build.build(minimal_data())

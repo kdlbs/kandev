@@ -71,8 +71,9 @@ custom domain as the externally visible URL.
 
 Added the dependent artifact-only publication job. It uploads only the HTML
 file to the configured R2 S3 endpoint using the bucket-scoped credentials,
-checks object metadata, performs a public HTTPS GET and byte comparison, and
-writes and exports the custom URL without receiving GitHub write permission.
+checks object metadata, performs a bounded-retry public HTTPS GET and byte
+comparison, and writes and exports the custom URL without receiving GitHub
+write permission.
 
 Verification: workflow contract tests passed; the publication job has no
 checkout step, and R2 secrets are scoped only to the upload step. Operator

@@ -39,14 +39,17 @@ deferred to a later merge-promotion design.
 - Walkthrough URLs survive PR merge and GitHub artifact retention.
 - R2 lifecycle cleanup is automatic and applies to all current and future
   SHA-keyed walkthrough objects.
-- Label reruns can replace the object for the same PR head without changing
-  the URL contract.
+- Label reruns can replace the object bytes for the same PR head without
+  changing its stable, commit-derived URL. The URL identifies the snapshot
+  scope, but it is not a content-addressed immutable object.
 - Per-push generation can be enabled later by adding `synchronize`; each head
   SHA will receive its own object and lifecycle cleanup will remove old ones.
 - The public bucket must contain only sanitized walkthrough HTML and must be
   served from a dedicated subdomain rather than the main app origin. A page may
-  load stable externally hosted scripts, styles, and fonts; R2 still stores one
-  HTML object per walkthrough and no separately deployed asset bundle.
+  load externally hosted scripts, styles, and fonts through exact-version URLs
+  controlled by the trusted shell. These third-party hosts are an explicit
+  runtime trust dependency. R2 still stores one HTML object per walkthrough
+  and no separately deployed asset bundle.
 - GitHub Actions needs two R2 secrets in addition to non-secret bucket,
   endpoint, and base-URL variables.
 
