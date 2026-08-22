@@ -161,8 +161,8 @@ curated React, UI, and app-store surface.
   internal/... packages or call undocumented REST endpoints.
 - state gates Host state; secrets gates RevealSecret and plugin-owned secret
   methods; each api_read resource gates its reader; api_write gates
-  task/message mutations; agent_invoke gates utility-agent calls; and
-  capabilities.events controls event delivery.
+  task/message mutations and interaction responses; agent_invoke gates
+  utility-agent calls; and capabilities.events controls event delivery.
 - GetConfig and EmitEvent are ungated. GetConfig returns this plugin's own
   config, including cleartext secret fields, so do not log or commit it.
 - Declared webhook keys default to public. Set `webhooks[].access: authenticated`
@@ -505,6 +505,8 @@ subscription vocabulary and wildcard rules are in the
 | Repositories   | Repositories().List                              | api_read: repositories                                                      | List by workspace id                                                                                                                                                                        |
 | Messages       | Messages().List                                  | api_read: messages                                                          | Historical user/agent content; Kandev system blocks are stripped                                                                                                                            |
 | Message send   | Messages().Send                                  | api_write: messages                                                         | Sends a prompt to a task session and records plugin:<id> author                                                                                                                             |
+| Interactions   | Interactions().ListPending, Interactions().Get   | api_read: interactions                                                      | Durable record of agent requests still owed a human answer; Get resolves resolved ones too                                                                                                  |
+| Interaction responses | Interactions().RespondToPermission, .AnswerClarification, .CancelClarification | api_write: interactions           | Routed through the services the native UI drives; first terminal response wins                                                                                                             |
 | Utility agent  | InvokeUtilityAgent(ctx, prompt)                  | agent_invoke: true plus config_schema.utility_agent (format: utility-agent) | One-shot completion using the selected utility-agent ID; Kandev resolves that utility's enabled profile, permissions, and launch settings. Missing or stale bindings are FailedPrecondition |
 
 The Go signatures, filters, DTOs, and pagination types live in
@@ -674,6 +676,10 @@ Declare `api_read: ["executor_profiles"]` before using this reader. A host that
 does not implement the extension returns `ok == false`; an implemented reader
 without the capability returns `PermissionDenied` from `List`.
 
+Pending agent interactions are an additive, optional Host extension too;
+discover it the same way with `pluginsdk.Interactions(host)`. See "Pending
+agent interactions" below for the contract.
+
 **Host state** is a small key/value store kandev keeps for your plugin in
 its own database. Each entry is addressed by a `(scope, scopeID, key)`
 triple and holds a JSON object (`map[string]any`): `SetState` upserts one,
@@ -712,6 +718,63 @@ conversation content (capability `api_read:messages`). Filter by `SessionIDs`,
 `content` has kandev's injected `<kandev-system>` blocks stripped; a plugin
 never sees raw system prompts.
 
+### Pending agent interactions
+
+An agent sometimes stops and waits for a person: a tool-permission request, or
+a structured question bundle. If your plugin surfaces attention (an inbox, a
+notifier, a dashboard badge), read that from the interaction API rather than
+from session state. `WAITING_FOR_INPUT` also describes an ordinarily completed
+turn, so a plugin that branches on state alone tells people they owe an answer
+they do not.
+
+```go
+interactions, ok := pluginsdk.Interactions(host)
+if !ok {
+    // Host predates the interaction API.
+    return nil
+}
+pending, _, err := interactions.ListPending(ctx, pluginsdk.InteractionFilter{
+    TaskIDs: []string{taskID},
+}, pluginsdk.Page{Limit: 50})
+```
+
+Each `Interaction` carries `ID` (the pending id every response keys on), `Kind`
+(`permission` or `clarification`), the task, session and turn ids, a normalized
+`Status`, timestamps, and everything needed to render a valid response:
+`Options` for a permission, `Questions` (each with its own options) for a
+clarification bundle. `AgentDisconnected` marks a still-pending clarification
+whose original waiter went away; it remains answerable, and answering it
+resumes the session in a new turn, so do not treat it as resolved.
+
+`Interactions().Get(ctx, id)` resolves any interaction, including resolved
+ones. That is how an event-driven cache reconciles: an id from an event you
+replayed or a snapshot you took before a restart still resolves to its current
+state instead of vanishing.
+
+Responding requires `api_write: ["interactions"]` and goes through the same
+services the native UI drives, so the agent actually unblocks:
+
+```go
+_, err := interactions.RespondToPermission(ctx, pluginsdk.PermissionResponse{
+    InteractionID: interaction.ID,
+    OptionID:      interaction.Options[0].OptionID,
+})
+```
+
+`OptionID` must name one of the interaction's declared options; Kandev derives
+the approve/deny outcome from that option's `Kind`, so you cannot report an
+outcome the agent never offered. Set `Cancelled: true` (with an empty
+`OptionID`) to dismiss the request instead. `AnswerClarification` takes one
+answer per question in the bundle; `CancelClarification(ctx, id, reason)`
+declines the bundle on the user's behalf and works whether or not the original
+waiter is still parked.
+
+Writes are terminal-once. The first response wins; a later attempt against an
+already-resolved interaction returns gRPC `FailedPrecondition`, and an unknown
+id returns `NotFound`. Branch on those two to tell "someone else answered
+first" apart from "my cached id is stale". Do not retry a
+`FailedPrecondition`.
+
 `host.InvokeUtilityAgent(ctx, prompt)` runs a one-shot, non-interactive LLM
 completion using the utility agent selected for this plugin in **Settings >
 Plugins > `<plugin>`** (capability `agent_invoke`), and returns its text. Declare
@@ -749,7 +812,7 @@ checked against your manifest's `capabilities` before the handler runs:
 `RevealSecret` require `capabilities.secrets: true`; `InvokeUtilityAgent`
 requires `capabilities.agent_invoke: true`; each data-reader accessor requires
 its resource in `capabilities.api_read` (e.g. `tasks`, `sessions`, `messages`,
-`workspaces`, `workflows`, `agent_profiles`, `repositories`).
+`interactions`, `workspaces`, `workflows`, `agent_profiles`, `repositories`).
 Calling one without the declared capability returns gRPC `PermissionDenied`
 with a message naming the missing capability; declare what you use.
 
@@ -758,9 +821,11 @@ with a message naming the missing capability; declare what you use.
 `api_write` is live, not advisory. Declare only the exact resource you mutate:
 `api_write: ["tasks"]` enables `host.Tasks().Create(ctx, CreateTaskInput{...})`
 and `.Update(ctx, UpdateTaskInput{...})`; `api_write: ["messages"]` enables
-`host.Messages().Send(ctx, taskID, sessionID, text)`. A blank `sessionID`
-targets the task's primary session. Send queues behind a running session or
-resumes/starts it when appropriate, returning `queued`, `sent`, or `started`.
+`host.Messages().Send(ctx, taskID, sessionID, text)`; `api_write:
+["interactions"]` enables the interaction response methods above. A blank
+`sessionID` targets the task's primary session. Send queues behind a running
+session or resumes/starts it when appropriate, returning `queued`, `sent`, or
+`started`.
 
 Task writes use Kandev's first-party service layer, so normal task events and
 browser updates occur. Kandev stamps the source as `plugin:<id>` and reserves
