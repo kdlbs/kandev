@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { usePluginRegistry } from "@/lib/plugins/registry";
+import { pluginTaskListFacetRegistrationKey, usePluginRegistry } from "@/lib/plugins/registry";
 import type { PluginTaskListFacetRegistration } from "@/lib/plugins/registry";
 import type { TaskListFacetValue } from "@/lib/plugins/types";
 import type { Task } from "@/lib/types/http";
+import { TASK_LIST_FACET_PREFIX } from "@/lib/tasks/tasks-list-options";
 
 export type ResolvedTaskListFacet = PluginTaskListFacetRegistration & { key: string };
 export type TaskFacetValues = Record<string, readonly TaskListFacetValue[]>;
@@ -12,7 +13,11 @@ export function useTaskListFacets(tasks: Task[], workspaceId: string | null) {
   const registrations = registry.getTaskListFacets();
   const registryVersion = registry.getVersion();
   const facets = useMemo(
-    () => registrations.map((facet) => ({ ...facet, key: `facet:${facet.pluginId}:${facet.id}` })),
+    () =>
+      registrations.map((facet) => ({
+        ...facet,
+        key: `${TASK_LIST_FACET_PREFIX}${pluginTaskListFacetRegistrationKey(facet)}`,
+      })),
     [registryVersion],
   );
   const [revision, setRevision] = useState(0);

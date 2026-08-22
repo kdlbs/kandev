@@ -60,6 +60,18 @@ describe("resolveTaskFacetValues", () => {
 });
 
 describe("useTaskListFacets", () => {
+  it("namespaces each facet key with its plugin and registration id", () => {
+    pluginRegistry.forPlugin(PLUGIN_ID).registerTaskListFacet({
+      id: "tags",
+      label: "Tag",
+      getValues: () => [],
+    });
+
+    const { result } = renderHook(() => useTaskListFacets(TASKS, "workspace-1"));
+
+    expect(result.current.facets.map((entry) => entry.key)).toEqual([`facet:${PLUGIN_ID}:tags`]);
+  });
+
   it("keeps healthy subscriptions active when another facet throws and cleans them up", () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const unsubscribe = vi.fn();
