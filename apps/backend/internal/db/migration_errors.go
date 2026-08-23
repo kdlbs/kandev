@@ -5,14 +5,19 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/mattn/go-sqlite3"
 )
 
 const (
-	postgresDuplicateColumn = "42701"
-	postgresDuplicateTable  = "42P07"
-	postgresDuplicateObject = "42710"
-	postgresUndefinedTable  = "42P01"
-	sqliteAlreadyExistsText = " already exists"
+	postgresDuplicateColumn      = "42701"
+	postgresDuplicateTable       = "42P07"
+	postgresDuplicateObject      = "42710"
+	postgresUndefinedTable       = "42P01"
+	postgresForeignKeyViolation  = "23503"
+	postgresSerializationFailure = "40001"
+	postgresDeadlockDetected     = "40P01"
+	sqliteAlreadyExistsText      = " already exists"
+	sqliteForeignKeyViolationMsg = "FOREIGN KEY constraint failed"
 )
 
 // IsDuplicateColumnError reports whether err means an ADD COLUMN migration has
@@ -71,4 +76,41 @@ func IsMissingTableError(err error) bool {
 		return pgErr.Code == postgresUndefinedTable
 	}
 	return strings.Contains(err.Error(), "no such table")
+}
+
+// IsForeignKeyViolation reports whether err means a write failed because it
+// referenced a row that does not exist (or no longer exists) in a
+// foreign-keyed table.
+func IsForeignKeyViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == postgresForeignKeyViolation
+	}
+	return strings.Contains(err.Error(), sqliteForeignKeyViolationMsg)
+}
+
+// IsTransientError reports whether err means a write failed for a reason
+// that is expected to clear on retry: a serialization failure or deadlock on
+// PostgreSQL, or the single-writer connection being busy/locked on SQLite.
+func IsTransientError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		switch pgErr.Code {
+		case postgresSerializationFailure, postgresDeadlockDetected:
+			return true
+		default:
+			return false
+		}
+	}
+	var sqliteErr sqlite3.Error
+	if errors.As(err, &sqliteErr) {
+		return sqliteErr.Code == sqlite3.ErrBusy || sqliteErr.Code == sqlite3.ErrLocked
+	}
+	return false
 }
