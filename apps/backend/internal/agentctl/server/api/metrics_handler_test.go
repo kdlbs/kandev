@@ -146,32 +146,76 @@ func TestHandleSystemMetrics_DiagnosticMetricsServedWhenRequested(t *testing.T) 
 	if err := json.Unmarshal(rec.Body.Bytes(), &snapshot); err != nil {
 		t.Fatalf("decode snapshot %q: %v", rec.Body.String(), err)
 	}
+
+	// Assert on the list itself, not a map keyed by ID: a collector that
+	// doesn't recognize a diagnostic ID emits its own "unknown metric" sample
+	// alongside the handler's correct one for the same ID, and collapsing
+	// into a map (last-write-wins) hides that duplication instead of
+	// catching it.
+	wantIDs := []string{
+		metrics.MetricAgentctlGoroutines,
+		metrics.MetricAgentctlGitPollMillis,
+		metrics.MetricAgentctlCreateReadyMs,
+	}
+	if len(snapshot.Metrics) != len(wantIDs) {
+		t.Fatalf("got %d metrics %+v, want exactly %d (one per requested ID)",
+			len(snapshot.Metrics), snapshot.Metrics, len(wantIDs))
+	}
+	counts := make(map[string]int, len(snapshot.Metrics))
+	for _, sample := range snapshot.Metrics {
+		counts[sample.ID]++
+	}
+	for _, id := range wantIDs {
+		if counts[id] != 1 {
+			t.Fatalf("id %q appears %d times in %+v, want exactly 1", id, counts[id], snapshot.Metrics)
+		}
+	}
+
 	byID := make(map[string]metrics.MetricSample, len(snapshot.Metrics))
 	for _, sample := range snapshot.Metrics {
 		byID[sample.ID] = sample
 	}
 
-	goroutines, ok := byID[metrics.MetricAgentctlGoroutines]
-	if !ok {
-		t.Fatalf("missing %s in response %+v", metrics.MetricAgentctlGoroutines, snapshot.Metrics)
-	}
+	goroutines := byID[metrics.MetricAgentctlGoroutines]
 	if !goroutines.Available || goroutines.Value == nil || *goroutines.Value <= 0 {
 		t.Errorf("goroutines sample = %+v, want available with a positive value", goroutines)
 	}
 
-	gitPoll, ok := byID[metrics.MetricAgentctlGitPollMillis]
-	if !ok {
-		t.Fatalf("missing %s in response %+v", metrics.MetricAgentctlGitPollMillis, snapshot.Metrics)
-	}
+	gitPoll := byID[metrics.MetricAgentctlGitPollMillis]
 	if gitPoll.Available || gitPoll.Error == "" {
 		t.Errorf("git poll sample = %+v, want unavailable with an error (no tracker started)", gitPoll)
 	}
 
-	createReady, ok := byID[metrics.MetricAgentctlCreateReadyMs]
-	if !ok {
-		t.Fatalf("missing %s in response %+v", metrics.MetricAgentctlCreateReadyMs, snapshot.Metrics)
-	}
+	createReady := byID[metrics.MetricAgentctlCreateReadyMs]
 	if createReady.Available || createReady.Error == "" {
 		t.Errorf("create-ready sample = %+v, want unavailable with an error (nil CreateReadyMillis)", createReady)
+	}
+}
+
+// TestHandleSystemMetrics_GenuinelyUnknownMetricStillReportsUnknown pins the
+// collector's fallback behaviour for an ID that is neither a known backend
+// metric nor an agentctl diagnostic one: it must still come back as exactly
+// one "unknown metric" sample, not zero (collectorMetricIDs must not filter
+// out anything besides the three diagnostic IDs) and not two (the diagnostic
+// path must not also emit something for it).
+func TestHandleSystemMetrics_GenuinelyUnknownMetricStillReportsUnknown(t *testing.T) {
+	srv := newTestServer(t)
+
+	rec := serverGet(t, srv, "/api/v1/system/metrics?metrics=nonsense")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (body %s)", rec.Code, rec.Body.String())
+	}
+	var snapshot struct {
+		Metrics []metrics.MetricSample `json:"metrics"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &snapshot); err != nil {
+		t.Fatalf("decode snapshot %q: %v", rec.Body.String(), err)
+	}
+	if len(snapshot.Metrics) != 1 {
+		t.Fatalf("got %d metrics %+v, want exactly 1", len(snapshot.Metrics), snapshot.Metrics)
+	}
+	got := snapshot.Metrics[0]
+	if got.ID != "nonsense" || got.Available || got.Error != "unknown metric" {
+		t.Errorf("sample = %+v, want {ID: nonsense, Available: false, Error: unknown metric}", got)
 	}
 }

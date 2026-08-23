@@ -23,12 +23,35 @@ func (s *Server) handleSystemMetrics(c *gin.Context) {
 	if diskPath == "" {
 		diskPath = "/"
 	}
-	snapshot := s.metricsCollector.Sample(c.Request.Context(), metricIDs, diskPath)
+	snapshot := s.metricsCollector.Sample(c.Request.Context(), collectorMetricIDs(metricIDs), diskPath)
 	snapshot.ID = "agentctl"
 	snapshot.Label = "Execution"
 	snapshot.Kind = "execution"
 	snapshot.Metrics = append(snapshot.Metrics, s.agentctlDiagnosticSamples(metricIDs)...)
 	c.JSON(http.StatusOK, snapshot)
+}
+
+// collectorMetricIDs filters the agentctl-scoped diagnostic IDs out before
+// they reach metrics.Collector.Sample. The collector doesn't recognize them
+// and would otherwise emit its own "unknown metric" sample for each one,
+// duplicating the correct sample agentctlDiagnosticSamples appends below.
+func collectorMetricIDs(metricIDs []string) []string {
+	out := make([]string, 0, len(metricIDs))
+	for _, id := range metricIDs {
+		if !isAgentctlDiagnosticMetric(id) {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+func isAgentctlDiagnosticMetric(id string) bool {
+	switch id {
+	case metrics.MetricAgentctlGoroutines, metrics.MetricAgentctlGitPollMillis, metrics.MetricAgentctlCreateReadyMs:
+		return true
+	default:
+		return false
+	}
 }
 
 // agentctlDiagnosticSamples builds MetricSample entries for the per-instance

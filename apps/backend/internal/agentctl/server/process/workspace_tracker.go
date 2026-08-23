@@ -181,8 +181,12 @@ func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
 // tracker's running count/total, regardless of whether the tick succeeded or
 // failed — see gitPollTick's deferred call site.
 func (wt *WorkspaceTracker) recordGitPollTick(d time.Duration) {
-	wt.gitPollTickCount.Add(1)
+	// Total before count: a reader racing this on the very first tick must
+	// see either "no tick yet" (count still 0) or a real duration, never a
+	// count of 1 paired with a not-yet-written total of 0 (which would report
+	// as a false "0ms" available reading instead of unavailable).
 	wt.gitPollTickTotalNanos.Add(d.Nanoseconds())
+	wt.gitPollTickCount.Add(1)
 }
 
 // GitPollTickStats returns the number of completed git poll ticks and their
