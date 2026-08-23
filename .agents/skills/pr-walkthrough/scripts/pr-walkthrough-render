@@ -10,7 +10,9 @@ import tempfile
 from pathlib import Path
 
 
-TRUSTED_DIR = Path(".opencode-walkthrough")
+SKILL_DIR = Path(__file__).resolve().parents[1]
+TRUSTED_DIR = Path(".pr-walkthrough")
+DRAFT_PATH = TRUSTED_DIR / "draft.json"
 OUTPUT_DIR = Path("docs/pr-walkthrough")
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
@@ -61,9 +63,18 @@ def bind_trusted_metadata(data: object) -> dict[str, object]:
     return data
 
 
+def load_draft() -> object:
+    if not DRAFT_PATH.is_file():
+        raise ValueError(f"fixed draft is missing: {DRAFT_PATH}")
+    try:
+        return json.loads(DRAFT_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"fixed draft is not valid JSON: {DRAFT_PATH}") from exc
+
+
 def render(data: dict[str, object]) -> tuple[Path, Path]:
-    build_script = TRUSTED_DIR / "build.py"
-    shell = TRUSTED_DIR / "shell.html"
+    build_script = SKILL_DIR / "references" / "build.py"
+    shell = SKILL_DIR / "references" / "shell.html"
     if not build_script.is_file() or not shell.is_file():
         raise ValueError("trusted walkthrough renderer assets are missing")
 
@@ -95,10 +106,12 @@ def render(data: dict[str, object]) -> tuple[Path, Path]:
 
 def main() -> int:
     try:
-        data = json.loads(sys.stdin.read())
+        if len(sys.argv) != 1:
+            raise ValueError("renderer does not accept command arguments")
+        data = load_draft()
         bound = bind_trusted_metadata(data)
         json_path, html_path = render(bound)
-    except (json.JSONDecodeError, OSError, ValueError) as exc:
+    except (OSError, ValueError) as exc:
         print(f"walkthrough render failed: {exc}", file=sys.stderr)
         return 1
     print(f"rendered {json_path} and {html_path}")

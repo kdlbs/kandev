@@ -49,6 +49,8 @@ function buildTaskRowProps(props: TaskSwitcherProps): TaskRowBaseProps {
     onTogglePin: props.onTogglePin,
     pinnedTaskIds: props.pinnedTaskIds,
     deletingTaskId: props.deletingTaskId,
+    archivingTaskId: props.archivingTaskId,
+    isArchiving: props.isArchiving,
     selectedTaskIds: props.selectedTaskIds,
     onToggleSelectTask: props.onToggleSelectTask,
     onSelectTaskRange: props.onSelectTaskRange,

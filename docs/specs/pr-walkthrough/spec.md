@@ -20,12 +20,18 @@ lifecycle policy.
 
 **Decisions:**
 [ADR-2026-08-22-pr-walkthrough-r2-hosting](../../decisions/2026-08-22-pr-walkthrough-r2-hosting.md),
-[ADR-2026-08-22-agent-owned-pr-walkthrough-rendering](../../decisions/2026-08-22-agent-owned-pr-walkthrough-rendering.md),
-[ADR-2026-08-22-pr-walkthrough-description-link](../../decisions/2026-08-22-pr-walkthrough-description-link.md)
+[ADR-2026-08-22-pr-walkthrough-filesystem-runner](../../decisions/2026-08-22-pr-walkthrough-filesystem-runner.md),
+[ADR-2026-08-22-pr-walkthrough-description-link](../../decisions/2026-08-22-pr-walkthrough-description-link.md),
+[ADR-2026-08-23-pr-walkthrough-short-urls](../../decisions/2026-08-23-pr-walkthrough-short-urls.md)
+
+**Implementation plan:**
+[Portable PR walkthrough runner fix](../../plans/pr-walkthrough-portable-runner-fix/plan.md)
 
 ## What
 
 - A project skill named `pr-walkthrough` is available to compatible agents.
+  Its directory is a self-contained, copyable package with instructions,
+  renderer assets, deterministic generation scripts, and focused tests.
 - The skill produces one JSON data file and one HTML file for a pull request:
   `docs/pr-walkthrough/pr-<number>.json` and
   `docs/pr-walkthrough/pr-<number>.html`.
@@ -38,26 +44,40 @@ lifecycle policy.
 - The generated page contains a vertical reviewer story, a dark and light
   theme, architecture and data diagrams when supplied, highlighted code, diff
   tinting, GitHub file links, an interactive code canvas, and a linear fallback
-  list.
+  list. Canvas edges use separate endpoint and node-pair lanes, and their
+  labels follow the routed edge without stacking. Horizontal code scrollbars
+  stay subtle until a reviewer hovers over or focuses a code block. Patch and
+  explicitly marked diff blocks use diff colors. Plain code blocks remain
+  neutral because they provide context rather than a change. Its top bar uses
+  the website brand mark and favicon, and its dark theme uses the
+  documentation shell's dark-gray palette.
 - The configured workflow agent generates and renders the walkthrough for a
-  non-draft same-repository pull request when it is opened, reopened, or marked
-  ready for review. OpenCode is the initial runner, but the skill and artifact
-  contract do not depend on it. A maintainer can explicitly retrigger
-  generation by adding the `generate-pr-walkthrough` label.
+  non-draft same-repository pull request when it is opened, reopened, marked
+  ready for review, or updated. OpenCode is the initial runner, but the skill
+  and artifact contract do not depend on it. A maintainer can explicitly
+  retrigger generation by adding the `generate-pr-walkthrough` label.
+- The workflow gives each runner the same fixed prompt, prepared context, draft
+  JSON path, renderer command, and final output paths. A provider change does
+  not change this contract.
+- Kandev CI uses `.pr-walkthrough/draft.json` as the provider-neutral draft
+  path. Its renderer command invokes the script bundled under
+  `.agents/skills/pr-walkthrough/scripts/`.
 - Walkthrough automation lives in `.github/workflows/pr-walkthrough.yml` and
   is enabled independently with the `PR_WALKTHROUGH_ENABLED` repository
   variable. It does not share the `OPENCODE_REVIEW_ENABLED` code-review gate.
-- The initial runner uses
-  `opencode-go/muse-spark-1.2-contributor#high`. OpenCode 1.17.7 reports native
-  reasoning support for the model and resolves `#high` to its built-in high
-  reasoning variant.
+- The initial runner uses `opencode-go/muse-spark-1.2-contributor` and its
+  built-in `high` reasoning variant. The workflow passes these values with the
+  OpenCode 1.17.7 `--model` and `--variant` options.
 - The workflow preserves the generated JSON and HTML as CI artifacts and
   uploads only the HTML to the `kandev-pr-walkthroughs` R2 bucket.
 - Each published object uses the key
-  `pr/<pull-request-number>/<head-sha>.html` and is served at
-  `https://walkthrough.kandev.ai/pr/<pull-request-number>/<head-sha>.html`.
-- The initial workflow does not regenerate on `synchronize`. Future
-  per-push generation can add that event without changing the object contract.
+  `pr/<pull-request-number>/<short-head-sha>.html`, where `short-head-sha` is
+  the first 12 lowercase hexadecimal characters of the exact head SHA. It is
+  served at
+  `https://walkthrough.kandev.ai/pr/<pull-request-number>/<short-head-sha>.html`.
+- The workflow regenerates on `synchronize` for same-repository pull request
+  updates. Each generated object remains keyed by pull request number and the
+  12-character prefix of the exact head SHA.
 - After public validation succeeds, a separate minimum-permission job prepends
   a prominent marker-owned walkthrough callout to the pull request
   description. A rerun replaces only that callout and preserves the rest of
@@ -65,9 +85,12 @@ lifecycle policy.
 
 ## Generation contract
 
-The walkthrough agent compares the exact pull request head SHA with the exact
-base SHA. It creates the JSON, invokes the trusted renderer, and corrects its
-data until both outputs pass renderer validation. The generated `pr` object
+The skill-local context helper resolves the merge base between the exact pull
+request head SHA and the exact base SHA. It prepares a patch and bounded text
+files from the immutable PR head. The walkthrough agent reads a trusted base
+checkout, the prepared patch, and the bounded head files. It creates a draft
+JSON file, invokes the trusted renderer, and corrects its data until both
+outputs pass renderer validation. The generated `pr` object
 includes the pull request number, title, URL, repository slug, base branch,
 head branch, and diff statistics when they are available. The managed runner
 binds identity and links to trusted event metadata before rendering.
@@ -81,21 +104,28 @@ The walkthrough is an explanation, not a code review. It does not approve,
 request changes, post findings, or claim that the pull request is safe to
 merge.
 
+All reusable generation logic lives in
+`.agents/skills/pr-walkthrough/`. The skill-local scripts resolve their
+renderer assets relative to that directory. A copied skill does not depend on
+`scripts/pr-walkthrough-context`, `scripts/pr-walkthrough-render`, or tests at
+the repository root. GitHub workflow, setup, publication, and PR-description
+adapters remain outside the skill because they are platform integration code.
+
 ## Permissions
 
 - The workflow may read pull request metadata and repository contents.
-- The selected agent reads the trusted base checkout and attached diff. A
-  narrow base-controlled tool may read bounded regular UTF-8 files directly
-  from the immutable pull request head Git object. The agent may not run
-  arbitrary shell commands, read outside the trusted worktree, modify source files,
-  invoke subagents, fetch external URLs, commit, push, or publish GitHub
-  changes. A managed runner may expose a narrow trusted-renderer tool that
-  writes only the fixed walkthrough JSON and HTML paths.
+- The selected agent reads the trusted base checkout and prepared context. The
+  context contains a patch, a manifest, and bounded regular UTF-8 files from
+  the immutable PR head Git object.
+- The agent can edit only one fixed draft JSON file. It can run only the fixed
+  base-controlled renderer command. It cannot run arbitrary shell commands,
+  read outside the trusted worktree, change source files, invoke subagents,
+  fetch external URLs, commit, push, or publish GitHub changes.
 - The workflow checks out only the trusted base commit in the secret-bearing
-  worktree. It fetches the event head SHA as a Git object without checking it
-  out, and uses base-commit copies of the walkthrough skill, renderer, managed
-  rendering adapter, and constrained file reader. Pull request changes cannot
-  replace those instructions or executable generation components.
+  worktree. It fetches enough history for the event head SHA to resolve the
+  merge base without checking out that SHA. It uses a base-commit copy of the
+  complete skill bundle and the runner setup action. Pull request changes
+  cannot replace these instructions or executable components.
 - The agent invokes the fixed renderer before it finishes. The workflow only
   verifies and packages the ignored walkthrough output directory.
 - The R2 publishing job receives only the bucket-scoped S3-compatible R2
@@ -113,6 +143,11 @@ merge.
 - If the selected agent command fails, exits non-zero, or does not produce both
   required walkthrough files, generation fails and the workflow records the
   diagnostic output in its CI artifacts.
+- If the workflow cannot resolve a merge base between the event SHAs, context
+  preparation fails before the agent starts.
+- If a changed PR file is unsafe, binary, oversized, or outside the total
+  context budget, the manifest records the omission. The patch remains
+  available to the agent.
 - If the JSON is missing required fields, contains invalid edges or risk data,
   includes a reserved renderer token, or otherwise violates the renderer
   contract, the renderer fails and no HTML is treated as generated.
@@ -141,13 +176,28 @@ not from merge time.
 - **GIVEN** a non-draft same-repository pull request is opened, reopened, or
   marked ready for review, **WHEN** the walkthrough job runs, **THEN** it
   creates non-empty JSON and HTML artifacts and publishes the HTML under the
-  current head SHA in R2.
+  12-character prefix of the current head SHA in R2.
+- **GIVEN** a fetched PR head, **WHEN** the workflow computes the triple-dot
+  diff, **THEN** the merge base exists and context preparation succeeds.
+- **GIVEN** a changed file contains bounded UTF-8 text, **WHEN** context is
+  prepared, **THEN** the agent reads the exact head bytes.
+- **GIVEN** a changed path is unsafe or unsupported, **WHEN** context is
+  prepared, **THEN** the manifest records the omission and no file appears.
+- **GIVEN** the agent receives the prompt, **WHEN** it generates the page,
+  **THEN** it changes only the draft and invokes only the fixed renderer.
+- **GIVEN** a future agent replaces OpenCode, **WHEN** its adapter starts the
+  walkthrough, **THEN** it receives the same prompt, context, draft path,
+  renderer command, and output contract.
+- **GIVEN** a user copies `.agents/skills/pr-walkthrough/` to another compatible
+  project, **WHEN** the user runs the skill, **THEN** its generation scripts,
+  renderer assets, and focused tests do not require repository-root helper
+  files.
 - **GIVEN** a maintainer adds the `generate-pr-walkthrough` label, **WHEN** the
   label-triggered walkthrough job runs, **THEN** it regenerates the current PR
   head and updates the corresponding R2 object and job-summary URL.
 - **GIVEN** a pull request receives a new head commit, **WHEN** the
-  walkthrough workflow runs for the synchronize event, **THEN** no
-  walkthrough generation occurs in the initial increment.
+  walkthrough workflow runs for the synchronize event, **THEN** it generates
+  a walkthrough for the new head.
 - **GIVEN** two pull requests use different numbers, **WHEN** both jobs run,
   **THEN** each output filename and R2 object key is distinct and neither run
   overwrites the other's result.
@@ -162,6 +212,15 @@ not from merge time.
   label contains unsafe markup, **WHEN** the page is rendered, **THEN** the
   source is escaped or sanitized and no executable PR-controlled markup is
   inserted by the renderer.
+- **GIVEN** two canvas edges share an endpoint or node pair, **WHEN** the
+  canvas draws them, **THEN** their paths and labels use separate lanes and do
+  not occupy the same route.
+- **GIVEN** a code block overflows horizontally, **WHEN** it is not hovered or
+  focused, **THEN** its scrollbar thumb is transparent; **WHEN** it is hovered
+  or focused, **THEN** a subtle thumb appears.
+- **GIVEN** a code block uses a patch or explicit diff marker, **WHEN** the
+  page renders it, **THEN** added and removed lines receive diff colors, and a
+  plain code block remains neutral context.
 - **GIVEN** a draft pull request or an unauthorized fork event, **WHEN** the
   workflow is triggered, **THEN** no walkthrough agent job runs.
 - **GIVEN** a successfully generated HTML file, **WHEN** the publishing job
@@ -177,8 +236,7 @@ not from merge time.
 ## Out of scope
 
 - Publishing walkthrough screenshots or using the screenshot media branch.
-- Generating a new walkthrough on every push. The initial `synchronize` path
-  remains disabled to control model usage.
+- Generating walkthroughs for fork pull requests.
 - Retaining a walkthrough for an exact period measured from merge time. The
   initial lifecycle is measured from upload time.
 - Adding a Kandev UI page for externally generated PR walkthroughs.

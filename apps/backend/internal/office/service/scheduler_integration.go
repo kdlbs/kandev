@@ -814,16 +814,25 @@ func (si *SchedulerIntegration) buildPromptContext(
 		pc.ApprovalNote = parsed["decision_note"]
 	}
 
-	if reason == RunReasonTaskChildrenCompleted {
+	if reason == RunReasonTaskChildrenCompleted || reason == legacyRunReasonChildrenCompleted {
 		si.enrichChildrenContext(pc, payload)
 	}
 
-	if reason == RunReasonTaskAssigned {
+	if reason == RunReasonTaskAssigned || reason == legacyRunReasonReviewStarted || reason == legacyRunReasonApprovalStarted {
 		pc.StageID = parsed["stage_id"]
+		if pc.StageID == "" {
+			pc.StageID = parsed["workflow_step_id"]
+		}
 		pc.StageType = parsed["stage_type"]
 		pc.ReviewFeedback = parsed["feedback"]
+		switch reason {
+		case legacyRunReasonReviewStarted:
+			pc.StageType = stageTypeReview
+		case legacyRunReasonApprovalStarted:
+			pc.StageType = stageTypeApproval
+		}
 
-		if pc.StageType == "review" && pc.TaskID != "" {
+		if (pc.StageType == stageTypeReview || pc.StageType == stageTypeApproval) && pc.TaskID != "" {
 			si.enrichBuilderComments(ctx, pc)
 		}
 	}
@@ -891,8 +900,8 @@ func (si *SchedulerIntegration) resolveCommentAuthor(
 	return "User"
 }
 
-// enrichBuilderComments fetches the most recent comments left by the task
-// assignee (builder) and appends them to pc.BuilderComments.
+// enrichBuilderComments fetches the most recent task comments and appends them
+// to pc.BuilderComments for review and approval prompts.
 func (si *SchedulerIntegration) enrichBuilderComments(ctx context.Context, pc *PromptContext) {
 	comments, err := si.svc.repo.ListRecentTaskComments(ctx, pc.TaskID, 5)
 	if err != nil {

@@ -52,7 +52,7 @@ type PromptContext struct {
 	// Stage fields (execution policy)
 	StageID         string   // execution policy stage ID
 	StageType       string   // "work", "review", "approval", "ship"
-	BuilderComments []string // latest comments from the builder/assignee
+	BuilderComments []string // recent task comments
 	ReviewFeedback  string   // aggregated feedback from rejected review
 
 	// Runtime fields
@@ -76,11 +76,19 @@ func BuildPrompt(pc *PromptContext) string {
 	switch pc.Reason {
 	case RunReasonTaskAssigned:
 		prompt = buildTaskAssignedPrompt(pc)
+	case legacyRunReasonReviewStarted:
+		prompt = buildLegacyStagePrompt(pc, stageTypeReview)
+	case legacyRunReasonApprovalStarted:
+		prompt = buildLegacyStagePrompt(pc, stageTypeApproval)
 	case RunReasonTaskComment:
 		prompt = buildTaskCommentPrompt(pc)
 	case RunReasonTaskBlockersResolved:
 		prompt = buildBlockersResolvedPrompt(pc)
+	case legacyRunReasonBlockersResolved:
+		prompt = buildBlockersResolvedPrompt(pc)
 	case RunReasonTaskChildrenCompleted:
+		prompt = buildChildrenCompletedPrompt(pc)
+	case legacyRunReasonChildrenCompleted:
 		prompt = buildChildrenCompletedPrompt(pc)
 	case RunReasonApprovalResolved:
 		prompt = buildApprovalResolvedPrompt(pc)
@@ -223,8 +231,10 @@ func appendRuntimeContext(prompt string, pc *PromptContext) string {
 
 func buildTaskAssignedPrompt(pc *PromptContext) string {
 	switch pc.StageType {
-	case "review":
+	case stageTypeReview:
 		return buildReviewStagePrompt(pc)
+	case stageTypeApproval:
+		return buildApprovalStagePrompt(pc)
 	case stageTypeShip:
 		return buildShipStagePrompt(pc)
 	case stageTypeWork:
@@ -233,6 +243,12 @@ func buildTaskAssignedPrompt(pc *PromptContext) string {
 		}
 	}
 	return buildDefaultWorkPrompt(pc)
+}
+
+func buildLegacyStagePrompt(pc *PromptContext, stageType string) string {
+	legacy := *pc
+	legacy.StageType = stageType
+	return buildTaskAssignedPrompt(&legacy)
 }
 
 func buildDefaultWorkPrompt(pc *PromptContext) string {
@@ -258,10 +274,24 @@ func buildReviewStagePrompt(pc *PromptContext) string {
 		fmt.Fprintf(&b, "\nTask description:\n%s\n", pc.TaskDescription)
 	}
 	if len(pc.BuilderComments) > 0 {
-		fmt.Fprintf(&b, "\nBuilder's comments:\n%s\n", strings.Join(pc.BuilderComments, "\n"))
+		fmt.Fprintf(&b, "\nRecent task comments:\n%s\n", strings.Join(pc.BuilderComments, "\n"))
 	}
 	b.WriteString("\nReview the implementation carefully. Check for correctness, edge cases, and code quality.\n")
 	b.WriteString("Submit your verdict: approve if the work is satisfactory, or reject with specific feedback on what needs to change.")
+	return b.String()
+}
+
+func buildApprovalStagePrompt(pc *PromptContext) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "You are approving task %s: %s.\n", taskRef(pc), pc.TaskTitle)
+	if pc.TaskDescription != "" {
+		fmt.Fprintf(&b, "\nTask description:\n%s\n", pc.TaskDescription)
+	}
+	if len(pc.BuilderComments) > 0 {
+		fmt.Fprintf(&b, "\nRecent task comments:\n%s\n", strings.Join(pc.BuilderComments, "\n"))
+	}
+	b.WriteString("\nConfirm that the approval requirements are met for this workflow.\n")
+	b.WriteString("Submit your verdict: approve if the requirements are met, or reject with specific feedback on what needs to change.")
 	return b.String()
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { memo } from "react";
+import { memo, type ReactNode } from "react";
 import {
   IconChevronDown,
   IconCircleCheck,
@@ -74,6 +74,7 @@ type TaskItemProps = {
   lastActivityAt?: string;
   showActivityTime?: boolean;
   menuOpen?: boolean;
+  archiveConfirmation?: ReactNode;
   isDeleting?: boolean;
   taskId?: string;
   /** Drives the `task-row-metadata` plugin slot's `workflowStepId`. */
@@ -424,9 +425,43 @@ function TaskItemContent({
   );
 }
 
-// The row keeps its state and accessibility affordances together for keyboard
-// selection, so this small exception avoids splitting that interaction across
-// multiple components.
+function TaskItemActions({
+  archiveConfirmation,
+  resolvedTaskRow,
+  diffStats,
+  menuOpen,
+  effectiveMenuOpen,
+  relativeTime,
+  taskId,
+  prInfo,
+}: {
+  archiveConfirmation?: ReactNode;
+  resolvedTaskRow: ResolvedTaskRowPresentation;
+  diffStats?: DiffStats;
+  menuOpen: boolean;
+  effectiveMenuOpen: boolean;
+  relativeTime?: string;
+  taskId?: string;
+  prInfo?: { number: number; state: string; aggregateState?: string };
+}) {
+  if (archiveConfirmation) {
+    return (
+      <div className="min-w-0 basis-full flex items-center justify-end">{archiveConfirmation}</div>
+    );
+  }
+  return (
+    <TaskItemTrailing
+      trailing={resolvedTaskRow.trailing}
+      diffStats={diffStats}
+      menuOpen={menuOpen}
+      effectiveMenuOpen={effectiveMenuOpen}
+      relativeTime={relativeTime}
+      taskId={taskId}
+      prInfo={prInfo}
+    />
+  );
+}
+
 // eslint-disable-next-line max-lines-per-function
 export const TaskItem = memo(function TaskItem({
   title,
@@ -440,6 +475,7 @@ export const TaskItem = memo(function TaskItem({
   onClick,
   onSelect,
   diffStats,
+  archiveConfirmation,
   comparisonUnavailable,
   isRemoteExecutor,
   remoteExecutorType,
@@ -487,7 +523,10 @@ export const TaskItem = memo(function TaskItem({
       onClick={taskItemRowClick(onSelect, onClick)}
       onKeyDown={(e) => handleTaskItemKeyDown(e, onSelect, onClick)}
       style={indent.depth > 0 ? { paddingLeft: indent.paddingLeftPx } : undefined}
-      className={taskItemRowClassName(isSelected, isMultiSelected, indent.depth === 0)}
+      className={cn(
+        taskItemRowClassName(isSelected, isMultiSelected, indent.depth === 0),
+        archiveConfirmation && "flex-wrap",
+      )}
     >
       <SelectionBar isSelected={isSelected} color={taskColor} />
       <RowConnector depth={indent.depth} leftPx={indent.connectorLeftPx} />
@@ -522,8 +561,9 @@ export const TaskItem = memo(function TaskItem({
         resolvedTaskRow={resolvedTaskRow}
         relativeTime={relativeTime}
       />
-      <TaskItemTrailing
-        trailing={resolvedTaskRow.trailing}
+      <TaskItemActions
+        archiveConfirmation={archiveConfirmation}
+        resolvedTaskRow={resolvedTaskRow}
         diffStats={diffStats}
         menuOpen={menuOpen}
         effectiveMenuOpen={effectiveMenuOpen}
@@ -534,9 +574,9 @@ export const TaskItem = memo(function TaskItem({
       {!!subtaskCount && subtaskCount > 0 && !!onToggleSubtasks && (
         <SubtaskToggle
           taskId={taskId}
-          count={subtaskCount!}
+          count={subtaskCount}
           collapsed={!!subtasksCollapsed}
-          onToggle={onToggleSubtasks!}
+          onToggle={onToggleSubtasks}
         />
       )}
     </div>

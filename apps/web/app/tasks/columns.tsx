@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { Row, ColumnDef } from "@tanstack/react-table";
 import type { Task, Workflow, WorkflowStep, Repository } from "@/lib/types/http";
 import Link from "@/components/routing/app-link";
@@ -10,10 +10,11 @@ import { Badge } from "@kandev/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { formatTimeDistance, useDateLocale } from "@/lib/i18n/date-locale";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
-import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
+import { TaskArchiveConfirmation } from "@/components/task/task-archive-confirmation";
 import { linkToTask } from "@/lib/links";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 
 type TaskWithResolution = Task & {
   workflowName?: string;
@@ -76,12 +77,17 @@ function ActionsCell({ row, ctx }: { row: Row<TaskWithResolution>; ctx: ActionsC
   const isArchived = !!task.archived_at;
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
+  const archiveAnchorRef = useRef<HTMLButtonElement>(null);
+  const { isFinePointer } = useResponsiveBreakpoint();
   return (
-    <div className="flex items-center justify-end gap-0.5">
-      {!isArchived && (
+    <div
+      className={`flex items-center justify-end gap-0.5 ${showArchiveConfirm && !isFinePointer ? "flex-wrap" : ""}`}
+    >
+      {!isArchived && (!showArchiveConfirm || isFinePointer) && (
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
+              ref={archiveAnchorRef}
               variant="ghost"
               size="sm"
               className="cursor-pointer h-7 w-7 p-0"
@@ -126,8 +132,9 @@ function ActionsCell({ row, ctx }: { row: Row<TaskWithResolution>; ctx: ActionsC
         isDeleting={isDeleting}
         onConfirm={({ cascade }) => ctx.onDelete(task.id, { cascade })}
       />
-      <TaskArchiveConfirmDialog
+      <TaskArchiveConfirmation
         open={showArchiveConfirm}
+        anchorRef={archiveAnchorRef}
         onOpenChange={setShowArchiveConfirm}
         taskTitle={task.title}
         taskId={task.id}

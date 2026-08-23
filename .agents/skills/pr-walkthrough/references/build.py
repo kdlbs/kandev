@@ -380,14 +380,44 @@ def render_groups(boxes):
     )
 
 
+def edge_lanes(edges):
+    """Assign stable slots for endpoints and repeated node pairs."""
+    outgoing, incoming, pairs = {}, {}, {}
+    for index, edge in enumerate(edges):
+        outgoing.setdefault(edge["from"], []).append(index)
+        incoming.setdefault(edge["to"], []).append(index)
+        pair = tuple(sorted((edge["from"], edge["to"])))
+        pairs.setdefault(pair, []).append(index)
+    lanes = []
+    for index, edge in enumerate(edges):
+        source_edges = outgoing[edge["from"]]
+        target_edges = incoming[edge["to"]]
+        pair_edges = pairs[tuple(sorted((edge["from"], edge["to"])))]
+        lanes.append({
+            "from_lane": source_edges.index(index),
+            "from_lanes": len(source_edges),
+            "to_lane": target_edges.index(index),
+            "to_lanes": len(target_edges),
+            "pair_lane": pair_edges.index(index),
+            "pair_lanes": len(pair_edges),
+        })
+    return lanes
+
+
 def render_edges(edges, ids):
     out = ""
     for e in edges:
         require(e.get("from") in ids, f'edge references unknown node "{e.get("from")}"')
         require(e.get("to") in ids, f'edge references unknown node "{e.get("to")}"')
+    for e, lane in zip(edges, edge_lanes(edges)):
+        lane_attrs = " ".join(
+            f'data-{name.replace("_", "-")}="{value}"'
+            for name, value in lane.items()
+        )
         out += (f'<div class="cedge" data-from="{esc_attr(e["from"])}" '
                 f'data-to="{esc_attr(e["to"])}" '
-                f'data-label="{esc_attr(e.get("label", ""))}"></div>')
+                f'data-label="{esc_attr(e.get("label", ""))}" '
+                f'{lane_attrs}></div>')
     return out
 
 

@@ -454,7 +454,7 @@ function useCommandPanelHandlers({
         return;
       }
       if (cmd.action) {
-        setOpen(false);
+        if (!cmd.keepOpen) setOpen(false);
         cmd.action();
       }
     },

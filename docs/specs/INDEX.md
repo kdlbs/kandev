@@ -1,6 +1,13 @@
-# Feature Specs
+# Legacy Feature Specification Catalog
 
-Specs for kandev product features, grouped by umbrella. Each spec describes a user-invocable capability and is the source of truth for "is this feature done?"
+This catalog locates specifications that predate the system-oriented structure.
+Do not add new standalone feature specifications here. New system specifications
+follow [`docs/specs/README.md`](README.md) and live under an owning system in
+`requirements/` or `system-design/`. Product-wide specifications live under
+`docs/specs/product/`.
+
+Each legacy specification remains authoritative until its system `README.md`
+names a replacement.
 
 The bar: an agent given only a spec (no source code) should be able to either reimplement the feature or test the existing system for conformance. See `.agents/skills/spec/SKILL.md` for the workflow and template.
 
@@ -60,6 +67,7 @@ Product-wide capabilities that are not tied to a single feature area.
 | [git-credential-lease-reissue](git-credential-lease-reissue/spec.md) | shipped |
 | [bounded-task-status-delivery](platform/bounded-task-status-delivery.md) | approved |
 | [diagnostic-logging](platform/diagnostic-logging.md) | approved |
+| [expected runtime log severity](platform/expected-runtime-log-severity.md) | building |
 | [provider-error-recovery](platform/provider-error-recovery.md) | draft |
 | [duplicated-tab-stale-data](fix-duplicated-tab-stale-data/spec.md) | building |
 | [health-endpoint-version](health-endpoint-version/spec.md) | building |
@@ -141,6 +149,7 @@ Roles, governance gates, and granular permissions that apply across human users 
 | [governance](agents/governance.md) | shipped |
 | [granular-permissions](agents/granular-permissions.md) | draft |
 | [external-permission-resolution](agents/external-permission-resolution.md) | draft |
+| [git-operations-permission-boundary](agents/git-operations-permission-boundary.md) | shipped |
 
 ## integrations/ — external service integrations
 
@@ -198,6 +207,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [comment-markdown](ui/comment-markdown.md) | shipped |
 | [resizable-markdown-tables](ui/resizable-markdown-tables.md) | building |
 | [transcript-auto-scroll](ui/transcript-auto-scroll.md) | building |
+| [task-transcript-history-visibility](ui/task-prompt-transcript-visibility.md) | implemented |
 | [clarification-context](ui/clarification-context.md) | shipped |
 | [empty-turn-notice](ui/empty-turn-notice.md) | shipped |
 | [acp-shell-command-output](ui/acp-shell-command-output.md) | shipped |
@@ -327,15 +337,18 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 
 ---
 
-## Conventions
+## Legacy conventions
 
-- **Spec layout.** Umbrella specs live as flat `.md` files under the umbrella directory (`docs/specs/office/agents.md`). Standalone specs use a folder (`docs/specs/improve-kandev/spec.md`).
-- **Plans are not specs.** Implementation plans are committed under `docs/plans/<feature>/` with individual sibling task files named `task-<NN>-<short-slug>.md`. Specs are the durable requirements; plans and task files are implementation records for the current buildout.
+- **Spec layout.** These two layouts remain valid only during migration.
+  Umbrella specs use flat files. Standalone specs use a `spec.md` file.
+- **Plans are not specifications.** Implementation plans remain under
+  `docs/plans/<initiative>/`. Their task files are work orders.
 - **Bug fixes are not specs.** Bugs produce a regression test plus an ADR if they encoded a new convention. See `/fix` skill.
 - **Architecture decisions are not specs.** ADRs live under `docs/decisions/`. See `/record decision`.
 
 ## Cross-references
 
 - ADRs: [`../decisions/INDEX.md`](../decisions/INDEX.md)
+- Specification system: [`README.md`](README.md)
 - Spec workflow: [`.agents/skills/spec/SKILL.md`](../../.agents/skills/spec/SKILL.md)
 - Bug-fix workflow: [`.agents/skills/fix/SKILL.md`](../../.agents/skills/fix/SKILL.md)
