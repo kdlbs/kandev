@@ -106,6 +106,58 @@ func TestProcessOnTurnComplete_ExplicitSignalGating(t *testing.T) {
 	})
 }
 
+// TestProcessOnTurnComplete_OfficeExplicitSignalGating proves the ADR 0015
+// signal gate (WO-32) blocks an Office task's turn-end transition exactly
+// like it does for kanban: a gated step with no pending signal must not
+// transition, and the session must be parked WAITING_FOR_INPUT rather than
+// silently advancing — the failure mode WO-38 measured for 6.75 hours.
+func TestProcessOnTurnComplete_OfficeExplicitSignalGating(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedOfficeSession(t, repo, "t-office-gate", "s-office-gate", "")
+
+	stepID := "wfs-t-office-gate" // matches seedOfficeSession's stepID convention
+	stepGetter := newMockStepGetter()
+	stepGetter.steps[stepID] = &wfmodels.WorkflowStep{
+		ID: stepID, WorkflowID: "wf-office", Name: "work", Position: 1,
+		AutoAdvanceRequiresSignal: true,
+		Events: wfmodels.StepEvents{
+			OnTurnComplete: []wfmodels.OnTurnCompleteAction{
+				{Type: wfmodels.OnTurnCompleteMoveToNext},
+			},
+		},
+	}
+	svc := createTestServiceWithAgent(repo, stepGetter, newMockTaskRepo(), &mockAgentManager{})
+
+	task, err := repo.GetTask(ctx, "t-office-gate")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "s-office-gate")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+
+	if got := svc.processOnTurnComplete(ctx, task, session); got {
+		t.Fatalf("expected Office gate to BLOCK transition, got transition=true")
+	}
+
+	updatedTask, err := repo.GetTask(ctx, "t-office-gate")
+	if err != nil {
+		t.Fatalf("re-read task: %v", err)
+	}
+	if updatedTask.WorkflowStepID != stepID {
+		t.Errorf("expected task to stay on %q, got %q", stepID, updatedTask.WorkflowStepID)
+	}
+	updatedSession, err := repo.GetTaskSession(ctx, "s-office-gate")
+	if err != nil {
+		t.Fatalf("re-read session: %v", err)
+	}
+	if updatedSession.State != models.TaskSessionStateWaitingForInput {
+		t.Errorf("expected session WAITING_FOR_INPUT, got %q", updatedSession.State)
+	}
+}
+
 func TestProcessOnTurnComplete_BlocksWhileClarificationPending(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
