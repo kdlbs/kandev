@@ -572,6 +572,31 @@ func (m *Manager) snapshotTrackers() (*WorkspaceTracker, []*WorkspaceTracker) {
 	return m.workspaceTracker, repos
 }
 
+// GitPollStats aggregates completed git-status poll tick counts and their
+// mean duration across this instance's root and per-repo workspace trackers.
+// Backs the diagnostic agentctl_git_poll_ms metric (api.handleSystemMetrics).
+// count == 0 means no tracker has completed a tick yet.
+func (m *Manager) GitPollStats() (count int64, meanMillis float64) {
+	root, trackers := m.snapshotTrackers()
+	var totalCount, totalNanos int64
+	accumulate := func(wt *WorkspaceTracker) {
+		if wt == nil {
+			return
+		}
+		c, n := wt.GitPollTickStats()
+		totalCount += c
+		totalNanos += n
+	}
+	accumulate(root)
+	for _, t := range trackers {
+		accumulate(t)
+	}
+	if totalCount == 0 {
+		return 0, 0
+	}
+	return totalCount, float64(totalNanos) / float64(totalCount) / float64(time.Millisecond)
+}
+
 // StartAllWorkspaceTrackers starts root + per-repo trackers (idempotent) so file-change events fire in passthrough mode.
 func (m *Manager) StartAllWorkspaceTrackers(ctx context.Context) {
 	root, trackers := m.snapshotTrackers()

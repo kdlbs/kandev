@@ -91,3 +91,87 @@ func TestHandleSystemMetrics_HonoursRequestedMetrics(t *testing.T) {
 		t.Errorf("metrics = %+v, want exactly [%s]", snapshot.Metrics, wanted)
 	}
 }
+
+// TestHandleSystemMetrics_DiagnosticMetricsAbsentByDefault guards the
+// user-visible-surface boundary: the three agentctl diagnostic metric IDs
+// must never appear unless a caller names them explicitly, because they are
+// deliberately excluded from metrics.isKnownMetric and must never leak into
+// what looks like the persisted/broadcast metric set.
+func TestHandleSystemMetrics_DiagnosticMetricsAbsentByDefault(t *testing.T) {
+	srv := newTestServer(t)
+
+	rec := serverGet(t, srv, "/api/v1/system/metrics")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (body %s)", rec.Code, rec.Body.String())
+	}
+	var snapshot struct {
+		Metrics []struct {
+			ID string `json:"id"`
+		} `json:"metrics"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &snapshot); err != nil {
+		t.Fatalf("decode snapshot %q: %v", rec.Body.String(), err)
+	}
+	diagnostic := map[string]bool{
+		metrics.MetricAgentctlGoroutines:    true,
+		metrics.MetricAgentctlGitPollMillis: true,
+		metrics.MetricAgentctlCreateReadyMs: true,
+	}
+	for _, sample := range snapshot.Metrics {
+		if diagnostic[sample.ID] {
+			t.Errorf("default snapshot unexpectedly includes diagnostic metric %q", sample.ID)
+		}
+	}
+}
+
+// TestHandleSystemMetrics_DiagnosticMetricsServedWhenRequested asserts the
+// three diagnostic metrics are served, with the expected shape, only when
+// explicitly named. newTestServer's config never goes through
+// instance.Manager.CreateInstance and its process.Manager is never started,
+// so agentctl_create_ready_ms and agentctl_git_poll_ms are exercised on their
+// "not recorded yet" branches; agentctl_goroutines is always available.
+func TestHandleSystemMetrics_DiagnosticMetricsServedWhenRequested(t *testing.T) {
+	srv := newTestServer(t)
+
+	rec := serverGet(t, srv, "/api/v1/system/metrics?metrics="+
+		metrics.MetricAgentctlGoroutines+","+
+		metrics.MetricAgentctlGitPollMillis+","+
+		metrics.MetricAgentctlCreateReadyMs)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (body %s)", rec.Code, rec.Body.String())
+	}
+	var snapshot struct {
+		Metrics []metrics.MetricSample `json:"metrics"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &snapshot); err != nil {
+		t.Fatalf("decode snapshot %q: %v", rec.Body.String(), err)
+	}
+	byID := make(map[string]metrics.MetricSample, len(snapshot.Metrics))
+	for _, sample := range snapshot.Metrics {
+		byID[sample.ID] = sample
+	}
+
+	goroutines, ok := byID[metrics.MetricAgentctlGoroutines]
+	if !ok {
+		t.Fatalf("missing %s in response %+v", metrics.MetricAgentctlGoroutines, snapshot.Metrics)
+	}
+	if !goroutines.Available || goroutines.Value == nil || *goroutines.Value <= 0 {
+		t.Errorf("goroutines sample = %+v, want available with a positive value", goroutines)
+	}
+
+	gitPoll, ok := byID[metrics.MetricAgentctlGitPollMillis]
+	if !ok {
+		t.Fatalf("missing %s in response %+v", metrics.MetricAgentctlGitPollMillis, snapshot.Metrics)
+	}
+	if gitPoll.Available || gitPoll.Error == "" {
+		t.Errorf("git poll sample = %+v, want unavailable with an error (no tracker started)", gitPoll)
+	}
+
+	createReady, ok := byID[metrics.MetricAgentctlCreateReadyMs]
+	if !ok {
+		t.Fatalf("missing %s in response %+v", metrics.MetricAgentctlCreateReadyMs, snapshot.Metrics)
+	}
+	if createReady.Available || createReady.Error == "" {
+		t.Errorf("create-ready sample = %+v, want unavailable with an error (nil CreateReadyMillis)", createReady)
+	}
+}

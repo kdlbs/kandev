@@ -2,10 +2,16 @@ package api
 
 import (
 	"net/http"
+	"runtime"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/system/metrics"
+)
+
+const (
+	labelGitPollLatency = "Git poll latency"
+	labelCreateToReady  = "Create-to-ready"
 )
 
 func (s *Server) handleSystemMetrics(c *gin.Context) {
@@ -21,7 +27,88 @@ func (s *Server) handleSystemMetrics(c *gin.Context) {
 	snapshot.ID = "agentctl"
 	snapshot.Label = "Execution"
 	snapshot.Kind = "execution"
+	snapshot.Metrics = append(snapshot.Metrics, s.agentctlDiagnosticSamples(metricIDs)...)
 	c.JSON(http.StatusOK, snapshot)
+}
+
+// agentctlDiagnosticSamples builds MetricSample entries for the per-instance
+// diagnostic metric IDs present in metricIDs. These IDs are intentionally
+// absent from metrics.isKnownMetric, so they can never enter persisted
+// GlobalSettings or the periodic broadcast — this handler is the only path
+// that serves them, gated on being named explicitly in the request.
+func (s *Server) agentctlDiagnosticSamples(metricIDs []string) []metrics.MetricSample {
+	var out []metrics.MetricSample
+	for _, id := range metricIDs {
+		switch id {
+		case metrics.MetricAgentctlGoroutines:
+			out = append(out, goroutineCountSample())
+		case metrics.MetricAgentctlGitPollMillis:
+			out = append(out, s.gitPollLatencySample())
+		case metrics.MetricAgentctlCreateReadyMs:
+			out = append(out, s.createReadyMillisSample())
+		}
+	}
+	return out
+}
+
+func goroutineCountSample() metrics.MetricSample {
+	value := float64(runtime.NumGoroutine())
+	return metrics.MetricSample{
+		ID:        metrics.MetricAgentctlGoroutines,
+		Label:     "Goroutines",
+		Available: true,
+		Value:     &value,
+	}
+}
+
+func (s *Server) gitPollLatencySample() metrics.MetricSample {
+	count, meanMillis := s.procMgr.GitPollStats()
+	if count == 0 {
+		return metrics.MetricSample{
+			ID:        metrics.MetricAgentctlGitPollMillis,
+			Label:     labelGitPollLatency,
+			Unit:      "ms",
+			Available: false,
+			Error:     "no git poll tick completed yet",
+		}
+	}
+	return metrics.MetricSample{
+		ID:        metrics.MetricAgentctlGitPollMillis,
+		Label:     labelGitPollLatency,
+		Unit:      "ms",
+		Available: true,
+		Value:     &meanMillis,
+	}
+}
+
+func (s *Server) createReadyMillisSample() metrics.MetricSample {
+	if s.cfg.CreateReadyMillis == nil {
+		return metrics.MetricSample{
+			ID:        metrics.MetricAgentctlCreateReadyMs,
+			Label:     labelCreateToReady,
+			Unit:      "ms",
+			Available: false,
+			Error:     "creation duration not tracked for this instance",
+		}
+	}
+	millis := s.cfg.CreateReadyMillis.Load()
+	if millis == 0 {
+		return metrics.MetricSample{
+			ID:        metrics.MetricAgentctlCreateReadyMs,
+			Label:     labelCreateToReady,
+			Unit:      "ms",
+			Available: false,
+			Error:     "instance still starting",
+		}
+	}
+	value := float64(millis)
+	return metrics.MetricSample{
+		ID:        metrics.MetricAgentctlCreateReadyMs,
+		Label:     labelCreateToReady,
+		Unit:      "ms",
+		Available: true,
+		Value:     &value,
+	}
 }
 
 func splitMetrics(raw string) []string {
