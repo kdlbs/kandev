@@ -192,6 +192,45 @@ func TestHandleSystemMetrics_DiagnosticMetricsServedWhenRequested(t *testing.T) 
 	}
 }
 
+// TestHandleSystemMetrics_MixedMetricsPreserveRequestOrder pins the
+// interleaving behaviour when a request mixes a standard (collector-served)
+// metric ID with a diagnostic (handler-served) one: the response must come
+// back in the same order they were requested in, not with every diagnostic
+// sample trailing every collector sample regardless of query order.
+func TestHandleSystemMetrics_MixedMetricsPreserveRequestOrder(t *testing.T) {
+	srv := newTestServer(t)
+
+	rec := serverGet(t, srv, "/api/v1/system/metrics?metrics="+
+		metrics.MetricAgentctlGoroutines+","+
+		metrics.MetricCPUPercent+","+
+		metrics.MetricAgentctlGitPollMillis)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (body %s)", rec.Code, rec.Body.String())
+	}
+	var snapshot struct {
+		Metrics []metrics.MetricSample `json:"metrics"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &snapshot); err != nil {
+		t.Fatalf("decode snapshot %q: %v", rec.Body.String(), err)
+	}
+
+	wantOrder := []string{
+		metrics.MetricAgentctlGoroutines,
+		metrics.MetricCPUPercent,
+		metrics.MetricAgentctlGitPollMillis,
+	}
+	if len(snapshot.Metrics) != len(wantOrder) {
+		t.Fatalf("got %d metrics %+v, want exactly %d (one per requested ID)",
+			len(snapshot.Metrics), snapshot.Metrics, len(wantOrder))
+	}
+	for i, id := range wantOrder {
+		if snapshot.Metrics[i].ID != id {
+			t.Errorf("metrics[%d].ID = %q, want %q (request order not preserved): got order %+v",
+				i, snapshot.Metrics[i].ID, id, snapshot.Metrics)
+		}
+	}
+}
+
 // TestHandleSystemMetrics_GenuinelyUnknownMetricStillReportsUnknown pins the
 // collector's fallback behaviour for an ID that is neither a known backend
 // metric nor an agentctl diagnostic one: it must still come back as exactly

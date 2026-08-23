@@ -14,7 +14,7 @@ import (
 // of whether individual ticks succeed.
 func TestWorkspaceTracker_GitPollTickStats_AccumulatesAcrossTicks(t *testing.T) {
 	repoDir, cleanup := setupTestRepo(t)
-	defer cleanup()
+	t.Cleanup(cleanup)
 
 	log := newTestLogger(t)
 	wt := NewWorkspaceTracker(repoDir, log)
@@ -56,7 +56,7 @@ func TestWorkspaceTracker_GitPollTickStats_AccumulatesAcrossTicks(t *testing.T) 
 // once the root tracker has recorded ticks.
 func TestManager_GitPollStats_AggregatesRootTracker(t *testing.T) {
 	repoDir, cleanup := setupTestRepo(t)
-	defer cleanup()
+	t.Cleanup(cleanup)
 
 	log := newTestLogger(t)
 	cfg := &config.InstanceConfig{WorkDir: repoDir}
@@ -80,5 +80,44 @@ func TestManager_GitPollStats_AggregatesRootTracker(t *testing.T) {
 	}
 	if mean <= 0 {
 		t.Fatalf("mean after two ticks = %f, want > 0", mean)
+	}
+}
+
+// TestManager_GitPollStats_AggregatesAcrossRepoTrackers exercises the
+// multi-repo half of GitPollStats: with a second WorkspaceTracker added to
+// m.repoTrackers (the shape a multi-repo task root produces), the aggregate
+// count and mean must include both the root tracker's and the extra
+// tracker's ticks, not just the root's.
+func TestManager_GitPollStats_AggregatesAcrossRepoTrackers(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	t.Cleanup(cleanup)
+	repoDir2, cleanup2 := setupTestRepo(t)
+	t.Cleanup(cleanup2)
+
+	log := newTestLogger(t)
+	cfg := &config.InstanceConfig{WorkDir: repoDir}
+	m := NewManager(cfg, log)
+
+	root, _ := m.snapshotTrackers()
+	if root == nil {
+		t.Fatal("expected a root workspace tracker")
+	}
+	var consecutiveFailures int
+	root.gitPollTick(context.Background(), &consecutiveFailures)
+	root.gitPollTick(context.Background(), &consecutiveFailures)
+
+	extra := NewWorkspaceTrackerForRepo(repoDir2, "extra-repo", log)
+	extra.gitPollTick(context.Background(), &consecutiveFailures)
+
+	m.repoTrackersMu.Lock()
+	m.repoTrackers = append(m.repoTrackers, extra)
+	m.repoTrackersMu.Unlock()
+
+	count, mean := m.GitPollStats()
+	if count != 3 {
+		t.Fatalf("count across root + extra tracker = %d, want 3 (2 from root + 1 from extra)", count)
+	}
+	if mean <= 0 {
+		t.Fatalf("mean across root + extra tracker = %f, want > 0", mean)
 	}
 }

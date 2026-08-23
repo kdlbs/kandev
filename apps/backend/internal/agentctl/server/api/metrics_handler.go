@@ -27,14 +27,37 @@ func (s *Server) handleSystemMetrics(c *gin.Context) {
 	snapshot.ID = "agentctl"
 	snapshot.Label = "Execution"
 	snapshot.Kind = "execution"
-	snapshot.Metrics = append(snapshot.Metrics, s.agentctlDiagnosticSamples(metricIDs)...)
+	snapshot.Metrics = s.mergeMetricsInRequestOrder(metricIDs, snapshot.Metrics)
 	c.JSON(http.StatusOK, snapshot)
+}
+
+// mergeMetricsInRequestOrder interleaves the collector's samples (already in
+// the same relative order as the non-diagnostic IDs in metricIDs, since
+// collectorMetricIDs preserves that subsequence) with a freshly built
+// diagnostic sample per diagnostic ID, walking metricIDs so a mixed request
+// like ?metrics=agentctl_goroutines,cpu_percent gets its response back in the
+// order it was requested rather than diagnostics always trailing.
+func (s *Server) mergeMetricsInRequestOrder(metricIDs []string, collectorSamples []metrics.MetricSample) []metrics.MetricSample {
+	out := make([]metrics.MetricSample, 0, len(metricIDs))
+	next := 0
+	for _, id := range metricIDs {
+		if isAgentctlDiagnosticMetric(id) {
+			out = append(out, s.agentctlDiagnosticSample(id))
+			continue
+		}
+		if next < len(collectorSamples) {
+			out = append(out, collectorSamples[next])
+			next++
+		}
+	}
+	return out
 }
 
 // collectorMetricIDs filters the agentctl-scoped diagnostic IDs out before
 // they reach metrics.Collector.Sample. The collector doesn't recognize them
 // and would otherwise emit its own "unknown metric" sample for each one,
-// duplicating the correct sample agentctlDiagnosticSamples appends below.
+// duplicating the correct sample mergeMetricsInRequestOrder builds via
+// agentctlDiagnosticSample.
 func collectorMetricIDs(metricIDs []string) []string {
 	out := make([]string, 0, len(metricIDs))
 	for _, id := range metricIDs {
@@ -54,26 +77,35 @@ func isAgentctlDiagnosticMetric(id string) bool {
 	}
 }
 
-// agentctlDiagnosticSamples builds MetricSample entries for the per-instance
-// diagnostic metric IDs present in metricIDs. These IDs are intentionally
-// absent from metrics.isKnownMetric, so they can never enter persisted
-// GlobalSettings or the periodic broadcast — this handler is the only path
-// that serves them, gated on being named explicitly in the request.
-func (s *Server) agentctlDiagnosticSamples(metricIDs []string) []metrics.MetricSample {
-	var out []metrics.MetricSample
-	for _, id := range metricIDs {
-		switch id {
-		case metrics.MetricAgentctlGoroutines:
-			out = append(out, goroutineCountSample())
-		case metrics.MetricAgentctlGitPollMillis:
-			out = append(out, s.gitPollLatencySample())
-		case metrics.MetricAgentctlCreateReadyMs:
-			out = append(out, s.createReadyMillisSample())
-		}
+// agentctlDiagnosticSample builds the MetricSample for one per-instance
+// diagnostic metric ID. These IDs are intentionally absent from
+// metrics.isKnownMetric, so they can never enter persisted GlobalSettings or
+// the periodic broadcast — this handler is the only path that serves them,
+// gated on being named explicitly in the request. Callers must only pass an
+// ID that isAgentctlDiagnosticMetric accepts; any other ID returns a
+// zero-value sample.
+func (s *Server) agentctlDiagnosticSample(id string) metrics.MetricSample {
+	switch id {
+	case metrics.MetricAgentctlGoroutines:
+		return goroutineCountSample()
+	case metrics.MetricAgentctlGitPollMillis:
+		return s.gitPollLatencySample()
+	case metrics.MetricAgentctlCreateReadyMs:
+		return s.createReadyMillisSample()
+	default:
+		return metrics.MetricSample{}
 	}
-	return out
 }
 
+// goroutineCountSample reports runtime.NumGoroutine(), which is process-wide:
+// when one agentctl process hosts several instances (multiple task sessions
+// sharing a Docker container, or host-utility mode), every instance's
+// endpoint reports the same number rather than that instance's own share.
+// Go has no per-goroutine ownership accounting without invasive
+// instrumentation (e.g. pprof.Do at every spawn site across the codebase),
+// so this is deliberately process-scoped; correlate it against the live
+// instance count from the control server to reason about growth per
+// instance.
 func goroutineCountSample() metrics.MetricSample {
 	value := float64(runtime.NumGoroutine())
 	return metrics.MetricSample{
