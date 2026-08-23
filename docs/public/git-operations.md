@@ -20,6 +20,12 @@ Use the task's **Changes** panel to inspect, stage, discard, commit, push, reset
 
 The repository must be a valid Git checkout in the executor workspace and the session's `agentctl` must be reachable. Remote commands use the remote named `origin`; configure its URL and credentials before relying on Pull, Push, or change-request creation. Rebase and Merge use `origin` when it exists, or a local base branch when it does not.
 
+Git commands from the agent shell and Git actions from the **Changes** panel use different permission paths. The Changes panel sends its Git action through Kandev to `agentctl`. It does not run the action inside the agent shell. The agent shell remains subject to the selected agent's permission mode.
+
+In a restricted agent mode, `git status` can work while `git add` or `git commit` fails. These write Git metadata, including `.git/index.lock`. A failure to create `.git/index.lock` usually means that the agent mode blocks the metadata write. It does not by itself mean that the repository or Kandev Git integration is broken.
+
+To commit agent edits, use the **Changes** panel. No mode change is needed. If the agent shell must commit, select an agent mode that allows Git metadata writes. Mode names come from the installed agent. For example, Codex can expose `Agent (default)` and `Agent (full access)`.
+
 Managed Improve Kandev tasks are the exception to the ordinary single-remote push description. The
 canonical `origin` still identifies `kdlbs/kandev` for pulls, base comparisons, issue lookup, and
 the pull-request target. Before launch, Kandev prepares one exact fork remote for the task branch

@@ -161,6 +161,8 @@ Changes are grouped by repository and then by state:
 
 From this panel you can stage or unstage files, discard working-tree changes, commit, amend, reset or revert commits, pull, rebase, merge, push, force-push, rename the task branch, choose a base branch, and create or open a pull request or merge request. Operations apply to the selected repository. Discarding a file is permanent, and history-changing operations can lose work or invalidate review; read [Git operations](git-operations.md) before using them.
 
+Changes-panel Git operations use Kandev's control path, not the agent's shell. They can work when a restricted agent mode blocks shell writes to Git metadata. If an agent commit fails with `.git/index.lock`, use the Changes panel. Read [Git operations](git-operations.md#prerequisites-and-trust-boundary) before you change the agent mode.
+
 For a linked fork pull request, the Changes header shows the exact comparison target, such as
 `upstream/widget:main`. Kandev keeps this target separate from `origin`, the checked-out branch,
 and the push remote. Desktop hover details and the mobile touch drawer show the same target.

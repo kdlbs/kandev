@@ -141,6 +141,7 @@ Roles, governance gates, and granular permissions that apply across human users 
 | [governance](agents/governance.md) | shipped |
 | [granular-permissions](agents/granular-permissions.md) | draft |
 | [external-permission-resolution](agents/external-permission-resolution.md) | draft |
+| [git-operations-permission-boundary](agents/git-operations-permission-boundary.md) | building |
 
 ## integrations/ — external service integrations
 
