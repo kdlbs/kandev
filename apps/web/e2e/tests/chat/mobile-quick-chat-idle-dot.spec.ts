@@ -1,20 +1,17 @@
 import { test, expect } from "../../fixtures/test-base";
 import { watchWs } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
-import { sendQuickChatMessage, startQuickChatFromSetup } from "./quick-chat-helpers";
-
-const SETTLED_STATES = new Set(["IDLE", "WAITING_FOR_INPUT", "COMPLETED", "FAILED", "CANCELLED"]);
-
-function waitForSessionSettled(ws: ReturnType<typeof watchWs>, sessionId: string) {
-  return ws.waitForEvent("session.state_changed", {
-    where: (payload) =>
-      payload.session_id === sessionId && SETTLED_STATES.has(payload.new_state ?? ""),
-  });
-}
+import {
+  sendQuickChatMessage,
+  startQuickChatFromSetup,
+  waitForSessionSettled,
+  waitForSessionSettledBaseline,
+} from "./quick-chat-helpers";
 
 test.describe("quick chat activity indicators", () => {
   test("shows the mobile header running and finished states through touch", async ({
     testPage,
+    apiClient,
   }) => {
     const ws = watchWs(testPage);
     await testPage.goto("/");
@@ -28,18 +25,22 @@ test.describe("quick chat activity indicators", () => {
     await expect(
       testPage.getByRole("status", { name: /Agent is (starting|running)/ }),
     ).not.toBeVisible();
-    const { session_id: sessionId } = (await (await created).json()) as { session_id: string };
+    const { session_id: sessionId, task_id: taskId } = (await (await created).json()) as {
+      session_id: string;
+      task_id: string;
+    };
     const tab = dialog.getByTestId("quick-chat-tab");
     const button = testPage.getByTestId("mobile-quick-chat-button");
     const indicator = button.getByTestId("quick-chat-activity-indicator");
 
     await expect(tab).toHaveCount(1);
+    await waitForSessionSettledBaseline(apiClient, taskId, sessionId);
     const completed = ws.waitForEvent("session.turn.completed", {
       where: (payload) => payload.session_id === sessionId,
     });
+    const settled = waitForSessionSettled(ws, sessionId);
     await sendQuickChatMessage(dialog, testPage, "/slow 8s");
     await expect(tab.getByRole("status")).toBeVisible();
-    const settled = waitForSessionSettled(ws, sessionId);
 
     await dialog.getByTestId("quick-chat-close").tap();
     await expect(indicator).toHaveAttribute("data-state", "running");
@@ -77,13 +78,17 @@ test.describe("quick chat activity indicators", () => {
     await entry.tap();
     const dialog = testPage.getByRole("dialog", { name: "Quick Chat" });
     await startQuickChatFromSetup(dialog, testPage);
-    const { session_id: sessionId } = (await (await created).json()) as { session_id: string };
+    const { session_id: sessionId, task_id: taskId } = (await (await created).json()) as {
+      session_id: string;
+      task_id: string;
+    };
+    await waitForSessionSettledBaseline(apiClient, taskId, sessionId);
     const completed = ws.waitForEvent("session.turn.completed", {
       where: (payload) => payload.session_id === sessionId,
     });
+    const settled = waitForSessionSettled(ws, sessionId);
     await sendQuickChatMessage(dialog, testPage, "/slow 8s");
     await expect(dialog.getByTestId("quick-chat-tab").getByRole("status")).toBeVisible();
-    const settled = waitForSessionSettled(ws, sessionId);
     await dialog.getByTestId("quick-chat-close").tap();
 
     await testPage.getByTestId("mobile-session-menu").tap();
