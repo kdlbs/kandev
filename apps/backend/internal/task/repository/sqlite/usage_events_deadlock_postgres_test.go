@@ -87,6 +87,7 @@ func TestPostgresCreateTaskUsageEvent_RealDeadlockIsClassifiedTransientAndRetrie
 	if err != nil {
 		t.Fatalf("begin antagonist transaction: %v", err)
 	}
+	t.Cleanup(func() { _ = antagonistTx.Rollback() })
 	if _, err := antagonistTx.Exec(
 		`UPDATE task_sessions SET tokens_in = tokens_in WHERE id = $1`, "session-deadlock-pg",
 	); err != nil {
