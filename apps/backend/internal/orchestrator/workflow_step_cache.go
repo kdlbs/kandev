@@ -192,7 +192,7 @@ func (c *stepSpecCache) evictOldestLocked() {
 	}
 }
 
-// invalidate drops stepID's byStep entry and every byPos entry belonging to
+// invalidate drops stepID's byStep entry and every cached entry belonging to
 // workflowID. A step edit changes that step's own spec (byStep) and can shift
 // Next/Prev results for its whole workflow (a position or move_to_step change),
 // so the coarser workflow-scoped invalidation is required there — see the
@@ -204,6 +204,11 @@ func (c *stepSpecCache) invalidate(workflowID, stepID string) {
 		delete(c.byStep, stepID)
 	}
 	if workflowID != "" {
+		for k, entry := range c.byStep {
+			if entry.spec.WorkflowID == workflowID {
+				delete(c.byStep, k)
+			}
+		}
 		prefix := workflowID + "\x00"
 		for k := range c.byPos {
 			if strings.HasPrefix(k, prefix) {

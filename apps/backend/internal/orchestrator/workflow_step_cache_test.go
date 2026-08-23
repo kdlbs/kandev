@@ -223,7 +223,29 @@ func TestStepSpecCache_UpdatedEventDropsSameWorkflowPositionEntriesOnly(t *testi
 	}
 }
 
-// 5. Both .deleted and .created invalidate (created covers the demoted-
+// 5. A deleted step can have references cleared from other steps before its
+// event is published. The event must therefore drop every direct entry for
+// the workflow, not only the deleted step's entry.
+func TestStepSpecCache_DeletedEventDropsAllWorkflowStepEntries(t *testing.T) {
+	cache := newStepSpecCache()
+	cache.putStep("source", engine.StepSpec{ID: "source", WorkflowID: "wf1"})
+	cache.putStep("deleted", engine.StepSpec{ID: "deleted", WorkflowID: "wf1"})
+	cache.putStep("other-workflow", engine.StepSpec{ID: "other-workflow", WorkflowID: "wf2"})
+
+	cache.invalidate("wf1", "deleted")
+
+	if _, ok := cache.getStep("source"); ok {
+		t.Fatal("expected workflow-wide invalidation to drop the cached source step")
+	}
+	if _, ok := cache.getStep("deleted"); ok {
+		t.Fatal("expected deleted step entry to be removed")
+	}
+	if _, ok := cache.getStep("other-workflow"); !ok {
+		t.Fatal("expected entries for other workflows to remain cached")
+	}
+}
+
+// 6. Both .deleted and .created invalidate (created covers the demoted-
 // start-step fan-out, which publishes .updated for demoted steps but the
 // cache must also tolerate a .created arriving for an unrelated step ID).
 func TestStepSpecCache_CreatedAndDeletedEventsInvalidate(t *testing.T) {
@@ -256,7 +278,7 @@ func TestStepSpecCache_CreatedAndDeletedEventsInvalidate(t *testing.T) {
 	}
 }
 
-// 6. A getter error is returned and not cached.
+// 7. A getter error is returned and not cached.
 func TestWorkflowStore_LoadStep_ErrorNotCached(t *testing.T) {
 	ctx := context.Background()
 	stepGetter := &erroringStepGetter{mockStepGetter: newMockStepGetter(), err: errors.New("boom")}
@@ -274,7 +296,7 @@ func TestWorkflowStore_LoadStep_ErrorNotCached(t *testing.T) {
 	}
 }
 
-// 7. LoadNextStep's step == nil case still returns today's "no next step"
+// 8. LoadNextStep's step == nil case still returns today's "no next step"
 // error, uncached.
 func TestWorkflowStore_LoadNextStep_NoNextStepNotCached(t *testing.T) {
 	ctx := context.Background()
@@ -292,7 +314,7 @@ func TestWorkflowStore_LoadNextStep_NoNextStepNotCached(t *testing.T) {
 	}
 }
 
-// 8. Eviction at maxEntries: filling the cache past its bound evicts the
+// 9. Eviction at maxEntries: filling the cache past its bound evicts the
 // oldest entry rather than growing without limit.
 func TestStepSpecCache_EvictsOldestAtMaxEntries(t *testing.T) {
 	cache := newStepSpecCache()
@@ -317,7 +339,7 @@ func TestStepSpecCache_EvictsOldestAtMaxEntries(t *testing.T) {
 	}
 }
 
-// 9. Concurrent get/put/invalidate must not race (run with -race).
+// 10. Concurrent get/put/invalidate must not race (run with -race).
 func TestStepSpecCache_ConcurrentAccess(t *testing.T) {
 	cache := newStepSpecCache()
 	var wg sync.WaitGroup
@@ -339,7 +361,7 @@ func TestStepSpecCache_ConcurrentAccess(t *testing.T) {
 	wg.Wait()
 }
 
-// 10. LoadPreviousStep caches across calls and is invalidated by a workflow
+// 11. LoadPreviousStep caches across calls and is invalidated by a workflow
 // step event, exercising the byPos "prev" direction — the rest of this suite
 // only exercises "next" via LoadNextStep.
 func TestWorkflowStore_LoadPreviousStep_CachesAndInvalidates(t *testing.T) {
@@ -385,7 +407,7 @@ func TestWorkflowStore_LoadPreviousStep_CachesAndInvalidates(t *testing.T) {
 	}
 }
 
-// 11. subscribeWorkflowStepCacheEvents actually registers the handler on the
+// 12. subscribeWorkflowStepCacheEvents actually registers the handler on the
 // bus and reacts to a delivered event, rather than trusting that
 // handleWorkflowStepCacheInvalidation (called directly by tests 3-5) is ever
 // wired up. A wrong event-type constant or a missing Subscribe call would
@@ -423,7 +445,7 @@ func TestSubscribeWorkflowStepCacheEvents_DeliversThroughBus(t *testing.T) {
 	}
 }
 
-// 12. Concurrent misses on the same key coalesce into one getter call via
+// 13. Concurrent misses on the same key coalesce into one getter call via
 // stepCache's singleflight group, rather than every waiter independently
 // re-reading and recompiling the step.
 func TestWorkflowStore_LoadStep_CoalescesConcurrentMisses(t *testing.T) {
