@@ -137,3 +137,5 @@ this task and `plan.md` with exact results.
 - Review remediation also marks the `STARTING` session icon as animated, keeps
   the accessible label on the agent status SVG, and strengthens the wrapper
   assertions so a missing child SVG cannot pass silently.
+- The full frontend suite surfaced one stale Kanban status-icon shape helper;
+  it now unwraps `CompositorSpin`, and that focused file passes all 17 tests.
