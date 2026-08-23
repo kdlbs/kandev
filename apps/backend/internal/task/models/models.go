@@ -1450,6 +1450,15 @@ type TaskSession struct {
 	// panel; the frontend snapshots the PRIOR value at that moment to draw
 	// the divider before overwriting it.
 	LastReadMessageID string `json:"last_read_message_id,omitempty"`
+
+	// Usage/cost rollup columns (docs/specs/task-cost-ledger/spec.md AC-28,
+	// AC-29). task_usage_events is the source of truth; these are the
+	// running totals internal/task/usage's writer maintains transactionally
+	// alongside each ledger insert via IncrementTaskSessionUsageTx.
+	CostSubcents   int64 `json:"cost_subcents"`
+	TokensIn       int64 `json:"tokens_in"`
+	TokensCachedIn int64 `json:"tokens_cached_in"`
+	TokensOut      int64 `json:"tokens_out"`
 }
 
 // ToAPI converts internal TaskSession to API type

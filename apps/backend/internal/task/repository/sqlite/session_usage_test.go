@@ -35,6 +35,40 @@ func TestIncrementTaskSessionUsage_AccumulatesCachedInAcrossCalls(t *testing.T) 
 	}
 }
 
+// TestGetTaskSessionAndListTaskSessions_SurfaceRollupColumns pins
+// docs/specs/task-cost-ledger/spec.md AC-28/AC-29: both session read paths
+// (GetTaskSession's single-row scan and ListTaskSessions' multi-row scan)
+// must return the four usage/cost rollup columns IncrementTaskSessionUsage
+// maintains, not just the underlying SQL row.
+func TestGetTaskSessionAndListTaskSessions_SurfaceRollupColumns(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-rollup-surface", "sess-rollup-surface", "turn-rollup-surface")
+
+	if err := repo.IncrementTaskSessionUsage(ctx, "sess-rollup-surface", 80, 8_203_943, 44979, 79118); err != nil {
+		t.Fatalf("increment: %v", err)
+	}
+
+	got, err := repo.GetTaskSession(ctx, "sess-rollup-surface")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if got.TokensIn != 80 || got.TokensCachedIn != 8_203_943 || got.TokensOut != 44979 || got.CostSubcents != 79118 {
+		t.Errorf("GetTaskSession rollup = %+v, want (80, 8203943, 44979, 79118)", got)
+	}
+
+	list, err := repo.ListTaskSessions(ctx, "task-rollup-surface")
+	if err != nil {
+		t.Fatalf("ListTaskSessions: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("ListTaskSessions returned %d sessions, want 1", len(list))
+	}
+	if list[0].TokensIn != 80 || list[0].TokensCachedIn != 8_203_943 || list[0].TokensOut != 44979 || list[0].CostSubcents != 79118 {
+		t.Errorf("ListTaskSessions rollup = %+v, want (80, 8203943, 44979, 79118)", list[0])
+	}
+}
+
 // createOfficeCostEventsTable creates a minimal standalone copy of
 // office_cost_events (owned by internal/office/repository/sqlite) so this
 // package's migration tests can exercise the guarded backfill without
