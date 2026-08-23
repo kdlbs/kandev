@@ -338,6 +338,26 @@ func (r *Repository) ListAutoPausedAgentsForInbox(
 	return out, rows.Err()
 }
 
+// HasPriorTasklessFailedRun reports whether the agent already has a
+// failed run with no task_id in its payload, other than excludeRunID.
+// Used to cap the inbox noise from routines that are taskless by design
+// (the pre-installed "Coordinator heartbeat" fires every 5 minutes,
+// WO-35): only the agent's first taskless failure stays visible in the
+// inbox, so callers auto-dismiss every later one once this reports true.
+func (r *Repository) HasPriorTasklessFailedRun(
+	ctx context.Context, agentID, excludeRunID string,
+) (bool, error) {
+	var n int
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+		SELECT COUNT(*) FROM runs
+		WHERE agent_profile_id = ?
+		  AND status = 'failed'
+		  AND id != ?
+		  AND COALESCE(json_extract(payload, '$.task_id'), '') = ''
+	`), agentID, excludeRunID).Scan(&n)
+	return n > 0, err
+}
+
 // ListFailedRunsForAgent returns the runs for an agent whose
 // status is `failed` and that haven't been dismissed by the user.
 // Used by the FailureService when computing which prior per-task
