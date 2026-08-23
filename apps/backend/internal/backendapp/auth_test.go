@@ -14,6 +14,7 @@ import (
 
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/auth"
+	"github.com/kandev/kandev/internal/auth/authn"
 	authstore "github.com/kandev/kandev/internal/auth/store"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -22,6 +23,7 @@ import (
 	"github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/repository"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	userstore "github.com/kandev/kandev/internal/user/store"
 )
@@ -127,11 +129,13 @@ func TestPluginSSOBridgeDefaultPortPlainName(t *testing.T) {
 	}
 }
 
-// newRunSubscriptionCheckHarness builds a task service and office repository
-// over one shared SQLite database, the same pairing gatewayAuthPolicy wires
-// in production. WO-02 round 2's runSubscriptionCheck tests seed agent
-// profiles and runs against it.
-func newRunSubscriptionCheckHarness(t *testing.T) (*taskservice.Service, *officesqlite.Repository) {
+// newRunSubscriptionCheckHarness builds a task service, task repository, and
+// office repository over one shared SQLite database, the same pairing
+// gatewayAuthPolicy wires in production. WO-02 round 2's runSubscriptionCheck
+// tests seed agent profiles and runs against it; round 3 also seeds owned
+// workspaces via the returned task repository to drive real ownership
+// decisions instead of the unscoped-caller shortcut.
+func newRunSubscriptionCheckHarness(t *testing.T) (*taskservice.Service, *sqliterepo.Repository, *officesqlite.Repository) {
 	t.Helper()
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "run-subscribe.db"))
 	if err != nil {
@@ -173,7 +177,25 @@ func newRunSubscriptionCheckHarness(t *testing.T) (*taskservice.Service, *office
 		Reviews:          taskRepo,
 		ResourceCleanups: taskRepo,
 	}, bus.NewMemoryEventBus(log), log, taskservice.RepositoryDiscoveryConfig{})
-	return taskSvc, officeRepo
+	return taskSvc, taskRepo, officeRepo
+}
+
+// seedOwnedWorkspace creates a real workspace row owned by ownerID and
+// returns its id. Driven through taskSvc.CreateWorkspace on an identity-free
+// context so the request-body OwnerID is honored (callerScope returns
+// unscoped, exactly the "internal caller" path CreateWorkspace documents) --
+// this seeds a real workspaces row rather than hand-writing SQL, so it stays
+// correct if the schema changes.
+func seedOwnedWorkspace(t *testing.T, taskSvc *taskservice.Service, ownerID string) string {
+	t.Helper()
+	workspace, err := taskSvc.CreateWorkspace(context.Background(), &taskservice.CreateWorkspaceRequest{
+		Name:    "ws-" + ownerID,
+		OwnerID: ownerID,
+	})
+	if err != nil {
+		t.Fatalf("seed workspace owned by %q: %v", ownerID, err)
+	}
+	return workspace.ID
 }
 
 // seedRunForWorkspace inserts an agent + agent profile scoped to
@@ -220,7 +242,7 @@ func seedRunForWorkspace(t *testing.T, officeRepo *officesqlite.Repository, work
 // dominant class of runs (workflow-engine queue_run against ordinary Kanban
 // agent profiles), not an edge case.
 func TestRunSubscriptionCheckDeniesEmptyResolvedWorkspace(t *testing.T) {
-	taskSvc, officeRepo := newRunSubscriptionCheckHarness(t)
+	taskSvc, _, officeRepo := newRunSubscriptionCheckHarness(t)
 	runID := seedRunForWorkspace(t, officeRepo, "")
 
 	check := runSubscriptionCheck(taskSvc, officeRepo)
@@ -229,16 +251,42 @@ func TestRunSubscriptionCheckDeniesEmptyResolvedWorkspace(t *testing.T) {
 	}
 }
 
-// TestRunSubscriptionCheckAllowsResolvedWorkspace is the control: a run
-// whose agent profile carries a real workspace id is unaffected by the
-// empty-workspace fix.
+// TestRunSubscriptionCheckAllowsResolvedWorkspace drives runSubscriptionCheck
+// with the real WORKSPACE OWNER's scoped identity against a real owned
+// workspace row, so the allow comes from AuthorizeWorkspaceAccess actually
+// reading the workspace and matching OwnerID -- not from callerScope's
+// unscoped short-circuit (authorizeWorkspaceID returns nil before ever
+// reading the row when the context carries no identity, which made the
+// original version of this test pass even with `return nil` substituted for
+// AuthorizeWorkspaceAccess; see REVIEW ROUND 2 FINDING B2-1).
 func TestRunSubscriptionCheckAllowsResolvedWorkspace(t *testing.T) {
-	taskSvc, officeRepo := newRunSubscriptionCheckHarness(t)
-	runID := seedRunForWorkspace(t, officeRepo, "ws-1")
+	taskSvc, _, officeRepo := newRunSubscriptionCheckHarness(t)
+	ownerID := "user-owner"
+	workspaceID := seedOwnedWorkspace(t, taskSvc, ownerID)
+	runID := seedRunForWorkspace(t, officeRepo, workspaceID)
 
 	check := runSubscriptionCheck(taskSvc, officeRepo)
-	if err := check(context.Background(), runID); err != nil {
-		t.Fatalf("runSubscriptionCheck(ws-1) = %v, want nil", err)
+	ctx := authn.WithIdentity(context.Background(), authn.Identity{UserID: ownerID, Role: authn.RoleMember})
+	if err := check(ctx, runID); err != nil {
+		t.Fatalf("runSubscriptionCheck(owner) = %v, want nil", err)
+	}
+}
+
+// TestRunSubscriptionCheckDeniesForeignWorkspaceOwner is the ownership-denial
+// half of B2-1's fix and directly verifies the card's own SCOPE item 4 ("a
+// subscribe for a run the caller does not own must be refused") against the
+// real runSubscriptionCheck -- the only existing foreign-owner coverage
+// (gateway TestSubscriptionChecksDenyForeignTopics) exercises a hand-written
+// fake Run hook, not this one.
+func TestRunSubscriptionCheckDeniesForeignWorkspaceOwner(t *testing.T) {
+	taskSvc, _, officeRepo := newRunSubscriptionCheckHarness(t)
+	workspaceID := seedOwnedWorkspace(t, taskSvc, "user-owner")
+	runID := seedRunForWorkspace(t, officeRepo, workspaceID)
+
+	check := runSubscriptionCheck(taskSvc, officeRepo)
+	ctx := authn.WithIdentity(context.Background(), authn.Identity{UserID: "user-other", Role: authn.RoleMember})
+	if err := check(ctx, runID); err == nil {
+		t.Fatal("runSubscriptionCheck(foreign owner) = nil, want a denial error")
 	}
 }
 
@@ -247,10 +295,29 @@ func TestRunSubscriptionCheckAllowsResolvedWorkspace(t *testing.T) {
 // shipped binary (repos.Office is never nil), but the wrong default for a
 // security check.
 func TestRunSubscriptionCheckDeniesWhenOfficeRepoNil(t *testing.T) {
-	taskSvc, _ := newRunSubscriptionCheckHarness(t)
+	taskSvc, _, _ := newRunSubscriptionCheckHarness(t)
 
 	check := runSubscriptionCheck(taskSvc, nil)
 	if err := check(context.Background(), "any-run"); err == nil {
 		t.Fatal("runSubscriptionCheck(nil officeRepo) = nil, want a denial error")
+	}
+}
+
+// TestGatewayAuthPolicyWiresRunSubscriptionCheck pins the production wiring
+// site itself (auth.go's Subscriptions.Run: runSubscriptionCheck(...)),
+// which nothing previously asserted: deleting that one line left every
+// runSubscriptionCheck/gateway test green (B2-1). Scoped to the Run hook
+// only, per the routing message -- Task/Session have no precedent test
+// either and are not part of this card.
+func TestGatewayAuthPolicyWiresRunSubscriptionCheck(t *testing.T) {
+	taskSvc, taskRepo, officeRepo := newRunSubscriptionCheckHarness(t)
+	cfg := &config.Config{}
+	cfg.Features.Auth = true
+	cfg.Auth.SessionTTLHours = 720
+	authSvc := newEnabledAuthService(t, cfg)
+
+	policy := gatewayAuthPolicy(authSvc, taskSvc, taskRepo, officeRepo)
+	if policy.Subscriptions.Run == nil {
+		t.Fatal("gatewayAuthPolicy(...).Subscriptions.Run = nil, want runSubscriptionCheck wired")
 	}
 }
