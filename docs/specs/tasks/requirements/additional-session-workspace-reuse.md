@@ -1,10 +1,40 @@
 ---
-status: building
+status: draft
+system: tasks
 created: 2026-08-19
-owner: kandev
+owners:
+  - kandev
 ---
 
-# Additional Session Workspace Reuse
+# Additional Session Workspace Reuse Requirements
+
+## Overview
+
+Additional sessions must use the task's existing workspace. They must not
+materialize a second worktree or change the files that the first session owns.
+
+## Requirements
+
+### REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-001: Additional Session Workspace Reuse
+
+**Intent:** Let additional sessions attach to a validated task workspace while
+preserving independent session runtime state.
+
+#### Acceptance criteria
+
+- **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-001.1:** An additional session
+  shall attach only to a ready canonical environment with a complete,
+  validated repository inventory.
+- **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-001.2:** Attach-only preparation
+  shall not create, recreate, clone, fetch, pull, checkout, reset, or otherwise
+  modify the shared workspace.
+- **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-001.3:** Each attached session
+  shall receive independent execution identity and runtime state.
+- **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-001.4:** Unsafe or unsupported
+  reuse shall fail with a typed, recoverable API error without creating a
+  session or replacement workspace.
+
+## Migrated source detail
 
 ## Why
 
