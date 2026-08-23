@@ -606,14 +606,12 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 			stripEnv = rt.StripEnv
 		}
 	}
-	workspaceSourceRoots := req.WorkspaceSourceRoots
-	if len(workspaceSourceRoots) == 0 {
-		workspaceSourceRoots = []string{dockerWorkspacePath}
-	}
 	return &agentctl.CreateInstanceRequest{
-		ID:                   instanceID,
-		WorkspacePath:        dockerWorkspacePath,
-		WorkspaceSourceRoots: append([]string(nil), workspaceSourceRoots...),
+		ID:            instanceID,
+		WorkspacePath: dockerWorkspacePath,
+		// The reconnect request runs inside the existing container. Host roots
+		// from the persisted execution are not visible to agentctl there.
+		WorkspaceSourceRoots: []string{dockerWorkspacePath},
 		AgentType:            agentType,
 		Env:                  cloneStringMap(req.Env),
 		AutoApprovePermissions: autoApprovePermissionsOverride(

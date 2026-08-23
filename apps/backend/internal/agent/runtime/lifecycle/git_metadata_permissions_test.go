@@ -182,6 +182,23 @@ func TestStandaloneGitMetadataPreflightRejectsLegacyCodexSandbox(t *testing.T) {
 	}
 }
 
+func TestStandaloneGitMetadataPreflightRejectsNestedLegacyCodexSandbox(t *testing.T) {
+	projection := newLinkedGitMetadataProjection(t)
+	req := &ExecutorCreateRequest{
+		WorkspacePath:          projection.CheckoutPath,
+		GitMetadataProjections: []*worktree.GitMetadataProjection{projection},
+		AgentConfig:            agents.NewCodexACP(),
+		Env: map[string]string{
+			"CODEX_CONFIG": `{"profiles":{"work":{"sandbox_mode":"danger-full-access"}}}`,
+		},
+	}
+
+	err := preflightGitMetadataProjection(context.Background(), &StandaloneExecutor{}, req)
+	if err == nil || !strings.Contains(err.Error(), gitMetadataProjectionUnsupported) {
+		t.Fatalf("preflightGitMetadataProjection() error = %v, want %q", err, gitMetadataProjectionUnsupported)
+	}
+}
+
 func TestStandaloneGitMetadataPreflightRejectsAgentWithoutFilesystemPolicy(t *testing.T) {
 	projection := newLinkedGitMetadataProjection(t)
 	req := &ExecutorCreateRequest{

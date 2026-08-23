@@ -800,6 +800,17 @@ func TestBuildReconnectCreateInstanceRequestOmitsAutoApproveOverrideWhenUnset(t 
 	}
 }
 
+func TestBuildReconnectCreateInstanceRequestUsesContainerWorkspaceRoots(t *testing.T) {
+	req := &ExecutorCreateRequest{
+		WorkspaceSourceRoots: []string{"/host/task-worktree", "/host/task-worktree/attached"},
+	}
+
+	got := buildReconnectCreateInstanceRequest(req, "previous-exec")
+	if len(got.WorkspaceSourceRoots) != 1 || got.WorkspaceSourceRoots[0] != dockerWorkspacePath {
+		t.Fatalf("WorkspaceSourceRoots = %v, want [%q]", got.WorkspaceSourceRoots, dockerWorkspacePath)
+	}
+}
+
 type recordingReconnectControl struct {
 	methods []string
 	created *agentctl.CreateInstanceRequest

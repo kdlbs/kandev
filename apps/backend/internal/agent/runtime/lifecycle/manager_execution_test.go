@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"reflect"
 	"runtime"
 	"slices"
@@ -1098,6 +1099,38 @@ func TestPrepareWorkspaceExecutionProjectsTaskGitMetadata(t *testing.T) {
 	if !slices.Contains(backend.lastRequest.WorkspaceSourceRoots, checkout) {
 		t.Fatalf("WorkspaceSourceRoots = %v, want projection checkout %q", backend.lastRequest.WorkspaceSourceRoots, checkout)
 	}
+	if !backend.prepared.Load() {
+		t.Fatal("workspace execution did not preflight its Git metadata projection")
+	}
+}
+
+func TestWorkspaceExecutionGitMetadataProjectionSanitizesResolverFailure(t *testing.T) {
+	repositoryPath := initBareGitRepo(t, "workspace-metadata-error")
+	preparer, worktreeManager := newPreparerForTest(t)
+	prepared, err := preparer.Prepare(context.Background(), &EnvPrepareRequest{
+		TaskID: "task-workspace-metadata-error", SessionID: "session-workspace-metadata-error",
+		TaskTitle: "Workspace metadata error", ExecutorType: executor.NameStandalone, TaskDirName: "workspace-metadata-error",
+		RepositoryID: "repo-workspace-metadata-error", RepositoryPath: repositoryPath, RepoName: "workspace-metadata-error", BaseBranch: "main",
+	}, nil)
+	if err != nil || !prepared.Success {
+		t.Fatalf("prepare worktree: result=%+v err=%v", prepared, err)
+	}
+	if err := os.RemoveAll(prepared.WorkspacePath); err != nil {
+		t.Fatal(err)
+	}
+
+	manager, _ := newEnvironmentExecutionTestManager(t, &mockWorkspaceInfoProvider{})
+	manager.SetWorktreeManager(worktreeManager)
+	_, err = manager.workspaceExecutionGitMetadataProjections(context.Background(), "task-workspace-metadata-error", &WorkspaceInfo{
+		ExecutorType:          string(models.ExecutorTypeWorktree),
+		WorkspaceRepositories: []WorkspaceRepositorySpec{{RepositoryID: "repo-workspace-metadata-error"}},
+	})
+	if err == nil || err.Error() != gitMetadataProjectionInvalid {
+		t.Fatalf("workspaceExecutionGitMetadataProjections() error = %v, want %q", err, gitMetadataProjectionInvalid)
+	}
+	if strings.Contains(err.Error(), prepared.WorkspacePath) || strings.Contains(err.Error(), repositoryPath) {
+		t.Fatalf("workspace metadata error leaked a filesystem path: %v", err)
+	}
 }
 
 func TestCreateExecutionRecoversRepositoryEnvironmentAndSSHApprovals(t *testing.T) {
@@ -1311,6 +1344,7 @@ type createInstanceExecutor struct {
 	createCount  atomic.Int32
 	stopCount    atomic.Int32
 	forceStopped atomic.Bool
+	prepared     atomic.Bool
 	lastRequest  *ExecutorCreateRequest
 	authToken    string
 	nonce        string
@@ -1321,6 +1355,11 @@ type createInstanceExecutor struct {
 	// Set barrier (unbuffered, closed to release) to block until the test is ready.
 	entered chan struct{}
 	barrier chan struct{}
+}
+
+func (e *createInstanceExecutor) PrepareGitMetadataProjection(_ context.Context, _ *ExecutorCreateRequest) error {
+	e.prepared.Store(true)
+	return nil
 }
 
 func (e *createInstanceExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {

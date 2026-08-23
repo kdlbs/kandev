@@ -592,6 +592,9 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	}
 	launchCtx, launchCancel := withLaunchPhaseTimeout(ctx)
 	defer launchCancel()
+	if err := preflightGitMetadataProjection(launchCtx, rt, preparation.request); err != nil {
+		return nil, err
+	}
 	if err := resumeRemoteInstancePreflight(launchCtx, rt, preparation.request); err != nil {
 		return nil, err
 	}
@@ -599,6 +602,13 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	runtimeInstance, err := rt.CreateInstance(launchCtx, preparation.request)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create execution: %w", err)
+	}
+	if err := installAttestedCloneGitMetadataPolicy(launchCtx, preparation.request, runtimeInstance); err != nil {
+		_ = rt.StopInstance(context.WithoutCancel(ctx), runtimeInstance, false)
+		if runtimeInstance != nil && runtimeInstance.Client != nil {
+			runtimeInstance.Client.Close()
+		}
+		return nil, fmt.Errorf("install clone Git metadata policy: %w", err)
 	}
 
 	execution := m.initializeCreatedExecution(ctx, taskID, info, executionID, rt, runtimeInstance, preparation)
@@ -789,7 +799,8 @@ func (m *Manager) workspaceExecutionGitMetadataProjections(ctx context.Context, 
 	}
 	worktrees, err := m.worktreeMgr.GetAllByTaskID(ctx, taskID)
 	if err != nil {
-		return nil, fmt.Errorf("list workspace Git metadata: %w", err)
+		m.logger.Warn("list workspace Git metadata failed", zap.Error(err))
+		return nil, errors.New(gitMetadataProjectionInvalid)
 	}
 	projections := make([]*worktree.GitMetadataProjection, 0, len(worktrees))
 	seen := make(map[string]struct{}, len(worktrees))
@@ -799,7 +810,8 @@ func (m *Manager) workspaceExecutionGitMetadataProjections(ctx context.Context, 
 		}
 		projection, err := worktree.ResolveGitMetadataForRepository(wt.Path, wt.RepositoryPath)
 		if err != nil {
-			return nil, fmt.Errorf("resolve workspace Git metadata for repository %q: %w", wt.RepositoryID, err)
+			m.logger.Warn("resolve workspace Git metadata failed", zap.String("repository_id", wt.RepositoryID), zap.Error(err))
+			return nil, errors.New(gitMetadataProjectionInvalid)
 		}
 		if _, exists := seen[projection.CheckoutPath]; exists {
 			continue

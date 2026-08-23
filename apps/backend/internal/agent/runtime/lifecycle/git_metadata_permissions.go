@@ -235,7 +235,16 @@ func hasLegacyCodexSandbox(config map[string]any) bool {
 	}
 	_, sandboxMode := config["sandbox_mode"]
 	_, workspaceWrite := config["sandbox_workspace_write"]
-	return sandboxMode || workspaceWrite
+	if sandboxMode || workspaceWrite {
+		return true
+	}
+	for _, value := range config {
+		nested, ok := value.(map[string]any)
+		if ok && hasLegacyCodexSandbox(nested) {
+			return true
+		}
+	}
+	return false
 }
 
 func mergeCodexConfig(base, overlay map[string]any) {
