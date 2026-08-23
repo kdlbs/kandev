@@ -256,6 +256,10 @@ func (r *Repository) runMigrations() error {
 	// task_sessions rebuilds above so it repairs legacy DBs whose schema can no
 	// longer trigger a rebuild (see migrateSessionsAddCostColumns).
 	r.migrateSessionsAddCostColumns()
+	// AC-28: widen the three still-INTEGER rollup columns to BIGINT (Postgres
+	// only). Must run after migrateSessionsAddCostColumns so a legacy DB has
+	// the columns to widen before this ALTERs their type.
+	r.migrateTaskSessionsRollupColumnsToBigint()
 	// BackfillSessionTokensCachedIn is deliberately NOT called here - see its
 	// doc comment. It runs from internal/backendapp/storage.go, after both
 	// this repository and the office repository (which owns office_cost_events)
