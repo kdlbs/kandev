@@ -30,7 +30,10 @@ bundles harder to triage.
 
 The existing `workspace.file.get` WebSocket action keeps its request and
 response shapes. Only the response classification for a missing current file
-is made explicit as `not_found`; no new action or payload field is added.
+is made explicit as `not_found`; no new action or payload field is added. The
+agentctl file-content endpoint carries this classification with HTTP 404 and a
+typed client sentinel. Other file-content failures keep their existing error
+status and message path.
 
 ## Failure modes
 
@@ -47,9 +50,10 @@ is made explicit as `not_found`; no new action or payload field is added.
 
 ## Persistence guarantees
 
-This repair changes log severity and missing-file classification only. It does
-not change task-environment ownership, worktree creation, launch persistence,
-or cleanup behavior across backend restarts.
+This repair changes log severity and missing-file classification only. The
+agentctl file-content transport now distinguishes missing files with HTTP 404;
+it does not change task-environment ownership, worktree creation, launch
+persistence, or cleanup behavior across backend restarts.
 
 ## Scenarios
 
@@ -70,8 +74,6 @@ or cleanup behavior across backend restarts.
 
 ## Out of scope
 
-- Changing the agentctl file-content error transport or introducing a new
-  filesystem error protocol.
 - Changing frontend diff rendering or review-file status behavior.
 - Changing worktree ownership, task-environment transactions, cleanup policy,
   or startup reconciliation.

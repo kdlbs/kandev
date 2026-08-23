@@ -128,6 +128,7 @@ func TestWorkspaceFileHandlersMissingContentIsNotFoundAndDebug(t *testing.T) {
 		t.Fatalf("create observer logger: %v", err)
 	}
 	h := workspaceHandlerServerWithLogger(t, log, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
 		_, _ = w.Write([]byte(`{"error":"file not found: stat /workspace/gone.go: no such file or directory"}`))
 	})
 	msg, err := ws.NewRequest("id", ws.ActionWorkspaceFileContentGet, map[string]any{
@@ -163,7 +164,8 @@ func TestWorkspaceFileHandlersNonMissingContentFailureRemainsError(t *testing.T)
 		t.Fatalf("create observer logger: %v", err)
 	}
 	h := workspaceHandlerServerWithLogger(t, log, func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"error":"permission denied"}`))
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"file not found: permission denied"}`))
 	})
 	msg, err := ws.NewRequest("id", ws.ActionWorkspaceFileContentGet, map[string]any{
 		"session_id": "s",

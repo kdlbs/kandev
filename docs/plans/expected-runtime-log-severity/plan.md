@@ -19,15 +19,17 @@ their existing behavior.
 
 ### Workspace file content classification
 
-- Update `apps/backend/internal/agent/handlers/workspace_file_handlers.go` in
-  `wsGetFileContent` to recognize the existing agentctl missing-file error
-  wording, log the expected condition at debug level, and return
-  `ws.ErrorCodeNotFound`.
+- Preserve the server-side `fs.ErrNotExist` distinction in
+  `apps/backend/internal/agentctl/server/process/workspace_files.go` and carry
+  it across the agentctl HTTP boundary as HTTP 404.
+- Map that status to a typed client sentinel, then have
+  `apps/backend/internal/agent/handlers/workspace_file_handlers.go` use the
+  sentinel in `wsGetFileContent` to log the expected condition at debug level
+  and return `ws.ErrorCodeNotFound`.
 - Leave non-missing errors on the current error-level and
   `ws.ErrorCodeInternalError` path.
-- Add focused observer-backed coverage in
-  `apps/backend/internal/agent/handlers/workspace_file_handlers_test.go` for
-  both the missing-file and genuine-failure paths.
+- Add focused coverage for the server status, client sentinel, handler logs,
+  and genuine stat-failure path.
 
 ### Initial worktree persistence severity
 
@@ -62,6 +64,19 @@ their existing behavior.
   passed after the worktree change and final formatting.
 - `cd apps/backend && go test ./internal/agent/handlers ./internal/worktree
   -count=1` passed: both packages green.
+- PR fixup RED: the client and process tests initially failed to compile
+  without the new `ErrFileNotFound` sentinels; the API rejection test reported
+  a missing file as 400; and the handler regression classified a 400 response
+  containing a legacy `file not found` message as `NOT_FOUND`.
+- PR fixup GREEN:
+  `cd apps/backend && go test ./internal/agent/runtime/agentctl -run
+  'TestRequestFileContent_(Surfaces|DoesNot).*' -count=1` passed;
+  `cd apps/backend && go test ./internal/agentctl/server/process -run
+  TestReadFileContent_PermissionErrorIsNotMissing -count=1` passed;
+  `cd apps/backend && go test ./internal/agentctl/server/api -run
+  TestHandleFileContent_Rejections -count=1` passed; and
+  `cd apps/backend && go test ./internal/agent/handlers -run
+  'TestWorkspaceFileHandlers(Missing|NonMissing).*' -count=1` passed.
 
 ## Implementation Waves And Parallel Candidates
 

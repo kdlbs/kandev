@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"unicode/utf8"
@@ -131,7 +132,8 @@ func (h *WorkspaceFileHandlers) wsGetFileContent(ctx context.Context, msg *ws.Me
 }
 
 func isMissingFileContentError(err error) bool {
-	return err != nil && strings.Contains(strings.ToLower(err.Error()), "file content error: file not found")
+	// The client derives this sentinel from the agentctl file-content 404 status.
+	return errors.Is(err, agentctl.ErrFileNotFound)
 }
 
 // wsGetFileContentAtRef handles workspace.file.get_at_ref action

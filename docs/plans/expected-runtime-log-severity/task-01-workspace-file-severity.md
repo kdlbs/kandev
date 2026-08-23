@@ -43,7 +43,8 @@ Sequential.
 - Spec: workspace file classification scenarios and failure modes.
 - Existing `workspaceHandlerServer` test helper and the at-ref missing-file
   classification in `workspace_file_handlers.go`.
-- Agentctl response errors are transported as `file content error: ...`.
+- Agentctl missing-file responses use HTTP 404 and the runtime client exposes a
+  typed `ErrFileNotFound` sentinel; non-missing responses retain their status.
 
 ## Output contract
 
@@ -61,3 +62,16 @@ remain `ws.ErrorCodeInternalError` and error-level.
   'TestWorkspaceFileHandlers(Missing|NonMissing).*' -count=1` failed because
   the missing-file response was `INTERNAL_ERROR` instead of `NOT_FOUND`.
 - GREEN: the same command passed after the handler change and after `gofmt`.
+- PR fixup: replaced the error-string classifier with the typed client
+  sentinel, added the HTTP 404 status mapping, and preserved non-ENOENT stat
+  failures as ordinary errors. Added client, server, and process regression
+  coverage for the boundary and permission path.
+- PR fixup verification passed:
+  `cd apps/backend && go test ./internal/agent/runtime/agentctl -run
+  'TestRequestFileContent_(Surfaces|DoesNot).*' -count=1`;
+  `cd apps/backend && go test ./internal/agentctl/server/process -run
+  TestReadFileContent_PermissionErrorIsNotMissing -count=1`;
+  `cd apps/backend && go test ./internal/agentctl/server/api -run
+  TestHandleFileContent_Rejections -count=1`; and
+  `cd apps/backend && go test ./internal/agent/handlers -run
+  'TestWorkspaceFileHandlers(Missing|NonMissing).*' -count=1`.
