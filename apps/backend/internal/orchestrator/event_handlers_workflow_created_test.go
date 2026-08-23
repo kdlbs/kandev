@@ -235,6 +235,87 @@ func TestHandleTaskCreated(t *testing.T) {
 		}
 	})
 
+	t.Run("claims the create-time opt-in so a duplicate task.created delivery cannot double-launch", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		now := time.Now().UTC()
+		requireNoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}))
+		requireNoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}))
+
+		metadata := map[string]interface{}{
+			models.MetaKeyAutoStartOnCreate: true,
+			models.MetaKeyAgentProfileID:    "routine-assignee",
+		}
+		requireNoError(t, repo.CreateTask(ctx, &models.Task{
+			ID:             "t5",
+			WorkspaceID:    "ws1",
+			WorkflowID:     "wf1",
+			WorkflowStepID: "step1",
+			Title:          "Routine run",
+			Description:    "prompt",
+			State:          v1.TaskStateCreated,
+			Metadata:       metadata,
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		}))
+
+		stepGetter := newMockStepGetter()
+		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+			ID: "step1", WorkflowID: "wf1", Name: "Routine Start", Position: 0,
+			Events: wfmodels.StepEvents{
+				OnEnter: []wfmodels.OnEnterAction{
+					{Type: wfmodels.OnEnterAutoStartAgent},
+				},
+			},
+		}
+
+		taskRepo := newMockTaskRepo()
+		taskRepo.tasks["t5"] = &v1.Task{
+			ID:          "t5",
+			WorkspaceID: "ws1",
+			WorkflowID:  "wf1",
+			Description: "prompt",
+			State:       v1.TaskStateCreated,
+			Metadata:    metadata,
+		}
+		launched := make(chan string, 2)
+		agentMgr := &mockAgentManager{
+			launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+				agentProfileID, _ := req.Metadata[models.MetaKeyAgentProfileID].(string)
+				launched <- agentProfileID
+				return &executor.LaunchAgentResponse{AgentExecutionID: "exec-1"}, nil
+			},
+		}
+		svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
+
+		// First delivery: the opt-in is present, so it is claimed (removed)
+		// synchronously — before the (async) launch even starts — and the
+		// launch proceeds.
+		svc.handleTaskCreated(ctx, watcher.TaskEventData{TaskID: "t5"})
+
+		reloaded, err := repo.GetTask(ctx, "t5")
+		requireNoError(t, err)
+		if models.HasAutoStartOnCreateIntent(reloaded.Metadata) {
+			t.Fatal("MetaKeyAutoStartOnCreate still present on the task after the first delivery; a duplicate task.created delivery would double-launch")
+		}
+
+		select {
+		case <-launched:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for the first delivery's launch")
+		}
+
+		// Second, duplicate delivery of the same event (e.g. a redelivered
+		// task.created): the opt-in was already claimed by the first call,
+		// so HasAutoStartOnCreateIntent is now false and this must return
+		// before attempting a second launch.
+		svc.handleTaskCreated(ctx, watcher.TaskEventData{TaskID: "t5"})
+		select {
+		case got := <-launched:
+			t.Fatalf("unexpected second launch for agent profile %q", got)
+		case <-time.After(100 * time.Millisecond):
+		}
+	})
+
 	t.Run("skips when the task cannot be found", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())

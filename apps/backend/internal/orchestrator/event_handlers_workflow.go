@@ -785,6 +785,12 @@ func (s *Service) handleTaskQueuePromoted(ctx context.Context, data watcher.Task
 // autoStartTaskForStep's own leading check already returns before doing
 // anything with it. Either way the key can never change this handler's
 // outcome, so checking it here would be dead code.
+//
+// The opt-in itself is claimed via claimTaskEventMetadata before launching,
+// the same one-shot-token pattern used for MetaKeyQueuePromotionPending: a
+// duplicate task.created delivery for the same task would otherwise see the
+// key still present and launch a second time. Only the delivery that wins
+// the atomic RemoveTaskMetadataKey proceeds.
 func (s *Service) handleTaskCreated(ctx context.Context, data watcher.TaskEventData) {
 	task, err := s.repo.GetTask(ctx, data.TaskID)
 	if err != nil || task == nil {
@@ -794,6 +800,9 @@ func (s *Service) handleTaskCreated(ctx context.Context, data watcher.TaskEventD
 		return
 	}
 	if task.IsFromOffice || !models.HasAutoStartOnCreateIntent(task.Metadata) {
+		return
+	}
+	if !s.claimTaskEventMetadata(ctx, task, models.MetaKeyAutoStartOnCreate) {
 		return
 	}
 	s.autoStartTaskForStep(ctx, task.ID, task.WorkflowStepID, events.TaskCreated)
