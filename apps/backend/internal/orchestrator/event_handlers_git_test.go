@@ -86,6 +86,15 @@ func TestHandleBranchSwitched_UpdatesWorktreeBranch(t *testing.T) {
 	}
 }
 
+func TestGitStatusHashIncludesRepositoryName(t *testing.T) {
+	status := &lifecycle.GitStatusData{RepositoryName: "backend", Branch: "feature/x", HeadCommit: "abc"}
+	other := *status
+	other.RepositoryName = "frontend"
+	if gitStatusHash(status) == gitStatusHash(&other) {
+		t.Fatal("status snapshots from different repositories must not share a hash")
+	}
+}
+
 func TestHandleBranchSwitched_RepositoryScopedUpdateKeepsSiblingBranch(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()

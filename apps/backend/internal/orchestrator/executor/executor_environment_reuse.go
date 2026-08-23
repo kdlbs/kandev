@@ -197,6 +197,7 @@ func topLevelLaunchRepoSpec(req *LaunchAgentRequest) (RepoSpec, bool) {
 		return RepoSpec{}, false
 	}
 	return RepoSpec{
+		TaskRepositoryID:       req.TaskRepositoryID,
 		RepositoryID:           req.RepositoryID,
 		RepositoryPath:         req.RepositoryPath,
 		RepositoryURL:          req.RepositoryURL,

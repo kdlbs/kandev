@@ -28,6 +28,9 @@ func (c *Controller) GetAgent(ctx context.Context, id string) (*dto.AgentDTO, er
 		return nil, err
 	}
 	result := toAgentDTO(agent, filterGlobalProfiles(profiles))
+	if err := c.decorateAgentDTO(ctx, &result); err != nil {
+		return nil, err
+	}
 	c.applyCapabilityStatus(&result, agent.Name)
 	c.applyBillingType(&result, agent.Name)
 	return &result, nil
@@ -45,6 +48,9 @@ func (c *Controller) ListAgents(ctx context.Context) (*dto.ListAgentsResponse, e
 			return nil, err
 		}
 		entry := toAgentDTO(agent, filterGlobalProfiles(profiles))
+		if err := c.decorateAgentDTO(ctx, &entry); err != nil {
+			return nil, err
+		}
 		c.applyCapabilityStatus(&entry, agent.Name)
 		c.applyBillingType(&entry, agent.Name)
 		payload = append(payload, entry)

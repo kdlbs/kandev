@@ -9,6 +9,7 @@ import (
 type AgentProfileDTO struct {
 	ID               string `json:"id"`
 	AgentID          string `json:"agent_id"`
+	Kind             string `json:"kind"`
 	Name             string `json:"name"`
 	AgentDisplayName string `json:"agent_display_name"`
 	Model            string `json:"model"`
@@ -41,9 +42,56 @@ type AgentProfileDTO struct {
 	WorkspaceID string `json:"workspace_id,omitempty"`
 	// BillingType is computed at read time from credential files — not stored in the DB.
 	// Values: "api_key" | "subscription". Empty for agents that don't support billing type detection.
-	BillingType string    `json:"billing_type,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	BillingType string                  `json:"billing_type,omitempty"`
+	CreatedAt   time.Time               `json:"created_at"`
+	UpdatedAt   time.Time               `json:"updated_at"`
+	Dynamic     *DynamicAgentProfileDTO `json:"dynamic,omitempty"`
+}
+
+// DynamicAgentProfileDTO is the versioned routing document attached to a
+// profile whose kind is "dynamic". Candidates stay opaque profile IDs on the
+// wire; the server resolves and validates their safe display data.
+type DynamicAgentProfileDTO struct {
+	Version    int64                      `json:"version"`
+	Candidates []DynamicAgentCandidateDTO `json:"candidates"`
+}
+
+// DynamicAgentPolicyDTO is the canonical, versioned policy document persisted
+// for one dynamic candidate. The two classes are deliberately explicit so a
+// missing class can never silently inherit another class's behavior.
+type DynamicAgentPolicyDTO struct {
+	Version   int64                 `json:"version"`
+	Transient DynamicErrorPolicyDTO `json:"transient"`
+	Hard      DynamicErrorPolicyDTO `json:"hard"`
+}
+
+type DynamicErrorPolicyDTO struct {
+	Retry        DynamicRetryPolicyDTO     `json:"retry"`
+	WaitForReset DynamicResetWaitPolicyDTO `json:"wait_for_reset"`
+	OnExhausted  string                    `json:"on_exhausted"`
+}
+
+type DynamicRetryPolicyDTO struct {
+	Enabled                bool  `json:"enabled"`
+	MaxRetries             int64 `json:"max_retries"`
+	InitialIntervalSeconds int64 `json:"initial_interval_seconds"`
+}
+
+type DynamicResetWaitPolicyDTO struct {
+	Enabled        bool  `json:"enabled"`
+	MaxWaitSeconds int64 `json:"max_wait_seconds"`
+}
+
+// DynamicAgentCandidateDTO is one ordered concrete execution profile and its
+// provider-error policy. Rules remains a read-compatible legacy input shape;
+// profile CRUD normalizes it into Policies before persistence and never emits
+// it in canonical responses.
+type DynamicAgentCandidateDTO struct {
+	Position           int                    `json:"position"`
+	ExecutionProfileID string                 `json:"execution_profile_id"`
+	Enabled            bool                   `json:"enabled"`
+	Policies           *DynamicAgentPolicyDTO `json:"policies,omitempty"`
+	Rules              map[string]string      `json:"rules,omitempty"`
 }
 
 // GetWorkspaceID lets struct-shaped profile payloads (e.g. the MCP event-bus
@@ -235,10 +283,41 @@ type AvailableAgentDTO struct {
 // RuntimeUpdateDTO describes a Kandev-managed npm runtime. Package is
 // informational; update requests select only the built-in agent name.
 type RuntimeUpdateDTO struct {
-	Supported      bool   `json:"supported"`
-	Package        string `json:"package"`
-	CurrentVersion string `json:"current_version,omitempty"`
-	ActiveVersion  string `json:"active_version,omitempty"`
+	Supported        bool   `json:"supported"`
+	Package          string `json:"package"`
+	CurrentVersion   string `json:"current_version,omitempty"`
+	DefaultVersion   string `json:"default_version"`
+	ActiveVersion    string `json:"active_version,omitempty"`
+	EffectiveVersion string `json:"effective_version"`
+}
+
+// AgentUpdateCheckState describes the result of the cached npm latest-version
+// lookup. Unknown is intentionally distinct from up_to_date so the UI can
+// avoid suggesting that an unavailable registry check is current.
+type AgentUpdateCheckState string
+
+const (
+	AgentUpdateCheckStateUpdateAvailable AgentUpdateCheckState = "update_available"
+	AgentUpdateCheckStateUpToDate        AgentUpdateCheckState = "up_to_date"
+	AgentUpdateCheckStateUnknown         AgentUpdateCheckState = "unknown"
+)
+
+// AgentUpdateStatusDTO is the read-only update hint for one available managed
+// runtime. ActiveVersion is the optional persisted operator selection; the
+// default is never persisted and remains the fallback effective version.
+type AgentUpdateStatusDTO struct {
+	AgentName        string                `json:"agent_name"`
+	Package          string                `json:"package"`
+	DefaultVersion   string                `json:"default_version"`
+	ActiveVersion    string                `json:"active_version,omitempty"`
+	EffectiveVersion string                `json:"effective_version"`
+	LatestVersion    string                `json:"latest_version,omitempty"`
+	CheckedAt        *time.Time            `json:"checked_at,omitempty"`
+	CheckState       AgentUpdateCheckState `json:"check_state"`
+}
+
+type ListAgentUpdateStatusResponse struct {
+	Statuses []AgentUpdateStatusDTO `json:"statuses"`
 }
 
 type ListAvailableAgentsResponse struct {
@@ -296,18 +375,20 @@ const (
 
 // AgentUpdateJobDTO is the retained HTTP and WebSocket update snapshot.
 type AgentUpdateJobDTO struct {
-	JobID          string               `json:"job_id"`
-	AgentName      string               `json:"agent_name"`
-	Status         AgentUpdateJobStatus `json:"status"`
-	Operation      string               `json:"operation"`
-	CurrentVersion string               `json:"current_version,omitempty"`
-	ActiveVersion  string               `json:"active_version,omitempty"`
-	TargetVersion  string               `json:"target_version,omitempty"`
-	Output         string               `json:"output,omitempty"`
-	Error          string               `json:"error,omitempty"`
-	RefreshError   string               `json:"refresh_error,omitempty"`
-	StartedAt      time.Time            `json:"started_at"`
-	FinishedAt     *time.Time           `json:"finished_at,omitempty"`
+	JobID            string               `json:"job_id"`
+	AgentName        string               `json:"agent_name"`
+	Status           AgentUpdateJobStatus `json:"status"`
+	Operation        string               `json:"operation"`
+	CurrentVersion   string               `json:"current_version,omitempty"`
+	DefaultVersion   string               `json:"default_version"`
+	ActiveVersion    string               `json:"active_version,omitempty"`
+	EffectiveVersion string               `json:"effective_version"`
+	TargetVersion    string               `json:"target_version,omitempty"`
+	Output           string               `json:"output,omitempty"`
+	Error            string               `json:"error,omitempty"`
+	RefreshError     string               `json:"refresh_error,omitempty"`
+	StartedAt        time.Time            `json:"started_at"`
+	FinishedAt       *time.Time           `json:"finished_at,omitempty"`
 }
 
 // AgentUpdatePreviewDTO is a read-only representation of the next managed
@@ -316,7 +397,9 @@ type AgentUpdatePreviewDTO struct {
 	AgentName         string                  `json:"agent_name"`
 	Package           string                  `json:"package"`
 	CurrentVersion    string                  `json:"current_version,omitempty"`
+	DefaultVersion    string                  `json:"default_version"`
 	ActiveVersion     string                  `json:"active_version,omitempty"`
+	EffectiveVersion  string                  `json:"effective_version"`
 	TargetVersion     string                  `json:"target_version"`
 	Operation         string                  `json:"operation"`
 	AvailableVersions []AgentUpdateVersionDTO `json:"available_versions"`
@@ -335,6 +418,7 @@ type AgentUpdateVersionDTO struct {
 // always resolved from trusted built-in agent metadata.
 type AgentUpdateRequest struct {
 	TargetVersion string `json:"target_version"`
+	UseDefault    bool   `json:"use_default"`
 }
 
 type ListAgentUpdateJobsResponse struct {

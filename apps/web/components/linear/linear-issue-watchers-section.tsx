@@ -58,7 +58,6 @@ function useToastedActions({ create, update, remove, trigger, reset }: RawAction
 
   const wrappedDelete = useCallback(
     async (w: LinearIssueWatch) => {
-      if (!confirm(t("linear:deleteThisLinearWatcher"))) return;
       try {
         await remove(w.id, w.workspaceId);
         toast({ description: t("linear:watcherDeleted"), variant: "success" });

@@ -375,6 +375,144 @@ describe("useClarificationGroup — optimistic store update edge cases", () => {
   });
 });
 
+// W1: both POST call sites must send the session cookie, or an auth-enabled
+// backend in split-origin dev mode rejects the request before it reaches the
+// resolver.
+describe("useClarificationGroup — credentials", () => {
+  beforeEach(setupFetchMock);
+
+  it("submitCollected sends credentials: include", async () => {
+    const msgs = [clarMessage({ id: "m1", pendingId: "p1", questionId: "q1", index: 0, total: 1 })];
+    const { result } = renderHook(() => useClarificationGroup(msgs));
+
+    await act(async () => {
+      await result.current.submitCollected({
+        q1: { question_id: "q1", selected_options: ["o1"] },
+      });
+    });
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init.credentials).toBe("include");
+  });
+
+  it("skipAll sends credentials: include", async () => {
+    const msgs = [clarMessage({ id: "m1", pendingId: "p1", questionId: "q1", index: 0, total: 1 })];
+    const { result } = renderHook(() => useClarificationGroup(msgs));
+
+    await act(async () => {
+      await result.current.skipAll("Too vague");
+    });
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init.credentials).toBe("include");
+  });
+});
+
+// Queues a claimed:false R10 envelope as the next fetch response, with the
+// winner's status/answers the assertion cares about.
+function mockLostRaceResponse(opts: {
+  status: "answered" | "rejected";
+  answers?: Array<{ question_id: string; selected_options?: string[]; custom_text?: string }>;
+}) {
+  fetchMock.mockResolvedValueOnce(
+    new Response(
+      JSON.stringify({
+        success: true,
+        claimed: false,
+        status: opts.status,
+        response: opts.answers ? { pending_id: "p1", answers: opts.answers } : null,
+      }),
+      { status: 200 },
+    ),
+  );
+}
+
+// W2/W3: a `claimed: false` response is a successful submit (the overlay
+// closes exactly as it does on 409), but the optimistic update must reflect
+// the winner's own status and answers — never this client's losing ones,
+// since R2 guarantees no later WS broadcast will ever correct that write.
+describe("useClarificationGroup — losing a race (claimed: false)", () => {
+  beforeEach(setupFetchMock);
+
+  it("submitCollected treats claimed:false as a successful submit", async () => {
+    mockLostRaceResponse({
+      status: "answered",
+      answers: [{ question_id: "q1", selected_options: ["o2"] }],
+    });
+    const msgs = [clarMessage({ id: "m1", pendingId: "p1", questionId: "q1", index: 0, total: 1 })];
+    const { result } = renderHook(() => useClarificationGroup(msgs));
+
+    await act(async () => {
+      await result.current.submitCollected({
+        q1: { question_id: "q1", selected_options: ["o1"] },
+      });
+    });
+
+    expect(result.current.submitState).toBe("ok");
+  });
+
+  it("submitCollected applies the winner's answers, not this client's own submitted answers", async () => {
+    mockLostRaceResponse({
+      status: "answered",
+      answers: [{ question_id: "q1", selected_options: ["winner-option"] }],
+    });
+    const msgs = [clarMessage({ id: "m1", pendingId: "p1", questionId: "q1", index: 0, total: 1 })];
+    const { result } = renderHook(() => useClarificationGroup(msgs));
+
+    await act(async () => {
+      await result.current.submitCollected({
+        q1: { question_id: "q1", selected_options: ["my-losing-option"] },
+      });
+    });
+
+    expect(mockUpdateMessage).toHaveBeenCalledTimes(1);
+    const call = mockUpdateMessage.mock.calls[0][0];
+    expect(call.metadata.status).toBe("answered");
+    expect(call.metadata.response).toEqual({
+      question_id: "q1",
+      selected_options: ["winner-option"],
+    });
+  });
+});
+
+describe("useClarificationGroup — losing a race, other call sites & fallback", () => {
+  beforeEach(setupFetchMock);
+
+  it("skipAll applies the winner's answers on claimed:false instead of an empty response", async () => {
+    mockLostRaceResponse({
+      status: "answered",
+      answers: [{ question_id: "q1", custom_text: "winner text" }],
+    });
+    const msgs = [clarMessage({ id: "m1", pendingId: "p1", questionId: "q1", index: 0, total: 1 })];
+    const { result } = renderHook(() => useClarificationGroup(msgs));
+
+    await act(async () => {
+      await result.current.skipAll("Too vague");
+    });
+
+    expect(mockUpdateMessage).toHaveBeenCalledTimes(1);
+    const call = mockUpdateMessage.mock.calls[0][0];
+    expect(call.metadata.status).toBe("answered");
+    expect(call.metadata.response).toEqual({ question_id: "q1", custom_text: "winner text" });
+  });
+
+  it("submitCollected keeps applying its own answers when claimed is absent (older backend)", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
+    const msgs = [clarMessage({ id: "m1", pendingId: "p1", questionId: "q1", index: 0, total: 1 })];
+    const { result } = renderHook(() => useClarificationGroup(msgs));
+
+    const ownAnswer = { question_id: "q1", selected_options: ["my-own-option"] };
+    await act(async () => {
+      await result.current.submitCollected({ q1: ownAnswer });
+    });
+
+    expect(mockUpdateMessage).toHaveBeenCalledTimes(1);
+    const call = mockUpdateMessage.mock.calls[0][0];
+    expect(call.metadata.status).toBe("answered");
+    expect(call.metadata.response).toEqual(ownAnswer);
+  });
+});
+
 describe("useClarificationGroup — inflight guard", () => {
   beforeEach(setupFetchMock);
 

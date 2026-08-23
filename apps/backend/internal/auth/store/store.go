@@ -131,11 +131,15 @@ func (s *Store) GetSessionByTokenHash(ctx context.Context, tokenHash string) (*S
 	return &session, err
 }
 
-// TouchSession updates activity timestamps (sliding expiry).
-func (s *Store) TouchSession(ctx context.Context, id string, lastSeen, expires time.Time) error {
+// TouchSession updates activity timestamps (sliding expiry) and refreshes the
+// stored client IP when a non-empty one is passed (empty never clobbers a
+// recorded value).
+func (s *Store) TouchSession(ctx context.Context, id string, lastSeen, expires time.Time, ip string) error {
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
-		UPDATE auth_sessions SET last_seen_at = ?, expires_at = ? WHERE id = ?
-	`), lastSeen, expires, id)
+		UPDATE auth_sessions SET last_seen_at = ?, expires_at = ?,
+			ip = CASE WHEN ? = '' THEN ip ELSE ? END
+		WHERE id = ?
+	`), lastSeen, expires, ip, ip, id)
 	return err
 }
 

@@ -91,6 +91,11 @@ func (r *ProfileReconciler) Run(ctx context.Context) error {
 		return fmt.Errorf("reconciler not fully configured")
 	}
 
+	// Virtual families are settings identities rather than inference agents.
+	// Seed their parent rows before orphan cleanup so the permanent dynamic
+	// family is protected even when no concrete provider probe is ready.
+	r.ensureVirtualFamilies(ctx)
+
 	// Orphan cleanup first: removed agents can't come back, regardless of
 	// probe state. The cleanup itself fails closed when the registry is empty
 	// so a transient registry/bootstrap issue cannot mass-delete profiles.
@@ -105,6 +110,32 @@ func (r *ProfileReconciler) Run(ctx context.Context) error {
 		r.reconcileAgent(ctx, ag)
 	}
 	return nil
+}
+
+func (r *ProfileReconciler) ensureVirtualFamilies(ctx context.Context) {
+	for _, ag := range r.registry.List() {
+		if !agents.IsVirtualAgent(ag) {
+			continue
+		}
+		if _, err := r.store.GetAgentByName(ctx, ag.ID()); err == nil {
+			continue
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			r.log.Warn("reconcile: look up virtual agent failed",
+				zap.String("agent_id", ag.ID()), zap.Error(err))
+			continue
+		}
+		parent := &models.Agent{
+			ID:          ag.ID(),
+			Name:        ag.ID(),
+			SupportsMCP: false,
+		}
+		if err := r.store.CreateAgent(ctx, parent); err != nil {
+			r.log.Warn("reconcile: seed virtual agent failed",
+				zap.String("agent_id", ag.ID()), zap.Error(err))
+			continue
+		}
+		r.log.Info("seeded virtual agent family", zap.String("agent_id", ag.ID()))
+	}
 }
 
 // cleanupOrphans soft-deletes profiles whose DB agent row references an

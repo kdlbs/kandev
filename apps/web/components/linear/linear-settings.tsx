@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import { IconHexagon } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { CardContent } from "@kandev/ui/card";
@@ -10,6 +17,8 @@ import { Separator } from "@kandev/ui/separator";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { useToast } from "@/components/toast-provider";
+import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
+import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { SettingsCard } from "@/components/settings/settings-card";
@@ -20,6 +29,7 @@ import {
 } from "@/components/integrations/auth-status-banner";
 import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
 import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import {
   getLinearConfig,
   setLinearConfig,
@@ -191,6 +201,15 @@ type ActionBarProps = {
 
 function ActionBar({ testing, loading, hasConfig, disableTest, onTest, onDelete }: ActionBarProps) {
   const { t } = useTranslation();
+  const { isFinePointer } = useResponsiveBreakpoint();
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const deleteAnchorRef = useRef<HTMLButtonElement>(null);
+  const removeConfirmation = t("linear:removeLinearConfigurationConfirm");
+
+  useEffect(() => {
+    if (!hasConfig && confirmingDelete) setConfirmingDelete(false);
+  }, [confirmingDelete, hasConfig]);
+
   return (
     <div className="flex flex-wrap items-center gap-2">
       <Button
@@ -204,17 +223,48 @@ function ActionBar({ testing, loading, hasConfig, disableTest, onTest, onDelete 
       >
         {testing ? t("linear:testing") : t("linear:testConnection")}
       </Button>
-      {hasConfig && (
+      {hasConfig && (isFinePointer || !confirmingDelete) && (
         <Button
+          ref={deleteAnchorRef}
           type="button"
           variant="destructive"
-          onClick={onDelete}
-          className="ml-auto cursor-pointer"
+          onClick={() => setConfirmingDelete(true)}
+          className="ml-auto min-h-11 cursor-pointer"
           data-testid="linear-delete-button"
         >
           {t("linear:removeConfiguration")}
         </Button>
       )}
+      {hasConfig && !isFinePointer && confirmingDelete ? (
+        <InlineConfirmActions
+          density="touch"
+          testId="linear-remove-inline-confirmation"
+          ariaLabel={removeConfirmation}
+          description={removeConfirmation}
+          cancelLabel={t("common:cancel")}
+          confirmLabel={t("linear:removeConfiguration")}
+          confirmAriaLabel={removeConfirmation}
+          confirmTestId="linear-remove-confirm"
+          onCancel={() => setConfirmingDelete(false)}
+          onClose={() => setConfirmingDelete(false)}
+          onConfirm={onDelete}
+        />
+      ) : null}
+      {hasConfig && isFinePointer ? (
+        <ActionConfirmPopover
+          open={confirmingDelete}
+          anchorRef={deleteAnchorRef}
+          title={removeConfirmation}
+          cancelLabel={t("common:cancel")}
+          confirmLabel={t("linear:removeConfiguration")}
+          confirmAriaLabel={removeConfirmation}
+          confirmTestId="linear-remove-confirm"
+          testId="linear-remove-confirm-popover"
+          onOpenChange={setConfirmingDelete}
+          onCancel={() => setConfirmingDelete(false)}
+          onConfirm={onDelete}
+        />
+      ) : null}
     </div>
   );
 }
@@ -288,7 +338,6 @@ function useSettingsActions({
   }, [workspaceId, form, t, toast, setConfig, setBaselineConfig, setForm, setTestResult]);
 
   const handleDelete = useCallback(async () => {
-    if (!confirm(t("linear:removeLinearConfigurationConfirm"))) return;
     try {
       await deleteLinearConfig({ workspaceId });
       setConfig(null);

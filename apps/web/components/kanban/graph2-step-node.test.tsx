@@ -1,5 +1,6 @@
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider } from "@/components/state-provider";
 import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
@@ -70,6 +71,50 @@ describe("Graph2StepNode — task-level background-running affordance", () => {
   });
 });
 
+describe("Graph2StepNode — auto-start-failed marker", () => {
+  function renderNodeWithTask(task: Task) {
+    return render(
+      <StateProvider>
+        <TooltipProvider>
+          <Graph2StepNode
+            step={STEP}
+            phase="current"
+            task={task}
+            hasPrev={false}
+            hasNext={false}
+            onMoveTask={() => undefined}
+            onPreviewTask={() => undefined}
+          />
+        </TooltipProvider>
+      </StateProvider>,
+    );
+  }
+
+  it("shows the auto-start-failed triangle for a non-terminal task marked auto_start_failed", () => {
+    const task = {
+      id: "task-1",
+      title: "A task",
+      workflowStepId: "step-1",
+      state: "IN_PROGRESS",
+      autoStartFailed: true,
+    } as Task;
+    const { container } = renderNodeWithTask(task);
+    expect(container.querySelector('[data-testid="task-state-auto-start-failed"]')).not.toBeNull();
+  });
+
+  it("does not show the auto-start-failed triangle when the marker is absent", () => {
+    const task = {
+      id: "task-1",
+      title: "A task",
+      workflowStepId: "step-1",
+      state: "IN_PROGRESS",
+      autoStartFailed: false,
+    } as Task;
+    const { container } = renderNodeWithTask(task);
+    expect(container.querySelector('[data-testid="task-state-auto-start-failed"]')).toBeNull();
+  });
+});
+
 describe("Graph2StepNode — waiting-for-input variants", () => {
   function renderWaitingNode(pendingAction: TaskPendingAction) {
     const task = {
@@ -108,5 +153,67 @@ describe("Graph2StepNode — waiting-for-input variants", () => {
     expect(container.querySelector(".tabler-icon-shield-question")).not.toBeNull();
     expect(container.querySelector(ICON_CHECK)).toBeNull();
     expect(container.querySelector(ICON_LOADER2)).toBeNull();
+  });
+});
+
+describe("Graph2StepNode — hidden destination disclosure", () => {
+  function renderNextMove(nextStepHidden: boolean) {
+    render(
+      <StateProvider>
+        <TooltipProvider delayDuration={0}>
+          <Graph2StepNode
+            step={STEP}
+            phase="current"
+            task={makeTask()}
+            hasPrev={false}
+            hasNext
+            nextStepId="step-done"
+            nextStepTitle="Done"
+            nextStepHidden={nextStepHidden}
+            onMoveTask={() => undefined}
+            onPreviewTask={() => undefined}
+          />
+        </TooltipProvider>
+      </StateProvider>,
+    );
+    const currentStep = screen.getByRole("button", { name: "In Progress" });
+    fireEvent.mouseEnter(currentStep.parentElement!);
+    return screen.getByRole("button", { name: "Move to Done" });
+  }
+
+  it("shows the destination tooltip only when the destination is hidden", async () => {
+    const hiddenTargetButton = renderNextMove(true);
+    fireEvent.focus(hiddenTargetButton);
+    await waitFor(() => expect(screen.getByRole("tooltip").textContent).toBe("Move to Done"));
+
+    cleanup();
+    const visibleTargetButton = renderNextMove(false);
+    fireEvent.focus(visibleTargetButton);
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
+  it("exposes move controls when the current node receives keyboard focus", () => {
+    render(
+      <StateProvider>
+        <TooltipProvider>
+          <Graph2StepNode
+            step={STEP}
+            phase="current"
+            task={makeTask()}
+            hasPrev={false}
+            hasNext
+            nextStepId="step-done"
+            nextStepTitle="Done"
+            nextStepHidden
+            onMoveTask={() => undefined}
+            onPreviewTask={() => undefined}
+          />
+        </TooltipProvider>
+      </StateProvider>,
+    );
+
+    fireEvent.focus(screen.getByRole("button", { name: "In Progress" }));
+
+    expect(screen.getByRole("button", { name: "Move to Done" })).not.toBeNull();
   });
 });

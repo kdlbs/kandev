@@ -51,6 +51,7 @@ function sheetStatus(task: KanbanState["tasks"][number], ctx: SheetItemCtx) {
     foregroundActivity: hasSummary ? summary?.foreground_activity : task.foregroundActivity,
     repositoryPath: sheetRepositoryPath(task, ctx),
     diffStats: sheetDiffStats(summary),
+    comparisonUnavailable: summary?.git?.comparison_unavailable === true,
     updatedAt: hasSummary ? summary?.updated_at : task.updatedAt,
     primarySessionId: hasSummary
       ? (summary?.primary_session?.id ?? null)

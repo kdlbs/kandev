@@ -185,6 +185,7 @@ type CreateRequest struct {
 	// first candidate when resolving BaseCommit / Ahead / Behind. Empty
 	// disables the override.
 	BaseBranches             map[string]string                         `json:"base_branches,omitempty"`
+	ComparisonTargets        map[string]models.ComparisonTarget        `json:"comparison_targets,omitempty"`
 	RemoteContributions      map[string]models.RemoteContribution      `json:"remote_contributions,omitempty"`
 	ContributionDestinations map[string]models.ContributionDestination `json:"contribution_destinations,omitempty"`
 	WorkspaceSourceRoots     []string                                  `json:"workspace_source_roots,omitempty"`

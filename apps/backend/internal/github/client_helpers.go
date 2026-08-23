@@ -160,6 +160,12 @@ func newPRStatus(pr *PR, reviews []PRReview, checks []CheckRun) *PRStatus {
 		// from the batched-GraphQL path that only carries rollup state.
 		ChecksPopulated:       true,
 		ReviewCountsPopulated: true,
+		// This path fetched a full single pull request (REST or gh CLI), so
+		// is_draft/changed_files/merged_by_login are real observations, not
+		// "I didn't look" (AC-10). ClosureAttributionPopulated stays false:
+		// neither REST caller can see the closing actor — that's GraphQL-only
+		// (AC-15).
+		OutcomeFieldsPopulated: true,
 	}
 }
 

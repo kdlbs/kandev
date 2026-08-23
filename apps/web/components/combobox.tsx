@@ -4,6 +4,7 @@ import { memo, useState } from "react";
 import { IconCheck, IconChevronDown, IconLoader2 } from "@tabler/icons-react";
 
 import { cn } from "@/lib/utils";
+import { prioritizeSelectedOption, selectorOptionClassName } from "@/lib/utils/selector-options";
 import { Button } from "@kandev/ui/button";
 import {
   Command,
@@ -25,6 +26,8 @@ export type ComboboxOption = {
   description?: string;
   keywords?: string[];
   renderLabel?: () => React.ReactNode;
+  /** Optional label renderer for the selected value inside the trigger. */
+  renderTriggerLabel?: () => React.ReactNode;
   /** When true the option renders dimmed and isn't selectable. */
   disabled?: boolean;
   /** Tooltip shown on hover when disabled is true. */
@@ -72,6 +75,9 @@ function TriggerLabel({
   plainTrigger: boolean;
   placeholder: string;
 }) {
+  if (!plainTrigger && selectedOption?.renderTriggerLabel) {
+    return selectedOption.renderTriggerLabel();
+  }
   if (!plainTrigger && selectedOption?.renderLabel) {
     return selectedOption.renderLabel();
   }
@@ -87,8 +93,13 @@ function OptionsList({
   value: string;
   onSelect: (value: string) => void;
 }) {
-  const enabled = options.filter((o) => !o.disabled);
-  const disabled = options.filter((o) => o.disabled);
+  const orderedOptions = prioritizeSelectedOption(options, value, (option) => option.value);
+  const selected = orderedOptions.find((option) => option.value === value);
+  const remaining = selected
+    ? orderedOptions.filter((option) => option.value !== value)
+    : orderedOptions;
+  const enabled = remaining.filter((o) => !o.disabled);
+  const disabled = remaining.filter((o) => o.disabled);
 
   const renderItem = (option: ComboboxOption) => {
     const item = (
@@ -98,7 +109,7 @@ function OptionsList({
         keywords={option.keywords ?? [option.label, option.description ?? ""]}
         onSelect={() => !option.disabled && onSelect(option.value)}
         disabled={option.disabled}
-        className={cn("relative pr-7", option.disabled && "opacity-40 cursor-not-allowed")}
+        className={selectorOptionClassName(option.value === value, option.disabled)}
       >
         <div className="flex min-w-0 flex-1 items-center">
           {option.renderLabel ? option.renderLabel() : option.label}
@@ -128,7 +139,8 @@ function OptionsList({
 
   return (
     <>
-      <CommandGroup>{enabled.map(renderItem)}</CommandGroup>
+      {selected && <CommandGroup>{renderItem(selected)}</CommandGroup>}
+      {enabled.length > 0 && <CommandGroup>{enabled.map(renderItem)}</CommandGroup>}
       {disabled.length > 0 && (
         <>
           <CommandSeparator />

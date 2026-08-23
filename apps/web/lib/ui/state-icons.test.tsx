@@ -167,6 +167,57 @@ describe("getTaskStateIcon — task-level activity tri-state", () => {
     expect(iconType(getTaskStateIcon("COMPLETED", undefined))).toBe(IconCheck);
   });
 
+  it("safe fallback: an in-progress task with a MISSING aggregate reads not-done, never a check", () => {
+    // safe default: a task whose turn is still
+    // open (coarse IN_PROGRESS) but whose task-level aggregate is unknown — e.g.
+    // the aggregate never reached this client, or the in-memory tracker reset on
+    // a backend restart — must fall back to the working spinner, never the done
+    // check. The coarse IN_PROGRESS reading is itself not-done, so a missing
+    // aggregate can only ever soften to working, never harden to done.
+    const missingUndefined = getTaskStateIcon("IN_PROGRESS", undefined);
+    const missingNull = getTaskStateIcon("IN_PROGRESS", undefined, { foregroundActivity: null });
+    expect(iconType(missingUndefined)).toBe(IconLoader2);
+    expect(iconType(missingUndefined)).not.toBe(IconCheck);
+    expect(iconType(missingNull)).toBe(IconLoader2);
+    expect(iconType(missingNull)).not.toBe(IconCheck);
+  });
+
+  it("distinguishes background from BOTH generating and done by icon SHAPE, not hue alone", () => {
+    // Icon TYPE (glyph) differs for all three, so the reading survives a
+    // grayscale/desaturated scan for color-vision-deficient operators
+    // The affordance remains distinguishable without color.
+    const generating = iconType(
+      getTaskStateIcon("IN_PROGRESS", undefined, { foregroundActivity: "generating" }),
+    );
+    const background = iconType(
+      getTaskStateIcon("IN_PROGRESS", undefined, { foregroundActivity: "background" }),
+    );
+    const done = iconType(getTaskStateIcon("COMPLETED", undefined, { foregroundActivity: null }));
+    expect(background).not.toBe(generating);
+    expect(background).not.toBe(done);
+    expect(generating).not.toBe(done);
+  });
+
+  it("also separates background from generating and done by HUE on the compact surfaces", () => {
+    // The dense board/list/graph surfaces get an extra hue separation on top of the
+    // shape difference so background reads apart from generating at a glance — its
+    // own violet, distinct from generating's blue and done's green.
+    const generating = iconClassName(
+      getTaskStateIcon("IN_PROGRESS", undefined, { foregroundActivity: "generating" }),
+    );
+    const background = iconClassName(
+      getTaskStateIcon("IN_PROGRESS", undefined, { foregroundActivity: "background" }),
+    );
+    const done = iconClassName(
+      getTaskStateIcon("COMPLETED", undefined, { foregroundActivity: null }),
+    );
+    expect(background).toContain("text-violet-500");
+    expect(background).not.toBe(generating);
+    expect(background).not.toBe(done);
+  });
+});
+
+describe("getTaskStateIcon — status markers", () => {
   it("renders the accessible interrupted icon with the tooltip label", () => {
     const { container } = render(
       <TooltipProvider>
@@ -218,53 +269,55 @@ describe("getTaskStateIcon — task-level activity tri-state", () => {
     ).toBe(IconShieldQuestion);
   });
 
-  it("safe fallback: an in-progress task with a MISSING aggregate reads not-done, never a check", () => {
-    // safe default: a task whose turn is still
-    // open (coarse IN_PROGRESS) but whose task-level aggregate is unknown — e.g.
-    // the aggregate never reached this client, or the in-memory tracker reset on
-    // a backend restart — must fall back to the working spinner, never the done
-    // check. The coarse IN_PROGRESS reading is itself not-done, so a missing
-    // aggregate can only ever soften to working, never harden to done.
-    const missingUndefined = getTaskStateIcon("IN_PROGRESS", undefined);
-    const missingNull = getTaskStateIcon("IN_PROGRESS", undefined, { foregroundActivity: null });
-    expect(iconType(missingUndefined)).toBe(IconLoader2);
-    expect(iconType(missingUndefined)).not.toBe(IconCheck);
-    expect(iconType(missingNull)).toBe(IconLoader2);
-    expect(iconType(missingNull)).not.toBe(IconCheck);
+  it("renders the accessible auto-start-failed icon with the tooltip label", () => {
+    const { container } = render(
+      <TooltipProvider>
+        {getTaskStateIcon("REVIEW", undefined, { autoStartFailed: true })}
+      </TooltipProvider>,
+    );
+    const icon = container.querySelector('[data-testid="task-state-auto-start-failed"]');
+    expect(icon).not.toBeNull();
+    expect(icon?.className).toContain("text-red-500");
+    expect(container.querySelector('[aria-label="Auto-start failed"]')).not.toBeNull();
+    // The icon itself is decorative; the label lives on the trigger.
+    expect(icon?.getAttribute("aria-hidden")).toBe("true");
   });
 
-  it("distinguishes background from BOTH generating and done by icon SHAPE, not hue alone", () => {
-    // Icon TYPE (glyph) differs for all three, so the reading survives a
-    // grayscale/desaturated scan for color-vision-deficient operators
-    // The affordance remains distinguishable without color.
-    const generating = iconType(
-      getTaskStateIcon("IN_PROGRESS", undefined, { foregroundActivity: "generating" }),
+  it("keeps terminal state icons over a lingering auto-start-failed marker", () => {
+    expect(iconType(getTaskStateIcon("COMPLETED", undefined, { autoStartFailed: true }))).toBe(
+      IconCheck,
     );
-    const background = iconType(
-      getTaskStateIcon("IN_PROGRESS", undefined, { foregroundActivity: "background" }),
+    expect(iconType(getTaskStateIcon("FAILED", undefined, { autoStartFailed: true }))).toBe(IconX);
+    expect(iconType(getTaskStateIcon("CANCELLED", undefined, { autoStartFailed: true }))).toBe(
+      IconX,
     );
-    const done = iconType(getTaskStateIcon("COMPLETED", undefined, { foregroundActivity: null }));
-    expect(background).not.toBe(generating);
-    expect(background).not.toBe(done);
-    expect(generating).not.toBe(done);
   });
 
-  it("also separates background from generating and done by HUE on the compact surfaces", () => {
-    // The dense board/list/graph surfaces get an extra hue separation on top of the
-    // shape difference so background reads apart from generating at a glance — its
-    // own violet, distinct from generating's blue and done's green.
-    const generating = iconClassName(
-      getTaskStateIcon("IN_PROGRESS", undefined, { foregroundActivity: "generating" }),
-    );
-    const background = iconClassName(
-      getTaskStateIcon("IN_PROGRESS", undefined, { foregroundActivity: "background" }),
-    );
-    const done = iconClassName(
-      getTaskStateIcon("COMPLETED", undefined, { foregroundActivity: null }),
-    );
-    expect(background).toContain("text-violet-500");
-    expect(background).not.toBe(generating);
-    expect(background).not.toBe(done);
+  it("keeps active and pending affordances over the auto-start-failed marker", () => {
+    expect(
+      iconType(
+        getTaskStateIcon("REVIEW", undefined, {
+          foregroundActivity: "generating",
+          autoStartFailed: true,
+        }),
+      ),
+    ).toBe(IconLoader2);
+    expect(
+      iconType(
+        getTaskStateIcon("REVIEW", undefined, {
+          hasPendingClarification: true,
+          autoStartFailed: true,
+        }),
+      ),
+    ).toBe(IconMessageQuestion);
+    expect(
+      iconType(
+        getTaskStateIcon("REVIEW", undefined, {
+          hasPendingPermission: true,
+          autoStartFailed: true,
+        }),
+      ),
+    ).toBe(IconShieldQuestion);
   });
 });
 

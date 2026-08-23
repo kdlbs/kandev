@@ -682,6 +682,14 @@ func (m *Manager) prepareExecutionCreateRequest(
 	if !ok {
 		return nil, fmt.Errorf("agent type %q not found in registry", info.AgentID)
 	}
+	managedRuntimeVersion, err := m.resolveManagedRuntimeVersion(
+		ctx,
+		models.ExecutorType(info.ExecutorType).Runtime(),
+		agentConfig,
+	)
+	if err != nil {
+		return nil, err
+	}
 
 	executionProfileID := workspaceExecutionProfileID(info)
 	profileInfo := m.resolveWorkspaceExecutionProfile(ctx, executionProfileID)
@@ -706,6 +714,16 @@ func (m *Manager) prepareExecutionCreateRequest(
 	contributionDestinations, err := contributionDestinationsFromMetadata(metadata)
 	if err != nil {
 		return nil, err
+	}
+	comparisonTargets, err := comparisonTargetsFromMetadata(metadata)
+	if err != nil {
+		return nil, err
+	}
+	if len(comparisonTargets) == 0 {
+		comparisonTargets, err = comparisonTargetsFromWorkspaceRepositories(info.WorkspaceRepositories)
+		if err != nil {
+			return nil, err
+		}
 	}
 	autoApprove := false
 	var autoApproveOverride *bool
@@ -734,8 +752,11 @@ func (m *Manager) prepareExecutionCreateRequest(
 			PreviousExecutionID:            info.AgentExecutionID,
 			AuthToken:                      m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyAuthTokenSecret),
 			BootstrapNonce:                 m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyBootstrapNonceSecret),
+			AgentctlStartupConfig:          m.agentctlStartupConfig,
 			RemoteContributions:            remoteContributions,
 			ContributionDestinations:       contributionDestinations,
+			ManagedRuntimeVersion:          managedRuntimeVersion,
+			ComparisonTargets:              comparisonTargets,
 		},
 		profileInfo: profileInfo,
 	}, nil

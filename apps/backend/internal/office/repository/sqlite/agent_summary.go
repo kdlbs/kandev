@@ -314,6 +314,7 @@ func (r *Repository) LatestRunForAgent(ctx context.Context, agentID string) (*Ru
 		       payload,
 		       status,
 		       COALESCE(error_message, '') AS error_message,
+		       COALESCE(output_summary, '') AS output_summary,
 		       requested_at,
 		       claimed_at,
 		       finished_at
@@ -339,6 +340,7 @@ type RunSummaryRow struct {
 	Payload        string     `db:"payload"`
 	Status         string     `db:"status"`
 	ErrorMessage   string     `db:"error_message"`
+	OutputSummary  string     `db:"output_summary"`
 	RequestedAt    time.Time  `db:"requested_at"`
 	ClaimedAt      *time.Time `db:"claimed_at"`
 	FinishedAt     *time.Time `db:"finished_at"`

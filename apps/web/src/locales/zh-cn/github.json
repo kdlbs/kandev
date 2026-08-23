@@ -575,5 +575,18 @@
   "timeAgoWeeks_one": "{{count}} 周前",
   "timeAgoWeeks_other": "{{count}} 周前",
   "timeAgoYears_one": "{{count}} 年前",
-  "timeAgoYears_other": "{{count}} 年前"
+  "timeAgoYears_other": "{{count}} 年前",
+  "mergeQueueEstimate_one": "预计合并时间：{{count}} 分钟",
+  "mergeQueueEstimate_other": "预计合并时间：{{count}} 分钟",
+  "mergeQueuePosition": "位置 {{position}}",
+  "mergeQueuePositionAndEstimate_one": "位置 {{position}}。预计合并时间：{{count}} 分钟",
+  "mergeQueuePositionAndEstimate_other": "位置 {{position}}。预计合并时间：{{count}} 分钟",
+  "mergeQueuePositionAndSubMinuteEstimate": "位置 {{position}}。预计合并时间：少于一分钟",
+  "mergeQueueStateAwaitingChecks": "等待检查",
+  "mergeQueueStateLocked": "已锁定",
+  "mergeQueueStateMergeable": "可合并",
+  "mergeQueueStateQueued": "排队中",
+  "mergeQueueStateUnmergeable": "不可合并",
+  "mergeQueueStatus": "合并队列：{{state}}",
+  "mergeQueueSubMinuteEstimate": "预计合并时间：少于一分钟"
 }

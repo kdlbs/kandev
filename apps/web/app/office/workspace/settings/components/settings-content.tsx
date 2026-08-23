@@ -1,14 +1,25 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
+import type { TFunction } from "i18next";
 import Image from "@/components/routing/app-image";
 import { IconUpload, IconDeviceFloppy } from "@tabler/icons-react";
 import { toast } from "@/lib/toast/sonner";
 import { Input } from "@kandev/ui/input";
 import { Switch } from "@kandev/ui/switch";
 import { Button } from "@kandev/ui/button";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { updateWorkspaceSettings, getWorkspaceSettings } from "@/lib/api/domains/office-api";
+import { updateWorkspaceAction } from "@/app/actions/workspaces";
+import type { AppState } from "@/lib/state/store";
 import type { WorkspaceState } from "@/lib/state/slices/workspace/types";
 import { ConfigSection } from "./config-section";
 import { DangerZoneSection } from "./danger-zone-section";
@@ -58,24 +69,18 @@ function AppearanceSection({
   logoPreview,
   initial,
   fileInputRef,
-  dirty,
-  saving,
   onNameChange,
   onDescriptionChange,
   onLogoChange,
-  onSave,
 }: {
   name: string;
   description: string;
   logoPreview: string | null;
   initial: string;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
-  dirty: boolean;
-  saving: boolean;
   onNameChange: (v: string) => void;
   onDescriptionChange: (v: string) => void;
   onLogoChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  onSave: () => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -133,14 +138,6 @@ function AppearanceSection({
           className="mt-1"
         />
       </div>
-      {dirty && (
-        <div className="flex justify-end pt-2">
-          <Button size="sm" onClick={onSave} disabled={saving} className="cursor-pointer">
-            <IconDeviceFloppy className="h-4 w-4 mr-1.5" />
-            {saving ? t("office:saving") : t("common:save")}
-          </Button>
-        </div>
-      )}
     </SettingCard>
   );
 }
@@ -249,6 +246,147 @@ function RecoverySection({
 
 type Workspace = WorkspaceState["items"][number];
 
+type WorkspaceStoreApi = {
+  getState: () => Pick<AppState, "workspaces" | "setWorkspaces">;
+};
+
+type SaveAppearanceOptions = {
+  activeWorkspace: Workspace | undefined;
+  name: string;
+  description: string;
+  storeApi: WorkspaceStoreApi;
+  nameRef: React.RefObject<string>;
+  descriptionRef: React.RefObject<string>;
+  setName: (v: string) => void;
+  setDescription: (v: string) => void;
+  setSaving: (v: boolean) => void;
+  t: TFunction;
+};
+
+function buildSaveAppearanceHandler({
+  activeWorkspace,
+  name,
+  description,
+  storeApi,
+  nameRef,
+  descriptionRef,
+  setName,
+  setDescription,
+  setSaving,
+  t,
+}: SaveAppearanceOptions) {
+  return async () => {
+    if (!activeWorkspace) return;
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      toast.error(t("workspaces:workspaceNameIsRequired"));
+      return;
+    }
+    setSaving(true);
+    try {
+      const updated = await updateWorkspaceAction(activeWorkspace.id, {
+        name: trimmedName,
+        description,
+      });
+      // Only echo the server response back into the draft fields if the user
+      // hasn't kept typing since this save started: the PATCH round trip can
+      // take long enough for a newer keystroke to land before the response
+      // does, and unconditionally overwriting the draft here would silently
+      // discard it (refs, not the closed-over name/description, hold the
+      // latest value across that round trip).
+      if (nameRef.current === name) setName(updated.name);
+      if (descriptionRef.current === description) setDescription(updated.description ?? "");
+      // Read the store's current list at save time, not the array captured at
+      // render/handler-build time: an in-flight workspace.created/updated/deleted
+      // WS event can land during the PATCH round trip, and a stale snapshot here
+      // would clobber it with a whole-array replace (setWorkspaces has no merge
+      // semantics). Same idiom as config-chat-agent-section.tsx.
+      const { workspaces: current, setWorkspaces } = storeApi.getState();
+      setWorkspaces(
+        current.items.map((ws) =>
+          ws.id === updated.id
+            ? { ...ws, name: updated.name, description: updated.description }
+            : ws,
+        ),
+      );
+      toast.success(t("office:appearanceSettingsSaved"));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("office:failedToSaveSettings"));
+      throw err;
+    } finally {
+      setSaving(false);
+    }
+  };
+}
+
+function usePermissionsState(activeWorkspace: Workspace | undefined) {
+  const { t } = useTranslation();
+  const [approvalNewAgents, setApprovalNewAgents] = useState(true);
+  const [approvalTaskCompletion, setApprovalTaskCompletion] = useState(false);
+  const [approvalSkillChanges, setApprovalSkillChanges] = useState(true);
+  const [origApprovalNewAgents, setOrigApprovalNewAgents] = useState(true);
+  const [origApprovalTaskCompletion, setOrigApprovalTaskCompletion] = useState(false);
+  const [origApprovalSkillChanges, setOrigApprovalSkillChanges] = useState(true);
+  const [savingPermissions, setSavingPermissions] = useState(false);
+  const activeWorkspaceId = activeWorkspace?.id;
+
+  useEffect(() => {
+    if (!activeWorkspaceId) return;
+    void getWorkspaceSettings(activeWorkspaceId)
+      .then((res) => {
+        const s = res.settings;
+        if (s.require_approval_for_new_agents !== undefined) {
+          setApprovalNewAgents(s.require_approval_for_new_agents);
+          setOrigApprovalNewAgents(s.require_approval_for_new_agents);
+        }
+        if (s.require_approval_for_task_completion !== undefined) {
+          setApprovalTaskCompletion(s.require_approval_for_task_completion);
+          setOrigApprovalTaskCompletion(s.require_approval_for_task_completion);
+        }
+        if (s.require_approval_for_skill_changes !== undefined) {
+          setApprovalSkillChanges(s.require_approval_for_skill_changes);
+          setOrigApprovalSkillChanges(s.require_approval_for_skill_changes);
+        }
+      })
+      .catch(() => {});
+  }, [activeWorkspaceId]);
+
+  const handleSavePermissions = useCallback(async () => {
+    if (!activeWorkspace) return;
+    setSavingPermissions(true);
+    try {
+      await updateWorkspaceSettings(activeWorkspace.id, {
+        require_approval_for_new_agents: approvalNewAgents,
+        require_approval_for_task_completion: approvalTaskCompletion,
+        require_approval_for_skill_changes: approvalSkillChanges,
+      });
+      setOrigApprovalNewAgents(approvalNewAgents);
+      setOrigApprovalTaskCompletion(approvalTaskCompletion);
+      setOrigApprovalSkillChanges(approvalSkillChanges);
+      toast.success(t("office:permissionSettingsSaved"));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("office:failedToSaveSettings"));
+    } finally {
+      setSavingPermissions(false);
+    }
+  }, [activeWorkspace, approvalNewAgents, approvalTaskCompletion, approvalSkillChanges]);
+
+  return {
+    approvalNewAgents,
+    setApprovalNewAgents,
+    approvalTaskCompletion,
+    setApprovalTaskCompletion,
+    approvalSkillChanges,
+    setApprovalSkillChanges,
+    savingPermissions,
+    permissionsDirty:
+      approvalNewAgents !== origApprovalNewAgents ||
+      approvalTaskCompletion !== origApprovalTaskCompletion ||
+      approvalSkillChanges !== origApprovalSkillChanges,
+    handleSavePermissions,
+  };
+}
+
 function useRecoveryState(activeWorkspace: Workspace | undefined) {
   const { t } = useTranslation();
   const [lookbackHours, setLookbackHours] = useState(24);
@@ -294,85 +432,131 @@ function useRecoveryState(activeWorkspace: Workspace | undefined) {
   };
 }
 
-function useSettingsState(activeWorkspace: Workspace | undefined) {
+type AppearanceBaseline = {
+  id: string | undefined;
+  name: string;
+  description: string;
+};
+
+function getAppearanceBaseline(workspace: Workspace | undefined): AppearanceBaseline {
+  return {
+    id: workspace?.id,
+    name: workspace?.name ?? "",
+    description: workspace?.description ?? "",
+  };
+}
+
+function reconcileAppearanceDraft(
+  previous: AppearanceBaseline,
+  next: AppearanceBaseline,
+  setName: Dispatch<SetStateAction<string>>,
+  setDescription: Dispatch<SetStateAction<string>>,
+) {
+  if (next.id !== previous.id) {
+    setName(next.name);
+    setDescription(next.description);
+    return;
+  }
+
+  setName((current) => (current === previous.name ? next.name : current));
+  setDescription((current) => (current === previous.description ? next.description : current));
+}
+
+export function useSettingsState(
+  activeWorkspace: Workspace | undefined,
+  storeApi: WorkspaceStoreApi,
+) {
   const { t } = useTranslation();
-  const [name, setName] = useState(activeWorkspace?.name ?? "");
-  const [description, setDescription] = useState(activeWorkspace?.description ?? "");
+  const appearance = getAppearanceBaseline(activeWorkspace);
+  const [name, setName] = useState(appearance.name);
+  const [description, setDescription] = useState(appearance.description);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [approvalNewAgents, setApprovalNewAgents] = useState(true);
-  const [approvalTaskCompletion, setApprovalTaskCompletion] = useState(false);
-  const [approvalSkillChanges, setApprovalSkillChanges] = useState(true);
-  const [origApprovalNewAgents, setOrigApprovalNewAgents] = useState(true);
-  const [origApprovalTaskCompletion, setOrigApprovalTaskCompletion] = useState(false);
-  const [origApprovalSkillChanges, setOrigApprovalSkillChanges] = useState(true);
   const [savingAppearance, setSavingAppearance] = useState(false);
-  const [savingPermissions, setSavingPermissions] = useState(false);
   const recovery = useRecoveryState(activeWorkspace);
+  const permissions = usePermissionsState(activeWorkspace);
+  const { id: appearanceId, name: appearanceName, description: appearanceDescription } = appearance;
+  const appearanceBaselineRef = useRef(appearance);
 
-  const activeWorkspaceId = activeWorkspace?.id;
-
+  // If the active workspace's identity changes without this page
+  // remounting - e.g. a workspace.deleted WS event elsewhere reassigns
+  // workspaces.activeId while this page stays mounted - the draft must
+  // reset to the new workspace's values. Otherwise the stale draft from
+  // the old workspace looks "dirty" against the new one's name, and Save
+  // would persist the old workspace's data onto the new, unrelated one.
+  // For same-workspace updates, only fields that still match the previous
+  // baseline are refreshed. This keeps remote changes visible without
+  // overwriting a local draft.
   useEffect(() => {
-    if (!activeWorkspaceId) return;
-    void getWorkspaceSettings(activeWorkspaceId)
-      .then((res) => {
-        const s = res.settings;
-        if (s.require_approval_for_new_agents !== undefined) {
-          setApprovalNewAgents(s.require_approval_for_new_agents);
-          setOrigApprovalNewAgents(s.require_approval_for_new_agents);
-        }
-        if (s.require_approval_for_task_completion !== undefined) {
-          setApprovalTaskCompletion(s.require_approval_for_task_completion);
-          setOrigApprovalTaskCompletion(s.require_approval_for_task_completion);
-        }
-        if (s.require_approval_for_skill_changes !== undefined) {
-          setApprovalSkillChanges(s.require_approval_for_skill_changes);
-          setOrigApprovalSkillChanges(s.require_approval_for_skill_changes);
-        }
-      })
-      .catch(() => {});
-  }, [activeWorkspaceId]);
+    const next = {
+      id: appearanceId,
+      name: appearanceName,
+      description: appearanceDescription,
+    };
+    const previous = appearanceBaselineRef.current;
+
+    reconcileAppearanceDraft(previous, next, setName, setDescription);
+    appearanceBaselineRef.current = next;
+  }, [appearanceDescription, appearanceId, appearanceName]);
+
+  // Latest-value refs so the in-flight save handler (a closure fixed at the
+  // moment Save was clicked) can tell whether the draft has moved on since,
+  // instead of blindly trusting the name/description it captured at submit
+  // time.
+  const nameRef = useRef(name);
+  const descriptionRef = useRef(description);
+  useEffect(() => {
+    nameRef.current = name;
+  }, [name]);
+  useEffect(() => {
+    descriptionRef.current = description;
+  }, [description]);
 
   const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) setLogoPreview(URL.createObjectURL(file));
   };
 
-  const handleSaveAppearance = useCallback(async () => {
-    if (!activeWorkspace) return;
-    setSavingAppearance(true);
-    try {
-      await updateWorkspaceSettings(activeWorkspace.id, { name, description });
-      toast.success(t("office:appearanceSettingsSaved"));
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("office:failedToSaveSettings"));
-    } finally {
-      setSavingAppearance(false);
-    }
-  }, [activeWorkspace, name, description]);
+  // useCallback (matching handleSavePermissions/handleSaveRecovery) so the
+  // handler only gets a new identity when an input it actually reads changes.
+  const handleSaveAppearance = useCallback(
+    buildSaveAppearanceHandler({
+      activeWorkspace,
+      name,
+      description,
+      storeApi,
+      nameRef,
+      descriptionRef,
+      setName,
+      setDescription,
+      setSaving: setSavingAppearance,
+      t,
+    }),
+    [activeWorkspace, name, description, storeApi, nameRef, descriptionRef, t],
+  );
 
-  const handleSavePermissions = useCallback(async () => {
-    if (!activeWorkspace) return;
-    setSavingPermissions(true);
-    try {
-      await updateWorkspaceSettings(activeWorkspace.id, {
-        require_approval_for_new_agents: approvalNewAgents,
-        require_approval_for_task_completion: approvalTaskCompletion,
-        require_approval_for_skill_changes: approvalSkillChanges,
-      });
-      setOrigApprovalNewAgents(approvalNewAgents);
-      setOrigApprovalTaskCompletion(approvalTaskCompletion);
-      setOrigApprovalSkillChanges(approvalSkillChanges);
-      toast.success(t("office:permissionSettingsSaved"));
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("office:failedToSaveSettings"));
-    } finally {
-      setSavingPermissions(false);
-    }
-  }, [activeWorkspace, approvalNewAgents, approvalTaskCompletion, approvalSkillChanges]);
+  const appearanceDirty =
+    Boolean(appearanceId) && (name !== appearanceName || description !== appearanceDescription);
+  const appearanceRevision = JSON.stringify({
+    id: appearanceId,
+    name,
+    description,
+  });
 
-  const origName = activeWorkspace?.name ?? "";
-  const origDescription = activeWorkspace?.description ?? "";
+  useSettingsSaveContributor({
+    id: "office-workspace-appearance",
+    order: 10,
+    revision: appearanceRevision,
+    isDirty: appearanceDirty,
+    canSave: Boolean(name.trim()),
+    invalidReason: name.trim() ? undefined : t("workspaces:workspaceNameIsRequired"),
+    save: handleSaveAppearance,
+    discard: (revision) => {
+      if (!Object.is(revision, appearanceRevision)) return;
+      setName(appearanceName);
+      setDescription(appearanceDescription);
+    },
+  });
 
   return {
     name,
@@ -381,33 +565,23 @@ function useSettingsState(activeWorkspace: Workspace | undefined) {
     setDescription,
     logoPreview,
     fileInputRef,
-    approvalNewAgents,
-    setApprovalNewAgents,
-    approvalTaskCompletion,
-    setApprovalTaskCompletion,
-    approvalSkillChanges,
-    setApprovalSkillChanges,
+    ...permissions,
     ...recovery,
-    appearanceDirty: name !== origName || description !== origDescription,
-    permissionsDirty:
-      approvalNewAgents !== origApprovalNewAgents ||
-      approvalTaskCompletion !== origApprovalTaskCompletion ||
-      approvalSkillChanges !== origApprovalSkillChanges,
+    appearanceDirty,
     savingAppearance,
-    savingPermissions,
     handleLogoChange,
     handleSaveAppearance,
-    handleSavePermissions,
   };
 }
 
 export function SettingsContent() {
   const { t } = useTranslation();
+  const storeApi = useAppStoreApi();
   const workspaces = useAppStore((s) => s.workspaces);
   const setWorkspaces = useAppStore((s) => s.setWorkspaces);
   const setActiveWorkspace = useAppStore((s) => s.setActiveWorkspace);
   const activeWorkspace = workspaces.items.find((w) => w.id === workspaces.activeId);
-  const s = useSettingsState(activeWorkspace);
+  const s = useSettingsState(activeWorkspace, storeApi);
   const initial = (s.name || "W").charAt(0).toUpperCase();
 
   return (
@@ -420,12 +594,9 @@ export function SettingsContent() {
           logoPreview={s.logoPreview}
           initial={initial}
           fileInputRef={s.fileInputRef}
-          dirty={s.appearanceDirty}
-          saving={s.savingAppearance}
           onNameChange={s.setName}
           onDescriptionChange={s.setDescription}
           onLogoChange={s.handleLogoChange}
-          onSave={s.handleSaveAppearance}
         />
       </div>
 

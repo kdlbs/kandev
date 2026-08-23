@@ -97,7 +97,7 @@ func provideOrchestrator(
 	if err != nil {
 		return nil, nil, fmt.Errorf("init message queue repo: %w", err)
 	}
-	queueSettings := resolveQueueSettings(pool, log).Effective
+	queueSettings := resolveQueueSettings(pool, log, queueConfiguration(cfg)).Effective
 	maxPerSession := queueSettings.MaxPerSession
 	mergeEnabled := queueSettings.MergeEnabled
 	autoMergeEnabled := queueSettings.AutoMergeEnabled
@@ -140,6 +140,7 @@ func provideOrchestrator(
 	// them the one task kind nothing else ever cleans up; the orchestrator needs
 	// the manager to enforce the per-automation retention window.
 	orchestratorSvc.SetWorktreeManager(lifecycleMgr.WorktreeManager())
+	orchestratorSvc.SetTaskLaunchRecoveryService(taskSvc)
 
 	msgCreator := &messageCreatorAdapter{svc: taskSvc, logger: log}
 	orchestratorSvc.SetMessageCreator(msgCreator)
@@ -239,6 +240,10 @@ func provideOrchestrator(
 		// Wire repo cloner into executor for provider-backed repos with no local path
 		orchestratorSvc.SetRepoCloner(repoCloner, &repoLocalPathUpdater{svc: taskSvc})
 	}
+	// Worktree fallback self-healing updates the exact task repository row
+	// after a successful launch. Keep this seam on the task service so the
+	// lifecycle and worktree packages remain task-agnostic.
+	orchestratorSvc.SetTaskRepositoryBaseBranchUpdater(&repoLocalPathUpdater{svc: taskSvc})
 
 	return orchestratorSvc, msgCreator, nil
 }
@@ -269,21 +274,21 @@ func (a githubExecutorCredentialPolicyAdapter) ResolveTaskGitCredentialPolicy(
 func githubCredentialBrokerEndpoint(cfg *config.Config) string {
 	if cfg != nil {
 		if publicBaseURL := strings.TrimRight(strings.TrimSpace(cfg.GitHubCredentialBroker.PublicBaseURL), "/"); publicBaseURL != "" {
-			return publicBaseURL + "/api/v1/github/credentials/resolve"
+			return publicBaseURL + "/api/v1/git/credentials/resolve"
 		}
 		if cfg.Server.Port != 0 {
-			return fmt.Sprintf("http://localhost:%d/api/v1/github/credentials/resolve", cfg.Server.Port)
+			return fmt.Sprintf("http://localhost:%d/api/v1/git/credentials/resolve", cfg.Server.Port)
 		}
 	}
-	return fmt.Sprintf("http://localhost:%d/api/v1/github/credentials/resolve", portsBackendDefault)
+	return fmt.Sprintf("http://localhost:%d/api/v1/git/credentials/resolve", portsBackendDefault)
 }
 
 // resolveQueueMaxPerSession honors the KANDEV_QUEUE_MAX_PER_SESSION env var,
 // falling back to messagequeue.DefaultMaxPerSession (10) when unset or invalid.
 // Values <= 0 disable the cap entirely (callers can still flood queues — only
 // useful in tests / specialized deployments).
-func resolveQueueMaxPerSession(pool *db.Pool, log *logger.Logger) int {
-	return resolveQueueSettings(pool, log).Effective.MaxPerSession
+func resolveQueueMaxPerSession(pool *db.Pool, log *logger.Logger, startup ...queuesettings.Configuration) int {
+	return resolveQueueSettings(pool, log, startup...).Effective.MaxPerSession
 }
 
 // resolveQueueMergeEnabled honors the persisted message queue setting,
@@ -303,7 +308,11 @@ func resolveQueueAutoMergeEnabled(pool *db.Pool, log *logger.Logger) bool {
 // back to defaults when unset, invalid, or the store is unavailable — and
 // resolves them against the KANDEV_QUEUE_MAX_PER_SESSION environment
 // override.
-func resolveQueueSettings(pool *db.Pool, log *logger.Logger) queuesettings.Resolution {
+func resolveQueueSettings(
+	pool *db.Pool,
+	log *logger.Logger,
+	startup ...queuesettings.Configuration,
+) queuesettings.Resolution {
 	var configured *queuesettings.Settings
 	if pool != nil {
 		rawStore, err := systemsettings.NewStore(pool)
@@ -317,7 +326,7 @@ func resolveQueueSettings(pool *db.Pool, log *logger.Logger) queuesettings.Resol
 			}
 		}
 	}
-	resolution, err := queuesettings.Resolve(configured, queuesettings.ReadEnvironment())
+	resolution, err := queuesettings.Resolve(configured, queuesettings.ReadEnvironment(), startup...)
 	if err != nil {
 		log.Warn("Failed to resolve message queue settings, using defaults", zap.Error(err))
 		return queuesettings.Resolution{Response: queuesettings.Response{
@@ -334,6 +343,13 @@ func resolveQueueSettings(pool *db.Pool, log *logger.Logger) queuesettings.Resol
 			zap.String("environment_variable", queuesettings.EnvironmentVariable))
 	}
 	return resolution
+}
+
+func queueConfiguration(cfg *config.Config) queuesettings.Configuration {
+	if cfg == nil || cfg.SourceFor("messageQueue.maxPerSession") != config.SourceConfiguration {
+		return queuesettings.Configuration{}
+	}
+	return queuesettings.Configuration{Value: cfg.MessageQueue.MaxPerSession, Present: true}
 }
 
 func resolveEventNamespace(cfg *config.Config) string {
@@ -940,6 +956,15 @@ func (u *repoLocalPathUpdater) UpdateRepositoryDefaultBranch(ctx context.Context
 	}
 	_, err := u.svc.UpdateRepository(ctx, repositoryID, &taskservice.UpdateRepositoryRequest{
 		DefaultBranch: &defaultBranch,
+	})
+	return err
+}
+
+func (u *repoLocalPathUpdater) UpdateTaskRepositoryBaseBranch(ctx context.Context, taskID, taskRepositoryID, baseBranch string) error {
+	_, err := u.svc.UpdateRepositoryBaseBranch(ctx, taskservice.UpdateRepositoryBaseBranchRequest{
+		TaskID:           taskID,
+		TaskRepositoryID: taskRepositoryID,
+		BaseBranch:       baseBranch,
 	})
 	return err
 }

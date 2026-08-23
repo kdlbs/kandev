@@ -161,6 +161,15 @@ Changes are grouped by repository and then by state:
 
 From this panel you can stage or unstage files, discard working-tree changes, commit, amend, reset or revert commits, pull, rebase, merge, push, force-push, rename the task branch, choose a base branch, and create or open a pull request or merge request. Operations apply to the selected repository. Discarding a file is permanent, and history-changing operations can lose work or invalidate review; read [Git operations](git-operations.md) before using them.
 
+For a linked fork pull request, the Changes header shows the exact comparison target, such as
+`upstream/widget:main`. Kandev keeps this target separate from `origin`, the checked-out branch,
+and the push remote. Desktop hover details and the mobile touch drawer show the same target.
+
+If Kandev cannot materialize that exact target, the Changes panel shows a comparison warning and
+hides numeric diff, commit, and ahead/behind totals. It does not use a same-named `origin` branch as
+a substitute. Check the executor's Git access and refresh the session after the target becomes
+available.
+
 ### Open a file in its external repository
 
 When Kandev has unambiguous repository context, file toolbars in Changes, Review, built-in viewers and editors, and their mobile layouts show **Open file in GitHub**, **Open file in GitLab**, or **Open file in Azure DevOps**. The action opens the provider page in a new browser tab. GitLab links support both `gitlab.com` and configured self-managed hosts.
@@ -265,7 +274,7 @@ The GitLab MR topbar control has an **Automation** group with the same two actio
 - **Auto-fix CI and address comments** sends the agent a new or changed failing pipeline job or unresolved discussion note once the pipeline settles, and stops after 10 repair rounds for that MR. Disable and re-enable it to reset the limit.
 - **Auto-merge when ready** merges only after the pipeline passes, unresolved discussions are cleared, and GitLab's own merge-readiness check agrees.
 
-Below that, open **Review follow-up** for the same three notification switches GitHub uses, task-level and applying to every merge request linked to the task:
+Below that, open **Review follow-up** for the same three notification switches GitHub uses. Every switch above belongs to one merge request: a task with several linked MRs shows an **Automation** group per MR, each labelled with its MR number, and turning a switch on for one leaves the others alone.
 
 - **Your review is requested** wakes the agent when the workspace's connected GitLab account is newly added as a reviewer on the MR. Staying assigned across MR updates does not re-fire it; being removed and re-added (for example, for a re-review after changes) does.
 - **MR merged** and **MR closed without merging** independently wake the agent when review work ends.

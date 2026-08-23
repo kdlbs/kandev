@@ -357,6 +357,9 @@ func buildGitStatusNotification(sessionID, repositoryName string, status client.
 		"renamed":               status.Renamed,
 		branchAdditionsFieldKey: status.BranchAdditions,
 		branchDeletionsFieldKey: status.BranchDeletions,
+		"comparison_target":     status.ComparisonTarget,
+		"comparison_status":     status.ComparisonStatus,
+		"comparison_error_code": status.ComparisonErrorCode,
 		"is_submodule":          status.IsSubmodule,
 	}
 	if repositoryName != "" {
@@ -405,8 +408,13 @@ func appendDBSnapshotGitStatus(ctx context.Context, taskRepo *sqliterepo.Reposit
 		"status": map[string]interface{}{
 			branchFieldKey:          latestSnapshot.Branch,
 			"remote_branch":         latestSnapshot.RemoteBranch,
+			"head_commit":           latestSnapshot.HeadCommit,
+			"base_commit":           latestSnapshot.BaseCommit,
 			"ahead":                 latestSnapshot.Ahead,
 			"behind":                latestSnapshot.Behind,
+			"remote_ahead":          metadata["remote_ahead"],
+			"remote_behind":         metadata["remote_behind"],
+			"remote_head_commit":    metadata["remote_head_commit"],
 			"files":                 latestSnapshot.Files,
 			"modified":              metadata["modified"],
 			addedFieldKey:           metadata[addedFieldKey],
@@ -415,6 +423,9 @@ func appendDBSnapshotGitStatus(ctx context.Context, taskRepo *sqliterepo.Reposit
 			"renamed":               metadata["renamed"],
 			branchAdditionsFieldKey: metadata[branchAdditionsFieldKey],
 			branchDeletionsFieldKey: metadata[branchDeletionsFieldKey],
+			"comparison_target":     metadata["comparison_target"],
+			"comparison_status":     metadata["comparison_status"],
+			"comparison_error_code": metadata["comparison_error_code"],
 		},
 	}
 	notification, err := ws.NewNotification(ws.ActionSessionGitEvent, gitEventData)
@@ -567,6 +578,8 @@ type routeParams struct {
 	devMode                       bool
 	httpPort                      int
 	features                      config.FeaturesConfig
+	planCoalesceWindow            time.Duration
+	planCoalesceWindowConfigured  bool
 	homeDir                       string
 	interimSettingsInterlockToken string
 	log                           *logger.Logger
@@ -575,13 +588,24 @@ type routeParams struct {
 // registerRoutes sets up all HTTP and WebSocket routes on the given router.
 func registerRoutes(p routeParams) {
 	workflowCtrl := workflowcontroller.NewController(p.services.Workflow)
-	planService := taskservice.NewPlanService(p.taskRepo, p.eventBus, p.log)
+	var planService *taskservice.PlanService
+	if p.planCoalesceWindowConfigured {
+		planService = taskservice.NewPlanService(p.taskRepo, p.eventBus, p.log, p.planCoalesceWindow)
+	} else {
+		planService = taskservice.NewPlanService(p.taskRepo, p.eventBus, p.log)
+	}
 	// Per-user task scoping for plan reads/writes (opt-in auth).
 	planService.SetTaskAuthorizer(p.taskSvc.AuthorizeTaskAccess)
 	clarificationStore := clarification.NewStore(2 * time.Hour)
 	clarificationCanceller := clarification.NewCanceller(clarificationStore, p.taskRepo, p.taskSvc, p.log)
 	p.orchestratorSvc.SetClarificationCanceller(clarificationCanceller)
 	p.taskSvc.SetClarificationCanceller(clarificationCanceller)
+	// Single resolver instance shared by the REST clarification routes and the
+	// external answer_question_kandev/list_pending_questions_kandev MCP tools
+	// (R3: both entry points must race through the same claim).
+	clarificationResolver := clarification.NewResolver(
+		clarificationStore, p.taskRepo, p.msgCreator, p.taskSvc, p.orchestratorSvc, p.eventBus, p.log,
+	)
 
 	// Wire pending clarification requests into the office inbox.
 	if p.services.OfficeSvcs != nil && p.services.OfficeSvcs.Dashboard != nil {
@@ -682,7 +706,7 @@ func registerRoutes(p routeParams) {
 
 	p.gateway.SetupRoutes(p.router)
 	registerTaskRoutes(p, planService, handoffSvc)
-	registerSecondaryRoutes(p, workflowCtrl, clarificationStore, clarificationCanceller, planService, handoffSvc)
+	registerSecondaryRoutes(p, workflowCtrl, clarificationStore, clarificationCanceller, clarificationResolver, planService, handoffSvc)
 	if p.authSvc != nil {
 		authhttpapi.RegisterRoutes(p.router, p.authSvc, p.log)
 	}
@@ -1093,6 +1117,7 @@ func registerSecondaryRoutes(
 	workflowCtrl *workflowcontroller.Controller,
 	clarificationStore *clarification.Store,
 	clarificationCanceller *clarification.Canceller,
+	clarificationResolver *clarification.Resolver,
 	planService *taskservice.PlanService,
 	handoffSvc *taskservice.HandoffService,
 ) {
@@ -1143,7 +1168,7 @@ func registerSecondaryRoutes(
 		p.msgCreator,
 		p.taskRepo,
 		p.eventBus,
-		p.orchestratorSvc,
+		clarificationResolver,
 		p.log,
 	)
 	p.log.Debug("Registered Clarification handlers (HTTP)")
@@ -1258,7 +1283,7 @@ func registerSecondaryRoutes(
 		p.log.Debug("Registered Improve Kandev handlers (HTTP)")
 	}
 
-	registerMCPAndDebugRoutes(p, workflowCtrl, clarificationStore, clarificationCanceller, planService, handoffSvc)
+	registerMCPAndDebugRoutes(p, workflowCtrl, clarificationStore, clarificationCanceller, clarificationResolver, planService, handoffSvc)
 
 	var automationSvc *automation.Service
 	if p.services.Automation != nil {
@@ -1540,6 +1565,7 @@ func registerMCPAndDebugRoutes(
 	wfCtrl *workflowcontroller.Controller,
 	clarificationStore *clarification.Store,
 	clarificationCanceller *clarification.Canceller,
+	clarificationResolver *clarification.Resolver,
 	planService *taskservice.PlanService,
 	handoffSvc *taskservice.HandoffService,
 ) {
@@ -1556,8 +1582,13 @@ func registerMCPAndDebugRoutes(
 	mcpHandlers.SetClarificationInputPauser(p.orchestratorSvc)
 	mcpHandlers.SetPromptReferenceResolver(p.services.Prompts)
 	mcpHandlers.SetTaskStopper(p.orchestratorSvc)
+	mcpHandlers.SetAgentPermissionService(p.orchestratorSvc)
 	mcpHandlers.SetTaskTitleBranchRenamer(p.orchestratorSvc)
 	mcpHandlers.SetUserSettingsProvider(p.services.User)
+	// list_pending_questions_kandev / answer_question_kandev (external MCP
+	// surface only). p.taskRepo already implements ClarificationBundleLister
+	// (ListUnresolvedClarificationBundles, FindMessagesByPendingID).
+	mcpHandlers.SetClarificationResolver(clarificationResolver, p.taskRepo)
 	if p.systemSvc != nil && p.systemSvc.LogBundles != nil {
 		mcpHandlers.SetDiagnosticBundleServices(p.systemSvc.LogBundles, p.lifecycleMgr)
 	}
@@ -1570,6 +1601,9 @@ func registerMCPAndDebugRoutes(
 	}
 	if p.services.GitLab != nil {
 		mcpHandlers.SetTaskMRAutomationService(p.services.GitLab)
+	}
+	if p.services.OfficeSvcs != nil && p.services.OfficeSvcs.Dashboard != nil {
+		mcpHandlers.SetDashboardService(p.services.OfficeSvcs.Dashboard)
 	}
 
 	// Reuse the cross-task handoff service constructed in registerRoutes —
@@ -1644,7 +1678,7 @@ func registerExternalMCP(p routeParams) {
 	}
 	baseURL := fmt.Sprintf("http://localhost:%d", port)
 
-	backendClient := mcpserver.NewDispatcherBackendClient(p.gateway.Dispatcher, p.log)
+	backendClient := mcpserver.NewExternalDispatcherBackendClient(p.gateway.Dispatcher, p.log)
 	srv := mcpserver.NewExternal(backendClient, p.log, "")
 	mcpGroup := p.router.Group("", externalMCPAuthMiddleware(p.authSvc))
 	srv.RegisterBackendRoutes(mcpGroup)
