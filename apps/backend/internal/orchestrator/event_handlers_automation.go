@@ -116,7 +116,7 @@ func (s *Service) loadAutomationCoordinatorSession(ctx context.Context, taskID, 
 	if err != nil {
 		return nil, false, err
 	}
-	if task == nil || task.Origin != models.TaskOriginAutomationRun {
+	if task == nil || !isAutomationTaskOrigin(task.Origin) {
 		return nil, false, nil
 	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
@@ -130,6 +130,10 @@ func (s *Service) loadAutomationCoordinatorSession(ctx context.Context, taskID, 
 		return nil, false, nil
 	}
 	return session, true, nil
+}
+
+func isAutomationTaskOrigin(origin string) bool {
+	return origin == models.TaskOriginAutomationRun || origin == models.TaskOriginAutomationTask
 }
 
 func (s *Service) coordinatorActiveTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
@@ -289,12 +293,9 @@ func (s *Service) createAutomationTask(ctx context.Context, evt *automation.Auto
 		return
 	}
 
-	// The run row is the only record that this firing happened: it carries the
-	// concurrency accounting and it is the sole way the work is reachable,
-	// since the task is hidden from every board and list. Launching an agent
-	// without it would leave an automation running that nothing can see and
-	// nothing can finalize, so a failed write stops the firing here — and takes
-	// the task with it, or the hidden task outlives the run it belonged to.
+	// The run row is the record that this firing happened and carries its exact
+	// concurrency accounting. Hidden tasks are reachable only through that row;
+	// visible normal tasks also remain available through ordinary task lists.
 	if err := s.recordSuccessRun(ctx, evt, task.ID); err != nil {
 		s.logger.Error("failed to record automation run; abandoning the firing",
 			zap.String("automation_id", a.ID),
@@ -325,8 +326,8 @@ func (s *Service) createAutomationTask(ctx context.Context, evt *automation.Auto
 
 	// Auto-start unconditionally: nobody opens an automation's task to drag
 	// it, so the trigger has to be the start signal. A workflow step's
-	// auto_start_agent setting is irrelevant here — it describes board
-	// behaviour and automation runs never reach the board.
+	// auto_start_agent setting is irrelevant here because the automation
+	// trigger is the start signal for both hidden runs and visible normal tasks.
 	s.autoStartAutomationTaskForRun(ctx, a, task, task.WorkflowStepID, evt.RunID, action, reason)
 }
 
@@ -339,6 +340,20 @@ func (s *Service) prepareAutomationTask(
 ) (*models.Task, *models.TaskSession, automation.ThreadAction, string, error) {
 	action := automation.ThreadActionCreated
 	reason := "new task created for automation run"
+	taskMode := a.TaskMode
+	if taskMode == "" {
+		taskMode = automation.TaskModeAutomationRun
+	}
+	repositoryMode := a.RepositoryMode
+	if repositoryMode == "" {
+		repositoryMode = automation.RepositoryModeWorkspaceDefault
+	}
+	metadata[models.MetaKeyAutomationTaskMode] = string(taskMode)
+	metadata[models.MetaKeyAutomationRepositoryMode] = string(repositoryMode)
+	taskOrigin := models.TaskOriginAutomationRun
+	if taskMode == automation.TaskModeNormalTask {
+		taskOrigin = models.TaskOriginAutomationTask
+	}
 	var task *models.Task
 	var continuationSession *models.TaskSession
 	if a.ContinuationPolicy == automation.ContinuationPolicyReuseThread {
@@ -354,7 +369,7 @@ func (s *Service) prepareAutomationTask(
 	}
 
 	repositories := s.resolveAutomationRepository(ctx, a, evt)
-	if len(repositories) == 0 {
+	if len(repositories) == 0 && a.RepositoryMode != automation.RepositoryModeNone {
 		return nil, nil, action, reason, fmt.Errorf("no repository available; add a repository to the workspace")
 	}
 	task, err := s.reviewTaskCreator.CreateReviewTask(ctx, &ReviewTaskRequest{
@@ -365,7 +380,7 @@ func (s *Service) prepareAutomationTask(
 		Description:    prompt,
 		Repositories:   repositories,
 		Metadata:       metadata,
-		Origin:         models.TaskOriginAutomationRun,
+		Origin:         taskOrigin,
 	})
 	if err != nil {
 		return nil, nil, action, reason, fmt.Errorf("create automation task: %w", err)
@@ -407,20 +422,59 @@ func (s *Service) findAutomationContinuation(ctx context.Context, a *automation.
 }
 
 func (s *Service) continuationTaskIncompatibility(ctx context.Context, a *automation.Automation, evt *automation.AutomationTriggeredEvent, task *models.Task) string {
-	if task.WorkspaceID != a.WorkspaceID || task.Origin != models.TaskOriginAutomationRun || task.ArchivedAt != nil {
+	if task.WorkspaceID != a.WorkspaceID || task.Origin != automationTaskOrigin(a) || task.ArchivedAt != nil {
 		return "previous continuation task is not compatible"
 	}
-	if task.WorkflowID != a.WorkflowID || task.WorkflowStepID != a.WorkflowStepID {
+	if !continuationWorkflowMatches(a, task) {
 		return "previous continuation task uses a different workflow"
 	}
-	if metadataString(task.Metadata, models.MetaKeyAgentProfileID) != a.AgentProfileID ||
-		metadataString(task.Metadata, models.MetaKeyExecutorProfileID) != a.ExecutorProfileID {
+	if !continuationTaskModeMatches(a, task) {
+		return "previous continuation task uses a different target mode"
+	}
+	if !continuationRepositoryModeMatches(a, task) {
+		return "previous continuation task uses a different repository mode"
+	}
+	if !continuationProfilesMatch(a, task) {
 		return "previous continuation task uses different runtime profiles"
 	}
 	if !s.continuationRepositoriesMatch(ctx, a, evt, task) {
 		return "previous continuation task uses different repositories"
 	}
 	return ""
+}
+
+func automationTaskOrigin(a *automation.Automation) string {
+	if a.TaskMode == automation.TaskModeNormalTask {
+		return models.TaskOriginAutomationTask
+	}
+	return models.TaskOriginAutomationRun
+}
+
+func continuationWorkflowMatches(a *automation.Automation, task *models.Task) bool {
+	return task.WorkflowID == a.WorkflowID && (a.WorkflowStepID == "" || task.WorkflowStepID == a.WorkflowStepID)
+}
+
+func continuationTaskModeMatches(a *automation.Automation, task *models.Task) bool {
+	taskMode := a.TaskMode
+	if taskMode == "" {
+		taskMode = automation.TaskModeAutomationRun
+	}
+	previous := metadataString(task.Metadata, models.MetaKeyAutomationTaskMode)
+	return previous == "" || previous == string(taskMode)
+}
+
+func continuationRepositoryModeMatches(a *automation.Automation, task *models.Task) bool {
+	repositoryMode := a.RepositoryMode
+	if repositoryMode == "" {
+		repositoryMode = automation.RepositoryModeWorkspaceDefault
+	}
+	previous := metadataString(task.Metadata, models.MetaKeyAutomationRepositoryMode)
+	return previous == "" || previous == string(repositoryMode)
+}
+
+func continuationProfilesMatch(a *automation.Automation, task *models.Task) bool {
+	return metadataString(task.Metadata, models.MetaKeyAgentProfileID) == a.AgentProfileID &&
+		metadataString(task.Metadata, models.MetaKeyExecutorProfileID) == a.ExecutorProfileID
 }
 
 func (s *Service) continuationRepositoriesMatch(ctx context.Context, a *automation.Automation, evt *automation.AutomationTriggeredEvent, task *models.Task) bool {
@@ -676,6 +730,9 @@ func (s *Service) startAutomationTask(
 func (s *Service) resolveAutomationRepository(
 	ctx context.Context, a *automation.Automation, evt *automation.AutomationTriggeredEvent,
 ) []ReviewTaskRepository {
+	if a.RepositoryMode == automation.RepositoryModeNone {
+		return nil
+	}
 	if evt.TriggerType == automation.TriggerTypeGitHubPR {
 		return s.resolveGitHubPRTriggerRepository(ctx, a.WorkspaceID, evt.TriggerData)
 	}
@@ -971,15 +1028,15 @@ func (s *Service) handleAutomationTurnCompleteForTurn(
 	if err != nil || task == nil {
 		return false
 	}
-	// Keyed on origin alone. Automation tasks are no longer ephemeral, and
-	// gating on IsEphemeral here would leave every run stuck at task_created,
-	// holding a max_concurrent_runs slot until a human archived it.
+	if task.Origin == models.TaskOriginAutomationTask {
+		return s.handleVisibleAutomationTurnComplete(ctx, taskID, sessionID, turnID, stopReason, isError, errMsg)
+	}
 	if task.Origin != models.TaskOriginAutomationRun {
 		return false
 	}
 
 	cancelled := stopReason == stopReasonCancelled
-	success := !isError && stopReason != "error" && !cancelled
+	success := !isError && stopReason != agentEventError && !cancelled
 	if cancelled && errMsg == "" {
 		errMsg = stopReasonCancelled
 	}
@@ -1004,11 +1061,27 @@ func (s *Service) handleAutomationTurnCompleteForTurn(
 	return true
 }
 
+func (s *Service) handleVisibleAutomationTurnComplete(
+	ctx context.Context, taskID, sessionID, turnID, stopReason string, isError bool, errMsg string,
+) bool {
+	if turnID != "" {
+		s.markAutomationRunTerminalForTurn(
+			ctx,
+			taskID,
+			sessionID,
+			turnID,
+			!isError && stopReason != agentEventError && stopReason != stopReasonCancelled,
+			errMsg,
+		)
+	}
+	return false
+}
+
 // finalizeAutomationRun flips an automation run's row from task_created →
 // succeeded|failed when its agent terminates, so max_concurrent_runs frees up
-// without anyone archiving anything. Keyed on origin — every automation task
-// carries origin=automation_run and none of them are ephemeral. Regular tasks
-// are untouched, and no worktree is torn down.
+// without anyone archiving anything. Keyed on automation origin so both hidden
+// coordinator tasks and visible automation-created tasks are settled while
+// regular tasks remain untouched.
 func (s *Service) finalizeAutomationRun(ctx context.Context, taskID string, success bool, errMsg string) {
 	if taskID == "" {
 		return
@@ -1017,7 +1090,28 @@ func (s *Service) finalizeAutomationRun(ctx context.Context, taskID string, succ
 	if err != nil || task == nil {
 		return
 	}
-	if task.Origin != models.TaskOriginAutomationRun {
+	if !isAutomationTaskOrigin(task.Origin) {
+		return
+	}
+	if task.Origin == models.TaskOriginAutomationTask {
+		// Visible automation tasks may share one session across multiple exact
+		// runs. The stream completion path settles the current bound turn; the
+		// process-exit fallback must never settle a different run by task ID.
+		lookup, ok := s.repo.(interface {
+			GetTaskSessionByTaskID(context.Context, string) (*models.TaskSession, error)
+		})
+		if !ok || s.turnService == nil {
+			return
+		}
+		session, sessionErr := lookup.GetTaskSessionByTaskID(ctx, taskID)
+		if sessionErr != nil || session == nil {
+			return
+		}
+		turn, turnErr := s.turnService.GetActiveTurn(ctx, session.ID)
+		if turnErr != nil || turn == nil {
+			return
+		}
+		s.markAutomationRunTerminalForTurn(ctx, taskID, session.ID, turn.ID, success, errMsg)
 		return
 	}
 
@@ -1093,6 +1187,9 @@ func (s *Service) pruneAutomationRunWorktrees(ctx context.Context, taskID string
 			zap.Error(err))
 	}
 	for _, agedOutTaskID := range s.automationWorkspaceSweepOrder(agedOut) {
+		if task, taskErr := s.repo.GetTask(ctx, agedOutTaskID); taskErr == nil && task != nil && task.Origin == models.TaskOriginAutomationTask {
+			continue
+		}
 		s.reclaimAutomationRunWorkspace(ctx, retention, agedOutTaskID)
 	}
 }

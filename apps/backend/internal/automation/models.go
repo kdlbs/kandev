@@ -79,6 +79,24 @@ const (
 	ContinuationPolicyReuseThread ContinuationPolicy = "reuse_thread"
 )
 
+// TaskMode controls whether an automation firing owns a coordinator-only
+// task or a normal user-visible task.
+type TaskMode string
+
+const (
+	TaskModeAutomationRun TaskMode = "automation_run"
+	TaskModeNormalTask    TaskMode = "normal_task"
+)
+
+// RepositoryMode controls how a firing chooses its repository environment.
+type RepositoryMode string
+
+const (
+	RepositoryModeWorkspaceDefault RepositoryMode = "workspace_default"
+	RepositoryModeSelected         RepositoryMode = "selected"
+	RepositoryModeNone             RepositoryMode = "none"
+)
+
 // ThreadAction describes how a dispatched run reached its task/session.
 type ThreadAction string
 
@@ -94,8 +112,11 @@ type Automation struct {
 	WorkspaceID string `json:"workspace_id" db:"workspace_id"`
 	Name        string `json:"name" db:"name"`
 	Description string `json:"description" db:"description"`
-	// WorkflowID / WorkflowStepID are optional: no automation run is placed
-	// on a board, so no automation needs a starting column.
+	// TaskModeAutomationRun is coordinator-only and may omit a workflow. A
+	// TaskModeNormalTask must name a workflow so the generated task enters the
+	// normal task lifecycle and appears in the Kanban/sidebar.
+	TaskMode           TaskMode           `json:"task_mode" db:"task_mode"`
+	RepositoryMode     RepositoryMode     `json:"repository_mode" db:"repository_mode"`
 	WorkflowID         string             `json:"workflow_id" db:"workflow_id"`
 	WorkflowStepID     string             `json:"workflow_step_id" db:"workflow_step_id"`
 	AgentProfileID     string             `json:"agent_profile_id" db:"agent_profile_id"`
@@ -130,11 +151,11 @@ type Automation struct {
 
 	// Hydrated separately, not stored as columns on this table.
 	Triggers []AutomationTrigger `json:"triggers" db:"-"`
-	// RepositoryIDs is the ordered list of repositories to use for trigger
-	// firings, backed by the automation_repositories join table. Empty
-	// falls back to the workspace's first repository (for scheduled /
-	// webhook triggers) or the PR's repository (for github_pr triggers,
-	// which always override this field — see resolveAutomationRepository).
+	// RepositoryIDs is the ordered list of repositories to use when
+	// RepositoryMode is selected, backed by the automation_repositories join
+	// table. WorkspaceDefault preserves the legacy first-repository fallback
+	// (or the PR's repository for github_pr triggers, which always override
+	// this field); None intentionally keeps the list empty.
 	RepositoryIDs []string `json:"repository_ids" db:"-"`
 }
 
@@ -166,11 +187,11 @@ type AutomationRun struct {
 	CreatedAt       time.Time       `json:"created_at" db:"created_at"`
 
 	// Summary is the tail of the agent's last message on the generated task,
-	// read at list time and truncated for display. Every automation hides its
-	// task from the board, so without this the run row can report that
-	// something happened but never what — which is the one thing the reader
-	// of a scheduled report actually wants. Empty when the run never produced
-	// a task or the agent never spoke.
+	// read at list time and truncated for display. Hidden automation-run tasks
+	// stay out of the board, while normal-task automation tasks follow the
+	// ordinary task lists. The summary keeps the run row useful in either mode
+	// when the task is not open. Empty when the run never produced a task or the
+	// agent never spoke.
 	Summary string `json:"summary,omitempty" db:"summary"`
 	// SessionID is the run's primary conversation, empty when the task is gone
 	// or never started one. The detail view mounts the transcript from it.
@@ -251,10 +272,12 @@ type WebhookTriggerConfig struct {
 	FilterExpression string `json:"filter_expression,omitempty"`
 }
 
-// TaskOriginLookup answers the two facts a merged-PR event needs about the
-// task its PR was linked to. ok=false means the task could not be resolved
-// (absent or query error — the adapter collapses both into ok=false and logs
-// at the appropriate level).
+// TaskOriginLookup answers the task workspace and whether it is hidden
+// automation-run work. The merged-PR subscriber uses the same facts to avoid
+// loops, while run cleanup uses them to leave visible automation-created tasks
+// in the normal task lifecycle. ok=false means the task could not be resolved
+// (absent or query error; the adapter collapses both into ok=false and logs at
+// the appropriate level).
 type TaskOriginLookup interface {
 	TaskWorkspaceAndAutomationOrigin(ctx context.Context, taskID string) (
 		workspaceID string, isAutomationRun bool, ok bool,
@@ -277,6 +300,8 @@ type CreateAutomationRequest struct {
 	TaskTitleTemplate  string              `json:"task_title_template"`
 	MaxConcurrentRuns  int                 `json:"max_concurrent_runs"`
 	ContinuationPolicy ContinuationPolicy  `json:"continuation_policy,omitempty"`
+	TaskMode           TaskMode            `json:"task_mode,omitempty"`
+	RepositoryMode     RepositoryMode      `json:"repository_mode,omitempty"`
 	Triggers           []CreateTriggerSpec `json:"triggers"`
 }
 
@@ -303,6 +328,8 @@ type UpdateAutomationRequest struct {
 	Enabled            *bool               `json:"enabled,omitempty"`
 	MaxConcurrentRuns  *int                `json:"max_concurrent_runs,omitempty"`
 	ContinuationPolicy *ContinuationPolicy `json:"continuation_policy,omitempty"`
+	TaskMode           *TaskMode           `json:"task_mode,omitempty"`
+	RepositoryMode     *RepositoryMode     `json:"repository_mode,omitempty"`
 }
 
 // AddTriggerRequest adds a trigger to an existing automation.

@@ -272,6 +272,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		// that never existed produced the same orphan without any delete
 		// involved.
 		automationComponents.Service.SetAgentProfileLookup(&automationAgentProfileLookupAdapter{store: repos.AgentSettings})
+		automationComponents.Service.SetExecutorProfileLookup(&automationExecutorProfileLookupAdapter{svc: taskSvc})
 		// YAML export descriptor resolution (AC-29): each Set* below is
 		// satisfied directly by an existing repository's Tx-accepting method,
 		// so the export's single read transaction can pass straight through

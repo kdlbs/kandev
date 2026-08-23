@@ -23,6 +23,9 @@ import { useTaskTitleSelectionRestore } from "@/hooks/use-task-title-selection-r
 
 type UpdateField = <K extends keyof FormState>(key: K, value: FormState[K]) => void;
 
+const SELECTED_CARD_CLASS_NAME = "border-primary bg-primary/5";
+const UNSELECTED_CARD_CLASS_NAME = "border-border hover:bg-muted/30";
+
 export function NameField({
   value,
   isDirty,
@@ -148,6 +151,8 @@ export function ThenSection({
     "prompt",
     "workflowId",
     "workflowStepId",
+    "taskMode",
+    "repositoryMode",
     "agentProfileId",
     "executorProfileId",
     "repositorySelections",
@@ -190,6 +195,8 @@ export function ThenSection({
           workflowStepId={form.workflowStepId}
           agentProfileId={form.agentProfileId}
           executorProfileId={form.executorProfileId}
+          taskMode={form.taskMode}
+          repositoryMode={form.repositoryMode}
           repositorySelections={form.repositorySelections}
           conditionType={conditionType}
           dirtyFields={{
@@ -206,7 +213,14 @@ export function ThenSection({
           onStepChange={(value) => updateField("workflowStepId", value)}
           onAgentProfileChange={(value) => updateField("agentProfileId", value)}
           onExecutorProfileChange={(value) => updateField("executorProfileId", value)}
-          onRepositoriesChange={(value) => updateField("repositorySelections", value)}
+          onRepositoryModeChange={(value) => {
+            updateField("repositoryMode", value);
+            if (value !== "selected") updateField("repositorySelections", []);
+          }}
+          onRepositoriesChange={(value) => {
+            updateField("repositorySelections", value);
+            if (value.length > 0) updateField("repositoryMode", "selected");
+          }}
         />
       </div>
     </div>
@@ -225,6 +239,10 @@ function ContinuationPolicySection({
   const { t } = useTranslation();
   const continuationIsDirty = isAutomationFieldDirty(form, savedForm, "continuationPolicy");
   const reusesThread = form.continuationPolicy === "reuse_thread";
+  const newTaskDescriptionKey =
+    form.taskMode === "normal_task"
+      ? "automations:contextBetweenRunsNewTaskNormalDescription"
+      : "automations:contextBetweenRunsNewTaskDescription";
   const continuationDescriptionId = "automation-continuation-description";
 
   return (
@@ -252,7 +270,7 @@ function ContinuationPolicySection({
         <Label
           htmlFor="automation-continuation-new-task"
           className={`flex min-h-11 w-full cursor-pointer items-start gap-3 rounded-md border p-3 ${
-            !reusesThread ? "border-primary bg-primary/5" : "border-border hover:bg-muted/30"
+            !reusesThread ? SELECTED_CARD_CLASS_NAME : UNSELECTED_CARD_CLASS_NAME
           }`}
         >
           <RadioGroupItem
@@ -269,14 +287,14 @@ function ContinuationPolicySection({
               id="automation-continuation-new-task-description"
               className="block whitespace-normal break-words text-xs text-muted-foreground"
             >
-              {t("automations:contextBetweenRunsNewTaskDescription")}
+              {t(newTaskDescriptionKey)}
             </span>
           </span>
         </Label>
         <Label
           htmlFor="automation-continuation-reuse-thread"
           className={`flex min-h-11 w-full cursor-pointer items-start gap-3 rounded-md border p-3 ${
-            reusesThread ? "border-primary bg-primary/5" : "border-border hover:bg-muted/30"
+            reusesThread ? SELECTED_CARD_CLASS_NAME : UNSELECTED_CARD_CLASS_NAME
           }`}
         >
           <RadioGroupItem
@@ -307,6 +325,88 @@ function ContinuationPolicySection({
   );
 }
 
+function TargetModeSection({
+  form,
+  savedForm,
+  updateField,
+}: {
+  form: FormState;
+  savedForm: FormState;
+  updateField: UpdateField;
+}) {
+  const { t } = useTranslation();
+  const targetIsDirty = isAutomationFieldDirty(form, savedForm, "taskMode");
+  const normalTask = form.taskMode === "normal_task";
+  const descriptionId = "automation-task-mode-description";
+  return (
+    <div className="space-y-2">
+      <div>
+        <h3 id="automation-task-mode-heading" className="text-sm font-medium">
+          {t("automations:taskModeTitle")}
+        </h3>
+        <p id={descriptionId} className="text-xs text-muted-foreground">
+          {t("automations:taskModeDescription")}
+        </p>
+      </div>
+      <RadioGroup
+        aria-labelledby="automation-task-mode-heading"
+        aria-describedby={descriptionId}
+        value={form.taskMode}
+        onValueChange={(value) => updateField("taskMode", value as FormState["taskMode"])}
+        data-settings-dirty={targetIsDirty}
+        className="gap-2"
+      >
+        <Label
+          htmlFor="automation-task-mode-hidden"
+          className={`flex min-h-11 w-full cursor-pointer items-start gap-3 rounded-md border p-3 ${
+            !normalTask ? SELECTED_CARD_CLASS_NAME : UNSELECTED_CARD_CLASS_NAME
+          }`}
+        >
+          <RadioGroupItem
+            id="automation-task-mode-hidden"
+            value="automation_run"
+            aria-describedby="automation-task-mode-hidden-description"
+            className="mt-0.5"
+          />
+          <span className="min-w-0 space-y-1">
+            <span className="block text-sm font-medium">
+              {t("automations:taskModeAutomationRun")}
+            </span>
+            <span
+              id="automation-task-mode-hidden-description"
+              className="block whitespace-normal break-words text-xs text-muted-foreground"
+            >
+              {t("automations:taskModeAutomationRunDescription")}
+            </span>
+          </span>
+        </Label>
+        <Label
+          htmlFor="automation-task-mode-normal"
+          className={`flex min-h-11 w-full cursor-pointer items-start gap-3 rounded-md border p-3 ${
+            normalTask ? SELECTED_CARD_CLASS_NAME : UNSELECTED_CARD_CLASS_NAME
+          }`}
+        >
+          <RadioGroupItem
+            id="automation-task-mode-normal"
+            value="normal_task"
+            aria-describedby="automation-task-mode-normal-description"
+            className="mt-0.5"
+          />
+          <span className="min-w-0 space-y-1">
+            <span className="block text-sm font-medium">{t("automations:taskModeNormalTask")}</span>
+            <span
+              id="automation-task-mode-normal-description"
+              className="block whitespace-normal break-words text-xs text-muted-foreground"
+            >
+              {t("automations:taskModeNormalTaskDescription")}
+            </span>
+          </span>
+        </Label>
+      </RadioGroup>
+    </div>
+  );
+}
+
 export function SettingsSection({
   form,
   savedForm,
@@ -320,11 +420,14 @@ export function SettingsSection({
   const enabledIsDirty = isAutomationFieldDirty(form, savedForm, "enabled");
   const maxRunsIsDirty = isAutomationFieldDirty(form, savedForm, "maxConcurrentRuns");
   const continuationIsDirty = isAutomationFieldDirty(form, savedForm, "continuationPolicy");
+  const taskModeIsDirty = isAutomationFieldDirty(form, savedForm, "taskMode");
   const reusesThread = form.continuationPolicy === "reuse_thread";
   return (
     <div
       className="space-y-3 rounded-lg border bg-card p-4"
-      data-settings-dirty={enabledIsDirty || maxRunsIsDirty || continuationIsDirty}
+      data-settings-dirty={
+        enabledIsDirty || maxRunsIsDirty || continuationIsDirty || taskModeIsDirty
+      }
       data-settings-dirty-level="container"
     >
       <Label className="text-xs uppercase tracking-wider text-muted-foreground">
@@ -355,6 +458,7 @@ export function SettingsSection({
           />
         </div>
       </div>
+      <TargetModeSection form={form} savedForm={savedForm} updateField={updateField} />
       <ContinuationPolicySection form={form} savedForm={savedForm} updateField={updateField} />
     </div>
   );

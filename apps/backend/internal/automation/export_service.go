@@ -143,6 +143,21 @@ func (s *Service) buildExportAutomation(ctx context.Context, tx *sqlx.Tx, a *Aut
 			}
 			return a.ContinuationPolicy
 		}(),
+		TaskMode: func() TaskMode {
+			if a.TaskMode == "" {
+				return TaskModeAutomationRun
+			}
+			return a.TaskMode
+		}(),
+		RepositoryMode: func() RepositoryMode {
+			if a.RepositoryMode == "" {
+				if len(a.RepositoryIDs) > 0 {
+					return RepositoryModeSelected
+				}
+				return RepositoryModeWorkspaceDefault
+			}
+			return a.RepositoryMode
+		}(),
 		TaskTitleTemplate: a.TaskTitleTemplate,
 		Prompt:            promptNode,
 		AgentProfile:      resolved.AgentProfile,

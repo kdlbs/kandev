@@ -165,6 +165,53 @@ func TestFindAutomationContinuationRejectsChangedLaunchIdentity(t *testing.T) {
 	require.Equal(t, "previous continuation task uses a different workflow", reason)
 }
 
+func TestFindAutomationContinuationKeepsImplicitStepAndRotatesRepositoryMode(t *testing.T) {
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+	ctx := context.Background()
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{
+		ID:             "implicit-step-task",
+		WorkspaceID:    "ws-1",
+		WorkflowID:     "workflow-a",
+		WorkflowStepID: "resolved-start-step",
+		Origin:         models.TaskOriginAutomationRun,
+		Metadata: map[string]interface{}{
+			models.MetaKeyAgentProfileID:           "agent-a",
+			models.MetaKeyExecutorProfileID:        "executor-a",
+			models.MetaKeyAutomationTaskMode:       string(automation.TaskModeAutomationRun),
+			models.MetaKeyAutomationRepositoryMode: string(automation.RepositoryModeNone),
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}))
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "implicit-step-session", TaskID: "implicit-step-task",
+		State: models.TaskSessionStateWaitingForInput, StartedAt: now, UpdatedAt: now,
+	}))
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	a := &automation.Automation{
+		ContinuationTaskID: "implicit-step-task", WorkspaceID: "ws-1",
+		WorkflowID: "workflow-a", AgentProfileID: "agent-a", ExecutorProfileID: "executor-a",
+		TaskMode: automation.TaskModeAutomationRun, RepositoryMode: automation.RepositoryModeNone,
+	}
+
+	task, session, reason := svc.findAutomationContinuation(ctx, a, &automation.AutomationTriggeredEvent{
+		TriggerType: automation.TriggerTypeScheduled,
+	})
+	require.Equal(t, "implicit-step-task", task.ID)
+	require.Equal(t, "implicit-step-session", session.ID)
+	require.Equal(t, "continued the previous task and session", reason)
+
+	a.RepositoryMode = automation.RepositoryModeWorkspaceDefault
+	task, session, reason = svc.findAutomationContinuation(ctx, a, &automation.AutomationTriggeredEvent{
+		TriggerType: automation.TriggerTypeScheduled,
+	})
+	require.Nil(t, task)
+	require.Nil(t, session)
+	require.Equal(t, "previous continuation task uses a different repository mode", reason)
+}
+
 // TestResolveAutomationRepository_GitHubPRIgnoresConfiguredRepositoryIDs is
 // the regression guard for a CodeRabbit review finding on PR #2077: the
 // frontend disables (but does not clear) the repository picker for
@@ -397,6 +444,58 @@ func TestCreateAutomationTask_WorksWithoutWorkflowOrStep(t *testing.T) {
 	require.Empty(t, creator.got.WorkflowID)
 	require.Empty(t, creator.got.WorkflowStepID)
 	require.Equal(t, models.TaskOriginAutomationRun, creator.got.Origin)
+}
+
+func TestPrepareAutomationTask_AllowsRepositoryFreeHiddenRun(t *testing.T) {
+	repo := setupTestRepo(t)
+	creator := &stubReviewTaskCreator{task: &models.Task{ID: "t-scratch"}}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.reviewTaskCreator = creator
+	a := &automation.Automation{
+		ID: "a-scratch", WorkspaceID: "ws-1", Name: "scratch", Enabled: true,
+		TaskMode:       automation.TaskModeAutomationRun,
+		RepositoryMode: automation.RepositoryModeNone,
+	}
+
+	task, session, action, _, err := svc.prepareAutomationTask(
+		context.Background(), a,
+		&automation.AutomationTriggeredEvent{TriggerType: automation.TriggerTypeScheduled},
+		"Scratch", "report", map[string]interface{}{},
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, task)
+	require.Nil(t, session)
+	require.Equal(t, automation.ThreadActionCreated, action)
+	require.Empty(t, creator.got.Repositories)
+	require.Equal(t, models.TaskOriginAutomationRun, creator.got.Origin)
+}
+
+func TestPrepareAutomationTaskCreatesVisibleNormalTaskWithoutRepository(t *testing.T) {
+	repo := setupTestRepo(t)
+	creator := &stubReviewTaskCreator{task: &models.Task{ID: "t-visible"}}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.reviewTaskCreator = creator
+	a := &automation.Automation{
+		ID: "a-visible", WorkspaceID: "ws-1", Name: "visible", Enabled: true,
+		TaskMode:       automation.TaskModeNormalTask,
+		RepositoryMode: automation.RepositoryModeNone,
+		WorkflowID:     "workflow-1",
+		WorkflowStepID: "step-1",
+	}
+
+	task, _, _, _, err := svc.prepareAutomationTask(
+		context.Background(), a,
+		&automation.AutomationTriggeredEvent{TriggerType: automation.TriggerTypeScheduled},
+		"Visible", "report", map[string]interface{}{},
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, task)
+	require.Empty(t, creator.got.Repositories)
+	require.Equal(t, "automation_task", creator.got.Origin)
+	require.Equal(t, "workflow-1", creator.got.WorkflowID)
+	require.Equal(t, "step-1", creator.got.WorkflowStepID)
 }
 
 // The deadlock the execution-mode split caused: a non-ephemeral automation

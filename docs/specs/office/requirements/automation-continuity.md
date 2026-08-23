@@ -10,12 +10,14 @@ owners:
 
 ## Overview
 
-Automation firings produce hidden work that people read through the
-automation run surface. A workspace owner can choose whether each firing gets
-an isolated task or continues one conversation and task environment. The
-system must keep each firing addressable, preserve the complete shared
-transcript, and expose one backend-owned coordinator authority to automation
-agents.
+By default, automation firings produce hidden work that people read through the
+automation run surface. The separate [automation target mode
+requirements](automation-target-modes.md) let a workspace owner opt into
+visible normal tasks. For either target, the owner can choose whether each
+firing gets an isolated task or continues one conversation and task
+environment. The system must keep each firing addressable, preserve the
+complete shared transcript, and expose one backend-owned coordinator authority
+only to hidden automation agents.
 
 ## Terminology
 
@@ -25,6 +27,8 @@ agents.
   to one hidden task and primary session.
 - **Automation run:** The durable record for one firing. A run is distinct
   from the task and is bound to the exact session turn that accepted it.
+- **Hidden automation target:** The default target described by this document.
+  Its generated task is not ordinary Kanban work.
 - **Coordinator authority:** The backend-resolved `SurfaceAutomation` MCP
   profile and its trusted automation principal.
 
@@ -32,9 +36,9 @@ agents.
 
 ### REQ-OFFICE-AUTOMATION-CONTINUITY-001: Choose context between runs
 
-**Intent:** Let a workspace owner choose independent automation work or a
-single continuing conversation without exposing automation tasks as ordinary
-Kanban work.
+**Intent:** Let a workspace owner choose independent hidden automation work or
+a single continuing hidden conversation without exposing hidden automation
+tasks as ordinary Kanban work.
 
 #### Acceptance criteria
 
@@ -43,14 +47,15 @@ Kanban work.
   with `new_task` and `reuse_thread` options.
 - **AC-OFFICE-AUTOMATION-CONTINUITY-001.2:** When no policy is selected, the
   system shall use `new_task`.
-- **AC-OFFICE-AUTOMATION-CONTINUITY-001.3:** When `new_task` is selected, each
-  firing shall create a separate conversation, files, and hidden task, and
-  that task shall not appear in Kanban or the sidebar.
+- **AC-OFFICE-AUTOMATION-CONTINUITY-001.3:** When the automation uses the
+  hidden target and `new_task` is selected, each firing shall create a separate
+  conversation, files, and hidden task, and that task shall not appear in
+  Kanban or the sidebar.
 - **AC-OFFICE-AUTOMATION-CONTINUITY-001.4:** When `reuse_thread` is selected,
   the system shall limit the automation to one open run at a time.
-- **AC-OFFICE-AUTOMATION-CONTINUITY-001.5:** The form shall state that new-task
-  runs use separate conversation and files and that those tasks do not appear
-  in Kanban or the sidebar.
+- **AC-OFFICE-AUTOMATION-CONTINUITY-001.5:** When the hidden target is
+  selected, the form shall state that new-task runs use separate conversation
+  and files and that those tasks do not appear in Kanban or the sidebar.
 - **AC-OFFICE-AUTOMATION-CONTINUITY-001.6:** Both policy descriptions shall
   remain visible and accessible on desktop and mobile, and each choice shall
   provide a touch target of at least 44 pixels.
@@ -65,13 +70,14 @@ each scheduled firing independently selectable and controllable.
 - **AC-OFFICE-AUTOMATION-CONTINUITY-002.1:** When a firing is admitted, its run
   shall record the exact task, session, and turn identities before the turn is
   dispatched.
-- **AC-OFFICE-AUTOMATION-CONTINUITY-002.2:** When two runs share a session,
-  selecting either run shall keep the complete session transcript mounted and
-  shall scroll or focus the selected turn instead of removing other turns.
+- **AC-OFFICE-AUTOMATION-CONTINUITY-002.2:** When two runs in either target
+  mode share a session, selecting either run shall keep the complete session
+  transcript mounted and shall scroll or focus the selected turn instead of
+  removing other turns.
 - **AC-OFFICE-AUTOMATION-CONTINUITY-002.3:** When a person replies from a
-  selected run, the new turn and its messages shall remain visible in the
-  complete transcript even when its turn identity differs from the selected
-  scheduled turn.
+  selected run in either target mode, the new turn and its messages shall
+  remain visible in the complete transcript even when its turn identity differs
+  from the selected scheduled turn.
 - **AC-OFFICE-AUTOMATION-CONTINUITY-002.4:** When native session continuation
   is unavailable, fallback resume context shall use the newest 50 non-empty
   user or assistant text messages in chronological order. Tool calls, tool
@@ -105,14 +111,15 @@ each scheduled firing independently selectable and controllable.
 
 ### REQ-OFFICE-AUTOMATION-CONTINUITY-004: Constrain coordinator authority
 
-**Intent:** Give automation agents enough workspace coordination access while
-  preventing owner-wide access, self-targeting, and task-local questions.
+**Intent:** Give hidden automation agents enough workspace coordination access
+while preventing owner-wide access, self-targeting, and task-local questions.
 
 #### Acceptance criteria
 
-- **AC-OFFICE-AUTOMATION-CONTINUITY-004.1:** Every automation task session
-  shall receive the fixed `SurfaceAutomation` profile resolved by the backend
-  before MCP dispatch.
+- **AC-OFFICE-AUTOMATION-CONTINUITY-004.1:** Every hidden automation task
+  session shall receive the fixed `SurfaceAutomation` profile resolved by the
+  backend before MCP dispatch. A visible normal task shall receive its normal
+  task profile instead.
 - **AC-OFFICE-AUTOMATION-CONTINUITY-004.2:** The fixed catalog shall include
   workspace inventory, read-only launch catalog, task/session inspection,
   task coordination, and blocker coordination tools, and shall exclude
@@ -123,8 +130,9 @@ each scheduled firing independently selectable and controllable.
   identities. Handlers shall use it as the workspace boundary and audit the
   source as `automation_mcp`.
 - **AC-OFFICE-AUTOMATION-CONTINUITY-004.4:** Mutations, messages, stopping,
-  spawning, and blocker discovery or resolution shall reject the automation's
-  own hidden task and every session on it, as well as foreign workspaces.
+  spawning, and blocker discovery or resolution through `SurfaceAutomation`
+  shall reject the automation's own hidden task and every session on it, as
+  well as foreign workspaces.
 - **AC-OFFICE-AUTOMATION-CONTINUITY-004.5:** A task spawned on another task
   shall receive that target task's normal profile and shall not inherit
   `SurfaceAutomation` from its caller.

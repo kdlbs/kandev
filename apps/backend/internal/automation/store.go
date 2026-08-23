@@ -43,6 +43,8 @@ const createTablesSQL = `
 		workflow_step_id TEXT NOT NULL,
 		agent_profile_id TEXT NOT NULL,
 		executor_profile_id TEXT NOT NULL,
+		task_mode TEXT NOT NULL DEFAULT 'automation_run',
+		repository_mode TEXT NOT NULL DEFAULT 'workspace_default',
 		repository_id TEXT NOT NULL DEFAULT '',
 		prompt TEXT DEFAULT '',
 		task_title_template TEXT DEFAULT '',
@@ -152,6 +154,8 @@ const (
 	migrateRepositoryIDSQL       = `ALTER TABLE automations ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`
 	migrateContinuationPolicySQL = `ALTER TABLE automations ADD COLUMN continuation_policy TEXT NOT NULL DEFAULT 'new_task'`
 	migrateContinuationTaskSQL   = `ALTER TABLE automations ADD COLUMN continuation_task_id TEXT DEFAULT ''`
+	migrateTaskModeSQL           = `ALTER TABLE automations ADD COLUMN task_mode TEXT NOT NULL DEFAULT 'automation_run'`
+	migrateRepositoryModeSQL     = `ALTER TABLE automations ADD COLUMN repository_mode TEXT NOT NULL DEFAULT 'workspace_default'`
 	migrateRunSessionSQL         = `ALTER TABLE automation_runs ADD COLUMN session_id TEXT DEFAULT ''`
 	migrateRunTurnSQL            = `ALTER TABLE automation_runs ADD COLUMN turn_id TEXT DEFAULT ''`
 	migrateRunThreadActionSQL    = `ALTER TABLE automation_runs ADD COLUMN thread_action TEXT DEFAULT ''`
@@ -175,7 +179,7 @@ const (
 // mode to branch on, and the whole point of withdrawing it is that no firing
 // path has one. See docs/specs/office/automations-settings.md § Migration.
 const automationColumns = `id, workspace_id, name, description, workflow_id, workflow_step_id,
-	agent_profile_id, executor_profile_id, prompt, task_title_template,
+	agent_profile_id, executor_profile_id, task_mode, repository_mode, prompt, task_title_template,
 	 enabled, max_concurrent_runs, continuation_policy, continuation_task_id, webhook_secret,
 	 last_triggered_at, created_at, updated_at,
 	execution_mode = 'task' AS legacy_board_card`
@@ -189,12 +193,17 @@ func (s *Store) initSchema() error {
 	s.db.Exec(migrateRepositoryIDSQL)       //nolint:errcheck // duplicate-column on existing DBs
 	s.db.Exec(migrateContinuationPolicySQL) //nolint:errcheck // duplicate-column on existing DBs
 	s.db.Exec(migrateContinuationTaskSQL)   //nolint:errcheck // duplicate-column on existing DBs
+	s.db.Exec(migrateTaskModeSQL)           //nolint:errcheck // duplicate-column on existing DBs
+	s.db.Exec(migrateRepositoryModeSQL)     //nolint:errcheck // duplicate-column on existing DBs
 	s.db.Exec(migrateRunSessionSQL)         //nolint:errcheck // duplicate-column on existing DBs
 	s.db.Exec(migrateRunTurnSQL)            //nolint:errcheck // duplicate-column on existing DBs
 	s.db.Exec(migrateRunThreadActionSQL)    //nolint:errcheck // duplicate-column on existing DBs
 	s.db.Exec(migrateRunThreadReasonSQL)    //nolint:errcheck // duplicate-column on existing DBs
 	s.db.Exec(migrateRunDisplayTitleSQL)    //nolint:errcheck // duplicate-column on existing DBs
-	return s.backfillLegacyRepositoryIDs()
+	if err := s.backfillLegacyRepositoryIDs(); err != nil {
+		return err
+	}
+	return s.backfillRepositoryModes()
 }
 
 // backfillLegacyRepositoryIDs copies every non-empty legacy
@@ -243,6 +252,22 @@ func (s *Store) backfillLegacyRepositoryIDs() error {
 	return tx.Commit()
 }
 
+// backfillRepositoryModes preserves pre-target automations that already had
+// an explicit repository list. Empty lists retain workspace_default, while a
+// non-empty join-table list becomes selected so repository_mode never claims
+// that those repository IDs are ignored.
+func (s *Store) backfillRepositoryModes() error {
+	_, err := s.db.Exec(`
+		UPDATE automations
+		SET repository_mode = 'selected'
+		WHERE repository_mode = 'workspace_default'
+		  AND EXISTS (
+			SELECT 1 FROM automation_repositories
+			WHERE automation_repositories.automation_id = automations.id
+		  )`)
+	return err
+}
+
 // --- Automation CRUD ---
 
 // CreateAutomation persists a new automation and its repository_ids.
@@ -258,6 +283,19 @@ func (s *Store) CreateAutomation(ctx context.Context, a *Automation) error {
 	a.UpdatedAt = now
 	if a.ContinuationPolicy == "" {
 		a.ContinuationPolicy = ContinuationPolicyNewTask
+	}
+	if a.TaskMode == "" {
+		a.TaskMode = TaskModeAutomationRun
+	}
+	if a.RepositoryMode == "" {
+		if len(a.RepositoryIDs) > 0 {
+			a.RepositoryMode = RepositoryModeSelected
+		} else {
+			a.RepositoryMode = RepositoryModeWorkspaceDefault
+		}
+	}
+	if err := validateAutomationTarget(a.TaskMode, a.RepositoryMode, a.WorkflowID, a.RepositoryIDs); err != nil {
+		return err
 	}
 	if err := validateContinuationSettings(a.ContinuationPolicy, a.MaxConcurrentRuns); err != nil {
 		return err
@@ -279,12 +317,13 @@ func (s *Store) CreateAutomation(ctx context.Context, a *Automation) error {
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO automations (id, workspace_id, name, description, workflow_id, workflow_step_id,
 			agent_profile_id, executor_profile_id,
-			prompt, task_title_template, execution_mode,
+			task_mode, repository_mode, prompt, task_title_template, execution_mode,
 			enabled, max_concurrent_runs, continuation_policy, continuation_task_id,
 			webhook_secret, last_triggered_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.ID, a.WorkspaceID, a.Name, a.Description, a.WorkflowID, a.WorkflowStepID,
 		a.AgentProfileID, a.ExecutorProfileID,
+		string(a.TaskMode), string(a.RepositoryMode),
 		a.Prompt, a.TaskTitleTemplate,
 		a.Enabled, a.MaxConcurrentRuns, a.ContinuationPolicy, a.ContinuationTaskID,
 		a.WebhookSecret, a.LastTriggeredAt, a.CreatedAt, a.UpdatedAt)
@@ -476,8 +515,8 @@ func (s *Store) hydrateAutomations(ctx context.Context, automations []*Automatio
 
 // UpdateAutomation applies partial updates to an automation. When
 // req.RepositoryIDs is non-nil, it atomically replaces the automation's
-// automation_repositories rows (nil means "leave unchanged"; an explicit
-// empty slice clears the list).
+// automation_repositories rows. An explicit non-selected repository mode also
+// clears the rows when a partial client omits repository_ids.
 func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAutomationRequest) error {
 	a, err := s.GetAutomation(ctx, id)
 	if err != nil {
@@ -489,6 +528,19 @@ func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAuto
 	applyAutomationUpdate(a, req)
 	if a.ContinuationPolicy == "" {
 		a.ContinuationPolicy = ContinuationPolicyNewTask
+	}
+	if a.TaskMode == "" {
+		a.TaskMode = TaskModeAutomationRun
+	}
+	if a.RepositoryMode == "" {
+		if len(a.RepositoryIDs) > 0 {
+			a.RepositoryMode = RepositoryModeSelected
+		} else {
+			a.RepositoryMode = RepositoryModeWorkspaceDefault
+		}
+	}
+	if err := validateAutomationTarget(a.TaskMode, a.RepositoryMode, a.WorkflowID, a.RepositoryIDs); err != nil {
+		return err
 	}
 	if a.ContinuationPolicy == ContinuationPolicyReuseThread && a.MaxConcurrentRuns <= 0 {
 		a.MaxConcurrentRuns = 1
@@ -507,11 +559,12 @@ func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAuto
 	_, err = tx.ExecContext(ctx, `
 		UPDATE automations SET name = ?, description = ?, workflow_id = ?, workflow_step_id = ?,
 			agent_profile_id = ?, executor_profile_id = ?,
-			prompt = ?, task_title_template = ?,
+			task_mode = ?, repository_mode = ?, prompt = ?, task_title_template = ?,
 			enabled = ?, max_concurrent_runs = ?, continuation_policy = ?, updated_at = ?
 		WHERE id = ?`,
 		a.Name, a.Description, a.WorkflowID, a.WorkflowStepID,
 		a.AgentProfileID, a.ExecutorProfileID,
+		string(a.TaskMode), string(a.RepositoryMode),
 		a.Prompt, a.TaskTitleTemplate,
 		a.Enabled, a.MaxConcurrentRuns, a.ContinuationPolicy, a.UpdatedAt, id)
 	if err != nil {
@@ -523,6 +576,10 @@ func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAuto
 		}
 		if err := insertAutomationRepositories(ctx, tx, id, req.RepositoryIDs); err != nil {
 			return err
+		}
+	} else if req.RepositoryMode != nil && *req.RepositoryMode != RepositoryModeSelected {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM automation_repositories WHERE automation_id = ?`, id); err != nil {
+			return fmt.Errorf("clear automation_repositories for repository mode: %w", err)
 		}
 	}
 	return tx.Commit()
@@ -546,6 +603,25 @@ func applyAutomationUpdate(a *Automation, req *UpdateAutomationRequest) {
 	}
 	if req.ExecutorProfileID != nil {
 		a.ExecutorProfileID = *req.ExecutorProfileID
+	}
+	if req.TaskMode != nil {
+		a.TaskMode = *req.TaskMode
+	}
+	if req.RepositoryMode != nil {
+		a.RepositoryMode = *req.RepositoryMode
+		if a.RepositoryMode != RepositoryModeSelected && req.RepositoryIDs == nil {
+			a.RepositoryIDs = nil
+		}
+	}
+	if req.RepositoryIDs != nil {
+		a.RepositoryIDs = append([]string(nil), req.RepositoryIDs...)
+		if req.RepositoryMode == nil {
+			if len(req.RepositoryIDs) > 0 {
+				a.RepositoryMode = RepositoryModeSelected
+			} else {
+				a.RepositoryMode = RepositoryModeWorkspaceDefault
+			}
+		}
 	}
 	if req.Prompt != nil {
 		a.Prompt = *req.Prompt
@@ -624,7 +700,7 @@ type automationCleanupOwner struct {
 	ContinuationTaskID string `db:"continuation_task_id"`
 }
 
-func (s *Store) DeleteAutomationWithCleanup(ctx context.Context, id string) ([]string, error) {
+func (s *Store) DeleteAutomationWithCleanup(ctx context.Context, id string, cleanupTaskIDs ...[]string) ([]string, error) {
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -638,7 +714,12 @@ func (s *Store) DeleteAutomationWithCleanup(ctx context.Context, id string) ([]s
 	if !found {
 		return nil, nil
 	}
-	taskIDs, err := listAutomationCleanupTaskIDs(ctx, tx, id, owner.ContinuationTaskID)
+	var taskIDs []string
+	if len(cleanupTaskIDs) > 0 {
+		taskIDs = cleanupTaskIDs[0]
+	} else {
+		taskIDs, err = listAutomationCleanupTaskIDs(ctx, tx, id, owner.ContinuationTaskID)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -653,6 +734,25 @@ func (s *Store) DeleteAutomationWithCleanup(ctx context.Context, id string) ([]s
 		return nil, err
 	}
 	return jobs, nil
+}
+
+// ListAutomationTaskIDs returns the distinct task IDs currently owned by an
+// automation's runs plus its continuation pointer. The service uses the task
+// origin to keep visible normal tasks out of hidden-task cleanup jobs.
+func (s *Store) ListAutomationTaskIDs(ctx context.Context, id string) ([]string, error) {
+	var taskIDs []string
+	if err := s.ro.SelectContext(ctx, &taskIDs,
+		`SELECT DISTINCT task_id FROM automation_runs WHERE automation_id = ? AND task_id != ''`, id); err != nil {
+		return nil, err
+	}
+	var continuationTaskID string
+	if err := s.ro.GetContext(ctx, &continuationTaskID,
+		`SELECT continuation_task_id FROM automations WHERE id = ?`, id); err == nil && continuationTaskID != "" {
+		taskIDs = append(taskIDs, continuationTaskID)
+	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	return taskIDs, nil
 }
 
 func loadAutomationCleanupOwner(ctx context.Context, tx *sqlx.Tx, id string) (automationCleanupOwner, bool, error) {

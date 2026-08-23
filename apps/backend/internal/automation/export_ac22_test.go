@@ -27,6 +27,8 @@ var automationFieldDispositions = map[string]fieldDisposition{
 	"Enabled":            {exported: true, yamlKey: "enabled"},
 	"MaxConcurrentRuns":  {exported: true, yamlKey: "max_concurrent_runs"},
 	"ContinuationPolicy": {exported: true, yamlKey: "continuation_policy"},
+	"TaskMode":           {exported: true, yamlKey: "task_mode"},
+	"RepositoryMode":     {exported: true, yamlKey: "repository_mode"},
 	"Triggers":           {exported: true, yamlKey: "triggers"},
 	"WorkflowID":         {exported: true, yamlKey: "workflow.name"},
 	"WorkflowStepID":     {exported: true, yamlKey: "workflow.step"},

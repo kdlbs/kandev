@@ -3195,6 +3195,9 @@ export class ApiClient {
     name: string;
     workflowId?: string;
     workflowStepId?: string;
+    taskMode?: "automation_run" | "normal_task";
+    repositoryMode?: "workspace_default" | "selected" | "none";
+    repositoryIds?: string[];
     /**
      * The automation's standing instruction. The run view only renders the
      * instruction card when there is one, so specs asserting on where that
@@ -3230,6 +3233,9 @@ export class ApiClient {
       name: opts.name,
       workflow_id: opts.workflowId ?? "",
       workflow_step_id: opts.workflowStepId ?? "",
+      task_mode: opts.taskMode,
+      repository_mode: opts.repositoryMode,
+      repository_ids: opts.repositoryIds,
       prompt: opts.prompt ?? "",
       agent_profile_id: opts.agentProfileId ?? "",
       executor_profile_id: opts.executorProfileId ?? "",

@@ -18,6 +18,8 @@ export type RunStatus =
   | "cancelled";
 
 export type ContinuationPolicy = "new_task" | "reuse_thread";
+export type TaskMode = "automation_run" | "normal_task";
+export type RepositoryMode = "workspace_default" | "selected" | "none";
 
 export type Automation = {
   id: string;
@@ -28,6 +30,8 @@ export type Automation = {
   workflow_step_id: string;
   agent_profile_id: string;
   executor_profile_id: string;
+  task_mode?: TaskMode;
+  repository_mode?: RepositoryMode;
   repository_ids: string[];
   prompt: string;
   task_title_template: string;
@@ -183,6 +187,8 @@ export type CreateAutomationRequest = {
   task_title_template?: string;
   max_concurrent_runs?: number;
   continuation_policy?: ContinuationPolicy;
+  task_mode?: TaskMode;
+  repository_mode?: RepositoryMode;
   triggers?: Array<{
     type: TriggerType;
     config: Record<string, unknown>;
@@ -203,6 +209,8 @@ export type UpdateAutomationRequest = {
   enabled?: boolean;
   max_concurrent_runs?: number;
   continuation_policy?: ContinuationPolicy;
+  task_mode?: TaskMode;
+  repository_mode?: RepositoryMode;
 };
 
 // CreateAutomationResponse mirrors the backend's one-time webhook secret

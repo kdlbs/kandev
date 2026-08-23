@@ -275,8 +275,8 @@ test.describe("Automations settings page", () => {
     const automations = new AutomationsPage(testPage, seedData.workspaceId);
     await automations.gotoNew();
 
-    // The repository selector should show "None" by default
-    await expect(testPage.getByTestId("repository-selector")).toContainText(/None|no repository/i, {
+    // The explicit repository-mode choice should select no repository by default.
+    await expect(testPage.getByRole("radio", { name: /no repository/i })).toBeChecked({
       timeout: 10_000,
     });
   });

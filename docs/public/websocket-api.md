@@ -511,6 +511,13 @@ selected open run's exact task/session/turn binding and returns `{run_id,
 status}`. A stale or terminal binding returns not found; it never stops another
 turn that happens to share the same task or session.
 
+Automation payloads expose `task_mode` (`automation_run` or `normal_task`) and
+`repository_mode` (`workspace_default`, `selected`, or `none`). Hidden runs may
+omit workflow and repository data and use a Local scratch workspace. Normal
+tasks require a workflow and remain visible in Kanban and the sidebar. A
+repository-required provider trigger rejects `repository_mode=none` before it
+creates an `AutomationRun`.
+
 ### GitHub and GitLab
 
 ```text

@@ -21,7 +21,7 @@ type exportDocument struct {
 
 // exportAutomation is a single automation's exported form. Key order is pinned by
 // AC-40: name, description, enabled, max_concurrent_runs, continuation_policy,
-// task_title_template, prompt,
+// task_mode, repository_mode, task_title_template, prompt,
 // agent_profile, executor_profile, workflow, repositories, triggers.
 //
 // Prompt and every trigger's Config are *yaml.Node rather than string/json.RawMessage
@@ -34,6 +34,8 @@ type exportAutomation struct {
 	Enabled            bool                   `yaml:"enabled"`
 	MaxConcurrentRuns  int                    `yaml:"max_concurrent_runs"`
 	ContinuationPolicy ContinuationPolicy     `yaml:"continuation_policy"`
+	TaskMode           TaskMode               `yaml:"task_mode"`
+	RepositoryMode     RepositoryMode         `yaml:"repository_mode"`
 	TaskTitleTemplate  string                 `yaml:"task_title_template,omitempty"`
 	Prompt             *yaml.Node             `yaml:"prompt,omitempty"`
 	AgentProfile       *exportAgentProfile    `yaml:"agent_profile,omitempty"`

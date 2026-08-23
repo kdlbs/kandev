@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Label } from "@kandev/ui/label";
+import { RadioGroup, RadioGroupItem } from "@kandev/ui/radio-group";
 import { SettingsFieldLabel } from "@/components/settings/settings-typography";
 import { settingsControlClassName } from "@/components/settings/settings-control";
 import { useAppStore } from "@/components/state-provider";
@@ -14,7 +15,8 @@ import { discoverRepositoriesAction } from "@/app/actions/workspaces";
 import { listWorkflows } from "@/lib/api";
 import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
 import type { ExecutorProfile, LocalRepository, Repository } from "@/lib/types/http";
-import type { TriggerType } from "@/lib/types/automation";
+import { t } from "@/lib/i18n";
+import type { RepositoryMode, TaskMode, TriggerType } from "@/lib/types/automation";
 import { getMultiRepoExecutorDisabledReason } from "@/components/task-create-dialog-multi-repo-guard";
 import { AutomationRepositoryRows } from "./automation-repository-rows";
 import {
@@ -36,7 +38,11 @@ export { buildRepositoryItems, pickSelectionFromOptionId, selectionToOptionId };
 export function getExecutorItemDisabledReason(
   executorType: string | null | undefined,
   repositorySelections: RepositorySelection[],
+  repositoryMode: RepositoryMode = "selected",
 ): string | null {
+  if (repositoryMode === "none" && executorType === "worktree") {
+    return t("automations:worktreeRequiresRepository");
+  }
   if (repositorySelections.length <= 1) return null;
   return getMultiRepoExecutorDisabledReason(executorType);
 }
@@ -47,6 +53,8 @@ type ConfigSectionProps = {
   workflowStepId: string;
   agentProfileId: string;
   executorProfileId: string;
+  taskMode?: TaskMode;
+  repositoryMode?: RepositoryMode;
   repositorySelections: RepositorySelection[];
   conditionType: TriggerType | null;
   dirtyFields?: {
@@ -60,6 +68,7 @@ type ConfigSectionProps = {
   onStepChange: (id: string) => void;
   onAgentProfileChange: (id: string) => void;
   onExecutorProfileChange: (id: string) => void;
+  onRepositoryModeChange?: (mode: RepositoryMode) => void;
   onRepositoriesChange: (selections: RepositorySelection[]) => void;
 };
 
@@ -220,6 +229,7 @@ function useConfigSectionComputed({
   agentProfiles,
   executors,
   executorProfileId,
+  repositoryMode,
   repositorySelections,
   repositories,
   discoveredRepos,
@@ -227,6 +237,7 @@ function useConfigSectionComputed({
   agentProfiles: AgentProfileLike[];
   executors: ExecutorLike[];
   executorProfileId: string;
+  repositoryMode: RepositoryMode;
   repositorySelections: RepositorySelection[];
   repositories: Repository[];
   discoveredRepos: LocalRepository[];
@@ -242,7 +253,7 @@ function useConfigSectionComputed({
   // executor's fields, mirroring task-create-dialog-computed.ts's identical
   // enrichment so the two surfaces never disagree on an executor's type.
   const allExecutorProfiles = executors
-    .filter((executor) => executor.type !== "local")
+    .filter((executor) => repositoryMode === "none" || executor.type !== "local")
     .flatMap((executor) =>
       (executor.profiles ?? []).map((p) => ({
         ...p,
@@ -253,7 +264,11 @@ function useConfigSectionComputed({
   const supportsMultiRepo =
     getMultiRepoExecutorDisabledReason(resolveExecutorType(executors, executorProfileId)) === null;
   const executorItems = allExecutorProfiles.map((p) => {
-    const disabledReason = getExecutorItemDisabledReason(p.executor_type, repositorySelections);
+    const disabledReason = getExecutorItemDisabledReason(
+      p.executor_type,
+      repositorySelections,
+      repositoryMode,
+    );
     return {
       id: p.id,
       label: p.name,
@@ -274,6 +289,8 @@ export function ConfigSection({
   workflowStepId,
   agentProfileId,
   executorProfileId,
+  taskMode = "automation_run",
+  repositoryMode = "workspace_default",
   repositorySelections,
   conditionType,
   dirtyFields = CLEAN_FIELDS,
@@ -281,6 +298,7 @@ export function ConfigSection({
   onStepChange,
   onAgentProfileChange,
   onExecutorProfileChange,
+  onRepositoryModeChange = () => {},
   onRepositoriesChange,
 }: ConfigSectionProps) {
   const { t } = useTranslation();
@@ -299,6 +317,7 @@ export function ConfigSection({
       agentProfiles,
       executors,
       executorProfileId,
+      repositoryMode,
       repositorySelections,
       repositories,
       discoveredRepos,
@@ -319,6 +338,7 @@ export function ConfigSection({
           steps={steps}
           workflowDirty={dirtyFields.workflowId}
           workflowStepDirty={dirtyFields.workflowStepId}
+          workflowRequired={taskMode === "normal_task"}
           onWorkflowChange={onWorkflowChange}
           onStepChange={onStepChange}
         />
@@ -342,6 +362,8 @@ export function ConfigSection({
           items={executorItems}
         />
         <RepositoryPickerField
+          repositoryMode={repositoryMode}
+          conditionType={conditionType}
           supportsMultiRepo={supportsMultiRepo}
           isPRTrigger={isPRTrigger}
           repositories={repositories}
@@ -349,6 +371,7 @@ export function ConfigSection({
           repositorySelections={repositorySelections}
           singleRepositoryItems={singleRepositoryItems}
           isDirty={dirtyFields.repositorySelections}
+          onRepositoryModeChange={onRepositoryModeChange}
           onRepositoriesChange={onRepositoriesChange}
         />
       </div>
@@ -362,6 +385,8 @@ export function ConfigSection({
 // trigger always uses the PR's own repository, so the picker stays a single
 // disabled field even when the executor otherwise supports multi-repo).
 function RepositoryPickerField({
+  repositoryMode,
+  conditionType,
   supportsMultiRepo,
   isPRTrigger,
   repositories,
@@ -369,8 +394,11 @@ function RepositoryPickerField({
   repositorySelections,
   singleRepositoryItems,
   isDirty,
+  onRepositoryModeChange,
   onRepositoriesChange,
 }: {
+  repositoryMode: RepositoryMode;
+  conditionType: TriggerType | null;
   supportsMultiRepo: boolean;
   isPRTrigger: boolean;
   repositories: Repository[];
@@ -378,36 +406,133 @@ function RepositoryPickerField({
   repositorySelections: RepositorySelection[];
   singleRepositoryItems: Array<{ id: string; label: string }>;
   isDirty: boolean;
+  onRepositoryModeChange: (mode: RepositoryMode) => void;
   onRepositoriesChange: (selections: RepositorySelection[]) => void;
 }) {
   const { t } = useTranslation();
-  if (supportsMultiRepo && !isPRTrigger) {
+  const repositoryRequired = ["github_pr", "github_pr_merged", "github_push", "github_ci"].includes(
+    conditionType ?? "",
+  );
+  const showPicker = repositoryMode !== "none";
+  if (supportsMultiRepo && !isPRTrigger && showPicker) {
     return (
-      <AutomationRepositoryRows
-        testId="repository-rows"
-        repositories={repositories}
-        discoveredRepos={discoveredRepos}
-        selections={repositorySelections}
-        onChange={onRepositoriesChange}
-        isDirty={isDirty}
-      />
+      <div className="space-y-3 sm:col-span-2">
+        <RepositoryModeField
+          value={repositoryMode}
+          disabledNone={repositoryRequired}
+          onChange={onRepositoryModeChange}
+        />
+        <AutomationRepositoryRows
+          testId="repository-rows"
+          repositories={repositories}
+          discoveredRepos={discoveredRepos}
+          selections={repositorySelections}
+          onChange={onRepositoriesChange}
+          isDirty={isDirty}
+        />
+      </div>
     );
   }
   return (
-    <SelectField
-      testId="repository-selector"
-      label={t("automations:repositoryLabel")}
-      value={selectionToOptionId(repositorySelections[0] ?? { kind: "none" })}
-      isDirty={isDirty}
-      onChange={(v) => {
-        const picked = pickSelectionFromOptionId(v, repositories, discoveredRepos);
-        onRepositoriesChange(picked.kind === "none" ? [] : [picked]);
-      }}
-      placeholder={t("automations:repositoryPlaceholderAuto")}
-      items={singleRepositoryItems}
-      disabled={isPRTrigger}
-      helpText={isPRTrigger ? t("automations:prTriggerRepositoryHelp") : undefined}
-    />
+    <div className="space-y-3 sm:col-span-2">
+      <RepositoryModeField
+        value={repositoryMode}
+        disabledNone={repositoryRequired}
+        onChange={onRepositoryModeChange}
+      />
+      {repositoryMode === "none" ? (
+        <p className="text-xs/relaxed text-muted-foreground">
+          {t("automations:repositoryModeNoneHelp")}
+        </p>
+      ) : (
+        <SelectField
+          testId="repository-selector"
+          label={t("automations:repositoryLabel")}
+          value={selectionToOptionId(repositorySelections[0] ?? { kind: "none" })}
+          isDirty={isDirty}
+          onChange={(v) => {
+            const picked = pickSelectionFromOptionId(v, repositories, discoveredRepos);
+            onRepositoriesChange(picked.kind === "none" ? [] : [picked]);
+          }}
+          placeholder={t("automations:repositoryPlaceholderAuto")}
+          items={singleRepositoryItems}
+          disabled={isPRTrigger}
+          helpText={isPRTrigger ? t("automations:prTriggerRepositoryHelp") : undefined}
+        />
+      )}
+    </div>
+  );
+}
+
+function RepositoryModeField({
+  value,
+  disabledNone,
+  onChange,
+}: {
+  value: RepositoryMode;
+  disabledNone: boolean;
+  onChange: (mode: RepositoryMode) => void;
+}) {
+  const { t } = useTranslation();
+  const options = [
+    [
+      "workspace_default",
+      "repositoryModeWorkspaceDefault",
+      "repositoryModeWorkspaceDefaultDescription",
+    ],
+    ["selected", "repositoryModeSelected", "repositoryModeSelectedDescription"],
+    ["none", "repositoryModeNone", "repositoryModeNoneDescription"],
+  ] as const;
+  return (
+    <div className="space-y-2">
+      <div>
+        <h3 id="automation-repository-mode-heading" className="text-sm font-medium">
+          {t("automations:repositoryModeTitle")}
+        </h3>
+        <p id="automation-repository-mode-description" className="text-xs text-muted-foreground">
+          {t("automations:repositoryModeDescription")}
+        </p>
+      </div>
+      <RadioGroup
+        aria-labelledby="automation-repository-mode-heading"
+        aria-describedby="automation-repository-mode-description"
+        value={value}
+        onValueChange={(next) => onChange(next as RepositoryMode)}
+        className="gap-2"
+      >
+        {options.map(([mode, labelKey, descriptionKey]) => (
+          <Label
+            key={mode}
+            htmlFor={`automation-repository-mode-${mode}`}
+            className={`flex min-h-11 w-full items-start gap-3 rounded-md border p-3 ${
+              disabledNone && mode === "none" ? "cursor-not-allowed opacity-60" : "cursor-pointer"
+            } ${value === mode ? "border-primary bg-primary/5" : "border-border hover:bg-muted/30"}`}
+          >
+            <RadioGroupItem
+              id={`automation-repository-mode-${mode}`}
+              value={mode}
+              disabled={disabledNone && mode === "none"}
+              aria-describedby={`automation-repository-mode-${mode}-description`}
+              className="mt-0.5"
+            />
+            <span className="min-w-0 space-y-1">
+              <span className="block text-sm font-medium">{t(`automations:${labelKey}`)}</span>
+              <span
+                id={`automation-repository-mode-${mode}-description`}
+                className="block whitespace-normal break-words text-xs text-muted-foreground"
+              >
+                {t(`automations:${descriptionKey}`)}
+              </span>
+            </span>
+          </Label>
+        ))}
+      </RadioGroup>
+      {disabledNone && (
+        <p className="text-xs/relaxed text-muted-foreground">
+          {t("automations:repositoryModeRequiredHelp")}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -420,6 +545,7 @@ function WorkflowFields({
   steps,
   workflowDirty,
   workflowStepDirty,
+  workflowRequired,
   onWorkflowChange,
   onStepChange,
 }: {
@@ -431,44 +557,38 @@ function WorkflowFields({
   steps: StepOption[];
   workflowDirty: boolean;
   workflowStepDirty: boolean;
+  workflowRequired: boolean;
   onWorkflowChange: (id: string) => void;
   onStepChange: (id: string) => void;
 }) {
-  // The step list is empty until a workflow is picked. Showing an empty
-  // dropdown next to the workflow select invites users to click it first
-  // and bounce off — keep the field in the DOM (so its testid is stable
-  // for tooling) but disable it and surface a hint until a workflow is
-  // chosen.
   const { t } = useTranslation();
   const hasWorkflow = !!workflowId;
-  // Both fields are optional: an automation that only reports has no place on a
-  // board, and demanding a workflow before it can be saved made every such
-  // automation pick one at random. Nothing here blocks saving, so nothing here
-  // says it does.
-  //
-  // Optional also has to mean reversible. A select listing only real workflows
-  // can be set but never unset, which would strand every automation upgraded
-  // from the era when a workflow was mandatory. An explicit None entry is the
-  // way back; picking it clears the step too, since a step without its workflow
-  // is not a selection anyone can act on.
+  // Keep the step field stable and disabled until a workflow is picked. The
+  // optional workflow picker includes None so legacy values can be cleared.
+  let workflowPlaceholder = t("automations:selectWorkflowOptional");
+  if (workflowRequired) workflowPlaceholder = t("automations:selectWorkflowRequired");
+  if (workflowsFailed) workflowPlaceholder = t("automations:couldNotLoadWorkflows");
   return (
     <>
       <SelectField
         testId="workflow-selector"
-        label={t("automations:workflowLabel")}
+        label={
+          workflowRequired ? t("automations:workflowRequiredLabel") : t("automations:workflowLabel")
+        }
         value={workflowId}
         isDirty={workflowDirty}
         onChange={(value) => onWorkflowChange(value === NONE_OPTION_ID ? "" : value)}
-        placeholder={
-          workflowsFailed
-            ? t("automations:couldNotLoadWorkflows")
-            : t("automations:selectWorkflowOptional")
-        }
+        placeholder={workflowPlaceholder}
         items={[
           { id: NONE_OPTION_ID, label: t("automations:noWorkflow") },
           ...workflows.map((w) => ({ id: w.id, label: w.name })),
         ]}
       />
+      {workflowRequired && !hasWorkflow && (
+        <p className="text-xs/relaxed text-muted-foreground">
+          {t("automations:normalTaskWorkflowHelp")}
+        </p>
+      )}
       {workflowsFailed && (
         <p className="text-xs/relaxed text-destructive" data-testid="workflow-load-error">
           {t("automations:workflowLoadError")}{" "}

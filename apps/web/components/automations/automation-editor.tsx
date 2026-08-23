@@ -27,7 +27,7 @@ import {
   buildCreatePayload,
   buildUpdatePayload,
   buildWebhookUrl,
-  resolveNormalizedRepositoryIds,
+  resolveRepositoryIdsForMode,
 } from "./automation-payload";
 import { resolveExecutorType } from "./automation-repository-selection";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
@@ -67,6 +67,8 @@ const defaultForm: FormState = {
   enabled: true,
   maxConcurrentRuns: 1,
   continuationPolicy: "new_task",
+  taskMode: "automation_run",
+  repositoryMode: "none",
 };
 
 function formFromAutomation(a: Automation): FormState {
@@ -77,6 +79,9 @@ function formFromAutomation(a: Automation): FormState {
     workflowStepId: a.workflow_step_id,
     agentProfileId: a.agent_profile_id,
     executorProfileId: a.executor_profile_id,
+    taskMode: a.task_mode ?? "automation_run",
+    repositoryMode:
+      a.repository_mode ?? (a.repository_ids.length > 0 ? "selected" : "workspace_default"),
     repositorySelections: a.repository_ids.map((id) => ({ kind: "registered" as const, id })),
     prompt: a.prompt || DEFAULT_PROMPT,
     taskTitleTemplate: a.task_title_template ?? "",
@@ -151,10 +156,15 @@ function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
       // re-enforces the same invariant right before persisting (see its
       // doc comment for why a stale entry can't be skipped here).
       const { ids: repositoryIds, selections: promotedSelections } =
-        await resolveNormalizedRepositoryIds(workspaceId, form.repositorySelections, {
-          supportsMultiRepo,
-          isPRTrigger,
-        });
+        await resolveRepositoryIdsForMode(
+          workspaceId,
+          form.repositorySelections,
+          form.repositoryMode,
+          {
+            supportsMultiRepo,
+            isPRTrigger,
+          },
+        );
       const promoteSelections = () => {
         setForm((prev) => ({ ...prev, repositorySelections: promotedSelections }));
       };
@@ -338,11 +348,11 @@ function useAutomationPersistence(options: AutomationPersistenceOptions) {
         description: error instanceof Error ? error.message : t("common:requestFailed"),
       }),
   );
-  // The name is the only thing an automation cannot do without — it is how the
-  // reader finds it in the runs list. Workflow and step are optional: an
-  // automation that only reports has no place on a board, and requiring one
-  // made every such automation pick a step at random to get past the gate.
-  const canSave = options.form.name.trim().length > 0;
+  // The name is the only required field for hidden runs. A visible normal
+  // task also needs a workflow so the task has a Kanban/sidebar destination.
+  const canSave =
+    options.form.name.trim().length > 0 &&
+    (options.form.taskMode !== "normal_task" || options.form.workflowId.trim().length > 0);
   useAutomationSaveContributor({
     isNew: options.isNew,
     currentId: options.currentId,

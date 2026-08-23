@@ -10,6 +10,7 @@ import {
   buildCreatePayload,
   buildUpdatePayload,
   resolveNormalizedRepositoryIds,
+  resolveRepositoryIdsForMode,
   resolveRepositoryIds,
 } from "./automation-payload";
 import type { FormState } from "./automation-payload";
@@ -22,6 +23,8 @@ function baseForm(overrides: Partial<FormState> = {}): FormState {
     workflowStepId: "step-1",
     agentProfileId: "agent-1",
     executorProfileId: "exec-1",
+    taskMode: "automation_run",
+    repositoryMode: "none",
     repositorySelections: [],
     prompt: "Run it",
     taskTitleTemplate: "",
@@ -150,5 +153,30 @@ describe("buildCreatePayload / buildUpdatePayload", () => {
 
     expect(buildCreatePayload("ws-1", form, [], []).continuation_policy).toBe("reuse_thread");
     expect(buildUpdatePayload(form, []).continuation_policy).toBe("reuse_thread");
+  });
+
+  it("sends the target and repository modes on create and update", () => {
+    const form = baseForm({ taskMode: "normal_task", repositoryMode: "selected" });
+
+    expect(buildCreatePayload("ws-1", form, ["repo-a"], [])).toMatchObject({
+      task_mode: "normal_task",
+      repository_mode: "selected",
+    });
+    expect(buildUpdatePayload(form, ["repo-a"])).toMatchObject({
+      task_mode: "normal_task",
+      repository_mode: "selected",
+    });
+  });
+
+  it("does not resolve stale repository selections for non-selected modes", async () => {
+    const result = await resolveRepositoryIdsForMode(
+      "ws-1",
+      [{ kind: "discovered", path: "/tmp/stale", name: "stale", defaultBranch: "main" }],
+      "none",
+      { supportsMultiRepo: true, isPRTrigger: false },
+    );
+
+    expect(result.ids).toEqual([]);
+    expect(createRepositoryAction).not.toHaveBeenCalled();
   });
 });

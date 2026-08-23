@@ -5,6 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 type MockWorkflow = { id: string; name: string; workspaceId: string };
 
 const WORKFLOW_SELECTOR = "workflow-selector";
+const WORKFLOW_STEP_SELECTOR = "workflow-step-selector";
+const WORKFLOW_STEP_HELP_ID = "workflow-step-selector-help";
+const ARIA_DESCRIBEDBY_ATTRIBUTE = "aria-describedby";
 const FEATURE_DEV = "Feature Dev";
 const WORKSPACE_1 = "workspace-1";
 const FETCH_FAILED = "Failed to fetch";
@@ -143,7 +146,7 @@ describe("ConfigSection", () => {
     // board, so nothing here may claim it blocks saving.
     expect(screen.queryAllByText("required")).toHaveLength(0);
     expect(screen.getByTestId(WORKFLOW_SELECTOR).getAttribute("aria-invalid")).toBeNull();
-    expect(screen.getByTestId("workflow-step-selector").getAttribute("aria-invalid")).toBeNull();
+    expect(screen.getByTestId(WORKFLOW_STEP_SELECTOR).getAttribute("aria-invalid")).toBeNull();
     expect(screen.getByTestId(WORKFLOW_SELECTOR).textContent).toContain("optional");
   });
 
@@ -151,9 +154,9 @@ describe("ConfigSection", () => {
     renderConfigSection();
 
     screen.getByText("Select a workflow before choosing a step.");
-    expect(screen.getByTestId("workflow-step-selector").getAttribute("aria-describedby")).toBe(
-      "workflow-step-selector-help",
-    );
+    expect(
+      screen.getByTestId(WORKFLOW_STEP_SELECTOR).getAttribute(ARIA_DESCRIBEDBY_ATTRIBUTE),
+    ).toBe(WORKFLOW_STEP_HELP_ID);
   });
 
   it("drops the step hint once a workflow is selected", () => {
@@ -161,7 +164,7 @@ describe("ConfigSection", () => {
 
     expect(screen.queryByText("Select a workflow before choosing a step.")).toBeNull();
     expect(
-      screen.getByTestId("workflow-step-selector").getAttribute("aria-describedby"),
+      screen.getByTestId(WORKFLOW_STEP_SELECTOR).getAttribute(ARIA_DESCRIBEDBY_ATTRIBUTE),
     ).toBeNull();
   });
 
@@ -181,6 +184,8 @@ function settingsForm(overrides: Partial<FormState> = {}): FormState {
     workflowStepId: "",
     agentProfileId: "",
     executorProfileId: "",
+    taskMode: "automation_run",
+    repositoryMode: "workspace_default",
     repositorySelections: [],
     prompt: "Run it",
     taskTitleTemplate: "",
@@ -208,7 +213,7 @@ describe("SettingsSection continuation policy", () => {
     expect(screen.getByText("Start a new task for every run")).toBeTruthy();
     expect(screen.getByText("Continue the previous session")).toBeTruthy();
     const reuse = screen.getByRole("radio", { name: /Continue the previous session/ });
-    expect(reuse.getAttribute("aria-describedby")).toBe(
+    expect(reuse.getAttribute(ARIA_DESCRIBEDBY_ATTRIBUTE)).toBe(
       "automation-continuation-reuse-thread-description",
     );
   });
@@ -222,6 +227,38 @@ describe("SettingsSection continuation policy", () => {
 
     expect(updateField).toHaveBeenNthCalledWith(1, "continuationPolicy", "reuse_thread");
     expect(updateField).toHaveBeenNthCalledWith(2, "maxConcurrentRuns", 1);
+  });
+
+  it("shows target choices and records a normal-task selection", () => {
+    const form = settingsForm();
+    const updateField = vi.fn();
+    render(<SettingsSection form={form} savedForm={form} updateField={updateField as never} />);
+
+    expect(screen.getByText("Run destination")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Each run uses a private task and conversation. These tasks do not appear in Kanban or the sidebar.",
+      ),
+    ).toBeTruthy();
+    const normal = screen.getByRole("radio", { name: /Create a normal task/ });
+    expect(normal.getAttribute(ARIA_DESCRIBEDBY_ATTRIBUTE)).toBe(
+      "automation-task-mode-normal-description",
+    );
+
+    fireEvent.click(normal);
+    expect(updateField).toHaveBeenCalledWith("taskMode", "normal_task");
+  });
+
+  it("explains that normal-task runs remain visible when starting a new task", () => {
+    const form = settingsForm({ taskMode: "normal_task" });
+    const updateField = vi.fn();
+    render(<SettingsSection form={form} savedForm={form} updateField={updateField as never} />);
+
+    expect(
+      screen.getByText(
+        "Each run starts with a separate conversation and files. These tasks appear in Kanban and the sidebar. Use this option for independent jobs and concurrent runs.",
+      ),
+    ).toBeTruthy();
   });
 });
 
@@ -457,5 +494,12 @@ describe("ConfigSection repository and executor pickers", () => {
     expect(
       getExecutorItemDisabledReason("local_pc", [{ kind: "registered", id: "repo-1" }]),
     ).toBeNull();
+  });
+
+  it("rejects Worktree when no repository mode is selected", () => {
+    expect(getExecutorItemDisabledReason("worktree", [], "none")).toContain(
+      "requires a repository",
+    );
+    expect(getExecutorItemDisabledReason("local_pc", [], "none")).toBeNull();
   });
 });

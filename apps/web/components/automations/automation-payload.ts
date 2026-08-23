@@ -2,6 +2,8 @@ import { createRepositoryAction } from "@/app/actions/workspaces";
 import type {
   CreateAutomationRequest,
   ContinuationPolicy,
+  RepositoryMode,
+  TaskMode,
   TriggerType,
   UpdateAutomationRequest,
 } from "@/lib/types/automation";
@@ -22,6 +24,8 @@ export type FormState = {
   workflowStepId: string;
   agentProfileId: string;
   executorProfileId: string;
+  taskMode: TaskMode;
+  repositoryMode: RepositoryMode;
   // repositorySelections captures an ordered list of registered workspace
   // repos (id), discovered local repos (path — registered at save time to
   // obtain an id), or an empty list for repo-less automations.
@@ -90,6 +94,18 @@ export async function resolveNormalizedRepositoryIds(
   return resolveRepositoryIds(workspaceId, normalizeRepositorySelections(selections, mode));
 }
 
+export async function resolveRepositoryIdsForMode(
+  workspaceId: string,
+  selections: RepositorySelection[],
+  repositoryMode: RepositoryMode,
+  mode: { supportsMultiRepo: boolean; isPRTrigger: boolean },
+): Promise<ResolvedRepositories> {
+  if (repositoryMode !== "selected") {
+    return { ids: [], selections: [] };
+  }
+  return resolveNormalizedRepositoryIds(workspaceId, selections, mode);
+}
+
 async function resolveOneRepositoryId(
   workspaceId: string,
   selection: RepositorySelection,
@@ -135,6 +151,8 @@ export function buildCreatePayload(
     workflow_step_id: form.workflowStepId,
     agent_profile_id: form.agentProfileId,
     executor_profile_id: form.executorProfileId,
+    task_mode: form.taskMode,
+    repository_mode: form.repositoryMode,
     repository_ids: repositoryIds,
     prompt: form.prompt,
     task_title_template: form.taskTitleTemplate,
@@ -155,6 +173,8 @@ export function buildUpdatePayload(
     workflow_step_id: form.workflowStepId,
     agent_profile_id: form.agentProfileId,
     executor_profile_id: form.executorProfileId,
+    task_mode: form.taskMode,
+    repository_mode: form.repositoryMode,
     repository_ids: repositoryIds,
     prompt: form.prompt,
     task_title_template: form.taskTitleTemplate,

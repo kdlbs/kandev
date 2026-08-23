@@ -94,7 +94,12 @@ const (
 	MetaKeyAgentProfileID    = "agent_profile_id"
 	MetaKeyExecutorID        = "executor_id"
 	MetaKeyExecutorProfileID = "executor_profile_id"
-	MetaKeyDeferredLaunch    = "deferred_launch"
+	// Automation target metadata is written to continuation tasks so a
+	// change from hidden to visible ownership or from repository-backed to
+	// repository-free execution cannot silently reuse the old task.
+	MetaKeyAutomationTaskMode       = "automation_task_mode"
+	MetaKeyAutomationRepositoryMode = "automation_repository_mode"
+	MetaKeyDeferredLaunch           = "deferred_launch"
 	// MetaKeyQueuedMoveExitPending identifies a queued manual move whose
 	// source-step on_exit side effect is not yet complete. Its value records the
 	// source step so recovery can resume the work after a restart.
@@ -781,6 +786,9 @@ const (
 	TaskOriginRoutine       = "routine"
 	TaskOriginOnboarding    = "onboarding"
 	TaskOriginAutomationRun = "automation_run"
+	// TaskOriginAutomationTask is a normal, user-visible task created by an
+	// automation. Unlike automation_run, it remains in Kanban/sidebar flows.
+	TaskOriginAutomationTask = "automation_task"
 )
 
 // Task represents a task in the database

@@ -356,10 +356,13 @@ func handleE2ECreateHiddenWorkflow(taskSvc *taskservice.Service, log *logger.Log
 }
 
 type e2eCreateAutomationRequest struct {
-	WorkspaceID    string `json:"workspace_id"`
-	Name           string `json:"name"`
-	WorkflowID     string `json:"workflow_id"`
-	WorkflowStepID string `json:"workflow_step_id"`
+	WorkspaceID    string                    `json:"workspace_id"`
+	Name           string                    `json:"name"`
+	WorkflowID     string                    `json:"workflow_id"`
+	WorkflowStepID string                    `json:"workflow_step_id"`
+	TaskMode       automation.TaskMode       `json:"task_mode"`
+	RepositoryMode automation.RepositoryMode `json:"repository_mode"`
+	RepositoryIDs  []string                  `json:"repository_ids"`
 	// Prompt is the automation's standing instruction. Optional, but the run
 	// view only renders the instruction card when there is one, so a spec
 	// asserting on where that card lives has to seed it.
@@ -402,6 +405,9 @@ func handleE2ECreateAutomation(
 			Name:              body.Name,
 			WorkflowID:        body.WorkflowID,
 			WorkflowStepID:    body.WorkflowStepID,
+			TaskMode:          body.TaskMode,
+			RepositoryMode:    body.RepositoryMode,
+			RepositoryIDs:     body.RepositoryIDs,
 			Prompt:            body.Prompt,
 			AgentProfileID:    body.AgentProfileID,
 			ExecutorProfileID: body.ExecutorProfileID,
@@ -725,8 +731,10 @@ func handleE2EAutomationManualTrigger(svc *automation.Service, log *logger.Logge
 	}
 }
 
-// e2ePollNewRun blocks until a new run (with a different id than beforeID) appears
-// for automationID, or until 5 seconds elapse. Returns the new run's TaskID.
+// e2ePollNewRun blocks until a new run (with a different id than beforeID) has
+// a task binding for automationID, or until 5 seconds elapse. The trigger row
+// is admitted before the event handler creates/binds its task, so observing the
+// row alone can return an empty task ID to an E2E caller.
 func e2ePollNewRun(ctx context.Context, svc *automation.Service, automationID, beforeID string) (string, error) {
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
@@ -735,7 +743,7 @@ func e2ePollNewRun(ctx context.Context, svc *automation.Service, automationID, b
 		if err != nil || len(runs) == 0 {
 			continue
 		}
-		if runs[0].ID != beforeID {
+		if runs[0].ID != beforeID && runs[0].TaskID != "" {
 			return runs[0].TaskID, nil
 		}
 	}

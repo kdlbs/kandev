@@ -25,6 +25,17 @@ func TestAutomationSchemaIncludesContinuationAndRunBindingColumns(t *testing.T) 
 	}
 }
 
+func TestAutomationSchemaIncludesTargetModeColumns(t *testing.T) {
+	store := setupTestStore(t)
+
+	for _, column := range []string{"task_mode", "repository_mode"} {
+		var count int
+		require.NoError(t, store.db.Get(&count,
+			`SELECT COUNT(*) FROM pragma_table_info('automations') WHERE name = ?`, column))
+		require.Equal(t, 1, count, "automations.%s must be persisted", column)
+	}
+}
+
 func TestCountActiveRunsIncludesAdmittedTriggeredRuns(t *testing.T) {
 	store := setupTestStore(t)
 	ctx := context.Background()
@@ -73,6 +84,110 @@ func TestAutomationContinuationPolicyDefaultsAndRoundTrips(t *testing.T) {
 	encoded, err := json.Marshal(got)
 	require.NoError(t, err)
 	require.NotContains(t, string(encoded), "continuation_task_id")
+}
+
+func TestAutomationTargetModesPersistAndValidate(t *testing.T) {
+	svc := newTestService(t)
+	svc.SetRepositoryLookup(&fakeRepositoryLookup{repos: map[string]string{"repo-1": "ws-1"}})
+	ctx := context.Background()
+
+	hidden, err := svc.CreateAutomation(ctx, &CreateAutomationRequest{
+		WorkspaceID:    "ws-1",
+		Name:           "scratch",
+		TaskMode:       TaskModeAutomationRun,
+		RepositoryMode: RepositoryModeNone,
+	})
+	require.NoError(t, err)
+	require.Equal(t, TaskModeAutomationRun, hidden.TaskMode)
+	require.Equal(t, RepositoryModeNone, hidden.RepositoryMode)
+
+	normal, err := svc.CreateAutomation(ctx, &CreateAutomationRequest{
+		WorkspaceID:    "ws-1",
+		Name:           "visible",
+		TaskMode:       TaskModeNormalTask,
+		WorkflowID:     "workflow-1",
+		RepositoryMode: RepositoryModeNone,
+	})
+	require.NoError(t, err)
+	require.Equal(t, TaskModeNormalTask, normal.TaskMode)
+	require.Equal(t, RepositoryModeNone, normal.RepositoryMode)
+
+	_, err = svc.CreateAutomation(ctx, &CreateAutomationRequest{
+		WorkspaceID: "ws-1",
+		Name:        "missing workflow",
+		TaskMode:    TaskModeNormalTask,
+	})
+	require.ErrorIs(t, err, ErrWorkflowRequired)
+
+	got, err := svc.GetAutomation(ctx, normal.ID)
+	require.NoError(t, err)
+	require.Equal(t, TaskModeNormalTask, got.TaskMode)
+	require.Equal(t, RepositoryModeNone, got.RepositoryMode)
+
+	selected, err := svc.CreateAutomation(ctx, &CreateAutomationRequest{
+		WorkspaceID:    "ws-1",
+		Name:           "selected",
+		RepositoryMode: RepositoryModeSelected,
+		RepositoryIDs:  []string{"repo-1"},
+	})
+	require.NoError(t, err)
+	mode := RepositoryModeNone
+	updated, err := svc.UpdateAutomation(ctx, selected.ID, &UpdateAutomationRequest{RepositoryMode: &mode})
+	require.NoError(t, err)
+	require.Equal(t, RepositoryModeNone, updated.RepositoryMode)
+	require.Empty(t, updated.RepositoryIDs)
+}
+
+type fakeExecutorProfileLookup struct {
+	types map[string]string
+}
+
+func (f *fakeExecutorProfileLookup) ExecutorType(_ context.Context, profileID string) (string, error) {
+	return f.types[profileID], nil
+}
+
+func TestRepositoryFreeTargetRejectsWorktreeExecutor(t *testing.T) {
+	svc := newTestService(t)
+	svc.SetExecutorProfileLookup(&fakeExecutorProfileLookup{types: map[string]string{
+		"worktree-profile": "worktree",
+		"local-profile":    "local",
+	}})
+
+	_, err := svc.CreateAutomation(context.Background(), &CreateAutomationRequest{
+		WorkspaceID:       "ws-1",
+		Name:              "worktree scratch",
+		ExecutorProfileID: "worktree-profile",
+		RepositoryMode:    RepositoryModeNone,
+	})
+	require.ErrorIs(t, err, ErrRepositoryRequiredForExecutor)
+
+	local, err := svc.CreateAutomation(context.Background(), &CreateAutomationRequest{
+		WorkspaceID:       "ws-1",
+		Name:              "local scratch",
+		ExecutorProfileID: "local-profile",
+		RepositoryMode:    RepositoryModeNone,
+	})
+	require.NoError(t, err)
+	require.Equal(t, RepositoryModeNone, local.RepositoryMode)
+}
+
+func TestRepositoryFreeTargetRejectsRepositoryBackedTrigger(t *testing.T) {
+	svc := newTestService(t)
+	_, err := svc.CreateAutomation(context.Background(), &CreateAutomationRequest{
+		WorkspaceID:    "ws-1",
+		Name:           "pr trigger",
+		RepositoryMode: RepositoryModeNone,
+		Triggers:       []CreateTriggerSpec{{Type: TriggerTypeGitHubPR, Config: json.RawMessage(`{}`)}},
+	})
+	require.ErrorIs(t, err, ErrRepositoryRequiredForTrigger)
+
+	_, err = svc.CreateAutomation(context.Background(), &CreateAutomationRequest{
+		WorkspaceID:    "ws-1",
+		Name:           "scheduled scratch",
+		RepositoryMode: RepositoryModeNone,
+		Triggers:       []CreateTriggerSpec{{Type: TriggerTypeScheduled, Config: json.RawMessage(`{}`)}},
+	})
+	require.NoError(t, err)
 }
 
 func TestAutomationRunPersistsExactBindingAndThreadMetadata(t *testing.T) {
