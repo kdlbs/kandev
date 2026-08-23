@@ -11,14 +11,16 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="https://kandev.ai/favicon.ico" sizes="32x32" />
+  <link rel="icon" href="https://kandev.ai/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="https://kandev.ai/apple-touch-icon.png" sizes="180x180" />
   <title>{{PR_TITLE}} - Walkthrough</title>
 
-  <!-- External resources (all pinned, loaded from CDN).
-       Tailwind loads here as a classic script. The four ESM libraries below
-       are declared in this import map so every external URL is visible at the
-       top. The module script near the end imports them by their bare name
-       (mermaid, marked, dompurify, shiki). To change a version, edit only the
-       URLs here. -->
+  <!-- External package resources use exact-version CDN URLs. Website brand
+       assets intentionally use live kandev.ai URLs so new pages match the
+       current site branding. Tailwind loads here as a classic script. The
+       four ESM libraries below are declared in this import map so every
+       package URL is visible at the top. -->
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
   <script type="importmap">
     {
@@ -35,15 +37,14 @@
     tailwind.config = {
       darkMode: 'class',
       theme: { extend: { maxWidth: { content: '72rem' }, colors: {
-        brand: { DEFAULT: '#4f46e5', soft: '#818cf8', deep: '#3730a3' },
+        brand: { DEFAULT: '#6366f1', soft: '#818cf8', deep: '#4f46e5' },
       } } },
     };
   </script>
   <style>
-    /* Visual language shared with kandev.ai landing: Figtree for UI copy,
-       Geist Mono for code, indigo actions, near-black product surfaces, and
-       compact shadcn-style radii. The font URLs are pinned to the landing
-       repository commit used for this design. */
+    /* Visual language shared with the documentation shell: Figtree for UI
+       copy, Geist Mono for code, indigo actions, dark-gray surfaces, and
+       compact shadcn-style radii. */
     @font-face {
       font-family: 'Figtree'; font-style: normal; font-weight: 300 900; font-display: swap;
       src: url('https://cdn.jsdelivr.net/gh/kdlbs/landing@71c3f609df07d6ff67fbe7c9213482d0c0c22c70/public/fonts/figtree/figtree-300-normal.woff2') format('woff2');
@@ -54,24 +55,25 @@
     }
     :root {
       color-scheme: light;
-      --wt-bg: #ffffff;
-      --wt-fg: #0d0d10;
-      --wt-muted: #71717a;
-      --wt-border: rgba(13, 13, 16, .12);
-      --wt-surface: #f7f7f8;
+      --wt-bg: #f5f5f5;
+      --wt-fg: #0a0a0a;
+      --wt-muted: #666666;
+      --wt-border: rgba(204, 204, 204, .5);
+      --wt-surface: #f1f1f1;
       --wt-primary: #4f46e5;
       --wt-primary-soft: #818cf8;
-      --wt-primary-deep: #3730a3;
-      --wt-dark-surface: #111114;
+      --wt-primary-deep: #4f46e5;
+      --wt-dark-surface: #1e1e1e;
       --wt-radius: .5rem;
     }
     html.dark {
       color-scheme: dark;
-      --wt-bg: #0d0d10;
-      --wt-fg: #fafafa;
-      --wt-muted: rgba(255, 255, 255, .58);
-      --wt-border: rgba(255, 255, 255, .10);
-      --wt-surface: #111114;
+      --wt-bg: #121212;
+      --wt-fg: #ebebeb;
+      --wt-muted: #b3b3b3;
+      --wt-border: rgba(102, 102, 102, .2);
+      --wt-surface: #191919;
+      --wt-primary: #6366f1;
     }
     html { scroll-behavior: smooth; }
     body {
@@ -80,11 +82,11 @@
       letter-spacing: -.01em;
     }
     .wt-topbar {
-      background: rgba(255, 255, 255, .88); border-color: var(--wt-border);
-      box-shadow: 0 1px 0 rgba(13, 13, 16, .02);
+      background: rgba(245, 245, 245, .95); border-color: var(--wt-border);
+      box-shadow: 0 1px 0 rgba(0, 0, 0, .02);
       backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
     }
-    html.dark .wt-topbar { background: rgba(13, 13, 16, .88); }
+    html.dark .wt-topbar { background: rgba(18, 18, 18, .95); }
     .wt-main { line-height: 1.7; }
     .wt-main h2, .wt-main h3 { letter-spacing: -.035em; }
     .wt-main h2 { font-weight: 650; }
@@ -98,10 +100,11 @@
     .wt-brand:hover { color: var(--wt-primary); }
     .wt-brand-mark {
       display: inline-flex; align-items: center; justify-content: center; width: 1.75rem; height: 1.75rem;
-      border-radius: .375rem; color: white; background: linear-gradient(135deg, #4f46e5, #818cf8);
-      box-shadow: 0 0 0 1px rgba(13, 13, 16, .08), 0 8px 18px rgba(79, 70, 229, .22);
-      font-size: .95rem; font-weight: 800; letter-spacing: -.08em;
+      overflow: hidden; border-radius: .375rem; background: var(--wt-surface);
+      box-shadow: 0 0 0 1px rgba(0, 0, 0, .08), 0 8px 18px rgba(99, 102, 241, .22);
     }
+    html.dark .wt-brand-mark { box-shadow: 0 0 0 1px rgba(255, 255, 255, .1), 0 8px 18px rgba(99, 102, 241, .22); }
+    .wt-brand-mark img { display: block; width: 100%; height: 100%; object-fit: cover; }
     .wt-brand-name { font-size: .875rem; font-weight: 650; }
     .wt-brand-divider { width: 1px; height: 1rem; background: var(--wt-border); }
     .wt-brand-pr { font-size: .8125rem; font-weight: 600; white-space: nowrap; }
@@ -118,6 +121,7 @@
       border: 1px solid var(--wt-border); border-radius: .5rem; background: var(--wt-bg);
       box-shadow: 0 12px 28px rgba(13, 13, 16, .14);
     }
+    html.dark .wt-mobile-menu { background: var(--wt-dark-surface); }
     .wt-mobile-menu a {
       display: block; min-height: 2.5rem; padding: .65rem .75rem; border-radius: .375rem; color: var(--wt-muted);
       font-size: .8125rem; font-weight: 550; text-decoration: none;
@@ -131,7 +135,14 @@
     /* Shiki dual-theme via defaultColor:false. Light by default, dark on html.dark. */
     .shiki, .shiki span { color: var(--shiki-light); background-color: var(--shiki-light-bg); }
     html.dark .shiki, html.dark .shiki span { color: var(--shiki-dark) !important; background-color: var(--shiki-dark-bg) !important; }
-    .shiki { padding: 14px 16px; border-radius: var(--wt-radius); overflow-x: auto; font-family: 'Geist Mono', ui-monospace, monospace; font-size: .82rem; line-height: 1.55; border: 1px solid var(--wt-border); }
+    .shiki { padding: 14px 16px; border-radius: var(--wt-radius); overflow-x: auto; font-family: 'Geist Mono', ui-monospace, monospace; font-size: .82rem; line-height: 1.55; border: 1px solid var(--wt-border); scrollbar-width: thin; scrollbar-color: transparent transparent; }
+    .shiki::-webkit-scrollbar { height: 6px; }
+    .shiki::-webkit-scrollbar-track { background: transparent; }
+    .shiki::-webkit-scrollbar-thumb { background: transparent; border-radius: 999px; }
+    .shiki:hover, .shiki:focus-within { scrollbar-color: rgba(100,116,139,.55) transparent; }
+    .shiki:hover::-webkit-scrollbar-thumb, .shiki:focus-within::-webkit-scrollbar-thumb { background: rgba(100,116,139,.55); }
+    html.dark .shiki:hover, html.dark .shiki:focus-within { scrollbar-color: rgba(148,163,184,.5) transparent; }
+    html.dark .shiki:hover::-webkit-scrollbar-thumb, html.dark .shiki:focus-within::-webkit-scrollbar-thumb { background: rgba(148,163,184,.5); }
     /* GitHub-style diff lines. applyLineDiff() tags changed lines with
        .diff.add / .diff.remove from the data-added / data-removed indices
        build.py emits. Each .line is a full-width block so the tint spans the
@@ -391,7 +402,9 @@
     <div class="mx-auto max-w-content px-4 sm:px-6 h-14 flex items-center justify-between gap-3">
       <a href="{{PR_URL}}" target="_blank" rel="noopener"
          class="wt-brand shrink-0" title="Open the pull request on GitHub">
-        <span class="wt-brand-mark" aria-hidden="true">k</span>
+        <span class="wt-brand-mark" aria-hidden="true">
+          <img src="https://kandev.ai/brand/kandev-github-org.png" alt="" />
+        </span>
         <span class="wt-brand-name hidden sm:inline">Kandev</span>
         <span class="wt-brand-divider hidden sm:inline" aria-hidden="true"></span>
         <span class="wt-brand-pr">PR #{{PR_NUMBER}}</span>
@@ -787,6 +800,25 @@
       const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
       const apply = () => { stage.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`; };
 
+      // Spread edges that share a node across that node's edge. The old
+      // midpoint route made every branch leave and enter at the same pixel,
+      // which stacked paths and labels on dense graphs.
+      function laneOffset(index, count, span, maxGap = 48) {
+        const total = Math.max(1, Number(count) || 1);
+        if (total === 1) return 0;
+        const slot = clamp(Number(index) || 0, 0, total - 1);
+        const gap = Math.min(maxGap, (span * .62) / (total - 1));
+        return (slot - (total - 1) / 2) * gap;
+      }
+
+      function cubicPoint(p0, p1, p2, p3, t) {
+        const u = 1 - t;
+        return {
+          x: u ** 3 * p0.x + 3 * u ** 2 * t * p1.x + 3 * u * t ** 2 * p2.x + t ** 3 * p3.x,
+          y: u ** 3 * p0.y + 3 * u ** 2 * t * p1.y + 3 * u * t ** 2 * p2.y + t ** 3 * p3.y,
+        };
+      }
+
       // Draw one arrow per .cedge, from the FROM node edge to the TO node edge.
       function drawEdges() {
         svg.innerHTML = '';
@@ -802,30 +834,69 @@
           const bcx = bx + bw / 2, bcy = by + bh / 2;
           // Anchor on the near vertical or horizontal edge of each node.
           const dx = bcx - acx, dy = bcy - acy;
+          const horizontal = Math.abs(dx) >= Math.abs(dy);
+          const fromLane = laneOffset(
+            e.dataset.fromLane, e.dataset.fromLanes, horizontal ? ah : aw,
+          );
+          const toLane = laneOffset(
+            e.dataset.toLane, e.dataset.toLanes, horizontal ? bh : bw,
+          );
+          // Reciprocal or parallel edges have the same endpoint geometry even
+          // when their source/target slots differ. Give the whole node pair a
+          // smaller parallel offset so those routes do not collapse into one.
+          const pairLane = laneOffset(
+            e.dataset.pairLane, e.dataset.pairLanes,
+            (horizontal ? Math.min(ah, bh) : Math.min(aw, bw)) * .6,
+          );
           let x1, y1, x2, y2;
-          if (Math.abs(dx) >= Math.abs(dy)) {
-            x1 = dx >= 0 ? ax + aw : ax; y1 = acy;
-            x2 = dx >= 0 ? bx : bx + bw; y2 = bcy;
+          if (horizontal) {
+            x1 = dx >= 0 ? ax + aw : ax; y1 = acy + fromLane + pairLane;
+            x2 = dx >= 0 ? bx : bx + bw; y2 = bcy + toLane + pairLane;
           } else {
-            x1 = acx; y1 = dy >= 0 ? ay + ah : ay;
-            x2 = bcx; y2 = dy >= 0 ? by : by + bh;
+            x1 = acx + fromLane + pairLane; y1 = dy >= 0 ? ay + ah : ay;
+            x2 = bcx + toLane + pairLane; y2 = dy >= 0 ? by : by + bh;
           }
-          const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
-          const c1x = Math.abs(dx) >= Math.abs(dy) ? mx : x1;
-          const c1y = Math.abs(dx) >= Math.abs(dy) ? y1 : my;
-          const c2x = Math.abs(dx) >= Math.abs(dy) ? mx : x2;
-          const c2y = Math.abs(dx) >= Math.abs(dy) ? y2 : my;
+          const direction = horizontal ? (dx >= 0 ? 1 : -1) : (dy >= 0 ? 1 : -1);
+          const curve = Math.max(52, (horizontal ? Math.abs(x2 - x1) : Math.abs(y2 - y1)) * .42);
+          const p0 = { x: x1, y: y1 };
+          const p1 = horizontal
+            ? { x: x1 + direction * curve, y: y1 }
+            : { x: x1, y: y1 + direction * curve };
+          const p2 = horizontal
+            ? { x: x2 - direction * curve, y: y2 }
+            : { x: x2, y: y2 - direction * curve };
+          const p3 = { x: x2, y: y2 };
           const path = document.createElementNS(SVGNS, 'path');
-          path.setAttribute('d', `M ${x1} ${y1} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${x2} ${y2}`);
+          path.setAttribute('d', `M ${p0.x} ${p0.y} C ${p1.x} ${p1.y}, ${p2.x} ${p2.y}, ${p3.x} ${p3.y}`);
           path.setAttribute('class', 'cedge-path');
           path.setAttribute('marker-end', 'url(#arrow)');
           svg.appendChild(path);
           if (e.dataset.label) {
+            const labelPoint = cubicPoint(p0, p1, p2, p3, .5);
+            const labelSpan = horizontal ? Math.min(ah, bh) : Math.min(aw, bw);
+            const labelFromLane = laneOffset(
+              e.dataset.fromLane, e.dataset.fromLanes, labelSpan, 192,
+            );
+            const labelToLane = laneOffset(
+              e.dataset.toLane, e.dataset.toLanes, labelSpan, 192,
+            );
+            // Prefer the endpoint with the stronger fan-out. This keeps labels
+            // apart when two different routes happen to share a midpoint.
+            const endpointLabelLane = Math.abs(labelToLane) >= Math.abs(labelFromLane)
+              ? labelToLane : labelFromLane;
+            const pairLabelLane = laneOffset(
+              e.dataset.pairLane, e.dataset.pairLanes,
+              labelSpan * .6, 96,
+            );
+            const labelLane = Number(e.dataset.pairLanes) > 1
+              ? pairLabelLane : endpointLabelLane;
+            if (horizontal) labelPoint.y += labelLane;
+            else labelPoint.x += labelLane;
             const lab = document.createElement('div');
             lab.className = 'cedge-label';
             lab.textContent = e.dataset.label;
-            lab.style.left = mx + 'px';
-            lab.style.top = my + 'px';
+            lab.style.left = labelPoint.x + 'px';
+            lab.style.top = labelPoint.y + 'px';
             stage.appendChild(lab);
           }
         }
@@ -1027,7 +1098,7 @@
 
       // Lay out after Shiki settles node heights, then fit.
       shikiReady.finally(() => { requestAnimationFrame(() => { sizeGroups(); drawEdges(); fit(); }); });
-      window.addEventListener('resize', () => { sizeGroups(); drawEdges(); });
+      window.addEventListener('resize', () => { sizeGroups(); drawEdges(); fit(); });
     })();
   </script>
 </body>

@@ -1,7 +1,8 @@
 ---
 id: "02-agent-rendering-contract"
 title: "Provider-neutral agent rendering contract"
-status: in_progress
+status: superseded
+superseded_by: ../pr-walkthrough-portable-runner-fix/task-02-fixed-renderer-contract.md
 wave: 1
 depends_on: ["01-walkthrough-skill-renderer"]
 plan: "plan.md"

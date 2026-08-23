@@ -566,6 +566,7 @@ test-scripts:
 	@bash scripts/opencode-code-review.test.sh
 	@python3 scripts/opencode-code-review.test.py
 	@python3 scripts/lint-harness-files.test.py
+	@python3 scripts/lint-spec-files.test.py
 	@python3 scripts/lint-architecture.test.py
 	@python3 scripts/playwright-blob-audit.test.py
 	@bash scripts/release-desktop.test.sh
@@ -621,7 +622,7 @@ test-e2e-ci:
 #
 
 .PHONY: lint
-lint: lint-backend lint-web lint-harness lint-architecture
+lint: lint-backend lint-web lint-harness lint-specs lint-architecture
 	@printf "\n$(GREEN)$(BOLD)✓ Linting complete!$(RESET)\n"
 
 .PHONY: lint-backend
@@ -638,6 +639,11 @@ lint-web:
 lint-harness:
 	@printf "$(CYAN)Linting harness files...$(RESET)\n"
 	@python3 .github/scripts/lint-harness-files.py --all
+
+.PHONY: lint-specs
+lint-specs:
+	@printf "$(CYAN)Linting specification files...$(RESET)\n"
+	@python3 scripts/lint-spec-files.py --all
 
 .PHONY: lint-architecture
 lint-architecture:

@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-rename-edit-dialogs"]
 plan: "plan.md"
-spec: "../../specs/tasks/title-length-limit.md"
+spec: "../../specs/tasks/requirements/title-length-limit.md"
 ---
 
 # Task 04: Extend the hook to sibling task-title inputs
@@ -27,7 +27,7 @@ spec: "../../specs/tasks/title-length-limit.md"
   user-facing copy, clamp semantics unchanged.
 - The full verification gate passes: `make fmt`, then `make typecheck test
   lint`.
-- The amended spec `docs/specs/tasks/title-length-limit.md` status flips back
+- The amended spec `docs/specs/tasks/requirements/title-length-limit.md` status flips back
   to `complete` and the plan/task statuses are updated.
 
 ## Verification
@@ -49,7 +49,7 @@ spec: "../../specs/tasks/title-length-limit.md"
 - `apps/web/app/office/components/new-task-dialog.tsx`
 - `apps/web/app/office/setup/step-task.tsx`
 - `apps/web/components/automations/automation-editor-sections.tsx`
-- `docs/specs/tasks/title-length-limit.md` (status back to `complete`)
+- `docs/specs/tasks/requirements/title-length-limit.md` (status back to `complete`)
 
 ## Dependencies
 

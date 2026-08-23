@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/parent-child-task-stop.md"
+spec: "../../specs/tasks/requirements/parent-child-task-stop.md"
 ---
 
 # Task 01: Execution stop outcomes

@@ -11,8 +11,9 @@ import unittest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = REPO_ROOT / "scripts" / "pr-walkthrough-pr-body"
 PR_NUMBER = 2906
-HEAD_SHA = "a" * 40
-URL = f"https://walkthrough.kandev.ai/pr/{PR_NUMBER}/{HEAD_SHA}.html"
+HEAD_SHA = "0123456789abcdef0123456789abcdef01234567"
+SHORT_HEAD_SHA = HEAD_SHA[:12]
+URL = f"https://walkthrough.kandev.ai/pr/{PR_NUMBER}/{SHORT_HEAD_SHA}.html"
 START = "<!-- kandev-pr-walkthrough-start -->"
 END = "<!-- kandev-pr-walkthrough-end -->"
 

@@ -685,7 +685,7 @@ export class SessionPage {
   /**
    * Archive a task via the sidebar context menu.
    * Hovers to reveal the menu trigger, opens it, clicks "Archive",
-   * and confirms the archive dialog.
+   * and confirms the local archive surface or cascade dialog.
    */
   async archiveTaskInSidebar(title: string, options: { cascade?: boolean } = {}): Promise<void> {
     await this.openSidebarMenuAndClick(title, "Archive");
@@ -693,11 +693,7 @@ export class SessionPage {
       const cascadeCheckbox = this.page.getByTestId("archive-cascade-checkbox");
       await cascadeCheckbox.click();
     }
-    // Confirm the archive dialog
-    const confirmButton = this.page
-      .getByRole("alertdialog")
-      .getByRole("button", { name: "Archive" });
-    await confirmButton.click();
+    await this.page.getByTestId("archive-task-confirm").click();
   }
 
   /**

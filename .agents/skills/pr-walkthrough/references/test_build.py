@@ -333,6 +333,54 @@ class TestRenderEdges(unittest.TestCase):
         self.assertIn('data-from="n1"', html)
         self.assertIn('data-label="calls"', html)
 
+    def test_shared_endpoints_receive_distinct_route_lanes(self):
+        html = build.render_edges(
+            [
+                {"from": "n1", "to": "n2", "label": "first"},
+                {"from": "n1", "to": "n3", "label": "second"},
+                {"from": "n2", "to": "n4", "label": "third"},
+                {"from": "n3", "to": "n4", "label": "fourth"},
+            ],
+            {"n1", "n2", "n3", "n4"},
+        )
+        self.assertIn(
+            'data-from-lane="0" data-from-lanes="2" '
+            'data-to-lane="0" data-to-lanes="1"',
+            html,
+        )
+        self.assertIn(
+            'data-from-lane="1" data-from-lanes="2" '
+            'data-to-lane="0" data-to-lanes="1"',
+            html,
+        )
+        self.assertIn(
+            'data-from-lane="0" data-from-lanes="1" '
+            'data-to-lane="0" data-to-lanes="2"',
+            html,
+        )
+        self.assertIn(
+            'data-from-lane="0" data-from-lanes="1" '
+            'data-to-lane="1" data-to-lanes="2"',
+            html,
+        )
+
+    def test_reciprocal_edges_receive_distinct_pair_lanes(self):
+        html = build.render_edges(
+            [
+                {"from": "n1", "to": "n2", "label": "forward"},
+                {"from": "n2", "to": "n1", "label": "backward"},
+            ],
+            {"n1", "n2"},
+        )
+        self.assertIn(
+            'data-pair-lane="0" data-pair-lanes="2"',
+            html,
+        )
+        self.assertIn(
+            'data-pair-lane="1" data-pair-lanes="2"',
+            html,
+        )
+
     def test_unknown_from_node_fails(self):
         with self.assertRaises(build.BuildError):
             build.render_edges([{"from": "nX", "to": "n1"}], {"n1"})
@@ -417,14 +465,28 @@ class TestBuild(unittest.TestCase):
             '<h3 class="font-semibold text-brand-soft mb-1">'
             'UniqueChangeTitle</h3>', out)
 
-    def test_shell_matches_kandev_landing_visual_language(self):
+    def test_shell_matches_docs_brand_and_dark_visual_language(self):
         out = build.build(minimal_data())
-        self.assertIn("--wt-primary: #4f46e5", out)
-        self.assertIn("--wt-bg: #0d0d10", out)
+        self.assertIn("--wt-primary: #6366f1", out)
+        self.assertIn("--wt-bg: #121212", out)
+        self.assertIn("--wt-surface: #191919", out)
+        self.assertIn("--wt-dark-surface: #1e1e1e", out)
+        self.assertIn("--wt-fg: #ebebeb", out)
         self.assertIn("font-family: 'Figtree'", out)
         self.assertIn("font-family: 'Geist Mono'", out)
         self.assertIn('class="wt-topbar sticky', out)
         self.assertIn('class="wt-brand-mark"', out)
+        self.assertIn('href="https://kandev.ai/favicon.ico"', out)
+        self.assertIn('href="https://kandev.ai/icon.svg"', out)
+        self.assertIn(
+            'rel="apple-touch-icon" href="https://kandev.ai/apple-touch-icon.png"',
+            out,
+        )
+        self.assertIn('src="https://kandev.ai/brand/kandev-github-org.png"', out)
+        self.assertIn(
+            "brand: { DEFAULT: '#6366f1', soft: '#818cf8', deep: '#4f46e5' },",
+            out,
+        )
 
     def test_runtime_cdn_dependencies_use_exact_versions(self):
         out = build.build(minimal_data())
@@ -444,6 +506,28 @@ class TestBuild(unittest.TestCase):
         self.assertIn('id="mobile-nav-architecture"', out)
         self.assertIn('id="mobile-nav-data"', out)
         self.assertIn("@media (max-width: 640px)", out)
+
+    def test_shell_makes_code_scrollbars_subtle_until_hover(self):
+        out = build.build(minimal_data())
+        self.assertIn("scrollbar-width: thin", out)
+        self.assertIn("scrollbar-color: transparent transparent", out)
+        self.assertIn(".shiki::-webkit-scrollbar-thumb", out)
+        self.assertIn(".shiki:hover::-webkit-scrollbar-thumb", out)
+        self.assertIn(".shiki:focus-within::-webkit-scrollbar-thumb", out)
+
+    def test_shell_uses_lanes_to_route_canvas_edges(self):
+        out = build.build(minimal_data())
+        self.assertIn("function laneOffset", out)
+        self.assertIn("e.dataset.fromLane", out)
+        self.assertIn("e.dataset.toLane", out)
+        self.assertIn("e.dataset.pairLane", out)
+        self.assertIn("const labelLane", out)
+        self.assertIn("const labelFromLane", out)
+        self.assertIn("const labelToLane", out)
+        self.assertIn("const endpointLabelLane", out)
+        self.assertIn("const pairLabelLane", out)
+        self.assertIn("labelPoint.x += labelLane", out)
+        self.assertIn("sizeGroups(); drawEdges(); fit();", out)
 
 
 if __name__ == "__main__":

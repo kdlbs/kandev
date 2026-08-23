@@ -8,7 +8,7 @@ owner: cfl
 
 Decision: [Task-owned worktree lifetime](../../decisions/2026-08-08-task-owned-worktree-lifetime.md)
 
-Runtime contract: [Task runtime cleanup](../tasks/runtime-cleanup.md)
+Runtime contract: [Task runtime cleanup](../tasks/system-design/runtime-cleanup.md)
 
 ## Why
 

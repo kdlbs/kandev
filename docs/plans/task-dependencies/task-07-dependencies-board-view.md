@@ -5,7 +5,7 @@ status: dropped
 wave: 7
 depends_on: ["06-kanban-dependency-ui"]
 plan: "plan.md"
-spec: "../../specs/task-dependencies/spec.md"
+spec: "../../specs/tasks/system-design/task-dependencies.md"
 ---
 
 # Task 07: Dependencies Board View

@@ -85,7 +85,7 @@ the local single-user install with a login screen it never asked for.
   payload (`/api/v1/app-state` — returns only `{features, auth}` for
   anonymous visitors), `/api/v1/features`, credential endpoints
   (login/setup/invite-accept), and self-authenticating webhooks (automation
-  `X-Webhook-Secret`, office channel HMAC, plugin webhooks). The GitHub
+  `X-Webhook-Secret`, office channel HMAC). The GitHub
   credential broker (`/api/v1/github/credentials/resolve`, GET readiness +
   POST resolve) is likewise public: containers and remote executors hold no
   session cookie or PAT by design, and the opaque, task-scoped lease in the
@@ -94,6 +94,14 @@ the local single-user install with a login screen it never asked for.
   (`/api/v1/github/app/registrations/{id}/webhook`) is public for the same
   reason as the other webhooks: its own HMAC (`X-Hub-Signature-256`) is
   verified by the handler.
+- **Plugin webhooks (`/api/plugins/{id}/webhooks/{key}`) are NOT
+  self-authenticating by default.** The global middleware cannot read the
+  plugin registry, so it structurally defers GET/POST requests for the path; `plugins.Controller`
+  enforces the actual gate: a webhook requires a real caller identity
+  (session/PAT, or the synthetic identity while auth is disabled) unless its
+  manifest declares `webhooks[].public: true`. An anonymous caller sees 401
+  for an unknown plugin ID, an undeclared key, and a declared-non-public key
+  alike, so a caller with no identity cannot enumerate installed plugins.
 - **Session challenges are distinct from provider authentication failures.**
   The browser clears its Kandev identity and opens `/login` only when a 401 is
   a Kandev session challenge. A third-party integration may also return 401

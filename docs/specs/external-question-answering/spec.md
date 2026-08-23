@@ -7,10 +7,10 @@ owner: nova28
 
 # External Question Answering — authorized, discoverable, idempotent clarification resolution
 
-> **Revision note (2026-08-20, spec round 6).** This spec was first written against a
+> **Revision note (2026-08-20, spec round 6).** This spec was first written against
 > `main` on which nothing made clarification resolution atomic. While it was in Build,
 > upstream commit `7e2c4ae84` ("fix: enforce active clarification lifecycle", #2669) merged
-> its own approved spec, `docs/specs/clarification-active-lifecycle/spec.md`, which landed an
+> its spec, `docs/specs/tasks/requirements/clarification-active-lifecycle.md`, which landed an
 > atomic current-turn claim and a turn-supersession lifecycle. That work **supersedes this
 > spec's entire claim mechanism** — the `clarification_resolutions` table, `ResolveBundle`'s
 > own claim SQL, and the workflow-guard changes are all retired here rather than merged

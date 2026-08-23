@@ -138,7 +138,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api := router.Group("/api/v1")
 	api.GET("/workflows/:id/tasks", h.httpListTasks)
 	api.GET("/workspaces/:id/tasks", h.httpListTasksByWorkspace)
-	// Task create-idempotency (docs/specs/tasks/external-id-idempotency):
+	// Task create-idempotency (docs/specs/tasks/requirements/external-id-idempotency.md):
 	// side-effect-free lookup, and an operator-only release. Both take
 	// external_id as a query parameter.
 	api.GET("/workspaces/:id/tasks/by-external-id", h.httpGetTaskByExternalID)

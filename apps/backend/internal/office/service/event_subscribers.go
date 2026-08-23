@@ -596,7 +596,36 @@ func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error
 	// retry-by-classifier path lives behind HandleRunFailure for
 	// rate-limit-retry callers; we deliberately do NOT call into it
 	// here. See docs/specs/office-agent-error-handling.
-	return s.HandleAgentFailure(ctx, run, enrichModelFailureMessage(run, data.ErrorMessage))
+	errMsg := enrichModelFailureMessage(run, data.ErrorMessage)
+	if err := s.HandleAgentFailure(ctx, run, errMsg); err != nil {
+		return err
+	}
+	s.dispatchAgentErrorTrigger(ctx, run, data.TaskID, data.SessionID, errMsg)
+	return nil
+}
+
+// dispatchAgentErrorTrigger wakes the workspace CEO agent (WO-05) after a
+// terminal agent-session failure. This is Path A in the office failure
+// model; Path B (HandleRunFailure -> escalateFailure, pre-launch retry
+// exhaustion) queues its own CEO run directly and never reaches this
+// dispatcher, so the two mechanisms cannot double-fire for one failure.
+// A dispatch error is logged rather than returned: it must not mask the
+// failure bookkeeping HandleAgentFailure already committed.
+func (s *Service) dispatchAgentErrorTrigger(
+	ctx context.Context, run *models.Run, taskID, sessionID, errMsg string,
+) {
+	key := fmt.Sprintf("agent_error:%s", run.ID)
+	if err := s.dispatchEngineTrigger(ctx, taskID, engine.TriggerOnAgentError,
+		engine.OnAgentErrorPayload{
+			FailedAgentID:   run.AgentProfileID,
+			FailedSessionID: sessionID,
+			ErrorMessage:    errMsg,
+		}, key); err != nil {
+		s.logger.Error("engine trigger on_agent_error failed",
+			zap.String("task_id", taskID),
+			zap.String("run_id", run.ID),
+			zap.Error(err))
+	}
 }
 
 // enrichModelFailureMessage prepends the actionable "change the model" copy
