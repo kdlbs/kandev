@@ -340,7 +340,8 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$BASE_SHA"
-          PUBLIC_URL="https://walkthrough.kandev.ai/pr/${PR_NUMBER}/${HEAD_SHA}.html"
+          SHORT_HEAD_SHA="${HEAD_SHA:0:12}"
+          PUBLIC_URL="https://walkthrough.kandev.ai/pr/${PR_NUMBER}/${SHORT_HEAD_SHA}.html"
 
           gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" > pr-response.json
 

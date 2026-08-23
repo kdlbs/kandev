@@ -281,7 +281,11 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
         self.assertIn("--github-response", self.link)
         self.assertIn("--input", self.link)
         self.assertIn(
-            'PUBLIC_URL="https://walkthrough.kandev.ai/pr/${PR_NUMBER}/${HEAD_SHA}.html"',
+            'SHORT_HEAD_SHA="${HEAD_SHA:0:12}"',
+            self.link,
+        )
+        self.assertIn(
+            'PUBLIC_URL="https://walkthrough.kandev.ai/pr/${PR_NUMBER}/${SHORT_HEAD_SHA}.html"',
             self.link,
         )
         self.assertNotIn("needs.pr-walkthrough-publish.outputs.url", self.link)
