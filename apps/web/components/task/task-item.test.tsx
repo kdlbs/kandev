@@ -623,7 +623,7 @@ describe("TaskItem task-row presentation", () => {
         visibleDetails: [],
         trailing: "relative_time",
       },
-    } as unknown as Partial<ComponentProps<typeof TaskItem>>);
+    });
 
     expect(screen.queryByTestId("sidebar-task-time")).toBeNull();
     expect(screen.queryByTestId("sidebar-task-repository")).toBeNull();

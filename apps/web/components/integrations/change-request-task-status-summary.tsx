@@ -186,7 +186,9 @@ function SummaryRow({
   const { t } = useTranslation();
   return (
     <div data-testid={`${presentation.rowTestIdPrefix}-${row.kind}`} className="contents">
-      <span className="text-muted-foreground">{t(presentation.rowLabelKeys[row.kind])}</span>
+      <span className="min-w-0 text-muted-foreground [overflow-wrap:anywhere]">
+        {t(presentation.rowLabelKeys[row.kind])}
+      </span>
       <span className={cn("flex items-center", TONE_CLASSES[row.tone])}>
         <SummaryStatusIcon status={row.status} />
       </span>
@@ -256,7 +258,7 @@ export function ChangeRequestTaskStatusSummary({
           {summary.rows.length > 0 && (
             <div
               data-testid={`${presentation.rowTestIdPrefix}-rows`}
-              className="mt-2.5 grid grid-cols-[max-content_auto_minmax(0,1fr)] items-start gap-x-3 gap-y-1.5 pl-6"
+              className="mt-2.5 grid grid-cols-[minmax(0,max-content)_auto_minmax(0,1fr)] items-start gap-x-3 gap-y-1.5 pl-6"
             >
               {summary.rows.map((row) => (
                 <SummaryRow key={row.kind} row={row} presentation={presentation} />

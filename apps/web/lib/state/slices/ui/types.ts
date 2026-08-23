@@ -5,6 +5,7 @@ import type {
   FilterClause,
   GroupKey,
   SidebarSliceState,
+  SidebarTaskRowPresentation,
   SidebarView,
   SidebarViewDraft,
   SortSpec,
@@ -385,7 +386,12 @@ export type UISliceActions = {
   setSidebarActiveView: (viewId: string) => void;
   createSidebarView: () => string | null;
   updateSidebarDraft: (
-    patch: Partial<{ filters: FilterClause[]; sort: SortSpec; group: GroupKey }>,
+    patch: Partial<{
+      filters: FilterClause[];
+      sort: SortSpec;
+      group: GroupKey;
+      taskRow: SidebarTaskRowPresentation;
+    }>,
   ) => void;
   saveSidebarDraftAs: (name: string) => void;
   saveSidebarDraftOverwrite: () => void;

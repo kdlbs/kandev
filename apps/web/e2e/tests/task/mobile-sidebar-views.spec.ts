@@ -150,6 +150,7 @@ test.describe("Mobile sidebar — view system", () => {
     await expect(sheet.getByText("Update deps")).toBeVisible();
 
     await addTitleFilter(testPage, sheet, "auth");
+    const filterEditor = testPage.getByTestId("sidebar-filter-popover");
     // Draft is active — the gear shows its unsaved indicator. Scope to the sheet:
     // the globally-mounted (hidden on mobile) AppSidebar TasksViewPicker renders
     // the same testid, so a page-level query is a strict-mode collision.
@@ -157,6 +158,10 @@ test.describe("Mobile sidebar — view system", () => {
     const blockedNewView = sheet.getByTestId("sidebar-new-view");
     await expect(blockedNewView).toHaveAttribute("aria-disabled", "true");
     await expect(blockedNewView).toHaveAttribute("aria-label", /save or discard changes/i);
+    // The filter editor is a modal drawer on coarse pointers. Close it before
+    // invoking the fixed-bar action underneath it.
+    await testPage.keyboard.press("Escape");
+    await expect(filterEditor).toBeHidden();
     // aria-disabled communicates the blocked state, but this action remains
     // clickable so touch/keyboard users can get the concrete reason toast.
     await blockedNewView.click({ force: true });

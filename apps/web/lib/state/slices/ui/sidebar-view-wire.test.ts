@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
-import type { SidebarView } from "./sidebar-view-types";
-import { fromApiSidebarView, toApiSidebarView } from "./sidebar-view-wire";
+import type { SidebarView, SidebarViewDraft } from "./sidebar-view-types";
+import {
+  fromApiSidebarDraft,
+  fromApiSidebarView,
+  toApiSidebarDraft,
+  toApiSidebarView,
+} from "./sidebar-view-wire";
 
 const view: SidebarView = {
   id: "v1",
@@ -51,14 +56,14 @@ describe("sidebar view wire", () => {
   });
 
   it("round-trips the saved task-row presentation", () => {
-    const taskRow = {
+    const taskRow: NonNullable<SidebarView["taskRow"]> = {
       detailsEnabled: true,
       detailOrder: ["relative_time", "repository", "pull_request_number"],
       visibleDetails: ["repository", "pull_request_number"],
       trailing: "change_request_status" as const,
     };
-    const viewWithTaskRow = { ...view, taskRow } as unknown as SidebarView;
-    const api = toApiSidebarView(viewWithTaskRow) as unknown as Record<string, unknown>;
+    const viewWithTaskRow: SidebarView = { ...view, taskRow };
+    const api = toApiSidebarView(viewWithTaskRow);
 
     expect(api.task_row).toEqual({
       details_enabled: true,
@@ -66,13 +71,32 @@ describe("sidebar view wire", () => {
       visible_details: ["repository", "pull_request_number"],
       trailing: "change_request_status",
     });
-    const restored = fromApiSidebarView({ ...api, task_row: api.task_row } as never);
-    expect((restored as unknown as Record<string, unknown>).taskRow).toEqual({
+    const restored = fromApiSidebarView(api);
+    expect(restored.taskRow).toEqual({
       detailsEnabled: true,
       detailOrder: ["relative_time", "repository", "pull_request_number"],
       visibleDetails: ["repository", "pull_request_number"],
       trailing: "change_request_status",
     });
+  });
+
+  it("round-trips the task-row presentation on a saved-view draft", () => {
+    const draft: SidebarViewDraft = {
+      baseViewId: view.id,
+      filters: view.filters,
+      sort: view.sort,
+      group: view.group,
+      taskRow: {
+        detailsEnabled: false,
+        detailOrder: ["pull_request_number", "relative_time", "repository"],
+        visibleDetails: ["pull_request_number"],
+        trailing: "none",
+      },
+    };
+
+    const api = toApiSidebarDraft(draft);
+    expect(api.task_row?.details_enabled).toBe(false);
+    expect(fromApiSidebarDraft(api)).toEqual(draft);
   });
 
   it("normalizes a missing task-row presentation to the current layout", () => {
@@ -85,7 +109,7 @@ describe("sidebar view wire", () => {
       collapsed_groups: [],
     });
 
-    expect((restored as unknown as Record<string, unknown>).taskRow).toEqual({
+    expect(restored.taskRow).toEqual({
       detailsEnabled: true,
       detailOrder: ["relative_time", "repository", "pull_request_number"],
       visibleDetails: ["relative_time", "repository", "pull_request_number"],

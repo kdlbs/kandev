@@ -33,9 +33,9 @@ export type SidebarViewDraftApi = {
 
 export type SidebarTaskRowPresentationApi = {
   details_enabled?: boolean;
-  detail_order?: unknown;
-  visible_details?: unknown;
-  trailing?: unknown;
+  detail_order?: unknown[];
+  visible_details?: unknown[];
+  trailing?: string;
 };
 
 export type SidebarTaskPrefsApi = {

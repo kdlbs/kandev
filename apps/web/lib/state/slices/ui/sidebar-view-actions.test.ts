@@ -17,6 +17,7 @@ type UIStore = UseBoundStore<StoreApi<UISlice>>;
 
 const CREATE_FAILED = "create failed";
 const RENAME_FAILED = "rename failed";
+const DRAFT_WRITE_FAILED = "draft write failed";
 
 function makeStore(): UIStore {
   return create<UISlice>()(
@@ -247,5 +248,26 @@ describe("createSidebarView failure isolation", () => {
     );
     expect(failedStore.getState().sidebarViews.views).toHaveLength(1);
     expect(successfulStore.getState().sidebarViews.views).toHaveLength(2);
+  });
+});
+
+describe("sidebar draft write failure isolation", () => {
+  it("restores the confirmed draft after a task-row write fails", async () => {
+    const store = makeStore();
+    seedSidebar(store, [makeView("all", "All tasks")]);
+    vi.mocked(updateUserSettings).mockRejectedValueOnce(new ApiError(DRAFT_WRITE_FAILED, 500, {}));
+
+    store.getState().updateSidebarDraft({
+      taskRow: {
+        detailsEnabled: false,
+        detailOrder: ["relative_time", "repository", "pull_request_number"],
+        visibleDetails: [],
+        trailing: "none",
+      },
+    });
+
+    expect(store.getState().sidebarViews.draft).not.toBeNull();
+    await waitFor(() => expect(store.getState().sidebarViews.syncError).toBe(DRAFT_WRITE_FAILED));
+    expect(store.getState().sidebarViews.draft).toBeNull();
   });
 });
