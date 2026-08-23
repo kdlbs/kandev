@@ -323,11 +323,10 @@ test.describe("Automation concurrency note", () => {
     const automations = new AutomationsPage(testPage, seed.workspaceId);
     await automations.gotoNew();
     await automations.nameInput.fill(name);
-    // A time, not a frequency: the frequency select already reads "every day",
-    // and Radix does not fire onValueChange for the value already selected, so
-    // picking it adds no trigger at all. Changing the time does, and 03:17
-    // keeps the real cron scheduler's one-minute-a-day firing window well away
-    // from the test.
+    // Select the schedule explicitly. A new automation starts unscheduled, so
+    // changing the time alone cannot create a trigger. 03:17 keeps the real
+    // cron scheduler's one-minute-a-day firing window well away from the test.
+    await automations.selectFrequency("every day");
     await automations.timeInput.fill("03:17");
     await automations.selectWorkflow("E2E Workflow");
     await expect(automations.saveButton).toBeEnabled({ timeout: 5_000 });
