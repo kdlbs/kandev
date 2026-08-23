@@ -122,6 +122,27 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:    "features.agentStackReaping",
+			EnvVar: "KANDEV_FEATURES_AGENT_STACK_REAPING",
+			Kind:   KindFeature,
+			Label:  "Agent stack reaping",
+			Description: "Stops idle agent stacks when a task reaches COMPLETED, after ~10 minutes without session " +
+				"activity, and when too many stacks are alive at once. Sessions stay resumable; the next prompt " +
+				"relaunches a fresh stack.",
+			Stability: StabilityStable,
+			RiskLevel: RiskMedium,
+			RiskDescription: "Stopping an idle stack discards the warm provider session, so the next prompt pays a " +
+				"relaunch cost. Guards never stop an agent mid-turn, during prompt admission, or on the REVIEW " +
+				"transition that follows every turn, but a misbehaving provider could surface resume hiccups. " +
+				"Disable to keep every stack alive indefinitely.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.AgentStackReaping },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.AgentStackReaping = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:         "debug.devMode",
 			EnvVar:      "KANDEV_DEBUG_DEV_MODE",
 			Kind:        KindDebug,

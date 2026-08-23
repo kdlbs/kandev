@@ -23,6 +23,7 @@ func (s *Service) handleTaskStateChanged(ctx context.Context, data watcher.TaskE
 		return
 	}
 
+	s.scheduleAgentStackStopForTaskState(data.TaskID, *data.NewState)
 	s.processParentChildrenCompletedForTaskState(ctx, data.TaskID, *data.NewState)
 	// Peer dependencies react to the same terminal transitions, but with a
 	// stricter definition of "done": on_children_completed counts FAILED as
@@ -85,6 +86,7 @@ func (s *Service) markTaskCompletedForTerminalStep(ctx context.Context, taskID, 
 		return
 	}
 	s.taskRuntimeStateMu.Unlock()
+	s.scheduleAgentStackStopForTaskState(taskID, v1.TaskStateCompleted)
 	s.publishTaskUpdated(ctx, task)
 	s.publishTaskStateChanged(ctx, task, oldState)
 	s.processParentChildrenCompletedForTaskState(ctx, taskID, v1.TaskStateCompleted)

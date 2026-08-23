@@ -461,6 +461,16 @@ type FeaturesConfig struct {
 	// kill-switch after rollout because the agent-side fold is undocumented and
 	// can regress without notice.
 	ClaudeMidTurnSteering bool `mapstructure:"claude_mid_turn_steering" json:"claudeMidTurnSteering"`
+
+	// AgentStackReaping gates the orchestrator's agent-stack reaping: a
+	// fail-closed stop of idle ACP stacks when a task reaches COMPLETED, after
+	// ~10 minutes without session activity, and when the concurrent live-stack
+	// cap is exceeded. It deliberately does not fire on REVIEW, which is
+	// written after every turn and would delete warm-stack reuse. On by
+	// default in every embedded profile because it is the fix for the
+	// idle-stack accumulation incident class; serves as the kill switch for
+	// operators who need the pre-fix keep-everything-warm behavior.
+	AgentStackReaping bool `mapstructure:"agent_stack_reaping" json:"agentStackReaping"`
 }
 
 // LoggingConfig holds logging configuration.

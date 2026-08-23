@@ -445,6 +445,7 @@ Copying this entire file is unnecessary and can freeze old defaults in a deploym
 | Key | Environment lock | Production default | Effect |
 |---|---|---|---|
 | `features.dynamicAgentRouting` | `KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING` | off | Experimental dynamic profiles with ordered provider-error fallback. |
+| `features.agentStackReaping` | `KANDEV_FEATURES_AGENT_STACK_REAPING` | on | Stops an idle agent stack when its task reaches COMPLETED, after about 10 minutes without session activity, or when too many stacks are alive at once. Never on the REVIEW transition that follows a turn, so a follow-up prompt still reuses the warm stack. Sessions stay resumable. |
 | `debug.devMode` | `KANDEV_DEBUG_DEV_MODE` | off | High-risk diagnostic endpoints and ACP frame logging. |
 
 The `KANDEV_FEATURES_*` values have no canonical YAML keys. They are selected

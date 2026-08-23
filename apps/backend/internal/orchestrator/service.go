@@ -62,6 +62,11 @@ type ServiceConfig struct {
 	// turn for an agent that advertised prompt queueing. Independent of
 	// ClaudeBackgroundPromptHandoff, which covers the foreground-idle handoff.
 	ClaudeMidTurnSteering bool
+
+	// AgentStackReaping enables the fail-closed agent-stack reaping triggers:
+	// task REVIEW/COMPLETED stop sweeps and the idle-TTL safety net. Zero value
+	// (off) preserves the pre-fix keep-warm behavior.
+	AgentStackReaping bool
 }
 
 // AttachmentReader is the narrow attachment-store seam needed when the
@@ -735,6 +740,19 @@ type Service struct {
 	// / stopIdleSessionReaper no-op. See idle_session_reaper.go.
 	idleReaper *idleSessionReaper
 
+	// stackSweeper owns the detached task-triggered agent-stack sweeps so
+	// Service.Stop cancels and joins them instead of letting a blocked
+	// StopAgentWithReason outlive shutdown. See agent_stack_reaper.go.
+	stackSweeper *agentStackSweeper
+
+	// promptAdmission counts, per session, the prompts currently inside the
+	// admission window that spans ensureSessionRunning through
+	// claimPromptDispatch. Agent-stack reaping refuses to stop a session with
+	// a non-zero count: the session row still reads settled in that window,
+	// but the execution is already spoken for. See beginPromptAdmission.
+	promptAdmissionMu sync.Mutex
+	promptAdmission   map[string]int
+
 	// unreclaimedWorkspaces holds the automation runs whose workspace removal
 	// was attempted and did not actually free the directory. Retention selects
 	// candidates by "still has a live worktree row", and a failed removal can
@@ -1160,6 +1178,7 @@ func NewService(
 		sendNowCtx:                   sendNowCtx,
 		sendNowCancel:                sendNowCancel,
 		idleReaper:                   newIdleSessionReaper(),
+		stackSweeper:                 newAgentStackSweeper(),
 	}
 	// Always publish queue-status after a task-scoped queue purge so the
 	// status-summary projector zeros queued_prompt_count. Unlike the
@@ -1196,6 +1215,7 @@ func NewService(
 				zap.String("state", string(state)))
 			return nil
 		}
+		s.scheduleAgentStackStopForTaskState(taskID, state)
 		s.processParentChildrenCompletedForTaskState(ctx, taskID, state)
 		return nil
 	})
@@ -2328,6 +2348,7 @@ func (s *Service) Start(ctx context.Context) error {
 	// would already have aborted Start above. After this returns the
 	// background goroutine owns the reclaim tick; Service.Stop joins it
 	// before tearing down repo / agentManager.
+	s.stackSweeper.start(ctx)
 	s.startIdleSessionReaper(ctx)
 
 	s.logger.Info("orchestrator service started successfully")
@@ -2350,6 +2371,9 @@ func (s *Service) Stop() error {
 	// Stop components in reverse order
 	var errs []error
 	s.stopIdleSessionReaper()
+	// Join the task-triggered sweeps before repo / agentManager teardown; a
+	// sweep in flight is still calling StopAgentWithReason on both.
+	s.stackSweeper.stop()
 	s.stopReservedPromptCallbacks()
 
 	if err := s.scheduler.Stop(); err != nil {

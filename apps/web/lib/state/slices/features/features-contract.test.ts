@@ -20,6 +20,12 @@ describe("feature flag repository contract", () => {
     expect(defaultFeatureFlags.dynamicAgentRouting).toBe(false);
   });
 
+  // The boot payload decides the real value; the frontend default has to be
+  // false so a flag never reads as enabled before hydration.
+  it("keeps agent stack reaping disabled until the boot payload says otherwise", () => {
+    expect(defaultFeatureFlags.agentStackReaping).toBe(false);
+  });
+
   it("keeps frontend defaults equal to backend FeaturesConfig JSON keys", async () => {
     const backendConfig = await readFile(backendConfigPath, "utf8");
 

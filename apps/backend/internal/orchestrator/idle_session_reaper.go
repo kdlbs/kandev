@@ -31,6 +31,10 @@ import (
 //     already looks idle — this gives the system a settling window
 //     after a normal turn ends so a row that is "WaitingForInput
 //     since 1ms" does not get reclaimed on the very next tick.
+//   - agentStackIdleTTL: how long a session may sit settled before its ACP
+//     stack is stopped. Measured from the session row, not the executor row.
+//   - agentStackLiveCap: the ceiling on concurrently live stacks, enforced
+//     oldest-idle-first once the TTL alone is not keeping up.
 //
 // Both constants are intentional configuration knobs in code source —
 // not env vars — because the orchestrator has no other runtime config
@@ -39,10 +43,12 @@ import (
 // edit and re-deploy; consumers do not.
 //
 // Hard invariants:
-//   - Never call StopAgent / StopAgentWithReason / Kill. reclaimIdleSession
-//     routes through repairDeadRowLiveness (status=stopped, LocalPID=0,
-//     resume_token preserved); a live executor is short-circuited inside
-//     reclaimIdleSession before any side effect.
+//   - The stack-TTL phase is the only reaper path allowed to call
+//     StopAgentWithReason, and it does so only after the session state and
+//     active-turn guards pass. The stale-row phase never calls a stop method:
+//     reclaimIdleSession routes through repairDeadRowLiveness (status=stopped,
+//     LocalPID=0, resume_token preserved); a live executor is short-circuited
+//     inside reclaimIdleSession before any side effect.
 //   - reclaimIdleSession is fail-closed: an uncertain guard is a skip,
 //     never a force. The reaper just calls the primitive in a loop,
 //     so the same invariant carries.
@@ -64,24 +70,42 @@ const (
 	// settling — on_enter / on_turn_complete / agent.ready may have
 	// just transitioned the row and the next event has not fired yet.
 	idleReaperMinIdle = 60 * time.Second
+
+	// agentStackIdleTTL bounds how long a settled ACP stack may remain alive
+	// without another turn. Ten minutes is well past the interactive
+	// follow-up window (where a stop would cost a relaunch plus session/load
+	// replay) and well short of the multi-day accumulation the incident hit.
+	// Guarded by the runtime feature flag.
+	agentStackIdleTTL = 10 * time.Minute
+
+	// agentStackLiveCap is the maximum number of simultaneously live ACP
+	// stacks. The incident was eleven concurrent stacks, so a ceiling bounds
+	// the failure mode directly rather than hoping every stack ages out. Sized
+	// above ordinary multi-session use; eviction only ever touches sessions
+	// that already pass the fail-closed reapable guards.
+	agentStackLiveCap = 6
 )
 
 // idleSessionReaper owns the lifecycle of one background goroutine.
 // All methods are nil-safe: a Service with reaper == nil treats the
 // reaper as off (useful for tests that don't want a loop).
 type idleSessionReaper struct {
-	mu       sync.Mutex
-	cancel   context.CancelFunc
-	workers  sync.WaitGroup
-	started  bool
-	interval time.Duration
-	minIdle  time.Duration
+	mu           sync.Mutex
+	cancel       context.CancelFunc
+	workers      sync.WaitGroup
+	started      bool
+	interval     time.Duration
+	minIdle      time.Duration
+	stackIdleTTL time.Duration
+	stackLiveCap int
 }
 
 func newIdleSessionReaper() *idleSessionReaper {
 	return &idleSessionReaper{
-		interval: idleReaperInterval,
-		minIdle:  idleReaperMinIdle,
+		interval:     idleReaperInterval,
+		minIdle:      idleReaperMinIdle,
+		stackIdleTTL: agentStackIdleTTL,
+		stackLiveCap: agentStackLiveCap,
 	}
 }
 
@@ -192,6 +216,9 @@ func (s *Service) stopIdleSessionReaper() {
 // skipped. The next tick will retry. The scan never aborts the loop
 // on a single-row error.
 func (s *Service) reclaimIdleSessionsOnce(ctx context.Context) {
+	if s.idleReaper == nil || s.repo == nil {
+		return
+	}
 	now := time.Now().UTC()
 	cutoff := now.Add(-s.idleReaper.minIdle)
 	var (
@@ -230,6 +257,12 @@ func (s *Service) reclaimIdleSessionsOnce(ctx context.Context) {
 		if row.UpdatedAt.After(now) || now.Sub(row.UpdatedAt) < s.idleReaper.minIdle {
 			continue
 		}
+		if s.stopAgentStackAfterIdleTTL(ctx, row, now) {
+			// Leave the durable row for the existing reconciliation pass. The
+			// next tick repairs it after the lifecycle stop has removed the
+			// execution from the runtime store.
+			continue
+		}
 		// Delegate to the fail-closed primitive. It reads the session,
 		// checks the triple guard (state × live runtime × active turn),
 		// and either reclaims the row or skips it. Errors here are
@@ -240,6 +273,53 @@ func (s *Service) reclaimIdleSessionsOnce(ctx context.Context) {
 				zap.Error(err))
 		}
 	}
+
+	s.enforceAgentStackCapOnce(ctx, now)
+}
+
+// enforceAgentStackCapOnce is the per-tick cap pass. It needs every live row,
+// not just the idle candidates the scan above filters to, because a stack that
+// is young or busy still consumes memory and must count toward the ceiling —
+// so it takes its own read rather than reusing the age-filtered list.
+func (s *Service) enforceAgentStackCapOnce(ctx context.Context, now time.Time) {
+	if !s.config.AgentStackReaping || s.idleReaper == nil || s.repo == nil {
+		return
+	}
+	if s.idleReaper.stackLiveCap <= 0 {
+		return
+	}
+	rows, err := s.repo.ListExecutorsRunning(ctx)
+	if err != nil {
+		s.logger.Warn("idle reaper: list executors_running for stack cap failed; pass skipped",
+			zap.Error(err))
+		return
+	}
+	s.enforceAgentStackCap(ctx, rows, now)
+}
+
+// stopAgentStackAfterIdleTTL stops a stack whose *session* has been settled
+// longer than stackIdleTTL. The executor row's UpdatedAt is not the idle
+// clock: execution persistence and status writes refresh it, so a session that
+// finished a turn seconds ago on a stack launched hours ago would be reaped
+// immediately. sessionIdleSince reads the session row instead.
+func (s *Service) stopAgentStackAfterIdleTTL(ctx context.Context, row *models.ExecutorRunning, now time.Time) bool {
+	if !s.config.AgentStackReaping || row == nil || s.idleReaper.stackIdleTTL <= 0 {
+		return false
+	}
+	session, err := s.repo.GetTaskSession(ctx, row.SessionID)
+	if err != nil {
+		if !isTaskSessionNotFound(err) {
+			s.logger.Warn("idle reaper: failed to load session for stack TTL",
+				zap.String("session_id", row.SessionID),
+				zap.Error(err))
+		}
+		return false
+	}
+	idleSince := sessionIdleSince(session, row)
+	if idleSince.IsZero() || idleSince.After(now) || now.Sub(idleSince) < s.idleReaper.stackIdleTTL {
+		return false
+	}
+	return s.stopIdleSessionAgentStack(ctx, session, stopReasonAgentStackIdleTTL)
 }
 
 // idleExecutorCandidateLister is implemented by the durable repository. The

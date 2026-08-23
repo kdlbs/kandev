@@ -673,7 +673,7 @@ func TestPromptTask_StalePromptStreamRecoversBeforeTimeout(t *testing.T) {
 	}
 }
 
-func TestPromptTask_ReapsPromptDeadExecutionBeforeSend(t *testing.T) {
+func TestPromptTask_ReentersAfterAgentStackReaping(t *testing.T) {
 	oldReadyTimeout := agentPromptReadyTimeout
 	oldReadyInterval := agentPromptReadyInterval
 	agentPromptReadyTimeout = 20 * time.Millisecond
@@ -778,6 +778,11 @@ func TestPromptTask_ReapsPromptDeadExecutionBeforeSend(t *testing.T) {
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
 	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.config.AgentStackReaping = true
+	svc.turnService = &repoTurnService{repo: repo}
+	if !svc.stopIdleSessionAgentStack(ctx, session, stopReasonAgentStackIdleTTL) {
+		t.Fatal("expected idle stack reaper to stop the settled execution")
+	}
 
 	if _, err := svc.PromptTask(ctx, "task1", "session1", "follow up", "", false, nil, false); err != nil {
 		t.Fatalf("expected prompt-dead execution to be replaced before send, got: %v", err)
@@ -791,6 +796,11 @@ func TestPromptTask_ReapsPromptDeadExecutionBeforeSend(t *testing.T) {
 	if got := agentMgr.capturedPromptCalls[0].ExecutionID; got != "exec-replacement" {
 		t.Fatalf("expected prompt to target replacement execution, got %q", got)
 	}
+	agentMgr.mu.Lock()
+	if len(agentMgr.stopAgentWithReasonArgs) != 1 || agentMgr.stopAgentWithReasonArgs[0].Reason != stopReasonAgentStackIdleTTL {
+		t.Fatalf("expected one idle-TTL stack stop, got %+v", agentMgr.stopAgentWithReasonArgs)
+	}
+	agentMgr.mu.Unlock()
 
 	running, err := repo.GetExecutorRunningBySessionID(ctx, "session1")
 	if err != nil {

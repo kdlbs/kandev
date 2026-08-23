@@ -2227,7 +2227,7 @@ func (s *Service) handleAgentStopped(ctx context.Context, data watcher.AgentEven
 	// Complete the current turn if there is one
 	s.completeTurnForSession(ctx, data.SessionID)
 
-	// Don't override WAITING_FOR_INPUT or IDLE — these are "stopped on
+	// Don't override WAITING_FOR_INPUT, IDLE, or COMPLETED — these are "stopped on
 	// purpose" states the caller already set. WAITING_FOR_INPUT comes from
 	// the recovery path so the user can choose to resume; IDLE comes from
 	// the office fire-and-forget turn-complete handler which intentionally
@@ -2238,7 +2238,8 @@ func (s *Service) handleAgentStopped(ctx context.Context, data watcher.AgentEven
 	// INSERT a new row and the partial unique index rejects it).
 	if session, err := s.repo.GetTaskSession(ctx, data.SessionID); err == nil &&
 		(session.State == models.TaskSessionStateWaitingForInput ||
-			session.State == models.TaskSessionStateIdle) {
+			session.State == models.TaskSessionStateIdle ||
+			session.State == models.TaskSessionStateCompleted) {
 		s.logger.Info("skipping CANCELLED transition; session was stopped on purpose",
 			zap.String("session_id", data.SessionID),
 			zap.String("state", string(session.State)))

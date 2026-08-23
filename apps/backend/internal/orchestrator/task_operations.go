@@ -3965,6 +3965,14 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	// Apply config-mode and plan-mode prompt transforms.
 	effectivePrompt := s.effectivePromptForSession(sessionID, prompt, planMode, session)
 
+	// Hold the admission marker across the whole prompt. ensureSessionRunning
+	// releases the per-session lifecycle lock when it returns and
+	// claimPromptDispatch only re-takes it later, so without this the session
+	// reads settled-with-no-active-turn in between and agent-stack reaping can
+	// stop the very execution this prompt is about to use.
+	releasePromptAdmission := s.beginPromptAdmission(sessionID)
+	defer releasePromptAdmission()
+
 	// Ensure the agent process is actually running. After a lazy backend restart,
 	// the session may be in WAITING_FOR_INPUT but no agent process exists yet.
 	_, hadExecutionBeforeEnsure := s.executor.GetExecutionBySession(sessionID)
@@ -6423,6 +6431,11 @@ func (s *Service) CompleteTask(ctx context.Context, taskID string) error {
 	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateCompleted); err != nil {
 		return fmt.Errorf("failed to update task state: %w", err)
 	}
+
+	// StopByTaskID only reaches CREATED/STARTING/RUNNING/WAITING_FOR_INPUT
+	// sessions. IDLE and COMPLETED sessions keep a live ACP stack that nothing
+	// else tears down, so sweep them once the task is durably COMPLETED.
+	s.scheduleAgentStackStopForTaskState(taskID, v1.TaskStateCompleted)
 	s.processParentChildrenCompletedForTaskState(ctx, taskID, v1.TaskStateCompleted)
 
 	s.logger.Info("task marked as COMPLETED",

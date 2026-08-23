@@ -76,6 +76,19 @@ features:
     dev:  "false"
     e2e:  "false"
 
+  # Agent-stack reaping: stop idle ACP stacks on task COMPLETED, after ~10 min
+  # without session activity, and when the concurrent live-stack cap is
+  # exceeded. Never on REVIEW, which fires after every turn and would remove
+  # warm-stack reuse. This is the remediation for the idle-stack accumulation
+  # incident class (11 stacks / ~3.5 GB RSS thrashing a host), so it ships ON
+  # in every profile. Every stop is fail-closed (never mid-turn, never a
+  # working session, never a prompt in admission); disabling restores the
+  # pre-fix keep-everything-warm behavior.
+  KANDEV_FEATURES_AGENT_STACK_REAPING:
+    prod: "true"
+    dev:  "true"
+    e2e:  "true"
+
 # ── Mock providers ────────────────────────────────────────────────
 # Swap real third-party services for in-memory fakes. Production
 # leaves all of these unset (real APIs). Dev opts into the mock agent
