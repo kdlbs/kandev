@@ -397,10 +397,17 @@ func TestQueueRunCallback_TargetParticipantRole(t *testing.T) {
 	}
 }
 
+// A cross-task participant_role target must stay step-scoped to the target
+// task's resolved current step (WO-30 review round 1: the any-step slate is
+// only safe for the same-task case, since only there does in.State.WorkflowID
+// scope the read to the task's actual current workflow — see
+// resolveParticipantRoleStepScoped). This asserts the single
+// ListStepParticipants(stepID, taskID) call the pre-WO-30 code made, and that
+// the any-step/any-workflow ListTaskParticipants query is never reached.
 func TestQueueRunCallback_ParticipantRoleUsesResolvedTargetStep(t *testing.T) {
 	q := &fakeRunQueue{}
 	var listedStepID string
-	var listedTemplateTaskID string
+	var listedStepTaskID string
 	var listedPerTaskID string
 	var stepResolverTaskID string
 	parts := fakeParticipants{
@@ -409,7 +416,7 @@ func TestQueueRunCallback_ParticipantRoleUsesResolvedTargetStep(t *testing.T) {
 		},
 		taskStepID:        "target-step",
 		stepID:            &listedStepID,
-		taskID:            &listedTemplateTaskID,
+		taskID:            &listedStepTaskID,
 		resolveTaskID:     &stepResolverTaskID,
 		taskParticipantID: &listedPerTaskID,
 	}
@@ -427,13 +434,13 @@ func TestQueueRunCallback_ParticipantRoleUsesResolvedTargetStep(t *testing.T) {
 		t.Fatalf("target step resolved against task %q, want target-task", stepResolverTaskID)
 	}
 	if listedStepID != "target-step" {
-		t.Fatalf("template participants listed for step %q, want target-step", listedStepID)
+		t.Fatalf("participants listed for step %q, want target-step", listedStepID)
 	}
-	if listedTemplateTaskID != "" {
-		t.Fatalf("template participant lookup must use task_id=\"\", got %q", listedTemplateTaskID)
+	if listedStepTaskID != "target-task" {
+		t.Fatalf("cross-task participant lookup must stay step-scoped to task_id=target-task, got %q", listedStepTaskID)
 	}
-	if listedPerTaskID != "target-task" {
-		t.Fatalf("per-task participants listed for task %q, want target-task", listedPerTaskID)
+	if listedPerTaskID != "" {
+		t.Fatalf("cross-task participant_role must not reach the any-step/any-workflow ListTaskParticipants query, got task_id %q", listedPerTaskID)
 	}
 	got := q.calls[0]
 	if got.WorkflowStepID != "target-step" {

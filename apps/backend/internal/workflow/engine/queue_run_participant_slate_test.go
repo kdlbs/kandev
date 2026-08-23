@@ -2,8 +2,46 @@ package engine
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
+
+// crossTaskParticipants emulates the real repository's two queries closely
+// enough to catch a cross-workflow leak: ListStepParticipants filters
+// `step_id = ? AND (task_id = ” OR task_id = ?)` (step-scoped, as the repo
+// actually enforces); ListTaskParticipants filters only `task_id = ?`,
+// ignoring step_id and workflow entirely — the unscoped, any-step query a
+// cross-task participant_role target must NOT use. Unlike scopedParticipants
+// (quorum_test.go), whose ListStepParticipants always returns nil for a
+// non-empty taskID, this fake answers a real step+task lookup so a leak from
+// the wrong query is actually observable.
+type crossTaskParticipants struct {
+	rows []ParticipantInfo
+}
+
+func (c crossTaskParticipants) ListStepParticipants(_ context.Context, stepID, taskID string) ([]ParticipantInfo, error) {
+	out := make([]ParticipantInfo, 0)
+	for _, p := range c.rows {
+		if p.StepID != stepID {
+			continue
+		}
+		if p.TaskID != "" && p.TaskID != taskID {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+func (c crossTaskParticipants) ListTaskParticipants(_ context.Context, taskID string) ([]ParticipantInfo, error) {
+	out := make([]ParticipantInfo, 0)
+	for _, p := range c.rows {
+		if p.TaskID == taskID {
+			out = append(out, p)
+		}
+	}
+	return out, nil
+}
 
 // WO-30: a participant added while the task sat on an earlier step
 // (AddTaskParticipant stamps step_id at write time) must still be woken by
@@ -113,5 +151,35 @@ func TestQueueRunCallback_ParticipantRoleWakesParticipantAddedOnEarlierStep(t *t
 	}
 	if q.calls[0].AgentProfileID != "rev-A" {
 		t.Fatalf("agent_profile_id = %q, want rev-A", q.calls[0].AgentProfileID)
+	}
+}
+
+// WO-30 review round 1 regression: applying the any-step slate to a
+// CROSS-task participant_role target reads across workflows. A per-task row
+// stamped on a step the target task no longer uses (because it changed
+// workflow, or simply advanced) must not be woken by a cross-task fan-out —
+// unlike the same-task case, the engine has no target-task workflow id to
+// scope the any-step query with, so widening it here can only leak. The
+// cross-task path must stay step-scoped to the target task's CURRENT step,
+// exactly as it was before WO-30.
+func TestQueueRunCallback_ParticipantRoleCrossTaskDoesNotLeakStaleStepRow(t *testing.T) {
+	q := &fakeRunQueue{}
+	parts := crossTaskParticipants{
+		rows: []ParticipantInfo{
+			{ID: "p-stale", StepID: "step-old", TaskID: "target-task", Role: "reviewer", AgentProfileID: "rev-leaked"},
+		},
+	}
+	cb := QueueRunCallback{Adapter: q, Participants: parts, TaskSteps: fakeTaskSteps{id: "step-new"}}
+	in := newQueueRunInput("participant_role:reviewer", "target-task")
+
+	_, err := cb.Execute(context.Background(), in)
+	if err == nil {
+		t.Fatalf("expected error: cross-task fan-out must not find the stale per-task row from step-old")
+	}
+	if !strings.Contains(err.Error(), `no participants with role "reviewer"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(q.calls) != 0 {
+		t.Fatalf("expected 0 queue run calls (stale row must not leak), got %d: %#v", len(q.calls), q.calls)
 	}
 }

@@ -102,11 +102,12 @@ func (c QueueRunCallback) resolveTarget(
 		if err != nil {
 			return nil, "", err
 		}
-		workflowID := ""
+		var agentIDs []string
 		if taskID == in.State.TaskID {
-			workflowID = in.State.WorkflowID
+			agentIDs, err = c.resolveParticipantRole(ctx, stepID, taskID, in.State.WorkflowID, role)
+		} else {
+			agentIDs, err = c.resolveParticipantRoleStepScoped(ctx, stepID, taskID, role)
 		}
-		agentIDs, err := c.resolveParticipantRole(ctx, stepID, taskID, workflowID, role)
 		return agentIDs, stepID, err
 	case strings.HasPrefix(target, TargetAgentProfile):
 		id := strings.TrimPrefix(target, TargetAgentProfile)
@@ -181,6 +182,38 @@ func (c QueueRunCallback) resolveParticipantRole(ctx context.Context, stepID, ta
 	ids := make([]string, 0, len(seats))
 	for _, p := range seats {
 		ids = append(ids, p.AgentProfileID)
+	}
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("queue_run: no participants with role %q on step %s", role, stepID)
+	}
+	return ids, nil
+}
+
+// resolveParticipantRoleStepScoped resolves a CROSS-task participant_role
+// target — the pre-WO-30 behaviour, unchanged. It must NOT widen to the
+// any-step/any-workflow slate resolveParticipantRole uses: that slate is
+// only safe for the same-task case, where in.State.WorkflowID scopes
+// gatherParticipantSlate's ListTaskParticipantsForWorkflow lookup to the
+// task's actual current workflow. For a cross-task target the engine has no
+// way to resolve the TARGET task's own workflow id here, so an any-step read
+// would return per-task rows stamped on a step from a workflow the target
+// task has since left (see phase2_sqlite.go's ListParticipantsForTaskAnyStep
+// doc comment: overrides must not leak into quorum evaluation for the new
+// workflow). Staying step-scoped to the target task's current step is the
+// only safe read available.
+func (c QueueRunCallback) resolveParticipantRoleStepScoped(ctx context.Context, stepID, taskID, role string) ([]string, error) {
+	if c.Participants == nil {
+		return nil, fmt.Errorf("%w: queue_run target=participant_role requires ParticipantStore", ErrActionNotYetWired)
+	}
+	all, err := c.Participants.ListStepParticipants(ctx, stepID, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("queue_run list participants: %w", err)
+	}
+	ids := make([]string, 0, len(all))
+	for _, p := range all {
+		if p.Role == role {
+			ids = append(ids, p.AgentProfileID)
+		}
 	}
 	if len(ids) == 0 {
 		return nil, fmt.Errorf("queue_run: no participants with role %q on step %s", role, stepID)
