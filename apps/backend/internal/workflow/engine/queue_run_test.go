@@ -63,14 +63,18 @@ func (s *sequencePrimary) WorkflowStepIDForTask(_ context.Context, _ string) (st
 	return "step-1", nil
 }
 
-// fakeParticipants returns a static slice for any step.
+// fakeParticipants returns a static slice for any step. ListStepParticipants
+// and ListTaskParticipants both return the same f.list, matching (and
+// exercising) the union/dedupe path that gatherParticipantSlate feeds into
+// canonicalizeByTaskRoleAgent/collapseByRoleAgent.
 type fakeParticipants struct {
-	list          []ParticipantInfo
-	err           error
-	taskStepID    string
-	stepID        *string
-	taskID        *string
-	resolveTaskID *string
+	list              []ParticipantInfo
+	err               error
+	taskStepID        string
+	stepID            *string
+	taskID            *string
+	resolveTaskID     *string
+	taskParticipantID *string
 }
 
 func (f fakeParticipants) ListStepParticipants(_ context.Context, stepID, taskID string) ([]ParticipantInfo, error) {
@@ -90,7 +94,10 @@ func (f fakeParticipants) WorkflowStepIDForTask(_ context.Context, taskID string
 	return f.taskStepID, f.err
 }
 
-func (f fakeParticipants) ListTaskParticipants(_ context.Context, _ string) ([]ParticipantInfo, error) {
+func (f fakeParticipants) ListTaskParticipants(_ context.Context, taskID string) ([]ParticipantInfo, error) {
+	if f.taskParticipantID != nil {
+		*f.taskParticipantID = taskID
+	}
 	return f.list, f.err
 }
 
@@ -393,16 +400,18 @@ func TestQueueRunCallback_TargetParticipantRole(t *testing.T) {
 func TestQueueRunCallback_ParticipantRoleUsesResolvedTargetStep(t *testing.T) {
 	q := &fakeRunQueue{}
 	var listedStepID string
-	var listedTaskID string
+	var listedTemplateTaskID string
+	var listedPerTaskID string
 	var stepResolverTaskID string
 	parts := fakeParticipants{
 		list: []ParticipantInfo{
 			{ID: "p-target", Role: "reviewer", AgentProfileID: "rev-target"},
 		},
-		taskStepID:    "target-step",
-		stepID:        &listedStepID,
-		taskID:        &listedTaskID,
-		resolveTaskID: &stepResolverTaskID,
+		taskStepID:        "target-step",
+		stepID:            &listedStepID,
+		taskID:            &listedTemplateTaskID,
+		resolveTaskID:     &stepResolverTaskID,
+		taskParticipantID: &listedPerTaskID,
 	}
 	cb := QueueRunCallback{Adapter: q, Participants: parts}
 	in := newQueueRunInput("participant_role:reviewer", "target-task")
@@ -418,10 +427,13 @@ func TestQueueRunCallback_ParticipantRoleUsesResolvedTargetStep(t *testing.T) {
 		t.Fatalf("target step resolved against task %q, want target-task", stepResolverTaskID)
 	}
 	if listedStepID != "target-step" {
-		t.Fatalf("participants listed for step %q, want target-step", listedStepID)
+		t.Fatalf("template participants listed for step %q, want target-step", listedStepID)
 	}
-	if listedTaskID != "target-task" {
-		t.Fatalf("participants listed for task %q, want target-task", listedTaskID)
+	if listedTemplateTaskID != "" {
+		t.Fatalf("template participant lookup must use task_id=\"\", got %q", listedTemplateTaskID)
+	}
+	if listedPerTaskID != "target-task" {
+		t.Fatalf("per-task participants listed for task %q, want target-task", listedPerTaskID)
 	}
 	got := q.calls[0]
 	if got.WorkflowStepID != "target-step" {

@@ -102,7 +102,11 @@ func (c QueueRunCallback) resolveTarget(
 		if err != nil {
 			return nil, "", err
 		}
-		agentIDs, err := c.resolveParticipantRole(ctx, stepID, taskID, role)
+		workflowID := ""
+		if taskID == in.State.TaskID {
+			workflowID = in.State.WorkflowID
+		}
+		agentIDs, err := c.resolveParticipantRole(ctx, stepID, taskID, workflowID, role)
 		return agentIDs, stepID, err
 	case strings.HasPrefix(target, TargetAgentProfile):
 		id := strings.TrimPrefix(target, TargetAgentProfile)
@@ -166,24 +170,43 @@ func (c QueueRunCallback) resolvePrimary(ctx context.Context, taskID, stepID str
 	return []string{id}, nil
 }
 
-func (c QueueRunCallback) resolveParticipantRole(ctx context.Context, stepID, taskID, role string) ([]string, error) {
+func (c QueueRunCallback) resolveParticipantRole(ctx context.Context, stepID, taskID, workflowID, role string) ([]string, error) {
 	if c.Participants == nil {
 		return nil, fmt.Errorf("%w: queue_run target=participant_role requires ParticipantStore", ErrActionNotYetWired)
 	}
-	all, err := c.Participants.ListStepParticipants(ctx, stepID, taskID)
+	seats, err := roleSeatsForFanOut(ctx, c.Participants, stepID, taskID, workflowID, role)
 	if err != nil {
 		return nil, fmt.Errorf("queue_run list participants: %w", err)
 	}
-	ids := make([]string, 0, len(all))
-	for _, p := range all {
-		if p.Role == role {
-			ids = append(ids, p.AgentProfileID)
-		}
+	ids := make([]string, 0, len(seats))
+	for _, p := range seats {
+		ids = append(ids, p.AgentProfileID)
 	}
 	if len(ids) == 0 {
 		return nil, fmt.Errorf("queue_run: no participants with role %q on step %s", role, stepID)
 	}
 	return ids, nil
+}
+
+// roleSeatsForFanOut gathers the same participant population the quorum
+// guard counts (gatherParticipantSlate — per-task rows at any step, unioned
+// with template rows at the evaluating step), filters to role (deliberately
+// NOT DecisionRequired, unlike the guard's own slate — a fan-out wakes every
+// seat in the role, not just decision-required ones), then dedupes via the
+// guard's own canonicalize/collapse so a reviewer present at multiple steps
+// or as both a per-task and template row is woken exactly once.
+func roleSeatsForFanOut(ctx context.Context, store ParticipantStore, stepID, taskID, workflowID, role string) ([]ParticipantInfo, error) {
+	gathered, err := gatherParticipantSlate(ctx, store, stepID, taskID, workflowID)
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]ParticipantInfo, 0, len(gathered))
+	for _, p := range gathered {
+		if p.Role == role {
+			filtered = append(filtered, p)
+		}
+	}
+	return collapseByRoleAgent(canonicalizeByTaskRoleAgent(filtered, stepID)), nil
 }
 
 func (c QueueRunCallback) resolveCEO(ctx context.Context, taskID string) ([]string, error) {
@@ -351,15 +374,12 @@ func (c QueueRunForEachParticipantCallback) Execute(ctx context.Context, in Acti
 		return ActionResult{}, fmt.Errorf("queue_run_for_each_participant missing role")
 	}
 	taskID := in.State.TaskID
-	all, err := c.Participants.ListStepParticipants(ctx, in.Step.ID, taskID)
+	seats, err := roleSeatsForFanOut(ctx, c.Participants, in.Step.ID, taskID, in.State.WorkflowID, cfg.Role)
 	if err != nil {
 		return ActionResult{}, fmt.Errorf("queue_run_for_each_participant list participants: %w", err)
 	}
 	reason := queueRunForEachParticipantReason(in)
-	for _, p := range all {
-		if p.Role != cfg.Role {
-			continue
-		}
+	for _, p := range seats {
 		req := QueueRunRequest{
 			AgentProfileID: p.AgentProfileID,
 			TaskID:         taskID,
