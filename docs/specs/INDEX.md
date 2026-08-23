@@ -60,6 +60,7 @@ Product-wide capabilities that are not tied to a single feature area.
 | [git-credential-lease-reissue](git-credential-lease-reissue/spec.md) | shipped |
 | [bounded-task-status-delivery](platform/bounded-task-status-delivery.md) | approved |
 | [diagnostic-logging](platform/diagnostic-logging.md) | approved |
+| [expected runtime log severity](platform/expected-runtime-log-severity.md) | building |
 | [provider-error-recovery](platform/provider-error-recovery.md) | draft |
 | [duplicated-tab-stale-data](fix-duplicated-tab-stale-data/spec.md) | building |
 | [health-endpoint-version](health-endpoint-version/spec.md) | building |
