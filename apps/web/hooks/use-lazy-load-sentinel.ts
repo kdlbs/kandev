@@ -40,6 +40,10 @@ type SentinelMutableRefs = {
   mountedRef: React.MutableRefObject<boolean>;
   disarmedRef: React.MutableRefObject<boolean>;
   intersectingRef: React.MutableRefObject<boolean>;
+  fireLoadRef: React.MutableRefObject<(() => void) | null>;
+  loadInFlightRef: React.MutableRefObject<boolean>;
+  continuationScheduledRef: React.MutableRefObject<boolean>;
+  continuationTimerRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>;
 };
 
 /** Creates and destroys the IntersectionObserver over the scroll container.
@@ -141,6 +145,34 @@ function useSentinelSettle(opts: {
         opts.refs.disarmedRef.current = false;
         if (opts.refs.optionsRef.current.rearmWhileIntersecting) {
           opts.refs.observerRef.current.observe(node);
+          // Browsers do not consistently emit a new entry when an already
+          // intersecting target is observed again after its layout changes.
+          // Yield one browser turn so prepend layout effects and the resulting
+          // intersection state settle before deciding whether the sentinel is
+          // still in the preload region.
+          if (!opts.refs.continuationScheduledRef.current) {
+            opts.refs.continuationScheduledRef.current = true;
+            opts.refs.continuationTimerRef.current = setTimeout(() => {
+              opts.refs.continuationTimerRef.current = null;
+              opts.refs.continuationScheduledRef.current = false;
+              if (
+                !opts.refs.mountedRef.current ||
+                opts.refs.observerRef.current !== observer ||
+                opts.refs.sentinelNodeRef.current !== node ||
+                !opts.refs.intersectingRef.current ||
+                opts.refs.disarmedRef.current
+              ) {
+                return;
+              }
+              const { hasMore, blocked } = opts.refs.stateRef.current;
+              if (!hasMore || blocked) return;
+              // The just-completed request owns this re-arm. `loadMore` still
+              // applies its own cursor/in-flight guard, so do not reject this
+              // hand-off on a stale loading render from the request that has
+              // already settled.
+              opts.refs.fireLoadRef.current?.();
+            }, 0);
+          }
         }
         // Appended rows push the sentinel below the viewport while the user
         // waits at the bottom, so the re-armed observer never fires. Scroll
@@ -213,6 +245,48 @@ function useScrollPinnedToBottom(scrollRef: React.RefObject<HTMLDivElement | nul
   return { isPinned, refreshPinned };
 }
 
+/** Retries an eligible, still-visible sentinel after a firing guard clears. */
+function shouldRetrySentinel(
+  previous: { hasMore: boolean; blocked: boolean; isLoadingMore: boolean },
+  current: { hasMore: boolean; blocked: boolean; isLoadingMore: boolean },
+  refs: SentinelMutableRefs,
+): boolean {
+  const { optionsRef, intersectingRef, disarmedRef } = refs;
+  if (!optionsRef.current.rearmWhileIntersecting) return false;
+  if (!intersectingRef.current || disarmedRef.current) return false;
+  const becameEligible =
+    (!previous.hasMore && current.hasMore) ||
+    (previous.blocked && !current.blocked) ||
+    (previous.isLoadingMore && !current.isLoadingMore);
+  if (!becameEligible || !current.hasMore || current.blocked) return false;
+  if (current.isLoadingMore && !optionsRef.current.joinInFlightWhileLoading) return false;
+  return !refs.loadInFlightRef.current && !refs.continuationScheduledRef.current;
+}
+
+function useRetryWhenSentinelBecomesEligible({
+  hasMore,
+  blocked,
+  isLoadingMore,
+  fireLoad,
+  refs,
+}: {
+  hasMore: boolean;
+  blocked: boolean;
+  isLoadingMore: boolean;
+  fireLoad: () => void;
+  refs: SentinelMutableRefs;
+}) {
+  const previousStateRef = useRef({ hasMore, blocked, isLoadingMore });
+
+  useEffect(() => {
+    const previous = previousStateRef.current;
+    const current = { hasMore, blocked, isLoadingMore };
+    previousStateRef.current = current;
+    if (!shouldRetrySentinel(previous, current, refs)) return;
+    void fireLoad();
+  }, [hasMore, blocked, isLoadingMore, fireLoad, refs]);
+}
+
 /**
  * Observes a sentinel element to trigger older-message lazy loading, shared by
  * the native transcript (top-of-list sentinel, no automatic re-arm) and the
@@ -233,10 +307,13 @@ function useScrollPinnedToBottom(scrollRef: React.RefObject<HTMLDivElement | nul
  * intersection is ignored, arming happens only after an observed exit, and a
  * retry fires on the next true re-entry — or via `onUserGesture` while still
  * intersecting (the panel's wheel/touch path when short content prevents a
- * scroll-away). Stale completions (unmount, observer cleanup, sentinel
- * replacement) never re-arm.
+ * scroll-away). If an eligible sentinel was observed while blocked or while
+ * another request was in flight, an eligibility transition retries it while
+ * it remains intersecting; this closes the gap where IntersectionObserver does
+ * not emit a second entry after the blocked state changes. Stale completions
+ * (unmount, observer cleanup, sentinel replacement) never re-arm.
  */
-// eslint-disable-next-line max-params -- plan-mandated unified sentinel state machine (scrollRef, hasMore, blocked, isLoadingMore, loadMore, options); the re-arm/disarm/join invariants live in the extracted observer/settle/pin helpers
+// eslint-disable-next-line max-params, max-lines-per-function -- plan-mandated sentinel state machine; eligibility retry and deferred re-arm stay coordinated with the extracted observer/settle/pin helpers
 export function useLazyLoadSentinel(
   scrollRef: React.RefObject<HTMLDivElement | null>,
   hasMore: boolean,
@@ -275,6 +352,10 @@ export function useLazyLoadSentinel(
   const observerRef = useRef<IntersectionObserver | null>(null);
   const sentinelNodeRef = useRef<HTMLDivElement | null>(null);
   const mountedRef = useRef(true);
+  const fireLoadRef = useRef<(() => void) | null>(null);
+  const loadInFlightRef = useRef(false);
+  const continuationScheduledRef = useRef(false);
+  const continuationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** When true, ignore intersections until an observed exit arms the hook. */
   const disarmedRef = useRef(false);
   const intersectingRef = useRef(false);
@@ -284,6 +365,11 @@ export function useLazyLoadSentinel(
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      if (continuationTimerRef.current !== null) {
+        clearTimeout(continuationTimerRef.current);
+        continuationTimerRef.current = null;
+      }
+      continuationScheduledRef.current = false;
     };
   }, []);
 
@@ -295,13 +381,20 @@ export function useLazyLoadSentinel(
     mountedRef,
     disarmedRef,
     intersectingRef,
+    fireLoadRef,
+    loadInFlightRef,
+    continuationScheduledRef,
+    continuationTimerRef,
   };
   const settleLoad = useSentinelSettle({ scrollRef, isPinned, refs });
 
   const fireLoad = useCallback(async () => {
     const node = sentinelNodeRef.current;
     const observer = observerRef.current;
-    if (!node || !observer) return;
+    if (!node || !observer || loadInFlightRef.current || continuationScheduledRef.current) {
+      return;
+    }
+    loadInFlightRef.current = true;
     // Refresh the pin from the CURRENT geometry before the request: the pin
     // otherwise reflects only the initial mount or the last user scroll, which
     // can be stale after a session switch or late-arriving content. Preserving
@@ -319,11 +412,21 @@ export function useLazyLoadSentinel(
       count = await loadMore();
     } catch {
       rejected = true;
+    } finally {
+      settleLoad(node, observer, { count, rejected });
+      loadInFlightRef.current = false;
     }
-    settleLoad(node, observer, { count, rejected });
   }, [loadMore, refreshPinned, settleLoad]);
+  fireLoadRef.current = fireLoad;
 
   useSentinelObserver({ scrollRef, rootMargin, fireLoad, refs });
+  useRetryWhenSentinelBecomesEligible({
+    hasMore,
+    blocked,
+    isLoadingMore,
+    fireLoad,
+    refs,
+  });
 
   // Callback ref — stores the node and observes if the observer already
   // exists. Only the sentinel is ever observed, so a remount swaps the

@@ -57,6 +57,7 @@ Workarounds (sibling tasks, manually managing two worktrees) lost shared context
 - Repository-chip tooltips keep long local paths inside a viewport-safe, wrapping surface. Closing a repository picker does not reveal its tooltip until the pointer leaves and deliberately hovers the chip again.
 - Review surfaces expose one linked pull request at a time when a task has multiple PRs. A task-scoped selector defaults to the primary (oldest) PR, remembers an in-session override, and falls back to the primary PR when that override disappears.
 - The Changes timeline keeps the last resolved PR file list visible while a background PR synchronization refresh is pending. A successful refresh replaces the list atomically, and a failed refresh retains the last resolved list; switching workspace/task or removing a PR must not expose files from the previous scope.
+- The Review dialog keeps the selected PR's last resolved diff mounted while a background synchronization refresh for that same PR is pending. The refresh must not replace the diff with a blocking loader or reset the review scroll position, file selection, reviewed state, or pending comments. A successful refresh replaces the selected PR's files atomically, while a failed background refresh retains the last resolved diff. Selecting a different PR or workspace must hide the previous PR's files immediately and retain the existing loading, error, and retry behavior for an initial request.
 - Selecting a PR changes the remote PR diff contribution while preserving the existing source precedence: uncommitted worktree changes, then cumulative committed changes, then the selected PR. PR-only views and PR timeline rows resolve the exact PR rather than the task primary.
 - The selector is available on desktop, phone, and coarse-pointer tablet. Phone uses a touch-sized bottom-menu treatment inside the existing Review surface; switching keeps Review open and exposes selected-PR loading, empty, and retry states.
 - Full "+ Branch" UI affordance and grouped repo > branch tabs are deferred — agents drive multi-branch via the MCP tool today.
@@ -78,6 +79,10 @@ Workarounds (sibling tasks, manually managing two worktrees) lost shared context
 - **GIVEN** the Changes timeline displays resolved files for a linked PR, **WHEN** background synchronization advances that PR's sync timestamp and the replacement file request is still pending, **THEN** the existing PR Changes section and count remain visible without moving or remounting.
 - **GIVEN** a background PR file refresh completes, **WHEN** the replacement response belongs to the current workspace, task, and PR, **THEN** the PR Changes section atomically displays the replacement file list without retaining removed files.
 - **GIVEN** the Changes timeline displays resolved files for a linked PR, **WHEN** a background refresh fails, **THEN** the last resolved PR Changes section and count remain visible.
+- **GIVEN** the Review dialog displays a resolved selected-PR diff and the reviewer has scrolled or created review state, **WHEN** background synchronization advances that same PR's sync timestamp and the replacement file request is pending, **THEN** the existing diff remains mounted without a blocking loader and the review position and transient state remain intact.
+- **GIVEN** the Review dialog retains a selected PR's resolved diff during refresh, **WHEN** the current replacement response succeeds, **THEN** the same Review surface atomically displays the replacement file list without retaining removed files.
+- **GIVEN** the Review dialog displays a resolved selected-PR diff, **WHEN** a background refresh fails, **THEN** the last resolved diff remains available; an initial request with no resolved diff still shows the existing error and retry state.
+- **GIVEN** the Review dialog displays one PR, **WHEN** the reviewer selects a different PR or workspace, **THEN** files from the previous PR are hidden immediately while the new selection loads.
 
 ## Non-goals
 
@@ -106,6 +111,7 @@ Workarounds (sibling tasks, manually managing two worktrees) lost shared context
 - Remote-entry component and mobile E2E coverage prove paste/typing remains editable until Enter, the `Remote URL` hint is visible, failures preserve the URL and expose retry, and retry completes resolution.
 - GitHub and GitLab backend tests prove public branch lookup works without configured credentials, while public GitHub PR/issue metadata lookup supplies the task-creation enrichment used by the Remote selector.
 - Web unit tests prove selected-PR default, override, task isolation, and removed-PR fallback behavior.
+- Web hook tests prove same-PR timestamp refreshes retain the mounted diff until atomic replacement, retain resolved files after a background failure, preserve initial-load errors, and never expose files from a different PR or workspace.
 - Desktop and mobile Playwright tests prove a two-PR task can switch Review from the primary PR to a sibling PR without stale files, overflow, or closing the surface.
 
 ## Open questions
