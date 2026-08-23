@@ -462,6 +462,72 @@ func TestDispatcher_CompletedSessionCommentCanApplyTransition(t *testing.T) {
 	}
 }
 
+// TestDispatcher_UsesLatestFailedSessionForAgentError pins WO-05's E5
+// fix: TriggerOnAgentError must resolve the task's latest session when
+// it is FAILED, since GetActiveTaskSessionByTaskID's state filter
+// ('CREATED','STARTING','RUNNING','WAITING_FOR_INPUT') never includes
+// FAILED. Without this, the on_agent_error dispatch added in
+// event_subscribers.go would be nondeterministically inert whenever the
+// orchestrator's AgentFailed subscriber wins the race and flips the
+// session to FAILED before the office subscriber's engine dispatch
+// runs.
+func TestDispatcher_UsesLatestFailedSessionForAgentError(t *testing.T) {
+	eng := &fakeEngine{}
+	sessions := &fakeSessions{
+		activeErr: taskmodels.ErrTaskSessionNotFound,
+		latestSession: &taskmodels.TaskSession{
+			ID:    "sess-failed",
+			State: taskmodels.TaskSessionStateFailed,
+		},
+	}
+	d := New(eng, sessions, logger.Default())
+
+	err := d.HandleTrigger(context.Background(), "task-1", engine.TriggerOnAgentError,
+		engine.OnAgentErrorPayload{FailedAgentID: "agent-1"}, "agent_error:run-1")
+	if err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if !eng.called {
+		t.Fatal("engine not invoked")
+	}
+	if eng.captured.SessionID != "sess-failed" {
+		t.Errorf("session id = %q, want sess-failed", eng.captured.SessionID)
+	}
+}
+
+// TestDispatcher_SkipsLatestSessionForAgentErrorWhenNotFailed pins that
+// on_agent_error only reuses a latest session that is actually FAILED —
+// an unrelated non-terminal-failure session state must not be treated
+// as the failed session's stand-in.
+func TestDispatcher_SkipsLatestSessionForAgentErrorWhenNotFailed(t *testing.T) {
+	for _, state := range []taskmodels.TaskSessionState{
+		taskmodels.TaskSessionStateCompleted,
+		taskmodels.TaskSessionStateIdle,
+		taskmodels.TaskSessionStateCancelled,
+	} {
+		t.Run(string(state), func(t *testing.T) {
+			eng := &fakeEngine{}
+			sessions := &fakeSessions{
+				activeErr: taskmodels.ErrTaskSessionNotFound,
+				latestSession: &taskmodels.TaskSession{
+					ID:    "sess-latest",
+					State: state,
+				},
+			}
+			d := New(eng, sessions, logger.Default())
+
+			err := d.HandleTrigger(context.Background(), "task-1", engine.TriggerOnAgentError,
+				engine.OnAgentErrorPayload{FailedAgentID: "agent-1"}, "agent_error:run-1")
+			if !errors.Is(err, ErrNoSession) {
+				t.Fatalf("err = %v, want ErrNoSession", err)
+			}
+			if eng.called {
+				t.Fatal("engine should not be invoked for a non-failed latest session")
+			}
+		})
+	}
+}
+
 func TestDispatcher_DoesNotUseLatestSessionForNonCommentTriggers(t *testing.T) {
 	eng := &fakeEngine{}
 	sessions := &fakeSessions{

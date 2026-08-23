@@ -167,7 +167,7 @@ func (d *Dispatcher) resolveSession(
 	if err != nil && !errors.Is(err, taskmodels.ErrTaskSessionNotFound) {
 		return nil, fmt.Errorf("active session lookup: %w", err)
 	}
-	if trigger != engine.TriggerOnComment {
+	if trigger != engine.TriggerOnComment && trigger != engine.TriggerOnAgentError {
 		return nil, nil
 	}
 	// Comment wakes are allowed after an office task's agent session has
@@ -175,9 +175,16 @@ func (d *Dispatcher) resolveSession(
 	// keyed by (taskID, sessionID), so a post-completion comment intentionally
 	// resumes the latest reusable session's persisted machine state instead of
 	// starting a fresh state machine here.
+	//
+	// Agent-error wakes are allowed to resume the session that just
+	// FAILED: GetActiveTaskSessionByTaskID's state filter never includes
+	// FAILED, and whichever of the orchestrator's or office's AgentFailed
+	// subscribers flips the session to FAILED first races the other, so
+	// resolveSession cannot rely on the active-session lookup alone for
+	// this trigger.
 	session, err = d.sessions.GetTaskSessionByTaskID(ctx, taskID)
 	if err == nil && session != nil {
-		if !isReusableCommentSession(session.State) {
+		if !isReusableSessionForTrigger(trigger, session.State) {
 			return nil, nil
 		}
 		return session, nil
@@ -188,7 +195,10 @@ func (d *Dispatcher) resolveSession(
 	return nil, nil
 }
 
-func isReusableCommentSession(state taskmodels.TaskSessionState) bool {
+func isReusableSessionForTrigger(trigger engine.Trigger, state taskmodels.TaskSessionState) bool {
+	if trigger == engine.TriggerOnAgentError {
+		return state == taskmodels.TaskSessionStateFailed
+	}
 	return state == taskmodels.TaskSessionStateCompleted || state == taskmodels.TaskSessionStateIdle
 }
 
