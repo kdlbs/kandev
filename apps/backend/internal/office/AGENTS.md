@@ -42,6 +42,7 @@
 - `repository/sqlite/` — Office's SQLite tables (`runs`, route-attempt ledger, etc.)
 - `routing/` — provider routing types; **spec archived**, package still live — exactly the kind of code/spec mismatch the precedence rule above exists for
 - `engine_dispatcher/` — office's bridge into `internal/workflow/engine` (participant roles, transitions)
+- `engine_adapters/` — concrete adapters office supplies to the workflow engine (CEO, child-task creation, workflow switching); consumed from `internal/backendapp`
 - `runtime/` — Office agent runtime wiring
 - `summary/` — continuation summary storage
 - `configloader/` — loads per-role agent instructions; `configloader/instructions/{ceo,devops,qa,reviewer,security,worker}/AGENTS.md` are the role-specific system prompts fed to each Office agent type, not developer docs. `ceo/` additionally has `HEARTBEAT.md`.
