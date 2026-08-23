@@ -676,6 +676,40 @@ func TestSubscriptionChecksDenyForeignTopics(t *testing.T) {
 	}
 }
 
+// TestRunSubscribeDeniesEmptyWorkspaceResolution pins WO-02 round 2's
+// FINDING R1-1 fix at the gateway wiring level: a Run hook denial for a run
+// that resolves to an empty workspace (the runSubscriptionCheck case, an
+// ordinary non-Office agent profile) must refuse the subscribe request and
+// leave it unregistered in hub.runSubscribers — the same contract already
+// pinned for a foreign-owned run by TestSubscriptionChecksDenyForeignTopics,
+// exercised here for the empty-workspace input specifically.
+func TestRunSubscribeDeniesEmptyWorkspaceResolution(t *testing.T) {
+	hub := newAccessTestHub(t)
+	errEmptyWorkspace := errors.New("workspace not found")
+	hub.setAuthPolicy(AuthPolicy{
+		Subscriptions: SubscriptionAccessPolicy{
+			Run: func(_ context.Context, runID string) error {
+				if runID == "run-unscoped" {
+					return errEmptyWorkspace
+				}
+				return nil
+			},
+		},
+	})
+	client := registerAccessClient(t, hub, "a", authn.Identity{UserID: "user-a", Role: authn.RoleMember})
+
+	subscribe := func(runID string) *ws.Message {
+		raw, _ := json.Marshal(map[string]interface{}{"run_id": runID})
+		return &ws.Message{ID: "1", Type: ws.MessageTypeRequest, Action: ws.ActionRunSubscribe, Payload: raw}
+	}
+
+	client.handleRunSubscribe(subscribe("run-unscoped"))
+	assertErrorResponse(t, client, "run subscribe with empty-workspace resolution")
+	if len(hub.getSubscribersLocked(hub.runSubscribers, "run-unscoped")) != 0 {
+		t.Fatal("denied run subscription (empty workspace) must not register")
+	}
+}
+
 // TestRunSubscribeNoExistenceLeak pins the no-existence-leak property: an
 // unknown run id and a foreign run id must be byte-identical on the wire.
 // handleRunSubscribe maps every hook error to one fixed (code, message)

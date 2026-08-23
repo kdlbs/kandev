@@ -307,3 +307,22 @@ func TestGetRunWorkspaceID_UnknownRunReturnsNoRows(t *testing.T) {
 		t.Fatalf("err = %v, want sql.ErrNoRows", err)
 	}
 }
+
+// TestGetRunWorkspaceID_ResolvesToEmptyStringForUnscopedAgentProfile pins the
+// WO-02 round-2 fix: an ordinary (non-Office) agent profile has
+// workspace_id=” (schema default, no backfill), and the join returns that
+// empty string as-is rather than an error. The gateway's subscribe hook (not
+// this repository) is responsible for denying on an empty result.
+func TestGetRunWorkspaceID_ResolvesToEmptyStringForUnscopedAgentProfile(t *testing.T) {
+	repo, writer := newTestRepoWithDB(t)
+	ctx := context.Background()
+
+	seedAgentProfile(t, writer, "a1", "")
+	run := seedTaskRun(t, repo, "run-1", "a1", "t1", "queued")
+
+	got, err := repo.GetRunWorkspaceID(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run workspace id: %v", err)
+	}
+	checkString(t, "workspace_id", got, "")
+}

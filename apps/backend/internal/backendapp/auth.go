@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/db"
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
@@ -108,14 +109,28 @@ func gatewayAuthPolicy(
 // Unlike WorkspaceOwner (which runs on every workspace broadcast), this
 // runs once per run.subscribe — a rare control message — so it is not
 // cached.
+//
+// An ordinary (non-Office) Kanban agent profile has workspace_id=""
+// (schema default, never backfilled) — the dominant case, since the run
+// processor and workflow-engine queue_run dispatch run for every backend,
+// not just Office. AuthorizeWorkspaceAccess's workspaceID=="" branch means
+// "no workspace scoping applies" (used for dangling references elsewhere
+// in the task service), which would silently allow subscribing to these
+// runs; that meaning does not apply here, so an empty resolution is denied
+// outright before it ever reaches that helper. officeRepo==nil fails
+// closed for the same reason: this is a security check, not a visibility
+// fallback.
 func runSubscriptionCheck(taskSvc *taskservice.Service, officeRepo *officesqlite.Repository) func(context.Context, string) error {
 	return func(ctx context.Context, runID string) error {
 		if officeRepo == nil {
-			return nil
+			return repoerrors.ErrWorkspaceNotFound
 		}
 		workspaceID, err := officeRepo.GetRunWorkspaceID(ctx, runID)
 		if err != nil {
 			return err
+		}
+		if workspaceID == "" {
+			return repoerrors.ErrWorkspaceNotFound
 		}
 		return taskSvc.AuthorizeWorkspaceAccess(ctx, workspaceID)
 	}
