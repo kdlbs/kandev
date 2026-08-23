@@ -618,8 +618,11 @@ func TestDispatcher_AgentErrorUsesFailedSessionIDOverActiveSibling(t *testing.T)
 func TestDispatcher_AgentErrorFailedSessionIDNotFoundYieldsNoSession(t *testing.T) {
 	eng := &fakeEngine{}
 	sessions := &fakeSessions{
-		activeErr: taskmodels.ErrTaskSessionNotFound,
-		latestErr: taskmodels.ErrTaskSessionNotFound,
+		activeSession: &taskmodels.TaskSession{
+			ID:    "sess-unrelated-active",
+			State: taskmodels.TaskSessionStateWaitingForInput,
+		},
+		// byID intentionally empty — "sess-missing" resolves to not-found
 	}
 	d := New(eng, sessions, logger.Default())
 
