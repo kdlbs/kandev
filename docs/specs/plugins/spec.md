@@ -153,7 +153,7 @@ webhooks:
   - key: "slack-events"
     description: "Slack Events API webhook"
     method: "POST"
-    access: public # anonymous delivery; the plugin must validate Slack signatures
+    access: public
 
 config_schema:
   type: object
@@ -389,17 +389,10 @@ Wildcard subscriptions: `task.*`, `agent.*`, `<feature>.*` (any subject prefix).
 POST /api/plugins/{plugin_id}/webhooks/{webhook_key}
 ```
 
-This remains kandev's one plugin-facing **HTTP** endpoint (external systems like Slack
-or Jira cannot speak gRPC). Kandev enforces an auth gate before anything else: a caller
-with no request identity (session/PAT, or the synthetic identity injected while auth is
-disabled) is rejected with 401 unless the manifest declares `webhooks[].key: <key>`
-with `public: true` (see [Plugin manifest reference](../../public/plugins-manifest.md)).
-An anonymous caller sees 401 for an unknown plugin ID, an undeclared key, and a
-declared-non-public key alike, so a caller with no identity cannot enumerate installed
-plugins. Once the gate passes, kandev validates the plugin is active and the webhook
-key is declared, converts the HTTP request into a `WebhookRequest` gRPC message
-(stripping kandev's own session cookie and PAT bearer from the relayed headers first),
-and calls the plugin's `Plugin.HandleWebhook` RPC:
+This is kandev's only plugin-facing **HTTP** endpoint. Anonymous callers need
+`access: public`; otherwise kandev returns 401 without revealing plugin/key. Kandev
+validates plugin/key, strips session/PAT, converts to `WebhookRequest`, and calls
+`Plugin.HandleWebhook`:
 
 ```proto
 message WebhookRequest {
@@ -849,15 +842,13 @@ complete.
   is a binary kandev spawns and supervises on the same host. See "Out of scope".
 - **`host.storage`'s user-state routes are the first plugin HTTP surface reachable
   with the caller's own browser session** (every other plugin HTTP route is either
-  operator-only management or the external webhook proxy, which since the plugin
-  webhook auth gate is also authenticated by default — see "External webhook proxy"
-  above). It is guarded the same way any other authenticated API route is —
-  `httpmw`'s allowlist explicitly does not cover it, so an unauthenticated request is
-  rejected before the handler runs — plus a capability gate (`user_state`), scope/key
-  validation, a body cap, and per-user row isolation. The stored value is opaque to
-  the host: it is never interpreted, never included in the
-  `plugin.user-state.updated` WS payload, and never delivered to the plugin's gRPC
-  backend (a browser-only surface).
+  operator-only management or a self-authenticating external webhook). It is
+  guarded the same way any other authenticated API route is — `httpmw`'s allowlist
+  explicitly does not cover it, so an unauthenticated request is rejected before the
+  handler runs — plus a capability gate (`user_state`), scope/key validation, a body
+  cap, and per-user row isolation. The stored value is opaque to the host: it is
+  never interpreted, never included in the `plugin.user-state.updated` WS payload,
+  and never delivered to the plugin's gRPC backend (a browser-only surface).
 
 ## Failure modes
 
@@ -947,8 +938,7 @@ complete.
   the event over the go-plugin unix socket. The plugin formats a Slack message and
   calls the Slack API, then returns `EventAck{}`.
 
-- **GIVEN** a Jira sync plugin with a registered `jira-webhooks` webhook declaring
-  `public: true` (Jira's callback carries no kandev session or PAT), **WHEN**
+- **GIVEN** a Jira sync plugin with a registered `jira-webhooks` webhook, **WHEN**
   Jira POSTs a webhook to
   `https://kandev.example.com/api/plugins/kandev-plugin-jira/webhooks/jira-webhooks`,
   **THEN** kandev converts the HTTP request into a `WebhookRequest` and calls the
