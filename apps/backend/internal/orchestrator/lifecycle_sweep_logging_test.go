@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -41,6 +42,29 @@ func observedTestLogger(t *testing.T) (*commonlogger.Logger, *observer.ObservedL
 		t.Fatalf("create observed logger: %v", err)
 	}
 	return log, logs
+}
+
+// observedTestLoggerWatching is observedTestLogger plus a channel that closes
+// the first time a log entry with the given message is emitted, so a test can
+// synchronize on the log itself instead of polling with time.Sleep.
+func observedTestLoggerWatching(t *testing.T, message string) (*commonlogger.Logger, *observer.ObservedLogs, <-chan struct{}) {
+	t.Helper()
+	core, logs := observer.New(zapcore.DebugLevel)
+
+	seen := make(chan struct{})
+	var once sync.Once
+	hooked := zapcore.RegisterHooks(core, func(entry zapcore.Entry) error {
+		if entry.Message == message {
+			once.Do(func() { close(seen) })
+		}
+		return nil
+	})
+
+	log, err := commonlogger.NewFromZap(zap.New(hooked))
+	if err != nil {
+		t.Fatalf("create observed logger: %v", err)
+	}
+	return log, logs, seen
 }
 
 // TestReconcileTaskLifecycleTokensLogsStartAndFinish is the regression test
@@ -103,7 +127,7 @@ func TestReconcileTaskLifecycleTokensWarnsWhenStuck(t *testing.T) {
 		t.Fatalf("seed promotion token: %v", err)
 	}
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
-	log, logs := observedTestLogger(t)
+	log, _, warned := observedTestLoggerWatching(t, "startup lifecycle sweep still running")
 	svc.logger = log
 
 	release := make(chan struct{})
@@ -115,13 +139,11 @@ func TestReconcileTaskLifecycleTokensWarnsWhenStuck(t *testing.T) {
 		svc.reconcileTaskLifecycleTokens(ctx)
 	}()
 
-	deadline := time.Now().Add(2 * time.Second)
-	for len(logs.FilterMessage("startup lifecycle sweep still running").All()) == 0 {
-		if time.Now().After(deadline) {
-			close(release)
-			t.Fatal("stuck-sweep warning never logged")
-		}
-		time.Sleep(5 * time.Millisecond)
+	select {
+	case <-warned:
+	case <-time.After(2 * time.Second):
+		close(release)
+		t.Fatal("stuck-sweep warning never logged")
 	}
 
 	close(release)

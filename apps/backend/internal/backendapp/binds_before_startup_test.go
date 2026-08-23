@@ -65,6 +65,12 @@ func TestBindBootstrapListenersServesLivenessBeforeSwap(t *testing.T) {
 	if got := body[versionFieldKey]; got != "1.2.3-test" {
 		t.Fatalf("bootstrap /health version = %v, want 1.2.3-test", got)
 	}
+	if got := body[statusKey]; got != "ok" {
+		t.Fatalf("bootstrap /health status field = %v, want %q (must match healthHandler's contract)", got, "ok")
+	}
+	if got := body["mode"]; got != "websocket+http" {
+		t.Fatalf("bootstrap /health mode = %v, want %q (must match healthHandler's contract)", got, "websocket+http")
+	}
 
 	// Every other path must answer deterministically, not hang or 404.
 	status, body, err = getJSON("127.0.0.1", cfg.Server.Port, "/api/v1/whatever")

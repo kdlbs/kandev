@@ -540,7 +540,10 @@ fn wait_for_backend(
 // aborts the launch on its own: HEALTH_TIMEOUT above already made the
 // keep-or-kill decision, and readiness can legitimately take longer while
 // startup recovery sweeps run. It only returns early if the backend process
-// exits or shutdown starts.
+// exits or shutdown starts. Mirrors wait_for_backend's settle-then-recheck
+// after a successful probe: a bare "GET /ready succeeded" is not proof the
+// backend that answered is still the one we launched, since another process
+// could rebind the same loopback port in the gap between exit and probe.
 fn wait_for_ready(port: u16, state: &BackendState) -> Result<(), String> {
     loop {
         if state.is_shutdown_started() {
@@ -552,6 +555,12 @@ fn wait_for_ready(port: u16, state: &BackendState) -> Result<(), String> {
             ));
         }
         if ready_ready(port) {
+            thread::sleep(HEALTH_READY_SETTLE);
+            if let Some(message) = state.child_exit_message()? {
+                return Err(format!(
+                    "Kandev launcher exited before /ready reported ready ({message})"
+                ));
+            }
             return Ok(());
         }
         thread::sleep(Duration::from_millis(250));
@@ -1242,6 +1251,48 @@ mod tests {
         assert!(
             !process_exists(pid),
             "backend child {pid} should be terminated"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wait_for_ready_rechecks_child_exit_after_success() {
+        // The child exits well before the /ready response arrives, so a
+        // wait_for_ready that trusted a bare "GET /ready succeeded" without
+        // rechecking would return Ok for a backend that is already gone.
+        let listener = TcpListener::bind((LOOPBACK_HOST, 0)).expect("bind ready listener");
+        let port = listener.local_addr().expect("listener addr").port();
+        thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0_u8; 512];
+                let _ = stream.read(&mut buf);
+                thread::sleep(Duration::from_millis(300));
+                let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+            }
+        });
+
+        let state = BackendState::default();
+        let child = Command::new("sh")
+            .arg("-c")
+            .arg("sleep 0.1")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn short-lived child");
+        assert!(state.set_child(child));
+
+        let result = wait_for_ready(port, &state);
+
+        assert!(
+            result.is_err(),
+            "wait_for_ready must not return Ok once the child has exited"
+        );
+        assert!(
+            result
+                .unwrap_err()
+                .contains("exited before /ready reported ready"),
+            "wait_for_ready error should name the exit-before-ready reason"
         );
     }
 

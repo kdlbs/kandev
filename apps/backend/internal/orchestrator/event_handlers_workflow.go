@@ -855,7 +855,11 @@ func (s *Service) reconcileTaskLifecycleTokens(ctx context.Context) {
 
 	var processed atomic.Int64
 	sweepDone := make(chan struct{})
-	go s.warnIfLifecycleSweepStuck(taskCount, &processed, start, sweepDone)
+	warnDone := make(chan struct{})
+	go func() {
+		defer close(warnDone)
+		s.warnIfLifecycleSweepStuck(taskCount, &processed, start, sweepDone)
+	}()
 
 	jobIDs := make(chan string)
 	workerCount := 4
@@ -879,6 +883,7 @@ func (s *Service) reconcileTaskLifecycleTokens(ctx context.Context) {
 	close(jobIDs)
 	wg.Wait()
 	close(sweepDone)
+	<-warnDone
 
 	s.logger.Info("startup lifecycle sweep finished",
 		zap.Int("task_count", taskCount),

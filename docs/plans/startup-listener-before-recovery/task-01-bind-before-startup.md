@@ -1,7 +1,7 @@
 ---
 id: "01-bind-before-startup"
 title: "Bind listeners and serve liveness before startup work"
-status: ready
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"

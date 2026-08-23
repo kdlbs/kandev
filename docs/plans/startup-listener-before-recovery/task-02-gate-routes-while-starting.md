@@ -1,7 +1,7 @@
 ---
 id: "02-gate-routes-while-starting"
 title: "Gate application routes behind an explicit starting state"
-status: ready
+status: done
 wave: 2
 depends_on: ["01-bind-before-startup"]
 plan: "plan.md"

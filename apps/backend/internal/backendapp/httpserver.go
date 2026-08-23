@@ -54,22 +54,29 @@ func (hs *handlerSwitch) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // making liveness depend on readiness here would bring back the crash loop
 // this handler exists to fix. Every other path returns a deterministic 503
 // with a parseable "starting" body instead of hanging, resetting, or 404ing.
-// The body shape mirrors (does not modify) healthHandler's in helpers.go.
+// GET /health's body is identical to healthHandler's in helpers.go (status
+// "ok", service, mode, version) since /health is a pure liveness probe and
+// its shape must not depend on startup progress.
 func newBootstrapHandler(version string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body := map[string]any{
-			statusKey:       startingStatus,
-			serviceFieldKey: kandevName,
-			versionFieldKey: version,
-		}
 		if r.URL.Path != "/health" {
+			body := map[string]any{
+				statusKey:       startingStatus,
+				serviceFieldKey: kandevName,
+				versionFieldKey: version,
+			}
 			writeBootstrapJSON(w, http.StatusServiceUnavailable, body)
 			return
 		}
 		if token := desktopHealthToken(); token != "" {
 			w.Header().Set(desktopHealthTokenHeader, token)
 		}
-		writeBootstrapJSON(w, http.StatusOK, body)
+		writeBootstrapJSON(w, http.StatusOK, map[string]any{
+			statusKey:       "ok",
+			serviceFieldKey: kandevName,
+			"mode":          "websocket+http",
+			versionFieldKey: version,
+		})
 	})
 }
 

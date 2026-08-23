@@ -1,7 +1,7 @@
 ---
 id: "03-ordering-guard"
 title: "Guard the bind-before-startup ordering against regression"
-status: ready
+status: done
 wave: 3
 depends_on: ["01-bind-before-startup", "02-gate-routes-while-starting"]
 plan: "plan.md"

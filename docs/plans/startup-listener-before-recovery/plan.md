@@ -1,8 +1,8 @@
 ---
 spec: docs/specs/startup-listener-before-recovery/spec.md
 created: 2026-08-22
-revised: 2026-08-22
-status: draft
+revised: 2026-08-23
+status: done
 ---
 
 # Fix Plan: Bind and Answer Liveness Before Startup Recovery
@@ -71,11 +71,20 @@ longer depends on classifying the sweeps.
 
 ## Implementation waves and parallel candidates
 
-- [ ] [Task 01: Bind listeners and serve liveness before startup work](task-01-bind-before-startup.md) (`ready`)
-- [ ] [Task 02: Gate application routes behind an explicit starting state](task-02-gate-routes-while-starting.md) (`blocked by Task 01`)
-- [ ] [Task 03: Guard the ordering against regression](task-03-ordering-guard.md) (`blocked by Tasks 01-02`)
+- [x] [Task 01: Bind listeners and serve liveness before startup work](task-01-bind-before-startup.md) (`done`)
+- [x] [Task 02: Gate application routes behind an explicit starting state](task-02-gate-routes-while-starting.md) (`done`)
+- [x] [Task 03: Guard the ordering against regression](task-03-ordering-guard.md) (`done`)
 
 No task is `parallel-safe`; all three touch the same startup sequence.
+
+## Validation results
+
+Implemented and validated across 5 Build/Verify/Review rounds; landed in PR
+[#2944](https://github.com/kdlbs/kandev/pull/2944)
+(`feature/backend-never-binds-k15` -> `main`). `/health` is now bound and
+answering liveness immediately at listen time; `/ready` gates readiness
+separately per `docs/specs/health-endpoint-version/spec.md`. Full command
+receipts and round-by-round findings are recorded in the task's Kandev plan.
 
 ## Regression test that must fail first
 
