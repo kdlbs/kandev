@@ -3263,6 +3263,7 @@ export class ApiClient {
     automationId: string,
     status = "skipped",
     taskId?: string,
+    opts?: { sessionId?: string; turnId?: string },
   ): Promise<{
     id: string;
     automation_id: string;
@@ -3275,6 +3276,8 @@ export class ApiClient {
       automation_id: automationId,
       status,
       task_id: taskId ?? "",
+      session_id: opts?.sessionId,
+      turn_id: opts?.turnId,
     });
   }
 

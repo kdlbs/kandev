@@ -145,6 +145,75 @@ test.describe("Automation exact-run controls", () => {
 });
 
 test.describe("Automation run composer", () => {
+  test("keeps a reply visible in the complete shared transcript", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Shared transcript reply",
+      seedData.agentProfileId,
+      {
+        description: 'e2e:message("initial shared turn")',
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          return sessions.find((session) => session.id === task.session_id)?.state;
+        },
+        { timeout: 60_000 },
+      )
+      .toBe("WAITING_FOR_INPUT");
+
+    await apiClient.setTaskOrigin(task.id, "automation_run");
+    const turns = await apiClient.listSessionTurns(task.session_id!);
+    expect(turns.turns).toHaveLength(1);
+    const initialTurnId = turns.turns[0].id;
+    const automation = await apiClient.seedAutomation({
+      workspaceId: seedData.workspaceId,
+      name: "Shared transcript automation",
+      workflowId: seedData.workflowId,
+      workflowStepId: seedData.startStepId,
+      prompt: STANDING_INSTRUCTION,
+      agentProfileId: seedData.agentProfileId,
+    });
+    const run = await apiClient.seedAutomationRun(automation.id, "succeeded", task.id, {
+      sessionId: task.session_id,
+      turnId: initialTurnId,
+    });
+    expect(run.session_id).not.toBe("");
+    expect(run.turn_id).not.toBe("");
+
+    await openRunView(testPage, automation.id);
+    const transcript = testPage.getByTestId("run-transcript");
+    await expect(transcript).toContainText("initial shared turn", { timeout: 15_000 });
+
+    const reply = "Reply stays visible in the selected run";
+    const editor = transcript.getByTestId("chat-input-editor");
+    await expect(editor).toBeEditable({ timeout: 15_000 });
+    await editor.fill(reply);
+    const submit = transcript.getByTestId("submit-message-button");
+    await expect(submit).toBeEnabled({ timeout: 15_000 });
+    await submit.click();
+
+    await expect
+      .poll(async () => (await apiClient.listSessionTurns(task.session_id!)).turns.length, {
+        timeout: 15_000,
+      })
+      .toBe(2);
+    const updatedTurns = await apiClient.listSessionTurns(task.session_id!);
+    const replyTurnId = updatedTurns.turns.find((turn) => turn.id !== initialTurnId)?.id;
+    expect(replyTurnId).toBeTruthy();
+    await expect(transcript).toContainText(reply, { timeout: 15_000 });
+    await expect(transcript.locator(`[data-turn-id="${replyTurnId}"]`)).toBeVisible();
+  });
+
   test("sits on the run page's own background, not the task workbench's card", async ({
     testPage,
     apiClient,

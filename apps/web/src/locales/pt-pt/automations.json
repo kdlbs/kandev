@@ -35,7 +35,7 @@
   "contextBetweenRunsConcurrencyLock": "Esta opção permite uma execução ativa de cada vez.",
   "contextBetweenRunsDescription": "Escolha se cada execução começa de novo ou continua a mesma conversa e ficheiros.",
   "contextBetweenRunsNewTask": "Iniciar uma tarefa nova em cada execução",
-  "contextBetweenRunsNewTaskDescription": "Cada execução começa com uma conversa e ficheiros separados. Use esta opção para trabalhos independentes e execuções simultâneas.",
+  "contextBetweenRunsNewTaskDescription": "Cada execução começa com uma conversa e ficheiros separados. Estas tarefas não aparecem no Kanban nem na barra lateral. Use esta opção para trabalhos independentes e execuções simultâneas.",
   "contextBetweenRunsReuseThread": "Continuar a sessão anterior",
   "contextBetweenRunsReuseThreadDescription": "As execuções continuam a mesma conversa e ficheiros, para que o agente mantenha o contexto e as alterações anteriores. As execuções acontecem uma de cada vez.",
   "contextBetweenRunsTitle": "Contexto entre execuções",

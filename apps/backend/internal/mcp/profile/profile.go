@@ -43,6 +43,13 @@ func New(surface Surface, capabilities []Capability, providers []string) Context
 	return ctx
 }
 
+// NewAutomation returns the fixed profile used by automation task sessions.
+// Automation tasks coordinate workspace work and never receive task-local
+// question capabilities.
+func NewAutomation() Context {
+	return New(SurfaceAutomation, nil, nil)
+}
+
 func (c Context) HasCapability(capability Capability) bool {
 	return slices.Contains(c.Capabilities, capability)
 }
@@ -81,7 +88,7 @@ func Legacy(mode string, disableAskQuestion bool, providers []string) Context {
 	case "task-title-pending":
 		capabilities = append(capabilities, CapabilityTaskTitle)
 	}
-	if !disableAskQuestion && surface != SurfaceExternal {
+	if !disableAskQuestion && surface != SurfaceExternal && surface != SurfaceAutomation {
 		capabilities = append(capabilities, CapabilityUserQuestion)
 	}
 	return New(surface, capabilities, providers)

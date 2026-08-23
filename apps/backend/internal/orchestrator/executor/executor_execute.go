@@ -77,10 +77,11 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 		// the exact office/autopilot capability set.
 		return mcpprofile.Legacy("", session != nil && session.IsPassthrough, nil), nil
 	}
-	surface := mcpprofile.SurfaceKanbanTask
 	if task.Origin == models.TaskOriginAutomationRun {
-		surface = mcpprofile.SurfaceAutomation
-	} else if task.IsFromOffice {
+		return mcpprofile.NewAutomation(), nil
+	}
+	surface := mcpprofile.SurfaceKanbanTask
+	if task.IsFromOffice {
 		surface = mcpprofile.SurfaceOfficeTask
 	}
 	capabilities := make([]mcpprofile.Capability, 0, 2)

@@ -16,11 +16,7 @@ vi.mock("@/hooks/domains/settings/use-settings-data", () => ({
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import { TooltipProvider } from "@kandev/ui/tooltip";
-import {
-  filterRunTranscriptItems,
-  filterRunTranscriptMessages,
-  RunTranscript,
-} from "./run-transcript";
+import { focusRunTranscriptTurn, RunTranscript } from "./run-transcript";
 
 const SESSION_ID = "session-1";
 const TASK_ID = "task-1";
@@ -84,35 +80,21 @@ describe("RunTranscript session hydration", () => {
 });
 
 describe("RunTranscript turn selection", () => {
-  it("keeps only the selected turn in a shared session", () => {
-    const items = [
-      {
-        type: "message" as const,
-        message: { id: "old", turn_id: OLD_TURN_ID } as never,
-      },
-      {
-        type: "turn_group" as const,
-        id: "group-current",
-        turnId: CURRENT_TURN_ID,
-        messages: [],
-      },
-      {
-        type: "prepare_progress" as const,
-        id: "prepare",
-        sessionId: SESSION_ID,
-      },
-    ];
+  it("focuses the selected turn without removing surrounding transcript rows", () => {
+    const root = document.createElement("div");
+    const previous = document.createElement("div");
+    previous.dataset.turnId = OLD_TURN_ID;
+    const selected = document.createElement("div");
+    selected.dataset.turnId = CURRENT_TURN_ID;
+    selected.scrollIntoView = vi.fn();
+    root.append(previous, selected);
+    document.body.append(root);
 
-    expect(filterRunTranscriptItems(items, CURRENT_TURN_ID)).toEqual([items[1], items[2]]);
-    expect(
-      filterRunTranscriptMessages(
-        [
-          { id: "old", turn_id: OLD_TURN_ID },
-          { id: "current", turn_id: CURRENT_TURN_ID },
-        ],
-        CURRENT_TURN_ID,
-      ),
-    ).toEqual([{ id: "current", turn_id: CURRENT_TURN_ID }]);
+    expect(focusRunTranscriptTurn(root, CURRENT_TURN_ID)).toBe(true);
+    expect(root.querySelectorAll("[data-turn-id]")).toHaveLength(2);
+    expect(document.activeElement).toBe(selected);
+    expect(selected.scrollIntoView).toHaveBeenCalledWith({ behavior: "auto", block: "center" });
+    root.remove();
   });
 });
 

@@ -35,7 +35,7 @@
   "contextBetweenRunsConcurrencyLock": "此选项一次只支持一个运行中的任务。",
   "contextBetweenRunsDescription": "选择每次运行是从头开始，还是继续使用相同的对话和文件。",
   "contextBetweenRunsNewTask": "每次运行都开始新任务",
-  "contextBetweenRunsNewTaskDescription": "每次运行都会使用独立的对话和文件。此选项适用于相互独立的作业和并发运行。",
+  "contextBetweenRunsNewTaskDescription": "每次运行都会使用独立的对话和文件。这些任务不会出现在看板或侧边栏中。此选项适用于相互独立的作业和并发运行。",
   "contextBetweenRunsReuseThread": "继续之前的会话",
   "contextBetweenRunsReuseThreadDescription": "运行会继续使用相同的对话和文件，因此代理可以保留之前的上下文和更改。运行会依次执行。",
   "contextBetweenRunsTitle": "运行之间的上下文",

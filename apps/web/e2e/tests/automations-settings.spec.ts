@@ -56,7 +56,7 @@ test.describe("Automations settings page", () => {
     ).toBeVisible();
     await expect(
       testPage.getByText(
-        "Each run starts with a separate conversation and files. Use this option for independent jobs and concurrent runs.",
+        "Each run starts with a separate conversation and files. These tasks do not appear in Kanban or the sidebar. Use this option for independent jobs and concurrent runs.",
         { exact: true },
       ),
     ).toBeVisible();

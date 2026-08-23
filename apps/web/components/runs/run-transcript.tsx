@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useEnsureTaskSession } from "@/hooks/use-ensure-task-session";
 import { type ChatInputContainerHandle } from "@/components/task/chat/chat-input-container";
@@ -13,37 +13,17 @@ import {
   useChatPanelHandlers,
 } from "@/components/task/chat/chat-input-area";
 import { routePanelMouseDown } from "@/components/task/chat/route-panel-mouse-down";
-import type { RenderItem } from "@/hooks/use-processed-messages";
 
-export function filterRunTranscriptItems(items: RenderItem[], turnId?: string): RenderItem[] {
-  if (!turnId) return items;
-  return items.filter((item) => {
-    if (item.type === "turn_group") return item.turnId === turnId;
-    if (item.type === "message") return item.message.turn_id === turnId;
-    return item.type === "prepare_progress" || item.type === "agent_error_notice";
-  });
-}
-
-export function filterRunTranscriptMessages<T extends { turn_id?: string | null }>(
-  messages: T[],
-  turnId?: string,
-): T[] {
-  return turnId ? messages.filter((message) => message.turn_id === turnId) : messages;
-}
-
-function useFilteredRunTranscript(
-  panelState: ReturnType<typeof useChatPanelState>,
-  turnId?: string,
-) {
-  const transcriptItems = useMemo(
-    () => filterRunTranscriptItems(panelState.groupedItems, turnId),
-    [panelState.groupedItems, turnId],
+export function focusRunTranscriptTurn(root: HTMLElement | null, turnId?: string): boolean {
+  if (!root || !turnId) return false;
+  const target = Array.from(root.querySelectorAll<HTMLElement>("[data-turn-id]")).find(
+    (element) => element.dataset.turnId === turnId,
   );
-  const transcriptMessages = useMemo(
-    () => filterRunTranscriptMessages(panelState.messages, turnId),
-    [panelState.messages, turnId],
-  );
-  return { transcriptItems, transcriptMessages };
+  if (!target) return false;
+
+  target.focus({ preventScroll: true });
+  target.scrollIntoView?.({ behavior: "auto", block: "center" });
+  return true;
 }
 
 /**
@@ -68,6 +48,7 @@ export function RunTranscript({
   const { t } = useTranslation();
   const chatInputRef = useRef<ChatInputContainerHandle>(null);
   const scopeRef = useRef<HTMLDivElement>(null);
+  const focusedTurnKeyRef = useRef<string | null>(null);
   const [clarificationKey, setClarificationKey] = useState(0);
 
   useSettingsData(true);
@@ -85,7 +66,15 @@ export function RunTranscript({
   });
   const { isSending, handleSubmit } = useSubmitHandler(panelState, undefined);
   const { handleCancelTurn } = useChatPanelHandlers(panelState.resolvedSessionId, chatInputRef);
-  const { transcriptItems, transcriptMessages } = useFilteredRunTranscript(panelState, turnId);
+
+  useEffect(() => {
+    if (!turnId) return;
+    const turnKey = `${sessionId}:${turnId}`;
+    if (focusedTurnKeyRef.current === turnKey) return;
+    if (focusRunTranscriptTurn(scopeRef.current, turnId)) {
+      focusedTurnKeyRef.current = turnKey;
+    }
+  }, [panelState.groupedItems, sessionId, turnId]);
 
   // An automation run is not a session anyone is sitting in: replying starts
   // the agent, it works the prompt, and it shuts down again. Controls that talk
@@ -116,8 +105,8 @@ export function RunTranscript({
     >
       <div className="min-h-0 flex-1 overflow-hidden">
         <MessageList
-          items={transcriptItems}
-          messages={transcriptMessages}
+          items={panelState.groupedItems}
+          messages={panelState.messages}
           permissionsByToolCallId={panelState.permissionsByToolCallId}
           childrenByParentToolCallId={panelState.childrenByParentToolCallId}
           taskId={panelState.taskId ?? undefined}

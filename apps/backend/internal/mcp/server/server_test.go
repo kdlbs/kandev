@@ -522,7 +522,7 @@ func TestServerSurfaceAutomationHasFixedCoordinatorCatalog(t *testing.T) {
 	backend := NewChannelBackendClient(log)
 	defer backend.Close()
 
-	profile := mcpprofile.New(mcpprofile.SurfaceAutomation, nil, nil)
+	profile := mcpprofile.NewAutomation()
 	s := NewWithProfile(backend, "automation-session", "automation-task", 10005, log, "", false, profile)
 	want := []string{
 		"list_workspaces_kandev", "list_workflows_kandev", "list_workflow_steps_kandev",

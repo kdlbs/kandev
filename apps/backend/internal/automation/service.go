@@ -1284,14 +1284,16 @@ func (s *Service) FireTrigger(ctx context.Context, automationID, triggerID strin
 		DedupKey:     dedupKey,
 	}
 
+	event := bus.NewEvent(events.AutomationTriggered, "automation_service", evt)
+	if err := s.eventBus.Publish(ctx, events.AutomationTriggered, event); err != nil {
+		if markErr := s.store.MarkRunTerminal(ctx, admittedRun.ID, "", "", RunStatusFailed, err.Error()); markErr != nil {
+			return FireResult{}, fmt.Errorf("publish automation triggered: %w; mark admitted run failed: %v", err, markErr)
+		}
+		return FireResult{}, fmt.Errorf("publish automation triggered: %w", err)
+	}
 	if updateErr := s.store.UpdateLastTriggered(ctx, automationID, now); updateErr != nil {
 		s.logger.Warn("failed to update last_triggered_at",
 			zap.String("automation_id", automationID), zap.Error(updateErr))
-	}
-
-	event := bus.NewEvent(events.AutomationTriggered, "automation_service", evt)
-	if err := s.eventBus.Publish(ctx, events.AutomationTriggered, event); err != nil {
-		return FireResult{}, fmt.Errorf("publish automation triggered: %w", err)
 	}
 
 	s.logger.Info("automation trigger fired",
