@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-cascade-aware-switch"]
 plan: "plan.md"
-spec: "../../specs/tasks/archive-confirmation.md"
+spec: "../../specs/tasks/requirements/archive-confirmation.md"
 ---
 
 # Task 02: Add Archive Navigation E2E Coverage

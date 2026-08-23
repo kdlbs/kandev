@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-resolve-and-auto-start"]
 plan: "plan.md"
-spec: "../../specs/task-dependencies/spec.md"
+spec: "../../specs/tasks/system-design/task-dependencies.md"
 ---
 
 # Task 04: Halt Chains on a Failed Predecessor

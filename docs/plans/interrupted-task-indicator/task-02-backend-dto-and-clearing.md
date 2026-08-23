@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-backend-startup-marker"]
 plan: "plan.md"
-spec: "../../specs/tasks/interrupted-task-indicator.md"
+spec: "../../specs/tasks/requirements/interrupted-task-indicator.md"
 ---
 
 # Task 02: Backend DTO exposure and marker clearing

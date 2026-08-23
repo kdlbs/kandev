@@ -153,6 +153,7 @@ webhooks:
   - key: "slack-events"
     description: "Slack Events API webhook"
     method: "POST"
+    access: public
 
 config_schema:
   type: object
@@ -388,10 +389,10 @@ Wildcard subscriptions: `task.*`, `agent.*`, `<feature>.*` (any subject prefix).
 POST /api/plugins/{plugin_id}/webhooks/{webhook_key}
 ```
 
-This remains kandev's one plugin-facing **HTTP** endpoint (external systems like Slack
-or Jira cannot speak gRPC). Kandev validates the plugin is active and the webhook key
-is declared, converts the HTTP request into a `WebhookRequest` gRPC message, and calls
-the plugin's `Plugin.HandleWebhook` RPC:
+This is kandev's only plugin-facing **HTTP** endpoint. Anonymous callers need
+`access: public`; otherwise kandev returns 401 without revealing plugin/key. Kandev
+validates plugin/key, strips session/PAT, converts to `WebhookRequest`, and calls
+`Plugin.HandleWebhook`:
 
 ```proto
 message WebhookRequest {

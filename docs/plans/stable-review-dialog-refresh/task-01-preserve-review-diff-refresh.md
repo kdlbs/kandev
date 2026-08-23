@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/multi-branch/spec.md"
+spec: "../../specs/tasks/requirements/multi-branch.md"
 ---
 
 # Task 01: Preserve Review diff during refresh
@@ -34,7 +34,7 @@ cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/review/mobi
 
 - `apps/web/hooks/domains/github/use-pr-diff.ts`
 - `apps/web/hooks/domains/github/use-pr-diff.test.ts`
-- `docs/specs/tasks/multi-branch/spec.md`
+- `docs/specs/tasks/requirements/multi-branch.md`
 - `docs/plans/stable-review-dialog-refresh/plan.md`
 - this task file
 

@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/multi-branch/spec.md"
+spec: "../../specs/tasks/requirements/multi-branch.md"
 ---
 
 # Task 01: Public provider resolution
@@ -36,7 +36,7 @@ None.
 
 ## Inputs
 
-- `docs/specs/tasks/multi-branch/spec.md` — Remote task-creation scenarios.
+- `docs/specs/tasks/requirements/multi-branch.md` — Remote task-creation scenarios.
 - `docs/specs/gitlab-integration/spec.md` — task-creation anonymous exception.
 - Existing `listRepoBranchesAnonymous` GitHub implementation and GitLab workspace-client resolution.
 

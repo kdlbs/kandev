@@ -945,6 +945,11 @@ plugin never handles the raw token, and any `Set-Cookie` you return is
 dropped. Requires authentication enabled; emitting the header without
 `capabilities.auth` returns 403.
 
+Declare both the initiate webhook and the callback webhook with `access: public`.
+Kandev checks the initiate key before it shows the login button. The manifest
+has no callback field, so your plugin must declare the callback key separately.
+Kandev logs a warning when a declared initiate webhook is not public.
+
 **You MUST only assert an `email` the IdP has verified as owned by `subject`.**
 Kandev auto-links that email to (or provisions) an account, so an unverified or
 user-settable email claim is an account-takeover vector. Kandev refuses to
@@ -2122,6 +2127,9 @@ repackaging.
 - **Trusting webhook metadata:** `webhooks[].method` is informational. Public
   routes are not authenticated by Kandev, so validate method, signature, timestamp, replay
   protection, and body before side effects.
+- **Authenticated webhook access:** a valid Kandev session or PAT is all the
+  host checks. Any signed-in user reaches an authenticated webhook, so enforce
+  your own per-user or per-role rules when the endpoint needs them.
 - **Bundling React:** use host.React, host.jsx, and host.ui; a second React or
   Radix copy breaks shared contexts and portals.
 - **Shipping the wrong binary name:** every declared executable must be under

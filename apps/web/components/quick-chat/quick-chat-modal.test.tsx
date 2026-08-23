@@ -1,9 +1,11 @@
 import { useCallback, useState } from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useClarificationEscapeGuard } from "@/hooks/use-clarification-escape-guard";
 
 const setQuickChatInitialPrompt = vi.fn();
+const quickChatSessionItems: Record<string, { state: string; task_id: string }> = {};
+const quickChatPrepareProgress: Record<string, { status: string }> = {};
 const handleActivateTerminal = vi.fn();
 const handleNewTerminal = vi.fn();
 const handleCloseTerminal = vi.fn();
@@ -18,8 +20,17 @@ const TOGGLE_ESCAPE_GUARD_TESTID = "toggle-escape-guard";
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (
-    selector: (state: { setQuickChatInitialPrompt: typeof setQuickChatInitialPrompt }) => unknown,
-  ) => selector({ setQuickChatInitialPrompt }),
+    selector: (state: {
+      setQuickChatInitialPrompt: typeof setQuickChatInitialPrompt;
+      taskSessions: { items: typeof quickChatSessionItems };
+      prepareProgress: { bySessionId: typeof quickChatPrepareProgress };
+    }) => unknown,
+  ) =>
+    selector({
+      setQuickChatInitialPrompt,
+      taskSessions: { items: quickChatSessionItems },
+      prepareProgress: { bySessionId: quickChatPrepareProgress },
+    }),
 }));
 
 vi.mock("@/lib/routing/client-dynamic", () => ({
@@ -182,6 +193,8 @@ import { QuickChatModal } from "./quick-chat-modal";
 
 afterEach(() => {
   cleanup();
+  for (const key of Object.keys(quickChatSessionItems)) delete quickChatSessionItems[key];
+  for (const key of Object.keys(quickChatPrepareProgress)) delete quickChatPrepareProgress[key];
   vi.clearAllMocks();
 });
 
@@ -201,6 +214,30 @@ describe("QuickChatModal mixed tabs", () => {
     expect(screen.getByText("Terminals")).toBeTruthy();
     expect(screen.queryByTestId("quick-chat-menu-session-chat-1")).toBeNull();
     expect(screen.queryByTestId("quick-chat-menu-terminal-terminal-1")).toBeNull();
+  });
+
+  it("shows a spinner only for working conversation tabs", () => {
+    quickChatSessionItems["chat-1"] = { state: "RUNNING", task_id: "task-1" };
+    quickChatSessionItems["quick-chat-setup:ws-1:chat"] = {
+      state: "RUNNING",
+      task_id: "task-setup",
+    };
+    useQuickChatModalMock.mockReturnValue({
+      ...defaultQuickChatModalState,
+      activeKind: "conversation",
+      activeSessionNeedsAgent: false,
+      terminalTabs: [],
+      sessions: [
+        ...defaultQuickChatModalState.sessions,
+        { sessionId: "quick-chat-setup:ws-1:chat", workspaceId: WORKSPACE_ID, kind: "chat" },
+      ],
+    });
+
+    render(<QuickChatModal workspaceId={WORKSPACE_ID} />);
+
+    const tabs = screen.getAllByTestId("quick-chat-tab");
+    expect(within(tabs[0]).getByRole("status", { name: "Loading" })).toBeTruthy();
+    expect(tabs[1].querySelector('[role="status"]')).toBeNull();
   });
 });
 

@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/prevent-agent-autostart-on-open/spec.md
+spec: docs/specs/tasks/requirements/prevent-agent-autostart-on-open.md
 created: 2026-08-11
 status: complete
 ---

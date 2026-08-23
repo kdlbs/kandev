@@ -10,12 +10,14 @@ import {
   ContextMenuItem,
   ContextMenuTrigger,
 } from "@kandev/ui/context-menu";
+import { GridSpinner } from "@/components/grid-spinner";
 import type { QuickChatSessionKind } from "@/lib/state/slices/ui/types";
 
 type QuickChatTabItemProps = {
   name: string;
   isActive: boolean;
   isRenameable: boolean;
+  isWorking?: boolean;
   kind?: QuickChatSessionKind;
   onActivate: () => void;
   onClose: () => void;
@@ -42,6 +44,7 @@ export const QuickChatTabItem = memo(function QuickChatTabItem({
   name,
   isActive,
   isRenameable,
+  isWorking = false,
   kind = "chat",
   onActivate,
   onClose,
@@ -128,6 +131,7 @@ export const QuickChatTabItem = memo(function QuickChatTabItem({
           title={isRenameable ? t("chat:doubleClickToRename") : undefined}
           className="flex items-center px-2.5 py-1 text-xs cursor-pointer"
         >
+          {isWorking && <GridSpinner className="h-3 w-3 shrink-0 text-muted-foreground" />}
           {kind === "config" && (
             <span role="img" aria-label={t("chat:configurationChat")} className="mr-1.5 shrink-0">
               <IconSparkles className="h-3 w-3" aria-hidden />
