@@ -153,34 +153,29 @@ function useAutoUpdateAction(upsertPlugin: (p: PluginRecord) => void) {
 }
 
 function useUninstallAction(removePlugin: (id: string) => void) {
-  const [uninstallTarget, setUninstallTarget] = useState<PluginRecord | null>(null);
   const [uninstallBusy, setUninstallBusy] = useState(false);
 
-  const confirmUninstall = async () => {
-    if (!uninstallTarget) return;
-    const target = uninstallTarget;
+  const confirmUninstall = async (target: PluginRecord) => {
     setUninstallBusy(true);
     try {
       await uninstallPlugin(target.id);
       unloadPlugin(target.id);
       removePlugin(target.id);
-      setUninstallTarget(null);
+      return true;
     } catch (err) {
       toast.error(
         err instanceof Error
           ? err.message
           : t("plugins:failedToUninstall", { name: target.display_name }),
       );
+      return false;
     } finally {
       setUninstallBusy(false);
     }
   };
 
   return {
-    uninstallTarget,
     uninstallBusy,
-    openUninstall: setUninstallTarget,
-    closeUninstall: () => setUninstallTarget(null),
     confirmUninstall,
   };
 }

@@ -66,6 +66,14 @@ func (r *messageAddSwitchRepo) GetMessage(_ context.Context, id string) (*models
 	return nil, sql.ErrNoRows
 }
 
+// GetMessageWithPromptIndex returns the message for id with its derived prompt index, mirroring the repository contract.
+func (r *messageAddSwitchRepo) GetMessageWithPromptIndex(_ context.Context, id string) (*models.Message, error) {
+	if r.idempotentMessage != nil && r.idempotentMessage.ID == id {
+		return r.idempotentMessage, nil
+	}
+	return nil, sql.ErrNoRows
+}
+
 func (r *messageAddSwitchRepo) GetTask(_ context.Context, id string) (*models.Task, error) {
 	r.taskGetCalls++
 	if task, ok := r.tasks[id]; ok {

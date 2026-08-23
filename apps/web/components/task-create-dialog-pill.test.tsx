@@ -80,13 +80,12 @@ vi.mock("@kandev/ui/tooltip", async () => {
   };
 });
 
+import { Pill, type PillOption } from "./task-create-dialog-pill";
 import {
-  sortBranches,
   branchToOption,
   computeBranchPlaceholder,
-  Pill,
-  type PillOption,
-} from "./task-create-dialog-pill";
+  sortBranches,
+} from "./task-create-dialog-branch-options";
 
 const CREATE_REPOSITORY = "Create new repository";
 
@@ -319,6 +318,37 @@ describe("Pill tooltip", () => {
 });
 
 describe("Pill popover", () => {
+  it("puts the current option first with a persistent selected surface", () => {
+    render(
+      <Pill
+        icon={<span aria-hidden="true" />}
+        value="Current label"
+        selectedValue="current"
+        placeholder="repository"
+        options={[
+          { value: "first", label: "First" },
+          { value: "current", label: "Current" },
+          { value: "last", label: "Last" },
+        ]}
+        onSelect={vi.fn()}
+        searchPlaceholder="Search repositories..."
+        emptyMessage="No repositories"
+      />,
+    );
+
+    fireEvent.click(screen.getByText("Current label"));
+
+    const options = screen.getAllByRole("option");
+    expect(options.map((option) => option.textContent?.trim())).toEqual([
+      "Current",
+      "First",
+      "Last",
+    ]);
+    expect(options[0].className).toContain("bg-card");
+    expect(options[0].className).toContain("border-primary/50");
+    expect(options[0].querySelector("svg")).not.toBeNull();
+  });
+
   it("portals selector content outside the trigger container", () => {
     render(
       <div data-testid="clipping-host" className="overflow-hidden">

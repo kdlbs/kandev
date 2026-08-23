@@ -7,6 +7,7 @@ import { Button } from "@kandev/ui/button";
 import { SettingsPageTemplate } from "@/components/settings/settings-page-template";
 import { WorkspaceSectionHeader } from "@/components/settings/workspaces/workspace-section-header";
 import { useAppStore } from "@/components/state-provider";
+import { useToast } from "@/components/toast-provider";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
 import type { ApiRequestOptions } from "@/lib/api/client";
 import { createSecret, updateSecret, deleteSecret } from "@/lib/api/domains/secrets-api";
@@ -14,7 +15,6 @@ import { useRequest } from "@/lib/http/use-request";
 import type { SecretListItem, SecretScope, UpdateSecretRequest } from "@/lib/types/http-secrets";
 import { SecretForm, defaultFormState, type SecretFormState } from "./secret-form";
 import { SecretListItemRow } from "./secrets-list-item-row";
-import { DeleteSecretDialog } from "./secrets-delete-dialog";
 import { CopyMoveSecretDialog, type CopyMoveMode } from "./copy-move-secret-dialog";
 
 /* ------------------------------------------------------------------ */
@@ -136,6 +136,8 @@ function useSecretRequests(
 
 /** Composes request runners and UI actions (create, edit, delete, transfer) from the secrets state. */
 function useSecretsActions(state: ReturnType<typeof useSecretsState>) {
+  const { t } = useTranslation();
+  const { toast } = useToast();
   const { rememberTransferTrigger, restoreTransferTrigger } = useTransferFocusRestore();
   const {
     addSecret: addToStore,
@@ -211,8 +213,11 @@ function useSecretsActions(state: ReturnType<typeof useSecretsState>) {
     closeDelete: () => setDeleteTarget(null),
     confirmDelete: () => {
       if (!deleteTarget) return;
-      deleteRequest.run(deleteTarget.id).catch(() => undefined);
+      const id = deleteTarget.id;
       setDeleteTarget(null);
+      return deleteRequest.run(id).catch(() => {
+        toast({ description: t("settings:secretDeleteFailed"), variant: "error" });
+      });
     },
     openTransfer: (secret: SecretListItem) => {
       // Remember the focused Copy/Move button; close restores it because
@@ -296,7 +301,7 @@ export type SecretsSettingsActions = {
   startCreate: () => void;
   openDelete: (secret: SecretListItem) => void;
   closeDelete: () => void;
-  confirmDelete: () => void;
+  confirmDelete: () => void | Promise<void>;
   openTransfer: (secret: SecretListItem) => void;
   closeTransfer: () => void;
   items: SecretListItem[];
@@ -419,21 +424,17 @@ function SecretsSettingsBody({
               workspaceId={workspaceId}
               onEdit={actions.startEditing}
               onDelete={actions.openDelete}
+              onDeleteCancel={actions.closeDelete}
+              onDeleteConfirm={actions.confirmDelete}
               onCopyMove={actions.openTransfer}
               isBusy={isBusy}
               showCreate={showCreate}
               isEditing={editingId === secret.id}
+              isDeleteConfirming={deleteTarget?.id === secret.id}
             />
           ))}
         </div>
       </div>
-
-      <DeleteSecretDialog
-        target={deleteTarget}
-        onClose={actions.closeDelete}
-        onConfirm={actions.confirmDelete}
-        isBusy={isBusy}
-      />
     </>
   );
 }

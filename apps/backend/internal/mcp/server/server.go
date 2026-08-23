@@ -18,6 +18,7 @@ import (
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpproviders "github.com/kandev/kandev/internal/mcp/providers"
 	"github.com/kandev/kandev/internal/mcp/toolschema"
+	"github.com/kandev/kandev/internal/mcp/tooltokens"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -235,7 +236,7 @@ func newServerWithProfile(backend BackendClient, sessionID, taskID string, log *
 		s.observeMCPConnection(mcpConnectionID(ctx), streams.MCPAttachmentEvidenceInitializeObserved, 0, "")
 	})
 	hooks.AddAfterListTools(func(ctx context.Context, _ any, _ *mcp.ListToolsRequest, result *mcp.ListToolsResult) {
-		s.observeMCPConnection(mcpConnectionID(ctx), streams.MCPAttachmentEvidenceToolsListObserved, len(result.Tools), "")
+		s.observeMCPToolsList(mcpConnectionID(ctx), result.Tools)
 	})
 	hooks.AddBeforeListTools(func(ctx context.Context, _ any, _ *mcp.ListToolsRequest) {
 		s.syncPluginTools(ctx)
@@ -291,6 +292,52 @@ func (s *Server) SetAttachmentAttempt(attempt streams.MCPAttachmentAttempt) {
 }
 
 func (s *Server) observeMCPConnection(connectionID string, kind streams.MCPAttachmentEvidenceKind, toolCount int, summary string) {
+	s.observeMCPConnectionWithTools(connectionID, kind, toolCount, summary, nil)
+}
+
+func (s *Server) observeMCPToolsList(connectionID string, tools []mcp.Tool) {
+	summaries := make([]streams.MCPToolSummary, 0, len(tools))
+	for _, tool := range tools {
+		summaries = append(summaries, summarizeMCPTool(tool))
+	}
+	s.observeMCPConnectionWithTools(connectionID, streams.MCPAttachmentEvidenceToolsListObserved, len(tools), "", summaries)
+}
+
+func summarizeMCPTool(tool mcp.Tool) streams.MCPToolSummary {
+	summary := streams.MCPToolSummary{
+		Name:        tool.Name,
+		Description: tool.Description,
+		InputSchema: mcpToolInputSchema(tool),
+	}
+	definition, err := json.Marshal(tool)
+	if err != nil {
+		return summary
+	}
+	summary.EstimatedTokens, _ = tooltokens.EstimateToolJSON(definition)
+	return summary
+}
+
+func mcpToolInputSchema(tool mcp.Tool) json.RawMessage {
+	if tool.RawInputSchema != nil {
+		if !json.Valid(tool.RawInputSchema) {
+			return nil
+		}
+		return append(json.RawMessage(nil), tool.RawInputSchema...)
+	}
+	schema, err := json.Marshal(tool.InputSchema)
+	if err != nil {
+		return nil
+	}
+	return schema
+}
+
+func (s *Server) observeMCPConnectionWithTools(
+	connectionID string,
+	kind streams.MCPAttachmentEvidenceKind,
+	toolCount int,
+	summary string,
+	tools []streams.MCPToolSummary,
+) {
 	s.attachmentMu.RLock()
 	attempt, ok := s.attachmentAttempts[connectionID]
 	reporter := s.attachmentReporter
@@ -298,7 +345,7 @@ func (s *Server) observeMCPConnection(connectionID string, kind streams.MCPAttac
 	if !ok || reporter == nil || attempt.AttemptID == "" {
 		return
 	}
-	s.reportMCPConnection(reporter, attempt, connectionID, kind, toolCount, summary)
+	s.reportMCPConnectionWithTools(reporter, attempt, connectionID, kind, toolCount, summary, tools)
 }
 
 func (s *Server) registerMCPConnection(connectionID string) {
@@ -335,16 +382,45 @@ func (s *Server) reportMCPConnection(
 	toolCount int,
 	summary string,
 ) {
+	s.reportMCPConnectionWithTools(reporter, attempt, connectionID, kind, toolCount, summary, nil)
+}
+
+func (s *Server) reportMCPConnectionWithTools(
+	reporter func(streams.MCPAttachmentEvidence),
+	attempt streams.MCPAttachmentAttempt,
+	connectionID string,
+	kind streams.MCPAttachmentEvidenceKind,
+	toolCount int,
+	summary string,
+	tools []streams.MCPToolSummary,
+) {
+	if kind == streams.MCPAttachmentEvidenceToolsListObserved {
+		// Bound summaries at the publication boundary before the callback can
+		// expose evidence to the agent update stream. Apply repeats the bound as
+		// a defense for any other evidence producer.
+		tools, _ = streams.NormalizeMCPToolCatalog(tools, toolCount)
+	}
 	reporter(streams.MCPAttachmentEvidence{
-		AttemptID:    attempt.AttemptID,
-		ServerName:   "kandev",
-		Kind:         kind,
-		OccurredAt:   time.Now().UTC(),
-		Source:       streams.MCPServerSourceKandev,
-		ConnectionID: opaqueMCPConnectionID(connectionID),
-		ToolCount:    toolCount,
-		Summary:      streams.SanitizeMCPErrorSummary(summary),
+		AttemptID:          attempt.AttemptID,
+		ServerName:         "kandev",
+		Kind:               kind,
+		OccurredAt:         time.Now().UTC(),
+		Source:             streams.MCPServerSourceKandev,
+		ConnectionID:       opaqueMCPConnectionID(connectionID),
+		ToolCount:          toolCount,
+		Tools:              tools,
+		ToolTokenEstimator: toolTokenEstimator(tools),
+		Summary:            streams.SanitizeMCPErrorSummary(summary),
 	})
+}
+
+func toolTokenEstimator(tools []streams.MCPToolSummary) string {
+	for _, tool := range tools {
+		if tool.EstimatedTokens > 0 {
+			return tooltokens.Estimator
+		}
+	}
+	return ""
 }
 
 func mcpConnectionID(ctx context.Context) string {
@@ -825,6 +901,8 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		{name: "configuration-executors", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigExecutorTools() }},
 		{name: "configuration-tasks", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigTaskTools() }},
 		{name: "external-create-task", enabled: external, register: func(s *Server) { s.registerCreateTaskTool() }},
+		{name: "external-questions", enabled: external, register: func(s *Server) { s.registerQuestionAnsweringTools() }},
+		{name: "external-agent-permissions", enabled: external, register: func(s *Server) { s.registerAgentPermissionTools() }},
 		// Dependency edges are manageable wherever a task can be created.
 		{name: "task-dependencies", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || external(ctx) }, register: func(s *Server) { s.registerTaskDependencyTools() }},
 		{name: "kanban-task", enabled: kanban, register: func(s *Server) { s.registerKanbanTools() }},
@@ -833,10 +911,12 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		{name: "user-question", enabled: capabilityEnabled(mcpprofile.CapabilityUserQuestion), register: func(s *Server) { s.registerInteractionTools() }},
 		{name: "parent-question", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityParentQuestion)), register: func(s *Server) { s.registerParentQuestionTool() }},
 		{name: "plan", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerPlanTools() }},
+		{name: "rich-output", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerRichOutputTool() }},
 		{name: "walkthrough", enabled: kanban, register: func(s *Server) { s.registerWalkthroughTools() }},
 		{name: "review", enabled: kanban, register: func(s *Server) { s.registerReviewTools() }},
 		{name: "related-tasks", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerRelatedTasksTool() }},
 		{name: "office-documents", enabled: office, register: func(s *Server) { s.registerTaskDocumentTools() }},
+		{name: "office-decisions", enabled: office, register: func(s *Server) { s.registerRecordStepDecisionTool() }},
 		{name: "task-branch-sources", enabled: kanban, register: func(s *Server) {
 			s.registerAddBranchToTaskTool()
 			s.registerAddWorkspaceSourcesTool()
@@ -846,6 +926,28 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		{name: "task-title", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityTaskTitle)), register: func(s *Server) { s.registerSetTaskTitleTool() }},
 		{name: "diagnostics", enabled: kanban, register: func(s *Server) { s.registerDiagnosticBundleTool() }},
 	}
+}
+
+func (s *Server) registerAgentPermissionTools() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("list_pending_agent_permissions_kandev",
+			mcp.WithDescription("List live pending agent command and tool permission requests for an authorized task, optionally limited to one session. Returns safe action details and the exact immutable provider-offered option IDs and kinds needed for resolution."),
+			mcp.WithString(mcpKeyTaskID, mcp.Required(), mcp.Description("The task ID whose live permission requests to list")),
+			mcp.WithString("session_id", mcp.Description("Optional session ID, which must belong to task_id")),
+		),
+		s.wrapHandler("list_pending_agent_permissions_kandev", s.listPendingAgentPermissionsHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("resolve_agent_permission_kandev",
+			mcp.WithDescription("Resolve one exact live agent permission request by selecting one option the provider originally offered. First call list_pending_agent_permissions_kandev and submit the returned task, session, request, pending, and option IDs unchanged. Reject choices are selected by their offered option ID; cancellation and caller-authored commands or options are not accepted."),
+			mcp.WithString(mcpKeyTaskID, mcp.Required(), mcp.Description("The task ID returned by permission discovery")),
+			mcp.WithString("session_id", mcp.Required(), mcp.Description("The session ID returned by permission discovery")),
+			mcp.WithString("request_id", mcp.Required(), mcp.Description("The immutable Kandev request generation ID")),
+			mcp.WithString("pending_id", mcp.Required(), mcp.Description("The provider pending request ID")),
+			mcp.WithString("option_id", mcp.Required(), mcp.Description("One exact option ID returned for this request")),
+		),
+		s.wrapHandler("resolve_agent_permission_kandev", s.resolveAgentPermissionHandler()),
+	)
 }
 
 // registerTools registers MCP tools from the declarative profile registry.
@@ -1058,7 +1160,17 @@ func (s *Server) registerMRAutomationTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("update_task_mr_automation_kandev",
-			mcp.WithDescription("Update this task's GitLab merge request lifecycle notification switches."),
+			mcp.WithDescription("Update this task's GitLab merge request automation options (auto-fix, auto-merge, "+
+				"and lifecycle notifications). The five switches are per merge request: pass repository_id, "+
+				"project_path and mr_iid together to target one linked MR, or omit all three to apply them to "+
+				"every MR linked to this task. auto_fix_prompt_override applies to every linked MR regardless "+
+				"of MR identity."),
+			mcp.WithString("repository_id", mcp.Description("Repository ID of the linked MR to target (omit to target every linked MR)")),
+			mcp.WithString("project_path", mcp.Description("Project path of the linked MR to target, e.g. group/project")),
+			mcp.WithNumber("mr_iid", mcp.Description("IID of the linked MR to target")),
+			mcp.WithBoolean("auto_fix_enabled", mcp.Description("Enable or disable auto-fix when the linked MR's pipeline fails")),
+			mcp.WithBoolean("auto_merge_enabled", mcp.Description("Enable or disable auto-merge when the linked MR is ready")),
+			mcp.WithString("auto_fix_prompt_override", mcp.Description("Task-level custom prompt for auto-fix; valid without linked MRs and not scoped by MR identity (empty string clears the override)")),
 			mcp.WithBoolean("prompt_on_review_requested", mcp.Description("Prompt this task's agent when a review is requested for the authenticated user")),
 			mcp.WithBoolean("prompt_on_merged", mcp.Description("Prompt this task's agent once when the linked MR becomes merged")),
 			mcp.WithBoolean("prompt_on_closed", mcp.Description("Prompt this task's agent once when the linked MR becomes closed without merge")),
@@ -1213,8 +1325,12 @@ func (s *Server) registerAddBranchToTaskTool() {
 func (s *Server) registerAddWorkspaceSourcesTool() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("add_workspace_sources_kandev",
-			mcp.WithDescription("Attach repository and folder workspace sources to an idle task. task_id defaults to the current task."),
+			mcp.WithDescription("Attach repository and folder workspace sources to an idle task. A task may update itself or its same-workspace direct child. Exact retries are idempotent."),
 			mcp.WithString(mcpKeyTaskID, mcp.Description("Task to update. Defaults to the current task.")),
+			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithDestructiveHintAnnotation(false),
+			mcp.WithIdempotentHintAnnotation(true),
+			mcp.WithOpenWorldHintAnnotation(true),
 			mcp.WithArray("sources", mcp.Required(), mcp.MinItems(1),
 				mcp.Description("Ordered source objects. Each has kind repository or folder and the documented fields for that kind."),
 				mcp.Items(map[string]any{"type": "object"}),
@@ -1233,11 +1349,8 @@ func (s *Server) addWorkspaceSourcesHandler() server.ToolHandlerFunc {
 		if taskID == "" {
 			return mcp.NewToolResultError("task_id is required (no current task context to default to)"), nil
 		}
-		// A task-mode MCP server is bound to one live task. Never let an agent
-		// use this mutation tool as a cross-task capability: the backend tunnel
-		// has no authenticated user principal to authorize arbitrary task IDs.
-		if s.taskID == "" || taskID != s.taskID {
-			return mcp.NewToolResultError("task_id is not available in this session"), nil
+		if s.taskID == "" || s.sessionID == "" {
+			return mcp.NewToolResultError("task source provenance is unavailable in this session"), nil
 		}
 		arguments, ok := req.Params.Arguments.(map[string]interface{})
 		if !ok {
@@ -1247,7 +1360,8 @@ func (s *Server) addWorkspaceSourcesHandler() server.ToolHandlerFunc {
 		if !ok {
 			return mcp.NewToolResultError("sources is required"), nil
 		}
-		payload := map[string]interface{}{mcpKeyTaskID: taskID, "sources": sources}
+		// Provenance is server-authored and intentionally absent from the callable schema.
+		payload := map[string]interface{}{mcpKeyTaskID: taskID, "sources": sources, "caller_task_id": s.taskID, "caller_session_id": s.sessionID}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPAddWorkspaceSources, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
@@ -1651,12 +1765,6 @@ func buildWalkthroughStepSchemaItem() map[string]any {
 // to keep the registration body short and to deduplicate the JSON-schema
 // keyword strings (linter goconst rules).
 func buildQuestionSchemaItem() map[string]any {
-	const typeKey = "type"
-	const propsKey = "properties"
-	const reqKey = "required"
-	const objType = "object"
-	const stringType = "string"
-
 	str := func(desc string) map[string]any {
 		return map[string]any{typeKey: stringType, descriptionArg: desc}
 	}

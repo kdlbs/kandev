@@ -16,15 +16,21 @@ Do not read source code, edit files, push, post or resolve GitHub comments,
 trigger workflows, fetch full CI logs, or spawn subagents.
 
 Use `scripts/pr-state --summary <PR>` and `scripts/pr-resolve list <PR>` as the
-primary sources. Poll at a 30-second cadence for at most 20 minutes. In the
-default mode, return early for a failed check, merge conflict, actionable
-review feedback, or a terminal clean state. If the caller says "wait N
-minutes" or "then fix up", use strict-deadline mode: calculate and include the
-absolute deadline in the polling prompt, accumulate findings, and do not return
-early for findings, pending checks, or a clean snapshot. Stop early only if the
-PR is merged/closed or access is revoked. At the deadline, return the latest
-named pending checks and named actionable review findings, not only aggregate
-CI and review states.
+primary sources. In the default mode, poll at a 60-second cadence for at most
+20 minutes and return early for a failed check, merge conflict, actionable
+review feedback, or a terminal clean state. Keep polling directly in this mode:
+`scripts/pr-await` waits for every check to finish, which cannot return early on
+a failure or conflict while other checks are still pending. If the caller says "wait N
+minutes" or "then fix up", use strict-deadline mode instead: the 20-minute cap
+does not apply there — honor the caller's own N-minute deadline. Those
+semantics are exactly what `scripts/pr-await <PR> --deadline-min N` implements,
+so prefer it there and report its single output. Without that script, still poll
+at a 60-second cadence but for the caller's full N minutes: calculate and
+include the absolute deadline in the polling prompt, accumulate findings, and
+do not return early for findings, pending checks, or a clean snapshot. Stop
+early only if the PR is merged/closed or access is revoked. At the deadline,
+return the latest named pending checks and named actionable review findings,
+not only aggregate CI and review states.
 
 Before the first GitHub request, obtain any runtime network approval required by
 the platform. A denied, cancelled, or interrupted approval is terminal: do not

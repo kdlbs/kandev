@@ -2,7 +2,9 @@ package backendapp
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -30,6 +32,7 @@ func provideLifecycleManager(
 	agentRegistry *registry.Registry,
 	secretStore secrets.SecretStore,
 	baseBranchProvider lifecycle.BaseBranchProvider,
+	comparisonTargetProvider lifecycle.ComparisonTargetProvider,
 	managedRuntimeSelections managedruntime.SelectionReader,
 ) (*lifecycle.Manager, error) {
 	log.Info("Initializing Agent Manager...")
@@ -90,7 +93,7 @@ func provideLifecycleManager(
 	}
 	credsMgr.AddProvider(credentials.NewEnvProvider("KANDEV_"))
 	credsMgr.AddProvider(credentials.NewAugmentSessionProvider())
-	if credsFile := os.Getenv("KANDEV_CREDENTIALS_FILE"); credsFile != "" {
+	if credsFile := credentialFilePath(cfg); credsFile != "" {
 		credsMgr.AddProvider(credentials.NewFileProvider(credsFile))
 	}
 
@@ -122,6 +125,9 @@ func provideLifecycleManager(
 	preparerRegistry.Register(models.ExecutorTypeSSH, lifecycle.NewSSHPreparer(log))
 	lifecycleMgr.SetPreparerRegistry(preparerRegistry)
 	lifecycleMgr.SetSecretStore(secretStore)
+	if err := lifecycleMgr.SetAgentctlStartupConfig(cfg.ManagedAgentctlStartupConfig()); err != nil {
+		return nil, fmt.Errorf("configure managed agentctl startup: %w", err)
+	}
 	// Record the standalone agentctl control-server PID (populated by
 	// provideAgentctlLauncher, which runs before this) so local/standalone
 	// executor rows carry a real host-local liveness handle.
@@ -138,6 +144,9 @@ func provideLifecycleManager(
 	// Wire the base-branch provider before Start so recovered executions are
 	// seeded during startup as well as newly-created executions.
 	lifecycleMgr.SetBaseBranchProvider(baseBranchProvider)
+	// Wire the comparison-target provider before Start so recovered executions
+	// hydrate the exact provider-qualified ref before their first status poll.
+	lifecycleMgr.SetComparisonTargetProvider(comparisonTargetProvider)
 
 	if err := lifecycleMgr.Start(ctx); err != nil {
 		return nil, err
@@ -147,4 +156,11 @@ func provideLifecycleManager(
 		zap.Int("runtimes", len(executorRegistry.List())),
 		zap.Int("agent_types", len(agentRegistry.List())))
 	return lifecycleMgr, nil
+}
+
+func credentialFilePath(cfg *config.Config) string {
+	if cfg != nil {
+		return strings.TrimSpace(cfg.Credentials.File)
+	}
+	return strings.TrimSpace(os.Getenv("KANDEV_CREDENTIALS_FILE"))
 }

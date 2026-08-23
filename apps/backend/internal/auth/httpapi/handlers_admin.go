@@ -128,7 +128,7 @@ func (h *Handlers) acceptInvite(c *gin.Context) {
 		h.writeAuthError(c, err)
 		return
 	}
-	setSessionCookie(c, h.svc.CookieName(), token, h.svc.SessionTTL())
+	setSessionCookie(c, h.svc.CookieNameForRequest(c.Request), token, h.svc.SessionTTL())
 	c.JSON(http.StatusOK, gin.H{"user": user})
 }
 

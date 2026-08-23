@@ -51,6 +51,9 @@ export function useSyncState(activeWorkspaceId: string) {
           updated: res.result.updated_count,
         }),
       );
+      if (res.result.warnings?.length) {
+        toast.warning(res.result.warnings.join("\n"));
+      }
       await refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t(MSG_IMPORT_FAIL));

@@ -314,7 +314,9 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     // --- 7. Uninstall via UI (with confirmation): row disappears, package
     // directory tree is removed from disk. ---
     await pluginRow.getByRole("button", { name: "Uninstall" }).click();
-    await testPage.getByRole("button", { name: "Confirm uninstall" }).click();
+    await expect(testPage.getByTestId("plugin-uninstall-confirm-popover")).toContainText("E2E");
+    await expect(testPage.locator('[data-slot="dialog-overlay"]')).toHaveCount(0);
+    await testPage.getByTestId("plugin-uninstall-confirm").click();
     await expect(pluginRow).toHaveCount(0, { timeout: 10_000 });
 
     const pluginDir = path.join(pluginsDir, PLUGIN_ID);
@@ -463,6 +465,37 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
 
     await testPage.unroute("**/api/plugins/marketplace");
     await testPage.unroute("**/api/plugins/marketplace/refresh");
+  });
+
+  test("row and detail uninstall confirmations stay local to their initiating controls", async ({
+    testPage,
+  }) => {
+    test.setTimeout(60_000);
+
+    await openInstallDialog(testPage);
+    await uploadPackage(testPage, PACKAGE_PATH);
+    const pluginRow = testPage.getByTestId(`plugin-row-${PLUGIN_ID}`);
+    await expect(pluginRow).toBeVisible({ timeout: 15_000 });
+
+    await pluginRow.getByRole("button", { name: "Uninstall" }).click();
+    const rowConfirmation = testPage.getByTestId("plugin-uninstall-confirm-popover");
+    await expect(rowConfirmation).toContainText("Kandev E2E Fixture Plugin");
+    await expect(testPage.locator('[data-slot="dialog-overlay"]')).toHaveCount(0);
+    await rowConfirmation.getByRole("button", { name: "Cancel" }).click();
+    await expect(rowConfirmation).toHaveCount(0);
+
+    await pluginRow.click({ position: { x: 600, y: 12 } });
+    await expect(testPage).toHaveURL(new RegExp(`/settings/plugins/${PLUGIN_ID}$`));
+    const detail = testPage.getByTestId(`plugin-detail-${PLUGIN_ID}`);
+    await expect(detail).toBeVisible();
+    await detail.getByRole("button", { name: "Uninstall" }).click();
+
+    const detailConfirmation = testPage.getByTestId("plugin-uninstall-confirm-popover");
+    await expect(detailConfirmation).toContainText("Kandev E2E Fixture Plugin");
+    await expect(testPage.locator('[data-slot="dialog-overlay"]')).toHaveCount(0);
+    await testPage.getByTestId("plugin-uninstall-confirm").click();
+    await expect(testPage).toHaveURL(/\/settings\/plugins$/);
+    await expect(testPage.getByTestId(`plugin-row-${PLUGIN_ID}`)).toHaveCount(0);
   });
 
   test("shows boot failure diagnostics and retries an errored plugin", async ({
@@ -817,6 +850,18 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
         { timeout: 15_000, intervals: [250, 500, 1000] },
       )
       .toBe("s3cret-roundtrip");
+
+    // --- Uninstall from the detail danger zone: the confirmation stays at
+    // the initiating control and only successful cleanup returns to the list. ---
+    await testPage.goto(`/settings/plugins/${PLUGIN_ID}`);
+    const detail = testPage.getByTestId(`plugin-detail-${PLUGIN_ID}`);
+    await expect(detail).toBeVisible();
+    await detail.getByRole("button", { name: "Uninstall" }).click();
+    await expect(testPage.getByTestId("plugin-uninstall-confirm-popover")).toContainText("E2E");
+    await expect(testPage.locator('[data-slot="dialog-overlay"]')).toHaveCount(0);
+    await testPage.getByTestId("plugin-uninstall-confirm").click();
+    await expect(testPage).toHaveURL(/\/settings\/plugins$/);
+    await expect(testPage.getByTestId(`plugin-row-${PLUGIN_ID}`)).toHaveCount(0);
   });
 
   test("uploading a corrupted package surfaces install-plugin-error", async ({ testPage }) => {

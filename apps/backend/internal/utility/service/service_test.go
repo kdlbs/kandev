@@ -6,6 +6,7 @@ import (
 	"errors"
 	"testing"
 
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/utility/models"
 	"github.com/kandev/kandev/internal/utility/profilebinding"
@@ -41,6 +42,50 @@ func TestMigrateLegacyBindingsUpdatesOnlyUnambiguousRows(t *testing.T) {
 	if repo.agents["inherit"].ProfileBindingState != models.ProfileBindingInherit {
 		t.Fatalf("inherit row changed: %#v", repo.agents["inherit"])
 	}
+}
+
+func TestPreparePromptRequestUsesFreshUtilityRouteForTaskBoundCall(t *testing.T) {
+	repo := &fakeRepository{agents: map[string]*models.UtilityAgent{
+		"utility": {ID: "utility", AgentProfileID: "dynamic", ProfileBindingState: models.ProfileBindingExplicit, Prompt: "summarize"},
+	}}
+	resolver := &recordingExecutionDetailsResolver{}
+	svc := NewService(repo)
+	svc.SetProfileResolver(fakeProfileResolver{profile: &agentsettingsmodels.AgentProfile{ID: "dynamic", AgentID: "dynamic"}})
+	svc.SetExecutionProfileResolver(resolver)
+
+	ctx := &template.Context{SessionID: "task-session"}
+	first, err := svc.PreparePromptRequest(context.Background(), "utility", ctx, nil, false)
+	if err != nil {
+		t.Fatalf("first PreparePromptRequest: %v", err)
+	}
+	second, err := svc.PreparePromptRequest(context.Background(), "utility", ctx, nil, false)
+	if err != nil {
+		t.Fatalf("second PreparePromptRequest: %v", err)
+	}
+	if first.RouteSessionID == "" || second.RouteSessionID == "" || first.RouteSessionID == second.RouteSessionID {
+		t.Fatalf("route IDs = %q and %q, want distinct utility invocations", first.RouteSessionID, second.RouteSessionID)
+	}
+	if len("utility:") > len(first.RouteSessionID) || first.RouteSessionID[:len("utility:")] != "utility:" ||
+		len("utility:") > len(second.RouteSessionID) || second.RouteSessionID[:len("utility:")] != "utility:" {
+		t.Fatalf("route IDs = %q and %q, want utility prefix", first.RouteSessionID, second.RouteSessionID)
+	}
+	if resolver.sessions[0] == "task-session" || resolver.sessions[1] == "task-session" {
+		t.Fatalf("resolver received task session identity: %#v", resolver.sessions)
+	}
+}
+
+type recordingExecutionDetailsResolver struct{ sessions []string }
+
+func (r *recordingExecutionDetailsResolver) ResolveExecution(context.Context, string) (*agentsettingsmodels.AgentProfile, string, error) {
+	return nil, "", nil
+}
+
+func (r *recordingExecutionDetailsResolver) ResolveExecutionDetails(_ context.Context, sessionID, _ string) (agentruntime.ProfileExecution, error) {
+	r.sessions = append(r.sessions, sessionID)
+	return agentruntime.ProfileExecution{
+		LogicalProfileID: "dynamic", ExecutionProfileID: "concrete", RouteSessionID: sessionID,
+		Generation: 1, Profile: &agentsettingsmodels.AgentProfile{ID: "concrete", AgentID: "claude-acp"},
+	}, nil
 }
 
 func TestMigrateLegacyBindingsNormalizesEmptyUnconfiguredBuiltin(t *testing.T) {

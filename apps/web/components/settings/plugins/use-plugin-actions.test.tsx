@@ -13,6 +13,20 @@ const enablePlugin = vi.fn(async () => ({ enabled: true }));
 const getPlugin = vi.fn<() => Promise<PluginRecord>>();
 const syncPlugins = vi.fn();
 const listPlugins = vi.fn(async () => []);
+const uninstallPlugin = vi.fn<() => Promise<{ deleted: boolean }>>();
+const { toastError, toastSuccess, toastWarning } = vi.hoisted(() => ({
+  toastError: vi.fn(),
+  toastSuccess: vi.fn(),
+  toastWarning: vi.fn(),
+}));
+
+vi.mock("@/lib/toast/sonner", () => ({
+  toast: {
+    error: (...args: unknown[]) => toastError(...args),
+    success: (...args: unknown[]) => toastSuccess(...args),
+    warning: (...args: unknown[]) => toastWarning(...args),
+  },
+}));
 
 vi.mock("@/lib/plugins/host", () => ({
   loadPlugins: (...args: unknown[]) => loadPlugins(...(args as [])),
@@ -31,6 +45,7 @@ vi.mock("@/lib/api/domains/plugins-api", async () => {
     getPlugin: (...args: unknown[]) => getPlugin(...(args as [])),
     syncPlugins: (...args: unknown[]) => syncPlugins(...(args as [])),
     listPlugins: (...args: unknown[]) => listPlugins(...(args as [])),
+    uninstallPlugin: (...args: unknown[]) => uninstallPlugin(...(args as [])),
   };
 });
 
@@ -70,6 +85,10 @@ beforeEach(() => {
   syncPlugins.mockReset();
   listPlugins.mockClear();
   listPlugins.mockResolvedValue([]);
+  uninstallPlugin.mockReset();
+  toastError.mockReset();
+  toastSuccess.mockReset();
+  toastWarning.mockReset();
 });
 
 describe("usePluginActions — install/update", () => {
@@ -223,5 +242,54 @@ describe("usePluginActions — handleSync result", () => {
     });
 
     expect(outcome).toEqual({ ok: false });
+  });
+});
+
+describe("usePluginActions — uninstall", () => {
+  it("confirms an explicitly supplied target and keeps busy state until API cleanup settles", async () => {
+    const plugin = activeRecord();
+    let resolveUninstall!: (result: { deleted: boolean }) => void;
+    uninstallPlugin.mockReturnValueOnce(
+      new Promise<{ deleted: boolean }>((resolve) => {
+        resolveUninstall = resolve;
+      }),
+    );
+
+    const { result } = renderHook(() => usePluginActions(), { wrapper });
+    let confirmation!: Promise<boolean>;
+    act(() => {
+      confirmation = result.current.confirmUninstall(plugin);
+    });
+
+    await waitFor(() => expect(result.current.uninstallBusy).toBe(true));
+    expect(uninstallPlugin).toHaveBeenCalledWith(plugin.id);
+    expect(unloadPlugin).not.toHaveBeenCalled();
+
+    resolveUninstall({ deleted: true });
+    await act(async () => {
+      await expect(confirmation).resolves.toBe(true);
+    });
+
+    expect(unloadPlugin).toHaveBeenCalledWith(plugin.id);
+    await waitFor(() => expect(result.current.uninstallBusy).toBe(false));
+  });
+
+  it("keeps localized failure feedback and releases busy state when uninstall fails", async () => {
+    const plugin = activeRecord();
+    uninstallPlugin.mockRejectedValueOnce(new Error("API key revoke failed"));
+
+    const { result } = renderHook(() => usePluginActions(), { wrapper });
+    let confirmation!: Promise<boolean>;
+    act(() => {
+      confirmation = result.current.confirmUninstall(plugin);
+    });
+
+    await act(async () => {
+      await expect(confirmation).resolves.toBe(false);
+    });
+
+    expect(toastError).toHaveBeenCalledWith("API key revoke failed");
+    expect(unloadPlugin).not.toHaveBeenCalled();
+    expect(result.current.uninstallBusy).toBe(false);
   });
 });

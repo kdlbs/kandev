@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable max-lines -- this component owns the chat timeline and composer composition. */
 
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { toast } from "@/lib/toast/sonner";
@@ -20,6 +21,7 @@ import { formatRelativeTime } from "@/lib/utils";
 import { MarkdownComment } from "./markdown-comment";
 import { AgentTurnPanel } from "./components/agent-turn-panel";
 import { RunErrorEntry } from "./components/run-error-entry";
+import { TaskChatLaunchError } from "./components/task-chat-launch-error";
 import { UserCommentRunBadge } from "./components/user-comment-run-badge";
 import { buildCommentTurnContext, type CommentTurnContext } from "./turn-context";
 import { groupSessionsForTimeline, groupSortKey, type SessionGroup } from "./session-groups";
@@ -36,6 +38,8 @@ import {
   mergeChatEntries,
   type ChatEntry,
 } from "./chat-entries";
+import type { TaskRepository } from "@/lib/types/http";
+import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 
 import { useTranslation } from "react-i18next";
 import { DecisionTimelineEntry, TimelineEntry } from "./task-chat-timeline-entries";
@@ -47,6 +51,7 @@ const PROMPT_INSERTED_MESSAGE_KEY = "task:enhancedPromptInserted";
 
 type TaskChatProps = {
   taskId: string;
+  workspaceId?: string;
   comments: TaskComment[];
   timeline?: TimelineEvent[];
   sessions?: TaskSession[];
@@ -58,6 +63,8 @@ type TaskChatProps = {
   onCommentsChanged?: () => void;
   taskTitle?: string;
   taskDescription?: string;
+  statusSummary?: TaskStatusSummary | null;
+  repositories?: TaskRepository[];
 };
 
 function partitionGroups(groups: SessionGroup[]): {
@@ -516,7 +523,17 @@ function useCommentHashScroll(comments: TaskComment[]): void {
   }, [comments]);
 }
 
-function ChatEntries({ taskId, entries }: { taskId: string; entries: ChatEntry[] }) {
+function ChatEntries({
+  taskId,
+  workspaceId,
+  repositories,
+  entries,
+}: {
+  taskId: string;
+  workspaceId: string;
+  repositories?: TaskRepository[];
+  entries: ChatEntry[];
+}) {
   return (
     <>
       {entries.map((entry) => {
@@ -538,7 +555,15 @@ function ChatEntries({ taskId, entries }: { taskId: string; entries: ChatEntry[]
           return <DecisionTimelineEntry key={`d-${entry.data.id}`} decision={entry.data} />;
         }
         if (entry.kind === "error") {
-          return <RunErrorEntry key={`re-${entry.data.id}`} taskId={taskId} error={entry.data} />;
+          return (
+            <RunErrorEntry
+              key={`re-${entry.data.id}`}
+              taskId={taskId}
+              workspaceId={workspaceId}
+              repositories={repositories}
+              error={entry.data}
+            />
+          );
         }
         // Session entries are intentionally not rendered in the Chat
         // tab: every agent message below already shows the same agent
@@ -553,6 +578,7 @@ function ChatEntries({ taskId, entries }: { taskId: string; entries: ChatEntry[]
 
 export function TaskChat({
   taskId,
+  workspaceId = "",
   comments,
   timeline = [],
   sessions = [],
@@ -564,6 +590,8 @@ export function TaskChat({
   onCommentsChanged,
   taskTitle,
   taskDescription,
+  statusSummary,
+  repositories,
 }: TaskChatProps) {
   const { t } = useTranslation();
   const [showOlder, setShowOlder] = useState(false);
@@ -620,11 +648,23 @@ export function TaskChat({
           {t("task:showOlderSessions", { count: olderGroups.length })}
         </button>
       )}
+      <TaskChatLaunchError
+        taskId={taskId}
+        workspaceId={workspaceId}
+        statusSummary={statusSummary}
+        runErrors={runErrors}
+        repositories={repositories}
+      />
       {isEmpty ? (
         <p className="text-sm text-muted-foreground py-4">{t("task:noCommentsYet")}</p>
       ) : (
         <div data-testid="task-chat-entries">
-          <ChatEntries taskId={taskId} entries={entries} />
+          <ChatEntries
+            taskId={taskId}
+            workspaceId={workspaceId}
+            repositories={repositories}
+            entries={entries}
+          />
         </div>
       )}
       {!readOnly && (

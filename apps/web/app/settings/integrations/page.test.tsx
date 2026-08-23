@@ -1,5 +1,6 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Component, IntegrationSettingsActionProps } from "@kandev/plugin-sdk";
 import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
 import { IntegrationsIndexPage } from "@/components/integrations/integrations-index-page";
 import { pluginRegistry } from "@/lib/plugins/registry";
@@ -46,14 +47,35 @@ vi.mock("@/hooks/domains/sentry/use-sentry-enabled", () => ({
 }));
 
 const PLUGIN_ID = "plugin-source-control";
+const SOURCE_CONTROL_ID = "source-control";
+const SOURCE_CONTROL_DESCRIPTION = "Connect a source-control provider.";
 
 function registerIntegration() {
   pluginRegistry.forPlugin(PLUGIN_ID).registerIntegrationSettings({
-    id: "source-control",
+    id: SOURCE_CONTROL_ID,
     label: "Source Control",
-    description: "Connect a source-control provider.",
+    description: SOURCE_CONTROL_DESCRIPTION,
     icon: "cloud",
     Component: () => null,
+  });
+}
+
+function registerIntegrationWithAction(
+  pluginId = PLUGIN_ID,
+  id = SOURCE_CONTROL_ID,
+  action?: Component<IntegrationSettingsActionProps>,
+) {
+  const labels: Record<string, string> = {
+    "source-control": "Source Control",
+    "throwing-provider": "Throwing Provider",
+  };
+  pluginRegistry.forPlugin(pluginId).registerIntegrationSettings({
+    id,
+    label: labels[id] ?? "Healthy Provider",
+    description: SOURCE_CONTROL_DESCRIPTION,
+    icon: "cloud",
+    Component: () => null,
+    action,
   });
 }
 
@@ -116,10 +138,17 @@ describe("IntegrationsIndexPage", () => {
     expect(window.localStorage.getItem("kandev:integrations:hideDisabledInNav:v1")).toBeNull();
   });
 
-  it("navigates when the integration label is clicked", () => {
+  it("exposes one full-card navigation target for a native integration", () => {
     renderPage();
 
-    fireEvent.click(screen.getByRole("link", { name: "Azure DevOps" }));
+    const card = screen.getByTestId("integration-card-azure-devops");
+    const links = within(card).getAllByRole("link");
+
+    expect(links).toHaveLength(1);
+    expect(links[0].getAttribute("aria-label")).toBe("Azure DevOps");
+    expect(links[0].getAttribute("href")).toBe("/settings/integrations/azure-devops");
+
+    fireEvent.click(links[0]);
 
     expect(pushNavigationStateSpy).toHaveBeenCalledWith(
       {},
@@ -157,9 +186,57 @@ describe("IntegrationsIndexPage plugin contributions", () => {
 
     renderPage();
 
-    const link = screen.getByRole("link", { name: /source control/i });
-    expect(link.getAttribute("href")).toBe("/settings/integrations/source-control");
-    expect(screen.getByText("Connect a source-control provider.")).not.toBeNull();
+    const card = screen.getByTestId(`integration-card-${PLUGIN_ID}-${SOURCE_CONTROL_ID}`);
+    const links = within(card).getAllByRole("link");
+
+    expect(links).toHaveLength(1);
+    const link = links[0];
+    expect(link.getAttribute("aria-label")).toBe("Source Control");
+    expect(link.getAttribute("href")).toBe(`/settings/integrations/${SOURCE_CONTROL_ID}`);
+    expect(screen.getByText(SOURCE_CONTROL_DESCRIPTION)).not.toBeNull();
+  });
+
+  it("renders the plugin action with the index surface and routed workspace", () => {
+    const actionCalls: Array<{ workspaceId?: string; surface: "detail" | "index" }> = [];
+    const Action = ({ workspaceId, surface }: IntegrationSettingsActionProps) => {
+      actionCalls.push({ workspaceId, surface });
+      return <span data-testid="plugin-index-action">Action</span>;
+    };
+    registerIntegrationWithAction(PLUGIN_ID, SOURCE_CONTROL_ID, Action);
+
+    renderPage("workspace-42");
+
+    expect(screen.getByTestId("plugin-index-action")).not.toBeNull();
+    expect(actionCalls).toEqual([{ workspaceId: "workspace-42", surface: "index" }]);
+  });
+
+  it("passes an undefined workspace to a plugin action on the global index route", () => {
+    const actionCalls: Array<{ workspaceId?: string; surface: "detail" | "index" }> = [];
+    const Action = ({ workspaceId, surface }: IntegrationSettingsActionProps) => {
+      actionCalls.push({ workspaceId, surface });
+      return null;
+    };
+    registerIntegrationWithAction(PLUGIN_ID, SOURCE_CONTROL_ID, Action);
+
+    renderPage();
+
+    expect(actionCalls).toEqual([{ workspaceId: undefined, surface: "index" }]);
+  });
+
+  it("contains a throwing plugin action without removing other integration cards", () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const ThrowingAction = () => {
+      throw new Error("plugin action failed");
+    };
+    const HealthyAction = () => <span data-testid="healthy-plugin-action">Healthy</span>;
+    registerIntegrationWithAction(PLUGIN_ID, "throwing-provider", ThrowingAction);
+    registerIntegrationWithAction("plugin-healthy", "healthy-provider", HealthyAction);
+
+    renderPage();
+
+    expect(screen.getByRole("link", { name: /throwing provider/i })).not.toBeNull();
+    expect(screen.getByRole("link", { name: /healthy provider/i })).not.toBeNull();
+    expect(screen.getByTestId("healthy-plugin-action")).not.toBeNull();
   });
 
   it("uses the workspace-scoped plugin integration path", () => {
@@ -168,7 +245,7 @@ describe("IntegrationsIndexPage plugin contributions", () => {
     renderPage("workspace one");
 
     expect(screen.getByRole("link", { name: /source control/i }).getAttribute("href")).toBe(
-      "/settings/workspaces/workspace%20one/integrations/source-control",
+      `/settings/workspaces/workspace%20one/integrations/${SOURCE_CONTROL_ID}`,
     );
   });
 

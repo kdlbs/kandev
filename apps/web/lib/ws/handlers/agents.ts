@@ -1,7 +1,13 @@
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
-import { compareTimestamps, toAgentProfileOption } from "@/lib/state/slices/settings/types";
+import {
+  compareTimestamps,
+  isStaleAvailableAgentsSnapshot,
+  refreshProfileCapabilities,
+  refreshSettingsAgentsCapabilities,
+  toAgentProfileOption,
+} from "@/lib/state/slices/settings/types";
 import { normalizeAgentProfile } from "@/lib/api/domains/agent-profile-normalize";
 import type { AgentProfile } from "@/lib/types/agent-profile";
 
@@ -89,7 +95,12 @@ function handleProfileCreated(
   deletionTombstones.delete(normalized.id); // a genuinely newer create wins
   const agentId = getAgentId(profile);
   const agent = state.settingsAgents.items.find((a) => a.id === agentId);
-  const agentStub = { id: agentId, name: agent?.name ?? "" };
+  const agentStub = {
+    id: agentId,
+    name: agent?.name ?? "",
+    capability_status: agent?.capability_status,
+    capability_error: agent?.capability_error,
+  };
   const nextProfiles = [
     ...state.agentProfiles.items.filter((p) => p.id !== normalized.id),
     toAgentProfileOption(agentStub, normalized),
@@ -125,7 +136,12 @@ function handleProfileUpdated(
   if (isStaleProfileEvent(state, normalized, eventTimestamp)) return {};
   const agentId = getAgentId(profile);
   const agent = state.settingsAgents.items.find((a) => a.id === agentId);
-  const agentStub = { id: agentId, name: agent?.name ?? "" };
+  const agentStub = {
+    id: agentId,
+    name: agent?.name ?? "",
+    capability_status: agent?.capability_status,
+    capability_error: agent?.capability_error,
+  };
   const nextProfiles = state.agentProfiles.items.map((p) =>
     p.id === normalized.id ? toAgentProfileOption(agentStub, normalized) : p,
   );
@@ -181,15 +197,27 @@ function handleProfileDeleted(
 export function registerAgentsHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     "agent.available.updated": (message) => {
-      store.setState((state) => ({
-        ...state,
-        availableAgents: {
-          items: message.payload.agents ?? [],
-          tools: message.payload.tools ?? state.availableAgents.tools,
-          loaded: true,
-          loading: false,
-        },
-      }));
+      const agents = message.payload.agents ?? [];
+      store.setState((state) => {
+        if (isStaleAvailableAgentsSnapshot(state.availableAgents.items, agents)) return state;
+        return {
+          ...state,
+          availableAgents: {
+            items: agents,
+            tools: message.payload.tools ?? state.availableAgents.tools,
+            loaded: true,
+            loading: false,
+          },
+          agentProfiles: {
+            ...state.agentProfiles,
+            items: refreshProfileCapabilities(state.agentProfiles.items, agents),
+          },
+          settingsAgents: {
+            ...state.settingsAgents,
+            items: refreshSettingsAgentsCapabilities(state.settingsAgents.items, agents),
+          },
+        };
+      });
     },
     "agent.install.started": (message) => {
       // Payload is the full job snapshot (queued → running transitions both emit this).

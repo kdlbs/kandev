@@ -1060,6 +1060,75 @@ func TestApplyWorkspaceAndTaskListPreferencesKanbanHiddenStepIDs(t *testing.T) {
 	}
 }
 
+func TestApplyWorkspaceAndTaskListPreferencesAutoHideWorkflowIDs(t *testing.T) {
+	makeWorkflowIDs := func(n int) []string {
+		ids := make([]string, n)
+		for i := range ids {
+			ids[i] = fmt.Sprintf("wf-%d", i)
+		}
+		return ids
+	}
+	duplicateWorkflowIDs := make([]string, maxWorkflowIDsWithAutoHideEmptySteps+1)
+	for i := range duplicateWorkflowIDs {
+		duplicateWorkflowIDs[i] = "wf-duplicate"
+	}
+
+	tests := []struct {
+		name    string
+		value   []string
+		want    []string
+		wantErr string
+	}{
+		{name: "empty list clears the preference", value: []string{}, want: []string{}},
+		{
+			name:  "normalizes duplicate workflow ids",
+			value: []string{"wf-b", "wf-a", "wf-b"},
+			want:  []string{"wf-a", "wf-b"},
+		},
+		{
+			name:  "applies the count limit after deduplication",
+			value: duplicateWorkflowIDs,
+			want:  []string{"wf-duplicate"},
+		},
+		{
+			name:    "rejects too many workflow ids",
+			value:   makeWorkflowIDs(maxWorkflowIDsWithAutoHideEmptySteps + 1),
+			wantErr: fmt.Sprintf("workflow_ids_with_auto_hide_empty_steps: max %d workflow ids allowed", maxWorkflowIDsWithAutoHideEmptySteps),
+		},
+		{
+			name:    "rejects an oversized preference",
+			value:   []string{strings.Repeat("x", maxUserPreferenceBlobBytes+1)},
+			wantErr: fmt.Sprintf("workflow_ids_with_auto_hide_empty_steps: max %d bytes allowed", maxUserPreferenceBlobBytes),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings := &models.UserSettings{
+				WorkflowIDsWithAutoHideEmptySteps: []string{"wf-existing"},
+			}
+			err := applyWorkspaceAndTaskListPreferences(settings, &UpdateUserSettingsRequest{
+				WorkflowIDsWithAutoHideEmptySteps: &tt.value,
+			})
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("error = %v, want error containing %q", err, tt.wantErr)
+				}
+				if !reflect.DeepEqual(settings.WorkflowIDsWithAutoHideEmptySteps, []string{"wf-existing"}) {
+					t.Fatalf("rejected update changed settings to %#v", settings.WorkflowIDsWithAutoHideEmptySteps)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !reflect.DeepEqual(settings.WorkflowIDsWithAutoHideEmptySteps, tt.want) {
+				t.Fatalf("WorkflowIDsWithAutoHideEmptySteps = %#v, want %#v", settings.WorkflowIDsWithAutoHideEmptySteps, tt.want)
+			}
+		})
+	}
+}
+
 // makeSidebarViews builds n SidebarView fixtures with distinct IDs and names.
 func makeSidebarViews(n int) []models.SidebarView {
 	views := make([]models.SidebarView, n)

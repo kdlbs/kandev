@@ -76,11 +76,13 @@ function defaultDisplaySettings() {
     eligibleWorkflows: [],
     snapshots: {},
     hiddenWorkflowStepIds: {},
+    workflowIdsWithAutoHideEmptySteps: [],
     onWorkflowChange: vi.fn(),
     onRepositoryChange: vi.fn(),
     onTogglePreviewOnClick: vi.fn(),
     onToggleTasksListShowDetails: vi.fn(),
     onToggleStepVisibility: vi.fn(),
+    onToggleAutoHideEmpty: vi.fn(),
     effectiveTaskListingView: "kanban",
     onViewModeChange: vi.fn(),
   };

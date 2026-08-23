@@ -31,8 +31,11 @@ type RoutingHealthResponse struct {
 }
 
 // AgentRoutePreview is one row in the workspace routing preview table.
-// TierSource is "inherit" when the agent uses the workspace default and
-// "override" when its override blob sets a tier explicitly.
+// TierSource names the precedence level that supplied EffectiveTier:
+// one of "wake_reason", "override", "role", "workspace" (see
+// routing.PreviewItem.TierSource / effectiveTier). Always computed
+// with an empty run reason, so this never reports "wake_reason" even
+// when the agent's own wake-reason policy would shadow it at runtime.
 //
 // PrimaryProviderID/PrimaryModel reflect the configured intent (first
 // entry in the effective provider order). CurrentProviderID/
@@ -72,21 +75,26 @@ type RoutingPreviewResponse struct {
 // RouteAttemptDTO mirrors models.RouteAttempt with stable JSON tags for
 // the dashboard run-detail UI. Timestamps are formatted as RFC3339.
 type RouteAttemptDTO struct {
-	Seq                int     `json:"seq"`
-	ExecutionProfileID string  `json:"execution_profile_id,omitempty"`
-	ProviderID         string  `json:"provider_id"`
-	Model              string  `json:"model,omitempty"`
-	Tier               string  `json:"tier"`
-	Outcome            string  `json:"outcome"`
-	ErrorCode          string  `json:"error_code,omitempty"`
-	ErrorConfidence    string  `json:"error_confidence,omitempty"`
-	AdapterPhase       string  `json:"adapter_phase,omitempty"`
-	ClassifierRule     string  `json:"classifier_rule,omitempty"`
-	ExitCode           *int    `json:"exit_code,omitempty"`
-	RawExcerpt         string  `json:"raw_excerpt,omitempty"`
-	ResetHint          *string `json:"reset_hint,omitempty"`
-	StartedAt          string  `json:"started_at"`
-	FinishedAt         *string `json:"finished_at,omitempty"`
+	Seq                int    `json:"seq"`
+	ExecutionProfileID string `json:"execution_profile_id,omitempty"`
+	ProviderID         string `json:"provider_id"`
+	Model              string `json:"model,omitempty"`
+	Tier               string `json:"tier"`
+	// TierSource names the precedence level that supplied Tier for this
+	// attempt: one of "wake_reason", "override", "role", "workspace",
+	// or "" for attempts recorded before this column existed or that
+	// never resolved a tier (see models.RouteAttempt.TierSource).
+	TierSource      string  `json:"tier_source,omitempty"`
+	Outcome         string  `json:"outcome"`
+	ErrorCode       string  `json:"error_code,omitempty"`
+	ErrorConfidence string  `json:"error_confidence,omitempty"`
+	AdapterPhase    string  `json:"adapter_phase,omitempty"`
+	ClassifierRule  string  `json:"classifier_rule,omitempty"`
+	ExitCode        *int    `json:"exit_code,omitempty"`
+	RawExcerpt      string  `json:"raw_excerpt,omitempty"`
+	ResetHint       *string `json:"reset_hint,omitempty"`
+	StartedAt       string  `json:"started_at"`
+	FinishedAt      *string `json:"finished_at,omitempty"`
 }
 
 // RunRouting is embedded on the run-detail response so the routing
@@ -130,6 +138,7 @@ func routeAttemptToDTO(a models.RouteAttempt) RouteAttemptDTO {
 		ProviderID:         a.ProviderID,
 		Model:              a.Model,
 		Tier:               a.Tier,
+		TierSource:         a.TierSource,
 		Outcome:            string(a.Outcome),
 		ErrorCode:          a.ErrorCode,
 		ErrorConfidence:    string(a.ErrorConfidence),

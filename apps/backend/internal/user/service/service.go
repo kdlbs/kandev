@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"time"
 
@@ -97,6 +98,7 @@ type UpdateUserSettingsRequest struct {
 	AppStatusBarEnabled               *bool
 	AppStatusBarOrder                 *models.AppStatusBarOrder
 	KanbanHiddenStepIDs               *map[string][]string
+	WorkflowIDsWithAutoHideEmptySteps *[]string
 }
 
 type SystemMetricsDisplaySettingsPatch struct {
@@ -360,6 +362,15 @@ func applyWorkspaceAndTaskListPreferences(settings *models.UserSettings, req *Up
 		}
 		settings.KanbanHiddenStepIDs = *req.KanbanHiddenStepIDs
 	}
+	if req.WorkflowIDsWithAutoHideEmptySteps != nil {
+		workflowIDs, err := normalizeWorkflowIDsWithAutoHideEmptySteps(
+			*req.WorkflowIDsWithAutoHideEmptySteps,
+		)
+		if err != nil {
+			return err
+		}
+		settings.WorkflowIDsWithAutoHideEmptySteps = workflowIDs
+	}
 	return nil
 }
 
@@ -375,8 +386,36 @@ const (
 	// validateKanbanHiddenStepIDs, which both the REST and WebSocket update
 	// paths call, so it isn't bypassable by whichever transport skips a
 	// transport-level guard.
-	maxKanbanHiddenStepIDsTotalBytes = maxUserPreferenceBlobBytes
+	maxKanbanHiddenStepIDsTotalBytes     = maxUserPreferenceBlobBytes
+	maxWorkflowIDsWithAutoHideEmptySteps = 200
 )
+
+func normalizeWorkflowIDsWithAutoHideEmptySteps(workflowIDs []string) ([]string, error) {
+	unique := make(map[string]struct{}, len(workflowIDs))
+	for _, workflowID := range workflowIDs {
+		unique[workflowID] = struct{}{}
+	}
+	if len(unique) > maxWorkflowIDsWithAutoHideEmptySteps {
+		return nil, fmt.Errorf(
+			"workflow_ids_with_auto_hide_empty_steps: max %d workflow ids allowed",
+			maxWorkflowIDsWithAutoHideEmptySteps,
+		)
+	}
+	totalBytes := 0
+	normalized := make([]string, 0, len(unique))
+	for workflowID := range unique {
+		totalBytes += len(workflowID)
+		if totalBytes > maxUserPreferenceBlobBytes {
+			return nil, fmt.Errorf(
+				"workflow_ids_with_auto_hide_empty_steps: max %d bytes allowed",
+				maxUserPreferenceBlobBytes,
+			)
+		}
+		normalized = append(normalized, workflowID)
+	}
+	sort.Strings(normalized)
+	return normalized, nil
+}
 
 // validateKanbanHiddenStepIDs bounds the per-workflow hidden-step-id map so a
 // single settings write cannot grow the users.settings JSON blob unboundedly
@@ -883,6 +922,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
 		"app_status_bar_order":                     settings.AppStatusBarOrder,
 		"kanban_hidden_step_ids":                   settings.KanbanHiddenStepIDs,
+		"workflow_ids_with_auto_hide_empty_steps":  settings.WorkflowIDsWithAutoHideEmptySteps,
 		"revision":                                 settings.Revision,
 		"updated_at":                               settings.UpdatedAt.Format(time.RFC3339),
 	}

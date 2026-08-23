@@ -239,6 +239,10 @@ func (a *Adapter) sendPrompt(
 	// state when the parent prompt completes naturally.
 	a.sweepMonitorsOnPromptEnd(sessionID)
 
+	// Drop any Cursor `cursor/task` metadata for this session that never matched
+	// a subagent tool_call this turn.
+	a.sweepCursorTaskMetaOnPromptEnd(sessionID)
+
 	if a.agentID == codexAgentID && turn.codexCapacityFailure() {
 		const safeMessage = codexModelCapacityErrorMessage
 		a.logger.Info("codex prompt ended with model-capacity evidence",

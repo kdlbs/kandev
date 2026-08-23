@@ -41,6 +41,10 @@ func registerWSHandlers(dispatcher *ws.Dispatcher, svc *Service, log *logger.Log
 func registerHTTPRoutes(router *gin.Engine, svc *Service, log *logger.Logger) {
 	wh := NewWebhookHandler(svc, log)
 	router.POST("/api/v1/automations/webhook/:id", wh.Handle)
+
+	eh := NewExportHandler(svc, log)
+	router.GET("/api/v1/workspaces/:id/automations/export", eh.ExportDocument)
+	router.GET("/api/v1/workspaces/:id/automations/export/zip", eh.ExportZip)
 }
 
 // parseMap parses the WS message payload into a map.

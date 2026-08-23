@@ -65,7 +65,7 @@ func TestAuthenticateExternalProvisionsMember(t *testing.T) {
 		t.Fatalf("provisioned user = %+v, want normalized member", user)
 	}
 	// The minted session authenticates as a non-admin member.
-	identity, ok := f.svc.ResolveSessionToken(ctx, token)
+	identity, ok := f.svc.ResolveSessionToken(ctx, token, "")
 	if !ok || identity.UserID != user.ID || identity.IsAdmin() {
 		t.Fatalf("session identity = %+v ok=%v, want member %s", identity, ok, user.ID)
 	}
@@ -111,7 +111,7 @@ func TestAuthenticateExternalLinksExistingMemberByEmail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("authenticate: %v", err)
 	}
-	identity, ok := f.svc.ResolveSessionToken(ctx, token)
+	identity, ok := f.svc.ResolveSessionToken(ctx, token, "")
 	if !ok || identity.UserID != user.ID || identity.IsAdmin() {
 		t.Fatalf("linked member session = %+v ok=%v, want non-admin member", identity, ok)
 	}

@@ -172,6 +172,39 @@ test.describe.serial("Message Queue task behavior settings", () => {
     await expect(testPage.getByTestId("message-queue-auto-merge-enabled")).toBeEnabled();
   });
 
+  test("configuration override is visible and read-only", async ({ testPage }) => {
+    await testPage.route(`**${MESSAGE_QUEUE_SETTINGS_PATH}`, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          settings: {
+            max_per_session: baseline?.max_per_session ?? 10,
+            merge_enabled: true,
+            auto_merge_enabled: true,
+          },
+          effective: {
+            max_per_session: 43,
+            source: "configuration",
+            locked: true,
+            merge_enabled: true,
+            auto_merge_enabled: true,
+          },
+        } satisfies MessageQueueSettingsResponse),
+      });
+    });
+
+    await testPage.goto("/settings/preferences/task-behavior");
+    await expect(testPage.getByLabel("Maximum messages per session")).toBeDisabled();
+    await expect(testPage.getByTestId("message-queue-effective-value")).toHaveText("43");
+    await expect(testPage.getByTestId("message-queue-source")).toHaveText("Configuration");
+    await expect(testPage.getByText(/Managed by configuration/)).toBeVisible();
+    await expect(testPage.getByText(/KANDEV_QUEUE_MAX_PER_SESSION/)).toHaveCount(0);
+    await expect(testPage.getByTestId("settings-floating-save")).toHaveCount(0);
+    await expect(testPage.getByTestId("message-queue-merge-enabled")).toBeEnabled();
+    await expect(testPage.getByTestId("message-queue-auto-merge-enabled")).toBeEnabled();
+  });
+
   test("member can navigate to the setting but cannot edit it", async ({ testPage }) => {
     await testPage.goto("/settings/preferences/appearance");
     await testPage.waitForFunction(() => Boolean(window.__KANDEV_E2E_STORE__));

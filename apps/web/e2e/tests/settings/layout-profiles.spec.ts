@@ -392,10 +392,80 @@ test.describe("Task layout profile defaults", () => {
     await testPage
       .locator('[data-testid="layout-saved-delete"][data-layout-id="focused-default"]')
       .click({ force: true });
-    await expect(testPage.getByRole("alertdialog")).toContainText(
+    const confirmation = testPage.getByTestId("layout-saved-delete-confirm-popover");
+    await expect(confirmation).toContainText(
       "The built-in Default layout will become the default.",
     );
-    await testPage.getByRole("button", { name: "Cancel" }).click();
+    await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
+    await confirmation.getByRole("button", { name: "Cancel" }).click();
     expect((await apiClient.getUserSettings()).settings.saved_layouts).toHaveLength(1);
+  });
+
+  test("confirms custom layout-profile deletion at the selected profile action", async ({
+    testPage,
+    apiClient,
+  }) => {
+    await apiClient.saveUserSettings({
+      saved_layouts: [
+        {
+          id: "custom-layout-to-delete",
+          name: "Custom layout to delete",
+          is_default: true,
+          layout: noTerminalLayout(),
+          created_at: new Date().toISOString(),
+        },
+      ],
+    });
+
+    const layouts = new LayoutSettingsPage(testPage);
+    await layouts.open();
+    const deleteButton = testPage.getByTestId("layout-profile-delete");
+    await expect(deleteButton).toBeVisible();
+    await deleteButton.click();
+
+    const confirmation = testPage.getByTestId("layout-profile-delete-confirm-popover");
+    await expect(confirmation).toBeVisible();
+    await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
+    await confirmation.getByRole("button", { name: "Cancel" }).click();
+    expect((await apiClient.getUserSettings()).settings.saved_layouts).toHaveLength(1);
+
+    await deleteButton.click();
+    await testPage
+      .getByTestId("layout-profile-delete-confirm-popover")
+      .getByTestId("layout-profile-delete-confirm")
+      .click();
+    await expect(deleteButton).toHaveCount(0);
+
+    await layouts.save();
+    await expect
+      .poll(async () => (await apiClient.getUserSettings()).settings.saved_layouts)
+      .toEqual([]);
+  });
+
+  test("adds Prompt History through the layout editor and restores it into a task", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(180_000);
+    const layouts = new LayoutSettingsPage(testPage);
+    await layouts.open();
+
+    await expect(layouts.editor.locator(".dv-tab", { hasText: "Prompt History" })).toHaveCount(0);
+    await layouts.addPanel("Prompt History");
+
+    // The added panel survives save and is persisted in the default profile.
+    await layouts.save();
+    const saved = (await apiClient.getUserSettings()).settings.saved_layouts;
+    expect(saved).toHaveLength(1);
+    expect(JSON.stringify(saved[0].layout)).toContain("prompt-history");
+
+    // A new task opens with the edited default layout; the panel restores and renders.
+    const task = await createTaskWithSession(apiClient, seedData, "Prompt History Layout Task");
+    await openTask(testPage, task.id);
+    const tab = testPage.locator(".dv-tab", { hasText: "Prompt History" });
+    await expect(tab).toBeVisible({ timeout: 15_000 });
+    await tab.click();
+    await expect(testPage.getByTestId("prompt-history-panel")).toBeVisible();
   });
 });

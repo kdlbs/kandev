@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/agent/executor"
+	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -171,6 +172,22 @@ func TestRestartPassthroughProcessClearsProcessIDBeforeStopping(t *testing.T) {
 		"the old process ID is cleared so the deliberate kill is not auto-restarted")
 	require.True(t, execution.PassthroughStartedAt.IsZero())
 	require.Equal(t, v1.AgentStatusFailed, execution.Status)
+}
+
+func TestRestartPassthroughProcessKeepsOldProcessWhenProfileSecretFails(t *testing.T) {
+	mgr, _, execution := newPassthroughRunnerManager(t)
+	mgr.profileResolver = &mockPassthroughProfileResolver{
+		agentName:      "claude-acp",
+		cliPassthrough: true,
+		envVars:        []settingsmodels.ProfileEnvVar{{Key: "PROFILE_ONLY", SecretID: "deleted-secret"}},
+	}
+	execution.PassthroughProcessID = "pty-old"
+
+	err := mgr.restartPassthroughProcess(context.Background(), execution)
+
+	require.ErrorIs(t, err, ErrProfileSecretUnavailable)
+	require.Equal(t, "pty-old", execution.PassthroughProcessID,
+		"the old process must remain available when replacement preflight fails")
 }
 
 func TestRestartPassthroughProcessWithoutRunner(t *testing.T) {

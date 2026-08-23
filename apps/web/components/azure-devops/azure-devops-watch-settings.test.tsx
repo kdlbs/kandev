@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "@/lib/i18n";
 import type {
@@ -9,10 +9,16 @@ import type {
 const PR_CARD = "azure-pull-request-watch-pr-1";
 const WI_CARD = "azure-work-item-watch-wi-1";
 
-const mocks = vi.hoisted(() => ({ watches: vi.fn() }));
+const mocks = vi.hoisted(() => ({ watches: vi.fn(), promptEditor: vi.fn() }));
 
 vi.mock("@/hooks/domains/azure-devops/use-azure-devops-watches", () => ({
   useAzureDevOpsWatches: mocks.watches,
+}));
+vi.mock("@/components/settings/settings-prompt-editor", () => ({
+  SettingsPromptEditor: (props: Record<string, unknown>) => {
+    mocks.promptEditor(props);
+    return <div data-testid={props.testId as string} />;
+  },
 }));
 
 import { AzureDevOpsWatchSettings } from "@/components/azure-devops/azure-devops-watch-settings";
@@ -35,7 +41,10 @@ const WORK_ITEM: AzureDevOpsWorkItemWatch = {
   cleanupPolicy: "never",
 } as AzureDevOpsWorkItemWatch;
 
-function state(overrides: Partial<AzureDevOpsPullRequestWatch> = {}) {
+function state(
+  overrides: Partial<AzureDevOpsPullRequestWatch> = {},
+  actionOverrides: Record<string, unknown> = {},
+) {
   return {
     workItems: [WORK_ITEM],
     pullRequests: [{ ...PULL_REQUEST, ...overrides }],
@@ -50,6 +59,7 @@ function state(overrides: Partial<AzureDevOpsPullRequestWatch> = {}) {
     trigger: vi.fn(),
     previewReset: vi.fn(),
     reset: vi.fn(),
+    ...actionOverrides,
   };
 }
 
@@ -61,7 +71,17 @@ beforeEach(() => {
 afterEach(async () => {
   cleanup();
   await i18n.changeLanguage("en");
+  Object.defineProperty(window, "confirm", { configurable: true, value: undefined });
 });
+
+function installNativeConfirm() {
+  const nativeConfirm = vi.fn();
+  Object.defineProperty(window, "confirm", {
+    configurable: true,
+    value: nativeConfirm,
+  });
+  return nativeConfirm;
+}
 
 describe("AzureDevOpsWatchSettings", () => {
   it("renders the watch summary", () => {
@@ -115,5 +135,50 @@ describe("AzureDevOpsWatchSettings", () => {
     await i18n.changeLanguage("pseudo");
     render(<AzureDevOpsWatchSettings workspaceId="workspace-a" />);
     expect(screen.getByTestId(PR_CARD).textContent).toContain("Śţàţũś: draft");
+  });
+
+  it("confirms watch deletion locally without calling browser confirm", async () => {
+    const remove = vi.fn();
+    const nativeConfirm = installNativeConfirm();
+    mocks.watches.mockReturnValue(state({}, { remove }));
+    render(<AzureDevOpsWatchSettings workspaceId="workspace-a" />);
+
+    fireEvent.click(
+      within(screen.getByTestId(PR_CARD)).getByTestId("azure-pull-request-watch-delete-pr-1"),
+    );
+    const confirmation = await screen.findByRole("dialog", { name: "Delete this watch?" });
+    expect(nativeConfirm).not.toHaveBeenCalled();
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(remove).toHaveBeenCalledWith("pull-request", "pr-1"));
+  });
+
+  it("keeps Azure reset in ResetWatchDialog while removing native pre-confirm", async () => {
+    const previewReset = vi.fn().mockResolvedValue({ taskCount: 2 });
+    const nativeConfirm = installNativeConfirm();
+    mocks.watches.mockReturnValue(state({}, { previewReset }));
+    render(<AzureDevOpsWatchSettings workspaceId="workspace-a" />);
+
+    fireEvent.click(within(screen.getByTestId(PR_CARD)).getByRole("button", { name: "Reset" }));
+
+    expect(await screen.findByTestId("reset-watch-dialog")).toBeTruthy();
+    expect(previewReset).toHaveBeenCalledWith("pull-request", "pr-1");
+    expect(nativeConfirm).not.toHaveBeenCalled();
+  });
+
+  it("uses typed Azure DevOps placeholders with saved-prompt references", () => {
+    render(<AzureDevOpsWatchSettings workspaceId="workspace-a" />);
+
+    fireEvent.click(screen.getByTestId("azure-pull-request-watch-edit-pr-1"));
+
+    expect(mocks.promptEditor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        promptReferences: true,
+        testId: "azure-pull-request-watch-prompt-editor",
+        placeholders: expect.arrayContaining([
+          expect.objectContaining({ key: "pull_request.url" }),
+          expect.objectContaining({ key: "pull_request.target_branch" }),
+        ]),
+      }),
+    );
   });
 });

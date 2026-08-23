@@ -24,6 +24,7 @@ func TestConfigContext_ContainsAllTools(t *testing.T) {
 		"create_workflow_kandev",
 		"update_workflow_kandev",
 		"delete_workflow_kandev",
+		"export_workflow_kandev",
 		"list_workflow_steps_kandev",
 		"create_workflow_step_kandev",
 		"update_workflow_step_kandev",
@@ -126,6 +127,21 @@ func TestKandevContext_PrefersNativeSubagentsForOrdinaryDelegation(t *testing.T)
 	assert.Contains(t, context, "user explicitly wants a persistent Kandev task or subtask")
 	assert.Contains(t, context, "user explicitly wants another Kandev session/tab")
 	assert.Contains(t, context, "do not silently create a Kandev task or session")
+}
+
+func TestFormatKandevContext_UserQuestionIsHardInputBarrier(t *testing.T) {
+	context := FormatKandevContextWithOptions("task-abc", "session-xyz", KandevContextOptions{
+		IncludeUserQuestionTool:        true,
+		IncludeCoordinatorTaskControls: true,
+	})
+
+	assert.Contains(t, context, "hard user-input barrier")
+	assert.Contains(t, context, "do not call another tool")
+	assert.Contains(t, context, "do not continue working")
+	assert.Contains(t, context, "do not provide a final response")
+	assert.Contains(t, context, "until the tool returns completed user answers or a structured rejection")
+	assert.Contains(t, context, "If the tool reports a validation error before creating a question, correct the request and retry")
+	assert.Contains(t, context, "If an accepted question returns without completed answers or a structured rejection, end your turn immediately")
 }
 
 func TestFormatKandevContext_TitleToolFollowsCapability(t *testing.T) {

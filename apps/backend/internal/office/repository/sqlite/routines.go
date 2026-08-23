@@ -189,6 +189,31 @@ func (r *Repository) UpdateRoutine(ctx context.Context, routine *models.Routine)
 	return err
 }
 
+// RoutineConfigFields is the subset of office_routines columns a config
+// import owns (see UpdateRoutineConfigFields).
+type RoutineConfigFields struct {
+	Description       string
+	TaskTemplate      string
+	ConcurrencyPolicy models.RoutineConcurrencyPolicy
+}
+
+// UpdateRoutineConfigFields updates only the columns a config import owns
+// (description, task template, concurrency policy), leaving
+// assignee_agent_profile_id, status, catch_up_policy, catch_up_max,
+// variables, and last_run_at untouched instead of reverting them to a
+// stale read-then-write snapshot.
+func (r *Repository) UpdateRoutineConfigFields(
+	ctx context.Context, id string, fields RoutineConfigFields,
+) error {
+	now := time.Now().UTC()
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE office_routines SET
+			description = ?, task_template = ?, concurrency_policy = ?, updated_at = ?
+		WHERE id = ?
+	`), fields.Description, fields.TaskTemplate, fields.ConcurrencyPolicy, now, id)
+	return err
+}
+
 // DeleteRoutine deletes a routine by ID.
 func (r *Repository) DeleteRoutine(ctx context.Context, id string) error {
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(

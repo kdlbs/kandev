@@ -285,9 +285,10 @@ processWakeup:
   6. Budget pre-check         -- workspace -> project -> agent budgets; pause_agent action skips
   7. Build context            -- assemble prompt from source, payload, context_snapshot
   8. Resolve executor         -- task override -> agent preference -> project -> workspace default
-  9. Create session           -- TaskSession through the orchestrator pipeline; per-task-and-agent session
-  10. Launch                  -- lifecycle manager -> executor backend -> agentctl -> agent subprocess
-  11. Finish                  -- mark wakeup finished; parse output for follow-up actions
+  9. Resolve execution agent  -- Office binding -> concrete profile or shared dynamic router
+  10. Create session          -- one logical TaskSession through the orchestrator pipeline
+  11. Launch                  -- lifecycle -> compute executor -> dynamic conductor or concrete agentctl
+  12. Finish                  -- mark wakeup finished; parse output for follow-up actions
 ```
 
 ### Atomic task checkout

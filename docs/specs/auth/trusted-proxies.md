@@ -16,16 +16,18 @@ client.
 
 ## What
 
-- Kandev SHALL read a `KANDEV_TRUSTED_PROXIES` environment variable at
-  startup: a comma-separated list of IP addresses or CIDR ranges.
+- Kandev SHALL read `server.trustedProxies` from startup YAML as a list of IP
+  addresses or CIDR ranges. The `KANDEV_TRUSTED_PROXIES` environment variable
+  remains a comma-separated override for the same setting.
+- The environment value SHALL override the YAML value when both are present.
 - When the TCP peer of a request is in the trusted list, the client IP SHALL
   resolve from the first valid forwarded-IP header in gin's configured order
   (`X-Forwarded-For`, then `X-Real-IP`), falling back to the peer only when
   neither header yields a valid address.
-- When the variable is unset or empty, or the peer is not in the list, the
+- When the configured list is unset or empty, or the peer is not in the list, the
   client IP SHALL be the TCP peer; forwarded headers are ignored.
 - When any entry fails to parse as an IP or CIDR, startup SHALL log a warning
-  naming the bad value(s) and the whole variable SHALL be ignored (fail
+  naming the bad value(s) and the whole configured list SHALL be ignored (fail
   closed; no partial trust). Startup SHALL NOT fail.
 - The resolved client IP feeds the same consumers as today: the session IP
   recorded for login, setup, invite acceptance, and plugin-provided SSO
@@ -33,13 +35,13 @@ client.
 
 ## Failure modes
 
-- **Invalid entries.** A warning names the bad values and the variable is
+- **Invalid entries.** A warning names the bad values and the configured list is
   ignored entirely; `X-Forwarded-For` is never trusted and the recorded IP
   stays the TCP peer. No crash.
 - **No valid forwarded-IP header** on a request from a trusted peer: gin
   falls back to the TCP peer (only when neither `X-Forwarded-For` nor
   `X-Real-IP` yields a valid address).
-- **Spoofing.** An operator who sets the variable while the backend is
+- **Spoofing.** An operator who configures the list while the backend is
   directly reachable lets any caller whose peer address falls inside a
   configured trusted IP/CIDR forge the client IP, including the login
   rate-limiter key. Callers outside every configured range still fall back to
@@ -48,16 +50,17 @@ client.
 
 ## Scenarios
 
-- **GIVEN** `KANDEV_TRUSTED_PROXIES` unset, **WHEN** a login request arrives
+- **GIVEN** `server.trustedProxies` unset and `KANDEV_TRUSTED_PROXIES` unset,
+  **WHEN** a login request arrives
   from a proxy carrying `X-Forwarded-For: <client>`, **THEN** the session IP
   is the proxy's address (the TCP peer).
-- **GIVEN** `KANDEV_TRUSTED_PROXIES=10.0.0.0/8` and a request whose TCP peer
+- **GIVEN** `server.trustedProxies: [10.0.0.0/8]` and a request whose TCP peer
   is `10.0.0.5`, **WHEN** the request carries `X-Forwarded-For: 203.0.113.7`,
   **THEN** the login session IP is `203.0.113.7`.
-- **GIVEN** `KANDEV_TRUSTED_PROXIES=192.168.0.0/16` and a request whose TCP
+- **GIVEN** `server.trustedProxies: [192.168.0.0/16]` and a request whose TCP
   peer is `10.0.0.5`, **WHEN** the request carries `X-Forwarded-For:
   203.0.113.7`, **THEN** the session IP is `10.0.0.5` (header ignored).
-- **GIVEN** `KANDEV_TRUSTED_PROXIES=10.0.0.0/8,not-a-cidr`, **WHEN** the
+- **GIVEN** `server.trustedProxies: [10.0.0.0/8, not-a-cidr]`, **WHEN** the
   backend starts, **THEN** a startup warning names `not-a-cidr` and
   `X-Forwarded-For` is ignored entirely.
 - **GIVEN** `KANDEV_TRUSTED_PROXIES=10.0.0.0/8` and a backend reachable

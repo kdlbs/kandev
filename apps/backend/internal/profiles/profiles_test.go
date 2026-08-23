@@ -42,6 +42,9 @@ func TestApplyProfile_DefaultsToProd(t *testing.T) {
 	if v := os.Getenv("KANDEV_FEATURES_AUTH"); v != "false" {
 		t.Errorf("KANDEV_FEATURES_AUTH = %q after prod ApplyProfile; want %q", v, "false")
 	}
+	if v := os.Getenv("KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING"); v != "false" {
+		t.Errorf("KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING = %q after prod ApplyProfile; want %q", v, "false")
+	}
 	if v := os.Getenv("KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF"); v != "false" {
 		t.Errorf(
 			"KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF = %q after prod ApplyProfile; want %q",
@@ -51,6 +54,37 @@ func TestApplyProfile_DefaultsToProd(t *testing.T) {
 	}
 	if _, ok := os.LookupEnv("KANDEV_WEB_TITLE_PREFIX"); ok {
 		t.Errorf("KANDEV_WEB_TITLE_PREFIX is set in prod; want it unset")
+	}
+}
+
+func TestEnvironmentDefaultsSelectsProfileWithoutMutatingEnvironment(t *testing.T) {
+	clearProfileSelectors(t)
+	clearProfilesYAMLVars(t)
+	t.Setenv("KANDEV_FEATURES_OFFICE", "explicit")
+
+	prodBefore, prodPresent := os.LookupEnv("KANDEV_FEATURES_OFFICE")
+	prod, err := EnvironmentDefaults()
+	if err != nil {
+		t.Fatalf("prod EnvironmentDefaults: %v", err)
+	}
+	if prod["KANDEV_FEATURES_OFFICE"] != "false" {
+		t.Fatalf("prod office default = %q, want false", prod["KANDEV_FEATURES_OFFICE"])
+	}
+	prodAfter, prodAfterPresent := os.LookupEnv("KANDEV_FEATURES_OFFICE")
+	if prodPresent != prodAfterPresent || prodBefore != prodAfter {
+		t.Fatalf("prod EnvironmentDefaults mutated KANDEV_FEATURES_OFFICE: before=%q/%v after=%q/%v", prodBefore, prodPresent, prodAfter, prodAfterPresent)
+	}
+
+	t.Setenv("KANDEV_E2E_MOCK", "true")
+	e2e, err := EnvironmentDefaults()
+	if err != nil {
+		t.Fatalf("e2e EnvironmentDefaults: %v", err)
+	}
+	if e2e["KANDEV_FEATURES_OFFICE"] != "true" {
+		t.Fatalf("e2e office default = %q, want true", e2e["KANDEV_FEATURES_OFFICE"])
+	}
+	if e2e["KANDEV_PLAN_COALESCE_WINDOW_MS"] != "2000" {
+		t.Fatalf("e2e plan coalesce default = %q, want 2000", e2e["KANDEV_PLAN_COALESCE_WINDOW_MS"])
 	}
 }
 

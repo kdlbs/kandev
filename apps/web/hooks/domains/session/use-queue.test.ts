@@ -13,20 +13,23 @@ const queueApiMock = vi.hoisted(() => {
     QueueReorderError,
     queueMessage: vi.fn(),
     clearQueue: vi.fn(),
-    drainQueuedMessage: vi.fn(),
     getQueueStatus: vi.fn(),
     updateQueuedMessage: vi.fn(),
     removeQueuedEntry: vi.fn(),
     mergeQueuedEntry: vi.fn(),
     reorderQueuedEntries: vi.fn(),
     sendQueuedNow: vi.fn(),
+    setQueueAutoRun: vi.fn(),
   };
 });
 
 type MockQueueState = {
   queue: {
     bySessionId: Record<string, QueuedMessage[]>;
-    metaBySessionId: Record<string, { count: number; max: number }>;
+    metaBySessionId: Record<
+      string,
+      { count: number; max: number; mergeEnabled?: boolean; autoRun?: boolean }
+    >;
     isLoading: Record<string, boolean>;
   };
   connection: { status: string };
@@ -121,6 +124,8 @@ describe("useQueue", () => {
     expect(mockState.setQueueEntries).toHaveBeenCalledWith(SESSION_ID, [], {
       count: 0,
       max: 10,
+      mergeEnabled: true,
+      autoRun: true,
     });
   });
 
@@ -146,6 +151,8 @@ describe("useQueue", () => {
     expect(mockState.setQueueEntries).toHaveBeenCalledWith(SESSION_ID, [], {
       count: 0,
       max: 10,
+      mergeEnabled: true,
+      autoRun: true,
     });
   });
 
@@ -273,22 +280,18 @@ describe("useQueue context file metadata and Send Now", () => {
     expect(queueApiMock.getQueueStatus).toHaveBeenCalledWith(SESSION_ID);
   });
 
-  it("refetches after a raced Send Now failure and preserves the typed error", async () => {
-    queueApiMock.sendQueuedNow.mockRejectedValueOnce(new queueApiMock.QueueSendNowError());
+  it("refetches after an Auto-run mutation failure and preserves its error", async () => {
+    const mutationError = new Error("policy update failed");
+    queueApiMock.setQueueAutoRun.mockRejectedValueOnce(mutationError);
     const { result } = renderHook(() => useQueue(SESSION_ID));
     await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
     queueApiMock.getQueueStatus.mockClear();
 
     await act(async () => {
-      await expect(result.current.sendAllNow()).rejects.toBeInstanceOf(
-        queueApiMock.QueueSendNowError,
-      );
+      await expect(result.current.setAutoRun(false)).rejects.toBe(mutationError);
     });
 
-    expect(queueApiMock.sendQueuedNow).toHaveBeenCalledWith({
-      session_id: SESSION_ID,
-      scope: "all",
-    });
+    expect(queueApiMock.setQueueAutoRun).toHaveBeenCalledWith(SESSION_ID, false);
     expect(queueApiMock.getQueueStatus).toHaveBeenCalledWith(SESSION_ID);
   });
 
@@ -298,6 +301,30 @@ describe("useQueue context file metadata and Send Now", () => {
     await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
 
     expect(result.current.cancellationPending).toBe(true);
+  });
+
+  it("sets Auto-run and refetches authoritative queue status", async () => {
+    queueApiMock.setQueueAutoRun.mockResolvedValue({
+      session_id: SESSION_ID,
+      auto_run: false,
+      dispatched: false,
+    });
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+    queueApiMock.getQueueStatus.mockClear();
+    const setAutoRun = (
+      result.current as typeof result.current & {
+        setAutoRun?: (enabled: boolean) => Promise<void>;
+      }
+    ).setAutoRun;
+
+    expect(setAutoRun).toBeTypeOf("function");
+    await act(async () => {
+      await setAutoRun!(false);
+    });
+
+    expect(queueApiMock.setQueueAutoRun).toHaveBeenCalledWith(SESSION_ID, false);
+    expect(queueApiMock.getQueueStatus).toHaveBeenCalledWith(SESSION_ID);
   });
 });
 
@@ -399,6 +426,8 @@ describe("useQueue clearAll", () => {
     expect(mockState.setQueueEntries).toHaveBeenCalledWith(SESSION_ID, [authoritative], {
       count: 1,
       max: 10,
+      mergeEnabled: true,
+      autoRun: true,
     });
   });
 
@@ -435,7 +464,7 @@ describe("useQueue clearAll", () => {
     expect(mockState.setQueueEntries).not.toHaveBeenCalledWith(
       SESSION_ID,
       [entry({ id: "pre-clear" })],
-      { count: 1, max: 10 },
+      { count: 1, max: 10, mergeEnabled: true, autoRun: true },
     );
   });
 });
@@ -497,6 +526,8 @@ describe("useQueue removeEntry", () => {
     expect(mockState.setQueueEntries).toHaveBeenCalledWith(SESSION_ID, [authoritative], {
       count: 1,
       max: 10,
+      mergeEnabled: true,
+      autoRun: true,
     });
   });
 });
@@ -542,6 +573,7 @@ describe("useQueue reorderEntries", () => {
       count: 2,
       max: 10,
       mergeEnabled: true,
+      autoRun: true,
     });
     expect(queueApiMock.getQueueStatus).toHaveBeenCalledWith(SESSION_ID);
   });

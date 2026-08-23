@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/common/subproc"
+	"github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
 )
@@ -61,6 +62,13 @@ type WorkspaceTracker struct {
 	// Sourced from task_repositories.base_branch on the kandev backend.
 	// Empty for legacy tasks or external branches with no recorded base.
 	baseBranch string
+	// comparisonTarget is the provider-qualified comparison binding. Its
+	// state is independent from baseBranch: an unavailable explicit target must
+	// never resolve through origin/<same-name>.
+	comparisonTarget          *models.ComparisonTarget
+	comparisonTargetRef       string
+	comparisonTargetStatus    string
+	comparisonTargetErrorCode string
 	// comparisonAnchor is set for an initialized submodule. Unlike a branch
 	// name, it must remain pinned to the gitlink commit recorded by the parent
 	// comparison tree, even when the submodule's own default branch moves.

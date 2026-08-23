@@ -202,6 +202,7 @@ type QueueStatus struct {
 	Entries []QueuedMessage `json:"entries"`
 	Count   int             `json:"count"`
 	Max     int             `json:"max"`
+	AutoRun bool            `json:"auto_run"`
 	// MergeEnabled mirrors Service.MergeEnabled so clients can hide the
 	// "Merge with above" affordance without a separate settings fetch.
 	MergeEnabled bool `json:"merge_enabled"`

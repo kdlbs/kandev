@@ -201,6 +201,54 @@ func TestRepairExecutorRunningDead(t *testing.T) {
 	}
 }
 
+func TestRepairExecutorRunningDeadIfCurrentRejectsRotatedExecution(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedExecutorRunningCleanupTask(t, repo, "task-cas")
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-cas", TaskID: "task-cas", State: models.TaskSessionStateWaitingForInput,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "session-cas", SessionID: "session-cas", TaskID: "task-cas",
+		AgentExecutionID: "execution-old", Status: models.ExecutorRunningStatusRunning,
+	}); err != nil {
+		t.Fatalf("UpsertExecutorRunning: %v", err)
+	}
+	observed, err := repo.GetExecutorRunningBySessionID(ctx, "session-cas")
+	if err != nil {
+		t.Fatalf("GetExecutorRunningBySessionID: %v", err)
+	}
+
+	if _, err := repo.DB().ExecContext(ctx, `
+		UPDATE executors_running
+		SET agent_execution_id = ?, status = ?, updated_at = ?
+		WHERE session_id = ?
+	`, "execution-new", models.ExecutorRunningStatusRunning, time.Now().UTC(), "session-cas"); err != nil {
+		t.Fatalf("rotate execution row: %v", err)
+	}
+	if err := repo.RepairExecutorRunningDeadIfCurrent(ctx, "session-cas", observed.AgentExecutionID, observed.UpdatedAt); !errors.Is(err, models.ErrExecutionRotated) {
+		t.Fatalf("CAS repair error = %v, want ErrExecutionRotated", err)
+	}
+	current, err := repo.GetExecutorRunningBySessionID(ctx, "session-cas")
+	if err != nil {
+		t.Fatalf("GetExecutorRunningBySessionID after rejected repair: %v", err)
+	}
+	if current.AgentExecutionID != "execution-new" || current.Status != models.ExecutorRunningStatusRunning {
+		t.Fatalf("successor row changed after rejected repair: execution=%q status=%q", current.AgentExecutionID, current.Status)
+	}
+	if err := repo.DeleteExecutorRunningIfCurrent(ctx, "session-cas", observed.AgentExecutionID, observed.UpdatedAt); !errors.Is(err, models.ErrExecutionRotated) {
+		t.Fatalf("CAS delete error = %v, want ErrExecutionRotated", err)
+	}
+	if err := repo.DeleteExecutorRunningIfCurrent(ctx, "session-cas", current.AgentExecutionID, current.UpdatedAt); err != nil {
+		t.Fatalf("delete current execution: %v", err)
+	}
+	if _, err := repo.GetExecutorRunningBySessionID(ctx, "session-cas"); !errors.Is(err, models.ErrExecutorRunningNotFound) {
+		t.Fatalf("row after current delete error = %v, want ErrExecutorRunningNotFound", err)
+	}
+}
+
 // TestExecutorRunningLocalPIDMigrationOnLegacyDB is the same-database replay test
 // mandated by ADR 0027 for a schema change: it proves the `local_pid` ADD COLUMN
 // migration upgrades a DB that PREDATES the column, adding it with the default

@@ -282,9 +282,9 @@ func buildTaskDTOsWithSessionInfo(
 			si.agentName,
 			si.workingDirectory,
 			si.sessionState,
-			pendingActionPtr(si.sessionID, pendingActionsBySession),
+			dto.PendingActionPtr(si.sessionID, pendingActionsBySession),
 		)
-		taskDTO.TaskPendingAction = taskPendingActionPtr(sessions, pendingActionsBySession)
+		taskDTO.TaskPendingAction = dto.TaskPendingActionPtr(sessions, pendingActionsBySession)
 		dto.EnrichTaskForegroundActivity(&taskDTO, sessions, activityProvider)
 		dto.EnrichTaskDependencies(&taskDTO, dependencyProjection(dependencyViews[task.ID]), task)
 		dto.EnrichTaskStatusSummary(&taskDTO, task.ID, statusSummaries)
@@ -365,7 +365,7 @@ func pendingActionsForInputCapableSessions(
 	sessionIDs := make([]string, 0)
 	for _, sessions := range sessionsByTask {
 		for _, session := range sessions {
-			if isInputCapableSession(session) {
+			if dto.IsInputCapableSession(session) {
 				sessionIDs = append(sessionIDs, session.ID)
 			}
 		}
@@ -378,27 +378,6 @@ func pendingActionsForInputCapableSessions(
 
 func isInputCapableSession(session *models.TaskSession) bool {
 	return session != nil && (session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateWaitingForInput)
-}
-
-func taskPendingActionPtr(sessions []*models.TaskSession, actions map[string]models.TaskPendingAction) *string {
-	var clarification bool
-	for _, session := range sessions {
-		if !isInputCapableSession(session) {
-			continue
-		}
-		switch actions[session.ID] {
-		case models.TaskPendingActionPermission:
-			value := string(models.TaskPendingActionPermission)
-			return &value
-		case models.TaskPendingActionClarification:
-			clarification = true
-		}
-	}
-	if clarification {
-		value := string(models.TaskPendingActionClarification)
-		return &value
-	}
-	return nil
 }
 
 func pendingActionPtr(
@@ -942,7 +921,8 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		deferredLaunch = map[string]interface{}{
 			"intent": intent, "agent_profile_id": body.AgentProfileID, "executor_id": body.ExecutorID,
 			"executor_profile_id": body.ExecutorProfileID, "prompt": description,
-			"plan_mode": body.PlanMode, "attachments": body.Attachments,
+			"plan_mode":   body.PlanMode,
+			"attachments": body.Attachments,
 		}
 	}
 
@@ -960,7 +940,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		Position:           body.Position,
 		Metadata:           metadata,
 		DeferredLaunch:     deferredLaunch,
-		PlanMode:           body.PlanMode && !body.StartAgent,
+		PlanMode:           body.PlanMode,
 		ParentID:           body.ParentID,
 		WorkspacePath:      body.WorkspacePath,
 		BlockedBy:          body.BlockedBy,

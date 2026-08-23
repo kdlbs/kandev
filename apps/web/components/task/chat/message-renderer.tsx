@@ -41,7 +41,7 @@ type AdapterContext = {
   childrenByParentToolCallId?: Map<string, Message[]>;
   worktreePath?: string;
   sessionId?: string;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, repo?: string) => void;
   onScrollToMessage?: (messageId: string) => void;
   isTurnActive?: boolean;
   isContainingTurnActive?: boolean;
@@ -331,7 +331,14 @@ const adapters: MessageAdapter[] = [
       const permissionMessage = toolCallId
         ? ctx.permissionsByToolCallId?.get(toolCallId)
         : undefined;
-      return <KandevToolMessage comment={comment} permissionMessage={permissionMessage} />;
+      return (
+        <KandevToolMessage
+          comment={comment}
+          permissionMessage={permissionMessage}
+          sessionId={ctx.sessionId}
+          onOpenFile={ctx.onOpenFile}
+        />
+      );
     },
   },
   {
@@ -440,7 +447,7 @@ type MessageRendererProps = {
   childrenByParentToolCallId?: Map<string, Message[]>;
   worktreePath?: string;
   sessionId?: string;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, repo?: string) => void;
   onScrollToMessage?: (messageId: string) => void;
   isTurnActive?: boolean;
   isContainingTurnActive?: boolean;

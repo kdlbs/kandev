@@ -6,6 +6,7 @@ import { typeWhileBusy, waitForComposerQueueMode } from "../../helpers/type-whil
 import { SessionPage } from "../../pages/session-page";
 import { expectFullQueueScrolls, seedFullQueueTask } from "./message-queue-scroll-helpers";
 import { registerSeparateQueueRows } from "../../helpers/message-queue-settings";
+import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 
 registerSeparateQueueRows(test);
 
@@ -17,11 +18,48 @@ async function expectTouchTarget(locator: Locator): Promise<void> {
   expect(box!.height).toBeGreaterThanOrEqual(44);
 }
 
+async function expectEffectiveTouchTarget(locator: Locator): Promise<void> {
+  await expect(locator).toBeVisible();
+  const size = await locator.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const after = getComputedStyle(element, "::after");
+    const px = (value: string) => Number.parseFloat(value) || 0;
+    return {
+      width: rect.width - px(after.left) - px(after.right),
+      height: rect.height - px(after.top) - px(after.bottom),
+    };
+  });
+  expect(size.width).toBeGreaterThanOrEqual(44);
+  expect(size.height).toBeGreaterThanOrEqual(44);
+}
+
+function scriptedQueueMessage(marker: string, delayMs = 250): string {
+  return `e2e:delay(${delayMs})\ne2e:message("${marker}")`;
+}
+
+async function expectSeparateTurnsInOrder(scope: Locator, markers: string[]): Promise<void> {
+  const agentBodies = scope.locator("[data-agent-message-body][data-message-id]");
+  for (const marker of markers) {
+    await expect(agentBodies.filter({ hasText: marker })).toHaveCount(1, { timeout: 45_000 });
+  }
+  const agentTexts = await agentBodies.allTextContents();
+  const agentIndexes = markers.map((marker) =>
+    agentTexts.findIndex((text) => text.includes(marker)),
+  );
+  expect(agentIndexes).toEqual([...agentIndexes].sort((a, b) => a - b));
+
+  const userTexts = await scope.getByTestId("user-message-bubble").allTextContents();
+  const userIndexes = markers.map((marker) => userTexts.findIndex((text) => text.includes(marker)));
+  expect(userIndexes.every((index) => index >= 0)).toBe(true);
+  expect(new Set(userIndexes).size).toBe(markers.length);
+  expect(userIndexes).toEqual([...userIndexes].sort((a, b) => a - b));
+}
+
 async function seedBusyQueueTask(
   testPage: Page,
   apiClient: ApiClient,
   seedData: SeedData,
-): Promise<{ session: SessionPage; taskId: string }> {
+): Promise<{ session: SessionPage; taskId: string; sessionId: string }> {
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
     "Mobile queue Send Now",
@@ -40,7 +78,9 @@ async function seedBusyQueueTask(
   await session.sendMessageViaButton("/slow 30s");
   await session.agentStatus().waitFor({ state: "visible", timeout: 15_000 });
   await waitForComposerQueueMode(testPage);
-  return { session, taskId: task.id };
+  const loadedTask = await apiClient.getTask(task.id);
+  if (!loadedTask.primary_session_id) throw new Error("task did not have a primary session");
+  return { session, taskId: task.id, sessionId: loadedTask.primary_session_id };
 }
 
 test("mobile full queue stays usable while removing and clearing messages", async ({
@@ -88,46 +128,50 @@ test("mobile full queue stays usable while removing and clearing messages", asyn
   await expect(chat.getByTestId("chat-input-editor-shell")).toBeVisible();
 });
 
-test("mobile Send Now replaces a busy turn without hover or horizontal overflow", async ({
+test("mobile Send Now resumes Auto-run in targeted order without overflow", async ({
   testPage,
   apiClient,
   seedData,
 }) => {
   test.setTimeout(120_000);
 
-  const { session } = await seedBusyQueueTask(testPage, apiClient, seedData);
+  const { session, taskId, sessionId } = await seedBusyQueueTask(testPage, apiClient, seedData);
   const chat = session.activeChat();
-  const editor = chat.locator(".tiptap.ProseMirror:visible").first();
-  const submit = testPage.getByTestId("submit-message-button");
-  for (const message of ["mobile first", "/slow 10s mobile second", "mobile third"]) {
-    await typeWhileBusy(testPage, editor, message);
-    await expect(submit).toBeEnabled();
-    await submit.tap();
+  const markerA = "mobile targeted A response";
+  const markerB = "mobile targeted B response";
+  const markerC = "mobile targeted C response";
+  for (const message of [
+    scriptedQueueMessage(markerA),
+    scriptedQueueMessage(markerB, 1_000),
+    scriptedQueueMessage(markerC),
+  ]) {
+    await apiClient.queueMessage(taskId, sessionId, message);
   }
 
   await chat.getByTestId("queue-chip").tap();
   const panel = chat.getByTestId("queued-ghost-list");
   await expect(panel.getByTestId("queue-entry-text")).toHaveCount(3);
   const rowSendNow = panel.getByTestId("queue-entry-send-now").nth(1);
-  const headerSendNow = panel.getByTestId("queue-send-now");
+  const autoRun = panel.getByTestId("queue-auto-run");
   await expectTouchTarget(rowSendNow);
-  await expectTouchTarget(headerSendNow);
+  await expectEffectiveTouchTarget(autoRun);
+  await expect(autoRun).toHaveAttribute("data-state", "checked");
+  await autoRun.tap();
+  await expect(autoRun).toHaveAttribute("data-state", "unchecked");
 
-  const viewport = await testPage.evaluate(() => ({
-    clientWidth: document.documentElement.clientWidth,
-    scrollWidth: document.documentElement.scrollWidth,
-  }));
-  expect(viewport.scrollWidth).toBeLessThanOrEqual(viewport.clientWidth);
+  await assertNoDocumentHorizontalOverflow(testPage);
 
   await rowSendNow.tap();
-  const transcript = chat.locator(".chat-message-list:visible");
-  await expect(transcript.getByText("/slow 10s mobile second", { exact: true })).toBeVisible({
-    timeout: 20_000,
-  });
   await expect(panel.getByTestId("queue-entry-text")).toHaveCount(2, { timeout: 10_000 });
-  await expect(panel.getByTestId("queue-entry-text").nth(0)).toContainText("mobile first");
-  await expect(panel.getByTestId("queue-entry-text").nth(1)).toContainText("mobile third");
+  await expect(panel.getByTestId("queue-entry-text").nth(0)).toContainText(markerA);
+  await expect(panel.getByTestId("queue-entry-text").nth(1)).toContainText(markerC);
+  await expect(autoRun).toHaveAttribute("data-state", "checked", { timeout: 10_000 });
+
+  await expectSeparateTurnsInOrder(session.chat, [markerB, markerA, markerC]);
+  await session.waitForChatIdle({ timeout: 45_000 });
+  await expect(panel).not.toBeVisible({ timeout: 15_000 });
   await expect(session.chat).not.toContainText("Turn cancelled by user");
+  await assertNoDocumentHorizontalOverflow(testPage);
 });
 
 test("mobile queue panel hides the desktop-only pin and keeps its controls", async ({
@@ -152,6 +196,7 @@ test("mobile queue panel hides the desktop-only pin and keeps its controls", asy
   // The pin is a desktop-only control: it must not render on the mobile
   // queue panel, while the other header controls stay touch-sized.
   await expect(panel.getByTestId("queue-pin")).toHaveCount(0);
+  await expectEffectiveTouchTarget(panel.getByTestId("queue-auto-run"));
   await expectTouchTarget(panel.getByTestId("queue-clear-all"));
   await expectTouchTarget(panel.getByTestId("queue-close"));
 });

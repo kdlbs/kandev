@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/discovery"
@@ -39,40 +40,60 @@ func buildCommandString(cmd []string) string {
 }
 
 var (
-	ErrAgentNotFound         = errors.New("agent not found")
-	ErrAgentAlreadyExists    = errors.New("agent already exists")
-	ErrAgentProfileNotFound  = errors.New("agent profile not found")
-	ErrAgentMcpUnsupported   = errors.New("mcp not supported by agent")
-	ErrModelRequired         = errors.New("model is required for agent profiles")
-	ErrLogoNotAvailable      = errors.New("logo not available for agent")
-	ErrInvalidSlug           = errors.New("display name must produce a valid slug")
-	ErrCommandRequired       = errors.New("command is required")
-	ErrInvalidProfileEnvVars = errors.New("invalid profile env vars")
-	ErrInvalidCommandPrefix  = errors.New("invalid command prefix")
-	ErrUnknownMCPStrategy    = errors.New("unknown MCP strategy")
-	ErrNotCustomTUIAgent     = errors.New("agent is not a custom TUI agent")
+	ErrAgentNotFound                        = errors.New("agent not found")
+	ErrAgentAlreadyExists                   = errors.New("agent already exists")
+	ErrAgentProfileNotFound                 = errors.New("agent profile not found")
+	ErrAgentMcpUnsupported                  = errors.New("mcp not supported by agent")
+	ErrModelRequired                        = errors.New("model is required for agent profiles")
+	ErrLogoNotAvailable                     = errors.New("logo not available for agent")
+	ErrInvalidSlug                          = errors.New("display name must produce a valid slug")
+	ErrCommandRequired                      = errors.New("command is required")
+	ErrInvalidProfileEnvVars                = errors.New("invalid profile env vars")
+	ErrInvalidCommandPrefix                 = errors.New("invalid command prefix")
+	ErrUnknownMCPStrategy                   = errors.New("unknown MCP strategy")
+	ErrNotCustomTUIAgent                    = errors.New("agent is not a custom TUI agent")
+	ErrDynamicAgentRoutingDisabled          = errors.New("dynamic agent routing is disabled")
+	ErrDynamicProfileCandidatesRequired     = errors.New("dynamic profile candidates are required")
+	ErrDynamicProfilePositions              = errors.New("dynamic profile candidate positions must be contiguous")
+	ErrDynamicProfileRule                   = errors.New("unsupported dynamic profile rule")
+	ErrDynamicProfileCandidate              = errors.New("invalid dynamic profile candidate")
+	ErrDynamicProfileVersionConflict        = store.ErrDynamicProfileVersionConflict
+	ErrDynamicProfileDuplicationUnsupported = errors.New("dynamic profile duplication is not supported")
 )
 
 type Controller struct {
-	repo                     store.Repository
-	discovery                *discovery.Registry
-	agentRegistry            *registry.Registry
-	sessionChecker           SessionChecker
-	watcherDeps              WatcherDependencyChecker
-	routingTierDeps          RoutingTierDependencyChecker
-	automationDeps           AutomationDependencyChecker
-	utilityDeps              UtilityDependencyChecker
-	mcpService               *mcpconfig.Service
-	modelCache               *modelfetcher.Cache
-	hostUtility              hostUtilityProvider
-	jobStore                 *JobStore
-	updateJobStore           *AgentUpdateJobStore
-	runtimeUpdater           RuntimeUpdater
-	managedRuntimeSelections managedruntime.SelectionStore
-	maintenance              *maintenanceCoordinator
-	hub                      JobBroadcaster
-	logger                   *logger.Logger
-	secretStore              secrets.SecretStore
+	repo                        store.Repository
+	discovery                   *discovery.Registry
+	agentRegistry               *registry.Registry
+	sessionChecker              SessionChecker
+	watcherDeps                 WatcherDependencyChecker
+	routingTierDeps             RoutingTierDependencyChecker
+	automationDeps              AutomationDependencyChecker
+	utilityDeps                 UtilityDependencyChecker
+	mcpService                  *mcpconfig.Service
+	modelCache                  *modelfetcher.Cache
+	hostUtility                 hostUtilityProvider
+	jobStore                    *JobStore
+	updateJobStore              *AgentUpdateJobStore
+	runtimeUpdater              RuntimeUpdater
+	managedRuntimeSelections    managedruntime.SelectionStore
+	maintenance                 *maintenanceCoordinator
+	hub                         JobBroadcaster
+	logger                      *logger.Logger
+	secretStore                 secrets.SecretStore
+	runtimeUpdateStatusMu       sync.Mutex
+	runtimeUpdateStatusCache    map[string]runtimeUpdateStatusCacheEntry
+	runtimeUpdateStatusNow      func() time.Time
+	runtimeUpdateStatusResolver RuntimeUpdateStatusResolver
+	runtimeUpdateStatusLookup   chan struct{}
+	dynamicAgentRoutingEnabled  bool
+}
+
+// SetDynamicAgentRoutingEnabled applies the authoritative runtime flag to the
+// settings boundary. Dynamic configuration remains readable when disabled, but
+// all dynamic writes fail before they create or alter rows.
+func (c *Controller) SetDynamicAgentRoutingEnabled(enabled bool) {
+	c.dynamicAgentRoutingEnabled = enabled
 }
 
 // SetSecretStore wires the metadata-only validator used by shared agent
@@ -113,22 +134,32 @@ func (c *Controller) SetUtilityDependencyChecker(u UtilityDependencyChecker) {
 // the breakdown to render a "this will also disable N watchers — continue?"
 // confirmation dialog before re-issuing the request with force=true.
 type ErrProfileInUseDetail struct {
-	ActiveSessions []agentdto.ActiveTaskInfo
-	Watchers       []WatcherReference
-	RoutingTiers   []RoutingTierReference
-	Automations    []AutomationReference
-	UtilityAgents  []UtilityAgentReference
+	ActiveSessions  []agentdto.ActiveTaskInfo
+	Watchers        []WatcherReference
+	RoutingTiers    []RoutingTierReference
+	Automations     []AutomationReference
+	UtilityAgents   []UtilityAgentReference
+	DynamicProfiles []DynamicProfileReference
 }
 
 func (e *ErrProfileInUseDetail) Error() string {
 	return fmt.Sprintf(
-		"agent profile is used by %d active session(s), %d watcher(s), %d routing tier(s), %d automation(s), and %d utility agent(s)",
-		len(e.ActiveSessions), len(e.Watchers), len(e.RoutingTiers), len(e.Automations), len(e.UtilityAgents))
+		"agent profile is used by %d active session(s), %d watcher(s), %d routing tier(s), %d automation(s), %d utility agent(s), and %d dynamic profile(s)",
+		len(e.ActiveSessions), len(e.Watchers), len(e.RoutingTiers), len(e.Automations), len(e.UtilityAgents), len(e.DynamicProfiles))
 }
 
 type UtilityAgentReference struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+}
+
+// DynamicProfileReference identifies a dynamic profile that contains the
+// concrete profile as a candidate. The route remains stored after a forced
+// disable or delete so the router can skip it and the user can repair it.
+type DynamicProfileReference struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Deleted bool   `json:"deleted"`
 }
 
 type UtilityDependencyChecker interface {
@@ -220,13 +251,16 @@ type hostUtilityProvider interface {
 func NewController(repo store.Repository, discoveryRegistry *discovery.Registry, agentRegistry *registry.Registry, sessionChecker SessionChecker, log *logger.Logger,
 ) *Controller {
 	return &Controller{
-		repo:           repo,
-		discovery:      discoveryRegistry,
-		agentRegistry:  agentRegistry,
-		sessionChecker: sessionChecker,
-		mcpService:     mcpconfig.NewService(repo),
-		modelCache:     modelfetcher.NewCache(),
-		logger:         log.WithFields(zap.String("component", "agent-settings-controller")),
+		repo:                      repo,
+		discovery:                 discoveryRegistry,
+		agentRegistry:             agentRegistry,
+		sessionChecker:            sessionChecker,
+		mcpService:                mcpconfig.NewService(repo),
+		modelCache:                modelfetcher.NewCache(),
+		logger:                    log.WithFields(zap.String("component", "agent-settings-controller")),
+		runtimeUpdateStatusCache:  make(map[string]runtimeUpdateStatusCacheEntry),
+		runtimeUpdateStatusNow:    time.Now,
+		runtimeUpdateStatusLookup: make(chan struct{}, runtimeUpdateStatusMaxConcurrent),
 	}
 }
 
@@ -314,6 +348,7 @@ func (c *Controller) initializeUpdateJobStore() {
 		c.BroadcastAvailableAgents,
 		c.managedRuntimeSelections,
 	)
+	c.updateJobStore.SetStatusInvalidator(c.InvalidateRuntimeUpdateStatus)
 }
 
 // BroadcastAvailableAgents fetches the current available-agents snapshot and

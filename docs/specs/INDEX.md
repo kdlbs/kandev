@@ -21,7 +21,8 @@ The office umbrella covers kandev's autonomous-agent product surface: workspaces
 | [tasks](office/tasks.md) | draft |
 | [scheduler](office/scheduler.md) | draft |
 | [runtime](office/runtime.md) | draft |
-| [routing](office/routing.md) | draft |
+| [routing](office/routing.md) | archived |
+| [per-agent + per-role tier selection](office-agent-tier-routing/spec.md) | draft |
 | [costs](office/costs.md) | in-progress |
 | [dashboard](office/dashboard.md) | draft |
 | [live-updates](office/live-updates.md) | draft |
@@ -38,6 +39,7 @@ Product-wide capabilities that are not tied to a single feature area.
 
 | Spec | Status |
 |---|---|
+| [startup-configuration-parity](platform/startup-configuration-parity.md) | shipped |
 | [agent-runtime-availability](platform/agent-runtime-availability.md) | draft |
 | [background-work-liveness](platform/background-work-liveness.md) | shipped |
 | [setup-launch-timeout](platform/setup-launch-timeout.md) | approved |
@@ -53,8 +55,9 @@ Product-wide capabilities that are not tied to a single feature area.
 | [plugins — Voice Mode leaves core](plugins/voice-extraction.md) | shipped |
 | [plugin-nav-sidebar-footer](plugin-nav-sidebar-footer/spec.md) | draft |
 | [semantic-notifications](platform/notifications.md) | shipped |
-| [workspace-git-status](platform/workspace-git-status.md) | shipped |
+| [workspace-git-status](platform/workspace-git-status.md) | approved |
 | [git-subprocess-admission](platform/git-subprocess-admission.md) | building |
+| [git-credential-lease-reissue](git-credential-lease-reissue/spec.md) | shipped |
 | [bounded-task-status-delivery](platform/bounded-task-status-delivery.md) | approved |
 | [diagnostic-logging](platform/diagnostic-logging.md) | approved |
 | [provider-error-recovery](platform/provider-error-recovery.md) | draft |
@@ -73,6 +76,7 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [interrupted-task-indicator](tasks/interrupted-task-indicator.md) | complete |
 | [labels](tasks/labels.md) | shipped |
 | [title-length-limit](tasks/title-length-limit.md) | complete |
+| [rich-task-title-previews](tasks/rich-task-title-previews.md) | building |
 | [active clarification lifecycle](clarification-active-lifecycle/spec.md) | approved |
 | [model-unification](tasks/model-unification.md) | draft |
 | [run-scheduling](tasks/run-scheduling.md) | building |
@@ -104,11 +108,13 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [agent-generated-titles](tasks/agent-generated-titles.md) | approved |
 | [task-create-executor-default](tasks/task-create-executor-default.md) | approved |
 | [task-create-workflow-memory](tasks/task-create-workflow-memory.md) | approved |
+| [task-create-escape-dismissal](tasks/task-create-escape-dismissal.md) | complete |
 | [repository-sets](repository-sets/spec.md) | building |
 | [external-id-idempotency](tasks/external-id-idempotency/spec.md) | draft |
 | [prompt-attachments](tasks/prompt-attachments.md) | draft |
 | [sidebar-task-edit](tasks/sidebar-task-edit.md) | approved |
 | [autopilot-mode](tasks/autopilot-mode.md) | draft |
+| [user-question-turn-boundary](tasks/user-question-turn-boundary.md) | shipped |
 | [explicit-completion-signal](workflow/explicit-completion-signal/spec.md) | shipped |
 | [cancelled-turn-completion](workflow/cancelled-turn-completion/spec.md) | building |
 | [task-step-transition-ledger](workflow/task-step-transition-ledger/spec.md) | draft |
@@ -126,11 +132,15 @@ Roles, governance gates, and granular permissions that apply across human users 
 | [profile-disable](agents/profile-disable.md) | draft |
 | [settings-profile-layout](agents/settings-profile-layout.md) | shipped |
 | [dynamic-provider-options](agents/dynamic-provider-options.md) | shipped |
+| [dynamic-agent-routing](agents/dynamic-agent-routing.md) | draft |
+| [dynamic-agent-routing-rollout-blockers](agents/dynamic-agent-routing-rollout-blockers.md) | draft |
+| [dynamic-agent-telemetry-routing](agents/dynamic-agent-telemetry-routing.md) | draft |
 | [utility-agent-profiles](agents/utility-agent-profiles.md) | approved |
 | [collapsible-agent-blocks](agents/collapsible-agent-blocks.md) | draft |
 | [roles](agents/roles.md) | shipped |
 | [governance](agents/governance.md) | shipped |
 | [granular-permissions](agents/granular-permissions.md) | draft |
+| [external-permission-resolution](agents/external-permission-resolution.md) | draft |
 
 ## integrations/ — external service integrations
 
@@ -150,7 +160,9 @@ Per-workspace credentials and triage triggers for external services.
 | [gitlab-mr-task-list-badges](gitlab-mr-task-list-badges/spec.md) | draft |
 | [gitlab-workflow-sync](gitlab-workflow-sync/spec.md) | shipped |
 | [jira-status-filter](jira-status-filter/spec.md) | shipped |
+| [pr-outcome-attribution](pr-outcome-attribution/spec.md) | shipped |
 | [enable-disable-toggle](integrations/enable-disable-toggle.md) | shipped |
+| [clickable-integration-cards](integrations/clickable-integration-cards.md) | shipped |
 
 ## workspaces/ — workspace lifecycle
 
@@ -176,6 +188,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 
 | Spec | Status |
 |---|---|
+| [kanban-auto-hide-empty-columns](kanban-auto-hide-empty-columns/spec.md) | shipped |
 | [workspace-active-first-order](ui/workspace-active-first-order.md) | shipped |
 | [ci-pr-automation](ui/ci-pr-automation.md) | building |
 | [github-pr-review-actions](ui/github-pr-review-actions.md) | shipped |
@@ -207,13 +220,16 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [entity-reference-composer](ui/entity-reference-composer.md) | draft |
 | [agent-launch-prompt-composer](ui/agent-launch-prompt-composer.md) | shipped |
 | [mermaid-rendering](ui/mermaid-rendering.md) | shipped |
+| [agent-rich-output](agent-rich-output/spec.md) | shipped |
 | [message-queue-auto-merge](ui/message-queue-auto-merge.md) | shipped |
 | [message-queue-management](ui/message-queue-management.md) | shipped |
 | [message-queue-merge](ui/message-queue-merge.md) | shipped |
 | [message-queue-reorder](ui/message-queue-reorder.md) | building |
+| [message-queue-run](ui/message-queue-run.md) | shipped |
 | [message-queue-send-now](ui/message-queue-send-now.md) | shipped |
 | [settings-manual-save](ui/settings-manual-save.md) | shipped |
 | [settings-discovery](ui/settings-discovery.md) | shipped |
+| [settings-prompt-editor](ui/settings-prompt-editor.md) | shipped |
 | [settings-typography](settings-typography/spec.md) | draft |
 | [executor-settings-card-spacing](ui/executor-settings-card-spacing.md) | shipped |
 | [quick-chat-elevation](ui/quick-chat-elevation.md) | building |
@@ -246,6 +262,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [cancel-turn-progress](ui/cancel-turn-progress.md) | approved |
 | [agent-todo-list-panel](ui/agent-todo-list-panel.md) | shipped |
 | [prompt-history-panel](ui/prompt-history-panel.md) | draft |
+| [prompt-turn-duration](ui/prompt-turn-duration.md) | draft |
 
 ## system-page/ — operational diagnostics & maintenance UI
 
@@ -273,9 +290,11 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [agent-stall-recovery](agent-stall-recovery/spec.md) | approved |
 | [mcp-session-observability](mcp-session-observability/spec.md) | approved |
 | [subagent-context-persistence](subagent-context-persistence/spec.md) | draft |
+| [external-question-answering](external-question-answering/spec.md) | draft |
 | [auth](auth/spec.md) | building |
 | [create-local-repository](create-local-repository/spec.md) | shipped |
 | [workflow-cycle-guardrails](workflow-cycle-guardrails/spec.md) | building |
+| [workflow-quorum-decision-recording](workflow-quorum-decision-recording/spec.md) | draft |
 | [improve-kandev](improve-kandev/spec.md) | building |
 | [homebrew-core](homebrew-core/spec.md) | building |
 | [native-kandev-cli](native-kandev-cli/spec.md) | draft |
@@ -291,15 +310,19 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [quick-chat-idle-dot](quick-chat-idle-dot/spec.md) | draft |
 | [native-code-review](native-code-review/spec.md) | building |
 | [missing-task-route-recovery](missing-task-route-recovery/spec.md) | draft |
+| [kanban-task-executor-cache-staleness](kanban-task-executor-cache-staleness/spec.md) | draft |
 | [browser-inspect-annotations-save](browser-inspect-annotations-save/spec.md) | shipped |
 | [automations-pr-merged-trigger](automations-pr-merged-trigger/spec.md) | draft |
 | [automation-runs-delete-all-by-status](automation-runs-delete-all-by-status/spec.md) | draft |
 | [no-silent-model-fallback](no-silent-model-fallback/spec.md) | approved |
 | [portable-agent-configuration](portable-agent-configuration/spec.md) | draft |
-| [e2e-duration-aware-sharding](e2e-duration-aware-sharding/spec.md) | implemented |
+| [e2e-duration-aware-sharding](e2e-duration-aware-sharding/spec.md) | shipped |
 | [board-step-visibility-filter](board-step-visibility-filter/spec.md) | draft |
 | [shutdown-turn-failure-suppression](shutdown-turn-failure-suppression/spec.md) | draft |
 | [executor-profile-env-precedence](executor-profile-env-precedence/spec.md) | building |
+| [automations-yaml-export](automations-yaml-export/spec.md) | building |
+| [task-launch-failure-recovery](task-launch-failure-recovery/spec.md) | draft |
+| [pr-walkthrough](pr-walkthrough/spec.md) | building |
 
 ---
 

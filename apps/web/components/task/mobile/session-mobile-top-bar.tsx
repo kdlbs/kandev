@@ -21,6 +21,7 @@ import {
   useMobileGitActions,
 } from "./session-mobile-top-bar-git-controls";
 import { TaskTopBarPluginActions } from "@/components/task/task-top-bar-plugin-actions";
+import { LayoutPresetSelector } from "@/components/task/layout-preset-selector";
 import { MRTopbarButton } from "@/components/gitlab/mr-topbar-button";
 import { PortForwardButton } from "@/components/task/port-forward-dialog";
 import { linkToTaskOverview } from "@/lib/links";
@@ -38,6 +39,8 @@ type SessionMobileTopBarProps = {
   taskId?: string | null;
   workspaceId?: string | null;
   taskTitle?: string;
+  /** `owner/repo` (or the repository name) of the task's primary repository. */
+  repositoryLabel?: string | null;
   sessionId?: string | null;
   baseBranch?: string;
   worktreeBranch?: string | null;
@@ -56,11 +59,13 @@ type SessionMobileTopBarProps = {
 
 function MobileTaskTitle({
   taskTitle,
+  repositoryLabel,
   displayBranch,
   totalAdditions,
   totalDeletions,
 }: {
   taskTitle?: string;
+  repositoryLabel?: string | null;
   displayBranch?: string;
   totalAdditions: number;
   totalDeletions: number;
@@ -69,15 +74,32 @@ function MobileTaskTitle({
   return (
     <div className="flex flex-col min-w-0 flex-1">
       <span className="text-sm font-medium truncate">{taskTitle ?? t("task:taskDetails")}</span>
-      {displayBranch && (
-        <div className="flex items-center gap-1.5">
-          <IconGitBranch className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-          <span className="text-xs text-muted-foreground truncate">{displayBranch}</span>
-          {(totalAdditions > 0 || totalDeletions > 0) && (
-            <LineStat added={totalAdditions} removed={totalDeletions} />
-          )}
-        </div>
-      )}
+      {/* The phone bar has no breadcrumb, so the repository rides the same
+          secondary line as the branch. It shrinks first: on a phone the branch
+          and diff stats are the denser signal, and the full name stays in
+          `title`. */}
+      <div className="flex items-center gap-1.5 min-w-0">
+        {repositoryLabel && (
+          <span
+            data-testid="mobile-task-repository"
+            title={repositoryLabel}
+            className="min-w-0 truncate text-xs text-muted-foreground/70"
+          >
+            {repositoryLabel}
+          </span>
+        )}
+        {displayBranch && (
+          <>
+            <IconGitBranch className="h-3 w-3 shrink-0 text-muted-foreground" />
+            <span className="shrink-0 max-w-[45%] truncate text-xs text-muted-foreground">
+              {displayBranch}
+            </span>
+            {(totalAdditions > 0 || totalDeletions > 0) && (
+              <LineStat added={totalAdditions} removed={totalDeletions} />
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -403,6 +425,7 @@ function MobileTopBarActions({
     <div className="flex items-center gap-1" data-testid="mobile-topbar-actions">
       <MRTopbarButton compact mobile />
       {!isArchived && <PortForwardButton sessionId={sessionId} />}
+      {!isArchived && <LayoutPresetSelector mobile />}
       {!isArchived && (
         <TaskTopBarPluginActions
           sessionId={sessionId ?? null}
@@ -494,6 +517,7 @@ export const SessionMobileTopBar = memo(function SessionMobileTopBar(
         </Button>
         <MobileTaskTitle
           taskTitle={props.taskTitle}
+          repositoryLabel={props.repositoryLabel}
           displayBranch={displayBranch}
           totalAdditions={totalAdditions}
           totalDeletions={totalDeletions}

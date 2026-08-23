@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
@@ -88,9 +89,64 @@ func copyAgent(a *models.Agent) *models.Agent {
 	return &out
 }
 
+// copyProfile deep-copies a profile so the fake store behaves like a real one:
+// callers get a snapshot, not a handle on stored state. Keep the legacy field
+// that is intentionally omitted from the public JSON representation.
+func copyProfile(p *models.AgentProfile) *models.AgentProfile {
+	if p == nil {
+		return nil
+	}
+	data, err := json.Marshal(p)
+	if err != nil {
+		panic("fakeStore: marshal profile: " + err.Error())
+	}
+	var out models.AgentProfile
+	if err := json.Unmarshal(data, &out); err != nil {
+		panic("fakeStore: unmarshal profile: " + err.Error())
+	}
+	out.DangerouslySkipPermissions = p.DangerouslySkipPermissions
+	return &out
+}
+
+func TestFakeStoreAgentProfileReadRequiresExplicitUpdate(t *testing.T) {
+	st := newFakeStore()
+	st.profiles["agent-1"] = []*models.AgentProfile{{
+		ID:      "profile-1",
+		AgentID: "agent-1",
+		Name:    "Original",
+	}}
+
+	profile, err := st.GetAgentProfile(context.Background(), "profile-1")
+	if err != nil {
+		t.Fatalf("GetAgentProfile: %v", err)
+	}
+	profile.Name = "Changed"
+
+	stored, err := st.GetAgentProfile(context.Background(), "profile-1")
+	if err != nil {
+		t.Fatalf("GetAgentProfile after local mutation: %v", err)
+	}
+	if stored.Name != "Original" {
+		t.Fatalf("local mutation changed stored profile name to %q", stored.Name)
+	}
+
+	if err := st.UpdateAgentProfile(context.Background(), profile); err != nil {
+		t.Fatalf("UpdateAgentProfile: %v", err)
+	}
+	stored, err = st.GetAgentProfile(context.Background(), "profile-1")
+	if err != nil {
+		t.Fatalf("GetAgentProfile after update: %v", err)
+	}
+	if stored.Name != "Changed" {
+		t.Fatalf("stored profile name = %q, want Changed after explicit update", stored.Name)
+	}
+}
+
 func (f *fakeStore) CreateAgent(_ context.Context, a *models.Agent) error {
-	f.nextAgentID++
-	a.ID = "agent-" + strconv.Itoa(f.nextAgentID)
+	if a.ID == "" {
+		f.nextAgentID++
+		a.ID = "agent-" + strconv.Itoa(f.nextAgentID)
+	}
 	stored := copyAgent(a)
 	f.agents[a.ID] = stored
 	f.byName[a.Name] = stored
@@ -161,8 +217,9 @@ func (f *fakeStore) UpsertAgentProfileMcpConfig(_ context.Context, config *model
 func (f *fakeStore) CreateAgentProfile(_ context.Context, p *models.AgentProfile) error {
 	f.nextProfID++
 	p.ID = "profile-" + strconv.Itoa(f.nextProfID)
-	f.profiles[p.AgentID] = append(f.profiles[p.AgentID], p)
-	f.created = append(f.created, p)
+	stored := copyProfile(p)
+	f.profiles[p.AgentID] = append(f.profiles[p.AgentID], stored)
+	f.created = append(f.created, stored)
 	return nil
 }
 
@@ -178,6 +235,9 @@ func (f *fakeStore) DuplicateAgentProfile(_ context.Context, input store.Duplica
 		// must re-read the source and copy the NEW state.
 		input.Source.Name = "Changed Name"
 		input.Source.UpdatedAt = input.Source.UpdatedAt.Add(time.Second)
+		if _, err := f.persistAgentProfile(input.Source); err != nil {
+			return err
+		}
 		return store.ErrProfileChanged
 	}
 	// Version check mirrors the sqlite store: the stored source rows must
@@ -201,8 +261,9 @@ func (f *fakeStore) DuplicateAgentProfile(_ context.Context, input store.Duplica
 	now := time.Now().UTC()
 	p.CreatedAt = now
 	p.UpdatedAt = now
-	f.profiles[p.AgentID] = append(f.profiles[p.AgentID], p)
-	f.created = append(f.created, p)
+	stored := copyProfile(p)
+	f.profiles[p.AgentID] = append(f.profiles[p.AgentID], stored)
+	f.created = append(f.created, stored)
 	if input.McpConfig != nil {
 		input.McpConfig.ProfileID = p.ID
 		f.mcpConfigs[p.ID] = input.McpConfig
@@ -210,8 +271,25 @@ func (f *fakeStore) DuplicateAgentProfile(_ context.Context, input store.Duplica
 	return nil
 }
 
+func (f *fakeStore) persistAgentProfile(p *models.AgentProfile) (*models.AgentProfile, error) {
+	stored := copyProfile(p)
+	for agentID, profiles := range f.profiles {
+		for i, existing := range profiles {
+			if existing.ID == p.ID {
+				f.profiles[agentID][i] = stored
+				return stored, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("agent profile not found: %s", p.ID)
+}
+
 func (f *fakeStore) UpdateAgentProfile(_ context.Context, p *models.AgentProfile) error {
-	f.updated = append(f.updated, p)
+	stored, err := f.persistAgentProfile(p)
+	if err != nil {
+		return err
+	}
+	f.updated = append(f.updated, copyProfile(stored))
 	return nil
 }
 
@@ -223,8 +301,12 @@ func (f *fakeStore) UpdateAgentProfileEnabled(ctx context.Context, id string, en
 	profile.Enabled = enabled
 	profile.UserModified = true
 	profile.UpdatedAt = time.Now().UTC()
-	f.updated = append(f.updated, profile)
-	return profile.UpdatedAt, nil
+	stored, err := f.persistAgentProfile(profile)
+	if err != nil {
+		return time.Time{}, err
+	}
+	f.updated = append(f.updated, copyProfile(stored))
+	return stored.UpdatedAt, nil
 }
 
 func (f *fakeStore) DeleteAgentProfile(_ context.Context, id string) error {
@@ -254,11 +336,17 @@ func (f *fakeStore) GetAgentProfile(_ context.Context, id string) (*models.Agent
 	for _, list := range f.profiles {
 		for _, p := range list {
 			if p.ID == id {
-				return p, nil
+				return copyProfile(p), nil
 			}
 		}
 	}
 	return nil, sql.ErrNoRows
+}
+
+// GetAgentProfileTx is not exercised by this package's tests; it exists only
+// to satisfy store.Repository.
+func (f *fakeStore) GetAgentProfileTx(_ context.Context, _ *sqlx.Tx, _ string) (*models.AgentProfile, bool, error) {
+	return nil, false, errors.New("GetAgentProfileTx not implemented")
 }
 
 func (f *fakeStore) GetAgentProfileIncludingDeleted(ctx context.Context, id string) (*models.AgentProfile, error) {
@@ -270,7 +358,7 @@ func (f *fakeStore) GetAgentProfileIncludingDeleted(ctx context.Context, id stri
 	for _, list := range f.deleted {
 		for _, p := range list {
 			if p.ID == id {
-				return p, nil
+				return copyProfile(p), nil
 			}
 		}
 	}
@@ -283,7 +371,12 @@ func (f *fakeStore) ListAgentProfiles(_ context.Context, agentID string) ([]*mod
 			return nil, err
 		}
 	}
-	return f.profiles[agentID], nil
+	profiles := f.profiles[agentID]
+	out := make([]*models.AgentProfile, 0, len(profiles))
+	for _, p := range profiles {
+		out = append(out, copyProfile(p))
+	}
+	return out, nil
 }
 
 func (f *fakeStore) Close() error { return nil }
@@ -368,6 +461,35 @@ func TestProfileReconciler_SeedsDefaultProfile(t *testing.T) {
 	}
 	if p.Mode != "default" {
 		t.Errorf("mode = %q, want default", p.Mode)
+	}
+}
+
+func TestProfileReconciler_SeedsDynamicVirtualFamily(t *testing.T) {
+	st := newFakeStore()
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	if err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+	reg := registry.NewRegistry(log)
+	reg.LoadDefaults()
+	r := NewProfileReconciler(
+		&fakeCapReader{caps: map[string]hostutility.AgentCapabilities{}},
+		reg,
+		st,
+		log,
+	)
+	if err := r.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	parent, err := st.GetAgentByName(context.Background(), agents.DynamicAgentID)
+	if err != nil {
+		t.Fatalf("dynamic family lookup: %v", err)
+	}
+	if parent.ID != agents.DynamicAgentID {
+		t.Fatalf("dynamic family ID = %q, want stable ID %q", parent.ID, agents.DynamicAgentID)
+	}
+	if len(st.created) != 0 {
+		t.Fatalf("dynamic family seeded a concrete profile: %+v", st.created)
 	}
 }
 
@@ -532,6 +654,80 @@ func TestProfileReconciler_KeepsGoneFallbackModel(t *testing.T) {
 	}
 }
 
+func TestProfileReconciler_PreservesUserModifiedCustomRouteOutsideAgentCatalog(t *testing.T) {
+	st := newFakeStore()
+	dbAgent := &models.Agent{Name: "opencode-acp"}
+	_ = st.CreateAgent(context.Background(), dbAgent)
+	existing := &models.AgentProfile{
+		AgentID:      dbAgent.ID,
+		Name:         "Custom route",
+		Model:        "custom-provider/model",
+		Mode:         "custom-mode",
+		UserModified: true,
+	}
+	_ = st.CreateAgentProfile(context.Background(), existing)
+	st.created = nil
+
+	ag := &mockInferenceAgent{id: "opencode-acp", displayName: "OpenCode", enabled: true}
+	caps := &fakeCapReader{caps: map[string]hostutility.AgentCapabilities{
+		"opencode-acp": {
+			AgentType:      "opencode-acp",
+			Models:         []hostutility.Model{{ID: "catalog-model", Name: "Catalog"}},
+			CurrentModelID: "catalog-model",
+			Modes:          []hostutility.Mode{{ID: "agent", Name: "Agent"}},
+			CurrentModeID:  "agent",
+			Status:         hostutility.StatusOK,
+		},
+	}}
+
+	r := newReconciler(t, st, caps, ag)
+	if err := r.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(st.updated) != 0 {
+		t.Fatalf("user-modified custom route was rewritten: %+v", st.updated)
+	}
+	if existing.Model != "custom-provider/model" || existing.Mode != "custom-mode" {
+		t.Fatalf("custom route changed to model=%q mode=%q", existing.Model, existing.Mode)
+	}
+}
+
+func TestProfileReconciler_LeavesUserModifiedEmptyRouteUnchanged(t *testing.T) {
+	st := newFakeStore()
+	dbAgent := &models.Agent{Name: "claude-acp"}
+	_ = st.CreateAgent(context.Background(), dbAgent)
+	existing := &models.AgentProfile{
+		AgentID:      dbAgent.ID,
+		Name:         "Use provider default",
+		UserModified: true,
+	}
+	_ = st.CreateAgentProfile(context.Background(), existing)
+	st.created = nil
+
+	ag := &mockInferenceAgent{id: "claude-acp", displayName: "Claude", enabled: true}
+	caps := &fakeCapReader{caps: map[string]hostutility.AgentCapabilities{
+		"claude-acp": {
+			AgentType:      "claude-acp",
+			Models:         []hostutility.Model{{ID: "claude-sonnet", Name: "Sonnet"}},
+			CurrentModelID: "claude-sonnet",
+			Modes:          []hostutility.Mode{{ID: "default", Name: "Default"}},
+			CurrentModeID:  "default",
+			Status:         hostutility.StatusOK,
+		},
+	}}
+
+	r := newReconciler(t, st, caps, ag)
+	if err := r.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(st.updated) != 0 {
+		t.Fatalf("user-modified empty route was rewritten: %+v", st.updated)
+	}
+	if existing.Model != "" || existing.Mode != "" {
+		t.Fatalf("empty route changed to model=%q mode=%q", existing.Model, existing.Mode)
+	}
+}
+
 func TestProfileReconciler_PreservesOfficeAgentName(t *testing.T) {
 	profile := &models.AgentProfile{
 		Name:             "Researcher",
@@ -596,6 +792,49 @@ func TestProfileReconciler_HealsStaleCodexModeAfterBridgeSwap(t *testing.T) {
 	}
 	if updated.Mode != "agent" {
 		t.Errorf("healed mode = %q, want agent", updated.Mode)
+	}
+}
+
+func TestProfileReconciler_HealsStaleCodexModeForUserModifiedProfile(t *testing.T) {
+	st := newFakeStore()
+	dbAgent := &models.Agent{Name: "codex-acp"}
+	_ = st.CreateAgent(context.Background(), dbAgent)
+	existing := &models.AgentProfile{
+		AgentID:      dbAgent.ID,
+		Name:         "Codex",
+		Model:        "gpt-5.6-sol",
+		Mode:         "auto",
+		UserModified: true,
+	}
+	_ = st.CreateAgentProfile(context.Background(), existing)
+	st.created = nil
+
+	ag := &mockInferenceAgent{id: "codex-acp", displayName: "Codex", enabled: true}
+	caps := &fakeCapReader{
+		caps: map[string]hostutility.AgentCapabilities{
+			"codex-acp": {
+				AgentType:      "codex-acp",
+				Status:         hostutility.StatusOK,
+				Models:         []hostutility.Model{{ID: "gpt-5.6-sol", Name: "GPT 5.6 Sol"}},
+				CurrentModelID: "gpt-5.6-sol",
+				Modes: []hostutility.Mode{
+					{ID: "read-only", Name: "Read Only"},
+					{ID: "agent", Name: "Agent"},
+					{ID: "agent-full-access", Name: "Agent Full Access"},
+				},
+				CurrentModeID: "agent",
+			},
+		},
+	}
+	r := newReconciler(t, st, caps, ag)
+	if err := r.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(st.updated) != 1 {
+		t.Fatalf("expected 1 updated profile, got %d", len(st.updated))
+	}
+	if got := st.updated[0].Mode; got != "agent" {
+		t.Fatalf("healed mode = %q, want agent", got)
 	}
 }
 
@@ -839,8 +1078,8 @@ func TestProfileReconciler_LogsOrphanCleanupSummary(t *testing.T) {
 		t.Fatalf("expected 1 summary log, got %d", len(entries))
 	}
 	fields := entries[0].ContextMap()
-	if fields["db_agent_count"] != int64(1) {
-		t.Errorf("db_agent_count = %v, want 1", fields["db_agent_count"])
+	if fields["db_agent_count"] != int64(2) {
+		t.Errorf("db_agent_count = %v, want 2 including the dynamic virtual family", fields["db_agent_count"])
 	}
 	if fields["orphan_agent_count"] != int64(1) {
 		t.Errorf("orphan_agent_count = %v, want 1", fields["orphan_agent_count"])
@@ -946,13 +1185,17 @@ func TestProfileReconciler_MigratesCursorVariantModel(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	if profile.Model != "grok-4.5" {
-		t.Fatalf("profile model = %q, want bare Cursor model", profile.Model)
+	stored, err := st.GetAgentProfile(context.Background(), profile.ID)
+	if err != nil {
+		t.Fatalf("get migrated profile: %v", err)
 	}
-	if got := profile.ConfigOptions["effort"]; got != "low" {
+	if stored.Model != "grok-4.5" {
+		t.Fatalf("profile model = %q, want bare Cursor model", stored.Model)
+	}
+	if got := stored.ConfigOptions["effort"]; got != "low" {
 		t.Errorf("profile effort = %q, want existing profile value low", got)
 	}
-	if got := profile.ConfigOptions["fast"]; got != "true" {
+	if got := stored.ConfigOptions["fast"]; got != "true" {
 		t.Errorf("profile fast = %q, want migrated value true", got)
 	}
 	if len(st.updated) == 0 {

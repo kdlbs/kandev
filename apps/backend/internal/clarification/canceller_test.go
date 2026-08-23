@@ -28,6 +28,7 @@ type stubMessageStore struct {
 	expireErr         error
 	findHasDeadline   bool
 	findContextErr    error
+	findErr           error
 }
 
 func (s *stubMessageStore) GetTaskSession(context.Context, string) (*taskmodels.TaskSession, error) {
@@ -45,6 +46,9 @@ func (s *stubMessageStore) FindMessageByPendingID(_ context.Context, pendingID s
 func (s *stubMessageStore) FindMessagesByPendingID(ctx context.Context, pendingID string) ([]*taskmodels.Message, error) {
 	_, s.findHasDeadline = ctx.Deadline()
 	s.findContextErr = ctx.Err()
+	if s.findErr != nil {
+		return nil, s.findErr
+	}
 	msgs, ok := s.messages[pendingID]
 	if !ok {
 		return nil, nil

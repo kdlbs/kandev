@@ -4,8 +4,10 @@ package integration
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
+	"testing"
 	"time"
 
 	"github.com/google/uuid"
@@ -26,17 +28,19 @@ import (
 // SimulatedAgentManagerClient simulates agent container behavior for testing.
 // It publishes realistic agent events (started, ACP messages, completion) to the event bus.
 type SimulatedAgentManagerClient struct {
-	eventBus      bus.EventBus
-	logger        *logger.Logger
-	mu            sync.Mutex
-	instances     map[string]*simulatedInstance
-	launchDelay   time.Duration
-	executionTime time.Duration
-	shouldFail    bool
-	failAfter     int // Fail after N successful launches
-	launchCount   int32
-	acpMessageFn  func(taskID, executionID string) []protocol.Message // Custom ACP messages
-	stopCh        chan struct{}
+	eventBus            bus.EventBus
+	logger              *logger.Logger
+	mu                  sync.Mutex
+	instances           map[string]*simulatedInstance
+	permissions         map[string][]streams.PendingAgentPermission
+	permissionResponses int
+	launchDelay         time.Duration
+	executionTime       time.Duration
+	shouldFail          bool
+	failAfter           int // Fail after N successful launches
+	launchCount         int32
+	acpMessageFn        func(taskID, executionID string) []protocol.Message // Custom ACP messages
+	stopCh              chan struct{}
 }
 
 // simulatedInstance tracks a simulated agent instance
@@ -59,6 +63,7 @@ func NewSimulatedAgentManager(eventBus bus.EventBus, log *logger.Logger) *Simula
 		eventBus:      eventBus,
 		logger:        log,
 		instances:     make(map[string]*simulatedInstance),
+		permissions:   make(map[string][]streams.PendingAgentPermission),
 		launchDelay:   50 * time.Millisecond,
 		executionTime: 200 * time.Millisecond,
 		stopCh:        make(chan struct{}),
@@ -346,6 +351,102 @@ func (s *SimulatedAgentManagerClient) RespondToPermissionBySessionID(ctx context
 		zap.String("option_id", optionID),
 		zap.Bool("cancelled", cancelled))
 	return nil
+}
+
+func (s *SimulatedAgentManagerClient) SetPendingPermissions(sessionID string, permissions []streams.PendingAgentPermission) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.permissions[sessionID] = append([]streams.PendingAgentPermission(nil), permissions...)
+}
+
+func (s *SimulatedAgentManagerClient) PermissionResponseCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.permissionResponses
+}
+
+func (s *SimulatedAgentManagerClient) ListPendingPermissionsBySessionID(_ context.Context, sessionID string) ([]streams.PendingAgentPermission, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]streams.PendingAgentPermission(nil), s.permissions[sessionID]...), nil
+}
+
+func (s *SimulatedAgentManagerClient) ResolvePermissionBySessionID(_ context.Context, sessionID, requestID, pendingID, optionID string) (*streams.PermissionResolveResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for permissionIndex, permission := range s.permissions[sessionID] {
+		if permission.RequestID != requestID || permission.PendingID != pendingID {
+			continue
+		}
+		for _, option := range permission.Options {
+			if option.OptionID != optionID {
+				continue
+			}
+			s.permissions[sessionID] = append(s.permissions[sessionID][:permissionIndex], s.permissions[sessionID][permissionIndex+1:]...)
+			s.permissionResponses++
+			return &streams.PermissionResolveResponse{
+				RequestID: requestID, PendingID: pendingID, OptionID: optionID,
+				OptionKind: option.Kind, Status: "resolved",
+			}, nil
+		}
+	}
+	return nil, fmt.Errorf("permission no longer pending")
+}
+
+func (s *SimulatedAgentManagerClient) CancelPermissionBySessionID(_ context.Context, sessionID, requestID, pendingID string) (*streams.PermissionCancelResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	permissions := s.permissions[sessionID]
+	for permissionIndex, permission := range permissions {
+		if permission.RequestID != requestID || permission.PendingID != pendingID {
+			continue
+		}
+		s.permissions[sessionID] = append(permissions[:permissionIndex], permissions[permissionIndex+1:]...)
+		return &streams.PermissionCancelResponse{RequestID: requestID, PendingID: pendingID, Status: "cancelled"}, nil
+	}
+	return nil, fmt.Errorf("permission no longer pending")
+}
+
+func TestSimulatedAgentManagerCancelPermissionConsumesExactTuple(t *testing.T) {
+	manager := &SimulatedAgentManagerClient{permissions: make(map[string][]streams.PendingAgentPermission)}
+	manager.SetPendingPermissions("session-1", []streams.PendingAgentPermission{{
+		RequestID: "request-1",
+		PendingID: "pending-1",
+		Options: []streams.PermissionChoice{{
+			OptionID: "allow-once",
+			Kind:     streams.PermissionOptionKindAllowOnce,
+		}},
+	}})
+
+	for _, tuple := range []struct {
+		sessionID string
+		requestID string
+		pendingID string
+	}{
+		{sessionID: "session-other", requestID: "request-1", pendingID: "pending-1"},
+		{sessionID: "session-1", requestID: "request-other", pendingID: "pending-1"},
+		{sessionID: "session-1", requestID: "request-1", pendingID: "pending-other"},
+	} {
+		if _, err := manager.CancelPermissionBySessionID(t.Context(), tuple.sessionID, tuple.requestID, tuple.pendingID); err == nil || !strings.Contains(err.Error(), "permission no longer pending") {
+			t.Fatalf("mismatched cancellation (%+v) error = %v, want permission no longer pending", tuple, err)
+		}
+	}
+	listed, err := manager.ListPendingPermissionsBySessionID(t.Context(), "session-1")
+	if err != nil || len(listed) != 1 {
+		t.Fatalf("list after mismatches = %+v, err=%v, want original permission", listed, err)
+	}
+
+	cancelled, err := manager.CancelPermissionBySessionID(t.Context(), "session-1", "request-1", "pending-1")
+	if err != nil || cancelled.Status != "cancelled" {
+		t.Fatalf("exact cancellation = %+v, err=%v", cancelled, err)
+	}
+	listed, err = manager.ListPendingPermissionsBySessionID(t.Context(), "session-1")
+	if err != nil || len(listed) != 0 {
+		t.Fatalf("list after cancellation = %+v, err=%v, want empty", listed, err)
+	}
+	if _, err := manager.ResolvePermissionBySessionID(t.Context(), "session-1", "request-1", "pending-1", "allow-once"); err == nil || !strings.Contains(err.Error(), "permission no longer pending") {
+		t.Fatalf("resolve after cancellation error = %v, want permission no longer pending", err)
+	}
 }
 
 // CompleteAgent marks an agent as completed

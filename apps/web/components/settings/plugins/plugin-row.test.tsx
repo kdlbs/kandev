@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { PluginRow, type PluginRowUpdateState } from "./plugin-row";
 import type { MarketplaceEntry, PluginRecord } from "@/lib/types/plugins";
 
@@ -70,7 +70,6 @@ const baseProps = {
   autoUpdateBusy: false,
   onEnable: noop,
   onDisable: noop,
-  onUninstall: noop,
   onSetAutoUpdate: noop,
 };
 
@@ -367,5 +366,53 @@ describe("PluginRow auto-update toggle", () => {
     render(<PluginRow {...baseProps} plugin={p} onSetAutoUpdate={onSetAutoUpdate} />);
     fireEvent.click(screen.getByTestId("plugin-auto-update-reset-acme"));
     expect(onSetAutoUpdate).toHaveBeenCalledWith(p, null);
+  });
+});
+
+describe("PluginRow uninstall confirmation", () => {
+  const pluginName = "Acme Tools";
+
+  it("anchors fine-pointer confirmation to the row action and names the target", () => {
+    const p = plugin({ display_name: pluginName });
+    const onConfirmUninstall = vi.fn();
+
+    render(
+      <PluginRow {...baseProps} plugin={p} isFinePointer onConfirmUninstall={onConfirmUninstall} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /^Uninstall$/i }));
+
+    expect(screen.getByTestId("plugin-uninstall-confirm-popover").textContent).toContain(
+      pluginName,
+    );
+    expect(document.querySelector('[data-slot="dialog-overlay"]')).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Cancel$/i }));
+    expect(screen.queryByTestId("plugin-uninstall-confirm-popover")).toBeNull();
+  });
+
+  it("uses inline touch actions on coarse pointers and passes the row target on confirm", async () => {
+    const p = plugin({ display_name: pluginName });
+    const onConfirmUninstall = vi.fn();
+
+    render(
+      <PluginRow
+        {...baseProps}
+        plugin={p}
+        isFinePointer={false}
+        onConfirmUninstall={onConfirmUninstall}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /^Uninstall$/i }));
+
+    const confirmation = screen.getByTestId("plugin-uninstall-inline-confirmation");
+    expect(confirmation.textContent).toContain(pluginName);
+    expect(screen.queryByRole("button", { name: /^Uninstall$/i })).toBeNull();
+    expect(screen.getByTestId("plugin-uninstall-confirm").className).toContain("h-11");
+    expect(screen.getByTestId("plugin-uninstall-confirm").className).toContain("min-w-11");
+
+    fireEvent.click(screen.getByTestId("plugin-uninstall-confirm"));
+    await waitFor(() => expect(onConfirmUninstall).toHaveBeenCalledWith(p));
   });
 });

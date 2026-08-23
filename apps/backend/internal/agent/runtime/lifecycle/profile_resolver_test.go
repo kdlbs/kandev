@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jmoiron/sqlx"
+
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agent/settings/store"
@@ -100,6 +102,12 @@ func (m *MockRepository) GetAgentProfile(ctx context.Context, id string) (*model
 		return m.GetAgentProfileFn(ctx, id)
 	}
 	return nil, errors.New("profile not found")
+}
+
+// GetAgentProfileTx is not exercised by this package's tests; it exists only
+// to satisfy store.Repository.
+func (m *MockRepository) GetAgentProfileTx(_ context.Context, _ *sqlx.Tx, _ string) (*models.AgentProfile, bool, error) {
+	return nil, false, errors.New("GetAgentProfileTx not implemented")
 }
 
 func (m *MockRepository) GetAgentProfileIncludingDeleted(ctx context.Context, id string) (*models.AgentProfile, error) {

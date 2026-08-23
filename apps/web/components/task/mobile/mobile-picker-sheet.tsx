@@ -14,6 +14,8 @@ type MobilePickerSheetProps = {
   onOpenChange: (open: boolean) => void;
   title: string;
   description?: string;
+  /** Optional stable hook for a picker that owns the sheet scroll area. */
+  contentTestId?: string;
   /** Optional trailing element rendered to the right of the title (e.g. a "+" CTA). */
   headerAction?: ReactNode;
   children: ReactNode;
@@ -29,6 +31,7 @@ export function MobilePickerSheet({
   onOpenChange,
   title,
   description,
+  contentTestId,
   headerAction,
   children,
 }: MobilePickerSheetProps) {
@@ -42,7 +45,12 @@ export function MobilePickerSheet({
           </div>
           {description && <DrawerDescription>{description}</DrawerDescription>}
         </DrawerHeader>
-        <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-4">{children}</div>
+        <div
+          className="flex-1 min-h-0 max-h-[70dvh] overflow-y-auto px-2 pb-[calc(1rem+env(safe-area-inset-bottom))]"
+          data-testid={contentTestId}
+        >
+          {children}
+        </div>
       </DrawerContent>
     </Drawer>
   );

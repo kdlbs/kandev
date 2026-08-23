@@ -1,7 +1,7 @@
 ---
 status: building
 created: 2026-08-07
-updated: 2026-08-11
+updated: 2026-08-19
 ---
 
 # Port collision and backend ownership safety
@@ -130,6 +130,26 @@ database path and tells the operator to use a separate `KANDEV_HOME_DIR` for an 
 instance. The rejected process must not initialize file logging, create a database backup, apply a
 migration, reconcile a session, launch agentctl, or start an HTTP server.
 
+That message also names the current owner when the owner is knowable. After a backend acquires a
+lock it records advisory owner metadata, its process ID, executable path, and start time, into the
+lock file it already holds, replacing any previous content. A process rejected for a conflict reads
+that metadata and includes it in its stderr message, so an operator who has no leftover terminal can
+identify the process to stop instead of being told only that the home is busy.
+
+This metadata is diagnostics, not ownership. The operating-system lock remains the sole proof: the
+metadata is never consulted to decide whether a lock is held, whether it is stale, or whether it may
+be taken over, and acquisition never waits on it. Failing to write it does not fail acquisition, and
+absent, empty, or unparseable metadata falls back to the message that names only the path. Because a
+crashed owner leaves its last-written metadata in place, a reader that can positively determine the
+recorded process is no longer running omits the owner detail rather than naming a dead process; a
+platform that cannot determine liveness reports the recorded values as-is.
+
+The lock sidecar is opened with platform no-follow semantics and must resolve to a regular file before
+the backend can write metadata. A symlink or platform reparse point at the lock path is rejected
+without modifying its target. The first byte of the sidecar is reserved for the Windows lock range,
+so a conflicting process can read the advisory metadata through a separate handle while the lock is
+held.
+
 The backend fails closed when it cannot create, open, or acquire a required lock. Launcher port
 preflight and health-token ownership remain useful readiness checks, but they are not persistent
 state ownership checks.
@@ -201,13 +221,25 @@ not part of this contract.
    against that home, then the direct command fails without changing task or session state.
 5. Given two distinct homes, databases, and ports, when two local backends start, then both can run
    as independent instances.
+6. Given a backend owns a Kandev home and has recorded its owner metadata, when a second backend
+   starts against the same home, then the rejection names the owning process ID and executable in
+   addition to the conflicting home path.
+7. Given a lock file still holds metadata from an owner that has since died, when a second backend
+   is rejected by whichever process holds the lock now, then the message omits owner detail it
+   cannot confirm and still names the conflicting home path.
+8. Given a backend cannot write its owner metadata, when it has already acquired the lock, then it
+   starts normally and a later conflicting process falls back to the path-only message.
+9. Given a lock sidecar path is a symlink or platform reparse point, when the backend starts, then
+   it rejects the lock before writing and leaves the link target unchanged.
 
 ## Out of scope
 
 - Changing default ports, fallback ranges, or automatic-port selection policy.
 - Choosing a different port when the user explicitly requested one.
-- PID or process-tree identity matching; the launcher wrapper chain makes that unreliable for
-  dev mode.
+- PID or process-tree identity matching as an ownership, staleness, or takeover decision; the
+  launcher wrapper chain makes that unreliable for dev mode, and a recorded PID can be stale or
+  reused. Advisory owner metadata written into the lock file is diagnostic text only and is
+  explicitly not such a decision input.
 - Changing the health response body, the backend health status semantics, or the desktop
   WebView flow.
 - Renaming KANDEV_DESKTOP_HEALTH_TOKEN to a neutral variable; that would be a separate contract

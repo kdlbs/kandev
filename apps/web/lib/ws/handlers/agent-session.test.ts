@@ -33,6 +33,8 @@ function makeStore(overrides: Record<string, unknown> = {}) {
     setSessionFailureNotification: vi.fn(),
     setContextWindow: vi.fn(),
     clearContextWindow: vi.fn(),
+    queue: { bySessionId: {}, metaBySessionId: {} },
+    setQueueEntries: vi.fn(),
     clearLegacyGitStatusEntry: vi.fn(),
     bumpSessionCommitsRefetch: vi.fn(),
     bumpWorkspaceFilesRefresh: vi.fn(),
@@ -47,6 +49,63 @@ function makeStore(overrides: Record<string, unknown> = {}) {
     getInitialState: vi.fn(),
   } as unknown as StoreApi<AppState>;
 }
+
+describe("message.queue.status_changed handler", () => {
+  it("stores the backend-owned Auto-run policy", () => {
+    const setQueueEntries = vi.fn();
+    const store = makeStore({ setQueueEntries });
+    const handler = registerTaskSessionHandlers(store)["message.queue.status_changed"]!;
+
+    handler({
+      id: "queue-status-1",
+      type: "notification",
+      action: "message.queue.status_changed",
+      payload: {
+        session_id: "s-1",
+        entries: [],
+        count: 0,
+        max: 10,
+        merge_enabled: true,
+        auto_run: false,
+      },
+    } as never);
+
+    expect(setQueueEntries).toHaveBeenCalledWith("s-1", [], {
+      count: 0,
+      max: 10,
+      mergeEnabled: true,
+      autoRun: false,
+    });
+  });
+
+  it("preserves a known OFF policy when an older publisher omits policy fields", () => {
+    const setQueueEntries = vi.fn();
+    const store = makeStore({
+      setQueueEntries,
+      queue: {
+        bySessionId: { "s-1": [] },
+        metaBySessionId: {
+          "s-1": { count: 1, max: 10, mergeEnabled: false, autoRun: false },
+        },
+      },
+    });
+    const handler = registerTaskSessionHandlers(store)["message.queue.status_changed"]!;
+
+    handler({
+      id: "queue-status-compat",
+      type: "notification",
+      action: "message.queue.status_changed",
+      payload: { session_id: "s-1", entries: [], count: 0, max: 10 },
+    } as never);
+
+    expect(setQueueEntries).toHaveBeenCalledWith("s-1", [], {
+      count: 0,
+      max: 10,
+      mergeEnabled: false,
+      autoRun: false,
+    });
+  });
+});
 
 const STATE_CHANGED_EVENT = "session.state_changed";
 const ACTIVITY_EVENT = "session.activity_changed";
@@ -166,6 +225,35 @@ describe("session.state_changed handler", () => {
       taskId: "t-1",
       message: "container crashed",
     });
+  });
+
+  it("classifies stamped typed failures as launch failures without actions", () => {
+    store = makeStore({
+      taskSessions: {
+        items: { "s-1": { id: "s-1", task_id: "t-1", state: "STARTING" } },
+      },
+    });
+    handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        new_state: "FAILED",
+        error_message: "pull request is closed",
+        session_metadata: {
+          last_agent_error: {
+            message: "pull request is closed",
+            code: "pr_already_closed",
+            stamp: "closed-pr-stamp",
+          },
+        },
+      }),
+    );
+
+    expect(store.getState().setSessionFailureNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ isLaunchFailure: true }),
+    );
   });
 
   it("does not set failure notification when session is already FAILED", () => {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -69,6 +70,7 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.POST("/agent-models/:agentName/resolve", h.httpResolveAgentModelConfig)
 	api.POST("/agent-command-preview/:agentName", h.httpPreviewAgentCommand)
 	api.POST("/agent-install/:agentName", h.interlock, h.httpInstallAgent)
+	api.GET("/agent-update/status", h.httpListAgentUpdateStatuses)
 	api.GET("/agent-update/:agentName/preview", h.httpPreviewAgentUpdate)
 	api.GET("/agent-install/jobs", h.httpListInstallJobs)
 	api.GET("/agent-install/jobs/:id", h.httpGetInstallJob)
@@ -131,11 +133,18 @@ func (h *Handlers) httpUpdateAgentRuntime(c *gin.Context) {
 		return
 	}
 	request.TargetVersion = strings.TrimSpace(request.TargetVersion)
-	if request.TargetVersion == "" {
+	if request.UseDefault && request.TargetVersion != "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "target version and use_default cannot be combined"})
+		return
+	}
+	if !request.UseDefault && request.TargetVersion == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "target version is required"})
 		return
 	}
 	h.enqueueMaintenance(c, name, "update", func() (any, error) {
+		if request.UseDefault {
+			return h.controller.EnqueueAgentUpdateUseDefault(c.Request.Context(), name)
+		}
 		return h.controller.EnqueueAgentUpdate(c.Request.Context(), name, request.TargetVersion)
 	}, classifyUpdateError)
 }
@@ -145,11 +154,27 @@ func (h *Handlers) httpPreviewAgentUpdate(c *gin.Context) {
 	if !ok {
 		return
 	}
-	preview, err := h.controller.PreviewAgentUpdate(
-		c.Request.Context(),
-		name,
-		strings.TrimSpace(c.Query("target_version")),
-	)
+	targetVersion := strings.TrimSpace(c.Query("target_version"))
+	useDefault := false
+	if raw := strings.TrimSpace(c.Query("use_default")); raw != "" {
+		parsed, err := strconv.ParseBool(raw)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "use_default must be a boolean"})
+			return
+		}
+		useDefault = parsed
+	}
+	if useDefault && targetVersion != "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "target version and use_default cannot be combined"})
+		return
+	}
+	var preview *dto.AgentUpdatePreviewDTO
+	var err error
+	if useDefault {
+		preview, err = h.controller.PreviewAgentUpdateUseDefault(c.Request.Context(), name)
+	} else {
+		preview, err = h.controller.PreviewAgentUpdate(c.Request.Context(), name, targetVersion)
+	}
 	if err == nil {
 		c.JSON(http.StatusOK, preview)
 		return
@@ -160,6 +185,16 @@ func (h *Handlers) httpPreviewAgentUpdate(c *gin.Context) {
 	}
 	h.logger.Error("failed to preview agent runtime update", zap.String("agent", name), zap.Error(err))
 	c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to preview agent update"})
+}
+
+func (h *Handlers) httpListAgentUpdateStatuses(c *gin.Context) {
+	resp, err := h.controller.ListAgentUpdateStatuses(c.Request.Context())
+	if err != nil {
+		h.logger.Error("failed to list agent runtime update statuses", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list agent update statuses"})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 func requireAgentName(c *gin.Context) (string, bool) {
@@ -525,18 +560,19 @@ func (h *Handlers) httpUpdateProfileMcpConfig(c *gin.Context) {
 }
 
 type createProfileRequest struct {
-	Name           string                 `json:"name"`
-	Model          string                 `json:"model"`
-	FallbackModel  string                 `json:"fallback_model,omitempty"`
-	AutoFallback   bool                   `json:"auto_fallback"`
-	Mode           string                 `json:"mode,omitempty"`
-	ConfigOptions  map[string]string      `json:"config_options,omitempty"`
-	AllowIndexing  bool                   `json:"allow_indexing"`
-	AutoApprove    bool                   `json:"auto_approve"`
-	CLIPassthrough bool                   `json:"cli_passthrough"`
-	CLIFlags       []dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
-	EnvVars        []dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
-	CommandPrefix  string                 `json:"command_prefix,omitempty"`
+	Name           string                      `json:"name"`
+	Model          string                      `json:"model"`
+	FallbackModel  string                      `json:"fallback_model,omitempty"`
+	AutoFallback   bool                        `json:"auto_fallback"`
+	Mode           string                      `json:"mode,omitempty"`
+	ConfigOptions  map[string]string           `json:"config_options,omitempty"`
+	AllowIndexing  bool                        `json:"allow_indexing"`
+	AutoApprove    bool                        `json:"auto_approve"`
+	CLIPassthrough bool                        `json:"cli_passthrough"`
+	CLIFlags       []dto.CLIFlagDTO            `json:"cli_flags,omitempty"`
+	EnvVars        []dto.ProfileEnvVarDTO      `json:"env_vars,omitempty"`
+	CommandPrefix  string                      `json:"command_prefix,omitempty"`
+	Dynamic        *dto.DynamicAgentProfileDTO `json:"dynamic,omitempty"`
 }
 
 func (h *Handlers) httpCreateProfile(c *gin.Context) {
@@ -563,8 +599,20 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 		CLIFlags:       body.CLIFlags,
 		EnvVars:        body.EnvVars,
 		CommandPrefix:  body.CommandPrefix,
+		Dynamic:        body.Dynamic,
 	})
 	if err != nil {
+		if errors.Is(err, controller.ErrDynamicAgentRoutingDisabled) {
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
+		if errors.Is(err, controller.ErrDynamicProfileCandidatesRequired) ||
+			errors.Is(err, controller.ErrDynamicProfilePositions) ||
+			errors.Is(err, controller.ErrDynamicProfileRule) ||
+			errors.Is(err, controller.ErrDynamicProfileCandidate) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -578,19 +626,20 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 }
 
 type updateProfileRequest struct {
-	Name           *string                 `json:"name,omitempty"`
-	Model          *string                 `json:"model,omitempty"`
-	FallbackModel  *string                 `json:"fallback_model,omitempty"`
-	AutoFallback   *bool                   `json:"auto_fallback,omitempty"`
-	Mode           *string                 `json:"mode,omitempty"`
-	ConfigOptions  *map[string]string      `json:"config_options,omitempty"`
-	AllowIndexing  *bool                   `json:"allow_indexing,omitempty"`
-	AutoApprove    *bool                   `json:"auto_approve,omitempty"`
-	CLIPassthrough *bool                   `json:"cli_passthrough,omitempty"`
-	Enabled        *bool                   `json:"enabled,omitempty"`
-	CLIFlags       *[]dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
-	EnvVars        *[]dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
-	CommandPrefix  *string                 `json:"command_prefix,omitempty"`
+	Name           *string                     `json:"name,omitempty"`
+	Model          *string                     `json:"model,omitempty"`
+	FallbackModel  *string                     `json:"fallback_model,omitempty"`
+	AutoFallback   *bool                       `json:"auto_fallback,omitempty"`
+	Mode           *string                     `json:"mode,omitempty"`
+	ConfigOptions  *map[string]string          `json:"config_options,omitempty"`
+	AllowIndexing  *bool                       `json:"allow_indexing,omitempty"`
+	AutoApprove    *bool                       `json:"auto_approve,omitempty"`
+	CLIPassthrough *bool                       `json:"cli_passthrough,omitempty"`
+	Enabled        *bool                       `json:"enabled,omitempty"`
+	CLIFlags       *[]dto.CLIFlagDTO           `json:"cli_flags,omitempty"`
+	EnvVars        *[]dto.ProfileEnvVarDTO     `json:"env_vars,omitempty"`
+	CommandPrefix  *string                     `json:"command_prefix,omitempty"`
+	Dynamic        *dto.DynamicAgentProfileDTO `json:"dynamic,omitempty"`
 }
 
 func (h *Handlers) httpUpdateProfile(c *gin.Context) {
@@ -618,6 +667,7 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 		CLIFlags:       body.CLIFlags,
 		EnvVars:        body.EnvVars,
 		CommandPrefix:  body.CommandPrefix,
+		Dynamic:        body.Dynamic,
 		Force:          c.Query("force") == queryTrue,
 	})
 	if err != nil {
@@ -629,9 +679,25 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		if errors.Is(err, controller.ErrDynamicAgentRoutingDisabled) ||
+			errors.Is(err, controller.ErrDynamicProfileVersionConflict) {
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
+		if errors.Is(err, controller.ErrDynamicProfileCandidatesRequired) ||
+			errors.Is(err, controller.ErrDynamicProfilePositions) ||
+			errors.Is(err, controller.ErrDynamicProfileRule) ||
+			errors.Is(err, controller.ErrDynamicProfileCandidate) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		var inUseErr *controller.ErrProfileInUseDetail
 		if errors.As(err, &inUseErr) {
-			c.JSON(http.StatusConflict, gin.H{"error": "agent profile is in use", "utility_agents": inUseErr.UtilityAgents})
+			c.JSON(http.StatusConflict, gin.H{
+				"error":            "agent profile is in use",
+				"utility_agents":   inUseErr.UtilityAgents,
+				"dynamic_profiles": inUseErr.DynamicProfiles,
+			})
 			return
 		}
 		h.logger.Error("failed to update profile", zap.Error(err))
@@ -658,6 +724,10 @@ func (h *Handlers) httpDuplicateProfile(c *gin.Context) {
 	if err != nil {
 		if err == controller.ErrAgentProfileNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"error": "agent profile not found"})
+			return
+		}
+		if errors.Is(err, controller.ErrDynamicProfileDuplicationUnsupported) {
+			c.JSON(http.StatusConflict, gin.H{"error": "dynamic profiles cannot be duplicated"})
 			return
 		}
 		h.logger.Error("failed to duplicate profile", zap.Error(err))
@@ -705,12 +775,13 @@ func (h *Handlers) httpDeleteProfile(c *gin.Context) {
 		var inUseErr *controller.ErrProfileInUseDetail
 		if errors.As(err, &inUseErr) {
 			c.JSON(http.StatusConflict, gin.H{
-				"error":           "agent profile is in use",
-				"active_sessions": inUseErr.ActiveSessions,
-				"watchers":        inUseErr.Watchers,
-				"routing_tiers":   inUseErr.RoutingTiers,
-				"automations":     inUseErr.Automations,
-				"utility_agents":  inUseErr.UtilityAgents,
+				"error":            "agent profile is in use",
+				"active_sessions":  inUseErr.ActiveSessions,
+				"watchers":         inUseErr.Watchers,
+				"routing_tiers":    inUseErr.RoutingTiers,
+				"automations":      inUseErr.Automations,
+				"utility_agents":   inUseErr.UtilityAgents,
+				"dynamic_profiles": inUseErr.DynamicProfiles,
 			})
 			return
 		}

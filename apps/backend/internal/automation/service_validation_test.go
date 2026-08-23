@@ -53,6 +53,15 @@ func (s stubWorkflowLocator) WorkflowWorkspaceID(context.Context, string) (strin
 	return s.workspaceID, nil
 }
 
+type stubWorkflowStepLocator struct {
+	belongs bool
+	err     error
+}
+
+func (s stubWorkflowStepLocator) WorkflowStepBelongs(context.Context, string, string, string) (bool, error) {
+	return s.belongs, s.err
+}
+
 // The editor filtering foreign workflows out of a dropdown is not a boundary —
 // a request naming one directly has to be refused server-side.
 func TestCreateAutomation_RejectsAForeignWorkflow(t *testing.T) {
@@ -77,6 +86,20 @@ func TestCreateAutomation_AcceptsItsOwnWorkflow(t *testing.T) {
 		WorkspaceID: "ws-1", Name: "local", WorkflowID: "wf-local", WorkflowStepID: "s-1",
 	}); err != nil {
 		t.Fatalf("expected a same-workspace workflow to be accepted, got %v", err)
+	}
+}
+
+func TestCreateAutomation_RejectsAStepFromADifferentWorkflow(t *testing.T) {
+	svc := newTestService(t)
+	svc.SetWorkflowLocator(stubWorkflowLocator{workspaceID: "ws-1"})
+	svc.SetWorkflowStepLocator(stubWorkflowStepLocator{belongs: false})
+	ctx := context.Background()
+
+	_, err := svc.CreateAutomation(ctx, &CreateAutomationRequest{
+		WorkspaceID: "ws-1", Name: "cross-step", WorkflowID: "wf-local", WorkflowStepID: "step-foreign",
+	})
+	if err == nil {
+		t.Fatal("expected a workflow step from another workflow to be rejected")
 	}
 }
 
@@ -159,6 +182,27 @@ func TestUpdateAutomation_AcceptsItsOwnWorkflow(t *testing.T) {
 		WorkflowID: &own,
 	}); err != nil {
 		t.Fatalf("expected a same-workspace workflow to be accepted on update, got %v", err)
+	}
+}
+
+func TestUpdateAutomation_RejectsAStepFromADifferentWorkflow(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	created, err := svc.CreateAutomation(ctx, &CreateAutomationRequest{
+		WorkspaceID: "ws-1", Name: "local", WorkflowID: "wf-local", WorkflowStepID: "step-local",
+	})
+	if err != nil {
+		t.Fatalf("seed automation: %v", err)
+	}
+
+	svc.SetWorkflowLocator(stubWorkflowLocator{workspaceID: "ws-1"})
+	svc.SetWorkflowStepLocator(stubWorkflowStepLocator{belongs: false})
+	foreignStep := "step-foreign"
+	if _, err := svc.UpdateAutomation(ctx, created.ID, &UpdateAutomationRequest{
+		WorkflowStepID: &foreignStep,
+	}); err == nil {
+		t.Fatal("expected a workflow step from another workflow to be rejected on update")
 	}
 }
 

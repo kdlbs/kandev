@@ -136,40 +136,35 @@ func TestBuildAgentCommand_UsesManagedNPMRuntimes(t *testing.T) {
 	tests := []struct {
 		name  string
 		agent agents.Agent
-		want  string
 	}{
 		{
 			name:  "claude",
 			agent: agents.NewClaudeACP(),
-			want:  "npx --yes --prefer-offline @agentclientprotocol/claude-agent-acp",
 		},
 		{
 			name:  "codex",
 			agent: agents.NewCodexACP(),
-			want:  "npx --yes --prefer-offline @agentclientprotocol/codex-acp",
 		},
 		{
 			name:  "opencode",
 			agent: agents.NewOpenCodeACP(),
-			want:  "npx --yes --prefer-offline opencode-ai acp --print-logs --log-level ERROR",
 		},
 		{
 			name:  "copilot",
 			agent: agents.NewCopilotACP(),
-			want:  "npx --yes --prefer-offline @github/copilot --acp",
 		},
 		{
 			name:  "gemini",
 			agent: agents.NewGemini(),
-			want:  "npx --yes --prefer-offline @google/gemini-cli --acp",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			want := strings.Join(tt.agent.(agents.ManagedNPMRuntimeAgent).ManagedNPMRuntime().CachedACPCommand().Args(), " ")
 			cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, nil, tt.agent, true)
 			require.NoError(t, err)
-			require.Equal(t, tt.want, cmds.initial)
+			require.Equal(t, want, cmds.initial)
 		})
 	}
 }
@@ -488,6 +483,25 @@ func TestBuildEnvForExecution_ResolvesSecretBackedProfileEnv(t *testing.T) {
 	}
 	if env["FROM_SECRET"] != "revealed" {
 		t.Fatalf("FROM_SECRET: got %q want revealed", env["FROM_SECRET"])
+	}
+}
+
+func TestBuildEnvForExecution_FailsClosedWhenProfileSecretIsUnavailable(t *testing.T) {
+	mgr := newTestManager(t)
+	mgr.secretStore = newInMemorySecretStore()
+
+	_, err := mgr.buildEnvForExecution(
+		context.Background(),
+		"exec-1",
+		&LaunchRequest{AgentProfileID: "profile-1"},
+		nil,
+		&AgentProfileInfo{EnvVars: []settingsmodels.ProfileEnvVar{{
+			Key:      "PROFILE_TOKEN",
+			SecretID: "missing-secret",
+		}}},
+	)
+	if err == nil {
+		t.Fatal("buildEnvForExecution succeeded with an unavailable profile secret")
 	}
 }
 
@@ -815,6 +829,32 @@ func TestConfigureAndStartAgent_DoesNotSendTaskDescriptionEnv(t *testing.T) {
 	}
 	if _, exists := configuredEnv["TASK_DESCRIPTION"]; exists {
 		t.Fatalf("TASK_DESCRIPTION must not be sent to agentctl configure env")
+	}
+}
+
+func TestConfigureAndStartAgentUsesRuntimeSnapshotWhenProfileSecretIsUnavailable(t *testing.T) {
+	mgr := newTestManager(t)
+	mgr.profileResolver = &mockPassthroughProfileResolver{
+		envVars: []settingsmodels.ProfileEnvVar{{Key: "PROFILE_ONLY", SecretID: "deleted-secret"}},
+	}
+	var configuredEnv map[string]string
+	client := newConfigureCaptureAgentctlClient(t, newTestLogger(), &configuredEnv)
+	execution := &AgentExecution{
+		ID:             "exec-1",
+		TaskID:         "task-1",
+		SessionID:      "session-1",
+		AgentProfileID: "profile-1",
+		AgentCommand:   "npx -y @agentclientprotocol/codex-acp",
+		WorkspacePath:  t.TempDir(),
+		agentctl:       client,
+	}
+	execution.setRuntimeEnvironment(map[string]string{"PROFILE_ONLY": "captured-value"})
+
+	if _, err := mgr.configureAndStartAgent(context.Background(), execution, "never"); err != nil {
+		t.Fatalf("configureAndStartAgent() error = %v", err)
+	}
+	if configuredEnv["PROFILE_ONLY"] != "captured-value" {
+		t.Fatalf("configured profile env = %q, want captured runtime value", configuredEnv["PROFILE_ONLY"])
 	}
 }
 

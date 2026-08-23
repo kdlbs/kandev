@@ -50,11 +50,7 @@ func TestManager_CancelAgent_EscalatesWhenAgentHangs(t *testing.T) {
 	streamCtx, streamCancel := context.WithCancel(context.Background())
 	t.Cleanup(streamCancel)
 	require.NoError(t, client.StreamUpdates(streamCtx, func(_ agentctlClient.AgentEvent) {}, nil, nil))
-	select {
-	case <-mock.wsConnected:
-	case <-time.After(2 * time.Second):
-		t.Fatal("mock server did not see WS connection")
-	}
+	waitForWSConnected(t, mock)
 
 	mgr := newTestManager(t)
 	mockBus, ok := mgr.eventBus.(*MockEventBus)
@@ -126,6 +122,87 @@ func TestManager_CancelAgent_EscalatesWhenAgentHangs(t *testing.T) {
 		}
 	}
 	require.True(t, sawReady, "expected AgentReady event after cancel escalation")
+}
+
+// TestManager_CancelAgent_ClearsPendingDispatchGate reproduces the lost-turn
+// completion path: a dispatch-only prompt leaves a completion gate behind,
+// cancellation escalates through the manager, and the next prompt must still
+// reach the existing agentctl stream.
+func TestManager_CancelAgent_ClearsPendingDispatchGate(t *testing.T) {
+	prevWait := cancelWaitTimeout
+	prevEsc := cancelEscalationTimeout
+	cancelWaitTimeout = 20 * time.Millisecond
+	cancelEscalationTimeout = 20 * time.Millisecond
+	t.Cleanup(func() {
+		cancelWaitTimeout = prevWait
+		cancelEscalationTimeout = prevEsc
+	})
+
+	mock := newMockAgentServer(t)
+	t.Cleanup(func() { mock.server.Close() })
+	promptSeen := make(chan struct{}, 2)
+	mock.handler = func(msg ws.Message) *ws.Message {
+		if msg.Action == "agent.prompt" {
+			promptSeen <- struct{}{}
+		}
+		if msg.Action == "agent.cancel" {
+			resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+				"success": true,
+			})
+			return resp
+		}
+		return mock.defaultHandler(msg)
+	}
+
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+	streamCtx, streamCancel := context.WithCancel(context.Background())
+	t.Cleanup(streamCancel)
+	require.NoError(t, client.StreamUpdates(streamCtx, func(_ agentctlClient.AgentEvent) {}, nil, nil))
+	select {
+	case <-mock.wsConnected:
+	case <-time.After(2 * time.Second):
+		t.Fatal("mock server did not see WS connection")
+	}
+
+	mgr := newTestManager(t)
+	exec := &AgentExecution{
+		ID:            "exec-cancel-dispatch-gate",
+		TaskID:        "task-1",
+		SessionID:     "session-1",
+		Status:        v1.AgentStatusRunning,
+		WorkspacePath: "/workspace",
+		agentctl:      client,
+		promptDoneCh:  make(chan PromptCompletionSignal, 1),
+	}
+	require.NoError(t, mgr.executionStore.Add(exec))
+
+	_, err := mgr.PromptAgent(context.Background(), exec.ID, "dispatch-only", nil, true)
+	require.NoError(t, err)
+	select {
+	case <-promptSeen:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("dispatch-only prompt did not reach agentctl")
+	}
+	require.True(t, exec.dispatchedPromptPending.Load(),
+		"dispatch-only prompt must leave its completion gate pending")
+
+	cancelCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	require.ErrorIs(t, mgr.CancelAgent(cancelCtx, exec.ID), ErrCancelEscalated)
+	require.False(t, exec.dispatchedPromptPending.Load(),
+		"escalation must clear dispatch gate before releasing the waiter")
+
+	followUpCtx, followUpCancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer followUpCancel()
+	_, err = mgr.PromptAgent(followUpCtx, exec.ID, "follow-up", nil, true)
+	require.NoError(t, err,
+		"follow-up prompt should not wait on the cancelled dispatch-only gate")
+	select {
+	case <-promptSeen:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("follow-up prompt did not reach agentctl after cancel escalation")
+	}
 }
 
 func TestManager_CancelAgent_DisconnectedStreamWithoutPromptIsAlreadyCancelled(t *testing.T) {

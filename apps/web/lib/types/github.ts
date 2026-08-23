@@ -217,6 +217,16 @@ export type MergeableState =
   | "unknown"
   | "";
 
+/** Normalized GitHub merge-queue entry states. Future provider values are
+ * retained as strings so the UI can use a generic queued presentation. */
+export type MergeQueueState =
+  | "queued"
+  | "awaiting_checks"
+  | "mergeable"
+  | "unmergeable"
+  | "locked"
+  | (string & {});
+
 export type TaskPR = {
   id: string;
   task_id: string;
@@ -254,6 +264,34 @@ export type TaskPR = {
   closed_at: string | null;
   last_synced_at: string | null;
   updated_at: string;
+  /** Empty when GitHub did not return an active merge-queue entry. */
+  merge_queue_state?: MergeQueueState;
+  /** GitHub's one-based queue position, when available. */
+  merge_queue_position?: number | null;
+  /** GitHub's estimated time to merge in seconds, when available. */
+  merge_queue_estimated_time_to_merge_seconds?: number | null;
+  // The five PR-outcome-attribution fields below are always present on a
+  // real API/WS payload (the backend sends every key, never omits one) — the
+  // `?:` here follows this file's existing convention for nullable fields
+  // added after the type's original shape (e.g. required_reviews?) so
+  // hand-written test fixtures aren't forced to enumerate all five. Treat
+  // `undefined` the same as `null` ("nobody looked" / "never observed");
+  // never treat `null` as "unknown" or vice versa.
+  /** Never observed by a populating sync when null. */
+  is_draft?: boolean | null;
+  /** Never observed when null, distinct from 0 (a real "no files changed" observation). */
+  changed_files?: number | null;
+  /** Not merged, or merged but never observed by a populating sync, when null. */
+  merged_by_login?: string | null;
+  /** Not closed, or closure never observed by the GraphQL path specifically
+   *  (closed_by is absent from the REST pulls endpoint and the gh CLI's PR
+   *  field set), when null. A PR closed only through those paths keeps this
+   *  null permanently. */
+  closed_by_login?: string | null;
+  /** A latched observation, never a merge cause: GitHub clears auto_merge
+   *  once it fires, so this can only mean "armed at some instant while
+   *  Kandev was watching." */
+  auto_merge_observed_at?: string | null;
 };
 
 /** Workspace-scoped websocket payload emitted when a task PR association is detached. */

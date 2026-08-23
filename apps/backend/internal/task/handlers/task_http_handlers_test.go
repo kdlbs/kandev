@@ -109,23 +109,6 @@ func TestParseHTTPWorkspaceSourcesPreservesSnakeCaseFields(t *testing.T) {
 	assert.Equal(t, "feature/x", sources[0].CheckoutBranch)
 }
 
-func TestTaskPendingActionPtrAggregatesInputCapableSessions(t *testing.T) {
-	sessions := []*models.TaskSession{
-		{ID: "running", State: models.TaskSessionStateRunning},
-		{ID: "waiting", State: models.TaskSessionStateWaitingForInput},
-		{ID: "starting", State: models.TaskSessionStateStarting},
-	}
-	actions := map[string]models.TaskPendingAction{
-		"running":  models.TaskPendingActionClarification,
-		"waiting":  models.TaskPendingActionPermission,
-		"starting": models.TaskPendingActionPermission,
-	}
-
-	got := taskPendingActionPtr(sessions, actions)
-	require.NotNil(t, got)
-	assert.Equal(t, "permission", *got)
-}
-
 func TestQuickChatResolveParamsForcesWorktreeForRepositoryContext(t *testing.T) {
 	defaultExecutor := models.ExecutorIDLocal
 	body := httpStartQuickChatRequest{
@@ -995,6 +978,103 @@ func TestHTTPCreateTask_StartAgentKeepsCreatedStateWhenSchedulingUpdateFails(t *
 	assert.Equal(t, v1.TaskStateCreated, response.State)
 	assert.Equal(t, "sess-1", response.TaskSessionID)
 	requireStartCreatedLaunch(t, startCreatedCalled)
+}
+
+// TestHTTPCreateTask_PlanModeStartAgentPreservesPlanMode pins the task.create
+// contract: plan_mode describes the execution prompt and must survive both
+// task persistence and the deferred launch intent, even when start_agent is
+// true.
+func TestHTTPCreateTask_PlanModeStartAgentPreservesPlanMode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log := newTestLogger(t)
+
+	repo := &captureCreateTaskRepo{}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorkflowStepGetter(repo)
+	h := &TaskHandlers{service: svc, orchestrator: &captureOrchestrator{}, logger: log}
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/tasks", strings.NewReader(`{
+		"workspace_id": "ws-1",
+		"workflow_id": "wf-1",
+		"workflow_step_id": "step-1",
+		"title": "Plan then boot",
+		"description": "Plan a refactor and start an agent",
+		"priority": "medium",
+		"agent_profile_id": "profile-1",
+		"start_agent": true,
+		"plan_mode": true
+	}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.httpCreateTask(c)
+
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+	require.NotNil(t, repo.captured, "CreateTask must persist the task")
+	require.NotNil(t, repo.captured.Metadata, "task metadata must hold the deferred intent")
+
+	deferredRaw, ok := repo.captured.Metadata[models.MetaKeyDeferredLaunch]
+	require.True(t, ok, "start_agent=true must persist a deferred_launch intent")
+	deferred, ok := deferredRaw.(map[string]interface{})
+	require.True(t, ok, "deferred_launch intent must be a map[string]interface{}")
+	pmFlag, present := deferred["plan_mode"]
+	require.True(t, present, "the deferred intent must carry the plan_mode key (to assert the !StartAgent guard)")
+	assert.Equal(t, true, pmFlag,
+		"plan_mode=true must remain true in the deferred launch intent")
+}
+
+// TestHTTPCreateTask_PlanModePrepareSessionKeepsPlanMode pins the
+// non-conflicting half of the matrix: a plan-mode task whose deferred
+// intent is prepare (not start_agent) keeps plan_mode=true on the
+// intent. Prepare does not launch the agent, so plan mode is allowed
+// to ride through to the eventual prompt-bearing start path.
+func TestHTTPCreateTask_PlanModePrepareSessionKeepsPlanMode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log := newTestLogger(t)
+
+	repo := &captureCreateTaskRepo{}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorkflowStepGetter(repo)
+	h := &TaskHandlers{service: svc, orchestrator: &captureOrchestrator{}, logger: log}
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/tasks", strings.NewReader(`{
+		"workspace_id": "ws-1",
+		"workflow_id": "wf-1",
+		"workflow_step_id": "step-1",
+		"title": "Prepare plan session",
+		"description": "Prepare a session under plan mode",
+		"priority": "medium",
+		"agent_profile_id": "profile-1",
+		"prepare_session": true,
+		"plan_mode": true
+	}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.httpCreateTask(c)
+
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+	require.NotNil(t, repo.captured)
+	deferredRaw, ok := repo.captured.Metadata[models.MetaKeyDeferredLaunch]
+	require.True(t, ok)
+	deferred, ok := deferredRaw.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, true, deferred["plan_mode"],
+		"plan_mode=true + prepare_session=true must persist plan_mode=true (prepare does not start an agent)")
 }
 
 func requireStartCreatedLaunch(t *testing.T, started <-chan struct{}) {

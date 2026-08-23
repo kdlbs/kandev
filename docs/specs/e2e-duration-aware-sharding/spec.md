@@ -1,6 +1,7 @@
 ---
-status: implemented
+status: shipped
 created: 2026-08-10
+updated: 2026-08-18
 ---
 
 # Duration-aware E2E sharding and CI reliability
@@ -23,6 +24,12 @@ containers, so unrelated daemon state can affect their result.
 This capability makes shard assignment adapt to the suite as it grows. It
 also turns the known reliability findings into deterministic regression work
 and makes passed-after-retry results visible.
+
+A merge-queue run later exposed a separate bootstrap problem in the desktop
+smoke job. The job contacted Ubuntu package mirrors for WebKit and Tauri build
+packages during each run. A mirror stopped responding, so the job reached its
+45-minute limit before the desktop smoke test started. The aggregate E2E gate
+then removed a valid pull request from the merge queue.
 
 ## What
 
@@ -107,6 +114,11 @@ contract.
    retry summary, prediction-versus-actual summary, and plan health counters.
 5. Only a successful `main` result is eligible to become the next baseline.
 
+The desktop smoke job uses a dedicated image from `ghcr.io/kdlbs/kandev-ci`.
+The image contains Node.js, pnpm, Rust, Xvfb, and the Linux packages that Tauri
+needs. The job does not contact Ubuntu or Rust toolchain servers during setup.
+It can still use the existing pnpm and Cargo caches for project dependencies.
+
 If the `main` artifact is unavailable, the workflow continues with the
 validated count-based fallback and records that fallback in the report. A
 missing or malformed manifest is a hard planning failure, not permission to
@@ -131,6 +143,14 @@ The following findings from PR #2471 become focused E2E repairs:
 The desktop and mobile multi-PR failures share the same fixture defect and
 must be fixed together. Each repaired failure gets a regression assertion that
 fails for the observed cause, not only a larger timeout.
+
+The desktop smoke bootstrap has these requirements:
+
+- the CI image build installs the Linux and Rust toolchain dependencies,
+- the image publisher produces content-addressed and `desktop-latest` tags,
+- the desktop smoke job uses the published image,
+- the job contains no live `apt-get` or `rustup toolchain install` step, and
+- a workflow contract test protects the image producer and consumer together.
 
 Playwright output also includes a retry summary containing the test key,
 attempt count, final status, error context, and links to retry artifacts. The
@@ -168,6 +188,10 @@ they improve wall time without increasing flakes.
   visible in the retry summary with actionable evidence.
 - The timing profile can be unavailable without blocking a correct,
   deterministic fallback plan.
+- The desktop smoke job reaches its build and test commands without contacting
+  Ubuntu package mirrors or Rust toolchain servers.
+- A contract test fails if the desktop image publisher disappears or the smoke
+  job restores live system-package or toolchain installation.
 
 ## Out of scope
 
@@ -176,12 +200,16 @@ they improve wall time without increasing flakes.
 - committing per-shard test lists that require manual maintenance;
 - moving timing data to an external database;
 - globally deleting Docker resources to make a test pass;
-- masking flakes by increasing timeouts or retries.
+- masking flakes by increasing timeouts or retries;
+- removing network access that project package installation or source checkout
+  still requires.
 
 ## Implementation status
 
-Implemented in the CI workflow, E2E tooling, scoped Docker fixtures, and
-focused reliability tests. The generated manifests, rolling profile, retry
-diagnostics, and fail-closed runner are covered by unit/type checks and local
-targeted E2E runs. The three-successful-main-run balance target remains an
-operational check after merge.
+The duration-aware sharding work is implemented in the CI workflow, E2E
+tooling, scoped Docker fixtures, and focused reliability tests. The generated
+manifests, rolling profile, retry diagnostics, and fail-closed runner have
+unit, type, and targeted E2E coverage. The prebuilt desktop image amendment is
+implemented and was proven by the branch image publish and pull-request smoke
+run recorded in `docs/plans/desktop-e2e-prebuilt-image/plan.md`. The balance
+target remains an operational check after merge.

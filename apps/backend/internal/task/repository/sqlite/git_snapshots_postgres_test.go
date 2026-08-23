@@ -34,6 +34,20 @@ func TestPostgresGitSnapshotLifecycle(t *testing.T) {
 		}
 	}
 
+	// Archive the task so the archive snapshot's conditional rank-0 branch
+	// (`snapshot_type='archive' AND task archived`) is the one being tested —
+	// with the task unarchived the row would rank as a stale archive instead.
+	// Set archived_at directly rather than calling ArchiveTask: that method
+	// also purges the messagequeue in the same transaction, and on Postgres a
+	// missing queue table aborts the tx so the later Commit() fails with
+	// "commit unexpectedly resulted in rollback". The snapshot ordering only
+	// needs the archived_at flag.
+	if _, err := repo.db.Exec(repo.db.Rebind(
+		`UPDATE tasks SET archived_at = ?, updated_at = ? WHERE id = ?`),
+		time.Now().UTC(), time.Now().UTC(), "task-git-pg"); err != nil {
+		t.Fatalf("archive task: %v", err)
+	}
+
 	base := time.Date(2026, 3, 4, 5, 6, 7, 123456000, time.UTC)
 	want := fullGitSnapshot("session-git-pg-a", base)
 	if err := repo.CreateGitSnapshot(ctx, want); err != nil {
@@ -45,8 +59,8 @@ func TestPostgresGitSnapshotLifecycle(t *testing.T) {
 	}
 	assertGitSnapshotEqual(t, got, want)
 
-	// A newer live_monitor row must lose to the older agent_completed row in
-	// both the single-row read and the window-function batch read.
+	// A newer live_monitor row must lose to the older archive row (task still
+	// archived) in both the single-row read and the window-function batch read.
 	if err := repo.CreateGitSnapshot(ctx, &models.GitSnapshot{
 		ID: "snap-pg-live", SessionID: "session-git-pg-a",
 		SnapshotType: models.SnapshotTypeStatusUpdate, Branch: "main",
@@ -67,7 +81,7 @@ func TestPostgresGitSnapshotLifecycle(t *testing.T) {
 		t.Fatalf("GetLatestGitSnapshot: %v", err)
 	}
 	if latest.ID != "snapshot-full" {
-		t.Errorf("GetLatestGitSnapshot = %q, want the agent_completed snapshot-full", latest.ID)
+		t.Errorf("GetLatestGitSnapshot = %q, want the archive snapshot-full", latest.ID)
 	}
 	batch, err := repo.GetLatestGitSnapshotsBySessionIDs(ctx,
 		[]string{"session-git-pg-a", "session-git-pg-b", "session-git-pg-missing"})
@@ -86,6 +100,36 @@ func TestPostgresGitSnapshotLifecycle(t *testing.T) {
 	}
 	assertJSONMapEqual(t, "batch[a].Files", batch["session-git-pg-a"].Files, want.Files)
 
+	// Unarchive + resume: a newer agent_completed row must now outrank the
+	// stale archive row in both selectors (round-3 lifecycle fix parity).
+	if _, err := repo.db.Exec(repo.db.Rebind(
+		`UPDATE tasks SET archived_at = NULL, updated_at = ? WHERE id = ?`),
+		time.Now().UTC(), "task-git-pg"); err != nil {
+		t.Fatalf("unarchive task: %v", err)
+	}
+	if err := repo.CreateGitSnapshot(ctx, &models.GitSnapshot{
+		ID: "snap-pg-resumed", SessionID: "session-git-pg-a",
+		SnapshotType: models.SnapshotTypeStatusUpdate, Branch: "main",
+		TriggeredBy: "agent_completed", HeadCommit: "resumed-head", CreatedAt: base.Add(3 * time.Hour),
+	}); err != nil {
+		t.Fatalf("CreateGitSnapshot(resumed): %v", err)
+	}
+	latestResumed, err := repo.GetLatestGitSnapshot(ctx, "session-git-pg-a")
+	if err != nil {
+		t.Fatalf("GetLatestGitSnapshot(resumed): %v", err)
+	}
+	if latestResumed.ID != "snap-pg-resumed" {
+		t.Errorf("after unarchive GetLatestGitSnapshot = %q, want the resumed agent_completed row", latestResumed.ID)
+	}
+	batchResumed, err := repo.GetLatestGitSnapshotsBySessionIDs(ctx, []string{"session-git-pg-a"})
+	if err != nil {
+		t.Fatalf("GetLatestGitSnapshotsBySessionIDs(resumed): %v", err)
+	}
+	if batchResumed["session-git-pg-a"].ID != "snap-pg-resumed" {
+		t.Errorf("after unarchive batch[a] = %q, want the resumed agent_completed row",
+			batchResumed["session-git-pg-a"].ID)
+	}
+
 	// The single-live-row upsert transaction.
 	if err := repo.UpsertLatestLiveGitSnapshot(ctx, &models.GitSnapshot{
 		ID: "snap-pg-live-2", SessionID: "session-git-pg-a", Branch: "main",
@@ -100,16 +144,16 @@ func TestPostgresGitSnapshotLifecycle(t *testing.T) {
 		t.Errorf("live_monitor rows = %d, want exactly 1", liveRows)
 	}
 	if got := countRows(t, repo,
-		`SELECT COUNT(1) FROM task_session_git_snapshots WHERE session_id = ?`, "session-git-pg-a"); got != 2 {
-		t.Errorf("total rows = %d, want 2 (archive snapshot + one live row)", got)
+		`SELECT COUNT(1) FROM task_session_git_snapshots WHERE session_id = ?`, "session-git-pg-a"); got != 3 {
+		t.Errorf("total rows = %d, want 3 (archive + live + resumed agent_completed)", got)
 	}
 
 	if err := repo.DeleteLiveMonitorSnapshots(ctx, "session-git-pg-a"); err != nil {
 		t.Fatalf("DeleteLiveMonitorSnapshots: %v", err)
 	}
 	if got := countRows(t, repo,
-		`SELECT COUNT(1) FROM task_session_git_snapshots WHERE session_id = ?`, "session-git-pg-a"); got != 1 {
-		t.Errorf("rows after live delete = %d, want 1", got)
+		`SELECT COUNT(1) FROM task_session_git_snapshots WHERE session_id = ?`, "session-git-pg-a"); got != 2 {
+		t.Errorf("rows after live delete = %d, want 2 (archive + resumed agent_completed)", got)
 	}
 
 	if _, err := repo.GetLatestGitSnapshot(ctx, "session-git-pg-missing"); !errors.Is(err, sql.ErrNoRows) {

@@ -15,12 +15,8 @@ import { ResetContextButton } from "./reset-context-button";
 import { ImplementPlanButton } from "./implement-plan-button";
 import { ChatInputPluginActions } from "./chat-input-plugin-actions";
 import { ContextPopover } from "./context-popover";
-import {
-  AttachFilesButton,
-  McpIndicator,
-  PlanToggleButton,
-  SubmitButton,
-} from "./chat-input-toolbar-primitives";
+import { AttachFilesButton, PlanToggleButton, SubmitButton } from "./chat-input-toolbar-primitives";
+import { McpIndicator } from "./mcp-explorer/mcp-indicator";
 import { type ChatInputToolbarProps } from "./chat-input-toolbar";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { SHORTCUTS } from "@/lib/keyboard/constants";
@@ -106,7 +102,7 @@ function buildCollapsibleItems(props: DesktopToolbarProps): ToolbarItemConfig[] 
       id: "reset-context",
       section: "right",
       visible: !!props.sessionId && !props.isAgentBusy,
-      render: () => <ResetContextButton sessionId={props.sessionId!} />,
+      render: () => <ResetContextButton sessionId={props.sessionId!} presentation="desktop" />,
     },
     {
       id: "sessions",

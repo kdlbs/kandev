@@ -7,6 +7,7 @@ import { Button } from "@kandev/ui/button";
 import { Switch } from "@kandev/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@kandev/ui/tabs";
 import { SettingsPageTemplate } from "@/components/settings/settings-page-template";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAutoUpdateSettings } from "@/hooks/domains/plugins/use-auto-update-settings";
 import { usePlugins } from "@/hooks/domains/plugins/use-plugins";
 import { usePluginSetupStatus } from "@/hooks/domains/plugins/use-plugin-setup-status";
@@ -15,7 +16,6 @@ import { InstallPluginDialog } from "./install-plugin-dialog";
 import { MarketplaceBrowser } from "./marketplace-browser";
 import { PluginRow, type PluginRowUpdateState } from "./plugin-row";
 import { PluginUpdateStatus } from "./plugin-update-status";
-import { UninstallPluginDialog } from "./uninstall-plugin-dialog";
 import { usePluginActions } from "./use-plugin-actions";
 import { usePluginUpdateAction } from "./use-plugin-update-action";
 import { settingsActionClassName } from "@/components/settings/settings-control";
@@ -27,6 +27,7 @@ import { settingsActionClassName } from "@/components/settings/settings-control"
  */
 export function PluginsSettings() {
   const { t } = useTranslation();
+  const { isFinePointer } = useResponsiveBreakpoint();
   const list = usePlugins();
   const actions = usePluginActions();
   const autoUpdate = useAutoUpdateSettings();
@@ -75,6 +76,7 @@ export function PluginsSettings() {
             autoUpdate={autoUpdate}
             updates={updates}
             updateAction={updateAction}
+            isFinePointer={isFinePointer}
           />
         </TabsContent>
 
@@ -83,12 +85,6 @@ export function PluginsSettings() {
         </TabsContent>
       </Tabs>
 
-      <UninstallPluginDialog
-        target={actions.uninstallTarget}
-        busy={actions.uninstallBusy}
-        onClose={actions.closeUninstall}
-        onConfirm={actions.confirmUninstall}
-      />
       <InstallPluginDialog
         open={actions.installOpen}
         busy={actions.installBusy}
@@ -107,10 +103,18 @@ type InstalledTabProps = {
   autoUpdate: ReturnType<typeof useAutoUpdateSettings>;
   updates: ReturnType<typeof usePluginUpdates>;
   updateAction: ReturnType<typeof usePluginUpdateAction>;
+  isFinePointer: boolean;
 };
 
 /** The Installed tab: auto-update toggle, sync/install toolbar, update status, sync errors, and the plugin list. */
-function InstalledTab({ list, actions, autoUpdate, updates, updateAction }: InstalledTabProps) {
+function InstalledTab({
+  list,
+  actions,
+  autoUpdate,
+  updates,
+  updateAction,
+  isFinePointer,
+}: InstalledTabProps) {
   const { t } = useTranslation();
 
   return (
@@ -175,6 +179,7 @@ function InstalledTab({ list, actions, autoUpdate, updates, updateAction }: Inst
         autoUpdateDefault={autoUpdate.autoUpdateDefault}
         updates={updates}
         updateAction={updateAction}
+        isFinePointer={isFinePointer}
       />
     </>
   );
@@ -220,9 +225,17 @@ type PluginListProps = {
   autoUpdateDefault: boolean;
   updates: ReturnType<typeof usePluginUpdates>;
   updateAction: ReturnType<typeof usePluginUpdateAction>;
+  isFinePointer: boolean;
 };
 
-function PluginList({ list, actions, autoUpdateDefault, updates, updateAction }: PluginListProps) {
+function PluginList({
+  list,
+  actions,
+  autoUpdateDefault,
+  updates,
+  updateAction,
+  isFinePointer,
+}: PluginListProps) {
   const { t } = useTranslation();
   const { items, loaded, loading, error } = list;
   const needsSetup = usePluginSetupStatus(items);
@@ -271,9 +284,13 @@ function PluginList({ list, actions, autoUpdateDefault, updates, updateAction }:
             autoUpdateDefault={autoUpdateDefault}
             autoUpdateBusy={actions.autoUpdateBusyId === plugin.id}
             needsSetup={needsSetup.has(plugin.id)}
+            isFinePointer={isFinePointer}
+            uninstallBusy={actions.uninstallBusy}
             onEnable={actions.handleEnable}
             onDisable={actions.handleDisable}
-            onUninstall={actions.openUninstall}
+            onConfirmUninstall={async (target) => {
+              await actions.confirmUninstall(target);
+            }}
             onUpdate={updateAction.runUpdate}
             onSetAutoUpdate={actions.handleSetAutoUpdate}
           />

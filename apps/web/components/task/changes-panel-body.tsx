@@ -15,6 +15,34 @@ import {
 } from "./changes-panel-helpers";
 import type { ChangesPanelBodyProps } from "./changes-panel-data";
 import { useTranslation } from "react-i18next";
+import { IconAlertTriangle } from "@tabler/icons-react";
+
+function ComparisonTargetNotice({
+  comparisonTargets,
+  comparisonUnavailable,
+}: Pick<ChangesPanelBodyProps, "comparisonTargets" | "comparisonUnavailable">) {
+  const { t } = useTranslation();
+  if (!comparisonUnavailable) return null;
+
+  const targetLabel = comparisonTargets.join(", ") || t("task:comparisonTargetUnknown");
+  return (
+    <div
+      className="mx-3 mt-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-xs"
+      data-testid="comparison-target-notice"
+      role="alert"
+    >
+      <div className="flex min-w-0 items-start gap-2">
+        <IconAlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
+        <div className="min-w-0">
+          <p className="font-medium text-foreground">{t("task:comparisonTargetUnavailable")}</p>
+          <p className="break-words text-muted-foreground">
+            {t("task:comparisonTargetUnavailableDescription", { target: targetLabel })}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function ChangesPanelDialogsSection({
   dialogs,
@@ -24,9 +52,10 @@ function ChangesPanelDialogsSection({
     <>
       <DiscardDialog
         open={dialogs.showDiscardDialog}
-        onOpenChange={dialogs.setShowDiscardDialog}
+        onOpenChange={dialogs.handleDiscardOpenChange}
         fileToDiscard={dialogs.fileToDiscard}
         filesToDiscard={dialogs.filesToDiscard}
+        anchorRef={dialogs.discardAnchorRef}
         onConfirm={dialogs.handleDiscardConfirm}
       />
       <AmendDialog
@@ -321,6 +350,10 @@ function ChangesPanelTimeline(props: TimelineProps) {
 export function ChangesPanelBody(props: ChangesPanelBodyProps) {
   return (
     <PanelBody className="flex flex-col">
+      <ComparisonTargetNotice
+        comparisonTargets={props.comparisonTargets}
+        comparisonUnavailable={props.comparisonUnavailable}
+      />
       <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
         <ChangesPanelTimeline {...props} />
       </div>
