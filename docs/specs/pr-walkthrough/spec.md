@@ -44,8 +44,13 @@ lifecycle policy.
 - The generated page contains a vertical reviewer story, a dark and light
   theme, architecture and data diagrams when supplied, highlighted code, diff
   tinting, GitHub file links, an interactive code canvas, and a linear fallback
-  list. Its top bar uses the website brand mark and favicon, and its dark theme
-  uses the documentation shell's dark-gray palette.
+  list. Canvas edges use separate endpoint and node-pair lanes, and their
+  labels follow the routed edge without stacking. Horizontal code scrollbars
+  stay subtle until a reviewer hovers over or focuses a code block. Patch and
+  explicitly marked diff blocks use diff colors. Plain code blocks remain
+  neutral because they provide context rather than a change. Its top bar uses
+  the website brand mark and favicon, and its dark theme uses the
+  documentation shell's dark-gray palette.
 - The configured workflow agent generates and renders the walkthrough for a
   non-draft same-repository pull request when it is opened, reopened, marked
   ready for review, or updated. OpenCode is the initial runner, but the skill
@@ -207,6 +212,15 @@ not from merge time.
   label contains unsafe markup, **WHEN** the page is rendered, **THEN** the
   source is escaped or sanitized and no executable PR-controlled markup is
   inserted by the renderer.
+- **GIVEN** two canvas edges share an endpoint or node pair, **WHEN** the
+  canvas draws them, **THEN** their paths and labels use separate lanes and do
+  not occupy the same route.
+- **GIVEN** a code block overflows horizontally, **WHEN** it is not hovered or
+  focused, **THEN** its scrollbar thumb is transparent; **WHEN** it is hovered
+  or focused, **THEN** a subtle thumb appears.
+- **GIVEN** a code block uses a patch or explicit diff marker, **WHEN** the
+  page renders it, **THEN** added and removed lines receive diff colors, and a
+  plain code block remains neutral context.
 - **GIVEN** a draft pull request or an unauthorized fork event, **WHEN** the
   workflow is triggered, **THEN** no walkthrough agent job runs.
 - **GIVEN** a successfully generated HTML file, **WHEN** the publishing job

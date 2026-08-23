@@ -135,7 +135,14 @@
     /* Shiki dual-theme via defaultColor:false. Light by default, dark on html.dark. */
     .shiki, .shiki span { color: var(--shiki-light); background-color: var(--shiki-light-bg); }
     html.dark .shiki, html.dark .shiki span { color: var(--shiki-dark) !important; background-color: var(--shiki-dark-bg) !important; }
-    .shiki { padding: 14px 16px; border-radius: var(--wt-radius); overflow-x: auto; font-family: 'Geist Mono', ui-monospace, monospace; font-size: .82rem; line-height: 1.55; border: 1px solid var(--wt-border); }
+    .shiki { padding: 14px 16px; border-radius: var(--wt-radius); overflow-x: auto; font-family: 'Geist Mono', ui-monospace, monospace; font-size: .82rem; line-height: 1.55; border: 1px solid var(--wt-border); scrollbar-width: thin; scrollbar-color: transparent transparent; }
+    .shiki::-webkit-scrollbar { height: 6px; }
+    .shiki::-webkit-scrollbar-track { background: transparent; }
+    .shiki::-webkit-scrollbar-thumb { background: transparent; border-radius: 999px; }
+    .shiki:hover, .shiki:focus-within { scrollbar-color: rgba(100,116,139,.55) transparent; }
+    .shiki:hover::-webkit-scrollbar-thumb, .shiki:focus-within::-webkit-scrollbar-thumb { background: rgba(100,116,139,.55); }
+    html.dark .shiki:hover, html.dark .shiki:focus-within { scrollbar-color: rgba(148,163,184,.5) transparent; }
+    html.dark .shiki:hover::-webkit-scrollbar-thumb, html.dark .shiki:focus-within::-webkit-scrollbar-thumb { background: rgba(148,163,184,.5); }
     /* GitHub-style diff lines. applyLineDiff() tags changed lines with
        .diff.add / .diff.remove from the data-added / data-removed indices
        build.py emits. Each .line is a full-width block so the tint spans the
@@ -793,6 +800,25 @@
       const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
       const apply = () => { stage.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`; };
 
+      // Spread edges that share a node across that node's edge. The old
+      // midpoint route made every branch leave and enter at the same pixel,
+      // which stacked paths and labels on dense graphs.
+      function laneOffset(index, count, span, maxGap = 48) {
+        const total = Math.max(1, Number(count) || 1);
+        if (total === 1) return 0;
+        const slot = clamp(Number(index) || 0, 0, total - 1);
+        const gap = Math.min(maxGap, (span * .62) / (total - 1));
+        return (slot - (total - 1) / 2) * gap;
+      }
+
+      function cubicPoint(p0, p1, p2, p3, t) {
+        const u = 1 - t;
+        return {
+          x: u ** 3 * p0.x + 3 * u ** 2 * t * p1.x + 3 * u * t ** 2 * p2.x + t ** 3 * p3.x,
+          y: u ** 3 * p0.y + 3 * u ** 2 * t * p1.y + 3 * u * t ** 2 * p2.y + t ** 3 * p3.y,
+        };
+      }
+
       // Draw one arrow per .cedge, from the FROM node edge to the TO node edge.
       function drawEdges() {
         svg.innerHTML = '';
@@ -808,30 +834,69 @@
           const bcx = bx + bw / 2, bcy = by + bh / 2;
           // Anchor on the near vertical or horizontal edge of each node.
           const dx = bcx - acx, dy = bcy - acy;
+          const horizontal = Math.abs(dx) >= Math.abs(dy);
+          const fromLane = laneOffset(
+            e.dataset.fromLane, e.dataset.fromLanes, horizontal ? ah : aw,
+          );
+          const toLane = laneOffset(
+            e.dataset.toLane, e.dataset.toLanes, horizontal ? bh : bw,
+          );
+          // Reciprocal or parallel edges have the same endpoint geometry even
+          // when their source/target slots differ. Give the whole node pair a
+          // smaller parallel offset so those routes do not collapse into one.
+          const pairLane = laneOffset(
+            e.dataset.pairLane, e.dataset.pairLanes,
+            (horizontal ? Math.min(ah, bh) : Math.min(aw, bw)) * .6,
+          );
           let x1, y1, x2, y2;
-          if (Math.abs(dx) >= Math.abs(dy)) {
-            x1 = dx >= 0 ? ax + aw : ax; y1 = acy;
-            x2 = dx >= 0 ? bx : bx + bw; y2 = bcy;
+          if (horizontal) {
+            x1 = dx >= 0 ? ax + aw : ax; y1 = acy + fromLane + pairLane;
+            x2 = dx >= 0 ? bx : bx + bw; y2 = bcy + toLane + pairLane;
           } else {
-            x1 = acx; y1 = dy >= 0 ? ay + ah : ay;
-            x2 = bcx; y2 = dy >= 0 ? by : by + bh;
+            x1 = acx + fromLane + pairLane; y1 = dy >= 0 ? ay + ah : ay;
+            x2 = bcx + toLane + pairLane; y2 = dy >= 0 ? by : by + bh;
           }
-          const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
-          const c1x = Math.abs(dx) >= Math.abs(dy) ? mx : x1;
-          const c1y = Math.abs(dx) >= Math.abs(dy) ? y1 : my;
-          const c2x = Math.abs(dx) >= Math.abs(dy) ? mx : x2;
-          const c2y = Math.abs(dx) >= Math.abs(dy) ? y2 : my;
+          const direction = horizontal ? (dx >= 0 ? 1 : -1) : (dy >= 0 ? 1 : -1);
+          const curve = Math.max(52, (horizontal ? Math.abs(x2 - x1) : Math.abs(y2 - y1)) * .42);
+          const p0 = { x: x1, y: y1 };
+          const p1 = horizontal
+            ? { x: x1 + direction * curve, y: y1 }
+            : { x: x1, y: y1 + direction * curve };
+          const p2 = horizontal
+            ? { x: x2 - direction * curve, y: y2 }
+            : { x: x2, y: y2 - direction * curve };
+          const p3 = { x: x2, y: y2 };
           const path = document.createElementNS(SVGNS, 'path');
-          path.setAttribute('d', `M ${x1} ${y1} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${x2} ${y2}`);
+          path.setAttribute('d', `M ${p0.x} ${p0.y} C ${p1.x} ${p1.y}, ${p2.x} ${p2.y}, ${p3.x} ${p3.y}`);
           path.setAttribute('class', 'cedge-path');
           path.setAttribute('marker-end', 'url(#arrow)');
           svg.appendChild(path);
           if (e.dataset.label) {
+            const labelPoint = cubicPoint(p0, p1, p2, p3, .5);
+            const labelSpan = horizontal ? Math.min(ah, bh) : Math.min(aw, bw);
+            const labelFromLane = laneOffset(
+              e.dataset.fromLane, e.dataset.fromLanes, labelSpan, 192,
+            );
+            const labelToLane = laneOffset(
+              e.dataset.toLane, e.dataset.toLanes, labelSpan, 192,
+            );
+            // Prefer the endpoint with the stronger fan-out. This keeps labels
+            // apart when two different routes happen to share a midpoint.
+            const endpointLabelLane = Math.abs(labelToLane) >= Math.abs(labelFromLane)
+              ? labelToLane : labelFromLane;
+            const pairLabelLane = laneOffset(
+              e.dataset.pairLane, e.dataset.pairLanes,
+              labelSpan * .6, 96,
+            );
+            const labelLane = Number(e.dataset.pairLanes) > 1
+              ? pairLabelLane : endpointLabelLane;
+            if (horizontal) labelPoint.y += labelLane;
+            else labelPoint.x += labelLane;
             const lab = document.createElement('div');
             lab.className = 'cedge-label';
             lab.textContent = e.dataset.label;
-            lab.style.left = mx + 'px';
-            lab.style.top = my + 'px';
+            lab.style.left = labelPoint.x + 'px';
+            lab.style.top = labelPoint.y + 'px';
             stage.appendChild(lab);
           }
         }
@@ -1033,7 +1098,7 @@
 
       // Lay out after Shiki settles node heights, then fit.
       shikiReady.finally(() => { requestAnimationFrame(() => { sizeGroups(); drawEdges(); fit(); }); });
-      window.addEventListener('resize', () => { sizeGroups(); drawEdges(); });
+      window.addEventListener('resize', () => { sizeGroups(); drawEdges(); fit(); });
     })();
   </script>
 </body>

@@ -333,6 +333,54 @@ class TestRenderEdges(unittest.TestCase):
         self.assertIn('data-from="n1"', html)
         self.assertIn('data-label="calls"', html)
 
+    def test_shared_endpoints_receive_distinct_route_lanes(self):
+        html = build.render_edges(
+            [
+                {"from": "n1", "to": "n2", "label": "first"},
+                {"from": "n1", "to": "n3", "label": "second"},
+                {"from": "n2", "to": "n4", "label": "third"},
+                {"from": "n3", "to": "n4", "label": "fourth"},
+            ],
+            {"n1", "n2", "n3", "n4"},
+        )
+        self.assertIn(
+            'data-from-lane="0" data-from-lanes="2" '
+            'data-to-lane="0" data-to-lanes="1"',
+            html,
+        )
+        self.assertIn(
+            'data-from-lane="1" data-from-lanes="2" '
+            'data-to-lane="0" data-to-lanes="1"',
+            html,
+        )
+        self.assertIn(
+            'data-from-lane="0" data-from-lanes="1" '
+            'data-to-lane="0" data-to-lanes="2"',
+            html,
+        )
+        self.assertIn(
+            'data-from-lane="0" data-from-lanes="1" '
+            'data-to-lane="1" data-to-lanes="2"',
+            html,
+        )
+
+    def test_reciprocal_edges_receive_distinct_pair_lanes(self):
+        html = build.render_edges(
+            [
+                {"from": "n1", "to": "n2", "label": "forward"},
+                {"from": "n2", "to": "n1", "label": "backward"},
+            ],
+            {"n1", "n2"},
+        )
+        self.assertIn(
+            'data-pair-lane="0" data-pair-lanes="2"',
+            html,
+        )
+        self.assertIn(
+            'data-pair-lane="1" data-pair-lanes="2"',
+            html,
+        )
+
     def test_unknown_from_node_fails(self):
         with self.assertRaises(build.BuildError):
             build.render_edges([{"from": "nX", "to": "n1"}], {"n1"})
@@ -458,6 +506,28 @@ class TestBuild(unittest.TestCase):
         self.assertIn('id="mobile-nav-architecture"', out)
         self.assertIn('id="mobile-nav-data"', out)
         self.assertIn("@media (max-width: 640px)", out)
+
+    def test_shell_makes_code_scrollbars_subtle_until_hover(self):
+        out = build.build(minimal_data())
+        self.assertIn("scrollbar-width: thin", out)
+        self.assertIn("scrollbar-color: transparent transparent", out)
+        self.assertIn(".shiki::-webkit-scrollbar-thumb", out)
+        self.assertIn(".shiki:hover::-webkit-scrollbar-thumb", out)
+        self.assertIn(".shiki:focus-within::-webkit-scrollbar-thumb", out)
+
+    def test_shell_uses_lanes_to_route_canvas_edges(self):
+        out = build.build(minimal_data())
+        self.assertIn("function laneOffset", out)
+        self.assertIn("e.dataset.fromLane", out)
+        self.assertIn("e.dataset.toLane", out)
+        self.assertIn("e.dataset.pairLane", out)
+        self.assertIn("const labelLane", out)
+        self.assertIn("const labelFromLane", out)
+        self.assertIn("const labelToLane", out)
+        self.assertIn("const endpointLabelLane", out)
+        self.assertIn("const pairLabelLane", out)
+        self.assertIn("labelPoint.x += labelLane", out)
+        self.assertIn("sizeGroups(); drawEdges(); fit();", out)
 
 
 if __name__ == "__main__":
