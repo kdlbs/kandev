@@ -48,6 +48,15 @@ async function waitForMarketplaceCheck(checkInFlight: {
   return true;
 }
 
+function markEntryInstalled(
+  entries: Map<string, MarketplaceEntry>,
+  pluginId: string,
+): Map<string, MarketplaceEntry> {
+  const current = entries.get(pluginId);
+  if (!current || current.install_state !== "update_available") return entries;
+  return new Map(entries).set(pluginId, { ...current, install_state: "installed" });
+}
+
 /**
  * Cross-references installed plugins against the marketplace catalog: which
  * ones have a catalog entry at all (`latestById`), and which of those are
@@ -120,17 +129,28 @@ export function usePluginUpdates() {
     setError(unhealthy.length > 0 ? reason() : null);
   }, []);
 
-  const reload = useCallback(async () => {
-    if (!(await waitForMarketplaceCheck(checkInFlight))) return;
+  const markUpdated = useCallback(
+    (pluginId: string) => setLatestById((previous) => markEntryInstalled(previous, pluginId)),
+    [],
+  );
 
-    const generation = ++requestGeneration.current;
-    try {
-      const catalog = await getMarketplaceCatalog();
-      if (generation === requestGeneration.current) applyCatalog(catalog);
-    } catch (err) {
-      if (generation === requestGeneration.current) setError(checkFailedMessage(err));
-    }
-  }, [applyCatalog]);
+  const reload = useCallback(
+    async (installedPluginId?: string) => {
+      if (!(await waitForMarketplaceCheck(checkInFlight))) {
+        if (installedPluginId) markUpdated(installedPluginId);
+        return;
+      }
+
+      const generation = ++requestGeneration.current;
+      try {
+        const catalog = await getMarketplaceCatalog();
+        if (generation === requestGeneration.current) applyCatalog(catalog);
+      } catch (err) {
+        if (generation === requestGeneration.current) setError(checkFailedMessage(err));
+      }
+    },
+    [applyCatalog, markUpdated],
+  );
 
   useEffect(() => {
     void reload();
@@ -158,16 +178,6 @@ export function usePluginUpdates() {
     );
     return run;
   }, [applyCatalog]);
-
-  const markUpdated = useCallback((pluginId: string) => {
-    setLatestById((previous) => {
-      const current = previous.get(pluginId);
-      if (!current || current.install_state !== "update_available") return previous;
-      const next = new Map(previous);
-      next.set(pluginId, { ...current, install_state: "installed" });
-      return next;
-    });
-  }, []);
 
   const updates = useMemo(() => {
     const next = new Map<string, MarketplaceEntry>();

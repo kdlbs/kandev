@@ -246,6 +246,40 @@ describe("usePluginUpdates — overlapping checks", () => {
     expect(result.current.updates.has("acme")).toBe(true);
     expect(getMarketplaceCatalog).toHaveBeenCalledTimes(1);
   });
+
+  it("marks the installed plugin current when its overlapping refresh fails", async () => {
+    getMarketplaceCatalog.mockResolvedValue({
+      plugins: [entry("acme", "update_available", "2.0.0")],
+      sources: [source()],
+    });
+    const refresh = deferred<{ refreshed: boolean }>();
+    refreshMarketplace.mockReturnValueOnce(refresh.promise);
+
+    const { result } = renderHook(() => usePluginUpdates());
+    await waitFor(() => expect(result.current.updates.has("acme")).toBe(true));
+    const lastCheckedAt = result.current.lastCheckedAt;
+
+    let checkPromise!: Promise<boolean>;
+    act(() => {
+      checkPromise = result.current.checkForUpdates();
+    });
+    let reloadPromise!: Promise<void>;
+    act(() => {
+      reloadPromise = result.current.reload("acme");
+    });
+
+    await act(async () => {
+      refresh.reject(new Error(REFRESH_UNAVAILABLE));
+      await checkPromise;
+      await reloadPromise;
+    });
+
+    expect(result.current.error).toBe(REFRESH_UNAVAILABLE);
+    expect(result.current.lastCheckedAt).toBe(lastCheckedAt);
+    expect(result.current.latestById.get("acme")?.install_state).toBe("installed");
+    expect(result.current.updates.has("acme")).toBe(false);
+    expect(getMarketplaceCatalog).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("usePluginUpdates — failure isolation", () => {

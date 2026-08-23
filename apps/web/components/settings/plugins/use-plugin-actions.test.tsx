@@ -195,12 +195,12 @@ describe("usePluginActions — marketplaceInstall result", () => {
 
     const { result } = renderHook(() => usePluginActions(), { wrapper });
 
-    let outcome: { ok: boolean; error?: string } | undefined;
+    let outcome: { ok: boolean; error?: string; pluginId?: string } | undefined;
     await act(async () => {
       outcome = await result.current.marketplaceInstall("https://example.com/acme-tools.tar.gz");
     });
 
-    expect(outcome).toEqual({ ok: true });
+    expect(outcome).toEqual({ ok: true, pluginId: plugin.id });
   });
 
   it("resolves ok: false with the backend's error message on a failed install, without throwing", async () => {

@@ -42,7 +42,7 @@ export function PluginsSettings() {
 
   const handleMarketplaceInstall = async (url: string) => {
     const result = await actions.marketplaceInstall(url);
-    if (result.ok) await updates.reload();
+    if (result.ok) await updates.reload(result.pluginId);
     return result;
   };
 

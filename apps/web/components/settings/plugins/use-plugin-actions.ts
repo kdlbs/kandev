@@ -231,13 +231,16 @@ function useInstallAction(upsertPlugin: (p: PluginRecord) => void) {
   // has no such region. It resolves even on failure (after toasting) so its
   // fire-and-forget onClick callers never leak an unhandled rejection; their
   // try/finally still clears per-entry busy state. The resolved
-  // `{ ok, error }` lets a caller that needs the outcome (the manual-update
-  // action) render a per-row failure state without also duplicating the toast.
-  const marketplaceInstall = async (url: string): Promise<{ ok: boolean; error?: string }> => {
+  // `{ ok, error, pluginId }` lets callers that need the outcome (the manual
+  // update action and the Browse tab) reconcile local update state without
+  // also duplicating the toast.
+  const marketplaceInstall = async (
+    url: string,
+  ): Promise<{ ok: boolean; error?: string; pluginId?: string }> => {
     try {
       const result = await installPluginFromUrl(url);
       await afterInstall(result);
-      return { ok: true };
+      return { ok: true, pluginId: result.plugin.id };
     } catch (err) {
       const message = err instanceof Error ? err.message : t("plugins:failedToInstallPlugin");
       toast.error(message);
