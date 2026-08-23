@@ -666,6 +666,9 @@ func TestStepCompletionSignalSurvivesTurnFailure(t *testing.T) {
 		if session.State != models.TaskSessionStateWaitingForInput {
 			t.Fatalf("expected session WAITING_FOR_INPUT after failure, got %q", session.State)
 		}
+		if _, hasBag := models.LoadPendingStepSignal(session.Metadata); hasBag {
+			t.Error("expected the stale signal to be cleared by the reconciler")
+		}
 
 		task, err := repo.GetTask(ctx, "t1")
 		if err != nil {
