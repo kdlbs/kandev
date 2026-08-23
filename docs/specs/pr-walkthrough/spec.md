@@ -21,10 +21,13 @@ lifecycle policy.
 **Decisions:**
 [ADR-2026-08-22-pr-walkthrough-r2-hosting](../../decisions/2026-08-22-pr-walkthrough-r2-hosting.md),
 [ADR-2026-08-22-pr-walkthrough-filesystem-runner](../../decisions/2026-08-22-pr-walkthrough-filesystem-runner.md),
-[ADR-2026-08-22-pr-walkthrough-description-link](../../decisions/2026-08-22-pr-walkthrough-description-link.md)
+[ADR-2026-08-22-pr-walkthrough-description-link](../../decisions/2026-08-22-pr-walkthrough-description-link.md),
+[ADR-2026-08-23-pr-walkthrough-short-urls](../../decisions/2026-08-23-pr-walkthrough-short-urls.md),
+[ADR-2026-08-23-pr-walkthrough-workflow-provenance](../../decisions/2026-08-23-pr-walkthrough-workflow-provenance.md)
 
-**Implementation plan:**
-[Portable PR walkthrough runner fix](../../plans/pr-walkthrough-portable-runner-fix/plan.md)
+**Implementation plans:**
+[Portable PR walkthrough runner fix](../../plans/pr-walkthrough-portable-runner-fix/plan.md),
+[PR walkthrough runner reliability fix](../../plans/pr-walkthrough-runner-reliability-fix/plan.md)
 
 ## What
 
@@ -43,7 +46,13 @@ lifecycle policy.
 - The generated page contains a vertical reviewer story, a dark and light
   theme, architecture and data diagrams when supplied, highlighted code, diff
   tinting, GitHub file links, an interactive code canvas, and a linear fallback
-  list.
+  list. Canvas edges use separate endpoint and node-pair lanes, and their
+  labels follow the routed edge without stacking. Horizontal code scrollbars
+  stay subtle until a reviewer hovers over or focuses a code block. Patch and
+  explicitly marked diff blocks use diff colors. Plain code blocks remain
+  neutral because they provide context rather than a change. Its top bar uses
+  the website brand mark and favicon, and its dark theme uses the
+  documentation shell's dark-gray palette.
 - The configured workflow agent generates and renders the walkthrough for a
   non-draft same-repository pull request when it is opened, reopened, marked
   ready for review, or updated. OpenCode is the initial runner, but the skill
@@ -52,6 +61,9 @@ lifecycle policy.
 - The workflow gives each runner the same fixed prompt, prepared context, draft
   JSON path, renderer command, and final output paths. A provider change does
   not change this contract.
+- The workflow commit is the source for all trusted instructions, scripts,
+  setup actions, context, and PR-description helpers. The event base SHA does
+  not select executable workflow inputs.
 - Kandev CI uses `.pr-walkthrough/draft.json` as the provider-neutral draft
   path. Its renderer command invokes the script bundled under
   `.agents/skills/pr-walkthrough/scripts/`.
@@ -64,11 +76,13 @@ lifecycle policy.
 - The workflow preserves the generated JSON and HTML as CI artifacts and
   uploads only the HTML to the `kandev-pr-walkthroughs` R2 bucket.
 - Each published object uses the key
-  `pr/<pull-request-number>/<head-sha>.html` and is served at
-  `https://walkthrough.kandev.ai/pr/<pull-request-number>/<head-sha>.html`.
+  `pr/<pull-request-number>/<short-head-sha>.html`, where `short-head-sha` is
+  the first 12 lowercase hexadecimal characters of the exact head SHA. It is
+  served at
+  `https://walkthrough.kandev.ai/pr/<pull-request-number>/<short-head-sha>.html`.
 - The workflow regenerates on `synchronize` for same-repository pull request
-  updates. Each generated object remains keyed by pull request number and head
-  SHA.
+  updates. Each generated object remains keyed by pull request number and the
+  12-character prefix of the exact head SHA.
 - After public validation succeeds, a separate minimum-permission job prepends
   a prominent marker-owned walkthrough callout to the pull request
   description. A rerun replaces only that callout and preserves the rest of
@@ -77,14 +91,20 @@ lifecycle policy.
 ## Generation contract
 
 The skill-local context helper resolves the merge base between the exact pull
-request head SHA and the exact base SHA. It prepares a patch and bounded text
-files from the immutable PR head. The walkthrough agent reads a trusted base
-checkout, the prepared patch, and the bounded head files. It creates a draft
-JSON file, invokes the trusted renderer, and corrects its data until both
-outputs pass renderer validation. The generated `pr` object
+request head SHA and the trusted workflow SHA. It prepares a patch and bounded
+text files from the immutable PR head. The walkthrough agent reads the trusted
+workflow checkout, the prepared patch, and the bounded head files. It creates
+a draft JSON file, invokes the trusted renderer, and corrects its data until
+both outputs pass renderer validation. The generated `pr` object
 includes the pull request number, title, URL, repository slug, base branch,
 head branch, and diff statistics when they are available. The managed runner
 binds identity and links to trusted event metadata before rendering.
+
+The OpenCode adapter accepts an attempt only when the process exits zero and
+both final files are non-empty. If the process exits zero without both files,
+the adapter retries once. The retry starts with an empty draft and no final
+files. Each attempt keeps separate status, standard output, standard error,
+and draft diagnostics. A non-zero process exit fails without a retry.
 
 Each code change includes a real repository-relative file path, a concise
 explanation, and at least one real code or rendered-Markdown block. Code
@@ -105,37 +125,39 @@ adapters remain outside the skill because they are platform integration code.
 ## Permissions
 
 - The workflow may read pull request metadata and repository contents.
-- The selected agent reads the trusted base checkout and prepared context. The
+- The selected agent reads the trusted workflow checkout and prepared context. The
   context contains a patch, a manifest, and bounded regular UTF-8 files from
   the immutable PR head Git object.
 - The agent can edit only one fixed draft JSON file. It can run only the fixed
-  base-controlled renderer command. It cannot run arbitrary shell commands,
+  workflow-controlled renderer command. It cannot run arbitrary shell commands,
   read outside the trusted worktree, change source files, invoke subagents,
   fetch external URLs, commit, push, or publish GitHub changes.
-- The workflow checks out only the trusted base commit in the secret-bearing
+- The workflow checks out only `github.workflow_sha` in the secret-bearing
   worktree. It fetches enough history for the event head SHA to resolve the
-  merge base without checking out that SHA. It uses a base-commit copy of the
-  complete skill bundle and the runner setup action. Pull request changes
-  cannot replace these instructions or executable components.
+  merge base without checking out that SHA. It uses the same workflow-commit
+  copy of the skill bundle, runner setup action, and PR-description helper.
+  Pull request changes cannot replace these executable components.
 - The agent invokes the fixed renderer before it finishes. The workflow only
   verifies and packages the ignored walkthrough output directory.
 - The R2 publishing job receives only the bucket-scoped S3-compatible R2
   credentials required to upload the rendered HTML. The generation job does
   not receive R2 credentials.
 - The PR-link job receives `pull-requests: write`, but no model or R2
-  credential. It checks out the immutable base commit and uses a trusted helper
-  that validates the PR number, event head SHA, and exact walkthrough URL
-  before constructing the GitHub API update.
+  credential. It checks out the immutable workflow commit and uses a trusted
+  helper. The helper validates the PR number, event head SHA, and exact
+  walkthrough URL before it constructs the GitHub API update.
 - The public bucket contains only generated walkthrough HTML. It does not
   publish the JSON source artifact.
 
 ## Failure modes
 
-- If the selected agent command fails, exits non-zero, or does not produce both
-  required walkthrough files, generation fails and the workflow records the
-  diagnostic output in its CI artifacts.
-- If the workflow cannot resolve a merge base between the event SHAs, context
-  preparation fails before the agent starts.
+- If the selected agent command exits non-zero, generation fails and the
+  workflow records the diagnostic output in its CI artifacts.
+- If OpenCode exits zero without both required files, the adapter removes
+  partial output and retries once from an empty draft. A second incomplete
+  attempt fails and preserves diagnostics from both attempts.
+- If the workflow cannot resolve a merge base between the workflow SHA and the
+  event head SHA, context preparation fails before the agent starts.
 - If a changed PR file is unsafe, binary, oversized, or outside the total
   context budget, the manifest records the omission. The patch remains
   available to the agent.
@@ -167,15 +189,24 @@ not from merge time.
 - **GIVEN** a non-draft same-repository pull request is opened, reopened, or
   marked ready for review, **WHEN** the walkthrough job runs, **THEN** it
   creates non-empty JSON and HTML artifacts and publishes the HTML under the
-  current head SHA in R2.
+  12-character prefix of the current head SHA in R2.
 - **GIVEN** a fetched PR head, **WHEN** the workflow computes the triple-dot
   diff, **THEN** the merge base exists and context preparation succeeds.
+- **GIVEN** the event base SHA is older than the workflow SHA, **WHEN** the
+  pipeline runs, **THEN** every trusted executable input comes from the
+  workflow SHA and the short public URL passes PR-description validation.
 - **GIVEN** a changed file contains bounded UTF-8 text, **WHEN** context is
   prepared, **THEN** the agent reads the exact head bytes.
 - **GIVEN** a changed path is unsafe or unsupported, **WHEN** context is
   prepared, **THEN** the manifest records the omission and no file appears.
 - **GIVEN** the agent receives the prompt, **WHEN** it generates the page,
   **THEN** it changes only the draft and invokes only the fixed renderer.
+- **GIVEN** OpenCode exits zero without both final files, **WHEN** the first
+  attempt ends, **THEN** the adapter retries once with clean output state and
+  keeps separate diagnostics for each attempt.
+- **GIVEN** the clean retry also exits zero without both final files, **WHEN**
+  the second attempt ends, **THEN** generation fails and publication does not
+  start.
 - **GIVEN** a future agent replaces OpenCode, **WHEN** its adapter starts the
   walkthrough, **THEN** it receives the same prompt, context, draft path,
   renderer command, and output contract.
@@ -203,6 +234,15 @@ not from merge time.
   label contains unsafe markup, **WHEN** the page is rendered, **THEN** the
   source is escaped or sanitized and no executable PR-controlled markup is
   inserted by the renderer.
+- **GIVEN** two canvas edges share an endpoint or node pair, **WHEN** the
+  canvas draws them, **THEN** their paths and labels use separate lanes and do
+  not occupy the same route.
+- **GIVEN** a code block overflows horizontally, **WHEN** it is not hovered or
+  focused, **THEN** its scrollbar thumb is transparent; **WHEN** it is hovered
+  or focused, **THEN** a subtle thumb appears.
+- **GIVEN** a code block uses a patch or explicit diff marker, **WHEN** the
+  page renders it, **THEN** added and removed lines receive diff colors, and a
+  plain code block remains neutral context.
 - **GIVEN** a draft pull request or an unauthorized fork event, **WHEN** the
   workflow is triggered, **THEN** no walkthrough agent job runs.
 - **GIVEN** a successfully generated HTML file, **WHEN** the publishing job

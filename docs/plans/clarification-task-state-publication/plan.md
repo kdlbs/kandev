@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/tasks/runtime-state-publication-order.md
+spec: docs/specs/tasks/requirements/runtime-state-publication-order.md
 created: 2026-08-02
 status: complete
 ---

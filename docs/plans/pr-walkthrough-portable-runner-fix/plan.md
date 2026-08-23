@@ -145,6 +145,10 @@ Wave 2:
 
 - [x] [task-03-prompt-driven-workflow](task-03-prompt-driven-workflow.md)
 
+Wave 3:
+
+- [x] [task-04-public-url-and-shell-presentation](task-04-public-url-and-shell-presentation.md)
+
 Execute tasks sequentially in the primary conversation unless the user
 explicitly authorizes subagents.
 
@@ -159,6 +163,7 @@ explicitly authorizes subagents.
 
 ## Out of Scope
 
-- Changes to R2 object naming, publication, retention, or PR linking.
+- Generic R2 retention or merge-promotion changes beyond the 12-character URL
+  contract recorded in ADR-2026-08-23-pr-walkthrough-short-urls.
 - Generic GitHub automation for Claude or Codex.
 - Walkthrough generation for fork pull requests.

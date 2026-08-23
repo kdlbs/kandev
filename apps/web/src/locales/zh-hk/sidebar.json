@@ -73,6 +73,7 @@
   "wipQueuePosition": "{{step}} 佇列中的第 {{position}} 項，共 {{total}} 項",
   "quickChat": "快速聊天",
   "quickChatUnseen": "快速聊天，有新回覆",
+  "quickChatRunning": "快速聊天，代理程式正在工作",
   "quickTerminal": "快速終端",
   "quickChatTerminals": "終端",
   "quickChatNewAgent": "新建代理程式",

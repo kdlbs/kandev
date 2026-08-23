@@ -348,6 +348,54 @@ func TestSchedulerIntegration_BuildPromptContext_TaskComment(t *testing.T) {
 	}
 }
 
+func TestSchedulerIntegration_BuildPromptContext_ApprovalStageIncludesRecentComments(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	insertTaskForPrompt(t, svc, "task-approval", "ws-1", "Approve release", "Confirm the release is safe", 3)
+	svc.ExecSQL(t, `INSERT INTO task_comments (id, task_id, author_type, author_id, body, source, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+		"cmt-approval", "task-approval", "user", "user-1", "Release notes are complete", "user")
+
+	payload := `{"task_id":"task-approval","stage_id":"step-approval","stage_type":"approval"}`
+	pc := service.BuildPromptContextForTest(svc, ctx, service.RunReasonTaskAssigned, payload)
+
+	if pc.StageType != "approval" {
+		t.Fatalf("StageType = %q, want approval", pc.StageType)
+	}
+	if len(pc.BuilderComments) != 1 || pc.BuilderComments[0] != "Release notes are complete" {
+		t.Fatalf("recent task comments = %#v, want the inserted comment", pc.BuilderComments)
+	}
+	prompt := service.BuildPrompt(pc)
+	if !containsIgnoreCase(prompt, "Recent task comments:") {
+		t.Errorf("approval prompt should label comments as recent task comments, got: %s", prompt)
+	}
+}
+
+func TestSchedulerIntegration_BuildPromptContext_LegacyApprovalStageIncludesRecentComments(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	insertTaskForPrompt(t, svc, "task-legacy-approval", "ws-1", "Approve release", "Confirm the release is safe", 3)
+	svc.ExecSQL(t, `INSERT INTO task_comments (id, task_id, author_type, author_id, body, source, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+		"cmt-legacy-approval", "task-legacy-approval", "agent", "builder-1", "Builder finished the release", "agent")
+
+	pc := service.BuildPromptContextForTest(
+		svc,
+		ctx,
+		"approval_started",
+		`{"task_id":"task-legacy-approval","workflow_step_id":"step-approval"}`,
+	)
+
+	if pc.StageType != "approval" {
+		t.Fatalf("legacy StageType = %q, want approval", pc.StageType)
+	}
+	if len(pc.BuilderComments) != 1 || pc.BuilderComments[0] != "Builder finished the release" {
+		t.Fatalf("legacy recent task comments = %#v, want the inserted comment", pc.BuilderComments)
+	}
+}
+
 func TestSchedulerIntegration_BuildPromptContext_TaskComment_AgentAuthor(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()

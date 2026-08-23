@@ -73,7 +73,7 @@ type CreateTaskRequest struct {
 	WorkspacePath  string                 `json:"workspace_path,omitempty"` // Optional host folder for repo-less tasks
 
 	// ExternalID is a caller-supplied identity used for create-idempotency
-	// (docs/specs/tasks/external-id-idempotency/spec.md). Accepted on REST
+	// (docs/specs/tasks/requirements/external-id-idempotency.md). Accepted on REST
 	// and MCP; empty means no idempotency key.
 	ExternalID string `json:"external_id,omitempty"`
 

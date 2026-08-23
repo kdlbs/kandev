@@ -1,11 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { PaginationState } from "@tanstack/react-table";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconArchive, IconArchiveOff, IconLoader, IconTrash } from "@tabler/icons-react";
-import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
+import { TaskArchiveConfirmation } from "@/components/task/task-archive-confirmation";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
 import { primaryTaskRepository, type Repository, type Task, type Workflow } from "@/lib/types/http";
 import { formatTaskStateLabel } from "@/lib/ui/state-labels";
@@ -22,6 +22,7 @@ import {
 } from "@/lib/tasks/tasks-list-options";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 
 export type TasksListViewProps = {
   total: number;
@@ -489,12 +490,18 @@ function TaskRowActions({
   onDelete: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
 }) {
   const { t } = useTranslation();
+  const archiveAnchorRef = useRef<HTMLButtonElement>(null);
+  const { isFinePointer } = useResponsiveBreakpoint();
   return (
-    <div className="flex items-center gap-1" onClick={(event) => event.stopPropagation()}>
-      {!isArchived && (
+    <div
+      className={`flex items-center gap-1 ${showArchiveConfirm && !isFinePointer ? "flex-wrap" : ""}`}
+      onClick={(event) => event.stopPropagation()}
+    >
+      {!isArchived && (!showArchiveConfirm || isFinePointer) && (
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
+              ref={archiveAnchorRef}
               variant="ghost"
               size="icon"
               className="h-9 w-9 cursor-pointer"
@@ -539,8 +546,9 @@ function TaskRowActions({
         isDeleting={isDeleting}
         onConfirm={({ cascade }) => onDelete(task.id, { cascade })}
       />
-      <TaskArchiveConfirmDialog
+      <TaskArchiveConfirmation
         open={showArchiveConfirm}
+        anchorRef={archiveAnchorRef}
         onOpenChange={onArchiveOpenChange}
         taskTitle={task.title}
         taskId={task.id}

@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/tasks/interrupted-task-indicator.md
+spec: docs/specs/tasks/requirements/interrupted-task-indicator.md
 created: 2026-08-02
 status: complete
 ---

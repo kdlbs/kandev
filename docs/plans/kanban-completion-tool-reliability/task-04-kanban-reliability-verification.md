@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-task-only-eager-tool", "02-canonical-tool-naming", "03-pin-and-reconnect-claude-acp"]
 plan: "plan.md"
-spec: "../../specs/workflow/explicit-completion-signal/spec.md"
+spec: "../../specs/tasks/requirements/workflow-explicit-completion-signal.md"
 ---
 
 # Task 04: Verify Kanban completion reliability

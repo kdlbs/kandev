@@ -23,7 +23,8 @@ only a later parity task may remove core code.
   validation, and submit lifecycles differ.
 - Plugin UI continues to use `host.api.fetch("webhooks/<key>")` and the existing `HandleWebhook` RPC.
   `webhooks[].access` selects public or authenticated invocation and `max_body_bytes` sets a bounded
-  per-key limit up to 16 MiB; old manifests retain public/4 MiB defaults.
+  per-key limit up to 16 MiB. API v1 manifests retain public/4 MiB defaults. API v2 defaults to
+  authenticated access and a 4 MiB limit.
 - Plugin localization is a separate prerequisite. It must be resolved before core Voice Mode is
   removed, but this package adds no host i18n API.
 
@@ -66,8 +67,9 @@ only a later parity task may remove core code.
 ## Backend Authenticated Webhook Architecture
 
 - Extend manifest `Webhook` with `Access` and `MaxBodyBytes`. Validate `access` as
-  `public|authenticated`, default it to `public`, default the limit to 4 MiB, reject non-positive or
-  >16 MiB values, and preserve those values through install/registry serialization.
+  `public|authenticated`, use the API v1 public default and API v2 authenticated default, default the
+  limit to 4 MiB, reject non-positive or >16 MiB values, and preserve those values through
+  install/registry serialization.
 - Keep the existing webhook URL and `HandleWebhook` RPC. In the handler, resolve the declared key
   before reading the body, apply its effective limit, and require normal Kandev identity plus accepted
   Origin for authenticated cookie requests. Authentication-disabled mode uses the synthetic user.
@@ -79,9 +81,9 @@ only a later parity task may remove core code.
 
 ## Localization And Compatibility
 
-- Add optional manifest fields without changing plugin `api_version: 1`. Document that consumers must
-  declare the first supporting `min_kandev_version`; older hosts fail installation instead of falling
-  back to webhooks.
+- Keep API v1 omissions public and introduce API v2 with an authenticated default. Document that
+  consumers must declare the first supporting `min_kandev_version`; older hosts fail installation
+  instead of falling back to webhooks.
 - Update `docs/specs/plugins/spec.md`, `docs/plans/plugins/PLUGIN-API.md`,
   `docs/public/plugins-authoring.md`, and `docs/public/plugins-manifest.md` in the same contract task.
 

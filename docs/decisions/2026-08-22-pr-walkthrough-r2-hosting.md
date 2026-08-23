@@ -18,8 +18,10 @@ object on every push if the model cost is acceptable.
 Publish walkthrough HTML files to a dedicated Cloudflare R2 bucket named
 `kandev-pr-walkthroughs`, exposed through the custom domain
 `walkthrough.kandev.ai`. Store objects under
-`pr/<pull-request-number>/<head-sha>.html` and publish only the HTML, not the
-JSON generation artifact.
+`pr/<pull-request-number>/<short-head-sha>.html`, where `short-head-sha` is the
+first 12 lowercase hexadecimal characters of the exact head SHA. Publish only
+the HTML, not the JSON generation artifact. The URL naming rule is recorded in
+[ADR-2026-08-23-pr-walkthrough-short-urls](2026-08-23-pr-walkthrough-short-urls.md).
 
 The GitHub Actions publication job uses a bucket-scoped R2 S3-compatible
 Object Read & Write credential. The generation job receives no R2 credential;

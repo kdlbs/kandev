@@ -42,13 +42,13 @@ steps:
           config:
             target: primary
             task_id: this
-            reason: blockers_resolved
+            reason: task_blockers_resolved
       on_children_completed:
         - type: queue_run
           config:
             target: primary
             task_id: this
-            reason: children_completed
+            reason: task_children_completed
       on_agent_error:
         - type: queue_run
           config:
@@ -73,7 +73,9 @@ steps:
         - type: queue_run_for_each_participant
           config:
             role: reviewer
-            reason: review_started
+            reason: task_assigned
+            payload:
+              stage_type: review
       on_turn_complete:
         - type: move_to_step
           config:
@@ -101,7 +103,9 @@ steps:
         - type: queue_run_for_each_participant
           config:
             role: approver
-            reason: approval_started
+            reason: task_assigned
+            payload:
+              stage_type: approval
       on_turn_complete:
         - type: move_to_step
           config:

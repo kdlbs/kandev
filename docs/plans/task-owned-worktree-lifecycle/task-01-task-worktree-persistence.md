@@ -116,7 +116,7 @@ None.
 
 ## Inputs
 
-- `docs/specs/tasks/runtime-cleanup.md`, especially the normalized task
+- `docs/specs/tasks/system-design/runtime-cleanup.md`, especially the normalized task
   environment data model.
 - `docs/decisions/2026-08-08-task-owned-worktree-lifetime.md`.
 - Existing `TaskEnvironment` ownership-transfer behavior and worktree manager
