@@ -845,7 +845,7 @@ func startGatewayAndServe(
 	// and proxy routes, subscription visibility checks, and workspace-owner
 	// broadcast routing. Must be installed before SetupRoutes runs in
 	// buildHTTPServer.
-	gateway.SetAuthPolicy(gatewayAuthPolicy(services.Auth, services.Task, repos.Task))
+	gateway.SetAuthPolicy(gatewayAuthPolicy(services.Auth, services.Task, repos.Task, repos.Office))
 
 	waitForAgentctlControlHealthy(ctx, cfg, log)
 
