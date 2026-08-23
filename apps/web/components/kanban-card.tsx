@@ -12,7 +12,7 @@ import {
 } from "@/components/kanban-card-menu-items";
 import { useTaskPluginLinkActions } from "@/components/task/task-session-sidebar-link-actions";
 import { useAppStore } from "@/components/state-provider";
-import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
+import { TaskArchiveConfirmation } from "@/components/task/task-archive-confirmation";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
 import { TaskDetachConfirmationSurface } from "@/components/task/task-detach-confirm-dialog";
 import {
@@ -324,6 +324,12 @@ function useKanbanCardMenus({
     window.setTimeout(() => dialogs.setShowDetachConfirm(true), 300);
   };
 
+  const requestArchiveConfirmation = () => {
+    // Let Radix finish the menu's pointer sequence before the local surface
+    // opens; otherwise the initiating menu event is treated as outside input.
+    window.setTimeout(() => dialogs.setShowArchiveConfirm(true), 300);
+  };
+
   const menuBase = {
     currentWorkflowId: moveMenu.moveTargets.currentWorkflowId,
     currentStepId: task.workflowStepId,
@@ -335,7 +341,7 @@ function useKanbanCardMenus({
     isDetaching,
     parentTaskId: task.parentTaskId,
     onEdit: onEdit ? () => onEdit(task) : undefined,
-    onArchive: onArchive ? () => dialogs.setShowArchiveConfirm(true) : undefined,
+    onArchive: onArchive ? requestArchiveConfirmation : undefined,
     onDelete: onDelete ? () => dialogs.setShowDeleteConfirm(true) : undefined,
     onDetach: task.parentTaskId && !actingOnMultiSelection ? requestDetachConfirmation : undefined,
     ...buildLinkDialogHandlers(externalLinkAvailability, dialogs),
@@ -361,6 +367,8 @@ function useKanbanCardMenus({
     isDetaching,
     detachAnchorRef,
     detachFocusReturnRef,
+    archiveAnchorRef: detachFocusReturnRef,
+    archiveFocusReturnRef: detachFocusReturnRef,
     handleDetachConfirm,
   };
 }
@@ -373,18 +381,14 @@ function KanbanCardDialogs({
   repositories,
   menu,
   isDeleting,
-  isArchiving,
   onDelete,
-  onArchive,
 }: {
   task: Task;
   workspaceId: string | null;
   repositories: Repository[];
   menu: KanbanCardMenuState;
   isDeleting?: boolean;
-  isArchiving?: boolean;
   onDelete?: KanbanCardProps["onDelete"];
-  onArchive?: KanbanCardProps["onArchive"];
 }) {
   return (
     <>
@@ -396,15 +400,6 @@ function KanbanCardDialogs({
         executorType={task.primaryExecutorType}
         isDeleting={isDeleting}
         onConfirm={({ cascade }) => onDelete?.(task, { cascade })}
-      />
-      <TaskArchiveConfirmDialog
-        open={menu.showArchiveConfirm}
-        onOpenChange={menu.setShowArchiveConfirm}
-        taskTitle={task.title}
-        taskId={task.id}
-        executorType={task.primaryExecutorType}
-        isArchiving={isArchiving}
-        onConfirm={({ cascade }) => onArchive?.(task, { cascade })}
       />
       <TaskGitHubPRDialog
         workspaceId={workspaceId}
@@ -491,6 +486,7 @@ function KanbanCardFrame({
   showMaximizeButton,
   isDeleting,
   isArchiving,
+  onArchive,
   onClick,
   onToggleSelect,
   onOpenFullPage,
@@ -503,6 +499,7 @@ function KanbanCardFrame({
   | "showMaximizeButton"
   | "isDeleting"
   | "isArchiving"
+  | "onArchive"
   | "onToggleSelect"
   | "onOpenFullPage"
 > & {
@@ -548,6 +545,17 @@ function KanbanCardFrame({
         sharesParentWorkspace={task.workspaceMode === "inherit_parent"}
         onOpenChange={menu.setShowDetachConfirm}
         onConfirm={menu.handleDetachConfirm}
+      />
+      <TaskArchiveConfirmation
+        open={menu.showArchiveConfirm}
+        anchorRef={menu.archiveAnchorRef}
+        focusReturnRef={menu.archiveFocusReturnRef}
+        taskTitle={task.title}
+        taskId={task.id}
+        executorType={task.primaryExecutorType}
+        isArchiving={isArchiving}
+        onOpenChange={menu.setShowArchiveConfirm}
+        onConfirm={({ cascade }) => onArchive?.(task, { cascade })}
       />
     </>
   );
@@ -618,6 +626,7 @@ export function KanbanCard({
         showMaximizeButton={showMaximizeButton}
         isDeleting={isDeleting}
         isArchiving={isArchiving}
+        onArchive={onArchive}
         onClick={handleClick}
         onToggleSelect={onToggleSelect}
         onOpenFullPage={onOpenFullPage}
@@ -628,9 +637,7 @@ export function KanbanCard({
         repositories={repositories}
         menu={menu}
         isDeleting={isDeleting}
-        isArchiving={isArchiving}
         onDelete={onDelete}
-        onArchive={onArchive}
       />
     </>
   );

@@ -120,7 +120,7 @@ func isOfficeRequest(req *CreateTaskRequest) bool {
 
 // CreateTaskOutcome distinguishes why Service.CreateTask returned the task it
 // did, per the create-idempotency contract
-// (docs/specs/tasks/external-id-idempotency/spec.md). Only meaningful when
+// (docs/specs/tasks/requirements/external-id-idempotency.md). Only meaningful when
 // the request carried an external_id; a request without one always reports
 // CreateTaskOutcomeCreated. The fourth contract outcome, CreatedIdentityLost,
 // is not produced here — it is decided by the handler during settlement,
@@ -162,7 +162,7 @@ func foundOutcomeFor(task *models.Task) CreateTaskOutcome {
 // CreateTask creates a new task and publishes a task.created event, or —
 // when the request carries an external_id already held by a task — returns
 // that task instead, per the create-idempotency contract
-// (docs/specs/tasks/external-id-idempotency/spec.md). WorkflowID is required
+// (docs/specs/tasks/requirements/external-id-idempotency.md). WorkflowID is required
 // for non-ephemeral kanban tasks. Office tasks (project_id set, or origin is
 // agent_created/routine) auto-resolve to the workspace's office workflow.
 // Ephemeral tasks (quick chat, config chat) must NOT have a workflow.

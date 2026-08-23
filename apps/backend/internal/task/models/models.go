@@ -842,7 +842,7 @@ type Task struct {
 	Identifier             string `json:"identifier,omitempty"` // e.g. "KAN-42"
 
 	// ExternalID is a caller-supplied identity used for create-idempotency
-	// (docs/specs/tasks/external-id-idempotency/spec.md). Empty when the task
+	// (docs/specs/tasks/requirements/external-id-idempotency.md). Empty when the task
 	// holds none. Unique per (workspace_id, external_id) when non-empty.
 	ExternalID string `json:"external_id,omitempty"`
 	// ExternalIDSettledAt is non-nil once the create that claimed ExternalID

@@ -297,6 +297,9 @@ func BearerToken(r *http.Request) string {
 // isPublicPath is the unauthenticated allowlist. Everything here is either
 // pre-session bootstrap, a credential-issuing endpoint, or a
 // self-authenticating webhook (own secret/HMAC validated by its handler).
+// Plugin webhooks are NOT in this allowlist — whether a given plugin webhook
+// is anonymous-callable depends on its manifest (webhooks[].public), which
+// only plugins.Controller.webhook can read; see isPluginWebhookPath below.
 func isPublicPath(method, path string) bool {
 	switch path {
 	case "/health":
@@ -347,9 +350,6 @@ func isPublicPath(method, path string) bool {
 		// GitHub App webhook delivery; HMAC (X-Hub-Signature-256) verified by
 		// the handler, not request identity.
 		return true
-	case strings.HasPrefix(path, "/api/plugins/") && strings.Contains(path, "/webhooks/"):
-		// Relayed to the plugin subprocess, which owns signature validation.
-		return true
 	case strings.HasPrefix(path, "/api/v1/e2e") || strings.HasPrefix(path, "/api/v1/_test/"):
 		// Test-harness routes; only mounted under KANDEV_E2E_MOCK. Never
 		// registered on production binaries.
@@ -375,6 +375,12 @@ func isDeferredPath(c *gin.Context, path string) bool {
 		// External MCP enforces PAT auth in its own group middleware
 		// (externalMCPAuthMiddleware) so agent clients get MCP-shaped errors.
 		return true
+	case isPluginWebhookRelayMethod(c.Request.Method) && isPluginWebhookPath(path):
+		// Whether this specific webhook is anonymous-callable depends on the
+		// plugin's manifest (webhooks[].public), which only
+		// plugins.Controller.webhook can read — it enforces the auth gate
+		// itself (webhookCallerAuthorized), mirroring the /mcp precedent above.
+		return true
 	case strings.HasPrefix(path, "/api/v1/office/") && BearerToken(c.Request) != "":
 		// Sandbox office agents call back with an agent JWT (KANDEV_API_KEY);
 		// officeagents.AgentAuthMiddleware validates it. Bearer-less office
@@ -387,4 +393,24 @@ func isDeferredPath(c *gin.Context, path string) bool {
 		return true
 	}
 	return false
+}
+
+// isPluginWebhookRelayMethod reports whether method is registered on the plugin
+// webhook relay route. Other methods should not bypass the global auth
+// challenge just because the path has the relay shape.
+func isPluginWebhookRelayMethod(method string) bool {
+	return method == http.MethodGet || method == http.MethodPost
+}
+
+// isPluginWebhookPath structurally matches /api/plugins/<id>/webhooks/<key>
+// with both dynamic segments non-empty — precisely what plugins.RegisterRoutes
+// registers for the relay endpoint (POST/GET /:id/webhooks/:key). Splitting
+// on "/" (rather than the old strings.Contains(path, "/webhooks/")) avoids
+// over-matching unrelated routes that merely contain the substring, such as
+// /api/plugins/p1/user-state/task/t1/note/webhooks/k or /api/plugins/webhooks/x.
+func isPluginWebhookPath(path string) bool {
+	parts := strings.Split(path, "/")
+	return len(parts) == 6 &&
+		parts[0] == "" && parts[1] == "api" && parts[2] == "plugins" &&
+		parts[3] != "" && parts[4] == "webhooks" && parts[5] != ""
 }

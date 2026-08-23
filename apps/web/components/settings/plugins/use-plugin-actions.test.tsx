@@ -11,11 +11,21 @@ const installPluginFromUrl = vi.fn<() => Promise<InstallResult>>();
 const installPluginUpload = vi.fn<() => Promise<InstallResult>>();
 const enablePlugin = vi.fn(async () => ({ enabled: true }));
 const getPlugin = vi.fn<() => Promise<PluginRecord>>();
+const syncPlugins = vi.fn();
+const listPlugins = vi.fn(async () => []);
 const uninstallPlugin = vi.fn<() => Promise<{ deleted: boolean }>>();
-const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }));
+const { toastError, toastSuccess, toastWarning } = vi.hoisted(() => ({
+  toastError: vi.fn(),
+  toastSuccess: vi.fn(),
+  toastWarning: vi.fn(),
+}));
 
 vi.mock("@/lib/toast/sonner", () => ({
-  toast: { error: (...args: unknown[]) => toastError(...args) },
+  toast: {
+    error: (...args: unknown[]) => toastError(...args),
+    success: (...args: unknown[]) => toastSuccess(...args),
+    warning: (...args: unknown[]) => toastWarning(...args),
+  },
 }));
 
 vi.mock("@/lib/plugins/host", () => ({
@@ -33,6 +43,8 @@ vi.mock("@/lib/api/domains/plugins-api", async () => {
     installPluginUpload: (...args: unknown[]) => installPluginUpload(...(args as [])),
     enablePlugin: (...args: unknown[]) => enablePlugin(...(args as [])),
     getPlugin: (...args: unknown[]) => getPlugin(...(args as [])),
+    syncPlugins: (...args: unknown[]) => syncPlugins(...(args as [])),
+    listPlugins: (...args: unknown[]) => listPlugins(...(args as [])),
     uninstallPlugin: (...args: unknown[]) => uninstallPlugin(...(args as [])),
   };
 });
@@ -70,8 +82,13 @@ beforeEach(() => {
   installPluginUpload.mockReset();
   enablePlugin.mockClear();
   getPlugin.mockReset();
+  syncPlugins.mockReset();
+  listPlugins.mockClear();
+  listPlugins.mockResolvedValue([]);
   uninstallPlugin.mockReset();
   toastError.mockReset();
+  toastSuccess.mockReset();
+  toastWarning.mockReset();
 });
 
 describe("usePluginActions — install/update", () => {
@@ -168,6 +185,63 @@ describe("usePluginActions — enable", () => {
     await waitFor(() => expect(result.current.stored?.last_error).toBe("new executable failure"));
     expect(result.current.stored?.last_error).not.toBe(plugin.last_error);
     expect(getPlugin).toHaveBeenCalledWith(plugin.id, { cache: "no-store" });
+  });
+});
+
+describe("usePluginActions — marketplaceInstall result", () => {
+  it("resolves ok: true on a successful install", async () => {
+    const plugin = activeRecord();
+    installPluginFromUrl.mockResolvedValue({ plugin });
+
+    const { result } = renderHook(() => usePluginActions(), { wrapper });
+
+    let outcome: { ok: boolean; error?: string; pluginId?: string } | undefined;
+    await act(async () => {
+      outcome = await result.current.marketplaceInstall("https://example.com/acme-tools.tar.gz");
+    });
+
+    expect(outcome).toEqual({ ok: true, pluginId: plugin.id });
+  });
+
+  it("resolves ok: false with the backend's error message on a failed install, without throwing", async () => {
+    installPluginFromUrl.mockRejectedValue(new Error("bad checksum"));
+
+    const { result } = renderHook(() => usePluginActions(), { wrapper });
+
+    let outcome: { ok: boolean; error?: string } | undefined;
+    await act(async () => {
+      outcome = await result.current.marketplaceInstall("https://example.com/acme-tools.tar.gz");
+    });
+
+    expect(outcome).toEqual({ ok: false, error: "bad checksum" });
+  });
+});
+
+describe("usePluginActions — handleSync result", () => {
+  it("resolves ok: true after a successful sync", async () => {
+    syncPlugins.mockResolvedValue({ added: [], installed: [], missing: [], errors: [] });
+
+    const { result } = renderHook(() => usePluginActions(), { wrapper });
+
+    let outcome: { ok: boolean } | undefined;
+    await act(async () => {
+      outcome = await result.current.handleSync();
+    });
+
+    expect(outcome).toEqual({ ok: true });
+  });
+
+  it("resolves ok: false when the sync call fails, without throwing", async () => {
+    syncPlugins.mockRejectedValue(new Error("backend unreachable"));
+
+    const { result } = renderHook(() => usePluginActions(), { wrapper });
+
+    let outcome: { ok: boolean } | undefined;
+    await act(async () => {
+      outcome = await result.current.handleSync();
+    });
+
+    expect(outcome).toEqual({ ok: false });
   });
 });
 

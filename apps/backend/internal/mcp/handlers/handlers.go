@@ -954,7 +954,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 
 // mcpCreateTaskResult is create_task_kandev's tool-result shape: the task
 // DTO plus deduplicated/creation_complete, per
-// docs/specs/tasks/external-id-idempotency/spec.md, "MCP" — required
+// docs/specs/tasks/system-design/external-id-idempotency.md, "MCP" — required
 // booleans, not presence-only markers, mirroring the REST create response.
 type mcpCreateTaskResult struct {
 	dto.TaskDTO

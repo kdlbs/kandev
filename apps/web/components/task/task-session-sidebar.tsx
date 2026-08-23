@@ -199,23 +199,8 @@ function useArchiveActions(store: StoreApi) {
   const [archivingTaskId, setArchivingTaskId] = useState<string | null>(null);
   const [isArchiving, setIsArchiving] = useState(false);
 
-  const handleArchiveTask = useCallback(
-    (taskId: string) => {
-      const state = store.getState();
-      const task = findSidebarTask(state, taskId);
-      setArchivingTask({
-        id: taskId,
-        title: task?.title ?? t("task:thisTask"),
-        executorType: task?.primaryExecutorType,
-      });
-    },
-    [store],
-  );
-
-  const handleArchiveConfirm = useCallback(
-    async (opts: { cascade: boolean }) => {
-      if (!archivingTask) return;
-      const taskId = archivingTask.id;
+  const runArchive = useCallback(
+    async (taskId: string, opts: { cascade?: boolean }) => {
       setIsArchiving(true);
       setArchivingTaskId(taskId);
       try {
@@ -228,7 +213,32 @@ function useArchiveActions(store: StoreApi) {
         setArchivingTask((current) => (current?.id === taskId ? null : current));
       }
     },
-    [archivingTask, archiveAndSwitch],
+    [archiveAndSwitch],
+  );
+
+  const handleArchiveTask = useCallback(
+    (taskId: string, opts?: { cascade?: boolean }) => {
+      if (opts) {
+        void runArchive(taskId, opts);
+        return;
+      }
+      const state = store.getState();
+      const task = findSidebarTask(state, taskId);
+      setArchivingTask({
+        id: taskId,
+        title: task?.title ?? t("task:thisTask"),
+        executorType: task?.primaryExecutorType,
+      });
+    },
+    [runArchive, store, t],
+  );
+
+  const handleArchiveConfirm = useCallback(
+    async (opts: { cascade: boolean }) => {
+      if (!archivingTask) return;
+      await runArchive(archivingTask.id, opts);
+    },
+    [archivingTask, runArchive],
   );
 
   return {

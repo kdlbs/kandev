@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/task-dependencies/create-dialog-advanced-settings.md
+spec: docs/specs/tasks/requirements/task-dependencies-create-dialog-advanced-settings.md
 created: 2026-08-13
 status: implemented
 ---
@@ -15,7 +15,7 @@ leaving a contained region for future uncommon create options.
 
 This is a frontend-only presentation change. It builds on the implemented
 dependency selector refinement in
-`docs/specs/task-dependencies/create-dialog-dependency-selector.md` and does
+`docs/specs/tasks/requirements/task-dependencies-create-dialog-dependency-selector.md` and does
 not change the backend, API client, persistence, or WebSocket contracts.
 
 ## Frontend composition

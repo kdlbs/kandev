@@ -132,6 +132,10 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
         )
         self.assertIn("--agent github-pr-walkthrough", self.generation)
         self.assertIn("--file .pr-walkthrough/guidelines.md", self.generation)
+        self.assertIn(
+            "Never put shell template sentinels such as PR_TITLE or PR_URL in a code, patch, or rendered-Markdown block.",
+            self.generation,
+        )
         self.assertIn("--file .pr-walkthrough/walkthrough.patch", self.generation)
         self.assertIn(".pr-walkthrough/head-context/manifest.json", self.generation)
         self.assertNotIn("render_pr_walkthrough", self.generation)
@@ -233,7 +237,8 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
 
     def test_publication_uploads_only_html_with_expected_metadata(self) -> None:
         for value in (
-            'OBJECT_KEY="pr/${PR_NUMBER}/${HEAD_SHA}.html"',
+            'SHORT_HEAD_SHA="${HEAD_SHA:0:12}"',
+            'OBJECT_KEY="pr/${PR_NUMBER}/${SHORT_HEAD_SHA}.html"',
             "aws s3 cp",
             '--content-type "text/html; charset=utf-8"',
             '--cache-control "public, max-age=300"',

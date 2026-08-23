@@ -171,6 +171,7 @@ jobs:
           - Read the attached guidelines and walkthrough patch first.
           - The checked-out repository is the trusted base commit. Inspect it only when needed to understand callers and surrounding architecture.
           - Use real file paths and real code excerpts from the PR head or attached diff. Do not fabricate code.
+          - Never put shell template sentinels such as PR_TITLE or PR_URL in a code, patch, or rendered-Markdown block. If a source diff hunk contains a shell template sentinel, trim that hunk or use a shorter excerpt that omits the sentinel.
           - Follow the pr-walkthrough skill from the trusted repository checkout.
           - Write the complete JSON object to .pr-walkthrough/draft.json, then run the renderer.
           - If the renderer rejects the draft, correct that file and run the renderer again.
@@ -272,7 +273,8 @@ jobs:
 
           HTML_PATH=".r2-artifact/docs/pr-walkthrough/pr-${PR_NUMBER}.html"
           test -s "$HTML_PATH"
-          OBJECT_KEY="pr/${PR_NUMBER}/${HEAD_SHA}.html"
+          SHORT_HEAD_SHA="${HEAD_SHA:0:12}"
+          OBJECT_KEY="pr/${PR_NUMBER}/${SHORT_HEAD_SHA}.html"
 
           aws s3 cp "$HTML_PATH" "s3://${CLOUDFLARE_R2_BUCKET}/${OBJECT_KEY}" \
             --endpoint-url "$CLOUDFLARE_R2_ENDPOINT" \

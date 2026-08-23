@@ -193,8 +193,10 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-22-plugin-version-retention | [Keep Exactly One Superseded Plugin Version](2026-08-22-plugin-version-retention.md) | accepted | backend | 2026-08-22 |
 | 2026-08-22-user-configured-automation-continuity | [Let Users Configure Continuity, Not MCP Authority](2026-08-22-user-configured-automation-continuity.md) | accepted | backend, agentctl, frontend, protocol, security, workflow | 2026-08-22 |
 | 2026-08-23-automation-target-modes | [Give Automations Explicit Hidden and Visible Task Targets](2026-08-23-automation-target-modes.md) | accepted | backend, frontend, protocol, workflow | 2026-08-23 |
+| 2026-08-12-plugin-webhook-auth-gate | [Require Auth for Plugin Webhooks Unless the Manifest Declares Them Public](2026-08-12-plugin-webhook-auth-gate.md) | accepted | backend, frontend, security | 2026-08-12 |
 | 2026-08-22-system-oriented-specifications | [Organize specifications by system](2026-08-22-system-oriented-specifications.md) | accepted | workflow, infra | 2026-08-22 |
 | 2026-08-22-pr-walkthrough-r2-hosting | [Host PR walkthrough HTML in Cloudflare R2](2026-08-22-pr-walkthrough-r2-hosting.md) | accepted | infra, workflow, security | 2026-08-22 |
 | 2026-08-22-agent-owned-pr-walkthrough-rendering | [Keep PR walkthrough rendering agent owned and provider neutral](2026-08-22-agent-owned-pr-walkthrough-rendering.md) | superseded by 2026-08-22-pr-walkthrough-filesystem-runner | workflow, infra, security | 2026-08-22 |
 | 2026-08-22-pr-walkthrough-filesystem-runner | [Use a Filesystem Contract for PR Walkthrough Runners](2026-08-22-pr-walkthrough-filesystem-runner.md) | accepted | workflow, infra, security | 2026-08-22 |
 | 2026-08-22-pr-walkthrough-description-link | [Own a top-level PR walkthrough callout](2026-08-22-pr-walkthrough-description-link.md) | accepted | workflow, infra, security, GitHub | 2026-08-22 |
+| 2026-08-23-pr-walkthrough-short-urls | [Use 12-character SHA prefixes for PR walkthrough URLs](2026-08-23-pr-walkthrough-short-urls.md) | accepted | workflow, infra | 2026-08-23 |

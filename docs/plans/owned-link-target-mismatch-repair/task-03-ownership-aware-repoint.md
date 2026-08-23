@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-owned-link-self-heal"]
 plan: "plan.md"
-spec: "../../specs/tasks/attach-workspace-sources.md"
+spec: "../../specs/tasks/system-design/attach-workspace-sources.md"
 parallelism: sequential
 ---
 

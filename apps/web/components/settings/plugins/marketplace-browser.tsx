@@ -15,8 +15,8 @@ import { MarketplaceSourcesDialog } from "./marketplace-sources-dialog";
 const ALL_CATEGORIES = "__all__";
 
 type MarketplaceBrowserProps = {
-  /** Installs a plugin from its package URL; resolves when the install settles. */
-  onInstallUrl: (url: string) => Promise<void>;
+  /** Installs a plugin from its package URL; resolves when the install settles. The result is unused here — failures already toast. */
+  onInstallUrl: (url: string) => Promise<{ ok: boolean; error?: string }>;
 };
 
 /** The "Browse" tab: search/filter/sort the catalog and install from it. */

@@ -21,7 +21,8 @@ lifecycle policy.
 **Decisions:**
 [ADR-2026-08-22-pr-walkthrough-r2-hosting](../../decisions/2026-08-22-pr-walkthrough-r2-hosting.md),
 [ADR-2026-08-22-pr-walkthrough-filesystem-runner](../../decisions/2026-08-22-pr-walkthrough-filesystem-runner.md),
-[ADR-2026-08-22-pr-walkthrough-description-link](../../decisions/2026-08-22-pr-walkthrough-description-link.md)
+[ADR-2026-08-22-pr-walkthrough-description-link](../../decisions/2026-08-22-pr-walkthrough-description-link.md),
+[ADR-2026-08-23-pr-walkthrough-short-urls](../../decisions/2026-08-23-pr-walkthrough-short-urls.md)
 
 **Implementation plan:**
 [Portable PR walkthrough runner fix](../../plans/pr-walkthrough-portable-runner-fix/plan.md)
@@ -43,7 +44,13 @@ lifecycle policy.
 - The generated page contains a vertical reviewer story, a dark and light
   theme, architecture and data diagrams when supplied, highlighted code, diff
   tinting, GitHub file links, an interactive code canvas, and a linear fallback
-  list.
+  list. Canvas edges use separate endpoint and node-pair lanes, and their
+  labels follow the routed edge without stacking. Horizontal code scrollbars
+  stay subtle until a reviewer hovers over or focuses a code block. Patch and
+  explicitly marked diff blocks use diff colors. Plain code blocks remain
+  neutral because they provide context rather than a change. Its top bar uses
+  the website brand mark and favicon, and its dark theme uses the
+  documentation shell's dark-gray palette.
 - The configured workflow agent generates and renders the walkthrough for a
   non-draft same-repository pull request when it is opened, reopened, marked
   ready for review, or updated. OpenCode is the initial runner, but the skill
@@ -64,11 +71,13 @@ lifecycle policy.
 - The workflow preserves the generated JSON and HTML as CI artifacts and
   uploads only the HTML to the `kandev-pr-walkthroughs` R2 bucket.
 - Each published object uses the key
-  `pr/<pull-request-number>/<head-sha>.html` and is served at
-  `https://walkthrough.kandev.ai/pr/<pull-request-number>/<head-sha>.html`.
+  `pr/<pull-request-number>/<short-head-sha>.html`, where `short-head-sha` is
+  the first 12 lowercase hexadecimal characters of the exact head SHA. It is
+  served at
+  `https://walkthrough.kandev.ai/pr/<pull-request-number>/<short-head-sha>.html`.
 - The workflow regenerates on `synchronize` for same-repository pull request
-  updates. Each generated object remains keyed by pull request number and head
-  SHA.
+  updates. Each generated object remains keyed by pull request number and the
+  12-character prefix of the exact head SHA.
 - After public validation succeeds, a separate minimum-permission job prepends
   a prominent marker-owned walkthrough callout to the pull request
   description. A rerun replaces only that callout and preserves the rest of
@@ -167,7 +176,7 @@ not from merge time.
 - **GIVEN** a non-draft same-repository pull request is opened, reopened, or
   marked ready for review, **WHEN** the walkthrough job runs, **THEN** it
   creates non-empty JSON and HTML artifacts and publishes the HTML under the
-  current head SHA in R2.
+  12-character prefix of the current head SHA in R2.
 - **GIVEN** a fetched PR head, **WHEN** the workflow computes the triple-dot
   diff, **THEN** the merge base exists and context preparation succeeds.
 - **GIVEN** a changed file contains bounded UTF-8 text, **WHEN** context is
@@ -203,6 +212,15 @@ not from merge time.
   label contains unsafe markup, **WHEN** the page is rendered, **THEN** the
   source is escaped or sanitized and no executable PR-controlled markup is
   inserted by the renderer.
+- **GIVEN** two canvas edges share an endpoint or node pair, **WHEN** the
+  canvas draws them, **THEN** their paths and labels use separate lanes and do
+  not occupy the same route.
+- **GIVEN** a code block overflows horizontally, **WHEN** it is not hovered or
+  focused, **THEN** its scrollbar thumb is transparent; **WHEN** it is hovered
+  or focused, **THEN** a subtle thumb appears.
+- **GIVEN** a code block uses a patch or explicit diff marker, **WHEN** the
+  page renders it, **THEN** added and removed lines receive diff colors, and a
+  plain code block remains neutral context.
 - **GIVEN** a draft pull request or an unauthorized fork event, **WHEN** the
   workflow is triggered, **THEN** no walkthrough agent job runs.
 - **GIVEN** a successfully generated HTML file, **WHEN** the publishing job

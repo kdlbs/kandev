@@ -13,7 +13,7 @@ behavior, then verify both through their existing user-facing creation flows. Th
 keeps Office onboarding separate while the frontend change preserves the current desktop and mobile
 dialog composition.
 
-Related requirement: `docs/specs/tasks/multi-branch/spec.md` task-creation scenarios.
+Related requirement: `docs/specs/tasks/requirements/multi-branch.md` task-creation scenarios.
 
 ## Backend
 
