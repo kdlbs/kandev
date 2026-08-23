@@ -21,16 +21,10 @@ The task system owns clarification bundle authority, turn scoping, response pers
 
 ## Requirement mapping
 
-
-
 | Requirement | Design source |
-
 | --- | --- |
-
 | `REQ-TASKS-CLARIFICATION-LIFECYCLE-001` | Extracted from the legacy design sections below. |
-
 | `REQ-TASKS-CLARIFICATION-SCENARIOS-001` | Extracted from the legacy design sections below. |
-
 
 
 ## Data model

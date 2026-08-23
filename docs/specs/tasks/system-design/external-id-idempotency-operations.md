@@ -22,18 +22,11 @@ This design records the operational, failure, persistence, and current-state evi
 
 ## Requirement mapping
 
-
-
 | Requirement | Design source |
-
 | --- | --- |
-
 | `REQ-TASKS-EXTERNAL-ID-001` | Extracted from the legacy design sections below. |
-
 | `REQ-TASKS-EXTERNAL-ID-SCENARIOS-001` | Extracted from the legacy design sections below. |
-
 | `REQ-TASKS-EXTERNAL-ID-BOUNDARIES-001` | Extracted from the legacy design sections below. |
-
 
 
 ## Permissions

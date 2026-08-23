@@ -28,28 +28,16 @@ The task system owns quorum semantics, participant canonicalization, decision pe
 
 ## Requirement mapping
 
-
-
 | Requirement | Design source |
-
 | --- | --- |
-
 | `REQ-TASKS-QUORUM-CORE-001` | Extracted from the legacy design sections below. |
-
 | `REQ-TASKS-QUORUM-RECORDING-001` | Extracted from the legacy design sections below. |
-
 | `REQ-TASKS-QUORUM-VERDICT-001` | Extracted from the legacy design sections below. |
-
 | `REQ-TASKS-QUORUM-REEVALUATION-001` | Extracted from the legacy design sections below. |
-
 | `REQ-TASKS-QUORUM-SLATE-001` | Extracted from the legacy design sections below. |
-
 | `REQ-TASKS-QUORUM-DIAGNOSTICS-001` | Extracted from the legacy design sections below. |
-
 | `REQ-TASKS-QUORUM-CONCURRENCY-001` | Extracted from the legacy design sections below. |
-
 | `REQ-TASKS-QUORUM-BINDING-001` | Extracted from the legacy design sections below. |
-
 | `REQ-TASKS-QUORUM-REGRESSION-001` | Extracted from the legacy design sections below. |
 
 ## Verified current state

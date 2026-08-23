@@ -21,16 +21,10 @@ The task system owns the task-level transition ledger and its writer boundaries.
 
 ## Requirement mapping
 
-
-
 | Requirement | Design source |
-
 | --- | --- |
-
 | `REQ-TASKS-TRANSITION-LEDGER-001` | Extracted from the legacy design sections below. |
-
 | `REQ-TASKS-TRANSITION-LEDGER-SCENARIOS-001` | Extracted from the legacy design sections below. |
-
 
 
 ## Data model

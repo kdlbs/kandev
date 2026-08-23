@@ -22,18 +22,11 @@ The task system owns external identity uniqueness, creation settlement, and the 
 
 ## Requirement mapping
 
-
-
 | Requirement | Design source |
-
 | --- | --- |
-
 | `REQ-TASKS-EXTERNAL-ID-001` | Extracted from the legacy design sections below. |
-
 | `REQ-TASKS-EXTERNAL-ID-SCENARIOS-001` | Extracted from the legacy design sections below. |
-
 | `REQ-TASKS-EXTERNAL-ID-BOUNDARIES-001` | Extracted from the legacy design sections below. |
-
 
 
 ## Data model

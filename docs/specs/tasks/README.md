@@ -39,6 +39,7 @@ signals, and task-scoped scheduling contracts.
 - [Active clarification lifecycle](requirements/clarification-active-lifecycle.md)
 - [Active clarification lifecycle scenarios](requirements/clarification-active-lifecycle-scenarios.md)
 - [Agent-generated titles](requirements/agent-generated-titles.md)
+- [Attach workspace sources](requirements/attach-workspace-sources.md)
 - [Archive confirmation](requirements/archive-confirmation.md)
 - [Autopilot mode](requirements/autopilot-mode.md)
 - [Blocked task escalation](requirements/blocked-task-escalation.md)
@@ -55,6 +56,7 @@ signals, and task-scoped scheduling contracts.
 - [Labels](requirements/labels.md)
 - [Link an existing task to a GitHub issue](requirements/link-existing-task-github-issue.md)
 - [MCP task agent-profile default](requirements/mcp-task-agent-profile-default.md)
+- [Model unification](requirements/model-unification.md)
 - [Multi-branch tasks](requirements/multi-branch.md)
 - [Parent-child message interrupt](requirements/parent-child-message-interrupt.md)
 - [Parent-child task stop](requirements/parent-child-task-stop.md)
@@ -62,6 +64,7 @@ signals, and task-scoped scheduling contracts.
 - [Prompt attachments](requirements/prompt-attachments.md)
 - [Quick chat expiration](requirements/quick-chat-expiration.md)
 - [Quick chat repository context](requirements/quick-chat-repository-context.md)
+- [Remote contribution tasks](requirements/remote-contribution-tasks.md)
 - [Rich task title previews](requirements/rich-task-title-previews.md)
 - [Run scheduling](requirements/run-scheduling.md)
 - [Runtime state publication order](requirements/runtime-state-publication-order.md)
@@ -79,6 +82,7 @@ signals, and task-scoped scheduling contracts.
 - [Task title length limit](requirements/title-length-limit.md)
 - [User question turn boundary](requirements/user-question-turn-boundary.md)
 - [Without repositories](requirements/without-repositories.md)
+- [Runtime cleanup](requirements/runtime-cleanup.md)
 - [Workflow cycle guardrails](requirements/workflow-cycle-guardrails.md)
 - [Workflow duplication](requirements/workflow-duplication.md)
 - [Workflow quorum decision recording](requirements/workflow-quorum-decision-recording.md)
@@ -96,6 +100,7 @@ signals, and task-scoped scheduling contracts.
 - [Workflow sync workspace authorization](requirements/workflow-sync-workspace-authz.md)
 - [Workflow task-step transition ledger](requirements/workflow-task-step-transition-ledger.md)
 - [Workflow task-step transition ledger scenarios](requirements/workflow-task-step-transition-ledger-scenarios.md)
+- [WIP limits and visible overflow queues](requirements/wip-limit-pull-system.md)
 
 ### System design
 
