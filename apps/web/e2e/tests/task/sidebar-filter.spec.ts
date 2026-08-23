@@ -302,7 +302,21 @@ test.describe("Sidebar filter — group + sort", () => {
   test("Group by none hides group headers", async ({ testPage, apiClient, seedData }) => {
     const { session, filters } = await openWithSeed(testPage, apiClient, seedData, ["One", "Two"]);
     await filters.open();
-    await filters.setGroup("None");
+    await filters.popover.getByTestId("group-key-select").click();
+    for (const { label, description } of [
+      { label: "None", description: "Keep all tasks in one list." },
+      { label: "Repository", description: "Separate tasks by repository." },
+      { label: "Workflow", description: "Separate tasks by workflow." },
+      { label: "Workflow step", description: "Separate tasks by workflow step." },
+      { label: "Executor type", description: "Separate tasks by executor type." },
+      { label: "State", description: "Separate tasks by state." },
+    ]) {
+      const option = testPage.getByRole("option", { name: label, exact: true });
+      const descriptionId = await option.getAttribute("aria-describedby");
+      expect(descriptionId).toBeTruthy();
+      await expect(testPage.locator(`[id="${descriptionId}"]`)).toHaveText(description);
+    }
+    await testPage.getByRole("option", { name: "None", exact: true }).click();
     await filters.close();
     await expect(session.sidebar.locator("[data-testid='sidebar-group-header']")).toHaveCount(0);
   });
@@ -719,6 +733,22 @@ test.describe("Sidebar filter — task-row presentation", () => {
 
     await filters.openTaskRowSettings();
     await expect(filters.popover.getByTestId("sidebar-filter-dirty-indicator")).toHaveCount(0);
+    await filters.taskRowSettings.getByTestId("task-row-trailing-select").click();
+    for (const { label, description } of [
+      { label: "Git changes", description: "Show added and removed lines." },
+      { label: "Relative time", description: "Show when the task was last updated." },
+      {
+        label: "Change request status",
+        description: "Show the pull request or merge request status.",
+      },
+      { label: "Nothing", description: "Leave the right side empty." },
+    ]) {
+      const option = testPage.getByRole("option", { name: label, exact: true });
+      const descriptionId = await option.getAttribute("aria-describedby");
+      expect(descriptionId).toBeTruthy();
+      await expect(testPage.locator(`[id="${descriptionId}"]`)).toHaveText(description);
+    }
+    await testPage.keyboard.press("Escape");
     await prCapture.screenshot("desktop-task-row-settings", {
       caption: "Desktop task-row presentation settings with the section expanded",
     });
@@ -756,6 +786,17 @@ test.describe("Sidebar filter — task-row presentation", () => {
     await detailsToggle.click();
     await expect(row.getByTestId("sidebar-task-time")).toHaveCount(0);
     await expect(row.getByText(taskTitle, { exact: true })).toBeVisible();
+    const compactRowBox = await row.boundingBox();
+    const compactTitleBox = await row.getByText(taskTitle, { exact: true }).first().boundingBox();
+    expect(compactRowBox).not.toBeNull();
+    expect(compactTitleBox).not.toBeNull();
+    expect(
+      Math.abs(
+        compactTitleBox!.y +
+          compactTitleBox!.height / 2 -
+          (compactRowBox!.y + compactRowBox!.height / 2),
+      ),
+    ).toBeLessThanOrEqual(3);
     await filters.saveAs("Compact task rows");
     await filters.expectActiveViewChip("Compact task rows");
 

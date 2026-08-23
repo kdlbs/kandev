@@ -45,6 +45,13 @@ const TRAILING_LABEL_KEYS: Record<SidebarTaskRowTrailing, string> = {
   none: "task:taskRowNothing",
 };
 
+const TRAILING_DESCRIPTION_KEYS: Record<SidebarTaskRowTrailing, string> = {
+  git_changes: "task:taskRowGitChangesDescription",
+  relative_time: "task:taskRowRelativeTimeDescription",
+  change_request_status: "task:taskRowChangeRequestStatusDescription",
+  none: "task:taskRowNothingDescription",
+};
+
 function TaskRowSwitch({
   id,
   checked,
@@ -271,11 +278,20 @@ function TaskRowTrailingSelect({
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          {SIDEBAR_TASK_ROW_TRAILING_KEYS.map((trailing) => (
-            <SelectItem key={trailing} value={trailing} className="text-xs">
-              {t(TRAILING_LABEL_KEYS[trailing])}
-            </SelectItem>
-          ))}
+          {SIDEBAR_TASK_ROW_TRAILING_KEYS.map((trailing) => {
+            const label = t(TRAILING_LABEL_KEYS[trailing]);
+            return (
+              <SelectItem
+                key={trailing}
+                value={trailing}
+                className="text-xs"
+                aria-label={label}
+                description={t(TRAILING_DESCRIPTION_KEYS[trailing])}
+              >
+                {label}
+              </SelectItem>
+            );
+          })}
         </SelectContent>
       </Select>
     </div>

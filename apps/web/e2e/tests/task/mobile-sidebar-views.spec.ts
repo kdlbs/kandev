@@ -406,10 +406,42 @@ test.describe("Mobile sidebar — view system", () => {
     const popover = testPage.getByTestId("sidebar-filter-popover");
     await expect(drawer).toBeVisible();
     await expect(popover).toBeVisible();
+    await popover.getByTestId("group-key-select").tap();
+    for (const { label, description } of [
+      { label: "None", description: "Keep all tasks in one list." },
+      { label: "Repository", description: "Separate tasks by repository." },
+      { label: "Workflow", description: "Separate tasks by workflow." },
+      { label: "Workflow step", description: "Separate tasks by workflow step." },
+      { label: "Executor type", description: "Separate tasks by executor type." },
+      { label: "State", description: "Separate tasks by state." },
+    ]) {
+      const option = testPage.getByRole("option", { name: label, exact: true });
+      const descriptionId = await option.getAttribute("aria-describedby");
+      expect(descriptionId).toBeTruthy();
+      await expect(testPage.locator(`[id="${descriptionId}"]`)).toHaveText(description);
+    }
+    await testPage.getByRole("option", { name: "Repository", exact: true }).tap();
     const settings = popover.getByTestId("task-row-settings");
     await expect(settings.getByTestId("task-row-details-toggle")).toHaveCount(0);
     await settings.getByTestId("task-row-settings-toggle").tap();
     await expect(settings.getByTestId("task-row-details-toggle")).toBeVisible();
+
+    await settings.getByTestId("task-row-trailing-select").tap();
+    for (const { label, description } of [
+      { label: "Git changes", description: "Show added and removed lines." },
+      { label: "Relative time", description: "Show when the task was last updated." },
+      {
+        label: "Change request status",
+        description: "Show the pull request or merge request status.",
+      },
+      { label: "Nothing", description: "Leave the right side empty." },
+    ]) {
+      const option = testPage.getByRole("option", { name: label, exact: true });
+      const descriptionId = await option.getAttribute("aria-describedby");
+      expect(descriptionId).toBeTruthy();
+      await expect(testPage.locator(`[id="${descriptionId}"]`)).toHaveText(description);
+    }
+    await testPage.getByRole("option", { name: "Git changes", exact: true }).tap();
 
     for (const control of [
       "task-row-details-toggle",
@@ -438,13 +470,29 @@ test.describe("Mobile sidebar — view system", () => {
       .toEqual(["pull_request_number", "relative_time", "repository"]);
 
     await settings.getByTestId("task-row-detail-toggle-repository").tap();
+    await settings.getByTestId("task-row-details-toggle").tap();
+    const compactRow = sheet.getByTestId("sidebar-task-item").filter({ hasText: taskTitle });
+    const compactRowBox = await compactRow.boundingBox();
+    const compactTitleBox = await compactRow
+      .getByText(taskTitle, { exact: true })
+      .first()
+      .boundingBox();
+    expect(compactRowBox).not.toBeNull();
+    expect(compactTitleBox).not.toBeNull();
+    expect(
+      Math.abs(
+        compactTitleBox!.y +
+          compactTitleBox!.height / 2 -
+          (compactRowBox!.y + compactRowBox!.height / 2),
+      ),
+    ).toBeLessThanOrEqual(3);
     await settings.getByTestId("task-row-trailing-select").tap();
     await testPage.getByRole("option", { name: "Relative time", exact: true }).tap();
     await popover.getByTestId("view-save-as-button").tap();
     await popover.getByTestId("view-save-as-name-input").fill("Mobile task rows");
     await popover.getByTestId("view-save-as-confirm").tap();
 
-    const row = sheet.getByTestId("sidebar-task-item").filter({ hasText: taskTitle });
+    const row = compactRow;
     await expect(row).toBeVisible();
     await expect(row.getByTestId("sidebar-task-trailing-time")).toBeVisible();
     await expect(row.getByTestId("sidebar-task-time")).toHaveCount(0);

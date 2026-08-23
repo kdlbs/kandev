@@ -164,9 +164,11 @@ function taskItemRowClassName(
   isSelected: boolean,
   isMultiSelected: boolean,
   isRoot: boolean,
+  hasDetails: boolean,
 ): string {
   return cn(
-    "group relative flex w-full items-start gap-2 py-2 pr-3 text-left text-sm outline-none cursor-pointer",
+    "group relative flex w-full gap-2 py-2 pr-3 text-left text-sm outline-none cursor-pointer",
+    hasDetails ? "items-start" : "items-center",
     "transition-colors duration-75 hover:bg-foreground/[0.05]",
     isSelected && "bg-primary/10",
     // When a row is both the active task and multi-selected, keep the stronger
@@ -524,7 +526,12 @@ export const TaskItem = memo(function TaskItem({
       onKeyDown={(e) => handleTaskItemKeyDown(e, onSelect, onClick)}
       style={indent.depth > 0 ? { paddingLeft: indent.paddingLeftPx } : undefined}
       className={cn(
-        taskItemRowClassName(isSelected, isMultiSelected, indent.depth === 0),
+        taskItemRowClassName(
+          isSelected,
+          isMultiSelected,
+          indent.depth === 0,
+          resolvedTaskRow.detailsEnabled,
+        ),
         archiveConfirmation && "flex-wrap",
       )}
     >
