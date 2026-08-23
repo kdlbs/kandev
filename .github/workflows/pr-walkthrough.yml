@@ -8,7 +8,8 @@ on:
     types: [opened, ready_for_review, reopened, synchronize, labeled]
 
 env:
-  PR_WALKTHROUGH_MODEL: opencode-go/muse-spark-1.2-contributor#high
+  PR_WALKTHROUGH_MODEL: opencode-go/muse-spark-1.2-contributor
+  PR_WALKTHROUGH_VARIANT: high
 
 concurrency:
   group: pr-walkthrough-${{ github.event.pull_request.number }}
@@ -135,7 +136,7 @@ jobs:
           ---
           description: Generate and render a visual pull request walkthrough.
           mode: primary
-          model: "opencode-go/muse-spark-1.2-contributor#high"
+          model: "opencode-go/muse-spark-1.2-contributor"
           temperature: 0.1
           permission:
             "*": deny
@@ -183,6 +184,7 @@ jobs:
           "$HOME/.opencode/bin/opencode" run \
             --agent github-pr-walkthrough \
             --model "$PR_WALKTHROUGH_MODEL" \
+            --variant "$PR_WALKTHROUGH_VARIANT" \
             --title "PR #${PR_NUMBER} walkthrough" \
             --file .pr-walkthrough/guidelines.md \
             --file .pr-walkthrough/walkthrough.patch \

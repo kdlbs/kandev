@@ -75,10 +75,14 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
         self.assertIn("arbitrary Git or shell commands", self.skill)
 
     def test_generation_uses_requested_model_native_high_reasoning_variant(self) -> None:
-        model = "opencode-go/muse-spark-1.2-contributor#high"
+        model = "opencode-go/muse-spark-1.2-contributor"
+        variant = "high"
         self.assertIn(f"PR_WALKTHROUGH_MODEL: {model}", self.workflow)
+        self.assertIn(f"PR_WALKTHROUGH_VARIANT: {variant}", self.workflow)
         self.assertIn(f'model: "{model}"', self.generation)
         self.assertIn('--model "$PR_WALKTHROUGH_MODEL"', self.generation)
+        self.assertIn('--variant "$PR_WALKTHROUGH_VARIANT"', self.generation)
+        self.assertNotIn("#high", self.workflow)
         self.assertNotIn("reasoningEffort", self.generation)
 
     def test_generation_keeps_untrusted_head_out_of_secret_bearing_workspace(self) -> None:

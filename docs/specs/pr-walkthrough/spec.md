@@ -58,10 +58,9 @@ lifecycle policy.
 - Walkthrough automation lives in `.github/workflows/pr-walkthrough.yml` and
   is enabled independently with the `PR_WALKTHROUGH_ENABLED` repository
   variable. It does not share the `OPENCODE_REVIEW_ENABLED` code-review gate.
-- The initial runner uses
-  `opencode-go/muse-spark-1.2-contributor#high`. OpenCode 1.17.7 reports native
-  reasoning support for the model and resolves `#high` to its built-in high
-  reasoning variant.
+- The initial runner uses `opencode-go/muse-spark-1.2-contributor` and its
+  built-in `high` reasoning variant. The workflow passes these values with the
+  OpenCode 1.17.7 `--model` and `--variant` options.
 - The workflow preserves the generated JSON and HTML as CI artifacts and
   uploads only the HTML to the `kandev-pr-walkthroughs` R2 bucket.
 - Each published object uses the key
