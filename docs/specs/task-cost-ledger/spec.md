@@ -79,7 +79,7 @@ per-session usage totals.
   copied from the payload. A provider-reported total that disagreed with the
   components would make a single API response self-contradictory; the
   components are authoritative and a differing payload total is ignored, not
-  recorded.
+  recorded. An overflowing sum is dropped as `overflow`.
 - **AC-24** (Ubiquitous) The ledger writer SHALL consume the prompt-usage event
   that already exists on the internal bus: subject
   `events.BuildSessionPromptUsageWildcardSubject()`
@@ -133,17 +133,15 @@ per-session usage totals.
   - On shutdown the writer SHALL stop accepting new events, drain what is
     already buffered, and return once the buffer is empty or after **5
     seconds**, whichever comes first. Events still buffered at that deadline
-    are counted `dropped:error` and logged. An unbounded drain would hang
+    are counted `dropped:drain_timeout` and logged. An unbounded drain would hang
     process shutdown behind a wedged database; a drain of zero would discard
     every buffered event on every restart.
   - An event offered by the bus callback **after** the drain has begun SHALL be
     refused rather than queued, counted `dropped:shutdown` (AC-27), and logged;
     the callback SHALL still return `nil` immediately, because the bus delivers
     on the publisher's goroutine and a closing writer may no more block an
-    agent turn than a busy one. `shutdown` is a reason distinct from
-    `overflow`: both refuse at the admit stage, but one says the writer is
-    behind and the other says it is closed, and conflating them makes every
-    clean restart read as sustained backpressure.
+    agent turn than a busy one. `shutdown` marks a closed writer, not queue
+    backpressure.
   - The event **in flight** at the deadline - the one the worker is writing, as
     distinct from those still queued behind it - SHALL be resolved too. The
     worker's per-event context SHALL derive from a context cancelled at the
@@ -191,7 +189,7 @@ per-session usage totals.
   `source=<cost_source>;provider=<provider>`, and
   `task_usage_events_dropped_total` keyed `reason=<reason>` where reason is one
   of `decode_error`, `unattributable`, `invalid`, `duplicate`, `overflow`,
-  `shutdown`, `error`. Every
+  `drain_timeout`, `shutdown`, `error`. Every
   terminal transition in *State machine* SHALL increment exactly one counter, so
   a writer that has silently stopped is observable and the drop classes are
   distinguishable from each other. The stages SHALL run in the order **decode,
@@ -251,7 +249,8 @@ Cost resolution reuses the two-layer contract already proven in
   ```
 
   All four products are summed in 64-bit integer arithmetic **before** the
-  single division, and that division truncates toward zero. Rounding happens
+  single division, and that division truncates toward zero. Overflow records
+  an `unpriced` row with zero cost. Rounding happens
   once, on the summed numerator, never per token class: rounding four times
   drifts from rounding once, and two writers that disagree about where to round
   produce different money for identical input. A *not recorded* (NULL) token
@@ -800,7 +799,7 @@ and no reconciliation state.
 | (none) | usage event observed, a token or cost value is negative | `dropped:invalid` | ledger writer |
 | (none) | usage event observed, invalid **and** session/task mismatched (AC-27, AC-33) | `dropped:invalid` | ledger writer |
 | (none) | usage event decoded, worker queue full (AC-34) | `dropped:overflow` | ledger writer |
-| (none) | usage event still buffered when the shutdown drain deadline expires (AC-34) | `dropped:error` | ledger writer |
+| (none) | usage event still buffered when the shutdown drain deadline expires (AC-34) | `dropped:drain_timeout` | ledger writer |
 | (none) | usage event decoded, shutdown drain already begun (AC-34) | `dropped:shutdown` | ledger writer |
 | (none) | usage event in flight when the shutdown drain deadline expires (AC-34) | `dropped:error`, transaction rolled back, nothing written after the drain returns | ledger writer |
 | (none) | usage event observed, no task identifier **and** a negative value (AC-27) | `dropped:unattributable` | ledger writer |

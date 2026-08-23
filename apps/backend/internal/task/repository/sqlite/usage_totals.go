@@ -63,6 +63,9 @@ func (r *Repository) GetSessionUsageTotals(ctx context.Context, sessionID string
 // GetTaskUsageTotals/GetSessionUsageTotals, never caller input, so
 // interpolating it into the query text carries no injection risk.
 func (r *Repository) scanUsageTotals(ctx context.Context, scopeColumn, scopeValue string) (*models.TaskUsageTotals, error) {
+	if scopeColumn != "task_id" && scopeColumn != "session_id" {
+		return nil, fmt.Errorf("scanUsageTotals: unsupported scope column %q", scopeColumn)
+	}
 	query := r.ro.Rebind(fmt.Sprintf(usageTotalsAggregateQuery, scopeColumn))
 
 	var (

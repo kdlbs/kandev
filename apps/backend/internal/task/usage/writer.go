@@ -86,7 +86,7 @@ func (w *Writer) Start() {
 // returns once the buffer is empty or drainDeadline has elapsed, whichever
 // comes first (AC-34). Anything still buffered at the deadline - including
 // the event in flight, whose context is cancelled at that instant - is
-// counted dropped:error and never written. Idempotent.
+// counted dropped:drain_timeout and never written. Idempotent.
 func (w *Writer) Stop() {
 	w.mu.Lock()
 	if !w.started || w.draining {
@@ -120,10 +120,14 @@ func (w *Writer) run() {
 			if !ok {
 				return
 			}
+			if w.workCtx.Err() != nil {
+				w.recordDropped(dropReasonDrainTimeout, payload.TaskID)
+				continue
+			}
 			w.processEvent(w.workCtx, payload)
 		case <-w.workCtx.Done():
 			for payload := range w.events {
-				w.recordDropped(dropReasonError, payload.TaskID)
+				w.recordDropped(dropReasonDrainTimeout, payload.TaskID)
 			}
 			return
 		}
@@ -177,6 +181,10 @@ func (w *Writer) processEvent(ctx context.Context, p *usageEventPayload) {
 
 	occurredAt := time.Now().UTC()
 	event := w.buildRow(ctx, p, occurredAt)
+	if event == nil {
+		w.recordDropped(dropReasonOverflow, p.TaskID)
+		return
+	}
 
 	err := w.repo.CreateTaskUsageEvent(ctx, event)
 	switch {

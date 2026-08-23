@@ -1,6 +1,6 @@
 package usage
 
-// validateStage implements AC-27's validate stage: three sub-checks run in
+// validateStage implements AC-27's validate stage: four sub-checks run in
 // a fixed order, so an event failing more than one is still classified
 // deterministically by whichever check it fails first. Returns "" when the
 // payload passes every check.
@@ -12,6 +12,8 @@ func validateStage(p *usageEventPayload) string {
 		return dropReasonUnattributable
 	case hasNegativeValue(p.Usage):
 		return dropReasonInvalid
+	case hasTokenTotalOverflow(p.Usage):
+		return dropReasonOverflow
 	default:
 		return ""
 	}
@@ -30,4 +32,19 @@ func hasNegativeValue(u *promptUsagePayload) bool {
 		return true
 	}
 	return u.ProviderReportedCostPresent && u.ProviderReportedCostSubcents < 0
+}
+
+func hasTokenTotalOverflow(u *promptUsagePayload) bool {
+	if u == nil {
+		return false
+	}
+	_, ok := sumTokenCounts(u.InputTokens, u.CachedReadTokens, u.CachedWriteTokens, optionalOutputTokens(u), u.ThoughtTokens)
+	return !ok
+}
+
+func optionalOutputTokens(u *promptUsagePayload) int64 {
+	if !u.OutputTokensPresent {
+		return 0
+	}
+	return u.OutputTokens
 }

@@ -1,6 +1,9 @@
 package usage
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 // TestValidateStage_AllChecksPass_ReturnsEmptyReason pins the happy path:
 // a fully-formed payload passes validate with no drop reason.
@@ -97,5 +100,16 @@ func TestValidateStage_NilUsage_PassesValidation(t *testing.T) {
 	p := &usageEventPayload{UsageEventID: "evt-1", TaskID: "task-1", Usage: nil}
 	if reason := validateStage(p); reason != "" {
 		t.Errorf("validateStage = %q, want empty", reason)
+	}
+}
+
+func TestValidateStage_TokenTotalOverflow_ReturnsOverflow(t *testing.T) {
+	p := &usageEventPayload{
+		UsageEventID: "evt-1",
+		TaskID:       "task-1",
+		Usage:        &promptUsagePayload{InputTokens: math.MaxInt64, CachedReadTokens: 1},
+	}
+	if reason := validateStage(p); reason != dropReasonOverflow {
+		t.Errorf("validateStage = %q, want %q for an overflowing token total", reason, dropReasonOverflow)
 	}
 }

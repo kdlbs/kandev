@@ -115,7 +115,6 @@ import (
 	repoerrors "github.com/kandev/kandev/internal/task/repository/repoerrors"
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
-	taskusage "github.com/kandev/kandev/internal/task/usage"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 
 	// Repository cloning
@@ -1202,16 +1201,10 @@ func initOfficeServices(
 	// The ledger writer is the sole writer of task_sessions' usage rollup
 	// columns (AC-10) and must run in every install, so it too is
 	// constructed and started before the Office early return.
-	usageWriter := taskusage.NewWriter(repos.Task, usagePricingAdapter{lookup: pricingLookup}, log)
-	usageWriter.Start()
-	if err := usageWriter.Subscribe(eventBus); err != nil {
+	if err := startTaskUsageWriter(repos.Task, usagePricingAdapter{lookup: pricingLookup}, eventBus, log, addCleanup); err != nil {
 		log.Error("Failed to subscribe task usage ledger writer", zap.Error(err))
 		return nil, false
 	}
-	addCleanup(func() error {
-		usageWriter.Stop()
-		return nil
-	})
 
 	if !cfg.Features.Office {
 		log.Info("Office feature disabled; Office services skipped while global run scheduling remains enabled")

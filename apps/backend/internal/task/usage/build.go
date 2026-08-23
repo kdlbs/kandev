@@ -2,6 +2,7 @@ package usage
 
 import (
 	"context"
+	"math"
 	"time"
 
 	commoncosts "github.com/kandev/kandev/internal/common/costs"
@@ -69,7 +70,13 @@ func (w *Writer) buildRow(ctx context.Context, p *usageEventPayload, occurredAt 
 		out := usage.OutputTokens
 		event.TokensOut = &out
 	}
-	event.TokensTotal = event.TokensIn + cachedRead + cachedWrite + thought + optionalInt64(event.TokensOut)
+	var ok bool
+	event.TokensTotal, ok = sumTokenCounts(
+		event.TokensIn, cachedRead, cachedWrite, optionalInt64(event.TokensOut), thought,
+	)
+	if !ok {
+		return nil
+	}
 
 	w.resolveCost(ctx, event, usage)
 
@@ -115,10 +122,15 @@ func (w *Writer) resolveCost(ctx context.Context, event *models.TaskUsageEvent, 
 		return
 	}
 
-	event.CostSubcents = commoncosts.CalculateCostSubcents(
+	cost, ok := commoncosts.CalculateCostSubcentsChecked(
 		event.TokensIn, optionalInt64(event.TokensCachedRead), optionalInt64(event.TokensCachedWrite),
 		optionalInt64(event.TokensOut), pricing,
 	)
+	if !ok {
+		event.CostSource = CostSourceUnpriced
+		return
+	}
+	event.CostSubcents = cost
 	event.CostSource = CostSourceModelsDevList
 	event.RateInputPerMillion = int64Ptr(pricing.InputPerMillion)
 	event.RateCachedReadPerMillion = int64Ptr(pricing.CachedReadPerMillion)
@@ -132,6 +144,17 @@ func optionalInt64(v *int64) int64 {
 		return 0
 	}
 	return *v
+}
+
+func sumTokenCounts(values ...int64) (int64, bool) {
+	var total int64
+	for _, value := range values {
+		if value < 0 || total > math.MaxInt64-value {
+			return 0, false
+		}
+		total += value
+	}
+	return total, true
 }
 
 func int64Ptr(v int64) *int64 {

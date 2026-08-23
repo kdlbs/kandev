@@ -24,7 +24,7 @@
     "docs/specs/lsp-file-intelligence/spec.md": 38089,
     "docs/specs/office/agents.md": 61654,
     "docs/specs/office/automations-settings.md": 33607,
-    "docs/specs/office/costs.md": 33242,
+    "docs/specs/office/costs.md": 33239,
     "docs/specs/office/live-updates.md": 38602,
     "docs/specs/office/overview.md": 34375,
     "docs/specs/office/routing.md": 40782,
@@ -36,7 +36,7 @@
     "docs/specs/plugins/spec.md": 77806,
     "docs/specs/subagent-context-persistence/spec.md": 160552,
     "docs/specs/system-page/storage-maintenance.md": 54320,
-    "docs/specs/task-cost-ledger/spec.md": 91976,
+    "docs/specs/task-cost-ledger/spec.md": 91931,
     "docs/specs/ui/ci-pr-automation.md": 57643
   }
 }

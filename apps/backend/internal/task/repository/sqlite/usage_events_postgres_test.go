@@ -43,6 +43,32 @@ func TestPostgresCreateTaskUsageEvent_HappyPath_InsertsRowAndIncrementsRollup(t 
 	}
 }
 
+// TestPostgresListTaskUsageEvents_EstimatedRoundTrips pins the INTEGER-to-bool
+// scan used by the read path. The insert stores the flag as 0/1 for both
+// dialects, so this keeps the Postgres driver conversion explicit.
+func TestPostgresListTaskUsageEvents_EstimatedRoundTrips(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	seedPostgresTask(t, repo, "task-estimated-pg")
+
+	event := newTestUsageEvent("evt-estimated-pg", "task-estimated-pg", "")
+	event.Estimated = true
+	if err := repo.CreateTaskUsageEvent(context.Background(), event); err != nil {
+		t.Fatalf("CreateTaskUsageEvent: %v", err)
+	}
+
+	events, err := repo.ListTaskUsageEvents(context.Background(), "task-estimated-pg", 0)
+	if err != nil {
+		t.Fatalf("ListTaskUsageEvents: %v", err)
+	}
+	if len(events) != 1 || !events[0].Estimated {
+		t.Fatalf("events = %+v, want one estimated event", events)
+	}
+}
+
 func TestPostgresCreateTaskUsageEvent_DuplicateUsageEventID_ReturnsErrDuplicateNoRollup(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
 	repo, err := NewWithDB(db, db, nil)

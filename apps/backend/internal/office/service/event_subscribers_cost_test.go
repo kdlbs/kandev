@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"math"
 	"testing"
 
 	"go.uber.org/zap"
@@ -319,6 +320,41 @@ func TestPromptUsage_CostSourceModelsDevList(t *testing.T) {
 	}
 	if row.CostContractVersion == nil || *row.CostContractVersion != 3 {
 		t.Errorf("CostContractVersion = %v, want 3 (in-band activation point)", row.CostContractVersion)
+	}
+}
+
+func TestPromptUsage_PricingOverflowFallsBackToUnpriced(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+	svc.SetPricingLookup(&fakePricingLookup{
+		hit:     true,
+		pricing: shared.ModelPricing{InputPerMillion: 3},
+	})
+
+	createTestAgent(t, svc, "ws-1", "worker-overflow")
+	insertTestTask(t, svc, "task-overflow", "ws-1")
+	setTestTaskAssignee(t, svc, "task-overflow", "worker-overflow")
+
+	event := bus.NewEvent(events.SessionPromptUsageUpdated, "test", map[string]interface{}{
+		"task_id":    "task-overflow",
+		"session_id": "session-overflow",
+		"agent_id":   "claude-acp",
+		"model":      "sonnet",
+		"usage": map[string]interface{}{
+			"input_tokens": math.MaxInt64/2 + 1,
+		},
+	})
+	if err := eb.Publish(ctx, events.BuildSessionPromptUsageSubject("session-overflow"), event); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	costs, err := svc.ListCostEvents(ctx, "ws-1")
+	if err != nil || len(costs) != 1 {
+		t.Fatalf("list costs: %v (len=%d)", err, len(costs))
+	}
+	row := costs[0]
+	if row.CostSource == nil || *row.CostSource != models.CostSourceUnpriced || row.CostSubcents != 0 {
+		t.Fatalf("cost = (%v, %d), want (unpriced, 0)", row.CostSource, row.CostSubcents)
 	}
 }
 

@@ -69,8 +69,7 @@ func (r *Repository) initTaskUsageEventsSchema() error {
 		ON task_usage_events(task_id, occurred_at, id);
 	CREATE INDEX IF NOT EXISTS idx_task_usage_events_session_turn
 		ON task_usage_events(session_id, turn_id);
-	CREATE INDEX IF NOT EXISTS idx_task_usage_events_occurred
-		ON task_usage_events(occurred_at);
+	DROP INDEX IF EXISTS idx_task_usage_events_occurred;
 	`)
 	if err != nil {
 		return fmt.Errorf("init task usage events schema: %w", err)

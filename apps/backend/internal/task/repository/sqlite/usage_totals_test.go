@@ -6,11 +6,20 @@ package sqlite
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+func TestScanUsageTotals_RejectsUnsupportedScopeColumn(t *testing.T) {
+	repo := newUsageEventsTestRepo(t)
+	_, err := repo.scanUsageTotals(context.Background(), "task_id; DROP TABLE tasks;--", "task-1")
+	if err == nil || !strings.Contains(err.Error(), "unsupported scope column") {
+		t.Fatalf("scanUsageTotals error = %v, want an unsupported-scope error", err)
+	}
+}
 
 func mustCreateUsageEvent(t *testing.T, repo *Repository, event *models.TaskUsageEvent) {
 	t.Helper()

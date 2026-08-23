@@ -2,6 +2,7 @@ package usage
 
 import (
 	"context"
+	"math"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -27,6 +28,17 @@ func TestBuildRow_TokensTotal_SumsAllFiveClasses(t *testing.T) {
 	event := w.buildRow(context.Background(), p, fixedOccurredAt)
 	if event.TokensTotal != 170 {
 		t.Errorf("TokensTotal = %d, want 170 (100+30+25+5+10), payload total_tokens must be ignored", event.TokensTotal)
+	}
+}
+
+func TestBuildRow_TokensTotalOverflow_ReturnsNil(t *testing.T) {
+	w := &Writer{}
+	p := &usageEventPayload{
+		UsageEventID: "evt-overflow", TaskID: "task-1",
+		Usage: &promptUsagePayload{InputTokens: math.MaxInt64, CachedReadTokens: 1},
+	}
+	if event := w.buildRow(context.Background(), p, fixedOccurredAt); event != nil {
+		t.Fatalf("buildRow returned %+v, want nil for an overflowing token total", event)
 	}
 }
 
@@ -222,6 +234,25 @@ func TestResolveCost_PricingNotOK_FallsBackToUnpriced(t *testing.T) {
 	}
 	if event.RateInputPerMillion != nil {
 		t.Errorf("RateInputPerMillion = %v, want nil", event.RateInputPerMillion)
+	}
+}
+
+func TestResolveCost_OverflowFallsBackToUnpriced(t *testing.T) {
+	pricing := &fakePricingLookup{
+		ok:      true,
+		pricing: commoncosts.ModelPricing{InputPerMillion: math.MaxInt64},
+	}
+	w := &Writer{pricing: pricing}
+	p := &usageEventPayload{
+		UsageEventID: "evt-cost-overflow", TaskID: "task-1",
+		Usage: &promptUsagePayload{InputTokens: 2},
+	}
+	event := w.buildRow(context.Background(), p, fixedOccurredAt)
+	if event == nil {
+		t.Fatal("buildRow returned nil for a cost overflow; token total still fits")
+	}
+	if event.CostSource != CostSourceUnpriced || event.CostSubcents != 0 {
+		t.Fatalf("overflowing cost = (%q, %d), want (unpriced, 0)", event.CostSource, event.CostSubcents)
 	}
 }
 

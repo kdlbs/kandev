@@ -17,6 +17,16 @@ func CalculateCostSubcents(
 	return commoncosts.CalculateCostSubcents(tokensIn, tokensCachedRead, tokensCachedWrite, tokensOut, pricing)
 }
 
+// CalculateCostSubcentsChecked exposes the shared overflow-aware calculation
+// to Office callers that need to distinguish an unpriced result from a real
+// zero-cost calculation.
+func CalculateCostSubcentsChecked(
+	tokensIn, tokensCachedRead, tokensCachedWrite, tokensOut int64,
+	pricing ModelPricing,
+) (int64, bool) {
+	return commoncosts.CalculateCostSubcentsChecked(tokensIn, tokensCachedRead, tokensCachedWrite, tokensOut, pricing)
+}
+
 // ProviderForModel delegates to internal/common/costs.
 func ProviderForModel(model string) string {
 	return commoncosts.ProviderForModel(model)

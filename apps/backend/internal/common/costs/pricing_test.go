@@ -1,6 +1,7 @@
 package costs_test
 
 import (
+	"math"
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/costs"
@@ -45,6 +46,18 @@ func TestCalculateCostSubcents(t *testing.T) {
 func TestCalculateCostSubcents_ZeroPricing(t *testing.T) {
 	if got := costs.CalculateCostSubcents(1_000_000, 0, 0, 1_000_000, costs.ModelPricing{}); got != 0 {
 		t.Errorf("zero pricing should yield zero cost, got %d", got)
+	}
+}
+
+func TestCalculateCostSubcents_OverflowReturnsZero(t *testing.T) {
+	pricing := costs.ModelPricing{InputPerMillion: 3}
+	checked, ok := costs.CalculateCostSubcentsChecked(math.MaxInt64/2+1, 0, 0, 0, pricing)
+	if ok || checked != 0 {
+		t.Fatalf("checked overflow result = (%d, %t), want (0, false)", checked, ok)
+	}
+	got := costs.CalculateCostSubcents(math.MaxInt64/2+1, 0, 0, 0, pricing)
+	if got != 0 {
+		t.Fatalf("overflowing cost = %d, want zero instead of a wrapped value", got)
 	}
 }
 

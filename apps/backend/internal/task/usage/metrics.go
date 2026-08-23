@@ -27,6 +27,7 @@ const (
 	dropReasonInvalid        = "invalid"
 	dropReasonDuplicate      = "duplicate"
 	dropReasonOverflow       = "overflow"
+	dropReasonDrainTimeout   = "drain_timeout"
 	dropReasonShutdown       = "shutdown"
 	dropReasonError          = "error"
 )

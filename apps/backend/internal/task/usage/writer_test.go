@@ -5,6 +5,7 @@ import (
 	"errors"
 	"expvar"
 	"fmt"
+	"math"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -156,6 +157,23 @@ func TestProcessEvent_InvalidPayload_NeverReachesRepository(t *testing.T) {
 	}
 }
 
+func TestProcessEvent_TokenTotalOverflow_DropsOverflowWithoutRepositoryCall(t *testing.T) {
+	repo := &fakeUsageRepo{}
+	w := NewWriter(repo, nil, nil)
+	before := expvarMapValue(eventsDroppedTotal, usageMetricLabel("reason", "overflow"))
+	w.processEvent(context.Background(), &usageEventPayload{
+		UsageEventID: "evt-overflow", TaskID: "task-1",
+		Usage: &promptUsagePayload{InputTokens: math.MaxInt64, CachedReadTokens: 1},
+	})
+	after := expvarMapValue(eventsDroppedTotal, usageMetricLabel("reason", "overflow"))
+	if after-before != 1 {
+		t.Errorf("overflow count delta = %d, want 1", after-before)
+	}
+	if repo.callCount() != 0 {
+		t.Errorf("repo.calls = %d, want 0 for an overflowing token total", repo.callCount())
+	}
+}
+
 // TestProcessEvent_RepoSucceeds_RecordsWritten pins the nil-error
 // classification branch.
 func TestProcessEvent_RepoSucceeds_RecordsWritten(t *testing.T) {
@@ -236,8 +254,8 @@ func TestStop_HealthyRepo_DrainsBufferedEventsAndReturnsPromptly(t *testing.T) {
 // TestStop_WedgedRepo_HonorsDrainDeadlineAndDropsEverythingAsError is
 // R5-F2's Test B: a repository that only responds to context cancellation
 // forces Stop to wait out the full drain deadline, after which the
-// in-flight event and everything still buffered are counted dropped:error
-// and nothing is written. Once workCtx is cancelled, a buffered event still
+// in-flight event is counted dropped:error, buffered events are counted
+// dropped:drain_timeout, and nothing is written. Once workCtx is cancelled, a buffered event still
 // waiting in the select may itself reach the repository with an
 // already-cancelled context (returning instantly, still an error) rather
 // than being classified without a repository call at all - both outcomes
@@ -260,7 +278,8 @@ func TestStop_WedgedRepo_HonorsDrainDeadlineAndDropsEverythingAsError(t *testing
 			w.admit(validPayload(fmt.Sprintf("evt-buffered-%d", i)))
 		}
 
-		before := expvarMapValue(eventsDroppedTotal, usageMetricLabel("reason", dropReasonError))
+		beforeError := expvarMapValue(eventsDroppedTotal, usageMetricLabel("reason", dropReasonError))
+		beforeDrain := expvarMapValue(eventsDroppedTotal, usageMetricLabel("reason", "drain_timeout"))
 
 		start := time.Now()
 		w.Stop()
@@ -275,9 +294,13 @@ func TestStop_WedgedRepo_HonorsDrainDeadlineAndDropsEverythingAsError(t *testing
 		if calls := repo.callCount(); calls < 1 {
 			t.Errorf("repo.calls = %d, want at least 1 (the in-flight event must reach the repository)", calls)
 		}
-		after := expvarMapValue(eventsDroppedTotal, usageMetricLabel("reason", dropReasonError))
-		if want := int64(1 + buffered); after-before != want {
-			t.Errorf("error-drop count delta = %d, want %d (1 in-flight + %d buffered)", after-before, want, buffered)
+		afterError := expvarMapValue(eventsDroppedTotal, usageMetricLabel("reason", dropReasonError))
+		afterDrain := expvarMapValue(eventsDroppedTotal, usageMetricLabel("reason", "drain_timeout"))
+		if afterError-beforeError != 1 {
+			t.Errorf("error-drop count delta = %d, want 1 for the in-flight event", afterError-beforeError)
+		}
+		if afterDrain-beforeDrain != buffered {
+			t.Errorf("drain-timeout count delta = %d, want %d for buffered events", afterDrain-beforeDrain, buffered)
 		}
 	})
 }

@@ -37,6 +37,19 @@ func TestProvideRepositoriesPreservesUsageRollupAcrossReboot(t *testing.T) {
 		t.Fatalf("first provideRepositories: %v", err)
 	}
 	_ = firstPool
+	firstClosed := false
+	closeFirst := func() {
+		if firstClosed {
+			return
+		}
+		firstClosed = true
+		for i := len(firstCleanups) - 1; i >= 0; i-- {
+			if firstCleanups[i] != nil {
+				_ = firstCleanups[i]()
+			}
+		}
+	}
+	t.Cleanup(closeFirst)
 
 	if err := firstRepos.Task.CreateTask(ctx, &models.Task{
 		ID:          "task-reboot-rollup",
@@ -88,11 +101,7 @@ func TestProvideRepositoriesPreservesUsageRollupAcrossReboot(t *testing.T) {
 	// Tear the first boot fully down (closes the database) before reopening
 	// the same on-disk file, so the second provideRepositories call is a
 	// genuine cold reboot rather than a second handle onto a live pool.
-	for i := len(firstCleanups) - 1; i >= 0; i-- {
-		if firstCleanups[i] != nil {
-			_ = firstCleanups[i]()
-		}
-	}
+	closeFirst()
 
 	_, secondRepos, secondCleanups, err := provideRepositories(ctx, cfg, nil, "test")
 	if err != nil {

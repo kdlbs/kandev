@@ -104,9 +104,11 @@ func TestTaskUsageEventsSchema_FreshDB(t *testing.T) {
 		"uniq_task_usage_events_usage_event_id": false,
 		"idx_task_usage_events_task":            false,
 		"idx_task_usage_events_session_turn":    false,
-		"idx_task_usage_events_occurred":        false,
 	}
 	for _, name := range indexNames {
+		if name == "idx_task_usage_events_occurred" {
+			t.Errorf("unexpected standalone occurred_at index %s, got indexes %v", name, indexNames)
+		}
 		if _, ok := want[name]; ok {
 			want[name] = true
 		}
