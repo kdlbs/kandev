@@ -223,8 +223,10 @@ func appendRuntimeContext(prompt string, pc *PromptContext) string {
 
 func buildTaskAssignedPrompt(pc *PromptContext) string {
 	switch pc.StageType {
-	case "review", "approval":
+	case "review":
 		return buildReviewStagePrompt(pc)
+	case "approval":
+		return buildApprovalStagePrompt(pc)
 	case stageTypeShip:
 		return buildShipStagePrompt(pc)
 	case stageTypeWork:
@@ -262,6 +264,20 @@ func buildReviewStagePrompt(pc *PromptContext) string {
 	}
 	b.WriteString("\nReview the implementation carefully. Check for correctness, edge cases, and code quality.\n")
 	b.WriteString("Submit your verdict: approve if the work is satisfactory, or reject with specific feedback on what needs to change.")
+	return b.String()
+}
+
+func buildApprovalStagePrompt(pc *PromptContext) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "You are approving task %s: %s.\n", taskRef(pc), pc.TaskTitle)
+	if pc.TaskDescription != "" {
+		fmt.Fprintf(&b, "\nTask description:\n%s\n", pc.TaskDescription)
+	}
+	if len(pc.BuilderComments) > 0 {
+		fmt.Fprintf(&b, "\nBuilder's comments:\n%s\n", strings.Join(pc.BuilderComments, "\n"))
+	}
+	b.WriteString("\nAll reviewers have approved this work. Confirm it is ready to ship.\n")
+	b.WriteString("Submit your verdict: approve to mark the task done, or reject with specific feedback on what needs to change.")
 	return b.String()
 }
 

@@ -80,6 +80,7 @@ func TestOfficeDefaultWorkflow_FullCycleSmoke(t *testing.T) {
 	if got := countCallsByReasonAndStep(queue, "task_assigned", steps["review"].ID); got != 2 {
 		t.Errorf("task_assigned fan-out calls for review step = %d, want 2", got)
 	}
+	assertPayloadStageType(t, queue, steps["review"].ID, "review")
 
 	// Reviewers approve.
 	for _, pID := range []string{"reviewer-1", "reviewer-2"} {
@@ -116,6 +117,7 @@ func TestOfficeDefaultWorkflow_FullCycleSmoke(t *testing.T) {
 	if got := countCallsByReasonAndStep(queue, "task_assigned", steps["approval"].ID); got != 1 {
 		t.Errorf("task_assigned fan-out calls for approval step = %d, want 1", got)
 	}
+	assertPayloadStageType(t, queue, steps["approval"].ID, "approval")
 
 	// Approver approves.
 	if err := decisions.RecordStepDecision(ctx, DecisionInfo{
@@ -359,16 +361,6 @@ func (noOpCallback) Execute(_ context.Context, _ ActionInput) (ActionResult, err
 	return ActionResult{}, nil
 }
 
-func countCallsByReason(q *fakeRunQueue, reason string) int {
-	count := 0
-	for _, c := range q.calls {
-		if c.Reason == reason {
-			count++
-		}
-	}
-	return count
-}
-
 // countCallsByReasonAndStep counts queued runs matching both reason and
 // WorkflowStepID. Needed once review and approval fan-out share the reason
 // "task_assigned" (distinguished only by payload stage_type) — a bare
@@ -381,4 +373,27 @@ func countCallsByReasonAndStep(q *fakeRunQueue, reason, stepID string) int {
 		}
 	}
 	return count
+}
+
+// assertPayloadStageType fails the test if any queued call for stepID does
+// not carry the expected Payload["stage_type"]. Deleting the YAML's
+// `payload: {stage_type: ...}` block would still pass countCallsByReasonAndStep
+// (reason + step are unaffected) — this closes that gap by checking the one
+// field BuildPrompt actually branches on to tell review and approval apart.
+func assertPayloadStageType(t *testing.T, q *fakeRunQueue, stepID, wantStageType string) {
+	t.Helper()
+	found := false
+	for _, c := range q.calls {
+		if c.WorkflowStepID != stepID {
+			continue
+		}
+		found = true
+		got, _ := c.Payload["stage_type"].(string)
+		if got != wantStageType {
+			t.Errorf("step %s: Payload[\"stage_type\"] = %q, want %q", stepID, got, wantStageType)
+		}
+	}
+	if !found {
+		t.Fatalf("no queued calls found for step %s", stepID)
+	}
 }

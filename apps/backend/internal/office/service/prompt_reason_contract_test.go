@@ -89,20 +89,46 @@ func TestPromptReasonContract_AllShippedReasonsResolve(t *testing.T) {
 
 // TestPromptReasonContract_ReviewAndApprovalStagesRouteToVerdictPrompt pins
 // the office-default review/approval fan-out contract: reason task_assigned
-// with payload stage_type "review" or "approval" must both produce the
-// reviewer verdict prompt, not the generic "start working" default prompt.
-// This guards the YAML's payload-based routing so it cannot silently rot.
+// with payload stage_type "review" or "approval" must both produce a
+// verdict-submission prompt, not the generic "start working" default
+// prompt. This guards the YAML's payload-based routing so it cannot
+// silently rot.
+//
+// Round 1 review (R1) caught that asserting only "both contain 'Submit
+// your verdict'" is not enough: it let stage_type "approval" silently
+// reuse the reviewer's "You are reviewing" framing (and its
+// builder-comments block, which was dead by construction for approvers —
+// see scheduler_integration.go's enrichBuilderComments guard). Assert the
+// two stages are actually distinguishable, not just both non-default.
 func TestPromptReasonContract_ReviewAndApprovalStagesRouteToVerdictPrompt(t *testing.T) {
-	for _, stage := range []string{"review", "approval"} {
-		pc := &PromptContext{
+	buildFor := func(stage string) string {
+		return BuildPrompt(&PromptContext{
 			Reason:    RunReasonTaskAssigned,
 			StageType: stage,
 			TaskID:    "T-1",
 			TaskTitle: "Add auth",
-		}
-		got := BuildPrompt(pc)
+		})
+	}
+
+	review := buildFor("review")
+	approval := buildFor("approval")
+
+	for stage, got := range map[string]string{"review": review, "approval": approval} {
 		if !strings.Contains(got, "Submit your verdict") {
-			t.Errorf("stage_type=%q: expected reviewer verdict prompt, got %q", stage, got)
+			t.Errorf("stage_type=%q: expected a verdict-submission prompt, got %q", stage, got)
 		}
+		if strings.HasPrefix(got, "You have been assigned task") {
+			t.Errorf("stage_type=%q: fell through to the generic default work prompt: %q", stage, got)
+		}
+	}
+
+	if review == approval {
+		t.Errorf("review and approval stages produced identical prompts — approval is not distinguishable from review: %q", review)
+	}
+	if !strings.HasPrefix(review, "You are reviewing") {
+		t.Errorf("review stage: expected reviewer framing, got %q", review)
+	}
+	if !strings.HasPrefix(approval, "You are approving") {
+		t.Errorf("approval stage: expected approver framing, got %q", approval)
 	}
 }

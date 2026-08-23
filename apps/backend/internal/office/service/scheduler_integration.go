@@ -823,7 +823,7 @@ func (si *SchedulerIntegration) buildPromptContext(
 		pc.StageType = parsed["stage_type"]
 		pc.ReviewFeedback = parsed["feedback"]
 
-		if pc.StageType == "review" && pc.TaskID != "" {
+		if (pc.StageType == "review" || pc.StageType == "approval") && pc.TaskID != "" {
 			si.enrichBuilderComments(ctx, pc)
 		}
 	}
