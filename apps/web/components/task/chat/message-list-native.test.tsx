@@ -1,8 +1,18 @@
 /* eslint-disable max-lines -- native scroll behavior and regression cases share one harness. */
 import { useLayoutEffect, useRef } from "react";
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Message } from "@/lib/types/http";
+import type { RenderItem } from "@/hooks/use-processed-messages";
+
+const sharedSentinelCalls = vi.hoisted(() => [] as unknown[][]);
+
+vi.mock("@/hooks/use-lazy-load-sentinel", () => ({
+  useLazyLoadSentinel: (...args: unknown[]) => {
+    sharedSentinelCalls.push(args);
+    return { sentinelRef: () => {}, onUserGesture: () => {} };
+  },
+}));
 
 vi.mock("@/lib/state/dockview-store", () => ({
   useDockviewStore: Object.assign(
@@ -19,7 +29,11 @@ vi.mock("@/components/state-provider", () => ({
 }));
 
 import { useScrollToDividerOrBottom } from "./message-list-native";
-import { useAutoScroll, useScrollToMessage } from "./message-list-native-scroll";
+import {
+  useAutoScroll,
+  useNativeScrollManagement,
+  useScrollToMessage,
+} from "./message-list-native-scroll";
 
 const DIVIDER_KEY = "m2";
 const DIVIDER_SCROLL_CONTAINER_TEST_ID = "divider-scroll-container";
@@ -124,7 +138,106 @@ function setScrollMetrics(element: HTMLElement) {
 
 afterEach(() => {
   cleanup();
+  sharedSentinelCalls.length = 0;
   vi.restoreAllMocks();
+});
+
+function transcriptMessage(id: string): RenderItem {
+  return { type: "message", message: { id } as Message };
+}
+
+function NativeScrollManagementHarness({
+  items,
+  metrics,
+}: {
+  items: RenderItem[];
+  metrics?: { scrollHeight: number; scrollTop: number; clientHeight: number };
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useNativeScrollManagement({
+    scrollRef,
+    items,
+    messages: [],
+    isWorking: false,
+    sessionId: null,
+    enabled: false,
+    hasUnreadDivider: false,
+    messagesLoading: false,
+    hasMore: true,
+    isLoadingMore: false,
+    loadMore: async () => 0,
+  });
+  useLayoutEffect(() => {
+    const element = scrollRef.current;
+    if (!element || !metrics) return;
+    Object.defineProperties(element, {
+      scrollHeight: { configurable: true, get: () => metrics.scrollHeight },
+      clientHeight: { configurable: true, get: () => metrics.clientHeight },
+      scrollTop: {
+        configurable: true,
+        get: () => metrics.scrollTop,
+        set: (value: number) => {
+          metrics.scrollTop = value;
+        },
+      },
+    });
+  }, [metrics]);
+  return <div data-testid="native-scroll-management-container" ref={scrollRef} />;
+}
+
+describe("useNativeScrollManagement transcript pagination", () => {
+  it("re-arms the native sentinel without joining its in-flight request", () => {
+    render(<NativeScrollManagementHarness items={[]} />);
+
+    const options = sharedSentinelCalls[0]?.[5];
+    expect(options).toEqual({ rearmWhileIntersecting: true });
+  });
+
+  it("anchors a prepend below a fixed task description row", () => {
+    const metrics = { scrollHeight: 100, scrollTop: 40, clientHeight: 50 };
+    const taskDescription = transcriptMessage("task-description");
+    const newest = transcriptMessage("newest");
+    const { rerender } = render(
+      <NativeScrollManagementHarness items={[taskDescription, newest]} metrics={metrics} />,
+    );
+
+    act(() => {
+      metrics.scrollTop = 40;
+      screen.getByTestId("native-scroll-management-container").dispatchEvent(new Event("scroll"));
+    });
+    metrics.scrollHeight = 200;
+    rerender(
+      <NativeScrollManagementHarness
+        items={[taskDescription, transcriptMessage("older"), newest]}
+        metrics={metrics}
+      />,
+    );
+
+    expect(metrics.scrollTop).toBe(140);
+  });
+
+  it("anchors a stored prompt replacing the synthetic task description", () => {
+    const metrics = { scrollHeight: 100, scrollTop: 40, clientHeight: 50 };
+    const taskDescription = transcriptMessage("task-description");
+    const newest = transcriptMessage("newest");
+    const { rerender } = render(
+      <NativeScrollManagementHarness items={[taskDescription, newest]} metrics={metrics} />,
+    );
+
+    act(() => {
+      metrics.scrollTop = 40;
+      screen.getByTestId("native-scroll-management-container").dispatchEvent(new Event("scroll"));
+    });
+    metrics.scrollHeight = 200;
+    rerender(
+      <NativeScrollManagementHarness
+        items={[transcriptMessage("stored-prompt"), newest]}
+        metrics={metrics}
+      />,
+    );
+
+    expect(metrics.scrollTop).toBe(140);
+  });
 });
 
 // eslint-disable-next-line max-lines-per-function -- this suite keeps the related scroll invariants together.

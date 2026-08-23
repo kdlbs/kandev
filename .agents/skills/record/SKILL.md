@@ -1,80 +1,92 @@
 ---
 name: record
-description: 'Keep durable architecture decisions and product specs in sync with the work happening in the conversation. AUTO-INVOKE when a request establishes or changes a long-lived architectural boundary, public contract, data ownership rule, operational invariant, or repo-wide convention with meaningful alternatives. Also invoke on explicit triggers: "record this", "create an ADR", "document this decision", "update the spec", "ADR for X". Run BEFORE coding when the decision is upfront, or AFTER landing when the right call only became clear during implementation. Do not create ADRs for simple features, local implementation choices, routine dependency changes, or bug fixes that do not establish a durable rule.'
+description: 'Keep durable architecture decisions, requirements, and system designs in sync. Auto-invoke when a request establishes or changes a long-lived boundary, public contract, ownership rule, operational invariant, or repo-wide convention with meaningful alternatives. Also use for explicit ADR or specification-recording requests.'
 ---
 
 # Record Knowledge
 
-Record architectural decisions for future reference, and keep related feature specs in sync.
+Record significant decisions for future work. Reconcile the affected
+requirements and system designs after the decision.
 
 ## Record a decision
 
-When a significant architectural or design choice is made, create an ADR:
+Create an ADR when all statements are true:
 
-1. Choose a decentralized ID in the form `YYYY-MM-DD-short-title`. The short title must be
-   specific enough to remain unique among decisions created on the same date.
-2. Confirm that `docs/decisions/<id>.md` does not already exist.
-3. Create `docs/decisions/<id>.md` using the template below.
-4. Update `docs/decisions/INDEX.md` with the new entry.
-5. **Reconcile specs** — see "Update or create a spec" below.
+- The choice creates a durable constraint, boundary, contract, ownership rule,
+  operational invariant, or repository-wide convention.
+- Meaningful alternatives have different trade-offs.
+- Future work must follow or supersede the choice.
+- A requirement, system design, test, or work order does not preserve enough
+  rationale.
 
-Existing numeric ADR IDs remain valid and must not be renamed. References use the complete stable
-ID, for example `ADR-2026-07-16-project-shell-output`.
+Do not create an ADR for a simple feature, local refactor, routine dependency
+change, plan sequence, or temporary migration step.
 
-### ADR template
+## ADR procedure
+
+1. Choose an ID in the form `YYYY-MM-DD-short-title`.
+2. Make sure that `docs/decisions/<id>.md` does not exist.
+3. Create the ADR with the template below.
+4. Add it to `docs/decisions/INDEX.md`.
+5. Reconcile affected specifications.
+
+Existing numeric ADR IDs remain valid. Do not rename them.
 
 ```markdown
-# ADR-YYYY-MM-DD-short-title: Short Title
+# ADR-YYYY-MM-DD-short-title: Short title
 
 **Status:** accepted | superseded by <adr-id> | deprecated
 **Date:** YYYY-MM-DD
 **Area:** backend | frontend | infra | protocol | workflow
 
 ## Context
-What situation prompted this decision. 2-5 sentences.
+
+Explain the situation and the need for a decision.
 
 ## Decision
-What was decided. Reference file paths, packages, interfaces.
+
+State the selected rule, boundary, or contract.
 
 ## Consequences
-Trade-offs. What becomes easier or harder.
+
+State benefits, costs, and follow-up constraints.
 
 ## Alternatives Considered
-What else was considered and why it was rejected.
+
+State each meaningful alternative and why it was not selected.
 ```
 
-### What warrants an ADR
+## Reconcile specifications
 
-Create an ADR only when all of these are true:
+Read `docs/specs/README.md`, the owning system index, and the relevant files in
+`docs/specs/guide/`.
 
-- The choice establishes a durable constraint, boundary, contract, ownership rule, operational
-  invariant, or repo-wide convention.
-- There were meaningful alternatives with materially different trade-offs.
-- Future work will need to follow or deliberately supersede the choice.
-- A spec, plan, code comment, or regression test alone would not preserve enough of the reasoning.
+Apply these rules:
 
-Typical examples include selecting a system-wide communication model, defining ownership across
-subsystems, changing a public API or persisted-data contract, and adopting a cross-cutting security
-or reliability invariant.
+- If the decision changes observable behavior, update the owning requirement
+  and its `REQ-*` or `AC-*` criteria.
+- If the decision changes technical boundaries or contracts, update the owning
+  system design.
+- If both change, update both artifacts and preserve their references.
+- If the decision is internal and does not change a documented design, the ADR
+  is sufficient.
+- If no product system applies, state that fact in the ADR.
 
-### What does NOT need an ADR
+Do not copy the ADR into requirements or system design. Link the ADR from the
+affected design. Requirements contain observable outcomes, not decision
+rationale.
 
-- Simple features whose behavior belongs in a product spec
-- Local implementation tactics and refactors within an existing pattern
-- Routine dependency additions or upgrades
-- Bug fixes unless they establish a new rule that future implementations must follow
-- Plan sequencing, task breakdown, and temporary migration mechanics
-- Anything obvious, uncontested, or easily reversible without cross-system consequences
+During legacy migration, use `docs/specs/INDEX.md` to locate existing sources.
+Do not create a new generic `spec.md` file.
 
-## Update or create a spec
+## Validation
 
-ADRs capture *why* a decision was made. Specs capture *what* a feature does and why it exists. After recording an ADR, reconcile the affected spec — specs are the canonical product record kept in git, so they must stay accurate.
+Run:
 
-1. Read `docs/specs/INDEX.md` and identify any spec whose scope the decision touches (e.g., a routing decision affects `office-provider-routing/spec.md`).
-2. For each affected spec:
-   - **If the decision changes observable behavior, scope, or scenarios:** update `docs/specs/<slug>/spec.md` so the "What" and "Why" sections reflect the new direction. Add a `Decision: ADR-<id>` reference where relevant.
-   - **If the decision is purely internal (implementation choice with no spec-visible change):** no spec edit needed — the ADR alone is sufficient.
-3. If the decision introduces a new product feature that has no spec yet, invoke `/spec` to create one rather than writing it ad-hoc here.
-4. If no spec applies (pure infra/process decision, like this knowledge system itself), skip — note in the ADR that no spec is needed.
+```bash
+python3 scripts/lint-spec-files.py --all
+git diff --check -- docs/decisions docs/specs
+```
 
-Do not duplicate ADR content inside the spec. Specs reference ADRs; they don't restate them.
+Report the ADR, affected requirement IDs, affected system designs, and the
+validation result.
