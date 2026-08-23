@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/tasks/rich-task-title-previews.md
+spec: docs/specs/tasks/requirements/rich-task-title-previews.md
 created: 2026-08-18
 status: complete
 ---

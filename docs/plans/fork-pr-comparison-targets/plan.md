@@ -21,7 +21,7 @@ This repairs the reported case where the fork's stale `origin/main` made Kandev 
 Related contracts:
 
 - [Workspace Git Status](../../specs/platform/workspace-git-status.md)
-- [Remote Contribution Tasks](../../specs/tasks/remote-contribution-tasks.md)
+- [Remote Contribution Tasks](../../specs/tasks/system-design/remote-contribution-tasks.md)
 - [ADR: Qualify Git Comparison Targets by Repository](../../decisions/2026-08-19-repository-qualified-comparison-targets.md)
 - [ADR: Multi-branch task support](../../decisions/0013-multi-branch-tasks.md)
 - [ADR: Bind Fork Push Destinations to Tasks](../../decisions/2026-08-12-task-bound-fork-destinations.md)

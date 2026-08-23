@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/tasks/sidebar-task-edit.md
+spec: docs/specs/tasks/requirements/sidebar-task-edit.md
 created: 2026-08-03
 status: complete
 ---

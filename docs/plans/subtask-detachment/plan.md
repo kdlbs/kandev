@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/tasks/subtask-detachment.md
+spec: docs/specs/tasks/requirements/subtask-detachment.md
 created: 2026-07-18
 status: complete
 ---

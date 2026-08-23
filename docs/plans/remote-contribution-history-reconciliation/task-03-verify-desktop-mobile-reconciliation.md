@@ -5,7 +5,7 @@ status: complete
 wave: 3
 depends_on: ["01-recover-provider-commit-evidence", "02-reconcile-and-style-commit-provenance"]
 plan: "plan.md"
-spec: "../../specs/tasks/remote-contribution-tasks.md"
+spec: "../../specs/tasks/system-design/remote-contribution-tasks.md"
 ---
 
 # Task 03: Verify Desktop and Mobile Reconciliation

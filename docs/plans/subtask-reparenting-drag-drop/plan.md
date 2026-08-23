@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/tasks/subtask-reparenting-drag-drop.md
+spec: docs/specs/tasks/requirements/subtask-reparenting-drag-drop.md
 created: 2026-08-04
 status: complete
 ---
