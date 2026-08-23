@@ -162,11 +162,14 @@ func (r *Registry) resolveManagedProviderVersion(
 	}
 	spec := managed.ManagedNPMRuntime()
 	selection, found, err := selectionStore.Get(ctx, providerID, spec.Package)
-	if err != nil || !found {
-		return "", err == nil
-	}
-	if selection.Package != spec.Package || selection.Version == "" {
+	if err != nil {
 		return "", false
+	}
+	if !found || selection.Package != spec.Package {
+		return spec.DefaultVersion, true
+	}
+	if selection.Version == "" {
+		return spec.DefaultVersion, true
 	}
 	return selection.Version, true
 }

@@ -127,6 +127,7 @@
   "deleteLayoutProfile": "Ďēĺēţē ĺàŷōũţ ƥŕōƒĩĺē",
   "deleteLayoutProfileNamed": "Ďēĺēţē {{name}}?",
   "deleteSecret": "Ďēĺēţē śēćŕēţ",
+  "secretDeleteFailed": "Ćōũĺďń'ţ ďēĺēţē śēćŕēţ",
   "deleteThisCustomLayoutAfterConfirmation": "Ďēĺēţē ţĥĩś ćũśţōḿ ĺàŷōũţ àƒţēŕ ćōńƒĩŕḿàţĩōń.",
   "desktopNotifications": "Ďēśķţōƥ Ńōţĩƒĩćàţĩōńś",
   "desktopNotificationsDescription": "Ńōţĩƒŷ ţĥĩś ďēvĩćē ŵĥēń à śēĺēćţēď àĝēńţ ţũŕń, qũēśţĩōń, ōŕ Ōƒƒĩćē ēvēńţ ōććũŕś.",

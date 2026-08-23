@@ -365,11 +365,15 @@ type PRStatus struct {
 	ReviewState        string `json:"review_state"`    // "approved", "changes_requested", "pending", ""
 	ChecksState        string `json:"checks_state"`    // "success", "failure", "pending", ""
 	MergeableState     string `json:"mergeable_state"` // "clean", "blocked", "behind", "dirty", "has_hooks", "unstable", "draft", "unknown", ""
-	ReviewCount        int    `json:"review_count"`
-	PendingReviewCount int    `json:"pending_review_count"`
-	RequiredReviews    *int   `json:"required_reviews,omitempty"` // nil when no branch protection rule found
-	ChecksTotal        int    `json:"checks_total"`
-	ChecksPassing      int    `json:"checks_passing"`
+	MergeQueueState    string `json:"merge_queue_state"`
+	MergeQueuePosition *int   `json:"merge_queue_position,omitempty"`
+	// A nil estimate is an observed absence when mergeQueuePopulated is true.
+	MergeQueueEstimatedTimeToMergeSeconds *int `json:"merge_queue_estimated_time_to_merge_seconds,omitempty"`
+	ReviewCount                           int  `json:"review_count"`
+	PendingReviewCount                    int  `json:"pending_review_count"`
+	RequiredReviews                       *int `json:"required_reviews,omitempty"` // nil when no branch protection rule found
+	ChecksTotal                           int  `json:"checks_total"`
+	ChecksPassing                         int  `json:"checks_passing"`
 	// ChecksPopulated reports whether the sync path actually computed
 	// ChecksTotal / ChecksPassing. The batched GraphQL poller doesn't (it
 	// only carries the rollup state), so SyncTaskPR uses this flag to
@@ -403,6 +407,9 @@ type PRStatus struct {
 	// closed-event actor with a non-empty login. REST and gh CLI single-PR
 	// syncs can never set this — they have no closing-actor field to read.
 	ClosureAttributionPopulated bool `json:"closure_attribution_populated,omitempty"`
+	// mergeQueuePopulated distinguishes a GraphQL observation (including a
+	// null mergeQueueEntry) from REST and gh CLI reads that have no queue data.
+	mergeQueuePopulated bool
 }
 
 // PRSearchPage is a paginated slice of PR search results, with the total
@@ -447,24 +454,27 @@ type PRWatch struct {
 // repository this PR belongs to (multi-repo tasks can have one PR per repo).
 // Empty for legacy rows persisted before multi-repo support.
 type TaskPR struct {
-	ID                 string `json:"id" db:"id"`
-	WorkspaceID        string `json:"workspace_id" db:"workspace_id"`
-	TaskID             string `json:"task_id" db:"task_id"`
-	RepositoryID       string `json:"repository_id,omitempty" db:"repository_id"`
-	Owner              string `json:"owner" db:"owner"`
-	Repo               string `json:"repo" db:"repo"`
-	PRNumber           int    `json:"pr_number" db:"pr_number"`
-	PRURL              string `json:"pr_url" db:"pr_url"`
-	PRTitle            string `json:"pr_title" db:"pr_title"`
-	HeadBranch         string `json:"head_branch" db:"head_branch"`
-	BaseBranch         string `json:"base_branch" db:"base_branch"`
-	AuthorLogin        string `json:"author_login" db:"author_login"`
-	State              string `json:"state" db:"state"`                     // open, closed, merged
-	ReviewState        string `json:"review_state" db:"review_state"`       // approved, changes_requested, pending, ""
-	ChecksState        string `json:"checks_state" db:"checks_state"`       // success, failure, pending, ""
-	MergeableState     string `json:"mergeable_state" db:"mergeable_state"` // clean, blocked, behind, dirty, has_hooks, unstable, draft, unknown, ""
-	ReviewCount        int    `json:"review_count" db:"review_count"`
-	PendingReviewCount int    `json:"pending_review_count" db:"pending_review_count"`
+	ID                                    string `json:"id" db:"id"`
+	WorkspaceID                           string `json:"workspace_id" db:"workspace_id"`
+	TaskID                                string `json:"task_id" db:"task_id"`
+	RepositoryID                          string `json:"repository_id,omitempty" db:"repository_id"`
+	Owner                                 string `json:"owner" db:"owner"`
+	Repo                                  string `json:"repo" db:"repo"`
+	PRNumber                              int    `json:"pr_number" db:"pr_number"`
+	PRURL                                 string `json:"pr_url" db:"pr_url"`
+	PRTitle                               string `json:"pr_title" db:"pr_title"`
+	HeadBranch                            string `json:"head_branch" db:"head_branch"`
+	BaseBranch                            string `json:"base_branch" db:"base_branch"`
+	AuthorLogin                           string `json:"author_login" db:"author_login"`
+	State                                 string `json:"state" db:"state"`                     // open, closed, merged
+	ReviewState                           string `json:"review_state" db:"review_state"`       // approved, changes_requested, pending, ""
+	ChecksState                           string `json:"checks_state" db:"checks_state"`       // success, failure, pending, ""
+	MergeableState                        string `json:"mergeable_state" db:"mergeable_state"` // clean, blocked, behind, dirty, has_hooks, unstable, draft, unknown, ""
+	MergeQueueState                       string `json:"merge_queue_state" db:"merge_queue_state"`
+	MergeQueuePosition                    *int   `json:"merge_queue_position" db:"merge_queue_position"`
+	MergeQueueEstimatedTimeToMergeSeconds *int   `json:"merge_queue_estimated_time_to_merge_seconds" db:"merge_queue_estimated_time_to_merge_seconds"`
+	ReviewCount                           int    `json:"review_count" db:"review_count"`
+	PendingReviewCount                    int    `json:"pending_review_count" db:"pending_review_count"`
 	// RequiredReviews is the branch protection's required_approving_review_count.
 	// Nil when no protection rule exists or the token lacks scope to read it.
 	RequiredReviews         *int       `json:"required_reviews,omitempty" db:"required_reviews"`

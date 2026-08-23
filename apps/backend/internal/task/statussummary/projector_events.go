@@ -771,6 +771,7 @@ func (p *Projector) applyPREventLocked(state *projectionState, data map[string]i
 		reviewState:           stringField(data, "review_state"),
 		checksState:           stringField(data, "checks_state"),
 		mergeableState:        stringField(data, "mergeable_state"),
+		mergeQueueState:       stringField(data, "merge_queue_state"),
 		unresolvedReviewCount: intValueOrZero(data["unresolved_review_threads"]),
 		pendingReviewCount:    intValueOrZero(data["pending_review_count"]),
 		checksTotal:           intValueOrZero(data["checks_total"]),

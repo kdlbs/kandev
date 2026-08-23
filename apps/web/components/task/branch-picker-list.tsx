@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { IconLoader2 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
+import { prioritizeSelectedOption } from "@/lib/utils/selector-options";
 import type { Branch } from "@/lib/types/http";
 import { useTranslation } from "react-i18next";
 
@@ -41,6 +42,10 @@ export function BranchPickerList({
       ? uniqueByName.filter((branch) => branch.name.toLowerCase().includes(query))
       : uniqueByName;
   }, [filter, uniqueByName]);
+  const orderedBranches = useMemo(() => {
+    if (filter.trim()) return filtered;
+    return prioritizeSelectedOption(filtered, currentBase, (branch) => branch.name);
+  }, [currentBase, filter, filtered]);
 
   return (
     <div className="flex min-w-0 flex-col gap-1">
@@ -54,7 +59,7 @@ export function BranchPickerList({
         autoFocus
       />
       <BranchPickerListBody
-        branches={filtered}
+        branches={orderedBranches}
         isLoadingBranches={isLoadingBranches}
         currentBase={currentBase}
         onSelect={onSelect}
@@ -104,7 +109,8 @@ function BranchPickerListBody({
           data-testid={`${testIdPrefix}-option-${branch.name}`}
           className={cn(
             "flex min-h-11 w-full items-center gap-2 rounded border border-transparent px-2 py-1.5 text-left text-xs cursor-pointer hover:bg-muted sm:min-h-8",
-            branch.name === currentBase && "border-primary/50 bg-card font-medium",
+            branch.name === currentBase &&
+              "border-primary/50 bg-card font-medium ring-1 ring-inset ring-primary/20",
           )}
           onClick={() => onSelect(branch.name)}
         >

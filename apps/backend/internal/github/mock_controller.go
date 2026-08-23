@@ -604,29 +604,32 @@ func (c *MockController) addRepoFiles(ctx *gin.Context) {
 // associateTaskPR endpoint. Pointer fields are optional — leave them nil
 // to skip the corresponding TaskPR column update.
 type associateTaskPRRequest struct {
-	TaskID                  string `json:"task_id"`
-	WorkspaceID             string `json:"workspace_id,omitempty"`
-	RepositoryID            string `json:"repository_id,omitempty"`
-	Owner                   string `json:"owner"`
-	Repo                    string `json:"repo"`
-	PRNumber                int    `json:"pr_number"`
-	PRURL                   string `json:"pr_url"`
-	PRTitle                 string `json:"pr_title"`
-	HeadBranch              string `json:"head_branch"`
-	BaseBranch              string `json:"base_branch"`
-	AuthorLogin             string `json:"author_login"`
-	State                   string `json:"state"`
-	ReviewState             string `json:"review_state"`
-	ChecksState             string `json:"checks_state"`
-	MergeableState          string `json:"mergeable_state"`
-	Additions               int    `json:"additions"`
-	Deletions               int    `json:"deletions"`
-	ReviewCount             *int   `json:"review_count,omitempty"`
-	PendingReviewCount      *int   `json:"pending_review_count,omitempty"`
-	RequiredReviews         *int   `json:"required_reviews,omitempty"`
-	ChecksTotal             *int   `json:"checks_total,omitempty"`
-	ChecksPassing           *int   `json:"checks_passing,omitempty"`
-	UnresolvedReviewThreads *int   `json:"unresolved_review_threads,omitempty"`
+	TaskID                                string `json:"task_id"`
+	WorkspaceID                           string `json:"workspace_id,omitempty"`
+	RepositoryID                          string `json:"repository_id,omitempty"`
+	Owner                                 string `json:"owner"`
+	Repo                                  string `json:"repo"`
+	PRNumber                              int    `json:"pr_number"`
+	PRURL                                 string `json:"pr_url"`
+	PRTitle                               string `json:"pr_title"`
+	HeadBranch                            string `json:"head_branch"`
+	BaseBranch                            string `json:"base_branch"`
+	AuthorLogin                           string `json:"author_login"`
+	State                                 string `json:"state"`
+	ReviewState                           string `json:"review_state"`
+	ChecksState                           string `json:"checks_state"`
+	MergeableState                        string `json:"mergeable_state"`
+	MergeQueueState                       string `json:"merge_queue_state"`
+	MergeQueuePosition                    *int   `json:"merge_queue_position,omitempty"`
+	MergeQueueEstimatedTimeToMergeSeconds *int   `json:"merge_queue_estimated_time_to_merge_seconds,omitempty"`
+	Additions                             int    `json:"additions"`
+	Deletions                             int    `json:"deletions"`
+	ReviewCount                           *int   `json:"review_count,omitempty"`
+	PendingReviewCount                    *int   `json:"pending_review_count,omitempty"`
+	RequiredReviews                       *int   `json:"required_reviews,omitempty"`
+	ChecksTotal                           *int   `json:"checks_total,omitempty"`
+	ChecksPassing                         *int   `json:"checks_passing,omitempty"`
+	UnresolvedReviewThreads               *int   `json:"unresolved_review_threads,omitempty"`
 }
 
 // associateTaskPR directly creates (or replaces) a github_task_prs record for
@@ -669,24 +672,27 @@ func (c *MockController) associateTaskPR(ctx *gin.Context) {
 // a TaskPR and applies the optional pointer fields when present.
 func buildTaskPRFromRequest(req *associateTaskPRRequest, now time.Time) *TaskPR {
 	tp := &TaskPR{
-		TaskID:         req.TaskID,
-		WorkspaceID:    req.WorkspaceID,
-		RepositoryID:   req.RepositoryID,
-		Owner:          req.Owner,
-		Repo:           req.Repo,
-		PRNumber:       req.PRNumber,
-		PRURL:          req.PRURL,
-		PRTitle:        req.PRTitle,
-		HeadBranch:     req.HeadBranch,
-		BaseBranch:     req.BaseBranch,
-		AuthorLogin:    req.AuthorLogin,
-		State:          req.State,
-		ReviewState:    req.ReviewState,
-		ChecksState:    req.ChecksState,
-		MergeableState: req.MergeableState,
-		Additions:      req.Additions,
-		Deletions:      req.Deletions,
-		CreatedAt:      now,
+		TaskID:                                req.TaskID,
+		WorkspaceID:                           req.WorkspaceID,
+		RepositoryID:                          req.RepositoryID,
+		Owner:                                 req.Owner,
+		Repo:                                  req.Repo,
+		PRNumber:                              req.PRNumber,
+		PRURL:                                 req.PRURL,
+		PRTitle:                               req.PRTitle,
+		HeadBranch:                            req.HeadBranch,
+		BaseBranch:                            req.BaseBranch,
+		AuthorLogin:                           req.AuthorLogin,
+		State:                                 req.State,
+		ReviewState:                           req.ReviewState,
+		ChecksState:                           req.ChecksState,
+		MergeableState:                        req.MergeableState,
+		MergeQueueState:                       req.MergeQueueState,
+		MergeQueuePosition:                    req.MergeQueuePosition,
+		MergeQueueEstimatedTimeToMergeSeconds: req.MergeQueueEstimatedTimeToMergeSeconds,
+		Additions:                             req.Additions,
+		Deletions:                             req.Deletions,
+		CreatedAt:                             now,
 	}
 	if req.ReviewCount != nil {
 		tp.ReviewCount = *req.ReviewCount

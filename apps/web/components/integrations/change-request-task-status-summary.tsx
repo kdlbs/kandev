@@ -22,6 +22,7 @@ export type ChangeRequestTaskSummaryTone =
   | "warning"
   | "info"
   | "merged"
+  | "queued"
   | "muted";
 export type ChangeRequestTaskSummaryStatus =
   | "merged"
@@ -40,13 +41,24 @@ export type ChangeRequestTaskSummaryStatus =
   | "blocked"
   | "unresolved_discussions"
   | "mergeable"
+  | "queue_queued"
+  | "queue_awaiting_checks"
+  | "queue_mergeable"
+  | "queue_unmergeable"
+  | "queue_locked"
   | "raw";
+
+export type ChangeRequestTaskSummaryRowDetail = {
+  key: string;
+  values?: Record<string, unknown>;
+};
 
 export type ChangeRequestTaskSummaryRow = {
   kind: ChangeRequestTaskSummaryRowKind;
   status: ChangeRequestTaskSummaryStatus;
   tone: ChangeRequestTaskSummaryTone;
   rawValue?: string;
+  detail?: ChangeRequestTaskSummaryRowDetail;
 };
 
 export type ChangeRequestTaskStatusSummaryData = {
@@ -81,6 +93,7 @@ const TONE_CLASSES: Record<ChangeRequestTaskSummaryTone, string> = {
   warning: "text-amber-600 dark:text-amber-400",
   info: "text-sky-600 dark:text-sky-400",
   merged: "text-purple-600 dark:text-purple-400",
+  queued: "text-[#966600]",
   muted: "text-muted-foreground",
 };
 
@@ -101,6 +114,11 @@ const STATUS_LABEL_KEYS: Record<Exclude<ChangeRequestTaskSummaryStatus, "raw">, 
   blocked: "github:blocked",
   unresolved_discussions: "github:blocked",
   mergeable: "github:mergeable",
+  queue_queued: "github:mergeQueueStateQueued",
+  queue_awaiting_checks: "github:mergeQueueStateAwaitingChecks",
+  queue_mergeable: "github:mergeQueueStateMergeable",
+  queue_unmergeable: "github:mergeQueueStateUnmergeable",
+  queue_locked: "github:mergeQueueStateLocked",
 };
 
 const STATUS_ICONS: Record<ChangeRequestTaskSummaryStatus, TablerIcon> = {
@@ -120,6 +138,11 @@ const STATUS_ICONS: Record<ChangeRequestTaskSummaryStatus, TablerIcon> = {
   blocked: IconAlertTriangle,
   unresolved_discussions: IconAlertTriangle,
   mergeable: IconGitMerge,
+  queue_queued: IconClockHour4,
+  queue_awaiting_checks: IconClockHour4,
+  queue_mergeable: IconClockHour4,
+  queue_unmergeable: IconClockHour4,
+  queue_locked: IconClockHour4,
   raw: IconCircleDot,
 };
 
@@ -144,6 +167,10 @@ function getStatusText(
   return t(presentation.statusLabelKeys?.[row.status] ?? STATUS_LABEL_KEYS[row.status]);
 }
 
+function getDetailText(detail: ChangeRequestTaskSummaryRowDetail, t: TFunction): string {
+  return t(detail.key, detail.values);
+}
+
 function SummaryStatusIcon({ status }: { status: ChangeRequestTaskSummaryStatus }) {
   const StatusIcon = STATUS_ICONS[status];
   return <StatusIcon aria-hidden="true" className="size-3.5 shrink-0" />;
@@ -163,10 +190,22 @@ function SummaryRow({
       className="grid grid-cols-[min-content_minmax(0,1fr)] items-start gap-x-3"
     >
       <span className="text-muted-foreground">{t(presentation.rowLabelKeys[row.kind])}</span>
-      <span className={cn("flex min-w-0 items-center gap-1.5 font-medium", TONE_CLASSES[row.tone])}>
-        <SummaryStatusIcon status={row.status} />
-        <span className="min-w-0 break-words">{getStatusText(row, presentation, t)}</span>
-      </span>
+      <div className="min-w-0">
+        <span
+          className={cn("flex min-w-0 items-center gap-1.5 font-medium", TONE_CLASSES[row.tone])}
+        >
+          <SummaryStatusIcon status={row.status} />
+          <span className="min-w-0 break-words">{getStatusText(row, presentation, t)}</span>
+        </span>
+        {row.detail && (
+          <span
+            data-testid={presentation.rowTestIdPrefix + "-" + row.kind + "-detail"}
+            className="mt-0.5 block text-[11px] leading-snug text-muted-foreground"
+          >
+            {getDetailText(row.detail, t)}
+          </span>
+        )}
+      </div>
     </div>
   );
 }

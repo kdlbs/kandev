@@ -21,6 +21,7 @@ import {
   useMobileGitActions,
 } from "./session-mobile-top-bar-git-controls";
 import { TaskTopBarPluginActions } from "@/components/task/task-top-bar-plugin-actions";
+import { LayoutPresetSelector } from "@/components/task/layout-preset-selector";
 import { MRTopbarButton } from "@/components/gitlab/mr-topbar-button";
 import { PortForwardButton } from "@/components/task/port-forward-dialog";
 import { linkToTaskOverview } from "@/lib/links";
@@ -424,6 +425,7 @@ function MobileTopBarActions({
     <div className="flex items-center gap-1" data-testid="mobile-topbar-actions">
       <MRTopbarButton compact mobile />
       {!isArchived && <PortForwardButton sessionId={sessionId} />}
+      {!isArchived && <LayoutPresetSelector mobile />}
       {!isArchived && (
         <TaskTopBarPluginActions
           sessionId={sessionId ?? null}
