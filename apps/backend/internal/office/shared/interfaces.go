@@ -5,8 +5,6 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jmoiron/sqlx"
-
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
 )
@@ -183,20 +181,4 @@ type PricingLookupWithVersion interface {
 	// read from the same snapshot so the two can never describe different
 	// catalogue states.
 	LookupForModelWithVersion(ctx context.Context, modelID string) (pricing ModelPricing, version string, ok bool)
-}
-
-// SessionUsageWriterTx increments the cumulative tokens/cost columns on
-// task_sessions inside a caller-supplied transaction, so the increment can
-// be made atomic with whatever insert produced the deltas
-// (docs/specs/task-cost-ledger/spec.md AC-11). Implemented by the task
-// repo; internal/task/usage's writer is the sole caller
-// (docs/specs/task-cost-ledger/spec.md AC-10, AC-21) — it inserts a
-// task_usage_events row and increments this rollup in one transaction
-// (internal/task/repository/sqlite's insertUsageEventAndRollup). Retained
-// here, rather than moved beside its caller, because office_cost_events and
-// task_sessions still share the concept this interface describes even
-// though office/service no longer calls it directly.
-type SessionUsageWriterTx interface {
-	IncrementTaskSessionUsageTx(ctx context.Context, tx *sqlx.Tx, sessionID string,
-		tokensIn, tokensCachedIn, tokensOut, costSubcents int64) error
 }

@@ -8,7 +8,7 @@ import (
 	"github.com/kandev/kandev/internal/testutil"
 )
 
-// The cached-token rollup (IncrementTaskSessionUsage) is dialect-sensitive in
+// The cached-token rollup (IncrementTaskSessionUsageTx) is dialect-sensitive in
 // a way the SQLite tests in session_usage_test.go and session_test.go cannot
 // exercise: SQLite's INTEGER is 64-bit, so a column declared INTEGER never
 // overflows there. On Postgres, INTEGER is int4 (max 2,147,483,647), and
@@ -37,7 +37,7 @@ func seedPostgresTaskSession(t *testing.T, repo *Repository, taskID, sessionID s
 }
 
 // TestPostgresIncrementTaskSessionUsage_AccumulatesValuesBeyondInt32Range
-// covers F8's other failure mode: IncrementTaskSessionUsage sets tokens_in,
+// covers F8's other failure mode: IncrementTaskSessionUsageTx sets tokens_in,
 // tokens_cached_in, tokens_out and cost_subcents in one UPDATE. On an INTEGER
 // column that UPDATE fails once tokens_cached_in crosses the int32 ceiling,
 // silently stopping tokens_in/tokens_out/cost_subcents from updating too -
@@ -53,8 +53,8 @@ func TestPostgresIncrementTaskSessionUsage_AccumulatesValuesBeyondInt32Range(t *
 	seedPostgresTaskSession(t, repo, "task-inc-overflow-pg", "sess-inc-overflow-pg")
 
 	const beyondInt32 = int64(2_800_000_000)
-	if err := repo.IncrementTaskSessionUsage(ctx, "sess-inc-overflow-pg", 100, beyondInt32, 200, 50); err != nil {
-		t.Fatalf("IncrementTaskSessionUsage must not error on a cached-token delta beyond int32 range: %v", err)
+	if err := repo.IncrementTaskSessionUsageTx(ctx, nil, "sess-inc-overflow-pg", 100, beyondInt32, 200, 50); err != nil {
+		t.Fatalf("IncrementTaskSessionUsageTx must not error on a cached-token delta beyond int32 range: %v", err)
 	}
 
 	var tokensIn, tokensCachedIn, tokensOut, costSubcents int64

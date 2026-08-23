@@ -1900,29 +1900,16 @@ func (r *Repository) GetLastAgentMessage(ctx context.Context, sessionID string) 
 	return content, nil
 }
 
-// IncrementTaskSessionUsage adds the given deltas to the cumulative
+// IncrementTaskSessionUsageTx adds the given deltas to the cumulative
 // tokens / cost columns on task_sessions, including cached input tokens
 // (tokens_cached_in mirrors office_cost_events.tokens_cached_in and is kept
-// separate from tokens_in because it is priced differently). Used by the
-// office cost subscriber, and by internal/task/usage's writer (AC-28,
-// AC-29), after a cost event lands so the per-session totals stay in sync
-// without re-summing task_usage_events. Surfaced on models.TaskSession and
-// dto.TaskSessionDTO.
-//
-// Delegates to IncrementTaskSessionUsageTx using r.db as the executor; a
-// caller that needs this atomic with another write (e.g. the office cost
-// subscriber's ledger insert) should call the Tx variant directly with a
-// shared transaction instead.
-func (r *Repository) IncrementTaskSessionUsage(
-	ctx context.Context, sessionID string, tokensIn, tokensCachedIn, tokensOut, costSubcents int64,
-) error {
-	return r.IncrementTaskSessionUsageTx(ctx, nil, sessionID, tokensIn, tokensCachedIn, tokensOut, costSubcents)
-}
-
-// IncrementTaskSessionUsageTx implements shared.SessionUsageWriterTx: same
-// write as IncrementTaskSessionUsage, but executed against tx when non-nil
-// (falling back to r.db, the shared writer connection, when tx is nil) so a
-// caller can make this atomic with another write in the same transaction.
+// separate from tokens_in because it is priced differently). Surfaced on
+// models.TaskSession and dto.TaskSessionDTO. internal/task/usage's writer is
+// the sole production caller (docs/specs/task-cost-ledger/spec.md AC-10,
+// AC-21) — it inserts a task_usage_events row and increments this rollup in
+// one transaction (insertUsageEventAndRollup in this package), so this
+// method is executed against tx when non-nil (falling back to r.db, the
+// shared writer connection, when tx is nil).
 func (r *Repository) IncrementTaskSessionUsageTx(
 	ctx context.Context, tx *sqlx.Tx, sessionID string, tokensIn, tokensCachedIn, tokensOut, costSubcents int64,
 ) error {

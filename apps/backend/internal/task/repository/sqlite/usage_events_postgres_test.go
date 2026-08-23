@@ -116,3 +116,81 @@ func TestPostgresCreateTaskUsageEvent_SecondForeignKeyFailure_ReturnsError(t *te
 		t.Errorf("row count = %d, want 0 (both attempts must roll back)", count)
 	}
 }
+
+// TestPostgresCreateTaskUsageEvent_TokensOutCrossesInt32ThroughRealWriter
+// covers AC-28 for tokens_out specifically: session_usage_postgres_test.go
+// only pushes tokens_cached_in (already BIGINT before this feature) past
+// int32, and TestPostgresTaskSessionsRollupColumns_LegacyIntegerSurvivesWidening
+// pushes cost_subcents past int32 via a raw UPDATE that bypasses the ledger
+// writer entirely - a version of either test passing before the migration
+// widened tokens_out/cost_subcents to BIGINT would prove nothing about this
+// column. This test seeds the rollup near the int32 ceiling via the real
+// IncrementTaskSessionUsageTx path, then commits a further ledger event
+// through CreateTaskUsageEvent (the insert+rollup transaction AC-11
+// requires) whose tokens_out delta crosses the boundary, and asserts that
+// transaction commits with the correct summed value.
+func TestPostgresCreateTaskUsageEvent_TokensOutCrossesInt32ThroughRealWriter(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	seedPostgresTaskSession(t, repo, "task-out-overflow-pg", "session-out-overflow-pg")
+
+	const nearInt32Ceiling = int64(2_147_483_600) // int32 max is 2,147,483,647
+	if err := repo.IncrementTaskSessionUsageTx(
+		context.Background(), nil, "session-out-overflow-pg", 0, 0, nearInt32Ceiling, 0,
+	); err != nil {
+		t.Fatalf("seed rollup near int32 ceiling: %v", err)
+	}
+
+	event := newTestUsageEvent("evt-out-overflow-pg", "task-out-overflow-pg", "session-out-overflow-pg")
+	crossingDelta := int64(200)
+	event.TokensOut = &crossingDelta
+	event.TokensTotal = event.TokensIn + crossingDelta
+	if err := repo.CreateTaskUsageEvent(context.Background(), event); err != nil {
+		t.Fatalf("CreateTaskUsageEvent must not error when tokens_out crosses int32: %v", err)
+	}
+
+	_, _, tokensOut, _ := readTaskSessionRollup(t, repo, "session-out-overflow-pg")
+	want := nearInt32Ceiling + crossingDelta
+	if tokensOut != want {
+		t.Errorf("tokens_out = %d, want %d (a delta crossing int32 must commit through the real writer)",
+			tokensOut, want)
+	}
+}
+
+// TestPostgresCreateTaskUsageEvent_CostSubcentsCrossesInt32ThroughRealWriter
+// is TestPostgresCreateTaskUsageEvent_TokensOutCrossesInt32ThroughRealWriter's
+// twin for cost_subcents, closing the other half of the gap: the only
+// existing beyond-int32 coverage for this column
+// (TestPostgresTaskSessionsRollupColumns_LegacyIntegerSurvivesWidening) uses
+// a raw UPDATE, not CreateTaskUsageEvent.
+func TestPostgresCreateTaskUsageEvent_CostSubcentsCrossesInt32ThroughRealWriter(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	seedPostgresTaskSession(t, repo, "task-cost-overflow-pg", "session-cost-overflow-pg")
+
+	const nearInt32Ceiling = int64(2_147_483_600) // int32 max is 2,147,483,647
+	if err := repo.IncrementTaskSessionUsageTx(
+		context.Background(), nil, "session-cost-overflow-pg", 0, 0, 0, nearInt32Ceiling,
+	); err != nil {
+		t.Fatalf("seed rollup near int32 ceiling: %v", err)
+	}
+
+	event := newTestUsageEvent("evt-cost-overflow-pg", "task-cost-overflow-pg", "session-cost-overflow-pg")
+	event.CostSubcents = 200
+	if err := repo.CreateTaskUsageEvent(context.Background(), event); err != nil {
+		t.Fatalf("CreateTaskUsageEvent must not error when cost_subcents crosses int32: %v", err)
+	}
+
+	_, _, _, costSubcents := readTaskSessionRollup(t, repo, "session-cost-overflow-pg")
+	want := nearInt32Ceiling + 200
+	if costSubcents != want {
+		t.Errorf("cost_subcents = %d, want %d (a delta crossing int32 must commit through the real writer)",
+			costSubcents, want)
+	}
+}

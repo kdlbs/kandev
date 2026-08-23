@@ -23,16 +23,20 @@ func TestCreateTaskUsageEvent_NonTransientFailureRollsBackThenRedeliveryOfSameID
 	createUsageEventsTestTask(t, repo, "task-nontransient")
 	createUsageEventsTestSession(t, repo, "session-nontransient", "task-nontransient")
 
-	repo.failUsageEventAttempts = 1
-	repo.failUsageEventErr = errors.New("injected rollup failure")
+	repo.failUsageEventRollupAttempts = 1
+	repo.failUsageEventRollupErr = errors.New("injected rollup failure")
 
 	event := newTestUsageEvent("evt-nontransient", "task-nontransient", "session-nontransient")
 
-	// First delivery: the atomic insert+rollup transaction is armed to fail
-	// with an error that is neither a duplicate, a foreign-key violation, nor
-	// transient, so CreateTaskUsageEvent returns it immediately with no
-	// internal retry. If the ledger insert and the rollup increment were not
-	// atomic, the row would already be committed here.
+	// First delivery: the failpoint fires after the ledger row insert has
+	// already been attempted inside the transaction, but before the rollup
+	// increment - an error that is neither a duplicate, a foreign-key
+	// violation, nor transient, so CreateTaskUsageEvent returns it
+	// immediately with no internal retry. Because the insert and the rollup
+	// share one transaction, the deferred rollback unwinds the already
+	// -attempted insert along with everything else; a non-atomic
+	// implementation that committed the insert in its own transaction before
+	// attempting the rollup would leave the row behind here.
 	err := repo.CreateTaskUsageEvent(context.Background(), event)
 	if err == nil {
 		t.Fatal("expected the injected rollup failure to surface, got nil")

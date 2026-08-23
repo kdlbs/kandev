@@ -168,6 +168,15 @@ func (r *Repository) insertUsageEventAndRollup(ctx context.Context, event *model
 		return err
 	}
 
+	if r.failUsageEventRollupAttempts > 0 {
+		r.failUsageEventRollupAttempts--
+		return r.failUsageEventRollupErr
+	}
+
+	if r.usageEventPreRollupHook != nil {
+		r.usageEventPreRollupHook()
+	}
+
 	if event.SessionID != "" {
 		cachedIn := coalesceInt64(event.TokensCachedRead) + coalesceInt64(event.TokensCachedWrite)
 		if err := r.IncrementTaskSessionUsageTx(ctx, tx, event.SessionID,

@@ -5,10 +5,23 @@ package sqlite
 // usageEventTransientBackoffs, up to maxUsageEventTransientAttempts total
 // attempts. A genuine SQLITE_BUSY/serialization race cannot be triggered
 // deterministically against this package's single-connection test
-// repositories, so these tests drive the retry loop through the
-// failUsageEventAttempts/failUsageEventErr seam (base.go) instead. They run
-// inside synctest.Test so usageEventTransientBackoffs' real time.Timer waits
-// (sleepOrDone) advance on the fake clock instead of costing real wall time.
+// repositories, so these tests drive the retry loop through the failpoint
+// seams in base.go instead. They run inside synctest.Test so
+// usageEventTransientBackoffs' real time.Timer waits (sleepOrDone) advance on
+// the fake clock instead of costing real wall time.
+//
+// TestCreateTaskUsageEvent_TransientError_RetriesAndSucceeds and
+// TestCreateTaskUsageEvent_TransientErrorExhaustsRetries_ReturnsError use
+// failUsageEventRollupAttempts/failUsageEventRollupErr, which fires after
+// insertUsageEventRowTx has actually attempted the row insert on each
+// retried attempt - proving the retry loop rolls back and re-attempts a real
+// insert, not just a pre-transaction error return.
+// TestCreateTaskUsageEvent_TransientErrorDoesNotConsumeForeignKeyRetryBudget
+// keeps the older failUsageEventAttempts/failUsageEventErr seam (fires
+// before BeginTxx) because its scenario depends on the injected transient
+// failure preceding a real foreign-key violation on the same attempt; the
+// FK-violating session ("session-does-not-exist") is never created, so a
+// post-insert failpoint would never fire on that attempt at all.
 
 import (
 	"context"
@@ -33,8 +46,8 @@ func TestCreateTaskUsageEvent_TransientError_RetriesAndSucceeds(t *testing.T) {
 		createUsageEventsTestTask(t, repo, "task-transient-retry")
 		createUsageEventsTestSession(t, repo, "session-transient-retry", "task-transient-retry")
 
-		repo.failUsageEventAttempts = 1
-		repo.failUsageEventErr = transientSQLiteBusyErr()
+		repo.failUsageEventRollupAttempts = 1
+		repo.failUsageEventRollupErr = transientSQLiteBusyErr()
 
 		event := newTestUsageEvent("evt-transient-retry", "task-transient-retry", "session-transient-retry")
 		start := time.Now()
@@ -61,8 +74,8 @@ func TestCreateTaskUsageEvent_TransientErrorExhaustsRetries_ReturnsError(t *test
 		createUsageEventsTestTask(t, repo, "task-transient-exhaust")
 		createUsageEventsTestSession(t, repo, "session-transient-exhaust", "task-transient-exhaust")
 
-		repo.failUsageEventAttempts = maxUsageEventTransientAttempts
-		repo.failUsageEventErr = transientSQLiteBusyErr()
+		repo.failUsageEventRollupAttempts = maxUsageEventTransientAttempts
+		repo.failUsageEventRollupErr = transientSQLiteBusyErr()
 
 		event := newTestUsageEvent("evt-transient-exhaust", "task-transient-exhaust", "session-transient-exhaust")
 		start := time.Now()
@@ -72,7 +85,7 @@ func TestCreateTaskUsageEvent_TransientErrorExhaustsRetries_ReturnsError(t *test
 		if err == nil {
 			t.Fatal("expected an error after exhausting all transient-retry attempts, got nil")
 		}
-		if !errors.Is(err, repo.failUsageEventErr) && err.Error() != transientSQLiteBusyErr().Error() {
+		if !errors.Is(err, repo.failUsageEventRollupErr) && err.Error() != transientSQLiteBusyErr().Error() {
 			t.Errorf("returned error = %v, want the injected transient error surfaced as-is", err)
 		}
 

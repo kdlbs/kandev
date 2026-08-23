@@ -14,10 +14,10 @@ func TestIncrementTaskSessionUsage_AccumulatesCachedInAcrossCalls(t *testing.T) 
 	ctx := context.Background()
 	seedForMsgTest(t, repo, "task-cached-usage", "sess-cached-usage", "turn-cached-usage")
 
-	if err := repo.IncrementTaskSessionUsage(ctx, "sess-cached-usage", 100, 50_000_000, 200, 50); err != nil {
+	if err := repo.IncrementTaskSessionUsageTx(ctx, nil, "sess-cached-usage", 100, 50_000_000, 200, 50); err != nil {
 		t.Fatalf("first increment: %v", err)
 	}
-	if err := repo.IncrementTaskSessionUsage(ctx, "sess-cached-usage", 10, 2_000, 20, 5); err != nil {
+	if err := repo.IncrementTaskSessionUsageTx(ctx, nil, "sess-cached-usage", 10, 2_000, 20, 5); err != nil {
 		t.Fatalf("second increment: %v", err)
 	}
 
@@ -37,14 +37,14 @@ func TestIncrementTaskSessionUsage_AccumulatesCachedInAcrossCalls(t *testing.T) 
 // TestGetTaskSessionAndListTaskSessions_SurfaceRollupColumns pins
 // docs/specs/task-cost-ledger/spec.md AC-28/AC-29: both session read paths
 // (GetTaskSession's single-row scan and ListTaskSessions' multi-row scan)
-// must return the four usage/cost rollup columns IncrementTaskSessionUsage
+// must return the four usage/cost rollup columns IncrementTaskSessionUsageTx
 // maintains, not just the underlying SQL row.
 func TestGetTaskSessionAndListTaskSessions_SurfaceRollupColumns(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
 	seedForMsgTest(t, repo, "task-rollup-surface", "sess-rollup-surface", "turn-rollup-surface")
 
-	if err := repo.IncrementTaskSessionUsage(ctx, "sess-rollup-surface", 80, 8_203_943, 44979, 79118); err != nil {
+	if err := repo.IncrementTaskSessionUsageTx(ctx, nil, "sess-rollup-surface", 80, 8_203_943, 44979, 79118); err != nil {
 		t.Fatalf("increment: %v", err)
 	}
 
