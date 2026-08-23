@@ -169,6 +169,14 @@ func TestReclaimStuckSignalSessionsOnce_UnblocksAutoStart(t *testing.T) {
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo, isAgentRunning: true}
 	agentMgr.promptDone = make(chan struct{})
 	svc := createEngineService(t, repo, stepGetter, agentMgr)
+	// createEngineService leaves turnService nil, which would make
+	// completeTurnForSession's activeTurns.Delete unreachable (see
+	// completeTurnForTaskSessionCheckedOwned's turnService==nil early
+	// return) and silently defeat the activeTurns.Store assertion below.
+	// Wire a real turn service so that reclaiming the stuck turn is what
+	// actually clears activeTurns, not an artifact of the guard never
+	// firing.
+	svc.turnService = &repoTurnService{repo: repo}
 
 	signal := models.PendingStepCompletionSignal{
 		StepID:     "step1",
@@ -179,6 +187,18 @@ func TestReclaimStuckSignalSessionsOnce_UnblocksAutoStart(t *testing.T) {
 	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
 	}
+
+	// Simulate the exact stale bookkeeping the watchdog exists to clear: an
+	// activeTurns entry left over from the turn that never reached turn-end.
+	// Note this does NOT gate the prompt-sent-vs-queued assertion below —
+	// flipStaleRunningToWaiting (the only production reader of activeTurns on
+	// this path) short-circuits on session.State before it ever reaches the
+	// activeTurns check, because the watchdog's own updateTaskSessionState
+	// call (stuck_signal_watchdog.go) already flips state to
+	// WAITING_FOR_INPUT first. What this entry lets us assert is the
+	// watchdog's own cleanup of that stale bookkeeping (below), independent
+	// of the prompt-delivery assertion.
+	svc.activeTurns.Store("s1", "turn-1")
 
 	svc.reclaimStuckSignalSessionsOnce(ctx)
 
@@ -194,6 +214,15 @@ func TestReclaimStuckSignalSessionsOnce_UnblocksAutoStart(t *testing.T) {
 	agentMgr.mu.Unlock()
 	if !prompted {
 		t.Fatal("expected the auto-start prompt to be sent via PromptAgent, not queued")
+	}
+
+	// The auto-start prompt sent above dispatches a fresh turn, which
+	// re-populates activeTurns with a new turn ID — so "cleared" isn't the
+	// right postcondition. What proves the watchdog actually closed the
+	// stale bookkeeping (rather than the new turn silently overwriting it)
+	// is that the stale turn ID from before the reclaim is gone.
+	if turnIDVal, tracked := svc.activeTurns.Load("s1"); tracked && turnIDVal == "turn-1" {
+		t.Error("expected the watchdog to close the stale turn-1 activeTurns entry, but it is still present")
 	}
 
 	status := svc.messageQueue.GetStatus(ctx, "s1")
