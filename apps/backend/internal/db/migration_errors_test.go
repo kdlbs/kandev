@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/mattn/go-sqlite3"
 )
 
 func TestIsDuplicateColumnError(t *testing.T) {
@@ -282,22 +281,22 @@ func TestIsTransientError(t *testing.T) {
 		},
 		{
 			name: "sqlite busy",
-			err:  sqlite3.Error{Code: sqlite3.ErrBusy},
+			err:  errors.New("database is locked"),
 			want: true,
 		},
 		{
 			name: "sqlite locked",
-			err:  sqlite3.Error{Code: sqlite3.ErrLocked},
+			err:  errors.New("database table is locked"),
 			want: true,
 		},
 		{
 			name: "wrapped sqlite busy",
-			err:  fmt.Errorf("insert usage event: %w", sqlite3.Error{Code: sqlite3.ErrBusy}),
+			err:  fmt.Errorf("insert usage event: %w", errors.New("database is locked")),
 			want: true,
 		},
 		{
 			name: "sqlite constraint error is not transient",
-			err:  sqlite3.Error{Code: sqlite3.ErrConstraint},
+			err:  errors.New("UNIQUE constraint failed: task_usage_events.usage_event_id"),
 			want: false,
 		},
 		{

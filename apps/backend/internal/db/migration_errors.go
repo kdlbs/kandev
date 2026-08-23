@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/mattn/go-sqlite3"
 )
 
 const (
@@ -18,6 +17,8 @@ const (
 	postgresDeadlockDetected     = "40P01"
 	sqliteAlreadyExistsText      = " already exists"
 	sqliteForeignKeyViolationMsg = "FOREIGN KEY constraint failed"
+	sqliteBusyText               = "database is locked"
+	sqliteLockedText             = "database table is locked"
 )
 
 // IsDuplicateColumnError reports whether err means an ADD COLUMN migration has
@@ -108,9 +109,6 @@ func IsTransientError(err error) bool {
 			return false
 		}
 	}
-	var sqliteErr sqlite3.Error
-	if errors.As(err, &sqliteErr) {
-		return sqliteErr.Code == sqlite3.ErrBusy || sqliteErr.Code == sqlite3.ErrLocked
-	}
-	return false
+	s := err.Error()
+	return strings.Contains(s, sqliteBusyText) || strings.Contains(s, sqliteLockedText)
 }
