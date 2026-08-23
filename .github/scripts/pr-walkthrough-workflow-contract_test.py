@@ -132,6 +132,10 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
         )
         self.assertIn("--agent github-pr-walkthrough", self.generation)
         self.assertIn("--file .pr-walkthrough/guidelines.md", self.generation)
+        self.assertIn(
+            "Never put shell template sentinels such as PR_TITLE or PR_URL in a code, patch, or rendered-Markdown block.",
+            self.generation,
+        )
         self.assertIn("--file .pr-walkthrough/walkthrough.patch", self.generation)
         self.assertIn(".pr-walkthrough/head-context/manifest.json", self.generation)
         self.assertNotIn("render_pr_walkthrough", self.generation)
