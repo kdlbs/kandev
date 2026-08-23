@@ -13,8 +13,8 @@ package and is separately reviewable.
 ## Related Specs
 
 - `docs/specs/platform/cron-office-disabled-safety.md` (Task 01, new repair spec)
-- `docs/specs/tasks/title-length-limit.md` (Task 02, amended)
-- `docs/specs/tasks/runtime-cleanup.md` (Task 03, amended)
+- `docs/specs/tasks/requirements/title-length-limit.md` (Task 02, amended)
+- `docs/specs/tasks/system-design/runtime-cleanup.md` (Task 03, amended)
 
 ## Root Causes
 

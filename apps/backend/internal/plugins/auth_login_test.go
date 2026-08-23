@@ -24,6 +24,8 @@ type fakeBridge struct {
 	setCookie                         bool
 }
 
+func (b *fakeBridge) SessionCookieName() string { return "kandev_session" }
+
 func (b *fakeBridge) LoginExternal(c *gin.Context, provider, subject, email, displayName string) error {
 	b.called = true
 	b.provider, b.subject, b.email, b.display = provider, subject, email, displayName

@@ -1,123 +1,80 @@
 ---
 status: draft
 created: 2026-08-16
+updated: 2026-08-23
 owner: kandev
 ---
 
-# Quick Chat Idle Dot
+# Quick Chat Activity Indicators
 
 ## Why
 
-Quick chat sessions keep running after the user closes the dialog. A session's
-turn can finish while the chat window is out of view, and nothing tells the
-user the agent has answered. Replies are missed until the user happens to
-reopen the dialog.
+Quick chat agents continue to work after the user closes the dialog. Users need to see which tab is active and whether background work is complete.
 
 ## What
 
-- Each Quick Chat entry icon in the active workspace — the sidebar rail Quick
-  Chat item, the sidebar Quick Chat shortcut, the tablet kanban header button,
-  the mobile kanban header button, and the mobile task-switcher sheet button —
-  shows a small red dot in the icon's corner while the Quick Chat dialog is
-  closed and at least one quick chat session of that workspace has completed a
-  turn (or settled to idle) since the dialog was last open.
-- A turn that completes while the dialog is open does NOT raise a dot; the
-  user is looking at the chat window.
-- Opening the Quick Chat dialog clears every dot. Closing it re-arms tracking:
-  a later turn completion while closed raises the dot again.
-- The dot is per-workspace: only sessions belonging to the active workspace
-  contribute to that workspace's entry icons.
-- A session whose tab is closed or whose backing task is deleted stops
-  contributing immediately.
-- The dot is decorative (`aria-hidden`). Button labels, tooltips, and the
-  dialog itself are unchanged.
+- Each server-backed Quick Chat conversation tab shows the shared grid spinner while its agent has live work.
+- Live work includes session startup, a running session, reported background activity, and environment preparation.
+- Setup tabs and Quick Terminal tabs do not show the grid spinner.
+- The Quick Chat entry shows an activity bubble only while the Quick Chat dialog is closed.
+- A blue bubble means that at least one Quick Chat agent in the active workspace has live work.
+- An emerald bubble means that all Quick Chat agents in the active workspace have settled and at least one result is unseen.
+- The running state has priority when some agents are settled and at least one agent still has live work.
+- The bubble appears on the collapsed sidebar item, expanded sidebar shortcut, tablet header, mobile header, and mobile task-switcher entry.
+- Opening the Quick Chat dialog clears all unseen completion markers and hides the entry bubble.
+- If the user closes the dialog while work continues, the blue bubble appears again.
+- If the user closes the dialog after all results are seen, no bubble appears until new work starts or a new result arrives.
+- Completion markers are scoped to a workspace. A tab removal or backing-task deletion removes its marker.
+- Button labels describe the running or finished state. The colored bubble remains decorative.
 
 ## State machine
 
-The unseen marker is a client-only, ephemeral flag keyed per (workspace,
-session id): `unseenIdleByWorkspace[workspaceId][sessionId]`. Workspace
-ownership lives in the key, so it survives hydration of a different
-workspace's session list.
+The entry indicator is derived from live session rows and the existing client-only completion markers.
 
-| State | Transition | Trigger | Actor |
-|---|---|---|---|
-| unmarked | marked | `session.state_changed` settles an active session (STARTING/RUNNING → IDLE/WAITING_FOR_INPUT/COMPLETED/FAILED/CANCELLED) or `session.turn.completed` arrives, while the dialog is closed, for a session known to `quickChat.sessions` (workspace taken from that tab entry) | WS handler |
-| marked | unmarked | dialog opens (`openQuickChat`) — all workspaces | user |
-| marked | unmarked | session becomes the active dialog tab | user |
-| marked | unmarked | session tab closed or backing task deleted | user / sync |
-| marked | unmarked | revision-guarded server resync removes the session from its workspace's list | resync |
+| State | Condition while the dialog is closed | Transition |
+|---|---|---|
+| hidden | No agent has live work and no unseen completion exists | A new turn starts or an unseen completion arrives |
+| running | At least one Quick Chat agent has live work | The last working agent settles, or the dialog opens |
+| finished | No agent has live work and at least one unseen completion exists | A new turn starts, the dialog opens, or the marked tab is removed |
+
+Opening the dialog clears `unseenIdleByWorkspace` for all workspaces. Live activity remains in the session store and is not copied into a second ledger.
 
 ## Failure modes
 
-- **WS disconnected**: `session.state_changed` / `session.turn.completed` are
-  live broadcasts; a turn that completes while the socket is down is never
-  delivered and no dot is raised. There is no backfill. The dot is a
-  best-effort cue, not a reliable delivery ledger.
-- **Race: event before tab**: a settle event for a session whose tab is not
-  yet in `quickChat.sessions` (e.g. the `task.created` tab arrives after the
-  session already settled) does not raise a dot. The user never saw that chat
-  window, so no dot is the conservative outcome.
-- **Re-delivery**: a re-delivered `session.turn.completed` (reconnect replay,
-  duplicate broadcast) for a turn already recorded as completed does not raise
-  a dot — not after the tab arrives, and not after the dialog was opened and
-  cleared the marker. Only a genuinely new turn completion raises the dot.
-  For `session.state_changed` the same guarantee holds within the settle
-  ledger's retention: the generation (`updated_at`) is kept per session for a
-  60-minute window (max 500 sessions); a duplicate delivered after its
-  generation was evicted (aged out or capped out) MAY raise a dot — accepted
-  bounded-memory tradeoff, since practical replay windows are seconds; the dot
-  self-heals on the next dialog open.
-- **Abandoned turns**: `AbandonOpenTurns` (session resume/startup cleanup,
-  rejected-message cleanup) publishes `session.turn.completed` for orphan
-  turns whose `completed_at` equals `started_at` — the backend already
-  recognizes this shape (`isAbandonedTurnCompletion` in
-  `apps/backend/internal/backendapp/gateway.go`), so a discriminator EXISTS in
-  the payload. The marker treats these uniformly with live completions and
-  deliberately does NOT filter on it: the session did settle to idle, and the
-  `session.state_changed` settle transition raises the same signal, so
-  excluding abandoned closures would not prevent the dot anyway. This is an
-  intentional product decision, pinned by a test; filtering is out of scope.
-- **Receipt-time semantics**: the marker reflects events handled while the
-  dialog is closed, not the instant the turn completed. `session.state_changed`
-  and `session.turn.completed` travel over separate event-bus subscriptions
-  and the gateway broadcasts both to every connected client (the payloads
-  carry no `workspace_id`, so the workspace-broadcast path falls back to
-  global delivery); per-workspace dots rely on session-tab membership and the
-  selector, not transport scoping. Their relative order is not guaranteed; a
-  completion notification handled while the dialog is open never marks, and
-  one handled after the dialog closed marks, even if the turn itself finished
-  earlier. The false-positive window is one notification round-trip and
-  self-heals on the next dialog open.
+- If the WebSocket is disconnected, the live row can be stale until the existing resync updates it.
+- If a completion event is missed, no finished bubble appears for that result. The indicator remains a best-effort cue.
+- If a session row is not loaded, that session does not count as running. Its existing unseen marker can still produce the finished state.
+- A completion received before its Quick Chat tab is known does not create a marker.
+- Failed, canceled, and abandoned turns count as settled. This rule preserves the existing completion indicator behavior.
+- Duplicate settle events use the existing 60-minute, 500-session ledger. They do not restore a marker while their ledger entry remains.
+- A duplicate can restore a marker after its ledger entry expires or is removed by the entry limit.
+- Marker timing uses receipt time. An event handled while the dialog is open is seen, even if the turn settled before the dialog opened.
+
+## Persistence guarantees
+
+The running state comes from live session data. Unseen completion markers remain browser-memory state and reset on page reload.
 
 ## Scenarios
 
-- **GIVEN** no quick chat session in the active workspace, **WHEN** the app
-  renders, **THEN** no Quick Chat entry icon shows a dot.
-- **GIVEN** a quick chat session with a running turn and the dialog closed,
-  **WHEN** the turn completes (the session settles to an idle state), **THEN**
-  a red dot appears on every Quick Chat entry icon of that workspace.
-- **GIVEN** a quick chat session with a running turn, **WHEN** the turn
-  completes while the dialog is open, **THEN** no dot appears for that turn.
-- **GIVEN** a dot showing, **WHEN** the user opens the Quick Chat dialog,
-  **THEN** the dot disappears.
-- **GIVEN** a dot cleared by opening the dialog, **WHEN** the same session
-  later completes another turn while the dialog is closed, **THEN** the dot
-  reappears.
-- **GIVEN** an unseen idle session in workspace A and none in workspace B,
-  **WHEN** the user switches to workspace B, **THEN** workspace B's entry
-  icons show no dot.
-- **GIVEN** a dot contributed by one session, **WHEN** that session's tab is
-  closed or its backing task is deleted, **THEN** the dot disappears.
-- **GIVEN** a quick chat session tab that has never completed a turn,
-  **WHEN** the page reloads, **THEN** no dot shows (markers are ephemeral and
-  not persisted).
+- **GIVEN** a Quick Chat agent starts work, **WHEN** its conversation tab is visible, **THEN** that tab shows a grid spinner.
+- **GIVEN** a Quick Chat agent settles, **WHEN** its conversation tab is visible, **THEN** that tab does not show a grid spinner.
+- **GIVEN** the dialog is closed and one agent has live work, **WHEN** the Quick Chat entry renders, **THEN** it shows a blue running bubble.
+- **GIVEN** one agent has settled and another agent still works, **WHEN** the Quick Chat entry renders, **THEN** it keeps the blue running bubble.
+- **GIVEN** the dialog is closed and the last working agent settles, **WHEN** the completion arrives, **THEN** the bubble changes from blue to emerald.
+- **GIVEN** an emerald finished bubble, **WHEN** the user opens the dialog, **THEN** the bubble disappears and the results become seen.
+- **GIVEN** the user opens and closes the dialog after all work settles, **WHEN** no new work occurs, **THEN** no bubble appears.
+- **GIVEN** the user opens and closes the dialog while an agent still works, **WHEN** the dialog closes, **THEN** the blue running bubble appears again.
+- **GIVEN** the dialog is open, **WHEN** a turn completes, **THEN** no finished bubble is stored for that completion.
+- **GIVEN** activity belongs to workspace A, **WHEN** the user views workspace B, **THEN** workspace B does not show that activity.
+- **GIVEN** a marked session, **WHEN** its tab or backing task is removed, **THEN** that session stops contributing to the bubble.
 
 ## Out of scope
 
-- No persistence: markers reset on page reload (scenario above).
-- No new copy, tooltips, sounds, or banner notifications.
-- No dot on the command-palette Quick Chat item or the config-chat floating
-  panel.
-- No backend changes: the existing global broadcasts of
-  `session.state_changed` and `session.turn.completed` are the only signals.
-- No change to quick chat session creation, tab sync, or dialog behavior.
+- No backend, database, or WebSocket contract changes.
+- No persisted notification history.
+- No sound, toast, operating-system notification, or command-palette indicator.
+- No activity bubble for Quick Terminal tabs.
+
+## Implementation plan
+
+See [the current implementation plan](../../plans/quick-chat-activity-indicators/plan.md).

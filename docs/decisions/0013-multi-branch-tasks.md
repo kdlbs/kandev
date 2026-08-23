@@ -63,4 +63,4 @@ Backend:
 Frontend:
 - `apps/web/components/task/chat/messages/kandev/task-renderers.tsx`
 
-Spec: `docs/specs/tasks/multi-branch/spec.md`
+Spec: `docs/specs/tasks/requirements/multi-branch.md`

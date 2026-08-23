@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-owned-loop-lifecycles", "03-office-maintenance-separation"]
 plan: "plan.md"
-spec: "../../specs/tasks/run-scheduling.md"
+spec: "../../specs/tasks/requirements/run-scheduling.md"
 ---
 
 # Task 04: Stop schedulers before database cleanup

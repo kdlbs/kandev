@@ -2,7 +2,7 @@
 spec: docs/specs/platform/agent-runtime-availability.md
 related_specs:
   - docs/specs/office/costs.md
-  - docs/specs/tasks/runtime-cleanup.md
+  - docs/specs/tasks/system-design/runtime-cleanup.md
   - docs/specs/ui/entity-reference-composer.md
 created: 2026-08-08
 status: completed

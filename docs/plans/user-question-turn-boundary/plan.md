@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/tasks/user-question-turn-boundary.md
+spec: docs/specs/tasks/requirements/user-question-turn-boundary.md
 created: 2026-08-22
 status: shipped
 ---

@@ -40,6 +40,11 @@ type AuthLoginBridge interface {
 	// cookie on c. It returns an error when authentication is not enabled or
 	// the identity cannot be established.
 	LoginExternal(c *gin.Context, provider, subject, email, displayName string) error
+
+	// SessionCookieName returns the name of Kandev's own session cookie, so
+	// the webhook relay (flattenHeaders) can strip it from the headers
+	// forwarded to a plugin subprocess.
+	SessionCookieName() string
 }
 
 // takeAuthLoginDirective removes the reserved SSO login directive header from a

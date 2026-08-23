@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/user-question-turn-boundary.md"
+spec: "../../specs/tasks/requirements/user-question-turn-boundary.md"
 ---
 
 # Task 01: Strengthen Question Wait Guidance
@@ -41,7 +41,7 @@ git diff --check
 
 - `apps/backend/internal/sysprompt/sysprompt.go`
 - `apps/backend/internal/sysprompt/sysprompt_test.go`
-- `docs/specs/tasks/user-question-turn-boundary.md`
+- `docs/specs/tasks/requirements/user-question-turn-boundary.md`
 - `docs/specs/INDEX.md`
 - `docs/plans/user-question-turn-boundary/plan.md`
 - `docs/plans/user-question-turn-boundary/task-01-strengthen-question-wait-guidance.md`
@@ -57,7 +57,7 @@ behavioral repair.
 
 ## Inputs
 
-- [User Question Turn Boundary spec](../../specs/tasks/user-question-turn-boundary.md)
+- [User Question Turn Boundary spec](../../specs/tasks/requirements/user-question-turn-boundary.md)
 - [Fix plan](plan.md)
 - `userQuestionSection`, `parentQuestionSection`, and `autopilotSection` in
   `apps/backend/internal/sysprompt/sysprompt.go`

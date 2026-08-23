@@ -212,7 +212,27 @@ func TestEnabledModeAllowlistMatrix(t *testing.T) {
 		{name: "auth me", method: http.MethodGet, path: "/api/v1/auth/me"},
 		{name: "automation webhook", method: http.MethodPost, path: "/api/v1/automations/webhook/abc"},
 		{name: "office channel inbound", method: http.MethodPost, path: "/api/v1/office/channels/ch1/inbound"},
-		{name: "plugin webhook", method: http.MethodPost, path: "/api/plugins/p1/webhooks/key1"},
+		{
+			// Deferred, not public: the middleware lets GET/POST
+			// /api/plugins/<id>/webhooks/<key> requests through structurally
+			// (isPluginWebhookPath) because it cannot read the plugin manifest to know
+			// whether this specific webhook is public. This row is therefore a WEAKENED
+			// pin: it only proves the path still passes the middleware, not that
+			// anonymous callers reach the subprocess. The real 401-vs-relay policy is
+			// enforced and tested in internal/plugins: see handlers_webhook_auth_test.go.
+			name: "plugin webhook (deferred, not a policy pin)", method: http.MethodPost, path: "/api/plugins/p1/webhooks/key1",
+		},
+		{
+			name: "plugin webhook GET (deferred, not a policy pin)", method: http.MethodGet,
+			path: "/api/plugins/p1/webhooks/key1",
+		},
+		{
+			// Unsupported methods are not registered webhook relay routes, so they should
+			// not bypass the global auth challenge just because the path has the relay
+			// shape.
+			name: "plugin webhook unsupported method", method: http.MethodPut,
+			path: "/api/plugins/p1/webhooks/key1", blocked: true,
+		},
 		{name: "ws upgrade deferred", method: http.MethodGet, path: "/ws"},
 		{name: "terminal deferred", method: http.MethodGet, path: "/terminal/target"},
 		{name: "vscode proxy deferred", method: http.MethodGet, path: "/vscode/s1/index.html"},
@@ -263,6 +283,19 @@ func TestEnabledModeAllowlistMatrix(t *testing.T) {
 		{
 			name: "plugin user-state unauthenticated", method: http.MethodGet,
 			path: "/api/plugins/p1/user-state/task/task1/note", blocked: true,
+		},
+		{
+			// AC6: the old strings.Contains(path, "/webhooks/") match let this
+			// through as a "plugin webhook"; the structural isPluginWebhookPath
+			// match (exactly ["", "api", "plugins", id, "webhooks", key]) rejects
+			// it as unrelated to the webhook relay.
+			name: "plugin user-state path containing webhooks substring", method: http.MethodGet,
+			path: "/api/plugins/p1/user-state/task/t1/note/webhooks/k", blocked: true,
+		},
+		{
+			// AC6: missing plugin id segment — not a real /:id/webhooks/:key route.
+			name: "plugin webhooks with no id segment", method: http.MethodPost,
+			path: "/api/plugins/webhooks/x", blocked: true,
 		},
 		{name: "debug", method: http.MethodGet, path: "/debug/vars", blocked: true},
 		{

@@ -5,7 +5,7 @@ status: pending
 wave: 3
 depends_on: ["02-backend-expiration-service", "03-boot-hydration"]
 plan: "plan.md"
-spec: "../../specs/tasks/quick-chat-expiration.md"
+spec: "../../specs/tasks/requirements/quick-chat-expiration.md"
 ---
 
 # Task 04: E2E and Verification

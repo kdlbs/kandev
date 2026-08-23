@@ -2,6 +2,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useSession } from "@/hooks/domains/session/use-session";
 import { useTask } from "@/hooks/use-task";
 import type { TaskSession } from "@/lib/types/http";
+import { isSessionWorking } from "@/lib/session-working";
 import { deriveSessionInputMode } from "./session-input-mode";
 
 export function deriveSessionFlags(session: TaskSession | null | undefined) {
@@ -27,7 +28,7 @@ export function deriveSessionFlags(session: TaskSession | null | undefined) {
   const supportsSteering = isRunning && !hasBackgroundWork && !!session?.supports_steering;
   // `isWorking` drives the spinner/affordance: any live turn (generating OR
   // background-idle) plus STARTING — it must stay up through (b).
-  const isWorking = isStarting || isRunning || hasBackgroundWork;
+  const isWorking = isSessionWorking(session);
   const isFailed = state === "FAILED" || state === "CANCELLED";
   const isCompleted = state === "COMPLETED";
   const needsRecovery = state === "WAITING_FOR_INPUT" && !!errorMessage;

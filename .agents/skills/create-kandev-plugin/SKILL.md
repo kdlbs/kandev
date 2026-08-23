@@ -229,12 +229,18 @@ request. Do not silently substitute a directory in the Kandev monorepo.
    subscriptions, and side effects; Kandev revokes registered routes, slots,
    handlers, styles, and navigation separately. Use `/mobile-parity` for
    interaction design and `/e2e` for user-visible flows.
-7. Treat webhook routes as public ingress. Follow
+7. API v2 webhook routes require a real Kandev caller identity by default. API
+   v1 keeps omitted access public for compatibility, so new plugins must use
+   API v2. Follow
    `docs/public/plugins-authoring.md` for the current body-size and route
-   limits. Kandev rejects undeclared keys, but it does not authenticate callers
-   or enforce the manifest's informational `method` field. Validate both before
-   side effects, return status codes from 100 through 599, and avoid reflecting
-   unsafe headers or bodies.
+   limits. Kandev rejects undeclared keys and, unless the manifest declares
+   `webhooks[].public: true`, rejects anonymous callers with 401 before your
+   handler runs. Only mark a webhook `public` when it is genuinely third-party
+   ingress (a provider callback, an SSO initiate/callback pair) that your own
+   handler authenticates — Kandev does not enforce the manifest's informational
+   `method` field or verify that a public webhook's own auth is correct.
+   Validate method and signature before side effects, return status codes from
+   100 through 599, and avoid reflecting unsafe headers or bodies.
 8. Keep package paths and platform declarations synchronized. Build every
    executable declared in `runtime.executables`; include `.exe` for Windows.
 

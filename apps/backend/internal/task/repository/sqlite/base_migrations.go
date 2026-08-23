@@ -205,7 +205,7 @@ func (r *Repository) runMigrations() error {
 	// unarchive can restore exactly the descendants that cascade archived.
 	r.migrate.Apply("tasks.archived_by_cascade_id", `ALTER TABLE tasks ADD COLUMN archived_by_cascade_id TEXT DEFAULT ''`)
 
-	// Task create-idempotency (docs/specs/tasks/external-id-idempotency).
+	// Task create-idempotency (docs/specs/tasks/system-design/external-id-idempotency.md).
 	// external_id needs an explicit deterministic collation: SQLite TEXT
 	// columns already compare BINARY by default, but an unqualified Postgres
 	// column silently inherits the database's default collation, which may be

@@ -368,7 +368,7 @@ func (r *Repository) runTaskPriorityRecreate() error {
 	_, _ = conn.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN queued_at TIMESTAMP`)
 	_, _ = conn.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN autopilot_enabled INTEGER NOT NULL DEFAULT 0`)
 	// Same defensive add for external_id/external_id_settled_at
-	// (docs/specs/tasks/external-id-idempotency): real installs already have
+	// (docs/specs/tasks/system-design/external-id-idempotency.md): real installs already have
 	// these from task/repository/sqlite/base.go runMigrations(), but older
 	// priority-migration fixtures predate them too.
 	_, _ = conn.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN external_id TEXT COLLATE BINARY`)
@@ -476,7 +476,7 @@ func taskPriorityMigrationStatements() []string {
 		// per-task assignee moved to workflow_step_participants.
 		//
 		// uniq_tasks_external_id enforces task create-idempotency
-		// (docs/specs/tasks/external-id-idempotency). DROP TABLE tasks above
+		// (docs/specs/tasks/system-design/external-id-idempotency.md). DROP TABLE tasks above
 		// silently drops every index on the old table, this one included —
 		// unlike a plain ALTER TABLE ADD COLUMN, recreating the table means
 		// every index must be explicitly relisted here or it is gone from
