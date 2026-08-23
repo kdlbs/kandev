@@ -2,8 +2,17 @@ import { test, expect } from "../../fixtures/test-base";
 import { watchWs } from "../../helpers/causal-waits";
 import { openQuickChatWithAgent, sendQuickChatMessage } from "./quick-chat-helpers";
 
-test.describe("quick chat idle dot", () => {
-  test("marks a closed quick chat after a turn completes and re-arms after opening", async ({
+const SETTLED_STATES = new Set(["IDLE", "WAITING_FOR_INPUT", "COMPLETED", "FAILED", "CANCELLED"]);
+
+function waitForSessionSettled(ws: ReturnType<typeof watchWs>, sessionId: string) {
+  return ws.waitForEvent("session.state_changed", {
+    where: (payload) =>
+      payload.session_id === sessionId && SETTLED_STATES.has(payload.new_state ?? ""),
+  });
+}
+
+test.describe("quick chat activity indicators", () => {
+  test("shows tab and sidebar running state, then clears a finished state when opened", async ({
     testPage,
   }) => {
     const ws = watchWs(testPage);
@@ -12,31 +21,34 @@ test.describe("quick chat idle dot", () => {
         response.url().includes("/quick-chat") && response.request().method() === "POST",
     );
     const dialog = await openQuickChatWithAgent(testPage);
-    const createdBody = (await created).json() as Promise<{ session_id: string }>;
-    const { session_id: sessionId } = await createdBody;
+    const { session_id: sessionId } = (await (await created).json()) as { session_id: string };
+    const tab = dialog.getByTestId("quick-chat-tab");
     const shortcut = testPage.getByTestId("sidebar-quick-chat-shortcut");
+    const indicator = shortcut.getByTestId("quick-chat-activity-indicator");
 
-    await expect(shortcut.getByTestId("quick-chat-unseen-dot")).toHaveCount(0);
-    const firstCompletion = ws.waitForEvent("session.turn.completed", {
+    await expect(tab).toHaveCount(1);
+    const completed = ws.waitForEvent("session.turn.completed", {
       where: (payload) => payload.session_id === sessionId,
     });
+    const settled = waitForSessionSettled(ws, sessionId);
     await sendQuickChatMessage(dialog, testPage, "/slow 8s");
+    await expect(tab.getByRole("status")).toBeVisible();
+
     await testPage.keyboard.press("Escape");
-    await firstCompletion;
-    await expect(shortcut.getByTestId("quick-chat-unseen-dot")).toBeVisible();
+    await expect(indicator).toHaveAttribute("data-state", "running");
+
+    await Promise.all([completed, settled]);
+    await expect(indicator).toHaveAttribute("data-state", "finished");
 
     await shortcut.click();
-    await expect(shortcut.getByTestId("quick-chat-unseen-dot")).toHaveCount(0);
-    const secondCompletion = ws.waitForEvent("session.turn.completed", {
-      where: (payload) => payload.session_id === sessionId,
-    });
-    await sendQuickChatMessage(dialog, testPage, "/slow 8s");
+    await expect(indicator).toHaveCount(0);
+    await expect(testPage.getByRole("dialog", { name: "Quick Chat" })).toBeVisible();
+
     await testPage.keyboard.press("Escape");
-    await secondCompletion;
-    await expect(shortcut.getByTestId("quick-chat-unseen-dot")).toBeVisible();
+    await expect(indicator).toHaveCount(0);
   });
 
-  test("marks the tablet header after a closed quick chat turn completes", async ({
+  test("uses the same running-to-finished state sequence in the tablet header", async ({
     tabletTestPage,
   }) => {
     const ws = watchWs(tabletTestPage);
@@ -46,16 +58,25 @@ test.describe("quick chat idle dot", () => {
     );
     const dialog = await openQuickChatWithAgent(tabletTestPage);
     const { session_id: sessionId } = (await (await created).json()) as { session_id: string };
+    const tab = dialog.getByTestId("quick-chat-tab");
     const button = tabletTestPage.getByTestId("tablet-quick-chat-button");
+    const indicator = button.getByTestId("quick-chat-activity-indicator");
 
-    await expect(button.getByTestId("quick-chat-unseen-dot")).toHaveCount(0);
+    await expect(tab).toHaveCount(1);
     const completed = ws.waitForEvent("session.turn.completed", {
       where: (payload) => payload.session_id === sessionId,
     });
+    const settled = waitForSessionSettled(ws, sessionId);
     await sendQuickChatMessage(dialog, tabletTestPage, "/slow 8s");
-    await tabletTestPage.keyboard.press("Escape");
-    await completed;
+    await expect(tab.getByRole("status")).toBeVisible();
 
-    await expect(button.getByTestId("quick-chat-unseen-dot")).toBeVisible();
+    await tabletTestPage.keyboard.press("Escape");
+    await expect(indicator).toHaveAttribute("data-state", "running");
+
+    await Promise.all([completed, settled]);
+    await expect(indicator).toHaveAttribute("data-state", "finished");
+
+    await button.click();
+    await expect(indicator).toHaveCount(0);
   });
 });

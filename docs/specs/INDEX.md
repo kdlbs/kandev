@@ -307,7 +307,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [claude-fork-review-allowlist](claude-fork-review-allowlist/spec.md) | building |
 | [workflow-settings-autosave](workflow-settings-autosave/spec.md) | archived; superseded by settings-manual-save |
 | [mobile-quick-chat-topbar](mobile-quick-chat-topbar/spec.md) | building |
-| [quick-chat-idle-dot](quick-chat-idle-dot/spec.md) | draft |
+| [quick-chat-activity-indicators](quick-chat-idle-dot/spec.md) | draft |
 | [native-code-review](native-code-review/spec.md) | building |
 | [missing-task-route-recovery](missing-task-route-recovery/spec.md) | draft |
 | [kanban-task-executor-cache-staleness](kanban-task-executor-cache-staleness/spec.md) | draft |

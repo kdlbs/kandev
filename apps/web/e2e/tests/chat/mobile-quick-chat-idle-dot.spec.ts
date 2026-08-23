@@ -3,8 +3,19 @@ import { watchWs } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
 import { sendQuickChatMessage, startQuickChatFromSetup } from "./quick-chat-helpers";
 
-test.describe("quick chat idle dot", () => {
-  test("marks the mobile header after a closed quick chat turn completes", async ({ testPage }) => {
+const SETTLED_STATES = new Set(["IDLE", "WAITING_FOR_INPUT", "COMPLETED", "FAILED", "CANCELLED"]);
+
+function waitForSessionSettled(ws: ReturnType<typeof watchWs>, sessionId: string) {
+  return ws.waitForEvent("session.state_changed", {
+    where: (payload) =>
+      payload.session_id === sessionId && SETTLED_STATES.has(payload.new_state ?? ""),
+  });
+}
+
+test.describe("quick chat activity indicators", () => {
+  test("shows the mobile header running and finished states through touch", async ({
+    testPage,
+  }) => {
     const ws = watchWs(testPage);
     await testPage.goto("/");
     await testPage.getByTestId("mobile-quick-chat-button").tap();
@@ -18,39 +29,36 @@ test.describe("quick chat idle dot", () => {
       testPage.getByRole("status", { name: /Agent is (starting|running)/ }),
     ).not.toBeVisible();
     const { session_id: sessionId } = (await (await created).json()) as { session_id: string };
+    const tab = dialog.getByTestId("quick-chat-tab");
     const button = testPage.getByTestId("mobile-quick-chat-button");
+    const indicator = button.getByTestId("quick-chat-activity-indicator");
+
+    await expect(tab).toHaveCount(1);
     const completed = ws.waitForEvent("session.turn.completed", {
       where: (payload) => payload.session_id === sessionId,
     });
+    const settled = waitForSessionSettled(ws, sessionId);
     await sendQuickChatMessage(dialog, testPage, "/slow 8s");
-    await expect(dialog.getByText("Running slow response", { exact: false })).toBeVisible();
+    await expect(tab.getByRole("status")).toBeVisible();
+
     await dialog.getByTestId("quick-chat-close").tap();
-    await completed;
-    await expect(button.getByTestId("quick-chat-unseen-dot")).toBeVisible({ timeout: 15_000 });
+    await expect(indicator).toHaveAttribute("data-state", "running");
+
+    await Promise.all([completed, settled]);
+    await expect(indicator).toHaveAttribute("data-state", "finished");
 
     await button.tap();
-    await expect(button.getByTestId("quick-chat-unseen-dot")).toHaveCount(0);
-    // The reopened dialog re-subscribes over WS; wait until the previous
-    // exchange has rendered so the send cannot race a dead subscription.
-    await expect(dialog.getByText("Slow response complete", { exact: false })).toBeVisible({
-      timeout: 15_000,
-    });
-    const secondCompleted = ws.waitForEvent("session.turn.completed", {
-      where: (payload) => payload.session_id === sessionId,
-    });
-    await sendQuickChatMessage(dialog, testPage, "/slow 8s");
-    await dialog.getByTestId("quick-chat-close").tap();
-    await secondCompleted;
-    await expect(button.getByTestId("quick-chat-unseen-dot")).toBeVisible({ timeout: 15_000 });
+    await expect(indicator).toHaveCount(0);
+    await expect(dialog).toBeVisible();
   });
 
-  test("marks the task switcher entry after a closed quick chat turn completes", async ({
+  test("keeps the task-switcher entry in sync with the same activity state", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
     const ws = watchWs(testPage);
-    const seeded = await apiClient.seedTask(seedData.workspaceId, "Mobile Quick Chat Idle Dot", {
+    const seeded = await apiClient.seedTask(seedData.workspaceId, "Mobile Quick Chat Activity", {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
     });
@@ -60,7 +68,7 @@ test.describe("quick chat idle dot", () => {
     await testPage.getByTestId("mobile-session-menu").tap();
     const sheet = testPage.getByRole("dialog", { name: "Tasks" });
     const entry = sheet.getByTestId("mobile-sheet-quick-chat");
-    await expect(entry.getByTestId("quick-chat-unseen-dot")).toHaveCount(0);
+    await expect(entry.getByTestId("quick-chat-activity-indicator")).toHaveCount(0);
 
     const created = testPage.waitForResponse(
       (response) =>
@@ -73,11 +81,28 @@ test.describe("quick chat idle dot", () => {
     const completed = ws.waitForEvent("session.turn.completed", {
       where: (payload) => payload.session_id === sessionId,
     });
+    const settled = waitForSessionSettled(ws, sessionId);
     await sendQuickChatMessage(dialog, testPage, "/slow 8s");
     await dialog.getByTestId("quick-chat-close").tap();
 
-    await completed;
     await testPage.getByTestId("mobile-session-menu").tap();
-    await expect(entry.getByTestId("quick-chat-unseen-dot")).toBeVisible({ timeout: 15_000 });
+    const openEntry = testPage
+      .getByRole("dialog", { name: "Tasks" })
+      .getByTestId("mobile-sheet-quick-chat");
+    await expect(openEntry.getByTestId("quick-chat-activity-indicator")).toHaveAttribute(
+      "data-state",
+      "running",
+    );
+    await testPage.keyboard.press("Escape");
+
+    await Promise.all([completed, settled]);
+    await testPage.getByTestId("mobile-session-menu").tap();
+    const finishedEntry = testPage
+      .getByRole("dialog", { name: "Tasks" })
+      .getByTestId("mobile-sheet-quick-chat");
+    await expect(finishedEntry.getByTestId("quick-chat-activity-indicator")).toHaveAttribute(
+      "data-state",
+      "finished",
+    );
   });
 });
