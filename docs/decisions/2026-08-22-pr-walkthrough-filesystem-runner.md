@@ -1,6 +1,6 @@
 # ADR-2026-08-22-pr-walkthrough-filesystem-runner: Use a Filesystem Contract for PR Walkthrough Runners
 
-**Status:** accepted
+**Status:** accepted (amended 2026-08-23)
 **Date:** 2026-08-22
 **Area:** workflow, infra, security
 
@@ -20,7 +20,7 @@ generation scripts or tests.
 
 ## Decision
 
-The walkthrough workflow uses a base-controlled filesystem contract for every
+The walkthrough workflow uses a trusted filesystem contract for every
 agent runner. The provider-neutral skill is a self-contained bundle. It owns
 its instructions, renderer assets, deterministic generation helpers, and
 their focused tests:
@@ -34,13 +34,13 @@ The context and managed-renderer entry points live under the skill's
 directory. They do not depend on copies in the repository-root `scripts/`
 directory.
 
-The workflow materializes the complete skill directory from the exact base
+The workflow materializes the complete skill directory from the exact workflow
 commit before it starts the agent. It then prepares the following inputs:
 
-- Repository guidance from the exact base commit.
+- Repository guidance from the exact workflow commit.
 - A base-to-head patch and changed-file manifest.
 - Bounded regular UTF-8 files from the exact PR head commit.
-- A trusted renderer command that invokes the base-controlled skill script.
+- A trusted renderer command that invokes the workflow-controlled skill script.
 
 The workflow fetches enough PR-head history to resolve the merge base. It does
 not check out the PR head in the secret-bearing worktree. A trusted context
@@ -73,6 +73,10 @@ GitHub-specific orchestration stays outside the skill. This includes provider
 installation, workflow triggers, artifact publication, R2 upload, and pull
 request description updates. Those adapters consume the portable skill; they
 do not own its generation logic.
+
+`2026-08-23-pr-walkthrough-workflow-provenance` refines the trusted commit in
+this decision. The trusted workflow SHA replaces the event base SHA for all
+workflow-controlled inputs.
 
 This decision supersedes
 `2026-08-22-agent-owned-pr-walkthrough-rendering`. It keeps agent-owned

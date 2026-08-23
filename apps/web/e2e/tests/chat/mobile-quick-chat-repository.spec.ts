@@ -47,7 +47,13 @@ test.describe("Quick Chat repository context on mobile", () => {
 
     const originalTabs = dialog.getByTestId("quick-chat-tab");
     await expect(originalTabs).toHaveCount(2);
-    const originalNames = await originalTabs.locator("span").allTextContents();
+    const readTabNames = (tabs: typeof originalTabs) =>
+      tabs
+        .locator("button")
+        .evaluateAll((buttons) =>
+          buttons.map((button) => button.textContent?.trim() ?? "").filter(Boolean),
+        );
+    const originalNames = await readTabNames(originalTabs);
 
     await testPage.reload();
     await testPage.waitForLoadState("networkidle");
@@ -57,7 +63,7 @@ test.describe("Quick Chat repository context on mobile", () => {
     const restoredTabs = restoredDialog.getByTestId("quick-chat-tab");
     await expect(restoredTabs).toHaveCount(2);
     await expect
-      .poll(async () => (await restoredTabs.locator("span").allTextContents()).toSorted())
+      .poll(async () => (await readTabNames(restoredTabs)).toSorted())
       .toEqual(originalNames.toSorted());
     await expect(restoredDialog.getByTestId("quick-chat-setup")).not.toBeVisible();
     await assertNoDocumentHorizontalOverflow(testPage);

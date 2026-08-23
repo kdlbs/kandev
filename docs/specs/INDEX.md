@@ -26,6 +26,8 @@ This catalog is the entry point for the system-oriented specification layout. Ea
 
 The legacy specification sources were migrated from the unstructured root and category directories into the system-oriented layout. Task and workflow sources from PR #2957 remain under `tasks/`; three task-owned sources found outside that tree were folded into the same system during this migration.
 
+----
+
 The former legacy size exceptions were removed. All canonical requirement and system-design documents now pass the repository specification linter.
 
 ## Authoring rule
