@@ -6,15 +6,8 @@ owner: tbd
 
 # Diagnostic logging
 
-Decisions:
-
-- [ADR-2026-07-30-file-backed-diagnostic-bundles](../../decisions/2026-07-30-file-backed-diagnostic-bundles.md)
-- [ADR-2026-08-22-preserve-newest-bounded-backend-logs](../../decisions/2026-08-22-preserve-newest-bounded-backend-logs.md)
-
-Implementation plans:
-
-- [diagnostic-logging](../../plans/diagnostic-logging/plan.md)
-- [bounded-rolling-backend-logs](../../plans/bounded-rolling-backend-logs/plan.md)
+Decisions: [bundles](../../decisions/2026-07-30-file-backed-diagnostic-bundles.md),
+[bounded logs](../../decisions/2026-08-22-preserve-newest-bounded-backend-logs.md).
 
 ## Why
 
@@ -40,36 +33,22 @@ history or returning an unbounded log export.
   remains `warn` and higher.
 - An explicitly verbose run writes `info` and higher entries to both the file
   and stdout.
-- Normal browser WebSocket closure code `1000` is a lifecycle event. It does
-  not create a backend error entry or stack trace. Unexpected WebSocket close
-  codes remain error entries with stack traces.
+- Normal browser close code `1000` is lifecycle-only; unexpected codes remain
+  error entries with stacks.
 - `logging.level` / `KANDEV_LOG_LEVEL` remains the supported override for the
   file threshold, and `logging.format` remains supported.
   `logging.outputPath`, `logging.maxSizeMb`, `logging.maxBackups`,
   `logging.maxAgeDays`, and `logging.compress` are removed; the diagnostic
   path and daily retention policy are not configurable.
-- `backend-logs.log` is the writable segment for the current UTC day. It
-  accepts at most 16 MiB.
-- Before an entry exceeds the segment bound, the backend closes the active
-  segment as `backend-logs-YYYY-MM-DD-NNNNNN.log` and opens a new active file.
-- All retained backend segments use at most 256 MiB in total. Rotation removes
-  the oldest closed segments across retained days until new entries fit within
-  the budget.
-- Logging continues after the total budget becomes full. The retained files
-  contain the newest bounded evidence instead of stopping at the first 256 MiB.
-- At UTC midnight, the backend closes the active file as the final segment for
-  the prior day. It then opens a new `backend-logs.log` for the new day.
-- Cleanup uses three UTC days as a maximum age. It removes older recognized
-  segments even when the total is below 256 MiB. Unrelated files remain
-  unchanged.
-- A same-day restart appends to a valid active segment and continues the next
-  sequence number. It never replaces an existing closed segment.
-- Legacy `backend-logs-YYYY-MM-DD.log` files remain readable and count toward
-  the total budget. An oversized legacy active file is converted to a bounded
-  newest-first segment set before normal writes continue.
-- Size rotation, day rotation, and legacy conversion are crash-recoverable.
-  Recovery completes each operation once and does not duplicate or replace a
-  completed segment.
+- `backend-logs.log` is the current-day active segment, capped at 16 MiB. Full
+  files become `backend-logs-YYYY-MM-DD-NNNNNN.log`.
+- Active, closed, and legacy files share a 256 MiB budget; rotation evicts old
+  closed files so logging continues with newest evidence.
+- At UTC midnight, the active file becomes the prior day's final segment and a
+  new file opens. Cleanup removes recognized files older than three UTC days;
+  this is a maximum age, not a per-day allocation.
+- Legacy singleton files remain readable and count toward the budget. An
+  oversized legacy active file is converted to bounded newest segments.
 - The structured backend in-memory ring buffer is removed. The System Logs
   page, Improve Kandev, and agent diagnostics use the files and bundles
   described below.
@@ -243,9 +222,7 @@ history or returning an unbounded log export.
 
 ```text
 manifest.json
-backend/backend-logs.log
-backend/backend-logs-YYYY-MM-DD-NNNNNN.log
-backend/backend-logs-YYYY-MM-DD.log
+backend/backend-logs*.log
 frontend/browser-01.jsonl
 frontend/browser-02.jsonl
 runtime/sessions.json
@@ -650,32 +627,17 @@ with the same task/session rules and excludes message bodies and user identity.
 - **GIVEN** a same-UTC-day restart, **WHEN** the backend opens its log,
   **THEN** it appends to the active segment and does not replace closed
   segments.
-- **GIVEN** the backend emits more than 256 MiB before old segments expire,
-  **WHEN** size rotation runs, **THEN** logging continues and the retained set
-  contains the newest 256 MiB within segment boundaries.
-- **GIVEN** a full retained segment set, **WHEN** a later error is written,
-  **THEN** the later error remains available and the oldest closed segment is
-  removed.
-- **GIVEN** a restart after multiple same-day rotations, **WHEN** logging
-  resumes, **THEN** the backend continues the sequence and preserves the total
-  budget.
-- **GIVEN** rotation cannot remove an old segment or open its replacement,
-  **WHEN** the active segment needs more space, **THEN** the backend preserves
-  existing files, reports the file-sink error, and retries after 30 seconds.
-- **GIVEN** an oversized legacy active file, **WHEN** the upgraded backend
-  starts, **THEN** it preserves the newest bounded content and continues
-  logging without waiting for UTC midnight.
+- **GIVEN** logging exceeds 256 MiB, restarts after rotation, or upgrades from
+  an oversized legacy file, **WHEN** the backend resumes, **THEN** it continues
+  with newest bounded content and the next sequence.
 - **GIVEN** the configured log directory is temporarily unwritable, **WHEN**
   Kandev starts, **THEN** product startup succeeds with a stderr warning and
   the backend retries file activation every 30 seconds.
 - **GIVEN** more than three UTC days of backend files, **WHEN** cleanup runs,
   **THEN** only the current and two preceding days remain.
-- **GIVEN** a browser sends WebSocket close code `1000`, **WHEN** the gateway
-  read pump receives it, **THEN** no `WebSocket read error` entry or stack
-  trace is written.
-- **GIVEN** a browser sends an unexpected WebSocket close code, **WHEN** the
-  gateway read pump receives it, **THEN** the backend writes one
-  `WebSocket read error` entry with a stack trace.
+- **GIVEN** the gateway receives close code `1000` or an unexpected close code,
+  **WHEN** the read pump handles it, **THEN** only the unexpected close creates
+  a `WebSocket read error` entry with a stack trace.
 - **GIVEN** an error toast on a recognized task route, **WHEN** its report is
   accepted, **THEN** one backend error entry includes its visible text,
   browser context, and `task_id`.
@@ -764,5 +726,5 @@ with the same task/session rules and excludes message bodies and user identity.
 - Adding a setting for log path, retention, browser capture, or bundle bounds.
 - Supporting configurable size-based, per-process, or local-time backend
   rotation.
-- Changing the browser reconnection policy.
-- Increasing the fixed 256 MiB total backend-log budget.
+- Changing the browser reconnection policy or increasing the fixed 256 MiB
+  total backend-log budget.
