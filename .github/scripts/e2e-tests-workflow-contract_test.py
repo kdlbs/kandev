@@ -102,6 +102,15 @@ class DesktopE2EWorkflowContractTest(unittest.TestCase):
             self.assertTrue(separator, f"Lint workflow has no {trigger} trigger")
             self.assertNotIn("    paths:", trigger_block_text.split("\n  ", 1)[0])
 
+    def test_timing_lookup_requires_a_profile_artifact(self) -> None:
+        workflow = E2E_WORKFLOW.read_text(encoding="utf-8")
+
+        self.assertIn("/actions/runs/", workflow)
+        self.assertIn("candidate.id", workflow)
+        self.assertIn("/artifacts?per_page=100", workflow)
+        self.assertIn('artifact.name === "e2e-timing-profile"', workflow)
+        self.assertIn("!artifact.expired", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()
