@@ -178,7 +178,7 @@ func (d *Dispatcher) resolveSession(
 	// state, since it was already identified as the one that failed.
 	if trigger == engine.TriggerOnAgentError {
 		if sessionID := agentErrorFailedSessionID(payload); sessionID != "" {
-			return d.resolveSessionByID(ctx, sessionID)
+			return d.resolveSessionByID(ctx, taskID, sessionID)
 		}
 	}
 	session, err := d.sessions.GetActiveTaskSessionByTaskID(ctx, taskID)
@@ -218,18 +218,25 @@ func (d *Dispatcher) resolveSession(
 
 // resolveSessionByID resolves a session by its own id — used for
 // TriggerOnAgentError's FailedSessionID (Review F1) rather than a
-// task-scoped active/latest lookup. A not-found id resolves to "no
+// task-scoped active/latest lookup. It also verifies that the session belongs
+// to the event task before returning it, so the engine never combines state
+// from two task records. A not-found or mismatched id resolves to "no
 // session" (nil, nil), consistent with every other branch of
 // resolveSession, rather than an error: the session row may already be
 // gone by the time the trigger dispatches, and that is a normal no-op,
 // not a failure.
-func (d *Dispatcher) resolveSessionByID(ctx context.Context, sessionID string) (*taskmodels.TaskSession, error) {
+func (d *Dispatcher) resolveSessionByID(
+	ctx context.Context, taskID, sessionID string,
+) (*taskmodels.TaskSession, error) {
 	session, err := d.sessions.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		if errors.Is(err, taskmodels.ErrTaskSessionNotFound) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed session lookup: %w", err)
+	}
+	if session == nil || session.TaskID != taskID {
+		return nil, nil
 	}
 	return session, nil
 }

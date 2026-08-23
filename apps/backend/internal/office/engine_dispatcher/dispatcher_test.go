@@ -558,7 +558,9 @@ func TestDispatcher_AgentErrorUsesFailedSessionIDNotLatestSibling(t *testing.T) 
 			State: taskmodels.TaskSessionStateIdle,
 		},
 		byID: map[string]*taskmodels.TaskSession{
-			"sess-failed": {ID: "sess-failed", State: taskmodels.TaskSessionStateFailed},
+			"sess-failed": {
+				ID: "sess-failed", TaskID: "task-1", State: taskmodels.TaskSessionStateFailed,
+			},
 		},
 	}
 	d := New(eng, sessions, logger.Default())
@@ -593,7 +595,9 @@ func TestDispatcher_AgentErrorUsesFailedSessionIDOverActiveSibling(t *testing.T)
 			State: taskmodels.TaskSessionStateWaitingForInput,
 		},
 		byID: map[string]*taskmodels.TaskSession{
-			"sess-failed": {ID: "sess-failed", State: taskmodels.TaskSessionStateFailed},
+			"sess-failed": {
+				ID: "sess-failed", TaskID: "task-1", State: taskmodels.TaskSessionStateFailed,
+			},
 		},
 	}
 	d := New(eng, sessions, logger.Default())
@@ -634,6 +638,35 @@ func TestDispatcher_AgentErrorFailedSessionIDNotFoundYieldsNoSession(t *testing.
 	}
 	if eng.called {
 		t.Fatal("engine should not be invoked when the failed session id can't be resolved")
+	}
+}
+
+// TestDispatcher_AgentErrorRejectsFailedSessionFromAnotherTask pins the
+// task/session ownership boundary for the direct FailedSessionID lookup.
+func TestDispatcher_AgentErrorRejectsFailedSessionFromAnotherTask(t *testing.T) {
+	eng := &fakeEngine{}
+	sessions := &fakeSessions{
+		activeSession: &taskmodels.TaskSession{
+			ID:     "sess-task-1-active",
+			TaskID: "task-1",
+			State:  taskmodels.TaskSessionStateWaitingForInput,
+		},
+		byID: map[string]*taskmodels.TaskSession{
+			"sess-task-2-failed": {
+				ID: "sess-task-2-failed", TaskID: "task-2", State: taskmodels.TaskSessionStateFailed,
+			},
+		},
+	}
+	d := New(eng, sessions, logger.Default())
+
+	err := d.HandleTrigger(context.Background(), "task-1", engine.TriggerOnAgentError,
+		engine.OnAgentErrorPayload{FailedAgentID: "agent-1", FailedSessionID: "sess-task-2-failed"},
+		"agent_error:run-1")
+	if !errors.Is(err, ErrNoSession) {
+		t.Fatalf("err = %v, want ErrNoSession", err)
+	}
+	if eng.called {
+		t.Fatal("engine should not be invoked for a session owned by another task")
 	}
 }
 
