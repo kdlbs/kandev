@@ -67,7 +67,12 @@ test.describe("Chat model selector — RPC failure", () => {
     await testPage.route("**/set-config-option", fail);
 
     await trigger.click();
-    const smartRow = testPage.getByRole("option", { name: /Mock Smart/ });
+    const modelListbox = testPage.getByRole("listbox");
+    const modelOptions = modelListbox.getByRole("option");
+    await expect(modelOptions.first()).toContainText("Mock Fast");
+    await expect(modelOptions.first()).toHaveClass(/bg-card/);
+    await expect(modelOptions.first()).toHaveClass(/border-primary\/50/);
+    const smartRow = modelListbox.getByRole("option", { name: /Mock Smart/ });
     await expect(smartRow).toBeVisible({ timeout: 5_000 });
     await smartRow.click();
 

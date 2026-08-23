@@ -1,9 +1,19 @@
 import { test, expect } from "../../fixtures/test-base";
+import type { Page } from "@playwright/test";
+
+async function openInitialDeleteConfirmation(page: Page) {
+  await page.getByTestId("profile-delete-trigger").click();
+  const confirmation = page.getByTestId("agent-profile-delete-confirm-popover");
+  await expect(confirmation).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("alertdialog")).toHaveCount(0);
+  return confirmation;
+}
 
 test.describe("Agent profile deletion", () => {
   test("deleting profile with no active sessions shows confirm dialog then succeeds", async ({
     testPage,
     apiClient,
+    prCapture,
   }) => {
     test.setTimeout(60_000);
 
@@ -23,15 +33,16 @@ test.describe("Agent profile deletion", () => {
     });
 
     // Click the delete button inside the delete card
-    await testPage.getByRole("button", { name: "Delete", exact: true }).click();
-
-    // Confirmation dialog should appear
-    const dialog = testPage.getByRole("alertdialog");
-    await expect(dialog).toBeVisible({ timeout: 10_000 });
-    await expect(dialog.getByText("This action cannot be undone")).toBeVisible();
+    const confirmation = await openInitialDeleteConfirmation(testPage);
+    await expect(
+      confirmation.getByText("This will permanently delete this profile."),
+    ).toBeVisible();
+    await prCapture.screenshot("desktop-agent-profile-delete-confirmation", {
+      caption: "Desktop agent profile deletion confirmation",
+    });
 
     // Confirm the deletion
-    await dialog.getByRole("button", { name: "Delete", exact: true }).click();
+    await confirmation.getByTestId("agent-profile-delete-confirm").click();
 
     // Should redirect to agents settings page
     await expect(testPage).toHaveURL(/\/settings\/agents$/, { timeout: 15_000 });
@@ -73,14 +84,10 @@ test.describe("Agent profile deletion", () => {
     });
 
     // Click the delete button
-    await testPage.getByRole("button", { name: "Delete", exact: true }).click();
-
-    // Initial confirmation dialog should appear
-    const confirmDialog = testPage.getByRole("alertdialog");
-    await expect(confirmDialog).toBeVisible({ timeout: 10_000 });
+    const confirmDialog = await openInitialDeleteConfirmation(testPage);
 
     // Confirm the initial deletion
-    await confirmDialog.getByRole("button", { name: "Delete", exact: true }).click();
+    await confirmDialog.getByTestId("agent-profile-delete-confirm").click();
 
     // The conflict dialog should appear with active session info
     const conflictDialog = testPage.getByRole("alertdialog");
@@ -130,10 +137,8 @@ test.describe("Agent profile deletion", () => {
       timeout: 15_000,
     });
 
-    await testPage.getByRole("button", { name: "Delete", exact: true }).click();
-    const confirmDialog = testPage.getByRole("alertdialog");
-    await expect(confirmDialog).toBeVisible({ timeout: 10_000 });
-    await confirmDialog.getByRole("button", { name: "Delete", exact: true }).click();
+    const confirmDialog = await openInitialDeleteConfirmation(testPage);
+    await confirmDialog.getByTestId("agent-profile-delete-confirm").click();
 
     // Conflict dialog pops with NO active sessions — only the watcher path.
     // Without the cycle-5 frontend wiring the dialog would either not pop
@@ -178,10 +183,8 @@ test.describe("Agent profile deletion", () => {
       timeout: 15_000,
     });
 
-    await testPage.getByRole("button", { name: "Delete", exact: true }).click();
-    const confirmDialog = testPage.getByRole("alertdialog");
-    await expect(confirmDialog).toBeVisible({ timeout: 10_000 });
-    await confirmDialog.getByRole("button", { name: "Delete", exact: true }).click();
+    const confirmDialog = await openInitialDeleteConfirmation(testPage);
+    await confirmDialog.getByTestId("agent-profile-delete-confirm").click();
 
     const conflictDialog = testPage.getByRole("alertdialog");
     await expect(conflictDialog).toBeVisible({ timeout: 10_000 });
@@ -232,14 +235,10 @@ test.describe("Agent profile deletion", () => {
     });
 
     // Click the delete button
-    await testPage.getByRole("button", { name: "Delete", exact: true }).click();
-
-    // Initial confirmation dialog should appear
-    const confirmDialog = testPage.getByRole("alertdialog");
-    await expect(confirmDialog).toBeVisible({ timeout: 10_000 });
+    const confirmDialog = await openInitialDeleteConfirmation(testPage);
 
     // Confirm the initial deletion
-    await confirmDialog.getByRole("button", { name: "Delete", exact: true }).click();
+    await confirmDialog.getByTestId("agent-profile-delete-confirm").click();
 
     // Conflict dialog should appear with active session info
     const conflictDialog = testPage.getByRole("alertdialog");

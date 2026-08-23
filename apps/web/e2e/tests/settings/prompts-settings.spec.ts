@@ -83,6 +83,56 @@ test.describe("Prompts settings — duplicate name handling", () => {
     ).toBeVisible();
   });
 
+  test("cancelling a prompt delete keeps the local editor draft", async ({
+    testPage,
+    apiClient,
+  }) => {
+    await apiClient.createPrompt("cancel-delete-prompt", "original content");
+
+    await testPage.goto("/settings/prompts");
+
+    const row = testPage.locator(
+      '[data-testid="prompt-list-item"][data-prompt-name="cancel-delete-prompt"]',
+    );
+    await row.getByTestId("prompt-edit-button").click();
+    const editor = row.getByTestId("prompt-content-input");
+    await replacePromptEditor(testPage, editor, "unsaved editor draft");
+    await row.getByTestId("prompt-delete-button").click();
+
+    const confirmation = testPage.getByTestId("prompt-delete-confirm-popover");
+    await expect(confirmation).toBeVisible();
+    await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
+    await confirmation.getByRole("button", { name: "Cancel" }).click();
+
+    await expect(promptEditorText(editor)).toContainText("unsaved editor draft");
+  });
+
+  test("deleting one prompt confirms in its row and removes only that prompt", async ({
+    testPage,
+    apiClient,
+  }) => {
+    await apiClient.createPrompt("delete-prompt", "delete me");
+    await apiClient.createPrompt("keep-prompt", "keep me");
+
+    await testPage.goto("/settings/prompts");
+
+    const row = testPage.locator(
+      '[data-testid="prompt-list-item"][data-prompt-name="delete-prompt"]',
+    );
+    const keptRow = testPage.locator(
+      '[data-testid="prompt-list-item"][data-prompt-name="keep-prompt"]',
+    );
+    await row.getByTestId("prompt-delete-button").click();
+
+    const confirmation = testPage.getByTestId("prompt-delete-confirm-popover");
+    await expect(confirmation).toBeVisible();
+    await confirmation.getByTestId("prompt-delete-confirm").click();
+
+    await expect(confirmation).toHaveCount(0);
+    await expect(row).toHaveCount(0);
+    await expect(keptRow).toBeVisible();
+  });
+
   test("creating a prompt with a unique name succeeds and appears in the list", async ({
     testPage,
   }) => {

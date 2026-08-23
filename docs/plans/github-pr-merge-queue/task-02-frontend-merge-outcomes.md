@@ -35,11 +35,15 @@ spec: "../../specs/github-pr-merge-queue/spec.md"
   PR state, and prevent duplicate submission; rejected requests remain retryable.
 - Desktop, compact, and mobile Review surfaces reuse the same mutation and
   eligibility behavior with accessible, touch-usable controls.
+- An active queue entry uses the dedicated `#966600` color before other
+  non-terminal review, check, draft, dirty, or behind states. A failing sibling
+  still wins multi-PR aggregation, terminal colors remain authoritative, and
+  future non-empty queue states use generic queued copy.
 
 ## Verification
 
 ```bash
-cd apps && pnpm install --frozen-lockfile && pnpm --filter @kandev/web test -- lib/api/domains/github-api.test.ts components/github/pr-task-icon.test.ts components/github/pr-merge-button.test.tsx && cd web && pnpm run i18n:check && pnpm run typecheck
+cd apps && pnpm install --frozen-lockfile && pnpm --filter @kandev/web test -- lib/api/domains/github-api.test.ts components/github/pr-task-icon.test.ts components/github/pr-merge-button.test.tsx components/github/pr-task-status-summary.test.ts components/github/pr-status-chip.test.tsx components/github/pr-merge-queue-status.test.tsx && cd web && pnpm run i18n:check && pnpm run typecheck
 ```
 
 ## Dependencies And Risks
@@ -52,12 +56,21 @@ cd apps && pnpm install --frozen-lockfile && pnpm --filter @kandev/web test -- l
 
 ## Results
 
-- `pnpm --filter @kandev/web test -- --run lib/api/domains/github-api.test.ts components/github/pr-task-icon.test.ts` passed: 96 tests.
-- `pnpm run i18n:check` passed with all supported catalogs complete.
+- The six-file queue-status command passed 160 tests, including the queue
+  precedence, failing-sibling, and future-state fallback regressions. The
+  existing API and merge-button action tests remain covered by Task 02's
+  frontend suite.
+- `pnpm run i18n:check` passed with 7,223 referenced keys, 8,779 English
+  entries, 48 orphans, and all supported catalogs complete.
 - `pnpm run typecheck` passed.
 - Review remediation keeps GitHub's overloaded `blocked` state visually neutral
   and labels the pre-submit action `Merge PR`; only the accepted response claims
   that GitHub added the PR to its merge queue.
+- Queue state is checked after terminal state and before other non-terminal
+  states in both task-icon and compact-chip status derivation. Multi-PR status
+  ranking still lets a failing sibling dominate a queued sibling.
+- Future provider queue enums map to the generic queued status rather than an
+  `Unknown` label.
 - Queue feedback is driven by GitHub's terminal `enqueued` result, not
   asynchronous `pending` acceptance.
 - Focused terminal-outcome coverage passes for merged, queued, rejected, and

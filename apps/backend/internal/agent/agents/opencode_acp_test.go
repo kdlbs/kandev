@@ -10,7 +10,7 @@ import (
 
 func TestOpenCodeACPUsesManagedRuntime(t *testing.T) {
 	a := NewOpenCodeACP()
-	want := []string{"npx", "--yes", "--prefer-offline", "opencode-ai", "acp", "--print-logs", "--log-level", "ERROR"}
+	want := a.ManagedNPMRuntime().CachedACPCommand().Args()
 
 	if got := a.BuildCommand(CommandOptions{}).Args(); !slices.Equal(got, want) {
 		t.Fatalf("BuildCommand = %#v, want %#v", got, want)

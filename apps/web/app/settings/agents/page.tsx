@@ -22,9 +22,10 @@ import {
   listAgents,
   listAvailableAgents,
 } from "@/lib/api";
-import type { AgentUpdateJob, AgentUpdatePreview, InstallJob } from "@/lib/api";
+import type { AgentUpdateJob, AgentUpdatePreview, AgentUpdateStatus, InstallJob } from "@/lib/api";
 import { useAgentDiscovery } from "@/hooks/domains/settings/use-agent-discovery";
 import { useAgentRuntimeUpdates } from "@/hooks/domains/settings/use-agent-runtime-updates";
+import { useAgentRuntimeUpdateStatuses } from "@/hooks/domains/settings/use-agent-runtime-update-statuses";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { AddTUIAgentDialog } from "@/components/settings/add-tui-agent-dialog";
 import { AgentProfilesSubList } from "@/components/settings/agents/agent-profiles-section";
@@ -55,10 +56,19 @@ type InstalledAgentsSectionProps = {
   resolveDisplayName: (name: string) => string;
   resolveCapabilityStatus: (name: string) => string | undefined;
   resolveRuntimeUpdate: (name: string) => RuntimeUpdate | undefined;
+  resolveRuntimeUpdateStatus: (name: string) => AgentUpdateStatus | undefined;
   installJobs: Record<string, InstallJob>;
   updateJobs: Record<string, AgentUpdateJob>;
-  previewUpdate: (name: string, targetVersion?: string) => Promise<AgentUpdatePreview>;
-  startUpdate: (name: string, targetVersion: string) => Promise<AgentUpdateJob>;
+  previewUpdate: (
+    name: string,
+    targetVersion?: string,
+    useDefault?: boolean,
+  ) => Promise<AgentUpdatePreview>;
+  startUpdate: (
+    name: string,
+    targetVersion: string,
+    useDefault?: boolean,
+  ) => Promise<AgentUpdateJob>;
   setTuiDialogOpen: (open: boolean) => void;
   handleRescan: () => Promise<void>;
 };
@@ -172,6 +182,7 @@ function InstalledAgentsSection({
   resolveDisplayName,
   resolveCapabilityStatus,
   resolveRuntimeUpdate,
+  resolveRuntimeUpdateStatus,
   installJobs,
   updateJobs,
   previewUpdate,
@@ -239,6 +250,7 @@ function InstalledAgentsSection({
               ? {
                   capabilityStatus: resolveCapabilityStatus(agent.name),
                   runtimeUpdate: resolveRuntimeUpdate(agent.name),
+                  runtimeUpdateStatus: resolveRuntimeUpdateStatus(agent.name),
                   installJob: installJobs[agent.name],
                   updateJob: updateJobs[agent.name],
                   onPreview: previewUpdate,
@@ -270,6 +282,9 @@ function useAgentPageState() {
   const { items: availableAgents } = useAvailableAgents();
   const [rescanning, setRescanning] = useState(false);
   const [tuiDialogOpen, setTuiDialogOpen] = useState(false);
+  const { updateJobs, previewUpdate, startUpdate } = useAgentRuntimeUpdates();
+  const { refresh: refreshRuntimeUpdateStatuses, statusByAgent } =
+    useAgentRuntimeUpdateStatuses(updateJobs);
 
   const installedAgents = useMemo(() => detectedAgents(discoveryAgents), [discoveryAgents]);
   const savedAgentsByName = useMemo(
@@ -282,6 +297,7 @@ function useAgentPageState() {
     availableAgents.find((item: AvailableAgent) => item.name === name)?.model_config?.status;
   const resolveRuntimeUpdate = (name: string) =>
     availableAgents.find((item: AvailableAgent) => item.name === name)?.runtime_update;
+  const resolveRuntimeUpdateStatus = (name: string) => statusByAgent[name];
 
   const handleRescan = async () => {
     if (rescanning) {
@@ -295,12 +311,11 @@ function useAgentPageState() {
       ]);
       setAgentDiscovery(discoveryResp.agents);
       setAvailableAgents(availableResp.agents, availableResp.tools ?? []);
+      await refreshRuntimeUpdateStatuses();
     } finally {
       setRescanning(false);
     }
   };
-
-  const { updateJobs, previewUpdate, startUpdate } = useAgentRuntimeUpdates();
 
   const handleCreateCustomTUI = async (data: {
     display_name: string;
@@ -336,6 +351,7 @@ function useAgentPageState() {
     resolveDisplayName,
     resolveCapabilityStatus,
     resolveRuntimeUpdate,
+    resolveRuntimeUpdateStatus,
     handleRescan,
     handleCreateCustomTUI,
     installJobs,
@@ -358,6 +374,7 @@ export default function AgentsSettingsPage() {
     resolveDisplayName,
     resolveCapabilityStatus,
     resolveRuntimeUpdate,
+    resolveRuntimeUpdateStatus,
     handleRescan,
     handleCreateCustomTUI,
     installJobs,
@@ -403,6 +420,7 @@ export default function AgentsSettingsPage() {
         resolveDisplayName={resolveDisplayName}
         resolveCapabilityStatus={resolveCapabilityStatus}
         resolveRuntimeUpdate={resolveRuntimeUpdate}
+        resolveRuntimeUpdateStatus={resolveRuntimeUpdateStatus}
         installJobs={installJobs}
         updateJobs={updateJobs}
         previewUpdate={previewUpdate}

@@ -718,7 +718,7 @@ func (m *Manager) resolveInferenceCommand(
 		return agents.Command{}, fmt.Errorf("resolve active managed runtime version for %s: %w", agentType, err)
 	}
 	if !found || selection.Package != spec.Package {
-		return command, nil
+		return spec.ACPCommand(spec.DefaultVersion), nil
 	}
 	return spec.ACPCommand(selection.Version), nil
 }

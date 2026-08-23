@@ -316,6 +316,7 @@
   "delete2": "Eliminar {{name}}",
   "deleteAgent": "Eliminar agente",
   "deleteComment": "Eliminar comentário",
+  "deleteFileConfirm": "Isto elimina permanentemente <1>{{name}}</1>. Esta ação não pode ser anulada.",
   "deleteFolderConfirm": "Isto elimina permanentemente <1>{{name}}</1>. Esta ação não pode ser anulada.",
   "deleteFolderTitle": "Eliminar a pasta?",
   "deleteFolderWithFilesConfirm_one": "Isto elimina permanentemente <1>{{name}}</1> e <4>{{count}}</4> ficheiro que contém. Esta ação não pode ser anulada.",

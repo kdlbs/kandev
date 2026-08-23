@@ -215,7 +215,7 @@ type CommandOptions struct {
 	// the native binary (e.g. "copilot --acp") instead of "npx -y <pkg>".
 	PreferNativeBinary bool
 	// ManagedRuntimeVersion is an internal exact version override for trusted
-	// managed npm ACP runtimes. Empty preserves the legacy unversioned command.
+	// managed npm ACP runtimes. Empty uses the built-in exact version pin.
 	ManagedRuntimeVersion string
 }
 

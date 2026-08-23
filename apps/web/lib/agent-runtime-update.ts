@@ -6,10 +6,8 @@ import type {
 } from "@/lib/api";
 import { t } from "@/lib/i18n";
 
-const MAX_VISIBLE_RUNTIME_VERSIONS = 10;
-
 export function latestRuntimeVersions(versions: AgentUpdateVersion[]): AgentUpdateVersion[] {
-  return versions.slice(0, MAX_VISIBLE_RUNTIME_VERSIONS);
+  return versions;
 }
 
 export type RuntimeVersionPair = {
@@ -43,7 +41,22 @@ export function resolveRuntimeActiveVersion(
   preview: AgentUpdatePreview,
   job?: AgentUpdateJob,
 ): string | undefined {
+  if (job?.status === "succeeded" && job.operation === "use_default" && !job.active_version) {
+    return undefined;
+  }
   return job?.active_version ?? preview.active_version;
+}
+
+export function resolveRuntimeEffectiveVersion(
+  preview: AgentUpdatePreview,
+  job?: AgentUpdateJob,
+): string {
+  return (
+    job?.effective_version ??
+    preview.effective_version ??
+    resolveRuntimeActiveVersion(preview, job) ??
+    resolveRuntimeVersionPair(preview, job).currentVersion
+  );
 }
 
 export function resolveRuntimeOperation(
@@ -61,6 +74,8 @@ export function runtimeOperationLabelKey(operation: AgentUpdateOperation | undef
       return "agents:repairRuntime";
     case "up_to_date":
       return "agents:upToDateRuntime";
+    case "use_default":
+      return "agents:useKandevDefault";
     case "update":
     default:
       return "agents:updateRuntime";
