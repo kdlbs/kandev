@@ -5,7 +5,7 @@ status: completed
 wave: 2
 depends_on: ["01-persist-continuation-policy"]
 plan: "plan.md"
-spec: "../../specs/office/automations-settings.md"
+spec: "../../specs/office/requirements/automation-continuity.md"
 ---
 
 # Task 06: Add Continuation Control

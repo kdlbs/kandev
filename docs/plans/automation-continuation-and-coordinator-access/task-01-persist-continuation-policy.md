@@ -5,7 +5,7 @@ status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/office/automations-settings.md"
+spec: "../../specs/office/requirements/automation-continuity.md"
 ---
 
 # Task 01: Persist Continuation and Run Contracts

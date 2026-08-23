@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/office/automations-settings.md
+spec: docs/specs/office/requirements/automation-continuity.md
 decision: docs/decisions/2026-08-22-user-configured-automation-continuity.md
 created: 2026-08-22
 status: completed

@@ -12,7 +12,7 @@ depends_on:
   - "06-add-continuation-control"
   - "07-anchor-and-control-shared-runs"
 plan: "plan.md"
-spec: "../../specs/office/automations-settings.md"
+spec: "../../specs/office/requirements/automation-continuity.md"
 ---
 
 # Task 08: Validate Coordinator Automations
