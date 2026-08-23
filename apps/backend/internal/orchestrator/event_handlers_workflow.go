@@ -751,6 +751,37 @@ func (s *Service) handleTaskQueuePromoted(ctx context.Context, data watcher.Task
 	s.autoStartTaskForLoadedStep(ctx, task, targetStep, "task.queue_promoted", true)
 }
 
+// handleTaskCreated lets a task that is created directly onto a step whose
+// on_enter carries auto_start_agent actually launch. Every other trigger
+// that reaches autoStartTaskForStep represents a task ENTERING a step via a
+// transition (task.moved, task.queue_promoted, dependency resolution); a
+// freshly created task enters its start step too, but nothing evaluated
+// on_enter for it before this handler existed.
+//
+// Skip entirely when the task carries MetaKeyDeferredLaunch metadata: that
+// key means the REST/MCP/WS create request itself asked for a launch
+// (start_agent or prepare_session). If the task could launch immediately,
+// the request handler already did it synchronously; if it's queued or
+// blocked, the deferred-launch record is meant to be consumed later by the
+// transition/dependency-resolution event that ends the queue or block, not
+// by this creation event. Either way, launching here would race or
+// duplicate that launch.
+func (s *Service) handleTaskCreated(ctx context.Context, data watcher.TaskEventData) {
+	task, err := s.repo.GetTask(ctx, data.TaskID)
+	if err != nil || task == nil {
+		if err != nil {
+			s.logger.Warn("task.created: failed to load task", zap.String("task_id", data.TaskID), zap.Error(err))
+		}
+		return
+	}
+	if task.Metadata != nil {
+		if _, hasDeferredLaunch := task.Metadata[models.MetaKeyDeferredLaunch]; hasDeferredLaunch {
+			return
+		}
+	}
+	s.autoStartTaskForStep(ctx, task.ID, task.WorkflowStepID, events.TaskCreated)
+}
+
 func (s *Service) claimTaskEventMetadata(ctx context.Context, task *models.Task, key string) bool {
 	if task == nil || task.Metadata == nil {
 		return false

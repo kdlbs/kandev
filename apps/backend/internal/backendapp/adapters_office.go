@@ -154,6 +154,14 @@ func (a *taskCreatorAdapter) createOfficeTask(
 func (a *taskCreatorAdapter) CreateOfficeTaskInWorkflow(
 	ctx context.Context, workspaceID, projectID, assigneeAgentID, workflowID, title, description string,
 ) (string, error) {
+	var metadata map[string]interface{}
+	if assigneeAgentID != "" {
+		// The Routine workflow's start step pins no agent (routine.yml), so
+		// the kanban auto-start path's fallback read of
+		// task.Metadata[MetaKeyAgentProfileID] is what lets a materialized
+		// heavy-routine task actually launch with the routine's assignee.
+		metadata = map[string]interface{}{models.MetaKeyAgentProfileID: assigneeAgentID}
+	}
 	result, err := a.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{ //nolint:exhaustruct
 		WorkspaceID:            workspaceID,
 		WorkflowID:             workflowID,
@@ -161,6 +169,7 @@ func (a *taskCreatorAdapter) CreateOfficeTaskInWorkflow(
 		Description:            description,
 		ProjectID:              projectID,
 		AssigneeAgentProfileID: assigneeAgentID,
+		Metadata:               metadata,
 		Origin:                 models.TaskOriginOnboarding,
 	})
 	if err != nil {
