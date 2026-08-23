@@ -37,12 +37,12 @@ func seedTasksTable(t *testing.T, repo *sqlite.Repository, taskID, workspaceID s
 }
 
 // TestCreateCostTables_IndexesSessionID guards the boot-time cost of
-// internal/task/repository/sqlite's BackfillSessionTokensCachedIn, which
-// correlates task_sessions against office_cost_events on session_id. Without
-// this index that correlated subquery falls back to a full table scan per
-// task_sessions row (a measured ~450x slowdown at 4,000 sessions / 80,000
-// events - 76.72s vs 0.17s). The index lives here, not in the task
-// repository, because it indexes a table this repository owns.
+// task_sessions rollup reconciliation queries (docs/specs/task-cost-ledger/
+// spec.md), which correlate task_sessions against office_cost_events on
+// session_id. Without this index that correlated subquery falls back to a
+// full table scan per task_sessions row (a measured ~450x slowdown at 4,000
+// sessions / 80,000 events - 76.72s vs 0.17s). The index lives here, not in
+// the task repository, because it indexes a table this repository owns.
 func TestCreateCostTables_IndexesSessionID(t *testing.T) {
 	repo := newTestRepo(t)
 
