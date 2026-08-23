@@ -76,5 +76,13 @@ contractions, or banned modal wording in the added text.
 - `rtk git diff --check`: passed.
 - Acceptance-term search: found `agent shell`, `index.lock`, `Changes panel`,
   `agent mode`, `permission path`, and `agentctl` in the changed docs.
-- No source-code, navigation, or page-frontmatter changes were made.
+- No source-code, public navigation, or public-page frontmatter changes were made.
 - No temporary files or runtime resources were created.
+
+PR review remediation:
+
+- Added separate guidance for permission-denied failures and active or stale
+  `.git/index.lock` contention. The docs now explain that the Changes panel
+  uses the same worktree and does not bypass an active lock.
+- Updated the specification and specification index status to `shipped`.
+- Re-ran the public-doc validation and diff checks after the remediation.

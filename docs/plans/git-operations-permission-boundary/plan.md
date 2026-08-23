@@ -58,7 +58,9 @@ change the UI, WebSocket contract, or Git execution path.
 - `rtk git diff --check`: passed.
 - Acceptance-term search passed for the agent shell, `.git/index.lock`, Changes
   panel, agent mode, permission path, and `agentctl` wording.
-- No source-code, navigation, or page-frontmatter changes were made.
+- No source-code, public navigation, or public-page frontmatter changes were made.
+- PR review remediation added lock-specific recovery guidance and marked the
+  implemented specification as `shipped`.
 
 ## Implementation Waves And Parallel Candidates
 
