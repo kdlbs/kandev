@@ -97,13 +97,20 @@ export class IndexedDBLogStore {
     if (this.database) return this.database;
     if (typeof indexedDB === "undefined") return Promise.reject(new Error("IndexedDB unavailable"));
 
-    this.database = new Promise((resolve, reject) => {
+    let failed = false;
+    const databasePromise = new Promise<IDBDatabase>((resolve, reject) => {
+      const fail = (error: Error) => {
+        if (failed) return;
+        failed = true;
+        if (this.database === databasePromise) this.database = null;
+        reject(error);
+      };
       const request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
       request.onupgradeneeded = () => {
         const database = request.result;
         const transaction = request.transaction;
         if (!transaction) {
-          reject(new Error("IndexedDB upgrade transaction unavailable"));
+          fail(new Error("IndexedDB upgrade transaction unavailable"));
           return;
         }
 
@@ -116,14 +123,20 @@ export class IndexedDBLogStore {
 
         rebuildTotalsDuringUpgrade(entries, metadata);
       };
+      request.onblocked = () => fail(new Error("IndexedDB upgrade blocked"));
       request.onsuccess = () => {
         const database = request.result;
+        if (failed) {
+          database.close();
+          return;
+        }
         database.onversionchange = () => database.close();
         resolve(database);
       };
-      request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
+      request.onerror = () => fail(request.error ?? new Error("IndexedDB open failed"));
     });
-    return this.database;
+    this.database = databasePromise;
+    return databasePromise;
   }
 }
 

@@ -163,9 +163,8 @@ function TaskPill({ pill, isLive }: { pill: ActivePill; isLive: boolean }) {
         <CompositorSpin
           data-testid="agent-card-task-pill-spinner"
           className="h-3.5 w-3.5 shrink-0 text-primary"
-          aria-label={t("office:beingWorkedOn")}
         >
-          <IconLoader2 className="size-full" />
+          <IconLoader2 aria-label={t("office:beingWorkedOn")} className="size-full" />
         </CompositorSpin>
       ) : null}
       {pill.identifier ? (

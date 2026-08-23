@@ -73,7 +73,11 @@ describe("AgentCard", () => {
     expect(pill).toBeTruthy();
     const spinner = within(pill).getByTestId("agent-card-task-pill-spinner");
     expect(spinner.tagName).toBe("SPAN");
-    expect(spinner.querySelector("svg")?.classList.contains("animate-spin")).toBe(false);
+    expect(spinner.classList.contains("animate-spin")).toBe(true);
+    expect(spinner.classList.contains("will-change-transform")).toBe(true);
+    const spinnerSvg = spinner.querySelector("svg");
+    expect(spinnerSvg).not.toBeNull();
+    expect(spinnerSvg?.classList.contains("animate-spin")).toBe(false);
     expect(within(pill).getByText("KAN-3")).toBeTruthy();
     expect(within(pill).getByText("present yourself")).toBeTruthy();
   });

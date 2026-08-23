@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { _resetForTesting, MAX_ENTRY_BYTES } from "./buffer";
-import { _resetRuntimeForTesting, snapshotBrowserLogs, stageLogEntry } from "./runtime";
+import {
+  _resetRuntimeForTesting,
+  browserLogMetadata,
+  snapshotBrowserLogs,
+  stageLogEntry,
+} from "./runtime";
 
 const storeMocks = vi.hoisted(() => ({
   append: vi.fn(),
@@ -33,6 +38,22 @@ describe("browser logger runtime", () => {
     await snapshotBrowserLogs("default-user");
 
     expect(storeMocks.append).not.toHaveBeenCalled();
+  });
+
+  it("falls back to memory when a persistence drain is rejected", async () => {
+    storeMocks.append.mockRejectedValueOnce(new Error("IndexedDB upgrade blocked"));
+    stageLogEntry({
+      timestamp: new Date().toISOString(),
+      level: "error",
+      source: "test",
+      message: "kept in memory",
+    });
+
+    await expect(snapshotBrowserLogs("default-user")).resolves.toHaveLength(1);
+    expect(browserLogMetadata()).toMatchObject({
+      storage_mode: "memory",
+      persistence_failures: 1,
+    });
   });
 
   it("serializes runtime drains and makes snapshots join the in-flight drain", async () => {

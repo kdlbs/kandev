@@ -122,7 +122,9 @@ describe("TaskItem status icon", () => {
     const spinner = screen.getByTestId(RUNNING_ICON_TEST_ID);
     expect(spinner.tagName).toBe("SPAN");
     expect(spinner.classList.contains(SPIN_CLASS)).toBe(true);
-    expect(spinner.querySelector("svg")?.classList.contains(SPIN_CLASS)).toBe(false);
+    const spinnerSvg = spinner.querySelector("svg");
+    expect(spinnerSvg).not.toBeNull();
+    expect(spinnerSvg?.classList.contains(SPIN_CLASS)).toBe(false);
   });
 });
 

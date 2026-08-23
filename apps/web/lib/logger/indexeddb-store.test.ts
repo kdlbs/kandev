@@ -85,6 +85,25 @@ describe("IndexedDB log retention planning and schema", () => {
       bytes: 33,
     });
   });
+
+  it("rejects a blocked schema upgrade and retries after the older tab closes", async () => {
+    const blocker = await openVersionOneDatabase();
+    const store = new IndexedDBLogStore();
+
+    try {
+      await expect(store.append([logEntry("a", Date.now(), "blocked")])).rejects.toThrow(
+        "IndexedDB upgrade blocked",
+      );
+    } finally {
+      blocker.close();
+    }
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    await expect(store.append([logEntry("a", Date.now(), "retried")])).resolves.toBeUndefined();
+    await expect(store.snapshot("a")).resolves.toEqual([
+      expect.objectContaining({ message: "retried" }),
+    ]);
+  });
 });
 
 describe("IndexedDB log retention writes", () => {
@@ -268,6 +287,23 @@ function createVersionOneDatabase(records: PersistedTestEntry[]): Promise<void> 
       transaction.onerror = () =>
         reject(transaction.error ?? new Error("failed to seed version one database"));
     };
+  });
+}
+
+function openVersionOneDatabase(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DATABASE_NAME, 1);
+    request.onupgradeneeded = () => {
+      const store = request.result.createObjectStore(ENTRIES_STORE, {
+        keyPath: "id",
+        autoIncrement: true,
+      });
+      store.createIndex("identity_scope", "identity_scope", { unique: false });
+      store.createIndex("timestamp_ms", "timestamp_ms", { unique: false });
+    };
+    request.onerror = () =>
+      reject(request.error ?? new Error("failed to open version one blocker"));
+    request.onsuccess = () => resolve(request.result);
   });
 }
 

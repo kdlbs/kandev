@@ -20,6 +20,10 @@ import {
   shouldShowTaskRunningSpinner,
 } from "./state-icons";
 
+const WILL_CHANGE_TRANSFORM = "will-change-transform";
+const SPIN_CLASS = "animate-spin";
+const SPIN_SELECTOR = `.${SPIN_CLASS}`;
+
 function iconType(node: ReactNode) {
   if (!isValidElement(node)) throw new Error("Expected React element");
   if (node.type === CompositorSpin) {
@@ -38,10 +42,13 @@ describe("getTaskStateIcon", () => {
     const { container } = render(
       <TooltipProvider>{getTaskStateIcon("IN_PROGRESS")}</TooltipProvider>,
     );
-    const animated = container.querySelector(".animate-spin");
+    const animated = container.querySelector(SPIN_SELECTOR);
 
     expect(animated?.tagName).toBe("SPAN");
-    expect(animated?.querySelector("svg")?.classList.contains("animate-spin")).toBe(false);
+    expect(animated?.classList.contains(WILL_CHANGE_TRANSFORM)).toBe(true);
+    const svg = animated?.querySelector("svg");
+    expect(svg).not.toBeNull();
+    expect(svg?.classList.contains(SPIN_CLASS)).toBe(false);
   });
 
   it("uses the question icon for waiting-for-input task state", () => {
@@ -345,7 +352,7 @@ describe("getSessionStateIcon — fine-grained busy tri-state", () => {
     // running affordance is deliberately left as it always was (static dot).
     const a = getSessionStateIcon("RUNNING", undefined, "generating");
     expect(iconType(a)).toBe(IconCircleFilled);
-    expect(iconClassName(a)).not.toContain("animate-spin");
+    expect(iconClassName(a)).not.toContain(SPIN_CLASS);
   });
 
   it("(a) defaults to the running dot when the substate is unknown", () => {
@@ -354,18 +361,31 @@ describe("getSessionStateIcon — fine-grained busy tri-state", () => {
     expect(iconType(getSessionStateIcon("RUNNING", undefined, null))).toBe(IconCircleFilled);
   });
 
+  it("animates a STARTING session on an HTML wrapper", () => {
+    const { container } = render(<>{getSessionStateIcon("STARTING")}</>);
+    const animated = container.querySelector(SPIN_SELECTOR);
+
+    expect(animated?.tagName).toBe("SPAN");
+    expect(animated?.classList.contains(WILL_CHANGE_TRANSFORM)).toBe(true);
+    const svg = animated?.querySelector("svg");
+    expect(svg).not.toBeNull();
+    expect(svg?.classList.contains(SPIN_CLASS)).toBe(false);
+  });
+
   it("(b) shows a working spinner — never the done checkmark — while background work runs", () => {
     const b = getSessionStateIcon("WAITING_FOR_INPUT", undefined, "background");
     expect(iconType(b)).toBe(IconLoader2);
     expect(iconType(b)).not.toBe(IconCircleCheck);
     const { container } = render(<>{b}</>);
-    expect(container.querySelector(".animate-spin")).not.toBeNull();
-    expect(container.querySelector(".animate-spin svg")?.classList.contains("animate-spin")).toBe(
-      false,
-    );
+    const animated = container.querySelector(SPIN_SELECTOR);
+    expect(animated).not.toBeNull();
+    expect(animated?.tagName).toBe("SPAN");
+    const svg = animated?.querySelector("svg");
+    expect(svg).not.toBeNull();
+    expect(svg?.classList.contains(SPIN_CLASS)).toBe(false);
   });
 
-  it("(b) is visually distinct from (a) so the operator can tell them apart", () => {
+  it("(b) shares (a)'s hue while shape and motion distinguish them", () => {
     const a = iconClassName(getSessionStateIcon("RUNNING", undefined, "generating"));
     const b = iconClassName(getSessionStateIcon("RUNNING", undefined, "background"));
     expect(a).toBe(b);

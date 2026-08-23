@@ -46,7 +46,7 @@ const TASK_STATE_ICONS: Record<TaskState, IconConfig> = {
 
 const SESSION_STATE_ICONS: Record<TaskSessionState, IconConfig> = {
   CREATED: { Icon: IconAlertCircle, className: STYLE_MUTED },
-  STARTING: { Icon: IconLoader2, className: STYLE_LOADING },
+  STARTING: { Icon: IconLoader2, className: STYLE_LOADING, animated: true },
   // (a) generating: the foreground agent is actively producing output. This is
   // the established "session is running" indicator and is deliberately left
   // unchanged — the fine-grained busy signal only ADDS a distinct

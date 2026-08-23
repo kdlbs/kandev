@@ -119,3 +119,7 @@ risks, and blockers. Update this task and `plan.md` with exact results.
   instances, cursor bounds, and non-overlapping runtime drains.
 - The focused store and runtime suite passed 12 tests. Frontend typecheck and
   the broader affected unit suite also passed.
+- An IndexedDB upgrade blocked by an older tab now rejects promptly, clears the
+  cached open promise, closes any late successful connection, and permits a
+  later retry. The runtime fallback test confirms a rejected drain preserves the
+  existing memory-mode behavior.

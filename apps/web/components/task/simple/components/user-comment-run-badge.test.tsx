@@ -33,8 +33,11 @@ describe("UserCommentRunBadge", () => {
     expect(badge.textContent).toContain("Working");
     // Spinner uses the animate-spin utility class.
     const spinner = container.querySelector(".animate-spin");
+    expect(spinner).not.toBeNull();
     expect(spinner?.tagName).toBe("SPAN");
-    expect(spinner?.querySelector("svg")?.classList.contains("animate-spin")).toBe(false);
+    const spinnerSvg = spinner?.querySelector("svg");
+    expect(spinnerSvg).not.toBeNull();
+    expect(spinnerSvg?.classList.contains("animate-spin")).toBe(false);
   });
 
   it("renders nothing for status=finished", () => {

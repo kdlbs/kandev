@@ -134,3 +134,6 @@ this task and `plan.md` with exact results.
   attributed to the status target alone. The target itself has no animated SVG
   style and the repeated trace is materially lower than the supplied baseline.
 - Typecheck, lint, i18n checks, spec lint, and `git diff --check` passed.
+- Review remediation also marks the `STARTING` session icon as animated, keeps
+  the accessible label on the agent status SVG, and strengthens the wrapper
+  assertions so a missing child SVG cannot pass silently.

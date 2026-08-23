@@ -77,7 +77,9 @@ describe("Kanban task status motion", () => {
     const animated = container.querySelector(".animate-spin");
 
     expect(animated?.tagName).toBe("SPAN");
-    expect(animated?.querySelector("svg")?.classList.contains("animate-spin")).toBe(false);
+    const svg = animated?.querySelector("svg");
+    expect(svg).not.toBeNull();
+    expect(svg?.classList.contains("animate-spin")).toBe(false);
   });
 });
 

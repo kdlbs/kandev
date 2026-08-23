@@ -10,14 +10,14 @@ owners:
 
 ## Overview
 
-Kandev uses rotating icons to show that tasks, sessions, and runs are active.
+Kandev uses rotating icons to show that tasks, sessions, runs, and agents are active.
 These indicators can stay visible for a long time. Their motion must remain
 clear without causing continuous main-thread rendering work.
 
 ## Terminology
 
 - **Persistent status indicator:** A status icon whose lifetime follows a
-  task, session, or run state instead of a short UI request.
+  task, session, agent, or run state instead of a short UI request.
 - **Compositor-prepared motion:** A transform-only animation on an HTML element
   that the browser can move to its compositor.
 
@@ -33,8 +33,8 @@ so that I can identify ongoing work without high idle CPU use.
 
 #### Acceptance criteria
 
-- **AC-UI-PERSISTENT-STATUS-MOTION-001.1:** When a task, session, or run has a
-  long-lived active status, the matching indicator shall remain visibly
+- **AC-UI-PERSISTENT-STATUS-MOTION-001.1:** When a task, session, agent, or run
+  has a long-lived active status, the matching indicator shall remain visibly
   rotating on desktop and mobile.
 - **AC-UI-PERSISTENT-STATUS-MOTION-001.2:** When the active status ends, the
   indicator shall stop rotating and the existing next-state icon shall appear.
