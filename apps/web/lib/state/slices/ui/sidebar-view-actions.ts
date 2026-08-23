@@ -112,6 +112,19 @@ function rollbackSidebarState(
   });
 }
 
+function restoreFailedViewMutation(set: ImmerSet, rollback: SidebarSnapshot): void {
+  set((draft) => {
+    draft.sidebarViews.views = rollback.views;
+    if (!rollback.views.some((view) => view.id === draft.sidebarViews.activeViewId)) {
+      draft.sidebarViews.activeViewId = rollback.activeViewId;
+    }
+    const currentDraft = draft.sidebarViews.draft;
+    if (currentDraft && !rollback.views.some((view) => view.id === currentDraft.baseViewId)) {
+      draft.sidebarViews.draft = rollback.draft;
+    }
+  });
+}
+
 function draftsEqual(a: SidebarViewDraft | null, b: SidebarViewDraft | null): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
@@ -148,7 +161,7 @@ function syncSidebarWrite(
         kind === "local" &&
         journal.failedRollback
       ) {
-        rollbackSidebarState(set, journal.failedRollback, after);
+        restoreFailedViewMutation(set, journal.failedRollback);
       }
       journal.failedRollback = undefined;
       journal.failedWriteKind = undefined;
@@ -198,7 +211,16 @@ function buildSidebarLocalActions(set: ImmerSet, get: () => UISlice) {
       });
       if (!committed) return;
       const after = snapshotSidebar(get().sidebarViews);
-      syncSidebarWrite(set, before, after, toSidebarSettingsPayload(after), "local");
+      syncSidebarWrite(
+        set,
+        before,
+        after,
+        {
+          sidebar_active_view_id: after.activeViewId,
+          sidebar_draft: after.draft ? toApiSidebarDraft(after.draft) : null,
+        },
+        "local",
+      );
     },
     updateSidebarDraft: (
       patch: Partial<{
@@ -234,7 +256,16 @@ function buildSidebarLocalActions(set: ImmerSet, get: () => UISlice) {
       });
       if (!committed) return;
       const after = snapshotSidebar(get().sidebarViews);
-      syncSidebarWrite(set, before, after, toSidebarSettingsPayload(after), "local");
+      syncSidebarWrite(
+        set,
+        before,
+        after,
+        {
+          sidebar_active_view_id: after.activeViewId,
+          sidebar_draft: after.draft ? toApiSidebarDraft(after.draft) : null,
+        },
+        "local",
+      );
     },
     discardSidebarDraft: () => {
       const before = snapshotSidebar(get().sidebarViews);
@@ -242,7 +273,16 @@ function buildSidebarLocalActions(set: ImmerSet, get: () => UISlice) {
         draft.sidebarViews.draft = null;
       });
       const after = snapshotSidebar(get().sidebarViews);
-      syncSidebarWrite(set, before, after, toSidebarSettingsPayload(after), "local");
+      syncSidebarWrite(
+        set,
+        before,
+        after,
+        {
+          sidebar_active_view_id: after.activeViewId,
+          sidebar_draft: null,
+        },
+        "local",
+      );
     },
     clearSidebarSyncError: () =>
       set((draft) => {
