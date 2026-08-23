@@ -30,6 +30,7 @@ function buildTaskRowProps(props: TaskSwitcherProps): TaskRowBaseProps {
     activeTaskId: props.activeTaskId,
     selectedTaskId: props.selectedTaskId,
     showActivityTime: props.showActivityTime,
+    taskRowPresentation: props.taskRowPresentation,
     showRepository: shouldShowRowRepository(props.grouped),
     onSelectTask: props.onSelectTask,
     onEditTask: props.onEditTask,

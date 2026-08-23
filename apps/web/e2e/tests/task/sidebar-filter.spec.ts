@@ -699,6 +699,123 @@ test.describe("Sidebar filter — repository dimension (#1213)", () => {
   });
 });
 
+test.describe("Sidebar filter — task-row presentation", () => {
+  test("previews, saves, discards, and reloads an independent task row layout", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    const taskTitle = "Desktop task row layout";
+    const { session, filters } = await openWithSeed(testPage, apiClient, seedData, [taskTitle]);
+    const row = session.sidebar.getByTestId("sidebar-task-item").filter({ hasText: taskTitle });
+    await expect(row).toBeVisible();
+    await expect(row.getByTestId("sidebar-task-time")).toBeVisible();
+
+    await filters.open();
+    await expect(filters.taskRowSettings.getByTestId("task-row-settings-toggle")).toBeVisible();
+    await expect(filters.taskRowSettings.getByTestId("task-row-details-toggle")).toHaveCount(0);
+    await expect(filters.popover.getByTestId("sidebar-filter-dirty-indicator")).toHaveCount(0);
+
+    await filters.openTaskRowSettings();
+    await expect(filters.popover.getByTestId("sidebar-filter-dirty-indicator")).toHaveCount(0);
+    await prCapture.screenshot("desktop-task-row-settings", {
+      caption: "Desktop task-row presentation settings with the section expanded",
+    });
+    const pullRequestHandle = filters.taskRowSettings.getByTestId(
+      "task-row-detail-handle-pull_request_number",
+    );
+    const relativeTimeHandle = filters.taskRowSettings.getByTestId(
+      "task-row-detail-handle-relative_time",
+    );
+    const sourceBox = await pullRequestHandle.boundingBox();
+    const targetBox = await relativeTimeHandle.boundingBox();
+    expect(sourceBox).not.toBeNull();
+    expect(targetBox).not.toBeNull();
+    await testPage.mouse.move(
+      sourceBox!.x + sourceBox!.width / 2,
+      sourceBox!.y + sourceBox!.height / 2,
+    );
+    await testPage.mouse.down();
+    await testPage.mouse.move(
+      sourceBox!.x + sourceBox!.width / 2,
+      sourceBox!.y + sourceBox!.height / 2 + 12,
+      { steps: 4 },
+    );
+    await testPage.mouse.move(targetBox!.x + targetBox!.width / 2, targetBox!.y + 2, {
+      steps: 16,
+    });
+    await testPage.mouse.up();
+    await expect
+      .poll(() => filters.taskRowDetailOrder())
+      .toEqual(["pull_request_number", "relative_time", "repository"]);
+    await filters.toggleTaskRowDetail("repository");
+    await expect(row.getByTestId("sidebar-task-repository")).toHaveCount(0);
+
+    const detailsToggle = filters.taskRowSettings.getByTestId("task-row-details-toggle");
+    await detailsToggle.click();
+    await expect(row.getByTestId("sidebar-task-time")).toHaveCount(0);
+    await expect(row.getByText(taskTitle, { exact: true })).toBeVisible();
+    await filters.saveAs("Compact task rows");
+    await filters.expectActiveViewChip("Compact task rows");
+
+    const savedSettings = await apiClient.getUserSettings();
+    const savedViews = savedSettings.settings.sidebar_views as Array<{
+      name?: string;
+      task_row?: { details_enabled?: boolean };
+    }>;
+    expect(savedViews.find((view) => view.name === "Compact task rows")?.task_row).toMatchObject({
+      details_enabled: false,
+    });
+
+    await filters.setTaskRowTrailing("Relative time");
+    await filters.saveOverwrite();
+    await expect(row.getByTestId("sidebar-task-trailing-time")).toBeVisible();
+
+    await filters.openTaskRowSettings();
+    await detailsToggle.click();
+    await expect(filters.popover.getByTestId("sidebar-filter-dirty-indicator")).toBeVisible();
+    await filters.discard();
+    await expect(row.getByTestId("sidebar-task-time")).toHaveCount(0);
+    await expect(row.getByTestId("sidebar-task-trailing-time")).toBeVisible();
+    await filters.close();
+
+    await filters.selectViewByName("All tasks");
+    await expect(
+      session.sidebar.getByTestId("sidebar-task-item").filter({ hasText: taskTitle }),
+    ).toBeVisible();
+    await expect(
+      session.sidebar
+        .getByTestId("sidebar-task-item")
+        .filter({ hasText: taskTitle })
+        .getByTestId("sidebar-task-time"),
+    ).toBeVisible();
+
+    await filters.selectViewByName("Compact task rows");
+    await expect
+      .poll(async () => {
+        const compactRow = session.sidebar
+          .getByTestId("sidebar-task-item")
+          .filter({ hasText: taskTitle });
+        return (await compactRow.getByTestId("sidebar-task-trailing-time").count()) === 1;
+      })
+      .toBe(true);
+
+    await testPage.reload();
+    await new SessionPage(testPage).waitForLoad();
+    const reloadedFilters = new SidebarFilterPopoverPage(testPage);
+    await reloadedFilters.expectActiveViewChip("Compact task rows");
+    const reloadedRow = testPage.getByTestId("sidebar-task-item").filter({ hasText: taskTitle });
+    await expect(reloadedRow.getByTestId("sidebar-task-time")).toHaveCount(0);
+    await expect(reloadedRow.getByTestId("sidebar-task-trailing-time")).toBeVisible();
+    await expect(
+      await testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+  });
+});
+
 test.describe("Sidebar filter — draft semantics", () => {
   test("dirty indicator appears after edits, clears on discard", async ({
     testPage,

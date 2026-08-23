@@ -207,6 +207,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [submodule-review](ui/submodule-review.md) | shipped |
 | [review-markdown-preview](ui/review-markdown-preview.md) | draft |
 | [sidebar-view-creation](ui/sidebar-view-creation.md) | shipped |
+| [sidebar-task-row-presentation](ui/sidebar-task-row-presentation.md) | shipped |
 | [command-panel sidebar task reveal](ui/command-panel-sidebar-task-reveal.md) | draft |
 | [sidebar-empty-task-alignment](ui/sidebar-empty-task-alignment.md) | building |
 | [sidebar-task-completion-icons](ui/sidebar-task-completion-icons.md) | shipped |

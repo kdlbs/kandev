@@ -87,6 +87,12 @@ describe("createSidebarView semantics", () => {
       sort: { key: "state", direction: "asc" },
       group: "repository",
       collapsedGroups: [],
+      taskRow: {
+        detailsEnabled: true,
+        detailOrder: ["relative_time", "repository", "pull_request_number"],
+        visibleDetails: ["relative_time", "repository", "pull_request_number"],
+        trailing: "git_changes",
+      },
     });
     expect(sidebar.activeViewId).toBe(createdId);
     expect(sidebar.draft).toBeNull();

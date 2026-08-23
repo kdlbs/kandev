@@ -348,6 +348,112 @@ test.describe("Mobile sidebar — view system", () => {
     await expect.poll(() => taskRowOrder(reloadedSheet, taskIds)).toEqual(taskIds);
   });
 
+  test("task row settings use the drawer, touch targets, and persisted preview", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    const taskTitle = "Mobile task row layout";
+    const sheet = await seedAndOpenSheet(testPage, apiClient, seedData, [taskTitle]);
+    const gear = sheet.getByTestId("sidebar-filter-gear");
+    await gear.tap();
+
+    const drawer = testPage.getByTestId("sidebar-filter-drawer");
+    const popover = testPage.getByTestId("sidebar-filter-popover");
+    await expect(drawer).toBeVisible();
+    await expect(popover).toBeVisible();
+    const settings = popover.getByTestId("task-row-settings");
+    await expect(settings.getByTestId("task-row-details-toggle")).toHaveCount(0);
+    await settings.getByTestId("task-row-settings-toggle").tap();
+    await expect(settings.getByTestId("task-row-details-toggle")).toBeVisible();
+
+    for (const control of [
+      "task-row-detail-handle-relative_time",
+      "task-row-detail-toggle-relative_time",
+      "task-row-trailing-select",
+    ]) {
+      const box = await settings.getByTestId(control).boundingBox();
+      expect(box?.height).toBeGreaterThanOrEqual(40);
+      expect(box?.width).toBeGreaterThanOrEqual(40);
+    }
+
+    const pullRequestHandle = settings.getByTestId("task-row-detail-handle-pull_request_number");
+    const relativeTimeHandle = settings.getByTestId("task-row-detail-handle-relative_time");
+    const sourceBox = await pullRequestHandle.boundingBox();
+    const targetBox = await relativeTimeHandle.boundingBox();
+    expect(sourceBox).not.toBeNull();
+    expect(targetBox).not.toBeNull();
+    await testPage.mouse.move(
+      sourceBox!.x + sourceBox!.width / 2,
+      sourceBox!.y + sourceBox!.height / 2,
+    );
+    await testPage.mouse.down();
+    await testPage.mouse.move(
+      sourceBox!.x + sourceBox!.width / 2,
+      sourceBox!.y + sourceBox!.height / 2 + 12,
+      { steps: 4 },
+    );
+    await testPage.mouse.move(targetBox!.x + targetBox!.width / 2, targetBox!.y + 2, {
+      steps: 16,
+    });
+    await testPage.mouse.up();
+    await expect
+      .poll(async () =>
+        settings
+          .locator("div[data-testid^='task-row-detail-']")
+          .evaluateAll((rows) =>
+            rows.map((row) => row.getAttribute("data-testid")?.replace("task-row-detail-", "")),
+          ),
+      )
+      .toEqual(["pull_request_number", "relative_time", "repository"]);
+
+    await settings.getByTestId("task-row-detail-toggle-repository").tap();
+    await settings.getByTestId("task-row-trailing-select").tap();
+    await testPage.getByRole("option", { name: "Relative time", exact: true }).tap();
+    await popover.getByTestId("view-save-as-button").tap();
+    await popover.getByTestId("view-save-as-name-input").fill("Mobile task rows");
+    await popover.getByTestId("view-save-as-confirm").tap();
+
+    const row = sheet.getByTestId("sidebar-task-item").filter({ hasText: taskTitle });
+    await expect(row).toBeVisible();
+    await expect(row.getByTestId("sidebar-task-trailing-time")).toBeVisible();
+    await expect(row.getByTestId("sidebar-task-time")).toHaveCount(0);
+    await prCapture.screenshot("mobile-task-row-settings", {
+      caption: "Mobile task-row settings in the inset bottom drawer",
+    });
+    await expect(popover).toHaveCSS("overflow-y", "auto");
+    const drawerBox = await drawer.boundingBox();
+    const viewport = testPage.viewportSize();
+    expect(drawerBox).not.toBeNull();
+    expect(viewport).not.toBeNull();
+    expect(drawerBox!.x).toBeGreaterThanOrEqual(0);
+    expect(drawerBox!.x + drawerBox!.width).toBeLessThanOrEqual(viewport!.width);
+    expect(
+      await testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+    await testPage.keyboard.press("Escape");
+    await expect(popover).toBeHidden();
+
+    await testPage.reload();
+    await new SessionPage(testPage).waitForLoad();
+    await testPage.getByTestId("mobile-session-menu").tap();
+    const reloadedSheet = testPage.getByRole("dialog", { name: "Tasks" });
+    await expect(
+      reloadedSheet.getByTestId("sidebar-view-chip").filter({ hasText: "Mobile task rows" }),
+    ).toHaveAttribute("data-active", "true");
+    await reloadedSheet.getByTestId("sidebar-filter-gear").tap();
+    const reloadedPopover = testPage.getByTestId("sidebar-filter-popover");
+    await expect(reloadedPopover.getByTestId("task-row-details-toggle")).toHaveCount(0);
+    await reloadedPopover.getByTestId("task-row-settings-toggle").tap();
+    await expect(reloadedPopover.getByTestId("task-row-trailing-select")).toContainText(
+      "Relative time",
+    );
+    await testPage.keyboard.press("Escape");
+  });
+
   test("many saved views scroll without covering fixed actions", async ({
     testPage,
     apiClient,

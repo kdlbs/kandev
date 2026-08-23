@@ -95,11 +95,23 @@ func TestMapUserSettingsStateIncludesPortableTaskAndSidebarSettings(t *testing.T
 			SidebarViews: []usermodels.SidebarView{{
 				ID:   "view-1",
 				Name: "My view",
+				TaskRow: &usermodels.SidebarTaskRowPresentation{
+					DetailsEnabled: true,
+					DetailOrder:    []string{"repository", "relative_time"},
+					VisibleDetails: []string{"repository"},
+					Trailing:       "relative_time",
+				},
 			}},
 			SidebarActiveViewID: "view-1",
 			SidebarDraft: &usermodels.SidebarViewDraft{
 				BaseViewID: "view-1",
 				Group:      "repository",
+				TaskRow: &usermodels.SidebarTaskRowPresentation{
+					DetailsEnabled: false,
+					DetailOrder:    []string{"relative_time", "repository", "pull_request_number"},
+					VisibleDetails: []string{},
+					Trailing:       "none",
+				},
 			},
 			SidebarTaskPrefs: usermodels.SidebarTaskPrefs{
 				PinnedTaskIDs:          []string{"task-1"},
@@ -122,6 +134,18 @@ func TestMapUserSettingsStateIncludesPortableTaskAndSidebarSettings(t *testing.T
 	draft, ok := state["sidebarDraft"].(map[string]any)
 	if !ok || draft["baseViewId"] != "view-1" || draft["group"] != "repository" {
 		t.Fatalf("sidebarDraft = %#v, want mapped draft", state["sidebarDraft"])
+	}
+	view, ok := state["sidebarViews"].([]map[string]any)
+	if !ok || len(view) != 1 {
+		t.Fatalf("sidebarViews = %#v, want one mapped view", state["sidebarViews"])
+	}
+	viewTaskRow, ok := view[0]["taskRow"].(map[string]any)
+	if !ok || viewTaskRow["trailing"] != "relative_time" {
+		t.Fatalf("sidebarViews taskRow = %#v, want relative_time trailing", view[0]["taskRow"])
+	}
+	draftTaskRow, ok := draft["taskRow"].(map[string]any)
+	if !ok || draftTaskRow["detailsEnabled"] != false || draftTaskRow["trailing"] != "none" {
+		t.Fatalf("sidebarDraft taskRow = %#v, want disabled none presentation", draft["taskRow"])
 	}
 	prefs, ok := state["sidebarTaskPrefs"].(map[string]any)
 	if !ok || len(prefs["pinnedTaskIds"].([]string)) != 1 {

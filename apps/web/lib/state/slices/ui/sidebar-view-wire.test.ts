@@ -13,6 +13,12 @@ const view: SidebarView = {
   sort: { key: "lastActivityAt", direction: "desc" },
   group: "workflow",
   collapsedGroups: ["backlog", "review"],
+  taskRow: {
+    detailsEnabled: true,
+    detailOrder: ["relative_time", "repository", "pull_request_number"],
+    visibleDetails: ["relative_time", "repository", "pull_request_number"],
+    trailing: "git_changes",
+  },
 };
 
 describe("sidebar view wire", () => {
@@ -42,5 +48,48 @@ describe("sidebar view wire", () => {
     expect(api.filters[0].value).toBe(true);
     expect(api.filters[1].value).toEqual(["review", "in_progress"]);
     expect(api.filters[2].value).toBe("fix ");
+  });
+
+  it("round-trips the saved task-row presentation", () => {
+    const taskRow = {
+      detailsEnabled: true,
+      detailOrder: ["relative_time", "repository", "pull_request_number"],
+      visibleDetails: ["repository", "pull_request_number"],
+      trailing: "change_request_status" as const,
+    };
+    const viewWithTaskRow = { ...view, taskRow } as unknown as SidebarView;
+    const api = toApiSidebarView(viewWithTaskRow) as unknown as Record<string, unknown>;
+
+    expect(api.task_row).toEqual({
+      details_enabled: true,
+      detail_order: ["relative_time", "repository", "pull_request_number"],
+      visible_details: ["repository", "pull_request_number"],
+      trailing: "change_request_status",
+    });
+    const restored = fromApiSidebarView({ ...api, task_row: api.task_row } as never);
+    expect((restored as unknown as Record<string, unknown>).taskRow).toEqual({
+      detailsEnabled: true,
+      detailOrder: ["relative_time", "repository", "pull_request_number"],
+      visibleDetails: ["repository", "pull_request_number"],
+      trailing: "change_request_status",
+    });
+  });
+
+  it("normalizes a missing task-row presentation to the current layout", () => {
+    const restored = fromApiSidebarView({
+      id: "v3",
+      name: "Legacy",
+      filters: [],
+      sort: { key: "state", direction: "asc" },
+      group: "none",
+      collapsed_groups: [],
+    });
+
+    expect((restored as unknown as Record<string, unknown>).taskRow).toEqual({
+      detailsEnabled: true,
+      detailOrder: ["relative_time", "repository", "pull_request_number"],
+      visibleDetails: ["relative_time", "repository", "pull_request_number"],
+      trailing: "git_changes",
+    });
   });
 });

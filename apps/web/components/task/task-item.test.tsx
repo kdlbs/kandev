@@ -609,6 +609,29 @@ describe("TaskItem activity timestamp", () => {
   });
 });
 
+describe("TaskItem task-row presentation", () => {
+  it("moves relative time to the trailing slot and hides the details row", () => {
+    renderTaskItem({
+      taskId: "t1",
+      updatedAt: "2026-07-24T00:00:00Z",
+      repositoryPath: "acme/api",
+      showRepository: true,
+      diffStats: { additions: 2, deletions: 1 },
+      taskRowPresentation: {
+        detailsEnabled: false,
+        detailOrder: ["relative_time", "repository", "pull_request_number"],
+        visibleDetails: [],
+        trailing: "relative_time",
+      },
+    } as unknown as Partial<ComponentProps<typeof TaskItem>>);
+
+    expect(screen.queryByTestId("sidebar-task-time")).toBeNull();
+    expect(screen.queryByTestId("sidebar-task-repository")).toBeNull();
+    expect(screen.queryByTestId("sidebar-task-diff-stats")).toBeNull();
+    expect(screen.getByTestId("sidebar-task-trailing-time")).toBeTruthy();
+  });
+});
+
 describe("TaskItem contribution badges", () => {
   it("renders the PR badge before the MR badge when the task has both (AC2)", () => {
     renderTaskItem(

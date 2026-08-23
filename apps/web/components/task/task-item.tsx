@@ -30,8 +30,12 @@ import { useTranslation } from "react-i18next";
 import { TaskTitleHoverCard } from "@/components/task/task-title-hover-card";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
 import { TaskItemComparisonUnavailable } from "./task-item-comparison-unavailable";
-import { TaskMenuButton } from "./task-item-menu-button";
 import { TaskItemLeadingBadges } from "./task-item-leading-badges";
+import {
+  resolveTaskRowPresentation,
+  type ResolvedTaskRowPresentation,
+} from "./task-row-presentation";
+import { TaskItemTrailing } from "./task-item-trailing";
 
 type DiffStats = {
   additions: number;
@@ -114,6 +118,7 @@ type TaskItemProps = {
   issueInfo?: { url: string; number: number };
   isPinned?: boolean;
   agentErrorMessage?: string | null;
+  taskRowPresentation?: import("@/lib/state/slices/ui/sidebar-task-row-presentation").SidebarTaskRowPresentation;
 };
 
 // Delegates to the shared classifier in task-switcher so the sidebar bucket
@@ -308,23 +313,6 @@ function TaskStateIcon({
   );
 }
 
-function DiffStatsRight({ diffStats, menuOpen }: { diffStats: DiffStats; menuOpen: boolean }) {
-  return (
-    <div
-      data-testid="sidebar-task-diff-stats"
-      className={cn(
-        "mobile-task-diff-stats shrink-0 self-center font-mono text-[11px] transition-opacity duration-100",
-        menuOpen
-          ? "opacity-0"
-          : "[@media(hover:hover)]:group-hover:opacity-0 group-focus-within/actions:opacity-0",
-      )}
-    >
-      <span className="text-emerald-500">+{diffStats.additions}</span>{" "}
-      <span className="text-rose-500">-{diffStats.deletions}</span>
-    </div>
-  );
-}
-
 function TaskItemTitle({ taskId, title }: { taskId?: string; title: string }) {
   // w-full: ScrollOnOverflow's root is inline-block, so once it sits inside
   // the title-preview trigger's <button> (task-title-hover-card.tsx) rather
@@ -352,16 +340,14 @@ function TaskItemContent({
   isArchived,
   isPinned,
   repositoryPath,
-  showRepository,
-  updatedAt,
-  lastActivityAt,
-  showActivityTime,
   prInfo,
   queuedCount,
   wipQueue,
   issueInfo,
   agentErrorMessage,
   comparisonUnavailable,
+  resolvedTaskRow,
+  relativeTime,
 }: {
   title: string;
   autopilot?: boolean;
@@ -374,16 +360,14 @@ function TaskItemContent({
   isArchived?: boolean;
   isPinned?: boolean;
   repositoryPath?: string;
-  showRepository: boolean;
-  updatedAt?: string;
-  lastActivityAt?: string;
-  showActivityTime?: boolean;
   prInfo?: { number: number; state: string; aggregateState?: string };
   queuedCount?: number;
   wipQueue?: WipQueueStatus;
   issueInfo?: { url: string; number: number };
   agentErrorMessage?: string | null;
   comparisonUnavailable?: boolean;
+  resolvedTaskRow: ResolvedTaskRowPresentation;
+  relativeTime?: string;
 }) {
   const { t } = useTranslation();
   return (
@@ -395,6 +379,7 @@ function TaskItemContent({
           isPinned={isPinned}
           taskId={taskId}
           prInfo={prInfo}
+          showChangeRequestStatus={resolvedTaskRow.trailing !== "change_request_status"}
           issueInfo={issueInfo}
           agentErrorMessage={agentErrorMessage}
         />
@@ -414,21 +399,27 @@ function TaskItemContent({
           </span>
         )}
       </span>
-      {taskId && (
+      {taskId && resolvedTaskRow.detailsEnabled && (
         <TaskRowMetadata
           taskId={taskId}
           workflowStepId={workflowStepId ?? null}
           surface="sidebar"
         />
       )}
-      <TaskItemStatsRow
-        updatedAt={showActivityTime ? (lastActivityAt ?? updatedAt) : updatedAt}
-        repositoryLabel={showRepository ? repositoryPath : undefined}
-        prInfo={prInfo}
-        primarySessionId={primarySessionId}
-        queuedCount={queuedCount}
-        wipQueue={wipQueue}
-      />
+      {resolvedTaskRow.detailsEnabled && (
+        <TaskItemStatsRow
+          updatedAt={relativeTime}
+          repositoryLabel={resolvedTaskRow.showRepository ? repositoryPath : undefined}
+          prInfo={resolvedTaskRow.showPullRequestNumber ? prInfo : undefined}
+          primarySessionId={primarySessionId}
+          queuedCount={queuedCount}
+          wipQueue={wipQueue}
+          detailOrder={resolvedTaskRow.detailOrder}
+          showRelativeTime={resolvedTaskRow.showRelativeTime}
+          showRepository={resolvedTaskRow.showRepository}
+          showPullRequestNumber={resolvedTaskRow.showPullRequestNumber}
+        />
+      )}
     </div>
   );
 }
@@ -478,9 +469,11 @@ export const TaskItem = memo(function TaskItem({
   isPinned,
   agentErrorMessage,
   isOnLastWorkflowStep = false,
+  taskRowPresentation,
 }: TaskItemProps) {
   const effectiveMenuOpen = menuOpen || isDeleting === true;
-  const hasDiffStats = !!diffStats && (diffStats.additions > 0 || diffStats.deletions > 0);
+  const resolvedTaskRow = resolveTaskRowPresentation(taskRowPresentation, { showRepository });
+  const relativeTime = showActivityTime ? (lastActivityAt ?? updatedAt) : updatedAt;
   const taskColor = useTaskColor(taskId);
   const indent = computeRowIndent(resolveRowDepth(depth, isSubTask));
 
@@ -520,27 +513,24 @@ export const TaskItem = memo(function TaskItem({
         isArchived={isArchived}
         isPinned={isPinned}
         repositoryPath={repositoryPath}
-        showRepository={showRepository}
-        updatedAt={updatedAt}
-        lastActivityAt={lastActivityAt}
-        showActivityTime={showActivityTime}
         prInfo={prInfo}
         queuedCount={queuedCount}
         wipQueue={wipQueue}
         issueInfo={issueInfo}
         agentErrorMessage={agentErrorMessage}
         comparisonUnavailable={comparisonUnavailable}
+        resolvedTaskRow={resolvedTaskRow}
+        relativeTime={relativeTime}
       />
-      {hasDiffStats ? (
-        <div className="mobile-task-actions-with-stats group/actions relative shrink-0 self-center flex items-center">
-          <DiffStatsRight diffStats={diffStats!} menuOpen={effectiveMenuOpen} />
-          <div className="mobile-task-actions-slot absolute inset-0 flex items-center justify-end">
-            <TaskMenuButton visible={effectiveMenuOpen} expanded={menuOpen} />
-          </div>
-        </div>
-      ) : (
-        <TaskMenuButton visible={effectiveMenuOpen} expanded={menuOpen} rowFocus />
-      )}
+      <TaskItemTrailing
+        trailing={resolvedTaskRow.trailing}
+        diffStats={diffStats}
+        menuOpen={menuOpen}
+        effectiveMenuOpen={effectiveMenuOpen}
+        relativeTime={relativeTime}
+        taskId={taskId}
+        prInfo={prInfo}
+      />
       {!!subtaskCount && subtaskCount > 0 && !!onToggleSubtasks && (
         <SubtaskToggle
           taskId={taskId}

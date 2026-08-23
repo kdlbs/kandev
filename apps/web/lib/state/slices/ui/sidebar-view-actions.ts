@@ -8,6 +8,7 @@ import type {
   SidebarViewDraft,
   SortSpec,
 } from "./sidebar-view-types";
+import { cloneSidebarTaskRowPresentation } from "./sidebar-task-row-presentation";
 import { toApiSidebarDraft, toApiSidebarView } from "./sidebar-view-wire";
 import { createDefaultSidebarView, MAX_SIDEBAR_VIEWS } from "./sidebar-view-builtins";
 import { t } from "@/lib/i18n";
@@ -69,7 +70,7 @@ function snapshotSidebar(s: UISliceState["sidebarViews"]): SidebarSnapshot {
   return {
     views: s.views.map(cloneView),
     activeViewId: s.activeViewId,
-    draft: s.draft ? { ...s.draft } : null,
+    draft: cloneDraft(s.draft),
   };
 }
 
@@ -178,7 +179,12 @@ function buildSidebarLocalActions(set: ImmerSet, get: () => UISlice) {
       syncSidebarViewState(set, { sidebar_active_view_id: viewId, sidebar_draft: null });
     },
     updateSidebarDraft: (
-      patch: Partial<{ filters: FilterClause[]; sort: SortSpec; group: GroupKey }>,
+      patch: Partial<{
+        filters: FilterClause[];
+        sort: SortSpec;
+        group: GroupKey;
+        taskRow: SidebarView["taskRow"];
+      }>,
     ) => {
       let committed = false;
       set((draft) => {
@@ -192,12 +198,14 @@ function buildSidebarLocalActions(set: ImmerSet, get: () => UISlice) {
           filters: active.filters,
           sort: active.sort,
           group: active.group,
+          taskRow: cloneSidebarTaskRowPresentation(active.taskRow),
         };
         const next: SidebarViewDraft = {
           baseViewId: active.id,
           filters: patch.filters ?? current.filters,
           sort: patch.sort ?? current.sort,
           group: patch.group ?? current.group,
+          taskRow: cloneSidebarTaskRowPresentation(patch.taskRow ?? current.taskRow),
         };
         draft.sidebarViews.draft = next;
       });
@@ -257,6 +265,7 @@ function buildSidebarBackendActions(set: ImmerSet, get: () => UISlice) {
           sort: s.draft.sort,
           group: s.draft.group,
           collapsedGroups: [],
+          taskRow: cloneSidebarTaskRowPresentation(s.draft.taskRow),
         });
         s.activeViewId = s.views[s.views.length - 1].id;
         s.draft = null;
@@ -269,6 +278,7 @@ function buildSidebarBackendActions(set: ImmerSet, get: () => UISlice) {
         view.filters = s.draft.filters;
         view.sort = s.draft.sort;
         view.group = s.draft.group;
+        view.taskRow = cloneSidebarTaskRowPresentation(s.draft.taskRow);
         s.draft = null;
       }),
     duplicateSidebarView: (viewId: string, name: string) =>
@@ -282,6 +292,7 @@ function buildSidebarBackendActions(set: ImmerSet, get: () => UISlice) {
           sort: source.sort,
           group: source.group,
           collapsedGroups: [],
+          taskRow: source.taskRow ? cloneSidebarTaskRowPresentation(source.taskRow) : undefined,
         });
         s.activeViewId = s.views[s.views.length - 1].id;
       }),
@@ -325,5 +336,17 @@ function cloneView(v: SidebarView): SidebarView {
     sort: { ...v.sort },
     group: v.group,
     collapsedGroups: [...v.collapsedGroups],
+    taskRow: v.taskRow ? cloneSidebarTaskRowPresentation(v.taskRow) : undefined,
+  };
+}
+
+function cloneDraft(draft: SidebarViewDraft | null): SidebarViewDraft | null {
+  if (!draft) return null;
+  return {
+    baseViewId: draft.baseViewId,
+    filters: draft.filters.map((filter) => ({ ...filter })),
+    sort: { ...draft.sort },
+    group: draft.group,
+    taskRow: draft.taskRow ? cloneSidebarTaskRowPresentation(draft.taskRow) : undefined,
   };
 }

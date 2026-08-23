@@ -20,6 +20,7 @@ export function buildTaskSwitcherProps(args: {
   effectiveView: {
     collapsedGroups: TaskSwitcherComponentProps["collapsedGroupKeys"];
     sort: { key: string };
+    taskRow?: TaskSwitcherComponentProps["taskRowPresentation"];
   };
   handleToggleGroup: TaskSwitcherComponentProps["onToggleGroup"];
   collapsedSubtaskParents: TaskSwitcherComponentProps["collapsedSubtaskParentIds"];
@@ -47,6 +48,7 @@ export function buildTaskSwitcherProps(args: {
     selectedTaskId: args.highlightedSelectedTaskId,
     collapsedGroupKeys: args.effectiveView.collapsedGroups,
     showActivityTime: args.effectiveView.sort.key === "lastActivityAt",
+    taskRowPresentation: args.effectiveView.taskRow,
     onToggleGroup: args.handleToggleGroup,
     collapsedSubtaskParentIds: args.collapsedSubtaskParents,
     onToggleSubtasks: args.toggleSubtaskCollapsed,
