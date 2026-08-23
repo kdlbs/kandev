@@ -922,7 +922,7 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 			s.registerAddWorkspaceSourcesTool()
 			s.registerUpdateRepositoryBaseBranchTool()
 		}},
-		{name: "step-completion", enabled: kanban, register: func(s *Server) { s.registerStepCompleteTool() }},
+		{name: "step-completion", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerStepCompleteTool() }},
 		{name: "task-title", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityTaskTitle)), register: func(s *Server) { s.registerSetTaskTitleTool() }},
 		{name: "diagnostics", enabled: kanban, register: func(s *Server) { s.registerDiagnosticBundleTool() }},
 	}

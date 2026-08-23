@@ -892,7 +892,7 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 	assert.Equal(t, 38, len(tools))
 }
 
-func TestServerStepCompleteTool_TaskOnlyAndDiscoverable(t *testing.T) {
+func TestServerStepCompleteTool_TaskAndOfficeOnlyAndDiscoverable(t *testing.T) {
 	log := newTestLogger(t)
 	backend := NewChannelBackendClient(log)
 	defer backend.Close()
@@ -907,7 +907,10 @@ func TestServerStepCompleteTool_TaskOnlyAndDiscoverable(t *testing.T) {
 	require.NoError(t, json.Unmarshal(serialized, &tool))
 	assert.NotContains(t, tool, "_meta", "task tools should use normal client discovery")
 
-	for _, mode := range []string{ModeOffice, ModeConfig, ModeExternal} {
+	officeServer := New(backend, "test-session", "test-task", 10005, log, "", false, ModeOffice)
+	assert.Contains(t, officeServer.mcpServer.ListTools(), "step_complete_kandev", "office mode must register step_complete_kandev (ADR 0015)")
+
+	for _, mode := range []string{ModeConfig, ModeExternal} {
 		t.Run(mode, func(t *testing.T) {
 			restrictedServer := New(backend, "test-session", "test-task", 10005, log, "", false, mode)
 			assert.NotContains(t, restrictedServer.mcpServer.ListTools(), "step_complete_kandev")
@@ -972,6 +975,11 @@ func TestServerModeOffice_RegistersCorrectTools(t *testing.T) {
 	assert.Contains(t, tools, "get_task_document_kandev")
 	assert.Contains(t, tools, "write_task_document_kandev")
 
+	// Office mode gets the ADR 0015 declarative completion signal too, so a
+	// step gated by auto_advance_requires_signal can advance without relying
+	// solely on the agent process exiting.
+	assert.Contains(t, tools, "step_complete_kandev")
+
 	// Office mode should NOT have kanban tools
 	assert.NotContains(t, tools, "create_task_kandev")
 	assert.NotContains(t, tools, "list_tasks_kandev")
@@ -996,10 +1004,11 @@ func TestServerModeOffice_ToolCount(t *testing.T) {
 
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeOffice)
 	tools := getRegisteredToolNames(s)
-	// 4 plan + 1 interaction + 1 related-tasks + 3 task-documents + 1 rich-output + 1 decisions = 11
+	// 4 plan + 1 interaction + 1 related-tasks + 3 task-documents + 1 rich-output + 1 decisions
+	// + 1 step_complete (ADR 0015) = 12.
 	// (delegate_task_kandev retired in favour of `agentctl kandev task create …`).
-	assert.NotContains(t, tools, "step_complete_kandev", "step_complete_kandev is kanban-task-only; office mode advances tasks via its own approval surface")
-	assert.Equal(t, 11, len(tools))
+	assert.Contains(t, tools, "step_complete_kandev", "office mode must register the ADR 0015 completion signal")
+	assert.Equal(t, 12, len(tools))
 }
 
 func TestServerModeOffice_DisableAskQuestion(t *testing.T) {
@@ -1016,9 +1025,10 @@ func TestServerModeOffice_DisableAskQuestion(t *testing.T) {
 	// delegate_task_kandev was retired from ModeOffice (now lives in
 	// the agentctl CLI as `agentctl kandev task create --parent …`).
 	assert.NotContains(t, tools, "delegate_task_kandev")
-	// 4 plan + 1 related-tasks + 3 task-documents + 1 rich-output + 1 decisions = 10
+	// 4 plan + 1 related-tasks + 3 task-documents + 1 rich-output + 1 decisions
+	// + 1 step_complete (ADR 0015) = 11
 	// (no ask_user_question, no delegate)
-	assert.Equal(t, 10, len(tools))
+	assert.Equal(t, 11, len(tools))
 }
 
 func TestServerModeConstants(t *testing.T) {
