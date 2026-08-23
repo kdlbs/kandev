@@ -26,6 +26,15 @@ func (s *Service) GetContinuationSummaryForTest(
 	return s.repo.GetContinuationSummary(ctx, agentProfileID, scope)
 }
 
+// LoadContinuationSummaryForTest exposes SchedulerIntegration's private
+// loadContinuationSummary so tests can drive the real reader path
+// (as assembleAgentPrompt calls it) without duplicating its scope logic.
+func (si *SchedulerIntegration) LoadContinuationSummaryForTest(
+	ctx context.Context, run *models.Run, agentID, taskID string,
+) string {
+	return si.loadContinuationSummary(ctx, run, agentID, taskID)
+}
+
 // ListTasksTouchedByRunForTest exposes the repo's read query so the
 // run-lifecycle integration tests can verify run_id plumbing on the
 // activity log.

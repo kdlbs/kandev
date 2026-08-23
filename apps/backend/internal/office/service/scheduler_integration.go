@@ -381,7 +381,7 @@ func (si *SchedulerIntegration) assembleAgentPrompt(
 		}
 	}
 
-	continuationSummary := si.loadContinuationSummary(ctx, agent.ID, taskID)
+	continuationSummary := si.loadContinuationSummary(ctx, run, agent.ID, taskID)
 	promptResult := si.svc.BuildAgentPrompt(
 		run, agent, instructionsDir, agentsMD, isResume, wakeContext,
 		taskID, continuationSummary,
@@ -393,18 +393,24 @@ func (si *SchedulerIntegration) assembleAgentPrompt(
 // loadContinuationSummary fetches the per-(agent, scope) continuation
 // summary for a taskless run. Returns "" when:
 // - taskID is non-empty (task-bound runs don't use the summary doc)
-// - the summary table has no row yet (first heartbeat ever for the agent)
+// - the summary table has no row yet (first wake ever for the scope)
 // - the lookup errors out (best-effort, fall back to no-summary)
 //
-// Today no caller passes taskID==""; this branch is a no-op until
-// PR 2 lands the agent_heartbeat cron handler.
+// The scope must match summaryScopeForRun's write-time key exactly: a
+// routine-dispatched taskless run carries routine_id in its
+// ContextSnapshot and is written under "routine:<id>"; every other
+// taskless source (comment / agent_error / self) falls back to
+// "agent:<id>". This is the reader half of a routine-triggered wake
+// (wakeup/payloads.go's SourceRoutine) — every scheduled wake flows
+// through a routine today, so the routine:<id> branch is the common case,
+// not a future one.
 func (si *SchedulerIntegration) loadContinuationSummary(
-	ctx context.Context, agentID, taskID string,
+	ctx context.Context, run *models.Run, agentID, taskID string,
 ) string {
 	if taskID != "" || agentID == "" {
 		return ""
 	}
-	prior, err := si.svc.repo.GetContinuationSummary(ctx, agentID, "heartbeat")
+	prior, err := si.svc.repo.GetContinuationSummary(ctx, agentID, summaryScopeForRun(run, agentID))
 	if err != nil || prior == nil {
 		return ""
 	}
