@@ -1223,7 +1223,6 @@ func initOfficeServices(
 
 	services.Office.SetPricingLookup(pricingLookup)
 	orchestratorSvc.SetModelInfoLookup(pricingLookup)
-	services.Office.SetSessionUsageWriter(repos.Task)
 
 	// ADR 0005 Wave E: plug the runtime-tier skill deployer into the
 	// lifecycle manager. The deployer reads office's skills repo +
