@@ -28,6 +28,7 @@ export type SidebarViewEditorCurrent = {
 
 type Props = {
   current: SidebarViewEditorCurrent;
+  isDrawerLayout: boolean;
   headerProps: ComponentProps<typeof ViewHeaderRow>;
   onUpdate: (patch: Partial<SidebarViewEditorCurrent>) => void;
   onAddFilter: () => void;
@@ -37,6 +38,7 @@ type Props = {
 
 export function SidebarViewEditor({
   current,
+  isDrawerLayout,
   headerProps,
   onUpdate,
   onAddFilter,
@@ -51,16 +53,17 @@ export function SidebarViewEditor({
       </div>
       <FilterSection
         filters={current.filters}
+        isDrawerLayout={isDrawerLayout}
         onAdd={onAddFilter}
         onChange={onChangeClause}
         onRemove={onRemoveClause}
       />
-      <div className="border-b px-2 pb-2 pt-0">
-        <SectionLabel>{t("task:sort")}</SectionLabel>
+      <div className={`border-b px-2 pb-2 ${isDrawerLayout ? "pt-2" : "pt-0"}`}>
+        <SectionLabel isDrawerLayout={isDrawerLayout}>{t("task:sort")}</SectionLabel>
         <SortPicker value={current.sort} onChange={(sort) => onUpdate({ sort })} />
       </div>
-      <div className="px-2 pb-2 pt-0">
-        <SectionLabel>{t("task:groupBy")}</SectionLabel>
+      <div className={`px-2 pb-2 ${isDrawerLayout ? "pt-2" : "pt-0"}`}>
+        <SectionLabel isDrawerLayout={isDrawerLayout}>{t("task:groupBy")}</SectionLabel>
         <GroupPicker value={current.group} onChange={(group) => onUpdate({ group })} />
       </div>
       <TaskRowSettings
@@ -75,31 +78,43 @@ export function SidebarViewEditor({
 const SECTION_LABEL_CLASS =
   "text-[11px] font-medium uppercase leading-none tracking-wide text-muted-foreground";
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return <span className={`-mt-1 mb-1 block ${SECTION_LABEL_CLASS}`}>{children}</span>;
+function SectionLabel({
+  children,
+  isDrawerLayout,
+}: {
+  children: React.ReactNode;
+  isDrawerLayout: boolean;
+}) {
+  return (
+    <span className={`${isDrawerLayout ? "" : "-mt-1 "}mb-1 block ${SECTION_LABEL_CLASS}`}>
+      {children}
+    </span>
+  );
 }
 
 function FilterSection({
   filters,
+  isDrawerLayout,
   onAdd,
   onChange,
   onRemove,
 }: {
   filters: FilterClause[];
+  isDrawerLayout: boolean;
   onAdd: () => void;
   onChange: (next: FilterClause) => void;
   onRemove: (id: string) => void;
 }) {
   const { t } = useTranslation();
   return (
-    <div className="border-b px-2 pb-2 pt-0">
-      <div className="-mt-1 mb-1 flex items-center justify-between">
+    <div className={`border-b px-2 pb-2 ${isDrawerLayout ? "pt-2" : "pt-0"}`}>
+      <div className={`${isDrawerLayout ? "" : "-mt-1 "}mb-1 flex items-center justify-between`}>
         <span className={SECTION_LABEL_CLASS}>{t("task:filters")}</span>
         <Button
           type="button"
           size="sm"
           variant="ghost"
-          className="-my-1 h-6 cursor-pointer text-xs"
+          className={`${isDrawerLayout ? "" : "-my-1 "}h-6 cursor-pointer text-xs`}
           onClick={onAdd}
           data-testid="filter-add-button"
         >

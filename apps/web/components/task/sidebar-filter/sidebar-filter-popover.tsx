@@ -59,6 +59,7 @@ export function SidebarFilterPopover({
   const editor = (
     <SidebarViewEditor
       current={current}
+      isDrawerLayout={!usesDesktopWorkbench}
       headerProps={headerProps}
       onUpdate={updateDraft}
       onAddFilter={() =>

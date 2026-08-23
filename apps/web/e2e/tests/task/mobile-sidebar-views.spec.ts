@@ -391,6 +391,37 @@ test.describe("Mobile sidebar — view system", () => {
     await expect.poll(() => taskRowOrder(reloadedSheet, taskIds)).toEqual(taskIds);
   });
 
+  test("keeps mobile section labels clear of separator lines", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const sheet = await seedAndOpenSheet(testPage, apiClient, seedData, [
+      "Mobile separator spacing",
+    ]);
+    await sheet.getByTestId("sidebar-filter-gear").click();
+
+    const popover = testPage.getByTestId("sidebar-filter-popover");
+    await expect(popover).toBeVisible();
+
+    for (const { label, sectionLevel } of [
+      { label: "Filters", sectionLevel: 2 },
+      { label: "Sort", sectionLevel: 1 },
+      { label: "Group by", sectionLevel: 1 },
+    ]) {
+      const heading = popover.getByText(label, { exact: true });
+      const section =
+        sectionLevel === 2 ? heading.locator("..").locator("..") : heading.locator("..");
+      const [headingBox, sectionBox] = await Promise.all([
+        heading.boundingBox(),
+        section.boundingBox(),
+      ]);
+      expect(headingBox).not.toBeNull();
+      expect(sectionBox).not.toBeNull();
+      expect(headingBox!.y).toBeGreaterThan(sectionBox!.y + 3);
+    }
+  });
+
   test("task row settings use the drawer, touch targets, and persisted preview", async ({
     testPage,
     apiClient,
