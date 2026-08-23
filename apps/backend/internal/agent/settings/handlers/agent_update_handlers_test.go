@@ -45,6 +45,10 @@ func (handlerSelectionStore) Save(context.Context, string, string, string) error
 	return nil
 }
 
+func (handlerSelectionStore) Delete(context.Context, string, string) error {
+	return nil
+}
+
 func (u *handlerRuntimeUpdater) CurrentCapabilities(string) (hostutility.AgentCapabilities, bool) {
 	return hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: "1.0.0"}, true
 }
@@ -181,7 +185,9 @@ func TestAgentUpdatePreviewEndpointIsReadOnly(t *testing.T) {
 	if preview["current_version"] != "1.0.0" || preview["target_version"] != "1.1.0" {
 		t.Fatalf("versions = %#v", preview)
 	}
-	if preview["command_string"] != `npm exec --yes --prefer-online --package=@agentclientprotocol/claude-agent-acp -- node -e ""` {
+	commandArgs := agents.NewClaudeACP().ManagedNPMRuntime().CacheUpdateCommand().Args()
+	wantCommand := strings.Join(commandArgs[:len(commandArgs)-1], " ") + ` ""`
+	if preview["command_string"] != wantCommand {
 		t.Fatalf("command_string = %#v", preview["command_string"])
 	}
 
@@ -189,6 +195,28 @@ func TestAgentUpdatePreviewEndpointIsReadOnly(t *testing.T) {
 	router.ServeHTTP(jobs, updateRequest(http.MethodGet, "/api/v1/agent-update/jobs"))
 	if jobs.Code != http.StatusOK || !strings.Contains(jobs.Body.String(), `"jobs":[]`) {
 		t.Fatalf("preview must not create a job: %d %s", jobs.Code, jobs.Body.String())
+	}
+}
+
+func TestAgentUpdateStatusEndpointIsReadOnly(t *testing.T) {
+	t.Setenv("KANDEV_E2E_MOCK", "true")
+	router, ctrl, _ := newAgentUpdateRouter(t, &handlerRuntimeUpdater{})
+	var statusResponse struct {
+		Statuses []dto.AgentUpdateStatusDTO `json:"statuses"`
+	}
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, updateRequest(http.MethodGet, "/api/v1/agent-update/status"))
+	if response.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &statusResponse); err != nil {
+		t.Fatalf("decode status response: %v", err)
+	}
+	if len(statusResponse.Statuses) == 0 {
+		t.Fatal("status response is empty")
+	}
+	if jobs := ctrl.ListAgentUpdateJobs(); len(jobs) != 0 {
+		t.Fatalf("status request created %d update jobs", len(jobs))
 	}
 }
 

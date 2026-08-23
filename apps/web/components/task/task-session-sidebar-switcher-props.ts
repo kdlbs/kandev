@@ -65,6 +65,8 @@ export function buildTaskSwitcherProps(args: {
     onNestTask: args.handleNestTask,
     pinnedTaskIds: args.pinnedTaskIds,
     deletingTaskId: args.sidebarActions.deletingTaskId,
+    archivingTaskId: args.sidebarActions.archivingTaskId,
+    isArchiving: args.sidebarActions.isArchiving,
     isLoading: args.isLoadingWorkflow,
     loadError: args.archivedError ? args.archivedLoadErrorLabel : null,
     onRetryLoad: args.retryArchivedTasks,

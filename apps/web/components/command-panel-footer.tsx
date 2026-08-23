@@ -38,6 +38,11 @@ import {
 } from "@/components/command-panel-scope-switcher";
 import type { WorkspaceContentSearchError } from "@/hooks/domains/session/use-workspace-content-search";
 import type { WorkspaceContentSearchResult } from "@/lib/types/backend";
+import {
+  CommandPanelConfirmation,
+  dismissCommandConfirmation,
+  getCommandConfirmationState,
+} from "@/components/command-panel-confirmation";
 
 const ARCHIVED_STATES = new Set(["COMPLETED", "CANCELLED", "FAILED"]);
 export const MODE_COMMANDS: CommandPanelMode = "commands";
@@ -527,12 +532,17 @@ function CommandPanelResultList(props: CommandPanelViewProps) {
     repoMap,
     handleTaskSelect,
   } = props;
+  const { confirmationCommand, visibleCommands, visibleGroups } = getCommandConfirmationState(
+    commands,
+    grouped,
+  );
   return (
     <CommandList>
+      {confirmationCommand && <CommandPanelConfirmation command={confirmationCommand} />}
       {mode === MODE_COMMANDS && (
         <CommandsListContent
-          commands={commands}
-          grouped={grouped}
+          commands={visibleCommands}
+          grouped={visibleGroups}
           search={search}
           onSelect={handleSelect}
           taskResults={taskResults}
@@ -589,10 +599,15 @@ export function CommandPanelView(props: CommandPanelViewProps) {
     if (workspaceModeUnavailable) onScopeChange("commands");
   }, [onScopeChange, workspaceModeUnavailable]);
 
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) dismissCommandConfirmation(props.commands);
+    setOpen(nextOpen);
+  };
+
   return (
     <CommandDialog
       open={open}
-      onOpenChange={setOpen}
+      onOpenChange={handleOpenChange}
       overlayClassName="supports-backdrop-filter:backdrop-blur-none!"
     >
       <Command

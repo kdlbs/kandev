@@ -249,10 +249,10 @@ type FileListSectionProps = {
   // hits the right git repo. Same-named files across repos collide by path.
   onStage: (path: string, repo?: string) => void;
   onUnstage: (path: string, repo?: string) => void;
-  onDiscard: (path: string, repo?: string) => void;
+  onDiscard: (path: string, repo?: string, anchor?: HTMLElement) => void;
   onBulkStage?: (paths: string[]) => void;
   onBulkUnstage?: (paths: string[]) => void;
-  onBulkDiscard?: (paths: string[]) => void;
+  onBulkDiscard?: (paths: string[], anchor?: HTMLElement) => void;
   // Per-repo action handlers shown inline with each repo group header. Always
   // rendered, including single-repo (with one entry pre-selected) — the empty
   // `repo` argument routes ops to the workspace root in that case.
@@ -280,7 +280,7 @@ type FileListBodyProps = {
   onEditFile: (path: string, repo?: string) => void;
   onStage: (path: string, repo?: string) => void;
   onUnstage: (path: string, repo?: string) => void;
-  onDiscard: (path: string, repo?: string) => void;
+  onDiscard: (path: string, repo?: string, anchor?: HTMLElement) => void;
   /** Per-repo group header actions; primary = Stage all (unstaged) / Commit (staged). */
   onRepoAction?: (repo: string) => void;
   onRepoSecondaryAction?: (repo: string) => void;

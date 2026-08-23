@@ -19,8 +19,10 @@ the existing Sessions picker.
 
 - The existing desktop X-confirm-delete scenario verifies the selected tab and backend session are
   removed without a deletion progress or success toast.
-- A `mobile-chrome` scenario deletes one of two sessions through the Sessions picker row action and
-  verifies the other session remains reachable.
+- Desktop context-menu scenarios use the anchored confirmation popover, not an alert dialog, while
+  preserving cancel and confirm outcomes.
+- A `mobile-chrome` scenario cancels and then confirms the inline Sessions picker row action,
+  verifies no alert dialog opens, and proves the other session remains reachable.
 - Both scenarios use stable test IDs or scoped accessible controls and assert user-visible outcomes,
   not API-only behavior.
 
@@ -73,8 +75,9 @@ task/plan status.
 
 - Extended the desktop close-confirmation scenario to assert that neither the deletion progress nor
   success toast appears.
-- Added `mobile-session-deletion.spec.ts`, using the native Sessions picker and scoped row actions
-  to delete one of two sessions while keeping the remaining row reachable.
+- Added `mobile-session-deletion.spec.ts`, using the native Sessions picker and scoped inline row
+  actions to cancel once, delete one of two sessions, and keep the remaining row reachable without
+  an alert dialog.
 - `rtk pnpm e2e:run tests/session/session-tab-management.spec.ts -- --grep "tab close button shows delete confirmation"` — 1 desktop test passed with a production build.
 - `rtk pnpm e2e:run --no-build --project mobile-chrome tests/session/mobile-session-deletion.spec.ts` — 1 mobile test passed.
 - `rtk pnpm e2e:run --no-build tests/session/session-tab-management.spec.ts tests/session/session-tab-close-guard.spec.ts` — 9 desktop tests passed.

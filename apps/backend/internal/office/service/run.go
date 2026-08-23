@@ -29,6 +29,16 @@ const (
 	RunReasonAgentError            = "agent_error"
 )
 
+// These reasons were persisted by earlier workflow templates. Keep them
+// readable so existing materialized workflows continue to wake the correct
+// prompt after the built-in template changes.
+const (
+	legacyRunReasonBlockersResolved  = "blockers_resolved"
+	legacyRunReasonChildrenCompleted = "children_completed"
+	legacyRunReasonReviewStarted     = "review_started"
+	legacyRunReasonApprovalStarted   = "approval_started"
+)
+
 // Run status constants.
 const (
 	RunStatusQueued    = "queued"

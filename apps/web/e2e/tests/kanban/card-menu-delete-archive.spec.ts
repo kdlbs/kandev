@@ -3,7 +3,7 @@ import { KanbanPage } from "../../pages/kanban-page";
 
 const TASK_VISIBLE_TIMEOUT = 10_000;
 
-// Regression: clicking Delete / Archive must show the confirm dialog, not navigate to the task.
+// Regression: clicking Delete / Archive must show the local confirmation, not navigate to the task.
 test.describe("Kanban card actions menu — delete/archive does not navigate", () => {
   test("clicking Delete in card dropdown shows confirm dialog and does not navigate", async ({
     testPage,
@@ -67,22 +67,10 @@ test.describe("Kanban card actions menu — delete/archive does not navigate", (
     await expect(archiveItem).toBeVisible();
     await archiveItem.click();
 
-    const dialog = testPage.getByRole("alertdialog");
-    await expect(dialog).toBeVisible();
-    await expect(dialog).toContainText("Card Menu Archive Task");
-    const dialogBox = await dialog.boundingBox();
-    if (!dialogBox) throw new Error("archive confirmation dialog has no layout box");
-    expect(dialogBox.width).toBeGreaterThanOrEqual(480);
-    await expect(dialog).toHaveClass(/font-sans/);
-    const archiveHeader = dialog.locator('[data-slot="alert-dialog-header"]');
-    await expect
-      .poll(async () =>
-        archiveHeader.evaluate((element) => {
-          const style = getComputedStyle(element);
-          return { justifyItems: style.justifyItems, textAlign: style.textAlign };
-        }),
-      )
-      .toEqual({ justifyItems: "start", textAlign: "left" });
+    const confirmation = testPage.getByTestId("task-archive-confirm-popover");
+    await expect(confirmation).toBeVisible();
+    await expect(confirmation).toContainText("Card Menu Archive Task");
+    await expect(confirmation.getByTestId("archive-task-confirm")).toBeVisible();
 
     expect(testPage.url()).toBe(startUrl);
   });
@@ -175,9 +163,9 @@ test.describe("Kanban card actions menu — delete/archive in All Workflows view
     await kanban.openTaskActionsMenu(task.id);
     await testPage.getByRole("menuitem", { name: "Archive" }).click();
 
-    const dialog = testPage.getByRole("alertdialog");
-    await expect(dialog).toBeVisible();
-    await dialog.getByRole("button", { name: "Archive" }).click();
+    const confirmation = testPage.getByTestId("task-archive-confirm-popover");
+    await expect(confirmation).toBeVisible();
+    await confirmation.getByTestId("archive-task-confirm").click();
 
     await expect(kanban.taskCardByTitle("All-Wf Archive Task")).not.toBeVisible({
       timeout: TASK_VISIBLE_TIMEOUT,

@@ -243,6 +243,60 @@ test.describe("Changes panel focus behavior", () => {
     await expect(session.chat).toBeVisible({ timeout: 5_000 });
   });
 
+  test("discarding one changed file uses local confirmation", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+    prCapture,
+  }) => {
+    test.setTimeout(90_000);
+
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Single file discard confirmation",
+      seedData.agentProfileId,
+      {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+    await session.clickTab("Changes");
+
+    git.createFile("single-discard.txt", "discard me");
+    const file = session.changesFileRow("single-discard.txt");
+    await expect(file).toBeVisible({ timeout: 15_000 });
+    await file.hover();
+
+    const discard = file.getByRole("button", { name: "Discard changes" });
+    await expect(discard).toBeVisible();
+    await discard.click();
+
+    const confirmation = testPage.getByTestId("discard-local-changes-confirm-popover");
+    await expect(confirmation).toBeVisible();
+    await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
+    await expect(file).toBeVisible();
+    await prCapture.screenshot("desktop-discard-file-confirmation", {
+      caption: "Desktop Changes panel with one-file discard confirmation",
+    });
+
+    await testPage.keyboard.press("Escape");
+    await expect(confirmation).not.toBeVisible();
+    await expect(discard).toBeFocused();
+
+    await discard.click();
+    await expect(confirmation).toBeVisible();
+    await testPage.getByTestId("discard-local-changes-confirm").click();
+    await expect(file).not.toBeVisible({ timeout: 15_000 });
+  });
+
   test("changes panel does not auto-focus when grouped with agent session panels", async ({
     testPage,
     apiClient,

@@ -741,11 +741,33 @@ type taskPRSyncState struct {
 	unresolved, reviewCount, pendingReviewCount int
 	requiredReviews                             *int
 	baseBranch, mergeableState, state           string
+	mergeQueueState                             string
+	mergeQueuePosition, mergeQueueEstimate      *int
 	mergedAt, closedAt                          *time.Time
 	isDraft                                     *bool
 	changedFiles                                *int
 	mergedByLogin, closedByLogin                *string
 	autoMergeObservedAt                         *time.Time
+}
+
+func resolveTaskPRMergeQueueFields(tp *TaskPR, status *PRStatus) (string, *int, *int) {
+	var state string
+	var position, estimate *int
+	if tp != nil {
+		state = tp.MergeQueueState
+		position = tp.MergeQueuePosition
+		estimate = tp.MergeQueueEstimatedTimeToMergeSeconds
+	}
+	if status == nil || status.PR == nil {
+		return state, position, estimate
+	}
+	if strings.EqualFold(status.PR.State, prStateMerged) || strings.EqualFold(status.PR.State, prStateClosed) {
+		return "", nil, nil
+	}
+	if !status.mergeQueuePopulated {
+		return state, position, estimate
+	}
+	return normalizeMergeQueueState(status.MergeQueueState), positiveIntPtr(status.MergeQueuePosition), nonNegativeIntPtr(status.MergeQueueEstimatedTimeToMergeSeconds)
 }
 
 // resolveTaskPROutcomeFields applies the populated/preserve dance for the
@@ -873,6 +895,7 @@ func (s *Service) prepareTaskPRSyncState(ctx context.Context, tp *TaskPR, status
 	if status.PR.Draft {
 		nextMergeableState = "draft"
 	}
+	mergeQueueState, mergeQueuePosition, mergeQueueEstimate := resolveTaskPRMergeQueueFields(tp, status)
 	nextState, nextMergedAt, nextClosedAt := resolveTerminalMergeState(tp, status.PR)
 	nextIsDraft, nextChangedFiles, nextMergedByLogin, nextClosedByLogin, nextAutoMergeObservedAt :=
 		resolveTaskPROutcomeFields(tp, status)
@@ -880,6 +903,7 @@ func (s *Service) prepareTaskPRSyncState(ctx context.Context, tp *TaskPR, status
 		checksTotal: nextChecksTotal, checksPassing: nextChecksPassing,
 		unresolved: nextUnresolved, reviewCount: nextReviewCount, pendingReviewCount: nextPendingReviewCount,
 		requiredReviews: nextRequiredReviews, baseBranch: nextBaseBranch, mergeableState: nextMergeableState,
+		mergeQueueState: mergeQueueState, mergeQueuePosition: mergeQueuePosition, mergeQueueEstimate: mergeQueueEstimate,
 		state: nextState, mergedAt: nextMergedAt, closedAt: nextClosedAt,
 		isDraft: nextIsDraft, changedFiles: nextChangedFiles,
 		mergedByLogin: nextMergedByLogin, closedByLogin: nextClosedByLogin,
@@ -899,6 +923,9 @@ func taskPRChangedFields(tp *TaskPR, status *PRStatus, next taskPRSyncState) []s
 	changed = appendChangedField(changed, "review_state", tp.ReviewState != status.ReviewState)
 	changed = appendChangedField(changed, "checks_state", tp.ChecksState != status.ChecksState)
 	changed = appendChangedField(changed, "mergeable_state", tp.MergeableState != next.mergeableState)
+	changed = appendChangedField(changed, "merge_queue_state", tp.MergeQueueState != next.mergeQueueState)
+	changed = appendChangedField(changed, "merge_queue_position", !intPtrEqual(tp.MergeQueuePosition, next.mergeQueuePosition))
+	changed = appendChangedField(changed, "merge_queue_estimated_time_to_merge_seconds", !intPtrEqual(tp.MergeQueueEstimatedTimeToMergeSeconds, next.mergeQueueEstimate))
 	changed = appendChangedField(changed, "review_count", tp.ReviewCount != next.reviewCount)
 	changed = appendChangedField(
 		changed,
@@ -969,6 +996,9 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 	tp.ReviewState = status.ReviewState
 	tp.ChecksState = status.ChecksState
 	tp.MergeableState = next.mergeableState
+	tp.MergeQueueState = next.mergeQueueState
+	tp.MergeQueuePosition = next.mergeQueuePosition
+	tp.MergeQueueEstimatedTimeToMergeSeconds = next.mergeQueueEstimate
 	tp.ReviewCount = next.reviewCount
 	tp.PendingReviewCount = next.pendingReviewCount
 	tp.RequiredReviews = next.requiredReviews

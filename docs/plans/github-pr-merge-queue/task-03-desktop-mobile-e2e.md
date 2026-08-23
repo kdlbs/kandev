@@ -26,18 +26,24 @@ spec: "../../specs/github-pr-merge-queue/spec.md"
 
 ## Acceptance
 
-- Desktop E2E proves merge-queue acceptance from the existing PR UI.
-- Component coverage proves immediate merge feedback and duplicate-submission
-  suppression without duplicating those deterministic cases in Playwright.
-- Mobile E2E reaches the same queued outcome through Review using touch and
-  verifies action size and absence of horizontal document overflow.
-- The managed runner builds fresh backend/frontend artifacts and both focused
-  projects pass without retries masking failures.
+- Desktop E2E has separate action and display scenarios. The action scenario
+  proves the existing PR UI exposes `Merge PR`, returns the queued API outcome,
+  shows the success notification, and suppresses the accepted action. The
+  display scenario proves task hover, compact popover, and detail notice expose
+  queued state, position, and estimated duration.
+- Mobile E2E has separate action and display scenarios. The action scenario
+  reaches the queued outcome through Review using touch, verifies a minimum
+  44px action target, and checks the success notification. The display scenario
+  verifies the existing status drawer and Review surface expose queue metadata
+  without hover.
+- Both display scenarios retain the absence-of-horizontal-document-overflow
+  assertion, and the managed runner builds fresh backend/frontend artifacts
+  before the focused projects pass without retries masking failures.
 
 ## Verification
 
 ```bash
-cd apps && pnpm install --frozen-lockfile && cd web && pnpm e2e:run tests/pr/pr-merge-queue.spec.ts && pnpm e2e:run --project mobile-chrome tests/pr/mobile-pr-merge-queue.spec.ts
+cd apps && pnpm install --frozen-lockfile && cd web && pnpm e2e:run tests/pr/pr-merge-queue.spec.ts && pnpm e2e:run --no-build --project mobile-chrome tests/pr/mobile-pr-merge-queue.spec.ts
 ```
 
 ## Dependencies And Risks
@@ -50,10 +56,15 @@ cd apps && pnpm install --frozen-lockfile && cd web && pnpm e2e:run tests/pr/pr-
 
 ## Results
 
-- Desktop managed E2E passed with one discovered test.
-- Mobile Chrome managed E2E passed with one discovered test, including the
-  touch action, minimum target height, and horizontal-overflow assertions.
-- `pnpm run typecheck` passed after the final E2E helper and spec changes.
-- Isolated desktop and mobile screenshots were captured under
-  `/tmp/kandev-merge-queue-screenshots-20260817/`; capture-only test hooks were
-  removed and both specs passed again afterward.
+Recorded after the remediation run:
+
+- Desktop managed E2E passed with two discovered tests in 12.2 seconds: the
+  merge action and the queued-status display scenario.
+- Mobile Chrome managed E2E passed with two discovered tests in 9.6 seconds:
+  the Review merge action with the minimum target-height assertion and the
+  drawer/Review queue display scenario. Both retained the horizontal-overflow
+  assertion.
+- The fresh-build desktop command was followed by the mobile `--no-build`
+  command, so both projects exercised the same newly built artifacts.
+- Existing queue-status screenshots remain valid for the display scenario;
+  action coverage is behavioral and does not add capture assets.

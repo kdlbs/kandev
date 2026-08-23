@@ -575,5 +575,18 @@
   "timeAgoYears_other": "há {{count}}a",
   "toggleReviewFollowUpAutomation": "Alternar a automação de seguimento da revisão",
   "wakeAgentOnReviewRequest": "Acordar o agente para qualquer novo pedido, incluindo nova revisão após alterações.",
-  "wakeAgentOnTerminalPrState": "Acordar o agente quando o trabalho de revisão terminar. Escolha um dos resultados ou ambos."
+  "wakeAgentOnTerminalPrState": "Acordar o agente quando o trabalho de revisão terminar. Escolha um dos resultados ou ambos.",
+  "mergeQueueEstimate_one": "Tempo estimado até ao merge: {{count}} minuto.",
+  "mergeQueueEstimate_other": "Tempo estimado até ao merge: {{count}} minutos.",
+  "mergeQueuePosition": "Posição {{position}}",
+  "mergeQueuePositionAndEstimate_one": "Posição {{position}}. Tempo estimado até ao merge: {{count}} minuto.",
+  "mergeQueuePositionAndEstimate_other": "Posição {{position}}. Tempo estimado até ao merge: {{count}} minutos.",
+  "mergeQueuePositionAndSubMinuteEstimate": "Posição {{position}}. Tempo estimado até ao merge: menos de um minuto.",
+  "mergeQueueStateAwaitingChecks": "A aguardar verificações",
+  "mergeQueueStateLocked": "Bloqueado",
+  "mergeQueueStateMergeable": "Integrável",
+  "mergeQueueStateQueued": "Em fila",
+  "mergeQueueStateUnmergeable": "Não integrável",
+  "mergeQueueStatus": "Fila de merge: {{state}}",
+  "mergeQueueSubMinuteEstimate": "Tempo estimado até ao merge: menos de um minuto."
 }

@@ -30,7 +30,11 @@ func (s managedRuntimeSelectionStore) Save(context.Context, string, string, stri
 	return nil
 }
 
-func TestBuildAgentCommandUsesExactVersionOnlyOnStandalone(t *testing.T) {
+func (s managedRuntimeSelectionStore) Delete(context.Context, string, string) error {
+	return nil
+}
+
+func TestBuildAgentCommandUsesEffectiveVersionAcrossExecutors(t *testing.T) {
 	log := newTestLogger()
 	manager := &Manager{commandBuilder: NewCommandBuilder(), logger: log}
 	manager.SetManagedRuntimeSelectionStore(managedRuntimeSelectionStore{
@@ -46,8 +50,8 @@ func TestBuildAgentCommandUsesExactVersionOnlyOnStandalone(t *testing.T) {
 	}{
 		{name: "standalone", executorType: models.ExecutorTypeLocal, wantVersion: true},
 		{name: "worktree", executorType: models.ExecutorTypeWorktree, wantVersion: true},
-		{name: "docker", executorType: models.ExecutorTypeLocalDocker},
-		{name: "ssh", executorType: models.ExecutorTypeSSH},
+		{name: "docker", executorType: models.ExecutorTypeLocalDocker, wantVersion: true},
+		{name: "ssh", executorType: models.ExecutorTypeSSH, wantVersion: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -121,7 +125,7 @@ func TestBuildFreshAgentCommandFailsWhenStandaloneSelectionCannotBeRead(t *testi
 	}
 }
 
-func TestBuildFreshAgentCommandLeavesRemoteCommandUnversioned(t *testing.T) {
+func TestBuildFreshAgentCommandUsesEffectiveVersionForRemoteRestart(t *testing.T) {
 	manager := &Manager{commandBuilder: NewCommandBuilder(), logger: newTestLogger()}
 	manager.SetManagedRuntimeSelectionStore(managedRuntimeSelectionStore{
 		selection: managedruntime.Selection{Package: "opencode-ai", Version: "1.18.5"},
@@ -136,10 +140,19 @@ func TestBuildFreshAgentCommandLeavesRemoteCommandUnversioned(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildFreshAgentCommand: %v", err)
 	}
-	if strings.Contains(commands.initial, "opencode-ai@1.18.5") {
-		t.Fatalf("remote restart command = %q, must not use host selection", commands.initial)
+	if !strings.Contains(commands.initial, "opencode-ai@1.18.5") {
+		t.Fatalf("remote restart command = %q, want exact selected version", commands.initial)
 	}
-	if !strings.Contains(commands.initial, "opencode-ai") {
-		t.Fatalf("remote restart command = %q, want managed runtime command", commands.initial)
+}
+
+func TestRemotePreflightUsesResolvedManagedRuntimeVersion(t *testing.T) {
+	req := &ExecutorCreateRequest{
+		AgentConfig:           agents.NewOpenCodeACP(),
+		ManagedRuntimeVersion: "1.18.5",
+	}
+	got := buildRemotePreflightAgentCommand(req).Args()
+	want := []string{"npx", "--yes", "--prefer-offline", "opencode-ai@1.18.5", "acp", "--print-logs", "--log-level", "ERROR"}
+	if !strings.EqualFold(strings.Join(got, " "), strings.Join(want, " ")) {
+		t.Fatalf("remote preflight command = %#v, want %#v", got, want)
 	}
 }

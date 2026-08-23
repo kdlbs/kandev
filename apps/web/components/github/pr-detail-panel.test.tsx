@@ -9,6 +9,8 @@ import type { PRFeedback, TaskPR } from "@/lib/types/github";
 import { getPRFeedback } from "@/lib/api/domains/github-api";
 import { PRDetailPanelComponent } from "./pr-detail-panel";
 
+const BOT_COMMENTS_LABEL = "Bot comments (1)";
+
 vi.mock("@/lib/api/domains/github-api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api/domains/github-api")>();
   return {
@@ -58,14 +60,14 @@ function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
   };
 }
 
-function makeFeedback(pr: TaskPR, botCommentBody: string): PRFeedback {
+function makeFeedback(pr: TaskPR, botCommentBody: string, state = "open"): PRFeedback {
   return {
     pr: {
       number: pr.pr_number,
       title: pr.pr_title,
       url: pr.pr_url,
       html_url: pr.pr_url,
-      state: "open",
+      state,
       head_branch: pr.head_branch,
       base_branch: pr.base_branch,
       author_login: pr.author_login,
@@ -161,8 +163,8 @@ describe("PRDetailPanelComponent — task switch on the singleton legacy panel",
     const { getStoreApi } = renderPanel(taskState("task-1", "session-1", [pr1]));
 
     // Task 1: expand the bot-comments disclosure.
-    await waitFor(() => expect(screen.getByText("Bot comments (1)")).toBeTruthy());
-    fireEvent.click(screen.getByText("Bot comments (1)"));
+    await waitFor(() => expect(screen.getByText(BOT_COMMENTS_LABEL)).toBeTruthy());
+    fireEvent.click(screen.getByText(BOT_COMMENTS_LABEL));
     await waitFor(() => expect(screen.getByText("PR 1 bot comment")).toBeTruthy());
 
     // Switch to a different task whose PR also has exactly one bot comment —
@@ -175,10 +177,24 @@ describe("PRDetailPanelComponent — task switch on the singleton legacy panel",
       }));
     });
 
-    await waitFor(() => expect(screen.getByText("Bot comments (1)")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(BOT_COMMENTS_LABEL)).toBeTruthy());
     // Task 2's bot comment must stay collapsed by default, not inherit task 1's
     // expanded disclosure state.
     expect(screen.queryByText("PR 2 bot comment")).toBeNull();
     expect(screen.queryByText("PR 1 bot comment")).toBeNull();
+  });
+
+  it("does not show a stale queue notice after live feedback closes the PR", async () => {
+    const pr = makePR({
+      merge_queue_state: "queued",
+      merge_queue_position: 2,
+      merge_queue_estimated_time_to_merge_seconds: 120,
+    });
+    vi.mocked(getPRFeedback).mockResolvedValue(makeFeedback(pr, "Closed PR", "closed"));
+
+    renderPanel(taskState("task-1", "session-1", [pr]));
+
+    await waitFor(() => expect(screen.getByText(BOT_COMMENTS_LABEL)).toBeTruthy());
+    expect(screen.queryByTestId("pr-merge-queue-status")).toBeNull();
   });
 });

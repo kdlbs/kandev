@@ -1,6 +1,6 @@
 "use client";
 
-import { memo } from "react";
+import { memo, type ReactNode } from "react";
 import {
   IconChevronDown,
   IconCircleCheck,
@@ -11,6 +11,7 @@ import {
 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { computeRowIndent, resolveRowDepth } from "@/lib/sidebar/row-indent";
+import { TaskItemStatsRow } from "./task-item-stats-row";
 import { useTaskColor } from "@/hooks/use-task-color";
 import { TASK_COLOR_BAR_CLASS, type TaskColor } from "@/lib/task-colors";
 import type { ForegroundActivity, TaskState, TaskSessionState } from "@/lib/types/http";
@@ -21,11 +22,15 @@ import {
   shouldUsePermissionTaskIcon,
 } from "@/lib/ui/state-icons";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { RemoteCloudTooltip } from "./remote-cloud-tooltip";
+import { TaskRowMetadata } from "./task-row-plugin-slots";
 import { classifyTask } from "./task-classify";
+import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import { useTranslation } from "react-i18next";
+import { TaskItemComparisonUnavailable } from "./task-item-comparison-unavailable";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
 import { TaskMenuButton } from "./task-item-menu-button";
-import { TaskItemContent } from "./task-item-content";
+import { TaskItemLeadingBadges } from "./task-item-leading-badges";
 
 type DiffStats = {
   additions: number;
@@ -64,6 +69,7 @@ type TaskItemProps = {
   lastActivityAt?: string;
   showActivityTime?: boolean;
   menuOpen?: boolean;
+  archiveConfirmation?: ReactNode;
   isDeleting?: boolean;
   taskId?: string;
   /** Drives the `task-row-metadata` plugin slot's `workflowStepId`. */
@@ -319,120 +325,207 @@ function DiffStatsRight({ diffStats, menuOpen }: { diffStats: DiffStats; menuOpe
   );
 }
 
-// The row keeps its state and accessibility affordances together for keyboard
-// selection, so this small exception avoids splitting that interaction across
-// multiple components.
-// eslint-disable-next-line max-lines-per-function
-export const TaskItem = memo(function TaskItem({
+function TaskItemTitle({ title }: { title: string }) {
+  return <ScrollOnOverflow className="min-w-0 w-full">{title}</ScrollOnOverflow>;
+}
+
+function TaskItemContent({
   title,
   autopilot,
-  state,
-  sessionState,
-  foregroundActivity,
-  isArchived,
-  isSelected = false,
-  isMultiSelected = false,
-  onClick,
-  onSelect,
-  diffStats,
-  comparisonUnavailable,
+  taskId,
+  workflowStepId,
   isRemoteExecutor,
   remoteExecutorType,
   remoteExecutorName,
+  primarySessionId,
+  isArchived,
+  isPinned,
+  repositoryPath,
+  showRepository,
   updatedAt,
   lastActivityAt,
-  showActivityTime = false,
-  menuOpen = false,
-  isDeleting,
-  taskId,
-  workflowStepId,
-  primarySessionId,
-  hasPendingClarification,
-  hasPendingPermission,
-  interrupted,
-  isSubTask,
-  depth,
-  subtaskCount,
-  subtasksCollapsed,
-  onToggleSubtasks,
-  repositoryPath,
-  showRepository = true,
+  showActivityTime,
   prInfo,
   queuedCount,
   wipQueue,
   issueInfo,
-  isPinned,
   agentErrorMessage,
-  isOnLastWorkflowStep = false,
-}: TaskItemProps) {
-  const effectiveMenuOpen = menuOpen || isDeleting === true;
-  const hasDiffStats = !!diffStats && (diffStats.additions > 0 || diffStats.deletions > 0);
-  const taskColor = useTaskColor(taskId);
-  const indent = computeRowIndent(resolveRowDepth(depth, isSubTask));
+  comparisonUnavailable,
+}: {
+  title: string;
+  autopilot?: boolean;
+  taskId?: string;
+  workflowStepId?: string | null;
+  isRemoteExecutor?: boolean;
+  remoteExecutorType?: string;
+  remoteExecutorName?: string;
+  primarySessionId?: string | null;
+  isArchived?: boolean;
+  isPinned?: boolean;
+  repositoryPath?: string;
+  showRepository: boolean;
+  updatedAt?: string;
+  lastActivityAt?: string;
+  showActivityTime?: boolean;
+  prInfo?: { number: number; state: string; aggregateState?: string };
+  queuedCount?: number;
+  wipQueue?: WipQueueStatus;
+  issueInfo?: { url: string; number: number };
+  agentErrorMessage?: string | null;
+  comparisonUnavailable?: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+      <span className="flex items-center gap-1 min-w-0 text-[13px] font-medium text-foreground leading-tight">
+        <TaskItemTitle title={title} />
+        <TaskItemLeadingBadges
+          autopilot={autopilot}
+          isPinned={isPinned}
+          taskId={taskId}
+          prInfo={prInfo}
+          issueInfo={issueInfo}
+          agentErrorMessage={agentErrorMessage}
+        />
+        <TaskItemComparisonUnavailable unavailable={comparisonUnavailable} />
+        {isRemoteExecutor && (
+          <RemoteCloudTooltip
+            taskId={taskId ?? ""}
+            sessionId={primarySessionId ?? null}
+            executorType={remoteExecutorType}
+            fallbackName={remoteExecutorName ?? remoteExecutorType}
+            iconClassName="h-3 w-3 text-muted-foreground/60"
+          />
+        )}
+        {isArchived && (
+          <span className="rounded px-1 py-px text-[10px] bg-amber-500/15 text-amber-500">
+            {t("task:filterDimensionArchived")}
+          </span>
+        )}
+      </span>
+      {taskId && (
+        <TaskRowMetadata
+          taskId={taskId}
+          workflowStepId={workflowStepId ?? null}
+          surface="sidebar"
+        />
+      )}
+      <TaskItemStatsRow
+        updatedAt={showActivityTime ? (lastActivityAt ?? updatedAt) : updatedAt}
+        repositoryLabel={showRepository ? repositoryPath : undefined}
+        prInfo={prInfo}
+        primarySessionId={primarySessionId}
+        queuedCount={queuedCount}
+        wipQueue={wipQueue}
+      />
+    </div>
+  );
+}
+
+function TaskItemActions({
+  archiveConfirmation,
+  diffStats,
+  hasDiffStats,
+  menuOpen,
+  effectiveMenuOpen,
+}: {
+  archiveConfirmation?: ReactNode;
+  diffStats?: DiffStats;
+  hasDiffStats: boolean;
+  menuOpen: boolean;
+  effectiveMenuOpen: boolean;
+}) {
+  if (archiveConfirmation) {
+    return (
+      <div className="min-w-0 basis-full flex items-center justify-end">{archiveConfirmation}</div>
+    );
+  }
+  if (hasDiffStats) {
+    return (
+      <div className="mobile-task-actions-with-stats group/actions relative shrink-0 self-center flex items-center">
+        <DiffStatsRight diffStats={diffStats!} menuOpen={effectiveMenuOpen} />
+        <div className="mobile-task-actions-slot absolute inset-0 flex items-center justify-end">
+          <TaskMenuButton visible={effectiveMenuOpen} expanded={menuOpen} />
+        </div>
+      </div>
+    );
+  }
+  return <TaskMenuButton visible={effectiveMenuOpen} expanded={menuOpen} rowFocus />;
+}
+
+export const TaskItem = memo(function TaskItem(props: TaskItemProps) {
+  const isSelected = props.isSelected ?? false;
+  const isMultiSelected = props.isMultiSelected ?? false;
+  const menuOpen = props.menuOpen ?? false;
+  const effectiveMenuOpen = menuOpen || props.isDeleting === true;
+  const hasDiffStats =
+    !!props.diffStats && (props.diffStats.additions > 0 || props.diffStats.deletions > 0);
+  const taskColor = useTaskColor(props.taskId);
+  const indent = computeRowIndent(resolveRowDepth(props.depth, props.isSubTask));
 
   return (
     <div
       role="button"
       tabIndex={0}
       data-testid="sidebar-task-item"
-      data-task-row-id={taskId}
+      data-task-row-id={props.taskId}
       {...taskItemStateAttrs(isSelected, isMultiSelected)}
-      onClick={taskItemRowClick(onSelect, onClick)}
-      onKeyDown={(e) => handleTaskItemKeyDown(e, onSelect, onClick)}
+      onClick={taskItemRowClick(props.onSelect, props.onClick)}
+      onKeyDown={(e) => handleTaskItemKeyDown(e, props.onSelect, props.onClick)}
       style={indent.depth > 0 ? { paddingLeft: indent.paddingLeftPx } : undefined}
-      className={taskItemRowClassName(isSelected, isMultiSelected, indent.depth === 0)}
+      className={cn(
+        taskItemRowClassName(isSelected, isMultiSelected, indent.depth === 0),
+        props.archiveConfirmation && "flex-wrap",
+      )}
     >
       <SelectionBar isSelected={isSelected} color={taskColor} />
       <RowConnector depth={indent.depth} leftPx={indent.connectorLeftPx} />
       <TaskStateIcon
-        sessionState={sessionState}
-        state={state}
-        foregroundActivity={foregroundActivity}
-        isInProgress={computeIsInProgress(state, sessionState)}
-        hasPendingClarification={hasPendingClarification}
-        hasPendingPermission={hasPendingPermission}
-        interrupted={interrupted}
-        isOnLastWorkflowStep={isOnLastWorkflowStep}
+        sessionState={props.sessionState}
+        state={props.state}
+        foregroundActivity={props.foregroundActivity}
+        isInProgress={computeIsInProgress(props.state, props.sessionState)}
+        hasPendingClarification={props.hasPendingClarification}
+        hasPendingPermission={props.hasPendingPermission}
+        interrupted={props.interrupted}
+        isOnLastWorkflowStep={props.isOnLastWorkflowStep ?? false}
       />
       <TaskItemContent
-        title={title}
-        autopilot={autopilot}
-        taskId={taskId}
-        workflowStepId={workflowStepId}
-        isRemoteExecutor={isRemoteExecutor}
-        remoteExecutorType={remoteExecutorType}
-        remoteExecutorName={remoteExecutorName}
-        primarySessionId={primarySessionId}
-        isArchived={isArchived}
-        isPinned={isPinned}
-        repositoryPath={repositoryPath}
-        showRepository={showRepository}
-        updatedAt={updatedAt}
-        lastActivityAt={lastActivityAt}
-        showActivityTime={showActivityTime}
-        prInfo={prInfo}
-        queuedCount={queuedCount}
-        wipQueue={wipQueue}
-        issueInfo={issueInfo}
-        agentErrorMessage={agentErrorMessage}
-        comparisonUnavailable={comparisonUnavailable}
+        title={props.title}
+        autopilot={props.autopilot}
+        taskId={props.taskId}
+        workflowStepId={props.workflowStepId}
+        isRemoteExecutor={props.isRemoteExecutor}
+        remoteExecutorType={props.remoteExecutorType}
+        remoteExecutorName={props.remoteExecutorName}
+        primarySessionId={props.primarySessionId}
+        isArchived={props.isArchived}
+        isPinned={props.isPinned}
+        repositoryPath={props.repositoryPath}
+        showRepository={props.showRepository ?? true}
+        updatedAt={props.updatedAt}
+        lastActivityAt={props.lastActivityAt}
+        showActivityTime={props.showActivityTime ?? false}
+        prInfo={props.prInfo}
+        queuedCount={props.queuedCount}
+        wipQueue={props.wipQueue}
+        issueInfo={props.issueInfo}
+        agentErrorMessage={props.agentErrorMessage}
+        comparisonUnavailable={props.comparisonUnavailable}
       />
-      {hasDiffStats ? (
-        <div className="mobile-task-actions-with-stats group/actions relative shrink-0 self-center flex items-center">
-          <DiffStatsRight diffStats={diffStats!} menuOpen={effectiveMenuOpen} />
-          <div className="mobile-task-actions-slot absolute inset-0 flex items-center justify-end">
-            <TaskMenuButton visible={effectiveMenuOpen} expanded={menuOpen} />
-          </div>
-        </div>
-      ) : (
-        <TaskMenuButton visible={effectiveMenuOpen} expanded={menuOpen} rowFocus />
-      )}
-      {!!subtaskCount && subtaskCount > 0 && !!onToggleSubtasks && (
+      <TaskItemActions
+        archiveConfirmation={props.archiveConfirmation}
+        diffStats={props.diffStats}
+        hasDiffStats={hasDiffStats}
+        menuOpen={menuOpen}
+        effectiveMenuOpen={effectiveMenuOpen}
+      />
+      {!!props.subtaskCount && props.subtaskCount > 0 && !!props.onToggleSubtasks && (
         <SubtaskToggle
-          taskId={taskId}
-          count={subtaskCount!}
-          collapsed={!!subtasksCollapsed}
-          onToggle={onToggleSubtasks!}
+          taskId={props.taskId}
+          count={props.subtaskCount}
+          collapsed={!!props.subtasksCollapsed}
+          onToggle={props.onToggleSubtasks}
         />
       )}
     </div>

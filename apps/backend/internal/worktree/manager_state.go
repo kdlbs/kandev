@@ -53,9 +53,9 @@ func (m *Manager) persistAndCacheWorktree(ctx context.Context, wt *Worktree, req
 	return nil
 }
 
-// persistWorktree writes the worktree to persistent storage, logging a warning
-// when session_id or a resolvable task environment is missing and cleaning up
-// the git worktree directory on failure.
+// persistWorktree writes the worktree to persistent storage, logging a debug
+// entry when session_id or a resolvable task environment is missing and
+// cleaning up the git worktree directory on failure.
 //
 // Initial materialization runs before the executor persists the task
 // environment, so the store cannot resolve an environment yet — that launch's
@@ -72,7 +72,7 @@ func (m *Manager) persistWorktree(ctx context.Context, wt *Worktree, req CreateR
 	}
 	if err := m.store.CreateWorktree(ctx, wt); err != nil {
 		if errors.Is(err, ErrEnvironmentNotResolved) {
-			m.logger.Warn("skipping worktree persistence: session has no task environment yet",
+			m.logger.Debug("skipping worktree persistence: session has no task environment yet",
 				zap.String("task_id", req.TaskID),
 				zap.String("session_id", req.SessionID),
 				zap.String("worktree_id", wt.ID))
