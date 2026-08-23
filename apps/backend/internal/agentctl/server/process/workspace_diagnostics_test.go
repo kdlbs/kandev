@@ -121,3 +121,29 @@ func TestManager_GitPollStats_AggregatesAcrossRepoTrackers(t *testing.T) {
 		t.Fatalf("mean across root + extra tracker = %f, want > 0", mean)
 	}
 }
+
+func TestManager_MonitorPollStats_AggregatesWorkspaceMonitorTicks(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	t.Cleanup(cleanup)
+
+	log := newTestLogger(t)
+	m := NewManager(&config.InstanceConfig{WorkDir: repoDir}, log)
+	root, _ := m.snapshotTrackers()
+	if root == nil {
+		t.Fatal("expected a root workspace tracker")
+	}
+
+	lastState := workspaceState{}
+	var consecutiveFailures int
+	if stop := root.monitorTick(context.Background(), &lastState, &consecutiveFailures); stop {
+		t.Fatal("monitorTick unexpectedly signalled stop")
+	}
+
+	count, mean := m.MonitorPollStats()
+	if count != 1 {
+		t.Fatalf("MonitorPollStats count = %d, want 1", count)
+	}
+	if mean <= 0 {
+		t.Fatalf("MonitorPollStats mean = %f, want > 0", mean)
+	}
+}

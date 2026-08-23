@@ -10,8 +10,9 @@ import (
 )
 
 const (
-	labelGitPollLatency = "Git poll latency"
-	labelCreateToReady  = "Create-to-ready"
+	labelGitPollLatency     = "Git poll latency"
+	labelMonitorPollLatency = "Workspace monitor latency"
+	labelCreateToReady      = "Create-to-ready"
 )
 
 func (s *Server) handleSystemMetrics(c *gin.Context) {
@@ -70,7 +71,10 @@ func collectorMetricIDs(metricIDs []string) []string {
 
 func isAgentctlDiagnosticMetric(id string) bool {
 	switch id {
-	case metrics.MetricAgentctlGoroutines, metrics.MetricAgentctlGitPollMillis, metrics.MetricAgentctlCreateReadyMs:
+	case metrics.MetricAgentctlGoroutines,
+		metrics.MetricAgentctlGitPollMillis,
+		metrics.MetricAgentctlMonitorMillis,
+		metrics.MetricAgentctlCreateReadyMs:
 		return true
 	default:
 		return false
@@ -90,6 +94,8 @@ func (s *Server) agentctlDiagnosticSample(id string) metrics.MetricSample {
 		return goroutineCountSample()
 	case metrics.MetricAgentctlGitPollMillis:
 		return s.gitPollLatencySample()
+	case metrics.MetricAgentctlMonitorMillis:
+		return s.monitorPollLatencySample()
 	case metrics.MetricAgentctlCreateReadyMs:
 		return s.createReadyMillisSample()
 	default:
@@ -130,6 +136,26 @@ func (s *Server) gitPollLatencySample() metrics.MetricSample {
 	return metrics.MetricSample{
 		ID:        metrics.MetricAgentctlGitPollMillis,
 		Label:     labelGitPollLatency,
+		Unit:      "ms",
+		Available: true,
+		Value:     &meanMillis,
+	}
+}
+
+func (s *Server) monitorPollLatencySample() metrics.MetricSample {
+	count, meanMillis := s.procMgr.MonitorPollStats()
+	if count == 0 {
+		return metrics.MetricSample{
+			ID:        metrics.MetricAgentctlMonitorMillis,
+			Label:     labelMonitorPollLatency,
+			Unit:      "ms",
+			Available: false,
+			Error:     "no workspace monitor scan completed yet",
+		}
+	}
+	return metrics.MetricSample{
+		ID:        metrics.MetricAgentctlMonitorMillis,
+		Label:     labelMonitorPollLatency,
 		Unit:      "ms",
 		Available: true,
 		Value:     &meanMillis,

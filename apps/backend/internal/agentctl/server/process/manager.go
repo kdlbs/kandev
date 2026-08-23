@@ -597,6 +597,30 @@ func (m *Manager) GitPollStats() (count int64, meanMillis float64) {
 	return totalCount, float64(totalNanos) / float64(totalCount) / float64(time.Millisecond)
 }
 
+// MonitorPollStats aggregates completed workspace monitor scans and their
+// mean duration across this instance's root and per-repo workspace trackers.
+// The initial scan is included. count == 0 means no scan has completed yet.
+func (m *Manager) MonitorPollStats() (count int64, meanMillis float64) {
+	root, trackers := m.snapshotTrackers()
+	var totalCount, totalNanos int64
+	accumulate := func(wt *WorkspaceTracker) {
+		if wt == nil {
+			return
+		}
+		c, n := wt.MonitorTickStats()
+		totalCount += c
+		totalNanos += n
+	}
+	accumulate(root)
+	for _, t := range trackers {
+		accumulate(t)
+	}
+	if totalCount == 0 {
+		return 0, 0
+	}
+	return totalCount, float64(totalNanos) / float64(totalCount) / float64(time.Millisecond)
+}
+
 // StartAllWorkspaceTrackers starts root + per-repo trackers (idempotent) so file-change events fire in passthrough mode.
 func (m *Manager) StartAllWorkspaceTrackers(ctx context.Context) {
 	root, trackers := m.snapshotTrackers()

@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"reflect"
+	"sync/atomic"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agentctl/server/config"
+	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/system/metrics"
 )
 
@@ -93,7 +96,7 @@ func TestHandleSystemMetrics_HonoursRequestedMetrics(t *testing.T) {
 }
 
 // TestHandleSystemMetrics_DiagnosticMetricsAbsentByDefault guards the
-// user-visible-surface boundary: the three agentctl diagnostic metric IDs
+// user-visible-surface boundary: the agentctl diagnostic metric IDs
 // must never appear unless a caller names them explicitly, because they are
 // deliberately excluded from metrics.isKnownMetric and must never leak into
 // what looks like the persisted/broadcast metric set.
@@ -115,6 +118,7 @@ func TestHandleSystemMetrics_DiagnosticMetricsAbsentByDefault(t *testing.T) {
 	diagnostic := map[string]bool{
 		metrics.MetricAgentctlGoroutines:    true,
 		metrics.MetricAgentctlGitPollMillis: true,
+		metrics.MetricAgentctlMonitorMillis: true,
 		metrics.MetricAgentctlCreateReadyMs: true,
 	}
 	for _, sample := range snapshot.Metrics {
@@ -125,7 +129,7 @@ func TestHandleSystemMetrics_DiagnosticMetricsAbsentByDefault(t *testing.T) {
 }
 
 // TestHandleSystemMetrics_DiagnosticMetricsServedWhenRequested asserts the
-// three diagnostic metrics are served, with the expected shape, only when
+// diagnostic metrics are served, with the expected shape, only when
 // explicitly named. newTestServer's config never goes through
 // instance.Manager.CreateInstance and its process.Manager is never started,
 // so agentctl_create_ready_ms and agentctl_git_poll_ms are exercised on their
@@ -136,6 +140,7 @@ func TestHandleSystemMetrics_DiagnosticMetricsServedWhenRequested(t *testing.T) 
 	rec := serverGet(t, srv, "/api/v1/system/metrics?metrics="+
 		metrics.MetricAgentctlGoroutines+","+
 		metrics.MetricAgentctlGitPollMillis+","+
+		metrics.MetricAgentctlMonitorMillis+","+
 		metrics.MetricAgentctlCreateReadyMs)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d (body %s)", rec.Code, rec.Body.String())
@@ -155,6 +160,7 @@ func TestHandleSystemMetrics_DiagnosticMetricsServedWhenRequested(t *testing.T) 
 	wantIDs := []string{
 		metrics.MetricAgentctlGoroutines,
 		metrics.MetricAgentctlGitPollMillis,
+		metrics.MetricAgentctlMonitorMillis,
 		metrics.MetricAgentctlCreateReadyMs,
 	}
 	if len(snapshot.Metrics) != len(wantIDs) {
@@ -186,9 +192,44 @@ func TestHandleSystemMetrics_DiagnosticMetricsServedWhenRequested(t *testing.T) 
 		t.Errorf("git poll sample = %+v, want unavailable with an error (no tracker started)", gitPoll)
 	}
 
+	monitorPoll := byID[metrics.MetricAgentctlMonitorMillis]
+	if monitorPoll.Available || monitorPoll.Error == "" {
+		t.Errorf("monitor poll sample = %+v, want unavailable with an error (no tracker started)", monitorPoll)
+	}
+
 	createReady := byID[metrics.MetricAgentctlCreateReadyMs]
 	if createReady.Available || createReady.Error == "" {
 		t.Errorf("create-ready sample = %+v, want unavailable with an error (nil CreateReadyMillis)", createReady)
+	}
+}
+
+func TestHandleSystemMetrics_CreateReadyIsAvailableAfterInstanceStartup(t *testing.T) {
+	log := newTestLogger()
+	readyMillis := &atomic.Int64{}
+	readyMillis.Store(42)
+	cfg := &config.InstanceConfig{
+		Port:              0,
+		WorkDir:           t.TempDir(),
+		CreateReadyMillis: readyMillis,
+	}
+	server := NewServer(cfg, process.NewManager(cfg, log), nil, nil, log)
+
+	rec := serverGet(t, server, "/api/v1/system/metrics?metrics="+metrics.MetricAgentctlCreateReadyMs)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (body %s)", rec.Code, rec.Body.String())
+	}
+	var snapshot struct {
+		Metrics []metrics.MetricSample `json:"metrics"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &snapshot); err != nil {
+		t.Fatalf("decode snapshot %q: %v", rec.Body.String(), err)
+	}
+	if len(snapshot.Metrics) != 1 {
+		t.Fatalf("metrics = %+v, want one sample", snapshot.Metrics)
+	}
+	sample := snapshot.Metrics[0]
+	if sample.ID != metrics.MetricAgentctlCreateReadyMs || !sample.Available || sample.Value == nil || *sample.Value != 42 {
+		t.Fatalf("create-ready sample = %+v, want available value 42", sample)
 	}
 }
 
@@ -235,7 +276,7 @@ func TestHandleSystemMetrics_MixedMetricsPreserveRequestOrder(t *testing.T) {
 // collector's fallback behaviour for an ID that is neither a known backend
 // metric nor an agentctl diagnostic one: it must still come back as exactly
 // one "unknown metric" sample, not zero (collectorMetricIDs must not filter
-// out anything besides the three diagnostic IDs) and not two (the diagnostic
+// out anything besides the diagnostic IDs) and not two (the diagnostic
 // path must not also emit something for it).
 func TestHandleSystemMetrics_GenuinelyUnknownMetricStillReportsUnknown(t *testing.T) {
 	srv := newTestServer(t)

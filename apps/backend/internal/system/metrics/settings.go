@@ -29,6 +29,7 @@ const (
 const (
 	MetricAgentctlGoroutines    = "agentctl_goroutines"
 	MetricAgentctlGitPollMillis = "agentctl_git_poll_ms"
+	MetricAgentctlMonitorMillis = "agentctl_monitor_poll_ms"
 	MetricAgentctlCreateReadyMs = "agentctl_create_ready_ms"
 )
 
