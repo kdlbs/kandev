@@ -367,7 +367,7 @@ function useKanbanCardMenus({
     isDetaching,
     detachAnchorRef,
     detachFocusReturnRef,
-    archiveAnchorRef: detachAnchorRef,
+    archiveAnchorRef: detachFocusReturnRef,
     archiveFocusReturnRef: detachFocusReturnRef,
     handleDetachConfirm,
   };

@@ -27,6 +27,8 @@ export type CommandItem = {
   keepOpen?: boolean;
   /** Confirmation content rendered inside the open palette. */
   confirmation?: ReactNode;
+  /** Clears action-owned confirmation state when the palette itself closes. */
+  onConfirmationDismiss?: () => void;
   /** For 'input' mode: placeholder text for the input field */
   inputPlaceholder?: string;
   /** For 'input' mode: called with the input value when Enter is pressed */

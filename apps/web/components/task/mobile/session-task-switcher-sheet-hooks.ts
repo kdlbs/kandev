@@ -403,7 +403,7 @@ function useSheetNestTask() {
   return useNestTaskByDrag();
 }
 
-function useSheetArchiveActions(
+export function useSheetArchiveActions(
   store: ReturnType<typeof useAppStoreApi>,
   archiveAndSwitch: ReturnType<typeof useArchiveAndSwitchTask>,
 ) {
@@ -414,16 +414,19 @@ function useSheetArchiveActions(
     executorType?: string | null;
   } | null>(null);
   const [isArchiving, setIsArchiving] = useState(false);
+  const [archivingTaskId, setArchivingTaskId] = useState<string | null>(null);
 
   const runArchive = useCallback(
     async (taskId: string, opts?: { cascade?: boolean }) => {
       setIsArchiving(true);
+      setArchivingTaskId(taskId);
       try {
         await archiveAndSwitch(taskId, opts);
       } catch (error) {
         console.error("Failed to archive task:", error);
       } finally {
         setIsArchiving(false);
+        setArchivingTaskId((current) => (current === taskId ? null : current));
         setArchivingTask((current) => (current?.id === taskId ? null : current));
       }
     },
@@ -457,7 +460,7 @@ function useSheetArchiveActions(
   return {
     handleArchiveTask,
     archivingTask,
-    archivingTaskId: archivingTask?.id ?? null,
+    archivingTaskId,
     setArchivingTask,
     isArchiving,
     handleArchiveConfirm,

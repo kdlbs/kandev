@@ -126,6 +126,50 @@ describe("TaskArchiveConfirmDialog preference", () => {
   });
 });
 
+describe("TaskArchiveConfirmDialog classification safety", () => {
+  it("disables archive while descendant classification is pending", () => {
+    const onConfirm = vi.fn();
+
+    renderDialog(
+      <TaskArchiveConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="My task"
+        taskId="task-1"
+        executorType="worktree"
+        subtaskClassification={{ status: "loading", total: 0 }}
+        confirmTestId="archive-confirm"
+        onConfirm={onConfirm}
+      />,
+    );
+
+    const confirm = screen.getByTestId("archive-confirm");
+    expect(confirm.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(confirm);
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it("keeps the safe fallback actionable when classification fails", () => {
+    const onConfirm = vi.fn();
+
+    renderDialog(
+      <TaskArchiveConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="My task"
+        taskId="task-1"
+        executorType="worktree"
+        subtaskClassification={{ status: "error", total: 0 }}
+        confirmTestId="archive-confirm"
+        onConfirm={onConfirm}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("archive-confirm"));
+    expect(onConfirm).toHaveBeenCalledWith({ cascade: false });
+  });
+});
+
 describe("TaskArchiveConfirmDialog cleanup copy", () => {
   it("renders local-executor reassurance about untouched repo", () => {
     renderDialog(

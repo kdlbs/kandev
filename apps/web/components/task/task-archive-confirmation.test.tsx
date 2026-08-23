@@ -5,6 +5,7 @@ import { StateProvider } from "@/components/state-provider";
 
 const getSubtaskCountMock = vi.hoisted(() => vi.fn());
 const pointerState = vi.hoisted(() => ({ isFinePointer: false }));
+const CONFIRM_TEST_ID = "archive-task-confirm";
 
 vi.mock("@/lib/api", () => ({
   getSubtaskCount: (...args: unknown[]) => getSubtaskCountMock(...args),
@@ -18,7 +19,13 @@ import { TaskArchiveConfirmation } from "./task-archive-confirmation";
 
 afterEach(cleanup);
 
-function ConfirmationHarness({ onConfirm }: { onConfirm: () => void }) {
+function ConfirmationHarness({
+  onConfirm,
+  onOpenChange,
+}: {
+  onConfirm: () => void;
+  onOpenChange: (open: boolean) => void;
+}) {
   const anchorRef = useRef<HTMLButtonElement>(null);
   return (
     <>
@@ -27,22 +34,22 @@ function ConfirmationHarness({ onConfirm }: { onConfirm: () => void }) {
       </button>
       <TaskArchiveConfirmation
         open
-        onOpenChange={vi.fn()}
+        onOpenChange={onOpenChange}
         anchorRef={anchorRef}
         taskId="task-1"
         taskTitle="Task One"
         executorType="worktree"
         onConfirm={onConfirm}
-        confirmTestId="archive-task-confirm"
+        confirmTestId={CONFIRM_TEST_ID}
       />
     </>
   );
 }
 
-function renderConfirmation(onConfirm = vi.fn()) {
+function renderConfirmation(onConfirm = vi.fn(), onOpenChange = vi.fn()) {
   return render(
     <StateProvider>
-      <ConfirmationHarness onConfirm={onConfirm} />
+      <ConfirmationHarness onConfirm={onConfirm} onOpenChange={onOpenChange} />
     </StateProvider>,
   );
 }
@@ -58,8 +65,24 @@ describe("TaskArchiveConfirmation classification", () => {
 
     renderConfirmation();
 
-    expect(screen.queryByTestId("archive-task-confirm")).toBeNull();
+    expect(screen.queryByTestId(CONFIRM_TEST_ID)).toBeNull();
     expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("shows a disabled anchored loading surface while desktop classification is pending", () => {
+    pointerState.isFinePointer = true;
+    getSubtaskCountMock.mockReturnValue(new Promise(() => undefined));
+    const onOpenChange = vi.fn();
+
+    renderConfirmation(vi.fn(), onOpenChange);
+
+    expect(screen.getByTestId("task-archive-confirm-popover")).toBeTruthy();
+    expect(screen.getByText("Loading…")).toBeTruthy();
+    expect(screen.getByTestId(CONFIRM_TEST_ID).hasAttribute("disabled")).toBe(true);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
   it("uses touch-sized local actions after a resolved zero-descendant result", async () => {
@@ -70,7 +93,7 @@ describe("TaskArchiveConfirmation classification", () => {
     const confirmation = await screen.findByTestId("task-archive-inline-confirmation");
     expect(confirmation).toBeTruthy();
     expect(screen.queryByRole("alertdialog")).toBeNull();
-    expect(screen.getByTestId("archive-task-confirm").className).toContain("h-11");
+    expect(screen.getByTestId(CONFIRM_TEST_ID).className).toContain("h-11");
   });
 
   it("keeps descendants on the cascade dialog branch", async () => {
@@ -101,7 +124,7 @@ describe("TaskArchiveConfirmation classification", () => {
     });
 
     renderConfirmation(onConfirm);
-    fireEvent.click(await screen.findByTestId("archive-task-confirm"));
+    fireEvent.click(await screen.findByTestId(CONFIRM_TEST_ID));
 
     await waitFor(() => expect(onConfirm).toHaveBeenCalledOnce());
     expect(closedBeforeConfirm).toBe(true);

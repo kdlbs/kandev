@@ -465,121 +465,79 @@ function TaskItemActions({
   return <TaskMenuButton visible={effectiveMenuOpen} expanded={menuOpen} rowFocus />;
 }
 
-// The row keeps its state and accessibility affordances together for keyboard
-// selection, so this small exception avoids splitting that interaction across
-// multiple components.
-// eslint-disable-next-line max-lines-per-function
-export const TaskItem = memo(function TaskItem({
-  title,
-  autopilot,
-  state,
-  sessionState,
-  foregroundActivity,
-  isArchived,
-  isSelected = false,
-  isMultiSelected = false,
-  onClick,
-  onSelect,
-  diffStats,
-  comparisonUnavailable,
-  isRemoteExecutor,
-  remoteExecutorType,
-  remoteExecutorName,
-  updatedAt,
-  lastActivityAt,
-  showActivityTime = false,
-  menuOpen = false,
-  archiveConfirmation,
-  isDeleting,
-  taskId,
-  workflowStepId,
-  primarySessionId,
-  hasPendingClarification,
-  hasPendingPermission,
-  interrupted,
-  isSubTask,
-  depth,
-  subtaskCount,
-  subtasksCollapsed,
-  onToggleSubtasks,
-  repositoryPath,
-  showRepository = true,
-  prInfo,
-  queuedCount,
-  wipQueue,
-  issueInfo,
-  isPinned,
-  agentErrorMessage,
-  isOnLastWorkflowStep = false,
-}: TaskItemProps) {
-  const effectiveMenuOpen = menuOpen || isDeleting === true;
-  const hasDiffStats = !!diffStats && (diffStats.additions > 0 || diffStats.deletions > 0);
-  const taskColor = useTaskColor(taskId);
-  const indent = computeRowIndent(resolveRowDepth(depth, isSubTask));
+export const TaskItem = memo(function TaskItem(props: TaskItemProps) {
+  const isSelected = props.isSelected ?? false;
+  const isMultiSelected = props.isMultiSelected ?? false;
+  const menuOpen = props.menuOpen ?? false;
+  const effectiveMenuOpen = menuOpen || props.isDeleting === true;
+  const hasDiffStats =
+    !!props.diffStats && (props.diffStats.additions > 0 || props.diffStats.deletions > 0);
+  const taskColor = useTaskColor(props.taskId);
+  const indent = computeRowIndent(resolveRowDepth(props.depth, props.isSubTask));
 
   return (
     <div
       role="button"
       tabIndex={0}
       data-testid="sidebar-task-item"
-      data-task-row-id={taskId}
+      data-task-row-id={props.taskId}
       {...taskItemStateAttrs(isSelected, isMultiSelected)}
-      onClick={taskItemRowClick(onSelect, onClick)}
-      onKeyDown={(e) => handleTaskItemKeyDown(e, onSelect, onClick)}
+      onClick={taskItemRowClick(props.onSelect, props.onClick)}
+      onKeyDown={(e) => handleTaskItemKeyDown(e, props.onSelect, props.onClick)}
       style={indent.depth > 0 ? { paddingLeft: indent.paddingLeftPx } : undefined}
       className={cn(
         taskItemRowClassName(isSelected, isMultiSelected, indent.depth === 0),
-        archiveConfirmation && "flex-wrap",
+        props.archiveConfirmation && "flex-wrap",
       )}
     >
       <SelectionBar isSelected={isSelected} color={taskColor} />
       <RowConnector depth={indent.depth} leftPx={indent.connectorLeftPx} />
       <TaskStateIcon
-        sessionState={sessionState}
-        state={state}
-        foregroundActivity={foregroundActivity}
-        isInProgress={computeIsInProgress(state, sessionState)}
-        hasPendingClarification={hasPendingClarification}
-        hasPendingPermission={hasPendingPermission}
-        interrupted={interrupted}
-        isOnLastWorkflowStep={isOnLastWorkflowStep}
+        sessionState={props.sessionState}
+        state={props.state}
+        foregroundActivity={props.foregroundActivity}
+        isInProgress={computeIsInProgress(props.state, props.sessionState)}
+        hasPendingClarification={props.hasPendingClarification}
+        hasPendingPermission={props.hasPendingPermission}
+        interrupted={props.interrupted}
+        isOnLastWorkflowStep={props.isOnLastWorkflowStep ?? false}
       />
       <TaskItemContent
-        title={title}
-        autopilot={autopilot}
-        taskId={taskId}
-        workflowStepId={workflowStepId}
-        isRemoteExecutor={isRemoteExecutor}
-        remoteExecutorType={remoteExecutorType}
-        remoteExecutorName={remoteExecutorName}
-        primarySessionId={primarySessionId}
-        isArchived={isArchived}
-        isPinned={isPinned}
-        repositoryPath={repositoryPath}
-        showRepository={showRepository}
-        updatedAt={updatedAt}
-        lastActivityAt={lastActivityAt}
-        showActivityTime={showActivityTime}
-        prInfo={prInfo}
-        queuedCount={queuedCount}
-        wipQueue={wipQueue}
-        issueInfo={issueInfo}
-        agentErrorMessage={agentErrorMessage}
-        comparisonUnavailable={comparisonUnavailable}
+        title={props.title}
+        autopilot={props.autopilot}
+        taskId={props.taskId}
+        workflowStepId={props.workflowStepId}
+        isRemoteExecutor={props.isRemoteExecutor}
+        remoteExecutorType={props.remoteExecutorType}
+        remoteExecutorName={props.remoteExecutorName}
+        primarySessionId={props.primarySessionId}
+        isArchived={props.isArchived}
+        isPinned={props.isPinned}
+        repositoryPath={props.repositoryPath}
+        showRepository={props.showRepository ?? true}
+        updatedAt={props.updatedAt}
+        lastActivityAt={props.lastActivityAt}
+        showActivityTime={props.showActivityTime ?? false}
+        prInfo={props.prInfo}
+        queuedCount={props.queuedCount}
+        wipQueue={props.wipQueue}
+        issueInfo={props.issueInfo}
+        agentErrorMessage={props.agentErrorMessage}
+        comparisonUnavailable={props.comparisonUnavailable}
       />
       <TaskItemActions
-        archiveConfirmation={archiveConfirmation}
-        diffStats={diffStats}
+        archiveConfirmation={props.archiveConfirmation}
+        diffStats={props.diffStats}
         hasDiffStats={hasDiffStats}
         menuOpen={menuOpen}
         effectiveMenuOpen={effectiveMenuOpen}
       />
-      {!!subtaskCount && subtaskCount > 0 && !!onToggleSubtasks && (
+      {!!props.subtaskCount && props.subtaskCount > 0 && !!props.onToggleSubtasks && (
         <SubtaskToggle
-          taskId={taskId}
-          count={subtaskCount!}
-          collapsed={!!subtasksCollapsed}
-          onToggle={onToggleSubtasks!}
+          taskId={props.taskId}
+          count={props.subtaskCount}
+          collapsed={!!props.subtasksCollapsed}
+          onToggle={props.onToggleSubtasks}
         />
       )}
     </div>

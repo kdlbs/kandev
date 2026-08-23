@@ -2,6 +2,7 @@
 
 import type { RefObject } from "react";
 import { useTranslation } from "react-i18next";
+import { IconLoader } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
 import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
 import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
@@ -16,6 +17,7 @@ type ArchiveConfirmValues = { cascade: boolean };
 
 const ARCHIVE_LABEL_KEY = "task:archive";
 const ARCHIVE_INLINE_CONFIRMATION_TEST_ID = "task-archive-inline-confirmation";
+const DEFAULT_CONFIRM_TEST_ID = "archive-task-confirm";
 
 export type TaskArchiveConfirmationProps = {
   open: boolean;
@@ -159,6 +161,46 @@ function ArchiveConfirmPopover({
   );
 }
 
+function ArchiveClassifyingPopover({
+  anchorRef,
+  focusReturnRef,
+  focusBoundaryRef,
+  onOpenChange,
+  confirmTestId,
+}: {
+  anchorRef: RefObject<HTMLElement | null>;
+  focusReturnRef?: RefObject<HTMLElement | null>;
+  focusBoundaryRef?: RefObject<HTMLElement | null>;
+  onOpenChange: (open: boolean) => void;
+  confirmTestId: string;
+}) {
+  const { t } = useTranslation();
+  return (
+    <ActionConfirmPopover
+      open
+      anchorRef={anchorRef}
+      focusReturnRef={focusReturnRef}
+      focusBoundaryRef={focusBoundaryRef ?? anchorRef}
+      title={t("task:archiveTaskTitle")}
+      description={
+        <span className="flex items-center gap-2">
+          <IconLoader className="h-4 w-4 animate-spin" />
+          {t("common:loading")}
+        </span>
+      }
+      cancelLabel={t("common:cancel")}
+      confirmLabel={t(ARCHIVE_LABEL_KEY)}
+      confirmAriaLabel={t(ARCHIVE_LABEL_KEY)}
+      confirmTestId={confirmTestId}
+      confirmDisabled
+      testId="task-archive-confirm-popover"
+      onOpenChange={onOpenChange}
+      onCancel={() => onOpenChange(false)}
+      onConfirm={() => undefined}
+    />
+  );
+}
+
 type ArchiveDialogProps = Pick<
   TaskArchiveConfirmationProps,
   | "onOpenChange"
@@ -214,11 +256,22 @@ function ArchiveConfirmationContent({
   }
 
   if (subtaskClassification.status !== "resolved") {
-    if (!inline) return null;
+    if (inline) {
+      return (
+        <span data-testid="task-archive-classifying" className="text-xs text-muted-foreground">
+          {t("common:loading")}
+        </span>
+      );
+    }
+    if (!isFinePointer) return null;
     return (
-      <span data-testid="task-archive-classifying" className="text-xs text-muted-foreground">
-        {t("common:loading")}
-      </span>
+      <ArchiveClassifyingPopover
+        anchorRef={anchorRef}
+        focusReturnRef={focusReturnRef}
+        focusBoundaryRef={focusBoundaryRef}
+        onOpenChange={dialogProps.onOpenChange}
+        confirmTestId={dialogProps.confirmTestId ?? DEFAULT_CONFIRM_TEST_ID}
+      />
     );
   }
 
@@ -233,7 +286,7 @@ function ArchiveConfirmationContent({
         onCancel={() => dialogProps.onOpenChange(false)}
         onClose={() => dialogProps.onOpenChange(false)}
         onConfirm={confirm}
-        confirmTestId={dialogProps.confirmTestId ?? "archive-task-confirm"}
+        confirmTestId={dialogProps.confirmTestId ?? DEFAULT_CONFIRM_TEST_ID}
       />
     );
   }
@@ -250,7 +303,7 @@ function ArchiveConfirmationContent({
       isArchiving={dialogProps.isArchiving}
       onOpenChange={dialogProps.onOpenChange}
       onConfirm={confirm}
-      confirmTestId={dialogProps.confirmTestId ?? "archive-task-confirm"}
+      confirmTestId={dialogProps.confirmTestId ?? DEFAULT_CONFIRM_TEST_ID}
     />
   );
 }
@@ -271,7 +324,7 @@ export function TaskArchiveConfirmation({
   focusReturnRef,
   focusBoundaryRef,
   onConfirm,
-  confirmTestId = "archive-task-confirm",
+  confirmTestId = DEFAULT_CONFIRM_TEST_ID,
   inline = false,
 }: TaskArchiveConfirmationProps) {
   const { isFinePointer } = useResponsiveBreakpoint();

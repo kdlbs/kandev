@@ -87,6 +87,15 @@ function computeTaskIsInFlight(isInFlight: boolean | undefined, storeInFlight: b
   return Boolean(isInFlight) || storeInFlight;
 }
 
+function isArchiveActionDisabled(
+  isArchiving: boolean | undefined,
+  classification: SubtaskCountResult,
+): boolean {
+  return (
+    Boolean(isArchiving) || classification.status === "idle" || classification.status === "loading"
+  );
+}
+
 // The legacy cascade dialog intentionally keeps its state, preference bypass,
 // and cleanup copy in one boundary.
 // eslint-disable-next-line max-lines-per-function
@@ -132,6 +141,7 @@ export function TaskArchiveConfirmDialog({
     taskIds,
   );
   const classification = subtaskClassification ?? fetchedSubtaskClassification;
+  const archiveDisabled = isArchiveActionDisabled(isArchiving, classification);
   const subtaskCount = classification.status === "resolved" ? classification.total : 0;
   const shouldCheckInFlight = shouldCheckTaskInFlight(open, requiresConfirmation);
   const storeInFlight = useTaskInFlight(taskId, taskIds, shouldCheckInFlight);
@@ -182,11 +192,11 @@ export function TaskArchiveConfirmDialog({
             {t("common:cancel")}
           </AlertDialogCancel>
           <AlertDialogAction
-            disabled={isArchiving}
+            disabled={archiveDisabled}
             className="cursor-pointer !text-sm"
             data-testid={confirmTestId}
             onClick={() => {
-              if (isArchiving) return;
+              if (archiveDisabled) return;
               onConfirm({ cascade });
               handleOpenChange(false);
             }}

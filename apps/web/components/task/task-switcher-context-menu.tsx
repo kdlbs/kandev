@@ -37,7 +37,7 @@ import {
 } from "./task-switcher-action-items";
 import type { StepDef, TaskSwitcherItem } from "./task-switcher-types";
 import { TaskPluginPrimaryMenuItems } from "./task-switcher-plugin-menu-items";
-import { TaskArchiveConfirmation } from "./task-archive-confirmation";
+import { useTaskSwitcherArchiveConfirmation } from "./task-switcher-archive-confirmation";
 export type { StepDef } from "./task-switcher-types";
 export { createTaskLinkSelectAction } from "./task-switcher-link-menu";
 
@@ -156,75 +156,34 @@ function useMenuTouchDragCancel(onOpenChange: (open: boolean) => void) {
   };
 }
 
-// This component coordinates the context menu, drag cancellation, and the
-// local archive surface for a row.
-// eslint-disable-next-line max-lines-per-function
-export function TaskItemWithContextMenu({
-  task,
-  workflows,
-  stepsByWorkflowId,
-  steps,
-  children,
-  onEditTask,
-  onRenameTask,
-  onArchiveTask,
-  onCreateSubtask,
-  onDeleteTask,
-  onDetachTask,
-  onLinkPullRequest,
-  onLinkIssue,
-  onLinkMergeRequest,
-  onLinkJiraTicket,
-  onLinkLinearIssue,
-  onLinkSentryIssue,
-  onMoveToStep,
-  onTogglePin,
-  isPinned,
-  pinnedTaskIds,
-  isDeleting,
-  isArchiving,
-  selectedTaskIds,
-  onBulkArchive,
-  onBulkDelete,
-  onBulkPin,
-  onBulkMove,
-  onClearSelection,
-  isMixedWorkflowSelection,
-}: ContextMenuProps) {
+// This component coordinates the context menu and drag cancellation. Archive
+// state lives in its focused adapter so unavailable actions stay unavailable.
+export function TaskItemWithContextMenu(props: ContextMenuProps) {
+  const { children, ...menuProps } = props;
   const [contextOpen, setContextOpen] = useState(false);
   const [menuKey, setMenuKey] = useState(0);
-  const [archiveOpen, setArchiveOpen] = useState(false);
-  const archiveAnchorRef = useRef<HTMLDivElement>(null);
   const moveTasks = useTaskWorkflowMove();
   const closeMenu = () => {
     setContextOpen(false);
     setMenuKey((k) => k + 1);
   };
   const { handleOpenChange, triggerProps } = useMenuTouchDragCancel(setContextOpen);
-  const requestArchive = () => {
-    closeMenu();
-    setArchiveOpen(true);
-  };
-  const archiveConfirmation = onArchiveTask ? (
-    <TaskArchiveConfirmation
-      open={archiveOpen}
-      anchorRef={archiveAnchorRef}
-      focusReturnRef={archiveAnchorRef}
-      taskId={task.id}
-      taskTitle={task.title}
-      executorType={task.remoteExecutorType}
-      isArchiving={isArchiving}
-      isInFlight={task.foregroundActivity !== null && task.foregroundActivity !== undefined}
-      onOpenChange={setArchiveOpen}
-      onConfirm={({ cascade }) => onArchiveTask(task.id, { cascade })}
-    />
-  ) : null;
+  const archive = useTaskSwitcherArchiveConfirmation({
+    task: menuProps.task,
+    onArchiveTask: menuProps.onArchiveTask,
+    isArchiving: menuProps.isArchiving,
+    closeMenu,
+  });
 
   return (
     <ContextMenu key={menuKey} onOpenChange={handleOpenChange}>
       <ContextMenuTrigger asChild>
-        <div ref={archiveAnchorRef} tabIndex={-1} {...triggerProps}>
-          {cloneWithMenuOpen(children, contextOpen, archiveOpen ? archiveConfirmation : undefined)}
+        <div ref={archive.archiveAnchorRef} tabIndex={-1} {...triggerProps}>
+          {cloneWithMenuOpen(
+            children,
+            contextOpen,
+            archive.archiveOpen ? archive.archiveConfirmation : undefined,
+          )}
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent
@@ -242,35 +201,8 @@ export function TaskItemWithContextMenu({
         onClick={(event) => event.stopPropagation()}
       >
         <TaskContextMenuItems
-          task={task}
-          workflows={workflows}
-          stepsByWorkflowId={stepsByWorkflowId}
-          steps={steps}
-          onEditTask={onEditTask}
-          onRenameTask={onRenameTask}
-          onArchiveTask={requestArchive}
-          onCreateSubtask={onCreateSubtask}
-          onDeleteTask={onDeleteTask}
-          onDetachTask={onDetachTask}
-          onLinkPullRequest={onLinkPullRequest}
-          onLinkIssue={onLinkIssue}
-          onLinkMergeRequest={onLinkMergeRequest}
-          onLinkJiraTicket={onLinkJiraTicket}
-          onLinkLinearIssue={onLinkLinearIssue}
-          onLinkSentryIssue={onLinkSentryIssue}
-          onMoveToStep={onMoveToStep}
-          onTogglePin={onTogglePin}
-          isPinned={isPinned}
-          pinnedTaskIds={pinnedTaskIds}
-          isDeleting={isDeleting}
-          isArchiving={isArchiving}
-          selectedTaskIds={selectedTaskIds}
-          onBulkArchive={onBulkArchive}
-          onBulkDelete={onBulkDelete}
-          onBulkPin={onBulkPin}
-          onBulkMove={onBulkMove}
-          onClearSelection={onClearSelection}
-          isMixedWorkflowSelection={isMixedWorkflowSelection}
+          {...menuProps}
+          onArchiveTask={archive.requestArchive}
           closeMenu={closeMenu}
           moveTasks={moveTasks}
         />

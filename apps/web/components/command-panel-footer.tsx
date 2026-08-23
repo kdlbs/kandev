@@ -38,6 +38,11 @@ import {
 } from "@/components/command-panel-scope-switcher";
 import type { WorkspaceContentSearchError } from "@/hooks/domains/session/use-workspace-content-search";
 import type { WorkspaceContentSearchResult } from "@/lib/types/backend";
+import {
+  CommandPanelConfirmation,
+  dismissCommandConfirmation,
+  getCommandConfirmationState,
+} from "@/components/command-panel-confirmation";
 
 const ARCHIVED_STATES = new Set(["COMPLETED", "CANCELLED", "FAILED"]);
 export const MODE_COMMANDS: CommandPanelMode = "commands";
@@ -527,26 +532,17 @@ function CommandPanelResultList(props: CommandPanelViewProps) {
     repoMap,
     handleTaskSelect,
   } = props;
-  const confirmation = commands.find((command) => command.confirmation)?.confirmation;
-  const visibleCommands = confirmation
-    ? commands.filter((command) => !command.confirmation)
-    : commands;
+  const { confirmationCommand, visibleCommands, visibleGroups } = getCommandConfirmationState(
+    commands,
+    grouped,
+  );
   return (
     <CommandList>
-      {confirmation && (
-        <div
-          role="alertdialog"
-          aria-label={t("task:archiveTaskTitle")}
-          data-testid="command-panel-confirmation"
-          className="border-b border-border p-3"
-        >
-          {confirmation}
-        </div>
-      )}
+      {confirmationCommand && <CommandPanelConfirmation command={confirmationCommand} />}
       {mode === MODE_COMMANDS && (
         <CommandsListContent
           commands={visibleCommands}
-          grouped={grouped}
+          grouped={visibleGroups}
           search={search}
           onSelect={handleSelect}
           taskResults={taskResults}
@@ -603,10 +599,15 @@ export function CommandPanelView(props: CommandPanelViewProps) {
     if (workspaceModeUnavailable) onScopeChange("commands");
   }, [onScopeChange, workspaceModeUnavailable]);
 
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) dismissCommandConfirmation(props.commands);
+    setOpen(nextOpen);
+  };
+
   return (
     <CommandDialog
       open={open}
-      onOpenChange={setOpen}
+      onOpenChange={handleOpenChange}
       overlayClassName="supports-backdrop-filter:backdrop-blur-none!"
     >
       <Command

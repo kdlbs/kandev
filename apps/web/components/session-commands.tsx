@@ -196,6 +196,7 @@ type TaskCommandOptions = {
   openSubtask: () => void;
   requestArchive: () => void;
   archiveConfirmation?: ReactNode;
+  onArchiveConfirmationDismiss?: () => void;
 };
 
 export function buildTaskCommands({
@@ -206,6 +207,7 @@ export function buildTaskCommands({
   openSubtask,
   requestArchive,
   archiveConfirmation,
+  onArchiveConfirmationDismiss,
 }: TaskCommandOptions): CommandItem[] {
   if (!activeTaskId) return [];
   const items: CommandItem[] = [
@@ -238,6 +240,7 @@ export function buildTaskCommands({
       action: requestArchive,
       keepOpen: true,
       confirmation: archiveConfirmation,
+      onConfirmationDismiss: onArchiveConfirmationDismiss,
     });
   }
   return items;
@@ -337,19 +340,16 @@ function SessionCommandDialogs({
   );
 }
 
-function useArchiveCommandConfirmation(
-  activeTaskId: string | null,
-  archive: ReturnType<typeof useTaskArchiveConfirm>,
-) {
+function useArchiveCommandConfirmation(archive: ReturnType<typeof useTaskArchiveConfirm>) {
   const archiveAnchorRef = useRef<HTMLElement>(null);
-  if (!activeTaskId || archive.target === null) return undefined;
+  if (archive.target === null) return undefined;
 
   return (
     <TaskArchiveConfirmation
       open
       inline
       anchorRef={archiveAnchorRef}
-      taskId={activeTaskId}
+      taskId={archive.target.id}
       taskTitle={archive.target.title}
       executorType={archive.target.executorType}
       isArchiving={archive.isPending}
@@ -400,7 +400,7 @@ export function SessionCommands({
 
   const archive = useTaskArchiveConfirm(activeTaskId);
   const { requestArchive } = archive;
-  const archiveConfirmation = useArchiveCommandConfirmation(activeTaskId, archive);
+  const archiveConfirmation = useArchiveCommandConfirmation(archive);
 
   // Session-scoped commands need a live session; task-scoped ones only need the
   // task, so they stay available while a session is still being ensured.
@@ -432,6 +432,7 @@ export function SessionCommands({
         openSubtask,
         requestArchive,
         archiveConfirmation,
+        onArchiveConfirmationDismiss: archive.closeConfirm,
       }),
     ];
     return items.map((cmd) => ({ ...cmd, priority: 0 }));
@@ -454,6 +455,7 @@ export function SessionCommands({
     openSubtask,
     requestArchive,
     archiveConfirmation,
+    archive.closeConfirm,
   ]);
 
   useRegisterCommands(commands);
