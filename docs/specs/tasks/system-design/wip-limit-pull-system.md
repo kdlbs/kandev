@@ -308,7 +308,7 @@ promotion.
   start, but it never delays the HTTP socket from binding: resuming a promotion
   can launch an agent, and agent readiness is not bounded by the launcher's
   health window. See
-  [`startup-listener-before-recovery`](../startup-listener-before-recovery/spec.md).
+  [`startup-listener-before-recovery`](../../startup-listener-before-recovery/spec.md).
 
 ## Scenarios
 

@@ -42,10 +42,13 @@ This increment preserves the shipped desktop contract:
   Vite/React SPA without requiring Node.js or a separate web server at runtime;
 - desktop and CLI/browser launches share the existing Kandev data directory, database, worktrees,
   executor settings, integrations, and agent configuration;
-- the desktop shell owns the backend process tree, waits for authenticated health readiness, and
-  cleans up on startup failure, quit, update restart, or WebView failure;
+- the desktop shell owns the backend process tree, waits for a two-stage readiness signal (a
+  token-verified `/health` proving process ownership, then an unauthenticated `/ready` proving
+  application readiness), and cleans up on startup failure, quit, update restart, or WebView
+  failure;
 - the backend binds to an app-selected loopback port, and the WebView navigates only after a
-  per-launch health token proves that the responding process is the backend the shell started;
+  per-launch health token first proves that the responding process is the backend the shell
+  started, and `/ready` then reports the backend has finished startup;
 - GUI launches retain the predictable process environment and common user binary locations needed
   to discover configured agent CLIs;
 - a second launch focuses the existing instance instead of starting another backend; and
@@ -60,13 +63,18 @@ dependency. It selects an available loopback port, starts:
 kandev --headless --port <available-loopback-port>
 ```
 
-with `KANDEV_SERVER_HOST=127.0.0.1`, and waits for `GET /health`. Each launch supplies a generated
-`KANDEV_DESKTOP_HEALTH_TOKEN`; readiness requires the same value in the successful response's
-`X-Kandev-Desktop-Health-Token` header before the WebView navigates to the backend origin. The
-desktop shell also sets `KANDEV_DESKTOP_NATIVE_NOTIFICATIONS=true` to identify the launch as
-desktop-owned. The nested native launcher must forward the shell's exact non-empty health token to
-the backend and use it for its own readiness poll rather than replacing it with another token. A
-second instance focuses the first and does not start another backend.
+with `KANDEV_SERVER_HOST=127.0.0.1`, and waits for readiness in two stages. First it polls
+`GET /health`, which flips to 200 as soon as the listener binds, before startup recovery
+finishes; each launch supplies a generated `KANDEV_DESKTOP_HEALTH_TOKEN`, and this stage
+requires the same value in the successful response's `X-Kandev-Desktop-Health-Token` header,
+proving the responding process is the backend the shell started. Once `/health` passes, the
+shell then polls unauthenticated `GET /ready` (which carries no health token), and only
+navigates the WebView to the backend origin once `/ready` reports the backend has finished
+startup. The desktop shell also sets `KANDEV_DESKTOP_NATIVE_NOTIFICATIONS=true` to identify the
+launch as desktop-owned. The nested native launcher must forward the shell's exact non-empty
+health token to the backend and use it for its own `/health` readiness poll rather than
+replacing it with another token. A second instance focuses the first and does not start another
+backend.
 
 The shell preserves the existing GUI-launch `PATH` normalization and the existing Kandev data
 directory, SQLite database, worktrees, executor settings, integrations, and agent configuration.
@@ -184,8 +192,10 @@ X-Kandev-Desktop-Health-Token: <per-launch-token>
 ```
 
 Desktop launches set `KANDEV_SERVER_HOST=127.0.0.1`. The health response must echo the per-launch
-token before the WebView navigates to the loopback SPA. Existing backend HTTP, WebSocket, and boot
-payload contracts remain the product API; native integration does not replace them.
+token before the shell trusts the responding process; the WebView then navigates to the loopback
+SPA only once the subsequent unauthenticated `GET /ready` reports the backend has finished
+startup. Existing backend HTTP, WebSocket, and boot payload contracts remain the product API;
+native integration does not replace them.
 
 ## State machines
 
