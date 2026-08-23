@@ -336,6 +336,9 @@ func TestDailyWriterPreservesFreshActiveLogAfterCompletedConversion(t *testing.T
 	if err := os.WriteFile(filepath.Join(logDir, activeBackendLogName), []byte("new\n"), 0o600); err != nil {
 		t.Fatalf("seed fresh active log: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(logDir, backendDayMarkerName), []byte("2026-08-22"), 0o600); err != nil {
+		t.Fatalf("seed active day marker: %v", err)
+	}
 	journal := &conversionJournal{
 		SourceDay: "2026-08-22", SourceSize: 14, TailOffset: 0,
 		BackupName: conversionSourceName,
