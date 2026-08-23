@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	internaldb "github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -202,7 +203,7 @@ func (r *Repository) insertUsageEventRowTx(ctx context.Context, tx *sqlx.Tx, eve
 	`), event.UsageEventID, event.TaskID, nullableString(event.SessionID), nullableString(event.TurnID),
 		event.AgentProfileID, event.AgentType, event.Model, event.Provider,
 		event.TokensIn, event.TokensCachedRead, event.TokensCachedWrite, event.TokensOut, event.TokensThought,
-		event.TokensTotal, event.CostSubcents, event.CostSource, event.Estimated,
+		event.TokensTotal, event.CostSubcents, event.CostSource, dialect.BoolToInt(event.Estimated),
 		event.RateInputPerMillion, event.RateCachedReadPerMillion,
 		event.RateCachedWritePerMillion, event.RateOutputPerMillion,
 		nullableString(event.PricingCatalogVersion), event.ContractVersion, event.OccurredAt, event.CreatedAt)
