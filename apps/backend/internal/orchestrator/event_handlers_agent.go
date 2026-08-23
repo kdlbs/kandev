@@ -1697,6 +1697,12 @@ func (s *Service) handleRecoverableFailureLocked(ctx context.Context, data watch
 	s.updateTaskSessionState(ctx, data.TaskID, data.SessionID, nextState, data.ErrorMessage, false)
 
 	// Ensure task is in REVIEW state unless another session is still working.
+	// Unlike the success path (processOnTurnCompleteViaEngine runs first and
+	// skips this write entirely on a transition), REVIEW is written before the
+	// reconciliation below runs. A pending signal that reconciles into a
+	// transition here is a transient REVIEW flash a watching client could
+	// observe; that's accepted as the price of keeping this failure path
+	// simple, since the agent genuinely did fail.
 	s.writeTaskReviewState(ctx, data.TaskID, data.SessionID)
 
 	// Give the ADR 0015 reconciler a second chance: a step_complete_kandev
