@@ -21,7 +21,8 @@ lifecycle policy.
 **Decisions:**
 [ADR-2026-08-22-pr-walkthrough-r2-hosting](../../decisions/2026-08-22-pr-walkthrough-r2-hosting.md),
 [ADR-2026-08-22-pr-walkthrough-filesystem-runner](../../decisions/2026-08-22-pr-walkthrough-filesystem-runner.md),
-[ADR-2026-08-22-pr-walkthrough-description-link](../../decisions/2026-08-22-pr-walkthrough-description-link.md)
+[ADR-2026-08-22-pr-walkthrough-description-link](../../decisions/2026-08-22-pr-walkthrough-description-link.md),
+[ADR-2026-08-23-pr-walkthrough-short-urls](../../decisions/2026-08-23-pr-walkthrough-short-urls.md)
 
 **Implementation plan:**
 [Portable PR walkthrough runner fix](../../plans/pr-walkthrough-portable-runner-fix/plan.md)
@@ -43,7 +44,8 @@ lifecycle policy.
 - The generated page contains a vertical reviewer story, a dark and light
   theme, architecture and data diagrams when supplied, highlighted code, diff
   tinting, GitHub file links, an interactive code canvas, and a linear fallback
-  list.
+  list. Its top bar uses the website brand mark and favicon, and its dark theme
+  uses the documentation shell's dark-gray palette.
 - The configured workflow agent generates and renders the walkthrough for a
   non-draft same-repository pull request when it is opened, reopened, marked
   ready for review, or updated. OpenCode is the initial runner, but the skill
@@ -64,11 +66,13 @@ lifecycle policy.
 - The workflow preserves the generated JSON and HTML as CI artifacts and
   uploads only the HTML to the `kandev-pr-walkthroughs` R2 bucket.
 - Each published object uses the key
-  `pr/<pull-request-number>/<head-sha>.html` and is served at
-  `https://walkthrough.kandev.ai/pr/<pull-request-number>/<head-sha>.html`.
+  `pr/<pull-request-number>/<short-head-sha>.html`, where `short-head-sha` is
+  the first 12 lowercase hexadecimal characters of the exact head SHA. It is
+  served at
+  `https://walkthrough.kandev.ai/pr/<pull-request-number>/<short-head-sha>.html`.
 - The workflow regenerates on `synchronize` for same-repository pull request
-  updates. Each generated object remains keyed by pull request number and head
-  SHA.
+  updates. Each generated object remains keyed by pull request number and the
+  12-character prefix of the exact head SHA.
 - After public validation succeeds, a separate minimum-permission job prepends
   a prominent marker-owned walkthrough callout to the pull request
   description. A rerun replaces only that callout and preserves the rest of
@@ -167,7 +171,7 @@ not from merge time.
 - **GIVEN** a non-draft same-repository pull request is opened, reopened, or
   marked ready for review, **WHEN** the walkthrough job runs, **THEN** it
   creates non-empty JSON and HTML artifacts and publishes the HTML under the
-  current head SHA in R2.
+  12-character prefix of the current head SHA in R2.
 - **GIVEN** a fetched PR head, **WHEN** the workflow computes the triple-dot
   diff, **THEN** the merge base exists and context preparation succeeds.
 - **GIVEN** a changed file contains bounded UTF-8 text, **WHEN** context is

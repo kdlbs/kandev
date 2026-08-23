@@ -272,7 +272,8 @@ jobs:
 
           HTML_PATH=".r2-artifact/docs/pr-walkthrough/pr-${PR_NUMBER}.html"
           test -s "$HTML_PATH"
-          OBJECT_KEY="pr/${PR_NUMBER}/${HEAD_SHA}.html"
+          SHORT_HEAD_SHA="${HEAD_SHA:0:12}"
+          OBJECT_KEY="pr/${PR_NUMBER}/${SHORT_HEAD_SHA}.html"
 
           aws s3 cp "$HTML_PATH" "s3://${CLOUDFLARE_R2_BUCKET}/${OBJECT_KEY}" \
             --endpoint-url "$CLOUDFLARE_R2_ENDPOINT" \

@@ -12,6 +12,7 @@ from typing import Any
 START_MARKER = "<!-- kandev-pr-walkthrough-start -->"
 END_MARKER = "<!-- kandev-pr-walkthrough-end -->"
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+PUBLIC_SHA_LENGTH = 12
 UNCHANGED = 3
 
 
@@ -49,7 +50,10 @@ def validate_url(url: str, pr_number: int, head_sha: str) -> None:
         raise ValueError("pull request number must be positive")
     if not SHA_PATTERN.fullmatch(head_sha):
         raise ValueError("head SHA must be 40 lowercase hexadecimal characters")
-    expected = f"https://walkthrough.kandev.ai/pr/{pr_number}/{head_sha}.html"
+    expected = (
+        "https://walkthrough.kandev.ai/"
+        f"pr/{pr_number}/{head_sha[:PUBLIC_SHA_LENGTH]}.html"
+    )
     if url != expected:
         raise ValueError(f"expected walkthrough URL {expected}")
 

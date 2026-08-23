@@ -417,14 +417,20 @@ class TestBuild(unittest.TestCase):
             '<h3 class="font-semibold text-brand-soft mb-1">'
             'UniqueChangeTitle</h3>', out)
 
-    def test_shell_matches_kandev_landing_visual_language(self):
+    def test_shell_matches_docs_brand_and_dark_visual_language(self):
         out = build.build(minimal_data())
-        self.assertIn("--wt-primary: #4f46e5", out)
-        self.assertIn("--wt-bg: #0d0d10", out)
+        self.assertIn("--wt-primary: #6366f1", out)
+        self.assertIn("--wt-bg: #121212", out)
+        self.assertIn("--wt-surface: #191919", out)
+        self.assertIn("--wt-dark-surface: #1e1e1e", out)
+        self.assertIn("--wt-fg: #ebebeb", out)
         self.assertIn("font-family: 'Figtree'", out)
         self.assertIn("font-family: 'Geist Mono'", out)
         self.assertIn('class="wt-topbar sticky', out)
         self.assertIn('class="wt-brand-mark"', out)
+        self.assertIn('href="https://kandev.ai/favicon.ico"', out)
+        self.assertIn('href="https://kandev.ai/icon.svg"', out)
+        self.assertIn('src="https://kandev.ai/brand/kandev-github-org.png"', out)
 
     def test_runtime_cdn_dependencies_use_exact_versions(self):
         out = build.build(minimal_data())

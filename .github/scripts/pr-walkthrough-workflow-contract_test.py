@@ -233,7 +233,8 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
 
     def test_publication_uploads_only_html_with_expected_metadata(self) -> None:
         for value in (
-            'OBJECT_KEY="pr/${PR_NUMBER}/${HEAD_SHA}.html"',
+            'SHORT_HEAD_SHA="${HEAD_SHA:0:12}"',
+            'OBJECT_KEY="pr/${PR_NUMBER}/${SHORT_HEAD_SHA}.html"',
             "aws s3 cp",
             '--content-type "text/html; charset=utf-8"',
             '--cache-control "public, max-age=300"',

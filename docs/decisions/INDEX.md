@@ -195,3 +195,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-22-agent-owned-pr-walkthrough-rendering | [Keep PR walkthrough rendering agent owned and provider neutral](2026-08-22-agent-owned-pr-walkthrough-rendering.md) | superseded by 2026-08-22-pr-walkthrough-filesystem-runner | workflow, infra, security | 2026-08-22 |
 | 2026-08-22-pr-walkthrough-filesystem-runner | [Use a Filesystem Contract for PR Walkthrough Runners](2026-08-22-pr-walkthrough-filesystem-runner.md) | accepted | workflow, infra, security | 2026-08-22 |
 | 2026-08-22-pr-walkthrough-description-link | [Own a top-level PR walkthrough callout](2026-08-22-pr-walkthrough-description-link.md) | accepted | workflow, infra, security, GitHub | 2026-08-22 |
+| 2026-08-23-pr-walkthrough-short-urls | [Use 12-character SHA prefixes for PR walkthrough URLs](2026-08-23-pr-walkthrough-short-urls.md) | accepted | workflow, infra | 2026-08-23 |

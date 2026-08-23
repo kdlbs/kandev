@@ -26,11 +26,13 @@ custom domain as the externally visible URL.
   S3-compatible API using a bucket-scoped Object Read & Write token. It does
   not use the existing Pages `CLOUDFLARE_API_TOKEN`.
 - **Acceptance:** The object key is
-  `pr/<pull-request-number>/<head-sha>.html`, with HTML content type and a
-  short cache policy suitable for label-triggered reruns.
+  `pr/<pull-request-number>/<short-head-sha>.html`, where `short-head-sha` is
+  the first 12 lowercase hexadecimal characters of the exact head SHA. It has
+  HTML content type and a short cache policy suitable for label-triggered
+  reruns.
 - **Acceptance:** The job verifies the object with an R2 metadata request and
   verifies the public URL
-  `https://walkthrough.kandev.ai/pr/<pull-request-number>/<head-sha>.html`
+  `https://walkthrough.kandev.ai/pr/<pull-request-number>/<short-head-sha>.html`
   with an HTTPS GET before reporting publication success.
 - **Acceptance:** The job writes the public URL to the workflow job summary
   and exports it to the dependent trusted link job, but receives no GitHub

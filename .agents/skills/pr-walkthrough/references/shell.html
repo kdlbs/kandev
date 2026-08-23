@@ -11,6 +11,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="https://kandev.ai/favicon.ico" sizes="32x32" />
+  <link rel="icon" href="https://kandev.ai/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="https://kandev.ai/apple-touch-icon.png" sizes="180x180" />
   <title>{{PR_TITLE}} - Walkthrough</title>
 
   <!-- External resources (all pinned, loaded from CDN).
@@ -35,15 +38,14 @@
     tailwind.config = {
       darkMode: 'class',
       theme: { extend: { maxWidth: { content: '72rem' }, colors: {
-        brand: { DEFAULT: '#4f46e5', soft: '#818cf8', deep: '#3730a3' },
+        brand: { DEFAULT: '#6366f1', soft: '#818cf8', deep: '#4f46e5' },
       } } },
     };
   </script>
   <style>
-    /* Visual language shared with kandev.ai landing: Figtree for UI copy,
-       Geist Mono for code, indigo actions, near-black product surfaces, and
-       compact shadcn-style radii. The font URLs are pinned to the landing
-       repository commit used for this design. */
+    /* Visual language shared with the documentation shell: Figtree for UI
+       copy, Geist Mono for code, indigo actions, dark-gray surfaces, and
+       compact shadcn-style radii. */
     @font-face {
       font-family: 'Figtree'; font-style: normal; font-weight: 300 900; font-display: swap;
       src: url('https://cdn.jsdelivr.net/gh/kdlbs/landing@71c3f609df07d6ff67fbe7c9213482d0c0c22c70/public/fonts/figtree/figtree-300-normal.woff2') format('woff2');
@@ -54,24 +56,24 @@
     }
     :root {
       color-scheme: light;
-      --wt-bg: #ffffff;
-      --wt-fg: #0d0d10;
-      --wt-muted: #71717a;
-      --wt-border: rgba(13, 13, 16, .12);
-      --wt-surface: #f7f7f8;
-      --wt-primary: #4f46e5;
+      --wt-bg: #f5f5f5;
+      --wt-fg: #0a0a0a;
+      --wt-muted: #737373;
+      --wt-border: rgba(204, 204, 204, .5);
+      --wt-surface: #f1f1f1;
+      --wt-primary: #6366f1;
       --wt-primary-soft: #818cf8;
-      --wt-primary-deep: #3730a3;
-      --wt-dark-surface: #111114;
+      --wt-primary-deep: #4f46e5;
+      --wt-dark-surface: #1e1e1e;
       --wt-radius: .5rem;
     }
     html.dark {
       color-scheme: dark;
-      --wt-bg: #0d0d10;
-      --wt-fg: #fafafa;
-      --wt-muted: rgba(255, 255, 255, .58);
-      --wt-border: rgba(255, 255, 255, .10);
-      --wt-surface: #111114;
+      --wt-bg: #121212;
+      --wt-fg: #ebebeb;
+      --wt-muted: #b3b3b3;
+      --wt-border: rgba(102, 102, 102, .2);
+      --wt-surface: #191919;
     }
     html { scroll-behavior: smooth; }
     body {
@@ -80,11 +82,11 @@
       letter-spacing: -.01em;
     }
     .wt-topbar {
-      background: rgba(255, 255, 255, .88); border-color: var(--wt-border);
-      box-shadow: 0 1px 0 rgba(13, 13, 16, .02);
+      background: rgba(245, 245, 245, .95); border-color: var(--wt-border);
+      box-shadow: 0 1px 0 rgba(0, 0, 0, .02);
       backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
     }
-    html.dark .wt-topbar { background: rgba(13, 13, 16, .88); }
+    html.dark .wt-topbar { background: rgba(18, 18, 18, .95); }
     .wt-main { line-height: 1.7; }
     .wt-main h2, .wt-main h3 { letter-spacing: -.035em; }
     .wt-main h2 { font-weight: 650; }
@@ -98,10 +100,11 @@
     .wt-brand:hover { color: var(--wt-primary); }
     .wt-brand-mark {
       display: inline-flex; align-items: center; justify-content: center; width: 1.75rem; height: 1.75rem;
-      border-radius: .375rem; color: white; background: linear-gradient(135deg, #4f46e5, #818cf8);
-      box-shadow: 0 0 0 1px rgba(13, 13, 16, .08), 0 8px 18px rgba(79, 70, 229, .22);
-      font-size: .95rem; font-weight: 800; letter-spacing: -.08em;
+      overflow: hidden; border-radius: .375rem; background: var(--wt-surface);
+      box-shadow: 0 0 0 1px rgba(0, 0, 0, .08), 0 8px 18px rgba(99, 102, 241, .22);
     }
+    html.dark .wt-brand-mark { box-shadow: 0 0 0 1px rgba(255, 255, 255, .1), 0 8px 18px rgba(99, 102, 241, .22); }
+    .wt-brand-mark img { display: block; width: 100%; height: 100%; object-fit: cover; }
     .wt-brand-name { font-size: .875rem; font-weight: 650; }
     .wt-brand-divider { width: 1px; height: 1rem; background: var(--wt-border); }
     .wt-brand-pr { font-size: .8125rem; font-weight: 600; white-space: nowrap; }
@@ -118,6 +121,7 @@
       border: 1px solid var(--wt-border); border-radius: .5rem; background: var(--wt-bg);
       box-shadow: 0 12px 28px rgba(13, 13, 16, .14);
     }
+    html.dark .wt-mobile-menu { background: var(--wt-dark-surface); }
     .wt-mobile-menu a {
       display: block; min-height: 2.5rem; padding: .65rem .75rem; border-radius: .375rem; color: var(--wt-muted);
       font-size: .8125rem; font-weight: 550; text-decoration: none;
@@ -391,7 +395,9 @@
     <div class="mx-auto max-w-content px-4 sm:px-6 h-14 flex items-center justify-between gap-3">
       <a href="{{PR_URL}}" target="_blank" rel="noopener"
          class="wt-brand shrink-0" title="Open the pull request on GitHub">
-        <span class="wt-brand-mark" aria-hidden="true">k</span>
+        <span class="wt-brand-mark" aria-hidden="true">
+          <img src="https://kandev.ai/brand/kandev-github-org.png" alt="" />
+        </span>
         <span class="wt-brand-name hidden sm:inline">Kandev</span>
         <span class="wt-brand-divider hidden sm:inline" aria-hidden="true"></span>
         <span class="wt-brand-pr">PR #{{PR_NUMBER}}</span>
