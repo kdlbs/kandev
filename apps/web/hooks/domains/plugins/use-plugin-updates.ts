@@ -57,6 +57,25 @@ function markEntryInstalled(
   return new Map(entries).set(pluginId, { ...current, install_state: "installed" });
 }
 
+function trackMarketplaceCheck(
+  run: Promise<boolean>,
+  checkInFlight: { current: Promise<boolean> | null },
+  lastCheckFailed: { current: boolean },
+) {
+  void run.then(
+    (succeeded) => {
+      if (checkInFlight.current !== run) return;
+      checkInFlight.current = null;
+      lastCheckFailed.current = !succeeded;
+    },
+    () => {
+      if (checkInFlight.current !== run) return;
+      checkInFlight.current = null;
+      lastCheckFailed.current = true;
+    },
+  );
+}
+
 /**
  * Cross-references installed plugins against the marketplace catalog: which
  * ones have a catalog entry at all (`latestById`), and which of those are
@@ -85,6 +104,7 @@ export function usePluginUpdates() {
   const requestGeneration = useRef(0);
   const checkGeneration = useRef(0);
   const checkInFlight = useRef<Promise<boolean> | null>(null);
+  const lastCheckFailed = useRef(false);
 
   const applyCatalog = useCallback((catalog: MarketplaceCatalog) => {
     const enabledSources = catalog.sources.filter((source) => source.enabled);
@@ -136,7 +156,8 @@ export function usePluginUpdates() {
 
   const reload = useCallback(
     async (installedPluginId?: string) => {
-      if (!(await waitForMarketplaceCheck(checkInFlight))) {
+      const checkSucceeded = await waitForMarketplaceCheck(checkInFlight);
+      if (!checkSucceeded || lastCheckFailed.current) {
         if (installedPluginId) markUpdated(installedPluginId);
         return;
       }
@@ -165,17 +186,11 @@ export function usePluginUpdates() {
     // flight wait for it, so they cannot steal the post-refresh GET.
     ++requestGeneration.current;
     const check = ++checkGeneration.current;
+    lastCheckFailed.current = false;
     setChecking(true);
     const run = runMarketplaceCheck(check, checkGeneration, applyCatalog, setChecking, setError);
     checkInFlight.current = run;
-    void run.then(
-      () => {
-        if (checkInFlight.current === run) checkInFlight.current = null;
-      },
-      () => {
-        if (checkInFlight.current === run) checkInFlight.current = null;
-      },
-    );
+    trackMarketplaceCheck(run, checkInFlight, lastCheckFailed);
     return run;
   }, [applyCatalog]);
 

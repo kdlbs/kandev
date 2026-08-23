@@ -280,6 +280,31 @@ describe("usePluginUpdates — overlapping checks", () => {
     expect(result.current.updates.has("acme")).toBe(false);
     expect(getMarketplaceCatalog).toHaveBeenCalledTimes(1);
   });
+
+  it("does not replace a failed check with a stale catalog on a later install reload", async () => {
+    getMarketplaceCatalog.mockResolvedValue({
+      plugins: [entry("acme", "update_available", "2.0.0")],
+      sources: [source()],
+    });
+    refreshMarketplace.mockRejectedValueOnce(new Error(REFRESH_UNAVAILABLE));
+
+    const { result } = renderHook(() => usePluginUpdates());
+    await waitFor(() => expect(result.current.updates.has("acme")).toBe(true));
+    const lastCheckedAt = result.current.lastCheckedAt;
+
+    await act(async () => {
+      await result.current.checkForUpdates();
+    });
+    await act(async () => {
+      await result.current.reload("acme");
+    });
+
+    expect(result.current.error).toBe(REFRESH_UNAVAILABLE);
+    expect(result.current.lastCheckedAt).toBe(lastCheckedAt);
+    expect(result.current.latestById.get("acme")?.install_state).toBe("installed");
+    expect(result.current.updates.has("acme")).toBe(false);
+    expect(getMarketplaceCatalog).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("usePluginUpdates — failure isolation", () => {
