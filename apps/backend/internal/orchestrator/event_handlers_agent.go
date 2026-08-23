@@ -1699,6 +1699,21 @@ func (s *Service) handleRecoverableFailureLocked(ctx context.Context, data watch
 	// Ensure task is in REVIEW state unless another session is still working.
 	s.writeTaskReviewState(ctx, data.TaskID, data.SessionID)
 
+	// Give the ADR 0015 reconciler a second chance: a step_complete_kandev
+	// call that landed mid-turn (session still RUNNING) is never picked up
+	// by processOnTurnCompleteViaEngine when the turn fails instead of
+	// completing successfully, so the signal would otherwise sit inert in
+	// the session's metadata bag until it's silently cleared on resume.
+	// Office sessions go FAILED, not WAITING_FOR_INPUT, and must not
+	// advance the step here.
+	if nextState == models.TaskSessionStateWaitingForInput {
+		if session, err := s.repo.GetTaskSession(ctx, data.SessionID); err == nil {
+			if signal, ok := models.LoadPendingStepSignal(session.Metadata); ok {
+				s.reconcileStepCompletionSignalLocked(ctx, data.TaskID, data.SessionID, signal.StepID)
+			}
+		}
+	}
+
 	// Clean up the agent execution.
 	go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
 }

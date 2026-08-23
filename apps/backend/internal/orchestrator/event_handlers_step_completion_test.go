@@ -6,6 +6,9 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/orchestrator/watcher"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
@@ -528,6 +531,148 @@ func TestOnStepCompletionSignaled(t *testing.T) {
 		}
 		if _, hasSignal := models.LoadPendingStepSignal(updatedSession.Metadata); !hasSignal {
 			t.Fatal("stop-winning subscriber consumed the queued completion signal")
+		}
+	})
+}
+
+// TestStepCompletionSignalSurvivesTurnFailure is the regression test for the
+// dropped-signal bug: a step_complete_kandev call lands mid-turn (session
+// still RUNNING), so onStepCompletionSignaled's bus subscriber correctly
+// no-ops (the inline turn-end check was expected to pick it up). But the
+// turn then FAILS instead of completing successfully, so
+// processOnTurnCompleteViaEngine never runs. Before the fix,
+// handleRecoverableFailureLocked settled the session into
+// WAITING_FOR_INPUT without ever re-checking the bag, and the signal sat
+// inert until it was silently cleared on resume — the task stayed stuck on
+// step1 forever. The fix gives the reconciler a second chance right where
+// the session settles into WAITING_FOR_INPUT.
+func TestStepCompletionSignalSurvivesTurnFailure(t *testing.T) {
+	ctx := context.Background()
+
+	buildEvent := func(taskID, sessionID, stepID string) *bus.Event {
+		return bus.NewEvent("workflow.step_completion_signaled", "test", map[string]interface{}{
+			"task_id":    taskID,
+			"session_id": sessionID,
+			"step_id":    stepID,
+		})
+	}
+
+	newGatedService := func(t *testing.T) (svc *Service, repo *sqliterepo.Repository) {
+		t.Helper()
+		repo = setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1") // seedSession leaves the session RUNNING.
+
+		stepGetter := newMockStepGetter()
+		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+			ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+			AutoAdvanceRequiresSignal: true,
+			Events: wfmodels.StepEvents{
+				OnTurnComplete: []wfmodels.OnTurnCompleteAction{
+					{Type: wfmodels.OnTurnCompleteMoveToNext},
+				},
+			},
+		}
+		stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+			ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
+		}
+
+		taskRepo := newMockTaskRepo()
+		agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+		svc = createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
+		return svc, repo
+	}
+
+	t.Run("signal survives turn failure and applies once WAITING_FOR_INPUT", func(t *testing.T) {
+		svc, repo := newGatedService(t)
+
+		// Step 1: mid-turn step_complete_kandev — writes the bag entry
+		// while the session is still RUNNING.
+		signal := models.PendingStepCompletionSignal{
+			StepID:     "step1",
+			Source:     models.StepCompletionSourceAgent,
+			Summary:    "all done",
+			SignaledAt: time.Now().UTC(),
+		}
+		if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
+			t.Fatalf("seed pending signal: %v", err)
+		}
+
+		// Step 2: the ADR 0015 bus subscriber fires synchronously off the
+		// signal write. Session is still RUNNING, so it must no-op.
+		svc.onStepCompletionSignaled(ctx, buildEvent("t1", "s1", "step1"))
+		if session, err := repo.GetTaskSession(ctx, "s1"); err != nil || session.State != models.TaskSessionStateRunning {
+			t.Fatalf("expected session to remain RUNNING after subscriber no-op, got %+v (err=%v)", session, err)
+		}
+		if task, err := repo.GetTask(ctx, "t1"); err != nil || task.WorkflowStepID != "step1" {
+			t.Fatalf("expected no transition yet, got %+v (err=%v)", task, err)
+		}
+
+		// Step 3: the turn fails (not completes) with a non-transient
+		// error. handleAgentFailed -> handleRecoverableFailureLocked
+		// settles the session into WAITING_FOR_INPUT.
+		svc.handleAgentFailed(ctx, watcher.AgentEventData{
+			TaskID:           "t1",
+			SessionID:        "s1",
+			AgentExecutionID: "exec-1",
+			ErrorMessage:     "agent crashed",
+		})
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("get session: %v", err)
+		}
+		if session.State != models.TaskSessionStateWaitingForInput {
+			t.Fatalf("expected session WAITING_FOR_INPUT after failure, got %q", session.State)
+		}
+		if _, hasBag := models.LoadPendingStepSignal(session.Metadata); hasBag {
+			t.Error("expected the pending signal to be consumed by the transition")
+		}
+
+		task, err := repo.GetTask(ctx, "t1")
+		if err != nil {
+			t.Fatalf("get task: %v", err)
+		}
+		if task.WorkflowStepID != "step2" {
+			t.Fatalf("expected task to advance to step2 after the failed turn, got %q", task.WorkflowStepID)
+		}
+	})
+
+	t.Run("stale signal (step changed) does not transition on failure", func(t *testing.T) {
+		svc, repo := newGatedService(t)
+
+		// Bag holds a signal for a step the task is no longer on — must
+		// not fire the transition just because a turn failed.
+		signal := models.PendingStepCompletionSignal{
+			StepID:     "step_old",
+			Source:     models.StepCompletionSourceAgent,
+			Summary:    "stale",
+			SignaledAt: time.Now().UTC(),
+		}
+		if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
+			t.Fatalf("seed stale signal: %v", err)
+		}
+
+		svc.handleAgentFailed(ctx, watcher.AgentEventData{
+			TaskID:           "t1",
+			SessionID:        "s1",
+			AgentExecutionID: "exec-1",
+			ErrorMessage:     "agent crashed",
+		})
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("get session: %v", err)
+		}
+		if session.State != models.TaskSessionStateWaitingForInput {
+			t.Fatalf("expected session WAITING_FOR_INPUT after failure, got %q", session.State)
+		}
+
+		task, err := repo.GetTask(ctx, "t1")
+		if err != nil {
+			t.Fatalf("get task: %v", err)
+		}
+		if task.WorkflowStepID != "step1" {
+			t.Fatalf("expected task to stay on step1 (stale signal must not transition), got %q", task.WorkflowStepID)
 		}
 	})
 }
