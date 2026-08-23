@@ -188,8 +188,8 @@ not from merge time.
   label-triggered walkthrough job runs, **THEN** it regenerates the current PR
   head and updates the corresponding R2 object and job-summary URL.
 - **GIVEN** a pull request receives a new head commit, **WHEN** the
-  walkthrough workflow runs for the synchronize event, **THEN** no
-  walkthrough generation occurs for the new head.
+  walkthrough workflow runs for the synchronize event, **THEN** it generates
+  a walkthrough for the new head.
 - **GIVEN** two pull requests use different numbers, **WHEN** both jobs run,
   **THEN** each output filename and R2 object key is distinct and neither run
   overwrites the other's result.
