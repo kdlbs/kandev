@@ -54,7 +54,8 @@ jobs:
         run: |
           python3 .github/scripts/pr-walkthrough-workflow-contract_test.py
           python3 scripts/pr-walkthrough-pr-body.test.py
-          python3 scripts/pr-walkthrough-read-file.test.py
+          python3 .agents/skills/pr-walkthrough/scripts/pr-walkthrough-context.test.py
+          python3 .agents/skills/pr-walkthrough/scripts/pr-walkthrough-render.test.py
 
       - name: Test preview environment workflow contract
         run: python3 .github/scripts/preview-env-workflow-contract_test.py
