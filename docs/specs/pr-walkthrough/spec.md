@@ -45,10 +45,10 @@ lifecycle policy.
   tinting, GitHub file links, an interactive code canvas, and a linear fallback
   list.
 - The configured workflow agent generates and renders the walkthrough for a
-  non-draft same-repository pull request when it is opened, reopened, or marked
-  ready for review. OpenCode is the initial runner, but the skill and artifact
-  contract do not depend on it. A maintainer can explicitly retrigger
-  generation by adding the `generate-pr-walkthrough` label.
+  non-draft same-repository pull request when it is opened, reopened, marked
+  ready for review, or updated. OpenCode is the initial runner, but the skill
+  and artifact contract do not depend on it. A maintainer can explicitly
+  retrigger generation by adding the `generate-pr-walkthrough` label.
 - The workflow gives each runner the same fixed prompt, prepared context, draft
   JSON path, renderer command, and final output paths. A provider change does
   not change this contract.
@@ -67,8 +67,9 @@ lifecycle policy.
 - Each published object uses the key
   `pr/<pull-request-number>/<head-sha>.html` and is served at
   `https://walkthrough.kandev.ai/pr/<pull-request-number>/<head-sha>.html`.
-- The initial workflow does not regenerate on `synchronize`. Future
-  per-push generation can add that event without changing the object contract.
+- The workflow regenerates on `synchronize` for same-repository pull request
+  updates. Each generated object remains keyed by pull request number and head
+  SHA.
 - After public validation succeeds, a separate minimum-permission job prepends
   a prominent marker-owned walkthrough callout to the pull request
   description. A rerun replaces only that callout and preserves the rest of
@@ -188,7 +189,7 @@ not from merge time.
   head and updates the corresponding R2 object and job-summary URL.
 - **GIVEN** a pull request receives a new head commit, **WHEN** the
   walkthrough workflow runs for the synchronize event, **THEN** no
-  walkthrough generation occurs in the initial increment.
+  walkthrough generation occurs for the new head.
 - **GIVEN** two pull requests use different numbers, **WHEN** both jobs run,
   **THEN** each output filename and R2 object key is distinct and neither run
   overwrites the other's result.
@@ -218,8 +219,7 @@ not from merge time.
 ## Out of scope
 
 - Publishing walkthrough screenshots or using the screenshot media branch.
-- Generating a new walkthrough on every push. The initial `synchronize` path
-  remains disabled to control model usage.
+- Generating walkthroughs for fork pull requests.
 - Retaining a walkthrough for an exact period measured from merge time. The
   initial lifecycle is measured from upload time.
 - Adding a Kandev UI page for externally generated PR walkthroughs.

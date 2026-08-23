@@ -36,6 +36,7 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
             raise AssertionError("PR walkthrough must have a dedicated workflow file")
         cls.workflow = WORKFLOW.read_text(encoding="utf-8")
         cls.review_workflow = REVIEW_WORKFLOW.read_text(encoding="utf-8")
+        cls.skill = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
         cls.generation = workflow_job(cls.workflow, "pr-walkthrough-generate")
         cls.publication = workflow_job(cls.workflow, "pr-walkthrough-publish")
         cls.link = workflow_job(cls.workflow, "pr-walkthrough-link")
@@ -53,7 +54,7 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
     def test_generation_is_limited_to_authorized_same_repository_events(self) -> None:
         self.assertIn("pull_request_target:", self.workflow)
         self.assertIn(
-            "types: [opened, ready_for_review, reopened, labeled]",
+            "types: [opened, ready_for_review, reopened, synchronize, labeled]",
             self.workflow,
         )
         for condition in (
@@ -63,10 +64,15 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
             "github.event.action == 'opened'",
             "github.event.action == 'reopened'",
             "github.event.action == 'ready_for_review'",
+            "github.event.action == 'synchronize'",
             "github.event.action == 'labeled' && github.event.label.name == 'generate-pr-walkthrough'",
         ):
             self.assertIn(condition, self.generation)
-        self.assertNotIn("synchronize", self.workflow)
+
+    def test_skill_explains_trusted_context_without_provider_names(self) -> None:
+        self.assertNotIn("Kandev", self.skill)
+        self.assertIn("managed runner", self.skill)
+        self.assertIn("arbitrary Git or shell commands", self.skill)
 
     def test_generation_uses_requested_model_native_high_reasoning_variant(self) -> None:
         model = "opencode-go/muse-spark-1.2-contributor#high"

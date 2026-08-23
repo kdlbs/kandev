@@ -153,7 +153,7 @@ explicitly authorizes subagents.
 - Task 01 targeted tests passed: 4 tests.
 - Task 02 targeted tests passed: 4 renderer tests and 59 renderer reference
   tests. Harness validation passed.
-- Task 03 contract and security checks passed: 19 workflow contract tests, 9
+- Task 03 contract and security checks passed: 20 workflow contract tests, 9
   action-pinning tests, 19 pinned workflow files, and actionlint v1.7.12.
 - `git diff --check` passed.
 
@@ -162,4 +162,3 @@ explicitly authorizes subagents.
 - Changes to R2 object naming, publication, retention, or PR linking.
 - Generic GitHub automation for Claude or Codex.
 - Walkthrough generation for fork pull requests.
-- Walkthrough generation on each `synchronize` event.

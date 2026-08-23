@@ -15,6 +15,8 @@ local OpenCode setup action. Remove the OpenCode TypeScript tools.
 
 - **Acceptance:** The workflow fetches the exact PR head without a depth limit.
   It proves that the base and head have a merge base before context creation.
+- **Acceptance:** The workflow regenerates the current walkthrough for a new
+  same-repository head received through the `synchronize` event.
 - **Acceptance:** The workflow materializes every executable helper and agent
   instruction by copying the complete `pr-walkthrough` skill directory from
   the exact base SHA.
@@ -65,6 +67,8 @@ local OpenCode setup action. Remove the OpenCode TypeScript tools.
 
 ## Results
 
+- Review remediation explains the trusted pre-agent context contract, removes
+  provider-specific skill wording, and enables `synchronize` retriggers.
 - The workflow fetches the complete PR-head history, proves the merge base,
   archives the complete skill bundle from the base commit, and prepares the
   bounded filesystem context before the agent starts.
@@ -79,7 +83,7 @@ local OpenCode setup action. Remove the OpenCode TypeScript tools.
 - `python3 .agents/skills/pr-walkthrough/scripts/pr-walkthrough-render.test.py`
   passed (4 tests).
 - `python3 .github/scripts/pr-walkthrough-workflow-contract_test.py` passed
-  (19 tests).
+  (20 tests).
 - `python3 .github/scripts/lint-action-pinning_test.py` passed (9 tests).
 - `python3 .github/scripts/lint-action-pinning.py` passed (19 workflow files).
 - `actionlint .github/workflows/pr-walkthrough.yml` passed with actionlint

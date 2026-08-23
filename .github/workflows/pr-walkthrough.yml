@@ -5,7 +5,7 @@ name: PR Walkthrough
 # only through a bounded, base-controlled filesystem context.
 on:
   pull_request_target:
-    types: [opened, ready_for_review, reopened, labeled]
+    types: [opened, ready_for_review, reopened, synchronize, labeled]
 
 env:
   PR_WALKTHROUGH_MODEL: opencode-go/muse-spark-1.2-contributor#high
@@ -24,6 +24,7 @@ jobs:
       (github.event.action == 'opened' ||
        github.event.action == 'reopened' ||
        github.event.action == 'ready_for_review' ||
+       github.event.action == 'synchronize' ||
        (github.event.action == 'labeled' && github.event.label.name == 'generate-pr-walkthrough'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
