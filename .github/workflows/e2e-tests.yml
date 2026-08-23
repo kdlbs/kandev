@@ -315,10 +315,10 @@ jobs:
     container:
       image: ghcr.io/kdlbs/kandev-ci:runtime-latest
       options: --ipc=host
-    # 25 min (was 22) — leaves room for the worst-case "every shard hits a few
-    # flake-retries" combination without blowing past the cap. Average shard
-    # runs ~10 min, so this only kicks in when something is going wrong.
-    timeout-minutes: 25
+    # 35 min covers the serial count-fallback tail and setup overhead. The
+    # first queue runs reached the old 25-minute cap with a healthy 167-test
+    # shard before the main timing profile had bootstrapped.
+    timeout-minutes: 35
     # Container jobs default to `sh`; pin to bash.
     defaults:
       run:

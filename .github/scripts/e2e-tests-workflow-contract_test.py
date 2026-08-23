@@ -89,6 +89,17 @@ class DesktopE2EWorkflowContractTest(unittest.TestCase):
         ):
             self.assertIn(pattern, changes_job)
 
+    def test_normal_shard_has_queue_safe_timeout(self) -> None:
+        workflow = E2E_WORKFLOW.read_text(encoding="utf-8")
+        normal_job = job_block(workflow, "e2e", "e2e-containers")
+
+        self.assertIn(
+            "# 35 min covers the serial count-fallback tail and setup overhead",
+            normal_job,
+        )
+        self.assertIn("timeout-minutes: 35", normal_job)
+        self.assertNotIn("timeout-minutes: 25", normal_job)
+
     def test_contract_runs_in_the_unfiltered_required_workflow(self) -> None:
         workflow = LINT_WORKFLOW.read_text(encoding="utf-8")
 
