@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/pr-walkthrough/spec.md
 created: 2026-08-23
-status: draft
+status: done
 ---
 
 # Implementation Plan: PR Walkthrough Runner Reliability Fix
@@ -83,17 +83,26 @@ the implementation reaches `main`.
 
 ## Verification Results
 
-Pending. Each task will record exact commands and outcomes here.
+The shared focused checks passed after both workflow changes:
+
+- `python3 .github/scripts/pr-walkthrough-workflow-contract_test.py` — 22 tests passed.
+- `python3 scripts/pr-walkthrough-pr-body.test.py` — 8 tests passed.
+- `python3 .agents/skills/pr-walkthrough/scripts/pr-walkthrough-context.test.py` — 4 tests passed.
+- `python3 .agents/skills/pr-walkthrough/scripts/pr-walkthrough-render.test.py` — 4 tests passed.
+- `python3 .github/scripts/lint-action-pinning_test.py` — 9 tests passed.
+- `python3 .github/scripts/lint-action-pinning.py` — 20 workflow files passed.
+- `actionlint .github/workflows/pr-walkthrough.yml` — passed with actionlint v1.7.7 installed in a temporary directory because no local binary was present.
+- `git diff --check` — passed.
 
 ## Implementation Waves And Parallel Candidates
 
 Wave 1:
 
-- [ ] [Task 01: Unify trusted workflow provenance](task-01-unify-trusted-workflow-provenance.md)
+- [x] [Task 01: Unify trusted workflow provenance](task-01-unify-trusted-workflow-provenance.md)
 
 Wave 2:
 
-- [ ] [Task 02: Retry incomplete OpenCode output](task-02-retry-incomplete-opencode-output.md)
+- [x] [Task 02: Retry incomplete OpenCode output](task-02-retry-incomplete-opencode-output.md)
 
 Run both tasks sequentially in the primary conversation. They change the same
 workflow and contract test.

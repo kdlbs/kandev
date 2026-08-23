@@ -1,7 +1,7 @@
 ---
 id: "01-unify-trusted-workflow-provenance"
 title: "Unify trusted workflow provenance"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -47,4 +47,17 @@ Use one immutable workflow commit for all trusted code and comparison inputs.
 
 ## Results
 
-Pending.
+Implemented in `.github/workflows/pr-walkthrough.yml` and covered by the
+workflow contract test. Generation and PR-link jobs now check out and verify
+`github.workflow_sha` through `TRUSTED_SHA`; the event head remains an
+immutable fetched object and is never checked out.
+
+Validation passed:
+
+- `python3 .github/scripts/pr-walkthrough-workflow-contract_test.py` - 22 tests.
+- `python3 scripts/pr-walkthrough-pr-body.test.py` - 8 tests.
+- `python3 .agents/skills/pr-walkthrough/scripts/pr-walkthrough-context.test.py` - 4 tests.
+- `python3 .github/scripts/lint-action-pinning_test.py` - 9 tests.
+- `python3 .github/scripts/lint-action-pinning.py` - 20 workflow files.
+- `actionlint .github/workflows/pr-walkthrough.yml` - passed with v1.7.7 in a temporary directory.
+- `git diff --check` - passed.

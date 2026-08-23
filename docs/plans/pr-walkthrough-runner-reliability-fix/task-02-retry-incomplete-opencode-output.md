@@ -1,7 +1,7 @@
 ---
 id: "02-retry-incomplete-opencode-output"
 title: "Retry incomplete OpenCode output"
-status: pending
+status: done
 wave: 2
 depends_on: ["01-unify-trusted-workflow-provenance"]
 plan: "plan.md"
@@ -47,4 +47,17 @@ Retry once when OpenCode exits zero without both rendered files.
 
 ## Results
 
-Pending.
+Implemented the bounded clean retry in `.github/workflows/pr-walkthrough.yml`.
+Each attempt resets the draft and final files, captures status/stdout/stderr
+and partial outputs under its own diagnostics directory, retries only after a
+zero exit with incomplete outputs, and fails before publication after the
+second incomplete attempt or any non-zero exit.
+
+Validation passed:
+
+- `python3 .github/scripts/pr-walkthrough-workflow-contract_test.py` - 22 tests.
+- `python3 .agents/skills/pr-walkthrough/scripts/pr-walkthrough-render.test.py` - 4 tests.
+- `python3 .github/scripts/lint-action-pinning_test.py` - 9 tests.
+- `python3 .github/scripts/lint-action-pinning.py` - 20 workflow files.
+- `actionlint .github/workflows/pr-walkthrough.yml` - passed with v1.7.7 in a temporary directory.
+- `git diff --check` - passed.
