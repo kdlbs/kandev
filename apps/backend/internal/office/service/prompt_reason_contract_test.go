@@ -23,8 +23,8 @@ type reasonOccurrence struct {
 }
 
 // collectReasonOccurrences walks every step of every shipped template and
-// every event trigger that can carry a `reason:` config key (the four
-// original triggers plus the seven Phase 2 event-driven ones), returning
+// every event trigger that can carry a `reason:` config key (the original
+// on_enter trigger plus the seven Phase 2 event-driven ones), returning
 // every occurrence found. This is table-driven off the actual shipped
 // config rather than a hand-maintained list of known-bad reasons, so a new
 // bad reason added to any template tomorrow fails this test without anyone
@@ -63,8 +63,7 @@ func collectGenericReasons(templateID, stepID, trigger string, actions []models.
 // TestPromptReasonContract_AllShippedReasonsResolve asserts that every
 // `reason:` value emitted by a shipped workflow template resolves to a real
 // BuildPrompt case instead of falling through to the bare fallback string.
-// It must fail against the unmodified office-default.yml (4 of 7 reasons
-// fall through) and pass once the YAML is corrected.
+// It fails when a shipped reason is not mapped to a structured prompt.
 func TestPromptReasonContract_AllShippedReasonsResolve(t *testing.T) {
 	templates, err := workflowcfg.LoadTemplates()
 	if err != nil {
@@ -96,10 +95,8 @@ func TestPromptReasonContract_AllShippedReasonsResolve(t *testing.T) {
 //
 // Round 1 review (R1) caught that asserting only "both contain 'Submit
 // your verdict'" is not enough: it let stage_type "approval" silently
-// reuse the reviewer's "You are reviewing" framing (and its
-// builder-comments block, which was dead by construction for approvers —
-// see scheduler_integration.go's enrichBuilderComments guard). Assert the
-// two stages are actually distinguishable, not just both non-default.
+// reuse the reviewer's "You are reviewing" framing. Assert the two stages
+// are actually distinguishable, not just both non-default.
 func TestPromptReasonContract_ReviewAndApprovalStagesRouteToVerdictPrompt(t *testing.T) {
 	buildFor := func(stage string) string {
 		return BuildPrompt(&PromptContext{
