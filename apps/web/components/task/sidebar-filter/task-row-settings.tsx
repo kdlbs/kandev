@@ -45,6 +45,37 @@ const TRAILING_LABEL_KEYS: Record<SidebarTaskRowTrailing, string> = {
   none: "task:taskRowNothing",
 };
 
+function TaskRowSwitch({
+  id,
+  checked,
+  onCheckedChange,
+  ariaLabel,
+  testId,
+}: {
+  id: string;
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+  ariaLabel: string;
+  testId: string;
+}) {
+  return (
+    <label
+      htmlFor={id}
+      className="flex size-11 shrink-0 cursor-pointer items-center justify-center"
+      data-testid={testId}
+    >
+      <Switch
+        id={id}
+        size="sm"
+        checked={checked}
+        onCheckedChange={onCheckedChange}
+        aria-label={ariaLabel}
+        className="after:-inset-y-4"
+      />
+    </label>
+  );
+}
+
 export function reorderSidebarTaskRowDetails(
   order: SidebarTaskRowDetail[],
   activeId: SidebarTaskRowDetail,
@@ -93,13 +124,12 @@ function SortableDetailRow({
       <label htmlFor={`task-row-detail-${detail}-toggle`} className="min-w-0 flex-1 py-2">
         <span className="block text-xs font-medium">{label}</span>
       </label>
-      <Switch
+      <TaskRowSwitch
         id={`task-row-detail-${detail}-toggle`}
         checked={value.visibleDetails.includes(detail)}
         onCheckedChange={(checked) => onToggle(detail, checked)}
-        aria-label={t("task:taskRowToggleDetail", { label })}
-        data-testid={`task-row-detail-toggle-${detail}`}
-        className="mr-2 min-h-11 min-w-11"
+        ariaLabel={t("task:taskRowToggleDetail", { label })}
+        testId={`task-row-detail-toggle-${detail}`}
       />
     </div>
   );
@@ -162,12 +192,12 @@ function TaskRowDetailsSection({
             {t("task:taskRowDetailsDescription")}
           </span>
         </div>
-        <Switch
+        <TaskRowSwitch
+          id="task-row-details-toggle"
           checked={value.detailsEnabled}
           onCheckedChange={(detailsEnabled) => update({ detailsEnabled })}
-          aria-label={t("task:taskRowToggleDetails")}
-          data-testid="task-row-details-toggle"
-          className="min-h-11 min-w-11"
+          ariaLabel={t("task:taskRowToggleDetails")}
+          testId="task-row-details-toggle"
         />
       </div>
       {value.detailsEnabled && (
@@ -224,7 +254,7 @@ function TaskRowTrailingSelect({
         <SelectTrigger
           id="task-row-trailing-select"
           size="sm"
-          className="min-h-11 w-[9rem] text-xs"
+          className="h-7 w-[9rem] text-xs"
           data-testid="task-row-trailing-select"
           aria-label={t("task:taskRowRightSide")}
         >

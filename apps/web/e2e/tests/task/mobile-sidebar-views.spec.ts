@@ -374,14 +374,19 @@ test.describe("Mobile sidebar — view system", () => {
     await expect(settings.getByTestId("task-row-details-toggle")).toBeVisible();
 
     for (const control of [
+      "task-row-details-toggle",
       "task-row-detail-handle-relative_time",
       "task-row-detail-toggle-relative_time",
-      "task-row-trailing-select",
     ]) {
       const box = await settings.getByTestId(control).boundingBox();
       expect(box?.height).toBeGreaterThanOrEqual(40);
       expect(box?.width).toBeGreaterThanOrEqual(40);
     }
+    const trailingSelectBox = await settings.getByTestId("task-row-trailing-select").boundingBox();
+    const groupSelectBox = await popover.getByTestId("group-key-select").boundingBox();
+    expect(trailingSelectBox).not.toBeNull();
+    expect(groupSelectBox).not.toBeNull();
+    expect(Math.abs(trailingSelectBox!.height - groupSelectBox!.height)).toBeLessThan(1);
 
     const pullRequestHandle = settings.getByTestId("task-row-detail-handle-pull_request_number");
     const relativeTimeHandle = settings.getByTestId("task-row-detail-handle-relative_time");
