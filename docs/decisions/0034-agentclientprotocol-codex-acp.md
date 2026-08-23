@@ -10,11 +10,12 @@ Kandev's `codex-acp` agent previously launched `@zed-industries/codex-acp`. That
 
 ## Decision
 
-Kandev's `codex-acp` agent launches the unversioned
-`@agentclientprotocol/codex-acp` package for ACP chat and one-shot inference
-sessions. Normal launches prefer npm's execution cache. The install script
-still installs `@openai/codex` for `codex login`; that native authentication
-helper is separate from the managed ACP runtime.
+Kandev's `codex-acp` agent launches the exact effective version of
+`@agentclientprotocol/codex-acp` for ACP chat and one-shot inference sessions.
+The reviewed Kandev default is currently `1.6.0`; an install-wide operator
+selection can override it. Normal launches prefer npm's execution cache. The
+install script still installs `@openai/codex` for `codex login`; that native
+authentication helper is separate from the managed ACP runtime.
 
 The host operator can deliberately refresh the ACP package through
 **Settings > Agents > Update agent**. Kandev then re-probes the bridge and
@@ -29,10 +30,11 @@ Codex ACP sessions receive the model catalogue and config options from the Agent
 
 Codex-specific ACP `cli_flags` are not advertised because the bridge entrypoint does not apply the native Codex `-c` config overrides to chat sessions. Kandev still exposes the universal agentctl auto-approve toggle for ACP permission requests and keeps native Codex flags scoped to passthrough mode.
 
-Kandev source no longer determines the exact bridge release. Incident
-diagnosis uses the version reported during ACP initialization. Compatibility
-is enforced through ACP protocol negotiation and advertised capabilities, so
-an upstream same-protocol regression can still require operator intervention.
+Kandev source supplies a reviewed default and records any operator-selected
+exact version. Incident diagnosis also uses the version reported during ACP
+initialization. Compatibility is enforced through ACP protocol negotiation and
+advertised capabilities, so an upstream same-protocol regression can still
+require operator intervention.
 
 ## Alternatives Considered
 

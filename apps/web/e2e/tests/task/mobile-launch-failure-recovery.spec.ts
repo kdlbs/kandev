@@ -103,6 +103,10 @@ test.describe("mobile task launch failure recovery", () => {
       const branchOption = testPage.getByTestId("task-launch-branch-picker-option-main");
       await expect(branchOption).toBeVisible({ timeout: 30_000 });
       await expect(branchOption).toBeInViewport();
+      await expect(pickerScroll.getByRole("option").first()).toHaveAttribute(
+        "data-testid",
+        "task-launch-branch-picker-option-main",
+      );
       const optionBox = await branchOption.boundingBox();
       expect(optionBox).not.toBeNull();
       expect(optionBox!.height).toBeGreaterThanOrEqual(44);

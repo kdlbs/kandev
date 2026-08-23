@@ -84,7 +84,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-07-24-opt-in-authentication | [Opt-in Authentication and Per-User Workspace Scoping](2026-07-24-opt-in-authentication.md) | accepted | backend, frontend, protocol, security | 2026-07-24 |
 | 2026-07-24-semantic-notification-events | [Semantic notification events come from domain occurrences](2026-07-24-semantic-notification-events.md) | accepted | backend, frontend, desktop | 2026-07-24 |
 | 2026-07-26-user-managed-agent-runtime-updates | [User-Managed Agent Runtime Updates](2026-07-26-user-managed-agent-runtime-updates.md) | superseded by 2026-08-12-validated-managed-runtime-version-selection | backend, frontend, protocol | 2026-07-26 |
-| 2026-08-12-validated-managed-runtime-version-selection | [Validate and Persist Managed Runtime Version Selection](2026-08-12-validated-managed-runtime-version-selection.md) | accepted | backend, frontend, protocol | 2026-08-12 |
+| 2026-08-12-validated-managed-runtime-version-selection | [Validate and Persist Managed Runtime Version Selection](2026-08-12-validated-managed-runtime-version-selection.md) | accepted (amended 2026-08-21) | backend, frontend, protocol, workflow | 2026-08-12 |
 | 2026-07-26-single-session-model-switching | [Single-Session Model Switching](2026-07-26-single-session-model-switching.md) | accepted (amended 2026-07-27) | workflow, infra | 2026-07-26 |
 | 2026-07-27-task-git-credential-policy | [Separate GitHub Automation From Task Git Credential Policy](2026-07-27-task-git-credential-policy.md) | accepted | backend, frontend, security | 2026-07-27 |
 | 2026-07-27-spa-failure-containment-and-deployment-recovery | [SPA Failure Containment and Deployment Recovery](2026-07-27-spa-failure-containment-and-deployment-recovery.md) | accepted | frontend | 2026-07-27 |
@@ -192,3 +192,6 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-22-persistent-fork-approval-labels | [Persist Fork Approval Labels Across Pushes](2026-08-22-persistent-fork-approval-labels.md) | accepted | infra, workflow, security | 2026-08-22 |
 | 2026-08-22-plugin-version-retention | [Keep Exactly One Superseded Plugin Version](2026-08-22-plugin-version-retention.md) | accepted | backend | 2026-08-22 |
 | 2026-08-22-system-oriented-specifications | [Organize specifications by system](2026-08-22-system-oriented-specifications.md) | accepted | workflow, infra | 2026-08-22 |
+| 2026-08-22-pr-walkthrough-r2-hosting | [Host PR walkthrough HTML in Cloudflare R2](2026-08-22-pr-walkthrough-r2-hosting.md) | accepted | infra, workflow, security | 2026-08-22 |
+| 2026-08-22-agent-owned-pr-walkthrough-rendering | [Keep PR walkthrough rendering agent owned and provider neutral](2026-08-22-agent-owned-pr-walkthrough-rendering.md) | accepted | workflow, infra, security | 2026-08-22 |
+| 2026-08-22-pr-walkthrough-description-link | [Own a top-level PR walkthrough callout](2026-08-22-pr-walkthrough-description-link.md) | accepted | workflow, infra, security, GitHub | 2026-08-22 |

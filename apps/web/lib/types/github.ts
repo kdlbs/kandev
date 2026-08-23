@@ -217,6 +217,16 @@ export type MergeableState =
   | "unknown"
   | "";
 
+/** Normalized GitHub merge-queue entry states. Future provider values are
+ * retained as strings so the UI can use a generic queued presentation. */
+export type MergeQueueState =
+  | "queued"
+  | "awaiting_checks"
+  | "mergeable"
+  | "unmergeable"
+  | "locked"
+  | (string & {});
+
 export type TaskPR = {
   id: string;
   task_id: string;
@@ -254,6 +264,12 @@ export type TaskPR = {
   closed_at: string | null;
   last_synced_at: string | null;
   updated_at: string;
+  /** Empty when GitHub did not return an active merge-queue entry. */
+  merge_queue_state?: MergeQueueState;
+  /** GitHub's one-based queue position, when available. */
+  merge_queue_position?: number | null;
+  /** GitHub's estimated time to merge in seconds, when available. */
+  merge_queue_estimated_time_to_merge_seconds?: number | null;
   // The five PR-outcome-attribution fields below are always present on a
   // real API/WS payload (the backend sends every key, never omits one) — the
   // `?:` here follows this file's existing convention for nullable fields

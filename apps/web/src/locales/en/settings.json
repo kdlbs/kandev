@@ -127,6 +127,7 @@
   "deleteLayoutProfile": "Delete layout profile",
   "deleteLayoutProfileNamed": "Delete {{name}}?",
   "deleteSecret": "Delete secret",
+  "secretDeleteFailed": "Couldn't delete secret",
   "deleteThisCustomLayoutAfterConfirmation": "Delete this custom layout after confirmation.",
   "desktopNotifications": "Desktop Notifications",
   "desktopNotificationsDescription": "Notify this device when a selected agent turn, question, or Office event occurs.",

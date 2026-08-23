@@ -18,6 +18,7 @@ const RED_500 = "text-red-500";
 const YELLOW_500 = "text-yellow-500";
 const EMERALD_400 = "text-emerald-400";
 const GREEN_500 = "text-green-500";
+const QUEUED = "text-[#966600]";
 const PURPLE_500 = "text-purple-500";
 const MUTED_FOREGROUND = "text-muted-foreground";
 
@@ -60,11 +61,24 @@ describe("getPRAggregateStatusColor", () => {
     ["pending", YELLOW_500],
     ["awaiting_review", SKY_400],
     ["ready", EMERALD_400],
+    ["queued", QUEUED],
     ["passing", GREEN_500],
     ["merged", PURPLE_500],
     ["open", MUTED_FOREGROUND],
   ])("maps %s to %s", (state, color) => {
     expect(getPRAggregateStatusColor(state)).toBe(color);
+  });
+
+  it("uses the dedicated merge-queue color for an open queued PR", () => {
+    expect(
+      getPRStatusColor(
+        makePR({
+          merge_queue_state: "queued",
+          checks_state: "success",
+          mergeable_state: "blocked",
+        }),
+      ),
+    ).toBe(QUEUED);
   });
 });
 

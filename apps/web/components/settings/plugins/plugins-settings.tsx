@@ -7,6 +7,7 @@ import { Button } from "@kandev/ui/button";
 import { Switch } from "@kandev/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@kandev/ui/tabs";
 import { SettingsPageTemplate } from "@/components/settings/settings-page-template";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAutoUpdateSettings } from "@/hooks/domains/plugins/use-auto-update-settings";
 import { usePlugins } from "@/hooks/domains/plugins/use-plugins";
 import { usePluginSetupStatus } from "@/hooks/domains/plugins/use-plugin-setup-status";
@@ -15,7 +16,6 @@ import type { MarketplaceEntry } from "@/lib/types/plugins";
 import { InstallPluginDialog } from "./install-plugin-dialog";
 import { MarketplaceBrowser } from "./marketplace-browser";
 import { PluginRow } from "./plugin-row";
-import { UninstallPluginDialog } from "./uninstall-plugin-dialog";
 import { usePluginActions } from "./use-plugin-actions";
 import { settingsActionClassName } from "@/components/settings/settings-control";
 
@@ -26,6 +26,7 @@ import { settingsActionClassName } from "@/components/settings/settings-control"
  */
 export function PluginsSettings() {
   const { t } = useTranslation();
+  const { isFinePointer } = useResponsiveBreakpoint();
   const list = usePlugins();
   const actions = usePluginActions();
   const autoUpdate = useAutoUpdateSettings();
@@ -75,6 +76,7 @@ export function PluginsSettings() {
             autoUpdate={autoUpdate}
             updates={updates}
             updatingId={updatingId}
+            isFinePointer={isFinePointer}
             onUpdate={handleUpdate}
           />
         </TabsContent>
@@ -84,12 +86,6 @@ export function PluginsSettings() {
         </TabsContent>
       </Tabs>
 
-      <UninstallPluginDialog
-        target={actions.uninstallTarget}
-        busy={actions.uninstallBusy}
-        onClose={actions.closeUninstall}
-        onConfirm={actions.confirmUninstall}
-      />
       <InstallPluginDialog
         open={actions.installOpen}
         busy={actions.installBusy}
@@ -108,6 +104,7 @@ type InstalledTabProps = {
   autoUpdate: ReturnType<typeof useAutoUpdateSettings>;
   updates: Map<string, MarketplaceEntry>;
   updatingId: string | null;
+  isFinePointer: boolean;
   onUpdate: (entry: MarketplaceEntry) => void;
 };
 
@@ -118,6 +115,7 @@ function InstalledTab({
   autoUpdate,
   updates,
   updatingId,
+  isFinePointer,
   onUpdate,
 }: InstalledTabProps) {
   const { t } = useTranslation();
@@ -167,6 +165,7 @@ function InstalledTab({
         autoUpdateDefault={autoUpdate.autoUpdateDefault}
         updates={updates}
         updatingId={updatingId}
+        isFinePointer={isFinePointer}
         onUpdate={onUpdate}
       />
     </>
@@ -213,6 +212,7 @@ type PluginListProps = {
   autoUpdateDefault: boolean;
   updates: Map<string, MarketplaceEntry>;
   updatingId: string | null;
+  isFinePointer: boolean;
   onUpdate: (entry: MarketplaceEntry) => void;
 };
 
@@ -222,6 +222,7 @@ function PluginList({
   autoUpdateDefault,
   updates,
   updatingId,
+  isFinePointer,
   onUpdate,
 }: PluginListProps) {
   const { t } = useTranslation();
@@ -263,9 +264,13 @@ function PluginList({
           autoUpdateDefault={autoUpdateDefault}
           autoUpdateBusy={actions.autoUpdateBusyId === plugin.id}
           needsSetup={needsSetup.has(plugin.id)}
+          isFinePointer={isFinePointer}
+          uninstallBusy={actions.uninstallBusy}
           onEnable={actions.handleEnable}
           onDisable={actions.handleDisable}
-          onUninstall={actions.openUninstall}
+          onConfirmUninstall={async (target) => {
+            await actions.confirmUninstall(target);
+          }}
           onUpdate={onUpdate}
           onSetAutoUpdate={actions.handleSetAutoUpdate}
         />

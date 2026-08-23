@@ -183,9 +183,14 @@ type batchedPRResult struct {
 	// IsDraft is a pointer: AC-12a requires distinguishing an upstream
 	// response that omits or nulls isDraft from one that genuinely reports
 	// false, and a plain bool can't tell the two apart after decode.
-	IsDraft     *bool  `json:"isDraft"`
-	Mergeable   string `json:"mergeable"`
-	MergeStatus string `json:"mergeStateStatus"`
+	IsDraft         *bool  `json:"isDraft"`
+	Mergeable       string `json:"mergeable"`
+	MergeStatus     string `json:"mergeStateStatus"`
+	MergeQueueEntry *struct {
+		State                string `json:"state"`
+		Position             *int   `json:"position"`
+		EstimatedTimeToMerge *int   `json:"estimatedTimeToMerge"`
+	} `json:"mergeQueueEntry"`
 	HeadRefName string `json:"headRefName"`
 	BaseRefName string `json:"baseRefName"`
 	HeadRefOid  string `json:"headRefOid"`
@@ -413,6 +418,7 @@ func prFieldsBlock() string {
 	return `state title url isDraft mergeable mergeStateStatus ` +
 		`headRefName baseRefName headRefOid additions deletions changedFiles ` +
 		`author { login } mergedBy { login } autoMergeRequest { enabledAt } ` +
+		`mergeQueueEntry { state position estimatedTimeToMerge } ` +
 		`createdAt updatedAt mergedAt closedAt ` +
 		`reviews(last: 100) { nodes { state author { login } submittedAt } } ` +
 		`reviewRequests(first: 0) { totalCount } ` +
@@ -490,20 +496,56 @@ func convertBatchedPRResult(raw *batchedPRResult, owner, repo string, number int
 		}
 	}
 	closedByLogin, closureAttributionPopulated := closedEventActor(raw.TimelineItems.Nodes)
+	mergeQueueState, mergeQueuePosition, mergeQueueEstimate := convertMergeQueueEntry(raw.MergeQueueEntry)
 	return &PRStatus{
-		PR:                               pr,
-		ReviewState:                      reviewState,
-		ChecksState:                      checksState,
-		MergeableState:                   pr.MergeableState,
-		ReviewCount:                      countApprovedReviewerNodes(raw.Reviews.Nodes),
-		PendingReviewCount:               raw.ReviewRequests.TotalCount,
-		ReviewCountsPopulated:            true,
-		UnresolvedReviewThreads:          unresolved,
-		UnresolvedReviewThreadsPopulated: true,
-		OutcomeFieldsPopulated:           true,
-		ClosedByLogin:                    closedByLogin,
-		ClosureAttributionPopulated:      closureAttributionPopulated,
+		PR:                                    pr,
+		ReviewState:                           reviewState,
+		ChecksState:                           checksState,
+		MergeableState:                        pr.MergeableState,
+		ReviewCount:                           countApprovedReviewerNodes(raw.Reviews.Nodes),
+		PendingReviewCount:                    raw.ReviewRequests.TotalCount,
+		ReviewCountsPopulated:                 true,
+		UnresolvedReviewThreads:               unresolved,
+		UnresolvedReviewThreadsPopulated:      true,
+		OutcomeFieldsPopulated:                true,
+		ClosedByLogin:                         closedByLogin,
+		ClosureAttributionPopulated:           closureAttributionPopulated,
+		MergeQueueState:                       mergeQueueState,
+		MergeQueuePosition:                    mergeQueuePosition,
+		MergeQueueEstimatedTimeToMergeSeconds: mergeQueueEstimate,
+		mergeQueuePopulated:                   true,
 	}
+}
+
+func convertMergeQueueEntry(entry *struct {
+	State                string `json:"state"`
+	Position             *int   `json:"position"`
+	EstimatedTimeToMerge *int   `json:"estimatedTimeToMerge"`
+}) (string, *int, *int) {
+	if entry == nil {
+		return "", nil, nil
+	}
+	return normalizeMergeQueueState(entry.State), positiveIntPtr(entry.Position), nonNegativeIntPtr(entry.EstimatedTimeToMerge)
+}
+
+func normalizeMergeQueueState(raw string) string {
+	return strings.ToLower(strings.TrimSpace(raw))
+}
+
+func positiveIntPtr(value *int) *int {
+	if value == nil || *value <= 0 {
+		return nil
+	}
+	copy := *value
+	return &copy
+}
+
+func nonNegativeIntPtr(value *int) *int {
+	if value == nil || *value < 0 {
+		return nil
+	}
+	copy := *value
+	return &copy
 }
 
 // closedEventActor extracts the closed-event actor's login from a

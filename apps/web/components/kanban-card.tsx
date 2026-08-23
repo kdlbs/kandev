@@ -1,9 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useDraggable } from "@dnd-kit/core";
 import { KanbanCardContextMenu } from "@/components/kanban-card-context-menu";
 import { KanbanCardShell } from "@/components/kanban-card-content";
+import { useActiveWorkspaceRepositories } from "@/components/kanban-card-repositories";
+export { resolveTaskRepositoryChips } from "@/components/kanban-card-repositories";
 import {
   buildKanbanCardMenuEntries,
   useKanbanCardMoveTargets,
@@ -12,7 +14,7 @@ import { useTaskPluginLinkActions } from "@/components/task/task-session-sidebar
 import { useAppStore } from "@/components/state-provider";
 import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
-import { TaskDetachConfirmDialog } from "@/components/task/task-detach-confirm-dialog";
+import { TaskDetachConfirmationSurface } from "@/components/task/task-detach-confirm-dialog";
 import {
   TaskExternalLinkDialog,
   type ExternalLinkProvider,
@@ -25,10 +27,7 @@ import { TaskMRLinkDialog } from "@/components/gitlab/task-mr-link-dialog";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
 import { useTaskMultiSelectStore } from "@/hooks/use-task-multi-select";
 import { useDetachTask } from "@/hooks/use-detach-task";
-import { repositorySlug } from "@/lib/repository-slug";
-import { formatUserHomePath } from "@/lib/utils";
 import {
-  repositoryId as toRepositoryId,
   type ForegroundActivity,
   type Repository,
   type TaskPendingAction,
@@ -37,8 +36,6 @@ import {
 } from "@/lib/types/http";
 import type { PluginTaskMenuContext } from "@/lib/plugins/types";
 import { usePluginRegistry } from "@/lib/plugins/registry";
-
-const EMPTY_REPOSITORIES: Repository[] = [];
 
 export interface Task {
   id: string;
@@ -306,6 +303,8 @@ function useKanbanCardMenus({
   const moveMenu = useKanbanCardMoveMenuActions({ task, steps, isSelected, selectedIds, onMove });
   const dialogs = useKanbanCardDialogState();
   const { detachTask, detachingTaskId } = useDetachTask();
+  const detachAnchorRef = useRef<HTMLDivElement>(null);
+  const detachFocusReturnRef = useRef<HTMLButtonElement>(null);
   const isDetaching = detachingTaskId === task.id;
   const disabled = Boolean(isDeleting || isArchiving || isDetaching);
   const actingOnMultiSelection = Boolean(isSelected && selectedIds && selectedIds.size > 1);
@@ -317,6 +316,12 @@ function useKanbanCardMenus({
     } catch (error) {
       console.error("Failed to detach task:", error);
     }
+  };
+
+  const requestDetachConfirmation = () => {
+    // Let Radix finish the menu's pointer sequence before the non-modal
+    // popover opens; otherwise the initiating menu event is an outside click.
+    window.setTimeout(() => dialogs.setShowDetachConfirm(true), 300);
   };
 
   const menuBase = {
@@ -332,10 +337,7 @@ function useKanbanCardMenus({
     onEdit: onEdit ? () => onEdit(task) : undefined,
     onArchive: onArchive ? () => dialogs.setShowArchiveConfirm(true) : undefined,
     onDelete: onDelete ? () => dialogs.setShowDeleteConfirm(true) : undefined,
-    onDetach:
-      task.parentTaskId && !actingOnMultiSelection
-        ? () => dialogs.setShowDetachConfirm(true)
-        : undefined,
+    onDetach: task.parentTaskId && !actingOnMultiSelection ? requestDetachConfirmation : undefined,
     ...buildLinkDialogHandlers(externalLinkAvailability, dialogs),
     pluginLinkActions,
   };
@@ -357,6 +359,8 @@ function useKanbanCardMenus({
       pluginMenuContext,
     }),
     isDetaching,
+    detachAnchorRef,
+    detachFocusReturnRef,
     handleDetachConfirm,
   };
 }
@@ -401,14 +405,6 @@ function KanbanCardDialogs({
         executorType={task.primaryExecutorType}
         isArchiving={isArchiving}
         onConfirm={({ cascade }) => onArchive?.(task, { cascade })}
-      />
-      <TaskDetachConfirmDialog
-        open={menu.showDetachConfirm}
-        onOpenChange={menu.setShowDetachConfirm}
-        taskTitle={task.title}
-        sharesParentWorkspace={task.workspaceMode === "inherit_parent"}
-        isDetaching={menu.isDetaching}
-        onConfirm={menu.handleDetachConfirm}
       />
       <TaskGitHubPRDialog
         workspaceId={workspaceId}
@@ -484,15 +480,6 @@ export function dispatchKanbanCardClick(
   handlers.onClick?.(task);
 }
 
-function useActiveWorkspaceRepositories() {
-  const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
-  return useAppStore((state) =>
-    activeWorkspaceId
-      ? (state.repositories.itemsByWorkspaceId[activeWorkspaceId] ?? EMPTY_REPOSITORIES)
-      : EMPTY_REPOSITORIES,
-  );
-}
-
 function KanbanCardFrame({
   task,
   repositoryChips,
@@ -525,30 +512,44 @@ function KanbanCardFrame({
   onClick: (e: React.MouseEvent) => void;
 }) {
   return (
-    <KanbanCardContextMenu entries={menu.contextMenuEntries}>
-      <KanbanCardShell
-        task={task}
-        repositoryChips={repositoryChips}
-        attributes={draggable.attributes}
-        listeners={draggable.listeners}
-        setNodeRef={draggable.setNodeRef}
-        transform={draggable.transform}
-        isDragging={draggable.isDragging}
-        isPreviewed={isPreviewed}
-        isSelected={isSelected}
-        isMultiSelectMode={isMultiSelectMode}
-        showMaximizeButton={showMaximizeButton}
-        isDeleting={isDeleting}
-        isArchiving={isArchiving}
-        menuEntries={menu.dropdownMenuEntries}
-        onClick={onClick}
-        onCheckboxClick={(e) => {
-          e.stopPropagation();
-          onToggleSelect?.(task.id);
-        }}
-        onOpenFullPage={onOpenFullPage}
+    <>
+      <div ref={menu.detachAnchorRef} className="w-full">
+        <KanbanCardContextMenu entries={menu.contextMenuEntries}>
+          <KanbanCardShell
+            task={task}
+            repositoryChips={repositoryChips}
+            attributes={draggable.attributes}
+            listeners={draggable.listeners}
+            setNodeRef={draggable.setNodeRef}
+            transform={draggable.transform}
+            isDragging={draggable.isDragging}
+            isPreviewed={isPreviewed}
+            isSelected={isSelected}
+            isMultiSelectMode={isMultiSelectMode}
+            showMaximizeButton={showMaximizeButton}
+            isDeleting={isDeleting}
+            isArchiving={isArchiving}
+            menuEntries={menu.dropdownMenuEntries}
+            menuTriggerRef={menu.detachFocusReturnRef}
+            onClick={onClick}
+            onCheckboxClick={(e) => {
+              e.stopPropagation();
+              onToggleSelect?.(task.id);
+            }}
+            onOpenFullPage={onOpenFullPage}
+          />
+        </KanbanCardContextMenu>
+      </div>
+      <TaskDetachConfirmationSurface
+        open={menu.showDetachConfirm}
+        anchorRef={menu.detachAnchorRef}
+        focusReturnRef={menu.detachFocusReturnRef}
+        taskTitle={task.title}
+        sharesParentWorkspace={task.workspaceMode === "inherit_parent"}
+        onOpenChange={menu.setShowDetachConfirm}
+        onConfirm={menu.handleDetachConfirm}
       />
-    </KanbanCardContextMenu>
+    </>
   );
 }
 
@@ -633,34 +634,4 @@ export function KanbanCard({
       />
     </>
   );
-}
-
-/**
- * Resolves a task's linked repositories to card chip data. Primary first
- * (`task.repositoryId`), then any others ordered by `task.repositories[].position`.
- * Skips unresolved IDs (repo deleted / not yet hydrated).
- */
-export function resolveTaskRepositoryChips(
-  task: Task,
-  repositories: Repository[],
-): RepositoryChip[] {
-  const byId = new Map(repositories.map((repo) => [repo.id, repo]));
-  const seen = new Set<string>();
-  const chips: RepositoryChip[] = [];
-  const push = (id: string | undefined) => {
-    if (!id || seen.has(id)) return;
-    const repo = byId.get(toRepositoryId(id));
-    if (!repo) return;
-    seen.add(id);
-    const label = repositorySlug(repo);
-    if (!label) return;
-    chips.push({
-      label,
-      ...(repo.local_path ? { path: formatUserHomePath(repo.local_path) } : {}),
-    });
-  };
-  push(task.repositoryId);
-  const ordered = [...(task.repositories ?? [])].sort((a, b) => a.position - b.position);
-  for (const link of ordered) push(link.repository_id);
-  return chips;
 }

@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  IconTrash,
-  IconRefresh,
-  IconPlayerPlay,
-  IconPlayerPause,
-  IconRestore,
-} from "@tabler/icons-react";
+import { IconRefresh, IconPlayerPlay, IconPlayerPause, IconRestore } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
@@ -15,6 +9,8 @@ import type { SentryIssueWatch, SentrySearchFilter } from "@/lib/types/sentry";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { formatRelative } from "@/lib/i18n/formats";
+import { WatcherDeleteAction } from "@/components/watches/watcher-delete-action";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 
 type SentryIssueWatchTableProps = {
   watches: SentryIssueWatch[];
@@ -89,14 +85,20 @@ function WatchActions({
   onDelete: (id: string, workspaceId: string) => void;
 }) {
   const { t } = useTranslation();
+  const { isFinePointer } = useResponsiveBreakpoint();
+  const actionSize = isFinePointer ? "h-7 w-7" : "h-11 w-11";
   return (
-    <div className="flex items-center justify-end gap-1">
+    <div
+      className="flex items-center justify-end gap-1"
+      data-watcher-actions
+      onClick={(event) => event.stopPropagation()}
+    >
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 w-7 p-0 cursor-pointer"
+            className={`${actionSize} p-0 cursor-pointer`}
             data-settings-dirty={isDirty}
             data-testid={`sentry-watch-enabled-${watch.id}`}
             onClick={(e) => {
@@ -118,7 +120,7 @@ function WatchActions({
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 w-7 p-0 cursor-pointer"
+            className={`${actionSize} p-0 cursor-pointer`}
             onClick={(e) => {
               e.stopPropagation();
               onTrigger(watch.id, watch.workspaceId);
@@ -134,7 +136,7 @@ function WatchActions({
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 w-7 p-0 cursor-pointer"
+            className={`${actionSize} p-0 cursor-pointer`}
             data-testid="watch-reset-button"
             aria-label={t("sentry:resetWatch")}
             onClick={(e) => {
@@ -147,27 +149,83 @@ function WatchActions({
         </TooltipTrigger>
         <TooltipContent>{t("common:reset")}</TooltipContent>
       </Tooltip>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 w-7 p-0 text-red-500 hover:text-red-600 cursor-pointer"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete(watch.id, watch.workspaceId);
-            }}
-          >
-            <IconTrash className="h-3.5 w-3.5" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>{t("sentry:delete")}</TooltipContent>
-      </Tooltip>
+      <WatcherDeleteAction
+        title={t("sentry:deleteThisSentryWatcher")}
+        cancelLabel={t("common:cancel")}
+        confirmLabel={t("sentry:delete")}
+        ariaLabel={t("sentry:deleteThisSentryWatcher")}
+        tooltipLabel={t("sentry:delete")}
+        triggerTestId={`sentry-watch-delete-${watch.id}`}
+        confirmTestId="sentry-watch-delete-confirm"
+        onConfirm={() => onDelete(watch.id, watch.workspaceId)}
+      />
     </div>
   );
 }
 
-export function SentryIssueWatchTable({
+function MobileWatchCard({
+  watch,
+  isDirty,
+  instanceName,
+  onEdit,
+  onToggleEnabled,
+  onTrigger,
+  onReset,
+  onDelete,
+}: {
+  watch: SentryIssueWatch;
+  isDirty: boolean;
+  instanceName: (sentryInstanceId: string) => string;
+  onEdit: (watch: SentryIssueWatch) => void;
+  onToggleEnabled: (watch: SentryIssueWatch) => void;
+  onTrigger: (id: string, workspaceId: string) => void;
+  onReset: (id: string, workspaceId: string) => void;
+  onDelete: (id: string, workspaceId: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div
+      className="min-w-0 space-y-3 border-b px-1 py-4 last:border-b-0"
+      data-settings-dirty={isDirty}
+      data-testid={`sentry-watch-mobile-row-${watch.id}`}
+    >
+      <button
+        type="button"
+        className="block w-full min-w-0 text-left cursor-pointer"
+        onClick={() => onEdit(watch)}
+      >
+        <span className="block truncate text-sm">{instanceName(watch.sentryInstanceId)}</span>
+        <span
+          className="mt-1 block truncate font-mono text-xs"
+          title={summarizeFilter(watch.filter)}
+        >
+          {summarizeFilter(watch.filter)}
+        </span>
+        <span className="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <Badge variant={watch.enabled ? "default" : "secondary"}>
+            {watch.enabled ? t("sentry:active") : t("sentry:paused")}
+          </Badge>
+          <span>
+            {t("sentry:intervalMinutes", {
+              count: Math.round(watch.pollIntervalSeconds / 60),
+            })}
+          </span>
+          <span>{formatLastPolled(t, watch.lastPolledAt)}</span>
+        </span>
+      </button>
+      <WatchActions
+        watch={watch}
+        isDirty={isDirty}
+        onToggleEnabled={onToggleEnabled}
+        onTrigger={onTrigger}
+        onReset={onReset}
+        onDelete={onDelete}
+      />
+    </div>
+  );
+}
+
+function DesktopSentryIssueWatchTable({
   watches,
   dirtyIds,
   instanceName,
@@ -178,16 +236,8 @@ export function SentryIssueWatchTable({
   onToggleEnabled,
 }: SentryIssueWatchTableProps) {
   const { t } = useTranslation();
-  if (watches.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground py-4 text-center">
-        {t("sentry:noWatchersConfigured")}
-      </p>
-    );
-  }
-
   return (
-    <Table>
+    <Table className="min-w-[680px]">
       <TableHeader>
         <TableRow>
           <TableHead>{t("sentry:instance")}</TableHead>
@@ -206,7 +256,15 @@ export function SentryIssueWatchTable({
             data-settings-dirty={dirtyIds.has(watch.id)}
             data-settings-dirty-level="container"
             data-testid={`sentry-watch-row-${watch.id}`}
-            onClick={() => onEdit(watch)}
+            onClick={(event) => {
+              if (
+                event.target instanceof Element &&
+                event.target.closest("[data-watcher-actions]")
+              ) {
+                return;
+              }
+              onEdit(watch);
+            }}
           >
             <TableCell className="text-xs text-muted-foreground" data-testid="watch-instance">
               {instanceName(watch.sentryInstanceId)}
@@ -244,5 +302,59 @@ export function SentryIssueWatchTable({
         ))}
       </TableBody>
     </Table>
+  );
+}
+
+export function SentryIssueWatchTable({
+  watches,
+  dirtyIds,
+  instanceName,
+  onEdit,
+  onDelete,
+  onTrigger,
+  onReset,
+  onToggleEnabled,
+}: SentryIssueWatchTableProps) {
+  const { t } = useTranslation();
+  const { usesDesktopWorkbench = true } = useResponsiveBreakpoint();
+  if (watches.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground py-4 text-center">
+        {t("sentry:noWatchersConfigured")}
+      </p>
+    );
+  }
+
+  if (!usesDesktopWorkbench) {
+    return (
+      <div className="min-w-0" data-testid="sentry-watch-mobile-list">
+        {watches.map((watch) => (
+          <MobileWatchCard
+            key={watch.id}
+            watch={watch}
+            isDirty={dirtyIds.has(watch.id)}
+            instanceName={instanceName}
+            onEdit={onEdit}
+            onToggleEnabled={onToggleEnabled}
+            onTrigger={onTrigger}
+            onReset={onReset}
+            onDelete={onDelete}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <DesktopSentryIssueWatchTable
+      watches={watches}
+      dirtyIds={dirtyIds}
+      instanceName={instanceName}
+      onEdit={onEdit}
+      onDelete={onDelete}
+      onTrigger={onTrigger}
+      onReset={onReset}
+      onToggleEnabled={onToggleEnabled}
+    />
   );
 }
