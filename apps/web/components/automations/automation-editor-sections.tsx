@@ -1,4 +1,5 @@
 import { IconTrash } from "@tabler/icons-react";
+import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
@@ -12,7 +13,11 @@ import type {
   TriggerType,
   TriggerTypeInfo,
 } from "@/lib/types/automation";
-import type { CreatedWebhookDetails, FormState } from "./automation-payload";
+import {
+  triggerRequiresRepository,
+  type CreatedWebhookDetails,
+  type FormState,
+} from "./automation-payload";
 import { useAutomationTriggerDrafts } from "./automation-trigger-drafts";
 import { ConfigSection } from "./config-section";
 import { PromptSection } from "./prompt-section";
@@ -25,6 +30,20 @@ type UpdateField = <K extends keyof FormState>(key: K, value: FormState[K]) => v
 
 const SELECTED_CARD_CLASS_NAME = "border-primary bg-primary/5";
 const UNSELECTED_CARD_CLASS_NAME = "border-border hover:bg-muted/30";
+
+function useEnsureRepositoryForTrigger(
+  conditionType: TriggerType | null,
+  repositoryMode: FormState["repositoryMode"],
+  updateField: UpdateField,
+) {
+  const repositoryRequired = triggerRequiresRepository(conditionType);
+  useEffect(() => {
+    if (repositoryRequired && repositoryMode === "none") {
+      updateField("repositoryMode", "workspace_default");
+      updateField("repositorySelections", []);
+    }
+  }, [repositoryMode, repositoryRequired, updateField]);
+}
 
 export function NameField({
   value,
@@ -146,6 +165,7 @@ export function ThenSection({
 }) {
   const { t } = useTranslation();
   const { inputRef, clampChange } = useTaskTitleSelectionRestore(form.taskTitleTemplate);
+  useEnsureRepositoryForTrigger(conditionType, form.repositoryMode, updateField);
   const dirtyFields: Array<keyof FormState> = [
     "taskTitleTemplate",
     "prompt",

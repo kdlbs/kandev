@@ -19,6 +19,7 @@ import { t } from "@/lib/i18n";
 import type { RepositoryMode, TaskMode, TriggerType } from "@/lib/types/automation";
 import { getMultiRepoExecutorDisabledReason } from "@/components/task-create-dialog-multi-repo-guard";
 import { AutomationRepositoryRows } from "./automation-repository-rows";
+import { triggerRequiresRepository } from "./automation-payload";
 import {
   buildRepositoryItems,
   pickSelectionFromOptionId,
@@ -410,9 +411,7 @@ function RepositoryPickerField({
   onRepositoriesChange: (selections: RepositorySelection[]) => void;
 }) {
   const { t } = useTranslation();
-  const repositoryRequired = ["github_pr", "github_pr_merged", "github_push", "github_ci"].includes(
-    conditionType ?? "",
-  );
+  const repositoryRequired = triggerRequiresRepository(conditionType);
   const showPicker = repositoryMode !== "none";
   if (supportsMultiRepo && !isPRTrigger && showPicker) {
     return (

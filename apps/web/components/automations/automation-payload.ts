@@ -44,6 +44,10 @@ export type PendingTrigger = {
   enabled: boolean;
 };
 
+export function triggerRequiresRepository(triggerType: TriggerType | null): boolean {
+  return ["github_pr", "github_pr_merged", "github_push", "github_ci"].includes(triggerType ?? "");
+}
+
 // ResolvedRepositories bundles the save-time output of resolving an ordered
 // RepositorySelection[]: `ids` is the compact repository_ids payload (in
 // order, "none"/empty entries dropped), `selections` is the 1:1-with-input

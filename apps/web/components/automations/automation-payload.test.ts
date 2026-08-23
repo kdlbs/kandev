@@ -12,6 +12,7 @@ import {
   resolveNormalizedRepositoryIds,
   resolveRepositoryIdsForMode,
   resolveRepositoryIds,
+  triggerRequiresRepository,
 } from "./automation-payload";
 import type { FormState } from "./automation-payload";
 
@@ -133,6 +134,13 @@ describe("resolveNormalizedRepositoryIds", () => {
 });
 
 describe("buildCreatePayload / buildUpdatePayload", () => {
+  it("identifies trigger types that require a repository", () => {
+    expect(triggerRequiresRepository("github_pr_merged")).toBe(true);
+    expect(triggerRequiresRepository("github_push")).toBe(true);
+    expect(triggerRequiresRepository("scheduled")).toBe(false);
+    expect(triggerRequiresRepository(null)).toBe(false);
+  });
+
   it("sends repository_ids in row order on create", () => {
     const payload = buildCreatePayload("ws-1", baseForm(), ["repo-a", "repo-b"], []);
     expect(payload.repository_ids).toEqual(["repo-a", "repo-b"]);
