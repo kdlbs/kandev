@@ -240,6 +240,7 @@ function MetricValues({
   ));
   if (layout === "grid") {
     return (
+      // Keep detailed cells compact enough for two columns in the Pixel 5 drawer.
       <div className="grid w-full min-w-0 grid-cols-[repeat(auto-fit,minmax(8rem,1fr))] gap-x-3 gap-y-1">
         {values}
       </div>
@@ -270,7 +271,7 @@ function MetricValue({
     <Tooltip>
       <TooltipTrigger asChild>
         <span
-          className={`inline-flex items-center gap-1.5 tabular-nums ${layout === "grid" ? "min-h-11 min-w-0 w-full" : "shrink-0"} ${metricColor(metric)}`}
+          className={`${layout === "grid" ? "flex min-h-11 min-w-0 w-full" : "inline-flex shrink-0"} items-center gap-1.5 tabular-nums ${metricColor(metric)}`}
           aria-label={`${metricLabel(t, metric.id)} ${formatMetric(metric)}`}
         >
           {metricIcon(metric.id, iconSize)}

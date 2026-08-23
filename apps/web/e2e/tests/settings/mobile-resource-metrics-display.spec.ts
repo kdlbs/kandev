@@ -9,20 +9,20 @@ import {
   metricsUnavailableWasRendered,
   observeMetricsUnavailable,
 } from "./metrics-loading-observer";
+import type { SystemMetricId, SystemMetricsGlobalSettings } from "@/lib/types/system";
 
 type SystemMetricsDisplay = {
   show_in_topbar: boolean;
   simplified?: boolean;
 };
 
-type SystemMetricsGlobalSettings = {
-  metrics: string[];
-  interval_seconds: number;
-  backend_disk_path: string;
-  collect_execution: boolean;
-};
-
-const ALL_HOST_METRICS = ["cpu_percent", "memory_percent", "disk_percent", "cpu_temp", "io_load"];
+const ALL_HOST_METRICS = [
+  "cpu_percent",
+  "memory_percent",
+  "disk_percent",
+  "cpu_temp",
+  "io_load",
+] satisfies SystemMetricId[];
 
 test.describe("Mobile resource metrics display", () => {
   let baseline: SystemMetricsDisplay;
