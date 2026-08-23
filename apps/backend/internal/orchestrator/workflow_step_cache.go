@@ -6,6 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/kandev/kandev/internal/workflow/engine"
 )
 
@@ -54,6 +56,16 @@ type stepSpecCache struct {
 	ttl     time.Duration
 	maxSize int
 	now     func() time.Time
+
+	// sfStep/sfPos coalesce concurrent misses on the same key into one
+	// fetch, so N sessions hitting an expired/cold entry in the same instant
+	// don't all fall through to the DB — the exact contention this cache
+	// exists to remove. Separate groups mirror byStep/byPos: a stepID and a
+	// posKey live in disjoint key spaces already (posKey embeds NUL-joined
+	// segments a stepID can't contain), but two groups keep that invariant
+	// structural rather than relied-upon.
+	sfStep singleflight.Group
+	sfPos  singleflight.Group
 }
 
 func newStepSpecCache() *stepSpecCache {
@@ -84,6 +96,55 @@ func (c *stepSpecCache) getPos(workflowID string, direction posDirection, positi
 
 func (c *stepSpecCache) putPos(workflowID string, direction posDirection, position int, spec engine.StepSpec) {
 	c.put(c.byPos, posKey(workflowID, direction, position), spec)
+}
+
+// getOrLoadStep returns stepID's cached spec when fresh; otherwise it runs
+// fetch, coalescing concurrent misses on the same stepID via sfStep so only
+// one caller reaches the DB. A fetch error is propagated to every waiter and
+// never cached, matching getStep/putStep's existing miss contract.
+func (c *stepSpecCache) getOrLoadStep(stepID string, fetch func() (engine.StepSpec, error)) (engine.StepSpec, error) {
+	if spec, ok := c.getStep(stepID); ok {
+		return spec, nil
+	}
+	v, err, _ := c.sfStep.Do(stepID, func() (interface{}, error) {
+		if spec, ok := c.getStep(stepID); ok { // another caller may have filled it
+			return spec, nil
+		}
+		spec, ferr := fetch()
+		if ferr != nil {
+			return engine.StepSpec{}, ferr
+		}
+		c.putStep(stepID, spec)
+		return spec, nil
+	})
+	if err != nil {
+		return engine.StepSpec{}, err
+	}
+	return v.(engine.StepSpec), nil
+}
+
+// getOrLoadPos is getOrLoadStep for the byPos cache, coalescing concurrent
+// misses on the same (workflowID, direction, position) key via sfPos.
+func (c *stepSpecCache) getOrLoadPos(workflowID string, direction posDirection, position int, fetch func() (engine.StepSpec, error)) (engine.StepSpec, error) {
+	if spec, ok := c.getPos(workflowID, direction, position); ok {
+		return spec, nil
+	}
+	key := posKey(workflowID, direction, position)
+	v, err, _ := c.sfPos.Do(key, func() (interface{}, error) {
+		if spec, ok := c.getPos(workflowID, direction, position); ok { // another caller may have filled it
+			return spec, nil
+		}
+		spec, ferr := fetch()
+		if ferr != nil {
+			return engine.StepSpec{}, ferr
+		}
+		c.putPos(workflowID, direction, position, spec)
+		return spec, nil
+	})
+	if err != nil {
+		return engine.StepSpec{}, err
+	}
+	return v.(engine.StepSpec), nil
 }
 
 // get reports a hit only when the key is present and unexpired. m must be

@@ -13,6 +13,31 @@ import (
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
+// blockingStepGetter blocks the first GetStep call on release, closing
+// entered exactly once so a concurrent-miss test can deterministically wait
+// for the fetch to actually start before releasing it. If singleflight
+// coalescing ever regresses and GetStep is invoked a second time while the
+// first is still blocked, the second close(entered) panics, failing loudly.
+type blockingStepGetter struct {
+	*countingStepGetter
+	entered chan struct{}
+	release chan struct{}
+}
+
+func newBlockingStepGetter() *blockingStepGetter {
+	return &blockingStepGetter{
+		countingStepGetter: newCountingStepGetter(),
+		entered:            make(chan struct{}),
+		release:            make(chan struct{}),
+	}
+}
+
+func (b *blockingStepGetter) GetStep(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error) {
+	close(b.entered)
+	<-b.release
+	return b.countingStepGetter.GetStep(ctx, stepID)
+}
+
 // erroringStepGetter always fails GetStep, mirroring the real repository's
 // error return for a missing step (unlike mockStepGetter, which returns
 // nil, nil and would make LoadStep call engine.CompileStep(nil)).
@@ -312,4 +337,128 @@ func TestStepSpecCache_ConcurrentAccess(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
+}
+
+// 10. LoadPreviousStep caches across calls and is invalidated by a workflow
+// step event, exercising the byPos "prev" direction — the rest of this suite
+// only exercises "next" via LoadNextStep.
+func TestWorkflowStore_LoadPreviousStep_CachesAndInvalidates(t *testing.T) {
+	ctx := context.Background()
+	stepGetter := newCountingStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{ID: "step1", WorkflowID: "wf1", Position: 0}
+	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{ID: "step2", WorkflowID: "wf1", Position: 1}
+
+	svc := &Service{logger: testLogger()}
+	svc.workflowStore = newWorkflowStore(nil, stepGetter, nil, noopPublisher, testLogger())
+
+	spec, err := svc.workflowStore.LoadPreviousStep(ctx, "wf1", 1)
+	if err != nil {
+		t.Fatalf("first LoadPreviousStep failed: %v", err)
+	}
+	if spec.ID != "step1" {
+		t.Fatalf("expected previous step %q, got %q", "step1", spec.ID)
+	}
+	if _, err := svc.workflowStore.LoadPreviousStep(ctx, "wf1", 1); err != nil {
+		t.Fatalf("second LoadPreviousStep failed: %v", err)
+	}
+
+	stepGetter.mu.Lock()
+	calls := stepGetter.getPreviousCalls
+	stepGetter.mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("expected exactly 1 getter call across 2 LoadPreviousStep calls, got %d", calls)
+	}
+
+	if err := svc.handleWorkflowStepCacheInvalidation(ctx, stepEvent(events.WorkflowStepUpdated, "step1", "wf1")); err != nil {
+		t.Fatalf("handleWorkflowStepCacheInvalidation failed: %v", err)
+	}
+
+	if _, err := svc.workflowStore.LoadPreviousStep(ctx, "wf1", 1); err != nil {
+		t.Fatalf("LoadPreviousStep after invalidation failed: %v", err)
+	}
+
+	stepGetter.mu.Lock()
+	calls = stepGetter.getPreviousCalls
+	stepGetter.mu.Unlock()
+	if calls != 2 {
+		t.Fatalf("expected a refetch after invalidation (2 calls), got %d", calls)
+	}
+}
+
+// 11. subscribeWorkflowStepCacheEvents actually registers the handler on the
+// bus and reacts to a delivered event, rather than trusting that
+// handleWorkflowStepCacheInvalidation (called directly by tests 3-5) is ever
+// wired up. A wrong event-type constant or a missing Subscribe call would
+// leave every LoadStep call here served from a stale cache entry.
+func TestSubscribeWorkflowStepCacheEvents_DeliversThroughBus(t *testing.T) {
+	ctx := context.Background()
+	stepGetter := newCountingStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{ID: "step1", WorkflowID: "wf1"}
+
+	eventBus := bus.NewMemoryEventBus(testLogger())
+	svc := &Service{logger: testLogger(), eventBus: eventBus}
+	svc.workflowStore = newWorkflowStore(nil, stepGetter, nil, noopPublisher, testLogger())
+	svc.subscribeWorkflowStepCacheEvents()
+
+	for _, eventType := range []string{events.WorkflowStepCreated, events.WorkflowStepUpdated, events.WorkflowStepDeleted} {
+		if _, err := svc.workflowStore.LoadStep(ctx, "wf1", "step1"); err != nil {
+			t.Fatalf("LoadStep before %s failed: %v", eventType, err)
+		}
+		if err := eventBus.Publish(ctx, eventType, stepEvent(eventType, "step1", "wf1")); err != nil {
+			t.Fatalf("publish %s failed: %v", eventType, err)
+		}
+	}
+	if _, err := svc.workflowStore.LoadStep(ctx, "wf1", "step1"); err != nil {
+		t.Fatalf("final LoadStep failed: %v", err)
+	}
+
+	stepGetter.mu.Lock()
+	calls := stepGetter.getStepCalls
+	stepGetter.mu.Unlock()
+	// One fetch per LoadStep call (4 total): each of the 3 bus-delivered
+	// events must invalidate the entry the prior LoadStep just populated, or
+	// this would stay at 1.
+	if calls != 4 {
+		t.Fatalf("expected 4 getter calls (each bus-delivered event invalidating the prior load), got %d", calls)
+	}
+}
+
+// 12. Concurrent misses on the same key coalesce into one getter call via
+// stepCache's singleflight group, rather than every waiter independently
+// re-reading and recompiling the step.
+func TestWorkflowStore_LoadStep_CoalescesConcurrentMisses(t *testing.T) {
+	ctx := context.Background()
+	stepGetter := newBlockingStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{ID: "step1", WorkflowID: "wf1", Name: "Planning"}
+
+	store := newWorkflowStore(nil, stepGetter, nil, noopPublisher, testLogger())
+
+	const n = 10
+	var wg sync.WaitGroup
+	errCh := make(chan error, n)
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func() {
+			defer wg.Done()
+			_, err := store.LoadStep(ctx, "wf1", "step1")
+			errCh <- err
+		}()
+	}
+
+	<-stepGetter.entered      // the leader has reached the DB read
+	close(stepGetter.release) // let it (and only it) complete the fetch
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			t.Fatalf("LoadStep returned error: %v", err)
+		}
+	}
+
+	stepGetter.mu.Lock()
+	calls := stepGetter.getStepCalls
+	stepGetter.mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("expected exactly 1 getter call across %d concurrent LoadStep calls, got %d", n, calls)
+	}
 }
