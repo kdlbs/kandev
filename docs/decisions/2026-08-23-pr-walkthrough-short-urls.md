@@ -18,6 +18,10 @@ first 12 lowercase hexadecimal characters for the R2 object key, public URL,
 and PR-description callout. The workflow and the PR-body helper derive this
 prefix from the trusted 40-character event SHA.
 
+The fixed shell loads the current website logo and favicon from the website's
+stable public asset paths. This live branding is intentional. Package URLs in
+the shell remain pinned, but new pages follow the current website identity.
+
 ## Consequences
 
 - Walkthrough links are 28 characters shorter while retaining a 48-bit prefix.
@@ -28,6 +32,8 @@ prefix from the trusted 40-character event SHA.
   is safer than a conventional 7-character display prefix.
 - Existing full-SHA objects are not renamed. New generations use the short
   path, and reruns update the PR callout to that path.
+- Existing pages can show a later website brand asset because the shell loads
+  that asset at page-load time.
 
 ## Alternatives Considered
 

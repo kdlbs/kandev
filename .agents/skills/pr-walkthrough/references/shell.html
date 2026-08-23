@@ -16,12 +16,11 @@
   <link rel="apple-touch-icon" href="https://kandev.ai/apple-touch-icon.png" sizes="180x180" />
   <title>{{PR_TITLE}} - Walkthrough</title>
 
-  <!-- External resources (all pinned, loaded from CDN).
-       Tailwind loads here as a classic script. The four ESM libraries below
-       are declared in this import map so every external URL is visible at the
-       top. The module script near the end imports them by their bare name
-       (mermaid, marked, dompurify, shiki). To change a version, edit only the
-       URLs here. -->
+  <!-- External package resources use exact-version CDN URLs. Website brand
+       assets intentionally use live kandev.ai URLs so new pages match the
+       current site branding. Tailwind loads here as a classic script. The
+       four ESM libraries below are declared in this import map so every
+       package URL is visible at the top. -->
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
   <script type="importmap">
     {
@@ -58,10 +57,10 @@
       color-scheme: light;
       --wt-bg: #f5f5f5;
       --wt-fg: #0a0a0a;
-      --wt-muted: #737373;
+      --wt-muted: #666666;
       --wt-border: rgba(204, 204, 204, .5);
       --wt-surface: #f1f1f1;
-      --wt-primary: #6366f1;
+      --wt-primary: #4f46e5;
       --wt-primary-soft: #818cf8;
       --wt-primary-deep: #4f46e5;
       --wt-dark-surface: #1e1e1e;
@@ -74,6 +73,7 @@
       --wt-muted: #b3b3b3;
       --wt-border: rgba(102, 102, 102, .2);
       --wt-surface: #191919;
+      --wt-primary: #6366f1;
     }
     html { scroll-behavior: smooth; }
     body {

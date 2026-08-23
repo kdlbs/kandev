@@ -430,7 +430,15 @@ class TestBuild(unittest.TestCase):
         self.assertIn('class="wt-brand-mark"', out)
         self.assertIn('href="https://kandev.ai/favicon.ico"', out)
         self.assertIn('href="https://kandev.ai/icon.svg"', out)
+        self.assertIn(
+            'rel="apple-touch-icon" href="https://kandev.ai/apple-touch-icon.png"',
+            out,
+        )
         self.assertIn('src="https://kandev.ai/brand/kandev-github-org.png"', out)
+        self.assertIn(
+            "brand: { DEFAULT: '#6366f1', soft: '#818cf8', deep: '#4f46e5' },",
+            out,
+        )
 
     def test_runtime_cdn_dependencies_use_exact_versions(self):
         out = build.build(minimal_data())
