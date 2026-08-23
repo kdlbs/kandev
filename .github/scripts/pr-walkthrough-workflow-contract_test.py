@@ -125,6 +125,11 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
         ):
             self.assertIn(value, self.link)
 
+        self.assertIn("trusted workflow checkout", self.generation)
+        self.assertIn("trusted workflow commit", self.generation)
+        self.assertNotIn("trusted base checkout", self.generation)
+        self.assertNotIn("trusted base commit", self.generation)
+
     def test_generation_retries_only_incomplete_zero_exit_once(self) -> None:
         for value in (
             "for attempt in 1 2; do",
@@ -333,10 +338,14 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
         self.assertIn("--github-response", self.link)
         self.assertIn("--input", self.link)
         self.assertIn(
+            "PUBLIC_URL: ${{ needs.pr-walkthrough-publish.outputs.url }}",
+            self.link,
+        )
+        self.assertIn('test -n "$PUBLIC_URL"', self.link)
+        self.assertNotIn(
             'PUBLIC_URL="https://walkthrough.kandev.ai/pr/${PR_NUMBER}/${HEAD_SHA}.html"',
             self.link,
         )
-        self.assertNotIn("needs.pr-walkthrough-publish.outputs.url", self.link)
         self.assertNotIn("CLOUDFLARE_R2", self.link)
         self.assertNotIn("OPENCODE_API_KEY", self.link)
         self.assertTrue(PR_BODY_HELPER.is_file())

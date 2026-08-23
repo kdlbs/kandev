@@ -94,6 +94,28 @@ The shared focused checks passed after both workflow changes:
 - `actionlint .github/workflows/pr-walkthrough.yml` — passed with actionlint v1.7.7 installed in a temporary directory because no local binary was present.
 - `git diff --check` — passed.
 
+## PR Fixup Results
+
+The PR review found that the link job rebuilt the public URL with the full head
+SHA. The job now reads the validated URL output from the publish job. It also
+rejects an empty output before it updates the PR body.
+
+The workflow prompt now uses the terms `trusted workflow checkout` and
+`trusted workflow commit`. The contract test rejects the old terms and local
+URL reconstruction.
+
+The fixup checks passed:
+
+- `python3 .github/scripts/pr-walkthrough-workflow-contract_test.py` - 22 tests passed.
+- `python3 scripts/pr-walkthrough-pr-body.test.py` - 8 tests passed.
+- `python3 .agents/skills/pr-walkthrough/scripts/pr-walkthrough-context.test.py` - 4 tests passed.
+- `python3 .agents/skills/pr-walkthrough/scripts/pr-walkthrough-render.test.py` - 4 tests passed.
+- `python3 .github/scripts/lint-action-pinning_test.py` - 9 tests passed.
+- `python3 .github/scripts/lint-action-pinning.py` - 20 workflow files passed.
+- `python3 scripts/lint-spec-files.py --all` - passed.
+- `actionlint .github/workflows/pr-walkthrough.yml` - passed with actionlint v1.7.12.
+- `git diff --check` - passed.
+
 ## Implementation Waves And Parallel Candidates
 
 Wave 1:

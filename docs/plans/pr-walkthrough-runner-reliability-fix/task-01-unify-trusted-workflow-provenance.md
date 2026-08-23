@@ -61,3 +61,23 @@ Validation passed:
 - `python3 .github/scripts/lint-action-pinning.py` - 20 workflow files.
 - `actionlint .github/workflows/pr-walkthrough.yml` - passed with v1.7.7 in a temporary directory.
 - `git diff --check` - passed.
+
+## PR Review Fixup
+
+The link job now uses the validated URL output from the publish job. It rejects
+an empty URL and does not rebuild the URL from the full head SHA.
+
+The contract test now covers this data flow. It also requires consistent
+trusted-workflow terms in the agent prompt.
+
+Fixup validation passed:
+
+- `python3 .github/scripts/pr-walkthrough-workflow-contract_test.py` - 22 tests.
+- `python3 scripts/pr-walkthrough-pr-body.test.py` - 8 tests.
+- `python3 .agents/skills/pr-walkthrough/scripts/pr-walkthrough-context.test.py` - 4 tests.
+- `python3 .agents/skills/pr-walkthrough/scripts/pr-walkthrough-render.test.py` - 4 tests.
+- `python3 .github/scripts/lint-action-pinning_test.py` - 9 tests.
+- `python3 .github/scripts/lint-action-pinning.py` - 20 workflow files.
+- `python3 scripts/lint-spec-files.py --all` - passed.
+- `actionlint .github/workflows/pr-walkthrough.yml` - passed with v1.7.12.
+- `git diff --check` - passed.
