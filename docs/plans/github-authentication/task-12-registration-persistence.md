@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: ["11-reconcile-main"]
 plan: "plan.md"
-spec: "../../specs/integrations/github-authentication.md"
+spec: "../../specs/integrations/requirements/github-authentication.md"
 ---
 
 # Task 12: Registration Persistence

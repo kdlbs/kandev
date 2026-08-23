@@ -5,7 +5,7 @@ status: completed
 wave: 2
 depends_on: ["01-mobile-kanban-hierarchy"]
 plan: "plan.md"
-spec: "../../specs/ui/mobile-task-navigation.md"
+spec: "../../specs/ui/requirements/mobile-task-navigation.md"
 ---
 
 # Task 02: Mobile Home task interaction

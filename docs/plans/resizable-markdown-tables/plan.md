@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/resizable-markdown-tables.md
+spec: docs/specs/ui/requirements/resizable-markdown-tables.md
 created: 2026-08-05
 status: complete
 ---

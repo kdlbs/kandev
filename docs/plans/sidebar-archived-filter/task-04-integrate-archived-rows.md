@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["03-archived-sidebar-projection"]
 plan: "plan.md"
-spec: "../../specs/ui/sidebar-archived-filter.md"
+spec: "../../specs/ui/requirements/sidebar-archived-filter.md"
 ---
 
 # Task 04: Integrate archived sidebar rows

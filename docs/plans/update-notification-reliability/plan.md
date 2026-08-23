@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/platform/notifications.md
+spec: docs/specs/platform/requirements/notifications.md
 created: 2026-07-24
 status: draft
 ---
@@ -265,9 +265,9 @@ Changes:
   Notifications provider/event matrix.
 - Add `system.update_available` and its occurrence payload to
   `docs/public/websocket-api.md`.
-- Keep `docs/specs/platform/notifications.md`,
-  `docs/specs/system-page/spec.md`,
-  `docs/specs/desktop-tauri-app/spec.md`,
+- Keep `docs/specs/platform/requirements/notifications.md`,
+  `docs/specs/system-page/requirements/system-page.md`,
+  `docs/specs/desktop/requirements/desktop-tauri-app.md`,
   `docs/decisions/2026-07-24-semantic-notification-events.md`, and
   `docs/decisions/0039-native-desktop-integration-boundary.md` aligned.
 

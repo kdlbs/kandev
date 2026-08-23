@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/claude-fork-review-allowlist/spec.md"
+spec: "../../specs/integrations/requirements/claude-fork-review-allowlist.md"
 ---
 
 # Task 01: Forward the approved fork allowlist
@@ -37,7 +37,7 @@ None.
 
 ## Inputs
 
-- Spec scenarios in `docs/specs/claude-fork-review-allowlist/spec.md`.
+- Spec scenarios in `docs/specs/integrations/requirements/claude-fork-review-allowlist.md`.
 - Failed `claude-review-fork` job 90922436522 from workflow run 30557734099.
 - Pinned action input contract: `allowed_non_write_users` accepts comma-separated usernames only when `github_token` is provided.
 

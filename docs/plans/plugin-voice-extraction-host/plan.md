@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/plugins/voice-extraction-host.md
+spec: docs/specs/plugins/requirements/voice-extraction-host.md
 created: 2026-08-11
 status: complete
 ---
@@ -84,7 +84,7 @@ only a later parity task may remove core code.
 - Keep API v1 omissions public and introduce API v2 with an authenticated default. Document that
   consumers must declare the first supporting `min_kandev_version`; older hosts fail installation
   instead of falling back to webhooks.
-- Update `docs/specs/plugins/spec.md`, `docs/plans/plugins/PLUGIN-API.md`,
+- Update `docs/specs/plugins/requirements/plugins.md`, `docs/plans/plugins/PLUGIN-API.md`,
   `docs/public/plugins-authoring.md`, and `docs/public/plugins-manifest.md` in the same contract task.
 
 ## Test Strategy

@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/platform/cron-office-disabled-safety.md
+spec: docs/specs/platform/requirements/cron-office-disabled-safety.md
 created: 2026-08-03
 status: complete
 ---
@@ -12,7 +12,7 @@ package and is separately reviewable.
 
 ## Related Specs
 
-- `docs/specs/platform/cron-office-disabled-safety.md` (Task 01, new repair spec)
+- `docs/specs/platform/requirements/cron-office-disabled-safety.md` (Task 01, new repair spec)
 - `docs/specs/tasks/requirements/title-length-limit.md` (Task 02, amended)
 - `docs/specs/tasks/system-design/runtime-cleanup.md` (Task 03, amended)
 

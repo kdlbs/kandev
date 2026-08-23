@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/platform/bounded-task-status-delivery.md
+spec: docs/specs/platform/requirements/bounded-task-status-delivery.md
 decision: docs/decisions/2026-08-02-isolate-replaceable-session-stream-traffic.md
 created: 2026-08-02
 status: complete
@@ -240,7 +240,7 @@ cd apps/web && pnpm e2e:run tests/session/session-stream-overload-isolation.spec
 ## Documentation impact
 
 The behavioral contract is added to
-`docs/specs/platform/bounded-task-status-delivery.md` and the shared boundary is
+`docs/specs/platform/requirements/bounded-task-status-delivery.md` and the shared boundary is
 recorded in
 `docs/decisions/2026-08-02-isolate-replaceable-session-stream-traffic.md`.
 No public docs change is expected because commands, settings, public APIs, and

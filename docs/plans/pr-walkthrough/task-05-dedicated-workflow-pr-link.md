@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["04-r2-html-publication"]
 plan: "plan.md"
-spec: "../../specs/pr-walkthrough/spec.md"
+spec: "../../specs/ui/requirements/pr-walkthrough.md"
 ---
 
 # Task 05: Separate walkthrough workflow and link it from the PR body

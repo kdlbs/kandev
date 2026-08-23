@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-frontend-pin"]
 plan: "plan.md"
-spec: "../../specs/ui/message-queue-pin.md"
+spec: "../../specs/ui/requirements/message-queue-pin.md"
 ---
 
 # Task 02: E2E pin persistence across navigation

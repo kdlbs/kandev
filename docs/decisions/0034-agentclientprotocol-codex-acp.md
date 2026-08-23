@@ -22,7 +22,7 @@ The host operator can deliberately refresh the ACP package through
 replaces the advertised model and configuration catalogue for future
 sessions. The shared runtime-management boundary is recorded in
 [ADR-2026-07-26](2026-07-26-user-managed-agent-runtime-updates.md) and the
-[managed runtime update spec](../specs/agents/runtime-updates.md).
+[managed runtime update spec](../specs/agents/requirements/runtime-updates.md).
 
 ## Consequences
 

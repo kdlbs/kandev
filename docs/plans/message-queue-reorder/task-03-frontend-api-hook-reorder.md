@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-backend-service-handler-reorder"]
 plan: "plan.md"
-spec: "../../specs/ui/message-queue-reorder.md"
+spec: "../../specs/ui/requirements/message-queue-reorder.md"
 ---
 
 # Task 03: Frontend queue API and hook reorder

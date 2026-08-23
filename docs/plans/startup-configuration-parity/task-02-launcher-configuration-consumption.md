@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-configuration-catalog-and-source-resolution"]
 plan: "plan.md"
-spec: "../../specs/platform/startup-configuration-parity.md"
+spec: "../../specs/platform/requirements/startup-configuration-parity.md"
 ---
 
 # Task 02: Launcher configuration consumption

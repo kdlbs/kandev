@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-derived-visibility"]
 plan: "plan.md"
-spec: "../../specs/kanban-auto-hide-empty-columns/spec.md"
+spec: "../../specs/ui/requirements/kanban-auto-hide-empty-columns.md"
 ---
 
 # Task 03: Restore auto-hidden steps as move targets

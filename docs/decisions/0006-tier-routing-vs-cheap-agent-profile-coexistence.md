@@ -48,6 +48,6 @@ Today there is no caller-level interaction: routing is gated on `office_workspac
 
 ## References
 
-- `docs/specs/office-provider-routing/spec.md` — routing feature spec
-- `docs/specs/office-provider-routing/plan.md` — routing implementation plan
+- `docs/specs/office/requirements/routing.md` — routing feature requirements
+- `docs/plans/office-execution-profile-routing/plan.md` — routing implementation plan
 - `apps/backend/internal/agent/settings/models/models.go` — `AgentSettings.CheapAgentProfileID`
