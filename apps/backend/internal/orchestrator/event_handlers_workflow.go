@@ -758,14 +758,33 @@ func (s *Service) handleTaskQueuePromoted(ctx context.Context, data watcher.Task
 // freshly created task enters its start step too, but nothing evaluated
 // on_enter for it before this handler existed.
 //
-// Skip entirely when the task carries MetaKeyDeferredLaunch metadata: that
-// key means the REST/MCP/WS create request itself asked for a launch
-// (start_agent or prepare_session). If the task could launch immediately,
-// the request handler already did it synchronously; if it's queued or
-// blocked, the deferred-launch record is meant to be consumed later by the
-// transition/dependency-resolution event that ends the queue or block, not
-// by this creation event. Either way, launching here would race or
-// duplicate that launch.
+// The guard is a POSITIVE opt-in (models.HasAutoStartOnCreateIntent), not an
+// absence check. An earlier version launched unless the task carried
+// MetaKeyDeferredLaunch, treating every other absence as "no launch opinion,
+// please auto-start" — but REST/MCP/WS creates without start_agent or
+// prepare_session never set that key either, so a task explicitly created
+// without a launch request got auto-started anyway. Requiring an explicit
+// MetaKeyAutoStartOnCreate marker means only a producer that actually wants
+// create-time on_enter evaluation gets it (today: CreateOfficeTaskInWorkflow,
+// for materialized heavy-routine runs); every other producer's silence is
+// left exactly as before.
+//
+// Office tasks (task.IsFromOffice) are excluded even when opted in: the
+// office subscriber's own task.created handler already queues a run for
+// every office task using a different idempotency key than
+// autoStartOfficeTaskForLoadedStep's, so both firing would double-queue the
+// same task. No current opt-in producer creates office tasks — heavy
+// routines are never IsFromOffice — but the exclusion is explicit rather
+// than incidental on that non-overlap.
+//
+// No MetaKeyDeferredLaunch check is needed here: repository.CreateTask
+// unconditionally clears that key (models.DropWIPDeferredLaunch) for any
+// task admitted directly onto a step, which is every task this handler
+// fires for — a fresh task lands here precisely because it wasn't queued.
+// A task that IS queued (QueuedForStepID != "") keeps the key, but
+// autoStartTaskForStep's own leading check already returns before doing
+// anything with it. Either way the key can never change this handler's
+// outcome, so checking it here would be dead code.
 func (s *Service) handleTaskCreated(ctx context.Context, data watcher.TaskEventData) {
 	task, err := s.repo.GetTask(ctx, data.TaskID)
 	if err != nil || task == nil {
@@ -774,10 +793,8 @@ func (s *Service) handleTaskCreated(ctx context.Context, data watcher.TaskEventD
 		}
 		return
 	}
-	if task.Metadata != nil {
-		if _, hasDeferredLaunch := task.Metadata[models.MetaKeyDeferredLaunch]; hasDeferredLaunch {
-			return
-		}
+	if task.IsFromOffice || !models.HasAutoStartOnCreateIntent(task.Metadata) {
+		return
 	}
 	s.autoStartTaskForStep(ctx, task.ID, task.WorkflowStepID, events.TaskCreated)
 }

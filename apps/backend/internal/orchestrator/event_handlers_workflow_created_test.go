@@ -18,6 +18,13 @@ import (
 // on_enter evaluated, because every other autoStartTaskForStep caller
 // represents a transition INTO a step (task.moved, task.queue_promoted,
 // dependency resolution) — creation was never wired in.
+//
+// Subtests that expect NO launch attempt assert on stepGetter.GetStepCalls()
+// rather than on the mock agent manager. autoStartTaskForStep calls GetStep
+// synchronously before any launch work is handed off to a detached goroutine
+// (see autoStartTaskForLoadedStep), so a zero call count is race-free proof
+// that autoStartTaskForStep was never entered — unlike waiting on the agent
+// manager, which races the test's own DB teardown against that goroutine.
 func TestHandleTaskCreated(t *testing.T) {
 	ctx := context.Background()
 
@@ -28,10 +35,12 @@ func TestHandleTaskCreated(t *testing.T) {
 		requireNoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}))
 
 		// Mirrors what CreateOfficeTaskInWorkflow now stamps for a heavy
-		// routine run: the routine's assignee carried as a task-level
-		// fallback, since the Routine workflow's start step pins no agent.
+		// routine run: the positive create-time opt-in, plus the routine's
+		// assignee carried as a task-level fallback since the Routine
+		// workflow's start step pins no agent.
 		metadata := map[string]interface{}{
-			models.MetaKeyAgentProfileID: "routine-assignee",
+			models.MetaKeyAutoStartOnCreate: true,
+			models.MetaKeyAgentProfileID:    "routine-assignee",
 		}
 		requireNoError(t, repo.CreateTask(ctx, &models.Task{
 			ID:             "t1",
@@ -87,33 +96,74 @@ func TestHandleTaskCreated(t *testing.T) {
 		}
 	})
 
-	t.Run("skips when the task carries deferred-launch metadata", func(t *testing.T) {
+	t.Run("skips a queued task even when it carries the create-time opt-in", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		now := time.Now().UTC()
 		requireNoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}))
 		requireNoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}))
 
-		// A REST/MCP/WS create request with start_agent (or prepare_session)
-		// stamps MetaKeyDeferredLaunch unconditionally. That request handler
-		// either already launched the session synchronously, or the task is
-		// queued/blocked and a later transition/dependency-resolution event
-		// owns consuming the deferred-launch record. Either way, task.created
-		// must not also race a launch through the auto-start chokepoint.
-		metadata := map[string]interface{}{
-			models.MetaKeyDeferredLaunch: map[string]interface{}{
-				"intent":           "start",
-				"agent_profile_id": "explicit-profile",
+		// QueuedForStepID marks a task as WIP-blocked: it isn't really
+		// entering step1 yet, it's waiting for capacity. autoStartTaskForStep
+		// bails on this before doing anything else, so a task.created firing
+		// for a queued task (e.g. via CreateTaskWithWorkflowStepAdmission
+		// overflow placement) must not attempt a launch even though it
+		// carries the create-time opt-in.
+		requireNoError(t, repo.CreateTask(ctx, &models.Task{
+			ID:              "t2",
+			WorkspaceID:     "ws1",
+			WorkflowID:      "wf1",
+			WorkflowStepID:  "step1",
+			QueuedForStepID: "step1",
+			QueuedAt:        &now,
+			Title:           "Queued create",
+			Description:     "prompt",
+			State:           v1.TaskStateCreated,
+			Metadata:        map[string]interface{}{models.MetaKeyAutoStartOnCreate: true},
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}))
+
+		stepGetter := newMockStepGetter()
+		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+			ID: "step1", WorkflowID: "wf1", Name: "Start", Position: 0,
+			Events: wfmodels.StepEvents{
+				OnEnter: []wfmodels.OnEnterAction{
+					{Type: wfmodels.OnEnterAutoStartAgent},
+				},
 			},
 		}
+
+		svc := createTestServiceWithAgent(repo, stepGetter, newMockTaskRepo(), failIfLaunched(t))
+
+		svc.handleTaskCreated(ctx, watcher.TaskEventData{TaskID: "t2"})
+
+		if calls := stepGetter.GetStepCalls(); calls != 0 {
+			t.Fatalf("GetStepCalls() = %d, want 0 (autoStartTaskForStep must bail on QueuedForStepID before loading the step)", calls)
+		}
+	})
+
+	t.Run("skips a task created on an auto-start step without the create-time opt-in (R-1)", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		now := time.Now().UTC()
+		requireNoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}))
+		requireNoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}))
+
+		// An ordinary task with no launch opinion at all: no
+		// MetaKeyAutoStartOnCreate. A prior version of this guard launched
+		// unless the task carried MetaKeyDeferredLaunch, treating every
+		// other absence as "no launch opinion, please auto-start" — which
+		// incorrectly launched every producer that simply never set it
+		// (REST/MCP/WS creates without start_agent or prepare_session,
+		// CreateChildTask, etc.). Landing on an auto-start step must not be
+		// enough on its own.
 		requireNoError(t, repo.CreateTask(ctx, &models.Task{
-			ID:             "t2",
+			ID:             "t3",
 			WorkspaceID:    "ws1",
 			WorkflowID:     "wf1",
 			WorkflowStepID: "step1",
-			Title:          "Explicit start",
+			Title:          "Ordinary create",
 			Description:    "prompt",
 			State:          v1.TaskStateCreated,
-			Metadata:       metadata,
 			CreatedAt:      now,
 			UpdatedAt:      now,
 		}))
@@ -130,7 +180,59 @@ func TestHandleTaskCreated(t *testing.T) {
 
 		svc := createTestServiceWithAgent(repo, stepGetter, newMockTaskRepo(), failIfLaunched(t))
 
-		svc.handleTaskCreated(ctx, watcher.TaskEventData{TaskID: "t2"})
+		svc.handleTaskCreated(ctx, watcher.TaskEventData{TaskID: "t3"})
+
+		if calls := stepGetter.GetStepCalls(); calls != 0 {
+			t.Fatalf("GetStepCalls() = %d, want 0 (handleTaskCreated must not call autoStartTaskForStep without the create-time opt-in)", calls)
+		}
+	})
+
+	t.Run("does not launch an office task even when it carries the create-time opt-in (R-2)", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		now := time.Now().UTC()
+		requireNoError(t, repo.CreateWorkspace(ctx, &models.Workspace{
+			ID: "ws1", Name: "Test", OfficeWorkflowID: "wf1", CreatedAt: now, UpdatedAt: now,
+		}))
+		requireNoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "Office WF", CreatedAt: now, UpdatedAt: now}))
+
+		// task.IsFromOffice is a read-time projection: true because this
+		// task's workflow matches the workspace's OfficeWorkflowID. The
+		// office subscriber's own task.created handler already queues a run
+		// for every office task; if handleTaskCreated also launched one here
+		// (even though this task, hypothetically, carried the opt-in), the
+		// two would race to double-queue the same task with different
+		// idempotency keys. handleTaskCreated must defer to the office
+		// subscriber entirely, regardless of the opt-in marker.
+		requireNoError(t, repo.CreateTask(ctx, &models.Task{
+			ID:             "t4",
+			WorkspaceID:    "ws1",
+			WorkflowID:     "wf1",
+			WorkflowStepID: "step1",
+			Title:          "Office task",
+			Description:    "prompt",
+			State:          v1.TaskStateCreated,
+			Metadata:       map[string]interface{}{models.MetaKeyAutoStartOnCreate: true},
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		}))
+
+		stepGetter := newMockStepGetter()
+		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+			ID: "step1", WorkflowID: "wf1", Name: "Start", Position: 0,
+			Events: wfmodels.StepEvents{
+				OnEnter: []wfmodels.OnEnterAction{
+					{Type: wfmodels.OnEnterAutoStartAgent},
+				},
+			},
+		}
+
+		svc := createTestServiceWithAgent(repo, stepGetter, newMockTaskRepo(), failIfLaunched(t))
+
+		svc.handleTaskCreated(ctx, watcher.TaskEventData{TaskID: "t4"})
+
+		if calls := stepGetter.GetStepCalls(); calls != 0 {
+			t.Fatalf("GetStepCalls() = %d, want 0 (handleTaskCreated must never call autoStartTaskForStep for an office task)", calls)
+		}
 	})
 
 	t.Run("skips when the task cannot be found", func(t *testing.T) {

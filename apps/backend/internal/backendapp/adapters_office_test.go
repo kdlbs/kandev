@@ -142,6 +142,12 @@ func TestCreateWorkspaceKanbanBootstrapCreatesUsableSteps(t *testing.T) {
 // task.Metadata[MetaKeyAgentProfileID] — AssigneeAgentProfileID alone (a
 // separate DB column) never reaches it. Without this, the routine's task
 // gets created but the orchestrator has no agent profile to start.
+//
+// It also covers WO-36 round 2: handleTaskCreated only evaluates a step's
+// on_enter for a freshly created task when the task carries the positive
+// MetaKeyAutoStartOnCreate opt-in (see event_handlers_workflow.go). This
+// method is that opt-in's only production setter, so both cases here —
+// with and without an assignee — must always stamp it true.
 func TestCreateOfficeTaskInWorkflowCarriesAssigneeIntoLaunchMetadata(t *testing.T) {
 	adapter, taskSvc := newOfficeTaskAdapterHarness(t)
 	ctx := context.Background()
@@ -165,6 +171,9 @@ func TestCreateOfficeTaskInWorkflowCarriesAssigneeIntoLaunchMetadata(t *testing.
 	if got, _ := task.Metadata[models.MetaKeyAgentProfileID].(string); got != "routine-assignee" {
 		t.Errorf("task.Metadata[MetaKeyAgentProfileID] = %q, want routine-assignee", got)
 	}
+	if !models.HasAutoStartOnCreateIntent(task.Metadata) {
+		t.Errorf("task.Metadata[MetaKeyAutoStartOnCreate] not set, want true")
+	}
 
 	noAssigneeTaskID, err := adapter.CreateOfficeTaskInWorkflow(
 		ctx, "ws-1", "", "", workflowID, "Unassigned run", "Materialized run",
@@ -178,6 +187,9 @@ func TestCreateOfficeTaskInWorkflowCarriesAssigneeIntoLaunchMetadata(t *testing.
 	}
 	if _, ok := noAssigneeTask.Metadata[models.MetaKeyAgentProfileID]; ok {
 		t.Errorf("task.Metadata[MetaKeyAgentProfileID] set for an unassigned routine, want absent")
+	}
+	if !models.HasAutoStartOnCreateIntent(noAssigneeTask.Metadata) {
+		t.Errorf("task.Metadata[MetaKeyAutoStartOnCreate] not set for an unassigned routine, want true")
 	}
 }
 
