@@ -21,7 +21,7 @@ vi.mock("@/components/gitlab/mr-task-icon", () => ({
 }));
 
 import { pluginRegistry } from "@/lib/plugins/registry";
-import { KanbanCardBody } from "./kanban-card-content";
+import { KanbanCardBody, renderTaskStatusIcon } from "./kanban-card-content";
 import type { Task } from "./kanban-card";
 
 const TASK: Task = {
@@ -68,6 +68,16 @@ describe("KanbanCardBody — task-card-indicators slot", () => {
     render(<KanbanCardBody task={TASK} repositoryChips={[]} />);
 
     expect(screen.getByTestId(INDICATOR_TEST_ID).textContent).toBe(SLOT_PROPS_TEXT);
+  });
+});
+
+describe("Kanban task status motion", () => {
+  it("animates the fallback running status on an HTML wrapper", () => {
+    const { container } = render(<>{renderTaskStatusIcon(TASK, true, false, false)}</>);
+    const animated = container.querySelector(".animate-spin");
+
+    expect(animated?.tagName).toBe("SPAN");
+    expect(animated?.querySelector("svg")?.classList.contains("animate-spin")).toBe(false);
   });
 });
 

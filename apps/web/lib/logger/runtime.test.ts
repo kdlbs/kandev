@@ -34,4 +34,51 @@ describe("browser logger runtime", () => {
 
     expect(storeMocks.append).not.toHaveBeenCalled();
   });
+
+  it("serializes runtime drains and makes snapshots join the in-flight drain", async () => {
+    vi.useFakeTimers();
+    let activeAppends = 0;
+    let maximumActiveAppends = 0;
+    let appendCalls = 0;
+    let releaseFirstAppend: (() => void) | undefined;
+    const firstAppend = new Promise<void>((resolve) => {
+      releaseFirstAppend = resolve;
+    });
+    storeMocks.append.mockImplementation(async () => {
+      appendCalls += 1;
+      activeAppends += 1;
+      maximumActiveAppends = Math.max(maximumActiveAppends, activeAppends);
+      if (appendCalls === 1) await firstAppend;
+      activeAppends -= 1;
+    });
+
+    try {
+      stageLogEntry({
+        timestamp: new Date().toISOString(),
+        level: "info",
+        source: "test",
+        message: "first",
+      });
+      const snapshot = snapshotBrowserLogs("default-user");
+      await vi.waitFor(() => expect(storeMocks.append).toHaveBeenCalledTimes(1));
+
+      stageLogEntry({
+        timestamp: new Date().toISOString(),
+        level: "info",
+        source: "test",
+        message: "second",
+      });
+      vi.runOnlyPendingTimers();
+      await Promise.resolve();
+      expect(storeMocks.append).toHaveBeenCalledTimes(1);
+      releaseFirstAppend?.();
+
+      await snapshot;
+      expect(storeMocks.append).toHaveBeenCalledTimes(2);
+      expect(maximumActiveAppends).toBe(1);
+    } finally {
+      vi.runOnlyPendingTimers();
+      vi.useRealTimers();
+    }
+  });
 });

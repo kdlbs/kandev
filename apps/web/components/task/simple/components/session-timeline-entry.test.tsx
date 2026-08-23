@@ -211,7 +211,7 @@ describe("SessionTimelineEntry — office (multi-agent)", () => {
       agentProfileId: "agent-a",
       startedAt: "2026-05-01T11:00:00Z",
     });
-    render(
+    const { container } = render(
       wrap(
         <SessionTimelineEntry
           taskId="task-1"
@@ -221,7 +221,11 @@ describe("SessionTimelineEntry — office (multi-agent)", () => {
       ),
     );
     expect(screen.getByText(/working/)).toBeTruthy();
-    expect(screen.getByTestId("session-state-running")).toBeTruthy();
+    const spinner = screen.getByTestId("session-state-running");
+    expect(spinner.tagName).toBe("SPAN");
+    expect(container.querySelector(".animate-spin svg")?.classList.contains("animate-spin")).toBe(
+      false,
+    );
     // Embed visible because expanded by default while live.
     expect(screen.getByTestId(EMBED_TID)).toBeTruthy();
   });

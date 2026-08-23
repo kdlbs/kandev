@@ -116,6 +116,17 @@ function expectPreparingSpinner(): void {
 }
 
 describe("TaskItem status icon", () => {
+  it("animates the running status on an HTML wrapper", () => {
+    renderTaskItem({ state: "IN_PROGRESS", sessionState: "RUNNING" });
+
+    const spinner = screen.getByTestId(RUNNING_ICON_TEST_ID);
+    expect(spinner.tagName).toBe("SPAN");
+    expect(spinner.classList.contains(SPIN_CLASS)).toBe(true);
+    expect(spinner.querySelector("svg")?.classList.contains(SPIN_CLASS)).toBe(false);
+  });
+});
+
+describe("TaskItem status icon states", () => {
   it("shows the autopilot icon with an accessible description", () => {
     renderTaskItem({ autopilot: true });
 
@@ -188,7 +199,9 @@ describe("TaskItem status icon", () => {
 
     expectPreparingSpinner();
   });
+});
 
+describe("TaskItem status icon fallbacks", () => {
   it("does not show a spinner for a created task waiting for manual start", () => {
     renderTaskItem({ state: "CREATED" });
 

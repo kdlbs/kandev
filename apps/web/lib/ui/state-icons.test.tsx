@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { isValidElement, type ReactNode } from "react";
 import { render } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
+import { CompositorSpin } from "@kandev/ui/compositor-spin";
 import {
   IconCheck,
   IconCircleCheck,
@@ -21,6 +22,9 @@ import {
 
 function iconType(node: ReactNode) {
   if (!isValidElement(node)) throw new Error("Expected React element");
+  if (node.type === CompositorSpin) {
+    return iconType((node.props as { children: ReactNode }).children);
+  }
   return node.type;
 }
 
@@ -30,6 +34,16 @@ function iconClassName(node: ReactNode): string {
 }
 
 describe("getTaskStateIcon", () => {
+  it("animates an HTML wrapper while keeping the status SVG static", () => {
+    const { container } = render(
+      <TooltipProvider>{getTaskStateIcon("IN_PROGRESS")}</TooltipProvider>,
+    );
+    const animated = container.querySelector(".animate-spin");
+
+    expect(animated?.tagName).toBe("SPAN");
+    expect(animated?.querySelector("svg")?.classList.contains("animate-spin")).toBe(false);
+  });
+
   it("uses the question icon for waiting-for-input task state", () => {
     expect(iconType(getTaskStateIcon("WAITING_FOR_INPUT"))).toBe(IconMessageQuestion);
   });
@@ -344,13 +358,17 @@ describe("getSessionStateIcon — fine-grained busy tri-state", () => {
     const b = getSessionStateIcon("WAITING_FOR_INPUT", undefined, "background");
     expect(iconType(b)).toBe(IconLoader2);
     expect(iconType(b)).not.toBe(IconCircleCheck);
-    expect(iconClassName(b)).toContain("animate-spin");
+    const { container } = render(<>{b}</>);
+    expect(container.querySelector(".animate-spin")).not.toBeNull();
+    expect(container.querySelector(".animate-spin svg")?.classList.contains("animate-spin")).toBe(
+      false,
+    );
   });
 
   it("(b) is visually distinct from (a) so the operator can tell them apart", () => {
     const a = iconClassName(getSessionStateIcon("RUNNING", undefined, "generating"));
     const b = iconClassName(getSessionStateIcon("RUNNING", undefined, "background"));
-    expect(a).not.toBe(b);
+    expect(a).toBe(b);
   });
 
   it("(c) flips to the done checkmark once background activity is cleared", () => {

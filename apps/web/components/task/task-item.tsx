@@ -32,6 +32,7 @@ import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
 import { TaskItemComparisonUnavailable } from "./task-item-comparison-unavailable";
 import { TaskMenuButton } from "./task-item-menu-button";
 import { TaskItemLeadingBadges } from "./task-item-leading-badges";
+import { CompositorSpin } from "@kandev/ui/compositor-spin";
 
 type DiffStats = {
   additions: number;
@@ -190,15 +191,35 @@ function BackgroundWorkTaskIcon() {
           tabIndex={0}
           className="mt-[1px] flex shrink-0 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-1"
         >
-          <IconCircleDashed
+          <CompositorSpin
             aria-hidden="true"
             data-testid="task-state-background-running"
-            className="h-3.5 w-3.5 shrink-0 animate-spin text-violet-500"
-          />
+            className="h-3.5 w-3.5 shrink-0 text-violet-500"
+          >
+            <IconCircleDashed className="size-full" />
+          </CompositorSpin>
         </span>
       </TooltipTrigger>
       <TooltipContent side="right">{t("task:backgroundWorkIsRunning")}</TooltipContent>
     </Tooltip>
+  );
+}
+
+function TaskRunningIcon({
+  phase,
+  className,
+}: {
+  phase: "running" | "preparing";
+  className: string;
+}) {
+  return (
+    <CompositorSpin
+      data-testid="task-state-running"
+      data-loading-phase={phase}
+      className={className}
+    >
+      <IconCircleDashed className="size-full" />
+    </CompositorSpin>
   );
 }
 
@@ -240,11 +261,7 @@ function TaskStateIcon({
   }
   if (foregroundActivity === "generating") {
     return (
-      <IconCircleDashed
-        data-testid="task-state-running"
-        data-loading-phase="running"
-        className="mt-[1px] h-3.5 w-3.5 shrink-0 text-yellow-500 animate-spin"
-      />
+      <TaskRunningIcon phase="running" className="mt-[1px] h-3.5 w-3.5 shrink-0 text-yellow-500" />
     );
   }
   if (foregroundActivity === "background") {
@@ -260,10 +277,9 @@ function TaskStateIcon({
   }
   if (computeIsPreparing(state, sessionState)) {
     return (
-      <IconCircleDashed
-        data-testid="task-state-running"
-        data-loading-phase="preparing"
-        className="mt-[1px] h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground/40 [animation-duration:2s]"
+      <TaskRunningIcon
+        phase="preparing"
+        className="mt-[1px] h-3.5 w-3.5 shrink-0 text-muted-foreground/40 [animation-duration:2s]"
       />
     );
   }
@@ -271,11 +287,7 @@ function TaskStateIcon({
   // established generating spinner rather than a done affordance.
   if (isInProgress) {
     return (
-      <IconCircleDashed
-        data-testid="task-state-running"
-        data-loading-phase="running"
-        className="mt-[1px] h-3.5 w-3.5 shrink-0 text-yellow-500 animate-spin"
-      />
+      <TaskRunningIcon phase="running" className="mt-[1px] h-3.5 w-3.5 shrink-0 text-yellow-500" />
     );
   }
   // The task's session was mid-turn when the backend died (startup
