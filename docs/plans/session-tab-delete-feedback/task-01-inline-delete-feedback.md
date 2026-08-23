@@ -95,3 +95,11 @@ feedback.
 
 Generated artifact: `apps/web/src/locales/pseudo/common.json`. No external side effects beyond local
 WebSocket test mocks.
+
+## Localized-confirmation follow-up
+
+The later shipped refinement preserves this task's tab-X dialog and feedback-mode contract while
+moving desktop context-menu confirmation into an anchored popover and phone confirmation into its
+Sessions picker row. Shared warning copy now lives in the purpose-neutral
+`components/task/session-delete-description.tsx`; the context-menu event and `preventDefault()`
+contracts are documented beside their public callback and Radix handler.

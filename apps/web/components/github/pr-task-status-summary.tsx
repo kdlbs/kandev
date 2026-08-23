@@ -2,6 +2,11 @@
 
 import type { TaskPR } from "@/lib/types/github";
 import {
+  getMergeQueueSummaryDetail,
+  getMergeQueueSummaryStatus,
+  hasActiveMergeQueueEntry,
+} from "./pr-merge-queue-status";
+import {
   ChangeRequestTaskStatusSummary,
   type ChangeRequestTaskStatusSummaryData,
   type ChangeRequestTaskSummaryRow,
@@ -53,6 +58,17 @@ function deriveCIRow(checksState: string): PRTaskSummaryRow | null {
 
 function deriveMergeRow(pr: TaskPR, readyToMerge: boolean): PRTaskSummaryRow | null {
   if (pr.state !== "open") return null;
+  if (hasActiveMergeQueueEntry(pr)) {
+    return {
+      kind: "merge",
+      status: getMergeQueueSummaryStatus(pr.merge_queue_state),
+      tone: "queued",
+      detail: getMergeQueueSummaryDetail(
+        pr.merge_queue_position,
+        pr.merge_queue_estimated_time_to_merge_seconds,
+      ),
+    };
+  }
   if (pr.mergeable_state === "draft") {
     return { kind: "merge", status: "draft", tone: "muted" };
   }

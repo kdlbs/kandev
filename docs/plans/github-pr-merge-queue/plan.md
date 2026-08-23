@@ -9,9 +9,13 @@ status: complete
 ## Overview
 
 Extend the existing GitHub merge boundary to use GitHub's asynchronous,
-queue-aware merge request and return a typed merged-or-queued outcome. Then
-reuse that outcome in the existing PR merge button across the desktop detail,
-compact status, and mobile Review surfaces, with targeted unit and E2E proof.
+queue-aware merge request and return a typed merged-or-queued outcome. Observe
+the resulting merge-queue entry through the existing GraphQL status sync,
+persist its state, one-based position, and optional estimated duration, and
+project it through the existing task and PR status surfaces. Reuse the typed
+outcome and the persisted status in the existing PR merge button across the
+desktop detail, compact status, and mobile Review surfaces, with targeted unit
+and E2E proof.
 
 ## Backend
 
@@ -37,6 +41,21 @@ compact status, and mobile Review surfaces, with targeted unit and E2E proof.
   `{"status":"merged"}` or `{"status":"queued"}` and retain the existing
   operational-auth and provider-error mapping.
 
+### Queue observation, persistence, and bounded projection
+
+- Extend the batched GraphQL pull-request selection and normalized `PRStatus`
+  with `mergeQueueEntry { state position estimatedTimeToMerge }`. A populated
+  GraphQL result replaces all three queue fields atomically; queue-unaware REST
+  and `gh pr view` reads preserve the last complete observation, while an
+  authoritative null or terminal lifecycle state clears it.
+- Add the queue state, one-based position, and optional estimate in seconds to
+  every `TaskPR` schema, migration, write, restore, and update path. Extend
+  the mock controller so integrated tests can seed the same contract.
+- Carry queue membership through live and restart-built task status summaries
+  as the bounded `queued` state. Terminal states precede queue membership;
+  queue membership precedes other non-terminal states for one PR, while the
+  existing aggregate ranking keeps a failing sibling above a queued sibling.
+
 ## Frontend
 
 ### Queue-aware merge action
@@ -53,6 +72,22 @@ compact status, and mobile Review surfaces, with targeted unit and E2E proof.
 - Add the new action and outcome copy to all locale catalogs under
   `apps/web/src/locales/*/github.json`; generate the Traditional Chinese pair
   through the repository script rather than translating them independently.
+
+### Queue status color and surfaces
+
+- Add the normalized queue fields to the web `TaskPR` contract and the shared
+  queued semantic color `text-[#966600]`. Terminal colors remain first; an
+  active queue entry is second, so hydrated failure, draft, dirty, or behind
+  fields cannot overwrite queue presentation. Multi-PR aggregation still ranks
+  a failing sibling above a queued sibling.
+- Extend the task hover summary, compact desktop popover, phone status drawer,
+  and PR detail panel with translated queue state, one-based position, and an
+  optional estimate rounded up to localized whole minutes. Missing estimates
+  omit only the estimate line. Recognized provider states retain their labels;
+  future non-empty states use generic `Queued` copy.
+- Keep queue derivation shared across desktop and mobile. Mobile display uses
+  the existing drawer and Review destination; the mobile merge-action test
+  separately verifies the existing 44px action target.
 
 ### Mobile design contract
 
@@ -92,31 +127,59 @@ compact status, and mobile Review surfaces, with targeted unit and E2E proof.
   and refresh callback. **File:**
   `apps/web/components/github/pr-merge-button.test.tsx`. **How:** component tests
   with mocked API outcomes.
+- **What:** queue observation, persistence, queue-unaware read preservation,
+  terminal clearing, and bounded live/restart projection. **Files:**
+  `apps/backend/internal/github/*merge_queue_status_test.go`,
+  `apps/backend/internal/github/store_taskpr_schema_drift_test.go`,
+  `apps/backend/internal/task/statussummary/merge_queue_status_test.go`, and
+  `apps/backend/internal/backendapp/status_summary_adapter_test.go`. **How:**
+  focused GraphQL, real-store, and projection tests.
+- **What:** queue color precedence, failing-sibling aggregation, translated
+  queue metadata, estimate boundaries, terminal queue clearing, and generic
+  fallback copy. **Files:**
+  `apps/web/components/github/pr-task-icon.test.ts`,
+  `pr-task-status-summary.test.ts`, `pr-status-chip.test.tsx`,
+  `pr-merge-queue-status.test.tsx`, `pr-mergeability-row.test.tsx`, and
+  `pr-detail-panel.test.tsx`. **How:** pure formatter and focused component
+  tests for terminal, queued, future-state, missing-estimate, sub-minute, and
+  minute-boundary cases.
 
 ## E2E Tests
 
-- **Scenario:** eligible direct merge reports merged. **File:**
-  `apps/web/e2e/tests/pr/pr-merge-queue.spec.ts`. **What to verify:** the desktop
-  PR surface exposes the action, submits it, and shows the merged notification.
-- **Scenario:** queue-required merge reports queued and does not resubmit.
-  **File:** `apps/web/e2e/tests/pr/pr-merge-queue.spec.ts`. **What to verify:**
-  the desktop action remains available for the queue-required state and the
-  accepted queue notification is shown once.
-- **Scenario:** phone Review surface provides the same queued outcome. **File:**
-  `apps/web/e2e/tests/pr/mobile-pr-merge-queue.spec.ts`. **What to verify:**
-  Review navigation, touch activation, queued notification, a touch-sized
-  action, and no document horizontal overflow.
+- **Scenario:** an eligible queue-required merge is accepted. **File:**
+  `apps/web/e2e/tests/pr/pr-merge-queue.spec.ts`, action test. **What to
+  verify:** the desktop PR surface exposes `Merge PR`, the merge request
+  returns `{"status":"queued"}`, the success notification appears, and the
+  accepted state suppresses the duplicate action.
+- **Scenario:** an already queued PR exposes hydrated queue metadata. **File:**
+  `apps/web/e2e/tests/pr/pr-merge-queue.spec.ts`, display test. **What to
+  verify:** task icon color, task hover summary, compact popover, and detail
+  notice show queued state, position, and estimated duration.
+- **Scenario:** the same accepted action is touch-usable. **File:**
+  `apps/web/e2e/tests/pr/mobile-pr-merge-queue.spec.ts`, action test. **What to
+  verify:** Review navigation, touch activation, queued notification, a
+  minimum 44px action target, and no document horizontal overflow.
+- **Scenario:** an already queued PR is readable on a phone. **File:**
+  `apps/web/e2e/tests/pr/mobile-pr-merge-queue.spec.ts`, display test. **What to
+  verify:** the existing PR status drawer and full-height Review surface show
+  queued state, position, and estimate without hover or horizontal overflow.
 
 ## Verification Results
 
-- Backend: `make -C apps/backend test ARGS='./internal/github/...'` passed; the
-  Make target executed the full backend `go test -tags fts5 ./...` suite.
-- Frontend: 96 focused Vitest tests passed; `pnpm run i18n:check` and
-  `pnpm run typecheck` passed.
-- Desktop E2E: `pnpm e2e:run --no-build tests/pr/pr-merge-queue.spec.ts`
-  passed (1 test).
-- Mobile E2E: `pnpm e2e:run --no-build --project mobile-chrome
-  tests/pr/mobile-pr-merge-queue.spec.ts` passed (1 test).
+Recorded after the remediation run:
+
+- Backend: `cd apps/backend && go test -tags fts5
+  ./internal/github/... ./internal/task/statussummary/...
+  ./internal/backendapp` passed 2,193 tests across 3 packages, including the
+  queue precedence regression.
+- Frontend: the six-file queue-status command passed 160 tests. `pnpm run
+  typecheck` and `pnpm run lint` passed. `pnpm run i18n:check` passed with
+  7,223 referenced keys, 8,779 English entries, 48 orphans, and all five
+  required catalogs complete.
+- Desktop E2E: the fresh-build `cd apps/web && pnpm e2e:run
+  tests/pr/pr-merge-queue.spec.ts` passed 2 tests in 12.2 seconds. Mobile E2E:
+  `pnpm e2e:run --no-build --project mobile-chrome
+  tests/pr/mobile-pr-merge-queue.spec.ts` passed 2 tests in 9.6 seconds.
 
 ## Implementation Waves And Parallel Candidates
 
@@ -128,6 +191,12 @@ Wave 2:
 
 Wave 3:
 - [x] [task-03-desktop-mobile-e2e](task-03-desktop-mobile-e2e.md)
+
+The detailed queue-observation task package under
+`docs/plans/github-pr-merge-queue-status/` is the synchronized execution record
+for the persistence, projection, queue color, metadata, and responsive display
+work described above. Its E2E task and this parent plan intentionally record
+the same two desktop and two mobile scenarios.
 
 Execution is sequential in the primary conversation unless the user explicitly
 authorizes subagents.

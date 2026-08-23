@@ -1,6 +1,6 @@
 # ADR-2026-08-22-agent-owned-pr-walkthrough-rendering: Keep PR walkthrough rendering agent owned and provider neutral
 
-**Status:** accepted
+**Status:** superseded by 2026-08-22-pr-walkthrough-filesystem-runner
 **Date:** 2026-08-22
 **Area:** workflow, infra, security
 

@@ -184,9 +184,10 @@ test.describe("Session tab management — close behavior", () => {
 
     await session.sessionTabBySessionId(session1Id).click({ button: "right" });
     await session.contextMenuItem("Delete").click();
-    const dialog = session.alertDialog();
-    await expect(dialog).toBeVisible({ timeout: 5_000 });
-    await dialog.getByRole("button", { name: "Delete" }).click();
+    const confirmation = testPage.getByTestId("session-delete-confirm-popover");
+    await expect(confirmation).toBeVisible({ timeout: 5_000 });
+    await expect(session.alertDialog()).toHaveCount(0);
+    await confirmation.getByTestId("session-delete-confirm").click();
 
     // Tab disappears…
     await expect(session.sessionTabBySessionId(session1Id)).not.toBeVisible({ timeout: 15_000 });
@@ -224,8 +225,10 @@ test.describe("Session tab management — close behavior", () => {
 
     await session.sessionTabBySessionId(session1Id).click({ button: "right" });
     await session.contextMenuItem("Delete").click();
-    await expect(session.alertDialog()).toBeVisible({ timeout: 5_000 });
-    await session.alertDialog().getByRole("button", { name: "Delete" }).click();
+    const confirmation = testPage.getByTestId("session-delete-confirm-popover");
+    await expect(confirmation).toBeVisible({ timeout: 5_000 });
+    await expect(session.alertDialog()).toHaveCount(0);
+    await confirmation.getByTestId("session-delete-confirm").click();
 
     await expect(session.sessionTabBySessionId(session1Id)).not.toBeVisible({ timeout: 15_000 });
     await expect(session.sessionTabBySessionId(session2Id)).toBeVisible({ timeout: 5_000 });
@@ -276,8 +279,10 @@ test.describe("Session tab management — close behavior", () => {
 
     await session.sessionTabBySessionId(session1Id).click({ button: "right" });
     await session.contextMenuItem("Delete").click();
-    await expect(session.alertDialog()).toBeVisible({ timeout: 5_000 });
-    await session.alertDialog().getByRole("button", { name: "Delete" }).click();
+    const confirmation = testPage.getByTestId("session-delete-confirm-popover");
+    await expect(confirmation).toBeVisible({ timeout: 5_000 });
+    await expect(session.alertDialog()).toHaveCount(0);
+    await confirmation.getByTestId("session-delete-confirm").click();
 
     // Wait for backend to confirm deletion (don't wait for tab to disappear).
     await expect

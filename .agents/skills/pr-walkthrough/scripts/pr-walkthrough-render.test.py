@@ -9,9 +9,8 @@ import unittest
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "scripts" / "pr-walkthrough-render"
-REFERENCES = ROOT / ".agents" / "skills" / "pr-walkthrough" / "references"
+ROOT = Path(__file__).resolve().parents[4]
+SKILL = ROOT / ".agents" / "skills" / "pr-walkthrough"
 
 
 class PRWalkthroughRenderTest(unittest.TestCase):
@@ -19,11 +18,16 @@ class PRWalkthroughRenderTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.worktree = Path(self.tmp.name)
-        trusted = self.worktree / ".opencode-walkthrough"
-        trusted.mkdir()
-        shutil.copy2(REFERENCES / "build.py", trusted / "build.py")
-        shutil.copy2(REFERENCES / "shell.html", trusted / "shell.html")
-        self.data = json.loads((REFERENCES / "example.json").read_text(encoding="utf-8"))
+        self.skill = self.worktree / ".agents" / "skills" / "pr-walkthrough"
+        (self.skill / "scripts").mkdir(parents=True)
+        shutil.copy2(
+            SKILL / "scripts" / "pr-walkthrough-render", self.skill / "scripts" / "pr-walkthrough-render"
+        )
+        shutil.copytree(SKILL / "references", self.skill / "references")
+        self.script = self.skill / "scripts" / "pr-walkthrough-render"
+        self.data = json.loads(
+            (self.skill / "references" / "example.json").read_text(encoding="utf-8")
+        )
         self.env = {
             **os.environ,
             "PR_NUMBER": "42",
@@ -34,16 +38,50 @@ class PRWalkthroughRenderTest(unittest.TestCase):
             "PR_HEAD": "feature/walkthrough",
         }
 
-    def run_render(self, data: object) -> subprocess.CompletedProcess[str]:
+    def run_render(
+        self,
+        data: object | None,
+        *,
+        stdin: str | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        draft = self.worktree / ".pr-walkthrough" / "draft.json"
+        draft.parent.mkdir(parents=True, exist_ok=True)
+        if data is None:
+            draft.unlink(missing_ok=True)
+        else:
+            draft.write_text(json.dumps(data), encoding="utf-8")
         return subprocess.run(
-            [sys.executable, str(SCRIPT)],
+            [sys.executable, str(self.script)],
             cwd=self.worktree,
             env=self.env,
-            input=json.dumps(data),
+            input=stdin,
             text=True,
             capture_output=True,
             check=False,
         )
+
+    def test_reads_only_the_fixed_draft_and_ignores_stdin(self) -> None:
+        result = self.run_render(self.data, stdin=json.dumps({"pr": {}}))
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rendered_data = json.loads(
+            (
+                self.worktree
+                / "docs"
+                / "pr-walkthrough"
+                / "pr-42.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(rendered_data["pr"]["title"], "Trusted pull request title")
+
+    def test_missing_draft_fails_without_partial_outputs(self) -> None:
+        result = self.run_render(None, stdin=json.dumps(self.data))
+
+        self.assertNotEqual(result.returncode, 0)
+        output = self.worktree / "docs" / "pr-walkthrough"
+        self.assertFalse((output / "pr-42.json").exists())
+        self.assertFalse((output / "pr-42.html").exists())
+        self.assertIn("draft.json", result.stderr)
 
     def test_binds_trusted_pr_identity_and_removes_model_link_overrides(self) -> None:
         self.data["pr"].update(

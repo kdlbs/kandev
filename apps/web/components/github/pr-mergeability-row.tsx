@@ -12,6 +12,7 @@ import {
 import type { TaskPR } from "@/lib/types/github";
 import { isPRAwaitingReview, isPRWaitingOnBranchProtection } from "./pr-task-icon";
 import { PRMergeabilityNotice, buildConflictResolutionMessage } from "./pr-mergeability-notice";
+import { hasActiveMergeQueueEntry, PRMergeQueueStatus } from "./pr-merge-queue-status";
 import { useTranslation } from "react-i18next";
 
 /**
@@ -78,6 +79,7 @@ function useResolveConflicts(pr: TaskPR): {
 export function PRMergeabilityRow({ pr }: { pr: TaskPR }) {
   const { t } = useTranslation();
   const { onResolveConflicts, conflictQueued } = useResolveConflicts(pr);
+  if (hasActiveMergeQueueEntry(pr)) return <PRMergeQueueStatus pr={pr} />;
   // "blocked" gets a richer note than the bare chip: it explains *why* the
   // merge is gated. But when the block is only an outstanding requested review,
   // stay silent — the review row above already conveys that and the

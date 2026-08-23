@@ -15,6 +15,7 @@ export type ActionConfirmPopoverProps = {
   open: boolean;
   disabled?: boolean;
   anchorRef: RefObject<HTMLElement | null>;
+  focusReturnRef?: RefObject<HTMLElement | null>;
   focusBoundaryRef?: RefObject<HTMLElement | null>;
   title: ReactNode;
   description?: ReactNode;
@@ -22,7 +23,9 @@ export type ActionConfirmPopoverProps = {
   confirmLabel: ReactNode;
   confirmAriaLabel?: string;
   confirmTestId?: string;
+  confirmDisabled?: boolean;
   testId?: string;
+  confirmationBoundary?: boolean;
   onOpenChange: (open: boolean) => void;
   onCancel?: () => void;
   onConfirm: () => void | Promise<void>;
@@ -39,6 +42,7 @@ export function ActionConfirmPopover({
   open,
   disabled = false,
   anchorRef,
+  focusReturnRef,
   focusBoundaryRef,
   title,
   description,
@@ -46,7 +50,9 @@ export function ActionConfirmPopover({
   confirmLabel,
   confirmAriaLabel,
   confirmTestId,
+  confirmDisabled = false,
   testId = "action-confirm-popover",
+  confirmationBoundary = false,
   onOpenChange,
   onCancel,
   onConfirm,
@@ -55,15 +61,15 @@ export function ActionConfirmPopover({
   const descriptionId = useId();
   const cancelRef = useRef<HTMLButtonElement>(null);
   const confirmedRef = useRef(false);
+  const confirmIsDisabled = disabled || confirmDisabled;
 
   // Intentionally runs on every render: an anchor can disappear through live
   // data without changing the confirmation's open state, so each render must
   // re-check the guard before the shell can invoke a stale action.
   useLayoutEffect(() => {
-    if (!open) {
-      confirmedRef.current = false;
-      return;
-    }
+    // Keep a confirmed close marked until Radix finishes close-autofocus. An
+    // early reset can refocus this anchor while a following popover is opening.
+    if (!open) return;
     if (isConnected(anchorRef.current)) return;
     onCancel?.();
     onOpenChange(false);
@@ -79,7 +85,7 @@ export function ActionConfirmPopover({
   };
 
   const handleConfirm = () => {
-    if (disabled) return;
+    if (confirmIsDisabled) return;
     if (!isConnected(anchorRef.current)) {
       handleOpenChange(false);
       return;
@@ -106,9 +112,12 @@ export function ActionConfirmPopover({
         confirmLabel={confirmLabel}
         confirmAriaLabel={confirmAriaLabel}
         confirmTestId={confirmTestId}
+        confirmDisabled={confirmIsDisabled}
         testId={testId}
+        confirmationBoundary={confirmationBoundary}
         disabled={disabled}
         cancelRef={cancelRef}
+        focusReturnRef={focusReturnRef}
         focusBoundaryRef={focusBoundaryRef}
         confirmedRef={confirmedRef}
         anchorRef={anchorRef}
@@ -128,9 +137,12 @@ type ActionConfirmPopoverContentProps = {
   confirmLabel: ReactNode;
   confirmAriaLabel?: string;
   confirmTestId?: string;
+  confirmDisabled: boolean;
   testId: string;
+  confirmationBoundary: boolean;
   disabled: boolean;
   cancelRef: RefObject<HTMLButtonElement | null>;
+  focusReturnRef?: RefObject<HTMLElement | null>;
   focusBoundaryRef?: RefObject<HTMLElement | null>;
   confirmedRef: { current: boolean };
   anchorRef: RefObject<HTMLElement | null>;
@@ -147,9 +159,12 @@ function ActionConfirmPopoverContent({
   confirmLabel,
   confirmAriaLabel,
   confirmTestId,
+  confirmDisabled,
   testId,
+  confirmationBoundary,
   disabled,
   cancelRef,
+  focusReturnRef,
   focusBoundaryRef,
   confirmedRef,
   anchorRef,
@@ -162,6 +177,7 @@ function ActionConfirmPopoverContent({
       aria-labelledby={titleId}
       aria-describedby={description ? descriptionId : undefined}
       data-testid={testId}
+      data-confirmation-boundary={confirmationBoundary ? "" : undefined}
       side="bottom"
       align="end"
       sideOffset={8}
@@ -173,9 +189,19 @@ function ActionConfirmPopoverContent({
       onFocusOutside={(event) => {
         if (focusBoundaryRef?.current?.contains(event.target as Node)) event.preventDefault();
       }}
+      onInteractOutside={(event) => {
+        const target = event.target as Node;
+        if (anchorRef.current?.contains(target) || focusBoundaryRef?.current?.contains(target)) {
+          event.preventDefault();
+        }
+      }}
       onCloseAutoFocus={(event) => {
         event.preventDefault();
-        if (!confirmedRef.current && isConnected(anchorRef.current)) anchorRef.current.focus();
+        if (!confirmedRef.current) {
+          const focusReturnTarget = focusReturnRef?.current ?? null;
+          if (isConnected(focusReturnTarget)) focusReturnTarget.focus();
+          else if (isConnected(anchorRef.current)) anchorRef.current.focus();
+        }
         confirmedRef.current = false;
       }}
     >
@@ -199,9 +225,9 @@ function ActionConfirmPopoverContent({
         <Button
           type="button"
           variant="destructive"
-          disabled={disabled}
           aria-label={confirmAriaLabel}
           data-testid={confirmTestId}
+          disabled={confirmDisabled}
           className="min-h-11 px-3 transition-[color,background-color,border-color,transform] duration-100 active:scale-[0.96]"
           onClick={onConfirm}
         >

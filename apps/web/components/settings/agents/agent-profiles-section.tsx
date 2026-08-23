@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { IconCopy, IconDotsVertical, IconTrash } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
@@ -16,7 +16,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import Link from "@/components/routing/app-link";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
-import { AgentProfileDeleteConfirmDialog } from "@/components/settings/agent-profile-delete-dialog";
+import { AgentProfileDeleteConfirmation } from "@/components/settings/agent-profile-delete-dialog";
 import { deleteAgentProfileAction } from "@/app/actions/agents";
 import { useProfileDuplicate } from "@/hooks/domains/settings/use-profile-duplicate";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
@@ -66,10 +66,12 @@ export function AgentProfilesSubList({
  */
 function ProfileRowActions({
   profile,
+  deleteAnchorRef,
   onDuplicate,
   onConfirmDelete,
 }: {
   profile: AgentProfile;
+  deleteAnchorRef: RefObject<HTMLButtonElement | null>;
   onDuplicate: () => void;
   onConfirmDelete: () => void;
 }) {
@@ -78,6 +80,7 @@ function ProfileRowActions({
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
+          ref={deleteAnchorRef}
           variant="ghost"
           size="sm"
           className="cursor-pointer min-h-11 min-w-11"
@@ -113,10 +116,12 @@ function ProfileRowActions({
 
 function ProfileRowInlineActions({
   profile,
+  deleteAnchorRef,
   onDuplicate,
   onConfirmDelete,
 }: {
   profile: AgentProfile;
+  deleteAnchorRef: RefObject<HTMLButtonElement | null>;
   onDuplicate: () => void;
   onConfirmDelete: () => void;
 }) {
@@ -142,6 +147,7 @@ function ProfileRowInlineActions({
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
+            ref={deleteAnchorRef}
             type="button"
             variant="destructive"
             size="icon"
@@ -159,20 +165,62 @@ function ProfileRowInlineActions({
   );
 }
 
+type ProfileRowDeleteConfirmationProps = {
+  open: boolean;
+  isFinePointer: boolean;
+  anchorRef: RefObject<HTMLButtonElement | null>;
+  onOpenChange: (open: boolean) => void;
+  onCancel: () => void;
+  onConfirm: () => void | Promise<void>;
+  placement: "inline" | "popover";
+};
+
+function ProfileRowDeleteConfirmation({
+  open,
+  isFinePointer,
+  anchorRef,
+  onOpenChange,
+  onCancel,
+  onConfirm,
+  placement,
+}: ProfileRowDeleteConfirmationProps) {
+  if (placement === "inline" && (isFinePointer || !open)) return null;
+  if (placement === "popover" && !isFinePointer) return null;
+
+  const confirmation = (
+    <AgentProfileDeleteConfirmation
+      open={open}
+      isFinePointer={isFinePointer}
+      anchorRef={anchorRef}
+      onOpenChange={onOpenChange}
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
+  );
+  return placement === "inline" ? (
+    <div className="relative z-10 basis-full min-w-0">{confirmation}</div>
+  ) : (
+    confirmation
+  );
+}
+
 /** One saved profile as a fully clickable row — shared by the Agents index and the agent page. */
 export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentProfile }) {
   const { t } = useTranslation();
   const { toast } = useToast();
   const router = useRouter();
-  const { isFullDesktop } = useResponsiveBreakpoint();
+  const { isFinePointer, isFullDesktop } = useResponsiveBreakpoint();
   const handleDuplicate = useProfileDuplicate();
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const deleteAnchorRef = useRef<HTMLButtonElement>(null);
   const store = useAppStoreApi();
   const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
   const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
   const href = profileHref(agent.name, profile.id);
-  const onDuplicate = () => void handleDuplicate(agent, profile);
-
+  const closeDeleteConfirmation = () => {
+    setConfirmOpen(false);
+    queueMicrotask(() => deleteAnchorRef.current?.focus());
+  };
   const handleDelete = async () => {
     setConfirmOpen(false);
     const result = await deleteAgentProfileAction(profile.id);
@@ -206,8 +254,16 @@ export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentPro
       description: result.message,
       variant: "error",
     });
+    closeDeleteConfirmation();
   };
-
+  const confirmationProps = {
+    open: confirmOpen,
+    isFinePointer,
+    anchorRef: deleteAnchorRef,
+    onOpenChange: setConfirmOpen,
+    onCancel: closeDeleteConfirmation,
+    onConfirm: () => void handleDelete(),
+  };
   return (
     <Card
       // Same surface treatment as the workspace section tiles.
@@ -236,26 +292,26 @@ export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentPro
           )}
         </div>
         <div className="relative z-10 flex shrink-0 items-center gap-1">
-          {isFullDesktop ? (
-            <ProfileRowInlineActions
-              profile={profile}
-              onDuplicate={onDuplicate}
-              onConfirmDelete={() => setConfirmOpen(true)}
-            />
-          ) : (
-            <ProfileRowActions
-              profile={profile}
-              onDuplicate={onDuplicate}
-              onConfirmDelete={() => setConfirmOpen(true)}
-            />
-          )}
+          {!(confirmOpen && !isFinePointer) &&
+            (isFullDesktop ? (
+              <ProfileRowInlineActions
+                profile={profile}
+                deleteAnchorRef={deleteAnchorRef}
+                onDuplicate={() => void handleDuplicate(agent, profile)}
+                onConfirmDelete={() => setConfirmOpen(true)}
+              />
+            ) : (
+              <ProfileRowActions
+                profile={profile}
+                deleteAnchorRef={deleteAnchorRef}
+                onDuplicate={() => void handleDuplicate(agent, profile)}
+                onConfirmDelete={() => setConfirmOpen(true)}
+              />
+            ))}
         </div>
+        <ProfileRowDeleteConfirmation {...confirmationProps} placement="inline" />
       </CardContent>
-      <AgentProfileDeleteConfirmDialog
-        open={confirmOpen}
-        onOpenChange={setConfirmOpen}
-        onConfirm={() => void handleDelete()}
-      />
+      <ProfileRowDeleteConfirmation {...confirmationProps} placement="popover" />
     </Card>
   );
 }
