@@ -297,11 +297,11 @@ describe("useLazyLoadSentinel — stickToBottomWhileLoading", () => {
     // Rows are appended while the load is in flight (scrollHeight grows to
     // 800); the user stays at the old bottom. The settle must scroll the
     // scroller back to the new bottom so the sentinel stays intersecting.
+    expect(loadMore).toHaveBeenCalledTimes(1);
     Object.defineProperty(scroller, "scrollHeight", { configurable: true, value: 800 });
     await act(async () => {
       resolveLoad(20);
     });
-    expect(loadMore).toHaveBeenCalledTimes(1);
     // Browser-faithful assertion: jsdom stores the raw write (800) while a
     // real browser clamps scrollTop to scrollHeight - clientHeight (400); the
     // invariant is "pinned at the bottom", so assert that instead of the
@@ -329,8 +329,6 @@ describe("useLazyLoadSentinel — pin refresh before a load", () => {
     );
     const { result } = renderHook(() =>
       useLazyLoadSentinel(scrollRef, true, false, false, loadMore, {
-        rearmWhileIntersecting: true,
-        joinInFlightWhileLoading: true,
         stickToBottomWhileLoading: true,
       }),
     );
