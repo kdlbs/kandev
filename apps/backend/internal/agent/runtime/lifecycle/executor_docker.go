@@ -606,11 +606,16 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 			stripEnv = rt.StripEnv
 		}
 	}
+	workspaceSourceRoots := req.WorkspaceSourceRoots
+	if len(workspaceSourceRoots) == 0 {
+		workspaceSourceRoots = []string{dockerWorkspacePath}
+	}
 	return &agentctl.CreateInstanceRequest{
-		ID:            instanceID,
-		WorkspacePath: dockerWorkspacePath,
-		AgentType:     agentType,
-		Env:           cloneStringMap(req.Env),
+		ID:                   instanceID,
+		WorkspacePath:        dockerWorkspacePath,
+		WorkspaceSourceRoots: append([]string(nil), workspaceSourceRoots...),
+		AgentType:            agentType,
+		Env:                  cloneStringMap(req.Env),
 		AutoApprovePermissions: autoApprovePermissionsOverride(
 			req.AutoApprovePermissions,
 			req.AutoApprovePermissionsOverride,
