@@ -230,3 +230,83 @@ func TestReclaimStuckSignalSessionsOnce_UnblocksAutoStart(t *testing.T) {
 		t.Fatalf("expected no queued prompt (it should have been sent directly), got count=%d", status.Count)
 	}
 }
+
+// TestReclaimStuckSignalSessionsOnce_SkipsWhenStillActive is the negative
+// control Review round 2 (Finding 3) requires: signal age alone is not
+// inactivity, so a RUNNING session with a signal well past
+// stuckSignalWatchdogThreshold that is STILL producing genuine agent
+// activity must not be reclaimed. Without this guard, the watchdog could
+// force-close a turn that is still genuinely in flight (a long tool call, a
+// provider retry/backoff that outlasts the threshold) and dispatch a second
+// prompt into the same live session — the exact "quiet corruption" this
+// watchdog exists to prevent, now caused by the watchdog itself. The mock's
+// getPromptActivityForSessionFunc simulates a genuine agent event landing
+// for the session between the watchdog's unguarded scan (which snapshots
+// the activity epoch) and its guarded recheck (which re-verifies the
+// snapshot is still owned) — see stuckSignalActivityUnchanged.
+func TestReclaimStuckSignalSessionsOnce_SkipsWhenStillActive(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1") // seeds session RUNNING
+	setSessionExecID(t, repo, "s1", "exec-1")
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+		ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+		AutoAdvanceRequiresSignal: true,
+		Events: wfmodels.StepEvents{
+			OnTurnComplete: []wfmodels.OnTurnCompleteAction{
+				{Type: wfmodels.OnTurnCompleteMoveToNext},
+			},
+		},
+	}
+	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+		ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
+	}
+
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo, isAgentRunning: true}
+	agentMgr.currentPromptExecutionID = "exec-1"
+	agentMgr.currentPromptGeneration.Store(1)
+	agentMgr.currentPromptActivityEpoch.Store(1)
+	agentMgr.getPromptActivityForSessionFunc = func(_ string) (string, uint64, uint64, error) {
+		execID := agentMgr.currentPromptExecutionID
+		generation := agentMgr.currentPromptGeneration.Load()
+		epoch := agentMgr.currentPromptActivityEpoch.Load()
+		// A real agent event lands right after the scan reads this
+		// snapshot but before the guarded recheck — bump the epoch the
+		// recheck will observe, exactly as markAgentActivity would.
+		agentMgr.currentPromptActivityEpoch.Add(1)
+		return execID, generation, epoch, nil
+	}
+	svc := createEngineService(t, repo, stepGetter, agentMgr)
+
+	signal := models.PendingStepCompletionSignal{
+		StepID:     "step1",
+		Source:     models.StepCompletionSourceAgent,
+		Summary:    "all done",
+		SignaledAt: time.Now().UTC().Add(-30 * time.Minute),
+	}
+	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
+		t.Fatalf("seed pending signal: %v", err)
+	}
+
+	svc.reclaimStuckSignalSessionsOnce(ctx)
+
+	updatedTask, err := repo.GetTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if updatedTask.WorkflowStepID != "step1" {
+		t.Fatalf("expected no transition while the agent is still active, got %q", updatedTask.WorkflowStepID)
+	}
+	updatedSession, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if updatedSession.State != models.TaskSessionStateRunning {
+		t.Fatalf("expected session to remain RUNNING while still active, got %q", updatedSession.State)
+	}
+	if _, hasSignal := models.LoadPendingStepSignal(updatedSession.Metadata); !hasSignal {
+		t.Error("expected the pending signal to remain untouched — the watchdog must not have reclaimed")
+	}
+}

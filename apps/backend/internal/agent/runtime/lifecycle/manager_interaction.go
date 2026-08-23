@@ -1544,6 +1544,22 @@ func (m *Manager) GetPromptGenerationForSession(_ context.Context, sessionID str
 	return execution.promptGenerationSnapshot(), nil
 }
 
+// GetPromptActivityForSession returns the execution ID, prompt generation,
+// and activity epoch currently owned by sessionID's active prompt. Unlike
+// OwnsPromptGeneration/OwnsPromptActivity (which check a value someone else
+// already captured), this is the capture step itself — for watchdogs that
+// scan for stuck sessions and must snapshot "is anything happening right
+// now" on their own, rather than waiting for a stall event to carry the
+// values in its payload. Returns ErrNoExecutionForSession (wrapped) when no
+// execution is tracked for the session.
+func (m *Manager) GetPromptActivityForSession(_ context.Context, sessionID string) (executionID string, generation, activityEpoch uint64, err error) {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return "", 0, 0, fmt.Errorf("%w: %s", ErrNoExecutionForSession, sessionID)
+	}
+	return execution.ID, execution.promptGenerationSnapshot(), execution.promptActivityEpochSnapshot(), nil
+}
+
 // MarkReady marks an execution as ready for follow-up prompts AFTER A TURN.
 // Use MarkBootReady instead when the agent has just initialized and hasn't yet
 // processed a turn — orchestrator subscribers rely on the distinction.

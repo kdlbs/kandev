@@ -352,6 +352,13 @@ type mockAgentManager struct {
 	currentPromptActivityEpoch atomic.Uint64
 	currentPromptExecutionID   string
 
+	// getPromptActivityForSessionFunc, when set, overrides
+	// GetPromptActivityForSession's default (report the current*
+	// fields above, or ErrNoExecutionForSession if no execution ID is
+	// set). Tests use this to simulate activity landing between a
+	// watchdog's unguarded snapshot and its guarded recheck.
+	getPromptActivityForSessionFunc func(sessionID string) (string, uint64, uint64, error)
+
 	// set_session_mode tracking (issue #1183). Records (sessionID, modeID) for
 	// every SetSessionModeBySessionID call. setSessionModeErr, when set, is
 	// returned to simulate "no running agent".
@@ -562,6 +569,18 @@ func (m *mockAgentManager) OwnsPromptActivity(
 
 func (m *mockAgentManager) GetPromptGenerationForSession(_ context.Context, _ string) (uint64, error) {
 	return m.currentPromptGeneration.Load(), nil
+}
+
+func (m *mockAgentManager) GetPromptActivityForSession(
+	_ context.Context, sessionID string,
+) (string, uint64, uint64, error) {
+	if m.getPromptActivityForSessionFunc != nil {
+		return m.getPromptActivityForSessionFunc(sessionID)
+	}
+	if m.currentPromptExecutionID == "" {
+		return "", 0, 0, fmt.Errorf("%w: %s", lifecycle.ErrNoExecutionForSession, sessionID)
+	}
+	return m.currentPromptExecutionID, m.currentPromptGeneration.Load(), m.currentPromptActivityEpoch.Load(), nil
 }
 
 // RowLiveness makes the mock satisfy the orchestrator's optional
