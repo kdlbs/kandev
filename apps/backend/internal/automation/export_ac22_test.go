@@ -35,6 +35,7 @@ var automationFieldDispositions = map[string]fieldDisposition{
 	"AgentProfileID":     {exported: true, yamlKey: "agent_profile"},
 	"ExecutorProfileID":  {exported: true, yamlKey: "executor_profile"},
 	"RepositoryIDs":      {exported: true, yamlKey: "repositories"},
+	"Repositories":       {exported: false},
 	"ContinuationTaskID": {exported: false}, // runtime pointer to the reused task
 
 	"WebhookSecret":   {exported: false}, // secret

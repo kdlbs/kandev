@@ -12,9 +12,9 @@ The current automation contract treats every firing as hidden work. That is
 appropriate for coordinator agents, but it prevents a scheduled action from
 entering a selected workflow as ordinary Kanban work. It also rejects a valid
 repository-free automation even though the agent lifecycle already supports a
-task-owned scratch workspace. The existing empty repository selection means
-"use the workspace's first repository", so it cannot express an intentional
-no-repository run.
+task-owned scratch workspace. A first-workspace-repository fallback is also
+ambiguous: it does not record user intent, cannot record a base branch, and
+changes behavior when repository ordering changes.
 
 The hidden task contract and the normal task contract have different authority
 and cleanup rules. A visible task must not receive the coordinator MCP profile,
@@ -25,19 +25,19 @@ find in the sidebar.
 
 1. Persist `task_mode` with `automation_run` as the compatibility default and
    `normal_task` as the explicit visible target.
-2. Persist `repository_mode` separately from `repository_ids`. `none` means
-   intentional repository-free execution, `selected` uses the listed
-   repositories, and `workspace_default` preserves legacy empty-selection
-   behavior for existing rows and omitted old-client fields. A provider
-   trigger that requires a repository cannot use explicit `none`.
-3. A repository-free automation uses the Local executor and a task-owned
-   scratch workspace. Worktree is not a valid repository-free choice. The
-   backend validates this even when the request bypasses the editor.
+2. Persist an ordered list of explicit repository and base-branch pairs. An
+   empty list means intentional repository-free execution. There is no
+   workspace-default or first-repository behavior. Compatibility ID-only
+   requests use each named repository's configured default branch; an empty
+   compatibility request remains empty.
+3. A repository-free automation uses a task-owned scratch workspace. Worktree
+   and Local-compatible executor profiles remain valid choices. A Worktree
+   profile does not create a Git worktree when no repository is attached.
 4. Hidden target mode keeps the fixed `SurfaceAutomation` profile and hidden
    `automation_run` origin. Normal-task mode requires a workflow, uses a
    visible `automation_task` origin, and receives the normal task profile and
-   lifecycle. The workflow step remains optional and resolves through the
-   workflow's normal starting-step rule.
+   lifecycle. The automation editor does not choose a workflow step; normal
+   task creation resolves the workflow's configured start step.
 5. The existing `new_task` and `reuse_thread` policy applies to both target
    modes. A reusable visible target continues one visible task and primary
    session, while an isolated visible firing creates a separate visible task.
@@ -45,19 +45,24 @@ find in the sidebar.
 6. Hidden tasks remain owned by automation cleanup. Visible normal tasks remain
    ordinary task records when an automation is disabled or deleted. Open run
    records are terminalized without deleting the visible task.
+7. The automation editor composes the repository/base-branch, workflow,
+   agent-profile, and executor-profile selectors from task creation. Search,
+   logos, workflow previews, availability rules, and mobile behavior therefore
+   have one implementation across both surfaces.
 
 ## Consequences
 
 - Users can run reports and coordination prompts without a repository or
-  workflow, with a clear Local scratch execution path.
+  workflow, even when Worktree is the only available executor profile.
 - Users can choose whether a scheduled firing becomes ordinary Kanban work or
   remains a background automation run.
 - Target mode, repository mode, continuation compatibility, and exact-run
   finalization become persisted contracts that require migrations and tests.
 - The run dispatcher must keep hidden and visible task origins separate while
   sharing admission, continuation, and exact identity logic.
-- Existing empty repository rows preserve their historical workspace-default
-  behavior. New explicit no-repository saves do not silently attach a repo.
+- Existing empty repository rows become explicit no-repository automations.
+  Existing selected repositories keep their order and receive a concrete base
+  branch during migration.
 - Visible tasks remain after automation deletion, so the automation UI must not
   promise that deleting an automation deletes all work it created.
 
@@ -76,7 +81,7 @@ find in the sidebar.
    visibility rules auditable.
 4. **Force visible tasks to use `new_task`.** Rejected because a user may want
    a visible recurring task that keeps one conversation and task environment.
-5. **Allow Worktree to create a worktree without a repository.** Rejected
-   because Worktree semantics require a source repository. Local scratch is
-   already supported by the lifecycle and gives the user an honest executor
-   label.
+5. **Require Local for repository-free execution.** Rejected because the
+   lifecycle already gives repository-free sessions a task-owned scratch
+   directory. Requiring another configured executor would block valid
+   automations without improving isolation.

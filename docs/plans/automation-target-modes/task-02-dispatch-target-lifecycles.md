@@ -27,7 +27,7 @@ acceptance_criteria:
 ## Summary
 
 Route automation firings to hidden or visible task creation, allow valid
-repository-free Local launches, and keep continuation, exact run binding,
+repository-free scratch launches, and keep continuation, exact run binding,
 terminal status, profile selection, and deletion ownership correct for both
 targets.
 
@@ -47,8 +47,8 @@ targets.
 
 ## Acceptance
 
-- A hidden automation with no workflow or repository launches in Local scratch;
-  a Worktree request fails before task creation.
+- A hidden automation with no workflow or repository launches in scratch with
+  Worktree or a Local-compatible profile.
 - A normal-task automation creates a visible workflow task, supports both
   continuity policies, and does not receive `SurfaceAutomation`.
 - Completion and stop terminalize only the exact visible or hidden run, and
@@ -99,7 +99,7 @@ Task 01.
 
 ## Results
 
-- Added hidden Local scratch and visible normal-task dispatch paths with
+- Added hidden scratch and visible normal-task dispatch paths with
   distinct task origins and exact automation-run bindings.
 - Kept hidden coordinator MCP authority and cleanup limited to hidden tasks;
   visible automation tasks use normal profiles and remain in task lists after

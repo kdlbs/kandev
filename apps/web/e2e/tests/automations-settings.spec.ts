@@ -28,7 +28,6 @@ test.describe("Automations settings page", () => {
 
     // Select workflow and step
     await automations.selectWorkflow("E2E Workflow");
-    await automations.selectWorkflowStep(seedData.steps[0].name);
 
     // Save — button should be enabled now
     await expect(automations.saveButton).toBeEnabled({ timeout: 5_000 });
@@ -80,7 +79,6 @@ test.describe("Automations settings page", () => {
     await testPage.getByTestId("automation-name-input").fill("Reusable Context");
     await automations.selectFrequency("every day");
     await automations.selectWorkflow("E2E Workflow");
-    await automations.selectWorkflowStep(seedData.steps[0].name);
     await expect(automations.saveButton).toBeEnabled({ timeout: 5_000 });
     await automations.saveButton.click();
 
@@ -102,7 +100,6 @@ test.describe("Automations settings page", () => {
 
     // Select workflow and step
     await automations.selectWorkflow("E2E Workflow");
-    await automations.selectWorkflowStep(seedData.steps[0].name);
 
     await expect(automations.saveButton).toBeEnabled({ timeout: 5_000 });
     await automations.saveButton.click();
@@ -131,7 +128,6 @@ test.describe("Automations settings page", () => {
     await automations.nameInput.fill("Original Name");
     await automations.selectFrequency("every hour");
     await automations.selectWorkflow("E2E Workflow");
-    await automations.selectWorkflowStep(seedData.steps[0].name);
     await expect(automations.saveButton).toBeEnabled({ timeout: 5_000 });
     await automations.saveButton.click();
 
@@ -163,7 +159,6 @@ test.describe("Automations settings page", () => {
     await automations.nameInput.fill("To Be Deleted");
     await automations.selectFrequency("every week");
     await automations.selectWorkflow("E2E Workflow");
-    await automations.selectWorkflowStep(seedData.steps[0].name);
     await expect(automations.saveButton).toBeEnabled({ timeout: 5_000 });
     await automations.saveButton.click();
 
@@ -198,7 +193,6 @@ test.describe("Automations settings page", () => {
 
     // Select workflow and step
     await automations.selectWorkflow("E2E Workflow");
-    await automations.selectWorkflowStep(seedData.steps[0].name);
 
     // Save
     await expect(automations.saveButton).toBeEnabled({ timeout: 5_000 });
@@ -243,7 +237,6 @@ test.describe("Automations settings page", () => {
     await automations.nameInput.fill("Reveal Me");
     await testPage.getByText("Or use a webhook instead").click();
     await automations.selectWorkflow("E2E Workflow");
-    await automations.selectWorkflowStep(seedData.steps[0].name);
     await expect(automations.saveButton).toBeEnabled({ timeout: 5_000 });
     await automations.saveButton.click();
 
@@ -271,14 +264,39 @@ test.describe("Automations settings page", () => {
     await expect(secretInput).not.toHaveValue(/^•+$/);
   });
 
-  test("repository defaults to none on a fresh automation", async ({ testPage, seedData }) => {
+  test("repository starts empty with no workspace fallback", async ({ testPage, seedData }) => {
     const automations = new AutomationsPage(testPage, seedData.workspaceId);
     await automations.gotoNew();
 
-    // The explicit repository-mode choice should select no repository by default.
-    await expect(testPage.getByRole("radio", { name: /no repository/i })).toBeChecked({
-      timeout: 10_000,
-    });
+    await expect(testPage.getByTestId("repo-chip")).toHaveCount(0);
+    await expect(testPage.getByText(/run without repository files/i)).toBeVisible();
+    await expect(testPage.getByText(/use workspace default/i)).toHaveCount(0);
+  });
+
+  test("shares workflow previews and repository branch chips with New Task", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const automations = new AutomationsPage(testPage, seedData.workspaceId);
+    await automations.gotoNew();
+
+    await automations.workflowSelector.click();
+    await expect(testPage.getByText(seedData.steps[0].name, { exact: true })).toBeVisible();
+    await testPage.keyboard.press("Escape");
+
+    const { repositories } = await apiClient.listRepositories(seedData.workspaceId);
+    const repository = repositories[0];
+    expect(repository).toBeTruthy();
+    await testPage.getByRole("button", { name: "Add repository" }).click();
+    await testPage.getByTestId("repo-chip-trigger").click();
+    await testPage.getByText(repository!.name, { exact: true }).last().click();
+
+    await expect(testPage.getByTestId("repo-chip")).toHaveAttribute(
+      "data-repository-id",
+      repository!.id,
+    );
+    await expect(testPage.getByTestId("branch-chip-trigger")).toBeEnabled();
   });
 
   test("create page keeps scrolling inside the settings pane", async ({ testPage, seedData }) => {
@@ -315,7 +333,6 @@ test.describe("Automations settings page", () => {
     await automations.nameInput.fill("Toggle Test");
     await automations.selectFrequency("every day");
     await automations.selectWorkflow("E2E Workflow");
-    await automations.selectWorkflowStep(seedData.steps[0].name);
     await expect(automations.saveButton).toBeEnabled({ timeout: 5_000 });
     await automations.saveButton.click();
     await expect(testPage).toHaveURL(/automations$/, { timeout: 15_000 });

@@ -12,7 +12,6 @@ import {
   resolveNormalizedRepositoryIds,
   resolveRepositoryIdsForMode,
   resolveRepositoryIds,
-  triggerRequiresRepository,
 } from "./automation-payload";
 import type { FormState } from "./automation-payload";
 
@@ -45,14 +44,24 @@ describe("resolveRepositoryIds", () => {
     createRepositoryAction.mockResolvedValue({ id: "repo-new" });
 
     const result = await resolveRepositoryIds("ws-1", [
-      { kind: "registered", id: "repo-a" },
-      { kind: "discovered", path: "/tmp/repo-b", name: "repo-b", defaultBranch: "main" },
+      { kind: "registered", id: "repo-a", branch: "release/1" },
+      {
+        kind: "discovered",
+        path: "/tmp/repo-b",
+        name: "repo-b",
+        defaultBranch: "main",
+        branch: "develop",
+      },
     ]);
 
     expect(result.ids).toEqual(["repo-a", "repo-new"]);
     expect(result.selections).toEqual([
-      { kind: "registered", id: "repo-a" },
-      { kind: "registered", id: "repo-new" },
+      { kind: "registered", id: "repo-a", branch: "release/1" },
+      { kind: "registered", id: "repo-new", key: undefined, branch: "develop" },
+    ]);
+    expect(result.repositories).toEqual([
+      { repository_id: "repo-a", base_branch: "release/1" },
+      { repository_id: "repo-new", base_branch: "develop" },
     ]);
     expect(createRepositoryAction).toHaveBeenCalledTimes(1);
     expect(createRepositoryAction).toHaveBeenCalledWith(
@@ -64,6 +73,7 @@ describe("resolveRepositoryIds", () => {
     const result = await resolveRepositoryIds("ws-1", []);
 
     expect(result.ids).toEqual([]);
+    expect(result.repositories).toEqual([]);
     expect(result.selections).toEqual([]);
     expect(createRepositoryAction).not.toHaveBeenCalled();
   });
@@ -82,14 +92,13 @@ describe("resolveNormalizedRepositoryIds", () => {
   });
 
   const twoRegistered = [
-    { kind: "registered" as const, id: "repo-a" },
-    { kind: "registered" as const, id: "repo-b" },
+    { kind: "registered" as const, id: "repo-a", branch: "main" },
+    { kind: "registered" as const, id: "repo-b", branch: "develop" },
   ];
 
-  it("resolves every selection when the executor supports multi-repo and it's not a PR trigger", async () => {
+  it("resolves every selection when the executor supports multi-repo", async () => {
     const result = await resolveNormalizedRepositoryIds("ws-1", twoRegistered, {
       supportsMultiRepo: true,
-      isPRTrigger: false,
     });
     expect(result.ids).toEqual(["repo-a", "repo-b"]);
   });
@@ -101,15 +110,6 @@ describe("resolveNormalizedRepositoryIds", () => {
     // both stale repository_ids here.
     const result = await resolveNormalizedRepositoryIds("ws-1", twoRegistered, {
       supportsMultiRepo: false,
-      isPRTrigger: false,
-    });
-    expect(result.ids).toEqual(["repo-a"]);
-  });
-
-  it("truncates a stale multi-repository selection to one ID for a github_pr trigger", async () => {
-    const result = await resolveNormalizedRepositoryIds("ws-1", twoRegistered, {
-      supportsMultiRepo: true,
-      isPRTrigger: true,
     });
     expect(result.ids).toEqual(["repo-a"]);
   });
@@ -117,37 +117,58 @@ describe("resolveNormalizedRepositoryIds", () => {
   it("feeds the truncated ids straight into buildUpdatePayload", async () => {
     const { ids } = await resolveNormalizedRepositoryIds("ws-1", twoRegistered, {
       supportsMultiRepo: false,
-      isPRTrigger: false,
     });
-    const payload = buildUpdatePayload(baseForm(), ids);
+    const payload = buildUpdatePayload(
+      baseForm(),
+      ids.map((repository_id) => ({ repository_id, base_branch: "main" })),
+    );
     expect(payload.repository_ids).toEqual(["repo-a"]);
   });
 
   it("feeds the truncated ids straight into buildCreatePayload", async () => {
     const { ids } = await resolveNormalizedRepositoryIds("ws-1", twoRegistered, {
       supportsMultiRepo: false,
-      isPRTrigger: false,
     });
-    const payload = buildCreatePayload("ws-1", baseForm(), ids, []);
+    const payload = buildCreatePayload(
+      "ws-1",
+      baseForm(),
+      ids.map((repository_id) => ({ repository_id, base_branch: "main" })),
+      [],
+    );
     expect(payload.repository_ids).toEqual(["repo-a"]);
   });
 });
 
 describe("buildCreatePayload / buildUpdatePayload", () => {
-  it("identifies trigger types that require a repository", () => {
-    expect(triggerRequiresRepository("github_pr_merged")).toBe(true);
-    expect(triggerRequiresRepository("github_push")).toBe(true);
-    expect(triggerRequiresRepository("scheduled")).toBe(false);
-    expect(triggerRequiresRepository(null)).toBe(false);
+  it("leaves workflow step resolution to normal task creation", () => {
+    const form = baseForm({ workflowStepId: "stale-step" });
+
+    expect(buildCreatePayload("ws-1", form, [], []).workflow_step_id).toBe("");
+    expect(buildUpdatePayload(form, []).workflow_step_id).toBe("");
   });
 
   it("sends repository_ids in row order on create", () => {
-    const payload = buildCreatePayload("ws-1", baseForm(), ["repo-a", "repo-b"], []);
+    const payload = buildCreatePayload(
+      "ws-1",
+      baseForm(),
+      [
+        { repository_id: "repo-a", base_branch: "main" },
+        { repository_id: "repo-b", base_branch: "develop" },
+      ],
+      [],
+    );
     expect(payload.repository_ids).toEqual(["repo-a", "repo-b"]);
+    expect(payload.repositories).toEqual([
+      { repository_id: "repo-a", base_branch: "main" },
+      { repository_id: "repo-b", base_branch: "develop" },
+    ]);
   });
 
   it("sends repository_ids in row order on update", () => {
-    const payload = buildUpdatePayload(baseForm(), ["repo-b", "repo-a"]);
+    const payload = buildUpdatePayload(baseForm(), [
+      { repository_id: "repo-b", base_branch: "develop" },
+      { repository_id: "repo-a", base_branch: "main" },
+    ]);
     expect(payload.repository_ids).toEqual(["repo-b", "repo-a"]);
   });
 
@@ -166,11 +187,12 @@ describe("buildCreatePayload / buildUpdatePayload", () => {
   it("sends the target and repository modes on create and update", () => {
     const form = baseForm({ taskMode: "normal_task", repositoryMode: "selected" });
 
-    expect(buildCreatePayload("ws-1", form, ["repo-a"], [])).toMatchObject({
+    const repositories = [{ repository_id: "repo-a", base_branch: "main" }];
+    expect(buildCreatePayload("ws-1", form, repositories, [])).toMatchObject({
       task_mode: "normal_task",
       repository_mode: "selected",
     });
-    expect(buildUpdatePayload(form, ["repo-a"])).toMatchObject({
+    expect(buildUpdatePayload(form, repositories)).toMatchObject({
       task_mode: "normal_task",
       repository_mode: "selected",
     });
@@ -181,7 +203,7 @@ describe("buildCreatePayload / buildUpdatePayload", () => {
       "ws-1",
       [{ kind: "discovered", path: "/tmp/stale", name: "stale", defaultBranch: "main" }],
       "none",
-      { supportsMultiRepo: true, isPRTrigger: false },
+      { supportsMultiRepo: true },
     );
 
     expect(result.ids).toEqual([]);

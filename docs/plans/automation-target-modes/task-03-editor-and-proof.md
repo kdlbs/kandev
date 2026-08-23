@@ -27,8 +27,8 @@ acceptance_criteria:
 
 ## Summary
 
-Expose target and repository choices in the automation editor, include the
-Local executor for repository-free runs, and make visible normal-task rules
+Expose target and repository choices in the automation editor, allow available
+executor profiles for repository-free runs, and make visible normal-task rules
 clear and accessible on desktop and mobile. Prove the two modes and toolbar
 geometry with focused component and Playwright coverage.
 
@@ -49,7 +49,7 @@ geometry with focused component and Playwright coverage.
 
 ## Acceptance
 
-- The editor can save a hidden no-repository/no-workflow automation with Local
+- The editor can save a hidden no-repository/no-workflow automation with
   scratch execution and explains that its per-run tasks stay out of Kanban and
   the sidebar.
 - The editor can save a workflow-backed normal-task automation, select either
@@ -109,8 +109,8 @@ Task 02.
 
 ## Results
 
-- Added target and repository mode controls, conditional workflow/executor
-  validation, Local scratch selection, accessible hidden/visible destination
+- Added target and repository mode controls, conditional workflow validation,
+  scratch execution, accessible hidden/visible destination
   descriptions, all-locale translations, and equal-height toolbar actions.
 - Kept the complete shared transcript mounted and focused the selected turn;
   replies remain visible while viewing a run.

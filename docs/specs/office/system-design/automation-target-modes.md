@@ -32,8 +32,9 @@ MCP surface.
 
 ## Components and responsibilities
 
-- `internal/automation` owns `TaskMode`, `RepositoryMode`, validation,
-  persistence, portable export, admission, and `AutomationRun` accounting.
+- `internal/automation` owns `TaskMode`, ordered repository/base-branch
+  selections, validation, persistence, portable export, admission, and
+  `AutomationRun` accounting.
 - `internal/orchestrator` resolves the target before task creation. It creates
   hidden tasks with `TaskOriginAutomationRun` and visible tasks with a distinct
   visible automation origin. It records the run ID in task metadata and binds
@@ -47,9 +48,10 @@ MCP surface.
 - `internal/mcp/profile`, `internal/mcp/scope`, and the MCP handlers apply
   `SurfaceAutomation` only to hidden automation tasks. Visible automation
   tasks use their ordinary task profile and ordinary caller boundaries.
-- `apps/web/components/automations` renders the target and repository-mode
-  controls, normalizes payloads, includes Local profiles, and keeps the
-  desktop and mobile editor behavior aligned.
+- `apps/web/components/automations` composes the shared task-creation workflow,
+  repository, branch, agent-profile, and executor-profile selectors. It adds
+  only automation-specific validation and keeps desktop and mobile behavior
+  aligned.
 
 ## Frontend boundary
 
@@ -57,7 +59,15 @@ The editor keeps target mode separate from continuity. Hidden mode explains
 that its per-run tasks stay out of the Kanban and sidebar. Normal-task mode
 explains that each firing is ordinary workflow work. Switching the target
 clears or revalidates fields that are not valid for the new mode, and the save
-payload always carries explicit target and repository modes.
+payload always carries the explicit target and ordered repository/base-branch
+pairs. An empty list is the only no-repository representation. The editor does
+not offer a workspace-default repository choice.
+
+The workflow, repository, branch, agent-profile, and executor-profile controls
+are shared with task creation. The workflow menu shows ordered steps and the
+configured start marker. Repository rows use the same paired chips and branch
+search. Profile menus use the same search, logos, labels, and availability
+rules. Automation code owns no parallel option catalog.
 
 On phones the existing automation editor remains the primary scroll surface.
 Target and continuity choices use the existing stacked control pattern with
@@ -67,16 +77,19 @@ height through one shared button sizing rule.
 
 ## Data and contracts
 
-The automation model and API add two persisted user choices:
+The automation model and API add a persisted task choice and ordered repository
+bindings:
 
 ```text
 task_mode: automation_run | normal_task
-repository_mode: workspace_default | selected | none
+repositories: [{repository_id, base_branch}, ...]
 ```
 
-`automation_run` and `workspace_default` are the compatibility defaults when
-older clients omit the fields. New editor saves always send an explicit
-repository mode. `repository_ids` is meaningful only for `selected`.
+`automation_run` is the compatibility default when older clients omit the
+field. An empty `repositories` list means no repository. The compatibility
+`repository_ids` field is accepted from older clients and resolves each ID to
+its configured default branch, but no empty request falls back to the first
+workspace repository.
 
 The task model adds a visible automation provenance value, for example
 `automation_task`. Board, sidebar, and normal task queries continue to exclude
@@ -95,11 +108,12 @@ unbound rows.
 ### Save and validation
 
 1. The editor presents the target choice. Hidden mode allows an empty workflow;
-   normal-task mode requires a workflow. The step picker remains optional.
-2. The editor presents repository mode explicitly. `none` selects Local and
-   disables Worktree. `selected` resolves repository IDs. `workspace_default`
-   is retained for legacy rows and is visible as a distinct fallback choice.
-3. The backend validates target, workflow, repository mode, executor type, and
+   normal-task mode requires a workflow. Selecting a workflow shows its step
+   preview; there is no independent step picker.
+2. The editor presents zero or more repository/base-branch chip pairs. Removing
+   every pair selects scratch execution. Every non-empty row requires a
+   repository and base branch.
+3. The backend validates target, workflow, repository selection, and
    continuation policy together. Invalid combinations fail before a firing is
    admitted.
 
@@ -107,10 +121,9 @@ unbound rows.
 
 1. `FireTrigger` renders the run title, atomically checks the shared open-run
    predicate, stores a `triggered` `AutomationRun`, and publishes its run ID.
-2. The orchestrator resolves repositories from `repository_mode`. `none`
-   produces an empty list for repository-neutral triggers. A provider trigger
-   that requires a repository rejects `none` before admission; existing
-   provider event-repository override behavior remains for the other modes.
+2. The orchestrator resolves the saved repository/base-branch pairs. An empty
+   list remains repository-free. A provider event can supply its own exact
+   repository only where its established event contract already does so.
 3. A hidden target creates or resumes an automation-origin task. A normal-task
    target creates or resumes a visible automation-origin task. Both paths use
    the same exact task/session/turn binding and continuation slot.
@@ -126,15 +139,16 @@ unbound rows.
 `new_task` creates a new task for either target. `reuse_thread` continues the
 target's current task and primary session, and remains limited to one open run.
 Compatibility checks include workspace, target mode, agent profile, executor
-profile, and repository mode/IDs. A missing or incompatible continuation gets a
+profile, and ordered repository/base-branch pairs. A missing or incompatible continuation gets a
 replacement task and an explicit `created` or `replaced` action. The configured
-workflow and step are used for a replacement. A resumed task keeps its existing
-title.
+workflow is used for a replacement, and normal task creation resolves its
+configured start step. A resumed task keeps its existing title.
 
 ## Failure and recovery
 
-- An empty repository list is valid only for a Local-compatible executor. The
-  orchestrator returns a validation error before task creation for Worktree.
+- An empty repository list is valid for Worktree and Local-compatible executor
+  profiles. The lifecycle creates a scratch directory and skips Git worktree
+  preparation because there is no repository checkout.
 - A task creation or exact launch failure marks the admitted run failed. The
   concurrency slot is released without deleting a visible task that was
   already created.
@@ -150,19 +164,20 @@ title.
 
 ## Persistence
 
-Add `task_mode` and `repository_mode` columns to `automations`. Fresh schemas
-use the compatibility defaults. Existing rows migrate to
-`task_mode=automation_run` and `repository_mode=workspace_default`, preserving
-the prior empty-repository fallback. The current automation editor writes
-`repository_mode=none` when the person explicitly chooses no repository.
+Keep `task_mode` on `automations` and store ordered repository bindings in
+`automation_repositories`, including `base_branch`. Fresh rows default to no
+repositories. Existing non-empty repository bindings use the repository's
+configured default branch when their legacy branch is empty. Existing empty
+and `workspace_default` rows migrate to no repositories; the first-repository
+fallback is removed.
 
 Portable YAML includes both user choices and repository IDs, but excludes
 `continuation_task_id`, run bindings, rendered titles, session pointers, and
 cleanup jobs. Import normalizes omitted target fields to the compatibility
 defaults and revalidates executor/workflow combinations.
 
-Changing target mode, repository mode, repository IDs, workflow, workflow step,
-agent profile, or executor profile rotates the continuation on the next firing.
+Changing target mode, repository/base-branch pairs, workflow, agent profile, or
+executor profile rotates the continuation on the next firing.
 Name, description, prompt, title template, enabled state, and trigger edits do
 not change the existing task until a firing needs a new or replacement task.
 

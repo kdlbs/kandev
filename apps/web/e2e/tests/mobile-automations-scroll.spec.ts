@@ -37,6 +37,9 @@ test.describe("Automations settings on mobile", () => {
     const automations = new AutomationsPage(testPage, seedData.workspaceId);
     await automations.gotoNew();
 
+    const workflowSelectorBox = await automations.workflowSelector.boundingBox();
+    expect(workflowSelectorBox?.height).toBeGreaterThanOrEqual(44);
+
     await expect(testPage.getByText("Context between runs", { exact: true })).toBeVisible();
     await expect(
       testPage.getByText(
@@ -54,6 +57,13 @@ test.describe("Automations settings on mobile", () => {
     const reuse = testPage.getByRole("radio", { name: "Continue the previous session" });
     await reuse.check();
     await expect(testPage.getByRole("spinbutton")).toBeDisabled();
+
+    const addRepository = testPage.getByRole("button", { name: "Add repository" });
+    const addRepositoryBox = await addRepository.boundingBox();
+    expect(addRepositoryBox?.height).toBeGreaterThanOrEqual(44);
+    await addRepository.click();
+    await expect(testPage.getByTestId("repo-chip-trigger")).toBeVisible();
+    await expect(testPage.getByTestId("branch-chip-trigger")).toBeVisible();
 
     const overflow = await testPage.evaluate(() => ({
       scrollWidth: document.documentElement.scrollWidth,

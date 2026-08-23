@@ -40,30 +40,30 @@ See [Tasks and workflows](tasks-and-workflows.md) for event configuration and de
 Open **Settings > Workspaces > _Workspace_ > Automations** (`/settings/workspace/{workspaceId}/automations`) and select **New Automation**. The top-level `/settings/automations` route redirects to, or asks you to select, a workspace.
 
 1. Enter a required name and optional description.
-2. Select an agent profile and executor profile. Passthrough profiles are not offered. When **No repository** is selected, choose a Local-compatible executor; Worktree is not a valid repository-free choice.
+2. Select an agent profile and executor profile. Passthrough profiles are not offered. Worktree and Local-compatible profiles can run without a repository in a task-owned scratch workspace.
 3. Choose the run destination:
    - **Run in automation history only** keeps each generated task out of Kanban and the sidebar. Workflow selection is optional.
    - **Create a normal task** creates ordinary workflow work that appears in Kanban and the sidebar. A workflow is required; an empty starting step uses that workflow's configured starting step.
-4. Select a repository mode: use the workspace default, choose registered or discovered local repositories, or choose **No repository**. A discovered repository is registered in the workspace when the automation is saved. No-repository runs use a task-scoped Local scratch workspace and do not create a worktree.
+4. Add one or more repository and base-branch pairs, or leave the list empty. The selector is the same searchable paired-chip control used by New Task. A discovered repository is registered in the workspace when the automation is saved. An empty list uses a task-scoped scratch workspace and does not create a Git worktree. Kandev never selects the workspace's first repository for you.
 5. Enter a prompt and optional task-title template.
 6. Choose **Context between runs**:
    - **Start a new task for every run** creates a separate task, conversation, and task environment for each firing. In the hidden destination, those tasks do not appear in Kanban or the sidebar; in the normal-task destination, they do.
-   - **Continue the previous session** reuses one task, primary session, conversation, and worktree across firings. The destination and repository mode remain part of continuation compatibility.
+   - **Continue the previous session** reuses one task, primary session, conversation, and worktree across firings. The destination and exact repository/base-branch pairs remain part of continuation compatibility.
 7. Keep the default maximum concurrency of 1 unless parallel work is safe. Reused sessions always use one active run.
 8. Choose a schedule and optional GitHub condition, or switch to webhook mode.
 9. Save, use **Run now** on the automation's page, then read what it said before widening credentials or scope.
 
-The form can save an empty agent or executor selection, but launch still needs a usable profile. Repository-neutral triggers such as scheduled, manual, and webhook runs may use Local scratch execution with no repository. GitHub PR, merged-PR, push, and CI triggers require repository context and reject **No repository** before admission. A GitHub pull-request run checks out that PR's head branch and uses its base branch.
+The form can save an empty agent or executor selection, but launch still needs a usable profile. Scheduled, manual, webhook, and provider-triggered runs can remain repository-free. When a provider event supplies an exact repository through its established contract, Kandev uses that event context. A GitHub pull-request run with configured repository access checks out that PR's head branch and uses its base branch.
 
 ### What a firing produces
 
-Every firing produces a distinct `AutomationRun` with exact task, session, and turn identity. A hidden destination uses `origin = automation_run`; that origin, not `is_ephemeral`, keeps its persistent task out of Kanban and task lists. A normal-task destination uses a separate visible automation origin, enters the selected workflow, and follows the ordinary task lifecycle. The trigger is the start signal, so the agent starts immediately rather than waiting for a workflow step's `auto_start_agent` action.
+Every firing produces a distinct `AutomationRun` with exact task, session, and turn identity. A hidden destination uses `origin = automation_run`; that origin, not `is_ephemeral`, keeps its persistent task out of Kanban and task lists. A normal-task destination uses a separate visible automation origin, enters the selected workflow at its configured start step, and follows the ordinary task lifecycle. The workflow selector shows the same ordered step preview as New Task; automations do not have a separate step selector. The trigger is the start signal, so the agent starts immediately rather than waiting for a workflow step's `auto_start_agent` action.
 
 With **Start a new task for every run**, each firing gets its own task, primary session, worktree or scratch workspace, and conversation. With **Continue the previous session**, the first firing creates one task and later firings send a new turn to its primary session. Kandev does not reset or rebase a reused checkout. If the saved task, session, runtime, or task environment is missing or incompatible, the firing creates a replacement thread and records that action on the run. A reused task keeps its creation title; each run keeps its own rendered `display_title` snapshot.
 
 A finished run parks in `WAITING_FOR_INPUT` rather than `COMPLETED`, so you can reply to it and the agent continues in the same session and worktree. A run is a thread, not a receipt. Worktrees are retained for the ten most recent finished task IDs of each automation and reclaimed beyond that, so an older run stays readable but can no longer be answered.
 
-The run destination and repository mode are explicit saved settings. Existing automations migrate to hidden-run behavior with the legacy workspace-default repository fallback; choose **No repository** when a legacy automation should use Local scratch execution. Changing the destination, workflow, repository mode or IDs, or runtime profiles replaces an incompatible reusable continuation on its next firing. Visible automation tasks survive automation deletion; hidden tasks use the automation cleanup lifecycle.
+The run destination and ordered repository/base-branch pairs are explicit saved settings. Existing empty repository selections migrate to scratch execution; there is no workspace-default fallback. Existing selected repositories use their configured default branch until the automation is saved with an explicit branch. Changing the destination, workflow, repository pairs, or runtime profiles replaces an incompatible reusable continuation on its next firing. Visible automation tasks survive automation deletion; hidden tasks use the automation cleanup lifecycle.
 
 Selecting a run opens the complete shared transcript and focuses its exact turn. Replies sent from that transcript create a new turn in the same conversation and remain visible; run selection does not filter away newer replies.
 

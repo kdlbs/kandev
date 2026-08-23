@@ -76,7 +76,6 @@ test.describe("automations — Pull request merged trigger", () => {
 
     await automations.nameInput.fill("PR Merged Round-trip");
     await automations.selectWorkflow("E2E Workflow");
-    await automations.selectWorkflowStep(seedData.steps[0].name);
 
     // Add the condition
     await automations.addConditionButton.click();

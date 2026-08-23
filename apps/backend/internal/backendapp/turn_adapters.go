@@ -24,31 +24,6 @@ type turnServiceAdapter struct {
 	svc *taskservice.Service
 }
 
-// automationExecutorProfileLookupAdapter exposes only the executor type that
-// automation validation needs. Keeping profile and executor resolution here
-// avoids coupling the automation package to the task service.
-type automationExecutorProfileLookupAdapter struct {
-	svc *taskservice.Service
-}
-
-func (a *automationExecutorProfileLookupAdapter) ExecutorType(ctx context.Context, profileID string) (string, error) {
-	profile, err := a.svc.GetExecutorProfile(ctx, profileID)
-	if err != nil {
-		return "", err
-	}
-	if profile == nil {
-		return "", fmt.Errorf("executor profile %q not found", profileID)
-	}
-	executor, err := a.svc.GetExecutor(ctx, profile.ExecutorID)
-	if err != nil {
-		return "", err
-	}
-	if executor == nil {
-		return "", fmt.Errorf("executor %q not found", profile.ExecutorID)
-	}
-	return string(executor.Type), nil
-}
-
 func (a *turnServiceAdapter) StartTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
 	return a.svc.StartTurn(ctx, sessionID)
 }

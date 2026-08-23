@@ -14,16 +14,15 @@ An automation can run as hidden coordinator work or create an ordinary task
 for each firing. Hidden work is useful for scheduled reports and background
 coordination. Visible work is useful when a firing should enter a selected
 workflow and be handled like a normal task by a person. Both modes can use a
-repository-backed executor or Local scratch execution when no repository is
-attached.
+repository-backed execution or a task-owned scratch workspace when no
+repository is attached.
 
 ## Terminology
 
 - **Task mode:** The persisted firing target. `automation_run` is the hidden
   default. `normal_task` creates a visible task.
-- **Repository mode:** The persisted repository choice. `none` means no
-  repository is attached, `selected` names one or more repositories, and
-  `workspace_default` preserves the legacy first-repository fallback.
+- **Repository selection:** An ordered list of repository and base-branch
+  pairs. An empty list means that no repository is attached.
 - **Scratch workspace:** A task-owned local directory created when a task has
   no attached repository. It is not a repository selection.
 - **Visible normal task:** A task with the normal task origin and workflow
@@ -47,16 +46,17 @@ background coordination or ordinary workflow work.
   use `automation_run` so existing automations retain hidden-run behavior.
 - **AC-OFFICE-AUTOMATION-TARGETS-001.3:** When the hidden target is selected,
   workflow and repository selection shall each be optional. A firing with no
-  workflow or repository shall be admitted and launched in a Local scratch
+  workflow or repository shall be admitted and launched in a task-owned scratch
   workspace.
 - **AC-OFFICE-AUTOMATION-TARGETS-001.4:** When no repository is attached, the
-  editor shall select or restrict execution to Local. A Worktree executor shall
-  not be offered as a valid repository-free choice, and the backend shall
-  reject an incompatible saved request before admitting a run.
+  selected executor profile shall run in a task-owned scratch workspace.
+  Worktree shall remain a valid profile choice and shall not require a Git
+  worktree when the repository list is empty.
 - **AC-OFFICE-AUTOMATION-TARGETS-001.5:** When the normal task target is
   selected, a workflow shall be required. A missing step shall use the
-  workflow's configured starting step. Repository mode shall remain explicit,
-  so `none` never silently falls back to the workspace's first repository.
+  workflow's configured starting step. Repository selection shall remain
+  explicit, so an empty list never silently falls back to the workspace's
+  first repository.
 - **AC-OFFICE-AUTOMATION-TARGETS-001.6:** Portable automation export shall
   include the target and repository modes and shall exclude runtime task,
   session, turn, and cleanup pointers.
@@ -64,10 +64,21 @@ background coordination or ordinary workflow work.
   repository, or executor combination shall fail validation before an
   `AutomationRun` is admitted, and shall return an actionable error to the
   editor or trigger caller.
-- **AC-OFFICE-AUTOMATION-TARGETS-001.8:** A provider trigger that requires a
-  repository shall reject explicit `repository_mode=none` before admission;
-  repository-free mode is valid for triggers that do not carry repository
-  context.
+- **AC-OFFICE-AUTOMATION-TARGETS-001.8:** A trigger shall not cause the editor
+  or backend to attach the workspace's first repository. A repository-free
+  automation remains repository-free unless the trigger's established event
+  contract supplies its own exact repository context.
+- **AC-OFFICE-AUTOMATION-TARGETS-001.9:** When a person configures repository
+  access, the editor shall let them add one or more explicit repository and
+  base-branch pairs or remove every pair. It shall not offer or apply a first
+  workspace repository fallback.
+- **AC-OFFICE-AUTOMATION-TARGETS-001.10:** When a firing uses selected
+  repositories, the system shall create the task environment from the saved
+  base branch for each repository and preserve pair order.
+- **AC-OFFICE-AUTOMATION-TARGETS-001.11:** When a workflow is selected, the
+  editor shall show its ordered step preview and the system shall place a new
+  task in that workflow's configured start step. The editor shall not ask the
+  person to select a workflow step.
 
 ### REQ-OFFICE-AUTOMATION-TARGETS-002: Create and continue visible tasks
 
@@ -95,7 +106,7 @@ task work without losing exact automation-run accounting.
   by the hidden-run cleanup lifecycle.
 - **AC-OFFICE-AUTOMATION-TARGETS-002.6:** A visible task with repository mode
   `none` shall retain its normal Kanban/sidebar identity while its agent runs
-  in a task-owned Local scratch workspace.
+  in a task-owned scratch workspace.
 
 ### REQ-OFFICE-AUTOMATION-TARGETS-003: Explain target choices on every viewport
 
@@ -117,6 +128,9 @@ clear before a person saves an automation.
 - **AC-OFFICE-AUTOMATION-TARGETS-003.4:** The Export and New Automation actions
   on the automation settings toolbar shall have the same rendered height on
   desktop and mobile.
+- **AC-OFFICE-AUTOMATION-TARGETS-003.5:** Repository, workflow, agent-profile,
+  and executor-profile selection shall use the same searchable controls,
+  logos, repository/branch chips, and workflow step previews as task creation.
 
 ## Out of scope
 

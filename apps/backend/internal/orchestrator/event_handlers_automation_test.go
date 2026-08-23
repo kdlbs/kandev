@@ -92,7 +92,7 @@ func TestResolveAutomationRepository_SkipsUnloadableID(t *testing.T) {
 	}
 }
 
-func TestResolveAutomationRepository_EmptyListFallsBackToWorkspace(t *testing.T) {
+func TestResolveAutomationRepository_EmptyListUsesNoRepository(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedAutomationWorkspaceRepos(t, repo, "ws-1", []string{"repo-only"})
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
@@ -102,9 +102,30 @@ func TestResolveAutomationRepository_EmptyListFallsBackToWorkspace(t *testing.T)
 
 	resolved := svc.resolveAutomationRepository(context.Background(), a, evt)
 
-	if len(resolved) != 1 || resolved[0].RepositoryID != "repo-only" {
-		t.Fatalf("expected fallback to the workspace's only repository, got %+v", resolved)
+	if len(resolved) != 0 {
+		t.Fatalf("expected no repository, got %+v", resolved)
 	}
+}
+
+// @covers AC-OFFICE-AUTOMATION-TARGETS-001.10
+func TestResolveAutomationRepository_UsesSavedBaseBranches(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedAutomationWorkspaceRepos(t, repo, "ws-1", []string{"repo-a"})
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	a := &automation.Automation{
+		WorkspaceID: "ws-1",
+		Repositories: []automation.AutomationRepository{
+			{RepositoryID: "repo-a", BaseBranch: "release/2"},
+		},
+	}
+
+	resolved := svc.resolveAutomationRepository(context.Background(), a, &automation.AutomationTriggeredEvent{
+		TriggerType: automation.TriggerTypeScheduled,
+	})
+
+	require.Len(t, resolved, 1)
+	require.Equal(t, "release/2", resolved[0].BaseBranch)
+	require.Equal(t, "release/2", resolved[0].CheckoutBranch)
 }
 
 func TestResolveAutomationTaskTitleTruncatesRenderedTitle(t *testing.T) {

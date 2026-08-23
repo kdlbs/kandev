@@ -1,6 +1,7 @@
 import { createRepositoryAction } from "@/app/actions/workspaces";
 import type {
   CreateAutomationRequest,
+  AutomationRepository,
   ContinuationPolicy,
   RepositoryMode,
   TaskMode,
@@ -44,10 +45,6 @@ export type PendingTrigger = {
   enabled: boolean;
 };
 
-export function triggerRequiresRepository(triggerType: TriggerType | null): boolean {
-  return ["github_pr", "github_pr_merged", "github_push", "github_ci"].includes(triggerType ?? "");
-}
-
 // ResolvedRepositories bundles the save-time output of resolving an ordered
 // RepositorySelection[]: `ids` is the compact repository_ids payload (in
 // order, "none"/empty entries dropped), `selections` is the 1:1-with-input
@@ -56,6 +53,7 @@ export function triggerRequiresRepository(triggerType: TriggerType | null): bool
 // re-register the same local path.
 export type ResolvedRepositories = {
   ids: string[];
+  repositories: AutomationRepository[];
   selections: RepositorySelection[];
 };
 
@@ -74,26 +72,41 @@ export async function resolveRepositoryIds(
   );
   const promoted = selections.map((selection, i) =>
     selection.kind === "discovered" && resolvedIds[i]
-      ? ({ kind: "registered", id: resolvedIds[i] } as const)
+      ? ({
+          kind: "registered",
+          id: resolvedIds[i],
+          key: selection.key,
+          branch: selection.branch || selection.defaultBranch,
+        } as const)
       : selection,
   );
-  return { ids: resolvedIds.filter((id) => id !== ""), selections: promoted };
+  const repositories = resolvedIds.flatMap((repositoryId, index) => {
+    if (!repositoryId) return [];
+    const selection = selections[index];
+    const baseBranch =
+      selection?.branch || (selection?.kind === "discovered" ? selection.defaultBranch : "");
+    return [{ repository_id: repositoryId, base_branch: baseBranch }];
+  });
+  return {
+    ids: repositories.map((repository) => repository.repository_id),
+    repositories,
+    selections: promoted,
+  };
 }
 
 // resolveNormalizedRepositoryIds is the save-boundary entry point used by
 // useSaveHandler (automation-editor.tsx). It enforces the single-repository
 // invariant (see normalizeRepositorySelections) before resolving, so a form
 // that had 2+ repos selected under a compatible executor, then switched to
-// an incompatible executor or a github_pr trigger without the picker being
-// touched again, can't smuggle every stale entry into the saved
-// repository_ids — only the first survives. Kept as a named function (not
+// an incompatible executor without touching the picker, can't send stale
+// repository entries. Only the first survives. Kept as a named function (not
 // inlined at the call site) deliberately: it's the test seam this module's
 // unit tests exercise directly, without needing a full AutomationEditor
 // render harness.
 export async function resolveNormalizedRepositoryIds(
   workspaceId: string,
   selections: RepositorySelection[],
-  mode: { supportsMultiRepo: boolean; isPRTrigger: boolean },
+  mode: { supportsMultiRepo: boolean },
 ): Promise<ResolvedRepositories> {
   return resolveRepositoryIds(workspaceId, normalizeRepositorySelections(selections, mode));
 }
@@ -102,10 +115,10 @@ export async function resolveRepositoryIdsForMode(
   workspaceId: string,
   selections: RepositorySelection[],
   repositoryMode: RepositoryMode,
-  mode: { supportsMultiRepo: boolean; isPRTrigger: boolean },
+  mode: { supportsMultiRepo: boolean },
 ): Promise<ResolvedRepositories> {
   if (repositoryMode !== "selected") {
-    return { ids: [], selections: [] };
+    return { ids: [], repositories: [], selections: [] };
   }
   return resolveNormalizedRepositoryIds(workspaceId, selections, mode);
 }
@@ -140,7 +153,7 @@ async function resolveOneRepositoryId(
 export function buildCreatePayload(
   workspaceId: string,
   form: FormState,
-  repositoryIds: string[],
+  repositories: AutomationRepository[],
   pending: PendingTrigger[],
 ): CreateAutomationRequest {
   // i18n-exempt: persisted automation name. See the comment below.
@@ -152,12 +165,13 @@ export function buildCreatePayload(
     name: form.name || "New Automation",
     description: form.description,
     workflow_id: form.workflowId,
-    workflow_step_id: form.workflowStepId,
+    workflow_step_id: "",
     agent_profile_id: form.agentProfileId,
     executor_profile_id: form.executorProfileId,
     task_mode: form.taskMode,
-    repository_mode: form.repositoryMode,
-    repository_ids: repositoryIds,
+    repository_mode: repositories.length > 0 ? "selected" : "none",
+    repository_ids: repositories.map((repository) => repository.repository_id),
+    repositories,
     prompt: form.prompt,
     task_title_template: form.taskTitleTemplate,
     max_concurrent_runs: form.maxConcurrentRuns,
@@ -168,18 +182,19 @@ export function buildCreatePayload(
 
 export function buildUpdatePayload(
   form: FormState,
-  repositoryIds: string[],
+  repositories: AutomationRepository[],
 ): UpdateAutomationRequest {
   return {
     name: form.name,
     description: form.description,
     workflow_id: form.workflowId,
-    workflow_step_id: form.workflowStepId,
+    workflow_step_id: "",
     agent_profile_id: form.agentProfileId,
     executor_profile_id: form.executorProfileId,
     task_mode: form.taskMode,
-    repository_mode: form.repositoryMode,
-    repository_ids: repositoryIds,
+    repository_mode: repositories.length > 0 ? "selected" : "none",
+    repository_ids: repositories.map((repository) => repository.repository_id),
+    repositories,
     prompt: form.prompt,
     task_title_template: form.taskTitleTemplate,
     enabled: form.enabled,

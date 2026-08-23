@@ -154,7 +154,7 @@ func (s *Service) buildExportAutomation(ctx context.Context, tx *sqlx.Tx, a *Aut
 				if len(a.RepositoryIDs) > 0 {
 					return RepositoryModeSelected
 				}
-				return RepositoryModeWorkspaceDefault
+				return RepositoryModeNone
 			}
 			return a.RepositoryMode
 		}(),

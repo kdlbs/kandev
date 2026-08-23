@@ -330,7 +330,6 @@ test.describe("Automation concurrency note", () => {
     // from the test.
     await automations.timeInput.fill("03:17");
     await automations.selectWorkflow("E2E Workflow");
-    await automations.selectWorkflowStep(seed.steps[0].name);
     await expect(automations.saveButton).toBeEnabled({ timeout: 5_000 });
     await automations.saveButton.click();
     await expect(testPage).toHaveURL(/automations$/, { timeout: 15_000 });

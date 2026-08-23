@@ -23,8 +23,8 @@ acceptance_criteria:
 ## Summary
 
 Add typed target and repository-mode values to automation models, requests,
-storage, migrations, validation, and export. Preserve legacy empty-repository
-behavior while allowing new saves to persist an intentional `none` choice.
+storage, migrations, validation, and export. Migrate legacy empty-repository
+behavior to an explicit no-repository choice and persist exact base branches.
 
 ## In scope
 
@@ -41,11 +41,11 @@ behavior while allowing new saves to persist an intentional `none` choice.
 ## Acceptance
 
 - Omitted target fields load as hidden automation runs and existing empty
-  repository rows retain workspace-default behavior.
+  repository rows migrate to no repository.
 - Explicit `repository_mode=none` is persisted, exported, and does not resolve
   a workspace repository.
-- Normal-task mode requires a workflow and incompatible Worktree/no-repository
-  requests fail before run admission.
+- Normal-task mode requires a workflow. Worktree and Local-compatible profiles
+  accept repository-free scratch execution.
 
 ## Verification
 
@@ -86,8 +86,8 @@ None.
 - Added persisted `task_mode` and `repository_mode` values with compatibility
   defaults and migration/backfill behavior for legacy empty repository lists.
 - Added request validation for hidden versus visible targets, explicit
-  repository-free execution, provider-trigger repository requirements, and
-  Worktree incompatibility without a repository.
+  repository-free execution, ordered repository/base-branch pairs, and
+  workspace repository ownership.
 - Added export and store/service regression coverage.
 - Verification: `go test -tags fts5 ./internal/automation` passed as part of
   the final automation/orchestrator suite (2,464 tests across both packages).

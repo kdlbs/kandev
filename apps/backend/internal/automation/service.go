@@ -57,8 +57,6 @@ var ErrAgentProfileNotFound = errors.New("automation: agent profile not found")
 
 var ErrInvalidContinuationPolicy = errors.New("automation: invalid continuation policy")
 
-var ErrRepositoryRequiredForExecutor = errors.New("automation: selected executor requires a repository")
-
 // ErrAutomationRunNotDispatchable means the run was stopped or otherwise
 // settled before its agent turn could be started. The event handler must not
 // launch work for this run.
@@ -162,13 +160,6 @@ type AgentProfileLookup interface {
 	AgentProfileExists(ctx context.Context, profileID string) (bool, error)
 }
 
-// ExecutorProfileLookup resolves the runtime type behind an executor profile.
-// It is used only to reject a repository-free automation bound to Worktree,
-// whose environment cannot be created without a repository checkout.
-type ExecutorProfileLookup interface {
-	ExecutorType(ctx context.Context, profileID string) (string, error)
-}
-
 // Service coordinates automation operations.
 type Service struct {
 	store       *Store
@@ -199,11 +190,6 @@ type Service struct {
 	// validation skipped, like workflowLocator above and unlike repoLookup —
 	// see validateAgentProfileID for why this one does not fail closed.
 	agentProfileLookup AgentProfileLookup
-
-	// executorProfileLookup rejects an explicit repository-free target when
-	// the selected executor is Worktree. Nil keeps isolated package tests and
-	// startup wiring failures non-fatal; production wires the task service.
-	executorProfileLookup ExecutorProfileLookup
 
 	// authorizeWorkspace gates automation access by workspace ownership
 	// (opt-in auth). Nil = unscoped (internal schedulers/pollers, auth
@@ -325,11 +311,6 @@ func (s *Service) SetAgentProfileLookup(l AgentProfileLookup) {
 	s.agentProfileLookup = l
 }
 
-// SetExecutorProfileLookup wires executor compatibility validation.
-func (s *Service) SetExecutorProfileLookup(l ExecutorProfileLookup) {
-	s.executorProfileLookup = l
-}
-
 // validateAgentProfileID rejects a binding to an agent profile that is not
 // there. Without it the only enforcement is executor.PrepareSession at launch
 // time — long after the automation has been persisted, scheduled and fired —
@@ -388,10 +369,10 @@ func (s *Service) TaskOriginLookup() TaskOriginLookup {
 }
 
 // SetRepositoryLookup wires the repository ownership validator for
-// repository_ids on create/update. This is a security control (prevents a
+// repository bindings on create/update. This is a security control (prevents a
 // crafted request attaching another workspace's repository), so an unset
-// lookup fails closed for any non-empty repository_ids list rather than
-// silently skipping validation — see validateRepositoryIDs.
+// lookup fails closed for any non-empty repository list rather than silently
+// skipping validation.
 func (s *Service) SetRepositoryLookup(lookup RepositoryLookup) {
 	s.repoLookup = lookup
 }
@@ -490,26 +471,21 @@ func (s *Service) CreateAutomation(ctx context.Context, req *CreateAutomationReq
 	if taskMode == "" {
 		taskMode = TaskModeAutomationRun
 	}
-	repositoryMode := req.RepositoryMode
-	if repositoryMode == "" {
-		if len(req.RepositoryIDs) > 0 {
-			repositoryMode = RepositoryModeSelected
-		} else {
-			repositoryMode = RepositoryModeWorkspaceDefault
-		}
-	}
-	if err := validateAutomationTarget(taskMode, repositoryMode, req.WorkflowID, req.RepositoryIDs); err != nil {
+	repositories, err := s.resolveAutomationRepositories(ctx, req.WorkspaceID, req.Repositories, req.RepositoryIDs)
+	if err != nil {
 		return nil, err
 	}
-	if err := s.validateExecutorRepositoryCompatibility(ctx, repositoryMode, req.ExecutorProfileID); err != nil {
+	repositoryMode := RepositoryModeNone
+	if len(repositories) > 0 {
+		repositoryMode = RepositoryModeSelected
+	}
+	if req.RepositoryMode != "" && req.RepositoryMode != repositoryMode {
+		return nil, fmt.Errorf("%w: %q", ErrInvalidRepositoryMode, req.RepositoryMode)
+	}
+	repositoryIDs := repositoryIDs(repositories)
+	if err := validateAutomationTarget(taskMode, repositoryMode, req.WorkflowID, repositoryIDs); err != nil {
 		return nil, err
 	}
-	for _, trigger := range req.Triggers {
-		if err := validateTriggerRepositoryMode(repositoryMode, trigger.Type); err != nil {
-			return nil, err
-		}
-	}
-
 	// Hidden automation runs may omit a workflow. Visible normal tasks require
 	// one, and when a workflow is supplied its ownership and optional starting
 	// step are still checked.
@@ -529,15 +505,13 @@ func (s *Service) CreateAutomation(ctx context.Context, req *CreateAutomationReq
 		ExecutorProfileID:  req.ExecutorProfileID,
 		TaskMode:           taskMode,
 		RepositoryMode:     repositoryMode,
-		RepositoryIDs:      req.RepositoryIDs,
+		Repositories:       repositories,
+		RepositoryIDs:      repositoryIDs,
 		Prompt:             req.Prompt,
 		TaskTitleTemplate:  req.TaskTitleTemplate,
 		Enabled:            true,
 		MaxConcurrentRuns:  maxRuns,
 		ContinuationPolicy: continuationPolicy,
-	}
-	if err := s.validateRepositoryIDs(ctx, req.WorkspaceID, req.RepositoryIDs); err != nil {
-		return nil, err
 	}
 	if err := s.validateAgentProfileID(ctx, req.AgentProfileID); err != nil {
 		return nil, err
@@ -620,48 +594,36 @@ func (s *Service) UpdateAutomation(ctx context.Context, id string, req *UpdateAu
 	if req.TaskMode != nil {
 		taskMode = *req.TaskMode
 	}
-	repositoryMode := existing.RepositoryMode
-	if repositoryMode == "" {
-		if len(existing.RepositoryIDs) > 0 {
-			repositoryMode = RepositoryModeSelected
-		} else {
-			repositoryMode = RepositoryModeWorkspaceDefault
+	repositories := existing.Repositories
+	if req.Repositories != nil || req.RepositoryIDs != nil {
+		repositories, err = s.resolveAutomationRepositories(
+			ctx, existing.WorkspaceID, req.Repositories, req.RepositoryIDs,
+		)
+		if err != nil {
+			return nil, err
 		}
 	}
 	if req.RepositoryMode != nil {
-		repositoryMode = *req.RepositoryMode
-	} else if req.RepositoryIDs != nil {
-		if len(req.RepositoryIDs) > 0 {
-			repositoryMode = RepositoryModeSelected
-		} else {
-			repositoryMode = RepositoryModeWorkspaceDefault
+		switch *req.RepositoryMode {
+		case RepositoryModeNone:
+			repositories = nil
+		case RepositoryModeWorkspaceDefault:
+			return nil, fmt.Errorf("%w: %q", ErrInvalidRepositoryMode, *req.RepositoryMode)
 		}
+	}
+	repositoryMode := RepositoryModeNone
+	if len(repositories) > 0 {
+		repositoryMode = RepositoryModeSelected
+	}
+	if req.RepositoryMode != nil && *req.RepositoryMode != repositoryMode {
+		return nil, fmt.Errorf("%w: %q", ErrInvalidRepositoryMode, *req.RepositoryMode)
 	}
 	workflowID := existing.WorkflowID
 	if req.WorkflowID != nil {
 		workflowID = *req.WorkflowID
 	}
-	repositoryIDs := existing.RepositoryIDs
-	if req.RepositoryIDs != nil {
-		repositoryIDs = req.RepositoryIDs
-	} else if req.RepositoryMode != nil && repositoryMode != RepositoryModeSelected {
-		// An explicit non-selected mode owns the repository choice. Clear
-		// legacy IDs even when a partial API client omits repository_ids.
-		repositoryIDs = nil
-	}
-	executorProfileID := existing.ExecutorProfileID
-	if req.ExecutorProfileID != nil {
-		executorProfileID = *req.ExecutorProfileID
-	}
+	repositoryIDs := repositoryIDs(repositories)
 	if err := validateAutomationTarget(taskMode, repositoryMode, workflowID, repositoryIDs); err != nil {
-		return nil, err
-	}
-	for _, trigger := range existing.Triggers {
-		if err := validateTriggerRepositoryMode(repositoryMode, trigger.Type); err != nil {
-			return nil, err
-		}
-	}
-	if err := s.validateExecutorRepositoryCompatibility(ctx, repositoryMode, executorProfileID); err != nil {
 		return nil, err
 	}
 	policy := existing.ContinuationPolicy
@@ -686,6 +648,13 @@ func (s *Service) UpdateAutomation(ctx context.Context, id string, req *UpdateAu
 	if err := validateContinuationSettings(policy, maxRuns); err != nil {
 		return nil, err
 	}
+	if req.Repositories != nil || req.RepositoryIDs != nil || req.RepositoryMode != nil {
+		clone := *storeReq
+		clone.Repositories = repositories
+		clone.RepositoryIDs = nil
+		clone.RepositoryMode = &repositoryMode
+		storeReq = &clone
+	}
 	if err := s.store.UpdateAutomation(ctx, id, storeReq); err != nil {
 		return nil, err
 	}
@@ -697,7 +666,7 @@ func (s *Service) UpdateAutomation(ctx context.Context, id string, req *UpdateAu
 // step. All three need the stored automation to learn that workspace, so it is
 // loaded once here rather than by each check.
 func (s *Service) authorizeUpdatedReferences(ctx context.Context, id string, req *UpdateAutomationRequest) error {
-	if req.RepositoryIDs == nil && req.WorkflowID == nil && req.WorkflowStepID == nil {
+	if req.Repositories == nil && req.RepositoryIDs == nil && req.WorkflowID == nil && req.WorkflowStepID == nil {
 		return nil
 	}
 	existing, err := s.store.GetAutomation(ctx, id)
@@ -707,8 +676,10 @@ func (s *Service) authorizeUpdatedReferences(ctx context.Context, id string, req
 	if existing == nil {
 		return fmt.Errorf("automation not found: %s", id)
 	}
-	if req.RepositoryIDs != nil {
-		if err := s.validateRepositoryIDs(ctx, existing.WorkspaceID, req.RepositoryIDs); err != nil {
+	if req.Repositories != nil || req.RepositoryIDs != nil {
+		if _, err := s.resolveAutomationRepositories(
+			ctx, existing.WorkspaceID, req.Repositories, req.RepositoryIDs,
+		); err != nil {
 			return err
 		}
 	}
@@ -729,45 +700,41 @@ func (s *Service) authorizeUpdatedReferences(ctx context.Context, id string, req
 	return s.authorizeWorkflowStepOwnership(ctx, existing.WorkspaceID, workflowID, stepID)
 }
 
-// validateRepositoryIDs rejects a duplicate entry, or any ID that isn't a
-// repository belonging to workspaceID. An empty list always passes. A
-// non-empty list with no RepositoryLookup wired fails closed
-// (ErrRepositoryLookupUnavailable) rather than silently skipping the check —
-// this validates cross-workspace access, so "unconfigured" must not mean
-// "unchecked".
-func (s *Service) validateRepositoryIDs(ctx context.Context, workspaceID string, repositoryIDs []string) error {
-	if len(repositoryIDs) == 0 {
-		return nil
+func (s *Service) resolveAutomationRepositories(
+	ctx context.Context,
+	workspaceID string,
+	repositories []AutomationRepository,
+	legacyIDs []string,
+) ([]AutomationRepository, error) {
+	if repositories == nil {
+		repositories = repositoriesFromIDs(legacyIDs)
+	}
+	if len(repositories) == 0 {
+		return []AutomationRepository{}, nil
 	}
 	if s.repoLookup == nil {
-		return ErrRepositoryLookupUnavailable
+		return nil, ErrRepositoryLookupUnavailable
 	}
-	seen := make(map[string]bool, len(repositoryIDs))
-	for _, id := range repositoryIDs {
-		if seen[id] {
-			return fmt.Errorf("%w: %s", ErrDuplicateRepositoryID, id)
+	result := make([]AutomationRepository, 0, len(repositories))
+	seen := make(map[string]bool, len(repositories))
+	for _, repository := range repositories {
+		if seen[repository.RepositoryID] {
+			return nil, fmt.Errorf("%w: %s", ErrDuplicateRepositoryID, repository.RepositoryID)
 		}
-		seen[id] = true
-		repoWorkspaceID, _, ok := s.repoLookup.GetRepository(ctx, id)
+		seen[repository.RepositoryID] = true
+		repoWorkspaceID, defaultBranch, ok := s.repoLookup.GetRepository(ctx, repository.RepositoryID)
 		if !ok || repoWorkspaceID != workspaceID {
-			return fmt.Errorf("%w: %s", ErrRepositoryNotInWorkspace, id)
+			return nil, fmt.Errorf("%w: %s", ErrRepositoryNotInWorkspace, repository.RepositoryID)
 		}
+		if strings.TrimSpace(repository.BaseBranch) == "" {
+			repository.BaseBranch = defaultBranch
+		}
+		if strings.TrimSpace(repository.BaseBranch) == "" {
+			return nil, fmt.Errorf("%w: repository %s requires a base branch", ErrInvalidRepositoryMode, repository.RepositoryID)
+		}
+		result = append(result, repository)
 	}
-	return nil
-}
-
-func (s *Service) validateExecutorRepositoryCompatibility(ctx context.Context, repositoryMode RepositoryMode, executorProfileID string) error {
-	if repositoryMode != RepositoryModeNone || executorProfileID == "" || s.executorProfileLookup == nil {
-		return nil
-	}
-	executorType, err := s.executorProfileLookup.ExecutorType(ctx, executorProfileID)
-	if err != nil {
-		return fmt.Errorf("resolve executor profile %q: %w", executorProfileID, err)
-	}
-	if executorType == "worktree" {
-		return fmt.Errorf("%w: worktree", ErrRepositoryRequiredForExecutor)
-	}
-	return nil
+	return result, nil
 }
 
 // DeleteAutomation removes an automation.
@@ -1019,20 +986,6 @@ func (s *Service) AddTrigger(ctx context.Context, req *AddTriggerRequest) (*Auto
 	if err := s.authorizeAutomation(ctx, req.AutomationID); err != nil {
 		return nil, err
 	}
-	a, err := s.store.GetAutomation(ctx, req.AutomationID)
-	if err != nil {
-		return nil, err
-	}
-	if a == nil {
-		return nil, ErrAutomationNotFound
-	}
-	repositoryMode := a.RepositoryMode
-	if repositoryMode == "" {
-		repositoryMode = RepositoryModeWorkspaceDefault
-	}
-	if err := validateTriggerRepositoryMode(repositoryMode, req.Type); err != nil {
-		return nil, err
-	}
 	if err := validateScheduledConfig(req.Type, req.Config); err != nil {
 		return nil, err
 	}
@@ -1059,20 +1012,6 @@ func (s *Service) UpdateTrigger(ctx context.Context, id string, req *UpdateTrigg
 	}
 	if existing == nil {
 		return fmt.Errorf("trigger not found: %s", id)
-	}
-	a, err := s.store.GetAutomation(ctx, existing.AutomationID)
-	if err != nil {
-		return err
-	}
-	if a == nil {
-		return ErrAutomationNotFound
-	}
-	repositoryMode := a.RepositoryMode
-	if repositoryMode == "" {
-		repositoryMode = RepositoryModeWorkspaceDefault
-	}
-	if err := validateTriggerRepositoryMode(repositoryMode, existing.Type); err != nil {
-		return err
 	}
 	if req.Config != nil {
 		if err := validateScheduledConfig(existing.Type, *req.Config); err != nil {
@@ -1424,14 +1363,6 @@ func (s *Service) FireTrigger(ctx context.Context, automationID, triggerID strin
 	if !a.Enabled {
 		return FireResult{Skipped: true, Reason: "automation is disabled"}, nil
 	}
-	repositoryMode := a.RepositoryMode
-	if repositoryMode == "" {
-		repositoryMode = RepositoryModeWorkspaceDefault
-	}
-	if err := validateTriggerRepositoryMode(repositoryMode, triggerType); err != nil {
-		return FireResult{}, err
-	}
-
 	// Serialize deduplication, the concurrency admission check, and the run
 	// insert. Otherwise two scheduler/webhook callers can both observe a free
 	// slot and publish two fires, or DeleteAllRuns can remove a row after its

@@ -7,10 +7,9 @@ import (
 )
 
 var (
-	ErrInvalidTaskMode              = errors.New("automation: invalid task mode")
-	ErrInvalidRepositoryMode        = errors.New("automation: invalid repository mode")
-	ErrWorkflowRequired             = errors.New("automation: normal task mode requires a workflow")
-	ErrRepositoryRequiredForTrigger = errors.New("automation: trigger requires a repository")
+	ErrInvalidTaskMode       = errors.New("automation: invalid task mode")
+	ErrInvalidRepositoryMode = errors.New("automation: invalid repository mode")
+	ErrWorkflowRequired      = errors.New("automation: normal task mode requires a workflow")
 )
 
 // validateAutomationTarget enforces the persisted target contract shared by
@@ -32,13 +31,9 @@ func validateAutomationTarget(taskMode TaskMode, repositoryMode RepositoryMode, 
 	}
 
 	if repositoryMode == "" {
-		repositoryMode = RepositoryModeWorkspaceDefault
+		repositoryMode = RepositoryModeNone
 	}
 	switch repositoryMode {
-	case RepositoryModeWorkspaceDefault:
-		if len(repositoryIDs) > 0 {
-			return fmt.Errorf("%w: workspace_default cannot include repository_ids", ErrInvalidRepositoryMode)
-		}
 	case RepositoryModeSelected:
 		if len(repositoryIDs) == 0 {
 			return fmt.Errorf("%w: selected requires repository_ids", ErrInvalidRepositoryMode)
@@ -51,21 +46,5 @@ func validateAutomationTarget(taskMode TaskMode, repositoryMode RepositoryMode, 
 		return fmt.Errorf("%w: %q", ErrInvalidRepositoryMode, repositoryMode)
 	}
 
-	return nil
-}
-
-func triggerRequiresRepository(triggerType TriggerType) bool {
-	switch triggerType {
-	case TriggerTypeGitHubPR, TriggerTypeGitHubPRMerged, TriggerTypeGitHubPush, TriggerTypeGitHubCI:
-		return true
-	default:
-		return false
-	}
-}
-
-func validateTriggerRepositoryMode(repositoryMode RepositoryMode, triggerType TriggerType) error {
-	if repositoryMode == RepositoryModeNone && triggerRequiresRepository(triggerType) {
-		return fmt.Errorf("%w: %s", ErrRepositoryRequiredForTrigger, triggerType)
-	}
 	return nil
 }

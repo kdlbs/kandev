@@ -356,13 +356,14 @@ func handleE2ECreateHiddenWorkflow(taskSvc *taskservice.Service, log *logger.Log
 }
 
 type e2eCreateAutomationRequest struct {
-	WorkspaceID    string                    `json:"workspace_id"`
-	Name           string                    `json:"name"`
-	WorkflowID     string                    `json:"workflow_id"`
-	WorkflowStepID string                    `json:"workflow_step_id"`
-	TaskMode       automation.TaskMode       `json:"task_mode"`
-	RepositoryMode automation.RepositoryMode `json:"repository_mode"`
-	RepositoryIDs  []string                  `json:"repository_ids"`
+	WorkspaceID    string                            `json:"workspace_id"`
+	Name           string                            `json:"name"`
+	WorkflowID     string                            `json:"workflow_id"`
+	WorkflowStepID string                            `json:"workflow_step_id"`
+	TaskMode       automation.TaskMode               `json:"task_mode"`
+	RepositoryMode automation.RepositoryMode         `json:"repository_mode"`
+	RepositoryIDs  []string                          `json:"repository_ids"`
+	Repositories   []automation.AutomationRepository `json:"repositories"`
 	// Prompt is the automation's standing instruction. Optional, but the run
 	// view only renders the instruction card when there is one, so a spec
 	// asserting on where that card lives has to seed it.
@@ -408,6 +409,7 @@ func handleE2ECreateAutomation(
 			TaskMode:          body.TaskMode,
 			RepositoryMode:    body.RepositoryMode,
 			RepositoryIDs:     body.RepositoryIDs,
+			Repositories:      body.Repositories,
 			Prompt:            body.Prompt,
 			AgentProfileID:    body.AgentProfileID,
 			ExecutorProfileID: body.ExecutorProfileID,

@@ -21,6 +21,11 @@ export type ContinuationPolicy = "new_task" | "reuse_thread";
 export type TaskMode = "automation_run" | "normal_task";
 export type RepositoryMode = "workspace_default" | "selected" | "none";
 
+export type AutomationRepository = {
+  repository_id: string;
+  base_branch: string;
+};
+
 export type Automation = {
   id: string;
   workspace_id: string;
@@ -33,6 +38,7 @@ export type Automation = {
   task_mode?: TaskMode;
   repository_mode?: RepositoryMode;
   repository_ids: string[];
+  repositories?: AutomationRepository[];
   prompt: string;
   task_title_template: string;
   enabled: boolean;
@@ -183,6 +189,7 @@ export type CreateAutomationRequest = {
   agent_profile_id: string;
   executor_profile_id: string;
   repository_ids?: string[];
+  repositories?: AutomationRepository[];
   prompt?: string;
   task_title_template?: string;
   max_concurrent_runs?: number;
@@ -204,6 +211,7 @@ export type UpdateAutomationRequest = {
   agent_profile_id?: string;
   executor_profile_id?: string;
   repository_ids?: string[];
+  repositories?: AutomationRepository[];
   prompt?: string;
   task_title_template?: string;
   enabled?: boolean;

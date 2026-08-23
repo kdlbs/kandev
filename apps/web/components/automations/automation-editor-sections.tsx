@@ -1,5 +1,4 @@
 import { IconTrash } from "@tabler/icons-react";
-import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
@@ -7,17 +6,8 @@ import { Label } from "@kandev/ui/label";
 import { Separator } from "@kandev/ui/separator";
 import { Switch } from "@kandev/ui/switch";
 import { RadioGroup, RadioGroupItem } from "@kandev/ui/radio-group";
-import type {
-  AutomationTrigger,
-  PlaceholderInfo,
-  TriggerType,
-  TriggerTypeInfo,
-} from "@/lib/types/automation";
-import {
-  triggerRequiresRepository,
-  type CreatedWebhookDetails,
-  type FormState,
-} from "./automation-payload";
+import type { AutomationTrigger, PlaceholderInfo, TriggerTypeInfo } from "@/lib/types/automation";
+import { type CreatedWebhookDetails, type FormState } from "./automation-payload";
 import { useAutomationTriggerDrafts } from "./automation-trigger-drafts";
 import { ConfigSection } from "./config-section";
 import { PromptSection } from "./prompt-section";
@@ -30,20 +20,6 @@ type UpdateField = <K extends keyof FormState>(key: K, value: FormState[K]) => v
 
 const SELECTED_CARD_CLASS_NAME = "border-primary bg-primary/5";
 const UNSELECTED_CARD_CLASS_NAME = "border-border hover:bg-muted/30";
-
-function useEnsureRepositoryForTrigger(
-  conditionType: TriggerType | null,
-  repositoryMode: FormState["repositoryMode"],
-  updateField: UpdateField,
-) {
-  const repositoryRequired = triggerRequiresRepository(conditionType);
-  useEffect(() => {
-    if (repositoryRequired && repositoryMode === "none") {
-      updateField("repositoryMode", "workspace_default");
-      updateField("repositorySelections", []);
-    }
-  }, [repositoryMode, repositoryRequired, updateField]);
-}
 
 export function NameField({
   value,
@@ -151,7 +127,6 @@ export function ThenSection({
   workspaceId,
   placeholders,
   defaultTaskTitle,
-  conditionType,
   savedForm,
   updateField,
 }: {
@@ -159,20 +134,16 @@ export function ThenSection({
   workspaceId: string;
   placeholders: PlaceholderInfo[];
   defaultTaskTitle: string;
-  conditionType: TriggerType | null;
   savedForm: FormState;
   updateField: UpdateField;
 }) {
   const { t } = useTranslation();
   const { inputRef, clampChange } = useTaskTitleSelectionRestore(form.taskTitleTemplate);
-  useEnsureRepositoryForTrigger(conditionType, form.repositoryMode, updateField);
   const dirtyFields: Array<keyof FormState> = [
     "taskTitleTemplate",
     "prompt",
     "workflowId",
-    "workflowStepId",
     "taskMode",
-    "repositoryMode",
     "agentProfileId",
     "executorProfileId",
     "repositorySelections",
@@ -212,16 +183,12 @@ export function ThenSection({
         <ConfigSection
           workspaceId={workspaceId}
           workflowId={form.workflowId}
-          workflowStepId={form.workflowStepId}
           agentProfileId={form.agentProfileId}
           executorProfileId={form.executorProfileId}
           taskMode={form.taskMode}
-          repositoryMode={form.repositoryMode}
           repositorySelections={form.repositorySelections}
-          conditionType={conditionType}
           dirtyFields={{
             workflowId: isAutomationFieldDirty(form, savedForm, "workflowId"),
-            workflowStepId: isAutomationFieldDirty(form, savedForm, "workflowStepId"),
             agentProfileId: isAutomationFieldDirty(form, savedForm, "agentProfileId"),
             executorProfileId: isAutomationFieldDirty(form, savedForm, "executorProfileId"),
             repositorySelections: isAutomationFieldDirty(form, savedForm, "repositorySelections"),
@@ -230,16 +197,11 @@ export function ThenSection({
             updateField("workflowId", value);
             updateField("workflowStepId", "");
           }}
-          onStepChange={(value) => updateField("workflowStepId", value)}
           onAgentProfileChange={(value) => updateField("agentProfileId", value)}
           onExecutorProfileChange={(value) => updateField("executorProfileId", value)}
-          onRepositoryModeChange={(value) => {
-            updateField("repositoryMode", value);
-            if (value !== "selected") updateField("repositorySelections", []);
-          }}
           onRepositoriesChange={(value) => {
             updateField("repositorySelections", value);
-            if (value.length > 0) updateField("repositoryMode", "selected");
+            updateField("repositoryMode", value.length > 0 ? "selected" : "none");
           }}
         />
       </div>

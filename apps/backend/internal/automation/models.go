@@ -97,6 +97,14 @@ const (
 	RepositoryModeNone             RepositoryMode = "none"
 )
 
+// AutomationRepository is one exact repository environment selected for an
+// automation. BaseBranch is persisted with the repository so dispatch never
+// depends on workspace repository ordering or a later default-branch change.
+type AutomationRepository struct {
+	RepositoryID string `json:"repository_id" db:"repository_id"`
+	BaseBranch   string `json:"base_branch" db:"base_branch"`
+}
+
 // ThreadAction describes how a dispatched run reached its task/session.
 type ThreadAction string
 
@@ -151,12 +159,11 @@ type Automation struct {
 
 	// Hydrated separately, not stored as columns on this table.
 	Triggers []AutomationTrigger `json:"triggers" db:"-"`
-	// RepositoryIDs is the ordered list of repositories to use when
-	// RepositoryMode is selected, backed by the automation_repositories join
-	// table. WorkspaceDefault preserves the legacy first-repository fallback
-	// (or the PR's repository for github_pr triggers, which always override
-	// this field); None intentionally keeps the list empty.
-	RepositoryIDs []string `json:"repository_ids" db:"-"`
+	// Repositories is the canonical ordered repository/base-branch selection.
+	// An empty list means task-owned scratch execution. RepositoryIDs remains a
+	// response compatibility projection for older clients.
+	Repositories  []AutomationRepository `json:"repositories" db:"-"`
+	RepositoryIDs []string               `json:"repository_ids" db:"-"`
 }
 
 // AutomationTrigger is a single trigger attached to an automation.
@@ -288,21 +295,22 @@ type TaskOriginLookup interface {
 
 // CreateAutomationRequest is the payload for creating an automation.
 type CreateAutomationRequest struct {
-	WorkspaceID        string              `json:"workspace_id"`
-	Name               string              `json:"name"`
-	Description        string              `json:"description"`
-	WorkflowID         string              `json:"workflow_id"`
-	WorkflowStepID     string              `json:"workflow_step_id"`
-	AgentProfileID     string              `json:"agent_profile_id"`
-	ExecutorProfileID  string              `json:"executor_profile_id"`
-	RepositoryIDs      []string            `json:"repository_ids"`
-	Prompt             string              `json:"prompt"`
-	TaskTitleTemplate  string              `json:"task_title_template"`
-	MaxConcurrentRuns  int                 `json:"max_concurrent_runs"`
-	ContinuationPolicy ContinuationPolicy  `json:"continuation_policy,omitempty"`
-	TaskMode           TaskMode            `json:"task_mode,omitempty"`
-	RepositoryMode     RepositoryMode      `json:"repository_mode,omitempty"`
-	Triggers           []CreateTriggerSpec `json:"triggers"`
+	WorkspaceID        string                 `json:"workspace_id"`
+	Name               string                 `json:"name"`
+	Description        string                 `json:"description"`
+	WorkflowID         string                 `json:"workflow_id"`
+	WorkflowStepID     string                 `json:"workflow_step_id"`
+	AgentProfileID     string                 `json:"agent_profile_id"`
+	ExecutorProfileID  string                 `json:"executor_profile_id"`
+	Repositories       []AutomationRepository `json:"repositories,omitempty"`
+	RepositoryIDs      []string               `json:"repository_ids"`
+	Prompt             string                 `json:"prompt"`
+	TaskTitleTemplate  string                 `json:"task_title_template"`
+	MaxConcurrentRuns  int                    `json:"max_concurrent_runs"`
+	ContinuationPolicy ContinuationPolicy     `json:"continuation_policy,omitempty"`
+	TaskMode           TaskMode               `json:"task_mode,omitempty"`
+	RepositoryMode     RepositoryMode         `json:"repository_mode,omitempty"`
+	Triggers           []CreateTriggerSpec    `json:"triggers"`
 }
 
 // CreateTriggerSpec defines a trigger to add during automation creation.
@@ -320,6 +328,8 @@ type UpdateAutomationRequest struct {
 	WorkflowStepID    *string `json:"workflow_step_id,omitempty"`
 	AgentProfileID    *string `json:"agent_profile_id,omitempty"`
 	ExecutorProfileID *string `json:"executor_profile_id,omitempty"`
+	// Repositories replaces the exact repository/base-branch list when non-nil.
+	Repositories []AutomationRepository `json:"repositories,omitempty"`
 	// RepositoryIDs replaces the automation's repository list when non-nil.
 	// nil means "leave unchanged"; an explicit empty slice clears it.
 	RepositoryIDs      []string            `json:"repository_ids,omitempty"`

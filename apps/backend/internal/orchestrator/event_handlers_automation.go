@@ -346,7 +346,11 @@ func (s *Service) prepareAutomationTask(
 	}
 	repositoryMode := a.RepositoryMode
 	if repositoryMode == "" {
-		repositoryMode = automation.RepositoryModeWorkspaceDefault
+		if len(a.Repositories) > 0 || len(a.RepositoryIDs) > 0 {
+			repositoryMode = automation.RepositoryModeSelected
+		} else {
+			repositoryMode = automation.RepositoryModeNone
+		}
 	}
 	metadata[models.MetaKeyAutomationTaskMode] = string(taskMode)
 	metadata[models.MetaKeyAutomationRepositoryMode] = string(repositoryMode)
@@ -369,9 +373,6 @@ func (s *Service) prepareAutomationTask(
 	}
 
 	repositories := s.resolveAutomationRepository(ctx, a, evt)
-	if len(repositories) == 0 && a.RepositoryMode != automation.RepositoryModeNone {
-		return nil, nil, action, reason, fmt.Errorf("no repository available; add a repository to the workspace")
-	}
 	task, err := s.reviewTaskCreator.CreateReviewTask(ctx, &ReviewTaskRequest{
 		WorkspaceID:    a.WorkspaceID,
 		WorkflowID:     a.WorkflowID,
@@ -466,7 +467,11 @@ func continuationTaskModeMatches(a *automation.Automation, task *models.Task) bo
 func continuationRepositoryModeMatches(a *automation.Automation, task *models.Task) bool {
 	repositoryMode := a.RepositoryMode
 	if repositoryMode == "" {
-		repositoryMode = automation.RepositoryModeWorkspaceDefault
+		if len(a.Repositories) > 0 || len(a.RepositoryIDs) > 0 {
+			repositoryMode = automation.RepositoryModeSelected
+		} else {
+			repositoryMode = automation.RepositoryModeNone
+		}
 	}
 	previous := metadataString(task.Metadata, models.MetaKeyAutomationRepositoryMode)
 	return previous == "" || previous == string(repositoryMode)
@@ -519,7 +524,8 @@ func sameAutomationRepositoryIDs(taskRepos []*models.TaskRepository, expected []
 		return false
 	}
 	for i, expectedRepo := range expected {
-		if taskRepos[i] == nil || taskRepos[i].RepositoryID != expectedRepo.RepositoryID {
+		if taskRepos[i] == nil || taskRepos[i].RepositoryID != expectedRepo.RepositoryID ||
+			taskRepos[i].BaseBranch != expectedRepo.BaseBranch {
 			return false
 		}
 	}
@@ -725,45 +731,44 @@ func (s *Service) startAutomationTask(
 // repo info from the trigger data — the PR's own repo is the only sensible
 // choice when responding to a PR event, so the automation's RepositoryIDs
 // are ignored. For other triggers (scheduled, webhook), it prefers the
-// automation's explicit RepositoryIDs; falls back to the workspace's first
-// repository if unset.
+// automation's explicit repository/base-branch pairs. An empty selection is
+// repository-free and never falls back to workspace ordering.
 func (s *Service) resolveAutomationRepository(
 	ctx context.Context, a *automation.Automation, evt *automation.AutomationTriggeredEvent,
 ) []ReviewTaskRepository {
-	if a.RepositoryMode == automation.RepositoryModeNone {
-		return nil
-	}
 	if evt.TriggerType == automation.TriggerTypeGitHubPR {
 		return s.resolveGitHubPRTriggerRepository(ctx, a.WorkspaceID, evt.TriggerData)
 	}
-	if len(a.RepositoryIDs) > 0 {
-		return s.resolveExplicitRepositories(ctx, a.RepositoryIDs)
+	if len(a.Repositories) == 0 && len(a.RepositoryIDs) == 0 {
+		return nil
 	}
-	return s.resolveWorkspaceRepository(ctx, a.WorkspaceID)
+	return s.resolveExplicitRepositories(ctx, configuredAutomationRepositories(a))
 }
 
-// resolveExplicitRepositories loads each repository named by the
-// automation's RepositoryIDs and produces one ReviewTaskRepository entry
-// per resolvable ID, in order. Each task repository gets pinned to its own
-// default branch — automations have no way to specify a checkout branch
-// yet. An ID that fails to load is skipped (with a warning) rather than
-// aborting the whole firing, so one bad repository doesn't sink the others.
+// resolveExplicitRepositories loads each configured repository and produces one
+// ReviewTaskRepository entry per resolvable pair, in order. Canonical bindings
+// use their saved base branch; legacy repository-ID-only rows use the repository
+// default. A repository that fails to load is skipped (with a warning) rather
+// than aborting the whole firing, so one bad repository does not sink the others.
 func (s *Service) resolveExplicitRepositories(
-	ctx context.Context, repositoryIDs []string,
+	ctx context.Context, repositories []automation.AutomationRepository,
 ) []ReviewTaskRepository {
 	store, ok := s.repo.(repoStore)
 	if !ok {
 		return nil
 	}
-	resolved := make([]ReviewTaskRepository, 0, len(repositoryIDs))
-	for _, repositoryID := range repositoryIDs {
-		repo, err := store.GetRepository(ctx, repositoryID)
+	resolved := make([]ReviewTaskRepository, 0, len(repositories))
+	for _, configured := range repositories {
+		repo, err := store.GetRepository(ctx, configured.RepositoryID)
 		if err != nil || repo == nil {
 			s.logger.Warn("failed to load explicit automation repository",
-				zap.String("repository_id", repositoryID), zap.Error(err))
+				zap.String("repository_id", configured.RepositoryID), zap.Error(err))
 			continue
 		}
-		baseBranch := repo.DefaultBranch
+		baseBranch := configured.BaseBranch
+		if baseBranch == "" {
+			baseBranch = repo.DefaultBranch
+		}
 		if baseBranch == "" {
 			baseBranch = automationDefaultBaseBranch
 		}
@@ -774,6 +779,17 @@ func (s *Service) resolveExplicitRepositories(
 		})
 	}
 	return resolved
+}
+
+func configuredAutomationRepositories(a *automation.Automation) []automation.AutomationRepository {
+	if len(a.Repositories) > 0 {
+		return a.Repositories
+	}
+	result := make([]automation.AutomationRepository, 0, len(a.RepositoryIDs))
+	for _, repositoryID := range a.RepositoryIDs {
+		result = append(result, automation.AutomationRepository{RepositoryID: repositoryID})
+	}
+	return result
 }
 
 // resolveGitHubPRTriggerRepository extracts repo owner/name from PR trigger data
@@ -809,37 +825,6 @@ func (s *Service) resolveGitHubPRTriggerRepository(
 		RepositoryID:   repoID,
 		BaseBranch:     baseBranch,
 		CheckoutBranch: data.HeadBranch,
-	}}
-}
-
-// resolveWorkspaceRepository looks up the workspace's first repository
-// and returns it for task creation. This mirrors how the review watch
-// auto-resolves repos — no manual selector needed.
-func (s *Service) resolveWorkspaceRepository(
-	ctx context.Context, workspaceID string,
-) []ReviewTaskRepository {
-	store, ok := s.repo.(repoStore)
-	if !ok {
-		return nil
-	}
-	repos, err := store.ListRepositories(ctx, workspaceID)
-	if err != nil {
-		s.logger.Warn("failed to list workspace repositories", zap.Error(err))
-		return nil
-	}
-	if len(repos) == 0 {
-		s.logger.Warn("workspace has no repositories",
-			zap.String("workspace_id", workspaceID))
-		return nil
-	}
-	repo := repos[0]
-	baseBranch := repo.DefaultBranch
-	if baseBranch == "" {
-		baseBranch = automationDefaultBaseBranch
-	}
-	return []ReviewTaskRepository{{
-		RepositoryID: repo.ID,
-		BaseBranch:   baseBranch,
 	}}
 }
 

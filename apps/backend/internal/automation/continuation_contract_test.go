@@ -138,40 +138,20 @@ func TestAutomationTargetModesPersistAndValidate(t *testing.T) {
 	require.Empty(t, updated.RepositoryIDs)
 }
 
-type fakeExecutorProfileLookup struct {
-	types map[string]string
-}
-
-func (f *fakeExecutorProfileLookup) ExecutorType(_ context.Context, profileID string) (string, error) {
-	return f.types[profileID], nil
-}
-
-func TestRepositoryFreeTargetRejectsWorktreeExecutor(t *testing.T) {
+func TestRepositoryFreeTargetAcceptsWorktreeExecutor(t *testing.T) {
 	svc := newTestService(t)
-	svc.SetExecutorProfileLookup(&fakeExecutorProfileLookup{types: map[string]string{
-		"worktree-profile": "worktree",
-		"local-profile":    "local",
-	}})
 
-	_, err := svc.CreateAutomation(context.Background(), &CreateAutomationRequest{
+	created, err := svc.CreateAutomation(context.Background(), &CreateAutomationRequest{
 		WorkspaceID:       "ws-1",
 		Name:              "worktree scratch",
 		ExecutorProfileID: "worktree-profile",
 		RepositoryMode:    RepositoryModeNone,
 	})
-	require.ErrorIs(t, err, ErrRepositoryRequiredForExecutor)
-
-	local, err := svc.CreateAutomation(context.Background(), &CreateAutomationRequest{
-		WorkspaceID:       "ws-1",
-		Name:              "local scratch",
-		ExecutorProfileID: "local-profile",
-		RepositoryMode:    RepositoryModeNone,
-	})
 	require.NoError(t, err)
-	require.Equal(t, RepositoryModeNone, local.RepositoryMode)
+	require.Equal(t, RepositoryModeNone, created.RepositoryMode)
 }
 
-func TestRepositoryFreeTargetRejectsRepositoryBackedTrigger(t *testing.T) {
+func TestRepositoryFreeTargetDoesNotSelectWorkspaceRepositoryForTrigger(t *testing.T) {
 	svc := newTestService(t)
 	_, err := svc.CreateAutomation(context.Background(), &CreateAutomationRequest{
 		WorkspaceID:    "ws-1",
@@ -179,7 +159,7 @@ func TestRepositoryFreeTargetRejectsRepositoryBackedTrigger(t *testing.T) {
 		RepositoryMode: RepositoryModeNone,
 		Triggers:       []CreateTriggerSpec{{Type: TriggerTypeGitHubPR, Config: json.RawMessage(`{}`)}},
 	})
-	require.ErrorIs(t, err, ErrRepositoryRequiredForTrigger)
+	require.NoError(t, err)
 
 	_, err = svc.CreateAutomation(context.Background(), &CreateAutomationRequest{
 		WorkspaceID:    "ws-1",

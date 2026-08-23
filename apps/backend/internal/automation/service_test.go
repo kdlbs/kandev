@@ -124,6 +124,25 @@ func TestCreateAutomation_AcceptsValidRepositoryIDs(t *testing.T) {
 	if len(a.RepositoryIDs) != 2 || a.RepositoryIDs[0] != "repo-a" || a.RepositoryIDs[1] != "repo-b" {
 		t.Fatalf("expected repository_ids [repo-a repo-b], got %v", a.RepositoryIDs)
 	}
+	if len(a.Repositories) != 2 || a.Repositories[0].BaseBranch != "main" || a.Repositories[1].BaseBranch != "main" {
+		t.Fatalf("expected legacy IDs to resolve repository default branches, got %#v", a.Repositories)
+	}
+}
+
+func TestCreateAutomation_PreservesExplicitRepositoryBaseBranch(t *testing.T) {
+	svc := newTestService(t)
+	svc.SetRepositoryLookup(&fakeRepositoryLookup{repos: map[string]string{"repo-a": "ws-a"}})
+
+	a, err := svc.CreateAutomation(context.Background(), &CreateAutomationRequest{
+		Name: "x", WorkspaceID: "ws-a",
+		Repositories: []AutomationRepository{{RepositoryID: "repo-a", BaseBranch: "release/2"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := a.Repositories[0].BaseBranch; got != "release/2" {
+		t.Fatalf("base branch = %q, want release/2", got)
+	}
 }
 
 func TestUpdateAutomation_RejectsForeignRepositoryID(t *testing.T) {
