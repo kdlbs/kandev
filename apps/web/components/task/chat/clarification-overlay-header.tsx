@@ -82,7 +82,7 @@ export function ClarificationHeaderActions({
               disabled={!allAnswered || isSubmitting}
               data-testid="clarification-submit"
               className={cn(
-                "inline-flex items-center gap-1 text-xs px-3 py-1 rounded font-medium transition-colors",
+                "inline-flex items-center gap-1 text-xs px-3 py-1 rounded font-medium transition-colors [@media(pointer:coarse)]:min-h-11",
                 allAnswered && !isSubmitting
                   ? "bg-blue-500 text-white hover:bg-blue-500/90 cursor-pointer"
                   : "bg-muted text-muted-foreground cursor-not-allowed",

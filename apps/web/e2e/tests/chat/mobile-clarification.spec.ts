@@ -204,12 +204,20 @@ test.describe("Mobile clarification multiline answer", () => {
 
     const submit = session.clarificationSubmit();
     await expect(submit).toBeEnabled();
+    const idleSubmitBox = await submit.boundingBox();
+    if (!idleSubmitBox) {
+      throw new Error("expected enabled mobile clarification Submit button to have a bounding box");
+    }
     await submit.tap();
     await expect(submit).toContainText("Submitting");
     await expect(submit).toBeDisabled();
     await expect(submit.locator('[role="status"]')).toBeVisible();
     await expect(submit.locator('[role="status"]')).toHaveAttribute("aria-hidden", "true");
     await expect(submit.locator("svg.tabler-icon-check")).toHaveCount(0);
+    const pendingSubmitBox = await submit.boundingBox();
+    if (!pendingSubmitBox) {
+      throw new Error("expected pending mobile clarification Submit button to have a bounding box");
+    }
     await expect(
       testPage.evaluate(
         () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
@@ -218,5 +226,7 @@ test.describe("Mobile clarification multiline answer", () => {
 
     releaseResponse();
     await expect(session.clarificationOverlay()).not.toBeVisible({ timeout: 30_000 });
+    expect(pendingSubmitBox.height).toBeGreaterThanOrEqual(44);
+    expect(Math.abs(pendingSubmitBox.height - idleSubmitBox.height)).toBeLessThanOrEqual(1);
   });
 });

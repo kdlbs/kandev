@@ -1,5 +1,5 @@
 ---
-status: implemented
+status: shipped
 created: 2026-08-20
 owner: kandev
 ---
@@ -12,6 +12,10 @@ When a multi-question clarification is submitted, the chat button changes to
 `Submitting...` and becomes disabled, but its completion check icon remains.
 The button needs a clear in-flight signal while the response is pending.
 
+On a touch viewport, that pending-state control is only about 24px tall beside
+the 44px clarification controls. The loading label and spinner therefore look
+cramped and the Submit action falls below the standard touch-target height.
+
 ## What
 
 - The shared clarification overlay keeps the translated `Submitting...` label
@@ -22,6 +26,10 @@ The button needs a clear in-flight signal while the response is pending.
   translated Submit label and completion check icon.
 - The same behavior applies to task chat and Quick Chat on desktop and mobile,
   because they share the clarification overlay header.
+- On coarse-pointer viewports, the multi-question Submit button remains at
+  least 44px tall in both its idle and submitting states, with its label and
+  status icon centered inside the control.
+- Fine-pointer desktop viewports keep the existing compact button dimensions.
 - If submission fails and the clarification remains visible, the spinner stops,
   the button returns to its existing retryable Submit state, and no new error
   behavior is introduced.
@@ -41,8 +49,12 @@ The button needs a clear in-flight signal while the response is pending.
   the existing Submit action is available for retry.
 - **GIVEN** the same multi-question clarification is rendered in a phone
   viewport, **WHEN** its answer request is pending, **THEN** the loading status
-  remains visible inside the reachable Submit button without changing the
-  mobile layout or introducing horizontal overflow.
+  remains visible inside a Submit button that is at least 44px tall, retains
+  its idle-state height, stays centered in the existing header, and introduces
+  no horizontal overflow.
+- **GIVEN** the clarification is rendered on a fine-pointer desktop viewport,
+  **WHEN** the Submit button changes between idle and pending states, **THEN**
+  its existing compact dimensions and behavior remain unchanged.
 
 ## Out of scope
 

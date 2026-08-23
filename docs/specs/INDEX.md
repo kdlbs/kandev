@@ -160,6 +160,7 @@ Subscription quota tracking, per-agent cheap-model profile routing, and the prod
 | [transcript-auto-scroll](ui/transcript-auto-scroll.md) | building |
 | [task-transcript-history-visibility](ui/task-prompt-transcript-visibility.md) | implemented |
 | [clarification-context](ui/clarification-context.md) | shipped |
+| [clarification-submit-feedback](ui/clarification-submit-feedback.md) | shipped |
 | [empty-turn-notice](ui/empty-turn-notice.md) | shipped |
 | [acp-shell-command-output](ui/acp-shell-command-output.md) | shipped |
 | [acp-model-configuration-summary](ui/acp-model-configuration-summary.md) | shipped |
