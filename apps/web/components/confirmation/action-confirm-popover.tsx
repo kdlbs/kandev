@@ -58,10 +58,9 @@ export function ActionConfirmPopover({
   // data without changing the confirmation's open state, so each render must
   // re-check the guard before the shell can invoke a stale action.
   useLayoutEffect(() => {
-    if (!open) {
-      confirmedRef.current = false;
-      return;
-    }
+    // Keep a confirmed close marked until Radix finishes close-autofocus. An
+    // early reset can refocus this anchor while a following popover is opening.
+    if (!open) return;
     if (isConnected(anchorRef.current)) return;
     onCancel?.();
     onOpenChange(false);
