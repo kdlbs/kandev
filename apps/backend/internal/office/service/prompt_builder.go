@@ -223,7 +223,7 @@ func appendRuntimeContext(prompt string, pc *PromptContext) string {
 
 func buildTaskAssignedPrompt(pc *PromptContext) string {
 	switch pc.StageType {
-	case "review":
+	case "review", "approval":
 		return buildReviewStagePrompt(pc)
 	case stageTypeShip:
 		return buildShipStagePrompt(pc)

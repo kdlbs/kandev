@@ -77,8 +77,8 @@ func TestOfficeDefaultWorkflow_FullCycleSmoke(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Review.on_enter: %v", err)
 	}
-	if got := countCallsByReason(queue, "review_started"); got != 2 {
-		t.Errorf("review_started fan-out calls = %d, want 2", got)
+	if got := countCallsByReasonAndStep(queue, "task_assigned", steps["review"].ID); got != 2 {
+		t.Errorf("task_assigned fan-out calls for review step = %d, want 2", got)
 	}
 
 	// Reviewers approve.
@@ -113,8 +113,8 @@ func TestOfficeDefaultWorkflow_FullCycleSmoke(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Approval.on_enter: %v", err)
 	}
-	if got := countCallsByReason(queue, "approval_started"); got != 1 {
-		t.Errorf("approval_started fan-out calls = %d, want 1", got)
+	if got := countCallsByReasonAndStep(queue, "task_assigned", steps["approval"].ID); got != 1 {
+		t.Errorf("task_assigned fan-out calls for approval step = %d, want 1", got)
 	}
 
 	// Approver approves.
@@ -363,6 +363,20 @@ func countCallsByReason(q *fakeRunQueue, reason string) int {
 	count := 0
 	for _, c := range q.calls {
 		if c.Reason == reason {
+			count++
+		}
+	}
+	return count
+}
+
+// countCallsByReasonAndStep counts queued runs matching both reason and
+// WorkflowStepID. Needed once review and approval fan-out share the reason
+// "task_assigned" (distinguished only by payload stage_type) — a bare
+// reason count can no longer tell the two fan-outs apart.
+func countCallsByReasonAndStep(q *fakeRunQueue, reason, stepID string) int {
+	count := 0
+	for _, c := range q.calls {
+		if c.Reason == reason && c.WorkflowStepID == stepID {
 			count++
 		}
 	}
