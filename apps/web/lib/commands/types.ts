@@ -23,6 +23,10 @@ export type CommandItem = {
   enterMode?: CommandPanelMode;
   /** Standard action — close panel and execute */
   action?: () => void;
+  /** Keep the palette mounted while an action-owned confirmation is shown. */
+  keepOpen?: boolean;
+  /** Confirmation content rendered inside the open palette. */
+  confirmation?: ReactNode;
   /** For 'input' mode: placeholder text for the input field */
   inputPlaceholder?: string;
   /** For 'input' mode: called with the input value when Enter is pressed */

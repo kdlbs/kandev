@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { IconArchive, IconDots, IconTrash } from "@tabler/icons-react";
 import {
   DropdownMenu,
@@ -11,7 +11,7 @@ import {
 import { Checkbox } from "@kandev/ui/checkbox";
 import { cn } from "@kandev/ui/lib/utils";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
-import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
+import { TaskArchiveConfirmation } from "@/components/task/task-archive-confirmation";
 import { formatRelativeTime } from "@/lib/utils";
 import { needsAction } from "@/lib/utils/needs-action";
 import { useAppStore } from "@/components/state-provider";
@@ -183,12 +183,14 @@ function TaskActions({
   const { t } = useTranslation();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
+  const archiveAnchorRef = useRef<HTMLButtonElement>(null);
 
   return (
-    <>
+    <div className="flex min-w-0 flex-wrap items-center justify-end gap-1">
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button
+            ref={archiveAnchorRef}
             type="button"
             className="shrink-0 h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground/40 hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer"
           >
@@ -198,7 +200,7 @@ function TaskActions({
         <DropdownMenuContent align="end" className="w-[160px]">
           {onArchiveTask && (
             <DropdownMenuItem
-              onClick={() => setShowArchiveConfirm(true)}
+              onClick={() => window.setTimeout(() => setShowArchiveConfirm(true), 300)}
               disabled={isArchiving}
               className="cursor-pointer"
             >
@@ -225,8 +227,9 @@ function TaskActions({
         isDeleting={isDeleting}
         onConfirm={({ cascade }) => onDeleteTask(task, { cascade })}
       />
-      <TaskArchiveConfirmDialog
+      <TaskArchiveConfirmation
         open={showArchiveConfirm}
+        anchorRef={archiveAnchorRef}
         onOpenChange={setShowArchiveConfirm}
         taskTitle={task.title}
         taskId={task.id}
@@ -234,7 +237,7 @@ function TaskActions({
         isArchiving={isArchiving}
         onConfirm={({ cascade }) => onArchiveTask?.(task, { cascade })}
       />
-    </>
+    </div>
   );
 }
 

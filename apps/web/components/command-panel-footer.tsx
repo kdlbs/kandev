@@ -527,11 +527,25 @@ function CommandPanelResultList(props: CommandPanelViewProps) {
     repoMap,
     handleTaskSelect,
   } = props;
+  const confirmation = commands.find((command) => command.confirmation)?.confirmation;
+  const visibleCommands = confirmation
+    ? commands.filter((command) => !command.confirmation)
+    : commands;
   return (
     <CommandList>
+      {confirmation && (
+        <div
+          role="alertdialog"
+          aria-label={t("task:archiveTaskTitle")}
+          data-testid="command-panel-confirmation"
+          className="border-b border-border p-3"
+        >
+          {confirmation}
+        </div>
+      )}
       {mode === MODE_COMMANDS && (
         <CommandsListContent
-          commands={commands}
+          commands={visibleCommands}
           grouped={grouped}
           search={search}
           onSelect={handleSelect}

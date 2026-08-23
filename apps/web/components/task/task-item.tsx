@@ -1,6 +1,6 @@
 "use client";
 
-import { memo } from "react";
+import { memo, type ReactNode } from "react";
 import {
   IconChevronDown,
   IconCircleCheck,
@@ -70,6 +70,7 @@ type TaskItemProps = {
   lastActivityAt?: string;
   showActivityTime?: boolean;
   menuOpen?: boolean;
+  archiveConfirmation?: ReactNode;
   isDeleting?: boolean;
   taskId?: string;
   /** Drives the `task-row-metadata` plugin slot's `workflowStepId`. */
@@ -433,6 +434,37 @@ function TaskItemContent({
   );
 }
 
+function TaskItemActions({
+  archiveConfirmation,
+  diffStats,
+  hasDiffStats,
+  menuOpen,
+  effectiveMenuOpen,
+}: {
+  archiveConfirmation?: ReactNode;
+  diffStats?: DiffStats;
+  hasDiffStats: boolean;
+  menuOpen: boolean;
+  effectiveMenuOpen: boolean;
+}) {
+  if (archiveConfirmation) {
+    return (
+      <div className="min-w-0 basis-full flex items-center justify-end">{archiveConfirmation}</div>
+    );
+  }
+  if (hasDiffStats) {
+    return (
+      <div className="mobile-task-actions-with-stats group/actions relative shrink-0 self-center flex items-center">
+        <DiffStatsRight diffStats={diffStats!} menuOpen={effectiveMenuOpen} />
+        <div className="mobile-task-actions-slot absolute inset-0 flex items-center justify-end">
+          <TaskMenuButton visible={effectiveMenuOpen} expanded={menuOpen} />
+        </div>
+      </div>
+    );
+  }
+  return <TaskMenuButton visible={effectiveMenuOpen} expanded={menuOpen} rowFocus />;
+}
+
 // The row keeps its state and accessibility affordances together for keyboard
 // selection, so this small exception avoids splitting that interaction across
 // multiple components.
@@ -457,6 +489,7 @@ export const TaskItem = memo(function TaskItem({
   lastActivityAt,
   showActivityTime = false,
   menuOpen = false,
+  archiveConfirmation,
   isDeleting,
   taskId,
   workflowStepId,
@@ -494,7 +527,10 @@ export const TaskItem = memo(function TaskItem({
       onClick={taskItemRowClick(onSelect, onClick)}
       onKeyDown={(e) => handleTaskItemKeyDown(e, onSelect, onClick)}
       style={indent.depth > 0 ? { paddingLeft: indent.paddingLeftPx } : undefined}
-      className={taskItemRowClassName(isSelected, isMultiSelected, indent.depth === 0)}
+      className={cn(
+        taskItemRowClassName(isSelected, isMultiSelected, indent.depth === 0),
+        archiveConfirmation && "flex-wrap",
+      )}
     >
       <SelectionBar isSelected={isSelected} color={taskColor} />
       <RowConnector depth={indent.depth} leftPx={indent.connectorLeftPx} />
@@ -531,16 +567,13 @@ export const TaskItem = memo(function TaskItem({
         agentErrorMessage={agentErrorMessage}
         comparisonUnavailable={comparisonUnavailable}
       />
-      {hasDiffStats ? (
-        <div className="mobile-task-actions-with-stats group/actions relative shrink-0 self-center flex items-center">
-          <DiffStatsRight diffStats={diffStats!} menuOpen={effectiveMenuOpen} />
-          <div className="mobile-task-actions-slot absolute inset-0 flex items-center justify-end">
-            <TaskMenuButton visible={effectiveMenuOpen} expanded={menuOpen} />
-          </div>
-        </div>
-      ) : (
-        <TaskMenuButton visible={effectiveMenuOpen} expanded={menuOpen} rowFocus />
-      )}
+      <TaskItemActions
+        archiveConfirmation={archiveConfirmation}
+        diffStats={diffStats}
+        hasDiffStats={hasDiffStats}
+        menuOpen={menuOpen}
+        effectiveMenuOpen={effectiveMenuOpen}
+      />
       {!!subtaskCount && subtaskCount > 0 && !!onToggleSubtasks && (
         <SubtaskToggle
           taskId={taskId}
