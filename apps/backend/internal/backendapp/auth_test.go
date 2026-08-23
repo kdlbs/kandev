@@ -309,6 +309,11 @@ func TestRunSubscriptionCheckDeniesWhenOfficeRepoNil(t *testing.T) {
 // runSubscriptionCheck/gateway test green (B2-1). Scoped to the Run hook
 // only, per the routing message -- Task/Session have no precedent test
 // either and are not part of this card.
+//
+// Beyond the nil check, it also invokes the wired hook against a real
+// empty-workspace run and asserts a denial -- this additionally catches a
+// no-op substitution (e.g. `func(context.Context, string) error { return
+// nil }`) that a bare non-nil assertion would miss.
 func TestGatewayAuthPolicyWiresRunSubscriptionCheck(t *testing.T) {
 	taskSvc, taskRepo, officeRepo := newRunSubscriptionCheckHarness(t)
 	cfg := &config.Config{}
@@ -319,5 +324,10 @@ func TestGatewayAuthPolicyWiresRunSubscriptionCheck(t *testing.T) {
 	policy := gatewayAuthPolicy(authSvc, taskSvc, taskRepo, officeRepo)
 	if policy.Subscriptions.Run == nil {
 		t.Fatal("gatewayAuthPolicy(...).Subscriptions.Run = nil, want runSubscriptionCheck wired")
+	}
+
+	runID := seedRunForWorkspace(t, officeRepo, "")
+	if err := policy.Subscriptions.Run(context.Background(), runID); err == nil {
+		t.Fatal("gatewayAuthPolicy(...).Subscriptions.Run(empty workspace) = nil, want a denial error")
 	}
 }
