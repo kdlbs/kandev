@@ -31,6 +31,15 @@ type Repository struct {
 	// cutover: when set to a cutover step name, the migration aborts at that
 	// step so tests can prove rollback restores the pre-upgrade state.
 	failCutoverAfter string
+	// failUsageEventAttempts/failUsageEventErr are a test-only failpoint for
+	// CreateTaskUsageEvent's AC-32 transient-retry loop: while
+	// failUsageEventAttempts > 0, insertUsageEventAndRollup returns
+	// failUsageEventErr without touching the database and decrements the
+	// counter. A genuine SQLITE_BUSY/serialization race cannot be triggered
+	// deterministically against this package's single-connection test
+	// repositories, so this stands in for one.
+	failUsageEventAttempts int
+	failUsageEventErr      error
 }
 
 func (r *Repository) nowUTC() time.Time {
