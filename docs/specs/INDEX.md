@@ -186,12 +186,13 @@ Per-workspace credentials and triage triggers for external services.
 
 ## costs/ — cost tracking & budgets
 
-Subscription quota tracking and per-agent cheap-model profile routing.
+Subscription quota tracking, per-agent cheap-model profile routing, and the production per-turn usage ledger.
 
 | Spec | Status |
 |---|---|
 | [subscription-usage](costs/subscription-usage.md) | draft |
 | [cheap-model-profiles](costs/cheap-model-profiles.md) | shipped |
+| [task cost & token ledger](task-cost-ledger/spec.md) | draft |
 
 ## ui/ — cross-cutting UI features
 
