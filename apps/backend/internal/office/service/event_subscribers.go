@@ -12,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	commoncosts "github.com/kandev/kandev/internal/common/costs"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/costs"
@@ -848,17 +849,11 @@ func resolveProvider(data PromptUsageData) string {
 
 // providerFromCLI maps the upstream CLI id (the agent_id stream field)
 // to a provider name. Used because claude-acp emits logical model
-// aliases (sonnet / haiku) that can't be matched on prefix.
+// aliases (sonnet / haiku) that can't be matched on prefix. Delegates to
+// internal/common/costs, the single source of truth shared with the task
+// usage ledger writer (docs/specs/task-cost-ledger/spec.md).
 func providerFromCLI(cli string) string {
-	switch cli {
-	case "claude-acp":
-		return "anthropic"
-	case "codex-acp", "openai-acp":
-		return "openai"
-	case "gemini", "gemini-acp":
-		return "google"
-	}
-	return ""
+	return commoncosts.ProviderFromCLI(cli)
 }
 
 func (s *Service) incrementSessionUsageTotals(
