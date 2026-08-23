@@ -231,7 +231,7 @@ func TestSchedulerTick_TasklessRunFailure_PublishesResolvableWorkspaceEvent(t *t
 	if err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}
-	defer func() { _ = sub.Unsubscribe() }()
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
 
 	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
@@ -289,7 +289,7 @@ func TestSchedulerTick_UnlaunchableRun_PublishesResolvableWorkspaceEvent(t *test
 	if err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}
-	defer func() { _ = sub.Unsubscribe() }()
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
 
 	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-wo35-unlaunchable"}`, ""); err != nil {

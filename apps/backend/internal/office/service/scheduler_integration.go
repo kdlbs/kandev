@@ -625,22 +625,27 @@ func (si *SchedulerIntegration) failTasklessRun(
 	if err := si.svc.repo.MarkRunFailed(ctx, run.ID, msg); err != nil {
 		si.logger.Error("failed to mark taskless run as failed",
 			zap.String("run_id", run.ID), zap.Error(err))
+		return // don't publish a terminal event when persistence failed
 	}
 	run.ErrorMessage = msg
-	si.svc.publishRunProcessedForWorkspace(ctx, run.ID, RunStatusFailed, run, agent.WorkspaceID)
 
+	// Settle the auto-dismiss decision before publishing: the frontend
+	// refetches the inbox off this event (see office.ts), so the dismissal
+	// row must already exist by the time that refetch lands or the UI
+	// would show a repeat taskless failure that a later event never
+	// corrects (PR Fixup round 1, WO-35).
 	hasPrior, err := si.svc.repo.HasPriorTasklessFailedRun(ctx, agent.ID, run.ID)
 	if err != nil {
 		si.logger.Error("failed to check prior taskless failures for agent",
 			zap.String("run_id", run.ID), zap.String("agent_id", agent.ID), zap.Error(err))
-		return
-	}
-	if hasPrior {
+	} else if hasPrior {
 		if err := si.svc.repo.DismissInboxItem(ctx, autoDismissUserID, InboxKindAgentRunFailed, run.ID); err != nil {
 			si.logger.Error("failed to auto-dismiss repeat taskless failure",
 				zap.String("run_id", run.ID), zap.String("agent_id", agent.ID), zap.Error(err))
 		}
 	}
+
+	si.svc.publishRunProcessedForWorkspace(ctx, run.ID, RunStatusFailed, run, agent.WorkspaceID)
 }
 
 // failUnlaunchableRun terminally fails a run that launchAgent determined
@@ -670,6 +675,7 @@ func (si *SchedulerIntegration) failUnlaunchableRun(
 	if err := si.svc.HandleAgentFailure(ctx, run, msg); err != nil {
 		si.logger.Error("failed to handle agent failure for unlaunchable run",
 			zap.String("run_id", run.ID), zap.Error(err))
+		return // don't publish a terminal event when persistence failed
 	}
 	run.ErrorMessage = msg
 	si.svc.publishRunProcessedForWorkspace(ctx, run.ID, RunStatusFailed, run, agent.WorkspaceID)

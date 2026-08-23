@@ -218,6 +218,10 @@ function buildMiscHandlers(
       if (!isCurrentWorkspace(message.payload)) return;
       triggerRefetch("runs");
       triggerRefetch("agents");
+      // A failed run can add (or, for a repeat taskless failure, auto-
+      // dismiss) an inbox row — refresh the inbox so that appears live
+      // instead of waiting for an unrelated event or a manual reload.
+      if (message.payload.status === "failed") triggerRefetch("inbox");
       // The run lifecycle just advanced (claimed → finished/failed/
       // cancelled) — refresh the chat for the affected task so the
       // badge transitions to its new state (or hides on finished).

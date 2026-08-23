@@ -3,8 +3,10 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"time"
 
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/office/models"
 )
 
@@ -347,14 +349,15 @@ func (r *Repository) ListAutoPausedAgentsForInbox(
 func (r *Repository) HasPriorTasklessFailedRun(
 	ctx context.Context, agentID, excludeRunID string,
 ) (bool, error) {
+	taskIDExpr := dialect.JSONExtract(r.ro.DriverName(), "payload", "task_id")
 	var n int
-	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(fmt.Sprintf(`
 		SELECT COUNT(*) FROM runs
 		WHERE agent_profile_id = ?
 		  AND status = 'failed'
 		  AND id != ?
-		  AND COALESCE(json_extract(payload, '$.task_id'), '') = ''
-	`), agentID, excludeRunID).Scan(&n)
+		  AND COALESCE(%s, '') = ''
+	`, taskIDExpr)), agentID, excludeRunID).Scan(&n)
 	return n > 0, err
 }
 
