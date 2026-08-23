@@ -1368,6 +1368,7 @@
   "taskRowRelativeTimeLastUpdate": "Uses the task's last update time.",
   "taskRowRepository": "Repository",
   "taskRowRightSide": "Right side",
+  "taskRowShownOnRight": "Shown on right",
   "taskRowToggleDetail": "{{label}} detail visibility",
   "taskRowToggleDetails": "Show task details",
   "skipAllQuestions": "Skip all questions",

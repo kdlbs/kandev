@@ -51,27 +51,21 @@ type SidebarSnapshot = {
   draft: SidebarViewDraft | null;
 };
 
-type ViewMutationSyncState = {
+type SidebarWriteJournal = {
   latestRequestId: number;
   failedRollback?: SidebarSnapshot;
+  failedWriteKind?: SidebarWriteKind;
 };
 
-const viewMutationSyncStates = new WeakMap<ImmerSet, ViewMutationSyncState>();
-const localViewSyncStates = new WeakMap<ImmerSet, ViewMutationSyncState>();
+type SidebarWriteKind = "views" | "local";
 
-function getViewMutationSyncState(set: ImmerSet): ViewMutationSyncState {
-  const existing = viewMutationSyncStates.get(set);
+const sidebarWriteJournals = new WeakMap<ImmerSet, SidebarWriteJournal>();
+
+function getSidebarWriteJournal(set: ImmerSet): SidebarWriteJournal {
+  const existing = sidebarWriteJournals.get(set);
   if (existing) return existing;
   const created = { latestRequestId: 0 };
-  viewMutationSyncStates.set(set, created);
-  return created;
-}
-
-function getLocalViewSyncState(set: ImmerSet): ViewMutationSyncState {
-  const existing = localViewSyncStates.get(set);
-  if (existing) return existing;
-  const created = { latestRequestId: 0 };
-  localViewSyncStates.set(set, created);
+  sidebarWriteJournals.set(set, created);
   return created;
 }
 
@@ -95,9 +89,8 @@ function rollbackSidebarState(
   set: ImmerSet,
   rollback: SidebarSnapshot,
   after: SidebarSnapshot,
-  error: unknown,
+  error?: unknown,
 ): void {
-  const message = error instanceof Error ? error.message : t("sidebar:failedToSyncSidebarViews");
   set((draft) => {
     draft.sidebarViews.views = rollback.views;
     const activeViewStillExists = rollback.views.some(
@@ -112,7 +105,10 @@ function rollbackSidebarState(
     if (draftsEqual(currentDraft, after.draft) || !draftBaseStillExists) {
       draft.sidebarViews.draft = rollback.draft;
     }
-    draft.sidebarViews.syncError = message;
+    if (error !== undefined) {
+      draft.sidebarViews.syncError =
+        error instanceof Error ? error.message : t("sidebar:failedToSyncSidebarViews");
+    }
   });
 }
 
@@ -135,27 +131,40 @@ function enqueueSidebarSettingsSync(
   return request;
 }
 
-function syncSidebarViewState(
+function syncSidebarWrite(
   set: ImmerSet,
   before: SidebarSnapshot,
   after: SidebarSnapshot,
-  payload: {
-    sidebar_active_view_id: string;
-    sidebar_draft: ReturnType<typeof toApiSidebarDraft> | null;
-  },
+  payload: UserSettingsUpdatePayload,
+  kind: SidebarWriteKind,
 ) {
-  const syncState = getLocalViewSyncState(set);
-  const thisRequestId = ++syncState.latestRequestId;
+  const journal = getSidebarWriteJournal(set);
+  const thisRequestId = ++journal.latestRequestId;
   enqueueSidebarSettingsSync(set, payload).then(
     () => {
-      syncState.failedRollback = undefined;
+      if (
+        thisRequestId === journal.latestRequestId &&
+        journal.failedWriteKind === "views" &&
+        kind === "local" &&
+        journal.failedRollback
+      ) {
+        rollbackSidebarState(set, journal.failedRollback, after);
+      }
+      journal.failedRollback = undefined;
+      journal.failedWriteKind = undefined;
     },
     (err) => {
-      const rollback = syncState.failedRollback ?? before;
-      syncState.failedRollback = rollback;
-      if (thisRequestId !== syncState.latestRequestId) return;
+      const rollback = journal.failedRollback ?? before;
+      journal.failedRollback = rollback;
+      journal.failedWriteKind ??= kind;
+      set((draft) => {
+        draft.sidebarViews.syncError =
+          err instanceof Error ? err.message : t("sidebar:failedToSyncSidebarViews");
+      });
+      if (thisRequestId !== journal.latestRequestId) return;
       rollbackSidebarState(set, rollback, after, err);
-      syncState.failedRollback = undefined;
+      journal.failedRollback = undefined;
+      journal.failedWriteKind = undefined;
     },
   );
 }
@@ -173,21 +182,7 @@ function mutateViews(
   if (!committed) return;
   const after = get().sidebarViews;
   const afterSnapshot = snapshotSidebar(after);
-  const syncState = getViewMutationSyncState(set);
-  const thisRequestId = ++syncState.latestRequestId;
-  const request = enqueueSidebarSettingsSync(set, toSidebarSettingsPayload(after));
-  request.then(
-    () => {
-      syncState.failedRollback = undefined;
-    },
-    (err) => {
-      const rollback = syncState.failedRollback ?? snapshot;
-      syncState.failedRollback = rollback;
-      if (thisRequestId !== syncState.latestRequestId) return;
-      rollbackSidebarState(set, rollback, afterSnapshot, err);
-      syncState.failedRollback = undefined;
-    },
-  );
+  syncSidebarWrite(set, snapshot, afterSnapshot, toSidebarSettingsPayload(after), "views");
 }
 
 function buildSidebarLocalActions(set: ImmerSet, get: () => UISlice) {
@@ -202,10 +197,8 @@ function buildSidebarLocalActions(set: ImmerSet, get: () => UISlice) {
         draft.sidebarViews.draft = null;
       });
       if (!committed) return;
-      syncSidebarViewState(set, before, snapshotSidebar(get().sidebarViews), {
-        sidebar_active_view_id: viewId,
-        sidebar_draft: null,
-      });
+      const after = snapshotSidebar(get().sidebarViews);
+      syncSidebarWrite(set, before, after, toSidebarSettingsPayload(after), "local");
     },
     updateSidebarDraft: (
       patch: Partial<{
@@ -241,10 +234,7 @@ function buildSidebarLocalActions(set: ImmerSet, get: () => UISlice) {
       });
       if (!committed) return;
       const after = snapshotSidebar(get().sidebarViews);
-      syncSidebarViewState(set, before, after, {
-        sidebar_active_view_id: after.activeViewId,
-        sidebar_draft: after.draft ? toApiSidebarDraft(after.draft) : null,
-      });
+      syncSidebarWrite(set, before, after, toSidebarSettingsPayload(after), "local");
     },
     discardSidebarDraft: () => {
       const before = snapshotSidebar(get().sidebarViews);
@@ -252,10 +242,7 @@ function buildSidebarLocalActions(set: ImmerSet, get: () => UISlice) {
         draft.sidebarViews.draft = null;
       });
       const after = snapshotSidebar(get().sidebarViews);
-      syncSidebarViewState(set, before, after, {
-        sidebar_active_view_id: after.activeViewId,
-        sidebar_draft: null,
-      });
+      syncSidebarWrite(set, before, after, toSidebarSettingsPayload(after), "local");
     },
     clearSidebarSyncError: () =>
       set((draft) => {

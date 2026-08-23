@@ -1322,6 +1322,7 @@
   "taskRowRelativeTimeLastUpdate": "使用任务的最近更新时间。",
   "taskRowRepository": "代码库",
   "taskRowRightSide": "右侧",
+  "taskRowShownOnRight": "显示在右侧",
   "taskRowToggleDetail": "{{label}} 详情可见性",
   "taskRowToggleDetails": "显示任务详情",
   "skipAllQuestions": "跳过全部问题",

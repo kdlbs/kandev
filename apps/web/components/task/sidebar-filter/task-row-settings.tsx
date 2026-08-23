@@ -122,7 +122,17 @@ function SortableDetailRow({
         <IconGripVertical className="size-4" aria-hidden="true" />
       </button>
       <label htmlFor={`task-row-detail-${detail}-toggle`} className="min-w-0 flex-1 py-2">
-        <span className="block text-xs font-medium">{label}</span>
+        <span className="flex flex-wrap items-baseline gap-x-2 text-xs font-medium">
+          <span>{label}</span>
+          {detail === "relative_time" && value.trailing === "relative_time" && (
+            <span
+              className="text-[11px] font-normal text-muted-foreground"
+              data-testid="task-row-relative-time-shown-on-right"
+            >
+              {t("task:taskRowShownOnRight")}
+            </span>
+          )}
+        </span>
       </label>
       <TaskRowSwitch
         id={`task-row-detail-${detail}-toggle`}
@@ -254,7 +264,7 @@ function TaskRowTrailingSelect({
         <SelectTrigger
           id="task-row-trailing-select"
           size="sm"
-          className="h-7 w-[9rem] text-xs"
+          className="min-h-11 w-[9rem] text-xs md:min-h-0 md:h-7"
           data-testid="task-row-trailing-select"
           aria-label={t("task:taskRowRightSide")}
         >

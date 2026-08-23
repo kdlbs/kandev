@@ -61,7 +61,8 @@ export function TaskItemTrailing({
           className={cn(
             "shrink-0 text-[11px] text-muted-foreground/50 transition-opacity duration-100",
             effectiveMenuOpen && "opacity-0",
-            !effectiveMenuOpen && "[@media(hover:hover)]:group-hover/actions:opacity-0",
+            !effectiveMenuOpen &&
+              "[@media(hover:hover)]:group-hover:opacity-0 group-focus-within/actions:opacity-0",
           )}
         >
           {formatRelativeTime(relativeTime)}

@@ -9,6 +9,7 @@ const DEFAULT_VALUE: SidebarTaskRowPresentation = {
   visibleDetails: ["relative_time", "repository", "pull_request_number"],
   trailing: "git_changes",
 };
+const SETTINGS_TOGGLE_TEST_ID = "task-row-settings-toggle";
 
 afterEach(cleanup);
 
@@ -24,7 +25,7 @@ describe("TaskRowSettings", () => {
     );
 
     expect(screen.queryByTestId("task-row-details-toggle")).toBeNull();
-    fireEvent.click(screen.getByTestId("task-row-settings-toggle"));
+    fireEvent.click(screen.getByTestId(SETTINGS_TOGGLE_TEST_ID));
     expect(onChange).not.toHaveBeenCalled();
     expect(screen.getByTestId("task-row-details-toggle")).toBeTruthy();
   });
@@ -38,13 +39,46 @@ describe("TaskRowSettings", () => {
         onChange={onChange}
       />,
     );
-    fireEvent.click(screen.getByTestId("task-row-settings-toggle"));
+    fireEvent.click(screen.getByTestId(SETTINGS_TOGGLE_TEST_ID));
     fireEvent.click(screen.getByTestId("task-row-detail-toggle-repository"));
 
     expect(onChange).toHaveBeenCalledWith({
       ...DEFAULT_VALUE,
       visibleDetails: ["relative_time", "pull_request_number"],
     });
+  });
+
+  it("marks relative time as shown on the right when it is the trailing value", () => {
+    const onChange = vi.fn();
+    render(
+      <TaskRowSettings
+        value={{ ...DEFAULT_VALUE, trailing: "relative_time" }}
+        sort={{ key: "state", direction: "asc" }}
+        onChange={onChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId(SETTINGS_TOGGLE_TEST_ID));
+
+    expect(screen.getByTestId("task-row-relative-time-shown-on-right").textContent).toBe(
+      "Shown on right",
+    );
+  });
+
+  it("keeps the mobile trailing selector touch-sized while matching compact desktop selectors", () => {
+    const onChange = vi.fn();
+    render(
+      <TaskRowSettings
+        value={DEFAULT_VALUE}
+        sort={{ key: "state", direction: "asc" }}
+        onChange={onChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId(SETTINGS_TOGGLE_TEST_ID));
+
+    expect(screen.getByTestId("task-row-trailing-select").className).toContain("min-h-11");
+    expect(screen.getByTestId("task-row-trailing-select").className).toContain("md:h-7");
   });
 
   it("reorders fields with the same stable keys used by the drag handles", () => {

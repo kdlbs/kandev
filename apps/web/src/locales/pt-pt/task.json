@@ -1323,6 +1323,7 @@
   "taskRowRelativeTimeLastUpdate": "Usa a hora da última atualização da tarefa.",
   "taskRowRepository": "Repositório",
   "taskRowRightSide": "Lado direito",
+  "taskRowShownOnRight": "Mostrado à direita",
   "taskRowToggleDetail": "Visibilidade do detalhe {{label}}",
   "taskRowToggleDetails": "Mostrar detalhes da tarefa",
   "skipAllQuestions": "Ignorar todas as perguntas",

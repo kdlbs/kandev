@@ -12,6 +12,7 @@
 import { test, expect, type SeedData } from "../../fixtures/test-base";
 import type { Page, Locator } from "@playwright/test";
 import type { ApiClient } from "../../helpers/api-client";
+import { dwell } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
 
 async function seedAndOpenSheet(
@@ -63,6 +64,43 @@ async function taskRowOrder(sheet: Locator, taskIds: string[]) {
     if (id && taskIds.includes(id)) order.push(id);
   }
   return order;
+}
+
+async function touchDrag(page: Page, source: Locator, target: Locator): Promise<void> {
+  const sourceBox = await source.boundingBox();
+  const targetBox = await target.boundingBox();
+  expect(sourceBox).not.toBeNull();
+  expect(targetBox).not.toBeNull();
+
+  const client = await page.context().newCDPSession(page);
+  const start = {
+    x: sourceBox!.x + sourceBox!.width / 2,
+    y: sourceBox!.y + sourceBox!.height / 2,
+  };
+  const end = {
+    x: targetBox!.x + targetBox!.width / 2,
+    y: targetBox!.y + targetBox!.height / 2,
+  };
+  await client.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [{ id: 1, x: start.x, y: start.y }],
+  });
+  await dwell(300, "library-timer", "dnd-kit TouchSensor waits 250ms before activating");
+  for (let step = 1; step <= 12; step += 1) {
+    const progress = step / 12;
+    await client.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [
+        {
+          id: 1,
+          x: start.x + (end.x - start.x) * progress,
+          y: start.y + (end.y - start.y) * progress,
+        },
+      ],
+    });
+  }
+  await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await client.detach();
 }
 
 test.describe("Mobile sidebar — view system", () => {
@@ -383,31 +421,12 @@ test.describe("Mobile sidebar — view system", () => {
       expect(box?.width).toBeGreaterThanOrEqual(40);
     }
     const trailingSelectBox = await settings.getByTestId("task-row-trailing-select").boundingBox();
-    const groupSelectBox = await popover.getByTestId("group-key-select").boundingBox();
     expect(trailingSelectBox).not.toBeNull();
-    expect(groupSelectBox).not.toBeNull();
-    expect(Math.abs(trailingSelectBox!.height - groupSelectBox!.height)).toBeLessThan(1);
+    expect(trailingSelectBox!.height).toBeGreaterThanOrEqual(44);
 
     const pullRequestHandle = settings.getByTestId("task-row-detail-handle-pull_request_number");
     const relativeTimeHandle = settings.getByTestId("task-row-detail-handle-relative_time");
-    const sourceBox = await pullRequestHandle.boundingBox();
-    const targetBox = await relativeTimeHandle.boundingBox();
-    expect(sourceBox).not.toBeNull();
-    expect(targetBox).not.toBeNull();
-    await testPage.mouse.move(
-      sourceBox!.x + sourceBox!.width / 2,
-      sourceBox!.y + sourceBox!.height / 2,
-    );
-    await testPage.mouse.down();
-    await testPage.mouse.move(
-      sourceBox!.x + sourceBox!.width / 2,
-      sourceBox!.y + sourceBox!.height / 2 + 12,
-      { steps: 4 },
-    );
-    await testPage.mouse.move(targetBox!.x + targetBox!.width / 2, targetBox!.y + 2, {
-      steps: 16,
-    });
-    await testPage.mouse.up();
+    await touchDrag(testPage, pullRequestHandle, relativeTimeHandle);
     await expect
       .poll(async () =>
         settings
