@@ -88,7 +88,8 @@ test.describe("automations — Pull request merged trigger", () => {
       .click();
 
     // The panel should show "All repositories" checked by default (all_repos:true from registry default)
-    const allReposSwitch = testPage.getByRole("switch", {
+    const triggerCard = testPage.getByTestId("trigger-card-github_pr_merged");
+    const allReposSwitch = triggerCard.getByRole("switch", {
       name: /All repositories allowed/i,
     });
     await expect(allReposSwitch).toBeChecked({ timeout: 5_000 });
@@ -370,7 +371,8 @@ test.describe("automations — Pull request merged trigger", () => {
       .click();
 
     // Uncheck "All repositories" to show the repo selector
-    const allReposSwitch = testPage.getByRole("switch", {
+    const triggerCard = testPage.getByTestId("trigger-card-github_pr_merged");
+    const allReposSwitch = triggerCard.getByRole("switch", {
       name: /All repositories allowed/i,
     });
     await expect(allReposSwitch).toBeChecked({ timeout: 5_000 });
@@ -378,7 +380,7 @@ test.describe("automations — Pull request merged trigger", () => {
 
     // The "Add repository" button appears when all_repos=false and must NOT be disabled.
     // (For github_pr the picker is disabled; for github_pr_merged it must be enabled.)
-    const addRepoButton = testPage.getByRole("button", { name: /Add repository/i });
+    const addRepoButton = triggerCard.getByRole("button", { name: /Add repository/i });
     await expect(addRepoButton).toBeVisible({ timeout: 5_000 });
     await expect(addRepoButton).not.toBeDisabled();
   });

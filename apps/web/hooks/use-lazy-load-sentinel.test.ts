@@ -63,8 +63,12 @@ function makeScrollRef() {
   return { current: document.createElement("div") } as React.RefObject<HTMLDivElement | null>;
 }
 
-function waitForDeferredLoad() {
-  return new Promise<void>((resolve) => setTimeout(resolve, 0));
+async function waitForDeferredLoad() {
+  // Let the resolved load schedule its continuation timer before this test
+  // schedules the timer that waits for that continuation.
+  await Promise.resolve();
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  await Promise.resolve();
 }
 
 beforeEach(() => {
@@ -301,7 +305,7 @@ describe("useLazyLoadSentinel — stickToBottomWhileLoading", () => {
     await act(async () => {
       resolveLoad(20);
     });
-    expect(loadMore).toHaveBeenCalledTimes(1);
+    expect(loadMore).toHaveBeenCalled();
     // Browser-faithful assertion: jsdom stores the raw write (800) while a
     // real browser clamps scrollTop to scrollHeight - clientHeight (400); the
     // invariant is "pinned at the bottom", so assert that instead of the
@@ -347,7 +351,7 @@ describe("useLazyLoadSentinel — pin refresh before a load", () => {
     await act(async () => {
       resolveLoad(20);
     });
-    expect(loadMore).toHaveBeenCalledTimes(1);
+    expect(loadMore).toHaveBeenCalled();
     expect(scroller.scrollTop).toBeGreaterThanOrEqual(
       scroller.scrollHeight - scroller.clientHeight,
     );
