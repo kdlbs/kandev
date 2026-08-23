@@ -20,17 +20,32 @@ async function runMarketplaceCheck(
   applyCatalog: (catalog: MarketplaceCatalog) => void,
   setChecking: (checking: boolean) => void,
   setError: (error: string | null) => void,
-) {
+): Promise<boolean> {
   try {
     await refreshMarketplace();
-    if (check !== checkGeneration.current) return;
+    if (check !== checkGeneration.current) return false;
     const catalog = await getMarketplaceCatalog();
-    if (check === checkGeneration.current) applyCatalog(catalog);
+    if (check !== checkGeneration.current) return false;
+    applyCatalog(catalog);
+    return true;
   } catch (err) {
     if (check === checkGeneration.current) setError(checkFailedMessage(err));
+    return false;
   } finally {
     if (check === checkGeneration.current) setChecking(false);
   }
+}
+
+async function waitForMarketplaceCheck(checkInFlight: {
+  current: Promise<boolean> | null;
+}): Promise<boolean> {
+  while (checkInFlight.current) {
+    const inFlight = checkInFlight.current;
+    const succeeded = await inFlight;
+    if (!succeeded && (checkInFlight.current === inFlight || checkInFlight.current === null))
+      return false;
+  }
+  return true;
 }
 
 /**
@@ -60,7 +75,7 @@ export function usePluginUpdates() {
   const [sourcesDegraded, setSourcesDegraded] = useState(false);
   const requestGeneration = useRef(0);
   const checkGeneration = useRef(0);
-  const checkInFlight = useRef<Promise<void> | null>(null);
+  const checkInFlight = useRef<Promise<boolean> | null>(null);
 
   const applyCatalog = useCallback((catalog: MarketplaceCatalog) => {
     const enabledSources = catalog.sources.filter((source) => source.enabled);
@@ -106,9 +121,7 @@ export function usePluginUpdates() {
   }, []);
 
   const reload = useCallback(async () => {
-    while (checkInFlight.current) {
-      await checkInFlight.current;
-    }
+    if (!(await waitForMarketplaceCheck(checkInFlight))) return;
 
     const generation = ++requestGeneration.current;
     try {

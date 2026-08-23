@@ -3,6 +3,7 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 
 const getMarketplaceCatalog = vi.fn();
 const refreshMarketplace = vi.fn();
+const REFRESH_UNAVAILABLE = "refresh unavailable";
 
 vi.mock("@/lib/api/domains/marketplace-api", () => ({
   getMarketplaceCatalog: (...args: unknown[]) => getMarketplaceCatalog(...args),
@@ -28,10 +29,12 @@ function source(overrides: Record<string, unknown> = {}) {
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((next) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((next, fail) => {
     resolve = next;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 beforeEach(() => {
@@ -106,7 +109,7 @@ describe("usePluginUpdates — checkForUpdates", () => {
     const { result } = renderHook(() => usePluginUpdates());
     await waitFor(() => expect(result.current.checked).toBe(true));
 
-    let checkPromise!: Promise<void>;
+    let checkPromise!: Promise<boolean>;
     act(() => {
       checkPromise = result.current.checkForUpdates();
     });
@@ -125,7 +128,7 @@ describe("usePluginUpdates — checkForUpdates", () => {
 
   it("does not fetch or record a fresh catalog when cache refresh fails", async () => {
     getMarketplaceCatalog.mockResolvedValue({ plugins: [], sources: [source()] });
-    refreshMarketplace.mockRejectedValueOnce(new Error("refresh unavailable"));
+    refreshMarketplace.mockRejectedValueOnce(new Error(REFRESH_UNAVAILABLE));
     const { result } = renderHook(() => usePluginUpdates());
     await waitFor(() => expect(result.current.checked).toBe(true));
     const lastCheckedAt = result.current.lastCheckedAt;
@@ -134,7 +137,7 @@ describe("usePluginUpdates — checkForUpdates", () => {
       await result.current.checkForUpdates();
     });
 
-    expect(result.current.error).toBe("refresh unavailable");
+    expect(result.current.error).toBe(REFRESH_UNAVAILABLE);
     expect(result.current.lastCheckedAt).toBe(lastCheckedAt);
     expect(getMarketplaceCatalog).toHaveBeenCalledTimes(1);
   });
@@ -184,7 +187,7 @@ describe("usePluginUpdates — checkForUpdates", () => {
     const { result } = renderHook(() => usePluginUpdates());
     await waitFor(() => expect(result.current.checked).toBe(true));
 
-    let checkPromise!: Promise<void>;
+    let checkPromise!: Promise<boolean>;
     act(() => {
       checkPromise = result.current.checkForUpdates();
     });
@@ -207,6 +210,41 @@ describe("usePluginUpdates — checkForUpdates", () => {
     expect(result.current.latestById.get("acme")?.version).toBe("2.0.0");
     expect(result.current.updates.has("acme")).toBe(false);
     expect(getMarketplaceCatalog).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("usePluginUpdates — overlapping checks", () => {
+  it("does not reload stale catalog data after an overlapping refresh fails", async () => {
+    getMarketplaceCatalog.mockResolvedValue({
+      plugins: [entry("acme", "update_available", "2.0.0")],
+      sources: [source()],
+    });
+    const refresh = deferred<{ refreshed: boolean }>();
+    refreshMarketplace.mockReturnValueOnce(refresh.promise);
+
+    const { result } = renderHook(() => usePluginUpdates());
+    await waitFor(() => expect(result.current.updates.has("acme")).toBe(true));
+    const lastCheckedAt = result.current.lastCheckedAt;
+
+    let checkPromise!: Promise<boolean>;
+    act(() => {
+      checkPromise = result.current.checkForUpdates();
+    });
+    let reloadPromise!: Promise<void>;
+    act(() => {
+      reloadPromise = result.current.reload();
+    });
+
+    await act(async () => {
+      refresh.reject(new Error(REFRESH_UNAVAILABLE));
+      await checkPromise;
+      await reloadPromise;
+    });
+
+    expect(result.current.error).toBe(REFRESH_UNAVAILABLE);
+    expect(result.current.lastCheckedAt).toBe(lastCheckedAt);
+    expect(result.current.updates.has("acme")).toBe(true);
+    expect(getMarketplaceCatalog).toHaveBeenCalledTimes(1);
   });
 });
 
