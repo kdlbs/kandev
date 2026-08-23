@@ -411,7 +411,15 @@ func TestSchedulerTick_StartTaskError_TriggersRetry(t *testing.T) {
 	}
 }
 
-func TestSchedulerTick_NoTaskStarter_FinishesWithoutError(t *testing.T) {
+// TestSchedulerTick_NoTaskStarter_FailsRunLoudly is the WO-35 regression
+// test for the missing-task-starter wiring fault: before the fix, an
+// unwired scheduler reported every run as "finished" with no session and
+// no error_message (return true from the old launchOrLog), which is
+// indistinguishable in the UI/run history from real success. A task
+// starter this Service was constructed without is a permanent capability
+// gap for the process lifetime, so the run must fail immediately with a
+// diagnostic message instead of retrying or reporting success.
+func TestSchedulerTick_NoTaskStarter_FailsRunLoudly(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 	// Intentionally do NOT call SetTaskStarter.
@@ -436,12 +444,27 @@ func TestSchedulerTick_NoTaskStarter_FinishesWithoutError(t *testing.T) {
 
 	service.RunSchedulerTick(svc, ctx)
 
-	// Run should be consumed (finished), queue empty.
+	// The run must not be silently claimable again as "queued" work.
 	next, err := svc.ClaimNextRun(ctx)
 	if err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 	if next != nil {
 		t.Error("expected queue to be empty after tick with no task starter")
+	}
+
+	runs, err := svc.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("run count = %d, want 1", len(runs))
+	}
+	if runs[0].Status != service.RunStatusFailed {
+		t.Fatalf("run status = %q, want %q (an un-launched run must not report success)",
+			runs[0].Status, service.RunStatusFailed)
+	}
+	if runs[0].ErrorMessage == "" {
+		t.Error("expected a non-empty error_message explaining why the run could not launch")
 	}
 }

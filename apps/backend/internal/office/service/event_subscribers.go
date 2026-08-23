@@ -329,10 +329,15 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 	if err != nil {
 		return nil
 	}
-	// Taskless completion (PR 1 of office-heartbeat-rework): heartbeat
-	// or lightweight-routine fires that don't carry a task_id. Today no
-	// caller emits these, so this branch is dead until PR 2 lands the
-	// agent_heartbeat cron handler.
+	// Taskless completion: heartbeat or lightweight-routine fires that
+	// don't carry a task_id. Lightweight routines are already created
+	// today (wakeup/dispatcher.go's createFreshRun runs on every
+	// coordinator heartbeat fire), but the scheduler cannot yet launch a
+	// taskless run (WO-35: SchedulerIntegration.launchAgent fails it
+	// instead), so no agent ever completes one and no production caller
+	// emits this event yet. Once a taskless launch seam lands (tracked
+	// as a follow-up feature, not part of WO-35), this branch is what
+	// will finish those runs.
 	if data.TaskID == "" {
 		return s.handleTasklessAgentCompleted(ctx, data)
 	}

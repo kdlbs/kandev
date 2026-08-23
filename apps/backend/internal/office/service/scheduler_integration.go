@@ -335,20 +335,14 @@ func (si *SchedulerIntegration) prepareAndLaunch(
 		Env:       env,
 		ProfileID: profileID,
 	}
-	if !si.launchOrLog(ctx, run, agent, taskID, execCfg.Type, launchCtx) {
-		return
-	}
-	// When a real task starter launched the agent, leave the run
-	// `claimed` and let the AgentCompleted/AgentStopped event subscribers
-	// in event_subscribers.go finish it. This serves as the "agent is
+	// launchAgent only returns true when the adapter was actually
+	// invoked. Leave the run `claimed` and let the
+	// AgentCompleted/AgentStopped event subscribers in
+	// event_subscribers.go finish it. This serves as the "agent is
 	// busy on this task" lock that ClaimNextEligibleRun respects, so
 	// new runs (comments, status changes) for the same agent + task
 	// queue up rather than racing the active turn.
-	if taskID != "" && si.svc.taskStarter != nil {
-		return
-	}
-
-	si.finishRun(ctx, run, agent, taskID)
+	si.launchAgent(ctx, run, agent, taskID, execCfg.Type, launchCtx)
 }
 
 // assembleAgentPrompt builds the wake-context prompt, decides whether the
@@ -396,8 +390,12 @@ func (si *SchedulerIntegration) assembleAgentPrompt(
 // - the summary table has no row yet (first heartbeat ever for the agent)
 // - the lookup errors out (best-effort, fall back to no-summary)
 //
-// Today no caller passes taskID==""; this branch is a no-op until
-// PR 2 lands the agent_heartbeat cron handler.
+// wakeup/dispatcher.go's createFreshRun passes taskID=="" on every
+// lightweight-routine fire (the pre-installed coordinator heartbeat,
+// among others), so this branch runs on a real cadence today. The
+// assembled prompt is still built for these runs even though
+// launchAgent cannot currently launch one (WO-35) — see that function's
+// doc comment.
 func (si *SchedulerIntegration) loadContinuationSummary(
 	ctx context.Context, agentID, taskID string,
 ) string {
@@ -508,25 +506,38 @@ func (si *SchedulerIntegration) isTaskTreeGated(ctx context.Context, runID, task
 	return true
 }
 
-// launchOrLog starts the agent via the orchestrator or logs the run when
-// no task starter is configured. Returns false if the launch failed and the
-// caller should abort (the failure is already handled).
-func (si *SchedulerIntegration) launchOrLog(
+// launchAgent starts the agent via the orchestrator. Returns false if the
+// run could not be launched — either because it is structurally
+// unlaunchable (no task_id, no task starter wired) or because the adapter
+// invocation itself errored — and the caller should abort; the failure is
+// already handled (run marked failed, checkout released, WO-35).
+func (si *SchedulerIntegration) launchAgent(
 	ctx context.Context, run *models.Run,
 	agent *models.AgentInstance, taskID, executorType string,
 	launch LaunchContext,
 ) bool {
 	runID := run.ID
 
-	if taskID == "" || si.svc.taskStarter == nil {
-		si.logger.Info("processing run (no task starter or task ID)",
+	if taskID == "" {
+		si.logger.Error("cannot launch taskless run",
 			zap.String("run_id", runID),
 			zap.String("agent", agent.Name),
 			zap.String("reason", run.Reason),
 			zap.String("executor_type", executorType),
-			zap.Int("prompt_len", len(launch.Prompt)),
 		)
-		return true
+		si.failUnlaunchableRun(ctx, run,
+			"scheduler cannot launch a taskless run: run payload carries no task_id")
+		return false
+	}
+	if si.svc.taskStarter == nil {
+		si.logger.Error("cannot launch run: no task starter configured",
+			zap.String("run_id", runID),
+			zap.String("agent", agent.Name),
+			zap.String("task_id", taskID),
+		)
+		si.failUnlaunchableRun(ctx, run,
+			"scheduler cannot launch run: no task starter is configured")
+		return false
 	}
 
 	si.logger.Info("launching agent for run",
@@ -569,6 +580,21 @@ func (si *SchedulerIntegration) launchOrLog(
 		return false
 	}
 	return true
+}
+
+// failUnlaunchableRun terminally fails a run that launchAgent determined
+// can never reach the adapter (a taskless run, or a missing task starter).
+// Unlike the transient adapter-invoke error above, this is a permanent
+// capability gap, so it uses HandleAgentFailure (immediate fail + auto-pause
+// accounting) rather than HandleRunFailure's retry-with-backoff — retrying a
+// condition that cannot change would just multiply the noise (WO-35).
+func (si *SchedulerIntegration) failUnlaunchableRun(ctx context.Context, run *models.Run, msg string) {
+	si.svc.AppendRunEvent(ctx, run.ID, "error", "error", map[string]interface{}{
+		"phase":         "scheduler.launch",
+		"error_message": msg,
+	})
+	si.releaseCheckoutIfNeeded(ctx, run)
+	_ = si.svc.HandleAgentFailure(ctx, run, msg)
 }
 
 // tryRoutingDispatch routes through the provider-routing dispatcher when
@@ -704,31 +730,6 @@ func (si *SchedulerIntegration) checkBudget(
 		return false
 	}
 	return true
-}
-
-// finishRun marks the run as finished, releases checkout, records
-// cooldown timestamp, and logs activity.
-func (si *SchedulerIntegration) finishRun(
-	ctx context.Context, run *models.Run,
-	agent *models.AgentInstance, taskID string,
-) {
-	if err := si.svc.FinishRun(ctx, run.ID); err != nil {
-		si.logger.Error("failed to finish run",
-			zap.String("run_id", run.ID), zap.Error(err))
-		return
-	}
-
-	si.releaseCheckoutIfNeeded(ctx, run)
-	si.svc.stampRunFinished(ctx, run)
-
-	si.svc.LogActivityWithRun(ctx, agent.WorkspaceID,
-		"scheduler", "office-scheduler",
-		"run_processed", "run", run.ID,
-		mustJSON(map[string]string{
-			"agent":    agent.Name,
-			"agent_id": agent.ID,
-			"reason":   run.Reason,
-		}), run.ID, "")
 }
 
 // releaseCheckoutIfNeeded releases the task checkout the given run may hold.
