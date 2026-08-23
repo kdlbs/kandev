@@ -16,13 +16,21 @@ import (
 // getJSON dials host:port+path over HTTP and decodes a JSON object body.
 // Keep-alives are disabled so no idle client connection lingers for goleak.
 func getJSON(host string, port int, path string) (int, map[string]any, error) {
+	return requestJSON(host, port, http.MethodGet, path)
+}
+
+func requestJSON(host string, port int, method string, path string) (int, map[string]any, error) {
 	url := fmt.Sprintf("http://%s%s", net.JoinHostPort(host, fmt.Sprint(port)), path)
 	client := &http.Client{
 		Timeout:   500 * time.Millisecond,
 		Transport: &http.Transport{DisableKeepAlives: true},
 	}
 	defer client.CloseIdleConnections()
-	resp, err := client.Get(url)
+	req, err := http.NewRequest(method, url, nil)
+	if err != nil {
+		return 0, nil, err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -70,6 +78,17 @@ func TestBindBootstrapListenersServesLivenessBeforeSwap(t *testing.T) {
 	}
 	if got := body["mode"]; got != "websocket+http" {
 		t.Fatalf("bootstrap /health mode = %v, want %q (must match healthHandler's contract)", got, "websocket+http")
+	}
+
+	status, body, err = requestJSON("127.0.0.1", cfg.Server.Port, http.MethodPost, "/health")
+	if err != nil {
+		t.Fatalf("POST /health before swap: %v", err)
+	}
+	if status != http.StatusServiceUnavailable {
+		t.Fatalf("bootstrap POST /health status = %d, want %d", status, http.StatusServiceUnavailable)
+	}
+	if body[statusKey] != startingStatus {
+		t.Fatalf("bootstrap POST /health body = %v, want status=%q", body, startingStatus)
 	}
 
 	// Every other path must answer deterministically, not hang or 404.

@@ -59,7 +59,7 @@ func (hs *handlerSwitch) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // its shape must not depend on startup progress.
 func newBootstrapHandler(version string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/health" {
+		if r.Method != http.MethodGet || r.URL.Path != "/health" {
 			body := map[string]any{
 				statusKey:       startingStatus,
 				serviceFieldKey: kandevName,

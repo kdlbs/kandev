@@ -134,6 +134,12 @@ func waitForReady(ctx context.Context, baseURL string, proc childState) error {
 			return fmt.Errorf("backend exited (code %d) before it reported ready", code)
 		}
 		if probeReady(ctx, readyURL) {
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("backend readiness wait canceled at %s: %w", readyURL, err)
+			}
+			if exited, code := proc.Exited(); exited {
+				return fmt.Errorf("backend exited (code %d) before it reported ready", code)
+			}
 			return nil
 		}
 		select {

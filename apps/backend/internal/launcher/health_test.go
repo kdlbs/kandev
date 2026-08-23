@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -16,6 +17,15 @@ type fakeChild struct {
 }
 
 func (f fakeChild) Exited() (bool, int) { return f.exited, f.code }
+
+type toggledChild struct {
+	exited atomic.Bool
+	code   atomic.Int32
+}
+
+func (c *toggledChild) Exited() (bool, int) {
+	return c.exited.Load(), int(c.code.Load())
+}
 
 func TestHealthTimeoutUsesDefaultWhenEnvUnusable(t *testing.T) {
 	for name, raw := range map[string]string{
@@ -220,6 +230,54 @@ func TestWaitForReadyReturnsNilOnReadyResponse(t *testing.T) {
 	}
 	if got := calls.Load(); got < 2 {
 		t.Fatalf("probe calls = %d, want at least 2", got)
+	}
+}
+
+func TestWaitForReadyRejectsChildExitDuringSuccessfulProbe(t *testing.T) {
+	requestStarted := make(chan struct{})
+	responseRelease := make(chan struct{})
+	var child toggledChild
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/ready" {
+			t.Errorf("path = %q, want /ready", r.URL.Path)
+		}
+		close(requestStarted)
+		<-responseRelease
+		w.WriteHeader(http.StatusOK)
+	}))
+	var releaseOnce sync.Once
+	t.Cleanup(func() {
+		releaseOnce.Do(func() { close(responseRelease) })
+		srv.Close()
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	done := make(chan error, 1)
+	go func() {
+		done <- waitForReady(ctx, srv.URL, &child)
+	}()
+
+	select {
+	case <-requestStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("waitForReady did not issue a readiness request")
+	}
+	child.code.Store(7)
+	child.exited.Store(true)
+	releaseOnce.Do(func() { close(responseRelease) })
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("waitForReady() = nil, want exit error when child exits during probe")
+		}
+		if !strings.Contains(err.Error(), "code 7") {
+			t.Fatalf("error = %v, want the backend exit code", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("waitForReady did not return after the readiness probe completed")
 	}
 }
 
