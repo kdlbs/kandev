@@ -286,44 +286,58 @@ func TestStop_WedgedRepo_HonorsDrainDeadlineAndDropsEverythingAsError(t *testing
 // AC-24 (subscribes on the real session-prompt-usage wildcard subject) and
 // AC-34 (Publish, which delivers synchronously on the publisher's own
 // goroutine, must return promptly regardless of downstream processing).
+// The repository blocks every call until its context is cancelled, so this
+// is the assertion that actually distinguishes the two designs: a handler
+// that wrote synchronously on the callback goroutine would make Publish
+// itself hang for as long as the repository blocks, and a repo that
+// returns instantly (the prior version of this test) can't tell that apart
+// from the real async design. synctest.Wait pins that the worker has
+// genuinely reached the blocking repository call - not merely that the
+// payload is still sitting unconsumed in the channel - before asserting
+// Publish already returned. Runs inside synctest so Stop's 5-second drain
+// deadline advances on the fake clock instead of costing real wall time.
 func TestSubscribe_PublishedEvent_IsRecordedWithoutBlockingThePublisher(t *testing.T) {
-	repo := &fakeUsageRepo{}
-	w := NewWriter(repo, nil, nil)
-	w.Start()
-	defer w.Stop()
+	synctest.Test(t, func(t *testing.T) {
+		repo := &fakeUsageRepo{block: true}
+		w := NewWriter(repo, nil, nil)
+		w.Start()
 
-	eb := bus.NewMemoryEventBus(logger.Default())
-	if err := w.Subscribe(eb); err != nil {
-		t.Fatalf("Subscribe: %v", err)
-	}
-
-	subject := events.BuildSessionPromptUsageSubject("session-1")
-	payload := map[string]any{
-		"task_id":        "task-1",
-		"session_id":     "session-1",
-		"usage_event_id": "evt-published",
-		"usage":          map[string]any{"input_tokens": int64(7)},
-	}
-
-	start := time.Now()
-	if err := eb.Publish(context.Background(), subject, &bus.Event{Data: payload}); err != nil {
-		t.Fatalf("Publish: %v", err)
-	}
-	if elapsed := time.Since(start); elapsed > 100*time.Millisecond {
-		t.Errorf("Publish took %v, want near-instant (the callback must never block on the worker)", elapsed)
-	}
-
-	deadline := time.After(2 * time.Second)
-	for repo.rowCount() == 0 {
-		select {
-		case <-deadline:
-			t.Fatal("published event was never recorded by the worker")
-		case <-time.After(time.Millisecond):
+		eb := bus.NewMemoryEventBus(logger.Default())
+		if err := w.Subscribe(eb); err != nil {
+			t.Fatalf("Subscribe: %v", err)
 		}
-	}
-	if repo.rowCount() != 1 {
-		t.Errorf("repo rows = %d, want 1", repo.rowCount())
-	}
+
+		subject := events.BuildSessionPromptUsageSubject("session-1")
+		payload := map[string]any{
+			"task_id":        "task-1",
+			"session_id":     "session-1",
+			"usage_event_id": "evt-published",
+			"usage":          map[string]any{"input_tokens": int64(7)},
+		}
+
+		start := time.Now()
+		if err := eb.Publish(context.Background(), subject, &bus.Event{Data: payload}); err != nil {
+			t.Fatalf("Publish: %v", err)
+		}
+		if elapsed := time.Since(start); elapsed > 100*time.Millisecond {
+			t.Errorf("Publish took %v, want near-instant (the callback must never block on the worker)", elapsed)
+		}
+
+		synctest.Wait()
+		if calls := repo.callCount(); calls != 1 {
+			t.Fatalf("repo.calls = %d, want 1 (the worker must have reached the repository despite Publish already returning)", calls)
+		}
+		if repo.rowCount() != 0 {
+			t.Fatalf("repo rows = %d, want 0 (the fake never returns success while its call is still blocked)", repo.rowCount())
+		}
+
+		before := expvarMapValue(eventsDroppedTotal, usageMetricLabel("reason", dropReasonError))
+		w.Stop()
+		after := expvarMapValue(eventsDroppedTotal, usageMetricLabel("reason", dropReasonError))
+		if after-before != 1 {
+			t.Errorf("error-drop count delta = %d, want 1 (Stop's drain deadline cancels the in-flight call)", after-before)
+		}
+	})
 }
 
 // TestStartStop_Idempotent pins that calling Start or Stop more than once

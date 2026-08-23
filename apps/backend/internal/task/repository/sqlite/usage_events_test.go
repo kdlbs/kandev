@@ -6,6 +6,7 @@ package sqlite
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -76,6 +77,52 @@ func TestCreateTaskUsageEvent_HappyPath_InsertsRowAndIncrementsRollup(t *testing
 	}
 }
 
+// TestCreateTaskUsageEvent_SameSessionAndTurn_BothRowsCommitAndRollupSums
+// pins AC-15: (session_id, turn_id) is an aggregation key for reads, not a
+// uniqueness constraint on writes - a single turn producing multiple ledger
+// rows (e.g. more than one prompt-usage event in one turn) must not be
+// rejected or collapsed.
+func TestCreateTaskUsageEvent_SameSessionAndTurn_BothRowsCommitAndRollupSums(t *testing.T) {
+	repo := newUsageEventsTestRepo(t)
+	createUsageEventsTestTask(t, repo, "task-same-turn")
+	createUsageEventsTestSession(t, repo, "session-same-turn", "task-same-turn")
+
+	first := newTestUsageEvent("evt-same-turn-1", "task-same-turn", "session-same-turn")
+	first.TurnID = "turn-shared"
+	if err := repo.CreateTaskUsageEvent(context.Background(), first); err != nil {
+		t.Fatalf("CreateTaskUsageEvent (first): %v", err)
+	}
+
+	second := newTestUsageEvent("evt-same-turn-2", "task-same-turn", "session-same-turn")
+	second.TurnID = "turn-shared"
+	if err := repo.CreateTaskUsageEvent(context.Background(), second); err != nil {
+		t.Fatalf("CreateTaskUsageEvent (second, same session_id+turn_id): %v", err)
+	}
+
+	if got := countTaskUsageEventRows(t, repo); got != 2 {
+		t.Fatalf("row count = %d, want 2 (both rows for the shared turn must commit)", got)
+	}
+
+	events, err := repo.ListTaskUsageEvents(context.Background(), "task-same-turn", 0)
+	if err != nil {
+		t.Fatalf("ListTaskUsageEvents: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("ListTaskUsageEvents returned %d events, want 2", len(events))
+	}
+	if events[0].TurnID != "turn-shared" || events[1].TurnID != "turn-shared" {
+		t.Errorf("turn IDs = [%q, %q], want both rows to carry turn_id=turn-shared", events[0].TurnID, events[1].TurnID)
+	}
+	if events[0].UsageEventID == events[1].UsageEventID {
+		t.Errorf("both rows have usage_event_id %q, want two distinct rows", events[0].UsageEventID)
+	}
+
+	tokensIn, tokensCachedIn, tokensOut, costSubcents := readTaskSessionRollup(t, repo, "session-same-turn")
+	if tokensIn != 200 || tokensCachedIn != 50 || tokensOut != 60 || costSubcents != 84 {
+		t.Errorf("rollup = (%d,%d,%d,%d), want (200,50,60,84) (both rows must contribute)", tokensIn, tokensCachedIn, tokensOut, costSubcents)
+	}
+}
+
 // TestCreateTaskUsageEvent_NilTokenPointersCoalesceToZeroInRollup pins AC-12:
 // a not-recorded token count (nil pointer) contributes zero to the rollup
 // rather than propagating SQL NULL through the sum.
@@ -125,6 +172,61 @@ func TestCreateTaskUsageEvent_DuplicateUsageEventID_ReturnsErrDuplicateNoRollup(
 	tokensIn, _, _, _ := readTaskSessionRollup(t, repo, "session-dup")
 	if tokensIn != 100 {
 		t.Errorf("tokens_in = %d, want 100 (redelivery must not double-increment the rollup)", tokensIn)
+	}
+}
+
+// TestCreateTaskUsageEvent_ConcurrentInsertsSameUsageEventID_ExactlyOneCommits
+// pins AC-32's unique-violation branch under a genuine race, not a
+// sequential redelivery: two deliveries of the same event, racing each
+// other, with the producer's deterministic identifier (spec's "Concurrency"
+// scenario). Both goroutines are released together via a start barrier so
+// they race for real; SQLITE_BUSY contention is expected and handled by
+// CreateTaskUsageEvent's own transient-retry loop, not by this test.
+// Exactly one call must succeed and the other must observe
+// ErrDuplicateUsageEvent - no other error, and no silent double-drop - with
+// the rollup incremented exactly once, matching the loser's increment
+// sharing the loser's rolled-back transaction.
+func TestCreateTaskUsageEvent_ConcurrentInsertsSameUsageEventID_ExactlyOneCommits(t *testing.T) {
+	repo := newUsageEventsTestRepo(t)
+	createUsageEventsTestTask(t, repo, "task-race")
+	createUsageEventsTestSession(t, repo, "session-race", "task-race")
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	for i := range errs {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			event := newTestUsageEvent("evt-race", "task-race", "session-race")
+			<-start
+			errs[i] = repo.CreateTaskUsageEvent(context.Background(), event)
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	successes, duplicates := 0, 0
+	for _, err := range errs {
+		switch err {
+		case nil:
+			successes++
+		case ErrDuplicateUsageEvent:
+			duplicates++
+		default:
+			t.Fatalf("unexpected error from a racing insert: %v", err)
+		}
+	}
+	if successes != 1 || duplicates != 1 {
+		t.Fatalf("successes=%d duplicates=%d, want exactly one of each", successes, duplicates)
+	}
+
+	if got := countTaskUsageEventRows(t, repo); got != 1 {
+		t.Fatalf("row count = %d, want 1 (the losing insert must not leave a row behind)", got)
+	}
+	tokensIn, _, _, _ := readTaskSessionRollup(t, repo, "session-race")
+	if tokensIn != 100 {
+		t.Errorf("tokens_in = %d, want 100 (the rollup must be incremented exactly once, not twice or zero times)", tokensIn)
 	}
 }
 

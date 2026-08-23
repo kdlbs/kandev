@@ -789,6 +789,50 @@ func TestPromptUsage_DuplicateUsageEventIDIsIdempotent(t *testing.T) {
 	}
 }
 
+// TestPromptUsage_DoesNotWriteTaskSessionsRollup pins AC-21: the Office cost
+// subscriber inserts its own office_cost_events row but SHALL NOT touch
+// task_sessions' tokens_in/tokens_cached_in/tokens_out/cost_subcents rollup
+// columns — internal/task/usage's writer is the sole writer of those columns
+// (AC-10). The session row is seeded with distinctive, nonzero rollup values
+// before the event is published; if handlePromptUsage still incremented (or
+// otherwise touched) those columns, they would change.
+func TestPromptUsage_DoesNotWriteTaskSessionsRollup(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "worker-rollup")
+	insertTestTask(t, svc, "task-rollup", "ws-1")
+	setTestTaskAssignee(t, svc, "task-rollup", "worker-rollup")
+	insertTestTaskSession(t, svc, "session-rollup", "task-rollup", "worker-rollup")
+	svc.ExecSQL(t,
+		`UPDATE task_sessions SET tokens_in = ?, tokens_cached_in = ?, tokens_out = ?, cost_subcents = ? WHERE id = ?`,
+		111, 22, 33, 44, "session-rollup")
+
+	event := bus.NewEvent(events.SessionPromptUsageUpdated, "test", map[string]interface{}{
+		"task_id":    "task-rollup",
+		"session_id": "session-rollup",
+		"model":      "sonnet",
+		"usage": map[string]interface{}{
+			"input_tokens":  100,
+			"output_tokens": 30,
+		},
+	})
+	if err := eb.Publish(ctx, events.BuildSessionPromptUsageSubject("session-rollup"), event); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	costs, err := svc.ListCostEvents(ctx, "ws-1")
+	if err != nil || len(costs) != 1 {
+		t.Fatalf("list costs: %v (len=%d) - the handler must still have run and inserted its own row", err, len(costs))
+	}
+
+	tokensIn, tokensCachedIn, tokensOut, costSubcents := svc.GetTaskSessionRollupForTest(t, "session-rollup")
+	if tokensIn != 111 || tokensCachedIn != 22 || tokensOut != 33 || costSubcents != 44 {
+		t.Errorf("task_sessions rollup = (%d,%d,%d,%d), want unchanged (111,22,33,44) - Office must not write these columns",
+			tokensIn, tokensCachedIn, tokensOut, costSubcents)
+	}
+}
+
 // TestPromptUsage_BudgetCheckUsesSessionFallbackProfile is a regression test
 // for the companion budget-check gap: buildCostEvent already resolves the
 // session fallback into costEvent.AgentProfileID (see

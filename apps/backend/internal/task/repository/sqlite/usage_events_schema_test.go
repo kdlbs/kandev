@@ -120,7 +120,10 @@ func TestTaskUsageEventsSchema_FreshDB(t *testing.T) {
 
 // TestTaskUsageEventsSchema_Replay proves re-running schema init against an
 // already-initialized database (a restart) does not error - CREATE TABLE IF
-// NOT EXISTS / CREATE INDEX IF NOT EXISTS must both be idempotent.
+// NOT EXISTS / CREATE INDEX IF NOT EXISTS must both be idempotent - and that
+// a usage event written before the replay, along with the rollup it drove,
+// survives the replay untouched, and that the ledger still accepts new
+// writes afterward (docs/specs/task-cost-ledger/spec.md AC-29, AC-36 row 3).
 func TestTaskUsageEventsSchema_Replay(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "usage-events-replay.db")
 	dbConn, err := dbutil.OpenSQLite(dbPath)
@@ -129,11 +132,46 @@ func TestTaskUsageEventsSchema_Replay(t *testing.T) {
 	}
 	db := sqlx.NewDb(dbConn, "sqlite3")
 	t.Cleanup(func() { _ = db.Close() })
-	if _, err := NewWithDB(db, db, nil); err != nil {
+
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
 		t.Fatalf("first schema init: %v", err)
 	}
-	if _, err := NewWithDB(db, db, nil); err != nil {
+	createUsageEventsTestTask(t, repo, "task-replay")
+	createUsageEventsTestSession(t, repo, "session-replay", "task-replay")
+	preReplayEvent := newTestUsageEvent("evt-replay-pre", "task-replay", "session-replay")
+	if err := repo.CreateTaskUsageEvent(context.Background(), preReplayEvent); err != nil {
+		t.Fatalf("CreateTaskUsageEvent before replay: %v", err)
+	}
+
+	wantRows := countTaskUsageEventRows(t, repo)
+	wantTokensIn, wantTokensCachedIn, wantTokensOut, wantCostSubcents := readTaskSessionRollup(t, repo, "session-replay")
+
+	repo, err = NewWithDB(db, db, nil)
+	if err != nil {
 		t.Fatalf("replayed schema init must be a no-op, got error: %v", err)
+	}
+
+	if got := countTaskUsageEventRows(t, repo); got != wantRows {
+		t.Errorf("row count after replay = %d, want %d (replay must not touch existing rows)", got, wantRows)
+	}
+	tokensIn, tokensCachedIn, tokensOut, costSubcents := readTaskSessionRollup(t, repo, "session-replay")
+	if tokensIn != wantTokensIn || tokensCachedIn != wantTokensCachedIn || tokensOut != wantTokensOut || costSubcents != wantCostSubcents {
+		t.Errorf("rollup after replay = (%d,%d,%d,%d), want (%d,%d,%d,%d) (replay must not touch the existing rollup)",
+			tokensIn, tokensCachedIn, tokensOut, costSubcents, wantTokensIn, wantTokensCachedIn, wantTokensOut, wantCostSubcents)
+	}
+
+	postReplayEvent := newTestUsageEvent("evt-replay-post", "task-replay", "session-replay")
+	if err := repo.CreateTaskUsageEvent(context.Background(), postReplayEvent); err != nil {
+		t.Fatalf("CreateTaskUsageEvent after replay: %v", err)
+	}
+	if got := countTaskUsageEventRows(t, repo); got != wantRows+1 {
+		t.Errorf("row count after post-replay write = %d, want %d (the ledger must still accept writes after replay)", got, wantRows+1)
+	}
+	tokensIn, tokensCachedIn, tokensOut, costSubcents = readTaskSessionRollup(t, repo, "session-replay")
+	if tokensIn != wantTokensIn*2 || tokensCachedIn != wantTokensCachedIn*2 || tokensOut != wantTokensOut*2 || costSubcents != wantCostSubcents*2 {
+		t.Errorf("rollup after post-replay write = (%d,%d,%d,%d), want (%d,%d,%d,%d) (the post-replay write must still increment the rollup)",
+			tokensIn, tokensCachedIn, tokensOut, costSubcents, wantTokensIn*2, wantTokensCachedIn*2, wantTokensOut*2, wantCostSubcents*2)
 	}
 }
 
