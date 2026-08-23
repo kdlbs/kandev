@@ -30,9 +30,9 @@ test.describe("quick chat activity indicators", () => {
     const completed = ws.waitForEvent("session.turn.completed", {
       where: (payload) => payload.session_id === sessionId,
     });
-    const settled = waitForSessionSettled(ws, sessionId);
     await sendQuickChatMessage(dialog, testPage, "/slow 8s");
     await expect(tab.getByRole("status")).toBeVisible();
+    const settled = waitForSessionSettled(ws, sessionId);
 
     await testPage.keyboard.press("Escape");
     await expect(indicator).toHaveAttribute("data-state", "running");
@@ -66,9 +66,9 @@ test.describe("quick chat activity indicators", () => {
     const completed = ws.waitForEvent("session.turn.completed", {
       where: (payload) => payload.session_id === sessionId,
     });
-    const settled = waitForSessionSettled(ws, sessionId);
     await sendQuickChatMessage(dialog, tabletTestPage, "/slow 8s");
     await expect(tab.getByRole("status")).toBeVisible();
+    const settled = waitForSessionSettled(ws, sessionId);
 
     await tabletTestPage.keyboard.press("Escape");
     await expect(indicator).toHaveAttribute("data-state", "running");

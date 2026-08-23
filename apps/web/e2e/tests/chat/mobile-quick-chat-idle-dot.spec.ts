@@ -37,9 +37,9 @@ test.describe("quick chat activity indicators", () => {
     const completed = ws.waitForEvent("session.turn.completed", {
       where: (payload) => payload.session_id === sessionId,
     });
-    const settled = waitForSessionSettled(ws, sessionId);
     await sendQuickChatMessage(dialog, testPage, "/slow 8s");
     await expect(tab.getByRole("status")).toBeVisible();
+    const settled = waitForSessionSettled(ws, sessionId);
 
     await dialog.getByTestId("quick-chat-close").tap();
     await expect(indicator).toHaveAttribute("data-state", "running");
@@ -81,8 +81,9 @@ test.describe("quick chat activity indicators", () => {
     const completed = ws.waitForEvent("session.turn.completed", {
       where: (payload) => payload.session_id === sessionId,
     });
-    const settled = waitForSessionSettled(ws, sessionId);
     await sendQuickChatMessage(dialog, testPage, "/slow 8s");
+    await expect(dialog.getByTestId("quick-chat-tab").getByRole("status")).toBeVisible();
+    const settled = waitForSessionSettled(ws, sessionId);
     await dialog.getByTestId("quick-chat-close").tap();
 
     await testPage.getByTestId("mobile-session-menu").tap();
