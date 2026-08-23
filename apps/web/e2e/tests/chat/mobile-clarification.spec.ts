@@ -224,9 +224,13 @@ test.describe("Mobile clarification multiline answer", () => {
       ),
     ).resolves.toBe(true);
 
-    releaseResponse();
+    try {
+      expect(idleSubmitBox.height).toBeGreaterThanOrEqual(44);
+      expect(pendingSubmitBox.height).toBeGreaterThanOrEqual(44);
+      expect(Math.abs(pendingSubmitBox.height - idleSubmitBox.height)).toBeLessThanOrEqual(1);
+    } finally {
+      releaseResponse();
+    }
     await expect(session.clarificationOverlay()).not.toBeVisible({ timeout: 30_000 });
-    expect(pendingSubmitBox.height).toBeGreaterThanOrEqual(44);
-    expect(Math.abs(pendingSubmitBox.height - idleSubmitBox.height)).toBeLessThanOrEqual(1);
   });
 });
