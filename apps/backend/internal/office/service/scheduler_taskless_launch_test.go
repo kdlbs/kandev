@@ -118,3 +118,75 @@ func TestSchedulerTick_TaskBoundRunStillLaunches(t *testing.T) {
 			runs[0].Status, service.RunStatusClaimed)
 	}
 }
+
+// TestSchedulerTick_TasklessRunsDoNotAutoPauseAgent is the WO-35 Review
+// round 1 regression test. A taskless run is a scheduler capability gap
+// (the taskless-launch seam does not exist yet — see the SCOPE-1 decision
+// in the task plan), not an agent failure, so failing it must not touch
+// the agent's consecutive-failure counter. The pre-installed "Coordinator
+// heartbeat" routine is taskless by design and fires every 5 minutes
+// (routines/service.go:133,155): if taskless failures counted toward
+// DefaultAgentFailureThreshold (3), every default install would
+// auto-pause its coordinator within ~15 minutes of a fresh boot. Once
+// paused, scheduler_integration.go's !isAgentActive branch silently
+// FinishRuns every subsequent run for that agent — including task-bound,
+// event-driven ones that work today — which is exactly the
+// reports-success-but-does-nothing pathology this card exists to kill,
+// now applied to the path the card's own SYMPTOM section says is
+// unaffected.
+func TestSchedulerTick_TasklessRunsDoNotAutoPauseAgent(t *testing.T) {
+	mock := &mockTaskStarter{}
+	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
+	ctx := context.Background()
+
+	agent := &models.AgentInstance{
+		ID:                 "coordinator-wo35-pause",
+		WorkspaceID:        "ws-1",
+		Name:               "coordinator-wo35-pause",
+		Role:               models.AgentRoleCEO,
+		Status:             models.AgentStatusIdle,
+		ExecutorPreference: `{"type":"worktree"}`,
+	}
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	// DefaultAgentFailureThreshold consecutive taskless heartbeat fires —
+	// mirrors 3 ticks of the pre-installed coordinator heartbeat routine.
+	const firesAtThreshold = 3
+	for i := 0; i < firesAtThreshold; i++ {
+		if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+			t.Fatalf("queue taskless run %d: %v", i, err)
+		}
+		service.RunSchedulerTick(svc, ctx)
+	}
+
+	got, err := svc.GetAgentInstance(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+	if got.Status == models.AgentStatusPaused {
+		t.Fatalf("agent auto-paused after %d taskless failures — a taskless run is a scheduler "+
+			"capability gap, not an agent failure, and must not count toward auto-pause", firesAtThreshold)
+	}
+	if got.PauseReason != "" {
+		t.Fatalf("pause_reason = %q, want empty", got.PauseReason)
+	}
+	if got.ConsecutiveFailures != 0 {
+		t.Fatalf("consecutive_failures = %d, want 0 — taskless failures must not accumulate", got.ConsecutiveFailures)
+	}
+
+	// The event-driven path must still work after repeated taskless
+	// failures: a task-bound run queued afterwards must still launch.
+	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, title, description, created_at, updated_at)
+		VALUES ('task-wo35-pause-1', 'ws-1', 'Build API', 'Implement endpoint', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"task-wo35-pause-1"}`, ""); err != nil {
+		t.Fatalf("queue task-bound run: %v", err)
+	}
+	service.RunSchedulerTick(svc, ctx)
+
+	if mock.callCount() != 1 {
+		t.Fatalf("expected 1 StartTask call for the task-bound run after taskless failures, got %d — "+
+			"the event-driven path must survive repeated taskless failures", mock.callCount())
+	}
+}

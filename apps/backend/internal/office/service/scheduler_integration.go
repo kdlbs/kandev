@@ -525,7 +525,7 @@ func (si *SchedulerIntegration) launchAgent(
 			zap.String("reason", run.Reason),
 			zap.String("executor_type", executorType),
 		)
-		si.failUnlaunchableRun(ctx, run,
+		si.failTasklessRun(ctx, run,
 			"scheduler cannot launch a taskless run: run payload carries no task_id")
 		return false
 	}
@@ -582,11 +582,40 @@ func (si *SchedulerIntegration) launchAgent(
 	return true
 }
 
+// failTasklessRun terminally fails a run that launchAgent determined has
+// no task_id. This is a scheduler capability gap — the taskless-launch
+// seam does not exist yet (task_sessions.task_id is NOT NULL; relaxing it
+// is New Feature Dev work, see the SCOPE-1 decision in the task plan) —
+// not an agent failure, so it must NOT go through HandleAgentFailure's
+// consecutive-failure/auto-pause accounting. The pre-installed
+// "Coordinator heartbeat" routine is taskless by design and fires every
+// 5 minutes, so counting these toward auto-pause paused every default
+// install's coordinator within ~15 minutes; once paused, every
+// subsequent run — including task-bound event-driven ones that work
+// today — was silently finished with no launch (WO-35 Review round 1,
+// Finding 1). A bare MarkRunFailed still leaves a visible failed row
+// (surfaces via ListFailedRunsForInbox, since the agent is never
+// auto-paused here — see the task plan's inbox-volume note).
+func (si *SchedulerIntegration) failTasklessRun(ctx context.Context, run *models.Run, msg string) {
+	si.svc.AppendRunEvent(ctx, run.ID, "error", "error", map[string]interface{}{
+		"phase":         "scheduler.launch",
+		"error_message": msg,
+	})
+	si.releaseCheckoutIfNeeded(ctx, run)
+	if err := si.svc.repo.MarkRunFailed(ctx, run.ID, msg); err != nil {
+		si.logger.Error("failed to mark taskless run as failed",
+			zap.String("run_id", run.ID), zap.Error(err))
+	}
+}
+
 // failUnlaunchableRun terminally fails a run that launchAgent determined
-// can never reach the adapter (a taskless run, or a missing task starter).
-// Unlike the transient adapter-invoke error above, this is a permanent
-// capability gap, so it uses HandleAgentFailure (immediate fail + auto-pause
-// accounting) rather than HandleRunFailure's retry-with-backoff — retrying a
+// can never reach the adapter because the office service was constructed
+// without a task starter. Unlike a taskless run (failTasklessRun above),
+// this is a genuine wiring fault present for the process's whole
+// lifetime — the deployment cannot launch anything until it is fixed —
+// so auto-pausing the agent via HandleAgentFailure (immediate fail +
+// auto-pause accounting) is defensible here, unlike for a taskless run.
+// HandleRunFailure's retry-with-backoff is not used either: retrying a
 // condition that cannot change would just multiply the noise (WO-35).
 func (si *SchedulerIntegration) failUnlaunchableRun(ctx context.Context, run *models.Run, msg string) {
 	si.svc.AppendRunEvent(ctx, run.ID, "error", "error", map[string]interface{}{
@@ -594,7 +623,10 @@ func (si *SchedulerIntegration) failUnlaunchableRun(ctx context.Context, run *mo
 		"error_message": msg,
 	})
 	si.releaseCheckoutIfNeeded(ctx, run)
-	_ = si.svc.HandleAgentFailure(ctx, run, msg)
+	if err := si.svc.HandleAgentFailure(ctx, run, msg); err != nil {
+		si.logger.Error("failed to handle agent failure for unlaunchable run",
+			zap.String("run_id", run.ID), zap.Error(err))
+	}
 }
 
 // tryRoutingDispatch routes through the provider-routing dispatcher when
