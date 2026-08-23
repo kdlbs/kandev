@@ -9,13 +9,42 @@ owners:
 
 ## Overview
 
-When the Kandev backend receives SIGTERM while an agent turn is in flight, the agent subprocess is torn down and the in-flight prompt fails with an ACP transport error (`-32603 ... peer disconnected before response`). The lifecycle manager currently treats that error completion as a genuine agent failure: it marks the execution `FAILED`, publishes `AgentFailed`, and runs the routing classifier, which labels the abort `agent_runtime_error` (low confidence,...
+When the Kandev backend receives SIGTERM while an agent turn is in flight, the
+agent subprocess is torn down and the in-flight prompt fails with an ACP
+transport error (`-32603 ... peer disconnected before response`). The lifecycle
+manager currently treats that error completion as a genuine agent failure: it
+marks the execution `FAILED`, publishes `AgentFailed`, and runs the routing
+classifier, which labels the abort `agent_runtime_error` (low confidence,
+`classifier_rule=phase.poststart.unknown`). The orchestrator then flips the
+session to a terminal FAILED state and the UI renders a red error banner for
+what was actually a clean, expected shutdown.
+
+This is distinct from the `shutdown-log-noise` spec, which only downgrades log
+severity and explicitly excludes any change to state transitions, returned
+errors, or the classifier. This spec covers the state/UX regression: a
+shutdown-race turn abort must not become a user-visible FAILED session.
+
+Observed incident: task `2a5cad30-cfea-494f-a19c-99b31579879e`, execution
+`5cb0f5e0`. Backend SIGTERM at 19:03:06 correlated with the execution failing at
+19:03:08 and surfacing `agent_runtime_error` in the UI.
 
 ## Requirements
 
 ### REQ-PLATFORM-SHUTDOWN-TURN-FAILURE-SUPPRESSION-001: Do not surface backend-shutdown turn aborts as agent failures
 
-**Intent:** When the Kandev backend receives SIGTERM while an agent turn is in flight, the agent subprocess is torn down and the in-flight prompt fails with an ACP transport error (`-32603 ... peer disconnected before response`). The lifecycle manager currently treats that error completion as a genuine agent failure: it marks the execution `FAILED`, publishes `AgentFailed`, and runs the routing classifier, which labels the abort `agent_runtime_error` (low confidence,...
+**Intent:** When the Kandev backend receives SIGTERM while an agent turn is in flight, the agent
+subprocess is torn down and the in-flight prompt fails with an ACP transport error (`-32603 ... peer
+disconnected before response`). The lifecycle manager currently treats that error completion as a
+genuine agent failure: it marks the execution `FAILED`, publishes `AgentFailed`, and runs the
+routing classifier, which labels the abort `agent_runtime_error` (low confidence,
+`classifier_rule=phase.poststart.unknown`). The orchestrator then flips the session to a terminal
+FAILED state and the UI renders a red error banner for what was actually a clean, expected shutdown.
+This is distinct from the `shutdown-log-noise` spec, which only downgrades log severity and
+explicitly excludes any change to state transitions, returned errors, or the classifier. This spec
+covers the state/UX regression: a shutdown-race turn abort must not become a user-visible FAILED
+session. Observed incident: task `2a5cad30-cfea-494f-a19c-99b31579879e`, execution `5cb0f5e0`.
+Backend SIGTERM at 19:03:06 correlated with the execution failing at 19:03:08 and surfacing
+`agent_runtime_error` in the UI.
 
 #### Acceptance criteria
 

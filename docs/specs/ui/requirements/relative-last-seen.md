@@ -9,13 +9,32 @@ owners:
 
 ## Overview
 
-The **Active sessions** table on `/settings/account/security` renders the "Last seen" column as an absolute timestamp (`formatDateTime`, e.g. "Aug 15, 2026, 3:42 PM"). Absolute stamps are precise but hard to scan: a user reviewing devices signed in to their account must mentally subtract to know whether a session was active moments ago or a month ago. Relative human-readable time ("5 minutes ago", "yesterday") makes session freshness legible at a glance, which is the primary security...
+The **Active sessions** table on `/settings/account/security` renders the "Last seen" column as an
+absolute timestamp (`formatDateTime`, e.g. "Aug 15, 2026, 3:42 PM"). Absolute stamps are precise but
+hard to scan: a user reviewing devices signed in to their account must mentally subtract to know
+whether a session was active moments ago or a month ago. Relative human-readable time ("5 minutes
+ago", "yesterday") makes session freshness legible at a glance, which is the primary security
+question a user is asking.
+
+Relative time is inherently stale the moment it renders, so the label must live-update, and users
+who need the exact moment still need access to it. This feature adds a per-user display option on
+the security page that switches the column to relative time with an absolute-time tooltip on fine
+pointer devices and a touch drawer on coarse-pointer devices.
 
 ## Requirements
 
 ### REQ-UI-RELATIVE-LAST-SEEN-001: Relative Last Seen in Account Security
 
-**Intent:** The **Active sessions** table on `/settings/account/security` renders the "Last seen" column as an absolute timestamp (`formatDateTime`, e.g. "Aug 15, 2026, 3:42 PM"). Absolute stamps are precise but hard to scan: a user reviewing devices signed in to their account must mentally subtract to know whether a session was active moments ago or a month ago. Relative human-readable time ("5 minutes ago", "yesterday") makes session freshness legible at a glance, which is the primary security...
+**Intent:** The **Active sessions** table on `/settings/account/security` renders the "Last seen"
+column as an absolute timestamp (`formatDateTime`, e.g. "Aug 15, 2026, 3:42 PM"). Absolute stamps
+are precise but hard to scan: a user reviewing devices signed in to their account must mentally
+subtract to know whether a session was active moments ago or a month ago. Relative human-readable
+time ("5 minutes ago", "yesterday") makes session freshness legible at a glance, which is the
+primary security question a user is asking. Relative time is inherently stale the moment it renders,
+so the label must live-update, and users who need the exact moment still need access to it. This
+feature adds a per-user display option on the security page that switches the column to relative
+time with an absolute-time tooltip on fine pointer devices and a touch drawer on coarse-pointer
+devices.
 
 #### Acceptance criteria
 

@@ -9,13 +9,24 @@ owners:
 
 ## Overview
 
-Today a user can only install a plugin if they already know its release tarball URL or have a `.tar.gz` to upload (see [plugins spec](plugins.md) → "Install pipeline"). There is no way to *discover* plugins from inside kandev, no curated list of what exists, and no signal for which plugins are worth trusting. Plugin authors have nowhere to publish, and teams have no sanctioned way to share an internal set of plugins. This feature adds a discoverable, curated catalog — kandev's marketplace —...
+Today a user can only install a plugin if they already know its release tarball URL
+or have a `.tar.gz` to upload (see [plugins spec](spec.md) → "Install pipeline").
+There is no way to *discover* plugins from inside kandev, no curated list of what
+exists, and no signal for which plugins are worth trusting. Plugin authors have
+nowhere to publish, and teams have no sanctioned way to share an internal set of
+plugins. This feature adds a discoverable, curated catalog — kandev's marketplace —
+while keeping install-by-URL and sideloading as escape hatches.
 
 ## Requirements
 
 ### REQ-PLUGINS-MARKETPLACE-001: Plugin Marketplace
 
-**Intent:** Today a user can only install a plugin if they already know its release tarball URL or have a `.tar.gz` to upload (see [plugins spec](plugins.md) → "Install pipeline"). There is no way to *discover* plugins from inside kandev, no curated list of what exists, and no signal for which plugins are worth trusting. Plugin authors have nowhere to publish, and teams have no sanctioned way to share an internal set of plugins. This feature adds a discoverable, curated catalog — kandev's marketplace —...
+**Intent:** Today a user can only install a plugin if they already know its release tarball URL or
+have a `.tar.gz` to upload (see [plugins spec](spec.md) → "Install pipeline"). There is no way to
+*discover* plugins from inside kandev, no curated list of what exists, and no signal for which
+plugins are worth trusting. Plugin authors have nowhere to publish, and teams have no sanctioned way
+to share an internal set of plugins. This feature adds a discoverable, curated catalog — kandev's
+marketplace — while keeping install-by-URL and sideloading as escape hatches.
 
 #### Acceptance criteria
 

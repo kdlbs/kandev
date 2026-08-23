@@ -9,13 +9,24 @@ owners:
 
 ## Overview
 
-A task session persists its runtime configuration options globally (model, mode, and provider-defined options like reasoning effort). When a session that ran earlier under one agent type is resumed under a different agent type, options that only the earlier agent understood are replayed onto the new agent. The new agent rejects them, the user sees a startup warning, and the model/mode selector disappears from the chat input, leaving the user unable to change model or mode for the resumed...
+A task session persists its runtime configuration options globally (model, mode,
+and provider-defined options like reasoning effort). When a session that ran
+earlier under one agent type is resumed under a different agent type, options
+that only the earlier agent understood are replayed onto the new agent. The new
+agent rejects them, the user sees a startup warning, and the model/mode selector
+disappears from the chat input, leaving the user unable to change model or mode
+for the resumed session.
 
 ## Requirements
 
 ### REQ-PLATFORM-SESSION-CONFIG-CROSS-AGENT-RECONCILE-001: Session Config Reconciliation Across Agent Types
 
-**Intent:** A task session persists its runtime configuration options globally (model, mode, and provider-defined options like reasoning effort). When a session that ran earlier under one agent type is resumed under a different agent type, options that only the earlier agent understood are replayed onto the new agent. The new agent rejects them, the user sees a startup warning, and the model/mode selector disappears from the chat input, leaving the user unable to change model or mode for the resumed...
+**Intent:** A task session persists its runtime configuration options globally (model, mode, and
+provider-defined options like reasoning effort). When a session that ran earlier under one agent
+type is resumed under a different agent type, options that only the earlier agent understood are
+replayed onto the new agent. The new agent rejects them, the user sees a startup warning, and the
+model/mode selector disappears from the chat input, leaving the user unable to change model or mode
+for the resumed session.
 
 #### Acceptance criteria
 

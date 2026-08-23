@@ -9,13 +9,24 @@ owners:
 
 ## Overview
 
-When Cursor's agent dispatches a subagent, the only thing a Kandev user sees is a generic `Task: Subagent task` card with no prompt, no model, and no identity. All the useful detail (what the subagent was asked to do, which model runs it, its agent id, whether it runs in the background) is delivered by Cursor over a non-standard agent-to-client request, `cursor/task`, which Kandev currently rejects. The subagent's work is therefore opaque, and a backgrounded subagent looks identical to one...
+When Cursor's agent dispatches a subagent, the only thing a Kandev user sees is a
+generic `Task: Subagent task` card with no prompt, no model, and no identity. All
+the useful detail (what the subagent was asked to do, which model runs it, its
+agent id, whether it runs in the background) is delivered by Cursor over a
+non-standard agent-to-client request, `cursor/task`, which Kandev currently
+rejects. The subagent's work is therefore opaque, and a backgrounded subagent
+looks identical to one that already finished.
 
 ## Requirements
 
 ### REQ-AGENTS-CURSOR-SUBAGENT-METADATA-001: Cursor Subagent Metadata
 
-**Intent:** When Cursor's agent dispatches a subagent, the only thing a Kandev user sees is a generic `Task: Subagent task` card with no prompt, no model, and no identity. All the useful detail (what the subagent was asked to do, which model runs it, its agent id, whether it runs in the background) is delivered by Cursor over a non-standard agent-to-client request, `cursor/task`, which Kandev currently rejects. The subagent's work is therefore opaque, and a backgrounded subagent looks identical to one...
+**Intent:** When Cursor's agent dispatches a subagent, the only thing a Kandev user sees is a
+generic `Task: Subagent task` card with no prompt, no model, and no identity. All the useful detail
+(what the subagent was asked to do, which model runs it, its agent id, whether it runs in the
+background) is delivered by Cursor over a non-standard agent-to-client request, `cursor/task`, which
+Kandev currently rejects. The subagent's work is therefore opaque, and a backgrounded subagent looks
+identical to one that already finished.
 
 #### Acceptance criteria
 

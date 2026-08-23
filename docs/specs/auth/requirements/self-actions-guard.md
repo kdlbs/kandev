@@ -9,13 +9,24 @@ owners:
 
 ## Overview
 
-Settings > System > Users lets an admin change the role or status of any listed account, including their own. The backend already enforces one guard on these actions: an active admin cannot be demoted or disabled when no other active admin exists (`ErrLastAdmin` -> 409). The page does not reflect that guard, so the last active admin can click "Make member" or "Disable" on a row and only then discover the rejection in an error toast. The buttons should show the guard up front: greyed out...
+Settings > System > Users lets an admin change the role or status of any listed
+account, including their own. The backend already enforces one guard on these
+actions: an active admin cannot be demoted or disabled when no other active
+admin exists (`ErrLastAdmin` -> 409). The page does not reflect that guard, so
+the last active admin can click "Make member" or "Disable" on a row and only
+then discover the rejection in an error toast. The buttons should show the
+guard up front: greyed out exactly when the backend would reject the action.
 
 ## Requirements
 
 ### REQ-AUTH-SELF-ACTIONS-GUARD-001: Self-Actions Guard in System Users
 
-**Intent:** Settings > System > Users lets an admin change the role or status of any listed account, including their own. The backend already enforces one guard on these actions: an active admin cannot be demoted or disabled when no other active admin exists (`ErrLastAdmin` -> 409). The page does not reflect that guard, so the last active admin can click "Make member" or "Disable" on a row and only then discover the rejection in an error toast. The buttons should show the guard up front: greyed out...
+**Intent:** Settings > System > Users lets an admin change the role or status of any listed account,
+including their own. The backend already enforces one guard on these actions: an active admin cannot
+be demoted or disabled when no other active admin exists (`ErrLastAdmin` -> 409). The page does not
+reflect that guard, so the last active admin can click "Make member" or "Disable" on a row and only
+then discover the rejection in an error toast. The buttons should show the guard up front: greyed
+out exactly when the backend would reject the action.
 
 #### Acceptance criteria
 

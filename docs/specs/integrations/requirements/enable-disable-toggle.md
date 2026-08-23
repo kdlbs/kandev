@@ -9,29 +9,6 @@ owners:
 
 ## Overview
 
-Every third-party integration (Azure DevOps, GitHub, GitLab, Jira, Linear, Sentry) can be connected with credentials, but only Jira, Linear and Sentry currently expose a user-facing on/off switch for their UI surfaces. Azure DevOps, GitHub and GitLab have no such switch. Users who want to temporarily silence an integration (e.g. while its credentials are being rotated, or because a workspace doesn't use it) have no consistent, discoverable way to do that across all six integrations, and no...
-
-## Requirements
-
-### REQ-INTEGRATIONS-ENABLE-DISABLE-TOGGLE-001: Integration Enable/Disable Toggle & Nav Visibility
-
-**Intent:** Every third-party integration (Azure DevOps, GitHub, GitLab, Jira, Linear, Sentry) can be connected with credentials, but only Jira, Linear and Sentry currently expose a user-facing on/off switch for their UI surfaces. Azure DevOps, GitHub and GitLab have no such switch. Users who want to temporarily silence an integration (e.g. while its credentials are being rotated, or because a workspace doesn't use it) have no consistent, discoverable way to do that across all six integrations, and no...
-
-#### Acceptance criteria
-
-- **AC-INTEGRATIONS-ENABLE-DISABLE-TOGGLE-001.1:** Every integration (Azure DevOps, GitHub, GitLab, Jira, Linear, Sentry) SHALL expose an enable/disable slider on its own settings page (`/settings/integrations/<slug>`, and the per-workspace equivalent `/settings/workspaces/<id>/integrations/<slug>`). Jira, Linear and Sentry already have this; Azure DevOps, GitHub and GitLab gain it.
-- **AC-INTEGRATIONS-ENABLE-DISABLE-TOGGLE-001.2:** The same slider SHALL also appear on each integration's row/card on the integrations index page (`/settings/integrations` and its per-workspace equivalent), so a user can enable or disable any integration without opening its detail page.
-- **AC-INTEGRATIONS-ENABLE-DISABLE-TOGGLE-001.3:** The enabled state SHALL be scoped to a workspace. Everything else about an integration already is (credentials, health, and the settings page the slider lives on, `/settings/workspaces/<id>/integrations/<slug>`), so disabling an integration in one workspace MUST NOT disable it in any other. Every surface that reads the toggle reads it for the workspace it is showing: the sliders for the workspace whose settings page they are on, the left-panel nav and its "hide disabled" filter for the active workspace, and the Settings menu tree for each workspace it lists.
-- **AC-INTEGRATIONS-ENABLE-DISABLE-TOGGLE-001.4:** Toggling the slider in either location SHALL keep both locations in sync for that workspace (same underlying per-integration, per-workspace enabled state).
-- **AC-INTEGRATIONS-ENABLE-DISABLE-TOGGLE-001.5:** The enabled state for Azure DevOps, GitHub and GitLab is purely a presentation/navigation-visibility switch: it MUST NOT change whether their existing PR/work-item/board/MR features function. This mirrors that those three integrations have no existing UI surface gated on an "available" concept beyond navigation and their own settings page banner.
-- **AC-INTEGRATIONS-ENABLE-DISABLE-TOGGLE-001.6:** The integrations index page SHALL gain one new setting, **"Hide disabled integrations from left panel navigation"**, disabled (off) by default.
-- **AC-INTEGRATIONS-ENABLE-DISABLE-TOGGLE-001.7:** When that setting is **off** (default), a disabled-but-configured integration MUST still appear in the left panel navigation (the sidebar's Integrations section, its mobile-menu equivalent, and — whenever a tree menu mode renders it; the default flat menu lists no per-workspace rows at all — the Settings left panel's per-workspace Integrations list under Settings → Workspaces → <workspace>) exactly as it does today for an enabled integration — only credential/health status controls nav visibility.
-- **AC-INTEGRATIONS-ENABLE-DISABLE-TOGGLE-001.8:** When that setting is **on**, a disabled integration MUST be hidden from all of those left-panel surfaces regardless of its credential/health status. An enabled, healthy integration is unaffected. Only integrations whose enable/disable toggle is off are hidden — an enabled-but-unconfigured integration stays listed (the Settings tree keeps its own configured-status badge convention).
-
-## Migrated source detail
-
-## Why
-
 Every third-party integration (Azure DevOps, GitHub, GitLab, Jira, Linear,
 Sentry) can be connected with credentials, but only Jira, Linear and Sentry
 currently expose a user-facing on/off switch for their UI surfaces. Azure
@@ -48,6 +25,35 @@ toggle first shipped install-wide: turning GitHub off for one workspace turned
 it off for every workspace, while the credentials it gates stay per workspace.
 That is corrected here, and the requirements below now describe the
 per-workspace toggle.
+
+## Requirements
+
+### REQ-INTEGRATIONS-ENABLE-DISABLE-TOGGLE-001: Integration Enable/Disable Toggle & Nav Visibility
+
+**Intent:** Every third-party integration (Azure DevOps, GitHub, GitLab, Jira, Linear, Sentry) can
+be connected with credentials, but only Jira, Linear and Sentry currently expose a user-facing
+on/off switch for their UI surfaces. Azure DevOps, GitHub and GitLab have no such switch. Users who
+want to temporarily silence an integration (e.g. while its credentials are being rotated, or because
+a workspace doesn't use it) have no consistent, discoverable way to do that across all six
+integrations, and no way to control whether a disabled-but-still-configured integration continues to
+clutter the left panel navigation. (Slack was retired from the core app to an external plugin after
+this spec was written and is out of scope.) "Because a workspace doesn't use it" was one of the
+reasons above, but the toggle first shipped install-wide: turning GitHub off for one workspace
+turned it off for every workspace, while the credentials it gates stay per workspace. That is
+corrected here, and the requirements below now describe the per-workspace toggle.
+
+#### Acceptance criteria
+
+- **AC-INTEGRATIONS-ENABLE-DISABLE-TOGGLE-001.1:** Every integration (Azure DevOps, GitHub, GitLab, Jira, Linear, Sentry) SHALL expose an enable/disable slider on its own settings page (`/settings/integrations/<slug>`, and the per-workspace equivalent `/settings/workspaces/<id>/integrations/<slug>`). Jira, Linear and Sentry already have this; Azure DevOps, GitHub and GitLab gain it.
+- **AC-INTEGRATIONS-ENABLE-DISABLE-TOGGLE-001.2:** The same slider SHALL also appear on each integration's row/card on the integrations index page (`/settings/integrations` and its per-workspace equivalent), so a user can enable or disable any integration without opening its detail page.
+- **AC-INTEGRATIONS-ENABLE-DISABLE-TOGGLE-001.3:** The enabled state SHALL be scoped to a workspace. Everything else about an integration already is (credentials, health, and the settings page the slider lives on, `/settings/workspaces/<id>/integrations/<slug>`), so disabling an integration in one workspace MUST NOT disable it in any other. Every surface that reads the toggle reads it for the workspace it is showing: the sliders for the workspace whose settings page they are on, the left-panel nav and its "hide disabled" filter for the active workspace, and the Settings menu tree for each workspace it lists.
+- **AC-INTEGRATIONS-ENABLE-DISABLE-TOGGLE-001.4:** Toggling the slider in either location SHALL keep both locations in sync for that workspace (same underlying per-integration, per-workspace enabled state).
+- **AC-INTEGRATIONS-ENABLE-DISABLE-TOGGLE-001.5:** The enabled state for Azure DevOps, GitHub and GitLab is purely a presentation/navigation-visibility switch: it MUST NOT change whether their existing PR/work-item/board/MR features function. This mirrors that those three integrations have no existing UI surface gated on an "available" concept beyond navigation and their own settings page banner.
+- **AC-INTEGRATIONS-ENABLE-DISABLE-TOGGLE-001.6:** The integrations index page SHALL gain one new setting, **"Hide disabled integrations from left panel navigation"**, disabled (off) by default.
+- **AC-INTEGRATIONS-ENABLE-DISABLE-TOGGLE-001.7:** When that setting is **off** (default), a disabled-but-configured integration MUST still appear in the left panel navigation (the sidebar's Integrations section, its mobile-menu equivalent, and — whenever a tree menu mode renders it; the default flat menu lists no per-workspace rows at all — the Settings left panel's per-workspace Integrations list under Settings → Workspaces → <workspace>) exactly as it does today for an enabled integration — only credential/health status controls nav visibility.
+- **AC-INTEGRATIONS-ENABLE-DISABLE-TOGGLE-001.8:** When that setting is **on**, a disabled integration MUST be hidden from all of those left-panel surfaces regardless of its credential/health status. An enabled, healthy integration is unaffected. Only integrations whose enable/disable toggle is off are hidden — an enabled-but-unconfigured integration stays listed (the Settings tree keeps its own configured-status badge convention).
+
+## Migrated source detail
 
 ## What
 

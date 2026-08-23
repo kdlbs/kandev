@@ -11,7 +11,7 @@ import (
 )
 
 // TestCostEventContractMigration_LegacyRowsGetNullColumns covers the
-// legacy-column contract from docs/specs/office/costs.md: an office_cost_events
+// legacy-column contract from docs/specs/office/requirements/costs.md: an office_cost_events
 // table that predates the cache-split / cost-provenance / turn-attribution
 // columns gets them added as nullable, a pre-existing row is left with NULL
 // (never 0) in every new column, the partial unique index on

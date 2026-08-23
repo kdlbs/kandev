@@ -34,7 +34,7 @@ type AgentProfileResolver func(profileID string) *AgentProfilePortable
 // during workflow-sync reconciliation); implementations should keep it when
 // it still matches the descriptor even if the profile was since disabled -
 // disabling only hides a profile from new selection, it doesn't touch
-// existing bindings (docs/specs/agents/profile-disable.md).
+// existing bindings (docs/specs/agents/requirements/profile-disable.md).
 type AgentProfileMatcher func(agentName, model, mode, currentID string) string
 
 // WorkflowPortable is a workflow without instance-specific fields (IDs, timestamps).

@@ -9,13 +9,18 @@ owners:
 
 ## Overview
 
-Review feedback on agent-written code only reaches a Kandev user after they push and open a pull request, because every reviewer Kandev can reach today (CodeRabbit, Greptile, cubic) lives in GitHub CI. That leaves the working diff — the thing the user is actually looking at in the Changes/Review panel — unreviewed, gives nothing at all to GitLab, Azure DevOps, and local-only work, and never lands in Kandev's own review surface where anchored comments, reviewed hashes, and stale detection...
+Review feedback on agent-written code only reaches a Kandev user after they push and open a pull request, because every reviewer Kandev can reach today (CodeRabbit, Greptile, cubic) lives in GitHub CI. That leaves the working diff — the thing the user is actually looking at in the Changes/Review panel — unreviewed, gives nothing at all to GitLab, Azure DevOps, and local-only work, and never lands in Kandev's own review surface where anchored comments, reviewed hashes, and stale detection already live.
 
 ## Requirements
 
 ### REQ-AGENTS-NATIVE-CODE-REVIEW-001: Native Code Review
 
-**Intent:** Review feedback on agent-written code only reaches a Kandev user after they push and open a pull request, because every reviewer Kandev can reach today (CodeRabbit, Greptile, cubic) lives in GitHub CI. That leaves the working diff — the thing the user is actually looking at in the Changes/Review panel — unreviewed, gives nothing at all to GitLab, Azure DevOps, and local-only work, and never lands in Kandev's own review surface where anchored comments, reviewed hashes, and stale detection...
+**Intent:** Review feedback on agent-written code only reaches a Kandev user after they push and
+open a pull request, because every reviewer Kandev can reach today (CodeRabbit, Greptile, cubic)
+lives in GitHub CI. That leaves the working diff — the thing the user is actually looking at in the
+Changes/Review panel — unreviewed, gives nothing at all to GitLab, Azure DevOps, and local-only
+work, and never lands in Kandev's own review surface where anchored comments, reviewed hashes, and
+stale detection already live.
 
 #### Acceptance criteria
 

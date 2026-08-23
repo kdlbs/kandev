@@ -96,7 +96,7 @@ var _ pluginsdk.Host = (*pluginHost)(nil)
 
 // permissionDenied builds the gRPC error RemotePlugin/Host RPCs return for
 // an undeclared capability, matching the wire-level message from
-// docs/specs/plugins/spec.md ("Permissions"): "capability '<name>' not
+// docs/specs/plugins/requirements/plugins.md ("Permissions"): "capability '<name>' not
 // declared".
 func permissionDenied(capability string) error {
 	return status.Errorf(codes.PermissionDenied, "capability '%s' not declared", capability)

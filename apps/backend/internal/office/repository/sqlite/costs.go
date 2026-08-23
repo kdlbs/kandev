@@ -28,7 +28,7 @@ import (
 var ErrDuplicateUsageEvent = errors.New("duplicate usage_event_id")
 
 // usageEventIndexName is the partial unique index enforcing at most one row
-// per non-NULL usage_event_id (docs/specs/office/costs.md).
+// per non-NULL usage_event_id (docs/specs/office/requirements/costs.md).
 const usageEventIndexName = "uniq_office_cost_usage_event"
 
 // sqliteUsageEventViolationMessage is the substring go-sqlite3 puts in a
@@ -73,7 +73,7 @@ func (r *Repository) CreateCostEvent(ctx context.Context, event *models.CostEven
 // against tx when non-nil (falling back to r.db, the shared writer
 // connection, when tx is nil) so a caller can make this atomic with another
 // write in the same transaction — see BeginTx and
-// shared.SessionUsageWriterTx's doc comment for why (docs/specs/office/costs.md,
+// shared.SessionUsageWriterTx's doc comment for why (docs/specs/office/requirements/costs.md,
 // PR #2606 review).
 func (r *Repository) CreateCostEventTx(ctx context.Context, tx *sqlx.Tx, event *models.CostEvent) error {
 	if event.ID == "" {

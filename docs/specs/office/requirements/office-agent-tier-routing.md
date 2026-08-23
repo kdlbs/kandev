@@ -9,13 +9,33 @@ owners:
 
 ## Overview
 
-Office agents in one workspace must be able to run on different model tiers. Today they can — a per-agent tier override already exists end to end — but the capability is undiscoverable, the org has no way to express a tier as a property of a role, and the Office agent record still carries a `model` field that routing ignores. The result is an operator who configures a Critic on `opus[1m]`, watches it run on `sonnet`, and has nothing in the product that explains the difference. This spec...
+# Office per-agent and per-role tier selection
+
+Office agents in one workspace must be able to run on different model tiers. Today
+they can — a per-agent tier override already exists end to end — but the capability is
+undiscoverable, the org has no way to express a tier as a property of a role, and the
+Office agent record still carries a `model` field that routing ignores. The result is
+an operator who configures a Critic on `opus[1m]`, watches it run on `sonnet`, and has
+nothing in the product that explains the difference.
+
+This spec extends `docs/specs/office/requirements/routing.md`. That spec remains authoritative for
+tiers, provider order, execution profiles, provider health, and wake-reason policy.
+Nothing here changes those contracts except where explicitly named in
+[Precedence](#precedence-contract).
 
 ## Requirements
 
 ### REQ-OFFICE-OFFICE-AGENT-TIER-ROUTING-001: Office per-agent and per-role tier selection
 
-**Intent:** Office agents in one workspace must be able to run on different model tiers. Today they can — a per-agent tier override already exists end to end — but the capability is undiscoverable, the org has no way to express a tier as a property of a role, and the Office agent record still carries a `model` field that routing ignores. The result is an operator who configures a Critic on `opus[1m]`, watches it run on `sonnet`, and has nothing in the product that explains the difference. This spec...
+**Intent:** # Office per-agent and per-role tier selection Office agents in one workspace must be
+able to run on different model tiers. Today they can — a per-agent tier override already exists end
+to end — but the capability is undiscoverable, the org has no way to express a tier as a property of
+a role, and the Office agent record still carries a `model` field that routing ignores. The result
+is an operator who configures a Critic on `opus[1m]`, watches it run on `sonnet`, and has nothing in
+the product that explains the difference. This spec extends `docs/specs/office/requirements/routing.md`. That
+spec remains authoritative for tiers, provider order, execution profiles, provider health, and
+wake-reason policy. Nothing here changes those contracts except where explicitly named in
+[Precedence](#precedence-contract).
 
 #### Acceptance criteria
 

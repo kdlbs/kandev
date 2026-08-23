@@ -579,7 +579,7 @@ type PlanRepository interface {
 
 // SubagentContextRepository persists the durable, queryable record of a
 // subagent (Task tool) invocation. See
-// docs/specs/subagent-context-persistence/spec.md.
+// docs/specs/agents/requirements/subagent-context-persistence.md.
 type SubagentContextRepository interface {
 	// UpsertSubagentContext inserts or merges one subagent invocation row,
 	// keyed on (task_session_id, tool_call_id). A single atomic statement —

@@ -9,13 +9,23 @@ owners:
 
 ## Overview
 
-Office tasks are the unit of work in office mode: a single task carries a description, a workspace, an assignee, optional reviewers and approvers, blockers, parent/child relationships, a chat thread, and a per-agent session of working memory. Users and agents need to drive these tasks end-to-end - hand off context across a tree of subtasks, request review and approval, edit properties inline, see the agent's work in the chat, react to property changes without an agent having to poll, and...
+Office tasks are the unit of work in office mode: a single task carries a description, a workspace, an assignee, optional reviewers and approvers, blockers, parent/child relationships, a chat thread, and a per-agent session of working memory. Users and agents need to drive these tasks end-to-end - hand off context across a tree of subtasks, request review and approval, edit properties inline, see the agent's work in the chat, react to property changes without an agent having to poll, and preserve each participant's conversation across many short-lived agent runs.
+
+This spec consolidates the office task surface: lifecycle, parent/child handoffs, approval flow, advanced execution mode, blocker cycle detection, the reactivity pipeline, per-(task, agent) session identity, inline editable properties, and the chat / activity views.
 
 ## Requirements
 
 ### REQ-OFFICE-TASKS-001: Office Tasks
 
-**Intent:** Office tasks are the unit of work in office mode: a single task carries a description, a workspace, an assignee, optional reviewers and approvers, blockers, parent/child relationships, a chat thread, and a per-agent session of working memory. Users and agents need to drive these tasks end-to-end - hand off context across a tree of subtasks, request review and approval, edit properties inline, see the agent's work in the chat, react to property changes without an agent having to poll, and...
+**Intent:** Office tasks are the unit of work in office mode: a single task carries a description, a
+workspace, an assignee, optional reviewers and approvers, blockers, parent/child relationships, a
+chat thread, and a per-agent session of working memory. Users and agents need to drive these tasks
+end-to-end - hand off context across a tree of subtasks, request review and approval, edit
+properties inline, see the agent's work in the chat, react to property changes without an agent
+having to poll, and preserve each participant's conversation across many short-lived agent runs.
+This spec consolidates the office task surface: lifecycle, parent/child handoffs, approval flow,
+advanced execution mode, blocker cycle detection, the reactivity pipeline, per-(task, agent) session
+identity, inline editable properties, and the chat / activity views.
 
 #### Acceptance criteria
 

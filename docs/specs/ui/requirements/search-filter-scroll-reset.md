@@ -9,13 +9,28 @@ owners:
 
 ## Overview
 
-Every search/filter dropdown in the web UI renders its results inside the shared `@kandev/ui/command` list (a `cmdk` list wrapped in a scrollable `div`). When the user scrolls that list and then types (or edits) the search query, `cmdk` re-filters and re-sorts the items and re-renders, but it never resets the list's scroll offset. The viewport stays parked at the previous `scrollTop`, so the newly filtered results can render with the top entries scrolled out of view and a scrollbar thumb...
+Every search/filter dropdown in the web UI renders its results inside the shared
+`@kandev/ui/command` list (a `cmdk` list wrapped in a scrollable `div`). When the
+user scrolls that list and then types (or edits) the search query, `cmdk`
+re-filters and re-sorts the items and re-renders, but it never resets the list's
+scroll offset. The viewport stays parked at the previous `scrollTop`, so the
+newly filtered results can render with the top entries scrolled out of view and a
+scrollbar thumb sitting in the middle of a now-short list. This is visible in the
+Command Center (command palette) and the model selector, and affects the shared
+combobox and filter multi-select that build on the same primitive.
 
 ## Requirements
 
 ### REQ-UI-SEARCH-FILTER-SCROLL-RESET-001: Search/filter dropdown scroll reset
 
-**Intent:** Every search/filter dropdown in the web UI renders its results inside the shared `@kandev/ui/command` list (a `cmdk` list wrapped in a scrollable `div`). When the user scrolls that list and then types (or edits) the search query, `cmdk` re-filters and re-sorts the items and re-renders, but it never resets the list's scroll offset. The viewport stays parked at the previous `scrollTop`, so the newly filtered results can render with the top entries scrolled out of view and a scrollbar thumb...
+**Intent:** Every search/filter dropdown in the web UI renders its results inside the shared
+`@kandev/ui/command` list (a `cmdk` list wrapped in a scrollable `div`). When the user scrolls that
+list and then types (or edits) the search query, `cmdk` re-filters and re-sorts the items and
+re-renders, but it never resets the list's scroll offset. The viewport stays parked at the previous
+`scrollTop`, so the newly filtered results can render with the top entries scrolled out of view and
+a scrollbar thumb sitting in the middle of a now-short list. This is visible in the Command Center
+(command palette) and the model selector, and affects the shared combobox and filter multi-select
+that build on the same primitive.
 
 #### Acceptance criteria
 

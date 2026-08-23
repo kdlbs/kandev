@@ -114,7 +114,7 @@ function pluginExecutablePath(installPath: string): string {
  * Stages a filesystem sideload: extracts the same fixture package the
  * upload tests use directly into `<pluginsDir>/<id>/<version>/`, with no
  * `{id}.yml` record — the on-disk shape `Service.Sync`'s directory-sideload
- * step looks for (docs/specs/plugins/spec.md "Filesystem sideloading &
+ * step looks for (docs/specs/plugins/requirements/plugins.md "Filesystem sideloading &
  * sync"). `checksums.txt` lands in the directory alongside the rest of the
  * package; the sideload path ignores it (only the tarball-install path
  * verifies checksums).

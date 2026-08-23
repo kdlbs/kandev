@@ -195,7 +195,7 @@ type SessionUsageWriter interface {
 // SessionUsageWriterTx is an optional capability a SessionUsageWriter
 // implementation may satisfy to run the increment inside a caller-supplied
 // transaction, so it can be made atomic with the office_cost_events insert
-// that produced the deltas (docs/specs/office/costs.md, PR #2606 review):
+// that produced the deltas (docs/specs/office/requirements/costs.md, PR #2606 review):
 // without this, a rollup-increment failure after a successful cost-event
 // insert is logged and swallowed, and any later redelivery of the same
 // completion is caught by the usage_event_id unique index and dropped as a

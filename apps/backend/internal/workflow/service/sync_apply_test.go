@@ -674,7 +674,7 @@ func TestApplySyncedWorkflows_WorkflowRebindWarningDoesNotFireOnFailedUpdate(t *
 // updateSyncedWorkflow passes the step's existing AgentProfileID to the
 // matcher as currentID. A real matcher (buildAgentProfileMatcher) uses that
 // to preserve a binding that was disabled after the fact instead of treating
-// disablement as a rebind (docs/specs/agents/profile-disable.md). This test
+// disablement as a rebind (docs/specs/agents/requirements/profile-disable.md). This test
 // stubs that same contract: the matcher echoes currentID back when given
 // one, standing in for "the bound profile still matches, keep it".
 func TestApplySyncedWorkflows_StepMatcherReceivesCurrentBinding(t *testing.T) {

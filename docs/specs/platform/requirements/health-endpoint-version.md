@@ -9,13 +9,57 @@ owners:
 
 ## Overview
 
-`GET /health` is the endpoint every operator already polls. Kubernetes liveness and readiness probes (`k8s/deployment.yaml:39,47`), the CLI (`apps/cli/src/health.ts`), the Go launcher (`internal/launcher/health.go:44`), the Homebrew service wrapper (`scripts/release/kandev.rb`), the Tauri desktop shell (`apps/desktop/src-tauri/src/backend.rs:555`), and the Playwright fixture (`apps/web/e2e/fixtures/backend.ts:461`) all hit it. It answers "is this process up?" but not "*which build* is up?",...
+`GET /health` is the endpoint every operator already polls. Kubernetes liveness and
+readiness probes (`k8s/deployment.yaml:39,47`), the CLI (`apps/cli/src/health.ts`),
+the Go launcher (`internal/launcher/health.go:44`), the Homebrew service wrapper
+(`scripts/release/kandev.rb`), the Tauri desktop shell
+(`apps/desktop/src-tauri/src/backend.rs:555`), and the Playwright fixture
+(`apps/web/e2e/fixtures/backend.ts:461`) all hit it. It answers "is this process up?"
+but not "*which build* is up?", so an operator watching a rollout, a bad canary, or a
+stuck upgrade cannot tell from their monitoring which version is answering.
+
+The version is not reachable from an equivalent place today. `GET /api/v1/system/info`
+does return it, but that route is **not** on the unauthenticated allowlist
+(`internal/auth/httpmw/middleware.go:85-99`), while `/health` **is**. Once auth is
+enabled, a monitoring system must be issued a credential purely to read a version
+string. Adding the field to `/health` closes that gap for every unauthenticated prober
+without weakening any existing boundary.
+
+**Correction to the originating request.** The request stated that `kandev_version` is
+"already on `/system/info`". That is not accurate, and the difference matters because it
+determines the field name this spec freezes. `GET /api/v1/system/info` returns a field
+named **`version`** (`internal/system/info/info.go:19`), not `kandev_version`. The
+identifier `kandev_version` does exist in this codebase, but for two unrelated things:
+the `kandev_meta.kandev_version` database key that drives upgrade-backup safety
+(`internal/persistence/meta.go:83`, ADR `0008-db-upgrade-safety.md`), and the
+share-snapshot payload field (`internal/task/share/snapshot.go:19`). Both names
+therefore had prior art. The name was resolved by explicit decision — see
+[Decisions](#decisions).
 
 ## Requirements
 
 ### REQ-PLATFORM-HEALTH-ENDPOINT-VERSION-001: Health Endpoint — Surface the Running Version
 
-**Intent:** `GET /health` is the endpoint every operator already polls. Kubernetes liveness and readiness probes (`k8s/deployment.yaml:39,47`), the CLI (`apps/cli/src/health.ts`), the Go launcher (`internal/launcher/health.go:44`), the Homebrew service wrapper (`scripts/release/kandev.rb`), the Tauri desktop shell (`apps/desktop/src-tauri/src/backend.rs:555`), and the Playwright fixture (`apps/web/e2e/fixtures/backend.ts:461`) all hit it. It answers "is this process up?" but not "*which build* is up?",...
+**Intent:** `GET /health` is the endpoint every operator already polls. Kubernetes liveness and
+readiness probes (`k8s/deployment.yaml:39,47`), the CLI (`apps/cli/src/health.ts`), the Go launcher
+(`internal/launcher/health.go:44`), the Homebrew service wrapper (`scripts/release/kandev.rb`), the
+Tauri desktop shell (`apps/desktop/src-tauri/src/backend.rs:555`), and the Playwright fixture
+(`apps/web/e2e/fixtures/backend.ts:461`) all hit it. It answers "is this process up?" but not
+"*which build* is up?", so an operator watching a rollout, a bad canary, or a stuck upgrade cannot
+tell from their monitoring which version is answering. The version is not reachable from an
+equivalent place today. `GET /api/v1/system/info` does return it, but that route is **not** on the
+unauthenticated allowlist (`internal/auth/httpmw/middleware.go:85-99`), while `/health` **is**. Once
+auth is enabled, a monitoring system must be issued a credential purely to read a version string.
+Adding the field to `/health` closes that gap for every unauthenticated prober without weakening any
+existing boundary. **Correction to the originating request.** The request stated that
+`kandev_version` is "already on `/system/info`". That is not accurate, and the difference matters
+because it determines the field name this spec freezes. `GET /api/v1/system/info` returns a field
+named **`version`** (`internal/system/info/info.go:19`), not `kandev_version`. The identifier
+`kandev_version` does exist in this codebase, but for two unrelated things: the
+`kandev_meta.kandev_version` database key that drives upgrade-backup safety
+(`internal/persistence/meta.go:83`, ADR `0008-db-upgrade-safety.md`), and the share-snapshot payload
+field (`internal/task/share/snapshot.go:19`). Both names therefore had prior art. The name was
+resolved by explicit decision — see [Decisions](#decisions).
 
 #### Acceptance criteria
 

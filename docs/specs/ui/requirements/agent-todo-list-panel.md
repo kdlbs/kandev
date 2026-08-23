@@ -10,13 +10,28 @@ owners:
 
 ## Overview
 
-The coding agent's own mid-session todo list (Claude Code's `TodoWrite`-style tool calls, and native ACP `session/update` Plan notifications) is already tracked end-to-end by the backend and streamed live to the frontend, but today it only ever renders inline: a small status-bar chip above the chat composer (`TodoIndicator`) and a collapsible card in the chat transcript (`TodoMessage`). Users who want to keep the current todo checklist visible while scrolled away from the composer, or...
+The coding agent's own mid-session todo list (Claude Code's `TodoWrite`-style
+tool calls, and native ACP `session/update` Plan notifications) is already
+tracked end-to-end by the backend and streamed live to the frontend, but today
+it only ever renders inline: a small status-bar chip above the chat composer
+(`TodoIndicator`) and a collapsible card in the chat transcript
+(`TodoMessage`). Users who want to keep the current todo checklist visible
+while scrolled away from the composer, or alongside Files/Changes, have no way
+to do so. Users need a Settings option to enable or disable a persistent
+**Todos** tab in the desktop right panel that shows the same checklist.
 
 ## Requirements
 
 ### REQ-UI-AGENT-TODO-LIST-PANEL-001: Agent Todo List Panel
 
-**Intent:** The coding agent's own mid-session todo list (Claude Code's `TodoWrite`-style tool calls, and native ACP `session/update` Plan notifications) is already tracked end-to-end by the backend and streamed live to the frontend, but today it only ever renders inline: a small status-bar chip above the chat composer (`TodoIndicator`) and a collapsible card in the chat transcript (`TodoMessage`). Users who want to keep the current todo checklist visible while scrolled away from the composer, or...
+**Intent:** The coding agent's own mid-session todo list (Claude Code's `TodoWrite`-style tool
+calls, and native ACP `session/update` Plan notifications) is already tracked end-to-end by the
+backend and streamed live to the frontend, but today it only ever renders inline: a small status-bar
+chip above the chat composer (`TodoIndicator`) and a collapsible card in the chat transcript
+(`TodoMessage`). Users who want to keep the current todo checklist visible while scrolled away from
+the composer, or alongside Files/Changes, have no way to do so. Users need a Settings option to
+enable or disable a persistent **Todos** tab in the desktop right panel that shows the same
+checklist.
 
 #### Acceptance criteria
 

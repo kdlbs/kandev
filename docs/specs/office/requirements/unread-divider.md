@@ -9,13 +9,25 @@ owners:
 
 ## Overview
 
-Navigating back into a task session that kept running in the background previously dropped the reader at the bottom of the transcript with no indication of what was new. A "New" divider identifies that pre-existing unread boundary, but it must never first emerge solely because messages arrive after the session is already visible. This spec documents the persisted cursor this feature is built on, since it's new product state whose scope (global vs. per-user) and edge-case behavior (first...
+Navigating back into a task session that kept running in the background
+previously dropped the reader at the bottom of the transcript with no
+indication of what was new. A "New" divider identifies that pre-existing
+unread boundary, but it must never first emerge solely because messages arrive
+after the session is already visible. This spec documents the persisted cursor
+this feature is built on, since it's new product state whose scope (global vs.
+per-user) and edge-case behavior (first visit, pagination, initial scroll)
+aren't otherwise obvious from the UI alone.
 
 ## Requirements
 
 ### REQ-OFFICE-UNREAD-DIVIDER-001: Office: Slack-Style Unread Divider
 
-**Intent:** Navigating back into a task session that kept running in the background previously dropped the reader at the bottom of the transcript with no indication of what was new. A "New" divider identifies that pre-existing unread boundary, but it must never first emerge solely because messages arrive after the session is already visible. This spec documents the persisted cursor this feature is built on, since it's new product state whose scope (global vs. per-user) and edge-case behavior (first...
+**Intent:** Navigating back into a task session that kept running in the background previously
+dropped the reader at the bottom of the transcript with no indication of what was new. A "New"
+divider identifies that pre-existing unread boundary, but it must never first emerge solely because
+messages arrive after the session is already visible. This spec documents the persisted cursor this
+feature is built on, since it's new product state whose scope (global vs. per-user) and edge-case
+behavior (first visit, pagination, initial scroll) aren't otherwise obvious from the UI alone.
 
 #### Acceptance criteria
 

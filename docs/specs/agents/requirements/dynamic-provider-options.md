@@ -10,13 +10,28 @@ owners:
 
 ## Overview
 
-Provider capabilities are not always properties of an agent family alone. Some ACP providers change the available configuration options when a model is selected. OpenCode currently demonstrates this split: the task chat selector receives model-dependent options such as reasoning effort from the live session, while the workflow session override editor and the OpenCode agent profile editor only have the agent-level capability snapshot. The settings surfaces therefore show the model but omit...
+Provider capabilities are not always properties of an agent family alone.
+Some ACP providers change the available configuration options when a model is
+selected. OpenCode currently demonstrates this split: the task chat selector
+receives model-dependent options such as reasoning effort from the live
+session, while the workflow session override editor and the OpenCode agent
+profile editor only have the agent-level capability snapshot. The settings
+surfaces therefore show the model but omit valid dependent options.
+
+Kandev needs one provider-neutral contract that works for OpenCode and future
+providers without maintaining a list of provider-specific option names.
 
 ## Requirements
 
 ### REQ-AGENTS-DYNAMIC-PROVIDER-OPTIONS-001: Dynamic Provider Model Options
 
-**Intent:** Provider capabilities are not always properties of an agent family alone. Some ACP providers change the available configuration options when a model is selected. OpenCode currently demonstrates this split: the task chat selector receives model-dependent options such as reasoning effort from the live session, while the workflow session override editor and the OpenCode agent profile editor only have the agent-level capability snapshot. The settings surfaces therefore show the model but omit...
+**Intent:** Provider capabilities are not always properties of an agent family alone. Some ACP
+providers change the available configuration options when a model is selected. OpenCode currently
+demonstrates this split: the task chat selector receives model-dependent options such as reasoning
+effort from the live session, while the workflow session override editor and the OpenCode agent
+profile editor only have the agent-level capability snapshot. The settings surfaces therefore show
+the model but omit valid dependent options. Kandev needs one provider-neutral contract that works
+for OpenCode and future providers without maintaining a list of provider-specific option names.
 
 #### Acceptance criteria
 

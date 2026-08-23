@@ -9,13 +9,24 @@ owners:
 
 ## Overview
 
-A plugin whose page is a compact, glanceable dashboard has nowhere good to put its entry point. `registerNavItem` can place a row in the sidebar's labelled plugin rail or in the Integrations section, but not in the sidebar footer's unlabelled icon strip (the gear / Stats / doctor / Office row) where Kandev's own at-a-glance destination, Stats, lives. Plugin authors either accept a full-width labelled row that visually outranks what they are contributing, or they get no placement that matches...
+A plugin whose page is a compact, glanceable dashboard has nowhere good to put its
+entry point. `registerNavItem` can place a row in the sidebar's labelled plugin rail
+or in the Integrations section, but not in the sidebar footer's unlabelled icon strip
+(the gear / Stats / doctor / Office row) where Kandev's own at-a-glance destination,
+Stats, lives. Plugin authors either accept a full-width labelled row that visually
+outranks what they are contributing, or they get no placement that matches the shape
+of their page.
 
 ## Requirements
 
 ### REQ-PLUGINS-PLUGIN-NAV-SIDEBAR-FOOTER-001: Plugin nav items in the sidebar footer icon row
 
-**Intent:** A plugin whose page is a compact, glanceable dashboard has nowhere good to put its entry point. `registerNavItem` can place a row in the sidebar's labelled plugin rail or in the Integrations section, but not in the sidebar footer's unlabelled icon strip (the gear / Stats / doctor / Office row) where Kandev's own at-a-glance destination, Stats, lives. Plugin authors either accept a full-width labelled row that visually outranks what they are contributing, or they get no placement that matches...
+**Intent:** A plugin whose page is a compact, glanceable dashboard has nowhere good to put its entry
+point. `registerNavItem` can place a row in the sidebar's labelled plugin rail or in the
+Integrations section, but not in the sidebar footer's unlabelled icon strip (the gear / Stats /
+doctor / Office row) where Kandev's own at-a-glance destination, Stats, lives. Plugin authors either
+accept a full-width labelled row that visually outranks what they are contributing, or they get no
+placement that matches the shape of their page.
 
 #### Acceptance criteria
 

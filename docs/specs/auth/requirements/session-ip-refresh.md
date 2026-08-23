@@ -9,13 +9,24 @@ owners:
 
 ## Overview
 
-A browser session's IP is written once at login and never updated. Sessions can live for weeks (the sliding TTL is refreshed on activity), so the account security page (`Settings > Account > Security`, backed by `GET /api/v1/auth/sessions`) keeps showing the login-time address forever. Roaming/mobile clients, DHCP re-leases, or a proxy that only started forwarding `X-Forwarded-For` after login leave a stale IP on display, which users read as a security problem (a proxy IP attributed to their...
+A browser session's IP is written once at login and never updated. Sessions
+can live for weeks (the sliding TTL is refreshed on activity), so the account
+security page (`Settings > Account > Security`, backed by
+`GET /api/v1/auth/sessions`) keeps showing the login-time address forever.
+Roaming/mobile clients, DHCP re-leases, or a proxy that only started
+forwarding `X-Forwarded-For` after login leave a stale IP on display, which
+users read as a security problem (a proxy IP attributed to their client).
 
 ## Requirements
 
 ### REQ-AUTH-SESSION-IP-REFRESH-001: Session IP Refresh
 
-**Intent:** A browser session's IP is written once at login and never updated. Sessions can live for weeks (the sliding TTL is refreshed on activity), so the account security page (`Settings > Account > Security`, backed by `GET /api/v1/auth/sessions`) keeps showing the login-time address forever. Roaming/mobile clients, DHCP re-leases, or a proxy that only started forwarding `X-Forwarded-For` after login leave a stale IP on display, which users read as a security problem (a proxy IP attributed to their...
+**Intent:** A browser session's IP is written once at login and never updated. Sessions can live for
+weeks (the sliding TTL is refreshed on activity), so the account security page (`Settings > Account
+> Security`, backed by `GET /api/v1/auth/sessions`) keeps showing the login-time address forever.
+Roaming/mobile clients, DHCP re-leases, or a proxy that only started forwarding `X-Forwarded-For`
+after login leave a stale IP on display, which users read as a security problem (a proxy IP
+attributed to their client).
 
 #### Acceptance criteria
 

@@ -184,7 +184,7 @@ func (c *Client) catalogVersionLocked() string {
 // cold-cache-buffer parse path, where the buffer and its version are
 // captured together before parsing — so a background refresh landing
 // mid-call can never pair one catalogue's rates with a different
-// catalogue's version identifier (docs/specs/office/costs.md).
+// catalogue's version identifier (docs/specs/office/requirements/costs.md).
 func (c *Client) LookupForModelWithVersion(ctx context.Context, modelID string) (shared.ModelPricing, string, bool) {
 	key, strategy := Normalize(modelID)
 	if strategy != StrategyLookup {
@@ -222,7 +222,7 @@ func (c *Client) LookupForModelWithVersion(ctx context.Context, modelID string) 
 // wholesale under c.mu — so a later, unrelated lookup for the same key would
 // then read old rates paired with the new catalogue version, the exact
 // provenance lie LookupForModelWithVersion exists to prevent
-// (docs/specs/office/costs.md). Compares catalogGen rather than the RFC3339
+// (docs/specs/office/requirements/costs.md). Compares catalogGen rather than the RFC3339
 // version string: the string only has one-second resolution, so two installs
 // landing in the same wall-clock second would otherwise compare equal and
 // defeat this guard. The returned (pricing, bufVersion) pair for THIS call is

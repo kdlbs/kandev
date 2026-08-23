@@ -9,13 +9,24 @@ owners:
 
 ## Overview
 
-Kandev users today manually trigger every task execution, monitor each agent individually, and shepherd work through the kanban board one task at a time. There is no way for agents to work independently across tasks, delegate work, run recurring jobs, or roll progress up across related initiatives - all table-stakes for autonomous multi-agent workflows. Office adds an autonomy layer on top of kandev's existing task system: a coordinator agent manages a fleet of workers, picks up tasks,...
+Kandev users today manually trigger every task execution, monitor each agent individually, and shepherd work through the kanban board one task at a time. There is no way for agents to work independently across tasks, delegate work, run recurring jobs, or roll progress up across related initiatives - all table-stakes for autonomous multi-agent workflows. Office adds an autonomy layer on top of kandev's existing task system: a coordinator agent manages a fleet of workers, picks up tasks, delegates subtasks, tracks costs, and reports progress. Users decide when to let agents run autonomously and when to drill into a single task for low-level details.
+
+This spec is the top-level entry point for Office. It covers the workspace model, projects, configuration storage and sync, and the first-run onboarding wizard. Other Office surfaces (agents, skills, scheduler, costs, routines, inbox, assistant) live in sibling specs under `docs/specs/office/`.
 
 ## Requirements
 
 ### REQ-OFFICE-OVERVIEW-001: Office: Overview
 
-**Intent:** Kandev users today manually trigger every task execution, monitor each agent individually, and shepherd work through the kanban board one task at a time. There is no way for agents to work independently across tasks, delegate work, run recurring jobs, or roll progress up across related initiatives - all table-stakes for autonomous multi-agent workflows. Office adds an autonomy layer on top of kandev's existing task system: a coordinator agent manages a fleet of workers, picks up tasks,...
+**Intent:** Kandev users today manually trigger every task execution, monitor each agent
+individually, and shepherd work through the kanban board one task at a time. There is no way for
+agents to work independently across tasks, delegate work, run recurring jobs, or roll progress up
+across related initiatives - all table-stakes for autonomous multi-agent workflows. Office adds an
+autonomy layer on top of kandev's existing task system: a coordinator agent manages a fleet of
+workers, picks up tasks, delegates subtasks, tracks costs, and reports progress. Users decide when
+to let agents run autonomously and when to drill into a single task for low-level details. This spec
+is the top-level entry point for Office. It covers the workspace model, projects, configuration
+storage and sync, and the first-run onboarding wizard. Other Office surfaces (agents, skills,
+scheduler, costs, routines, inbox, assistant) live in sibling specs under `docs/specs/office/`.
 
 #### Acceptance criteria
 

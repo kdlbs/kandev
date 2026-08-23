@@ -9,13 +9,18 @@ owners:
 
 ## Overview
 
-When a user sends a message to the agent chat and the turn completes with **no content and no tool calls** (a clean `end_turn`), kandev showed the user's message followed by dead air — no reply, no explanation. This is common when a user types a slash command (e.g. `/pr-fixup`) into the agent chat: the ACP agent treats it as a slash command and returns an empty turn, either because the command is unsupported or because it exists but no-ops. The user gets no feedback and assumes the app is...
+When a user sends a message to the agent chat and the turn completes with **no content and no tool calls** (a clean `end_turn`), kandev showed the user's message followed by dead air — no reply, no explanation. This is common when a user types a slash command (e.g. `/pr-fixup`) into the agent chat: the ACP agent treats it as a slash command and returns an empty turn, either because the command is unsupported or because it exists but no-ops. The user gets no feedback and assumes the app is broken.
 
 ## Requirements
 
 ### REQ-UI-EMPTY-TURN-NOTICE-001: Empty-Turn Notice and Slash-Command Hint
 
-**Intent:** When a user sends a message to the agent chat and the turn completes with **no content and no tool calls** (a clean `end_turn`), kandev showed the user's message followed by dead air — no reply, no explanation. This is common when a user types a slash command (e.g. `/pr-fixup`) into the agent chat: the ACP agent treats it as a slash command and returns an empty turn, either because the command is unsupported or because it exists but no-ops. The user gets no feedback and assumes the app is...
+**Intent:** When a user sends a message to the agent chat and the turn completes with **no content
+and no tool calls** (a clean `end_turn`), kandev showed the user's message followed by dead air — no
+reply, no explanation. This is common when a user types a slash command (e.g. `/pr-fixup`) into the
+agent chat: the ACP agent treats it as a slash command and returns an empty turn, either because the
+command is unsupported or because it exists but no-ops. The user gets no feedback and assumes the
+app is broken.
 
 #### Acceptance criteria
 

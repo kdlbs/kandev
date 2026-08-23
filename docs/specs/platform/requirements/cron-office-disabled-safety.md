@@ -9,13 +9,24 @@ owners:
 
 ## Overview
 
-The shared cron loop (ADR-0004 Phase 5) drives every backend timer — heartbeat, budget, Office routines, and Office recovery — on a single goroutine. Office is an optional feature. When Office is disabled the routines collaborator does not exist, and the cron loop must keep running the other handlers instead of crashing. A crash here is severe because the loop's panic recovery re-arms every tick: the backend logs a nil-pointer panic every 30 seconds for the life of the process and never...
+The shared cron loop (ADR-0004 Phase 5) drives every backend timer — heartbeat,
+budget, Office routines, and Office recovery — on a single goroutine. Office is
+an optional feature. When Office is disabled the routines collaborator does not
+exist, and the cron loop must keep running the other handlers instead of
+crashing. A crash here is severe because the loop's panic recovery re-arms every
+tick: the backend logs a nil-pointer panic every 30 seconds for the life of the
+process and never fires heartbeat or budget work.
 
 ## Requirements
 
 ### REQ-PLATFORM-CRON-OFFICE-DISABLED-SAFETY-001: Shared Cron Loop Safety When Office Is Disabled
 
-**Intent:** The shared cron loop (ADR-0004 Phase 5) drives every backend timer — heartbeat, budget, Office routines, and Office recovery — on a single goroutine. Office is an optional feature. When Office is disabled the routines collaborator does not exist, and the cron loop must keep running the other handlers instead of crashing. A crash here is severe because the loop's panic recovery re-arms every tick: the backend logs a nil-pointer panic every 30 seconds for the life of the process and never...
+**Intent:** The shared cron loop (ADR-0004 Phase 5) drives every backend timer — heartbeat, budget,
+Office routines, and Office recovery — on a single goroutine. Office is an optional feature. When
+Office is disabled the routines collaborator does not exist, and the cron loop must keep running the
+other handlers instead of crashing. A crash here is severe because the loop's panic recovery re-arms
+every tick: the backend logs a nil-pointer panic every 30 seconds for the life of the process and
+never fires heartbeat or budget work.
 
 #### Acceptance criteria
 

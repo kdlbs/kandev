@@ -9,13 +9,82 @@ owners:
 
 ## Overview
 
-Browsers match cookies by host, domain, and path; **port is not part of cookie scope** (the `Secure` attribute controls transmission over TLS, not scheme partitioning). Every kandev instance bound to the same host (same IP, different ports) therefore shares one cookie jar: a cookie written by the instance the user touched last is sent to every other instance on the next request. `localStorage` and `sessionStorage` are origin-scoped (scheme + host + port) and therefore port-segregated;...
+Browsers match cookies by host, domain, and path; **port is not part of
+cookie scope** (the `Secure` attribute controls transmission over TLS, not
+scheme partitioning). Every kandev instance bound to the same host (same IP,
+different ports) therefore shares one cookie jar: a cookie written by the
+instance the user touched last is sent to every other instance on the next
+request. `localStorage` and `sessionStorage` are origin-scoped (scheme +
+host + port) and therefore port-segregated; cookies are the only browser
+storage that leaks between instances (empirically verified: a cookie written
+on port 18111 is readable on port 18222 of the same host, while
+localStorage/sessionStorage are not). Known limit: instances served on the
+same host at default ports over different schemes (`http://host` on :80 and
+`https://host` on :443) both carry no port in their Host, so they keep the
+plain cookie names and are not isolated by this fix; the reported scenario
+(same scheme, different ports) is fully covered.
+
+Three kandev cookies carry per-instance identity and are all written with
+`Path=/` and no Domain/Port scoping:
+
+- `kandev_session` — the auth session token (HttpOnly). Two auth-enabled
+  instances on one host overwrite each other's token. The losing instance
+  rejects the foreign token (per-instance session store), 401s every API
+  call, and the SPA's `onUnauthorized` handler clears auth state and
+  redirects to `/login`. With two or more instances this ping-pongs: every
+  instance keeps breaking (`"crashes / blanks"` in the report). Reproduced
+  live with two auth-enabled instances (A on :48429, B on :48529): logging
+  into B yanked A's open UI to the Sign in page; each instance rejects the
+  other's token with `{"mode":"enabled","authenticated":false}`. The
+  maintainers documented the same caveat in kdlbs/kandev#2689 ("Cookies do
+  not include ports in their scope. Two authenticated Kandev instances on the
+  same hostname can have a `kandev_session` cookie conflict").
+- `kandev-active-workspace` and `office-active-workspace` — the remembered
+  active workspace. A foreign workspace id is read by every other instance at
+  boot. Today both backend (`firstValidID`) and frontend resolvers validate
+  the value against the instance's own workspace list and fall back to the
+  first workspace, so this path is graceful rather than fatal — but it
+  constantly churns which workspace (and, since ADR
+  2026-08-15-office-mode-follows-active-workspace, which mode) each instance
+  boots into, and any unvalidated read of these values would hard-fail.
+
+Private-browsing the demo servers "fixes" the report because the browser
+gives private contexts an isolated cookie partition — consistent with cookies
+being the shared state.
 
 ## Requirements
 
 ### REQ-AUTH-FIX-MULTI-INSTANCE-COOKIE-ISOLATION-001: Isolate Kandev cookies between instances on one host
 
-**Intent:** Browsers match cookies by host, domain, and path; **port is not part of cookie scope** (the `Secure` attribute controls transmission over TLS, not scheme partitioning). Every kandev instance bound to the same host (same IP, different ports) therefore shares one cookie jar: a cookie written by the instance the user touched last is sent to every other instance on the next request. `localStorage` and `sessionStorage` are origin-scoped (scheme + host + port) and therefore port-segregated;...
+**Intent:** Browsers match cookies by host, domain, and path; **port is not part of cookie scope**
+(the `Secure` attribute controls transmission over TLS, not scheme partitioning). Every kandev
+instance bound to the same host (same IP, different ports) therefore shares one cookie jar: a cookie
+written by the instance the user touched last is sent to every other instance on the next request.
+`localStorage` and `sessionStorage` are origin-scoped (scheme + host + port) and therefore
+port-segregated; cookies are the only browser storage that leaks between instances (empirically
+verified: a cookie written on port 18111 is readable on port 18222 of the same host, while
+localStorage/sessionStorage are not). Known limit: instances served on the same host at default
+ports over different schemes (`http://host` on :80 and `https://host` on :443) both carry no port in
+their Host, so they keep the plain cookie names and are not isolated by this fix; the reported
+scenario (same scheme, different ports) is fully covered. Three kandev cookies carry per-instance
+identity and are all written with `Path=/` and no Domain/Port scoping: - `kandev_session` — the auth
+session token (HttpOnly). Two auth-enabled instances on one host overwrite each other's token. The
+losing instance rejects the foreign token (per-instance session store), 401s every API call, and the
+SPA's `onUnauthorized` handler clears auth state and redirects to `/login`. With two or more
+instances this ping-pongs: every instance keeps breaking (`"crashes / blanks"` in the report).
+Reproduced live with two auth-enabled instances (A on :48429, B on :48529): logging into B yanked
+A's open UI to the Sign in page; each instance rejects the other's token with
+`{"mode":"enabled","authenticated":false}`. The maintainers documented the same caveat in
+kdlbs/kandev#2689 ("Cookies do not include ports in their scope. Two authenticated Kandev instances
+on the same hostname can have a `kandev_session` cookie conflict"). - `kandev-active-workspace` and
+`office-active-workspace` — the remembered active workspace. A foreign workspace id is read by every
+other instance at boot. Today both backend (`firstValidID`) and frontend resolvers validate the
+value against the instance's own workspace list and fall back to the first workspace, so this path
+is graceful rather than fatal — but it constantly churns which workspace (and, since ADR
+2026-08-15-office-mode-follows-active-workspace, which mode) each instance boots into, and any
+unvalidated read of these values would hard-fail. Private-browsing the demo servers "fixes" the
+report because the browser gives private contexts an isolated cookie partition — consistent with
+cookies being the shared state.
 
 #### Acceptance criteria
 

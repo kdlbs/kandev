@@ -10,13 +10,33 @@ owners:
 
 ## Overview
 
-Self-hosted Kandev installations execute many short-lived tasks that create worktrees, dependency directories, Go build artifacts, and Docker resources. Archive and delete normally release task resources, but interrupted cleanup and shared tool caches can still consume the disk until an operator edits the host or runs broad commands such as `docker system prune -a`. Operators need an in-app, ownership-aware way to understand and reclaim that space without maintaining cron or systemd...
+Self-hosted Kandev installations execute many short-lived tasks that create worktrees,
+dependency directories, Go build artifacts, and Docker resources. Archive and delete
+normally release task resources, but interrupted cleanup and shared tool caches can still
+consume the disk until an operator edits the host or runs broad commands such as
+`docker system prune -a`. Operators need an in-app, ownership-aware way to understand and
+reclaim that space without maintaining cron or systemd configuration outside Kandev.
+
+The service also creates some longer-lived temporary roots for diagnostics and host
+utilities. Operators need a way to reclaim abandoned roots created by this installation, but shared
+temporary directories also contain unrelated caches, preview/CI data, developer harnesses, and other
+Kandev installations. Cleanup must therefore prove ownership instead of treating a `/tmp` name or
+mtime as sufficient evidence.
 
 ## Requirements
 
 ### REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-001: Storage Maintenance
 
-**Intent:** Self-hosted Kandev installations execute many short-lived tasks that create worktrees, dependency directories, Go build artifacts, and Docker resources. Archive and delete normally release task resources, but interrupted cleanup and shared tool caches can still consume the disk until an operator edits the host or runs broad commands such as `docker system prune -a`. Operators need an in-app, ownership-aware way to understand and reclaim that space without maintaining cron or systemd...
+**Intent:** Self-hosted Kandev installations execute many short-lived tasks that create worktrees,
+dependency directories, Go build artifacts, and Docker resources. Archive and delete normally
+release task resources, but interrupted cleanup and shared tool caches can still consume the disk
+until an operator edits the host or runs broad commands such as `docker system prune -a`. Operators
+need an in-app, ownership-aware way to understand and reclaim that space without maintaining cron or
+systemd configuration outside Kandev. The service also creates some longer-lived temporary roots for
+diagnostics and host utilities. Operators need a way to reclaim abandoned roots created by this
+installation, but shared temporary directories also contain unrelated caches, preview/CI data,
+developer harnesses, and other Kandev installations. Cleanup must therefore prove ownership instead
+of treating a `/tmp` name or mtime as sufficient evidence.
 
 #### Acceptance criteria
 

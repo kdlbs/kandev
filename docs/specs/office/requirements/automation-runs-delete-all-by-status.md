@@ -9,13 +9,26 @@ owners:
 
 ## Overview
 
-The Recent Runs table on an automation's settings page (`/settings/workspaces/<id>/automations/<id>`) can filter by status (Skipped, Archived, Cancelled, ...), but the "delete all runs" action always clears every run for the automation regardless of the active filter. A user who filters to one status to tidy just those runs cannot delete them as a group: they must click the per-row delete button once per run. The delete-all control also sits in the section header above the table, away from...
+The Recent Runs table on an automation's settings page
+(`/settings/workspaces/<id>/automations/<id>`) can filter by status (Skipped,
+Archived, Cancelled, ...), but the "delete all runs" action always clears
+every run for the automation regardless of the active filter. A user who
+filters to one status to tidy just those runs cannot delete them as a group:
+they must click the per-row delete button once per run. The delete-all
+control also sits in the section header above the table, away from the
+per-row delete buttons, so its scope is easy to misread.
 
 ## Requirements
 
 ### REQ-OFFICE-AUTOMATION-RUNS-DELETE-ALL-BY-STATUS-001: Automation runs — status-scoped delete all
 
-**Intent:** The Recent Runs table on an automation's settings page (`/settings/workspaces/<id>/automations/<id>`) can filter by status (Skipped, Archived, Cancelled, ...), but the "delete all runs" action always clears every run for the automation regardless of the active filter. A user who filters to one status to tidy just those runs cannot delete them as a group: they must click the per-row delete button once per run. The delete-all control also sits in the section header above the table, away from...
+**Intent:** The Recent Runs table on an automation's settings page
+(`/settings/workspaces/<id>/automations/<id>`) can filter by status (Skipped, Archived, Cancelled,
+...), but the "delete all runs" action always clears every run for the automation regardless of the
+active filter. A user who filters to one status to tidy just those runs cannot delete them as a
+group: they must click the per-row delete button once per run. The delete-all control also sits in
+the section header above the table, away from the per-row delete buttons, so its scope is easy to
+misread.
 
 #### Acceptance criteria
 

@@ -9,13 +9,31 @@ owners:
 
 ## Overview
 
-An agent profile can be disabled via the `/settings/agents` profile list (`docs/specs/agents/requirements/profile-disable.md`) — the `enabled` toggle takes it out of task/session creation while keeping it configured and editable. A disabled profile still appears in the Settings left panel's Agents tree (under Settings → Agents) with a "Disabled" badge. Users who disable several profiles (retired models, temporarily broken agent CLIs) get a cluttered navigation tree with no way to suppress those entries,...
+An agent profile can be disabled via the `/settings/agents` profile list
+(`docs/specs/agents/requirements/profile-disable.md`) — the `enabled` toggle takes it out
+of task/session creation while keeping it configured and editable. A disabled
+profile still appears in the Settings left panel's Agents tree (under
+Settings → Agents) with a "Disabled" badge. Users who disable several
+profiles (retired models, temporarily broken agent CLIs) get a cluttered
+navigation tree with no way to suppress those entries, exactly the problem
+the integrations feature solved for disabled integrations
+(`docs/specs/integrations/requirements/enable-disable-toggle.md`, setting "Hide disabled
+integrations from left panel navigation"). This feature adds the analogous
+setting for agent profiles.
 
 ## Requirements
 
 ### REQ-AGENTS-HIDE-DISABLED-PROFILES-NAV-001: Hide Disabled Agent Profiles from Left Panel Navigation
 
-**Intent:** An agent profile can be disabled via the `/settings/agents` profile list (`docs/specs/agents/requirements/profile-disable.md`) — the `enabled` toggle takes it out of task/session creation while keeping it configured and editable. A disabled profile still appears in the Settings left panel's Agents tree (under Settings → Agents) with a "Disabled" badge. Users who disable several profiles (retired models, temporarily broken agent CLIs) get a cluttered navigation tree with no way to suppress those entries,...
+**Intent:** An agent profile can be disabled via the `/settings/agents` profile list
+(`docs/specs/agents/requirements/profile-disable.md`) — the `enabled` toggle takes it out of task/session
+creation while keeping it configured and editable. A disabled profile still appears in the Settings
+left panel's Agents tree (under Settings → Agents) with a "Disabled" badge. Users who disable
+several profiles (retired models, temporarily broken agent CLIs) get a cluttered navigation tree
+with no way to suppress those entries, exactly the problem the integrations feature solved for
+disabled integrations (`docs/specs/integrations/requirements/enable-disable-toggle.md`, setting "Hide disabled
+integrations from left panel navigation"). This feature adds the analogous setting for agent
+profiles.
 
 #### Acceptance criteria
 
