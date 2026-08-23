@@ -337,11 +337,10 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          PUBLIC_URL: ${{ needs.pr-walkthrough-publish.outputs.url }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$BASE_SHA"
-          test -n "$PUBLIC_URL"
+          PUBLIC_URL="https://walkthrough.kandev.ai/pr/${PR_NUMBER}/${HEAD_SHA}.html"
 
           gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" > pr-response.json
 

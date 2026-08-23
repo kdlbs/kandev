@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-gate-automated-launch"]
 plan: "plan.md"
-spec: "../../specs/task-dependencies/spec.md"
+spec: "../../specs/tasks/system-design/task-dependencies.md"
 ---
 
 # Task 03: Resolve Dependencies and Auto-Start on Unblock

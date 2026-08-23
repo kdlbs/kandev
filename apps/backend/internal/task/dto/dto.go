@@ -236,7 +236,7 @@ type TaskDTO struct {
 	Labels                 string `json:"labels,omitempty"`
 	Identifier             string `json:"identifier,omitempty"`
 	// ExternalID is a caller-supplied identity used for task create-
-	// idempotency (docs/specs/tasks/external-id-idempotency/spec.md). Omitted
+	// idempotency (docs/specs/tasks/requirements/external-id-idempotency.md). Omitted
 	// when the task holds none.
 	ExternalID string `json:"external_id,omitempty"`
 	// IsFromOffice is the authoritative "this task is owned by office"

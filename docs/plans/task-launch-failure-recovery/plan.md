@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/task-launch-failure-recovery/spec.md
+spec: docs/specs/tasks/requirements/task-launch-failure-recovery.md
 created: 2026-08-19
 status: done
 ---

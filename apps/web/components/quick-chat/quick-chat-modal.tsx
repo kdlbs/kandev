@@ -24,6 +24,7 @@ import { ConfigChatSetup } from "@/components/config-chat/config-chat-setup";
 import { useConfigChat } from "@/components/config-chat/use-config-chat";
 import type { QuickChatSession, QuickTerminalTab } from "@/lib/state/slices/ui/types";
 import { isQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
+import { selectQuickChatSessionIsWorking } from "@/lib/state/slices/ui/quick-chat-activity-selectors";
 import type { TFunction } from "i18next";
 
 const QuickTerminalTabView = dynamic(
@@ -40,6 +41,31 @@ function quickChatTabName(t: TFunction, session: QuickChatSession, index: number
     return session.name || t("chat:chatTabName", { index: index + 1 });
   }
   return session.kind === "config" ? t("chat:configurationChatTab") : t("chat:newChatTab");
+}
+
+function QuickChatConversationTab({
+  session,
+  ...props
+}: {
+  session: QuickChatSession;
+  name: string;
+  isActive: boolean;
+  onActivate: () => void;
+  onClose: () => void;
+  onRename: (name: string) => void;
+}) {
+  const isWorking = useAppStore((state) =>
+    selectQuickChatSessionIsWorking(state, session.sessionId),
+  );
+
+  return (
+    <QuickChatTabItem
+      {...props}
+      isRenameable={!isQuickChatSetupSessionId(session.sessionId)}
+      isWorking={!isQuickChatSetupSessionId(session.sessionId) && isWorking}
+      kind={session.kind}
+    />
+  );
 }
 
 function QuickChatTabs({
@@ -78,12 +104,11 @@ function QuickChatTabs({
         {sessions.map((s, index) => {
           const tabName = quickChatTabName(t, s, index);
           return (
-            <QuickChatTabItem
+            <QuickChatConversationTab
               key={s.sessionId || `new-${index}`}
+              session={s}
               name={tabName}
               isActive={activeKind === "conversation" && s.sessionId === activeSessionId}
-              isRenameable={!isQuickChatSetupSessionId(s.sessionId)}
-              kind={s.kind}
               onActivate={() => onTabChange(s.sessionId)}
               onClose={() => onTabClose(s.sessionId)}
               onRename={(name) => onRename(s.sessionId, name)}

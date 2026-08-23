@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/title-length-limit.md"
+spec: "../../specs/tasks/requirements/title-length-limit.md"
 ---
 
 # Task 02: Frontend title inputs and remote prefill

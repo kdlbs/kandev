@@ -5,7 +5,7 @@ status: completed
 wave: 5
 depends_on: ["04-credential-and-push-routing"]
 plan: "plan.md"
-spec: "../../specs/tasks/remote-contribution-tasks.md"
+spec: "../../specs/tasks/system-design/remote-contribution-tasks.md"
 ---
 
 # Task 05: Integration Coverage and Public Docs

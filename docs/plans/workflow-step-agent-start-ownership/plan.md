@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/workflow-step-agent-start-ownership/spec.md
+spec: docs/specs/tasks/requirements/workflow-step-agent-start-ownership.md
 created: 2026-08-05
 status: complete
 ---

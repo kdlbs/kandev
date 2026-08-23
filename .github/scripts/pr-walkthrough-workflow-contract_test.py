@@ -280,7 +280,11 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
         self.assertIn("scripts/pr-walkthrough-pr-body", self.link)
         self.assertIn("--github-response", self.link)
         self.assertIn("--input", self.link)
-        self.assertIn("needs.pr-walkthrough-publish.outputs.url", self.link)
+        self.assertIn(
+            'PUBLIC_URL="https://walkthrough.kandev.ai/pr/${PR_NUMBER}/${HEAD_SHA}.html"',
+            self.link,
+        )
+        self.assertNotIn("needs.pr-walkthrough-publish.outputs.url", self.link)
         self.assertNotIn("CLOUDFLARE_R2", self.link)
         self.assertNotIn("OPENCODE_API_KEY", self.link)
         self.assertTrue(PR_BODY_HELPER.is_file())
