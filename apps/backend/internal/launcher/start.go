@@ -43,6 +43,12 @@ func runStart(ctx context.Context, opts Options) int {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
 	}
+	endpoints, err := resolveBackendEndpoints(startupConfig, ports.BackendPort)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+		return 1
+	}
+	ports.BackendURL = endpoints.accessURL
 	if err := ensureDataDirForConfig(startupConfig); err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
@@ -64,6 +70,7 @@ func runStart(ctx context.Context, opts Options) int {
 		LogLevel:   logLevel,
 		Opts:       opts,
 		Startup:    startupConfig,
+		Endpoints:  endpoints,
 	})
 }
 
@@ -76,6 +83,7 @@ type managedAppConfig struct {
 	LogLevel   string
 	Opts       Options
 	Startup    *config.Config
+	Endpoints  backendEndpointSet
 }
 
 func resolveLogLevel(opts Options, configs ...*config.Config) string {
@@ -108,6 +116,19 @@ func resolveConsoleLogLevel(opts Options) string {
 }
 
 func runManagedApp(ctx context.Context, cfg managedAppConfig) int {
+	if cfg.Endpoints.accessURL == "" {
+		if cfg.Startup != nil {
+			endpoints, err := resolveBackendEndpoints(cfg.Startup, cfg.Ports.BackendPort)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+				return 1
+			}
+			cfg.Endpoints = endpoints
+		} else {
+			cfg.Endpoints = endpointSetForAccessURL(cfg.Ports.BackendURL)
+		}
+	}
+	cfg.Ports.BackendURL = cfg.Endpoints.accessURL
 	ignoreBrokenPipeSignal()
 	logStartup(cfg.Header, cfg.Ports, resolveDatabasePathForConfig(cfg.Startup), cfg.LogLevel, serverHostForConfig(cfg.Startup))
 	setLauncherShutdownDebug(cfg.Opts.Debug || os.Getenv("KANDEV_SHUTDOWN_DEBUG") == "1")
@@ -143,9 +164,9 @@ func runManagedApp(ctx context.Context, cfg managedAppConfig) int {
 	}
 	shutdownDebugf("runManagedApp backend launched")
 	fmt.Println("[kandev] starting backend...")
-	if err := waitForHealthFn(ctx, cfg.Ports.BackendURL, backend, healthTimeoutForConfig(healthTimeoutReleaseMS, cfg.Startup), healthToken, dumpLogs); err != nil {
+	if err := waitForHealthFn(ctx, cfg.Endpoints, backend, healthTimeoutForConfig(healthTimeoutReleaseMS, cfg.Startup), healthToken, dumpLogs); err != nil {
 		supervisor.shutdown("backend health failure")
-		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+		fmt.Fprintln(os.Stderr, formatStartupFailure(err, cfg.Endpoints, cfg.Startup, backendLogPathForConfig(cfg.Startup), startupFailureStoppedBackend(err)))
 		return 1
 	}
 	fmt.Printf("[kandev] backend ready at %s\n", cfg.Ports.BackendURL)

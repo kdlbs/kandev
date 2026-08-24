@@ -164,6 +164,36 @@ func TestRunStartUsesSelfExecutableAndBackendCWD(t *testing.T) {
 	}
 }
 
+func TestRunStartUsesConfiguredBindForBackendURL(t *testing.T) {
+	clearLauncherConfigurationEnvironment(t)
+	dir := t.TempDir()
+	t.Chdir(dir)
+	homeDir := canonicalTempDir(t)
+	writeLauncherConfig(t, filepath.Join(dir, "config.yaml"), "homeDir: "+homeDir+"\nserver:\n  host: 192.0.2.10\n  port: 48123\n")
+
+	oldExecutablePath := executablePath
+	oldLaunchManaged := launchManaged
+	t.Cleanup(func() {
+		executablePath = oldExecutablePath
+		launchManaged = oldLaunchManaged
+	})
+	executablePath = func() (string, error) {
+		return filepath.Join(homeDir, "bin", "kandev"), nil
+	}
+	var got managedAppConfig
+	launchManaged = func(_ context.Context, cfg managedAppConfig) int {
+		got = cfg
+		return 42
+	}
+
+	if code := runStart(context.Background(), Options{Command: CommandStart, Headless: true}); code != 42 {
+		t.Fatalf("runStart() = %d, want 42", code)
+	}
+	if got.Ports.BackendURL != "http://192.0.2.10:48123" {
+		t.Fatalf("BackendURL = %q, want the configured bind address", got.Ports.BackendURL)
+	}
+}
+
 func TestRunManagedAppAttachesSignalsBeforeBackendLaunch(t *testing.T) {
 	oldNewSupervisor := newSupervisorFn
 	oldLaunchBackend := launchBackendFn
@@ -207,7 +237,7 @@ func TestRunManagedAppAttachesSignalsBeforeBackendLaunch(t *testing.T) {
 		events = append(events, "start-parent-watch")
 		return newParentWatchdog(0, nil, nil)
 	}
-	waitForHealthFn = func(_ context.Context, _ string, _ childState, _ time.Duration, expectedToken string, _ func()) error {
+	waitForHealthFn = func(_ context.Context, _ backendEndpointSet, _ childState, _ time.Duration, expectedToken string, _ func()) error {
 		waitedHealthToken = expectedToken
 		events = append(events, "wait-health")
 		return nil
@@ -266,7 +296,7 @@ func TestRunManagedAppPreservesDesktopOwnedHealthToken(t *testing.T) {
 		exitCh <- 0
 		return &restartableBackend{exitCh: exitCh}, func() {}, nil
 	}
-	waitForHealthFn = func(_ context.Context, _ string, _ childState, _ time.Duration, expectedToken string, _ func()) error {
+	waitForHealthFn = func(_ context.Context, _ backendEndpointSet, _ childState, _ time.Duration, expectedToken string, _ func()) error {
 		waitedHealthToken = expectedToken
 		return nil
 	}

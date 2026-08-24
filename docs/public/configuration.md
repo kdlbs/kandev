@@ -64,7 +64,7 @@ Some common camelCase keys have explicit compatibility aliases. Use the document
 | YAML key | Environment variable | Default | Current behavior |
 |---|---|---|---|
 | `homeDir` | `KANDEV_HOME_DIR` | `~/.kandev` | Root for data, tasks, worktrees, cloned repositories, sessions, and logs. A leading `~/` expands. |
-| `server.host` | `KANDEV_SERVER_HOST` | `0.0.0.0` | HTTP listen address. Use `127.0.0.1` for local-only access. |
+| `server.host` | `KANDEV_SERVER_HOST` | `0.0.0.0` | HTTP listen address. It accepts one hostname/IP or a comma-separated list. Use `127.0.0.1` for local-only access. |
 | `server.port` | `KANDEV_SERVER_PORT` (`KANDEV_BACKEND_PORT`, `KANDEV_PORT` aliases) | `38429` | UI, HTTP API, WebSocket, and MCP port; must be `1`-`65535`. The launcher normally supplies its selected port. |
 | `server.readTimeout` | `KANDEV_SERVER_READTIMEOUT` | `30` | HTTP read timeout in seconds. |
 | `server.writeTimeout` | `KANDEV_SERVER_WRITETIMEOUT` | `30` | HTTP write timeout in seconds. |
@@ -72,7 +72,7 @@ Some common camelCase keys have explicit compatibility aliases. Use the document
 | `server.webTitlePrefix` | `KANDEV_WEB_TITLE_PREFIX` | empty | Prefixes the browser tab title as `<prefix> Kandev` (for example `TEST` renders `TEST Kandev`), so several instances stay distinguishable in adjacent tabs. `make dev` defaults to `Dev`; `make start-debug` keeps production defaults, enables diagnostics, and defaults to `Debug`; PR previews use `Preview`. An explicit value overrides these defaults. Empty keeps the plain `Kandev` title. |
 | `server.trustedProxies` | `KANDEV_TRUSTED_PROXIES` | empty list | IP addresses or CIDR ranges for proxies whose forwarded client headers Kandev accepts. See [Trusted proxies](#trusted-proxies-for-x-forwarded-for). |
 
-The default host exposes the server on every interface even though the CLI prints a `localhost` URL. The current local product path must not be treated as an authenticated multi-user perimeter. For remote access, bind to loopback and use a trusted authenticated tunnel/proxy, or isolate the network at the deployment layer.
+When `server.host` is unset, `server.hosts` may provide a YAML list of bind addresses. The launcher derives its health targets and access URL from this resolved set. It maps `0.0.0.0` to `127.0.0.1` and `::` to `[::1]` for local readiness and access, while the backend still listens on every interface for a wildcard bind. The current local product path must not be treated as an authenticated multi-user perimeter. For remote access, bind to loopback and use a trusted authenticated tunnel/proxy, or isolate the network at the deployment layer.
 
 ### Database
 
@@ -207,14 +207,27 @@ ignored and the TCP peer address is used. The resolved IP feeds the login
 session record (Settings > Account > Security) and the login rate-limiter
 key.
 
-For a reverse proxy, use a narrow list of proxy addresses:
+For one stable reverse proxy, list its immediate TCP peer as an exact IP:
 
 ```yaml
 server:
   trustedProxies:
     - 10.0.0.5
-    - 192.168.0.0/16
 ```
+
+For a controlled proxy network whose address changes, use the narrowest CIDR
+that contains the proxy peers:
+
+```yaml
+server:
+  trustedProxies:
+    - 10.0.0.0/28
+```
+
+Use the proxy `peer` address named in the warning. Do not list the browser's
+client network. A trusted CIDR lets every directly connected host in that
+range supply forwarded identity headers, so use an exact IP when the proxy
+address is stable and never trust a broad private-network range by default.
 
 Default: unset, meaning no trusted proxies. Forwarded headers are ignored
 entirely and the recorded client IP is always the TCP peer. This is the

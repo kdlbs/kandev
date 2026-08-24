@@ -3,14 +3,89 @@ package launcher
 import (
 	"fmt"
 	"net"
+	"os"
 	"strconv"
 	"strings"
+
+	"github.com/kandev/kandev/internal/common/config"
 )
 
 var (
 	networkInterfacesFn     = net.Interfaces
 	networkInterfaceAddrsFn = func(iface net.Interface) ([]net.Addr, error) { return iface.Addrs() }
 )
+
+type backendEndpointSet struct {
+	bindHosts     []string
+	healthTargets []string
+	accessURL     string
+}
+
+func resolveBackendEndpoints(cfg *config.Config, port int) (backendEndpointSet, error) {
+	server := config.ServerConfig{Host: os.Getenv("KANDEV_SERVER_HOST")}
+	if cfg != nil {
+		server = cfg.Server
+	}
+	binds, err := server.ResolvedBinds()
+	if err != nil {
+		return backendEndpointSet{}, err
+	}
+
+	loopback := make([]string, 0, len(binds))
+	nonLoopback := make([]string, 0, len(binds))
+	seen := make(map[string]struct{}, len(binds))
+	for _, bind := range binds {
+		host := endpointHost(bind)
+		accessURL := backendURLForHost(host, port)
+		target := accessURL + "/health"
+		if _, ok := seen[target]; ok {
+			continue
+		}
+		seen[target] = struct{}{}
+		if config.IsLoopbackHost(host) {
+			loopback = append(loopback, target)
+			continue
+		}
+		nonLoopback = append(nonLoopback, target)
+	}
+	healthTargets := loopback
+	healthTargets = append(healthTargets, nonLoopback...)
+	if len(healthTargets) == 0 {
+		return backendEndpointSet{}, fmt.Errorf("server bind configuration produced no health targets")
+	}
+	return backendEndpointSet{
+		bindHosts:     append([]string(nil), binds...),
+		healthTargets: healthTargets,
+		accessURL:     strings.TrimSuffix(healthTargets[0], "/health"),
+	}, nil
+}
+
+func endpointHost(bind string) string {
+	host := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(bind), "."))
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.IsUnspecified() {
+			if ip.To4() != nil {
+				return "127.0.0.1"
+			}
+			return "::1"
+		}
+		return ip.String()
+	}
+	return host
+}
+
+func backendURLForHost(host string, port int) string {
+	return fmt.Sprintf("http://%s", net.JoinHostPort(host, strconv.Itoa(port)))
+}
+
+func endpointSetForAccessURL(accessURL string) backendEndpointSet {
+	accessURL = strings.TrimRight(strings.TrimSpace(accessURL), "/")
+	return backendEndpointSet{
+		bindHosts:     []string{"localhost"},
+		healthTargets: []string{accessURL + "/health"},
+		accessURL:     accessURL,
+	}
+}
 
 func listHostNetworkAddresses() []string {
 	interfaces, err := networkInterfacesFn()

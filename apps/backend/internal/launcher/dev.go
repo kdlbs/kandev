@@ -62,9 +62,9 @@ func runDev(ctx context.Context, opts Options) int {
 	}
 
 	fmt.Println("[kandev] starting backend...")
-	if err := waitForHealthFn(ctx, cfg.ports.BackendURL, backend, healthTimeoutForConfig(healthTimeoutDevMS, cfg.startup), healthToken, dumpLogs); err != nil {
+	if err := waitForHealthFn(ctx, cfg.endpoints, backend, healthTimeoutForConfig(healthTimeoutDevMS, cfg.startup), healthToken, dumpLogs); err != nil {
 		supervisor.shutdown("backend health failure")
-		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+		fmt.Fprintln(os.Stderr, formatStartupFailure(err, cfg.endpoints, cfg.startup, backendLogPathForConfig(cfg.startup), startupFailureStoppedBackend(err)))
 		return 1
 	}
 	fmt.Printf("[kandev] backend ready at %s\n", cfg.ports.BackendURL)
@@ -93,14 +93,15 @@ func runDev(ctx context.Context, opts Options) int {
 }
 
 type devLaunchConfig struct {
-	repoRoot string
-	ports    portConfig
-	dbPath   string
-	extra    []string
-	logLevel string
-	debug    bool
-	homeDir  string
-	startup  *config.Config
+	repoRoot  string
+	ports     portConfig
+	dbPath    string
+	extra     []string
+	logLevel  string
+	debug     bool
+	homeDir   string
+	startup   *config.Config
+	endpoints backendEndpointSet
 }
 
 // devLaunchConfigFor resolves everything runDev needs before any process is
@@ -136,20 +137,27 @@ func devLaunchConfigFor(opts Options, configs ...*config.Config) (devLaunchConfi
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return devLaunchConfig{}, 1
 	}
+	endpoints, err := resolveBackendEndpoints(startupConfig, ports.BackendPort)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+		return devLaunchConfig{}, 1
+	}
+	ports.BackendURL = endpoints.accessURL
 	dbPath, extra := resolveDevBackendEnv(repoRoot, startupConfig)
 	homeDir := devKandevHome(repoRoot)
 	if !isInsideKandevTask(repoRoot) && configSourceIsExplicit(startupConfig, "homeDir") {
 		homeDir = startupConfig.ResolvedHomeDir()
 	}
 	return devLaunchConfig{
-		repoRoot: repoRoot,
-		ports:    ports,
-		dbPath:   dbPath,
-		extra:    extra,
-		logLevel: resolveLogLevelForConfig(opts, startupConfig),
-		debug:    opts.Debug,
-		homeDir:  homeDir,
-		startup:  startupConfig,
+		repoRoot:  repoRoot,
+		ports:     ports,
+		dbPath:    dbPath,
+		extra:     extra,
+		logLevel:  resolveLogLevelForConfig(opts, startupConfig),
+		debug:     opts.Debug,
+		homeDir:   homeDir,
+		startup:   startupConfig,
+		endpoints: endpoints,
 	}, 0
 }
 

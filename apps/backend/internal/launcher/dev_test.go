@@ -59,8 +59,8 @@ func TestRunDevLaunchesBackendThenWebAndOpensBrowser(t *testing.T) {
 		exitCh <- 0
 		return &restartableBackend{exitCh: exitCh}, func() {}, nil
 	}
-	waitForHealthFn = func(_ context.Context, url string, _ childState, _ time.Duration, _ string, _ func()) error {
-		events = append(events, "wait-health:"+url)
+	waitForHealthFn = func(_ context.Context, endpoints backendEndpointSet, _ childState, _ time.Duration, _ string, _ func()) error {
+		events = append(events, "wait-health:"+endpoints.accessURL)
 		return nil
 	}
 	waitForURLFn = func(_ context.Context, url string, _ childState, _ time.Duration) error {
@@ -88,10 +88,10 @@ func TestRunDevLaunchesBackendThenWebAndOpensBrowser(t *testing.T) {
 		"new-supervisor",
 		"attach-signals",
 		"launch-backend",
-		"wait-health:http://localhost:" + itoa(backendCfg.Ports.BackendPort),
+		"wait-health:http://127.0.0.1:" + itoa(backendCfg.Ports.BackendPort),
 		"start-web:web",
 		"wait-url:http://localhost:" + itoa(backendCfg.Ports.WebPort),
-		"open:http://localhost:" + itoa(backendCfg.Ports.BackendPort),
+		"open:http://127.0.0.1:" + itoa(backendCfg.Ports.BackendPort),
 	}
 	if !reflect.DeepEqual(events, want) {
 		t.Fatalf("events = %v, want %v", events, want)
@@ -132,7 +132,7 @@ func TestRunDevLaunchesBackendThenWebAndOpensBrowser(t *testing.T) {
 		t.Fatalf("web args = %v, want the Vite dev command", webArgs)
 	}
 	for _, expected := range []string{
-		"KANDEV_API_BASE_URL=http://localhost:" + itoa(backendCfg.Ports.BackendPort),
+		"KANDEV_API_BASE_URL=http://127.0.0.1:" + itoa(backendCfg.Ports.BackendPort),
 		"PORT=" + itoa(backendCfg.Ports.WebPort),
 		"HOSTNAME=127.0.0.1",
 		"KANDEV_DEBUG=true",
@@ -151,6 +151,7 @@ func TestRunDevLaunchesBackendThenWebAndOpensBrowser(t *testing.T) {
 }
 
 func TestRunDevUsesConfiguredHealthTimeoutForBackendAndWeb(t *testing.T) {
+	clearLauncherConfigurationEnvironment(t)
 	repo := makeRepoTree(t)
 	t.Chdir(repo)
 	writeLauncherConfig(t, filepath.Join(repo, "config.yaml"), "launcher:\n  healthTimeoutMs: 12345\n")
@@ -183,7 +184,7 @@ func TestRunDevUsesConfiguredHealthTimeoutForBackendAndWeb(t *testing.T) {
 		return &restartableBackend{exitCh: exitCh}, func() {}, nil
 	}
 	var backendTimeout, webTimeout time.Duration
-	waitForHealthFn = func(_ context.Context, _ string, _ childState, timeout time.Duration, _ string, _ func()) error {
+	waitForHealthFn = func(_ context.Context, _ backendEndpointSet, _ childState, timeout time.Duration, _ string, _ func()) error {
 		backendTimeout = timeout
 		return nil
 	}
@@ -234,7 +235,7 @@ func TestRunDevHeadlessSkipsBrowser(t *testing.T) {
 		exitCh <- 0
 		return &restartableBackend{exitCh: exitCh}, func() {}, nil
 	}
-	waitForHealthFn = func(_ context.Context, _ string, _ childState, _ time.Duration, _ string, _ func()) error {
+	waitForHealthFn = func(_ context.Context, _ backendEndpointSet, _ childState, _ time.Duration, _ string, _ func()) error {
 		return nil
 	}
 	waitForURLFn = func(_ context.Context, _ string, _ childState, _ time.Duration) error {
@@ -316,7 +317,7 @@ func TestRunDevShutsDownTreeOnBackendHealthFailure(t *testing.T) {
 	launchBackendFn = func(_ backendLaunchConfig) (*restartableBackend, func(), error) {
 		return &restartableBackend{exitCh: make(chan int, 1)}, func() {}, nil
 	}
-	waitForHealthFn = func(_ context.Context, _ string, _ childState, _ time.Duration, _ string, _ func()) error {
+	waitForHealthFn = func(_ context.Context, _ backendEndpointSet, _ childState, _ time.Duration, _ string, _ func()) error {
 		return errTestHealth
 	}
 	waitForURLFn = func(_ context.Context, _ string, _ childState, _ time.Duration) error {
@@ -374,7 +375,7 @@ func TestRunDevShutsDownTreeWhenWebChildExits(t *testing.T) {
 	launchBackendFn = func(_ backendLaunchConfig) (*restartableBackend, func(), error) {
 		return &restartableBackend{exitCh: make(chan int, 1)}, func() {}, nil
 	}
-	waitForHealthFn = func(_ context.Context, _ string, _ childState, _ time.Duration, _ string, _ func()) error {
+	waitForHealthFn = func(_ context.Context, _ backendEndpointSet, _ childState, _ time.Duration, _ string, _ func()) error {
 		return nil
 	}
 	waitForURLFn = func(_ context.Context, _ string, _ childState, _ time.Duration) error {
