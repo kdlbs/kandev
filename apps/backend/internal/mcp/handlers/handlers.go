@@ -797,6 +797,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		AssigneeAgentProfileID: req.AssigneeAgentProfileID,
 		Metadata:               metadata,
 		DeferredLaunch:         deferredLaunch,
+		StartAgent:             startAgent,
 		ExternalID:             req.ExternalID,
 	})
 	if err != nil {
