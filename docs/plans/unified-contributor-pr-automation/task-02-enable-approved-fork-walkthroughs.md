@@ -93,3 +93,7 @@ trusted workflow asset boundary remain unchanged.
 The walkthrough contract, context helper, renderer, PR-body helper, action
 pinning, specification lint, and diff checks passed. Direct `zizmor` reports
 only the intentional `pull_request_target` trigger finding for this workflow.
+
+The final PR verification also passed the walkthrough generation, publication,
+linking, and preview checks with no unresolved review threads. Post-merge live
+verification remains the planned operational follow-up.

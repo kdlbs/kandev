@@ -87,3 +87,8 @@ workflow contracts, action pinning, the standalone OpenCode workflow test, and
 credential-persistence checks passed. Direct `zizmor` still reports the
 repository's existing `pull_request_target` trigger findings; no new trigger
 type was introduced.
+
+During PR fixup, the legacy specification was narrowed to the single active
+label and the standalone artifact-upload assertion was strengthened to compare
+every upload reference with the exact required pin. The focused test and
+specification lint passed, and the final PR check snapshot was fully green.

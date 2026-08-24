@@ -80,5 +80,10 @@ needed because this change is limited to GitHub Actions.
 The implementation checks pass. The direct `zizmor` audit reports only the
 intentional `pull_request_target` trigger findings on the four affected
 workflows. The old checkout credential-persistence findings are resolved.
-Post-merge live verification and the one-time `safe-to-test` label cleanup
-remain operational follow-up.
+The PR fixup also addressed the remaining single-label wording in the legacy
+specification and tightened the artifact-upload pin assertion to cover every
+upload reference. The focused OpenCode test and specification lint passed.
+The final PR check snapshot had 15 passed, 0 failed, and 0 pending checks, with
+no unresolved review threads and a clean merge state. Post-merge live
+verification and the one-time `safe-to-test` label cleanup remain operational
+follow-up.
