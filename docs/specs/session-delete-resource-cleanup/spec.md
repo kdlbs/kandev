@@ -34,7 +34,10 @@ task lifecycle operation takes responsibility for cleanup.
   it is one of several sessions sharing the workspace.
 - A task with zero sessions retains its `TaskEnvironment`, worktree directory,
   Git registration, branch, and uncommitted files.
-- A later session may reuse the retained workspace.
+- A later session may reuse the retained workspace only after canonical
+  environment and repository inventory validation. A missing, preparing, or
+  unsafe retained environment returns a recoverable workspace conflict; a
+  replacement session never recreates it implicitly.
 - Task archive/delete, cascade archive/delete, workspace delete, quick-chat task
   expiry, and explicit task-environment reset remain the owners of physical
   cleanup.

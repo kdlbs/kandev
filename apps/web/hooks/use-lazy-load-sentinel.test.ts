@@ -1,4 +1,4 @@
-import { act, cleanup, renderHook } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useLazyLoadSentinel } from "./use-lazy-load-sentinel";
 
@@ -61,14 +61,6 @@ function fire(record: ObserverRecord, isIntersecting: boolean, target: Element) 
 
 function makeScrollRef() {
   return { current: document.createElement("div") } as React.RefObject<HTMLDivElement | null>;
-}
-
-async function waitForDeferredLoad() {
-  // Let the resolved load schedule its continuation timer before this test
-  // schedules the timer that waits for that continuation.
-  await Promise.resolve();
-  await new Promise<void>((resolve) => setTimeout(resolve, 0));
-  await Promise.resolve();
 }
 
 beforeEach(() => {
@@ -241,8 +233,7 @@ describe("useLazyLoadSentinel — re-arm, disarm, and stale completions", () => 
     // No second intersection is delivered, so the eligibility transition
     // must retry the still-visible sentinel itself.
     rerender({ blocked: false });
-    await act(waitForDeferredLoad);
-    expect(loadMore).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(loadMore).toHaveBeenCalledTimes(2));
   });
 
   it("re-arms only when enabled: unobserves before loading and re-observes after a positive result", async () => {
@@ -261,11 +252,10 @@ describe("useLazyLoadSentinel — re-arm, disarm, and stale completions", () => 
     // The sentinel was unobserved before the await; the load resolved
     // positively, so it is re-observed (still current).
     expect(records[0].unobserved).toContain(node);
-    await act(waitForDeferredLoad);
+    await waitFor(() => expect(loadMore).toHaveBeenCalledTimes(2));
     expect(records[0].targets.filter((t) => t === node).length).toBeGreaterThanOrEqual(1);
     // Still intersecting: the next page auto-loads without a scroll-away or
     // a second IntersectionObserver entry.
-    expect(loadMore).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -465,9 +455,8 @@ describe("useLazyLoadSentinel — re-arm, disarm, and stale completions", () => 
     });
     await act(async () => {
       await finalPageSettled;
-      await waitForDeferredLoad();
     });
-    expect(loadMore).toHaveBeenCalledTimes(4);
+    await waitFor(() => expect(loadMore).toHaveBeenCalledTimes(4));
   });
 
   it("does not re-arm after a positive result when rearmWhileIntersecting is false", async () => {
@@ -559,8 +548,7 @@ describe("useLazyLoadSentinel — failure recovery and stale completions", () =>
 
     // Successful gesture retry clears the disarmed state.
     act(() => result.current.onUserGesture());
-    await act(waitForDeferredLoad);
-    expect(loadMore).toHaveBeenCalledTimes(3);
+    await waitFor(() => expect(loadMore).toHaveBeenCalledTimes(3));
 
     // The successful gesture retry already loaded the next page while the
     // sentinel remained visible; the stale true entry cannot loop after the
@@ -608,8 +596,7 @@ describe("useLazyLoadSentinel — stale observers", () => {
     // then its positive result re-arms the same observer for one follow-up
     // page.
     fire(records[1], true, node);
-    await act(waitForDeferredLoad);
-    expect(secondLoadMore).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(secondLoadMore).toHaveBeenCalledTimes(2));
   });
 
   it("disarms after a rejected load without looping", async () => {
