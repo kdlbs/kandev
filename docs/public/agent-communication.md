@@ -21,7 +21,7 @@ The examples below use canonical MCP protocol names ending in `_kandev`. An agen
 
 An agent typically learns a peer's task ID in one of three ways:
 
-**From related tasks.** `list_related_tasks_kandev` returns parent, children, siblings, blockers, and blocked-by tasks for the current task. Each entry includes the full task UUID, title, lifecycle state, and associated pull requests, but not the workflow step (kanban column). The Office Coordinator can request an unrelated compact task tree in the same workspace for monitoring, but descriptions and document keys remain relation-scoped. To check which column a related task currently sits in, look it up with `list_tasks_kandev` on its workflow.
+**From related tasks.** `list_related_tasks_kandev` returns parent, children, siblings, blockers, and blocked-by tasks for the current task. Each entry includes the full task UUID, title, lifecycle state, and associated pull requests, but not the workflow step (kanban column). The Office Coordinator can request an unrelated compact task tree in the same workspace for monitoring, but descriptions and document keys remain relation-scoped. Task and Configuration MCP sessions can use `list_tasks_kandev` on a known workflow to find a related task's column. The Office MCP catalog does not expose `list_tasks_kandev`, so Office agents must not rely on an MCP board lookup for workflow-column details.
 
 ```
 list_related_tasks_kandev()
@@ -30,7 +30,7 @@ list_related_tasks_kandev()
 
 **From a creation return value.** `create_task_kandev` returns the newly created task's ID. A coordinator that spawns subtasks immediately holds every child's UUID and can message them as soon as they start.
 
-**By browsing the board.** `list_workspaces_kandev` → `list_workflows_kandev` → `list_tasks_kandev` lets an agent walk the full board structure, including tasks in other workspaces. Because `message_task_kandev` accepts any task UUID, cross-project messaging (tasks in separate workflows or workspaces) works without special configuration.
+**By browsing the board.** In Task and Configuration MCP sessions, `list_workspaces_kandev` → `list_workflows_kandev` → `list_tasks_kandev` lets an agent walk the full board structure, including tasks in other workspaces. Office sessions intentionally do not expose these board-listing tools. Because `message_task_kandev` accepts any task UUID, cross-project messaging (tasks in separate workflows or workspaces) works without special configuration.
 
 ## Sending a message
 

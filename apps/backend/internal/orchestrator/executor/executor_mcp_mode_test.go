@@ -183,7 +183,8 @@ func TestResolveTaskSessionMCPProfile_GrantsWorkspaceTreeReadOnlyToOfficeCEO(t *
 		{name: "office CEO", fromOffice: true, profileID: "ceo", resolver: testCoordinatorProfileResolver{profileID: "ceo"}, wantCapability: true},
 		{name: "office worker", fromOffice: true, profileID: "worker", resolver: testCoordinatorProfileResolver{profileID: "ceo"}},
 		{name: "kanban CEO profile", profileID: "ceo", resolver: testCoordinatorProfileResolver{profileID: "ceo"}},
-		{name: "resolver failure fails closed", fromOffice: true, profileID: "ceo", resolver: testCoordinatorProfileResolver{err: errors.New("lookup failed")}, wantErr: true},
+		{name: "repository lookup failure does not block office worker", fromOffice: true, profileID: "worker", resolver: testCoordinatorProfileResolver{err: errors.New("lookup failed")}},
+		{name: "repository lookup failure fails closed for coordinator capability", fromOffice: true, profileID: "ceo", resolver: testCoordinatorProfileResolver{err: errors.New("lookup failed")}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

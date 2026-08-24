@@ -244,6 +244,18 @@ test("plugin authoring reference documents authenticated actions and live host w
   assert.match(integrations, /Bitbucket/);
 });
 
+test("agent communication does not advertise task listing to Office agents", async () => {
+  const communication = await fs.readFile(
+    path.join(process.cwd(), "docs/public/agent-communication.md"),
+    "utf8",
+  );
+
+  assert.match(
+    communication,
+    /The Office MCP catalog does not expose \`list_tasks_kandev\`/,
+  );
+});
+
 test("rejects public pages that contain an em dash", async () => {
   const dir = await createDocs(
     { "index.md": validPage.replace("Page body.", "Public — copy.") },

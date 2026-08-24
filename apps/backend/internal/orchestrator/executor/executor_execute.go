@@ -117,7 +117,11 @@ func (e *Executor) addCoordinatorTaskTreeReadCapability(
 	}
 	ceoProfileID, err := e.coordinatorResolver.ResolveCEOAgentProfileID(ctx, taskID)
 	if err != nil {
-		return nil, fmt.Errorf("resolve Office coordinator profile: %w", err)
+		// This lookup only attests an additive capability. Failing it must not
+		// block an Office worker's launch or resume; without the attestation,
+		// no session receives workspace-wide relation reads.
+		e.logger.Warn("Office coordinator MCP capability unavailable", zap.Error(err))
+		return capabilities, nil
 	}
 	if ceoProfileID == "" || session.AgentProfileID != ceoProfileID {
 		return capabilities, nil
