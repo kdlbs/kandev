@@ -67,6 +67,8 @@ func planTruncationDetected(priorContent, newContent string) bool {
 func planTruncationWarning(priorContent, newContent string, priorRevisionNumber int) string {
 	priorLen := utf8.RuneCountInString(priorContent)
 	newLen := utf8.RuneCountInString(newContent)
+	// dropped is always >= 0: the only caller, evaluatePlanWriteGuard, invokes this
+	// after planTruncationDetected has already confirmed newLen < priorLen.
 	dropped := priorLen - newLen
 	droppedPct := float64(dropped) / float64(priorLen) * 100
 

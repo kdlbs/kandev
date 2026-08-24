@@ -83,10 +83,10 @@ func TestMCPPlanTruncationGuard_WarnsAndPreservesHistory(t *testing.T) {
 
 	warning, _ := updated["plan_write_warning"].(string)
 	if warning == "" {
-		t.Fatal("expected a truncation warning naming the byte drop, got none")
+		t.Fatal("expected a truncation warning naming the character drop, got none")
 	}
 	if !strings.Contains(warning, "40000") || !strings.Contains(warning, "10000") {
-		t.Errorf("warning does not name the byte drop (40000 -> 10000): %q", warning)
+		t.Errorf("warning does not name the character drop (40000 -> 10000): %q", warning)
 	}
 	if !strings.Contains(strings.ToLower(warning), "entire") && !strings.Contains(strings.ToLower(warning), "whole document") {
 		t.Errorf("warning does not explain the write replaced the whole document: %q", warning)
@@ -383,7 +383,7 @@ func TestMCPPlanTruncationGuard_RevisionLookupFailureOmitsRevisionNumber(t *test
 		t.Errorf("warning names a nonexistent revision 0 (revision numbering starts at 1): %q", warning)
 	}
 	if !strings.Contains(warning, "40000") || !strings.Contains(warning, "10000") {
-		t.Errorf("warning does not name the byte drop (40000 -> 10000): %q", warning)
+		t.Errorf("warning does not name the character drop (40000 -> 10000): %q", warning)
 	}
 
 	if _, ok := updated["prior_revision_number"]; ok {
