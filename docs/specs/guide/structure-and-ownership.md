@@ -74,6 +74,28 @@ systems use the same capability.
 Create a first-class system when shared behavior has independent ownership and
 guarantees. Event delivery and persistence can become systems under this rule.
 
+## Vertical feature ownership
+
+Choose the owner from the durable contract, not from the code directories that
+the implementation changes. A capability can change backend, frontend, mobile,
+and test code while one system owns its requirements and design.
+
+User visibility does not make a capability UI-owned. The UI system owns an
+interaction contract only when that contract remains useful without the feature
+or backend state that first uses it. Provider state, task state, permissions,
+and persistence stay with their owning systems. Their requirements can include
+desktop, mobile, accessibility, and failure outcomes.
+
+For example, a GitHub merge-queue capability belongs to the integration system.
+Its integration requirement describes the visible queue controls and states.
+Its integration design describes the GitHub client, persistence, API projection,
+and React components. Do not create a second UI requirement or design for those
+same controls.
+
+Create separate cross-system artifacts only when each system owns an independent
+contract with a different lifecycle. Link the contracts in both system indexes.
+Do not repeat acceptance criteria or technical sections.
+
 ## File names
 
 Use a short kebab-case capability name. Use the same file name for the paired

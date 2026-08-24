@@ -56,6 +56,12 @@ Keep a visible task list:
 
 Use `/interview-me` only when the request needs clarification.
 
+Run the `/spec` ownership gate before you choose paths. Search adjacent systems
+for the same capability. Choose the owner from the durable contract, not from
+backend or frontend implementation layers. If a feature has a UI, include its
+observable UI outcomes and frontend design in the feature owner's artifacts.
+Create a separate UI artifact only for an independent reusable UI contract.
+
 Create or update:
 
 - `docs/specs/<system>/requirements/<capability>.md` through `/spec`.
@@ -69,6 +75,9 @@ system design replaces it.
 Requirements define stable `REQ-*` and `AC-*` IDs. System designs map technical
 behavior to those IDs. Plans define delivery order. Work orders define one
 implementation result and its verification.
+
+Keep one vertical requirement/design pair for one cohesive outcome. Work orders
+can separate implementation boundaries after the specification has one owner.
 
 Each work order must contain:
 

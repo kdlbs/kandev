@@ -2,7 +2,7 @@
 status: draft
 system: ui
 specification_version: 1
-migration: complete
+migration: in_progress
 owners:
   - kandev
 ---
@@ -20,11 +20,18 @@ This system owns navigation, settings presentation, boards, task and review
 surfaces, walkthroughs, chat controls, visual feedback, and responsive
 interaction contracts that do not own backend state.
 
+A control is not UI-owned only because it appears in the web application. A
+provider or task system keeps ownership when the control configures or displays
+that system's state. The UI system owns only the independent presentation
+contract that other capabilities can reuse.
+
 ## Exclusions
 
 - Durable task behavior belongs to the [task system](../tasks/README.md).
 - Agent profile behavior belongs to the [agent system](../agents/README.md).
 - Plugin contribution contracts belong to the [plugin system](../plugins/README.md).
+- Provider-specific state and actions belong to the
+  [integration system](../integrations/README.md).
 
 ## Specification map
 
@@ -146,7 +153,8 @@ interaction contracts that do not own backend state.
 
 ## Migration record
 
-All legacy sources assigned to this system are now represented by the canonical requirement and system-design documents above. Source detail is retained in those documents or in their linked design parts.
+Migration remains in progress while legacy source detail is extracted from the
+canonical requirement and system-design documents above.
 
 ## Related systems
 
