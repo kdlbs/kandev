@@ -227,11 +227,11 @@ func gatherParticipantSlate(ctx context.Context, store ParticipantStore, stepID,
 		perTask, err = store.ListTaskParticipants(ctx, taskID)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("list task participants for quorum: %w", err)
+		return nil, fmt.Errorf("list task participants: %w", err)
 	}
 	template, err := store.ListStepParticipants(ctx, stepID, "")
 	if err != nil {
-		return nil, fmt.Errorf("list step participants for quorum: %w", err)
+		return nil, fmt.Errorf("list step participants: %w", err)
 	}
 
 	gathered := make([]ParticipantInfo, 0, len(perTask)+len(template))

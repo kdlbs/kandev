@@ -388,7 +388,7 @@ func (c ClearDecisionsCallback) Execute(ctx context.Context, in ActionInput) (Ac
 }
 
 // QueueRunForEachParticipantCallback fans out queue_run over every participant
-// on the step matching the configured role.
+// in the task's workflow-scoped participant slate matching the configured role.
 type QueueRunForEachParticipantCallback struct {
 	Adapter      RunQueueAdapter
 	Participants ParticipantStore
