@@ -21,6 +21,10 @@ var ErrRepositoryNotFound = repoerrors.ErrRepositoryNotFound
 var ErrTaskEnvironmentNotFound = repoerrors.ErrTaskEnvironmentNotFound
 var ErrWIPLimitExceeded = wfmodels.ErrWIPLimitExceeded
 var ErrExternalIDConflict = repoerrors.ErrExternalIDConflict
+var ErrWorkspaceAgentPrincipalNotFound = repoerrors.ErrWorkspaceAgentPrincipalNotFound
+var ErrWorkspaceAgentPrincipalConflict = repoerrors.ErrWorkspaceAgentPrincipalConflict
+var ErrCoordinatorGrantNotFound = repoerrors.ErrCoordinatorGrantNotFound
+var ErrCoordinatorGrantConflict = repoerrors.ErrCoordinatorGrantConflict
 
 // WorkspaceRepository handles workspace CRUD.
 type WorkspaceRepository interface {

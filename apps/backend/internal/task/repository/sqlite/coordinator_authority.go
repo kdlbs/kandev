@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 const (
@@ -28,6 +30,9 @@ func (r *Repository) CreateWorkspaceAgentPrincipal(ctx context.Context, principa
 	}
 	principal.UpdatedAt = principal.CreatedAt
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`INSERT INTO workspace_agent_principals (id, workspace_id, plugin_installation_id, logical_key, backing_task_id, backing_session_id, revoked_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`), principal.ID, principal.WorkspaceID, principal.PluginInstallationID, principal.LogicalKey, principal.BackingTaskID, principal.BackingSessionID, principal.RevokedAt, principal.CreatedAt, principal.UpdatedAt)
+	if isPrincipalContextUniqueViolation(err) {
+		return repoerrors.ErrWorkspaceAgentPrincipalConflict
+	}
 	return err
 }
 
@@ -38,12 +43,18 @@ func (r *Repository) GetWorkspaceAgentPrincipal(ctx context.Context, id string) 
 	if revoked.Valid {
 		p.RevokedAt = &revoked.Time
 	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, repoerrors.ErrWorkspaceAgentPrincipalNotFound
+	}
 	return p, err
 }
 
 func (r *Repository) GetWorkspaceAgentPrincipalByContext(ctx context.Context, workspaceID, pluginInstallationID, logicalKey string) (*models.WorkspaceAgentPrincipal, error) {
 	var id string
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`SELECT id FROM workspace_agent_principals WHERE workspace_id = ? AND plugin_installation_id = ? AND logical_key = ?`), workspaceID, pluginInstallationID, logicalKey).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, repoerrors.ErrWorkspaceAgentPrincipalNotFound
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -74,14 +85,25 @@ func (r *Repository) RebindWorkspaceAgentPrincipal(ctx context.Context, id, task
 		if err != nil {
 			return err
 		}
-		return sql.ErrNoRows
+		// The row is absent or already revoked; without reading it back the two
+		// cases are indistinguishable, which keeps revocation timelines opaque.
+		return repoerrors.ErrWorkspaceAgentPrincipalNotFound
 	}
 	return nil
 }
 
 func (r *Repository) RevokeWorkspaceAgentPrincipal(ctx context.Context, id string, revokedAt time.Time) error {
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`UPDATE workspace_agent_principals SET revoked_at = ?, updated_at = ? WHERE id = ? AND revoked_at IS NULL`), revokedAt, revokedAt, id)
-	return err
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`UPDATE workspace_agent_principals SET revoked_at = ?, updated_at = ? WHERE id = ? AND revoked_at IS NULL`), revokedAt, revokedAt, id)
+	if err != nil {
+		return err
+	}
+	if changed, err := result.RowsAffected(); err != nil || changed == 0 {
+		if err != nil {
+			return err
+		}
+		return repoerrors.ErrWorkspaceAgentPrincipalNotFound
+	}
+	return nil
 }
 
 func (r *Repository) CreateCoordinatorGrant(ctx context.Context, grant *models.CoordinatorGrant) error {
@@ -98,11 +120,10 @@ func (r *Repository) CreateCoordinatorGrant(ctx context.Context, grant *models.C
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), grant.ID, grant.CoordinatorTaskID, grant.PrincipalID, grant.WorkspaceID, grant.ScopeKind, grant.ScopeID,
 		grant.Capabilities, grant.Note, grant.GrantedByUserID, grant.GrantedAt, grant.RevokedAt, grant.RevokedByUserID)
+	if isPrincipalGrantScopeUniqueViolation(err) {
+		return repoerrors.ErrCoordinatorGrantConflict
+	}
 	return err
-}
-
-func (r *Repository) GetCoordinatorGrant(ctx context.Context, id string) (*models.CoordinatorGrant, error) {
-	return r.getCoordinatorGrant(ctx, `WHERE id = ?`, id)
 }
 
 func (r *Repository) ListCoordinatorGrants(ctx context.Context, workspaceID, coordinatorTaskID string, includeRevoked bool) ([]*models.CoordinatorGrant, error) {
@@ -148,7 +169,7 @@ func (r *Repository) RevokeCoordinatorGrant(ctx context.Context, id, revokedByUs
 		if err != nil {
 			return err
 		}
-		return sql.ErrNoRows
+		return repoerrors.ErrCoordinatorGrantNotFound
 	}
 	return nil
 }
@@ -198,6 +219,14 @@ func (r *Repository) CreateCoordinatorAuditEvent(ctx context.Context, event *mod
 		return fmt.Errorf("prune coordinator audit events: %w", err)
 	}
 	return tx.Commit()
+}
+
+func (r *Repository) GetCoordinatorGrant(ctx context.Context, id string) (*models.CoordinatorGrant, error) {
+	grant, err := r.getCoordinatorGrant(ctx, `WHERE id = ?`, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, repoerrors.ErrCoordinatorGrantNotFound
+	}
+	return grant, err
 }
 
 func (r *Repository) FinishCoordinatorAuditEvent(ctx context.Context, id, result, detail string) error {

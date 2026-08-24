@@ -130,3 +130,82 @@ func TestAuthorityKeepsDirectParentAccessWhenFlagIsOff(t *testing.T) {
 		t.Fatalf("decision = %#v, want direct parent access", decision)
 	}
 }
+
+// An adapter resolves a principal from its own authenticated context and asks
+// the authority fail-closed questions with host-loaded actor/target tasks.
+// When no active principal binding exists for the acting task - disabled
+// plugin install, revoked binding, or plain absence - the authority must deny
+// silently and write no audit row: an ordinary task's denial is not auditable.
+func TestAuthorityDeniesWhenNoActivePrincipalBinding(t *testing.T) {
+	store := &memoryStore{}
+	authority := New(store, func() bool { return true })
+	decision, err := authority.Authorize(context.Background(), Request{
+		ActorTask:  &models.Task{ID: "actor", WorkspaceID: "workspace"},
+		TargetTask: &models.Task{ID: "target", WorkspaceID: "workspace"},
+		Action:     "stop", Capability: CapabilityOrchestrate,
+	})
+	if err != nil {
+		t.Fatalf("Authorize: %v", err)
+	}
+	if decision.Allowed || decision.Basis != BasisDenied {
+		t.Fatalf("decision = %#v, want silent denial without binding", decision)
+	}
+	if len(store.audits) != 0 {
+		t.Fatalf("audits = %#v, want none without an active binding", store.audits)
+	}
+}
+
+// A store failure must deny the action and surface the error; the caller maps
+// it to the same opaque denial message as any other non-parent refusal.
+func TestAuthorityFailsClosedOnStoreError(t *testing.T) {
+	decision, err := New(&errorStore{}, func() bool { return true }).Authorize(context.Background(), Request{
+		ActorTask:  &models.Task{ID: "actor", WorkspaceID: "workspace"},
+		TargetTask: &models.Task{ID: "target", WorkspaceID: "workspace"},
+		Action:     "stop", Capability: CapabilityOrchestrate,
+	})
+	if err == nil {
+		t.Fatal("Authorize succeeded on store error")
+	}
+	if decision.Allowed || decision.Basis != BasisDenied {
+		t.Fatalf("decision = %#v, want fail-closed denial", decision)
+	}
+}
+
+func TestAuthorityAllowsWorkflowScopedGrant(t *testing.T) {
+	store := &memoryStore{principal: &models.WorkspaceAgentPrincipal{ID: "principal-1", WorkspaceID: "workspace", BackingTaskID: "actor"}, grants: []*models.CoordinatorGrant{{
+		ID: "grant-1", PrincipalID: "principal-1", WorkspaceID: "workspace",
+		ScopeKind: ScopeWorkflow, ScopeID: "workflow-1", Capabilities: "inspect",
+	}}}
+	authority := New(store, func() bool { return true })
+	matching, err := authority.Authorize(context.Background(), Request{
+		ActorTask:  &models.Task{ID: "actor", WorkspaceID: "workspace"},
+		TargetTask: &models.Task{ID: "target-in-flow", WorkspaceID: "workspace", WorkflowID: "workflow-1"},
+		Action:     "list_related", Capability: CapabilityInspect,
+	})
+	if err != nil || !matching.Allowed || matching.Basis != BasisGrant || matching.GrantID != "grant-1" {
+		t.Fatalf("workflow-scope decision = %#v, %v; want allowed by grant-1", matching, err)
+	}
+	outside, err := authority.Authorize(context.Background(), Request{
+		ActorTask:  &models.Task{ID: "actor", WorkspaceID: "workspace"},
+		TargetTask: &models.Task{ID: "target-elsewhere", WorkspaceID: "workspace", WorkflowID: "workflow-2"},
+		Action:     "list_related", Capability: CapabilityInspect,
+	})
+	if err != nil || outside.Allowed || outside.Basis != BasisDenied {
+		t.Fatalf("out-of-workflow decision = %#v, %v; want denied", outside, err)
+	}
+}
+
+type errorStore struct{}
+
+func (s *errorStore) GetActiveWorkspaceAgentPrincipalForTask(_ context.Context, _, _ string) (*models.WorkspaceAgentPrincipal, error) {
+	return nil, context.DeadlineExceeded
+}
+func (s *errorStore) ListActiveWorkspaceAgentPrincipalGrants(_ context.Context, _, _ string) ([]*models.CoordinatorGrant, error) {
+	return nil, context.DeadlineExceeded
+}
+func (s *errorStore) CreateCoordinatorAuditEvent(_ context.Context, _ *models.CoordinatorAuditEvent) error {
+	return context.DeadlineExceeded
+}
+func (s *errorStore) FinishCoordinatorAuditEvent(_ context.Context, _, _, _ string) error {
+	return context.DeadlineExceeded
+}
