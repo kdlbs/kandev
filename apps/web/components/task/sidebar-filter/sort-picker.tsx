@@ -9,13 +9,37 @@ import { useTranslation } from "react-i18next";
 // `labelKey` holds a catalog key, not copy: this table is module scope, so a
 // resolved `t()` here would freeze at the boot locale. `key` is a persisted
 // sort value and stays in English.
-const SORT_OPTIONS: Array<{ key: SortKey; labelKey: string }> = [
-  { key: "state", labelKey: "task:sortStatus" },
-  { key: "updatedAt", labelKey: "task:sortUpdated" },
-  { key: "lastActivityAt", labelKey: "task:sortLastActivity" },
-  { key: "createdAt", labelKey: "task:sortCreated" },
-  { key: "title", labelKey: "task:sortTitle" },
-  { key: "custom", labelKey: "task:sortCustom" },
+const SORT_OPTIONS: Array<{ key: SortKey; labelKey: string; descriptionKey: string }> = [
+  {
+    key: "state",
+    labelKey: "task:sortStatus",
+    descriptionKey: "task:sortStatusDescription",
+  },
+  {
+    key: "updatedAt",
+    labelKey: "task:sortUpdated",
+    descriptionKey: "task:sortUpdatedDescription",
+  },
+  {
+    key: "lastActivityAt",
+    labelKey: "task:sortLastActivity",
+    descriptionKey: "task:sortLastActivityDescription",
+  },
+  {
+    key: "createdAt",
+    labelKey: "task:sortCreated",
+    descriptionKey: "task:sortCreatedDescription",
+  },
+  {
+    key: "title",
+    labelKey: "task:sortTitle",
+    descriptionKey: "task:sortTitleDescription",
+  },
+  {
+    key: "custom",
+    labelKey: "task:sortCustom",
+    descriptionKey: "task:sortCustomDescription",
+  },
 ];
 
 type Props = {
@@ -35,11 +59,20 @@ export function SortPicker({ value, onChange }: Props) {
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          {SORT_OPTIONS.map((opt) => (
-            <SelectItem key={opt.key} value={opt.key} className="text-xs">
-              {t(opt.labelKey)}
-            </SelectItem>
-          ))}
+          {SORT_OPTIONS.map((opt) => {
+            const label = t(opt.labelKey);
+            return (
+              <SelectItem
+                key={opt.key}
+                value={opt.key}
+                className="text-xs"
+                aria-label={label}
+                description={t(opt.descriptionKey)}
+              >
+                {label}
+              </SelectItem>
+            );
+          })}
         </SelectContent>
       </Select>
       {!isCustom && (

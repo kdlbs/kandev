@@ -29,6 +29,8 @@ type TaskLayoutProps = {
   initialTerminals?: Terminal[];
   defaultLayouts?: Record<string, Layout>;
   taskTitle?: string;
+  /** `owner/repo` (or the repository name) of the task's primary repository. */
+  repositoryLabel?: string | null;
   baseBranch?: string;
   worktreeBranch?: string | null;
   isRemoteExecutor?: boolean;
@@ -51,6 +53,7 @@ export const TaskLayout = memo(function TaskLayout({
   initialTerminals,
   defaultLayouts = {},
   taskTitle,
+  repositoryLabel,
   baseBranch,
   worktreeBranch,
   isRemoteExecutor,
@@ -94,6 +97,7 @@ export const TaskLayout = memo(function TaskLayout({
         baseBranch={baseBranch}
         worktreeBranch={worktreeBranch}
         taskTitle={taskTitle}
+        repositoryLabel={repositoryLabel}
         isRemoteExecutor={isRemoteExecutor}
         remoteExecutorType={remoteExecutorType}
         remoteExecutorName={remoteExecutorName}

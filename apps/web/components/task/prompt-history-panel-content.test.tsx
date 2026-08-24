@@ -1,5 +1,5 @@
 /* eslint-disable max-lines -- single spec for the prompt-history panel content accumulating row, numbering, and auto-load suites; splitting would orphan the plan's named test file. */
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import i18n from "i18next";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Message, Turn } from "@/lib/types/http";
@@ -23,6 +23,10 @@ const pagination = vi.hoisted(() => ({
   loadMore: vi.fn(async () => 0),
 }));
 
+const lazyLoadOptions = vi.hoisted(() => ({
+  current: null as null | { minUserPromptsPerLoad?: number },
+}));
+
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (value: typeof state) => unknown) => selector(state),
 }));
@@ -35,11 +39,17 @@ vi.mock("@/hooks/domains/session/use-session-messages", () => ({
 }));
 
 vi.mock("@/hooks/use-lazy-load-messages", () => ({
-  useLazyLoadMessages: () => ({
-    loadMore: pagination.loadMore,
-    hasMore: pagination.hasMore,
-    isLoadingMore: pagination.isLoadingMore,
-  }),
+  useLazyLoadMessages: (
+    _sessionId: string | null,
+    options?: { minUserPromptsPerLoad?: number },
+  ) => {
+    lazyLoadOptions.current = options ?? null;
+    return {
+      loadMore: pagination.loadMore,
+      hasMore: pagination.hasMore,
+      isLoadingMore: pagination.isLoadingMore,
+    };
+  },
 }));
 
 vi.mock("@/hooks/domains/session/use-session-turns", () => ({
@@ -51,7 +61,7 @@ vi.mock("@/hooks/domains/session/use-session-turns", () => ({
   }),
 }));
 
-import { PromptHistoryPanelContent } from "./prompt-history-panel-content";
+import { PromptHistoryPanelContent, overflowsPanel } from "./prompt-history-panel-content";
 import { useMessageFavoritesStore } from "@/lib/state/slices/message-favorites";
 import { formatDateTime } from "@/lib/i18n/formats";
 
@@ -76,10 +86,12 @@ const BUBBLE_SELECTOR = ".rounded-2xl";
 const LONG_PROMPT_TEXT = "long prompt text";
 const SENTINEL_TEST_ID = "prompt-history-sentinel";
 const LOADING_OLDER_TEST_ID = "prompt-history-loading-older";
+const SCROLL_TEST_ID = "prompt-history-scroll";
 const EMPTY_TEXT = "No prompts yet.";
 
 type ObserverEntry = { element: Element; callback: ResizeObserverCallback };
 const observerEntries: ObserverEntry[] = [];
+const resizeObserverInstances: CapturingResizeObserver[] = [];
 
 type IntersectionRecord = {
   callback: IntersectionObserverCallback;
@@ -132,10 +144,13 @@ function fireIntersection(isIntersecting: boolean, target?: Element) {
 
 class CapturingResizeObserver {
   private readonly callback: ResizeObserverCallback;
+  /** Set once the instance is torn down; lets tests prove cleanup runs. */
+  disconnected = false;
 
   /** Stores the ResizeObserver callback for later manual invocation. */
   constructor(callback: ResizeObserverCallback) {
     this.callback = callback;
+    resizeObserverInstances.push(this);
   }
 
   /** Records the observed element and its callback for later manual resize firing. */
@@ -143,8 +158,11 @@ class CapturingResizeObserver {
     observerEntries.push({ element, callback: this.callback });
   }
 
-  /** No-op: recorded observations are retained so tests can fire them manually. */
-  disconnect() {}
+  /** Retains recorded observations so tests can fire them manually, but flags
+   * the instance as torn down so cleanup is observable. */
+  disconnect() {
+    this.disconnected = true;
+  }
   /** No-op: recorded observations are retained so tests can fire them manually. */
   unobserve() {}
 }
@@ -176,15 +194,26 @@ function turn(overrides: Partial<Turn> = {}): Turn {
   };
 }
 
-/** Stubs the given scrollWidth/clientWidth/clientHeight values onto an element. */
+/** Stubs the given scrollWidth/scrollHeight/clientWidth/clientHeight values onto an element. */
 function setGeometry(
   element: Element,
-  overrides: { scrollWidth?: number; clientWidth?: number; clientHeight?: number },
+  overrides: {
+    scrollWidth?: number;
+    scrollHeight?: number;
+    clientWidth?: number;
+    clientHeight?: number;
+  },
 ) {
   if (overrides.scrollWidth !== undefined) {
     Object.defineProperty(element, "scrollWidth", {
       configurable: true,
       value: overrides.scrollWidth,
+    });
+  }
+  if (overrides.scrollHeight !== undefined) {
+    Object.defineProperty(element, "scrollHeight", {
+      configurable: true,
+      value: overrides.scrollHeight,
     });
   }
   if (overrides.clientWidth !== undefined) {
@@ -230,6 +259,7 @@ function expandButton(index: number): HTMLElement {
 beforeEach(() => {
   vi.clearAllMocks();
   observerEntries.length = 0;
+  resizeObserverInstances.length = 0;
   intersectionRecords.length = 0;
   vi.stubGlobal("ResizeObserver", CapturingResizeObserver);
   vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
@@ -237,6 +267,7 @@ beforeEach(() => {
   pagination.isLoadingMore = false;
   pagination.messagesLoading = false;
   pagination.loadMore.mockResolvedValue(0);
+  lazyLoadOptions.current = null;
   state.tasks.activeSessionId = SESSION_A;
   state.taskSessions.items = {
     [SESSION_A]: { name: "Agent A", is_passthrough: false },
@@ -254,6 +285,7 @@ beforeEach(() => {
 afterEach(async () => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
   useMessageFavoritesStore.setState({ bySession: {} });
   sessionStorage.clear();
   await i18n.changeLanguage("en");
@@ -673,6 +705,53 @@ describe("PromptHistoryPanelContent — expand/collapse behavior", () => {
   });
 });
 
+describe("PromptHistoryPanelContent — auto-load behavior", () => {
+  it("requests at least 10 user prompts per older-page load", () => {
+    pagination.hasMore = true;
+    messagesBySession[SESSION_A] = [message({ id: "m1", prompt_index: 2, content: "prompt" })];
+    render(<PromptHistoryPanelContent />);
+
+    expect(lazyLoadOptions.current).toEqual({ minUserPromptsPerLoad: 10 });
+  });
+
+  it("sticks to the bottom after a load while the user is pinned, so older pages keep loading", async () => {
+    pagination.hasMore = true;
+    let resolveLoad: (value: number) => void = () => {};
+    pagination.loadMore
+      .mockImplementationOnce(
+        () =>
+          new Promise<number>((resolve) => {
+            resolveLoad = resolve;
+          }),
+      )
+      .mockResolvedValueOnce(0);
+    messagesBySession[SESSION_A] = [message({ id: "m1", prompt_index: 2, content: "prompt" })];
+    render(<PromptHistoryPanelContent />);
+    const scroller = screen.getByTestId(SCROLL_TEST_ID) as HTMLElement;
+    // Content (600) overflows the 400px viewport; the user pins at the bottom.
+    setGeometry(scroller, { scrollHeight: 600, clientHeight: 400 });
+    scroller.scrollTop = 200;
+    scroller.dispatchEvent(new Event("scroll"));
+    await act(async () => {});
+
+    // Rows append while the load is in flight; the settle must re-pin the
+    // scroller to the new bottom so the sentinel stays in view for the next
+    // page.
+    fireIntersection(true);
+    setGeometry(scroller, { scrollHeight: 800 });
+    await act(async () => {
+      resolveLoad(20);
+    });
+    await waitFor(() => expect(pagination.loadMore).toHaveBeenCalledTimes(2));
+    // Browser-faithful: a real browser clamps scrollTop to
+    // scrollHeight - clientHeight, so assert the "pinned at the bottom"
+    // invariant rather than the raw jsdom write.
+    expect(scroller.scrollTop).toBeGreaterThanOrEqual(
+      scroller.scrollHeight - scroller.clientHeight,
+    );
+  });
+});
+
 describe("PromptHistoryPanelContent — auto-load sentinel", () => {
   it("keeps the sentinel while hasMore and no entry is prompt #1, and loads on intersection", async () => {
     pagination.hasMore = true;
@@ -705,23 +784,6 @@ describe("PromptHistoryPanelContent — auto-load sentinel", () => {
     expect(screen.queryByTestId("load-older-messages")).toBeNull();
   });
 
-  it("shows the older-page loading row only while shouldPaginate && isLoadingMore", () => {
-    pagination.hasMore = true;
-    messagesBySession[SESSION_A] = [message({ id: "m1", prompt_index: 2, content: "prompt" })];
-
-    const { rerender } = render(<PromptHistoryPanelContent />);
-    expect(screen.queryByTestId(LOADING_OLDER_TEST_ID)).toBeNull();
-
-    pagination.isLoadingMore = true;
-    rerender(<PromptHistoryPanelContent />);
-    expect(screen.getByTestId(LOADING_OLDER_TEST_ID).textContent).toBe("Loading older messages...");
-
-    // Loading row disappears when the load settles.
-    pagination.isLoadingMore = false;
-    rerender(<PromptHistoryPanelContent />);
-    expect(screen.queryByTestId(LOADING_OLDER_TEST_ID)).toBeNull();
-  });
-
   it("fires the shared loader while isLoadingMore (joinInFlightWhileLoading) but never while messagesLoading", async () => {
     pagination.hasMore = true;
     messagesBySession[SESSION_A] = [message({ id: "m1", prompt_index: 2, content: "prompt" })];
@@ -751,19 +813,15 @@ describe("PromptHistoryPanelContent — auto-load sentinel", () => {
 
   it("re-arms after a positive result while still intersecting", async () => {
     pagination.hasMore = true;
-    pagination.loadMore.mockResolvedValue(20);
+    pagination.loadMore.mockResolvedValueOnce(20).mockResolvedValueOnce(0);
     messagesBySession[SESSION_A] = [message({ id: "m1", prompt_index: 2, content: "prompt" })];
 
     render(<PromptHistoryPanelContent />);
 
     fireIntersection(true);
-    await act(async () => {});
-    expect(pagination.loadMore).toHaveBeenCalledTimes(1);
-
-    // Positive progress re-arms: a further intersection fires the next page.
-    fireIntersection(true);
-    await act(async () => {});
-    expect(pagination.loadMore).toHaveBeenCalledTimes(2);
+    // Positive progress re-arms: the still-intersecting sentinel automatically
+    // fires the next page after prepend/layout work settles.
+    await waitFor(() => expect(pagination.loadMore).toHaveBeenCalledTimes(2));
   });
 
   it("does not loop after a zero-result load and retries on scroll-out/scroll-back or wheel", async () => {
@@ -788,11 +846,12 @@ describe("PromptHistoryPanelContent — auto-load sentinel", () => {
     await act(async () => {});
     expect(pagination.loadMore).toHaveBeenCalledTimes(2);
 
-    // Wheel/touch retry path while disarmed and intersecting.
+    // Wheel/touch retry path while disarmed and intersecting. The gesture
+    // handlers live on the panel's inner scroller.
     pagination.loadMore.mockClear();
     fireIntersection(true);
     await act(async () => {});
-    fireEvent.wheel(screen.getByTestId(PANEL_TEST_ID));
+    fireEvent.wheel(screen.getByTestId(SCROLL_TEST_ID));
     await act(async () => {});
     expect(pagination.loadMore).toHaveBeenCalledTimes(1);
   });
@@ -803,6 +862,231 @@ describe("PromptHistoryPanelContent — auto-load sentinel", () => {
 
     expect(screen.getByTestId(SENTINEL_TEST_ID)).toBeTruthy();
     expect(screen.getByTestId(PANEL_TEST_ID).textContent).not.toBe(EMPTY_TEXT);
+  });
+});
+
+describe("PromptHistoryPanelContent — loading message placement", () => {
+  it("shows the loading message only while shouldPaginate && isLoadingMore", () => {
+    pagination.hasMore = true;
+    messagesBySession[SESSION_A] = [message({ id: "m1", prompt_index: 2, content: "prompt" })];
+
+    const { rerender } = render(<PromptHistoryPanelContent />);
+    expect(screen.queryByTestId(LOADING_OLDER_TEST_ID)).toBeNull();
+
+    pagination.isLoadingMore = true;
+    rerender(<PromptHistoryPanelContent />);
+    const loading = screen.getByTestId(LOADING_OLDER_TEST_ID);
+    expect(loading.textContent).toBe("Loading older messages...");
+
+    // Loading message disappears when the load settles (after the grace
+    // window; the grace test below covers the settle timing).
+    pagination.isLoadingMore = false;
+    rerender(<PromptHistoryPanelContent />);
+    expect(screen.getByTestId(LOADING_OLDER_TEST_ID)).toBeTruthy();
+  });
+
+  it("floats the loading message only when the panel content scrolls, and sits under the last message otherwise", () => {
+    pagination.hasMore = true;
+    messagesBySession[SESSION_A] = [message({ id: "m1", prompt_index: 2, content: "prompt" })];
+    const { rerender } = render(<PromptHistoryPanelContent />);
+    const panel = screen.getByTestId(PANEL_TEST_ID);
+    // The scroller is the panel's first child; the content wrapper (rows +
+    // sentinel) is the scroller's first child. Scrollability is measured from
+    // the wrapper against the scroller's content box.
+    const scroller = panel.firstElementChild as HTMLElement;
+    const content = scroller.firstElementChild as HTMLElement;
+    expect(scroller.getAttribute("data-testid")).toBe(SCROLL_TEST_ID);
+
+    pagination.isLoadingMore = true;
+    rerender(<PromptHistoryPanelContent />);
+    let loading = screen.getByTestId(LOADING_OLDER_TEST_ID);
+
+    // Default metrics (0/0): content does not overflow, so the message is
+    // in-flow inside the scroller, directly under the last message.
+    expect(loading.className).not.toContain("absolute");
+    expect(loading.className).toContain("py-2");
+    expect(loading.parentElement).toBe(scroller);
+    // The sentinel stays the final in-flow child of the content wrapper; the
+    // indicator is never its preceding sibling, so it cannot shift sentinel
+    // geometry.
+    expect(screen.getByTestId(SENTINEL_TEST_ID).previousElementSibling).not.toBe(loading);
+
+    // Content overflows the scroller (the panel scrolls): the message floats
+    // at the panel bottom, anchored to the panel viewport (the outer relative
+    // root, NOT the scroller - an absolute child of the scroller would scroll
+    // with the content).
+    setGeometry(content, { scrollHeight: 600 });
+    setGeometry(scroller, { clientHeight: 400 });
+    rerender(<PromptHistoryPanelContent />);
+    loading = screen.getByTestId(LOADING_OLDER_TEST_ID);
+    expect(loading.className).toContain("absolute");
+    expect(loading.className).toContain("pointer-events-none");
+    expect(loading.className).toContain("z-10");
+    expect(loading.parentElement).toBe(panel);
+    expect(panel.className).toContain("relative");
+    expect(screen.getByTestId(SENTINEL_TEST_ID).previousElementSibling).not.toBe(loading);
+  });
+
+  it("re-measures scrollability on an external scroller resize without a render", () => {
+    pagination.hasMore = true;
+    messagesBySession[SESSION_A] = [message({ id: "m1", prompt_index: 2, content: "prompt" })];
+    const { rerender } = render(<PromptHistoryPanelContent />);
+    const panel = screen.getByTestId(PANEL_TEST_ID);
+    const scroller = panel.firstElementChild as HTMLElement;
+    const content = scroller.firstElementChild as HTMLElement;
+
+    pagination.isLoadingMore = true;
+    rerender(<PromptHistoryPanelContent />);
+    expect(screen.getByTestId(LOADING_OLDER_TEST_ID).className).not.toContain("absolute");
+
+    // A dockview width-only drag changes the panel size without committing a
+    // React render; the scroller ResizeObserver must re-measure and flip the
+    // mode.
+    setGeometry(content, { scrollHeight: 600 });
+    setGeometry(scroller, { clientHeight: 400 });
+    fireResize(scroller);
+
+    expect(panel.className).toContain("relative");
+    expect(screen.getByTestId(LOADING_OLDER_TEST_ID).className).toContain("absolute");
+  });
+
+  it("disconnects its ResizeObservers on unmount", () => {
+    // Render the rows branch so the scroller (and its observer) exists.
+    messagesBySession[SESSION_A] = [message({ id: "m1", content: "prompt" })];
+    const { unmount } = render(<PromptHistoryPanelContent />);
+    // Row max-height observer + scrollability observer (recreated per commit).
+    expect(resizeObserverInstances.length).toBeGreaterThanOrEqual(2);
+    unmount();
+    expect(resizeObserverInstances.every((instance) => instance.disconnected)).toBe(true);
+  });
+});
+
+describe("PromptHistoryPanelContent — loading message continuity", () => {
+  it("keeps the loading message mounted across consecutive loads so it does not flicker", () => {
+    vi.useFakeTimers();
+    pagination.hasMore = true;
+    messagesBySession[SESSION_A] = [message({ id: "m1", prompt_index: 2, content: "prompt" })];
+    const { rerender } = render(<PromptHistoryPanelContent />);
+    expect(screen.queryByTestId(LOADING_OLDER_TEST_ID)).toBeNull();
+
+    pagination.isLoadingMore = true;
+    rerender(<PromptHistoryPanelContent />);
+    expect(screen.getByTestId(LOADING_OLDER_TEST_ID)).toBeTruthy();
+
+    // The request settles, but the sentinel's re-arm fires the next page
+    // within the grace window: the message stays mounted (no per-page flash).
+    pagination.isLoadingMore = false;
+    rerender(<PromptHistoryPanelContent />);
+    act(() => vi.advanceTimersByTime(200));
+    expect(screen.getByTestId(LOADING_OLDER_TEST_ID)).toBeTruthy();
+
+    // Next page starts and settles within the window: still continuous.
+    pagination.isLoadingMore = true;
+    rerender(<PromptHistoryPanelContent />);
+    pagination.isLoadingMore = false;
+    rerender(<PromptHistoryPanelContent />);
+    act(() => vi.advanceTimersByTime(200));
+    expect(screen.getByTestId(LOADING_OLDER_TEST_ID)).toBeTruthy();
+
+    // No new load arrives: once the grace expires the message disappears.
+    act(() => vi.advanceTimersByTime(400));
+    expect(screen.queryByTestId(LOADING_OLDER_TEST_ID)).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it("cancels the previous session's loading grace on switch and never revives it", () => {
+    vi.useFakeTimers();
+    pagination.hasMore = true;
+    messagesBySession[SESSION_A] = [message({ id: "m1", prompt_index: 2, content: "prompt" })];
+    messagesBySession[SESSION_B] = [message({ id: "b1", prompt_index: 5, content: "prompt" })];
+    const { rerender } = render(<PromptHistoryPanelContent />);
+
+    // Session A loads and settles: its grace keeps the indicator mounted.
+    pagination.isLoadingMore = true;
+    rerender(<PromptHistoryPanelContent />);
+    pagination.isLoadingMore = false;
+    rerender(<PromptHistoryPanelContent />);
+    act(() => vi.advanceTimersByTime(200));
+    expect(screen.getByTestId(LOADING_OLDER_TEST_ID)).toBeTruthy();
+
+    // Switching to session B (paginatable but NOT loading) within the grace
+    // window hides the indicator even during the switch render itself: B has
+    // no in-flight load of its own (render-safe session identity guard).
+    state.tasks.activeSessionId = SESSION_B;
+    rerender(<PromptHistoryPanelContent />);
+    expect(screen.queryByTestId(LOADING_OLDER_TEST_ID)).toBeNull();
+
+    // Switching back to A within the window does not revive A's old grace.
+    state.tasks.activeSessionId = SESSION_A;
+    rerender(<PromptHistoryPanelContent />);
+    expect(screen.queryByTestId(LOADING_OLDER_TEST_ID)).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it("shows the loading message for the new session's own in-flight load", () => {
+    pagination.hasMore = true;
+    messagesBySession[SESSION_B] = [message({ id: "b1", prompt_index: 5, content: "prompt" })];
+    state.tasks.activeSessionId = SESSION_B;
+    const { rerender } = render(<PromptHistoryPanelContent />);
+
+    pagination.isLoadingMore = true;
+    rerender(<PromptHistoryPanelContent />);
+    expect(screen.getByTestId(LOADING_OLDER_TEST_ID)).toBeTruthy();
+  });
+
+  it("carries the grace onto a session that is already loading when switched to", () => {
+    vi.useFakeTimers();
+    pagination.hasMore = true;
+    messagesBySession[SESSION_A] = [message({ id: "m1", prompt_index: 2, content: "prompt" })];
+    messagesBySession[SESSION_B] = [message({ id: "b1", prompt_index: 5, content: "prompt" })];
+    const { rerender } = render(<PromptHistoryPanelContent />);
+
+    // A loads and settles: grace active for A.
+    pagination.isLoadingMore = true;
+    rerender(<PromptHistoryPanelContent />);
+    pagination.isLoadingMore = false;
+    rerender(<PromptHistoryPanelContent />);
+    act(() => vi.advanceTimersByTime(200));
+    expect(screen.getByTestId(LOADING_OLDER_TEST_ID)).toBeTruthy();
+
+    // B is ALREADY loading when the user switches (transcript-initiated
+    // request): the indicator shows via the shared isLoadingMore flag.
+    pagination.isLoadingMore = true;
+    state.tasks.activeSessionId = SESSION_B;
+    rerender(<PromptHistoryPanelContent />);
+    expect(screen.getByTestId(LOADING_OLDER_TEST_ID)).toBeTruthy();
+
+    // B's request settles: the carried-over grace keeps the indicator mounted
+    // through the window (no flash before the sentinel re-arms the next page).
+    pagination.isLoadingMore = false;
+    rerender(<PromptHistoryPanelContent />);
+    act(() => vi.advanceTimersByTime(200));
+    expect(screen.getByTestId(LOADING_OLDER_TEST_ID)).toBeTruthy();
+
+    // The next page starts and settles within the window: still continuous.
+    pagination.isLoadingMore = true;
+    rerender(<PromptHistoryPanelContent />);
+    pagination.isLoadingMore = false;
+    rerender(<PromptHistoryPanelContent />);
+    act(() => vi.advanceTimersByTime(200));
+    expect(screen.getByTestId(LOADING_OLDER_TEST_ID)).toBeTruthy();
+
+    // No further load: the grace expires and the indicator disappears.
+    act(() => vi.advanceTimersByTime(400));
+    expect(screen.queryByTestId(LOADING_OLDER_TEST_ID)).toBeNull();
+    vi.useRealTimers();
+  });
+});
+
+describe("overflowsPanel — padding-aware overflow boundary", () => {
+  it("compares content height against the root's scrollable content box", () => {
+    // A p-2 root (8px top + 8px bottom) leaves clientHeight - 16 as the
+    // scrollable viewport; 390px of content in a 400px panel really scrolls.
+    expect(overflowsPanel(390, 400, 16)).toBe(true);
+    expect(overflowsPanel(384, 400, 16)).toBe(false);
+    // No padding: the boundary is the client height itself.
+    expect(overflowsPanel(400, 400, 0)).toBe(false);
+    expect(overflowsPanel(401, 400, 0)).toBe(true);
   });
 });
 
@@ -824,6 +1108,12 @@ describe("PromptHistoryPanelContent — auto-load loading states", () => {
 
     expect(screen.getByTestId(PANEL_TEST_ID).textContent).toBe("Loading older messages...");
     expect(screen.getByTestId(SENTINEL_TEST_ID)).toBeTruthy();
+    // An empty panel has nothing to scroll: the message is in-flow inside the
+    // scroller under the (empty) list, never floating.
+    expect(screen.getByTestId(LOADING_OLDER_TEST_ID).className).not.toContain("absolute");
+    expect(screen.getByTestId(LOADING_OLDER_TEST_ID).parentElement).toBe(
+      screen.getByTestId(SCROLL_TEST_ID),
+    );
   });
 
   it("renders the definitive empty state only when entries are empty, hasMore is false, and loading ended", () => {
@@ -856,8 +1146,9 @@ describe("PromptHistoryPanelContent — auto-load loading states", () => {
     await act(async () => {});
     expect(pagination.loadMore).toHaveBeenCalledTimes(1);
 
-    // Disarmed and still intersecting: a wheel gesture retries.
-    fireEvent.wheel(screen.getByTestId(PANEL_TEST_ID));
+    // Disarmed and still intersecting: a wheel gesture on the scroller
+    // retries.
+    fireEvent.wheel(screen.getByTestId(SCROLL_TEST_ID));
     await act(async () => {});
     expect(pagination.loadMore).toHaveBeenCalledTimes(2);
   });

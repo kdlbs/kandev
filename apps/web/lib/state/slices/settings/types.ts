@@ -438,6 +438,7 @@ export type UserSettingsState = {
   appStatusBarEnabled: boolean;
   appStatusBarOrder: AppStatusBarOrderState;
   hiddenWorkflowStepIds: Record<string, string[]>;
+  workflowIdsWithAutoHideEmptySteps: string[];
   loaded: boolean;
 };
 

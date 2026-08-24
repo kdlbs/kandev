@@ -109,17 +109,6 @@ func (r *Repository) ExecRaw(ctx context.Context, query string, args ...interfac
 // package should keep using typed methods.
 func (r *Repository) ReaderDB() *sqlx.DB { return r.ro }
 
-// BeginTx starts a transaction on the shared writer connection. Exposed so
-// the office service layer can make CreateCostEventTx atomic with another
-// package's write (e.g. task.Repository.IncrementTaskSessionUsageTx via
-// shared.SessionUsageWriterTx) — safe because both repositories are
-// constructed from the same underlying *sqlx.DB (internal/backendapp/storage.go),
-// so a transaction begun here can execute statements against tables either
-// package owns.
-func (r *Repository) BeginTx(ctx context.Context) (*sqlx.Tx, error) {
-	return r.db.BeginTxx(ctx, nil)
-}
-
 // initSchema creates all office tables if they don't exist.
 func (r *Repository) initSchema() error {
 	if err := r.createCoreTables(); err != nil {
@@ -311,13 +300,7 @@ func (r *Repository) createCostTables() error {
 	CREATE INDEX IF NOT EXISTS idx_office_cost_agent ON office_cost_events(agent_profile_id);
 	CREATE INDEX IF NOT EXISTS idx_office_cost_occurred ON office_cost_events(occurred_at DESC);
 	CREATE INDEX IF NOT EXISTS idx_office_cost_task ON office_cost_events(task_id);
-	-- Indexes the join column internal/task/repository/sqlite's
-	-- BackfillSessionTokensCachedIn correlates task_sessions against. Lives
-	-- here (not in the task repository) because it indexes a table this
-	-- repository owns. Without it that correlated subquery falls back to a
-	-- full table scan per task_sessions row - measured at 76.72s at a modest
-	-- 4,000 sessions / 80,000 events versus 0.17s indexed.
-	CREATE INDEX IF NOT EXISTS idx_office_cost_events_session_id ON office_cost_events(session_id);
+	DROP INDEX IF EXISTS idx_office_cost_events_session_id;
 	-- uniq_office_cost_usage_event is created by migrateCostEventContract
 	-- (base_migrations.go), not here: schema init runs before migrations,
 	-- so indexing usage_event_id inline would crash a pre-migration

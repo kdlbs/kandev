@@ -8,7 +8,7 @@ owner: cfl
 
 Decision: [Task-owned worktree lifetime](../../decisions/2026-08-08-task-owned-worktree-lifetime.md)
 
-Runtime contract: [Task runtime cleanup](../tasks/runtime-cleanup.md)
+Runtime contract: [Task runtime cleanup](../tasks/system-design/runtime-cleanup.md)
 
 ## Why
 
@@ -34,7 +34,10 @@ task lifecycle operation takes responsibility for cleanup.
   it is one of several sessions sharing the workspace.
 - A task with zero sessions retains its `TaskEnvironment`, worktree directory,
   Git registration, branch, and uncommitted files.
-- A later session may reuse the retained workspace.
+- A later session may reuse the retained workspace only after canonical
+  environment and repository inventory validation. A missing, preparing, or
+  unsafe retained environment returns a recoverable workspace conflict; a
+  replacement session never recreates it implicitly.
 - Task archive/delete, cascade archive/delete, workspace delete, quick-chat task
   expiry, and explicit task-environment reset remain the owners of physical
   cleanup.

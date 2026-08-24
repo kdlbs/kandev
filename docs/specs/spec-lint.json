@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "limits": {
+    "guide": 16384,
+    "legacy": 32768,
+    "product": 16384,
+    "requirement": 20480,
+    "system-design": 32768,
+    "system-index": 12288,
+    "template": 8192
+  },
+  "legacy_size_exceptions": {
+    "docs/specs/agents/dynamic-agent-routing.md": 38046,
+    "docs/specs/automations-pr-merged-trigger/spec.md": 122063,
+    "docs/specs/automations-yaml-export/spec.md": 111884,
+    "docs/specs/azure-devops-integration/spec.md": 43510,
+    "docs/specs/board-step-visibility-filter/spec.md": 39946,
+    "docs/specs/executor-profile-env-precedence/spec.md": 88243,
+    "docs/specs/external-question-answering/spec.md": 80621,
+    "docs/specs/gitlab-integration/spec.md": 34079,
+    "docs/specs/gitlab-mr-status-chip/spec.md": 77760,
+    "docs/specs/gitlab-mr-task-list-badges/spec.md": 51962,
+    "docs/specs/integrations/github-authentication.md": 59381,
+    "docs/specs/lsp-file-intelligence/spec.md": 38089,
+    "docs/specs/office/agents.md": 61654,
+    "docs/specs/office/automations-settings.md": 33607,
+    "docs/specs/office/costs.md": 33239,
+    "docs/specs/office/live-updates.md": 38568,
+    "docs/specs/office/overview.md": 34375,
+    "docs/specs/office/routing.md": 40782,
+    "docs/specs/office/scheduler.md": 50967,
+    "docs/specs/office/tasks.md": 42862,
+    "docs/specs/office-agent-tier-routing/spec.md": 58448,
+    "docs/specs/platform/diagnostic-logging.md": 40696,
+    "docs/specs/plugin-nav-sidebar-footer/spec.md": 63150,
+    "docs/specs/plugins/spec.md": 77806,
+    "docs/specs/subagent-context-persistence/spec.md": 160552,
+    "docs/specs/system-page/storage-maintenance.md": 54320,
+    "docs/specs/task-cost-ledger/spec.md": 91931,
+    "docs/specs/ui/ci-pr-automation.md": 57643
+  }
+}

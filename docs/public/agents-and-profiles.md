@@ -49,6 +49,20 @@ The status shown on this page is authoritative for the current host. A CLI that 
 The update icon is available on managed Claude, Codex, OpenCode, Copilot, and
 Gemini agent cards. It updates the runtime on the Kandev host.
 
+Each managed runtime has a reviewed Kandev default. If you have not selected a
+version, Kandev uses that exact default for probes, sessions, standalone
+inference, containers, and SSH commands. A successful version update stores
+your exact selection for this Kandev installation. The selection takes
+precedence over the default until you choose **Use Kandev default**. Kandev
+does not store the default as a user selection, so later Kandev releases can
+move unmodified installations to their reviewed defaults.
+
+When the cached npm check finds a newer stable release, the update control has
+a blue dot and its accessible label includes the effective and latest
+versions. The dot is only a hint. Opening the control performs a fresh,
+authoritative preview before any update starts. If the check is unavailable,
+the control has no dot but remains usable.
+
 1. Select the update icon.
 2. Review the current version, active version, available stable versions, and command.
 3. Keep the latest version selected for a normal update, or select an older stable version to roll back.
@@ -65,7 +79,10 @@ configuration options, commands, and runtime version without a page reload.
 - The active exact version survives Kandev and browser restarts.
 - Later host-local probes, utility calls, and standalone sessions use the active exact version.
 - Active sessions keep running. They are not restarted or hot-swapped.
-- Passthrough agents, authentication helpers, remote executors, and running containers are unchanged.
+- Passthrough agents and authentication helpers remain unchanged. The Settings
+  update job prepares the host runtime only; remote executor and new-container
+  commands still use the effective exact version and must resolve that package
+  in their own environment. Running sessions and containers are unchanged.
 - If preparation, ACP validation, authentication, or persistence fails, Kandev keeps the previous active version and capability catalogue. Select another stable version or retry the same target.
 - Kandev may prepare the exact version again if npm removes its cache entry. Kandev does not own an offline package inventory, and global npm cache cleanup is not required.
 
@@ -284,6 +301,13 @@ Literal values remain in profile configuration. A secret reference avoids copyin
 ## Permissions and unattended work
 
 In a structured ACP session, the agent can present a permission request and its available responses. With **Auto-approve all permissions** disabled, a person chooses a response in the session. With it enabled, the runtime selects the first allow-once or allow-always response without waiting. If the agent supplies no allow response, Kandev selects its first response even when that response is not approval; with no responses, it cancels.
+
+An external MCP client can also list live pending requests for an authorized task and submit one
+exact option originally offered by the agent. The request-generation ID prevents an old approval
+from targeting a replacement prompt that reused a provider pending ID. Kandev records who selected
+which option before delivery and rejects concurrent or replayed answers. It does not expose hidden
+environment values, headers, raw MCP arguments, or option metadata. See
+[Resolve a live agent permission request](automation-and-mcp.md#resolve-a-live-agent-permission-request).
 
 Auto approval can authorize shell commands, file changes, network calls, or any other capability exposed by that agent. Agent-specific flags that suppress permission prompts can be broader still. Use either only with a constrained executor, repository, environment, and credential set.
 

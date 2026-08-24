@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { produce } from "immer";
+import type { Draft } from "immer";
 
 import { snapshotToState } from "./mapper";
+import { hydrateState } from "@/lib/state/hydration/hydrator";
+import { defaultState } from "@/lib/state/default-state";
+import type { AppState } from "@/lib/state/store";
 import { taskId, workflowId, workspaceId } from "@/lib/types/ids";
 import type { WorkflowSnapshot } from "@/lib/types/http";
 import { partitionWipTasks } from "@/lib/kanban/wip-queue";
@@ -45,6 +50,18 @@ function snapshotWithPendingAction(action: unknown): WorkflowSnapshot {
       } as WorkflowSnapshot["tasks"][number],
     ],
   };
+}
+
+const EXECUTOR_ID = "exec-worktree";
+const EXECUTOR_TYPE = "worktree";
+const EXECUTOR_NAME = "Worktree";
+
+function snapshotWithExecutor(): WorkflowSnapshot {
+  const snapshot = snapshotWithPendingAction(undefined);
+  snapshot.tasks[0].primary_executor_id = EXECUTOR_ID;
+  snapshot.tasks[0].primary_executor_type = EXECUTOR_TYPE;
+  snapshot.tasks[0].primary_executor_name = EXECUTOR_NAME;
+  return snapshot;
 }
 
 // eslint-disable-next-line max-lines-per-function -- test describe block, splitting hurts readability
@@ -115,6 +132,45 @@ describe("snapshotToState", () => {
     expect(state.kanban?.tasks[0]?.statusSummary).toEqual(snapshot.tasks[0].status_summary);
   });
 
+  it("maps the primary executor binding onto the kanban task", () => {
+    const snapshot = snapshotWithExecutor();
+    snapshot.tasks[0].is_remote_executor = false;
+
+    const state = snapshotToState(snapshot);
+
+    expect(state.kanban?.tasks[0]).toMatchObject({
+      primaryExecutorId: EXECUTOR_ID,
+      primaryExecutorType: EXECUTOR_TYPE,
+      primaryExecutorName: EXECUTOR_NAME,
+      isRemoteExecutor: false,
+    });
+  });
+
+  it("leaves the executor binding unset when the snapshot omits it", () => {
+    // The backend marks every executor field `omitempty`, so a task whose
+    // primary session has not bound an executor yet arrives with the keys
+    // absent rather than null. The mapper must yield undefined here, never
+    // crash and never invent a binding.
+    const state = snapshotToState(snapshotWithPendingAction(undefined));
+
+    expect(state.kanban?.tasks[0]?.primaryExecutorId).toBeUndefined();
+    expect(state.kanban?.tasks[0]?.primaryExecutorType).toBeUndefined();
+    expect(state.kanban?.tasks[0]?.primaryExecutorName).toBeUndefined();
+    expect(state.kanban?.tasks[0]?.isRemoteExecutor).toBe(false);
+  });
+
+  it("leaves an explicitly undefined executor binding unset", () => {
+    // Reviewer-requested wire-contract coverage. JSON omits undefined values,
+    // but typed snapshot fixtures can retain the property; both representations
+    // must produce the same unresolved client state.
+    const snapshot = snapshotWithPendingAction(undefined);
+    snapshot.tasks[0].primary_executor_type = undefined;
+
+    const state = snapshotToState(snapshot);
+
+    expect(state.kanban?.tasks[0]?.primaryExecutorType).toBeUndefined();
+  });
+
   it("preserves workflow step WIP fields", () => {
     const state = snapshotToState({
       workflow: {
@@ -180,5 +236,36 @@ describe("snapshotToState", () => {
       taskId("task-2"),
       taskId("task-1"),
     ]);
+  });
+});
+
+describe("snapshotToState feeding hydrateState", () => {
+  it("does not blank an already-known executor when a re-hydration lands", () => {
+    // Regression guard for the bug this change fixes, exercised through the
+    // real chain: use-workflow-snapshot calls hydrate(snapshotToState(...)) on
+    // (re)mount, and mergeKanbanTasks replaces the cached task wholesale when
+    // the incoming updatedAt is not older. While snapshotToState dropped the
+    // executor fields, that replacement silently reset primaryExecutorType to
+    // undefined and the "Add folder" control disappeared.
+    const draft = structuredClone(defaultState) as AppState;
+    draft.kanban.tasks = [
+      {
+        id: taskId("task-1"),
+        workflowId: workflowID,
+        workflowStepId: "step-1",
+        title: "Task",
+        position: 0,
+        updatedAt: now,
+        primaryExecutorId: EXECUTOR_ID,
+        primaryExecutorType: EXECUTOR_TYPE,
+        primaryExecutorName: EXECUTOR_NAME,
+      },
+    ] as AppState["kanban"]["tasks"];
+
+    const result = produce(draft, (d: Draft<AppState>) => {
+      hydrateState(d, snapshotToState(snapshotWithExecutor()));
+    });
+
+    expect(result.kanban.tasks[0]?.primaryExecutorType).toBe(EXECUTOR_TYPE);
   });
 });

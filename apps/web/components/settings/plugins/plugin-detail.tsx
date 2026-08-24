@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef, useState, type RefObject } from "react";
 import { IconArrowLeft } from "@tabler/icons-react";
 import { Trans, useTranslation } from "react-i18next";
 import { Badge } from "@kandev/ui/badge";
@@ -9,6 +10,7 @@ import { Separator } from "@kandev/ui/separator";
 import { PluginSlot } from "@/components/plugins/plugin-slot";
 import Link from "@/components/routing/app-link";
 import { useRouter } from "@/lib/routing/client-router";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { usePlugins } from "@/hooks/domains/plugins/use-plugins";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
@@ -17,7 +19,7 @@ import { PluginManifestCard } from "./plugin-manifest-card";
 import { PluginRepoLink } from "./plugin-repo-link";
 import { PluginStatusBadge } from "./plugin-status-badge";
 import { PluginErrorDiagnostic } from "./plugin-error-diagnostic";
-import { UninstallPluginDialog } from "./uninstall-plugin-dialog";
+import { PluginUninstallConfirmation } from "./uninstall-plugin-dialog";
 import { usePluginActions } from "./use-plugin-actions";
 import { usePluginConfigForm } from "./use-plugin-config-form";
 import type { PluginRecord } from "@/lib/types/plugins";
@@ -35,8 +37,11 @@ const PLUGINS_SETTINGS_HREF = "/settings/plugins";
 export function PluginDetail({ pluginId }: { pluginId: string }) {
   const { items, loaded } = usePlugins();
   const router = useRouter();
+  const { isFinePointer } = useResponsiveBreakpoint();
   const actions = usePluginActions();
   const plugin = items.find((p) => p.id === pluginId) ?? null;
+  const [confirmingUninstall, setConfirmingUninstall] = useState(false);
+  const uninstallAnchorRef = useRef<HTMLButtonElement>(null);
   const form = usePluginConfigForm(plugin);
   useSettingsSaveContributor({
     id: `plugin-config:${pluginId}`,
@@ -63,17 +68,35 @@ export function PluginDetail({ pluginId }: { pluginId: string }) {
         ownerPluginId={plugin.id}
         slotProps={{ pluginId: plugin.id, status: plugin.status }}
       />
-      <PluginSettingsCard plugin={plugin} form={form} busy={actions.busyId === plugin.id} />
+      <PluginSettingsCard
+        plugin={plugin}
+        form={form}
+        busy={actions.busyId === plugin.id || actions.uninstallBusy}
+      />
       <PluginManifestCard plugin={plugin} />
 
-      <PluginDangerZone plugin={plugin} actions={actions} />
-      <UninstallPluginDialog
-        target={actions.uninstallTarget}
-        busy={actions.uninstallBusy}
-        onClose={actions.closeUninstall}
+      <PluginDangerZone
+        plugin={plugin}
+        actions={actions}
+        isFinePointer={isFinePointer}
+        confirmingUninstall={confirmingUninstall}
+        uninstallAnchorRef={uninstallAnchorRef}
+        onUninstall={() => {
+          setConfirmingUninstall(true);
+        }}
+      />
+      <PluginUninstallConfirmation
+        target={plugin}
+        open={confirmingUninstall}
+        isFinePointer={isFinePointer}
+        anchorRef={uninstallAnchorRef}
+        onOpenChange={setConfirmingUninstall}
+        onCancel={() => {
+          setConfirmingUninstall(false);
+        }}
         onConfirm={async () => {
-          await actions.confirmUninstall();
-          router.push(PLUGINS_SETTINGS_HREF);
+          const uninstalled = await actions.confirmUninstall(plugin);
+          if (uninstalled) router.push(PLUGINS_SETTINGS_HREF);
         }}
       />
     </div>
@@ -185,11 +208,22 @@ function PluginSettingsBody({ plugin, form, busy }: PluginSettingsCardProps) {
 type PluginDangerZoneProps = {
   plugin: PluginRecord;
   actions: ReturnType<typeof usePluginActions>;
+  isFinePointer: boolean;
+  confirmingUninstall: boolean;
+  uninstallAnchorRef: RefObject<HTMLButtonElement | null>;
+  onUninstall: () => void;
 };
 
-function PluginDangerZone({ plugin, actions }: PluginDangerZoneProps) {
+function PluginDangerZone({
+  plugin,
+  actions,
+  isFinePointer,
+  confirmingUninstall,
+  uninstallAnchorRef,
+  onUninstall,
+}: PluginDangerZoneProps) {
   const { t } = useTranslation();
-  const busy = actions.busyId === plugin.id;
+  const busy = actions.busyId === plugin.id || actions.uninstallBusy;
   const canEnable =
     plugin.status === "disabled" || plugin.status === "registered" || plugin.status === "error";
   const canDisable = plugin.status === "active" || plugin.status === "error";
@@ -218,15 +252,18 @@ function PluginDangerZone({ plugin, actions }: PluginDangerZoneProps) {
           {t("plugins:disable")}
         </Button>
       )}
-      <Button
-        variant="ghost"
-        size="sm"
-        className="cursor-pointer min-h-11 text-destructive hover:text-destructive sm:min-h-0"
-        disabled={busy}
-        onClick={() => actions.openUninstall(plugin)}
-      >
-        {t("plugins:uninstall")}
-      </Button>
+      {(isFinePointer || !confirmingUninstall) && (
+        <Button
+          ref={uninstallAnchorRef}
+          variant="ghost"
+          size="sm"
+          className="cursor-pointer min-h-11 text-destructive hover:text-destructive sm:min-h-0"
+          disabled={busy}
+          onClick={onUninstall}
+        >
+          {t("plugins:uninstall")}
+        </Button>
+      )}
     </div>
   );
 }

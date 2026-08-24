@@ -15,6 +15,7 @@ import (
 var ErrWorkspaceNameMismatch = repoerrors.ErrWorkspaceNameMismatch
 var ErrWorkspaceNotFound = repoerrors.ErrWorkspaceNotFound
 var ErrTaskNotFound = repoerrors.ErrTaskNotFound
+var ErrTaskParentMismatch = repoerrors.ErrTaskParentMismatch
 var ErrTaskPlanNotFound = repoerrors.ErrTaskPlanNotFound
 var ErrRepositoryNotFound = repoerrors.ErrRepositoryNotFound
 var ErrTaskEnvironmentNotFound = repoerrors.ErrTaskEnvironmentNotFound
@@ -215,6 +216,7 @@ type MessageRepository interface {
 	GetMessageWithPromptIndex(ctx context.Context, id string) (*models.Message, error)
 	GetMessageByToolCallID(ctx context.Context, sessionID, toolCallID string) (*models.Message, error)
 	GetMessageByPendingID(ctx context.Context, sessionID, pendingID string) (*models.Message, error)
+	GetPermissionMessageByIdentity(ctx context.Context, taskID, sessionID, requestID, pendingID string) (*models.Message, error)
 	FindMessageByPendingID(ctx context.Context, pendingID string) (*models.Message, error)
 	FindMessagesByPendingID(ctx context.Context, pendingID string) ([]*models.Message, error)
 	FindMessageByPendingIDAndQuestion(ctx context.Context, sessionID, pendingID, questionID string) (*models.Message, error)
@@ -224,15 +226,13 @@ type MessageRepository interface {
 	// compact pending-action projection, under the same turn/session authority
 	// (ADR 0052). Clarification bundles come back as one row per question.
 	ListPendingInteractions(ctx context.Context, filter models.PendingInteractionFilter) ([]*models.Message, error)
-	// ClaimPermissionResponse atomically resolves a pending permission row,
-	// reporting whether this caller won the claim and, if not, the status the
-	// row already carries. Response delivery is otherwise read-then-dispatch,
-	// so concurrent responders can both reach the agent.
-	ClaimPermissionResponse(ctx context.Context, sessionID, pendingID string, status models.PermissionStatus) (bool, models.PermissionStatus, error)
 	CompleteActiveClarificationBundle(ctx context.Context, pendingID, status string, responses map[string]interface{}) ([]*models.Message, bool, error)
 	FinalizeClarificationResponseDelivery(ctx context.Context, pendingID, terminalStatus string, claimedMessages []*models.Message) ([]*models.Message, bool, error)
 	RestoreActiveClarificationBundle(ctx context.Context, pendingID, terminalStatus string, claimedMessages []*models.Message) ([]*models.Message, bool, error)
 	UpdateMessage(ctx context.Context, message *models.Message) error
+	ClaimPermissionResolution(ctx context.Context, request models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error)
+	FinalizePermissionResolution(ctx context.Context, request models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error)
+	GetPermissionResolutionAudit(ctx context.Context, taskID, sessionID, requestID, pendingID string) (*models.PermissionResolutionAudit, error)
 	ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error)
 	ListMessagesByTurnID(ctx context.Context, turnID string) ([]*models.Message, error)
 	ListMessagesPaginated(ctx context.Context, sessionID string, opts models.ListMessagesOptions) ([]*models.Message, bool, error)
@@ -591,4 +591,15 @@ type SubagentContextRepository interface {
 	UpsertSubagentContext(ctx context.Context, sc *models.SubagentContext) error
 	ListSubagentContextsBySession(ctx context.Context, sessionID string) ([]*models.SubagentContext, error)
 	ListSubagentContextsByTurn(ctx context.Context, turnID string) ([]*models.SubagentContext, error)
+}
+
+// UsageRepository serves the task-cost-ledger read surface
+// (docs/specs/task-cost-ledger/spec.md AC-18, AC-19, AC-20): per-task and
+// per-session aggregate totals over task_usage_events. The ledger write path
+// (CreateTaskUsageEvent, ListTaskUsageEvents) is deliberately not part of
+// this interface - it is consumed only by internal/task/usage's own narrow
+// Repository interface, never through the Service layer.
+type UsageRepository interface {
+	GetTaskUsageTotals(ctx context.Context, taskID string) (*models.TaskUsageTotals, error)
+	GetSessionUsageTotals(ctx context.Context, sessionID string) (*models.TaskUsageTotals, error)
 }

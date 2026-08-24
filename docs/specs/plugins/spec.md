@@ -153,6 +153,7 @@ webhooks:
   - key: "slack-events"
     description: "Slack Events API webhook"
     method: "POST"
+    access: public
 
 config_schema:
   type: object
@@ -189,11 +190,9 @@ fields. Existing records without these fields load as null.
 
 `capabilities.api_read` / `capabilities.api_write` gate the **Host data API** Host
 RPCs (both reads and writes live now) — the vocabulary is a list of
-resource names: `tasks`, `sessions`, `messages`, `interactions`, `workspaces`,
-`workflows`, `agent_profiles`, `executor_profiles`, `repositories` for
-`api_read`, plus `tasks` (CreateTask/UpdateTask), `messages` (SendMessage), and
-`interactions` (permission and clarification responses) for `api_write`. See
-"Host data API".
+resource names: `tasks`, `sessions`, `messages`, `workspaces`, `workflows`,
+`agent_profiles`, `executor_profiles`, `repositories` for `api_read`, plus `tasks` (CreateTask/
+UpdateTask) and `messages` (SendMessage) for `api_write`. See "Host data API".
 
 **Declaring data access.** Listing a resource under `api_read` grants the
 corresponding Host data reads for that resource only — e.g. `api_read:
@@ -390,10 +389,10 @@ Wildcard subscriptions: `task.*`, `agent.*`, `<feature>.*` (any subject prefix).
 POST /api/plugins/{plugin_id}/webhooks/{webhook_key}
 ```
 
-This remains kandev's one plugin-facing **HTTP** endpoint (external systems like Slack
-or Jira cannot speak gRPC). Kandev validates the plugin is active and the webhook key
-is declared, converts the HTTP request into a `WebhookRequest` gRPC message, and calls
-the plugin's `Plugin.HandleWebhook` RPC:
+This is kandev's only plugin-facing **HTTP** endpoint. Anonymous callers need
+`access: public`; otherwise kandev returns 401 without revealing plugin/key. Kandev
+validates plugin/key, strips session/PAT, converts to `WebhookRequest`, and calls
+`Plugin.HandleWebhook`:
 
 ```proto
 message WebhookRequest {
@@ -520,7 +519,6 @@ domain structs. See [ADR 0043](../../decisions/0043-plugin-host-data-api.md) and
 | `ListSessions`          | `api_read:sessions`          | Session identity + agent context (id, task, agent profile, resolved display name + model, `acp_session_id`, state, timestamps)                                                                                                                    |
 | `ListSessionCodeStats`  | `api_read:sessions`          | **Computed** per-session code metrics: committed lines added/deleted, peak pending-diff lines added/deleted                                                                                                                                       |
 | `ListMessages`          | `api_read:messages`          | Historical conversation content (id, session, task, turn, `author_type` (user/agent), `content`, `type`, `created_at`), filterable by session ids, task ids, a `created_at` range (`since`/`until`), and types. See "Conversation content" below. |
-| `ListPendingInteractions` / `GetInteraction` | `api_read:interactions` | Agent requests still owed a human answer (pending id, kind, task/session/turn, status, permission options or clarification questions, timestamps). `GetInteraction` also resolves terminal ones. See "Pending interactions" below. |
 
 `acp_session_id` on a session is the external usage-attribution join key (e.g.
 `tokscale`): kandev exposes the session identity and code stats but stays out of
@@ -542,33 +540,6 @@ kandev-injected `<kandev-system>` blocks are stripped via
 system context is inline markup removed at read time. Reads route through the
 task service's `ListMessagesForPlugin` (a single filtered
 session/task/time/type query), never a repository or the DB file directly.
-
-**Pending interactions (`api_read:interactions` / `api_write:interactions`,
-ADR 0052).** An `Interaction` is one thing a human still owes an answer to: a
-tool-permission request, or a whole clarification bundle collapsed into a
-single record carrying every question. Session state is deliberately not that
-record — `WAITING_FOR_INPUT` also describes an ordinarily completed turn — so a
-consumer that branches on state alone reports attention nobody owes.
-
-`ListPendingInteractions` applies the same durable authority as the compact
-`pending_action` projection kandev's own list surfaces render (current turn
-only, terminal sessions quarantined, newest permission of the turn only); a
-pinning test asserts the two agree per session. `GetInteraction` resolves any
-interaction by pending id, terminal ones included, so an event-driven cache
-that started late, restarted, or dropped an event converges on the current
-result rather than `NotFound`.
-
-The three writes — `RespondToPermission`, `AnswerClarification`,
-`CancelClarification` — route through the first-party services the native UI
-drives (the orchestrator for permissions, the clarification handler for
-bundles, including its durable exclusive claim and detached-resume fallback), so
-the agent actually unblocks and every surface converges through the normal
-events. A permission response must name one of the interaction's declared
-options and kandev derives the approve/deny outcome from that option's ACP
-kind, so a plugin cannot report an outcome the agent never offered; the target
-session comes from the durable record, never from the request. Writes are
-terminal-once: the first response wins, an already-resolved interaction returns
-`FailedPrecondition`, and an unknown id returns `NotFound`.
 
 **Host data API writes.** `CreateTask`, `UpdateTask`, and `SendMessage` are
 implemented, each gated by `api_write:<resource>` and routed through the

@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState, type RefObject, type ReactNode } from
 import {
   IconChevronDown,
   IconCloudDownload,
-  IconFolderPlus,
   IconGitBranch,
   IconPlus,
   IconStack2,
@@ -47,6 +46,7 @@ import {
   getWorkspaceSourceCapabilities,
   hasCloneableSavedRepository,
 } from "@/components/workspace-source-picker/executor-capabilities";
+import { AddFolderButton } from "./add-folder-button";
 import { SavedRepositorySourceRow } from "./saved-repository-source-row";
 import { useDialogOpenerFocus } from "./use-dialog-opener-focus";
 import { useSubmitWorkspaceSources } from "./use-submit-workspace-sources";
@@ -318,17 +318,7 @@ function SourceForm({
     <div className="space-y-4 py-1" data-testid="add-workspace-sources-form">
       <div className="flex flex-wrap items-center gap-2">
         <RepositorySourceMenu isMobile={isMobile} onAdd={onAdd} />
-        {capabilities.canAddFolders && (
-          <Button
-            type="button"
-            variant="outline"
-            className={cn("cursor-pointer", isMobile ? "min-h-11" : "h-9 px-3")}
-            onClick={() => onAdd("folder")}
-          >
-            <IconFolderPlus className="h-4 w-4" />
-            {t("task:addFolder")}
-          </Button>
-        )}
+        <AddFolderButton isMobile={isMobile} capabilities={capabilities} onAdd={onAdd} />
       </div>
       {capabilities.requiresCloneableLocalRepository && (
         <p className="text-sm text-muted-foreground">

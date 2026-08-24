@@ -1,0 +1,115 @@
+name: Update managed runtime pins
+
+on:
+  schedule:
+    # Refresh the reviewed runtime pins every Monday at 06:17 UTC, then open
+    # or refresh the single grouped updater PR when a stable version changes.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+# The job mints a narrower GitHub App token only after checkout. The default
+# workflow token is never used to create the generated PR, so its events retain
+# the repository's normal CI behavior.
+permissions:
+  contents: read
+
+concurrency:
+  group: managed-runtime-pin-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Open managed runtime pin PR
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      BOT_BRANCH: automation/update-managed-runtime-pins
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "24"
+
+      - name: Test pin updater
+        run: node --test scripts/update-agent-runtime-pins.test.mjs
+
+      - name: Create managed runtime pin App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.MANAGED_RUNTIME_PIN_APP_CLIENT_ID }}
+          private-key: ${{ secrets.MANAGED_RUNTIME_PIN_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Configure git authentication
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: gh auth setup-git
+
+      - name: Prepare stable bot branch
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git fetch origin "refs/heads/${BOT_BRANCH}:refs/remotes/origin/${BOT_BRANCH}" || true
+          git checkout -B "${BOT_BRANCH}" origin/main
+
+      - name: Update trusted catalogue
+        id: update
+        run: node scripts/update-agent-runtime-pins.mjs --github-output "$GITHUB_OUTPUT"
+
+      - name: Test managed runtime catalogue and commands
+        working-directory: apps/backend
+        run: go test ./internal/agent/agents ./internal/agent/managedruntime ./internal/agent/runtime/lifecycle ./internal/agent/hostutility ./internal/agent/settings/controller ./internal/agent/settings/handlers
+
+      - name: Commit and push one grouped change
+        if: steps.update.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          git config user.name "kandev-runtime-updater[bot]"
+          git config user.email "kandev-runtime-updater[bot]@users.noreply.github.com"
+          git add apps/backend/internal/agent/agents/managed_npm_runtime_versions.json
+          git diff --cached --check
+          git commit -m "chore: update managed runtime pins"
+          git push --force-with-lease origin "${BOT_BRANCH}"
+
+      # The stable branch and head filter keep this workflow to at most one
+      # open grouped PR, even when the scheduler and manual trigger overlap.
+      - name: Create or refresh the single grouped PR
+        if: steps.update.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          cat > /tmp/managed-runtime-pin-pr-body.md <<'EOF'
+          ## Summary
+
+          Refresh the reviewed managed npm runtime defaults from stable `latest` metadata.
+
+          The catalogue is validated before this PR is created. This workflow does not install or activate a runtime.
+          EOF
+          open_pr_number="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BOT_BRANCH" --base main --state open --json number --jq '.[0].number // ""')"
+          if [[ -z "$open_pr_number" ]]; then
+            gh pr create \
+              --repo "$GITHUB_REPOSITORY" \
+              --base main \
+              --head "$BOT_BRANCH" \
+              --title "chore: update managed runtime pins" \
+              --body-file /tmp/managed-runtime-pin-pr-body.md
+          else
+            gh pr edit "$open_pr_number" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "chore: update managed runtime pins" \
+              --body-file /tmp/managed-runtime-pin-pr-body.md
+          fi

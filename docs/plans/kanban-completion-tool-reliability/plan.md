@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/workflow/explicit-completion-signal/spec.md
+spec: docs/specs/tasks/requirements/workflow-explicit-completion-signal.md
 created: 2026-07-22
 status: implemented
 ---

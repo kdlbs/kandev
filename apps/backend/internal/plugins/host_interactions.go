@@ -36,8 +36,22 @@ type interactionDataSource interface {
 	GetInteraction(ctx context.Context, pendingID string) (*taskmodels.Interaction, error)
 }
 
+// PluginPermissionResponse is the plugins-local permission response a
+// responder adapter translates into the orchestrator's resolution request.
+// Kandev's permission resolution is keyed on the full (task, session, request,
+// pending) identity, and every field is taken from the durable record rather
+// than from the plugin.
+type PluginPermissionResponse struct {
+	TaskID    string
+	SessionID string
+	RequestID string
+	PendingID string
+	OptionID  string
+	Cancelled bool
+}
+
 // PluginClarificationAnswer is the plugins-local answer a responder adapter
-// translates into the clarification handler's request body.
+// translates into the clarification resolver's outcome.
 type PluginClarificationAnswer struct {
 	QuestionID      string
 	SelectedOptions []string
@@ -51,7 +65,7 @@ type PluginClarificationAnswer struct {
 // for a malformed answer set) is decided by the layer that knows the
 // first-party service's failure modes rather than by string matching here.
 type interactionResponder interface {
-	RespondToPermission(ctx context.Context, sessionID, pendingID, optionID string, cancelled, rejected bool) error
+	RespondToPermission(ctx context.Context, in PluginPermissionResponse) error
 	AnswerClarification(ctx context.Context, pendingID string, answers []PluginClarificationAnswer) error
 	DeclineClarification(ctx context.Context, pendingID, reason string) error
 }
@@ -134,9 +148,14 @@ func (r interactionReader) RespondToPermission(
 	if err != nil {
 		return nil, err
 	}
-	if err := responder.RespondToPermission(
-		ctx, interaction.SessionID, interaction.ID, optionID, in.Cancelled, rejected,
-	); err != nil {
+	if err := responder.RespondToPermission(ctx, PluginPermissionResponse{
+		TaskID:    interaction.TaskID,
+		SessionID: interaction.SessionID,
+		RequestID: interaction.RequestID,
+		PendingID: interaction.ID,
+		OptionID:  optionID,
+		Cancelled: in.Cancelled,
+	}); err != nil {
 		return nil, err
 	}
 	// The orchestrator records the same derivation: a cancelled or reject-kind

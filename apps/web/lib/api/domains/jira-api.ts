@@ -55,6 +55,29 @@ export async function deleteJiraConfig(options?: WorkspaceApiOptions) {
   );
 }
 
+// startJiraOAuth registers a client + PKCE and returns the Atlassian
+// authorization URL. Uses withWorkspace so the backend gets `workspace_id`.
+export async function startJiraOAuth(
+  siteUrl: string,
+  options?: WorkspaceApiOptions,
+): Promise<{ authUrl: string }> {
+  const path = withWorkspace(
+    `/api/v1/jira/oauth/start?siteUrl=${encodeURIComponent(siteUrl)}`,
+    options,
+  );
+  return fetchJson<{ authUrl: string }>(path, requestOptions(options));
+}
+
+// completeJiraOAuth exchanges the pasted redirect (code + state) for tokens.
+export async function completeJiraOAuth(
+  code: string,
+  state: string,
+  options?: WorkspaceApiOptions,
+): Promise<{ ok: boolean }> {
+  const path = `/api/v1/jira/oauth/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}&api=1`;
+  return fetchJson<{ ok: boolean }>(path, requestOptions(options));
+}
+
 export async function testJiraConnection(
   payload: SetJiraConfigRequest,
   options?: WorkspaceApiOptions,

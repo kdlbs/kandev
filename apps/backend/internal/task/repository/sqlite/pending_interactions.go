@@ -2,8 +2,6 @@ package sqlite
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -201,86 +199,4 @@ func pendingInteractionKindClauses(kinds []string) (string, []interface{}) {
 	}
 	ph, args := buildInPlaceholders(types)
 	return "type IN (" + ph + ")", args
-}
-
-// ClaimPermissionResponse atomically moves a permission request from its
-// unresolved state to status, reporting whether THIS call performed the move
-// and, when it did not, the status the row already carries.
-//
-// Permission delivery is otherwise a read-then-dispatch: two responders (two
-// browser tabs, or a tab and a plugin) can both observe a pending row and both
-// dispatch. agentctl keeps the pending entry in its map after a response and
-// its response channel holds one slot, so the loser either lands a second
-// response the agent never asked for or fails and drives this row to
-// "expired" — overwriting the winner's real outcome. Claiming first makes the
-// durable row the arbiter, exactly as CompleteActiveClarificationBundle does
-// for question bundles.
-func (r *Repository) ClaimPermissionResponse(
-	ctx context.Context,
-	sessionID, pendingID string,
-	status models.PermissionStatus,
-) (bool, models.PermissionStatus, error) {
-	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ClaimPermissionResponse")
-	defer span.End()
-
-	drv := r.db.DriverName()
-	query := fmt.Sprintf(`
-		UPDATE task_session_messages
-		SET metadata = %s, updated_at = CURRENT_TIMESTAMP
-		WHERE task_session_id = ?
-		  AND type = '%s'
-		  AND %s = ?
-		  AND COALESCE(%s, '') IN ('', '%s')
-	`,
-		dialect.JSONSet(drv, "metadata", "status", string(status)),
-		models.MessageTypePermissionRequest,
-		dialect.JSONExtract(drv, "metadata", "pending_id"),
-		dialect.JSONExtract(drv, "metadata", "status"),
-		models.InteractionStatusPending,
-	)
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), sessionID, pendingID)
-	if err != nil {
-		return false, "", fmt.Errorf("claim permission response: %w", err)
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return false, "", fmt.Errorf("claim permission response rows: %w", err)
-	}
-	if affected > 0 {
-		return true, status, nil
-	}
-	current, err := r.permissionResponseStatus(ctx, sessionID, pendingID)
-	if err != nil {
-		return false, "", err
-	}
-	return false, current, nil
-}
-
-// permissionResponseStatus reads the status a permission row already carries,
-// so a lost claim can report whether it lost to an identical outcome (a
-// double-click) or a conflicting one.
-func (r *Repository) permissionResponseStatus(
-	ctx context.Context,
-	sessionID, pendingID string,
-) (models.PermissionStatus, error) {
-	drv := r.ro.DriverName()
-	query := fmt.Sprintf(`
-		SELECT COALESCE(%s, '')
-		FROM task_session_messages
-		WHERE task_session_id = ? AND type = '%s' AND %s = ?
-		ORDER BY created_at DESC LIMIT 1
-	`,
-		dialect.JSONExtract(drv, "metadata", "status"),
-		models.MessageTypePermissionRequest,
-		dialect.JSONExtract(drv, "metadata", "pending_id"),
-	)
-	var current string
-	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), sessionID, pendingID).Scan(&current)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
-	}
-	if err != nil {
-		return "", fmt.Errorf("read permission response status: %w", err)
-	}
-	return models.PermissionStatus(current), nil
 }

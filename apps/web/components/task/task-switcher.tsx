@@ -14,6 +14,15 @@ export type {
 } from "./task-switcher-types";
 export { dispatchSidebarRowClick } from "./task-switcher-click";
 
+/**
+ * Rows name their repository unless the list is already grouped by it, where
+ * the section header says it once for the whole group. A list whose grouping is
+ * unknown (a hand-built `grouped` without `groupKey`) shows the label.
+ */
+function shouldShowRowRepository(grouped: TaskSwitcherProps["grouped"]): boolean {
+  return grouped.groupKey !== "repository";
+}
+
 function buildTaskRowProps(props: TaskSwitcherProps): TaskRowBaseProps {
   return {
     workflows: props.workflows,
@@ -21,6 +30,7 @@ function buildTaskRowProps(props: TaskSwitcherProps): TaskRowBaseProps {
     activeTaskId: props.activeTaskId,
     selectedTaskId: props.selectedTaskId,
     showActivityTime: props.showActivityTime,
+    showRepository: shouldShowRowRepository(props.grouped),
     onSelectTask: props.onSelectTask,
     onEditTask: props.onEditTask,
     onRenameTask: props.onRenameTask,
@@ -38,6 +48,8 @@ function buildTaskRowProps(props: TaskSwitcherProps): TaskRowBaseProps {
     onTogglePin: props.onTogglePin,
     pinnedTaskIds: props.pinnedTaskIds,
     deletingTaskId: props.deletingTaskId,
+    archivingTaskId: props.archivingTaskId,
+    isArchiving: props.isArchiving,
     selectedTaskIds: props.selectedTaskIds,
     onToggleSelectTask: props.onToggleSelectTask,
     onSelectTaskRange: props.onSelectTaskRange,

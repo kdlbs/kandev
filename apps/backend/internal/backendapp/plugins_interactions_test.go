@@ -3,119 +3,127 @@ package backendapp
 import (
 	"context"
 	"errors"
-	"net/http"
 	"testing"
 
 	"github.com/kandev/kandev/internal/clarification"
+	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/plugins"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
-type recordingPermissionResponder struct {
-	sessionID, pendingID, optionID string
-	cancelled, rejected            bool
-	err                            error
-}
-
-func (r *recordingPermissionResponder) RespondToPermission(
-	_ context.Context, sessionID, pendingID, optionID string, cancelled, rejected bool,
-) error {
-	r.sessionID, r.pendingID, r.optionID = sessionID, pendingID, optionID
-	r.cancelled, r.rejected = cancelled, rejected
-	return r.err
-}
-
-type recordingClarificationResponder struct {
-	pendingID string
-	body      clarification.RespondBody
+type recordingPermissionResolver struct {
+	request   orchestrator.ResolveAgentPermissionRequest
+	cancelled bool
 	err       error
 }
 
-func (r *recordingClarificationResponder) Respond(
-	_ context.Context, pendingID string, body clarification.RespondBody,
+func (r *recordingPermissionResolver) ResolveAgentPermission(
+	_ context.Context, request orchestrator.ResolveAgentPermissionRequest,
+) (*orchestrator.ResolveAgentPermissionResult, error) {
+	r.request = request
+	if r.err != nil {
+		return nil, r.err
+	}
+	return &orchestrator.ResolveAgentPermissionResult{PendingID: request.PendingID}, nil
+}
+
+func (r *recordingPermissionResolver) RespondToPermission(
+	_ context.Context, taskID, sessionID, requestID, pendingID, optionID string, cancelled, _ bool,
 ) error {
-	r.pendingID, r.body = pendingID, body
+	r.request = orchestrator.ResolveAgentPermissionRequest{
+		TaskID: taskID, SessionID: sessionID, RequestID: requestID,
+		PendingID: pendingID, OptionID: optionID,
+	}
+	r.cancelled = cancelled
 	return r.err
 }
 
-func TestPluginsInteractionResponderForwardsPermission(t *testing.T) {
-	permissions := &recordingPermissionResponder{}
+type recordingBundleResolver struct {
+	pendingID string
+	outcome   clarification.Outcome
+	claimed   bool
+	err       error
+}
+
+func (r *recordingBundleResolver) ResolveBundle(
+	_ context.Context, pendingID string, outcome clarification.Outcome,
+) (*clarification.Resolution, bool, error) {
+	r.pendingID, r.outcome = pendingID, outcome
+	if r.err != nil {
+		return nil, false, r.err
+	}
+	return &clarification.Resolution{}, r.claimed, nil
+}
+
+func TestPluginsInteractionResponderForwardsPermissionIdentity(t *testing.T) {
+	permissions := &recordingPermissionResolver{}
 	adapter := pluginsInteractionResponderAdapter{permissions: permissions}
 
-	if err := adapter.RespondToPermission(
-		context.Background(), "session-1", "pending-1", "deny", false, true,
-	); err != nil {
+	if err := adapter.RespondToPermission(context.Background(), plugins.PluginPermissionResponse{
+		TaskID: "task-1", SessionID: "session-1", RequestID: "request-1",
+		PendingID: "pending-1", OptionID: "deny",
+	}); err != nil {
 		t.Fatalf("RespondToPermission: %v", err)
 	}
-	if permissions.sessionID != "session-1" || permissions.pendingID != "pending-1" ||
-		permissions.optionID != "deny" || permissions.cancelled || !permissions.rejected {
-		t.Fatalf("orchestrator saw %+v", permissions)
+	if permissions.request.TaskID != "task-1" || permissions.request.SessionID != "session-1" ||
+		permissions.request.RequestID != "request-1" || permissions.request.PendingID != "pending-1" ||
+		permissions.request.OptionID != "deny" {
+		t.Fatalf("resolver saw %+v", permissions.request)
+	}
+	// A plugin response must not be recorded as a browser one: the audit trail
+	// distinguishes sources, and mislabelling it would make a plugin's action
+	// indistinguishable from a person's after the fact.
+	if permissions.request.Source == taskmodels.PermissionSourceWeb {
+		t.Fatalf("source = %q, want a non-web source for a plugin response", permissions.request.Source)
 	}
 }
 
-func TestPluginsInteractionResponderForwardsClarificationAnswers(t *testing.T) {
-	clarifications := &recordingClarificationResponder{}
-	adapter := pluginsInteractionResponderAdapter{clarifications: clarifications}
+// TestPluginsInteractionResponderDismissalUsesCancelPath keeps a dismissal off
+// the option path: there is no option to select, and inventing one would
+// report an outcome the agent never offered.
+func TestPluginsInteractionResponderDismissalUsesCancelPath(t *testing.T) {
+	permissions := &recordingPermissionResolver{}
+	adapter := pluginsInteractionResponderAdapter{permissions: permissions}
 
-	err := adapter.AnswerClarification(context.Background(), "pending-2", []plugins.PluginClarificationAnswer{
-		{QuestionID: "q1", SelectedOptions: []string{"a"}, CustomText: "note"},
-	})
-	if err != nil {
-		t.Fatalf("AnswerClarification: %v", err)
+	if err := adapter.RespondToPermission(context.Background(), plugins.PluginPermissionResponse{
+		TaskID: "task-1", SessionID: "session-1", RequestID: "request-1",
+		PendingID: "pending-1", Cancelled: true,
+	}); err != nil {
+		t.Fatalf("RespondToPermission: %v", err)
 	}
-	if clarifications.pendingID != "pending-2" || len(clarifications.body.Answers) != 1 {
-		t.Fatalf("clarification handler saw %+v", clarifications)
+	if !permissions.cancelled {
+		t.Fatal("dismissal did not reach the cancel path")
 	}
-	answer := clarifications.body.Answers[0]
-	if answer.QuestionID != "q1" || answer.CustomText != "note" || len(answer.SelectedOptions) != 1 {
-		t.Fatalf("answer = %+v", answer)
-	}
-	if clarifications.body.Rejected {
-		t.Fatal("an answer must not be delivered as a rejection")
+	if permissions.request.OptionID != "" {
+		t.Fatalf("option = %q, want empty on a dismissal", permissions.request.OptionID)
 	}
 }
 
-// TestPluginsInteractionResponderDeclineUsesRejectPath pins the deliberate
-// routing choice: Cancel needs the in-memory pending entry and therefore fails
-// after a restart, while the reject path is durable-claim based. A plugin
-// reconciling a bundle whose waiter went away is exactly the caller that
-// needs the second one.
-func TestPluginsInteractionResponderDeclineUsesRejectPath(t *testing.T) {
-	clarifications := &recordingClarificationResponder{}
-	adapter := pluginsInteractionResponderAdapter{clarifications: clarifications}
-
-	if err := adapter.DeclineClarification(context.Background(), "pending-3", "user stepped away"); err != nil {
-		t.Fatalf("DeclineClarification: %v", err)
-	}
-	if !clarifications.body.Rejected || clarifications.body.RejectReason != "user stepped away" {
-		t.Fatalf("decline body = %+v", clarifications.body)
-	}
-	if len(clarifications.body.Answers) != 0 {
-		t.Fatalf("decline carried answers: %+v", clarifications.body.Answers)
-	}
-}
-
-func TestPluginsInteractionResponderMapsClarificationOutcomes(t *testing.T) {
+func TestPluginsInteractionResponderMapsPermissionOutcomes(t *testing.T) {
 	cases := []struct {
 		name string
 		in   error
 		want codes.Code
 	}{
-		{"malformed answer set", &clarification.RespondError{Status: http.StatusBadRequest, Message: "bad"}, codes.InvalidArgument},
-		{"unknown bundle", &clarification.RespondError{Status: http.StatusNotFound, Message: "gone"}, codes.NotFound},
-		// A conflict means another responder claimed the bundle first. It must
-		// land on the SAME code the plugin host returns when it catches the
-		// terminal state itself, so a plugin branches on one outcome.
-		{"lost the claim race", &clarification.RespondError{Status: http.StatusConflict, Message: "inactive"}, codes.FailedPrecondition},
-		{"server failure", &clarification.RespondError{Status: http.StatusInternalServerError, Message: "boom"}, codes.Internal},
+		{"unknown permission", orchestrator.ErrPermissionNotFound, codes.NotFound},
+		{"unknown task or session", orchestrator.ErrPermissionTaskOrSessionNotFound, codes.NotFound},
+		{"option never offered", orchestrator.ErrPermissionOptionNotOffered, codes.InvalidArgument},
+		// Everything that means "this can no longer take your response"
+		// collapses to the one code terminal-once promises.
+		{"already resolved", orchestrator.ErrPermissionAlreadyResolved, codes.FailedPrecondition},
+		{"stale", orchestrator.ErrPermissionStale, codes.FailedPrecondition},
+		{"another responder mid-flight", orchestrator.ErrPermissionResolutionInProgress, codes.FailedPrecondition},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			adapter := pluginsInteractionResponderAdapter{
-				clarifications: &recordingClarificationResponder{err: tc.in},
+				permissions: &recordingPermissionResolver{err: tc.in},
 			}
-			err := adapter.DeclineClarification(context.Background(), "pending-4", "")
+			err := adapter.RespondToPermission(context.Background(), plugins.PluginPermissionResponse{
+				PendingID: "pending-1", OptionID: "allow",
+			})
 			if got := status.Code(err); got != tc.want {
 				t.Fatalf("code = %v (%v), want %v", got, err, tc.want)
 			}
@@ -123,13 +131,72 @@ func TestPluginsInteractionResponderMapsClarificationOutcomes(t *testing.T) {
 	}
 }
 
-func TestPluginsInteractionResponderPassesThroughNonRespondErrors(t *testing.T) {
-	sentinel := errors.New("transport exploded")
-	adapter := pluginsInteractionResponderAdapter{
-		clarifications: &recordingClarificationResponder{err: sentinel},
+func TestPluginsInteractionResponderForwardsClarificationAnswers(t *testing.T) {
+	resolver := &recordingBundleResolver{claimed: true}
+	adapter := pluginsInteractionResponderAdapter{clarifications: resolver}
+
+	err := adapter.AnswerClarification(context.Background(), "pending-2", []plugins.PluginClarificationAnswer{
+		{QuestionID: "q1", SelectedOptions: []string{"a"}, CustomText: "note"},
+	})
+	if err != nil {
+		t.Fatalf("AnswerClarification: %v", err)
 	}
-	if err := adapter.DeclineClarification(context.Background(), "pending-5", ""); !errors.Is(err, sentinel) {
-		t.Fatalf("err = %v, want the original error preserved", err)
+	if resolver.pendingID != "pending-2" || len(resolver.outcome.Answers) != 1 {
+		t.Fatalf("resolver saw %q / %+v", resolver.pendingID, resolver.outcome)
+	}
+	if resolver.outcome.Rejected {
+		t.Fatal("an answer must not be delivered as a rejection")
+	}
+}
+
+// TestPluginsInteractionResponderDeclineUsesRejectOutcome pins the deliberate
+// routing choice: the operator cancel route needs the in-memory pending entry
+// and therefore fails after a restart, while the reject outcome is
+// durable-claim based. A plugin reconciling a bundle whose waiter went away is
+// exactly the caller that needs the second one.
+func TestPluginsInteractionResponderDeclineUsesRejectOutcome(t *testing.T) {
+	resolver := &recordingBundleResolver{claimed: true}
+	adapter := pluginsInteractionResponderAdapter{clarifications: resolver}
+
+	if err := adapter.DeclineClarification(context.Background(), "pending-3", "user stepped away"); err != nil {
+		t.Fatalf("DeclineClarification: %v", err)
+	}
+	if !resolver.outcome.Rejected || resolver.outcome.RejectReason != "user stepped away" {
+		t.Fatalf("decline outcome = %+v", resolver.outcome)
+	}
+	if len(resolver.outcome.Answers) != 0 {
+		t.Fatalf("decline carried answers: %+v", resolver.outcome.Answers)
+	}
+}
+
+// TestPluginsInteractionResponderLostClaimIsFailedPrecondition covers the race
+// the resolver reports as a non-claimed resolution: another responder settled
+// the bundle first. It must read as the same code the host returns when it
+// catches the terminal state itself.
+func TestPluginsInteractionResponderLostClaimIsFailedPrecondition(t *testing.T) {
+	adapter := pluginsInteractionResponderAdapter{
+		clarifications: &recordingBundleResolver{claimed: false},
+	}
+	err := adapter.DeclineClarification(context.Background(), "pending-4", "")
+	if got := status.Code(err); got != codes.FailedPrecondition {
+		t.Fatalf("code = %v (%v), want FailedPrecondition", got, err)
+	}
+}
+
+func TestPluginsInteractionResponderMapsClarificationOutcomes(t *testing.T) {
+	adapter := pluginsInteractionResponderAdapter{
+		clarifications: &recordingBundleResolver{err: clarification.ErrBundleNotFound},
+	}
+	if got := status.Code(adapter.DeclineClarification(context.Background(), "pending-5", "")); got != codes.NotFound {
+		t.Fatalf("unknown bundle code = %v, want NotFound", got)
+	}
+
+	sentinel := errors.New("transport exploded")
+	adapter = pluginsInteractionResponderAdapter{
+		clarifications: &recordingBundleResolver{err: sentinel},
+	}
+	if got := status.Code(adapter.DeclineClarification(context.Background(), "pending-6", "")); got != codes.Internal {
+		t.Fatalf("unexpected failure code = %v, want Internal", got)
 	}
 }
 
@@ -137,7 +204,7 @@ func TestPluginsInteractionResponderUnwiredIsUnimplemented(t *testing.T) {
 	adapter := pluginsInteractionResponderAdapter{}
 	ctx := context.Background()
 
-	if got := status.Code(adapter.RespondToPermission(ctx, "s", "p", "o", false, false)); got != codes.Unimplemented {
+	if got := status.Code(adapter.RespondToPermission(ctx, plugins.PluginPermissionResponse{})); got != codes.Unimplemented {
 		t.Fatalf("permission code = %v", got)
 	}
 	if got := status.Code(adapter.AnswerClarification(ctx, "p", nil)); got != codes.Unimplemented {

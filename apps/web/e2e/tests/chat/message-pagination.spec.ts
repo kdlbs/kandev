@@ -1,133 +1,70 @@
-// Chat message pagination — "Load older messages" button reliably walks a long
-// conversation all the way back to the very first message (the initial prompt).
-//
-// Regression for the scroll-up lazy-loader wedging at the top: the
-// IntersectionObserver only fires on intersection *transitions*, so once the
-// user is pinned at scrollTop 0 with the sentinel permanently in view it never
-// re-arms and older messages stop loading. The explicit button does not depend
-// on scroll/intersection state, so it always makes progress.
-//
-// Covers the native transcript renderer, including its explicit load-more
-// path and visible oldest-message assertion.
+// Chat message pagination — upward scrolling walks a collapsed conversation
+// all the way back to the first stored prompt without repeated button actions.
+// Covers the native transcript renderer and its prepend scroll anchoring.
 import { test, expect } from "../../fixtures/test-base";
-import type { ApiClient } from "../../helpers/api-client";
-import type { SeedData } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
-import { seedMessagesDescription } from "../search/shared";
-
-// Stands in for the user's "initial prompt": an early chat message seeded near
-// the start of the conversation, then buried under a large turn so it falls
-// outside the initial newest-100 fetch window. Kept OUT of the task description
-// (which the chat renders verbatim) so the only on-screen occurrence is the
-// paginated message itself.
-const INITIAL_PROMPT = "INITIAL-PROMPT-MARKER-7Q2X";
-// Enough filler to require multiple lazy-load pages beyond the initial 100, while
-// keeping sequential seeding (one round-trip per message) off the test budget:
-// 120 + the marker leaves ~20+ messages older than the initial window.
-const FILLER_COUNT = 120;
-
-/** Boot an idle session, seed the marker, then bury it under FILLER_COUNT messages. */
-async function seedBigConversation(apiClient: ApiClient, seedData: SeedData): Promise<string> {
-  const task = await apiClient.createTaskWithAgent(
-    seedData.workspaceId,
-    "message-pagination-load-older",
-    seedData.agentProfileId,
-    {
-      description: seedMessagesDescription(["chat ready"]),
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    },
-  );
-  const sessionId = task.session_id!;
-  await expect
-    .poll(
-      async () => {
-        const { messages } = await apiClient.listSessionMessages(sessionId);
-        return messages.some((m) => m.content.includes("chat ready"));
-      },
-      { timeout: 60_000, message: "Waiting for the boot turn to persist" },
-    )
-    .toBe(true);
-
-  // A mock-agent text reply is persisted before the session reaches its idle
-  // state. Wait for that transition before adding the long history, otherwise
-  // the boot turn can still mutate the same transcript while pagination is
-  // under test.
-  await expect
-    .poll(
-      async () => {
-        const { sessions } = await apiClient.listTaskSessions(task.id);
-        return sessions.find((session) => session.id === sessionId)?.state;
-      },
-      { timeout: 60_000, message: "Waiting for the boot turn to become idle" },
-    )
-    .toBe("WAITING_FOR_INPUT");
-
-  await apiClient.seedSessionMessage(sessionId, { type: "message", content: INITIAL_PROMPT });
-  await apiClient.seedAgentMessages(sessionId, FILLER_COUNT);
-  return task.id;
-}
+import {
+  INITIAL_PROMPT_MARKER,
+  RECENT_AGENT_MARKER,
+  TASK_DESCRIPTION_MARKER,
+  readStandaloneMessageTop,
+  seedCollapsedMessageHistory,
+  scrollToOldestLoadedEdge,
+} from "./message-pagination-helpers";
 
 test.describe("@chat message pagination", () => {
-  test("load-older button reaches the initial prompt in a big conversation", async ({
+  test("upward scrolling reaches the initial prompt through collapsed history", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
     test.setTimeout(180_000);
 
-    const taskId = await seedBigConversation(apiClient, seedData);
+    const { taskId } = await seedCollapsedMessageHistory(
+      apiClient,
+      seedData,
+      "message-pagination-scrolls-to-start",
+    );
 
-    // Open the session fresh (SSR + initial fetch loads only the newest ~100).
     await testPage.goto(`/t/${taskId}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
+    const chat = session.activeChat();
+    const list = chat.locator(".chat-message-list");
 
-    // Filler renders; the initial prompt does NOT yet (older than the window).
-    await expect(session.chat.getByText("filler message", { exact: false }).first()).toBeVisible({
-      timeout: 30_000,
-    });
-    await expect(session.chat.getByText(INITIAL_PROMPT)).toHaveCount(0);
+    await expect(chat.getByText(TASK_DESCRIPTION_MARKER, { exact: true })).toBeVisible();
+    await expect(chat.getByText(INITIAL_PROMPT_MARKER, { exact: true })).toHaveCount(0);
 
-    // The explicit load-older button is offered because more messages exist.
-    const loadOlder = session.chat.getByTestId("load-older-messages");
-    await expect(loadOlder).toBeVisible({ timeout: 10_000 });
+    // Each upward gesture reaches the current oldest loaded edge. Older pages
+    // may only extend a collapsed activity row, so keep scrolling until the
+    // stored prompt appears. The row-position assertion belongs to each load:
+    // it verifies prepend anchoring without treating the user's next upward
+    // gesture as an anchoring regression.
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const edge = await scrollToOldestLoadedEdge(list, RECENT_AGENT_MARKER);
+      expect(Number.isFinite(edge.rowTop)).toBe(true);
 
-    // Click it repeatedly until the initial prompt is reached. The button is the
-    // reliable path — no scrolling, no intersection timing.
-    await expect
-      .poll(
-        async () => {
-          if (
-            await session.chat
-              .getByText(INITIAL_PROMPT)
-              .isVisible()
-              .catch(() => false)
-          ) {
-            return "reached";
-          }
-          if (await loadOlder.isVisible().catch(() => false)) {
-            // An actionability click scrolls the button into the adjacent
-            // IntersectionObserver sentinel. The observer can then load the
-            // page and detach the button while Playwright waits to click it,
-            // consuming the poll's entire timeout even though pagination won.
-            // An atomic DOM click avoids that scroll race and returns
-            // immediately if the observer already removed the control.
-            await loadOlder.evaluateAll((buttons) => {
-              const button = buttons[0];
-              if (button instanceof HTMLButtonElement) button.click();
-            });
-          }
-          return "loading";
-        },
-        { timeout: 60_000, intervals: [300], message: "Loading older pages until initial prompt" },
-      )
-      .toBe("reached");
+      await expect
+        .poll(
+          async () =>
+            (await chat.getByText(INITIAL_PROMPT_MARKER, { exact: true }).count()) === 1 ||
+            (await list.evaluate((element) => element.scrollHeight)) > edge.scrollHeight,
+          {
+            timeout: 15_000,
+            intervals: [300],
+            message: "Loading older pages until initial prompt",
+          },
+        )
+        .toBe(true);
 
-    // The initial prompt is visible, and there's nothing left to load.
-    await expect(session.chat.getByText(INITIAL_PROMPT)).toBeVisible();
-    await expect(loadOlder).toBeHidden();
+      const afterLoadTop = await readStandaloneMessageTop(list, RECENT_AGENT_MARKER);
+      expect(Math.abs(afterLoadTop - edge.rowTop)).toBeLessThanOrEqual(8);
+      if ((await chat.getByText(INITIAL_PROMPT_MARKER, { exact: true }).count()) === 1) break;
+    }
+
+    await expect(chat.getByText(INITIAL_PROMPT_MARKER, { exact: true })).toBeVisible();
+    await expect(chat.getByText(TASK_DESCRIPTION_MARKER, { exact: true })).toHaveCount(0);
+    await expect(chat.getByTestId("load-older-messages")).toHaveCount(0);
   });
 });

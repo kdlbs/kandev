@@ -14,7 +14,7 @@ ACP agents can advertise an arbitrary ordered set of model-adjacent session conf
 
 - Kandev records a write-once baseline of the initial ACP select-option values advertised by the provider before agent-profile or runtime overrides are applied. The baseline is stored in the task-session database metadata and survives backend restart, process recreation, and ACP session resume.
 - The provider-default baseline is separate from mutable runtime configuration and is never used to restore provider state. A profile-selected value that differs from the provider default is therefore shown as changed as soon as the task session starts.
-- Workflow restoration uses a separate immutable original effective configuration captured after profile settings settle. It does not change the comparison-only ownership of the provider-default baseline. See [Conditional Workflow Session Settings](../workflow-session-settings/spec.md) and [ADR-2026-08-01-workflow-session-original-configuration](../../decisions/2026-08-01-workflow-session-original-configuration.md).
+- Workflow restoration uses a separate immutable original effective configuration captured after profile settings settle. It does not change the comparison-only ownership of the provider-default baseline. See [Conditional Workflow Session Settings](../tasks/requirements/workflow-session-settings.md) and [ADR-2026-08-01-workflow-session-original-configuration](../../decisions/2026-08-01-workflow-session-original-configuration.md).
 - In the task chat input and task context surfaces, the closed model selector always shows the current model name followed by every non-model config value whose raw current value differs from its baseline value, in ACP-provided option order. Values are joined by a slash with surrounding spaces; option names are omitted. Example: `GPT-5.6-Sol / Low / On`.
 - Until a session baseline is available, the closed task selector shows every current non-model value rather than hiding options whose changed state cannot yet be determined.
 - A value that returns to its baseline disappears from the closed summary. A currently advertised option with no baseline entry is treated as changed. Baseline entries for options the provider no longer advertises are ignored.
@@ -25,6 +25,9 @@ ACP agents can advertise an arbitrary ordered set of model-adjacent session conf
 - Before the reset, Kandev captures the effective model, permission mode, and every selected ACP configuration option.
 - After the reset, Kandev reapplies the captured model, mode, and options before it sends another prompt.
 - Fresh-session default events cannot replace the captured restoration intent. Provider convergence events remain the source of truth for accepted state, persistence, and UI hydration.
+- During process resume, each task session keeps its last persisted model until that session reports its settled startup configuration.
+- An unsettled provider-default event cannot replace durable runtime configuration or relabel an unnamed session tab.
+- A session tab and its task selector use one authoritative current model. Contradictory intermediate option data cannot give these surfaces different labels.
 - An unnamed agent tab derives its title from the task session's authoritative current model. Live config values may identify the current model, but non-model config values and the session mode are never appended to the tab title. The title updates when the model changes and remains correct after a task-detail refresh; a user-supplied session name continues to override the derived title.
 - Each turn stores an immutable configuration snapshot when the turn is created. The snapshot contains the effective model, mode, ordered selected config values with their provider-supplied display names, and the task-session provider-default baseline used for comparison. Agent-message metadata renders from this turn snapshot instead of the session's latest mutable runtime configuration.
 - Agent-message metadata always shows the attributed model and shows only non-model config values that differ from the turn's captured baseline. It keeps option names in the compact row because message attribution is read outside the selector context. Baseline-matching values and the session mode are omitted from the compact row; the mode remains available in turn metadata.
@@ -50,6 +53,9 @@ Decision: [ADR-2026-08-18-context-reset-preserves-runtime-configuration](../../d
 - **GIVEN** a task session uses a non-default model, permission mode, and reasoning option, **WHEN** a workflow step resets context, **THEN** the fresh ACP session uses all three values before the next prompt.
 - **GIVEN** a fresh ACP session reports provider defaults during reset, **WHEN** restoration runs, **THEN** Kandev applies the configuration captured before reset instead of those defaults.
 - **GIVEN** a successful reset restores the complete runtime configuration, **WHEN** the task page reloads, **THEN** the model selector and permission selector show the restored values.
+- **GIVEN** a task has Luna and Sol sessions, **WHEN** restart resumes both and each agent first reports Luna, **THEN** each tab keeps its persisted model until settlement.
+- **GIVEN** a resumed session has a persisted model, **WHEN** an unsettled startup event reports another model, **THEN** the event does not replace durable runtime state or clear model-specific UI state.
+- **GIVEN** a resumed session has settled, **WHEN** the user changes its model, **THEN** the tab and task selector both show the new model.
 - **GIVEN** an unnamed agent tab whose selected model changes during the session, **WHEN** the model update converges or the task-detail page is refreshed, **THEN** the existing tab title shows only the current selected model instead of the agent profile's original model label or any session mode and non-model config values.
 - **GIVEN** turn A runs with reasoning `High`, **WHEN** reasoning changes to `Low` before turn B, **THEN** turn A continues to show `Reasoning effort: High` and turn B shows `Reasoning effort: Low`.
 - **GIVEN** a turn uses only provider-default options, **WHEN** its agent-message metadata renders, **THEN** the compact row shows only the attributed model.
@@ -62,6 +68,7 @@ Decision: [ADR-2026-08-18-context-reset-preserves-runtime-configuration](../../d
 - Task-session metadata contains a dedicated write-once ACP provider-default baseline keyed by config option ID with raw selected values.
 - Task-session metadata also contains the latest complete ACP model selector state needed for task-detail boot hydration, including provider-supplied model and option metadata.
 - The provider's latest mutable state remains in runtime configuration metadata. Explicit user selections are stored separately and applied as overrides after that provider state, preventing delayed provider events from replacing resume intent. Baseline, live state, and explicit overrides have distinct ownership and lifecycle semantics.
+- During `STARTING`, unsettled provider events do not replace the last settled runtime configuration or selector snapshot. The settled startup event replaces both records.
 - Turn metadata contains a minimal immutable configuration snapshot. Selected option IDs and raw values support baseline comparison; captured option/value names and order preserve the provider's display semantics without depending on later session state.
 - ACP config option and option-value transport types carry optional descriptions.
 
@@ -78,6 +85,7 @@ Decision: [ADR-2026-08-18-context-reset-preserves-runtime-configuration](../../d
 - Once stored, the baseline is not replaced by later ACP updates, user selections, agent-initiated selections, backend restarts, or session resume.
 - The complete effective runtime configuration is captured before a context reset can emit fresh provider defaults.
 - A fresh default event cannot redefine the model, mode, or option values that Kandev restores.
+- A backend restart does not make an unsettled startup event durable when a prior settled model exists.
 - Baseline comparison is scoped to the task session, not the agent profile or provider globally.
 - Once a turn is created, its configuration snapshot is not changed by later session configuration events. Only provider-reported attribution fields such as the actual model and usage may be added to the turn.
 
@@ -88,3 +96,4 @@ Decision: [ADR-2026-08-18-context-reset-preserves-runtime-configuration](../../d
 - Reconstructing configuration snapshots for turns created before this behavior shipped.
 - Changing the closed-label behavior in agent-profile settings or other non-task selector surfaces.
 - Adding support for ACP input control types that Kandev does not otherwise render.
+- Changing the mobile task layout or adding a mobile dock-tab surface.

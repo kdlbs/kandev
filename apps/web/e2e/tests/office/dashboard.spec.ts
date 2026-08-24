@@ -65,12 +65,24 @@ test.describe("Dashboard", () => {
   });
 
   test("update workspace settings", async ({ officeApi, officeSeed }) => {
-    const updated = await officeApi.updateWorkspaceSettings(officeSeed.workspaceId, {
-      name: "E2E Workspace Updated",
-    });
-    expect(updated).toBeDefined();
+    const { settings: originalSettings } = await officeApi.getWorkspaceSettings(
+      officeSeed.workspaceId,
+    );
+    const originalLookbackHours = (originalSettings as { recovery_lookback_hours: number })
+      .recovery_lookback_hours;
 
-    const settings = await officeApi.getWorkspaceSettings(officeSeed.workspaceId);
-    expect(settings).toBeDefined();
+    try {
+      const updated = await officeApi.updateWorkspaceSettings(officeSeed.workspaceId, {
+        recovery_lookback_hours: 42,
+      });
+      expect(updated).toEqual({ ok: true });
+
+      const { settings } = await officeApi.getWorkspaceSettings(officeSeed.workspaceId);
+      expect((settings as { recovery_lookback_hours: number }).recovery_lookback_hours).toBe(42);
+    } finally {
+      await officeApi.updateWorkspaceSettings(officeSeed.workspaceId, {
+        recovery_lookback_hours: originalLookbackHours,
+      });
+    }
   });
 });

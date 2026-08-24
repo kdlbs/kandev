@@ -625,8 +625,6 @@ export function getWorkspaceSettings(workspaceId: string, options?: ApiRequestOp
 export function updateWorkspaceSettings(
   workspaceId: string,
   data: {
-    name?: string;
-    description?: string;
     require_approval_for_new_agents?: boolean;
     require_approval_for_task_completion?: boolean;
     require_approval_for_skill_changes?: boolean;

@@ -84,18 +84,19 @@ func newTestTaskServiceWithEventBus(t *testing.T) (*service.Service, *sqliterepo
 	eventBus := bus.NewMemoryEventBus(log)
 	t.Cleanup(func() { eventBus.Close() })
 	svc := service.NewService(service.Repos{
-		Workspaces:   repo,
-		Tasks:        repo,
-		TaskRepos:    repo,
-		Workflows:    repo,
-		Messages:     repo,
-		Turns:        repo,
-		Sessions:     repo,
-		GitSnapshots: repo,
-		RepoEntities: repo,
-		Executors:    repo,
-		Environments: repo,
-		Reviews:      repo,
+		Workspaces:       repo,
+		Tasks:            repo,
+		TaskRepos:        repo,
+		WorkspaceFolders: repo,
+		Workflows:        repo,
+		Messages:         repo,
+		Turns:            repo,
+		Sessions:         repo,
+		GitSnapshots:     repo,
+		RepoEntities:     repo,
+		Executors:        repo,
+		Environments:     repo,
+		Reviews:          repo,
 	}, eventBus, log, service.RepositoryDiscoveryConfig{})
 	return svc, repo, eventBus
 }
@@ -122,18 +123,19 @@ func newTestTaskServiceWithWorkflow(t *testing.T) (*service.Service, *sqliterepo
 	eventBus := bus.NewMemoryEventBus(log)
 	t.Cleanup(func() { eventBus.Close() })
 	svc := service.NewService(service.Repos{
-		Workspaces:   repo,
-		Tasks:        repo,
-		TaskRepos:    repo,
-		Workflows:    repo,
-		Messages:     repo,
-		Turns:        repo,
-		Sessions:     repo,
-		GitSnapshots: repo,
-		RepoEntities: repo,
-		Executors:    repo,
-		Environments: repo,
-		Reviews:      repo,
+		Workspaces:       repo,
+		Tasks:            repo,
+		TaskRepos:        repo,
+		WorkspaceFolders: repo,
+		Workflows:        repo,
+		Messages:         repo,
+		Turns:            repo,
+		Sessions:         repo,
+		GitSnapshots:     repo,
+		RepoEntities:     repo,
+		Executors:        repo,
+		Environments:     repo,
+		Reviews:          repo,
 	}, eventBus, log, service.RepositoryDiscoveryConfig{})
 	workflowSvc := workflowservice.NewService(workflowRepo, log)
 	t.Cleanup(func() { _ = workflowSvc.Close() })
@@ -469,15 +471,24 @@ func TestHandleAddBranchToTask_ReturnsMaterializedPaths(t *testing.T) {
 }
 
 func TestHandleAddWorkspaceSourcesRejectsUnknownKind(t *testing.T) {
-	h := &Handlers{}
+	ctx := context.Background()
+	svc, repo, parent, child := newWorkspaceSourceAuthorizationFixture(t)
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{ID: "parent-session", TaskID: parent.ID}))
+	h := &Handlers{taskSvc: svc, sessionRepo: repo, logger: testLogger(t).WithFields()}
 	msg := makeWSMessage(t, ws.ActionMCPAddWorkspaceSources, map[string]interface{}{
-		"task_id": "task-1",
+		"task_id": child.ID, "caller_task_id": parent.ID, "caller_session_id": "parent-session",
 		"sources": []interface{}{map[string]interface{}{"kind": "unknown"}},
 	})
 
-	resp, err := h.handleAddWorkspaceSources(context.Background(), msg)
+	resp, err := h.handleAddWorkspaceSources(ctx, msg)
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeValidation)
+	folders, err := repo.ListTaskWorkspaceFolders(ctx, child.ID)
+	require.NoError(t, err)
+	require.Empty(t, folders)
+	repositories, err := repo.ListTaskRepositories(ctx, child.ID)
+	require.NoError(t, err)
+	require.Len(t, repositories, 1)
 }
 
 func TestClassifyWorkspaceSourceErrorMapsRepositoryNotFound(t *testing.T) {

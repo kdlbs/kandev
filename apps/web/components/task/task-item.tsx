@@ -1,6 +1,6 @@
 "use client";
 
-import { memo } from "react";
+import { memo, type ReactNode } from "react";
 import {
   IconChevronDown,
   IconCircleCheck,
@@ -70,6 +70,7 @@ type TaskItemProps = {
   lastActivityAt?: string;
   showActivityTime?: boolean;
   menuOpen?: boolean;
+  archiveConfirmation?: ReactNode;
   isDeleting?: boolean;
   taskId?: string;
   /** Drives the `task-row-metadata` plugin slot's `workflowStepId`. */
@@ -95,7 +96,17 @@ type TaskItemProps = {
   subtasksCollapsed?: boolean;
   /** Toggles subtask visibility when the chevron is clicked. */
   onToggleSubtasks?: () => void;
-  repositories?: string[];
+  /**
+   * The task's repository as a stable slug (or name). A multi-repository task
+   * carries its primary repository here; enumerating the rest is deferred,
+   * since `TaskSwitcherItem.repositories` is not populated from live data.
+   */
+  repositoryPath?: string;
+  /**
+   * Whether this row should name its repository. False when the list is grouped
+   * by repository, where the section header already says it.
+   */
+  showRepository?: boolean;
   prInfo?: { number: number; state: string; aggregateState?: string };
   /** Number of prompts currently en-queued for this task (mail badge). */
   queuedCount?: number;
@@ -341,7 +352,8 @@ function TaskItemContent({
   primarySessionId,
   isArchived,
   isPinned,
-  repositories,
+  repositoryPath,
+  showRepository,
   updatedAt,
   lastActivityAt,
   showActivityTime,
@@ -362,7 +374,8 @@ function TaskItemContent({
   primarySessionId?: string | null;
   isArchived?: boolean;
   isPinned?: boolean;
-  repositories?: string[];
+  repositoryPath?: string;
+  showRepository: boolean;
   updatedAt?: string;
   lastActivityAt?: string;
   showActivityTime?: boolean;
@@ -402,11 +415,6 @@ function TaskItemContent({
           </span>
         )}
       </span>
-      {repositories && repositories.length > 1 && (
-        <span className="truncate text-[11px] text-muted-foreground/50">
-          {repositories.join(" · ")}
-        </span>
-      )}
       {taskId && (
         <TaskRowMetadata
           taskId={taskId}
@@ -416,6 +424,7 @@ function TaskItemContent({
       )}
       <TaskItemStatsRow
         updatedAt={showActivityTime ? (lastActivityAt ?? updatedAt) : updatedAt}
+        repositoryLabel={showRepository ? repositoryPath : undefined}
         prInfo={prInfo}
         primarySessionId={primarySessionId}
         queuedCount={queuedCount}
@@ -425,118 +434,110 @@ function TaskItemContent({
   );
 }
 
-// The row keeps its state and accessibility affordances together for keyboard
-// selection, so this small exception avoids splitting that interaction across
-// multiple components.
-// eslint-disable-next-line max-lines-per-function
-export const TaskItem = memo(function TaskItem({
-  title,
-  autopilot,
-  state,
-  sessionState,
-  foregroundActivity,
-  isArchived,
-  isSelected = false,
-  isMultiSelected = false,
-  onClick,
-  onSelect,
+function TaskItemActions({
+  archiveConfirmation,
   diffStats,
-  comparisonUnavailable,
-  isRemoteExecutor,
-  remoteExecutorType,
-  remoteExecutorName,
-  updatedAt,
-  lastActivityAt,
-  showActivityTime = false,
-  menuOpen = false,
-  isDeleting,
-  taskId,
-  workflowStepId,
-  primarySessionId,
-  hasPendingClarification,
-  hasPendingPermission,
-  interrupted,
-  isSubTask,
-  depth,
-  subtaskCount,
-  subtasksCollapsed,
-  onToggleSubtasks,
-  repositories,
-  prInfo,
-  queuedCount,
-  wipQueue,
-  issueInfo,
-  isPinned,
-  agentErrorMessage,
-  isOnLastWorkflowStep = false,
-}: TaskItemProps) {
-  const effectiveMenuOpen = menuOpen || isDeleting === true;
-  const hasDiffStats = !!diffStats && (diffStats.additions > 0 || diffStats.deletions > 0);
-  const taskColor = useTaskColor(taskId);
-  const indent = computeRowIndent(resolveRowDepth(depth, isSubTask));
+  hasDiffStats,
+  menuOpen,
+  effectiveMenuOpen,
+}: {
+  archiveConfirmation?: ReactNode;
+  diffStats?: DiffStats;
+  hasDiffStats: boolean;
+  menuOpen: boolean;
+  effectiveMenuOpen: boolean;
+}) {
+  if (archiveConfirmation) {
+    return (
+      <div className="min-w-0 basis-full flex items-center justify-end">{archiveConfirmation}</div>
+    );
+  }
+  if (hasDiffStats) {
+    return (
+      <div className="mobile-task-actions-with-stats group/actions relative shrink-0 self-center flex items-center">
+        <DiffStatsRight diffStats={diffStats!} menuOpen={effectiveMenuOpen} />
+        <div className="mobile-task-actions-slot absolute inset-0 flex items-center justify-end">
+          <TaskMenuButton visible={effectiveMenuOpen} expanded={menuOpen} />
+        </div>
+      </div>
+    );
+  }
+  return <TaskMenuButton visible={effectiveMenuOpen} expanded={menuOpen} rowFocus />;
+}
+
+export const TaskItem = memo(function TaskItem(props: TaskItemProps) {
+  const isSelected = props.isSelected ?? false;
+  const isMultiSelected = props.isMultiSelected ?? false;
+  const menuOpen = props.menuOpen ?? false;
+  const effectiveMenuOpen = menuOpen || props.isDeleting === true;
+  const hasDiffStats =
+    !!props.diffStats && (props.diffStats.additions > 0 || props.diffStats.deletions > 0);
+  const taskColor = useTaskColor(props.taskId);
+  const indent = computeRowIndent(resolveRowDepth(props.depth, props.isSubTask));
 
   return (
     <div
       role="button"
       tabIndex={0}
       data-testid="sidebar-task-item"
-      data-task-row-id={taskId}
+      data-task-row-id={props.taskId}
       {...taskItemStateAttrs(isSelected, isMultiSelected)}
-      onClick={taskItemRowClick(onSelect, onClick)}
-      onKeyDown={(e) => handleTaskItemKeyDown(e, onSelect, onClick)}
+      onClick={taskItemRowClick(props.onSelect, props.onClick)}
+      onKeyDown={(e) => handleTaskItemKeyDown(e, props.onSelect, props.onClick)}
       style={indent.depth > 0 ? { paddingLeft: indent.paddingLeftPx } : undefined}
-      className={taskItemRowClassName(isSelected, isMultiSelected, indent.depth === 0)}
+      className={cn(
+        taskItemRowClassName(isSelected, isMultiSelected, indent.depth === 0),
+        props.archiveConfirmation && "flex-wrap",
+      )}
     >
       <SelectionBar isSelected={isSelected} color={taskColor} />
       <RowConnector depth={indent.depth} leftPx={indent.connectorLeftPx} />
       <TaskStateIcon
-        sessionState={sessionState}
-        state={state}
-        foregroundActivity={foregroundActivity}
-        isInProgress={computeIsInProgress(state, sessionState)}
-        hasPendingClarification={hasPendingClarification}
-        hasPendingPermission={hasPendingPermission}
-        interrupted={interrupted}
-        isOnLastWorkflowStep={isOnLastWorkflowStep}
+        sessionState={props.sessionState}
+        state={props.state}
+        foregroundActivity={props.foregroundActivity}
+        isInProgress={computeIsInProgress(props.state, props.sessionState)}
+        hasPendingClarification={props.hasPendingClarification}
+        hasPendingPermission={props.hasPendingPermission}
+        interrupted={props.interrupted}
+        isOnLastWorkflowStep={props.isOnLastWorkflowStep ?? false}
       />
       <TaskItemContent
-        title={title}
-        autopilot={autopilot}
-        taskId={taskId}
-        workflowStepId={workflowStepId}
-        isRemoteExecutor={isRemoteExecutor}
-        remoteExecutorType={remoteExecutorType}
-        remoteExecutorName={remoteExecutorName}
-        primarySessionId={primarySessionId}
-        isArchived={isArchived}
-        isPinned={isPinned}
-        repositories={repositories}
-        updatedAt={updatedAt}
-        lastActivityAt={lastActivityAt}
-        showActivityTime={showActivityTime}
-        prInfo={prInfo}
-        queuedCount={queuedCount}
-        wipQueue={wipQueue}
-        issueInfo={issueInfo}
-        agentErrorMessage={agentErrorMessage}
-        comparisonUnavailable={comparisonUnavailable}
+        title={props.title}
+        autopilot={props.autopilot}
+        taskId={props.taskId}
+        workflowStepId={props.workflowStepId}
+        isRemoteExecutor={props.isRemoteExecutor}
+        remoteExecutorType={props.remoteExecutorType}
+        remoteExecutorName={props.remoteExecutorName}
+        primarySessionId={props.primarySessionId}
+        isArchived={props.isArchived}
+        isPinned={props.isPinned}
+        repositoryPath={props.repositoryPath}
+        showRepository={props.showRepository ?? true}
+        updatedAt={props.updatedAt}
+        lastActivityAt={props.lastActivityAt}
+        showActivityTime={props.showActivityTime ?? false}
+        prInfo={props.prInfo}
+        queuedCount={props.queuedCount}
+        wipQueue={props.wipQueue}
+        issueInfo={props.issueInfo}
+        agentErrorMessage={props.agentErrorMessage}
+        comparisonUnavailable={props.comparisonUnavailable}
       />
-      {hasDiffStats ? (
-        <div className="mobile-task-actions-with-stats group/actions relative shrink-0 self-center flex items-center">
-          <DiffStatsRight diffStats={diffStats!} menuOpen={effectiveMenuOpen} />
-          <div className="mobile-task-actions-slot absolute inset-0 flex items-center justify-end">
-            <TaskMenuButton visible={effectiveMenuOpen} expanded={menuOpen} />
-          </div>
-        </div>
-      ) : (
-        <TaskMenuButton visible={effectiveMenuOpen} expanded={menuOpen} rowFocus />
-      )}
-      {!!subtaskCount && subtaskCount > 0 && !!onToggleSubtasks && (
+      <TaskItemActions
+        archiveConfirmation={props.archiveConfirmation}
+        diffStats={props.diffStats}
+        hasDiffStats={hasDiffStats}
+        menuOpen={menuOpen}
+        effectiveMenuOpen={effectiveMenuOpen}
+      />
+      {!!props.subtaskCount && props.subtaskCount > 0 && !!props.onToggleSubtasks && (
         <SubtaskToggle
-          taskId={taskId}
-          count={subtaskCount!}
-          collapsed={!!subtasksCollapsed}
-          onToggle={onToggleSubtasks!}
+          taskId={props.taskId}
+          count={props.subtaskCount}
+          collapsed={!!props.subtasksCollapsed}
+          onToggle={props.onToggleSubtasks}
         />
       )}
     </div>

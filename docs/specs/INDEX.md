@@ -1,6 +1,13 @@
-# Feature Specs
+# Legacy Feature Specification Catalog
 
-Specs for kandev product features, grouped by umbrella. Each spec describes a user-invocable capability and is the source of truth for "is this feature done?"
+This catalog locates specifications that predate the system-oriented structure.
+Do not add new standalone feature specifications here. New system specifications
+follow [`docs/specs/README.md`](README.md) and live under an owning system in
+`requirements/` or `system-design/`. Product-wide specifications live under
+`docs/specs/product/`.
+
+Each legacy specification remains authoritative until its system `README.md`
+names a replacement.
 
 The bar: an agent given only a spec (no source code) should be able to either reimplement the feature or test the existing system for conformance. See `.agents/skills/spec/SKILL.md` for the workflow and template.
 
@@ -22,6 +29,7 @@ The office umbrella covers kandev's autonomous-agent product surface: workspaces
 | [scheduler](office/scheduler.md) | draft |
 | [runtime](office/runtime.md) | draft |
 | [routing](office/routing.md) | archived |
+| [per-agent + per-role tier selection](office-agent-tier-routing/spec.md) | draft |
 | [costs](office/costs.md) | in-progress |
 | [dashboard](office/dashboard.md) | draft |
 | [live-updates](office/live-updates.md) | draft |
@@ -59,6 +67,7 @@ Product-wide capabilities that are not tied to a single feature area.
 | [git-credential-lease-reissue](git-credential-lease-reissue/spec.md) | shipped |
 | [bounded-task-status-delivery](platform/bounded-task-status-delivery.md) | approved |
 | [diagnostic-logging](platform/diagnostic-logging.md) | approved |
+| [expected runtime log severity](platform/expected-runtime-log-severity.md) | building |
 | [provider-error-recovery](platform/provider-error-recovery.md) | draft |
 | [duplicated-tab-stale-data](fix-duplicated-tab-stale-data/spec.md) | building |
 | [health-endpoint-version](health-endpoint-version/spec.md) | building |
@@ -66,59 +75,10 @@ Product-wide capabilities that are not tied to a single feature area.
 
 ## tasks/ — task & workflow model
 
-Kandev's task model: documents, execution stages, labels, blocker escalation, subtask checklists, subtree controls, and the unification with the workflow engine.
-
-| Spec | Status |
-|---|---|
-| [documents](tasks/documents.md) | shipped |
-| [execution-stages](tasks/execution-stages.md) | shipped |
-| [interrupted-task-indicator](tasks/interrupted-task-indicator.md) | complete |
-| [labels](tasks/labels.md) | shipped |
-| [title-length-limit](tasks/title-length-limit.md) | complete |
-| [rich-task-title-previews](tasks/rich-task-title-previews.md) | building |
-| [active clarification lifecycle](clarification-active-lifecycle/spec.md) | approved |
-| [model-unification](tasks/model-unification.md) | draft |
-| [run-scheduling](tasks/run-scheduling.md) | building |
-| [without-repositories](tasks/without-repositories.md) | draft |
-| [attach-workspace-sources](tasks/attach-workspace-sources.md) | building |
-| [remote-contribution-tasks](tasks/remote-contribution-tasks.md) | approved |
-| [subtask-checklist](tasks/subtask-checklist.md) | shipped |
-| [subtask-detachment](tasks/subtask-detachment.md) | shipped |
-| [subtask-reparenting-drag-drop](tasks/subtask-reparenting-drag-drop.md) | building |
-| [subtask-completion-trigger](tasks/subtask-completion-trigger.md) | draft |
-| [task-dependencies](task-dependencies/spec.md) | draft |
-| [task-dependencies - create dialog selector](task-dependencies/create-dialog-dependency-selector.md) | implemented |
-| [task-dependencies - create dialog advanced settings](task-dependencies/create-dialog-advanced-settings.md) | shipped |
-| [subtree-controls](tasks/subtree-controls.md) | shipped |
-| [blocked-task-escalation](tasks/blocked-task-escalation.md) | draft |
-| [runtime-cleanup](tasks/runtime-cleanup.md) | draft |
-| [session-delete-resource-cleanup](session-delete-resource-cleanup/spec.md) | draft |
-| [archive-confirmation](tasks/archive-confirmation.md) | shipped |
-| [link-existing-task-github-issue](tasks/link-existing-task-github-issue.md) | building |
-| [wip-limit-pull-system](tasks/wip-limit-pull-system.md) | draft |
-| [multi-branch](tasks/multi-branch/spec.md) | shipped |
-| [quick-chat-sessions](tasks/quick-chat-expiration.md) | shipped |
-| [quick-chat-repository-context](tasks/quick-chat-repository-context.md) | shipped |
-| [parent-child-message-interrupt](tasks/parent-child-message-interrupt.md) | shipped |
-| [parent-child-task-stop](tasks/parent-child-task-stop.md) | shipped |
-| [mcp-task-agent-profile-default](tasks/mcp-task-agent-profile-default/spec.md) | shipped |
-| [spawn-session-effective-profile](spawn-session-effective-profile/spec.md) | shipped |
-| [runtime-state-publication-order](tasks/runtime-state-publication-order.md) | shipped |
-| [agent-generated-titles](tasks/agent-generated-titles.md) | approved |
-| [task-create-executor-default](tasks/task-create-executor-default.md) | approved |
-| [task-create-workflow-memory](tasks/task-create-workflow-memory.md) | approved |
-| [task-create-escape-dismissal](tasks/task-create-escape-dismissal.md) | complete |
-| [repository-sets](repository-sets/spec.md) | building |
-| [external-id-idempotency](tasks/external-id-idempotency/spec.md) | draft |
-| [prompt-attachments](tasks/prompt-attachments.md) | draft |
-| [sidebar-task-edit](tasks/sidebar-task-edit.md) | approved |
-| [autopilot-mode](tasks/autopilot-mode.md) | draft |
-| [explicit-completion-signal](workflow/explicit-completion-signal/spec.md) | shipped |
-| [cancelled-turn-completion](workflow/cancelled-turn-completion/spec.md) | building |
-| [task-step-transition-ledger](workflow/task-step-transition-ledger/spec.md) | draft |
-| [conditional-session-settings](workflow-session-settings/spec.md) | approved |
-| [prevent-agent-autostart-on-open](prevent-agent-autostart-on-open/spec.md) | draft |
-| [workflow-duplication](workflow-duplication/spec.md) | draft |
+The task and workflow system has a system index and new authoritative
+requirement and design paths in [tasks/README.md](tasks/README.md).
+All task and workflow specifications are now indexed under that system
+directory; this legacy catalog has no remaining task-owned editable sources.
 
 ## agents/ — agent governance
 
@@ -138,6 +98,8 @@ Roles, governance gates, and granular permissions that apply across human users 
 | [roles](agents/roles.md) | shipped |
 | [governance](agents/governance.md) | shipped |
 | [granular-permissions](agents/granular-permissions.md) | draft |
+| [external-permission-resolution](agents/external-permission-resolution.md) | draft |
+| [git-operations-permission-boundary](agents/git-operations-permission-boundary.md) | shipped |
 
 ## integrations/ — external service integrations
 
@@ -159,6 +121,7 @@ Per-workspace credentials and triage triggers for external services.
 | [jira-status-filter](jira-status-filter/spec.md) | shipped |
 | [pr-outcome-attribution](pr-outcome-attribution/spec.md) | shipped |
 | [enable-disable-toggle](integrations/enable-disable-toggle.md) | shipped |
+| [clickable-integration-cards](integrations/clickable-integration-cards.md) | shipped |
 
 ## workspaces/ — workspace lifecycle
 
@@ -173,17 +136,19 @@ Per-workspace credentials and triage triggers for external services.
 
 ## costs/ — cost tracking & budgets
 
-Subscription quota tracking and per-agent cheap-model profile routing.
+Subscription quota tracking, per-agent cheap-model profile routing, and the production per-turn usage ledger.
 
 | Spec | Status |
 |---|---|
 | [subscription-usage](costs/subscription-usage.md) | draft |
 | [cheap-model-profiles](costs/cheap-model-profiles.md) | shipped |
+| [task cost & token ledger](task-cost-ledger/spec.md) | draft |
 
 ## ui/ — cross-cutting UI features
 
 | Spec | Status |
 |---|---|
+| [kanban-auto-hide-empty-columns](kanban-auto-hide-empty-columns/spec.md) | shipped |
 | [workspace-active-first-order](ui/workspace-active-first-order.md) | shipped |
 | [ci-pr-automation](ui/ci-pr-automation.md) | building |
 | [github-pr-review-actions](ui/github-pr-review-actions.md) | shipped |
@@ -193,6 +158,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [comment-markdown](ui/comment-markdown.md) | shipped |
 | [resizable-markdown-tables](ui/resizable-markdown-tables.md) | building |
 | [transcript-auto-scroll](ui/transcript-auto-scroll.md) | building |
+| [task-transcript-history-visibility](ui/task-prompt-transcript-visibility.md) | implemented |
 | [clarification-context](ui/clarification-context.md) | shipped |
 | [empty-turn-notice](ui/empty-turn-notice.md) | shipped |
 | [acp-shell-command-output](ui/acp-shell-command-output.md) | shipped |
@@ -257,6 +223,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [cancel-turn-progress](ui/cancel-turn-progress.md) | approved |
 | [agent-todo-list-panel](ui/agent-todo-list-panel.md) | shipped |
 | [prompt-history-panel](ui/prompt-history-panel.md) | draft |
+| [prompt-turn-duration](ui/prompt-turn-duration.md) | draft |
 
 ## system-page/ — operational diagnostics & maintenance UI
 
@@ -284,10 +251,9 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [agent-stall-recovery](agent-stall-recovery/spec.md) | approved |
 | [mcp-session-observability](mcp-session-observability/spec.md) | approved |
 | [subagent-context-persistence](subagent-context-persistence/spec.md) | draft |
+| [external-question-answering](external-question-answering/spec.md) | draft |
 | [auth](auth/spec.md) | building |
 | [create-local-repository](create-local-repository/spec.md) | shipped |
-| [workflow-cycle-guardrails](workflow-cycle-guardrails/spec.md) | building |
-| [workflow-quorum-decision-recording](workflow-quorum-decision-recording/spec.md) | draft |
 | [improve-kandev](improve-kandev/spec.md) | building |
 | [homebrew-core](homebrew-core/spec.md) | building |
 | [native-kandev-cli](native-kandev-cli/spec.md) | draft |
@@ -298,11 +264,11 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [ssh-executor](ssh-executor/spec.md) | draft |
 | [cli-mode-parity](cli-mode-parity/spec.md) | draft |
 | [claude-fork-review-allowlist](claude-fork-review-allowlist/spec.md) | building |
-| [workflow-settings-autosave](workflow-settings-autosave/spec.md) | archived; superseded by settings-manual-save |
 | [mobile-quick-chat-topbar](mobile-quick-chat-topbar/spec.md) | building |
-| [quick-chat-idle-dot](quick-chat-idle-dot/spec.md) | draft |
+| [quick-chat-activity-indicators](quick-chat-idle-dot/spec.md) | draft |
 | [native-code-review](native-code-review/spec.md) | building |
 | [missing-task-route-recovery](missing-task-route-recovery/spec.md) | draft |
+| [kanban-task-executor-cache-staleness](kanban-task-executor-cache-staleness/spec.md) | draft |
 | [browser-inspect-annotations-save](browser-inspect-annotations-save/spec.md) | shipped |
 | [automations-pr-merged-trigger](automations-pr-merged-trigger/spec.md) | draft |
 | [automation-runs-delete-all-by-status](automation-runs-delete-all-by-status/spec.md) | draft |
@@ -313,19 +279,22 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [shutdown-turn-failure-suppression](shutdown-turn-failure-suppression/spec.md) | draft |
 | [executor-profile-env-precedence](executor-profile-env-precedence/spec.md) | building |
 | [automations-yaml-export](automations-yaml-export/spec.md) | building |
-| [task-launch-failure-recovery](task-launch-failure-recovery/spec.md) | draft |
+| [pr-walkthrough](pr-walkthrough/spec.md) | building |
 
 ---
 
-## Conventions
+## Legacy conventions
 
-- **Spec layout.** Umbrella specs live as flat `.md` files under the umbrella directory (`docs/specs/office/agents.md`). Standalone specs use a folder (`docs/specs/improve-kandev/spec.md`).
-- **Plans are not specs.** Implementation plans are committed under `docs/plans/<feature>/` with individual sibling task files named `task-<NN>-<short-slug>.md`. Specs are the durable requirements; plans and task files are implementation records for the current buildout.
+- **Spec layout.** These two layouts remain valid only during migration.
+  Umbrella specs use flat files. Standalone specs use a `spec.md` file.
+- **Plans are not specifications.** Implementation plans remain under
+  `docs/plans/<initiative>/`. Their task files are work orders.
 - **Bug fixes are not specs.** Bugs produce a regression test plus an ADR if they encoded a new convention. See `/fix` skill.
 - **Architecture decisions are not specs.** ADRs live under `docs/decisions/`. See `/record decision`.
 
 ## Cross-references
 
 - ADRs: [`../decisions/INDEX.md`](../decisions/INDEX.md)
+- Specification system: [`README.md`](README.md)
 - Spec workflow: [`.agents/skills/spec/SKILL.md`](../../.agents/skills/spec/SKILL.md)
 - Bug-fix workflow: [`.agents/skills/fix/SKILL.md`](../../.agents/skills/fix/SKILL.md)

@@ -44,7 +44,12 @@ flowchart LR
 
 Installation validates the manifest, archive paths, checksums, managed runtime,
 and the current host executable before extraction. Kandev then supervises the
-declared subprocess and injects a Host connection. The UI bundle is static
+declared subprocess and injects a Host connection. Installing a new version
+does not remove the one it replaces: that version stays on disk as the rollback
+target, and only the versions before it are deleted, once the new one is
+confirmed running. Two extracted versions is therefore the steady state for a
+plugin that runs; a plugin that is disabled or failed to start keeps every
+version it has, and `data/` is never part of that cleanup. The UI bundle is static
 package content loaded by the browser; it does not run inside the backend
 subprocess. On disable or uninstall, the host calls destroy when present and
 bulk-revokes registrations, styles, routes, handlers, and navigation. Reloads and
@@ -1004,6 +1009,11 @@ verbatim and must be unique per cookie host); your
 plugin never handles the raw token, and any `Set-Cookie` you return is
 dropped. Requires authentication enabled; emitting the header without
 `capabilities.auth` returns 403.
+
+Declare both the initiate webhook and the callback webhook with `access: public`.
+Kandev checks the initiate key before it shows the login button. The manifest
+has no callback field, so your plugin must declare the callback key separately.
+Kandev logs a warning when a declared initiate webhook is not public.
 
 **You MUST only assert an `email` the IdP has verified as owned by `subject`.**
 Kandev auto-links that email to (or provisions) an account, so an unverified or
@@ -2182,6 +2192,9 @@ repackaging.
 - **Trusting webhook metadata:** `webhooks[].method` is informational. Public
   routes are not authenticated by Kandev, so validate method, signature, timestamp, replay
   protection, and body before side effects.
+- **Authenticated webhook access:** a valid Kandev session or PAT is all the
+  host checks. Any signed-in user reaches an authenticated webhook, so enforce
+  your own per-user or per-role rules when the endpoint needs them.
 - **Bundling React:** use host.React, host.jsx, and host.ui; a second React or
   Radix copy breaks shared contexts and portals.
 - **Shipping the wrong binary name:** every declared executable must be under

@@ -28,7 +28,8 @@ import type { TasksListDisplayOptions } from "./mobile-menu-task-list-options";
 import { linkToTaskOverview, linkToTasks } from "@/lib/links";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
-import { selectQuickChatHasUnseenIdle } from "@/lib/state/slices/ui/quick-chat-unseen-selectors";
+import { QuickChatActivityIndicator } from "@/components/quick-chat/quick-chat-activity-indicator";
+import { useQuickChatActivity } from "@/components/quick-chat/use-quick-chat-activity";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { useReleaseNotes } from "@/hooks/use-release-notes";
 import { useSystemHealthIndicator } from "@/hooks/use-system-health-indicator";
@@ -161,12 +162,7 @@ function useIsHeaderNarrow(ref: RefObject<HTMLElement | null>): boolean {
 function TabletQuickActions({ workspaceId }: { workspaceId?: string }) {
   const { t } = useTranslation();
   const handleOpenQuickChat = useQuickChatLauncher(workspaceId);
-  const quickChatHasUnseenIdle = useAppStore((state) =>
-    selectQuickChatHasUnseenIdle(state, workspaceId),
-  );
-  const quickChatLabel = t(
-    quickChatHasUnseenIdle ? "sidebar:quickChatUnseen" : "sidebar:quickChat",
-  );
+  const { activity: quickChatActivity, label: quickChatLabel } = useQuickChatActivity(workspaceId);
   const handleOpenQuickTerminal = useQuickTerminalLauncher(workspaceId);
   if (!workspaceId) return null;
 
@@ -192,13 +188,7 @@ function TabletQuickActions({ workspaceId }: { workspaceId?: string }) {
       >
         <span className="relative flex">
           <IconMessageCircle className="h-4 w-4" />
-          {quickChatHasUnseenIdle && (
-            <span
-              aria-hidden="true"
-              className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-red-500 ring-2 ring-background"
-              data-testid="quick-chat-unseen-dot"
-            />
-          )}
+          <QuickChatActivityIndicator activity={quickChatActivity} />
         </span>
       </Button>
     </>

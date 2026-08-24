@@ -111,7 +111,7 @@ func (a *ClaudeACP) BuildCommand(opts CommandOptions) Command {
 }
 
 func (a *ClaudeACP) ManagedNPMRuntime() ManagedNPMRuntimeSpec {
-	return ManagedNPMRuntimeSpec{Package: claudeACPPackage}
+	return newManagedNPMRuntimeSpec(claudeACPPackage)
 }
 
 func (a *ClaudeACP) Runtime() *RuntimeConfig {

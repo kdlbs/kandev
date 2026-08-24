@@ -110,12 +110,16 @@ type InteractionQuestion struct {
 // pending and answerable — the answer resumes the session in a new turn — so a
 // consumer must not treat disconnection as resolution.
 type Interaction struct {
-	ID                string                `json:"id"`
-	Kind              InteractionKind       `json:"kind"`
-	TaskID            string                `json:"task_id"`
-	SessionID         string                `json:"session_id"`
-	TurnID            string                `json:"turn_id"`
-	Status            InteractionStatus     `json:"status"`
+	ID        string            `json:"id"`
+	Kind      InteractionKind   `json:"kind"`
+	TaskID    string            `json:"task_id"`
+	SessionID string            `json:"session_id"`
+	TurnID    string            `json:"turn_id"`
+	Status    InteractionStatus `json:"status"`
+	// RequestID is the provider-side permission request identity. Kandev's
+	// resolution path is keyed on it alongside the pending id; empty for a
+	// clarification bundle and for permission rows written before it existed.
+	RequestID         string                `json:"request_id,omitempty"`
 	Title             string                `json:"title,omitempty"`
 	Context           string                `json:"context,omitempty"`
 	ToolCallID        string                `json:"tool_call_id,omitempty"`

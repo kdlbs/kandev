@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import type { StepDef, TaskLinkHandler, TaskSwitcherItem } from "./task-switcher-types";
 import { TaskItem } from "./task-item";
 import { TaskItemWithContextMenu } from "./task-switcher-context-menu";
@@ -22,10 +23,12 @@ export type TaskRowProps = {
   activeTaskId: string | null;
   selectedTaskId: string | null;
   showActivityTime?: boolean;
+  /** False when the list is grouped by repository and the header already names it. */
+  showRepository?: boolean;
   onSelectTask: (taskId: string) => void;
   onEditTask?: (task: TaskSwitcherItem) => void;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
-  onArchiveTask?: (taskId: string) => void;
+  onArchiveTask?: (taskId: string, opts?: { cascade?: boolean }) => void;
   onCreateSubtask?: (taskId: string, taskTitle: string) => void;
   onDeleteTask?: (taskId: string) => void;
   onDetachTask?: (taskId: string) => void;
@@ -40,6 +43,8 @@ export type TaskRowProps = {
   isPinned?: boolean;
   pinnedTaskIds?: string[];
   deletingTaskId?: string | null;
+  archivingTaskId?: string | null;
+  isArchiving?: boolean;
   selectedTaskIds?: Set<string>;
   onToggleSelectTask?: (taskId: string) => void;
   onSelectTaskRange?: (taskId: string) => void;
@@ -74,6 +79,7 @@ function getContextMenuProps(props: TaskRowProps, isArchived: boolean) {
     isPinned: isArchived ? false : props.isPinned,
     pinnedTaskIds: props.pinnedTaskIds,
     isDeleting: props.deletingTaskId === props.task.id,
+    isArchiving: props.isArchiving && props.archivingTaskId === props.task.id,
     selectedTaskIds: archiveAware(props.selectedTaskIds, isArchived),
     onBulkArchive: archiveAware(props.onBulkArchive, isArchived),
     onBulkDelete: props.onBulkDelete,
@@ -93,6 +99,7 @@ type TaskRowItemProps = Pick<
   | "activeTaskId"
   | "selectedTaskId"
   | "showActivityTime"
+  | "showRepository"
   | "onSelectTask"
   | "selectedTaskIds"
   | "onToggleSelectTask"
@@ -100,7 +107,7 @@ type TaskRowItemProps = Pick<
   | "deletingTaskId"
   | "isPinned"
   | "stepsByWorkflowId"
-> & { isArchived: boolean };
+> & { isArchived: boolean; archiveConfirmation?: ReactNode };
 
 function TaskRowItem({
   task,
@@ -110,6 +117,7 @@ function TaskRowItem({
   activeTaskId,
   selectedTaskId,
   showActivityTime,
+  showRepository,
   onSelectTask,
   selectedTaskIds,
   onToggleSelectTask,
@@ -118,6 +126,7 @@ function TaskRowItem({
   isPinned,
   stepsByWorkflowId,
   isArchived,
+  archiveConfirmation,
 }: TaskRowItemProps) {
   const taskSteps = task.workflowId ? stepsByWorkflowId?.[task.workflowId] : undefined;
   const isSelected = task.id === selectedTaskId || task.id === activeTaskId;
@@ -161,7 +170,8 @@ function TaskRowItem({
       updatedAt={task.updatedAt}
       lastActivityAt={task.lastActivityAt}
       showActivityTime={showActivityTime}
-      repositories={task.repositories}
+      repositoryPath={task.repositoryPath}
+      showRepository={showRepository}
       prInfo={task.prInfo}
       queuedCount={task.queuedCount}
       wipQueue={task.wipQueue}
@@ -176,6 +186,7 @@ function TaskRowItem({
       onClick={() => onSelectTask(task.id)}
       isDeleting={isDeleting}
       isPinned={isArchived ? false : isPinned}
+      archiveConfirmation={archiveConfirmation}
     />
   );
 }

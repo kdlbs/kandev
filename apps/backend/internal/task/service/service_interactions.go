@@ -91,6 +91,7 @@ func buildInteraction(pendingID string, rows []*models.Message) *models.Interact
 func buildPermissionInteraction(pendingID string, row *models.Message) *models.Interaction {
 	toolCallID, _ := row.Metadata["tool_call_id"].(string)
 	actionType, _ := row.Metadata["action_type"].(string)
+	requestID, _ := row.Metadata["request_id"].(string)
 	return &models.Interaction{
 		ID:         pendingID,
 		Kind:       models.InteractionKindPermission,
@@ -98,6 +99,7 @@ func buildPermissionInteraction(pendingID string, row *models.Message) *models.I
 		SessionID:  row.TaskSessionID,
 		TurnID:     row.TurnID,
 		Status:     models.InteractionStatusFromMetadata(row.Metadata),
+		RequestID:  requestID,
 		Title:      row.Content,
 		ToolCallID: toolCallID,
 		ActionType: actionType,
@@ -234,16 +236,4 @@ func clarificationOptionsFromMetadata(value interface{}) []models.InteractionOpt
 		out = append(out, models.InteractionOption{ID: id, Label: label, Description: description})
 	}
 	return out
-}
-
-// ClaimPermissionResponse atomically resolves a pending permission request,
-// reporting whether this caller performed the resolution and the status the
-// row carries either way. Callers must claim before dispatching a response so
-// two responders cannot both reach the agent (see the repository method).
-func (s *Service) ClaimPermissionResponse(
-	ctx context.Context,
-	sessionID, pendingID string,
-	status models.PermissionStatus,
-) (bool, models.PermissionStatus, error) {
-	return s.messages.ClaimPermissionResponse(ctx, sessionID, pendingID, status)
 }

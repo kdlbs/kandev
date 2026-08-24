@@ -15,7 +15,7 @@ export function buildArchivedSidebarItem(
     workflowName: undefined,
     workflowStepId: undefined,
     workflowStepTitle: undefined,
-    repositoryPath: s.archivedTaskRepositoryPath,
+    repositoryPath: s.archivedTaskRepositoryLabel,
     diffStats: undefined,
     isRemoteExecutor: false,
     remoteExecutorType: undefined,

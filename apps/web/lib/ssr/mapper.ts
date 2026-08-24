@@ -16,6 +16,15 @@ function resolveAutoStartFailed(task: WorkflowSnapshot["tasks"][number]): boolea
   return task.auto_start_failed ?? false;
 }
 
+function primaryExecutorFields(task: Task) {
+  return {
+    primaryExecutorId: task.primary_executor_id ?? undefined,
+    primaryExecutorType: task.primary_executor_type ?? undefined,
+    primaryExecutorName: task.primary_executor_name ?? undefined,
+    isRemoteExecutor: task.is_remote_executor ?? false,
+  };
+}
+
 export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
   // Handle empty snapshot (ephemeral tasks have no workflow)
   if (!snapshot.workflow) {
@@ -64,6 +73,7 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
         })),
         primarySessionId: task.primary_session_id ?? undefined,
         primarySessionState: task.primary_session_state ?? undefined,
+        ...primaryExecutorFields(task),
         primarySessionPendingAction: pickPendingAction(task.primary_session_pending_action),
         taskPendingAction: pickPendingAction(task.task_pending_action),
         foregroundActivity: task.foreground_activity ?? undefined,

@@ -1,8 +1,12 @@
 # ADR-2026-07-30-file-backed-diagnostic-bundles: File-backed diagnostic bundles
 
-**Status:** accepted
+**Status:** accepted (backend file retention amended by ADR-2026-08-22-preserve-newest-bounded-backend-logs)
 **Date:** 2026-07-30
 **Area:** backend, frontend, infra, protocol, workflow
+
+The 2026-08-22 amendment replaces the stop-at-256-MiB behavior with bounded
+size segments and one 256 MiB budget across retained backend logs. The original
+bundle, privacy, UTC-day, and maximum-age decisions remain accepted.
 
 ## Context
 
@@ -126,10 +130,10 @@ does not mistake a best-effort bundle for complete evidence. Diagnostic bundle
 requests can be temporarily busy or coalesced instead of competing with normal
 product activity.
 
-The fixed daily file bound limits worst-case disk growth but can omit later
-same-day evidence after sustained pressure. Count and byte limits reduce how
-quickly automatic browser reports consume that budget, while UTC rollover
-restores capacity without operator action.
+The aggregate backend-log budget limits worst-case disk growth while oldest
+closed segments are evicted first, so later evidence remains available during
+sustained pressure. Count and byte limits reduce how quickly automatic browser
+reports consume that budget, while UTC age cleanup removes stale evidence.
 
 Fixed byte/profile caps mean a very large retained backend file or a fifth
 browser profile may be represented only partially. Newest backend bytes are

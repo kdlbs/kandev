@@ -144,6 +144,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 			StatusSummaries:   repos.Task,
 			TaskActivity:      repos.Task,
 			SubagentContexts:  repos.Task,
+			Usage:             repos.Task,
 		},
 		eventBus,
 		log,

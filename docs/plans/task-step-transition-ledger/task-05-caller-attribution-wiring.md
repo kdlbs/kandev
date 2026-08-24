@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["04-ledger-writer-chokepoints"]
 plan: "plan.md"
-spec: "../../specs/workflow/task-step-transition-ledger/spec.md"
+spec: "../../specs/tasks/requirements/workflow-task-step-transition-ledger.md"
 ---
 
 # Task 05: Caller attribution wiring

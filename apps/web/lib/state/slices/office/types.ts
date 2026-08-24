@@ -459,9 +459,10 @@ export type OfficeMeta = {
 };
 
 // --- Provider routing types ---
-// Extracted to routing-types.ts to keep this file under the file-length
-// lint limit; re-exported here so existing `from ".../office/types"`
-// imports keep working unchanged.
+//
+// Defined in `./routing-types` (kept out of this file to stay under the
+// 600-line cap) and re-exported here so existing
+// `@/lib/state/slices/office/types` imports keep working unchanged.
 
 export type {
   Tier,
@@ -471,6 +472,8 @@ export type {
   ExecutionProfileSummary,
   WakeReason,
   TierPerReason,
+  RoleTierMap,
+  TierSource,
   WorkspaceRouting,
   AgentRoutingOverrides,
   ProviderHealthState,
@@ -486,6 +489,7 @@ export type {
   RunAttemptsState,
   AgentRoutingSliceState,
 } from "./routing-types";
+
 import type {
   AgentRouteData,
   AgentRoutePreview,

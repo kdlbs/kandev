@@ -12,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	commoncosts "github.com/kandev/kandev/internal/common/costs"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/costs"
@@ -596,7 +597,36 @@ func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error
 	// retry-by-classifier path lives behind HandleRunFailure for
 	// rate-limit-retry callers; we deliberately do NOT call into it
 	// here. See docs/specs/office-agent-error-handling.
-	return s.HandleAgentFailure(ctx, run, enrichModelFailureMessage(run, data.ErrorMessage))
+	errMsg := enrichModelFailureMessage(run, data.ErrorMessage)
+	if err := s.HandleAgentFailure(ctx, run, errMsg); err != nil {
+		return err
+	}
+	s.dispatchAgentErrorTrigger(ctx, run, data.TaskID, data.SessionID, errMsg)
+	return nil
+}
+
+// dispatchAgentErrorTrigger wakes the workspace CEO agent (WO-05) after a
+// terminal agent-session failure. This is Path A in the office failure
+// model; Path B (HandleRunFailure -> escalateFailure, pre-launch retry
+// exhaustion) queues its own CEO run directly and never reaches this
+// dispatcher, so the two mechanisms cannot double-fire for one failure.
+// A dispatch error is logged rather than returned: it must not mask the
+// failure bookkeeping HandleAgentFailure already committed.
+func (s *Service) dispatchAgentErrorTrigger(
+	ctx context.Context, run *models.Run, taskID, sessionID, errMsg string,
+) {
+	key := fmt.Sprintf("agent_error:%s", run.ID)
+	if err := s.dispatchEngineTrigger(ctx, taskID, engine.TriggerOnAgentError,
+		engine.OnAgentErrorPayload{
+			FailedAgentID:   run.AgentProfileID,
+			FailedSessionID: sessionID,
+			ErrorMessage:    errMsg,
+		}, key); err != nil {
+		s.logger.Error("engine trigger on_agent_error failed",
+			zap.String("task_id", taskID),
+			zap.String("run_id", run.ID),
+			zap.Error(err))
+	}
 }
 
 // enrichModelFailureMessage prepends the actionable "change the model" copy
@@ -672,14 +702,18 @@ func (s *Service) tryPostStartFallback(
 //
 // buildCostEvent (prompt_usage_cost.go) also records the cache read/write
 // split when the usage frame reports cache data, and turn_id /
-// usage_event_id threaded from the publish site. The ledger insert and the
-// task_sessions rollup increment (tokens_in / tokens_cached_in / tokens_out /
-// cost_subcents) are written atomically by recordCostEventAndRollup — see its
-// doc comment for why non-atomic writes here are a real defect, not a
-// theoretical one — and any applicable budget policy is evaluated afterward.
-// Estimated rows count toward budget totals at face value. Every early
-// return and the insert path record a writer-health metric (cost_metrics.go)
-// so a silently-stopped writer is observable.
+// usage_event_id threaded from the publish site. This function only inserts
+// the office_cost_events row; it no longer increments the task_sessions
+// rollup columns (docs/specs/task-cost-ledger/spec.md AC-21):
+// internal/task/usage's writer is now the sole writer of those columns
+// (AC-10), inserting task_usage_events and incrementing task_sessions
+// atomically in its own transaction (internal/task/repository/sqlite's
+// insertUsageEventAndRollup). Before this change, Office incremented the
+// same columns here too, so an Office-enabled install (the dev/e2e default)
+// double-counted every turn. Any applicable budget policy is evaluated
+// after the insert. Estimated rows count toward budget totals at face
+// value. Every early return and the insert path record a writer-health
+// metric (cost_metrics.go) so a silently-stopped writer is observable.
 func (s *Service) handlePromptUsage(ctx context.Context, event *bus.Event) error {
 	data, err := decodeEventData[PromptUsageData](event)
 	if err != nil {
@@ -719,10 +753,7 @@ func (s *Service) handlePromptUsage(ctx context.Context, event *bus.Event) error
 		*data, fields, s.projectIDForTask(ctx, data.TaskID), provider, resolution, sessionAgentProfileID,
 	)
 
-	if err := s.recordCostEventAndRollup(
-		ctx, costEvent, data.SessionID,
-		data.Usage.InputTokens, costEvent.TokensCachedIn, data.Usage.OutputTokens, resolution.costSubcents,
-	); err != nil {
+	if err := s.repo.CreateCostEvent(ctx, costEvent); err != nil {
 		if errors.Is(err, sqlite.ErrDuplicateUsageEvent) {
 			s.recordCostEventDropped(costDropReasonDuplicate, data.TaskID)
 			return nil
@@ -741,61 +772,6 @@ func (s *Service) handlePromptUsage(ctx context.Context, event *bus.Event) error
 		}
 	}
 	return nil
-}
-
-// recordCostEventAndRollup inserts costEvent and increments the
-// task_sessions rollup atomically when the wired sessionUsageWriter
-// supports it (shared.SessionUsageWriterTx) — every production wiring does
-// (backendapp's SetSessionUsageWriter(repos.Task)).
-//
-// Atomicity matters because of how this card's own usage_event_id
-// idempotency guard interacts with a partial failure: without a shared
-// transaction, a rollup-increment failure after a successful ledger insert
-// was logged and swallowed, and a later redelivery of the same completion
-// (see ErrDuplicateUsageEvent's doc comment for why redelivery is real, not
-// hypothetical) would hit the unique index and be dropped as a duplicate
-// before the rollup ever got a second chance — task_sessions permanently
-// behind office_cost_events with no recovery path (PR #2606 review). Wrapping
-// both writes in one transaction closes that: any failure, including the
-// rollup increment, rolls back the ledger insert too, so nothing is
-// committed and a redelivered completion with the same usage_event_id
-// retries the whole operation cleanly instead of colliding with a
-// half-landed row.
-//
-// Falls back to the pre-existing non-atomic two-step write when the wired
-// writer doesn't implement SessionUsageWriterTx (e.g. a simplified test
-// double that doesn't need transactional coupling, or sessionUsageWriter
-// left unset).
-func (s *Service) recordCostEventAndRollup(
-	ctx context.Context, costEvent *models.CostEvent, sessionID string,
-	tokensIn, tokensCachedIn, tokensOut, costSubcents int64,
-) error {
-	txWriter, ok := s.sessionUsageWriter.(shared.SessionUsageWriterTx)
-	if !ok {
-		if err := s.repo.CreateCostEvent(ctx, costEvent); err != nil {
-			return err
-		}
-		s.incrementSessionUsageTotals(ctx, sessionID, tokensIn, tokensCachedIn, tokensOut, costSubcents)
-		return nil
-	}
-
-	tx, err := s.repo.BeginTx(ctx)
-	if err != nil {
-		return err
-	}
-	if err := s.repo.CreateCostEventTx(ctx, tx, costEvent); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	if err := txWriter.IncrementTaskSessionUsageTx(
-		ctx, tx, sessionID, tokensIn, tokensCachedIn, tokensOut, costSubcents,
-	); err != nil {
-		_ = tx.Rollback()
-		s.logger.Warn("increment task_session usage failed, rolled back cost event insert",
-			zap.String("session_id", sessionID), zap.Error(err))
-		return err
-	}
-	return tx.Commit()
 }
 
 // resolveProvider derives the provider id for the cost row. AgentType
@@ -819,31 +795,11 @@ func resolveProvider(data PromptUsageData) string {
 
 // providerFromCLI maps the upstream CLI id (the agent_id stream field)
 // to a provider name. Used because claude-acp emits logical model
-// aliases (sonnet / haiku) that can't be matched on prefix.
+// aliases (sonnet / haiku) that can't be matched on prefix. Delegates to
+// internal/common/costs, the single source of truth shared with the task
+// usage ledger writer (docs/specs/task-cost-ledger/spec.md).
 func providerFromCLI(cli string) string {
-	switch cli {
-	case "claude-acp":
-		return "anthropic"
-	case "codex-acp", "openai-acp":
-		return "openai"
-	case "gemini", "gemini-acp":
-		return "google"
-	}
-	return ""
-}
-
-func (s *Service) incrementSessionUsageTotals(
-	ctx context.Context, sessionID string, tokensIn, tokensCachedIn, tokensOut, costSubcents int64,
-) {
-	if s.sessionUsageWriter == nil || sessionID == "" {
-		return
-	}
-	if err := s.sessionUsageWriter.IncrementTaskSessionUsage(
-		ctx, sessionID, tokensIn, tokensCachedIn, tokensOut, costSubcents,
-	); err != nil {
-		s.logger.Warn("increment task_session usage failed",
-			zap.String("session_id", sessionID), zap.Error(err))
-	}
+	return commoncosts.ProviderFromCLI(cli)
 }
 
 func (s *Service) projectIDForTask(ctx context.Context, taskID string) string {

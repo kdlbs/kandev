@@ -1,7 +1,7 @@
 ---
 status: shipped
 created: 2026-08-10
-updated: 2026-08-18
+updated: 2026-08-23
 ---
 
 # Duration-aware E2E sharding and CI reliability
@@ -114,6 +114,12 @@ contract.
    retry summary, prediction-versus-actual summary, and plan health counters.
 5. Only a successful `main` result is eligible to become the next baseline.
 
+The normal merge-queue shard job has a 35-minute execution budget. This is a
+job-capacity budget for the serial fallback plan and its setup overhead, not a
+change to Playwright's 60-second per-test timeout or retry policy. The
+aggregate `E2E Tests Passed` gate still treats a cancelled shard as a failure,
+so a genuinely stuck shard remains visible and blocks the merge.
+
 The desktop smoke job uses a dedicated image from `ghcr.io/kdlbs/kandev-ci`.
 The image contains Node.js, pnpm, Rust, Xvfb, and the Linux packages that Tauri
 needs. The job does not contact Ubuntu or Rust toolchain servers during setup.
@@ -188,6 +194,9 @@ they improve wall time without increasing flakes.
   visible in the retry summary with actionable evidence.
 - The timing profile can be unavailable without blocking a correct,
   deterministic fallback plan.
+- A count-fallback normal shard can finish within the merge queue's
+  60-minute check-response window, including setup, report merging, and the
+  aggregate gate.
 - The desktop smoke job reaches its build and test commands without contacting
   Ubuntu package mirrors or Rust toolchain servers.
 - A contract test fails if the desktop image publisher disappears or the smoke

@@ -416,6 +416,8 @@ const (
 	ActionMCPStepComplete               = "mcp.step_complete" // ADR 0015: agent-emitted explicit completion signal
 	ActionMCPAskUserQuestion            = "mcp.ask_user_question"
 	ActionMCPAskParentQuestion          = "mcp.ask_parent_question"
+	ActionMCPListPendingQuestions       = "mcp.list_pending_questions"
+	ActionMCPAnswerQuestion             = "mcp.answer_question"
 	ActionMCPCreateTaskPlan             = "mcp.create_task_plan"
 	ActionMCPGetTaskPlan                = "mcp.get_task_plan"
 	ActionMCPUpdateTaskPlan             = "mcp.update_task_plan"
@@ -467,15 +469,17 @@ const (
 	ActionMCPUpdateExecutorProfile = "mcp.update_executor_profile"
 	ActionMCPDeleteExecutorProfile = "mcp.delete_executor_profile"
 
-	ActionMCPMoveTask            = "mcp.move_task"
-	ActionMCPDeleteTask          = "mcp.delete_task"
-	ActionMCPArchiveTask         = "mcp.archive_task"
-	ActionMCPUpdateTaskState     = "mcp.update_task_state"
-	ActionMCPMessageTask         = "mcp.message_task"
-	ActionMCPStopTask            = "mcp.stop_task"
-	ActionMCPSpawnSession        = "mcp.spawn_session"
-	ActionMCPGetTaskConversation = "mcp.get_task_conversation"
-	ActionMCPListTaskSessions    = "mcp.list_task_sessions"
+	ActionMCPMoveTask                    = "mcp.move_task"
+	ActionMCPDeleteTask                  = "mcp.delete_task"
+	ActionMCPArchiveTask                 = "mcp.archive_task"
+	ActionMCPUpdateTaskState             = "mcp.update_task_state"
+	ActionMCPMessageTask                 = "mcp.message_task"
+	ActionMCPStopTask                    = "mcp.stop_task"
+	ActionMCPSpawnSession                = "mcp.spawn_session"
+	ActionMCPGetTaskConversation         = "mcp.get_task_conversation"
+	ActionMCPListTaskSessions            = "mcp.list_task_sessions"
+	ActionMCPListPendingAgentPermissions = "mcp.list_pending_agent_permissions"
+	ActionMCPResolveAgentPermission      = "mcp.resolve_agent_permission"
 )
 
 const (

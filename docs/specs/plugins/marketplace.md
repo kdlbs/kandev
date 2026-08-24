@@ -36,12 +36,34 @@ while keeping install-by-URL and sideloading as escape hatches.
   or actively-maintained plugins are not buried under older high-star incumbents.
 - Each catalog entry shows: display name, description, author, categories, the source
   repository link, the latest published version, and its star count.
+- Release authors and registry reviewers SHALL apply the attribution convention:
+  first-party `kdlbs/kandev-plugin-*` releases declare `author: "kandev"`,
+  community releases declare the contributor's stable identity, and a plugin is
+  not labeled `kandev` only because a maintainer curated it into the official
+  source. This is a release and curation check, not an index-builder ownership
+  validation rule. The builder preserves a declared manifest author and falls
+  back to the repository owner for legacy releases without one.
+- The catalog source repository link SHALL identify the repository named by the
+  registry entry. The index builder derives this value from the registry pointer.
+  A release manifest's `repo_url`, when present, SHOULD identify the same
+  repository so installed and marketplace views do not disagree; release and
+  registry review is responsible for flagging mismatches.
 - Installing from the catalog SHALL be **one click**: it resolves to the plugin's
   latest release tarball URL and runs the existing verified install pipeline
   (`POST /api/plugins/install`). No new install mechanism is introduced.
 - A catalog entry for a plugin that is already installed SHALL show an **Installed**
   state; when the catalog's latest version is newer than the installed version, it
-  SHALL show an **Update available** affordance (which reinstalls the newer tarball).
+  SHALL show a highlighted **Update** button (which reinstalls the newer tarball).
+- The **Installed** tab SHALL show each installed plugin's latest known marketplace
+  version alongside its installed version — not only when an update is available — so
+  an operator can see version drift without switching to Browse. This check runs once
+  on page load and when the operator selects **Check for updates**. The explicit check
+  clears the server's five-minute catalog cache before it retrieves current versions.
+  **Sync** remains a separate filesystem action. A failed marketplace check degrades to
+  an inline "couldn't check" state and never blocks installed-plugin management.
+- Each installed row SHALL show a visible **Settings** link that opens the plugin's
+  settings page. This link makes plugin configuration discoverable without requiring
+  the operator to know that the row itself is also navigable.
 - The catalog SHALL be assembled from **one or more marketplace sources**. kandev
   ships with the **official kandev source** enabled by default; operators MAY add
   **additional sources** (a team or corporate registry) and the catalog merges them.
@@ -119,7 +141,7 @@ This is the fetch contract between a marketplace source and kandev. Additional
       "id": "agent-stats",
       "name": "Agent Stats",              // from manifest display_name
       "description": "Per-session token & LOC dashboard",
-      "author": "kandev",
+      "author": "kandev",                 // from the release manifest
       "categories": ["analytics"],
       "icon_url": "https://raw.githubusercontent.com/kdlbs/kandev-plugin-agent-stats/v1.4.0/icon.svg",
       "repo_url": "https://github.com/kdlbs/kandev-plugin-agent-stats",
@@ -282,8 +304,36 @@ response but stays `enabled`.
 - **GIVEN** a plugin is already installed at the catalog's latest version, **WHEN**
   the catalog renders, **THEN** its entry shows **Installed** and no Install button.
 - **GIVEN** a plugin is installed at a version older than the catalog's, **WHEN** the
-  catalog renders, **THEN** its entry shows **Update available**, and clicking it
-  installs the newer tarball.
+  catalog renders, **THEN** its Installed row shows a highlighted **Update** button,
+  and clicking it installs the newer tarball.
+- **GIVEN** the Installed tab, **WHEN** it loads, **THEN** every installed plugin with a
+  catalog entry shows its latest known version (e.g. "Latest v2.1.0"), and a plugin with
+  no catalog entry anywhere shows a "not in the marketplace" hint instead — never before
+  the first successful check completes.
+- **GIVEN** a check that reached only some of the enabled sources, **WHEN** it completes,
+  **THEN** plugins missing from that response show **no** "not in the marketplace" hint —
+  a source that failed contributes no entries, which is indistinguishable from delisting —
+  while the healthy sources' known versions and **Update** affordances render as usual, and
+  the degraded source's reason is reported inline.
+- **GIVEN** no marketplace source is enabled, **WHEN** a check completes, **THEN** kandev
+  reports that versions can't be checked and where to enable a source, and no plugin claims
+  to be missing from the marketplace — nothing was queried, so nothing was learned.
+- **GIVEN** the Installed tab, **WHEN** the operator selects **Check for updates**,
+  **THEN** kandev busts the marketplace cache and re-fetches the catalog, and any
+  plugin's latest-version text and highlighted **Update** button state update in place.
+- **GIVEN** the Installed tab, **WHEN** the operator selects **Sync**, **THEN** kandev
+  reconciles the local plugins directory without starting a marketplace refresh.
+- **GIVEN** an installed plugin row, **WHEN** the operator selects **Settings**, **THEN**
+  kandev opens that plugin's settings page.
+- **GIVEN** the marketplace is unreachable or every enabled source reports unhealthy,
+  **WHEN** a check on load or through **Check for updates** fails, **THEN** an inline error explains the
+  check couldn't complete, while the installed-plugin list, enable/disable/uninstall,
+  and the filesystem-sync summary are all unaffected.
+- **GIVEN** an installed plugin with an available update, **WHEN** the operator clicks
+  its **Update** button, **THEN** the button shows a busy/spinner state and the plugin's
+  Enable/Disable/Uninstall controls are disabled until the install settles; on success
+  the version and Update affordance refresh, and on failure an inline error shows the
+  backend's message while the button stays clickable for a retry.
 - **GIVEN** an operator adds a source `{name: "Acme Internal", url: …}`, **WHEN** the
   catalog is next fetched, **THEN** Acme's plugins appear alongside the official ones,
   and an Acme entry with an id that also exists in the official source is hidden in
@@ -300,10 +350,18 @@ response but stays `enabled`.
 - **GIVEN** a PR that adds an entry to `plugins.yaml` whose `id` does not match the
   target repo's latest-release manifest `id`, **WHEN** registry CI runs, **THEN** the
   schema/consistency check fails and the PR is blocked.
+- **GIVEN** the latest release of the first-party Bitbucket plugin declares
+  `author: "kandev"` and its `repo_url` points to `kdlbs/kandev-plugin-bitbucket`,
+  **WHEN** the official index is built, **THEN** the catalog shows **by kandev** and
+  links to the `kdlbs` Bitbucket repository.
+- **GIVEN** the latest release of the community YouTrack plugin is owned by
+  `ahmedbally` and declares `author: "ahmedbally"` with its matching repository URL,
+  **WHEN** the official index is built, **THEN** the catalog shows **by ahmedbally**
+  and links to `ahmedbally/kandev-plugin-youtrack`, not a `kdlbs` repository.
 
 ## Auto-update (opt-in)
 
-Beyond the manual **Update available** affordance, kandev can update installed
+Beyond the manual **Update** affordance, kandev can update installed
 plugins in the background — **off by default, opt-in**. This does not add a new
 install mechanism: an auto-update is exactly the existing verified reinstall of a
 newer catalog `package_url` (`Service.InstallFromURL`), driven automatically

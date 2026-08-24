@@ -14,6 +14,7 @@ type UserSettingsFields = {
   workflowId: string | null;
   repositoryIds: string[];
   hiddenWorkflowStepIds?: Record<string, string[]>;
+  workflowIdsWithAutoHideEmptySteps?: string[];
 };
 
 type CommitSettingsFn = (
@@ -29,6 +30,8 @@ function baseSettingsPayload(settings: UserSettingsFields): UserSettingsFields {
     workspaceId: settings.workspaceId,
     workflowId: settings.workflowId,
     repositoryIds: settings.repositoryIds,
+    hiddenWorkflowStepIds: settings.hiddenWorkflowStepIds,
+    workflowIdsWithAutoHideEmptySteps: settings.workflowIdsWithAutoHideEmptySteps,
   };
 }
 
@@ -131,7 +134,20 @@ function useStepVisibilityHandlers(
     },
     [commitSettings, userSettings],
   );
-  return { eligibleWorkflows, onToggleStepVisibility };
+  const onToggleAutoHideEmpty = useCallback(
+    (workflowId: string) => {
+      const current = userSettings.workflowIdsWithAutoHideEmptySteps ?? [];
+      const next = current.includes(workflowId)
+        ? current.filter((id) => id !== workflowId)
+        : [...current, workflowId];
+      commitSettings({
+        ...baseSettingsPayload(userSettings),
+        workflowIdsWithAutoHideEmptySteps: next,
+      });
+    },
+    [commitSettings, userSettings],
+  );
+  return { eligibleWorkflows, onToggleStepVisibility, onToggleAutoHideEmpty };
 }
 
 /**
@@ -188,13 +204,8 @@ export function useKanbanDisplaySettings() {
     [commitSettings, userSettings],
   );
 
-  const { eligibleWorkflows, onToggleStepVisibility } = useStepVisibilityHandlers(
-    workflows,
-    snapshots,
-    userSettings,
-    commitSettings,
-    activeWorkflowId,
-  );
+  const { eligibleWorkflows, onToggleStepVisibility, onToggleAutoHideEmpty } =
+    useStepVisibilityHandlers(workflows, snapshots, userSettings, commitSettings, activeWorkflowId);
 
   const { effectiveView, onViewModeChange } = useViewModeChange();
 
@@ -213,12 +224,14 @@ export function useKanbanDisplaySettings() {
     eligibleWorkflows,
     snapshots,
     hiddenWorkflowStepIds: userSettings.hiddenWorkflowStepIds ?? {},
+    workflowIdsWithAutoHideEmptySteps: userSettings.workflowIdsWithAutoHideEmptySteps ?? [],
     onWorkspaceChange,
     onWorkflowChange,
     onRepositoryChange,
     onTogglePreviewOnClick,
     onToggleTasksListShowDetails,
     onToggleStepVisibility,
+    onToggleAutoHideEmpty,
     onViewModeChange,
   };
 }

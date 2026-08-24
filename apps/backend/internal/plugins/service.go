@@ -75,6 +75,18 @@ type Service struct {
 	// insertion one atomic catalog mutation across different plugin IDs.
 	agentToolInstallMu sync.Mutex
 
+	// extractingMu guards extractingPaths and, crucially, is held across the
+	// pkgtar extraction that registers into it: a version directory must never
+	// be observable on disk before it is marked in flight, or a concurrent
+	// prune could delete it in that gap. See extractPackage.
+	extractingMu sync.Mutex
+	// extractingPaths counts, per version directory, the installs that have
+	// extracted it but have not yet finished. Install extracts before it can
+	// know the plugin id (and therefore before it can take that id's lifecycle
+	// lock), so this is what tells a prune running under the lock that a
+	// directory belongs to an install still waiting for it.
+	extractingPaths map[string]int
+
 	pluginsDir       string
 	store            store.Store
 	registry         *Registry
@@ -498,6 +510,18 @@ func (s *Service) authLoginBridge() AuthLoginBridge {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.authLogin
+}
+
+// sessionCookieName returns the name of Kandev's own session cookie via the
+// wired auth bridge, or "" when no bridge is wired (auth disabled entirely,
+// so no session cookie is ever minted). Used by the webhook relay to strip
+// that cookie before forwarding headers to a plugin subprocess.
+func (s *Service) sessionCookieName() string {
+	bridge := s.authLoginBridge()
+	if bridge == nil {
+		return ""
+	}
+	return bridge.SessionCookieName()
 }
 
 // SetKandevVersion wires the currently running kandev build version,

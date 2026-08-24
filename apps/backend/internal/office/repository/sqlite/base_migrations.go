@@ -94,6 +94,7 @@ func (r *Repository) migrateProviderRouting() {
 		provider_order    TEXT    NOT NULL DEFAULT '[]',
 		provider_profiles TEXT    NOT NULL DEFAULT '{}',
 		tier_per_reason   TEXT    NOT NULL DEFAULT '{}',
+		role_tiers        TEXT    NOT NULL DEFAULT '{}',
 		updated_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 	)`)
 
@@ -105,6 +106,7 @@ func (r *Repository) migrateProviderRouting() {
 		provider_id      TEXT NOT NULL,
 		model            TEXT NOT NULL,
 		tier             TEXT NOT NULL,
+		tier_source      TEXT NOT NULL DEFAULT '',
 		outcome          TEXT NOT NULL,
 		error_code       TEXT,
 		error_confidence TEXT,
@@ -123,6 +125,10 @@ func (r *Repository) migrateProviderRouting() {
 		`ALTER TABLE runs ADD COLUMN resolved_execution_profile_id TEXT`)
 	r.migrate.Apply("office_run_route_attempts.execution_profile_id",
 		`ALTER TABLE office_run_route_attempts ADD COLUMN execution_profile_id TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("office_workspace_routing.role_tiers",
+		`ALTER TABLE office_workspace_routing ADD COLUMN role_tiers TEXT NOT NULL DEFAULT '{}'`)
+	r.migrate.Apply("office_run_route_attempts.tier_source",
+		`ALTER TABLE office_run_route_attempts ADD COLUMN tier_source TEXT NOT NULL DEFAULT ''`)
 
 	_, _ = r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS office_provider_health (
@@ -362,7 +368,7 @@ func (r *Repository) runTaskPriorityRecreate() error {
 	_, _ = conn.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN queued_at TIMESTAMP`)
 	_, _ = conn.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN autopilot_enabled INTEGER NOT NULL DEFAULT 0`)
 	// Same defensive add for external_id/external_id_settled_at
-	// (docs/specs/tasks/external-id-idempotency): real installs already have
+	// (docs/specs/tasks/system-design/external-id-idempotency.md): real installs already have
 	// these from task/repository/sqlite/base.go runMigrations(), but older
 	// priority-migration fixtures predate them too.
 	_, _ = conn.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN external_id TEXT COLLATE BINARY`)
@@ -470,7 +476,7 @@ func taskPriorityMigrationStatements() []string {
 		// per-task assignee moved to workflow_step_participants.
 		//
 		// uniq_tasks_external_id enforces task create-idempotency
-		// (docs/specs/tasks/external-id-idempotency). DROP TABLE tasks above
+		// (docs/specs/tasks/system-design/external-id-idempotency.md). DROP TABLE tasks above
 		// silently drops every index on the old table, this one included —
 		// unlike a plain ALTER TABLE ADD COLUMN, recreating the table means
 		// every index must be explicitly relisted here or it is gone from

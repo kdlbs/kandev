@@ -5,7 +5,7 @@
 # the host platform into server/, and packs the whole tree with
 # cmd/plugin-pack into apps/backend/.build/kandev-plugin-e2e-1.0.0.tar.gz.
 id: "kandev-plugin-e2e"
-api_version: 1
+api_version: 2
 version: "1.0.0"
 display_name: "Kandev E2E Fixture Plugin"
 description: "SDK-based plugin backend used by backend integration tests and Playwright e2e tests"
@@ -85,6 +85,10 @@ webhooks:
   - key: "test-hook"
     description: "Records inbound webhooks for e2e polling"
     method: "POST"
+  - key: "public-hook"
+    description: "Public counterpart of test-hook for exercising the anonymous auth-gate opt-in"
+    method: "POST"
+    access: public
 
 ui:
   bundle: "/ui/bundle.js"

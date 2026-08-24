@@ -1,5 +1,6 @@
 import type { Draft } from "immer";
 import type { AppState, HydrationState } from "../store";
+import type { KanbanState } from "../slices/kanban/types";
 import { migrateSidebarViewDraft, migrateView } from "../slices/ui/ui-slice";
 import {
   mergeHydratedQuickChatSessions,
@@ -12,6 +13,7 @@ import {
   reconcileActiveTurnAfterHydrationDraft,
   seedSettledSessionBoundaries,
 } from "@/lib/state/slices/session/turn-actions";
+import { preserveOmittedExecutorFields } from "@/lib/kanban/map-task";
 import { deepMerge, mergeSessionMap, mergeLoadingState } from "./merge-strategies";
 
 /**
@@ -35,6 +37,8 @@ function mergeWithLoading(draft: any, source: any | undefined): void {
 }
 
 /** Merge kanban tasks by ID, keeping the version with the newer updatedAt timestamp. */
+type KanbanTask = KanbanState["tasks"][number];
+
 function mergeKanbanTasks(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   draft: Draft<any>,
@@ -42,19 +46,25 @@ function mergeKanbanTasks(
   source: any[] | undefined,
 ): void {
   if (!source || source.length === 0) return;
-  const draftTasks = draft.tasks as Array<{ id: string; updatedAt?: string }>;
-  const existingById = new Map(draftTasks.map((t) => [t.id, t]));
+  const draftTasks = draft.tasks as Draft<KanbanTask>[];
+  const existingById = new Map<string, Draft<KanbanTask>>(
+    draftTasks.map((task) => [task.id, task]),
+  );
 
   for (const incoming of source) {
     const existing = existingById.get(incoming.id);
     if (!existing) {
-      draftTasks.push(incoming);
+      draftTasks.push({ ...incoming });
     } else {
       const existingTime = existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
       const incomingTime = incoming.updatedAt ? new Date(incoming.updatedAt).getTime() : 0;
       const idx = draftTasks.findIndex((t) => t.id === incoming.id);
       if (incomingTime >= existingTime) {
-        if (idx >= 0) draftTasks[idx] = incoming;
+        if (idx >= 0) {
+          const mergedIncoming = { ...incoming } as KanbanTask;
+          preserveOmittedExecutorFields(mergedIncoming, existing);
+          draftTasks[idx] = mergedIncoming;
+        }
       } else if (idx >= 0) {
         backfillServerDerivedFields(draftTasks[idx], incoming);
       }

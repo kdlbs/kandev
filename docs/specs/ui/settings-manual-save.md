@@ -3,7 +3,7 @@ status: shipped
 created: 2026-07-14
 updated: 2026-08-09
 owner: kandev
-supersedes: docs/specs/workflow-settings-autosave/spec.md
+supersedes: docs/specs/tasks/requirements/workflow-settings-autosave.md
 ---
 
 # Settings Manual Save

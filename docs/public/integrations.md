@@ -316,6 +316,8 @@ For a task with linked GitHub pull requests, open the PR status control above th
 
 This is a GitHub-only lifecycle feature. Kandev reuses the existing lightweight task PR poller, which checks watched linked PRs roughly once per minute; it does not add a separate scheduler. Saving enabled options also evaluates the task's current linked PRs without waiting for the next poll.
 
+When GitHub puts a linked pull request in a merge queue, the PR status control shows its queue state. It also shows the queue position and estimated merge time when GitHub provides them. The same status appears in the task summary, the mobile PR chip, and Review.
+
 **Your review is requested** matches the GitHub account connected to the task's workspace. The first observation is a quiet baseline. Any later transition to a request for that account wakes the agent, including the first new request after baselining and a re-review request after changes. Clearing a request rearms the next transition. If the workspace's connected GitHub account changes, Kandev quietly rebinds the task and re-establishes every linked PR's baseline; switching accounts does not itself create a prompt.
 
 **PR merged** and **PR closed without merging** are separate subscriptions to the same kind of follow-up: waking the agent when review work ends. Each notifies once when its linked PR enters the selected terminal state. Kandev delivers lifecycle notifications to the task's active promptable session, preferring the primary session. It does not interrupt a busy session: it queues a message for delivery when that session is available. If the task has no promptable session, Kandev records the per-PR delivery error, creates no new session, and retries once a session becomes promptable.
@@ -372,7 +374,9 @@ These actions use the connected GitLab user's permissions and do not bypass prot
 
 ### Automate a linked merge request
 
-For a task with a linked GitLab merge request, open the MR topbar control. The **Automation** group has the same two task-level controls as GitHub's PRs: **Auto-fix CI and address comments** and **Auto-merge when ready**. Below it, expand **Review follow-up** for three lifecycle booleans: **Your review is requested**, **MR merged**, and **MR closed without merging**. Enabling any control applies it to every MR linked to that task; Kandev tracks delivery and deduplication separately for each linked MR.
+For a task with a linked GitLab merge request, open the MR topbar control. The **Automation** group has the same two controls as GitHub's PRs: **Auto-fix CI and address comments** and **Auto-merge when ready**. Below it, expand **Review follow-up** for three lifecycle booleans: **Your review is requested**, **MR merged**, and **MR closed without merging**.
+
+All five belong to a single merge request. A task with several linked MRs shows one **Automation** group per MR, each labelled with its MR number, so you can automate one MR and leave the rest untouched; Kandev tracks delivery and deduplication separately for each. The auto-fix prompt override is the one setting that stays task-level; editing it applies to every linked MR. An agent calling `update_task_mr_automation_kandev` can name a merge request to target it alone, or omit the merge-request fields to apply the change to every MR linked to the task.
 
 Kandev reuses the existing lightweight task MR poller, which checks linked MRs roughly once per minute; it does not add a separate scheduler. Saving enabled options also evaluates the task's current linked MRs without waiting for the next poll.
 
@@ -547,10 +551,13 @@ Enter the site URL (a missing scheme is normalized to HTTPS), choose **Cloud** o
 | Deployment | Method | Required values |
 |---|---|---|
 | Jira Cloud | API token (recommended) | Atlassian account email and API token. |
+| Jira Cloud | OAuth 2.0 | Approval from the Atlassian account in a browser window. |
 | Jira Cloud | Browser session | Only the value of the `cloud.session.token` or `tenant.session.token` cookie. Do not include the cookie name or `=`. |
 | Server/Data Center | Personal access token | Bearer personal access token with the required read/write access. |
 
 Cloud API tokens are not accepted for Server/Data Center, and Server/Data Center PATs are not the Cloud token flow. Browser-session JWTs expire and are less reliable than an API token; Kandev surfaces the decoded expiry and warns as it approaches.
+
+For OAuth, select **Connect with Atlassian**. Then approve the connection in the browser window. Kandev completes the connection when Atlassian returns the result. If the automatic return fails, paste the full callback URL into Kandev.
 
 When editing, a blank secret preserves the saved credential only if the URL, account identity, and authentication method still match. Supply a new secret when changing those identity fields. Save, select **Test connection**, and check the background health result.
 

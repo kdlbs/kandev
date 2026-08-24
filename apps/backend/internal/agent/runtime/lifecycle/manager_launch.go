@@ -489,23 +489,32 @@ func (m *Manager) buildAgentCommandWithContext(
 
 func (m *Manager) resolveManagedRuntimeVersion(
 	ctx context.Context,
-	runtime agentruntime.Runtime,
+	_ agentruntime.Runtime,
 	agentConfig agents.Agent,
 ) (string, error) {
-	if runtime != agentruntime.RuntimeStandalone || m.managedRuntimeSelections == nil {
-		return "", nil
-	}
 	managed, ok := agentConfig.(agents.ManagedNPMRuntimeAgent)
 	if !ok {
 		return "", nil
 	}
 	spec := managed.ManagedNPMRuntime()
+	effectiveVersion := spec.DefaultVersion
+	if effectiveVersion == "" {
+		// Test and embedded agents may construct a spec literal. PackageSpec
+		// still resolves a known built-in package's reviewed default.
+		packageSpec := spec.PackageSpec("")
+		if packageSpec != spec.Package {
+			effectiveVersion = strings.TrimPrefix(packageSpec, spec.Package+"@")
+		}
+	}
+	if m.managedRuntimeSelections == nil {
+		return effectiveVersion, nil
+	}
 	selection, found, err := m.managedRuntimeSelections.Get(ctx, agentConfig.ID(), spec.Package)
 	if err != nil {
 		return "", fmt.Errorf("resolve active managed runtime version for %s: %w", agentConfig.ID(), err)
 	}
 	if !found || selection.Package != spec.Package {
-		return "", nil
+		return effectiveVersion, nil
 	}
 	return selection.Version, nil
 }
@@ -849,6 +858,13 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		metadata[MetadataKeyContributionDestinations] = contributionDestinations
 	}
 
+	allowLegacyContainerControlFallback := reqWithWorktree.WorkspaceReuseRequired &&
+		(reqWithWorktree.ExecutorType == string(models.ExecutorTypeLocalDocker) || reqWithWorktree.ExecutorType == string(models.ExecutorTypeRemoteDocker))
+	containerControlAuthToken, err := m.revealContainerControlAuthToken(ctx, metadata, allowLegacyContainerControlFallback)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("resolve container control token: %w", err)
+	}
+
 	var autoApproveOverride *bool
 	if profileInfo != nil {
 		autoApproveOverride = boolPtr(profileInfo.AutoApprove)
@@ -859,6 +875,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		TaskTitle:                      reqWithWorktree.TaskTitle,
 		SessionID:                      reqWithWorktree.SessionID,
 		TaskEnvironmentID:              reqWithWorktree.TaskEnvironmentID,
+		WorkspaceReuseRequired:         reqWithWorktree.WorkspaceReuseRequired,
 		AgentProfileID:                 executionProfileID(reqWithWorktree),
 		OfficeAgentProfileID:           reqWithWorktree.AgentProfileID,
 		PromptTurnID:                   reqWithWorktree.TurnID,
@@ -876,7 +893,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		McpMode:                        reqWithWorktree.McpMode,
 		McpProviders:                   reqWithWorktree.McpProviders,
 		McpProfile:                     reqWithWorktree.McpProfile,
-		AuthToken:                      m.revealRuntimeSecret(ctx, metadata, MetadataKeyAuthTokenSecret),
+		AuthToken:                      containerControlAuthToken,
 		BootstrapNonce:                 m.revealRuntimeSecret(ctx, metadata, MetadataKeyBootstrapNonceSecret),
 		AgentctlStartupConfig:          m.agentctlStartupConfig,
 		OnProgress:                     onProgress,
@@ -987,6 +1004,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 		TaskID:                  req.TaskID,
 		WorkspaceID:             req.WorkspaceID,
 		SessionID:               req.SessionID,
+		TaskEnvironmentID:       req.TaskEnvironmentID,
 		TaskTitle:               req.TaskTitle,
 		ExecutorType:            execName,
 		WorkspacePath:           workspacePath,
@@ -994,6 +1012,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 		RepositoryID:            req.RepositoryID,
 		TaskRepositoryID:        req.TaskRepositoryID,
 		UseWorktree:             req.UseWorktree,
+		WorkspaceReuseRequired:  req.WorkspaceReuseRequired,
 		WorktreeID:              req.WorktreeID,
 		SetupScript:             req.SetupScript,
 		RepoSetupScript:         repoSetupScript,

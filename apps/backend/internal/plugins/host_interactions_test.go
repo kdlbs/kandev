@@ -49,8 +49,7 @@ func (f *fakeInteractionDataSource) GetInteraction(
 }
 
 type recordedPermissionResponse struct {
-	sessionID, pendingID, optionID string
-	cancelled, rejected            bool
+	in PluginPermissionResponse
 }
 
 type fakeInteractionResponder struct {
@@ -64,12 +63,12 @@ type fakeInteractionResponder struct {
 }
 
 func (f *fakeInteractionResponder) RespondToPermission(
-	_ context.Context, sessionID, pendingID, optionID string, cancelled, rejected bool,
+	_ context.Context, in PluginPermissionResponse,
 ) error {
 	if f.err != nil {
 		return f.err
 	}
-	f.permission = &recordedPermissionResponse{sessionID, pendingID, optionID, cancelled, rejected}
+	f.permission = &recordedPermissionResponse{in: in}
 	f.writeCalled = true
 	return nil
 }
@@ -98,7 +97,7 @@ func pendingPermissionInteraction() *taskmodels.Interaction {
 	return &taskmodels.Interaction{
 		ID: "pending-1", Kind: taskmodels.InteractionKindPermission,
 		TaskID: "task-1", SessionID: "session-1", TurnID: "turn-1",
-		Status: taskmodels.InteractionStatusPending, Title: "Run a command?",
+		Status: taskmodels.InteractionStatusPending, RequestID: "request-1", Title: "Run a command?",
 		Options: []taskmodels.InteractionOption{
 			{ID: "allow", Label: "Allow once", Kind: "allow_once"},
 			{ID: "deny", Label: "Deny", Kind: "reject_once"},
@@ -249,14 +248,13 @@ func TestPluginHost_Interactions_GetUnknownIsNotFound(t *testing.T) {
 
 func TestPluginHost_Interactions_RespondToPermissionDerivesOutcomeFromOptionKind(t *testing.T) {
 	cases := []struct {
-		name         string
-		optionID     string
-		cancelled    bool
-		wantRejected bool
+		name      string
+		optionID  string
+		cancelled bool
 	}{
-		{"allow option approves", "allow", false, false},
-		{"reject option denies", "deny", false, true},
-		{"dismissal cancels", "", true, false},
+		{"allow option is forwarded", "allow", false},
+		{"reject option is forwarded", "deny", false},
+		{"dismissal carries no option", "", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -274,16 +272,19 @@ func TestPluginHost_Interactions_RespondToPermissionDerivesOutcomeFromOptionKind
 			if d.responder.permission == nil {
 				t.Fatal("responder not called")
 			}
-			if d.responder.permission.rejected != tc.wantRejected {
-				t.Fatalf("rejected = %v, want %v (derived from the option's recorded kind)",
-					d.responder.permission.rejected, tc.wantRejected)
+			if d.responder.permission.in.OptionID != tc.optionID {
+				t.Fatalf("option = %q, want %q", d.responder.permission.in.OptionID, tc.optionID)
 			}
-			if d.responder.permission.cancelled != tc.cancelled {
-				t.Fatalf("cancelled = %v, want %v", d.responder.permission.cancelled, tc.cancelled)
+			if d.responder.permission.in.Cancelled != tc.cancelled {
+				t.Fatalf("cancelled = %v, want %v", d.responder.permission.in.Cancelled, tc.cancelled)
 			}
-			if d.responder.permission.sessionID != "session-1" {
-				t.Fatalf("session = %q, want the durable record's session (never plugin-supplied)",
-					d.responder.permission.sessionID)
+			// Identity always comes from the durable record, never from the
+			// plugin: kandev's resolution is keyed on all four ids.
+			if d.responder.permission.in.SessionID != "session-1" ||
+				d.responder.permission.in.TaskID != "task-1" ||
+				d.responder.permission.in.RequestID != "request-1" ||
+				d.responder.permission.in.PendingID != "pending-1" {
+				t.Fatalf("identity = %+v, want it taken from the durable record", d.responder.permission.in)
 			}
 			if got.Status != pluginsdk.InteractionStatusApproved {
 				t.Fatalf("returned status = %q, want the post-write state", got.Status)

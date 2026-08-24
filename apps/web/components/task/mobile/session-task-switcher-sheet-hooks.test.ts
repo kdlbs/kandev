@@ -1,3 +1,4 @@
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { toSheetItem } from "./session-task-switcher-sheet-item";
 import {
@@ -7,6 +8,7 @@ import {
   selectTaskFromSheet,
 } from "./session-task-switcher-sheet-selection";
 import type { TaskPendingAction, TaskSession } from "@/lib/types/http";
+import { useSheetArchiveActions } from "./session-task-switcher-sheet-hooks";
 
 type SheetTask = Parameters<typeof toSheetItem>[0];
 type SheetCtx = Parameters<typeof toSheetItem>[1];
@@ -578,5 +580,36 @@ describe("selectTaskFromSheet sheet lifecycle", () => {
     expect(setActiveSession).not.toHaveBeenCalled();
     expect(navigate).not.toHaveBeenCalled();
     expect(onOpenChange.mock.calls).toEqual([[false], [true]]);
+  });
+});
+
+describe("useSheetArchiveActions", () => {
+  it("tracks the directly archived row while its request is pending", async () => {
+    let resolveArchive: () => void = () => undefined;
+    const archiveAndSwitch = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveArchive = resolve;
+        }),
+    );
+    const store = {
+      getState: () => ({}),
+    } as Parameters<typeof useSheetArchiveActions>[0];
+    const { result } = renderHook(() =>
+      useSheetArchiveActions(
+        store,
+        archiveAndSwitch as Parameters<typeof useSheetArchiveActions>[1],
+      ),
+    );
+
+    act(() => result.current.handleArchiveTask("task-1", { cascade: false }));
+
+    await waitFor(() => expect(result.current.archivingTaskId).toBe("task-1"));
+    expect(result.current.isArchiving).toBe(true);
+
+    await act(async () => resolveArchive());
+
+    await waitFor(() => expect(result.current.archivingTaskId).toBeNull());
+    expect(result.current.isArchiving).toBe(false);
   });
 });
