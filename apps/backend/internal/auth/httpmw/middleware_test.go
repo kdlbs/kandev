@@ -204,6 +204,7 @@ func TestEnabledModeAllowlistMatrix(t *testing.T) {
 		blocked bool
 	}{
 		{name: "health", method: http.MethodGet, path: "/health"},
+		{name: "ready", method: http.MethodGet, path: "/ready"},
 		{name: "features", method: http.MethodGet, path: "/api/v1/features"},
 		{name: "app-state", method: http.MethodGet, path: "/api/v1/app-state"},
 		{name: "login", method: http.MethodPost, path: "/api/v1/auth/login"},

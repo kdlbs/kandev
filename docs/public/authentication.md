@@ -63,7 +63,7 @@ External MCP clients (Claude Code, Cursor connecting to `/mcp`) must be configur
 
 ## Endpoints that stay public
 
-`/health` (readiness probes), the login/setup/invite pages, `GET /api/v1/features`, and self-authenticating webhook receivers (automation webhooks with `X-Webhook-Secret`, office channel HMAC webhooks). Everything else requires a session or token.
+`/health` (liveness probes) and `/ready` (readiness probes), the login/setup/invite pages, `GET /api/v1/features`, and self-authenticating webhook receivers (automation webhooks with `X-Webhook-Secret`, office channel HMAC webhooks). Everything else requires a session or token.
 
 Plugin webhooks (`/api/plugins/{id}/webhooks/{key}`) are **not** public by default: a plugin's manifest must explicitly declare `webhooks[].public: true` for that specific webhook to accept anonymous requests. Unflagged webhooks require a session or PAT like any other endpoint. See [Plugin manifest reference](plugins-manifest.md).
 

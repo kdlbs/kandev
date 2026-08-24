@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mockAppState = {
   workspaces: { activeId: "ws-1" },
-  kanban: { tasks: [] as Array<{ id: string; title: string }> },
+  kanban: { tasks: [] as Array<{ id: string; title: string; parentTaskId?: string }> },
   kanbanMulti: { snapshots: {} as Record<string, { tasks: Array<{ id: string }> }> },
   taskPRs: { byTaskId: {} as Record<string, unknown> },
 };
@@ -49,6 +49,7 @@ function SlotPropsProbe({ testId, slotProps }: { testId: string; slotProps?: unk
 
 afterEach(() => {
   cleanup();
+  mockAppState.kanban.tasks = [];
   pluginRegistry.unregisterPlugin(NOTES_PLUGIN_ID);
   pluginRegistry.unregisterPlugin(SECOND_PLUGIN_ID);
 });
@@ -171,7 +172,14 @@ describe("KanbanCardBody — title hover card gating", () => {
     expect(title.getAttribute("data-slot")).not.toBe("hover-card-trigger");
   });
 
-  it("mounts the hover card trigger around the title when enableTitleHover is set", () => {
+  it("does not mount a hover card trigger for a childless task", () => {
+    render(<KanbanCardBody task={TASK} repositoryChips={[]} enableTitleHover />);
+    const title = screen.getByTestId(TITLE_TEST_ID);
+    expect(title.closest('[data-testid="task-title-preview-trigger"]')).toBeNull();
+  });
+
+  it("mounts the hover card trigger when an active direct subtask exists", () => {
+    mockAppState.kanban.tasks = [{ id: "child-1", title: "Child", parentTaskId: TASK.id }];
     render(<KanbanCardBody task={TASK} repositoryChips={[]} enableTitleHover />);
     const title = screen.getByTestId(TITLE_TEST_ID);
     expect(title.closest('[data-testid="task-title-preview-trigger"]')).not.toBeNull();

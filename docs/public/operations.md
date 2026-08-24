@@ -12,7 +12,7 @@ Kandev does not currently provide a user-login boundary for the web application,
 ## Quick path
 
 1. Choose one process owner for the database and Kandev home.
-2. Check `/health` for readiness and **System > Status** for diagnostics.
+2. Check `/ready` for readiness and **System > Status** for diagnostics.
 3. Back up the database and `master.key` before upgrades, resets, or recovery work.
 4. Preserve Git branches and external provider state separately from database backups.
 
@@ -58,19 +58,25 @@ if the new backend can provide it and a working task still exists.
 
 ## Health and readiness
 
-Use the top-level readiness endpoint for supervisors and probes:
+Use the top-level liveness endpoint for process supervisors:
 
 ```bash
 curl -fsS http://127.0.0.1:38429/health
 ```
 
-After startup it returns HTTP 200 with:
+It returns HTTP 200 as soon as the listener accepts connections, with:
 
 ```json
 {"status":"ok","service":"kandev","mode":"websocket+http","version":"1.2.3"}
 ```
 
-It returns HTTP 503 with `status: "starting"` (plus the same `version`) until routes, the agent registry, and the listener are ready. The supplied Kubernetes probes use this endpoint. `/health` is unauthenticated even when auth is enabled, so it's also the credential-free way for monitoring to read the running version; there is no need to authenticate to **System > About** just to check what build is deployed.
+`/health` never returns a non-2xx status while the process is alive, even mid-startup: it confirms the process is up, not that it can serve real traffic. Use the readiness endpoint instead when you need to know the backend can actually serve requests:
+
+```bash
+curl -fsS http://127.0.0.1:38429/ready
+```
+
+It returns HTTP 503 with `status: "starting"` (plus the same `version`) until routes, the agent registry, and the listener are ready, then HTTP 200. The supplied Kubernetes liveness probe uses `/health`; the readiness probe uses `/ready`. Both are unauthenticated even when auth is enabled, so they're also a credential-free way for monitoring to read the running version; there is no need to authenticate to **System > About** just to check what build is deployed.
 
 For application diagnostics, open **Settings > System > Status** or request:
 
@@ -313,7 +319,7 @@ The UI flow applies to the configured SQLite path:
 2. Open **Settings > System > Backups**, choose **Restore**, type `RESTORE`, and confirm.
 3. Kandev stops scheduling, active executions, and database-backed workers. It copies the selected snapshot to `<configured-database-path>.new`, validates the SQLite checkpoint result, and closes the pool. It then quarantines the configured database and its `-wal`/`-shm` sidecars before installing the staged file. If installation fails, Kandev restores the quarantined files.
 4. Click **Restart Kandev** in the success dialog. If automatic restart is unavailable, quit and relaunch Kandev manually. The backend must restart before database-backed work resumes.
-5. Check `/health`, **System > Status**, database schema version, secrets, and representative tasks.
+5. Check `/ready`, **System > Status**, database schema version, secrets, and representative tasks.
 
 Restore does not roll back worktrees or remote/provider state. A database may therefore refer to files, containers, pull requests, or credentials from a different point in time. Reconcile them before restarting automation.
 
@@ -433,7 +439,7 @@ Before any update, finish or stop active sessions, create and export a database 
 - Transient npx: start the desired release with `npx -y kandev@latest`; this does not update a persistent package.
 - Docker/Kubernetes: replace the image and recreate the workload. Do not treat an in-container package install as a durable update.
 
-After restart, verify `/health`, **System > About**, **System > Status**, the database page, and one non-destructive agent session. Kandev does not perform automatic binary or database rollback. If rollback is necessary, restore a compatible pre-upgrade database and matching application release together.
+After restart, verify `/ready`, **System > About**, **System > Status**, the database page, and one non-destructive agent session. Kandev does not perform automatic binary or database rollback. If rollback is necessary, restore a compatible pre-upgrade database and matching application release together.
 
 ## Resource metrics
 
@@ -474,8 +480,9 @@ drawer mirrors it as the saved left sequence followed by the saved right sequenc
 
 | Symptom | Check | Action |
 | --- | --- | --- |
-| `/health` stays at 503 or cannot connect | Process-manager and launcher output | Confirm port ownership, database reachability, writable Kandev home, and required executables; then restart once |
-| Status page says unhealthy while `/health` is 200 | `/api/v1/system/health` issue IDs | Fix Git, GitHub, agent discovery, or Linux inotify warning; readiness and application diagnostics have different meanings |
+| `/health` cannot connect | Process-manager and launcher output | Confirm port ownership, database reachability, writable Kandev home, and required executables; then restart once |
+| `/ready` stays at 503 while `/health` is 200 | Backend startup logs | Process is alive but still wiring routes, seeding the agent registry, or mounting test-harness routes; give it more time before restarting |
+| Status page says unhealthy while `/ready` is 200 | `/api/v1/system/health` issue IDs | Fix Git, GitHub, agent discovery, or Linux inotify warning; readiness and application diagnostics have different meanings |
 | Backups page reports a 15-second create timeout | Reload the backup list and inspect the `backup-create` job/log | Large `VACUUM INTO` jobs can still finish; avoid double-clicking and ensure free disk |
 | Backup/maintenance fails on PostgreSQL | Active driver on Database page | Use `pg_dump`, provider snapshots, and PostgreSQL maintenance; System backup/vacuum/reset is SQLite-only |
 | Restored data looks stale | Whether the backend was restarted immediately | Quit/restart; do not keep using the old open database connections |

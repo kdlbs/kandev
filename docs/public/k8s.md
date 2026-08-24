@@ -194,7 +194,7 @@ The universal image already runs as `kandev`; use `kubectl exec -it deployment/k
 
 The example requests 250 millicores and 512 MiB, with limits of 2 CPU and 2 GiB. Those are placeholders, not capacity recommendations. Local/Worktree agents share the pod limit with the control plane and can exceed it during builds. Measure workload memory, CPU, ephemeral storage, PVC growth, and process counts; then set requests/limits accordingly.
 
-Both example probes call `/health`. That endpoint returns 503 during startup and 200 once routes are wired and the TCP listener accepts connections. It is a readiness signal, not a deep check of database, repository, Docker, provider, or agent health. The supplied liveness probe therefore tests the same shallow condition.
+The example liveness probe calls `/health`; the example readiness probe calls `/ready`. `/health` returns 200 as soon as the TCP listener accepts connections, before startup finishes: it confirms the process is alive, not that it can serve real traffic, so gating liveness on it never restarts a pod that is merely still starting up. `/ready` returns 503 until routes are wired, the agent registry is seeded, and (in e2e builds) the mock-harness routes are mounted, then 200. Neither is a deep check of database, repository, Docker, provider, or agent health.
 
 Long migrations or slow storage may need a startup probe to prevent premature liveness restarts:
 
@@ -207,7 +207,7 @@ startupProbe:
   failureThreshold: 60
 ```
 
-Tune from observed startup time. Keep readiness on `/health`; use separate external monitoring for dependencies and real workflows.
+Tune from observed startup time. Keep liveness on `/health` and readiness on `/ready`; use separate external monitoring for dependencies and real workflows.
 
 </details>
 

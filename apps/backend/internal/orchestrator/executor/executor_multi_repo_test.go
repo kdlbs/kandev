@@ -387,20 +387,22 @@ func TestLaunchPreparedSession_ReuseRejectsIncompleteCanonicalRepositoryInventor
 	seedMultiRepoTask(t, repo, taskID)
 	seedWorktreeExecutor(repo)
 
-	environment := &models.TaskEnvironment{
-		ID:           "env-incomplete",
-		TaskID:       taskID,
-		ExecutorType: string(models.ExecutorTypeWorktree),
-		Status:       models.TaskEnvironmentStatusReady,
-	}
-	repo.taskEnvironments[environment.ID] = environment
-	repo.taskEnvironmentRepos[environment.ID] = []*models.TaskEnvironmentRepo{{
-		TaskEnvironmentID: environment.ID,
+	environmentRepos := []*models.TaskEnvironmentRepo{{
+		TaskEnvironmentID: "env-incomplete",
 		RepositoryID:      "repo-front",
 		BranchSlug:        "main",
 		WorktreeID:        "wt-front",
 		Status:            "active",
 	}}
+	environment := &models.TaskEnvironment{
+		ID:           "env-incomplete",
+		TaskID:       taskID,
+		ExecutorType: string(models.ExecutorTypeWorktree),
+		Status:       models.TaskEnvironmentStatusReady,
+		Repos:        environmentRepos,
+	}
+	repo.taskEnvironments[environment.ID] = environment
+	repo.taskEnvironmentRepos[environment.ID] = environmentRepos
 	repo.sessions[sessionID] = &models.TaskSession{
 		ID: sessionID, TaskID: taskID, TaskEnvironmentID: environment.ID,
 		AgentProfileID: "profile-123", ExecutorID: models.ExecutorIDWorktree,
