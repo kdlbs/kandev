@@ -365,6 +365,92 @@ func automationsToProto(items []Automation) []*pluginv1.Automation {
 	return out
 }
 
+// WorkspaceAgentPrincipal is the safe, plugin-visible durable identity for a
+// workspace agent. It deliberately omits backing task/session bindings and
+// installation identity, both of which are server-owned execution context.
+type WorkspaceAgentPrincipal struct {
+	ID          string
+	WorkspaceID string
+	LogicalKey  string
+	CreatedAt   string
+	UpdatedAt   string
+}
+
+func (p WorkspaceAgentPrincipal) toProto() *pluginv1.WorkspaceAgentPrincipal {
+	return &pluginv1.WorkspaceAgentPrincipal{Id: p.ID, WorkspaceId: p.WorkspaceID, LogicalKey: p.LogicalKey, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt}
+}
+
+func workspaceAgentPrincipalFromProto(p *pluginv1.WorkspaceAgentPrincipal) *WorkspaceAgentPrincipal {
+	if p == nil {
+		return nil
+	}
+	return &WorkspaceAgentPrincipal{ID: p.GetId(), WorkspaceID: p.GetWorkspaceId(), LogicalKey: p.GetLogicalKey(), CreatedAt: p.GetCreatedAt(), UpdatedAt: p.GetUpdatedAt()}
+}
+
+// WorkspaceAgentPrincipalStatus is the grant-safe operational projection.
+// A missing principal is represented by a NotFound error; revoked principals
+// remain visible to their owning plugin as state "revoked" so it can guide
+// the operator without learning any backing-task detail.
+type WorkspaceAgentPrincipalStatus struct {
+	PrincipalID         string
+	State               string
+	GrantedCapabilities []string
+	UpdatedAt           string
+}
+
+func (s WorkspaceAgentPrincipalStatus) toProto() *pluginv1.WorkspaceAgentPrincipalStatus {
+	return &pluginv1.WorkspaceAgentPrincipalStatus{PrincipalId: s.PrincipalID, State: s.State, GrantedCapabilities: s.GrantedCapabilities, UpdatedAt: s.UpdatedAt}
+}
+
+func workspaceAgentPrincipalStatusFromProto(s *pluginv1.WorkspaceAgentPrincipalStatus) *WorkspaceAgentPrincipalStatus {
+	if s == nil {
+		return nil
+	}
+	return &WorkspaceAgentPrincipalStatus{PrincipalID: s.GetPrincipalId(), State: s.GetState(), GrantedCapabilities: s.GetGrantedCapabilities(), UpdatedAt: s.GetUpdatedAt()}
+}
+
+// WorkspaceAgentPrincipalAuditEvent is a redacted audit record. It never
+// contains task/session ids, user ids, target ids, paths, or task content.
+type WorkspaceAgentPrincipalAuditEvent struct {
+	ID         string
+	OccurredAt string
+	Action     string
+	Capability string
+	Decision   string
+	Result     string
+	DetailCode string
+}
+
+func (e WorkspaceAgentPrincipalAuditEvent) toProto() *pluginv1.WorkspaceAgentPrincipalAuditEvent {
+	return &pluginv1.WorkspaceAgentPrincipalAuditEvent{Id: e.ID, OccurredAt: e.OccurredAt, Action: e.Action, Capability: e.Capability, Decision: e.Decision, Result: e.Result, DetailCode: e.DetailCode}
+}
+
+func workspaceAgentPrincipalAuditEventFromProto(e *pluginv1.WorkspaceAgentPrincipalAuditEvent) WorkspaceAgentPrincipalAuditEvent {
+	return WorkspaceAgentPrincipalAuditEvent{ID: e.GetId(), OccurredAt: e.GetOccurredAt(), Action: e.GetAction(), Capability: e.GetCapability(), Decision: e.GetDecision(), Result: e.GetResult(), DetailCode: e.GetDetailCode()}
+}
+
+func workspaceAgentPrincipalAuditEventsFromProto(items []*pluginv1.WorkspaceAgentPrincipalAuditEvent) []WorkspaceAgentPrincipalAuditEvent {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]WorkspaceAgentPrincipalAuditEvent, len(items))
+	for i, item := range items {
+		out[i] = workspaceAgentPrincipalAuditEventFromProto(item)
+	}
+	return out
+}
+
+func workspaceAgentPrincipalAuditEventsToProto(items []WorkspaceAgentPrincipalAuditEvent) []*pluginv1.WorkspaceAgentPrincipalAuditEvent {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]*pluginv1.WorkspaceAgentPrincipalAuditEvent, len(items))
+	for i := range items {
+		out[i] = items[i].toProto()
+	}
+	return out
+}
+
 // TaskFilter is the Go-native mirror of kandev.plugin.v1.TaskFilter.
 type TaskFilter struct {
 	WorkspaceIDs     []string

@@ -214,7 +214,7 @@ safe.
 ### 3a. Host data API (ADR 0043)
 
 Read/write RPCs let plugins read and write kandev's own domain data —
-tasks, automations, sessions, workspaces, workflows, agent profiles, repositories, messages —
+ tasks, automations, workspace-agent principals, sessions, workspaces, workflows, agent profiles, repositories, messages —
 over the same Host gRPC channel used for state/secrets, instead of opening the
 kandev database file directly. Full message definitions (`Page`, `PageInfo`,
 `Task`, `TaskFilter`, `Workspace`, `Workflow`, `WorkflowStep`, `AgentProfile`,
@@ -233,6 +233,7 @@ plugin's manifest:
 | `ListTasks` / `GetTask` | `api_read:tasks`             | tasks             |
 | `GetTaskRelations`      | `api_read:task_relations`    | task_relations    |
 | `ListAutomations` / `GetAutomation` | `api_read:automations` | automations |
+| `GetWorkspaceAgentPrincipal` / `GetWorkspaceAgentPrincipalStatus` / `ListWorkspaceAgentPrincipalAudit` | `api_read:workspace_agent_principals` | workspace_agent_principals |
 | `ListWorkspaces`        | `api_read:workspaces`        | workspaces        |
 | `ListWorkflows`         | `api_read:workflows`         | workflows         |
 | `ListWorkflowSteps`     | `api_read:workflows`         | workflows         |
@@ -250,6 +251,18 @@ identical in shape to the existing state/secrets gating. Declaring the resource
 grants every RPC listed against it; there is no finer-grained gate within a
 resource (e.g. `api_read:workflows` covers both `ListWorkflows` and
 `ListWorkflowSteps`).
+
+**Workspace-agent principal projection.** A plugin with
+`api_read:workspace_agent_principals` may read only the principal identified by
+the authenticated tuple `(workspace, calling plugin installation, logical
+key)`, its active/revoked status, and a paginated redacted audit projection.
+The host never accepts installation identity from the plugin and makes foreign
+workspace/install records indistinguishable from `NotFound`. Principal IDs are
+opaque and durable; backing task/session IDs, user IDs, target IDs, grant
+notes/scopes, task content, and credentials are excluded. Create, grant,
+revoke, delete, and actor rebind are host/operator lifecycle operations, not
+plugin RPCs. Revocation is fail-closed and legacy task-only grants never match
+or migrate implicitly.
 
 **Writes.** `CreateTask`, `UpdateTask`, and `SendMessage` are implemented.
 `CreateTask`/`UpdateTask` are gated by `api_write:tasks` and route through
@@ -379,6 +392,7 @@ type Host interface {                                        // injected before 
     Tasks() TaskReader
     TaskRelations() TaskRelationsReader
     Automations() AutomationReader
+    WorkspaceAgentPrincipals() WorkspaceAgentPrincipalReader
     Sessions() SessionReader
     Workspaces() WorkspaceReader
     Workflows() WorkflowReader

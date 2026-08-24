@@ -67,13 +67,17 @@ type pluginHost struct {
 	taskRelations func() taskRelationsSource
 	// automations is late-wired because the Automation service starts after
 	// boot-active plugins. Trigger consumers resolve it at request time.
-	automations      func() automationSource
-	workflows        workflowLister
-	workflowSteps    workflowStepLister
-	agentProfiles    agentProfileDataSource
-	sessionCodeStats sessionCodeStatsSource
-	messageData      messageDataSource
-	interactionData  interactionDataSource
+	automations func() automationSource
+	// workspaceAgentPrincipals is late-wired with the task repository-backed
+	// projection. It is intentionally separate from AgentConversations:
+	// a backing conversation is an execution resource, never the principal.
+	workspaceAgentPrincipals func() workspaceAgentPrincipalSource
+	workflows                workflowLister
+	workflowSteps            workflowStepLister
+	agentProfiles            agentProfileDataSource
+	sessionCodeStats         sessionCodeStatsSource
+	messageData              messageDataSource
+	interactionData          interactionDataSource
 
 	// taskWriter backs the CreateTask/UpdateTask write RPCs (ADR 0043
 	// phase 2, capability api_write:tasks). Wired via SetDataSources like the

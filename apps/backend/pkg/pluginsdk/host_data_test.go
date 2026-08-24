@@ -17,27 +17,32 @@ import (
 type dataRecordingHost struct {
 	UnimplementedHostData
 
-	tasks         map[string]Task
-	taskList      []Task
-	taskPageInfo  *PageInfo
-	automations   []Automation
-	automation    *Automation
-	sessions      []Session
-	sessionPage   *PageInfo
-	codeStats     []SessionCodeStats
-	codeStatsPage *PageInfo
-	workspaces    []Workspace
-	workflows     []Workflow
-	workflowSteps []WorkflowStep
-	agentProfiles []AgentProfile
-	repositories  []Repository
-	messages      []Message
-	messagePage   *PageInfo
-	utilityText   string
+	tasks           map[string]Task
+	taskList        []Task
+	taskPageInfo    *PageInfo
+	automations     []Automation
+	automation      *Automation
+	principal       *WorkspaceAgentPrincipal
+	principalStatus *WorkspaceAgentPrincipalStatus
+	principalAudit  []WorkspaceAgentPrincipalAuditEvent
+	sessions        []Session
+	sessionPage     *PageInfo
+	codeStats       []SessionCodeStats
+	codeStatsPage   *PageInfo
+	workspaces      []Workspace
+	workflows       []Workflow
+	workflowSteps   []WorkflowStep
+	agentProfiles   []AgentProfile
+	repositories    []Repository
+	messages        []Message
+	messagePage     *PageInfo
+	utilityText     string
 
 	lastTaskFilter            TaskFilter
 	lastAutomationWorkspaceID string
 	lastAutomationID          string
+	lastPrincipalWorkspaceID  string
+	lastPrincipalLogicalKey   string
 	lastSessionFilter         SessionFilter
 	lastMessageFilter         MessageFilter
 	lastWorkspaceID           string
@@ -77,9 +82,12 @@ func (h *dataRecordingHost) EmitEvent(context.Context, string, map[string]any) e
 
 func (h *dataRecordingHost) Tasks() TaskReader             { return dataRecordingTaskReader{h} }
 func (h *dataRecordingHost) Automations() AutomationReader { return dataRecordingAutomationReader{h} }
-func (h *dataRecordingHost) Sessions() SessionReader       { return dataRecordingSessionReader{h} }
-func (h *dataRecordingHost) Workspaces() WorkspaceReader   { return dataRecordingWorkspaceReader{h} }
-func (h *dataRecordingHost) Workflows() WorkflowReader     { return dataRecordingWorkflowReader{h} }
+func (h *dataRecordingHost) WorkspaceAgentPrincipals() WorkspaceAgentPrincipalReader {
+	return dataRecordingWorkspaceAgentPrincipalReader{h}
+}
+func (h *dataRecordingHost) Sessions() SessionReader     { return dataRecordingSessionReader{h} }
+func (h *dataRecordingHost) Workspaces() WorkspaceReader { return dataRecordingWorkspaceReader{h} }
+func (h *dataRecordingHost) Workflows() WorkflowReader   { return dataRecordingWorkflowReader{h} }
 func (h *dataRecordingHost) AgentProfiles() AgentProfileReader {
 	return dataRecordingAgentProfileReader{h}
 }
@@ -96,6 +104,8 @@ type dataRecordingTaskReader struct{ h *dataRecordingHost }
 
 type dataRecordingAutomationReader struct{ h *dataRecordingHost }
 
+type dataRecordingWorkspaceAgentPrincipalReader struct{ h *dataRecordingHost }
+
 func (r dataRecordingAutomationReader) List(_ context.Context, workspaceID string, _ Page) ([]Automation, *PageInfo, error) {
 	r.h.lastAutomationWorkspaceID = workspaceID
 	return r.h.automations, nil, nil
@@ -104,6 +114,21 @@ func (r dataRecordingAutomationReader) List(_ context.Context, workspaceID strin
 func (r dataRecordingAutomationReader) Get(_ context.Context, workspaceID, id string) (*Automation, error) {
 	r.h.lastAutomationWorkspaceID, r.h.lastAutomationID = workspaceID, id
 	return r.h.automation, nil
+}
+
+func (r dataRecordingWorkspaceAgentPrincipalReader) Get(_ context.Context, workspaceID, logicalKey string) (*WorkspaceAgentPrincipal, error) {
+	r.h.lastPrincipalWorkspaceID, r.h.lastPrincipalLogicalKey = workspaceID, logicalKey
+	return r.h.principal, nil
+}
+
+func (r dataRecordingWorkspaceAgentPrincipalReader) Status(_ context.Context, workspaceID, logicalKey string) (*WorkspaceAgentPrincipalStatus, error) {
+	r.h.lastPrincipalWorkspaceID, r.h.lastPrincipalLogicalKey = workspaceID, logicalKey
+	return r.h.principalStatus, nil
+}
+
+func (r dataRecordingWorkspaceAgentPrincipalReader) ListAudit(_ context.Context, workspaceID, logicalKey string, _ Page) ([]WorkspaceAgentPrincipalAuditEvent, *PageInfo, error) {
+	r.h.lastPrincipalWorkspaceID, r.h.lastPrincipalLogicalKey = workspaceID, logicalKey
+	return r.h.principalAudit, nil, nil
 }
 
 func (r dataRecordingTaskReader) List(_ context.Context, filter TaskFilter, _ Page) ([]Task, *PageInfo, error) {
@@ -307,6 +332,28 @@ func TestHostData_Automations(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, &automation, got)
 	require.Equal(t, "automation-1", impl.lastAutomationID)
+}
+
+func TestHostData_WorkspaceAgentPrincipals(t *testing.T) {
+	principal := &WorkspaceAgentPrincipal{ID: "opaque-1", WorkspaceID: "ws-1", LogicalKey: "agent"}
+	principalStatus := &WorkspaceAgentPrincipalStatus{PrincipalID: "opaque-1", State: "active", GrantedCapabilities: []string{"orchestrate"}}
+	impl := &dataRecordingHost{
+		principal: principal, principalStatus: principalStatus,
+		principalAudit: []WorkspaceAgentPrincipalAuditEvent{{ID: "audit-1", Action: "task.stop", Decision: "allowed", DetailCode: "grant"}},
+	}
+	host := dialHostOverBufconn(t, impl)
+
+	got, err := host.WorkspaceAgentPrincipals().Get(context.Background(), "ws-1", "agent")
+	require.NoError(t, err)
+	require.Equal(t, principal, got)
+	principalState, err := host.WorkspaceAgentPrincipals().Status(context.Background(), "ws-1", "agent")
+	require.NoError(t, err)
+	require.Equal(t, principalStatus, principalState)
+	audit, _, err := host.WorkspaceAgentPrincipals().ListAudit(context.Background(), "ws-1", "agent", Page{})
+	require.NoError(t, err)
+	require.Equal(t, impl.principalAudit, audit)
+	require.Equal(t, "ws-1", impl.lastPrincipalWorkspaceID)
+	require.Equal(t, "agent", impl.lastPrincipalLogicalKey)
 }
 
 func TestHostData_InvokeUtilityAgent(t *testing.T) {

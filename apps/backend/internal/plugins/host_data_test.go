@@ -65,6 +65,26 @@ type fakeAutomationSource struct {
 	automationID string
 }
 
+type fakeWorkspaceAgentPrincipalSource struct {
+	principal       *pluginsdk.WorkspaceAgentPrincipal
+	principalStatus *pluginsdk.WorkspaceAgentPrincipalStatus
+	events          []pluginsdk.WorkspaceAgentPrincipalAuditEvent
+	err             error
+	pluginID        string
+	workspaceID     string
+	logicalKey      string
+}
+
+func (f *fakeWorkspaceAgentPrincipalSource) GetPluginWorkspaceAgentPrincipal(_ context.Context, pluginID, workspaceID, logicalKey string) (*pluginsdk.WorkspaceAgentPrincipal, *pluginsdk.WorkspaceAgentPrincipalStatus, error) {
+	f.pluginID, f.workspaceID, f.logicalKey = pluginID, workspaceID, logicalKey
+	return f.principal, f.principalStatus, f.err
+}
+
+func (f *fakeWorkspaceAgentPrincipalSource) ListPluginWorkspaceAgentPrincipalAudit(_ context.Context, pluginID, workspaceID, logicalKey string) ([]pluginsdk.WorkspaceAgentPrincipalAuditEvent, error) {
+	f.pluginID, f.workspaceID, f.logicalKey = pluginID, workspaceID, logicalKey
+	return f.events, f.err
+}
+
 func (f *fakeAutomationSource) ListPluginAutomations(_ context.Context, workspaceID string) ([]pluginsdk.Automation, error) {
 	f.workspaceID = workspaceID
 	return f.items, f.err
@@ -314,6 +334,7 @@ type testDataHost struct {
 	taskWriter  *fakeTaskWriter
 	relations   *fakeTaskRelationsSource
 	automations *fakeAutomationSource
+	principals  *fakeWorkspaceAgentPrincipalSource
 	messenger   *fakeMessenger
 	starter     *fakeTaskStarter
 
@@ -337,6 +358,7 @@ func newTestDataHost(caps manifest.Capabilities) *testDataHost {
 		taskWriter:  &fakeTaskWriter{},
 		relations:   &fakeTaskRelationsSource{},
 		automations: &fakeAutomationSource{},
+		principals:  &fakeWorkspaceAgentPrincipalSource{},
 		messenger:   &fakeMessenger{},
 		starter:     &fakeTaskStarter{},
 
@@ -359,6 +381,9 @@ func newTestDataHost(caps manifest.Capabilities) *testDataHost {
 		},
 		automations: func() automationSource {
 			return d.automations
+		},
+		workspaceAgentPrincipals: func() workspaceAgentPrincipalSource {
+			return d.principals
 		},
 		configs: &fakeConfigReader{configs: map[string]any{utilityAgentConfigKey: "utility-agent-42"}},
 		utilityDeps: func() (utilityAgentSource, utilityRunner) {
@@ -466,6 +491,33 @@ func TestPluginHost_Automations_HidesForeignAndUnknownTargetsAndResolvesLateWiri
 	items, _, err := d.host.Automations().List(context.Background(), "workspace-a", pluginsdk.Page{})
 	if err != nil || len(items) != 1 {
 		t.Fatalf("late-wired Automations().List = %+v, %v", items, err)
+	}
+}
+
+func TestPluginHost_WorkspaceAgentPrincipals_GatesAndBindsRegistryIdentity(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{})
+	_, err := d.host.WorkspaceAgentPrincipals().Get(context.Background(), "workspace-a", "agent-key")
+	assertPermissionDenied(t, err, "api_read:workspace_agent_principals")
+
+	d = newTestDataHost(manifest.Capabilities{APIRead: []string{"workspace_agent_principals"}})
+	d.principals.principal = &pluginsdk.WorkspaceAgentPrincipal{ID: "opaque-principal", WorkspaceID: "workspace-a", LogicalKey: "agent-key"}
+	d.principals.principalStatus = &pluginsdk.WorkspaceAgentPrincipalStatus{PrincipalID: "opaque-principal", State: "active", GrantedCapabilities: []string{"orchestrate"}}
+	d.principals.events = []pluginsdk.WorkspaceAgentPrincipalAuditEvent{{ID: "audit-1", Action: "task.stop", Decision: "allowed"}}
+
+	principal, err := d.host.WorkspaceAgentPrincipals().Get(context.Background(), "workspace-a", "agent-key")
+	if err != nil || principal == nil || principal.ID != "opaque-principal" {
+		t.Fatalf("Get principal = %+v, %v", principal, err)
+	}
+	principalStatus, err := d.host.WorkspaceAgentPrincipals().Status(context.Background(), "workspace-a", "agent-key")
+	if err != nil || principalStatus == nil || principalStatus.State != "active" {
+		t.Fatalf("Status = %+v, %v", principalStatus, err)
+	}
+	events, _, err := d.host.WorkspaceAgentPrincipals().ListAudit(context.Background(), "workspace-a", "agent-key", pluginsdk.Page{})
+	if err != nil || len(events) != 1 {
+		t.Fatalf("ListAudit = %+v, %v", events, err)
+	}
+	if d.principals.pluginID != "p1" || d.principals.workspaceID != "workspace-a" || d.principals.logicalKey != "agent-key" {
+		t.Fatalf("principal source context = %q/%q/%q, want p1/workspace-a/agent-key", d.principals.pluginID, d.principals.workspaceID, d.principals.logicalKey)
 	}
 }
 

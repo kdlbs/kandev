@@ -95,6 +95,12 @@ type Host interface {
 	// through the workspace-stamped automation.triggered event.
 	Automations() AutomationReader
 
+	// WorkspaceAgentPrincipals returns the owning plugin's safe projection of
+	// operator-created, durable workspace-agent principals. Backing tasks and
+	// sessions are intentionally not part of this contract. Requires
+	// api_read:workspace_agent_principals.
+	WorkspaceAgentPrincipals() WorkspaceAgentPrincipalReader
+
 	// Sessions returns the reader for the Host data API's session and
 	// session-code-stats RPCs (capability api_read:sessions).
 	Sessions() SessionReader
@@ -166,6 +172,16 @@ type TaskRelationsReader interface {
 type AutomationReader interface {
 	List(ctx context.Context, workspaceID string, page Page) ([]Automation, *PageInfo, error)
 	Get(ctx context.Context, workspaceID, id string) (*Automation, error)
+}
+
+// WorkspaceAgentPrincipalReader reads only the caller plugin's principal for
+// a workspace/logical-key pair. The host derives plugin installation identity
+// from the authenticated registry context; callers cannot enumerate or probe
+// another installation's principals.
+type WorkspaceAgentPrincipalReader interface {
+	Get(ctx context.Context, workspaceID, logicalKey string) (*WorkspaceAgentPrincipal, error)
+	Status(ctx context.Context, workspaceID, logicalKey string) (*WorkspaceAgentPrincipalStatus, error)
+	ListAudit(ctx context.Context, workspaceID, logicalKey string, page Page) ([]WorkspaceAgentPrincipalAuditEvent, *PageInfo, error)
 }
 
 // SessionReader is the read-only accessor behind Host.Sessions(), mirroring
@@ -442,6 +458,10 @@ func (h *grpcHostClient) Automations() AutomationReader {
 	return grpcAutomationReader{client: h.client}
 }
 
+func (h *grpcHostClient) WorkspaceAgentPrincipals() WorkspaceAgentPrincipalReader {
+	return grpcWorkspaceAgentPrincipalReader{client: h.client}
+}
+
 func (h *grpcHostClient) Sessions() SessionReader { return grpcSessionReader{client: h.client} }
 
 func (h *grpcHostClient) Workspaces() WorkspaceReader { return grpcWorkspaceReader{client: h.client} }
@@ -482,6 +502,10 @@ type grpcAutomationReader struct {
 	client pluginv1.HostClient
 }
 
+type grpcWorkspaceAgentPrincipalReader struct {
+	client pluginv1.HostClient
+}
+
 func (r grpcTaskRelationsReader) Get(ctx context.Context, workspaceID, taskID string) (*TaskRelations, error) {
 	resp, err := r.client.GetTaskRelations(ctx, &pluginv1.GetTaskRelationsRequest{WorkspaceId: workspaceID, TaskId: taskID})
 	if err != nil {
@@ -504,6 +528,30 @@ func (r grpcAutomationReader) Get(ctx context.Context, workspaceID, id string) (
 		return nil, err
 	}
 	return automationFromProto(resp.GetAutomation()), nil
+}
+
+func (r grpcWorkspaceAgentPrincipalReader) Get(ctx context.Context, workspaceID, logicalKey string) (*WorkspaceAgentPrincipal, error) {
+	resp, err := r.client.GetWorkspaceAgentPrincipal(ctx, &pluginv1.GetWorkspaceAgentPrincipalRequest{WorkspaceId: workspaceID, LogicalKey: logicalKey})
+	if err != nil {
+		return nil, err
+	}
+	return workspaceAgentPrincipalFromProto(resp.GetPrincipal()), nil
+}
+
+func (r grpcWorkspaceAgentPrincipalReader) Status(ctx context.Context, workspaceID, logicalKey string) (*WorkspaceAgentPrincipalStatus, error) {
+	resp, err := r.client.GetWorkspaceAgentPrincipalStatus(ctx, &pluginv1.GetWorkspaceAgentPrincipalStatusRequest{WorkspaceId: workspaceID, LogicalKey: logicalKey})
+	if err != nil {
+		return nil, err
+	}
+	return workspaceAgentPrincipalStatusFromProto(resp.GetStatus()), nil
+}
+
+func (r grpcWorkspaceAgentPrincipalReader) ListAudit(ctx context.Context, workspaceID, logicalKey string, page Page) ([]WorkspaceAgentPrincipalAuditEvent, *PageInfo, error) {
+	resp, err := r.client.ListWorkspaceAgentPrincipalAudit(ctx, &pluginv1.ListWorkspaceAgentPrincipalAuditRequest{WorkspaceId: workspaceID, LogicalKey: logicalKey, Page: page.toProto()})
+	if err != nil {
+		return nil, nil, err
+	}
+	return workspaceAgentPrincipalAuditEventsFromProto(resp.GetEvents()), pageInfoFromProto(resp.GetPageInfo()), nil
 }
 
 func (r grpcTaskReader) List(ctx context.Context, filter TaskFilter, page Page) ([]Task, *PageInfo, error) {
@@ -936,6 +984,36 @@ func (s *grpcHostServer) GetAutomation(ctx context.Context, req *pluginv1.GetAut
 	return &pluginv1.GetAutomationResponse{Automation: automation.toProto()}, nil
 }
 
+func (s *grpcHostServer) GetWorkspaceAgentPrincipal(ctx context.Context, req *pluginv1.GetWorkspaceAgentPrincipalRequest) (*pluginv1.GetWorkspaceAgentPrincipalResponse, error) {
+	principal, err := s.impl.WorkspaceAgentPrincipals().Get(ctx, req.GetWorkspaceId(), req.GetLogicalKey())
+	if err != nil {
+		return nil, err
+	}
+	if principal == nil {
+		return nil, status.Error(codes.NotFound, "workspace agent principal not found")
+	}
+	return &pluginv1.GetWorkspaceAgentPrincipalResponse{Principal: principal.toProto()}, nil
+}
+
+func (s *grpcHostServer) GetWorkspaceAgentPrincipalStatus(ctx context.Context, req *pluginv1.GetWorkspaceAgentPrincipalStatusRequest) (*pluginv1.GetWorkspaceAgentPrincipalStatusResponse, error) {
+	principalStatus, err := s.impl.WorkspaceAgentPrincipals().Status(ctx, req.GetWorkspaceId(), req.GetLogicalKey())
+	if err != nil {
+		return nil, err
+	}
+	if principalStatus == nil {
+		return nil, status.Error(codes.NotFound, "workspace agent principal not found")
+	}
+	return &pluginv1.GetWorkspaceAgentPrincipalStatusResponse{Status: principalStatus.toProto()}, nil
+}
+
+func (s *grpcHostServer) ListWorkspaceAgentPrincipalAudit(ctx context.Context, req *pluginv1.ListWorkspaceAgentPrincipalAuditRequest) (*pluginv1.ListWorkspaceAgentPrincipalAuditResponse, error) {
+	events, pageInfo, err := s.impl.WorkspaceAgentPrincipals().ListAudit(ctx, req.GetWorkspaceId(), req.GetLogicalKey(), pageFromProto(req.GetPage()))
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.ListWorkspaceAgentPrincipalAuditResponse{Events: workspaceAgentPrincipalAuditEventsToProto(events), PageInfo: pageInfo.toProto()}, nil
+}
+
 func (s *grpcHostServer) ListWorkspaces(ctx context.Context, req *pluginv1.ListWorkspacesRequest) (*pluginv1.ListWorkspacesResponse, error) {
 	page := pageFromProto(req.GetPage())
 	workspaces, pageInfo, err := s.impl.Workspaces().List(ctx, page)
@@ -1190,9 +1268,12 @@ func (UnimplementedHostData) TaskRelations() TaskRelationsReader {
 	return unimplementedTaskRelationsReader{}
 }
 func (UnimplementedHostData) Automations() AutomationReader { return unimplementedAutomationReader{} }
-func (UnimplementedHostData) Sessions() SessionReader       { return unimplementedSessionReader{} }
-func (UnimplementedHostData) Workspaces() WorkspaceReader   { return unimplementedWorkspaceReader{} }
-func (UnimplementedHostData) Workflows() WorkflowReader     { return unimplementedWorkflowReader{} }
+func (UnimplementedHostData) WorkspaceAgentPrincipals() WorkspaceAgentPrincipalReader {
+	return unimplementedWorkspaceAgentPrincipalReader{}
+}
+func (UnimplementedHostData) Sessions() SessionReader     { return unimplementedSessionReader{} }
+func (UnimplementedHostData) Workspaces() WorkspaceReader { return unimplementedWorkspaceReader{} }
+func (UnimplementedHostData) Workflows() WorkflowReader   { return unimplementedWorkflowReader{} }
 func (UnimplementedHostData) AgentProfiles() AgentProfileReader {
 	return unimplementedAgentProfileReader{}
 }
@@ -1257,6 +1338,20 @@ func (unimplementedAutomationReader) List(context.Context, string, Page) ([]Auto
 
 func (unimplementedAutomationReader) Get(context.Context, string, string) (*Automation, error) {
 	return nil, errUnimplementedHostData("automations")
+}
+
+type unimplementedWorkspaceAgentPrincipalReader struct{}
+
+func (unimplementedWorkspaceAgentPrincipalReader) Get(context.Context, string, string) (*WorkspaceAgentPrincipal, error) {
+	return nil, errUnimplementedHostData("workspace_agent_principals")
+}
+
+func (unimplementedWorkspaceAgentPrincipalReader) Status(context.Context, string, string) (*WorkspaceAgentPrincipalStatus, error) {
+	return nil, errUnimplementedHostData("workspace_agent_principals")
+}
+
+func (unimplementedWorkspaceAgentPrincipalReader) ListAudit(context.Context, string, string, Page) ([]WorkspaceAgentPrincipalAuditEvent, *PageInfo, error) {
+	return nil, nil, errUnimplementedHostData("workspace_agent_principals")
 }
 
 type unimplementedSessionReader struct{}

@@ -36,17 +36,18 @@ import (
 // Resource names gating the Host data API's read RPCs, per ADR 0043: each
 // accessor requires "api_read:<resource>" in the plugin's manifest.
 const (
-	resourceTasks            = "tasks"
-	resourceTaskRelations    = "task_relations"
-	resourceAutomations      = "automations"
-	resourceSessions         = "sessions"
-	resourceWorkspaces       = "workspaces"
-	resourceWorkflows        = "workflows"
-	resourceAgentProfiles    = "agent_profiles"
-	resourceExecutorProfiles = "executor_profiles"
-	resourceRepositories     = "repositories"
-	resourceMessages         = "messages"
-	resourceInteractions     = "interactions"
+	resourceTasks                    = "tasks"
+	resourceTaskRelations            = "task_relations"
+	resourceAutomations              = "automations"
+	resourceWorkspaceAgentPrincipals = "workspace_agent_principals"
+	resourceSessions                 = "sessions"
+	resourceWorkspaces               = "workspaces"
+	resourceWorkflows                = "workflows"
+	resourceAgentProfiles            = "agent_profiles"
+	resourceExecutorProfiles         = "executor_profiles"
+	resourceRepositories             = "repositories"
+	resourceMessages                 = "messages"
+	resourceInteractions             = "interactions"
 )
 
 // apiReadCapability formats resource as the api_read:<resource> capability
@@ -160,6 +161,15 @@ type automationSource interface {
 	GetPluginAutomation(ctx context.Context, workspaceID, automationID string) (*pluginsdk.Automation, error)
 }
 
+// workspaceAgentPrincipalSource is the host-owned safe projection of
+// operator-created durable principals. The caller plugin ID is passed by the
+// host, never supplied over the plugin RPC, so foreign installation records
+// are indistinguishable from absent records.
+type workspaceAgentPrincipalSource interface {
+	GetPluginWorkspaceAgentPrincipal(ctx context.Context, pluginID, workspaceID, logicalKey string) (*pluginsdk.WorkspaceAgentPrincipal, *pluginsdk.WorkspaceAgentPrincipalStatus, error)
+	ListPluginWorkspaceAgentPrincipalAudit(ctx context.Context, pluginID, workspaceID, logicalKey string) ([]pluginsdk.WorkspaceAgentPrincipalAuditEvent, error)
+}
+
 // workflowLister is the narrow slice of internal/task/service.Service the
 // Workflows().List RPC needs (workflows themselves are owned by the task
 // service, not internal/workflow/service — only steps are).
@@ -247,6 +257,20 @@ func (h *pluginHost) Automations() pluginsdk.AutomationReader {
 		return h.UnimplementedHostData.Automations()
 	}
 	return automationReader{source: source}
+}
+
+func (h *pluginHost) WorkspaceAgentPrincipals() pluginsdk.WorkspaceAgentPrincipalReader {
+	if !h.capabilities.CanRead(resourceWorkspaceAgentPrincipals) {
+		return deniedWorkspaceAgentPrincipalReader{}
+	}
+	if h.workspaceAgentPrincipals == nil {
+		return h.UnimplementedHostData.WorkspaceAgentPrincipals()
+	}
+	source := h.workspaceAgentPrincipals()
+	if source == nil {
+		return h.UnimplementedHostData.WorkspaceAgentPrincipals()
+	}
+	return workspaceAgentPrincipalReader{pluginID: h.pluginID, source: source}
 }
 
 func (h *pluginHost) Sessions() pluginsdk.SessionReader {

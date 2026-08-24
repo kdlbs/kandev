@@ -607,3 +607,25 @@ type UsageRepository interface {
 	GetTaskUsageTotals(ctx context.Context, taskID string) (*models.TaskUsageTotals, error)
 	GetSessionUsageTotals(ctx context.Context, sessionID string) (*models.TaskUsageTotals, error)
 }
+
+// WorkspaceAgentPrincipalRepository persists an operator-created durable
+// workspace-agent identity, its explicit grants, and its bounded audit log.
+// Plugin code only receives a redacted projection through the Host API.
+type WorkspaceAgentPrincipalRepository interface {
+	CreateWorkspaceAgentPrincipal(ctx context.Context, principal *models.WorkspaceAgentPrincipal) error
+	GetWorkspaceAgentPrincipal(ctx context.Context, id string) (*models.WorkspaceAgentPrincipal, error)
+	GetWorkspaceAgentPrincipalByContext(ctx context.Context, workspaceID, pluginInstallationID, logicalKey string) (*models.WorkspaceAgentPrincipal, error)
+	GetActiveWorkspaceAgentPrincipalForTask(ctx context.Context, workspaceID, taskID string) (*models.WorkspaceAgentPrincipal, error)
+	RebindWorkspaceAgentPrincipal(ctx context.Context, id, taskID, sessionID string, updatedAt time.Time) error
+	RevokeWorkspaceAgentPrincipal(ctx context.Context, id string, revokedAt time.Time) error
+	CreateCoordinatorGrant(ctx context.Context, grant *models.CoordinatorGrant) error
+	GetCoordinatorGrant(ctx context.Context, id string) (*models.CoordinatorGrant, error)
+	ListCoordinatorGrants(ctx context.Context, workspaceID, coordinatorTaskID string, includeRevoked bool) ([]*models.CoordinatorGrant, error)
+	ListActiveCoordinatorGrants(ctx context.Context, coordinatorTaskID, workspaceID string) ([]*models.CoordinatorGrant, error)
+	ListActiveWorkspaceAgentPrincipalGrants(ctx context.Context, principalID, workspaceID string) ([]*models.CoordinatorGrant, error)
+	RevokeCoordinatorGrant(ctx context.Context, id, revokedByUserID string, revokedAt time.Time) error
+	CreateCoordinatorAuditEvent(ctx context.Context, event *models.CoordinatorAuditEvent) error
+	FinishCoordinatorAuditEvent(ctx context.Context, id, result, detail string) error
+	ListCoordinatorAuditEvents(ctx context.Context, workspaceID, taskID string, limit int) ([]*models.CoordinatorAuditEvent, error)
+	ListWorkspaceAgentPrincipalAuditEvents(ctx context.Context, workspaceID, principalID string, limit int) ([]*models.CoordinatorAuditEvent, error)
+}

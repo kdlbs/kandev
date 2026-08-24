@@ -498,6 +498,7 @@ subscription vocabulary and wildcard rules are in the
 | Tasks          | Tasks().List, Tasks().Get                        | api_read: tasks                                                             | Typed DTOs and opaque pagination cursor                                                                                                                                                     |
 | Task relations | TaskRelations().Get                              | api_read: task_relations                                                    | Workspace-scoped compact parent, child, sibling, blocker, and blocked-task graph; no descriptions, documents, metadata, or repository fields                                               |
 | Automations    | Automations().List, Automations().Get             | api_read: automations                                                       | Workspace-scoped trigger configuration projection: prompt, selected agent/executor profiles, state, and concurrency; no secrets, repository bindings, or run history                         |
+| Workspace-agent principals | WorkspaceAgentPrincipals().Get, .Status, .ListAudit | api_read: workspace_agent_principals | Calling-installation, workspace-scoped durable identity/status and redacted audit codes; no backing task/session, user, target, grant-scope, or credential fields |
 | Tasks writes   | Tasks().Create, Tasks().Update                   | api_write: tasks                                                            | Implemented; routed through Kandev services so events/WS updates fire                                                                                                                       |
 | Sessions       | Sessions().List, Sessions().CodeStats            | api_read: sessions                                                          | Typed session and computed code-stat records                                                                                                                                                |
 | Workspaces     | Workspaces().List                                | api_read: workspaces                                                        | Instance-visible workspaces                                                                                                                                                                 |
@@ -520,6 +521,7 @@ by the plugin. There is no Host cleanup callback. Typical calls are
 `host.Tasks().List(ctx, filter, page)`,
 `host.TaskRelations().Get(ctx, workspaceID, taskID)`,
 `host.Automations().Get(ctx, workspaceID, automationID)`,
+`host.WorkspaceAgentPrincipals().Status(ctx, workspaceID, logicalKey)`,
 `host.Tasks().Create(ctx, pluginsdk.CreateTaskInput{...})`,
 `host.Messages().Send(ctx, taskID, sessionID, text)`, and
 `host.InvokeUtilityAgent(ctx, prompt)`; each fails with `PermissionDenied`
@@ -641,12 +643,13 @@ type Host interface {
 
 	EmitEvent(ctx context.Context, name string, payload map[string]any) error
 
-	// Tasks/TaskRelations/Automations/Sessions/Workspaces/Workflows/AgentProfiles/Repositories return
+	// Tasks/TaskRelations/Automations/WorkspaceAgentPrincipals/Sessions/Workspaces/Workflows/AgentProfiles/Repositories return
 	// Host data accessors. List/Get operations require their own api_read
 	// resource; task Create/Update require api_write:tasks.
 	Tasks() TaskReader
 	TaskRelations() TaskRelationsReader
 	Automations() AutomationReader
+	WorkspaceAgentPrincipals() WorkspaceAgentPrincipalReader
 	Sessions() SessionReader
 	Workspaces() WorkspaceReader
 	Workflows() WorkflowReader

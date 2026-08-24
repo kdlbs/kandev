@@ -647,6 +647,7 @@ func registerRoutes(p routeParams) {
 		p.officeRepo, p.officeRepo, p.log)
 	if p.services.Plugins != nil {
 		p.services.Plugins.SetTaskRelationsSource(handoffSvc)
+		p.services.Plugins.SetWorkspaceAgentPrincipalSource(pluginsWorkspaceAgentPrincipalSourceAdapter{repo: p.taskRepo})
 		if p.services.Automation != nil {
 			p.services.Plugins.SetAutomationSource(pluginsAutomationSourceAdapter{svc: p.services.Automation.Service})
 		}

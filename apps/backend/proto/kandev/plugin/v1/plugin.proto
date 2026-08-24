@@ -89,6 +89,12 @@ service Host {
   // the configured prompt/profile through this scoped accessor.
   rpc ListAutomations(ListAutomationsRequest) returns (ListAutomationsResponse);
   rpc GetAutomation(GetAutomationRequest) returns (GetAutomationResponse);
+  // Workspace-agent principal projection — capability
+  // api_read:workspace_agent_principals. The host derives plugin-installation
+  // identity from the authenticated registry context; plugins never submit it.
+  rpc GetWorkspaceAgentPrincipal(GetWorkspaceAgentPrincipalRequest) returns (GetWorkspaceAgentPrincipalResponse);
+  rpc GetWorkspaceAgentPrincipalStatus(GetWorkspaceAgentPrincipalStatusRequest) returns (GetWorkspaceAgentPrincipalStatusResponse);
+  rpc ListWorkspaceAgentPrincipalAudit(ListWorkspaceAgentPrincipalAuditRequest) returns (ListWorkspaceAgentPrincipalAuditResponse);
   rpc ListWorkspaces(ListWorkspacesRequest) returns (ListWorkspacesResponse);
   rpc ListWorkflows(ListWorkflowsRequest) returns (ListWorkflowsResponse);
   rpc ListWorkflowSteps(ListWorkflowStepsRequest) returns (ListWorkflowStepsResponse);
@@ -463,6 +469,57 @@ message GetAutomationRequest {
 }
 message GetAutomationResponse {
   Automation automation = 1;
+}
+
+// A durable workspace-scoped agent identity. Backing task/session bindings
+// are intentionally omitted: they are replaceable execution details, not an
+// identity a plugin may retain or target.
+message WorkspaceAgentPrincipal {
+  string id = 1;
+  string workspace_id = 2;
+  string logical_key = 3;
+  string created_at = 4;
+  string updated_at = 5;
+}
+message WorkspaceAgentPrincipalStatus {
+  string principal_id = 1;
+  string state = 2; // "active" | "revoked" | "unavailable"
+  repeated string granted_capabilities = 3;
+  string updated_at = 4;
+}
+// Redacted audit projection: task/session identifiers, user identities, and
+// target content are not exposed to plugins.
+message WorkspaceAgentPrincipalAuditEvent {
+  string id = 1;
+  string occurred_at = 2;
+  string action = 3;
+  string capability = 4;
+  string decision = 5;
+  string result = 6;
+  string detail_code = 7;
+}
+message GetWorkspaceAgentPrincipalRequest {
+  string workspace_id = 1;
+  string logical_key = 2;
+}
+message GetWorkspaceAgentPrincipalResponse {
+  WorkspaceAgentPrincipal principal = 1;
+}
+message GetWorkspaceAgentPrincipalStatusRequest {
+  string workspace_id = 1;
+  string logical_key = 2;
+}
+message GetWorkspaceAgentPrincipalStatusResponse {
+  WorkspaceAgentPrincipalStatus status = 1;
+}
+message ListWorkspaceAgentPrincipalAuditRequest {
+  string workspace_id = 1;
+  string logical_key = 2;
+  Page page = 3;
+}
+message ListWorkspaceAgentPrincipalAuditResponse {
+  repeated WorkspaceAgentPrincipalAuditEvent events = 1;
+  PageInfo page_info = 2;
 }
 
 // ── Workspace / Workflow / Steps ─────────────────────────────────────────────

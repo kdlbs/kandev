@@ -116,17 +116,18 @@ type Service struct {
 	// pluginHost built before that falls back to Unimplemented for these
 	// accessors regardless of declared capabilities (see host_data.go's
 	// accessor nil-checks).
-	taskData         taskDataSource
-	taskRelations    taskRelationsSource
-	automations      automationSource
-	workflows        workflowLister
-	workflowSteps    workflowStepLister
-	agentProfiles    agentProfileDataSource
-	sessionCodeStats sessionCodeStatsSource
-	messageData      messageDataSource
-	interactionData  interactionDataSource
-	taskWriter       taskWriter
-	agentConvs       AgentConversationService
+	taskData                 taskDataSource
+	taskRelations            taskRelationsSource
+	automations              automationSource
+	workspaceAgentPrincipals workspaceAgentPrincipalSource
+	workflows                workflowLister
+	workflowSteps            workflowStepLister
+	agentProfiles            agentProfileDataSource
+	sessionCodeStats         sessionCodeStatsSource
+	messageData              messageDataSource
+	interactionData          interactionDataSource
+	taskWriter               taskWriter
+	agentConvs               AgentConversationService
 
 	// Utility agent invocation (ADR 0048), wired via SetUtilityAgent.
 	utilityAgents utilityAgentSource
@@ -470,6 +471,21 @@ func (s *Service) automationSource() automationSource {
 	return s.automations
 }
 
+// SetWorkspaceAgentPrincipalSource wires the host-owned, installation-scoped
+// principal projection. Operator grant/revoke/create/delete paths stay
+// outside this setter and are never exposed through plugin RPCs.
+func (s *Service) SetWorkspaceAgentPrincipalSource(source workspaceAgentPrincipalSource) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.workspaceAgentPrincipals = source
+}
+
+func (s *Service) workspaceAgentPrincipalSource() workspaceAgentPrincipalSource {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.workspaceAgentPrincipals
+}
+
 func (s *Service) taskRelationsSource() taskRelationsSource {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -666,6 +682,7 @@ func (s *Service) hostForPlugin(pluginID string) pluginsdk.Host {
 		rec = &store.Record{} // every capability check below denies; should not happen in practice
 	}
 	return &pluginHost{
+<<<<<<< HEAD
 		pluginID:            pluginID,
 		capabilities:        rec.Capabilities,
 		repositoryProviders: rec.RepositoryProviders,
@@ -675,19 +692,29 @@ func (s *Service) hostForPlugin(pluginID string) pluginsdk.Host {
 		bus:                 s.eventBus,
 		configs:             s.store,
 		taskData:            s.taskData,
-		taskRelations:       s.taskRelationsSource,
-		automations:         s.automationSource,
-		workflows:           s.workflows,
-		workflowSteps:       s.workflowSteps,
-		agentProfiles:       s.agentProfiles,
-		sessionCodeStats:    s.sessionCodeStats,
-		messageData:         s.messageData,
-		interactionData:     s.interactionData,
-		taskWriter:          s.taskWriter,
-		utilityDeps:         s.utilityAgentDeps,
-		writeDeps:           s.writeDependencies,
-		interactionDeps:     s.interactionResponderDep,
-		agentConversations:  s.agentConversationDeps,
+		pluginID:                 pluginID,
+		capabilities:             rec.Capabilities,
+		repositoryProviders:      rec.RepositoryProviders,
+		configSchema:             rec.ConfigSchema,
+		state:                    s.state,
+		secrets:                  s.secrets,
+		bus:                      s.eventBus,
+		configs:                  s.store,
+		taskData:                 s.taskData,
+		taskRelations:            s.taskRelationsSource,
+		automations:              s.automationSource,
+		workspaceAgentPrincipals: s.workspaceAgentPrincipalSource,
+		workflows:                s.workflows,
+		workflowSteps:            s.workflowSteps,
+		agentProfiles:            s.agentProfiles,
+		sessionCodeStats:         s.sessionCodeStats,
+		messageData:              s.messageData,
+		interactionData:          s.interactionData,
+		taskWriter:               s.taskWriter,
+		utilityDeps:              s.utilityAgentDeps,
+		writeDeps:                s.writeDependencies,
+		interactionDeps:          s.interactionResponderDep,
+		agentConversations:       s.agentConversationDeps,
 	}
 }
 
