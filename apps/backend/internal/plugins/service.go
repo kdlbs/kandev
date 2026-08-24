@@ -117,6 +117,7 @@ type Service struct {
 	// accessors regardless of declared capabilities (see host_data.go's
 	// accessor nil-checks).
 	taskData         taskDataSource
+	taskRelations    taskRelationsSource
 	workflows        workflowLister
 	workflowSteps    workflowStepLister
 	agentProfiles    agentProfileDataSource
@@ -443,6 +444,21 @@ func (s *Service) interactionResponderDep() interactionResponder {
 	return s.interactionResponder
 }
 
+// SetTaskRelationsSource wires the compact workspace-scoped relation graph
+// separately because HandoffService is assembled after boot-active plugins
+// may already have started. Hosts resolve it at request time.
+func (s *Service) SetTaskRelationsSource(source taskRelationsSource) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.taskRelations = source
+}
+
+func (s *Service) taskRelationsSource() taskRelationsSource {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.taskRelations
+}
+
 // SetWriteDeps wires the Host data API's late write dependencies (ADR 0043
 // phase 2): the task-message delivery path behind the SendMessage RPC
 // (api_write:messages) and the orchestrator task-starter behind CreateTask's
@@ -642,6 +658,7 @@ func (s *Service) hostForPlugin(pluginID string) pluginsdk.Host {
 		bus:                 s.eventBus,
 		configs:             s.store,
 		taskData:            s.taskData,
+		taskRelations:       s.taskRelationsSource,
 		workflows:           s.workflows,
 		workflowSteps:       s.workflowSteps,
 		agentProfiles:       s.agentProfiles,

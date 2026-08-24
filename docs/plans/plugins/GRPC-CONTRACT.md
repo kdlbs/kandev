@@ -85,7 +85,8 @@ service Host {
 
   // Host data API (ADR 0043, §3a below) — reads, capability api_read:<resource>.
   rpc ListTasks(ListTasksRequest) returns (ListTasksResponse);
-  rpc GetTask(GetTaskRequest) returns (Task);
+  rpc GetTask(GetTaskRequest) returns (GetTaskResponse);
+  rpc GetTaskRelations(GetTaskRelationsRequest) returns (GetTaskRelationsResponse);
   rpc ListWorkspaces(ListWorkspacesRequest) returns (ListWorkspacesResponse);
   rpc ListWorkflows(ListWorkflowsRequest) returns (ListWorkflowsResponse);
   rpc ListWorkflowSteps(ListWorkflowStepsRequest) returns (ListWorkflowStepsResponse);
@@ -228,6 +229,7 @@ plugin's manifest:
 | RPC                     | Capability                   | Resource          |
 | ----------------------- | ---------------------------- | ----------------- |
 | `ListTasks` / `GetTask` | `api_read:tasks`             | tasks             |
+| `GetTaskRelations`      | `api_read:task_relations`    | task_relations    |
 | `ListWorkspaces`        | `api_read:workspaces`        | workspaces        |
 | `ListWorkflows`         | `api_read:workflows`         | workflows         |
 | `ListWorkflowSteps`     | `api_read:workflows`         | workflows         |
@@ -372,6 +374,7 @@ type Host interface {                                        // injected before 
     // the corresponding api_read:<resource>; see "Host data API accessors"
     // below for the reader interfaces and Go-native DTOs.
     Tasks() TaskReader
+    TaskRelations() TaskRelationsReader
     Sessions() SessionReader
     Workspaces() WorkspaceReader
     Workflows() WorkflowReader

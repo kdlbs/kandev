@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/kandev/kandev/pkg/pluginsdk"
 )
 
 // Workspace-mode and ordering constants used across handoff plumbing.
@@ -504,6 +505,89 @@ func (s *HandoffService) ListRelatedForCaller(ctx context.Context, callerTaskID,
 		}
 	}
 	return s.ListRelated(ctx, targetTaskID)
+}
+
+// GetTaskRelations returns a compact relationship graph for a task in one
+// workspace. It is the narrow source behind the plugin Host API: unknown and
+// foreign targets intentionally share ErrTaskNotFound, and no description,
+// metadata, repository, or document data crosses this boundary.
+func (s *HandoffService) GetTaskRelations(ctx context.Context, workspaceID, taskID string) (*pluginsdk.TaskRelations, error) {
+	if workspaceID == "" || taskID == "" {
+		return nil, repository.ErrTaskNotFound
+	}
+	self, err := s.tasks.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if self == nil || self.WorkspaceID != workspaceID {
+		return nil, repository.ErrTaskNotFound
+	}
+
+	out := &pluginsdk.TaskRelations{Task: compactRelationTask(self)}
+	if self.ParentID != "" {
+		if parent, err := s.tasks.GetTask(ctx, self.ParentID); err == nil && parent != nil && parent.WorkspaceID == workspaceID {
+			compact := compactRelationTask(parent)
+			out.Parent = &compact
+		}
+	}
+	if children, err := s.tasks.ListChildren(ctx, taskID); err != nil {
+		return nil, err
+	} else {
+		out.Children = compactRelationTasks(children, workspaceID)
+	}
+	if siblings, err := s.tasks.ListSiblings(ctx, taskID); err != nil {
+		return nil, err
+	} else {
+		out.Siblings = compactRelationTasks(siblings, workspaceID)
+	}
+	if s.blockers != nil {
+		if blockers, err := s.blockers.ListTaskBlockers(ctx, taskID); err == nil {
+			out.Blockers = s.compactRelationsByID(ctx, blockers, workspaceID, func(b *orchmodels.TaskBlocker) string { return b.BlockerTaskID })
+		}
+		if blockedBy, err := s.blockers.ListTasksBlockedBy(ctx, taskID); err == nil {
+			out.BlockedBy = s.compactRelationIDs(ctx, blockedBy, workspaceID)
+		}
+	}
+	return out, nil
+}
+
+func compactRelationTask(task *models.Task) pluginsdk.RelationTask {
+	return pluginsdk.RelationTask{ID: task.ID, WorkspaceID: task.WorkspaceID, Identifier: task.Identifier, Title: task.Title, State: string(task.State)}
+}
+
+func compactRelationTasks(tasks []*models.Task, workspaceID string) []pluginsdk.RelationTask {
+	out := make([]pluginsdk.RelationTask, 0, len(tasks))
+	for _, task := range tasks {
+		if task != nil && task.WorkspaceID == workspaceID {
+			out = append(out, compactRelationTask(task))
+		}
+	}
+	return out
+}
+
+func (s *HandoffService) compactRelationsByID(ctx context.Context, blockers []*orchmodels.TaskBlocker, workspaceID string, taskID func(*orchmodels.TaskBlocker) string) []pluginsdk.RelationTask {
+	out := make([]pluginsdk.RelationTask, 0, len(blockers))
+	for _, blocker := range blockers {
+		if blocker == nil {
+			continue
+		}
+		task, err := s.tasks.GetTask(ctx, taskID(blocker))
+		if err == nil && task != nil && task.WorkspaceID == workspaceID {
+			out = append(out, compactRelationTask(task))
+		}
+	}
+	return out
+}
+
+func (s *HandoffService) compactRelationIDs(ctx context.Context, ids []string, workspaceID string) []pluginsdk.RelationTask {
+	out := make([]pluginsdk.RelationTask, 0, len(ids))
+	for _, id := range ids {
+		task, err := s.tasks.GetTask(ctx, id)
+		if err == nil && task != nil && task.WorkspaceID == workspaceID {
+			out = append(out, compactRelationTask(task))
+		}
+	}
+	return out
 }
 
 // ListRelated returns the parent, children, siblings, blockers, and

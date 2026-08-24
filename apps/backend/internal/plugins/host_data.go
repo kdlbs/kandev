@@ -37,6 +37,7 @@ import (
 // accessor requires "api_read:<resource>" in the plugin's manifest.
 const (
 	resourceTasks            = "tasks"
+	resourceTaskRelations    = "task_relations"
 	resourceSessions         = "sessions"
 	resourceWorkspaces       = "workspaces"
 	resourceWorkflows        = "workflows"
@@ -143,6 +144,13 @@ type taskDataSource interface {
 	GetExecutor(ctx context.Context, id string) (*taskmodels.Executor, error)
 }
 
+// taskRelationsSource is the narrow host seam for compact, workspace-scoped
+// relationship graphs. The source owns the target-workspace check and must
+// return no descriptions or documents in its pluginsdk DTO.
+type taskRelationsSource interface {
+	GetTaskRelations(ctx context.Context, workspaceID, taskID string) (*pluginsdk.TaskRelations, error)
+}
+
 // workflowLister is the narrow slice of internal/task/service.Service the
 // Workflows().List RPC needs (workflows themselves are owned by the task
 // service, not internal/workflow/service — only steps are).
@@ -202,6 +210,20 @@ type messageDataSource interface {
 // here, writes in host_write.go).
 func (h *pluginHost) Tasks() pluginsdk.TaskReader {
 	return taskReader{host: h}
+}
+
+func (h *pluginHost) TaskRelations() pluginsdk.TaskRelationsReader {
+	if !h.capabilities.CanRead(resourceTaskRelations) {
+		return deniedTaskRelationsReader{}
+	}
+	if h.taskRelations == nil {
+		return h.UnimplementedHostData.TaskRelations()
+	}
+	source := h.taskRelations()
+	if source == nil {
+		return h.UnimplementedHostData.TaskRelations()
+	}
+	return taskRelationsReader{source: source}
 }
 
 func (h *pluginHost) Sessions() pluginsdk.SessionReader {

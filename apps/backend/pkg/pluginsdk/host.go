@@ -85,6 +85,11 @@ type Host interface {
 	// (capability api_read:tasks per ADR 0043).
 	Tasks() TaskReader
 
+	// TaskRelations returns the compact, workspace-scoped task relationship
+	// reader (capability api_read:task_relations). It is separate from Tasks:
+	// relation reads never reveal descriptions, metadata, or documents.
+	TaskRelations() TaskRelationsReader
+
 	// Sessions returns the reader for the Host data API's session and
 	// session-code-stats RPCs (capability api_read:sessions).
 	Sessions() SessionReader
@@ -141,6 +146,13 @@ type TaskReader interface {
 	// (title/description/state/workflow_step_id) and returns the updated task.
 	// Requires api_write:tasks.
 	Update(ctx context.Context, in UpdateTaskInput) (*Task, error)
+}
+
+// TaskRelationsReader is the compact relation-graph accessor behind
+// Host.TaskRelations(). Get requires both the target task ID and its
+// workspace ID; a target outside that workspace is not disclosed.
+type TaskRelationsReader interface {
+	Get(ctx context.Context, workspaceID, taskID string) (*TaskRelations, error)
 }
 
 // SessionReader is the read-only accessor behind Host.Sessions(), mirroring
@@ -409,6 +421,10 @@ func (h *grpcHostClient) EmitEvent(ctx context.Context, name string, payload map
 
 func (h *grpcHostClient) Tasks() TaskReader { return grpcTaskReader{client: h.client} }
 
+func (h *grpcHostClient) TaskRelations() TaskRelationsReader {
+	return grpcTaskRelationsReader{client: h.client}
+}
+
 func (h *grpcHostClient) Sessions() SessionReader { return grpcSessionReader{client: h.client} }
 
 func (h *grpcHostClient) Workspaces() WorkspaceReader { return grpcWorkspaceReader{client: h.client} }
@@ -439,6 +455,18 @@ var _ Host = (*grpcHostClient)(nil)
 // generated pluginv1.HostClient and converting proto<->Go-native.
 type grpcTaskReader struct {
 	client pluginv1.HostClient
+}
+
+type grpcTaskRelationsReader struct {
+	client pluginv1.HostClient
+}
+
+func (r grpcTaskRelationsReader) Get(ctx context.Context, workspaceID, taskID string) (*TaskRelations, error) {
+	resp, err := r.client.GetTaskRelations(ctx, &pluginv1.GetTaskRelationsRequest{WorkspaceId: workspaceID, TaskId: taskID})
+	if err != nil {
+		return nil, err
+	}
+	return taskRelationsFromProto(resp.GetRelations()), nil
 }
 
 func (r grpcTaskReader) List(ctx context.Context, filter TaskFilter, page Page) ([]Task, *PageInfo, error) {
@@ -841,6 +869,17 @@ func (s *grpcHostServer) GetTask(ctx context.Context, req *pluginv1.GetTaskReque
 	return &pluginv1.GetTaskResponse{Task: protoTask}, nil
 }
 
+func (s *grpcHostServer) GetTaskRelations(ctx context.Context, req *pluginv1.GetTaskRelationsRequest) (*pluginv1.GetTaskRelationsResponse, error) {
+	relations, err := s.impl.TaskRelations().Get(ctx, req.GetWorkspaceId(), req.GetTaskId())
+	if err != nil {
+		return nil, err
+	}
+	if relations == nil {
+		return nil, status.Error(codes.NotFound, "task relations not found")
+	}
+	return &pluginv1.GetTaskRelationsResponse{Relations: relations.toProto()}, nil
+}
+
 func (s *grpcHostServer) ListWorkspaces(ctx context.Context, req *pluginv1.ListWorkspacesRequest) (*pluginv1.ListWorkspacesResponse, error) {
 	page := pageFromProto(req.GetPage())
 	workspaces, pageInfo, err := s.impl.Workspaces().List(ctx, page)
@@ -1080,8 +1119,8 @@ func (s *grpcHostServer) DeleteAgentConversation(ctx context.Context, req *plugi
 var _ pluginv1.HostServer = (*grpcHostServer)(nil)
 
 // UnimplementedHostData is an embeddable default for the Host data API
-// (ADR 0043) sub-accessors: Tasks/Sessions/Workspaces/Workflows/
-// AgentProfiles/Repositories. Embed it in a Go-native Host implementation
+// (ADR 0043) sub-accessors: Tasks/TaskRelations/Sessions/Workspaces/
+// Workflows/AgentProfiles/Repositories. Embed it in a Go-native Host implementation
 // to satisfy the interface before wiring real data access — every method
 // on every returned reader returns a gRPC Unimplemented error. Override
 // individual accessor methods (e.g. define your own Tasks() on the
@@ -1090,7 +1129,10 @@ var _ pluginv1.HostServer = (*grpcHostServer)(nil)
 // accessors because each one fans out to multiple reader methods.
 type UnimplementedHostData struct{}
 
-func (UnimplementedHostData) Tasks() TaskReader           { return unimplementedTaskReader{} }
+func (UnimplementedHostData) Tasks() TaskReader { return unimplementedTaskReader{} }
+func (UnimplementedHostData) TaskRelations() TaskRelationsReader {
+	return unimplementedTaskRelationsReader{}
+}
 func (UnimplementedHostData) Sessions() SessionReader     { return unimplementedSessionReader{} }
 func (UnimplementedHostData) Workspaces() WorkspaceReader { return unimplementedWorkspaceReader{} }
 func (UnimplementedHostData) Workflows() WorkflowReader   { return unimplementedWorkflowReader{} }
@@ -1142,6 +1184,12 @@ func (unimplementedTaskReader) Create(context.Context, CreateTaskInput) (*Task, 
 
 func (unimplementedTaskReader) Update(context.Context, UpdateTaskInput) (*Task, error) {
 	return nil, errUnimplementedHostData("tasks")
+}
+
+type unimplementedTaskRelationsReader struct{}
+
+func (unimplementedTaskRelationsReader) Get(context.Context, string, string) (*TaskRelations, error) {
+	return nil, errUnimplementedHostData("task_relations")
 }
 
 type unimplementedSessionReader struct{}
