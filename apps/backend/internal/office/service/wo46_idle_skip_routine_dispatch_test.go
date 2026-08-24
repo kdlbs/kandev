@@ -37,10 +37,11 @@ func TestIdleSkip_RoutineDispatchNoTasks_Skipped(t *testing.T) {
 
 	service.RunSchedulerTick(svc, ctx)
 
-	// No session should have been launched.
-	if mock.callCount() != 0 {
-		t.Errorf("expected 0 StartTask calls, got %d", mock.callCount())
-	}
+	// mock.callCount() == 0 is not asserted here: a taskless run never
+	// reaches StartTask regardless of whether the idle-skip gate fired
+	// correctly, so it can't discriminate a working gate from a broken one
+	// (WO-46 Review round 1, S1). The activity-entry and queue-drained
+	// checks below are what actually prove the skip happened.
 
 	// Queue should be empty (run was finished).
 	next, err := svc.ClaimNextRun(ctx)
