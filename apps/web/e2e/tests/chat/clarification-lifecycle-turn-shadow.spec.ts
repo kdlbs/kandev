@@ -9,6 +9,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
 
 const QUESTION_PROMPT = "Which environment should I deploy to?";
@@ -80,18 +81,24 @@ test.describe("Duplicate lifecycle turn does not hide a pending clarification", 
     apiClient,
     seedData,
   }) => {
-    const { taskId } = await seedShadowedClarification(
+    const { taskId, sessionId } = await seedShadowedClarification(
       apiClient,
       seedData,
       "Lifecycle shadow - marked",
       true,
     );
 
+    const messagesLoaded = waitForHttp(
+      testPage,
+      "GET",
+      new RegExp(`/task-sessions/${sessionId}/messages`),
+    );
     await testPage.goto(`/t/${taskId}`);
+    await messagesLoaded;
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
-    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 15_000 });
+    await expect(session.clarificationOverlay()).toBeVisible();
     await expect(session.clarificationOverlay()).toContainText(QUESTION_PROMPT);
 
     const staging = session.clarificationOption(STAGING_LABEL);
@@ -105,18 +112,24 @@ test.describe("Duplicate lifecycle turn does not hide a pending clarification", 
     apiClient,
     seedData,
   }) => {
-    const { taskId } = await seedShadowedClarification(
+    const { taskId, sessionId } = await seedShadowedClarification(
       apiClient,
       seedData,
       "Lifecycle shadow - unmarked legacy",
       false,
     );
 
+    const messagesLoaded = waitForHttp(
+      testPage,
+      "GET",
+      new RegExp(`/task-sessions/${sessionId}/messages`),
+    );
     await testPage.goto(`/t/${taskId}`);
+    await messagesLoaded;
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
-    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 15_000 });
+    await expect(session.clarificationOverlay()).toBeVisible();
     await expect(session.clarificationOverlay()).toContainText(QUESTION_PROMPT);
 
     const production = session.clarificationOption(PRODUCTION_LABEL);
