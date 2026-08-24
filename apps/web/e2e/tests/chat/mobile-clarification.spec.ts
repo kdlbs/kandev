@@ -8,7 +8,7 @@ import { seedClarificationSession } from "../../helpers/clarification";
  * bundles). Runs under the Pixel 5 `mobile-chrome` project.
  */
 test.describe("Mobile clarification multiline answer", () => {
-  test.describe.configure({ retries: 1, timeout: 120_000 });
+  test.describe.configure({ timeout: 120_000 });
 
   test("Auto-run ON does not bypass a pending clarification on mobile", async ({
     testPage,
