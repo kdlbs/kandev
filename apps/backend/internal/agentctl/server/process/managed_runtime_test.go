@@ -2,7 +2,6 @@ package process
 
 import (
 	"context"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -50,7 +49,7 @@ func TestRepairManagedRuntimeCacheRejectsUnversionedSpecBeforeCommand(t *testing
 }
 
 func TestRepairManagedRuntimeCacheClearsPreviousStderr(t *testing.T) {
-	cacheRoot := filepath.Join(t.TempDir(), "npm-cache")
+	cacheRoot := t.TempDir()
 	packageSpec := "managed-acp@1.2.3"
 	mgr := NewManager(&config.InstanceConfig{
 		WorkDir:  t.TempDir(),
