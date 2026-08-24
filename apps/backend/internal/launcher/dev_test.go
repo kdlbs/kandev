@@ -22,6 +22,7 @@ func TestRunDevLaunchesBackendThenWebAndOpensBrowser(t *testing.T) {
 	t.Setenv("KANDEV_TASK_ID", "")
 	t.Setenv("KANDEV_DATABASE_PATH", "")
 	t.Setenv("KANDEV_HOME_DIR", "")
+	t.Setenv("KANDEV_SERVER_HOST", "0.0.0.0")
 
 	oldNewSupervisor := newSupervisorFn
 	oldAttachSignals := attachSignalsFn
@@ -90,7 +91,7 @@ func TestRunDevLaunchesBackendThenWebAndOpensBrowser(t *testing.T) {
 		"new-supervisor",
 		"attach-signals",
 		"launch-backend",
-		"wait-health:http://127.0.0.1:" + itoa(backendCfg.Ports.BackendPort),
+		"wait-health:http://localhost:" + itoa(backendCfg.Ports.BackendPort),
 		"start-web:web",
 		"wait-url:http://localhost:" + itoa(backendCfg.Ports.WebPort),
 		"open:" + readyURL,
