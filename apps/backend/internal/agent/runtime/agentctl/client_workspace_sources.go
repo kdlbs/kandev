@@ -39,6 +39,13 @@ type GitMetadataAttestationResponse struct {
 	Error     string                   `json:"error,omitempty"`
 }
 
+// GitMetadataAttestationRequest narrows a Git metadata proof to checkout
+// roots already authorized for ordinary workspace access. This keeps ACP
+// directory grants independent from the subset that must be Git checkouts.
+type GitMetadataAttestationRequest struct {
+	CheckoutRoots []string `json:"checkout_roots,omitempty"`
+}
+
 // GitMetadataAttestation is an agentctl-approved executor checkout and its
 // regular Git directory. Lifecycle uses only these returned pairs when it
 // renders a clone policy.
@@ -50,8 +57,16 @@ type GitMetadataAttestation struct {
 // AttestWorkspaceGitMetadata asks agentctl to validate the regular .git
 // directory in its current workspace before lifecycle configures a mutable
 // agent. This is the executor-side attestation boundary for clone launches.
-func (c *Client) AttestWorkspaceGitMetadata(ctx context.Context) ([]GitMetadataAttestation, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/v1/workspace/attest-git-metadata", nil)
+func (c *Client) AttestWorkspaceGitMetadata(ctx context.Context, checkoutRoots []string) ([]GitMetadataAttestation, error) {
+	var body *bytes.Reader
+	if checkoutRoots != nil {
+		payload, err := json.Marshal(GitMetadataAttestationRequest{CheckoutRoots: checkoutRoots})
+		if err != nil {
+			return nil, fmt.Errorf("marshal workspace Git metadata attestation request: %w", err)
+		}
+		body = bytes.NewReader(payload)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/v1/workspace/attest-git-metadata", body)
 	if err != nil {
 		return nil, fmt.Errorf("create workspace Git metadata attestation request: %w", err)
 	}

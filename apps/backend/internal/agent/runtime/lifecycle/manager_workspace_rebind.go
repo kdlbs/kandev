@@ -70,7 +70,10 @@ func (m *Manager) RebindWorkspaceWithGitMetadata(ctx context.Context, sessionID,
 	oldProjections := append([]*worktree.GitMetadataProjection(nil), execution.GitMetadataProjections...)
 	oldRuntimeEnv := execution.RuntimeEnvironment()
 	newRoots := optionalWorkspaceSourceRoots(oldRoots, sourceRoots)
-	startNewSession := m.startsNewSessionOnWorkspaceRebind(execution)
+	// ACP additional directories are negotiated only during session creation.
+	// Loading an existing Codex session after changing roots would retain its
+	// old grants, so any root change requires a fresh session.
+	startNewSession := m.startsNewSessionForWorkspaceRoots(execution, oldRoots, newRoots)
 	execution.Status = v1.AgentStatusStarting
 
 	// Stop before changing agentctl's workdir: a successful rebind must never
@@ -96,6 +99,18 @@ func (m *Manager) RebindWorkspaceWithGitMetadata(ctx context.Context, sessionID,
 	}
 	execution.Status = v1.AgentStatusReady
 	return nil
+}
+
+func workspaceSourceRootsChanged(previous, next []string) bool {
+	if len(previous) != len(next) {
+		return true
+	}
+	for index := range previous {
+		if previous[index] != next[index] {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Manager) prepareGitMetadataRebind(ctx context.Context, execution *AgentExecution, workspacePath string, projections []*worktree.GitMetadataProjection) (*ExecutorCreateRequest, error) {
@@ -220,6 +235,16 @@ func (m *Manager) startsNewSessionOnWorkspaceRebind(execution *AgentExecution) b
 		return false
 	}
 	return agentConfig.Runtime().SessionConfig.NewSessionOnWorkspaceRebind
+}
+
+func (m *Manager) startsNewSessionForWorkspaceRoots(execution *AgentExecution, oldRoots, newRoots []string) bool {
+	if m.startsNewSessionOnWorkspaceRebind(execution) {
+		return true
+	}
+	// Test-only and legacy callers can rebind an already-running adapter without
+	// a registry-backed agent descriptor. Preserve their existing load behavior;
+	// production ACP sessions have a registry entry and can obtain fresh grants.
+	return workspaceSourceRootsChanged(oldRoots, newRoots) && m.registry != nil && execution != nil && execution.AgentID != ""
 }
 
 func (m *Manager) createReboundACPSession(ctx context.Context, execution *AgentExecution) error {

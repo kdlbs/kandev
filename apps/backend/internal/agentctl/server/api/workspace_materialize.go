@@ -49,6 +49,13 @@ type GitMetadataAttestationResponse struct {
 	Error     string                   `json:"error,omitempty"`
 }
 
+// GitMetadataAttestationRequest selects a subset of the currently validated
+// workspace roots that must be regular Git checkouts. Omitted roots preserve
+// the legacy behavior of attesting every workspace root.
+type GitMetadataAttestationRequest struct {
+	CheckoutRoots []string `json:"checkout_roots,omitempty"`
+}
+
 // GitMetadataAttestation is an executor-visible checkout/gitdir pair approved
 // by agentctl immediately before lifecycle renders a mutable clone policy.
 // It is returned only over the authenticated control channel, never copied to
@@ -63,13 +70,57 @@ type GitMetadataAttestation struct {
 // call this immediately before ConfigureAgent/Start, so lifecycle renders from
 // final executor-side proof rather than host paths or derived .git paths.
 func (s *Server) handleWorkspaceGitMetadataAttestation(c *gin.Context) {
-	checkouts, err := attestWorkspaceGitMetadata(c.Request.Context(), s.procMgr.WorkspaceSourceRoots())
+	var req GitMetadataAttestationRequest
+	if c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, GitMetadataAttestationResponse{Error: "invalid Git metadata attestation request"})
+			return
+		}
+	}
+	roots, err := gitMetadataAttestationRoots(s.procMgr.WorkspaceSourceRoots(), req.CheckoutRoots)
+	if err != nil {
+		c.JSON(http.StatusUnprocessableEntity, GitMetadataAttestationResponse{Error: "workspace Git metadata validation failed"})
+		return
+	}
+	checkouts, err := attestWorkspaceGitMetadata(c.Request.Context(), roots)
 	if err != nil {
 		s.logger.Warn("workspace Git metadata attestation failed", zap.Error(err))
 		c.JSON(http.StatusUnprocessableEntity, GitMetadataAttestationResponse{Error: "workspace Git metadata validation failed"})
 		return
 	}
 	c.JSON(http.StatusOK, GitMetadataAttestationResponse{Attested: true, Checkouts: checkouts})
+}
+
+func gitMetadataAttestationRoots(authorizedRoots, requestedRoots []string) ([]string, error) {
+	if requestedRoots == nil {
+		return authorizedRoots, nil
+	}
+	if len(requestedRoots) == 0 {
+		return nil, errors.New("git metadata attestation roots are empty")
+	}
+	authorized := make(map[string]struct{}, len(authorizedRoots))
+	for _, root := range authorizedRoots {
+		if root == "" {
+			return nil, errors.New("authorized workspace roots are invalid")
+		}
+		authorized[root] = struct{}{}
+	}
+	roots := make([]string, 0, len(requestedRoots))
+	seen := make(map[string]struct{}, len(requestedRoots))
+	for _, root := range requestedRoots {
+		if root == "" {
+			return nil, errors.New("git metadata attestation roots are invalid")
+		}
+		if _, ok := authorized[root]; !ok {
+			return nil, errors.New("git metadata attestation root is not authorized")
+		}
+		if _, duplicate := seen[root]; duplicate {
+			return nil, errors.New("git metadata attestation roots are invalid")
+		}
+		seen[root] = struct{}{}
+		roots = append(roots, root)
+	}
+	return roots, nil
 }
 
 // RemoveMaterializedRepositoryRequest identifies a previously materialized,

@@ -97,6 +97,57 @@ func TestWorkspaceGitMetadataAttestationFailsClosedForNonRepository(t *testing.T
 	}
 }
 
+func TestWorkspaceGitMetadataAttestationAllowsAuthorizedCheckoutSubset(t *testing.T) {
+	origin := createMaterializeOrigin(t)
+	workspace := filepath.Join(canonicalTempDir(t), "workspace")
+	if err := os.Mkdir(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	attached := filepath.Join(workspace, "attached")
+	if _, err := materializeRepository(context.Background(), origin, attached, "main", ""); err != nil {
+		t.Fatal(err)
+	}
+	s := newMaterializeTestServerWithRoots(t, workspace, []string{workspace, attached})
+	body, err := json.Marshal(GitMetadataAttestationRequest{CheckoutRoots: []string{attached}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workspace/attest-git-metadata", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-token")
+	w := httptest.NewRecorder()
+
+	s.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("attestation status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var response GitMetadataAttestationResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Checkouts) != 1 || response.Checkouts[0].CheckoutPath != attached {
+		t.Fatalf("attestation checkouts = %#v, want only attached checkout", response.Checkouts)
+	}
+}
+
+func TestWorkspaceGitMetadataAttestationRejectsUnauthorizedCheckoutSubset(t *testing.T) {
+	workspace := canonicalTempDir(t)
+	s := newMaterializeTestServerWithRoots(t, workspace, []string{workspace})
+	body, err := json.Marshal(GitMetadataAttestationRequest{CheckoutRoots: []string{filepath.Join(workspace, "outside")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workspace/attest-git-metadata", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-token")
+	w := httptest.NewRecorder()
+
+	s.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("attestation status = %d, body = %s", w.Code, w.Body.String())
+	}
+}
+
 func TestWorkspaceGitMetadataAttestationRejectsCheckoutSwapAfterChildStop(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink setup requires platform-specific privileges")

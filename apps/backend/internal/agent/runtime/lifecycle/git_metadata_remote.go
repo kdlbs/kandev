@@ -24,7 +24,11 @@ func installAttestedCloneGitMetadataPolicy(ctx context.Context, req *ExecutorCre
 	if instance == nil || instance.Client == nil || instance.WorkspacePath == "" {
 		return unsupportedGitMetadataProjection("clone checkout attestation is unavailable; start a new session with a supported executor")
 	}
-	policyEnv, err := attestedCloneGitMetadataRuntimeEnv(ctx, req, instance.Client, instance.WorkspacePath, instance.WorkspaceSourceRoots)
+	checkoutRoots := instance.GitMetadataAttestationRoots
+	if len(checkoutRoots) == 0 {
+		checkoutRoots = instance.WorkspaceSourceRoots
+	}
+	policyEnv, err := attestedCloneGitMetadataRuntimeEnv(ctx, req, instance.Client, instance.WorkspacePath, checkoutRoots)
 	if err != nil {
 		return unsupportedGitMetadataProjection("clone Git metadata policy installation failed; start a new session with a supported executor")
 	}
@@ -39,17 +43,17 @@ func installAttestedCloneGitMetadataPolicy(ctx context.Context, req *ExecutorCre
 // agentctl's final ordered attestation. It is shared by launch and live
 // attachment refreshes so neither path can derive a GitDir from a workspace
 // string after the executor has materialized the checkout.
-func attestedCloneGitMetadataRuntimeEnv(ctx context.Context, req *ExecutorCreateRequest, client *agentctl.Client, workspacePath string, sourceRoots []string) (map[string]string, error) {
+func attestedCloneGitMetadataRuntimeEnv(ctx context.Context, req *ExecutorCreateRequest, client *agentctl.Client, workspacePath string, checkoutRoots []string) (map[string]string, error) {
 	if !requiresCloneGitMetadataPolicy(req) || client == nil || workspacePath == "" {
 		return nil, errors.New("clone checkout attestation is unavailable")
 	}
-	approved, err := client.AttestWorkspaceGitMetadata(ctx)
-	if err != nil {
-		return nil, errors.New("clone checkout attestation failed")
-	}
-	expectedRoots := append([]string(nil), sourceRoots...)
+	expectedRoots := append([]string(nil), checkoutRoots...)
 	if len(expectedRoots) == 0 {
 		expectedRoots = []string{workspacePath}
+	}
+	approved, err := client.AttestWorkspaceGitMetadata(ctx, expectedRoots)
+	if err != nil {
+		return nil, errors.New("clone checkout attestation failed")
 	}
 	metadata, err := remoteRegularGitMetadataFromAttestations(approved, expectedRoots)
 	if err != nil {

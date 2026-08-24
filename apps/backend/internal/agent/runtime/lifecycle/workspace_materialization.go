@@ -241,11 +241,12 @@ func distinctWorkspaceRepositoryClients(executions []*AgentExecution) []workspac
 // It carries no host checkout information: all roots are executor-visible and
 // every new GitDir is supplied by agentctl's final attestation.
 type cloneWorkspacePolicyRefresh struct {
-	execution   *AgentExecution
-	oldRoots    []string
-	oldEnv      map[string]string
-	oldACP      string
-	agentConfig agents.Agent
+	execution           *AgentExecution
+	oldRoots            []string
+	oldGitMetadataRoots []string
+	oldEnv              map[string]string
+	oldACP              string
+	agentConfig         agents.Agent
 }
 
 func isMutableCloneWorkspaceExecution(execution *AgentExecution) bool {
@@ -260,9 +261,9 @@ func isMutableCloneWorkspaceExecution(execution *AgentExecution) bool {
 	}
 }
 
-func cloneWorkspaceAttachmentRoots(execution *AgentExecution, repositories []WorkspaceRepositoryMaterialization) ([]string, error) {
+func cloneWorkspaceAttachmentRoots(execution *AgentExecution, repositories []WorkspaceRepositoryMaterialization) ([]string, []string, error) {
 	if execution == nil || execution.WorkspacePath == "" {
-		return nil, errors.New("clone workspace is unavailable")
+		return nil, nil, errors.New("clone workspace is unavailable")
 	}
 	roots := append([]string(nil), execution.WorkspaceSourceRoots...)
 	if len(roots) == 0 {
@@ -271,25 +272,50 @@ func cloneWorkspaceAttachmentRoots(execution *AgentExecution, repositories []Wor
 	seen := make(map[string]struct{}, len(roots)+len(repositories))
 	for _, root := range roots {
 		if root == "" {
-			return nil, errors.New("clone workspace roots are invalid")
+			return nil, nil, errors.New("clone workspace roots are invalid")
 		}
 		if _, duplicate := seen[root]; duplicate {
-			return nil, errors.New("clone workspace roots are invalid")
+			return nil, nil, errors.New("clone workspace roots are invalid")
 		}
 		seen[root] = struct{}{}
 	}
+	gitRoots := append([]string(nil), execution.GitMetadataAttestationRoots...)
+	gitSeen, err := cloneGitMetadataRootSet(gitRoots, seen, len(repositories))
+	if err != nil {
+		return nil, nil, err
+	}
 	for _, repository := range repositories {
 		if repository.Destination == "" || filepath.Base(repository.Destination) != repository.Destination {
-			return nil, errors.New("clone workspace attachment is invalid")
+			return nil, nil, errors.New("clone workspace attachment is invalid")
 		}
 		root := filepath.Join(execution.WorkspacePath, repository.Destination)
 		if _, exists := seen[root]; exists {
+			if _, attested := gitSeen[root]; !attested {
+				gitSeen[root] = struct{}{}
+				gitRoots = append(gitRoots, root)
+			}
 			continue
 		}
 		seen[root] = struct{}{}
 		roots = append(roots, root)
+		gitSeen[root] = struct{}{}
+		gitRoots = append(gitRoots, root)
 	}
-	return roots, nil
+	return roots, gitRoots, nil
+}
+
+func cloneGitMetadataRootSet(gitRoots []string, workspaceRoots map[string]struct{}, repositoryCount int) (map[string]struct{}, error) {
+	seen := make(map[string]struct{}, len(gitRoots)+repositoryCount)
+	for _, root := range gitRoots {
+		if _, allowed := workspaceRoots[root]; root == "" || !allowed {
+			return nil, errors.New("clone Git metadata roots are invalid")
+		}
+		if _, duplicate := seen[root]; duplicate {
+			return nil, errors.New("clone Git metadata roots are invalid")
+		}
+		seen[root] = struct{}{}
+	}
+	return seen, nil
 }
 
 // refreshCloneWorkspacePolicyAfterMaterialization makes a later remote
@@ -301,7 +327,7 @@ func (m *Manager) refreshCloneWorkspacePolicyAfterMaterialization(ctx context.Co
 	if execution == nil || execution.agentctl == nil {
 		return refresh, unsupportedGitMetadataProjection("clone workspace policy refresh is unavailable; start a new session with a supported executor")
 	}
-	newRoots, err := cloneWorkspaceAttachmentRoots(execution, repositories)
+	newRoots, newGitMetadataRoots, err := cloneWorkspaceAttachmentRoots(execution, repositories)
 	if err != nil {
 		return refresh, unsupportedGitMetadataProjection("clone workspace policy refresh is unavailable; start a new session with a supported executor")
 	}
@@ -315,6 +341,7 @@ func (m *Manager) refreshCloneWorkspacePolicyAfterMaterialization(ctx context.Co
 		return refresh, unsupportedGitMetadataProjection("clone workspace policy refresh requires an idle session; wait for the current turn and try again")
 	}
 	refresh.oldRoots = append([]string(nil), execution.WorkspaceSourceRoots...)
+	refresh.oldGitMetadataRoots = append([]string(nil), execution.GitMetadataAttestationRoots...)
 	refresh.oldEnv = execution.RuntimeEnvironment()
 	refresh.oldACP = execution.ACPSessionID
 	refresh.agentConfig = agentConfig
@@ -332,7 +359,7 @@ func (m *Manager) refreshCloneWorkspacePolicyAfterMaterialization(ctx context.Co
 		AgentConfig:            agentConfig,
 		Env:                    cloneStringMap(refresh.oldEnv),
 	}
-	newEnv, err := attestedCloneGitMetadataRuntimeEnv(ctx, request, execution.agentctl, execution.WorkspacePath, newRoots)
+	newEnv, err := attestedCloneGitMetadataRuntimeEnv(ctx, request, execution.agentctl, execution.WorkspacePath, newGitMetadataRoots)
 	if err != nil {
 		return refresh, m.rollbackCloneWorkspacePolicyRefresh(ctx, refresh, unsupportedGitMetadataProjection("clone workspace policy refresh failed; start a new session with a supported executor"))
 	}
@@ -343,11 +370,12 @@ func (m *Manager) refreshCloneWorkspacePolicyAfterMaterialization(ctx context.Co
 		return refresh, m.rollbackCloneWorkspacePolicyRefresh(ctx, refresh, unsupportedGitMetadataProjection("clone workspace policy refresh failed; start a new session with a supported executor"))
 	}
 	if refresh.oldACP != "" {
-		if err := m.restoreReboundACPSession(ctx, execution, refresh.oldACP, m.startsNewSessionOnWorkspaceRebind(execution)); err != nil {
+		if err := m.restoreReboundACPSession(ctx, execution, refresh.oldACP, m.startsNewSessionForWorkspaceRoots(execution, refresh.oldRoots, newRoots)); err != nil {
 			return refresh, m.rollbackCloneWorkspacePolicyRefresh(ctx, refresh, unsupportedGitMetadataProjection("clone workspace policy refresh failed; start a new session with a supported executor"))
 		}
 	}
 	execution.WorkspaceSourceRoots = newRoots
+	execution.GitMetadataAttestationRoots = newGitMetadataRoots
 	execution.setRuntimeEnvironment(newEnv)
 	execution.setMetadataValue("runtime_env", cloneStringMap(newEnv))
 	execution.Status = v1.AgentStatusReady
@@ -403,6 +431,7 @@ func (m *Manager) rollbackCloneWorkspacePolicyRefresh(ctx context.Context, refre
 		return m.failClosedCloneWorkspacePolicyRefresh(rollbackCtx, refresh)
 	}
 	execution.WorkspaceSourceRoots = append([]string(nil), refresh.oldRoots...)
+	execution.GitMetadataAttestationRoots = append([]string(nil), refresh.oldGitMetadataRoots...)
 	execution.setRuntimeEnvironment(oldEnv)
 	execution.setMetadataValue("runtime_env", cloneStringMap(oldEnv))
 	execution.Status = v1.AgentStatusReady
@@ -421,7 +450,10 @@ func (m *Manager) attestedCloneWorkspacePolicyEnvironment(ctx context.Context, r
 		AgentConfig:            refresh.agentConfig,
 		Env:                    cloneStringMap(refresh.oldEnv),
 	}
-	env, err := attestedCloneGitMetadataRuntimeEnv(ctx, request, execution.agentctl, execution.WorkspacePath, refresh.oldRoots)
+	if len(refresh.oldGitMetadataRoots) == 0 {
+		return cloneStringMap(refresh.oldEnv), nil
+	}
+	env, err := attestedCloneGitMetadataRuntimeEnv(ctx, request, execution.agentctl, execution.WorkspacePath, refresh.oldGitMetadataRoots)
 	if err != nil {
 		return nil, fmt.Errorf("rollback attest clone workspace policy: %w", err)
 	}

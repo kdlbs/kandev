@@ -169,6 +169,35 @@ func TestRebindWorkspaceForSessionCreatesNewSessionWhenProviderCannotChangeResum
 	}
 }
 
+func TestRebindWorkspaceForSessionCreatesNewSessionWhenAdditionalDirectoriesChange(t *testing.T) {
+	server := newWorkspaceRebindAgentctlServer(t, false)
+	t.Cleanup(server.Close)
+	t.Cleanup(server.closeConnections)
+	mgr, execution := workspaceSourceTestManager(t, server.URL, []string{"/old-workspace"})
+	mgr.registry = registry.NewRegistry(newTestLogger())
+	mgr.registry.LoadDefaults()
+	execution.AgentID = "codex-acp"
+	execution.Status = v1.AgentStatusReady
+	execution.ACPSessionID = "acp-existing"
+
+	newRoots := []string{"/new-workspace", "/new-workspace/attached-outside-cwd"}
+	if err := mgr.RebindWorkspaceForSession(context.Background(), execution.SessionID, "/new-workspace", newRoots); err != nil {
+		t.Fatalf("RebindWorkspaceForSession: %v", err)
+	}
+	if loads := server.loads(); len(loads) != 0 {
+		t.Fatalf("loaded ACP sessions = %v, want none after directory grants changed", loads)
+	}
+	if execution.ACPSessionID != "acp-new" {
+		t.Fatalf("ACP session ID = %q, want a new grant-bearing session", execution.ACPSessionID)
+	}
+	if !sameStrings(execution.WorkspaceSourceRoots, newRoots) {
+		t.Fatalf("workspace roots = %v, want %v", execution.WorkspaceSourceRoots, newRoots)
+	}
+	if actions := server.actions(); !sameStrings(actions, []string{"agent.initialize", "agent.session.new"}) {
+		t.Fatalf("ACP actions = %v, want initialize then new session", actions)
+	}
+}
+
 func TestRebindWorkspaceForSessionReadinessTimeoutRollsBack(t *testing.T) {
 	server := newWorkspaceRebindAgentctlServer(t, true)
 	mgr, execution := workspaceSourceTestManager(t, server.URL, []string{"/old"})
@@ -317,6 +346,7 @@ type workspaceRebindAgentctlServer struct {
 	workspaceRoots    [][]string
 	configured        []map[string]string
 	attestations      int
+	attestedRoots     [][]string
 	attestationErr    bool
 	failAttestAt      int
 	failStartAt       int
@@ -425,12 +455,26 @@ func newWorkspaceRebindAgentctlServer(t *testing.T, neverReady bool) *workspaceR
 		server.mu.Unlock()
 		w.WriteHeader(http.StatusOK)
 	})
-	mux.HandleFunc("/api/v1/workspace/attest-git-metadata", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/api/v1/workspace/attest-git-metadata", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			CheckoutRoots []string `json:"checkout_roots"`
+		}
+		if r.ContentLength > 0 {
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Error(err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+		}
 		server.mu.Lock()
 		server.attestations++
 		server.operations = append(server.operations, "attest")
 		failed := server.attestationErr || server.failAttestAt == server.attestations
 		roots := append([]string(nil), server.workspaceRoots[len(server.workspaceRoots)-1]...)
+		if request.CheckoutRoots != nil {
+			roots = append([]string(nil), request.CheckoutRoots...)
+		}
+		server.attestedRoots = append(server.attestedRoots, append([]string(nil), roots...))
 		for _, root := range roots[1:] {
 			if !server.materialized[filepath.Base(root)] {
 				failed = true
@@ -616,6 +660,16 @@ func (s *workspaceRebindAgentctlServer) attestationCalls() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.attestations
+}
+
+func (s *workspaceRebindAgentctlServer) attestationRoots() [][]string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	roots := make([][]string, len(s.attestedRoots))
+	for index := range s.attestedRoots {
+		roots[index] = append([]string(nil), s.attestedRoots[index]...)
+	}
+	return roots
 }
 
 func (s *workspaceRebindAgentctlServer) hasMaterialized(destination string) bool {

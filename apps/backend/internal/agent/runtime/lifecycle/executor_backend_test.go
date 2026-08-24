@@ -108,3 +108,13 @@ func TestToAgentExecutionUsesExecutorVisibleSourceRoots(t *testing.T) {
 	require.Equal(t, []string{"/workspace", "/workspace/frontend-main"}, execution.WorkspaceSourceRoots)
 	require.NotContains(t, execution.WorkspaceSourceRoots, "/host/private/source")
 }
+
+func TestToAgentExecutionSeparatesCloneGitMetadataRootsFromWorkspaceRoots(t *testing.T) {
+	execution := (&ExecutorInstance{
+		InstanceID:                  "execution",
+		WorkspaceSourceRoots:        []string{"/workspace", "/workspace/attached"},
+		GitMetadataAttestationRoots: []string{"/workspace/attached"},
+	}).ToAgentExecution(&ExecutorCreateRequest{GitMetadataRequirement: cloneGitMetadataRequirement(true)})
+	require.Equal(t, []string{"/workspace", "/workspace/attached"}, execution.WorkspaceSourceRoots)
+	require.Equal(t, []string{"/workspace/attached"}, execution.GitMetadataAttestationRoots)
+}

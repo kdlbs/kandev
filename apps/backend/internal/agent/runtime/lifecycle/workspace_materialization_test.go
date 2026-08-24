@@ -242,6 +242,7 @@ func TestMaterializeRepositoriesForEnvironmentRefreshesMutableClonePolicyForEver
 			execution.AgentID = "codex-acp"
 			execution.AgentProfileID = "profile-1"
 			execution.AgentCommand = "codex-acp"
+			execution.GitMetadataAttestationRoots = []string{"/executor/workspace"}
 			execution.setRuntimeEnvironment(map[string]string{"CODEX_CONFIG": `{}`})
 
 			_, err := manager.MaterializeRepositoriesForEnvironment(context.Background(), "environment-1", []WorkspaceRepositoryMaterialization{{
@@ -262,10 +263,60 @@ func TestMaterializeRepositoriesForEnvironmentRefreshesMutableClonePolicyForEver
 			if server.attestationCalls() != 1 {
 				t.Fatalf("attestation calls = %d, want one final batch attestation", server.attestationCalls())
 			}
-			if loads := server.loads(); !sameStrings(loads, []string{"acp-existing"}) {
-				t.Fatalf("restored ACP sessions = %v, want [acp-existing]", loads)
+			if loads := server.loads(); len(loads) != 0 {
+				t.Fatalf("restored ACP sessions = %v, want a fresh session after roots changed", loads)
+			}
+			if actions := server.actions(); !sameStrings(actions, []string{"agent.initialize", "agent.session.new"}) {
+				t.Fatalf("ACP actions = %v, want initialize then new session with refreshed roots", actions)
 			}
 		})
+	}
+}
+
+func TestMaterializeRepositoriesForEnvironmentSeparatesACPAndGitMetadataRoots(t *testing.T) {
+	server := newWorkspaceRebindAgentctlServer(t, false)
+	t.Cleanup(server.Close)
+	t.Cleanup(server.closeConnections)
+
+	manager, execution := workspaceSourceTestManager(t, server.URL, []string{"/executor/workspace"})
+	manager.registry = registry.NewRegistry(newTestLogger())
+	manager.registry.LoadDefaults()
+	manager.profileResolver = &countingProfileResolver{info: &AgentProfileInfo{AgentName: "codex-acp"}}
+	execution.TaskEnvironmentID = "environment-1"
+	execution.RuntimeName = executor.NameDocker
+	execution.WorkspacePath = "/executor/workspace"
+	execution.Status = v1.AgentStatusReady
+	execution.ACPSessionID = "acp-existing"
+	execution.AgentID = "codex-acp"
+	execution.AgentProfileID = "profile-1"
+	execution.AgentCommand = "codex-acp"
+	// This is a repository-less workspace: its ACP grant is not eligible for
+	// Git attestation until a repository has been attached beneath it.
+	execution.setRuntimeEnvironment(map[string]string{"CODEX_CONFIG": `{}`})
+
+	_, err := manager.MaterializeRepositoriesForEnvironment(context.Background(), "environment-1", []WorkspaceRepositoryMaterialization{{
+		RepositoryURL: "https://github.com/acme/added.git",
+		Destination:   "added-main",
+		BaseBranch:    "main",
+	}})
+	if err != nil {
+		t.Fatalf("MaterializeRepositoriesForEnvironment: %v", err)
+	}
+	attached := "/executor/workspace/added-main"
+	if !sameStrings(execution.WorkspaceSourceRoots, []string{"/executor/workspace", attached}) {
+		t.Fatalf("ACP workspace roots = %v, want workspace and attached repository", execution.WorkspaceSourceRoots)
+	}
+	if !sameStrings(execution.GitMetadataAttestationRoots, []string{attached}) {
+		t.Fatalf("Git metadata roots = %v, want only attached repository", execution.GitMetadataAttestationRoots)
+	}
+	if roots := server.attestationRoots(); len(roots) != 1 || !sameStrings(roots[0], []string{attached}) {
+		t.Fatalf("attested roots = %v, want only attached repository", roots)
+	}
+	if loads := server.loads(); len(loads) != 0 {
+		t.Fatalf("loaded ACP sessions = %v, want a fresh session after ACP roots changed", loads)
+	}
+	if actions := server.actions(); !sameStrings(actions, []string{"agent.initialize", "agent.session.new"}) {
+		t.Fatalf("ACP actions = %v, want new session to receive attached root", actions)
 	}
 }
 
@@ -520,6 +571,7 @@ func configureCloneAttachmentExecution(execution *AgentExecution, id, sessionID,
 	execution.RuntimeName = executor.NameDocker
 	execution.WorkspacePath = workspacePath
 	execution.WorkspaceSourceRoots = []string{workspacePath}
+	execution.GitMetadataAttestationRoots = []string{workspacePath}
 	execution.Status = v1.AgentStatusReady
 	execution.ACPSessionID = "acp-one"
 	execution.AgentID = "codex-acp"

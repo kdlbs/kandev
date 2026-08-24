@@ -1543,6 +1543,7 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 			projectionErr = materializeWorkspaceRepositories(ctx, execInstance.Client, projection, roots)
 			if projectionErr == nil {
 				execInstance.WorkspaceSourceRoots = roots
+				execInstance.GitMetadataAttestationRoots = roots
 			}
 		}
 		if projectionErr != nil {
