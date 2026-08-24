@@ -621,7 +621,7 @@ func (s *RoutineService) materialiseLightweightRoutineRun(
 		ID:             uuid.New().String(),
 		AgentProfileID: routine.AssigneeAgentProfileID,
 		Source:         "routine",
-		Reason:         "routine_dispatch",
+		Reason:         shared.RunReasonRoutineDispatch,
 		Payload:        payloadStr,
 		IdempotencyKey: idemKey,
 		RequestedAt:    time.Now().UTC(),
