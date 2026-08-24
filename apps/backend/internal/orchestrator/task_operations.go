@@ -4032,6 +4032,23 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	if foregroundDispatch.yieldedBeforeBegin || foregroundClaim != nil {
 		s.publishForegroundActivityChanged(ctx, taskID, sessionID)
 	}
+	var releaseDispatchGuard func()
+	if options.requireNonterminalSession {
+		var guard *sync.Mutex
+		guard, releaseDispatchGuard = s.acquireCancelInFlightGuard(sessionID)
+		guard.Lock()
+		fresh, reloadErr := s.repo.GetTaskSession(ctx, sessionID)
+		if reloadErr != nil || fresh == nil || isTerminalSessionState(fresh.State) {
+			guard.Unlock()
+			releaseDispatchGuard()
+			s.rollbackForegroundDispatchOnFailure(ctx, taskID, sessionID, foregroundDispatch)
+			return nil, errWorkflowAutoStartSessionTerminalized
+		}
+		defer func() {
+			guard.Unlock()
+			releaseDispatchGuard()
+		}()
+	}
 
 	// Only bounded-ack callers preserve request context; ordinary prompts can take minutes.
 	promptCtx := options.executorContext(ctx)
