@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import {
   IconArrowUpCircle,
   IconChevronRight,
@@ -111,6 +111,10 @@ export function PluginRow({
     confirmUninstall,
   } = usePluginUninstallConfirmation(plugin, onConfirmUninstall);
 
+  useEffect(() => {
+    if (!canManage) setConfirmingUninstall(false);
+  }, [canManage, setConfirmingUninstall]);
+
   return (
     <div
       data-testid={`plugin-row-${plugin.id}`}
@@ -134,17 +138,19 @@ export function PluginRow({
         onUpdate={onUpdate}
         onSetAutoUpdate={onSetAutoUpdate}
       />
-      <div className="relative z-10">
-        <PluginUninstallConfirmation
-          target={plugin}
-          open={confirmingUninstall}
-          isFinePointer={isFinePointer}
-          anchorRef={uninstallAnchorRef}
-          onOpenChange={setConfirmingUninstall}
-          onCancel={cancelUninstall}
-          onConfirm={confirmUninstall}
-        />
-      </div>
+      {canManage && (
+        <div className="relative z-10">
+          <PluginUninstallConfirmation
+            target={plugin}
+            open={confirmingUninstall}
+            isFinePointer={isFinePointer}
+            anchorRef={uninstallAnchorRef}
+            onOpenChange={setConfirmingUninstall}
+            onCancel={cancelUninstall}
+            onConfirm={confirmUninstall}
+          />
+        </div>
+      )}
     </div>
   );
 }

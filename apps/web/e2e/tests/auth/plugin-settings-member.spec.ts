@@ -44,28 +44,31 @@ test.describe.serial("member plugin settings", () => {
     const page = await memberContext.newPage();
     await page.goto("/settings/plugins");
 
-    const row = page.getByTestId(`plugin-row-${PLUGIN_ID}`);
+    const settingsPanel = page.locator('[data-testid="settings-scroll-container"]:visible');
+    await expect(settingsPanel).toBeVisible();
+
+    const row = settingsPanel.getByTestId(`plugin-row-${PLUGIN_ID}`);
     await expect(row).toBeVisible({ timeout: 15_000 });
     await expect(row.getByTestId(`plugin-row-link-${PLUGIN_ID}`)).toBeVisible();
-    await expect(page.getByTestId("install-plugin-trigger")).toHaveCount(0);
-    await expect(page.getByTestId("plugins-sync-button")).toHaveCount(0);
-    await expect(page.getByTestId("plugins-check-updates-button")).toHaveCount(0);
-    await expect(page.getByTestId("plugins-auto-update-default")).toHaveCount(0);
+    await expect(settingsPanel.getByTestId("install-plugin-trigger")).toHaveCount(0);
+    await expect(settingsPanel.getByTestId("plugins-sync-button")).toHaveCount(0);
+    await expect(settingsPanel.getByTestId("plugins-check-updates-button")).toHaveCount(0);
+    await expect(settingsPanel.getByTestId("plugins-auto-update-default")).toHaveCount(0);
     await expect(row.getByRole("button", { name: /Enable|Disable|Uninstall|Update/ })).toHaveCount(
       0,
     );
     await expect(row.getByTestId(`plugin-auto-update-${PLUGIN_ID}`)).toHaveCount(0);
 
     await row.getByTestId(`plugin-row-link-${PLUGIN_ID}`).click();
-    await expect(page.getByTestId("plugin-manifest-card")).toBeVisible();
-    await expect(page.getByTestId("plugin-settings-card")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Uninstall" })).toHaveCount(0);
+    await expect(settingsPanel.getByTestId("plugin-manifest-card")).toBeVisible();
+    await expect(settingsPanel.getByTestId("plugin-settings-card")).toHaveCount(0);
+    await expect(settingsPanel.getByRole("button", { name: "Uninstall" })).toHaveCount(0);
 
     await page.goto("/settings/plugins");
-    await page.getByTestId("plugins-tab-browse").click();
-    await expect(page.getByTestId("marketplace-search")).toBeVisible();
-    await expect(page.getByTestId("marketplace-manage-sources")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Refresh" })).toHaveCount(0);
+    await settingsPanel.getByTestId("plugins-tab-browse").click();
+    await expect(settingsPanel.getByTestId("marketplace-search")).toBeVisible();
+    await expect(settingsPanel.getByTestId("marketplace-manage-sources")).toHaveCount(0);
+    await expect(settingsPanel.getByRole("button", { name: "Refresh" })).toHaveCount(0);
 
     await memberContext.close();
     await adminContext.close();
