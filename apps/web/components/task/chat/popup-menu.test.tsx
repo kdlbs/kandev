@@ -50,6 +50,32 @@ describe("popup menu geometry", () => {
     expect(style.transform).toBe("translateY(-100%)");
   });
 
+  // @covers AC-UI-COMPOSER-OVERLAY-001.1
+  it("clamps an above-composer menu to a software-keyboard visual viewport", () => {
+    const style = computePopupMenuStyle({
+      position: { x: 16, y: 560 },
+      placement: "above",
+      viewport: { offsetLeft: 0, offsetTop: 0, width: 393, height: 420 },
+    });
+
+    expect(style.top).toBe(412);
+    expect(Number(style.top) - Number(style.maxHeight)).toBeGreaterThanOrEqual(8);
+  });
+
+  it("preserves ordinary below-caret placement", () => {
+    const style = computePopupMenuStyle({
+      position: { x: 100, y: 100 },
+      placement: "below",
+      viewport: { offsetLeft: 0, offsetTop: 0, width: 1200, height: 800 },
+    });
+
+    expect(style.top).toBe(108);
+    expect(style.maxHeight).toBe(280);
+    expect(style.transform).toBeUndefined();
+  });
+});
+
+describe("popup menu viewport updates", () => {
   it("reflows while the mobile visual viewport changes", () => {
     const viewport = Object.assign(new EventTarget(), {
       offsetLeft: 0,
@@ -79,6 +105,37 @@ describe("popup menu geometry", () => {
     });
 
     expect(menu?.style.width).toBe("284px");
+  });
+
+  // @covers AC-UI-COMPOSER-OVERLAY-001.2
+  it("reflows an open menu above the software keyboard", () => {
+    const viewport = Object.assign(new EventTarget(), {
+      offsetLeft: 0,
+      offsetTop: 0,
+      width: 393,
+      height: 600,
+    });
+    Object.defineProperty(window, "visualViewport", { configurable: true, value: viewport });
+    render(
+      <PopupMenu
+        isOpen
+        position={{ x: 16, y: 560 }}
+        title="References"
+        selectedIndex={0}
+        onClose={() => undefined}
+      >
+        Result
+      </PopupMenu>,
+    );
+    const menu = screen.getByText("References").parentElement?.parentElement;
+    expect(menu?.style.top).toBe("552px");
+
+    act(() => {
+      viewport.height = 420;
+      viewport.dispatchEvent(new Event("resize"));
+    });
+
+    expect(menu?.style.top).toBe("412px");
   });
 });
 

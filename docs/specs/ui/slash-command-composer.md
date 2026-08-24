@@ -1,6 +1,7 @@
 ---
 status: shipped
 created: 2026-07-02
+updated: 2026-08-23
 owner: cfl
 ---
 
@@ -13,6 +14,7 @@ ACP agents can advertise slash commands during session setup. Kandev exposes tho
 ## What
 
 - When a chat composer has advertised agent commands and the user types `/`, the composer shows matching slash commands from the active session.
+- The menu's shared geometry and visible-viewport containment follow the [composer suggestion overlay requirements](requirements/composer-suggestion-overlays.md).
 - Selecting a slash command with Enter, Tab, or pointer/touch replaces only the active slash trigger range with a visually distinct inline command chip in the composer. It MUST NOT submit, queue, or otherwise send a chat message.
 - The inserted command chip remains part of the editable draft. The user can add text before or after it, delete it, or leave the composer without starting an agent turn.
 - The command chip serializes to the same plain slash command text when submitted, copied from the draft value, or saved as a draft.
