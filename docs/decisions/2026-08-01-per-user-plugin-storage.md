@@ -30,7 +30,7 @@ follow-up Notes plugin (porting PR #2050's native task-notes feature into a
 plugin) that needs exactly one per-user, per-task document with no Go binary
 of its own.
 
-`docs/specs/auth/spec.md` records hard per-user privacy: workspaces are
+`docs/specs/auth/requirements/auth.md` records hard per-user privacy: workspaces are
 per-user, cross-user access returns 404, and admins get no visibility into
 other users' data. Any new storage surface must hold that invariant.
 

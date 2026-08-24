@@ -215,6 +215,7 @@ func TestRegisterProcessRoutesWiresSessionScopedRoutes(t *testing.T) {
 		"POST /api/v1/task-sessions/:id/processes/:processId/stop",
 		"GET /api/v1/task-sessions/:id/processes",
 		"GET /api/v1/task-sessions/:id/processes/:processId",
+		"GET /api/v1/task-sessions/:id/agentctl/metrics",
 		"POST /api/v1/task-sessions/:id/set-mode",
 		"POST /api/v1/task-sessions/:id/set-model",
 		"POST /api/v1/task-sessions/:id/set-config-option",

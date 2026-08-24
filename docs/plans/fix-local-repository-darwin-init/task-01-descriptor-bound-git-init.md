@@ -5,7 +5,7 @@ status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/create-local-repository/spec.md"
+spec: "../../specs/workspaces/requirements/create-local-repository.md"
 ---
 
 # Task 01: Descriptor-Bound Git Initialization
@@ -47,7 +47,7 @@ cd apps/backend && tmpdir=$(mktemp -d) && \
 - `apps/backend/internal/task/service/local_repository_initialization.go`
 - `apps/backend/internal/task/service/local_repository_initialization_test.go`
 - `apps/backend/internal/task/handlers/repository_handlers_test.go`
-- `docs/specs/create-local-repository/spec.md`
+- `docs/specs/workspaces/requirements/create-local-repository.md`
 - `docs/plans/fix-local-repository-darwin-init/plan.md`
 - `docs/plans/fix-local-repository-darwin-init/task-01-descriptor-bound-git-init.md`
 

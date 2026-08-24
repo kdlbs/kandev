@@ -280,7 +280,7 @@ healthcheck:
   start_period: 15s
 ```
 
-The backend writes its daily files to `/data/logs/backend-logs.log` on the persistent volume and prints the path at startup. Each daily file accepts at most 256 MiB, and Kandev retains the current UTC day plus the two preceding days. `docker logs` shows the bounded stdout stream; use **Settings > System > Logs** for a frontend+backend diagnostic ZIP.
+The backend writes its active file to `/data/logs/backend-logs.log` on the persistent volume and prints the path at startup. Each segment accepts at most 16 MiB and is named `backend-logs-YYYY-MM-DD-NNNNNN.log` when it rolls. Active and closed backend files use at most 256 MiB in total. Kandev removes the oldest closed segments when needed, so high-volume periods keep the newest evidence. Three UTC days is the maximum file age. `docker logs` shows the bounded stdout stream; use **Settings > System > Logs** for a frontend+backend diagnostic ZIP.
 
 ## Upgrade and remove
 

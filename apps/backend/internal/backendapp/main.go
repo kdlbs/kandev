@@ -1188,6 +1188,31 @@ func initOfficeServices(
 	// at all: blocked_by on create failed and list_related_tasks reported nothing.
 	services.Task.SetBlockerRepository(repos.Office)
 
+	// office-costs Wave B: lazy models.dev pricing lookup. The Client
+	// allocates no resources at startup — the first non-claude-acp cost
+	// event triggers a disk read; the first missing cache file triggers
+	// a background fetch. Workspaces running only claude-acp stay
+	// untouched because Layer A handles every event before lookup.
+	//
+	// Constructed here, above the Office early return, because
+	// task_usage_events's ledger writer (docs/specs/task-cost-ledger/spec.md
+	// AC-10, AC-26) needs it in every install, not just Office-enabled ones.
+	// SetPricingLookup/SetModelInfoLookup below stay gated - the Office
+	// service and orchestrator model-info surface those Office features
+	// widen only apply when the feature is on.
+	modelsdevCachePath := filepath.Join(cfg.ResolvedHomeDir(), "cache", "models-dev.json")
+	pricingLookup := officemodelsdev.New(officemodelsdev.Config{
+		CachePath: modelsdevCachePath,
+	}, log)
+
+	// The ledger writer is the sole writer of task_sessions' usage rollup
+	// columns (AC-10) and must run in every install, so it too is
+	// constructed and started before the Office early return.
+	if err := startTaskUsageWriter(repos.Task, usagePricingAdapter{lookup: pricingLookup}, eventBus, log, addCleanup); err != nil {
+		log.Error("Failed to subscribe task usage ledger writer", zap.Error(err))
+		return nil, false
+	}
+
 	if !cfg.Features.Office {
 		log.Info("Office feature disabled; Office services skipped while global run scheduling remains enabled")
 		return runProcessorSvc, true
@@ -1196,18 +1221,8 @@ func initOfficeServices(
 	services.Office = runProcessorSvc
 	log.Info("Office service constructed with all dependencies")
 
-	// office-costs Wave B: lazy models.dev pricing lookup. The Client
-	// allocates no resources at startup — the first non-claude-acp cost
-	// event triggers a disk read; the first missing cache file triggers
-	// a background fetch. Workspaces running only claude-acp stay
-	// untouched because Layer A handles every event before lookup.
-	modelsdevCachePath := filepath.Join(cfg.ResolvedHomeDir(), "cache", "models-dev.json")
-	pricingLookup := officemodelsdev.New(officemodelsdev.Config{
-		CachePath: modelsdevCachePath,
-	}, log)
 	services.Office.SetPricingLookup(pricingLookup)
 	orchestratorSvc.SetModelInfoLookup(pricingLookup)
-	services.Office.SetSessionUsageWriter(repos.Task)
 
 	// ADR 0005 Wave E: plug the runtime-tier skill deployer into the
 	// lifecycle manager. The deployer reads office's skills repo +

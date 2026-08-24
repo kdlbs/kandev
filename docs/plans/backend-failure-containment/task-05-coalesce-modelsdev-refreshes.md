@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/office/costs.md"
+spec: "../../specs/office/requirements/costs.md"
 ---
 
 # Task 05: Coalesce models.dev refreshes

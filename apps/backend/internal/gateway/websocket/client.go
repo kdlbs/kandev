@@ -137,10 +137,11 @@ func (c *Client) ReadPump(_ context.Context) {
 	for {
 		_, message, err := c.conn.ReadMessage()
 		if err != nil {
+			// CloseNormalClosure (1000): Normal browser close
 			// CloseGoingAway (1001): Client navigating away
 			// CloseNoStatusReceived (1005): Client closed without status (normal browser close)
 			// CloseAbnormalClosure (1006): Abnormal close (network drop)
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNoStatusReceived, websocket.CloseAbnormalClosure) {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseNoStatusReceived, websocket.CloseAbnormalClosure) {
 				c.logger.Error("WebSocket read error", zap.Error(err))
 			}
 			break

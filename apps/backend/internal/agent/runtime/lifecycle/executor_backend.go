@@ -416,18 +416,21 @@ type RemoteStatusProvider interface {
 
 // ExecutorCreateRequest contains parameters for creating an agentctl instance.
 type ExecutorCreateRequest struct {
-	InstanceID           string
-	TaskID               string
-	TaskTitle            string
-	SessionID            string
-	TaskEnvironmentID    string // Env this execution belongs to (shared across sessions in same task)
-	AgentProfileID       string
-	OfficeAgentProfileID string
-	PromptTurnID         string
-	WorkspacePath        string
-	WorkspaceSourceRoots []string
-	Protocol             string
-	Env                  map[string]string
+	InstanceID        string
+	TaskID            string
+	TaskTitle         string
+	SessionID         string
+	TaskEnvironmentID string // Env this execution belongs to (shared across sessions in same task)
+	// WorkspaceReuseRequired means this runtime must attach to the supplied
+	// environment handle and must never fall back to provisioning a replacement.
+	WorkspaceReuseRequired bool
+	AgentProfileID         string
+	OfficeAgentProfileID   string
+	PromptTurnID           string
+	WorkspacePath          string
+	WorkspaceSourceRoots   []string
+	Protocol               string
+	Env                    map[string]string
 	// ApprovedSecretEnvKeys contains repository binding keys explicitly
 	// approved for SSH forwarding. Other request env keys remain filtered.
 	ApprovedSecretEnvKeys  []string

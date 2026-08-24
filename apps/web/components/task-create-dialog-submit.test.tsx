@@ -55,7 +55,6 @@ type BuildCreateTaskPayloadCall = {
 };
 
 const buildCreateTaskPayloadMock = vi.fn((args: BuildCreateTaskPayloadCall) => ({
-  workflow_step_id: "step-1",
   repositories: args.repositoriesPayload,
   agent_profile_id: args.agentProfileId || undefined,
   executor_id: args.executorId || undefined,
@@ -131,7 +130,6 @@ function makeDeps(overrides: Partial<SubmitHandlersDeps>): SubmitHandlersDeps {
     workspaceId: "ws-1",
     workflowId: "wf-1",
     effectiveWorkflowId: "wf-1",
-    effectiveDefaultStepId: "step-1",
     repositories: [],
     discoveredRepositories: [],
     workspaceRepositories: [],
@@ -310,7 +308,6 @@ describe("useTaskSubmitHandlers — handleCreateSubmit (CLI-mode parity)", () =>
 
     expect(createTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        workflow_step_id: "step-1",
         agent_profile_id: "agent-1",
         executor_id: "exec-1",
       }),
@@ -409,5 +406,31 @@ describe("useTaskSubmitHandlers — handleCreateSubmit (CLI-mode parity)", () =>
       agentProfileId: "agent-from-workflow",
       executorProfileId: "execp-autopick",
     });
+  });
+});
+
+describe("useTaskSubmitHandlers — handleCreateWithoutAgent", () => {
+  // "Create without starting agent" must leave the destination to the backend,
+  // which parks the task in the workflow's start step. Sending a step from the
+  // dialog pinned it to whatever the caller happened to pass as defaultStepId
+  // (uniformly "first step by position"), so a workflow whose start step was
+  // moved elsewhere was ignored.
+  it("sends no workflow_step_id, leaving the start step to the backend", async () => {
+    const createTask = vi.fn().mockResolvedValue({ id: TASK_ID });
+    const deps = makeDeps({
+      createTask,
+      descriptionInputRef: makeRef("park this for later"),
+    });
+    const { result } = renderHook(() => useTaskSubmitHandlers(deps));
+
+    await act(async () => {
+      await result.current.handleCreateWithoutAgent();
+    });
+
+    expect(createTask).toHaveBeenCalledTimes(1);
+    expect(createTask.mock.calls[0][0]).not.toHaveProperty("workflow_step_id");
+    expect(buildCreateTaskPayloadMock).toHaveBeenCalledWith(
+      expect.objectContaining({ withAgent: false }),
+    );
   });
 });

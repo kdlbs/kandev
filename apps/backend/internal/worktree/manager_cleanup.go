@@ -412,6 +412,12 @@ func (m *Manager) CleanupWorktrees(ctx context.Context, worktrees []*Worktree) e
 		if wt == nil {
 			continue
 		}
+		// Task-environment inventory rows can describe a repository slot
+		// without a materialized physical worktree. Never pass such a row to
+		// filesystem cleanup, because its path can be the source checkout.
+		if strings.TrimSpace(wt.ID) == "" {
+			continue
+		}
 		if err := m.removeWorktree(ctx, wt, true); err != nil {
 			m.logger.Warn("failed to remove worktree on task deletion",
 				zap.String("task_id", wt.TaskID),

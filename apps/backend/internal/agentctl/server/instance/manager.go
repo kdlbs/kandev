@@ -105,6 +105,11 @@ func (m *Manager) SetServerFactory(factory ServerFactory) {
 
 // CreateInstance creates a new agent instance.
 func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*CreateResponse, error) {
+	// createStart includes the m.mu queue wait deliberately: that wait is the
+	// leak pathology described below, and the diagnostic agentctl_create_ready_ms
+	// metric (api.handleSystemMetrics) exists to make it visible.
+	createStart := time.Now()
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -245,6 +250,15 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 	httpServer := m.startHTTPServer(port, listener, handler, id)
 	inst.server = httpServer
 	m.instances[id] = inst
+
+	// Clamp to a minimum of 1ms so a genuinely sub-millisecond creation can't
+	// be stored as 0, which CreateReadyMillis's zero value reserves to mean
+	// "not yet recorded".
+	readyMillis := time.Since(createStart).Milliseconds()
+	if readyMillis <= 0 {
+		readyMillis = 1
+	}
+	instanceCfg.CreateReadyMillis.Store(readyMillis)
 
 	m.logger.Info("created instance",
 		zap.String("instance_id", id),

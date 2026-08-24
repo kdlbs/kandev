@@ -11,7 +11,7 @@ Kandev has three distinct configuration surfaces:
 - persistent product settings edited in the web UI and stored in the database; and
 - executor, agent, repository, and workflow profiles stored through their own Settings pages.
 
-This page is the startup-configuration reference. Executor-specific fields are covered in [Executors](./executors.md), and deployment examples are in [Docker](./docker.md), [Kubernetes](./k8s.md), and [Run as a service](./run-as-a-service.md).
+This page is the startup-configuration reference. Executor-specific fields are covered in [Executors](executors.md), and deployment examples are in [Docker](docker.md), [Kubernetes](k8s.md), and [Run as a service](run-as-a-service.md).
 
 ## Quick path
 
@@ -95,7 +95,7 @@ SQLite is the supported default and enables WAL mode. PostgreSQL deployments mus
 
 One backend owns a Kandev home at a time. When SQLite uses a custom path outside that home, the backend also owns that database path, so separate homes alone do not permit concurrent backends against one SQLite file. Use a separate home and database for an intentional second instance. Ownership is released when the backend exits.
 
-Database-only snapshots also omit `<home>/data/master.key`, the AES-256 key used to decrypt stored secrets. Preserve that owner-only key with an independently secured home/data backup; restoring the database without its matching key leaves encrypted credentials unreadable. See [Operations](./operations.md).
+Database-only snapshots also omit `<home>/data/master.key`, the AES-256 key used to decrypt stored secrets. Preserve that owner-only key with an independently secured home/data backup; restoring the database without its matching key leaves encrypted credentials unreadable. See [Operations](operations.md).
 
 ### Event bus and NATS
 
@@ -120,7 +120,7 @@ An external NATS URL moves event traffic across the configured network and can e
 | `docker.defaultNetwork` | `KANDEV_DOCKER_DEFAULTNETWORK` | `kandev-network` | Accepted compatibility field; not wired into current executor networking. |
 | `docker.volumeBasePath` | `KANDEV_DOCKER_VOLUMEBASEPATH` | `/var/lib/kandev/volumes` on Unix; `%LOCALAPPDATA%\kandev\volumes` on Windows | Accepted compatibility field; not wired into current executor volume placement. |
 
-The Docker socket is effectively root-equivalent on many hosts. Do not publish it or assume `docker.tlsVerify` secures a TCP daemon; it currently does not. Configure TLS through a supported Docker endpoint/environment and validate it independently, or keep the daemon local. See [Docker](./docker.md) and [Executors](./executors.md).
+The Docker socket is effectively root-equivalent on many hosts. Do not publish it or assume `docker.tlsVerify` secures a TCP daemon; it currently does not. Configure TLS through a supported Docker endpoint/environment and validate it independently, or keep the daemon local. See [Docker](docker.md) and [Executors](executors.md).
 
 ### Core agent service
 
@@ -255,7 +255,9 @@ launch and is not an environment configuration source.
 | `logging.level` | `KANDEV_LOG_LEVEL` | `info` | File threshold: `debug`, `info`, `warn`, or `error`. `--debug` selects `debug`; normal and `--verbose` launches select `info`. |
 | `logging.format` | `KANDEV_LOGGING_FORMAT` | `text`, or `json` in production/Kubernetes | `text` or `json`; `auto` is not accepted. |
 
-Every backend launch writes to `<home>/logs/backend-logs.log` and prints that resolved path at startup. The active file appends across same-day restarts and accepts at most 256 MiB; later entries are dropped until the next UTC day rather than allowing diagnostics to fill the disk. At the next UTC day it rolls to `backend-logs-YYYY-MM-DD.log`; Kandev retains the current UTC day and the two preceding days. Files are owner-only (`0600`) on Unix.
+Every backend launch writes to `<home>/logs/backend-logs.log` and prints that resolved path at startup. The active file appends across same-day restarts and accepts at most 16 MiB. Before a new entry would exceed that limit, Kandev closes the file as `backend-logs-YYYY-MM-DD-NNNNNN.log` and opens a new active file.
+
+Active and closed backend files use at most 256 MiB in total. Kandev removes the oldest closed segments when needed, so high-volume periods keep the newest evidence instead of stopping file logging. Three UTC days is the maximum file age, not a reserved allocation for each day. The segment size, total budget, and maximum age are fixed and are not configurable. Legacy `backend-logs-YYYY-MM-DD.log` files remain readable during upgrades and count toward the total budget. Files are owner-only (`0600`) on Unix.
 
 Normal launches write info and above to the file and warn and above to stdout. `--debug` writes debug and above to the file while stdout remains warn and above. `--verbose` writes info and above to both. The format default becomes JSON when `KUBERNETES_SERVICE_HOST` is non-empty or `KANDEV_ENV` is exactly `production`/`prod`; otherwise it is text.
 
@@ -274,7 +276,7 @@ Debug output may contain repository paths, subprocess output, prompts, file cont
 | `worktree.pullTimeoutSeconds` | `KANDEV_WORKTREE_PULLTIMEOUTSECONDS` | `60` | Git pull timeout during worktree preparation. |
 | `repoClone.basePath` | `KANDEV_REPOCLONE_BASEPATH` | `<home>/repos` | Base directory for provider-backed clones. A leading `~/` expands. |
 
-Discovery roots bound automatic filesystem traversal, so scope them narrowly. They do not authorize explicitly selected repository paths: **Add Local Repository** validates and saves the exact accessible Git repository the user chooses without widening automatic scans. Worktrees and clones can contain credentials or generated files ignored by Git; review repository copy-file and setup/cleanup settings before remote execution. See [Git operations](./git-operations.md).
+Discovery roots bound automatic filesystem traversal, so scope them narrowly. They do not authorize explicitly selected repository paths: **Add Local Repository** validates and saves the exact accessible Git repository the user chooses without widening automatic scans. Worktrees and clones can contain credentials or generated files ignored by Git; review repository copy-file and setup/cleanup settings before remote execution. See [Git operations](git-operations.md).
 
 ### Debug configuration
 
@@ -579,4 +581,4 @@ If a value appears ignored:
 
 Use `kandev --verbose` to surface startup errors. Do not use `--debug` merely to diagnose a YAML typo on an exposed machine; verbose logs are usually sufficient.
 
-Variables used only to assemble/test the runtime, such as `KANDEV_WEB_DIST_DIR`, `KANDEV_DESKTOP_RUNTIME_DIR`, mock/E2E switches, supervisor socket/manifest values, and bootstrap nonces, are internal implementation contracts, not supported deployment configuration. `KANDEV_MCP_LOG_FILE` remains a debug-only component variable without a YAML key. `KANDEV_BUNDLE_DIR` is the narrow exception documented for installer/package integration in [CLI](./cli.md); end users should still let the installer set it.
+Variables used only to assemble/test the runtime, such as `KANDEV_WEB_DIST_DIR`, `KANDEV_DESKTOP_RUNTIME_DIR`, mock/E2E switches, supervisor socket/manifest values, and bootstrap nonces, are internal implementation contracts, not supported deployment configuration. `KANDEV_MCP_LOG_FILE` remains a debug-only component variable without a YAML key. `KANDEV_BUNDLE_DIR` is the narrow exception documented for installer/package integration in [CLI](cli.md); end users should still let the installer set it.

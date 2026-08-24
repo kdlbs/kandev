@@ -5,7 +5,7 @@ status: pending
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/subagent-context-persistence/spec.md"
+spec: "../../specs/agents/requirements/subagent-context-persistence.md"
 ---
 
 > **Amendment 1 update:** the shipped schema and migration differ from this

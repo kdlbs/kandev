@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/platform/notifications.md
+spec: docs/specs/platform/requirements/notifications.md
 created: 2026-07-24
 status: implemented
 ---
@@ -133,8 +133,8 @@ Likely files:
 - A focused `apps/web/e2e/tests/settings/mobile-*.spec.ts`
 - `docs/public/websocket-api.md`
 - `docs/public/desktop-app.md`
-- `docs/specs/desktop-tauri-app/spec.md`
-- `docs/specs/office/inbox.md`
+- `docs/specs/desktop/requirements/desktop-tauri-app.md`
+- `docs/specs/office/requirements/inbox.md`
 - `docs/decisions/0039-native-desktop-integration-boundary.md`
 
 Changes:

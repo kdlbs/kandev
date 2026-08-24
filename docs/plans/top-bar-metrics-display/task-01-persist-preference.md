@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/app-status-bar.md"
+spec: "../../specs/ui/requirements/app-status-bar.md"
 ---
 
 # Task 01: Persist simplified metrics preference

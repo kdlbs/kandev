@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["04-comparison-target-ui-and-docs"]
 plan: "plan.md"
-spec: "../../specs/platform/workspace-git-status.md"
+spec: "../../specs/platform/requirements/workspace-git-status.md"
 ---
 
 # Task 05: Cross-fork desktop/mobile regression

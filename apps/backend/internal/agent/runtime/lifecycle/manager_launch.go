@@ -858,6 +858,13 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		metadata[MetadataKeyContributionDestinations] = contributionDestinations
 	}
 
+	allowLegacyContainerControlFallback := reqWithWorktree.WorkspaceReuseRequired &&
+		(reqWithWorktree.ExecutorType == string(models.ExecutorTypeLocalDocker) || reqWithWorktree.ExecutorType == string(models.ExecutorTypeRemoteDocker))
+	containerControlAuthToken, err := m.revealContainerControlAuthToken(ctx, metadata, allowLegacyContainerControlFallback)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("resolve container control token: %w", err)
+	}
+
 	var autoApproveOverride *bool
 	if profileInfo != nil {
 		autoApproveOverride = boolPtr(profileInfo.AutoApprove)
@@ -868,6 +875,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		TaskTitle:                      reqWithWorktree.TaskTitle,
 		SessionID:                      reqWithWorktree.SessionID,
 		TaskEnvironmentID:              reqWithWorktree.TaskEnvironmentID,
+		WorkspaceReuseRequired:         reqWithWorktree.WorkspaceReuseRequired,
 		AgentProfileID:                 executionProfileID(reqWithWorktree),
 		OfficeAgentProfileID:           reqWithWorktree.AgentProfileID,
 		PromptTurnID:                   reqWithWorktree.TurnID,
@@ -885,7 +893,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		McpMode:                        reqWithWorktree.McpMode,
 		McpProviders:                   reqWithWorktree.McpProviders,
 		McpProfile:                     reqWithWorktree.McpProfile,
-		AuthToken:                      m.revealRuntimeSecret(ctx, metadata, MetadataKeyAuthTokenSecret),
+		AuthToken:                      containerControlAuthToken,
 		BootstrapNonce:                 m.revealRuntimeSecret(ctx, metadata, MetadataKeyBootstrapNonceSecret),
 		AgentctlStartupConfig:          m.agentctlStartupConfig,
 		OnProgress:                     onProgress,
@@ -996,6 +1004,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 		TaskID:                  req.TaskID,
 		WorkspaceID:             req.WorkspaceID,
 		SessionID:               req.SessionID,
+		TaskEnvironmentID:       req.TaskEnvironmentID,
 		TaskTitle:               req.TaskTitle,
 		ExecutorType:            execName,
 		WorkspacePath:           workspacePath,
@@ -1003,6 +1012,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 		RepositoryID:            req.RepositoryID,
 		TaskRepositoryID:        req.TaskRepositoryID,
 		UseWorktree:             req.UseWorktree,
+		WorkspaceReuseRequired:  req.WorkspaceReuseRequired,
 		WorktreeID:              req.WorktreeID,
 		SetupScript:             req.SetupScript,
 		RepoSetupScript:         repoSetupScript,

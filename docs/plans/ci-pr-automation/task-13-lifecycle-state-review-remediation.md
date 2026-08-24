@@ -6,7 +6,7 @@ wave: 8
 depends_on:
   - "09-backend-lifecycle-reliability"
 plan: "plan.md"
-spec: "../../specs/ui/ci-pr-automation.md"
+spec: "../../specs/ui/requirements/ci-pr-automation.md"
 ---
 
 # Task 13: Lifecycle state review remediation

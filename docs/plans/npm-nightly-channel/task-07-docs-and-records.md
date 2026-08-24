@@ -5,7 +5,7 @@ status: completed
 wave: 6
 depends_on: ["02-release-workflow", "04-backend-api-apply", "06-updates-channel-e2e"]
 plan: "plan.md"
-spec: "../../specs/npm-nightly-channel/spec.md"
+spec: "../../specs/release/requirements/npm-nightly-channel.md"
 ---
 
 # Task 07: Public docs and final records

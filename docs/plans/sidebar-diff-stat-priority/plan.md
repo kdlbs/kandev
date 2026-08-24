@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/sidebar-diff-stat-priority.md
+spec: docs/specs/ui/requirements/sidebar-diff-stat-priority.md
 created: 2026-08-02
 status: completed
 ---
