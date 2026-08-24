@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
+import { StateProvider } from "@/components/state-provider";
 import type { Repository } from "@/lib/types/http";
 import type { DialogFormState, TaskRepoRow } from "./task-create-dialog-types";
 import { WorkspaceRepoChips } from "./task-create-dialog-workspace-repo-chips";
@@ -58,7 +59,11 @@ function chips(overrides: Partial<ChipsProps> = {}) {
 }
 
 function renderChips(overrides: Partial<ChipsProps> = {}) {
-  return render(<TooltipProvider>{chips(overrides)}</TooltipProvider>);
+  return render(
+    <StateProvider>
+      <TooltipProvider>{chips(overrides)}</TooltipProvider>
+    </StateProvider>,
+  );
 }
 
 afterEach(cleanup);
@@ -155,9 +160,11 @@ describe("WorkspaceRepoChips workspace markers", () => {
     ).toBeTruthy();
 
     rerender(
-      <TooltipProvider>
-        {chips({ rows: [row({ key: "r0", repositoryId: BACKEND_ID }), row({ key: "r1" })] })}
-      </TooltipProvider>,
+      <StateProvider>
+        <TooltipProvider>
+          {chips({ rows: [row({ key: "r0", repositoryId: BACKEND_ID }), row({ key: "r1" })] })}
+        </TooltipProvider>
+      </StateProvider>,
     );
     expect(
       within(screen.getByRole("option", { name: /^frontend/ })).queryByTestId(ADDED_MARKER),
@@ -166,7 +173,11 @@ describe("WorkspaceRepoChips workspace markers", () => {
       within(screen.getByRole("option", { name: /^backend/ })).getByTestId(ADDED_MARKER),
     ).toBeTruthy();
 
-    rerender(<TooltipProvider>{chips({ rows: [row({ key: "r1" })] })}</TooltipProvider>);
+    rerender(
+      <StateProvider>
+        <TooltipProvider>{chips({ rows: [row({ key: "r1" })] })}</TooltipProvider>
+      </StateProvider>,
+    );
     expect(
       within(screen.getByRole("option", { name: /^backend/ })).queryByTestId(ADDED_MARKER),
     ).toBeNull();
@@ -189,24 +200,28 @@ describe("WorkspaceRepoChips discovered markers", () => {
     ).toBeTruthy();
 
     rerender(
-      <TooltipProvider>
-        {chips({
-          rows: [
-            row({ key: "r0", localPath: "/home/me/projects/another-project" }),
-            row({ key: "r1" }),
-          ],
-          discoveredRepositories,
-        })}
-      </TooltipProvider>,
+      <StateProvider>
+        <TooltipProvider>
+          {chips({
+            rows: [
+              row({ key: "r0", localPath: "/home/me/projects/another-project" }),
+              row({ key: "r1" }),
+            ],
+            discoveredRepositories,
+          })}
+        </TooltipProvider>
+      </StateProvider>,
     );
     expect(
       within(screen.getByRole("option", { name: /^local-project/ })).queryByTestId(ADDED_MARKER),
     ).toBeNull();
 
     rerender(
-      <TooltipProvider>
-        {chips({ rows: [row({ key: "r1" })], discoveredRepositories })}
-      </TooltipProvider>,
+      <StateProvider>
+        <TooltipProvider>
+          {chips({ rows: [row({ key: "r1" })], discoveredRepositories })}
+        </TooltipProvider>
+      </StateProvider>,
     );
     expect(
       within(screen.getByRole("option", { name: /^local-project/ })).queryByTestId(ADDED_MARKER),
