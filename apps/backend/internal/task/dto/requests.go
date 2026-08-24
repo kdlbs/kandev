@@ -269,6 +269,10 @@ type TaskRepositoryInput struct {
 	ProviderRepoID string
 	ProviderOwner  string
 	ProviderName   string
+	// PreserveBaseBranch is set only by the internal fresh-branch rewrite. It
+	// keeps the generated branch as the effective base when the association is
+	// recreated after policy resolution.
+	PreserveBaseBranch bool
 }
 
 type CreateTaskRequest struct {

@@ -89,10 +89,19 @@ export type TaskEventPayload = {
   repository_id?: string;
   repositories?: Array<{
     id?: string;
+    task_id?: string;
     repository_id: string;
     base_branch?: string;
     checkout_branch?: string;
+    branch_policy_id?: string;
+    branch_policy_name?: string;
+    branch_policy_base_branch?: string;
+    branch_policy_branch_template?: string;
+    branch_policy_pull_request_target?: string;
     position?: number;
+    metadata?: Record<string, unknown>;
+    created_at?: string;
+    updated_at?: string;
   }>;
   primary_session_id?: string | null;
   primary_session_state?: TaskSessionState | null;

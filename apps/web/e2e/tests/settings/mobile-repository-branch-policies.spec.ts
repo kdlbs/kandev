@@ -17,6 +17,11 @@ test.describe("Repository branch policies on mobile", () => {
 
     const drawer = testPage.getByRole("dialog", { name: "Add branch policy" });
     await expect(drawer).toBeVisible();
+    await drawer.getByRole("button", { name: "About policy names", exact: true }).tap();
+    await expect(testPage.getByRole("dialog", { name: "About policy names" })).toContainText(
+      "Use a short name that helps people choose this policy in the task dialog.",
+    );
+    await testPage.keyboard.press("Escape");
     await drawer.getByRole("textbox", { name: "Policy name" }).fill("Mobile policy");
     await drawer.getByRole("combobox", { name: "Base branch" }).fill("main");
     await drawer.getByRole("combobox", { name: "Pull request target" }).fill("main");

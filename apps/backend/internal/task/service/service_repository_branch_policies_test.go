@@ -181,6 +181,67 @@ func TestCreateTaskRejectsRemoteContributionPolicyBaseMismatch(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "does not match branch policy base branch") {
 		t.Fatalf("remote contribution mismatch error = %v", err)
 	}
+	_, total, err := repo.ListTasksByWorkspace(ctx, "ws-policy-remote", "", "", "", 1, 50, "", false, false, false, false)
+	if err != nil {
+		t.Fatalf("list tasks after rejected create: %v", err)
+	}
+	if total != 0 {
+		t.Fatalf("rejected remote contribution mismatch persisted %d task(s)", total)
+	}
+}
+
+func TestReplaceTaskRepositoriesPreservesFreshBranchWithPolicySnapshot(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	workflowID := seedWorkspaceAndWorkflowForCreate(t, ctx, repo, "ws-policy-fresh")
+	if err := repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-policy-fresh", WorkspaceID: "ws-policy-fresh", Name: "fresh", DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("create repository: %v", err)
+	}
+	policy, err := svc.CreateRepositoryBranchPolicy(ctx, &CreateRepositoryBranchPolicyRequest{
+		RepositoryID: "repo-policy-fresh", Name: "Feature", BaseBranch: "main",
+		BranchTemplate: "feature/{title}-{suffix}", PullRequestTarget: "main",
+	})
+	if err != nil {
+		t.Fatalf("create policy: %v", err)
+	}
+
+	result, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-policy-fresh", WorkflowID: workflowID, Title: "Fresh branch",
+		Repositories: []TaskRepositoryInput{{
+			RepositoryID: "repo-policy-fresh", BranchPolicyID: policy.ID, BaseBranch: "main",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if _, err := svc.UpdateRepositoryBranchPolicy(ctx, policy.ID, &UpdateRepositoryBranchPolicyRequest{
+		BaseBranch: stringPointer("develop"),
+	}); err != nil {
+		t.Fatalf("update policy after task creation: %v", err)
+	}
+
+	if err := svc.ReplaceTaskRepositories(ctx, result.Task.ID, "ws-policy-fresh", []TaskRepositoryInput{{
+		RepositoryID: "repo-policy-fresh", BranchPolicyID: policy.ID, BaseBranch: "feature/fresh-branch",
+		PreserveBaseBranch: true,
+	}}); err != nil {
+		t.Fatalf("replace task repositories: %v", err)
+	}
+
+	linked, err := repo.ListTaskRepositories(ctx, result.Task.ID)
+	if err != nil {
+		t.Fatalf("list task repositories: %v", err)
+	}
+	if len(linked) != 1 {
+		t.Fatalf("task repositories = %+v, want one association", linked)
+	}
+	if linked[0].BaseBranch != "feature/fresh-branch" {
+		t.Fatalf("effective base branch = %q, want generated fresh branch", linked[0].BaseBranch)
+	}
+	if linked[0].BranchPolicyBaseBranch != "main" {
+		t.Fatalf("policy snapshot base branch = %q, want main", linked[0].BranchPolicyBaseBranch)
+	}
 }
 
 func stringPointer(value string) *string { return &value }

@@ -108,3 +108,12 @@ Verification:
 - Mobile settings scenario passed.
 - Mobile task scenario passed.
 - The E2E fixture plugin package was built before browser validation.
+
+Review remediation verification:
+
+- Desktop and mobile local-executor subtask scenarios passed with policy
+  selection, fresh-branch submission, immutable snapshot fields, and the
+  generated branch identity asserted.
+- Desktop keyboard-focus help and mobile tap-to-open help scenarios passed.
+- The targeted desktop and mobile settings and subtask Playwright runs passed
+  after the backend fresh-branch persistence fix.

@@ -417,8 +417,9 @@ function branchPolicyToOption(policy: RepositoryBranchPolicy, branches: Branch[]
         </span>
         <span className="flex shrink-0 flex-col items-end text-xs text-muted-foreground">
           <span>
-            {t("task:branchPolicyOptionSummary", {
+            {t("workspaces:branchPolicySummary", {
               base: policy.base_branch,
+              template: policy.branch_template,
               target: policy.pull_request_target,
             })}
           </span>

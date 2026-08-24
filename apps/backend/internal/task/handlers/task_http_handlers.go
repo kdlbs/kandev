@@ -1271,6 +1271,7 @@ func (h *TaskHandlers) applyFreshBranch(
 		}
 		repos[i].BaseBranch = newBranch
 		repos[i].CheckoutBranch = ""
+		repos[i].PreserveBaseBranch = true
 	}
 	return true
 }

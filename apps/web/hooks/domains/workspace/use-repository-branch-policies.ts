@@ -15,6 +15,127 @@ type PolicyDraft = Omit<
   "id" | "repository_id" | "created_at" | "updated_at"
 >;
 
+type InitialPolicyLoadArgs = {
+  enabled: boolean;
+  isLoaded: boolean;
+  repositoryId: string | null;
+  revisionRef: { current: number };
+  setLoading: (repositoryId: string, loading: boolean) => void;
+  setPolicies: (
+    repositoryId: string,
+    policies: RepositoryBranchPolicy[],
+    expectedRevision?: number,
+  ) => void;
+};
+
+function useInitialRepositoryBranchPolicies({
+  enabled,
+  isLoaded,
+  repositoryId,
+  revisionRef,
+  setLoading,
+  setPolicies,
+}: InitialPolicyLoadArgs) {
+  useEffect(() => {
+    if (!enabled || !repositoryId || isLoaded) return;
+    let cancelled = false;
+    setLoading(repositoryId, true);
+    const requestRevision = revisionRef.current;
+    listRepositoryBranchPolicies(repositoryId, { cache: "no-store" })
+      .then((response) => {
+        if (!cancelled)
+          setPolicies(repositoryId, response.repository_branch_policies, requestRevision);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setLoading(repositoryId, false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, isLoaded, repositoryId, revisionRef, setLoading, setPolicies]);
+}
+
+type PolicyMutationArgs = {
+  repositoryId: string | null;
+  revisionRef: { current: number };
+  refresh: () => Promise<void>;
+  upsert: (policy: RepositoryBranchPolicy) => void;
+  remove: (repositoryId: string, policyId: string) => void;
+  setPolicies: InitialPolicyLoadArgs["setPolicies"];
+};
+
+function useRepositoryBranchPolicyMutations({
+  repositoryId,
+  revisionRef,
+  refresh,
+  upsert,
+  remove,
+  setPolicies,
+}: PolicyMutationArgs) {
+  const create = useCallback(
+    async (draft: PolicyDraft) => {
+      // i18n-exempt: internal validation error
+      if (!repositoryId) throw new Error("Repository is required");
+      const requestRevision = revisionRef.current;
+      const policy = await createRepositoryBranchPolicy(repositoryId, draft);
+      if (revisionRef.current !== requestRevision) {
+        await refresh();
+        return policy;
+      }
+      upsert(policy);
+      return policy;
+    },
+    [refresh, repositoryId, revisionRef, upsert],
+  );
+  const update = useCallback(
+    async (policyId: string, draft: Partial<PolicyDraft>) => {
+      const requestRevision = revisionRef.current;
+      const policy = await updateRepositoryBranchPolicy(policyId, draft);
+      if (revisionRef.current !== requestRevision) {
+        await refresh();
+        return policy;
+      }
+      upsert(policy);
+      return policy;
+    },
+    [refresh, revisionRef, upsert],
+  );
+  const removePolicy = useCallback(
+    async (policyId: string) => {
+      const requestRevision = revisionRef.current;
+      await deleteRepositoryBranchPolicy(policyId);
+      if (!repositoryId) return;
+      if (revisionRef.current !== requestRevision) {
+        await refresh();
+        return;
+      }
+      remove(repositoryId, policyId);
+    },
+    [refresh, remove, repositoryId, revisionRef],
+  );
+  const seedGitflow = useCallback(
+    async (productionBranch: string, developmentBranch: string) => {
+      // i18n-exempt: internal validation error
+      if (!repositoryId) throw new Error("Repository is required");
+      const requestRevision = revisionRef.current;
+      const response = await createGitflowRepositoryBranchPolicies(repositoryId, {
+        productionBranch,
+        developmentBranch,
+      });
+      if (revisionRef.current !== requestRevision) {
+        await refresh();
+        return response.repository_branch_policies;
+      }
+      setPolicies(repositoryId, response.repository_branch_policies, requestRevision);
+      return response.repository_branch_policies;
+    },
+    [refresh, repositoryId, revisionRef, setPolicies],
+  );
+
+  return { create, update, remove: removePolicy, seedGitflow };
+}
+
 export function useRepositoryBranchPolicies(repositoryId: string | null, enabled = true) {
   const policies = useAppStore((state) =>
     repositoryId
@@ -39,7 +160,7 @@ export function useRepositoryBranchPolicies(repositoryId: string | null, enabled
   const setPolicies = useAppStore((state) => state.setRepositoryBranchPolicies);
   const setLoading = useAppStore((state) => state.setRepositoryBranchPoliciesLoading);
   const upsert = useAppStore((state) => state.upsertRepositoryBranchPolicy);
-  const remove = useAppStore((state) => state.removeRepositoryBranchPolicy);
+  const removePolicyFromStore = useAppStore((state) => state.removeRepositoryBranchPolicy);
 
   const refresh = useCallback(async () => {
     if (!enabled || !repositoryId) return;
@@ -53,64 +174,22 @@ export function useRepositoryBranchPolicies(repositoryId: string | null, enabled
     }
   }, [enabled, repositoryId, setLoading, setPolicies]);
 
-  useEffect(() => {
-    if (!enabled || !repositoryId || isLoaded) return;
-    let cancelled = false;
-    setLoading(repositoryId, true);
-    const requestRevision = revisionRef.current;
-    listRepositoryBranchPolicies(repositoryId, { cache: "no-store" })
-      .then((response) => {
-        if (!cancelled) {
-          setPolicies(repositoryId, response.repository_branch_policies, requestRevision);
-        }
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        if (!cancelled) setLoading(repositoryId, false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [enabled, isLoaded, repositoryId, setLoading, setPolicies]);
+  useInitialRepositoryBranchPolicies({
+    enabled,
+    isLoaded,
+    repositoryId,
+    revisionRef,
+    setLoading,
+    setPolicies,
+  });
+  const mutations = useRepositoryBranchPolicyMutations({
+    repositoryId,
+    revisionRef,
+    refresh,
+    upsert,
+    remove: removePolicyFromStore,
+    setPolicies,
+  });
 
-  const create = useCallback(
-    async (draft: PolicyDraft) => {
-      // i18n-exempt: internal validation error
-      if (!repositoryId) throw new Error("Repository is required");
-      const policy = await createRepositoryBranchPolicy(repositoryId, draft);
-      upsert(policy);
-      return policy;
-    },
-    [repositoryId, upsert],
-  );
-  const update = useCallback(
-    async (policyId: string, draft: Partial<PolicyDraft>) => {
-      const policy = await updateRepositoryBranchPolicy(policyId, draft);
-      upsert(policy);
-      return policy;
-    },
-    [upsert],
-  );
-  const removePolicy = useCallback(
-    async (policyId: string) => {
-      await deleteRepositoryBranchPolicy(policyId);
-      if (repositoryId) remove(repositoryId, policyId);
-    },
-    [remove, repositoryId],
-  );
-  const seedGitflow = useCallback(
-    async (productionBranch: string, developmentBranch: string) => {
-      // i18n-exempt: internal validation error
-      if (!repositoryId) throw new Error("Repository is required");
-      const response = await createGitflowRepositoryBranchPolicies(repositoryId, {
-        productionBranch,
-        developmentBranch,
-      });
-      setPolicies(repositoryId, response.repository_branch_policies);
-      return response.repository_branch_policies;
-    },
-    [repositoryId, setPolicies],
-  );
-
-  return { policies, isLoading, refresh, create, update, remove: removePolicy, seedGitflow };
+  return { policies, isLoading, refresh, ...mutations };
 }

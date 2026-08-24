@@ -100,3 +100,17 @@ Verification:
 - Focused task service, handler, and SQLite tests passed: 61 tests.
 - `go test ./internal/backendapp ./internal/orchestrator ./internal/orchestrator/executor -run 'TestTaskRepositoryBranchTemplate|TestRenderTitleBranchName|TestBranchMaterializer|TestBuildRepoSpecs|TestResolveTaskRepoInfo' -count=1` passed.
 - The full backend validation listed in Task 01 passed.
+
+Review remediation verification:
+
+- Remote contribution policy/base mismatches are rejected before task-row
+  insertion, and the regression test confirms no orphan task remains.
+- Fresh-branch repository replacement preserves the generated effective branch
+  while retaining the immutable policy snapshot.
+- Task-created and task-updated event regression tests include all policy
+  snapshot fields, timestamps, and metadata.
+- `go test ./internal/task/service ./internal/task/handlers` passed: 1,877
+  tests across both packages.
+- `make -C apps/backend test` passed with `KANDEV_INTERNAL_CONFIG_FILE` and
+  `KANDEV_HOME_DIR` cleared so the host user's external config cannot alter
+  test defaults. Backend lint also passed with zero issues.

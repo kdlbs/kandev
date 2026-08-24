@@ -391,6 +391,18 @@ function NewSubtaskForm({
   const allExecutorProfiles = useExecutorProfiles(executors);
   const executorProfileOptions = useExecutorProfileOptions(allExecutorProfiles);
   useExecutorDefault(allExecutorProfiles, fs.executorProfileId, fs.setExecutorProfileId);
+  const selectedExecutorProfile = executorProfileOptions.find(
+    (profile) => profile.value === fs.executorProfileId,
+  );
+  const isLocalExecutor = Boolean(
+    selectedExecutorProfile?.executorType === "local" ||
+    selectedExecutorProfile?.executorType === "local_pc",
+  );
+  const freshBranchAvailable =
+    workspaceMode === "new_workspace" &&
+    !fs.useRemote &&
+    isLocalExecutor &&
+    fs.repositories.length === 1;
   const promptZone = useSubtaskPromptZone({
     parentTaskId,
     workspaceId,
@@ -424,6 +436,7 @@ function NewSubtaskForm({
     title,
     autoTitle,
     autopilot: fs.autopilot,
+    isLocalExecutor,
     setIsCreating,
     onClose,
     workspaceMode,
@@ -442,7 +455,12 @@ function NewSubtaskForm({
     executorProfileOptions,
     agentProfileId: fs.agentProfileId || defaultProfileId,
     workspaceMode,
-    onWorkspaceModeChange: setWorkspaceMode,
+    onWorkspaceModeChange: (mode: SubtaskWorkspaceMode) => {
+      if (mode !== "new_workspace") fs.setFreshBranchEnabled(false);
+      setWorkspaceMode(mode);
+    },
+    isLocalExecutor,
+    freshBranchAvailable,
     contextValue,
     onContextChange: handleContextChange,
     hasInitialPrompt: !!initialPrompt,

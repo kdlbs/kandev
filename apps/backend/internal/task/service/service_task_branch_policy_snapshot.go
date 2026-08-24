@@ -20,9 +20,6 @@ func (s *Service) validateTaskRepositoryPolicies(ctx context.Context, workspaceI
 		if input.RepositoryID == "" {
 			return fmt.Errorf("%w: branch policy selection requires a repository id", ErrInvalidRepositoryBranchPolicy)
 		}
-		if s.branchPolicies == nil {
-			return ErrRepositoryBranchPolicyStoreMissing
-		}
 		repository, err := s.repoEntities.GetRepository(ctx, input.RepositoryID)
 		if err != nil {
 			return err
@@ -30,16 +27,54 @@ func (s *Service) validateTaskRepositoryPolicies(ctx context.Context, workspaceI
 		if repository == nil || repository.WorkspaceID != workspaceID {
 			return repoerrors.ErrRepositoryNotFound
 		}
-		policy, err := s.branchPolicies.GetRepositoryBranchPolicy(ctx, input.BranchPolicyID)
+		policy, err := s.resolveTaskRepositoryPolicy(ctx, input.RepositoryID, *input)
 		if err != nil {
-			return fmt.Errorf("%w: selected policy is no longer available", ErrInvalidRepositoryBranchPolicy)
+			return err
 		}
-		if policy.RepositoryID != input.RepositoryID {
-			return fmt.Errorf("%w: selected policy does not belong to repository", ErrInvalidRepositoryBranchPolicy)
+		if input.RemoteContribution != nil && policy.BaseBranch != input.RemoteContribution.BaseBranch {
+			return fmt.Errorf("remote contribution base branch %q does not match branch policy base branch %q", input.RemoteContribution.BaseBranch, policy.BaseBranch)
 		}
 		input.BranchPolicySnapshot = cloneBranchPolicy(policy)
 	}
 	return nil
+}
+
+// preserveTaskRepositoryPolicySnapshots carries the immutable policy fields
+// across an association replacement. Fresh-branch creation replaces the row
+// after the branch exists, so resolving the policy again could otherwise pick
+// up a later edit or fail after the policy was deleted.
+func preserveTaskRepositoryPolicySnapshots(inputs []TaskRepositoryInput, existing []*models.TaskRepository) {
+	for index := range inputs {
+		input := &inputs[index]
+		if input.BranchPolicyID == "" || input.BranchPolicySnapshot != nil {
+			continue
+		}
+		for _, repository := range existing {
+			if repository.RepositoryID != input.RepositoryID || repository.BranchPolicyID != input.BranchPolicyID {
+				continue
+			}
+			if snapshot := branchPolicyFromTaskRepository(repository); snapshot != nil {
+				input.BranchPolicySnapshot = snapshot
+			}
+			break
+		}
+	}
+}
+
+func branchPolicyFromTaskRepository(repository *models.TaskRepository) *models.RepositoryBranchPolicy {
+	if repository == nil || repository.BranchPolicyID == "" || repository.BranchPolicyName == "" ||
+		repository.BranchPolicyBaseBranch == "" || repository.BranchPolicyBranchTemplate == "" ||
+		repository.BranchPolicyPullRequestTarget == "" {
+		return nil
+	}
+	return &models.RepositoryBranchPolicy{
+		ID:                repository.BranchPolicyID,
+		RepositoryID:      repository.RepositoryID,
+		Name:              repository.BranchPolicyName,
+		BaseBranch:        repository.BranchPolicyBaseBranch,
+		BranchTemplate:    repository.BranchPolicyBranchTemplate,
+		PullRequestTarget: repository.BranchPolicyPullRequestTarget,
+	}
 }
 
 func (s *Service) resolveTaskRepositoryPolicy(ctx context.Context, repositoryID string, input TaskRepositoryInput) (*models.RepositoryBranchPolicy, error) {

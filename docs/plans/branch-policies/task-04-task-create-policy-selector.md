@@ -116,3 +116,16 @@ Verification:
 - Focused frontend Vitest suite passed: 78 tests in 5 files.
 - `pnpm run typecheck`, `pnpm run lint`, and `pnpm run i18n:check` passed.
 - Desktop and mobile task-creation Playwright scenarios passed.
+
+Review remediation verification:
+
+- Unstarted-task edits keep repository snapshots unless repository rows are
+  explicitly changed, including an explicit delete.
+- The policy selector keeps policies before raw branches within the combined
+  control and previews base, template, and pull-request target.
+- Deferred-response tests cover stale create, update, and Gitflow responses;
+  stale task submissions refresh policy options without closing the dialog.
+- Local-executor policy subtasks submit the fresh-branch contract and are
+  covered on desktop and mobile.
+- The focused regression suite passed: 80 tests in 7 files. Web typecheck,
+  lint, and i18n checks passed.

@@ -10,6 +10,24 @@ vi.mock("@/hooks/domains/workspace/use-repository-branches", () => ({
   useBranches: () => ({ branches: [], isLoading: false }),
 }));
 
+vi.mock("@/hooks/domains/workspace/use-repository-branch-policies", () => ({
+  useRepositoryBranchPolicies: () => ({
+    policies: [
+      {
+        id: "policy-1",
+        repository_id: "repo-front",
+        name: "Feature branches",
+        description: "Policy description",
+        base_branch: "main",
+        branch_template: "feature/{title}-{suffix}",
+        pull_request_target: "develop",
+        created_at: "2026-08-24T10:00:00Z",
+        updated_at: "2026-08-24T10:00:00Z",
+      },
+    ],
+  }),
+}));
+
 const FRONTEND_ID = "repo-front";
 const BACKEND_ID = "repo-back";
 const CHIP_TRIGGER = "repo-chip-trigger";
@@ -117,6 +135,20 @@ describe("WorkspaceRepoChips duplicate policy", () => {
     fireEvent.click(screen.getAllByTestId(CHIP_TRIGGER)[1]);
 
     expect(screen.queryByText("Create new repository")).toBeNull();
+  });
+});
+
+describe("WorkspaceRepoChips branch policy preview", () => {
+  it("shows the branch template in the policy option preview", () => {
+    renderChips({
+      rows: [row({ key: "r0", repositoryId: FRONTEND_ID, branch: "main" })],
+      showBranchPolicies: true,
+    });
+
+    fireEvent.click(screen.getByTestId("branch-chip-trigger"));
+
+    const option = screen.getByRole("option", { name: /Feature branches/ });
+    expect(option.textContent).toContain("feature/{title}-{suffix}");
   });
 });
 

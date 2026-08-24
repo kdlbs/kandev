@@ -824,7 +824,7 @@ func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceI
 				if policy.BaseBranch != repoInput.RemoteContribution.BaseBranch {
 					return fmt.Errorf("remote contribution base branch %q does not match branch policy base branch %q", repoInput.RemoteContribution.BaseBranch, policy.BaseBranch)
 				}
-			} else {
+			} else if !repoInput.PreserveBaseBranch {
 				baseBranch = policy.BaseBranch
 			}
 		}
@@ -1520,6 +1520,15 @@ func (s *Service) ReplaceTaskRepositories(ctx context.Context, taskID, workspace
 
 // replaceTaskRepositories deletes all existing task-repository associations and recreates them.
 func (s *Service) replaceTaskRepositories(ctx context.Context, taskID, workspaceID string, repositories []TaskRepositoryInput) error {
+	existing, err := s.taskRepos.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		s.logger.Error("failed to load existing task repositories", zap.Error(err))
+		return err
+	}
+	preserveTaskRepositoryPolicySnapshots(repositories, existing)
+	if err := s.validateTaskRepositoryPolicies(ctx, workspaceID, repositories); err != nil {
+		return err
+	}
 	if err := s.taskRepos.DeleteTaskRepositoriesByTask(ctx, taskID); err != nil {
 		s.logger.Error("failed to delete task repositories", zap.Error(err))
 		return err

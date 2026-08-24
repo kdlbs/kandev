@@ -41,7 +41,7 @@ import {
 } from "@kandev/ui/drawer";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "@kandev/ui/hover-card";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useToast } from "@/components/toast-provider";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
@@ -94,12 +94,12 @@ function FieldHelp({ label, description }: { label: string; description: string 
   );
   if (!usesTouchDrawer) {
     return (
-      <HoverCard openDelay={150} closeDelay={100}>
-        <HoverCardTrigger asChild>{button}</HoverCardTrigger>
-        <HoverCardContent align="start" className="w-80 text-xs">
-          {description}
-        </HoverCardContent>
-      </HoverCard>
+      <TooltipProvider delayDuration={150}>
+        <Tooltip>
+          <TooltipTrigger asChild>{button}</TooltipTrigger>
+          <TooltipContent className="w-80 text-xs">{description}</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
     );
   }
   return (

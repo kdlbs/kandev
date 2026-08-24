@@ -107,3 +107,12 @@ and public-documentation files.
 All six work packages are implemented. Focused backend and frontend tests,
 desktop and phone browser scenarios, localization checks, public-document
 validators, specification lint, and frontend lint/typecheck passed.
+
+Review remediation also covers orphan-task prevention for remote contribution
+policy mismatches, policy-snapshot preservation during ordinary unstarted-task
+edits, complete policy fields in task WebSocket events, local fresh-branch
+creation for policy-backed subtasks, fixed selector ordering and previews,
+revision-guarded policy refreshes, stale-policy recovery, and keyboard-focused
+desktop help. The branch was rechecked with the focused backend and frontend
+suites, full backend tests with the repository's external config disabled, web
+typecheck/lint/i18n checks, and targeted desktop/mobile Playwright scenarios.

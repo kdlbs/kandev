@@ -3,6 +3,28 @@ import { expect, test } from "../../fixtures/test-base";
 import { makeGitEnv } from "../../helpers/git-helper";
 
 test.describe("Repository branch policies on desktop", () => {
+  test("shows field help on hover and keyboard focus", async ({ testPage, seedData }) => {
+    await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/repositories`);
+    const repositoryCard = testPage.locator('[data-slot="card"]', { hasText: "E2E Repo" });
+    await repositoryCard.getByRole("button", { name: "Edit", exact: true }).click();
+
+    const policies = testPage.getByTestId(`branch-policies-${seedData.repositoryId}`);
+    await policies.locator("summary").click();
+    await policies.getByRole("button", { name: "Add policy", exact: true }).click();
+
+    const dialog = testPage.getByRole("dialog", { name: "Add branch policy" });
+    const help = dialog.getByRole("button", { name: "About policy names", exact: true });
+    await help.hover();
+    await expect(testPage.getByRole("tooltip")).toContainText(
+      "Use a short name that helps people choose this policy in the task dialog.",
+    );
+
+    await help.focus();
+    await expect(testPage.getByRole("tooltip")).toContainText(
+      "Use a short name that helps people choose this policy in the task dialog.",
+    );
+  });
+
   test("creates Gitflow policies, edits one, and deletes it", async ({
     testPage,
     apiClient,
