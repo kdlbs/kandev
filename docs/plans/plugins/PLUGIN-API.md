@@ -668,6 +668,9 @@ own write).
 // React. Unknown/missing names render a puzzle glyph in the sidebar.
 // section: "main" (default) renders as a top-level sidebar entry;
 // "integrations" renders inside the sidebar's Integrations section alongside
+// "after-integrations" renders as a top-level destination immediately after
+// the Integrations group on desktop and mobile; use it for a workspace-scoped
+// agent product, not a generic integration;
 // the first-party integration links (GitHub, Jira, ...); "sidebar-footer"
 // renders as an icon button in the sidebar footer's icon row and as a
 // labelled row in the phone menu's Utilities group, subject to the footer's
@@ -677,11 +680,7 @@ own write).
 // unrecognised one, simply degrade to "main"'s placement — nothing is ever
 // silently dropped.
 type PluginIcon = string | React.ComponentType<{ className?: string }>;
-export type PluginNavSection =
-  | "main"
-  | "settings"
-  | "integrations"
-  | "sidebar-footer";
+export type PluginNavSection = "main" | "settings" | "integrations" | "after-integrations" | "sidebar-footer";
 
 interface NavItem {
   id: string;

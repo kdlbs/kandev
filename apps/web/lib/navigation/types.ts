@@ -29,7 +29,13 @@ export type NavSurface = "sidebar" | "mobileMenu" | "palette";
  * headings in the mobile menu and their own sidebar sections; `insights` and
  * `utilities` render together in the mobile menu's utility block.
  */
-export type NavSection = "primary" | "plugins" | "integrations" | "insights" | "utilities";
+export type NavSection =
+  | "primary"
+  | "plugins"
+  | "integrations"
+  | "workspace-agents"
+  | "insights"
+  | "utilities";
 
 /**
  * Sections that may contain availability-gated destinations. Only surfaces

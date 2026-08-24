@@ -127,6 +127,13 @@ export function AppNavSections({
       )}
       {!omit.has("plugins") && <MobilePluginNavSection onNavigate={onNavigate} />}
       {!omit.has("integrations") && <MobileIntegrationsSection onNavigate={onNavigate} />}
+      {!omit.has("integrations") && (
+        <MobilePluginNavSection
+          onNavigate={onNavigate}
+          section="workspace-agents"
+          heading={false}
+        />
+      )}
       <UtilityNavSection onNavigate={onNavigate} controls={controls} />
     </>
   );

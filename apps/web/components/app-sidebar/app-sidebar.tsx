@@ -87,6 +87,7 @@ function AppSidebarModeNav({ collapsed, inOffice }: { collapsed: boolean; inOffi
         <AgentsSection collapsed={collapsed} />
         {inOffice && <OfficeNavigationSection collapsed={collapsed} section="office" />}
         {!inOffice && <IntegrationsSection collapsed={collapsed} />}
+        {!inOffice && <PluginNavItems collapsed={collapsed} section="workspace-agents" />}
       </div>
       {/* In regular kanban mode, Tasks is the flex-grow middle section so
           it absorbs remaining vertical space and scrolls internally.

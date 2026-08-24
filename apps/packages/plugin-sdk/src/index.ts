@@ -25,7 +25,12 @@ export interface PluginIconProps {
 export type PluginIcon = string | Component<PluginIconProps>;
 
 /** Placement for a registered nav item; see `PluginRegistry.registerNavItem`. */
-export type PluginNavSection = "main" | "settings" | "integrations" | "sidebar-footer";
+export type PluginNavSection =
+  | "main"
+  | "settings"
+  | "integrations"
+  | "after-integrations"
+  | "sidebar-footer";
 
 /** Context passed to components registered for the `main-top-bar` slot. */
 export interface MainTopBarSlotProps {
