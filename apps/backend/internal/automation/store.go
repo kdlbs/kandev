@@ -179,7 +179,7 @@ const (
 // automation used to put a card on the board", for a migration notice that
 // closes once. Projecting the mode itself would hand every future caller a
 // mode to branch on, and the whole point of withdrawing it is that no firing
-// path has one. See docs/specs/office/automations-settings.md § Migration.
+// path has one. See docs/specs/office/requirements/automations-settings.md § Migration.
 const automationColumns = `id, workspace_id, name, description, workflow_id, workflow_step_id,
 	agent_profile_id, executor_profile_id, task_mode, repository_mode, prompt, task_title_template,
 	 enabled, max_concurrent_runs, continuation_policy, continuation_task_id, webhook_secret,

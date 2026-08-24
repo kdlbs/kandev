@@ -1127,6 +1127,8 @@ export class ApiClient {
     updates: {
       prompt?: string;
       agent_profile_id?: string;
+      /** Promotes this step to the workflow's start step, demoting the previous one. */
+      is_start_step?: boolean;
       events?: {
         on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
         on_turn_start?: Array<{ type: string; config?: Record<string, unknown> }>;

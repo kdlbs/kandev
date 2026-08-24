@@ -5,7 +5,7 @@ status: done
 wave: 7
 depends_on: ["18-workspace-authentication-ux"]
 plan: "plan.md"
-spec: "../../specs/integrations/github-authentication.md"
+spec: "../../specs/integrations/requirements/github-authentication.md"
 ---
 
 # Task 20: Registration Documentation

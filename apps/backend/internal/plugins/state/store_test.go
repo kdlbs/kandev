@@ -135,7 +135,7 @@ func TestStoreDeleteRemovesEntry(t *testing.T) {
 }
 
 // TestStoreDeleteAllRemovesEveryRowForPlugin pins the Uninstall cleanup
-// contract (docs/specs/plugins/spec.md "plugin_state"): a plugin's entire
+// contract (docs/specs/plugins/requirements/plugins.md "plugin_state"): a plugin's entire
 // state footprint — across every scope and scope_id — must be removable in
 // one call, so a reinstalled or id-reused plugin never inherits stale state.
 func TestStoreDeleteAllRemovesEveryRowForPlugin(t *testing.T) {
@@ -248,7 +248,7 @@ func TestStoreListReturnsOnlyMatchingScope(t *testing.T) {
 }
 
 // TestStorePluginsCannotReadEachOthersState pins the spec invariant that
-// plugin state is always filtered by plugin_id (docs/specs/plugins/spec.md
+// plugin state is always filtered by plugin_id (docs/specs/plugins/requirements/plugins.md
 // "Plugins cannot read others' state").
 func TestStorePluginsCannotReadEachOthersState(t *testing.T) {
 	store := newTestStore(t)

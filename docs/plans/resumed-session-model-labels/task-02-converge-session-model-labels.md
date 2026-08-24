@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-gate-startup-model-events"]
 plan: "plan.md"
-spec: "../../specs/ui/acp-model-configuration-summary.md"
+spec: "../../specs/ui/requirements/acp-model-configuration-summary.md"
 ---
 
 # Task 02: Converge Resumed Session Model Labels
@@ -34,7 +34,7 @@ cd apps/web && pnpm e2e:run --project mobile-chrome tests/chat/mobile-model-sele
 - `apps/web/components/task/session-tab-title.ts`
 - `apps/web/components/task/session-tab-title.test.ts`
 - `apps/web/e2e/tests/session/session-resume.spec.ts`
-- `docs/specs/ui/acp-model-configuration-summary.md`
+- `docs/specs/ui/requirements/acp-model-configuration-summary.md`
 - `docs/plans/resumed-session-model-labels/plan.md`
 - `docs/plans/resumed-session-model-labels/task-02-converge-session-model-labels.md`
 

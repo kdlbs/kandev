@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: docs/plans/app-status-bar-appearance-setting/plan.md
-spec: docs/specs/ui/app-status-bar.md
+spec: docs/specs/ui/requirements/app-status-bar.md
 decision: docs/decisions/2026-08-11-user-owned-status-bar-visibility.md
 ---
 
@@ -13,7 +13,7 @@ decision: docs/decisions/2026-08-11-user-owned-status-bar-visibility.md
 
 ## Inputs
 
-The approved [App Status Bar spec](../../specs/ui/app-status-bar.md), ADR 0041
+The approved [App Status Bar spec](../../specs/ui/requirements/app-status-bar.md), ADR 0041
 backend-owned portable settings, the new visibility ADR, and the existing
 `app_status_bar_order` user-settings round trip.
 

@@ -2213,7 +2213,7 @@ type TaskReviewRun struct {
 // TaskReviewFinding is one anchored, advisory review comment produced by a
 // review run. It renders in the Changes/Review diff at File/StartLine..EndLine
 // of Repository, and carries FileDiffHash so a client can tell whether the
-// diff has moved under it (see ../../../../docs/specs/native-code-review/spec.md).
+// diff has moved under it (see ../../../../docs/specs/agents/requirements/native-code-review.md).
 type TaskReviewFinding struct {
 	ID             string              `json:"id"`
 	RunID          string              `json:"run_id"`

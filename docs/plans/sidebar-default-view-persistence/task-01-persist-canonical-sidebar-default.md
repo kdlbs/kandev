@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/sidebar-view-creation.md"
+spec: "../../specs/ui/requirements/sidebar-view-creation.md"
 ---
 
 # Task 01: Persist the canonical sidebar default
@@ -39,7 +39,7 @@ filter edit through unit, HTTP integration, and browser coverage.
 
 ## Files likely touched
 
-- `docs/specs/ui/sidebar-view-creation.md`
+- `docs/specs/ui/requirements/sidebar-view-creation.md`
 - `apps/backend/internal/user/store/sqlite.go`
 - `apps/backend/internal/user/store/sqlite_test.go`
 - `apps/backend/internal/user/handlers/handlers_test.go`
@@ -59,7 +59,7 @@ regression describe one cross-layer contract and should be landed together.
 
 ## Inputs
 
-- Spec: `docs/specs/ui/sidebar-view-creation.md`, especially **Persistence and
+- Spec: `docs/specs/ui/requirements/sidebar-view-creation.md`, especially **Persistence and
   failure behavior** and the clean-user scenarios.
 - Decision: `docs/decisions/0041-backend-owned-portable-user-settings.md`.
 - Backend paths: `defaultUserSettings`, `scanUserSettings`,

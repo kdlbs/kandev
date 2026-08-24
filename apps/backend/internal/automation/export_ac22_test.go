@@ -7,7 +7,7 @@ import (
 
 // fieldDisposition records what AC-22 calls a field's "disposition": either exported
 // under a named YAML key, or excluded for a stated reason. See
-// docs/specs/automations-yaml-export/spec.md § Round-trip completeness, the field
+// docs/specs/office/requirements/automations-yaml-export.md § Round-trip completeness, the field
 // disposition table under "Data model".
 //
 // This is the anti-`reports_to` guard: Office's config export declared and emitted an

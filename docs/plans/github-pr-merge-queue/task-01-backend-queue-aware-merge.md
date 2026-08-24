@@ -5,14 +5,14 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/github-pr-merge-queue/spec.md"
+spec: "../../specs/integrations/requirements/github-pr-merge-queue.md"
 ---
 
 # Task 01: Backend Queue-Aware Merge
 
 ## Inputs
 
-- `docs/specs/github-pr-merge-queue/spec.md`
+- `docs/specs/integrations/requirements/github-pr-merge-queue.md`
 - `docs/plans/github-pr-merge-queue/plan.md`
 - `apps/backend/AGENTS.md`
 

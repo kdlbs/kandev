@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/sidebar-empty-task-alignment.md
+spec: docs/specs/ui/requirements/sidebar-empty-task-alignment.md
 created: 2026-08-13
 status: complete
 ---

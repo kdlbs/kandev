@@ -513,7 +513,7 @@ const McpModeTaskTitlePending = "task-title-pending"
 // McpModeOffice restricts the MCP toolset for office (autonomous) agents to
 // interaction + plan tools. Office agents manage tasks via the kandev CLI
 // (exposed through agentctl + $KANDEV_CLI), not MCP — see
-// docs/specs/office-agent-cli/spec.md.
+// docs/specs/office/system-design/agents-03.md.
 const McpModeOffice = "office"
 
 // McpModeAutomation selects the fixed coordinator MCP surface for tasks

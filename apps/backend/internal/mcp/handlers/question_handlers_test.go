@@ -388,7 +388,7 @@ func (stubDetachedResumer) ResumeDetachedClarification(context.Context, clarific
 func newTestResolver(t *testing.T, store *clarification.Store, repo *sqliterepo.Repository, svc *service.Service) *clarification.Resolver {
 	t.Helper()
 	resumer := stubDetachedResumer{}
-	return clarification.NewResolver(store, repo, &svcMessageUpdater{Service: svc}, svc, resumer, resumer, testLogger(t))
+	return clarification.NewResolver(store, repo, &svcMessageUpdater{Service: svc}, svc, resumer, resumer, nil, testLogger(t))
 }
 
 // seedBundle creates a task/session/turn and a two-question clarification

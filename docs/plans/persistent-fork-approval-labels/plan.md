@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/claude-fork-review-allowlist/spec.md
+spec: docs/specs/integrations/requirements/claude-fork-review-allowlist.md
 created: 2026-08-22
 status: implemented
 ---
@@ -51,7 +51,7 @@ files.
 
 ## Documentation and decision records
 
-- Amend `docs/specs/claude-fork-review-allowlist/spec.md` with durable-label
+- Amend `docs/specs/integrations/requirements/claude-fork-review-allowlist.md` with durable-label
   scenarios and the changed OpenCode/preview behavior.
 - Amend `docs/decisions/2026-08-07-claude-allowlist-label-bridge.md` to point
   the superseded per-commit clause at the new decision.

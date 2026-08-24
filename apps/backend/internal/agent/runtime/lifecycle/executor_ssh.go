@@ -59,7 +59,7 @@ type sshSessionState struct {
 // Each session owns its own *ssh.Client (no shared pool). One SSH connection
 // per session keeps teardown simple — closing the executor instance closes
 // the client — at the cost of an extra TCP+handshake per session on the same
-// host. See docs/specs/ssh-executor/spec.md for the full design.
+// host. See docs/specs/executors/requirements/ssh-executor.md for the full design.
 type SSHExecutor struct {
 	agentctlResolver *AgentctlResolver
 	secretStore      secrets.SecretStore

@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-enforce-queue-auto-run"]
 plan: "plan.md"
-spec: "../../specs/ui/message-queue-run.md"
+spec: "../../specs/ui/requirements/message-queue-run.md"
 ---
 
 # Task 03: Add the Auto-run switch

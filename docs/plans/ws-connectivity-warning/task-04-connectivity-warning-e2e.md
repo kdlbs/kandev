@@ -6,7 +6,7 @@ wave: 4
 depends_on:
   ["01-connection-issue-timing", "02-desktop-warning-surfaces", "03-mobile-warning-surfaces"]
 plan: "plan.md"
-spec: "../../specs/ui/ws-connectivity-warning.md"
+spec: "../../specs/ui/requirements/ws-connectivity-warning.md"
 ---
 
 # Task 04: Connectivity warning E2E

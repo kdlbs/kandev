@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -24,6 +25,15 @@ func (s *Service) GetContinuationSummaryForTest(
 	ctx context.Context, agentProfileID, scope string,
 ) (*sqlite.AgentContinuationSummary, error) {
 	return s.repo.GetContinuationSummary(ctx, agentProfileID, scope)
+}
+
+// LoadContinuationSummaryForTest exposes SchedulerIntegration's private
+// loadContinuationSummary so tests can drive the real reader path
+// (as assembleAgentPrompt calls it) without duplicating its scope logic.
+func (si *SchedulerIntegration) LoadContinuationSummaryForTest(
+	ctx context.Context, run *models.Run, agentID, taskID string,
+) string {
+	return si.loadContinuationSummary(ctx, run, agentID, taskID)
 }
 
 // ListTasksTouchedByRunForTest exposes the repo's read query so the
@@ -57,6 +67,32 @@ func ParseRateLimitResetTimeForTest(errMsg string, now time.Time) *time.Time {
 func BuildPromptContextForTest(svc *Service, ctx context.Context, reason, payload string) *PromptContext {
 	si := &SchedulerIntegration{svc: svc, logger: svc.logger}
 	return si.buildPromptContext(ctx, reason, payload)
+}
+
+// CoalesceRoutineWakeupForTest creates a wakeup-request carrying the
+// given routine_id and coalesces it into an already-claimed run, exactly
+// as the wakeup dispatcher does when a routine fire lands on an
+// in-flight run (wakeup.Dispatcher.Dispatch -> MarkWakeupRequestCoalesced).
+// Used by WO-16's continuation-scope regression tests to reproduce the
+// claim-time vs completion-time snapshot drift without standing up the
+// full wakeup dispatcher.
+func (s *Service) CoalesceRoutineWakeupForTest(
+	ctx context.Context, t *testing.T, agentProfileID, runID, routineID string,
+) {
+	t.Helper()
+	req := &sqlite.WakeupRequest{
+		ID:             "wakeup-" + runID + "-" + routineID,
+		AgentProfileID: agentProfileID,
+		Source:         "routine",
+		Reason:         "routine_trigger",
+		Payload:        fmt.Sprintf(`{"routine_id":%q}`, routineID),
+	}
+	if err := s.repo.CreateWakeupRequest(ctx, req); err != nil {
+		t.Fatalf("create wakeup request: %v", err)
+	}
+	if err := s.repo.MarkWakeupRequestCoalesced(ctx, req.ID, runID); err != nil {
+		t.Fatalf("coalesce wakeup request into run: %v", err)
+	}
 }
 
 // ExecSQL executes raw SQL against the service's database for test setup.

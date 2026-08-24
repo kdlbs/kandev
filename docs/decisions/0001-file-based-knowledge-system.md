@@ -24,10 +24,9 @@ parallel branches to reserve a shared next number.
 
 Architecture decisions are recorded as ADRs (this file is an example). Product
 behavior is captured in the system-oriented specification layout defined by
-`ADR-2026-08-22-system-oriented-specifications`. ~~Implementation plans
-(`docs/specs/<slug>/plan.md`) and post-ship notes (`docs/specs/<slug>/notes.md`)
-live alongside specs but are **gitignored** — they are ephemeral working files
-regenerated from the spec as needed, not permanent records.~~
+`ADR-2026-08-22-system-oriented-specifications`. Implementation plans live
+under `docs/plans/<initiative>/` and are durable records linked to their
+requirements and system designs.
 
 > The current specification and plan layout is defined by
 > `ADR-2026-08-22-system-oriented-specifications`. The paragraph above records
