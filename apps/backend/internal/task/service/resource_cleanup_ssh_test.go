@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -147,6 +148,7 @@ func TestSSHReclaimRemovesDirectoryOnTerminalOutcomes(t *testing.T) {
 	triggers := []models.TaskResourceCleanupTrigger{
 		models.TaskResourceCleanupTriggerArchive,
 		models.TaskResourceCleanupTriggerDelete,
+		models.TaskResourceCleanupTriggerCascadeArchive,
 		models.TaskResourceCleanupTriggerCascadeDelete,
 	}
 	for _, trigger := range triggers {
@@ -157,7 +159,7 @@ func TestSSHReclaimRemovesDirectoryOnTerminalOutcomes(t *testing.T) {
 			taskSvc.SetSSHTaskDirReclaimer(reclaimer)
 
 			taskID, env := newReclaimTask(t, taskSvc, "Reclaimed task")
-			if trigger == models.TaskResourceCleanupTriggerArchive {
+			if trigger == models.TaskResourceCleanupTriggerArchive || trigger == models.TaskResourceCleanupTriggerCascadeArchive {
 				if err := repo.ArchiveTask(context.Background(), taskID); err != nil {
 					t.Fatalf("ArchiveTask: %v", err)
 				}
@@ -239,6 +241,73 @@ func TestSSHReclaimSnapshotDeDuplicatesSiblingSessions(t *testing.T) {
 	}
 	if !seen[testReclaimTaskDir] || !seen[otherHostDir] {
 		t.Fatalf("captured dirs = %v, want both recorded directories", seen)
+	}
+}
+
+func TestSSHReclaimSnapshotPreservesOptOutAcrossDuplicateSessions(t *testing.T) {
+	taskSvc, repo := setupOfficeTest(t)
+	taskSvc.StopTaskResourceCleanupWorker()
+	ctx := context.Background()
+	taskID, _ := newReclaimTask(t, taskSvc, "Mixed reclamation settings")
+
+	for index, enabled := range []bool{true, false} {
+		sessionID := fmt.Sprintf("mixed-session-%d", index)
+		if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+			ID: sessionID, TaskID: taskID, State: models.TaskSessionStateCompleted,
+		}); err != nil {
+			t.Fatalf("CreateTaskSession: %v", err)
+		}
+		if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+			ID: sessionID, SessionID: sessionID, TaskID: taskID, ExecutorID: "executor-ssh",
+			Runtime: agentruntime.RuntimeStandalone, Status: models.ExecutorRunningStatusStarting,
+			Metadata: sshRunningMetadata(testReclaimTaskDir, enabled),
+		}); err != nil {
+			t.Fatalf("UpsertExecutorRunning: %v", err)
+		}
+	}
+
+	targets, err := taskSvc.gatherSSHReclaimTargets(ctx, taskID)
+	if err != nil {
+		t.Fatalf("gatherSSHReclaimTargets: %v", err)
+	}
+	if len(targets) != 1 {
+		t.Fatalf("targets = %d, want 1 (%+v)", len(targets), targets)
+	}
+	if targets[0].Enabled {
+		t.Fatal("duplicate target remained enabled after one session opted out")
+	}
+}
+
+func TestSSHReclaimSnapshotMatchesHostNamesWithoutCase(t *testing.T) {
+	taskSvc, repo := setupOfficeTest(t)
+	taskSvc.StopTaskResourceCleanupWorker()
+	ctx := context.Background()
+	taskID, _ := newReclaimTask(t, taskSvc, "Host spelling aliases")
+
+	for index, host := range []string{"BUILD.EXAMPLE", "build.example"} {
+		sessionID := fmt.Sprintf("host-session-%d", index)
+		metadata := sshRunningMetadata(testReclaimTaskDir, true)
+		metadata[sshMetaHost] = host
+		if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+			ID: sessionID, TaskID: taskID, State: models.TaskSessionStateCompleted,
+		}); err != nil {
+			t.Fatalf("CreateTaskSession: %v", err)
+		}
+		if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+			ID: sessionID, SessionID: sessionID, TaskID: taskID, ExecutorID: "executor-ssh",
+			Runtime: agentruntime.RuntimeStandalone, Status: models.ExecutorRunningStatusStarting,
+			Metadata: metadata,
+		}); err != nil {
+			t.Fatalf("UpsertExecutorRunning: %v", err)
+		}
+	}
+
+	targets, err := taskSvc.gatherSSHReclaimTargets(ctx, taskID)
+	if err != nil {
+		t.Fatalf("gatherSSHReclaimTargets: %v", err)
+	}
+	if len(targets) != 1 {
+		t.Fatalf("targets = %d, want one host identity (%+v)", len(targets), targets)
 	}
 }
 
@@ -406,6 +475,17 @@ func TestSSHReclaimSafetySkipCompletesJob(t *testing.T) {
 	if got.LastError != "" {
 		t.Fatalf("last_error = %q, want empty for a safety skip", got.LastError)
 	}
+	var snapshot taskResourceCleanupSnapshot
+	if err := json.Unmarshal([]byte(got.ResourceSnapshot), &snapshot); err != nil {
+		t.Fatalf("decode persisted snapshot: %v", err)
+	}
+	if len(snapshot.SSHTaskDirs) != 1 {
+		t.Fatalf("persisted targets = %d, want 1", len(snapshot.SSHTaskDirs))
+	}
+	if target := snapshot.SSHTaskDirs[0]; target.Outcome != sshReclaimOutcomeSkipped ||
+		target.SkipReason != "unpushed_commits" || target.Detail != "2 commits" {
+		t.Fatalf("persisted reclaim result = %+v, want skipped unpushed_commits detail", target)
+	}
 }
 
 // TestSSHReclaimFailureIsARealError is the anti-D6 test: a removal that did not
@@ -470,10 +550,10 @@ func TestSSHReclaimRetryReRunsTheProbe(t *testing.T) {
 	}
 	job := newReclaimJob(t, repo, taskID, models.TaskResourceCleanupTriggerDelete, snapshot)
 
-	if err := taskSvc.executeTaskResourceCleanupJob(context.Background(), job, snapshot); err == nil {
+	if err := taskSvc.executeTaskResourceCleanupJob(context.Background(), job, &snapshot); err == nil {
 		t.Fatal("first attempt returned nil, want the transport failure")
 	}
-	if err := taskSvc.executeTaskResourceCleanupJob(context.Background(), job, snapshot); err != nil {
+	if err := taskSvc.executeTaskResourceCleanupJob(context.Background(), job, &snapshot); err != nil {
 		t.Fatalf("second attempt: %v", err)
 	}
 	if attempts != 2 {
@@ -524,7 +604,7 @@ func TestSSHReclaimNeverStartsOnACancelledContext(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_ = taskSvc.executeTaskResourceCleanupJob(ctx, job, snapshot)
+	_ = taskSvc.executeTaskResourceCleanupJob(ctx, job, &snapshot)
 
 	if calls := reclaimer.calls(); len(calls) != 0 {
 		t.Fatalf("reclaim attempts = %d, want 0 during shutdown", len(calls))

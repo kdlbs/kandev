@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: ssh-executor
 created: 2026-08-24
 owners:
@@ -98,8 +98,9 @@ housekeeping can never cost me work.
   directory only when each checkout positively demonstrates that it holds no
   at-risk content.
 - **AC-SSH-TASKDIR-RECLAMATION-002.2:** When a checkout has uncommitted
-  modifications, staged changes, or untracked files, the system shall skip
-  reclamation for that task directory and report the reason.
+  modifications, staged changes, untracked files, or ignored files outside the
+  Kandev-owned `.kandev/` runtime path, the system shall skip reclamation for
+  that task directory and report the reason.
 - **AC-SSH-TASKDIR-RECLAMATION-002.3:** When a checkout holds a commit reachable
   from any local branch or from `HEAD` that is not contained by any
   remote-tracking ref, the system shall skip reclamation for that task directory

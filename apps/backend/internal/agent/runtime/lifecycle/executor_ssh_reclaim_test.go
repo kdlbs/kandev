@@ -16,6 +16,20 @@ type fakeSSHRunner struct {
 	calls     []string
 }
 
+type directFakeSSHRunner struct {
+	*fakeSSHRunner
+	directResponses map[string]fakeSSHResponse
+	directCalls     []string
+}
+
+func (f *directFakeSSHRunner) RunDirect(_ context.Context, cmd string) (string, string, error) {
+	f.directCalls = append(f.directCalls, cmd)
+	if resp, ok := f.directResponses[cmd]; ok {
+		return resp.stdout, resp.stderr, resp.err
+	}
+	return "", "", errors.New("unexpected direct command: " + cmd)
+}
+
 type fakeSSHResponse struct {
 	stdout string
 	stderr string
@@ -166,7 +180,7 @@ func TestSSHTaskDirReclaimProbeSkipReasons(t *testing.T) {
 		{
 			name:       "checkout probe errors",
 			mutate:     func(f *fakeSSHRunner) { f.onErr(sshReclaimIsCheckoutCmd(testTaskDir), errors.New("git: not found")) },
-			wantReason: SSHReclaimSkipNotACheckout,
+			wantReason: SSHReclaimSkipProbeFailed,
 		},
 		{
 			name:       "status probe errors",
@@ -216,6 +230,29 @@ func TestSSHTaskDirReclaimProbeSkipReasons(t *testing.T) {
 	}
 }
 
+func TestSSHTaskDirReclaimProbePreservesIgnoredFiles(t *testing.T) {
+	f := safeSingleRepoRunner()
+	f.on(sshReclaimStatusCmd(testTaskDir), "!! .env\n")
+
+	verdict := newTestReclaimer(f).probe(context.Background(), testTaskDir)
+	if verdict.Safe {
+		t.Fatal("probe verdict = safe, want ignored file to preserve the directory")
+	}
+	if verdict.Reason != SSHReclaimSkipDirtyWorktree {
+		t.Fatalf("probe reason = %q, want %q", verdict.Reason, SSHReclaimSkipDirtyWorktree)
+	}
+}
+
+func TestSSHTaskDirReclaimProbeIgnoresKandevRuntimeFiles(t *testing.T) {
+	f := safeSingleRepoRunner()
+	f.on(sshReclaimStatusCmd(testTaskDir), "!! .kandev/\n")
+
+	verdict := newTestReclaimer(f).probe(context.Background(), testTaskDir)
+	if !verdict.Safe {
+		t.Fatalf("probe verdict = %+v, want safe for Kandev-owned runtime files", verdict)
+	}
+}
+
 func TestSSHTaskDirReclaimProbeInspectsChildRepositories(t *testing.T) {
 	childA := testTaskDir + "/api-main"
 	childB := testTaskDir + "/web-main"
@@ -242,6 +279,19 @@ func TestSSHTaskDirReclaimProbeInspectsChildRepositories(t *testing.T) {
 	}
 	if !strings.Contains(verdict.Detail, childB) {
 		t.Fatalf("verdict detail %q does not name the offending checkout %q", verdict.Detail, childB)
+	}
+}
+
+func TestSSHTaskDirReclaimProbeRejectsUnexpectedChildEntry(t *testing.T) {
+	f := safeSingleRepoRunner()
+	f.on(sshReclaimChildReposCmd(testTaskDir), testTaskDir+"/not-a-git-entry\n")
+
+	verdict := newTestReclaimer(f).probe(context.Background(), testTaskDir)
+	if verdict.Safe {
+		t.Fatal("probe verdict = safe, want malformed child enumeration to preserve the directory")
+	}
+	if verdict.Reason != SSHReclaimSkipProbeFailed {
+		t.Fatalf("probe reason = %q, want %q", verdict.Reason, SSHReclaimSkipProbeFailed)
 	}
 }
 
@@ -431,6 +481,26 @@ func TestSSHTaskDirReclaimExpandsRemoteHomeInWorkspaceRoot(t *testing.T) {
 				t.Fatalf("outcome = %q, want removed", outcome)
 			}
 		})
+	}
+}
+
+func TestSSHTaskDirReclaimUsesDirectHomeProbe(t *testing.T) {
+	f := &directFakeSSHRunner{
+		fakeSSHRunner:   newFakeSSHRunner(),
+		directResponses: map[string]fakeSSHResponse{sshReclaimHomeCmd(): {stdout: "/home/dev\n"}},
+	}
+	root, err := newTestReclaimer(f).resolveWorkdirRoot(context.Background(), "~/.kandev")
+	if err != nil {
+		t.Fatalf("resolveWorkdirRoot: %v", err)
+	}
+	if root != "/home/dev/.kandev" {
+		t.Fatalf("resolved root = %q, want /home/dev/.kandev", root)
+	}
+	if len(f.directCalls) != 1 || f.directCalls[0] != sshReclaimHomeCmd() {
+		t.Fatalf("direct calls = %v, want one unwrapped home probe", f.directCalls)
+	}
+	if len(f.calls) != 0 {
+		t.Fatalf("login-shell calls = %v, want none for the home probe", f.calls)
 	}
 }
 

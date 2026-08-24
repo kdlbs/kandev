@@ -65,12 +65,19 @@ type sshReclaimTarget struct {
 	// launched. The profile is the sole source of truth; a task can never set
 	// it, because the executor projection treats the key as authoritative.
 	Enabled bool `json:"enabled,omitempty"`
+	// Outcome, SkipReason, and Detail are filled after the cleanup attempt so a
+	// successful safety skip remains discoverable in the durable job snapshot.
+	Outcome    string `json:"outcome,omitempty"`
+	SkipReason string `json:"skip_reason,omitempty"`
+	Detail     string `json:"detail,omitempty"`
 }
 
 // sameRemoteDir reports whether two targets name the same directory on the
 // same host. Used to detect a directory another task is still using.
 func (t sshReclaimTarget) sameRemoteDir(other sshReclaimTarget) bool {
-	return t.Host == other.Host &&
+	sameHost := strings.EqualFold(t.Host, other.Host) ||
+		(t.HostFingerprint != "" && t.HostFingerprint == other.HostFingerprint)
+	return sameHost &&
 		t.Port == other.Port &&
 		t.User == other.User &&
 		t.TaskDir == other.TaskDir
@@ -139,7 +146,18 @@ func (s *Service) gatherSSHReclaimTargets(ctx context.Context, taskID string) ([
 			continue
 		}
 		target := sshReclaimTargetFromMetadata(running.Metadata)
-		if !target.usable() || containsRemoteDir(targets, target) {
+		if !target.usable() {
+			continue
+		}
+		duplicate := false
+		for index := range targets {
+			if targets[index].sameRemoteDir(target) {
+				targets[index].Enabled = targets[index].Enabled && target.Enabled
+				duplicate = true
+				break
+			}
+		}
+		if duplicate {
 			continue
 		}
 		targets = append(targets, target)
@@ -197,9 +215,9 @@ const (
 func (s *Service) reclaimSSHTaskDirs(
 	ctx context.Context,
 	job *models.TaskResourceCleanupJob,
-	snapshot taskResourceCleanupSnapshot,
+	snapshot *taskResourceCleanupSnapshot,
 ) []error {
-	if s.sshTaskDirReclaimer == nil || len(snapshot.SSHTaskDirs) == 0 {
+	if s.sshTaskDirReclaimer == nil || snapshot == nil || len(snapshot.SSHTaskDirs) == 0 {
 		return nil
 	}
 	// Never begin an irreversible remote removal on a context that is already
@@ -213,18 +231,23 @@ func (s *Service) reclaimSSHTaskDirs(
 	owned, ownershipDetail := s.taskOwnsItsWorkspace(ctx, job.TaskID, snapshot.TaskEnvironment)
 	claims, claimErr := s.remoteTaskDirsClaimedByOtherTasks(ctx, job.TaskID)
 	var errs []error
-	for _, target := range snapshot.SSHTaskDirs {
+	for index := range snapshot.SSHTaskDirs {
+		target := &snapshot.SSHTaskDirs[index]
 		switch {
 		case !target.Enabled:
-			s.logSSHReclaim(job.TaskID, target, sshReclaimOutcomeSkipped, sshReclaimSkipDisabled, "")
+			s.recordSSHReclaimOutcome(target, sshReclaimOutcomeSkipped, sshReclaimSkipDisabled, "")
+			s.logSSHReclaim(job.TaskID, *target, sshReclaimOutcomeSkipped, sshReclaimSkipDisabled, "")
 		case !owned:
-			s.logSSHReclaim(job.TaskID, target, sshReclaimOutcomeSkipped, sshReclaimSkipShared, ownershipDetail)
+			s.recordSSHReclaimOutcome(target, sshReclaimOutcomeSkipped, sshReclaimSkipShared, ownershipDetail)
+			s.logSSHReclaim(job.TaskID, *target, sshReclaimOutcomeSkipped, sshReclaimSkipShared, ownershipDetail)
 		case claimErr != nil:
-			s.logSSHReclaim(job.TaskID, target, sshReclaimOutcomeSkipped, sshReclaimSkipShared,
-				"directory ownership lookup failed: "+claimErr.Error())
-		case containsRemoteDir(claims, target):
-			s.logSSHReclaim(job.TaskID, target, sshReclaimOutcomeSkipped, sshReclaimSkipShared,
-				"another task still holds this remote directory")
+			detail := "directory ownership lookup failed: " + claimErr.Error()
+			s.recordSSHReclaimOutcome(target, sshReclaimOutcomeSkipped, sshReclaimSkipShared, detail)
+			s.logSSHReclaim(job.TaskID, *target, sshReclaimOutcomeSkipped, sshReclaimSkipShared, detail)
+		case containsRemoteDir(claims, *target):
+			detail := "another task still holds this remote directory"
+			s.recordSSHReclaimOutcome(target, sshReclaimOutcomeSkipped, sshReclaimSkipShared, detail)
+			s.logSSHReclaim(job.TaskID, *target, sshReclaimOutcomeSkipped, sshReclaimSkipShared, detail)
 		default:
 			if err := s.reclaimOneSSHTaskDir(ctx, job.TaskID, target); err != nil {
 				errs = append(errs, err)
@@ -234,7 +257,7 @@ func (s *Service) reclaimSSHTaskDirs(
 	return errs
 }
 
-func (s *Service) reclaimOneSSHTaskDir(ctx context.Context, taskID string, target sshReclaimTarget) error {
+func (s *Service) reclaimOneSSHTaskDir(ctx context.Context, taskID string, target *sshReclaimTarget) error {
 	result, err := s.sshTaskDirReclaimer.ReclaimTaskDir(ctx, SSHTaskDirReclaimRequest{
 		Host:            target.Host,
 		Port:            target.Port,
@@ -248,15 +271,24 @@ func (s *Service) reclaimOneSSHTaskDir(ctx context.Context, taskID string, targe
 		TaskDir:         target.TaskDir,
 	})
 	if err != nil {
-		s.logSSHReclaim(taskID, target, sshReclaimOutcomeFailed, "", err.Error())
+		s.recordSSHReclaimOutcome(target, sshReclaimOutcomeFailed, "", err.Error())
+		s.logSSHReclaim(taskID, *target, sshReclaimOutcomeFailed, "", err.Error())
 		return fmt.Errorf("reclaim remote task dir %s on %s: %w", target.TaskDir, target.Host, err)
 	}
 	if result.Removed {
-		s.logSSHReclaim(taskID, target, sshReclaimOutcomeRemoved, "", result.Detail)
+		s.recordSSHReclaimOutcome(target, sshReclaimOutcomeRemoved, "", result.Detail)
+		s.logSSHReclaim(taskID, *target, sshReclaimOutcomeRemoved, "", result.Detail)
 		return nil
 	}
-	s.logSSHReclaim(taskID, target, sshReclaimOutcomeSkipped, result.SkipReason, result.Detail)
+	s.recordSSHReclaimOutcome(target, sshReclaimOutcomeSkipped, result.SkipReason, result.Detail)
+	s.logSSHReclaim(taskID, *target, sshReclaimOutcomeSkipped, result.SkipReason, result.Detail)
 	return nil
+}
+
+func (s *Service) recordSSHReclaimOutcome(target *sshReclaimTarget, outcome, reason, detail string) {
+	target.Outcome = outcome
+	target.SkipReason = reason
+	target.Detail = detail
 }
 
 // taskOwnsItsWorkspace reports whether the cleaned task owns the workspace the

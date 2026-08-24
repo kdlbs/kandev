@@ -200,4 +200,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-22-pr-walkthrough-description-link | [Own a top-level PR walkthrough callout](2026-08-22-pr-walkthrough-description-link.md) | accepted | workflow, infra, security, GitHub | 2026-08-22 |
 | 2026-08-23-pr-walkthrough-short-urls | [Use 12-character SHA prefixes for PR walkthrough URLs](2026-08-23-pr-walkthrough-short-urls.md) | accepted | workflow, infra | 2026-08-23 |
 | 2026-08-23-pr-walkthrough-workflow-provenance | [Use the workflow SHA for trusted PR walkthrough inputs](2026-08-23-pr-walkthrough-workflow-provenance.md) | accepted | workflow, infra, security | 2026-08-23 |
-| 2026-08-25-opt-in-ssh-task-directory-reclamation | [Opt-in reclamation of remote SSH task directories](2026-08-25-opt-in-ssh-task-directory-reclamation.md) | accepted | backend, frontend, operations | 2026-08-25 |
+| 2026-08-24-opt-in-ssh-task-directory-reclamation | [Opt-in reclamation of remote SSH task directories](2026-08-24-opt-in-ssh-task-directory-reclamation.md) | accepted | backend, frontend, operations | 2026-08-24 |

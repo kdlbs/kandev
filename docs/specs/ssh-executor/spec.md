@@ -99,9 +99,10 @@ Multiple sessions in the *same* task share the same worktree on disk (same files
   the same workspace placeholders as preparation. Ordinary Stop and backend restart preserve both
   the workspace and cleanup hook for resume. Cleanup failure is reported in logs but does not prevent
   controller teardown.
-- The task directory remains after controller teardown so a later resume keeps history. Removing it
-  is never part of the stop path; it is an opt-in phase of the durable task-resource cleanup job,
-  specified in [Remote task-directory reclamation](requirements/remote-task-directory-reclamation.md).
+- The task directory remains after controller teardown so a later resume keeps history. Built-in
+  reclamation is never part of the stop path; terminal cleanup hooks may still run there. Built-in
+  reclamation is an opt-in phase of the durable task-resource cleanup job, specified in
+  [Remote task-directory reclamation](requirements/remote-task-directory-reclamation.md).
 
 ### agentctl binary upload with content-hash cache
 

@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: ssh-executor
 requirements:
   - REQ-SSH-TASKDIR-RECLAMATION-001
@@ -182,7 +182,7 @@ checkout must satisfy all four, and every probe is read-only
 | Probe | Command | Safe when |
 | --- | --- | --- |
 | Is a checkout | `git rev-parse --is-inside-work-tree` | prints `true` |
-| Clean tree | `git status --porcelain` | empty output |
+| Clean tree | `git status --porcelain --untracked-files=all --ignored` | empty output after Kandev-owned `.kandev/` runtime entries are excluded |
 | Everything pushed | `git rev-list --count HEAD --branches --not --remotes` | prints `0` |
 | No stashes | `git stash list` | empty output |
 
@@ -274,7 +274,9 @@ latter two. `skipped` reasons are enumerated (`disabled`, `shared`,
 probe.
 
 The existing `task_resource_cleanup_jobs` row remains the durable record of a
-failure, via its `state`, `attempts`, and `last_error` columns.
+failure, via its `state`, `attempts`, and `last_error` columns. The resource
+snapshot in that row also records each target outcome and safety-skip reason,
+so a successful preservation is discoverable after restart.
 
 ## Testing
 

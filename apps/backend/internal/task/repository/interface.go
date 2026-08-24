@@ -365,6 +365,10 @@ type TaskResourceCleanupRepository interface {
 	CreateTaskResourceCleanupJob(ctx context.Context, job *models.TaskResourceCleanupJob) error
 	HasActiveTaskResourceCleanupJob(ctx context.Context, taskID string) (bool, error)
 	UpdateTaskResourceCleanupSnapshot(ctx context.Context, operationID, snapshot string) error
+	// UpdateClaimedTaskResourceCleanupSnapshot persists outcomes produced by one
+	// exact running cleanup attempt. A newer retry or cancellation wins when
+	// the claim no longer matches.
+	UpdateClaimedTaskResourceCleanupSnapshot(ctx context.Context, id string, attempt int, snapshot string) (bool, error)
 	GetTaskResourceCleanupJob(ctx context.Context, id string) (*models.TaskResourceCleanupJob, error)
 	GetTaskResourceCleanupJobByOperationID(ctx context.Context, operationID string) (*models.TaskResourceCleanupJob, error)
 	ListPreparedTaskResourceCleanupJobs(ctx context.Context) ([]*models.TaskResourceCleanupJob, error)

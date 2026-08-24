@@ -346,9 +346,22 @@ func (s *Service) processTaskResourceCleanupJob(ctx context.Context, id string) 
 		return s.retryTaskResourceCleanupJob(runCtx, job, fmt.Errorf("decode resource snapshot: %w", err))
 	}
 	defer s.signalCleanupDoneForTest()
-	cleanupErr := s.executeTaskResourceCleanupJob(runCtx, job, snapshot)
+	cleanupErr := s.executeTaskResourceCleanupJob(runCtx, job, &snapshot)
 	if cleanupErr != nil {
 		return s.retryTaskResourceCleanupJob(runCtx, job, cleanupErr)
+	}
+	encoded, err := json.Marshal(snapshot)
+	if err != nil {
+		return s.retryTaskResourceCleanupJob(runCtx, job, fmt.Errorf("encode resource snapshot outcomes: %w", err))
+	}
+	updated, err := s.resourceCleanups.UpdateClaimedTaskResourceCleanupSnapshot(
+		runCtx, job.ID, job.Attempts, string(encoded),
+	)
+	if err != nil {
+		return s.retryTaskResourceCleanupJob(runCtx, job, fmt.Errorf("persist resource snapshot outcomes: %w", err))
+	}
+	if !updated {
+		return nil
 	}
 	_, err = s.resourceCleanups.CompleteClaimedTaskResourceCleanupJob(
 		runCtx, job.ID, job.Attempts, models.TaskResourceCleanupStateSucceeded, "", nil,
@@ -402,8 +415,11 @@ func (s *Service) cancelAndJoinArchiveTaskResourceCleanupRuns(ctx context.Contex
 func (s *Service) executeTaskResourceCleanupJob(
 	ctx context.Context,
 	job *models.TaskResourceCleanupJob,
-	snapshot taskResourceCleanupSnapshot,
+	snapshot *taskResourceCleanupSnapshot,
 ) error {
+	if snapshot == nil {
+		return errors.New("resource cleanup snapshot is nil")
+	}
 	targets, err := s.refreshTaskRuntimeStopTargets(
 		ctx,
 		job.TaskID,

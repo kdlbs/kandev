@@ -2,7 +2,7 @@
 spec: docs/specs/ssh-executor/requirements/remote-task-directory-reclamation.md
 system_design: docs/specs/ssh-executor/system-design/remote-task-directory-reclamation.md
 created: 2026-08-24
-status: in_progress
+status: done
 ---
 
 # Implementation Plan: SSH Remote Task-Directory Reclamation

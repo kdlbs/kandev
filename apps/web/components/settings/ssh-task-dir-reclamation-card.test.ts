@@ -22,7 +22,7 @@ function executor(config?: Record<string, string>): Executor {
 describe("isSSHReclaimEnabled", () => {
   it("treats only the exact string true as enabled", () => {
     expect(isSSHReclaimEnabled({ ssh_reclaim_task_dir: "true" })).toBe(true);
-    expect(isSSHReclaimEnabled({ ssh_reclaim_task_dir: "  true  " })).toBe(true);
+    expect(isSSHReclaimEnabled({ ssh_reclaim_task_dir: "  true  " })).toBe(false);
   });
 
   it("defaults to off for a profile that never stored a value", () => {
@@ -54,9 +54,9 @@ describe("sshTaskDirRoot", () => {
 
 describe("sshReclaimHostLabel", () => {
   it("prefers the resolved host", () => {
-    expect(sshReclaimHostLabel(executor({ ssh_host: "build.example", ssh_host_alias: "prod" }))).toBe(
-      "build.example",
-    );
+    expect(
+      sshReclaimHostLabel(executor({ ssh_host: "build.example", ssh_host_alias: "prod" })),
+    ).toBe("build.example");
   });
 
   it("falls back to the alias, then to the executor name", () => {

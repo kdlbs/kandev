@@ -95,6 +95,10 @@ type sshRemoteRunner interface {
 	Run(ctx context.Context, cmd string) (stdout, stderr string, err error)
 }
 
+type sshDirectRunner interface {
+	RunDirect(ctx context.Context, cmd string) (stdout, stderr string, err error)
+}
+
 type sshClientRunner struct {
 	client *ssh.Client
 	shell  string
@@ -106,6 +110,10 @@ type sshClientRunner struct {
 // than being caused by us.
 func (r sshClientRunner) Run(ctx context.Context, cmd string) (string, string, error) {
 	return runSSHCommand(ctx, r.client, WrapLoginShell(r.shell, cmd))
+}
+
+func (r sshClientRunner) RunDirect(ctx context.Context, cmd string) (string, string, error) {
+	return runSSHCommand(ctx, r.client, cmd)
 }
 
 // SSHTaskDirReclaimer probes and removes one remote task directory.
@@ -173,7 +181,13 @@ func (r *SSHTaskDirReclaimer) resolveWorkdirRoot(ctx context.Context, workdirRoo
 	if root != "~" && !strings.HasPrefix(root, "~/") {
 		return root, nil
 	}
-	out, _, err := r.runner.Run(ctx, sshReclaimHomeCmd())
+	var out string
+	var err error
+	if direct, ok := r.runner.(sshDirectRunner); ok {
+		out, _, err = direct.RunDirect(ctx, sshReclaimHomeCmd())
+	} else {
+		out, _, err = r.runner.Run(ctx, sshReclaimHomeCmd())
+	}
 	if err != nil {
 		return "", fmt.Errorf("ssh reclaim: resolve remote $HOME: %w", err)
 	}
@@ -229,7 +243,11 @@ func (r *SSHTaskDirReclaimer) discoverCheckouts(ctx context.Context, taskDir str
 		if line == "" {
 			continue
 		}
-		dirs = append(dirs, strings.TrimSuffix(line, "/.git"))
+		child, ok := strings.CutSuffix(line, "/.git")
+		if !ok {
+			return nil, fmt.Errorf("unexpected child repository entry %q", line)
+		}
+		dirs = append(dirs, child)
 	}
 	return dirs, nil
 }
@@ -242,10 +260,13 @@ func (r *SSHTaskDirReclaimer) probeCheckout(ctx context.Context, dir string) SSH
 	// means preparation failed or the layout is unrecognized, and it may hold
 	// arbitrary user content we have no way to appraise.
 	out, _, err := r.runner.Run(ctx, sshReclaimIsCheckoutCmd(dir))
-	if err != nil || strings.TrimSpace(out) != boolStringTrue {
+	if err != nil {
+		return unsafeVerdict(SSHReclaimSkipProbeFailed, dir+": "+err.Error())
+	}
+	if strings.TrimSpace(out) != boolStringTrue {
 		return unsafeVerdict(SSHReclaimSkipNotACheckout, dir)
 	}
-	if verdict, ok := r.probeEmptyOutput(ctx, dir, sshReclaimStatusCmd(dir), SSHReclaimSkipDirtyWorktree); !ok {
+	if verdict, ok := r.probeWorktreeStatus(ctx, dir); !ok {
 		return verdict
 	}
 	if verdict, ok := r.probeUnpushed(ctx, dir); !ok {
@@ -255,6 +276,26 @@ func (r *SSHTaskDirReclaimer) probeCheckout(ctx context.Context, dir string) SSH
 		return verdict
 	}
 	return SSHReclaimVerdict{Safe: true}
+}
+
+func (r *SSHTaskDirReclaimer) probeWorktreeStatus(ctx context.Context, dir string) (SSHReclaimVerdict, bool) {
+	out, _, err := r.runner.Run(ctx, sshReclaimStatusCmd(dir))
+	if err != nil {
+		return unsafeVerdict(SSHReclaimSkipProbeFailed, dir+": "+err.Error()), false
+	}
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || isKandevRuntimeStatus(line) {
+			continue
+		}
+		return unsafeVerdict(SSHReclaimSkipDirtyWorktree, dir), false
+	}
+	return SSHReclaimVerdict{Safe: true}, true
+}
+
+func isKandevRuntimeStatus(line string) bool {
+	const ignoredPrefix = "!! .kandev/"
+	return strings.HasPrefix(line, ignoredPrefix)
 }
 
 // probeEmptyOutput runs a probe whose safe answer is "no output".
@@ -372,7 +413,7 @@ func sshReclaimIsCheckoutCmd(dir string) string {
 }
 
 func sshReclaimStatusCmd(dir string) string {
-	return gitProbeCmd(dir, "status --porcelain")
+	return gitProbeCmd(dir, "status --porcelain --untracked-files=all --ignored")
 }
 
 func sshReclaimUnpushedCmd(dir string) string {
@@ -389,8 +430,8 @@ func sshReclaimRemoveCmd(taskDir string) string {
 
 func sshReclaimExistsCmd(taskDir string) string {
 	return "test -e " + shellQuote(taskDir) +
-		" && printf " + sshReclaimExistsMarker +
-		" || printf " + sshReclaimGoneMarker
+		" && printf %s " + shellQuote(sshReclaimExistsMarker) +
+		" || printf %s " + shellQuote(sshReclaimGoneMarker)
 }
 
 // SSHReclaimEnabled reports whether the executor profile opted in to reclaiming

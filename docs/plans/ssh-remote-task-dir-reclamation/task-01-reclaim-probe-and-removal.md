@@ -40,7 +40,7 @@ host through a partially-wired cleanup job.
   of `safe`, or `skip` with an enumerated reason
   (`dirty_worktree`, `unpushed_commits`, `stash_present`, `not_a_checkout`,
   `probe_failed`).
-- `validateReclaimPath(workdirRoot, path)` refusing anything that is not exactly
+- `validateSSHReclaimPath(workdirRoot, path)` refusing anything that is not exactly
   one non-empty segment under `<workdir_root>/tasks/`, and refusing a segment
   containing `/`, `.`, or `..`.
 - `rm -rf -- <shellQuote(path)>` followed by a post-removal existence check.
@@ -55,11 +55,11 @@ host through a partially-wired cleanup job.
 ## Implementation acceptance conditions
 
 1. The verdict function returns `safe` only when every discovered checkout
-   reports a clean `git status --porcelain`, `0` from
+   reports a clean `git status --porcelain --untracked-files=all --ignored`, `0` from
    `git rev-list --count HEAD --branches --not --remotes`, and no stash entries;
    every other input, including any command error, non-zero exit, timeout, or
    unparseable output, returns a `skip` verdict with its reason.
-2. `validateReclaimPath` refuses `<workdir_root>/tasks`, `<workdir_root>/tasks/`,
+2. `validateSSHReclaimPath` refuses `<workdir_root>/tasks`, `<workdir_root>/tasks/`,
    an empty segment, `..` traversal, a nested segment, and any absolute path
    outside the root; removal is unreachable without a passing validation.
 3. Removal reports an error when `rm` exits non-zero or when the path still

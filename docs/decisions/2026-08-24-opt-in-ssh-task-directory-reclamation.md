@@ -1,7 +1,7 @@
-# ADR-2026-08-25-opt-in-ssh-task-directory-reclamation: Opt-in reclamation of remote SSH task directories
+# ADR-2026-08-24-opt-in-ssh-task-directory-reclamation: Opt-in reclamation of remote SSH task directories
 
 **Status:** accepted
-**Date:** 2026-08-25
+**Date:** 2026-08-24
 **Area:** backend, frontend, operations
 
 ## Context
@@ -39,6 +39,8 @@ backoff, `last_error`, and `failed` handling. A safety skip is not an error: the
 
 `SSHExecutor.StopInstance` keeps its contract of never removing the task directory, which is what
 makes preservation on an ordinary stop and on backend shutdown structural rather than conditional.
+The built-in reclamation phase is separate from the profile `cleanup_script` hook: the hook may run
+during terminal stop, while reclamation runs later in the durable task-resource cleanup job.
 
 ## Consequences
 
@@ -70,6 +72,6 @@ task row was rejected: it acts on a remote filesystem listing rather than on rec
 ownership, so a directory Kandev did not create, or one created by a task in another Kandev
 install sharing the host, is indistinguishable from an orphan.
 
-Treating a clean `git status --porcelain` as sufficient evidence of safety was rejected. It reports
+Treating a clean `git status --porcelain --untracked-files=all --ignored` as sufficient evidence of safety was rejected. It reports
 nothing about commits that exist only locally, and nothing about stashes. The probe checks all
 three.

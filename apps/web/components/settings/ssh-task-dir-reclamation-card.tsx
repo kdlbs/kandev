@@ -22,7 +22,7 @@ export const SSH_RECLAIM_DISABLED_VALUE = "false";
 
 /** Only the exact string "true" enables reclamation, matching the backend. */
 export function isSSHReclaimEnabled(config?: Record<string, string>): boolean {
-  return (config?.ssh_reclaim_task_dir ?? "").trim() === SSH_RECLAIM_ENABLED_VALUE;
+  return (config?.ssh_reclaim_task_dir ?? "") === SSH_RECLAIM_ENABLED_VALUE;
 }
 
 /** The directory tree the setting governs, as the user would type it. */
