@@ -11,13 +11,24 @@ test.describe("Mobile plugin task-list facet", () => {
     test.setTimeout(90_000);
 
     await installFixturePlugin(testPage);
-    await apiClient.createTask(seedData.workspaceId, "Mobile facet task", {
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-    });
+    const taskId = (
+      await apiClient.createTask(seedData.workspaceId, "Mobile facet task", {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+      })
+    ).id;
 
     await testPage.goto("/tasks?group=none");
     await testPage.waitForLoadState("networkidle");
+
+    await testPage.evaluate(
+      ({ taskId }: { taskId: string }) => {
+        const win = window as Record<string, unknown>;
+        win.__e2eFacetValues = { [taskId]: [{ value: "alpha", label: "Alpha" }] };
+        (win.__e2eFacetNotify as () => void)();
+      },
+      { taskId },
+    );
 
     await testPage.getByRole("button", { name: "Open menu" }).tap();
     const menu = testPage.getByRole("dialog", { name: "Menu" });
@@ -26,7 +37,7 @@ test.describe("Mobile plugin task-list facet", () => {
 
     const section = testPage.getByTestId("tasks-list-section");
     await expect(section).toHaveCount(1);
-    await expect(section).toContainText("Fixture tag");
+    await expect(section).toContainText("Alpha");
     await expect(section).toContainText("Mobile facet task");
     expect(
       await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
