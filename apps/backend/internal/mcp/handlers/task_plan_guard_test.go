@@ -163,3 +163,85 @@ func TestMCPPlanTruncationGuard_SmallDropsAreQuiet(t *testing.T) {
 		}
 	})
 }
+
+// TestMCPPlanTruncationGuard_NonASCIIUsesCharacterCount pins Review round 1
+// Finding 1: len() on a Go string counts UTF-8 bytes, not characters. A plan
+// rewritten from ASCII into a CJK script can drop 80% of its characters
+// while retaining 60% of its bytes, so a byte-counting guard stays silent on
+// a loss larger than either real WO-38 incident. This asserts the guard is
+// measured in runes: it must fire on this drop even though the byte ratio
+// alone would not cross the threshold.
+func TestMCPPlanTruncationGuard_NonASCIIUsesCharacterCount(t *testing.T) {
+	h := newMCPPlanTestHandlers(t)
+	ctx := context.Background()
+
+	// 4000 ASCII runes == 4000 bytes.
+	large := strings.Repeat("x", 4000)
+	// 800 CJK runes, each 3 UTF-8 bytes == 2400 bytes: 20% of characters
+	// retained, but 60% of bytes retained — the byte ratio alone would not
+	// cross the 50% line, but the character ratio must.
+	small := strings.Repeat("好", 800)
+
+	_, err := h.handleCreateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPCreateTaskPlan,
+		mustMarshalPlanPayload(t, map[string]any{
+			"task_id": mcpPlanTaskID,
+			"content": large,
+		})))
+	if err != nil {
+		t.Fatalf("handleCreateTaskPlan: %v", err)
+	}
+
+	out, err := h.handleUpdateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPUpdateTaskPlan,
+		mustMarshalPlanPayload(t, map[string]any{
+			"task_id": mcpPlanTaskID,
+			"content": small,
+		})))
+	if err != nil {
+		t.Fatalf("handleUpdateTaskPlan: %v", err)
+	}
+	updated := decodeMCPPlanPayload(t, out)
+
+	warning, _ := updated["plan_write_warning"].(string)
+	if warning == "" {
+		t.Fatal("expected a truncation warning for an 80 percent character drop disguised as a 60 percent byte retain, got none")
+	}
+	if !strings.Contains(warning, "4000") || !strings.Contains(warning, "800") {
+		t.Errorf("warning does not name the character counts (4000 -> 800): %q", warning)
+	}
+}
+
+// TestMCPPlanTruncationGuard_CreateOverExistingPlanWarns pins the deliberate
+// scope extension in handleCreateTaskPlan: CreatePlan upserts, so a create
+// call over an existing large plan is the same destructive write as update,
+// through a different door, and must be guarded identically.
+func TestMCPPlanTruncationGuard_CreateOverExistingPlanWarns(t *testing.T) {
+	h := newMCPPlanTestHandlers(t)
+	ctx := context.Background()
+
+	large := strings.Repeat("x", 40000)
+	small := strings.Repeat("y", 10000)
+
+	_, err := h.handleCreateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPCreateTaskPlan,
+		mustMarshalPlanPayload(t, map[string]any{
+			"task_id": mcpPlanlessID,
+			"content": large,
+		})))
+	if err != nil {
+		t.Fatalf("handleCreateTaskPlan (initial): %v", err)
+	}
+
+	out, err := h.handleCreateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPCreateTaskPlan,
+		mustMarshalPlanPayload(t, map[string]any{
+			"task_id": mcpPlanlessID,
+			"content": small,
+		})))
+	if err != nil {
+		t.Fatalf("handleCreateTaskPlan (overwrite): %v", err)
+	}
+	updated := decodeMCPPlanPayload(t, out)
+
+	warning, _ := updated["plan_write_warning"].(string)
+	if warning == "" {
+		t.Fatal("expected a truncation warning when create_task_plan_kandev overwrites an existing large plan, got none")
+	}
+}

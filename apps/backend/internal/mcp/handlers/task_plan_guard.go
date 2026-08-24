@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"unicode/utf8"
 
 	"github.com/kandev/kandev/internal/task/dto"
 )
@@ -26,30 +27,49 @@ const (
 // planTruncationDetected reports whether newContent looks like an accidental
 // destructive truncation of priorContent, rather than a deliberate edit or a
 // legitimate (smaller) prune.
+//
+// Measured in runes, not bytes: len() on a Go string counts UTF-8 bytes, so a
+// script change (e.g. an ASCII plan rewritten in CJK) can retain a small
+// fraction of the document's characters while retaining most of its bytes —
+// silently defeating this guard on exactly the kind of loss it exists to
+// catch. Kandev ships zh-cn/zh-hk/zh-tw/pt-pt locales, so non-ASCII plan
+// content is not hypothetical.
 func planTruncationDetected(priorContent, newContent string) bool {
-	priorLen := len(priorContent)
+	priorLen := utf8.RuneCountInString(priorContent)
 	if priorLen < planTruncationMinPriorChars {
 		return false
 	}
-	return float64(len(newContent)) < float64(priorLen)*planTruncationMaxRetainRatio
+	return float64(utf8.RuneCountInString(newContent)) < float64(priorLen)*planTruncationMaxRetainRatio
 }
 
 // planTruncationWarning renders the agent-facing warning appended to a plan
 // write's tool result when planTruncationDetected reports true. It states
 // plainly that the write replaced the entire document — update_task_plan_kandev
 // and create_task_plan_kandev have no partial-update mode — and names the
-// prior revision number so the caller (or a human) can recover the dropped
-// content from plan history instead of silently losing it.
+// prior revision number.
+//
+// It deliberately does NOT tell the caller to "recover" the content by
+// calling an MCP tool: none of the four registered plan tools can read a
+// past revision (get_task_plan_kandev returns the current, now-truncated,
+// HEAD). Telling an agent to "recover it" here would send it to the only
+// tool it has, get back the truncated document, and fall back to
+// reconstructing the plan from memory — the exact WO-38 failure this guard
+// exists to stop. Instead it says where the content lives (revision
+// history, Kandev UI only) and that the caller cannot fetch it itself, so
+// the caller stops and surfaces the loss instead of guessing.
 func planTruncationWarning(priorContent, newContent string, priorRevisionNumber int) string {
-	priorLen := len(priorContent)
-	newLen := len(newContent)
+	priorLen := utf8.RuneCountInString(priorContent)
+	newLen := utf8.RuneCountInString(newContent)
 	dropped := priorLen - newLen
 	droppedPct := float64(dropped) / float64(priorLen) * 100
 	return fmt.Sprintf(
 		"WARNING: this write replaced %d chars with %d (dropped %d chars, %.0f%%). "+
 			"Plan writes REPLACE THE ENTIRE DOCUMENT — there is no partial update or append "+
-			"mode. If this drop was not intentional, the pre-write content is preserved in "+
-			"plan revision %d; recover it before writing again.",
+			"mode. The pre-write content is preserved in plan revision %d, in the task's plan "+
+			"revision history — recoverable from the Kandev UI, but NOT fetchable through "+
+			"the MCP plan tools (get_task_plan_kandev returns the current, now-truncated, "+
+			"content, not that revision). If this drop was not intentional, stop and surface "+
+			"the loss rather than rewriting the plan from memory.",
 		priorLen, newLen, dropped, droppedPct, priorRevisionNumber,
 	)
 }
