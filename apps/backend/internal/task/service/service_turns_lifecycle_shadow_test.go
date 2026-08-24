@@ -139,6 +139,100 @@ func TestCurrentTurnAuthoritySurvivesLifecycleShadowOverPendingClarification(t *
 	})
 }
 
+// TestCurrentTurnAuthoritySurvivesLifecycleShadowOverPendingClarificationOpenTurn
+// covers AC-4's literal precondition: the real conversational turn is
+// genuinely OPEN (never completed) when the synthetic lifecycle turn is
+// created after it. TestCurrentTurnAuthoritySurvivesLifecycleShadowOverPendingClarification
+// deliberately completes the conversational turn to isolate R1's
+// lifecycle_only exclusion from D1's open-beats-completed tie-break; this
+// test instead exercises the scenario as it actually happens in production -
+// an agent resume racing a still-open, awaiting-input turn - across the same
+// three named consumer surfaces.
+func TestCurrentTurnAuthoritySurvivesLifecycleShadowOverPendingClarificationOpenTurn(t *testing.T) {
+	svc, repo, taskID, sessionID := newLifecycleShadowTestService(t)
+	ctx := context.Background()
+
+	past := time.Now().UTC().Add(-time.Hour)
+	const conversationTurnID = "turn-conversation-open"
+	if err := repo.CreateTurn(ctx, &models.Turn{
+		ID: conversationTurnID, TaskSessionID: sessionID, TaskID: taskID,
+		StartedAt: past, CreatedAt: past, UpdatedAt: past,
+	}); err != nil {
+		t.Fatalf("seed open conversational turn: %v", err)
+	}
+
+	const pendingID = "pending-cta-open"
+	if err := repo.CreateMessage(ctx, &models.Message{
+		ID: "msg-cta-open-question", TaskSessionID: sessionID, TaskID: taskID,
+		TurnID: conversationTurnID, AuthorType: models.MessageAuthorAgent,
+		Type: models.MessageTypeClarificationRequest,
+		Metadata: map[string]interface{}{
+			"pending_id":     pendingID,
+			"question_id":    "q1",
+			"status":         "pending",
+			"question_index": 0,
+			"question_total": 1,
+			"question": map[string]interface{}{
+				"id":     "q1",
+				"title":  "title",
+				"prompt": "prompt",
+				"options": []map[string]interface{}{
+					{"option_id": "opt1", "label": "Yes"},
+				},
+			},
+		},
+		CreatedAt: past,
+	}); err != nil {
+		t.Fatalf("seed pending clarification message: %v", err)
+	}
+
+	// R1/D5: reproduce the defect's trigger through the real write path - an
+	// agent resume creates a synthetic completed turn after the real turn,
+	// while the real turn is still open and awaiting the clarification's
+	// answer.
+	if _, err := svc.CreateMessage(ctx, &CreateMessageRequest{
+		TaskSessionID: sessionID,
+		Content:       "resumed",
+		CompletedTurn: true,
+	}); err != nil {
+		t.Fatalf("create lifecycle turn via CreateMessage: %v", err)
+	}
+
+	t.Run("list_pending_questions_kandev surface", func(t *testing.T) {
+		page, err := repo.ListUnresolvedClarificationBundles(ctx, models.ListClarificationBundlesOptions{
+			Unscoped: true, Limit: 10,
+		})
+		if err != nil {
+			t.Fatalf("ListUnresolvedClarificationBundles: %v", err)
+		}
+		if len(page.Bundles) != 1 || page.Bundles[0].PendingID != pendingID {
+			t.Fatalf("bundles = %+v, want exactly pending bundle %s", page.Bundles, pendingID)
+		}
+	})
+
+	t.Run("GetPendingActionsBySessionIDs surface", func(t *testing.T) {
+		actions, err := repo.GetPendingActionsBySessionIDs(ctx, []string{sessionID})
+		if err != nil {
+			t.Fatalf("GetPendingActionsBySessionIDs: %v", err)
+		}
+		if actions[sessionID] != models.TaskPendingActionClarification {
+			t.Fatalf("pending action for %s = %v, want %v", sessionID, actions[sessionID], models.TaskPendingActionClarification)
+		}
+	})
+
+	t.Run("internal/clarification respond surface", func(t *testing.T) {
+		completed, claimed, err := repo.CompleteActiveClarificationBundle(ctx, pendingID, "answered", map[string]interface{}{
+			"q1": "opt1",
+		})
+		if err != nil {
+			t.Fatalf("CompleteActiveClarificationBundle: %v", err)
+		}
+		if !claimed || len(completed) != 1 {
+			t.Fatalf("claimed=%v completed=%+v, want a single successful claim, not a conflict", claimed, completed)
+		}
+	})
+}
+
 // TestBootResumeLifecycleTurnNeverClaimsClarificationRequest is AC-7 / D5: the
 // boot-on-resume path (Service.CreateMessage with CompletedTurn: true,
 // Type: "script_execution", mirroring bootMsgAdapter.CreateMessage in
