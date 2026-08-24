@@ -1399,6 +1399,7 @@ func (s *Service) FireTrigger(ctx context.Context, automationID, triggerID strin
 
 	evt := &AutomationTriggeredEvent{
 		AutomationID: automationID,
+		WorkspaceID:  a.WorkspaceID,
 		RunID:        admittedRun.ID,
 		TriggerID:    triggerID,
 		TriggerType:  triggerType,

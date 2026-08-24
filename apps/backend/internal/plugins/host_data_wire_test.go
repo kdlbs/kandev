@@ -134,6 +134,29 @@ func TestPluginHostData_Wire_GetTaskNotFound(t *testing.T) {
 	require.Equal(t, codes.NotFound, st.Code())
 }
 
+func TestPluginHostData_Wire_AutomationsAreCapabilityGatedAndWorkspaceScoped(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{})
+	host := dialPluginHostOverWire(t, d.host)
+	_, _, err := host.Automations().List(context.Background(), "ws-1", pluginsdk.Page{})
+	require.Equal(t, codes.PermissionDenied, status.Code(err))
+
+	d = newTestDataHost(manifest.Capabilities{APIRead: []string{"automations"}})
+	d.automations.items = []pluginsdk.Automation{{
+		ID: "automation-1", WorkspaceID: "ws-1", Name: "Reconcile", Prompt: "WAKE:CYCLE",
+		AgentProfileID: "agent-1", ExecutorProfileID: "executor-1", Enabled: true,
+	}}
+	d.automations.item = &d.automations.items[0]
+	host = dialPluginHostOverWire(t, d.host)
+	items, _, err := host.Automations().List(context.Background(), "ws-1", pluginsdk.Page{})
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.Equal(t, "WAKE:CYCLE", items[0].Prompt)
+	got, err := host.Automations().Get(context.Background(), "ws-1", "automation-1")
+	require.NoError(t, err)
+	require.Equal(t, "automation-1", got.ID)
+	require.Equal(t, "ws-1", d.automations.workspaceID)
+}
+
 // TestPluginHostData_Wire_SessionsRoundTrip proves canned Sessions +
 // SessionCodeStats data round-trips correctly, over the real broker
 // transport, through a *pluginHost whose manifest declares api_read:sessions

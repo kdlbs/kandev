@@ -118,6 +118,7 @@ type Service struct {
 	// accessor nil-checks).
 	taskData         taskDataSource
 	taskRelations    taskRelationsSource
+	automations      automationSource
 	workflows        workflowLister
 	workflowSteps    workflowStepLister
 	agentProfiles    agentProfileDataSource
@@ -453,6 +454,22 @@ func (s *Service) SetTaskRelationsSource(source taskRelationsSource) {
 	s.taskRelations = source
 }
 
+// SetAutomationSource wires compact workspace-scoped Automation descriptors
+// for plugins that declare api_read:automations. It is late-bound for the same
+// reason as TaskRelations: an already-running plugin must observe the source
+// once the Automation subsystem finishes booting.
+func (s *Service) SetAutomationSource(source automationSource) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.automations = source
+}
+
+func (s *Service) automationSource() automationSource {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.automations
+}
+
 func (s *Service) taskRelationsSource() taskRelationsSource {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -659,6 +676,7 @@ func (s *Service) hostForPlugin(pluginID string) pluginsdk.Host {
 		configs:             s.store,
 		taskData:            s.taskData,
 		taskRelations:       s.taskRelationsSource,
+		automations:         s.automationSource,
 		workflows:           s.workflows,
 		workflowSteps:       s.workflowSteps,
 		agentProfiles:       s.agentProfiles,

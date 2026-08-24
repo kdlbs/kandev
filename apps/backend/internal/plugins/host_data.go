@@ -38,6 +38,7 @@ import (
 const (
 	resourceTasks            = "tasks"
 	resourceTaskRelations    = "task_relations"
+	resourceAutomations      = "automations"
 	resourceSessions         = "sessions"
 	resourceWorkspaces       = "workspaces"
 	resourceWorkflows        = "workflows"
@@ -151,6 +152,14 @@ type taskRelationsSource interface {
 	GetTaskRelations(ctx context.Context, workspaceID, taskID string) (*pluginsdk.TaskRelations, error)
 }
 
+// automationSource provides the compact, workspace-scoped Automation
+// descriptor projection for plugin trigger consumers. It intentionally uses
+// pluginsdk DTOs so the plugin package does not import the Automation domain.
+type automationSource interface {
+	ListPluginAutomations(ctx context.Context, workspaceID string) ([]pluginsdk.Automation, error)
+	GetPluginAutomation(ctx context.Context, workspaceID, automationID string) (*pluginsdk.Automation, error)
+}
+
 // workflowLister is the narrow slice of internal/task/service.Service the
 // Workflows().List RPC needs (workflows themselves are owned by the task
 // service, not internal/workflow/service — only steps are).
@@ -224,6 +233,20 @@ func (h *pluginHost) TaskRelations() pluginsdk.TaskRelationsReader {
 		return h.UnimplementedHostData.TaskRelations()
 	}
 	return taskRelationsReader{source: source}
+}
+
+func (h *pluginHost) Automations() pluginsdk.AutomationReader {
+	if !h.capabilities.CanRead(resourceAutomations) {
+		return deniedAutomationReader{}
+	}
+	if h.automations == nil {
+		return h.UnimplementedHostData.Automations()
+	}
+	source := h.automations()
+	if source == nil {
+		return h.UnimplementedHostData.Automations()
+	}
+	return automationReader{source: source}
 }
 
 func (h *pluginHost) Sessions() pluginsdk.SessionReader {

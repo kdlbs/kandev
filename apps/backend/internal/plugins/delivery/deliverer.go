@@ -357,7 +357,7 @@ func (d *Deliverer) makeHandler(w *pluginWorker, pattern string) bus.EventHandle
 				EventID:     uuid.New().String(),
 				EventType:   subject,
 				OccurredAt:  d.nowFn().UTC().Format(time.RFC3339),
-				WorkspaceID: workspaceIDFromData(event.Data),
+				WorkspaceID: workspaceIDFromPayload(payload),
 				Payload:     payload,
 			},
 		})

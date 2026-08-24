@@ -306,6 +306,65 @@ func taskRelationsFromProto(p *pluginv1.TaskRelations) *TaskRelations {
 	return out
 }
 
+// Automation is the compact, workspace-scoped configuration projection a
+// plugin receives after an automation.triggered delivery. It has no secrets,
+// repository bindings, or run history.
+type Automation struct {
+	ID                string
+	WorkspaceID       string
+	Name              string
+	Description       string
+	AgentProfileID    string
+	ExecutorProfileID string
+	Prompt            string
+	Enabled           bool
+	MaxConcurrentRuns int32
+	UpdatedAt         string
+}
+
+func (a Automation) toProto() *pluginv1.Automation {
+	return &pluginv1.Automation{
+		Id: a.ID, WorkspaceId: a.WorkspaceID, Name: a.Name, Description: a.Description,
+		AgentProfileId: a.AgentProfileID, ExecutorProfileId: a.ExecutorProfileID,
+		Prompt: a.Prompt, Enabled: a.Enabled, MaxConcurrentRuns: a.MaxConcurrentRuns,
+		UpdatedAt: a.UpdatedAt,
+	}
+}
+
+func automationFromProto(p *pluginv1.Automation) *Automation {
+	if p == nil {
+		return nil
+	}
+	return &Automation{
+		ID: p.GetId(), WorkspaceID: p.GetWorkspaceId(), Name: p.GetName(), Description: p.GetDescription(),
+		AgentProfileID: p.GetAgentProfileId(), ExecutorProfileID: p.GetExecutorProfileId(),
+		Prompt: p.GetPrompt(), Enabled: p.GetEnabled(), MaxConcurrentRuns: p.GetMaxConcurrentRuns(),
+		UpdatedAt: p.GetUpdatedAt(),
+	}
+}
+
+func automationsFromProto(items []*pluginv1.Automation) []Automation {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]Automation, len(items))
+	for i, item := range items {
+		out[i] = *automationFromProto(item)
+	}
+	return out
+}
+
+func automationsToProto(items []Automation) []*pluginv1.Automation {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]*pluginv1.Automation, len(items))
+	for i := range items {
+		out[i] = items[i].toProto()
+	}
+	return out
+}
+
 // TaskFilter is the Go-native mirror of kandev.plugin.v1.TaskFilter.
 type TaskFilter struct {
 	WorkspaceIDs     []string

@@ -426,6 +426,8 @@ const (
 	Host_ListTasks_FullMethodName                  = "/kandev.plugin.v1.Host/ListTasks"
 	Host_GetTask_FullMethodName                    = "/kandev.plugin.v1.Host/GetTask"
 	Host_GetTaskRelations_FullMethodName           = "/kandev.plugin.v1.Host/GetTaskRelations"
+	Host_ListAutomations_FullMethodName            = "/kandev.plugin.v1.Host/ListAutomations"
+	Host_GetAutomation_FullMethodName              = "/kandev.plugin.v1.Host/GetAutomation"
 	Host_ListWorkspaces_FullMethodName             = "/kandev.plugin.v1.Host/ListWorkspaces"
 	Host_ListWorkflows_FullMethodName              = "/kandev.plugin.v1.Host/ListWorkflows"
 	Host_ListWorkflowSteps_FullMethodName          = "/kandev.plugin.v1.Host/ListWorkflowSteps"
@@ -504,6 +506,11 @@ type HostClient interface {
 	// repositories, or document fields. The requested target must belong to
 	// workspace_id; foreign and unknown targets fail as NotFound.
 	GetTaskRelations(ctx context.Context, in *GetTaskRelationsRequest, opts ...grpc.CallOption) (*GetTaskRelationsResponse, error)
+	// Automation descriptors — capability api_read:automations. A plugin uses
+	// the workspace-stamped automation.triggered event as delivery, then reads
+	// the configured prompt/profile through this scoped accessor.
+	ListAutomations(ctx context.Context, in *ListAutomationsRequest, opts ...grpc.CallOption) (*ListAutomationsResponse, error)
+	GetAutomation(ctx context.Context, in *GetAutomationRequest, opts ...grpc.CallOption) (*GetAutomationResponse, error)
 	ListWorkspaces(ctx context.Context, in *ListWorkspacesRequest, opts ...grpc.CallOption) (*ListWorkspacesResponse, error)
 	ListWorkflows(ctx context.Context, in *ListWorkflowsRequest, opts ...grpc.CallOption) (*ListWorkflowsResponse, error)
 	ListWorkflowSteps(ctx context.Context, in *ListWorkflowStepsRequest, opts ...grpc.CallOption) (*ListWorkflowStepsResponse, error)
@@ -698,6 +705,26 @@ func (c *hostClient) GetTaskRelations(ctx context.Context, in *GetTaskRelationsR
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetTaskRelationsResponse)
 	err := c.cc.Invoke(ctx, Host_GetTaskRelations_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ListAutomations(ctx context.Context, in *ListAutomationsRequest, opts ...grpc.CallOption) (*ListAutomationsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListAutomationsResponse)
+	err := c.cc.Invoke(ctx, Host_ListAutomations_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) GetAutomation(ctx context.Context, in *GetAutomationRequest, opts ...grpc.CallOption) (*GetAutomationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetAutomationResponse)
+	err := c.cc.Invoke(ctx, Host_GetAutomation_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -960,6 +987,11 @@ type HostServer interface {
 	// repositories, or document fields. The requested target must belong to
 	// workspace_id; foreign and unknown targets fail as NotFound.
 	GetTaskRelations(context.Context, *GetTaskRelationsRequest) (*GetTaskRelationsResponse, error)
+	// Automation descriptors — capability api_read:automations. A plugin uses
+	// the workspace-stamped automation.triggered event as delivery, then reads
+	// the configured prompt/profile through this scoped accessor.
+	ListAutomations(context.Context, *ListAutomationsRequest) (*ListAutomationsResponse, error)
+	GetAutomation(context.Context, *GetAutomationRequest) (*GetAutomationResponse, error)
 	ListWorkspaces(context.Context, *ListWorkspacesRequest) (*ListWorkspacesResponse, error)
 	ListWorkflows(context.Context, *ListWorkflowsRequest) (*ListWorkflowsResponse, error)
 	ListWorkflowSteps(context.Context, *ListWorkflowStepsRequest) (*ListWorkflowStepsResponse, error)
@@ -1068,6 +1100,12 @@ func (UnimplementedHostServer) GetTask(context.Context, *GetTaskRequest) (*GetTa
 }
 func (UnimplementedHostServer) GetTaskRelations(context.Context, *GetTaskRelationsRequest) (*GetTaskRelationsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetTaskRelations not implemented")
+}
+func (UnimplementedHostServer) ListAutomations(context.Context, *ListAutomationsRequest) (*ListAutomationsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListAutomations not implemented")
+}
+func (UnimplementedHostServer) GetAutomation(context.Context, *GetAutomationRequest) (*GetAutomationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetAutomation not implemented")
 }
 func (UnimplementedHostServer) ListWorkspaces(context.Context, *ListWorkspacesRequest) (*ListWorkspacesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListWorkspaces not implemented")
@@ -1380,6 +1418,42 @@ func _Host_GetTaskRelations_Handler(srv interface{}, ctx context.Context, dec fu
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(HostServer).GetTaskRelations(ctx, req.(*GetTaskRelationsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ListAutomations_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListAutomationsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListAutomations(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListAutomations_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListAutomations(ctx, req.(*ListAutomationsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_GetAutomation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetAutomationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).GetAutomation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_GetAutomation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).GetAutomation(ctx, req.(*GetAutomationRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1802,6 +1876,14 @@ var Host_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetTaskRelations",
 			Handler:    _Host_GetTaskRelations_Handler,
+		},
+		{
+			MethodName: "ListAutomations",
+			Handler:    _Host_ListAutomations_Handler,
+		},
+		{
+			MethodName: "GetAutomation",
+			Handler:    _Host_GetAutomation_Handler,
 		},
 		{
 			MethodName: "ListWorkspaces",

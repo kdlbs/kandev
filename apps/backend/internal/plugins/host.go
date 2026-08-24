@@ -64,7 +64,10 @@ type pluginHost struct {
 	taskData taskDataSource
 	// taskRelations is read at request time because HandoffService is built
 	// after boot-active plugins have started.
-	taskRelations    func() taskRelationsSource
+	taskRelations func() taskRelationsSource
+	// automations is late-wired because the Automation service starts after
+	// boot-active plugins. Trigger consumers resolve it at request time.
+	automations      func() automationSource
 	workflows        workflowLister
 	workflowSteps    workflowStepLister
 	agentProfiles    agentProfileDataSource

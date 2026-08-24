@@ -12,6 +12,35 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 )
 
+// TestFireTrigger_StampsWorkspaceOnDelivery pins the only workspace identity a
+// plugin receives with automation.triggered. TriggerData is provider-supplied
+// and must never be treated as the workspace selector for a plugin-owned
+// binding.
+func TestFireTrigger_StampsWorkspaceOnDelivery(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	a := &Automation{WorkspaceID: "workspace-owned", Name: "Board pulse", Enabled: true, MaxConcurrentRuns: 1}
+	if err := svc.store.CreateAutomation(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	trig := &AutomationTrigger{AutomationID: a.ID, Type: TriggerTypeScheduled, Config: json.RawMessage(`{"cron_expression":"@daily"}`), Enabled: true}
+	if err := svc.store.CreateTrigger(ctx, trig); err != nil {
+		t.Fatal(err)
+	}
+	fired := subscribeAutomationTriggered(t, svc.eventBus)
+	if _, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeScheduled, json.RawMessage(`{"workspace_id":"forged"}`), "scheduled:workspace"); err != nil {
+		t.Fatalf("FireTrigger: %v", err)
+	}
+	select {
+	case evt := <-fired:
+		if evt.WorkspaceID != "workspace-owned" {
+			t.Fatalf("event workspace = %q, want server-stamped workspace-owned", evt.WorkspaceID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected automation.triggered event")
+	}
+}
+
 // TestFireTrigger_SkippedForConcurrencyCap_UpdatesLastEvaluatedAt guards
 // against the scheduler retrying a scheduled trigger on every check tick
 // once max_concurrent_runs is reached. FireTrigger must record that the

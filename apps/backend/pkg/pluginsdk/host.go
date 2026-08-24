@@ -90,6 +90,11 @@ type Host interface {
 	// relation reads never reveal descriptions, metadata, or documents.
 	TaskRelations() TaskRelationsReader
 
+	// Automations returns workspace-scoped trigger configuration descriptors
+	// (capability api_read:automations). Plugins receive delivery separately
+	// through the workspace-stamped automation.triggered event.
+	Automations() AutomationReader
+
 	// Sessions returns the reader for the Host data API's session and
 	// session-code-stats RPCs (capability api_read:sessions).
 	Sessions() SessionReader
@@ -153,6 +158,14 @@ type TaskReader interface {
 // workspace ID; a target outside that workspace is not disclosed.
 type TaskRelationsReader interface {
 	Get(ctx context.Context, workspaceID, taskID string) (*TaskRelations, error)
+}
+
+// AutomationReader reads compact, workspace-scoped Automation configuration.
+// It intentionally exposes no webhook secret, repository binding, or run
+// history. Get rejects unknown and cross-workspace IDs as NotFound.
+type AutomationReader interface {
+	List(ctx context.Context, workspaceID string, page Page) ([]Automation, *PageInfo, error)
+	Get(ctx context.Context, workspaceID, id string) (*Automation, error)
 }
 
 // SessionReader is the read-only accessor behind Host.Sessions(), mirroring
@@ -425,6 +438,10 @@ func (h *grpcHostClient) TaskRelations() TaskRelationsReader {
 	return grpcTaskRelationsReader{client: h.client}
 }
 
+func (h *grpcHostClient) Automations() AutomationReader {
+	return grpcAutomationReader{client: h.client}
+}
+
 func (h *grpcHostClient) Sessions() SessionReader { return grpcSessionReader{client: h.client} }
 
 func (h *grpcHostClient) Workspaces() WorkspaceReader { return grpcWorkspaceReader{client: h.client} }
@@ -461,12 +478,32 @@ type grpcTaskRelationsReader struct {
 	client pluginv1.HostClient
 }
 
+type grpcAutomationReader struct {
+	client pluginv1.HostClient
+}
+
 func (r grpcTaskRelationsReader) Get(ctx context.Context, workspaceID, taskID string) (*TaskRelations, error) {
 	resp, err := r.client.GetTaskRelations(ctx, &pluginv1.GetTaskRelationsRequest{WorkspaceId: workspaceID, TaskId: taskID})
 	if err != nil {
 		return nil, err
 	}
 	return taskRelationsFromProto(resp.GetRelations()), nil
+}
+
+func (r grpcAutomationReader) List(ctx context.Context, workspaceID string, page Page) ([]Automation, *PageInfo, error) {
+	resp, err := r.client.ListAutomations(ctx, &pluginv1.ListAutomationsRequest{WorkspaceId: workspaceID, Page: page.toProto()})
+	if err != nil {
+		return nil, nil, err
+	}
+	return automationsFromProto(resp.GetAutomations()), pageInfoFromProto(resp.GetPageInfo()), nil
+}
+
+func (r grpcAutomationReader) Get(ctx context.Context, workspaceID, id string) (*Automation, error) {
+	resp, err := r.client.GetAutomation(ctx, &pluginv1.GetAutomationRequest{WorkspaceId: workspaceID, Id: id})
+	if err != nil {
+		return nil, err
+	}
+	return automationFromProto(resp.GetAutomation()), nil
 }
 
 func (r grpcTaskReader) List(ctx context.Context, filter TaskFilter, page Page) ([]Task, *PageInfo, error) {
@@ -880,6 +917,25 @@ func (s *grpcHostServer) GetTaskRelations(ctx context.Context, req *pluginv1.Get
 	return &pluginv1.GetTaskRelationsResponse{Relations: relations.toProto()}, nil
 }
 
+func (s *grpcHostServer) ListAutomations(ctx context.Context, req *pluginv1.ListAutomationsRequest) (*pluginv1.ListAutomationsResponse, error) {
+	automations, pageInfo, err := s.impl.Automations().List(ctx, req.GetWorkspaceId(), pageFromProto(req.GetPage()))
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.ListAutomationsResponse{Automations: automationsToProto(automations), PageInfo: pageInfo.toProto()}, nil
+}
+
+func (s *grpcHostServer) GetAutomation(ctx context.Context, req *pluginv1.GetAutomationRequest) (*pluginv1.GetAutomationResponse, error) {
+	automation, err := s.impl.Automations().Get(ctx, req.GetWorkspaceId(), req.GetId())
+	if err != nil {
+		return nil, err
+	}
+	if automation == nil {
+		return nil, status.Error(codes.NotFound, "automation not found")
+	}
+	return &pluginv1.GetAutomationResponse{Automation: automation.toProto()}, nil
+}
+
 func (s *grpcHostServer) ListWorkspaces(ctx context.Context, req *pluginv1.ListWorkspacesRequest) (*pluginv1.ListWorkspacesResponse, error) {
 	page := pageFromProto(req.GetPage())
 	workspaces, pageInfo, err := s.impl.Workspaces().List(ctx, page)
@@ -1119,7 +1175,7 @@ func (s *grpcHostServer) DeleteAgentConversation(ctx context.Context, req *plugi
 var _ pluginv1.HostServer = (*grpcHostServer)(nil)
 
 // UnimplementedHostData is an embeddable default for the Host data API
-// (ADR 0043) sub-accessors: Tasks/TaskRelations/Sessions/Workspaces/
+// (ADR 0043) sub-accessors: Tasks/TaskRelations/Automations/Sessions/Workspaces/
 // Workflows/AgentProfiles/Repositories. Embed it in a Go-native Host implementation
 // to satisfy the interface before wiring real data access — every method
 // on every returned reader returns a gRPC Unimplemented error. Override
@@ -1133,9 +1189,10 @@ func (UnimplementedHostData) Tasks() TaskReader { return unimplementedTaskReader
 func (UnimplementedHostData) TaskRelations() TaskRelationsReader {
 	return unimplementedTaskRelationsReader{}
 }
-func (UnimplementedHostData) Sessions() SessionReader     { return unimplementedSessionReader{} }
-func (UnimplementedHostData) Workspaces() WorkspaceReader { return unimplementedWorkspaceReader{} }
-func (UnimplementedHostData) Workflows() WorkflowReader   { return unimplementedWorkflowReader{} }
+func (UnimplementedHostData) Automations() AutomationReader { return unimplementedAutomationReader{} }
+func (UnimplementedHostData) Sessions() SessionReader       { return unimplementedSessionReader{} }
+func (UnimplementedHostData) Workspaces() WorkspaceReader   { return unimplementedWorkspaceReader{} }
+func (UnimplementedHostData) Workflows() WorkflowReader     { return unimplementedWorkflowReader{} }
 func (UnimplementedHostData) AgentProfiles() AgentProfileReader {
 	return unimplementedAgentProfileReader{}
 }
@@ -1190,6 +1247,16 @@ type unimplementedTaskRelationsReader struct{}
 
 func (unimplementedTaskRelationsReader) Get(context.Context, string, string) (*TaskRelations, error) {
 	return nil, errUnimplementedHostData("task_relations")
+}
+
+type unimplementedAutomationReader struct{}
+
+func (unimplementedAutomationReader) List(context.Context, string, Page) ([]Automation, *PageInfo, error) {
+	return nil, nil, errUnimplementedHostData("automations")
+}
+
+func (unimplementedAutomationReader) Get(context.Context, string, string) (*Automation, error) {
+	return nil, errUnimplementedHostData("automations")
 }
 
 type unimplementedSessionReader struct{}

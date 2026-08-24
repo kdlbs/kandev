@@ -647,6 +647,9 @@ func registerRoutes(p routeParams) {
 		p.officeRepo, p.officeRepo, p.log)
 	if p.services.Plugins != nil {
 		p.services.Plugins.SetTaskRelationsSource(handoffSvc)
+		if p.services.Automation != nil {
+			p.services.Plugins.SetAutomationSource(pluginsAutomationSourceAdapter{svc: p.services.Automation.Service})
+		}
 	}
 	// Phase 6 wirings — materializer hook + disk cleaner. The
 	// SessionWorktreeReader and WorkspaceCleaner interfaces are both

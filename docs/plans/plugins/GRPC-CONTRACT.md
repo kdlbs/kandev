@@ -87,6 +87,8 @@ service Host {
   rpc ListTasks(ListTasksRequest) returns (ListTasksResponse);
   rpc GetTask(GetTaskRequest) returns (GetTaskResponse);
   rpc GetTaskRelations(GetTaskRelationsRequest) returns (GetTaskRelationsResponse);
+  rpc ListAutomations(ListAutomationsRequest) returns (ListAutomationsResponse);
+  rpc GetAutomation(GetAutomationRequest) returns (GetAutomationResponse);
   rpc ListWorkspaces(ListWorkspacesRequest) returns (ListWorkspacesResponse);
   rpc ListWorkflows(ListWorkflowsRequest) returns (ListWorkflowsResponse);
   rpc ListWorkflowSteps(ListWorkflowStepsRequest) returns (ListWorkflowStepsResponse);
@@ -212,7 +214,7 @@ safe.
 ### 3a. Host data API (ADR 0043)
 
 Read/write RPCs let plugins read and write kandev's own domain data —
-tasks, sessions, workspaces, workflows, agent profiles, repositories, messages —
+tasks, automations, sessions, workspaces, workflows, agent profiles, repositories, messages —
 over the same Host gRPC channel used for state/secrets, instead of opening the
 kandev database file directly. Full message definitions (`Page`, `PageInfo`,
 `Task`, `TaskFilter`, `Workspace`, `Workflow`, `WorkflowStep`, `AgentProfile`,
@@ -230,6 +232,7 @@ plugin's manifest:
 | ----------------------- | ---------------------------- | ----------------- |
 | `ListTasks` / `GetTask` | `api_read:tasks`             | tasks             |
 | `GetTaskRelations`      | `api_read:task_relations`    | task_relations    |
+| `ListAutomations` / `GetAutomation` | `api_read:automations` | automations |
 | `ListWorkspaces`        | `api_read:workspaces`        | workspaces        |
 | `ListWorkflows`         | `api_read:workflows`         | workflows         |
 | `ListWorkflowSteps`     | `api_read:workflows`         | workflows         |
@@ -375,6 +378,7 @@ type Host interface {                                        // injected before 
     // below for the reader interfaces and Go-native DTOs.
     Tasks() TaskReader
     TaskRelations() TaskRelationsReader
+    Automations() AutomationReader
     Sessions() SessionReader
     Workspaces() WorkspaceReader
     Workflows() WorkflowReader
@@ -453,6 +457,11 @@ type TaskReader interface {
     Get(ctx context.Context, id string) (*Task, error)
 }
 
+type AutomationReader interface {
+    List(ctx context.Context, workspaceID string, page Page) ([]Automation, *PageInfo, error)
+    Get(ctx context.Context, workspaceID, id string) (*Automation, error)
+}
+
 type SessionReader interface {
     List(ctx context.Context, filter SessionFilter, page Page) ([]Session, *PageInfo, error)
     CodeStats(ctx context.Context, filter SessionFilter, page Page) ([]SessionCodeStats, *PageInfo, error)
@@ -480,7 +489,7 @@ type RepositoryReader interface {
 }
 ```
 
-`Task`, `Session`, `SessionCodeStats`, `Workspace`, `Workflow`, `WorkflowStep`,
+`Task`, `Automation`, `Session`, `SessionCodeStats`, `Workspace`, `Workflow`, `WorkflowStep`,
 `AgentProfile`, `Repository`, `TaskFilter`, `SessionFilter` are Go-native
 structs in `pluginsdk` (field-for-field mirrors of the proto messages, PascalCase
 Go names for the proto's snake_case fields, `*string` for `optional string`) —
@@ -495,6 +504,13 @@ local checkout path, scripts, or credentials through this DTO.
 the strong identity is workspace + provider + scope + immutable provider repository
 ID. Host/name/owner fields remain routing and display metadata; scoped descriptors do
 not adopt legacy unscoped rows.
+
+`Automation` is a workspace-scoped configuration projection for a plugin that
+has received `automation.triggered`: id, workspace id, name, description,
+agent/executor profile ids, prompt, enabled state, concurrency limit, and update
+time. It deliberately omits webhook secrets, repository bindings, run history,
+and implementation-specific task-placement fields. `GetAutomation` treats an
+unknown or foreign id as `NotFound`.
 
 `WorkflowStep` additionally carries `coordinator_monitored` (bool) and
 `coordinator_prompt` (string): the host-owned Settings > Workspace > Workflow

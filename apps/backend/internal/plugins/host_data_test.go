@@ -57,6 +57,24 @@ type fakeTaskRelationsSource struct {
 	taskID    string
 }
 
+type fakeAutomationSource struct {
+	items        []pluginsdk.Automation
+	item         *pluginsdk.Automation
+	err          error
+	workspaceID  string
+	automationID string
+}
+
+func (f *fakeAutomationSource) ListPluginAutomations(_ context.Context, workspaceID string) ([]pluginsdk.Automation, error) {
+	f.workspaceID = workspaceID
+	return f.items, f.err
+}
+
+func (f *fakeAutomationSource) GetPluginAutomation(_ context.Context, workspaceID, automationID string) (*pluginsdk.Automation, error) {
+	f.workspaceID, f.automationID = workspaceID, automationID
+	return f.item, f.err
+}
+
 func (f *fakeTaskRelationsSource) GetTaskRelations(_ context.Context, workspaceID, taskID string) (*pluginsdk.TaskRelations, error) {
 	f.workspace, f.taskID = workspaceID, taskID
 	return f.relations, f.err
@@ -284,19 +302,20 @@ func (f *fakeTaskStarter) StartTask(_ context.Context, taskID string, launch Tas
 // tests can both drive Host calls and assert against the fakes' recorded
 // state.
 type testDataHost struct {
-	host       *pluginHost
-	tasks      *fakeTaskDataSource
-	workflows  *fakeWorkflowLister
-	steps      *fakeWorkflowStepLister
-	profiles   *fakeAgentProfileDataSource
-	codeStats  *fakeSessionCodeStatsSource
-	messages   *fakeMessageDataSource
-	utilAgents *fakeUtilityAgentSource
-	utilRun    *fakeUtilityRunner
-	taskWriter *fakeTaskWriter
-	relations  *fakeTaskRelationsSource
-	messenger  *fakeMessenger
-	starter    *fakeTaskStarter
+	host        *pluginHost
+	tasks       *fakeTaskDataSource
+	workflows   *fakeWorkflowLister
+	steps       *fakeWorkflowStepLister
+	profiles    *fakeAgentProfileDataSource
+	codeStats   *fakeSessionCodeStatsSource
+	messages    *fakeMessageDataSource
+	utilAgents  *fakeUtilityAgentSource
+	utilRun     *fakeUtilityRunner
+	taskWriter  *fakeTaskWriter
+	relations   *fakeTaskRelationsSource
+	automations *fakeAutomationSource
+	messenger   *fakeMessenger
+	starter     *fakeTaskStarter
 
 	interactions *fakeInteractionDataSource
 	responder    *fakeInteractionResponder
@@ -307,18 +326,19 @@ type testDataHost struct {
 // resource) so each test only needs to vary caps.
 func newTestDataHost(caps manifest.Capabilities) *testDataHost {
 	d := &testDataHost{
-		tasks:      &fakeTaskDataSource{},
-		workflows:  &fakeWorkflowLister{},
-		steps:      &fakeWorkflowStepLister{},
-		profiles:   &fakeAgentProfileDataSource{resp: &agentsettingsdto.ListAgentsResponse{}},
-		codeStats:  &fakeSessionCodeStatsSource{},
-		messages:   &fakeMessageDataSource{},
-		utilAgents: &fakeUtilityAgentSource{},
-		utilRun:    &fakeUtilityRunner{text: "ok"},
-		taskWriter: &fakeTaskWriter{},
-		relations:  &fakeTaskRelationsSource{},
-		messenger:  &fakeMessenger{},
-		starter:    &fakeTaskStarter{},
+		tasks:       &fakeTaskDataSource{},
+		workflows:   &fakeWorkflowLister{},
+		steps:       &fakeWorkflowStepLister{},
+		profiles:    &fakeAgentProfileDataSource{resp: &agentsettingsdto.ListAgentsResponse{}},
+		codeStats:   &fakeSessionCodeStatsSource{},
+		messages:    &fakeMessageDataSource{},
+		utilAgents:  &fakeUtilityAgentSource{},
+		utilRun:     &fakeUtilityRunner{text: "ok"},
+		taskWriter:  &fakeTaskWriter{},
+		relations:   &fakeTaskRelationsSource{},
+		automations: &fakeAutomationSource{},
+		messenger:   &fakeMessenger{},
+		starter:     &fakeTaskStarter{},
 
 		interactions: &fakeInteractionDataSource{},
 		responder:    &fakeInteractionResponder{},
@@ -336,6 +356,9 @@ func newTestDataHost(caps manifest.Capabilities) *testDataHost {
 		taskWriter:       d.taskWriter,
 		taskRelations: func() taskRelationsSource {
 			return d.relations
+		},
+		automations: func() automationSource {
+			return d.automations
 		},
 		configs: &fakeConfigReader{configs: map[string]any{utilityAgentConfigKey: "utility-agent-42"}},
 		utilityDeps: func() (utilityAgentSource, utilityRunner) {
@@ -401,6 +424,48 @@ func TestPluginHost_TaskRelations_ResolvesLateWiring(t *testing.T) {
 	relations, err := d.host.TaskRelations().Get(context.Background(), "workspace-a", "task-a")
 	if err != nil || relations.Task.ID != "task-a" {
 		t.Fatalf("late-wired TaskRelations().Get = %+v, %v", relations, err)
+	}
+}
+
+func TestPluginHost_Automations_RequiresDedicatedCapabilityAndScopesReads(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{})
+	_, _, err := d.host.Automations().List(context.Background(), "workspace-a", pluginsdk.Page{})
+	assertPermissionDenied(t, err, "api_read:automations")
+
+	d = newTestDataHost(manifest.Capabilities{APIRead: []string{"automations"}})
+	d.automations.items = []pluginsdk.Automation{{ID: "automation-a", WorkspaceID: "workspace-a", Prompt: "WAKE:CYCLE"}}
+	items, _, err := d.host.Automations().List(context.Background(), "workspace-a", pluginsdk.Page{})
+	if err != nil || len(items) != 1 || d.automations.workspaceID != "workspace-a" {
+		t.Fatalf("Automations().List = %+v, %v; workspace=%q", items, err, d.automations.workspaceID)
+	}
+
+	d.automations.item = &items[0]
+	item, err := d.host.Automations().Get(context.Background(), "workspace-a", "automation-a")
+	if err != nil || item == nil || item.ID != "automation-a" || d.automations.automationID != "automation-a" {
+		t.Fatalf("Automations().Get = %+v, %v; request=%q/%q", item, err, d.automations.workspaceID, d.automations.automationID)
+	}
+}
+
+func TestPluginHost_Automations_HidesForeignAndUnknownTargetsAndResolvesLateWiring(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"automations"}})
+	d.automations.err = status.Error(codes.NotFound, "automation not found")
+	_, err := d.host.Automations().Get(context.Background(), "workspace-a", "foreign")
+	if status.Code(err) != codes.NotFound {
+		t.Fatalf("Automations().Get error code = %s, want NotFound: %v", status.Code(err), err)
+	}
+
+	var source automationSource
+	d.host.automations = func() automationSource { return source }
+	_, _, err = d.host.Automations().List(context.Background(), "workspace-a", pluginsdk.Page{})
+	if status.Code(err) != codes.Unimplemented {
+		t.Fatalf("unwired Automations().List error code = %s, want Unimplemented: %v", status.Code(err), err)
+	}
+	source = d.automations
+	d.automations.err = nil
+	d.automations.items = []pluginsdk.Automation{{ID: "automation-a", WorkspaceID: "workspace-a"}}
+	items, _, err := d.host.Automations().List(context.Background(), "workspace-a", pluginsdk.Page{})
+	if err != nil || len(items) != 1 {
+		t.Fatalf("late-wired Automations().List = %+v, %v", items, err)
 	}
 }
 

@@ -84,6 +84,11 @@ service Host {
   // repositories, or document fields. The requested target must belong to
   // workspace_id; foreign and unknown targets fail as NotFound.
   rpc GetTaskRelations(GetTaskRelationsRequest) returns (GetTaskRelationsResponse);
+  // Automation descriptors — capability api_read:automations. A plugin uses
+  // the workspace-stamped automation.triggered event as delivery, then reads
+  // the configured prompt/profile through this scoped accessor.
+  rpc ListAutomations(ListAutomationsRequest) returns (ListAutomationsResponse);
+  rpc GetAutomation(GetAutomationRequest) returns (GetAutomationResponse);
   rpc ListWorkspaces(ListWorkspacesRequest) returns (ListWorkspacesResponse);
   rpc ListWorkflows(ListWorkflowsRequest) returns (ListWorkflowsResponse);
   rpc ListWorkflowSteps(ListWorkflowStepsRequest) returns (ListWorkflowStepsResponse);
@@ -427,6 +432,37 @@ message GetTaskRelationsRequest {
 }
 message GetTaskRelationsResponse {
   TaskRelations relations = 1;
+}
+
+// Automation is the compact, workspace-scoped configuration projection for a
+// trigger consumer. It deliberately excludes webhook secrets, repository
+// bindings, run history, and implementation-specific task placement fields.
+message Automation {
+  string id = 1;
+  string workspace_id = 2;
+  string name = 3;
+  string description = 4;
+  string agent_profile_id = 5;
+  string executor_profile_id = 6;
+  string prompt = 7;
+  bool enabled = 8;
+  int32 max_concurrent_runs = 9;
+  string updated_at = 10;
+}
+message ListAutomationsRequest {
+  string workspace_id = 1;
+  Page page = 2;
+}
+message ListAutomationsResponse {
+  repeated Automation automations = 1;
+  PageInfo page_info = 2;
+}
+message GetAutomationRequest {
+  string workspace_id = 1;
+  string id = 2;
+}
+message GetAutomationResponse {
+  Automation automation = 1;
 }
 
 // ── Workspace / Workflow / Steps ─────────────────────────────────────────────

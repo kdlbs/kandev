@@ -20,6 +20,8 @@ type dataRecordingHost struct {
 	tasks         map[string]Task
 	taskList      []Task
 	taskPageInfo  *PageInfo
+	automations   []Automation
+	automation    *Automation
 	sessions      []Session
 	sessionPage   *PageInfo
 	codeStats     []SessionCodeStats
@@ -33,12 +35,14 @@ type dataRecordingHost struct {
 	messagePage   *PageInfo
 	utilityText   string
 
-	lastTaskFilter    TaskFilter
-	lastSessionFilter SessionFilter
-	lastMessageFilter MessageFilter
-	lastWorkspaceID   string
-	lastWorkflowID    string
-	lastUtilityPrompt string
+	lastTaskFilter            TaskFilter
+	lastAutomationWorkspaceID string
+	lastAutomationID          string
+	lastSessionFilter         SessionFilter
+	lastMessageFilter         MessageFilter
+	lastWorkspaceID           string
+	lastWorkflowID            string
+	lastUtilityPrompt         string
 
 	createdTask     Task
 	lastCreateInput CreateTaskInput
@@ -71,10 +75,11 @@ func (h *dataRecordingHost) EmitEvent(context.Context, string, map[string]any) e
 	return nil
 }
 
-func (h *dataRecordingHost) Tasks() TaskReader           { return dataRecordingTaskReader{h} }
-func (h *dataRecordingHost) Sessions() SessionReader     { return dataRecordingSessionReader{h} }
-func (h *dataRecordingHost) Workspaces() WorkspaceReader { return dataRecordingWorkspaceReader{h} }
-func (h *dataRecordingHost) Workflows() WorkflowReader   { return dataRecordingWorkflowReader{h} }
+func (h *dataRecordingHost) Tasks() TaskReader             { return dataRecordingTaskReader{h} }
+func (h *dataRecordingHost) Automations() AutomationReader { return dataRecordingAutomationReader{h} }
+func (h *dataRecordingHost) Sessions() SessionReader       { return dataRecordingSessionReader{h} }
+func (h *dataRecordingHost) Workspaces() WorkspaceReader   { return dataRecordingWorkspaceReader{h} }
+func (h *dataRecordingHost) Workflows() WorkflowReader     { return dataRecordingWorkflowReader{h} }
 func (h *dataRecordingHost) AgentProfiles() AgentProfileReader {
 	return dataRecordingAgentProfileReader{h}
 }
@@ -88,6 +93,18 @@ func (h *dataRecordingHost) InvokeUtilityAgent(_ context.Context, prompt string)
 }
 
 type dataRecordingTaskReader struct{ h *dataRecordingHost }
+
+type dataRecordingAutomationReader struct{ h *dataRecordingHost }
+
+func (r dataRecordingAutomationReader) List(_ context.Context, workspaceID string, _ Page) ([]Automation, *PageInfo, error) {
+	r.h.lastAutomationWorkspaceID = workspaceID
+	return r.h.automations, nil, nil
+}
+
+func (r dataRecordingAutomationReader) Get(_ context.Context, workspaceID, id string) (*Automation, error) {
+	r.h.lastAutomationWorkspaceID, r.h.lastAutomationID = workspaceID, id
+	return r.h.automation, nil
+}
 
 func (r dataRecordingTaskReader) List(_ context.Context, filter TaskFilter, _ Page) ([]Task, *PageInfo, error) {
 	r.h.lastTaskFilter = filter
@@ -273,6 +290,25 @@ func TestHostData_Workspaces(t *testing.T) {
 	require.Equal(t, impl.workspaces, workspaces)
 }
 
+func TestHostData_Automations(t *testing.T) {
+	automation := Automation{
+		ID: "automation-1", WorkspaceID: "ws-1", Name: "Reconcile", Prompt: "WAKE:CYCLE",
+		AgentProfileID: "agent-1", ExecutorProfileID: "executor-1", Enabled: true, MaxConcurrentRuns: 1,
+	}
+	impl := &dataRecordingHost{automations: []Automation{automation}, automation: &automation}
+	host := dialHostOverBufconn(t, impl)
+
+	items, _, err := host.Automations().List(context.Background(), "ws-1", Page{})
+	require.NoError(t, err)
+	require.Equal(t, []Automation{automation}, items)
+	require.Equal(t, "ws-1", impl.lastAutomationWorkspaceID)
+
+	got, err := host.Automations().Get(context.Background(), "ws-1", "automation-1")
+	require.NoError(t, err)
+	require.Equal(t, &automation, got)
+	require.Equal(t, "automation-1", impl.lastAutomationID)
+}
+
 func TestHostData_InvokeUtilityAgent(t *testing.T) {
 	impl := &dataRecordingHost{utilityText: "the completion"}
 	host := dialHostOverBufconn(t, impl)
@@ -371,6 +407,10 @@ func TestHostData_UnimplementedHostData_ReturnsUnimplemented(t *testing.T) {
 	require.Equal(t, codes.Unimplemented, status.Code(err))
 
 	_, err = host.Tasks().Get(context.Background(), "task-1")
+	require.Error(t, err)
+	require.Equal(t, codes.Unimplemented, status.Code(err))
+
+	_, _, err = host.Automations().List(context.Background(), "workspace-1", Page{})
 	require.Error(t, err)
 	require.Equal(t, codes.Unimplemented, status.Code(err))
 
