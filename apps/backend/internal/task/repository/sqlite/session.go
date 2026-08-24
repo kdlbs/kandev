@@ -216,17 +216,21 @@ func (r *Repository) GetTurn(ctx context.Context, id string) (*models.Turn, erro
 	return scanTurnRow(row)
 }
 
-// GetActiveTurnBySessionID gets the currently active (non-completed) turn for a session
+// GetActiveTurnBySessionID gets the currently active (non-completed) turn for
+// a session. This is not the same query as "current turn": it keeps its own
+// completed_at IS NULL filter alongside currentTurnAuthority's predicate and
+// ordering (D10) so AbandonOpenTurns' re-bury loop keeps working.
 func (r *Repository) GetActiveTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error) {
+	predicate, orderBy := currentTurnAuthority(r.ro.DriverName(), "turn_row")
 	query := fmt.Sprintf(`
 		SELECT id, task_session_id, task_id, execution_profile_id, route_generation, started_at, completed_at, metadata, created_at, updated_at
 		FROM task_session_turns turn_row
 		WHERE turn_row.task_session_id = ?
 		  AND turn_row.completed_at IS NULL
 		  AND %s
-		ORDER BY turn_row.started_at DESC, turn_row.created_at DESC, turn_row.id DESC
+		ORDER BY %s
 		LIMIT 1
-	`, turnAuthorityPredicate(r.ro.DriverName(), "turn_row"))
+	`, predicate, orderBy)
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), sessionID)
 	return scanTurnRow(row)
 }
