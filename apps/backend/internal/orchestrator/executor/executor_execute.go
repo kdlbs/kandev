@@ -2208,11 +2208,17 @@ func (e *Executor) persistTaskEnvironment(
 	if existingEnv != nil {
 		materializationSessionID := existingEnv.MaterializationSessionID
 		isInitialMaterializer := existingEnv.Status == models.TaskEnvironmentStatusCreating && materializationSessionID == session.ID
+		repos := environmentReposForLaunch(req, resp)
 		// agent_execution_id is no longer stored on task_environments — the column
 		// is being dropped (executors_running is the single source of truth).
 		// Status, workspace, and container fields are still env-row-owned; the
-		// physical worktree lives on task_environment_repos.
-		existingEnv.Status = models.TaskEnvironmentStatusReady
+		// physical worktree lives on task_environment_repos. Status is decided
+		// per branch below rather than forced here: the initial materializer
+		// always transitions to ready (its inventory publishes atomically in
+		// the same call), but a non-materializing sibling must not force ready
+		// onto an environment whose canonical inventory turned out empty for a
+		// repo-backed task — that permanently bricks reuse (see
+		// validateReuseEnvironmentInventory).
 		existingEnv.MaterializationSessionID = ""
 		// Refresh workspace + container/sandbox fields. The original update
 		// branch only touched AgentExecutionID/Status, so envs created with
@@ -2247,7 +2253,7 @@ func (e *Executor) persistTaskEnvironment(
 			existingEnv.Status = models.TaskEnvironmentStatusReady
 			existingEnv.MaterializationSessionID = ""
 			if finalizer, ok := e.repo.(taskEnvironmentMaterializationFinalizer); ok {
-				if err := finalizer.FinalizeTaskEnvironmentMaterialization(ctx, existingEnv, environmentReposForLaunch(req, resp), materializationSessionID); err != nil {
+				if err := finalizer.FinalizeTaskEnvironmentMaterialization(ctx, existingEnv, repos, materializationSessionID); err != nil {
 					e.logger.Warn("failed to finalize task environment materialization",
 						zap.String("task_id", taskID), zap.String("env_id", existingEnv.ID), zap.Error(err))
 					return
@@ -2256,6 +2262,17 @@ func (e *Executor) persistTaskEnvironment(
 				e.selfHealTaskRepositoryBaseBranches(ctx, taskID, req, resp)
 				return
 			}
+		}
+		// A non-materializing sibling only advances the environment to ready
+		// when inventory is present: already recorded before this launch,
+		// about to be written by this launch, or not required because the
+		// task has no configured repositories at all. A launch whose prepare
+		// step failed produces an empty repos slice here — leaving the
+		// environment's existing status untouched (it can only already be
+		// ready or stopped by the time this branch runs) keeps that launch
+		// from bricking future reuse instead of silently corrupting the row.
+		if len(repos) > 0 || len(existingEnv.Repos) > 0 || !e.taskIsRepoBacked(ctx, taskID) {
+			existingEnv.Status = models.TaskEnvironmentStatusReady
 		}
 		if err := e.repo.UpdateTaskEnvironment(ctx, existingEnv); err != nil {
 			e.logger.Warn("failed to update task environment",
@@ -2267,7 +2284,7 @@ func (e *Executor) persistTaskEnvironment(
 		// Persist per-repo rows for launches that didn't have them yet. The
 		// environment-repository rows are the only physical-worktree record,
 		// so single-repo launches write one row here too.
-		e.persistTaskEnvironmentRepos(ctx, existingEnv.ID, environmentReposForLaunch(req, resp))
+		e.persistTaskEnvironmentRepos(ctx, existingEnv.ID, repos)
 		e.selfHealTaskRepositoryBaseBranches(ctx, taskID, req, resp)
 		return
 	}
@@ -2299,6 +2316,23 @@ func (e *Executor) persistTaskEnvironment(
 	}
 	session.TaskEnvironmentID = env.ID
 	e.selfHealTaskRepositoryBaseBranches(ctx, taskID, req, resp)
+}
+
+// taskIsRepoBacked reports whether a task has any configured repositories.
+// Fails closed on a read error (treats the task as repo-backed) so a
+// transient failure cannot mask the ready-with-empty-inventory bug the
+// persistTaskEnvironment status guard exists to prevent.
+func (e *Executor) taskIsRepoBacked(ctx context.Context, taskID string) bool {
+	if e.repo == nil {
+		return false
+	}
+	repos, err := e.repo.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		e.logger.Warn("failed to check task repositories for environment ready-status guard",
+			zap.String("task_id", taskID), zap.Error(err))
+		return true
+	}
+	return len(repos) > 0
 }
 
 func (e *Executor) selfHealTaskRepositoryBaseBranches(

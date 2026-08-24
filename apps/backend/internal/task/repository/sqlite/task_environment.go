@@ -43,6 +43,21 @@ func (r *Repository) CreateTaskEnvironment(ctx context.Context, env *models.Task
 		return err
 	}
 
+	// A ready environment with zero repo rows is indistinguishable from "the
+	// canonical inventory was never captured" and permanently bricks reuse
+	// (validateReuseEnvironmentInventory refuses every later launch). Reject
+	// at the boundary instead of trusting the caller: only a task with no
+	// repositories configured at all may legitimately have none.
+	if env.Status == models.TaskEnvironmentStatusReady && len(env.Repos) == 0 {
+		hasRepos, err := r.taskHasRepositoriesTx(ctx, tx, env.TaskID)
+		if err != nil {
+			return err
+		}
+		if hasRepos {
+			return fmt.Errorf("create task environment: ready status requires repository inventory for repo-backed task (task=%s)", env.TaskID)
+		}
+	}
+
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_environments (
 			id, task_id, executor_type, executor_id, executor_profile_id,
@@ -208,6 +223,19 @@ func (r *Repository) FinalizeTaskEnvironmentMaterialization(
 	if err := r.taskCleanupBarrierLocked(ctx, tx, taskID); err != nil {
 		return err
 	}
+	// See the matching guard in CreateTaskEnvironment: a materializer that
+	// publishes ready with an empty inventory (e.g. because its prepare step
+	// failed and produced no repos) must not be allowed to land, or the
+	// environment becomes permanently unreusable.
+	if len(repos) == 0 {
+		hasRepos, err := r.taskHasRepositoriesTx(ctx, tx, taskID)
+		if err != nil {
+			return err
+		}
+		if hasRepos {
+			return fmt.Errorf("finalize task environment: ready status requires repository inventory for repo-backed task (id=%s)", env.ID)
+		}
+	}
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_environment_repos WHERE task_environment_id = ?`), env.ID); err != nil {
 		return err
 	}
@@ -241,6 +269,17 @@ func (r *Repository) FinalizeTaskEnvironmentMaterialization(
 		return fmt.Errorf("finalize task environment: materialization claim was not current")
 	}
 	return tx.Commit()
+}
+
+// taskHasRepositoriesTx reports whether a task has any task_repositories
+// rows, i.e. whether it is repo-backed and therefore expected to carry a
+// non-empty canonical inventory whenever its environment is ready.
+func (r *Repository) taskHasRepositoriesTx(ctx context.Context, tx *sqlx.Tx, taskID string) (bool, error) {
+	var count int
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT COUNT(1) FROM task_repositories WHERE task_id = ?`), taskID).Scan(&count); err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 func (r *Repository) TransferTaskEnvironmentToTask(ctx context.Context, envID, taskID string) error {
