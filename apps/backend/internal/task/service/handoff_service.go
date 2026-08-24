@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/coordinator"
 	orchmodels "github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
@@ -190,20 +191,21 @@ type RelatedTasks struct {
 // than reaching into the repos directly so document writes still go
 // through DocumentService and emit the same revision/event side effects.
 type HandoffService struct {
-	tasks              repository.TaskRepository
-	docs               *DocumentService
-	docsRepo           repository.DocumentRepository
-	blockers           BlockerRepository
-	wsGroups           WorkspaceGroupRepo
-	sessions           SessionWorktreeReader
-	cleaner            WorkspaceCleaner
-	runCanceller       RunCanceller
-	eventPublisher     TaskEventPublisher
-	resourceCleaner    TaskResourceCleaner
-	taskAccessCheck    func(ctx context.Context, taskID string) error
-	logger             *logger.Logger
-	parentLock         parentMutex
-	workspaceGroupLock parentMutex
+	tasks                repository.TaskRepository
+	docs                 *DocumentService
+	docsRepo             repository.DocumentRepository
+	blockers             BlockerRepository
+	wsGroups             WorkspaceGroupRepo
+	sessions             SessionWorktreeReader
+	cleaner              WorkspaceCleaner
+	runCanceller         RunCanceller
+	eventPublisher       TaskEventPublisher
+	resourceCleaner      TaskResourceCleaner
+	taskAccessCheck      func(ctx context.Context, taskID string) error
+	coordinatorAuthority *coordinator.Authority
+	logger               *logger.Logger
+	parentLock           parentMutex
+	workspaceGroupLock   parentMutex
 }
 
 // TaskEventPublisher abstracts the side-effect of broadcasting task
@@ -291,6 +293,10 @@ func (s *HandoffService) SetTaskResourceCleaner(c TaskResourceCleaner) {
 // of every archive and delete route.
 func (s *HandoffService) SetTaskAccessChecker(check func(ctx context.Context, taskID string) error) {
 	s.taskAccessCheck = check
+}
+
+func (s *HandoffService) SetCoordinatorAuthority(authority *coordinator.Authority) {
+	s.coordinatorAuthority = authority
 }
 
 // authorizeTask applies the configured per-user task check. No-op when unwired.
@@ -492,10 +498,7 @@ func (s *HandoffService) ListRelatedForCaller(ctx context.Context, callerTaskID,
 	// empty caller has no identity to authorize against, so canReadDocuments
 	// denies it (rather than silently delegating to the ungated ListRelated).
 	if callerTaskID != targetTaskID {
-		ok, err := canReadDocuments(ctx,
-			repoTaskLookupAdapter{r: s.tasks},
-			blockerLookupAdapter{repo: s.blockers},
-			callerTaskID, targetTaskID)
+		ok, err := s.canReadForCaller(ctx, callerTaskID, targetTaskID)
 		if err != nil {
 			return nil, err
 		}
@@ -578,7 +581,7 @@ func (s *HandoffService) GetDocumentForCaller(ctx context.Context, currentTaskID
 	if targetTaskID == "" {
 		return nil, ErrDocumentTaskRequired
 	}
-	ok, err := canReadDocuments(ctx, repoTaskLookupAdapter{r: s.tasks}, blockerLookupAdapter{repo: s.blockers}, currentTaskID, targetTaskID)
+	ok, err := s.canReadForCaller(ctx, currentTaskID, targetTaskID)
 	if err != nil {
 		return nil, err
 	}
@@ -594,7 +597,7 @@ func (s *HandoffService) ListDocumentsForCaller(ctx context.Context, currentTask
 	if targetTaskID == "" {
 		return nil, ErrDocumentTaskRequired
 	}
-	ok, err := canReadDocuments(ctx, repoTaskLookupAdapter{r: s.tasks}, blockerLookupAdapter{repo: s.blockers}, currentTaskID, targetTaskID)
+	ok, err := s.canReadForCaller(ctx, currentTaskID, targetTaskID)
 	if err != nil {
 		return nil, err
 	}

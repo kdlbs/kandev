@@ -122,6 +122,22 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:             "features.coordinatorTaskAuthority",
+			EnvVar:          "KANDEV_FEATURES_COORDINATOR_TASK_AUTHORITY",
+			Kind:            KindFeature,
+			Label:           "Coordinator task authority",
+			Description:     "Allows operators to grant a task scoped authority to inspect or coordinate other tasks.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskHigh,
+			RiskDescription: "A coordinator grant extends task-to-task access within its declared workspace or workflow scope. Enable it only on installations where workspace operators are trusted.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.CoordinatorTaskAuthority },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.CoordinatorTaskAuthority = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:         "debug.devMode",
 			EnvVar:      "KANDEV_DEBUG_DEV_MODE",
 			Kind:        KindDebug,

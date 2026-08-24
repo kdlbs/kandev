@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
@@ -304,7 +305,14 @@ type Handlers struct {
 
 	// Optional list_pending_agent_permissions_kandev / resolve_agent_permission_kandev
 	// dependency (external MCP surface only, set via SetAgentPermissionService).
-	agentPermissionSvc AgentPermissionService
+	agentPermissionSvc   AgentPermissionService
+	coordinatorAuthority *coordinator.Authority
+}
+
+// SetCoordinatorAuthority installs the optional, centrally evaluated task
+// authority boundary. Leaving it nil preserves direct-parent-only behavior.
+func (h *Handlers) SetCoordinatorAuthority(authority *coordinator.Authority) {
+	h.coordinatorAuthority = authority
 }
 
 // NewHandlers creates new MCP handlers.
@@ -2046,8 +2054,14 @@ func (h *Handlers) authorizeWorkspaceSourceTarget(ctx context.Context, msg *ws.M
 		return nil, false, newWorkspaceSourceError(msg, ws.ErrorCodeNotFound, "target task not found")
 	}
 	isChildTarget := req.TaskID != req.CallerTaskID
-	if isChildTarget && !canDirectParentAccess(caller, target) {
-		return nil, false, newWorkspaceSourceError(msg, ws.ErrorCodeForbidden, "only a task's direct parent in the same workspace can attach its sources")
+	if isChildTarget {
+		decision, authErr := h.authorizeCoordinatorAction(ctx, caller, target, "add_workspace_sources", coordinator.CapabilityOrchestrate)
+		if authErr != nil {
+			return nil, false, newWorkspaceSourceError(msg, ws.ErrorCodeInternalError, "failed to authorize target task")
+		}
+		if !decision.Allowed {
+			return nil, false, newWorkspaceSourceError(msg, ws.ErrorCodeForbidden, "only a task's direct parent in the same workspace can attach its sources")
+		}
 	}
 	return target, isChildTarget, nil
 }
@@ -2594,9 +2608,15 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 	// its request was rejected. Omitted or "queued" keeps the default
 	// queue-and-wait behavior documented on message_task_kandev, even for
 	// a parent sender.
-	isParentToChild := targetTask.ParentID != "" && targetTask.ParentID == senderTask.ID
 	wantsInterrupt := req.DeliveryMode == deliveryModeInterrupt
-	if wantsInterrupt && !isParentToChild {
+	interruptDecision := coordinator.Decision{}
+	if wantsInterrupt {
+		interruptDecision, err = h.authorizeCoordinatorAction(ctx, senderTask, targetTask, "message_interrupt", coordinator.CapabilityOrchestrate)
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to authorize target task", nil)
+		}
+	}
+	if wantsInterrupt && !interruptDecision.Allowed {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden,
 			`delivery_mode="interrupt" is only allowed when the sender is the target task's direct parent`, nil)
 	}

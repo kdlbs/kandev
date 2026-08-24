@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 )
@@ -21,6 +22,23 @@ var ErrAccessDenied = errors.New("document access denied")
 // in this file alone.
 type taskLookup interface {
 	GetTask(ctx context.Context, id string) (*models.Task, error)
+}
+
+func (s *HandoffService) canReadForCaller(ctx context.Context, callerID, targetID string) (bool, error) {
+	ok, err := canReadDocuments(ctx, repoTaskLookupAdapter{r: s.tasks}, blockerLookupAdapter{repo: s.blockers}, callerID, targetID)
+	if err != nil || ok || s.coordinatorAuthority == nil {
+		return ok, err
+	}
+	caller, err := s.tasks.GetTask(ctx, callerID)
+	if err != nil {
+		return false, err
+	}
+	target, err := s.tasks.GetTask(ctx, targetID)
+	if err != nil {
+		return false, err
+	}
+	decision, err := s.coordinatorAuthority.Authorize(ctx, coordinator.Request{ActorTask: caller, TargetTask: target, Action: "inspect_task_documents", Capability: coordinator.CapabilityInspect})
+	return decision.Allowed, err
 }
 
 // blockerLookup is the minimal repository surface canReadDocuments
