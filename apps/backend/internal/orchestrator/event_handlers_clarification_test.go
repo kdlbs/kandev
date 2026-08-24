@@ -1471,6 +1471,75 @@ func TestClarificationWatchdogCancellationInterruptsFallbackLookup(t *testing.T)
 	}
 }
 
+func TestClarificationWatchdogRecoveryIgnoresOwnCancelActivity(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID    = "task-watchdog-own-cancel"
+		sessionID = "session-watchdog-own-cancel"
+		execution = "exec-watchdog-own-cancel"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+	seedExecutorRunning(t, repo, sessionID, taskID, execution)
+
+	promptDone := make(chan struct{})
+	var svc *Service
+	agentMgr := &mockAgentManager{
+		isAgentRunning: true,
+		promptDone:     promptDone,
+	}
+	agentMgr.cancelAgentFunc = func(cancelCtx context.Context, _ string) error {
+		svc.handleAgentStreamEvent(cancelCtx, &lifecycle.AgentStreamEventPayload{
+			TaskID:      taskID,
+			SessionID:   sessionID,
+			ExecutionID: execution,
+			Data: &lifecycle.AgentStreamEventData{
+				Type: "session_info",
+			},
+		})
+		return nil
+	}
+	svc = createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.turnService = &repoTurnService{repo: repo}
+	clarificationTurn, err := svc.turnService.StartTurn(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("start clarification turn: %v", err)
+	}
+
+	watchCtx, cancelWatchdog := context.WithCancel(context.Background())
+	defer cancelWatchdog()
+	pendingID := "pending-watchdog-own-cancel"
+	entry := &clarificationWatchdogEntry{cancel: cancelWatchdog}
+	key := svc.clarificationWatchdogKey(sessionID, pendingID)
+	svc.clarificationWatchdogs.Store(key, entry)
+	t.Cleanup(func() { svc.cancelAllClarificationWatchdogs() })
+
+	recovered := svc.retryClarificationAfterCancel(
+		watchCtx,
+		clarificationAnsweredData{
+			TaskID: taskID, SessionID: sessionID, PendingID: pendingID,
+			ClarificationTurnID: clarificationTurn.ID,
+		},
+		"the clarification answer",
+		fmt.Errorf("wrapped: %w", ErrAgentPromptInProgress),
+	)
+	if !recovered {
+		t.Fatal("clarification watchdog recovery did not complete after its own cancellation activity")
+	}
+	select {
+	case <-promptDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("clarification answer was not handed off after recovery")
+	}
+	if err := watchCtx.Err(); err != nil {
+		t.Fatalf("watchdog recovery context was cancelled by its own stream activity: %v", err)
+	}
+	if got := len(agentMgr.capturedPrompts); got != 1 {
+		t.Fatalf("clarification replacement prompts = %d, want exactly 1", got)
+	}
+}
+
 // TestRetryClarificationAfterCancel_DoesNotStarveUserCancel is the regression
 // test for the production hang where a clarification-timeout recovery left a
 // session permanently unstoppable. retryClarificationAfterCancel used to send

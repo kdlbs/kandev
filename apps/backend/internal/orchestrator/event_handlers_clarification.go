@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -123,6 +124,25 @@ type clarificationAnsweredData struct {
 
 type clarificationWatchdogEntry struct {
 	cancel func()
+	// Recovery's silent cancellation can synchronously emit stream activity.
+	// Keep that activity from cancelling this entry's own recovery context.
+	recoveryCancellationActive atomic.Bool
+}
+
+func (e *clarificationWatchdogEntry) beginRecoveryCancellation() {
+	if e != nil {
+		e.recoveryCancellationActive.Store(true)
+	}
+}
+
+func (e *clarificationWatchdogEntry) endRecoveryCancellation() {
+	if e != nil {
+		e.recoveryCancellationActive.Store(false)
+	}
+}
+
+func (e *clarificationWatchdogEntry) isRecoveryCancellationActive() bool {
+	return e != nil && e.recoveryCancellationActive.Load()
 }
 
 // handleClarificationAnswered handles user responses to agent clarification questions.
@@ -263,6 +283,21 @@ func (s *Service) handleClarificationPrimaryAnswered(ctx context.Context, event 
 
 func (s *Service) clarificationWatchdogKey(sessionID, pendingID string) string {
 	return sessionID + "::" + pendingID
+}
+
+func (s *Service) loadClarificationWatchdogEntry(sessionID, pendingID string) *clarificationWatchdogEntry {
+	if sessionID == "" || pendingID == "" {
+		return nil
+	}
+	value, ok := s.clarificationWatchdogs.Load(s.clarificationWatchdogKey(sessionID, pendingID))
+	if !ok {
+		return nil
+	}
+	entry, ok := value.(*clarificationWatchdogEntry)
+	if !ok {
+		return nil
+	}
+	return entry
 }
 
 func (s *Service) getClarificationWatchdogTimeout() time.Duration {
@@ -410,10 +445,18 @@ func (s *Service) retryClarificationAfterCancel(ctx context.Context, data clarif
 		return false
 	}
 
-	if err := s.cancelAgentSilentWithGuard(ctx, data.TaskID, data.SessionID, guard.unlock, guard.relock); err != nil {
+	watchdogEntry := s.loadClarificationWatchdogEntry(data.SessionID, data.PendingID)
+	if watchdogEntry != nil {
+		watchdogEntry.beginRecoveryCancellation()
+	}
+	cancelErr := s.cancelAgentSilentWithGuard(ctx, data.TaskID, data.SessionID, guard.unlock, guard.relock)
+	if watchdogEntry != nil {
+		watchdogEntry.endRecoveryCancellation()
+	}
+	if cancelErr != nil {
 		s.logger.Warn("cancel failed (agent likely dead), force-transitioning session state",
 			zap.String("session_id", data.SessionID),
-			zap.Error(err))
+			zap.Error(cancelErr))
 		// Revert through the terminal-safe state writer. Production uses a
 		// compare-and-set, and the shared guard keeps coordinator cancellation
 		// outside this narrow mutation.
@@ -922,6 +965,12 @@ func (s *Service) cancelClarificationWatchdogsForSession(sessionID, reason strin
 	s.clarificationWatchdogs.Range(func(key, value interface{}) bool {
 		keyStr, ok := key.(string)
 		if !ok || !strings.HasPrefix(keyStr, prefix) {
+			return true
+		}
+		// Silent cancellation may synchronously emit this stream frame while the
+		// fallback still owns the watchdog context. Independent activity remains
+		// authoritative once the recovery phase ends.
+		if entry, ok := value.(*clarificationWatchdogEntry); ok && entry.isRecoveryCancellationActive() {
 			return true
 		}
 		s.clarificationWatchdogs.Delete(keyStr)

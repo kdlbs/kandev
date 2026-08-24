@@ -111,11 +111,14 @@ hiding the action the icon represents.
   endpoint still returns the acknowledgement error. A publication or summary-convergence error after
   the database restore does not make that retry unsafe; durable pending state remains authoritative.
   Once agentctl accepts the prompt, later publication or completion errors cannot roll back the
-  successor turn or reopen the answer. A primary-answer watchdog carries the clarification turn ID
-  and revalidates that ID both before fallback and inside serialized prompt admission, so it cannot
-  dispatch a stale answer into a successor turn. Its fallback keeps the watchdog cancellation context
-  through authority reads and prompt admission so session activity or service shutdown interrupts
-  in-flight recovery work.
+  successor turn or reopen the answer. A primary-answer watchdog is observable before a confirmed live
+  waiter returns the response to the agent, so acknowledgement activity cannot occur before the
+  watchdog can observe it. The watchdog carries the clarification turn ID and revalidates that ID both
+  before fallback and inside serialized prompt admission, so it cannot dispatch a stale answer into a
+  successor turn. Its fallback keeps the watchdog cancellation context through authority reads and
+  prompt admission so independent session activity or service shutdown interrupts in-flight recovery
+  work. Activity emitted by the fallback's own silent cancellation remains part of that recovery and
+  cannot cancel its context before the answer reaches the replacement handoff.
 - A current-turn bundle remains answerable while any sibling question is pending. Recovery claims only
   those pending rows, preserves siblings already made terminal by an earlier partial write, and restores
   only the claimed rows if detached delivery fails. Primary delivery events and detached recovery derive

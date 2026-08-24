@@ -385,6 +385,14 @@ func (r *Resolver) deliverClaimedResolution(
 		func() error {
 			finalized, confirmErr := r.confirmLiveClarificationResponseDelivery(ctx, pendingID, claim)
 			if confirmErr == nil {
+				r.publishPrimaryAnsweredEvent(
+					ctx,
+					pendingID,
+					response.Answers,
+					response.Rejected,
+					response.RejectReason,
+					r.clarificationClaimTurnID(pendingID, finalized),
+				)
 				finalizedMessages <- finalized
 			}
 			return confirmErr
@@ -393,14 +401,6 @@ func (r *Resolver) deliverClaimedResolution(
 	if deliveryErr == nil {
 		finalized := <-finalizedMessages
 		r.publishClarificationBundleUpdates(ctx, pendingID, finalized)
-		r.publishPrimaryAnsweredEvent(
-			ctx,
-			pendingID,
-			response.Answers,
-			response.Rejected,
-			response.RejectReason,
-			r.clarificationClaimTurnID(pendingID, finalized),
-		)
 		r.logger.Info("clarification answered via primary path (same turn)",
 			zap.String("pending_id", pendingID),
 			zap.Int("answers", len(response.Answers)),

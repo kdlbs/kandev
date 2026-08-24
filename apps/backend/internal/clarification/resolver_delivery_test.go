@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
@@ -191,6 +193,18 @@ func newResolverDeliveryFixture(
 	return resolver, store, repo, creator, eventBus
 }
 
+type resolverOrderingEventBus struct {
+	*stubEventBus
+	onPrimaryPublish func()
+}
+
+func (b *resolverOrderingEventBus) Publish(ctx context.Context, subject string, event *bus.Event) error {
+	if subject == events.ClarificationPrimaryAnswered && b.onPrimaryPublish != nil {
+		b.onPrimaryPublish()
+	}
+	return b.stubEventBus.Publish(ctx, subject, event)
+}
+
 func resolverAnswer() Outcome {
 	return Outcome{Answers: []Answer{{
 		QuestionID:      "q1",
@@ -238,6 +252,63 @@ func TestResolverLiveDeliveryRequiresDurableConfirmation(t *testing.T) {
 	}
 	if creator.restoreCalls != 1 {
 		t.Fatalf("restore calls = %d, want 1", creator.restoreCalls)
+	}
+}
+
+func TestResolverLiveDeliveryPublishesPrimaryAnswerBeforeWaiterReturns(t *testing.T) {
+	const pendingID = "pending-live-ordering"
+	message := resolverDeliveryMessage(pendingID, "message-live-ordering", "turn-1")
+	resolver, store, _, _, eventBus := newResolverDeliveryFixture(
+		t, pendingID, []*taskmodels.Message{message},
+	)
+	orderingBus := &resolverOrderingEventBus{stubEventBus: eventBus}
+	resolver.eventBus = orderingBus
+	store.CreateRequest(&Request{
+		PendingID: pendingID,
+		SessionID: "session-1",
+		TaskID:    "task-1",
+		Questions: []Question{{
+			ID: "q1", Prompt: "Continue?",
+			Options: []Option{{ID: "yes", Label: "Yes"}, {ID: "no", Label: "No"}},
+		}},
+	})
+
+	waitEntered := make(chan struct{}, 1)
+	store.SetOnWaitEntered(func(string) { waitEntered <- struct{}{} })
+	waitReturned := make(chan struct{})
+	waitDone := make(chan error, 1)
+	go func() {
+		_, err := store.WaitForResponse(context.Background(), pendingID)
+		close(waitReturned)
+		waitDone <- err
+	}()
+	<-waitEntered
+	store.SetOnWaitEntered(nil)
+
+	eventBeforeWaiterReturn := true
+	eventPublished := make(chan struct{})
+	orderingBus.onPrimaryPublish = func() {
+		select {
+		case <-waitReturned:
+			eventBeforeWaiterReturn = false
+		default:
+		}
+		close(eventPublished)
+	}
+
+	_, claimed, err := resolver.ResolveBundle(context.Background(), pendingID, resolverAnswer())
+	if err != nil || !claimed {
+		t.Fatalf("ResolveBundle = claimed %v, err %v; want live delivery", claimed, err)
+	}
+	<-eventPublished
+	if err := <-waitDone; err != nil {
+		t.Fatalf("WaitForResponse: %v", err)
+	}
+	if !eventBeforeWaiterReturn {
+		t.Fatal("primary-answer event was published after the live waiter returned")
+	}
+	if len(eventBus.events) != 1 || eventBus.events[0].Type != events.ClarificationPrimaryAnswered {
+		t.Fatalf("primary-answer events = %d, want exactly 1", len(eventBus.events))
 	}
 }
 

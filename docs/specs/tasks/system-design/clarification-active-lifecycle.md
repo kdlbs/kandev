@@ -121,6 +121,27 @@ Transitions:
   `delivery_claimed` state is recoverable. A new request creates a new
   bundle identity; message deletion cannot reverse this transition.
 
+## Primary-answer watchdog recovery
+
+The primary path uses the live waiter's durable delivery-confirmation callback as the ordering
+boundary between response persistence and ACP delivery. After the claim is finalized, watchdog
+registration for the pending ID and clarification turn must complete before the callback returns the
+response to the agent. The agent therefore cannot emit a tool-completion acknowledgement before an
+armed watchdog can observe and cancel itself. Terminal clarification message publication remains after
+successful delivery; watchdog registration does not publish those messages early.
+
+Each watchdog has an armed phase and a fallback-recovery phase. Independent live stream activity
+cancels either phase, and service shutdown cancels all phases. Once fallback owns the per-session
+cancel-and-handoff sequence, it marks the silent cancellation as recovery-owned. Session information
+and completion frames caused by that cancellation do not cancel the same recovery context. The marker
+is cleared when cancellation settles, so later independent activity retains its normal cancellation
+authority.
+
+Fallback uses one bounded context through turn-authority reads, silent cancellation, terminal-safe
+session reconciliation, and replacement-answer queue handoff. The recovery-owned activity exception
+does not weaken current-turn checks, prompt-generation checks, explicit user cancellation, coordinator
+stop, or service-shutdown cancellation. No watchdog or recovery phase is persisted.
+
 ## Permissions
 
 No authorization change. A user can see, answer, or dismiss only clarification data for a task and
@@ -168,6 +189,12 @@ session they can already access. Session selection does not broaden task visibil
   report whether retry state was recovered, and never restore it after a successor turn is accepted. A
   started confirmation may finish after the responder's bounded wait, but it cannot mutate the
   responder's claim snapshot and its durable finalization serializes against that restore.
+- Live delivery acknowledgement races response finalization: arm the primary-answer watchdog inside the
+  finalized delivery-confirmation boundary before returning the response to the agent. Do not rely on a
+  later terminal-message publication to establish watchdog ordering.
+- Primary-answer fallback cancellation produces its own stream activity: retain the bounded fallback
+  context while that recovery-owned cancellation settles, then continue state reconciliation and the
+  single replacement-answer handoff. Independent activity and service shutdown still cancel recovery.
 - Historical partial terminalization leaves pending and terminal siblings in one current-turn bundle:
   complete the pending siblings without rewriting terminal history or returning a permanent conflict.
 - A malformed persisted pending row has no matching durable turn: drain any live in-memory waiter, but
