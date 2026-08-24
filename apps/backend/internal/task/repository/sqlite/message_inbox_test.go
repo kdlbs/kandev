@@ -2,9 +2,11 @@ package sqlite
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/require"
 )
@@ -38,6 +40,44 @@ func TestListTaskInboxMessagesScopesAuthorsAndPaginatesByTask(t *testing.T) {
 	require.False(t, hasMore)
 	require.Equal(t, []string{"m3"}, inboxMessageIDs(page))
 	require.Equal(t, map[string]int{"session-a": 2, "session-b": 1}, counts)
+}
+
+func TestListTaskInboxMessagesUsesTaskScopedOrderingIndex(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	normalizedCreatedAt := dialect.NormalizedMicrosecond(dialect.SQLite3, "created_at")
+	rows, err := repo.ro.QueryxContext(context.Background(), repo.ro.Rebind(`
+		EXPLAIN QUERY PLAN
+		SELECT id
+		FROM task_session_messages
+		WHERE task_id = ? AND author_type = ?
+		ORDER BY `+normalizedCreatedAt+` ASC, id ASC
+		LIMIT ?
+	`), "task-inbox", string(models.MessageAuthorUser), 1)
+	require.NoError(t, err)
+	defer func() { _ = rows.Close() }()
+
+	var details []string
+	for rows.Next() {
+		var id, parent, notUsed int
+		var detail string
+		require.NoError(t, rows.Scan(&id, &parent, &notUsed, &detail))
+		details = append(details, detail)
+	}
+	require.NoError(t, rows.Err())
+	require.NotEmpty(t, details)
+	require.True(t, slicesContain(details, "idx_messages_task_inbox_order"), "query plan: %v", details)
+	for _, detail := range details {
+		require.False(t, strings.Contains(detail, "USE TEMP B-TREE FOR ORDER BY"), "query plan: %v", details)
+	}
+}
+
+func slicesContain(values []string, wanted string) bool {
+	for _, value := range values {
+		if strings.Contains(value, wanted) {
+			return true
+		}
+	}
+	return false
 }
 
 func createInboxMessage(t *testing.T, repo *Repository, id, taskID, sessionID, turnID string, author models.MessageAuthorType, createdAt time.Time) {

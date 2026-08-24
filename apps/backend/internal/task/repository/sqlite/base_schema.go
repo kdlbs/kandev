@@ -45,6 +45,7 @@ func (r *Repository) initSchema() error {
 		r.ensureWorkspaceIndexes,
 		r.ensureMessageMetadataIndexes,
 		r.ensurePromptOrderIndex,
+		r.ensureTaskInboxOrderIndex,
 	}
 	for _, step := range steps {
 		if err := step(); err != nil {
@@ -173,6 +174,16 @@ func (r *Repository) ensurePromptOrderIndex() error {
 	ddl := dialect.PromptOrderIndexDDL(r.db.DriverName(), "idx_messages_prompt_order", "task_session_messages")
 	if _, err := r.db.Exec(ddl); err != nil {
 		return fmt.Errorf("create prompt-order index: %w", err)
+	}
+	return nil
+}
+
+// ensureTaskInboxOrderIndex creates the additive task/author/order index used
+// by the bounded task-wide inbox projection.
+func (r *Repository) ensureTaskInboxOrderIndex() error {
+	ddl := dialect.TaskInboxOrderIndexDDL(r.db.DriverName(), "idx_messages_task_inbox_order", "task_session_messages")
+	if _, err := r.db.Exec(ddl); err != nil {
+		return fmt.Errorf("create task inbox order index: %w", err)
 	}
 	return nil
 }

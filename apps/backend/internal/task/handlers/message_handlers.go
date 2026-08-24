@@ -11,6 +11,7 @@ import (
 	"unicode"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
@@ -18,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
@@ -414,6 +416,11 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		WithAttachments(req.Attachments).
 		WithContextFiles(req.ContextFiles).
 		WithEntityReferences(req.EntityReferences)
+	metadata := meta.ToMap()
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+	}
+	metadata[messagequeue.MetadataInboxTransitionID] = uuid.NewString()
 
 	// First message on a CREATED session is the kanban "type in chat to start
 	// the agent" path. Wrap with the Kandev MCP system block before persisting
@@ -476,7 +483,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		Content:       storedContent,
 		AuthorType:    "user",
 		AuthorID:      req.AuthorID,
-		Metadata:      meta.ToMap(),
+		Metadata:      metadata,
 	}
 	var message *models.Message
 	var err error
@@ -490,6 +497,10 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create message", nil)
 	}
 	if turnStartResult.Queued {
+		queueMetadata := message.Metadata
+		if queueMetadata == nil {
+			queueMetadata = metadata
+		}
 		if err := h.orchestrator.QueueUserPrompt(
 			ctx,
 			req.TaskID,
@@ -498,7 +509,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 			req.Model,
 			req.PlanMode,
 			req.Attachments,
-			meta.ToMap(),
+			queueMetadata,
 			true,
 		); err != nil {
 			h.logger.Warn("failed to queue prompt until workflow promotion",
