@@ -4038,7 +4038,16 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 		guard, releaseDispatchGuard = s.acquireCancelInFlightGuard(sessionID)
 		guard.Lock()
 		fresh, reloadErr := s.repo.GetTaskSession(ctx, sessionID)
-		if reloadErr != nil || fresh == nil || isTerminalSessionState(fresh.State) {
+		if reloadErr != nil {
+			guard.Unlock()
+			releaseDispatchGuard()
+			failureCtx, cancel := options.failureContext(ctx)
+			defer cancel()
+			s.rollbackForegroundDispatchOnFailure(failureCtx, taskID, sessionID, foregroundDispatch)
+			s.rollbackPromptClaim(failureCtx, taskID, sessionID, rollback)
+			return nil, reloadErr
+		}
+		if fresh == nil || isTerminalSessionState(fresh.State) {
 			guard.Unlock()
 			releaseDispatchGuard()
 			s.rollbackForegroundDispatchOnFailure(ctx, taskID, sessionID, foregroundDispatch)

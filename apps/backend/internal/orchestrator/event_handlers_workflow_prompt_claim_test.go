@@ -28,6 +28,49 @@ type terminalizeAfterPromotionRepo struct {
 	once            sync.Once
 }
 
+// postClaimReloadErrorRepo fails the guarded reload that follows a successful
+// prompt claim. The turn service arms it only after that claim has persisted
+// the RUNNING state and created the turn.
+type postClaimReloadErrorRepo struct {
+	sessionExecutorStore
+	targetSessionID string
+	err             error
+	mu              sync.Mutex
+	failNextReload  bool
+}
+
+func (r *postClaimReloadErrorRepo) armReloadFailure() {
+	r.mu.Lock()
+	r.failNextReload = true
+	r.mu.Unlock()
+}
+
+func (r *postClaimReloadErrorRepo) GetTaskSession(ctx context.Context, sessionID string) (*models.TaskSession, error) {
+	r.mu.Lock()
+	fail := sessionID == r.targetSessionID && r.failNextReload
+	if fail {
+		r.failNextReload = false
+	}
+	r.mu.Unlock()
+	if fail {
+		return nil, r.err
+	}
+	return r.sessionExecutorStore.GetTaskSession(ctx, sessionID)
+}
+
+type postClaimReloadErrorTurnService struct {
+	*repoBackedTurnService
+	repo *postClaimReloadErrorRepo
+}
+
+func (s *postClaimReloadErrorTurnService) StartTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
+	turn, err := s.repoBackedTurnService.StartTurn(ctx, sessionID)
+	if err == nil {
+		s.repo.armReloadFailure()
+	}
+	return turn, err
+}
+
 // dispatchBoundaryAgentManager blocks after agentctl has accepted the prompt,
 // giving the test a deterministic way to inspect the guard after admission but
 // before the prompt call returns.
@@ -166,6 +209,62 @@ func TestWorkflowAutoStartRejectsSessionTerminalizedBeforeResume(t *testing.T) {
 	}
 	if status := queue.GetStatus(ctx, session.ID); status.Count != 1 {
 		t.Fatalf("queued handoff count = %d, want 1 after terminal auto-start rejection", status.Count)
+	}
+}
+
+func TestWorkflowAutoStartRollsBackPromptClaimWhenPostClaimReloadFails(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-auto-start-reload-error", "session-auto-start-reload-error", "step-one")
+	session, err := repo.GetTaskSession(ctx, "session-auto-start-reload-error")
+	requireNoError(t, err)
+	session.State = models.TaskSessionStateWaitingForInput
+	requireNoError(t, repo.UpdateTaskSession(ctx, session))
+	seedExecutorRunning(t, repo, session.ID, session.TaskID, "execution-auto-start-reload-error")
+
+	reloadErr := errors.New("post-claim session reload failed")
+	failingRepo := &postClaimReloadErrorRepo{
+		sessionExecutorStore: repo,
+		targetSessionID:      session.ID,
+		err:                  reloadErr,
+	}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo, isAgentRunning: true}
+	queue := messagequeue.NewServiceMemory(testLogger())
+	if _, err := queue.QueueMessage(ctx, session.ID, session.TaskID, "handoff", "", messagequeue.QueuedByUser, true, nil); err != nil {
+		t.Fatalf("queue handoff: %v", err)
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.repo = failingRepo
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.messageQueue = queue
+	svc.turnService = &postClaimReloadErrorTurnService{
+		repoBackedTurnService: &repoBackedTurnService{repo: repo},
+		repo:                  failingRepo,
+	}
+
+	err = svc.autoStartStepPrompt(ctx, session.TaskID, session, &wfmodels.WorkflowStep{}, "review the task", false, false)
+	if !errors.Is(err, reloadErr) {
+		t.Fatalf("auto-start error = %v, want post-claim reload error", err)
+	}
+	stored, err := repo.GetTaskSession(ctx, session.ID)
+	requireNoError(t, err)
+	if stored.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("session state after reload failure = %s, want WAITING_FOR_INPUT", stored.State)
+	}
+	if active, err := repo.GetActiveTurnBySessionID(ctx, session.ID); err == nil || active != nil {
+		t.Fatalf("active turn after reload failure = %#v, %v; want no active turn", active, err)
+	}
+	turns, err := repo.ListTurnsBySession(ctx, session.ID)
+	requireNoError(t, err)
+	if len(turns) != 1 || turns[0].CompletedAt == nil {
+		t.Fatalf("turns after reload failure = %#v, want one completed rollback turn", turns)
+	}
+	if len(agentMgr.capturedPrompts) != 0 {
+		t.Fatalf("prompt dispatches = %d, want none after reload failure", len(agentMgr.capturedPrompts))
+	}
+	queued, ok := queue.TakeQueued(ctx, session.ID)
+	if !ok || queued.Content != "handoff" {
+		t.Fatalf("requeued handoff = %#v, ok=%t; want original handoff", queued, ok)
 	}
 }
 
