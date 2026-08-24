@@ -68,6 +68,16 @@ const (
 	// activity has been quiet for at least this same threshold; see
 	// stuckSignalInactiveLongEnough.
 	stuckSignalWatchdogThreshold = 10 * time.Minute
+
+	// stuckSignalScanBudget bounds how long a single
+	// reclaimStuckSignalSessionsOnce tick may run. Reclaiming one session can
+	// block for several seconds settling a stuck execution (see
+	// cancelAgentWhileUnlocked's CancelAgent wait); without a cap, enough
+	// simultaneously-stuck sessions could stall the shared reaper goroutine's
+	// other duty (reclaimIdleSessionsOnce) far past its own 30s tick cadence
+	// (idleReaperInterval, idle_session_reaper.go). Chosen comfortably under
+	// that cadence so a capped tick still leaves room before the next one.
+	stuckSignalScanBudget = 20 * time.Second
 )
 
 // stuckSignalSessionLister is implemented by the durable repository via
@@ -93,9 +103,17 @@ func (s *Service) reclaimStuckSignalSessionsOnce(ctx context.Context) {
 		s.logger.Warn("stuck-signal watchdog: list active sessions failed; tick skipped", zap.Error(err))
 		return
 	}
+	scanCtx, cancel := context.WithTimeout(ctx, stuckSignalScanBudget)
+	defer cancel()
 	now := time.Now().UTC()
-	for _, session := range sessions {
-		s.reclaimStuckSignalSessionIfDue(ctx, session, now)
+	for i, session := range sessions {
+		if scanCtx.Err() != nil {
+			s.logger.Warn("stuck-signal watchdog: per-tick scan budget exceeded; deferring remaining candidates to the next tick",
+				zap.Int("candidates_scanned", i),
+				zap.Int("candidates_deferred", len(sessions)-i))
+			return
+		}
+		s.reclaimStuckSignalSessionIfDue(scanCtx, session, now)
 	}
 }
 
@@ -131,6 +149,91 @@ func (s *Service) reclaimStuckSignalSessionIfDue(ctx context.Context, session *m
 		return
 	}
 
+	// Register this reclaim as the session's cancellation owner before
+	// yielding the guard below (mirroring runSilentCancellationOwned's use of
+	// claimCancellationWithActionExclusive in event_handlers_clarification.go).
+	// Without this, a user's concurrent Cancel click
+	// (Service.CancelAgent -> claimExplicitCancellation) finds an empty
+	// cancellationOperations entry for the session and independently
+	// re-invokes agentManager.CancelAgent against the same execution while
+	// this reclaim's own call is still in flight below — the
+	// isCancelInFlight check above only reads that same map, so without
+	// registering here it can never observe this reclaim's own operation
+	// either. Exclusive (not joining): a session that already has an owner
+	// registered resolved the isCancelInFlight race above in the other
+	// operation's favor, so this tick backs off rather than attaching to a
+	// cancellation it did not initiate.
+	operation, owner, _, accepted := s.claimCancellationWithActionExclusive(session.ID, cancellationKindInternal, nil)
+	if !accepted || !owner {
+		return
+	}
+
+	// reclaimStuckSignalSessionOwned always releases guard itself (its own
+	// defer) before returning, so by the time finishCancellationWithActions
+	// runs below the per-session cancelInFlight mutex is already free.
+	// This ordering matters: finishCancellationWithActions re-acquires that
+	// same mutex to run any action a concurrent joiner (e.g. a user's
+	// Service.CancelAgent click joining this operation) registered on it
+	// (task_operations.go). Calling finishCancellationWithActions while this
+	// goroutine still held the mutex — as a single defer registered here
+	// alongside guard's — would self-deadlock the very first time SEC-001's
+	// join path actually has an action to run. Mirrors runSilentCancellation
+	// calling finishCancellationWithActions only after
+	// runSilentCancellationOwned's own deferred guard.release() has already
+	// run (event_handlers_clarification.go); the outer defer guard.release()
+	// above is a harmless no-op once the owned call already released it.
+	reclaimErr := s.reclaimStuckSignalSessionOwned(ctx, task, session, signal, now, operation, guard)
+	s.finishCancellationWithActions(ctx, session.ID, operation, reclaimErr)
+}
+
+// reclaimStuckSignalSessionOwned performs the reclaim once
+// reclaimStuckSignalSessionIfDue has established exclusive cancellation
+// ownership of the session. It always releases guard before returning; see
+// the caller for why finishCancellationWithActions must not run until this
+// has happened.
+func (s *Service) reclaimStuckSignalSessionOwned(
+	ctx context.Context,
+	task *models.Task,
+	session *models.TaskSession,
+	signal models.PendingStepCompletionSignal,
+	now time.Time,
+	operation *cancelOperation,
+	guard *lockedCancelInFlightGuard,
+) error {
+	defer guard.release()
+
+	// Capture the active turn's identity before releasing the guard around
+	// CancelAgent below (mirroring prepareCancelAgent /
+	// runSilentCancellationOwned in task_operations.go /
+	// event_handlers_clarification.go). The turn that is stuck right now is
+	// the one this reclaim must settle; the checked completion below targets
+	// exactly this captured turn rather than whatever happens to be active
+	// once the wait returns.
+	identity, err := s.captureCancellationIdentity(ctx, session.ID)
+	if err != nil {
+		s.logger.Warn("stuck-signal watchdog: failed to capture turn identity before reclaim; skipping this tick",
+			zap.String("task_id", task.ID),
+			zap.String("session_id", session.ID),
+			zap.Error(err))
+		return err
+	}
+	s.setCancellationIdentity(session.ID, operation, identity)
+
+	// A concurrent explicit cancel that joins this operation (SEC-001) needs
+	// completion eligibility populated, not just identity --
+	// reconcileJoinedExplicitCancellationLocked's cancellationPreparationSnapshot
+	// treats the operation as not-ready-to-reconcile until both are set. Mirror
+	// prepareCancelAgent's pairing of the two calls.
+	completionEligible, err := s.cancelTurnCompletionEligible(ctx, session, session.ID)
+	if err != nil {
+		s.logger.Warn("stuck-signal watchdog: failed to compute cancel-turn completion eligibility before reclaim; skipping this tick",
+			zap.String("task_id", task.ID),
+			zap.String("session_id", session.ID),
+			zap.Error(err))
+		return err
+	}
+	s.setCancellationCompletionEligible(session.ID, operation, completionEligible)
+
 	// The session's own lifecycle-level prompt wait (promptMu/promptDoneCh/
 	// promptFinished in agent/runtime/lifecycle) is never released by the
 	// DB-only mutations below. Settle the stuck execution via the existing
@@ -147,7 +250,7 @@ func (s *Service) reclaimStuckSignalSessionIfDue(ctx context.Context, session *m
 			zap.String("task_id", task.ID),
 			zap.String("session_id", session.ID),
 			zap.Error(err))
-		return
+		return err
 	}
 
 	// Re-verify under the reacquired lock: the unlock/relock window above
@@ -156,7 +259,7 @@ func (s *Service) reclaimStuckSignalSessionIfDue(ctx context.Context, session *m
 	// re-read fresh state after their own unlock/relock.
 	latest, ok := s.stuckSignalStillPending(ctx, session.ID, signal.StepID)
 	if !ok {
-		return
+		return nil
 	}
 
 	s.logger.Warn("stuck-signal watchdog: reclaiming session stuck RUNNING with an unapplied completion signal",
@@ -165,9 +268,23 @@ func (s *Service) reclaimStuckSignalSessionIfDue(ctx context.Context, session *m
 		zap.String("step_id", signal.StepID),
 		zap.Duration("signal_age", now.Sub(signal.SignaledAt)))
 
-	s.completeTurnForSession(ctx, session.ID)
+	// Checked completion: close exactly the turn captured above, failing
+	// closed if a different turn is now active — e.g. a brand-new legitimate
+	// turn that started during the CancelAgent unlock window above. The
+	// unchecked completeTurnForSession takes an empty-expectedTurnID
+	// "complete every open turn" path that cannot tell the two apart and
+	// would force-close the new turn too.
+	if err := s.completeTurnForTaskSessionCheckedOwned(ctx, task.ID, session.ID, identity.turnID); err != nil {
+		s.logger.Warn("stuck-signal watchdog: captured turn was superseded before it could be settled; skipping reclaim",
+			zap.String("task_id", task.ID),
+			zap.String("session_id", session.ID),
+			zap.String("step_id", signal.StepID),
+			zap.Error(err))
+		return err
+	}
 	s.updateTaskSessionState(ctx, task.ID, session.ID, models.TaskSessionStateWaitingForInput, "", false, latest)
 	s.reconcileStepCompletionSignalLocked(ctx, task.ID, session.ID, signal.StepID)
+	return nil
 }
 
 // stuckSignalCandidate applies the unguarded eligibility filter: RUNNING or
