@@ -174,13 +174,15 @@ func TestProbeACPSessionWithContextRejectsProviderWithoutModelSelection(t *testi
 	}
 }
 
-// TestProbeACPSessionWithContextKeepsSnapshotWhenModelYieldsNoConfig pins that
-// applying a model which returns no per-model config options (and pushes no
-// follow-up config-update notification) is a valid empty resolution, not a
-// failure. The probe must succeed and keep the config options advertised on
-// session/new. This is the auggie shape: a model list with no reasoning-effort
-// style selectors to resolve.
-func TestProbeACPSessionWithContextKeepsSnapshotWhenModelYieldsNoConfig(t *testing.T) {
+// TestProbeACPSessionWithContextErrorsWhenConfigOptionYieldsNoSnapshot pins that
+// when an agent advertises a typed model config option (so the probe applies the
+// model via session/set_config_option) but returns neither inline options nor a
+// follow-up config-update notification, the probe fails. Keeping the pre-switch
+// session/new snapshot would report the previous model's options as the resolved
+// configuration for the newly selected model, so this must stay an error. The
+// empty-resolution relaxation is scoped to the legacy session/set_model path
+// (auggie); see TestApplyProbeModel_LegacyNoConfigOptionsReturnsEmpty.
+func TestProbeACPSessionWithContextErrorsWhenConfigOptionYieldsNoSnapshot(t *testing.T) {
 	c2aR, c2aW := io.Pipe()
 	a2cR, a2cW := io.Pipe()
 	t.Cleanup(func() {
@@ -196,21 +198,11 @@ func TestProbeACPSessionWithContextKeepsSnapshotWhenModelYieldsNoConfig(t *testi
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	resp, err := e.probeACPSessionWithContext(
+	_, err := e.probeACPSessionWithContext(
 		ctx, c2aW, a2cR, t.TempDir(), "provider-without-config-response", "model", "", nil,
 	)
-	if err != nil {
-		t.Fatalf("probeACPSessionWithContext(): %v", err)
-	}
-	var found bool
-	for _, option := range resp.ConfigOptions {
-		if option.ID == "reasoning_effort" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("config options = %#v, want session/new snapshot preserved", resp.ConfigOptions)
+	if err == nil || !strings.Contains(err.Error(), "returned no configuration options") {
+		t.Fatalf("error = %v, want missing configuration snapshot", err)
 	}
 }
 

@@ -796,11 +796,21 @@ func applyProbeModel(
 		return nil, err
 	}
 	if !received {
-		// The model was applied but the agent surfaces no per-model config
-		// options (e.g. auggie, which advertises a flat model list and answers
-		// session/set_model with an empty result). That is a valid empty
-		// resolution, not a failure: keep the session-advertised options.
-		return nil, nil
+		if method == sessionmodel.MethodSetModel {
+			// The legacy session/set_model RPC applied the model, but the agent
+			// surfaces no per-model config options and pushes no follow-up
+			// config-update notification (e.g. auggie, which advertises a flat
+			// model list and answers session/set_model with an empty result).
+			// That is a valid empty resolution, not a failure: the caller keeps
+			// the session-advertised options.
+			return nil, nil
+		}
+		// A typed session/set_config_option that returns neither inline options
+		// nor a config-update notification leaves us without an authoritative
+		// snapshot for the newly selected model. Keeping the pre-switch
+		// session/new snapshot would report the previous model's options as the
+		// current configuration, so treat this as a failure.
+		return nil, fmt.Errorf("ACP model selection returned no configuration options")
 	}
 	return updated, nil
 }
