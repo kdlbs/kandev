@@ -1,6 +1,6 @@
 # ADR-2026-08-17-plugin-workspace-agent-conversations: Managed workspace agent conversations
 
-**Status:** accepted
+**Status:** accepted (amended 2026-08-24)
 **Date:** 2026-08-17
 **Area:** backend, frontend, protocol, security
 
@@ -25,12 +25,29 @@ composition. It uses existing route and Integrations navigation registration. Di
 upgrading, or changing configuration retains managed conversation data; uninstall stops
 the plugin and fails visibly if provenance-safe cleanup cannot complete.
 
+### Amendment: Coordinator product identity is separate
+
+This ADR defines a generic plugin conversation and chat compatibility contract.
+It does not define the Coordinator product identity, authority, audit history,
+or wake ownership. The Coordinator product is now specified as a first-class,
+host-owned workspace object in
+[ADR-2026-08-24-first-class-workspace-coordinator](2026-08-24-first-class-workspace-coordinator.md).
+
+For Coordinator, the backing task/session is a replaceable Stage 0 execution
+adapter. It is not an immortal session, a visible product identity, or a source
+of implicit authority. The generic Integrations recipe stays available to other
+workspace-agent plugins; Coordinator's future dedicated navigation section is a
+separate host-owned product surface.
+
 ## Consequences
 
-The host owns identity, visibility, profile/executor resolution, dispatch idempotency,
-and lifecycle cleanup. Plugin authors receive a narrow public contract rather than
-database or private-API access. The Host protobuf, SDK, manifest, task service, and
-native UI surfaces require additive compatibility tests.
+The host owns generic conversation visibility, profile/executor resolution,
+dispatch idempotency, and lifecycle cleanup. Plugin authors receive a narrow
+public contract rather than database or private-API access. The Host protobuf,
+SDK, manifest, task service, and native UI surfaces require additive
+compatibility tests. Coordinator-specific identity, grants, audit, event wakes,
+and destructive boundaries are additive host contracts and cannot be inferred
+from this generic capability.
 
 ## Alternatives Considered
 

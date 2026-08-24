@@ -52,7 +52,7 @@ Product-wide capabilities that are not tied to a single feature area.
 | [plugins — Voice extraction host prerequisites](plugins/voice-extraction-host.md) | shipped |
 | [plugins — Voice Mode leaves core](plugins/voice-extraction.md) | shipped |
 | [plugin-nav-sidebar-footer](plugin-nav-sidebar-footer/spec.md) | draft |
-| [coordinator-plugin](coordinator-plugin/spec.md) | building |
+| [coordinator-plugin](coordinator-plugin/spec.md) | proposed |
 | [semantic-notifications](platform/notifications.md) | shipped |
 | [workspace-git-status](platform/workspace-git-status.md) | shipped |
 | [git-subprocess-admission](platform/git-subprocess-admission.md) | building |
