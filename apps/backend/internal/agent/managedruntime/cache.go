@@ -47,10 +47,13 @@ func validateManagedPackageName(packageName string) error {
 		return errors.New("managed runtime package spec is path-like")
 	}
 	if !strings.HasPrefix(packageName, "@") {
-		if strings.Contains(packageName, "/") {
+		if strings.ContainsAny(packageName, "@/") {
 			return errors.New("managed runtime package spec is path-like")
 		}
 		return nil
+	}
+	if strings.Contains(packageName[1:], "@") {
+		return errors.New("managed runtime package spec has an invalid scope")
 	}
 	parts := strings.Split(packageName, "/")
 	if len(parts) != 2 || parts[0] == "@" || parts[1] == "" {

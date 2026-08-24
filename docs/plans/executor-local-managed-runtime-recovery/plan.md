@@ -121,9 +121,10 @@ specs in their owning desktop, Office, and mobile projects.
 
 ## Verification results
 
-Task 01 passed the focused agentctl, cache, and client command with 897 tests
-across 3 packages. Task 02 passed the lifecycle and orchestrator command with
-4,050 tests across 2 packages. The container-backed Docker and SSH specs each
+Task 01 passed the focused agentctl, cache, process-manager, and client command
+with 1,598 tests across 4 packages. Task 02 passed the lifecycle and
+orchestrator command with 4,050 tests across 2 packages. The container-backed
+Docker and SSH specs each
 passed in the host-backed `containers` Playwright project after rebuilding the
 backend, mock agent, and E2E plugin artifacts. The nested `e2e:run` wrapper was
 not usable in this environment because its runtime had no Docker daemon.

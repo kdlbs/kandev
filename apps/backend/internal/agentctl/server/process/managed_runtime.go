@@ -20,7 +20,7 @@ func (m *Manager) RepairManagedRuntimeCache(ctx context.Context, packageSpec str
 	if err != nil {
 		return errors.New("resolve agent environment for managed runtime repair")
 	}
-	output, err := m.CombinedOutput(ctx, tools.CommandSpec{
+	output, err := m.Output(ctx, tools.CommandSpec{
 		Path: "npm",
 		Args: []string{"config", "get", "cache"},
 		Dir:  m.cfg.WorkDir,
@@ -42,16 +42,18 @@ func (m *Manager) RepairManagedRuntimeCache(ctx context.Context, packageSpec str
 		}
 		return errors.New("remove managed runtime npm execution tree")
 	}
+	m.ClearStderrBuffer()
 	return nil
 }
 
 func npmCacheRootFromOutput(output []byte) (string, error) {
-	lines := strings.Split(string(output), "\n")
-	for index := len(lines) - 1; index >= 0; index-- {
-		candidate := strings.TrimSpace(lines[index])
-		if candidate != "" && filepath.IsAbs(candidate) {
-			return candidate, nil
-		}
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	if len(lines) != 1 {
+		return "", errors.New("npm cache path was not returned")
 	}
-	return "", errors.New("npm cache path was not returned")
+	candidate := strings.TrimSpace(lines[0])
+	if candidate == "" || !filepath.IsAbs(candidate) {
+		return "", errors.New("npm cache path was not returned")
+	}
+	return candidate, nil
 }

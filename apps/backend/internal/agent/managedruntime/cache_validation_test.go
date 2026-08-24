@@ -20,9 +20,11 @@ func TestValidateExactPackageSpecRejectsUntrustedSelectors(t *testing.T) {
 		"managed-acp",
 		"managed-acp@1.2.3-beta.1",
 		"managed-acp@latest",
+		"managed-acp@latest@1.2.3",
 		"../managed-acp@1.2.3",
 		"/tmp/managed-acp@1.2.3",
 		"@scope/managed-acp@1.2.3/extra",
+		"@scope@other/managed-acp@1.2.3",
 		" managed-acp@1.2.3",
 		"managed-acp@1.2.3 ",
 	} {

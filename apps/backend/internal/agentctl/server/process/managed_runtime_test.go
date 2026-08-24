@@ -2,15 +2,18 @@ package process
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 )
 
-func TestNpmCacheRootFromOutputUsesAbsolutePathAfterWarnings(t *testing.T) {
+func TestNpmCacheRootFromOutputUsesAbsolutePath(t *testing.T) {
 	cacheRoot := t.TempDir()
-	output := []byte("npm warning using configured registry\n" + cacheRoot + "\n")
+	output := []byte(cacheRoot + "\n")
 
 	got, err := npmCacheRootFromOutput(output)
 	if err != nil {
@@ -18,6 +21,14 @@ func TestNpmCacheRootFromOutputUsesAbsolutePathAfterWarnings(t *testing.T) {
 	}
 	if got != cacheRoot {
 		t.Fatalf("cache root = %q, want %q", got, cacheRoot)
+	}
+}
+
+func TestNpmCacheRootFromOutputRejectsMixedStreams(t *testing.T) {
+	cacheRoot := t.TempDir()
+	output := []byte("npm warning using configured registry\n" + cacheRoot + "\n")
+	if _, err := npmCacheRootFromOutput(output); err == nil {
+		t.Fatal("npmCacheRootFromOutput() = nil error, want mixed-stream output rejected")
 	}
 }
 
@@ -37,5 +48,27 @@ func TestRepairManagedRuntimeCacheRejectsUnversionedSpecBeforeCommand(t *testing
 	}
 	if strings.Contains(err.Error(), "npm") {
 		t.Fatalf("validation error = %q, should not start npm", err)
+	}
+}
+
+func TestRepairManagedRuntimeCacheClearsPreviousStderr(t *testing.T) {
+	cacheRoot := t.TempDir()
+	packageSpec := "managed-acp@1.2.3"
+	target := filepath.Join(cacheRoot, "_npx", managedruntime.NpxExecutionCacheKey(packageSpec))
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mgr := NewManager(&config.InstanceConfig{
+		WorkDir:  t.TempDir(),
+		AgentEnv: []string{"NPM_CONFIG_CACHE=" + cacheRoot},
+	}, newTestLogger(t))
+	t.Cleanup(func() { _ = mgr.StopForTeardown(context.Background()) })
+	mgr.appendStderr("stale first-attempt error")
+
+	if err := mgr.RepairManagedRuntimeCache(context.Background(), packageSpec); err != nil {
+		t.Fatalf("RepairManagedRuntimeCache: %v", err)
+	}
+	if got := mgr.GetRecentStderr(); len(got) != 0 {
+		t.Fatalf("stderr after repair = %#v, want empty", got)
 	}
 }

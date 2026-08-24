@@ -14,8 +14,8 @@ if [ "$preference" = "--prefer-offline" ]; then
 fi
 
 if [ "$preference" = "--prefer-online" ]; then
-  shift 4
-  exec /usr/local/bin/mock-agent "$@"
+	shift 3
+	exec /usr/local/bin/mock-agent "$@"
 fi
 
 printf 'unexpected npx preference: %s\n' "$preference" >&2

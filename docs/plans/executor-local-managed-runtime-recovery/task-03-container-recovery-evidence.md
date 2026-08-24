@@ -57,8 +57,9 @@ KANDEV_E2E_CONTAINERS=1 pnpm e2e:run --project containers tests/ssh/managed-runt
 
 - `apps/web/e2e/tests/docker/managed-runtime-npm-recovery.spec.ts`
 - `apps/web/e2e/tests/ssh/managed-runtime-npm-recovery.spec.ts`
-- `apps/web/e2e/fixtures/docker-test-base.ts`
-- `apps/web/e2e/fixtures/ssh-test-base.ts`
+- `apps/web/e2e/fixtures/docker-probe.ts`
+- `apps/web/e2e/fixtures/managed-runtime-npx.sh`
+- `apps/web/e2e/fixtures/ssh-image.ts`
 - `apps/web/e2e/helpers/managed-runtime-recovery.ts`
 
 ## Dependencies

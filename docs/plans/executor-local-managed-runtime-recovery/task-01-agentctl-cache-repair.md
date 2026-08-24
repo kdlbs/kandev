@@ -46,17 +46,22 @@ Resolve the npm cache with the configured agent environment.
 ## Verification
 
 ```bash
-go test ./internal/agent/managedruntime ./internal/agentctl/server/api ./internal/agent/runtime/agentctl -count=1
+go test ./internal/agent/managedruntime ./internal/agentctl/server/api ./internal/agentctl/server/process ./internal/agent/runtime/agentctl -count=1
 ```
 
 ## Files likely touched
 
 - `apps/backend/internal/agent/managedruntime/cache.go`
+- `apps/backend/internal/agent/managedruntime/cache_validation_test.go`
+- `apps/backend/internal/agentctl/server/process/managed_runtime.go`
+- `apps/backend/internal/agentctl/server/process/managed_runtime_test.go`
+- `apps/backend/internal/agentctl/server/process/manager_command.go`
+- `apps/backend/internal/agentctl/server/process/manager_stderr_exit_test.go`
 - `apps/backend/internal/agentctl/server/api/server.go`
-- `apps/backend/internal/agentctl/server/api/agent.go`
-- `apps/backend/internal/agentctl/server/api/agent_test.go`
-- `apps/backend/internal/agent/runtime/agentctl/client.go`
-- `apps/backend/internal/agent/runtime/agentctl/agent_test.go`
+- `apps/backend/internal/agentctl/server/api/managed_runtime.go`
+- `apps/backend/internal/agentctl/server/api/managed_runtime_test.go`
+- `apps/backend/internal/agent/runtime/agentctl/client_managed_runtime.go`
+- `apps/backend/internal/agent/runtime/agentctl/client_managed_runtime_test.go`
 
 ## Dependencies
 
@@ -86,4 +91,4 @@ None.
 - Added API, client, managedruntime, and process-manager tests for exact-tree
   repair, sibling preservation, unsafe selectors, and bounded cache discovery.
 - Verification passed:
-  `go test ./internal/agent/managedruntime ./internal/agentctl/server/api ./internal/agent/runtime/agentctl -count=1`
+  `go test ./internal/agent/managedruntime ./internal/agentctl/server/api ./internal/agentctl/server/process ./internal/agent/runtime/agentctl -count=1`

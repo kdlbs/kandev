@@ -228,7 +228,6 @@ type Manager struct {
 	wg               sync.WaitGroup
 	stopCh           chan struct{}
 	doneCh           chan struct{}
-	stderrDone       chan struct{}
 	startMu          sync.Mutex
 	admissionMu      sync.Mutex
 	admissionCount   int
@@ -1162,11 +1161,12 @@ func (m *Manager) Start(ctx context.Context) error {
 		return errors.Join(fmt.Errorf("failed to connect adapter: %w", err), reapErr)
 	}
 
-	// Start stderr reader and exit waiter
-	m.stderrDone = make(chan struct{})
+	// Start stderr reader and exit waiter. Keep the completion channel local to
+	// this process generation so a delayed reader cannot signal a replacement.
+	stderrDone := make(chan struct{})
 	m.wg.Add(2)
-	go m.readStderr()
-	go m.waitForExit()
+	go m.readStderr(stderrDone)
+	go m.waitForExit(stderrDone)
 
 	// Forward adapter updates to our channel
 	m.wg.Add(1)
@@ -2208,10 +2208,10 @@ func waitForProcessGroupExit(ctx context.Context, pid int) bool {
 	}
 }
 
-// readStderr reads and logs stderr from the agent
-func (m *Manager) readStderr() {
+// readStderr reads and logs stderr from the agent.
+func (m *Manager) readStderr(stderrDone chan<- struct{}) {
 	defer m.wg.Done()
-	defer m.signalStderrDone()
+	defer close(stderrDone)
 
 	scanner := bufio.NewScanner(m.stderr)
 	for scanner.Scan() {
@@ -2244,20 +2244,14 @@ func (m *Manager) readStderr() {
 	}
 }
 
-func (m *Manager) signalStderrDone() {
-	if m.stderrDone != nil {
-		close(m.stderrDone)
-	}
-}
-
-func (m *Manager) waitForStderrDrain() {
-	if m.stderrDone == nil {
+func (m *Manager) waitForStderrDrain(stderrDone <-chan struct{}) {
+	if stderrDone == nil {
 		return
 	}
 	timer := time.NewTimer(processStderrDrainTimeout)
 	defer timer.Stop()
 	select {
-	case <-m.stderrDone:
+	case <-stderrDone:
 	case <-timer.C:
 		m.logger.Warn("timed out waiting for agent stderr to drain")
 	}
@@ -2304,13 +2298,17 @@ func (m *Manager) ClearStderrBuffer() {
 }
 
 // waitForExit waits for the process to exit
-func (m *Manager) waitForExit() {
+func (m *Manager) waitForExit(stderrDone <-chan struct{}) {
 	defer m.wg.Done()
 	defer close(m.doneCh)
 
 	pid := m.agentPID()
+	// StderrPipe must be drained before Wait closes its parent-side pipe. The
+	// second bounded wait covers a reader that was still blocked when the
+	// process-exit wait began and was released by Wait closing the pipe.
+	m.waitForStderrDrain(stderrDone)
 	err := m.cmd.Wait()
-	m.waitForStderrDrain()
+	m.waitForStderrDrain(stderrDone)
 	intentionalStop := m.Status() == StatusStopping
 
 	switch {
