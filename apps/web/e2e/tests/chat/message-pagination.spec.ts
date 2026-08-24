@@ -1,18 +1,48 @@
 // Chat message pagination — the first stored prompt is the visible transcript
 // start even when older internal rows remain on the backend.
 import { test, expect } from "../../fixtures/test-base";
+import { dwell } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
 import {
+  EAGER_HISTORY_PROMPT_MARKER,
   INITIAL_PROMPT_MARKER,
   PRE_PROMPT_MARKER,
   RECENT_AGENT_MARKER,
   TASK_DESCRIPTION_MARKER,
   readStandaloneMessageTop,
   seedCollapsedMessageHistory,
+  seedToolHeavyOpeningHistory,
   scrollToOldestLoadedEdge,
+  watchOlderMessageRequests,
 } from "./message-pagination-helpers";
 
 test.describe("@chat message pagination", () => {
+  test("does not load older history while opening a task", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(180_000);
+
+    const { taskId, sessionId } = await seedToolHeavyOpeningHistory(
+      apiClient,
+      seedData,
+      "message-pagination-does-not-eager-load",
+    );
+    const olderRequests = watchOlderMessageRequests(testPage, sessionId);
+
+    await testPage.goto(`/t/${taskId}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+    await dwell(testPage, 500, "negative-assertion", "observe background pagination after open");
+    const chat = session.activeChat();
+
+    await expect(chat.getByText(TASK_DESCRIPTION_MARKER, { exact: true })).toBeVisible();
+    await expect(chat.getByText(EAGER_HISTORY_PROMPT_MARKER, { exact: true })).toHaveCount(0);
+    expect(olderRequests).toHaveLength(0);
+  });
+
   test("hides the older control when only hidden pre-prompt rows remain", async ({
     testPage,
     apiClient,

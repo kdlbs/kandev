@@ -20,18 +20,28 @@ The design changes no backend query, message order, persistence rule, or API fie
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001` | [Pagination boundary](#pagination-boundary), [Failure and compatibility](#failure-and-compatibility) |
+| `REQ-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001` | [Opening boundary](#opening-boundary), [Pagination boundary](#pagination-boundary), [Failure and compatibility](#failure-and-compatibility) |
 
 ## Components and responsibilities
 
 - `useLazyLoadMessages` owns the visible pagination boundary for transcript consumers.
+- The session message fetch owns one bounded initial request for the newest message window.
 - `messages.metaBySession[sessionId].hasMore` keeps the raw backend `has_more` value.
 - `messages.bySession[sessionId]` supplies the loaded messages and their prompt ordinals.
-- The native transcript, Prompt History panel, and transcript navigation consume the shared hook result.
+- The native transcript and Prompt History panel consume the shared hook result.
+- Transcript navigation uses only the messages that the transcript already loaded.
 - The hook also exposes an explicit raw-pagination loader for direct recovery consumers, such as session search.
 - `requestOlderMessages` keeps request coordination and raw cursor metadata unchanged.
 
 The Prompt History panel already uses prompt `#1` as its terminal boundary. The transcript uses the same boundary through the shared hook.
+
+## Opening boundary
+
+The session message fetch requests only the newest bounded window when a task opens. A tool-only window does not start an automatic backfill.
+
+`TaskChatPanel` does not load older pages to find the last prompt. The last-prompt action becomes available after the prompt enters the loaded window.
+
+If the newest window has no user message, the transcript shows the task-description fallback. Upward navigation then loads older pages through visible pagination.
 
 ## Pagination boundary
 
@@ -50,17 +60,20 @@ The store keeps the raw backend value. Direct recovery code can use the hook's e
 
 ## Control flow
 
-1. The initial message request stores a newest suffix and raw pagination metadata.
+1. The initial message request stores one newest suffix and raw pagination metadata.
 2. The shared hook reports visible older history while prompt `#1` is absent.
-3. An older-page request prepends messages through the existing coordinator.
-4. If the page contains prompt `#1`, the shared hook changes its visible value to false.
-5. The transcript removes its sentinel, loading state, and older-page control.
-6. Transcript navigation uses visible pagination and treats prompt `#1` as the start.
-7. Explicit reverse search uses raw pagination when it must backfill a backend search hit.
+3. The user reaches the oldest loaded point.
+4. An older-page request prepends messages through the existing coordinator.
+5. The native transcript preserves a stable message-row position across the complete request.
+6. If the page contains prompt `#1`, the shared hook changes its visible value to false.
+7. The transcript removes its sentinel, loading state, and older-page control.
+8. Explicit reverse search uses raw pagination when it must backfill a backend search hit.
 
 ## Failure and compatibility
 
 If a request fails before prompt `#1` is known, the explicit older-page control remains available. A zero-result response keeps the existing retry behavior.
+
+An initial tool-only window completes without an older-page request. The task-description fallback remains visible until upward pagination loads a stored user prompt.
 
 Older payloads can omit `prompt_index`. In this case, the shared hook uses raw `has_more` exhaustion as the compatibility fallback.
 
@@ -77,6 +90,8 @@ The existing full-height mobile task layout remains the nearest mobile exemplar.
 - A hook test proves that a multi-page load stops when a response adds prompt `#1`.
 - Hook and drain tests prove that explicit search backfill can continue through the raw boundary.
 - Desktop and mobile browser tests seed hidden pre-prompt rows and prove that no older-page control remains.
+- Desktop and mobile browser tests prove that task opening makes no request with an older-page cursor.
+- A message-fetch test proves that a tool-only initial window completes without automatic backfill.
 - Separate desktop and mobile browser tests preserve the prepend anchor while loading older pages.
 
 ## Related design

@@ -1,17 +1,45 @@
 import { test, expect } from "../../fixtures/test-base";
+import { dwell } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
 import {
+  EAGER_HISTORY_PROMPT_MARKER,
   INITIAL_PROMPT_MARKER,
   PRE_PROMPT_MARKER,
   RECENT_AGENT_MARKER,
   TASK_DESCRIPTION_MARKER,
   readStandaloneMessageTop,
   seedCollapsedMessageHistory,
+  seedToolHeavyOpeningHistory,
   scrollToOldestLoadedEdge,
+  watchOlderMessageRequests,
 } from "./message-pagination-helpers";
 
 test.describe("Mobile chat message pagination", () => {
   test.describe.configure({ timeout: 180_000 });
+
+  test("does not load older history while opening a task", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { taskId, sessionId } = await seedToolHeavyOpeningHistory(
+      apiClient,
+      seedData,
+      "mobile-message-pagination-does-not-eager-load",
+    );
+    const olderRequests = watchOlderMessageRequests(testPage, sessionId);
+
+    await testPage.goto(`/t/${taskId}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+    await dwell(testPage, 500, "negative-assertion", "observe mobile pagination after open");
+    const chat = session.activeChat();
+
+    await expect(chat.getByText(TASK_DESCRIPTION_MARKER, { exact: true })).toBeVisible();
+    await expect(chat.getByText(EAGER_HISTORY_PROMPT_MARKER, { exact: true })).toHaveCount(0);
+    expect(olderRequests).toHaveLength(0);
+  });
 
   test("hides the older control when only hidden pre-prompt rows remain", async ({
     testPage,

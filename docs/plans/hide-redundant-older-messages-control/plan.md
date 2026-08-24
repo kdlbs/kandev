@@ -24,6 +24,8 @@ The backend can report older rows after prompt `#1`. These rows contain internal
 - Apply the boundary to automatic loading, transcript navigation, and the explicit older-page control.
 - Keep raw backend pagination metadata in the store.
 - Preserve an explicit raw-pagination path for reverse-search backfill, while keeping transcript consumers on visible pagination.
+- Keep task opening bounded to the newest message window.
+- Load older transcript pages only after upward navigation or an explicit recovery action.
 - Extend desktop and mobile pagination coverage with hidden pre-prompt rows.
 - Retain desktop and mobile prepend-anchor coverage for older-page loading.
 
@@ -62,6 +64,13 @@ The focused run reported one failed regression and seven passing tests. The thro
 - Remove duplicate prompt-`#1` pagination logic from the Prompt History panel if the shared hook owns the complete rule.
 - Keep request coordination shared between visible and raw loaders.
 
+### Bounded task opening
+
+- Remove background pagination that locates the last prompt when a task opens.
+- Remove initial backfill for a tool-only newest window.
+- Keep the task-description fallback as the readable start until upward navigation loads a prompt.
+- Preserve a stable message-row position across each older-page request.
+
 ### Browser regression
 
 - Seed more than one page of hidden setup rows before the first user prompt.
@@ -75,6 +84,8 @@ The focused run reported one failed regression and seven passing tests. The thro
 | Acceptance criterion | Test evidence |
 | --- | --- |
 | `AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.4` | Existing native sentinel tests remain green. |
+| `AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.5` | Desktop and mobile tests load collapsed older history after upward navigation. |
+| `AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.6` | Desktop and mobile tests reach the first prompt without another action. |
 | `AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.7` | The hook stops a multi-page load at prompt `#1`. |
 | `AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.9` | The hook and browser tests show no visible older history at prompt `#1`. |
 
@@ -98,6 +109,7 @@ The shared seed will add hidden pre-prompt rows. Both tests already assert that 
 ## Work orders
 
 - [x] [Task 01: Stop visible pagination at the first prompt](task-01-stop-visible-pagination-at-first-prompt.md)
+- [x] [Task 02: Stop eager history loading on chat open](task-02-stop-eager-history-loading.md)
 
 ## Verification results
 
@@ -106,6 +118,13 @@ The shared seed will add hidden pre-prompt rows. Both tests already assert that 
 - `pnpm --filter @kandev/web lint` — passed.
 - `pnpm e2e:run --project chromium tests/chat/message-pagination.spec.ts` — 2 tests passed, including the visible-boundary and prepend-anchor flows.
 - `pnpm e2e:run --project mobile-chrome tests/chat/mobile-message-pagination.spec.ts` — 2 tests passed, including the visible-boundary and prepend-anchor flows.
+- `pnpm exec vitest run components/task/chat/message-list-shared.test.tsx hooks/domains/session/use-session-message-fetch.test.ts hooks/domains/session/use-session-messages.test.ts` — 3 files, 66 tests passed.
+- `pnpm --filter @kandev/web run typecheck` — passed after the bounded-opening change.
+- `pnpm --filter @kandev/web lint` — passed after the bounded-opening change.
+- `pnpm --filter @kandev/web run i18n:ratchet` — passed.
+- `pnpm --filter @kandev/web run e2e:sleep-ratchet` — passed.
+- `pnpm e2e:run --host --no-build --project chromium -- tests/chat/message-pagination.spec.ts` — 3 tests passed.
+- `pnpm e2e:run --host --no-build --project mobile-chrome -- tests/chat/mobile-message-pagination.spec.ts` — 3 tests passed.
 
 ## Risks
 
