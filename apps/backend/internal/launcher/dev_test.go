@@ -22,6 +22,7 @@ func TestRunDevLaunchesBackendThenWebAndOpensBrowser(t *testing.T) {
 	t.Setenv("KANDEV_TASK_ID", "")
 	t.Setenv("KANDEV_DATABASE_PATH", "")
 	t.Setenv("KANDEV_HOME_DIR", "")
+	t.Setenv("KANDEV_SERVER_HOST", "0.0.0.0")
 
 	oldNewSupervisor := newSupervisorFn
 	oldAttachSignals := attachSignalsFn
@@ -44,6 +45,7 @@ func TestRunDevLaunchesBackendThenWebAndOpensBrowser(t *testing.T) {
 
 	var events []string
 	var backendCfg backendLaunchConfig
+	var readyURL string
 	var webCmd, webArgs []string
 	var webCWD, webEnvJoined string
 	var webLabel string
@@ -61,9 +63,10 @@ func TestRunDevLaunchesBackendThenWebAndOpensBrowser(t *testing.T) {
 		exitCh <- 0
 		return &restartableBackend{exitCh: exitCh}, func() {}, nil
 	}
-	waitForHealthFn = func(_ context.Context, url string, _ childState, _ time.Duration, _ string, _ func()) error {
-		events = append(events, "wait-health:"+url)
-		return nil
+	waitForHealthFn = func(_ context.Context, endpoints backendEndpointSet, _ childState, _ time.Duration, _ string, _ func()) (string, error) {
+		events = append(events, "wait-health:"+endpoints.accessURL)
+		readyURL = "http://127.0.0.2:" + itoa(backendCfg.Ports.BackendPort)
+		return readyURL, nil
 	}
 	waitForReadyFn = func(_ context.Context, url string, _ childState) error {
 		events = append(events, "wait-ready:"+url)
@@ -95,10 +98,10 @@ func TestRunDevLaunchesBackendThenWebAndOpensBrowser(t *testing.T) {
 		"attach-signals",
 		"launch-backend",
 		"wait-health:http://localhost:" + itoa(backendCfg.Ports.BackendPort),
-		"wait-ready:http://localhost:" + itoa(backendCfg.Ports.BackendPort),
+		"wait-ready:" + readyURL,
 		"start-web:web",
 		"wait-url:http://localhost:" + itoa(backendCfg.Ports.WebPort),
-		"open:http://localhost:" + itoa(backendCfg.Ports.BackendPort),
+		"open:" + readyURL,
 	}
 	if !reflect.DeepEqual(events, want) {
 		t.Fatalf("events = %v, want %v", events, want)
@@ -139,7 +142,7 @@ func TestRunDevLaunchesBackendThenWebAndOpensBrowser(t *testing.T) {
 		t.Fatalf("web args = %v, want the Vite dev command", webArgs)
 	}
 	for _, expected := range []string{
-		"KANDEV_API_BASE_URL=http://localhost:" + itoa(backendCfg.Ports.BackendPort),
+		"KANDEV_API_BASE_URL=" + readyURL,
 		"PORT=" + itoa(backendCfg.Ports.WebPort),
 		"HOSTNAME=127.0.0.1",
 		"KANDEV_DEBUG=true",
@@ -158,6 +161,7 @@ func TestRunDevLaunchesBackendThenWebAndOpensBrowser(t *testing.T) {
 }
 
 func TestRunDevUsesConfiguredHealthTimeoutForBackendAndWeb(t *testing.T) {
+	clearLauncherConfigurationEnvironment(t)
 	repo := makeRepoTree(t)
 	t.Chdir(repo)
 	writeLauncherConfig(t, filepath.Join(repo, "config.yaml"), "launcher:\n  healthTimeoutMs: 12345\n")
@@ -192,9 +196,9 @@ func TestRunDevUsesConfiguredHealthTimeoutForBackendAndWeb(t *testing.T) {
 		return &restartableBackend{exitCh: exitCh}, func() {}, nil
 	}
 	var backendTimeout, webTimeout time.Duration
-	waitForHealthFn = func(_ context.Context, _ string, _ childState, timeout time.Duration, _ string, _ func()) error {
+	waitForHealthFn = func(_ context.Context, _ backendEndpointSet, _ childState, timeout time.Duration, _ string, _ func()) (string, error) {
 		backendTimeout = timeout
-		return nil
+		return "", nil
 	}
 	waitForReadyFn = func(_ context.Context, _ string, _ childState) error {
 		return nil
@@ -248,8 +252,8 @@ func TestRunDevHeadlessSkipsBrowser(t *testing.T) {
 		exitCh <- 0
 		return &restartableBackend{exitCh: exitCh}, func() {}, nil
 	}
-	waitForHealthFn = func(_ context.Context, _ string, _ childState, _ time.Duration, _ string, _ func()) error {
-		return nil
+	waitForHealthFn = func(_ context.Context, _ backendEndpointSet, _ childState, _ time.Duration, _ string, _ func()) (string, error) {
+		return "", nil
 	}
 	waitForReadyFn = func(_ context.Context, _ string, _ childState) error {
 		return nil
@@ -333,8 +337,8 @@ func TestRunDevShutsDownTreeOnBackendHealthFailure(t *testing.T) {
 	launchBackendFn = func(_ backendLaunchConfig) (*restartableBackend, func(), error) {
 		return &restartableBackend{exitCh: make(chan int, 1)}, func() {}, nil
 	}
-	waitForHealthFn = func(_ context.Context, _ string, _ childState, _ time.Duration, _ string, _ func()) error {
-		return errTestHealth
+	waitForHealthFn = func(_ context.Context, _ backendEndpointSet, _ childState, _ time.Duration, _ string, _ func()) (string, error) {
+		return "", errTestHealth
 	}
 	waitForURLFn = func(_ context.Context, _ string, _ childState, _ time.Duration) error {
 		t.Fatal("waitForURL called after backend health failure")
@@ -395,8 +399,8 @@ func TestRunDevShutsDownTreeOnBackendReadinessFailure(t *testing.T) {
 	launchBackendFn = func(_ backendLaunchConfig) (*restartableBackend, func(), error) {
 		return &restartableBackend{exitCh: make(chan int, 1)}, func() {}, nil
 	}
-	waitForHealthFn = func(_ context.Context, _ string, _ childState, _ time.Duration, _ string, _ func()) error {
-		return nil
+	waitForHealthFn = func(_ context.Context, _ backendEndpointSet, _ childState, _ time.Duration, _ string, _ func()) (string, error) {
+		return "", nil
 	}
 	waitForReadyFn = func(_ context.Context, _ string, _ childState) error {
 		return errTestHealth
@@ -458,8 +462,8 @@ func TestRunDevShutsDownTreeWhenWebChildExits(t *testing.T) {
 	launchBackendFn = func(_ backendLaunchConfig) (*restartableBackend, func(), error) {
 		return &restartableBackend{exitCh: make(chan int, 1)}, func() {}, nil
 	}
-	waitForHealthFn = func(_ context.Context, _ string, _ childState, _ time.Duration, _ string, _ func()) error {
-		return nil
+	waitForHealthFn = func(_ context.Context, _ backendEndpointSet, _ childState, _ time.Duration, _ string, _ func()) (string, error) {
+		return "", nil
 	}
 	waitForReadyFn = func(_ context.Context, _ string, _ childState) error {
 		return nil

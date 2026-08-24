@@ -95,9 +95,18 @@ The lifecycle contract covers timeout, supersession, response, cleanup, and reco
 - **GIVEN** a primary-answer watchdog survives until another turn supersedes its clarification turn,
   **WHEN** its fallback timer expires, **THEN** both the preflight and serialized prompt-admission checks
   reject the stale answer without prompting or cancelling the successor.
+- **GIVEN** a live clarification answer is durably finalized, **WHEN** the agent acknowledges the answer
+  before the response endpoint finishes, **THEN** the primary-answer watchdog observes that activity and
+  does not cancel the current turn or dispatch the answer again.
 - **GIVEN** a primary-answer watchdog has entered fallback authority or prompt work, **WHEN** session
-  activity or service shutdown cancels the watchdog, **THEN** that cancellation reaches the in-flight
-  repository and prompt calls.
+  activity independent of fallback recovery or service shutdown cancels the watchdog, **THEN** that
+  cancellation reaches the in-flight repository and prompt calls.
+- **GIVEN** primary-answer fallback silently cancels the stuck turn, **WHEN** that cancellation emits
+  session or completion activity, **THEN** the fallback keeps its bounded recovery context through state
+  reconciliation and exactly one replacement-answer handoff.
+- **GIVEN** primary-answer fallback is silently cancelling a stuck turn, **WHEN** a message, thinking,
+  or tool frame arrives, **THEN** that frame cancels the watchdog unless it is an explicit cancellation
+  acknowledgement; matching execution identity alone does not suppress normal agent activity.
 - **GIVEN** a reserved successor is marked dispatch-attempted but remains unpublished, **WHEN** a client
   loads turn history before agentctl accepts or rejects it, **THEN** the successor is omitted until
   publication or durable message evidence prevents rollback from leaving stale client-only history.
