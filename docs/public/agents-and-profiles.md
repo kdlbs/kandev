@@ -96,10 +96,17 @@ resolution error, removes only the deterministic `_npx` execution tree for the
 selected package and version, then retries the same command once with an
 online-preferred metadata lookup.
 
+The same recovery applies to managed runtime startup on a local PC, in a local
+Docker executor, or in a remote SSH executor. Kandev sends the repair request
+to the agentctl process that owns the failed execution. That process resolves
+npm's cache with the agent environment and removes only the selected execution
+tree. It does not repair the Kandev host cache, delete sibling execution trees,
+change the registry, or clear the global npm cache.
+
 The retry keeps the selected package, exact version, command prefix, model,
 permissions, and session identity. It does not change the npm registry or
 silently select another version. When the retry succeeds, no recovery card is
-shown. When it fails again, Kanban and Office show one **Retry runtime** action
+shown. When it fails again, Kandev and Office show one **Retry runtime** action
 with collapsed technical details.
 
 Do not use `npm cache clean --force` as the normal recovery step. It removes

@@ -1,7 +1,7 @@
 ---
 status: approved
 created: 2026-07-26
-updated: 2026-08-22
+updated: 2026-08-24
 owner: Kandev
 ---
 
@@ -20,11 +20,8 @@ they open its version dialog. Kandev must provide a stable reviewed default for
 unmodified installations without preventing an operator from selecting a newer
 validated version between Kandev releases.
 
-Managed runtimes can also fail when npm has stale package metadata. In that
-case, npm can report `ETARGET` and `No matching version found` for a dependency
-that the configured registry now contains. Kandev currently reports the later
-ACP disconnect instead of the npm cause. The user then has no useful recovery
-action unless they inspect backend logs.
+Managed npm runtime recovery now has an authoritative requirement and design:
+[managed npm runtime recovery](requirements/managed-npm-runtime-recovery.md).
 
 ## What
 
@@ -62,11 +59,8 @@ action unless they inspect backend logs.
   recipe.
 - Jobs for one agent are idempotent while queued or running. Installation and
   version management for the same agent cannot run concurrently.
-- A host-local managed runtime launch detects a strict npm `ETARGET` version
-  resolution failure before ACP initialization. Kandev refreshes npm metadata
-  and retries the same trusted package and version once.
-- If the retry also fails, Kandev reports an npm runtime preparation error and
-  offers one runtime retry action. The user does not need to understand ACP.
+- Managed npm runtime recovery follows the authoritative
+  [recovery requirement](requirements/managed-npm-runtime-recovery.md).
 - When the Agents settings page loads, Kandev checks each available managed
   package against npm's stable `latest` version through one batch status
   request. A newer version marks the existing update control with a blue dot
@@ -309,29 +303,9 @@ produces a repair job.
 
 ## Launch-time stale metadata recovery
 
-- Normal managed runtime commands continue to use `--prefer-offline`.
-- Kandev inspects bounded process stderr when ACP initialization ends before a
-  response. Automatic recovery requires both npm `ETARGET` and a matching
-  `No matching version found for package@version` message.
-- Kandev classifies the npm error from stderr. It does not build a command from
-  package names, versions, paths, or registry values found in stderr.
-- Recovery removes only the deterministic `_npx` execution tree for the
-  trusted built-in package specification. It never clears npm's full cache.
-- Kandev starts the same managed runtime once with `--prefer-online`. The
-  command keeps the same trusted package, exact effective version,
-  ACP arguments, configured npm registry, command prefix, permissions, model,
-  and session identity.
-- Recovery is limited to one retry for each launch attempt. A delayed event
-  from the first child process cannot fail or complete the replacement process.
-- User cancellation and backend shutdown stop recovery. Kandev does not retry
-  a remote executor, a native runtime, a passthrough command, an unrelated npm
-  error, or a second failed online attempt.
-- A successful retry continues the original session without a failure card.
-  Kandev records structured recovery telemetry without exposing host paths or
-  raw process logs.
-- A failed retry emits a stable npm runtime failure code and bounded sanitized
-  details. This evidence is stored with the last agent error so the focused UI
-  survives a page reload.
+The [managed npm runtime recovery requirement](requirements/managed-npm-runtime-recovery.md)
+and its [system design](system-design/managed-npm-runtime-recovery.md) are
+authoritative for launch-time stale metadata recovery.
 
 ## Failure and recovery behavior
 
@@ -351,8 +325,9 @@ produces a repair job.
 - Browser disconnect does not cancel a running job. The jobs endpoint can
   recover process-local progress while the backend remains running.
 - Active sessions are never restarted, replaced, or hot-swapped.
-- A launch-time stale metadata retry is not a version rollback. It prepares the
-  same package selection again and does not change the active version.
+- Launch-time recovery does not change the active version. The authoritative
+  [recovery requirement](requirements/managed-npm-runtime-recovery.md) defines
+  its observable behavior.
 - Registry failure during the batch update-status check returns `unknown` for
   only the affected package. It does not disable the update control, show an
   error badge, or claim that the package is up to date.
@@ -382,9 +357,8 @@ produces a repair job.
   version again; it must not advance to another version.
 - Dialog selection, output, and result remain page-local after a browser page
   restart.
-- A terminal launch-time npm resolution error stores its stable failure code
-  and bounded sanitized details in `last_agent_error`. No database migration is
-  required because the record is JSON metadata with optional fields.
+- Terminal launch-time npm resolution metadata follows the authoritative
+  [recovery design](system-design/managed-npm-runtime-recovery.md).
 
 ## Desktop and mobile behavior
 
@@ -411,16 +385,8 @@ produces a repair job.
 - Tapping the dotted control on a phone opens the same version drawer and shows
   the authoritative version summary. The dot itself is not a separate touch
   target and does not depend on hover.
-- A failed automatic launch retry uses the existing inline recovery card in
-  Kanban chat and Office chat. It does not open a dialog or drawer.
-- The card states that npm could not prepare the agent runtime. It states that
-  Kandev refreshed package data and retried once. Technical details are
-  collapsed initially.
-- The card offers one **Retry runtime** action. When a resume token exists, the
-  action resumes the session. Otherwise, it starts a replacement run. The card
-  does not present session history loss as a fix for an npm problem.
-- Phone actions stack when needed, remain at least 44 px high, and do not add a
-  second scroll container.
+- Launch-time recovery presentation follows the authoritative
+  [recovery requirement](requirements/managed-npm-runtime-recovery.md).
 
 ## Scenarios
 
@@ -483,21 +449,8 @@ produces a repair job.
 - **GIVEN** a dotted update control on a phone, **WHEN** the operator taps it,
   **THEN** the existing update drawer opens and shows a live authoritative
   preview without requiring hover.
-- **GIVEN** a host-local managed runtime exits before ACP initialization with
-  npm `ETARGET` and a matching missing dependency version, **WHEN** Kandev
-  reads the captured stderr, **THEN** it removes only the trusted package's
-  deterministic `_npx` tree and retries the same runtime once with current npm
-  metadata.
-- **GIVEN** that online retry starts successfully, **WHEN** ACP initialization
-  completes, **THEN** the original session continues and no recovery card is
-  shown.
-- **GIVEN** that online retry fails with the same npm resolution error,
-  **WHEN** the failure reaches Kanban or Office chat, **THEN** the UI explains
-  the npm cause, keeps sanitized technical details collapsed, and offers only
-  **Retry runtime**.
-- **GIVEN** a native, SSH, container, passthrough, or unrelated failed launch,
-  **WHEN** Kandev classifies the error, **THEN** this automatic npm recovery
-  does not run.
+- Managed npm runtime recovery scenarios follow the authoritative
+  [recovery requirement](requirements/managed-npm-runtime-recovery.md).
 
 ## Out of scope
 

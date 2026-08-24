@@ -80,9 +80,11 @@ requirement and design paths in [tasks/README.md](tasks/README.md).
 All task and workflow specifications are now indexed under that system
 directory; this legacy catalog has no remaining task-owned editable sources.
 
-## agents/ — agent governance
+## agents/ — agent governance and runtime
 
-Roles, governance gates, and granular permissions that apply across human users and office agents.
+The agent system now has a system index at [agents/README.md](agents/README.md).
+Managed npm runtime recovery uses new authoritative requirement and design
+documents. Other agent specifications remain in this legacy migration catalog.
 
 | Spec | Status |
 |---|---|

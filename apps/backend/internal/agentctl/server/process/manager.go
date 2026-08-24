@@ -94,6 +94,7 @@ const processDefaultExitGrace = 5 * time.Second
 
 const processGroupTerminateGrace = 2 * time.Second
 const processGroupPollInterval = 50 * time.Millisecond
+const processStderrDrainTimeout = time.Second
 
 // Manager manages the agent subprocess
 type Manager struct {
@@ -227,6 +228,7 @@ type Manager struct {
 	wg               sync.WaitGroup
 	stopCh           chan struct{}
 	doneCh           chan struct{}
+	stderrDone       chan struct{}
 	startMu          sync.Mutex
 	admissionMu      sync.Mutex
 	admissionCount   int
@@ -1161,6 +1163,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 
 	// Start stderr reader and exit waiter
+	m.stderrDone = make(chan struct{})
 	m.wg.Add(2)
 	go m.readStderr()
 	go m.waitForExit()
@@ -2208,6 +2211,7 @@ func waitForProcessGroupExit(ctx context.Context, pid int) bool {
 // readStderr reads and logs stderr from the agent
 func (m *Manager) readStderr() {
 	defer m.wg.Done()
+	defer m.signalStderrDone()
 
 	scanner := bufio.NewScanner(m.stderr)
 	for scanner.Scan() {
@@ -2223,6 +2227,9 @@ func (m *Manager) readStderr() {
 		if m.stderrSanitizer != nil {
 			line, keep = m.stderrSanitizer.SanitizeStderrLine(rawLine)
 		}
+		if !keep {
+			line, keep = safeManagedNpmStderrLine(rawLine)
+		}
 		if !keep || line == "" {
 			continue
 		}
@@ -2234,6 +2241,25 @@ func (m *Manager) readStderr() {
 
 	if err := scanner.Err(); err != nil {
 		m.logger.Debug("stderr reader error", zap.Error(err))
+	}
+}
+
+func (m *Manager) signalStderrDone() {
+	if m.stderrDone != nil {
+		close(m.stderrDone)
+	}
+}
+
+func (m *Manager) waitForStderrDrain() {
+	if m.stderrDone == nil {
+		return
+	}
+	timer := time.NewTimer(processStderrDrainTimeout)
+	defer timer.Stop()
+	select {
+	case <-m.stderrDone:
+	case <-timer.C:
+		m.logger.Warn("timed out waiting for agent stderr to drain")
 	}
 }
 
@@ -2284,6 +2310,7 @@ func (m *Manager) waitForExit() {
 
 	pid := m.agentPID()
 	err := m.cmd.Wait()
+	m.waitForStderrDrain()
 	intentionalStop := m.Status() == StatusStopping
 
 	switch {

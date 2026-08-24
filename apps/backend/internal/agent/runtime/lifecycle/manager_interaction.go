@@ -1714,6 +1714,12 @@ func (m *Manager) markCompletedWithTurnID(
 	if (exitCode != 0 || errorMessage != "") && m.IsShuttingDown() {
 		return m.markStoppedDuringShutdown(execution, exitCode, errorMessage, turnID)
 	}
+	if (exitCode != 0 || errorMessage != "") && isUninitializedStartupExecution(execution) {
+		m.logger.Debug("deferring uninitialized startup process exit to startup owner",
+			zap.String("execution_id", execution.ID),
+			zap.Int("exit_code", exitCode))
+		return nil
+	}
 
 	_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
 		now := time.Now()
