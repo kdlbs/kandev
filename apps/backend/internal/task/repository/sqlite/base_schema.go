@@ -736,7 +736,7 @@ func (r *Repository) initSessionSchema() error {
 
 // initSubagentContextSchema creates task_session_subagents, the durable
 // relational record of a subagent (Task tool) invocation. See
-// docs/specs/subagent-context-persistence/spec.md. The three measurement
+// docs/specs/agents/requirements/subagent-context-persistence.md. The three measurement
 // columns (total_tokens, tool_use_count, duration_ms) deliberately carry no
 // DEFAULT: an unreported value must store NULL, never 0 (75% of observed
 // invocations report none of them). turn_id carries no FOREIGN KEY so a turn

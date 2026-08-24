@@ -4,7 +4,7 @@ title: "Give the normal E2E shard a queue-safe budget"
 status: completed
 depends_on: []
 plan: plan.md
-spec: ../../specs/e2e-duration-aware-sharding/spec.md
+spec: ../../specs/platform/requirements/e2e-duration-aware-sharding.md
 parallelism: sequential
 ---
 
@@ -23,7 +23,7 @@ parallelism: sequential
 
 - `.github/workflows/e2e-tests.yml`
 - `.github/scripts/e2e-tests-workflow-contract_test.py`
-- `docs/specs/e2e-duration-aware-sharding/spec.md`
+- `docs/specs/platform/requirements/e2e-duration-aware-sharding.md`
 - `docs/plans/merge-queue-e2e-shard-timeout/plan.md`
 
 ## TDD sequence

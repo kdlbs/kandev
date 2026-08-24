@@ -11,7 +11,7 @@ Kandev has three distinct configuration surfaces:
 - persistent product settings edited in the web UI and stored in the database; and
 - executor, agent, repository, and workflow profiles stored through their own Settings pages.
 
-This page is the startup-configuration reference. Executor-specific fields are covered in [Executors](./executors.md), and deployment examples are in [Docker](./docker.md), [Kubernetes](./k8s.md), and [Run as a service](./run-as-a-service.md).
+This page is the startup-configuration reference. Executor-specific fields are covered in [Executors](executors.md), and deployment examples are in [Docker](docker.md), [Kubernetes](k8s.md), and [Run as a service](run-as-a-service.md).
 
 ## Quick path
 
@@ -64,7 +64,7 @@ Some common camelCase keys have explicit compatibility aliases. Use the document
 | YAML key | Environment variable | Default | Current behavior |
 |---|---|---|---|
 | `homeDir` | `KANDEV_HOME_DIR` | `~/.kandev` | Root for data, tasks, worktrees, cloned repositories, sessions, and logs. A leading `~/` expands. |
-| `server.host` | `KANDEV_SERVER_HOST` | `0.0.0.0` | HTTP listen address. Use `127.0.0.1` for local-only access. |
+| `server.host` | `KANDEV_SERVER_HOST` | `0.0.0.0` | HTTP listen address. It accepts one hostname/IP or a comma-separated list. Use `127.0.0.1` for local-only access. |
 | `server.port` | `KANDEV_SERVER_PORT` (`KANDEV_BACKEND_PORT`, `KANDEV_PORT` aliases) | `38429` | UI, HTTP API, WebSocket, and MCP port; must be `1`-`65535`. The launcher normally supplies its selected port. |
 | `server.readTimeout` | `KANDEV_SERVER_READTIMEOUT` | `30` | HTTP read timeout in seconds. |
 | `server.writeTimeout` | `KANDEV_SERVER_WRITETIMEOUT` | `30` | HTTP write timeout in seconds. |
@@ -72,7 +72,7 @@ Some common camelCase keys have explicit compatibility aliases. Use the document
 | `server.webTitlePrefix` | `KANDEV_WEB_TITLE_PREFIX` | empty | Prefixes the browser tab title as `<prefix> Kandev` (for example `TEST` renders `TEST Kandev`), so several instances stay distinguishable in adjacent tabs. `make dev` defaults to `Dev`; `make start-debug` keeps production defaults, enables diagnostics, and defaults to `Debug`; PR previews use `Preview`. An explicit value overrides these defaults. Empty keeps the plain `Kandev` title. |
 | `server.trustedProxies` | `KANDEV_TRUSTED_PROXIES` | empty list | IP addresses or CIDR ranges for proxies whose forwarded client headers Kandev accepts. See [Trusted proxies](#trusted-proxies-for-x-forwarded-for). |
 
-The default host exposes the server on every interface even though the CLI prints a `localhost` URL. The current local product path must not be treated as an authenticated multi-user perimeter. For remote access, bind to loopback and use a trusted authenticated tunnel/proxy, or isolate the network at the deployment layer.
+When `server.host` is unset, `server.hosts` may provide a YAML list of bind addresses. The launcher derives its health targets and access URL from this resolved set. It probes an IPv4 wildcard through `127.0.0.1` and keeps `localhost` as the default browser/access URL, while it probes and accesses an IPv6 wildcard through `[::1]`. The backend still listens on every interface for a wildcard bind. The current local product path must not be treated as an authenticated multi-user perimeter. For remote access, bind to loopback and use a trusted authenticated tunnel/proxy, or isolate the network at the deployment layer.
 
 ### Database
 
@@ -95,7 +95,7 @@ SQLite is the supported default and enables WAL mode. PostgreSQL deployments mus
 
 One backend owns a Kandev home at a time. When SQLite uses a custom path outside that home, the backend also owns that database path, so separate homes alone do not permit concurrent backends against one SQLite file. Use a separate home and database for an intentional second instance. Ownership is released when the backend exits.
 
-Database-only snapshots also omit `<home>/data/master.key`, the AES-256 key used to decrypt stored secrets. Preserve that owner-only key with an independently secured home/data backup; restoring the database without its matching key leaves encrypted credentials unreadable. See [Operations](./operations.md).
+Database-only snapshots also omit `<home>/data/master.key`, the AES-256 key used to decrypt stored secrets. Preserve that owner-only key with an independently secured home/data backup; restoring the database without its matching key leaves encrypted credentials unreadable. See [Operations](operations.md).
 
 ### Event bus and NATS
 
@@ -120,7 +120,7 @@ An external NATS URL moves event traffic across the configured network and can e
 | `docker.defaultNetwork` | `KANDEV_DOCKER_DEFAULTNETWORK` | `kandev-network` | Accepted compatibility field; not wired into current executor networking. |
 | `docker.volumeBasePath` | `KANDEV_DOCKER_VOLUMEBASEPATH` | `/var/lib/kandev/volumes` on Unix; `%LOCALAPPDATA%\kandev\volumes` on Windows | Accepted compatibility field; not wired into current executor volume placement. |
 
-The Docker socket is effectively root-equivalent on many hosts. Do not publish it or assume `docker.tlsVerify` secures a TCP daemon; it currently does not. Configure TLS through a supported Docker endpoint/environment and validate it independently, or keep the daemon local. See [Docker](./docker.md) and [Executors](./executors.md).
+The Docker socket is effectively root-equivalent on many hosts. Do not publish it or assume `docker.tlsVerify` secures a TCP daemon; it currently does not. Configure TLS through a supported Docker endpoint/environment and validate it independently, or keep the daemon local. See [Docker](docker.md) and [Executors](executors.md).
 
 ### Core agent service
 
@@ -207,14 +207,27 @@ ignored and the TCP peer address is used. The resolved IP feeds the login
 session record (Settings > Account > Security) and the login rate-limiter
 key.
 
-For a reverse proxy, use a narrow list of proxy addresses:
+For one stable reverse proxy, list its immediate TCP peer as an exact IP:
 
 ```yaml
 server:
   trustedProxies:
     - 10.0.0.5
-    - 192.168.0.0/16
 ```
+
+For a controlled proxy network whose address changes, use the narrowest CIDR
+that contains the proxy peers:
+
+```yaml
+server:
+  trustedProxies:
+    - 10.0.0.0/28
+```
+
+Use the proxy `peer` address named in the warning. Do not list the browser's
+client network. A trusted CIDR lets every directly connected host in that
+range supply forwarded identity headers, so use an exact IP when the proxy
+address is stable and never trust a broad private-network range by default.
 
 Default: unset, meaning no trusted proxies. Forwarded headers are ignored
 entirely and the recorded client IP is always the TCP peer. This is the
@@ -276,7 +289,7 @@ Debug output may contain repository paths, subprocess output, prompts, file cont
 | `worktree.pullTimeoutSeconds` | `KANDEV_WORKTREE_PULLTIMEOUTSECONDS` | `60` | Git pull timeout during worktree preparation. |
 | `repoClone.basePath` | `KANDEV_REPOCLONE_BASEPATH` | `<home>/repos` | Base directory for provider-backed clones. A leading `~/` expands. |
 
-Discovery roots bound automatic filesystem traversal, so scope them narrowly. They do not authorize explicitly selected repository paths: **Add Local Repository** validates and saves the exact accessible Git repository the user chooses without widening automatic scans. Worktrees and clones can contain credentials or generated files ignored by Git; review repository copy-file and setup/cleanup settings before remote execution. See [Git operations](./git-operations.md).
+Discovery roots bound automatic filesystem traversal, so scope them narrowly. They do not authorize explicitly selected repository paths: **Add Local Repository** validates and saves the exact accessible Git repository the user chooses without widening automatic scans. Worktrees and clones can contain credentials or generated files ignored by Git; review repository copy-file and setup/cleanup settings before remote execution. See [Git operations](git-operations.md).
 
 ### Debug configuration
 
@@ -581,4 +594,4 @@ If a value appears ignored:
 
 Use `kandev --verbose` to surface startup errors. Do not use `--debug` merely to diagnose a YAML typo on an exposed machine; verbose logs are usually sufficient.
 
-Variables used only to assemble/test the runtime, such as `KANDEV_WEB_DIST_DIR`, `KANDEV_DESKTOP_RUNTIME_DIR`, mock/E2E switches, supervisor socket/manifest values, and bootstrap nonces, are internal implementation contracts, not supported deployment configuration. `KANDEV_MCP_LOG_FILE` remains a debug-only component variable without a YAML key. `KANDEV_BUNDLE_DIR` is the narrow exception documented for installer/package integration in [CLI](./cli.md); end users should still let the installer set it.
+Variables used only to assemble/test the runtime, such as `KANDEV_WEB_DIST_DIR`, `KANDEV_DESKTOP_RUNTIME_DIR`, mock/E2E switches, supervisor socket/manifest values, and bootstrap nonces, are internal implementation contracts, not supported deployment configuration. `KANDEV_MCP_LOG_FILE` remains a debug-only component variable without a YAML key. `KANDEV_BUNDLE_DIR` is the narrow exception documented for installer/package integration in [CLI](cli.md); end users should still let the installer set it.

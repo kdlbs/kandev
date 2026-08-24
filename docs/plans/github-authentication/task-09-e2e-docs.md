@@ -5,7 +5,7 @@ status: done
 wave: 7
 depends_on: ["08-frontend-settings"]
 plan: "plan.md"
-spec: "../../specs/integrations/github-authentication.md"
+spec: "../../specs/integrations/requirements/github-authentication.md"
 ---
 
 # Task 09: End-To-End Coverage And Public Docs

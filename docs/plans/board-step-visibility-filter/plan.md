@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/board-step-visibility-filter/spec.md
+spec: docs/specs/ui/requirements/board-step-visibility-filter.md
 created: 2026-08-10
 status: implemented
 ---

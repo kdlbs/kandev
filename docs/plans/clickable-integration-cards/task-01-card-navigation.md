@@ -5,7 +5,7 @@ status: complete
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/integrations/clickable-integration-cards.md"
+spec: "../../specs/integrations/requirements/clickable-integration-cards.md"
 ---
 
 # Task 01: Integration card navigation
@@ -43,7 +43,7 @@ None.
 
 ## Inputs
 
-- `docs/specs/integrations/clickable-integration-cards.md`, What and Scenarios.
+- `docs/specs/integrations/requirements/clickable-integration-cards.md`, What and Scenarios.
 - `docs/plans/clickable-integration-cards/plan.md`, Frontend and Tests.
 - Existing `AppLink` behavior in `apps/web/components/routing/app-link.tsx`.
 

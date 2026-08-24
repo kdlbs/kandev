@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/shutdown-turn-failure-suppression/spec.md
+spec: docs/specs/platform/requirements/shutdown-turn-failure-suppression.md
 created: 2026-08-12
 status: implemented
 ---

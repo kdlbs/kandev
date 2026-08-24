@@ -59,7 +59,7 @@ const steerSetupHoldMillis = 30_000
 // text of its own, so a mid-turn steer delivered while it runs can only be
 // answered by the steer's own successor turn. This reproduces the "folded"
 // outcome from the mid-turn steering spec's outcome taxonomy
-// (docs/specs/platform/mid-turn-steering.md): the predecessor settles without
+// (docs/specs/platform/requirements/mid-turn-steering.md): the predecessor settles without
 // having produced an answer, and the operator sees a single, combined reply.
 func scenarioSteerFoldSetup(e *emitter) {
 	waitForDelay(e.ctx, steerSetupHoldMillis)

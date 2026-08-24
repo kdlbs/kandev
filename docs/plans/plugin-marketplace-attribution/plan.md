@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/plugins/marketplace.md
+spec: docs/specs/plugins/requirements/marketplace.md
 created: 2026-08-22
 status: building
 ---

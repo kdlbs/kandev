@@ -1,7 +1,7 @@
 ---
 status: implemented
 created: 2026-08-11
-spec: "../../specs/port-collision-safety/spec.md"
+spec: "../../specs/executors/requirements/port-collision-safety.md"
 ---
 
 # Plan: Launcher port-availability probe detects wildcard listeners

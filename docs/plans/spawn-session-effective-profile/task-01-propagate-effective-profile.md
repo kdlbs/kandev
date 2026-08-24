@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/spawn-session-effective-profile/spec.md"
+spec: "../../specs/agents/requirements/spawn-session-effective-profile.md"
 ---
 
 # Task 01: Propagate the effective profile

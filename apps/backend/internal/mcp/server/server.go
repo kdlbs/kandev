@@ -1609,9 +1609,9 @@ This tool is available only to autopilot child tasks. It sends a durable questio
 func (s *Server) registerPlanTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("create_task_plan_kandev",
-			mcp.WithDescription("Create or save a task plan. task_id addresses the plan's task: pass your own task ID for your current task, or another task's ID to write that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own)."),
+			mcp.WithDescription("Create or save a task plan. task_id addresses the plan's task: pass your own task ID for your current task, or another task's ID to write that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own). If a plan already exists for this task, this REPLACES ITS ENTIRE CONTENT — same as update_task_plan_kandev through a different door. Read it first with get_task_plan_kandev if you need to preserve any of it."),
 			mcp.WithString("task_id", mcp.Description("The task ID to create a plan for. Defaults to your current task when omitted; pass another task's ID to target it directly.")),
-			mcp.WithString("content", mcp.Required(), mcp.Description("The plan content in markdown format")),
+			mcp.WithString("content", mcp.Required(), mcp.Description("The full plan content in markdown format. This REPLACES any existing plan whole — there is no partial update or append mode. To preserve prior content, call get_task_plan_kandev first and include its content plus your additions in this call.")),
 			mcp.WithString("title", mcp.Description("Optional title for the plan (default: 'Plan')")),
 		),
 		s.wrapHandler("create_task_plan_kandev", s.createTaskPlanHandler()),
@@ -1625,9 +1625,9 @@ func (s *Server) registerPlanTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("update_task_plan_kandev",
-			mcp.WithDescription("Update an existing task plan. task_id selects the task whose plan to modify: your own task by default, or another task's ID to update that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own)."),
+			mcp.WithDescription("Update an existing task plan. task_id selects the task whose plan to modify: your own task by default, or another task's ID to update that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own). This REPLACES THE ENTIRE PLAN — there is no partial update, append, or section-patch mode. The correct sequence is: call get_task_plan_kandev, then send this call with the full document (prior content plus your changes), never just the new section."),
 			mcp.WithString("task_id", mcp.Description("The task ID to update the plan for. Defaults to your current task when omitted; pass another task's ID to target it directly.")),
-			mcp.WithString("content", mcp.Required(), mcp.Description("The updated plan content in markdown format")),
+			mcp.WithString("content", mcp.Required(), mcp.Description("The full plan content in markdown format that REPLACES the entire existing plan. Sending only a new section instead of the whole document will silently delete everything else. Read the current plan with get_task_plan_kandev first and include its content here plus your additions.")),
 			mcp.WithString("title", mcp.Description("Optional new title for the plan")),
 		),
 		s.wrapHandler("update_task_plan_kandev", s.updateTaskPlanHandler()),

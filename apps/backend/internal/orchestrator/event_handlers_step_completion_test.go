@@ -6,6 +6,9 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/orchestrator/watcher"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
@@ -680,4 +683,169 @@ func TestOnStepCompletionSignaled(t *testing.T) {
 			t.Fatal("stop-winning subscriber consumed the queued completion signal")
 		}
 	})
+}
+
+// newGatedStepFailureService creates the workflow used by the turn-failure
+// signal tests below. The first step advances only when a matching signal is
+// present.
+func newGatedStepFailureService(t *testing.T) (*Service, *sqliterepo.Repository) {
+	t.Helper()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1") // seedSession leaves the session RUNNING.
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+		ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+		AutoAdvanceRequiresSignal: true,
+		Events: wfmodels.StepEvents{
+			OnTurnComplete: []wfmodels.OnTurnCompleteAction{
+				{Type: wfmodels.OnTurnCompleteMoveToNext},
+			},
+		},
+	}
+	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+		ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
+	}
+
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	return createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr), repo
+}
+
+func seedPendingStepCompletionSignal(t *testing.T, repo *sqliterepo.Repository, stepID, summary string) {
+	t.Helper()
+	signal := models.PendingStepCompletionSignal{
+		StepID:     stepID,
+		Source:     models.StepCompletionSourceAgent,
+		Summary:    summary,
+		SignaledAt: time.Now().UTC(),
+	}
+	if err := repo.SetSessionMetadataKey(context.Background(), "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
+		t.Fatalf("seed pending signal: %v", err)
+	}
+}
+
+func stepCompletionSignalEvent(taskID, sessionID, stepID string) *bus.Event {
+	return bus.NewEvent("workflow.step_completion_signaled", "test", map[string]interface{}{
+		"task_id":    taskID,
+		"session_id": sessionID,
+		"step_id":    stepID,
+	})
+}
+
+// TestStepCompletionSignalSurvivesTurnFailure is the regression test for the
+// dropped-signal bug. A signal written during a running turn must be applied
+// when that turn fails and settles the session into WAITING_FOR_INPUT.
+func TestStepCompletionSignalSurvivesTurnFailure(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newGatedStepFailureService(t)
+	seedPendingStepCompletionSignal(t, repo, "step1", "all done")
+
+	// The subscriber sees a running session and correctly defers to the
+	// turn-end path.
+	svc.onStepCompletionSignaled(ctx, stepCompletionSignalEvent("t1", "s1", "step1"))
+	if session, err := repo.GetTaskSession(ctx, "s1"); err != nil || session.State != models.TaskSessionStateRunning {
+		t.Fatalf("expected session to remain RUNNING after subscriber no-op, got %+v (err=%v)", session, err)
+	}
+	if task, err := repo.GetTask(ctx, "t1"); err != nil || task.WorkflowStepID != "step1" {
+		t.Fatalf("expected no transition yet, got %+v (err=%v)", task, err)
+	}
+
+	svc.handleAgentFailed(ctx, watcher.AgentEventData{
+		TaskID:           "t1",
+		SessionID:        "s1",
+		AgentExecutionID: "exec-1",
+		ErrorMessage:     "agent crashed",
+	})
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if session.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("expected session WAITING_FOR_INPUT after failure, got %q", session.State)
+	}
+	if _, hasSignal := models.LoadPendingStepSignal(session.Metadata); hasSignal {
+		t.Error("expected the pending signal to be consumed by the transition")
+	}
+
+	task, err := repo.GetTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if task.WorkflowStepID != "step2" {
+		t.Fatalf("expected task to advance to step2 after the failed turn, got %q", task.WorkflowStepID)
+	}
+}
+
+func TestStaleStepCompletionSignalDoesNotTransitionAfterTurnFailure(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newGatedStepFailureService(t)
+	seedPendingStepCompletionSignal(t, repo, "step_old", "stale")
+
+	svc.handleAgentFailed(ctx, watcher.AgentEventData{
+		TaskID:           "t1",
+		SessionID:        "s1",
+		AgentExecutionID: "exec-1",
+		ErrorMessage:     "agent crashed",
+	})
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if session.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("expected session WAITING_FOR_INPUT after failure, got %q", session.State)
+	}
+	if _, hasSignal := models.LoadPendingStepSignal(session.Metadata); hasSignal {
+		t.Error("expected the stale signal to be cleared by the reconciler")
+	}
+
+	task, err := repo.GetTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if task.WorkflowStepID != "step1" {
+		t.Fatalf("expected task to stay on step1 (stale signal must not transition), got %q", task.WorkflowStepID)
+	}
+}
+
+// TestOfficeStepCompletionSignalDoesNotAdvanceAfterTurnFailure covers the
+// Office-session exclusion. Office failures are terminal for the session and
+// must not advance the workflow from a matching pending signal.
+func TestOfficeStepCompletionSignalDoesNotAdvanceAfterTurnFailure(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newGatedStepFailureService(t)
+	task, err := repo.GetTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	task.ProjectID = "office-project"
+	if err := repo.UpdateTask(ctx, task); err != nil {
+		t.Fatalf("mark task as Office-owned: %v", err)
+	}
+	seedPendingStepCompletionSignal(t, repo, "step1", "all done")
+
+	svc.handleAgentFailed(ctx, watcher.AgentEventData{
+		TaskID:           "t1",
+		SessionID:        "s1",
+		AgentExecutionID: "exec-1",
+		ErrorMessage:     "agent crashed",
+	})
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if session.State != models.TaskSessionStateFailed {
+		t.Fatalf("expected Office session FAILED after failure, got %q", session.State)
+	}
+
+	task, err = repo.GetTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if task.WorkflowStepID != "step1" {
+		t.Fatalf("expected Office task to stay on step1, got %q", task.WorkflowStepID)
+	}
 }

@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-duration-helper"]
 plan: "plan.md"
-spec: "../../specs/ui/prompt-turn-duration.md"
+spec: "../../specs/ui/requirements/prompt-turn-duration.md"
 ---
 
 # Task 02: Render duration in message action row
@@ -27,7 +27,7 @@ spec: "../../specs/ui/prompt-turn-duration.md"
 - **Dependencies:** task 01 (helper must exist).
 - **Parallelism:** sequential.
 - **Inputs:**
-  - Spec: `docs/specs/ui/prompt-turn-duration.md` — `What` and `Scenarios`.
+  - Spec: `docs/specs/ui/requirements/prompt-turn-duration.md` — `What` and `Scenarios`.
   - Plan: `docs/plans/prompt-turn-duration/plan.md` — Frontend "Component", Tests table.
   - Patterns: `PromptDuration` in `apps/web/components/task/prompt-history-panel-content.tsx` (hourglass + `formatPromptDuration` with `t()` unit keys); existing `MessageMetaInfo` styling in `message-actions.tsx`.
   - The store already resolves `turn` via `useMessageTurnAndUsage`. To seed test turns, capture the store with `useAppStoreApi()` (from `@/components/state-provider`; `useAppStore` is a hook without `getState`) inside a seeding wrapper component rendered within `StateProvider` (or via `renderHook`), then call `api.getState().addTurn(turn)` inside `act()`. `addTurn` is a ROOT-level store action (see `apps/web/lib/state/slices/session/turn-actions.ts` and its use in `turn-actions.test.ts`) — never `turns.addTurn`. The `assistantMessage()` helper in the test file is `author_type: "agent"`; add a user-message factory with `turn_id`.
