@@ -21,6 +21,7 @@ id: kandev-plugin-admin-action
 api_version: 1
 version: "1.0.0"
 display_name: Admin Action
+min_kandev_version: "0.91.1"
 actions:
   - key: connection.set
     scope: workspace

@@ -784,6 +784,7 @@ declared `scope`, strips selectors from the untrusted body, and calls the
 plugin's optional `ActionHandler` with a `VerifiedActionContext`.
 
 ```yaml
+min_kandev_version: "0.91.1"
 actions:
   - key: "pullrequests.link"
     scope: "task"
@@ -794,7 +795,9 @@ actions:
 `access` defaults to `authenticated`. Set it to `admin` for instance-wide
 configuration or credentials that only a Kandev administrator may manage. The
 host checks this policy before reading the bounded envelope or invoking the
-plugin, so the plugin does not need to infer roles from actor IDs.
+plugin, so the plugin does not need to infer roles from actor IDs. An `admin`
+action requires `min_kandev_version: "0.91.1"` or later; validation rejects a
+missing or older minimum because earlier hosts do not enforce action access.
 
 ```ts
 const result = await host.api.invokeAction(
