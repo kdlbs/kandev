@@ -70,7 +70,7 @@ export type TaskSwitcherProps = {
   onSelectTask: (taskId: string) => void;
   onEditTask?: (task: TaskSwitcherItem) => void;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
-  onArchiveTask?: (taskId: string) => void;
+  onArchiveTask?: (taskId: string, opts?: { cascade?: boolean }) => void;
   onCreateSubtask?: (taskId: string, taskTitle: string) => void;
   onDeleteTask?: (taskId: string) => void;
   onDetachTask?: (taskId: string) => void;
@@ -88,6 +88,8 @@ export type TaskSwitcherProps = {
   onNestTask?: (taskId: string, parentTaskId: string) => void;
   pinnedTaskIds?: string[];
   deletingTaskId?: string | null;
+  archivingTaskId?: string | null;
+  isArchiving?: boolean;
   isLoading?: boolean;
   loadError?: string | null;
   onRetryLoad?: () => void;

@@ -349,7 +349,7 @@ func (c *Config) ToSharedConfig() *shared.Config {
 //
 // Delivery is opportunistic: whether the agent folds the prompt into the running
 // turn or runs it as the next turn is the agent's decision and is not advertised
-// over the protocol. See docs/specs/platform/mid-turn-steering.md.
+// over the protocol. See docs/specs/platform/requirements/mid-turn-steering.md.
 type SteerablePrompter interface {
 	SupportsSteering() bool
 	PromptSteer(

@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-mobile-action-strip"]
 plan: "plan.md"
-spec: "../../specs/mobile-quick-chat-topbar/spec.md"
+spec: "../../specs/ui/requirements/mobile-quick-chat-topbar.md"
 ---
 
 # Task 02: Prove mobile overflow behavior

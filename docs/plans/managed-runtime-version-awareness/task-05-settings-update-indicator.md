@@ -5,7 +5,7 @@ status: complete
 wave: 4
 depends_on: ["03-update-status-api"]
 plan: "plan.md"
-spec: "../../specs/agents/runtime-updates.md"
+spec: "../../specs/agents/requirements/runtime-updates.md"
 ---
 
 # Task 05: Show update awareness in Settings

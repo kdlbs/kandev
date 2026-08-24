@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/interrupted-task-indicator.md"
+spec: "../../specs/tasks/requirements/interrupted-task-indicator.md"
 ---
 
 # Task 01: Backend startup interruption marker

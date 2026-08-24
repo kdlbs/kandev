@@ -87,6 +87,7 @@ describe("popup menu viewport updates", () => {
     render(
       <PopupMenu
         isOpen
+        testId="reflow-menu"
         position={null}
         clientRect={() => new DOMRect(16, 240, 1, 20)}
         title="References"
@@ -96,15 +97,15 @@ describe("popup menu viewport updates", () => {
         Result
       </PopupMenu>,
     );
-    const menu = screen.getByText("References").parentElement?.parentElement;
-    expect(menu?.style.width).toBe("344px");
+    const menu = screen.getByTestId("reflow-menu");
+    expect(menu.style.width).toBe("344px");
 
     act(() => {
       viewport.width = 300;
       viewport.dispatchEvent(new Event("resize"));
     });
 
-    expect(menu?.style.width).toBe("284px");
+    expect(menu.style.width).toBe("284px");
   });
 
   // @covers AC-UI-COMPOSER-OVERLAY-001.2
@@ -119,6 +120,7 @@ describe("popup menu viewport updates", () => {
     render(
       <PopupMenu
         isOpen
+        testId="reflow-menu"
         position={{ x: 16, y: 560 }}
         title="References"
         selectedIndex={0}
@@ -127,15 +129,15 @@ describe("popup menu viewport updates", () => {
         Result
       </PopupMenu>,
     );
-    const menu = screen.getByText("References").parentElement?.parentElement;
-    expect(menu?.style.top).toBe("552px");
+    const menu = screen.getByTestId("reflow-menu");
+    expect(menu.style.top).toBe("552px");
 
     act(() => {
       viewport.height = 420;
       viewport.dispatchEvent(new Event("resize"));
     });
 
-    expect(menu?.style.top).toBe("412px");
+    expect(menu.style.top).toBe("412px");
   });
 });
 

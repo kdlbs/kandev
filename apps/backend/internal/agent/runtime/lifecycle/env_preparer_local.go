@@ -60,6 +60,18 @@ func (p *LocalPreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, onP
 	if workspacePath == "" {
 		workspacePath = req.RepositoryPath
 	}
+	if req.WorkspaceReuseRequired {
+		step := beginStep("Validate workspace")
+		reportProgress(onProgress, step, 0, 1)
+		info, statErr := os.Stat(workspacePath)
+		if workspacePath == "" || statErr != nil || !info.IsDir() {
+			completeStepError(&step, "required workspace is unavailable")
+			return &EnvPrepareResult{Success: false, Steps: []PrepareStep{step}, ErrorMessage: step.Error, Error: worktree.ErrReuseWorktreeUnavailable, Duration: time.Since(start)}, nil
+		}
+		completeStepSuccess(&step)
+		reportProgress(onProgress, step, 0, 1)
+		return &EnvPrepareResult{Success: true, Steps: []PrepareStep{step}, WorkspacePath: workspacePath, Duration: time.Since(start)}, nil
+	}
 	resolvedScript, err := resolvePreparerSetupScript(req, workspacePath)
 	if err != nil {
 		return nil, fmt.Errorf("resolve setup script: %w", err)

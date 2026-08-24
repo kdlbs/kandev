@@ -254,6 +254,7 @@ func (s *SQLiteStore) GetWorktreeBySessionID(ctx context.Context, sessionID stri
 		LEFT JOIN repositories r ON ter.repository_id = r.id
 		WHERE s.id = ? AND ter.status = ?
 		  AND ter.deleted_at IS NULL
+		  AND COALESCE(ter.worktree_id, '') <> ''
 		ORDER BY ter.position ASC, ter.created_at ASC
 		LIMIT 1
 	`), sessionID, StatusActive)
@@ -271,6 +272,7 @@ func (s *SQLiteStore) GetWorktreeByTaskID(ctx context.Context, taskID string) (*
 		LEFT JOIN repositories r ON ter.repository_id = r.id
 		WHERE te.task_id = ? AND ter.status = ?
 		  AND ter.deleted_at IS NULL
+		  AND COALESCE(ter.worktree_id, '') <> ''
 		ORDER BY ter.created_at DESC LIMIT 1
 	`), taskID, StatusActive)
 	return scanWorktreeRow(row)
@@ -287,6 +289,7 @@ func (s *SQLiteStore) GetWorktreesByTaskID(ctx context.Context, taskID string) (
 		WHERE te.task_id = ?
 		  AND ter.deleted_at IS NULL
 		  AND ter.status <> ?
+		  AND COALESCE(ter.worktree_id, '') <> ''
 		ORDER BY ter.created_at DESC
 	`), taskID, StatusDeleted)
 	if err != nil {
@@ -308,6 +311,7 @@ func (s *SQLiteStore) GetWorktreesByRepositoryID(ctx context.Context, repoID str
 		WHERE ter.repository_id = ?
 		  AND ter.deleted_at IS NULL
 		  AND ter.status <> ?
+		  AND COALESCE(ter.worktree_id, '') <> ''
 	`), repoID, StatusDeleted)
 	if err != nil {
 		return nil, err
@@ -376,6 +380,7 @@ func (s *SQLiteStore) ListActiveWorktrees(ctx context.Context) ([]*Worktree, err
 		LEFT JOIN task_sessions s ON s.task_environment_id = ter.task_environment_id
 		LEFT JOIN repositories r ON ter.repository_id = r.id
 		WHERE ter.status = ? AND ter.deleted_at IS NULL
+		  AND COALESCE(ter.worktree_id, '') <> ''
 	`), StatusActive)
 	if err != nil {
 		return nil, err
@@ -397,6 +402,7 @@ func (s *SQLiteStore) ListActiveWorktreePaths(ctx context.Context) ([]string, er
 		WHERE status = ?
 		  AND deleted_at IS NULL
 		  AND worktree_path <> ''
+		  AND COALESCE(worktree_id, '') <> ''
 	`), StatusActive)
 	if err != nil {
 		return nil, err
@@ -520,6 +526,7 @@ func (s *SQLiteStore) GetWorktreesBySessionID(ctx context.Context, sessionID str
 		LEFT JOIN repositories r ON ter.repository_id = r.id
 		WHERE s.id = ? AND ter.status = ?
 		  AND ter.deleted_at IS NULL
+		  AND COALESCE(ter.worktree_id, '') <> ''
 		ORDER BY ter.position ASC, ter.created_at ASC
 	`), sessionID, StatusActive)
 	if err != nil {
@@ -547,6 +554,7 @@ func (s *SQLiteStore) GetWorktreeBySessionAndRepository(ctx context.Context, ses
 		  AND COALESCE(ter.branch_slug, '') = ?
 		  AND ter.status = ?
 		  AND ter.deleted_at IS NULL
+		  AND COALESCE(ter.worktree_id, '') <> ''
 		LIMIT 1
 	`), sessionID, repositoryID, branchSlug, StatusActive)
 	return scanWorktreeRow(row)

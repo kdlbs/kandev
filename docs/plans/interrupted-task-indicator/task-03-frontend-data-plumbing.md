@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-backend-dto-and-clearing"]
 plan: "plan.md"
-spec: "../../specs/tasks/interrupted-task-indicator.md"
+spec: "../../specs/tasks/requirements/interrupted-task-indicator.md"
 ---
 
 # Task 03: Frontend interrupted-field plumbing

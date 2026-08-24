@@ -9,8 +9,23 @@ vi.mock("@kandev/ui/command", () => ({
       {children}
     </div>
   ),
-  CommandDialog: ({ children, open }: { children: ReactNode; open: boolean }) =>
-    open ? <div>{children}</div> : null,
+  CommandDialog: ({
+    children,
+    open,
+    onOpenChange,
+  }: {
+    children: ReactNode;
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+  }) =>
+    open ? (
+      <div>
+        <button type="button" onClick={() => onOpenChange(false)}>
+          Dismiss test dialog
+        </button>
+        {children}
+      </div>
+    ) : null,
   CommandEmpty: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   CommandGroup: ({
     children,
@@ -108,6 +123,8 @@ const result: WorkspaceContentSearchResult = {
 
 const ARIA_SELECTED_ATTRIBUTE = "aria-selected";
 const CMDK_GROUP_HEADING_SELECTOR = "[cmdk-group-heading]";
+const ACTIONS_GROUP = "Actions";
+const CONFIRMATION_LABEL = "Remove selected item";
 
 function viewProps(overrides: Partial<CommandPanelViewProps> = {}): CommandPanelViewProps {
   return {
@@ -366,8 +383,8 @@ describe("CommandPanelView mode result safety", () => {
           mode: "commands",
           search: "needle",
           commands: [
-            { id: "matching-command", label: "Needle command", group: "Actions" },
-            { id: "unrelated-command", label: "Unrelated action", group: "Actions" },
+            { id: "matching-command", label: "Needle command", group: ACTIONS_GROUP },
+            { id: "unrelated-command", label: "Unrelated action", group: ACTIONS_GROUP },
           ],
         })}
       />,
@@ -417,5 +434,65 @@ describe("CommandPanelView mode result safety", () => {
     expect(groups).toHaveLength(2);
     expect(groups[0].getAttribute("data-repository")).toBe("backend");
     expect(groups[1].getAttribute("data-repository")).toBe("frontend");
+  });
+});
+
+describe("CommandPanelView confirmations", () => {
+  it("labels generic confirmations from their command and hides the command row", () => {
+    const confirmationCommand = {
+      id: "destructive-command",
+      label: CONFIRMATION_LABEL,
+      group: ACTIONS_GROUP,
+      confirmation: <div>Confirm removal</div>,
+    };
+    const regularCommand = {
+      id: "regular-command",
+      label: "Keep working",
+      group: ACTIONS_GROUP,
+    };
+
+    render(
+      <CommandPanelView
+        {...viewProps({
+          mode: MODE_COMMANDS,
+          search: "",
+          commands: [confirmationCommand, regularCommand],
+          grouped: [[ACTIONS_GROUP, [confirmationCommand, regularCommand]]],
+        })}
+      />,
+    );
+
+    expect(screen.getByRole("alertdialog", { name: CONFIRMATION_LABEL })).toBeTruthy();
+    expect(screen.getByText("Confirm removal")).toBeTruthy();
+    expect(screen.queryByText(CONFIRMATION_LABEL)).toBeNull();
+    expect(screen.getByText("Keep working")).toBeTruthy();
+  });
+
+  it("dismisses an owned confirmation when the palette closes", () => {
+    const onConfirmationDismiss = vi.fn();
+    const setOpen = vi.fn();
+    const confirmationCommand = {
+      id: "destructive-command",
+      label: CONFIRMATION_LABEL,
+      group: ACTIONS_GROUP,
+      confirmation: <div>Confirm removal</div>,
+      onConfirmationDismiss,
+    };
+
+    render(
+      <CommandPanelView
+        {...viewProps({
+          setOpen,
+          mode: MODE_COMMANDS,
+          commands: [confirmationCommand],
+          grouped: [[ACTIONS_GROUP, [confirmationCommand]]],
+        })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss test dialog" }));
+
+    expect(onConfirmationDismiss).toHaveBeenCalledOnce();
+    expect(setOpen).toHaveBeenCalledWith(false);
   });
 });

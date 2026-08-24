@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/models"
 	officeruntime "github.com/kandev/kandev/internal/office/runtime"
+	"github.com/kandev/kandev/internal/office/shared"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -381,7 +382,7 @@ func (si *SchedulerIntegration) assembleAgentPrompt(
 		}
 	}
 
-	continuationSummary := si.loadContinuationSummary(ctx, agent.ID, taskID)
+	continuationSummary := si.loadContinuationSummary(ctx, run, agent.ID, taskID)
 	promptResult := si.svc.BuildAgentPrompt(
 		run, agent, instructionsDir, agentsMD, isResume, wakeContext,
 		taskID, continuationSummary,
@@ -393,18 +394,26 @@ func (si *SchedulerIntegration) assembleAgentPrompt(
 // loadContinuationSummary fetches the per-(agent, scope) continuation
 // summary for a taskless run. Returns "" when:
 // - taskID is non-empty (task-bound runs don't use the summary doc)
-// - the summary table has no row yet (first heartbeat ever for the agent)
+// - the summary table has no row yet (first wake ever for the scope)
 // - the lookup errors out (best-effort, fall back to no-summary)
 //
-// Today no caller passes taskID==""; this branch is a no-op until
-// PR 2 lands the agent_heartbeat cron handler.
+// The scope read here is run.ContinuationScope — the same key
+// models.ContinuationScopeForRun computed once, at run-creation time, and
+// that refreshContinuationSummary (event_subscribers.go) later writes
+// under. This deliberately does NOT recompute the scope from run's
+// ContextSnapshot: a routine wakeup that coalesces into this run after
+// claim (MarkWakeupRequestCoalesced) patches only context_snapshot, so a
+// second derivation here — against a run object that may itself predate
+// that patch — could disagree with what the writer used at completion.
+// Reading the persisted field closes that race for every caller instead
+// of relying on ordering between two independent derivations.
 func (si *SchedulerIntegration) loadContinuationSummary(
-	ctx context.Context, agentID, taskID string,
+	ctx context.Context, run *models.Run, agentID, taskID string,
 ) string {
-	if taskID != "" || agentID == "" {
+	if run == nil || taskID != "" || agentID == "" {
 		return ""
 	}
-	prior, err := si.svc.repo.GetContinuationSummary(ctx, agentID, "heartbeat")
+	prior, err := si.svc.repo.GetContinuationSummary(ctx, agentID, run.ContinuationScope)
 	if err != nil || prior == nil {
 		return ""
 	}
@@ -766,12 +775,12 @@ func isAgentActive(status models.AgentStatus) bool {
 }
 
 // checkIdleSkip returns true if the run should be skipped because the agent
-// is configured to skip idle heartbeats and has no actionable tasks assigned.
-// Returns false (do not skip) on any DB error to fail open.
+// is configured to skip idle periodic wakes and has no actionable tasks
+// assigned. Returns false (do not skip) on any DB error to fail open.
 func (si *SchedulerIntegration) checkIdleSkip(
 	ctx context.Context, run *models.Run, agent *models.AgentInstance,
 ) bool {
-	if run.Reason != RunReasonHeartbeat {
+	if !shared.IsPeriodicTasklessWake(run.Reason) {
 		return false
 	}
 	if !agent.SkipIdleRuns {
@@ -814,16 +823,25 @@ func (si *SchedulerIntegration) buildPromptContext(
 		pc.ApprovalNote = parsed["decision_note"]
 	}
 
-	if reason == RunReasonTaskChildrenCompleted {
+	if reason == RunReasonTaskChildrenCompleted || reason == legacyRunReasonChildrenCompleted {
 		si.enrichChildrenContext(pc, payload)
 	}
 
-	if reason == RunReasonTaskAssigned {
+	if reason == RunReasonTaskAssigned || reason == legacyRunReasonReviewStarted || reason == legacyRunReasonApprovalStarted {
 		pc.StageID = parsed["stage_id"]
+		if pc.StageID == "" {
+			pc.StageID = parsed["workflow_step_id"]
+		}
 		pc.StageType = parsed["stage_type"]
 		pc.ReviewFeedback = parsed["feedback"]
+		switch reason {
+		case legacyRunReasonReviewStarted:
+			pc.StageType = stageTypeReview
+		case legacyRunReasonApprovalStarted:
+			pc.StageType = stageTypeApproval
+		}
 
-		if pc.StageType == "review" && pc.TaskID != "" {
+		if (pc.StageType == stageTypeReview || pc.StageType == stageTypeApproval) && pc.TaskID != "" {
 			si.enrichBuilderComments(ctx, pc)
 		}
 	}
@@ -891,8 +909,8 @@ func (si *SchedulerIntegration) resolveCommentAuthor(
 	return "User"
 }
 
-// enrichBuilderComments fetches the most recent comments left by the task
-// assignee (builder) and appends them to pc.BuilderComments.
+// enrichBuilderComments fetches the most recent task comments and appends them
+// to pc.BuilderComments for review and approval prompts.
 func (si *SchedulerIntegration) enrichBuilderComments(ctx context.Context, pc *PromptContext) {
 	comments, err := si.svc.repo.ListRecentTaskComments(ctx, pc.TaskID, 5)
 	if err != nil {

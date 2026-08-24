@@ -2008,9 +2008,17 @@ func (s *Service) createNewSessionForStep(ctx context.Context, taskID string, cu
 
 	// Create a new session with the new agent profile.
 	// Reuse the same executor profile from the current session.
-	sessionID, err := s.executor.PrepareSession(ctx, task, newAgentProfileID, currentSession.ExecutorID, currentSession.ExecutorProfileID, dbTask.WorkflowStepID)
+	sessionID, err := s.executor.PrepareSessionForExistingEnvironment(ctx, task, newAgentProfileID, currentSession.ExecutorID, currentSession.ExecutorProfileID, dbTask.WorkflowStepID, currentSession.TaskEnvironmentID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare new session: %w", err)
+	}
+	if _, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{
+		AgentProfileID: newAgentProfileID,
+		ExecutorID:     currentSession.ExecutorID,
+		WorkflowStepID: dbTask.WorkflowStepID,
+		StartAgent:     false,
+	}); err != nil {
+		return nil, fmt.Errorf("failed to attach workflow replacement workspace: %w", err)
 	}
 
 	newSession, err := s.repo.GetTaskSession(ctx, sessionID)
@@ -2021,19 +2029,6 @@ func (s *Service) createNewSessionForStep(ctx context.Context, taskID string, cu
 	// Tag the session as workflow-spawned for provenance: its agent profile
 	// was selected by the workflow step override rather than direct user choice.
 	s.tagSessionAsWorkflowSwitched(ctx, newSession.ID)
-
-	// Inherit the task environment from the old session — the workspace is shared
-	// across sessions within the same task, so the new session can reuse the
-	// existing agentctl connection and workspace files.
-	if currentSession.TaskEnvironmentID != "" && newSession.TaskEnvironmentID == "" {
-		newSession.TaskEnvironmentID = currentSession.TaskEnvironmentID
-		newSession.UpdatedAt = time.Now().UTC()
-		if err := s.repo.UpdateTaskSession(ctx, newSession); err != nil {
-			s.logger.Warn("failed to copy task_environment_id to new session",
-				zap.String("session_id", newSession.ID),
-				zap.Error(err))
-		}
-	}
 
 	// Transfer any queued message (e.g. a move_task_kandev hand-off prompt) and
 	// pending move from the old session to the new one — the queue is keyed by

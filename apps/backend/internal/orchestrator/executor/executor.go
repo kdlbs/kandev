@@ -102,6 +102,30 @@ type initialRuntimeSeedTaskSessionCreator interface {
 	CreateTaskSessionWithInitialRuntimeSeed(context.Context, *models.TaskSession) error
 }
 
+// taskEnvironmentMaterializationFinalizer publishes a successfully prepared
+// canonical environment only after its complete repository inventory is saved.
+// It is kept narrow so legacy test stores retain the existing fallback path.
+type taskEnvironmentMaterializationFinalizer interface {
+	FinalizeTaskEnvironmentMaterialization(context.Context, *models.TaskEnvironment, []*models.TaskEnvironmentRepo, string) error
+}
+
+// workspaceBindingTaskSessionCreator elects the single materializing session
+// and inserts its creating environment in the same transaction as the session.
+// It is optional for lightweight test/legacy stores; production repositories
+// must implement it so a concurrent sibling cannot enter lifecycle setup
+// without a durable canonical workspace binding.
+type workspaceBindingTaskSessionCreator interface {
+	CreateTaskSessionWithWorkspaceBinding(context.Context, *models.TaskSession, *models.TaskEnvironment) error
+}
+
+// sharedGroupWorkspaceBindingTaskSessionCreator elects the sole first
+// materializer for a shared workspace group while inserting its session and
+// creating environment. Later members observe the same durable claim instead
+// of independently creating task-local workspaces.
+type sharedGroupWorkspaceBindingTaskSessionCreator interface {
+	CreateTaskSessionWithSharedGroupWorkspaceBinding(context.Context, *models.TaskSession, *models.TaskEnvironment, string) error
+}
+
 type primarySessionTaskStateStore interface {
 	UpdateTaskStateIfPrimarySessionState(
 		context.Context,
@@ -344,9 +368,12 @@ type LaunchAgentRequest struct {
 	WorkspaceID       string // Kandev workspace ID — used to build scratch dir for repo-less tasks
 	SessionID         string
 	TaskEnvironmentID string // Env owning this session (shared across sessions in the same task)
-	TaskTitle         string // Human-readable task title for semantic worktree naming
-	AgentProfileID    string
-	TurnID            string // Durable Kandev turn for the initial prompt, when present
+	// WorkspaceReuseRequired selects attach-only preparation of an already-ready
+	// task environment. It must never be inferred from a sibling execution ID.
+	WorkspaceReuseRequired bool
+	TaskTitle              string // Human-readable task title for semantic worktree naming
+	AgentProfileID         string
+	TurnID                 string // Durable Kandev turn for the initial prompt, when present
 	// OfficeAgentProfileID is the stable Office identity. AgentProfileID stays
 	// the concrete execution profile inside the executor for compatibility.
 	OfficeAgentProfileID string
@@ -486,7 +513,7 @@ const McpModeTaskTitlePending = "task-title-pending"
 // McpModeOffice restricts the MCP toolset for office (autonomous) agents to
 // interaction + plan tools. Office agents manage tasks via the kandev CLI
 // (exposed through agentctl + $KANDEV_CLI), not MCP — see
-// docs/specs/office-agent-cli/spec.md.
+// docs/specs/office/system-design/agents-03.md.
 const McpModeOffice = "office"
 
 // LaunchOptions contains optional parameters for LaunchPreparedSession.

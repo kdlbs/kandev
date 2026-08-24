@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-backend-queue-state", "02-frontend-queued-status"]
 plan: "plan.md"
-spec: "../../specs/github-pr-merge-queue/spec.md"
+spec: "../../specs/integrations/requirements/github-pr-merge-queue.md"
 ---
 
 # Task 03: Responsive merge-queue E2E

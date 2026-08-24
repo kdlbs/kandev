@@ -5,7 +5,7 @@ status: done
 wave: 7
 depends_on: ["07-web-clarification-client"]
 plan: "plan.md"
-spec: "../../specs/external-question-answering/spec.md"
+spec: "../../specs/integrations/requirements/external-question-answering.md"
 ---
 
 # Task 09: E2E — overlay closes on a lost claim

@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-review-plan-operations"]
 plan: "plan.md"
-spec: "../../specs/i18n-second-audit-gaps/spec.md"
+spec: "../../specs/platform/requirements/i18n-second-audit-gaps.md"
 ---
 
 # Task 04: Production Operation Audit

@@ -5,7 +5,7 @@ status: completed
 wave: 4
 depends_on: ["03-runtime-contribution-materialization"]
 plan: "plan.md"
-spec: "../../specs/tasks/remote-contribution-tasks.md"
+spec: "../../specs/tasks/system-design/remote-contribution-tasks.md"
 ---
 
 # Task 04: Credential and Push Routing

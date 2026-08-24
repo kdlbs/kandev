@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/office/automations-settings.md
+spec: docs/specs/office/requirements/automations-settings.md
 created: 2026-07-30
 status: draft
 ---

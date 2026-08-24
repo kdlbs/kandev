@@ -6,7 +6,7 @@ import type { ApiClient } from "../../helpers/api-client";
  * E2E coverage for the workflow engine's guarded `move_to_step` transitions
  * (the office-default template's Review/Approval steps, each gated by a
  * `wait_for_quorum` action). Spec:
- *   docs/specs/workflow-quorum-decision-recording/spec.md
+ *   docs/specs/tasks/requirements/workflow-quorum-decision-recording.md
  *
  * Drives Work -> Review -> Approval with a reviewer and an approver
  * attached, asserting advance-on-approve, return-on-reject, and the AC-25

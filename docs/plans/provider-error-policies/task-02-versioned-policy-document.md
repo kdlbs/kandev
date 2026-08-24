@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-shared-error-catalogue"]
 plan: "plan.md"
-spec: "../../specs/platform/provider-error-recovery.md"
+spec: "../../specs/platform/requirements/provider-error-recovery.md"
 ---
 
 # Task 02: Versioned policy document

@@ -6,7 +6,7 @@ wave: 1
 depends_on: []
 parallelism: sequential
 plan: "plan.md"
-spec: "../../specs/ui/task-layout-profiles.md"
+spec: "../../specs/ui/requirements/task-layout-profiles.md"
 ---
 
 # Task 01: Repair Missing Agent Panels at Restore Completion
@@ -36,7 +36,7 @@ spec: "../../specs/ui/task-layout-profiles.md"
 - `apps/web/lib/state/dockview-env-switch.ts`
 - `apps/web/lib/state/dockview-env-switch.test.ts`
 - `apps/web/e2e/tests/layout/saved-layout-session-isolation.spec.ts`
-- `docs/specs/ui/task-layout-profiles.md`
+- `docs/specs/ui/requirements/task-layout-profiles.md`
 
 ## Verification
 

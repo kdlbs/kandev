@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/task-prompt-transcript-visibility.md"
+spec: "../../specs/ui/requirements/task-prompt-transcript-visibility.md"
 ---
 
 # Task 01: Preserve the task prompt fallback
@@ -58,7 +58,7 @@ Sequential. Task 03 validates this condition with the complete browser flow.
 ## Inputs
 
 - Spec scenarios in
-  `docs/specs/ui/task-prompt-transcript-visibility.md`.
+  `docs/specs/ui/requirements/task-prompt-transcript-visibility.md`.
 - Root-cause location in `apps/web/hooks/use-processed-messages.ts`.
 - Existing launch-persistence coverage in
   `apps/web/e2e/tests/chat/kandev-system-wrap.spec.ts`.

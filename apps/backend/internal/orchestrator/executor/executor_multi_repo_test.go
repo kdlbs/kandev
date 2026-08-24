@@ -323,12 +323,14 @@ func TestLaunchPreparedSession_MultiRepo_ReusesPerRepoWorktreeIDsFromEnvironment
 			{
 				TaskEnvironmentID: "env-existing",
 				RepositoryID:      "repo-front",
+				BranchSlug:        "main",
 				WorktreeID:        "wt-front",
 				Position:          0,
 			},
 			{
 				TaskEnvironmentID: "env-existing",
 				RepositoryID:      "repo-back",
+				BranchSlug:        "main",
 				WorktreeID:        "wt-back",
 				Position:          1,
 			},
@@ -375,6 +377,49 @@ func TestLaunchPreparedSession_MultiRepo_ReusesPerRepoWorktreeIDsFromEnvironment
 	}
 	if captured.Repositories[1].WorktreeID != "wt-back" {
 		t.Errorf("back WorktreeID = %q, want wt-back", captured.Repositories[1].WorktreeID)
+	}
+}
+
+func TestLaunchPreparedSession_ReuseRejectsIncompleteCanonicalRepositoryInventory(t *testing.T) {
+	repo := newMockRepository()
+	taskID := "task-multi-incomplete-reuse"
+	sessionID := "session-multi-incomplete-reuse"
+	seedMultiRepoTask(t, repo, taskID)
+	seedWorktreeExecutor(repo)
+
+	environment := &models.TaskEnvironment{
+		ID:           "env-incomplete",
+		TaskID:       taskID,
+		ExecutorType: string(models.ExecutorTypeWorktree),
+		Status:       models.TaskEnvironmentStatusReady,
+	}
+	repo.taskEnvironments[environment.ID] = environment
+	repo.taskEnvironmentRepos[environment.ID] = []*models.TaskEnvironmentRepo{{
+		TaskEnvironmentID: environment.ID,
+		RepositoryID:      "repo-front",
+		BranchSlug:        "main",
+		WorktreeID:        "wt-front",
+		Status:            "active",
+	}}
+	repo.sessions[sessionID] = &models.TaskSession{
+		ID: sessionID, TaskID: taskID, TaskEnvironmentID: environment.ID,
+		AgentProfileID: "profile-123", ExecutorID: models.ExecutorIDWorktree,
+		State: models.TaskSessionStateCreated, StartedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+
+	manager := &mockAgentManager{}
+	exec := newTestExecutor(t, manager, repo)
+	_, err := exec.LaunchPreparedSession(context.Background(),
+		&v1.Task{ID: taskID, WorkspaceID: "ws-1", Title: "Multi"}, sessionID,
+		LaunchOptions{AgentProfileID: "profile-123", ExecutorID: models.ExecutorIDWorktree})
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("LaunchPreparedSession error = %v, want workspace reuse unsafe", err)
+	}
+	if manager.launchAgentCallCount != 0 {
+		t.Fatalf("LaunchAgent calls = %d, want 0", manager.launchAgentCallCount)
+	}
+	if got := repo.sessions[sessionID].TaskEnvironmentID; got != environment.ID {
+		t.Fatalf("session environment = %q, want %q", got, environment.ID)
 	}
 }
 

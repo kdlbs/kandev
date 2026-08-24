@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-columns-menu-on-swimlane-header", "02-retain-lanes-with-hidden-steps", "03-phone-columns-home"]
 plan: "plan.md"
-spec: "../../specs/board-step-visibility-filter/spec.md"
+spec: "../../specs/ui/requirements/board-step-visibility-filter.md"
 ---
 
 # Task 04: Retarget the E2E spec, add lane retention, add the mobile spec

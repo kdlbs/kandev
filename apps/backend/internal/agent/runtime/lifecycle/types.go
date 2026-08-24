@@ -827,7 +827,9 @@ type LaunchRequest struct {
 	WorkspaceID       string // Kandev workspace ID — used to build the scratch dir for repo-less tasks
 	SessionID         string
 	TaskEnvironmentID string // Env this session belongs to (shared across sessions in same task)
-	TaskTitle         string // Human-readable task title for semantic worktree naming
+	// WorkspaceReuseRequired selects attach-only environment preparation.
+	WorkspaceReuseRequired bool
+	TaskTitle              string // Human-readable task title for semantic worktree naming
 	// AgentProfileID is the stable Office identity for routed Office launches.
 	// For non-Office launches it is also the concrete execution profile.
 	AgentProfileID string

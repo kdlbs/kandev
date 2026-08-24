@@ -35,7 +35,11 @@ const (
 
 const maxFileSize = 10 * 1024 * 1024 // 10MB
 
-var errPathTraversal = errors.New("path traversal detected")
+var (
+	// ErrFileNotFound identifies a workspace file that does not exist.
+	ErrFileNotFound  = errors.New("file not found")
+	errPathTraversal = errors.New("path traversal detected")
+)
 
 // workspaceMutationBarrier provides a deterministic synchronization point for
 // filesystem-race regression tests. It is unset in production.
@@ -413,7 +417,7 @@ func (wt *WorkspaceTracker) readResolvedPath(reqPath string) (string, int64, boo
 			// original error so they aren't mislabeled as missing.
 			if cleaned := filepath.Clean(reqPath); filepath.IsAbs(cleaned) {
 				if _, statErr := os.Stat(cleaned); errors.Is(statErr, fs.ErrNotExist) {
-					return "", 0, false, "", fmt.Errorf("file not found: %w", statErr)
+					return "", 0, false, "", fmt.Errorf("%w: %w", ErrFileNotFound, statErr)
 				}
 			}
 			return "", 0, false, "", err
@@ -457,7 +461,10 @@ func readFileContent(safePath string) (string, int64, bool, error) {
 	// codeql[go/path-injection] safePath is canonical containment-validated by resolveSafePath; read-only external paths reach here only through absoluteReadPath validation.
 	info, err := os.Stat(safePath)
 	if err != nil {
-		return "", 0, false, fmt.Errorf("file not found: %w", err)
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", 0, false, fmt.Errorf("%w: %w", ErrFileNotFound, err)
+		}
+		return "", 0, false, fmt.Errorf("failed to stat file: %w", err)
 	}
 
 	if !info.Mode().IsRegular() {

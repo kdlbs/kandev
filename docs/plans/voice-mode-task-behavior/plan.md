@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/voice-mode-task-behavior.md
+spec: docs/specs/ui/requirements/voice-mode-task-behavior.md
 created: 2026-08-11
 status: implemented
 ---

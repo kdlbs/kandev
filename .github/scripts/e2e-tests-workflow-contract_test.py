@@ -89,6 +89,17 @@ class DesktopE2EWorkflowContractTest(unittest.TestCase):
         ):
             self.assertIn(pattern, changes_job)
 
+    def test_normal_shard_has_queue_safe_timeout(self) -> None:
+        workflow = E2E_WORKFLOW.read_text(encoding="utf-8")
+        normal_job = job_block(workflow, "e2e", "e2e-containers")
+
+        self.assertIn(
+            "# 35 min covers the serial count-fallback tail and setup overhead",
+            normal_job,
+        )
+        self.assertIn("timeout-minutes: 35", normal_job)
+        self.assertNotIn("timeout-minutes: 25", normal_job)
+
     def test_contract_runs_in_the_unfiltered_required_workflow(self) -> None:
         workflow = LINT_WORKFLOW.read_text(encoding="utf-8")
 
@@ -101,6 +112,15 @@ class DesktopE2EWorkflowContractTest(unittest.TestCase):
             _, separator, trigger_block_text = workflow.partition(trigger_marker)
             self.assertTrue(separator, f"Lint workflow has no {trigger} trigger")
             self.assertNotIn("    paths:", trigger_block_text.split("\n  ", 1)[0])
+
+    def test_timing_lookup_requires_a_profile_artifact(self) -> None:
+        workflow = E2E_WORKFLOW.read_text(encoding="utf-8")
+
+        self.assertIn("/actions/runs/", workflow)
+        self.assertIn("candidate.id", workflow)
+        self.assertIn("/artifacts?per_page=100", workflow)
+        self.assertIn('artifact.name === "e2e-timing-profile"', workflow)
+        self.assertIn("!artifact.expired", workflow)
 
 
 if __name__ == "__main__":
