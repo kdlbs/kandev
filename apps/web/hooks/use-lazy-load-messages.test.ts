@@ -86,6 +86,19 @@ describe("useLazyLoadMessages loadMore", () => {
     expect(listTaskSessionMessages).not.toHaveBeenCalled();
   });
 
+  it("keeps raw backfill available after the visible prompt boundary", async () => {
+    storeMock.bySession = [{ id: "first", author_type: "user", prompt_index: 1 }];
+    listTaskSessionMessages.mockResolvedValueOnce(wireResponse(["hidden"], false));
+    const { result } = renderHook(() => useLazyLoadMessages("s1"));
+
+    expect(result.current.hasMore).toBe(false);
+    expect(result.current.rawHasMore).toBe(true);
+    await act(async () => {
+      await result.current.loadMoreRaw();
+    });
+    expect(listTaskSessionMessages).toHaveBeenCalledTimes(1);
+  });
+
   it("joins an in-flight request for the same cursor instead of skipping", async () => {
     let resolvePage: (value: unknown) => void = () => {};
     listTaskSessionMessages.mockReturnValueOnce(

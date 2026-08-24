@@ -7,11 +7,12 @@ export const INITIAL_PROMPT_MARKER = "INITIAL-PROMPT-MARKER-7Q2X";
 export const RECENT_AGENT_MARKER = "RECENT-AGENT-MARKER-4K8P";
 export const PRE_PROMPT_MARKER = "HIDDEN-PRE-PROMPT-MARKER-6N3V";
 
-/** Seeds hidden pre-prompt rows, the first prompt, and collapsed same-turn history. */
+/** Seeds collapsed history around the visible prompt boundary. */
 export async function seedCollapsedMessageHistory(
   apiClient: ApiClient,
   seedData: SeedData,
   title: string,
+  options?: { promptOutsideInitialWindow?: boolean },
 ): Promise<{ taskId: string; sessionId: string }> {
   const task = await apiClient.createTask(seedData.workspaceId, title, {
     description: TASK_DESCRIPTION_MARKER,
@@ -24,26 +25,40 @@ export async function seedCollapsedMessageHistory(
     repositoryId: seedData.repositoryId,
   });
 
-  for (let i = 0; i < 20; i += 1) {
+  if (options?.promptOutsideInitialWindow) {
     await apiClient.seedSessionMessage(sessionId, {
-      type: "tool_call",
-      content: `${PRE_PROMPT_MARKER} ${i + 1}`,
+      type: "message",
+      content: INITIAL_PROMPT_MARKER,
+      authorType: "user",
     });
+    await apiClient.seedTaskSession(task.id, {
+      sessionId,
+      state: "IDLE",
+      commandCount: 80,
+    });
+    await apiClient.seedToolCallMessages(sessionId, 60);
+  } else {
+    for (let i = 0; i < 20; i += 1) {
+      await apiClient.seedSessionMessage(sessionId, {
+        type: "tool_call",
+        content: `${PRE_PROMPT_MARKER} ${i + 1}`,
+      });
+    }
+    await apiClient.seedSessionMessage(sessionId, {
+      type: "message",
+      content: INITIAL_PROMPT_MARKER,
+      authorType: "user",
+    });
+    await apiClient.seedTaskSession(task.id, {
+      sessionId,
+      state: "IDLE",
+      commandCount: 0,
+    });
+    // Keep the prompt at the oldest edge of the initial 100-message window:
+    // 98 collapsed rows plus the recent agent row follow it, while the 20
+    // pre-prompt rows remain on the next backend page.
+    await apiClient.seedToolCallMessages(sessionId, 98);
   }
-  await apiClient.seedSessionMessage(sessionId, {
-    type: "message",
-    content: INITIAL_PROMPT_MARKER,
-    authorType: "user",
-  });
-  await apiClient.seedTaskSession(task.id, {
-    sessionId,
-    state: "IDLE",
-    commandCount: 0,
-  });
-  // Keep the prompt at the oldest edge of the initial 100-message window:
-  // 98 collapsed rows plus the recent agent row follow it, while the 20
-  // pre-prompt rows remain on the next backend page.
-  await apiClient.seedToolCallMessages(sessionId, 98);
   await apiClient.seedSessionMessage(sessionId, {
     type: "message",
     content: RECENT_AGENT_MARKER,

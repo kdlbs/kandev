@@ -23,7 +23,9 @@ The backend can report older rows after prompt `#1`. These rows contain internal
 - Derive visible transcript pagination from raw `has_more` and the loaded prompt ordinals.
 - Apply the boundary to automatic loading, transcript navigation, and the explicit older-page control.
 - Keep raw backend pagination metadata in the store.
+- Preserve an explicit raw-pagination path for reverse-search backfill, while keeping transcript consumers on visible pagination.
 - Extend desktop and mobile pagination coverage with hidden pre-prompt rows.
+- Retain desktop and mobile prepend-anchor coverage for older-page loading.
 
 ### Out of scope
 
@@ -51,12 +53,14 @@ The focused run reported one failed regression and seven passing tests. The thro
 - Recalculate this value after joined and completed requests.
 - Use the recalculated value in the multi-page accumulation loop.
 - Keep `requestOlderMessages` and stored pagination metadata unchanged.
+- Expose raw pagination separately for direct recovery consumers.
 
 ### Consumer alignment
 
 - Keep the native transcript, transcript navigation, and drain hook on `useLazyLoadMessages`.
+- Keep transcript navigation on visible pagination, and let session search use the raw loader when a backend hit is before prompt `#1`.
 - Remove duplicate prompt-`#1` pagination logic from the Prompt History panel if the shared hook owns the complete rule.
-- Keep raw message backfill code on the low-level pagination coordinator.
+- Keep request coordination shared between visible and raw loaders.
 
 ### Browser regression
 
@@ -64,6 +68,7 @@ The focused run reported one failed regression and seven passing tests. The thro
 - Keep the existing long collapsed activity history after the prompt.
 - Scroll to prompt `#1` and stop before the hidden rows load.
 - Assert that the older-page control is absent on desktop and mobile.
+- Preserve the existing prepend-anchor assertion in a separate desktop and mobile flow.
 
 ## Tests
 
@@ -96,11 +101,11 @@ The shared seed will add hidden pre-prompt rows. Both tests already assert that 
 
 ## Verification results
 
-- `pnpm --filter @kandev/web test -- hooks/use-lazy-load-messages.test.ts components/task/prompt-history-panel-content.test.tsx` — 2 files, 60 tests passed.
+- `pnpm --filter @kandev/web test -- hooks/use-lazy-load-messages.test.ts components/task/prompt-history-panel-content.test.tsx components/task/chat/use-drain-older-messages.test.ts` — 3 files, 73 tests passed.
 - `pnpm --filter @kandev/web run typecheck` — passed.
 - `pnpm --filter @kandev/web lint` — passed.
-- `pnpm e2e:run --project chromium tests/chat/message-pagination.spec.ts` — 1 test passed.
-- `pnpm e2e:run --project mobile-chrome tests/chat/mobile-message-pagination.spec.ts` — 1 test passed.
+- `pnpm e2e:run --project chromium tests/chat/message-pagination.spec.ts` — 2 tests passed, including the visible-boundary and prepend-anchor flows.
+- `pnpm e2e:run --project mobile-chrome tests/chat/mobile-message-pagination.spec.ts` — 2 tests passed, including the visible-boundary and prepend-anchor flows.
 
 ## Risks
 

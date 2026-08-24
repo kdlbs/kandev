@@ -27,7 +27,9 @@ Make the shared older-message hook stop at loaded prompt `#1`. Prove the behavio
 - Update joined and completed request state with the same boundary.
 - Stop the multi-page loop at prompt `#1`.
 - Align the Prompt History panel with the shared boundary.
+- Preserve raw pagination for explicit session-search backfill.
 - Seed hidden pre-prompt rows in the shared browser fixture.
+- Preserve the prepend-anchor regression in desktop and mobile flows.
 
 ## Out of scope
 
@@ -40,6 +42,7 @@ Make the shared older-message hook stop at loaded prompt `#1`. Prove the behavio
 
 - Prompt `#1` makes the shared hook report no visible older history, even when raw `has_more` is true.
 - Missing prompt ordinals keep the current raw-pagination fallback.
+- Reverse search can backfill raw session history without changing the visible transcript boundary.
 - Desktop and mobile show prompt `#1` without an older-page control while hidden pre-prompt rows remain unloaded.
 
 ## Verification
@@ -48,7 +51,8 @@ Make the shared older-message hook stop at loaded prompt `#1`. Prove the behavio
 cd apps
 pnpm --filter @kandev/web test -- \
   hooks/use-lazy-load-messages.test.ts \
-  components/task/prompt-history-panel-content.test.tsx
+  components/task/prompt-history-panel-content.test.tsx \
+  components/task/chat/use-drain-older-messages.test.ts
 pnpm --filter @kandev/web run typecheck
 pnpm --filter @kandev/web lint
 ```
@@ -65,6 +69,10 @@ pnpm e2e:run --project mobile-chrome tests/chat/mobile-message-pagination.spec.t
 - `apps/web/hooks/use-lazy-load-messages.test.ts`
 - `apps/web/components/task/prompt-history-panel-content.tsx`
 - `apps/web/components/task/prompt-history-panel-content.test.tsx`
+- `apps/web/components/task/chat/use-drain-older-messages.ts`
+- `apps/web/components/task/chat/use-drain-older-messages.test.ts`
+- `apps/web/components/task/chat/tiptap-input.tsx`
+- `apps/web/components/task/task-chat-panel.tsx`
 - `apps/web/e2e/tests/chat/message-pagination-helpers.ts`
 - `apps/web/e2e/tests/chat/message-pagination.spec.ts`
 - `apps/web/e2e/tests/chat/mobile-message-pagination.spec.ts`
@@ -75,9 +83,10 @@ None.
 
 ## Risks
 
-- Keep raw store metadata separate from the visible pagination result.
+- Keep raw store metadata separate from the visible pagination result and expose raw loading only to explicit recovery consumers.
 - Recalculate the boundary before another page starts in one load operation.
 - Keep the compatibility path for payloads without `prompt_index`.
+- Preserve the prepend anchor while visible older pages are loaded.
 
 ## Parallelism
 
@@ -92,8 +101,8 @@ None.
 
 ## Results
 
-- `pnpm --filter @kandev/web test -- hooks/use-lazy-load-messages.test.ts components/task/prompt-history-panel-content.test.tsx` — 60 tests passed.
+- `pnpm --filter @kandev/web test -- hooks/use-lazy-load-messages.test.ts components/task/prompt-history-panel-content.test.tsx components/task/chat/use-drain-older-messages.test.ts` — 3 files, 73 tests passed.
 - `pnpm --filter @kandev/web run typecheck` — passed.
 - `pnpm --filter @kandev/web lint` — passed.
-- `pnpm e2e:run --project chromium tests/chat/message-pagination.spec.ts` — 1 test passed.
-- `pnpm e2e:run --project mobile-chrome tests/chat/mobile-message-pagination.spec.ts` — 1 test passed.
+- `pnpm e2e:run --project chromium tests/chat/message-pagination.spec.ts` — 2 tests passed.
+- `pnpm e2e:run --project mobile-chrome tests/chat/mobile-message-pagination.spec.ts` — 2 tests passed.

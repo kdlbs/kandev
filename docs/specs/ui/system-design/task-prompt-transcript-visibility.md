@@ -28,6 +28,7 @@ The design changes no backend query, message order, persistence rule, or API fie
 - `messages.metaBySession[sessionId].hasMore` keeps the raw backend `has_more` value.
 - `messages.bySession[sessionId]` supplies the loaded messages and their prompt ordinals.
 - The native transcript, Prompt History panel, and transcript navigation consume the shared hook result.
+- The hook also exposes an explicit raw-pagination loader for direct recovery consumers, such as session search.
 - `requestOlderMessages` keeps request coordination and raw cursor metadata unchanged.
 
 The Prompt History panel already uses prompt `#1` as its terminal boundary. The transcript uses the same boundary through the shared hook.
@@ -45,7 +46,7 @@ The hook applies this rule to its reactive return value. It also applies the rul
 
 This immediate update stops one multi-page load operation at prompt `#1`. It prevents an extra request for pre-prompt internal rows.
 
-The store keeps the raw backend value. Direct recovery code can still inspect the complete message stream when its contract requires raw pagination.
+The store keeps the raw backend value. Direct recovery code can use the hook's explicit raw-pagination loader when its contract requires the complete message stream. Session search uses this path because backend search can return a hit from before prompt `#1`. Transcript rendering and navigation continue to use visible pagination, so this recovery path does not restore the older-page control.
 
 ## Control flow
 
@@ -54,7 +55,8 @@ The store keeps the raw backend value. Direct recovery code can still inspect th
 3. An older-page request prepends messages through the existing coordinator.
 4. If the page contains prompt `#1`, the shared hook changes its visible value to false.
 5. The transcript removes its sentinel, loading state, and older-page control.
-6. Transcript navigation treats prompt `#1` as the start and does not drain pre-prompt rows.
+6. Transcript navigation uses visible pagination and treats prompt `#1` as the start.
+7. Explicit reverse search uses raw pagination when it must backfill a backend search hit.
 
 ## Failure and compatibility
 
@@ -73,7 +75,9 @@ The existing full-height mobile task layout remains the nearest mobile exemplar.
 - A hook test covers raw `has_more: true` with loaded prompt `#1`.
 - A hook test covers the compatibility path when the ordinal is absent.
 - A hook test proves that a multi-page load stops when a response adds prompt `#1`.
+- Hook and drain tests prove that explicit search backfill can continue through the raw boundary.
 - Desktop and mobile browser tests seed hidden pre-prompt rows and prove that no older-page control remains.
+- Separate desktop and mobile browser tests preserve the prepend anchor while loading older pages.
 
 ## Related design
 
