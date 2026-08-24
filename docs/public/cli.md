@@ -128,8 +128,9 @@ On a normal start, the launcher:
 3. selects backend and `agentctl` ports;
 4. starts and supervises the backend;
 5. derives one or more `/health` targets from the effective server binds;
-6. waits up to 45 seconds for any target to return the launcher's health token; and
-7. opens the reachable access URL in the default browser.
+6. waits up to 45 seconds for any target to return the launcher's health token (the backend is alive and its socket is bound);
+7. waits for `/ready` (the backend has finished startup recovery and can serve real requests); this wait is unbounded by design, since recovery can legitimately take much longer than 45 seconds; and
+8. opens the reachable access URL in the default browser.
 
 The launcher remains in the foreground. Press `Ctrl+C` or terminate it to stop the backend and its managed children cleanly. A force-kill can leave worktree processes or containers running; inspect them before deleting data.
 

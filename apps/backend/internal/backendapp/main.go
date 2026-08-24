@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/auth"
 	authhttpmw "github.com/kandev/kandev/internal/auth/httpmw"
 	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/entityrefs"
@@ -58,6 +59,7 @@ import (
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	agentctltracing "github.com/kandev/kandev/internal/agentctl/tracing"
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/utility/profilebinding"
 
 	// WebSocket gateway
@@ -176,12 +178,18 @@ func parseBackendFlags(args []string) (backendFlags, func(), error) {
 	return out, flags.Usage, flags.Parse(args)
 }
 
-// ready is the readiness flag consulted by the GET /health handler.
-// Until it flips true, /health returns 503 — so callers polling for
-// readiness (Playwright fixtures, container orchestrators, manual
-// curl loops) keep waiting instead of racing ahead. main() flips it
-// after every route is mounted, the agent registry is seeded, and
-// the HTTP listener is accepting connections.
+// ready is the readiness flag consulted by the GET /ready handler. Until it
+// flips true, /ready returns 503 — so callers polling for readiness
+// (Playwright fixtures, container orchestrators, manual curl loops) keep
+// waiting instead of racing ahead of route registration. GET /health is a
+// liveness probe and is unaffected by this flag: it answers 200 as soon as
+// the listener is bound (see bindBootstrapListeners), because the launcher's
+// healthcheck must succeed regardless of startup progress — making it depend
+// on readiness would bring back the crash loop docs/specs/startup-listener-
+// before-recovery/spec.md exists to fix. startGatewayAndServe flips this flag
+// before swapping the bootstrap handler for the fully wired router (in that
+// order — see the comment at the call site), so a request racing the swap
+// never observes the real router with ready still false.
 var ready atomic.Bool
 
 // Run contains all startup logic and returns 0 on success or 1 on fatal error.
@@ -487,6 +495,12 @@ func startAgentInfrastructure(
 		restoreCleanups = append(restoreCleanups, stop)
 	}
 	userSecretStore := secrets.NewUserVisibleStore(repos.Secrets)
+	mcpScopeResolver := mcpscope.NewResolver(
+		repos.Task,
+		services.Auth,
+		func() bool { return services.Auth != nil && services.Auth.Mode() != auth.ModeDisabled },
+		log,
+	)
 	// ============================================
 	// AGENT MANAGER
 	// ============================================
@@ -501,6 +515,8 @@ func startAgentInfrastructure(
 		services.Task.TaskBaseBranches,
 		services.Task.TaskComparisonTargets,
 		services.ManagedRuntimeSelections,
+		mcpScopeResolver.Scope,
+		mcpScopeResolver.ScopePrincipal,
 	)
 	if err != nil {
 		log.Error("Failed to initialize agent manager", zap.Error(err))
@@ -642,6 +658,8 @@ func startAgentInfrastructure(
 	// tasks via the task service directly.
 	if services.Automation != nil {
 		orchestratorSvc.SetAutomationService(services.Automation.Service)
+		services.Automation.Service.SetRunStopper(orchestratorSvc)
+		services.Automation.Service.SetRunLivenessChecker(orchestratorSvc)
 	}
 
 	// Wire GitHub service into orchestrator for PR auto-detection on push
@@ -741,20 +759,44 @@ func startAgentInfrastructure(
 		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, repoCloner, agentctlBinaryPath, addRuntimeCleanup, runCleanups, cancelContext, restoreCleanups)
 }
 
-// startOrchestratorAndAutomationConsumers establishes the event-consumer
-// chain in dependency order. The GitHub poller performs an immediate sweep on
-// start, so both downstream consumers must be ready before it is started.
+// startOrchestratorAndAutomationConsumers establishes the startup chain in
+// dependency order: the HTTP listener must be bound (so the launcher's
+// liveness probe can succeed) before the orchestrator runs its startup
+// recovery sweeps, which can run long. The GitHub poller performs an
+// immediate sweep on start, so both downstream consumers must be ready
+// before it is started.
 func startOrchestratorAndAutomationConsumers(
+	bindListeners func() error,
 	startOrchestrator func() error,
 	startAutomation func(),
 	startGitHubPoller func(),
 ) error {
+	if err := bindListeners(); err != nil {
+		return err
+	}
 	if err := startOrchestrator(); err != nil {
 		return err
 	}
 	startAutomation()
 	startGitHubPoller()
 	return nil
+}
+
+// closeBoundListeners releases the HTTP listener(s) bound by bindListeners
+// when a later startup step fails and startGatewayAndServe returns early.
+// listeners.Stop only halts the background bind-retry loop; the bound TCP
+// sockets are released by the shared http.Server (see serverListeners's doc
+// comment), so an early return that skips this leaves the port held by this
+// process even though the caller sees a start failure. server is non-nil
+// whenever listeners is, since bindListeners assigns both together.
+func closeBoundListeners(server *http.Server, listeners *serverListeners, log *logger.Logger) {
+	if listeners == nil {
+		return
+	}
+	listeners.Stop()
+	if err := server.Close(); err != nil {
+		log.Warn("failed to close HTTP listeners after startup failure", zap.Error(err))
+	}
 }
 
 // startGatewayAndServe sets up the WebSocket gateway, HTTP routes, starts the server,
@@ -837,9 +879,6 @@ func startGatewayAndServe(
 	// Wire the host utility manager into the settings controller so
 	// /api/v1/agent-models/:agentName reads live capability data.
 	agentSettingsController.SetHostUtility(hostUtilityMgr)
-	// Reuse the settings-owned exact npm cache boundary for managed-runtime
-	// startup recovery. The lifecycle manager never derives cache paths.
-	lifecycleMgr.SetManagedRuntimeCacheInvalidator(agentSettingsController)
 	profileReconciler := agentsettingscontroller.NewProfileReconciler(hostUtilityMgr, agentRegistry, repos.AgentSettings, log)
 	go func() {
 		if err := hostUtilityMgr.Start(ctx); err != nil {
@@ -873,7 +912,22 @@ func startGatewayAndServe(
 		services.Plugins.SetUtilityAgent(pluginsUtilityAgentAdapter{svc: services.Utility, userSvc: services.User}, pluginsHostUtilityAdapter{mgr: hostUtilityMgr})
 	}
 
+	var (
+		handler   *handlerSwitch
+		server    *http.Server
+		listeners *serverListeners
+	)
+	bindListeners := func() error {
+		h, s, l, err := bindBootstrapListeners(cfg, log, Version)
+		if err != nil {
+			return err
+		}
+		handler, server, listeners = h, s, l
+		return nil
+	}
+
 	if err := startOrchestratorAndAutomationConsumers(
+		bindListeners,
 		func() error { return orchestratorSvc.Start(ctx) },
 		func() {
 			if services.Automation == nil {
@@ -894,7 +948,10 @@ func startGatewayAndServe(
 			log.Info("GitHub poller started")
 		},
 	); err != nil {
-		log.Error("Failed to start orchestrator", zap.Error(err))
+		if !errors.Is(err, errServerBindFailed) {
+			log.Error("Failed to start orchestrator", zap.Error(err))
+		}
+		closeBoundListeners(server, listeners, log)
 		return false
 	}
 	log.Info("Orchestrator initialized")
@@ -921,6 +978,7 @@ func startGatewayAndServe(
 	// ============================================
 	runProcessorSvc, ok := initOfficeServices(ctx, cfg, log, repos, services, orchestratorSvc, eventBus, agentctlBinaryPath, addCleanup, lifecycleMgr, agentRegistry)
 	if !ok {
+		closeBoundListeners(server, listeners, log)
 		return false
 	}
 	scheduling := startSchedulingRuntime(
@@ -983,6 +1041,7 @@ func startGatewayAndServe(
 	)
 	if err != nil {
 		log.Error("Failed to initialize storage maintenance", zap.Error(err))
+		closeBoundListeners(server, listeners, log)
 		return false
 	}
 	hostUtilityMgr.SetTemporaryArtifactRegistry(storageComposition.tempArtifacts)
@@ -1046,23 +1105,18 @@ func startGatewayAndServe(
 	// ============================================
 	// HTTP SERVER
 	// ============================================
-	server, err := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
+	// The listener was already bound (and is serving the bootstrap handler)
+	// by bindListeners above, before orchestratorSvc.Start ran its startup
+	// recovery sweeps. Build the real router now and swap it in on the same,
+	// already-bound handler and listeners — no second bind, no window where
+	// the socket is closed and reopened.
+	builtServer, err := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
 		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr,
 		addCleanup, repoCloner, systemSvc, storageComposition.workspaceRestorer,
 		storageComposition.tempArtifacts, dbPool, agentRuntimeAvailability)
 	if err != nil {
 		log.Error("Failed to build HTTP server", zap.Error(err))
-		return false
-	}
-
-	port := resolvedHTTPPort(cfg)
-	hosts, err := cfg.Server.ResolvedBinds()
-	if err != nil {
-		log.Error("Invalid server bind configuration", zap.Error(err))
-		return false
-	}
-	listeners, ok := startHTTPServers(server, hosts, port, log)
-	if !ok {
+		closeBoundListeners(server, listeners, log)
 		return false
 	}
 
@@ -1072,15 +1126,29 @@ func startGatewayAndServe(
 		zap.String("http", "/api/v1"),
 	)
 
-	// Flip the readiness flag once the HTTP listener is actually
-	// accepting connections, not just "spawned". Serve runs in a goroutine
-	// after we bind the socket above; probe a reachable local listener with a
-	// short retry loop — once a single connect succeeds, the kernel queue is up
-	// and any subsequent /health call will land on a wired route.
-	go waitListenerThenMarkReady(listeners.probeAddr(), log)
+	// Flip readiness before swapping in the fully wired router — see
+	// publishReadiness for why the order matters and
+	// TestPublishReadinessFlipsReadyBeforeSwappingHandler for the regression
+	// test pinning it.
+	publishReadiness(func() { ready.Store(true) }, func() { handler.Store(builtServer.Handler) })
 
 	awaitShutdown(server, listeners, scheduling, orchestratorSvc, lifecycleMgr, runCleanups, log)
 	return true
+}
+
+// publishReadiness flips readiness and then swaps in the fully wired router,
+// in that order — never the reverse. A request landing between the two must
+// never observe the real router while ready is still false: readyHandler
+// gates on ready.Load(), so the reverse order would 503 a client on a router
+// that is otherwise already fully up, recreating the exact flap
+// docs/specs/startup-listener-before-recovery/spec.md exists to prevent.
+// Flipping ready first means any request in that window still hits the
+// bootstrap handler, whose /health branch is unconditionally 200 and whose
+// every other path (including /ready) is a deterministic 503 "starting" —
+// never a stale ready=false read through the real router.
+func publishReadiness(markReady func(), swapHandler func()) {
+	markReady()
+	swapHandler()
 }
 
 // serverListenAddr formats the host and port into a listen address, binding
@@ -1091,58 +1159,6 @@ func serverListenAddr(host string, port int) string {
 		return fmt.Sprintf(":%d", port)
 	}
 	return net.JoinHostPort(host, fmt.Sprint(port))
-}
-
-// serverProbeAddr rewrites a listen address into a loopback address suitable
-// for local probing, mapping wildcard hosts to 127.0.0.1 / ::1.
-func serverProbeAddr(listenAddr string) string {
-	host, port, err := net.SplitHostPort(listenAddr)
-	if err != nil {
-		return listenAddr
-	}
-	switch host {
-	case "", "0.0.0.0":
-		host = "127.0.0.1"
-	case "::":
-		// Preserve the address family: an IPv6-only wildcard listener isn't
-		// reachable via 127.0.0.1, so probe the IPv6 loopback instead.
-		host = "::1"
-	}
-	return net.JoinHostPort(host, port)
-}
-
-// waitListenerThenMarkReady probes the local HTTP listener until a
-// connect succeeds, then flips the package-level `ready` flag so the
-// /health handler stops returning 503. Runs in its own goroutine so
-// the caller can proceed into awaitShutdown.
-//
-// The probe budget is generous (30s) — under heavy parallel-suite
-// load the OS scheduler can delay the listen goroutine for a couple
-// of seconds. If the budget expires the flag still flips, so the
-// backend doesn't permanently advertise "not ready" if probing fails
-// for some unrelated reason (e.g. an iptables hiccup on a dev box).
-func waitListenerThenMarkReady(listenAddr string, log *logger.Logger) {
-	addr := serverProbeAddr(listenAddr)
-	deadline := time.Now().Add(30 * time.Second)
-	ticker := time.NewTicker(50 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
-		if err == nil {
-			_ = conn.Close()
-			// A successful TCP dial proves the listener is bound.
-			ready.Store(true)
-			log.Info("backend ready", zap.String("addr", addr))
-			return
-		}
-		if time.Now().After(deadline) {
-			log.Warn("backend readiness probe never connected; flipping ready anyway",
-				zap.String("addr", addr))
-			ready.Store(true)
-			return
-		}
-		<-ticker.C
-	}
 }
 
 // initOfficeServices constructs the run processor service for every backend and

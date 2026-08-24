@@ -146,7 +146,7 @@ pass before launcher settings are described as an isolation boundary:
 
 - **GIVEN** an office agent in ModeOffice, **WHEN** something tries to call `create_task_kandev` MCP tool, **THEN** the MCP server returns an error saying to use `$KANDEV_CLI` instead.
 
-- **GIVEN** an office agent in ModeOffice, **WHEN** its first-turn system context is generated, **THEN** every advertised MCP tool is registered in ModeOffice and `step_complete_kandev` is absent.
+- **GIVEN** an office agent in ModeOffice, **WHEN** its first-turn system context is generated, **THEN** every advertised MCP tool is registered in ModeOffice, including `step_complete_kandev`.
 
 - **GIVEN** an Office-owned task without a scheduler-prepared signed run context, **WHEN** a generic manual or workflow task/session path attempts to start it in ModeOffice, **THEN** Kandev starts no agent process and returns an error directing the caller to start or wake the task through Office.
 

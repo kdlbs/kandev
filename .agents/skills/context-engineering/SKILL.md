@@ -28,8 +28,10 @@ Before changing code:
 - Use `rg` to find existing patterns before inventing one.
 - Read the file you will edit and nearby tests.
 - For product features, read `docs/specs/README.md`, the owning system index,
-  and only the relevant requirement and system-design files. During migration,
-  use `docs/specs/INDEX.md` to find a legacy source.
+  adjacent indexes with similar capability names, and only the relevant
+  requirement and system-design files. Choose the owner from the durable
+  contract, not the affected code layer. During migration, use
+  `docs/specs/INDEX.md` to find a legacy source.
 - When implementing from a plan, read `plan.md` for orientation and only the
   current work order. Follow its `REQ-*`, `AC-*`, and system-design references.
 - For frontend/UI, include `/mobile-parity` and `/e2e` guidance when applicable.

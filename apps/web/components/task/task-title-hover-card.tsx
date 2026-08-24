@@ -4,7 +4,7 @@ import { useRef, type FocusEvent, type MouseEvent, type ReactNode } from "react"
 import { useTranslation } from "react-i18next";
 import { Popover, PopoverAnchor, PopoverContent } from "@kandev/ui/popover";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
-import { useTaskSubtasks } from "@/hooks/domains/kanban/use-task-subtasks";
+import { useTaskSubtasks, type TaskSubtask } from "@/hooks/domains/kanban/use-task-subtasks";
 import { useHoverPopover } from "@/components/integrations/use-hover-popover";
 import { TaskSubtaskRow } from "./task-subtask-row";
 
@@ -12,9 +12,8 @@ const MAX_VISIBLE_SUBTASKS = 12;
 const OPEN_DELAY_MS = 200;
 const CLOSE_DELAY_MS = 100;
 
-function SubtasksSection({ taskId }: { taskId: string }) {
+function SubtasksSection({ subtasks }: { subtasks: TaskSubtask[] }) {
   const { t } = useTranslation();
-  const subtasks = useTaskSubtasks(taskId);
   if (subtasks.length === 0) return null;
 
   const visible = subtasks.slice(0, MAX_VISIBLE_SUBTASKS);
@@ -43,15 +42,15 @@ function SubtasksSection({ taskId }: { taskId: string }) {
 }
 
 function DesktopTaskTitlePreview({
-  taskId,
   title,
   children,
+  subtasks,
   side,
   align,
 }: {
-  taskId: string;
   title: string;
   children: ReactNode;
+  subtasks: TaskSubtask[];
   side: "top" | "right" | "bottom" | "left";
   align: "start" | "center" | "end";
 }) {
@@ -131,7 +130,7 @@ function DesktopTaskTitlePreview({
         <div className="text-pretty break-words text-sm font-semibold leading-snug text-foreground [overflow-wrap:anywhere]">
           {title}
         </div>
-        <SubtasksSection taskId={taskId} />
+        <SubtasksSection subtasks={subtasks} />
       </PopoverContent>
     </Popover>
   );
@@ -152,11 +151,12 @@ export function TaskTitleHoverCard({
   align?: "start" | "center" | "end";
 }) {
   const { isFinePointer } = useResponsiveBreakpoint();
+  const subtasks = useTaskSubtasks(taskId);
 
-  if (!isFinePointer) return <>{children}</>;
+  if (!isFinePointer || subtasks.length === 0) return <>{children}</>;
 
   return (
-    <DesktopTaskTitlePreview taskId={taskId} title={title} side={side} align={align}>
+    <DesktopTaskTitlePreview title={title} subtasks={subtasks} side={side} align={align}>
       {children}
     </DesktopTaskTitlePreview>
   );

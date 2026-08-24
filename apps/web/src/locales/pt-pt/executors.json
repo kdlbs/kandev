@@ -203,7 +203,7 @@
   "sshFailedToSaveShell": "Não foi possível guardar a shell",
   "sshFingerprintChanged": "Aviso: esta impressão digital difere da que está atualmente afixada (<1>{{fingerprint}}</1>). Confiar nela substitui a chave afixada. Se não estava à espera de uma mudança de chave do anfitrião, pare aqui.",
   "sshFingerprintObserved": "Impressão digital do anfitrião observada:",
-  "sshHostAliasHint": "Se for definido, herda HostName / Port / User / IdentityFile / ProxyJump da sua configuração.",
+  "sshHostAliasHint": "Se for definido, herda HostName / Port / User / IdentityAgent / IdentityFile / ProxyJump da sua configuração.",
   "sshHostAliasLabel": "Alias de anfitrião de {{path}} (opcional)",
   "sshIdentityFileHint": "As chaves protegidas por frase-passe têm de ser carregadas primeiro no ssh-agent.",
   "sshIdentityFilePath": "Caminho do ficheiro de identidade",

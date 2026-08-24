@@ -50,6 +50,9 @@ const (
 	// ModeOffice registers plan and interaction tools for office agents.
 	// Kanban tools are excluded because office agents use CLI commands instead.
 	ModeOffice = "office"
+	// ModeAutomation registers the fixed workspace coordinator catalog for
+	// scheduled automation agents.
+	ModeAutomation = "automation"
 )
 
 const pluginToolArgumentsKey = "arguments"
@@ -85,7 +88,7 @@ func locatorCount(locators ...string) int {
 // normalizeMode returns a valid MCP mode, defaulting unknown values to ModeTask.
 func normalizeMode(mode string) string {
 	switch mode {
-	case ModeConfig, ModeExternal, ModeOffice, ModeTaskTitlePending:
+	case ModeConfig, ModeExternal, ModeOffice, ModeAutomation, ModeTaskTitlePending:
 		return mode
 	default:
 		return ModeTask
@@ -596,6 +599,8 @@ func surfaceForMode(mode string) mcpprofile.Surface {
 		return mcpprofile.SurfaceExternal
 	case ModeOffice:
 		return mcpprofile.SurfaceOfficeTask
+	case ModeAutomation:
+		return mcpprofile.SurfaceAutomation
 	default:
 		return mcpprofile.SurfaceKanbanTask
 	}
@@ -894,7 +899,9 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 	external := surfaceEnabled(mcpprofile.SurfaceExternal)
 	office := surfaceEnabled(mcpprofile.SurfaceOfficeTask)
 	kanban := surfaceEnabled(mcpprofile.SurfaceKanbanTask)
+	automation := surfaceEnabled(mcpprofile.SurfaceAutomation)
 	return []profileToolGroup{
+		{name: "automation", enabled: automation, register: func(s *Server) { s.registerAutomationTools() }},
 		{name: "configuration-workflows", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigWorkflowTools() }},
 		{name: "configuration-agents", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigAgentTools() }},
 		{name: "configuration-mcp", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigMcpTools() }},
@@ -922,7 +929,7 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 			s.registerAddWorkspaceSourcesTool()
 			s.registerUpdateRepositoryBaseBranchTool()
 		}},
-		{name: "step-completion", enabled: kanban, register: func(s *Server) { s.registerStepCompleteTool() }},
+		{name: "step-completion", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerStepCompleteTool() }},
 		{name: "task-title", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityTaskTitle)), register: func(s *Server) { s.registerSetTaskTitleTool() }},
 		{name: "diagnostics", enabled: kanban, register: func(s *Server) { s.registerDiagnosticBundleTool() }},
 	}
@@ -959,12 +966,52 @@ func (s *Server) registerTools() {
 			group.register(s)
 		}
 	}
-	s.registerPluginTools()
+	if s.profile.Surface != mcpprofile.SurfaceAutomation {
+		s.registerPluginTools()
+	}
 	s.logger.Info("registered MCP tools",
 		zap.String("mode", s.mode),
 		zap.Int("count", len(s.mcpServer.ListTools())),
 		zap.Bool("disable_ask_question", s.disableAskQuestion))
 	s.rebuildToolArgumentValidators()
+}
+
+// registerAutomationTools composes the fixed coordinator catalog from the
+// existing read/task lifecycle registrations, then removes every mutation or
+// task-local capability that is not part of the automation authority. Keeping
+// this allowlist next to the profile registry makes accidental additions
+// visible in the catalog test instead of silently expanding automation power.
+func (s *Server) registerAutomationTools() {
+	s.registerKanbanTools()
+	s.registerTaskDependencyTools()
+	s.registerRelatedTasksTool()
+	s.registerQuestionAnsweringTools()
+	s.registerAgentPermissionTools()
+	s.registerConfigWorkflowTools()
+	s.registerConfigExecutorTools()
+	s.mcpServer.DeleteTools(
+		"delete_task_kandev",
+		"update_task_state_kandev",
+		"create_workflow_kandev",
+		"update_workflow_kandev",
+		"delete_workflow_kandev",
+		"import_workflow_kandev",
+		"export_workflow_kandev",
+		"create_workflow_step_kandev",
+		"update_workflow_step_kandev",
+		"delete_workflow_step_kandev",
+		"reorder_workflow_steps_kandev",
+		"update_agent_kandev",
+		"create_agent_profile_kandev",
+		"delete_agent_profile_kandev",
+		"list_agent_profiles_kandev",
+		"update_agent_profile_kandev",
+		"get_mcp_config_kandev",
+		"update_mcp_config_kandev",
+		"create_executor_profile_kandev",
+		"update_executor_profile_kandev",
+		"delete_executor_profile_kandev",
+	)
 }
 
 func (s *Server) registerDiagnosticBundleTool() {

@@ -44,3 +44,13 @@ func TestLegacyExternalHasNoQuestionCapability(t *testing.T) {
 		t.Fatalf("external capabilities = %#v, want no question capability", ctx.Capabilities)
 	}
 }
+
+func TestLegacyAutomationHasNoQuestionCapability(t *testing.T) {
+	ctx := Legacy("automation", false, nil)
+	if ctx.Surface != SurfaceAutomation {
+		t.Fatalf("surface = %q, want %q", ctx.Surface, SurfaceAutomation)
+	}
+	if ctx.HasCapability(CapabilityUserQuestion) || ctx.HasCapability(CapabilityParentQuestion) {
+		t.Fatalf("automation capabilities = %#v, want no question capability", ctx.Capabilities)
+	}
+}

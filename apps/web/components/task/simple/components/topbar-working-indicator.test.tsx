@@ -43,11 +43,14 @@ describe("TopbarWorkingIndicator", () => {
 
   it("renders 'Working' button when a live session exists for the task", () => {
     const sessions = { "s-1": liveSession("task-1") };
-    render(wrap(<TopbarWorkingIndicator taskId="task-1" />, sessions));
+    const { container } = render(wrap(<TopbarWorkingIndicator taskId="task-1" />, sessions));
     expect(screen.getByTestId(INDICATOR_TID)).toBeTruthy();
     expect(screen.getByText("Working")).toBeTruthy();
     // E2E hook: a more specific data-testid only present while live.
     expect(screen.getByTestId("topbar-working-active")).toBeTruthy();
+    const spinner = container.querySelector(".animate-spin");
+    expect(spinner?.tagName).toBe("SPAN");
+    expect(spinner?.querySelector("svg")?.classList.contains("animate-spin")).toBe(false);
   });
 
   it("drops the spinner when an office session goes RUNNING → IDLE", () => {

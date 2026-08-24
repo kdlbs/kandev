@@ -99,17 +99,44 @@ func OfficeContext() string { return prompts.Get("office-context") }
 
 // FormatOfficeContext injects the active task and session IDs into the Office context.
 func FormatOfficeContext(taskID, sessionID string) string {
+	return FormatOfficeContextWithOptions(taskID, sessionID, false)
+}
+
+const officeStepCompleteInstruction = "This workflow step requires an explicit completion signal. " +
+	"Call step_complete_kandev as the LAST action after every requirement is satisfied. " +
+	"Do not call it before a question or during partial progress. " +
+	"If the tool is not visible, use the client's tool search or discovery with the canonical name.\n"
+
+// FormatOfficeContextWithOptions formats the Office context for the current
+// workflow step. The imperative completion instruction is present only when
+// the step's auto-advance policy requires the signal.
+func FormatOfficeContextWithOptions(taskID, sessionID string, requiresSignal bool) string {
+	instruction := ""
+	if requiresSignal {
+		instruction = officeStepCompleteInstruction
+	}
 	return Resolve("office-context", map[string]string{
-		"task_id":    taskID,
-		"session_id": sessionID,
+		"task_id":                   taskID,
+		"session_id":                sessionID,
+		"step_complete_instruction": instruction,
 	})
 }
 
 // InjectOfficeContext ensures a first-turn prompt has the restricted Office context.
 // trustedContents must contain only exact server-generated system block contents.
 func InjectOfficeContext(taskID, sessionID, prompt string, trustedContents ...string) string {
+	return InjectOfficeContextWithOptions(taskID, sessionID, prompt, false, trustedContents...)
+}
+
+// InjectOfficeContextWithOptions injects the restricted Office context and
+// adds the completion instruction only for a signal-gated workflow step.
+func InjectOfficeContextWithOptions(
+	taskID, sessionID, prompt string,
+	requiresSignal bool,
+	trustedContents ...string,
+) string {
 	return canonicalizeKandevContext(
-		FormatOfficeContext(taskID, sessionID),
+		FormatOfficeContextWithOptions(taskID, sessionID, requiresSignal),
 		prompt,
 		trustedContextContents(sessionID, trustedContents...),
 	)

@@ -203,7 +203,7 @@
   "sshFailedToSaveShell": "保存 shell 失败",
   "sshFingerprintChanged": "警告：此指纹与当前固定的指纹不同（<1>{{fingerprint}}</1>）。信任后将覆盖已固定的密钥。若你未预期主机重新生成密钥，请停止操作。",
   "sshFingerprintObserved": "观察到的主机指纹：",
-  "sshHostAliasHint": "若已设置，将从配置继承 HostName / Port / User / IdentityFile / ProxyJump。",
+  "sshHostAliasHint": "若已设置，将从配置继承 HostName / Port / User / IdentityAgent / IdentityFile / ProxyJump。",
   "sshHostAliasLabel": "来自 {{path}} 的主机别名（可选）",
   "sshIdentityFileHint": "受密码保护的密钥须先加载到 ssh-agent。",
   "sshIdentityFilePath": "身份文件路径",
