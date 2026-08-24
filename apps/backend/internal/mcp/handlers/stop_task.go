@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
+
+	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
@@ -16,8 +18,9 @@ import (
 const stopTaskStatusKey = "status"
 
 type stopTaskRequest struct {
-	TaskID       string `json:"task_id"`
-	SenderTaskID string `json:"sender_task_id"`
+	TaskID          string `json:"task_id"`
+	SenderTaskID    string `json:"sender_task_id"`
+	SenderSessionID string `json:"sender_session_id"`
 }
 
 type stopTaskFailure struct {
@@ -50,11 +53,8 @@ func (h *Handlers) handleStopTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 		return lookupError.response, lookupError.err
 	}
 
-	if automationCaller {
-		if target.ID == principal.CallerTaskID || target.WorkspaceID != principal.WorkspaceID {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "target task not found", nil)
-		}
-	} else if !canStopTask(sender, target) {
+	decision, err := h.authorizeCoordinatorAction(ctx, sender, target, req.SenderSessionID, "stop_task", coordinator.CapabilityOrchestrate)
+	if err != nil || !decision.Allowed {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden,
 			"only a task's direct parent in the same workspace can stop it", nil)
 	}
@@ -63,6 +63,9 @@ func (h *Handlers) handleStopTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 	}
 
 	result, err := h.taskStopper.StopTaskForCoordinator(ctx, target.ID)
+	if finishErr := h.finishCoordinatorAction(ctx, decision, err); finishErr != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to record task stop", nil)
+	}
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to stop target task", nil)
 	}

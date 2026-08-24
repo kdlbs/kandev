@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
@@ -273,6 +274,9 @@ type Handlers struct {
 	// Wires the list_related_tasks_kandev / *_task_document_kandev
 	// MCP tools introduced in office task handoffs phase 2.
 	handoffSvc *service.HandoffService
+	// Optional, generic explicit-authority evaluator. It extends direct-parent
+	// access for an active workspace-agent principal only.
+	coordinatorAuthority *coordinator.Authority
 
 	// Office dashboard service (optional, set via SetDashboardService).
 	// Wires the record_step_decision_kandev MCP tool.
@@ -305,6 +309,12 @@ type Handlers struct {
 	// Optional list_pending_agent_permissions_kandev / resolve_agent_permission_kandev
 	// dependency (external MCP surface only, set via SetAgentPermissionService).
 	agentPermissionSvc AgentPermissionService
+}
+
+// SetCoordinatorAuthority installs the optional centrally evaluated task
+// authority boundary. Leaving it nil preserves direct-parent-only behavior.
+func (h *Handlers) SetCoordinatorAuthority(authority *coordinator.Authority) {
+	h.coordinatorAuthority = authority
 }
 
 // NewHandlers creates new MCP handlers.
@@ -2594,9 +2604,12 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 	// its request was rejected. Omitted or "queued" keeps the default
 	// queue-and-wait behavior documented on message_task_kandev, even for
 	// a parent sender.
-	isParentToChild := targetTask.ParentID != "" && targetTask.ParentID == senderTask.ID
 	wantsInterrupt := req.DeliveryMode == deliveryModeInterrupt
-	if wantsInterrupt && !isParentToChild {
+	interruptDecision := coordinator.Decision{}
+	if wantsInterrupt {
+		interruptDecision, err = h.authorizeCoordinatorAction(ctx, senderTask, targetTask, req.SenderSessionID, "message_interrupt", coordinator.CapabilityOrchestrate)
+	}
+	if wantsInterrupt && (err != nil || !interruptDecision.Allowed) {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden,
 			`delivery_mode="interrupt" is only allowed when the sender is the target task's direct parent`, nil)
 	}
@@ -2604,6 +2617,7 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		// Claim the durable question before dispatch. A failed status update after
 		// delivery would make a retry send the same answer a second time.
 		if err := h.markParentQuestionAnswered(ctx, parentReply.message, req.Prompt); err != nil {
+			_ = h.finishCoordinatorAction(ctx, interruptDecision, err)
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "parent question could not be claimed: "+err.Error(), nil)
 		}
 	}
@@ -2626,6 +2640,9 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 	// primary is terminal is pinned too, or the idle dispatch path re-resolves
 	// it straight back to that terminal primary.
 	result, err := h.dispatchTaskMessage(dispatchCtx, req.TaskID, session, wrappedPrompt, senderMeta, wantsInterrupt, pinnedTarget)
+	if finishErr := h.finishCoordinatorAction(ctx, interruptDecision, err); finishErr != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to record message interrupt", nil)
+	}
 	if err != nil {
 		if parentReply != nil {
 			if restoreErr := h.restoreParentQuestionPending(ctx, parentReply.message); restoreErr != nil {

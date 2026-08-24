@@ -39,6 +39,7 @@ import (
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/ports"
+	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/db"
 	debughandlers "github.com/kandev/kandev/internal/debug"
 	editorcontroller "github.com/kandev/kandev/internal/editors/controller"
@@ -645,6 +646,9 @@ func registerRoutes(p routeParams) {
 	handoffDocSvc := taskservice.NewDocumentService(p.taskRepo, p.log)
 	handoffSvc := taskservice.NewHandoffService(p.taskRepo, p.taskRepo, handoffDocSvc,
 		p.officeRepo, p.officeRepo, p.log)
+	handoffSvc.SetCoordinatorAuthority(coordinator.New(p.taskRepo, func() bool {
+		return p.features.CoordinatorTaskAuthority
+	}))
 	if p.services.Plugins != nil {
 		p.services.Plugins.SetTaskRelationsSource(handoffSvc)
 		p.services.Plugins.SetWorkspaceAgentPrincipalSource(pluginsWorkspaceAgentPrincipalSourceAdapter{repo: p.taskRepo})
@@ -1664,6 +1668,9 @@ func registerMCPAndDebugRoutes(
 	mcpHandlers.SetAgentPermissionService(p.orchestratorSvc)
 	mcpHandlers.SetTaskTitleBranchRenamer(p.orchestratorSvc)
 	mcpHandlers.SetUserSettingsProvider(p.services.User)
+	mcpHandlers.SetCoordinatorAuthority(coordinator.New(p.taskRepo, func() bool {
+		return p.features.CoordinatorTaskAuthority
+	}))
 	// list_pending_questions_kandev / answer_question_kandev (external MCP
 	// surface only). p.taskRepo already implements ClarificationBundleLister
 	// (ListUnresolvedClarificationBundles, FindMessagesByPendingID).

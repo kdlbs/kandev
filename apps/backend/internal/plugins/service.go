@@ -682,16 +682,6 @@ func (s *Service) hostForPlugin(pluginID string) pluginsdk.Host {
 		rec = &store.Record{} // every capability check below denies; should not happen in practice
 	}
 	return &pluginHost{
-<<<<<<< HEAD
-		pluginID:            pluginID,
-		capabilities:        rec.Capabilities,
-		repositoryProviders: rec.RepositoryProviders,
-		configSchema:        rec.ConfigSchema,
-		state:               s.state,
-		secrets:             s.secrets,
-		bus:                 s.eventBus,
-		configs:             s.store,
-		taskData:            s.taskData,
 		pluginID:                 pluginID,
 		capabilities:             rec.Capabilities,
 		repositoryProviders:      rec.RepositoryProviders,

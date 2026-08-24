@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/coordinator"
 	orchmodels "github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
@@ -191,20 +192,27 @@ type RelatedTasks struct {
 // than reaching into the repos directly so document writes still go
 // through DocumentService and emit the same revision/event side effects.
 type HandoffService struct {
-	tasks              repository.TaskRepository
-	docs               *DocumentService
-	docsRepo           repository.DocumentRepository
-	blockers           BlockerRepository
-	wsGroups           WorkspaceGroupRepo
-	sessions           SessionWorktreeReader
-	cleaner            WorkspaceCleaner
-	runCanceller       RunCanceller
-	eventPublisher     TaskEventPublisher
-	resourceCleaner    TaskResourceCleaner
-	taskAccessCheck    func(ctx context.Context, taskID string) error
-	logger             *logger.Logger
-	parentLock         parentMutex
-	workspaceGroupLock parentMutex
+	tasks                repository.TaskRepository
+	docs                 *DocumentService
+	docsRepo             repository.DocumentRepository
+	blockers             BlockerRepository
+	wsGroups             WorkspaceGroupRepo
+	sessions             SessionWorktreeReader
+	cleaner              WorkspaceCleaner
+	runCanceller         RunCanceller
+	eventPublisher       TaskEventPublisher
+	resourceCleaner      TaskResourceCleaner
+	coordinatorAuthority *coordinator.Authority
+	taskAccessCheck      func(ctx context.Context, taskID string) error
+	logger               *logger.Logger
+	parentLock           parentMutex
+	workspaceGroupLock   parentMutex
+}
+
+// SetCoordinatorAuthority installs the optional explicit workspace-agent
+// authority evaluator used only after ordinary relation/document access denies.
+func (s *HandoffService) SetCoordinatorAuthority(authority *coordinator.Authority) {
+	s.coordinatorAuthority = authority
 }
 
 // TaskEventPublisher abstracts the side-effect of broadcasting task
@@ -486,25 +494,34 @@ func (s *HandoffService) attachSequentialBlocker(ctx context.Context, taskID, pa
 // The un-gated ListRelated remains for trusted internal callers (e.g.
 // GetTaskContext renders the context panel for a task the user already owns).
 func (s *HandoffService) ListRelatedForCaller(ctx context.Context, callerTaskID, targetTaskID string) (*RelatedTasks, error) {
+	return s.ListRelatedForCallerSession(ctx, callerTaskID, "", targetTaskID)
+}
+
+// ListRelatedForCallerSession preserves the session provenance required by
+// an active workspace-agent principal.
+func (s *HandoffService) ListRelatedForCallerSession(ctx context.Context, callerTaskID, callerSessionID, targetTaskID string) (*RelatedTasks, error) {
 	if targetTaskID == "" {
 		return nil, ErrDocumentTaskRequired
 	}
 	// Any target other than the caller itself must pass the read guard. An
 	// empty caller has no identity to authorize against, so canReadDocuments
 	// denies it (rather than silently delegating to the ungated ListRelated).
+	decision := coordinator.Decision{}
 	if callerTaskID != targetTaskID {
-		ok, err := canReadDocuments(ctx,
-			repoTaskLookupAdapter{r: s.tasks},
-			blockerLookupAdapter{repo: s.blockers},
-			callerTaskID, targetTaskID)
+		ok, authorized, err := s.canReadForCaller(ctx, callerTaskID, callerSessionID, targetTaskID)
 		if err != nil {
 			return nil, err
 		}
 		if !ok {
 			return nil, ErrAccessDenied
 		}
+		decision = authorized
 	}
-	return s.ListRelated(ctx, targetTaskID)
+	related, err := s.ListRelated(ctx, targetTaskID)
+	if finishErr := s.finishCoordinatorRead(ctx, decision, err); finishErr != nil {
+		return nil, finishErr
+	}
+	return related, err
 }
 
 // GetTaskRelations returns a compact relationship graph for a task in one
@@ -656,29 +673,41 @@ func (s *HandoffService) ListRelated(ctx context.Context, taskID string) (*Relat
 // the read access rule for currentTaskID. Returns ErrAccessDenied when
 // the rule fails.
 func (s *HandoffService) GetDocumentForCaller(ctx context.Context, currentTaskID, targetTaskID, key string) (*models.TaskDocument, error) {
+	return s.GetDocumentForCallerSession(ctx, currentTaskID, "", targetTaskID, key)
+}
+
+func (s *HandoffService) GetDocumentForCallerSession(ctx context.Context, currentTaskID, callerSessionID, targetTaskID, key string) (*models.TaskDocument, error) {
 	if key == "" {
 		return nil, ErrDocumentKeyRequired
 	}
 	if targetTaskID == "" {
 		return nil, ErrDocumentTaskRequired
 	}
-	ok, err := canReadDocuments(ctx, repoTaskLookupAdapter{r: s.tasks}, blockerLookupAdapter{repo: s.blockers}, currentTaskID, targetTaskID)
+	ok, decision, err := s.canReadForCaller(ctx, currentTaskID, callerSessionID, targetTaskID)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
 		return nil, ErrAccessDenied
 	}
-	return s.docs.GetDocument(ctx, targetTaskID, key)
+	document, err := s.docs.GetDocument(ctx, targetTaskID, key)
+	if finishErr := s.finishCoordinatorRead(ctx, decision, err); finishErr != nil {
+		return nil, finishErr
+	}
+	return document, err
 }
 
 // ListDocumentsForCaller returns the document HEADs (no content) for
 // targetTaskID after the read-access guard.
 func (s *HandoffService) ListDocumentsForCaller(ctx context.Context, currentTaskID, targetTaskID string) ([]*models.TaskDocument, error) {
+	return s.ListDocumentsForCallerSession(ctx, currentTaskID, "", targetTaskID)
+}
+
+func (s *HandoffService) ListDocumentsForCallerSession(ctx context.Context, currentTaskID, callerSessionID, targetTaskID string) ([]*models.TaskDocument, error) {
 	if targetTaskID == "" {
 		return nil, ErrDocumentTaskRequired
 	}
-	ok, err := canReadDocuments(ctx, repoTaskLookupAdapter{r: s.tasks}, blockerLookupAdapter{repo: s.blockers}, currentTaskID, targetTaskID)
+	ok, decision, err := s.canReadForCaller(ctx, currentTaskID, callerSessionID, targetTaskID)
 	if err != nil {
 		return nil, err
 	}
@@ -687,6 +716,7 @@ func (s *HandoffService) ListDocumentsForCaller(ctx context.Context, currentTask
 	}
 	docs, err := s.docs.ListDocuments(ctx, targetTaskID)
 	if err != nil {
+		_ = s.finishCoordinatorRead(ctx, decision, err)
 		return nil, err
 	}
 	// Strip Content from the projection so callers cannot accidentally
@@ -697,6 +727,9 @@ func (s *HandoffService) ListDocumentsForCaller(ctx context.Context, currentTask
 		copy := *d
 		copy.Content = ""
 		out = append(out, &copy)
+	}
+	if err := s.finishCoordinatorRead(ctx, decision, nil); err != nil {
+		return nil, err
 	}
 	return out, nil
 }

@@ -76,6 +76,13 @@ features:
     dev:  "false"
     e2e:  "false"
 
+  # Explicit operator grants for generic workspace-agent authority remain off
+  # until an instance deliberately enables and configures them.
+  KANDEV_FEATURES_COORDINATOR_TASK_AUTHORITY:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
 # ── Mock providers ────────────────────────────────────────────────
 # Swap real third-party services for in-memory fakes. Production
 # leaves all of these unset (real APIs). Dev opts into the mock agent
