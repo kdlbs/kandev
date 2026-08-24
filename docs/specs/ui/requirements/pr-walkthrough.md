@@ -47,7 +47,8 @@ lifecycle policy.
 [ADR-2026-08-22-pr-walkthrough-filesystem-runner](../../../decisions/2026-08-22-pr-walkthrough-filesystem-runner.md),
 [ADR-2026-08-22-pr-walkthrough-description-link](../../../decisions/2026-08-22-pr-walkthrough-description-link.md),
 [ADR-2026-08-23-pr-walkthrough-short-urls](../../../decisions/2026-08-23-pr-walkthrough-short-urls.md),
-[ADR-2026-08-23-pr-walkthrough-workflow-provenance](../../../decisions/2026-08-23-pr-walkthrough-workflow-provenance.md)
+[ADR-2026-08-23-pr-walkthrough-workflow-provenance](../../../decisions/2026-08-23-pr-walkthrough-workflow-provenance.md),
+[ADR-2026-08-24-unified-fork-approval-label](../../../decisions/2026-08-24-unified-fork-approval-label.md)
 
 **Implementation plans:**
 [Portable PR walkthrough runner fix](../../../plans/pr-walkthrough-portable-runner-fix/plan.md),
@@ -78,10 +79,11 @@ lifecycle policy.
   the website brand mark and favicon, and its dark theme uses the
   documentation shell's dark-gray palette.
 - The configured workflow agent generates and renders the walkthrough for a
-  non-draft same-repository pull request when it is opened, reopened, marked
-  ready for review, or updated. OpenCode is the initial runner, but the skill
-  and artifact contract do not depend on it. A maintainer can explicitly
-  retrigger generation by adding the `generate-pr-walkthrough` label.
+  non-draft same-repository pull request or an authorized contributor pull
+  request when it is opened, reopened, marked ready for review, or updated.
+  OpenCode is the initial runner, but the skill and artifact contract do not
+  depend on it. A maintainer can explicitly retrigger same-repository
+  generation by adding the `generate-pr-walkthrough` label.
 - The workflow gives each runner the same fixed prompt, prepared context, draft
   JSON path, renderer command, and final output paths. A provider change does
   not change this contract.
@@ -104,9 +106,9 @@ lifecycle policy.
   the first 12 lowercase hexadecimal characters of the exact head SHA. It is
   served at
   `https://walkthrough.kandev.ai/pr/<pull-request-number>/<short-head-sha>.html`.
-- The workflow regenerates on `synchronize` for same-repository pull request
-  updates. Each generated object remains keyed by pull request number and the
-  12-character prefix of the exact head SHA.
+- The workflow regenerates on `synchronize` for same-repository and authorized
+  contributor pull request updates. Each generated object remains keyed by
+  pull request number and the 12-character prefix of the exact head SHA.
 - After public validation succeeds, a separate minimum-permission job prepends
   a prominent marker-owned walkthrough callout to the pull request
   description. A rerun replaces only that callout and preserves the rest of
@@ -161,6 +163,9 @@ adapters remain outside the skill because they are platform integration code.
   merge base without checking out that SHA. It uses the same workflow-commit
   copy of the skill bundle, runner setup action, and PR-description helper.
   Pull request changes cannot replace these executable components.
+- Contributor generation requires the durable `safe-to-review` approval label
+  or the existing trusted-contributor allowlist path. The old `safe-to-test`
+  label is not an authorization source.
 - The agent invokes the fixed renderer before it finishes. The workflow only
   verifies and packages the ignored walkthrough output directory.
 - The R2 publishing job receives only the bucket-scoped S3-compatible R2
@@ -243,7 +248,8 @@ not from merge time.
   head and updates the corresponding R2 object and job-summary URL.
 - **GIVEN** a pull request receives a new head commit, **WHEN** the
   walkthrough workflow runs for the synchronize event, **THEN** it generates
-  a walkthrough for the new head.
+  a walkthrough for the new head when the pull request is same-repository or
+  has contributor approval.
 - **GIVEN** two pull requests use different numbers, **WHEN** both jobs run,
   **THEN** each output filename and R2 object key is distinct and neither run
   overwrites the other's result.
@@ -269,6 +275,9 @@ not from merge time.
   plain code block remains neutral context.
 - **GIVEN** a draft pull request or an unauthorized fork event, **WHEN** the
   workflow is triggered, **THEN** no walkthrough agent job runs.
+- **GIVEN** an approved contributor pull request, **WHEN** the workflow is
+  triggered, **THEN** it prepares the exact head data without checking out or
+  executing contributor code in the secret-bearing generation worktree.
 - **GIVEN** a successfully generated HTML file, **WHEN** the publishing job
   uploads it, **THEN** a public GET to the reported URL returns the same HTML
   with an HTML content type.
@@ -282,7 +291,7 @@ not from merge time.
 ## Out of scope
 
 - Publishing walkthrough screenshots or using the screenshot media branch.
-- Generating walkthroughs for fork pull requests.
+- Generating walkthroughs for unauthorized contributor pull requests.
 - Retaining a walkthrough for an exact period measured from merge time. The
   initial lifecycle is measured from upload time.
 - Adding a Kandev UI page for externally generated PR walkthroughs.
