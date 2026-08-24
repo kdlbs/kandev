@@ -65,6 +65,14 @@ and revoke are explicit, immediately effective for new operations, and audited.
 The host records every privileged success, denial, wake, retry, coalescing,
 safe-mode transition, and authority change.
 
+V1 selects one durable workspace-scoped Coordinator and one explicit safe
+orchestration grant: **Workspace + Assist**. It allows only host-approved,
+scope-checked low-risk follow-up actions. V1 has mandatory monitoring for Done
+integrity, the Coordinator Todo/follow-up inventory, and pending-human/Human-QA
+checks. These signals may produce evidence, a retry, or a visible human ask;
+they never confer archive/delete or terminal-cleanup authority. Broader board
+control, global scope, and multiple authoritative Coordinators are deferred.
+
 Migration may adopt a legacy plugin/workspace/conversation descriptor as an
 unprivileged principal and link its transcript, but it must not migrate a
 task-bound grant. The operator re-consents before a principal-bound grant is
@@ -94,7 +102,7 @@ session, or implicit proof of authority.
   Coordinator record. It must not create a second chat, lose transcript links,
   or silently delete governance evidence on plugin uninstall.
 - A minimum implementation can ship identity, read-only Overview/Inbox, pause,
-  audit, and dedicated navigation before it grants board-control mutation.
+  audit, and dedicated navigation before it grants Workspace + Assist actions.
 - Board control depends on the explicit master-authority implementation. Relation
   inspection and own-task inbox remain narrow dependencies rather than a broad
   workspace superuser or message index. Fork credential leases stay a separate,
@@ -122,9 +130,9 @@ session, or implicit proof of authority.
   can double-nudge, race, and produce conflicting authority/audit decisions.
   Ephemeral read-only helpers are sufficient for bounded parallel evidence.
 
-## Open operator decisions
+## Remaining operator decisions
 
-Before Stage 1 implementation, decide workspace-only versus a later global
-aggregate, the allowed autonomy tiers and approvers, audit/report/transcript
-retention, notification surfaces, and the initial event-source set. The product
-spec records recommendations and the acceptance matrix.
+The v1 scope, multiplicity, Workspace + Assist grant, mandatory monitoring,
+and archive/delete exclusion are selected. Before Stage 1 implementation, decide
+the approvers and notification surfaces plus audit/report/transcript retention.
+The product spec records the remaining choices and acceptance matrix.

@@ -93,19 +93,21 @@ The host authorizes privileged board actions. The plugin proposes an action;
 the host validates the current grant, workspace/workflow scope, action class,
 target ownership, policy tier, and idempotency before it executes anything.
 
-The baseline has three operator-visible autonomy tiers:
+The approved v1 grant is **Workspace + Assist**. It is explicitly issued to
+the workspace-scoped Coordinator principal and covers only safe orchestration
+within that workspace. The host expresses it through these operator-visible
+tiers:
 
 1. **Observe.** Read state, maintain an inbox, publish reports, and recommend.
    It cannot mutate tasks or interrupt runs.
-2. **Bounded lead.** Perform configured low-risk orchestration actions within a
-   selected workflow, such as a documented nudge, forward routing of a proven
-   handoff, or one safe retry. Actions are audited and reversible where the
-   underlying task contract permits.
-3. **Board control.** Exercise individually granted parent-equivalent actions
-   in the declared workspace/workflow, including interrupt, redirect, and
-   recovery of a stalled task. This tier remains unable to delete/archive,
-   change credentials, grant authority, merge, rewrite history, or perform an
-   unapproved external/destructive action.
+2. **Workspace + Assist.** Perform explicitly granted low-risk orchestration
+   across the declared workspace, such as a documented nudge, forward routing
+   of a proven handoff, one safe retry, and Coordinator follow-up. Actions are
+   audited and reversible where the underlying task contract permits.
+3. **Broader board control.** Reserved for a later operator decision. It is not
+   part of v1 and cannot imply archive/delete, terminal cleanup, credential
+   changes, grant changes, merge, history rewrite, or an unapproved
+   external/destructive action.
 
 `safe_mode`, pause, revocation, and kill switch take effect before the next
 privileged operation, without requiring the plugin process or a session to
@@ -128,6 +130,12 @@ coalesces them into durable wake records. Candidate inputs are task and workflow
 transitions, session state/error changes, clarification/flag changes, queued
 messages for the Coordinator's own task-scoped inbox, provider CI/review
 changes, grant/revocation changes, and due follow-up deadlines.
+
+V1 monitoring is mandatory for three bounded governance checks: evidence-backed
+**Done integrity**, the Coordinator's own **Todo**/follow-up inventory, and
+**pending-human/Human-QA** work. These are monitoring and escalation signals,
+not a terminal-cleanup grant. Archive/delete and automatic terminal cleanup are
+excluded even when a Done-integrity check finds a discrepancy.
 
 The host assigns every occurrence an idempotency key and records whether it was
 accepted, coalesced, deferred, or rejected. Periodic reconciliation catches lost
@@ -279,17 +287,16 @@ audited destructive operation.
    coalescing, safe-mode transition, and terminal-integrity recovery with stable
    identifiers and evidence links.
 
-## Human decisions required before Stage 1
+## Approved v1 defaults and remaining decisions
 
-- **Scope:** workspace-only is recommended for v1. A global coordinator needs a
-  separate aggregate identity, cross-workspace consent, and a different threat
-  model.
-- **Autonomy:** adopt the three tiers above, or require per-action approval for
-  all mutation. Recommendation: Observe by default, Bounded lead opt-in, Board
-  control only through an explicit scoped grant.
-- **Multiplicity:** one authoritative Coordinator per workspace is recommended.
-  Decide whether read-only named assistants may exist as separate product
-  identities or only as ephemeral helpers.
+- **Scope and multiplicity:** one durable Coordinator per workspace. A global
+  aggregate and multiple authoritative Coordinators are deferred; helpers stay
+  ephemeral and non-authoritative.
+- **Autonomy:** Observe is available by default. **Workspace + Assist** is the
+  only approved mutation grant, must be explicit and scope-checked, and remains
+  unable to archive/delete or perform terminal cleanup.
+- **Mandatory monitoring:** Done integrity, Coordinator Todo/follow-up, and
+  pending-human/Human-QA checks are required v1 signals.
 - **Approval UX:** decide whether approvals live only in Overview/Inbox or also
   generate native task/desktop/mobile notifications, and who may approve them.
 - **Retention:** choose duration and export/delete policy for audit, reports,
@@ -302,5 +309,5 @@ audited destructive operation.
 
 Global cross-workspace coordination, multiple authoritative Coordinators in one
 workspace, autonomous credential/security changes, destructive task operations,
-unbounded helper swarms, transcript scraping as governance storage, and a
-plugin-owned hidden scheduler are out of scope.
+archive/delete, terminal cleanup, unbounded helper swarms, transcript scraping
+as governance storage, and a plugin-owned hidden scheduler are out of scope.
