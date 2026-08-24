@@ -24,9 +24,10 @@ does not own a scheduler per workspace.
 
 ## Queue ownership and classification
 
-The existing runs table is the durable queue. One scheduler claims work for all
-workspaces while preserving the existing per-agent serialization rule.
-Explicit queue_run workflow actions may enqueue from any workflow style.
+The existing `runs` table is the durable queue. One scheduler claims work for all
+workspaces in global request order while preserving the existing per-agent
+serialization rule. Explicit `queue_run` workflow actions may enqueue from any
+workflow style.
 Interactive user launches stay on the interactive orchestrator path.
 
 Office assignment subscribers and unstarted-task recovery classify a task as
@@ -68,9 +69,9 @@ message.
 
 ## Verification
 
-- Test one global consumer across multiple workspaces and per-agent
-  serialization.
-- Test Office classification, explicit queue_run, missed-signal recovery, and
+- Test one global consumer across multiple workspaces, global FIFO ordering, and
+  per-agent serialization.
+- Test Office classification, explicit `queue_run`, missed-signal recovery, and
   restart recovery.
 - Test idempotent lifecycle calls and shutdown while idle or inside a handler.
 - Test that queued rows remain available after process restart.

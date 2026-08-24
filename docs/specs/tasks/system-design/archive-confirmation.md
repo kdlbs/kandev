@@ -35,9 +35,9 @@ programmatic archive callers remain separate contracts.
 
 ## Data and API contracts
 
-The existing user settings JSON stores confirm_task_archive. A missing value
+The existing user settings JSON stores `confirm_task_archive`. A missing value
 means true for backward compatibility. The existing user-settings GET, PATCH,
-and user.settings.updated contracts carry the boolean. No archive endpoint
+and `user.settings.updated` contracts carry the boolean. No archive endpoint
 changes.
 
 ## Control flow

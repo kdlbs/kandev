@@ -26,10 +26,10 @@ autonomous launches without creating workspace-local schedulers.
 #### Acceptance criteria
 
 - **AC-TASKS-RUN-SCHEDULING-001.1:** When queued runs exist in multiple
-  workspaces, one backend-wide scheduler shall process them while preserving
-  the existing per-agent serialization rule.
+  workspaces, one backend-wide scheduler shall claim them in global request
+  order while preserving the existing per-agent serialization rule.
 - **AC-TASKS-RUN-SCHEDULING-001.2:** When a workflow explicitly uses
-  queue_run, the system shall enqueue and process that work for any workflow
+  `queue_run`, the system shall enqueue and process that work for any workflow
   style; an interactive user launch shall retain its existing launch path.
 - **AC-TASKS-RUN-SCHEDULING-001.3:** When a task is an ordinary Kanban task,
   assigning a runner shall not make it autonomous; Office assignment and

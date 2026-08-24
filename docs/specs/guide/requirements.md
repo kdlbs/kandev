@@ -100,10 +100,10 @@ capability through the web application. Create a UI requirement when the UI
 owns an independent presentation or interaction contract that several features
 can use without copying feature state.
 
-Before you add a requirement, search all system indexes and requirement files
-for the capability and its main nouns. Update the current owner when the new
-behavior extends the same outcome. Create another requirement only when the
-actor, lifecycle, or contract is independent.
+Before you add a requirement, search all system indexes, requirement files, and
+system-design files for the capability and its main nouns. Update the current
+owner when the new behavior extends the same outcome. Create another
+requirement only when the actor, lifecycle, or contract is independent.
 
 ## Migration quality
 

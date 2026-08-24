@@ -5,7 +5,7 @@ requirements:
   - REQ-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-001
 created: 2026-08-24
 owners:
-  - Kandev
+  - kandev
 ---
 
 # GitHub PR Merge Queue System Design
@@ -172,8 +172,10 @@ An active queue entry uses `#966600`. Terminal states take precedence. Queue
 membership takes precedence over other non-terminal icon states.
 
 The task hover summary, desktop status popover, phone drawer, and pull-request
-detail panel show localized state and position. They show the optional estimate
-as a localized duration. Unknown provider states use generic queue copy.
+detail panel show localized state and position. Estimates below one minute use a
+localized sub-minute label. Estimates of one minute or more round up to a
+localized whole-minute duration. Missing estimates omit estimate text instead
+of inventing a value. Unknown provider states use generic queue copy.
 
 Desktop and mobile share state derivation and actions. Mobile uses the existing
 Review surface and status drawer. The action has a touch-sized target, does not

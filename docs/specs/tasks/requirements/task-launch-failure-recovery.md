@@ -26,9 +26,11 @@ launching work against the wrong pull request or repository branch.
 #### Acceptance criteria
 
 - **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-001.1:** When workflow auto-start
-  finds only terminal relevant GitHub pull requests, it shall leave the task
+  finds relevant GitHub pull requests and every relevant pull request is
+  terminal, it shall leave the task
   in its current step, avoid starting a session, and show a durable
-  pr_already_closed reason after reload; manual launch shall bypass this gate.
+  `pr_already_closed` reason after reload; manual launch shall bypass this
+  gate.
 - **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-001.2:** When a handled launch error
   is projected, the task surface shall show a safe category, bounded detail,
   and only the recovery actions valid for the affected task repository.
@@ -39,7 +41,7 @@ launching work against the wrong pull request or repository branch.
   names a foreign session or repository row, or an error stamp that is no
   longer current, the system shall reject it without mutation.
 - **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-001.5:** When a user selects
-  mark_review_done, the system shall offer and accept it only for a valid
+  `mark_review_done`, the system shall offer and accept it only for a valid
   terminal workflow step with all relevant pull requests in terminal states.
 - **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-001.6:** When a launch lookup fails,
   no relevant pull request exists, or a relevant pull request is open or
@@ -48,9 +50,9 @@ launching work against the wrong pull request or repository branch.
   desktop or mobile, the same error projection, authorization, and outcome
   shall apply without horizontal page overflow.
 - **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-001.8:** When recovery fails, the
-  source error shall remain visible with the new typed cause and valid actions;
-  a successful recovery shall clear it only after the required relaunch or
-  task move succeeds.
+  source error record shall remain visible and update with the new typed cause,
+  bounded details, and valid actions; a successful recovery shall clear it only
+  after the required relaunch or task move succeeds.
 
 ## Out of scope
 
