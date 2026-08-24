@@ -49,6 +49,12 @@ type TaskRepositoryInput struct {
 	// provider descriptor already authorized by the plugin host. It is never
 	// accepted from REST/MCP JSON; callers must still supply every identity and
 	// exact credential-free clone URL field above.
+	//
+	// A descriptor that arrives without this marker can still reach the same
+	// resolver when the plugin registry says an installed plugin owns its
+	// provider — see Service.pluginProviderDescriptorAuthorized. Authorization
+	// is decided server-side either way; this field only records that the
+	// plugin host already made that decision.
 	TrustedProviderDescriptor bool `json:"-"`
 }
 

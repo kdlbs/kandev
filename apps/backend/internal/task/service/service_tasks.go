@@ -19,6 +19,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
@@ -943,7 +944,7 @@ func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repo
 		return s.resolveRepoInputID(ctx, workspaceID, repositoryID, baseBranch)
 	}
 
-	if repoInput.TrustedProviderDescriptor {
+	if repoInput.TrustedProviderDescriptor || s.pluginProviderDescriptorAuthorized(repoInput) {
 		return s.resolveTrustedRemoteRepository(ctx, workspaceID, repoInput, baseBranch)
 	}
 
@@ -1244,6 +1245,44 @@ func (s *Service) resolveRepoInputRemote(
 	return repo.ID, baseBranch, repoCreated, nil
 }
 
+// RepositoryProviderAuthorizer reports whether a repository provider identity
+// is declared by an installed, enabled plugin.
+type RepositoryProviderAuthorizer interface {
+	AuthorizesRepositoryProvider(provider string) bool
+}
+
+// pluginProviderDescriptorAuthorized reports whether repoInput carries a
+// provider descriptor owned by an installed plugin, which makes it resolvable
+// through the same path the plugin host itself uses.
+//
+// Without this, a repository picked from a plugin's picker reaches
+// parseRemoteRepositoryURL, whose host table only knows the built-in
+// providers, and task creation fails with "unsupported remote repository
+// host". The plugin registry is the authority on provider ownership, so trust
+// is established server-side; the descriptor stays a plain request body that
+// cannot assert its own trust. Built-in providers keep their existing parse
+// path so their host validation is never bypassed.
+func (s *Service) pluginProviderDescriptorAuthorized(repoInput TaskRepositoryInput) bool {
+	if s.repositoryProviderAuthorizer == nil {
+		return false
+	}
+	provider := strings.TrimSpace(repoInput.Provider)
+	if provider == "" || isBuiltinRepositoryProvider(provider) {
+		return false
+	}
+	return s.repositoryProviderAuthorizer.AuthorizesRepositoryProvider(provider)
+}
+
+// isBuiltinRepositoryProvider reports whether provider is resolved by core's
+// own URL parser rather than by a plugin.
+func isBuiltinRepositoryProvider(provider string) bool {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case providerGitHub, providerGitLab, providerAzureDevOps:
+		return true
+	}
+	return false
+}
+
 // resolveTrustedRemoteRepository persists a complete provider descriptor
 // supplied by an authorized plugin host. Unlike the built-in URL parser, this
 // path never guesses a provider or rebuilds CloneURL, preserving context paths
@@ -1285,6 +1324,9 @@ func validateTrustedRemoteRepository(input TaskRepositoryInput) error {
 	}
 	if _, err := validateProviderScope(input.ProviderScope); err != nil {
 		return errors.New("trusted remote repository provider_scope is invalid")
+	}
+	if err := repoclone.ValidateHTTPSCloneOrigin(input.RemoteURL, input.ProviderHost); err != nil {
+		return fmt.Errorf("trusted remote repository clone origin: %w", err)
 	}
 	parsed, _, err := normalizeRemoteRepositoryURL(input.RemoteURL)
 	if err != nil {
