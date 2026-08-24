@@ -5,6 +5,7 @@ import {
   joinOlderMessages,
   requestOlderMessages,
 } from "@/hooks/domains/session/older-message-pagination";
+import type { Message } from "@/lib/types/http";
 
 const debug = createDebugLogger("messages:lazyload");
 
@@ -14,6 +15,7 @@ export const OLDER_PAGE_LIMIT = 20;
  * `minUserPromptsPerLoad` is set, so a pathological session cannot loop
  * forever. */
 const MAX_PAGES_PER_LOAD = 10;
+const EMPTY_MESSAGES: Message[] = [];
 
 export type LazyLoadMessagesOptions = {
   /** Accumulate at least this many NEW user prompts per loadMore call before
@@ -36,12 +38,24 @@ function describeSkip(args: {
   return "no-cursor";
 }
 
+function hasLoadedFirstPrompt(messages: Message[]): boolean {
+  return messages.some((message) => message.author_type === "user" && message.prompt_index === 1);
+}
+
+function visibleHasMore(rawHasMore: boolean, messages: Message[]): boolean {
+  return rawHasMore && !hasLoadedFirstPrompt(messages);
+}
+
 export function useLazyLoadMessages(sessionId: string | null, options?: LazyLoadMessagesOptions) {
   const { minUserPromptsPerLoad } = options ?? {};
   // Use refs for values that should not trigger callback recreation
-  const hasMore = useAppStore((state) =>
+  const rawHasMore = useAppStore((state) =>
     sessionId ? (state.messages.metaBySession[sessionId]?.hasMore ?? false) : false,
   );
+  const messages = useAppStore((state) =>
+    sessionId ? (state.messages.bySession[sessionId] ?? EMPTY_MESSAGES) : EMPTY_MESSAGES,
+  );
+  const hasMore = visibleHasMore(rawHasMore, messages);
   const oldestCursor = useAppStore((state) =>
     sessionId ? (state.messages.metaBySession[sessionId]?.oldestCursor ?? null) : null,
   );
@@ -76,7 +90,10 @@ export function useLazyLoadMessages(sessionId: string | null, options?: LazyLoad
       try {
         const result = await inFlight;
         stateRef.current = {
-          hasMore: result.hasMore,
+          hasMore: visibleHasMore(
+            result.hasMore,
+            store.getState().messages.bySession[sessionId] ?? EMPTY_MESSAGES,
+          ),
           oldestCursor: result.oldestCursor,
           // The coordinator clears the store's shared isLoadingMore when the
           // session's LAST flight settles (this join may be one of several).
@@ -123,7 +140,10 @@ export function useLazyLoadMessages(sessionId: string | null, options?: LazyLoad
       // Sync ref immediately so the next intersection callback sees correct state
       // (the useEffect sync may not have run yet between store update and next observer fire)
       stateRef.current = {
-        hasMore: result.hasMore,
+        hasMore: visibleHasMore(
+          result.hasMore,
+          store.getState().messages.bySession[sessionId] ?? EMPTY_MESSAGES,
+        ),
         oldestCursor: result.oldestCursor,
         isLoadingMore: false,
       };
