@@ -118,3 +118,10 @@ func TestToAgentExecutionSeparatesCloneGitMetadataRootsFromWorkspaceRoots(t *tes
 	require.Equal(t, []string{"/workspace", "/workspace/attached"}, execution.WorkspaceSourceRoots)
 	require.Equal(t, []string{"/workspace/attached"}, execution.GitMetadataAttestationRoots)
 }
+
+func TestToAgentExecutionDefaultsCloneGitMetadataRootsToExecutorWorkspace(t *testing.T) {
+	execution := (&ExecutorInstance{WorkspaceSourceRoots: []string{"/workspace"}}).ToAgentExecution(&ExecutorCreateRequest{
+		GitMetadataRequirement: cloneGitMetadataRequirement(true),
+	})
+	require.Equal(t, []string{"/workspace"}, execution.GitMetadataAttestationRoots)
+}

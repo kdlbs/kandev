@@ -334,18 +334,19 @@ func TestMaterializeRepositoriesForEnvironmentMaterializesEveryDistinctCloneExec
 	manager.profileResolver = &countingProfileResolver{info: &AgentProfileInfo{AgentName: "codex-acp"}}
 	configureCloneAttachmentExecution(firstExecution, "execution-1", "session-1", "environment-1", "/executor/one")
 	secondExecution := &AgentExecution{
-		ID:                   "execution-2",
-		SessionID:            "session-2",
-		TaskEnvironmentID:    "environment-1",
-		RuntimeName:          executor.NameSSH,
-		WorkspacePath:        "/executor/two",
-		WorkspaceSourceRoots: []string{"/executor/two"},
-		Status:               v1.AgentStatusReady,
-		ACPSessionID:         "acp-two",
-		AgentID:              "codex-acp",
-		AgentProfileID:       "profile-1",
-		AgentCommand:         "codex-acp",
-		agentctl:             workspaceMaterializationAgentctlClient(t, second.URL),
+		ID:                          "execution-2",
+		SessionID:                   "session-2",
+		TaskEnvironmentID:           "environment-1",
+		RuntimeName:                 executor.NameSSH,
+		WorkspacePath:               "/executor/two",
+		WorkspaceSourceRoots:        []string{"/executor/two"},
+		GitMetadataAttestationRoots: []string{"/executor/two"},
+		Status:                      v1.AgentStatusReady,
+		ACPSessionID:                "acp-two",
+		AgentID:                     "codex-acp",
+		AgentProfileID:              "profile-1",
+		AgentCommand:                "codex-acp",
+		agentctl:                    workspaceMaterializationAgentctlClient(t, second.URL),
 	}
 	secondExecution.setRuntimeEnvironment(map[string]string{"CODEX_CONFIG": `{}`})
 	if err := manager.executionStore.Add(secondExecution); err != nil {
@@ -380,7 +381,7 @@ func TestMaterializeRepositoriesForEnvironmentCompensatesFirstCloneExecutorWhenS
 	manager.registry.LoadDefaults()
 	manager.profileResolver = &countingProfileResolver{info: &AgentProfileInfo{AgentName: "codex-acp"}}
 	configureCloneAttachmentExecution(firstExecution, "execution-1", "session-1", "environment-1", "/executor/one")
-	secondExecution := &AgentExecution{ID: "execution-2", SessionID: "session-2", TaskEnvironmentID: "environment-1", RuntimeName: executor.NameSSH, WorkspacePath: "/executor/two", WorkspaceSourceRoots: []string{"/executor/two"}, Status: v1.AgentStatusReady, agentctl: workspaceMaterializationAgentctlClient(t, second.URL)}
+	secondExecution := &AgentExecution{ID: "execution-2", SessionID: "session-2", TaskEnvironmentID: "environment-1", RuntimeName: executor.NameSSH, WorkspacePath: "/executor/two", WorkspaceSourceRoots: []string{"/executor/two"}, GitMetadataAttestationRoots: []string{"/executor/two"}, Status: v1.AgentStatusReady, agentctl: workspaceMaterializationAgentctlClient(t, second.URL)}
 	secondExecution.setRuntimeEnvironment(map[string]string{"CODEX_CONFIG": `{}`})
 	if err := manager.executionStore.Add(secondExecution); err != nil {
 		t.Fatal(err)
@@ -442,7 +443,7 @@ func TestMaterializeRepositoriesForEnvironmentCompensatesRefreshedCloneExecutors
 		{name: "final attestation", configureSecond: func(server *workspaceRebindAgentctlServer) { server.failAttestAt = 1 }, wantSecondRemoved: true},
 		{name: "configure", configureSecond: func(server *workspaceRebindAgentctlServer) { server.failConfigureAt = 1 }, wantSecondRemoved: true},
 		{name: "start", configureSecond: func(server *workspaceRebindAgentctlServer) { server.failStartAt = 1 }, wantSecondRemoved: true},
-		{name: "ACP restoration", configureSecond: func(server *workspaceRebindAgentctlServer) { server.failLoadAt = 1 }, wantSecondRemoved: true},
+		{name: "ACP restoration", configureSecond: func(server *workspaceRebindAgentctlServer) { server.failNewAt = 1 }, wantSecondRemoved: true},
 		{name: "permanent rollback configure", configureSecond: func(server *workspaceRebindAgentctlServer) { server.failConfigure = true }, wantSecondFailed: true, wantSecondRemoved: true},
 		{name: "checkout cleanup", configureSecond: func(server *workspaceRebindAgentctlServer) { server.failStartAt = 1; server.failRemove = true }, wantSecondFailed: true},
 	} {
@@ -460,7 +461,7 @@ func TestMaterializeRepositoriesForEnvironmentCompensatesRefreshedCloneExecutors
 			manager.registry.LoadDefaults()
 			manager.profileResolver = &countingProfileResolver{info: &AgentProfileInfo{AgentName: "codex-acp"}}
 			configureCloneAttachmentExecution(firstExecution, "execution-1", "session-1", "environment-1", "/executor/one")
-			secondExecution := &AgentExecution{ID: "execution-2", SessionID: "session-2", TaskEnvironmentID: "environment-1", RuntimeName: executor.NameSSH, WorkspacePath: "/executor/two", WorkspaceSourceRoots: []string{"/executor/two"}, Status: v1.AgentStatusReady, ACPSessionID: "acp-two", AgentID: "codex-acp", AgentProfileID: "profile-1", AgentCommand: "codex-acp", agentctl: workspaceMaterializationAgentctlClient(t, second.URL)}
+			secondExecution := &AgentExecution{ID: "execution-2", SessionID: "session-2", TaskEnvironmentID: "environment-1", RuntimeName: executor.NameSSH, WorkspacePath: "/executor/two", WorkspaceSourceRoots: []string{"/executor/two"}, GitMetadataAttestationRoots: []string{"/executor/two"}, Status: v1.AgentStatusReady, ACPSessionID: "acp-two", AgentID: "codex-acp", AgentProfileID: "profile-1", AgentCommand: "codex-acp", agentctl: workspaceMaterializationAgentctlClient(t, second.URL)}
 			secondExecution.setRuntimeEnvironment(map[string]string{"CODEX_CONFIG": `{}`})
 			if err := manager.executionStore.Add(secondExecution); err != nil {
 				t.Fatal(err)
@@ -608,6 +609,7 @@ func TestMaterializeRepositoriesForEnvironmentRollsBackClonePolicyOnAttestationO
 			execution.AgentID = "codex-acp"
 			execution.AgentProfileID = "profile-1"
 			execution.AgentCommand = "codex-acp"
+			execution.GitMetadataAttestationRoots = []string{"/executor/workspace"}
 			execution.setRuntimeEnvironment(map[string]string{"CODEX_CONFIG": `{}`})
 
 			_, err := manager.MaterializeRepositoriesForEnvironment(context.Background(), "environment-1", []WorkspaceRepositoryMaterialization{{

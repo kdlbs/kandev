@@ -356,10 +356,12 @@ type workspaceRebindAgentctlServer struct {
 	failMaterializeAt int
 	failRemove        bool
 	failLoadAt        int
+	failNewAt         int
 	materialized      map[string]bool
 	operations        []string
 	materializeCount  int
 	loadCount         int
+	newSessionCount   int
 	loadedSessions    []string
 	actionLog         []string
 	connections       []*websocket.Conn
@@ -585,8 +587,12 @@ func newWorkspaceRebindAgentctlServer(t *testing.T, neverReady bool) *workspaceR
 				continue
 			}
 			if request.Action == "agent.session.new" {
+				server.mu.Lock()
+				server.newSessionCount++
+				failed := server.failNewAt == server.newSessionCount
+				server.mu.Unlock()
 				response, _ := ws.NewResponse(request.ID, request.Action, map[string]any{
-					"success":    true,
+					"success":    !failed,
 					"session_id": "acp-new",
 				})
 				data, _ := json.Marshal(response)
