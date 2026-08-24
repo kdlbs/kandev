@@ -49,6 +49,7 @@ test.describe.serial("member plugin settings", () => {
     await expect(row.getByTestId(`plugin-row-link-${PLUGIN_ID}`)).toBeVisible();
     await expect(page.getByTestId("install-plugin-trigger")).toHaveCount(0);
     await expect(page.getByTestId("plugins-sync-button")).toHaveCount(0);
+    await expect(page.getByTestId("plugins-check-updates-button")).toHaveCount(0);
     await expect(page.getByTestId("plugins-auto-update-default")).toHaveCount(0);
     await expect(row.getByRole("button", { name: /Enable|Disable|Uninstall|Update/ })).toHaveCount(
       0,

@@ -136,8 +136,8 @@ capabilities:
 
 actions:
   - key: "connection.save"
-    scope: workspace                          # workspace | task | repository
-    access: admin                             # authenticated (default) | admin
+    scope: workspace
+    access: admin                             # defaults to authenticated
     max_body_bytes: 65536
 
 repository_providers: ["example-repository-provider"]
@@ -154,6 +154,7 @@ webhooks:
   - key: "slack-events"
     description: "Slack Events API webhook"
     method: "POST"
+    access: public
 
 config_schema:
   type: object
@@ -319,20 +320,17 @@ record, and state.
 
 ### Authenticated plugin actions (browser -> kandev -> plugin)
 
-`POST /api/plugins/{id}/actions/{key}` is the only browser action route. Kandev first
-applies ordinary HTTP authentication, then rejects inactive plugins or undeclared keys
-and authorizes every referenced workspace, task, or repository. It derives a task's
-workspace relation server-side, passes verified actor/resource context separately from
-bounded untrusted JSON, invokes `Plugin.HandleAction` with a hard timeout and
-cancellation, and relays only an allowlisted response-header set. Provider callback
-routes under `/webhooks/` stay public and must not serve authenticated browser actions.
-Actions default to `access: authenticated`; `access: admin` makes Kandev reject
-non-administrator callers before reading the action envelope or invoking the plugin.
-Task-scoped actions require a verified task and may optionally select one persisted
-repository attached to that task; Kandev rejects unattached repository IDs and passes
-the accepted repository separately in `VerifiedActionContext`.
-The manifest's canonical action field is `scope`; `resource_scope` remains a read-only
-compatibility alias for packages produced during the prerelease contract rollout.
+`POST /api/plugins/{id}/actions/{key}` is the only browser action route. Kandev
+authenticates the caller, rejects inactive plugins and undeclared keys, and authorizes
+each referenced workspace, task, or repository. It derives a task's workspace
+server-side. `access` defaults to `authenticated`; `admin` rejects non-administrators
+before reading the bounded envelope or invoking the plugin. Kandev passes verified
+actor/resource context separately from untrusted JSON, applies a hard timeout and
+cancellation, and relays only allowlisted response headers. Public `/webhooks/`
+callbacks cannot serve browser actions. Task actions may select one persisted
+repository attached to the verified task; unattached IDs are rejected and the accepted
+repository is separate in `VerifiedActionContext`. The canonical manifest field is
+`scope`; `resource_scope` is a read-only prerelease compatibility alias.
 
 ### Dynamic composer reference sources (plugin -> kandev)
 
@@ -391,10 +389,10 @@ Wildcard subscriptions: `task.*`, `agent.*`, `<feature>.*` (any subject prefix).
 POST /api/plugins/{plugin_id}/webhooks/{webhook_key}
 ```
 
-This remains kandev's one plugin-facing **HTTP** endpoint (external systems like Slack
-or Jira cannot speak gRPC). Kandev validates the plugin is active and the webhook key
-is declared, converts the HTTP request into a `WebhookRequest` gRPC message, and calls
-the plugin's `Plugin.HandleWebhook` RPC:
+This is kandev's only plugin-facing **HTTP** endpoint. Anonymous callers need
+`access: public`; otherwise kandev returns 401 without revealing plugin/key. Kandev
+validates plugin/key, strips session/PAT, converts to `WebhookRequest`, and calls
+`Plugin.HandleWebhook`:
 
 ```proto
 message WebhookRequest {

@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import { IconTicket } from "@tabler/icons-react";
-import { Button } from "@kandev/ui/button";
 import { CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { settingsCredentialClassName } from "@/components/settings/settings-control";
@@ -17,6 +16,7 @@ import { SettingsCard } from "@/components/settings/settings-card";
 import { TaskPresetsSection } from "@/components/jira/task-presets-section";
 import { JiraIssueWatchersSection } from "@/components/jira/jira-issue-watchers-section";
 import { JiraEnabledControl } from "@/components/jira/jira-enabled-control";
+import { JiraActionBar } from "@/components/jira/jira-action-bar";
 import {
   IntegrationAuthStatusBanner,
   type IntegrationAuthHealth,
@@ -290,45 +290,6 @@ function configToHealth(config: JiraConfig | null): IntegrationAuthHealth | null
   };
 }
 
-type ActionBarProps = {
-  testing: boolean;
-  loading: boolean;
-  hasConfig: boolean;
-  disableTest: boolean;
-  onTest: () => void;
-  onDelete: () => void;
-};
-
-function ActionBar({ testing, loading, hasConfig, disableTest, onTest, onDelete }: ActionBarProps) {
-  const { t } = useTranslation();
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <Button
-        type="button"
-        variant="outline"
-        onClick={onTest}
-        disabled={testing || loading || disableTest}
-        className="cursor-pointer"
-        title={disableTest ? t("jira:pasteATokenToTestTheConnection") : undefined}
-        data-testid="jira-test-button"
-      >
-        {testing ? t("jira:testingConnection") : t("jira:testConnection")}
-      </Button>
-      {hasConfig && (
-        <Button
-          type="button"
-          variant="destructive"
-          onClick={onDelete}
-          className="ml-auto cursor-pointer"
-          data-testid="jira-delete-button"
-        >
-          {t("jira:removeConfiguration")}
-        </Button>
-      )}
-    </div>
-  );
-}
-
 function useJiraConfigRefresh(workspaceId: string, setConfig: (cfg: JiraConfig | null) => void) {
   // Background refresh so the auth-health banner picks up new probe results
   // from the backend poller without requiring a page reload. We re-fetch the
@@ -400,7 +361,6 @@ function useJiraConfigMutations({
   }, [workspaceId, form, setConfig, setForm, setTestResult, setSaving, t, toast]);
 
   const handleDelete = useCallback(async () => {
-    if (!confirm(t("jira:removeJiraConfiguration"))) return;
     try {
       await deleteJiraConfig({ workspaceId });
       setConfig(null);
@@ -560,7 +520,7 @@ export function JiraConnectionSection({ workspaceId }: { workspaceId: string }) 
           )}
           <TestResultAlert result={s.testResult} />
           <Separator />
-          <ActionBar
+          <JiraActionBar
             testing={s.testing}
             loading={s.loading}
             hasConfig={!!s.config}

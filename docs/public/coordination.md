@@ -49,6 +49,13 @@ Use an additional session when agents need the same task, repository attachments
 
 The dialog shows the environment, branch, and executor the session will share. Two sessions can edit the same files concurrently; assign files or phases explicitly.
 
+Additional sessions attach to the task's existing workspace. They do not create a
+second checkout, switch branches, pull, or run repository setup again, so
+uncommitted files remain visible to every session. If Kandev reports that the
+workspace is still preparing, wait for the first session to finish preparing
+and retry. If it reports that reuse is unsafe, restore or repair that existing
+workspace before retrying; starting another session never replaces it.
+
 Right-click a session tab to **Rename…**, **Set as Primary**, stop, resume, delete, share, use **Handoff** to another profile, or **Close Others**, when that action is available for the session state. Names are trimmed and limited to 120 characters. **Handoff** creates another session; it does not move the task or transfer its workflow state.
 
 ### Spawn a session from an agent

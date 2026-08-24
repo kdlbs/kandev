@@ -119,3 +119,17 @@ describe("QuickChatTabItem rename", () => {
     expect(queryByLabelText(RENAME_LABEL)).toBeNull();
   });
 });
+
+describe("QuickChatTabItem activity", () => {
+  it("shows the grid spinner while its conversation is working", () => {
+    const { getByRole } = render(<QuickChatTabItem {...makeProps({ isWorking: true })} />);
+
+    expect(getByRole("status", { name: "Loading" })).toBeTruthy();
+  });
+
+  it("does not show a spinner for a settled conversation", () => {
+    const { queryByRole } = render(<QuickChatTabItem {...makeProps({ isWorking: false })} />);
+
+    expect(queryByRole("status", { name: "Loading" })).toBeNull();
+  });
+});

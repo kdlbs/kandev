@@ -416,18 +416,21 @@ type RemoteStatusProvider interface {
 
 // ExecutorCreateRequest contains parameters for creating an agentctl instance.
 type ExecutorCreateRequest struct {
-	InstanceID           string
-	TaskID               string
-	TaskTitle            string
-	SessionID            string
-	TaskEnvironmentID    string // Env this execution belongs to (shared across sessions in same task)
-	AgentProfileID       string
-	OfficeAgentProfileID string
-	PromptTurnID         string
-	WorkspacePath        string
-	WorkspaceSourceRoots []string
-	Protocol             string
-	Env                  map[string]string
+	InstanceID        string
+	TaskID            string
+	TaskTitle         string
+	SessionID         string
+	TaskEnvironmentID string // Env this execution belongs to (shared across sessions in same task)
+	// WorkspaceReuseRequired means this runtime must attach to the supplied
+	// environment handle and must never fall back to provisioning a replacement.
+	WorkspaceReuseRequired bool
+	AgentProfileID         string
+	OfficeAgentProfileID   string
+	PromptTurnID           string
+	WorkspacePath          string
+	WorkspaceSourceRoots   []string
+	Protocol               string
+	Env                    map[string]string
 	// ApprovedSecretEnvKeys contains repository binding keys explicitly
 	// approved for SSH forwarding. Other request env keys remain filtered.
 	ApprovedSecretEnvKeys  []string
@@ -444,13 +447,17 @@ type ExecutorCreateRequest struct {
 	ComparisonTargets        map[string]models.ComparisonTarget
 	McpServers               []McpServerConfig
 	AgentConfig              agents.Agent // Agent type info needed by runtimes
-	PreviousExecutionID      string       // Non-empty when reconnecting to a previous execution
-	McpMode                  string       // MCP tool mode: "task" (default), "config", or "office"
-	McpProviders             []string     // Normalized provider capabilities attached to the task
-	McpProfile               *mcpprofile.Context
-	AuthToken                string // Previously handshaken agentctl token for reconnects
-	BootstrapNonce           string // Stored nonce for re-handshake after container restart
-	AgentctlStartupConfig    commonconfig.AgentctlStartupConfig
+	// ManagedRuntimeVersion is the effective exact version resolved for this
+	// launch. Remote executors use it during preflight before agentctl receives
+	// the final command.
+	ManagedRuntimeVersion string
+	PreviousExecutionID   string   // Non-empty when reconnecting to a previous execution
+	McpMode               string   // MCP tool mode: "task" (default), "config", or "office"
+	McpProviders          []string // Normalized provider capabilities attached to the task
+	McpProfile            *mcpprofile.Context
+	AuthToken             string // Previously handshaken agentctl token for reconnects
+	BootstrapNonce        string // Stored nonce for re-handshake after container restart
+	AgentctlStartupConfig commonconfig.AgentctlStartupConfig
 
 	// OnProgress is an optional callback for streaming preparation progress.
 	// Executors that perform multi-step setup (e.g. Sprites, remote Docker) can

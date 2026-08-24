@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-workspace-repository-marker"]
 plan: "plan.md"
-spec: "../../specs/tasks/multi-branch/spec.md"
+spec: "../../specs/tasks/requirements/multi-branch.md"
 ---
 
 # Task 04: Prove workspace marker exclusion

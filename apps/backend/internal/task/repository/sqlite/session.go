@@ -475,7 +475,8 @@ const taskSessionSelectCols = `ts.id, ts.task_id,
 	COALESCE(NULLIF(te.workspace_path, ''), ts.workspace_path),
 	ts.agent_profile_snapshot, ts.executor_snapshot, ts.environment_snapshot, ts.repository_snapshot,
 	ts.state, ts.error_message, ts.metadata, ts.started_at, ts.completed_at, ts.updated_at,
-	ts.is_primary, ts.review_status, ts.is_passthrough, ts.task_environment_id, ts.name, ts.last_read_message_id`
+	ts.is_primary, ts.review_status, ts.is_passthrough, ts.task_environment_id, ts.name, ts.last_read_message_id,
+	ts.cost_subcents, ts.tokens_in, ts.tokens_cached_in, ts.tokens_out`
 
 // taskSessionFromClause is the FROM clause that pairs with taskSessionSelectCols.
 // Always reference task_sessions as `ts` and executors_running as `er` in WHERE/ORDER.
@@ -521,16 +522,266 @@ func (r *Repository) CreateTaskSessionWithInitialRuntimeSeed(ctx context.Context
 		return err
 	}
 
+	if err := r.applyInitialRuntimeSeedTx(ctx, tx, session); err != nil {
+		return err
+	}
+	if err := r.createTaskSession(ctx, tx, session); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// CreateTaskSessionWithWorkspaceBinding atomically elects the first session
+// allowed to materialize a task workspace, or attaches a later session to its
+// ready canonical environment. The transaction deliberately happens before a
+// session row is committed: a preparing or unsafe workspace therefore leaves
+// no orphan session for a caller to clean up.
+//
+// The candidate is persisted only when this call wins the election. It may be
+// a worktree environment without a workspace path because that path is not
+// known until the elected launch has completed preparation.
+//
+//nolint:cyclop // The state cases are the durable workspace binding state machine.
+func (r *Repository) CreateTaskSessionWithWorkspaceBinding(
+	ctx context.Context,
+	session *models.TaskSession,
+	candidate *models.TaskEnvironment,
+) error {
+	if candidate == nil {
+		return fmt.Errorf("workspace binding candidate is required")
+	}
+	if candidate.TaskID != session.TaskID {
+		return fmt.Errorf("workspace binding task mismatch")
+	}
+	if session.ID == "" {
+		session.ID = uuid.New().String()
+	}
+
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.taskCleanupBarrierLocked(ctx, tx, session.TaskID); err != nil {
+		return err
+	}
+
+	var envID, status, materializationSessionID string
+	err = tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT id, status, materialization_session_id FROM task_environments WHERE task_id = ?
+	`), session.TaskID).Scan(&envID, &status, &materializationSessionID)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		if candidate.ID == "" {
+			candidate.ID = uuid.New().String()
+		}
+		candidate.Status = models.TaskEnvironmentStatusCreating
+		candidate.MaterializationSessionID = session.ID
+		candidate.CreatedAt = r.nowUTC()
+		candidate.UpdatedAt = candidate.CreatedAt
+		if err := r.insertCreatingWorkspaceEnvironment(ctx, tx, candidate); err != nil {
+			return err
+		}
+		session.TaskEnvironmentID = candidate.ID
+	case err != nil:
+		return fmt.Errorf("load workspace binding: %w", err)
+	case models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusCreating:
+		abandoned, err := r.failAbandonedWorkspaceMaterialization(ctx, tx, envID, materializationSessionID)
+		if err != nil {
+			return err
+		}
+		if abandoned {
+			if err := tx.Commit(); err != nil {
+				return fmt.Errorf("persist abandoned workspace materialization failure: %w", err)
+			}
+			return fmt.Errorf("%w: the initial workspace materialization did not complete", models.ErrWorkspaceReuseUnsafe)
+		}
+		return fmt.Errorf("%w: retry after the initial workspace launch completes", models.ErrWorkspacePreparing)
+	case models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusReady || models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusStopped:
+		session.TaskEnvironmentID = envID
+	default:
+		return fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
+	}
+
+	if err := r.applyInitialRuntimeSeedTx(ctx, tx, session); err != nil {
+		return err
+	}
+	if err := r.createTaskSession(ctx, tx, session); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// CreateTaskSessionWithSharedGroupWorkspaceBinding atomically elects the
+// shared group's first materializer. The elected environment is published to
+// the group while it is still creating, so another member can never create a
+// second physical workspace: it receives workspace_preparing until the elected
+// owner finalizes the canonical environment.
+func (r *Repository) CreateTaskSessionWithSharedGroupWorkspaceBinding(
+	ctx context.Context,
+	session *models.TaskSession,
+	candidate *models.TaskEnvironment,
+	groupID string,
+) error {
+	if candidate == nil || groupID == "" {
+		return fmt.Errorf("shared workspace binding requires a candidate and group")
+	}
+	if candidate.TaskID != session.TaskID {
+		return fmt.Errorf("shared workspace binding task mismatch")
+	}
+	if session.ID == "" {
+		session.ID = uuid.New().String()
+	}
+
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.taskCleanupBarrierLocked(ctx, tx, session.TaskID); err != nil {
+		return err
+	}
+
+	if candidate.ID == "" {
+		candidate.ID = uuid.New().String()
+	}
+	candidate.Status = models.TaskEnvironmentStatusCreating
+	candidate.MaterializationSessionID = session.ID
+	candidate.CreatedAt = r.nowUTC()
+	candidate.UpdatedAt = candidate.CreatedAt
+
+	res, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_workspace_groups
+		SET materialized_environment_id = ?, updated_at = ?
+		WHERE id = ?
+		  AND materialized_environment_id = ''
+		  AND EXISTS (
+			SELECT 1 FROM task_workspace_group_members
+			WHERE workspace_group_id = ? AND task_id = ? AND released_at IS NULL
+		  )
+	`), candidate.ID, candidate.UpdatedAt, groupID, groupID, session.TaskID)
+	if err != nil {
+		return fmt.Errorf("elect shared workspace materializer: %w", err)
+	}
+	won, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("inspect shared workspace election: %w", err)
+	}
+	if won == 0 {
+		return r.bindReadySharedGroupEnvironment(ctx, tx, session, groupID)
+	}
+
+	if err := r.insertCreatingWorkspaceEnvironment(ctx, tx, candidate); err != nil {
+		return err
+	}
+	session.TaskEnvironmentID = candidate.ID
+	if err := r.applyInitialRuntimeSeedTx(ctx, tx, session); err != nil {
+		return err
+	}
+	if err := r.createTaskSession(ctx, tx, session); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *Repository) bindReadySharedGroupEnvironment(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	session *models.TaskSession,
+	groupID string,
+) error {
+	var environmentID, status string
+	err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT COALESCE(e.id, ''), COALESCE(e.status, '')
+		FROM task_workspace_groups g
+		JOIN task_workspace_group_members m
+		  ON m.workspace_group_id = g.id AND m.task_id = ? AND m.released_at IS NULL
+		LEFT JOIN task_environments e ON e.id = g.materialized_environment_id
+		WHERE g.id = ?
+	`), session.TaskID, groupID).Scan(&environmentID, &status)
+	if errors.Is(err, sql.ErrNoRows) || environmentID == "" {
+		return fmt.Errorf("%w: shared workspace group is unavailable", models.ErrWorkspaceReuseUnsafe)
+	}
+	if err != nil {
+		return fmt.Errorf("load shared workspace environment: %w", err)
+	}
+	switch models.TaskEnvironmentStatus(status) {
+	case models.TaskEnvironmentStatusReady, models.TaskEnvironmentStatusStopped:
+		session.TaskEnvironmentID = environmentID
+	case models.TaskEnvironmentStatusCreating:
+		return fmt.Errorf("%w: retry after the shared workspace launch completes", models.ErrWorkspacePreparing)
+	default:
+		return fmt.Errorf("%w: shared workspace is not attachable", models.ErrWorkspaceReuseUnsafe)
+	}
+	if err := r.applyInitialRuntimeSeedTx(ctx, tx, session); err != nil {
+		return err
+	}
+	if err := r.createTaskSession(ctx, tx, session); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *Repository) insertCreatingWorkspaceEnvironment(ctx context.Context, tx *sqlx.Tx, candidate *models.TaskEnvironment) error {
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO task_environments (
+			id, task_id, executor_type, executor_id, executor_profile_id,
+			control_port, status, materialization_session_id, workspace_path,
+			container_id, sandbox_id, task_dir_name, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), candidate.ID, candidate.TaskID, candidate.ExecutorType, candidate.ExecutorID,
+		candidate.ExecutorProfileID, candidate.ControlPort, string(candidate.Status),
+		candidate.MaterializationSessionID, candidate.WorkspacePath, candidate.ContainerID,
+		candidate.SandboxID, candidate.TaskDirName, candidate.CreatedAt, candidate.UpdatedAt); err != nil {
+		return fmt.Errorf("create workspace binding: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) failAbandonedWorkspaceMaterialization(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	environmentID string,
+	ownerID string,
+) (bool, error) {
+	var ownerState models.TaskSessionState
+	ownerErr := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT state FROM task_sessions WHERE id = ?`), ownerID).Scan(&ownerState)
+	abandoned := ownerID == "" || errors.Is(ownerErr, sql.ErrNoRows) || isTerminalWorkspaceMaterializerState(ownerState)
+	if ownerErr != nil && !errors.Is(ownerErr, sql.ErrNoRows) {
+		return false, fmt.Errorf("load workspace materialization owner: %w", ownerErr)
+	}
+	if !abandoned {
+		return false, nil
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_environments
+		SET status = ?, materialization_session_id = '', updated_at = ?
+		WHERE id = ? AND status = ?
+	`), string(models.TaskEnvironmentStatusFailed), r.nowUTC(), environmentID, string(models.TaskEnvironmentStatusCreating)); err != nil {
+		return false, fmt.Errorf("fail abandoned workspace materialization: %w", err)
+	}
+	return true, nil
+}
+
+func isTerminalWorkspaceMaterializerState(state models.TaskSessionState) bool {
+	switch state {
+	case models.TaskSessionStateCompleted, models.TaskSessionStateFailed, models.TaskSessionStateCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
+// applyInitialRuntimeSeedTx preserves CreateTaskSessionWithInitialRuntimeSeed's
+// one-time seed semantics for the workspace-binding creation path.
+func (r *Repository) applyInitialRuntimeSeedTx(ctx context.Context, tx *sqlx.Tx, session *models.TaskSession) error {
 	initialRuntimeConfig, hasInitialRuntimeConfig, initialRuntimeConfigProfileID, hasInitialRuntimeSeedKey, err := r.loadInitialSessionRuntimeSeedTx(ctx, tx, session.TaskID)
 	if err != nil {
 		return err
 	}
-
 	var sessionCount int
-	if err := tx.QueryRowContext(ctx, r.db.Rebind(
-		`SELECT COUNT(*) FROM task_sessions WHERE task_id = ?`,
-	), session.TaskID).Scan(&sessionCount); err != nil {
-		return fmt.Errorf("check task sessions before initial runtime session: %w", err)
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT COUNT(*) FROM task_sessions WHERE task_id = ?`), session.TaskID).Scan(&sessionCount); err != nil {
+		return fmt.Errorf("check task sessions before workspace binding: %w", err)
 	}
 	if sessionCount == 0 {
 		if session.Metadata == nil {
@@ -541,13 +792,7 @@ func (r *Repository) CreateTaskSessionWithInitialRuntimeSeed(ctx context.Context
 			session.Metadata[models.SessionMetaKeyRuntimeConfigOverrides] = initialRuntimeConfig
 		}
 	} else if models.IsOriginalTaskSession(session.Metadata) {
-		// PrepareSession performs a read before this transaction. If another
-		// launch won the race, do not persist the stale origin marker.
 		delete(session.Metadata, models.SessionMetaKeyOrigin)
-	}
-
-	if err := r.createTaskSession(ctx, tx, session); err != nil {
-		return err
 	}
 	if hasInitialRuntimeSeedKey {
 		if _, err := r.removeTaskMetadataKeyWithExecutor(ctx, tx, session.TaskID, models.MetaKeyInitialSessionRuntimeConfig); err != nil {
@@ -557,7 +802,7 @@ func (r *Repository) CreateTaskSessionWithInitialRuntimeSeed(ctx context.Context
 			return fmt.Errorf("consume initial runtime seed profile: %w", err)
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 func (r *Repository) loadInitialSessionRuntimeSeedTx(
@@ -743,6 +988,7 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID, &name, &lastReadMessageID,
+		&session.CostSubcents, &session.TokensIn, &session.TokensCachedIn, &session.TokensOut,
 	)
 
 	if err == sql.ErrNoRows {
@@ -1898,29 +2144,16 @@ func (r *Repository) GetLastAgentMessage(ctx context.Context, sessionID string) 
 	return content, nil
 }
 
-// IncrementTaskSessionUsage adds the given deltas to the cumulative
+// IncrementTaskSessionUsageTx adds the given deltas to the cumulative
 // tokens / cost columns on task_sessions, including cached input tokens
 // (tokens_cached_in mirrors office_cost_events.tokens_cached_in and is kept
-// separate from tokens_in because it is priced differently). Used by the
-// office cost subscriber after a cost event lands so the per-session totals
-// stay in sync without re-summing office_cost_events. The model + DTO
-// don't surface these columns yet (DB-only per the office-costs
-// wedge); the cost explorer follow-up will expose them.
-//
-// Delegates to IncrementTaskSessionUsageTx using r.db as the executor; a
-// caller that needs this atomic with another write (e.g. the office cost
-// subscriber's ledger insert) should call the Tx variant directly with a
-// shared transaction instead.
-func (r *Repository) IncrementTaskSessionUsage(
-	ctx context.Context, sessionID string, tokensIn, tokensCachedIn, tokensOut, costSubcents int64,
-) error {
-	return r.IncrementTaskSessionUsageTx(ctx, nil, sessionID, tokensIn, tokensCachedIn, tokensOut, costSubcents)
-}
-
-// IncrementTaskSessionUsageTx implements shared.SessionUsageWriterTx: same
-// write as IncrementTaskSessionUsage, but executed against tx when non-nil
-// (falling back to r.db, the shared writer connection, when tx is nil) so a
-// caller can make this atomic with another write in the same transaction.
+// separate from tokens_in because it is priced differently). Surfaced on
+// models.TaskSession and dto.TaskSessionDTO. internal/task/usage's writer is
+// the sole production caller (docs/specs/task-cost-ledger/spec.md AC-10,
+// AC-21) — it inserts a task_usage_events row and increments this rollup in
+// one transaction (insertUsageEventAndRollup in this package), so this
+// method is executed against tx when non-nil (falling back to r.db, the
+// shared writer connection, when tx is nil).
 func (r *Repository) IncrementTaskSessionUsageTx(
 	ctx context.Context, tx *sqlx.Tx, sessionID string, tokensIn, tokensCachedIn, tokensOut, costSubcents int64,
 ) error {
@@ -2377,6 +2610,7 @@ func scanTaskSessionRow(rows *sql.Rows) (*models.TaskSession, error) {
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID, &name, &lastReadMessageID,
+		&session.CostSubcents, &session.TokensIn, &session.TokensCachedIn, &session.TokensOut,
 	)
 	if err != nil {
 		return nil, err

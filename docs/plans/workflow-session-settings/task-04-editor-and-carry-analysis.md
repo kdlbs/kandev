@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-workflow-contract-and-validation"]
 plan: "plan.md"
-spec: "../../specs/workflow-session-settings/spec.md"
+spec: "../../specs/tasks/requirements/workflow-session-settings.md"
 ---
 
 # Task 04: Build the Conditional Rule Editor and Carry-forward Diagnostics

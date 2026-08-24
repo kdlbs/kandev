@@ -9,6 +9,8 @@ import type { AppState } from "@/lib/state/store";
 import type { MergeableState, TaskPR } from "@/lib/types/github";
 
 const SESSION_ID = "sess-1";
+const QUEUE_STATUS_TEST_ID = "pr-merge-queue-status";
+const CONFLICT_BANNER_TEST_ID = "pr-conflict-banner";
 
 function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
   return {
@@ -71,7 +73,7 @@ afterEach(() => cleanup());
 describe("PRMergeabilityRow", () => {
   it("shows the conflict banner with a Resolve conflicts CTA for a dirty PR", () => {
     const { queryByTestId } = renderRow(makePR({ mergeable_state: "dirty" }));
-    expect(queryByTestId("pr-conflict-banner")).not.toBeNull();
+    expect(queryByTestId(CONFLICT_BANNER_TEST_ID)).not.toBeNull();
     expect(queryByTestId("pr-resolve-conflicts-button")).not.toBeNull();
   });
 
@@ -79,7 +81,7 @@ describe("PRMergeabilityRow", () => {
     const { container, queryByTestId } = renderRow(
       makePR({ mergeable_state: "blocked", checks_state: "failure" }),
     );
-    expect(queryByTestId("pr-conflict-banner")).toBeNull();
+    expect(queryByTestId(CONFLICT_BANNER_TEST_ID)).toBeNull();
     expect(queryByTestId("pr-blocked-note")).not.toBeNull();
     expect(queryByTestId("pr-blocked-shield-icon")).not.toBeNull();
     expect(container.textContent).toContain("Blocked by branch protection");
@@ -147,8 +149,46 @@ describe("PRMergeabilityRow", () => {
   it("hides the Resolve conflicts CTA when there is no active session", () => {
     const { queryByTestId } = renderRow(makePR({ mergeable_state: "dirty" }), null);
     // Banner still surfaces the conflict, but the CTA needs a session to target.
-    expect(queryByTestId("pr-conflict-banner")).not.toBeNull();
+    expect(queryByTestId(CONFLICT_BANNER_TEST_ID)).not.toBeNull();
     expect(queryByTestId("pr-resolve-conflicts-button")).toBeNull();
+  });
+});
+
+describe("PRMergeabilityRow queue state", () => {
+  it("replaces mergeability with queue state and metadata for an active entry", () => {
+    const { getByTestId, queryByTestId, container } = renderRow(
+      makePR({
+        merge_queue_state: "mergeable",
+        merge_queue_position: 2,
+        merge_queue_estimated_time_to_merge_seconds: 120,
+        mergeable_state: "dirty",
+      }),
+    );
+
+    expect(getByTestId(QUEUE_STATUS_TEST_ID)).not.toBeNull();
+    expect(container.textContent).toContain("Merge queue: Mergeable");
+    expect(container.textContent).toContain("Position 2");
+    expect(container.textContent).toContain("2 minutes");
+    expect(queryByTestId(CONFLICT_BANNER_TEST_ID)).toBeNull();
+  });
+
+  it("keeps queue state visible when position and estimate are absent", () => {
+    const { getByTestId, container } = renderRow(
+      makePR({ merge_queue_state: "locked", mergeable_state: "blocked" }),
+    );
+
+    expect(getByTestId(QUEUE_STATUS_TEST_ID)).not.toBeNull();
+    expect(container.textContent).toContain("Merge queue: Locked");
+    expect(container.textContent).not.toContain("Position");
+  });
+
+  it("does not show a stale queue entry after a terminal transition", () => {
+    const { queryByTestId, getByTestId } = renderRow(
+      makePR({ state: "merged", merge_queue_state: "queued" }),
+    );
+
+    expect(queryByTestId(QUEUE_STATUS_TEST_ID)).toBeNull();
+    expect(getByTestId("row-host").childElementCount).toBe(0);
   });
 });
 

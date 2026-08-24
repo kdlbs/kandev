@@ -685,7 +685,7 @@ export class SessionPage {
   /**
    * Archive a task via the sidebar context menu.
    * Hovers to reveal the menu trigger, opens it, clicks "Archive",
-   * and confirms the archive dialog.
+   * and confirms the local archive surface or cascade dialog.
    */
   async archiveTaskInSidebar(title: string, options: { cascade?: boolean } = {}): Promise<void> {
     await this.openSidebarMenuAndClick(title, "Archive");
@@ -693,11 +693,7 @@ export class SessionPage {
       const cascadeCheckbox = this.page.getByTestId("archive-cascade-checkbox");
       await cascadeCheckbox.click();
     }
-    // Confirm the archive dialog
-    const confirmButton = this.page
-      .getByRole("alertdialog")
-      .getByRole("button", { name: "Archive" });
-    await confirmButton.click();
+    await this.page.getByTestId("archive-task-confirm").click();
   }
 
   /**
@@ -1788,6 +1784,35 @@ export class SessionPage {
     return this.page.getByTestId("plan-revert-confirm-dialog");
   }
 
+  /** Desktop row-local restore confirmation popover. */
+  revertConfirmPopover(): Locator {
+    return this.page.getByTestId("plan-revision-restore-confirm-popover");
+  }
+
+  revertConfirmPopoverOk(): Locator {
+    return this.revertConfirmPopover().getByTestId("plan-revision-restore-confirm");
+  }
+
+  revertConfirmPopoverCancel(): Locator {
+    return this.revertConfirmPopover().getByRole("button", { name: "Cancel", exact: true });
+  }
+
+  /** Phone row-local restore confirmation. */
+  revertInlineConfirmation(row: Locator): Locator {
+    return row.getByTestId("plan-revision-restore-inline-confirmation");
+  }
+
+  revertInlineConfirm(row: Locator): Locator {
+    return row.getByTestId("plan-revision-restore-confirm");
+  }
+
+  revertInlineCancel(row: Locator): Locator {
+    return this.revertInlineConfirmation(row).getByRole("button", {
+      name: "Cancel",
+      exact: true,
+    });
+  }
+
   revertConfirmOk(): Locator {
     return this.page.getByTestId("plan-revert-confirm-ok");
   }
@@ -1803,7 +1828,10 @@ export class SessionPage {
 
   /** Open the rewind popover and wait for it to render. No-op when already open. */
   async openRewind(): Promise<void> {
-    if (await this.revisionsPopover().isVisible()) return;
+    // Radix keeps the closed content in the DOM during its exit transition,
+    // and mobile can report that content as visible while the trigger is
+    // already closed. The trigger state is the authoritative open signal.
+    if ((await this.rewindButton().getAttribute("aria-expanded")) === "true") return;
     await this.rewindButton().click();
     await expect(this.revisionsPopover()).toBeVisible({ timeout: 5_000 });
   }
@@ -1812,8 +1840,8 @@ export class SessionPage {
   async revertToRevision(n: number): Promise<void> {
     await this.openRewind();
     await this.revertButton(this.revisionRow(n)).click();
-    await expect(this.revertConfirmDialog()).toBeVisible({ timeout: 5_000 });
-    await this.revertConfirmOk().click();
+    await expect(this.revertConfirmPopover()).toBeVisible({ timeout: 5_000 });
+    await this.revertConfirmPopoverOk().click();
   }
 
   // --- Plan revision preview & compare (Phase 6) ---

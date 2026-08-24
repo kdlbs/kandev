@@ -575,5 +575,18 @@
   "failedToFetchPrFiles": "Failed to fetch PR files",
   "failedToLoadCiAutomationOptions": "Failed to load CI automation options.",
   "failedToSearchGitHub": "Failed to search GitHub",
-  "pullRequestNumbered": "Pull Request #{{number}}"
+  "pullRequestNumbered": "Pull Request #{{number}}",
+  "mergeQueueEstimate_one": "Estimated merge time: {{count}} minute.",
+  "mergeQueueEstimate_other": "Estimated merge time: {{count}} minutes.",
+  "mergeQueuePosition": "Position {{position}}",
+  "mergeQueuePositionAndEstimate_one": "Position {{position}}. Estimated merge time: {{count}} minute.",
+  "mergeQueuePositionAndEstimate_other": "Position {{position}}. Estimated merge time: {{count}} minutes.",
+  "mergeQueuePositionAndSubMinuteEstimate": "Position {{position}}. Estimated merge time: less than a minute.",
+  "mergeQueueStateAwaitingChecks": "Awaiting checks",
+  "mergeQueueStateLocked": "Locked",
+  "mergeQueueStateMergeable": "Mergeable",
+  "mergeQueueStateQueued": "Queued",
+  "mergeQueueStateUnmergeable": "Unmergeable",
+  "mergeQueueStatus": "Merge queue: {{state}}",
+  "mergeQueueSubMinuteEstimate": "Estimated merge time: less than a minute."
 }

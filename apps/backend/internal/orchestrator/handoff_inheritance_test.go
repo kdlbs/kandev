@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -110,6 +111,33 @@ func TestPrepareSessionForStart_PropagatesInheritedEnvironment(t *testing.T) {
 	}
 }
 
+func TestPrepareSessionForStart_InheritedWorkspaceMissingCompensatesSession(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{repoForExecutionLookup: repo})
+	ctx := context.Background()
+	now := time.Now().UTC()
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-missing", Name: "WS", CreatedAt: now, UpdatedAt: now})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-missing", WorkspaceID: "ws-missing", Name: "WF", CreatedAt: now, UpdatedAt: now})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "parent-missing", WorkspaceID: "ws-missing", WorkflowID: "wf-missing", Title: "P", State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "child-missing", ParentID: "parent-missing", WorkspaceID: "ws-missing", WorkflowID: "wf-missing", Title: "C", State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now})
+
+	_, created, err := svc.prepareSessionForStart(ctx, &v1.Task{
+		ID:       "child-missing",
+		ParentID: "parent-missing",
+		Metadata: map[string]interface{}{"workspace": map[string]interface{}{"mode": "inherit_parent"}},
+	}, "profile-1", "exec-1", "", "")
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("prepareSessionForStart error = %v, want workspace reuse unsafe", err)
+	}
+	if created {
+		t.Fatal("failed inherited launch must not report a created session")
+	}
+	sessions, listErr := repo.ListTaskSessions(ctx, "child-missing")
+	if listErr != nil || len(sessions) != 0 {
+		t.Fatalf("sessions after rejected inherited launch = %+v, %v", sessions, listErr)
+	}
+}
+
 // When the parent has a primary session with an env, that takes
 // precedence over the group fallback.
 func TestInheritFromParentEnvironment_ParentSessionWins(t *testing.T) {
@@ -144,5 +172,34 @@ func TestInheritFromParentEnvironment_ParentSessionWins(t *testing.T) {
 	got, _ := repo.GetTaskSession(ctx, "cs1")
 	if got.TaskEnvironmentID != "env-parent" {
 		t.Errorf("parent session env should win; got %q", got.TaskEnvironmentID)
+	}
+}
+
+func TestInheritFromSharedGroupEnvironment_BindsCanonicalEnvironment(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.SetWorkspaceMaterializer(&stubMaterializer{envByTask: map[string]string{"member": "env-group"}})
+	ctx := context.Background()
+	now := time.Now().UTC()
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-shared", Name: "WS", CreatedAt: now, UpdatedAt: now})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-shared", WorkspaceID: "ws-shared", Name: "WF", CreatedAt: now, UpdatedAt: now})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "member", WorkspaceID: "ws-shared", WorkflowID: "wf-shared", Title: "member", State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now})
+	_ = repo.CreateTaskSession(ctx, &models.TaskSession{ID: "member-session", TaskID: "member", State: models.TaskSessionStateCreated, StartedAt: now, UpdatedAt: now})
+
+	if err := svc.inheritFromSharedGroup(ctx, &v1.Task{ID: "member"}, "member-session"); err != nil {
+		t.Fatalf("inherit shared group: %v", err)
+	}
+	got, err := repo.GetTaskSession(ctx, "member-session")
+	if err != nil || got.TaskEnvironmentID != "env-group" {
+		t.Fatalf("shared environment binding = %+v, %v", got, err)
+	}
+}
+
+func TestInheritFromSharedGroupEnvironment_MissingResolverFailsClosed(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	err := svc.inheritFromSharedGroup(context.Background(), &v1.Task{ID: "member"}, "session")
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("shared group error = %v, want workspace reuse unsafe", err)
 	}
 }

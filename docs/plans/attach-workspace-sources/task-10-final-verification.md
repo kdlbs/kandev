@@ -5,7 +5,7 @@ status: completed
 wave: 6
 depends_on: ["08-end-to-end-coverage", "09-public-documentation"]
 plan: "plan.md"
-spec: "../../specs/tasks/attach-workspace-sources.md"
+spec: "../../specs/tasks/system-design/attach-workspace-sources.md"
 ---
 
 # Task 10: Final Verification
