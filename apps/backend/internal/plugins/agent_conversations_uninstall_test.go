@@ -179,3 +179,38 @@ func TestServiceUninstallWithoutAgentConversationsWiredIsNoop(t *testing.T) {
 		t.Fatalf("Uninstall() unexpected error with no agent-conversation service wired: %v", err)
 	}
 }
+
+func TestServiceUninstallRevokesWorkspaceAgentPrincipalsBeforeRemovingPlugin(t *testing.T) {
+	svc, fsStore, _ := newTestService(t)
+	principals := &fakeWorkspaceAgentPrincipalSource{}
+	svc.SetWorkspaceAgentPrincipalSource(principals)
+	rec := installTestPlugin(t, svc, "kandev-plugin-coordinator")
+
+	if err := svc.Uninstall(context.Background(), rec.ID); err != nil {
+		t.Fatalf("Uninstall() unexpected error: %v", err)
+	}
+	if principals.revokedPluginID != rec.ID {
+		t.Fatalf("revoked plugin ID = %q, want %q", principals.revokedPluginID, rec.ID)
+	}
+	if _, err := fsStore.Get(rec.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("plugin record after successful revocation/uninstall = %v, want not found", err)
+	}
+}
+
+func TestServiceUninstallFailsClosedWhenPrincipalRevocationFails(t *testing.T) {
+	svc, fsStore, rt := newTestService(t)
+	principals := &fakeWorkspaceAgentPrincipalSource{revokeErr: errors.New("principal store unavailable")}
+	svc.SetWorkspaceAgentPrincipalSource(principals)
+	rec := installTestPlugin(t, svc, "kandev-plugin-coordinator")
+
+	err := svc.Uninstall(context.Background(), rec.ID)
+	if err == nil || !strings.Contains(err.Error(), "principal store unavailable") {
+		t.Fatalf("Uninstall() error = %v, want principal revocation failure", err)
+	}
+	if !rt.stopped(rec.ID) {
+		t.Fatal("Uninstall() must stop the runtime before revocation failure is returned")
+	}
+	if _, err := fsStore.Get(rec.ID); err != nil {
+		t.Fatalf("plugin record after failed revocation = %v, want preserved", err)
+	}
+}

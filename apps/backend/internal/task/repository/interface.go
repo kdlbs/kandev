@@ -615,6 +615,7 @@ type WorkspaceAgentPrincipalRepository interface {
 	CreateWorkspaceAgentPrincipal(ctx context.Context, principal *models.WorkspaceAgentPrincipal) error
 	GetWorkspaceAgentPrincipal(ctx context.Context, id string) (*models.WorkspaceAgentPrincipal, error)
 	GetWorkspaceAgentPrincipalByContext(ctx context.Context, workspaceID, pluginInstallationID, logicalKey string) (*models.WorkspaceAgentPrincipal, error)
+	ListWorkspaceAgentPrincipalsByPluginInstallation(ctx context.Context, pluginInstallationID string) ([]*models.WorkspaceAgentPrincipal, error)
 	GetActiveWorkspaceAgentPrincipalForTask(ctx context.Context, workspaceID, taskID string) (*models.WorkspaceAgentPrincipal, error)
 	RebindWorkspaceAgentPrincipal(ctx context.Context, id, taskID, sessionID string, updatedAt time.Time) error
 	RevokeWorkspaceAgentPrincipal(ctx context.Context, id string, revokedAt time.Time) error

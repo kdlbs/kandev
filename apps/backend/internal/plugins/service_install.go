@@ -357,6 +357,10 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 		s.runtime.Stop(id)
 	}
 	s.revokeGitCredentialProviderLeases(rec.RepositoryProviders)
+	if err := s.revokePluginWorkspaceAgentPrincipals(ctx, id); err != nil {
+		s.reconcileAbortedUninstall(id, wasRunning)
+		return fmt.Errorf("plugins: uninstall aborted, could not revoke workspace agent principals: %w", err)
+	}
 	if err := s.deletePluginSecrets(ctx, id); err != nil {
 		s.reconcileAbortedUninstall(id, wasRunning)
 		return fmt.Errorf("plugins: uninstall aborted, could not purge plugin secrets: %w", err)
@@ -380,6 +384,21 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 	s.notifyDeliverer()
 	s.notifyAgentToolCatalogChanged()
 	return nil
+}
+
+// revokePluginWorkspaceAgentPrincipals is fail-visible uninstall lifecycle
+// cleanup. Disable and upgrade intentionally preserve durable principals and
+// grants; only uninstall revokes them before removing plugin identity so a
+// reinstall cannot inherit authority. A nil source means this host predates
+// the generic principal feature and has no principals to revoke.
+func (s *Service) revokePluginWorkspaceAgentPrincipals(ctx context.Context, id string) error {
+	s.mu.Lock()
+	source := s.workspaceAgentPrincipals
+	s.mu.Unlock()
+	if source == nil {
+		return nil
+	}
+	return source.RevokePluginWorkspaceAgentPrincipals(ctx, id)
 }
 
 func (s *Service) reconcileAbortedUninstall(id string, wasRunning bool) {

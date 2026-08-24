@@ -70,6 +70,10 @@ type fakeWorkspaceAgentPrincipalSource struct {
 	principalStatus *pluginsdk.WorkspaceAgentPrincipalStatus
 	events          []pluginsdk.WorkspaceAgentPrincipalAuditEvent
 	err             error
+	runErr          error
+	bindErr         error
+	revokeErr       error
+	revokedPluginID string
 	pluginID        string
 	workspaceID     string
 	logicalKey      string
@@ -83,6 +87,27 @@ func (f *fakeWorkspaceAgentPrincipalSource) GetPluginWorkspaceAgentPrincipal(_ c
 func (f *fakeWorkspaceAgentPrincipalSource) ListPluginWorkspaceAgentPrincipalAudit(_ context.Context, pluginID, workspaceID, logicalKey string) ([]pluginsdk.WorkspaceAgentPrincipalAuditEvent, error) {
 	f.pluginID, f.workspaceID, f.logicalKey = pluginID, workspaceID, logicalKey
 	return f.events, f.err
+}
+
+func (f *fakeWorkspaceAgentPrincipalSource) AuthorizePluginWorkspaceAgentRun(_ context.Context, pluginID, workspaceID, logicalKey string) error {
+	f.pluginID, f.workspaceID, f.logicalKey = pluginID, workspaceID, logicalKey
+	if f.runErr != nil {
+		return f.runErr
+	}
+	return f.err
+}
+
+func (f *fakeWorkspaceAgentPrincipalSource) BindPluginWorkspaceAgentRun(_ context.Context, pluginID, workspaceID, logicalKey, _, _ string) error {
+	f.pluginID, f.workspaceID, f.logicalKey = pluginID, workspaceID, logicalKey
+	if f.bindErr != nil {
+		return f.bindErr
+	}
+	return f.err
+}
+
+func (f *fakeWorkspaceAgentPrincipalSource) RevokePluginWorkspaceAgentPrincipals(_ context.Context, pluginID string) error {
+	f.revokedPluginID = pluginID
+	return f.revokeErr
 }
 
 func (f *fakeAutomationSource) ListPluginAutomations(_ context.Context, workspaceID string) ([]pluginsdk.Automation, error) {

@@ -110,3 +110,36 @@ func TestAgentConversationsStampCallingPluginID(t *testing.T) {
 		t.Fatalf("expected plugin id %q, got %q", "p1", svc.lastPluginID)
 	}
 }
+
+func TestAgentConversationsPrincipalBoundRunFailsClosedAndRebinds(t *testing.T) {
+	svc := &stubAgentConversationService{}
+	h := agentConversationHost(true, svc)
+	h.capabilities.APIRead = []string{resourceWorkspaceAgentPrincipals}
+	principals := &fakeWorkspaceAgentPrincipalSource{runErr: status.Error(codes.FailedPrecondition, "principal configuration required")}
+	h.workspaceAgentPrincipals = func() workspaceAgentPrincipalSource { return principals }
+
+	_, result, err := h.AgentConversations().Ensure(context.Background(), pluginsdk.AgentConversationSpec{WorkspaceID: "ws1", ConversationKey: "agent"})
+	if err != nil || result != "configuration_required" {
+		t.Fatalf("missing principal Ensure = result %q err %v, want configuration_required nil", result, err)
+	}
+	if svc.lastPluginID != "" {
+		t.Fatal("missing principal must not create a managed conversation")
+	}
+
+	principals.runErr = nil
+	_, result, err = h.AgentConversations().Ensure(context.Background(), pluginsdk.AgentConversationSpec{WorkspaceID: "ws1", ConversationKey: "agent"})
+	if err != nil || result != "created" {
+		t.Fatalf("authorized Ensure = result %q err %v", result, err)
+	}
+	if svc.lastPluginID != "p1" || principals.pluginID != "p1" || principals.workspaceID != "ws1" || principals.logicalKey != "agent" {
+		t.Fatalf("run context plugin/workspace/key = %q/%q/%q, service plugin=%q", principals.pluginID, principals.workspaceID, principals.logicalKey, svc.lastPluginID)
+	}
+
+	principals.runErr = status.Error(codes.PermissionDenied, "principal revoked")
+	svc.lastPluginID = ""
+	_, err = h.AgentConversations().Dispatch(context.Background(), "ws1", "agent", "wake", "occurrence")
+	assertCode(t, err, codes.PermissionDenied)
+	if svc.lastPluginID != "" {
+		t.Fatal("revoked principal must block dispatch before side effects")
+	}
+}

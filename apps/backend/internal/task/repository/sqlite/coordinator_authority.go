@@ -50,6 +50,27 @@ func (r *Repository) GetWorkspaceAgentPrincipalByContext(ctx context.Context, wo
 	return r.GetWorkspaceAgentPrincipal(ctx, id)
 }
 
+func (r *Repository) ListWorkspaceAgentPrincipalsByPluginInstallation(ctx context.Context, pluginInstallationID string) ([]*models.WorkspaceAgentPrincipal, error) {
+	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`SELECT id, workspace_id, plugin_installation_id, logical_key, backing_task_id, backing_session_id, revoked_at, created_at, updated_at FROM workspace_agent_principals WHERE plugin_installation_id = ? ORDER BY created_at, id`), pluginInstallationID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := make([]*models.WorkspaceAgentPrincipal, 0)
+	for rows.Next() {
+		principal := &models.WorkspaceAgentPrincipal{}
+		var revoked sql.NullTime
+		if err := rows.Scan(&principal.ID, &principal.WorkspaceID, &principal.PluginInstallationID, &principal.LogicalKey, &principal.BackingTaskID, &principal.BackingSessionID, &revoked, &principal.CreatedAt, &principal.UpdatedAt); err != nil {
+			return nil, err
+		}
+		if revoked.Valid {
+			principal.RevokedAt = &revoked.Time
+		}
+		out = append(out, principal)
+	}
+	return out, rows.Err()
+}
+
 // GetActiveWorkspaceAgentPrincipalForTask resolves the durable subject bound
 // to the currently acting task. Revoked bindings intentionally look absent so
 // a revocation takes effect on the next authorization check.

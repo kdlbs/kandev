@@ -168,6 +168,19 @@ type automationSource interface {
 type workspaceAgentPrincipalSource interface {
 	GetPluginWorkspaceAgentPrincipal(ctx context.Context, pluginID, workspaceID, logicalKey string) (*pluginsdk.WorkspaceAgentPrincipal, *pluginsdk.WorkspaceAgentPrincipalStatus, error)
 	ListPluginWorkspaceAgentPrincipalAudit(ctx context.Context, pluginID, workspaceID, logicalKey string) ([]pluginsdk.WorkspaceAgentPrincipalAuditEvent, error)
+	// AuthorizePluginWorkspaceAgentRun is a server-side preflight for the
+	// existing AgentConversations Ensure/Dispatch run path. It never lets a
+	// plugin grant itself authority; missing/revoked/ungranted principals fail
+	// before a run is launched or prompted.
+	AuthorizePluginWorkspaceAgentRun(ctx context.Context, pluginID, workspaceID, logicalKey string) error
+	// BindPluginWorkspaceAgentRun attaches only a host-created backing run to
+	// the durable principal after Ensure. The source re-checks active status so
+	// a revoke racing creation cannot preserve authorization.
+	BindPluginWorkspaceAgentRun(ctx context.Context, pluginID, workspaceID, logicalKey, taskID, sessionID string) error
+	// RevokePluginWorkspaceAgentPrincipals is host lifecycle cleanup only. It
+	// runs before uninstall removes a plugin record so reinstall cannot inherit
+	// active authority.
+	RevokePluginWorkspaceAgentPrincipals(ctx context.Context, pluginID string) error
 }
 
 // workflowLister is the narrow slice of internal/task/service.Service the

@@ -76,6 +76,73 @@ func (a pluginsWorkspaceAgentPrincipalSourceAdapter) ListPluginWorkspaceAgentPri
 	return out, nil
 }
 
+// AuthorizePluginWorkspaceAgentRun is deliberately narrow: the existing
+// AgentConversations Ensure/Dispatch path is the generic run primitive. A
+// plugin can only use it as a principal-bound run after an operator-created,
+// active principal has an explicit orchestrate grant. There is no plugin RPC
+// for grant creation or escalation.
+func (a pluginsWorkspaceAgentPrincipalSourceAdapter) AuthorizePluginWorkspaceAgentRun(ctx context.Context, pluginID, workspaceID, logicalKey string) error {
+	_, err := a.activePrincipalForRun(ctx, pluginID, workspaceID, logicalKey)
+	return err
+}
+
+func (a pluginsWorkspaceAgentPrincipalSourceAdapter) BindPluginWorkspaceAgentRun(ctx context.Context, pluginID, workspaceID, logicalKey, taskID, sessionID string) error {
+	principal, err := a.activePrincipalForRun(ctx, pluginID, workspaceID, logicalKey)
+	if err != nil {
+		return err
+	}
+	if err := a.repo.RebindWorkspaceAgentPrincipal(ctx, principal.ID, taskID, sessionID, time.Now().UTC()); err == sql.ErrNoRows {
+		return status.Error(codes.PermissionDenied, "workspace agent principal is revoked")
+	} else {
+		return err
+	}
+}
+
+func (a pluginsWorkspaceAgentPrincipalSourceAdapter) RevokePluginWorkspaceAgentPrincipals(ctx context.Context, pluginID string) error {
+	principals, err := a.repo.ListWorkspaceAgentPrincipalsByPluginInstallation(ctx, pluginID)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	for _, principal := range principals {
+		if principal.RevokedAt != nil {
+			continue
+		}
+		if err := a.repo.RevokeWorkspaceAgentPrincipal(ctx, principal.ID, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (a pluginsWorkspaceAgentPrincipalSourceAdapter) activePrincipalForRun(ctx context.Context, pluginID, workspaceID, logicalKey string) (*models.WorkspaceAgentPrincipal, error) {
+	if pluginID == "" || workspaceID == "" || logicalKey == "" {
+		return nil, status.Error(codes.InvalidArgument, "workspace_id and logical_key are required")
+	}
+	principal, err := a.repo.GetWorkspaceAgentPrincipalByContext(ctx, workspaceID, pluginID, logicalKey)
+	if err == sql.ErrNoRows || principal == nil || principal.WorkspaceID != workspaceID || principal.PluginInstallationID != pluginID {
+		return nil, status.Error(codes.FailedPrecondition, "workspace agent principal configuration is required")
+	}
+	if err != nil {
+		return nil, err
+	}
+	if principal.RevokedAt != nil {
+		return nil, status.Error(codes.PermissionDenied, "workspace agent principal is revoked")
+	}
+	grants, err := a.repo.ListActiveWorkspaceAgentPrincipalGrants(ctx, principal.ID, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	for _, grant := range grants {
+		for _, capability := range strings.Split(grant.Capabilities, ",") {
+			if strings.TrimSpace(capability) == "orchestrate" {
+				return principal, nil
+			}
+		}
+	}
+	return nil, status.Error(codes.PermissionDenied, "workspace agent principal lacks an active orchestrate grant")
+}
+
 func pluginWorkspaceAgentPrincipalDescriptor(principal *models.WorkspaceAgentPrincipal) pluginsdk.WorkspaceAgentPrincipal {
 	return pluginsdk.WorkspaceAgentPrincipal{
 		ID: principal.ID, WorkspaceID: principal.WorkspaceID, LogicalKey: principal.LogicalKey,

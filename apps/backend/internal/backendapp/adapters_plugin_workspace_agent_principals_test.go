@@ -36,6 +36,8 @@ func TestPluginsWorkspaceAgentPrincipalSourceAdapter_ScopesAndRedacts(t *testing
 	require.Equal(t, "opaque-principal", descriptor.ID)
 	require.Equal(t, "active", principalStatus.State)
 	require.Equal(t, []string{"inspect", "orchestrate"}, principalStatus.GrantedCapabilities)
+	require.NoError(t, adapter.AuthorizePluginWorkspaceAgentRun(ctx, "plugin-owned", "ws-owned", "agent"))
+	require.NoError(t, adapter.BindPluginWorkspaceAgentRun(ctx, "plugin-owned", "ws-owned", "agent", "repaired-backing-task", "repaired-session"))
 	// The safe DTO has no backing task/session, grant note/scope, user, or
 	// target fields; only the explicit public projection can cross this seam.
 	audit, err := adapter.ListPluginWorkspaceAgentPrincipalAudit(ctx, "plugin-owned", "ws-owned", "agent")
@@ -47,4 +49,8 @@ func TestPluginsWorkspaceAgentPrincipalSourceAdapter_ScopesAndRedacts(t *testing
 	require.Equal(t, codes.NotFound, status.Code(err), "foreign installation is indistinguishable from absent")
 	_, _, err = adapter.GetPluginWorkspaceAgentPrincipal(ctx, "plugin-owned", "ws-other", "agent")
 	require.Equal(t, codes.NotFound, status.Code(err), "foreign workspace is indistinguishable from absent")
+
+	require.NoError(t, repo.RevokeWorkspaceAgentPrincipal(ctx, principal.ID, principal.CreatedAt.AddDate(0, 0, 1)))
+	err = adapter.AuthorizePluginWorkspaceAgentRun(ctx, "plugin-owned", "ws-owned", "agent")
+	require.Equal(t, codes.PermissionDenied, status.Code(err), "revoke fails closed before a run starts")
 }

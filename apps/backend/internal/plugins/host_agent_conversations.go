@@ -75,12 +75,34 @@ func (m *pluginHostAgentConversationManager) Ensure(ctx context.Context, spec pl
 	if err != nil {
 		return pluginsdk.AgentConversationDescriptor{}, "", err
 	}
-	return svc.Ensure(ctx, pluginID, spec)
+	if err := m.authorizeWorkspaceRun(ctx, pluginID, spec.WorkspaceID, spec.ConversationKey); err != nil {
+		if status.Code(err) == codes.FailedPrecondition {
+			return pluginsdk.AgentConversationDescriptor{}, "configuration_required", nil
+		}
+		return pluginsdk.AgentConversationDescriptor{}, "", err
+	}
+	descriptor, result, err := svc.Ensure(ctx, pluginID, spec)
+	if err != nil || !m.requiresWorkspaceAgentPrincipal() {
+		return descriptor, result, err
+	}
+	if err := m.bindWorkspaceRun(ctx, pluginID, spec.WorkspaceID, spec.ConversationKey, descriptor.TaskID, descriptor.SessionID); err != nil {
+		// A principal revocation may race task/session creation. Delete only a
+		// brand-new run; an existing run may belong to a prior valid binding and
+		// must merely become unusable, not be destroyed by a retry.
+		if result == "created" {
+			_, _ = svc.Delete(ctx, pluginID, spec.WorkspaceID, spec.ConversationKey)
+		}
+		return pluginsdk.AgentConversationDescriptor{}, "", err
+	}
+	return descriptor, result, nil
 }
 
 func (m *pluginHostAgentConversationManager) Dispatch(ctx context.Context, workspaceID, conversationKey, text, occurrenceKey string) (pluginsdk.AgentConversationDispatch, error) {
 	pluginID, svc, err := m.resolve()
 	if err != nil {
+		return pluginsdk.AgentConversationDispatch{}, err
+	}
+	if err := m.authorizeWorkspaceRun(ctx, pluginID, workspaceID, conversationKey); err != nil {
 		return pluginsdk.AgentConversationDispatch{}, err
 	}
 	return svc.Dispatch(ctx, pluginID, workspaceID, conversationKey, text, occurrenceKey)
@@ -92,4 +114,40 @@ func (m *pluginHostAgentConversationManager) Delete(ctx context.Context, workspa
 		return 0, err
 	}
 	return svc.Delete(ctx, pluginID, workspaceID, conversationKey)
+}
+
+// requiresWorkspaceAgentPrincipal opts a plugin into principal-bound managed
+// runs by its dedicated read capability. Existing agent_conversation plugins
+// that have not declared this new resource retain their source-compatible
+// managed-conversation behaviour.
+func (m *pluginHostAgentConversationManager) requiresWorkspaceAgentPrincipal() bool {
+	return m != nil && m.host != nil && m.host.capabilities.CanRead(resourceWorkspaceAgentPrincipals)
+}
+
+func (m *pluginHostAgentConversationManager) authorizeWorkspaceRun(ctx context.Context, pluginID, workspaceID, logicalKey string) error {
+	if !m.requiresWorkspaceAgentPrincipal() {
+		return nil
+	}
+	if m.host.workspaceAgentPrincipals == nil {
+		return status.Error(codes.Unavailable, "workspace agent principals are not available on this host")
+	}
+	source := m.host.workspaceAgentPrincipals()
+	if source == nil {
+		return status.Error(codes.Unavailable, "workspace agent principals are not available on this host")
+	}
+	return source.AuthorizePluginWorkspaceAgentRun(ctx, pluginID, workspaceID, logicalKey)
+}
+
+func (m *pluginHostAgentConversationManager) bindWorkspaceRun(ctx context.Context, pluginID, workspaceID, logicalKey, taskID, sessionID string) error {
+	if !m.requiresWorkspaceAgentPrincipal() {
+		return nil
+	}
+	if m.host.workspaceAgentPrincipals == nil {
+		return status.Error(codes.Unavailable, "workspace agent principals are not available on this host")
+	}
+	source := m.host.workspaceAgentPrincipals()
+	if source == nil {
+		return status.Error(codes.Unavailable, "workspace agent principals are not available on this host")
+	}
+	return source.BindPluginWorkspaceAgentRun(ctx, pluginID, workspaceID, logicalKey, taskID, sessionID)
 }
