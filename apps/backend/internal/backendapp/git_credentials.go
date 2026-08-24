@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"net/url"
 	"strings"
@@ -42,6 +43,9 @@ func newGitCredentialBroker(
 		resolvers = append(resolvers, pluginGitCredentialResolver{service: pluginCredentialServiceAdapter{service: pluginSvc}})
 	}
 	broker := gitcredentials.NewBroker(gitcredentials.NewCompositeResolver(resolvers...), &githubBrokerScopeAuthorizer{repo: repo})
+	if strings.TrimSpace(reissueSigningKey) == "" {
+		reissueSigningKey = rand.Text()
+	}
 	if signer, err := gitcredentials.NewReissueCapabilitySigner(reissueSigningKey); err == nil {
 		broker.SetReissueCapabilitySigner(signer)
 	}
