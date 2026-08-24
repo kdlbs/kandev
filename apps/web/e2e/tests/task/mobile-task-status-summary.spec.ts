@@ -21,7 +21,10 @@ test.describe("Mobile task status summary", () => {
       "Mobile summary navigation",
       stepOptions,
     );
-    const targetTask = await apiClient.seedTask(seedData.workspaceId, TARGET_TITLE, stepOptions);
+    const targetTask = await apiClient.seedTask(seedData.workspaceId, TARGET_TITLE, {
+      ...stepOptions,
+      state: "IN_PROGRESS",
+    });
     await apiClient.seedTaskSession(navTask.task_id, {
       state: "WAITING_FOR_INPUT",
       agentProfileId: seedData.agentProfileId,
@@ -40,6 +43,21 @@ test.describe("Mobile task status summary", () => {
       hasText: TARGET_TITLE,
     });
     await expect(targetRow).toBeVisible({ timeout: 15_000 });
+
+    await apiClient.seedTaskSession(targetTask.task_id, {
+      sessionId: targetSession.session_id,
+      state: "RUNNING",
+    });
+    const runningStatus = targetRow.getByTestId("task-state-running");
+    await expect(runningStatus).toBeVisible({ timeout: 15_000 });
+    await expect
+      .poll(async () =>
+        runningStatus.evaluate((element) => ({
+          tagName: element.tagName,
+          svgAnimated: element.querySelector("svg")?.classList.contains("animate-spin") ?? false,
+        })),
+      )
+      .toEqual({ tagName: "SPAN", svgAnimated: false });
 
     await apiClient.seedSessionMessage(targetSession.session_id, {
       type: "clarification_request",

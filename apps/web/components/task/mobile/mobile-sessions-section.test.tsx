@@ -226,7 +226,12 @@ describe("MobileSessionsPicker activity precedence", () => {
 
     // background-running: the shared spinner, in motion, and a label that says so.
     expect(svgClass(bg)).toContain("tabler-icon-loader-2");
-    expect(svgClass(bg)).toContain("animate-spin");
+    const spinner = bg.querySelector(".animate-spin");
+    expect(spinner).not.toBeNull();
+    expect(spinner?.tagName).toBe("SPAN");
+    const spinnerSvg = spinner?.querySelector("svg");
+    expect(spinnerSvg).not.toBeNull();
+    expect(spinnerSvg?.classList.contains("animate-spin")).toBe(false);
     expect(bg.textContent).toMatch(/background/i);
 
     // Distinct from generating: a static solid dot, no spin — a different SHAPE,

@@ -115,7 +115,7 @@ function expectPreparingSpinner(): void {
   expect(icon.classList.contains(SLOW_SPIN_CLASS)).toBe(true);
 }
 
-describe("TaskItem status icon", () => {
+describe("TaskItem status icon states", () => {
   it("shows the autopilot icon with an accessible description", () => {
     renderTaskItem({ autopilot: true });
 
@@ -188,7 +188,9 @@ describe("TaskItem status icon", () => {
 
     expectPreparingSpinner();
   });
+});
 
+describe("TaskItem status icon fallbacks", () => {
   it("does not show a spinner for a created task waiting for manual start", () => {
     renderTaskItem({ state: "CREATED" });
 

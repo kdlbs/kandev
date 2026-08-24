@@ -3026,7 +3026,7 @@ func (s *Service) autoStartStepPrompt(
 		requiresSignal := step != nil && step.AutoAdvanceRequiresSignal
 		referenceContext := EntityReferenceContext(references)
 		if isOfficeTask {
-			recordedPrompt = sysprompt.InjectOfficeContext(taskID, sessionID, agentPrompt, referenceContext)
+			recordedPrompt = sysprompt.InjectOfficeContextWithOptions(taskID, sessionID, agentPrompt, requiresSignal, referenceContext)
 		} else {
 			recordedPrompt = sysprompt.InjectKandevContextWithOptions(taskID, sessionID, agentPrompt, sysprompt.KandevContextOptions{
 				RequiresCompletionSignal:       requiresSignal,

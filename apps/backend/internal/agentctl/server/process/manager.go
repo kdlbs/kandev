@@ -94,6 +94,7 @@ const processDefaultExitGrace = 5 * time.Second
 
 const processGroupTerminateGrace = 2 * time.Second
 const processGroupPollInterval = 50 * time.Millisecond
+const processStderrDrainTimeout = time.Second
 
 // Manager manages the agent subprocess
 type Manager struct {
@@ -1209,10 +1210,12 @@ func (m *Manager) Start(ctx context.Context) error {
 		return errors.Join(fmt.Errorf("failed to connect adapter: %w", err), reapErr)
 	}
 
-	// Start stderr reader and exit waiter
+	// Start stderr reader and exit waiter. Keep the completion channel local to
+	// this process generation so a delayed reader cannot signal a replacement.
+	stderrDone := make(chan struct{})
 	m.wg.Add(2)
-	go m.readStderr()
-	go m.waitForExit()
+	go m.readStderr(stderrDone)
+	go m.waitForExit(stderrDone)
 
 	// Forward adapter updates to our channel
 	m.wg.Add(1)
@@ -2254,9 +2257,10 @@ func waitForProcessGroupExit(ctx context.Context, pid int) bool {
 	}
 }
 
-// readStderr reads and logs stderr from the agent
-func (m *Manager) readStderr() {
+// readStderr reads and logs stderr from the agent.
+func (m *Manager) readStderr(stderrDone chan<- struct{}) {
 	defer m.wg.Done()
+	defer close(stderrDone)
 
 	scanner := bufio.NewScanner(m.stderr)
 	for scanner.Scan() {
@@ -2272,6 +2276,9 @@ func (m *Manager) readStderr() {
 		if m.stderrSanitizer != nil {
 			line, keep = m.stderrSanitizer.SanitizeStderrLine(rawLine)
 		}
+		if !keep {
+			line, keep = safeManagedNpmStderrLine(rawLine)
+		}
 		if !keep || line == "" {
 			continue
 		}
@@ -2283,6 +2290,19 @@ func (m *Manager) readStderr() {
 
 	if err := scanner.Err(); err != nil {
 		m.logger.Debug("stderr reader error", zap.Error(err))
+	}
+}
+
+func (m *Manager) waitForStderrDrain(stderrDone <-chan struct{}) {
+	if stderrDone == nil {
+		return
+	}
+	timer := time.NewTimer(processStderrDrainTimeout)
+	defer timer.Stop()
+	select {
+	case <-stderrDone:
+	case <-timer.C:
+		m.logger.Warn("timed out waiting for agent stderr to drain")
 	}
 }
 
@@ -2327,12 +2347,17 @@ func (m *Manager) ClearStderrBuffer() {
 }
 
 // waitForExit waits for the process to exit
-func (m *Manager) waitForExit() {
+func (m *Manager) waitForExit(stderrDone <-chan struct{}) {
 	defer m.wg.Done()
 	defer close(m.doneCh)
 
 	pid := m.agentPID()
+	// StderrPipe must be drained before Wait closes its parent-side pipe. The
+	// second bounded wait covers a reader that was still blocked when the
+	// process-exit wait began and was released by Wait closing the pipe.
+	m.waitForStderrDrain(stderrDone)
 	err := m.cmd.Wait()
+	m.waitForStderrDrain(stderrDone)
 	intentionalStop := m.Status() == StatusStopping
 
 	switch {

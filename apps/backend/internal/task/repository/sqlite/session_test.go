@@ -792,6 +792,49 @@ func TestSetSessionMetadataKeyIfAbsentOrDifferentStepSQLiteReplacesOnlyStaleStep
 	require.Equal(t, "second", signal.Summary)
 }
 
+func TestSetSessionMetadataKeyIfAbsentOrDifferentStepIfTaskAtStepRejectsMovedTask(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-step-cas", "session-step-cas", "turn-step-cas")
+
+	task, err := repo.GetTask(ctx, "task-step-cas")
+	require.NoError(t, err)
+	task.WorkflowStepID = "step-review"
+	require.NoError(t, repo.UpdateTask(ctx, task))
+
+	signal := models.PendingStepCompletionSignal{StepID: "step-review", Summary: "review complete"}
+	stored, err := repo.SetSessionMetadataKeyIfAbsentOrDifferentStepIfTaskAtStep(
+		ctx,
+		"task-step-cas",
+		"session-step-cas",
+		models.SessionMetaKeyPendingStepCompletion,
+		"step-review",
+		signal,
+	)
+	require.NoError(t, err)
+	require.True(t, stored)
+
+	task.WorkflowStepID = "step-work"
+	require.NoError(t, repo.UpdateTask(ctx, task))
+	late := models.PendingStepCompletionSignal{StepID: "step-review", Summary: "late review signal"}
+	stored, err = repo.SetSessionMetadataKeyIfAbsentOrDifferentStepIfTaskAtStep(
+		ctx,
+		"task-step-cas",
+		"session-step-cas",
+		models.SessionMetaKeyPendingStepCompletion,
+		"step-review",
+		late,
+	)
+	require.NoError(t, err)
+	require.False(t, stored, "a moved task must reject a stale launch-step signal")
+
+	session, err := repo.GetTaskSession(ctx, "session-step-cas")
+	require.NoError(t, err)
+	got, ok := models.LoadPendingStepSignal(session.Metadata)
+	require.True(t, ok)
+	require.Equal(t, "review complete", got.Summary)
+}
+
 func TestUpdateSessionContextWindowSQLiteCountsStrictUsageDrops(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

@@ -146,9 +146,11 @@ history and remains immutable.
   live under `docs/specs/**`. New work uses
   `docs/specs/<system>/requirements/` and
   `docs/specs/<system>/system-design/`. Read `docs/specs/README.md` and the
-  relevant file in `docs/specs/guide/`. Use `docs/specs/INDEX.md` only to find
-  unmigrated legacy specifications. Run `python3 scripts/lint-spec-files.py
-  --all` after specification changes.
+  relevant file in `docs/specs/guide/`. Choose the owner from the durable
+  contract, not the affected code layer. Keep one vertical requirement/design
+  pair and include its UI outcomes there. Use `docs/specs/INDEX.md` only to
+  find unmigrated legacy specifications. Run `python3
+  scripts/lint-spec-files.py --all` after specification changes.
 - **Decisions:** Architecture decisions are recorded in `docs/decisions/`. Read `docs/decisions/INDEX.md` for an overview. When making significant architectural choices, create a new ADR via `/record decision`.
 - **Plans:** Implementation plans are generated from requirements and system
   designs through `/plan`. `docs/plans/<initiative>/plan.md` is a work-package

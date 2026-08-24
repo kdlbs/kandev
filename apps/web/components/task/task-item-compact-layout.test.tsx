@@ -29,4 +29,21 @@ describe("TaskItem compact layout", () => {
     expect(row.className).toContain("items-center");
     expect(row.className).not.toContain("items-start");
   });
+
+  it("animates the running status on an HTML wrapper", () => {
+    render(
+      <StateProvider>
+        <TooltipProvider>
+          <TaskItem title="Needs answer" state="IN_PROGRESS" sessionState="RUNNING" />
+        </TooltipProvider>
+      </StateProvider>,
+    );
+
+    const spinner = screen.getByTestId("task-state-running");
+    expect(spinner.tagName).toBe("SPAN");
+    expect(spinner.classList.contains("animate-spin")).toBe(true);
+    const spinnerSvg = spinner.querySelector("svg");
+    expect(spinnerSvg).not.toBeNull();
+    expect(spinnerSvg?.classList.contains("animate-spin")).toBe(false);
+  });
 });

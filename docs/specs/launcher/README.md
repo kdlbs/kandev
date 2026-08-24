@@ -43,12 +43,11 @@ handoffs.
 ## Migration status
 
 The startup-recovery documents are authoritative for bind-aware readiness and
-launcher failure output. The legacy
-[startup configuration parity](../platform/startup-configuration-parity.md)
-specification remains authoritative for configuration discovery and
-precedence. The legacy [Go development launcher](../go-dev-launcher/spec.md)
-specification remains historical implementation context for the native
-launcher migration.
+launcher failure output. Configuration discovery and precedence are defined by
+[startup configuration parity](../platform/requirements/startup-configuration-parity.md).
+The native launcher migration also incorporates the
+[Go development launcher](../platform/requirements/go-dev-launcher.md)
+requirement. No removed legacy path remains authoritative.
 
 ## Related systems
 
