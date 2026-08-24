@@ -2273,6 +2273,15 @@ func (s *Service) maybySwitchSessionForProfile(
 // could otherwise satisfy wait_for_quorum without every current-round
 // participant actually voting. The loop stops entirely (not just further
 // engine-owned actions) the moment that happens.
+//
+// AC-F1: a caller that loses a *live* claim on an engine-owned position
+// (dispatchEngineOwnedOnEnterAction's abandon=true) must abandon the entry
+// the same way — it does not skip to a later position, because that later
+// action could execute while the winner is still committing an earlier
+// one (e.g. enqueueing queue_run_for_each_participant's fan-out before the
+// winner's clear_decisions delete commits). This is a normal outcome, not
+// a fault, so the loop stops silently (no WARNING/ERROR) rather than via
+// AC-C2's error-logged abort.
 func (s *Service) dispatchOnEnterActions(ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, entryID int64, isPassthrough, hasPlanMode bool) bool {
 	hasAutoStart := false
 dispatchLoop:
@@ -2293,7 +2302,16 @@ dispatchLoop:
 			// Already handled earlier in processOnEnter (context reset must run
 			// before auto_start_agent; session config runs right after it).
 		case wfmodels.OnEnterClearDecisions, wfmodels.OnEnterQueueRunForEachParticipant:
-			failed, cause := s.dispatchEngineOwnedOnEnterAction(ctx, taskID, step, action, i, entryID)
+			abandon, failed, cause := s.dispatchEngineOwnedOnEnterAction(ctx, taskID, step, action, i, entryID)
+			if abandon {
+				s.logger.Debug("processOnEnter: lost a live claim to a concurrent dispatch of this step entry, abandoning remaining on_enter actions",
+					zap.String("workflow_id", step.WorkflowID),
+					zap.String("step_id", step.ID),
+					zap.String("task_id", taskID),
+					zap.String("action_type", string(action.Type)),
+				)
+				break dispatchLoop
+			}
 			if failed && action.Type == wfmodels.OnEnterClearDecisions {
 				s.logger.Error("processOnEnter: clear_decisions failed, aborting remaining on_enter actions for step entry",
 					zap.String("workflow_id", step.WorkflowID),
@@ -2510,13 +2528,30 @@ func (s *Service) launchAfterProfileSwitchOrWait(
 // not a regression: dispatch through those paths is a no-op until a later
 // round wires their write sites the same way applyEngineTransition's is.
 //
+// abandon reports whether this call lost a *live* claim on this exact
+// position: the marker already has a row and is still in_progress, so
+// whoever holds it may still be executing or committing the action. Per
+// AC-F1 the loser must abandon the whole step entry here, not just this
+// action — dispatchOnEnterActions stops walking step.Events.OnEnter rather
+// than advancing to a later position, because that later action could run
+// (and, for queue_run_for_each_participant, enqueue its fan-out) before the
+// winner's clear_decisions delete AC-A3 requires to precede it commits.
+// This is a normal outcome, not a fault: callers must not log a WARNING or
+// ERROR for it. abandon is false when the existing marker is already done
+// — a legitimate resumption case (e.g. an AC-B9 recovery scan re-entering
+// this function from position 0 after an earlier position already
+// committed must be free to continue past it) — or already failed, which
+// is failed's concern below instead.
+//
 // failed reports whether this call ended (or left) the action in a
-// non-done outcome — either the callback itself returned an error, or the
-// marker couldn't even be claimed, so the caller (dispatchOnEnterActions,
-// AC-C2) cannot assume the action ran. failed is false for the no-op paths
-// above and for "already claimed" (AC-D3/AC-D4's at-most-once outcome,
-// handled by an earlier call, not a fresh failure to react to here). cause
-// is the underlying error string when failed is true, empty otherwise.
+// non-done outcome — either the callback itself returned an error, the
+// marker couldn't even be claimed due to a repository error, or the marker
+// was already claimed and terminally failed by an earlier attempt at this
+// exact position — so the caller (dispatchOnEnterActions, AC-C2) cannot
+// assume the action ran. failed is false for the no-op paths above and for
+// "already claimed, still in progress or already done" (abandon's concern,
+// not a fresh failure to react to here). cause is the underlying error
+// string when failed is true, empty otherwise.
 //
 // For clear_decisions specifically, once claimed this tries the AC-B6
 // atomic path (dispatchClearDecisionsAtomic) before falling back to the
@@ -2525,17 +2560,17 @@ func (s *Service) launchAfterProfileSwitchOrWait(
 // between the two calls.
 func (s *Service) dispatchEngineOwnedOnEnterAction(
 	ctx context.Context, taskID string, step *wfmodels.WorkflowStep, action wfmodels.OnEnterAction, position int, entryID int64,
-) (failed bool, cause string) {
+) (abandon, failed bool, cause string) {
 	if entryID == 0 {
-		return false, ""
+		return false, false, ""
 	}
 	compiled, ok := engine.CompileOnEnterAction(action)
 	if !ok {
-		return false, ""
+		return false, false, ""
 	}
 	callback := s.engineOnEnterCallback(action.Type)
 	if callback == nil {
-		return false, ""
+		return false, false, ""
 	}
 	operationID := fmt.Sprintf("step_entry:%d:%d", entryID, position)
 	now := time.Now()
@@ -2544,29 +2579,45 @@ func (s *Service) dispatchEngineOwnedOnEnterAction(
 		s.logger.Error("processOnEnter: claim step entry marker failed",
 			zap.Error(err), zap.String("task_id", taskID), zap.String("step_id", step.ID),
 			zap.Int64("entry_id", entryID), zap.Int("position", position))
-		return true, err.Error()
+		return false, true, err.Error()
 	}
 	if !claimed {
 		// Already claimed by a concurrent or prior attempt, or already
 		// terminal — AC-D3/AC-D4's at-most-once guarantee for this
-		// step-entry. Most outcomes here (still in progress elsewhere,
-		// already done) are not errors — the expected outcome on retry.
-		// But if a prior attempt for this exact position already recorded
-		// a terminal failure, silently returning "not failed" would let
-		// dispatchOnEnterActions fall through to the next on_enter action
-		// as if clear_decisions had never failed — the same fall-through
-		// AC-C2's break exists to close for a fresh failure. Surface the
-		// stored failure so the caller aborts the remaining actions here
-		// too, instead of only on a failure it just witnessed itself.
-		if priorState, priorCause, found, stateErr := s.repo.GetStepEntryMarkerState(ctx, entryID, position); stateErr == nil && found && priorState == stepentry.MarkerFailed {
-			return true, priorCause
+		// step-entry. GetStepEntryMarkerState is the only read that can
+		// tell apart the three outcomes this covers (see its doc comment):
+		// still in progress elsewhere, already done, or already failed.
+		priorState, priorCause, found, stateErr := s.repo.GetStepEntryMarkerState(ctx, entryID, position)
+		if stateErr != nil || !found {
+			// Read failed, or the row vanished between the failed claim
+			// and this read (nothing deletes marker rows, so this
+			// shouldn't happen). Fall back to the pre-existing lenient
+			// default rather than abandoning on an inconclusive read.
+			return false, false, ""
 		}
-		return false, ""
+		switch priorState {
+		case stepentry.MarkerFailed:
+			// A prior attempt for this exact position already recorded a
+			// terminal failure. Silently returning "not failed" would let
+			// dispatchOnEnterActions fall through to the next on_enter
+			// action as if clear_decisions had never failed — the same
+			// fall-through AC-C2's break exists to close for a fresh
+			// failure. Surface the stored failure so the caller aborts the
+			// remaining actions here too, instead of only on a failure it
+			// just witnessed itself.
+			return false, true, priorCause
+		case stepentry.MarkerInProgress:
+			return true, false, ""
+		default:
+			// MarkerDone: this position already ran to completion in an
+			// earlier attempt. Safe, and required, to continue past it.
+			return false, false, ""
+		}
 	}
 
 	if action.Type == wfmodels.OnEnterClearDecisions {
 		if handled, atomicFailed, atomicCause := s.dispatchClearDecisionsAtomic(ctx, taskID, step, entryID, position); handled {
-			return atomicFailed, atomicCause
+			return false, atomicFailed, atomicCause
 		}
 	}
 
@@ -2584,12 +2635,24 @@ func (s *Service) dispatchEngineOwnedOnEnterAction(
 			zap.Error(execErr), zap.String("task_id", taskID), zap.String("step_id", step.ID),
 			zap.String("action_type", string(action.Type)))
 	}
+	// This write's own failure is deliberately not turned into abandon/failed
+	// for the caller: state already reflects whether the actual effect (the
+	// clear_decisions delete, or the fan-out) ran, and that already
+	// committed independently of this marker bookkeeping — clear_decisions
+	// specifically is atomic with its delete only on the AC-B6 path above,
+	// not here. Reporting this write failure as an action failure would be
+	// wrong when the effect itself succeeded. The residual cost is a marker
+	// stranded at in_progress with no live claimant, indistinguishable from
+	// a genuine live peer to a later dispatch of this entry (this call's own
+	// abandon path above), until a future round's AC-B9 startup recovery
+	// scan adds the epoch/staleness reconciliation step_entries.go's header
+	// comment already documents as deferred.
 	if err := s.repo.CompleteStepEntryMarker(ctx, entryID, position, state, execCause, time.Now()); err != nil {
 		s.logger.Error("processOnEnter: complete step entry marker failed",
 			zap.Error(err), zap.String("task_id", taskID), zap.String("step_id", step.ID),
 			zap.Int64("entry_id", entryID), zap.Int("position", position))
 	}
-	return state == stepentry.MarkerFailed, execCause
+	return false, state == stepentry.MarkerFailed, execCause
 }
 
 // dispatchClearDecisionsAtomic executes clear_decisions through
@@ -4285,31 +4348,85 @@ func (s *Service) processOnTurnCompleteViaEngineWithCause(
 // acquireTurnCompletionCriticalSection serializes on_turn_complete
 // processing per session (see turnCompletionLocks' field comment for the
 // double-allocation/double-dispatch race this closes) and detects a
-// duplicate call that lost the race for the lock: if another caller already
-// moved the task off the step observedTask reflects while this one waited,
-// evaluating on_turn_complete against the task's new (fresh) step would
-// fire that step's own on_turn_complete — e.g. Review's on_turn_complete
-// sending the task back to Work — for a turn nobody actually completed
-// there. proceed is false when this call must stop and treat itself as
-// that redundant duplicate; the caller must still invoke unlock regardless
-// of proceed. session == nil callers (none exist today, but the type
-// allows it) skip locking entirely, matching pre-fix behavior.
+// duplicate call that lost the race for the lock. proceed is false when
+// this call must stop and treat itself as a redundant duplicate; the
+// caller must still invoke unlock regardless of proceed. session == nil
+// callers (none exist today, but the type allows it) skip locking
+// entirely, matching pre-fix behavior.
+//
+// Two independent duplicate signals are checked, because neither alone
+// covers every case:
+//
+//  1. Lock contention (acquireTurnCompletionLock's contended return).
+//     Several independent event sources (normal agent turn completion,
+//     agent-exit, step_complete_kandev's out-of-band signal, user
+//     cancellation) can each call this for the same session; if this call
+//     had to wait for another one already in flight for the same session,
+//     that other call is processing (or has just finished processing) the
+//     same physical turn, so this one backs off unconditionally — no DB
+//     read is needed or even safe to reason from, since a call that lost
+//     the lock race has no reliable way to tell whether the winner's
+//     commit is what it would observe. This is the only signal that
+//     reliably catches a duplicate whose entire pre-lock read happens
+//     *after* the winner already committed: e.g. two concurrent normal
+//     agent-turn-completion signals for the same physical turn (one via
+//     the ready path, one via agent-exit), where the second caller's very
+//     first DB read can already reflect the first caller's full commit,
+//     making any comparison of "my early read" vs. "my read under the
+//     lock" pass trivially even though the two calls are genuine
+//     duplicates. Contention can only be true when two calls for the same
+//     session truly overlap in time, so it never misfires against a
+//     legitimate call that arrives well after a prior one has finished
+//     (cancellation reconciliation, onStepCompletionSignaled's retry,
+//     clarification-dismissal) — those find the lock free.
+//  2. The WorkflowStepID comparison (observedTask vs. a fresh read taken
+//     after acquiring the lock without contention). This catches a
+//     duplicate whose pre-lock snapshot predates the winner's commit: the
+//     step moved out from under it while it waited for the (uncontended,
+//     from this call's perspective) lock.
+//  3. The session-generation comparison (turnCompletionConsumedGeneration):
+//     closes the one gap the first two leave open. When two calls for the
+//     same session are fully sequential — no true overlap, so contention
+//     never fires — the second caller's own pre-lock GetTask already
+//     reflects the first caller's commit, so signal 2 also passes
+//     trivially: current and observedTask agree, just both already at the
+//     winner's destination. Nothing in either DB read distinguishes that
+//     from a legitimate, later call that happens to arrive once the
+//     session already sits at that step. What does distinguish them is
+//     the caller-supplied session snapshot's UpdatedAt: a genuinely new
+//     call only exists because something touched the session after the
+//     winner's transition committed (a new turn starting, cancellation
+//     reconciliation, ...), which bumps UpdatedAt past the generation the
+//     winner recorded. A duplicate redelivery carries the same (or an
+//     older) snapshot it was constructed from before that commit, so its
+//     UpdatedAt is not strictly newer, and it is rejected here instead of
+//     being evaluated against the step the winner already moved to.
 func (s *Service) acquireTurnCompletionCriticalSection(
 	ctx context.Context, taskID string, session *models.TaskSession, observedTask *models.Task,
 ) (unlock func(), fresh *models.Task, proceed bool) {
 	if session == nil {
 		return func() {}, observedTask, true
 	}
-	unlock = s.acquireTurnCompletionLock(session.ID)
+	unlock, contended := s.acquireTurnCompletionLock(session.ID)
+	if contended {
+		return unlock, observedTask, false
+	}
+	if lastConsumed, ok := s.turnCompletionConsumedGeneration.Load(session.ID); ok {
+		if !session.UpdatedAt.After(lastConsumed.(time.Time)) {
+			return unlock, observedTask, false
+		}
+	}
 	current, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		// Best-effort re-check: fall back to the already-validated snapshot
 		// rather than fail a call that succeeded its primary read.
+		s.turnCompletionConsumedGeneration.Store(session.ID, session.UpdatedAt)
 		return unlock, observedTask, true
 	}
 	if current.WorkflowStepID != observedTask.WorkflowStepID {
 		return unlock, current, false
 	}
+	s.turnCompletionConsumedGeneration.Store(session.ID, session.UpdatedAt)
 	return unlock, current, true
 }
 

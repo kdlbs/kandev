@@ -29,6 +29,7 @@ import (
 	workflowadapters "github.com/kandev/kandev/internal/workflow/adapters"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	workflowrepository "github.com/kandev/kandev/internal/workflow/repository"
+	"github.com/kandev/kandev/internal/workflow/stepentry"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -116,6 +117,28 @@ func TestProcessOnEnter_ClearDecisions_RealDecisionAdapter_ClearsAndCompletesAto
 	}
 	if len(remaining) != 0 {
 		t.Fatalf("remaining decisions = %d, want 0 (AC-B6 atomic clear_decisions)", len(remaining))
+	}
+
+	// The run-queued assertion above only proves dispatchOnEnterActions
+	// continued past clear_decisions — it does not directly prove
+	// ClearStepDecisionsAndCompleteMarker's own marker-write half of its one
+	// transaction actually committed "done" rather than, say, leaving the
+	// marker in_progress while a downstream code path incorrectly continued
+	// anyway. entryID 1: the fresh per-test database's very first allocated
+	// workflow_step_entries row (same reasoning as
+	// step_entry_dispatch_cas_loser_test.go's sibling tests); position 0 is
+	// clear_decisions, the first action reviewLoopWorkflowJSON's Review step
+	// declares.
+	const entryID, clearDecisionsPosition = int64(1), 0
+	state, cause, found, err := f.repo.GetStepEntryMarkerState(ctx, entryID, clearDecisionsPosition)
+	if err != nil {
+		t.Fatalf("GetStepEntryMarkerState: %v", err)
+	}
+	if !found {
+		t.Fatalf("expected a clear_decisions marker to exist for entry %d position %d", entryID, clearDecisionsPosition)
+	}
+	if state != stepentry.MarkerDone {
+		t.Fatalf("clear_decisions marker state = %q (cause=%q), want %q (AC-B6: the atomic path must complete the marker inside the same transaction as the delete)", state, cause, stepentry.MarkerDone)
 	}
 }
 

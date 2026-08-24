@@ -922,6 +922,22 @@ type Service struct {
 	// on_enter actions (clear_decisions, queue_run_for_each_participant).
 	// Entries are not deleted — see sessionLifecycleLocks above for why.
 	turnCompletionLocks sync.Map // map[sessionID]*sync.Mutex
+	// turnCompletionConsumedGeneration records, per session, the
+	// TaskSession.UpdatedAt of the most recent session snapshot that was
+	// already let past acquireTurnCompletionCriticalSection. It closes the
+	// gap turnCompletionLocks' contention signal cannot: two calls whose
+	// entire lifetimes are fully sequential (the second's own pre-lock
+	// GetTask already reflects the first's commit, so the WorkflowStepID
+	// comparison passes trivially) never contend on the mutex at all. A
+	// caller's session argument only carries a newer UpdatedAt than the
+	// stored generation when something legitimately touched the session
+	// (a new turn starting, cancellation reconciliation, ...) after the
+	// last transition was consumed; a stale or identical snapshot — the
+	// hallmark of a duplicate delivery for the same physical turn — is
+	// rejected instead of being re-evaluated against the step the winner
+	// already moved to. See acquireTurnCompletionCriticalSection.
+	// Entries are not deleted — see sessionLifecycleLocks above for why.
+	turnCompletionConsumedGeneration sync.Map // map[sessionID]time.Time
 	// contextWindowGuards serializes live context usage writes and gives each
 	// session a generation boundary that reset_agent_context can invalidate.
 	contextWindowGuards sync.Map
@@ -2280,15 +2296,27 @@ func (s *Service) acquireSessionLifecycleLock(sessionID string) func() {
 // acquireTurnCompletionLock serializes on_turn_complete processing for a
 // single session — see turnCompletionLocks' field comment for the race it
 // closes. A caller with no session ID (defensive callers pass "" rather than
-// skip the lock call) gets a no-op unlock.
-func (s *Service) acquireTurnCompletionLock(sessionID string) func() {
+// skip the lock call) gets a no-op unlock and contended=false.
+//
+// contended reports whether another caller already held this session's lock
+// at the moment this call tried to acquire it — i.e. another
+// processOnTurnCompleteViaEngineWithCause call for the same session is (or
+// very recently was) actively executing right now. That is a direct,
+// timing-independent duplicate signal: unlike comparing two DB reads taken
+// at different times (which a sufficiently late duplicate can pass
+// trivially — see acquireTurnCompletionCriticalSection), lock contention can
+// only be true when two calls for the same session genuinely overlapped.
+func (s *Service) acquireTurnCompletionLock(sessionID string) (unlock func(), contended bool) {
 	if sessionID == "" {
-		return func() {}
+		return func() {}, false
 	}
 	value, _ := s.turnCompletionLocks.LoadOrStore(sessionID, &sync.Mutex{})
 	lock := value.(*sync.Mutex)
+	if lock.TryLock() {
+		return lock.Unlock, false
+	}
 	lock.Lock()
-	return lock.Unlock
+	return lock.Unlock, true
 }
 
 func (s *Service) isSessionResetInProgress(sessionID string) bool {
