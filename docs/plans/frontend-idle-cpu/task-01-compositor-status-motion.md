@@ -63,8 +63,10 @@ pnpm e2e:run --project mobile-chrome tests/task/mobile-task-status-summary.spec.
 
 Capture and inspect one Chromium performance trace after the automated checks.
 Use a focused task with the same persistent running indicators as the supplied
-trace. Record the animation target type and the steady-state event counts in
-this work order's results.
+trace. Attribute recurring events to individual animation targets, include a
+settled control with unrelated persistent animations disabled, and record the
+animation target type and steady-state event counts in this work order's
+results.
 
 ## Files likely touched
 
@@ -116,30 +118,38 @@ this task and `plan.md` with exact results.
 
 - Added `apps/packages/ui/src/compositor-spin.tsx` and exported it from the UI
   package. The primitive renders an `inline-flex` HTML `span` with
-  `animate-spin will-change-transform`; its nested SVG is static.
+  `animate-spin will-change-transform`; its nested SVG is static. When
+  `Element.animate` is available, it reads the existing CSS duration, disables
+  the CSS animation, and starts an infinite linear Web Animations API
+  transform animation on the HTML wrapper. The CSS class remains as the
+  compatibility fallback, and the Web Animations API instance is cancelled on
+  cleanup.
 - Migrated the shared state icons, task-list rows, Kanban cards, focused-task
   topbar/session/agent/run indicators, and Office task/agent/run rows. Existing
   dimensions, colors, selectors, state precedence, labels, and mobile layout
   remain on the same surfaces.
-- Component coverage passed: 7 focused files and 137 tests. The broader
-  affected suite passed 10 files and 161 tests. Desktop and mobile Playwright
-  status flows each passed one test, including the static-SVG wrapper assertion,
-  settling behavior, mobile touch navigation, and overflow checks.
-- A controlled 8.34-second Chromium trace found the migrated target as
+- Component coverage includes the static-SVG wrapper assertion and a Web
+  Animations API assertion for the live compositor path. Desktop and mobile
+  Playwright status flows each passed one test, including settling behavior,
+  mobile touch navigation, and overflow checks.
+- A node-attributed 8.34-second Chromium trace found the migrated target as
   `span.inline-flex.animate-spin.will-change-transform` with a static SVG child.
-  The frame-scoped app capture recorded 180 `UpdateLayoutTree` and 180
-  `Layerize` events with the live status motion enabled. The same page still
-  recorded 155 of each event after all persistent HTML wrappers were disabled,
-  and 163 of each after all `animate-spin` elements were disabled. Those
-  recurring events are therefore page-wide application work, not a sufficient
-  attribution to `CompositorSpin`.
-- The attribution control closed the app page and captured a clean page with
-  seven exact HTML wrapper/SVG pairs using the same transform animation. It
-  recorded one `UpdateLayoutTree` and two `Layerize` events during
-  initialization, with no recurring main-thread layout or layerization during
-  the remaining window. The compositor wrapper therefore does not account for
-  recurring main-thread frame work after its layer is established, so no
-  production adjustment was required.
+  With the page's nine `spinner-grid-cube` animations enabled, the capture
+  recorded 150 `UpdateLayoutTree` and 150 `Layerize` events. The trace
+  attributed 1,350 invalidations to those grid-cube elements and 150
+  co-occurring invalidations to the target wrapper.
+- The decisive production control kept the Web Animations API-backed
+  `CompositorSpin` running, disabled the grid-cube animation and all other
+  persistent status wrappers, and waited one second for the page to settle.
+  The following 8.34-second window recorded zero `UpdateLayoutTree`,
+  `Layerize`, `Layout`, or `Paint` events and no target invalidations. The
+  target had zero class or style mutations during the window. Its four
+  `animate` calls were one-time lifecycle setup before the settled window. A
+  CSS-animation control for the same target
+  recorded 41 `UpdateLayoutTree` and 41 `Layerize` events with target
+  invalidations, while the Web Animations API control had no recurring events.
+  This confirms that the remaining enabled-page frame work is unrelated grid
+  animation, and closes the performance acceptance condition.
 - Typecheck, lint, i18n checks, spec lint, and `git diff --check` passed.
 - Review remediation also marks the `STARTING` session icon as animated, keeps
   the accessible label on the agent status SVG, and strengthens the wrapper

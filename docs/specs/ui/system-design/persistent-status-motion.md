@@ -29,6 +29,14 @@ It renders an `inline-flex` HTML `span` with the existing transform rotation and
 the `will-change: transform` hint. The child SVG stays static and inherits its
 size and color from the wrapper.
 
+The wrapper retains the `animate-spin` class for the existing selector and
+compatibility contract. In browsers with `Element.animate`, the primitive reads
+the duration from that class, disables the CSS animation, and starts an
+infinite linear Web Animations API animation from `rotate(0deg)` to
+`rotate(360deg)` on the HTML element. It applies the transform promotion hint
+and cancels the animation when the primitive is cleaned up. If Web Animations
+are unavailable, the retained CSS animation remains the fallback.
+
 The wrapper owns animation classes, dimensions, margins, status test IDs, and
 other non-SVG attributes. The SVG owns only its path and `aria-hidden` state.
 This split gives Chromium a stable HTML transform target that it can promote to
@@ -81,15 +89,24 @@ Mobile Playwright coverage checks the same wrapper in the task switcher and
 confirms the existing touch navigation.
 
 After implementation, capture the same steady focused-task state in Chromium.
-Compare recurring `UpdateLayoutTree`, `Layerize`, and frame activity with the
-supplied trace. The status animations must not account for per-frame
-main-thread work after their compositor layers are established.
+Attribute recurring `UpdateLayoutTree`, `Layerize`, and frame activity to
+individual animation targets. In the production control, keep the live
+Web Animations API target running while disabling unrelated grid and persistent
+status animations, wait for the page to settle, and inspect the following
+8.34-second window. That window records zero recurring layout-tree or layerize
+events and no target invalidations. With the unrelated grid animation enabled,
+the page records 150 of each event and 1,350 grid-cube invalidations. A CSS
+animation control for the same target records 41 of each event, while the Web
+Animations API path records only one-time setup activity. The remaining
+enabled-page frame work is therefore attributed to the unrelated grid
+animation, not the migrated status target.
 
 ## Failure and compatibility
 
-If a browser does not promote the wrapper, the transform animation still
-rotates normally. No state or content is lost. The implementation uses the
-existing CSS animation, so speed and visual timing remain compatible.
+If a browser does not provide Web Animations, the retained CSS animation still
+rotates the wrapper normally. No state or content is lost. The duration is
+read from the existing CSS class on the Web Animations path, so speed and
+visual timing remain compatible.
 
 The wrapper preserves existing test IDs and semantic attributes. Tests and
 assistive technology do not need to depend on the nested SVG element.

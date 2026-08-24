@@ -37,12 +37,14 @@ Audit task, session, agent, and run status surfaces that can remain mounted for
 the lifetime of domain state. Migrate those call sites and preserve their
 existing state selection, motion, visual style, semantics, and selectors.
 
-Use focused component tests for wrapper ownership and state precedence. Extend
-the existing desktop settled-spinner and mobile task-status flows. Capture a
-new Chromium trace after implementation and compare its steady-state rendering
-events with the supplied baseline. The acceptance trace uses frame-scoped app
-controls plus an uncontaminated wrapper-only control page, so page-wide frame
-events are not treated as evidence against the shared compositor primitive.
+Use focused component tests for wrapper ownership, state precedence, and the
+live Web Animations API path. Extend the existing desktop settled-spinner and
+mobile task-status flows. Capture a new Chromium trace after implementation
+and attribute its steady-state rendering events to individual animation
+targets. The acceptance trace keeps the production target running while
+disabling unrelated grid and status animations, then compares it with a CSS
+animation control and the Web Animations API path so page-wide frame events are
+not misattributed to the shared compositor primitive.
 
 ### Incremental browser-log retention
 

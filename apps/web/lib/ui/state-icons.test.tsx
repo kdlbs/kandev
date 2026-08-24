@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { isValidElement, type ReactNode } from "react";
 import { render } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
@@ -38,6 +38,34 @@ function iconClassName(node: ReactNode): string {
 }
 
 describe("getTaskStateIcon", () => {
+  it("uses a compositor transform animation when Web Animations are available", () => {
+    const originalAnimate = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "animate");
+    const animate = vi.fn(() => ({ cancel: vi.fn() }) as unknown as Animation);
+    Object.defineProperty(HTMLElement.prototype, "animate", {
+      configurable: true,
+      value: animate,
+    });
+
+    try {
+      const { container } = render(
+        <TooltipProvider>{getTaskStateIcon("IN_PROGRESS")}</TooltipProvider>,
+      );
+      const wrapper = container.querySelector(SPIN_SELECTOR) as HTMLElement;
+
+      expect(wrapper.style.animation).toBe("none");
+      expect(animate).toHaveBeenCalledWith(
+        [{ transform: "rotate(0deg)" }, { transform: "rotate(360deg)" }],
+        expect.objectContaining({ duration: 1_000, easing: "linear", iterations: Infinity }),
+      );
+    } finally {
+      if (originalAnimate) {
+        Object.defineProperty(HTMLElement.prototype, "animate", originalAnimate);
+      } else {
+        Reflect.deleteProperty(HTMLElement.prototype, "animate");
+      }
+    }
+  });
+
   it("animates an HTML wrapper while keeping the status SVG static", () => {
     const { container } = render(
       <TooltipProvider>{getTaskStateIcon("IN_PROGRESS")}</TooltipProvider>,
