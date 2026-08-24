@@ -222,6 +222,19 @@ func pluginCredentialExpiry(raw string) (time.Time, error) {
 }
 
 func (a *githubBrokerScopeAuthorizer) AuthorizeGitCredential(ctx context.Context, scope gitcredentials.Scope) error {
+	if a == nil || a.repo == nil {
+		return fmt.Errorf("task repository is unavailable")
+	}
+	if err := a.authorizeTaskSession(ctx, scope.WorkspaceID, scope.TaskID, scope.SessionID); err != nil {
+		return err
+	}
+	if _, err := a.authorizeTaskRepository(ctx, scope.TaskID, scope.RepositoryID); err != nil {
+		return err
+	}
+	if !strings.EqualFold(scope.ProviderID, gitCredentialGitHubProviderID) ||
+		!strings.EqualFold(scope.Host, gitCredentialGitHubHost) {
+		return a.authorizeRepositoryIdentity(ctx, scope)
+	}
 	owner, repo, err := gitCredentialScopeOwnerRepo(scope.Path)
 	if err != nil {
 		return err
@@ -232,9 +245,9 @@ func (a *githubBrokerScopeAuthorizer) AuthorizeGitCredential(ctx context.Context
 	); err == nil {
 		return nil
 	}
-	// Legacy GitHub rows may omit ProviderHost while their persisted clone
-	// URL still proves github.com. Retain that exact-identity compatibility
-	// path after checking server-authored contribution destinations.
+	// Legacy GitHub rows may omit ProviderHost while their persisted clone URL
+	// still proves github.com. This exact-identity fallback is upstream-only;
+	// fork credentials must pass the server-authored destination check above.
 	return a.authorizeRepositoryIdentity(ctx, scope)
 }
 
