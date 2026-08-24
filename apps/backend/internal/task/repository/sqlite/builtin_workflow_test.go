@@ -432,7 +432,7 @@ func TestHealBuiltinWorkflowStepFlags_HealsStaleOfficeWorkStep(t *testing.T) {
 	_, err = repo.db.ExecContext(ctx, repo.db.Rebind(`
 		INSERT INTO workflow_steps (
 			id, workflow_id, name, position, stage_type, events, auto_advance_requires_signal, created_at, updated_at
-		) VALUES ('stale-office-heal-work', 'stale-office-heal', 'Work', 1, 'active', '{}', 0, ?, ?)
+		) VALUES ('stale-office-heal-work', 'stale-office-heal', 'Work', 1, 'work', '{}', 0, ?, ?)
 	`), legacyTime, legacyTime)
 	if err != nil {
 		t.Fatalf("insert stale work step: %v", err)
@@ -476,7 +476,7 @@ func TestHealBuiltinWorkflowStepFlags_KeepsUserWorkflowStepUntouched(t *testing.
 	_, err = repo.db.ExecContext(ctx, repo.db.Rebind(`
 		INSERT INTO workflow_steps (
 			id, workflow_id, name, position, stage_type, events, auto_advance_requires_signal, created_at, updated_at
-		) VALUES ('user-office-work', 'user-office', 'Work', 1, 'active', '{}', 0, ?, ?)
+		) VALUES ('user-office-work', 'user-office', 'Work', 1, 'work', '{}', 0, ?, ?)
 	`), legacyTime, legacyTime)
 	if err != nil {
 		t.Fatalf("insert user work step: %v", err)
