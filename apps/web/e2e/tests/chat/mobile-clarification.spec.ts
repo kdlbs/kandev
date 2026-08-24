@@ -175,7 +175,7 @@ test.describe("Mobile clarification multiline answer", () => {
     await expect(context).toHaveCount(1);
   });
 
-  test("shows a loading spinner while batch answers submit on mobile", async ({
+  test("separates batch actions from the stepper while showing submission feedback", async ({
     testPage,
     apiClient,
     seedData,
@@ -202,12 +202,30 @@ test.describe("Mobile clarification multiline answer", () => {
       await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
     });
 
+    const header = session.clarificationOverlay().getByTestId("clarification-overlay-header");
+    const stepper = session.clarificationOverlay().getByTestId("clarification-stepper");
     const submit = session.clarificationSubmit();
+    const skip = session.clarificationSkip();
+    const collapse = session.clarificationCollapseToggle();
     await expect(submit).toBeEnabled();
-    const idleSubmitBox = await submit.boundingBox();
-    if (!idleSubmitBox) {
-      throw new Error("expected enabled mobile clarification Submit button to have a bounding box");
+    const [headerBox, stepperBox, idleSubmitBox, skipBox, collapseBox] = await Promise.all([
+      header.boundingBox(),
+      stepper.boundingBox(),
+      submit.boundingBox(),
+      skip.boundingBox(),
+      collapse.boundingBox(),
+    ]);
+    if (!headerBox || !stepperBox || !idleSubmitBox || !skipBox || !collapseBox) {
+      throw new Error("expected mobile clarification header controls to have bounding boxes");
     }
+
+    expect(idleSubmitBox.y).toBeGreaterThanOrEqual(stepperBox.y + stepperBox.height + 4);
+    expect(skipBox.height).toBeGreaterThanOrEqual(44);
+    expect(skipBox.width).toBeGreaterThanOrEqual(44);
+    expect(collapseBox.height).toBeGreaterThanOrEqual(44);
+    expect(collapseBox.width).toBeGreaterThanOrEqual(44);
+    expect(idleSubmitBox.x).toBeGreaterThanOrEqual(headerBox.x);
+    expect(collapseBox.x + collapseBox.width).toBeLessThanOrEqual(headerBox.x + headerBox.width);
     await submit.tap();
     await expect(submit).toContainText("Submitting");
     await expect(submit).toBeDisabled();
