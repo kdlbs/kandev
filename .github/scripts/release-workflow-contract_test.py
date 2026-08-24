@@ -731,12 +731,20 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
 
         self.assertIn("macos_unsigned=false", warning)
         self.assertIn("macos_unsigned=true", warning)
-        self.assertIn('if [ "$macos_unsigned" = "true" ]; then', warning)
+        branch_if = 'if [ "$macos_unsigned" = "true" ]; then'
+        command = "xattr -d com.apple.quarantine /Applications/Kandev.app"
+
+        self.assertIn(branch_if, warning)
         self.assertIn("verify the checksum", warning)
-        self.assertIn(
-            "xattr -d com.apple.quarantine /Applications/Kandev.app",
-            warning,
+        self.assertIn(command, warning)
+        self.assertLess(
+            warning.index("verify the checksum"),
+            warning.index(command),
         )
+        branch_start = warning.index(branch_if)
+        branch_end = warning.index("\n            fi", branch_start)
+        branch_body = warning[branch_start:branch_end]
+        self.assertIn(command, branch_body)
 
     def test_release_asset_globs_are_disjoint_and_upload_sequentially(self) -> None:
         publish = step_block("Publish release")
