@@ -1044,15 +1044,40 @@ func (s *Service) clarificationRecoveryOwnsStreamEvent(
 	if operation == nil || operation.kind != cancellationKindSilent {
 		return false
 	}
+	if !clarificationRecoveryCancellationFrame(payload) {
+		// Message, thinking, and tool frames are always live activity. Even an
+		// exact execution/generation match cannot prove that those frames came
+		// from the cancellation rather than the agent's normal work.
+		return false
+	}
+	identity, ready := s.cancellationIdentitySnapshot(operation)
+	if !ready || identity.executionID == "" || identity.promptGeneration == 0 {
+		// Recovery may ignore a frame only when both immutable parts of the
+		// cancellation identity are present on the frame. Missing identity is
+		// independent activity by definition, not evidence of cancellation.
+		return false
+	}
 	eventExecutionID := payload.ExecutionID
 	if eventExecutionID == "" {
 		eventExecutionID = payload.AgentID
 	}
-	return s.cancellationOwnsStreamEvent(
-		sessionID,
-		eventExecutionID,
-		payload.Data.PromptGeneration,
-	)
+	return eventExecutionID != "" &&
+		eventExecutionID == identity.executionID &&
+		payload.Data.PromptGeneration == identity.promptGeneration
+}
+
+func clarificationRecoveryCancellationFrame(payload *lifecycle.AgentStreamEventPayload) bool {
+	if payload == nil || payload.Data == nil {
+		return false
+	}
+	switch payload.Data.Type {
+	case "session_info", "session_status":
+		return true
+	case agentEventComplete:
+		return extractStopReason(payload) == stopReasonCancelled
+	default:
+		return false
+	}
 }
 
 func (s *Service) cancelAllClarificationWatchdogs() {

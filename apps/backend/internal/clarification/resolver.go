@@ -70,22 +70,15 @@ type clarificationResponseClaim struct {
 // on a win delivers through upstream's existing live-waiter/detached-resume
 // path (R7) unchanged; on a loss it reconstructs the winner's outcome (R2).
 type Resolver struct {
-	store                  *Store
-	repo                   handlerMessageStore
-	messages               MessageCreator
-	authorizer             taskAccessAuthorizer
-	detachedResumer        DetachedClarificationResumer
-	eventBus               EventBus
-	primaryAnsweredHandler PrimaryAnsweredHandler
-	logger                 *logger.Logger
-	now                    func() time.Time // seam for deterministic tests
-}
-
-// SetPrimaryAnsweredHandler installs the local ordering seam used by the
-// orchestrator. The handler is called synchronously before a live waiter can
-// observe the response; the event bus publication remains separate fan-out.
-func (r *Resolver) SetPrimaryAnsweredHandler(handler PrimaryAnsweredHandler) {
-	r.primaryAnsweredHandler = handler
+	store                   *Store
+	repo                    handlerMessageStore
+	messages                MessageCreator
+	authorizer              taskAccessAuthorizer
+	detachedResumer         DetachedClarificationResumer
+	eventBus                EventBus
+	primaryAnsweredNotifier PrimaryAnsweredNotifier
+	logger                  *logger.Logger
+	now                     func() time.Time // seam for deterministic tests
 }
 
 // NewResolver creates a Resolver.
@@ -96,17 +89,19 @@ func NewResolver(
 	authorizer taskAccessAuthorizer,
 	detachedResumer DetachedClarificationResumer,
 	eventBus EventBus,
+	primaryAnsweredNotifier PrimaryAnsweredNotifier,
 	log *logger.Logger,
 ) *Resolver {
 	return &Resolver{
-		store:           store,
-		repo:            repo,
-		messages:        messages,
-		authorizer:      authorizer,
-		detachedResumer: detachedResumer,
-		eventBus:        eventBus,
-		logger:          log.WithFields(zap.String("component", "clarification-resolver")),
-		now:             time.Now,
+		store:                   store,
+		repo:                    repo,
+		messages:                messages,
+		authorizer:              authorizer,
+		detachedResumer:         detachedResumer,
+		eventBus:                eventBus,
+		primaryAnsweredNotifier: primaryAnsweredNotifier,
+		logger:                  log.WithFields(zap.String("component", "clarification-resolver")),
+		now:                     time.Now,
 	}
 }
 
@@ -393,7 +388,7 @@ func (r *Resolver) deliverClaimedResolution(
 		func() error {
 			finalized, confirmErr := r.confirmLiveClarificationResponseDelivery(ctx, pendingID, claim)
 			if confirmErr == nil {
-				r.publishPrimaryAnsweredEvent(
+				r.notifyPrimaryAnsweredBeforeWaiter(
 					ctx,
 					pendingID,
 					response.Answers,
@@ -578,14 +573,18 @@ func clarificationClaimTurnIdentity(messages []*taskmodels.Message) (string, err
 	return turnID, nil
 }
 
-func (r *Resolver) publishPrimaryAnsweredEvent(
+// notifyPrimaryAnsweredBeforeWaiter is the synchronous local ordering
+// boundary. It must complete before the delivery-confirmation callback returns
+// to Store, because Store then releases the live waiter. Event-bus fan-out is
+// deliberately kept after this notifier and is never used as its acknowledgement.
+func (r *Resolver) notifyPrimaryAnsweredBeforeWaiter(
 	ctx context.Context,
 	pendingID string,
 	answers []Answer,
 	rejected bool,
 	rejectReason, clarificationTurnID string,
 ) {
-	if r.eventBus == nil && r.primaryAnsweredHandler == nil {
+	if r.eventBus == nil && r.primaryAnsweredNotifier == nil {
 		return
 	}
 	persistenceCtx, cancel := clarificationPersistenceContext(ctx)
@@ -605,42 +604,50 @@ func (r *Resolver) publishPrimaryAnsweredEvent(
 	}
 
 	answerText := buildAnswerSummary(clarificationCtx.Questions, answers, rejected, rejectReason)
-	if r.primaryAnsweredHandler != nil {
-		r.primaryAnsweredHandler(persistenceCtx, PrimaryAnswered{
-			SessionID:           clarificationCtx.SessionID,
-			TaskID:              clarificationCtx.TaskID,
-			PendingID:           pendingID,
-			ClarificationTurnID: clarificationTurnID,
-			Question:            clarificationCtx.QuestionSummary,
-			AnswerText:          answerText,
-			Rejected:            rejected,
-			RejectReason:        rejectReason,
-		})
+	answered := PrimaryAnswered{
+		SessionID:           clarificationCtx.SessionID,
+		TaskID:              clarificationCtx.TaskID,
+		PendingID:           pendingID,
+		ClarificationTurnID: clarificationTurnID,
+		Question:            clarificationCtx.QuestionSummary,
+		AnswerText:          answerText,
+		Rejected:            rejected,
+		RejectReason:        rejectReason,
 	}
+	if r.primaryAnsweredNotifier != nil {
+		r.primaryAnsweredNotifier(persistenceCtx, answered)
+	}
+	r.publishPrimaryAnsweredEvent(persistenceCtx, answered)
+}
+
+// publishPrimaryAnsweredEvent is asynchronous fan-out only. The local
+// watchdog notifier is intentionally not called from this method: NATS
+// publication returns before its subscribers process the event.
+func (r *Resolver) publishPrimaryAnsweredEvent(ctx context.Context, answered PrimaryAnswered) {
 	if r.eventBus == nil {
 		return
 	}
 	eventData := map[string]any{
-		metaSessionIDKey:        clarificationCtx.SessionID,
-		metaTaskIDKey:           clarificationCtx.TaskID,
-		metaPendingIDKey:        pendingID,
-		"clarification_turn_id": clarificationTurnID,
-		metaQuestionKey:         clarificationCtx.QuestionSummary,
-		"answer_text":           answerText,
-		metaRejectedKey:         rejected,
-		"reject_reason":         rejectReason,
+		metaSessionIDKey:        answered.SessionID,
+		metaTaskIDKey:           answered.TaskID,
+		metaPendingIDKey:        answered.PendingID,
+		"clarification_turn_id": answered.ClarificationTurnID,
+		metaQuestionKey:         answered.Question,
+		"answer_text":           answered.AnswerText,
+		metaRejectedKey:         answered.Rejected,
+		"reject_reason":         answered.RejectReason,
 		// The orchestrator handled this event synchronously in the resolver's
 		// process. Its event-bus subscription must not arm a second watchdog.
-		"handled_inline": r.primaryAnsweredHandler != nil,
+		"handled_inline": r.primaryAnsweredNotifier != nil,
 	}
-	if err := r.eventBus.Publish(persistenceCtx, events.ClarificationPrimaryAnswered, bus.NewEvent(
+	if err := r.eventBus.Publish(ctx, events.ClarificationPrimaryAnswered, bus.NewEvent(
 		events.ClarificationPrimaryAnswered,
 		"clarification-resolver",
 		eventData,
 	)); err != nil {
 		r.logger.Warn("failed to publish primary clarification event",
-			zap.String("pending_id", pendingID),
-			zap.String("session_id", clarificationCtx.SessionID),
+			zap.String("pending_id", answered.PendingID),
+			zap.String("session_id", answered.SessionID),
 			zap.Error(err))
 	}
 }

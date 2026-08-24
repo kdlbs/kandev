@@ -104,6 +104,9 @@ The lifecycle contract covers timeout, supersession, response, cleanup, and reco
 - **GIVEN** primary-answer fallback silently cancels the stuck turn, **WHEN** that cancellation emits
   session or completion activity, **THEN** the fallback keeps its bounded recovery context through state
   reconciliation and exactly one replacement-answer handoff.
+- **GIVEN** primary-answer fallback is silently cancelling a stuck turn, **WHEN** a message, thinking,
+  or tool frame arrives, **THEN** that frame cancels the watchdog unless it is an explicit cancellation
+  acknowledgement; matching execution identity alone does not suppress normal agent activity.
 - **GIVEN** a reserved successor is marked dispatch-attempted but remains unpublished, **WHEN** a client
   loads turn history before agentctl accepts or rejects it, **THEN** the successor is omitted until
   publication or durable message evidence prevents rollback from leaving stale client-only history.

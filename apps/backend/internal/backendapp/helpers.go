@@ -604,9 +604,15 @@ func registerRoutes(p routeParams) {
 	// external answer_question_kandev/list_pending_questions_kandev MCP tools
 	// (R3: both entry points must race through the same claim).
 	clarificationResolver := clarification.NewResolver(
-		clarificationStore, p.taskRepo, p.msgCreator, p.taskSvc, p.orchestratorSvc, p.eventBus, p.log,
+		clarificationStore,
+		p.taskRepo,
+		p.msgCreator,
+		p.taskSvc,
+		p.orchestratorSvc,
+		p.eventBus,
+		p.orchestratorSvc.HandleClarificationPrimaryAnswered,
+		p.log,
 	)
-	clarificationResolver.SetPrimaryAnsweredHandler(p.orchestratorSvc.HandleClarificationPrimaryAnswered)
 
 	// Wire pending clarification requests into the office inbox.
 	if p.services.OfficeSvcs != nil && p.services.OfficeSvcs.Dashboard != nil {

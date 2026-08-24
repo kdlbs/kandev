@@ -37,18 +37,20 @@ from cancelling the fallback context that must hand off that answer.
 
 ### Live delivery ordering
 
-Update `clarification.Resolver` so a synchronous local orchestrator notifier arms the watchdog from
-the successful delivery-confirmation callback after durable finalization and before `Store.WaitForResponse`
-can return the response to the agent. Keep the event-bus publication as fan-out, mark it as handled by
-the local notifier to avoid a duplicate watchdog, and keep terminal bundle-message publication after
-confirmed delivery.
+Update `clarification.Resolver` so its construction-supplied synchronous local orchestrator notifier
+arms the watchdog from the successful delivery-confirmation callback after durable finalization and
+before `Store.WaitForResponse` can return the response to the agent. Keep event-bus publication as
+fan-out, mark it as handled by the local notifier to avoid a duplicate watchdog, and keep terminal
+bundle-message publication after confirmed delivery. NATS publication is never the watchdog
+acknowledgement.
 
 ### Recovery-owned cancellation activity
 
 Extend `clarificationWatchdogEntry` with concurrency-safe recovery-cancellation phase state. Mark that
 phase only around expected-turn silent cancellation. `cancelClarificationWatchdogsForSession` must
-preserve the matching entry only when a live stream frame matches the cancellation operation's captured
-execution and prompt-generation identity. Newer or independent activity, and
+preserve the matching entry only when a live stream frame has an allowed cancellation-acknowledgement
+type and matches the cancellation operation's captured execution and prompt-generation identity.
+Message, thinking, and tool activity, newer or independent activity, and
 `cancelAllClarificationWatchdogs`, retain their cancellation authority. After cancellation, recheck
 the captured turn and allow queue handoff only when it remains current or is the exact turn durably
 completed by the owned cancellation.

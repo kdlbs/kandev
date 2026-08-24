@@ -124,22 +124,24 @@ Transitions:
 ## Primary-answer watchdog recovery
 
 The primary path uses the live waiter's durable delivery-confirmation callback as the ordering
-boundary between response persistence and ACP delivery. After the claim is finalized, a synchronous
-local orchestrator notifier registers the watchdog for the pending ID and clarification turn before
-the callback returns the response to the agent. The event-bus publication remains fan-out for other
-consumers and carries an inline-handled marker so the local subscription does not arm a duplicate
-watchdog. The agent therefore cannot emit a tool-completion acknowledgement before an armed watchdog
-can observe and cancel itself. Terminal clarification message publication remains after successful
-delivery; watchdog registration does not publish those messages early.
+boundary between response persistence and ACP delivery. The resolver is constructed with a synchronous
+local orchestrator notifier. After the claim is finalized, that notifier registers the watchdog for the
+pending ID and clarification turn before the callback returns the response to the agent. The event-bus
+publication remains fan-out for other consumers and carries an inline-handled marker so the local
+subscription does not arm a duplicate watchdog. NATS publication is not used as the acknowledgement:
+its publish call can return before subscribers run. The agent therefore cannot emit a tool-completion
+acknowledgement before an armed watchdog can observe and cancel itself. Terminal clarification message
+publication remains after successful delivery; watchdog registration does not publish those messages
+early.
 
 Each watchdog has an armed phase and a fallback-recovery phase. Independent live stream activity
 cancels either phase, and service shutdown cancels all phases. Once fallback owns the per-session
 cancel-and-handoff sequence, it marks the silent cancellation as recovery-owned. The cancellation
-operation's captured execution and prompt-generation identity classifies session-information and
-completion frames caused by that cancellation. Only frames with that operation-owned identity are
-ignored; a newer execution or prompt generation cancels the same recovery context even while
-cancellation is blocked. The marker is cleared when cancellation settles, so later independent
-activity retains its normal cancellation authority.
+operation's captured execution and prompt-generation identity plus a cancellation-acknowledgement
+frame type classifies frames caused by that cancellation. Only those exact frames are ignored; message,
+thinking, and tool frames always cancel the recovery context, and a newer execution or prompt
+generation cancels it even while cancellation is blocked. The marker is cleared when cancellation
+settles, so later independent activity retains its normal cancellation authority.
 
 Fallback uses one bounded context through turn-authority reads, silent cancellation, terminal-safe
 session reconciliation, and replacement-answer queue handoff. The recovery-owned activity exception
@@ -196,11 +198,11 @@ session they can already access. Session selection does not broaden task visibil
   report whether retry state was recovered, and never restore it after a successor turn is accepted. A
   started confirmation may finish after the responder's bounded wait, but it cannot mutate the
   responder's claim snapshot and its durable finalization serializes against that restore.
-- Live delivery acknowledgement races response finalization: invoke the local primary-answer watchdog
-  notifier synchronously inside the finalized delivery-confirmation boundary before returning the
-  response to the agent. Keep the event-bus publication as fan-out and mark the event as handled inline
-  so the local subscriber does not register a duplicate watchdog. Do not rely on a later terminal-
-  message publication or asynchronous bus delivery to establish watchdog ordering.
+- Live delivery acknowledgement races response finalization: invoke the resolver's construction-supplied
+  local primary-answer watchdog notifier synchronously inside the finalized delivery-confirmation
+  boundary before returning the response to the agent. Keep the event-bus publication as fan-out and
+  mark the event as handled inline so the local subscriber does not register a duplicate watchdog. Do
+  not rely on NATS or another asynchronous bus delivery to establish watchdog ordering.
 - Primary-answer fallback cancellation produces its own stream activity: retain the bounded fallback
   context while that recovery-owned cancellation settles, then revalidate the captured turn's durable
   authority before the single replacement-answer handoff. Independent activity and service shutdown
