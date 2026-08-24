@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -136,4 +137,82 @@ func TestCurrentTurnAuthoritySurvivesLifecycleShadowOverPendingClarification(t *
 			t.Fatalf("claimed=%v completed=%+v, want a single successful claim, not a conflict", claimed, completed)
 		}
 	})
+}
+
+// TestBootResumeLifecycleTurnNeverClaimsClarificationRequest is AC-7 / D5: the
+// boot-on-resume path (Service.CreateMessage with CompletedTurn: true,
+// Type: "script_execution", mirroring bootMsgAdapter.CreateMessage in
+// internal/backendapp/worktree.go) creates a lifecycle turn, but a
+// clarification_request written afterward through the real getOrStartTurn
+// path must still land on the open conversational turn, never the lifecycle
+// one - regardless of the lifecycle turn's later timestamp.
+func TestBootResumeLifecycleTurnNeverClaimsClarificationRequest(t *testing.T) {
+	svc, repo, taskID, sessionID := newLifecycleShadowTestService(t)
+	ctx := context.Background()
+
+	past := time.Now().UTC().Add(-time.Hour)
+	const conversationTurnID = "turn-conversation-ac7"
+	if err := repo.CreateTurn(ctx, &models.Turn{
+		ID: conversationTurnID, TaskSessionID: sessionID, TaskID: taskID,
+		StartedAt: past, CreatedAt: past, UpdatedAt: past,
+	}); err != nil {
+		t.Fatalf("seed open conversational turn: %v", err)
+	}
+
+	bootMsg, err := svc.CreateMessage(ctx, &CreateMessageRequest{
+		TaskSessionID: sessionID,
+		Content:       "",
+		AuthorType:    "agent",
+		Type:          "script_execution",
+		CompletedTurn: true,
+		Metadata: map[string]interface{}{
+			"script_type": "agent_boot",
+			"status":      "running",
+			"is_resuming": true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("create boot message via CompletedTurn path: %v", err)
+	}
+	if bootMsg.TurnID == conversationTurnID {
+		t.Fatalf("boot message landed on the conversational turn %s, want a fresh lifecycle turn", conversationTurnID)
+	}
+	lifecycleTurnID := bootMsg.TurnID
+
+	clarification, err := svc.CreateMessage(ctx, &CreateMessageRequest{
+		TaskSessionID: sessionID,
+		AuthorType:    "agent",
+		Type:          string(models.MessageTypeClarificationRequest),
+		Content:       "q",
+		Metadata: map[string]interface{}{
+			"pending_id":  "pending-ac7",
+			"question_id": "q1",
+			"status":      "pending",
+		},
+	})
+	if err != nil {
+		t.Fatalf("create clarification_request after boot resume: %v", err)
+	}
+	if clarification.TurnID != conversationTurnID {
+		t.Fatalf("clarification_request turn_id = %s, want the open conversational turn %s", clarification.TurnID, conversationTurnID)
+	}
+	if clarification.TurnID == lifecycleTurnID {
+		t.Fatalf("clarification_request landed on the lifecycle turn %s, want the open conversational turn", lifecycleTurnID)
+	}
+}
+
+// TestCreateMessageRequestCompletedTurnNotJSONSettable is AC-7's second half:
+// CreateMessageRequest.CompletedTurn is tagged json:"-" so no API client can
+// set it. Unmarshalling a body that sets completed_turn SHALL leave the field
+// false; a caller later making it settable while writing a
+// clarification_request would let any client hide its own question.
+func TestCreateMessageRequestCompletedTurnNotJSONSettable(t *testing.T) {
+	var req CreateMessageRequest
+	body := []byte(`{"session_id":"sess","content":"hi","completed_turn":true}`)
+	if err := json.Unmarshal(body, &req); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if req.CompletedTurn {
+		t.Fatal("CompletedTurn = true after unmarshalling a body setting completed_turn, want false (json:\"-\")")
+	}
 }
