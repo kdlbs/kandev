@@ -82,6 +82,7 @@ func provideWorktreeManager(dbPool *db.Pool, cfg *config.Config, log *logger.Log
 			worktrees: manager,
 		})
 	}
+	taskSvc.SetSSHTaskDirReclaimer(&sshTaskDirReclaimerAdapter{logger: log})
 
 	// Wire script message handler with adapters
 	taskSvcAdapter := &taskServiceAdapter{svc: taskSvc}
