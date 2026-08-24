@@ -1110,21 +1110,24 @@ type pluginsUtilityAgentAdapter struct {
 	userSvc *userservice.Service
 }
 
-type pluginAgentProfileStore interface {
-	GetAgentProfile(ctx context.Context, id string) (*agentsettingsmodels.AgentProfile, error)
+type pluginAgentProfileResolver interface {
+	Resolve(ctx context.Context, id string) (*agentsettingsmodels.AgentProfile, error)
 }
 
 // pluginsAgentProfileAdapter keeps agent-settings storage errors at the
 // backend boundary. The plugins package only receives the narrow execution
 // eligibility record and its typed missing-profile sentinel.
 type pluginsAgentProfileAdapter struct {
-	store pluginAgentProfileStore
+	resolver pluginAgentProfileResolver
 }
 
 func (a pluginsAgentProfileAdapter) GetProfileByID(ctx context.Context, id string) (*plugins.AgentProfile, error) {
-	profile, err := a.store.GetAgentProfile(ctx, id)
-	if errors.Is(err, sql.ErrNoRows) {
+	profile, err := a.resolver.Resolve(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, profilebinding.ErrProfileNotFound) {
 		return nil, plugins.ErrAgentProfileNotFound
+	}
+	if errors.Is(err, profilebinding.ErrProfileIneligible) {
+		return nil, plugins.ErrAgentProfileIneligible
 	}
 	if err != nil {
 		return nil, err
@@ -1133,9 +1136,10 @@ func (a pluginsAgentProfileAdapter) GetProfileByID(ctx context.Context, id strin
 		return nil, plugins.ErrAgentProfileNotFound
 	}
 	return &plugins.AgentProfile{
-		Enabled:        profile.Enabled,
-		CLIPassthrough: profile.CLIPassthrough,
-		WorkspaceID:    profile.WorkspaceID,
+		Enabled:          profile.Enabled,
+		CLIPassthrough:   profile.CLIPassthrough,
+		WorkspaceID:      profile.WorkspaceID,
+		InferenceCapable: true,
 	}, nil
 }
 

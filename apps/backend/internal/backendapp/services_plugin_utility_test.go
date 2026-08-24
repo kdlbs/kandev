@@ -14,6 +14,7 @@ import (
 	userService "github.com/kandev/kandev/internal/user/service"
 	userStore "github.com/kandev/kandev/internal/user/store"
 	utilitymodels "github.com/kandev/kandev/internal/utility/models"
+	"github.com/kandev/kandev/internal/utility/profilebinding"
 	utilityservice "github.com/kandev/kandev/internal/utility/service"
 	utilitystore "github.com/kandev/kandev/internal/utility/store"
 )
@@ -80,7 +81,7 @@ func TestPluginsUtilityAgentAdapter_ResolvesEmptyBuiltinThroughDefault(t *testin
 }
 
 func TestPluginsAgentProfileAdapter_MapsTypedNotFound(t *testing.T) {
-	adapter := pluginsAgentProfileAdapter{store: &pluginAgentProfileStoreStub{err: sql.ErrNoRows}}
+	adapter := pluginsAgentProfileAdapter{resolver: &pluginAgentProfileResolverStub{err: sql.ErrNoRows}}
 
 	_, err := adapter.GetProfileByID(context.Background(), "missing")
 	if !errors.Is(err, plugins.ErrAgentProfileNotFound) {
@@ -90,7 +91,7 @@ func TestPluginsAgentProfileAdapter_MapsTypedNotFound(t *testing.T) {
 
 func TestPluginsAgentProfileAdapter_PreservesOperationalFailure(t *testing.T) {
 	storeErr := errors.New("agent profile database unavailable")
-	adapter := pluginsAgentProfileAdapter{store: &pluginAgentProfileStoreStub{err: storeErr}}
+	adapter := pluginsAgentProfileAdapter{resolver: &pluginAgentProfileResolverStub{err: storeErr}}
 
 	_, err := adapter.GetProfileByID(context.Background(), "configured")
 	if !errors.Is(err, storeErr) {
@@ -99,7 +100,7 @@ func TestPluginsAgentProfileAdapter_PreservesOperationalFailure(t *testing.T) {
 }
 
 func TestPluginsAgentProfileAdapter_PreservesEligibilityFields(t *testing.T) {
-	adapter := pluginsAgentProfileAdapter{store: &pluginAgentProfileStoreStub{profile: &agentsettingsmodels.AgentProfile{
+	adapter := pluginsAgentProfileAdapter{resolver: &pluginAgentProfileResolverStub{profile: &agentsettingsmodels.AgentProfile{
 		Enabled:        true,
 		CLIPassthrough: false,
 		WorkspaceID:    "",
@@ -109,8 +110,17 @@ func TestPluginsAgentProfileAdapter_PreservesEligibilityFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetProfileByID() error = %v", err)
 	}
-	if !got.Enabled || got.CLIPassthrough || got.WorkspaceID != "" {
+	if !got.Enabled || got.CLIPassthrough || got.WorkspaceID != "" || !got.InferenceCapable {
 		t.Fatalf("GetProfileByID() = %+v, want an eligible profile", got)
+	}
+}
+
+func TestPluginsAgentProfileAdapter_MapsIneligibleProfile(t *testing.T) {
+	adapter := pluginsAgentProfileAdapter{resolver: &pluginAgentProfileResolverStub{err: profilebinding.ErrProfileIneligible}}
+
+	_, err := adapter.GetProfileByID(context.Background(), "not-inference-capable")
+	if !errors.Is(err, plugins.ErrAgentProfileIneligible) {
+		t.Fatalf("GetProfileByID() error = %v, want plugin ineligible error", err)
 	}
 }
 
@@ -119,12 +129,12 @@ type utilityAgentRepositoryStub struct {
 	agent *utilitymodels.UtilityAgent
 }
 
-type pluginAgentProfileStoreStub struct {
+type pluginAgentProfileResolverStub struct {
 	profile *agentsettingsmodels.AgentProfile
 	err     error
 }
 
-func (s *pluginAgentProfileStoreStub) GetAgentProfile(context.Context, string) (*agentsettingsmodels.AgentProfile, error) {
+func (s *pluginAgentProfileResolverStub) Resolve(context.Context, string) (*agentsettingsmodels.AgentProfile, error) {
 	return s.profile, s.err
 }
 

@@ -54,12 +54,13 @@ function renderField(
 }
 
 describe("PluginConfigForm agent profile field", () => {
-  it("offers only enabled global non-CLI profiles and stores the stable ID", () => {
+  it("offers only enabled global non-CLI inference profiles and stores the stable ID", () => {
     const onChange = renderField([
       profile({ id: "eligible", label: ELIGIBLE_PROFILE_LABEL }),
       profile({ id: "disabled", label: "Disabled", enabled: false }),
       profile({ id: "workspace", label: "Workspace", workspace_id: "workspace-1" }),
       profile({ id: "cli", label: "CLI", cli_passthrough: true }),
+      profile({ id: "non-inference", label: "Non-inference", inference_capable: false }),
     ]);
 
     fireEvent.click(screen.getByRole("combobox"));
@@ -68,6 +69,7 @@ describe("PluginConfigForm agent profile field", () => {
     expect(screen.queryByRole("option", { name: "Disabled" })).toBeNull();
     expect(screen.queryByRole("option", { name: "Workspace" })).toBeNull();
     expect(screen.queryByRole("option", { name: "CLI" })).toBeNull();
+    expect(screen.queryByRole("option", { name: "Non-inference" })).toBeNull();
 
     fireEvent.click(screen.getByRole("option", { name: ELIGIBLE_PROFILE_LABEL }));
     expect(onChange).toHaveBeenCalledWith(AGENT_PROFILE_FIELD, "eligible");

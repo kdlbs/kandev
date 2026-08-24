@@ -30,6 +30,10 @@ var ErrUtilityAgentNotFound = errors.New("utility agent not found")
 // profile and translate it into the configured-plugin failure contract.
 var ErrAgentProfileNotFound = errors.New("agent profile not found")
 
+// ErrAgentProfileIneligible lets backend adapters return the same typed
+// eligibility result used by the sessionless host-utility profile resolver.
+var ErrAgentProfileIneligible = errors.New("agent profile is not eligible for utility execution")
+
 // UtilityAgent is the execution-relevant portion of a configured utility
 // agent. backendapp adapts internal/utility/service.Service to this shape.
 type UtilityAgent struct {
@@ -48,9 +52,10 @@ type utilityAgentSource interface {
 // AgentProfile is the execution-relevant portion of a direct profile
 // selection. backendapp adapts the agent-settings repository to this shape.
 type AgentProfile struct {
-	Enabled        bool
-	CLIPassthrough bool
-	WorkspaceID    string
+	Enabled          bool
+	CLIPassthrough   bool
+	WorkspaceID      string
+	InferenceCapable bool
 }
 
 type agentProfileSource interface {
@@ -142,6 +147,9 @@ func (h *pluginHost) invokeConfiguredAgentProfile(
 	if errors.Is(err, ErrAgentProfileNotFound) {
 		return "", status.Errorf(codes.FailedPrecondition, "configured agent profile %q not found", profileID)
 	}
+	if errors.Is(err, ErrAgentProfileIneligible) {
+		return "", status.Errorf(codes.FailedPrecondition, "configured agent profile %q is not eligible for utility execution", profileID)
+	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return "", status.FromContextError(err).Err()
 	}
@@ -154,7 +162,7 @@ func (h *pluginHost) invokeConfiguredAgentProfile(
 	if profile == nil {
 		return "", status.Errorf(codes.FailedPrecondition, "configured agent profile %q not found", profileID)
 	}
-	if !profile.Enabled || profile.CLIPassthrough || profile.WorkspaceID != "" {
+	if !profile.Enabled || profile.CLIPassthrough || profile.WorkspaceID != "" || !profile.InferenceCapable {
 		return "", status.Errorf(codes.FailedPrecondition, "configured agent profile %q is not eligible for utility execution", profileID)
 	}
 	return runner.ExecuteProfilePrompt(ctx, profileID, prompt)

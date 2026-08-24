@@ -116,7 +116,7 @@ func (c *Controller) CreateCustomTUIAgent(ctx context.Context, req CreateCustomT
 	}
 
 	profiles := []*models.AgentProfile{profile}
-	result := toAgentDTO(agent, profiles)
+	result := c.toAgentDTO(agent, profiles)
 	return &result, nil
 }
 
@@ -200,6 +200,6 @@ func (c *Controller) customTUIAgentDTO(ctx context.Context, agent *models.Agent)
 	if err != nil {
 		return nil, err
 	}
-	result := toAgentDTO(agent, filterGlobalProfiles(profiles))
+	result := c.toAgentDTO(agent, filterGlobalProfiles(profiles))
 	return &result, nil
 }

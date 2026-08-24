@@ -874,10 +874,11 @@ func startGatewayAndServe(
 		agentctlclient.WithControlAuthToken(cfg.Agent.StandaloneAuthToken))
 	hostUtilityMgr := hostutility.NewManager(agentRegistry, cfg.Agent.StandaloneHost, cfg.Agent.StandalonePort, hostControlClient, log)
 	hostUtilityMgr.SetAuthToken(cfg.Agent.StandaloneAuthToken)
-	hostUtilityMgr.SetProfileResolver(profilebinding.New(repos.AgentSettings, func(agentID string) bool {
+	pluginProfileResolver := profilebinding.New(repos.AgentSettings, func(agentID string) bool {
 		_, ok := agentRegistry.GetInferenceAgent(agentID)
 		return ok
-	}))
+	})
+	hostUtilityMgr.SetProfileResolver(pluginProfileResolver)
 	hostUtilityMgr.SetManagedRuntimeSelectionStore(services.ManagedRuntimeSelections)
 	// Wire the host utility manager into the settings controller so
 	// /api/v1/agent-models/:agentName reads live capability data.
@@ -914,7 +915,7 @@ func startGatewayAndServe(
 	if services.Plugins != nil && services.Utility != nil {
 		services.Plugins.SetUtilityAgent(
 			pluginsUtilityAgentAdapter{svc: services.Utility, userSvc: services.User},
-			pluginsAgentProfileAdapter{store: repos.AgentSettings},
+			pluginsAgentProfileAdapter{resolver: pluginProfileResolver},
 			pluginsHostUtilityAdapter{mgr: hostUtilityMgr},
 		)
 	}

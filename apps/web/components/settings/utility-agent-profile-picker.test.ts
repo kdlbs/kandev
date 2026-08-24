@@ -19,6 +19,7 @@ describe("utilityProfileEligibility", () => {
     ["disabled profile", profile({ enabled: false }), false],
     ["CLI passthrough profile", profile({ cli_passthrough: true }), false],
     ["workspace profile", profile({ workspace_id: "workspace-1" }), false],
+    ["non-inference profile", profile({ inference_capable: false }), false],
   ])("returns %s = %s", (_label, candidate, expected) => {
     expect(utilityProfileEligibility(candidate)).toBe(expected);
   });

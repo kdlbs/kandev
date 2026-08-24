@@ -31,8 +31,9 @@ configuration and the existing host-utility tier.
 1. **Plugin config: direct profile first.** Plugins declaring `agent_invoke`
    can declare an `agent_profile` field with `type: string` and
    `format: agent-profile`. Settings > Plugins renders enabled, global,
-   non-CLI profiles and stores the selected stable ID. A missing, deleted,
-   disabled, CLI-passthrough, or workspace-scoped profile is a
+   non-CLI profiles whose agent supports sessionless inference and stores the
+   selected stable ID. A missing, deleted, disabled, CLI-passthrough,
+   workspace-scoped, or non-inference profile is a
    `FailedPrecondition`. A non-empty declared `agent_profile` is the direct
    execution selection and takes precedence over `utility_agent`; when it is
    unset, the legacy selection remains available.

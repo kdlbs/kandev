@@ -805,13 +805,15 @@ config_schema:
   required: ["agent_profile"]
 ```
 
-The picker displays enabled global non-CLI profiles and stores the selected
-profile's stable ID. Omit `agent_profile` from `required` only when the plugin
+The picker displays enabled global non-CLI profiles whose agent supports
+sessionless inference and stores the selected profile's stable ID. Omit
+`agent_profile` from `required` only when the plugin
 supports operating without LLM delegation; optional selectors include a
 **Not set** choice. The plugin needs no provider API key because it delegates
-to a kandev-configured agent. A missing, deleted, disabled, CLI-passthrough, or
-workspace-scoped selection returns gRPC `FailedPrecondition`, so handle that as
-"ask the operator to configure one" rather than a transient failure.
+to a kandev-configured agent. A missing, deleted, disabled, CLI-passthrough,
+workspace-scoped, or non-inference selection returns gRPC `FailedPrecondition`,
+so handle that as "ask the operator to configure one" rather than a transient
+failure.
 
 Existing plugins may continue to declare `utility_agent` with
 `format: utility-agent`; Kandev resolves that utility agent's effective

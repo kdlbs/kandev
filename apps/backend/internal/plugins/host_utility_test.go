@@ -88,7 +88,7 @@ func TestPluginHost_InvokeUtilityAgent_UsesConfiguredAgentProfileBeforeUtilityAg
 		utilityAgentConfigKey: "utility-agent-42",
 	}}
 	d.profiles.profilesByID = map[string]*AgentProfile{
-		"profile-99": {Enabled: true},
+		"profile-99": {Enabled: true, InferenceCapable: true},
 	}
 
 	got, err := d.host.InvokeUtilityAgent(context.Background(), "summarize yesterday")
@@ -164,19 +164,19 @@ func TestPluginHost_InvokeUtilityAgent_RejectsMissingOrIneligibleConfiguredAgent
 		{
 			name:     "disabled profile",
 			config:   map[string]any{agentProfileConfigKey: "disabled-profile"},
-			profiles: map[string]*AgentProfile{"disabled-profile": {Enabled: false}},
+			profiles: map[string]*AgentProfile{"disabled-profile": {Enabled: false, InferenceCapable: true}},
 			want:     `configured agent profile "disabled-profile" is not eligible for utility execution`,
 		},
 		{
 			name:     "CLI profile",
 			config:   map[string]any{agentProfileConfigKey: "cli-profile"},
-			profiles: map[string]*AgentProfile{"cli-profile": {Enabled: true, CLIPassthrough: true}},
+			profiles: map[string]*AgentProfile{"cli-profile": {Enabled: true, CLIPassthrough: true, InferenceCapable: true}},
 			want:     `configured agent profile "cli-profile" is not eligible for utility execution`,
 		},
 		{
 			name:     "workspace profile",
 			config:   map[string]any{agentProfileConfigKey: "workspace-profile"},
-			profiles: map[string]*AgentProfile{"workspace-profile": {Enabled: true, WorkspaceID: "workspace-1"}},
+			profiles: map[string]*AgentProfile{"workspace-profile": {Enabled: true, WorkspaceID: "workspace-1", InferenceCapable: true}},
 			want:     `configured agent profile "workspace-profile" is not eligible for utility execution`,
 		},
 	} {
@@ -206,6 +206,27 @@ func TestPluginHost_InvokeUtilityAgent_RejectsMissingOrIneligibleConfiguredAgent
 	}
 }
 
+func TestPluginHost_InvokeUtilityAgent_DirectProfileRejectsNonInferenceProfile(t *testing.T) {
+	d := configuredUtilityHost(t)
+	d.host.configSchema = map[string]any{
+		"properties": map[string]any{
+			agentProfileConfigKey: map[string]any{"type": "string", "format": "agent-profile"},
+		},
+	}
+	d.host.configs = &fakeConfigReader{configs: map[string]any{agentProfileConfigKey: "profile-no-inference"}}
+	d.profiles.profilesByID = map[string]*AgentProfile{"profile-no-inference": {
+		Enabled: true, InferenceCapable: false,
+	}}
+
+	_, err := d.host.InvokeUtilityAgent(context.Background(), "hi")
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("InvokeUtilityAgent() status = %s, want %s", status.Code(err), codes.FailedPrecondition)
+	}
+	if d.utilRun.calls != 0 {
+		t.Fatalf("runner calls = %d, want 0", d.utilRun.calls)
+	}
+}
+
 func TestPluginHost_InvokeUtilityAgent_PreservesDirectProfileRunnerFailure(t *testing.T) {
 	runnerErr := status.Error(codes.Unavailable, "agentctl unavailable")
 	d := configuredUtilityHost(t)
@@ -215,7 +236,7 @@ func TestPluginHost_InvokeUtilityAgent_PreservesDirectProfileRunnerFailure(t *te
 		},
 	}
 	d.host.configs = &fakeConfigReader{configs: map[string]any{agentProfileConfigKey: "profile-99"}}
-	d.profiles.profilesByID = map[string]*AgentProfile{"profile-99": {Enabled: true}}
+	d.profiles.profilesByID = map[string]*AgentProfile{"profile-99": {Enabled: true, InferenceCapable: true}}
 	d.utilRun.err = runnerErr
 
 	_, err := d.host.InvokeUtilityAgent(context.Background(), "summarize")
