@@ -41,7 +41,7 @@ This spec consolidates the office task surface: lifecycle, parent/child handoffs
 
 - Tasks form a tree via `parent_id`. Parent tasks act as the default home for shared specs, plans, and coordination documents.
 - Child tasks can read parent-owned documents and write parent-owned coordination documents by default. Document handoffs reuse the existing **blocker mechanism**: a consumer task is blocked-by the producer task and reads the resulting documents from its wakeup prompt context. There is no separate "required documents" data type.
-- Related reads are scoped; the persisted CEO gets compact unrelated workspace trees only (ADR-2026-08-20-mcp-related-task-read-authorization).
+- Agents can list related tasks (parent, children, siblings, blockers, blocked) and can read/write allowed task documents via MCP or CLI tools.
 - A parent task defines a default child workspace policy for its tree: children **inherit the parent workspace** OR **create their own workspace**.
 - A parent task defines a default child ordering policy: children are created with dependency edges (sequential) or without (parallel).
 - Each child task can override the parent workspace policy and run in the parent workspace, a new workspace, or an explicit shared workspace group.

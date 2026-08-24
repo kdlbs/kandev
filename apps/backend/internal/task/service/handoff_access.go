@@ -16,55 +16,6 @@ const ancestorWalkHopCap = 64
 // not allowed to read or write documents on the target task.
 var ErrAccessDenied = errors.New("document access denied")
 
-// RelatedReadScope is an internally attested extension to relation-scoped
-// related-task reads. It is deliberately not derived from callable arguments.
-type RelatedReadScope string
-
-const (
-	RelatedReadScopeRelation          RelatedReadScope = "relation"
-	RelatedReadScopeWorkspaceTaskTree RelatedReadScope = "workspace-task-tree"
-)
-
-// RelatedReadRequest separates compact task-tree inspection from the document
-// access rules. The MCP server supplies Scope after resolving its profile.
-type RelatedReadRequest struct {
-	CallerTaskID string
-	TargetTaskID string
-	Scope        RelatedReadScope
-	Verbose      bool
-}
-
-// RelatedReadDenialReason is safe to return to a caller. In particular,
-// target_unavailable intentionally combines unknown and foreign targets.
-type RelatedReadDenialReason string
-
-const (
-	RelatedReadDenialTargetUnavailable          RelatedReadDenialReason = "target_unavailable"
-	RelatedReadDenialScopeRequired              RelatedReadDenialReason = "related_task_scope_required"
-	RelatedReadDenialVerboseDocumentScopeNeeded RelatedReadDenialReason = "verbose_document_scope_required"
-)
-
-// RelatedReadAccessError preserves the existing ErrAccessDenied category for
-// callers that only need a 403 while making the public reason stable.
-type RelatedReadAccessError struct {
-	Reason         RelatedReadDenialReason
-	InternalReason string
-}
-
-func (e *RelatedReadAccessError) Error() string { return "related task access denied" }
-
-func (e *RelatedReadAccessError) Unwrap() error { return ErrAccessDenied }
-
-// RelatedReadDenialReasonFor extracts a safe reason without exposing an
-// operator-only classification such as an unknown or foreign target.
-func RelatedReadDenialReasonFor(err error) (RelatedReadDenialReason, bool) {
-	var denied *RelatedReadAccessError
-	if !errors.As(err, &denied) {
-		return "", false
-	}
-	return denied.Reason, true
-}
-
 // taskLookup is the minimal repository surface the access guards depend on.
 // Defined here (and not as a public interface) to keep the dependency arrow
 // in this file alone.
@@ -79,63 +30,6 @@ type taskLookup interface {
 // BlockerRepository.ListTaskBlockers.
 type blockerLookup interface {
 	BlockerTaskIDs(ctx context.Context, taskID string) ([]string, error)
-}
-
-// relatedReadCache memoizes a single related-task request's access graph. A
-// compact task tree can contain many nodes, but document authorization walks
-// ancestor chains from each one. Caching both task and blocker lookups keeps
-// those checks bounded to one repository load per task/edge root.
-type relatedReadCache struct {
-	tasks    taskLookup
-	blockers blockerLookup
-	task     map[string]cachedTask
-	blocker  map[string]cachedBlockers
-}
-
-type cachedTask struct {
-	task *models.Task
-	err  error
-}
-
-type cachedBlockers struct {
-	ids []string
-	err error
-}
-
-func newRelatedReadCache(tasks taskLookup, blockers blockerLookup) *relatedReadCache {
-	return &relatedReadCache{
-		tasks:    tasks,
-		blockers: blockers,
-		task:     make(map[string]cachedTask),
-		blocker:  make(map[string]cachedBlockers),
-	}
-}
-
-func (c *relatedReadCache) GetTask(ctx context.Context, id string) (*models.Task, error) {
-	if cached, ok := c.task[id]; ok {
-		return cached.task, cached.err
-	}
-	task, err := c.tasks.GetTask(ctx, id)
-	c.task[id] = cachedTask{task: task, err: err}
-	return task, err
-}
-
-func (c *relatedReadCache) remember(task *models.Task) {
-	if task != nil {
-		c.task[task.ID] = cachedTask{task: task}
-	}
-}
-
-func (c *relatedReadCache) BlockerTaskIDs(ctx context.Context, taskID string) ([]string, error) {
-	if c.blockers == nil {
-		return nil, nil
-	}
-	if cached, ok := c.blocker[taskID]; ok {
-		return cached.ids, cached.err
-	}
-	ids, err := c.blockers.BlockerTaskIDs(ctx, taskID)
-	c.blocker[taskID] = cachedBlockers{ids: ids, err: err}
-	return ids, err
 }
 
 // canReadDocuments returns true when currentTaskID may READ documents on

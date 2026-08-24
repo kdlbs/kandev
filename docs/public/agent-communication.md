@@ -21,7 +21,7 @@ The examples below use canonical MCP protocol names ending in `_kandev`. An agen
 
 An agent typically learns a peer's task ID in one of three ways:
 
-**From related tasks.** `list_related_tasks_kandev` returns parent, children, siblings, blockers, and blocked-by tasks for the current task. Each entry includes the full task UUID, title, lifecycle state, and associated pull requests, but not the workflow step (kanban column). The Office Coordinator can request an unrelated compact task tree in the same workspace for monitoring, but descriptions and document keys remain relation-scoped. Task and Configuration MCP sessions can use `list_tasks_kandev` on a known workflow to find a related task's column. The Office MCP catalog does not expose `list_tasks_kandev`, so Office agents must not rely on an MCP board lookup for workflow-column details.
+**From related tasks.** `list_related_tasks_kandev` returns parent, children, siblings, blockers, and blocked-by tasks for the current task. Each entry includes the full task UUID, title, lifecycle state, and associated pull requests, but not the workflow step (kanban column). Task and Configuration MCP sessions can use `list_tasks_kandev` on a known workflow to find a related task's column. The Office MCP catalog does not expose `list_tasks_kandev`, so Office agents must not rely on an MCP board lookup for workflow-column details.
 
 ```
 list_related_tasks_kandev()

@@ -2,22 +2,12 @@ package executor
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/require"
 )
-
-type testCoordinatorProfileResolver struct {
-	profileID string
-	err       error
-}
-
-func (r testCoordinatorProfileResolver) ResolveCEOAgentProfileID(_ context.Context, _ string) (string, error) {
-	return r.profileID, r.err
-}
 
 func TestResolveTaskSessionMCPProfile_SelectsSurfaceAndQuestionCapability(t *testing.T) {
 	tests := []struct {
@@ -169,39 +159,4 @@ func TestResolveTaskSessionMCPMode_TitlePendingDoesNotOverrideRestrictedModes(t 
 	mode, err = exec.resolveTaskSessionMCPMode(ctx, "task-pending", repo.sessions["session-office"], true)
 	require.NoError(t, err)
 	require.Equal(t, McpModeOffice, mode)
-}
-
-func TestResolveTaskSessionMCPProfile_GrantsWorkspaceTreeReadOnlyToOfficeCEO(t *testing.T) {
-	tests := []struct {
-		name           string
-		fromOffice     bool
-		profileID      string
-		resolver       testCoordinatorProfileResolver
-		wantCapability bool
-		wantErr        bool
-	}{
-		{name: "office CEO", fromOffice: true, profileID: "ceo", resolver: testCoordinatorProfileResolver{profileID: "ceo"}, wantCapability: true},
-		{name: "office worker", fromOffice: true, profileID: "worker", resolver: testCoordinatorProfileResolver{profileID: "ceo"}},
-		{name: "kanban CEO profile", profileID: "ceo", resolver: testCoordinatorProfileResolver{profileID: "ceo"}},
-		{name: "repository lookup failure does not block office worker", fromOffice: true, profileID: "worker", resolver: testCoordinatorProfileResolver{err: errors.New("lookup failed")}},
-		{name: "repository lookup failure fails closed for coordinator capability", fromOffice: true, profileID: "ceo", resolver: testCoordinatorProfileResolver{err: errors.New("lookup failed")}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			repo := newMockRepository()
-			task := &models.Task{ID: "task", IsFromOffice: tt.fromOffice}
-			session := &models.TaskSession{ID: "session", TaskID: task.ID, AgentProfileID: tt.profileID}
-			repo.tasks[task.ID] = task
-			exec := newTestExecutor(t, &mockAgentManager{}, repo)
-			exec.SetCoordinatorProfileResolver(tt.resolver)
-
-			profile, err := exec.resolveTaskSessionMCPProfile(context.Background(), task.ID, session, false)
-			if tt.wantErr {
-				require.Error(t, err)
-				return
-			}
-			require.NoError(t, err)
-			require.Equal(t, tt.wantCapability, profile.HasCapability(mcpprofile.CapabilityWorkspaceTaskTreeRead))
-		})
-	}
 }
