@@ -163,6 +163,13 @@ describe("sortBranches", () => {
 });
 
 describe("branchToOption keywords", () => {
+  it("tags branch options for the grouped selector", () => {
+    expect(branchToOption(localBranch("main"))).toMatchObject({
+      group: "branches",
+      groupLabel: expect.any(String),
+    });
+  });
+
   function keywords(b: Branch): string[] {
     return branchToOption(b).keywords ?? [];
   }

@@ -70,6 +70,7 @@ function renderCard(repo: RepositoryWithScripts, autoOpen = false) {
       <SettingsSaveProvider>
         <RepositoryCard
           repository={repo}
+          workspaceId="workspace-1"
           savedRepository={repo}
           isRepositoryDirty={false}
           areScriptsDirty={false}

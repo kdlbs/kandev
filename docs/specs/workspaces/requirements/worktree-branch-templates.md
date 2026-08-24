@@ -30,6 +30,12 @@ Teams use repository-specific branch names for tickets and other local rules. Ka
 
 ## Migrated source detail
 
+> This legacy specification is no longer the editable source for worktree branch
+> policy behavior. See the migrated
+> [branch policies requirements](requirements/branch-policies.md) and
+> [system design](system-design/branch-policies.md). The repository-level
+> template described below remains the compatibility fallback.
+
 ## Why
 
 Teams use repository-specific branch names for tickets and other local rules.

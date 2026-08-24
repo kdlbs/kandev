@@ -251,6 +251,9 @@ func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskReq
 	if err := s.inheritParentRepositories(ctx, req); err != nil {
 		return nil, err
 	}
+	if err := s.validateTaskRepositoryPolicies(ctx, req.WorkspaceID, req.Repositories); err != nil {
+		return nil, err
+	}
 
 	// For office tasks, resolve workflow from workspace
 	if isOfficeRequest(req) && req.WorkflowID == "" {
@@ -812,6 +815,13 @@ func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceI
 		if repositoryID == "" {
 			return fmt.Errorf("repository_id is required")
 		}
+		policy, err := s.resolveTaskRepositoryPolicy(ctx, repositoryID, repoInput)
+		if err != nil {
+			return err
+		}
+		if policy != nil {
+			baseBranch = policy.BaseBranch
+		}
 		// Multi-branch validation: the same repository may appear multiple
 		// times in a task on different branches. Identity is
 		// (repository_id, base_branch, checkout_branch) — base_branch matters
@@ -854,6 +864,13 @@ func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceI
 			CheckoutBranch: repoInput.CheckoutBranch,
 			Position:       i,
 			Metadata:       metadata,
+		}
+		if policy != nil {
+			taskRepo.BranchPolicyID = policy.ID
+			taskRepo.BranchPolicyName = policy.Name
+			taskRepo.BranchPolicyBaseBranch = policy.BaseBranch
+			taskRepo.BranchPolicyBranchTemplate = policy.BranchTemplate
+			taskRepo.BranchPolicyPullRequestTarget = policy.PullRequestTarget
 		}
 		if err := s.taskRepos.CreateTaskRepository(ctx, taskRepo); err != nil {
 			s.logger.Error("failed to create task repository", zap.Error(err))

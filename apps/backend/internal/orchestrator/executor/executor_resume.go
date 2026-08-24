@@ -219,6 +219,9 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 	info.RepositoryPath = repo.LocalPath
 	info.WorktreeBranchPrefix = repo.WorktreeBranchPrefix
 	info.WorktreeBranchTemplate = repo.WorktreeBranchTemplate
+	if tr.BranchPolicyBranchTemplate != "" {
+		info.WorktreeBranchTemplate = tr.BranchPolicyBranchTemplate
+	}
 	info.PullBeforeWorktree = repo.PullBeforeWorktree
 	if info.BaseBranch == "" && repo.DefaultBranch != "" {
 		info.BaseBranch = repo.DefaultBranch
@@ -1347,6 +1350,9 @@ func (e *Executor) applyResumeWorktreeConfig(
 	}
 	req.WorktreeBranchPrefix = repository.WorktreeBranchPrefix
 	req.WorktreeBranchTemplate = repository.WorktreeBranchTemplate
+	if primaryTaskRepo != nil && primaryTaskRepo.RepositoryID == repositoryID && primaryTaskRepo.BranchPolicyBranchTemplate != "" {
+		req.WorktreeBranchTemplate = primaryTaskRepo.BranchPolicyBranchTemplate
+	}
 	req.PullBeforeWorktree = repository.PullBeforeWorktree
 	// Worktree manager requires TaskDirName and RepoName. Mirror the
 	// initial-launch path (applyRepositoryConfig) so resumes of single-repo

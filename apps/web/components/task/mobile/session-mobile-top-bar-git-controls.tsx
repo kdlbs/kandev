@@ -354,9 +354,14 @@ function createPrSuccessToast(
   };
 }
 
+type MobileGitActionContext = {
+  sessionId: string | null | undefined;
+  baseBranch: string | undefined;
+  pullRequestTarget: string | undefined;
+};
+
 export function useMobileGitActions(
-  sessionId: string | null | undefined,
-  baseBranch: string | undefined,
+  { sessionId, baseBranch, pullRequestTarget }: MobileGitActionContext,
   setCommitDialogOpen: (v: boolean) => void,
   setPrDialogOpen: (v: boolean) => void,
   setPrBranchPushed: (v: boolean) => void,
@@ -407,7 +412,7 @@ export function useMobileGitActions(
     async (title: string, body: string, draft: boolean) => {
       setPrDialogOpen(false);
       try {
-        const result = await createPR(title, body, baseBranch, draft);
+        const result = await createPR(title, body, pullRequestTarget ?? baseBranch, draft);
         if (result.success) {
           const terms = resolveChangeRequestTerminology(result.provider, defaultTerminology);
           toast(createPrSuccessToast(terms.longName, result.pr_url, draft, t));
@@ -438,6 +443,7 @@ export function useMobileGitActions(
     [
       createPR,
       baseBranch,
+      pullRequestTarget,
       toast,
       setPrDialogOpen,
       setPrBranchPushed,

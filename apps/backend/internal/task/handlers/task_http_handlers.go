@@ -693,6 +693,7 @@ type httpTaskRepositoryInput struct {
 	RepositoryID   string `json:"repository_id"`
 	BaseBranch     string `json:"base_branch"`
 	CheckoutBranch string `json:"checkout_branch"`
+	BranchPolicyID string `json:"branch_policy_id,omitempty"`
 	PRNumber       int    `json:"pr_number,omitempty"`
 	LocalPath      string `json:"local_path"`
 	Name           string `json:"name"`
@@ -1331,6 +1332,7 @@ func convertCreateTaskRepositories(c *gin.Context, inputs []httpTaskRepositoryIn
 			RepositoryID:   r.RepositoryID,
 			BaseBranch:     r.BaseBranch,
 			CheckoutBranch: r.CheckoutBranch,
+			BranchPolicyID: r.BranchPolicyID,
 			PRNumber:       r.PRNumber,
 			LocalPath:      r.LocalPath,
 			Name:           r.Name,
@@ -1558,6 +1560,7 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 				RepositoryID:   r.RepositoryID,
 				BaseBranch:     r.BaseBranch,
 				CheckoutBranch: r.CheckoutBranch,
+				BranchPolicyID: r.BranchPolicyID,
 				PRNumber:       r.PRNumber,
 				LocalPath:      r.LocalPath,
 				Name:           r.Name,

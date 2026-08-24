@@ -258,6 +258,7 @@ type TaskRepositoryInput struct {
 	RepositoryID   string
 	BaseBranch     string
 	CheckoutBranch string
+	BranchPolicyID string
 	PRNumber       int // GitHub PR number when CheckoutBranch is a PR head; persisted into task_repositories.metadata["pr_number"].
 	LocalPath      string
 	Name           string

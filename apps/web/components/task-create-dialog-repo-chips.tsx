@@ -32,6 +32,8 @@ type RepoChipsRowProps = {
    */
   onRowRepositoryChange: (key: string, value: string) => void;
   onRowBranchChange: (key: string, value: string) => void;
+  onRowPolicyChange?: (key: string, policyId: string, baseBranch: string) => void;
+  onPolicySelected?: () => void;
   /** Toggles the Remote tab on/off. Remote-mode rows live in `fs.remoteRepos`. */
   onToggleRemote?: () => void;
   /**
@@ -89,6 +91,8 @@ export function RepoChipsRow({
   workspaceId,
   onRowRepositoryChange,
   onRowBranchChange,
+  onRowPolicyChange,
+  onPolicySelected,
   onToggleRemote,
   freshBranchAvailable,
   freshBranchEnabled,
@@ -160,6 +164,8 @@ export function RepoChipsRow({
         freshBranchEnabled={freshBranchEnabled}
         onRowRepositoryChange={onRowRepositoryChange}
         onRowBranchChange={onRowBranchChange}
+        onRowPolicyChange={onRowPolicyChange}
+        onPolicySelected={onPolicySelected}
         onToggleFreshBranch={onToggleFreshBranch}
         onWorkspacePathChange={onWorkspacePathChange}
         lastUsedBranch={lastUsedBranch}
@@ -247,6 +253,8 @@ function ModeBody({
   freshBranchEnabled,
   onRowRepositoryChange,
   onRowBranchChange,
+  onRowPolicyChange,
+  onPolicySelected,
   onToggleFreshBranch,
   onWorkspacePathChange,
   lastUsedBranch,
@@ -266,6 +274,8 @@ function ModeBody({
   freshBranchEnabled?: boolean;
   onRowRepositoryChange: (key: string, value: string) => void;
   onRowBranchChange: (key: string, value: string) => void;
+  onRowPolicyChange?: (key: string, policyId: string, baseBranch: string) => void;
+  onPolicySelected?: () => void;
   onToggleFreshBranch?: (enabled: boolean) => void;
   onWorkspacePathChange?: (value: string) => void;
   lastUsedBranch?: string | null;
@@ -312,6 +322,9 @@ function ModeBody({
       onRemove={fs.removeRepository}
       onRowRepositoryChange={onRowRepositoryChange}
       onRowBranchChange={onRowBranchChange}
+      onRowPolicyChange={onRowPolicyChange}
+      onPolicySelected={onPolicySelected}
+      showBranchPolicies
       lastUsedBranch={lastUsedBranch}
       userSettingsLoaded={userSettingsLoaded}
       onCreateRepository={onCreateRepository}

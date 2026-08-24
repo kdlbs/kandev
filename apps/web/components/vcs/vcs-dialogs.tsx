@@ -53,6 +53,7 @@ export function useVcsDialogs() {
 type VcsDialogsProviderProps = {
   sessionId: string | null;
   baseBranch?: string;
+  pullRequestBaseBranch?: string;
   taskTitle?: string;
   displayBranch?: string | null;
   children: ReactNode;
@@ -384,10 +385,12 @@ function useVcsDialogsState(
   sessionId: string | null,
   taskTitle: string | undefined,
   baseBranch: string | undefined,
+  pullRequestBaseBranch: string | undefined,
 ) {
   const { t } = useTranslation();
   const cs = useCommitDialogState();
   const ps = usePRDialogState();
+  const effectivePullRequestBaseBranch = pullRequestBaseBranch ?? baseBranch;
   const gitWithFeedback = useGitWithFeedback();
   const gitStatus = useSessionGitStatus(sessionId);
   const statusByRepo = useSessionGitStatusByRepo(sessionId);
@@ -453,7 +456,7 @@ function useVcsDialogsState(
   }, [cs, gitWithFeedback, commit, t]);
   const handleCreatePR = useCreateChangeRequestHandler({
     dialog: ps,
-    baseBranch,
+    baseBranch: effectivePullRequestBaseBranch,
     createChangeRequest: createPR,
     defaultTerminology: changeRequestTerminology,
     supportsDraft,
@@ -473,6 +476,7 @@ function useVcsDialogsState(
     handleCommit,
     handleCreatePR,
     contextValue,
+    pullRequestBaseBranch: effectivePullRequestBaseBranch,
     repoDisplayName,
     isMultiRepo,
     changeRequestTerminology,
@@ -483,12 +487,13 @@ function useVcsDialogsState(
 export function VcsDialogsProvider({
   sessionId,
   baseBranch,
+  pullRequestBaseBranch,
   taskTitle,
   displayBranch,
   children,
 }: VcsDialogsProviderProps) {
   const { t } = useTranslation();
-  const state = useVcsDialogsState(sessionId, taskTitle, baseBranch);
+  const state = useVcsDialogsState(sessionId, taskTitle, baseBranch, pullRequestBaseBranch);
   const { cs, ps, isGitLoading, fileSummary, handleCommit, handleCreatePR, contextValue } = state;
   const effectiveRepoLabel = pickRepoLabel(cs.repo, state.isMultiRepo, state.repoDisplayName, t);
   const effectivePRLabel = pickRepoLabel(ps.repo, state.isMultiRepo, state.repoDisplayName, t);
@@ -531,7 +536,7 @@ export function VcsDialogsProvider({
         onOpenChange={ps.setOpen}
         scopedRepo={effectivePRLabel}
         displayBranch={displayBranch}
-        baseBranch={baseBranch}
+        baseBranch={state.pullRequestBaseBranch}
         title={ps.title}
         onTitleChange={ps.setTitle}
         body={ps.body}

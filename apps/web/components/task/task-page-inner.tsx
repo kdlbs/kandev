@@ -153,6 +153,7 @@ function buildTaskLayoutProps(params: {
     taskTitle: taskProps.taskTitle,
     repositoryLabel: taskProps.repositoryLabel,
     baseBranch: taskProps.baseBranch,
+    pullRequestTarget: taskProps.pullRequestTarget,
     worktreeBranch: params.merged.worktreeBranch,
     isRemoteExecutor: params.remote.isRemoteExecutor,
     remoteExecutorType: params.remote.remoteExecutorType,
@@ -287,6 +288,7 @@ export function TaskPageInner(props: TaskPageInnerProps) {
         <VcsDialogsProvider
           sessionId={effectiveSessionId}
           baseBranch={taskProps.baseBranch}
+          pullRequestBaseBranch={taskProps.pullRequestTarget}
           taskTitle={taskProps.taskTitle}
           displayBranch={merged.worktreeBranch}
         >

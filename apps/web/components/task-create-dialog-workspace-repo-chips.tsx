@@ -12,7 +12,7 @@ import {
 import { Badge } from "@kandev/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useBranches, type BranchSource } from "@/hooks/domains/workspace/use-repository-branches";
-import type { LocalRepository, Repository } from "@/lib/types/http";
+import type { Branch, LocalRepository, Repository, RepositoryBranchPolicy } from "@/lib/types/http";
 import type { TaskRepoRow } from "@/components/task-create-dialog-types";
 import { cn, formatUserHomePath } from "@/lib/utils";
 import { scoreBranch } from "@/lib/utils/branch-filter";
@@ -31,6 +31,7 @@ import {
   type BranchIntent,
 } from "@/components/task-create-dialog-branch-utils";
 import { useRepoBranchAutoselect } from "@/components/task-create-dialog-repo-branch-autoselect";
+import { useRepositoryBranchPolicies } from "@/hooks/domains/workspace/use-repository-branch-policies";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 
@@ -44,6 +45,7 @@ type WorkspaceRepoChipsProps = {
   currentLocalBranch?: string;
   currentLocalBranchLoading?: boolean;
   freshBranchEnabled?: boolean;
+  showBranchPolicies?: boolean;
   canAddMore: boolean;
   addHint?: string;
   addLabel?: string;
@@ -53,6 +55,8 @@ type WorkspaceRepoChipsProps = {
   onRemove: (key: string) => void;
   onRowRepositoryChange: (key: string, value: string) => void;
   onRowBranchChange: (key: string, value: string) => void;
+  onRowPolicyChange?: (key: string, policyId: string, baseBranch: string) => void;
+  onPolicySelected?: () => void;
   onCreateRepository?: (key: string) => void;
   onRefreshRepositories?: () => void;
   repositoriesRefreshing?: boolean;
@@ -75,6 +79,7 @@ export function WorkspaceRepoChips({
   currentLocalBranch,
   currentLocalBranchLoading,
   freshBranchEnabled,
+  showBranchPolicies = false,
   canAddMore,
   addHint,
   addLabel,
@@ -84,6 +89,8 @@ export function WorkspaceRepoChips({
   onRemove,
   onRowRepositoryChange,
   onRowBranchChange,
+  onRowPolicyChange,
+  onPolicySelected,
   onCreateRepository,
   onRefreshRepositories,
   repositoriesRefreshing,
@@ -121,6 +128,13 @@ export function WorkspaceRepoChips({
           })}
           onRepositoryChange={(value) => onRowRepositoryChange(row.key, value)}
           onBranchChange={(value) => onRowBranchChange(row.key, value)}
+          onPolicyChange={
+            onRowPolicyChange
+              ? (policyId, baseBranch) => onRowPolicyChange(row.key, policyId, baseBranch)
+              : undefined
+          }
+          onPolicySelected={onPolicySelected}
+          showBranchPolicies={showBranchPolicies}
           onCreateRepository={
             rows.length === 1 && onCreateRepository ? () => onCreateRepository(row.key) : undefined
           }
@@ -253,12 +267,16 @@ type RepoChipProps = {
   branchIntent?: BranchIntent;
   onRepositoryChange: (value: string) => void;
   onBranchChange: (value: string) => void;
+  onPolicyChange?: (policyId: string, baseBranch: string) => void;
+  onPolicySelected?: () => void;
+  showBranchPolicies?: boolean;
   onRemove: () => void;
   onCreateRepository?: () => void;
   onRefreshRepositories?: () => void;
   repositoriesRefreshing?: boolean;
 };
 
+// eslint-disable-next-line max-lines-per-function -- Keeps repository, branch, and policy option data in one hook.
 function useRepoChipData({
   row,
   workspaceId,
@@ -267,6 +285,7 @@ function useRepoChipData({
   excludedRepoIds,
   selectedElsewhere,
   onBranchChange,
+  showBranchPolicies,
   preferredDefaultBranch,
   preferredDefaultBranchLoading,
   lastUsedBranch,
@@ -280,6 +299,7 @@ function useRepoChipData({
   | "excludedRepoIds"
   | "selectedElsewhere"
   | "onBranchChange"
+  | "showBranchPolicies"
   | "preferredDefaultBranch"
   | "preferredDefaultBranchLoading"
   | "lastUsedBranch"
@@ -318,6 +338,10 @@ function useRepoChipData({
     isLoading: branchesLoading,
     refresh: refreshBranches,
   } = useBranches(branchSource, !!branchSource);
+  const { policies: branchPolicies } = useRepositoryBranchPolicies(
+    row.repositoryId ?? null,
+    !!showBranchPolicies && !!row.repositoryId,
+  );
   useRepoBranchAutoselect({
     branchSource,
     branchesLoading,
@@ -359,7 +383,50 @@ function useRepoChipData({
     () => sortBranches(branches).map(branchToOption),
     [branches],
   );
-  return { repoOptions, branchOptions, branchesLoading, refreshBranches };
+  return { repoOptions, branchOptions, branchPolicies, branches, branchesLoading, refreshBranches };
+}
+
+function branchPolicyToOption(policy: RepositoryBranchPolicy, branches: Branch[]): PillOption {
+  const baseBranchAvailable = branches.some((branch) => {
+    if (branch.name === policy.base_branch) return true;
+    return branch.type === "remote" && `${branch.remote}/${branch.name}` === policy.base_branch;
+  });
+  const unavailableReason = baseBranchAvailable ? undefined : t("task:branchPolicyUnavailable");
+  return {
+    value: `policy:${policy.id}`,
+    label: policy.name,
+    keywords: [
+      policy.name,
+      policy.description,
+      policy.base_branch,
+      policy.branch_template,
+      policy.pull_request_target,
+    ].filter(Boolean),
+    group: "policies",
+    groupLabel: t("task:branchPoliciesGroup"),
+    disabled: !baseBranchAvailable,
+    renderLabel: () => (
+      <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+        <span className="flex min-w-0 items-center gap-2">
+          <Badge variant="secondary" className="shrink-0 text-xs">
+            {t("task:branchPolicyMarker")}
+          </Badge>
+          <span className="truncate" title={policy.name}>
+            {policy.name}
+          </span>
+        </span>
+        <span className="flex shrink-0 flex-col items-end text-xs text-muted-foreground">
+          <span>
+            {t("task:branchPolicyOptionSummary", {
+              base: policy.base_branch,
+              target: policy.pull_request_target,
+            })}
+          </span>
+          {unavailableReason ? <span>{unavailableReason}</span> : null}
+        </span>
+      </span>
+    ),
+  };
 }
 
 function computeRepoChipDisplay(
@@ -386,6 +453,7 @@ function buildCreateRepositoryAction(onSelect?: () => void): PillAction | undefi
   };
 }
 
+// eslint-disable-next-line max-lines-per-function -- Renders the combined repository and policy branch controls.
 function RepoChip({
   row,
   workspaceId,
@@ -401,25 +469,30 @@ function RepoChip({
   branchIntent,
   onRepositoryChange,
   onBranchChange,
+  onPolicyChange,
+  onPolicySelected,
+  showBranchPolicies,
   onRemove,
   onCreateRepository,
   onRefreshRepositories,
   repositoriesRefreshing,
 }: RepoChipProps) {
   const { t } = useTranslation();
-  const { repoOptions, branchOptions, branchesLoading, refreshBranches } = useRepoChipData({
-    row,
-    workspaceId,
-    repositories,
-    discoveredRepositories,
-    excludedRepoIds,
-    selectedElsewhere,
-    onBranchChange,
-    preferredDefaultBranch,
-    preferredDefaultBranchLoading,
-    lastUsedBranch,
-    userSettingsLoaded,
-  });
+  const { repoOptions, branchOptions, branchPolicies, branches, branchesLoading, refreshBranches } =
+    useRepoChipData({
+      row,
+      workspaceId,
+      repositories,
+      discoveredRepositories,
+      excludedRepoIds,
+      selectedElsewhere,
+      onBranchChange,
+      preferredDefaultBranch,
+      preferredDefaultBranchLoading,
+      lastUsedBranch,
+      userSettingsLoaded,
+      showBranchPolicies,
+    });
   const { repoLabel, repoTooltip } = computeRepoChipDisplay(
     row,
     repositories,
@@ -427,10 +500,37 @@ function RepoChip({
   );
   const hasRepo = !!(row.repositoryId || row.localPath);
   const branchValue = preferredDefaultBranchLoading ? "" : row.branch;
+  const selectedPolicy = branchPolicies.find((policy) => policy.id === row.branchPolicyId);
+  const policyOptions = useMemo(
+    () => branchPolicies.map((policy) => branchPolicyToOption(policy, branches)),
+    [branchPolicies, branches],
+  );
+  const branchPickerOptions = useMemo(
+    () => [...policyOptions, ...branchOptions],
+    [branchOptions, policyOptions],
+  );
+  const selectedBranchValue = selectedPolicy ? `policy:${selectedPolicy.id}` : branchValue;
+  const selectedBranchLabel = selectedPolicy
+    ? t("task:branchPolicySelected", {
+        name: selectedPolicy.name,
+        base: selectedPolicy.base_branch,
+      })
+    : branchValue;
+  const handleBranchSelect = (value: string) => {
+    if (value.startsWith("policy:")) {
+      const policy = branchPolicies.find((candidate) => `policy:${candidate.id}` === value);
+      if (policy) {
+        onPolicyChange?.(policy.id, policy.base_branch);
+        onPolicySelected?.();
+      }
+      return;
+    }
+    onBranchChange(value);
+  };
   const branchPlaceholder = computeBranchPlaceholder(
     hasRepo,
     branchesLoading || !!preferredDefaultBranchLoading,
-    branchOptions.length,
+    branchPickerOptions.length,
   );
   return (
     <span
@@ -459,17 +559,18 @@ function RepoChip({
       />
       <Pill
         icon={<IconGitBranch className="h-3 w-3 shrink-0 text-muted-foreground" />}
-        value={branchValue}
+        value={selectedBranchLabel}
+        selectedValue={selectedBranchValue}
         placeholder={branchPlaceholder}
         prefix={computeBranchPrefix(branchIntent ?? "none")}
-        options={branchOptions}
-        onSelect={onBranchChange}
-        disabled={branchLocked || !hasRepo || branchesLoading || branchOptions.length === 0}
+        options={branchPickerOptions}
+        onSelect={handleBranchSelect}
+        disabled={branchLocked || !hasRepo || branchesLoading || branchPickerOptions.length === 0}
         disabledReason={computeBranchDisabledReason({
           branchLocked: !!branchLocked,
           hasRepo,
           branchesLoading,
-          optionCount: branchOptions.length,
+          optionCount: branchPickerOptions.length,
         })}
         searchPlaceholder={t("task:searchBranches")}
         emptyMessage={t("task:noBranches")}

@@ -109,6 +109,8 @@ export type TaskRepoRow = {
   /** On-machine repo path, when the user picked from discovered repos. */
   localPath?: string;
   branch: string;
+  /** Saved repository policy selected for this row. */
+  branchPolicyId?: string;
 };
 
 /**
@@ -535,6 +537,7 @@ export type DialogFormBodyProps = {
   onTaskNameChange: (v: string) => void;
   onRowRepositoryChange: (key: string, value: string) => void;
   onRowBranchChange: (key: string, value: string) => void;
+  onRowPolicyChange?: (key: string, policyId: string, baseBranch: string) => void;
   onAgentProfileChange: (v: string) => void;
   onExecutorProfileChange: (v: string) => void;
   onWorkflowChange: (v: string) => void;

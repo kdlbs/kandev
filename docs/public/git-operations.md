@@ -81,6 +81,24 @@ feature/{title}-{suffix}
 
 `{title}` is an ASCII-safe, lower-case task-title slug and `{suffix}` is a short collision-avoidance value. Repository settings can change the template. When `pull_before_worktree` is omitted it defaults to `true`: Kandev best-effort fetches the base branch before creating the worktree. The public configuration defaults both fetch and fast-forward pull timeouts to 60 seconds. An authentication, network, or timeout failure can fall back to an available local or remote-tracking ref with a visible warning; a base branch that cannot be resolved, including its configured fallback, stops creation.
 
+### Named branch policies
+
+Open **Settings → Workspaces → _workspace_ → Repositories**, edit a repository, and expand
+**Branch policies**. A policy names the base branch, branch-name template, and pull-request target.
+Policies belong to that repository. Create, edit, and delete actions take effect immediately.
+
+In **New Task** or **New subtask**, the repository branch picker shows saved policies before raw
+branches. Select a policy to create a fresh task branch from its base branch. The policy template
+controls the branch name. Raw branches keep their existing checkout behavior.
+
+The **Gitflow starter** can create Feature, Bugfix, Hotfix, and Release policies in one operation.
+It requires two different existing branches and does not change Git branches. A task stores the
+selected policy values when it is created. Later policy edits or deletion do not change that task's
+branch or pull-request target. The saved pull-request target is the default, and you can override it
+when you create the pull request.
+
+Policies are not available in **Quick Chat**, **Remote**, **Add Sources**, or **Add Branch** flows.
+
 When a task opens an existing branch or GitHub PR, Kandev fetches that branch; for a numbered GitHub PR it can fetch `refs/pull/NUMBER/head`, including fork PRs. If the intended branch is already checked out in another worktree, the new worktree uses a suffixed local branch and tracks the original `origin` branch when available. If remote fetch fails but the local branch exists, Kandev can continue with that possibly stale branch and reports the fallback.
 
 Tasks created without an initial title can expose the one-shot `set_task_title_kandev` handoff when

@@ -254,6 +254,7 @@ function WorkspaceSection({
         workspaceId={workspaceId}
         onRowRepositoryChange={handlers.handleRowRepositoryChange}
         onRowBranchChange={handlers.handleRowBranchChange}
+        onRowPolicyChange={handlers.handleRowPolicyChange}
         onToggleRemote={handlers.handleToggleRemote}
         repositorySets={{ sets, onApply: onApplyRepositorySet }}
       />

@@ -7,6 +7,7 @@ import type {
   TaskSessionState,
   TaskCreateLastUsedApi,
   MCPTaskAgentProfileDefault,
+  RepositoryBranchPolicy,
 } from "../../lib/types/http";
 import type { Agent, AgentProfile } from "../../lib/types/http-agents";
 import { normalizeAgentProfile } from "../../lib/api/domains/agent-profile-normalize";
@@ -215,6 +216,7 @@ type TaskRepositoryInput = {
   repository_id?: string;
   base_branch?: string;
   checkout_branch?: string;
+  branch_policy_id?: string;
   pr_number?: number;
   remote_url?: string;
   provider?: string;
@@ -840,6 +842,49 @@ export class ApiClient {
     total: number;
   }> {
     return this.request("GET", `/api/v1/workspaces/${workspaceId}/repositories`);
+  }
+
+  async listRepositoryBranchPolicies(repositoryId: string): Promise<{
+    repository_branch_policies: RepositoryBranchPolicy[];
+    total: number;
+  }> {
+    return this.request("GET", `/api/v1/repositories/${repositoryId}/branch-policies`);
+  }
+
+  async createRepositoryBranchPolicy(
+    repositoryId: string,
+    policy: {
+      name: string;
+      description?: string;
+      base_branch: string;
+      branch_template: string;
+      pull_request_target: string;
+    },
+  ): Promise<RepositoryBranchPolicy> {
+    return this.request("POST", `/api/v1/repositories/${repositoryId}/branch-policies`, policy);
+  }
+
+  async updateRepositoryBranchPolicy(
+    policyId: string,
+    patch: Partial<{
+      name: string;
+      description: string;
+      base_branch: string;
+      branch_template: string;
+      pull_request_target: string;
+    }>,
+  ): Promise<RepositoryBranchPolicy> {
+    return this.request("PATCH", `/api/v1/repository-branch-policies/${policyId}`, patch);
+  }
+
+  async deleteRepositoryBranchPolicy(policyId: string): Promise<void> {
+    const response = await this.rawRequest(
+      "DELETE",
+      `/api/v1/repository-branch-policies/${policyId}`,
+    );
+    if (!response.ok) {
+      throw new Error(`delete branch policy failed: ${response.status} ${await response.text()}`);
+    }
   }
 
   async listRepositorySets(workspaceId: string): Promise<{

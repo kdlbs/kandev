@@ -24,6 +24,9 @@ export type PillOption = {
   label: string;
   keywords?: string[];
   renderLabel?: () => React.ReactNode;
+  group?: string;
+  groupLabel?: string;
+  disabled?: boolean;
 };
 
 export type PillAction = {
@@ -103,35 +106,45 @@ function PillCommandList({
   emptyMessage: string;
 }) {
   const orderedOptions = prioritizeSelectedOption(options, value, (option) => option.value);
+  const groups = new Map<string, { label?: string; options: PillOption[] }>();
+  for (const option of orderedOptions) {
+    const key = option.group ?? "";
+    const group = groups.get(key) ?? { label: option.groupLabel, options: [] };
+    group.options.push(option);
+    groups.set(key, group);
+  }
 
   return (
     <CommandList>
       <CommandEmpty>{emptyMessage}</CommandEmpty>
-      <CommandGroup>
-        {orderedOptions.map((option) => {
-          const selected = option.value === value;
-          return (
-            <CommandItem
-              key={option.value}
-              value={option.value}
-              keywords={[option.label, ...(option.keywords ?? [])]}
-              onPointerDown={(event) => onPointerSelect(event.pointerType)}
-              onSelect={() => {
-                onSelect(option.value);
-                setOpen(false);
-              }}
-              className={selectorOptionClassName(selected)}
-            >
-              <div className="min-w-0 flex-1">
-                {option.renderLabel ? option.renderLabel() : option.label}
-              </div>
-              <IconCheck
-                className={cn("absolute right-2 h-4 w-4", selected ? "opacity-100" : "opacity-0")}
-              />
-            </CommandItem>
-          );
-        })}
-      </CommandGroup>
+      {Array.from(groups.entries()).map(([key, group]) => (
+        <CommandGroup key={key || "ungrouped"} heading={group.label}>
+          {group.options.map((option) => {
+            const selected = option.value === value;
+            return (
+              <CommandItem
+                key={option.value}
+                value={option.value}
+                keywords={[option.label, ...(option.keywords ?? [])]}
+                disabled={option.disabled}
+                onPointerDown={(event) => onPointerSelect(event.pointerType)}
+                onSelect={() => {
+                  onSelect(option.value);
+                  setOpen(false);
+                }}
+                className={selectorOptionClassName(selected)}
+              >
+                <div className="min-w-0 flex-1">
+                  {option.renderLabel ? option.renderLabel() : option.label}
+                </div>
+                <IconCheck
+                  className={cn("absolute right-2 h-4 w-4", selected ? "opacity-100" : "opacity-0")}
+                />
+              </CommandItem>
+            );
+          })}
+        </CommandGroup>
+      ))}
     </CommandList>
   );
 }

@@ -217,14 +217,17 @@ export function syncActiveTaskSession(params: {
 }
 
 export function resolveTaskIds(task: Task | null) {
+  const taskValues = task ?? ({} as Task);
+  const primaryRepository = taskValues.repositories?.[0];
   return {
-    taskId: task?.id ?? null,
-    workflowId: task?.workflow_id ?? null,
-    workspaceId: task?.workspace_id ?? null,
-    projectId: task?.project_id ?? null,
-    workflowStepId: task?.workflow_step_id ?? null,
-    baseBranch: task?.repositories?.[0]?.base_branch,
-    isArchived: !!task?.archived_at,
+    taskId: taskValues.id ?? null,
+    workflowId: taskValues.workflow_id ?? null,
+    workspaceId: taskValues.workspace_id ?? null,
+    projectId: taskValues.project_id ?? null,
+    workflowStepId: taskValues.workflow_step_id ?? null,
+    baseBranch: primaryRepository?.base_branch,
+    pullRequestTarget: primaryRepository?.branch_policy_pull_request_target || undefined,
+    isArchived: !!taskValues.archived_at,
   };
 }
 

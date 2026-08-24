@@ -12,7 +12,7 @@ owners:
 ## Purpose
 
 The workspace system owns workspace lifecycle, repositories, worktrees,
-branches, workspace secrets, and workspace-scoped execution context.
+branches, branch policies, workspace secrets, and workspace-scoped execution context.
 
 ## Ownership
 
@@ -42,6 +42,7 @@ Git state.
 - [Copy and Move Secrets Between Scopes](requirements/secret-scope-transfer.md)
 - [Workspace Base-Branch Propagation](requirements/workspace-base-branch-propagation.md)
 - [Worktree Branch Templates](requirements/worktree-branch-templates.md)
+- [Branch Policies](requirements/branch-policies.md)
 
 ### System design
 
@@ -49,6 +50,7 @@ Git state.
 
 - [Improve Kandev](system-design/improve-kandev.md)
 - [Copy and Move Secrets Between Scopes](system-design/secret-scope-transfer.md)
+- [Branch Policies](system-design/branch-policies.md)
 
 ## Migration record
 

@@ -135,6 +135,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 			GitSnapshots:      repos.Task,
 			RepoEntities:      repos.Task,
 			RepositorySets:    repos.Task,
+			BranchPolicies:    repos.Task,
 			RepositoryCleanup: repos.Task,
 			Executors:         repos.Task,
 			Environments:      repos.Task,

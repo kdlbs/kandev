@@ -13,6 +13,7 @@ type TaskRepositoryInput struct {
 	RepositoryID   string `json:"repository_id"`
 	BaseBranch     string `json:"base_branch"`
 	CheckoutBranch string `json:"checkout_branch,omitempty"`
+	BranchPolicyID string `json:"branch_policy_id,omitempty"`
 	PRNumber       int    `json:"pr_number,omitempty"` // GitHub PR number when CheckoutBranch is a PR head; persisted into task_repositories.metadata["pr_number"].
 	LocalPath      string `json:"local_path,omitempty"`
 	Name           string `json:"name,omitempty"`
@@ -49,7 +50,8 @@ type TaskRepositoryInput struct {
 	// provider descriptor already authorized by the plugin host. It is never
 	// accepted from REST/MCP JSON; callers must still supply every identity and
 	// exact credential-free clone URL field above.
-	TrustedProviderDescriptor bool `json:"-"`
+	TrustedProviderDescriptor bool                           `json:"-"`
+	BranchPolicySnapshot      *models.RepositoryBranchPolicy `json:"-"`
 }
 
 // CreateTaskRequest contains the data for creating a new task

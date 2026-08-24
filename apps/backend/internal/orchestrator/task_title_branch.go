@@ -50,14 +50,28 @@ type TitleBranchRenameResult struct {
 }
 
 func renderTitleBranchName(title string, task *models.Task, repository *models.Repository, suffix string) (string, error) {
+	return renderTitleBranchNameForTaskRepository(title, task, repository, nil, suffix)
+}
+
+func renderTitleBranchNameForTaskRepository(
+	title string,
+	task *models.Task,
+	repository *models.Repository,
+	taskRepository *models.TaskRepository,
+	suffix string,
+) (string, error) {
 	if task == nil {
 		return "", fmt.Errorf("task is required")
 	}
 	if repository == nil {
 		return "", fmt.Errorf("repository is required")
 	}
+	template := repository.WorktreeBranchTemplate
+	if taskRepository != nil && taskRepository.BranchPolicyBranchTemplate != "" {
+		template = taskRepository.BranchPolicyBranchTemplate
+	}
 	return worktree.RenderTaskBranchName(worktree.BranchNameTemplateInput{
-		Template: repository.WorktreeBranchTemplate,
+		Template: template,
 		TaskID:   task.ID,
 		Title:    title,
 		Ticket:   worktree.TicketForBranchName(task.Identifier, task.Metadata),

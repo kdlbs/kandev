@@ -43,6 +43,7 @@ type SessionMobileTopBarProps = {
   repositoryLabel?: string | null;
   sessionId?: string | null;
   baseBranch?: string;
+  pullRequestTarget?: string;
   worktreeBranch?: string | null;
   onMenuClick: () => void;
   showApproveButton?: boolean;
@@ -473,6 +474,7 @@ function MobileTopBarActions({
   );
 }
 
+// eslint-disable-next-line max-lines-per-function -- Coordinates the mobile task header and Git actions.
 export const SessionMobileTopBar = memo(function SessionMobileTopBar(
   props: SessionMobileTopBarProps,
 ) {
@@ -498,8 +500,11 @@ export const SessionMobileTopBar = memo(function SessionMobileTopBar(
     handleCommit,
     handleCreatePR,
   } = useMobileGitActions(
-    props.sessionId,
-    props.baseBranch,
+    {
+      sessionId: props.sessionId,
+      baseBranch: props.baseBranch,
+      pullRequestTarget: props.pullRequestTarget,
+    },
     setCommitDialogOpen,
     setPrDialogOpen,
     setPrBranchPushed,
@@ -558,7 +563,7 @@ export const SessionMobileTopBar = memo(function SessionMobileTopBar(
         prDialogOpen={prDialogOpen}
         setPrDialogOpen={setPrDialogOpen}
         displayBranch={displayBranch}
-        baseBranch={props.baseBranch}
+        baseBranch={props.pullRequestTarget ?? props.baseBranch}
         taskTitle={props.taskTitle}
         firstCommitMessage={commits[0]?.commit_message}
         isGitLoading={isGitLoading}
