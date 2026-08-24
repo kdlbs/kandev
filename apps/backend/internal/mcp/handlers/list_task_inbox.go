@@ -15,7 +15,10 @@ import (
 	"go.uber.org/zap"
 )
 
-const inboxDefaultLimit = 100
+const (
+	inboxDefaultLimit = 100
+	inboxMaxLimit     = 500
+)
 
 type taskInboxRequest struct {
 	TaskID           string `json:"task_id"`
@@ -81,10 +84,7 @@ func (h *Handlers) handleListTaskInbox(ctx context.Context, msg *ws.Message) (*w
 			start++
 		}
 	}
-	limit := req.Limit
-	if limit == 0 {
-		limit = inboxDefaultLimit
-	}
+	limit := inboxLimit(req.Limit)
 	end := start + limit
 	if end > len(items) {
 		end = len(items)
@@ -134,7 +134,18 @@ func (h *Handlers) appendSessionInbox(ctx context.Context, items []inboxItem, co
 		if message.AuthorType != models.MessageAuthorUser {
 			continue
 		}
-		items = append(items, inboxItem{ID: message.ID, TransitionID: inboxMetadataString(message.Metadata, "queue_entry_id"), State: "delivered", SessionID: session.ID, SessionName: session.Name, IsPrimary: session.IsPrimary, IsCurrent: session.ID == currentID, Sender: string(message.AuthorType), Content: message.Content, Timestamp: message.CreatedAt})
+		items = append(items, inboxItem{
+			ID:           message.ID,
+			TransitionID: inboxMetadataString(message.Metadata, "queue_entry_id"),
+			State:        "delivered",
+			SessionID:    session.ID,
+			SessionName:  session.Name,
+			IsPrimary:    session.IsPrimary,
+			IsCurrent:    session.ID == currentID,
+			Sender:       string(message.AuthorType),
+			Content:      message.Content,
+			Timestamp:    message.CreatedAt,
+		})
 		counts[session.ID]++
 	}
 	if h.sessionLauncher == nil || h.sessionLauncher.GetMessageQueue() == nil {
@@ -144,7 +155,19 @@ func (h *Handlers) appendSessionInbox(ctx context.Context, items []inboxItem, co
 		if entry.IsReservedInFlight() {
 			continue
 		}
-		items = append(items, inboxItem{ID: entry.ID, TransitionID: entry.ID, State: "queued", SessionID: session.ID, SessionName: session.Name, IsPrimary: session.IsPrimary, IsCurrent: session.ID == currentID, Sender: entry.QueuedBy, Content: entry.Content, Attachments: safeInboxAttachments(entry.Attachments), Timestamp: entry.QueuedAt})
+		items = append(items, inboxItem{
+			ID:           entry.ID,
+			TransitionID: entry.ID,
+			State:        "queued",
+			SessionID:    session.ID,
+			SessionName:  session.Name,
+			IsPrimary:    session.IsPrimary,
+			IsCurrent:    session.ID == currentID,
+			Sender:       entry.QueuedBy,
+			Content:      entry.Content,
+			Attachments:  safeInboxAttachments(entry.Attachments),
+			Timestamp:    entry.QueuedAt,
+		})
 		counts[session.ID]++
 	}
 	return items, nil
@@ -153,6 +176,15 @@ func (h *Handlers) appendSessionInbox(ctx context.Context, items []inboxItem, co
 func inboxMetadataString(metadata map[string]interface{}, key string) string {
 	value, _ := metadata[key].(string)
 	return value
+}
+func inboxLimit(requested int) int {
+	if requested <= 0 {
+		return inboxDefaultLimit
+	}
+	if requested > inboxMaxLimit {
+		return inboxMaxLimit
+	}
+	return requested
 }
 func safeInboxAttachments(entries []messagequeue.MessageAttachment) []inboxAttachment {
 	out := make([]inboxAttachment, 0, len(entries))

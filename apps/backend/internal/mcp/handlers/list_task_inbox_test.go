@@ -22,7 +22,11 @@ func TestHandleListTaskInbox_AggregatesDeliveredMessagesForOwnTask(t *testing.T)
 	sibling := &models.TaskSession{ID: "inbox-sibling", TaskID: task.ID, IsPrimary: false, State: models.TaskSessionStateWaitingForInput}
 	require.NoError(t, repo.CreateTaskSession(context.Background(), sibling))
 	for _, session := range []*models.TaskSession{primary, sibling} {
-		_, err := svc.CreateMessage(context.Background(), &service.CreateMessageRequest{TaskSessionID: session.ID, TaskID: task.ID, AuthorType: "user", Content: session.ID})
+		metadata := map[string]interface{}(nil)
+		if session.ID == primary.ID {
+			metadata = map[string]interface{}{"queue_entry_id": "queue-primary"}
+		}
+		_, err := svc.CreateMessage(context.Background(), &service.CreateMessageRequest{TaskSessionID: session.ID, TaskID: task.ID, AuthorType: "user", Content: session.ID, Metadata: metadata})
 		require.NoError(t, err)
 	}
 	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
@@ -36,6 +40,7 @@ func TestHandleListTaskInbox_AggregatesDeliveredMessagesForOwnTask(t *testing.T)
 	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
 	assert.Len(t, payload.Items, 2)
 	assert.Equal(t, 2, payload.Total)
+	assert.Equal(t, "queue-primary", payload.Items[0].TransitionID)
 }
 
 func TestHandleListTaskInbox_RejectsForeignTarget(t *testing.T) {
@@ -89,4 +94,10 @@ func TestTaskInboxCursorAndTransitionIdentity(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, inboxAfter(second, *cursor))
 	assert.False(t, inboxAfter(first, *cursor))
+}
+
+func TestInboxLimitCapsOversizedPages(t *testing.T) {
+	assert.Equal(t, inboxDefaultLimit, inboxLimit(0))
+	assert.Equal(t, 7, inboxLimit(7))
+	assert.Equal(t, inboxMaxLimit, inboxLimit(inboxMaxLimit+1))
 }

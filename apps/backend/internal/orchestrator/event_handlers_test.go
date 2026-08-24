@@ -1526,6 +1526,9 @@ func TestExecuteQueuedMessage_RequeuesTransientPromptFailure(t *testing.T) {
 	if len(messages.userMessages) != 1 {
 		t.Fatalf("expected boot-ready drain to reuse the existing user message, got %d", len(messages.userMessages))
 	}
+	if messages.userMessages[0].metadata["queue_entry_id"] != "q1" {
+		t.Fatalf("expected delivered user message to retain queue transition id, got %#v", messages.userMessages[0].metadata)
+	}
 }
 
 func TestExecuteQueuedMessage_RequeuesCoalescedMessageWithOriginalSender(t *testing.T) {
