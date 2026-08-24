@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/kanban-auto-hide-empty-columns/spec.md
+spec: docs/specs/ui/requirements/kanban-auto-hide-empty-columns.md
 created: 2026-08-18
 status: complete
 ---

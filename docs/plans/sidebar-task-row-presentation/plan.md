@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/sidebar-task-row-presentation.md
+spec: docs/specs/ui/requirements/sidebar-task-row-presentation.md
 created: 2026-08-23
 status: complete
 ---
@@ -19,7 +19,7 @@ bottom drawer for the phone and tablet editor.
 Refine the provider-neutral change-request status summary in parallel. Give its rows shared label,
 icon, and value columns without changing provider status logic.
 
-Related specification: [PR task status summary](../../specs/ui/pr-task-status-summary.md).
+Related specification: [PR task status summary](../../specs/ui/requirements/pr-task-status-summary.md).
 
 ## Confirmed Product Decisions
 

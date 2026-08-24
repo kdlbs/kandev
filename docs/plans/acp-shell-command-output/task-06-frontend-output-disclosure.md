@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["05-backend-output-projection"]
 plan: "plan.md"
-spec: "../../specs/ui/acp-shell-command-output.md"
+spec: "../../specs/ui/requirements/acp-shell-command-output.md"
 ---
 
 # Task 06: Frontend Shell Output Disclosure

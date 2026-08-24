@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-djb2-and-diff-collection", "03-review-service-and-events"]
 plan: "plan.md"
-spec: "../../specs/native-code-review/spec.md"
+spec: "../../specs/agents/requirements/native-code-review.md"
 ---
 
 # Task 04: Review run orchestration

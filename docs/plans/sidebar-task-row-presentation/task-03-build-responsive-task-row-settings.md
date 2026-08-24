@@ -5,7 +5,7 @@ status: complete
 wave: 2
 depends_on: ["01-persist-task-row-presentation"]
 plan: "plan.md"
-spec: "../../specs/ui/sidebar-task-row-presentation.md"
+spec: "../../specs/ui/requirements/sidebar-task-row-presentation.md"
 ---
 
 # Task 03: Build Responsive Task-Row Settings

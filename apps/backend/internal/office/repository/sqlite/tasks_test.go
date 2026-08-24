@@ -758,7 +758,7 @@ func TestCountActionableTasksForAgent_AgentIsolation(t *testing.T) {
 
 // Automation runs are hidden from the task list by their origin, not by
 // is_ephemeral: they are ordinary persistent tasks with their own destination
-// (docs/specs/office/automations-settings.md). The quick chat alongside them
+// (docs/specs/office/requirements/automations-settings.md). The quick chat alongside them
 // still behaves exactly as it did.
 func TestOfficeTaskListsExcludeAutomationOriginTasks(t *testing.T) {
 	repo := newSearchTestRepo(t)

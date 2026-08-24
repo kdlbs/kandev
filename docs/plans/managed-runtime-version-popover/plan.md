@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/agents/runtime-updates.md
+spec: docs/specs/agents/requirements/runtime-updates.md
 created: 2026-08-22
 status: completed
 ---
@@ -36,7 +36,7 @@ only their trigger surface and available viewport geometry differ.
 - `apps/web/components/settings/agent-runtime-update-control.test.tsx`
 - `apps/web/e2e/tests/settings/agent-runtime-update.spec.ts`
 - `apps/web/e2e/tests/settings/mobile-agent-runtime-update.spec.ts`
-- `docs/specs/agents/runtime-updates.md`
+- `docs/specs/agents/requirements/runtime-updates.md`
 
 ## Verification
 

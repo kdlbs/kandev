@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-agent-settings-layout"]
 plan: "plan.md"
-spec: "../../specs/agents/settings-profile-layout.md"
+spec: "../../specs/agents/requirements/settings-profile-layout.md"
 ---
 
 # Task 02: Agent settings E2E coverage
@@ -46,7 +46,7 @@ Sequential. E2E selectors and layout assertions depend on task 01.
 
 ## Inputs
 
-- Spec: `docs/specs/agents/settings-profile-layout.md`, all Scenarios.
+- Spec: `docs/specs/agents/requirements/settings-profile-layout.md`, all Scenarios.
 - Plan: `plan.md`, E2E Tests and Mobile design contract sections.
 - Existing patterns: `agent-profile-duplicate.spec.ts`,
   `mobile-agent-profile-duplicate.spec.ts`, and

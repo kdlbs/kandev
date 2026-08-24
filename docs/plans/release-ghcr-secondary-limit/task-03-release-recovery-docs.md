@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-workflow-wiring"]
 plan: "plan.md"
-spec: "../../specs/release-ghcr-secondary-limit/spec.md"
+spec: "../../specs/release/requirements/release-ghcr-secondary-limit.md"
 ---
 
 # Task 03: Document release recovery
@@ -37,7 +37,7 @@ sequential
 
 ## Inputs
 
-- `docs/specs/release-ghcr-secondary-limit/spec.md`, especially Why, What, Failure modes, and Out of scope.
+- `docs/specs/release/requirements/release-ghcr-secondary-limit.md`, especially Why, What, Failure modes, and Out of scope.
 - `docs/plans/release-ghcr-secondary-limit/plan.md`, Documentation section.
 - Existing partial-release recovery guidance in `docs/public/release-process.md`.
 

@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-explicit-url-entry", "03-resolution-errors-and-retry"]
 plan: "plan.md"
-spec: "../../specs/tasks/multi-branch/spec.md"
+spec: "../../specs/tasks/requirements/multi-branch.md"
 ---
 
 # Task 04: Mobile remote entry coverage

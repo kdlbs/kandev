@@ -144,7 +144,7 @@ type SetSessionModeAction struct {
 
 // RunCodeReviewAction starts a native code-review pass on step entry.
 // AgentProfileID is optional; empty means "use the configured code-review
-// utility agent". See docs/specs/native-code-review/spec.md.
+// utility agent". See docs/specs/agents/requirements/native-code-review.md.
 type RunCodeReviewAction struct {
 	AgentProfileID string
 }

@@ -8,7 +8,7 @@ depends_on:
   - "03-build-responsive-task-row-settings"
   - "04-align-change-request-summary-rows"
 plan: "plan.md"
-spec: "../../specs/ui/sidebar-task-row-presentation.md"
+spec: "../../specs/ui/requirements/sidebar-task-row-presentation.md"
 ---
 
 # Task 05: Prove Task-Row Presentation End to End
@@ -45,8 +45,8 @@ git diff --check
 - `apps/web/e2e/tests/task/mobile-sidebar-views.spec.ts`
 - `apps/web/e2e/tests/task/mobile-task-status-summary.spec.ts`
 - `apps/web/e2e/tests/pr/pr-status-badge.spec.ts`
-- `docs/specs/ui/sidebar-task-row-presentation.md`
-- `docs/specs/ui/pr-task-status-summary.md`
+- `docs/specs/ui/requirements/sidebar-task-row-presentation.md`
+- `docs/specs/ui/requirements/pr-task-status-summary.md`
 - `docs/plans/sidebar-task-row-presentation/plan.md`
 - All task files in this plan
 

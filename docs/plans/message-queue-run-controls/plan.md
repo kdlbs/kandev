@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/message-queue-run.md
+spec: docs/specs/ui/requirements/message-queue-run.md
 created: 2026-08-16
 status: done
 ---

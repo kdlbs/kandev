@@ -1,7 +1,7 @@
 // Package state provides a plugin-scoped key/value store backed by SQLite.
 // Plugins read and write arbitrary JSON values under a (scope, scope_id, key)
 // tuple, always filtered by plugin_id so a plugin can never read or write
-// another plugin's state (spec: docs/specs/plugins/spec.md, "plugin_state").
+// another plugin's state (spec: docs/specs/plugins/requirements/plugins.md, "plugin_state").
 package state
 
 import (

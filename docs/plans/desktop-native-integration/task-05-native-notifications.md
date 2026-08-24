@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["04-updater-runtime-settings"]
 plan: "plan.md"
-spec: "../../specs/desktop-tauri-app/spec.md"
+spec: "../../specs/desktop/requirements/desktop-tauri-app.md"
 ---
 
 # Task 05: Native Notifications and Duplicate Suppression

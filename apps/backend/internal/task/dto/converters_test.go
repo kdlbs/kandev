@@ -155,6 +155,55 @@ func TestFromTaskSession_IncludesAllWorktrees(t *testing.T) {
 	}
 }
 
+// TestFromTaskSession_CopiesRollupColumns pins docs/specs/task-cost-ledger/
+// spec.md AC-28/AC-29: TaskSessionDTO (the full session detail shape) must
+// surface the four usage/cost rollup columns internal/task/usage's writer
+// maintains on task_sessions.
+func TestFromTaskSession_CopiesRollupColumns(t *testing.T) {
+	session := &models.TaskSession{
+		ID:             "session-1",
+		TaskID:         "task-1",
+		CostSubcents:   79118,
+		TokensIn:       80,
+		TokensCachedIn: 8203943,
+		TokensOut:      44979,
+	}
+
+	got := FromTaskSession(session)
+	if got.CostSubcents != 79118 || got.TokensIn != 80 || got.TokensCachedIn != 8203943 || got.TokensOut != 44979 {
+		t.Fatalf("got rollup fields = %+v, want copied verbatim from session", got)
+	}
+}
+
+// TestFromTaskSessionSummary_ExcludesRollupColumns pins the deliberate scope
+// decision (task-cost-ledger plan #11): the cross-task summary projection is
+// NOT widened by this card, only the full TaskSessionDTO is.
+func TestFromTaskSessionSummary_ExcludesRollupColumns(t *testing.T) {
+	session := &models.TaskSession{
+		ID:             "session-1",
+		TaskID:         "task-1",
+		CostSubcents:   79118,
+		TokensIn:       80,
+		TokensCachedIn: 8203943,
+		TokensOut:      44979,
+	}
+
+	got := FromTaskSessionSummary(session)
+	raw, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for _, key := range []string{"cost_subcents", "tokens_in", "tokens_cached_in", "tokens_out"} {
+		if _, ok := decoded[key]; ok {
+			t.Errorf("TaskSessionSummaryDTO JSON contains %q, want it absent", key)
+		}
+	}
+}
+
 func TestFromTask_DerivesInterruptedFromMetadata(t *testing.T) {
 	now := time.Now().UTC()
 

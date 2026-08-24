@@ -6,7 +6,7 @@ wave: 2
 depends_on:
   - "01-persist-task-contract"
 plan: "plan.md"
-spec: "../../specs/tasks/autopilot-mode.md"
+spec: "../../specs/tasks/requirements/autopilot-mode.md"
 ---
 
 # Task 04: Build the Autopilot Task UI

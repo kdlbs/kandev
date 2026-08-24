@@ -177,6 +177,25 @@ func (r *Repository) GetRunByID(ctx context.Context, id string) (*models.Run, er
 	return &run, nil
 }
 
+// GetRunWorkspaceID resolves a run's owning workspace via its agent
+// profile, the same join idiom ListRuns uses. A raw join, not
+// GetAgentInstance: GetAgentInstance filters deleted_at IS NULL, which
+// would make a run under a soft-deleted agent profile permanently
+// unresolvable (and so permanently deniable) to its own owner. Returns
+// sql.ErrNoRows for an unknown run.
+func (r *Repository) GetRunWorkspaceID(ctx context.Context, runID string) (string, error) {
+	var workspaceID string
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+		SELECT a.workspace_id FROM runs r
+		JOIN agent_profiles a ON a.id = r.agent_profile_id
+		WHERE r.id = ?
+	`), runID).Scan(&workspaceID)
+	if err != nil {
+		return "", err
+	}
+	return workspaceID, nil
+}
+
 // GetClaimedRunByID returns a run only while it is still claimed. Lifecycle
 // events carry this immutable run identity so a delayed predecessor event
 // cannot finish a newer claimed run for the same task and agent.

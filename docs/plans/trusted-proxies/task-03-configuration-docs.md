@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/auth/trusted-proxies.md"
+spec: "../../specs/auth/requirements/trusted-proxies.md"
 ---
 
 # Task 03: Configuration docs

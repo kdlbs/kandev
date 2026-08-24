@@ -5,7 +5,7 @@ status: complete
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/sidebar-task-row-presentation.md"
+spec: "../../specs/ui/requirements/sidebar-task-row-presentation.md"
 ---
 
 # Task 01: Persist Task-Row Presentation

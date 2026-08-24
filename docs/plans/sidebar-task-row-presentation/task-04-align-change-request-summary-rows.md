@@ -5,7 +5,7 @@ status: complete
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/pr-task-status-summary.md"
+spec: "../../specs/ui/requirements/pr-task-status-summary.md"
 ---
 
 # Task 04: Align Change-Request Summary Rows
@@ -31,7 +31,7 @@ cd apps && pnpm --filter @kandev/web lint -- components/integrations/change-requ
 - `apps/web/components/integrations/change-request-task-status-summary.tsx`
 - `apps/web/components/integrations/change-request-task-status-summary.test.tsx`
 - Existing GitHub, GitLab, and registered-provider summary tests
-- `docs/specs/ui/pr-task-status-summary.md`
+- `docs/specs/ui/requirements/pr-task-status-summary.md`
 
 ## Dependencies
 
