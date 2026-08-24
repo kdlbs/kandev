@@ -4044,10 +4044,18 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 			s.rollbackForegroundDispatchOnFailure(ctx, taskID, sessionID, foregroundDispatch)
 			return nil, errWorkflowAutoStartSessionTerminalized
 		}
-		defer func() {
-			guard.Unlock()
-			releaseDispatchGuard()
-		}()
+		var releaseOnce sync.Once
+		originalRelease := releaseDispatchGuard
+		releaseDispatchGuard = func() {
+			releaseOnce.Do(func() {
+				guard.Unlock()
+				originalRelease()
+			})
+		}
+		// The agentctl dispatch callback is the acceptance boundary. Releasing
+		// here keeps terminalization mutually exclusive with admission without
+		// holding the session guard for the rest of the (potentially long) turn.
+		defer releaseDispatchGuard()
 	}
 
 	// Only bounded-ack callers preserve request context; ordinary prompts can take minutes.
@@ -4057,6 +4065,13 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	onDispatched := s.promptDispatchCallback(
 		promptCtx, taskID, sessionID, rollback.reservedTurn, foregroundDispatch, dispatchOutcome,
 	)
+	if releaseDispatchGuard != nil {
+		originalOnDispatched := onDispatched
+		onDispatched = func() {
+			releaseDispatchGuard()
+			originalOnDispatched()
+		}
+	}
 	result, err := s.executor.PromptWithDispatchCallback(
 		promptCtx, taskID, sessionID, effectivePrompt, attachments, dispatchOnly,
 		onDispatched, session,

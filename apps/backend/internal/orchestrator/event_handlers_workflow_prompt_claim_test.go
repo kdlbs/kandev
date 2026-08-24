@@ -5,11 +5,13 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // terminalizeAfterPromotionRepo pauses the prompt claim after the session has
@@ -24,6 +26,32 @@ type terminalizeAfterPromotionRepo struct {
 	mu              sync.Mutex
 	getCalls        int
 	once            sync.Once
+}
+
+// dispatchBoundaryAgentManager blocks after agentctl has accepted the prompt,
+// giving the test a deterministic way to inspect the guard after admission but
+// before the prompt call returns.
+type dispatchBoundaryAgentManager struct {
+	*mockAgentManager
+	dispatched chan struct{}
+	release    chan struct{}
+}
+
+func (m *dispatchBoundaryAgentManager) PromptAgentWithDispatchCallback(
+	ctx context.Context,
+	executionID, prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	onDispatched func(),
+) (*executor.PromptResult, error) {
+	result, err := m.PromptAgent(ctx, executionID, prompt, attachments, dispatchOnly)
+	if err != nil {
+		return result, err
+	}
+	onDispatched()
+	close(m.dispatched)
+	<-m.release
+	return result, nil
 }
 
 func (r *terminalizeAfterPromotionRepo) GetTaskSession(ctx context.Context, sessionID string) (*models.TaskSession, error) {
@@ -138,5 +166,47 @@ func TestWorkflowAutoStartRejectsSessionTerminalizedBeforeResume(t *testing.T) {
 	}
 	if status := queue.GetStatus(ctx, session.ID); status.Count != 1 {
 		t.Fatalf("queued handoff count = %d, want 1 after terminal auto-start rejection", status.Count)
+	}
+}
+
+func TestWorkflowAutoStartReleasesTerminalGuardAfterPromptAdmission(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-auto-start-dispatch", "session-auto-start-dispatch", "step-one")
+	session, err := repo.GetTaskSession(ctx, "session-auto-start-dispatch")
+	requireNoError(t, err)
+	session.State = models.TaskSessionStateWaitingForInput
+	requireNoError(t, repo.UpdateTaskSession(ctx, session))
+	seedExecutorRunning(t, repo, session.ID, session.TaskID, "execution-auto-start-dispatch")
+
+	agentMgr := &dispatchBoundaryAgentManager{
+		mockAgentManager: &mockAgentManager{repoForExecutionLookup: repo, isAgentRunning: true},
+		dispatched:       make(chan struct{}),
+		release:          make(chan struct{}),
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- svc.autoStartStepPrompt(ctx, session.TaskID, session, &wfmodels.WorkflowStep{}, "review the task", false, false)
+	}()
+
+	<-agentMgr.dispatched
+	guard, release := svc.acquireCancelInFlightGuard(session.ID)
+	acquired := make(chan struct{})
+	go func() {
+		guard.Lock()
+		close(acquired)
+		guard.Unlock()
+		release()
+	}()
+	select {
+	case <-acquired:
+	case <-time.After(time.Second):
+		t.Fatal("workflow auto-start held the terminal guard after agentctl accepted the prompt")
+	}
+	close(agentMgr.release)
+	if err := <-errCh; err != nil {
+		t.Fatalf("auto-start prompt: %v", err)
 	}
 }
