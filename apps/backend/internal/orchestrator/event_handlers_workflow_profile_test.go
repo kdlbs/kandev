@@ -807,6 +807,7 @@ func TestSwitchSessionForStep_ReusesNonterminalSession(t *testing.T) {
 	log := testLogger()
 	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
 	sched := scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.SchedulerConfig{})
+	publisher := &recordingTaskUpdatedPublisher{}
 	svc := &Service{
 		logger:             log,
 		repo:               repo,
@@ -816,6 +817,7 @@ func TestSwitchSessionForStep_ReusesNonterminalSession(t *testing.T) {
 		messageQueue:       messagequeue.NewServiceMemory(log),
 		executor:           exec,
 		scheduler:          sched,
+		taskEvents:         publisher,
 	}
 
 	revived, err := svc.switchSessionForStep(ctx, "t1", current, "profile-a")
@@ -861,6 +863,9 @@ func TestSwitchSessionForStep_ReusesNonterminalSession(t *testing.T) {
 	}
 	if parked.IsPrimary {
 		t.Error("previous current session must no longer be primary")
+	}
+	if got := publisher.updatedTaskIDs; len(got) != 1 || got[0] != "t1" {
+		t.Errorf("task.updated publishes = %v, want [t1] after reused-session promotion", got)
 	}
 }
 

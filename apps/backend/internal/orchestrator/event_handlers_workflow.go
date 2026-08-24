@@ -32,8 +32,9 @@ import (
 type turnCompletionCause string
 
 var (
-	errDeferredMoveAlreadyApplied    = errors.New("deferred move already applied")
-	errReusableSessionNoLongerActive = errors.New("reusable session is no longer active")
+	errDeferredMoveAlreadyApplied           = errors.New("deferred move already applied")
+	errReusableSessionNoLongerActive        = errors.New("reusable session is no longer active")
+	errWorkflowAutoStartSessionTerminalized = errors.New("workflow auto-start session terminalized")
 )
 
 type taskMetadataKeyRemover interface {
@@ -2029,6 +2030,11 @@ func (s *Service) reuseSessionForStep(ctx context.Context, taskID string, curren
 			zap.String("session_id", existing.ID), zap.Error(err))
 	} else if !promoted {
 		return nil, errReusableSessionNoLongerActive
+	} else if task, taskErr := s.repo.GetTask(ctx, taskID); taskErr != nil {
+		s.logger.Warn("failed to load task after promoting reused session",
+			zap.String("task_id", taskID), zap.Error(taskErr))
+	} else if task != nil {
+		s.publishTaskUpdated(ctx, task)
 	}
 	s.tagSessionAsWorkflowSwitched(ctx, existing.ID)
 
@@ -2348,6 +2354,11 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		// autoStartStepPrompt sends the prompt directly via PromptTask.
 		effectivePrompt := s.buildWorkflowPrompt(ctx, taskDescription, step, taskID, sessionID, isPassthrough)
 		if err := s.autoStartStepPrompt(ctx, taskID, session, step, effectivePrompt, hasPlanMode, true); err != nil {
+			if errors.Is(err, errWorkflowAutoStartSessionTerminalized) {
+				s.logger.Info("skipping workflow auto-start after reused session terminalized",
+					zap.String("task_id", taskID), zap.String("session_id", sessionID))
+				return
+			}
 			s.logger.Error("failed to auto-start agent for step",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),
@@ -3086,9 +3097,14 @@ func (s *Service) autoStartStepPrompt(
 
 	const maxRetryAttempts = 5
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
-		_, err := s.PromptTask(ctx, taskID, sessionID, recordedPrompt, "", planMode, attachments, false)
+		_, err := s.promptTask(ctx, taskID, sessionID, recordedPrompt, "", planMode, attachments, false, promptTaskOptions{
+			requireNonterminalSession: true,
+		})
 		if err == nil {
 			return nil
+		}
+		if errors.Is(err, errWorkflowAutoStartSessionTerminalized) {
+			return err
 		}
 
 		// ErrExecutionNotFound means ResumeSession landed on an execution that
