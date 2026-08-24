@@ -3104,6 +3104,7 @@ func (s *Service) autoStartStepPrompt(
 			return nil
 		}
 		if errors.Is(err, errWorkflowAutoStartSessionTerminalized) {
+			requeueTaken()
 			return err
 		}
 

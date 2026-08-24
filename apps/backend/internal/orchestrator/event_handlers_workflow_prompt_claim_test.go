@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
@@ -107,11 +108,16 @@ func TestWorkflowAutoStartRejectsSessionTerminalizedBeforeResume(t *testing.T) {
 		allowClaim:           make(chan struct{}),
 	}
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	queue := messagequeue.NewServiceMemory(testLogger())
+	if _, err := queue.QueueMessage(ctx, session.ID, session.TaskID, "handoff", "", messagequeue.QueuedByUser, true, nil); err != nil {
+		t.Fatalf("queue handoff: %v", err)
+	}
 	svc := &Service{
 		repo:         barrierRepo,
 		logger:       testLogger(),
 		agentManager: agentMgr,
 		executor:     executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}),
+		messageQueue: queue,
 	}
 	errCh := make(chan error, 1)
 	go func() {
@@ -129,5 +135,8 @@ func TestWorkflowAutoStartRejectsSessionTerminalizedBeforeResume(t *testing.T) {
 	requireNoError(t, err)
 	if stored.State != models.TaskSessionStateCompleted {
 		t.Fatalf("terminalized session state = %s, want COMPLETED", stored.State)
+	}
+	if status := queue.GetStatus(ctx, session.ID); status.Count != 1 {
+		t.Fatalf("queued handoff count = %d, want 1 after terminal auto-start rejection", status.Count)
 	}
 }
