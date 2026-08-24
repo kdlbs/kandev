@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/i18n-second-audit-gaps/spec.md"
+spec: "../../specs/platform/requirements/i18n-second-audit-gaps.md"
 ---
 
 # Task 02: Azure And Shortcut Metadata

@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/models"
 	officeruntime "github.com/kandev/kandev/internal/office/runtime"
+	"github.com/kandev/kandev/internal/office/shared"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -766,12 +767,12 @@ func isAgentActive(status models.AgentStatus) bool {
 }
 
 // checkIdleSkip returns true if the run should be skipped because the agent
-// is configured to skip idle heartbeats and has no actionable tasks assigned.
-// Returns false (do not skip) on any DB error to fail open.
+// is configured to skip idle periodic wakes and has no actionable tasks
+// assigned. Returns false (do not skip) on any DB error to fail open.
 func (si *SchedulerIntegration) checkIdleSkip(
 	ctx context.Context, run *models.Run, agent *models.AgentInstance,
 ) bool {
-	if run.Reason != RunReasonHeartbeat {
+	if !shared.IsPeriodicTasklessWake(run.Reason) {
 		return false
 	}
 	if !agent.SkipIdleRuns {

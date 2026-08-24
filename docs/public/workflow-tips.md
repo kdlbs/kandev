@@ -126,7 +126,7 @@ Workflow-level settings include the name and default agent profile. A step can o
 |---------|----------|
 | Name and color | Board label and presentation. Color is stored as a CSS utility class. |
 | Prompt | Step-specific agent prompt. `{{task_prompt}}` inserts the task description. Type `@` to reference a saved prompt by name. |
-| Start step | Preferred initial step. The editor keeps at most one. If none is set, task creation falls back to the first step by position. |
+| Start step | Where a task is created when no agent starts with it. The editor keeps at most one. If none is set, task creation falls back to the first step by position. Creating a task that starts an agent immediately uses the first Auto-start agent step instead, so a Start step with no entry actions is a genuine parking column. |
 | Auto-start agent | Adds `auto_start_agent` to `on_enter`. It still needs a valid agent and executor configuration. |
 | Plan mode | Adds `enable_plan_mode` on entry. Add the matching disable behavior on completion or exit when later steps should edit files. |
 | Reset agent context | Starts the step with fresh conversation context. It is redundant when the step changes agent profile. |
@@ -219,7 +219,7 @@ A task may contain several repositories, but a workflow step is not bound to one
 
 ## Troubleshooting
 
-- **Task starts in the wrong column:** confirm exactly one Start step, save the workflow, and check whether the creator supplied an explicit `workflow_step_id`.
+- **Task starts in the wrong column:** confirm exactly one Start step, save the workflow, and check whether the creator supplied an explicit `workflow_step_id`. Remember that a create which starts an agent targets the first Auto-start agent step, not the Start step.
 - **Agent does not start:** verify the effective workflow/step agent profile, its health, executor profile, repository access, and the `auto_start_agent` entry action.
 - **Task stays after a turn:** check for an absent transition, a pending clarification, the explicit-completion toggle, a queued WIP card waiting for capacity, or an invalid target left by an older definition.
 - **Task stays after a cancel:** check for a pending clarification, the cancelled-turn completion policy, an absent or blocked transition, a queued WIP card, or an invalid target left by an older definition.

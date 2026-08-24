@@ -44,6 +44,7 @@ const (
 	resourceExecutorProfiles = "executor_profiles"
 	resourceRepositories     = "repositories"
 	resourceMessages         = "messages"
+	resourceInteractions     = "interactions"
 )
 
 // apiReadCapability formats resource as the api_read:<resource> capability

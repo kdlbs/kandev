@@ -6,7 +6,7 @@ wave: 1
 depends_on: []
 superseded_by: "05-backend-owned-cancel-control"
 plan: "plan.md"
-spec: "../../specs/ui/cancel-turn-progress.md"
+spec: "../../specs/ui/requirements/cancel-turn-progress.md"
 ---
 
 # Task 01: Session-scoped cancel state

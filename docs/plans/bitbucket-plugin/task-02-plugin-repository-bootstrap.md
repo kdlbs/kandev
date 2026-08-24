@@ -5,7 +5,7 @@ status: completed
 wave: 0
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/bitbucket-plugin/spec.md"
+spec: "../../specs/integrations/requirements/bitbucket-plugin.md"
 ---
 
 # Task 02: Dedicated plugin repository bootstrap

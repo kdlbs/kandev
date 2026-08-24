@@ -8,7 +8,7 @@ depends_on:
   - "08-browser-logs-and-bundle-ui"
   - "10-agent-diagnostic-materialization"
 plan: "plan.md"
-spec: "../../specs/platform/diagnostic-logging.md"
+spec: "../../specs/platform/requirements/diagnostic-logging.md"
 ---
 
 # Task 09: Remove legacy diagnostics

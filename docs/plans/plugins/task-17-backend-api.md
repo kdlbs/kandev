@@ -15,7 +15,7 @@ auth/capability middleware, state + secrets, webhook proxy, **JS bundle proxy**,
 boot-payload active-plugin list, health monitor, and backendapp wiring.
 
 ## Inputs
-- Spec `docs/specs/plugins/spec.md` (API surface, permissions, security).
+- Spec `docs/specs/plugins/requirements/plugins.md` (API surface, permissions, security).
 - `PLUGIN-API.md`: boot payload `plugins: [{id,name,bundleUrl,styleUrls?}]`,
   `bundleUrl=/api/plugins/{id}/bundle`; bundle proxied to plugin's `ui.bundle`.
 - Reuse: task-05 `Service` (Provide, Registry(), Get, List, Enable/Disable,

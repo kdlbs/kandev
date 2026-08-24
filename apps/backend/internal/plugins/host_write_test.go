@@ -497,3 +497,38 @@ func TestPluginHost_Messages_SendRequiresTaskAndText(t *testing.T) {
 		t.Fatalf("messenger called %d times despite invalid input", d.messenger.calls)
 	}
 }
+
+// The host launches a plugin task right after CreateTask returns, so the start
+// intent has to reach the create itself. Without it the task service resolves
+// the parking start step and the plugin's agent runs in a column configured to
+// run nothing — the bug this PR fixes for REST, WS and MCP, reached by a fourth
+// route.
+func TestPluginHost_Tasks_CreatePropagatesStartAgentToTheWriter(t *testing.T) {
+	for name, startAgent := range map[string]bool{
+		"starting an agent": true,
+		"create only":       false,
+	} {
+		t.Run(name, func(t *testing.T) {
+			d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
+			d.taskWriter.created = &taskmodels.Task{ID: "task-9", WorkspaceID: "ws-1", WorkflowID: "wf-1"}
+			d.profiles.resp = &agentsettingsdto.ListAgentsResponse{Agents: []agentsettingsdto.AgentDTO{{
+				ID: "agent-1", Profiles: []agentsettingsdto.AgentProfileDTO{{ID: "agent-1"}},
+			}}}
+			d.tasks.executorProfiles = []*taskmodels.ExecutorProfile{{ID: "executor-profile-1"}}
+			agentProfileID, executorProfileID := "agent-1", "executor-profile-1"
+
+			_, err := d.host.Tasks().Create(context.Background(), pluginsdk.CreateTaskInput{
+				WorkspaceID: "ws-1", WorkflowID: "wf-1", Title: "Investigate", StartAgent: startAgent,
+				Launch: &pluginsdk.PluginTaskLaunchOptions{
+					AgentProfileID: &agentProfileID, ExecutorProfileID: &executorProfileID,
+				},
+			})
+			if err != nil {
+				t.Fatalf("Create() unexpected error: %v", err)
+			}
+			if d.taskWriter.lastCreate.StartAgent != startAgent {
+				t.Fatalf("create StartAgent = %v, want %v", d.taskWriter.lastCreate.StartAgent, startAgent)
+			}
+		})
+	}
+}

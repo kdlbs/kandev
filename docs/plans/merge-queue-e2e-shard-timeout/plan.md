@@ -2,7 +2,7 @@
 status: in_progress
 created: 2026-08-23
 updated: 2026-08-23
-spec: ../../specs/e2e-duration-aware-sharding/spec.md
+spec: ../../specs/platform/requirements/e2e-duration-aware-sharding.md
 ---
 
 # Keep merge-queue E2E checks within the response budget

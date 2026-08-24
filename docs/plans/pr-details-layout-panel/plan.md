@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/task-layout-profiles.md
+spec: docs/specs/ui/requirements/task-layout-profiles.md
 created: 2026-07-31
 status: complete
 ---
@@ -10,7 +10,7 @@ status: complete
 
 Replace this branch's global Appearance preference for pull-request tab placement with the existing task-layout profile system. Promote the canonical `pr-detail` runtime panel to the reusable **PR Details** panel, put it beside Agent in the built-in Default layout's `CENTER_GROUP`, and let users place or remove it with `Settings > General > Layouts`. Keep review identity synchronization separate from layout mutation: runtime code may update which review the canonical panel renders, but only layouts decide whether the panel exists and where it lives.
 
-No backend schema, user-settings field, endpoint, or ADR is required. `users.settings.saved_layouts` already owns portable layout placement, and `docs/specs/ui/task-layout-profiles.md` owns the product contract.
+No backend schema, user-settings field, endpoint, or ADR is required. `users.settings.saved_layouts` already owns portable layout placement, and `docs/specs/ui/requirements/task-layout-profiles.md` owns the product contract.
 
 ## Architecture boundary
 

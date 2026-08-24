@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-backend-contract-and-baseline", "02-task-selector-ux"]
 plan: "plan.md"
-spec: "../../specs/ui/acp-model-configuration-summary.md"
+spec: "../../specs/ui/requirements/acp-model-configuration-summary.md"
 ---
 
 # Task 03: Verify ACP Configuration Summary Workflows

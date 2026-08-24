@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/review-file-status.md"
+spec: "../../specs/ui/requirements/review-file-status.md"
 ---
 
 # Task 01: Shared file status model

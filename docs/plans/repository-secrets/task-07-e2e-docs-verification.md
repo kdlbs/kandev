@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["04-runtime-environment-propagation", "06-repository-binding-settings"]
 plan: "plan.md"
-spec: "../../specs/workspaces/repository-secrets.md"
+spec: "../../specs/workspaces/requirements/repository-secrets.md"
 ---
 
 # Task 07: Prove and Document Repository Secrets
