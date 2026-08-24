@@ -479,7 +479,7 @@ Agent routing and Office ownership are independent. Workflow-level defaults, per
 - `list_related_tasks_kandev`.
 - 3 task-document tools (`list_task_documents_kandev`, `get_task_document_kandev`, `write_task_document_kandev`).
 
-`ModeOffice` excludes kanban tools, config tools, `list_workspaces_kandev`, `list_workflows_kandev`, `list_workflow_steps_kandev`, and `step_complete_kandev`. Office advances work through its Office task and approval surfaces, not the Kanban workflow-step completion signal. The first-turn Office context lists only tools registered in `ModeOffice` and directs Office mutations to `$KANDEV_CLI`; it never advertises an excluded tool.
+`ModeOffice` excludes kanban tools, config tools, `list_workspaces_kandev`, `list_workflows_kandev`, and `list_workflow_steps_kandev`. Per ADR 0015, `ModeOffice` also registers `step_complete_kandev`, required by office-default's `work` step. The first-turn Office context lists only tools registered in `ModeOffice` and directs Office mutations to `$KANDEV_CLI`; it never advertises an excluded tool.
 
 ### Skills are preferred over MCP tools
 
@@ -699,7 +699,7 @@ pass before launcher settings are described as an isolation boundary:
 
 - **GIVEN** an office agent in ModeOffice, **WHEN** something tries to call `create_task_kandev` MCP tool, **THEN** the MCP server returns an error saying to use `$KANDEV_CLI` instead.
 
-- **GIVEN** an office agent in ModeOffice, **WHEN** its first-turn system context is generated, **THEN** every advertised MCP tool is registered in ModeOffice and `step_complete_kandev` is absent.
+- **GIVEN** an office agent in ModeOffice, **WHEN** its first-turn system context is generated, **THEN** every advertised MCP tool is registered in ModeOffice, including `step_complete_kandev` (ADR 0015).
 
 - **GIVEN** an Office-owned task without a scheduler-prepared signed run context, **WHEN** a generic manual or workflow task/session path attempts to start it in ModeOffice, **THEN** Kandev starts no agent process and returns an error directing the caller to start or wake the task through Office.
 
