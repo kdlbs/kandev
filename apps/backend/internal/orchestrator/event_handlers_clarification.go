@@ -120,6 +120,7 @@ type clarificationAnsweredData struct {
 	AnswerText          string `json:"answer_text"`
 	Rejected            bool   `json:"rejected"`
 	RejectReason        string `json:"reject_reason"`
+	HandledInline       bool   `json:"handled_inline"`
 }
 
 type clarificationWatchdogEntry struct {
@@ -272,6 +273,16 @@ func (s *Service) handleClarificationPrimaryAnswered(ctx context.Context, event 
 			zap.String("pending_id", data.PendingID))
 		return nil
 	}
+	if data.HandledInline {
+		return nil
+	}
+	return s.handleClarificationPrimaryAnsweredData(ctx, data)
+}
+
+func (s *Service) handleClarificationPrimaryAnsweredData(ctx context.Context, data clarificationAnsweredData) error {
+	if data.SessionID == "" || data.TaskID == "" || data.PendingID == "" {
+		return nil
+	}
 
 	// A directly answered MCP request does not transition the session through
 	// WAITING_FOR_INPUT, so no ordinary turn-start event exists to move a task
@@ -279,6 +290,22 @@ func (s *Service) handleClarificationPrimaryAnswered(ctx context.Context, event 
 	s.writeTaskInProgressForRuntime(ctx, data.TaskID, data.SessionID)
 	s.scheduleClarificationWatchdog(data)
 	return nil
+}
+
+// HandleClarificationPrimaryAnswered is the synchronous local notification
+// used by clarification.Resolver to arm the watchdog before releasing a live
+// clarification waiter. The bus event remains available for projections.
+func (s *Service) HandleClarificationPrimaryAnswered(ctx context.Context, answered clarification.PrimaryAnswered) {
+	_ = s.handleClarificationPrimaryAnsweredData(ctx, clarificationAnsweredData{
+		SessionID:           answered.SessionID,
+		TaskID:              answered.TaskID,
+		PendingID:           answered.PendingID,
+		ClarificationTurnID: answered.ClarificationTurnID,
+		Question:            answered.Question,
+		AnswerText:          answered.AnswerText,
+		Rejected:            answered.Rejected,
+		RejectReason:        answered.RejectReason,
+	})
 }
 
 func (s *Service) clarificationWatchdogKey(sessionID, pendingID string) string {
@@ -449,7 +476,15 @@ func (s *Service) retryClarificationAfterCancel(ctx context.Context, data clarif
 	if watchdogEntry != nil {
 		watchdogEntry.beginRecoveryCancellation()
 	}
-	cancelErr := s.cancelAgentSilentWithGuard(ctx, data.TaskID, data.SessionID, guard.unlock, guard.relock)
+	expectedTurnID := data.ClarificationTurnID
+	cancelErr := s.cancelAgentSilentExpectedWithGuard(
+		ctx,
+		data.TaskID,
+		data.SessionID,
+		&expectedTurnID,
+		guard.unlock,
+		guard.relock,
+	)
 	if watchdogEntry != nil {
 		watchdogEntry.endRecoveryCancellation()
 	}
@@ -491,6 +526,9 @@ func (s *Service) retryClarificationAfterCancel(ctx context.Context, data clarif
 		s.logger.Debug("skipping clarification replacement for terminal session after cancellation",
 			zap.String("session_id", data.SessionID),
 			zap.String("session_state", string(session.State)))
+		return false
+	}
+	if !s.clarificationTurnStillCurrentAfterRecovery(ctx, data) {
 		return false
 	}
 
@@ -955,7 +993,10 @@ func (s *Service) logSilentCancelReconciled(taskID, sessionID string, err error)
 		zap.Error(err))
 }
 
-func (s *Service) cancelClarificationWatchdogsForSession(sessionID, reason string) {
+func (s *Service) cancelClarificationWatchdogsForSession(
+	sessionID, reason string,
+	payload *lifecycle.AgentStreamEventPayload,
+) {
 	if sessionID == "" {
 		return
 	}
@@ -967,10 +1008,13 @@ func (s *Service) cancelClarificationWatchdogsForSession(sessionID, reason strin
 		if !ok || !strings.HasPrefix(keyStr, prefix) {
 			return true
 		}
-		// Silent cancellation may synchronously emit this stream frame while the
-		// fallback still owns the watchdog context. Independent activity remains
-		// authoritative once the recovery phase ends.
-		if entry, ok := value.(*clarificationWatchdogEntry); ok && entry.isRecoveryCancellationActive() {
+		// Silent cancellation may synchronously emit a frame for the captured
+		// execution/prompt. Ignore only that operation-owned identity. A newer
+		// execution or prompt generation remains authoritative and cancels the
+		// watchdog even while the fallback cancellation is blocked.
+		if entry, ok := value.(*clarificationWatchdogEntry); ok &&
+			entry.isRecoveryCancellationActive() &&
+			s.clarificationRecoveryOwnsStreamEvent(sessionID, payload) {
 			return true
 		}
 		s.clarificationWatchdogs.Delete(keyStr)
@@ -987,6 +1031,28 @@ func (s *Service) cancelClarificationWatchdogsForSession(sessionID, reason strin
 			zap.String("reason", reason),
 			zap.Int("count", cancelled))
 	}
+}
+
+func (s *Service) clarificationRecoveryOwnsStreamEvent(
+	sessionID string,
+	payload *lifecycle.AgentStreamEventPayload,
+) bool {
+	if payload == nil || payload.Data == nil {
+		return false
+	}
+	operation := s.currentCancellation(sessionID)
+	if operation == nil || operation.kind != cancellationKindSilent {
+		return false
+	}
+	eventExecutionID := payload.ExecutionID
+	if eventExecutionID == "" {
+		eventExecutionID = payload.AgentID
+	}
+	return s.cancellationOwnsStreamEvent(
+		sessionID,
+		eventExecutionID,
+		payload.Data.PromptGeneration,
+	)
 }
 
 func (s *Service) cancelAllClarificationWatchdogs() {

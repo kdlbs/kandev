@@ -312,6 +312,55 @@ func TestResolverLiveDeliveryPublishesPrimaryAnswerBeforeWaiterReturns(t *testin
 	}
 }
 
+func TestResolverLiveDeliveryNotifiesWatchdogBeforeWaiterReturns(t *testing.T) {
+	const pendingID = "pending-live-watchdog-notifier"
+	message := resolverDeliveryMessage(pendingID, "message-live-watchdog-notifier", "turn-1")
+	resolver, store, _, _, _ := newResolverDeliveryFixture(t, pendingID, []*taskmodels.Message{message})
+
+	notified := make(chan struct{})
+	resolver.SetPrimaryAnsweredHandler(func(context.Context, PrimaryAnswered) {
+		close(notified)
+	})
+
+	store.CreateRequest(&Request{
+		PendingID: pendingID,
+		SessionID: "session-1",
+		TaskID:    "task-1",
+		Questions: []Question{{
+			ID: "q1", Prompt: "Continue?",
+			Options: []Option{{ID: "yes", Label: "Yes"}, {ID: "no", Label: "No"}},
+		}},
+	})
+	waitEntered := make(chan struct{}, 1)
+	store.SetOnWaitEntered(func(string) { waitEntered <- struct{}{} })
+	waitDone := make(chan error, 1)
+	go func() {
+		_, err := store.WaitForResponse(context.Background(), pendingID)
+		waitDone <- err
+	}()
+	<-waitEntered
+	store.SetOnWaitEntered(nil)
+
+	_, claimed, err := resolver.ResolveBundle(context.Background(), pendingID, resolverAnswer())
+	if err != nil || !claimed {
+		t.Fatalf("ResolveBundle = claimed %v, err %v; want live delivery", claimed, err)
+	}
+	var waitErr error
+	select {
+	case waitErr = <-waitDone:
+	case <-time.After(time.Second):
+		t.Fatal("WaitForResponse did not return")
+	}
+	select {
+	case <-notified:
+	default:
+		t.Fatal("live waiter returned before the primary-answer watchdog was notified")
+	}
+	if waitErr != nil {
+		t.Fatalf("WaitForResponse: %v", waitErr)
+	}
+}
+
 func TestResolverDetachedResumeFailureRestoresRetryableBundle(t *testing.T) {
 	const pendingID = "pending-detached-retry"
 	message := resolverDeliveryMessage(pendingID, "message-detached-retry", "turn-1")

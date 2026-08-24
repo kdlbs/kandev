@@ -26,9 +26,12 @@ paths effective.
 ## In scope
 
 - Write the two deterministic regression tests before changing production code.
-- Move primary-answer event publication into the successful live delivery-confirmation boundary.
-- Track the narrow recovery-owned silent-cancellation phase on the watchdog entry.
-- Keep current-turn, prompt-generation, queue, and shutdown behavior unchanged.
+- Add a synchronous local primary-answer notifier inside the successful live delivery-confirmation
+  boundary and retain the event bus as fan-out without duplicate local watchdog registration.
+- Track the narrow recovery-owned silent-cancellation phase on the watchdog entry and classify frames
+  by the cancellation operation's execution/prompt-generation identity.
+- Bind cancellation to the captured clarification turn and recheck turn authority after cancellation
+  before queueing the replacement; keep current-turn, queue, and shutdown behavior unchanged.
 
 ## Out of scope
 
@@ -38,11 +41,12 @@ paths effective.
 
 ## Acceptance
 
-- A live waiter cannot receive the clarification answer before the primary-answer event has armed its
-  watchdog, and the event is published exactly once.
+- A live waiter cannot receive the clarification answer before the synchronous local notifier has armed
+  its watchdog, and the fan-out event is published exactly once without a duplicate local watchdog.
 - Stream activity emitted synchronously by fallback's silent cancellation does not cancel its recovery
   context; the answer reaches exactly one replacement queue or dispatch.
-- Independent live activity and service shutdown still cancel in-flight watchdog fallback work.
+- Independent live activity, successor-turn authority, and service shutdown still cancel or reject
+  in-flight watchdog fallback work.
 
 ## Verification
 
@@ -85,8 +89,17 @@ None.
 ## Results
 
 - Added `TestResolverLiveDeliveryPublishesPrimaryAnswerBeforeWaiterReturns`, which proves the primary-answer event is published before the live waiter returns and is published exactly once.
+- Added `TestResolverLiveDeliveryNotifiesWatchdogBeforeWaiterReturns`, which proves the synchronous local
+  watchdog notifier runs before the live waiter returns.
 - Added `TestClarificationWatchdogRecoveryIgnoresOwnCancelActivity`, which synchronously emits `session_info` from silent cancellation and proves the watchdog context survives to one replacement prompt.
-- Moved primary-answer publication into the successful durable delivery-confirmation callback.
-- Added an atomic recovery-cancellation phase marker and ignored only that phase's own stream activity; independent activity and service-wide cancellation remain authoritative.
+- Kept primary-answer fan-out publication in the successful durable delivery-confirmation callback and
+  added the synchronous local watchdog notifier at that boundary.
+- Added a synchronous local watchdog notifier and an inline-handled bus marker so NATS fan-out cannot
+  release the waiter before local watchdog registration or arm a duplicate watchdog.
+- Added an atomic recovery-cancellation phase marker keyed to the cancellation operation's execution and
+  prompt-generation identity; independent activity and service-wide cancellation remain authoritative.
+- Bound silent cancellation to the captured clarification turn and added a post-cancel authority check
+  that accepts owned completion but rejects a successor turn.
+- Added regressions for newer prompt activity, post-cancel authority, and idempotent blocked-cancel cleanup.
 - Targeted regression command passed.
 - Race-enabled clarification and orchestrator suites passed.

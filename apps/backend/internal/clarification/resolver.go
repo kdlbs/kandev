@@ -70,14 +70,22 @@ type clarificationResponseClaim struct {
 // on a win delivers through upstream's existing live-waiter/detached-resume
 // path (R7) unchanged; on a loss it reconstructs the winner's outcome (R2).
 type Resolver struct {
-	store           *Store
-	repo            handlerMessageStore
-	messages        MessageCreator
-	authorizer      taskAccessAuthorizer
-	detachedResumer DetachedClarificationResumer
-	eventBus        EventBus
-	logger          *logger.Logger
-	now             func() time.Time // seam for deterministic tests
+	store                  *Store
+	repo                   handlerMessageStore
+	messages               MessageCreator
+	authorizer             taskAccessAuthorizer
+	detachedResumer        DetachedClarificationResumer
+	eventBus               EventBus
+	primaryAnsweredHandler PrimaryAnsweredHandler
+	logger                 *logger.Logger
+	now                    func() time.Time // seam for deterministic tests
+}
+
+// SetPrimaryAnsweredHandler installs the local ordering seam used by the
+// orchestrator. The handler is called synchronously before a live waiter can
+// observe the response; the event bus publication remains separate fan-out.
+func (r *Resolver) SetPrimaryAnsweredHandler(handler PrimaryAnsweredHandler) {
+	r.primaryAnsweredHandler = handler
 }
 
 // NewResolver creates a Resolver.
@@ -577,7 +585,7 @@ func (r *Resolver) publishPrimaryAnsweredEvent(
 	rejected bool,
 	rejectReason, clarificationTurnID string,
 ) {
-	if r.eventBus == nil {
+	if r.eventBus == nil && r.primaryAnsweredHandler == nil {
 		return
 	}
 	persistenceCtx, cancel := clarificationPersistenceContext(ctx)
@@ -597,6 +605,21 @@ func (r *Resolver) publishPrimaryAnsweredEvent(
 	}
 
 	answerText := buildAnswerSummary(clarificationCtx.Questions, answers, rejected, rejectReason)
+	if r.primaryAnsweredHandler != nil {
+		r.primaryAnsweredHandler(persistenceCtx, PrimaryAnswered{
+			SessionID:           clarificationCtx.SessionID,
+			TaskID:              clarificationCtx.TaskID,
+			PendingID:           pendingID,
+			ClarificationTurnID: clarificationTurnID,
+			Question:            clarificationCtx.QuestionSummary,
+			AnswerText:          answerText,
+			Rejected:            rejected,
+			RejectReason:        rejectReason,
+		})
+	}
+	if r.eventBus == nil {
+		return
+	}
 	eventData := map[string]any{
 		metaSessionIDKey:        clarificationCtx.SessionID,
 		metaTaskIDKey:           clarificationCtx.TaskID,
@@ -606,6 +629,9 @@ func (r *Resolver) publishPrimaryAnsweredEvent(
 		"answer_text":           answerText,
 		metaRejectedKey:         rejected,
 		"reject_reason":         rejectReason,
+		// The orchestrator handled this event synchronously in the resolver's
+		// process. Its event-bus subscription must not arm a second watchdog.
+		"handled_inline": r.primaryAnsweredHandler != nil,
 	}
 	if err := r.eventBus.Publish(persistenceCtx, events.ClarificationPrimaryAnswered, bus.NewEvent(
 		events.ClarificationPrimaryAnswered,

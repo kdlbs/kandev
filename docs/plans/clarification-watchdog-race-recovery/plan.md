@@ -37,24 +37,29 @@ from cancelling the fallback context that must hand off that answer.
 
 ### Live delivery ordering
 
-Update `clarification.Resolver` so `ClarificationPrimaryAnswered` is published from the successful
-delivery-confirmation callback after durable finalization and before `Store.WaitForResponse` can return
-the response to the agent. Keep terminal bundle-message publication after confirmed delivery and remove
-the later duplicate primary-answer publication.
+Update `clarification.Resolver` so a synchronous local orchestrator notifier arms the watchdog from
+the successful delivery-confirmation callback after durable finalization and before `Store.WaitForResponse`
+can return the response to the agent. Keep the event-bus publication as fan-out, mark it as handled by
+the local notifier to avoid a duplicate watchdog, and keep terminal bundle-message publication after
+confirmed delivery.
 
 ### Recovery-owned cancellation activity
 
 Extend `clarificationWatchdogEntry` with concurrency-safe recovery-cancellation phase state. Mark that
-phase only around `cancelAgentSilentWithGuard`. `cancelClarificationWatchdogsForSession` must preserve
-the matching entry when a live stream frame is caused by that recovery-owned cancellation, while normal
-activity and `cancelAllClarificationWatchdogs` retain their current cancellation behavior.
+phase only around expected-turn silent cancellation. `cancelClarificationWatchdogsForSession` must
+preserve the matching entry only when a live stream frame matches the cancellation operation's captured
+execution and prompt-generation identity. Newer or independent activity, and
+`cancelAllClarificationWatchdogs`, retain their cancellation authority. After cancellation, recheck
+the captured turn and allow queue handoff only when it remains current or is the exact turn durably
+completed by the owned cancellation.
 
 ### Regression coverage
 
-Add a resolver delivery test proving that the primary-answer event is published before the live waiter
+Add a resolver delivery test proving that the synchronous local notifier runs before the live waiter
 receives the response. Add an orchestrator test whose silent cancellation synchronously emits the same
 `session_info` activity observed in production and prove the answer still reaches exactly one queued or
-dispatched replacement.
+dispatched replacement. Add a concurrent newer-prompt activity regression and a post-cancellation
+turn-authority regression.
 
 ## Tests
 

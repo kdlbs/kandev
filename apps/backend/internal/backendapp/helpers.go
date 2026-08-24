@@ -606,6 +606,7 @@ func registerRoutes(p routeParams) {
 	clarificationResolver := clarification.NewResolver(
 		clarificationStore, p.taskRepo, p.msgCreator, p.taskSvc, p.orchestratorSvc, p.eventBus, p.log,
 	)
+	clarificationResolver.SetPrimaryAnsweredHandler(p.orchestratorSvc.HandleClarificationPrimaryAnswered)
 
 	// Wire pending clarification requests into the office inbox.
 	if p.services.OfficeSvcs != nil && p.services.OfficeSvcs.Dashboard != nil {
