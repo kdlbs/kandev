@@ -743,11 +743,20 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 	}
 
+	// Resolve the destination step before launch metadata. The profile lookup
+	// below reads it off pendingTask, and CreateTask sends an agent start to
+	// the first auto_start_agent step rather than to the start step — leaving
+	// this empty pinned the metadata and the deferred-launch record to the
+	// start step's profile while the task landed somewhere else.
+	resolvedStepID := req.WorkflowStepID
+	if resolvedStepID == "" {
+		resolvedStepID = h.resolveMCPDestinationStep(ctx, req.WorkflowID, startAgent)
+	}
 	pendingTask := &models.Task{
 		ParentID:       req.ParentID,
 		WorkspaceID:    req.WorkspaceID,
 		WorkflowID:     req.WorkflowID,
-		WorkflowStepID: req.WorkflowStepID,
+		WorkflowStepID: resolvedStepID,
 	}
 	launchConfig, metadata, err := h.resolveMCPLaunchMetadataWithSource(
 		ctx, pendingTask, req.AgentProfileID, req.ExecutorProfileID, req.SourceTaskID, req.SourceSessionID,
@@ -787,7 +796,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		ParentID:               req.ParentID,
 		WorkspaceID:            req.WorkspaceID,
 		WorkflowID:             req.WorkflowID,
-		WorkflowStepID:         req.WorkflowStepID,
+		WorkflowStepID:         resolvedStepID,
 		Title:                  req.Title,
 		Description:            req.Description,
 		Autopilot:              req.Autopilot,
@@ -1496,6 +1505,31 @@ func (h *Handlers) resolveWorkflowStepAgentProfile(ctx context.Context, workflow
 		workflowID = resp.Step.WorkflowID
 	}
 	return resp.Step.AgentProfileID, workflowID
+}
+
+// resolveMCPDestinationStep pre-resolves the step a new task will be created
+// on, mirroring the task service's rules: an agent start goes to the first
+// auto_start_agent step, anything else to the start step. Both are computed by
+// the shared selectors, so the two implementations cannot drift. Returns "" when
+// the workflow has no steps or cannot be read, which leaves resolution to
+// CreateTask exactly as before.
+func (h *Handlers) resolveMCPDestinationStep(ctx context.Context, workflowID string, startAgent bool) string {
+	if h.workflowCtrl == nil || workflowID == "" {
+		return ""
+	}
+	resp, err := h.workflowCtrl.ListStepsByWorkflow(ctx, workflowctrl.ListStepsRequest{WorkflowID: workflowID})
+	if err != nil || resp == nil {
+		return ""
+	}
+	if startAgent {
+		if step := workflowmodels.SelectAutoStartStep(resp.Steps); step != nil {
+			return step.ID
+		}
+	}
+	if step := workflowmodels.SelectStartStep(resp.Steps); step != nil {
+		return step.ID
+	}
+	return ""
 }
 
 func (h *Handlers) resolveWorkflowStartStepAgentProfile(ctx context.Context, workflowID string) string {

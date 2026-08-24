@@ -445,10 +445,8 @@ func (s *Service) ResolveAutoStartStep(ctx context.Context, workflowID string) (
 		s.logger.Error("failed to list steps for auto-start step resolution", zap.String("workflow_id", workflowID), zap.Error(err))
 		return nil, err
 	}
-	for _, step := range steps {
-		if step != nil && step.HasOnEnterAction(models.OnEnterAutoStartAgent) {
-			return step, nil
-		}
+	if step := models.SelectAutoStartStep(steps); step != nil {
+		return step, nil
 	}
 	return s.ResolveStartStep(ctx, workflowID)
 }
