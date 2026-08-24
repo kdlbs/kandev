@@ -68,3 +68,48 @@ func TestIdleSkip_RoutineDispatchNoTasks_Skipped(t *testing.T) {
 		t.Error("expected run_idle_skipped activity entry for reason=routine_dispatch")
 	}
 }
+
+// TestIdleSkip_RoutineDispatch_CoordinatorNotSkipped is the complementary
+// case to TestIdleSkip_RoutineDispatchNoTasks_Skipped (PR #2973 review
+// round 1, github-actions suggestion): a coordinator (CEO role) defaults to
+// SkipIdleRuns=false because its heartbeat purpose is self-directed and
+// does not require a directly assigned task, so a routine_dispatch fire for
+// one must never be idle-skipped. checkIdleSkip's guard order happens to
+// check the reason before SkipIdleRuns, so this passes today, but nothing
+// pinned the coordinator side of the contract — a future reorder of the
+// guards in checkIdleSkip would silently break it without this test.
+func TestIdleSkip_RoutineDispatch_CoordinatorNotSkipped(t *testing.T) {
+	mock := &mockTaskStarter{}
+	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
+	ctx := context.Background()
+
+	agent := &models.AgentInstance{
+		WorkspaceID:        "ws-2",
+		Name:               "coordinator-no-skip",
+		Role:               models.AgentRoleCEO,
+		Status:             models.AgentStatusIdle,
+		ExecutorPreference: `{"type":"worktree"}`,
+	}
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if agent.SkipIdleRuns {
+		t.Fatalf("CEO role should default to SkipIdleRuns=false")
+	}
+
+	if err := svc.QueueRun(ctx, agent.ID, shared.RunReasonRoutineDispatch, `{}`, ""); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+
+	service.RunSchedulerTick(svc, ctx)
+
+	entries, err := svc.ListActivity(ctx, "ws-2", 50)
+	if err != nil {
+		t.Fatalf("list activity: %v", err)
+	}
+	for _, e := range entries {
+		if e.Action == "run_idle_skipped" {
+			t.Error("coordinator run must not be idle-skipped when SkipIdleRuns=false")
+		}
+	}
+}
