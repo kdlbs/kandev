@@ -297,7 +297,7 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
             'OBJECT_KEY="pr/${PR_NUMBER}/${SHORT_HEAD_SHA}.html"',
             "aws s3 cp",
             '--content-type "text/html; charset=utf-8"',
-            '--cache-control "public, max-age=300"',
+            '--cache-control "public, max-age=300, no-transform"',
             "aws s3api head-object",
             'test "$content_type" = "text/html; charset=utf-8"',
             'test "$content_length" -gt 0',
