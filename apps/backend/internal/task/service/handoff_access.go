@@ -34,8 +34,14 @@ func (s *HandoffService) canReadForCaller(ctx context.Context, callerID, callerS
 		return false, coordinator.Decision{}, err
 	}
 	target, err := s.tasks.GetTask(ctx, targetID)
-	if err != nil {
-		return false, coordinator.Decision{}, err
+	if err != nil || target == nil {
+		if caller != nil {
+			decision, auditErr := s.coordinatorAuthority.AuditMaterializationDenied(ctx, caller.ID, callerSessionID, targetID, caller.WorkspaceID, "inspect_task_documents", coordinator.CapabilityInspect)
+			if auditErr == nil {
+				return false, decision, nil
+			}
+		}
+		return false, coordinator.Decision{}, nil
 	}
 	decision, err := s.coordinatorAuthority.Authorize(ctx, coordinator.Request{ActorTask: caller, TargetTask: target, ActorSessionID: callerSessionID, Action: "inspect_task_documents", Capability: coordinator.CapabilityInspect})
 	if err != nil {

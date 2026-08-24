@@ -170,6 +170,25 @@ func (a *Authority) auditDenied(ctx context.Context, request Request, principalI
 	return Decision{Basis: BasisDenied, AuditID: event.ID}, nil
 }
 
+// AuditMaterializationDenied records a redacted denied attempt when the caller
+// is known but the target task cannot be materialized. It intentionally leaves
+// PrincipalID empty: no principal may be inferred from an incomplete target.
+func (a *Authority) AuditMaterializationDenied(ctx context.Context, actorTaskID, actorSessionID, targetTaskID, workspaceID, action string, capability Capability) (Decision, error) {
+	if a == nil || a.store == nil || actorTaskID == "" || workspaceID == "" {
+		return Decision{Basis: BasisDenied}, nil
+	}
+	event := &models.CoordinatorAuditEvent{
+		ID: uuid.NewString(), ActorTaskID: actorTaskID, ActorSessionID: actorSessionID,
+		TargetTaskID: targetTaskID, WorkspaceID: workspaceID, Action: action,
+		Capability: string(capability), Decision: "denied", DenyReason: "materialization_failure",
+		Result: "ok", Detail: "materialization_failure",
+	}
+	if err := a.store.CreateCoordinatorAuditEvent(ctx, event); err != nil {
+		return Decision{Basis: BasisDenied}, err
+	}
+	return Decision{Basis: BasisDenied, AuditID: event.ID}, nil
+}
+
 func matchingGrant(grants []*models.CoordinatorGrant, request Request) (*models.CoordinatorGrant, string) {
 	if request.ActorTask.WorkspaceID != request.TargetTask.WorkspaceID {
 		return nil, "cross_workspace"
