@@ -16,25 +16,33 @@ import (
 )
 
 // CreateRun creates a new run queue entry.
+//
+// ContinuationScope is decided here, once, before the row exists to be
+// coalesced into — never at read or write time downstream. A routine
+// wakeup that later coalesces into this run (MarkWakeupRequestCoalesced)
+// only ever patches context_snapshot, so every later reader/writer of
+// this run's continuation summary reads the value persisted here instead
+// of re-deriving it against a snapshot that may have drifted.
 func (r *Repository) CreateRun(ctx context.Context, req *models.Run) error {
 	if req.ID == "" {
 		req.ID = uuid.New().String()
 	}
 	ensureRunDefaults(req)
 	req.RequestedAt = time.Now().UTC()
+	req.ContinuationScope = models.ContinuationScopeForRun(req, req.AgentProfileID)
 
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO runs (
 			id, agent_profile_id, reason, payload, status, coalesced_count,
 			idempotency_key, context_snapshot, capabilities, input_snapshot,
 			output_summary, failure_reason, session_id, retry_count, scheduled_retry_at,
-			requested_at, error_message, cancel_reason
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			requested_at, error_message, cancel_reason, continuation_scope
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), req.ID, req.AgentProfileID, req.Reason, req.Payload, req.Status,
 		req.CoalescedCount, req.IdempotencyKey, req.ContextSnapshot,
 		req.Capabilities, req.InputSnapshot, req.OutputSummary, req.FailureReason,
 		req.SessionID, req.RetryCount, req.ScheduledRetryAt, req.RequestedAt,
-		req.ErrorMessage, req.CancelReason)
+		req.ErrorMessage, req.CancelReason, req.ContinuationScope)
 	return err
 }
 

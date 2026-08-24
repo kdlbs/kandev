@@ -396,21 +396,23 @@ func (si *SchedulerIntegration) assembleAgentPrompt(
 // - the summary table has no row yet (first wake ever for the scope)
 // - the lookup errors out (best-effort, fall back to no-summary)
 //
-// The scope must match summaryScopeForRun's write-time key exactly: a
-// routine-dispatched taskless run carries routine_id in its
-// ContextSnapshot and is written under "routine:<id>"; every other
-// taskless source (comment / agent_error / self) falls back to
-// "agent:<id>". This is the reader half of a routine-triggered wake
-// (wakeup/payloads.go's SourceRoutine) — every scheduled wake flows
-// through a routine today, so the routine:<id> branch is the common case,
-// not a future one.
+// The scope read here is run.ContinuationScope — the same key
+// models.ContinuationScopeForRun computed once, at run-creation time, and
+// that refreshContinuationSummary (event_subscribers.go) later writes
+// under. This deliberately does NOT recompute the scope from run's
+// ContextSnapshot: a routine wakeup that coalesces into this run after
+// claim (MarkWakeupRequestCoalesced) patches only context_snapshot, so a
+// second derivation here — against a run object that may itself predate
+// that patch — could disagree with what the writer used at completion.
+// Reading the persisted field closes that race for every caller instead
+// of relying on ordering between two independent derivations.
 func (si *SchedulerIntegration) loadContinuationSummary(
 	ctx context.Context, run *models.Run, agentID, taskID string,
 ) string {
-	if taskID != "" || agentID == "" {
+	if run == nil || taskID != "" || agentID == "" {
 		return ""
 	}
-	prior, err := si.svc.repo.GetContinuationSummary(ctx, agentID, summaryScopeForRun(run, agentID))
+	prior, err := si.svc.repo.GetContinuationSummary(ctx, agentID, run.ContinuationScope)
 	if err != nil || prior == nil {
 		return ""
 	}

@@ -430,26 +430,27 @@ func (s *Service) handleTasklessAgentCompleted(
 }
 
 // refreshContinuationSummary rebuilds the continuation summary for the
-// given agent and upserts it under a scope keyed off the wakeup that
-// produced the run. Errors are logged at warn — the prior row stays
-// intact (last-good wins) and the run completion proceeds.
+// given agent and upserts it under run.ContinuationScope — the scope key
+// models.ContinuationScopeForRun computed once, at run-creation time, and
+// persisted onto the row (see runs/repository/sqlite.CreateRun). Errors
+// are logged at warn — the prior row stays intact (last-good wins) and
+// the run completion proceeds.
 //
-// Scope rules (office-heartbeat-as-routine):
-//   - run came from a routine wakeup (payload has routine_id) →
-//     "routine:<routine_id>" so each routine bridges its own context.
-//   - any other source (self / user / direct dispatch) →
-//     "agent:<agent_id>" so the agent still has somewhere to land its
-//     summary even when no routine is in play.
-//
-// The legacy "heartbeat" scope is retired alongside the agent-level
-// heartbeat cron — every scheduled wake now flows through a routine.
+// This deliberately reads the persisted field rather than recomputing it:
+// run here comes from resolveLifecycleRun's fresh DB fetch, which can
+// observe a context_snapshot a routine wakeup coalesced into this run
+// after it was claimed (MarkWakeupRequestCoalesced patches only
+// context_snapshot). Recomputing against that drifted snapshot could
+// disagree with the scope the claim-time scheduler used when it read the
+// prior continuation summary into the prompt — the persisted column is
+// the single source of truth both sides read.
 func (s *Service) refreshContinuationSummary(
 	ctx context.Context, run *models.Run, agentID string,
 ) {
 	if s.repo == nil || run == nil || agentID == "" {
 		return
 	}
-	scope := summaryScopeForRun(run, agentID)
+	scope := run.ContinuationScope
 	inputs, err := summaryLoadInputs(ctx, s.repo, run, agentID, scope)
 	if err != nil {
 		s.logger.Warn("continuation-summary load inputs failed",
@@ -475,37 +476,6 @@ func (s *Service) refreshContinuationSummary(
 // — the summary is capped at 8 KB so the absolute number is small.
 func approxTokenCount(s string) int {
 	return (len(s) + 3) / 4
-}
-
-// summaryScopeForRun returns the (agent_profile_id, scope) scope value
-// for the continuation-summary upsert. Reads run.ContextSnapshot for a
-// routine_id (set by the wakeup dispatcher when source="routine") and
-// returns "routine:<id>" when present; falls back to "agent:<id>" so
-// non-routine fires still have a stable upsert key.
-func summaryScopeForRun(run *models.Run, agentID string) string {
-	if run == nil {
-		return "agent:" + agentID
-	}
-	if id := extractRoutineID(run.ContextSnapshot); id != "" {
-		return "routine:" + id
-	}
-	return "agent:" + agentID
-}
-
-// extractRoutineID pulls routine_id out of a JSON snapshot. Returns ""
-// for missing / malformed payloads so the caller falls back to the
-// agent-scoped summary key.
-func extractRoutineID(snapshot string) string {
-	if snapshot == "" {
-		return ""
-	}
-	var p struct {
-		RoutineID string `json:"routine_id"`
-	}
-	if err := json.Unmarshal([]byte(snapshot), &p); err != nil {
-		return ""
-	}
-	return p.RoutineID
 }
 
 // recordRunOutputSummary persists the agent's final message as the run's

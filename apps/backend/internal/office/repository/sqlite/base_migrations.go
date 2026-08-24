@@ -36,6 +36,17 @@ func (r *Repository) runMigrations() {
 	// Provider routing tables and replayable column migrations. Fresh
 	// schemas include the columns inline; ALTERs converge existing databases.
 	r.migrateProviderRouting()
+	r.migrateContinuationScope()
+}
+
+// migrateContinuationScope adds runs.continuation_scope for databases
+// created before WO-16's claim-time scope persistence. Existing rows
+// default to an empty scope (not yet decided) — only newly created runs
+// need the column populated, since a run's continuation scope is only
+// ever read off that same run, never off a historical one.
+func (r *Repository) migrateContinuationScope() {
+	r.migrate.Apply("runs.continuation_scope",
+		`ALTER TABLE runs ADD COLUMN continuation_scope TEXT NOT NULL DEFAULT ''`)
 }
 
 // migrateCostEventContract adds the cache read/write split, turn
