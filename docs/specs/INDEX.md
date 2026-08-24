@@ -35,5 +35,6 @@ The former legacy size exceptions for migrated sources were removed. All canonic
 The following specification was added after this migration and remains in the legacy layout until it moves into an owning system:
 
 - [Task Cost & Token Ledger](task-cost-ledger/spec.md) (draft)
+- [Startup listener before recovery](startup-listener-before-recovery/spec.md) (draft)
 
 ## Authoring rule

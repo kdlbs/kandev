@@ -108,7 +108,10 @@ function subtaskRow(childId: string): HTMLElement {
 
 describe("TaskTitleHoverCard", () => {
   it("AC12: shows the full title in bold (font-semibold) when opened", async () => {
-    renderCard([makeTask({ id: "parent-1" })]);
+    renderCard([
+      makeTask({ id: "parent-1" }),
+      makeTask({ id: "child-1", parentTaskId: "parent-1" }),
+    ]);
     await openCard();
 
     const card = screen.getAllByTestId(HOVER_CARD_TEST_ID)[0];
@@ -243,11 +246,11 @@ describe("TaskTitleHoverCard — GitLab MR subtasks", () => {
 });
 
 describe("TaskTitleHoverCard — subtask cap and dismissal", () => {
-  it("AC15: opens with only the bold title when there are no subtasks", async () => {
+  it("AC15: does not mount a trigger when there are no subtasks", () => {
     renderCard([makeTask({ id: "parent-1" })]);
-    await openCard();
 
-    expect(screen.queryAllByTestId("task-title-hover-subtasks")).toHaveLength(0);
+    expect(screen.queryByTestId("task-title-preview-trigger")).toBeNull();
+    expect(screen.queryByTestId(HOVER_CARD_TEST_ID)).toBeNull();
   });
 
   it("AC17: caps subtask rows at 12 and shows a +N more line", async () => {
@@ -290,7 +293,10 @@ describe("TaskTitleHoverCard — subtask cap and dismissal", () => {
           kanban: {
             workflowId: "wf-1",
             steps: [],
-            tasks: [makeTask({ id: "parent-1" })],
+            tasks: [
+              makeTask({ id: "parent-1" }),
+              makeTask({ id: "child-1", parentTaskId: "parent-1" }),
+            ],
           },
         }}
       >
@@ -325,7 +331,14 @@ describe("TaskTitleHoverCard — keyboard propagation", () => {
     render(
       <StateProvider
         initialState={{
-          kanban: { workflowId: "wf-1", steps: [], tasks: [makeTask({ id: "parent-1" })] },
+          kanban: {
+            workflowId: "wf-1",
+            steps: [],
+            tasks: [
+              makeTask({ id: "parent-1" }),
+              makeTask({ id: "child-1", parentTaskId: "parent-1" }),
+            ],
+          },
         }}
       >
         <div onKeyDown={onParentKeyDown}>

@@ -450,9 +450,8 @@ test.describe("PR status badge", () => {
     ).toBe(true);
 
     await taskRow.focus();
-    // Tab once lands on the row's title-preview trigger (now keyboard-operable,
-    // see task-title-hover-card.tsx), tab again reaches the PR badge.
-    await testPage.keyboard.press("Tab");
+    // The sidebar no longer mounts the task-title preview, so the first tab
+    // after the row reaches the PR badge.
     await testPage.keyboard.press("Tab");
     await expect(icon).toBeFocused();
     const focusedSummary = visibleTaskPRSummary(testPage);

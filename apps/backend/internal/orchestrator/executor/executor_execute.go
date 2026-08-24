@@ -1682,23 +1682,23 @@ func workspaceReuseAllowed(existingEnv *models.TaskEnvironment, requestedExecuto
 	if !required || existingEnv == nil {
 		return required
 	}
-	if existingEnv.ExecutorType == "" {
-		// Older environments did not persist their executor type. They remain
-		// attachable for local/container launchers, but a worktree launch may
-		// attach only when the durable inventory contains a physical worktree.
-		// Inventory-only rows deliberately have no WorktreeID and cannot satisfy
-		// the worktree preparer's attach-only contract.
-		if requestedExecutorType == string(models.ExecutorTypeWorktree) {
-			for _, repo := range existingEnv.Repos {
-				if repo != nil && repo.WorktreeID != "" && repo.DeletedAt == nil && repo.Status != taskEnvironmentRepoStatusFailed && repo.Status != taskEnvironmentRepoStatusDeleted {
-					return true
-				}
-			}
-			return false
+	if existingEnv.ExecutorType != "" && existingEnv.ExecutorType != requestedExecutorType {
+		return false
+	}
+	if requestedExecutorType == string(models.ExecutorTypeWorktree) {
+		return hasLiveWorktreeRepo(existingEnv)
+	}
+	return true
+}
+
+func hasLiveWorktreeRepo(env *models.TaskEnvironment) bool {
+	for _, repo := range env.Repos {
+		if repo == nil || repo.WorktreeID == "" || repo.DeletedAt != nil || repo.Status == taskEnvironmentRepoStatusFailed || repo.Status == taskEnvironmentRepoStatusDeleted {
+			continue
 		}
 		return true
 	}
-	return existingEnv.ExecutorType == requestedExecutorType
+	return false
 }
 
 func mergeEnv(req *LaunchAgentRequest, env map[string]string) {

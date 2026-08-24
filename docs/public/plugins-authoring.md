@@ -174,6 +174,10 @@ curated React, UI, and app-store surface.
   for browser UI and billable operations. Kandev does not enforce
   `webhooks[].method`; public integrations must still validate the provider
   signature and replay/timestamp rules before side effects.
+- An authenticated webhook is reachable from your panel with any method,
+  `GET` included: `host.api.fetch` is same-origin (or carries an accepted
+  `Origin` in a split-origin install), which is what the host checks. You do
+  not need to force a read onto `POST`.
 - capabilities.auth is the highest-risk capability. A webhook response may
   assert a verified external identity with X-Kandev-Auth-Login; only assert an
   email the IdP verified as owned by the subject. See [ADR 0050](../decisions/0050-plugin-external-auth-capability.md).
@@ -1984,6 +1988,25 @@ For plugin-UI operations, declare `access: authenticated`; those routes may
 raise `max_body_bytes` to 16 MiB. Kandev verifies the current user but strips
 its session cookie and PAT before relaying the remaining headers.
 
+On an instance with authentication enabled, a caller identified by the session
+cookie must additionally look same-origin, because that cookie is ambient and a
+page on another site could otherwise make the browser send it. The host accepts
+the request in exactly two cases:
+
+- it carries an accepted `Origin`; or
+- it carries no `Origin` and `Sec-Fetch-Site` is `same-origin` or `none`.
+
+Everything else is rejected, including `Sec-Fetch-Site` of `cross-site` or
+`same-site` and a request carrying neither header. Browsers omit `Origin` on
+same-origin `GET` and `HEAD` requests, so the second rule is what lets a panel
+poll its own webhook with `GET`. In practice `host.api.fetch` from an active
+`ui.bundle` satisfies it with no work on your part, whatever method you use.
+
+Callers identified by a PAT are not subject to this check at all, because a PAT
+is not ambient. That is the supported way to call an authenticated webhook from
+outside a browser (a script, a CLI, your own backend); a replayed session cookie
+carries no origin signal and is refused.
+
 ```yaml
 webhooks:
   - key: "provider-events"
@@ -2192,9 +2215,13 @@ repackaging.
 - **Trusting webhook metadata:** `webhooks[].method` is informational. Public
   routes are not authenticated by Kandev, so validate method, signature, timestamp, replay
   protection, and body before side effects.
-- **Authenticated webhook access:** a valid Kandev session or PAT is all the
-  host checks. Any signed-in user reaches an authenticated webhook, so enforce
-  your own per-user or per-role rules when the endpoint needs them.
+- **Authenticated webhook access:** a valid Kandev session or PAT, plus a
+  same-origin request for the session case, is all the host checks. Any
+  signed-in user reaches an authenticated webhook, so enforce your own
+  per-user or per-role rules when the endpoint needs them. It is not an
+  authorization boundary, and it is not a CSRF boundary for your own state
+  either: the host proves the request came from its own origin, not that the
+  user meant to trigger whatever your handler does.
 - **Bundling React:** use host.React, host.jsx, and host.ui; a second React or
   Radix copy breaks shared contexts and portals.
 - **Shipping the wrong binary name:** every declared executable must be under

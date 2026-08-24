@@ -28,8 +28,8 @@ import { classifyTask } from "./task-classify";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import { useTranslation } from "react-i18next";
 import { TaskTitleHoverCard } from "@/components/task/task-title-hover-card";
-import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
 import { TaskItemComparisonUnavailable } from "./task-item-comparison-unavailable";
+import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
 import { TaskItemLeadingBadges } from "./task-item-leading-badges";
 import {
   resolveTaskRowPresentation,

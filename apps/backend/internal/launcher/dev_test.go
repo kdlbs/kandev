@@ -28,6 +28,7 @@ func TestRunDevLaunchesBackendThenWebAndOpensBrowser(t *testing.T) {
 	oldAttachSignals := attachSignalsFn
 	oldLaunchBackend := launchBackendFn
 	oldWaitForHealth := waitForHealthFn
+	oldWaitForReady := waitForReadyFn
 	oldWaitForURL := waitForURLFn
 	oldOpenBrowser := openBrowserFn
 	oldStartProcess := startProcessFn
@@ -36,6 +37,7 @@ func TestRunDevLaunchesBackendThenWebAndOpensBrowser(t *testing.T) {
 		attachSignalsFn = oldAttachSignals
 		launchBackendFn = oldLaunchBackend
 		waitForHealthFn = oldWaitForHealth
+		waitForReadyFn = oldWaitForReady
 		waitForURLFn = oldWaitForURL
 		openBrowserFn = oldOpenBrowser
 		startProcessFn = oldStartProcess
@@ -66,6 +68,10 @@ func TestRunDevLaunchesBackendThenWebAndOpensBrowser(t *testing.T) {
 		readyURL = "http://127.0.0.2:" + itoa(backendCfg.Ports.BackendPort)
 		return readyURL, nil
 	}
+	waitForReadyFn = func(_ context.Context, url string, _ childState) error {
+		events = append(events, "wait-ready:"+url)
+		return nil
+	}
 	waitForURLFn = func(_ context.Context, url string, _ childState, _ time.Duration) error {
 		events = append(events, "wait-url:"+url)
 		return nil
@@ -92,6 +98,7 @@ func TestRunDevLaunchesBackendThenWebAndOpensBrowser(t *testing.T) {
 		"attach-signals",
 		"launch-backend",
 		"wait-health:http://localhost:" + itoa(backendCfg.Ports.BackendPort),
+		"wait-ready:" + readyURL,
 		"start-web:web",
 		"wait-url:http://localhost:" + itoa(backendCfg.Ports.WebPort),
 		"open:" + readyURL,
@@ -166,6 +173,7 @@ func TestRunDevUsesConfiguredHealthTimeoutForBackendAndWeb(t *testing.T) {
 	oldAttachSignals := attachSignalsFn
 	oldLaunchBackend := launchBackendFn
 	oldWaitForHealth := waitForHealthFn
+	oldWaitForReady := waitForReadyFn
 	oldWaitForURL := waitForURLFn
 	oldOpenBrowser := openBrowserFn
 	oldStartProcess := startProcessFn
@@ -174,6 +182,7 @@ func TestRunDevUsesConfiguredHealthTimeoutForBackendAndWeb(t *testing.T) {
 		attachSignalsFn = oldAttachSignals
 		launchBackendFn = oldLaunchBackend
 		waitForHealthFn = oldWaitForHealth
+		waitForReadyFn = oldWaitForReady
 		waitForURLFn = oldWaitForURL
 		openBrowserFn = oldOpenBrowser
 		startProcessFn = oldStartProcess
@@ -190,6 +199,9 @@ func TestRunDevUsesConfiguredHealthTimeoutForBackendAndWeb(t *testing.T) {
 	waitForHealthFn = func(_ context.Context, _ backendEndpointSet, _ childState, timeout time.Duration, _ string, _ func()) (string, error) {
 		backendTimeout = timeout
 		return "", nil
+	}
+	waitForReadyFn = func(_ context.Context, _ string, _ childState) error {
+		return nil
 	}
 	waitForURLFn = func(_ context.Context, _ string, _ childState, timeout time.Duration) error {
 		webTimeout = timeout
@@ -218,6 +230,7 @@ func TestRunDevHeadlessSkipsBrowser(t *testing.T) {
 
 	oldLaunchBackend := launchBackendFn
 	oldWaitForHealth := waitForHealthFn
+	oldWaitForReady := waitForReadyFn
 	oldWaitForURL := waitForURLFn
 	oldOpenBrowser := openBrowserFn
 	oldStartProcess := startProcessFn
@@ -225,6 +238,7 @@ func TestRunDevHeadlessSkipsBrowser(t *testing.T) {
 	t.Cleanup(func() {
 		launchBackendFn = oldLaunchBackend
 		waitForHealthFn = oldWaitForHealth
+		waitForReadyFn = oldWaitForReady
 		waitForURLFn = oldWaitForURL
 		openBrowserFn = oldOpenBrowser
 		startProcessFn = oldStartProcess
@@ -240,6 +254,9 @@ func TestRunDevHeadlessSkipsBrowser(t *testing.T) {
 	}
 	waitForHealthFn = func(_ context.Context, _ backendEndpointSet, _ childState, _ time.Duration, _ string, _ func()) (string, error) {
 		return "", nil
+	}
+	waitForReadyFn = func(_ context.Context, _ string, _ childState) error {
+		return nil
 	}
 	waitForURLFn = func(_ context.Context, _ string, _ childState, _ time.Duration) error {
 		return nil
@@ -345,6 +362,71 @@ func TestRunDevShutsDownTreeOnBackendHealthFailure(t *testing.T) {
 	}
 }
 
+// TestRunDevShutsDownTreeOnBackendReadinessFailure is the R2-1 regression
+// test for dev mode: it must not launch the web child or open the browser
+// onto a backend that answered /health but never became ready.
+func TestRunDevShutsDownTreeOnBackendReadinessFailure(t *testing.T) {
+	repo := makeRepoTree(t)
+	t.Chdir(repo)
+	t.Setenv("KANDEV_TASK_ID", "")
+	t.Setenv("KANDEV_DATABASE_PATH", "")
+	t.Setenv("KANDEV_HOME_DIR", "")
+
+	oldLaunchBackend := launchBackendFn
+	oldWaitForHealth := waitForHealthFn
+	oldWaitForReady := waitForReadyFn
+	oldWaitForURL := waitForURLFn
+	oldOpenBrowser := openBrowserFn
+	oldStartProcess := startProcessFn
+	oldAttachSignals := attachSignalsFn
+	oldStatusOutput := launcherStatusOutput
+	t.Cleanup(func() {
+		launchBackendFn = oldLaunchBackend
+		waitForHealthFn = oldWaitForHealth
+		waitForReadyFn = oldWaitForReady
+		waitForURLFn = oldWaitForURL
+		openBrowserFn = oldOpenBrowser
+		startProcessFn = oldStartProcess
+		attachSignalsFn = oldAttachSignals
+		launcherStatusOutput = oldStatusOutput
+	})
+
+	var output strings.Builder
+	launcherStatusOutput = &output
+
+	browserOpened := false
+	attachSignalsFn = func(_ *processSupervisor) {}
+	launchBackendFn = func(_ backendLaunchConfig) (*restartableBackend, func(), error) {
+		return &restartableBackend{exitCh: make(chan int, 1)}, func() {}, nil
+	}
+	waitForHealthFn = func(_ context.Context, _ backendEndpointSet, _ childState, _ time.Duration, _ string, _ func()) (string, error) {
+		return "", nil
+	}
+	waitForReadyFn = func(_ context.Context, _ string, _ childState) error {
+		return errTestHealth
+	}
+	waitForURLFn = func(_ context.Context, _ string, _ childState, _ time.Duration) error {
+		t.Fatal("waitForURL called after backend readiness failure")
+		return nil
+	}
+	openBrowserFn = func(_ string) { browserOpened = true }
+	startProcessFn = func(_ string, _ []string, _ string, _ []string, _ bool, _ string, _ *processSupervisor) (*managedProcess, func(), error) {
+		t.Fatal("web child launched after backend readiness failure")
+		return nil, nil, nil
+	}
+
+	code := runDev(context.Background(), Options{Command: CommandDev})
+	if code != 1 {
+		t.Fatalf("runDev() = %d, want 1", code)
+	}
+	if !strings.Contains(output.String(), "graceful shutdown started") {
+		t.Fatalf("supervisor shutdown not triggered on readiness failure:\n%s", output.String())
+	}
+	if browserOpened {
+		t.Fatal("browser opened despite readiness failure")
+	}
+}
+
 func TestRunDevShutsDownTreeWhenWebChildExits(t *testing.T) {
 	repo := makeRepoTree(t)
 	t.Chdir(repo)
@@ -354,6 +436,7 @@ func TestRunDevShutsDownTreeWhenWebChildExits(t *testing.T) {
 
 	oldLaunchBackend := launchBackendFn
 	oldWaitForHealth := waitForHealthFn
+	oldWaitForReady := waitForReadyFn
 	oldWaitForURL := waitForURLFn
 	oldOpenBrowser := openBrowserFn
 	oldStartProcess := startProcessFn
@@ -362,6 +445,7 @@ func TestRunDevShutsDownTreeWhenWebChildExits(t *testing.T) {
 	t.Cleanup(func() {
 		launchBackendFn = oldLaunchBackend
 		waitForHealthFn = oldWaitForHealth
+		waitForReadyFn = oldWaitForReady
 		waitForURLFn = oldWaitForURL
 		openBrowserFn = oldOpenBrowser
 		startProcessFn = oldStartProcess
@@ -380,6 +464,9 @@ func TestRunDevShutsDownTreeWhenWebChildExits(t *testing.T) {
 	}
 	waitForHealthFn = func(_ context.Context, _ backendEndpointSet, _ childState, _ time.Duration, _ string, _ func()) (string, error) {
 		return "", nil
+	}
+	waitForReadyFn = func(_ context.Context, _ string, _ childState) error {
+		return nil
 	}
 	waitForURLFn = func(_ context.Context, _ string, _ childState, _ time.Duration) error {
 		return nil

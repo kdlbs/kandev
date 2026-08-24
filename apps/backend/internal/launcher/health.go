@@ -350,6 +350,57 @@ func safeProbeError(err error) string {
 	return "network error"
 }
 
+// waitForReady polls GET /ready until the backend reports readiness or the
+// process exits. Unlike waitForHealth, it has no timeout of its own and never
+// triggers a kill: /health (and its healthTimeoutReleaseMS/healthTimeoutDevMS
+// budget) already made the keep-or-kill decision by the time this runs. This
+// only decides when the bootstrap handler has handed off to the real router,
+// so the launcher can print "backend ready"/open a browser onto real content
+// instead of the bootstrap stub's 503 while startup recovery is still
+// in flight. Do not fold this into waitForHealth's timeout — that would
+// recreate the crash loop docs/specs/startup-listener-before-recovery/spec.md
+// exists to fix.
+func waitForReady(ctx context.Context, baseURL string, proc childState) error {
+	readyURL := baseURL + "/ready"
+	for ctx.Err() == nil {
+		if exited, code := proc.Exited(); exited {
+			return fmt.Errorf("backend exited (code %d) before it reported ready", code)
+		}
+		if probeReady(ctx, readyURL) {
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("backend readiness wait canceled at %s: %w", readyURL, err)
+			}
+			if exited, code := proc.Exited(); exited {
+				return fmt.Errorf("backend exited (code %d) before it reported ready", code)
+			}
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+		case <-time.After(healthPollInterval):
+		}
+	}
+	return fmt.Errorf("backend readiness wait canceled at %s: %w", readyURL, ctx.Err())
+}
+
+// probeReady reports whether a single readiness request returned 2xx. Unlike
+// probeHealth, it does not check the desktop health token: readyHandler never
+// sets X-Kandev-Desktop-Health-Token (that header is /health-only, see
+// docs/specs/health-endpoint-version/spec.md AC-21).
+func probeReady(ctx context.Context, readyURL string) bool {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, readyURL, nil)
+	if err != nil {
+		return false
+	}
+	resp, err := healthProbeClient.Do(req)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return resp.StatusCode >= 200 && resp.StatusCode < 300
+}
+
 func healthPort(baseURL string) string {
 	parsed, err := url.Parse(baseURL)
 	if err == nil && parsed.Port() != "" {

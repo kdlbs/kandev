@@ -71,6 +71,11 @@ func runDev(ctx context.Context, opts Options) int {
 	if readyURL != "" {
 		cfg.ports.BackendURL = readyURL
 	}
+	if err := waitForReadyFn(ctx, cfg.ports.BackendURL, backend); err != nil {
+		supervisor.shutdown("backend readiness failure")
+		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+		return 1
+	}
 	fmt.Printf("[kandev] backend ready at %s\n", cfg.ports.BackendURL)
 
 	webURL := fmt.Sprintf("http://localhost:%d", cfg.ports.WebPort)
