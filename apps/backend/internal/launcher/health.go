@@ -176,7 +176,7 @@ func waitForHealth(ctx context.Context, endpoints backendEndpointSet, proc child
 			latest[observation.URL] = observation
 		}
 		if healthyURL != "" {
-			return accessURLForHealthTarget(healthyURL), nil
+			return endpoints.browserURLForHealthTarget(healthyURL), nil
 		}
 		if exited, code := proc.Exited(); exited {
 			err := &backendHealthError{
@@ -223,33 +223,48 @@ func finishHealthFailure(err *backendHealthError, onFailure func()) error {
 	return err
 }
 
+type healthProbeResult struct {
+	index       int
+	observation healthObservation
+}
+
 func probeHealthTargets(ctx context.Context, targets []string, expectedToken string) ([]healthObservation, string) {
 	probeCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	results := make(chan healthObservation, len(targets))
-	for _, target := range targets {
-		go func(target string) {
-			results <- probeHealth(probeCtx, target, expectedToken)
-		}(target)
+	results := make(chan healthProbeResult, len(targets))
+	for index, target := range targets {
+		go func(index int, target string) {
+			results <- healthProbeResult{index: index, observation: probeHealth(probeCtx, target, expectedToken)}
+		}(index, target)
 	}
 
 	observations := make(map[string]healthObservation, len(targets))
+	received := make([]bool, len(targets))
 	for completed := 0; completed < len(targets); completed++ {
 		select {
 		case <-ctx.Done():
 			return observationValues(observations), ""
-		case observation := <-results:
-			observations[observation.URL] = observation
-			if observation.Outcome == healthOutcomeHealthy {
-				return observationValues(observations), observation.URL
+		case result := <-results:
+			received[result.index] = true
+			observations[result.observation.URL] = result.observation
+			if healthyURL := preferredHealthyTarget(targets, observations, received); healthyURL != "" {
+				return observationValues(observations), healthyURL
 			}
 		}
 	}
 	return observationValues(observations), ""
 }
 
-func accessURLForHealthTarget(target string) string {
-	return strings.TrimSuffix(target, "/health")
+func preferredHealthyTarget(targets []string, observations map[string]healthObservation, received []bool) string {
+	for index, target := range targets {
+		if !received[index] {
+			return ""
+		}
+		if observations[target].Outcome == healthOutcomeHealthy {
+			return target
+		}
+	}
+	return ""
 }
 
 func observationValues(observations map[string]healthObservation) []healthObservation {

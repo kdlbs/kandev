@@ -45,8 +45,10 @@ understand the launcher's readiness implementation.
   owned backend, a failed or unavailable sibling address shall not block
   startup.
 - **AC-LAUNCHER-STARTUP-001.5:** When the launcher prints or opens an access
-  URL, that URL shall use a reachable effective bind. The launcher shall prefer
-  loopback and shall map a wildcard bind to loopback.
+  URL, that URL shall use a reachable effective bind and shall prefer loopback.
+  For an IPv4 wildcard, readiness shall use `127.0.0.1` while the default
+  browser URL shall remain `http://localhost:<port>` to preserve the established
+  browser origin. An IPv6 wildcard shall use `[::1]` for readiness and access.
 - **AC-LAUNCHER-STARTUP-001.6:** The `dev`, `start`, and `run` modes shall use
   the same bind and readiness rules.
 

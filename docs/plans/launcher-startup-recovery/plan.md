@@ -44,8 +44,10 @@ guides after the runtime behavior is stable.
 
 Add a launcher-owned endpoint resolver beside `network.go`. It consumes
 `ServerConfig.ResolvedBinds()` and the selected backend port. It returns an
-ordered target set and reachable access URL. Change `waitForHealth` to probe
-all targets and accept the first response with the launch token. Thread the
+ordered probe-target set, a corresponding browser-URL set, and the preferred
+access URL. An IPv4 wildcard is probed through `127.0.0.1` while its default
+browser URL remains `localhost`. Change `waitForHealth` to probe all targets
+concurrently while selecting the highest-priority healthy target. Thread the
 endpoint set through `runManagedApp` and `runDev` without changing port
 selection.
 
@@ -69,7 +71,8 @@ trusted range must contain controlled proxies, not browser clients.
 - `internal/launcher/network_test.go` covers IPv4, IPv6, wildcard, loopback,
   specific-address, multi-bind, and access-URL resolution.
 - `internal/launcher/health_test.go` covers concurrent multi-target success,
-  target observations, token mismatch, child exit, cancellation, and timeout.
+  target-priority selection, target observations, token mismatch, child exit,
+  cancellation, and timeout.
 - `internal/launcher/start_test.go` and `dev_test.go` cover shared endpoint
   wiring and failure presentation.
 - Public documentation validation covers links, frontmatter, and navigation.

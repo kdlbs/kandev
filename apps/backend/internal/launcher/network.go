@@ -18,6 +18,7 @@ var (
 type backendEndpointSet struct {
 	bindHosts     []string
 	healthTargets []string
+	accessURLs    []string
 	accessURL     string
 }
 
@@ -31,33 +32,48 @@ func resolveBackendEndpoints(cfg *config.Config, port int) (backendEndpointSet, 
 		return backendEndpointSet{}, err
 	}
 
-	loopback := make([]string, 0, len(binds))
-	nonLoopback := make([]string, 0, len(binds))
+	loopbackTargets := make([]string, 0, len(binds))
+	loopbackAccessURLs := make([]string, 0, len(binds))
+	nonLoopbackTargets := make([]string, 0, len(binds))
+	nonLoopbackAccessURLs := make([]string, 0, len(binds))
 	seen := make(map[string]struct{}, len(binds))
 	for _, bind := range binds {
 		host := endpointHost(bind)
-		accessURL := backendURLForHost(host, port)
-		target := accessURL + "/health"
-		if _, ok := seen[target]; ok {
+		healthURL := backendURLForHost(host, port) + "/health"
+		accessURL := backendURLForHost(browserEndpointHost(bind, host), port)
+		if _, ok := seen[healthURL]; ok {
 			continue
 		}
-		seen[target] = struct{}{}
+		seen[healthURL] = struct{}{}
 		if config.IsLoopbackHost(host) {
-			loopback = append(loopback, target)
+			loopbackTargets = append(loopbackTargets, healthURL)
+			loopbackAccessURLs = append(loopbackAccessURLs, accessURL)
 			continue
 		}
-		nonLoopback = append(nonLoopback, target)
+		nonLoopbackTargets = append(nonLoopbackTargets, healthURL)
+		nonLoopbackAccessURLs = append(nonLoopbackAccessURLs, accessURL)
 	}
-	healthTargets := loopback
-	healthTargets = append(healthTargets, nonLoopback...)
+	healthTargets := append([]string(nil), loopbackTargets...)
+	healthTargets = append(healthTargets, nonLoopbackTargets...)
+	accessURLs := append([]string(nil), loopbackAccessURLs...)
+	accessURLs = append(accessURLs, nonLoopbackAccessURLs...)
 	if len(healthTargets) == 0 {
 		return backendEndpointSet{}, fmt.Errorf("server bind configuration produced no health targets")
 	}
 	return backendEndpointSet{
 		bindHosts:     append([]string(nil), binds...),
 		healthTargets: healthTargets,
-		accessURL:     strings.TrimSuffix(healthTargets[0], "/health"),
+		accessURLs:    accessURLs,
+		accessURL:     accessURLs[0],
 	}, nil
+}
+
+func browserEndpointHost(bind, probeHost string) string {
+	ip := net.ParseIP(strings.TrimSuffix(strings.TrimSpace(bind), "."))
+	if ip != nil && ip.IsUnspecified() && ip.To4() != nil {
+		return "localhost"
+	}
+	return probeHost
 }
 
 func endpointHost(bind string) string {
@@ -83,8 +99,22 @@ func endpointSetForAccessURL(accessURL string) backendEndpointSet {
 	return backendEndpointSet{
 		bindHosts:     []string{"localhost"},
 		healthTargets: []string{accessURL + "/health"},
+		accessURLs:    []string{accessURL},
 		accessURL:     accessURL,
 	}
+}
+
+func (e backendEndpointSet) browserURLForHealthTarget(target string) string {
+	for index, healthTarget := range e.healthTargets {
+		if healthTarget != target {
+			continue
+		}
+		if index < len(e.accessURLs) && e.accessURLs[index] != "" {
+			return e.accessURLs[index]
+		}
+		break
+	}
+	return strings.TrimSuffix(target, "/health")
 }
 
 func listHostNetworkAddresses() []string {

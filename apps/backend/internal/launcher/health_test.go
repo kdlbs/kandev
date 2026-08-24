@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -85,18 +86,11 @@ func TestWaitForHealthReturnsNilOnHealthyResponse(t *testing.T) {
 	}
 }
 
-func TestWaitForHealthAcceptsHealthySiblingWithoutWaitingForUnreachableTarget(t *testing.T) {
-	release := make(chan struct{})
-	hanging := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		select {
-		case <-release:
-		case <-r.Context().Done():
-		}
+func TestWaitForHealthAcceptsHealthySiblingAfterHigherPriorityFailure(t *testing.T) {
+	higherPriority := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
-	t.Cleanup(func() {
-		close(release)
-		hanging.Close()
-	})
+	t.Cleanup(higherPriority.Close)
 	healthy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("X-Kandev-Desktop-Health-Token", "expected")
 		w.WriteHeader(http.StatusOK)
@@ -107,7 +101,7 @@ func TestWaitForHealthAcceptsHealthySiblingWithoutWaitingForUnreachableTarget(t 
 	readyURL, err := waitForHealth(context.Background(), backendEndpointSet{
 		accessURL: healthy.URL,
 		healthTargets: []string{
-			hanging.URL + "/health",
+			higherPriority.URL + "/health",
 			healthy.URL + "/health",
 		},
 	}, fakeChild{}, 2*time.Second, "expected", nil)
@@ -119,6 +113,87 @@ func TestWaitForHealthAcceptsHealthySiblingWithoutWaitingForUnreachableTarget(t 
 	}
 	if elapsed := time.Since(started); elapsed >= healthProbeTimeout {
 		t.Fatalf("waitForHealth() took %s, want healthy sibling to win before probe timeout", elapsed)
+	}
+}
+
+func TestWaitForHealthPreservesWildcardBrowserOrigin(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Kandev-Desktop-Health-Token", "expected")
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	browserURL := strings.Replace(srv.URL, "127.0.0.1", "localhost", 1)
+
+	readyURL, err := waitForHealth(context.Background(), backendEndpointSet{
+		healthTargets: []string{srv.URL + "/health"},
+		accessURLs:    []string{browserURL},
+		accessURL:     browserURL,
+	}, fakeChild{}, time.Second, "expected", nil)
+	if err != nil {
+		t.Fatalf("waitForHealth() = %v, want wildcard readiness", err)
+	}
+	if readyURL != browserURL {
+		t.Fatalf("ready URL = %q, want preserved browser origin %q", readyURL, browserURL)
+	}
+}
+
+func TestWaitForHealthPrefersHigherPriorityTargetWhenLowerRespondsFirst(t *testing.T) {
+	loopbackStarted := make(chan struct{})
+	lanResponded := make(chan struct{})
+	releaseLoopback := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseLoopback) }) }
+	t.Cleanup(release)
+
+	loopback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(loopbackStarted)
+		select {
+		case <-releaseLoopback:
+		case <-r.Context().Done():
+			return
+		}
+		w.Header().Set("X-Kandev-Desktop-Health-Token", "expected")
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(loopback.Close)
+	lan := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		close(lanResponded)
+		w.Header().Set("X-Kandev-Desktop-Health-Token", "expected")
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(lan.Close)
+
+	type result struct {
+		url string
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		url, err := waitForHealth(context.Background(), backendEndpointSet{
+			accessURL: loopback.URL,
+			healthTargets: []string{
+				loopback.URL + "/health",
+				lan.URL + "/health",
+			},
+		}, fakeChild{}, time.Second, "expected", nil)
+		done <- result{url: url, err: err}
+	}()
+
+	<-loopbackStarted
+	<-lanResponded
+	select {
+	case got := <-done:
+		t.Fatalf("waitForHealth returned %q before higher-priority target responded (err=%v)", got.url, got.err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	release()
+
+	got := <-done
+	if got.err != nil {
+		t.Fatalf("waitForHealth() error = %v, want loopback readiness", got.err)
+	}
+	if got.url != loopback.URL {
+		t.Fatalf("ready URL = %q, want higher-priority loopback %q", got.url, loopback.URL)
 	}
 }
 

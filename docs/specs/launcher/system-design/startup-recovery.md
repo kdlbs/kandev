@@ -47,18 +47,23 @@ The launcher creates one immutable endpoint set for each launch:
 ```text
 backendEndpointSet
   bindHosts     effective values from ResolvedBinds
-  healthTargets ordered local HTTP URLs
-  accessURL     reachable URL for output and browser opening
+  healthTargets ordered local HTTP probe URLs
+  accessURLs    browser URLs corresponding to each health target
+  accessURL     preferred URL for output and browser opening
 ```
 
 The resolver applies these rules:
 
-1. Map `0.0.0.0` to `127.0.0.1` for a health target and access URL.
-2. Map `::` to `::1` and format it with brackets.
+1. Map `0.0.0.0` to `127.0.0.1` for the health target and retain `localhost`
+   as the default browser/access URL.
+2. Map `::` to `::1` and format it with brackets for both probing and access.
 3. Keep a specific IP or hostname as a target.
 4. Put loopback targets before non-loopback targets.
 5. Remove duplicate URLs after wildcard mapping and hostname normalization.
-6. Select the first ordered target as the access URL.
+6. Probe every target concurrently, but select a healthy target in priority
+   order. A lower-priority success cannot win until every higher-priority
+   target has completed without the launch token.
+7. Use the access URL corresponding to the selected health target.
 
 The endpoint set is separate from `portConfig`. Port selection remains a port
 concern. Bind resolution remains a configuration concern.
@@ -88,6 +93,9 @@ For each polling interval, the launcher probes all unresolved targets with the
 shared deadline and the existing per-request timeout. Probes in one interval
 run concurrently so an unreachable address cannot delay a healthy sibling.
 The interval completes when all probes return or their request contexts end.
+Selection still follows target priority: a LAN response that arrives before a
+loopback response is held until the loopback probe completes, so a healthy
+loopback target remains preferred.
 
 A `2xx` response with the matching token makes the backend ready. Other target
 results update their observations. A child exit ends polling immediately. The
@@ -107,6 +115,8 @@ summary with these fields:
 - effective bind addresses and value source
 - each health target and its last observation
 - selected configuration-file path, or `defaults and environment`
+- effective source for `server.host`, including `KANDEV_SERVER_HOST` when an
+  environment override wins over the selected file
 - expected backend-log path
 - one next action plus the public troubleshooting URL.
 

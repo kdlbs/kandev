@@ -18,7 +18,7 @@ func formatStartupFailure(err error, endpoints backendEndpointSet, cfg *config.C
 	writeStartupFailureHeading(&output, class, healthErr)
 	writeStartupFailureState(&output, healthErr, backendStopped)
 	writeStartupFailureEndpoints(&output, endpoints, observations)
-	fmt.Fprintf(&output, "[kandev] configuration source: %s\n", startupConfigSource(cfg))
+	writeStartupConfiguration(&output, cfg)
 	if backendLogPath == "" {
 		backendLogPath = backendLogPathForConfig(cfg)
 	}
@@ -93,11 +93,31 @@ func writeStartupTarget(output *strings.Builder, target string, observations map
 	fmt.Fprintf(output, "[kandev]   %s: %s%s\n", target, observation.Outcome, detail)
 }
 
-func startupConfigSource(cfg *config.Config) string {
+func writeStartupConfiguration(output *strings.Builder, cfg *config.Config) {
+	file := "none (defaults and environment)"
 	if cfg != nil && strings.TrimSpace(cfg.Source.FilePath) != "" {
-		return cfg.Source.FilePath
+		file = cfg.Source.FilePath
 	}
-	return "defaults and environment"
+	fmt.Fprintf(output, "[kandev] configuration file: %s\n", file)
+	fmt.Fprintf(output, "[kandev] server.host source: %s\n", startupServerHostSource(cfg))
+}
+
+func startupServerHostSource(cfg *config.Config) string {
+	if cfg == nil {
+		return "built-in default (0.0.0.0)"
+	}
+	switch cfg.SourceFor("server.host") {
+	case config.SourceEnvironment:
+		return "environment (KANDEV_SERVER_HOST)"
+	case config.SourceConfiguration:
+		return "configuration file"
+	case config.SourceProfile:
+		return "profile defaults"
+	case config.SourceDefault:
+		return "built-in default (0.0.0.0)"
+	default:
+		return string(cfg.SourceFor("server.host"))
+	}
 }
 
 func startupFailureLabel(class healthFailureClass) string {

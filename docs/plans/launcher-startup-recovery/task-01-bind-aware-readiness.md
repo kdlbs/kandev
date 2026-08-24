@@ -29,8 +29,10 @@ without a loopback listener.
 ## In scope
 
 - Add the immutable backend endpoint set and resolver.
-- Map IPv4 and IPv6 wildcard binds to their loopback families.
-- Probe multiple targets without serial delay from an unreachable sibling.
+- Map IPv4 and IPv6 wildcard binds to their loopback families while preserving
+  the default `localhost` browser origin for IPv4.
+- Probe multiple targets concurrently while preserving loopback-first target
+  priority.
 - Use the resolved access URL in `dev`, `start`, and `run` output and browser
   opening.
 
@@ -84,10 +86,12 @@ None.
 ## Results
 
 Implemented the endpoint set used by `dev`, `start`, and `run`. It derives
-health targets and the access URL from `ResolvedBinds()`, maps wildcard binds
-to the matching loopback family, prefers loopback access, deduplicates targets,
-and probes targets concurrently so an unavailable sibling does not block a
-healthy target. The launcher preserves the existing health-token ownership
+separate health targets and browser URLs from `ResolvedBinds()`, probes IPv4
+wildcards through `127.0.0.1` while preserving the default `localhost` browser
+origin, maps IPv6 wildcards to `[::1]`, prefers loopback access, deduplicates
+targets, and probes concurrently while retaining target priority. A lower-
+priority success waits for higher-priority probes to complete without the
+launch token. The launcher preserves the existing health-token ownership
 contract.
 
 Verification passed:

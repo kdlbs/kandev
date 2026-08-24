@@ -156,7 +156,7 @@ func TestResolveBackendEndpointsMapsBindsAndPrefersLoopback(t *testing.T) {
 			server:     config.ServerConfig{Host: "0.0.0.0"},
 			wantBinds:  []string{"0.0.0.0"},
 			wantURLs:   []string{"http://127.0.0.1:38429/health"},
-			wantAccess: "http://127.0.0.1:38429",
+			wantAccess: "http://localhost:38429",
 		},
 		{
 			name:       "ipv6 wildcard",
@@ -199,6 +199,19 @@ func TestResolveBackendEndpointsMapsBindsAndPrefersLoopback(t *testing.T) {
 				t.Fatalf("access URL = %q, want %q", got.accessURL, test.wantAccess)
 			}
 		})
+	}
+}
+
+func TestResolveBackendEndpointsPreservesDefaultBrowserOrigin(t *testing.T) {
+	got, err := resolveBackendEndpoints(&config.Config{}, 38429)
+	if err != nil {
+		t.Fatalf("resolveBackendEndpoints() error = %v", err)
+	}
+	if got.healthTargets[0] != "http://127.0.0.1:38429/health" {
+		t.Fatalf("default health target = %q, want loopback probe", got.healthTargets[0])
+	}
+	if got.accessURL != "http://localhost:38429" {
+		t.Fatalf("default browser URL = %q, want localhost origin", got.accessURL)
 	}
 }
 
