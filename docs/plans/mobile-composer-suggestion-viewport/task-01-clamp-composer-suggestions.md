@@ -133,5 +133,7 @@ Then mark this work order done and update the plan checkbox and results.
 - `pnpm run typecheck` passed.
 - Final full web lint passed with zero warnings after splitting the test groups
   to satisfy the callback line limit.
+- PR review remediation qualified the legacy entity-reference anchoring text to
+  cover the below-viewport clamp; specification lint passed afterward.
 - Managed browser runs removed their artifacts and task-owned instances during
   teardown. No blocker or known remaining risk remains in the work-order scope.

@@ -130,6 +130,9 @@ cd apps && pnpm --filter @kandev/web lint
 - Full web lint initially reported the popup test callback over its line limit.
   Splitting geometry and viewport-update groups resolved it; the final full web
   lint passed with zero warnings.
+- PR review remediation qualified the legacy entity-reference anchoring text so
+  it matches the authoritative off-screen-anchor clamp. Specification lint
+  passed afterward.
 
 ## Implementation wave
 
