@@ -3,6 +3,7 @@ package process
 import (
 	"context"
 	"errors"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -108,15 +109,26 @@ func TestProcessRunnerStopLogsSignalAttempts(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Ignore the graceful interrupt so the process stays alive through
-	// stopProcess's graceful window; otherwise a fast SIGINT exit can close
-	// proc.done and race the pre-cancelled context in the select, making the
-	// SIGKILL-escalation log this test asserts nondeterministic (flaky on CI).
+	// The runner wraps Command in `sh -lc` (see shellExecArgs), so the direct
+	// child of stopProcess's SIGINT is the shell, not the fixture binary — a
+	// login shell forks the fixture rather than exec'ing it. Ignoring SIGINT
+	// only in the fixture (sleep-ignore-signals) protects the grandchild but
+	// leaves the shell free to die on SIGINT, which closes proc.done and
+	// races the pre-cancelled context in stopProcess's select, making the
+	// SIGKILL-escalation log this test asserts nondeterministic (flaky on
+	// CI). Trap SIGINT in the shell itself and exec the fixture so neither
+	// process can exit during the graceful window; an ignored disposition
+	// survives exec, so the fixture's own signal.Ignore stays redundant-safe
+	// belt-and-braces. Windows has no POSIX trap/exec, so only wrap on Unix.
 	cmd, env := fixtureShellExec("sleep-ignore-signals 30")
+	command := cmd
+	if runtime.GOOS != "windows" {
+		command = "trap '' INT; exec " + cmd
+	}
 	info, err := runner.Start(ctx, StartProcessRequest{
 		SessionID:  "session-1",
 		Kind:       "dev",
-		Command:    cmd,
+		Command:    command,
 		Env:        env,
 		WorkingDir: "",
 	})
