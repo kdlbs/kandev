@@ -803,6 +803,44 @@ func (r *prepareProgressRecorder) recordStep(step PrepareStep, index int) {
 	r.steps[index] = step
 }
 
+type launchRequestMetadata struct {
+	values                   map[string]interface{}
+	remoteContributions      map[string]models.RemoteContribution
+	comparisonTargets        map[string]models.ComparisonTarget
+	contributionDestinations map[string]models.ContributionDestination
+}
+
+func buildLaunchRequestMetadata(req *LaunchRequest, worktreeID, worktreeBranch string) (*launchRequestMetadata, error) {
+	metadata := buildLaunchMetadata(req, worktreeID, worktreeBranch)
+	remoteContributions, err := collectRemoteContributions(req)
+	if err != nil {
+		return nil, err
+	}
+	if len(remoteContributions) > 0 {
+		metadata[MetadataKeyRemoteContributions] = remoteContributions
+	}
+	comparisonTargets, err := collectComparisonTargets(req)
+	if err != nil {
+		return nil, err
+	}
+	if len(comparisonTargets) > 0 {
+		metadata[MetadataKeyComparisonTargets] = comparisonTargets
+	}
+	contributionDestinations, err := collectContributionDestinations(req)
+	if err != nil {
+		return nil, err
+	}
+	if len(contributionDestinations) > 0 {
+		metadata[MetadataKeyContributionDestinations] = contributionDestinations
+	}
+	return &launchRequestMetadata{
+		values:                   metadata,
+		remoteContributions:      remoteContributions,
+		comparisonTargets:        comparisonTargets,
+		contributionDestinations: contributionDestinations,
+	}, nil
+}
+
 // launchBuildExecutorRequest resolves MCP servers, builds the ExecutorCreateRequest,
 // and creates the runtime instance.
 //
@@ -832,30 +870,13 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 			Headers: srv.Headers,
 		})
 	}
-	metadata := buildLaunchMetadata(reqWithWorktree, worktreeID, worktreeBranch)
-	remoteContributions, err := collectRemoteContributions(reqWithWorktree)
+	launchMetadata, err := buildLaunchRequestMetadata(reqWithWorktree, worktreeID, worktreeBranch)
 	if err != nil {
 		return nil, nil, nil, err
-	}
-	if len(remoteContributions) > 0 {
-		metadata[MetadataKeyRemoteContributions] = remoteContributions
-	}
-	comparisonTargets, err := collectComparisonTargets(reqWithWorktree)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	if len(comparisonTargets) > 0 {
-		metadata[MetadataKeyComparisonTargets] = comparisonTargets
-	}
-	contributionDestinations, err := collectContributionDestinations(reqWithWorktree)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	if len(contributionDestinations) > 0 {
-		metadata[MetadataKeyContributionDestinations] = contributionDestinations
 	}
 
-	launchAuthToken, err := m.resolveLaunchAuthToken(ctx, reqWithWorktree, metadata)
+
+	launchAuthToken, err := m.resolveLaunchAuthToken(ctx, reqWithWorktree, launchMetadata.values)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("resolve launch auth token: %w", err)
 	}
@@ -882,7 +903,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		Env:                            env,
 		AutoApprovePermissions:         profileInfo != nil && profileInfo.AutoApprove,
 		AutoApprovePermissionsOverride: autoApproveOverride,
-		Metadata:                       metadata,
+		Metadata:                       launchMetadata.values,
 		AgentConfig:                    agentConfig,
 		ApprovedSecretEnvKeys:          append([]string(nil), reqWithWorktree.ApprovedSecretEnvKeys...),
 		McpServers:                     mcpServers,
@@ -891,12 +912,12 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		McpProviders:                   reqWithWorktree.McpProviders,
 		McpProfile:                     reqWithWorktree.McpProfile,
 		AuthToken:                      launchAuthToken,
-		BootstrapNonce:                 m.revealRuntimeSecret(ctx, metadata, MetadataKeyBootstrapNonceSecret),
+		BootstrapNonce:                 m.revealRuntimeSecret(ctx, launchMetadata.values, MetadataKeyBootstrapNonceSecret),
 		AgentctlStartupConfig:          m.agentctlStartupConfig,
 		OnProgress:                     onProgress,
-		RemoteContributions:            remoteContributions,
-		ContributionDestinations:       contributionDestinations,
-		ComparisonTargets:              comparisonTargets,
+		RemoteContributions:            launchMetadata.remoteContributions,
+		ContributionDestinations:       launchMetadata.contributionDestinations,
+		ComparisonTargets:              launchMetadata.comparisonTargets,
 	}
 	execInstance, err := createLaunchInstance(ctx, rt, execReq)
 	if err != nil {

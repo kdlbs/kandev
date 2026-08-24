@@ -79,7 +79,7 @@ func TestPrepareExecutionCreateRequest_ReuseRequiredDockerUsesEnvironmentControl
 			MetadataKeyAuthTokenSecret:            "session-auth",
 			MetadataKeyContainerControlAuthSecret: "container-control",
 		},
-	}, "execution-2")
+	}, "execution-2", &MockExecutor{name: executor.NameDocker})
 	if err != nil {
 		t.Fatalf("prepareExecutionCreateRequest() error = %v", err)
 	}

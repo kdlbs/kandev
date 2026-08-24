@@ -21,7 +21,6 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/scriptengine"
 	"github.com/kandev/kandev/internal/task/models"
-	"github.com/kandev/kandev/internal/worktree"
 )
 
 const dockerWorkspacePath = "/workspace"
