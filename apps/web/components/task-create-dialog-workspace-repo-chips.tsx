@@ -392,6 +392,11 @@ function branchPolicyToOption(policy: RepositoryBranchPolicy, branches: Branch[]
     return branch.type === "remote" && `${branch.remote}/${branch.name}` === policy.base_branch;
   });
   const unavailableReason = baseBranchAvailable ? undefined : t("task:branchPolicyUnavailable");
+  const summary = t("workspaces:branchPolicySummary", {
+    base: policy.base_branch,
+    template: policy.branch_template,
+    target: policy.pull_request_target,
+  });
   return {
     value: `policy:${policy.id}`,
     label: policy.name,
@@ -406,7 +411,7 @@ function branchPolicyToOption(policy: RepositoryBranchPolicy, branches: Branch[]
     groupLabel: t("task:branchPoliciesGroup"),
     disabled: !baseBranchAvailable,
     renderLabel: () => (
-      <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5 pr-1">
         <span className="flex min-w-0 items-center gap-2">
           <Badge variant="secondary" className="shrink-0 text-xs">
             {t("task:branchPolicyMarker")}
@@ -415,13 +420,9 @@ function branchPolicyToOption(policy: RepositoryBranchPolicy, branches: Branch[]
             {policy.name}
           </span>
         </span>
-        <span className="flex shrink-0 flex-col items-end text-xs text-muted-foreground">
-          <span>
-            {t("workspaces:branchPolicySummary", {
-              base: policy.base_branch,
-              template: policy.branch_template,
-              target: policy.pull_request_target,
-            })}
+        <span className="flex min-w-0 flex-col text-xs text-muted-foreground">
+          <span className="truncate" title={summary}>
+            {summary}
           </span>
           {unavailableReason ? <span>{unavailableReason}</span> : null}
         </span>

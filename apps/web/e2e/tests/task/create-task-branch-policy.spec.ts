@@ -2,6 +2,7 @@ import { execSync } from "node:child_process";
 import { expect, test } from "../../fixtures/test-base";
 import { makeGitEnv } from "../../helpers/git-helper";
 import { useRegularMode } from "../../helpers/regular-mode";
+import { expectPolicyOptionContentNotToOverlap } from "./create-task-branch-policy-helpers";
 
 useRegularMode();
 
@@ -44,6 +45,7 @@ test.describe("Task creation with branch policies", () => {
       await dialog.getByTestId("branch-chip-trigger").click();
       const option = testPage.getByRole("option", { name: new RegExp(policy.name) });
       await expect(option).toContainText("Policy");
+      await expectPolicyOptionContentNotToOverlap(option, policy.name);
       await option.click();
       await expect(dialog.getByTestId("branch-chip-trigger")).toContainText(policy.name);
       await expect(dialog.getByTestId("fresh-branch-toggle")).toHaveAttribute(

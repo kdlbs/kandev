@@ -1,6 +1,7 @@
 import { expect, test } from "../../fixtures/test-base";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
+import { expectPolicyOptionContentNotToOverlap } from "./create-task-branch-policy-helpers";
 
 useRegularMode();
 
@@ -39,6 +40,7 @@ test.describe("Task branch policy selection on mobile", () => {
       await dialog.getByTestId("branch-chip-trigger").tap();
       const option = testPage.getByRole("option", { name: new RegExp(policy.name) });
       await expect(option).toContainText("Policy");
+      await expectPolicyOptionContentNotToOverlap(option, policy.name);
       await option.tap({ force: true });
       await expect(dialog.getByTestId("branch-chip-trigger")).toContainText(policy.name);
       await expect(dialog.getByTestId("fresh-branch-toggle")).toHaveAttribute(
