@@ -19,10 +19,16 @@ func (r *Repository) initCoordinatorAuthoritySchema() error {
 			updated_at TIMESTAMP NOT NULL,
 			UNIQUE(workspace_id, plugin_installation_id, logical_key)
 		);
+		CREATE UNIQUE INDEX IF NOT EXISTS uniq_active_workspace_agent_principal_task
+			ON workspace_agent_principals(workspace_id, backing_task_id)
+			WHERE revoked_at IS NULL AND backing_task_id != '';
+		CREATE UNIQUE INDEX IF NOT EXISTS uniq_active_workspace_agent_principal_session
+			ON workspace_agent_principals(workspace_id, backing_session_id)
+			WHERE revoked_at IS NULL AND backing_session_id != '';
 
 		CREATE TABLE IF NOT EXISTS task_coordinator_grants (
 			id TEXT PRIMARY KEY,
-			coordinator_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+			coordinator_task_id TEXT NOT NULL DEFAULT '',
 			principal_id TEXT NOT NULL DEFAULT '',
 			workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
 			scope_kind TEXT NOT NULL,

@@ -69,6 +69,9 @@ func TestAuthorityAllowsInScopeCapabilityAndAuditsGrantUse(t *testing.T) {
 	if len(store.audits) != 1 || store.audits[0].Result != "ok" {
 		t.Fatalf("audits = %#v, want resolved allowed audit", store.audits)
 	}
+	if audit := store.audits[0]; audit.PrincipalID != "principal-1" || audit.ActorTaskID != "actor" || audit.ActorSessionID != "session" {
+		t.Fatalf("audit provenance = %#v, want principal and exact task/session", audit)
+	}
 }
 
 func TestDecisionAuditableOnlyWhenAnAuditEventExists(t *testing.T) {
@@ -115,6 +118,9 @@ func TestAuthorityDeniesCrossWorkspaceWithoutExposingReason(t *testing.T) {
 	}
 	if len(store.audits) != 1 || store.audits[0].DenyReason != "cross_workspace" {
 		t.Fatalf("audit = %#v, want cross-workspace reason", store.audits)
+	}
+	if store.audits[0].PrincipalID != "principal-1" || store.audits[0].ActorSessionID != "session" {
+		t.Fatalf("denial audit provenance = %#v, want current principal/session", store.audits[0])
 	}
 }
 

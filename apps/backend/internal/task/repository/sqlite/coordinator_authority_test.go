@@ -123,6 +123,38 @@ func TestWorkspaceAgentPrincipalRepository_FiltersAuditByDurableIdentityAndReaso
 	require.Len(t, legacyProjection, 2, "the existing principal audit query remains source-compatible")
 }
 
+func TestWorkspaceAgentPrincipalRepository_RejectsAmbiguousActiveTaskOrSessionBinding(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "ws-binding")
+	now := time.Now().UTC()
+	first := &models.WorkspaceAgentPrincipal{ID: "principal-first", WorkspaceID: "ws-binding", PluginInstallationID: "plugin-a", LogicalKey: "agent", BackingTaskID: "task-a", BackingSessionID: "session-a", CreatedAt: now}
+	require.NoError(t, repo.CreateWorkspaceAgentPrincipal(ctx, first))
+	require.ErrorIs(t, repo.CreateWorkspaceAgentPrincipal(ctx, &models.WorkspaceAgentPrincipal{ID: "principal-duplicate-task", WorkspaceID: "ws-binding", PluginInstallationID: "plugin-b", LogicalKey: "agent", BackingTaskID: "task-a", BackingSessionID: "session-b", CreatedAt: now}), repoerrors.ErrWorkspaceAgentPrincipalConflict)
+	require.ErrorIs(t, repo.CreateWorkspaceAgentPrincipal(ctx, &models.WorkspaceAgentPrincipal{ID: "principal-duplicate-session", WorkspaceID: "ws-binding", PluginInstallationID: "plugin-c", LogicalKey: "agent", BackingTaskID: "task-b", BackingSessionID: "session-a", CreatedAt: now}), repoerrors.ErrWorkspaceAgentPrincipalConflict)
+
+	candidate := &models.WorkspaceAgentPrincipal{ID: "principal-candidate", WorkspaceID: "ws-binding", PluginInstallationID: "plugin-d", LogicalKey: "agent", BackingTaskID: "task-d", BackingSessionID: "session-d", CreatedAt: now}
+	require.NoError(t, repo.CreateWorkspaceAgentPrincipal(ctx, candidate))
+	require.ErrorIs(t, repo.RebindWorkspaceAgentPrincipal(ctx, candidate.ID, "task-a", "session-a", now.Add(time.Minute)), repoerrors.ErrWorkspaceAgentPrincipalConflict)
+}
+
+func TestWorkspaceAgentPrincipalRepository_PrincipalGrantSurvivesBackingTaskDeletion(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "ws-durable-grant")
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: "task-replaceable", WorkspaceID: "ws-durable-grant", Title: "replaceable backing"}))
+	principal := &models.WorkspaceAgentPrincipal{ID: "principal-durable", WorkspaceID: "ws-durable-grant", PluginInstallationID: "plugin-owned", LogicalKey: "agent", BackingTaskID: "task-replaceable", BackingSessionID: "session-replaceable"}
+	require.NoError(t, repo.CreateWorkspaceAgentPrincipal(ctx, principal))
+	require.NoError(t, repo.CreateCoordinatorGrant(ctx, &models.CoordinatorGrant{ID: "grant-durable", PrincipalID: principal.ID, WorkspaceID: "ws-durable-grant", ScopeKind: "workspace", ScopeID: "ws-durable-grant", Capabilities: "orchestrate"}))
+
+	_, err := repo.db.ExecContext(ctx, `DELETE FROM tasks WHERE id = ?`, "task-replaceable")
+	require.NoError(t, err)
+	grants, err := repo.ListActiveWorkspaceAgentPrincipalGrants(ctx, principal.ID, "ws-durable-grant")
+	require.NoError(t, err)
+	require.Len(t, grants, 1)
+	require.Equal(t, "grant-durable", grants[0].ID)
+}
+
 func mustListPrincipalGrants(t *testing.T, repo *Repository, ctx context.Context, workspaceID, principalID string, includeRevoked bool) []*models.CoordinatorGrant {
 	t.Helper()
 	grants, err := repo.ListWorkspaceAgentPrincipalGrants(ctx, workspaceID, principalID, includeRevoked)

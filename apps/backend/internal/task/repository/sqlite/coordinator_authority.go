@@ -36,7 +36,7 @@ func (r *Repository) CreateWorkspaceAgentPrincipal(ctx context.Context, principa
 	}
 	principal.UpdatedAt = principal.CreatedAt
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`INSERT INTO workspace_agent_principals (id, workspace_id, plugin_installation_id, logical_key, backing_task_id, backing_session_id, revoked_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`), principal.ID, principal.WorkspaceID, principal.PluginInstallationID, principal.LogicalKey, principal.BackingTaskID, principal.BackingSessionID, principal.RevokedAt, principal.CreatedAt, principal.UpdatedAt)
-	if isPrincipalContextUniqueViolation(err) {
+	if isPrincipalConflictViolation(err) {
 		return repoerrors.ErrWorkspaceAgentPrincipalConflict
 	}
 	return err
@@ -111,6 +111,9 @@ func (r *Repository) GetActiveWorkspaceAgentPrincipalForTask(ctx context.Context
 
 func (r *Repository) RebindWorkspaceAgentPrincipal(ctx context.Context, id, taskID, sessionID string, updatedAt time.Time) error {
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`UPDATE workspace_agent_principals SET backing_task_id = ?, backing_session_id = ?, updated_at = ? WHERE id = ? AND revoked_at IS NULL`), taskID, sessionID, updatedAt, id)
+	if isPrincipalConflictViolation(err) {
+		return repoerrors.ErrWorkspaceAgentPrincipalConflict
+	}
 	if err != nil {
 		return err
 	}

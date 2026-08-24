@@ -110,14 +110,15 @@ func (a *Authority) authorizePrincipalGrant(ctx context.Context, request Request
 
 	grant, reason := matchingGrant(grants, request)
 	if reason != "" {
-		return a.auditDenied(ctx, request, reason)
+		return a.auditDenied(ctx, request, principal.ID, reason)
 	}
 	if request.ActorTask.ArchivedAt != nil {
-		return a.auditDenied(ctx, request, "archived_actor")
+		return a.auditDenied(ctx, request, principal.ID, "archived_actor")
 	}
 
 	event := &models.CoordinatorAuditEvent{
 		ID:             uuid.NewString(),
+		PrincipalID:    principal.ID,
 		ActorTaskID:    request.ActorTask.ID,
 		ActorSessionID: request.ActorSessionID,
 		TargetTaskID:   request.TargetTask.ID,
@@ -148,9 +149,10 @@ func (a *Authority) Finish(ctx context.Context, decision Decision, operationErr 
 	return a.store.FinishCoordinatorAuditEvent(ctx, decision.AuditID, result, detail)
 }
 
-func (a *Authority) auditDenied(ctx context.Context, request Request, reason string) (Decision, error) {
+func (a *Authority) auditDenied(ctx context.Context, request Request, principalID, reason string) (Decision, error) {
 	event := &models.CoordinatorAuditEvent{
 		ID:             uuid.NewString(),
+		PrincipalID:    principalID,
 		ActorTaskID:    request.ActorTask.ID,
 		ActorSessionID: request.ActorSessionID,
 		TargetTaskID:   request.TargetTask.ID,
