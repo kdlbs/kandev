@@ -884,10 +884,12 @@ func TestSwitchSessionForStep_CreatesFreshSessionWhenCandidateTerminalizesBefore
 	current := &models.TaskSession{
 		ID: "session-b", TaskID: "t1", AgentProfileID: "profile-b", ExecutorID: "exec-local",
 		ExecutorProfileID: "ep1", State: models.TaskSessionStateRunning, IsPrimary: true,
-		StartedAt: now, UpdatedAt: now,
+		TaskEnvironmentID: "env-1",
+		StartedAt:         now, UpdatedAt: now,
 	}
 	requireNoError(t, repo.CreateTaskSession(ctx, candidate))
 	requireNoError(t, repo.CreateTaskSession(ctx, current))
+	requireNoError(t, repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{ID: "env-1", TaskID: "t1", ExecutorType: string(models.ExecutorTypeLocal), Status: models.TaskEnvironmentStatusReady}))
 
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks["t1"] = &v1.Task{ID: "t1", WorkspaceID: "ws1", WorkflowID: "wf1", Title: "Test", Description: "Test", State: v1.TaskStateInProgress}
@@ -1004,10 +1006,12 @@ func TestSwitchSessionForStep_CompletedSessionNotReused(t *testing.T) {
 		AgentExecutionID:  "ae-b",
 		State:             models.TaskSessionStateRunning,
 		IsPrimary:         true,
+		TaskEnvironmentID: "env-1",
 		StartedAt:         now,
 		UpdatedAt:         now,
 	}
 	_ = repo.CreateTaskSession(ctx, current)
+	_ = repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{ID: "env-1", TaskID: "t1", ExecutorType: string(models.ExecutorTypeLocal), Status: models.TaskEnvironmentStatusReady})
 
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks["t1"] = &v1.Task{
@@ -1165,10 +1169,12 @@ func TestSwitchSessionForStep_FailedSessionNotReused(t *testing.T) {
 		AgentExecutionID:  "ae-b",
 		State:             models.TaskSessionStateRunning,
 		IsPrimary:         true,
+		TaskEnvironmentID: "env-1",
 		StartedAt:         now,
 		UpdatedAt:         now,
 	}
 	_ = repo.CreateTaskSession(ctx, current)
+	_ = repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{ID: "env-1", TaskID: "t1", ExecutorType: string(models.ExecutorTypeLocal), Status: models.TaskEnvironmentStatusReady})
 
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks["t1"] = &v1.Task{
