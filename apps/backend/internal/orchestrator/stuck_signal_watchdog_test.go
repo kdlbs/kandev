@@ -232,18 +232,20 @@ func TestReclaimStuckSignalSessionsOnce_UnblocksAutoStart(t *testing.T) {
 }
 
 // TestReclaimStuckSignalSessionsOnce_SkipsWhenStillActive is the negative
-// control Review round 2 (Finding 3) requires: signal age alone is not
-// inactivity, so a RUNNING session with a signal well past
-// stuckSignalWatchdogThreshold that is STILL producing genuine agent
-// activity must not be reclaimed. Without this guard, the watchdog could
-// force-close a turn that is still genuinely in flight (a long tool call, a
-// provider retry/backoff that outlasts the threshold) and dispatch a second
-// prompt into the same live session — the exact "quiet corruption" this
-// watchdog exists to prevent, now caused by the watchdog itself. The mock's
-// getPromptActivityForSessionFunc simulates a genuine agent event landing
-// for the session between the watchdog's unguarded scan (which snapshots
-// the activity epoch) and its guarded recheck (which re-verifies the
-// snapshot is still owned) — see stuckSignalActivityUnchanged.
+// control both Review round 2 (Finding 3) and round 3 (Finding 2) require:
+// signal age alone is not inactivity. A RUNNING session with a signal well
+// past stuckSignalWatchdogThreshold (30 minutes old) whose agent's tracked
+// prompt activity is recent (30 seconds old) must not be reclaimed. This is
+// the case an epoch-equality check across the watchdog's own sub-millisecond
+// scan window cannot see: a live agent producing events every few seconds
+// sails straight through that window unchanged, so only gating on real
+// elapsed inactivity (time.Since(lastActivityAt) >=
+// stuckSignalWatchdogThreshold) catches it. Without this guard, the watchdog
+// could force-close a turn that is still genuinely in flight (a long tool
+// call, a provider retry/backoff that outlasts the signal-age threshold) and
+// dispatch a second prompt into the same live session — the exact "quiet
+// corruption" this watchdog exists to prevent, now caused by the watchdog
+// itself.
 func TestReclaimStuckSignalSessionsOnce_SkipsWhenStillActive(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -268,16 +270,7 @@ func TestReclaimStuckSignalSessionsOnce_SkipsWhenStillActive(t *testing.T) {
 	agentMgr.currentPromptExecutionID = "exec-1"
 	agentMgr.currentPromptGeneration.Store(1)
 	agentMgr.currentPromptActivityEpoch.Store(1)
-	agentMgr.getPromptActivityForSessionFunc = func(_ string) (string, uint64, uint64, error) {
-		execID := agentMgr.currentPromptExecutionID
-		generation := agentMgr.currentPromptGeneration.Load()
-		epoch := agentMgr.currentPromptActivityEpoch.Load()
-		// A real agent event lands right after the scan reads this
-		// snapshot but before the guarded recheck — bump the epoch the
-		// recheck will observe, exactly as markAgentActivity would.
-		agentMgr.currentPromptActivityEpoch.Add(1)
-		return execID, generation, epoch, nil
-	}
+	agentMgr.currentPromptLastActivityAt = time.Now().UTC().Add(-30 * time.Second)
 	svc := createEngineService(t, repo, stepGetter, agentMgr)
 
 	signal := models.PendingStepCompletionSignal{

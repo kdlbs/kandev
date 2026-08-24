@@ -56,9 +56,9 @@ const (
 	// while its agent process is still genuinely producing events (a long
 	// tool call, a provider retry/backoff that outlasts the threshold).
 	// Candidacy on age is therefore only the first filter — the actual
-	// reclaim additionally requires that no prompt-activity event landed
-	// for the session between the unguarded scan and the guarded reclaim;
-	// see capturePromptActivitySnapshot / stuckSignalActivityUnchanged.
+	// reclaim additionally requires that the session's tracked prompt
+	// activity has been quiet for at least this same threshold; see
+	// stuckSignalInactiveLongEnough.
 	stuckSignalWatchdogThreshold = 10 * time.Minute
 )
 
@@ -96,15 +96,16 @@ func (s *Service) reclaimStuckSignalSessionsOnce(ctx context.Context) {
 // guard is re-checked under the session's cancelInFlight lock (the same
 // lock onStepCompletionSignaled holds) after a fresh re-read, so a session
 // that resolves itself (turn-end or failure event) between the unguarded
-// scan and here is left alone. The prompt-activity snapshot is captured
-// here, unguarded, and re-verified under the same lock right before the
-// reclaim fires — see stuckSignalActivityUnchanged.
+// scan and here is left alone. The inactivity gate is read fresh inside that
+// same locked section, immediately before the reclaim fires — see
+// stuckSignalInactiveLongEnough — rather than captured earlier and compared
+// for change, so there is no separate scan-to-reclaim window for a live
+// agent's activity to race.
 func (s *Service) reclaimStuckSignalSessionIfDue(ctx context.Context, session *models.TaskSession, now time.Time) {
 	task, signal, ok := s.stuckSignalCandidate(ctx, session, now)
 	if !ok {
 		return
 	}
-	snapshot := s.capturePromptActivitySnapshot(ctx, session.ID)
 
 	lock, release := s.acquireCancelInFlightGuard(session.ID)
 	defer release()
@@ -117,8 +118,8 @@ func (s *Service) reclaimStuckSignalSessionIfDue(ctx context.Context, session *m
 	if !ok {
 		return
 	}
-	if !s.stuckSignalActivityUnchanged(session.ID, snapshot) {
-		s.logger.Debug("stuck-signal watchdog: skipping reclaim, agent activity observed since the scan",
+	if !s.stuckSignalInactiveLongEnough(ctx, session.ID, now) {
+		s.logger.Debug("stuck-signal watchdog: skipping reclaim, agent activity observed within the inactivity window",
 			zap.String("task_id", task.ID),
 			zap.String("session_id", session.ID),
 			zap.String("step_id", signal.StepID))
@@ -187,76 +188,50 @@ func (s *Service) stuckSignalStillPending(ctx context.Context, sessionID, stepID
 	return latest, true
 }
 
-// stuckSignalActivitySnapshot is the prompt-activity identity captured
-// during the unguarded scan, ok reports whether the lifecycle manager had
-// anything tracked for the session to snapshot at all. A false ok means the
-// watchdog has no live-activity evidence either way (for example, the
-// backend restarted and the in-memory execution registry lost track of the
-// session) — the guard treats that as nothing to protect and lets the
-// existing signal-age filter decide, matching this watchdog's pre-existing
-// behavior for that case.
-type stuckSignalActivitySnapshot struct {
-	ok            bool
-	executionID   string
-	generation    uint64
-	activityEpoch uint64
-}
-
 // promptActivitySessionReader is implemented by the lifecycle manager. A
 // narrow optional interface — mirrors the generation-reader interface
 // task_operations.go's captureCancellationAgentIdentity asserts for — so
 // lightweight test doubles that don't track prompt activity stay
-// compatible.
+// compatible. In production, backendapp.lifecycleAdapter forwards this
+// method and its shape is pinned at compile time (adapters.go) precisely so
+// a missing or drifted forward is a build failure rather than a silently
+// dead guard here.
 type promptActivitySessionReader interface {
-	GetPromptActivityForSession(ctx context.Context, sessionID string) (executionID string, generation, activityEpoch uint64, err error)
+	GetPromptActivityForSession(ctx context.Context, sessionID string) (executionID string, generation, activityEpoch uint64, lastActivityAt time.Time, err error)
 }
 
-// capturePromptActivitySnapshot snapshots the session's current
-// prompt-activity identity, unguarded, so reclaimStuckSignalSessionIfDue can
-// later confirm under the lock that no genuine agent event arrived in
-// between (stuckSignalActivityUnchanged) before force-closing the turn.
-func (s *Service) capturePromptActivitySnapshot(ctx context.Context, sessionID string) stuckSignalActivitySnapshot {
+// stuckSignalInactiveLongEnough reports whether the session's tracked prompt
+// activity has been quiet for at least stuckSignalWatchdogThreshold — the
+// card's actual "no activity for N minutes" requirement. Called under the
+// cancelInFlight lock, immediately before the reclaim fires, so it reads the
+// freshest possible activity state for whatever execution the session
+// currently owns; there is no separate unguarded-capture step to race,
+// because the read happens inside the same critical section as the reclaim
+// itself.
+//
+// Three cases:
+//   - s.agentManager doesn't implement promptActivitySessionReader: in
+//     production this cannot happen (see the compile-time pin in
+//     backendapp/adapters.go), but a lightweight test double may still omit
+//     it deliberately. Treated as fail-open — no evidence either way, so the
+//     signal-age filter that already ran in stuckSignalCandidate decides.
+//   - ErrNoExecutionForSession (nothing tracked for the session — process
+//     gone, backend restarted): fail open, reclaim. There is no live turn
+//     left to protect.
+//   - An execution is tracked: reclaim only once
+//     now.Sub(lastActivityAt) >= stuckSignalWatchdogThreshold. A session
+//     whose signal is old but whose agent is still emitting events within
+//     the window is left alone — this is the case a signal-age-only check,
+//     or an epoch-equality check across a sub-millisecond scan window, both
+//     get wrong.
+func (s *Service) stuckSignalInactiveLongEnough(ctx context.Context, sessionID string, now time.Time) bool {
 	reader, ok := s.agentManager.(promptActivitySessionReader)
 	if !ok {
-		return stuckSignalActivitySnapshot{}
+		return true
 	}
-	executionID, generation, activityEpoch, err := reader.GetPromptActivityForSession(ctx, sessionID)
+	_, _, _, lastActivityAt, err := reader.GetPromptActivityForSession(ctx, sessionID)
 	if err != nil {
-		return stuckSignalActivitySnapshot{}
-	}
-	return stuckSignalActivitySnapshot{
-		ok:            true,
-		executionID:   executionID,
-		generation:    generation,
-		activityEpoch: activityEpoch,
-	}
-}
-
-// stuckSignalActivityUnchanged reports whether the session still owns the
-// prompt-activity identity captured by capturePromptActivitySnapshot — i.e.
-// no genuine agent event (which bumps the activity epoch, see
-// AgentExecution.markAgentActivity) landed for the session between the
-// unguarded scan and now. A snapshot with ok=false has no evidence to check
-// and is treated as unchanged, matching the fail-open behavior documented on
-// stuckSignalActivitySnapshot.
-func (s *Service) stuckSignalActivityUnchanged(sessionID string, snapshot stuckSignalActivitySnapshot) bool {
-	if !snapshot.ok {
 		return true
 	}
-	generationOwner, ok := s.agentManager.(interface {
-		OwnsPromptGeneration(sessionID, executionID string, generation uint64) bool
-	})
-	if !ok {
-		return true
-	}
-	if !generationOwner.OwnsPromptGeneration(sessionID, snapshot.executionID, snapshot.generation) {
-		return false
-	}
-	activityOwner, ok := s.agentManager.(interface {
-		OwnsPromptActivity(sessionID, executionID string, generation, activityEpoch uint64) bool
-	})
-	if !ok {
-		return true
-	}
-	return activityOwner.OwnsPromptActivity(sessionID, snapshot.executionID, snapshot.generation, snapshot.activityEpoch)
+	return now.Sub(lastActivityAt) >= stuckSignalWatchdogThreshold
 }

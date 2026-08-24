@@ -1545,19 +1545,24 @@ func (m *Manager) GetPromptGenerationForSession(_ context.Context, sessionID str
 }
 
 // GetPromptActivityForSession returns the execution ID, prompt generation,
-// and activity epoch currently owned by sessionID's active prompt. Unlike
-// OwnsPromptGeneration/OwnsPromptActivity (which check a value someone else
-// already captured), this is the capture step itself — for watchdogs that
-// scan for stuck sessions and must snapshot "is anything happening right
-// now" on their own, rather than waiting for a stall event to carry the
-// values in its payload. Returns ErrNoExecutionForSession (wrapped) when no
-// execution is tracked for the session.
-func (m *Manager) GetPromptActivityForSession(_ context.Context, sessionID string) (executionID string, generation, activityEpoch uint64, err error) {
+// activity epoch, and last-activity timestamp currently owned by sessionID's
+// active prompt. Unlike OwnsPromptGeneration/OwnsPromptActivity (which check
+// a value someone else already captured), this is the capture step itself —
+// for watchdogs that scan for stuck sessions and must snapshot "is anything
+// happening right now" on their own, rather than waiting for a stall event to
+// carry the values in its payload. lastActivityAt in particular is what lets
+// a caller gate on real elapsed inactivity (time.Since(lastActivityAt))
+// instead of an epoch comparison across its own scan window, which only
+// catches activity that lands during that window and sails through a live
+// agent that is simply between events. Returns ErrNoExecutionForSession
+// (wrapped) when no execution is tracked for the session.
+func (m *Manager) GetPromptActivityForSession(_ context.Context, sessionID string) (executionID string, generation, activityEpoch uint64, lastActivityAt time.Time, err error) {
 	execution, exists := m.executionStore.GetBySessionID(sessionID)
 	if !exists {
-		return "", 0, 0, fmt.Errorf("%w: %s", ErrNoExecutionForSession, sessionID)
+		return "", 0, 0, time.Time{}, fmt.Errorf("%w: %s", ErrNoExecutionForSession, sessionID)
 	}
-	return execution.ID, execution.promptGenerationSnapshot(), execution.promptActivityEpochSnapshot(), nil
+	lastActivityAt, _, activityEpoch = execution.promptActivitySnapshot()
+	return execution.ID, execution.promptGenerationSnapshot(), activityEpoch, lastActivityAt, nil
 }
 
 // MarkReady marks an execution as ready for follow-up prompts AFTER A TURN.

@@ -348,16 +348,17 @@ type mockAgentManager struct {
 	// ErrCancelEscalated sentinels handled inside cancelAgentSilent).
 	cancelAgentErr error
 
-	currentPromptGeneration    atomic.Uint64
-	currentPromptActivityEpoch atomic.Uint64
-	currentPromptExecutionID   string
+	currentPromptGeneration     atomic.Uint64
+	currentPromptActivityEpoch  atomic.Uint64
+	currentPromptExecutionID    string
+	currentPromptLastActivityAt time.Time
 
 	// getPromptActivityForSessionFunc, when set, overrides
 	// GetPromptActivityForSession's default (report the current*
 	// fields above, or ErrNoExecutionForSession if no execution ID is
-	// set). Tests use this to simulate activity landing between a
-	// watchdog's unguarded snapshot and its guarded recheck.
-	getPromptActivityForSessionFunc func(sessionID string) (string, uint64, uint64, error)
+	// set). Tests use this to control exactly what a watchdog's activity
+	// gate observes, e.g. a lastActivityAt within its inactivity window.
+	getPromptActivityForSessionFunc func(sessionID string) (string, uint64, uint64, time.Time, error)
 
 	// set_session_mode tracking (issue #1183). Records (sessionID, modeID) for
 	// every SetSessionModeBySessionID call. setSessionModeErr, when set, is
@@ -573,14 +574,14 @@ func (m *mockAgentManager) GetPromptGenerationForSession(_ context.Context, _ st
 
 func (m *mockAgentManager) GetPromptActivityForSession(
 	_ context.Context, sessionID string,
-) (string, uint64, uint64, error) {
+) (string, uint64, uint64, time.Time, error) {
 	if m.getPromptActivityForSessionFunc != nil {
 		return m.getPromptActivityForSessionFunc(sessionID)
 	}
 	if m.currentPromptExecutionID == "" {
-		return "", 0, 0, fmt.Errorf("%w: %s", lifecycle.ErrNoExecutionForSession, sessionID)
+		return "", 0, 0, time.Time{}, fmt.Errorf("%w: %s", lifecycle.ErrNoExecutionForSession, sessionID)
 	}
-	return m.currentPromptExecutionID, m.currentPromptGeneration.Load(), m.currentPromptActivityEpoch.Load(), nil
+	return m.currentPromptExecutionID, m.currentPromptGeneration.Load(), m.currentPromptActivityEpoch.Load(), m.currentPromptLastActivityAt, nil
 }
 
 // RowLiveness makes the mock satisfy the orchestrator's optional
