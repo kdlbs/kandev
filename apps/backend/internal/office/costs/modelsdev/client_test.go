@@ -656,17 +656,31 @@ func TestRequestGate_ReleaseAllIsIdempotentAndUnblocksParkedHandlers(t *testing.
 		HTTPClient: gate.server.Client(),
 	}, logger.Default())
 
-	refreshDone := make(chan error, 1)
-	go func() { refreshDone <- c.Refresh(context.Background()) }()
+	var refreshErr error
+	refreshDone := make(chan struct{})
+	go func() {
+		refreshErr = c.Refresh(context.Background())
+		close(refreshDone)
+	}()
+	// Same self-contained release-then-join shape as
+	// TestClient_ConcurrentRefreshCallsShareOneFetch: if waitForFirstRequest
+	// below times out, this Cleanup still drains the goroutine before
+	// t.TempDir() removes the directory it may be writing into. refreshDone
+	// is closed (not a single-value send) so both this Cleanup and the
+	// select below can receive from it without racing over who drains it.
+	t.Cleanup(func() {
+		gate.releaseAll()
+		<-refreshDone
+	})
 	gate.waitForFirstRequest(t)
 
 	gate.releaseAll()
 	gate.releaseAll()
 
 	select {
-	case err := <-refreshDone:
-		if err != nil {
-			t.Fatalf("Refresh: %v", err)
+	case <-refreshDone:
+		if refreshErr != nil {
+			t.Fatalf("Refresh: %v", refreshErr)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("Refresh did not complete after releaseAll")
