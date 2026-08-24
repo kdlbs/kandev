@@ -221,6 +221,9 @@ func TestDefaultDockerPrepareScript_ReusesExistingCloneAfterContainerRestart(t *
 
 	_, origin := setupPostludeRepo(t, "main")
 	workspace := filepath.Join(t.TempDir(), "workspace")
+	if err := os.Mkdir(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	script := strings.NewReplacer(
 		"{{git.identity_setup}}", "",
 		"{{github.auth_setup}}", "",

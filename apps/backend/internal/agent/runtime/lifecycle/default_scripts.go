@@ -120,16 +120,18 @@ git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
 # repository.branch / repository.clone_url / workspace.path, so a hostile branch
 # name or URL cannot break out of the git clone argument even though the
 # placeholders are referenced bare here. Do not add double quotes around them.
-# A stopped container retains its writable workspace. Reuse only a regular
-# checkout; an unexpected existing path remains a fail-closed bootstrap error.
+# Docker's /workspace volume starts as an empty directory. A stopped container
+# retains its populated workspace, so reuse only a regular checkout; an
+# unexpected nonempty non-Git path remains a fail-closed bootstrap error.
 if [ -d {{workspace.path}}/.git ]; then
   cd {{workspace.path}}
-elif [ -e {{workspace.path}} ]; then
-  echo "workspace exists but is not a regular Git checkout" >&2
-  exit 1
-else
+elif [ ! -e {{workspace.path}} ] || \
+     { [ -d {{workspace.path}} ] && [ -z "$(find {{workspace.path}} -mindepth 1 -maxdepth 1 -print -quit)" ]; }; then
   git clone --depth=1 --branch {{repository.branch}} {{repository.clone_url}} {{workspace.path}}
   cd {{workspace.path}}
+else
+  echo "workspace exists but is not a regular Git checkout" >&2
+  exit 1
 fi
 
 # Strip embedded token from remote URL to avoid persisting credentials in .git/config
