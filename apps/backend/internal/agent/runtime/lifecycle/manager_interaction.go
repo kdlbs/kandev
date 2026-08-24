@@ -880,7 +880,10 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		return err
 	}
 	defer activityLease.Release()
-	m.releaseActivity(executionActivityKey(executionID))
+	// Keep the execution's running activity lease until backend teardown
+	// succeeds. A failed stop remains retryable, so maintenance must not treat
+	// a potentially live runtime as idle. RemoveExecution releases the lease on
+	// the successful path.
 
 	m.logger.Info("stopping agent",
 		zap.String("execution_id", executionID),

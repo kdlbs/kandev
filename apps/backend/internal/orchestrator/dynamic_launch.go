@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
@@ -632,7 +633,12 @@ func (s *Service) relaunchDynamicTaskAfterFailure(
 		return false
 	}
 	if err := s.executor.StopExecution(ctx, data.AgentExecutionID, "dynamic route fallback", true); err != nil {
-		s.logger.Debug("failed to stop dynamic fallback predecessor", zap.Error(err))
+		if errors.Is(err, agentruntime.ErrNotFound) {
+			s.logger.Debug("dynamic fallback predecessor is already absent", zap.Error(err))
+		} else {
+			s.logger.Debug("failed to stop dynamic fallback predecessor", zap.Error(err))
+			return false
+		}
 	}
 	if err := s.repo.UpdateTaskSessionState(ctx, data.SessionID, models.TaskSessionStateCreated, ""); err != nil {
 		return false
