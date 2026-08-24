@@ -24,16 +24,16 @@ test.describe("Plugin task-list facet", () => {
 
     await testPage.getByTestId("tasks-list-sort").click();
     await expect(
-      testPage.getByRole("listbox").getByRole("option", { name: "Fixture facet" }),
+      testPage.getByRole("listbox").getByRole("option", { name: "Fixture tag" }),
     ).toBeVisible();
-    await testPage.getByRole("listbox").getByRole("option", { name: "Fixture facet" }).click();
+    await testPage.getByRole("listbox").getByRole("option", { name: "Fixture tag" }).click();
 
     await testPage.getByTestId("tasks-list-group").click();
-    await testPage.getByRole("listbox").getByRole("option", { name: "Fixture facet" }).click();
+    await testPage.getByRole("listbox").getByRole("option", { name: "Fixture tag" }).click();
 
     const section = testPage.getByTestId("tasks-list-section");
     await expect(section).toHaveCount(1);
-    await expect(section).toContainText("Fixture facet");
+    await expect(section).toContainText("Fixture tag");
     await expect(section).toContainText("Desktop facet task");
   });
 });

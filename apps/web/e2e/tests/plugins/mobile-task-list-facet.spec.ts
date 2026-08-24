@@ -22,11 +22,11 @@ test.describe("Mobile plugin task-list facet", () => {
     await testPage.getByRole("button", { name: "Open menu" }).tap();
     const menu = testPage.getByRole("dialog", { name: "Menu" });
     await menu.getByTestId("mobile-tasks-list-group").tap();
-    await testPage.getByRole("listbox").getByRole("option", { name: "Fixture facet" }).tap();
+    await testPage.getByRole("listbox").getByRole("option", { name: "Fixture tag" }).tap();
 
     const section = testPage.getByTestId("tasks-list-section");
     await expect(section).toHaveCount(1);
-    await expect(section).toContainText("Fixture facet");
+    await expect(section).toContainText("Fixture tag");
     await expect(section).toContainText("Mobile facet task");
     expect(
       await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
