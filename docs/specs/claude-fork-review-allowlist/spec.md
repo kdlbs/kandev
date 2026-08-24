@@ -23,7 +23,7 @@ The same trusted contributors should also receive the repository's one review an
 - The `CLAUDE_REVIEW_ALLOWLIST` gate remains a direct authorization path for the fork review job, so adding labels with the repository `GITHUB_TOKEN` does not create a second review run through the `labeled` event.
 - The preview workflow treats an author in `CLAUDE_REVIEW_ALLOWLIST` as trusted for fork preview deployment on every non-closed pull-request-target event it already handles (`opened`, `synchronize`, `reopened`, and `labeled`). A maintainer-applied `safe-to-review` label remains valid across later `synchronize` events and also authorizes the preview deployment path for the current fork head.
 - A maintainer-applied `safe-to-review` label remains valid across later `synchronize` events and authorizes the existing OpenCode fork-review, preview, and walkthrough paths for the current fork head. The label is not removed automatically after a push.
-- Approval labels remain until a maintainer removes them. A contributor push does not revoke either label or require the maintainer to repeat the same approval for each follow-up commit.
+- The `safe-to-review` label remains until a maintainer removes it. A contributor push does not revoke it or require the maintainer to repeat the same approval for each follow-up commit. The legacy `safe-to-test` label is inert after migration and does not authorize review, walkthrough, or preview workflows.
 - A maintainer may apply `safe-to-review` to request the initial review of an untrusted fork pull request.
 - Pushes, ready-for-review transitions, and reopenings do not automatically start another Claude review. A maintainer can request a later review by commenting `@claude review` on the pull request. That requested review reads the current pull request head, including files newly added by the pull request.
 - Manual pull request reviews keep the trusted default branch at the workflow root and do not check out pull request content. Claude may use read-only local tools for trusted surrounding code, reads the current diff through constrained GitHub commands, and reads complete current-head PR files only through a path-validated, size-limited GET helper bound to the event's PR number. Its only write capability is posting review comments.
@@ -33,9 +33,9 @@ The same trusted contributors should also receive the repository's one review an
 
 ## Permissions
 
-- Only the base-controlled `pull_request_target` workflow may add the approval label. It does not check out or execute pull-request content for the labeling step.
+- Only the base-controlled `pull_request_target` workflow may add the `safe-to-review` approval label. It does not check out or execute pull-request content for the labeling step.
 - A matching `CLAUDE_REVIEW_ALLOWLIST` entry authorizes the existing fork review path and the preview workflow's fork deployment path, which has access to the preview deployment credentials. Repository maintainers are responsible for keeping this variable restricted to trusted contributors.
-- A non-allowlisted fork author still needs the existing maintainer-applied labels. Those labels authorize the current and subsequent fork heads until a maintainer removes them; maintainers are responsible for revoking approval when the contributor or proposed change is no longer trusted.
+- A non-allowlisted fork author still needs the existing maintainer-applied `safe-to-review` label. That label authorizes the current and subsequent fork heads until a maintainer removes it; maintainers are responsible for revoking approval when the contributor or proposed change is no longer trusted.
 
 ## Failure modes
 

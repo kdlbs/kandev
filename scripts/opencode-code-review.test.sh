@@ -137,7 +137,8 @@ fi
 pass "OpenCode review executes the parser script from the trusted base commit in both workflow paths"
 
 artifact_upload_count="$(count_occurrences 'uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1')"
-if [[ "$artifact_upload_count" != "2" ]]; then
+total_artifact_upload_count="$(count_occurrences 'uses: actions/upload-artifact@')"
+if [[ "$artifact_upload_count" != "2" || "$artifact_upload_count" != "$total_artifact_upload_count" ]]; then
   fail "OpenCode review upload-artifact is pinned to v7 in both workflow paths"
 fi
 pass "OpenCode review upload-artifact is pinned to v7 in both workflow paths"
