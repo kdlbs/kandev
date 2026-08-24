@@ -97,7 +97,7 @@ func UsernsProfileJSON() (string, error) {
 		return "", fmt.Errorf("seccomp: unmarshal default profile: %w", err)
 	}
 
-	keepRules, err := processSyscallRules(profile.Syscalls)
+	processedRules, err := processSyscallRules(profile.Syscalls)
 	if err != nil {
 		return "", err
 	}
@@ -106,7 +106,7 @@ func UsernsProfileJSON() (string, error) {
 	// Seeding with the full list (rather than only the names lifted out of the
 	// CAP_SYS_ADMIN group) is what covers syscalls the base profile never
 	// mentions, such as pivot_root.
-	finalSyscalls, err := mergeUnconditionalAllow(profile.Syscalls, keepRules, usernsRelaxedSyscalls)
+	finalSyscalls, err := mergeUnconditionalAllow(processedRules, usernsRelaxedSyscalls)
 	if err != nil {
 		return "", err
 	}
@@ -119,11 +119,11 @@ func UsernsProfileJSON() (string, error) {
 	return string(out), nil
 }
 
-// processSyscallRules iterates over the profile's syscall rules, drops the
-// clone MASKED_EQ and clone3 ERRNO rules, and strips the relaxed namespace
-// syscalls out of the CAP_SYS_ADMIN-gated rules. Returns the indices of the
-// rules to keep.
-func processSyscallRules(rules []json.RawMessage) (keepRules []int, _ error) {
+// processSyscallRules returns a transformed copy of the profile's syscall
+// rules. It drops the clone MASKED_EQ and clone3 ERRNO rules, and strips the
+// relaxed namespace syscalls out of the CAP_SYS_ADMIN-gated rules.
+func processSyscallRules(rules []json.RawMessage) ([]json.RawMessage, error) {
+	processed := make([]json.RawMessage, 0, len(rules))
 	for i, raw := range rules {
 		var rule seccompRule
 		if err := json.Unmarshal(raw, &rule); err != nil {
@@ -150,36 +150,32 @@ func processSyscallRules(rules []json.RawMessage) (keepRules []int, _ error) {
 			}
 			if len(remaining) > 0 {
 				sort.Strings(remaining)
-				modified := makeRule(remaining, seccompActionAllow, capInclude("CAP_SYS_ADMIN"))
-				rules[i] = modified
-				keepRules = append(keepRules, i)
+				processed = append(processed, makeRule(remaining, seccompActionAllow, capInclude("CAP_SYS_ADMIN")))
 			}
 			continue
 		}
 
-		keepRules = append(keepRules, i)
+		processed = append(processed, slices.Clone(raw))
 	}
-	return keepRules, nil
+	return processed, nil
 }
 
 // mergeUnconditionalAllow adds the namespace syscalls to the first
-// unconditional allow rule, or prepends a new one.
-func mergeUnconditionalAllow(rules []json.RawMessage, keepRules []int, addedSyscalls []string) ([]json.RawMessage, error) {
+// unconditional allow rule, or prepends a new one. It never modifies rules.
+func mergeUnconditionalAllow(rules []json.RawMessage, addedSyscalls []string) ([]json.RawMessage, error) {
+	final := make([]json.RawMessage, len(rules))
+	for i, raw := range rules {
+		final[i] = slices.Clone(raw)
+	}
 	if len(addedSyscalls) == 0 {
-		// Just rebuild the syscalls array with kept rules.
-		final := make([]json.RawMessage, 0, len(keepRules))
-		for _, i := range keepRules {
-			final = append(final, rules[i])
-		}
 		return final, nil
 	}
 	addedSyscalls = slices.Clone(addedSyscalls)
 	sort.Strings(addedSyscalls)
-	merged := false
-	for i, raw := range rules {
+	for i, raw := range final {
 		var rule seccompRule
 		if err := json.Unmarshal(raw, &rule); err != nil {
-			continue
+			return nil, fmt.Errorf("seccomp: unmarshal rule %d: %w", i, err)
 		}
 		if isUnconditionalAllowRule(rule) {
 			allNames := make([]string, 0, len(rule.Names)+len(addedSyscalls))
@@ -187,22 +183,12 @@ func mergeUnconditionalAllow(rules []json.RawMessage, keepRules []int, addedSysc
 			allNames = append(allNames, addedSyscalls...)
 			sort.Strings(allNames)
 			allNames = slices.Compact(allNames)
-			rules[i] = makeRule(allNames, seccompActionAllow, nil)
-			merged = true
-			break
+			final[i] = makeRule(allNames, seccompActionAllow, nil)
+			return final, nil
 		}
 	}
-	// Rebuild from keepRules first: prepending to rules beforehand would shift
-	// every index keepRules refers to.
-	final := make([]json.RawMessage, 0, len(keepRules)+1)
-	for _, i := range keepRules {
-		final = append(final, rules[i])
-	}
-	if !merged {
-		newRule := makeRule(addedSyscalls, seccompActionAllow, nil)
-		final = append([]json.RawMessage{newRule}, final...)
-	}
-	return final, nil
+	newRule := makeRule(addedSyscalls, seccompActionAllow, nil)
+	return append([]json.RawMessage{newRule}, final...), nil
 }
 
 func isUnconditionalAllowRule(rule seccompRule) bool {

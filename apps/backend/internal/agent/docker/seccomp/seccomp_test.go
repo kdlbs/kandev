@@ -1,11 +1,68 @@
 package seccomp
 
 import (
+	"bytes"
 	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
 )
+
+func TestProcessSyscallRulesDoesNotMutateInput(t *testing.T) {
+	var profile struct {
+		Syscalls []json.RawMessage `json:"syscalls"`
+	}
+	if err := json.Unmarshal(defaultProfileJSON, &profile); err != nil {
+		t.Fatalf("unmarshal default profile: %v", err)
+	}
+	before := make([]json.RawMessage, len(profile.Syscalls))
+	for i, rule := range profile.Syscalls {
+		before[i] = bytes.Clone(rule)
+	}
+
+	processed, err := processSyscallRules(profile.Syscalls)
+	if err != nil {
+		t.Fatalf("processSyscallRules: %v", err)
+	}
+	if len(processed) >= len(profile.Syscalls) {
+		t.Fatal("processSyscallRules did not remove the clone restrictions")
+	}
+	for i, rule := range profile.Syscalls {
+		if !bytes.Equal(rule, before[i]) {
+			t.Fatalf("processSyscallRules modified input rule %d", i)
+		}
+	}
+}
+
+func TestMergeUnconditionalAllowDoesNotMutateInput(t *testing.T) {
+	rules := []json.RawMessage{
+		json.RawMessage(`{"names":["read"],"action":"SCMP_ACT_ALLOW"}`),
+	}
+	before := bytes.Clone(rules[0])
+
+	merged, err := mergeUnconditionalAllow(rules, []string{"unshare"})
+	if err != nil {
+		t.Fatalf("mergeUnconditionalAllow: %v", err)
+	}
+	if !bytes.Equal(rules[0], before) {
+		t.Fatal("mergeUnconditionalAllow modified input")
+	}
+	allowSet := unconditionalAllowSet(t, mustMarshalRules(t, merged))
+	if !allowSet["read"] || !allowSet["unshare"] {
+		t.Fatalf("merged allow set = %v, want read and unshare", allowSet)
+	}
+}
+
+func mustMarshalRules(t *testing.T, rules []json.RawMessage) string {
+	t.Helper()
+	encoded, err := json.Marshal(struct {
+		Syscalls []json.RawMessage `json:"syscalls"`
+	}{Syscalls: rules})
+	if err != nil {
+		t.Fatalf("marshal syscall rules: %v", err)
+	}
+	return string(encoded)
+}
 
 // usernsProfileAllowedSyscalls returns the set of syscalls that appear in a
 // SCMP_ACT_ALLOW rule with no capability gating, no arch specifics, no
