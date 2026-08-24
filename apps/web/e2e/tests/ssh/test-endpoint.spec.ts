@@ -141,17 +141,26 @@ test.describe("ssh test-endpoint contract", () => {
       )
       .toBe("ssh");
 
-    // Subsequent test run: sha256 matches, status = "cached".
-    const after = await apiClient.testSSHConnection({
-      name: "F5-after",
-      host: seedData.sshTarget.host,
-      port: seedData.sshTarget.port,
-      user: seedData.sshTarget.user,
-      identity_source: "file",
-      identity_file: seedData.sshTarget.identityFile,
-    });
-    expect(after.success).toBe(true);
-    expect(after.agentctl_action).toBe("cached");
+    // Environment ownership is now recorded before the initial launch
+    // completes. Poll the cache probe rather than treating that durable row as
+    // evidence that the asynchronous SSH upload has already finished.
+    await expect
+      .poll(
+        async () => {
+          const after = await apiClient.testSSHConnection({
+            name: "F5-after",
+            host: seedData.sshTarget.host,
+            port: seedData.sshTarget.port,
+            user: seedData.sshTarget.user,
+            identity_source: "file",
+            identity_file: seedData.sshTarget.identityFile,
+          });
+          expect(after.success).toBe(true);
+          return after.agentctl_action;
+        },
+        { message: "SSH agentctl should be cached after the initial launch", timeout: 60_000 },
+      )
+      .toBe("cached");
   });
 
   // F6 — WS dispatcher returns the same shape as the HTTP route. Doesn't

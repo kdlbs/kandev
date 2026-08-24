@@ -20,6 +20,102 @@ import (
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
+func TestCreateNewSessionForStep_TerminalPrimaryReusesCanonicalEnvironment(t *testing.T) {
+	for _, state := range []models.TaskSessionState{
+		models.TaskSessionStateCompleted,
+		models.TaskSessionStateFailed,
+		models.TaskSessionStateCancelled,
+	} {
+		t.Run(string(state), func(t *testing.T) {
+			ctx := context.Background()
+			repo := setupTestRepo(t)
+			seedSession(t, repo, "task-terminal-reentry", "session-terminal-reentry", "step-one")
+			current, err := repo.GetTaskSession(ctx, "session-terminal-reentry")
+			if err != nil {
+				t.Fatal(err)
+			}
+			current.State = state
+			current.AgentProfileID = "profile-old"
+			current.ExecutorID = models.ExecutorIDWorktree
+			current.TaskEnvironmentID = "environment-terminal-reentry"
+			if err := repo.UpdateTaskSession(ctx, current); err != nil {
+				t.Fatal(err)
+			}
+			environment := &models.TaskEnvironment{ID: current.TaskEnvironmentID, TaskID: current.TaskID, ExecutorType: string(models.ExecutorTypeLocal), Status: models.TaskEnvironmentStatusReady}
+			if err := repo.CreateTaskEnvironment(ctx, environment); err != nil {
+				t.Fatal(err)
+			}
+			seedExecutorRunning(t, repo, current.ID, current.TaskID, "sibling-execution")
+			taskRepo := newMockTaskRepo()
+			taskRepo.tasks[current.TaskID] = &v1.Task{ID: current.TaskID, WorkspaceID: "ws1", Title: "Test Task"}
+			svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{
+				repoForExecutionLookup: repo,
+				launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+					return &executor.LaunchAgentResponse{AgentExecutionID: "replacement-execution"}, nil
+				},
+			})
+
+			created, err := svc.createNewSessionForStep(ctx, current.TaskID, current, "profile-new")
+			if err != nil {
+				t.Fatalf("createNewSessionForStep: %v", err)
+			}
+			if created.TaskEnvironmentID != environment.ID {
+				t.Fatalf("environment = %q, want %q", created.TaskEnvironmentID, environment.ID)
+			}
+			if created.AgentExecutionID != "" {
+				t.Fatalf("new session adopted sibling execution %q", created.AgentExecutionID)
+			}
+			got, err := repo.GetTaskEnvironment(ctx, environment.ID)
+			if err != nil || got.Status != models.TaskEnvironmentStatusReady {
+				t.Fatalf("canonical environment = %+v, %v", got, err)
+			}
+		})
+	}
+}
+
+func TestCreateNewSessionForStepKeepsCurrentSessionWhenWorkspaceAttachFails(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-workflow-attach", "session-workflow-current", "step-one")
+	current, err := repo.GetTaskSession(ctx, "session-workflow-current")
+	if err != nil {
+		t.Fatal(err)
+	}
+	current.State = models.TaskSessionStateRunning
+	current.IsPrimary = true
+	current.AgentProfileID = "profile-old"
+	current.ExecutorID = models.ExecutorIDWorktree
+	current.TaskEnvironmentID = "environment-workflow-attach"
+	if err := repo.UpdateTaskSession(ctx, current); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: current.TaskEnvironmentID, TaskID: current.TaskID,
+		ExecutorType: string(models.ExecutorTypeLocal), Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[current.TaskID] = &v1.Task{ID: current.TaskID, WorkspaceID: "ws1", Title: "Test Task"}
+	launchErr := errors.New("attach failed")
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo, launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+		return nil, launchErr
+	}}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+	_, err = svc.createNewSessionForStep(ctx, current.TaskID, current, "profile-new")
+	if !errors.Is(err, launchErr) {
+		t.Fatalf("createNewSessionForStep error = %v, want attach failure", err)
+	}
+	persisted, err := repo.GetTaskSession(ctx, current.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.State != models.TaskSessionStateRunning || !persisted.IsPrimary {
+		t.Fatalf("current session after failed attach = state %q primary %t, want running primary", persisted.State, persisted.IsPrimary)
+	}
+}
+
 func seedAutopilotTaskAndSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID string, sessionState models.TaskSessionState) {
 	t.Helper()
 	ctx := context.Background()
@@ -320,6 +416,11 @@ func TestSwitchWorkflowDispatcherRoutesOnEnterToDestinationProfileSession(t *tes
 	if err := repo.UpdateTaskSession(ctx, session); err != nil {
 		t.Fatalf("update session: %v", err)
 	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-1", TaskID: "t1", Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("create task environment: %v", err)
+	}
 
 	stepGetter := newMockStepGetter()
 	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
@@ -333,7 +434,12 @@ func TestSwitchWorkflowDispatcherRoutesOnEnterToDestinationProfileSession(t *tes
 	}
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks["t1"] = &v1.Task{ID: "t1", WorkflowID: "wf1", State: v1.TaskStateInProgress}
-	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return &executor.LaunchAgentResponse{AgentExecutionID: "workflow-profile-execution"}, nil
+		},
+	}
 	log := testLogger()
 	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
 	svc := createTestServiceWithAgent(repo, stepGetter, taskRepo, agentMgr)
@@ -515,6 +621,11 @@ func TestSwitchSessionForStep(t *testing.T) {
 			CreatedAt: now, UpdatedAt: now,
 		}
 		_ = repo.CreateTask(ctx, task)
+		if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+			ID: "env-1", TaskID: "t1", Status: models.TaskEnvironmentStatusReady,
+		}); err != nil {
+			t.Fatalf("create task environment: %v", err)
+		}
 
 		// Create current session with profile-A
 		session := &models.TaskSession{
@@ -524,6 +635,7 @@ func TestSwitchSessionForStep(t *testing.T) {
 			ExecutorID:        "exec-local",
 			ExecutorProfileID: "ep1",
 			AgentExecutionID:  "ae1",
+			TaskEnvironmentID: "env-1",
 			State:             models.TaskSessionStateRunning,
 			IsPrimary:         true,
 			StartedAt:         now,
@@ -542,7 +654,12 @@ func TestSwitchSessionForStep(t *testing.T) {
 			State:       v1.TaskStateInProgress,
 		}
 
-		agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+		agentMgr := &mockAgentManager{
+			repoForExecutionLookup: repo,
+			launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+				return &executor.LaunchAgentResponse{AgentExecutionID: "workflow-switch-execution"}, nil
+			},
+		}
 		log := testLogger()
 		exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
 		sched := scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.SchedulerConfig{})
@@ -934,6 +1051,11 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 			CreatedAt: now, UpdatedAt: now,
 		}
 		_ = repo.CreateTask(ctx, task)
+		if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+			ID: "env-1", TaskID: "t1", Status: models.TaskEnvironmentStatusReady,
+		}); err != nil {
+			t.Fatalf("create task environment: %v", err)
+		}
 
 		session := &models.TaskSession{
 			ID:                "s1",
@@ -941,6 +1063,7 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 			AgentProfileID:    "profile-a",
 			ExecutorID:        "exec-local",
 			ExecutorProfileID: "ep1",
+			TaskEnvironmentID: "env-1",
 			State:             models.TaskSessionStateRunning,
 			IsPrimary:         true,
 			StartedAt:         now,
@@ -967,7 +1090,12 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 		}
 		sg.steps["step2"] = step
 
-		agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+		agentMgr := &mockAgentManager{
+			repoForExecutionLookup: repo,
+			launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+				return &executor.LaunchAgentResponse{AgentExecutionID: "workflow-on-enter-execution"}, nil
+			},
+		}
 		log := testLogger()
 		exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
 		sched := scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.SchedulerConfig{})

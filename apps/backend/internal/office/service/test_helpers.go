@@ -67,6 +67,20 @@ func (s *Service) ExecSQL(t *testing.T, query string, args ...interface{}) {
 	}
 }
 
+// GetTaskSessionRollupForTest reads task_sessions' AC-10 rollup columns
+// directly, so tests can assert the Office cost subscriber never writes them
+// (docs/specs/task-cost-ledger/spec.md AC-21).
+func (s *Service) GetTaskSessionRollupForTest(t *testing.T, sessionID string) (tokensIn, tokensCachedIn, tokensOut, costSubcents int64) {
+	t.Helper()
+	if err := s.repo.ReaderDB().QueryRowx(
+		`SELECT tokens_in, tokens_cached_in, tokens_out, cost_subcents FROM task_sessions WHERE id = ?`,
+		sessionID,
+	).Scan(&tokensIn, &tokensCachedIn, &tokensOut, &costSubcents); err != nil {
+		t.Fatalf("read task_sessions rollup: %v", err)
+	}
+	return
+}
+
 // GetWorkspaceGroupForTest exposes workspace-group rows for deletion-order tests.
 func (s *Service) GetWorkspaceGroupForTest(ctx context.Context, id string) (*models.WorkspaceGroup, error) {
 	return s.repo.GetWorkspaceGroup(ctx, id)

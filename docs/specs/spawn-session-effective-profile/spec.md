@@ -39,6 +39,11 @@ The successful `spawn_session_kandev` response has this shape:
 ## Failure modes
 
 - If the session launch fails, the tool returns the existing launch error and no success response.
+- If the task workspace is still materializing, the tool returns `CONFLICT`
+  with `reason: workspace_preparing`, `recoverable: true`, and retry guidance.
+- If the canonical workspace cannot be safely attached, the tool returns
+  `CONFLICT` with `reason: workspace_reuse_unsafe`; it never provisions a
+  replacement checkout as part of spawning a session.
 - A successful session launch returns the nonempty effective profile from the launch result.
 - A session name update can still fail without changing the successful launch result.
 

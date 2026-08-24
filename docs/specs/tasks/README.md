@@ -39,6 +39,7 @@ signals, and task-scoped scheduling contracts.
 - [Active clarification lifecycle](requirements/clarification-active-lifecycle.md)
 - [Active clarification lifecycle scenarios](requirements/clarification-active-lifecycle-scenarios.md)
 - [Agent-generated titles](requirements/agent-generated-titles.md)
+- [Additional session workspace reuse](requirements/additional-session-workspace-reuse.md)
 - [Attach workspace sources](requirements/attach-workspace-sources.md)
 - [Archive confirmation](requirements/archive-confirmation.md)
 - [Autopilot mode](requirements/autopilot-mode.md)

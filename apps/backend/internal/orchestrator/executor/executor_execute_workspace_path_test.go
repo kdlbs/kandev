@@ -1,6 +1,10 @@
 package executor
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/kandev/kandev/internal/task/models"
+)
 
 // Pinpointed tests for computeWorkspacePath. The persisted workspace_path
 // becomes agentctl's WorkDir on cold start (GetOrEnsureExecution); it must
@@ -53,6 +57,17 @@ func TestResolveTaskEnvWorkspacePath(t *testing.T) {
 		resp := &LaunchAgentResponse{} // no WorktreePath
 		if got := computeWorkspacePath(req, resp); got != "/repos/myrepo" {
 			t.Fatalf("fallback: want /repos/myrepo, got %q", got)
+		}
+	})
+
+	t.Run("SSH keeps the remote task directory over the host repository path", func(t *testing.T) {
+		req := &LaunchAgentRequest{
+			ExecutorType:   string(models.ExecutorTypeSSH),
+			RepositoryPath: "/host/repos/source-only",
+		}
+		resp := &LaunchAgentResponse{WorkspacePath: "/home/agent/.kandev/tasks/task-1"}
+		if got := computeWorkspacePath(req, resp); got != "/home/agent/.kandev/tasks/task-1" {
+			t.Fatalf("SSH workspace: want remote task directory, got %q", got)
 		}
 	})
 }
