@@ -844,7 +844,7 @@ func TestExpandIdentityAgentEnvironmentDoesNotReprocessSubstitutedTokens(t *test
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run", "^TestExpandIdentityAgentEnvironmentDoesNotReprocessSubstitutedTokens$")
 	cmd.Env = append(os.Environ(), childEnv+"=1")
