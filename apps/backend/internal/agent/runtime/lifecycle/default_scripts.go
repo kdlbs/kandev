@@ -112,7 +112,7 @@ git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
 # Configure GitHub token for gh CLI and git operations
 {{github.auth_setup}}
 
-# ---- Clone repository ----
+# ---- Clone or reuse repository ----
 # The kandev-managed feature-branch checkout is appended as an invariant
 # postlude (see KandevBranchCheckoutPostlude) — keep it out of the default
 # so old profiles snapshotting this script and the postlude never disagree.
@@ -120,8 +120,17 @@ git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
 # repository.branch / repository.clone_url / workspace.path, so a hostile branch
 # name or URL cannot break out of the git clone argument even though the
 # placeholders are referenced bare here. Do not add double quotes around them.
-git clone --depth=1 --branch {{repository.branch}} {{repository.clone_url}} {{workspace.path}}
-cd {{workspace.path}}
+# A stopped container retains its writable workspace. Reuse only a regular
+# checkout; an unexpected existing path remains a fail-closed bootstrap error.
+if [ -d {{workspace.path}}/.git ]; then
+  cd {{workspace.path}}
+elif [ -e {{workspace.path}} ]; then
+  echo "workspace exists but is not a regular Git checkout" >&2
+  exit 1
+else
+  git clone --depth=1 --branch {{repository.branch}} {{repository.clone_url}} {{workspace.path}}
+  cd {{workspace.path}}
+fi
 
 # Strip embedded token from remote URL to avoid persisting credentials in .git/config
 git remote set-url origin "$(git remote get-url origin | sed 's|https://[^@]*@github.com/|https://github.com/|')" 2>/dev/null || true

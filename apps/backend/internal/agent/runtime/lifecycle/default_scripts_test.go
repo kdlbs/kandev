@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -210,6 +211,38 @@ func TestDefaultPrepareScripts_NoInlineFeatureBranchCheckout(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestDefaultDockerPrepareScript_ReusesExistingCloneAfterContainerRestart(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	_, origin := setupPostludeRepo(t, "main")
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	script := strings.NewReplacer(
+		"{{git.identity_setup}}", "",
+		"{{github.auth_setup}}", "",
+		"{{repository.branch}}", "main",
+		"{{repository.clone_url}}", origin,
+		"{{workspace.path}}", workspace,
+		"{{repository.setup_script}}", "",
+	).Replace(DefaultPrepareScript("local_docker"))
+
+	runPrepare := func() {
+		t.Helper()
+		cmd := exec.Command("sh", "-e", "-c", script)
+		cmd.Env = append(os.Environ(), "HOME="+t.TempDir())
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("Docker prepare script failed: %v\n%s\nscript:\n%s", err, output, script)
+		}
+	}
+
+	runPrepare()
+	runPrepare()
+	if got := strings.TrimSpace(string(runIn(t, workspace, "git", "branch", "--show-current"))); got != "main" {
+		t.Fatalf("branch after restart = %q, want main", got)
 	}
 }
 
