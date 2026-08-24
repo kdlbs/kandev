@@ -1,6 +1,7 @@
 package scriptengine
 
 import (
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -257,4 +258,82 @@ func TestGitHubAuthProvider(t *testing.T) {
 			t.Error("expected gh auth setup-git backup")
 		}
 	})
+
+	// `gh auth setup-git` — emitted by the no-token branch above and by the
+	// with-token branch itself — leaves credential.https://github.com.helper
+	// multi-valued. A plain `git config --global <key> <value>` refuses to
+	// overwrite a multi-valued key and exits 5, aborting the prepare script
+	// under `set -euo pipefail`.
+	t.Run("credential helper write uses --replace-all", func(t *testing.T) {
+		provider := GitHubAuthProvider(map[string]string{"GH_TOKEN": "ghp_test"})
+		vars := provider()
+		setup := vars["github.auth_setup"]
+		if !strings.Contains(setup, "git config --global --replace-all credential.https://github.com.helper") {
+			t.Errorf("credential helper must be written with --replace-all, got %q", setup)
+		}
+	})
+}
+
+// credentialHelperCommand returns the single emitted line that writes the
+// GitHub credential helper, failing the test if it is not present.
+func credentialHelperCommand(t *testing.T, setup string) string {
+	t.Helper()
+	for _, line := range strings.Split(setup, "\n") {
+		if strings.HasPrefix(line, "git config") && strings.Contains(line, "credential.https://github.com.helper") {
+			return line
+		}
+	}
+	t.Fatalf("no credential-helper git config line in %q", setup)
+	return ""
+}
+
+// TestGitHubAuthCredentialWriteIsIdempotent is a behavioural regression test: it
+// runs the emitted command against a real git binary and a real (temporary)
+// global config, twice, with the key already multi-valued the way
+// `gh auth setup-git` leaves it. Asserting the flag string alone would not catch
+// a future rewrite that drops back to a single-value write by another spelling —
+// git's exit 5 is the actual contract being defended.
+func TestGitHubAuthCredentialWriteIsIdempotent(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	home := t.TempDir()
+	runGit := func(args ...string) (string, error) {
+		cmd := exec.Command("git", args...)
+		cmd.Env = append([]string{"HOME=" + home, "XDG_CONFIG_HOME=" + home, "GH_TOKEN=ghp_test"}, "PATH="+os.Getenv("PATH"))
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
+
+	// Seed the exact shape `gh auth setup-git` writes: an empty entry that
+	// resets the helper chain, then gh's own helper.
+	for _, v := range []string{"", "!/opt/homebrew/bin/gh auth git-credential"} {
+		if out, err := runGit("config", "--global", "--add", "credential.https://github.com.helper", v); err != nil {
+			t.Fatalf("seeding config failed: %v: %s", err, out)
+		}
+	}
+
+	command := credentialHelperCommand(t, GitHubAuthProvider(map[string]string{"GH_TOKEN": "ghp_test"})()["github.auth_setup"])
+
+	// Run the emitted command twice — the regression is on the second launch.
+	for i := 1; i <= 2; i++ {
+		cmd := exec.Command("/bin/sh", "-c", command)
+		cmd.Env = append([]string{"HOME=" + home, "XDG_CONFIG_HOME=" + home, "GH_TOKEN=ghp_test"}, "PATH="+os.Getenv("PATH"))
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("run %d: credential helper write failed: %v: %s", i, err, out)
+		}
+	}
+
+	out, err := runGit("config", "--global", "--get-all", "credential.https://github.com.helper")
+	if err != nil {
+		t.Fatalf("reading back config failed: %v: %s", err, out)
+	}
+	values := strings.Split(strings.TrimSpace(out), "\n")
+	if len(values) != 1 {
+		t.Fatalf("expected the key to collapse to one value, got %d: %q", len(values), values)
+	}
+	if !strings.Contains(values[0], "x-access-token") {
+		t.Errorf("surviving value is not the one we wrote: %q", values[0])
+	}
 }
