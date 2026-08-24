@@ -3873,17 +3873,19 @@ func (h *Handlers) handleCreateTaskPlan(ctx context.Context, msg *ws.Message) (*
 		createdBy = "agent"
 	}
 
+	guard := h.evaluatePlanWriteGuard(ctx, req.TaskID, req.Content)
 	plan, err := h.planService.CreatePlan(ctx, service.CreatePlanRequest{
-		TaskID:    req.TaskID,
-		Title:     req.Title,
-		Content:   req.Content,
-		CreatedBy: createdBy,
+		TaskID:           req.TaskID,
+		Title:            req.Title,
+		Content:          req.Content,
+		CreatedBy:        createdBy,
+		ForceNewRevision: guard.forceNewRevision,
 	})
 	if err != nil {
 		return planws.CreateError(msg, err)
 	}
 
-	return ws.NewResponse(msg.ID, msg.Action, dto.TaskPlanFromModel(plan))
+	return ws.NewResponse(msg.ID, msg.Action, planWritePayload(dto.TaskPlanFromModel(plan), guard))
 }
 
 // handleGetTaskPlan retrieves a task plan.
@@ -3925,17 +3927,19 @@ func (h *Handlers) handleUpdateTaskPlan(ctx context.Context, msg *ws.Message) (*
 		createdBy = "agent"
 	}
 
+	guard := h.evaluatePlanWriteGuard(ctx, req.TaskID, req.Content)
 	plan, err := h.planService.UpdatePlan(ctx, service.UpdatePlanRequest{
-		TaskID:    req.TaskID,
-		Title:     req.Title,
-		Content:   req.Content,
-		CreatedBy: createdBy,
+		TaskID:           req.TaskID,
+		Title:            req.Title,
+		Content:          req.Content,
+		CreatedBy:        createdBy,
+		ForceNewRevision: guard.forceNewRevision,
 	})
 	if err != nil {
 		return planws.UpdateError(msg, err)
 	}
 
-	return ws.NewResponse(msg.ID, msg.Action, dto.TaskPlanFromModel(plan))
+	return ws.NewResponse(msg.ID, msg.Action, planWritePayload(dto.TaskPlanFromModel(plan), guard))
 }
 
 // handleDeleteTaskPlan deletes a task plan.
