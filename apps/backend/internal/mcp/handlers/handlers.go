@@ -436,6 +436,7 @@ func (h *Handlers) registerTaskReadHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPUpdateTaskMRAutomation, h.handleUpdateTaskMRAutomation)
 	d.RegisterFunc(ws.ActionMCPGetTaskConversation, h.handleGetTaskConversation)
 	d.RegisterFunc(ws.ActionMCPListTaskSessions, h.handleListTaskSessions)
+	d.RegisterFunc(ws.ActionMCPListTaskInbox, h.handleListTaskInbox)
 	d.RegisterFunc(ws.ActionMCPListPendingAgentPermissions, h.handleListPendingAgentPermissions)
 	d.RegisterFunc(ws.ActionMCPResolveAgentPermission, h.handleResolveAgentPermission)
 }

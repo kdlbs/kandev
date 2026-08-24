@@ -1161,6 +1161,25 @@ func (s *Server) registerKanbanTools() {
 		s.wrapHandler("get_task_conversation_kandev", s.getTaskConversationHandler()),
 	)
 	s.registerListTaskSessionsTool()
+	s.registerListTaskInboxTool()
+}
+
+func (s *Server) registerListTaskInboxTool() {
+	if s.taskID == "" {
+		return
+	}
+	s.mcpServer.AddTool(
+		mcp.NewTool("list_task_inbox_kandev",
+			mcp.WithDescription("List inbound delivered and queued prompts across the current task's sessions. This read-only polling view is bound to this task and never marks messages read or drains the queue."),
+			mcp.WithReadOnlyHintAnnotation(true),
+			mcp.WithDestructiveHintAnnotation(false),
+			mcp.WithIdempotentHintAnnotation(true),
+			mcp.WithOpenWorldHintAnnotation(false),
+			mcp.WithString("cursor", mcp.Description("Opaque continuation cursor returned by a previous call")),
+			mcp.WithNumber("limit", mcp.Description("Optional page size")),
+		),
+		s.wrapHandler("list_task_inbox_kandev", s.listTaskInboxHandler()),
+	)
 }
 
 func (s *Server) registerPRAutomationTools() {

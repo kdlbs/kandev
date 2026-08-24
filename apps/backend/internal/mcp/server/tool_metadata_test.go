@@ -66,6 +66,7 @@ func TestCoreToolRiskAnnotations(t *testing.T) {
 		openWorld   bool
 	}{
 		{name: "list_task_sessions_kandev", readOnly: true, destructive: false, idempotent: true, openWorld: false},
+		{name: "list_task_inbox_kandev", readOnly: true, destructive: false, idempotent: true, openWorld: false},
 		{name: "archive_task_kandev", readOnly: false, destructive: false, idempotent: true, openWorld: false},
 		{name: "delete_task_kandev", readOnly: false, destructive: true, idempotent: false, openWorld: false},
 		{name: "stop_task_kandev", readOnly: false, destructive: true, idempotent: true, openWorld: false},

@@ -30,6 +30,11 @@ func TestListTaskSessions_RegisteredWhereverConversationIs(t *testing.T) {
 			require.Contains(t, tools, "get_task_conversation_kandev")
 			assert.Contains(t, tools, "list_task_sessions_kandev",
 				"session discovery must ship with the tools that consume a session_id")
+			if tc.name == "task" {
+				assert.Contains(t, tools, "list_task_inbox_kandev")
+			} else {
+				assert.NotContains(t, tools, "list_task_inbox_kandev")
+			}
 		})
 	}
 }
@@ -42,6 +47,20 @@ func TestListTaskSessions_NotRegisteredInOfficeMode(t *testing.T) {
 	tools := getRegisteredToolNames(s)
 	require.NotContains(t, tools, "get_task_conversation_kandev")
 	assert.NotContains(t, tools, "list_task_sessions_kandev")
+	assert.NotContains(t, tools, "list_task_inbox_kandev")
+}
+
+func TestListTaskInbox_IsBoundToCurrentTask(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"total": 0}}
+	s := newTaskModeServer(t, backend, "task-current")
+	result := callTool(t, s, "list_task_inbox_kandev", map[string]interface{}{})
+	require.False(t, result.IsError)
+	assert.Equal(t, ws.ActionMCPListTaskInbox, backend.lastAction)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "task-current", payload["task_id"])
+	assert.Equal(t, "task-current", payload["caller_task_id"])
+	assert.Equal(t, "test-session", payload["current_session_id"])
 }
 
 func TestListTaskSessions_ToolSchemaIsTaskIDOnly(t *testing.T) {
