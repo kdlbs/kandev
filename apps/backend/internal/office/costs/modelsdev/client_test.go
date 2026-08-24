@@ -449,10 +449,11 @@ func TestClient_FirstBootMissesGracefully(t *testing.T) {
 }
 
 type requestGate struct {
-	server   *httptest.Server
-	started  chan struct{}
-	release  chan struct{}
-	requests atomic.Int32
+	server      *httptest.Server
+	started     chan struct{}
+	release     chan struct{}
+	releaseOnce sync.Once
+	requests    atomic.Int32
 }
 
 func newRequestGate(t *testing.T, body string) *requestGate {
@@ -473,8 +474,17 @@ func newRequestGate(t *testing.T, body string) *requestGate {
 		}
 		_, _ = w.Write([]byte(body))
 	}))
+	// Cleanup runs LIFO: registering releaseAll after server.Close means it
+	// runs first, so a t.Fatal (which skips the explicit release below via
+	// runtime.Goexit) still unblocks any parked handler before Close waits
+	// on it.
 	t.Cleanup(gate.server.Close)
+	t.Cleanup(gate.releaseAll)
 	return gate
+}
+
+func (g *requestGate) releaseAll() {
+	g.releaseOnce.Do(func() { close(g.release) })
 }
 
 func (g *requestGate) waitForFirstRequest(t *testing.T) {
@@ -511,7 +521,7 @@ func TestClient_ConcurrentRefreshCallsShareOneFetch(t *testing.T) {
 	}
 	close(start)
 	gate.waitForFirstRequest(t)
-	close(gate.release)
+	gate.releaseAll()
 	wg.Wait()
 
 	if got := gate.requests.Load(); got != 1 {
@@ -559,7 +569,7 @@ func TestClient_ConcurrentLookupsShareOneBackgroundFetch(t *testing.T) {
 	}
 	refreshDone := make(chan error, 1)
 	go func() { refreshDone <- c.Refresh(context.Background()) }()
-	close(gate.release)
+	gate.releaseAll()
 	select {
 	case err := <-refreshDone:
 		if err != nil {
@@ -604,7 +614,7 @@ func TestClient_CanceledStaleLookupDoesNotCancelJoinedRefresh(t *testing.T) {
 	case <-time.After(25 * time.Millisecond):
 	}
 
-	close(gate.release)
+	gate.releaseAll()
 	select {
 	case err := <-refreshDone:
 		if err != nil {
@@ -615,6 +625,69 @@ func TestClient_CanceledStaleLookupDoesNotCancelJoinedRefresh(t *testing.T) {
 	}
 	if got := gate.requests.Load(); got != 1 {
 		t.Fatalf("models.dev request count after canceled lookup = %d, want 1", got)
+	}
+}
+
+// releaseAll must be safe to call more than once (the happy-path release
+// races the t.Cleanup-registered release on the same gate) and must unblock
+// a handler already parked in the select inside newRequestGate.
+func TestRequestGate_ReleaseAllIsIdempotentAndUnblocksParkedHandlers(t *testing.T) {
+	dir := t.TempDir()
+	cachePath := filepath.Join(dir, "models-dev.json")
+	gate := newRequestGate(t, sampleDataset)
+	c := modelsdev.New(modelsdev.Config{
+		CachePath:  cachePath,
+		URL:        gate.server.URL,
+		TTL:        time.Hour,
+		HTTPClient: gate.server.Client(),
+	}, logger.Default())
+
+	refreshDone := make(chan error, 1)
+	go func() { refreshDone <- c.Refresh(context.Background()) }()
+	gate.waitForFirstRequest(t)
+
+	gate.releaseAll()
+	gate.releaseAll()
+
+	select {
+	case err := <-refreshDone:
+		if err != nil {
+			t.Fatalf("Refresh: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Refresh did not complete after releaseAll")
+	}
+	// t.Cleanup(gate.releaseAll) fires a third call on the same gate below.
+}
+
+// A parked requestGate handler must not block test teardown when the calling
+// t.Run returns without releasing it — the same shape as waitForFirstRequest
+// timing out and running t.Fatal (runtime.Goexit skips the explicit release
+// that follows it), minus the induced failure so the assertion below is
+// meaningful. Pre-fix (raw close(gate.release) only, no t.Cleanup release),
+// the inner t.Run and the outer test both hang until the package's -timeout
+// fires; post-fix it returns in milliseconds because the cleanup-registered
+// gate.releaseAll unblocks the handler so httptest.Server.Close can proceed.
+func TestRequestGate_ParkedHandlerDoesNotBlockTestTeardown(t *testing.T) {
+	start := time.Now()
+	t.Run("park-without-release", func(t *testing.T) {
+		dir := t.TempDir()
+		cachePath := filepath.Join(dir, "models-dev.json")
+		gate := newRequestGate(t, sampleDataset)
+		c := modelsdev.New(modelsdev.Config{
+			CachePath:  cachePath,
+			URL:        gate.server.URL,
+			TTL:        time.Hour,
+			HTTPClient: gate.server.Client(),
+		}, logger.Default())
+
+		go func() { _ = c.Refresh(context.Background()) }()
+		gate.waitForFirstRequest(t)
+		// Intentionally return without releasing the gate — the subtest's
+		// t.Cleanup chain must release it during teardown.
+	})
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
+		t.Fatalf("parked handler blocked teardown for %v, want well under 10s", elapsed)
 	}
 }
 
