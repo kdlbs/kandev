@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
@@ -462,5 +463,97 @@ func TestReclaimStuckSignalSessionsOnce_ReclaimsOnGenuineInactivity(t *testing.T
 	}
 	if _, hasSignal := models.LoadPendingStepSignal(updatedSession.Metadata); hasSignal {
 		t.Error("expected the applied signal to be cleared from the session bag")
+	}
+}
+
+// TestReclaimStuckSignalSessionsOnce_SettlesStuckExecutionBeforeReclaiming is
+// the regression test for PR #2975 review Thread 2: the reclaim path
+// (completeTurnForSession -> updateTaskSessionState ->
+// reconcileStepCompletionSignalLocked) mutates task/session state but never
+// settles the stuck execution's lifecycle-level prompt wait
+// (promptMu/promptDoneCh/promptFinished in
+// agent/runtime/lifecycle/manager_interaction.go). Without settling it first,
+// a subsequent auto-start re-prompt resolves to the SAME still-stuck
+// execution (GetExecutionBySession) and deadlocks behind it — the reclaim
+// looks successful in the DB but the card never actually recovers. The fix
+// must call the existing CancelAgent/escalateStuckCancel primitive (via
+// cancelAgentWhileUnlocked) to settle the execution BEFORE applying any of
+// the reclaim's state mutations, not just before returning from the
+// function.
+func TestReclaimStuckSignalSessionsOnce_SettlesStuckExecutionBeforeReclaiming(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1") // seeds session RUNNING
+	setSessionExecID(t, repo, "s1", "exec-1")
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+		ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+		AutoAdvanceRequiresSignal: true,
+		Events: wfmodels.StepEvents{
+			OnTurnComplete: []wfmodels.OnTurnCompleteAction{
+				{Type: wfmodels.OnTurnCompleteMoveToNext},
+			},
+		},
+	}
+	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+		ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
+	}
+
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo, isAgentRunning: true}
+	agentMgr.currentPromptExecutionID = "exec-1"
+	agentMgr.currentPromptGeneration.Store(1)
+	agentMgr.currentPromptActivityEpoch.Store(1)
+	// Genuinely stale, exactly like _ReclaimsOnGenuineInactivity — this
+	// session must clear the inactivity gate and reach the reclaim.
+	agentMgr.currentPromptLastActivityAt = time.Now().UTC().Add(-15 * time.Minute)
+
+	var cancelSawSessionStillRunning, cancelSawStepStillOne bool
+	agentMgr.cancelAgentFunc = func(_ context.Context, sessionID string) error {
+		if sessionID != "s1" {
+			t.Errorf("CancelAgent called with unexpected session ID %q", sessionID)
+		}
+		if session, err := repo.GetTaskSession(ctx, sessionID); err == nil && session.State == models.TaskSessionStateRunning {
+			cancelSawSessionStillRunning = true
+		}
+		if task, err := repo.GetTask(ctx, "t1"); err == nil && task.WorkflowStepID == "step1" {
+			cancelSawStepStillOne = true
+		}
+		// Mirrors the real lifecycle manager's behavior when a stuck agent
+		// never acknowledges cancel: escalation runs and this sentinel is
+		// returned. cancelAgentWhileUnlocked already tolerates it.
+		return lifecycle.ErrCancelEscalated
+	}
+
+	svc := createEngineService(t, repo, stepGetter, agentMgr)
+
+	signal := models.PendingStepCompletionSignal{
+		StepID:     "step1",
+		Source:     models.StepCompletionSourceAgent,
+		Summary:    "all done",
+		SignaledAt: time.Now().UTC().Add(-30 * time.Minute),
+	}
+	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
+		t.Fatalf("seed pending signal: %v", err)
+	}
+
+	svc.reclaimStuckSignalSessionsOnce(ctx)
+
+	if got := agentMgr.cancelAgentCalls.Load(); got != 1 {
+		t.Fatalf("expected the watchdog to call CancelAgent exactly once to settle the stuck execution before reclaiming, got %d calls", got)
+	}
+	if !cancelSawSessionStillRunning {
+		t.Error("expected CancelAgent to be called before the reclaim flips the session out of RUNNING — settling the execution must happen first, not after")
+	}
+	if !cancelSawStepStillOne {
+		t.Error("expected CancelAgent to be called before the reclaim applies the pending step transition — settling the execution must happen first, not after")
+	}
+
+	updatedTask, err := repo.GetTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if updatedTask.WorkflowStepID != "step2" {
+		t.Fatalf("expected the watchdog to still apply the pending transition to step2 after settling the execution, got %q", updatedTask.WorkflowStepID)
 	}
 }

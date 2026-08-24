@@ -115,15 +115,12 @@ func (s *Service) reclaimStuckSignalSessionIfDue(ctx context.Context, session *m
 		return
 	}
 
-	lock, release := s.acquireCancelInFlightGuard(session.ID)
-	defer release()
-	lock.Lock()
-	defer lock.Unlock()
+	guard := s.lockCancelInFlightGuard(session.ID)
+	defer guard.release()
 	if s.isCancelInFlight(session.ID) {
 		return
 	}
-	latest, ok := s.stuckSignalStillPending(ctx, session.ID, signal.StepID)
-	if !ok {
+	if _, ok := s.stuckSignalStillPending(ctx, session.ID, signal.StepID); !ok {
 		return
 	}
 	if !s.stuckSignalInactiveLongEnough(ctx, session.ID, now) {
@@ -131,6 +128,34 @@ func (s *Service) reclaimStuckSignalSessionIfDue(ctx context.Context, session *m
 			zap.String("task_id", task.ID),
 			zap.String("session_id", session.ID),
 			zap.String("step_id", signal.StepID))
+		return
+	}
+
+	// The session's own lifecycle-level prompt wait (promptMu/promptDoneCh/
+	// promptFinished in agent/runtime/lifecycle) is never released by the
+	// DB-only mutations below. Settle the stuck execution via the existing
+	// CancelAgent/escalateStuckCancel primitive first — unlocking the guard
+	// around the call exactly like the orchestrator's other cancel callers
+	// (see cancelAgentWhileUnlocked) — so a subsequent auto-start re-prompt
+	// targets a fresh execution instead of deadlocking behind this one.
+	// Any error beyond what cancelAgentWhileUnlocked already tolerates
+	// (ErrNoExecutionForSession, ErrCancelEscalated) means the execution
+	// could not be confirmed settled; fail closed and skip this tick rather
+	// than force-closing the turn anyway.
+	if err := s.cancelAgentWhileUnlocked(ctx, session.ID, guard.unlock, guard.relock); err != nil {
+		s.logger.Warn("stuck-signal watchdog: failed to settle stuck execution before reclaim; skipping this tick",
+			zap.String("task_id", task.ID),
+			zap.String("session_id", session.ID),
+			zap.Error(err))
+		return
+	}
+
+	// Re-verify under the reacquired lock: the unlock/relock window above
+	// gave a live agent a chance to resolve the session on its own (turn-end
+	// or failure event), same as the other cancelAgentWhileUnlocked callers
+	// re-read fresh state after their own unlock/relock.
+	latest, ok := s.stuckSignalStillPending(ctx, session.ID, signal.StepID)
+	if !ok {
 		return
 	}
 
