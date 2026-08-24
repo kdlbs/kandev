@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/settings-manual-save.md
+spec: docs/specs/ui/requirements/settings-manual-save.md
 created: 2026-07-29
 status: complete
 ---

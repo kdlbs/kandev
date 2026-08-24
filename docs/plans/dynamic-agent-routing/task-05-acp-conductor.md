@@ -5,7 +5,7 @@ status: in_progress
 wave: 5
 depends_on: ["04-core-route-engine"]
 plan: "plan.md"
-spec: "../../specs/agents/dynamic-agent-routing.md"
+spec: "../../specs/agents/requirements/dynamic-agent-routing.md"
 ---
 
 # Task 05: ACP conductor

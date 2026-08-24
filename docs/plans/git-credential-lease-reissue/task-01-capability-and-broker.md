@@ -5,7 +5,7 @@ status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/git-credential-lease-reissue/spec.md"
+spec: "../../specs/platform/requirements/git-credential-lease-reissue.md"
 ---
 
 # Task 01: Add credential reissue capability

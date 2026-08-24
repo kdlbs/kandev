@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-persist-preference"]
 plan: "plan.md"
-spec: "../../specs/kanban-auto-hide-empty-columns/spec.md"
+spec: "../../specs/ui/requirements/kanban-auto-hide-empty-columns.md"
 ---
 
 # Task 02: Derive and render empty-column visibility

@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-nonblocking-close-feedback"]
 plan: "plan.md"
-spec: "../../specs/ui/terminal-close-feedback.md"
+spec: "../../specs/ui/requirements/terminal-close-feedback.md"
 ---
 
 # Task 02: Responsive optimistic terminal close

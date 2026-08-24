@@ -5,7 +5,7 @@ status: completed
 wave: 4
 depends_on: ["03-auto-merge-settings"]
 plan: "plan.md"
-spec: "../../specs/ui/message-queue-auto-merge.md"
+spec: "../../specs/ui/requirements/message-queue-auto-merge.md"
 ---
 
 # Task 04: Add automatic merge switch

@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["06-session-steer-contract"]
 plan: "plan.md"
-spec: "../../specs/platform/mid-turn-steering.md"
+spec: "../../specs/platform/requirements/mid-turn-steering.md"
 ---
 
 # Task 07: Show a delivery affordance in the composer

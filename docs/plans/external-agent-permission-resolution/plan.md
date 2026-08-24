@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/agents/external-permission-resolution.md
+spec: docs/specs/agents/requirements/external-permission-resolution.md
 decision: docs/decisions/2026-08-11-live-agent-permission-authority.md
 created: 2026-08-11
 status: complete

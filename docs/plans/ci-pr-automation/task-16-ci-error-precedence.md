@@ -6,7 +6,7 @@ wave: 8
 depends_on:
   - "15-final-review-remediation"
 plan: "plan.md"
-spec: "../../specs/ui/ci-pr-automation.md"
+spec: "../../specs/ui/requirements/ci-pr-automation.md"
 ---
 
 # Task 16: Preserve CI error after lifecycle success

@@ -5,7 +5,7 @@ status: done
 wave: 8
 depends_on: ["08-end-to-end-coverage"]
 plan: "plan.md"
-spec: "../../specs/repository-sets/spec.md"
+spec: "../../specs/workspaces/requirements/repository-sets.md"
 ---
 
 # Task 09: Public Documentation For Repository Sets

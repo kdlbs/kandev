@@ -5,7 +5,7 @@ status: complete
 wave: 2
 depends_on: ["01-card-navigation"]
 plan: "plan.md"
-spec: "../../specs/integrations/clickable-integration-cards.md"
+spec: "../../specs/integrations/requirements/clickable-integration-cards.md"
 ---
 
 # Task 02: Integration card navigation E2E coverage
@@ -45,7 +45,7 @@ Task 01.
 
 ## Inputs
 
-- `docs/specs/integrations/clickable-integration-cards.md`, Scenarios.
+- `docs/specs/integrations/requirements/clickable-integration-cards.md`, Scenarios.
 - `docs/plans/clickable-integration-cards/plan.md`, E2E Tests.
 - Existing fixtures from `apps/web/e2e/fixtures/test-base.ts`.
 - Existing layout and toggle tests in `apps/web/e2e/tests/integrations/`.

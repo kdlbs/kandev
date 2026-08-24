@@ -62,7 +62,7 @@ type clarificationResponseClaim struct {
 }
 
 // Resolver implements ResolveBundle
-// (docs/specs/external-question-answering/spec.md, "Resolution semantics"),
+// (docs/specs/integrations/requirements/external-question-answering.md, "Resolution semantics"),
 // the single service-layer operation the REST endpoints and the
 // answer_question_kandev MCP tool both call. It resolves a bundle's identity
 // and authorization (M5, A1-A9), validates the outcome (N6-N8b), claims it
