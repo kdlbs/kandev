@@ -21,6 +21,10 @@ var ErrRepositoryNotFound = repoerrors.ErrRepositoryNotFound
 var ErrTaskEnvironmentNotFound = repoerrors.ErrTaskEnvironmentNotFound
 var ErrWIPLimitExceeded = wfmodels.ErrWIPLimitExceeded
 var ErrExternalIDConflict = repoerrors.ErrExternalIDConflict
+var ErrWorkspaceAgentPrincipalNotFound = repoerrors.ErrWorkspaceAgentPrincipalNotFound
+var ErrWorkspaceAgentPrincipalConflict = repoerrors.ErrWorkspaceAgentPrincipalConflict
+var ErrCoordinatorGrantNotFound = repoerrors.ErrCoordinatorGrantNotFound
+var ErrCoordinatorGrantConflict = repoerrors.ErrCoordinatorGrantConflict
 
 // WorkspaceRepository handles workspace CRUD.
 type WorkspaceRepository interface {
@@ -623,10 +627,14 @@ type WorkspaceAgentPrincipalRepository interface {
 	GetCoordinatorGrant(ctx context.Context, id string) (*models.CoordinatorGrant, error)
 	ListCoordinatorGrants(ctx context.Context, workspaceID, coordinatorTaskID string, includeRevoked bool) ([]*models.CoordinatorGrant, error)
 	ListActiveCoordinatorGrants(ctx context.Context, coordinatorTaskID, workspaceID string) ([]*models.CoordinatorGrant, error)
+	// ListWorkspaceAgentPrincipalGrants is the durable principal lookup. It
+	// never falls back to legacy task-bound rows whose principal ID is empty.
+	ListWorkspaceAgentPrincipalGrants(ctx context.Context, workspaceID, principalID string, includeRevoked bool) ([]*models.CoordinatorGrant, error)
 	ListActiveWorkspaceAgentPrincipalGrants(ctx context.Context, principalID, workspaceID string) ([]*models.CoordinatorGrant, error)
 	RevokeCoordinatorGrant(ctx context.Context, id, revokedByUserID string, revokedAt time.Time) error
 	CreateCoordinatorAuditEvent(ctx context.Context, event *models.CoordinatorAuditEvent) error
 	FinishCoordinatorAuditEvent(ctx context.Context, id, result, detail string) error
 	ListCoordinatorAuditEvents(ctx context.Context, workspaceID, taskID string, limit int) ([]*models.CoordinatorAuditEvent, error)
+	ListWorkspaceAgentPrincipalAuditEventsFiltered(ctx context.Context, workspaceID string, filter models.WorkspaceAgentAuditFilter, limit int) ([]*models.CoordinatorAuditEvent, error)
 	ListWorkspaceAgentPrincipalAuditEvents(ctx context.Context, workspaceID, principalID string, limit int) ([]*models.CoordinatorAuditEvent, error)
 }

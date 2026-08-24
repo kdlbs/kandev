@@ -3,13 +3,16 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 const (
@@ -20,6 +23,11 @@ const (
 const coordinatorGrantColumns = `id, coordinator_task_id, principal_id, workspace_id, scope_kind, scope_id, capabilities, note, granted_by_user_id, granted_at, revoked_at, revoked_by_user_id`
 
 func (r *Repository) CreateWorkspaceAgentPrincipal(ctx context.Context, principal *models.WorkspaceAgentPrincipal) error {
+	if strings.TrimSpace(principal.PluginInstallationID) == "" {
+		// A task-bound or installation-less row is legacy ambiguous state. It
+		// must never become a durable plugin principal.
+		return repoerrors.ErrWorkspaceAgentPrincipalNotFound
+	}
 	if principal.ID == "" {
 		principal.ID = uuid.NewString()
 	}
@@ -28,22 +36,34 @@ func (r *Repository) CreateWorkspaceAgentPrincipal(ctx context.Context, principa
 	}
 	principal.UpdatedAt = principal.CreatedAt
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`INSERT INTO workspace_agent_principals (id, workspace_id, plugin_installation_id, logical_key, backing_task_id, backing_session_id, revoked_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`), principal.ID, principal.WorkspaceID, principal.PluginInstallationID, principal.LogicalKey, principal.BackingTaskID, principal.BackingSessionID, principal.RevokedAt, principal.CreatedAt, principal.UpdatedAt)
+	if isPrincipalContextUniqueViolation(err) {
+		return repoerrors.ErrWorkspaceAgentPrincipalConflict
+	}
 	return err
 }
 
 func (r *Repository) GetWorkspaceAgentPrincipal(ctx context.Context, id string) (*models.WorkspaceAgentPrincipal, error) {
 	p := &models.WorkspaceAgentPrincipal{}
 	var revoked sql.NullTime
-	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`SELECT id, workspace_id, plugin_installation_id, logical_key, backing_task_id, backing_session_id, revoked_at, created_at, updated_at FROM workspace_agent_principals WHERE id = ?`), id).Scan(&p.ID, &p.WorkspaceID, &p.PluginInstallationID, &p.LogicalKey, &p.BackingTaskID, &p.BackingSessionID, &revoked, &p.CreatedAt, &p.UpdatedAt)
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`SELECT id, workspace_id, plugin_installation_id, logical_key, backing_task_id, backing_session_id, revoked_at, created_at, updated_at FROM workspace_agent_principals WHERE id = ? AND plugin_installation_id != ''`), id).Scan(&p.ID, &p.WorkspaceID, &p.PluginInstallationID, &p.LogicalKey, &p.BackingTaskID, &p.BackingSessionID, &revoked, &p.CreatedAt, &p.UpdatedAt)
 	if revoked.Valid {
 		p.RevokedAt = &revoked.Time
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, repoerrors.ErrWorkspaceAgentPrincipalNotFound
 	}
 	return p, err
 }
 
 func (r *Repository) GetWorkspaceAgentPrincipalByContext(ctx context.Context, workspaceID, pluginInstallationID, logicalKey string) (*models.WorkspaceAgentPrincipal, error) {
 	var id string
-	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`SELECT id FROM workspace_agent_principals WHERE workspace_id = ? AND plugin_installation_id = ? AND logical_key = ?`), workspaceID, pluginInstallationID, logicalKey).Scan(&id)
+	if strings.TrimSpace(pluginInstallationID) == "" {
+		return nil, repoerrors.ErrWorkspaceAgentPrincipalNotFound
+	}
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`SELECT id FROM workspace_agent_principals WHERE workspace_id = ? AND plugin_installation_id = ? AND plugin_installation_id != '' AND logical_key = ?`), workspaceID, pluginInstallationID, logicalKey).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, repoerrors.ErrWorkspaceAgentPrincipalNotFound
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +71,10 @@ func (r *Repository) GetWorkspaceAgentPrincipalByContext(ctx context.Context, wo
 }
 
 func (r *Repository) ListWorkspaceAgentPrincipalsByPluginInstallation(ctx context.Context, pluginInstallationID string) ([]*models.WorkspaceAgentPrincipal, error) {
-	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`SELECT id, workspace_id, plugin_installation_id, logical_key, backing_task_id, backing_session_id, revoked_at, created_at, updated_at FROM workspace_agent_principals WHERE plugin_installation_id = ? ORDER BY created_at, id`), pluginInstallationID)
+	if strings.TrimSpace(pluginInstallationID) == "" {
+		return []*models.WorkspaceAgentPrincipal{}, nil
+	}
+	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`SELECT id, workspace_id, plugin_installation_id, logical_key, backing_task_id, backing_session_id, revoked_at, created_at, updated_at FROM workspace_agent_principals WHERE plugin_installation_id = ? AND plugin_installation_id != '' ORDER BY created_at, id`), pluginInstallationID)
 	if err != nil {
 		return nil, err
 	}
@@ -76,7 +99,7 @@ func (r *Repository) ListWorkspaceAgentPrincipalsByPluginInstallation(ctx contex
 // a revocation takes effect on the next authorization check.
 func (r *Repository) GetActiveWorkspaceAgentPrincipalForTask(ctx context.Context, workspaceID, taskID string) (*models.WorkspaceAgentPrincipal, error) {
 	var id string
-	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`SELECT id FROM workspace_agent_principals WHERE workspace_id = ? AND backing_task_id = ? AND revoked_at IS NULL`), workspaceID, taskID).Scan(&id)
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`SELECT id FROM workspace_agent_principals WHERE workspace_id = ? AND backing_task_id = ? AND plugin_installation_id != '' AND revoked_at IS NULL`), workspaceID, taskID).Scan(&id)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -95,14 +118,23 @@ func (r *Repository) RebindWorkspaceAgentPrincipal(ctx context.Context, id, task
 		if err != nil {
 			return err
 		}
-		return sql.ErrNoRows
+		return repoerrors.ErrWorkspaceAgentPrincipalNotFound
 	}
 	return nil
 }
 
 func (r *Repository) RevokeWorkspaceAgentPrincipal(ctx context.Context, id string, revokedAt time.Time) error {
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`UPDATE workspace_agent_principals SET revoked_at = ?, updated_at = ? WHERE id = ? AND revoked_at IS NULL`), revokedAt, revokedAt, id)
-	return err
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`UPDATE workspace_agent_principals SET revoked_at = ?, updated_at = ? WHERE id = ? AND revoked_at IS NULL`), revokedAt, revokedAt, id)
+	if err != nil {
+		return err
+	}
+	if changed, err := result.RowsAffected(); err != nil || changed == 0 {
+		if err != nil {
+			return err
+		}
+		return repoerrors.ErrWorkspaceAgentPrincipalNotFound
+	}
+	return nil
 }
 
 func (r *Repository) CreateCoordinatorGrant(ctx context.Context, grant *models.CoordinatorGrant) error {
@@ -119,11 +151,18 @@ func (r *Repository) CreateCoordinatorGrant(ctx context.Context, grant *models.C
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), grant.ID, grant.CoordinatorTaskID, grant.PrincipalID, grant.WorkspaceID, grant.ScopeKind, grant.ScopeID,
 		grant.Capabilities, grant.Note, grant.GrantedByUserID, grant.GrantedAt, grant.RevokedAt, grant.RevokedByUserID)
+	if isPrincipalGrantScopeUniqueViolation(err) {
+		return repoerrors.ErrCoordinatorGrantConflict
+	}
 	return err
 }
 
 func (r *Repository) GetCoordinatorGrant(ctx context.Context, id string) (*models.CoordinatorGrant, error) {
-	return r.getCoordinatorGrant(ctx, `WHERE id = ?`, id)
+	grant, err := r.getCoordinatorGrant(ctx, `WHERE id = ?`, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, repoerrors.ErrCoordinatorGrantNotFound
+	}
+	return grant, err
 }
 
 func (r *Repository) ListCoordinatorGrants(ctx context.Context, workspaceID, coordinatorTaskID string, includeRevoked bool) ([]*models.CoordinatorGrant, error) {
@@ -148,10 +187,26 @@ func (r *Repository) ListActiveCoordinatorGrants(ctx context.Context, coordinato
 		ORDER BY granted_at DESC, id DESC`, coordinatorTaskID, workspaceID)
 }
 
+// ListWorkspaceAgentPrincipalGrants looks up grants by durable principal ID.
+// Empty principal IDs are legacy task-bound grants and are intentionally never
+// visible through this path.
+func (r *Repository) ListWorkspaceAgentPrincipalGrants(ctx context.Context, workspaceID, principalID string, includeRevoked bool) ([]*models.CoordinatorGrant, error) {
+	if principalID == "" {
+		return []*models.CoordinatorGrant{}, nil
+	}
+	query := `SELECT ` + coordinatorGrantColumns + ` FROM task_coordinator_grants WHERE workspace_id = ? AND principal_id = ? AND principal_id != ''`
+	args := []interface{}{workspaceID, principalID}
+	if !includeRevoked {
+		query += ` AND revoked_at IS NULL`
+	}
+	query += ` ORDER BY granted_at DESC, id DESC`
+	return r.listCoordinatorGrants(ctx, query, args...)
+}
+
 // ListActiveWorkspaceAgentPrincipalGrants is the principal-only authorization
 // path. Legacy task-bound rows have an empty principal_id and never match.
 func (r *Repository) ListActiveWorkspaceAgentPrincipalGrants(ctx context.Context, principalID, workspaceID string) ([]*models.CoordinatorGrant, error) {
-	return r.listCoordinatorGrants(ctx, `SELECT `+coordinatorGrantColumns+` FROM task_coordinator_grants WHERE principal_id = ? AND workspace_id = ? AND revoked_at IS NULL`, principalID, workspaceID)
+	return r.ListWorkspaceAgentPrincipalGrants(ctx, workspaceID, principalID, false)
 }
 
 func (r *Repository) RevokeCoordinatorGrant(ctx context.Context, id, revokedByUserID string, revokedAt time.Time) error {
@@ -169,7 +224,7 @@ func (r *Repository) RevokeCoordinatorGrant(ctx context.Context, id, revokedByUs
 		if err != nil {
 			return err
 		}
-		return sql.ErrNoRows
+		return repoerrors.ErrCoordinatorGrantNotFound
 	}
 	return nil
 }
@@ -258,8 +313,40 @@ func (r *Repository) ListCoordinatorAuditEvents(ctx context.Context, workspaceID
 // query. Actor task/session bindings may change after repair, so querying by
 // those replaceable ids would lose history.
 func (r *Repository) ListWorkspaceAgentPrincipalAuditEvents(ctx context.Context, workspaceID, principalID string, limit int) ([]*models.CoordinatorAuditEvent, error) {
-	query := `SELECT id, occurred_at, principal_id, actor_task_id, actor_session_id, target_task_id, workspace_id, action, capability, decision, deny_reason, grant_id, result, detail FROM task_coordinator_audit_events WHERE workspace_id = ? AND principal_id = ? ORDER BY occurred_at DESC, id DESC`
-	args := []interface{}{workspaceID, principalID}
+	return r.ListWorkspaceAgentPrincipalAuditEventsFiltered(ctx, workspaceID, models.WorkspaceAgentAuditFilter{PrincipalID: principalID}, limit)
+}
+
+// ListWorkspaceAgentPrincipalAuditEventsFiltered is the server-side filtered
+// audit query. Task and session identifiers remain internal; callers above
+// this layer receive only the redacted public audit projection.
+func (r *Repository) ListWorkspaceAgentPrincipalAuditEventsFiltered(ctx context.Context, workspaceID string, filter models.WorkspaceAgentAuditFilter, limit int) ([]*models.CoordinatorAuditEvent, error) {
+	query := `SELECT id, occurred_at, principal_id, actor_task_id, actor_session_id, target_task_id, workspace_id, action, capability, decision, deny_reason, grant_id, result, detail FROM task_coordinator_audit_events WHERE workspace_id = ?`
+	args := []interface{}{workspaceID}
+	if filter.PrincipalID != "" {
+		query += ` AND principal_id = ?`
+		args = append(args, filter.PrincipalID)
+	}
+	if filter.ActorTaskID != "" {
+		query += ` AND actor_task_id = ?`
+		args = append(args, filter.ActorTaskID)
+	}
+	if filter.TargetTaskID != "" {
+		query += ` AND target_task_id = ?`
+		args = append(args, filter.TargetTaskID)
+	}
+	if filter.Action != "" {
+		query += ` AND action = ?`
+		args = append(args, filter.Action)
+	}
+	if filter.Decision != "" {
+		query += ` AND decision = ?`
+		args = append(args, filter.Decision)
+	}
+	if filter.Result != "" {
+		query += ` AND result = ?`
+		args = append(args, filter.Result)
+	}
+	query += ` ORDER BY occurred_at DESC, id DESC`
 	if limit > 0 {
 		query += ` LIMIT ?`
 		args = append(args, limit)

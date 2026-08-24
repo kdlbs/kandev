@@ -58,3 +58,15 @@ type CoordinatorAuditEvent struct {
 	Result         string `json:"result"`
 	Detail         string `json:"detail"`
 }
+
+// WorkspaceAgentAuditFilter narrows an internal workspace-agent audit query.
+// It intentionally contains only server-resolved identity and reason-code
+// fields; plugin callers receive the separately redacted Host projection.
+type WorkspaceAgentAuditFilter struct {
+	PrincipalID  string
+	ActorTaskID  string
+	TargetTaskID string
+	Action       string
+	Decision     string
+	Result       string
+}

@@ -10,7 +10,7 @@ func (r *Repository) initCoordinatorAuthoritySchema() error {
 		CREATE TABLE IF NOT EXISTS workspace_agent_principals (
 			id TEXT PRIMARY KEY,
 			workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-			plugin_installation_id TEXT NOT NULL,
+			plugin_installation_id TEXT NOT NULL CHECK(plugin_installation_id != ''),
 			logical_key TEXT NOT NULL,
 			backing_task_id TEXT NOT NULL DEFAULT '',
 			backing_session_id TEXT NOT NULL DEFAULT '',

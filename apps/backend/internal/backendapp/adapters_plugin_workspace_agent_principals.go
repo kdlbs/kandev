@@ -2,7 +2,7 @@ package backendapp
 
 import (
 	"context"
-	"database/sql"
+	"errors"
 	"sort"
 	"strings"
 	"time"
@@ -27,7 +27,7 @@ func (a pluginsWorkspaceAgentPrincipalSourceAdapter) GetPluginWorkspaceAgentPrin
 		return nil, nil, status.Error(codes.InvalidArgument, "workspace_id and logical_key are required")
 	}
 	principal, err := a.repo.GetWorkspaceAgentPrincipalByContext(ctx, workspaceID, pluginID, logicalKey)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, taskrepo.ErrWorkspaceAgentPrincipalNotFound) {
 		// Do not disclose whether an ID belongs to a different workspace or
 		// installation: absent and foreign are both NotFound.
 		return nil, nil, status.Error(codes.NotFound, "workspace agent principal not found")
@@ -48,7 +48,7 @@ func (a pluginsWorkspaceAgentPrincipalSourceAdapter) GetPluginWorkspaceAgentPrin
 		principalStatus.State = "revoked"
 		return &descriptor, &principalStatus, nil
 	}
-	grants, err := a.repo.ListActiveWorkspaceAgentPrincipalGrants(ctx, principal.ID, workspaceID)
+	grants, err := a.repo.ListWorkspaceAgentPrincipalGrants(ctx, workspaceID, principal.ID, false)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -61,7 +61,7 @@ func (a pluginsWorkspaceAgentPrincipalSourceAdapter) ListPluginWorkspaceAgentPri
 	if err != nil {
 		return nil, err
 	}
-	events, err := a.repo.ListWorkspaceAgentPrincipalAuditEvents(ctx, workspaceID, principal.ID, 10_000)
+	events, err := a.repo.ListWorkspaceAgentPrincipalAuditEventsFiltered(ctx, workspaceID, models.WorkspaceAgentAuditFilter{PrincipalID: principal.ID}, 10_000)
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +91,7 @@ func (a pluginsWorkspaceAgentPrincipalSourceAdapter) BindPluginWorkspaceAgentRun
 	if err != nil {
 		return err
 	}
-	if err := a.repo.RebindWorkspaceAgentPrincipal(ctx, principal.ID, taskID, sessionID, time.Now().UTC()); err == sql.ErrNoRows {
+	if err := a.repo.RebindWorkspaceAgentPrincipal(ctx, principal.ID, taskID, sessionID, time.Now().UTC()); errors.Is(err, taskrepo.ErrWorkspaceAgentPrincipalNotFound) {
 		return status.Error(codes.PermissionDenied, "workspace agent principal is revoked")
 	} else {
 		return err
@@ -120,7 +120,7 @@ func (a pluginsWorkspaceAgentPrincipalSourceAdapter) activePrincipalForRun(ctx c
 		return nil, status.Error(codes.InvalidArgument, "workspace_id and logical_key are required")
 	}
 	principal, err := a.repo.GetWorkspaceAgentPrincipalByContext(ctx, workspaceID, pluginID, logicalKey)
-	if err == sql.ErrNoRows || principal == nil || principal.WorkspaceID != workspaceID || principal.PluginInstallationID != pluginID {
+	if errors.Is(err, taskrepo.ErrWorkspaceAgentPrincipalNotFound) || principal == nil || principal.WorkspaceID != workspaceID || principal.PluginInstallationID != pluginID {
 		return nil, status.Error(codes.FailedPrecondition, "workspace agent principal configuration is required")
 	}
 	if err != nil {
@@ -129,7 +129,7 @@ func (a pluginsWorkspaceAgentPrincipalSourceAdapter) activePrincipalForRun(ctx c
 	if principal.RevokedAt != nil {
 		return nil, status.Error(codes.PermissionDenied, "workspace agent principal is revoked")
 	}
-	grants, err := a.repo.ListActiveWorkspaceAgentPrincipalGrants(ctx, principal.ID, workspaceID)
+	grants, err := a.repo.ListWorkspaceAgentPrincipalGrants(ctx, workspaceID, principal.ID, false)
 	if err != nil {
 		return nil, err
 	}

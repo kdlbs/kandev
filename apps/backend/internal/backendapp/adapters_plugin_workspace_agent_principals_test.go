@@ -3,6 +3,7 @@ package backendapp
 import (
 	"context"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/jmoiron/sqlx"
@@ -44,6 +45,14 @@ func TestPluginsWorkspaceAgentPrincipalSourceAdapter_ScopesAndRedacts(t *testing
 	require.NoError(t, err)
 	require.Equal(t, []string{"audit-1"}, []string{audit[0].ID})
 	require.Equal(t, "grant", audit[0].DetailCode)
+	for _, privateField := range []string{"BackingTaskID", "BackingSessionID", "PluginInstallationID", "GrantedByUserID", "TargetTaskID", "ActorSessionID"} {
+		if _, found := reflect.TypeOf(*descriptor).FieldByName(privateField); found {
+			t.Fatalf("public principal descriptor unexpectedly exposes %s", privateField)
+		}
+		if _, found := reflect.TypeOf(audit[0]).FieldByName(privateField); found {
+			t.Fatalf("public principal audit unexpectedly exposes %s", privateField)
+		}
+	}
 
 	_, _, err = adapter.GetPluginWorkspaceAgentPrincipal(ctx, "plugin-other", "ws-owned", "agent")
 	require.Equal(t, codes.NotFound, status.Code(err), "foreign installation is indistinguishable from absent")
