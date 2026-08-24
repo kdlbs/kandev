@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
 )
 
 const (
@@ -344,6 +345,19 @@ func (s *Service) ListMessages(ctx context.Context, sessionID string) ([]*models
 		return nil, err
 	}
 	return s.messages.ListMessages(ctx, sessionID)
+}
+
+// ListTaskInboxMessages returns a bounded task-wide view of delivered user
+// messages for the task inbox projection.
+func (s *Service) ListTaskInboxMessages(ctx context.Context, taskID string, opts models.TaskInboxMessagesOptions) ([]*models.Message, bool, map[string]int, error) {
+	if err := s.authorizeTaskID(ctx, taskID); err != nil {
+		return nil, false, nil, err
+	}
+	repo, ok := s.messages.(repository.TaskInboxMessageRepository)
+	if !ok {
+		return nil, false, nil, fmt.Errorf("message repository does not support task inbox queries")
+	}
+	return repo.ListTaskInboxMessages(ctx, taskID, opts)
 }
 
 // ListMessagesPaginated returns messages for a session with pagination options.

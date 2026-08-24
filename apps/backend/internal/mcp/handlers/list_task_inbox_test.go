@@ -53,6 +53,67 @@ func TestHandleListTaskInbox_AggregatesDeliveredMessagesForOwnTask(t *testing.T)
 	assert.NotContains(t, string(resp.Payload), "secret")
 }
 
+func TestHandleListTaskInbox_PaginatesDeliveredMessagesWithCursor(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	_, task, primary := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+	sibling := &models.TaskSession{ID: "inbox-page-sibling", TaskID: task.ID, State: models.TaskSessionStateWaitingForInput}
+	require.NoError(t, repo.CreateTaskSession(ctx, sibling))
+	first, err := svc.CreateMessage(ctx, &service.CreateMessageRequest{
+		TaskSessionID: primary.ID,
+		TaskID:        task.ID,
+		AuthorType:    "user",
+		Content:       "first",
+	})
+	require.NoError(t, err)
+	second, err := svc.CreateMessage(ctx, &service.CreateMessageRequest{
+		TaskSessionID: sibling.ID,
+		TaskID:        task.ID,
+		AuthorType:    "user",
+		Content:       "second",
+	})
+	require.NoError(t, err)
+
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+	request := func(cursor string) *ws.Message {
+		return makeWSMessage(t, ws.ActionMCPListTaskInbox, map[string]interface{}{
+			"task_id":        task.ID,
+			"caller_task_id": task.ID,
+			"limit":          1,
+			"cursor":         cursor,
+		})
+	}
+	var firstPayload struct {
+		Items   []inboxItem `json:"items"`
+		Total   int         `json:"total"`
+		Cursor  string      `json:"cursor"`
+		HasMore bool        `json:"has_more"`
+	}
+	resp, err := h.handleListTaskInbox(ctx, request(""))
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(resp.Payload, &firstPayload))
+	require.Len(t, firstPayload.Items, 1)
+	assert.Equal(t, first.ID, firstPayload.Items[0].ID)
+	assert.Equal(t, 2, firstPayload.Total)
+	assert.True(t, firstPayload.HasMore)
+	assert.NotEmpty(t, firstPayload.Cursor)
+
+	var secondPayload struct {
+		Items   []inboxItem `json:"items"`
+		Total   int         `json:"total"`
+		Cursor  string      `json:"cursor"`
+		HasMore bool        `json:"has_more"`
+	}
+	resp, err = h.handleListTaskInbox(ctx, request(firstPayload.Cursor))
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(resp.Payload, &secondPayload))
+	require.Len(t, secondPayload.Items, 1)
+	assert.Equal(t, second.ID, secondPayload.Items[0].ID)
+	assert.Equal(t, 2, secondPayload.Total)
+	assert.False(t, secondPayload.HasMore)
+	assert.Empty(t, secondPayload.Cursor)
+}
+
 func TestHandleListTaskInbox_RejectsForeignTarget(t *testing.T) {
 	h := &Handlers{}
 	resp, err := h.handleListTaskInbox(context.Background(), makeWSMessage(t, ws.ActionMCPListTaskInbox, map[string]interface{}{"task_id": "foreign", "caller_task_id": "own"}))

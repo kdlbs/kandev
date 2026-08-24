@@ -1554,6 +1554,8 @@ func TestExecuteQueuedMessage_RequeuesCoalescedMessageWithOriginalSender(t *test
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
 	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
 
 	queuedMsg := &messagequeue.QueuedMessage{
 		ID:        "q1",
@@ -1582,6 +1584,16 @@ func TestExecuteQueuedMessage_RequeuesCoalescedMessageWithOriginalSender(t *test
 	}
 	if status.Entries[0].Metadata[messagequeue.MetadataCoalesceKey] != "ci-key" {
 		t.Fatalf("expected coalesce metadata to be preserved, got %+v", status.Entries[0].Metadata)
+	}
+	if len(messages.userMessages) != 1 {
+		t.Fatalf("expected one delivered user message, got %d", len(messages.userMessages))
+	}
+	transitionID, _ := messages.userMessages[0].metadata[inboxTransitionMetadataKey].(string)
+	if transitionID == "" {
+		t.Fatalf("expected delivered user message to have a transition ID, got %#v", messages.userMessages[0].metadata)
+	}
+	if got := status.Entries[0].Metadata[inboxTransitionMetadataKey]; got != transitionID {
+		t.Fatalf("queued transition ID = %#v, want delivered transition ID %q", got, transitionID)
 	}
 }
 

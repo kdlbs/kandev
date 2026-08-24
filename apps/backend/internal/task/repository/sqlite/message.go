@@ -146,6 +146,78 @@ func (r *Repository) ListMessages(ctx context.Context, sessionID string) ([]*mod
 	return msgs, err
 }
 
+// ListTaskInboxMessages returns a bounded, task-wide view of delivered user
+// messages. The cursor is a keyset over normalized created_at and message ID,
+// so callers do not need to load every session transcript before pagination.
+func (r *Repository) ListTaskInboxMessages(
+	ctx context.Context,
+	taskID string,
+	opts models.TaskInboxMessagesOptions,
+) ([]*models.Message, bool, map[string]int, error) {
+	counts := make(map[string]int)
+	countRows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT task_session_id, COUNT(*)
+		FROM task_session_messages
+		WHERE task_id = ? AND author_type = ?
+		GROUP BY task_session_id
+	`), taskID, string(models.MessageAuthorUser))
+	if err != nil {
+		return nil, false, nil, err
+	}
+	for countRows.Next() {
+		var sessionID string
+		var count int
+		if err := countRows.Scan(&sessionID, &count); err != nil {
+			_ = countRows.Close()
+			return nil, false, nil, err
+		}
+		counts[sessionID] = count
+	}
+	if err := countRows.Err(); err != nil {
+		_ = countRows.Close()
+		return nil, false, nil, err
+	}
+	if err := countRows.Close(); err != nil {
+		return nil, false, nil, err
+	}
+
+	limit := opts.Limit
+	if limit < 0 {
+		limit = 0
+	}
+	nm := dialect.NormalizedMicrosecond(r.ro.DriverName(), "created_at")
+	query := `
+		SELECT id, task_session_id, task_id, turn_id, author_type, author_id,
+		       content, requests_input, type, metadata, created_at, updated_at
+		FROM task_session_messages
+		WHERE task_id = ? AND author_type = ?`
+	args := []interface{}{taskID, string(models.MessageAuthorUser)}
+	if !opts.AfterCreatedAt.IsZero() {
+		bound := "?"
+		if dialect.IsPostgres(r.ro.DriverName()) {
+			bound = "CAST(? AS timestamp)"
+		}
+		query += fmt.Sprintf(" AND (%s > %s OR (%s = %s AND id > ?))", nm, bound, nm, bound)
+		cursorKey := formatPromptKey(opts.AfterCreatedAt)
+		args = append(args, cursorKey, cursorKey, opts.AfterID)
+	}
+	query += fmt.Sprintf(" ORDER BY %s ASC, id ASC", nm)
+	if limit > 0 {
+		query += sqlLimitClause
+		args = append(args, limit+1)
+	}
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
+	if err != nil {
+		return nil, false, nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	messages, hasMore, err := scanMessageRows(rows, limit)
+	if err != nil {
+		return nil, false, nil, err
+	}
+	return messages, hasMore, counts, nil
+}
+
 // ListMessagesByTurnID returns all messages for a single turn ordered by
 // creation time. Backed by idx_messages_turn_id, so it reads only the turn's
 // own rows rather than the whole session's history.

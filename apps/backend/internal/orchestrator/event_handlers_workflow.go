@@ -2886,7 +2886,7 @@ func (s *Service) autoStartPassthroughPrompt(
 // failed transiently and the queue was later drained via boot_ready.
 const (
 	metaKeyUserMessageRecorded = "user_message_recorded"
-	inboxTransitionMetadataKey = "inbox_transition_id"
+	inboxTransitionMetadataKey = messagequeue.MetadataInboxTransitionID
 )
 
 type workflowMessageOrigin struct {
@@ -2965,6 +2965,7 @@ func (s *Service) handleCreatedAutoStartLaunchFailure(
 	attachments []v1.MessageAttachment,
 	origin workflowMessageOrigin,
 	references []v1.EntityReference,
+	inboxTransitionID string,
 	takenMsg *messagequeue.QueuedMessage,
 ) {
 	promptQueued := false
@@ -2973,7 +2974,7 @@ func (s *Service) handleCreatedAutoStartLaunchFailure(
 		if queueErr := s.queueAutoStartPrompt(
 			ctx, taskID, sessionID, prompt, planMode,
 			attachments, origin, userMessageRecorded, references,
-			"",
+			inboxTransitionID,
 		); queueErr != nil {
 			s.logger.Warn("failed to queue auto-start prompt after launch failure",
 				zap.String("task_id", taskID),
@@ -3099,7 +3100,7 @@ func (s *Service) autoStartStepPrompt(
 			s.handleCreatedAutoStartLaunchFailure(
 				ctx, taskID, sessionID, stepName, prompt, err,
 				planMode, shouldQueueIfBusy, userMsgRecorded,
-				attachments, origin, references, takenMsg,
+				attachments, origin, references, inboxTransitionID, takenMsg,
 			)
 		}
 		return err
