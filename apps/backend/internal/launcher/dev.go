@@ -157,10 +157,6 @@ func devLaunchConfigFor(opts Options, configs ...*config.Config) (devLaunchConfi
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return devLaunchConfig{}, 1
 	}
-	homeDir := devKandevHome(repoRoot)
-	if !isInsideKandevTask(repoRoot) && startupConfig.SourceFor("homeDir") == config.SourceConfiguration {
-		homeDir = startupConfig.ResolvedHomeDir()
-	}
 	return devLaunchConfig{
 		repoRoot:  repoRoot,
 		ports:     ports,
@@ -168,7 +164,7 @@ func devLaunchConfigFor(opts Options, configs ...*config.Config) (devLaunchConfi
 		extra:     database.extra,
 		logLevel:  resolveLogLevelForConfig(opts, startupConfig),
 		debug:     opts.Debug,
-		homeDir:   homeDir,
+		homeDir:   database.homeDir,
 		startup:   startupConfig,
 		endpoints: endpoints,
 	}, 0

@@ -146,8 +146,8 @@ func TestResolveDevBackendEnvHonorsExplicitDatabasePath(t *testing.T) {
 	if env["KANDEV_DATABASE_PATH"] != "/custom/kandev.db" {
 		t.Fatalf("KANDEV_DATABASE_PATH = %q", env["KANDEV_DATABASE_PATH"])
 	}
-	if _, ok := env["KANDEV_HOME_DIR"]; ok {
-		t.Fatal("explicit override must not set KANDEV_HOME_DIR")
+	if want := filepath.Join(repo, ".kandev-dev"); env["KANDEV_HOME_DIR"] != want {
+		t.Fatalf("KANDEV_HOME_DIR = %q, want repo-local dev home %q", env["KANDEV_HOME_DIR"], want)
 	}
 	if env["KANDEV_DEBUG_DEV_MODE"] != "true" {
 		t.Fatalf("KANDEV_DEBUG_DEV_MODE = %q, want true", env["KANDEV_DEBUG_DEV_MODE"])
@@ -258,6 +258,33 @@ func TestResolveDevBackendEnvHonorsEnvironmentDatabaseBeforeAmbientHome(t *testi
 	}
 	if env := devEnvToMap(extra); env["KANDEV_DATABASE_PATH"] != explicitDB {
 		t.Fatalf("KANDEV_DATABASE_PATH = %q, want %q", env["KANDEV_DATABASE_PATH"], explicitDB)
+	} else if want := filepath.Join(repo, ".kandev-dev"); env["KANDEV_HOME_DIR"] != want {
+		t.Fatalf("KANDEV_HOME_DIR = %q, want repo-local dev home %q", env["KANDEV_HOME_DIR"], want)
+	}
+}
+
+func TestResolveDevBackendEnvPinsConfiguredHomeForConfiguredDatabase(t *testing.T) {
+	repo := makeRepoTree(t)
+	t.Setenv("KANDEV_TASK_ID", "")
+	t.Setenv("KANDEV_HOME_DIR", filepath.Join(t.TempDir(), "ambient-home"))
+	configuredHome := filepath.Join(t.TempDir(), "configured-home")
+	explicitDB := filepath.Join(t.TempDir(), "configured.db")
+	cfg := &commonconfig.Config{
+		HomeDir:  configuredHome,
+		Database: commonconfig.DatabaseConfig{Path: explicitDB},
+		Source: commonconfig.ConfigSource{Values: map[string]commonconfig.SettingSource{
+			"homeDir":       commonconfig.SourceConfiguration,
+			"database.path": commonconfig.SourceConfiguration,
+		}},
+	}
+
+	dbPath, extra := resolveDevBackendEnv(repo, cfg)
+	if dbPath != explicitDB {
+		t.Fatalf("dbPath = %q, want %q", dbPath, explicitDB)
+	}
+	env := devEnvToMap(extra)
+	if env["KANDEV_HOME_DIR"] != configuredHome {
+		t.Fatalf("KANDEV_HOME_DIR = %q, want configured dev home %q", env["KANDEV_HOME_DIR"], configuredHome)
 	}
 }
 
@@ -312,5 +339,21 @@ func TestValidateDevDatabaseTargetRejectsRepoLocalSymlinkEscape(t *testing.T) {
 	target := devDatabaseTarget{path: filepath.Join(devHome, "data", "kandev.db"), source: devDatabaseDefault}
 	if err := validateDevDatabaseTarget(repo, target); err == nil {
 		t.Fatal("validateDevDatabaseTarget accepted a symlinked repo-local database path")
+	}
+}
+
+func TestValidateDevDatabaseTargetRejectsExplicitRepoLocalSymlinkEscape(t *testing.T) {
+	repo := makeRepoTree(t)
+	devHome := devKandevHome(repo)
+	dataDir := filepath.Join(devHome, "data")
+	if err := os.MkdirAll(devHome, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), dataDir); err != nil {
+		t.Fatal(err)
+	}
+	target := devDatabaseTarget{path: filepath.Join(dataDir, "kandev.db"), source: devDatabaseEnvironment}
+	if err := validateDevDatabaseTarget(repo, target); err == nil {
+		t.Fatal("validateDevDatabaseTarget accepted an explicit database path through a repo-local symlink")
 	}
 }

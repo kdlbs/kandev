@@ -90,7 +90,10 @@ usage error, not a silent fallback.
 
 Dev resolves one database target, with provenance, before any backup, output,
 supervisor setup, or backend launch. That exact target is passed explicitly to
-the backend child so these consumers cannot resolve different databases.
+the backend child so these consumers cannot resolve different databases. The
+launcher also pins the child's `KANDEV_HOME_DIR` to the selected dev-state home
+(repo-local by default, or explicit YAML `homeDir`) so ambient parent state
+cannot diverge from supervisor state when an explicit database is selected.
 
 `KANDEV_DATABASE_PATH` resolution keeps its current three-way rule:
 
