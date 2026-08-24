@@ -136,6 +136,13 @@ func backendLogPathForConfig(cfg *config.Config) string {
 	return filepath.Join(resolveHomeDirForConfig(cfg), "logs", "backend-logs.log")
 }
 
+func backendLogPathForDevConfig(cfg devLaunchConfig) string {
+	if homeDir := strings.TrimSpace(processEnvValue(cfg.extra, "KANDEV_HOME_DIR")); homeDir != "" {
+		return filepath.Join(homeDir, "logs", "backend-logs.log")
+	}
+	return backendLogPathForConfig(cfg.startup)
+}
+
 func startupFailureStoppedBackend(err error) bool {
 	var healthErr *backendHealthError
 	return !errors.As(err, &healthErr) || !healthErr.ChildExited

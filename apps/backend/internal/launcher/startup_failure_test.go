@@ -1,6 +1,7 @@
 package launcher
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -49,4 +50,34 @@ func TestStartupFailureFormattingIncludesSafeEvidenceAndRecovery(t *testing.T) {
 	if strings.Contains(got, healthToken) || strings.Contains(got, "X-Kandev-Desktop-Health-Token") {
 		t.Fatalf("formatted failure exposed health-token material:\n%s", got)
 	}
+}
+
+func TestBackendLogPathForDevConfigUsesEffectiveBackendHome(t *testing.T) {
+	repo := t.TempDir()
+	t.Setenv("KANDEV_TASK_ID", "")
+	t.Setenv("KANDEV_HOME_DIR", "")
+	t.Setenv("KANDEV_DATABASE_PATH", "")
+	defaultExtra := devExtraForTest(t, repo)
+	got := backendLogPathForDevConfig(devLaunchConfig{startup: nil, extra: defaultExtra})
+	want := filepath.Join(repo, ".kandev-dev", "logs", "backend-logs.log")
+	if got != want {
+		t.Fatalf("default dev backend log = %q, want %q", got, want)
+	}
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	databasePath := filepath.Join(t.TempDir(), "kandev.db")
+	t.Setenv("KANDEV_DATABASE_PATH", databasePath)
+	overrideExtra := devExtraForTest(t, repo)
+	got = backendLogPathForDevConfig(devLaunchConfig{startup: nil, extra: overrideExtra})
+	want = filepath.Join(home, ".kandev", "logs", "backend-logs.log")
+	if got != want {
+		t.Fatalf("explicit database dev backend log = %q, want %q", got, want)
+	}
+}
+
+func devExtraForTest(t *testing.T, repo string) []string {
+	t.Helper()
+	_, extra := resolveDevBackendEnv(repo)
+	return extra
 }

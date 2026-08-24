@@ -62,10 +62,14 @@ func runDev(ctx context.Context, opts Options) int {
 	}
 
 	fmt.Println("[kandev] starting backend...")
-	if err := waitForHealthFn(ctx, cfg.endpoints, backend, healthTimeoutForConfig(healthTimeoutDevMS, cfg.startup), healthToken, dumpLogs); err != nil {
+	readyURL, err := waitForHealthFn(ctx, cfg.endpoints, backend, healthTimeoutForConfig(healthTimeoutDevMS, cfg.startup), healthToken, dumpLogs)
+	if err != nil {
 		supervisor.shutdown("backend health failure")
-		fmt.Fprintln(os.Stderr, formatStartupFailure(err, cfg.endpoints, cfg.startup, backendLogPathForConfig(cfg.startup), startupFailureStoppedBackend(err)))
+		fmt.Fprintln(os.Stderr, formatStartupFailure(err, cfg.endpoints, cfg.startup, backendLogPathForDevConfig(cfg), startupFailureStoppedBackend(err)))
 		return 1
+	}
+	if readyURL != "" {
+		cfg.ports.BackendURL = readyURL
 	}
 	fmt.Printf("[kandev] backend ready at %s\n", cfg.ports.BackendURL)
 

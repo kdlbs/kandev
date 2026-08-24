@@ -237,10 +237,10 @@ func TestRunManagedAppAttachesSignalsBeforeBackendLaunch(t *testing.T) {
 		events = append(events, "start-parent-watch")
 		return newParentWatchdog(0, nil, nil)
 	}
-	waitForHealthFn = func(_ context.Context, _ backendEndpointSet, _ childState, _ time.Duration, expectedToken string, _ func()) error {
+	waitForHealthFn = func(_ context.Context, _ backendEndpointSet, _ childState, _ time.Duration, expectedToken string, _ func()) (string, error) {
 		waitedHealthToken = expectedToken
 		events = append(events, "wait-health")
-		return nil
+		return "", nil
 	}
 	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
 
@@ -296,9 +296,9 @@ func TestRunManagedAppPreservesDesktopOwnedHealthToken(t *testing.T) {
 		exitCh <- 0
 		return &restartableBackend{exitCh: exitCh}, func() {}, nil
 	}
-	waitForHealthFn = func(_ context.Context, _ backendEndpointSet, _ childState, _ time.Duration, expectedToken string, _ func()) error {
+	waitForHealthFn = func(_ context.Context, _ backendEndpointSet, _ childState, _ time.Duration, expectedToken string, _ func()) (string, error) {
 		waitedHealthToken = expectedToken
-		return nil
+		return "", nil
 	}
 	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
 	t.Setenv("KANDEV_DESKTOP_NATIVE_NOTIFICATIONS", "true")

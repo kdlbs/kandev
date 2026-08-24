@@ -3,6 +3,7 @@ package launcher
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -69,9 +70,12 @@ func TestWaitForHealthReturnsNilOnHealthyResponse(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	var failures int
-	err := waitForHealth(context.Background(), singleHealthTarget(srv.URL), fakeChild{}, 5*time.Second, "expected", func() { failures++ })
+	readyURL, err := waitForHealth(context.Background(), singleHealthTarget(srv.URL), fakeChild{}, 5*time.Second, "expected", func() { failures++ })
 	if err != nil {
 		t.Fatalf("waitForHealth() = %v, want nil", err)
+	}
+	if readyURL != srv.URL {
+		t.Fatalf("ready URL = %q, want %q", readyURL, srv.URL)
 	}
 	if failures != 0 {
 		t.Fatalf("onFailure called %d times, want 0", failures)
@@ -100,7 +104,7 @@ func TestWaitForHealthAcceptsHealthySiblingWithoutWaitingForUnreachableTarget(t 
 	t.Cleanup(healthy.Close)
 
 	started := time.Now()
-	err := waitForHealth(context.Background(), backendEndpointSet{
+	readyURL, err := waitForHealth(context.Background(), backendEndpointSet{
 		accessURL: healthy.URL,
 		healthTargets: []string{
 			hanging.URL + "/health",
@@ -110,8 +114,52 @@ func TestWaitForHealthAcceptsHealthySiblingWithoutWaitingForUnreachableTarget(t 
 	if err != nil {
 		t.Fatalf("waitForHealth() = %v, want nil", err)
 	}
+	if readyURL != healthy.URL {
+		t.Fatalf("ready URL = %q, want healthy sibling %q", readyURL, healthy.URL)
+	}
 	if elapsed := time.Since(started); elapsed >= healthProbeTimeout {
 		t.Fatalf("waitForHealth() took %s, want healthy sibling to win before probe timeout", elapsed)
+	}
+}
+
+func TestWaitForHealthBypassesHTTPProxyForSpecificBind(t *testing.T) {
+	hosts := listHostNetworkAddresses()
+	if len(hosts) == 0 {
+		t.Skip("no non-loopback interface available for proxy-bypass coverage")
+	}
+
+	var proxyRequests atomic.Int32
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		proxyRequests.Add(1)
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	t.Cleanup(proxy.Close)
+	t.Setenv("HTTP_PROXY", proxy.URL)
+	t.Setenv("HTTPS_PROXY", proxy.URL)
+	t.Setenv("NO_PROXY", "")
+	t.Setenv("no_proxy", "")
+
+	listener, err := net.Listen("tcp", net.JoinHostPort(hosts[0], "0"))
+	if err != nil {
+		t.Skipf("cannot bind a non-loopback test listener: %v", err)
+	}
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Kandev-Desktop-Health-Token", "expected")
+		w.WriteHeader(http.StatusOK)
+	}))
+	srv.Listener = listener
+	srv.Start()
+	t.Cleanup(srv.Close)
+
+	readyURL, err := waitForHealth(context.Background(), singleHealthTarget(srv.URL), fakeChild{}, time.Second, "expected", nil)
+	if err != nil {
+		t.Fatalf("waitForHealth() = %v, want proxy-free readiness", err)
+	}
+	if readyURL != srv.URL {
+		t.Fatalf("ready URL = %q, want %q", readyURL, srv.URL)
+	}
+	if got := proxyRequests.Load(); got != 0 {
+		t.Fatalf("proxy requests = %d, want no proxy request for local readiness", got)
 	}
 }
 
@@ -126,7 +174,7 @@ func TestWaitForHealthRetainsLastSafeObservationPerTarget(t *testing.T) {
 	}))
 	t.Cleanup(foreign.Close)
 
-	err := waitForHealth(context.Background(), backendEndpointSet{
+	_, err := waitForHealth(context.Background(), backendEndpointSet{
 		accessURL: status.URL,
 		healthTargets: []string{
 			status.URL + "/health",
@@ -163,7 +211,7 @@ func TestWaitForHealthRetainsLastSafeObservationPerTarget(t *testing.T) {
 }
 
 func TestWaitForHealthClassifiesUnreachableBackend(t *testing.T) {
-	err := waitForHealth(context.Background(), singleHealthTarget("http://127.0.0.1:1"), fakeChild{}, 50*time.Millisecond, "expected", nil)
+	_, err := waitForHealth(context.Background(), singleHealthTarget("http://127.0.0.1:1"), fakeChild{}, 50*time.Millisecond, "expected", nil)
 	if err == nil {
 		t.Fatal("waitForHealth() = nil, want timeout error")
 	}
@@ -183,7 +231,7 @@ func TestWaitForHealthIgnoresHealthyResponseWithoutMatchingToken(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	err := waitForHealth(context.Background(), singleHealthTarget(srv.URL), fakeChild{}, 400*time.Millisecond, "expected", nil)
+	_, err := waitForHealth(context.Background(), singleHealthTarget(srv.URL), fakeChild{}, 400*time.Millisecond, "expected", nil)
 	if err == nil {
 		t.Fatal("waitForHealth() = nil, want different-process error")
 	}
@@ -203,7 +251,7 @@ func TestWaitForHealthTimesOutOnNon2xxResponse(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	var failures int
-	err := waitForHealth(context.Background(), singleHealthTarget(srv.URL), fakeChild{}, 400*time.Millisecond, "", func() { failures++ })
+	_, err := waitForHealth(context.Background(), singleHealthTarget(srv.URL), fakeChild{}, 400*time.Millisecond, "", func() { failures++ })
 	if err == nil {
 		t.Fatal("waitForHealth() = nil, want timeout error")
 	}
@@ -232,7 +280,8 @@ func TestWaitForHealthReturnsWhenServerHangs(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- waitForHealth(context.Background(), singleHealthTarget(srv.URL), fakeChild{}, 300*time.Millisecond, "", nil)
+		_, err := waitForHealth(context.Background(), singleHealthTarget(srv.URL), fakeChild{}, 300*time.Millisecond, "", nil)
+		done <- err
 	}()
 
 	select {
@@ -265,7 +314,8 @@ func TestWaitForHealthReturnsWhenContextCanceled(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		// A generous timeout: only cancellation can end this wait in time.
-		done <- waitForHealth(ctx, singleHealthTarget(srv.URL), fakeChild{}, time.Minute, "", nil)
+		_, err := waitForHealth(ctx, singleHealthTarget(srv.URL), fakeChild{}, time.Minute, "", nil)
+		done <- err
 	}()
 	cancel()
 
@@ -287,7 +337,7 @@ func TestWaitForHealthCallsOnFailureWhenContextCanceled(t *testing.T) {
 	cancel()
 
 	var failures atomic.Int32
-	err := waitForHealth(ctx, singleHealthTarget("http://127.0.0.1:1"), fakeChild{}, time.Minute, "", func() {
+	_, err := waitForHealth(ctx, singleHealthTarget("http://127.0.0.1:1"), fakeChild{}, time.Minute, "", func() {
 		failures.Add(1)
 	})
 	if err == nil {
@@ -303,7 +353,7 @@ func TestWaitForHealthCallsOnFailureWhenContextCanceled(t *testing.T) {
 
 func TestWaitForHealthFailsFastWhenBackendExited(t *testing.T) {
 	var failures int
-	err := waitForHealth(
+	_, err := waitForHealth(
 		context.Background(),
 		singleHealthTarget("http://127.0.0.1:1"),
 		fakeChild{exited: true, code: 3},

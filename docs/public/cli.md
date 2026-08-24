@@ -338,7 +338,7 @@ kandev --verbose
 KANDEV_HEALTH_TIMEOUT_MS=90000 kandev --verbose
 ```
 
-The launcher prints buffered backend output once when startup fails, followed by a bounded summary. The summary includes the effective bind addresses, every attempted health target and its last safe outcome, the selected configuration source, the backend log path, and one next step. It never prints the launcher's health token or sensitive configuration values.
+The launcher prints buffered backend output once when startup fails, followed by a bounded summary. The summary includes the effective bind addresses, every attempted health target and its last safe outcome, the selected configuration source, the backend log path, one next step, and a link to this troubleshooting guide. It never prints the launcher's health token or sensitive configuration values.
 
 Use the failure class to choose the next action:
 

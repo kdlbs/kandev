@@ -50,8 +50,7 @@ whether the backend exited or the launcher stopped a live process.
 ## Verification
 
 ```bash
-cd apps/backend && go test ./internal/launcher -run 'Test(WaitForHealth|StartupFailure|RunManagedApp|RunDev)' -count=1
-cd apps/backend && go test ./internal/launcher -count=1
+(cd apps/backend && go test ./internal/launcher -run 'Test(WaitForHealth|StartupFailure|RunManagedApp|RunDev)' -count=1 && go test ./internal/launcher -count=1)
 ```
 
 ## Files likely touched

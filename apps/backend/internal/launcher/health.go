@@ -23,8 +23,20 @@ const (
 
 // healthProbeClient bounds every individual health request. http.DefaultClient
 // has no timeout, so a backend that accepts the connection but never answers
-// would otherwise block the launcher forever.
-var healthProbeClient = &http.Client{Timeout: healthProbeTimeout}
+// would otherwise block the launcher forever. Launcher readiness is local to
+// the process, so probes must not be redirected through an inherited proxy.
+var healthProbeClient = newHealthProbeClient()
+
+func newHealthProbeClient() *http.Client {
+	transport, ok := http.DefaultTransport.(*http.Transport)
+	if ok {
+		transport = transport.Clone()
+	} else {
+		transport = &http.Transport{}
+	}
+	transport.Proxy = nil
+	return &http.Client{Timeout: healthProbeTimeout, Transport: transport}
+}
 
 type childState interface {
 	Exited() (bool, int)
@@ -129,7 +141,7 @@ func healthTimeoutForConfig(defaultMS int, cfg *config.Config) time.Duration {
 	return healthTimeout(defaultMS)
 }
 
-func waitForHealth(ctx context.Context, endpoints backendEndpointSet, proc childState, timeout time.Duration, expectedToken string, onFailure func()) error {
+func waitForHealth(ctx context.Context, endpoints backendEndpointSet, proc childState, timeout time.Duration, expectedToken string, onFailure func()) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	if len(endpoints.healthTargets) == 0 && endpoints.accessURL != "" {
@@ -142,7 +154,7 @@ func waitForHealth(ctx context.Context, endpoints backendEndpointSet, proc child
 			Timeout:     timeout,
 			Cause:       errors.New("no health targets configured"),
 		}
-		return finishHealthFailure(err, onFailure)
+		return "", finishHealthFailure(err, onFailure)
 	}
 
 	latest := make(map[string]healthObservation, len(endpoints.healthTargets))
@@ -156,15 +168,15 @@ func waitForHealth(ctx context.Context, endpoints backendEndpointSet, proc child
 				ChildExited:   true,
 				ChildExitCode: code,
 			}
-			return finishHealthFailure(err, onFailure)
+			return "", finishHealthFailure(err, onFailure)
 		}
 
-		observations, healthy := probeHealthTargets(ctx, endpoints.healthTargets, expectedToken)
+		observations, healthyURL := probeHealthTargets(ctx, endpoints.healthTargets, expectedToken)
 		for _, observation := range observations {
 			latest[observation.URL] = observation
 		}
-		if healthy {
-			return nil
+		if healthyURL != "" {
+			return accessURLForHealthTarget(healthyURL), nil
 		}
 		if exited, code := proc.Exited(); exited {
 			err := &backendHealthError{
@@ -175,7 +187,7 @@ func waitForHealth(ctx context.Context, endpoints backendEndpointSet, proc child
 				ChildExited:   true,
 				ChildExitCode: code,
 			}
-			return finishHealthFailure(err, onFailure)
+			return "", finishHealthFailure(err, onFailure)
 		}
 		select {
 		case <-ctx.Done():
@@ -192,7 +204,7 @@ func waitForHealth(ctx context.Context, endpoints backendEndpointSet, proc child
 			Timeout:      timeout,
 			Cause:        ctx.Err(),
 		}
-		return finishHealthFailure(err, onFailure)
+		return "", finishHealthFailure(err, onFailure)
 	}
 	class := classifyHealthObservations(observations)
 	err := &backendHealthError{
@@ -201,7 +213,7 @@ func waitForHealth(ctx context.Context, endpoints backendEndpointSet, proc child
 		Observations: observations,
 		Timeout:      timeout,
 	}
-	return finishHealthFailure(err, onFailure)
+	return "", finishHealthFailure(err, onFailure)
 }
 
 func finishHealthFailure(err *backendHealthError, onFailure func()) error {
@@ -211,7 +223,7 @@ func finishHealthFailure(err *backendHealthError, onFailure func()) error {
 	return err
 }
 
-func probeHealthTargets(ctx context.Context, targets []string, expectedToken string) ([]healthObservation, bool) {
+func probeHealthTargets(ctx context.Context, targets []string, expectedToken string) ([]healthObservation, string) {
 	probeCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	results := make(chan healthObservation, len(targets))
@@ -225,15 +237,19 @@ func probeHealthTargets(ctx context.Context, targets []string, expectedToken str
 	for completed := 0; completed < len(targets); completed++ {
 		select {
 		case <-ctx.Done():
-			return observationValues(observations), false
+			return observationValues(observations), ""
 		case observation := <-results:
 			observations[observation.URL] = observation
 			if observation.Outcome == healthOutcomeHealthy {
-				return observationValues(observations), true
+				return observationValues(observations), observation.URL
 			}
 		}
 	}
-	return observationValues(observations), false
+	return observationValues(observations), ""
+}
+
+func accessURLForHealthTarget(target string) string {
+	return strings.TrimSuffix(target, "/health")
 }
 
 func observationValues(observations map[string]healthObservation) []healthObservation {

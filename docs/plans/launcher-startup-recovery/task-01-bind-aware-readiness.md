@@ -49,8 +49,7 @@ without a loopback listener.
 ## Verification
 
 ```bash
-cd apps/backend && go test ./internal/launcher -run 'Test(BackendEndpoint|WaitForHealth|RunManagedApp|RunDev)' -count=1
-cd apps/backend && go test ./internal/launcher -count=1
+(cd apps/backend && go test ./internal/launcher -run 'Test(BackendEndpoint|WaitForHealth|RunManagedApp|RunDev)' -count=1 && go test ./internal/launcher -count=1)
 ```
 
 ## Files likely touched

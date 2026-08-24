@@ -164,10 +164,14 @@ func runManagedApp(ctx context.Context, cfg managedAppConfig) int {
 	}
 	shutdownDebugf("runManagedApp backend launched")
 	fmt.Println("[kandev] starting backend...")
-	if err := waitForHealthFn(ctx, cfg.Endpoints, backend, healthTimeoutForConfig(healthTimeoutReleaseMS, cfg.Startup), healthToken, dumpLogs); err != nil {
+	readyURL, err := waitForHealthFn(ctx, cfg.Endpoints, backend, healthTimeoutForConfig(healthTimeoutReleaseMS, cfg.Startup), healthToken, dumpLogs)
+	if err != nil {
 		supervisor.shutdown("backend health failure")
 		fmt.Fprintln(os.Stderr, formatStartupFailure(err, cfg.Endpoints, cfg.Startup, backendLogPathForConfig(cfg.Startup), startupFailureStoppedBackend(err)))
 		return 1
+	}
+	if readyURL != "" {
+		cfg.Ports.BackendURL = readyURL
 	}
 	fmt.Printf("[kandev] backend ready at %s\n", cfg.Ports.BackendURL)
 
