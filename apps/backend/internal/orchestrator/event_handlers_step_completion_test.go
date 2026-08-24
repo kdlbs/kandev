@@ -290,6 +290,46 @@ func TestProcessOnTurnCompleteViaEngine_BlocksWhileClarificationPendingEvenWithS
 	}
 }
 
+// TestProcessOnTurnCompleteViaEngine_OfficeExplicitSignalGating covers the
+// production engine path for Office sessions. The legacy path has separate
+// coverage, but production uses the workflow engine when it is configured.
+func TestProcessOnTurnCompleteViaEngine_OfficeExplicitSignalGating(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedOfficeSession(t, repo, "t-office-engine", "s-office-engine", "")
+
+	stepID := "wfs-t-office-engine"
+	stepGetter := newMockStepGetter()
+	stepGetter.steps[stepID] = &wfmodels.WorkflowStep{
+		ID: stepID, WorkflowID: "wf-office", Name: "Work", Position: 1,
+		AutoAdvanceRequiresSignal: true,
+		Events: wfmodels.StepEvents{
+			OnTurnComplete: []wfmodels.OnTurnCompleteAction{{Type: wfmodels.OnTurnCompleteMoveToNext}},
+		},
+	}
+	stepGetter.steps["wfs-office-engine-review"] = &wfmodels.WorkflowStep{
+		ID: "wfs-office-engine-review", WorkflowID: "wf-office", Name: "Review", Position: 2,
+	}
+
+	svc := createEngineService(t, repo, stepGetter, &mockAgentManager{})
+	session, err := repo.GetTaskSession(ctx, "s-office-engine")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+
+	if transitioned := svc.processOnTurnCompleteViaEngine(ctx, "t-office-engine", session); transitioned {
+		t.Fatal("expected the engine path to block an Office turn without a signal")
+	}
+
+	task, err := repo.GetTask(ctx, "t-office-engine")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if task.WorkflowStepID != stepID {
+		t.Errorf("workflow step = %q, want %q", task.WorkflowStepID, stepID)
+	}
+}
+
 // TestLoadPendingStepSignal_RoundTrip verifies the bag survives JSON
 // rehydration — important for the backend-restart path where the bag is
 // read from the DB as map[string]interface{} rather than the typed struct.

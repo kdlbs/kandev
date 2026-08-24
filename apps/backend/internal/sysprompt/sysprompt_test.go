@@ -265,6 +265,14 @@ func TestFormatOfficeContext_InjectsIDs(t *testing.T) {
 	assert.NotContains(t, result, "{session_id}")
 }
 
+func TestFormatOfficeContext_CompletionInstructionFollowsStepGate(t *testing.T) {
+	withoutSignal := FormatOfficeContextWithOptions("task-office", "session-office", false)
+	assert.NotContains(t, withoutSignal, "Call step_complete_kandev as the LAST action")
+
+	withSignal := FormatOfficeContextWithOptions("task-office", "session-office", true)
+	assert.Contains(t, withSignal, "Call step_complete_kandev as the LAST action")
+}
+
 func TestInjectOfficeContext_WrapsAndIsStrippable(t *testing.T) {
 	result := InjectOfficeContext("task-office", "session-office", "Do the work")
 	assert.True(t, strings.HasPrefix(result, TagStart))

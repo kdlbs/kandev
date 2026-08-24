@@ -102,6 +102,24 @@ type SessionRepository interface {
 	SetSessionMetadataKeyIfAbsentOrDifferentStep(ctx context.Context, sessionID, key, stepID string, value interface{}) (bool, error)
 }
 
+// stepCompletionTurnReader exposes the immutable workflow-step stamp on the
+// latest turn. Production SQLite implements this through the turn repository,
+// while small handler fakes can omit it and retain legacy behavior.
+type stepCompletionTurnReader interface {
+	ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error)
+}
+
+// stepCompletionSignalClaimer binds the metadata write to the task step that
+// launched the calling turn. Production SQLite performs the task-step check
+// and metadata claim in one transaction.
+type stepCompletionSignalClaimer interface {
+	SetSessionMetadataKeyIfAbsentOrDifferentStepIfTaskAtStep(
+		ctx context.Context,
+		taskID, sessionID, key, stepID string,
+		value interface{},
+	) (bool, error)
+}
+
 // conditionalSessionStateUpdater is implemented by repositories that can
 // reject stale session-state writers. Keeping it optional preserves existing
 // handler fakes and alternate repositories while production SQLite gets CAS
@@ -2170,21 +2188,27 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		return errMsg, err
 	}
 
+	launchStepID, err := h.stepCompletionLaunchStep(ctx, req.SessionID, task.WorkflowStepID)
+	if err != nil {
+		h.logger.Error("failed to resolve step-completion turn",
+			zap.String("task_id", req.TaskID),
+			zap.String("session_id", req.SessionID),
+			zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to resolve calling turn", nil)
+	}
+	if launchStepID != task.WorkflowStepID {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow step changed before signal was recorded", nil)
+	}
+
 	signal := models.PendingStepCompletionSignal{
-		StepID:     task.WorkflowStepID,
+		StepID:     launchStepID,
 		Source:     models.StepCompletionSourceAgent,
 		Summary:    strings.TrimSpace(req.Summary),
 		Handoff:    strings.TrimSpace(req.Handoff),
 		Blockers:   strings.TrimSpace(req.Blockers),
 		SignaledAt: time.Now().UTC(),
 	}
-	stored, err := h.sessionRepo.SetSessionMetadataKeyIfAbsentOrDifferentStep(
-		ctx,
-		req.SessionID,
-		models.SessionMetaKeyPendingStepCompletion,
-		task.WorkflowStepID,
-		signal,
-	)
+	stored, err := h.claimStepCompletionSignal(ctx, req.TaskID, req.SessionID, launchStepID, signal)
 	if err != nil {
 		h.logger.Error("failed to persist step-completion signal",
 			zap.String("task_id", req.TaskID),
@@ -2193,7 +2217,7 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to record signal", nil)
 	}
 	if !stored {
-		return h.handleDuplicateStepComplete(ctx, msg, req.TaskID, req.SessionID, task.WorkflowStepID, session)
+		return h.handleDuplicateStepComplete(ctx, msg, req.TaskID, req.SessionID, launchStepID, session)
 	}
 
 	// Counted here, at the durable bag write, not after publishStepCompletionEvent
@@ -2218,6 +2242,43 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		"step_id":     task.WorkflowStepID,
 		"signaled_at": signal.SignaledAt,
 	})
+}
+
+func (h *Handlers) stepCompletionLaunchStep(ctx context.Context, sessionID, fallback string) (string, error) {
+	reader, ok := h.sessionRepo.(stepCompletionTurnReader)
+	if !ok {
+		return fallback, nil
+	}
+	turns, err := reader.ListTurnsBySession(ctx, sessionID)
+	if err != nil {
+		return "", err
+	}
+	if len(turns) == 0 {
+		return fallback, nil
+	}
+	latest := turns[len(turns)-1]
+	if latest == nil {
+		return "", errors.New("latest turn is missing")
+	}
+	if stepID := models.StringFromAny(latest.Metadata[models.TurnMetaKeyWorkflowStepIDAtStart]); stepID != "" {
+		return stepID, nil
+	}
+	return "", errors.New("latest turn has no workflow-step stamp")
+}
+
+func (h *Handlers) claimStepCompletionSignal(
+	ctx context.Context,
+	taskID, sessionID, stepID string,
+	signal models.PendingStepCompletionSignal,
+) (bool, error) {
+	if claimer, ok := h.sessionRepo.(stepCompletionSignalClaimer); ok {
+		return claimer.SetSessionMetadataKeyIfAbsentOrDifferentStepIfTaskAtStep(
+			ctx, taskID, sessionID, models.SessionMetaKeyPendingStepCompletion, stepID, signal,
+		)
+	}
+	return h.sessionRepo.SetSessionMetadataKeyIfAbsentOrDifferentStep(
+		ctx, sessionID, models.SessionMetaKeyPendingStepCompletion, stepID, signal,
+	)
 }
 
 func (h *Handlers) handleDuplicateStepComplete(

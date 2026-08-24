@@ -673,8 +673,10 @@ func (s *Service) wrapCreatedSessionPrompt(
 		}
 		return prompt
 	case isOfficeTask:
-		return sysprompt.InjectOfficeContext(
-			taskID, sessionID, prompt, referenceContext, promptReferenceContext,
+		return sysprompt.InjectOfficeContextWithOptions(
+			taskID, sessionID, prompt,
+			s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID),
+			referenceContext, promptReferenceContext,
 		)
 	default:
 		return sysprompt.InjectKandevContextWithOptions(taskID, sessionID, prompt, sysprompt.KandevContextOptions{
@@ -1250,8 +1252,10 @@ func (s *Service) applyLaunchPromptContext(ctx context.Context, p launchPromptCo
 	// that whitelists it as trusted content.
 	prompt, spawnContext := applySpawnOriginContext(p.prompt, p.spawnOrigin)
 	if p.isOfficeTask {
-		return sysprompt.InjectOfficeContext(
-			p.taskID, p.sessionID, prompt, p.referenceContext, spawnContext,
+		return sysprompt.InjectOfficeContextWithOptions(
+			p.taskID, p.sessionID, prompt,
+			s.StepRequiresCompletionSignal(ctx, p.taskID),
+			p.referenceContext, spawnContext,
 		)
 	}
 	return sysprompt.InjectKandevContextWithOptions(p.taskID, p.sessionID, prompt, sysprompt.KandevContextOptions{

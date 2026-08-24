@@ -460,6 +460,45 @@ func TestHealBuiltinWorkflowStepFlags_HealsStaleOfficeWorkStep(t *testing.T) {
 	}
 }
 
+// TestRepositoryInitialization_HealsBuiltinWorkflowStepFlags verifies that
+// initSchema keeps the boot registration for the reconciler. Direct tests
+// above would not catch removing the step from the initialization sequence.
+func TestRepositoryInitialization_HealsBuiltinWorkflowStepFlags(t *testing.T) {
+	repo := newRepoForBuiltinWorkflowTests(t)
+	ctx := context.Background()
+	legacyTime := time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)
+
+	_, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
+		INSERT INTO workflows (
+			id, workspace_id, name, workflow_template_id, is_system, hidden, created_at, updated_at
+		) VALUES ('stale-office-boot', 'ws-1', 'Office', 'office-default', 1, 1, ?, ?)
+	`), legacyTime, legacyTime)
+	if err != nil {
+		t.Fatalf("insert stale boot workflow: %v", err)
+	}
+	_, err = repo.db.ExecContext(ctx, repo.db.Rebind(`
+		INSERT INTO workflow_steps (
+			id, workflow_id, name, position, stage_type, events, auto_advance_requires_signal, created_at, updated_at
+		) VALUES ('stale-office-boot-work', 'stale-office-boot', 'Work', 1, 'work', '{}', 0, ?, ?)
+	`), legacyTime, legacyTime)
+	if err != nil {
+		t.Fatalf("insert stale boot work step: %v", err)
+	}
+
+	if err := repo.initSchema(); err != nil {
+		t.Fatalf("reinitialize repository: %v", err)
+	}
+
+	steps := loadStepsForWorkflow(t, repo, "stale-office-boot")
+	work := findStepByNameLocal(steps, "Work")
+	if work == nil {
+		t.Fatal("missing Work step")
+	}
+	if !work.AutoAdvanceRequiresSignal {
+		t.Error("initSchema left Work.AutoAdvanceRequiresSignal = false, want true")
+	}
+}
+
 func TestHealBuiltinWorkflowStepFlags_KeepsUserWorkflowStepUntouched(t *testing.T) {
 	repo := newRepoForBuiltinWorkflowTests(t)
 	ctx := context.Background()
