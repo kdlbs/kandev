@@ -9,19 +9,36 @@
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
-import { watchWs } from "../../helpers/causal-waits";
+import { watchWs, waitForHttp } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
+
+/** Matches GET /api/v1/task-sessions/:id/turns, the REST snapshot that backs
+ * ensureSessionTurnsLoaded — a separate, fire-and-forget fetch from the WS
+ * message.list round trip (use-session-messages.ts fires it `void` before
+ * message.list is even awaited). The clarification overlay's turn-scoping
+ * depends on this fetch too, so a test must wait for both. */
+const TURNS_FETCH_PATH = /\/task-sessions\/[^/]+\/turns/;
 
 const QUESTION_PROMPT = "Which environment should I deploy to?";
 const STAGING_LABEL = "Staging";
 const PRODUCTION_LABEL = "Production";
 
 /**
- * Seeds a session with a real open turn carrying a pending clarification,
- * plus a second turn started 0.8s later that shadows it in "latest by
- * started_at" ordering. `markedLifecycle` selects between AC-9's marked
+ * Seeds a session with a real turn carrying a pending clarification, plus a
+ * second turn started 0.8s later that shadows it in "latest by started_at"
+ * ordering. `markedLifecycle` selects between AC-9's marked
  * `lifecycle_only: true` shape (Scenario 1) and AC-6's unmarked legacy
- * zero-duration shape (Scenario 3) — both must resolve to the open turn.
+ * zero-duration shape (Scenario 3) — both must resolve to turn A.
+ *
+ * AC-9's marked variant also completes turn A (instead of leaving it open),
+ * forcing a D1 key-1 tie against turn B (also completed): with both turns
+ * completed, D1's remaining keys (started_at DESC) alone would hand
+ * authority to the later turn B, exactly as if R1's lifecycle_only exclusion
+ * did not exist. Only R1 filtering B out of contention lets turn A win, so
+ * this shape actually requires the exclusion mechanism — mirroring
+ * TestCurrentTurnAuthoritySurvivesLifecycleShadowOverPendingClarification's
+ * own precedent. AC-6's unmarked variant leaves turn A open, since that
+ * scenario proves D1's plain open-beats-completed rule, not R1.
  */
 async function seedShadowedClarification(
   apiClient: ApiClient,
@@ -44,6 +61,7 @@ async function seedShadowedClarification(
     type: "clarification_request",
     newTurn: true,
     turnStartedAt: turnAStartedAt,
+    ...(markedLifecycle ? { turnCompletedAt: turnAStartedAt } : {}),
     metadata: {
       pending_id: "pend-shadow-1",
       session_id: sessionId,
@@ -76,7 +94,7 @@ async function seedShadowedClarification(
 }
 
 test.describe("Duplicate lifecycle turn does not hide a pending clarification", () => {
-  test("a marked lifecycle turn written after an open turn does not shadow its clarification (AC-9)", async ({
+  test("a marked lifecycle turn tied with the clarification turn in D1 ordering does not shadow its clarification (AC-9)", async ({
     testPage,
     apiClient,
     seedData,
@@ -90,8 +108,9 @@ test.describe("Duplicate lifecycle turn does not hide a pending clarification", 
 
     const wsWatcher = watchWs(testPage);
     const messagesLoaded = wsWatcher.waitForResponse("message.list");
+    const turnsLoaded = waitForHttp(testPage, "GET", TURNS_FETCH_PATH);
     await testPage.goto(`/t/${taskId}`);
-    await messagesLoaded;
+    await Promise.all([messagesLoaded, turnsLoaded]);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
@@ -118,8 +137,9 @@ test.describe("Duplicate lifecycle turn does not hide a pending clarification", 
 
     const wsWatcher = watchWs(testPage);
     const messagesLoaded = wsWatcher.waitForResponse("message.list");
+    const turnsLoaded = waitForHttp(testPage, "GET", TURNS_FETCH_PATH);
     await testPage.goto(`/t/${taskId}`);
-    await messagesLoaded;
+    await Promise.all([messagesLoaded, turnsLoaded]);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
