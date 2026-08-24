@@ -303,3 +303,164 @@ func TestReclaimStuckSignalSessionsOnce_SkipsWhenStillActive(t *testing.T) {
 		t.Error("expected the pending signal to remain untouched — the watchdog must not have reclaimed")
 	}
 }
+
+// TestReclaimStuckSignalSessionsOnce_ExcludesPassthrough is Review round 4's
+// BLOCKING finding: passthrough (PTY) sessions manage their own RUNNING/idle
+// transitions (MarkPassthroughRunning) and never write lastActivityAt — every
+// writer of that field (armPromptActivity, markAgentActivity,
+// recordSteerActivity, recordActivity) sits on the ACP path only. A tracked
+// passthrough execution therefore reports a zero-value lastActivityAt, which
+// a naive now.Sub(lastActivityAt) >= threshold check reads as "infinitely
+// inactive" and reclaims unconditionally. Reclaiming a passthrough session
+// force-closes its turn and, per processOnEnter's PTY prompt path
+// (event_handlers_workflow.go), writes the next step's auto-start prompt
+// directly into the live agent's stdin — corrupting a healthy, still-running
+// PTY agent. Sibling guards (flipStaleRunningToWaiting, markIdleAfterReset)
+// already exclude passthrough for exactly this reason; this watchdog's
+// candidate filter must too.
+func TestReclaimStuckSignalSessionsOnce_ExcludesPassthrough(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1") // seeds session RUNNING
+	setSessionExecID(t, repo, "s1", "exec-1")
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	session.IsPassthrough = true
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("seed passthrough session: %v", err)
+	}
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+		ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+		AutoAdvanceRequiresSignal: true,
+		Events: wfmodels.StepEvents{
+			OnTurnComplete: []wfmodels.OnTurnCompleteAction{
+				{Type: wfmodels.OnTurnCompleteMoveToNext},
+			},
+		},
+	}
+	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+		ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
+	}
+
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo, isPassthrough: true, isAgentRunning: true}
+	// A tracked execution whose lastActivityAt was never written — the exact
+	// shape GetPromptActivityForSession reports in production for a
+	// passthrough session (see manager_interaction.go: only ACP-path callers
+	// write promptActivitySnapshot). currentPromptLastActivityAt is left at
+	// its zero value deliberately.
+	agentMgr.currentPromptExecutionID = "exec-1"
+	agentMgr.currentPromptGeneration.Store(1)
+	agentMgr.currentPromptActivityEpoch.Store(1)
+	svc := createEngineService(t, repo, stepGetter, agentMgr)
+
+	signal := models.PendingStepCompletionSignal{
+		StepID:     "step1",
+		Source:     models.StepCompletionSourceAgent,
+		Summary:    "all done",
+		SignaledAt: time.Now().UTC().Add(-30 * time.Minute),
+	}
+	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
+		t.Fatalf("seed pending signal: %v", err)
+	}
+
+	svc.reclaimStuckSignalSessionsOnce(ctx)
+
+	updatedTask, err := repo.GetTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if updatedTask.WorkflowStepID != "step1" {
+		t.Fatalf("expected no transition for a passthrough session, got %q — "+
+			"a healthy PTY agent's turn was force-closed and the next step's "+
+			"prompt would be written straight into its live stdin", updatedTask.WorkflowStepID)
+	}
+	updatedSession, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if updatedSession.State != models.TaskSessionStateRunning {
+		t.Fatalf("expected passthrough session to remain RUNNING, got %q", updatedSession.State)
+	}
+	if _, hasSignal := models.LoadPendingStepSignal(updatedSession.Metadata); !hasSignal {
+		t.Error("expected the pending signal to remain untouched on a passthrough session — the watchdog must not have reclaimed")
+	}
+}
+
+// TestReclaimStuckSignalSessionsOnce_ReclaimsOnGenuineInactivity is the
+// positive test Review round 4 found missing: every existing reclaim test
+// (_ReclaimsStuckRunningSession, _UnblocksAutoStart) passes through
+// GetPromptActivityForSession's fail-open ErrNoExecutionForSession branch —
+// "no execution tracked at all" — never the branch that actually reads a
+// tracked execution's elapsed activity and finds it genuinely stale. Round
+// 5's fail-closed rewrite of stuckSignalInactiveLongEnough moves those two
+// tests further onto that same no-execution branch, so without this test the
+// watchdog's actual "no activity for N minutes" purpose would still have
+// zero coverage proving it fires. Here the execution IS tracked, is not
+// passthrough, and lastActivityAt is a real non-zero timestamp older than
+// stuckSignalWatchdogThreshold — the one shape that must reclaim.
+func TestReclaimStuckSignalSessionsOnce_ReclaimsOnGenuineInactivity(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1") // seeds session RUNNING
+	setSessionExecID(t, repo, "s1", "exec-1")
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+		ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+		AutoAdvanceRequiresSignal: true,
+		Events: wfmodels.StepEvents{
+			OnTurnComplete: []wfmodels.OnTurnCompleteAction{
+				{Type: wfmodels.OnTurnCompleteMoveToNext},
+			},
+		},
+	}
+	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+		ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
+	}
+
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo, isAgentRunning: true}
+	agentMgr.currentPromptExecutionID = "exec-1"
+	agentMgr.currentPromptGeneration.Store(1)
+	agentMgr.currentPromptActivityEpoch.Store(1)
+	// Genuinely stale: well past stuckSignalWatchdogThreshold (10m), and a
+	// real non-zero timestamp — not the zero value a never-initialized
+	// tracked execution would report.
+	agentMgr.currentPromptLastActivityAt = time.Now().UTC().Add(-15 * time.Minute)
+	svc := createEngineService(t, repo, stepGetter, agentMgr)
+
+	signal := models.PendingStepCompletionSignal{
+		StepID:     "step1",
+		Source:     models.StepCompletionSourceAgent,
+		Summary:    "all done",
+		SignaledAt: time.Now().UTC().Add(-30 * time.Minute),
+	}
+	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
+		t.Fatalf("seed pending signal: %v", err)
+	}
+
+	svc.reclaimStuckSignalSessionsOnce(ctx)
+
+	updatedTask, err := repo.GetTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if updatedTask.WorkflowStepID != "step2" {
+		t.Fatalf("expected the watchdog to reclaim a session with genuinely stale tracked "+
+			"activity and apply the pending transition to step2, got %q", updatedTask.WorkflowStepID)
+	}
+	updatedSession, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if updatedSession.State == models.TaskSessionStateRunning {
+		t.Fatal("expected the session to no longer be RUNNING after a genuine-inactivity reclaim")
+	}
+	if _, hasSignal := models.LoadPendingStepSignal(updatedSession.Metadata); hasSignal {
+		t.Error("expected the applied signal to be cleared from the session bag")
+	}
+}

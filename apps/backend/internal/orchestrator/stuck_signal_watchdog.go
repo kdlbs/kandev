@@ -6,6 +6,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -41,7 +42,14 @@ import (
 // (handleRecoverableFailureLocked, PR #2963): only a session holding a
 // signal for the task's current step is touched. A long turn that never
 // signalled at all is out of scope and keeps running. Office sessions are
-// excluded — this path must not advance an Office task's step.
+// excluded — this path must not advance an Office task's step. Passthrough
+// (PTY) sessions are excluded too, mirroring the guard
+// flipStaleRunningToWaiting and markIdleAfterReset already apply
+// (event_handlers_workflow.go): a passthrough session manages its own
+// RUNNING/idle transitions, and none of the ACP-only lastActivityAt writers
+// ever run for it, so stuckSignalInactiveLongEnough has no real activity
+// signal to read for one. Making lastActivityAt meaningful for passthrough
+// is out of scope here — it needs an activity source that doesn't exist yet.
 const (
 	// stuckSignalWatchdogThreshold is how long a pending completion signal
 	// may sit unapplied on a RUNNING/STARTING session before the watchdog
@@ -139,10 +147,12 @@ func (s *Service) reclaimStuckSignalSessionIfDue(ctx context.Context, session *m
 
 // stuckSignalCandidate applies the unguarded eligibility filter: RUNNING or
 // STARTING state, a pending signal older than stuckSignalWatchdogThreshold,
-// matching the task's CURRENT step, on a non-Office task. Office sessions go
-// FAILED, not WAITING_FOR_INPUT, and must not advance their step from this
-// path — same exclusion PR #2963 applies to
-// handleRecoverableFailureLocked's reconciliation hook.
+// matching the task's CURRENT step, on a non-Office, non-passthrough task.
+// Office sessions go FAILED, not WAITING_FOR_INPUT, and must not advance
+// their step from this path — same exclusion PR #2963 applies to
+// handleRecoverableFailureLocked's reconciliation hook. Passthrough sessions
+// are excluded because this watchdog's inactivity gate cannot see them (see
+// the package doc and stuckSignalInactiveLongEnough).
 func (s *Service) stuckSignalCandidate(
 	ctx context.Context, session *models.TaskSession, now time.Time,
 ) (*models.Task, models.PendingStepCompletionSignal, bool) {
@@ -164,7 +174,7 @@ func (s *Service) stuckSignalCandidate(
 	// job. A stale signal (step already moved on) is left for the ordinary
 	// signal-consuming paths, which clear a bag entry that no longer
 	// matches the current step.
-	if task.WorkflowStepID != signal.StepID || task.IsFromOffice {
+	if task.WorkflowStepID != signal.StepID || task.IsFromOffice || session.IsPassthrough {
 		return nil, models.PendingStepCompletionSignal{}, false
 	}
 	return task, signal, true
@@ -209,29 +219,49 @@ type promptActivitySessionReader interface {
 // because the read happens inside the same critical section as the reclaim
 // itself.
 //
-// Three cases:
+// Fail CLOSED (skip, do not reclaim) on anything this watchdog cannot read
+// as genuine elapsed inactivity — "cannot tell whether the agent is alive"
+// must never mean "reclaim". Reclaiming a session that is actually still
+// running force-closes a live turn and, for some session kinds, writes the
+// next step's prompt straight into a process that is still using its stdin.
+// A skipped tick just retries next tick; a wrong reclaim corrupts a live
+// session. Four cases:
 //   - s.agentManager doesn't implement promptActivitySessionReader: in
 //     production this cannot happen (see the compile-time pin in
 //     backendapp/adapters.go), but a lightweight test double may still omit
-//     it deliberately. Treated as fail-open — no evidence either way, so the
-//     signal-age filter that already ran in stuckSignalCandidate decides.
+//     it deliberately. No evidence either way — fail closed, skip.
 //   - ErrNoExecutionForSession (nothing tracked for the session — process
-//     gone, backend restarted): fail open, reclaim. There is no live turn
-//     left to protect.
-//   - An execution is tracked: reclaim only once
-//     now.Sub(lastActivityAt) >= stuckSignalWatchdogThreshold. A session
-//     whose signal is old but whose agent is still emitting events within
-//     the window is left alone — this is the case a signal-age-only check,
-//     or an epoch-equality check across a sub-millisecond scan window, both
-//     get wrong.
+//     gone, backend restarted): the one case where absence really is
+//     information. Fail open, reclaim — there is no live turn left to
+//     protect.
+//   - Any other error (store failure, transient lookup error, or any future
+//     error this reader ever returns): unknown, not "old". Fail closed,
+//     skip. This is deliberately the general rule rather than special-casing
+//     only the specific errors observed today, so a future error path does
+//     not silently inherit fail-open behavior.
+//   - An execution is tracked and the read succeeded: a zero lastActivityAt
+//     means the tracked execution's activity was never written at all (every
+//     writer — armPromptActivity, markAgentActivity, recordSteerActivity,
+//     recordActivity — sits on the ACP path only; a passthrough execution
+//     never reaches one). That is "unknown", not "over ten minutes ago", so
+//     it does not count as inactive even though the zero value trivially
+//     satisfies now.Sub(lastActivityAt) >= threshold. Otherwise, reclaim
+//     only once now.Sub(lastActivityAt) >= stuckSignalWatchdogThreshold. A
+//     session whose signal is old but whose agent is still emitting events
+//     within the window is left alone — this is the case a signal-age-only
+//     check, or an epoch-equality check across a sub-millisecond scan
+//     window, both get wrong.
 func (s *Service) stuckSignalInactiveLongEnough(ctx context.Context, sessionID string, now time.Time) bool {
 	reader, ok := s.agentManager.(promptActivitySessionReader)
 	if !ok {
-		return true
+		return false
 	}
 	_, _, _, lastActivityAt, err := reader.GetPromptActivityForSession(ctx, sessionID)
 	if err != nil {
-		return true
+		return executor.IsNoExecutionForSessionError(err)
+	}
+	if lastActivityAt.IsZero() {
+		return false
 	}
 	return now.Sub(lastActivityAt) >= stuckSignalWatchdogThreshold
 }

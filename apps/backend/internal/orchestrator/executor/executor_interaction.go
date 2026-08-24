@@ -928,3 +928,15 @@ func (e *Executor) CancelPermission(ctx context.Context, sessionID, requestID, p
 	}
 	return result, err
 }
+
+// IsNoExecutionForSessionError reports whether err is (or wraps)
+// lifecycle.ErrNoExecutionForSession — "no live execution is tracked for
+// this session" (process gone, backend restarted), as opposed to a
+// transient lookup failure. Exposed here so callers outside
+// internal/agent/runtime/ can distinguish this one specific, meaningful
+// absence without importing internal/agent/runtime/lifecycle directly,
+// which the architecture guard reserves for the runtime tier and its
+// already-approved low-level adapters (this package is one).
+func IsNoExecutionForSessionError(err error) bool {
+	return errors.Is(err, lifecycle.ErrNoExecutionForSession)
+}
