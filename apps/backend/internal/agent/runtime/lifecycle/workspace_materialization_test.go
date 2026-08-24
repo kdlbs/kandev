@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -111,6 +112,31 @@ func TestRemoteWorkspaceProjectionFromWorkspaceRepositories_SkipsPrimary(t *test
 	}
 	if len(projection) != 1 || projection[0].Destination != "two-feature-next" {
 		t.Fatalf("projection=%+v, want the durable secondary checkout", projection)
+	}
+}
+
+func TestRemoteWorkspaceProjectionFromWorkspaceRepositories_PreservesContributionBindings(t *testing.T) {
+	contribution := &models.RemoteContribution{
+		Version: models.RemoteContributionVersion, Provider: models.RemoteContributionProviderGitHub,
+		Kind: models.RemoteContributionKindPullRequest, CanonicalURL: "https://github.com/acme/widget/pull/7",
+		Number: 7, State: models.RemoteContributionStateOpen, BaseBranch: "main", HeadBranch: "feature/fork-only", HeadSHA: "0123456789012345678901234567890123456789",
+		SourceRepository:     models.RemoteContributionRepository{Host: "github.com", Path: "contributor/widget", RemoteURL: "https://github.com/contributor/widget.git"},
+		CollaborationAllowed: true,
+	}
+	destination := &models.ContributionDestination{
+		Version: models.ContributionDestinationVersion, Provider: models.ContributionDestinationProviderGitHub,
+		SourceRepository: models.RemoteContributionRepository{Host: "github.com", Path: "acme/widget", RemoteURL: "https://github.com/acme/widget.git"},
+		TargetRepository: models.RemoteContributionRepository{Host: "github.com", Path: "agent/widget", RemoteURL: "https://github.com/agent/widget.git"},
+	}
+	projection, err := remoteWorkspaceProjectionFromWorkspaceRepositories([]WorkspaceRepositorySpec{
+		{RepositoryURL: "https://github.com/acme/primary.git", RepoName: "primary", BaseBranch: "main"},
+		{RepositoryURL: "https://github.com/acme/widget.git", RepoName: "widget", BaseBranch: "main", CheckoutBranch: "feature/fork-only", RemoteContribution: contribution, ContributionDestination: destination},
+	})
+	if err != nil {
+		t.Fatalf("remoteWorkspaceProjectionFromWorkspaceRepositories: %v", err)
+	}
+	if len(projection) != 1 || projection[0].RemoteContribution != contribution || projection[0].ContributionDestination != destination {
+		t.Fatalf("projection = %#v, want recovered contribution bindings", projection)
 	}
 }
 

@@ -798,21 +798,23 @@ type WorkspaceFolderSpec struct {
 // WorkspaceRepositorySpec is the durable host-side source needed to recreate
 // a task's owned repository entry after a restart.
 type WorkspaceRepositorySpec struct {
-	RepositoryID           string
-	RepositoryPath         string
-	RepositoryURL          string
-	RepoName               string
-	BaseBranch             string
-	DefaultBranch          string
-	CheckoutBranch         string
-	ComparisonTarget       *models.ComparisonTarget
-	WorktreeID             string
-	WorktreeBranchPrefix   string
-	WorktreeBranchTemplate string
-	PullBeforeWorktree     bool
-	RemoteSyncHandled      bool
-	BranchSlug             string
-	BranchIdentitySlug     string
+	RepositoryID            string
+	RepositoryPath          string
+	RepositoryURL           string
+	RepoName                string
+	BaseBranch              string
+	DefaultBranch           string
+	CheckoutBranch          string
+	RemoteContribution      *models.RemoteContribution
+	ContributionDestination *models.ContributionDestination
+	ComparisonTarget        *models.ComparisonTarget
+	WorktreeID              string
+	WorktreeBranchPrefix    string
+	WorktreeBranchTemplate  string
+	PullBeforeWorktree      bool
+	RemoteSyncHandled       bool
+	BranchSlug              string
+	BranchIdentitySlug      string
 }
 
 // RouteOverride carries a fully resolved provider profile for one

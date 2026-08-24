@@ -186,6 +186,11 @@ func (s *Server) handleWorkspaceMaterializeRepository(c *gin.Context) {
 		return
 	}
 	if err := attestMaterializedGitMetadata(c.Request.Context(), destination); err != nil {
+		if !reused {
+			if _, cleanupErr := removeMaterializedRepository(c.Request.Context(), s.procMgr.WorkDir(), destination, req.RepositoryURL); cleanupErr != nil {
+				s.logger.Warn("workspace repository cleanup after Git metadata attestation failure failed", zap.String("destination", req.Destination), zap.Error(cleanupErr))
+			}
+		}
 		s.logger.Warn("workspace repository Git metadata attestation failed", zap.String("destination", req.Destination), zap.Error(err))
 		c.JSON(http.StatusUnprocessableEntity, MaterializeRepositoryResponse{Error: "repository Git metadata validation failed"})
 		return
@@ -201,7 +206,7 @@ func (s *Server) handleWorkspaceMaterializeRepository(c *gin.Context) {
 // regular repository under agentctl's canonical workspace before lifecycle can
 // grant its .git directory to a mutable Codex session. It returns no path to
 // the caller, keeping executor filesystem details out of API errors.
-func attestMaterializedGitMetadata(ctx context.Context, destination string) error {
+var attestMaterializedGitMetadata = func(ctx context.Context, destination string) error {
 	_, err := attestRegularGitMetadata(ctx, destination)
 	return err
 }

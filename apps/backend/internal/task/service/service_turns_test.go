@@ -896,14 +896,33 @@ func TestGetWorkspaceInfoForSession_ProjectsPersistedWorktreeIdentity(t *testing
 	ctx := context.Background()
 	setupTestTask(t, repo)
 	now := time.Now().UTC()
+	metadata := make(map[string]interface{})
+	remoteContribution := &models.RemoteContribution{
+		Version: models.RemoteContributionVersion, Provider: models.RemoteContributionProviderGitHub,
+		Kind: models.RemoteContributionKindPullRequest, CanonicalURL: "https://github.com/acme/api/pull/7",
+		Number: 7, State: models.RemoteContributionStateOpen, BaseBranch: "main", HeadBranch: "feature/fork-only", HeadSHA: "0123456789012345678901234567890123456789",
+		SourceRepository:     models.RemoteContributionRepository{Host: "github.com", Path: "contributor/api", RemoteURL: "https://github.com/contributor/api.git"},
+		CollaborationAllowed: true,
+	}
+	contributionDestination := &models.ContributionDestination{
+		Version: models.ContributionDestinationVersion, Provider: models.ContributionDestinationProviderGitHub,
+		SourceRepository: models.RemoteContributionRepository{Host: "github.com", Path: "acme/api", ProviderID: "100", RemoteURL: "https://github.com/acme/api.git"},
+		TargetRepository: models.RemoteContributionRepository{Host: "github.com", Path: "agent/api", ProviderID: "200", RemoteURL: "https://github.com/agent/api.git"},
+	}
+	if err := models.PutRemoteContribution(metadata, remoteContribution); err != nil {
+		t.Fatal(err)
+	}
+	if err := models.PutContributionDestination(metadata, contributionDestination); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := repo.CreateRepository(ctx, &models.Repository{
-		ID: "repo-recovery", WorkspaceID: "ws-1", Name: "api", LocalPath: "/source/api", DefaultBranch: "main",
+		ID: "repo-recovery", WorkspaceID: "ws-1", Name: "api", LocalPath: "/source/api", RemoteURL: "https://github.com/acme/api.git", DefaultBranch: "main",
 	}); err != nil {
 		t.Fatalf("CreateRepository: %v", err)
 	}
 	if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{
-		ID: "task-repo-recovery", TaskID: "task-123", RepositoryID: "repo-recovery", BaseBranch: "main", CheckoutBranch: "feature/recovery",
+		ID: "task-repo-recovery", TaskID: "task-123", RepositoryID: "repo-recovery", BaseBranch: "main", CheckoutBranch: "feature/fork-only", Metadata: metadata,
 	}); err != nil {
 		t.Fatalf("CreateTaskRepository: %v", err)
 	}
@@ -916,7 +935,7 @@ func TestGetWorkspaceInfoForSession_ProjectsPersistedWorktreeIdentity(t *testing
 	createTestEnvironment(t, repo, "env-recovery", "task-123")
 	if err := repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
 		ID: "session-worktree-recovery", TaskEnvironmentID: "env-recovery", WorktreeID: "worktree-recovery", RepositoryID: "repo-recovery",
-		BranchSlug: "feature-recovery", WorktreePath: "/tasks/task-recovery/api-feature-recovery", CreatedAt: now,
+		BranchSlug: "feature-fork-only", WorktreePath: "/tasks/task-recovery/api-feature-fork-only", CreatedAt: now,
 	}); err != nil {
 		t.Fatalf("CreateTaskEnvironmentRepo: %v", err)
 	}
@@ -929,8 +948,14 @@ func TestGetWorkspaceInfoForSession_ProjectsPersistedWorktreeIdentity(t *testing
 		t.Fatalf("WorkspaceRepositories = %#v, want one repository", info.WorkspaceRepositories)
 	}
 	got := info.WorkspaceRepositories[0]
-	if got.WorktreeID != "worktree-recovery" || got.BranchSlug != "feature-recovery" || got.BranchIdentitySlug != "feature-recovery" {
+	if got.WorktreeID != "worktree-recovery" || got.BranchSlug != "feature-fork-only" || got.BranchIdentitySlug != "feature-fork-only" {
 		t.Fatalf("recovery repository identity = %+v, want persisted worktree ID and branch slug", got)
+	}
+	if got.RemoteContribution == nil || got.RemoteContribution.SourceRepository.RemoteURL != "https://github.com/contributor/api.git" {
+		t.Fatalf("recovery remote contribution = %#v, want durable contributor-fork binding", got.RemoteContribution)
+	}
+	if got.ContributionDestination == nil || got.ContributionDestination.TargetRepository.RemoteURL != "https://github.com/agent/api.git" {
+		t.Fatalf("recovery contribution destination = %#v, want durable push destination", got.ContributionDestination)
 	}
 }
 

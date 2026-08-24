@@ -960,11 +960,25 @@ func (s *Service) populateWorkspaceRepositorySpecs(ctx context.Context, taskID s
 	branchPlans := worktree.BuildBranchIdentityPlans(workspaceBranchIdentityInputs(projections))
 	for index, projection := range projections {
 		taskRepository, repository := projection.taskRepository, projection.repository
+		remoteContribution, hasRemoteContribution, err := models.LoadRemoteContribution(taskRepository.Metadata)
+		if err != nil {
+			return fmt.Errorf("load workspace remote contribution: %w", err)
+		}
+		contributionDestination, hasContributionDestination, err := models.LoadContributionDestination(taskRepository.Metadata)
+		if err != nil {
+			return fmt.Errorf("load workspace contribution destination: %w", err)
+		}
 		spec := lifecycle.WorkspaceRepositorySpec{
 			RepositoryID: taskRepository.RepositoryID, RepositoryPath: repository.LocalPath, RepositoryURL: repository.RemoteURL, RepoName: projection.repoName,
 			BaseBranch: taskRepository.BaseBranch, DefaultBranch: repository.DefaultBranch,
 			CheckoutBranch: taskRepository.CheckoutBranch, WorktreeBranchPrefix: repository.WorktreeBranchPrefix,
 			WorktreeBranchTemplate: repository.WorktreeBranchTemplate, PullBeforeWorktree: repository.PullBeforeWorktree,
+		}
+		if hasRemoteContribution {
+			spec.RemoteContribution = &remoteContribution
+		}
+		if hasContributionDestination {
+			spec.ContributionDestination = &contributionDestination
 		}
 		if worktree := worktreesByIdentity[workspaceWorktreeKey{repositoryID: taskRepository.RepositoryID, branchSlug: branchPlans[index].IdentitySlug}]; worktree != nil {
 			spec.WorktreeID = worktree.WorktreeID

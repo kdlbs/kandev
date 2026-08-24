@@ -295,8 +295,13 @@ func TestMaterializeRepository_RemoteContributionReusePreservesLocalCommit(t *te
 		},
 		CollaborationAllowed: true,
 	}
+	contributionDestination := &models.ContributionDestination{
+		Version: models.ContributionDestinationVersion, Provider: models.ContributionDestinationProviderGitHub,
+		SourceRepository: models.RemoteContributionRepository{Host: "github.com", Path: "acme/widget", ProviderID: "100", RemoteURL: "https://github.com/acme/widget.git"},
+		TargetRepository: models.RemoteContributionRepository{Host: "github.com", Path: "agent/widget", ProviderID: "200", RemoteURL: "https://github.com/agent/widget.git"},
+	}
 	destination := filepath.Join(t.TempDir(), "widget")
-	reused, err := materializeRepository(context.Background(), target, destination, binding.BaseBranch, binding.HeadBranch, &binding)
+	reused, err := materializeRepositoryWithDestination(context.Background(), target, destination, binding.BaseBranch, binding.HeadBranch, &binding, contributionDestination)
 	if err != nil {
 		t.Fatalf("initial materialization: %v", err)
 	}
@@ -312,7 +317,7 @@ func TestMaterializeRepository_RemoteContributionReusePreservesLocalCommit(t *te
 	runMaterializeTestGit(t, destination, "commit", "-m", "agent contribution")
 	localHEAD := strings.TrimSpace(materializeGitOutputForTest(t, destination, "rev-parse", "HEAD"))
 
-	reused, err = materializeRepository(context.Background(), target, destination, binding.BaseBranch, binding.HeadBranch, &binding)
+	reused, err = materializeRepositoryWithDestination(context.Background(), target, destination, binding.BaseBranch, binding.HeadBranch, &binding, contributionDestination)
 	if err != nil {
 		t.Fatalf("repeat materialization: %v", err)
 	}
@@ -328,6 +333,12 @@ func TestMaterializeRepository_RemoteContributionReusePreservesLocalCommit(t *te
 	wantUpstream := binding.ContributionRemoteName() + "/" + binding.HeadBranch
 	if got := strings.TrimSpace(materializeGitOutputForTest(t, destination, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")); got != wantUpstream {
 		t.Fatalf("upstream = %q, want %q", got, wantUpstream)
+	}
+	if got := strings.TrimSpace(materializeGitOutputForTest(t, destination, "config", "--get", "branch."+binding.HeadBranch+".pushRemote")); got != contributionDestination.ContributionRemoteName() {
+		t.Fatalf("push remote = %q, want %q", got, contributionDestination.ContributionRemoteName())
+	}
+	if got := strings.TrimSpace(materializeGitOutputForTest(t, destination, "config", "--get-all", "remote."+contributionDestination.ContributionRemoteName()+".pushurl")); got != contributionDestination.TargetRepository.RemoteURL {
+		t.Fatalf("push URL = %q, want %q", got, contributionDestination.TargetRepository.RemoteURL)
 	}
 }
 
@@ -457,6 +468,45 @@ func TestMaterializeRepository_CancelledCloneLeavesNoDestination(t *testing.T) {
 	}
 	if _, err := os.Stat(destination); !os.IsNotExist(err) {
 		t.Fatalf("partial destination remains after cancellation: %v", err)
+	}
+}
+
+func TestWorkspaceMaterializeRepository_RemovesNewCheckoutAfterFailedAttestation(t *testing.T) {
+	origin := createMaterializeOrigin(t)
+	workDir := canonicalTempDir(t)
+	locator := "https://github.com/acme/repository.git"
+	configPath := filepath.Join(t.TempDir(), "gitconfig")
+	if err := os.WriteFile(configPath, []byte("[url \"file://"+filepath.ToSlash(origin)+"\"]\n\tinsteadOf = "+locator+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", configPath)
+	s := newMaterializeTestServer(t, workDir)
+	request := MaterializeRepositoryRequest{RepositoryURL: locator, Destination: "new-checkout", BaseBranch: "main"}
+
+	originalAttestation := attestMaterializedGitMetadata
+	attestMaterializedGitMetadata = func(context.Context, string) error { return errors.New("forced attestation failure") }
+	t.Cleanup(func() { attestMaterializedGitMetadata = originalAttestation })
+	failed := materializeRepositoryRequest(t, s, request)
+	if failed.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("failed materialization status = %d, body = %s", failed.Code, failed.Body.String())
+	}
+	if _, err := os.Lstat(filepath.Join(workDir, request.Destination)); !os.IsNotExist(err) {
+		t.Fatalf("new checkout remains after failed attestation: %v", err)
+	}
+
+	attestMaterializedGitMetadata = originalAttestation
+	retry := materializeRepositoryRequest(t, s, request)
+	if retry.Code != http.StatusCreated {
+		t.Fatalf("retry status = %d, body = %s", retry.Code, retry.Body.String())
+	}
+
+	attestMaterializedGitMetadata = func(context.Context, string) error { return errors.New("forced attestation failure") }
+	reused := materializeRepositoryRequest(t, s, request)
+	if reused.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("reused materialization status = %d, body = %s", reused.Code, reused.Body.String())
+	}
+	if _, err := os.Lstat(filepath.Join(workDir, request.Destination)); err != nil {
+		t.Fatalf("reused checkout was removed after failed attestation: %v", err)
 	}
 }
 
@@ -742,6 +792,20 @@ func removeMaterializedRepositoryRequest(t *testing.T, s *Server, removal Remove
 		t.Fatal(err)
 	}
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/workspace/materialize-repository/remove", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	return w
+}
+
+func materializeRepositoryRequest(t *testing.T, s *Server, materialization MaterializeRepositoryRequest) *httptest.ResponseRecorder {
+	t.Helper()
+	body, err := json.Marshal(materialization)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workspace/materialize-repository", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer test-token")
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()

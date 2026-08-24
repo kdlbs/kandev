@@ -79,7 +79,7 @@ func remoteWorkspaceProjectionFromWorkspaceRepositories(specs []WorkspaceReposit
 		if name == "" || branchSlug == "" {
 			return nil, fmt.Errorf("remote repository %q has unsafe runtime name", spec.RepoName)
 		}
-		projection = append(projection, WorkspaceRepositoryMaterialization{RepositoryURL: spec.RepositoryURL, Destination: name + "-" + branchSlug, BaseBranch: spec.BaseBranch, CheckoutBranch: spec.CheckoutBranch})
+		projection = append(projection, WorkspaceRepositoryMaterialization{RepositoryURL: spec.RepositoryURL, Destination: name + "-" + branchSlug, BaseBranch: spec.BaseBranch, CheckoutBranch: spec.CheckoutBranch, RemoteContribution: spec.RemoteContribution, ContributionDestination: spec.ContributionDestination})
 	}
 	return projection, nil
 }
