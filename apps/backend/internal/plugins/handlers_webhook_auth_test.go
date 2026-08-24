@@ -135,8 +135,8 @@ func TestWebhookAuthGate_AuthenticatedNonPublicReachesRelay(t *testing.T) {
 }
 
 // browserSignals is the pair of headers the session CSRF gate reads. A zero
-// value models a request carrying neither — a non-browser client, or a
-// browser predating Fetch Metadata.
+// value models a request carrying neither: a non-browser client replaying a
+// session cookie, or a browser predating Fetch Metadata.
 type browserSignals struct {
 	origin       string
 	secFetchSite string
@@ -265,10 +265,14 @@ func TestWebhookAuthGate_SessionCSRFSignals(t *testing.T) {
 			signals: browserSignals{origin: "https://example.com:1420", secFetchSite: "same-site"},
 			want:    relayed,
 		},
-		// Neither signal: accepted. See webhookSameOriginRequest for why.
+		// Neither signal: refused. An ambient session cookie with no origin
+		// evidence is indistinguishable from a cross-site top-level GET
+		// navigation by a browser predating Fetch Metadata, which
+		// SameSite=Lax does attach the cookie to. A deliberate non-browser
+		// caller uses a PAT, which is not gated at all (next case).
 		{
 			name: "no browser signals at all", method: http.MethodGet, identity: session,
-			signals: browserSignals{}, want: relayed,
+			signals: browserSignals{}, want: blocked,
 		},
 		// The gate is scoped to ambient-credential identities. A PAT is sent
 		// deliberately by its holder, so a cross-site page cannot borrow it

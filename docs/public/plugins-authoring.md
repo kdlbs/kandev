@@ -1926,13 +1926,21 @@ its session cookie and PAT before relaying the remaining headers.
 On an instance with authentication enabled, a caller identified by the session
 cookie must additionally look same-origin, because that cookie is ambient and a
 page on another site could otherwise make the browser send it. The host accepts
-the request when it carries an accepted `Origin`, or when it carries no `Origin`
-and `Sec-Fetch-Site` is `same-origin` or `none`; it rejects `cross-site` and
-`same-site`. Browsers omit `Origin` on same-origin `GET` and `HEAD` requests, so
-that second rule is what lets a panel poll its own webhook with `GET`. Callers
-identified by a PAT are not subject to this check. In practice `host.api.fetch`
-from an active `ui.bundle` satisfies it with no work on your part, whatever
-method you use.
+the request in exactly two cases:
+
+- it carries an accepted `Origin`; or
+- it carries no `Origin` and `Sec-Fetch-Site` is `same-origin` or `none`.
+
+Everything else is rejected, including `Sec-Fetch-Site` of `cross-site` or
+`same-site` and a request carrying neither header. Browsers omit `Origin` on
+same-origin `GET` and `HEAD` requests, so the second rule is what lets a panel
+poll its own webhook with `GET`. In practice `host.api.fetch` from an active
+`ui.bundle` satisfies it with no work on your part, whatever method you use.
+
+Callers identified by a PAT are not subject to this check at all, because a PAT
+is not ambient. That is the supported way to call an authenticated webhook from
+outside a browser (a script, a CLI, your own backend); a replayed session cookie
+carries no origin signal and is refused.
 
 ```yaml
 webhooks:

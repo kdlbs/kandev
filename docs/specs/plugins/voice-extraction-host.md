@@ -132,9 +132,10 @@ rpc HandleWebhook(WebhookRequest) returns (WebhookResponse)
 ```
 
 `access` is enforced by the host before `HandleWebhook` runs. For `authenticated`, the normal Kandev
-identity must be present, and a session-cookie identity additionally requires a same-origin request:
-an accepted Origin, or (when the browser sends no Origin, as it does not on same-origin GET/HEAD) a
-`Sec-Fetch-Site` of `same-origin` or `none`. `cross-site` and `same-site` are rejected. PAT and
+identity must be present, and a session-cookie identity additionally requires a same-origin request.
+Exactly two signals accept it: an accepted Origin, or (when the browser sends no Origin, as it does
+not on same-origin GET/HEAD) a `Sec-Fetch-Site` of `same-origin` or `none`. Everything else is
+rejected, including `cross-site`, `same-site`, and a request carrying neither header. PAT and
 synthetic identities are not ambient and are not subject to that check;
 authentication-disabled installations use the synthetic default user. Public webhooks retain their
 current external-call behavior. Request cancellation propagates through the existing RPC context.

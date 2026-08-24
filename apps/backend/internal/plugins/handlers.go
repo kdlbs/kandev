@@ -498,25 +498,24 @@ func webhookCallerAuthorized(ctx *gin.Context, public bool) bool {
 // or POST, but it *is* sent on a cross-site top-level GET navigation, which
 // carries no Origin either.
 //
-// Neither header is accepted. CSRF requires a browser attaching a credential
-// the caller did not choose to send; a request with no fetch metadata is
-// either a non-browser client (curl, a CLI, a server-side caller) explicitly
-// presenting a session cookie, which an attacker cannot drive, or a browser
-// predating Fetch Metadata. Refusing it would break the deliberate
-// non-browser caller and the older WebKitGTK builds the Linux desktop shell
-// runs on, and would buy nothing: backendapp.corsMiddleware already rejects a
-// present-but-disallowed Origin ahead of this handler, and every other
-// authenticated route in the backend accepts a session cookie with no origin
-// signal at all (see the CSRF note on internal/auth/httpmw). A legacy-browser
-// forgery against this one route is not worth refusing the legitimate callers.
+// Neither header is refused. A session cookie with no origin signal at all is
+// indistinguishable from a cross-site top-level GET navigation made by a
+// browser that predates Fetch Metadata (or behind something stripping it),
+// which SameSite=Lax does attach the cookie to, so accepting it would reopen
+// the CSRF path this gate exists to close. That costs nothing anyone has
+// today: such a request is already refused before this change, so refusing it
+// still is not a regression, and the deliberate non-browser caller (curl, a
+// CLI, a server-side integration) has a credential built for exactly this,
+// the PAT, which is not ambient and is not gated here at all.
 func webhookSameOriginRequest(ctx *gin.Context) bool {
 	if origin := ctx.GetHeader("Origin"); origin != "" {
 		return commonhttpmw.AllowedOrigin(origin, ctx.Request.Host)
 	}
 	// Fetch Metadata values are lowercase per spec; match leniently, which
-	// cannot admit a value outside the accepted set.
+	// cannot admit a value outside the accepted set. An absent header falls to
+	// the default and is refused along with cross-site and same-site.
 	switch strings.ToLower(strings.TrimSpace(ctx.GetHeader("Sec-Fetch-Site"))) {
-	case "same-origin", "none", "":
+	case "same-origin", "none":
 		return true
 	default:
 		return false
