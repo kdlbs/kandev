@@ -325,7 +325,13 @@ function TaskItemTitle({ taskId, title }: { taskId?: string; title: string }) {
   const content = <ScrollOnOverflow className="min-w-0 w-full">{title}</ScrollOnOverflow>;
   if (!taskId) return content;
   return (
-    <TaskTitleHoverCard taskId={taskId} title={title} side="right" align="start">
+    <TaskTitleHoverCard
+      taskId={taskId}
+      title={title}
+      side="right"
+      align="start"
+      triggerClassName="flex items-center"
+    >
       {content}
     </TaskTitleHoverCard>
   );

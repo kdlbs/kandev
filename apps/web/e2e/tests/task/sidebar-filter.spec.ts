@@ -796,7 +796,7 @@ test.describe("Sidebar filter — task-row presentation", () => {
           compactTitleBox!.height / 2 -
           (compactRowBox!.y + compactRowBox!.height / 2),
       ),
-    ).toBeLessThanOrEqual(3);
+    ).toBeLessThanOrEqual(1);
     await filters.saveAs("Compact task rows");
     await filters.expectActiveViewChip("Compact task rows");
 

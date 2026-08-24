@@ -541,7 +541,7 @@ test.describe("Mobile sidebar — view system", () => {
           compactTitleBox!.height / 2 -
           (compactRowBox!.y + compactRowBox!.height / 2),
       ),
-    ).toBeLessThanOrEqual(3);
+    ).toBeLessThanOrEqual(1);
     await settings.getByTestId("task-row-trailing-select").tap();
     await testPage.getByRole("option", { name: "Relative time", exact: true }).tap();
     await popover.getByTestId("view-save-as-button").tap();
