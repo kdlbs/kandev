@@ -3,7 +3,7 @@ package automation
 import "gopkg.in/yaml.v3"
 
 // exportDocumentVersion and exportDocumentType are the fixed values of the export
-// document's `version` and `type` keys. See docs/specs/automations-yaml-export/spec.md
+// document's `version` and `type` keys. See docs/specs/office/requirements/automations-yaml-export.md
 // § Data model.
 const (
 	exportDocumentVersion = 1

@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/voice-mode-task-behavior.md"
+spec: "../../specs/ui/requirements/voice-mode-task-behavior.md"
 ---
 
 # Task 01: Consolidate Voice Mode Settings

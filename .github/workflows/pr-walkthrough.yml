@@ -327,7 +327,7 @@ jobs:
           aws s3 cp "$HTML_PATH" "s3://${CLOUDFLARE_R2_BUCKET}/${OBJECT_KEY}" \
             --endpoint-url "$CLOUDFLARE_R2_ENDPOINT" \
             --content-type "text/html; charset=utf-8" \
-            --cache-control "public, max-age=300" \
+            --cache-control "public, max-age=300, no-transform" \
             --only-show-errors
 
           content_type="$(aws s3api head-object \

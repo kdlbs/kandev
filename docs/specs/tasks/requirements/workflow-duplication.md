@@ -42,7 +42,7 @@ Workflow authors often need a new pipeline that differs only slightly from an ex
 - Duplicate is unavailable for a new unsaved workflow or a workflow with unsaved metadata or step changes. The UI explains that the source must be saved before it can be duplicated.
 - Duplicate is unavailable in the read-only Improve Kandev workspace. It remains available for a sync-managed workflow in a normal editable workspace because creating the independent manual draft does not mutate the source.
 - The source workflow remains unchanged. Editing, saving, deleting, or reordering the duplicate after creation has no ongoing effect on the source.
-- Discarding or removing the duplicate draft creates no durable workflow. Reloading before Save also discards it, following the existing [Settings Manual Save](../../ui/settings-manual-save.md) contract.
+- Discarding or removing the duplicate draft creates no durable workflow. Reloading before Save also discards it, following the existing [Settings Manual Save](../../ui/requirements/settings-manual-save.md) contract.
 
 ## Permissions
 

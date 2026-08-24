@@ -155,7 +155,6 @@ function useSubmitHandlersWiring({
     workspaceId,
     workflowId,
     effectiveWorkflowId: computed.effectiveWorkflowId,
-    effectiveDefaultStepId: computed.effectiveDefaultStepId,
     repositories: fs.repositories,
     discoveredRepositories: fs.discoveredRepositories,
     workspaceRepositories,

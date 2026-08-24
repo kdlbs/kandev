@@ -287,7 +287,7 @@ function InheritedTierHint({
 // AC-17 / AC-17a / AC-17b: names the wake reasons whose policy shadows the
 // tier displayed above, whichever level supplied it. The effective map is
 // the agent's own tier_per_reason when it overrides the workspace policy
-// (an override replaces the map entirely, per docs/specs/office/routing.md)
+// (an override replaces the map entirely, per docs/specs/office/requirements/routing.md)
 // and the workspace map otherwise; keys with an empty value do not shadow
 // anything and are excluded.
 function effectiveWakeReasonMap(

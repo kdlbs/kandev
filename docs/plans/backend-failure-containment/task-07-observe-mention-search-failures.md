@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["02-publish-agent-runtime-availability"]
 plan: "plan.md"
-spec: "../../specs/ui/entity-reference-composer.md"
+spec: "../../specs/ui/requirements/entity-reference-composer.md"
 ---
 
 # Task 07: Make mention-search failures observable

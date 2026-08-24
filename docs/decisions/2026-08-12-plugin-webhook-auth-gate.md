@@ -32,7 +32,7 @@ elsewhere, ruling out simply dropping plugin webhooks from the allowlist:
 - **SSO.** `0050-plugin-external-auth-capability.md` — the webhook response
   is the only plugin→browser HTTP path, so it is how a first session is
   minted for a visitor with no credentials yet.
-- **Third-party callbacks.** `docs/specs/plugins/spec.md` pins Jira POSTing
+- **Third-party callbacks.** `docs/specs/plugins/requirements/plugins.md` pins Jira POSTing
   to `/api/plugins/kandev-plugin-jira/webhooks/jira-webhooks` as an
   acceptance criterion; the plugin registry lists `kandev-plugin-slack` and
   `kandev-plugin-github-status`, which take the same shape of callback.

@@ -43,20 +43,16 @@ function notifyQueuedTask(
 
 type NoAgentTaskRequirements = {
   description: string;
-  workflowStepId: string;
   workspaceId: string;
   workflowId: string;
 };
 
 function hasNoAgentTaskRequirements(input: {
   description: string;
-  workflowStepId: string | null;
   workspaceId: string | null;
   workflowId: string | null;
 }): input is NoAgentTaskRequirements {
-  return Boolean(
-    input.description && input.workflowStepId && input.workspaceId && input.workflowId,
-  );
+  return Boolean(input.description && input.workspaceId && input.workflowId);
 }
 
 function resolveWorkspacePath(noRepository: boolean, workspacePath: string): string | undefined {
@@ -75,7 +71,6 @@ export function useTaskSubmitHandlers({
   workspaceId,
   workflowId,
   effectiveWorkflowId,
-  effectiveDefaultStepId,
   repositories,
   discoveredRepositories,
   workspaceRepositories,
@@ -665,7 +660,6 @@ export function useTaskSubmitHandlers({
     if (!validateForCreate(trimmedTitle, trimmedDescription)) return;
     const requirements = {
       description: trimmedDescription,
-      workflowStepId: effectiveDefaultStepId,
       workspaceId,
       workflowId: effectiveWorkflowId,
     };
@@ -694,7 +688,6 @@ export function useTaskSubmitHandlers({
           autopilot,
           blockedBy,
         });
-        p.workflow_step_id = requirements.workflowStepId;
         submittedPayload = p;
         return p;
       };
@@ -721,7 +714,6 @@ export function useTaskSubmitHandlers({
     workspaceId,
     effectiveWorkflowId,
     agentProfileId,
-    effectiveDefaultStepId,
     executorId,
     executorProfileId,
     noRepository,

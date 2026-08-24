@@ -186,6 +186,7 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Metadata:       req.Metadata,
 		DeferredLaunch: deferredLaunch,
 		PlanMode:       req.PlanMode,
+		StartAgent:     req.StartAgent,
 		ParentID:       req.ParentID,
 	})
 	if err != nil {

@@ -186,7 +186,7 @@ no effect beyond the icon.
 
 - [Task Runtime Cleanup](../system-design/runtime-cleanup.md) — startup reconciliation semantics
   the marker hooks into.
-- [Sidebar Task Completion Icons](../../ui/sidebar-task-completion-icons.md) —
+- [Sidebar Task Completion Icons](../../ui/requirements/sidebar-task-completion-icons.md) —
   the shared task-row icon precedence this feature extends.
 - [Backend Runtime-State Ownership](../../../plans/backend-runtime-state-ownership/plan.md) —
   startup publication that clears stale generating activity.

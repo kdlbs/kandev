@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/settings-manual-save.md"
+spec: "../../specs/ui/requirements/settings-manual-save.md"
 ---
 
 # Task 01: Save Coordinator and Navigation Guard

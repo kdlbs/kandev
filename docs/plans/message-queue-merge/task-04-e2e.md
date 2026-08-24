@@ -5,7 +5,7 @@ status: completed
 wave: 4
 depends_on: ["message-queue-merge-03"]
 plan: plan.md
-spec: ../../specs/ui/message-queue-merge.md
+spec: ../../specs/ui/requirements/message-queue-merge.md
 ---
 
 # Task 04: E2E merge flow

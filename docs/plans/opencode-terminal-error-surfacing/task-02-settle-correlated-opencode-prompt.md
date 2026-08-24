@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-capture-opencode-error-diagnostics"]
 plan: "plan.md"
-spec: "../../specs/agent-stall-recovery/spec.md"
+spec: "../../specs/agents/requirements/agent-stall-recovery.md"
 ---
 
 # Task 02: Settle Prompts From Correlated Diagnostics

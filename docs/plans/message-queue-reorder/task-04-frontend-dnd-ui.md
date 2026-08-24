@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-frontend-api-hook-reorder"]
 plan: "plan.md"
-spec: "../../specs/ui/message-queue-reorder.md"
+spec: "../../specs/ui/requirements/message-queue-reorder.md"
 ---
 
 # Task 04: Frontend drag-and-drop queue UI
