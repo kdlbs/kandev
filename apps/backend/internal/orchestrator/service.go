@@ -64,9 +64,14 @@ type ServiceConfig struct {
 	ClaudeMidTurnSteering bool
 
 	// AgentStackReaping enables the fail-closed agent-stack reaping triggers:
-	// task REVIEW/COMPLETED stop sweeps and the idle-TTL safety net. Zero value
-	// (off) preserves the pre-fix keep-warm behavior.
+	// task COMPLETED stop sweeps and the idle-TTL safety net. Zero value (off)
+	// preserves the pre-fix keep-warm behavior.
 	AgentStackReaping bool
+
+	// AgentStackIdleTTL is the operator-configured settled-session window used
+	// by the safety net. Zero disables TTL reaping while leaving task-completed
+	// cleanup available when AgentStackReaping is enabled.
+	AgentStackIdleTTL time.Duration
 }
 
 // AttachmentReader is the narrow attachment-store seam needed when the
@@ -80,9 +85,10 @@ type AttachmentReader interface {
 // DefaultServiceConfig returns default configuration
 func DefaultServiceConfig() ServiceConfig {
 	return ServiceConfig{
-		Scheduler:  scheduler.DefaultSchedulerConfig(),
-		QueueSize:  1000,
-		QueueGroup: "orchestrator",
+		Scheduler:         scheduler.DefaultSchedulerConfig(),
+		QueueSize:         1000,
+		QueueGroup:        "orchestrator",
+		AgentStackIdleTTL: time.Hour,
 	}
 }
 
@@ -1180,6 +1186,7 @@ func NewService(
 		idleReaper:                   newIdleSessionReaper(),
 		stackSweeper:                 newAgentStackSweeper(),
 	}
+	s.idleReaper.stackIdleTTL = cfg.AgentStackIdleTTL
 	// Always publish queue-status after a task-scoped queue purge so the
 	// status-summary projector zeros queued_prompt_count. Unlike the
 	// ephemeral purger above, this must never call PurgeTask on the SQLite

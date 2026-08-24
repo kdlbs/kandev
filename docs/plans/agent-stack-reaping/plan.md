@@ -9,13 +9,12 @@ status: implemented
 
 ## Overview
 
-Terminate idle ACP agent stacks at three triggers: (1) the task COMPLETED
-transition, (2) an idle safety net inside the existing idle-session reaper that
-stops any stack whose *session* has been settled for 10 minutes with no active
-turn, and (3) a ceiling on concurrently live stacks that evicts the least
-recently active reapable sessions. All three share one fail-closed stop
-primitive gated by the `features.agentStackReaping` runtime flag (default ON;
-kill switch).
+Terminate idle ACP agent stacks at two triggers: (1) the task COMPLETED
+transition and (2) an idle safety net inside the existing idle-session reaper
+that stops any stack whose *session* has been settled for the operator's
+`agentctl.idleTimeout` with no active turn. Both share one fail-closed stop
+primitive gated by the experimental `features.agentStackReaping` runtime flag,
+which defaults off in every shipped profile.
 
 ## Root cause recap
 
@@ -34,7 +33,7 @@ only when the process itself exits. Idle stacks therefore accumulate for days.
   relaunch plus `session/load` replay, lose the provider prompt cache, and for
   an agent with `SupportsRecovery() == false` (Auggie) or no ACP `LoadSession`
   capability fall back to re-injecting the transcript. The interactive
-  follow-up window is precisely the window the 10-minute idle net protects, so
+  follow-up window is precisely the window the configurable idle net protects, so
   measuring idleness replaced inferring it.
 - **COMPLETED is a trigger, and is not redundant.**
   `Executor.StopByTaskID` lists only CREATED/STARTING/RUNNING/
@@ -66,13 +65,10 @@ only when the process itself exits. Idle stacks therefore accumulate for days.
   that finished a turn seconds ago read as ancient. `sessionIdleSince` reads
   `task_sessions.updated_at`, falling back to `started_at` and finally the
   executor row.
-- **Live-stack cap.** The incident was eleven concurrent stacks, not one very
-  old one, so a ceiling bounds the failure mode directly. Counting uses every
-  non-stopped `executors_running` row (ADR 0003), so busy sessions count toward
-  the ceiling; eviction only ever touches sessions that already pass the
-  fail-closed reapable guards, oldest-idle first. The per-session read is
-  deferred until the count is known to exceed the ceiling, so an under-cap tick
-  costs one list.
+- **Deployment-neutral policy.** The incident's six-stack budget reflected one
+  host's memory and workload, not a safe Kandev-wide limit. The universal cap
+  was removed; timeout cleanup uses the existing operator-configurable
+  `agentctl.idleTimeout` (default one hour).
 - **Shared primitive.** `stopIdleSessionAgentStack` (`agent_stack_reaper.go`)
   implements the guards and is the only caller of `StopAgentWithReason` for
   reaping. Graceful stop (`force=false`), matching `completeAndStopSession`.
@@ -82,15 +78,13 @@ only when the process itself exits. Idle stacks therefore accumulate for days.
   dead-execution → fresh-launch fallback
   (`TestPromptTask_ReentersAfterAgentStackReaping`,
   `TestPromptTask_LazyResumeExecutionNotFoundFallsBackToFreshLaunch`).
-- **Flag default ON.** The runtime-feature-flags skill's default-off rule
-  targets risky new capabilities. This is a fail-closed fix for an incident
-  class; shipping it off would preserve the resource leak for every
-  installation. Registered as a kill switch (mutable, restart required).
-- **Constants, not settings.** `agentStackIdleTTL` (10 min) and
-  `agentStackLiveCap` (6) sit beside the existing `idleReaperInterval` /
-  `idleReaperMinIdle` code constants for the reason documented there: the
-  orchestrator has no runtime config surface for this tier, and operators do
-  not tune it.
+- **Staged rollout.** The flag is experimental, mutable, restart required, and
+  off in prod/dev/e2e by default. Controlled installations can opt in before
+  the behavior is promoted.
+- **Confirmed cleanup.** `StopAgentWithReason` retains lifecycle tracking and
+  returns an error when runtime teardown fails. Removal and `agent.stopped`
+  publication happen only after the runtime confirms the stop, so later ticks
+  can retry instead of losing the execution handle.
 
 ## Tasks
 
@@ -98,13 +92,13 @@ only when the process itself exits. Idle stacks therefore accumulate for days.
   registry, orchestrator ServiceConfig, and frontend defaults.
 - task-02: shared guarded stop primitive, service-owned sweeper, prompt-
   admission interlock, and the task COMPLETED trigger.
-- task-03: idle safety net on the session clock plus the live-stack cap.
+- task-03: configurable idle safety net on the session clock, independent of executor-row age.
 - task-04: regression tests (guards, flag off, all triggers, REVIEW-stays-warm,
   turn re-entry, shutdown join) and full backend/web verification.
 
 ## Verification state
 
-- Passed: focused backend tests for orchestrator, runtimeflags, config, and profiles, including the agent-stack reaping, cap, and turn-reentry regressions.
+- Passed: focused backend tests for orchestrator, lifecycle, runtimeflags, config, and profiles, including retryable runtime teardown, executor-age-independent TTL scanning, deterministic prompt/reaper interleaving, and turn re-entry.
 - Passed: `make -C apps/backend lint`.
 - Passed: web feature-contract test, ESLint, standalone TypeScript typecheck, and public-doc validation.
 - Passed: `KANDEV_BACKEND_PORT=19876 CGO_ENABLED=1 GOCACHE=/tmp/kandev-go-cache make -C apps/backend test lint`. The isolated port avoids the existing Kandev process occupying `10101`; the temporary Go cache keeps the verification run within the available workspace disk.

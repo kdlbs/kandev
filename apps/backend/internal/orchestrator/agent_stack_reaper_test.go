@@ -182,7 +182,7 @@ func TestAgentStackReaping_FailsClosedForUnsafeGuards(t *testing.T) {
 // prompt path: it must be held across ensureSessionRunning, and released once
 // the prompt is done.
 func TestAgentStackReaping_PromptAdmissionMarkerIsBalanced(t *testing.T) {
-	svc := &Service{}
+	svc := &Service{config: ServiceConfig{AgentStackReaping: true}}
 	require.False(t, svc.hasPromptInAdmission("session-admit"))
 
 	releaseFirst := svc.beginPromptAdmission("session-admit")
@@ -241,6 +241,7 @@ func newReapingTestService(
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
 	svc.config.AgentStackReaping = true
 	svc.turnService = &inactiveTurnService{}
+	svc.idleReaper = newIdleSessionReaper()
 	svc.stackSweeper = newAgentStackSweeper()
 	svc.stackSweeper.start(context.Background())
 	t.Cleanup(svc.stackSweeper.stop)

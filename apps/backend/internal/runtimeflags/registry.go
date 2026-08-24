@@ -126,15 +126,14 @@ var registrations = []runtimeFlagRegistration{
 			EnvVar: "KANDEV_FEATURES_AGENT_STACK_REAPING",
 			Kind:   KindFeature,
 			Label:  "Agent stack reaping",
-			Description: "Stops idle agent stacks when a task reaches COMPLETED, after ~10 minutes without session " +
-				"activity, and when too many stacks are alive at once. Sessions stay resumable; the next prompt " +
-				"relaunches a fresh stack.",
-			Stability: StabilityStable,
+			Description: "Stops idle agent stacks when a task reaches COMPLETED or exceeds the configured agentctl idle " +
+				"timeout. Sessions stay resumable; the next prompt relaunches a fresh stack.",
+			Stability: StabilityExperimental,
 			RiskLevel: RiskMedium,
 			RiskDescription: "Stopping an idle stack discards the warm provider session, so the next prompt pays a " +
 				"relaunch cost. Guards never stop an agent mid-turn, during prompt admission, or on the REVIEW " +
 				"transition that follows every turn, but a misbehaving provider could surface resume hiccups. " +
-				"Disable to keep every stack alive indefinitely.",
+				"Leave disabled to keep the established warm-stack behavior.",
 			RestartRequired: true,
 			Mutable:         true,
 		},

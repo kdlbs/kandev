@@ -1,6 +1,6 @@
 ---
 id: "03-idle-ttl-safety-net"
-title: "Idle safety net and live-stack cap"
+title: "Configurable idle safety net"
 status: completed
 wave: 1
 depends_on: ["01-agent-stack-reaping-flag"]
@@ -8,31 +8,28 @@ plan: "plan.md"
 spec: "../../../specs/platform/agent-stack-reaping.md"
 ---
 
-# Task 03: Idle safety net and live-stack cap
+# Task 03: Configurable idle safety net
 
 ## Acceptance
 
 - The idle-session reaper tick additionally stops stacks whose *session* has
-  been settled >= 10 min (`agentStackIdleTTL`) and whose session is in
+  been settled for `agentctl.idleTimeout` and whose session is in
   {WAITING_FOR_INPUT, IDLE, COMPLETED} with no active turn.
 - Idle age comes from `sessionIdleSince` (session row `updated_at`, then
   `started_at`, then the executor row), never from `executors_running.updated_at`
   alone: that column is refreshed by execution persistence and status writes,
   so a long-lived stack that just finished a turn would be reaped immediately.
-- A second pass caps concurrently live stacks at `agentStackLiveCap`. Counting
-  uses every non-stopped `executors_running` row, so working sessions count
-  toward the ceiling; eviction is oldest-idle first and only touches sessions
-  that pass the reapable guards. The per-session read happens only once the
-  count is known to exceed the ceiling.
-- Both stops reuse the shared guarded primitive with reasons
-  `agent stack reaping: idle ttl` and `agent stack reaping: live stack cap`;
-  row repair stays with the existing reclaim phase on later ticks.
+- The TTL pass lists every durable execution row independently of the stale-row
+  query, so a recently refreshed executor row cannot hide an old idle session.
+- Stops reuse the shared guarded primitive with reason
+  `agent stack reaping: idle ttl`; row repair stays with the existing reclaim
+  phase on later ticks.
 - The reaper's documented "never call StopAgent" invariant is relaxed to the
   guarded contract instead of silently violated.
 
 ## Verification
 
-- `cd apps/backend && go test ./internal/orchestrator -run 'TestAgentStackReaping_IdleTTL|TestAgentStackReaping_LiveStackCap|TestIdleReaper'`
+- `cd apps/backend && go test ./internal/orchestrator -run 'TestAgentStackReaping_IdleTTL|TestIdleReaper'`
 
 ## Files
 

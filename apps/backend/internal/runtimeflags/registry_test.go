@@ -451,3 +451,22 @@ func TestDefinitionsIncludeClaudeMidTurnSteeringMetadata(t *testing.T) {
 		t.Fatal("RestartRequired = false, want true")
 	}
 }
+
+func TestDefinitionsIncludeAgentStackReapingMetadata(t *testing.T) {
+	def, ok := DefinitionByKey("features.agentStackReaping")
+	if !ok {
+		t.Fatal("features.agentStackReaping definition missing")
+	}
+	if def.EnvVar != "KANDEV_FEATURES_AGENT_STACK_REAPING" {
+		t.Fatalf("EnvVar = %q, want KANDEV_FEATURES_AGENT_STACK_REAPING", def.EnvVar)
+	}
+	if def.Stability != StabilityExperimental {
+		t.Fatalf("Stability = %q, want experimental", def.Stability)
+	}
+	if def.RiskLevel != RiskMedium {
+		t.Fatalf("RiskLevel = %q, want medium", def.RiskLevel)
+	}
+	if !def.RestartRequired {
+		t.Fatal("RestartRequired = false, want true")
+	}
+}

@@ -31,16 +31,9 @@ import (
 //     already looks idle — this gives the system a settling window
 //     after a normal turn ends so a row that is "WaitingForInput
 //     since 1ms" does not get reclaimed on the very next tick.
-//   - agentStackIdleTTL: how long a session may sit settled before its ACP
-//     stack is stopped. Measured from the session row, not the executor row.
-//   - agentStackLiveCap: the ceiling on concurrently live stacks, enforced
-//     oldest-idle-first once the TTL alone is not keeping up.
-//
-// Both constants are intentional configuration knobs in code source —
-// not env vars — because the orchestrator has no other runtime config
-// of this shape, and the values are bounded by fail-closed invariants
-// rather than deployment shape. Operators who need to tune them can
-// edit and re-deploy; consumers do not.
+//   - ServiceConfig.AgentStackIdleTTL: how long a session may sit settled
+//     before its ACP stack is stopped. It is sourced from the existing
+//     agentctl.idleTimeout operator setting and measured from the session row.
 //
 // Hard invariants:
 //   - The stack-TTL phase is the only reaper path allowed to call
@@ -70,20 +63,6 @@ const (
 	// settling — on_enter / on_turn_complete / agent.ready may have
 	// just transitioned the row and the next event has not fired yet.
 	idleReaperMinIdle = 60 * time.Second
-
-	// agentStackIdleTTL bounds how long a settled ACP stack may remain alive
-	// without another turn. Ten minutes is well past the interactive
-	// follow-up window (where a stop would cost a relaunch plus session/load
-	// replay) and well short of the multi-day accumulation the incident hit.
-	// Guarded by the runtime feature flag.
-	agentStackIdleTTL = 10 * time.Minute
-
-	// agentStackLiveCap is the maximum number of simultaneously live ACP
-	// stacks. The incident was eleven concurrent stacks, so a ceiling bounds
-	// the failure mode directly rather than hoping every stack ages out. Sized
-	// above ordinary multi-session use; eviction only ever touches sessions
-	// that already pass the fail-closed reapable guards.
-	agentStackLiveCap = 6
 )
 
 // idleSessionReaper owns the lifecycle of one background goroutine.
@@ -97,15 +76,12 @@ type idleSessionReaper struct {
 	interval     time.Duration
 	minIdle      time.Duration
 	stackIdleTTL time.Duration
-	stackLiveCap int
 }
 
 func newIdleSessionReaper() *idleSessionReaper {
 	return &idleSessionReaper{
-		interval:     idleReaperInterval,
-		minIdle:      idleReaperMinIdle,
-		stackIdleTTL: agentStackIdleTTL,
-		stackLiveCap: agentStackLiveCap,
+		interval: idleReaperInterval,
+		minIdle:  idleReaperMinIdle,
 	}
 }
 
@@ -220,6 +196,7 @@ func (s *Service) reclaimIdleSessionsOnce(ctx context.Context) {
 		return
 	}
 	now := time.Now().UTC()
+	stoppedByTTL := s.reapIdleAgentStacksByTTLOnce(ctx, now)
 	cutoff := now.Add(-s.idleReaper.minIdle)
 	var (
 		rows []*models.ExecutorRunning
@@ -249,6 +226,9 @@ func (s *Service) reclaimIdleSessionsOnce(ctx context.Context) {
 		if sessionID == "" {
 			continue
 		}
+		if _, stopped := stoppedByTTL[sessionID]; stopped {
+			continue
+		}
 		// Reject rows with zero / unset / future UpdatedAt — they would
 		// otherwise look older than the threshold on the first tick.
 		if row.UpdatedAt.IsZero() {
@@ -273,28 +253,31 @@ func (s *Service) reclaimIdleSessionsOnce(ctx context.Context) {
 				zap.Error(err))
 		}
 	}
-
-	s.enforceAgentStackCapOnce(ctx, now)
 }
 
-// enforceAgentStackCapOnce is the per-tick cap pass. It needs every live row,
-// not just the idle candidates the scan above filters to, because a stack that
-// is young or busy still consumes memory and must count toward the ceiling —
-// so it takes its own read rather than reusing the age-filtered list.
-func (s *Service) enforceAgentStackCapOnce(ctx context.Context, now time.Time) {
-	if !s.config.AgentStackReaping || s.idleReaper == nil || s.repo == nil {
-		return
-	}
-	if s.idleReaper.stackLiveCap <= 0 {
-		return
+// reapIdleAgentStacksByTTLOnce scans every durable execution row independently
+// of the stale-row candidate query. The executor row's own age is deliberately
+// irrelevant to this policy; only the session activity clock determines TTL.
+func (s *Service) reapIdleAgentStacksByTTLOnce(ctx context.Context, now time.Time) map[string]struct{} {
+	stopped := make(map[string]struct{})
+	if !s.config.AgentStackReaping || s.idleReaper == nil || s.repo == nil || s.idleReaper.stackIdleTTL <= 0 {
+		return stopped
 	}
 	rows, err := s.repo.ListExecutorsRunning(ctx)
 	if err != nil {
-		s.logger.Warn("idle reaper: list executors_running for stack cap failed; pass skipped",
+		s.logger.Warn("idle reaper: list executors_running for stack TTL failed; pass skipped",
 			zap.Error(err))
-		return
+		return stopped
 	}
-	s.enforceAgentStackCap(ctx, rows, now)
+	for _, row := range rows {
+		if row == nil || row.SessionID == "" || row.Status == models.ExecutorRunningStatusStopped {
+			continue
+		}
+		if s.stopAgentStackAfterIdleTTL(ctx, row, now) {
+			stopped[row.SessionID] = struct{}{}
+		}
+	}
+	return stopped
 }
 
 // stopAgentStackAfterIdleTTL stops a stack whose *session* has been settled

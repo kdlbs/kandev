@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"sort"
 	"sync"
 	"time"
 
@@ -32,21 +31,17 @@ import (
 // is exactly the window a REVIEW trigger would destroy, so idleness is
 // measured, not assumed.
 //
-// Three triggers remain, in increasing order of bluntness:
+// Two triggers remain:
 //
 //   - Task COMPLETED. The task is done; nobody is coming back to this stack.
 //     Executor.StopByTaskID only reaches CREATED/STARTING/RUNNING/
 //     WAITING_FOR_INPUT sessions, so IDLE (office fire-and-forget) and
 //     COMPLETED sessions keep a live stack that nothing else tears down, and
 //     markTaskCompletedForTerminalStep never stopped agents at all.
-//   - Idle TTL (agentStackIdleTTL). Measured from the *session* row's
+//   - Idle TTL. Measured from the *session* row's
 //     UpdatedAt, not the executors_running row's: the latter is refreshed by
 //     execution persistence and status writes, so a long-lived stack that
 //     just finished a turn would look ancient.
-//   - Live-stack cap (agentStackLiveCap). Bounds concurrent stacks regardless
-//     of timing, which is the shape the incident actually took: eleven
-//     simultaneously-live stacks, not one very old one. Evicts the least
-//     recently active reapable sessions first.
 //
 // All three share stopIdleSessionAgentStack, the single fail-closed stop
 // primitive. Turn re-entry is guaranteed by the prompt path: promptTask calls
@@ -55,7 +50,7 @@ import (
 // the stop.
 //
 // Everything is gated by ServiceConfig.AgentStackReaping (runtime flag
-// features.agentStackReaping, default ON; kill switch) and hard guards:
+// features.agentStackReaping, disabled by default while experimental) and hard guards:
 // never a working session state, never a session with an active turn, never a
 // session with a prompt in admission, never when the turn service is
 // unavailable (an uncertain signal is a skip, not a force). Failures log at
@@ -68,10 +63,6 @@ const (
 	// stopReasonAgentStackIdleTTL is the StopAgentWithReason reason for the
 	// idle-TTL safety net.
 	stopReasonAgentStackIdleTTL = "agent stack reaping: idle ttl"
-
-	// stopReasonAgentStackOverCap is the StopAgentWithReason reason for a stop
-	// forced by the concurrent live-stack cap.
-	stopReasonAgentStackOverCap = "agent stack reaping: live stack cap"
 )
 
 // isReapableIdleSessionState reports whether a settled session state permits
@@ -191,7 +182,7 @@ func (w *agentStackSweeper) stop() {
 // before ensureSessionRunning, promptTask's resumedForPrompt fresh-launch
 // fallback does not apply — the user's prompt just fails.
 func (s *Service) beginPromptAdmission(sessionID string) func() {
-	if sessionID == "" {
+	if !s.config.AgentStackReaping || sessionID == "" {
 		return func() {}
 	}
 	s.promptAdmissionMu.Lock()
@@ -339,101 +330,6 @@ func (s *Service) scheduleIdleAgentStackStopForTask(taskID, reason string) {
 	s.logger.Debug("agent stack reaping: sweeper unavailable; deferring to the idle tick",
 		zap.String("task_id", taskID),
 		zap.String("reason", reason))
-}
-
-// agentStackCandidate is one reapable live stack considered by the cap pass,
-// ordered by how long its session has been settled.
-type agentStackCandidate struct {
-	session  *models.TaskSession
-	idleFrom time.Time
-}
-
-// enforceAgentStackCap bounds the number of concurrently live ACP stacks.
-// Counting uses every non-stopped executors_running row (ADR 0003 makes that
-// table the execution-id source of truth), so working sessions count toward
-// the cap even though they can never be evicted; eviction only ever touches
-// sessions that already pass the fail-closed reapable guards, oldest-idle
-// first.
-func (s *Service) enforceAgentStackCap(ctx context.Context, rows []*models.ExecutorRunning, now time.Time) {
-	if !s.config.AgentStackReaping || s.repo == nil || s.idleReaper == nil {
-		return
-	}
-	limit := s.idleReaper.stackLiveCap
-	if limit <= 0 {
-		return
-	}
-	live := liveAgentStackRows(rows)
-	overflow := len(live) - limit
-	if overflow <= 0 {
-		return
-	}
-	// Only now is the per-session read worth its cost: under the cap the tick
-	// does one list and nothing else.
-	candidates := s.reapableStackCandidates(ctx, live)
-	if len(candidates) == 0 {
-		return
-	}
-	stopped := s.evictOldestIdleStacks(ctx, candidates, overflow)
-	if stopped > 0 {
-		s.logger.Info("agent stack reaping: live-stack cap enforced",
-			zap.Int("live_stacks", len(live)),
-			zap.Int("cap", limit),
-			zap.Int("stopped", stopped),
-			zap.Time("observed_at", now))
-	}
-}
-
-func liveAgentStackRows(rows []*models.ExecutorRunning) []*models.ExecutorRunning {
-	live := make([]*models.ExecutorRunning, 0, len(rows))
-	for _, row := range rows {
-		if row == nil || row.SessionID == "" || row.Status == models.ExecutorRunningStatusStopped {
-			continue
-		}
-		live = append(live, row)
-	}
-	return live
-}
-
-// reapableStackCandidates loads the sessions behind live rows and keeps the
-// ones a stop may touch, sorted oldest-idle first.
-func (s *Service) reapableStackCandidates(
-	ctx context.Context,
-	live []*models.ExecutorRunning,
-) []agentStackCandidate {
-	candidates := make([]agentStackCandidate, 0, len(live))
-	for _, row := range live {
-		session, err := s.repo.GetTaskSession(ctx, row.SessionID)
-		if err != nil || session == nil || !isReapableIdleSessionState(session.State) {
-			continue
-		}
-		candidates = append(candidates, agentStackCandidate{
-			session:  session,
-			idleFrom: sessionIdleSince(session, row),
-		})
-	}
-	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].idleFrom.Before(candidates[j].idleFrom)
-	})
-	return candidates
-}
-
-// evictOldestIdleStacks stops up to overflow candidates and reports how many
-// stops actually landed. Each one still runs the full fail-closed guard set.
-func (s *Service) evictOldestIdleStacks(
-	ctx context.Context,
-	candidates []agentStackCandidate,
-	overflow int,
-) int {
-	stopped := 0
-	for _, candidate := range candidates {
-		if stopped >= overflow || ctx.Err() != nil {
-			break
-		}
-		if s.stopIdleSessionAgentStack(ctx, candidate.session, stopReasonAgentStackOverCap) {
-			stopped++
-		}
-	}
-	return stopped
 }
 
 // sessionIdleSince reports when a settled session last changed. The session

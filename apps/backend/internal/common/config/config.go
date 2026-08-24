@@ -464,12 +464,10 @@ type FeaturesConfig struct {
 
 	// AgentStackReaping gates the orchestrator's agent-stack reaping: a
 	// fail-closed stop of idle ACP stacks when a task reaches COMPLETED, after
-	// ~10 minutes without session activity, and when the concurrent live-stack
-	// cap is exceeded. It deliberately does not fire on REVIEW, which is
-	// written after every turn and would delete warm-stack reuse. On by
-	// default in every embedded profile because it is the fix for the
-	// idle-stack accumulation incident class; serves as the kill switch for
-	// operators who need the pre-fix keep-everything-warm behavior.
+	// the operator-configured agentctl idle timeout without session activity.
+	// It deliberately does not fire on REVIEW, which is written after every
+	// turn and would delete warm-stack reuse. Off by default while the behavior
+	// is experimental; operators can opt in per installation.
 	AgentStackReaping bool `mapstructure:"agent_stack_reaping" json:"agentStackReaping"`
 }
 

@@ -162,7 +162,7 @@ startup setting, not a database or Settings value.
 | `limits.gitMaxConcurrent` | `KANDEV_GIT_MAX_CONCURRENT` | positive integer, `12` | Process-wide `git` subprocess admission cap. |
 | `limits.lspMaxConnections` | `KANDEV_LSP_MAX_CONNECTIONS` | positive integer, `8` | Active browser-to-task-host language-server connection cap. |
 | `messageQueue.maxPerSession` | `KANDEV_QUEUE_MAX_PER_SESSION` | integer `>= 0`, `10` | Per-session pending-message cap. Zero means unlimited. A non-negative YAML or environment value locks capacity in Settings; a negative environment value means unlimited, and invalid environment input falls through to the lower-precedence source. |
-| `agentctl.idleTimeout` | `KANDEV_ACP_IDLE_TIMEOUT` | Go duration, `1h` | Idle managed-agent reaping timeout. Zero disables reaping. |
+| `agentctl.idleTimeout` | `KANDEV_ACP_IDLE_TIMEOUT` | Go duration, `1h` | Idle managed-agent reaping timeout. When experimental agent-stack reaping is enabled, this also controls its settled-session safety net. Zero disables timeout-based reaping. |
 | `agentctl.idleReaperInterval` | `KANDEV_ACP_IDLE_REAPER_INTERVAL` | Go duration, `1m` | Interval between idle-agent scans. |
 | `agentctl.notificationQueueCapacity` | `KANDEV_ACP_NOTIF_QUEUE` | integer `1024`-`131072`, `131072` | ACP inbound notification queue capacity. An out-of-range YAML value fails startup; an invalid or out-of-range environment value uses the built-in default. |
 | `planning.coalesceWindowMs` | `KANDEV_PLAN_COALESCE_WINDOW_MS` | integer `>= 0`, `300000` | Same-author plan revision coalescing window in milliseconds. |
@@ -445,7 +445,7 @@ Copying this entire file is unnecessary and can freeze old defaults in a deploym
 | Key | Environment lock | Production default | Effect |
 |---|---|---|---|
 | `features.dynamicAgentRouting` | `KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING` | off | Experimental dynamic profiles with ordered provider-error fallback. |
-| `features.agentStackReaping` | `KANDEV_FEATURES_AGENT_STACK_REAPING` | on | Stops an idle agent stack when its task reaches COMPLETED, after about 10 minutes without session activity, or when too many stacks are alive at once. Never on the REVIEW transition that follows a turn, so a follow-up prompt still reuses the warm stack. Sessions stay resumable. |
+| `features.agentStackReaping` | `KANDEV_FEATURES_AGENT_STACK_REAPING` | off | Experimental. Stops an idle agent stack when its task reaches COMPLETED or after `agentctl.idleTimeout` without session activity. Never on the REVIEW transition that follows a turn, so a follow-up prompt still reuses the warm stack. Sessions stay resumable. |
 | `debug.devMode` | `KANDEV_DEBUG_DEV_MODE` | off | High-risk diagnostic endpoints and ACP frame logging. |
 
 The `KANDEV_FEATURES_*` values have no canonical YAML keys. They are selected
@@ -507,7 +507,7 @@ overrides.
 | `limits.gitMaxConcurrent` | `KANDEV_GIT_MAX_CONCURRENT` | `12` | Positive integer process-wide cap for `git` subprocesses; invalid/non-positive uses default. |
 | `limits.lspMaxConnections` | `KANDEV_LSP_MAX_CONNECTIONS` | `8` | Positive integer cap for active browser-to-task-host language-server streams; invalid/non-positive uses default. |
 | `messageQueue.maxPerSession` | `KANDEV_QUEUE_MAX_PER_SESSION` | `10` | Pending messages per session. A non-negative YAML value locks the saved UI capacity; a valid environment value overrides YAML and locks it; a negative environment value means unlimited; malformed environment input falls through to YAML, the saved setting, or default. |
-| `agentctl.idleTimeout` | `KANDEV_ACP_IDLE_TIMEOUT` | `1h` | Go duration after which idle managed agentctl instances are reaped; `0` disables. Invalid uses default. |
+| `agentctl.idleTimeout` | `KANDEV_ACP_IDLE_TIMEOUT` | `1h` | Go duration after which idle managed agentctl instances are reaped; when `features.agentStackReaping` is enabled, it also controls the orchestrator's settled-session timeout. `0` disables timeout-based reaping. Invalid uses default. |
 | `agentctl.idleReaperInterval` | `KANDEV_ACP_IDLE_REAPER_INTERVAL` | `1m` | Go duration between idle scans. |
 | `agentctl.notificationQueueCapacity` | `KANDEV_ACP_NOTIF_QUEUE` | `131072` | Per-connection ACP inbound notification capacity. YAML values outside `1024`-`131072` fail startup; invalid or out-of-range environment values use `131072`. |
 | `planning.coalesceWindowMs` | `KANDEV_PLAN_COALESCE_WINDOW_MS` | `300000` | Non-negative milliseconds for same-author plan revision coalescing; invalid/negative uses five minutes. |

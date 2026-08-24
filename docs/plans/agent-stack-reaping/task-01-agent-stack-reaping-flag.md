@@ -13,12 +13,14 @@ spec: "../../../specs/platform/agent-stack-reaping.md"
 ## Acceptance
 
 - `profiles.yaml` declares `KANDEV_FEATURES_AGENT_STACK_REAPING` default
-  `"true"` in prod, dev, and e2e (kill switch; the fix ships on).
+  `"false"` in prod, dev, and e2e for a controlled experimental rollout.
 - `config.FeaturesConfig.AgentStackReaping` carries explicit mapstructure/json
   tags; the runtimeflags registry owns the public metadata; the frontend
   feature defaults declare the key.
 - Orchestrator `ServiceConfig.AgentStackReaping` is wired from
   `cfg.Features.AgentStackReaping` in `backendapp.provideOrchestrator`.
+- Orchestrator `ServiceConfig.AgentStackIdleTTL` is wired from the existing
+  operator setting `cfg.Agentctl.IdleTimeout`.
 
 ## Verification
 

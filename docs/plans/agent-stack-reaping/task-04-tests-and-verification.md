@@ -17,11 +17,11 @@ spec: "../../../specs/platform/agent-stack-reaping.md"
   session `StopByTaskID` misses; `StopTask` still stops agents when the REVIEW
   write fails; stopped-event preserves COMPLETED session state; working-session,
   active-turn, prompt-admission, flag-off, and missing-execution guards;
-  admission marker balance; stop failure is non-fatal; idle TTL uses the
-  session clock rather than the executor row; live-stack cap evicts oldest-idle
-  first and skips working sessions and under-cap ticks; sweeper joins its
-  workers and cancels their context on stop; and turn re-entry after a stack
-  stop.
+  admission marker balance; runtime stop failure retains the execution for a
+  confirmed retry; idle TTL uses the session clock even when the executor row
+  was recently refreshed; a deterministic prompt/reaper interleaving; sweeper
+  joins its workers and cancels their context on stop; and turn re-entry after
+  a stack stop.
 - `make -C apps/backend test lint` passes; web feature-contract test,
   typecheck, and lint pass.
 
@@ -34,5 +34,7 @@ spec: "../../../specs/platform/agent-stack-reaping.md"
 ## Files
 
 - `apps/backend/internal/orchestrator/agent_stack_reaper_test.go` (new)
-- `apps/backend/internal/orchestrator/agent_stack_cap_test.go` (new)
+- `apps/backend/internal/orchestrator/agent_stack_ttl_test.go` (new)
+- `apps/backend/internal/orchestrator/agent_stack_prompt_race_test.go` (new)
+- `apps/backend/internal/agent/runtime/lifecycle/manager_interaction_accessors_test.go`
 - `apps/backend/internal/orchestrator/prompt_idle_session_test.go`
