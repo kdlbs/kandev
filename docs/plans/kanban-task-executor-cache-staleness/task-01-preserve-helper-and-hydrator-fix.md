@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/kanban-task-executor-cache-staleness/spec.md"
+spec: "../../specs/tasks/requirements/kanban-task-executor-cache-staleness.md"
 ---
 
 # Task 01: Add executor-fields preserve helper and fix mergeKanbanTasks

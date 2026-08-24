@@ -133,7 +133,7 @@ The backend validates the action on workflow-step create/update and import. Inva
 
 Existing agent capability responses provide the editor's family names, models, and ACP select options. Existing task-session model/configuration mechanisms apply and persist runtime changes.
 
-When an ACP provider's options depend on the selected model, the editor uses the model-aware capability contract in [Dynamic Provider Model Options](../../agents/dynamic-provider-options.md) to replace the baseline option snapshot before saving a rule.
+When an ACP provider's options depend on the selected model, the editor uses the model-aware capability contract in [Dynamic Provider Model Options](../../agents/requirements/dynamic-provider-options.md) to replace the baseline option snapshot before saving a rule.
 
 ## State machine
 

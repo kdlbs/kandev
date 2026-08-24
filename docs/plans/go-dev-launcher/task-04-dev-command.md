@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-dev-paths"]
 plan: "plan.md"
-spec: "../../specs/go-dev-launcher/spec.md"
+spec: "../../specs/platform/requirements/go-dev-launcher.md"
 ---
 
 # Task 04: `dev` command, web port, and dev env wiring

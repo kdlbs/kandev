@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/platform/expected-runtime-log-severity.md"
+spec: "../../specs/platform/requirements/expected-runtime-log-severity.md"
 ---
 
 # Task 01: Workspace file missing-file severity

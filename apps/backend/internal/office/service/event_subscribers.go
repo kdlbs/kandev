@@ -562,7 +562,7 @@ func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error
 	// Office failure path (v1): every agent error is terminal. The
 	// retry-by-classifier path lives behind HandleRunFailure for
 	// rate-limit-retry callers; we deliberately do NOT call into it
-	// here. See docs/specs/office-agent-error-handling.
+	// here. See docs/specs/office/requirements/runtime.md.
 	errMsg := enrichModelFailureMessage(run, data.ErrorMessage)
 	if err := s.HandleAgentFailure(ctx, run, errMsg); err != nil {
 		return err
@@ -650,7 +650,7 @@ func (s *Service) tryPostStartFallback(
 
 // handlePromptUsage records a cost event from a session/prompt usage
 // update. Cost resolution follows the two-layer order from
-// docs/specs/office/costs.md, and CostSource on the row records which
+// docs/specs/office/requirements/costs.md, and CostSource on the row records which
 // layer actually produced the dollar amount (see resolveCostForUsage in
 // prompt_usage_cost.go — distinct from Estimated, a usage-authority flag):
 //

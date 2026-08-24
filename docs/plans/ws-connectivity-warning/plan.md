@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/ws-connectivity-warning.md
+spec: docs/specs/ui/requirements/ws-connectivity-warning.md
 created: 2026-07-30
 status: complete
 ---

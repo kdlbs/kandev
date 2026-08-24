@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/sidebar-view-creation.md
+spec: docs/specs/ui/requirements/sidebar-view-creation.md
 created: 2026-08-05
 status: complete
 ---

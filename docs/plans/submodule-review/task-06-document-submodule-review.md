@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["03-present-submodule-review-hierarchy"]
 plan: "plan.md"
-spec: "../../specs/ui/submodule-review.md"
+spec: "../../specs/ui/requirements/submodule-review.md"
 ---
 
 # Task 06: Document nested submodule review

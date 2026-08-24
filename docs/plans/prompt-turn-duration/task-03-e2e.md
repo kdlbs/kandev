@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-message-actions-ui"]
 plan: "plan.md"
-spec: "../../specs/ui/prompt-turn-duration.md"
+spec: "../../specs/ui/requirements/prompt-turn-duration.md"
 ---
 
 # Task 03: E2E hover duration spec
@@ -29,7 +29,7 @@ spec: "../../specs/ui/prompt-turn-duration.md"
 - **Dependencies:** task 02 (UI must render the duration).
 - **Parallelism:** sequential.
 - **Inputs:**
-  - Spec: `docs/specs/ui/prompt-turn-duration.md` — golden-path scenario (hover reveal).
+  - Spec: `docs/specs/ui/requirements/prompt-turn-duration.md` — golden-path scenario (hover reveal).
   - Plan: `docs/plans/prompt-turn-duration/plan.md` — E2E Tests section.
   - Pattern: `apps/web/e2e/tests/task/prompt-history-panel.spec.ts` (seeding, settle polling, sentinel message-id capture, `session.activeChat()` scoping with `toHaveCount(1)`, `DURATION_SHAPE` regex + comment); `activeChat()` is `page.locator("[data-testid='session-chat']:visible").first()` (`apps/web/e2e/pages/session-page.ts`) because background dockview chat panels stay mounted.
   - Mobile: `apps/web/e2e/tests/task/mobile-prompt-history-panel.spec.ts` (mobile-chrome project, Pixel 5, per `apps/web/e2e/playwright.config.ts`); `pnpm run build:e2e` before `pnpm e2e:raw` (per `apps/web/e2e/README.md`).

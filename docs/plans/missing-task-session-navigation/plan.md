@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/missing-task-route-recovery/spec.md
+spec: docs/specs/tasks/requirements/missing-task-route-recovery.md
 created: 2026-08-12
 status: complete
 ---

@@ -294,7 +294,7 @@ type AgentEvent struct {
 	// prompt while another prompt for the same session is still in flight. It is
 	// the negotiated precondition for prompt handoff and mid-turn steering, and
 	// does not by itself promise the agent will fold that prompt into the running
-	// turn. See docs/specs/platform/mid-turn-steering.md.
+	// turn. See docs/specs/platform/requirements/mid-turn-steering.md.
 	SupportsPromptQueueing bool `json:"supports_prompt_queueing"`
 
 	// AuthMethods lists authentication methods from ACP initialize.
@@ -541,7 +541,7 @@ type ConfigOptionValue struct {
 // per-turn total — see normalizeCodexPromptUsage in
 // server/adapter/transport/acp/dialect_codex.go). Rows flagged estimated
 // still count toward budget totals at face value per
-// docs/specs/office/costs.md.
+// docs/specs/office/requirements/costs.md.
 type PromptUsage struct {
 	InputTokens  int64 `json:"input_tokens"`
 	OutputTokens int64 `json:"output_tokens"`

@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-publish-agent-runtime-availability", "03-surface-runtime-failure"]
 plan: "plan.md"
-spec: "../../specs/platform/agent-runtime-availability.md"
+spec: "../../specs/platform/requirements/agent-runtime-availability.md"
 ---
 
 # Task 04: Cover runtime failure across viewports

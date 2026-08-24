@@ -287,7 +287,7 @@ var ValidProjectStatuses = map[ProjectStatus]bool{
 }
 
 // CostContractVersion is the in-band activation point for the cache-split /
-// cost-provenance / turn-attribution columns (docs/specs/office/costs.md).
+// cost-provenance / turn-attribution columns (docs/specs/office/requirements/costs.md).
 // The Rill cost extract has no schema versioning of its own, so a row
 // written under a prior contract is distinguished by comparing
 // cost_contract_version, not by a date an analyst has to be told out of
@@ -332,7 +332,7 @@ const CostContractVersion int64 = 3
 // turn. The JSON cost-list representation includes this field as null so API
 // consumers can make the same distinction. NULL is never backfilled to 0;
 // TokensCachedIn keeps its original read+write sum semantics on every row so
-// existing consumers of that column are unaffected. See docs/specs/office/costs.md.
+// existing consumers of that column are unaffected. See docs/specs/office/requirements/costs.md.
 type CostEvent struct {
 	ID                        string      `json:"id" db:"id"`
 	SessionID                 string      `json:"session_id" db:"session_id"`

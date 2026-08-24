@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-inline-delete-feedback"]
 plan: "plan.md"
-spec: "../../specs/ui/session-tab-delete-feedback.md"
+spec: "../../specs/ui/requirements/session-tab-delete-feedback.md"
 ---
 
 # Task 02: Session deletion E2E

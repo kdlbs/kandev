@@ -101,6 +101,13 @@ type CreatePlanRequest struct {
 	CreatedBy  string // "agent" | "user"
 	AuthorKind string // optional explicit override
 	AuthorName string // optional; display snapshot
+	// ForceNewRevision skips coalescing for this write even if it would
+	// otherwise qualify (same author within the coalesce window). Callers set
+	// this when the write looks like an accidental whole-document truncation:
+	// coalescing would merge the destructive content into the prior revision
+	// row in place, destroying the only recovery path. Zero value (false)
+	// preserves today's coalescing behavior for every existing caller.
+	ForceNewRevision bool
 }
 
 // CreatePlan upserts a plan and appends or coalesces a revision.
@@ -113,12 +120,13 @@ func (s *PlanService) CreatePlan(ctx context.Context, req CreatePlanRequest) (*m
 
 // UpdatePlanRequest mirrors CreatePlanRequest; kept as a distinct type for API clarity.
 type UpdatePlanRequest struct {
-	TaskID     string
-	Title      string
-	Content    string
-	CreatedBy  string
-	AuthorKind string
-	AuthorName string
+	TaskID           string
+	Title            string
+	Content          string
+	CreatedBy        string
+	AuthorKind       string
+	AuthorName       string
+	ForceNewRevision bool
 }
 
 // UpdatePlan updates an existing plan (errors if missing).
@@ -145,12 +153,13 @@ func (s *PlanService) UpdatePlan(ctx context.Context, req UpdatePlanRequest) (*m
 		createdBy = existing.CreatedBy
 	}
 	return s.upsertPlan(ctx, CreatePlanRequest{
-		TaskID:     req.TaskID,
-		Title:      title,
-		Content:    req.Content,
-		CreatedBy:  createdBy,
-		AuthorKind: req.AuthorKind,
-		AuthorName: req.AuthorName,
+		TaskID:           req.TaskID,
+		Title:            title,
+		Content:          req.Content,
+		CreatedBy:        createdBy,
+		AuthorKind:       req.AuthorKind,
+		AuthorName:       req.AuthorName,
+		ForceNewRevision: req.ForceNewRevision,
 	})
 }
 
@@ -209,7 +218,7 @@ func (s *PlanService) upsertPlan(ctx context.Context, req CreatePlanRequest) (*m
 		return nil, err
 	}
 	now := time.Now().UTC()
-	coalesce := s.canCoalesce(latest, authorKind, authorName, now)
+	coalesce := !req.ForceNewRevision && s.canCoalesce(latest, authorKind, authorName, now)
 
 	rev := &models.TaskPlanRevision{
 		TaskID:     req.TaskID,

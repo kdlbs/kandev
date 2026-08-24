@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../../specs/plugins/spec.md"
+spec: "../../../specs/plugins/requirements/plugins.md"
 adr: "../../../decisions/0043-plugin-host-data-api.md"
 ---
 

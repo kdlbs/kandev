@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/shutdown-log-noise/spec.md
+spec: docs/specs/platform/requirements/shutdown-log-noise.md
 created: 2026-08-11
 status: done
 ---

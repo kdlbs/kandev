@@ -193,7 +193,7 @@ func (h *HTTPHandlers) httpRevoke(c *gin.Context) {
 
 // mapShareError translates a service error into the response body + status
 // code. Returns (nil, 0) when err is nil. The status table is part of the
-// public contract; keep it in sync with docs/specs/public-share-links/spec.md.
+// public contract; keep it in sync with docs/specs/auth/requirements/public-share-links.md.
 func mapShareError(err error) (*errorBody, int) {
 	if err == nil {
 		return nil, 0

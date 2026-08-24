@@ -243,6 +243,41 @@ func (s *WorkflowStep) HasOnEnterAction(actionType OnEnterActionType) bool {
 	return false
 }
 
+// SelectAutoStartStep returns the first step by position whose on_enter carries
+// auto_start_agent, or nil when no step automates. It is the destination for a
+// task that is starting an agent immediately: `is_start_step` says where tasks
+// are parked, which is not necessarily a step configured to run anything.
+func SelectAutoStartStep(steps []*WorkflowStep) *WorkflowStep {
+	var best *WorkflowStep
+	for _, step := range steps {
+		if step == nil || !step.HasOnEnterAction(OnEnterAutoStartAgent) {
+			continue
+		}
+		if best == nil || step.Position < best.Position {
+			best = step
+		}
+	}
+	return best
+}
+
+// SelectStartStep returns the step marked is_start_step, falling back to the
+// first step by position. Nil only when there are no steps.
+func SelectStartStep(steps []*WorkflowStep) *WorkflowStep {
+	var firstByPosition *WorkflowStep
+	for _, step := range steps {
+		if step == nil {
+			continue
+		}
+		if step.IsStartStep {
+			return step
+		}
+		if firstByPosition == nil || step.Position < firstByPosition.Position {
+			firstByPosition = step
+		}
+	}
+	return firstByPosition
+}
+
 // HasOnTurnStartAction checks if the step has any on_turn_start actions.
 func (s *WorkflowStep) HasOnTurnStartAction() bool {
 	return len(s.Events.OnTurnStart) > 0

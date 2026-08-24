@@ -101,7 +101,7 @@ type Automation struct {
 	// Derived in SQL (`execution_mode = 'task'`) rather than by reading the
 	// column into a field, so the raw mode never enters the Go model and
 	// cannot grow a firing-path branch: this is a migration-window notice,
-	// not a second destination. See docs/specs/office/automations-settings.md
+	// not a second destination. See docs/specs/office/requirements/automations-settings.md
 	// § Migration.
 	LegacyBoardCard bool `json:"legacy_board_card" db:"legacy_board_card"`
 

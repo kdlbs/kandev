@@ -5,7 +5,7 @@ description: "Install, start, and operate Kandev from the command line."
 
 # Kandev CLI
 
-The `kandev` command starts a local Kandev backend, which serves the web UI, HTTP API, WebSocket API, and MCP endpoint. Use it when you want a browser-based installation or a headless/service process. For a packaged system WebView and desktop updates, use the [desktop app](./desktop-app.md) instead.
+The `kandev` command starts a local Kandev backend, which serves the web UI, HTTP API, WebSocket API, and MCP endpoint. Use it when you want a browser-based installation or a headless/service process. For a packaged system WebView and desktop updates, use the [desktop app](desktop-app.md) instead.
 
 ## Quick path
 
@@ -212,7 +212,7 @@ kandev service status
 kandev service logs --follow
 ```
 
-Supported actions are `install`, `uninstall`, `start`, `stop`, `restart`, `status`, `logs`, and `config`. Installation accepts `--system`, `--run-as <user>` (only with `--system`), `--port`, `--home-dir`, and `--no-boot-start`. Reinstalling an existing Kandev-managed system service preserves its account unless `--run-as` is supplied explicitly. A first system install from a root login requires `--run-as`, including `--run-as root` when root is intentional. In the current native installer, `--port` is written as `KANDEV_SERVER_PORT`, but the supervising launcher overwrites that value with its own automatic port selection; the option therefore does not reliably pin a service listener today. The service normally prefers `38429` and falls back when it is busy. Windows service installation is not implemented. Managed user services write owner-only install metadata so **Settings > System > Updates** can offer the guarded Apply action; system services and failed guarded updates use the package manager followed by `kandev service install` and `kandev service restart`. See [Run as a service](./run-as-a-service.md) for privileges, paths, upgrades, and recovery.
+Supported actions are `install`, `uninstall`, `start`, `stop`, `restart`, `status`, `logs`, and `config`. Installation accepts `--system`, `--run-as <user>` (only with `--system`), `--port`, `--home-dir`, and `--no-boot-start`. Reinstalling an existing Kandev-managed system service preserves its account unless `--run-as` is supplied explicitly. A first system install from a root login requires `--run-as`, including `--run-as root` when root is intentional. In the current native installer, `--port` is written as `KANDEV_SERVER_PORT`, but the supervising launcher overwrites that value with its own automatic port selection; the option therefore does not reliably pin a service listener today. The service normally prefers `38429` and falls back when it is busy. Windows service installation is not implemented. Managed user services write owner-only install metadata so **Settings > System > Updates** can offer the guarded Apply action; system services and failed guarded updates use the package manager followed by `kandev service install` and `kandev service restart`. See [Run as a service](run-as-a-service.md) for privileges, paths, upgrades, and recovery.
 
 </details>
 
@@ -233,14 +233,14 @@ The backend's default `server.host` is `0.0.0.0`. That can expose Kandev to othe
 KANDEV_SERVER_HOST=127.0.0.1 kandev
 ```
 
-See [Configuration](./configuration.md) before putting Kandev behind a reverse proxy or publishing the port.
+See [Configuration](configuration.md) before putting Kandev behind a reverse proxy or publishing the port.
 
 ## Launcher environment
 
 Flags take precedence over the equivalent port variables. `KANDEV_BACKEND_PORT` takes precedence over `KANDEV_PORT`.
 
 Every CLI launch automatically uses the startup configuration discovery in
-[Configuration](./configuration.md): `config.yaml` in the working directory,
+[Configuration](configuration.md): `config.yaml` in the working directory,
 then `<KANDEV_HOME_DIR>/config.yaml` (or `~/.kandev/config.yaml`), then
 `/etc/kandev/config.yaml`. The first existing file is authoritative; Kandev
 does not merge candidates, and an unreadable or invalid first file stops the
@@ -252,7 +252,7 @@ discovery and carry the selected file into the managed backend process.
 | `KANDEV_BACKEND_PORT` | unset | Backend port when `--port` is absent. |
 | `KANDEV_PORT` | unset | Compatibility backend-port alias. |
 | `KANDEV_HOME_DIR` | `~/.kandev` | Root for application data, tasks, repositories, logs, and launcher state. |
-| `KANDEV_DATABASE_PATH` | `<home>/data/kandev.db` | Advanced SQLite path override. System backups use the sibling `backups/` directory. See [Configuration](./configuration.md). |
+| `KANDEV_DATABASE_PATH` | `<home>/data/kandev.db` | Advanced SQLite path override. System backups use the sibling `backups/` directory. See [Configuration](configuration.md). |
 | `KANDEV_LOG_LEVEL` | `warn` from the launcher | Explicit backend log level; overrides `--verbose` and `--debug` log-level selection. |
 | `KANDEV_HEALTH_TIMEOUT_MS` | `45000` | Positive integer startup-health timeout. Invalid or non-positive values fall back to 45 seconds. |
 | `KANDEV_NO_BROWSER` | unset | The exact value `1` suppresses browser opening. |
@@ -269,7 +269,7 @@ The launcher also sets the selected server and `agentctl` ports for the backend.
 go to `<home>/logs/backend-logs.log`; warn and above still appear on stdout.
 ACP logs can contain full prompts, file content, and tool calls, while
 diagnostic endpoints expose process details. Use debug mode only on a trusted
-machine and remove retained debug logs afterward. [Configuration](./configuration.md)
+machine and remove retained debug logs afterward. [Configuration](configuration.md)
 lists locations and retention.
 
 ## Data and cleanup
@@ -278,7 +278,7 @@ The default persistent root is `~/.kandev` (on Windows, `.kandev` below the user
 
 Runtime program files live in the Homebrew Cellar, the global npm dependency tree, or npm's `_npx` cache. They are not application data. `npm config get cache` and `npm root -g` show the latter two roots.
 
-Uninstalling the package does not remove `<home>`. Before removing that directory, stop Kandev and any service, confirm no task or executor is running, and take a backup. See [Operations](./operations.md) for safe database backup and restore procedures.
+Uninstalling the package does not remove `<home>`. Before removing that directory, stop Kandev and any service, confirm no task or executor is running, and take a backup. See [Operations](operations.md) for safe database backup and restore procedures.
 
 ## Update
 
@@ -347,4 +347,4 @@ The public CLI has no `--config` option. Confirm the first existing candidate
 in the working-directory, home, and `/etc/kandev/` order, and remember that
 environment values override YAML. For predictable installed/service
 deployments, verify the active home and database paths printed at startup.
-See [Configuration](./configuration.md).
+See [Configuration](configuration.md).
