@@ -1,7 +1,7 @@
 ---
 status: shipped
 created: 2026-08-05
- amended: 2026-08-20
+amended: 2026-08-20
 owner: kandev
 ---
 

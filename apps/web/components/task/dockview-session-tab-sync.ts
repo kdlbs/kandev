@@ -62,7 +62,9 @@ export function setupSessionTabSync(api: DockviewReadyEvent["api"], appStore: St
       if (shouldRestoreActiveSession) restoreActiveSessionPanel(api, state.tasks.activeSessionId);
       return;
     }
-    if (!consumeSessionTabUserActivationIntent(target.sessionId)) {
+    const activeSessionPanelIsGone = !api.getPanel(`session:${state.tasks.activeSessionId}`);
+    const hasUserActivationIntent = consumeSessionTabUserActivationIntent(target.sessionId);
+    if (!activeSessionPanelIsGone && !hasUserActivationIntent) {
       if (isDebug()) {
         debug("setupSessionTabSync: skip (no user activation intent)", {
           panelId: panel.id,

@@ -137,6 +137,16 @@ describe("setupSessionTabSync", () => {
     expect(harness.activePanelSetActive).toHaveBeenCalledTimes(1);
   });
 
+  it("pins Dockview's visible successor after the active session panel closes", () => {
+    const harness = makeDefaultSessionTabSyncHarness();
+
+    startSessionTabSync(harness);
+    harness.api.panels.splice(0, 1);
+    harness.fireActivePanelChange(OTHER_SESSION_PANEL_ID);
+
+    expect(harness.setActiveSession).toHaveBeenCalledWith(TASK_ID, OTHER_SESSION_ID);
+  });
+
   it("pins the session when the active panel change follows explicit session-tab user intent", () => {
     const harness = makeDefaultSessionTabSyncHarness();
 
