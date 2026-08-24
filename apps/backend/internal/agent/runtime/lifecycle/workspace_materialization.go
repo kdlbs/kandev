@@ -59,6 +59,31 @@ func remoteWorkspaceProjectionFromLaunch(req *LaunchRequest) ([]WorkspaceReposit
 	return projection, nil
 }
 
+// remoteWorkspaceProjectionFromWorkspaceRepositories reconstructs the
+// secondary executor-local checkouts needed when a clone-based execution is
+// created on demand or recovered after the in-memory lifecycle state is gone.
+func remoteWorkspaceProjectionFromWorkspaceRepositories(specs []WorkspaceRepositorySpec) ([]WorkspaceRepositoryMaterialization, error) {
+	projection := make([]WorkspaceRepositoryMaterialization, 0, len(specs))
+	for index, spec := range specs {
+		if index == 0 {
+			continue
+		}
+		if spec.RepositoryURL == "" {
+			return nil, fmt.Errorf("remote repository %q has no clone URL", spec.RepoName)
+		}
+		branch := spec.CheckoutBranch
+		if branch == "" {
+			branch = spec.BaseBranch
+		}
+		name, branchSlug := worktree.SanitizeRepoDirName(spec.RepoName), worktree.SanitizeBranchSlug(branch)
+		if name == "" || branchSlug == "" {
+			return nil, fmt.Errorf("remote repository %q has unsafe runtime name", spec.RepoName)
+		}
+		projection = append(projection, WorkspaceRepositoryMaterialization{RepositoryURL: spec.RepositoryURL, Destination: name + "-" + branchSlug, BaseBranch: spec.BaseBranch, CheckoutBranch: spec.CheckoutBranch})
+	}
+	return projection, nil
+}
+
 // remoteWorkspaceSourceRoots returns only executor-visible, server-derived
 // directories. Repository destinations have already been sanitized by the
 // durable projection builder, so no host checkout path can enter agentctl.

@@ -603,6 +603,10 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	if err != nil {
 		return nil, fmt.Errorf("failed to create execution: %w", err)
 	}
+	if err := reconstructExecutionRemoteWorkspace(ctx, rt, runtimeInstance, info.WorkspaceRepositories); err != nil {
+		_ = rt.StopInstance(context.WithoutCancel(ctx), runtimeInstance, false)
+		return nil, err
+	}
 	if err := installAttestedCloneGitMetadataPolicy(launchCtx, preparation.request, runtimeInstance); err != nil {
 		_ = rt.StopInstance(context.WithoutCancel(ctx), runtimeInstance, false)
 		if runtimeInstance != nil && runtimeInstance.Client != nil {
@@ -648,6 +652,26 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	m.publishCreatedExecution(ctx, runtimeInstance, execution, executionID, taskID)
 
 	return execution, nil
+}
+
+func reconstructExecutionRemoteWorkspace(ctx context.Context, rt ExecutorBackend, instance *ExecutorInstance, repositories []WorkspaceRepositorySpec) error {
+	if rt == nil || !rt.RequiresCloneURL() || len(repositories) <= 1 {
+		return nil
+	}
+	if instance == nil || instance.Client == nil {
+		return fmt.Errorf("reconstruct remote workspace repositories: agentctl is unavailable")
+	}
+	projection, err := remoteWorkspaceProjectionFromWorkspaceRepositories(repositories)
+	if err != nil {
+		return fmt.Errorf("reconstruct remote workspace repositories: %w", err)
+	}
+	roots := remoteWorkspaceSourceRoots(instance.WorkspacePath, projection)
+	if err := materializeWorkspaceRepositories(ctx, instance.Client, projection, roots); err != nil {
+		return fmt.Errorf("reconstruct remote workspace repositories: %w", err)
+	}
+	instance.WorkspaceSourceRoots = roots
+	instance.GitMetadataAttestationRoots = roots
+	return nil
 }
 
 type executionCreatePreparation struct {

@@ -101,6 +101,19 @@ func TestRemoteWorkspaceProjectionFromLaunch_KeepsAdditionalBranchOfPrimaryRepos
 	}
 }
 
+func TestRemoteWorkspaceProjectionFromWorkspaceRepositories_SkipsPrimary(t *testing.T) {
+	projection, err := remoteWorkspaceProjectionFromWorkspaceRepositories([]WorkspaceRepositorySpec{
+		{RepositoryURL: "https://github.com/acme/one.git", RepoName: "one", BaseBranch: "main"},
+		{RepositoryURL: "https://github.com/acme/two.git", RepoName: "two", CheckoutBranch: "feature/next"},
+	})
+	if err != nil {
+		t.Fatalf("remoteWorkspaceProjectionFromWorkspaceRepositories: %v", err)
+	}
+	if len(projection) != 1 || projection[0].Destination != "two-feature-next" {
+		t.Fatalf("projection=%+v, want the durable secondary checkout", projection)
+	}
+}
+
 func TestRemoteWorkspaceSourceRootsUseCanonicalExecutorPaths(t *testing.T) {
 	got := remoteWorkspaceSourceRoots("/workspace", []WorkspaceRepositoryMaterialization{
 		{Destination: "frontend-main"},
@@ -500,6 +513,9 @@ func assertRestoredCloneAttachmentExecution(t *testing.T, server *workspaceRebin
 	}
 	if execution.Status != v1.AgentStatusReady || !server.running() {
 		t.Fatalf("execution %s = status:%q running:%v, want restored ready child", execution.ID, execution.Status, server.running())
+	}
+	if execution.ACPSessionID != acpID {
+		t.Fatalf("execution %s ACP session ID = %q, want restored prior session %q", execution.ID, execution.ACPSessionID, acpID)
 	}
 	if !strings.Contains(policy, filepath.Join(workspacePath, ".git")) {
 		t.Fatalf("execution %s policy %q lacks restored GitDir", execution.ID, policy)

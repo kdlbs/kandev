@@ -223,6 +223,11 @@ func (m *Manager) restoreReboundACPSession(ctx context.Context, execution *Agent
 	if err := execution.agentctl.LoadSession(ctx, acpID, nil); err != nil {
 		return err
 	}
+	// A preceding rebind may have created a replacement session. Once the old
+	// conversation is loaded during rollback, make the lifecycle record agree
+	// with agentctl again so later persistence and resume use that session.
+	execution.ACPSessionID = acpID
+	execution.setSessionInitialized(true)
 	return nil
 }
 
