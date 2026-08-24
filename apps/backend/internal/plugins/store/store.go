@@ -18,7 +18,7 @@ import (
 )
 
 // Status values for a plugin registration, per the state machine in
-// docs/specs/plugins/spec.md ("State machine").
+// docs/specs/plugins/requirements/plugins.md ("State machine").
 const (
 	StatusRegistered  = "registered"
 	StatusActive      = "active"

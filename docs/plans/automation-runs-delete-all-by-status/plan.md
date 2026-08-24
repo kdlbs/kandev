@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/automation-runs-delete-all-by-status/spec.md
+spec: docs/specs/office/requirements/automation-runs-delete-all-by-status.md
 created: 2026-08-12
 status: completed
 ---

@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/improve-kandev/spec.md
+spec: docs/specs/workspaces/requirements/improve-kandev.md
 created: 2026-08-01
 status: implemented
 ---
@@ -131,7 +131,7 @@ verification run on the merged branch (`68b8a57a4`, PR #2347):
   `0dfe5db8-c82d-4c6e-803a-2eec41bcb3fc` and carried the Default workspace's
   mock GitHub connection; 409s and read-only settings pages verified.
 
-Artifacts: `docs/specs/improve-kandev/spec.md` (spec amendment for Phase 2),
+Artifacts: `docs/specs/workspaces/requirements/improve-kandev.md` (spec amendment for Phase 2),
 this plan, and `docs/plans/improve-kandev-workspace/task-*.md`.
 Cleanup/teardown: no temporary artifacts shipped; e2e DIAG probes removed before
 committing.

@@ -5,7 +5,7 @@ status: completed
 wave: 5
 depends_on: ["04-app-oauth-webhooks", "05-service-routing", "06-executor-credentials"]
 plan: "plan.md"
-spec: "../../specs/integrations/github-authentication.md"
+spec: "../../specs/integrations/requirements/github-authentication.md"
 ---
 
 # Task 07: Connection API, Health, And Mocks

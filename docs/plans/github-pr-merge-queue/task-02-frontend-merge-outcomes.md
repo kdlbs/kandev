@@ -5,14 +5,14 @@ status: done
 wave: 2
 depends_on: ["01-backend-queue-aware-merge"]
 plan: "plan.md"
-spec: "../../specs/github-pr-merge-queue/spec.md"
+spec: "../../specs/integrations/requirements/github-pr-merge-queue.md"
 ---
 
 # Task 02: Frontend Merge Outcomes
 
 ## Inputs
 
-- `docs/specs/github-pr-merge-queue/spec.md`
+- `docs/specs/integrations/requirements/github-pr-merge-queue.md`
 - `docs/plans/github-pr-merge-queue/plan.md`
 - `apps/web/AGENTS.md`
 - `.agents/skills/mobile-parity/references/kandev-mobile-ui-language.md`

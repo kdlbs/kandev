@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/kanban-task-executor-cache-staleness/spec.md
+spec: docs/specs/tasks/requirements/kanban-task-executor-cache-staleness.md
 created: 2026-08-15
 status: completed
 ---

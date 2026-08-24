@@ -1,8 +1,12 @@
 # ADR-2026-08-22-persistent-fork-approval-labels: Persist Fork Approval Labels Across Pushes
 
-**Status:** accepted
+**Status:** accepted (amended by 2026-08-24-unified-fork-approval-label)
 **Date:** 2026-08-22
 **Area:** infra, workflow, security
+
+> This decision records the persistence rule. The current approval-label
+> contract, including the removal of `safe-to-test`, is defined by
+> [ADR-2026-08-24-unified-fork-approval-label](2026-08-24-unified-fork-approval-label.md).
 
 ## Context
 

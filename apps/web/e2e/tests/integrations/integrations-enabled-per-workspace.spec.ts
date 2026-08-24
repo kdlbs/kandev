@@ -1,6 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 
-// Covers docs/specs/integrations/enable-disable-toggle.md's per-workspace
+// Covers docs/specs/integrations/requirements/enable-disable-toggle.md's per-workspace
 // scoping: the enable toggle belongs to the workspace whose settings page it
 // sits on, so disabling an integration in one workspace leaves every other
 // workspace's toggle alone. It shipped install-wide first, which silenced an

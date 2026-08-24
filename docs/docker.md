@@ -30,7 +30,7 @@ Two flavors are published. The default vanilla image is smallest and bundles npm
 docker pull ghcr.io/kdlbs/kandev:universal
 ```
 
-See [`images.md`](./images.md) for the full comparison, inclusion policy, and recipes for deriving your own image.
+See [`images.md`](images.md) for the full comparison, inclusion policy, and recipes for deriving your own image.
 
 ## Building from Source
 
@@ -97,7 +97,7 @@ docker run -p 38429:38429 \
 
 ### Environment Variables
 
-See [`configuration.md`](./configuration.md) for the full reference (including the YAML form and every knob the backend reads). The table below covers the env vars most often set in a Docker deployment.
+See [`configuration.md`](configuration.md) for the full reference (including the YAML form and every knob the backend reads). The table below covers the env vars most often set in a Docker deployment.
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|

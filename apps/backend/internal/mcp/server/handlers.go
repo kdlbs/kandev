@@ -1028,8 +1028,11 @@ func planWriteAck(action string, result map[string]interface{}, sentContent stri
 	if updatedAt := stringField(result, "updated_at"); updatedAt != "" {
 		ack += ", updated_at=" + updatedAt
 	}
-	return mcp.NewToolResultText(ack +
-		". Plan content is omitted from this response; read it back with get_task_plan_kandev if needed.")
+	ack += ". Plan content is omitted from this response; read it back with get_task_plan_kandev if needed."
+	if warning := stringField(result, "plan_write_warning"); warning != "" {
+		ack += "\n\n" + warning
+	}
+	return mcp.NewToolResultText(ack)
 }
 
 func (s *Server) createTaskPlanHandler() server.ToolHandlerFunc {

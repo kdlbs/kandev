@@ -69,7 +69,7 @@ MCP attachment observability is owned by the Kandev session and execution:
   initialize, tool listing, and tool use remain separate findings.
 
 The observable behavior is specified in
-[`docs/specs/mcp-session-observability/spec.md`](../specs/mcp-session-observability/spec.md).
+[`docs/specs/platform/requirements/mcp-session-observability.md`](../specs/platform/requirements/mcp-session-observability.md).
 
 ## Consequences
 
