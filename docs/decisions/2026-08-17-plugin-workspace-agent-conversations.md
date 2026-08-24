@@ -20,10 +20,12 @@ ephemeral backing task/session, stamps its provenance server-side, is excluded f
 ordinary task and Quick Chat projections, and is deleted only by its owning plugin's
 successful uninstall.
 
-The Coordinator plugin owns scheduling, reports, workflow workstep policy, and prompt
-composition. It uses existing route and Integrations navigation registration. Disabling,
-upgrading, or changing configuration retains managed conversation data; uninstall stops
-the plugin and fails visibly if provenance-safe cleanup cannot complete.
+The Coordinator plugin owns reports, workflow workstep policy, prompt composition,
+and its durable Coordinator product state. It must not own a cron/scheduler:
+Kandev Automations trigger Coordinator cycles. The generic conversation remains
+transport only. Disabling, upgrading, or changing configuration retains managed
+conversation data; uninstall stops the plugin and fails visibly if
+provenance-safe cleanup cannot complete.
 
 ### Amendment: Coordinator product identity is separate
 
@@ -36,8 +38,8 @@ host-owned workspace object in
 For Coordinator, the backing task/session is a replaceable Stage 0 execution
 adapter. It is not an immortal session, a visible product identity, or a source
 of implicit authority. The generic Integrations recipe stays available to other
-workspace-agent plugins; Coordinator's future dedicated navigation section is a
-separate host-owned product surface.
+workspace-agent plugins; Coordinator uses a generic workspace-agent destination
+placement after Integrations rather than a Coordinator-specific core surface.
 
 ## Consequences
 
@@ -45,9 +47,10 @@ The host owns generic conversation visibility, profile/executor resolution,
 dispatch idempotency, and lifecycle cleanup. Plugin authors receive a narrow
 public contract rather than database or private-API access. The Host protobuf,
 SDK, manifest, task service, and native UI surfaces require additive
-compatibility tests. Coordinator-specific identity, grants, audit, event wakes,
-and destructive boundaries are additive host contracts and cannot be inferred
-from this generic capability.
+compatibility tests. Coordinator-specific policy, reports, run ledger, audit
+projection, and wake interpretation remain plugin-owned. Any additional core
+contract must be generic workspace-agent identity/authority, inbox, logical
+conversation, or Automation delivery rather than Coordinator behavior.
 
 ## Alternatives Considered
 
