@@ -6,7 +6,7 @@ wave: 8
 depends_on:
   - "13-lifecycle-state-review-remediation"
 plan: "plan.md"
-spec: "../../specs/ui/ci-pr-automation.md"
+spec: "../../specs/ui/requirements/ci-pr-automation.md"
 ---
 
 # Task 14: Lifecycle delivery review remediation

@@ -7,7 +7,7 @@ description: "Install and run the Tauri desktop app with the native Kandev runti
 
 Kandev Desktop packages the native Kandev runtime inside a Tauri application and displays the normal web UI in the operating system WebView. Choose it for a native launcher, application menus, window-state persistence, desktop notifications, and signed in-app updates. It does not require Node.js, pnpm, Go, or Rust at runtime.
 
-The [CLI](./cli.md) is a better fit for headless machines, browser-only access, or an OS service. Desktop and CLI releases use the same SemVer and the same default Kandev data layout, but they are separate installation and update channels.
+The [CLI](cli.md) is a better fit for headless machines, browser-only access, or an OS service. Desktop and CLI releases use the same SemVer and the same default Kandev data layout, but they are separate installation and update channels.
 
 ## Quick path
 
@@ -111,15 +111,15 @@ Startup waits up to 60 seconds for the owned backend. A missing packaged binary,
 
 ## Data, processes, and cleanup
 
-Desktop inherits normal backend configuration. By default, persistent data lives in `~/.kandev` (below the user profile directory on Windows). Set `KANDEV_HOME_DIR` in the desktop process environment before launch to isolate or relocate it; see [Configuration](./configuration.md). The desktop app's own platform app-data directory separately stores window geometry.
+Desktop inherits normal backend configuration. By default, persistent data lives in `~/.kandev` (below the user profile directory on Windows). Set `KANDEV_HOME_DIR` in the desktop process environment before launch to isolate or relocate it; see [Configuration](configuration.md). The desktop app's own platform app-data directory separately stores window geometry.
 
 Only one desktop instance runs per OS user/application scope. Launching the app a second time shows, unminimizes, and focuses the existing main window; it does not start a second backend.
 
-Closing the main OS window or choosing **Quit Kandev** quits the application and stops the backend it owns. There is no tray/background mode or desktop autostart service. On Unix, shutdown sends a graceful termination and force-kills after five seconds if needed; on Windows it terminates the owned process tree. Active external executor resources may have their own lifecycle, check [Executors](./executors.md) before manual cleanup.
+Closing the main OS window or choosing **Quit Kandev** quits the application and stops the backend it owns. There is no tray/background mode or desktop autostart service. On Unix, shutdown sends a graceful termination and force-kills after five seconds if needed; on Windows it terminates the owned process tree. Active external executor resources may have their own lifecycle, check [Executors](executors.md) before manual cleanup.
 
 The application menu exposes New Task, Settings (`Cmd/Ctrl+,`), contextual Close (`Cmd/Ctrl+W`), zoom, full-screen, Help, update, and Quit actions. Contextual Close asks the web UI to close its top dialog or eligible file/diff/commit/preview tab; if nothing is closeable it does not shut down the window or backend. The desktop shell saves window geometry in its platform app-data directory and clamps restored geometry to an available display.
 
-Uninstalling the desktop application does not delete the Kandev home. Keep it to preserve workspaces and settings, or back it up and remove it separately only after all Kandev processes and executors are stopped. See [Operations](./operations.md).
+Uninstalling the desktop application does not delete the Kandev home. Keep it to preserve workspaces and settings, or back it up and remove it separately only after all Kandev processes and executors are stopped. See [Operations](operations.md).
 
 ## Agent CLI discovery
 

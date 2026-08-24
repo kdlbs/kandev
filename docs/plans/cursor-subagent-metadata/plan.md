@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/agents/cursor-subagent-metadata.md
+spec: docs/specs/agents/requirements/cursor-subagent-metadata.md
 created: 2026-08-20
 status: in_progress
 ---

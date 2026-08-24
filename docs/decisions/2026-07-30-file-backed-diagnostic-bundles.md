@@ -108,7 +108,7 @@ download flow because its content and permission boundary differ materially
 from the standard support bundle.
 
 The observable contract lives in
-[`docs/specs/platform/diagnostic-logging.md`](../specs/platform/diagnostic-logging.md).
+[`docs/specs/platform/requirements/diagnostic-logging.md`](../specs/platform/requirements/diagnostic-logging.md).
 
 ## Consequences
 

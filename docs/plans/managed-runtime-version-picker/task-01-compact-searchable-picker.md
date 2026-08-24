@@ -5,7 +5,7 @@ status: complete
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/agents/runtime-updates.md"
+spec: "../../specs/agents/requirements/runtime-updates.md"
 ---
 
 # Task 01: Implement the compact searchable picker
@@ -46,7 +46,7 @@ cd apps/web && pnpm e2e:run --project mobile-chrome e2e/tests/settings/mobile-ag
 - `apps/web/src/locales/zh-cn/agents.json`
 - `apps/web/src/locales/zh-hk/agents.json`
 - `apps/web/src/locales/zh-tw/agents.json`
-- `docs/specs/agents/runtime-updates.md`
+- `docs/specs/agents/requirements/runtime-updates.md`
 - `docs/plans/managed-runtime-version-picker/plan.md`
 - `docs/plans/managed-runtime-version-picker/task-01-compact-searchable-picker.md`
 

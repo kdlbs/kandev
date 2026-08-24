@@ -621,7 +621,7 @@ func seedRunSkillSnapshotHandler(repo *officesqlite.Repository, log *logger.Logg
 // Used by the agent dashboard E2E spec to drive the costs section
 // (aggregate + per-run rollup) without launching an agent. TokensOut is a
 // pointer so a test can omit it to seed the "never measured" NULL shape
-// (docs/specs/office/costs.md) instead of always writing a measured 0.
+// (docs/specs/office/requirements/costs.md) instead of always writing a measured 0.
 type seedCostEventRequest struct {
 	AgentProfileID string  `json:"agent_profile_id"`
 	TaskID         string  `json:"task_id"`

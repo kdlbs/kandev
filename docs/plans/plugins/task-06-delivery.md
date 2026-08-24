@@ -14,7 +14,7 @@ Subscribe plugins to the event bus and deliver signed event webhooks with
 at-least-once semantics, sequential per plugin, retries, and an error-state buffer.
 
 ## Inputs
-- Spec `docs/specs/plugins/spec.md` → "Event webhook delivery" (headers,
+- Spec `docs/specs/plugins/requirements/plugins.md` → "Event webhook delivery" (headers,
   envelope, HMAC-SHA256(webhook_secret, raw_body), at-least-once, 10s timeout,
   3 retries backoff 5s/15s/45s, sequential per plugin, ring buffer 100 events /
   5min TTL while plugin is in error).

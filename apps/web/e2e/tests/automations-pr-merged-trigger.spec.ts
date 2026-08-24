@@ -4,7 +4,7 @@ import { AutomationsPage } from "../pages/automations-page";
 /**
  * E2E coverage for the github_pr_merged ("Pull request merged") trigger type.
  *
- * Spec: docs/specs/automations-pr-merged-trigger/spec.md
+ * Spec: docs/specs/office/requirements/automations-pr-merged-trigger.md
  * Decisions pinned here:
  *  - Picker shows "Pull request merged" under GitHub group, immediately after "New pull requests"
  *  - Config round-trip: all_repos, repos, base_branches survive save/reopen

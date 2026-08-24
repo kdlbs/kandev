@@ -5,7 +5,7 @@ status: completed
 wave: 2
 depends_on: ["01-core-and-task-search"]
 plan: "plan.md"
-spec: "../../specs/ui/entity-reference-composer.md"
+spec: "../../specs/ui/requirements/entity-reference-composer.md"
 ---
 
 # Task 06: Azure DevOps Mention Provider

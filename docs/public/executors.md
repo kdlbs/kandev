@@ -124,7 +124,7 @@ Do not treat the two script fields as universal hooks:
 Keep working prepare scripts noninteractive and idempotent. Kandev resolves supported placeholders and appends its managed branch checkout for Docker, Sprites, and SSH after the user script. A profile cleanup script must never remove paths outside the environment it owns.
 
 The common preparation limit is configured through
-`KANDEV_TASK_PREPARATION_TIMEOUT`; see [Configuration](./configuration.md#setup-and-launch-timing)
+`KANDEV_TASK_PREPARATION_TIMEOUT`; see [Configuration](configuration.md#setup-and-launch-timing)
 for duration syntax, fallback behavior, and the derived launch-phase limit.
 
 Two current preparation exceptions are easy to miss:

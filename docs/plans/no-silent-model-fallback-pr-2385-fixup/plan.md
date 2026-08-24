@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/no-silent-model-fallback/spec.md
+spec: docs/specs/agents/requirements/no-silent-model-fallback.md
 created: 2026-08-09
 status: done
 ---

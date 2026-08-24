@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/message-queue-auto-merge.md
+spec: docs/specs/ui/requirements/message-queue-auto-merge.md
 created: 2026-08-12
 status: completed
 ---

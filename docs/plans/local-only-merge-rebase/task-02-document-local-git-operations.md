@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-resolve-local-base-targets"]
 plan: "plan.md"
-spec: "../../specs/workspaces/local-repositories.md"
+spec: "../../specs/workspaces/requirements/local-repositories.md"
 ---
 
 # Task 02: Document local Git operations
@@ -16,7 +16,7 @@ Update the public Git reference for local-only Merge and Rebase behavior. Keep r
 
 ## Inputs
 
-- Spec: `docs/specs/workspaces/local-repositories.md`.
+- Spec: `docs/specs/workspaces/requirements/local-repositories.md`.
 - Plan: `docs/plans/local-only-merge-rebase/plan.md`, Public Documentation.
 - Existing reference page: `docs/public/git-operations.md`, Everyday operations and Troubleshooting.
 - Primary Diátaxis type: reference.

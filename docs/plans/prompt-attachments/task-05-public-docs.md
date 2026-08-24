@@ -25,7 +25,7 @@ spec: "../../specs/tasks/requirements/prompt-attachments.md"
 ## Verification
 
 ```bash
-rg -n "10 MB|10 MiB|20 MB|20 MiB|32 MiB|100 MiB|attachment" docs/public/tasks-and-workflows.md docs/public/websocket-api.md docs/specs/office/live-updates.md docs/specs/tasks/requirements/prompt-attachments.md docs/decisions/2026-08-04-file-backed-prompt-attachments.md
+rg -n "10 MB|10 MiB|20 MB|20 MiB|32 MiB|100 MiB|attachment" docs/public/tasks-and-workflows.md docs/public/websocket-api.md docs/specs/office/requirements/live-updates.md docs/specs/tasks/requirements/prompt-attachments.md docs/decisions/2026-08-04-file-backed-prompt-attachments.md
 node --test scripts/validate-public-docs.test.mjs
 node scripts/validate-public-docs.mjs
 ```
@@ -34,7 +34,7 @@ node scripts/validate-public-docs.mjs
 
 - `docs/public/tasks-and-workflows.md`
 - `docs/public/websocket-api.md`
-- `docs/specs/office/live-updates.md`
+- `docs/specs/office/requirements/live-updates.md`
 - `docs/specs/tasks/requirements/prompt-attachments.md` only if implementation reveals a
   confirmed contract correction
 

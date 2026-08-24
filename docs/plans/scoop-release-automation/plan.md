@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/scoop-release-automation/spec.md
+spec: docs/specs/release/requirements/scoop-release-automation.md
 created: 2026-08-11
 status: complete
 ---
@@ -73,7 +73,7 @@ but that repository has no automation that runs them.
 - Amend `docs/decisions/0029-release-backfill-and-desktop-diagnostics.md` so
   backfill reconciles the Scoop bucket with current workflow control logic.
 - Amend `docs/decisions/2026-07-31-npm-nightly-release-channel.md` and
-  `docs/specs/npm-nightly-channel/spec.md` so Scoop remains Stable-only.
+  `docs/specs/release/requirements/npm-nightly-channel.md` so Scoop remains Stable-only.
 - Change the repair spec and its index entry to `shipped` after all tasks and
   checks are complete.
 
