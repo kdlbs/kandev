@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -57,6 +58,8 @@ type inboxAttachment struct {
 	Name         string `json:"name,omitempty"`
 	SizeBytes    int64  `json:"size_bytes,omitempty"`
 }
+
+const inboxTransitionIDKey = "inbox_transition_id"
 
 func (h *Handlers) handleListTaskInbox(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	req, cursor, errResp := h.parseTaskInboxRequest(ctx, msg)
@@ -136,14 +139,15 @@ func (h *Handlers) appendSessionInbox(ctx context.Context, items []inboxItem, co
 		}
 		items = append(items, inboxItem{
 			ID:           message.ID,
-			TransitionID: inboxMetadataString(message.Metadata, "queue_entry_id"),
+			TransitionID: inboxTransitionID(message.Metadata, inboxMetadataString(message.Metadata, "queue_entry_id")),
 			State:        "delivered",
 			SessionID:    session.ID,
 			SessionName:  session.Name,
 			IsPrimary:    session.IsPrimary,
 			IsCurrent:    session.ID == currentID,
 			Sender:       string(message.AuthorType),
-			Content:      message.Content,
+			Content:      sysprompt.StripSystemContent(message.Content),
+			Attachments:  safeInboxMessageAttachments(message.Metadata),
 			Timestamp:    message.CreatedAt,
 		})
 		counts[session.ID]++
@@ -157,7 +161,7 @@ func (h *Handlers) appendSessionInbox(ctx context.Context, items []inboxItem, co
 		}
 		items = append(items, inboxItem{
 			ID:           entry.ID,
-			TransitionID: entry.ID,
+			TransitionID: inboxTransitionID(entry.Metadata, entry.ID),
 			State:        "queued",
 			SessionID:    session.ID,
 			SessionName:  session.Name,
@@ -177,6 +181,12 @@ func inboxMetadataString(metadata map[string]interface{}, key string) string {
 	value, _ := metadata[key].(string)
 	return value
 }
+func inboxTransitionID(metadata map[string]interface{}, fallback string) string {
+	if id := inboxMetadataString(metadata, inboxTransitionIDKey); id != "" {
+		return id
+	}
+	return fallback
+}
 func inboxLimit(requested int) int {
 	if requested <= 0 {
 		return inboxDefaultLimit
@@ -192,6 +202,22 @@ func safeInboxAttachments(entries []messagequeue.MessageAttachment) []inboxAttac
 		out = append(out, inboxAttachment{AttachmentID: entry.AttachmentID, Type: entry.Type, MimeType: entry.MimeType, Name: entry.Name, SizeBytes: entry.SizeBytes})
 	}
 	return out
+}
+
+func safeInboxMessageAttachments(metadata map[string]interface{}) []inboxAttachment {
+	attachments, ok := metadata["attachments"]
+	if !ok {
+		return nil
+	}
+	encoded, err := json.Marshal(attachments)
+	if err != nil {
+		return nil
+	}
+	var queued []messagequeue.MessageAttachment
+	if err := json.Unmarshal(encoded, &queued); err != nil {
+		return nil
+	}
+	return safeInboxAttachments(queued)
 }
 func inboxBefore(a, b inboxItem) bool {
 	if !a.Timestamp.Equal(b.Timestamp) {

@@ -200,13 +200,21 @@ func TestAutoStartTransientError_BootReadyDrainsOrphanedQueue(t *testing.T) {
 		t.Errorf("queued metadata workflow_step_name = %q, want Merge", name)
 	}
 	mergeUserMsgs := 0
+	var recordedTransitionID string
 	for _, m := range msgCreator.userMessages {
 		if name, _ := m.metadata["workflow_step_name"].(string); name == "Merge" {
 			mergeUserMsgs++
+			recordedTransitionID, _ = m.metadata[inboxTransitionMetadataKey].(string)
 		}
 	}
 	if mergeUserMsgs != 1 {
 		t.Errorf("expected exactly 1 Merge user_message (from recordAutoStartMessage before PromptTask failed), got %d", mergeUserMsgs)
+	}
+	if recordedTransitionID == "" {
+		t.Fatal("recorded workflow message is missing inbox transition identity")
+	}
+	if queuedTransitionID, _ := queued.Metadata[inboxTransitionMetadataKey].(string); queuedTransitionID != recordedTransitionID {
+		t.Errorf("queued transition identity = %q, want recorded message identity %q", queuedTransitionID, recordedTransitionID)
 	}
 
 	// --- Phase 2: user resumes the session — boot_ready must drain the queue ---

@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -2883,7 +2884,10 @@ func (s *Service) autoStartPassthroughPrompt(
 // before the prompt was queued. executeQueuedMessage reads this flag to skip
 // its own CreateUserMessage and avoid the duplicate observed when PromptTask
 // failed transiently and the queue was later drained via boot_ready.
-const metaKeyUserMessageRecorded = "user_message_recorded"
+const (
+	metaKeyUserMessageRecorded = "user_message_recorded"
+	inboxTransitionMetadataKey = "inbox_transition_id"
+)
 
 type workflowMessageOrigin struct {
 	StepID    string
@@ -2969,6 +2973,7 @@ func (s *Service) handleCreatedAutoStartLaunchFailure(
 		if queueErr := s.queueAutoStartPrompt(
 			ctx, taskID, sessionID, prompt, planMode,
 			attachments, origin, userMessageRecorded, references,
+			"",
 		); queueErr != nil {
 			s.logger.Warn("failed to queue auto-start prompt after launch failure",
 				zap.String("task_id", taskID),
@@ -3075,7 +3080,7 @@ func (s *Service) autoStartStepPrompt(
 			}, referenceContext, pullRequestTargetContext)
 		}
 	}
-	userMsgRecorded := s.recordAutoStartMessage(ctx, taskID, sessionID, recordedPrompt, planMode, origin, references)
+	userMsgRecorded, inboxTransitionID := s.recordAutoStartMessage(ctx, taskID, sessionID, recordedPrompt, planMode, origin, references)
 
 	// If the session is in CREATED state, the agent was never started (e.g. workspace-only
 	// preparation from a blocked auto-start). PromptTask will reject CREATED sessions,
@@ -3130,7 +3135,7 @@ func (s *Service) autoStartStepPrompt(
 		// chat row was successfully inserted above; a failed write passes false,
 		// letting the drain re-attempt insertion.
 		if isAgentAlreadyRunningError(err) && shouldQueueIfBusy {
-			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode, attachments, origin, userMsgRecorded, references); queueErr != nil {
+			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode, attachments, origin, userMsgRecorded, references, inboxTransitionID); queueErr != nil {
 				requeueTaken()
 				return queueErr
 			}
@@ -3145,7 +3150,7 @@ func (s *Service) autoStartStepPrompt(
 		if shouldQueueIfBusy {
 			// Pass userMsgRecorded so the drain skips CreateUserMessage only when
 			// the chat row was successfully inserted above by recordAutoStartMessage.
-			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode, attachments, origin, userMsgRecorded, references); queueErr != nil {
+			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode, attachments, origin, userMsgRecorded, references, inboxTransitionID); queueErr != nil {
 				requeueTaken()
 				return queueErr
 			}
@@ -3317,9 +3322,9 @@ func (s *Service) recordAutoStartMessage(
 	planMode bool,
 	origin workflowMessageOrigin,
 	references []v1.EntityReference,
-) bool {
+) (bool, string) {
 	if s.messageCreator == nil || prompt == "" {
-		return false
+		return false, ""
 	}
 	turnID := s.getActiveTurnID(sessionID)
 	if turnID == "" {
@@ -3334,14 +3339,16 @@ func (s *Service) recordAutoStartMessage(
 	// workflow_auto_start is the original tag this function set; preserved
 	// for any consumer reading it directly.
 	metaMap := workflowMessageMetadata(planMode, origin, references)
+	transitionID := uuid.NewString()
+	metaMap[inboxTransitionMetadataKey] = transitionID
 	if err := s.messageCreator.CreateUserMessage(ctx, taskID, prompt, sessionID, turnID, metaMap); err != nil {
 		s.logger.Error("failed to create auto-start user message",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-		return false
+		return false, ""
 	}
-	return true
+	return true, transitionID
 }
 
 // queueAutoStartPromptIfRunning queues the workflow auto-start prompt only
@@ -3362,7 +3369,7 @@ func (s *Service) queueAutoStartPromptIfRunning(
 	if session.State != models.TaskSessionStateRunning && session.State != models.TaskSessionStateStarting {
 		return false, nil
 	}
-	if err := s.queueAutoStartPrompt(ctx, taskID, session.ID, prompt, planMode, attachments, origin, userMessageRecorded, references); err != nil {
+	if err := s.queueAutoStartPrompt(ctx, taskID, session.ID, prompt, planMode, attachments, origin, userMessageRecorded, references, ""); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -3406,6 +3413,7 @@ func (s *Service) queueAutoStartPrompt(
 	origin workflowMessageOrigin,
 	userMessageRecorded bool,
 	references []v1.EntityReference,
+	inboxTransitionID string,
 ) error {
 	if s.messageQueue == nil {
 		return fmt.Errorf("message queue is not configured")
@@ -3413,6 +3421,9 @@ func (s *Service) queueAutoStartPrompt(
 	meta := workflowMessageMetadata(planMode, origin, references)
 	if userMessageRecorded {
 		meta[metaKeyUserMessageRecorded] = true
+	}
+	if inboxTransitionID != "" {
+		meta[inboxTransitionMetadataKey] = inboxTransitionID
 	}
 	_, err := s.messageQueue.QueueMessageWithMetadata(
 		ctx,

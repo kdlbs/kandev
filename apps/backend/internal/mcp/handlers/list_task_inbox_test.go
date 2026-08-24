@@ -23,10 +23,16 @@ func TestHandleListTaskInbox_AggregatesDeliveredMessagesForOwnTask(t *testing.T)
 	require.NoError(t, repo.CreateTaskSession(context.Background(), sibling))
 	for _, session := range []*models.TaskSession{primary, sibling} {
 		metadata := map[string]interface{}(nil)
+		content := session.ID
 		if session.ID == primary.ID {
-			metadata = map[string]interface{}{"queue_entry_id": "queue-primary"}
+			metadata = map[string]interface{}{
+				"queue_entry_id":     "queue-primary",
+				inboxTransitionIDKey: "transition-primary",
+				"attachments":        []messagequeue.MessageAttachment{{Type: "image", Data: "secret", MimeType: "image/png", Name: "delivered.png", SizeBytes: 12}},
+			}
+			content = "visible\n\n<kandev-system>hidden</kandev-system>"
 		}
-		_, err := svc.CreateMessage(context.Background(), &service.CreateMessageRequest{TaskSessionID: session.ID, TaskID: task.ID, AuthorType: "user", Content: session.ID, Metadata: metadata})
+		_, err := svc.CreateMessage(context.Background(), &service.CreateMessageRequest{TaskSessionID: session.ID, TaskID: task.ID, AuthorType: "user", Content: content, Metadata: metadata})
 		require.NoError(t, err)
 	}
 	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
@@ -40,7 +46,11 @@ func TestHandleListTaskInbox_AggregatesDeliveredMessagesForOwnTask(t *testing.T)
 	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
 	assert.Len(t, payload.Items, 2)
 	assert.Equal(t, 2, payload.Total)
-	assert.Equal(t, "queue-primary", payload.Items[0].TransitionID)
+	assert.Equal(t, "transition-primary", payload.Items[0].TransitionID)
+	assert.Equal(t, "visible", payload.Items[0].Content)
+	require.Len(t, payload.Items[0].Attachments, 1)
+	assert.Equal(t, "delivered.png", payload.Items[0].Attachments[0].Name)
+	assert.NotContains(t, string(resp.Payload), "secret")
 }
 
 func TestHandleListTaskInbox_RejectsForeignTarget(t *testing.T) {
