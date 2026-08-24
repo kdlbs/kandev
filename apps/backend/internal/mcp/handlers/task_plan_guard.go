@@ -105,8 +105,9 @@ type planWriteGuardResult struct {
 // through a different door) and update_task_plan_kandev.
 //
 // A failure to fetch the current plan is non-fatal: the write proceeds
-// without a truncation warning rather than blocking on a guard that itself
-// failed. A failure to list the revision history is handled differently:
+// without a truncation warning, but it forces a new revision so a later
+// successful write cannot coalesce into an unknown prior revision. A failure
+// to list the revision history is handled differently:
 // truncation has already been detected from the plan content at that point,
 // so the guard still forces a new revision and still warns — it renders the
 // warning without a specific revision number (see planTruncationWarning)
@@ -115,7 +116,10 @@ type planWriteGuardResult struct {
 // overwrite, the only surviving copy of the pre-truncation content.
 func (h *Handlers) evaluatePlanWriteGuard(ctx context.Context, taskID, newContent string) planWriteGuardResult {
 	existing, err := h.planService.GetPlan(ctx, taskID)
-	if err != nil || existing == nil {
+	if err != nil {
+		return planWriteGuardResult{forceNewRevision: true}
+	}
+	if existing == nil {
 		return planWriteGuardResult{}
 	}
 	if !planTruncationDetected(existing.Content, newContent) {

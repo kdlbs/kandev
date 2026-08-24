@@ -262,16 +262,25 @@ func TestMCPPlanTruncationGuard_CreateOverExistingPlanWarns(t *testing.T) {
 // succeeded.
 type failingRevisionsRepo struct {
 	*sqlite.Repository
+	failGetPlan bool
 }
 
 func (r *failingRevisionsRepo) ListTaskPlanRevisions(context.Context, string, int) ([]*models.TaskPlanRevision, error) {
 	return nil, errors.New("simulated revision lookup failure")
 }
 
+func (r *failingRevisionsRepo) GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error) {
+	if r.failGetPlan {
+		r.failGetPlan = false
+		return nil, errors.New("simulated plan lookup failure")
+	}
+	return r.Repository.GetTaskPlan(ctx, taskID)
+}
+
 // newMCPPlanTestHandlersWithFailingRevisionLookup builds Handlers like
 // newMCPPlanTestHandlers, but backed by a plan service whose ListRevisions
 // call always fails.
-func newMCPPlanTestHandlersWithFailingRevisionLookup(t *testing.T) *Handlers {
+func newMCPPlanTestHandlersWithFailingRevisionLookup(t *testing.T) (*Handlers, *failingRevisionsRepo) {
 	t.Helper()
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
@@ -323,7 +332,7 @@ func newMCPPlanTestHandlersWithFailingRevisionLookup(t *testing.T) *Handlers {
 	}
 
 	wrapped := &failingRevisionsRepo{Repository: repo}
-	return &Handlers{planService: service.NewPlanService(wrapped, eventBus, log), logger: log}
+	return &Handlers{planService: service.NewPlanService(wrapped, eventBus, log), logger: log}, wrapped
 }
 
 // TestMCPPlanTruncationGuard_RevisionLookupFailureOmitsRevisionNumber pins
@@ -336,7 +345,7 @@ func newMCPPlanTestHandlersWithFailingRevisionLookup(t *testing.T) *Handlers {
 // content — but the rendered warning must not claim the content lives in
 // revision 0.
 func TestMCPPlanTruncationGuard_RevisionLookupFailureOmitsRevisionNumber(t *testing.T) {
-	h := newMCPPlanTestHandlersWithFailingRevisionLookup(t)
+	h, _ := newMCPPlanTestHandlersWithFailingRevisionLookup(t)
 	ctx := context.Background()
 
 	large := strings.Repeat("x", 40000)
@@ -389,5 +398,54 @@ func TestMCPPlanTruncationGuard_RevisionLookupFailureOmitsRevisionNumber(t *test
 	if _, ok := updated["prior_revision_number"]; ok {
 		t.Errorf("prior_revision_number should be omitted when the revision number is unknown, got %v",
 			updated["prior_revision_number"])
+	}
+}
+
+func TestMCPPlanTruncationGuard_PlanLookupFailurePreservesHistory(t *testing.T) {
+	h, repo := newMCPPlanTestHandlersWithFailingRevisionLookup(t)
+	ctx := context.Background()
+
+	large := strings.Repeat("x", 40000)
+	small := strings.Repeat("y", 10000)
+
+	_, err := h.handleCreateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPCreateTaskPlan,
+		mustMarshalPlanPayload(t, map[string]any{
+			"task_id": mcpPlanTaskID,
+			"content": large,
+		})))
+	if err != nil {
+		t.Fatalf("handleCreateTaskPlan: %v", err)
+	}
+
+	repo.failGetPlan = true
+
+	out, err := h.handleUpdateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPUpdateTaskPlan,
+		mustMarshalPlanPayload(t, map[string]any{
+			"task_id": mcpPlanTaskID,
+			"content": small,
+		})))
+	if err != nil {
+		t.Fatalf("handleUpdateTaskPlan: %v", err)
+	}
+	updated := decodeMCPPlanPayload(t, out)
+	if warning, ok := updated["plan_write_warning"]; ok {
+		t.Errorf("unexpected warning when the guard could not read the prior plan: %v", warning)
+	}
+
+	revisions, err := repo.Repository.ListTaskPlanRevisions(ctx, mcpPlanTaskID, 0)
+	if err != nil {
+		t.Fatalf("ListTaskPlanRevisions: %v", err)
+	}
+	if len(revisions) != 2 {
+		t.Fatalf("expected 2 revisions after a guarded read failure, got %d", len(revisions))
+	}
+	rev1 := revisionWithNumber(t, revisions, 1)
+	fullRev1, err := repo.GetTaskPlanRevision(ctx, rev1.ID)
+	if err != nil {
+		t.Fatalf("GetTaskPlanRevision(rev1): %v", err)
+	}
+	if fullRev1.Content != large {
+		t.Errorf("revision 1 content was mutated after a guarded read failure; got len=%d, want len=%d",
+			len(fullRev1.Content), len(large))
 	}
 }
