@@ -42,6 +42,7 @@ signals, and task-scoped scheduling contracts.
 - [Additional session workspace reuse](requirements/additional-session-workspace-reuse.md)
 - [Attach workspace sources](requirements/attach-workspace-sources.md)
 - [Archive confirmation](requirements/archive-confirmation.md)
+- [Task confirmation warning hierarchy](requirements/confirmation-warning-hierarchy.md)
 - [Autopilot mode](requirements/autopilot-mode.md)
 - [Blocked task escalation](requirements/blocked-task-escalation.md)
 - [Cancelled turn completion](requirements/workflow-cancelled-turn-completion.md)
@@ -107,6 +108,7 @@ signals, and task-scoped scheduling contracts.
 
 - [Active clarification lifecycle](system-design/clarification-active-lifecycle.md)
 - [Attach workspace sources](system-design/attach-workspace-sources.md)
+- [Task confirmation warning hierarchy](system-design/confirmation-warning-hierarchy.md)
 - [External task ID idempotency](system-design/external-id-idempotency.md)
 - [External task ID idempotency operations](system-design/external-id-idempotency-operations.md)
 - [Model unification](system-design/model-unification.md)

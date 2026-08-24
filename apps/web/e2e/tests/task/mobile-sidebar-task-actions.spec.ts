@@ -4,6 +4,7 @@ import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { activeSessionId, seedSecondaryClarificationTask } from "../../helpers/clarification";
 import { makeGitEnv } from "../../helpers/git-helper";
+import { waitForActiveSessionForegroundActivity } from "../../helpers/session-store";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("Mobile sidebar task actions", () => {
@@ -202,6 +203,80 @@ test.describe("Mobile sidebar task actions", () => {
       client: document.documentElement.clientWidth,
     }));
     expect(pageWidth.scroll).toBeLessThanOrEqual(pageWidth.client);
+  });
+
+  test("keeps the in-flight warning compact and reachable on a phone", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    test.setTimeout(120_000);
+    const title = "Mobile in-flight archive warning";
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      title,
+      seedData.agentProfileId,
+      {
+        description: "/background 30s",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await waitForActiveSessionForegroundActivity(testPage, "generating");
+    await testPage.getByTestId("mobile-session-menu").tap();
+
+    const drawer = testPage.getByRole("dialog", { name: "Tasks" });
+    const taskRow = drawer.getByTestId("sidebar-task-item").filter({ hasText: title });
+    const heightBefore = await taskRow.evaluate(
+      (element) => element.getBoundingClientRect().height,
+    );
+    await prCapture.screenshot("before-mobile-in-flight-archive", {
+      caption: "Phone task row before in-flight archive confirmation",
+    });
+    await taskRow.getByRole("button", { name: "Task actions" }).tap();
+    await testPage.getByRole("menuitem", { name: "Archive", exact: true }).tap();
+
+    const confirmation = taskRow.getByTestId("task-archive-inline-confirmation");
+    const warning = confirmation.getByTestId("still-working-warning");
+    await expect(confirmation).toBeVisible();
+    await expect(warning).toBeVisible();
+    await prCapture.screenshot("mobile-in-flight-archive-warning", {
+      caption: "Compact in-flight warning in phone archive confirmation",
+    });
+
+    const warningMetrics = await warning.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { fontSize: style.fontSize, lineHeight: style.lineHeight };
+    });
+    expect(warningMetrics).toEqual({ fontSize: "12px", lineHeight: "20px" });
+    await expect(warning).toHaveClass(/text-pretty/);
+    const heightOpen = await taskRow.evaluate((element) => element.getBoundingClientRect().height);
+    expect(heightOpen).toBeGreaterThan(heightBefore);
+
+    for (const button of [
+      confirmation.getByRole("button", { name: "Cancel" }),
+      confirmation.getByTestId("archive-task-confirm"),
+    ]) {
+      const box = await button.boundingBox();
+      if (!box) throw new Error("in-flight inline archive action has no layout box");
+      expect(box.width).toBeGreaterThanOrEqual(44);
+      expect(box.height).toBeGreaterThanOrEqual(44);
+      await expect(button).toBeInViewport();
+    }
+
+    const pageWidth = await testPage.evaluate(() => ({
+      scroll: document.documentElement.scrollWidth,
+      client: document.documentElement.clientWidth,
+    }));
+    expect(pageWidth.scroll).toBeLessThanOrEqual(pageWidth.client);
+    await confirmation.getByRole("button", { name: "Cancel" }).tap();
+    await expect(confirmation).toBeHidden();
   });
 
   test("keeps the tablet task switcher as a left-side sheet", async ({

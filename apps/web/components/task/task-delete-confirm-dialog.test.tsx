@@ -41,6 +41,17 @@ function renderDialog(ui: ReactNode, tasks: SeedTask[] = []) {
 
 const WARNING_TESTID = "still-working-warning";
 
+function expectCompactWarning() {
+  const warning = screen.getByTestId(WARNING_TESTID);
+  expect(warning.getAttribute("role")).toBe("alert");
+  expect(warning.className).toContain("gap-1.5");
+  expect(warning.className).toContain("p-2.5");
+  expect(warning.className).toContain("text-xs");
+  expect(warning.className).toContain("leading-5");
+  expect(warning.className).toContain("text-pretty");
+  expect(warning.querySelector("svg")?.getAttribute("class")).toContain("h-3.5");
+}
+
 beforeEach(() => {
   mockGetSubtaskCount.mockReset();
 });
@@ -190,6 +201,23 @@ describe("TaskDeleteConfirmDialog executor cleanup copy", () => {
 });
 
 describe("TaskDeleteConfirmDialog still-working guard", () => {
+  it("keeps the shared in-flight warning visually subordinate", () => {
+    mockGetSubtaskCount.mockResolvedValue({ count: 0 });
+    renderDialog(
+      <TaskDeleteConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="My task"
+        taskId="task-1"
+        executorType="worktree"
+        onConfirm={() => {}}
+      />,
+      [{ id: "task-1", foregroundActivity: "generating" }],
+    );
+
+    expectCompactWarning();
+  });
+
   it("warns when the task is generating", () => {
     mockGetSubtaskCount.mockResolvedValue({ count: 0 });
     renderDialog(

@@ -55,6 +55,17 @@ function renderWithTasks(ui: ReactNode, tasks: SeedTask[], confirmTaskArchive = 
 
 const WARNING_TESTID = "still-working-warning";
 
+function expectCompactWarning() {
+  const warning = screen.getByTestId(WARNING_TESTID);
+  expect(warning.getAttribute("role")).toBe("alert");
+  expect(warning.className).toContain("gap-1.5");
+  expect(warning.className).toContain("p-2.5");
+  expect(warning.className).toContain("text-xs");
+  expect(warning.className).toContain("leading-5");
+  expect(warning.className).toContain("text-pretty");
+  expect(warning.querySelector("svg")?.getAttribute("class")).toContain("h-3.5");
+}
+
 function DisableArchiveConfirmationButton() {
   const settings = useAppStore((state) => state.userSettings);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
@@ -264,6 +275,22 @@ describe("TaskArchiveConfirmDialog cleanup copy", () => {
 });
 
 describe("TaskArchiveConfirmDialog still-working guard", () => {
+  it("keeps the in-flight warning visually subordinate to confirmation copy", () => {
+    renderWithTasks(
+      <TaskArchiveConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="My task"
+        taskId="task-1"
+        executorType="worktree"
+        onConfirm={() => {}}
+      />,
+      [{ id: "task-1", foregroundActivity: "generating" }],
+    );
+
+    expectCompactWarning();
+  });
+
   it("warns when the task is generating", () => {
     renderWithTasks(
       <TaskArchiveConfirmDialog
