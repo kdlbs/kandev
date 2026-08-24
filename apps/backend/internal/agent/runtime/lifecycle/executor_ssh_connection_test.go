@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -802,5 +803,56 @@ func TestExpandIdentityAgentOpenSSHSyntax(t *testing.T) {
 		if _, err := expandIdentityAgent(input, target); err == nil {
 			t.Errorf("expandIdentityAgent(%q) unexpectedly succeeded", input)
 		}
+	}
+}
+
+func TestExpandIdentityAgentRejectsUnsetLegacyVariable(t *testing.T) {
+	const variable = "MISSING_IDENTITY_AGENT"
+	previous, wasSet := os.LookupEnv(variable)
+	if err := os.Unsetenv(variable); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if wasSet {
+			_ = os.Setenv(variable, previous)
+			return
+		}
+		_ = os.Unsetenv(variable)
+	})
+	t.Setenv("SSH_AUTH_SOCK", "/tmp/fallback.sock")
+
+	got, err := expandIdentityAgent("$"+variable, &SSHTarget{Host: "example.com"})
+	if err == nil {
+		t.Fatalf("expandIdentityAgent() returned %q without an error", got)
+	}
+	if !strings.Contains(err.Error(), variable) {
+		t.Fatalf("error = %v, want missing variable name %q", err, variable)
+	}
+}
+
+func TestExpandIdentityAgentEnvironmentDoesNotReprocessSubstitutedTokens(t *testing.T) {
+	const childEnv = "KANDEV_TEST_EXPAND_IDENTITY_AGENT_ENV"
+	if os.Getenv(childEnv) == "1" {
+		t.Setenv("AGENT", "${AGENT}")
+		got, err := expandIdentityAgentEnvironment("${AGENT}")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != "${AGENT}" {
+			t.Fatalf("expanded value = %q, want the substituted token to remain literal", got)
+		}
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run", "^TestExpandIdentityAgentEnvironmentDoesNotReprocessSubstitutedTokens$")
+	cmd.Env = append(os.Environ(), childEnv+"=1")
+	output, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		t.Fatalf("environment expansion did not terminate")
+	}
+	if err != nil {
+		t.Fatalf("child test failed: %v\n%s", err, output)
 	}
 }

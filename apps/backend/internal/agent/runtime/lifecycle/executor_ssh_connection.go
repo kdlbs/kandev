@@ -266,7 +266,11 @@ func expandIdentityAgent(value string, t *SSHTarget) (string, error) {
 		if name == "" || strings.ContainsAny(name, "/{}") {
 			return "", fmt.Errorf("invalid legacy environment variable %q", value)
 		}
-		return os.Getenv(name), nil
+		socket, ok := os.LookupEnv(name)
+		if !ok || socket == "" {
+			return "", fmt.Errorf("environment variable %s is not set", name)
+		}
+		return socket, nil
 	}
 	if value == "SSH_AUTH_SOCK" {
 		return os.Getenv("SSH_AUTH_SOCK"), nil
@@ -315,11 +319,17 @@ func expandIdentityAgentPercentTokens(value string, tokens map[byte]string) (str
 }
 
 func expandIdentityAgentEnvironment(value string) (string, error) {
-	for {
-		start := strings.Index(value, "${")
-		if start == -1 {
-			return value, nil
+	// Scan the original value only. Environment contents can contain `${...}`
+	// text, but that text is replacement data, not another expression to expand.
+	var out strings.Builder
+	for cursor := 0; cursor < len(value); {
+		relativeStart := strings.Index(value[cursor:], "${")
+		if relativeStart == -1 {
+			out.WriteString(value[cursor:])
+			break
 		}
+		start := cursor + relativeStart
+		out.WriteString(value[cursor:start])
 		endRel := strings.IndexByte(value[start+2:], '}')
 		if endRel == -1 {
 			return "", errors.New("unterminated environment variable")
@@ -333,8 +343,10 @@ func expandIdentityAgentEnvironment(value string) (string, error) {
 		if !ok {
 			return "", fmt.Errorf("environment variable %s is not set", name)
 		}
-		value = value[:start] + env + value[end+1:]
+		out.WriteString(env)
+		cursor = end + 1
 	}
+	return out.String(), nil
 }
 
 // SSHFingerprint returns the SHA256 fingerprint of a host key in the

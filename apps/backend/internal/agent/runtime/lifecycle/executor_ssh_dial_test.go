@@ -716,12 +716,12 @@ func TestBuildAuthMethodsIdentityAgentOverridesEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = configured.Close() }()
+	t.Cleanup(func() { _ = configured.Close() })
 	envListener, err := net.Listen("unix", envPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = envListener.Close() }()
+	t.Cleanup(func() { _ = envListener.Close() })
 	t.Setenv("SSH_AUTH_SOCK", envPath)
 
 	_, cleanup, err := buildAuthMethods(&SSHTarget{
