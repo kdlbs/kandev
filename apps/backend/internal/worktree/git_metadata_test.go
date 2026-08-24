@@ -72,6 +72,56 @@ func TestResolveGitMetadataRejectsSymlinkedGitEntry(t *testing.T) {
 	}
 }
 
+func TestResolveGitMetadataRejectsSymlinkedWritableDependencies(t *testing.T) {
+	for _, dependency := range []string{"objects", "logs"} {
+		t.Run(dependency, func(t *testing.T) {
+			repo := initGitMetadataRepository(t)
+			checkout := filepath.Join(t.TempDir(), "task-checkout")
+			runGitMetadata(t, repo, "worktree", "add", "-b", "task-branch", checkout)
+
+			commonDir := filepath.Join(repo, ".git")
+			path := filepath.Join(commonDir, dependency)
+			target := filepath.Join(t.TempDir(), dependency+"-target")
+			if err := os.Rename(path, target); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(target, path); err != nil {
+				t.Skipf("symlink unsupported: %v", err)
+			}
+
+			if _, err := ResolveGitMetadata(checkout); !errors.Is(err, ErrGitMetadataProjectionInvalid) {
+				t.Fatalf("ResolveGitMetadata error = %v, want symlink rejection", err)
+			}
+			if info, err := os.Lstat(path); err != nil || info.Mode()&os.ModeSymlink == 0 {
+				t.Fatalf("unsafe dependency was changed during rejection: info=%v err=%v", info, err)
+			}
+			if info, err := os.Stat(target); err != nil || !info.IsDir() {
+				t.Fatalf("symlink target was removed during rejection: info=%v err=%v", info, err)
+			}
+		})
+	}
+}
+
+func TestResolveGitMetadataIncludesRegularWritableDependencies(t *testing.T) {
+	repo := initGitMetadataRepository(t)
+	checkout := filepath.Join(t.TempDir(), "task-checkout")
+	runGitMetadata(t, repo, "worktree", "add", "-b", "task-branch", checkout)
+
+	projection, err := ResolveGitMetadata(checkout)
+	if err != nil {
+		t.Fatalf("ResolveGitMetadata: %v", err)
+	}
+	for _, path := range []string{projection.ObjectDir, filepath.Dir(projection.ReflogPath)} {
+		info, statErr := os.Lstat(path)
+		if statErr != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			t.Fatalf("regular writable dependency %q = info:%v err:%v", path, info, statErr)
+		}
+		if !containsGitMetadataPath(projection.WritablePaths, path) {
+			t.Fatalf("WritablePaths = %#v, missing %q", projection.WritablePaths, path)
+		}
+	}
+}
+
 func TestResolveGitMetadataRejectsTraversalCurrentBranchRef(t *testing.T) {
 	repo := initGitMetadataRepository(t)
 	checkout := filepath.Join(t.TempDir(), "task-checkout")
