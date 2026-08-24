@@ -2,7 +2,6 @@ package process
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -51,11 +50,8 @@ func TestRepairManagedRuntimeCacheRejectsUnversionedSpecBeforeCommand(t *testing
 }
 
 func TestRepairManagedRuntimeCacheClearsPreviousStderr(t *testing.T) {
-	cacheRoot := t.TempDir()
+	cacheRoot := filepath.Join(t.TempDir(), "npm-cache")
 	packageSpec := "managed-acp@1.2.3"
-	if err := os.MkdirAll(filepath.Join(cacheRoot, "_npx"), 0o755); err != nil {
-		t.Fatal(err)
-	}
 	mgr := NewManager(&config.InstanceConfig{
 		WorkDir:  t.TempDir(),
 		AgentEnv: []string{"NPM_CONFIG_CACHE=" + cacheRoot},
