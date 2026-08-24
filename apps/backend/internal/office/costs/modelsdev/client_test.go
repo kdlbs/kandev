@@ -668,11 +668,19 @@ func TestRequestGate_ReleaseAllIsIdempotentAndUnblocksParkedHandlers(t *testing.
 // the inner t.Run and the outer test both hang until the package's -timeout
 // fires; post-fix it returns in milliseconds because the cleanup-registered
 // gate.releaseAll unblocks the handler so httptest.Server.Close can proceed.
+//
+// dir and refreshDone are hoisted to the outer t so the Refresh goroutine is
+// explicitly joined before this function returns: httptest.Server.Close only
+// waits for the handler goroutine, not for the client goroutine to finish
+// writeCacheAtomic, so leaving it unjoined races the inner t.TempDir cleanup
+// against files the goroutine is still writing into that same directory.
 func TestRequestGate_ParkedHandlerDoesNotBlockTestTeardown(t *testing.T) {
+	dir := t.TempDir()
+	cachePath := filepath.Join(dir, "models-dev.json")
+	refreshDone := make(chan struct{})
+
 	start := time.Now()
 	t.Run("park-without-release", func(t *testing.T) {
-		dir := t.TempDir()
-		cachePath := filepath.Join(dir, "models-dev.json")
 		gate := newRequestGate(t, sampleDataset)
 		c := modelsdev.New(modelsdev.Config{
 			CachePath:  cachePath,
@@ -681,13 +689,22 @@ func TestRequestGate_ParkedHandlerDoesNotBlockTestTeardown(t *testing.T) {
 			HTTPClient: gate.server.Client(),
 		}, logger.Default())
 
-		go func() { _ = c.Refresh(context.Background()) }()
+		go func() {
+			defer close(refreshDone)
+			_ = c.Refresh(context.Background())
+		}()
 		gate.waitForFirstRequest(t)
 		// Intentionally return without releasing the gate — the subtest's
 		// t.Cleanup chain must release it during teardown.
 	})
 	if elapsed := time.Since(start); elapsed > 10*time.Second {
 		t.Fatalf("parked handler blocked teardown for %v, want well under 10s", elapsed)
+	}
+
+	select {
+	case <-refreshDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Refresh goroutine did not finish after the subtest released the gate")
 	}
 }
 
