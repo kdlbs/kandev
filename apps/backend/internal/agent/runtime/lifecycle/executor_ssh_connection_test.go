@@ -766,3 +766,41 @@ func TestSSHManagedBrokerResumeForcesFreshAgentctlWithNewLease(t *testing.T) {
 		t.Fatal("connection metadata required for fresh SSH launch was removed")
 	}
 }
+
+func TestExpandIdentityAgentOpenSSHSyntax(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("AGENT_DIR", filepath.Join(home, "agents"))
+	t.Setenv("LEGACY_AGENT", filepath.Join(home, "legacy.sock"))
+	t.Setenv("SSH_AUTH_SOCK", filepath.Join(home, "env.sock"))
+	target := &SSHTarget{
+		Host: "resolved.internal", Port: 2222, User: "deploy",
+		ProxyJump: "jump-alias", OriginalHost: "prod",
+	}
+
+	cases := map[string]string{
+		"~/.ssh/agent.sock":                   filepath.Join(home, ".ssh", "agent.sock"),
+		"${AGENT_DIR}/%n-%h-%p-%r-%j-%%.sock": filepath.Join(home, "agents", "prod-resolved.internal-2222-deploy-jump-alias-%.sock"),
+		"$LEGACY_AGENT":                       filepath.Join(home, "legacy.sock"),
+		"SSH_AUTH_SOCK":                       filepath.Join(home, "env.sock"),
+		"@abstract-agent":                     "@abstract-agent",
+	}
+	for input, want := range cases {
+		got, err := expandIdentityAgent(input, target)
+		if err != nil {
+			t.Errorf("expandIdentityAgent(%q): %v", input, err)
+		} else if got != want {
+			t.Errorf("expandIdentityAgent(%q) = %q, want %q", input, got, want)
+		}
+	}
+
+	allTokens, err := expandIdentityAgent("%d-%i-%k-%L-%l-%u", target)
+	if err != nil || allTokens == "" || !strings.Contains(allTokens, "prod") {
+		t.Fatalf("all token expansion = %q, %v", allTokens, err)
+	}
+	for _, input := range []string{"${MISSING_IDENTITY_AGENT}", "%C", "%Z", "trailing%"} {
+		if _, err := expandIdentityAgent(input, target); err == nil {
+			t.Errorf("expandIdentityAgent(%q) unexpectedly succeeded", input)
+		}
+	}
+}

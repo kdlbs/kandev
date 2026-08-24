@@ -219,7 +219,7 @@
   "sshFailedToSaveShell": "Failed to save shell",
   "sshFingerprintChanged": "Warning: this fingerprint differs from the one currently pinned (<1>{{fingerprint}}</1>). Trusting it overwrites the pinned key. If you didn’t expect a host re-key, stop here.",
   "sshFingerprintObserved": "Host fingerprint observed:",
-  "sshHostAliasHint": "If set, inherits HostName / Port / User / IdentityFile / ProxyJump from your config.",
+  "sshHostAliasHint": "If set, inherits HostName / Port / User / IdentityAgent / IdentityFile / ProxyJump from your config.",
   "sshHostAliasLabel": "Host alias from {{path}} (optional)",
   "sshIdentityFileHint": "Passphrase-protected keys must be loaded into ssh-agent first.",
   "sshIdentityFilePath": "Identity file path",
