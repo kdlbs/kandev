@@ -22,6 +22,7 @@ type DockerSectionsProps = {
   onDockerfileChange: (v: string) => void;
   imageTag: string;
   onImageTagChange: (v: string) => void;
+  allowsUserNamespaces: boolean;
   allowUserNamespaces: boolean;
   onAllowUserNamespacesChange: (v: boolean) => void;
 };
@@ -32,6 +33,7 @@ export function DockerSections({
   onDockerfileChange,
   imageTag,
   onImageTagChange,
+  allowsUserNamespaces,
   allowUserNamespaces,
   onAllowUserNamespacesChange,
 }: DockerSectionsProps) {
@@ -45,11 +47,13 @@ export function DockerSections({
         baselineImageTag={profile.config?.image_tag ?? ""}
         onImageTagChange={onImageTagChange}
       />
-      <UserNamespacesCard
-        enabled={allowUserNamespaces}
-        baselineEnabled={profile.config?.allow_user_namespaces === "true"}
-        onChange={onAllowUserNamespacesChange}
-      />
+      {allowsUserNamespaces && (
+        <UserNamespacesCard
+          enabled={allowUserNamespaces}
+          baselineEnabled={profile.config?.allow_user_namespaces === "true"}
+          onChange={onAllowUserNamespacesChange}
+        />
+      )}
       <DockerContainersCard profileId={profile.id} />
     </>
   );

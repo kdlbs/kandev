@@ -55,6 +55,7 @@ describe("executor profile dirty fields", () => {
     );
 
     const toggle = container.querySelector("#allow-user-namespaces");
+    expect(screen.getByRole("switch", { name: "User namespace support" })).toBe(toggle);
     expect(toggle?.getAttribute(DIRTY_ATTRIBUTE)).toBe("false");
 
     rerender(<UserNamespacesCard enabled={false} baselineEnabled onChange={vi.fn()} />);

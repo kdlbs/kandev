@@ -412,6 +412,7 @@ export function UserNamespacesCard({
         actions={
           <Switch
             id="allow-user-namespaces"
+            aria-label={t("executors:allowUserNamespacesTitle")}
             checked={enabled}
             onCheckedChange={onChange}
             data-settings-dirty={isDirty}
