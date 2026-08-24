@@ -25,6 +25,7 @@ func (m *Manager) managedRuntimeNpmStartupFailure(
 	ctx context.Context,
 	execution *AgentExecution,
 	initErr error,
+	packageSpec string,
 ) *routingerr.Error {
 	if execution == nil || execution.agentctl == nil || initErr == nil {
 		return nil
@@ -36,10 +37,14 @@ func (m *Manager) managedRuntimeNpmStartupFailure(
 		return nil
 	}
 	evidence := strings.Join(lines, "\n")
+	combined := strings.TrimSpace(evidence + "\n" + initErr.Error())
+	if !routingerr.ManagedRuntimeNpmResolutionMatchesPackage(combined, packageSpec) {
+		return nil
+	}
 	return routingerr.Classify(routingerr.Input{
 		Phase:      routingerr.PhaseSessionInit,
 		ProviderID: execution.AgentID,
-		Stderr:     strings.TrimSpace(evidence + "\n" + initErr.Error()),
+		Stderr:     combined,
 	})
 }
 
@@ -119,12 +124,12 @@ func (m *Manager) prepareManagedRuntimeStartupRetry(
 	if !ok {
 		return nil, false
 	}
-	classification := m.managedRuntimeNpmStartupFailure(ctx, execution, initErr)
-	if classification == nil || classification.Code != routingerr.CodeManagedRuntimeNpmResolution {
-		return nil, false
-	}
 	preferOnlineArgs, packageSpec, ok := onlineManagedRuntimeArgs(execution.AgentArgs, managed.ManagedNPMRuntime())
 	if !ok {
+		return nil, false
+	}
+	classification := m.managedRuntimeNpmStartupFailure(ctx, execution, initErr, packageSpec)
+	if classification == nil || classification.Code != routingerr.CodeManagedRuntimeNpmResolution {
 		return nil, false
 	}
 	return &managedRuntimeStartupRetry{
@@ -297,7 +302,7 @@ func (m *Manager) retryManagedRuntimeStartup(
 		failureCause = retryErr
 		var second *routingerr.Error
 		if initializationFailed {
-			second = m.managedRuntimeNpmStartupFailure(ctx, execution, retryErr)
+			second = m.managedRuntimeNpmStartupFailure(ctx, execution, retryErr, retry.packageSpec)
 		}
 		failureCode, failureDetails = managedRuntimeRetryFailureClassification(
 			failureCode, failureDetails, retryErr, initializationFailed, second,

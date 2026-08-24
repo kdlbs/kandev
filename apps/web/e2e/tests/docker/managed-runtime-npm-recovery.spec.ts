@@ -1,5 +1,5 @@
 import { test, expect } from "../../fixtures/docker-test-base";
-import { dockerPathExists } from "../../helpers/docker";
+import { dockerFileContent, dockerPathExists } from "../../helpers/docker";
 import { waitForLatestSessionDone } from "../../helpers/session";
 import {
   MANAGED_RUNTIME_CACHE_ROOT,
@@ -40,13 +40,15 @@ test.describe("Docker executor - managed npm runtime recovery", () => {
       expect(environment?.container_id).toBeTruthy();
       const target = `${MANAGED_RUNTIME_CACHE_ROOT}/_npx/${managedRuntimeExecutionCacheKey()}`;
       const sibling = `${MANAGED_RUNTIME_CACHE_ROOT}/_npx/0123456789abcdef`;
-      await expect
-        .poll(() => dockerPathExists(environment!.container_id!, target), {
-          timeout: 10_000,
-          message: `exact cache tree for ${MANAGED_RUNTIME_PACKAGE_SPEC} should be removed`,
-        })
-        .toBe(false);
-      expect(dockerPathExists(environment!.container_id!, sibling)).toBe(true);
+      const containerID = environment!.container_id!;
+      expect(dockerPathExists(containerID, `${target}/stale-marker`)).toBe(false);
+      expect(dockerFileContent(containerID, `${target}/fresh-marker`)).toBe("fresh\n");
+      expect(dockerFileContent(containerID, `${sibling}/sibling-marker`)).toBe("sibling\n");
+      const onlineInvocations = dockerFileContent(
+        containerID,
+        `${MANAGED_RUNTIME_CACHE_ROOT}/online-invocations`,
+      );
+      expect(onlineInvocations.trim().split(/\r?\n/)).toEqual([MANAGED_RUNTIME_PACKAGE_SPEC]);
 
       await testPage.goto(`/t/${task.id}`);
       const session = new SessionPage(testPage);

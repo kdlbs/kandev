@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 )
 
@@ -54,8 +53,7 @@ func TestRepairManagedRuntimeCacheRejectsUnversionedSpecBeforeCommand(t *testing
 func TestRepairManagedRuntimeCacheClearsPreviousStderr(t *testing.T) {
 	cacheRoot := t.TempDir()
 	packageSpec := "managed-acp@1.2.3"
-	target := filepath.Join(cacheRoot, "_npx", managedruntime.NpxExecutionCacheKey(packageSpec))
-	if err := os.MkdirAll(target, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(cacheRoot, "_npx"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	mgr := NewManager(&config.InstanceConfig{

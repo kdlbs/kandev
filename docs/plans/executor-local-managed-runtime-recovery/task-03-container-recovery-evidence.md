@@ -89,9 +89,9 @@ KANDEV_E2E_CONTAINERS=1 pnpm e2e:run --project containers tests/ssh/managed-runt
   tests/docker/managed-runtime-npm-recovery.spec.ts --workers=1`.
 - SSH recovery passed with the corresponding `tests/ssh/managed-runtime-npm-recovery.spec.ts`
   command.
-- Both specs proved that the original session completed, the exact deterministic
-  cache tree was removed, the sibling tree remained, and no recovery card was
-  shown.
+- Both specs proved that the original session completed, the stale marker was
+  removed, a fresh marker was recreated, the sibling tree remained, exactly one
+  online invocation was recorded, and no recovery card was shown.
 - The nested `e2e:run` wrapper could not start in this environment because its
   runtime had no Docker daemon; the equivalent host-backed containers project
   supplied the real Docker and SSH evidence.

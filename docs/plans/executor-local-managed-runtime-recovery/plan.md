@@ -74,7 +74,8 @@ The wrapper emits the strict ETARGET signature for `--prefer-offline`. It
 executes `/usr/local/bin/mock-agent` for the online retry.
 
 The tests assert that the original session completes. They also assert that
-the exact cache tree is removed and no recovery card appears.
+the stale managed-runtime marker is removed, a fresh marker is recreated,
+sibling cache state is preserved, and no recovery card appears.
 
 ### Documentation
 

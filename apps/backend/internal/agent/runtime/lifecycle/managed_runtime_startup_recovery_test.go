@@ -196,6 +196,24 @@ func TestRetryManagedRuntimeStartupLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("transitive ETARGET does not trigger top-level recovery", func(t *testing.T) {
+		mgr, execution, mock, agentConfig := newManagedRuntimeRetryFixture(t, false)
+		mock.stderrLines = []string{
+			"npm error code ETARGET",
+			"npm error notarget No matching version found for transitive-dependency@9.9.9",
+		}
+
+		attempted, err := mgr.retryManagedRuntimeStartup(
+			context.Background(), execution, initialErr, agentConfig, "", "", nil, nil,
+		)
+		if attempted || !errors.Is(err, initialErr) {
+			t.Fatalf("mismatched ETARGET result = (%v, %v), want no retry and original error", attempted, err)
+		}
+		if got := mock.getHTTPActions(); len(got) != 0 {
+			t.Fatalf("mismatched ETARGET HTTP actions = %#v, want none", got)
+		}
+	})
+
 	t.Run("repeated initialization failure is terminal after one retry", func(t *testing.T) {
 		mgr, execution, mock, agentConfig := newManagedRuntimeRetryFixture(t, true)
 

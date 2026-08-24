@@ -54,6 +54,7 @@ type restartMockAgentctlServer struct {
 	failMode           bool
 	failModel          bool
 	failConfigOptionID string
+	stderrLines        []string
 	modelState         *streams.SessionModelState
 	newModelState      *streams.SessionModelState
 	onReset            func()
@@ -250,11 +251,15 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 					})
 				}
 			case "agent.stderr":
-				resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-					"lines": []string{
+				stderrLines := m.stderrLines
+				if len(stderrLines) == 0 {
+					stderrLines = []string{
 						"npm error code ETARGET",
 						"npm error notarget No matching version found for opencode-ai@1.2.3",
-					},
+					}
+				}
+				resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+					"lines": stderrLines,
 				})
 			default:
 				resp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnknownAction, "unknown action", nil)

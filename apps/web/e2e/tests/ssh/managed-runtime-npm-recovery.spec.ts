@@ -1,5 +1,5 @@
 import { test, expect } from "../../fixtures/ssh-test-base";
-import { remotePathExists } from "../../helpers/ssh";
+import { readRemoteFile, remotePathExists } from "../../helpers/ssh";
 import { waitForLatestSessionDone } from "../../helpers/session";
 import {
   MANAGED_RUNTIME_CACHE_ROOT,
@@ -42,8 +42,14 @@ test.describe("SSH executor - managed npm runtime recovery", () => {
       expect(session?.remote_task_dir).toBeTruthy();
       const target = `${MANAGED_RUNTIME_CACHE_ROOT}/_npx/${managedRuntimeExecutionCacheKey()}`;
       const sibling = `${MANAGED_RUNTIME_CACHE_ROOT}/_npx/0123456789abcdef`;
-      expect(remotePathExists(seedData.sshTarget, target)).toBe(false);
-      expect(remotePathExists(seedData.sshTarget, sibling)).toBe(true);
+      expect(remotePathExists(seedData.sshTarget, `${target}/stale-marker`)).toBe(false);
+      expect(readRemoteFile(seedData.sshTarget, `${target}/fresh-marker`)).toBe("fresh\n");
+      expect(readRemoteFile(seedData.sshTarget, `${sibling}/sibling-marker`)).toBe("sibling\n");
+      const onlineInvocations = readRemoteFile(
+        seedData.sshTarget,
+        `${MANAGED_RUNTIME_CACHE_ROOT}/online-invocations`,
+      );
+      expect(onlineInvocations.trim().split(/\r?\n/)).toEqual([MANAGED_RUNTIME_PACKAGE_SPEC]);
       expect(MANAGED_RUNTIME_PACKAGE_SPEC).toBe("opencode-ai@1.18.18");
 
       await testPage.goto(`/t/${task.id}`);

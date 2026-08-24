@@ -118,6 +118,86 @@ func TestReadStderrClosesOnlyItsGenerationChannel(t *testing.T) {
 	}
 }
 
+func TestReadStderrDelayedGenerationCannotCloseReplacementChannel(t *testing.T) {
+	oldStarted := make(chan struct{})
+	oldRelease := make(chan struct{})
+	replacementStarted := make(chan struct{})
+	replacementRelease := make(chan struct{})
+	oldDone := make(chan struct{})
+	replacementDone := make(chan struct{})
+	m := &Manager{
+		logger: newTestLogger(t),
+	}
+	var oldReleaseOnce sync.Once
+	var replacementReleaseOnce sync.Once
+	releaseOld := func() {
+		oldReleaseOnce.Do(func() { close(oldRelease) })
+	}
+	releaseReplacement := func() {
+		replacementReleaseOnce.Do(func() { close(replacementRelease) })
+	}
+	t.Cleanup(func() {
+		releaseOld()
+		releaseReplacement()
+		m.wg.Wait()
+	})
+
+	m.stderr = &gatedStderrReader{
+		started: oldStarted,
+		release: oldRelease,
+		data:    []byte("old generation\n"),
+	}
+	m.wg.Add(1)
+	go m.readStderr(oldDone)
+	select {
+	case <-oldStarted:
+	case <-time.After(time.Second):
+		t.Fatal("old stderr reader did not start")
+	}
+
+	// The old reader outlives the bounded drain. A replacement starts before
+	// the old reader is released, which is the interleaving that used to close
+	// the replacement generation's completion channel.
+	m.waitForStderrDrain(oldDone)
+	select {
+	case <-oldDone:
+		t.Fatal("old stderr reader finished before the replacement started")
+	default:
+	}
+
+	m.stderr = &gatedStderrReader{
+		started: replacementStarted,
+		release: replacementRelease,
+		data:    []byte("replacement generation\n"),
+	}
+	m.wg.Add(1)
+	go m.readStderr(replacementDone)
+	select {
+	case <-replacementStarted:
+	case <-time.After(time.Second):
+		t.Fatal("replacement stderr reader did not start")
+	}
+
+	releaseOld()
+	select {
+	case <-oldDone:
+	case <-time.After(time.Second):
+		t.Fatal("old stderr reader did not finish after release")
+	}
+	select {
+	case <-replacementDone:
+		t.Fatal("old stderr reader closed the replacement channel")
+	default:
+	}
+
+	releaseReplacement()
+	select {
+	case <-replacementDone:
+	case <-time.After(time.Second):
+		t.Fatal("replacement stderr reader did not finish after release")
+	}
+}
+
 func TestReadStderrPreservesSafeManagedNpmResolutionLines(t *testing.T) {
 	m := &Manager{
 		stderr: io.NopCloser(strings.NewReader(strings.Join([]string{
