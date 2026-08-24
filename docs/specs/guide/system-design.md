@@ -42,6 +42,22 @@ short table is sufficient.
 Do not copy requirement text into the design. Reference the stable `REQ-*` and
 `AC-*` identifiers.
 
+## Vertical designs
+
+Keep a design with the system that owns its requirements. Cover every stable
+runtime boundary needed for the outcome. A single integration design can cover
+a provider client, storage, HTTP and WebSocket projections, frontend state,
+React components, responsive behavior, and tests.
+
+Do not create parallel backend and UI designs for one feature contract. Link to
+another system design when that system owns an independent dependency. Do not
+list another system's requirement in design frontmatter.
+
+Split a large design by capability, lifecycle, or contract boundary. If a
+document needs numbered parts, keep every part under the same owning system and
+map each part to specific design sections. Do not split only at the frontend and
+backend boundary.
+
 ## Decisions
 
 Use an ADR when a choice creates a durable boundary, contract, ownership rule,
@@ -58,4 +74,3 @@ contract. Do not update it for a local refactor that preserves the design.
 
 When code and design disagree, stop and identify the intended source of truth.
 Do not silently rewrite the design to match accidental behavior.
-

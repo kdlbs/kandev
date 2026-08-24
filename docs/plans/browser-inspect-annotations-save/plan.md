@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/browser-inspect-annotations-save/spec.md
+spec: docs/specs/ui/requirements/browser-inspect-annotations-save.md
 created: 2026-08-07
 status: complete
 ---

@@ -45,10 +45,14 @@ class Kandev < Formula
     ENV["KANDEV_SERVER_HOST"] = "127.0.0.1"
     port = free_port
     pid = spawn bin/"kandev", "--headless", "--port", port.to_s
-    health_url = "http://127.0.0.1:#{port}/health"
+    # /health flips to 200 as soon as the listener binds, before startup
+    # recovery finishes, so curl's --retry (which only retries on
+    # connection-refused/5xx, never on 200) would stop waiting immediately.
+    # /ready holds at 503 until the app is actually usable.
+    ready_url = "http://127.0.0.1:#{port}/ready"
     curl = "curl --silent --show-error --fail --retry 30 --retry-connrefused --retry-delay 1"
-    health = shell_output("#{curl} #{health_url}")
-    assert_match '"status":"ok"', health
+    ready = shell_output("#{curl} #{ready_url}")
+    assert_match '"status":"ok"', ready
     assert_match "<title>Kandev</title>", shell_output("#{curl} http://127.0.0.1:#{port}/")
   ensure
     Process.kill("TERM", pid) if pid

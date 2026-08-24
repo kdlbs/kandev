@@ -5,7 +5,7 @@ status: done
 wave: remediation
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/external-vcs-file-links.md"
+spec: "../../specs/ui/requirements/external-vcs-file-links.md"
 ---
 
 # Task 05: Safe remote URL exposure

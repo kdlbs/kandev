@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["01-scope-task-mcp-tools-by-provider", "02-propagate-providers-through-agent-launch", "03-refresh-tools-after-source-attachment", "06-derive-mcp-handler-inventory"]
 plan: "plan.md"
-spec: "../../specs/integrations/provider-aware-review-automation.md"
+spec: "../../specs/integrations/requirements/provider-aware-review-automation.md"
 ---
 
 # Task 07: Document provider-scoped task MCP
@@ -23,7 +23,7 @@ spec: "../../specs/integrations/provider-aware-review-automation.md"
 
 - `node --test scripts/validate-public-docs.test.mjs`
 - `node scripts/validate-public-docs.mjs`
-- `rtk rg -n 'get_task_(pr|mr)_automation_kandev|provider' docs/public/automation-and-mcp.md docs/specs/integrations/provider-aware-review-automation.md docs/decisions/2026-08-03-provider-scoped-task-mcp-tools.md`
+- `rtk rg -n 'get_task_(pr|mr)_automation_kandev|provider' docs/public/automation-and-mcp.md docs/specs/integrations/requirements/provider-aware-review-automation.md docs/decisions/2026-08-03-provider-scoped-task-mcp-tools.md`
 
 ## Files likely touched
 
@@ -74,7 +74,7 @@ node --test scripts/validate-public-docs.test.mjs
 node scripts/validate-public-docs.mjs
 Validated 41 published docs pages.
 
-rtk rg -n 'get_task_(pr|mr)_automation_kandev|provider' docs/public/automation-and-mcp.md docs/specs/integrations/provider-aware-review-automation.md docs/decisions/2026-08-03-provider-scoped-task-mcp-tools.md
+rtk rg -n 'get_task_(pr|mr)_automation_kandev|provider' docs/public/automation-and-mcp.md docs/specs/integrations/requirements/provider-aware-review-automation.md docs/decisions/2026-08-03-provider-scoped-task-mcp-tools.md
 60 matches in 3 files
 ```
 

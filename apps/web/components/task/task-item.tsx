@@ -27,11 +27,11 @@ import { TaskRowMetadata } from "./task-row-plugin-slots";
 import { classifyTask } from "./task-classify";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import { useTranslation } from "react-i18next";
-import { TaskTitleHoverCard } from "@/components/task/task-title-hover-card";
-import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
 import { TaskItemComparisonUnavailable } from "./task-item-comparison-unavailable";
+import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
 import { TaskMenuButton } from "./task-item-menu-button";
 import { TaskItemLeadingBadges } from "./task-item-leading-badges";
+import { CompositorSpin } from "@kandev/ui/compositor-spin";
 
 type DiffStats = {
   additions: number;
@@ -190,15 +190,35 @@ function BackgroundWorkTaskIcon() {
           tabIndex={0}
           className="mt-[1px] flex shrink-0 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-1"
         >
-          <IconCircleDashed
+          <CompositorSpin
             aria-hidden="true"
             data-testid="task-state-background-running"
-            className="h-3.5 w-3.5 shrink-0 animate-spin text-violet-500"
-          />
+            className="h-3.5 w-3.5 shrink-0 text-violet-500"
+          >
+            <IconCircleDashed className="size-full" />
+          </CompositorSpin>
         </span>
       </TooltipTrigger>
       <TooltipContent side="right">{t("task:backgroundWorkIsRunning")}</TooltipContent>
     </Tooltip>
+  );
+}
+
+function TaskRunningIcon({
+  phase,
+  className,
+}: {
+  phase: "running" | "preparing";
+  className: string;
+}) {
+  return (
+    <CompositorSpin
+      data-testid="task-state-running"
+      data-loading-phase={phase}
+      className={className}
+    >
+      <IconCircleDashed className="size-full" />
+    </CompositorSpin>
   );
 }
 
@@ -240,11 +260,7 @@ function TaskStateIcon({
   }
   if (foregroundActivity === "generating") {
     return (
-      <IconCircleDashed
-        data-testid="task-state-running"
-        data-loading-phase="running"
-        className="mt-[1px] h-3.5 w-3.5 shrink-0 text-yellow-500 animate-spin"
-      />
+      <TaskRunningIcon phase="running" className="mt-[1px] h-3.5 w-3.5 shrink-0 text-yellow-500" />
     );
   }
   if (foregroundActivity === "background") {
@@ -260,10 +276,9 @@ function TaskStateIcon({
   }
   if (computeIsPreparing(state, sessionState)) {
     return (
-      <IconCircleDashed
-        data-testid="task-state-running"
-        data-loading-phase="preparing"
-        className="mt-[1px] h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground/40 [animation-duration:2s]"
+      <TaskRunningIcon
+        phase="preparing"
+        className="mt-[1px] h-3.5 w-3.5 shrink-0 text-muted-foreground/40 [animation-duration:2s]"
       />
     );
   }
@@ -271,11 +286,7 @@ function TaskStateIcon({
   // established generating spinner rather than a done affordance.
   if (isInProgress) {
     return (
-      <IconCircleDashed
-        data-testid="task-state-running"
-        data-loading-phase="running"
-        className="mt-[1px] h-3.5 w-3.5 shrink-0 text-yellow-500 animate-spin"
-      />
+      <TaskRunningIcon phase="running" className="mt-[1px] h-3.5 w-3.5 shrink-0 text-yellow-500" />
     );
   }
   // The task's session was mid-turn when the backend died (startup
@@ -326,19 +337,8 @@ function DiffStatsRight({ diffStats, menuOpen }: { diffStats: DiffStats; menuOpe
   );
 }
 
-function TaskItemTitle({ taskId, title }: { taskId?: string; title: string }) {
-  // w-full: ScrollOnOverflow's root is inline-block, so once it sits inside
-  // the title-preview trigger's <button> (task-title-hover-card.tsx) rather
-  // than being the flex row's direct child, shrink-to-fit sizing lets it grow
-  // past the button's flex-shrunk width instead of clipping to it — losing
-  // the overflow the hover-scroll marquee depends on.
-  const content = <ScrollOnOverflow className="min-w-0 w-full">{title}</ScrollOnOverflow>;
-  if (!taskId) return content;
-  return (
-    <TaskTitleHoverCard taskId={taskId} title={title} side="right" align="start">
-      {content}
-    </TaskTitleHoverCard>
-  );
+function TaskItemTitle({ title }: { title: string }) {
+  return <ScrollOnOverflow className="min-w-0 w-full">{title}</ScrollOnOverflow>;
 }
 
 function TaskItemContent({
@@ -390,7 +390,7 @@ function TaskItemContent({
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
       <span className="flex items-center gap-1 min-w-0 text-[13px] font-medium text-foreground leading-tight">
-        <TaskItemTitle taskId={taskId} title={title} />
+        <TaskItemTitle title={title} />
         <TaskItemLeadingBadges
           autopilot={autopilot}
           isPinned={isPinned}

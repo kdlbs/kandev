@@ -122,6 +122,7 @@ type Service struct {
 	agentProfiles    agentProfileDataSource
 	sessionCodeStats sessionCodeStatsSource
 	messageData      messageDataSource
+	interactionData  interactionDataSource
 	taskWriter       taskWriter
 
 	// Utility agent invocation (ADR 0048), wired via SetUtilityAgent.
@@ -134,6 +135,12 @@ type Service struct {
 	// pluginHost). Mutex-guarded against the concurrent hostForPlugin reads.
 	messenger   taskMessenger
 	taskStarter taskStarter
+
+	// Interaction response path wired late via SetInteractionResponder (ADR
+	// 0052), for the same reason as messenger/taskStarter: the orchestrator
+	// and the clarification handler are constructed after boot-active plugins
+	// spawn. Mutex-guarded against the concurrent hostForPlugin reads.
+	interactionResponder interactionResponder
 
 	// authLogin establishes an authenticated browser session for an external
 	// identity an auth-capable plugin asserts via its webhook response
@@ -401,6 +408,7 @@ func (s *Service) SetDataSources(
 	agentProfiles agentProfileDataSource,
 	sessionCodeStats sessionCodeStatsSource,
 	messages messageDataSource,
+	interactions interactionDataSource,
 	taskWrites taskWriter,
 ) {
 	s.taskData = tasks
@@ -409,7 +417,29 @@ func (s *Service) SetDataSources(
 	s.agentProfiles = agentProfiles
 	s.sessionCodeStats = sessionCodeStats
 	s.messageData = messages
+	s.interactionData = interactions
 	s.taskWriter = taskWrites
+}
+
+// SetInteractionResponder wires the interaction write path (ADR 0052): the
+// adapter that answers permissions through the orchestrator and clarification
+// bundles through the clarification handler. Wired LATE for the same reason as
+// SetWriteDeps — both first-party services are constructed after
+// StartActivePlugins has spawned boot-active plugins — so hosts read it live
+// via interactionResponderDep rather than snapshotting it. A nil responder
+// leaves the write RPCs returning Unimplemented; the reads are unaffected.
+func (s *Service) SetInteractionResponder(responder interactionResponder) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.interactionResponder = responder
+}
+
+// interactionResponderDep returns the currently-wired interaction responder,
+// guarded by s.mu against the SetInteractionResponder write.
+func (s *Service) interactionResponderDep() interactionResponder {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.interactionResponder
 }
 
 // SetWriteDeps wires the Host data API's late write dependencies (ADR 0043
@@ -599,9 +629,11 @@ func (s *Service) hostForPlugin(pluginID string) pluginsdk.Host {
 		agentProfiles:       s.agentProfiles,
 		sessionCodeStats:    s.sessionCodeStats,
 		messageData:         s.messageData,
+		interactionData:     s.interactionData,
 		taskWriter:          s.taskWriter,
 		utilityDeps:         s.utilityAgentDeps,
 		writeDeps:           s.writeDependencies,
+		interactionDeps:     s.interactionResponderDep,
 	}
 }
 

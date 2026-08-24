@@ -54,11 +54,13 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	if eventExecutionID == "" {
 		eventExecutionID = payload.AgentID
 	}
+	eventType := payload.Data.Type
 	if !s.cancellationOwnsStreamEvent(
 		payload.SessionID,
 		eventExecutionID,
 		payload.Data.PromptGeneration,
 	) {
+		s.cancelClarificationWatchdogsForSession(payload.SessionID, eventType, payload)
 		s.logger.Debug("ignoring stream event for execution outside cancellation identity",
 			zap.String("task_id", payload.TaskID),
 			zap.String("session_id", payload.SessionID),
@@ -68,7 +70,6 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	}
 	taskID := payload.TaskID
 	sessionID := payload.SessionID
-	eventType := payload.Data.Type
 	terminalCompleteStream := false
 
 	if eventType == agentEventComplete {
@@ -111,7 +112,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		// Any live agent stream activity means the agent resumed after clarification.
 		// Cancel primary-path clarification watchdogs for this session. Late terminal
 		// completes are excluded because they belong to an already-finished execution.
-		s.cancelClarificationWatchdogsForSession(sessionID, eventType)
+		s.cancelClarificationWatchdogsForSession(sessionID, eventType, payload)
 	}
 
 	s.logger.Debug("handling agent stream event",
@@ -2457,11 +2458,12 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 	if session != nil && s.handleOfficeTurnComplete(ctx, payload.TaskID, payload.SessionID, session, stopReason) {
 		return
 	}
-	if session != nil && s.handleAutomationTurnComplete(
+	if session != nil && s.handleAutomationTurnCompleteForTurn(
 		ctx,
 		payload.TaskID,
 		payload.SessionID,
 		session,
+		completionTurnID,
 		stopReason,
 		extractCompleteIsError(payload),
 		extractCompleteErrorMessage(payload),

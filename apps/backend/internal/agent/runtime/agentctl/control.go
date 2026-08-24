@@ -301,7 +301,11 @@ func (c *ControlClient) DeleteInstance(ctx context.Context, instanceID string) e
 		_ = resp.Body.Close()
 	}()
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+	// A retry may observe 404 after agentctl completed the first delete but its
+	// response was lost. The desired postcondition is already satisfied.
+	if resp.StatusCode != http.StatusOK &&
+		resp.StatusCode != http.StatusNoContent &&
+		resp.StatusCode != http.StatusNotFound {
 		var errResp struct {
 			Error string `json:"error"`
 		}

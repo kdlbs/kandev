@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/portable-agent-configuration/spec.md
+spec: docs/specs/agents/requirements/portable-agent-configuration.md
 decision: docs/decisions/2026-08-15-portable-agent-configuration-bundles.md
 created: 2026-08-15
 status: implemented

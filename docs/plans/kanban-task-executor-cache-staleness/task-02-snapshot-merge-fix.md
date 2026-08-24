@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: ["01-preserve-helper-and-hydrator-fix"]
 plan: "plan.md"
-spec: "../../specs/kanban-task-executor-cache-staleness/spec.md"
+spec: "../../specs/tasks/requirements/kanban-task-executor-cache-staleness.md"
 ---
 
 # Task 02: Preserve executor fields in the workflow snapshot merge

@@ -5,7 +5,7 @@ status: pending
 wave: 2
 depends_on: ["01-bitbucket-attribution", "02-youtrack-attribution"]
 plan: "plan.md"
-spec: "../../specs/plugins/marketplace.md"
+spec: "../../specs/plugins/requirements/marketplace.md"
 ---
 
 # Task 03: Verify regenerated catalog attribution
@@ -52,7 +52,7 @@ shared official catalog.
 
 ## Inputs
 
-- `docs/specs/plugins/marketplace.md`, author and repository scenarios.
+- `docs/specs/plugins/requirements/marketplace.md`, author and repository scenarios.
 - `plugin-registry/build-index.mjs`, release-manifest enrichment behavior.
 - `apps/web/components/settings/plugins/marketplace-entry-row.tsx`, unchanged
   presentation consumer.

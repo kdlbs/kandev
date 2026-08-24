@@ -310,19 +310,31 @@ export class SessionPage {
   }
 
   /**
+   * Return the foreground panel for a test id.
+   *
+   * Dockview keeps background task panels mounted while switching tasks. A
+   * page-level DOM query can therefore read a stale terminal buffer even
+   * though the visible panel has already connected.
+   */
+  private activePanel(testId: string): Locator {
+    return this.page.locator(`[data-testid="${testId}"]:visible`).first();
+  }
+
+  /**
    * Read the text content of an xterm.js terminal buffer.
    * xterm renders to canvas/WebGL so text isn't in the DOM. Uses the
    * __xtermReadBuffer() helper exposed on the terminal container element.
    */
-  private readXtermBuffer(testId: string): Promise<string> {
-    return this.page.evaluate((tid) => {
-      const panel = document.querySelector(`[data-testid="${tid}"]`);
-      if (!panel) return "";
-      const xtermEl = panel.querySelector(".xterm");
+  private async readXtermBuffer(testId: string): Promise<string> {
+    const panel = this.activePanel(testId);
+    if ((await panel.count()) === 0) return "";
+
+    return panel.evaluate((panelElement) => {
+      const xtermEl = panelElement.querySelector(".xterm");
       type XC = HTMLElement & { __xtermReadBuffer?: () => string };
       const container = xtermEl?.parentElement as XC | null | undefined;
       return container?.__xtermReadBuffer?.() ?? "";
-    }, testId);
+    });
   }
 
   /**
@@ -1282,9 +1294,7 @@ export class SessionPage {
    * Use this to detect the "terminal hangs forever on Connecting" bug.
    */
   async expectTerminalConnected(timeout = TERMINAL_READY_TIMEOUT): Promise<void> {
-    await this.page
-      .locator("[data-testid='terminal-panel']:visible")
-      .first()
+    await this.activePanel("terminal-panel")
       .getByTestId("passthrough-loading")
       .waitFor({ state: "hidden", timeout });
   }
@@ -1302,7 +1312,7 @@ export class SessionPage {
       })
       .toBe(true);
 
-    const xterm = this.terminal.locator(".xterm");
+    const xterm = this.activePanel("terminal-panel").locator(".xterm");
     await xterm.click();
     await this.page.keyboard.type(command);
     await this.page.keyboard.press("Enter");

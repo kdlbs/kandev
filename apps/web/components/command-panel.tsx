@@ -4,11 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "@/lib/routing/client-router";
 import { useCommands, useCommandPanelOpen } from "@/lib/commands/command-registry";
 import type { CommandPanelMode, CommandItem as CommandItemType } from "@/lib/commands/types";
-import {
-  findFirstMatchingCommand,
-  selectCommandSearchResult,
-  selectContentSearchResult,
-} from "@/lib/commands/search";
+import { selectCommandSearchResult, selectContentSearchResult } from "@/lib/commands/search";
 import { useCommandPanelShortcuts } from "@/hooks/use-command-panel-shortcuts";
 import { useContentSearchResultOpener } from "@/hooks/use-content-search-result-opener";
 import { useWorkspaceContentSearch } from "@/hooks/domains/session/use-workspace-content-search";
@@ -18,7 +14,6 @@ import {
   type CommandPanelScopeMode,
 } from "@/components/command-panel-scope-switcher";
 
-import { listTasksByWorkspace } from "@/lib/api";
 import type { Task } from "@/lib/types/http";
 import type { FileSearchResult } from "@/lib/types/backend";
 import { getWebSocketClient } from "@/lib/ws/connection";
@@ -28,11 +23,13 @@ import { getContentSearchResultValue } from "@/components/workspace-content-sear
 import { getFileName } from "@/lib/utils/file-path";
 import { isTaskWorkspaceSearchAvailable } from "@/lib/commands/task-workspace-search";
 import { useCommandPanelTaskNavigation } from "@/hooks/use-command-panel-task-navigation";
+import { useInlineTaskSearchEffect } from "@/hooks/use-command-panel-task-results";
 import {
   CommandPanelView,
   MODE_COMMANDS,
   MODE_SEARCH_CONTENT,
   MODE_SEARCH_FILES,
+  MODE_SEARCH_TASKS,
   getFileResultValue,
   getTaskResultValue,
 } from "@/components/command-panel-footer";
@@ -132,138 +129,6 @@ function useFileSearchEffect(opts: FileSearchEffectOptions) {
   ]);
 }
 
-const ARCHIVED_STATES = new Set(["COMPLETED", "CANCELLED", "FAILED"]);
-
-function resolveVisibleStepIds(steps: { id: string; show_in_command_panel?: boolean }[]) {
-  if (steps.length === 0) return null; // no steps loaded yet — don't filter
-  return new Set(steps.filter((s) => s.show_in_command_panel !== false).map((s) => s.id));
-}
-
-type InlineTaskSearchOptions = {
-  mode: CommandPanelMode;
-  search: string;
-  open: boolean;
-  workspaceId: string | null;
-  steps: { id: string; position: number; show_in_command_panel?: boolean }[];
-  setTaskResults: (tasks: Task[]) => void;
-  setIsSearching: (searching: boolean) => void;
-};
-
-function useStepMaps(steps: InlineTaskSearchOptions["steps"]) {
-  const visibleStepIds = useMemo(() => resolveVisibleStepIds(steps), [steps]);
-  const stepPositionMap = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const step of steps) map.set(step.id, step.position);
-    return map;
-  }, [steps]);
-  return { visibleStepIds, stepPositionMap };
-}
-
-function useInlineTaskSearchEffect(opts: InlineTaskSearchOptions) {
-  const { mode, search, open, workspaceId, steps, setTaskResults, setIsSearching } = opts;
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
-  const { visibleStepIds, stepPositionMap } = useStepMaps(steps);
-
-  useEffect(() => {
-    if (mode !== MODE_COMMANDS) return;
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    abortRef.current?.abort();
-
-    // No search: load active tasks (excluding backlog + done steps)
-    if (!search.trim()) {
-      if (!open || !workspaceId) {
-        setTaskResults([]);
-        setIsSearching(false);
-        return;
-      }
-      setIsSearching(true);
-      const controller = new AbortController();
-      abortRef.current = controller;
-      listTasksByWorkspace(
-        workspaceId,
-        { page: 1, pageSize: 20 },
-        { init: { signal: controller.signal } },
-      )
-        .then((res) => {
-          if (controller.signal.aborted) return;
-          const tasks = (res.tasks ?? []).filter(
-            (t) =>
-              (!visibleStepIds || visibleStepIds.has(t.workflow_step_id)) &&
-              !ARCHIVED_STATES.has(t.state),
-          );
-          tasks.sort(
-            (a, b) =>
-              (stepPositionMap.get(a.workflow_step_id) ?? 99) -
-              (stepPositionMap.get(b.workflow_step_id) ?? 99),
-          );
-          setTaskResults(tasks);
-        })
-        .catch(() => {
-          if (!controller.signal.aborted) setTaskResults([]);
-        })
-        .finally(() => {
-          if (!controller.signal.aborted) setIsSearching(false);
-        });
-      return () => {
-        controller.abort();
-      };
-    }
-
-    // Search with < 2 chars: clear results
-    if (search.trim().length < 2) {
-      setTaskResults([]);
-      setIsSearching(false);
-      return;
-    }
-
-    // Search: query API including archived
-    setIsSearching(true);
-    debounceRef.current = setTimeout(async () => {
-      if (!workspaceId) {
-        setIsSearching(false);
-        return;
-      }
-      const controller = new AbortController();
-      abortRef.current = controller;
-      try {
-        const res = await listTasksByWorkspace(
-          workspaceId,
-          { query: search.trim(), page: 1, pageSize: 5, includeArchived: true },
-          { init: { signal: controller.signal } },
-        );
-        if (!controller.signal.aborted) {
-          const tasks = res.tasks ?? [];
-          tasks.sort((a, b) => {
-            const aArchived = ARCHIVED_STATES.has(a.state) ? 1 : 0;
-            const bArchived = ARCHIVED_STATES.has(b.state) ? 1 : 0;
-            return aArchived - bArchived;
-          });
-          setTaskResults(tasks);
-        }
-      } catch {
-        if (!controller.signal.aborted) setTaskResults([]);
-      } finally {
-        if (!controller.signal.aborted) setIsSearching(false);
-      }
-    }, 300);
-
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      abortRef.current?.abort();
-    };
-  }, [
-    mode,
-    search,
-    open,
-    workspaceId,
-    visibleStepIds,
-    stepPositionMap,
-    setTaskResults,
-    setIsSearching,
-  ]);
-}
-
 type CommandPanelEffectsOptions = {
   open: boolean;
   state: ReturnType<typeof useCommandPanelState>;
@@ -356,32 +221,38 @@ function useFirstResultSelection(
   contentResults: ReturnType<typeof useWorkspaceContentSearch>["results"],
 ) {
   const { mode, search, taskResults, fileResults, setSelectedValue } = state;
-  const previousCommandsRef = useRef(commands);
 
-  // `search` intentionally re-applies the first result while debounced results are loading.
+  // Every branch is a functional update, so a re-registration of the command
+  // list or a late batch of results never discards a selection the user moved.
   useEffect(() => {
-    const commandsChanged = previousCommandsRef.current !== commands;
-    previousCommandsRef.current = commands;
     if (!open) return;
 
     if (mode === MODE_COMMANDS) {
-      const firstTask = taskResults[0];
-      if (commandsChanged) {
-        const taskValues = taskResults.map(getTaskResultValue);
-        setSelectedValue((current) =>
-          selectCommandSearchResult(commands, search, taskValues, current),
-        );
-        return;
-      }
-      if (firstTask) {
-        setSelectedValue(getTaskResultValue(firstTask));
-        return;
-      }
-      if (search.trim()) {
-        setSelectedValue(findFirstMatchingCommand(commands, search)?.id ?? "");
-        return;
-      }
-      setSelectedValue((current) => (current.startsWith("__task:") ? "" : current));
+      // Matching commands render above the task preview once there is a query,
+      // so the default highlight has to follow that order: Enter on "archive"
+      // must run the Archive command, not the first task the query fuzzy-matched.
+      // Task results arrive 300ms behind the keystroke, so this stays a
+      // functional update: a row the user arrow-keyed to in the meantime must
+      // survive the results landing rather than snap back to the default.
+      const commandsLeadResults = Boolean(search.trim());
+      const taskResultValues = taskResults.map(getTaskResultValue);
+      setSelectedValue((current) =>
+        selectCommandSearchResult({
+          commands,
+          search,
+          taskResultValues,
+          preferredValue: current,
+          commandsLeadResults,
+        }),
+      );
+      return;
+    }
+
+    if (mode === MODE_SEARCH_TASKS) {
+      const taskResultValues = taskResults.map(getTaskResultValue);
+      setSelectedValue((current) =>
+        current && taskResultValues.includes(current) ? current : (taskResultValues[0] ?? ""),
+      );
       return;
     }
 

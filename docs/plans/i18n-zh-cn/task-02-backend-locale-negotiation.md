@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-frontend-locale-catalogs"]
 plan: "plan.md"
-spec: "../../specs/platform/i18n.md"
+spec: "../../specs/platform/requirements/i18n.md"
 ---
 
 # Task 02: Backend locale negotiation

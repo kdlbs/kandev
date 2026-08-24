@@ -6,7 +6,7 @@ wave: 3
 depends_on:
   - dynamic-provider-options-02
 plan: docs/plans/dynamic-provider-options/plan.md
-spec: docs/specs/agents/dynamic-provider-options.md
+spec: docs/specs/agents/requirements/dynamic-provider-options.md
 ---
 
 # Add model resolution hook

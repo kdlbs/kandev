@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/models"
 	officeruntime "github.com/kandev/kandev/internal/office/runtime"
+	"github.com/kandev/kandev/internal/office/shared"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -375,7 +376,7 @@ func (si *SchedulerIntegration) assembleAgentPrompt(
 		}
 	}
 
-	continuationSummary := si.loadContinuationSummary(ctx, agent.ID, taskID)
+	continuationSummary := si.loadContinuationSummary(ctx, run, agent.ID, taskID)
 	promptResult := si.svc.BuildAgentPrompt(
 		run, agent, instructionsDir, agentsMD, isResume, wakeContext,
 		taskID, continuationSummary,
@@ -387,7 +388,7 @@ func (si *SchedulerIntegration) assembleAgentPrompt(
 // loadContinuationSummary fetches the per-(agent, scope) continuation
 // summary for a taskless run. Returns "" when:
 // - taskID is non-empty (task-bound runs don't use the summary doc)
-// - the summary table has no row yet (first heartbeat ever for the agent)
+// - the summary table has no row yet (first wake ever for the scope)
 // - the lookup errors out (best-effort, fall back to no-summary)
 //
 // wakeup/dispatcher.go's createFreshRun passes taskID=="" on every
@@ -396,13 +397,24 @@ func (si *SchedulerIntegration) assembleAgentPrompt(
 // assembled prompt is still built for these runs even though
 // launchAgent cannot currently launch one (WO-35) — see that function's
 // doc comment.
+//
+// The scope read here is run.ContinuationScope — the same key
+// models.ContinuationScopeForRun computed once, at run-creation time, and
+// that refreshContinuationSummary (event_subscribers.go) later writes
+// under. This deliberately does NOT recompute the scope from run's
+// ContextSnapshot: a routine wakeup that coalesces into this run after
+// claim (MarkWakeupRequestCoalesced) patches only context_snapshot, so a
+// second derivation here — against a run object that may itself predate
+// that patch — could disagree with what the writer used at completion.
+// Reading the persisted field closes that race for every caller instead
+// of relying on ordering between two independent derivations.
 func (si *SchedulerIntegration) loadContinuationSummary(
-	ctx context.Context, agentID, taskID string,
+	ctx context.Context, run *models.Run, agentID, taskID string,
 ) string {
-	if taskID != "" || agentID == "" {
+	if run == nil || taskID != "" || agentID == "" {
 		return ""
 	}
-	prior, err := si.svc.repo.GetContinuationSummary(ctx, agentID, "heartbeat")
+	prior, err := si.svc.repo.GetContinuationSummary(ctx, agentID, run.ContinuationScope)
 	if err != nil || prior == nil {
 		return ""
 	}
@@ -851,12 +863,12 @@ func isAgentActive(status models.AgentStatus) bool {
 }
 
 // checkIdleSkip returns true if the run should be skipped because the agent
-// is configured to skip idle heartbeats and has no actionable tasks assigned.
-// Returns false (do not skip) on any DB error to fail open.
+// is configured to skip idle periodic wakes and has no actionable tasks
+// assigned. Returns false (do not skip) on any DB error to fail open.
 func (si *SchedulerIntegration) checkIdleSkip(
 	ctx context.Context, run *models.Run, agent *models.AgentInstance,
 ) bool {
-	if run.Reason != RunReasonHeartbeat {
+	if !shared.IsPeriodicTasklessWake(run.Reason) {
 		return false
 	}
 	if !agent.SkipIdleRuns {

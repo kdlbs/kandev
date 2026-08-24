@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/review-markdown-preview.md"
+spec: "../../specs/ui/requirements/review-markdown-preview.md"
 ---
 
 # Task 01: Expose rendered Markdown from Review diffs
@@ -63,7 +63,7 @@ Sequential. The responsive paths share callback types, Review wiring, and E2E se
 
 ## Inputs
 
-- `docs/specs/ui/review-markdown-preview.md`
+- `docs/specs/ui/requirements/review-markdown-preview.md`
 - `docs/plans/review-markdown-preview/plan.md`
 - `apps/web/AGENTS.md`
 - `.agents/skills/tdd/SKILL.md`

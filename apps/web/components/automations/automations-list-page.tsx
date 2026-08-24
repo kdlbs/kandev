@@ -59,7 +59,7 @@ export function AutomationsListPage({ workspaceId }: AutomationsListPageProps) {
               type="button"
               size="sm"
               data-testid="new-automation-button"
-              className="cursor-pointer"
+              className="min-h-11 cursor-pointer md:min-h-7"
               onClick={() => router.push(`/settings/workspaces/${workspaceId}/automations/new`)}
             >
               <IconPlus className="h-4 w-4 mr-2" />

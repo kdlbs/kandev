@@ -175,6 +175,51 @@ func TestTaskListQueriesExcludeAutomationOriginTasks(t *testing.T) {
 	assertExcludesAutomation(t, "ListTaskTree", tree, f.boardTaskID)
 }
 
+func TestTaskListQueriesIncludeVisibleAutomationTasks(t *testing.T) {
+	f := seedAutomationOriginFixture(t)
+	ctx := context.Background()
+	const visibleID = "t-auto-visible"
+	if err := f.repo.CreateTask(ctx, &models.Task{
+		ID:             visibleID,
+		WorkspaceID:    autoOriginWorkspaceID,
+		WorkflowID:     autoOriginWorkflowID,
+		WorkflowStepID: autoOriginStepID,
+		Title:          "visible automation task",
+		State:          "BACKLOG",
+		Priority:       "medium",
+		Origin:         models.TaskOriginAutomationTask,
+	}); err != nil {
+		t.Fatalf("CreateTask(%s): %v", visibleID, err)
+	}
+
+	list, _, err := f.repo.ListTasksByWorkspace(ctx, autoOriginWorkspaceID, "", "", "", 1, 50, "", false, false, false, false)
+	if err != nil {
+		t.Fatalf("ListTasksByWorkspace: %v", err)
+	}
+	ids := taskIDs(list)
+	if len(ids) != 2 || !containsTaskID(ids, "t-board") || !containsTaskID(ids, visibleID) {
+		t.Fatalf("workspace task list = %v, want both t-board and %s", ids, visibleID)
+	}
+
+	byWorkflow, err := f.repo.ListTasks(ctx, autoOriginWorkflowID)
+	if err != nil {
+		t.Fatalf("ListTasks: %v", err)
+	}
+	workflowIDs := taskIDs(byWorkflow)
+	if len(workflowIDs) != 2 || !containsTaskID(workflowIDs, "t-board") || !containsTaskID(workflowIDs, visibleID) {
+		t.Fatalf("workflow task list = %v, want both t-board and %s", workflowIDs, visibleID)
+	}
+}
+
+func containsTaskID(ids []string, want string) bool {
+	for _, id := range ids {
+		if id == want {
+			return true
+		}
+	}
+	return false
+}
+
 // Quick chat owns is_ephemeral and must be unaffected by the origin filter:
 // the only-ephemeral listing still returns exactly the quick chat.
 func TestOnlyEphemeralListingStillReturnsQuickChat(t *testing.T) {

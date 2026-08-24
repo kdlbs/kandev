@@ -248,7 +248,7 @@ build script (zero-dependency Node) + GitHub Action resolve each listed repo's
 latest release into a full catalog record and publish the generated
 `index.json` to GitHub Pages. Point kandev at that Pages URL. The document
 shape, the build pipeline, and the source data model are specified in the
-[plugin marketplace spec](https://github.com/kdlbs/kandev/blob/main/docs/specs/plugins/marketplace.md).
+[plugin marketplace spec](https://github.com/kdlbs/kandev/blob/main/docs/specs/plugins/requirements/marketplace.md).
 
 Related: [Plugins](plugins.md), [Authoring a
 plugin](plugins-authoring.md), [Plugin manifest

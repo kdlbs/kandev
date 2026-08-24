@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/selected-option-picker-prominence.md
+spec: docs/specs/ui/requirements/selected-option-picker-prominence.md
 created: 2026-08-22
 status: implemented
 ---

@@ -5,7 +5,7 @@ status: completed
 wave: 2
 depends_on: ["01-version-and-publisher"]
 plan: "plan.md"
-spec: "../../specs/npm-nightly-channel/spec.md"
+spec: "../../specs/release/requirements/npm-nightly-channel.md"
 ---
 
 # Task 02: Scheduled and manual Nightly release workflow

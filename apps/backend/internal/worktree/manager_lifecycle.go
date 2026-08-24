@@ -101,6 +101,9 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 	if err := req.Validate(); err != nil {
 		return nil, err
 	}
+	if req.ReuseRequired {
+		return m.reuseRequiredWorktree(ctx, req)
+	}
 
 	// Reject invalid explicit slugs up-front. If either slug is non-empty but
 	// normalizes to "", reuse/path lookup would silently target the wrong
@@ -153,6 +156,32 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 	}
 	if err := m.configureContributionDestination(ctx, req.RepositoryPath, wt.Path, wt.Branch, req.ContributionDestination); err != nil {
 		return nil, err
+	}
+	return wt, nil
+}
+
+// reuseRequiredWorktree resolves the exact canonical worktree for an
+// additional session. It intentionally performs no Git operation and does
+// not run contribution setup or repository scripts: another active session
+// may be using this checkout with uncommitted changes.
+func (m *Manager) reuseRequiredWorktree(ctx context.Context, req CreateRequest) (*Worktree, error) {
+	if req.WorktreeID == "" || req.TaskEnvironmentID == "" {
+		return nil, ErrReuseWorktreeUnavailable
+	}
+	requestedBranchSlug := requestBranchIdentitySlug(req)
+	if (req.BranchSlug != "" || req.BranchIdentitySlug != "") && requestedBranchSlug == "" {
+		return nil, ErrReuseWorktreeUnavailable
+	}
+	wt, err := m.GetByID(ctx, req.WorktreeID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrReuseWorktreeUnavailable, err)
+	}
+	if wt == nil || wt.Status != StatusActive ||
+		wt.RepositoryID != req.RepositoryID ||
+		wt.TaskEnvironmentID != req.TaskEnvironmentID ||
+		(requestedBranchSlug != "" && SanitizeBranchSlug(wt.BranchSlug) != requestedBranchSlug) ||
+		!m.IsValid(wt.Path) {
+		return nil, ErrReuseWorktreeUnavailable
 	}
 	return wt, nil
 }
