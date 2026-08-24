@@ -226,7 +226,10 @@ function useTaskPageDerivedProps({
   officeTaskHref,
   onTaskUnarchived,
 }: TaskPageInnerProps) {
-  const taskProps = resolveTaskProps(task, repository);
+  const workspaceRepositories = useAppStore((state) =>
+    task?.workspace_id ? (state.repositories.itemsByWorkspaceId[task.workspace_id] ?? []) : [],
+  );
+  const taskProps = resolveTaskProps(task, repository, workspaceRepositories);
   const remote = resolveRemoteExecutor(resumption.sessionStatus as RemoteExecutorStatus | null);
   const embeddedVscode = useEmbeddedVscodeSupport(effectiveSessionId, resumption.sessionStatus);
   const activeSessionMetadata = useAppStore((state) =>
@@ -289,6 +292,7 @@ export function TaskPageInner(props: TaskPageInnerProps) {
           sessionId={effectiveSessionId}
           baseBranch={taskProps.baseBranch}
           pullRequestBaseBranch={taskProps.pullRequestTarget}
+          pullRequestTargetsByRepository={taskProps.pullRequestTargetsByRepository}
           taskTitle={taskProps.taskTitle}
           displayBranch={merged.worktreeBranch}
         >

@@ -86,6 +86,13 @@ test.describe("Task creation with branch policies", () => {
           branch_policy_pull_request_target: "develop",
         }),
       );
+      const currentBranch = execSync("git branch --show-current", {
+        cwd: seedData.repositoryPath,
+        env: makeGitEnv(backend.tmpDir),
+      })
+        .toString()
+        .trim();
+      expect(currentBranch).toMatch(/^feature\/policy-task-/);
     } finally {
       await apiClient.deleteExecutorProfile(localProfile.id).catch(() => {});
     }

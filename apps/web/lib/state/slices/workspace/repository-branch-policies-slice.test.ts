@@ -69,4 +69,18 @@ describe("repositoryBranchPolicies slice", () => {
     expect(store.getState().repositoryBranchPolicies.itemsByRepositoryId["repo-1"]).toEqual([]);
     expect(store.getState().repositoryBranchPolicies.loadedByRepositoryId["repo-1"]).toBe(false);
   });
+
+  it("bumps the revision when an event removes a policy before the first list response", () => {
+    const store = createStore();
+    const capturedRevision =
+      store.getState().repositoryBranchPolicies.revisionByRepositoryId["repo-1"] ?? 0;
+
+    store.getState().removeRepositoryBranchPolicy("repo-1", "deleted-policy");
+    store
+      .getState()
+      .setRepositoryBranchPolicies("repo-1", [policy("deleted-policy", "Stale")], capturedRevision);
+
+    expect(store.getState().repositoryBranchPolicies.itemsByRepositoryId["repo-1"]).toBeUndefined();
+    expect(store.getState().repositoryBranchPolicies.revisionByRepositoryId["repo-1"]).toBe(1);
+  });
 });

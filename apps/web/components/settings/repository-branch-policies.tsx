@@ -37,11 +37,13 @@ import {
   DrawerFooter,
   DrawerHeader,
   DrawerTitle,
+  DrawerTrigger,
 } from "@kandev/ui/drawer";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@kandev/ui/hover-card";
 import { useToast } from "@/components/toast-provider";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useBranches } from "@/hooks/domains/workspace/use-repository-branches";
 import { useRepositoryBranchPolicies } from "@/hooks/domains/workspace/use-repository-branch-policies";
@@ -77,21 +79,39 @@ function draftFromPolicy(policy?: RepositoryBranchPolicy): PolicyDraft {
 }
 
 function FieldHelp({ label, description }: { label: string; description: string }) {
+  const usesTouchDrawer = useTouchDrawer();
+  const [open, setOpen] = useState(false);
+  const button = (
+    <button
+      type="button"
+      className={`${TOUCH_TARGET_CLASS} min-w-11 cursor-pointer text-muted-foreground hover:text-foreground`}
+      aria-label={label}
+      aria-haspopup={usesTouchDrawer ? "dialog" : undefined}
+      aria-expanded={usesTouchDrawer ? open : undefined}
+    >
+      <IconInfoCircle className="mx-auto h-4 w-4" />
+    </button>
+  );
+  if (!usesTouchDrawer) {
+    return (
+      <HoverCard openDelay={150} closeDelay={100}>
+        <HoverCardTrigger asChild>{button}</HoverCardTrigger>
+        <HoverCardContent align="start" className="w-80 text-xs">
+          {description}
+        </HoverCardContent>
+      </HoverCard>
+    );
+  }
   return (
-    <HoverCard openDelay={150} closeDelay={100}>
-      <HoverCardTrigger asChild>
-        <button
-          type="button"
-          className={`${TOUCH_TARGET_CLASS} min-w-11 text-muted-foreground hover:text-foreground`}
-          aria-label={label}
-        >
-          <IconInfoCircle className="mx-auto h-4 w-4" />
-        </button>
-      </HoverCardTrigger>
-      <HoverCardContent align="start" className="w-80 text-xs">
-        {description}
-      </HoverCardContent>
-    </HoverCard>
+    <Drawer open={open} onOpenChange={setOpen}>
+      <DrawerTrigger asChild>{button}</DrawerTrigger>
+      <DrawerContent>
+        <DrawerHeader>
+          <DrawerTitle>{label}</DrawerTitle>
+          <DrawerDescription>{description}</DrawerDescription>
+        </DrawerHeader>
+      </DrawerContent>
+    </Drawer>
   );
 }
 
@@ -137,25 +157,28 @@ function PolicyFields({
   draft,
   setDraft,
   branchOptions,
+  idPrefix,
 }: {
   draft: PolicyDraft;
   setDraft: (next: PolicyDraft) => void;
   branchOptions: string[];
+  idPrefix: string;
 }) {
   const { t } = useTranslation();
+  const fieldId = (name: string) => `${idPrefix}-${name}`;
   const update = (key: keyof PolicyDraft, value: string) => setDraft({ ...draft, [key]: value });
   return (
     <div className="space-y-4">
       <div className="space-y-1.5">
         <div className="flex items-center gap-1">
-          <Label htmlFor="branch-policy-name">{t("workspaces:branchPolicyName")}</Label>
+          <Label htmlFor={fieldId("name")}>{t("workspaces:branchPolicyName")}</Label>
           <FieldHelp
             label={t("workspaces:branchPolicyNameHelpLabel")}
             description={t("workspaces:branchPolicyNameHelp")}
           />
         </div>
         <Input
-          id="branch-policy-name"
+          id={fieldId("name")}
           value={draft.name}
           onChange={(event) => update("name", event.target.value)}
           maxLength={100}
@@ -164,9 +187,9 @@ function PolicyFields({
         <p className="text-xs text-muted-foreground">{t("workspaces:branchPolicyNameHint")}</p>
       </div>
       <div className="space-y-1.5">
-        <Label htmlFor="branch-policy-description">{t("workspaces:branchPolicyDescription")}</Label>
+        <Label htmlFor={fieldId("description")}>{t("workspaces:branchPolicyDescription")}</Label>
         <Input
-          id="branch-policy-description"
+          id={fieldId("description")}
           value={draft.description}
           onChange={(event) => update("description", event.target.value)}
           maxLength={500}
@@ -174,7 +197,7 @@ function PolicyFields({
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
         <BranchField
-          id="branch-policy-base"
+          id={fieldId("base")}
           label={t("workspaces:branchPolicyBaseBranch")}
           value={draft.base_branch}
           onChange={(value) => update("base_branch", value)}
@@ -183,7 +206,7 @@ function PolicyFields({
           help={t("workspaces:branchPolicyBaseBranchHelp")}
         />
         <BranchField
-          id="branch-policy-target"
+          id={fieldId("target")}
           label={t("workspaces:branchPolicyPullRequestTarget")}
           value={draft.pull_request_target}
           onChange={(value) => update("pull_request_target", value)}
@@ -194,14 +217,14 @@ function PolicyFields({
       </div>
       <div className="space-y-1.5">
         <div className="flex items-center gap-1">
-          <Label htmlFor="branch-policy-template">{t("workspaces:branchPolicyTemplate")}</Label>
+          <Label htmlFor={fieldId("template")}>{t("workspaces:branchPolicyTemplate")}</Label>
           <FieldHelp
             label={t("workspaces:branchPolicyTemplateHelpLabel")}
             description={t("workspaces:branchPolicyTemplateHelp")}
           />
         </div>
         <Input
-          id="branch-policy-template"
+          id={fieldId("template")}
           value={draft.branch_template}
           onChange={(event) => update("branch_template", event.target.value)}
         />
@@ -219,6 +242,7 @@ function PolicySurface({
   draft,
   setDraft,
   branchOptions,
+  idPrefix,
   onSubmit,
   loading,
 }: {
@@ -229,31 +253,33 @@ function PolicySurface({
   draft: PolicyDraft;
   setDraft: (next: PolicyDraft) => void;
   branchOptions: string[];
+  idPrefix: string;
   onSubmit: () => void;
   loading: boolean;
 }) {
   const { t } = useTranslation();
   const { isMobile } = useResponsiveBreakpoint();
+  const formId = `${idPrefix}-form`;
   const body = (
     <form
-      id="branch-policy-form"
+      id={formId}
       onSubmit={(event) => {
         event.preventDefault();
         onSubmit();
       }}
       className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4"
     >
-      <PolicyFields draft={draft} setDraft={setDraft} branchOptions={branchOptions} />
+      <PolicyFields
+        draft={draft}
+        setDraft={setDraft}
+        branchOptions={branchOptions}
+        idPrefix={idPrefix}
+      />
     </form>
   );
   const footer = isMobile ? (
     <DrawerFooter className="shrink-0 border-t px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
-      <Button
-        type="submit"
-        form="branch-policy-form"
-        disabled={loading}
-        className={TOUCH_TARGET_CLASS}
-      >
+      <Button type="submit" form={formId} disabled={loading} className={TOUCH_TARGET_CLASS}>
         {t("common:save")}
       </Button>
       <Button
@@ -270,7 +296,7 @@ function PolicySurface({
       <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
         {t(CANCEL_LABEL_KEY)}
       </Button>
-      <Button type="submit" form="branch-policy-form" disabled={loading}>
+      <Button type="submit" form={formId} disabled={loading}>
         {t("common:save")}
       </Button>
     </DialogFooter>
@@ -312,6 +338,7 @@ function GitflowSurface({
   setProductionBranch,
   setDevelopmentBranch,
   branchOptions,
+  idPrefix,
   branchesLoading,
   onSubmit,
   loading,
@@ -323,6 +350,7 @@ function GitflowSurface({
   setProductionBranch: (value: string) => void;
   setDevelopmentBranch: (value: string) => void;
   branchOptions: string[];
+  idPrefix: string;
   branchesLoading: boolean;
   onSubmit: () => void;
   loading: boolean;
@@ -335,7 +363,7 @@ function GitflowSurface({
         {t("workspaces:branchPolicyGitflowDescription")}
       </p>
       <BranchField
-        id="gitflow-production"
+        id={`${idPrefix}-gitflow-production`}
         label={t("workspaces:branchPolicyProductionBranch")}
         value={productionBranch}
         onChange={setProductionBranch}
@@ -344,7 +372,7 @@ function GitflowSurface({
         help={t("workspaces:branchPolicyProductionHelp")}
       />
       <BranchField
-        id="gitflow-development"
+        id={`${idPrefix}-gitflow-development`}
         label={t("workspaces:branchPolicyDevelopmentBranch")}
         value={developmentBranch}
         onChange={setDevelopmentBranch}
@@ -430,6 +458,7 @@ export function RepositoryBranchPolicies({
   const { t } = useTranslation();
   const { toast } = useToast();
   const isSaved = !repository.id.startsWith("temp-repo-");
+  const idPrefix = `branch-policy-${repository.id.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
   const { policies, isLoading, create, update, remove, seedGitflow } = useRepositoryBranchPolicies(
     repository.id,
     isSaved,
@@ -597,6 +626,7 @@ export function RepositoryBranchPolicies({
                 type="button"
                 variant="outline"
                 className={TOUCH_TARGET_CLASS}
+                disabled={branchesLoading}
                 onClick={() => {
                   setProductionBranch(repository.default_branch || branchOptions[0] || "");
                   setDevelopmentBranch(
@@ -627,6 +657,7 @@ export function RepositoryBranchPolicies({
         draft={draft}
         setDraft={setDraft}
         branchOptions={branchOptions}
+        idPrefix={idPrefix}
         onSubmit={() => void submitPolicy()}
         loading={pending}
       />
@@ -638,6 +669,7 @@ export function RepositoryBranchPolicies({
         setProductionBranch={setProductionBranch}
         setDevelopmentBranch={setDevelopmentBranch}
         branchOptions={branchOptions}
+        idPrefix={idPrefix}
         branchesLoading={branchesLoading}
         onSubmit={() => void submitGitflow()}
         loading={pending}

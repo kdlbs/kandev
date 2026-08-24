@@ -240,10 +240,11 @@ function createRepositoryBranchPolicyActions(
     removeRepositoryBranchPolicy: (repositoryId, policyId) =>
       set((draft) => {
         const policies = draft.repositoryBranchPolicies.itemsByRepositoryId[repositoryId];
-        if (!policies) return;
-        draft.repositoryBranchPolicies.itemsByRepositoryId[repositoryId] = policies.filter(
-          (policy) => policy.id !== policyId,
-        );
+        if (policies) {
+          draft.repositoryBranchPolicies.itemsByRepositoryId[repositoryId] = policies.filter(
+            (policy) => policy.id !== policyId,
+          );
+        }
         draft.repositoryBranchPolicies.revisionByRepositoryId[repositoryId] =
           (draft.repositoryBranchPolicies.revisionByRepositoryId[repositoryId] ?? 0) + 1;
       }),

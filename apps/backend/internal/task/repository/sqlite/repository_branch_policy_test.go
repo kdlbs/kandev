@@ -112,3 +112,37 @@ func TestRepositoryDeletePrunesBranchPolicies(t *testing.T) {
 		t.Fatalf("policies after repository deletion = %+v", policies)
 	}
 }
+
+func TestListRepositoryBranchPoliciesByWorkspaceGroupsOnlyWorkspaceRepositories(t *testing.T) {
+	repo := newRepoForSetTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "ws-policy-batch")
+	seedWorkspace(t, repo, "ws-policy-other")
+	for _, item := range []struct {
+		id          string
+		workspaceID string
+		policyID    string
+		name        string
+	}{
+		{id: "repo-batch-a", workspaceID: "ws-policy-batch", policyID: "policy-batch-a", name: "Feature"},
+		{id: "repo-batch-b", workspaceID: "ws-policy-batch", policyID: "policy-batch-b", name: "Hotfix"},
+		{id: "repo-other", workspaceID: "ws-policy-other", policyID: "policy-other", name: "Other"},
+	} {
+		if err := repo.CreateRepository(ctx, &models.Repository{ID: item.id, WorkspaceID: item.workspaceID, Name: item.id}); err != nil {
+			t.Fatalf("create repository %s: %v", item.id, err)
+		}
+		if err := repo.CreateRepositoryBranchPolicy(ctx, &models.RepositoryBranchPolicy{
+			ID: item.policyID, RepositoryID: item.id, Name: item.name,
+		}); err != nil {
+			t.Fatalf("create policy %s: %v", item.policyID, err)
+		}
+	}
+
+	policies, err := repo.ListRepositoryBranchPoliciesByWorkspace(ctx, "ws-policy-batch")
+	if err != nil {
+		t.Fatalf("list workspace policies: %v", err)
+	}
+	if len(policies) != 2 || policies[0].RepositoryID != "repo-batch-a" || policies[1].RepositoryID != "repo-batch-b" {
+		t.Fatalf("workspace policies = %+v, want the two ordered workspace repositories", policies)
+	}
+}

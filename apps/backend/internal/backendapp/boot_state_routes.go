@@ -269,23 +269,34 @@ func (b bootStateBuilder) repositoryBranchPoliciesForState(
 		}
 		return items
 	}
-	for _, repository := range repositories {
-		if repository == nil {
-			continue
-		}
-		policies, listErr := b.p.taskSvc.ListRepositoryBranchPolicies(ctx, repository.ID)
-		if listErr != nil {
-			b.logBootError("list repository branch policies", listErr)
+	policies, err := b.p.taskSvc.ListRepositoryBranchPoliciesForWorkspace(ctx, workspaceID)
+	if err != nil {
+		b.logBootError("list repository branch policies", err)
+		for _, repository := range repositories {
+			if repository == nil {
+				continue
+			}
 			itemsByRepositoryID[repository.ID] = []taskdto.RepositoryBranchPolicyDTO{}
 			loadedByRepositoryID[repository.ID] = false
 			loadingByRepositoryID[repository.ID] = false
-			continue
 		}
-		dtos := repositoryBranchPoliciesToDTOs(policies)
-		itemsByRepositoryID[repository.ID] = dtos
-		loadedByRepositoryID[repository.ID] = true
-		loadingByRepositoryID[repository.ID] = false
-		items = append(items, dtos...)
+	} else {
+		policiesByRepositoryID := make(map[string][]*taskmodels.RepositoryBranchPolicy)
+		for _, policy := range policies {
+			if policy != nil {
+				policiesByRepositoryID[policy.RepositoryID] = append(policiesByRepositoryID[policy.RepositoryID], policy)
+			}
+		}
+		for _, repository := range repositories {
+			if repository == nil {
+				continue
+			}
+			dtos := repositoryBranchPoliciesToDTOs(policiesByRepositoryID[repository.ID])
+			itemsByRepositoryID[repository.ID] = dtos
+			loadedByRepositoryID[repository.ID] = true
+			loadingByRepositoryID[repository.ID] = false
+			items = append(items, dtos...)
+		}
 	}
 	state["repositoryBranchPolicies"] = map[string]any{
 		"itemsByRepositoryId":   itemsByRepositoryID,

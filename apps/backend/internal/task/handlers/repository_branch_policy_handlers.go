@@ -86,7 +86,8 @@ func branchPolicyStatus(err error) int {
 	case errors.Is(err, service.ErrInvalidRepositoryBranchPolicy):
 		return http.StatusBadRequest
 	case errors.Is(err, service.ErrRepositoryBranchPolicyNameConflict),
-		errors.Is(err, service.ErrRepositoryBranchPolicyAlreadySeeded):
+		errors.Is(err, service.ErrRepositoryBranchPolicyAlreadySeeded),
+		errors.Is(err, service.ErrRepositoryBranchPolicyReadOnly):
 		return http.StatusConflict
 	case errors.Is(err, repoerrors.ErrRepositoryNotFound),
 		errors.Is(err, repoerrors.ErrRepositoryBranchPolicyNotFound),

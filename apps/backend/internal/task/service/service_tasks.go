@@ -820,7 +820,13 @@ func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceI
 			return err
 		}
 		if policy != nil {
-			baseBranch = policy.BaseBranch
+			if repoInput.RemoteContribution != nil {
+				if policy.BaseBranch != repoInput.RemoteContribution.BaseBranch {
+					return fmt.Errorf("remote contribution base branch %q does not match branch policy base branch %q", repoInput.RemoteContribution.BaseBranch, policy.BaseBranch)
+				}
+			} else {
+				baseBranch = policy.BaseBranch
+			}
 		}
 		// Multi-branch validation: the same repository may appear multiple
 		// times in a task on different branches. Identity is

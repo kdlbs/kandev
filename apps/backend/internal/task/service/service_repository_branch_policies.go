@@ -26,6 +26,7 @@ var (
 	ErrInvalidRepositoryBranchPolicy       = errors.New("invalid repository branch policy")
 	ErrRepositoryBranchPolicyNameConflict  = errors.New("repository branch policy name already used")
 	ErrRepositoryBranchPolicyAlreadySeeded = errors.New("repository branch policies already seeded")
+	ErrRepositoryBranchPolicyReadOnly      = errors.New("this workspace is managed by Improve Kandev and is read-only")
 	ErrRepositoryBranchPolicyStoreMissing  = errors.New("repository branch policy store is unavailable")
 )
 
@@ -56,7 +57,7 @@ func (s *Service) CreateRepositoryBranchPolicy(ctx context.Context, req *CreateR
 	if err := s.ensureBranchPolicyStore(); err != nil {
 		return nil, err
 	}
-	repository, err := s.authorizeBranchPolicyRepository(ctx, req.RepositoryID)
+	repository, err := s.authorizeWritableBranchPolicyRepository(ctx, req.RepositoryID)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +75,7 @@ func (s *Service) CreateRepositoryBranchPolicy(ctx context.Context, req *CreateR
 	if err := s.branchPolicies.CreateRepositoryBranchPolicy(ctx, policy); err != nil {
 		return nil, err
 	}
-	s.publishRepositoryBranchPolicyEvent(ctx, events.RepositoryBranchPolicyCreated, policy)
+	s.publishRepositoryBranchPolicyEvent(ctx, events.RepositoryBranchPolicyCreated, repository.WorkspaceID, policy)
 	return policy, nil
 }
 
@@ -102,6 +103,16 @@ func (s *Service) ListRepositoryBranchPolicies(ctx context.Context, repositoryID
 	return s.branchPolicies.ListRepositoryBranchPolicies(ctx, repositoryID)
 }
 
+func (s *Service) ListRepositoryBranchPoliciesForWorkspace(ctx context.Context, workspaceID string) ([]*models.RepositoryBranchPolicy, error) {
+	if err := s.ensureBranchPolicyStore(); err != nil {
+		return nil, err
+	}
+	if err := s.authorizeWorkspaceID(ctx, workspaceID); err != nil {
+		return nil, err
+	}
+	return s.branchPolicies.ListRepositoryBranchPoliciesByWorkspace(ctx, workspaceID)
+}
+
 func (s *Service) UpdateRepositoryBranchPolicy(ctx context.Context, id string, req *UpdateRepositoryBranchPolicyRequest) (*models.RepositoryBranchPolicy, error) {
 	if err := s.ensureBranchPolicyStore(); err != nil {
 		return nil, err
@@ -125,7 +136,8 @@ func (s *Service) UpdateRepositoryBranchPolicy(ctx context.Context, id string, r
 	if req.PullRequestTarget != nil {
 		policy.PullRequestTarget = *req.PullRequestTarget
 	}
-	if _, err := s.authorizeBranchPolicyRepository(ctx, policy.RepositoryID); err != nil {
+	repository, err := s.authorizeWritableBranchPolicyRepository(ctx, policy.RepositoryID)
+	if err != nil {
 		return nil, err
 	}
 	normalized, err := normalizeRepositoryBranchPolicy(policy)
@@ -138,7 +150,7 @@ func (s *Service) UpdateRepositoryBranchPolicy(ctx context.Context, id string, r
 	if err := s.branchPolicies.UpdateRepositoryBranchPolicy(ctx, normalized); err != nil {
 		return nil, err
 	}
-	s.publishRepositoryBranchPolicyEvent(ctx, events.RepositoryBranchPolicyUpdated, normalized)
+	s.publishRepositoryBranchPolicyEvent(ctx, events.RepositoryBranchPolicyUpdated, repository.WorkspaceID, normalized)
 	return normalized, nil
 }
 
@@ -150,6 +162,10 @@ func (s *Service) DeleteRepositoryBranchPolicy(ctx context.Context, id string) e
 	if err != nil {
 		return err
 	}
+	repository, err := s.authorizeWritableBranchPolicyRepository(ctx, policy.RepositoryID)
+	if err != nil {
+		return err
+	}
 	deleted, err := s.branchPolicies.DeleteRepositoryBranchPolicy(ctx, id)
 	if err != nil {
 		return err
@@ -157,7 +173,7 @@ func (s *Service) DeleteRepositoryBranchPolicy(ctx context.Context, id string) e
 	if !deleted {
 		return repoerrors.ErrRepositoryBranchPolicyNotFound
 	}
-	s.publishRepositoryBranchPolicyEvent(ctx, events.RepositoryBranchPolicyDeleted, policy)
+	s.publishRepositoryBranchPolicyEvent(ctx, events.RepositoryBranchPolicyDeleted, repository.WorkspaceID, policy)
 	return nil
 }
 
@@ -165,7 +181,7 @@ func (s *Service) CreateGitflowRepositoryBranchPolicies(ctx context.Context, req
 	if err := s.ensureBranchPolicyStore(); err != nil {
 		return nil, err
 	}
-	repository, err := s.authorizeBranchPolicyRepository(ctx, req.RepositoryID)
+	repository, err := s.authorizeWritableBranchPolicyRepository(ctx, req.RepositoryID)
 	if err != nil {
 		return nil, err
 	}
@@ -197,7 +213,7 @@ func (s *Service) CreateGitflowRepositoryBranchPolicies(ctx context.Context, req
 		return nil, err
 	}
 	for _, policy := range policies {
-		s.publishRepositoryBranchPolicyEvent(ctx, events.RepositoryBranchPolicyCreated, policy)
+		s.publishRepositoryBranchPolicyEvent(ctx, events.RepositoryBranchPolicyCreated, repository.WorkspaceID, policy)
 	}
 	return policies, nil
 }
@@ -242,6 +258,21 @@ func (s *Service) authorizeBranchPolicyRepository(ctx context.Context, repositor
 	}
 	if err := s.authorizeWorkspaceID(ctx, repository.WorkspaceID); err != nil {
 		return nil, repoerrors.ErrRepositoryNotFound
+	}
+	return repository, nil
+}
+
+func (s *Service) authorizeWritableBranchPolicyRepository(ctx context.Context, repositoryID string) (*models.Repository, error) {
+	repository, err := s.authorizeBranchPolicyRepository(ctx, repositoryID)
+	if err != nil {
+		return nil, err
+	}
+	workspace, err := s.workspaces.GetWorkspace(ctx, repository.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if workspace != nil && workspace.IsImproveKandev() {
+		return nil, ErrRepositoryBranchPolicyReadOnly
 	}
 	return repository, nil
 }
@@ -297,12 +328,12 @@ func gitflowPolicies(repositoryID, production, development string) []*models.Rep
 	}
 }
 
-func (s *Service) publishRepositoryBranchPolicyEvent(ctx context.Context, eventType string, policy *models.RepositoryBranchPolicy) {
+func (s *Service) publishRepositoryBranchPolicyEvent(ctx context.Context, eventType, workspaceID string, policy *models.RepositoryBranchPolicy) {
 	if s.eventBus == nil || policy == nil {
 		return
 	}
 	event := map[string]interface{}{
-		"id": policy.ID, "repository_id": policy.RepositoryID, "name": policy.Name,
+		"id": policy.ID, "repository_id": policy.RepositoryID, "workspace_id": workspaceID, "name": policy.Name,
 		"description": policy.Description, "base_branch": policy.BaseBranch,
 		"branch_template": policy.BranchTemplate, "pull_request_target": policy.PullRequestTarget,
 		"created_at": policy.CreatedAt.Format(time.RFC3339), "updated_at": policy.UpdatedAt.Format(time.RFC3339),

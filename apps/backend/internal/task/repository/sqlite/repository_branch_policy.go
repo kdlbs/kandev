@@ -80,6 +80,35 @@ func (r *Repository) ListRepositoryBranchPolicies(ctx context.Context, repositor
 	return policies, rows.Err()
 }
 
+func (r *Repository) ListRepositoryBranchPoliciesByWorkspace(ctx context.Context, workspaceID string) ([]*models.RepositoryBranchPolicy, error) {
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT `+repositoryBranchPolicyColumnsWithAlias("p")+` FROM repository_branch_policies p
+		JOIN repositories r ON r.id = p.repository_id
+		WHERE r.workspace_id = ? ORDER BY p.repository_id, LOWER(p.name), p.id
+	`), workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	policies := make([]*models.RepositoryBranchPolicy, 0)
+	for rows.Next() {
+		policy := &models.RepositoryBranchPolicy{}
+		if err := rows.Scan(&policy.ID, &policy.RepositoryID, &policy.Name, &policy.Description,
+			&policy.BaseBranch, &policy.BranchTemplate, &policy.PullRequestTarget,
+			&policy.CreatedAt, &policy.UpdatedAt); err != nil {
+			return nil, err
+		}
+		policies = append(policies, policy)
+	}
+	return policies, rows.Err()
+}
+
+func repositoryBranchPolicyColumnsWithAlias(alias string) string {
+	return alias + ".id, " + alias + ".repository_id, " + alias + ".name, " + alias + ".description, " +
+		alias + ".base_branch, " + alias + ".branch_template, " + alias + ".pull_request_target, " +
+		alias + ".created_at, " + alias + ".updated_at"
+}
+
 func (r *Repository) UpdateRepositoryBranchPolicy(ctx context.Context, policy *models.RepositoryBranchPolicy) error {
 	policy.UpdatedAt = time.Now().UTC()
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
