@@ -27,6 +27,15 @@ func removeNpxExecutionTree(cacheRoot, key string) error {
 	}
 	defer windows.CloseHandle(rootHandle)
 
+	// NtCreateFile can report a missing child with a status that does not
+	// compare equal to the Win32 not-found errors on hosted Windows runners.
+	// Check the direct child first so an absent _npx tree remains idempotent.
+	if _, err := os.Lstat(filepath.Join(cacheRoot, "_npx")); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("inspect npm execution cache: %w", err)
+	}
+
 	npxHandle, err := openManagedRuntimeDirectoryRelative(rootHandle, "_npx")
 	if errors.Is(err, windows.ERROR_PATH_NOT_FOUND) || errors.Is(err, windows.ERROR_FILE_NOT_FOUND) {
 		return nil
