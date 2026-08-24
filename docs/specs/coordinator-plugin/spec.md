@@ -48,6 +48,45 @@ Only one run may hold a coordinator's mutation lease at a time. Read-only
 evidence helpers are non-authoritative, short-lived, bounded to the specific
 request, and receive no implicit board-control grant.
 
+### Principal contract and execution binding
+
+The Coordinator record is also the durable authorization **principal**. Its
+opaque, server-issued `coordinator_principal_id` is bound to exactly the tuple
+`(workspace_id, plugin_installation_id, logical_coordinator_key)`. For v1 the
+only accepted logical key is the host-reserved `coordinator`; it is not a
+plugin-controlled task ID or a display name. The host derives the workspace and
+installation from the authenticated caller/installation registry, rejects a
+foreign or duplicate tuple, and returns the same principal on retries.
+
+The host alone resolves a principal to a current execution run and, when a run
+needs chat transport, to a replaceable backing task/session. Plugins receive
+typed descriptors and may request a run or safe action for their own resolved
+principal; they cannot set, repair, or transfer the principal's actor binding.
+The current task/session is an internal execution reference, never grant
+identity. Replacing a crashed, deleted, or partial backing task therefore
+preserves the principal while requiring the new actor to be resolved by the
+host before it can act.
+
+Every authorization and audit record carries both the stable principal and the
+concrete actor tuple `(run_id, task_id?, session_id?)`. Host API shape is
+additive and capability-scoped: operator-only create/grant/revoke/delete
+operations; plugin-readable descriptor/status/audit-page operations; and
+host-authorized `StartCoordinatorRun` and `ExecuteCoordinatorAction` requests
+that resolve the actor server-side. `AgentConversations` remains a separate
+generic API and cannot accept a principal, a grant, or a privileged action.
+
+No legacy task-bound grant is silently upgraded. Migration can adopt a legacy
+plugin/workspace/conversation descriptor as an unprivileged principal and link
+the old transcript as evidence, but the operator must explicitly re-consent to
+issue a principal-bound grant. A revoked grant invalidates every future action
+immediately, including actions attempted by a previously bound task/session;
+repair, retry, or a plugin restart cannot restore it. Disable stops policy runs
+without changing retained identity/audit data; upgrade preserves the principal
+only when the registered installation is the same continuity-recognized
+installation; repair replaces only execution references; uninstall first
+revokes/terminates authority and then follows the selected retention/deletion
+policy through a host-audited operation.
+
 ## Authority and safety model
 
 The host authorizes privileged board actions. The plugin proposes an action;
@@ -157,7 +196,9 @@ credentials, private documents, unscoped provider events, or a generic
 2. **Stage 1, host identity and grants.** Add a host-owned Coordinator record,
    explicit operator grant/revoke UI/API, audit store, dedicated navigation
    section, and migration that adopts an existing Coordinator plugin's
-   workspace/key descriptor without creating a second chat.
+   workspace/key descriptor without creating a second chat or inheriting a
+   task-bound grant. Bind grants to the server-issued Coordinator principal;
+   require explicit operator re-consent for any legacy authority.
 3. **Stage 2, runs and wakes.** Add durable run records, event subscriptions,
    reconciliation, follow-up deadlines, typed provider/model recovery, and
    pause/safe-mode/kill switch. The adapter launches or repairs a backing
@@ -179,8 +220,10 @@ audited destructive operation.
 
 ## Dependencies
 
-- **6394f111**, master Coordinator authority, is required before Stage 3. It
-  must provide explicit, revocable, audited, scope-limited board authority.
+- **6394f111**, master Coordinator authority, is required before Stage 3. Its
+  current task-ID grant model is insufficient: it must instead bind explicit,
+  revocable, audited, scope-limited authority to the durable Coordinator
+  principal and server-resolve the concrete execution task/session.
 - **9349b6e5 / PR #2841**, relation inspection, is a narrow read dependency.
   It is under review and must not be assumed available by any design or test.
 - **71b2bc32 / PR #2974**, task-scoped inbox, is required for the inbox's
@@ -197,6 +240,10 @@ audited destructive operation.
 - A compromised or buggy plugin cannot self-grant, widen scope, impersonate a
   different workspace, bypass pause/revocation, delete/archive, expose
   credentials, or turn a helper into an authoritative Coordinator.
+- Replacing, repairing, deleting, or replaying a backing task/session cannot
+  bind it to a different principal, retain an old grant, or hijack a principal
+  in another workspace. The host rejects actor/principal/installation mismatch
+  without existence disclosure.
 - A replayed event/run cannot duplicate a privileged action after its
   idempotency key is claimed. A stale or rate-limited session cannot accumulate
   unbounded wake messages.

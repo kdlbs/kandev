@@ -22,6 +22,13 @@ human escalation. Related platform work is separately tracked: master authority
 and narrowly scoped fork credential leases (`16803c08`). None is assumed landed
 solely because it is described here.
 
+The current `6394f111` authority schema binds grants to `coordinator_task_id`
+and authorizes using the concrete actor task ID. That is not safe for a
+replaceable backing task: repair or session replacement would either drop
+operator consent or let a task identity become a transferable authorization
+handle. This ADR therefore makes a durable principal a prerequisite, rather
+than treating it as a naming change to the hidden task.
+
 ## Decision
 
 Create a host-owned Coordinator identity scoped to one workspace. The identity
@@ -29,6 +36,20 @@ is independent of policy plugins and execution sessions. It stores lifecycle,
 operator grants, authority scope, policy version, bounded durable state,
 follow-up deadlines, reports, and audit references. It has one authoritative
 instance per workspace.
+
+The identity has an opaque server-issued principal ID and is uniquely bound to
+`(workspace_id, plugin_installation_id, logical_coordinator_key)`. The host
+derives workspace and installation from authenticated context; v1 reserves the
+logical key `coordinator`. Plugins cannot choose a task ID as a principal,
+transfer a principal, or self-bind a repaired task to one. The host resolves a
+principal to its current execution run and optional backing task/session.
+
+Grants bind to the principal, not to a task/session. Each authorization and
+audit entry attributes both the principal and the concrete actor
+`(run_id, task_id?, session_id?)`. A change in backing task/session requires
+host-side actor resolution only, never a grant rewrite. The generic
+`AgentConversations` API remains unable to carry principal authority or a
+privileged-action request.
 
 Every execution is a separate durable run with trigger, idempotency key, policy
 snapshot, retry/backoff state, and an optional backing session. The host manages
@@ -43,6 +64,16 @@ use a credential/security mutation through Coordinator authority. Operator grant
 and revoke are explicit, immediately effective for new operations, and audited.
 The host records every privileged success, denial, wake, retry, coalescing,
 safe-mode transition, and authority change.
+
+Migration may adopt a legacy plugin/workspace/conversation descriptor as an
+unprivileged principal and link its transcript, but it must not migrate a
+task-bound grant. The operator re-consents before a principal-bound grant is
+issued. Disable stops policy runs while retaining the principal and evidence;
+upgrade preserves it only across recognized installation continuity; repair
+changes only the execution reference; revoke invalidates all former actors
+immediately; uninstall revokes/terminates authority before host-audited
+retention or deletion. A repaired, cross-workspace, foreign-installation, or
+revoked actor fails closed and cannot restore authority.
 
 Desktop gains a dedicated Coordinator navigation section immediately after
 Integrations; mobile projects the same section. Its route presents Overview/
@@ -68,6 +99,9 @@ session, or implicit proof of authority.
   inspection and own-task inbox remain narrow dependencies rather than a broad
   workspace superuser or message index. Fork credential leases stay a separate,
   mechanical publication capability.
+- `6394f111` must replace its task-bound grant/actor lookup with the durable
+  principal and host-side execution resolution described here before it can be
+  used by Coordinator board control.
 - The old plugin-owned scheduler is transitional only. The durable product wake
   source is host events plus periodic reconciliation, with operator-controlled
   subscriptions/cadence and stable idempotency.
