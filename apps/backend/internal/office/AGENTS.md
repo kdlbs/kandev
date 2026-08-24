@@ -24,6 +24,8 @@
 | `testing.md` | shipped | E2E mock harness for task sessions/messages — Playwright can't launch real executors in CI |
 | `unread-divider.md` | shipped | Slack-style unread divider for background-running task sessions |
 
+`office-agent-tier-routing/spec.md`'s own front matter still calls `routing.md` "authoritative" for tiers, provider order, execution profiles, provider health, and wake-reason policy — that predates `routing.md`'s archival in `docs/specs/INDEX.md` and is now stale; trust the INDEX status over the sibling spec's own text.
+
 ## Traps
 
 - **A run is not a task start.** The `runs` table carries provider routing (`resolved_provider_id`, `logical_provider_order`, `requested_tier`, plus the `office_run_route_attempts` ledger), the per-reason `assembled_prompt`, the `AppendRunEvent` timeline, and retry/backoff/coalescing (`retry_count`, `earliest_retry_at`, `coalesced_count`, `idempotency_key` with unique index `idx_run_idempotency`). `Service.QueueRun` (`service/run.go`) and `SchedulerService.QueueRun` (`scheduler/run.go`) are the entry points that populate all of it; `TaskStarter` (the `StartTask` seam office calls, `service/service.go`) runs only *after*. Calling `StartTask` directly, or any ordinary kanban start path, skips all of the above. See `scheduler.md`.
@@ -40,7 +42,7 @@
 - `routines/` — routine (cron) definitions and dispatch, including the default coordinator routine
 - `wakeup/` — wake payload/source/reason types and the dispatcher that turns them into runs
 - `repository/sqlite/` — Office's SQLite tables (`runs`, route-attempt ledger, etc.)
-- `routing/` — provider routing types; **spec archived**, package still live — exactly the kind of code/spec mismatch the precedence rule above exists for
+- `routing/` — provider routing types; **spec archived**, package still live — exactly the kind of code/spec mismatch the precedence rule above exists for; readers wanting current routing behavior should start from `../agents/dynamic-agent-routing.md`
 - `engine_dispatcher/` — office's bridge into `internal/workflow/engine` (participant roles, transitions)
 - `engine_adapters/` — concrete adapters office supplies to the workflow engine (CEO, child-task creation, workflow switching); consumed from `internal/backendapp`
 - `runtime/` — Office agent runtime wiring
