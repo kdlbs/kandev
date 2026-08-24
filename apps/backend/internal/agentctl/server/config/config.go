@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	commonconfig "github.com/kandev/kandev/internal/common/config"
@@ -284,6 +285,17 @@ type InstanceConfig struct {
 	// WorkspaceSourceRoots are canonical durable source roots permitted for
 	// linked workspace file operations.
 	WorkspaceSourceRoots []string
+
+	// CreateReadyMillis is written once by instance.Manager.CreateInstance
+	// with the elapsed milliseconds from CreateInstance's entry (including
+	// the creation-queue mutex wait) to the instant this instance's HTTP
+	// server starts listening. Backs the diagnostic agentctl_create_ready_ms
+	// metric (api.handleSystemMetrics). A pointer so InstanceConfig can be
+	// read concurrently by the metrics handler while instance.Manager holds
+	// the only writer; zero means "not yet recorded" (a create still in
+	// flight, or a config built directly by a test/harness that never goes
+	// through CreateInstance).
+	CreateReadyMillis *atomic.Int64
 }
 
 // Load loads the configuration from environment variables. Managed launches
@@ -435,6 +447,7 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *Inst
 		VscodeCommand:             c.VscodeCommand,
 		McpMode:                   "task",
 		AuthToken:                 c.AuthToken,
+		CreateReadyMillis:         &atomic.Int64{},
 	}
 
 	applyOverrides(cfg, overrides)
