@@ -174,7 +174,11 @@ function CommandPanelInputHeader({
     handleKeyDown(event);
   };
   return (
-    <div className="flex min-h-10 items-center border-b border-border [&>[data-slot=command-input-wrapper]]:min-w-0 [&>[data-slot=command-input-wrapper]]:flex-1 [&>[data-slot=command-input-wrapper]]:pb-1">
+    // Four scope tabs do not fit beside the input on a phone, and the tablist
+    // does not shrink, so the input would collapse to a few characters. The
+    // min-width forces the tablist onto its own row instead of squeezing the
+    // query out of view.
+    <div className="flex min-h-10 flex-wrap items-center border-b border-border [&>[data-slot=command-input-wrapper]]:min-w-44 [&>[data-slot=command-input-wrapper]]:flex-1 [&>[data-slot=command-input-wrapper]]:pb-1">
       {!isTopLevelMode && (
         <button
           onClick={goBack}

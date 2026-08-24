@@ -84,7 +84,7 @@ export function CommandPanelScopeSwitcher({
     <div
       role="tablist"
       aria-label={t("common:commandPaletteMode")}
-      className="mr-1 flex h-10 shrink-0 items-stretch gap-0.5"
+      className="mr-1 flex h-10 max-w-full shrink-0 items-stretch gap-0.5 overflow-x-auto"
     >
       {availableScopes(workspaceSearchAvailable).map((scope) => {
         const active = mode === scope.mode;

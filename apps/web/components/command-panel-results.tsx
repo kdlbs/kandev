@@ -128,7 +128,10 @@ function TaskResultItem({ task, stepMap, repoMap, onSelect }: TaskResultItemProp
         ) : (
           <IconHammer className="size-3 shrink-0 text-muted-foreground" />
         )}
-        <span className="truncate font-medium">{task.title}</span>
+        {/* The title identifies the row, so it takes the free space and the
+            non-shrinking badge and metadata cannot squeeze it away. Metadata is
+            secondary and steps aside entirely on a phone. */}
+        <span className="min-w-0 flex-1 truncate font-medium">{task.title}</span>
         {step && (
           <Badge
             variant="secondary"
@@ -139,7 +142,7 @@ function TaskResultItem({ task, stepMap, repoMap, onSelect }: TaskResultItemProp
           </Badge>
         )}
         {details.length > 0 && (
-          <span className="ml-auto text-[0.6rem] text-muted-foreground truncate shrink-0">
+          <span className="hidden shrink-0 truncate text-[0.6rem] text-muted-foreground sm:inline">
             {details.join(" · ")}
           </span>
         )}

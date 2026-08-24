@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceContentSearchResult } from "@/lib/types/backend";
 import type { Task } from "@/lib/types/http";
+import { taskId, workflowId, workspaceId } from "@/lib/types/ids";
 
 vi.mock("@kandev/ui/command", () => ({
   Command: ({ children, shouldFilter }: { children: ReactNode; shouldFilter?: boolean }) => (
@@ -67,7 +68,13 @@ vi.mock("@kandev/ui/command", () => ({
       />
     </div>
   ),
-  CommandItem: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  // Forwards onSelect: without it the mock silently swallows every selection
+  // handler and any assertion about picking a row would prove nothing.
+  CommandItem: ({ children, onSelect }: { children: ReactNode; onSelect?: () => void }) => (
+    <div role="option" aria-selected="false" onClick={onSelect}>
+      {children}
+    </div>
+  ),
   CommandList: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   CommandShortcut: ({ children }: { children: ReactNode }) => <span>{children}</span>,
 }));
@@ -511,6 +518,22 @@ describe("CommandPanelView confirmations", () => {
   });
 });
 
+function task(id: string, title: string): Task {
+  return {
+    id: taskId(id),
+    workspace_id: workspaceId("workspace-1"),
+    workflow_id: workflowId("workflow-1"),
+    workflow_step_id: "step-1",
+    position: 0,
+    title,
+    description: "",
+    state: "IN_PROGRESS",
+    priority: "medium",
+    created_at: "2026-08-24T09:00:00Z",
+    updated_at: "2026-08-24T09:00:00Z",
+  };
+}
+
 describe("CommandPanelView commands scope ordering", () => {
   const archiveCommand = {
     id: "task-archive",
@@ -518,15 +541,6 @@ describe("CommandPanelView commands scope ordering", () => {
     group: "Task",
     action: vi.fn(),
   };
-
-  function task(id: string, title: string): Task {
-    return {
-      id,
-      title,
-      state: "RUNNING",
-      workflow_step_id: "step-1",
-    } as Task;
-  }
 
   function groupHeadings() {
     return Array.from(document.querySelectorAll(CMDK_GROUP_HEADING_SELECTOR)).map(
@@ -569,24 +583,22 @@ describe("CommandPanelView commands scope ordering", () => {
 
 describe("CommandPanelView tasks scope", () => {
   it("lists task results and opens the one that is picked", () => {
-    const handleTaskSelect = vi.fn();
-    const target = { id: "task-1", title: "Palette task", state: "RUNNING" } as Task;
-    render(
-      <CommandPanelView
-        {...viewProps({
-          mode: MODE_SEARCH_TASKS,
-          search: "palette",
-          taskResults: [target],
-          handleTaskSelect,
-        })}
-      />,
-    );
+    const target = task("task-1", "Palette task");
+    const props = viewProps({
+      mode: MODE_SEARCH_TASKS,
+      search: "palette",
+      taskResults: [target],
+    });
+    render(<CommandPanelView {...props} />);
 
     expect(screen.getByPlaceholderText("Search for tasks...")).toBeTruthy();
     expect(screen.getByText("Palette task")).toBeTruthy();
     expect(screen.getByRole("tab", { name: "Tasks" }).getAttribute(ARIA_SELECTED_ATTRIBUTE)).toBe(
       "true",
     );
+
+    fireEvent.click(screen.getByText("Palette task"));
+    expect(props.handleTaskSelect).toHaveBeenCalledWith(target);
   });
 
   it("reports an empty task search instead of falling back to commands", () => {

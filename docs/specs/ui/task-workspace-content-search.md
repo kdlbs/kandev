@@ -20,17 +20,37 @@ repositories.
 - The shortcut works while a workbench editor or text input has focus and takes
   precedence over that surface's local find shortcut. It prevents the browser's
   default search action.
-- The command palette visibly exposes **Commands**, **Files**, and **Contents**
-  as low-chrome text tabs beside the search field. The active mode uses a subtle
-  underline, and each mode's direct shortcut remains discoverable from its
-  tooltip without adding a separate selector row.
+- The command palette visibly exposes **Commands**, **Tasks**, **Files**, and
+  **Contents** as low-chrome text tabs beside the search field. The active mode
+  uses a subtle underline, and a mode with a direct shortcut keeps that shortcut
+  discoverable from its tooltip without adding a separate selector row.
+  **Tasks** has no direct shortcut and is reached by click or **Tab**.
 - **Files** and **Contents** are available only on the active task-detail route
-  when its selected session belongs to that task. Elsewhere the palette is
-  command-only, does not intercept either workspace-search shortcut, and
-  normalizes a previously open workspace-search palette back to **Commands**.
-- Clicking a mode or pressing **Tab** / **Shift+Tab** switches among those modes
-  without discarding the current query. The existing **Cmd/Ctrl+Shift+K**
-  shortcut still opens file-name and path search directly.
+  when its selected session belongs to that task. Elsewhere they are absent, the
+  palette does not intercept either workspace-search shortcut, and a previously
+  open workspace-search palette normalizes back to **Commands**.
+- **Commands** and **Tasks** read no worktree, so both remain available on every
+  route. The tab strip therefore always offers at least those two modes, and off
+  a task route it offers exactly those two.
+- Clicking a mode or pressing **Tab** / **Shift+Tab** switches among the modes
+  that are currently available, without discarding the current query. The
+  existing **Cmd/Ctrl+Shift+K** shortcut still opens file-name and path search
+  directly.
+- **Commands** mixes commands with task rows. With no query it leads with the
+  active-task list, capped at five rows, because reopening the palette is
+  usually a jump back to work and there is no query to rank commands against.
+  Once there is a query, matching commands rank above the task rows, which
+  remain as a preview of at most five. The default highlight follows that
+  rendered order, so pressing **Enter** on an exact command name runs the
+  command rather than opening a task whose title the query also matched.
+- **Tasks** owns the full task search: up to twenty results, archived tasks
+  included and ranked last. Switching into it discards the commands scope's
+  narrower preview rather than presenting it as the complete result set.
+- A row the user moved to with the arrow keys survives both a command
+  re-registration and the arrival of debounced task results.
+- The tab strip does not shrink. Where it and the search field cannot both fit
+  on one row, the strip wraps to its own row beneath the field so the query
+  stays readable, rather than collapsing the field.
 - File-name and path search covers every repository materialized for the active
   task. Multi-repository results use task-root-relative, repository-prefixed
   paths so same-named files remain distinguishable and open in the correct
