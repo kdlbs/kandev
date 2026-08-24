@@ -455,16 +455,72 @@ func webhookCallerAuthorized(ctx *gin.Context, public bool) bool {
 		ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
 		return false
 	}
-	if identity.SessionID != "" {
-		origin := ctx.GetHeader("Origin")
-		if origin == "" || !commonhttpmw.AllowedOrigin(origin, ctx.Request.Host) {
-			ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-				"error": "an accepted Origin is required for session-authenticated webhooks",
-			})
-			return false
-		}
+	if identity.SessionID != "" && !webhookSameOriginRequest(ctx) {
+		ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+			"error": "a same-origin request is required for session-authenticated webhooks",
+		})
+		return false
 	}
 	return true
+}
+
+// webhookSameOriginRequest reports whether a session-authenticated webhook
+// call is a genuine same-origin request rather than cross-site forgery.
+//
+// A session identity rides on an ambient cookie, so a page on another site can
+// make the browser attach it; a PAT or the synthetic auth-disabled identity
+// cannot be borrowed that way, which is why only sessions reach this check.
+// The signal is the request's origin, never its method: Kandev does not
+// enforce webhooks[].method and cannot see whether a plugin's GET handler has
+// side effects, so exempting safe verbs would reopen exactly the hole this
+// gate closes.
+//
+// The two signals, in order:
+//
+//   - Origin present: decided by httpmw.AllowedOrigin, the shared origin trust
+//     policy. Every cross-origin request carries Origin, including the SPA's
+//     own fetch in a split-origin or desktop install (frontend and backend on
+//     different ports, see apps/web/lib/plugins/host-api.ts), which the browser
+//     labels Sec-Fetch-Site: same-site. Origin therefore has to decide alone
+//     here; also demanding same-origin fetch metadata would break those installs.
+//
+//   - Origin absent: decided by Sec-Fetch-Site. Browsers do not send Origin on
+//     a same-origin GET or HEAD (per Fetch, it is attached to cross-origin
+//     requests and to same-origin requests whose method is neither GET nor
+//     HEAD), so an absent Origin is the normal state of a plugin panel polling
+//     its own webhook, not evidence of a cross-origin caller. Requiring Origin
+//     unconditionally refused every such poll on any auth-enabled instance.
+//
+// same-origin and none (a user-initiated request with no initiator: address
+// bar, bookmark) are accepted; cross-site and same-site are refused. Refusing
+// cross-site closes the one ambient-credential vector left on this route: the
+// SameSite=Lax session cookie is not sent on a cross-site subresource request
+// or POST, but it *is* sent on a cross-site top-level GET navigation, which
+// carries no Origin either.
+//
+// Neither header is accepted. CSRF requires a browser attaching a credential
+// the caller did not choose to send; a request with no fetch metadata is
+// either a non-browser client (curl, a CLI, a server-side caller) explicitly
+// presenting a session cookie, which an attacker cannot drive, or a browser
+// predating Fetch Metadata. Refusing it would break the deliberate
+// non-browser caller and the older WebKitGTK builds the Linux desktop shell
+// runs on, and would buy nothing: backendapp.corsMiddleware already rejects a
+// present-but-disallowed Origin ahead of this handler, and every other
+// authenticated route in the backend accepts a session cookie with no origin
+// signal at all (see the CSRF note on internal/auth/httpmw). A legacy-browser
+// forgery against this one route is not worth refusing the legitimate callers.
+func webhookSameOriginRequest(ctx *gin.Context) bool {
+	if origin := ctx.GetHeader("Origin"); origin != "" {
+		return commonhttpmw.AllowedOrigin(origin, ctx.Request.Host)
+	}
+	// Fetch Metadata values are lowercase per spec; match leniently, which
+	// cannot admit a value outside the accepted set.
+	switch strings.ToLower(strings.TrimSpace(ctx.GetHeader("Sec-Fetch-Site"))) {
+	case "same-origin", "none", "":
+		return true
+	default:
+		return false
+	}
 }
 
 // webhookStatusForResponse validates a plugin-supplied WebhookResponse.Status
