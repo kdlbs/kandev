@@ -28,9 +28,12 @@ The session's current turn owns active clarification state.
 
 - A pending clarification is operational only when its message belongs to the session's newest durable
   **conversational** `task_session_turns` record — a turn whose `metadata.lifecycle_only` flag is not
-  set. That marker identifies a synthetic turn born already-completed by lifecycle bookkeeping (for
-  example the agent-boot-on-resume record), not a turn representing genuine conversation; a lifecycle
-  turn is excluded from current-turn resolution entirely, however recent. Among conversational turns,
+  set. "Set" means exactly the value-set `{true, 1, "true", "1"}`; every other encoding — an absent
+  key, `null`, `false`, `0`, `""`, `"false"`, `"0"`, any other string, an object, or an array — is
+  conversational, matching `turnMetadataFlagPredicate`'s `IN ('true','1')` test on both dialects. That
+  marker identifies a synthetic turn born already-completed by lifecycle bookkeeping (for example the
+  agent-boot-on-resume record), not a turn representing genuine conversation; a lifecycle turn is
+  excluded from current-turn resolution entirely, however recent. Among conversational turns,
   the newest is the one with no open successor: an open turn (`completed_at IS NULL`) always outranks
   a completed one regardless of timestamps, and only when both candidates are open or both are
   completed do `started_at`, then `created_at`, then `id` (all descending) break the tie. Missing
