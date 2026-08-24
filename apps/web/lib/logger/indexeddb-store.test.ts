@@ -1,8 +1,6 @@
 import "fake-indexeddb/auto";
 
-import { readFileSync } from "node:fs";
-
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { LogEntry } from "./buffer";
 import { IndexedDBLogStore, retentionPlan } from "./indexeddb-store";
 
@@ -215,13 +213,26 @@ describe("IndexedDB log retention repair and concurrency", () => {
     });
   });
 
-  it("walks only the timestamp prefix for retention and does not use a full-store append read", () => {
-    const source = readFileSync("lib/logger/indexeddb-store.ts", "utf8");
+  it("uses only the bounded timestamp cursor for a within-limit append", async () => {
+    const store = new IndexedDBLogStore();
+    await store.append([logEntry("a", Date.now(), "first")]);
 
-    expect(source).toContain('index("timestamp_ms")');
-    expect(source).toContain("IDBKeyRange.upperBound");
-    expect(source).not.toContain("scanAndDeleteExpired");
-    expect(source).not.toContain("store.getAll()");
+    const objectStoreCursor = vi.spyOn(IDBObjectStore.prototype, "openCursor");
+    const timestampCursor = vi.spyOn(IDBIndex.prototype, "openCursor");
+
+    try {
+      await store.append([logEntry("a", Date.now() + 1, "second")]);
+
+      expect(objectStoreCursor).not.toHaveBeenCalled();
+      expect(timestampCursor).toHaveBeenCalledTimes(1);
+      expect(timestampCursor.mock.calls[0]?.[0]).toBeInstanceOf(IDBKeyRange);
+      expect(timestampCursor.mock.calls[0]?.[0]).toMatchObject({
+        upper: expect.any(Number),
+      });
+    } finally {
+      objectStoreCursor.mockRestore();
+      timestampCursor.mockRestore();
+    }
   });
 });
 

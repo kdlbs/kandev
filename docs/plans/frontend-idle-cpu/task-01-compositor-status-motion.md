@@ -125,14 +125,21 @@ this task and `plan.md` with exact results.
   affected suite passed 10 files and 161 tests. Desktop and mobile Playwright
   status flows each passed one test, including the static-SVG wrapper assertion,
   settling behavior, mobile touch navigation, and overflow checks.
-- A repeated 8.34-second Chromium capture found the migrated target as
+- A controlled 8.34-second Chromium trace found the migrated target as
   `span.inline-flex.animate-spin.will-change-transform` with a static SVG child.
-  The repeat recorded 502 `Layerize`, 502 `UpdateLayoutTree`, and 34 `Paint`
-  events, compared with the supplied 1,155, 921, and approximately 50,000
-  IndexedDB callbacks in the baseline. The capture was page-wide, so the
-  remaining frame-level `Layerize` and `UpdateLayoutTree` events cannot be
-  attributed to the status target alone. The target itself has no animated SVG
-  style and the repeated trace is materially lower than the supplied baseline.
+  The frame-scoped app capture recorded 180 `UpdateLayoutTree` and 180
+  `Layerize` events with the live status motion enabled. The same page still
+  recorded 155 of each event after all persistent HTML wrappers were disabled,
+  and 163 of each after all `animate-spin` elements were disabled. Those
+  recurring events are therefore page-wide application work, not a sufficient
+  attribution to `CompositorSpin`.
+- The attribution control closed the app page and captured a clean page with
+  seven exact HTML wrapper/SVG pairs using the same transform animation. It
+  recorded one `UpdateLayoutTree` and two `Layerize` events during
+  initialization, with no recurring main-thread layout or layerization during
+  the remaining window. The compositor wrapper therefore does not account for
+  recurring main-thread frame work after its layer is established, so no
+  production adjustment was required.
 - Typecheck, lint, i18n checks, spec lint, and `git diff --check` passed.
 - Review remediation also marks the `STARTING` session icon as animated, keeps
   the accessible label on the agent status SVG, and strengthens the wrapper

@@ -40,7 +40,9 @@ existing state selection, motion, visual style, semantics, and selectors.
 Use focused component tests for wrapper ownership and state precedence. Extend
 the existing desktop settled-spinner and mobile task-status flows. Capture a
 new Chromium trace after implementation and compare its steady-state rendering
-events with the supplied baseline.
+events with the supplied baseline. The acceptance trace uses frame-scoped app
+controls plus an uncontaminated wrapper-only control page, so page-wide frame
+events are not treated as evidence against the shared compositor primitive.
 
 ### Incremental browser-log retention
 
