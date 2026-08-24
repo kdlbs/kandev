@@ -5,7 +5,7 @@ import "encoding/json"
 // ContinuationScopeForRun computes the continuation-summary scope key for
 // a run: "routine:<routine_id>" when the run's context snapshot carries a
 // routine_id (set by the wakeup dispatcher for source="routine" wakeups),
-// else "agent:<agent_id>" so non-routine fires still have a stable upsert
+// else "agent:<agent_profile_id>" so non-routine fires still have a stable upsert
 // key. The legacy "heartbeat" scope is retired alongside the agent-level
 // heartbeat cron.
 //
@@ -19,14 +19,14 @@ import "encoding/json"
 // derivation a claim-time in-memory copy is still holding — sharing this
 // function is not enough on its own when its input can drift between
 // calls.
-func ContinuationScopeForRun(run *Run, agentID string) string {
+func ContinuationScopeForRun(run *Run, agentProfileID string) string {
 	if run == nil {
-		return "agent:" + agentID
+		return "agent:" + agentProfileID
 	}
 	if id := extractRoutineID(run.ContextSnapshot); id != "" {
 		return "routine:" + id
 	}
-	return "agent:" + agentID
+	return "agent:" + agentProfileID
 }
 
 // extractRoutineID pulls routine_id out of a JSON context snapshot.

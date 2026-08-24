@@ -379,6 +379,10 @@ One sentence. The single next thing to do on the next wake-up.
 
 Idempotent: re-running with the same inputs produces the same output. Called from the `AgentCompleted` event subscriber on successful taskless runs. On failure, the previous summary is left intact (last-good wins).
 
+`runs.continuation_scope` is selected at creation (`routine:<id>` when
+`routine_id` exists, else `agent:<agent_profile_id>`). Coalescing can change
+`context_snapshot`, not scope, so the first wake owns the summary chain.
+
 ### Resume delta prompt
 
 When resuming a task-bound session (same agent, same task, session ID preserved), the agent receives only a resume delta - the new information since the last run. Full instructions and context are skipped (the agent CLI retains them from the previous session), saving ~5-10K tokens per fire.
@@ -436,7 +440,7 @@ INDEX (idempotency_key)
 
 ```
 agent_profile_id   TEXT NOT NULL
-scope              TEXT NOT NULL  -- routine:<routine_id>
+scope              TEXT NOT NULL  -- routine:<routine_id> or agent:<agent_profile_id>
 content            TEXT NOT NULL DEFAULT ''  -- markdown, capped 8 KB
 content_tokens     INT  NOT NULL DEFAULT 0
 updated_at         TIMESTAMP NOT NULL
@@ -499,6 +503,7 @@ started_at, completed_at
 result_json       TEXT  NOT NULL  DEFAULT '{}'  -- structured adapter output for summary builder
 assembled_prompt  TEXT  NOT NULL  DEFAULT ''    -- final prompt as the agent saw it (inspection)
 summary_injected  TEXT  NOT NULL  DEFAULT ''    -- the summary that was prepended (per-run snapshot)
+continuation_scope TEXT  NOT NULL DEFAULT ''    -- summary key selected at run creation
 ```
 
 `runs.payload.task_id` is empty for taskless runs; all other run lifecycle fields (`idempotency_key`, claim/coalesce, cost rollup) carry over unchanged.
@@ -571,7 +576,9 @@ type TaskAssignedPayload struct { TaskID string `json:"task_id"` }
 
 ### Run inspection (existing `/office/agents/[id]/runs/[runId]`)
 
-`GetRunDetail` returns the `RunDetail` aggregate including the new columns (`result_json`, `assembled_prompt`, `summary_injected`) plus existing `context_snapshot`, `output_summary`. The detail UI surfaces a "Prompt" tab rendering the assembled prompt + injected summary. WS live updates via `useRunLiveSync` are unchanged.
+`GetRunDetail` returns `result_json`, `assembled_prompt`, `summary_injected`,
+and `continuation_scope` with existing run fields. The detail UI has a
+"Prompt" tab.
 
 ### Frontend UI
 
@@ -665,7 +672,9 @@ A formal per-route authorization model (workspace membership, admin role, RBAC o
 
 ## Persistence guarantees
 
-Survives a kandev process restart: all `agent_wakeup_requests` rows including `queued`, `claimed` (re-claimed on restart), and `scheduled_retry_at`; all `office_routines`, `office_routine_triggers` (with `next_run_at` advanced), `office_routine_runs` history; `agent_continuation_summaries` (last-good); `runs` rows including `result_json`, `assembled_prompt`, `summary_injected` snapshots.
+Survives restart: wakeups, routines and triggers,
+`office_routine_runs`, continuation summaries, and run snapshots including
+`result_json`, `assembled_prompt`, `summary_injected`, and `continuation_scope`.
 
 Does NOT survive (reconstructed on next tick): in-memory claim leases - a `claimed` wakeup whose process died is picked up by the staleness/recovery path; the scheduler's claim query is the source of truth. The unstarted-task recovery sweep suppresses duplicates with its `NOT EXISTS` check on `runs`: any queued, claimed, or finished run of any age blocks redispatch, while failed and cancelled runs do not.
 

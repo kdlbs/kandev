@@ -37,8 +37,9 @@ func TestLoadContinuationSummary_AgentScope_RoundTripsThroughRealWriterAndReader
 	}
 
 	completed := bus.NewEvent(events.AgentCompleted, "test", map[string]string{
-		"agent_id":   "agent-scope-a",
-		"session_id": "sess-scope-a",
+		"agent_id":         "claude-acp",
+		"agent_profile_id": "agent-scope-a",
+		"session_id":       "sess-scope-a",
 	})
 	if pErr := eb.Publish(ctx, events.AgentCompleted, completed); pErr != nil {
 		t.Fatalf("publish completed: %v", pErr)
@@ -96,8 +97,10 @@ func TestLoadContinuationSummary_RoutineScope_RoundTripsThroughRealWriterAndRead
 	`, claimedAt, claimedAt)
 
 	completed := bus.NewEvent(events.AgentCompleted, "test", map[string]string{
-		"agent_id":   "agent-scope-r",
-		"session_id": "sess-scope-r",
+		"agent_id":         "claude-acp",
+		"agent_profile_id": "agent-scope-r",
+		"run_id":           "run-scope-r",
+		"session_id":       "sess-scope-r",
 	})
 	if pErr := eb.Publish(ctx, events.AgentCompleted, completed); pErr != nil {
 		t.Fatalf("publish completed: %v", pErr)
@@ -123,19 +126,11 @@ func TestLoadContinuationSummary_RoutineScope_RoundTripsThroughRealWriterAndRead
 // TestLoadContinuationSummary_ScopeSurvivesCoalesceAfterClaim pins the PR
 // #2971 review round-2 finding: reader and writer must agree on scope
 // even when a routine wakeup coalesces into an already-claimed run
-// between claim and completion. Before this fix, both sides called
-// summaryScopeForRun against their OWN snapshot of the run — the
-// claim-time in-memory copy for the reader (assembleAgentPrompt), a
-// freshly re-fetched DB row for the writer (resolveLifecycleRun) — and
-// MarkWakeupRequestCoalesced patches only context_snapshot. So a routine
-// wakeup landing on this run after claim flipped the WRITER's
-// re-derived scope from "agent:<id>" to "routine:<id>" while the READER
-// (still holding the pre-coalesce run object) kept computing
-// "agent:<id>", and the two sides silently wrote/read different rows.
-// Sharing summaryScopeForRun was not enough: its inputs drifted between
-// calls. The fix persists ContinuationScope once, at CreateRun — before
-// this row can ever be coalesced into — so a later coalesce cannot move
-// which bucket this run's continuation summary lands in.
+// between claim and completion. The reader holds the claimed run in memory,
+// while the writer fetches it again after completion. Coalescing patches
+// context_snapshot, so re-deriving the scope would let the two paths select
+// different summary rows. CreateRun persists ContinuationScope before a row
+// can be coalesced, so both paths use the same bucket.
 //
 // This run originates from a plain (non-routine) taskless wakeup, so its
 // scope is decided as "agent:<id>" at creation, before a routine wakeup
@@ -177,8 +172,10 @@ func TestLoadContinuationSummary_ScopeSurvivesCoalesceAfterClaim(t *testing.T) {
 	svc.CoalesceRoutineWakeupForTest(ctx, t, "agent-scope-coalesce", claimedRun.ID, "rt-2")
 
 	completed := bus.NewEvent(events.AgentCompleted, "test", map[string]string{
-		"agent_id":   "agent-scope-coalesce",
-		"session_id": "sess-scope-coalesce",
+		"agent_id":         "claude-acp",
+		"agent_profile_id": "agent-scope-coalesce",
+		"run_id":           claimedRun.ID,
+		"session_id":       "sess-scope-coalesce",
 	})
 	if pErr := eb.Publish(ctx, events.AgentCompleted, completed); pErr != nil {
 		t.Fatalf("publish completed: %v", pErr)
