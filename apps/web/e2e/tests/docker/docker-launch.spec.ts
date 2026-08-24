@@ -20,6 +20,12 @@ import {
   waitForSessionEnvironment,
 } from "../../helpers/session";
 
+// A clone-backed Docker task must leave a regular checkout at /workspace
+// before agentctl starts. Keep the intentional delay in the same profile
+// while retaining that prerequisite for the fail-closed metadata policy.
+const slowDockerBootstrapScript = `sleep 20
+git clone --depth=1 --branch {{repository.branch}} {{repository.clone_url}} {{workspace.path}}`;
+
 test.describe("Docker executor — launch + reuse + recovery", () => {
   test("executes the prepare script on Alpine BusyBox", async ({ apiClient, seedData }) => {
     test.setTimeout(180_000);
@@ -102,12 +108,12 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
     const profile = await apiClient.createExecutorProfile(dockerExec!.id, {
       name: "E2E Docker Slow",
       config: { image_tag: E2E_IMAGE_TAG },
-      prepare_script: "sleep 20",
+      prepare_script: slowDockerBootstrapScript,
       cleanup_script: "",
       env_vars: seedData.gitConfigEnvVars,
     });
     const persistedProfile = await apiClient.getExecutorProfile(dockerExec!.id, profile.id);
-    expect(persistedProfile.prepare_script).toBe("sleep 20");
+    expect(persistedProfile.prepare_script).toBe(slowDockerBootstrapScript);
 
     try {
       const task = await apiClient.createTask(seedData.workspaceId, "Docker Slow Progress", {
