@@ -519,6 +519,20 @@ func TestClient_ConcurrentRefreshCallsShareOneFetch(t *testing.T) {
 			}
 		}()
 	}
+	// If waitForFirstRequest below times out, its t.Fatal runs
+	// runtime.Goexit and skips the explicit releaseAll+wg.Wait() that
+	// follows, leaving these 8 goroutines parked in the gate. This
+	// Cleanup performs release-then-join as one atomic unit so it is
+	// safe regardless of its LIFO position relative to newRequestGate's
+	// own release Cleanup: without it, the parked goroutines complete
+	// only once the deferred release fires, after the test has already
+	// been marked done, and their t.Errorf call above then panics with
+	// "Log in goroutine after Test has completed" instead of failing
+	// cleanly.
+	t.Cleanup(func() {
+		gate.releaseAll()
+		wg.Wait()
+	})
 	close(start)
 	gate.waitForFirstRequest(t)
 	gate.releaseAll()
