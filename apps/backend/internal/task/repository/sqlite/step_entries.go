@@ -70,10 +70,7 @@ func isStepEntryMarkerUniqueViolation(err error) bool {
 // ones, so CREATE TABLE IF NOT EXISTS in the init block is correct — see
 // initStepTransitionsSchema's comment for why that rule doesn't apply here.
 func (r *Repository) initStepEntriesSchema() error {
-	idCol := "id INTEGER PRIMARY KEY AUTOINCREMENT"
-	if dialect.IsPostgres(r.db.DriverName()) {
-		idCol = "id BIGSERIAL PRIMARY KEY"
-	}
+	idCol := dialect.AutoIncrementIDColumn(r.db.DriverName())
 	_, err := r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS workflow_step_entries (
 		` + idCol + `,
