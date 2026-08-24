@@ -9,7 +9,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
-import { waitForHttp } from "../../helpers/causal-waits";
+import { watchWs } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
 
 const QUESTION_PROMPT = "Which environment should I deploy to?";
@@ -81,18 +81,15 @@ test.describe("Duplicate lifecycle turn does not hide a pending clarification", 
     apiClient,
     seedData,
   }) => {
-    const { taskId, sessionId } = await seedShadowedClarification(
+    const { taskId } = await seedShadowedClarification(
       apiClient,
       seedData,
       "Lifecycle shadow - marked",
       true,
     );
 
-    const messagesLoaded = waitForHttp(
-      testPage,
-      "GET",
-      new RegExp(`/task-sessions/${sessionId}/messages`),
-    );
+    const wsWatcher = watchWs(testPage);
+    const messagesLoaded = wsWatcher.waitForResponse("message.list");
     await testPage.goto(`/t/${taskId}`);
     await messagesLoaded;
     const session = new SessionPage(testPage);
@@ -112,18 +109,15 @@ test.describe("Duplicate lifecycle turn does not hide a pending clarification", 
     apiClient,
     seedData,
   }) => {
-    const { taskId, sessionId } = await seedShadowedClarification(
+    const { taskId } = await seedShadowedClarification(
       apiClient,
       seedData,
       "Lifecycle shadow - unmarked legacy",
       false,
     );
 
-    const messagesLoaded = waitForHttp(
-      testPage,
-      "GET",
-      new RegExp(`/task-sessions/${sessionId}/messages`),
-    );
+    const wsWatcher = watchWs(testPage);
+    const messagesLoaded = wsWatcher.waitForResponse("message.list");
     await testPage.goto(`/t/${taskId}`);
     await messagesLoaded;
     const session = new SessionPage(testPage);
