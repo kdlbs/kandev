@@ -422,6 +422,31 @@ test.describe("Mobile sidebar — view system", () => {
     }
   });
 
+  test("keeps mobile section separators inside the drawer surface", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const sheet = await seedAndOpenSheet(testPage, apiClient, seedData, [
+      "Mobile separator containment",
+    ]);
+    await sheet.getByTestId("sidebar-filter-gear").tap();
+
+    const drawer = testPage.getByTestId("sidebar-filter-drawer");
+    const popover = testPage.getByTestId("sidebar-filter-popover");
+    await expect(drawer).toBeVisible();
+    await expect(popover).toBeVisible();
+
+    const [drawerBox, popoverBox] = await Promise.all([
+      drawer.boundingBox(),
+      popover.boundingBox(),
+    ]);
+    expect(drawerBox).not.toBeNull();
+    expect(popoverBox).not.toBeNull();
+    expect(popoverBox!.x).toBeGreaterThan(drawerBox!.x);
+    expect(popoverBox!.x + popoverBox!.width).toBeLessThan(drawerBox!.x + drawerBox!.width);
+  });
+
   test("task row settings use the drawer, touch targets, and persisted preview", async ({
     testPage,
     apiClient,

@@ -96,7 +96,7 @@ export function SidebarFilterPopover({
       <DrawerTrigger asChild>{trigger}</DrawerTrigger>
       <DrawerContent
         data-testid="sidebar-filter-drawer"
-        className="h-[min(90dvh,48rem)] max-h-[calc(100dvh-1rem)] overflow-hidden rounded-t-xl p-0"
+        className="h-[min(90dvh,48rem)] max-h-[calc(100dvh-1rem)] overflow-hidden rounded-t-xl"
       >
         <DrawerHeader className="shrink-0 border-b px-4 pb-3 pt-5 text-left">
           <DrawerTitle>{t("task:sidebarFilters")}</DrawerTitle>
