@@ -28,10 +28,12 @@ async function openReadyTask(page: Page, apiClient: ApiClient, seedData: SeedDat
 // @covers AC-UI-COMPOSER-OVERLAY-001.1
 // @covers AC-UI-COMPOSER-OVERLAY-001.3
 // @covers AC-UI-COMPOSER-OVERLAY-001.4
-test("keeps custom prompts usable above a mobile software keyboard", async ({
+// @covers AC-UI-COMPOSER-OVERLAY-001.5
+test("keeps custom prompts directly above a keyboard-resized mobile composer", async ({
   testPage,
   apiClient,
   seedData,
+  prCapture,
 }) => {
   const prompt = await apiClient.createPrompt(PROMPT_NAME, PROMPT_CONTENT);
   try {
@@ -39,25 +41,26 @@ test("keeps custom prompts usable above a mobile software keyboard", async ({
     const editor = await session.composerReady();
     await editor.tap();
     await editor.fill("");
-    await testPage.evaluate(() => {
-      const keyboardViewport = Object.assign(new EventTarget(), {
-        offsetLeft: 0,
-        offsetTop: 0,
-        width: window.innerWidth,
-        height: 420,
-      });
-      Object.defineProperty(window, "visualViewport", {
-        configurable: true,
-        value: keyboardViewport,
-      });
-      window.dispatchEvent(new Event("resize"));
-    });
+    const viewport = testPage.viewportSize();
+    expect(viewport).not.toBeNull();
+    // Playwright cannot open an OS keyboard. Resize the page itself so the
+    // mobile layout and focused composer reflow into the reduced visible area.
+    // Overriding visualViewport alone would describe the composer as occluded.
+    await testPage.setViewportSize({ width: viewport!.width, height: 420 });
     await editor.pressSequentially("@mobile-prompt");
 
     const menu = testPage.getByRole("listbox", { name: /Mention tasks, files, prompts/i });
     const option = menu.getByRole("option").filter({ hasText: PROMPT_NAME });
     await expect(menu).toBeVisible();
     await expect(option).toBeVisible();
+
+    const [menuBox, composerBox] = await Promise.all([
+      menu.locator("..").boundingBox(),
+      session.activeChat().getByTestId("chat-input-editor-shell").boundingBox(),
+    ]);
+    expect(menuBox).not.toBeNull();
+    expect(composerBox).not.toBeNull();
+    expect(Math.abs(menuBox!.y + menuBox!.height - composerBox!.y)).toBeLessThanOrEqual(8);
 
     const geometry = await menu.evaluate((listbox) => {
       const surface = listbox.parentElement;
@@ -79,6 +82,11 @@ test("keeps custom prompts usable above a mobile software keyboard", async ({
     expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewportBottom + 1);
     expect(geometry.rowHeight).toBeGreaterThanOrEqual(44);
     expect(geometry.hasHorizontalOverflow).toBe(false);
+
+    await prCapture.screenshot("mobile-composer-prompt-menu", {
+      caption:
+        "Saved-prompt suggestions stay attached directly above the keyboard-resized composer",
+    });
 
     await option.tap();
     await expect(menu).toHaveCount(0);

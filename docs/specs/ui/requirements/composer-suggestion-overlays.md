@@ -59,6 +59,10 @@ without hiding the keyboard or abandoning my draft.
   or keyboard, the existing feature-specific insertion behavior shall complete,
   the draft shall not submit implicitly, and composer focus shall remain
   available for continued editing.
+- **AC-UI-COMPOSER-OVERLAY-001.5:** Given the composer and its above-composer
+  anchor remain inside the visual viewport, when a suggestion overlay opens or
+  reflows, its rendered bottom edge shall remain directly adjacent to the
+  composer rather than detach to another viewport edge.
 
 ## Out of scope
 
