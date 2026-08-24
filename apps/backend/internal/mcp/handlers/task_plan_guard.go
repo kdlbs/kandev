@@ -46,7 +46,14 @@ func planTruncationDetected(priorContent, newContent string) bool {
 // write's tool result when planTruncationDetected reports true. It states
 // plainly that the write replaced the entire document — update_task_plan_kandev
 // and create_task_plan_kandev have no partial-update mode — and names the
-// prior revision number.
+// prior revision number when it is known.
+//
+// priorRevisionNumber of 0 means the prior revision could not be established
+// (the revision-history lookup itself failed after truncation was already
+// detected off the plan content). Revision numbering starts at 1
+// (NextTaskPlanRevisionNumber), so 0 is never a real revision — in that case
+// the "in plan revision N" clause is omitted rather than naming a revision
+// that cannot exist.
 //
 // It deliberately does NOT tell the caller to "recover" the content by
 // calling an MCP tool: none of the four registered plan tools can read a
@@ -62,15 +69,20 @@ func planTruncationWarning(priorContent, newContent string, priorRevisionNumber 
 	newLen := utf8.RuneCountInString(newContent)
 	dropped := priorLen - newLen
 	droppedPct := float64(dropped) / float64(priorLen) * 100
+
+	preservedIn := "the task's plan revision history"
+	if priorRevisionNumber > 0 {
+		preservedIn = fmt.Sprintf("plan revision %d, in the task's plan revision history", priorRevisionNumber)
+	}
+
 	return fmt.Sprintf(
 		"WARNING: this write replaced %d chars with %d (dropped %d chars, %.0f%%). "+
 			"Plan writes REPLACE THE ENTIRE DOCUMENT — there is no partial update or append "+
-			"mode. The pre-write content is preserved in plan revision %d, in the task's plan "+
-			"revision history — recoverable from the Kandev UI, but NOT fetchable through "+
-			"the MCP plan tools (get_task_plan_kandev returns the current, now-truncated, "+
-			"content, not that revision). If this drop was not intentional, stop and surface "+
-			"the loss rather than rewriting the plan from memory.",
-		priorLen, newLen, dropped, droppedPct, priorRevisionNumber,
+			"mode. The pre-write content is preserved in %s — recoverable from the Kandev UI, "+
+			"but NOT fetchable through the MCP plan tools (get_task_plan_kandev returns the "+
+			"current, now-truncated, content, not that revision). If this drop was not "+
+			"intentional, stop and surface the loss rather than rewriting the plan from memory.",
+		priorLen, newLen, dropped, droppedPct, preservedIn,
 	)
 }
 
@@ -90,9 +102,15 @@ type planWriteGuardResult struct {
 // upserts, so a create over an existing plan is the same destructive write
 // through a different door) and update_task_plan_kandev.
 //
-// Lookup failures are non-fatal: if the current plan or its revision history
-// can't be fetched, the write still proceeds without a truncation warning
-// rather than blocking on a guard that itself failed.
+// A failure to fetch the current plan is non-fatal: the write proceeds
+// without a truncation warning rather than blocking on a guard that itself
+// failed. A failure to list the revision history is handled differently:
+// truncation has already been detected from the plan content at that point,
+// so the guard still forces a new revision and still warns — it renders the
+// warning without a specific revision number (see planTruncationWarning)
+// instead of silently dropping the warning, because clearing
+// forceNewRevision here would let this destructive write coalesce into, and
+// overwrite, the only surviving copy of the pre-truncation content.
 func (h *Handlers) evaluatePlanWriteGuard(ctx context.Context, taskID, newContent string) planWriteGuardResult {
 	existing, err := h.planService.GetPlan(ctx, taskID)
 	if err != nil || existing == nil {

@@ -3,10 +3,20 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/sqlite"
+	"github.com/kandev/kandev/internal/task/service"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -243,5 +253,141 @@ func TestMCPPlanTruncationGuard_CreateOverExistingPlanWarns(t *testing.T) {
 	warning, _ := updated["plan_write_warning"].(string)
 	if warning == "" {
 		t.Fatal("expected a truncation warning when create_task_plan_kandev overwrites an existing large plan, got none")
+	}
+}
+
+// failingRevisionsRepo wraps the real sqlite repository but forces
+// ListTaskPlanRevisions to always fail, simulating a transient lookup
+// failure (e.g. SQLITE_BUSY) that happens after GetPlan has already
+// succeeded.
+type failingRevisionsRepo struct {
+	*sqlite.Repository
+}
+
+func (r *failingRevisionsRepo) ListTaskPlanRevisions(context.Context, string, int) ([]*models.TaskPlanRevision, error) {
+	return nil, errors.New("simulated revision lookup failure")
+}
+
+// newMCPPlanTestHandlersWithFailingRevisionLookup builds Handlers like
+// newMCPPlanTestHandlers, but backed by a plan service whose ListRevisions
+// call always fails.
+func newMCPPlanTestHandlersWithFailingRevisionLookup(t *testing.T) *Handlers {
+	t.Helper()
+	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
+	t.Cleanup(func() {
+		if err := sqlxDB.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	})
+	repo, err := sqlite.NewWithDB(sqlxDB, sqlxDB, nil)
+	if err != nil {
+		t.Fatalf("sqlite.NewWithDB: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := repo.Close(); err != nil {
+			t.Errorf("close repository: %v", err)
+		}
+	})
+
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
+	if err != nil {
+		t.Fatalf("NewLogger: %v", err)
+	}
+	eventBus := bus.NewMemoryEventBus(log)
+	t.Cleanup(func() { eventBus.Close() })
+
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: mcpPlanWS, Name: "Plan WS"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: mcpPlanWF, WorkspaceID: mcpPlanWS, Name: "WF"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	now := time.Now().UTC()
+	task := &models.Task{
+		ID:          mcpPlanTaskID,
+		WorkspaceID: mcpPlanWS,
+		WorkflowID:  mcpPlanWF,
+		Title:       "Plan target",
+		State:       v1.TaskStateCreated,
+		Priority:    "medium",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	if err := repo.CreateTask(ctx, task); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	wrapped := &failingRevisionsRepo{Repository: repo}
+	return &Handlers{planService: service.NewPlanService(wrapped, eventBus, log), logger: log}
+}
+
+// TestMCPPlanTruncationGuard_RevisionLookupFailureOmitsRevisionNumber pins
+// Review round 2 Finding 3: revision numbering starts at 1
+// (NextTaskPlanRevisionNumber), so "plan revision 0" can never be a real
+// revision. When ListRevisions fails after GetPlan has already detected a
+// truncating write, evaluatePlanWriteGuard must still force a new revision
+// and still warn — silently returning an empty guard here would let the
+// coalescing path overwrite the only surviving copy of the pre-truncation
+// content — but the rendered warning must not claim the content lives in
+// revision 0.
+func TestMCPPlanTruncationGuard_RevisionLookupFailureOmitsRevisionNumber(t *testing.T) {
+	h := newMCPPlanTestHandlersWithFailingRevisionLookup(t)
+	ctx := context.Background()
+
+	large := strings.Repeat("x", 40000)
+	small := strings.Repeat("y", 10000)
+
+	_, err := h.handleCreateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPCreateTaskPlan,
+		mustMarshalPlanPayload(t, map[string]any{
+			"task_id": mcpPlanTaskID,
+			"content": large,
+		})))
+	if err != nil {
+		t.Fatalf("handleCreateTaskPlan: %v", err)
+	}
+
+	// Check the guard directly before the write mutates the stored plan, so
+	// "existing" below is still the large content.
+	guard := h.evaluatePlanWriteGuard(ctx, mcpPlanTaskID, small)
+	if !guard.forceNewRevision {
+		t.Error("forceNewRevision must stay true even when the revision lookup fails, " +
+			"otherwise a truncating write can coalesce into the only surviving revision")
+	}
+	if guard.warning == "" {
+		t.Fatal("expected a truncation warning even when the revision lookup fails, got none")
+	}
+	if strings.Contains(guard.warning, "revision 0") {
+		t.Errorf("warning names a nonexistent revision 0 (revision numbering starts at 1): %q", guard.warning)
+	}
+
+	out, err := h.handleUpdateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPUpdateTaskPlan,
+		mustMarshalPlanPayload(t, map[string]any{
+			"task_id": mcpPlanTaskID,
+			"content": small,
+		})))
+	if err != nil {
+		t.Fatalf("handleUpdateTaskPlan: %v", err)
+	}
+	updated := decodeMCPPlanPayload(t, out)
+
+	warning, _ := updated["plan_write_warning"].(string)
+	if warning == "" {
+		t.Fatal("expected a truncation warning even when the revision lookup fails, got none")
+	}
+	if strings.Contains(warning, "revision 0") {
+		t.Errorf("warning names a nonexistent revision 0 (revision numbering starts at 1): %q", warning)
+	}
+	if !strings.Contains(warning, "40000") || !strings.Contains(warning, "10000") {
+		t.Errorf("warning does not name the byte drop (40000 -> 10000): %q", warning)
+	}
+
+	if _, ok := updated["prior_revision_number"]; ok {
+		t.Errorf("prior_revision_number should be omitted when the revision number is unknown, got %v",
+			updated["prior_revision_number"])
 	}
 }
