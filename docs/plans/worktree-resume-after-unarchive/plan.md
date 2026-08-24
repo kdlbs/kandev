@@ -97,7 +97,7 @@ No repository or schema method needs to change.
 
 - RED: `go test ./internal/orchestrator/executor -run '^TestWorkspaceReuseAllowedRequiresLiveWorktreeRepo$' -race`
   failed on the four invalid inventory cases before the production change.
-- GREEN: the focused regression passed with 9 cases.
+- GREEN: the focused regression passed with 8 cases.
 - `go test ./internal/orchestrator/executor/... -run 'WorkspaceReuse|ReuseExistingEnvironment' -race`
   passed with 31 tests.
 - `go test ./internal/worktree/... -run 'TestCreate_RestoresReleasedWorktreeAfterArchive' -race`
