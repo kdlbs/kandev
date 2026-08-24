@@ -1,3 +1,5 @@
+import fs from "node:fs";
+
 import { test, expect } from "../../fixtures/docker-test-base";
 import {
   buildAlpineE2EImage,
@@ -10,6 +12,7 @@ import {
   dockerFileContent,
   dockerInspectExists,
   dockerRemove,
+  dockerRestartDiagnostics,
   dockerState,
   dockerStop,
   waitForDockerContainerRemoved,
@@ -219,7 +222,7 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
   test("restarts an externally stopped container and reuses the task environment", async ({
     apiClient,
     seedData,
-  }) => {
+  }, testInfo) => {
     test.setTimeout(180_000);
 
     const task = await apiClient.createTaskWithAgent(
@@ -246,20 +249,44 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
       })
       .toBe("exited");
 
-    const launched = await apiClient.launchSession({
-      task_id: task.id,
-      agent_profile_id: seedData.agentProfileId,
-      executor_profile_id: seedData.dockerExecutorProfileId,
-      workflow_step_id: seedData.startStepId,
-      prompt: "/e2e:simple-message",
-    });
+    try {
+      const launched = await apiClient.launchSession({
+        task_id: task.id,
+        agent_profile_id: seedData.agentProfileId,
+        executor_profile_id: seedData.dockerExecutorProfileId,
+        workflow_step_id: seedData.startStepId,
+        prompt: "/e2e:simple-message",
+      });
 
-    await waitForSessionDone(
-      apiClient,
-      task.id,
-      launched.session_id,
-      "Waiting for second Docker session",
-    );
+      await waitForSessionDone(
+        apiClient,
+        task.id,
+        launched.session_id,
+        "Waiting for second Docker session",
+      );
+    } catch (error) {
+      const [sessions, environment] = await Promise.all([
+        apiClient.listTaskSessions(task.id).catch((cause) => ({ diagnostic_error: String(cause) })),
+        apiClient
+          .getTaskEnvironment(task.id)
+          .catch((cause) => ({ diagnostic_error: String(cause) })),
+      ]);
+      const diagnosticsPath = testInfo.outputPath("external-stop-restart-diagnostics.txt");
+      fs.writeFileSync(
+        diagnosticsPath,
+        [
+          `launch_error=${error instanceof Error ? (error.stack ?? error.message) : String(error)}`,
+          dockerRestartDiagnostics(before!.container_id!),
+          `sessions=${JSON.stringify(sessions, null, 2)}`,
+          `environment=${JSON.stringify(environment, null, 2)}`,
+        ].join("\n\n"),
+      );
+      await testInfo.attach("external-stop-restart-diagnostics", {
+        path: diagnosticsPath,
+        contentType: "text/plain",
+      });
+      throw error;
+    }
     const after = await apiClient.getTaskEnvironment(task.id);
     expect(after?.id).toBe(before!.id);
     expect(after?.container_id).toBe(before!.container_id);

@@ -25,6 +25,39 @@ export function dockerState(containerID: string): string {
   return res.stdout.trim();
 }
 
+// dockerRestartDiagnostics captures the state that is lost when a restarted
+// container exits before the session launch request returns. Keep this limited
+// to non-secret Docker inspect fields so failed E2E artifacts are actionable
+// without exposing the container environment.
+export function dockerRestartDiagnostics(containerID: string): string {
+  const inspect = spawnSync(
+    "docker",
+    [
+      "inspect",
+      "--format",
+      [
+        "state={{json .State}}",
+        "entrypoint={{json .Config.Entrypoint}}",
+        "command={{json .Config.Cmd}}",
+        "mounts={{json .Mounts}}",
+      ].join("\\n"),
+      containerID,
+    ],
+    { encoding: "utf8" },
+  );
+  const logs = spawnSync("docker", ["logs", "--timestamps", containerID], { encoding: "utf8" });
+
+  return [
+    `container_id=${containerID}`,
+    `inspect_status=${inspect.status}`,
+    `inspect_stdout=${inspect.stdout.trim()}`,
+    `inspect_stderr=${inspect.stderr.trim()}`,
+    `logs_status=${logs.status}`,
+    `logs_stdout=${logs.stdout.trim()}`,
+    `logs_stderr=${logs.stderr.trim()}`,
+  ].join("\\n");
+}
+
 export function dockerCurrentBranch(containerID: string): string {
   const res = spawnSync(
     "docker",
