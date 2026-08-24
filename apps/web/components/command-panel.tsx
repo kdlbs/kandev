@@ -33,6 +33,7 @@ import {
   MODE_COMMANDS,
   MODE_SEARCH_CONTENT,
   MODE_SEARCH_FILES,
+  MODE_SEARCH_TASKS,
   getFileResultValue,
   getTaskResultValue,
 } from "@/components/command-panel-footer";
@@ -133,6 +134,10 @@ function useFileSearchEffect(opts: FileSearchEffectOptions) {
 }
 
 const ARCHIVED_STATES = new Set(["COMPLETED", "CANCELLED", "FAILED"]);
+/** Task rows previewed alongside the commands in the commands scope. */
+const TASK_PREVIEW_SIZE = 5;
+/** Task rows listed in the dedicated tasks scope. */
+const TASK_SCOPE_PAGE_SIZE = 20;
 
 function resolveVisibleStepIds(steps: { id: string; show_in_command_panel?: boolean }[]) {
   if (steps.length === 0) return null; // no steps loaded yet — don't filter
@@ -166,7 +171,10 @@ function useInlineTaskSearchEffect(opts: InlineTaskSearchOptions) {
   const { visibleStepIds, stepPositionMap } = useStepMaps(steps);
 
   useEffect(() => {
-    if (mode !== MODE_COMMANDS) return;
+    if (mode !== MODE_COMMANDS && mode !== MODE_SEARCH_TASKS) return;
+    // The commands scope only previews tasks alongside the commands; the tasks
+    // scope is the one that lists the full result set.
+    const resultLimit = mode === MODE_SEARCH_TASKS ? TASK_SCOPE_PAGE_SIZE : TASK_PREVIEW_SIZE;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     abortRef.current?.abort();
 
@@ -182,7 +190,7 @@ function useInlineTaskSearchEffect(opts: InlineTaskSearchOptions) {
       abortRef.current = controller;
       listTasksByWorkspace(
         workspaceId,
-        { page: 1, pageSize: 20 },
+        { page: 1, pageSize: TASK_SCOPE_PAGE_SIZE },
         { init: { signal: controller.signal } },
       )
         .then((res) => {
@@ -197,7 +205,7 @@ function useInlineTaskSearchEffect(opts: InlineTaskSearchOptions) {
               (stepPositionMap.get(a.workflow_step_id) ?? 99) -
               (stepPositionMap.get(b.workflow_step_id) ?? 99),
           );
-          setTaskResults(tasks);
+          setTaskResults(tasks.slice(0, resultLimit));
         })
         .catch(() => {
           if (!controller.signal.aborted) setTaskResults([]);
@@ -229,7 +237,7 @@ function useInlineTaskSearchEffect(opts: InlineTaskSearchOptions) {
       try {
         const res = await listTasksByWorkspace(
           workspaceId,
-          { query: search.trim(), page: 1, pageSize: 5, includeArchived: true },
+          { query: search.trim(), page: 1, pageSize: resultLimit, includeArchived: true },
           { init: { signal: controller.signal } },
         );
         if (!controller.signal.aborted) {
@@ -365,23 +373,42 @@ function useFirstResultSelection(
     if (!open) return;
 
     if (mode === MODE_COMMANDS) {
-      const firstTask = taskResults[0];
+      // Matching commands render above the task preview once there is a query,
+      // so the default highlight has to follow that order: Enter on "archive"
+      // must run the Archive command, not the first task the query fuzzy-matched.
+      const commandsLeadResults = Boolean(search.trim());
+      const taskResultValues = taskResults.map(getTaskResultValue);
       if (commandsChanged) {
-        const taskValues = taskResults.map(getTaskResultValue);
         setSelectedValue((current) =>
-          selectCommandSearchResult(commands, search, taskValues, current),
+          selectCommandSearchResult({
+            commands,
+            search,
+            taskResultValues,
+            preferredValue: current,
+            commandsLeadResults,
+          }),
         );
         return;
       }
-      if (firstTask) {
-        setSelectedValue(getTaskResultValue(firstTask));
+      if (commandsLeadResults) {
+        setSelectedValue(
+          findFirstMatchingCommand(commands, search)?.id ?? taskResultValues[0] ?? "",
+        );
         return;
       }
-      if (search.trim()) {
-        setSelectedValue(findFirstMatchingCommand(commands, search)?.id ?? "");
+      if (taskResultValues[0]) {
+        setSelectedValue(taskResultValues[0]);
         return;
       }
       setSelectedValue((current) => (current.startsWith("__task:") ? "" : current));
+      return;
+    }
+
+    if (mode === MODE_SEARCH_TASKS) {
+      const taskResultValues = taskResults.map(getTaskResultValue);
+      setSelectedValue((current) =>
+        current && taskResultValues.includes(current) ? current : (taskResultValues[0] ?? ""),
+      );
       return;
     }
 

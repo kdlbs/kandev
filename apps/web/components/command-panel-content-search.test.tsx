@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceContentSearchResult } from "@/lib/types/backend";
+import type { Task } from "@/lib/types/http";
 
 vi.mock("@kandev/ui/command", () => ({
   Command: ({ children, shouldFilter }: { children: ReactNode; shouldFilter?: boolean }) => (
@@ -109,6 +110,7 @@ import {
   CommandPanelView,
   MODE_COMMANDS,
   MODE_SEARCH_CONTENT,
+  MODE_SEARCH_TASKS,
   type CommandPanelViewProps,
 } from "./command-panel-footer";
 
@@ -185,14 +187,21 @@ describe("CommandPanelView task content search mode", () => {
     fireEvent.click(screen.getByTestId("mock-content-search"));
     expect(props.handleContentSelect).toHaveBeenCalledWith(result);
   });
+});
 
+describe("CommandPanelView scope switcher", () => {
   it("makes all palette scopes visible and switches without clearing the query", () => {
     const onScopeChange = vi.fn();
     const props = viewProps({ onScopeChange });
     render(<CommandPanelView {...props} />);
 
     const tabs = screen.getAllByRole("tab");
-    expect(tabs).toHaveLength(3);
+    expect(tabs.map((tab) => tab.getAttribute("aria-label"))).toEqual([
+      "Commands",
+      "Tasks",
+      "Files",
+      "Contents",
+    ]);
     expect(
       screen.getByRole("tab", { name: "Commands" }).getAttribute(ARIA_SELECTED_ATTRIBUTE),
     ).toBe("false");
@@ -262,7 +271,7 @@ describe("CommandPanelView task content search mode", () => {
     expect(document.activeElement).toBe(input);
   });
 
-  it("hides workspace modes and leaves Tab alone outside a task workbench", () => {
+  it("hides workspace modes but keeps commands and tasks outside a task workbench", () => {
     const onScopeChange = vi.fn();
     render(
       <CommandPanelView
@@ -275,10 +284,15 @@ describe("CommandPanelView task content search mode", () => {
     );
     const input = screen.getByRole("combobox");
 
-    expect(screen.queryByRole("tablist", { name: "Command palette mode" })).toBeNull();
-    expect(screen.queryByText("Switch mode")).toBeNull();
-    expect(fireEvent.keyDown(input, { key: "Tab" })).toBe(true);
-    expect(onScopeChange).not.toHaveBeenCalled();
+    expect(screen.getAllByRole("tab").map((tab) => tab.getAttribute("aria-label"))).toEqual([
+      "Commands",
+      "Tasks",
+    ]);
+    // Tab still cycles, but only between the two scopes that need no worktree.
+    expect(fireEvent.keyDown(input, { key: "Tab" })).toBe(false);
+    expect(onScopeChange).toHaveBeenLastCalledWith("search-tasks");
+    expect(fireEvent.keyDown(input, { key: "Tab", shiftKey: true })).toBe(false);
+    expect(onScopeChange).toHaveBeenLastCalledWith("search-tasks");
   });
 });
 
@@ -494,5 +508,100 @@ describe("CommandPanelView confirmations", () => {
 
     expect(onConfirmationDismiss).toHaveBeenCalledOnce();
     expect(setOpen).toHaveBeenCalledWith(false);
+  });
+});
+
+describe("CommandPanelView commands scope ordering", () => {
+  const archiveCommand = {
+    id: "task-archive",
+    label: "Archive task",
+    group: "Task",
+    action: vi.fn(),
+  };
+
+  function task(id: string, title: string): Task {
+    return {
+      id,
+      title,
+      state: "RUNNING",
+      workflow_step_id: "step-1",
+    } as Task;
+  }
+
+  function groupHeadings() {
+    return Array.from(document.querySelectorAll(CMDK_GROUP_HEADING_SELECTOR)).map(
+      (heading) => heading.textContent,
+    );
+  }
+
+  it("puts matching commands above the task preview once the user types", () => {
+    render(
+      <CommandPanelView
+        {...viewProps({
+          mode: MODE_COMMANDS,
+          search: "archive",
+          commands: [archiveCommand],
+          grouped: [],
+          taskResults: [task("task-1", "Close every remaining archive item")],
+        })}
+      />,
+    );
+
+    expect(groupHeadings()).toEqual(["Commands", "Tasks"]);
+  });
+
+  it("keeps the active task list on top while nothing is typed", () => {
+    render(
+      <CommandPanelView
+        {...viewProps({
+          mode: MODE_COMMANDS,
+          search: "",
+          commands: [archiveCommand],
+          grouped: [["Task", [archiveCommand]]],
+          taskResults: [task("task-1", "Resume yesterday's work")],
+        })}
+      />,
+    );
+
+    expect(groupHeadings()).toEqual(["Active Tasks", "Task"]);
+  });
+});
+
+describe("CommandPanelView tasks scope", () => {
+  it("lists task results and opens the one that is picked", () => {
+    const handleTaskSelect = vi.fn();
+    const target = { id: "task-1", title: "Palette task", state: "RUNNING" } as Task;
+    render(
+      <CommandPanelView
+        {...viewProps({
+          mode: MODE_SEARCH_TASKS,
+          search: "palette",
+          taskResults: [target],
+          handleTaskSelect,
+        })}
+      />,
+    );
+
+    expect(screen.getByPlaceholderText("Search for tasks...")).toBeTruthy();
+    expect(screen.getByText("Palette task")).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Tasks" }).getAttribute(ARIA_SELECTED_ATTRIBUTE)).toBe(
+      "true",
+    );
+  });
+
+  it("reports an empty task search instead of falling back to commands", () => {
+    render(
+      <CommandPanelView
+        {...viewProps({
+          mode: MODE_SEARCH_TASKS,
+          search: "nothing",
+          taskResults: [],
+          commands: [{ id: "nav-home", label: "Go Home", group: "Navigation" }],
+        })}
+      />,
+    );
+
+    expect(screen.getByText("No tasks found.")).toBeTruthy();
+    expect(screen.queryByText("Go Home")).toBeNull();
   });
 });
