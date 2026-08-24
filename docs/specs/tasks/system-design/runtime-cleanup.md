@@ -126,8 +126,8 @@ worktrees, or executor rows behind and the machine slowly runs out of memory.
   removal.
 - A worktree resume uses attach-only preparation only when the requested
   executor matches the environment owner and the durable environment inventory
-  contains a live physical worktree row. A failed, deleted, missing, or
-  tombstoned worktree row selects normal preparation so Git recovery can run.
+  contains a live physical worktree row. When no live physical repository row
+  exists, normal preparation runs so Git recovery can run.
 - Normal worktree preparation retains the historical worktree ID when one is
   available. The worktree manager resolves the deleted record, recreates its
   recoverable branch and directory, then marks the row active and clears
