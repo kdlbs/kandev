@@ -828,6 +828,7 @@ func TestStopTask_ToolSchemaIsMinimalAndDescriptionIsAccurate(t *testing.T) {
 	description := stopTool.Tool.Description
 	for _, phrase := range []string{
 		"direct child",
+		"explicitly granted coordinator authority",
 		"all live sessions",
 		"halt-only",
 		"does not send a prompt or start a replacement turn",
@@ -864,10 +865,10 @@ func TestStopTask_ForwardsTrustedSenderToBackend(t *testing.T) {
 	assert.Equal(t, "mcp.stop_task", backend.lastAction)
 	payload, ok := backend.lastPayload.(map[string]interface{})
 	require.True(t, ok)
-	require.Len(t, payload, 2, "forwarder must build a fresh trusted payload")
+	require.Len(t, payload, 3, "forwarder must build a fresh trusted payload")
 	assert.Equal(t, "task-target", payload["task_id"])
 	assert.Equal(t, "task-current", payload["sender_task_id"])
-	assert.NotContains(t, payload, "sender_session_id")
+	assert.Equal(t, "test-session", payload["sender_session_id"])
 	assert.NotContains(t, payload, "session_id")
 	assert.NotContains(t, payload, "reason")
 	assert.NotContains(t, payload, "force")

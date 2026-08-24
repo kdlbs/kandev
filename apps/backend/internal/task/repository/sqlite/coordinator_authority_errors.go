@@ -16,6 +16,11 @@ import (
 // ation_id_logical_key_key", which is unambiguous for the typed branch.
 const principalContextConstraintName = "workspace_agent_principals_workspace_id_plugin_installation_id_logical_key_key"
 
+const (
+	principalTaskBindingIndexName    = "uniq_active_workspace_agent_principal_task"
+	principalSessionBindingIndexName = "uniq_active_workspace_agent_principal_session"
+)
+
 // sqlitePrincipalContextViolationMessage is the substring go-sqlite3 puts in
 // a UNIQUE-constraint error for the inline principal-context constraint. The
 // column triple appears in exactly one UNIQUE constraint on the table, so
@@ -23,6 +28,11 @@ const principalContextConstraintName = "workspace_agent_principals_workspace_id_
 // failed" match would also fire on the table's primary key. Mirrors
 // sqliteUsageEventIDViolationMessage (usage_events_unique.go).
 const sqlitePrincipalContextViolationMessage = "UNIQUE constraint failed: workspace_agent_principals.workspace_id, workspace_agent_principals.plugin_installation_id, workspace_agent_principals.logical_key"
+
+const (
+	sqlitePrincipalTaskBindingViolationMessage    = "UNIQUE constraint failed: workspace_agent_principals.workspace_id, workspace_agent_principals.backing_task_id"
+	sqlitePrincipalSessionBindingViolationMessage = "UNIQUE constraint failed: workspace_agent_principals.workspace_id, workspace_agent_principals.backing_session_id"
+)
 
 const principalGrantScopeIndexName = "uniq_active_principal_coordinator_grants_scope"
 
@@ -33,11 +43,12 @@ const principalGrantScopeIndexName = "uniq_active_principal_coordinator_grants_s
 // (coordinator_task_id, scope_kind, scope_id).
 const sqlitePrincipalGrantScopeViolationMessage = "UNIQUE constraint failed: task_coordinator_grants.principal_id, task_coordinator_grants.scope_kind, task_coordinator_grants.scope_id"
 
-// isPrincipalContextUniqueViolation reports whether err is a violation of the
-// workspace_agent_principals context constraint specifically, not any unique
-// violation. Mirrors isUsageEventUniqueViolation (usage_events_unique.go).
-func isPrincipalContextUniqueViolation(err error) bool {
-	return isUniqueViolation(err, principalContextConstraintName, sqlitePrincipalContextViolationMessage)
+// isPrincipalConflictViolation reports whether err would make either the
+// durable context or its active task/session binding ambiguous.
+func isPrincipalConflictViolation(err error) bool {
+	return isUniqueViolation(err, principalContextConstraintName, sqlitePrincipalContextViolationMessage) ||
+		isUniqueViolation(err, principalTaskBindingIndexName, sqlitePrincipalTaskBindingViolationMessage) ||
+		isUniqueViolation(err, principalSessionBindingIndexName, sqlitePrincipalSessionBindingViolationMessage)
 }
 
 // isPrincipalGrantScopeUniqueViolation reports whether err is a violation of

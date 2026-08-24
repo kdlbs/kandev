@@ -2,6 +2,8 @@ package coordinator
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -47,15 +49,16 @@ func (s *memoryStore) FinishCoordinatorAuditEvent(_ context.Context, id, result,
 
 // @covers AC-COORDINATOR-AUTHORITY-003
 func TestAuthorityAllowsInScopeCapabilityAndAuditsGrantUse(t *testing.T) {
-	store := &memoryStore{principal: &models.WorkspaceAgentPrincipal{ID: "principal-1", WorkspaceID: "workspace", BackingTaskID: "actor"}, grants: []*models.CoordinatorGrant{{
+	store := &memoryStore{principal: &models.WorkspaceAgentPrincipal{ID: "principal-1", WorkspaceID: "workspace", PluginInstallationID: "plugin-1", LogicalKey: "coordinator", BackingTaskID: "actor", BackingSessionID: "actor-session"}, grants: []*models.CoordinatorGrant{{
 		ID: "grant-1", PrincipalID: "principal-1", WorkspaceID: "workspace",
 		ScopeKind: ScopeWorkspace, ScopeID: "workspace", Capabilities: "inspect,orchestrate",
 	}}}
 	authority := New(store, func() bool { return true })
 	decision, err := authority.Authorize(context.Background(), Request{
-		ActorTask:  &models.Task{ID: "actor", WorkspaceID: "workspace"},
-		TargetTask: &models.Task{ID: "target", WorkspaceID: "workspace", WorkflowID: "workflow"},
-		Action:     "stop", Capability: CapabilityOrchestrate,
+		ActorTask:      &models.Task{ID: "actor", WorkspaceID: "workspace"},
+		TargetTask:     &models.Task{ID: "target", WorkspaceID: "workspace", WorkflowID: "workflow"},
+		ActorSessionID: "actor-session",
+		Action:         "stop", Capability: CapabilityOrchestrate,
 	})
 	if err != nil {
 		t.Fatalf("Authorize: %v", err)
@@ -69,17 +72,50 @@ func TestAuthorityAllowsInScopeCapabilityAndAuditsGrantUse(t *testing.T) {
 	if len(store.audits) != 1 || store.audits[0].Result != "ok" {
 		t.Fatalf("audits = %#v, want resolved allowed audit", store.audits)
 	}
+	encoded, err := json.Marshal(store.audits[0])
+	if err != nil {
+		t.Fatalf("marshal audit: %v", err)
+	}
+	if !strings.Contains(string(encoded), `"principal_id":"principal-1"`) {
+		t.Fatalf("audit = %s, want durable principal attribution", encoded)
+	}
+}
+
+func TestAuthorityRejectsStaleBackingSession(t *testing.T) {
+	store := &memoryStore{principal: &models.WorkspaceAgentPrincipal{
+		ID: "principal-1", WorkspaceID: "workspace", PluginInstallationID: "plugin-1", LogicalKey: "coordinator", BackingTaskID: "actor", BackingSessionID: "current-session",
+	}, grants: []*models.CoordinatorGrant{{
+		ID: "grant-1", PrincipalID: "principal-1", WorkspaceID: "workspace",
+		ScopeKind: ScopeWorkspace, ScopeID: "workspace", Capabilities: "orchestrate",
+	}}}
+	decision, err := New(store, func() bool { return true }).Authorize(context.Background(), Request{
+		ActorTask:      &models.Task{ID: "actor", WorkspaceID: "workspace"},
+		TargetTask:     &models.Task{ID: "target", WorkspaceID: "workspace"},
+		ActorSessionID: "replaced-session",
+		Action:         "stop",
+		Capability:     CapabilityOrchestrate,
+	})
+	if err != nil {
+		t.Fatalf("Authorize: %v", err)
+	}
+	if decision.Allowed || decision.Basis != BasisDenied {
+		t.Fatalf("decision = %#v, want stale-session denial", decision)
+	}
+	if len(store.audits) != 0 {
+		t.Fatalf("audits = %#v, want no privileged audit for an unbound session", store.audits)
+	}
 }
 
 func TestAuthorityDeniesCrossWorkspaceWithoutExposingReason(t *testing.T) {
-	store := &memoryStore{principal: &models.WorkspaceAgentPrincipal{ID: "principal-1", WorkspaceID: "workspace-a", BackingTaskID: "actor"}, grants: []*models.CoordinatorGrant{{
+	store := &memoryStore{principal: &models.WorkspaceAgentPrincipal{ID: "principal-1", WorkspaceID: "workspace-a", PluginInstallationID: "plugin-1", LogicalKey: "coordinator", BackingTaskID: "actor", BackingSessionID: "actor-session"}, grants: []*models.CoordinatorGrant{{
 		ID: "grant-1", PrincipalID: "principal-1", WorkspaceID: "workspace-a",
 		ScopeKind: ScopeWorkspace, ScopeID: "workspace-a", Capabilities: "orchestrate", GrantedAt: time.Now(),
 	}}}
 	decision, err := New(store, func() bool { return true }).Authorize(context.Background(), Request{
-		ActorTask:  &models.Task{ID: "actor", WorkspaceID: "workspace-a"},
-		TargetTask: &models.Task{ID: "target", WorkspaceID: "workspace-b"},
-		Action:     "stop", Capability: CapabilityOrchestrate,
+		ActorTask:      &models.Task{ID: "actor", WorkspaceID: "workspace-a"},
+		TargetTask:     &models.Task{ID: "target", WorkspaceID: "workspace-b"},
+		ActorSessionID: "actor-session",
+		Action:         "stop", Capability: CapabilityOrchestrate,
 	})
 	if err != nil {
 		t.Fatalf("Authorize: %v", err)
@@ -114,6 +150,32 @@ func TestAuthorityDeniesRevokedOrLegacyTaskBoundPrincipal(t *testing.T) {
 	}
 	if len(store.audits) != 0 {
 		t.Fatalf("audits = %#v, want none without an active principal grant", store.audits)
+	}
+}
+
+func TestAuthorityDeniesPrincipalWithoutAuthenticatedPluginContext(t *testing.T) {
+	store := &memoryStore{
+		principal: &models.WorkspaceAgentPrincipal{
+			ID: "principal-1", WorkspaceID: "workspace", LogicalKey: "coordinator",
+			BackingTaskID: "actor", BackingSessionID: "actor-session",
+		},
+		grants: []*models.CoordinatorGrant{{
+			ID: "grant-1", PrincipalID: "principal-1", WorkspaceID: "workspace",
+			ScopeKind: ScopeWorkspace, ScopeID: "workspace", Capabilities: "orchestrate",
+		}},
+	}
+	decision, err := New(store, func() bool { return true }).Authorize(context.Background(), Request{
+		ActorTask:      &models.Task{ID: "actor", WorkspaceID: "workspace"},
+		TargetTask:     &models.Task{ID: "target", WorkspaceID: "workspace"},
+		ActorSessionID: "actor-session",
+		Action:         "stop",
+		Capability:     CapabilityOrchestrate,
+	})
+	if err != nil {
+		t.Fatalf("Authorize: %v", err)
+	}
+	if decision.Allowed || len(store.audits) != 0 {
+		t.Fatalf("decision/audits = %#v / %#v, want silent null-context denial", decision, store.audits)
 	}
 }
 
@@ -172,23 +234,25 @@ func TestAuthorityFailsClosedOnStoreError(t *testing.T) {
 }
 
 func TestAuthorityAllowsWorkflowScopedGrant(t *testing.T) {
-	store := &memoryStore{principal: &models.WorkspaceAgentPrincipal{ID: "principal-1", WorkspaceID: "workspace", BackingTaskID: "actor"}, grants: []*models.CoordinatorGrant{{
+	store := &memoryStore{principal: &models.WorkspaceAgentPrincipal{ID: "principal-1", WorkspaceID: "workspace", PluginInstallationID: "plugin-1", LogicalKey: "coordinator", BackingTaskID: "actor", BackingSessionID: "actor-session"}, grants: []*models.CoordinatorGrant{{
 		ID: "grant-1", PrincipalID: "principal-1", WorkspaceID: "workspace",
 		ScopeKind: ScopeWorkflow, ScopeID: "workflow-1", Capabilities: "inspect",
 	}}}
 	authority := New(store, func() bool { return true })
 	matching, err := authority.Authorize(context.Background(), Request{
-		ActorTask:  &models.Task{ID: "actor", WorkspaceID: "workspace"},
-		TargetTask: &models.Task{ID: "target-in-flow", WorkspaceID: "workspace", WorkflowID: "workflow-1"},
-		Action:     "list_related", Capability: CapabilityInspect,
+		ActorTask:      &models.Task{ID: "actor", WorkspaceID: "workspace"},
+		TargetTask:     &models.Task{ID: "target-in-flow", WorkspaceID: "workspace", WorkflowID: "workflow-1"},
+		ActorSessionID: "actor-session",
+		Action:         "list_related", Capability: CapabilityInspect,
 	})
 	if err != nil || !matching.Allowed || matching.Basis != BasisGrant || matching.GrantID != "grant-1" {
 		t.Fatalf("workflow-scope decision = %#v, %v; want allowed by grant-1", matching, err)
 	}
 	outside, err := authority.Authorize(context.Background(), Request{
-		ActorTask:  &models.Task{ID: "actor", WorkspaceID: "workspace"},
-		TargetTask: &models.Task{ID: "target-elsewhere", WorkspaceID: "workspace", WorkflowID: "workflow-2"},
-		Action:     "list_related", Capability: CapabilityInspect,
+		ActorTask:      &models.Task{ID: "actor", WorkspaceID: "workspace"},
+		TargetTask:     &models.Task{ID: "target-elsewhere", WorkspaceID: "workspace", WorkflowID: "workflow-2"},
+		ActorSessionID: "actor-session",
+		Action:         "list_related", Capability: CapabilityInspect,
 	})
 	if err != nil || outside.Allowed || outside.Basis != BasisDenied {
 		t.Fatalf("out-of-workflow decision = %#v, %v; want denied", outside, err)

@@ -36,6 +36,104 @@ func TestCoordinatorAuthoritySchemaCreatesRevocableGrantAndAuditTables(t *testin
 	`), "audit-1", now, "coordinator", "session-1", "target", "ws-1", "stop", "orchestrate", "allowed", "", "grant-1", "pending", "grant"); err != nil {
 		t.Fatalf("insert coordinator audit event: %v", err)
 	}
+	var principalID string
+	if err := repo.db.QueryRow(`SELECT principal_id FROM task_coordinator_audit_events WHERE id = 'audit-1'`).Scan(&principalID); err != nil {
+		t.Fatalf("read audit principal attribution: %v", err)
+	}
+}
+
+func TestCoordinatorAuditPrincipalMigrationReplaysOnLegacyDatabase(t *testing.T) {
+	repo := newUsageEventsTestRepo(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Coordinator authority"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	event := &models.CoordinatorAuditEvent{
+		ID: "audit-legacy", PrincipalID: "principal-before-rewind", ActorTaskID: "actor", TargetTaskID: "target",
+		WorkspaceID: "ws-1", Action: "stop", Capability: "orchestrate", Decision: "allowed", Result: "pending",
+	}
+	if err := repo.CreateCoordinatorAuditEvent(ctx, event); err != nil {
+		t.Fatalf("CreateCoordinatorAuditEvent: %v", err)
+	}
+	if _, err := repo.db.Exec(`ALTER TABLE task_coordinator_audit_events DROP COLUMN principal_id`); err != nil {
+		t.Fatalf("simulate legacy audit schema: %v", err)
+	}
+	if err := repo.runMigrations(); err != nil {
+		t.Fatalf("runMigrations: %v", err)
+	}
+	events, err := repo.ListCoordinatorAuditEvents(ctx, "ws-1", "actor", 10)
+	if err != nil {
+		t.Fatalf("ListCoordinatorAuditEvents: %v", err)
+	}
+	if len(events) != 1 || events[0].ID != event.ID || events[0].PrincipalID != "" {
+		t.Fatalf("migrated events = %#v, want preserved legacy row with default principal", events)
+	}
+}
+
+func TestPrincipalGrantSurvivesBackingTaskDeletion(t *testing.T) {
+	repo := newUsageEventsTestRepo(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Coordinator authority"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	createUsageEventsTestTask(t, repo, "coordinator")
+	now := time.Now().UTC()
+	principal := &models.WorkspaceAgentPrincipal{
+		ID: "principal-1", WorkspaceID: "ws-1", PluginInstallationID: "plugin-1", LogicalKey: "coordinator",
+		BackingTaskID: "coordinator", BackingSessionID: "session-1", CreatedAt: now,
+	}
+	if err := repo.CreateWorkspaceAgentPrincipal(ctx, principal); err != nil {
+		t.Fatalf("CreateWorkspaceAgentPrincipal: %v", err)
+	}
+	if err := repo.CreateCoordinatorGrant(ctx, &models.CoordinatorGrant{
+		ID: "grant-1", PrincipalID: principal.ID, WorkspaceID: "ws-1",
+		ScopeKind: "workspace", ScopeID: "ws-1", Capabilities: "orchestrate", GrantedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateCoordinatorGrant: %v", err)
+	}
+	if _, err := repo.db.ExecContext(ctx, `DELETE FROM tasks WHERE id = 'coordinator'`); err != nil {
+		t.Fatalf("delete backing task: %v", err)
+	}
+	grants, err := repo.ListActiveWorkspaceAgentPrincipalGrants(ctx, principal.ID, "ws-1")
+	if err != nil {
+		t.Fatalf("ListActiveWorkspaceAgentPrincipalGrants: %v", err)
+	}
+	if len(grants) != 1 || grants[0].ID != "grant-1" {
+		t.Fatalf("grants after backing task deletion = %#v, want durable grant-1", grants)
+	}
+}
+
+func TestWorkspaceAgentPrincipalRejectsAmbiguousActiveBinding(t *testing.T) {
+	repo := newUsageEventsTestRepo(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Coordinator authority"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	now := time.Now().UTC()
+	first := &models.WorkspaceAgentPrincipal{
+		ID: "principal-1", WorkspaceID: "ws-1", PluginInstallationID: "plugin-1", LogicalKey: "coordinator",
+		BackingTaskID: "coordinator", BackingSessionID: "session-1", CreatedAt: now,
+	}
+	second := &models.WorkspaceAgentPrincipal{
+		ID: "principal-2", WorkspaceID: "ws-1", PluginInstallationID: "plugin-2", LogicalKey: "coordinator",
+		BackingTaskID: "coordinator", BackingSessionID: "session-1", CreatedAt: now,
+	}
+	rebindCandidate := &models.WorkspaceAgentPrincipal{
+		ID: "principal-3", WorkspaceID: "ws-1", PluginInstallationID: "plugin-3", LogicalKey: "coordinator",
+		BackingTaskID: "other-task", BackingSessionID: "other-session", CreatedAt: now,
+	}
+	if err := repo.CreateWorkspaceAgentPrincipal(ctx, first); err != nil {
+		t.Fatalf("create first principal: %v", err)
+	}
+	if err := repo.CreateWorkspaceAgentPrincipal(ctx, second); !errors.Is(err, repoerrors.ErrWorkspaceAgentPrincipalConflict) {
+		t.Fatalf("ambiguous binding error = %v, want ErrWorkspaceAgentPrincipalConflict", err)
+	}
+	if err := repo.CreateWorkspaceAgentPrincipal(ctx, rebindCandidate); err != nil {
+		t.Fatalf("create rebind candidate: %v", err)
+	}
+	if err := repo.RebindWorkspaceAgentPrincipal(ctx, rebindCandidate.ID, "coordinator", "session-1", now.Add(time.Minute)); !errors.Is(err, repoerrors.ErrWorkspaceAgentPrincipalConflict) {
+		t.Fatalf("ambiguous rebind error = %v, want ErrWorkspaceAgentPrincipalConflict", err)
+	}
 }
 
 // @covers AC-COORDINATOR-AUTHORITY-002

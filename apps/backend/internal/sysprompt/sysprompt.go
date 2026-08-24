@@ -193,11 +193,11 @@ const stepCompleteSection = "- step_complete_kandev: Signal that every requireme
 const coordinatorTaskControlSection = " Optional: session_id, delivery_mode. " +
 	"For an autopilot child question, also pass reply_to_question_id with the question ID from the child message. " +
 	"Use delivery_mode=\"queued\" or omit it for information that can wait. " +
-	"Use delivery_mode=\"interrupt\" for urgent replacement work on a running direct child; " +
+	"Use delivery_mode=\"interrupt\" for urgent replacement work on a running direct child or a target within your explicitly granted coordinator authority; " +
 	"if immediate cancel-and-dispatch cannot be confirmed safely, the message remains queued. " +
 	"For halt-only work, use stop_task_kandev.\n" +
 	"- stop_task_kandev: Halt all live sessions observed for a direct child, with no prompt and no replacement turn. " +
-	"Only the target task's direct parent may call it. Required params: task_id. " +
+	"Only the target task's direct parent or a task explicitly granted coordinator authority over the target's scope may call it. Required params: task_id. " +
 	"A stopped session is CANCELLED and cannot be resumed, so message_task_kandev will not restart it: " +
 	"use spawn_session_kandev to put the task back to work."
 

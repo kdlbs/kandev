@@ -34,20 +34,26 @@ rejected alternatives: [ADR 2026-08-24](../../../decisions/2026-08-24-explicit-c
 
 ## Data model
 
-Three tables in
-[`apps/backend/internal/task/repository/sqlite/coordinator_authority.go`](../../../../apps/backend/internal/task/repository/sqlite/coordinator_authority.go):
+Three tables are declared in
+[`apps/backend/internal/task/repository/sqlite/coordinator_authority_schema.go`](../../../../apps/backend/internal/task/repository/sqlite/coordinator_authority_schema.go)
+and accessed through
+[`coordinator_authority.go`](../../../../apps/backend/internal/task/repository/sqlite/coordinator_authority.go):
 
 - `workspace_agent_principals` — durable opaque subject. Identity is
   `UNIQUE(workspace_id, plugin_installation_id, logical_key)`; backing task and
-  session are mutable columns. `principal_id = ''` and
-  `plugin_installation_id = ''` mark legacy task-bound rows/scope; both are
-  excluded from resolution (`WHERE principal_id != ''`,
-  `AND plugin_installation_id != ''`) so mixed deployments fail closed.
+  session are mutable columns. Partial unique indexes ensure one active
+  principal owns a backing task or session in a workspace. An empty plugin
+  installation or logical key is rejected by the authority, and an empty
+  principal id on a legacy task-bound grant never matches the principal-only
+  grant query, so mixed deployments fail closed.
 - `task_coordinator_grants` — one active grant per `(principal or coordinator
   task, scope kind, scope id)`, enforced by partial unique indexes
-  `... WHERE revoked_at IS NULL`. Capabilities serialize as JSON (`inspect`,
-  `orchestrate`).
+  `... WHERE revoked_at IS NULL`. Principal grants are not foreign-keyed to a
+  replaceable backing task, so task rotation or deletion cannot erase durable
+  operator consent. Capabilities serialize as a normalized comma-separated
+  list (`inspect`, `orchestrate`).
 - `task_coordinator_audit_events` — append-only privileged-attempt log,
+  carrying durable `principal_id` plus concrete actor task/session and using
   claim-then-resolve (`pending` → `ok`/`error`). Pruned at 10k rows with
   dialect-aware `LIMIT -1 OFFSET ?` / `LIMIT ALL OFFSET ?`.
 
@@ -67,8 +73,10 @@ executes per request:
    state (AC-...-002.1).
 2. Runtime flag `coordinatorTaskAuthority` off, or store unavailable: silent
    deny (AC-...-002.2) with no principal DB reads.
-3. Resolve active principal by `(acting task, actor session)`; store miss,
-   store error, or archived actor task: fail-closed deny.
+3. Resolve the active principal by acting task, then require the request's
+   server-authored actor session to equal the principal's current backing
+   session. A missing/null plugin context, stale session, store failure, or
+   archived actor task fails closed.
 4. Cross-workspace actor/target: deny with audit reason `cross_workspace`.
 5. Evaluate active grants: matching scope (`workspace`, or `workflow` with
    equal workflow ids) AND required capability present → allow with
@@ -122,8 +130,9 @@ is the second layer of default-off.
 
 - Store error during authorize: fail-closed deny, error surfaced to caller;
   the caller maps it to the same opaque denial message.
-- Audit write failure on allow: the action proceeds; audit is best-effort on
-  the write path but the pending row is only created after an allow decision.
+- Audit claim failure: authorization fails closed before the action. Audit
+  resolution failure is surfaced after the action rather than silently
+  claiming the row was finalized.
 - Revoked or legacy principal rows: treated as absence (silent deny, no
   audit), never as errors.
 - Crash between claim and resolve leaves a `pending` audit row, which is

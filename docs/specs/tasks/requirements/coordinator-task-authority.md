@@ -61,8 +61,9 @@ explicit and retractable.
   history remains queryable for inspection.
 - **AC-TASKS-COORDINATOR-AUTHORITY-001.4:** When a privileged action occurs
   under a grant (allowed or denied while the actor holds any active grant),
-  the system shall write an audit event and resolve it after the action with
-  an ok or error outcome. A denied attempt by an actor holding no active
+  the system shall write an audit event carrying both the durable principal
+  id and the concrete actor task/session, then resolve it after the action
+  with an ok or error outcome. A denied attempt by an actor holding no active
   grant shall produce no audit event.
 
 ### REQ-TASKS-COORDINATOR-AUTHORITY-002: Centralized fail-closed authorization
@@ -110,6 +111,9 @@ backing task rotation and plugin reinstalls do not change identity.
   to a new backing task and session, the system shall apply the binding to
   the next authorization check and shall reject rebinds of revoked principals
   with the same typed outcome as an unknown principal.
+- **AC-TASKS-COORDINATOR-AUTHORITY-003.5:** The system shall authorize only
+  the current backing task/session pair, and shall prevent two active
+  principals in a workspace from claiming the same backing task or session.
 
 ## Out of scope
 

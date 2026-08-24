@@ -17,7 +17,7 @@ type WorkspaceAgentPrincipal struct {
 	UpdatedAt            time.Time  `json:"updated_at"`
 }
 
-// CoordinatorGrant is an explicit operator grant for a task. Capabilities are
+// CoordinatorGrant is an explicit operator grant for a durable principal. Capabilities are
 // persisted as a normalized comma-separated list; only the coordinator
 // authority package interprets their values.
 type CoordinatorGrant struct {
@@ -43,6 +43,7 @@ type CoordinatorGrant struct {
 type CoordinatorAuditEvent struct {
 	ID             string    `json:"id"`
 	OccurredAt     time.Time `json:"occurred_at"`
+	PrincipalID    string    `json:"principal_id"`
 	ActorTaskID    string    `json:"actor_task_id"`
 	ActorSessionID string    `json:"actor_session_id"`
 	TargetTaskID   string    `json:"target_task_id"`

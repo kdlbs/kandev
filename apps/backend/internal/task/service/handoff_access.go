@@ -24,21 +24,31 @@ type taskLookup interface {
 	GetTask(ctx context.Context, id string) (*models.Task, error)
 }
 
-func (s *HandoffService) canReadForCaller(ctx context.Context, callerID, targetID string) (bool, error) {
+func (s *HandoffService) canReadForCaller(ctx context.Context, callerID, callerSessionID, targetID string) (bool, coordinator.Decision, error) {
 	ok, err := canReadDocuments(ctx, repoTaskLookupAdapter{r: s.tasks}, blockerLookupAdapter{repo: s.blockers}, callerID, targetID)
 	if err != nil || ok || s.coordinatorAuthority == nil {
-		return ok, err
+		return ok, coordinator.Decision{}, err
 	}
 	caller, err := s.tasks.GetTask(ctx, callerID)
 	if err != nil {
-		return false, err
+		return false, coordinator.Decision{}, err
 	}
 	target, err := s.tasks.GetTask(ctx, targetID)
 	if err != nil {
-		return false, err
+		return false, coordinator.Decision{}, err
 	}
-	decision, err := s.coordinatorAuthority.Authorize(ctx, coordinator.Request{ActorTask: caller, TargetTask: target, Action: "inspect_task_documents", Capability: coordinator.CapabilityInspect})
-	return decision.Allowed, err
+	decision, err := s.coordinatorAuthority.Authorize(ctx, coordinator.Request{ActorTask: caller, TargetTask: target, ActorSessionID: callerSessionID, Action: "inspect_task_documents", Capability: coordinator.CapabilityInspect})
+	if err != nil {
+		return false, coordinator.Decision{}, nil
+	}
+	return decision.Allowed, decision, err
+}
+
+func (s *HandoffService) finishCoordinatorRead(ctx context.Context, decision coordinator.Decision, operationErr error) error {
+	if !decision.Allowed || decision.Basis != coordinator.BasisGrant || s.coordinatorAuthority == nil {
+		return nil
+	}
+	return s.coordinatorAuthority.Finish(ctx, decision, operationErr)
 }
 
 // blockerLookup is the minimal repository surface canReadDocuments

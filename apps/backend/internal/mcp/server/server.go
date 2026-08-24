@@ -1129,7 +1129,7 @@ func (s *Server) registerKanbanTools() {
 			mcp.WithString("delivery_mode",
 				mcp.Enum("queued", "interrupt"),
 				mcp.DefaultString("queued"),
-				mcp.Description(`How to deliver this message if the target is currently running/starting. "queued" (default): wait for the current turn to finish, like any other peer message. "interrupt": cancel the target's current turn now and deliver this message immediately instead — only allowed when you are the target task's direct parent; requesting "interrupt" as a non-parent is rejected with an error rather than silently queued.`),
+				mcp.Description(`How to deliver this message if the target is currently running/starting. "queued" (default): wait for the current turn to finish, like any other peer message. "interrupt": cancel the target's current turn now and deliver this message immediately instead. It is allowed when you are the target task's direct parent or a task explicitly granted coordinator authority over the target's scope; other requests are rejected rather than silently queued.`),
 			),
 			mcp.WithString("reply_to_question_id", mcp.Description("Optional question ID from an autopilot child. When set, the direct parent answer is recorded against that pending question and the delivery is idempotent.")),
 		),
@@ -1137,7 +1137,7 @@ func (s *Server) registerKanbanTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("stop_task_kandev",
-			mcp.WithDescription(`Stop all live sessions on a direct child task. Only its direct parent may call this halt-only tool; self, sibling, parent, grandparent, unrelated, and cross-workspace requests fail. It does not send a prompt or start a replacement turn; use message_task_kandev with delivery_mode="interrupt" to stop and steer. Accepted sessions become CANCELLED and teardown runs asynchronously; an eligible active task moves to REVIEW. If nothing is running, returns status="not_running" without changing state. Worktrees, commits, records, descendants, and queued messages are preserved. CANCELLED sessions cannot be resumed; use spawn_session_kandev with a new prompt to restart in the same workspace.`),
+			mcp.WithDescription(`Stop all live sessions on a direct child or granted target. Only its direct parent or a task explicitly granted coordinator authority over the target's scope may call this halt-only tool. It does not send a prompt or start a replacement turn; use message_task_kandev with delivery_mode="interrupt" to stop and steer. Accepted sessions become CANCELLED; teardown runs asynchronously and an eligible active task moves to REVIEW. If nothing is running, returns status="not_running". Worktrees, commits, records, descendants, and queued messages are preserved. CANCELLED sessions cannot be resumed; use spawn_session_kandev to restart.`),
 			mcp.WithReadOnlyHintAnnotation(false),
 			mcp.WithDestructiveHintAnnotation(true),
 			mcp.WithIdempotentHintAnnotation(true),
@@ -1372,7 +1372,7 @@ func (s *Server) registerAddBranchToTaskTool() {
 func (s *Server) registerAddWorkspaceSourcesTool() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("add_workspace_sources_kandev",
-			mcp.WithDescription("Attach repository and folder workspace sources to an idle task. A task may update itself or its same-workspace direct child. Exact retries are idempotent."),
+			mcp.WithDescription("Attach repository and folder workspace sources to an idle task. A task may update itself, its same-workspace direct child, or a target within an explicitly granted coordinator scope. Exact retries are idempotent."),
 			mcp.WithString(mcpKeyTaskID, mcp.Description("Task to update. Defaults to the current task.")),
 			mcp.WithReadOnlyHintAnnotation(false),
 			mcp.WithDestructiveHintAnnotation(false),

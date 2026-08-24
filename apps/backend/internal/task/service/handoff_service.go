@@ -491,22 +491,34 @@ func (s *HandoffService) attachSequentialBlocker(ctx context.Context, taskID, pa
 // The un-gated ListRelated remains for trusted internal callers (e.g.
 // GetTaskContext renders the context panel for a task the user already owns).
 func (s *HandoffService) ListRelatedForCaller(ctx context.Context, callerTaskID, targetTaskID string) (*RelatedTasks, error) {
+	return s.ListRelatedForCallerSession(ctx, callerTaskID, "", targetTaskID)
+}
+
+// ListRelatedForCallerSession is the agent-facing variant that preserves the
+// server-authored session binding required by durable coordinator principals.
+func (s *HandoffService) ListRelatedForCallerSession(ctx context.Context, callerTaskID, callerSessionID, targetTaskID string) (*RelatedTasks, error) {
 	if targetTaskID == "" {
 		return nil, ErrDocumentTaskRequired
 	}
+	decision := coordinator.Decision{}
 	// Any target other than the caller itself must pass the read guard. An
 	// empty caller has no identity to authorize against, so canReadDocuments
 	// denies it (rather than silently delegating to the ungated ListRelated).
 	if callerTaskID != targetTaskID {
-		ok, err := s.canReadForCaller(ctx, callerTaskID, targetTaskID)
+		ok, authorized, err := s.canReadForCaller(ctx, callerTaskID, callerSessionID, targetTaskID)
 		if err != nil {
 			return nil, err
 		}
 		if !ok {
 			return nil, ErrAccessDenied
 		}
+		decision = authorized
 	}
-	return s.ListRelated(ctx, targetTaskID)
+	related, err := s.ListRelated(ctx, targetTaskID)
+	if finishErr := s.finishCoordinatorRead(ctx, decision, err); finishErr != nil {
+		return nil, finishErr
+	}
+	return related, err
 }
 
 // ListRelated returns the parent, children, siblings, blockers, and
@@ -575,29 +587,41 @@ func (s *HandoffService) ListRelated(ctx context.Context, taskID string) (*Relat
 // the read access rule for currentTaskID. Returns ErrAccessDenied when
 // the rule fails.
 func (s *HandoffService) GetDocumentForCaller(ctx context.Context, currentTaskID, targetTaskID, key string) (*models.TaskDocument, error) {
+	return s.GetDocumentForCallerSession(ctx, currentTaskID, "", targetTaskID, key)
+}
+
+func (s *HandoffService) GetDocumentForCallerSession(ctx context.Context, currentTaskID, callerSessionID, targetTaskID, key string) (*models.TaskDocument, error) {
 	if key == "" {
 		return nil, ErrDocumentKeyRequired
 	}
 	if targetTaskID == "" {
 		return nil, ErrDocumentTaskRequired
 	}
-	ok, err := s.canReadForCaller(ctx, currentTaskID, targetTaskID)
+	ok, decision, err := s.canReadForCaller(ctx, currentTaskID, callerSessionID, targetTaskID)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
 		return nil, ErrAccessDenied
 	}
-	return s.docs.GetDocument(ctx, targetTaskID, key)
+	document, err := s.docs.GetDocument(ctx, targetTaskID, key)
+	if finishErr := s.finishCoordinatorRead(ctx, decision, err); finishErr != nil {
+		return nil, finishErr
+	}
+	return document, err
 }
 
 // ListDocumentsForCaller returns the document HEADs (no content) for
 // targetTaskID after the read-access guard.
 func (s *HandoffService) ListDocumentsForCaller(ctx context.Context, currentTaskID, targetTaskID string) ([]*models.TaskDocument, error) {
+	return s.ListDocumentsForCallerSession(ctx, currentTaskID, "", targetTaskID)
+}
+
+func (s *HandoffService) ListDocumentsForCallerSession(ctx context.Context, currentTaskID, callerSessionID, targetTaskID string) ([]*models.TaskDocument, error) {
 	if targetTaskID == "" {
 		return nil, ErrDocumentTaskRequired
 	}
-	ok, err := s.canReadForCaller(ctx, currentTaskID, targetTaskID)
+	ok, decision, err := s.canReadForCaller(ctx, currentTaskID, callerSessionID, targetTaskID)
 	if err != nil {
 		return nil, err
 	}
@@ -606,6 +630,7 @@ func (s *HandoffService) ListDocumentsForCaller(ctx context.Context, currentTask
 	}
 	docs, err := s.docs.ListDocuments(ctx, targetTaskID)
 	if err != nil {
+		_ = s.finishCoordinatorRead(ctx, decision, err)
 		return nil, err
 	}
 	// Strip Content from the projection so callers cannot accidentally
@@ -616,6 +641,9 @@ func (s *HandoffService) ListDocumentsForCaller(ctx context.Context, currentTask
 		copy := *d
 		copy.Content = ""
 		out = append(out, &copy)
+	}
+	if err := s.finishCoordinatorRead(ctx, decision, nil); err != nil {
+		return nil, err
 	}
 	return out, nil
 }

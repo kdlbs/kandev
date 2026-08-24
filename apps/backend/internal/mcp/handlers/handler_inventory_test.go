@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepository "github.com/kandev/kandev/internal/task/repository"
@@ -76,6 +78,39 @@ func TestHandleAddWorkspaceSourcesDirectParentAuthorizesAndAudits(t *testing.T) 
 	require.Equal(t, int64(1), fields["requested_source_count"])
 	require.Equal(t, true, fields["durable_state_changed"])
 	require.NotContains(t, fmt.Sprint(fields), folder)
+}
+
+func TestHandleAddWorkspaceSourcesCoordinatorGrantAuthorizesUnrelatedTargetAndResolvesAudit(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, caller, _ := newWorkspaceSourceAuthorizationFixture(t)
+	target := createWorkspaceSourceAuthorizationTask(t, svc, caller.WorkspaceID, "Unrelated target", "")
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{ID: "caller-session", TaskID: caller.ID}))
+	now := time.Now().UTC()
+	principal := &models.WorkspaceAgentPrincipal{
+		ID: "principal-1", WorkspaceID: caller.WorkspaceID, PluginInstallationID: "plugin-1", LogicalKey: "coordinator",
+		BackingTaskID: caller.ID, BackingSessionID: "caller-session", CreatedAt: now,
+	}
+	require.NoError(t, repo.CreateWorkspaceAgentPrincipal(ctx, principal))
+	require.NoError(t, repo.CreateCoordinatorGrant(ctx, &models.CoordinatorGrant{
+		ID: "grant-1", PrincipalID: principal.ID, WorkspaceID: caller.WorkspaceID,
+		ScopeKind: coordinator.ScopeWorkspace, ScopeID: caller.WorkspaceID, Capabilities: "orchestrate", GrantedAt: now,
+	}))
+	h := &Handlers{taskSvc: svc, sessionRepo: repo, logger: testLogger(t).WithFields()}
+	h.SetCoordinatorAuthority(coordinator.New(repo, func() bool { return true }))
+
+	response, err := h.handleAddWorkspaceSources(ctx, makeWSMessage(t, ws.ActionMCPAddWorkspaceSources, map[string]interface{}{
+		"task_id": target.ID, "caller_task_id": caller.ID, "caller_session_id": "caller-session",
+		"sources": []interface{}{map[string]interface{}{"kind": "folder", "local_path": t.TempDir(), "display_name": "docs"}},
+	}))
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, response.Type)
+
+	events, err := repo.ListCoordinatorAuditEvents(ctx, caller.WorkspaceID, caller.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	require.Equal(t, principal.ID, events[0].PrincipalID)
+	require.Equal(t, "caller-session", events[0].ActorSessionID)
+	require.Equal(t, "ok", events[0].Result)
 }
 
 func TestHandleAddWorkspaceSourcesRejectsUnrelatedAndMismatchedCallers(t *testing.T) {

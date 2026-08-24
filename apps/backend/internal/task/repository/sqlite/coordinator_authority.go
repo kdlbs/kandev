@@ -30,7 +30,7 @@ func (r *Repository) CreateWorkspaceAgentPrincipal(ctx context.Context, principa
 	}
 	principal.UpdatedAt = principal.CreatedAt
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`INSERT INTO workspace_agent_principals (id, workspace_id, plugin_installation_id, logical_key, backing_task_id, backing_session_id, revoked_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`), principal.ID, principal.WorkspaceID, principal.PluginInstallationID, principal.LogicalKey, principal.BackingTaskID, principal.BackingSessionID, principal.RevokedAt, principal.CreatedAt, principal.UpdatedAt)
-	if isPrincipalContextUniqueViolation(err) {
+	if isPrincipalConflictViolation(err) {
 		return repoerrors.ErrWorkspaceAgentPrincipalConflict
 	}
 	return err
@@ -78,6 +78,9 @@ func (r *Repository) GetActiveWorkspaceAgentPrincipalForTask(ctx context.Context
 
 func (r *Repository) RebindWorkspaceAgentPrincipal(ctx context.Context, id, taskID, sessionID string, updatedAt time.Time) error {
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`UPDATE workspace_agent_principals SET backing_task_id = ?, backing_session_id = ?, updated_at = ? WHERE id = ? AND revoked_at IS NULL`), taskID, sessionID, updatedAt, id)
+	if isPrincipalConflictViolation(err) {
+		return repoerrors.ErrWorkspaceAgentPrincipalConflict
+	}
 	if err != nil {
 		return err
 	}
@@ -191,10 +194,10 @@ func (r *Repository) CreateCoordinatorAuditEvent(ctx context.Context, event *mod
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_coordinator_audit_events (
-			id, occurred_at, actor_task_id, actor_session_id, target_task_id, workspace_id,
+			id, occurred_at, principal_id, actor_task_id, actor_session_id, target_task_id, workspace_id,
 			action, capability, decision, deny_reason, grant_id, result, detail
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), event.ID, event.OccurredAt, event.ActorTaskID, event.ActorSessionID, event.TargetTaskID,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), event.ID, event.OccurredAt, event.PrincipalID, event.ActorTaskID, event.ActorSessionID, event.TargetTaskID,
 		event.WorkspaceID, event.Action, event.Capability, event.Decision, event.DenyReason,
 		event.GrantID, event.Result, event.Detail); err != nil {
 		return err
@@ -235,7 +238,7 @@ func (r *Repository) FinishCoordinatorAuditEvent(ctx context.Context, id, result
 }
 
 func (r *Repository) ListCoordinatorAuditEvents(ctx context.Context, workspaceID, taskID string, limit int) ([]*models.CoordinatorAuditEvent, error) {
-	query := `SELECT id, occurred_at, actor_task_id, actor_session_id, target_task_id, workspace_id, action, capability, decision, deny_reason, grant_id, result, detail FROM task_coordinator_audit_events WHERE workspace_id = ?`
+	query := `SELECT id, occurred_at, principal_id, actor_task_id, actor_session_id, target_task_id, workspace_id, action, capability, decision, deny_reason, grant_id, result, detail FROM task_coordinator_audit_events WHERE workspace_id = ?`
 	args := []interface{}{workspaceID}
 	if taskID != "" {
 		query += ` AND (actor_task_id = ? OR target_task_id = ?)`
@@ -254,7 +257,7 @@ func (r *Repository) ListCoordinatorAuditEvents(ctx context.Context, workspaceID
 	events := make([]*models.CoordinatorAuditEvent, 0)
 	for rows.Next() {
 		event := &models.CoordinatorAuditEvent{}
-		if err := rows.Scan(&event.ID, &event.OccurredAt, &event.ActorTaskID, &event.ActorSessionID, &event.TargetTaskID, &event.WorkspaceID, &event.Action, &event.Capability, &event.Decision, &event.DenyReason, &event.GrantID, &event.Result, &event.Detail); err != nil {
+		if err := rows.Scan(&event.ID, &event.OccurredAt, &event.PrincipalID, &event.ActorTaskID, &event.ActorSessionID, &event.TargetTaskID, &event.WorkspaceID, &event.Action, &event.Capability, &event.Decision, &event.DenyReason, &event.GrantID, &event.Result, &event.Detail); err != nil {
 			return nil, err
 		}
 		events = append(events, event)

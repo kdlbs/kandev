@@ -49,6 +49,10 @@ actors holding an active grant, so an ordinary task's denial produces no row
 and audit volume and behavior are unchanged. Legacy task-bound grant rows
 (`principal_id = ''`) and null-context principals
 (`plugin_installation_id = ''`) are excluded from resolution and fail closed.
+Every audit records the durable principal id together with the concrete actor
+task and server-authored current session. Active backing-task and
+backing-session uniqueness prevents ambiguous principal resolution, while
+principal grants remain independent of replaceable backing-task rows.
 
 This ADR extends, and does not revoke, ADR 2026-08-19: direct parent remains
 the default, grants are the declared operator-approved exception.

@@ -5,9 +5,49 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/kandev/kandev/internal/coordinator"
 	orchmodels "github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+type handoffCoordinatorStore struct {
+	principal *models.WorkspaceAgentPrincipal
+	grants    []*models.CoordinatorGrant
+	audits    []*models.CoordinatorAuditEvent
+}
+
+func (s *handoffCoordinatorStore) GetActiveWorkspaceAgentPrincipalForTask(_ context.Context, workspaceID, taskID string) (*models.WorkspaceAgentPrincipal, error) {
+	if s.principal != nil && s.principal.WorkspaceID == workspaceID && s.principal.BackingTaskID == taskID && s.principal.RevokedAt == nil {
+		return s.principal, nil
+	}
+	return nil, nil
+}
+
+func (s *handoffCoordinatorStore) ListActiveWorkspaceAgentPrincipalGrants(_ context.Context, principalID, workspaceID string) ([]*models.CoordinatorGrant, error) {
+	var active []*models.CoordinatorGrant
+	for _, grant := range s.grants {
+		if grant.PrincipalID == principalID && grant.WorkspaceID == workspaceID && grant.RevokedAt == nil {
+			active = append(active, grant)
+		}
+	}
+	return active, nil
+}
+
+func (s *handoffCoordinatorStore) CreateCoordinatorAuditEvent(_ context.Context, event *models.CoordinatorAuditEvent) error {
+	s.audits = append(s.audits, event)
+	return nil
+}
+
+func (s *handoffCoordinatorStore) FinishCoordinatorAuditEvent(_ context.Context, id, result, detail string) error {
+	for _, event := range s.audits {
+		if event.ID == id {
+			event.Result = result
+			event.Detail = detail
+		}
+	}
+	return nil
+}
 
 // setDescription and setState mutate a task the fake repo already holds so a
 // test can model a CREATED sibling (no session) that carries dependency
@@ -153,6 +193,33 @@ func TestListRelatedForCaller_GatesUnrelatedAndCrossWorkspace(t *testing.T) {
 	// An empty caller has no identity to authorize a non-self target.
 	if _, err := svc.ListRelatedForCaller(context.Background(), "", "sibling"); !errors.Is(err, ErrAccessDenied) {
 		t.Errorf("empty caller should be denied for a non-self target, got %v", err)
+	}
+}
+
+func TestListRelatedForCallerSession_InspectGrantUsesCurrentBindingAndResolvesAudit(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("caller", "", "ws-1")
+	tasks.addTask("unrelated", "", "ws-1")
+	store := &handoffCoordinatorStore{
+		principal: &models.WorkspaceAgentPrincipal{
+			ID: "principal-1", WorkspaceID: "ws-1", PluginInstallationID: "plugin-1", LogicalKey: "coordinator", BackingTaskID: "caller", BackingSessionID: "caller-session",
+		},
+		grants: []*models.CoordinatorGrant{{
+			ID: "grant-1", PrincipalID: "principal-1", WorkspaceID: "ws-1",
+			ScopeKind: coordinator.ScopeWorkspace, ScopeID: "ws-1", Capabilities: "inspect",
+		}},
+	}
+	svc := newCascadeService(t, tasks, newCascadeWSGroupRepo())
+	svc.SetCoordinatorAuthority(coordinator.New(store, func() bool { return true }))
+
+	if _, err := svc.ListRelatedForCallerSession(context.Background(), "caller", "stale-session", "unrelated"); !errors.Is(err, ErrAccessDenied) {
+		t.Fatalf("stale session error = %v, want ErrAccessDenied", err)
+	}
+	if _, err := svc.ListRelatedForCallerSession(context.Background(), "caller", "caller-session", "unrelated"); err != nil {
+		t.Fatalf("current session inspect: %v", err)
+	}
+	if len(store.audits) != 1 || store.audits[0].Result != "ok" || store.audits[0].PrincipalID != "principal-1" || store.audits[0].ActorSessionID != "caller-session" {
+		t.Fatalf("audits = %#v, want one resolved principal/session audit", store.audits)
 	}
 }
 
