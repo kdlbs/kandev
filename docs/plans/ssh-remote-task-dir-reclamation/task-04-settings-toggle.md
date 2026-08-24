@@ -5,12 +5,12 @@ status: done
 wave: 3
 depends_on: ["02-profile-opt-in"]
 plan: "plan.md"
-requirements: "../../specs/ssh-executor/requirements/remote-task-directory-reclamation.md"
+requirements: "../../specs/executors/requirements/remote-task-directory-reclamation.md"
 acceptance_criteria:
   - AC-SSH-TASKDIR-RECLAMATION-006.1
   - AC-SSH-TASKDIR-RECLAMATION-006.4
   - AC-SSH-TASKDIR-RECLAMATION-001.4
-system_design: "../../specs/ssh-executor/system-design/remote-task-directory-reclamation.md"
+system_design: "../../specs/executors/system-design/remote-task-directory-reclamation.md"
 ---
 
 # Task 04: SSH profile reclamation settings toggle

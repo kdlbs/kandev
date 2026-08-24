@@ -5,11 +5,11 @@ status: done
 wave: 3
 depends_on: ["03-cleanup-job-phase"]
 plan: "plan.md"
-requirements: "../../specs/ssh-executor/requirements/remote-task-directory-reclamation.md"
+requirements: "../../specs/executors/requirements/remote-task-directory-reclamation.md"
 acceptance_criteria:
   - AC-SSH-TASKDIR-RECLAMATION-006.1
   - AC-SSH-TASKDIR-RECLAMATION-004.1
-system_design: "../../specs/ssh-executor/system-design/remote-task-directory-reclamation.md"
+system_design: "../../specs/executors/system-design/remote-task-directory-reclamation.md"
 ---
 
 # Task 05: Reclamation ADR and shipped-behavior documentation
@@ -35,7 +35,7 @@ that describes shipped user-visible behavior. The `AGENTS.md` correction and the
 
 ## Exclusions
 
-- `apps/backend/AGENTS.md` and `docs/specs/ssh-executor/spec.md` are corrected as
+- `apps/backend/AGENTS.md` and `docs/specs/executors/system-design/ssh-executor.md` are corrected as
   part of the design package, not here.
 
 ## Implementation acceptance conditions

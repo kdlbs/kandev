@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/port-collision-safety/spec.md"
+spec: "../../specs/executors/requirements/port-collision-safety.md"
 ---
 
 # Task 05: Cross-platform address-in-use handling

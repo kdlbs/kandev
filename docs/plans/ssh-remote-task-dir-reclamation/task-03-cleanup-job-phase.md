@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-reclaim-probe-and-removal", "02-profile-opt-in"]
 plan: "plan.md"
-requirements: "../../specs/ssh-executor/requirements/remote-task-directory-reclamation.md"
+requirements: "../../specs/executors/requirements/remote-task-directory-reclamation.md"
 acceptance_criteria:
   - AC-SSH-TASKDIR-RECLAMATION-001.1
   - AC-SSH-TASKDIR-RECLAMATION-001.3
@@ -22,7 +22,7 @@ acceptance_criteria:
   - AC-SSH-TASKDIR-RECLAMATION-005.4
   - AC-SSH-TASKDIR-RECLAMATION-007.1
   - AC-SSH-TASKDIR-RECLAMATION-007.2
-system_design: "../../specs/ssh-executor/system-design/remote-task-directory-reclamation.md"
+system_design: "../../specs/executors/system-design/remote-task-directory-reclamation.md"
 ---
 
 # Task 03: Reclamation phase in the durable task-resource cleanup job

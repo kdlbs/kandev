@@ -51,6 +51,6 @@ Rejected because absence is not evidence of success and caused false success ind
 
 ## References
 
-- [ACP shell command output spec](../specs/ui/acp-shell-command-output.md)
+- [ACP shell command output spec](../specs/ui/requirements/acp-shell-command-output.md)
 - [Implementation plan](../plans/acp-shell-command-output/plan.md)
 - [ADR-0034: Agent Client Protocol Codex ACP Bridge](0034-agentclientprotocol-codex-acp.md)

@@ -9,7 +9,7 @@ depends_on:
   - "04-backend-catalogs"
   - "05-high-traffic-review"
 plan: "plan.md"
-spec: "../../specs/platform/traditional-chinese-locales.md"
+spec: "../../specs/platform/requirements/traditional-chinese-locales.md"
 ---
 
 # Task 06: Docs update and locale switcher E2E
@@ -22,7 +22,7 @@ reload).
 
 ## Acceptance
 
-- `docs/i18n.md` and `docs/specs/platform/i18n.md` list `zh-tw` and `zh-hk` as
+- `docs/i18n.md` and `docs/specs/platform/requirements/i18n.md` list `zh-tw` and `zh-hk` as
   shipped human locales (and switcher endonyms).
 - E2E covers selecting each Traditional locale, asserting
   `document.documentElement.lang`, and at least one stable Traditional UI
@@ -43,8 +43,8 @@ cd apps/web && pnpm e2e:run tests/settings/locale-switcher-zh-hant.spec.ts
 ## Files likely touched
 
 - `docs/i18n.md`
-- `docs/specs/platform/i18n.md`
-- `docs/specs/platform/traditional-chinese-locales.md` (status)
+- `docs/specs/platform/requirements/i18n.md`
+- `docs/specs/platform/requirements/traditional-chinese-locales.md` (status)
 - `apps/web/e2e/tests/settings/*locale*` (new or extended)
 - Possibly settings appearance component test if pure unit coverage is added
 

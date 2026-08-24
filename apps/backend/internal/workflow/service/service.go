@@ -424,6 +424,33 @@ func (s *Service) ResolveStartStep(ctx context.Context, workflowID string) (*mod
 	return s.ResolveFirstStep(ctx, workflowID)
 }
 
+// ResolveAutoStartStep resolves which step a task should be created in when the
+// creator asked to start an agent immediately: the first step by position whose
+// on_enter carries auto_start_agent.
+//
+// `is_start_step` and `auto_start_agent` are independent settings — the first
+// says where new tasks are parked, the second says which steps run agents — so
+// a task that is starting now belongs in the first step that actually runs
+// agents, not in the parking column. They coincide in every built-in template
+// (In Progress is both), which is why routing an agent start through
+// ResolveStartStep looked correct until someone moved the start step onto their
+// backlog and watched the agent start there anyway.
+//
+// Fallback chain: first auto_start_agent step by position → ResolveStartStep
+// (is_start_step → first step by position), so a workflow with no automated
+// step behaves exactly as it did before.
+func (s *Service) ResolveAutoStartStep(ctx context.Context, workflowID string) (*models.WorkflowStep, error) {
+	steps, err := s.repo.ListStepsByWorkflow(ctx, workflowID)
+	if err != nil {
+		s.logger.Error("failed to list steps for auto-start step resolution", zap.String("workflow_id", workflowID), zap.Error(err))
+		return nil, err
+	}
+	if step := models.SelectAutoStartStep(steps); step != nil {
+		return step, nil
+	}
+	return s.ResolveStartStep(ctx, workflowID)
+}
+
 // ResolveFirstStep always returns the first step by position, ignoring is_start_step.
 func (s *Service) ResolveFirstStep(ctx context.Context, workflowID string) (*models.WorkflowStep, error) {
 	steps, err := s.repo.ListStepsByWorkflow(ctx, workflowID)

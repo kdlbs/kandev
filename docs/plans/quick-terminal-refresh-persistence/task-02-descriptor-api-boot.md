@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-persist-descriptors"]
 plan: "plan.md"
-spec: "../../specs/quick-terminal/spec.md"
+spec: "../../specs/ui/requirements/quick-terminal.md"
 ---
 
 # Task 02: Expose descriptor API and boot state

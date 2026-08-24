@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/workspace-base-branch-propagation/spec.md
+spec: docs/specs/workspaces/requirements/workspace-base-branch-propagation.md
 created: 2026-08-05
 status: complete
 ---

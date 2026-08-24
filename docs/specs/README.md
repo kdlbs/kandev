@@ -17,13 +17,12 @@ docs/specs/
 ```
 
 Read the [specification guide](guide/README.md) before you create or change a
-specification. Use the files in [templates](templates/) for new documents.
+specification. Use the files in [templates](templates) for new documents.
 
-The existing [feature specification index](INDEX.md) remains the migration
-catalog for legacy documents. A legacy document remains authoritative until
-its system index names a replacement.
+The [specification catalog](INDEX.md) is the entry point for the completed
+system-oriented layout. Each system README names its authoritative requirements
+and system designs.
 
-Plans and work orders are in [`docs/plans`](../plans/). Architecture decisions
-are in [`docs/decisions`](../decisions/). Public user documentation is in
-[`docs/public`](../public/).
-
+Plans and work orders are in [`docs/plans`](../plans). Architecture decisions
+are in [`docs/decisions`](../decisions). Public user documentation is in
+[`docs/public`](../public).

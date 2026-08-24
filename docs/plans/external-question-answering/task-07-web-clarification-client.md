@@ -5,7 +5,7 @@ status: done
 wave: 6
 depends_on: ["04-rest-endpoints"]
 plan: "plan.md"
-spec: "../../specs/external-question-answering/spec.md"
+spec: "../../specs/integrations/requirements/external-question-answering.md"
 ---
 
 # Task 07: Web clarification client sends credentials and handles a lost claim

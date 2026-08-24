@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["03-read-services"]
 plan: "plan.md"
-spec: "../../specs/azure-devops-integration/spec.md"
+spec: "../../specs/integrations/requirements/azure-devops-integration.md"
 ---
 
 # Task 04: Task PR Persistence And Backend Wiring

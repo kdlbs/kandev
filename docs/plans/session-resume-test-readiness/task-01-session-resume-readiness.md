@@ -5,7 +5,7 @@ status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/agent-resume-runtime-recovery/spec.md"
+spec: "../../specs/agents/requirements/agent-resume-runtime-recovery.md"
 ---
 
 # Task 01: Harden session-resume readiness

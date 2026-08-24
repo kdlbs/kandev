@@ -5,8 +5,8 @@
 - Area: backend, security, protocol
 - Related: [0043 — Plugin host data API](0043-plugin-host-data-api.md),
   [Opt-in authentication](2026-07-24-opt-in-authentication.md),
-  [docs/specs/auth/spec.md](../specs/auth/spec.md),
-  [docs/specs/plugins/spec.md](../specs/plugins/spec.md)
+  [docs/specs/auth/requirements/auth.md](../specs/auth/requirements/auth.md),
+  [docs/specs/plugins/requirements/plugins.md](../specs/plugins/requirements/plugins.md)
 
 ## Context
 

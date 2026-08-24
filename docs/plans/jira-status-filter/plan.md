@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/jira-status-filter/spec.md
+spec: docs/specs/integrations/requirements/jira-status-filter.md
 created: 2026-07-03
 status: draft
 ---

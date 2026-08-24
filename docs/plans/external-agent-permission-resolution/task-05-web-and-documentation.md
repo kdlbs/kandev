@@ -5,7 +5,7 @@ status: complete
 wave: 4
 depends_on: ["03-authorized-permission-service"]
 plan: "plan.md"
-spec: "../../specs/agents/external-permission-resolution.md"
+spec: "../../specs/agents/requirements/external-permission-resolution.md"
 ---
 
 # Task 05: Web compatibility and documentation

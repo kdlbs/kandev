@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/task-prompt-transcript-visibility.md
+spec: docs/specs/ui/requirements/task-prompt-transcript-visibility.md
 created: 2026-08-22
 status: implemented
 ---

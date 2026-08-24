@@ -26,7 +26,7 @@ import (
 // marked terminal, and cannot see the task graph that decides directory
 // ownership. Removal is driven from the durable task-resource cleanup job
 // instead; see the system design at
-// docs/specs/ssh-executor/system-design/remote-task-directory-reclamation.md.
+// docs/specs/executors/system-design/remote-task-directory-reclamation.md.
 
 const (
 	// sshReclaimTimeout bounds one directory's probe-and-remove attempt. The

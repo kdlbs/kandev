@@ -207,6 +207,7 @@ type PRTaskResolver interface {
 type StartStepResolver interface {
 	ResolveStartStep(ctx context.Context, workflowID string) (string, error)
 	ResolveFirstStep(ctx context.Context, workflowID string) (string, error)
+	ResolveAutoStartStep(ctx context.Context, workflowID string) (string, error)
 }
 
 // StepHistoryRecorder persists an ADR 0015 session-step transition audit

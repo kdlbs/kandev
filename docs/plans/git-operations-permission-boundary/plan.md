@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/agents/git-operations-permission-boundary.md
+spec: docs/specs/agents/requirements/git-operations-permission-boundary.md
 created: 2026-08-23
 status: implemented
 ---

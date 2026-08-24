@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/improve-kandev/spec.md"
+spec: "../../specs/workspaces/requirements/improve-kandev.md"
 ---
 
 # Task 01: Normalize standard task-create workflow context
@@ -55,7 +55,7 @@ Sequential.
 ## Inputs
 
 - Hidden-workflow requirements and task-detail regression scenario in
-  `docs/specs/improve-kandev/spec.md`.
+  `docs/specs/workspaces/requirements/improve-kandev.md`.
 - Frontend approach in `plan.md`.
 - Existing visible fallback in
   `apps/web/components/task-create-dialog-defaults.ts`.

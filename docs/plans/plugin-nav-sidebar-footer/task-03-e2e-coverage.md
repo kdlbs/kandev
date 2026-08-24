@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-contract-and-mapping"]
 plan: "plan.md"
-spec: "../../specs/plugin-nav-sidebar-footer/spec.md"
+spec: "../../specs/plugins/requirements/plugin-nav-sidebar-footer.md"
 ---
 
 # Task 03: E2E coverage

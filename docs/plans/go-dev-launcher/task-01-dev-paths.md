@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/go-dev-launcher/spec.md"
+spec: "../../specs/platform/requirements/go-dev-launcher.md"
 ---
 
 # Task 01: Dev paths, repo root, and dev backend env

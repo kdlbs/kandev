@@ -22,7 +22,7 @@ import { settingsActionClassName } from "@/components/settings/settings-control"
 
 /**
  * Operator UI to browse, install, enable, disable, uninstall, and update kandev
- * plugins (docs/specs/plugins/marketplace.md). Gated on the `plugins` feature
+ * plugins (docs/specs/plugins/requirements/marketplace.md). Gated on the `plugins` feature
  * flag by the page-level default export.
  */
 export function PluginsSettings() {

@@ -33,7 +33,7 @@ type Props = {
 // RoleTierCard renders the per-role tier policy table on the workspace
 // routing settings page: the third of four precedence levels, below a
 // wake-reason policy and a per-agent override, above the workspace default.
-// See docs/specs/office-agent-tier-routing/spec.md.
+// See docs/specs/office/requirements/office-agent-tier-routing.md.
 export function RoleTierCard({ roles, config, value, onChange, disabled }: Props) {
   const { t } = useTranslation();
   const handleRowChange = (role: AgentRole, tier: Tier | typeof USE_WORKSPACE_DEFAULT) => {

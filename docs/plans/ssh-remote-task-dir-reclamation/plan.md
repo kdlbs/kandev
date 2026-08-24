@@ -1,6 +1,6 @@
 ---
-spec: docs/specs/ssh-executor/requirements/remote-task-directory-reclamation.md
-system_design: docs/specs/ssh-executor/system-design/remote-task-directory-reclamation.md
+spec: docs/specs/executors/requirements/remote-task-directory-reclamation.md
+system_design: docs/specs/executors/system-design/remote-task-directory-reclamation.md
 created: 2026-08-24
 status: done
 ---
@@ -80,7 +80,7 @@ ADR for the opt-in default and the cleanup-job placement;
 `docs/public/feature-status.md` SSH row updated to describe shipped behavior.
 
 `apps/backend/AGENTS.md` and the `Out of scope (v1)` item in
-`docs/specs/ssh-executor/spec.md` are corrected as part of this design package
+`docs/specs/executors/system-design/ssh-executor.md` is corrected as part of this design package
 rather than at ship time — the first is a present-tense factual error about
 today's code, and the second is the specification boundary this package moves.
 

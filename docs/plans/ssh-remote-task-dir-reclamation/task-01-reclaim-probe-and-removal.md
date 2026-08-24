@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-requirements: "../../specs/ssh-executor/requirements/remote-task-directory-reclamation.md"
+requirements: "../../specs/executors/requirements/remote-task-directory-reclamation.md"
 acceptance_criteria:
   - AC-SSH-TASKDIR-RECLAMATION-002.1
   - AC-SSH-TASKDIR-RECLAMATION-002.2
@@ -15,7 +15,7 @@ acceptance_criteria:
   - AC-SSH-TASKDIR-RECLAMATION-002.6
   - AC-SSH-TASKDIR-RECLAMATION-003.4
   - AC-SSH-TASKDIR-RECLAMATION-001.2
-system_design: "../../specs/ssh-executor/system-design/remote-task-directory-reclamation.md"
+system_design: "../../specs/executors/system-design/remote-task-directory-reclamation.md"
 ---
 
 # Task 01: SSH task-directory safety probe and guarded removal

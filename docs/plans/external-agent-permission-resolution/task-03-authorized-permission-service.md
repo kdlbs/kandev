@@ -5,7 +5,7 @@ status: completed
 wave: 3
 depends_on: ["01-live-permission-contract", "02-permission-audit-claim"]
 plan: "plan.md"
-spec: "../../specs/agents/external-permission-resolution.md"
+spec: "../../specs/agents/requirements/external-permission-resolution.md"
 ---
 
 # Task 03: Authorized permission service
