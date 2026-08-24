@@ -242,15 +242,17 @@ func (f *fakeBlockerRepo) ListDependentsForTasks(_ context.Context, blockerTaskI
 // fakeTaskRepo provides the minimal TaskRepository surface AttachWorkspacePolicy
 // uses. It supports GetTask + ListChildren so sibling lookup works.
 type fakeTaskRepo struct {
-	mu       sync.Mutex
-	tasks    map[string]*models.Task
-	children map[string][]string // parentID -> ordered child IDs
+	mu           sync.Mutex
+	tasks        map[string]*models.Task
+	children     map[string][]string // parentID -> ordered child IDs
+	getTaskCalls map[string]int
 }
 
 func newFakeTaskRepo() *fakeTaskRepo {
 	return &fakeTaskRepo{
-		tasks:    map[string]*models.Task{},
-		children: map[string][]string{},
+		tasks:        map[string]*models.Task{},
+		children:     map[string][]string{},
+		getTaskCalls: map[string]int{},
 	}
 }
 
@@ -266,7 +268,14 @@ func (f *fakeTaskRepo) addTask(id, parentID, ws string) {
 func (f *fakeTaskRepo) GetTask(_ context.Context, id string) (*models.Task, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.getTaskCalls[id]++
 	return f.tasks[id], nil
+}
+
+func (f *fakeTaskRepo) getTaskCallCount(id string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.getTaskCalls[id]
 }
 
 func (f *fakeTaskRepo) GetTasksByIDs(_ context.Context, ids []string) ([]*models.Task, error) {

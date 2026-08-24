@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	orchmodels "github.com/kandev/kandev/internal/office/models"
 )
 
 func TestListRelatedForRequest_AllowsCoordinatorCompactWorkspaceTreeRead(t *testing.T) {
@@ -125,5 +127,75 @@ func TestListRelatedForRequest_FiltersSensitiveFieldsPerRelatedNode(t *testing.T
 	}
 	if len(verbose.Task.DocumentKeys) != 1 || verbose.Task.DocumentKeys[0] != "spec" {
 		t.Fatalf("document keys = %v", verbose.Task.DocumentKeys)
+	}
+}
+
+func TestListRelatedForRequest_FiltersCrossWorkspaceRelationsAndCachesAuthorization(t *testing.T) {
+	ctx := context.Background()
+	tasks := newFakeTaskRepo()
+	tasks.addTask("caller", "", "workspace-a")
+	tasks.addTask("foreign-parent", "", "workspace-b")
+	tasks.addTask("target", "foreign-parent", "workspace-a")
+	tasks.addTask("same-child", "target", "workspace-a")
+	tasks.addTask("foreign-child", "target", "workspace-b")
+	tasks.addTask("same-sibling", "foreign-parent", "workspace-a")
+	tasks.addTask("foreign-sibling", "foreign-parent", "workspace-b")
+	tasks.addTask("same-blocker", "", "workspace-a")
+	tasks.addTask("foreign-blocker", "", "workspace-b")
+	tasks.addTask("same-blocked", "", "workspace-a")
+	tasks.addTask("foreign-blocked", "", "workspace-b")
+
+	blockers := &fakeBlockerRepo{}
+	for _, blocker := range []string{"same-blocker", "foreign-blocker"} {
+		if err := blockers.CreateTaskBlocker(ctx, &orchmodels.TaskBlocker{TaskID: "target", BlockerTaskID: blocker}); err != nil {
+			t.Fatalf("create target blocker %q: %v", blocker, err)
+		}
+	}
+	for _, blocked := range []string{"same-blocked", "foreign-blocked"} {
+		if err := blockers.CreateTaskBlocker(ctx, &orchmodels.TaskBlocker{TaskID: blocked, BlockerTaskID: "target"}); err != nil {
+			t.Fatalf("create blocked task %q: %v", blocked, err)
+		}
+	}
+
+	svc := newPhase4Service(t, tasks, blockers, newCascadeWSGroupRepo())
+	related, err := svc.ListRelatedForRequest(ctx, RelatedReadRequest{
+		CallerTaskID: "caller", TargetTaskID: "target", Scope: RelatedReadScopeWorkspaceTaskTree,
+	})
+	if err != nil {
+		t.Fatalf("list compact related tasks: %v", err)
+	}
+
+	if related.Parent != nil || related.Task.ParentID != "" {
+		t.Fatalf("foreign parent leaked: parent=%+v task.parent_id=%q", related.Parent, related.Task.ParentID)
+	}
+	assertRelatedTaskIDs(t, related.Children, "same-child")
+	assertRelatedTaskIDs(t, related.Siblings, "same-sibling")
+	assertRelatedTaskIDs(t, related.Blockers, "same-blocker")
+	assertRelatedTaskIDs(t, related.BlockedBy, "same-blocked")
+	for _, task := range relatedTaskPointers(related) {
+		if task != nil && task.WorkspaceID != "workspace-a" {
+			t.Fatalf("cross-workspace task projected: %+v", task)
+		}
+	}
+
+	for _, id := range []string{
+		"caller", "foreign-parent", "target", "same-child", "foreign-child", "same-sibling", "foreign-sibling",
+		"same-blocker", "foreign-blocker", "same-blocked", "foreign-blocked",
+	} {
+		if calls := tasks.getTaskCallCount(id); calls > 1 {
+			t.Errorf("GetTask(%q) called %d times, want at most once", id, calls)
+		}
+	}
+}
+
+func assertRelatedTaskIDs(t *testing.T, tasks []*RelatedTask, want ...string) {
+	t.Helper()
+	if len(tasks) != len(want) {
+		t.Fatalf("related task count = %d, want %d: %+v", len(tasks), len(want), tasks)
+	}
+	for i, task := range tasks {
+		if task.ID != want[i] {
+			t.Fatalf("related task[%d] = %q, want %q", i, task.ID, want[i])
+		}
 	}
 }

@@ -81,6 +81,63 @@ type blockerLookup interface {
 	BlockerTaskIDs(ctx context.Context, taskID string) ([]string, error)
 }
 
+// relatedReadCache memoizes a single related-task request's access graph. A
+// compact task tree can contain many nodes, but document authorization walks
+// ancestor chains from each one. Caching both task and blocker lookups keeps
+// those checks bounded to one repository load per task/edge root.
+type relatedReadCache struct {
+	tasks    taskLookup
+	blockers blockerLookup
+	task     map[string]cachedTask
+	blocker  map[string]cachedBlockers
+}
+
+type cachedTask struct {
+	task *models.Task
+	err  error
+}
+
+type cachedBlockers struct {
+	ids []string
+	err error
+}
+
+func newRelatedReadCache(tasks taskLookup, blockers blockerLookup) *relatedReadCache {
+	return &relatedReadCache{
+		tasks:    tasks,
+		blockers: blockers,
+		task:     make(map[string]cachedTask),
+		blocker:  make(map[string]cachedBlockers),
+	}
+}
+
+func (c *relatedReadCache) GetTask(ctx context.Context, id string) (*models.Task, error) {
+	if cached, ok := c.task[id]; ok {
+		return cached.task, cached.err
+	}
+	task, err := c.tasks.GetTask(ctx, id)
+	c.task[id] = cachedTask{task: task, err: err}
+	return task, err
+}
+
+func (c *relatedReadCache) remember(task *models.Task) {
+	if task != nil {
+		c.task[task.ID] = cachedTask{task: task}
+	}
+}
+
+func (c *relatedReadCache) BlockerTaskIDs(ctx context.Context, taskID string) ([]string, error) {
+	if c.blockers == nil {
+		return nil, nil
+	}
+	if cached, ok := c.blocker[taskID]; ok {
+		return cached.ids, cached.err
+	}
+	ids, err := c.blockers.BlockerTaskIDs(ctx, taskID)
+	c.blocker[taskID] = cachedBlockers{ids: ids, err: err}
+	return ids, err
+}
+
 // canReadDocuments returns true when currentTaskID may READ documents on
 // targetTaskID. Allowed cases (all require same workspace_id):
 //   - target == current

@@ -511,54 +511,59 @@ func (s *HandoffService) ListRelatedForRequest(ctx context.Context, req RelatedR
 	if req.TargetTaskID == "" {
 		return nil, ErrDocumentTaskRequired
 	}
-	if err := s.authorizeRelatedRead(ctx, req); err != nil {
-		return nil, err
-	}
-	related, err := s.listRelated(ctx, req.TargetTaskID, s.toRelatedCompact)
+	readCache := newRelatedReadCache(
+		repoTaskLookupAdapter{r: s.tasks},
+		blockerLookupAdapter{repo: s.blockers},
+	)
+	target, err := s.authorizeRelatedRead(ctx, req, readCache)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.enrichRelatedSensitiveFields(ctx, req.CallerTaskID, related, req.Verbose); err != nil {
+	related, err := s.listRelated(ctx, req.TargetTaskID, target.WorkspaceID, s.toRelatedCompact, readCache)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.enrichRelatedSensitiveFields(ctx, req.CallerTaskID, related, req.Verbose, readCache); err != nil {
 		return nil, err
 	}
 	return related, nil
 }
 
-func (s *HandoffService) authorizeRelatedRead(ctx context.Context, req RelatedReadRequest) error {
-	caller, err := s.tasks.GetTask(ctx, req.CallerTaskID)
+func (s *HandoffService) authorizeRelatedRead(ctx context.Context, req RelatedReadRequest, readCache *relatedReadCache) (*models.Task, error) {
+	caller, err := readCache.GetTask(ctx, req.CallerTaskID)
 	if err != nil {
 		if errors.Is(err, repository.ErrTaskNotFound) {
-			return relatedReadDenied(RelatedReadDenialTargetUnavailable, "caller or target task missing")
+			return nil, relatedReadDenied(RelatedReadDenialTargetUnavailable, "caller or target task missing")
 		}
-		return err
+		return nil, err
 	}
-	target, err := s.tasks.GetTask(ctx, req.TargetTaskID)
+	target, err := readCache.GetTask(ctx, req.TargetTaskID)
 	if err != nil {
 		if errors.Is(err, repository.ErrTaskNotFound) {
-			return relatedReadDenied(RelatedReadDenialTargetUnavailable, "caller or target task missing")
+			return nil, relatedReadDenied(RelatedReadDenialTargetUnavailable, "caller or target task missing")
 		}
-		return err
+		return nil, err
 	}
 	if caller == nil || target == nil {
-		return relatedReadDenied(RelatedReadDenialTargetUnavailable, "caller or target task missing")
+		return nil, relatedReadDenied(RelatedReadDenialTargetUnavailable, "caller or target task missing")
 	}
 	if caller.WorkspaceID != target.WorkspaceID {
-		return relatedReadDenied(RelatedReadDenialTargetUnavailable, "target belongs to another workspace")
+		return nil, relatedReadDenied(RelatedReadDenialTargetUnavailable, "target belongs to another workspace")
 	}
-	relationReadable, err := canReadDocuments(ctx, repoTaskLookupAdapter{r: s.tasks}, blockerLookupAdapter{repo: s.blockers}, req.CallerTaskID, req.TargetTaskID)
+	relationReadable, err := canReadDocuments(ctx, readCache, readCache, req.CallerTaskID, req.TargetTaskID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if req.Verbose && !relationReadable {
 		if req.Scope == RelatedReadScopeWorkspaceTaskTree {
-			return relatedReadDenied(RelatedReadDenialVerboseDocumentScopeNeeded, "workspace-tree scope cannot read verbose documents")
+			return nil, relatedReadDenied(RelatedReadDenialVerboseDocumentScopeNeeded, "workspace-tree scope cannot read verbose documents")
 		}
-		return relatedReadDenied(RelatedReadDenialScopeRequired, "target is not relation-readable")
+		return nil, relatedReadDenied(RelatedReadDenialScopeRequired, "target is not relation-readable")
 	}
 	if !relationReadable && req.Scope != RelatedReadScopeWorkspaceTaskTree {
-		return relatedReadDenied(RelatedReadDenialScopeRequired, "target is not relation-readable")
+		return nil, relatedReadDenied(RelatedReadDenialScopeRequired, "target is not relation-readable")
 	}
-	return nil
+	return target, nil
 }
 
 func relatedReadDenied(reason RelatedReadDenialReason, internalReason string) error {
@@ -570,16 +575,21 @@ func relatedReadDenied(reason RelatedReadDenialReason, internalReason string) er
 // itself plus every related task so an agent can shop for documents in
 // one call.
 func (s *HandoffService) ListRelated(ctx context.Context, taskID string) (*RelatedTasks, error) {
-	return s.listRelated(ctx, taskID, s.toRelated)
+	return s.listRelated(ctx, taskID, "", s.toRelated, nil)
 }
 
 type relatedTaskProjector func(context.Context, *models.Task) RelatedTask
 
-func (s *HandoffService) listRelated(ctx context.Context, taskID string, project relatedTaskProjector) (*RelatedTasks, error) {
+func (s *HandoffService) listRelated(
+	ctx context.Context,
+	taskID, workspaceID string,
+	project relatedTaskProjector,
+	readCache *relatedReadCache,
+) (*RelatedTasks, error) {
 	if taskID == "" {
 		return nil, ErrDocumentTaskRequired
 	}
-	self, err := s.tasks.GetTask(ctx, taskID)
+	self, err := s.relatedTask(ctx, taskID, readCache)
 	if err != nil {
 		return nil, err
 	}
@@ -588,7 +598,7 @@ func (s *HandoffService) listRelated(ctx context.Context, taskID string, project
 	}
 
 	out := &RelatedTasks{
-		Task:      project(ctx, self),
+		Task:      projectRelatedTask(ctx, self, workspaceID, project),
 		Children:  []*RelatedTask{},
 		Siblings:  []*RelatedTask{},
 		Blockers:  []*RelatedTask{},
@@ -596,9 +606,9 @@ func (s *HandoffService) listRelated(ctx context.Context, taskID string, project
 	}
 
 	if self.ParentID != "" {
-		parent, err := s.tasks.GetTask(ctx, self.ParentID)
-		if err == nil && parent != nil {
-			ref := project(ctx, parent)
+		parent, err := s.relatedTask(ctx, self.ParentID, readCache)
+		if err == nil && parent != nil && sameRelatedWorkspace(parent, workspaceID) {
+			ref := projectRelatedTask(ctx, parent, workspaceID, project)
 			out.Parent = &ref
 		}
 	}
@@ -607,13 +617,13 @@ func (s *HandoffService) listRelated(ctx context.Context, taskID string, project
 	if err != nil {
 		return nil, err
 	}
-	out.Children = s.toRelatedSlice(ctx, children, project)
+	out.Children = s.toRelatedSlice(ctx, children, workspaceID, project, readCache)
 
 	siblings, err := s.tasks.ListSiblings(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}
-	out.Siblings = s.toRelatedSlice(ctx, siblings, project)
+	out.Siblings = s.toRelatedSlice(ctx, siblings, workspaceID, project, readCache)
 
 	if s.blockers != nil {
 		bs, err := s.blockers.ListTaskBlockers(ctx, taskID)
@@ -622,11 +632,11 @@ func (s *HandoffService) listRelated(ctx context.Context, taskID string, project
 			for _, b := range bs {
 				ids = append(ids, b.BlockerTaskID)
 			}
-			out.Blockers = s.toRelatedByIDs(ctx, ids, project)
+			out.Blockers = s.toRelatedByIDs(ctx, ids, workspaceID, project, readCache)
 		}
 		bbIDs, err := s.blockers.ListTasksBlockedBy(ctx, taskID)
 		if err == nil {
-			out.BlockedBy = s.toRelatedByIDs(ctx, bbIDs, project)
+			out.BlockedBy = s.toRelatedByIDs(ctx, bbIDs, workspaceID, project, readCache)
 		}
 	}
 
@@ -744,34 +754,80 @@ func (s *HandoffService) toRelatedCompact(_ context.Context, t *models.Task) Rel
 	}
 }
 
-func (s *HandoffService) toRelatedSlice(ctx context.Context, tasks []*models.Task, project relatedTaskProjector) []*RelatedTask {
+func (s *HandoffService) relatedTask(ctx context.Context, taskID string, readCache *relatedReadCache) (*models.Task, error) {
+	if readCache != nil {
+		return readCache.GetTask(ctx, taskID)
+	}
+	return s.tasks.GetTask(ctx, taskID)
+}
+
+func sameRelatedWorkspace(task *models.Task, workspaceID string) bool {
+	return workspaceID == "" || task.WorkspaceID == workspaceID
+}
+
+func projectRelatedTask(ctx context.Context, task *models.Task, workspaceID string, project relatedTaskProjector) RelatedTask {
+	related := project(ctx, task)
+	if workspaceID != "" {
+		// The compact tree already exposes parent/child structure. Omitting
+		// parent_id here prevents a task with a cross-workspace parent edge
+		// from leaking that foreign ID through an otherwise safe projection.
+		related.ParentID = ""
+	}
+	return related
+}
+
+func (s *HandoffService) toRelatedSlice(
+	ctx context.Context,
+	tasks []*models.Task,
+	workspaceID string,
+	project relatedTaskProjector,
+	readCache *relatedReadCache,
+) []*RelatedTask {
 	out := make([]*RelatedTask, 0, len(tasks))
 	for _, t := range tasks {
-		rt := project(ctx, t)
-		out = append(out, &rt)
-	}
-	return out
-}
-
-func (s *HandoffService) toRelatedByIDs(ctx context.Context, ids []string, project relatedTaskProjector) []*RelatedTask {
-	out := make([]*RelatedTask, 0, len(ids))
-	for _, id := range ids {
-		t, err := s.tasks.GetTask(ctx, id)
-		if err != nil || t == nil {
+		if readCache != nil {
+			readCache.remember(t)
+		}
+		if !sameRelatedWorkspace(t, workspaceID) {
 			continue
 		}
-		rt := project(ctx, t)
+		rt := projectRelatedTask(ctx, t, workspaceID, project)
 		out = append(out, &rt)
 	}
 	return out
 }
 
-func (s *HandoffService) enrichRelatedSensitiveFields(ctx context.Context, callerTaskID string, related *RelatedTasks, verbose bool) error {
+func (s *HandoffService) toRelatedByIDs(
+	ctx context.Context,
+	ids []string,
+	workspaceID string,
+	project relatedTaskProjector,
+	readCache *relatedReadCache,
+) []*RelatedTask {
+	out := make([]*RelatedTask, 0, len(ids))
+	for _, id := range ids {
+		t, err := s.relatedTask(ctx, id, readCache)
+		if err != nil || t == nil || !sameRelatedWorkspace(t, workspaceID) {
+			continue
+		}
+		rt := projectRelatedTask(ctx, t, workspaceID, project)
+		out = append(out, &rt)
+	}
+	return out
+}
+
+func (s *HandoffService) enrichRelatedSensitiveFields(
+	ctx context.Context,
+	callerTaskID string,
+	related *RelatedTasks,
+	verbose bool,
+	readCache *relatedReadCache,
+) error {
 	for _, task := range relatedTaskPointers(related) {
 		if task == nil || task.source == nil {
 			continue
 		}
-		allowed, err := canReadDocuments(ctx, repoTaskLookupAdapter{r: s.tasks}, blockerLookupAdapter{repo: s.blockers}, callerTaskID, task.ID)
+		allowed, err := canReadDocuments(ctx, readCache, readCache, callerTaskID, task.ID)
 		if err != nil {
 			return err
 		}
