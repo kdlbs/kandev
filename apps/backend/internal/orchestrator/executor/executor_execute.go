@@ -2468,6 +2468,8 @@ func (e *Executor) refreshTaskEnvironmentRepo(ctx context.Context, row, w *model
 		return
 	}
 	row.BranchSlug = w.BranchSlug
+	// Concrete launch results populate the physical tuple together; inventory-only
+	// rows have no WorktreeID and must not replace it.
 	if w.WorktreeID != "" {
 		row.WorktreeID = w.WorktreeID
 		row.WorktreePath = w.WorktreePath

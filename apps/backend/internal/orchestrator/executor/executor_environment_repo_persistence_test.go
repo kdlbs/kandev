@@ -42,4 +42,7 @@ func TestPersistTaskEnvironmentRepos_PreservesPhysicalWorktreeOnInventoryOnlyRef
 	if row.WorktreeID != "wt-existing" || row.WorktreePath != "/tasks/task-1/repo" || row.WorktreeBranch != "feature/task-1" {
 		t.Fatalf("inventory-only refresh changed physical worktree: %+v", row)
 	}
+	if row.ErrorMessage != "" {
+		t.Fatalf("inventory-only refresh did not clear ErrorMessage: %q", row.ErrorMessage)
+	}
 }
