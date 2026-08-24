@@ -174,7 +174,13 @@ func TestProbeACPSessionWithContextRejectsProviderWithoutModelSelection(t *testi
 	}
 }
 
-func TestProbeACPSessionWithContextTimesOutWithoutConfigSnapshot(t *testing.T) {
+// TestProbeACPSessionWithContextKeepsSnapshotWhenModelYieldsNoConfig pins that
+// applying a model which returns no per-model config options (and pushes no
+// follow-up config-update notification) is a valid empty resolution, not a
+// failure. The probe must succeed and keep the config options advertised on
+// session/new. This is the auggie shape: a model list with no reasoning-effort
+// style selectors to resolve.
+func TestProbeACPSessionWithContextKeepsSnapshotWhenModelYieldsNoConfig(t *testing.T) {
 	c2aR, c2aW := io.Pipe()
 	a2cR, a2cW := io.Pipe()
 	t.Cleanup(func() {
@@ -190,11 +196,21 @@ func TestProbeACPSessionWithContextTimesOutWithoutConfigSnapshot(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	_, err := e.probeACPSessionWithContext(
+	resp, err := e.probeACPSessionWithContext(
 		ctx, c2aW, a2cR, t.TempDir(), "provider-without-config-response", "model", "", nil,
 	)
-	if err == nil || !strings.Contains(err.Error(), "returned no configuration options") {
-		t.Fatalf("error = %v, want missing configuration snapshot", err)
+	if err != nil {
+		t.Fatalf("probeACPSessionWithContext(): %v", err)
+	}
+	var found bool
+	for _, option := range resp.ConfigOptions {
+		if option.ID == "reasoning_effort" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("config options = %#v, want session/new snapshot preserved", resp.ConfigOptions)
 	}
 }
 

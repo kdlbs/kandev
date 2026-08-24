@@ -4,6 +4,7 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 
 	acp "github.com/coder/acp-go-sdk"
 )
@@ -162,6 +163,33 @@ func TestApplySessionModel_NoOpWhenAgentSupportsNeitherSurface(t *testing.T) {
 	}
 	if method != "" {
 		t.Fatalf("method = %q, want empty (MethodNone)", method)
+	}
+	wantCalls := []string{"legacy:sess-1:legacy-model"}
+	if !reflect.DeepEqual(conn.calls, wantCalls) {
+		t.Fatalf("calls = %#v, want %#v", conn.calls, wantCalls)
+	}
+}
+
+// TestApplyProbeModel_LegacyNoConfigOptionsReturnsEmpty pins that when the
+// legacy session/set_model RPC succeeds but the agent surfaces no per-model
+// config options (and pushes no follow-up config-update notification), the
+// probe treats it as a valid empty resolution (nil options, nil error) rather
+// than a hard failure. This is the auggie shape: a flat model list with no
+// reasoning-effort style selectors to resolve.
+func TestApplyProbeModel_LegacyNoConfigOptionsReturnsEmpty(t *testing.T) {
+	t.Parallel()
+
+	conn := &fakeModelConn{}
+	state := newACPProbeNotificationState("auggie")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	options, err := applyProbeModel(ctx, conn, acp.SessionId("sess-1"), "legacy-model", nil, state)
+	if err != nil {
+		t.Fatalf("applyProbeModel() error = %v, want nil", err)
+	}
+	if options != nil {
+		t.Fatalf("options = %#v, want nil (empty resolution)", options)
 	}
 	wantCalls := []string{"legacy:sess-1:legacy-model"}
 	if !reflect.DeepEqual(conn.calls, wantCalls) {

@@ -796,7 +796,11 @@ func applyProbeModel(
 		return nil, err
 	}
 	if !received {
-		return nil, fmt.Errorf("ACP model selection returned no configuration options")
+		// The model was applied but the agent surfaces no per-model config
+		// options (e.g. auggie, which advertises a flat model list and answers
+		// session/set_model with an empty result). That is a valid empty
+		// resolution, not a failure: keep the session-advertised options.
+		return nil, nil
 	}
 	return updated, nil
 }
@@ -904,7 +908,9 @@ func (e *ACPInferenceExecutor) probeACPSessionWithContext(
 		if err != nil {
 			return nil, err
 		}
-		sessionResp.ConfigOptions = updated
+		if updated != nil {
+			sessionResp.ConfigOptions = updated
+		}
 	}
 	if updated, err := applyProbeConfigOptions(
 		ctx,
