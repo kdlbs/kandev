@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/session-delete-resource-cleanup/spec.md
+spec: docs/specs/tasks/requirements/session-delete-resource-cleanup.md
 created: 2026-08-11
 status: implemented
 ---

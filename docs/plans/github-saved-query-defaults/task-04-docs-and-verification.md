@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-default-view-controls"]
 plan: "plan.md"
-spec: "../../specs/ui/github-saved-query-defaults.md"
+spec: "../../specs/ui/requirements/github-saved-query-defaults.md"
 ---
 
 # Task 04: Document and Verify Default Views
@@ -19,7 +19,7 @@ spec: "../../specs/ui/github-saved-query-defaults.md"
 ## Files
 
 - `docs/public/integrations.md`
-- `docs/specs/ui/github-saved-query-defaults.md`
+- `docs/specs/ui/requirements/github-saved-query-defaults.md`
 - `docs/plans/github-saved-query-defaults/*`
 
 ## Verification

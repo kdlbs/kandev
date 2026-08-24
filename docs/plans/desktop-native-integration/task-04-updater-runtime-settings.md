@@ -10,7 +10,7 @@ depends_on:
     "03-updater-release-artifacts",
   ]
 plan: "plan.md"
-spec: "../../specs/desktop-tauri-app/spec.md"
+spec: "../../specs/desktop/requirements/desktop-tauri-app.md"
 ---
 
 # Task 04: Desktop Updater Runtime and Settings Adapter

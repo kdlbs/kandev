@@ -5,7 +5,7 @@ status: completed
 wave: 3
 depends_on: ["01-design-package", "02-plugin-repository-bootstrap", "03-protocol-manifest-actions"]
 plan: "plan.md"
-spec: "../../specs/bitbucket-plugin/spec.md"
+spec: "../../specs/integrations/requirements/bitbucket-plugin.md"
 ---
 
 # Task 10: Cloud/Data Center domain, HTTP clients, and authentication

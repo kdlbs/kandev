@@ -5,7 +5,7 @@ status: done
 wave: 10
 depends_on: ["10-policy-e2e"]
 plan: "plan.md"
-spec: "../../specs/platform/provider-error-recovery.md"
+spec: "../../specs/platform/requirements/provider-error-recovery.md"
 ---
 
 # Task 11: Documentation release gate

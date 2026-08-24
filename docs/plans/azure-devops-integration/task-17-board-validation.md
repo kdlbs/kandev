@@ -5,7 +5,7 @@ status: done
 wave: 10
 depends_on: ["16-board-ui"]
 plan: "plan.md"
-spec: "../../specs/azure-devops-integration/spec.md"
+spec: "../../specs/integrations/requirements/azure-devops-integration.md"
 ---
 
 # Task 17: Board E2E, Docs, And Verification

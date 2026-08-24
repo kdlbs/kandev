@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/tasks/requirements/multi-branch.md
 related_specs:
-  - docs/specs/gitlab-integration/spec.md
+  - docs/specs/integrations/requirements/gitlab-integration.md
 created: 2026-07-24
 status: completed
 ---

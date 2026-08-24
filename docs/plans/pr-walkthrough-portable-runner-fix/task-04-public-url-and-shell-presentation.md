@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["03-prompt-driven-workflow"]
 plan: "plan.md"
-spec: "../../specs/pr-walkthrough/spec.md"
+spec: "../../specs/ui/requirements/pr-walkthrough.md"
 ---
 
 # Task 04: Public URL and Shell Presentation

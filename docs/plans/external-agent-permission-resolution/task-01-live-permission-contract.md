@@ -5,7 +5,7 @@ status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/agents/external-permission-resolution.md"
+spec: "../../specs/agents/requirements/external-permission-resolution.md"
 ---
 
 # Task 01: Live permission contract

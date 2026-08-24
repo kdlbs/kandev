@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-review-markdown-preview"]
 plan: "plan.md"
-spec: "../../specs/ui/review-markdown-preview.md"
+spec: "../../specs/ui/requirements/review-markdown-preview.md"
 ---
 
 # Task 02: Render changed Markdown inside Review
@@ -72,7 +72,7 @@ share one component contract.
 
 ## Inputs
 
-- `docs/specs/ui/review-markdown-preview.md`
+- `docs/specs/ui/requirements/review-markdown-preview.md`
 - `docs/plans/review-markdown-preview/plan.md`
 - `apps/web/AGENTS.md`
 - `.agents/skills/tdd/SKILL.md`

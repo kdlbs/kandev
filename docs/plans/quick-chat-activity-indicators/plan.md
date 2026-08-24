@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/quick-chat-idle-dot/spec.md
+spec: docs/specs/ui/requirements/quick-chat-idle-dot.md
 created: 2026-08-23
 status: implemented
 ---

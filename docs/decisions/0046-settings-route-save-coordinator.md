@@ -14,7 +14,7 @@ The settings shell will own a route-scoped save coordinator. Descendant forms re
 
 Draft state and API payload construction remain with the domain component that owns the setting. A page-level owner combines sections that write the same backend resource so the coordinator does not issue competing replacements. Immediate named commands and dialog submissions do not register as dirty contributors.
 
-The user-visible contract is defined by [Settings Manual Save](../specs/ui/settings-manual-save.md).
+The user-visible contract is defined by [Settings Manual Save](../specs/ui/requirements/settings-manual-save.md).
 
 ## Consequences
 
