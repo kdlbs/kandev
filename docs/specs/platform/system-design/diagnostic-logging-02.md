@@ -278,9 +278,9 @@ with the same task/session rules and excludes message bodies and user identity.
   backend startup prints the intended path and a warning to stderr, continues
   with stdout/stderr logging, and retries the file sink every 30 seconds.
   Retention-cleanup failures are warnings and do not prevent startup.
-- If midnight rollover fails after startup, the backend emits an error to
-  stderr and its existing sinks, continues writing to the active file, and
-  retries rollover on the next write without dropping the triggering entry.
+- If size or day rotation fails, the backend preserves the existing files and
+  does not exceed the total retention budget. It reports the error to stderr
+  and retries the file sink after 30 seconds.
 - If browser persistence fails, capture continues in the bounded memory
   fallback and the bundle manifest marks the degraded storage mode.
 - If no eligible frontend is connected, a frontend-only bundle becomes
@@ -316,12 +316,12 @@ with the same task/session rules and excludes message bodies and user identity.
 
 ## Persistence guarantees
 
-- `backend-logs.log` preserves entries accepted by the file queue during the
-  current UTC day until the fixed 256 MiB daily bound. Pressure drops, startup
-  fallback gaps, bounded-shutdown loss, and archive truncation are explicit in
-  counters and bundle manifests.
-- Dated archives preserve the two preceding UTC calendar days. Files outside
-  that rolling window are deleted at startup and after successful rollover.
+- Backend segments preserve the newest accepted entries across retained UTC
+  days, up to the fixed 256 MiB total budget. High volume shortens the available
+  time window instead of removing later evidence.
+- Three UTC days is the maximum backend-log age. It is not a guaranteed
+  allocation for each day. Files outside that window are removed at startup
+  and after successful rotation.
 - Browser console history remains in the browser profile for three UTC days,
   subject to its entry/byte caps. It is not server-persistent before capture.
 - Raw ACP files retain their existing debug-only executor/host retention: at
@@ -351,12 +351,19 @@ with the same task/session rules and excludes message bodies and user identity.
   error entries, **THEN** all are in the file while only warn/error are on
   stdout.
 - **GIVEN** a same-UTC-day restart, **WHEN** the backend opens its log,
-  **THEN** it appends without losing earlier entries.
+  **THEN** it appends to the active segment and does not replace closed
+  segments.
+- **GIVEN** logging exceeds 256 MiB, restarts after rotation, or upgrades from
+  an oversized legacy file, **WHEN** the backend resumes, **THEN** it continues
+  with newest bounded content and the next sequence.
 - **GIVEN** the configured log directory is temporarily unwritable, **WHEN**
   Kandev starts, **THEN** product startup succeeds with a stderr warning and
   the backend retries file activation every 30 seconds.
 - **GIVEN** more than three UTC days of backend files, **WHEN** cleanup runs,
   **THEN** only the current and two preceding days remain.
+- **GIVEN** the gateway receives close code `1000` or an unexpected close code,
+  **WHEN** the read pump handles it, **THEN** only the unexpected close creates
+  a `WebSocket read error` entry with a stack trace.
 - **GIVEN** an error toast on a recognized task route, **WHEN** its report is
   accepted, **THEN** one backend error entry includes its visible text,
   browser context, and `task_id`.
@@ -445,3 +452,5 @@ with the same task/session rules and excludes message bodies and user identity.
 - Adding a setting for log path, retention, browser capture, or bundle bounds.
 - Supporting configurable size-based, per-process, or local-time backend
   rotation.
+- Changing the browser reconnection policy or increasing the fixed 256 MiB
+  total backend-log budget.

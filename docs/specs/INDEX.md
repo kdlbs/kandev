@@ -18,7 +18,7 @@ This catalog is the entry point for the system-oriented specification layout. Ea
 | Plugins | [README](plugins/README.md) | complete | 7 requirements, 9 designs |
 | Release | [README](release/README.md) | complete | 5 requirements, 0 designs |
 | System page | [README](system-page/README.md) | complete | 3 requirements, 5 designs |
-| Tasks | [README](tasks/README.md) | complete | 68 requirements, 12 designs |
+| Tasks | [README](tasks/README.md) | complete | 69 requirements, 12 designs |
 | UI | [README](ui/README.md) | complete | 95 requirements, 11 designs |
 | Workspaces | [README](workspaces/README.md) | complete | 10 requirements, 2 designs |
 
@@ -28,8 +28,12 @@ The legacy specification sources were migrated from the unstructured root and ca
 
 ----
 
-The former legacy size exceptions were removed. All canonical requirement and system-design documents now pass the repository specification linter.
+The former legacy size exceptions for migrated sources were removed. All canonical requirement and system-design documents now pass the repository specification linter.
+
+## Unmigrated additions
+
+The following specification was added after this migration and remains in the legacy layout until it moves into an owning system:
+
+- [Task Cost & Token Ledger](task-cost-ledger/spec.md) (draft)
 
 ## Authoring rule
-
-New behavior belongs in a system README's `requirements/` directory, with technical boundaries in `system-design/`. Do not add new `spec.md` files or parallel category-owned sources.

@@ -25,6 +25,7 @@ import (
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 const (
@@ -462,6 +463,20 @@ func ensureRemoteTaskDir(ctx context.Context, client *ssh.Client, workdirRoot, t
 	return taskDir, nil
 }
 
+// ensureReuseRequiredRemoteTaskDirExists verifies the canonical task directory
+// before a sibling launch creates its session-scoped runtime directory beneath
+// it. Attach-only reuse must never turn a missing workspace into a replacement
+// directory through the later mkdir -p for that session directory.
+func ensureReuseRequiredRemoteTaskDirExists(ctx context.Context, client *ssh.Client, taskDir string) error {
+	if strings.TrimSpace(taskDir) == "" {
+		return fmt.Errorf("%w: missing remote task directory", models.ErrWorkspaceReuseUnsafe)
+	}
+	if _, _, err := runSSHCommand(ctx, client, "test -d "+shellQuote(taskDir)); err != nil {
+		return fmt.Errorf("%w: remote task directory is unavailable", models.ErrWorkspaceReuseUnsafe)
+	}
+	return nil
+}
+
 // ensureRemoteSessionDir creates <taskDir>/.kandev/sessions/<sessionID>/ and
 // returns the absolute remote path. Per-session runtime data (PID file, logs,
 // agentctl socket) lives here.
@@ -470,7 +485,11 @@ func ensureRemoteSessionDir(ctx context.Context, client *ssh.Client, taskDir, se
 		return "", errors.New("ssh: session ID is empty")
 	}
 	sessionDir := taskDir + "/.kandev/sessions/" + sessionID
-	if _, _, err := runSSHCommand(ctx, client, "mkdir -p "+shellQuote(sessionDir)); err != nil {
+	// Change into the canonical directory before creating session-scoped state.
+	// A path-based mkdir -p could recreate taskDir after an attach-only probe
+	// observed it, whereas cd fails if the canonical workspace disappeared.
+	command := "cd -- " + shellQuote(taskDir) + " && mkdir -p -- " + shellQuote(".kandev/sessions/"+sessionID)
+	if _, _, err := runSSHCommand(ctx, client, command); err != nil {
 		return "", fmt.Errorf("ssh: mkdir session dir: %w", err)
 	}
 	return sessionDir, nil

@@ -21,7 +21,8 @@ This design preserves the technical source detail for `REQ-PLATFORM-DIAGNOSTIC-L
 
 ## Migrated source detail
 
-Decision: [ADR-2026-07-30-file-backed-diagnostic-bundles](../../../decisions/2026-07-30-file-backed-diagnostic-bundles.md)
+Decisions: [bundles](../../../decisions/2026-07-30-file-backed-diagnostic-bundles.md),
+[bounded logs](../../../decisions/2026-08-22-preserve-newest-bounded-backend-logs.md).
 
 Implementation plan: [diagnostic-logging](../../../plans/diagnostic-logging/plan.md)
 
@@ -49,28 +50,25 @@ history or returning an unbounded log export.
   remains `warn` and higher.
 - An explicitly verbose run writes `info` and higher entries to both the file
   and stdout.
+- Normal browser close code `1000` is lifecycle-only; unexpected codes remain
+  error entries with stacks.
 - `logging.level` / `KANDEV_LOG_LEVEL` remains the supported override for the
   file threshold, and `logging.format` remains supported.
   `logging.outputPath`, `logging.maxSizeMb`, `logging.maxBackups`,
   `logging.maxAgeDays`, and `logging.compress` are removed; the diagnostic
   path and daily retention policy are not configurable.
-- `backend-logs.log` represents the current UTC calendar day. At UTC midnight,
-  the backend atomically rolls it to `backend-logs-YYYY-MM-DD.log` and creates
-  a new owner-readable, owner-writable active file.
-- A restart during the same UTC day appends to `backend-logs.log`. On the first
-  startup after a day boundary, the previous active file is rolled to the date
-  it represents before new entries are written.
-- Cleanup retains a rolling three-day UTC window: the current active day and
-  at most the two preceding dated daily files. Older recognized daily files
-  are removed; unrelated files in the log directory are preserved.
-- Each daily backend file accepts at most 256 MiB. Once the active file reaches
-  that bound, entries that would exceed it are dropped without blocking
-  application work and are reflected in file-sink loss statistics. UTC
-  rollover resumes normal writes into the next day's file.
-- Rollover is crash-recoverable. A small owner-only rollover journal records
-  the source day, source identity/size, destination, and copied offset before
-  an existing dated destination is extended. Recovery resumes that transaction
-  exactly once and never replaces an existing dated file.
+- `backend-logs.log` is the current-day active segment, capped at 16 MiB. Full
+  files become `backend-logs-YYYY-MM-DD-NNNNNN.log`.
+- Active, closed, and legacy files share a 256 MiB budget; rotation evicts old
+  closed files so logging continues with newest evidence.
+- At UTC midnight, the active file becomes the prior day's final segment and a
+  new file opens. Cleanup removes recognized files older than three UTC days;
+  this is a maximum age, not a per-day allocation.
+- Legacy singleton files remain readable and count toward the budget. An
+  oversized legacy active file is converted to bounded newest segments.
+- The structured backend in-memory ring buffer is removed. The System Logs
+  page, Improve Kandev, and agent diagnostics use the files and bundles
+  described below.
 - The structured backend in-memory ring buffer is removed. The System Logs
   page, Improve Kandev, and agent diagnostics use the files and bundles
   described below.
@@ -244,8 +242,7 @@ history or returning an unbounded log export.
 
 ```text
 manifest.json
-backend/backend-logs.log
-backend/backend-logs-YYYY-MM-DD.log
+backend/backend-logs*.log
 frontend/browser-01.jsonl
 frontend/browser-02.jsonl
 runtime/sessions.json
@@ -253,8 +250,9 @@ acp/session-01/raw-acp.jsonl
 acp/session-01/normalized-acp.jsonl
 ```
 
-- `backend/` contains the recognized active and dated files still inside the
-  three-day retention window. File bytes are copied without reformatting.
+- `backend/` contains recognized active, segmented, and legacy files inside the
+  three-day retention window. Candidates are selected newest-first, and file
+  bytes are copied without reformatting.
 - `frontend/` contains one JSON Lines file per distinct responding browser
   profile. Multiple tabs from one browser profile are deduplicated. Client
   values never determine archive paths or filenames.

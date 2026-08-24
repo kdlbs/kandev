@@ -588,3 +588,14 @@ type SubagentContextRepository interface {
 	ListSubagentContextsBySession(ctx context.Context, sessionID string) ([]*models.SubagentContext, error)
 	ListSubagentContextsByTurn(ctx context.Context, turnID string) ([]*models.SubagentContext, error)
 }
+
+// UsageRepository serves the task-cost-ledger read surface
+// (docs/specs/task-cost-ledger/spec.md AC-18, AC-19, AC-20): per-task and
+// per-session aggregate totals over task_usage_events. The ledger write path
+// (CreateTaskUsageEvent, ListTaskUsageEvents) is deliberately not part of
+// this interface - it is consumed only by internal/task/usage's own narrow
+// Repository interface, never through the Service layer.
+type UsageRepository interface {
+	GetTaskUsageTotals(ctx context.Context, taskID string) (*models.TaskUsageTotals, error)
+	GetSessionUsageTotals(ctx context.Context, sessionID string) (*models.TaskUsageTotals, error)
+}

@@ -42,7 +42,7 @@ This design preserves the technical source detail for `REQ-OFFICE-COSTS-001` dur
 
 - **GIVEN** a prompt-usage event for an in-progress turn, **WHEN** the cost event is recorded at turn completion, **THEN** `turn_id` is populated with the turn that was resolved at completion time and `usage_event_id` is set to a deterministic id derived from the underlying completion's identity.
 
-- **GIVEN** the same underlying prompt-usage completion is delivered twice (e.g. a reconnecting WS client replaying a buffered stream event), **WHEN** the second copy is processed, **THEN** it derives the same `usage_event_id`, the insert is rejected by the unique partial index, and the session rollup is not incremented a second time.
+- **GIVEN** the same underlying prompt-usage completion is delivered twice (e.g. a reconnecting WS client replaying a buffered stream event), **WHEN** the second copy is processed, **THEN** it derives the same `usage_event_id` and the `office_cost_events` insert is rejected by the unique partial index; the task ledger writer's idempotent insert keeps the `task_sessions` rollup from being incremented a second time ([task-cost-ledger](../../task-cost-ledger/spec.md) AC-10/AC-21).
 
 - **GIVEN** an `office_cost_events` table that predates contract v2, **WHEN** the repository boots and runs its migration, **THEN** the new columns are added nullable, every pre-existing row reads NULL (never `0`) for all of them, and running the migration again on the same database is a no-op.
 

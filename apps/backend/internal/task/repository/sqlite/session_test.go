@@ -1101,10 +1101,10 @@ func TestIncrementTaskSessionUsage_AccumulatesAcrossCalls(t *testing.T) {
 	ctx := context.Background()
 	seedForMsgTest(t, repo, "task-usage", "sess-usage", "turn-usage")
 
-	if err := repo.IncrementTaskSessionUsage(ctx, "sess-usage", 100, 0, 200, 50); err != nil {
+	if err := repo.IncrementTaskSessionUsageTx(ctx, nil, "sess-usage", 100, 0, 200, 50); err != nil {
 		t.Fatalf("first increment: %v", err)
 	}
-	if err := repo.IncrementTaskSessionUsage(ctx, "sess-usage", 10, 0, 20, 5); err != nil {
+	if err := repo.IncrementTaskSessionUsageTx(ctx, nil, "sess-usage", 10, 0, 20, 5); err != nil {
 		t.Fatalf("second increment: %v", err)
 	}
 
@@ -1124,7 +1124,7 @@ func TestIncrementTaskSessionUsage_AccumulatesAcrossCalls(t *testing.T) {
 // missing row (subscriber may race against session creation).
 func TestIncrementTaskSessionUsage_UnknownSessionNoError(t *testing.T) {
 	repo := newRepoForSessionTests(t)
-	if err := repo.IncrementTaskSessionUsage(context.Background(), "no-such", 1, 1, 2, 3); err != nil {
+	if err := repo.IncrementTaskSessionUsageTx(context.Background(), nil, "no-such", 1, 1, 2, 3); err != nil {
 		t.Errorf("expected no error for unknown session, got %v", err)
 	}
 }
@@ -1133,7 +1133,7 @@ func TestIncrementTaskSessionUsage_UnknownSessionNoError(t *testing.T) {
 // orchestrator publishing a usage event before SessionID is set.
 func TestIncrementTaskSessionUsage_EmptySessionIDNoOp(t *testing.T) {
 	repo := newRepoForSessionTests(t)
-	if err := repo.IncrementTaskSessionUsage(context.Background(), "", 1, 1, 2, 3); err != nil {
+	if err := repo.IncrementTaskSessionUsageTx(context.Background(), nil, "", 1, 1, 2, 3); err != nil {
 		t.Errorf("empty session id should be a no-op, got %v", err)
 	}
 }
@@ -1189,7 +1189,7 @@ func rebuildSessionsWithoutCostColumns(t *testing.T, repo *Repository) {
 // TestMigrateSessionsAddCostColumns_BackfillsLegacySchema reproduces the office
 // cost subscriber failure ("no such column: tokens_in"): a task_sessions table
 // that predates the cost columns and no longer contains the rebuild trigger
-// columns can never gain them, so IncrementTaskSessionUsage fails. The additive
+// columns can never gain them, so IncrementTaskSessionUsageTx fails. The additive
 // migration must backfill the columns idempotently.
 func TestMigrateSessionsAddCostColumns_BackfillsLegacySchema(t *testing.T) {
 	repo := newRepoForSessionTests(t)
@@ -1199,20 +1199,20 @@ func TestMigrateSessionsAddCostColumns_BackfillsLegacySchema(t *testing.T) {
 	seedForMsgTest(t, repo, "task-mig", "sess-mig", "turn-mig")
 
 	// Precondition: this is the reported bug on a legacy schema.
-	if err := repo.IncrementTaskSessionUsage(ctx, "sess-mig", 1, 1, 2, 3); err == nil {
+	if err := repo.IncrementTaskSessionUsageTx(ctx, nil, "sess-mig", 1, 1, 2, 3); err == nil {
 		t.Fatal("expected missing-column error before backfill")
 	}
 
 	repo.migrateSessionsAddCostColumns()
 
-	if err := repo.IncrementTaskSessionUsage(ctx, "sess-mig", 1, 1, 2, 3); err != nil {
-		t.Fatalf("IncrementTaskSessionUsage after backfill: %v", err)
+	if err := repo.IncrementTaskSessionUsageTx(ctx, nil, "sess-mig", 1, 1, 2, 3); err != nil {
+		t.Fatalf("IncrementTaskSessionUsageTx after backfill: %v", err)
 	}
 
 	// Idempotent: a second pass over a table that already has the columns is a no-op.
 	repo.migrateSessionsAddCostColumns()
-	if err := repo.IncrementTaskSessionUsage(ctx, "sess-mig", 10, 10, 20, 30); err != nil {
-		t.Fatalf("IncrementTaskSessionUsage after second pass: %v", err)
+	if err := repo.IncrementTaskSessionUsageTx(ctx, nil, "sess-mig", 10, 10, 20, 30); err != nil {
+		t.Fatalf("IncrementTaskSessionUsageTx after second pass: %v", err)
 	}
 }
 

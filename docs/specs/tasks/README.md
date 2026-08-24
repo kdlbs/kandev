@@ -39,6 +39,7 @@ signals, and task-scoped scheduling contracts.
 
 
 - [Agent-Generated Task Titles](requirements/agent-generated-titles.md)
+- [Additional Session Workspace Reuse](requirements/additional-session-workspace-reuse.md)
 - [Task Archive Confirmation](requirements/archive-confirmation.md)
 - [Attach Workspace Sources](requirements/attach-workspace-sources.md)
 - [Task Autopilot Mode](requirements/autopilot-mode.md)

@@ -262,7 +262,7 @@ func (c *Client) warmFromDisk(ctx context.Context) {
 		}
 		// File missing on first boot — schedule a refresh; lookup
 		// returns miss this turn.
-		c.startBackgroundRefresh(ctx)
+		c.startBackgroundRefresh(context.WithoutCancel(ctx))
 		return
 	}
 	buf, err := os.ReadFile(c.cachePath)

@@ -102,7 +102,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-07-29-interactive-accent-surface-semantics | [Separate Brand Accent from Interactive Surface Fills](2026-07-29-interactive-accent-surface-semantics.md) | accepted | frontend | 2026-07-29 |
 | 2026-07-30-embedded-editor-executor-capabilities | [Derive Embedded Editor Availability from the Active Executor](2026-07-30-embedded-editor-executor-capabilities.md) | accepted | backend, frontend, protocol | 2026-07-30 |
 | 2026-07-30-session-owned-mcp-observability | [Keep MCP Attachment Evidence Session Owned](2026-07-30-session-owned-mcp-observability.md) | accepted | backend, frontend, protocol, security | 2026-07-30 |
-| 2026-07-30-file-backed-diagnostic-bundles | [File-backed diagnostic bundles](2026-07-30-file-backed-diagnostic-bundles.md) | accepted | backend, frontend, infra, protocol, workflow | 2026-07-30 |
+| 2026-07-30-file-backed-diagnostic-bundles | [File-backed diagnostic bundles](2026-07-30-file-backed-diagnostic-bundles.md) | accepted (backend file retention amended by 2026-08-22) | backend, frontend, infra, protocol, workflow | 2026-07-30 |
 | 2026-07-30-runtime-task-state-before-running-event | [Publish Task State Before Running Session State](2026-07-30-runtime-task-state-before-running-event.md) | accepted | backend, frontend, protocol, workflow | 2026-07-30 |
 | 2026-07-31-authenticated-plugin-actions | [Authenticated Plugin Actions](2026-07-31-authenticated-plugin-actions.md) | accepted | backend, frontend, protocol, security | 2026-07-31 |
 | 2026-07-31-plugin-repository-provider-extensions | [Plugin Repository Provider Extensions](2026-07-31-plugin-repository-provider-extensions.md) | accepted | frontend, backend, protocol | 2026-07-31 |
@@ -191,6 +191,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-20-acp-client-non-underscore-extension-methods | [Route Non-Underscore Inbound Client Methods to the Extension Handler](2026-08-20-acp-client-non-underscore-extension-methods.md) | accepted | backend, protocol | 2026-08-20 |
 | 2026-08-22-persistent-fork-approval-labels | [Persist Fork Approval Labels Across Pushes](2026-08-22-persistent-fork-approval-labels.md) | accepted | infra, workflow, security | 2026-08-22 |
 | 2026-08-22-plugin-version-retention | [Keep Exactly One Superseded Plugin Version](2026-08-22-plugin-version-retention.md) | accepted | backend | 2026-08-22 |
+| 2026-08-22-preserve-newest-bounded-backend-logs | [Preserve Newest Bounded Backend Logs](2026-08-22-preserve-newest-bounded-backend-logs.md) | accepted | backend, infra, operations | 2026-08-22 |
 | 2026-08-12-plugin-webhook-auth-gate | [Require Auth for Plugin Webhooks Unless the Manifest Declares Them Public](2026-08-12-plugin-webhook-auth-gate.md) | accepted | backend, frontend, security | 2026-08-12 |
 | 2026-08-22-system-oriented-specifications | [Organize specifications by system](2026-08-22-system-oriented-specifications.md) | accepted | workflow, infra | 2026-08-22 |
 | 2026-08-22-pr-walkthrough-r2-hosting | [Host PR walkthrough HTML in Cloudflare R2](2026-08-22-pr-walkthrough-r2-hosting.md) | accepted | infra, workflow, security | 2026-08-22 |
