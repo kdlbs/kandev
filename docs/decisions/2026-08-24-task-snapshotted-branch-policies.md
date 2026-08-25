@@ -24,8 +24,10 @@ configuration, not another repository identity and not a synthetic Git branch.
 Task creation sends a policy ID. The backend authorizes and resolves that ID in
 the task-create transaction and snapshots the policy name, base branch, branch
 template, and pull-request target onto the task-repository row. Runtime behavior
-uses the snapshot. The policy ID is historical provenance and is not a foreign
-key, so deleting configuration cannot erase or mutate the snapshot.
+uses the snapshot. Agent instructions for pull-request creation also use this
+snapshot, not the live policy. The policy ID is historical provenance and is
+not a foreign key, so deleting configuration cannot erase or mutate the
+snapshot.
 
 The existing repository `worktree_branch_template` remains the fallback for
 raw branch selections and older tasks. No existing repository template is
@@ -38,6 +40,8 @@ automatically converted into a policy.
 - Task-repository storage duplicates a small amount of policy data.
 - Every branch-producing runtime path must resolve the same effective snapshot
   before falling back to repository configuration.
+- Every policy-backed agent context must name the snapshotted pull-request
+  target. Policy edits cannot change this instruction for an existing task.
 - The selector must use typed policy options; display text cannot carry domain
   identity.
 
@@ -63,4 +67,3 @@ reason about.
 
 Rejected because existing task payloads and repositories need a policy-free
 compatibility path.
-

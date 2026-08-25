@@ -15,6 +15,7 @@ acceptance_criteria:
   - AC-WORKSPACES-BRANCH-POLICIES-004.3
   - AC-WORKSPACES-BRANCH-POLICIES-004.4
   - AC-WORKSPACES-BRANCH-POLICIES-004.5
+  - AC-WORKSPACES-BRANCH-POLICIES-004.6
   - AC-WORKSPACES-BRANCH-POLICIES-005.4
 system_design: "../../specs/workspaces/system-design/branch-policies.md"
 ---
@@ -44,6 +45,8 @@ legacy fallback, local fresh branch naming, title rename, and PR target choice.
   lifecycle, local fresh-branch, and title-generated rename paths to use it.
 - Project the pull-request target to task/session clients and use it as the
   desktop/mobile default before falling back to base branch.
+- Inject the snapshotted target into first-launch and context-reset agent
+  instructions. Give passthrough agents the same instruction as plain text.
 - Preserve raw-selection and legacy task behavior.
 
 ## Implementation acceptance
@@ -54,6 +57,8 @@ legacy fallback, local fresh branch naming, title rename, and PR target choice.
   resolution.
 - Existing task inputs and rows continue to produce their current branches and
   pull-request bases.
+- Policy-backed agents receive the immutable target. Raw-branch agents receive
+  no policy-target instruction.
 
 ## Exclusions
 
@@ -100,6 +105,10 @@ Verification:
 - Focused task service, handler, and SQLite tests passed: 61 tests.
 - `go test ./internal/backendapp ./internal/orchestrator ./internal/orchestrator/executor -run 'TestTaskRepositoryBranchTemplate|TestRenderTitleBranchName|TestBranchMaterializer|TestBuildRepoSpecs|TestResolveTaskRepoInfo' -count=1` passed.
 - The full backend validation listed in Task 01 passed.
+- First-launch, stored-message, context-reset, Office, and passthrough prompt
+  paths now use the snapshotted pull-request target.
+- RED tests failed before the prompt wiring existed. The affected orchestrator,
+  message-handler, and system-prompt packages passed 2,813 tests after the fix.
 
 Review remediation verification:
 

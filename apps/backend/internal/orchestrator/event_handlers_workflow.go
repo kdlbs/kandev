@@ -3021,21 +3021,30 @@ func (s *Service) autoStartStepPrompt(
 			return contextErr
 		}
 	}
+	var pullRequestTargetContext string
+	if needsRuntimeContext {
+		recordedPrompt, pullRequestTargetContext = s.addTaskPullRequestTargetContext(
+			ctx, taskID, recordedPrompt, session.IsPassthrough,
+		)
+	}
 	if (session.State == models.TaskSessionStateCreated || step.HasOnEnterAction(wfmodels.OnEnterResetAgentContext)) && !session.IsPassthrough && (agentPrompt != "" || len(attachments) > 0) {
 		configMode, _ := session.Metadata["config_mode"].(bool)
 		requiresSignal := step != nil && step.AutoAdvanceRequiresSignal
 		referenceContext := EntityReferenceContext(references)
 		if isOfficeTask {
-			recordedPrompt = sysprompt.InjectOfficeContextWithOptions(taskID, sessionID, agentPrompt, requiresSignal, referenceContext)
+			recordedPrompt = sysprompt.InjectOfficeContextWithOptions(
+				taskID, sessionID, recordedPrompt, requiresSignal,
+				referenceContext, pullRequestTargetContext,
+			)
 		} else {
-			recordedPrompt = sysprompt.InjectKandevContextWithOptions(taskID, sessionID, agentPrompt, sysprompt.KandevContextOptions{
+			recordedPrompt = sysprompt.InjectKandevContextWithOptions(taskID, sessionID, recordedPrompt, sysprompt.KandevContextOptions{
 				RequiresCompletionSignal:       requiresSignal,
 				IncludeCoordinatorTaskControls: !configMode,
 				IncludeTaskTitleTool:           !configMode && titleOwner,
 				Autopilot:                      taskForPrompt != nil && taskForPrompt.Autopilot,
 				IncludeUserQuestionTool:        taskForPrompt == nil || !taskForPrompt.Autopilot,
 				IncludeParentQuestionTool:      taskForPrompt != nil && taskForPrompt.Autopilot && taskForPrompt.ParentID != "",
-			}, referenceContext)
+			}, referenceContext, pullRequestTargetContext)
 		}
 	}
 	userMsgRecorded := s.recordAutoStartMessage(ctx, taskID, sessionID, recordedPrompt, planMode, origin, references)

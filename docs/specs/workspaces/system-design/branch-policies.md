@@ -112,8 +112,20 @@ shows that base for feedback.
 Runtime worktree creation, local fresh-branch creation, and title-triggered
 branch rename read the task snapshot first. They read the repository template
 only when the snapshot template is empty. The web pull-request flow reads the
-snapshot target first and then the task base branch. Agent prompts, skills, and
-shell environments do not receive the target in this release.
+snapshot target first and then the task base branch.
+
+The orchestrator also derives trusted agent context from policy-backed
+task-repository snapshots. The context lists the repository, working branch,
+and pull-request target. It tells agents to pass the target to the provider CLI
+instead of inferring it from the base branch. First launches and agent-context
+resets receive the context. Office agents receive the same trusted block.
+Passthrough agents receive a compact plain-text instruction because they do not
+receive hidden Kandev system blocks. Raw-branch tasks add no instruction.
+
+Prompt construction reads only the task snapshot. It does not read the live
+policy. Repeated record-and-launch wrapping replaces the same hidden target
+block, so the agent receives one copy. Agent skills and shell environments do
+not receive a separate target value.
 
 ## Frontend state and transport
 
@@ -226,7 +238,7 @@ is unchanged and policies are opt-in.
 - Repository tests cover persistence, replay, normalization, conflicts,
   authorization, cascade, and atomic Gitflow seeding in SQLite and Postgres.
 - Service/runtime tests cover snapshot resolution, stale IDs, raw fallback,
-  local fresh branches, title rename, and pull-request targets.
+  local fresh branches, title rename, pull-request targets, and agent context.
 - Frontend unit tests cover the settings CRUD state, responsive surface choice,
   tagged selector options, local fork transition, and submit payload.
 - Desktop and `mobile-chrome` Playwright tests cover collapsed settings, help
@@ -239,5 +251,5 @@ is unchanged and policies are opt-in.
 | REQ-WORKSPACES-BRANCH-POLICIES-001 | Domain model, repository service, settings experience |
 | REQ-WORKSPACES-BRANCH-POLICIES-002 | Repository service, Gitflow starter, failure recovery |
 | REQ-WORKSPACES-BRANCH-POLICIES-003 | Frontend state, task-create experience |
-| REQ-WORKSPACES-BRANCH-POLICIES-004 | Task snapshot resolution, runtime, migration |
+| REQ-WORKSPACES-BRANCH-POLICIES-004 | Task snapshot resolution, runtime, agent context, migration |
 | REQ-WORKSPACES-BRANCH-POLICIES-005 | Responsive UI, accessibility, localization, compatibility |

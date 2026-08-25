@@ -34,9 +34,7 @@ duplicate repositories and not a restriction on Git itself.
 - Enforcing Gitflow or preventing users from selecting arbitrary branches.
 - Automatically routing merges between release, production, and development
   branches after a pull request is created.
-- Injecting the saved pull-request target into agent prompts, skills, or shell
-  environments. Users must name the target when an agent creates the pull
-  request with a provider CLI.
+- Adding the saved pull-request target to agent skills or shell environments.
 - Adding policies to Quick Chat, Remote URL, Add Sources, or the post-creation
   Add Branch flow in the first release.
 - Reordering policies or choosing a repository-wide default policy.
@@ -172,6 +170,11 @@ task-repository record.
 - **AC-WORKSPACES-BRANCH-POLICIES-004.5:** A stale policy selected in an open dialog produces an actionable
   error and refreshes available policies; Kandev does not silently substitute a
   raw branch or another policy.
+- **AC-WORKSPACES-BRANCH-POLICIES-004.6:** When Kandev starts or resets an agent for a policy-backed task,
+  the agent context identifies each repository's snapshotted pull-request
+  target. The context instructs the agent to pass that target explicitly to a
+  provider CLI. Passthrough agents receive the same instruction as plain text.
+  Raw-branch tasks receive no policy-target instruction.
 
 ### REQ-WORKSPACES-BRANCH-POLICIES-005: Responsive, accessible compatibility
 

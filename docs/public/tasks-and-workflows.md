@@ -89,9 +89,9 @@ The base branch is the starting point. The pull-request target is the merge dest
 
 When you create a task, Kandev saves the selected policy values on the task repository. Later edits
 or deletion of the policy do not change the task. Kandev's pull-request dialog uses the saved target
-by default. You can change it before creation. An agent-run provider CLI does not receive this target
-automatically. Include the target when you ask an agent to create the pull request. Policies are not
-offered in **Quick Chat**, **Remote**, **Add Sources**, or **Add Branch** flows.
+by default. You can change it before creation. Kandev also adds the saved target to the agent's task
+context. The instruction tells the agent to pass the target explicitly to its provider CLI.
+Policies are not offered in **Quick Chat**, **Remote**, **Add Sources**, or **Add Branch** flows.
 
 Kandev remembers draft or recently used repository, branch, executor, and profile choices. Review the restored values before submitting, especially after changing workspace.
 

@@ -75,7 +75,7 @@ and public-documentation files.
 | AC-WORKSPACES-BRANCH-POLICIES-001.6 | Task 03, Task 05 |
 | AC-WORKSPACES-BRANCH-POLICIES-002.1 through AC-WORKSPACES-BRANCH-POLICIES-002.5 | Task 01, Task 03, Task 05 |
 | AC-WORKSPACES-BRANCH-POLICIES-003.1 through AC-WORKSPACES-BRANCH-POLICIES-003.6 | Task 04, Task 05 |
-| AC-WORKSPACES-BRANCH-POLICIES-004.1 through AC-WORKSPACES-BRANCH-POLICIES-004.5 | Task 02, Task 04, Task 05 |
+| AC-WORKSPACES-BRANCH-POLICIES-004.1 through AC-WORKSPACES-BRANCH-POLICIES-004.6 | Task 02, Task 04, Task 05 |
 | AC-WORKSPACES-BRANCH-POLICIES-005.1 through AC-WORKSPACES-BRANCH-POLICIES-005.3 | Task 03, Task 04, Task 05 |
 | AC-WORKSPACES-BRANCH-POLICIES-005.4 | Task 01, Task 02, Task 04 |
 
@@ -117,3 +117,9 @@ revision-guarded policy refreshes, stale-policy recovery, and keyboard-focused
 desktop help. The branch was rechecked with the focused backend and frontend
 suites, full backend tests with the repository's external config disabled, web
 typecheck/lint/i18n checks, and targeted desktop/mobile Playwright scenarios.
+
+The follow-up delivery injects each snapshotted pull-request target into agent
+context on first launch and context reset. Passthrough agents receive the same
+instruction as plain text. Focused orchestrator and message-handler tests cover
+the stored and delivered prompt contracts. The three affected backend packages
+passed 2,813 tests. Specification lint and public-document validation passed.

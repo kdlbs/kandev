@@ -104,9 +104,10 @@ selected policy values when it is created. Later policy edits or deletion do not
 branch or pull-request target. Kandev's pull-request dialog uses the saved target by default. You can
 select a different target before creation.
 
-Kandev does not add this target to an agent prompt or shell environment. If an agent creates the pull
-request with a provider CLI, tell the agent which target to use. The agent must pass that target to
-the CLI.
+Kandev adds the saved target to the agent's task context. The instruction tells the agent to pass the
+target to the provider CLI. For example, a GitHub agent uses `gh pr create --base <target>`. Kandev
+does not add a separate shell environment value, and it does not prevent the user from changing the
+target.
 
 Policies are not available in **Quick Chat**, **Remote**, **Add Sources**, or **Add Branch** flows.
 
