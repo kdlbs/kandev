@@ -125,27 +125,40 @@ func (m *Manager) preferRefreshedRemoteRef(ctx context.Context, repoPath, branch
 // local nor remote-tracking ref exists, preserving the existing "create a new
 // branch from base" behavior.
 func (m *Manager) prepareCheckoutFromRefreshedOrigin(ctx context.Context, repoPath, branch string) (bool, error) {
-	if exists, err := m.branchExists(ctx, repoPath, branch); err != nil {
+	return m.prepareBranchFromRefreshedOrigin(ctx, repoPath, branch, branch, 0)
+}
+
+// prepareBranchFromRefreshedOrigin makes a provider-refreshed source branch
+// available as a local branch without contacting origin. A PR number selects
+// the dedicated origin/pr/<N> ref, which is also how fork PR heads are kept
+// available after the authenticated refresh.
+func (m *Manager) prepareBranchFromRefreshedOrigin(
+	ctx context.Context, repoPath, localBranch, sourceBranch string, prNumber int,
+) (bool, error) {
+	if exists, err := m.branchExists(ctx, repoPath, localBranch); err != nil {
 		return false, err
 	} else if exists {
 		return true, nil
 	}
-	remoteRef := "origin/" + branch
+	remoteRef := "origin/" + sourceBranch
+	if prNumber > 0 {
+		remoteRef = fmt.Sprintf("origin/pr/%d", prNumber)
+	}
 	if exists, err := m.branchExists(ctx, repoPath, remoteRef); err != nil {
 		return false, err
 	} else if !exists {
 		return false, nil
 	}
 
-	release, err := subproc.Git().Acquire(ctx)
+	release, err := subproc.AcquireGit(ctx, subproc.GitLifecycle)
 	if err != nil {
 		return false, err
 	}
 	defer release()
-	cmd := m.newNonInteractiveGitCmd(ctx, repoPath, "branch", "--track", branch, remoteRef)
+	cmd := m.newNonInteractiveGitCmd(ctx, repoPath, "branch", "--track", localBranch, remoteRef)
 	if output, runErr := cmd.CombinedOutput(); runErr != nil {
 		return false, fmt.Errorf("create local branch %q from refreshed origin: %s: %w",
-			branch, strings.TrimSpace(string(output)), runErr)
+			localBranch, strings.TrimSpace(string(output)), runErr)
 	}
 	return true, nil
 }
@@ -420,6 +433,10 @@ func (m *Manager) selectContainingRef(
 	return "", fmt.Errorf("base refs %q and %q diverged", localRef, remoteRef)
 }
 
+// syncFailureCause intentionally suppresses cmdErr because Git output can
+// contain credentials. Callers expose only a bounded failure class and keep
+// raw command output in internal logs where the existing redaction policy
+// applies.
 func syncFailureCause(reason string, _ error, contextErr error) error {
 	if contextErr != nil {
 		return contextErr

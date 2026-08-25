@@ -1754,6 +1754,7 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 			WorktreeBranchTemplate:  info.WorktreeBranchTemplate,
 			PullBeforeWorktree:      info.PullBeforeWorktree,
 			RemoteSyncHandled:       info.RemoteSyncHandled,
+			RefreshRepository:       info.RefreshRepository,
 		}
 		if info.Repository != nil {
 			spec.RepoName = info.Repository.Name
@@ -1824,6 +1825,7 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 		req.WorktreeBranchTemplate = repoInfo.WorktreeBranchTemplate
 		req.PullBeforeWorktree = repoInfo.PullBeforeWorktree
 		req.RemoteSyncHandled = repoInfo.RemoteSyncHandled
+		req.RefreshRepository = repoInfo.RefreshRepository
 		if repoInfo.Repository != nil {
 			req.DefaultBranch = repoInfo.Repository.DefaultBranch
 			if req.UseWorktree {

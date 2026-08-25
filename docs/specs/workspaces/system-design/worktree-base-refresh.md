@@ -39,7 +39,9 @@ launch.
 
 - `internal/orchestrator/executor` resolves every task repository and selects
   the refresh route that matches its provider and task Git credential policy.
-  It passes `PullBeforeWorktree` and `RemoteSyncHandled` to the lifecycle layer.
+  It passes `PullBeforeWorktree`, `RemoteSyncHandled`, and a provider-authenticated
+  refresh callback to the lifecycle layer. The callback is not invoked until a
+  worktree must be materialized or recreated.
 - `internal/repoclone.Cloner` performs a strict refresh for a Kandev-managed
   provider checkout when provider credentials belong to the backend refresh
   boundary. `RefreshWorkspaceRepositoryWithCredentialRequest` binds the fetch
@@ -64,6 +66,7 @@ The existing worktree preparation fields have these contracts:
 | --- | --- |
 | `PullBeforeWorktree` | A required remote refresh remains to be completed before base-ref selection. |
 | `RemoteSyncHandled` | A strict provider-authenticated refresh completed for the exact checkout. The worktree manager must not run a second unauthenticated fetch. |
+| `RefreshRepository` | An optional exact-scope refresh callback. Lifecycle invokes it only when creating or recreating a worktree; valid reuse bypasses it. |
 
 `RemoteSyncHandled` is valid only after a successful strict refresh. A
 best-effort fetch or a failed refresh cannot set it.
@@ -74,22 +77,29 @@ When `PullBeforeWorktree` is false, base-ref resolution keeps its offline local
 behavior. This path does not claim that the checkout contains current remote
 state.
 
-When `PullBeforeWorktree` is true, base-ref resolution requires one successful
-refresh. A caller cannot convert a refresh error into a warning and local ref.
-The rule applies to initial launch and to resume whenever Kandev creates or
-recreates a worktree.
+When `PullBeforeWorktree` is true, worktree materialization requires one
+successful refresh. A caller cannot convert a refresh error into a warning and
+local ref. The rule applies to initial launch and to resume whenever Kandev
+creates or recreates a worktree. A valid reusable worktree is returned before
+the callback is invoked.
 
 ## Refresh routing
 
 The executor resolves one of two refresh routes before lifecycle preparation:
 
-1. A Kandev-managed provider route calls the strict `repoclone` refresh with
-   the exact credential request. On success, it clears `PullBeforeWorktree` and
-   sets `RemoteSyncHandled`.
+1. A Kandev-managed provider route supplies a callback that calls the strict
+   `repoclone` refresh with the exact credential request. The lifecycle layer
+   invokes it only when it must materialize or recreate a worktree. On success,
+   worktree creation clears `PullBeforeWorktree` and sets `RemoteSyncHandled`.
 2. A host or executor route leaves `PullBeforeWorktree` set. The worktree
    manager uses the reconciled `origin` URL and the non-interactive host Git
    environment. This includes an executor-inherited GitHub checkout whose
    origin uses the protocol selected by the host `gh` configuration.
+
+When a managed checkout carries a pull request number, the strict refresh also
+fetches `refs/pull/<N>/head` into a local `origin/pr/<N>` remote-tracking ref.
+Worktree creation uses that ref for the checkout branch, including fork pull
+requests, without a second unauthenticated fetch.
 
 Provider selection must follow the existing task Git credential policy. A
 managed GitHub workspace uses the backend-managed credential route. An
@@ -183,4 +193,3 @@ credential material or secret-bearing remote URLs.
 - [Required Worktree Refresh Fails Closed](../../../decisions/2026-08-25-required-worktree-refresh-fails-closed.md)
 - [Separate GitHub Automation From Task Git Credential Policy](../../../decisions/2026-07-27-task-git-credential-policy.md)
 - [Provider-Neutral Git Credential Broker](../../../decisions/2026-07-31-provider-neutral-git-credential-broker.md)
-

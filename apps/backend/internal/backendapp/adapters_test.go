@@ -99,6 +99,14 @@ func (f *distinctFiller) fill(t *testing.T, v reflect.Value, name string) {
 		f.fill(t, value, name+"-value")
 		m.SetMapIndex(key, value)
 		v.Set(m)
+	case reflect.Func:
+		v.Set(reflect.MakeFunc(v.Type(), func([]reflect.Value) []reflect.Value {
+			outputs := make([]reflect.Value, v.Type().NumOut())
+			for i := range outputs {
+				outputs[i] = reflect.Zero(v.Type().Out(i))
+			}
+			return outputs
+		}))
 	default:
 		t.Fatalf("distinctFiller: unsupported kind %s for field %s — extend the helper", v.Kind(), name)
 	}
@@ -125,6 +133,12 @@ func assertSameNamedFieldsEqual(t *testing.T, label string, src, dst any) {
 			continue
 		}
 		want := srcVal.Field(i).Interface()
+		if srcVal.Field(i).Kind() == reflect.Func {
+			if srcVal.Field(i).IsNil() != dstField.IsNil() {
+				t.Errorf("%s: field %s nil = %v, want %v", label, name, dstField.IsNil(), srcVal.Field(i).IsNil())
+			}
+			continue
+		}
 		if got := dstField.Interface(); !reflect.DeepEqual(got, want) {
 			t.Errorf("%s: field %s = %#v, want %#v", label, name, got, want)
 		}

@@ -133,7 +133,7 @@ func TestScopedWorkspaceRefreshUsesOnlyAuthenticatedOrigin(t *testing.T) {
 	fakeGit := `#!/bin/sh
 if [ "$3" = "config" ]; then printf '%s\n' "https://bitbucket.org/acme/repository.git"; exit 0; fi
 if [ "$3" = "remote" ]; then exit 0; fi
-printf '%s\n' "$@" > "$CAPTURE_PATH.args"
+	printf '%s\n' "$@" >> "$CAPTURE_PATH.args"
 printf '%s\n' "$GIT_CONFIG_KEY_1" > "$CAPTURE_PATH.scope"
 helper=${GIT_CONFIG_VALUE_1#!}
 "$helper" get > "$CAPTURE_PATH.helper"
@@ -152,6 +152,7 @@ helper=${GIT_CONFIG_VALUE_1#!}
 		WorkspaceID: "workspace-a", TaskID: "task-a", SessionID: "session-a", RepositoryID: "repo-a",
 		Provider: "bitbucket", ProviderHost: "https://bitbucket.org",
 		CloneURL: "https://bitbucket.org/acme/repository.git", Owner: "acme", Name: "repository",
+		CheckoutBranch: "feature/pr", PRNumber: 42,
 	}
 	repositoryPath, err := cloner.WorkspaceProviderRepoPath(
 		request.WorkspaceID, request.Provider, request.ProviderHost, request.Owner, request.Name,
@@ -172,7 +173,8 @@ helper=${GIT_CONFIG_VALUE_1#!}
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := string(args); !strings.Contains(got, "fetch\n--prune\n--force\n--no-tags\norigin\n") || strings.Contains(got, "--all") {
+	if got := string(args); !strings.Contains(got, "fetch\n--prune\n--force\n--no-tags\norigin\n") ||
+		!strings.Contains(got, "pull/42/head:refs/remotes/origin/pr/42\n") || strings.Contains(got, "--all") {
 		t.Fatalf("refresh args = %q", got)
 	}
 	scope, err := os.ReadFile(capturePath + ".scope")

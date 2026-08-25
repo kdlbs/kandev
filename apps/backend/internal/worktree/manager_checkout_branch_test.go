@@ -226,6 +226,66 @@ func TestCreateWorktree_UsesAlreadyRefreshedRemoteWithoutNetwork(t *testing.T) {
 	}
 }
 
+func TestCreateWorktree_ManagedRefreshRunsOnlyForMaterialization(t *testing.T) {
+	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+	repoPath := initGitRepoWithRemote(t)
+	refreshCalls := 0
+	req := CreateRequest{
+		TaskID: "task-refresh", SessionID: "session-refresh", RepositoryID: "repo-refresh",
+		RepositoryPath: repoPath, BaseBranch: "main", PullBeforeWorktree: true,
+		TaskDirName: "task-refresh", RepoName: "repo-refresh",
+		RefreshRepository: func(context.Context) error {
+			refreshCalls++
+			return nil
+		},
+	}
+	if _, err := mgr.Create(context.Background(), req); err != nil {
+		t.Fatalf("first Create(): %v", err)
+	}
+	if refreshCalls != 1 {
+		t.Fatalf("refresh calls after materialization = %d, want 1", refreshCalls)
+	}
+	if _, err := mgr.Create(context.Background(), req); err != nil {
+		t.Fatalf("reusing Create(): %v", err)
+	}
+	if refreshCalls != 1 {
+		t.Fatalf("refresh calls after valid reuse = %d, want 1", refreshCalls)
+	}
+}
+
+func TestCreateWorktree_ManagedRefreshUsesRefreshedPRHead(t *testing.T) {
+	repoPath, wantSHA := initGitRepoWithPullRef(t, 974, "feature/fork-pr")
+	runGit(t, repoPath, "fetch", "origin", "pull/974/head:refs/remotes/origin/pr/974")
+	runGit(t, repoPath, "remote", "set-url", "origin", "https://127.0.0.1:1/never.git")
+
+	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+	refreshCalls := 0
+	wt, err := mgr.Create(context.Background(), CreateRequest{
+		TaskID: "task-pr-refresh", SessionID: "session-pr-refresh", RepositoryID: "repo-pr-refresh",
+		RepositoryPath: repoPath, BaseBranch: "main", CheckoutBranch: "feature/fork-pr", PRNumber: 974,
+		PullBeforeWorktree: true, TaskDirName: "task-pr-refresh", RepoName: "repo-pr-refresh",
+		RefreshRepository: func(context.Context) error {
+			refreshCalls++
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create(): %v", err)
+	}
+	if refreshCalls != 1 {
+		t.Fatalf("refresh calls = %d, want 1", refreshCalls)
+	}
+	if got := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD")); got != wantSHA {
+		t.Fatalf("worktree HEAD = %q, want refreshed PR head %q", got, wantSHA)
+	}
+}
+
 // TestCreateWorktree_RemoteBaseRefDoesNotSetUpstream verifies that when a worktree
 // is created with a remote-tracking ref as the base (e.g. origin/feature/foo),
 // the new branch does NOT inherit upstream tracking from that ref.

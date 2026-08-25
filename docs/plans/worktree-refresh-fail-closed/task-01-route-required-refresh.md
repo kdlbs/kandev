@@ -26,11 +26,14 @@ backend credentials only for managed provider routes.
 
 - Add failing tests for GitHub managed mode, GitHub executor mode, plugin
   providers, GitLab, and Azure DevOps.
-- Resolve the route before worktree preparation in initial launch and resume.
+- Resolve the route before lifecycle preparation in initial launch and resume;
+  defer a managed refresh until the lifecycle actually materializes or
+  recreates a worktree so valid reuse performs no refresh.
 - Generalize the existing plugin strict-refresh helper into a
   provider-credential-aware helper.
 - Reuse the clone credential path for strict GitLab and Azure DevOps refresh.
-- Set `RemoteSyncHandled` only after strict provider refresh succeeds.
+- Set `RemoteSyncHandled` only after the deferred strict provider refresh
+  succeeds.
 - Leave `PullBeforeWorktree` enabled for executor-inherited and local routes so
   the worktree manager owns their fetch.
 - Preserve the SSH origin selected by `gitHubCheckoutOriginURL` in executor
@@ -45,9 +48,9 @@ backend credentials only for managed provider routes.
 
 ## Acceptance
 
-- A managed provider checkout completes one authenticated strict fetch before
-  lifecycle worktree preparation and does not run an unauthenticated follow-up
-  fetch.
+- A managed provider checkout runs one authenticated strict refresh when a
+  worktree is materialized or recreated, and does not run an unauthenticated
+  follow-up fetch. A valid reusable worktree bypasses the refresh.
 - An executor-inherited GitHub checkout retains its reconciled origin and
   delegates required fetch to the worktree manager.
 - A strict provider refresh error returns from initial launch and resume with
@@ -55,9 +58,9 @@ backend credentials only for managed provider routes.
 
 ## Verification
 
-Start with a regression that proves a managed first-party checkout can continue
-after its authenticated refresh fails. Confirm that it fails before the
-production change. Then run:
+Start with a regression that proves a managed first-party checkout stops after
+its authenticated refresh fails. Confirm that it fails before the production
+change. Then run:
 
 ```bash
 # From apps/backend:
@@ -100,6 +103,11 @@ None.
 
 - Added managed-provider refresh routing for GitHub, GitLab, Azure DevOps, and
   plugin repositories while preserving executor-inherited GitHub transport.
+- Deferred managed refresh until worktree materialization or recreation, while
+  preserving exact repository identity through multi-repository preparation and
+  bypassing refresh for valid worktree reuse.
+- Added authenticated pull-request-head fetching into `origin/pr/<N>` for
+  managed checkouts, including fork pull requests.
 - Added strict Azure DevOps basic-auth refresh support that reuses the clone
   credential boundary and validates the exact workspace checkout path.
 - Verified with:

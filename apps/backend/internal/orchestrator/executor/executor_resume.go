@@ -76,6 +76,7 @@ type repoInfo struct {
 	WorktreeBranchTemplate  string
 	PullBeforeWorktree      bool
 	RemoteSyncHandled       bool
+	RefreshRepository       func(context.Context) error
 	Repository              *models.Repository
 }
 
@@ -232,13 +233,22 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 		if !refreshRequired {
 			return info, nil
 		}
-		if err := e.refreshManagedRepositoryForSession(ctx, tr.TaskID, sessionID, repo); err != nil {
-			return nil, err
+		prNumber, checkoutBranch := info.PRNumber, info.CheckoutBranch
+		info.RefreshRepository = func(refreshCtx context.Context) error {
+			return e.refreshManagedRepositoryForSession(
+				refreshCtx, tr.TaskID, sessionID, repo, prNumber, checkoutBranch,
+			)
 		}
-		info.PullBeforeWorktree = false
-		info.RemoteSyncHandled = true
 	}
 	return info, nil
+}
+
+func hasProviderRepositoryIdentity(repo *models.Repository) bool {
+	if repo == nil {
+		return false
+	}
+	return (strings.TrimSpace(repo.ProviderOwner) != "" && strings.TrimSpace(repo.ProviderName) != "") ||
+		(strings.TrimSpace(repo.ProviderScope) != "" && strings.TrimSpace(repo.ProviderRepoID) != "")
 }
 
 func (e *Executor) shouldRefreshRepositoryForSession(
@@ -248,8 +258,11 @@ func (e *Executor) shouldRefreshRepositoryForSession(
 		return false, nil
 	}
 	provider := strings.ToLower(strings.TrimSpace(repo.Provider))
-	if provider == gitLabProviderID || provider == providerAzureDevOps {
-		return true, nil
+	if provider == gitLabProviderID {
+		return hasProviderRepositoryIdentity(repo), nil
+	}
+	if provider == providerAzureDevOps {
+		return strings.TrimSpace(repo.ProviderOwner) != "" && strings.TrimSpace(repo.ProviderName) != "", nil
 	}
 	if !isGitHubRepository(repo) {
 		return isPluginManagedRepository(repo), nil
@@ -266,7 +279,7 @@ func (e *Executor) shouldRefreshRepositoryForSession(
 }
 
 func isPluginManagedRepository(repo *models.Repository) bool {
-	if repo == nil || repo.SourceType == sourceTypeLocal || repo.ProviderOwner == "" || repo.ProviderName == "" {
+	if repo == nil || repo.SourceType == sourceTypeLocal || !hasProviderRepositoryIdentity(repo) {
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(repo.Provider)) {
@@ -278,7 +291,7 @@ func isPluginManagedRepository(repo *models.Repository) bool {
 }
 
 func (e *Executor) refreshManagedRepositoryForSession(
-	ctx context.Context, taskID, sessionID string, repo *models.Repository,
+	ctx context.Context, taskID, sessionID string, repo *models.Repository, prNumber int, checkoutBranch string,
 ) error {
 	if e.repoCloner == nil || repo.LocalPath == "" {
 		return errors.New("managed repository refresh is unavailable")
@@ -302,13 +315,18 @@ func (e *Executor) refreshManagedRepositoryForSession(
 			return fmt.Errorf("resolve GitLab refresh credentials: %w", err)
 		}
 	}
-	if provider == providerAzureDevOps && strings.HasPrefix(strings.ToLower(cloneURL), "http") {
+	if provider == providerAzureDevOps && strings.HasPrefix(strings.ToLower(cloneURL), "https://") {
 		return e.refreshAzureDevOpsRepositoryForSession(
 			ctx, repo, cloneURL,
 		)
 	}
+	request := repositoryGitCredentialRequest(taskID, sessionID, repo, cloneURL)
+	if isGitHubRepository(repo) {
+		request.PRNumber = prNumber
+		request.CheckoutBranch = checkoutBranch
+	}
 	if err := e.repoCloner.RefreshWorkspaceRepositoryWithCredentialRequest(
-		ctx, repositoryGitCredentialRequest(taskID, sessionID, repo, cloneURL), repo.LocalPath, credentialOrigin, token,
+		ctx, request, repo.LocalPath, credentialOrigin, token,
 	); err != nil {
 		return fmt.Errorf("refresh repository before worktree: %w", err)
 	}
@@ -352,7 +370,7 @@ func (e *Executor) ensureRepoLocalPath(ctx context.Context, repo *models.Reposit
 func (e *Executor) ensureRepoLocalPathForSession(
 	ctx context.Context, taskID, sessionID string, repo *models.Repository,
 ) error {
-	if repo.SourceType == sourceTypeLocal || repo.ProviderOwner == "" || repo.ProviderName == "" {
+	if repo.SourceType == sourceTypeLocal || !hasProviderRepositoryIdentity(repo) {
 		return nil
 	}
 	if repo.LocalPath != "" && isLocalGitRepo(repo.LocalPath) &&
@@ -1015,6 +1033,7 @@ func (e *Executor) buildResumeRequestAtCredentialBoundary(
 	if len(allRepos) > 0 {
 		req.PullBeforeWorktree = allRepos[0].PullBeforeWorktree
 		req.RemoteSyncHandled = allRepos[0].RemoteSyncHandled
+		req.RefreshRepository = allRepos[0].RefreshRepository
 	}
 
 	e.reuseExistingEnvironment(ctx, req, existingEnv)

@@ -63,12 +63,13 @@ and updates the public Git guidance.
 
 ## Technical approach
 
-The executor will resolve the task Git credential policy before worktree
-preparation. A backend-managed provider checkout will use a strict `repoclone`
-refresh with the same provider-specific credentials as clone. An
-executor-inherited checkout will retain its reconciled origin and enter the
-strict worktree-manager fetch path. Only a completed backend refresh can set
-`RemoteSyncHandled`.
+The executor will resolve the task Git credential policy before lifecycle
+preparation. A backend-managed provider checkout will pass a deferred strict
+`repoclone` refresh callback with the same provider-specific credentials as
+clone. The callback runs only when a worktree is materialized or recreated; a
+valid reusable worktree bypasses it. An executor-inherited checkout will retain
+its reconciled origin and enter the strict worktree-manager fetch path. Only a
+completed refresh can set `RemoteSyncHandled`.
 
 The worktree manager will return `(ref, error)` from required sync and
 base-selection functions. Fetch failure will propagate instead of returning a
@@ -112,7 +113,7 @@ verified behavior.
 ## Verification results
 
 - Worktree, lifecycle, orchestrator, and executor race suites passed, including
-  3,399 tests in the combined orchestrator/worktree run.
+  6,049 tests in the combined affected-package run.
 - Backend build, E2E plugin packaging, and production E2E build passed.
 - The launch-failure recovery spec passed all 3 Chromium tests and both
   `mobile-chrome` tests.

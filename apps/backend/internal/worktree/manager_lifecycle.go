@@ -121,6 +121,9 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 		}
 		return wt, err
 	}
+	if err := m.refreshRepositoryForMaterialization(ctx, &req); err != nil {
+		return nil, err
+	}
 
 	// Check repository is a git repo
 	if !m.isGitRepo(req.RepositoryPath) {
@@ -158,6 +161,22 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 		return nil, err
 	}
 	return wt, nil
+}
+
+// refreshRepositoryForMaterialization runs a provider-authenticated refresh
+// only when Create is going to materialize or recreate a worktree. Reuse is
+// checked by the caller first, so a valid existing worktree never refreshes
+// origin or incurs provider authentication work.
+func (m *Manager) refreshRepositoryForMaterialization(ctx context.Context, req *CreateRequest) error {
+	if req == nil || req.RemoteSyncHandled || req.RefreshRepository == nil {
+		return nil
+	}
+	if err := req.RefreshRepository(ctx); err != nil {
+		return err
+	}
+	req.RemoteSyncHandled = true
+	req.PullBeforeWorktree = false
+	return nil
 }
 
 // reuseRequiredWorktree resolves the exact canonical worktree for an
@@ -400,11 +419,16 @@ func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRe
 	}
 	if req.CheckoutBranch != "" {
 		if req.RemoteSyncHandled {
-			prepared, prepareErr := m.prepareCheckoutFromRefreshedOrigin(ctx, req.RepositoryPath, req.CheckoutBranch)
+			prepared, prepareErr := m.prepareBranchFromRefreshedOrigin(
+				ctx, req.RepositoryPath, req.CheckoutBranch, req.CheckoutBranch, req.PRNumber,
+			)
 			if prepareErr != nil {
 				return nil, prepareErr
 			}
 			if !prepared {
+				if req.PRNumber > 0 {
+					return nil, fmt.Errorf("%w: refreshed pull request head %d was not materialized", ErrBranchUnrecoverable, req.PRNumber)
+				}
 				branchName = req.CheckoutBranch
 				checkoutMode.CheckoutBranch = ""
 			}
@@ -1318,11 +1342,15 @@ func (m *Manager) copyConfiguredFiles(ctx context.Context, req CreateRequest, wt
 
 // recreate recreates a worktree from stored metadata.
 func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRequest) (*Worktree, error) {
+	if err := m.refreshRepositoryForMaterialization(ctx, &req); err != nil {
+		return nil, err
+	}
 	// Recreate bypasses the new-worktree path, so perform the same required
 	// base refresh before touching the existing worktree path. A failed refresh
 	// must leave the retryable on-disk state intact.
 	if req.PullBeforeWorktree && !req.RemoteSyncHandled {
-		if _, _, _, err := m.resolveBaseRefWithFallback(ctx, &req); err != nil {
+		refreshReq := req
+		if _, _, _, err := m.resolveBaseRefWithFallback(ctx, &refreshReq); err != nil {
 			return nil, err
 		}
 	}
@@ -1383,6 +1411,21 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 			if output, branchErr := runGitCmdCombinedOutput(ctx, branchCmd); branchErr != nil {
 				return nil, fmt.Errorf("restore contribution branch: %s: %w", strings.TrimSpace(string(output)), branchErr)
 			}
+		} else if req.RemoteSyncHandled {
+			sourceBranch := existing.Branch
+			if req.CheckoutBranch != "" {
+				sourceBranch = req.CheckoutBranch
+			}
+			prepared, prepareErr := m.prepareBranchFromRefreshedOrigin(
+				ctx, req.RepositoryPath, existing.Branch, sourceBranch, req.PRNumber,
+			)
+			if prepareErr != nil {
+				return nil, prepareErr
+			}
+			if !prepared {
+				return nil, fmt.Errorf("%w: refreshed branch %q was not materialized", ErrBranchUnrecoverable, sourceBranch)
+			}
+			exists = true
 		} else {
 			if _, fetchErr := m.fetchBranchToLocalWithPolicy(
 				ctx, req.RepositoryPath, existing.Branch, req.PRNumber,

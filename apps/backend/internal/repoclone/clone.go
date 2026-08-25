@@ -84,6 +84,8 @@ type GitCredentialRequest struct {
 	CloneURL             string
 	Owner                string
 	Name                 string
+	CheckoutBranch       string
+	PRNumber             int
 }
 
 // NewCloner creates a new Cloner with the given configuration.
@@ -416,7 +418,7 @@ func (c *Cloner) RefreshWorkspaceRepositoryWithCredentialRequest(
 	if err != nil {
 		return err
 	}
-	return c.refreshWorkspaceRepository(ctx, targetPath, cloneURL, auth)
+	return c.refreshWorkspaceRepository(ctx, targetPath, cloneURL, auth, request.PRNumber)
 }
 
 // RefreshWorkspaceRepositoryWithBasicAuth strictly refreshes one existing
@@ -438,11 +440,11 @@ func (c *Cloner) RefreshWorkspaceRepositoryWithBasicAuth(
 	}
 	return c.refreshWorkspaceRepository(ctx, targetPath, cloneURL, &cloneAuth{
 		origin: origin, username: username, password: password,
-	})
+	}, 0)
 }
 
 func (c *Cloner) refreshWorkspaceRepository(
-	ctx context.Context, targetPath, cloneURL string, auth *cloneAuth,
+	ctx context.Context, targetPath, cloneURL string, auth *cloneAuth, prNumber int,
 ) error {
 	mu := c.repoMu(targetPath)
 	mu.Lock()
@@ -453,15 +455,31 @@ func (c *Cloner) refreshWorkspaceRepository(
 	if err := c.setOriginURLLocked(ctx, targetPath, cloneURL); err != nil {
 		return err
 	}
-	cmd := subproc.NewGitCommand(ctx, "-C", targetPath, "fetch", "--prune", "--force", gitNoTags, "origin")
-	cleanup, err := configureGitCommand(cmd, auth)
-	if err != nil {
+	runFetch := func(refspec string) error {
+		args := []string{"-C", targetPath, "fetch", "--prune", "--force", gitNoTags, "origin"}
+		if refspec != "" {
+			args = append(args, refspec)
+		}
+		cmd := subproc.NewGitCommand(ctx, args...)
+		cleanup, err := configureGitCommand(cmd, auth)
+		if err != nil {
+			return err
+		}
+		defer cleanup()
+		if out, runErr := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd); runErr != nil {
+			return fmt.Errorf("refresh scoped workspace repository: %s: %w",
+				redactCloneOutput(string(out), authToken(auth)), runErr)
+		}
+		return nil
+	}
+	if err := runFetch(""); err != nil {
 		return err
 	}
-	defer cleanup()
-	if out, runErr := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd); runErr != nil {
-		return fmt.Errorf("refresh scoped workspace repository: %s: %w",
-			redactCloneOutput(string(out), authToken(auth)), runErr)
+	if prNumber > 0 {
+		prRefspec := fmt.Sprintf("pull/%d/head:refs/remotes/origin/pr/%d", prNumber, prNumber)
+		if err := runFetch(prRefspec); err != nil {
+			return fmt.Errorf("refresh scoped workspace pull request: %w", err)
+		}
 	}
 	return nil
 }

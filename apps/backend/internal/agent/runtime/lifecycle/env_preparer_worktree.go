@@ -302,6 +302,7 @@ func buildWorktreeCreateRequest(req *EnvPrepareRequest) worktree.CreateRequest {
 		WorktreeBranchTicket:    req.WorktreeBranchTicket,
 		PullBeforeWorktree:      req.PullBeforeWorktree,
 		RemoteSyncHandled:       req.RemoteSyncHandled,
+		RefreshRepository:       req.RefreshRepository,
 		WorktreeID:              req.WorktreeID,
 		ReuseRequired:           req.WorkspaceReuseRequired,
 		TaskDirName:             req.TaskDirName,
@@ -534,6 +535,7 @@ func (p *WorktreePreparer) prepareOneRepo(
 	subReq.WorktreeBranchTicket = spec.WorktreeBranchTicket
 	subReq.PullBeforeWorktree = spec.PullBeforeWorktree
 	subReq.RemoteSyncHandled = spec.RemoteSyncHandled
+	subReq.RefreshRepository = spec.RefreshRepository
 	subReq.BranchSlug = spec.BranchSlug
 	subReq.BranchIdentitySlug = repoBranchIdentitySlug(spec)
 	// Strip the multi-repo list to avoid re-entering the multi-repo branch.
