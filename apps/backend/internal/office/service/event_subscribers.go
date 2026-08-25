@@ -378,6 +378,14 @@ func (s *Service) warnIfReviewDecisionMissing(ctx context.Context, run *models.R
 	}
 	parsed := ParseRunPayload(run.Payload)
 	stageType := parsed["stage_type"]
+	if stageType == "" {
+		switch run.Reason {
+		case legacyRunReasonReviewStarted:
+			stageType = stageTypeReview
+		case legacyRunReasonApprovalStarted:
+			stageType = stageTypeApproval
+		}
+	}
 	if stageType != stageTypeReview && stageType != stageTypeApproval {
 		return
 	}

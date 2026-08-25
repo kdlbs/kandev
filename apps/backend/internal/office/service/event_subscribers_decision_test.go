@@ -38,7 +38,7 @@ func TestHandleAgentCompleted_WarnsWhenReviewDecisionMissing(t *testing.T) {
 	createTestAgent(t, svc, "ws-1", "reviewer-1")
 	taskID := createOfficeTask(t, svc, "ws-1", "reviewer-1")
 
-	payload := `{"task_id":"` + taskID + `","stage_type":"review","stage_id":"step-1"}`
+	payload := `{"task_id":"` + taskID + `","stage_type":"review","workflow_step_id":"step-1"}`
 	if err := svc.QueueRun(ctx, "reviewer-1", service.RunReasonTaskAssigned, payload, "review-no-decision"); err != nil {
 		t.Fatalf("queue run: %v", err)
 	}
@@ -74,6 +74,55 @@ func TestHandleAgentCompleted_WarnsWhenReviewDecisionMissing(t *testing.T) {
 	}
 }
 
+// TestHandleAgentCompleted_WarnsOnLegacyReviewStartedReason pins Review
+// round 1 finding 1: a run woken with the legacy "review_started" reason
+// (the exact reason on the incident's run f05a6f89) carries no stage_type
+// in its payload — production payload shape is {task_id, workflow_step_id,
+// agent_profile_id}, mirroring what runPayload persists. The detector must
+// derive stage_type from run.Reason the same way buildPromptContext already
+// does for the prompt, or a decisionless review_started/approval_started
+// turn goes undetected.
+func TestHandleAgentCompleted_WarnsOnLegacyReviewStartedReason(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+	createStepDecisionsTable(t, svc)
+
+	createTestAgent(t, svc, "ws-1", "reviewer-1")
+	taskID := createOfficeTask(t, svc, "ws-1", "reviewer-1")
+
+	payload := `{"task_id":"` + taskID + `","workflow_step_id":"step-1","agent_profile_id":"reviewer-1"}`
+	if err := svc.QueueRun(ctx, "reviewer-1", "review_started", payload, "review-started-no-decision"); err != nil {
+		t.Fatalf("queue run: %v", err)
+	}
+	run, err := svc.ClaimNextRun(ctx)
+	if err != nil || run == nil {
+		t.Fatalf("claim run: %v (run=%v)", err, run)
+	}
+
+	completed := bus.NewEvent(events.AgentCompleted, "test", map[string]string{
+		"task_id":          taskID,
+		"session_id":       "sess-1",
+		"agent_profile_id": "reviewer-1",
+	})
+	if pErr := eb.Publish(ctx, events.AgentCompleted, completed); pErr != nil {
+		t.Fatalf("publish completed: %v", pErr)
+	}
+
+	rowEvents, err := listRunEvents(t, svc, run.ID)
+	if err != nil {
+		t.Fatalf("list run events: %v", err)
+	}
+	found := false
+	for _, e := range rowEvents {
+		if string(e.EventType) == "decision.missing" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("events = %+v, want a decision.missing warn event for legacy review_started reason", rowEvents)
+	}
+}
+
 // TestHandleAgentCompleted_NoWarnWhenReviewDecisionRecorded is the
 // counterpart green path: when the reviewer's decision was recorded via
 // record_step_decision_kandev before the run finished, no decision.missing
@@ -86,7 +135,7 @@ func TestHandleAgentCompleted_NoWarnWhenReviewDecisionRecorded(t *testing.T) {
 	createTestAgent(t, svc, "ws-1", "reviewer-1")
 	taskID := createOfficeTask(t, svc, "ws-1", "reviewer-1")
 
-	payload := `{"task_id":"` + taskID + `","stage_type":"review","stage_id":"step-1"}`
+	payload := `{"task_id":"` + taskID + `","stage_type":"review","workflow_step_id":"step-1"}`
 	if err := svc.QueueRun(ctx, "reviewer-1", service.RunReasonTaskAssigned, payload, "review-with-decision"); err != nil {
 		t.Fatalf("queue run: %v", err)
 	}
@@ -132,7 +181,7 @@ func TestHandleAgentCompleted_NoWarnForWorkStage(t *testing.T) {
 	createTestAgent(t, svc, "ws-1", "builder-1")
 	taskID := createOfficeTask(t, svc, "ws-1", "builder-1")
 
-	payload := `{"task_id":"` + taskID + `","stage_type":"work","stage_id":"step-1"}`
+	payload := `{"task_id":"` + taskID + `","stage_type":"work","workflow_step_id":"step-1"}`
 	if err := svc.QueueRun(ctx, "builder-1", service.RunReasonTaskAssigned, payload, "work-stage"); err != nil {
 		t.Fatalf("queue run: %v", err)
 	}
