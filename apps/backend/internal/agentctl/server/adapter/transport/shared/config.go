@@ -39,8 +39,8 @@ type Config struct {
 	AgentName string
 
 	// BaseURL, AuthHeader, AuthValue, and Headers are unused by any adapter
-	// today (no HTTP-based transport exists); no production code sets or
-	// reads them.
+	// today (no HTTP-based transport exists). Populated by
+	// adapter.Config.ToSharedConfig but never read by a transport.
 	BaseURL    string            // Base URL of the agent's HTTP API
 	AuthHeader string            // Optional auth header name
 	AuthValue  string            // Optional auth header value
