@@ -24,6 +24,7 @@ runtime:
 
 capabilities:
   events: ["task.created"]
+  api_read: ["automations"]
   api_write: ["tasks"]
   state: true
   secrets: true
