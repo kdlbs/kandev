@@ -158,7 +158,16 @@ func remoteFilesystemPolicyDescriptor(req *ExecutorCreateRequest) (*agents.Files
 // profile into the environment forwarded to a remote agentctl instance. The
 // remote resolver proves GitDir is the task checkout's non-symlink .git
 // directory before this function is called.
+//
+// Agents that do not implement FilesystemPolicyAgent cannot receive a
+// server-authored policy overlay — skip the merge while keeping the in-container
+// attestation (AttestWorkspaceGitMetadata) intact.
 func prepareRemoteRegularGitMetadataPolicy(req *ExecutorCreateRequest, metadata ...remoteRegularGitMetadata) error {
+	if _, ok := req.AgentConfig.(agents.FilesystemPolicyAgent); !ok {
+		// No filesystem policy to merge — the in-container attestation has
+		// already completed successfully.
+		return nil
+	}
 	descriptor, err := remoteFilesystemPolicyDescriptor(req)
 	if err != nil {
 		return err
