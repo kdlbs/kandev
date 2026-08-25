@@ -7,7 +7,7 @@ They confirm message parsing, turn detection, and normalization still work when 
 
 ## Prerequisites
 
-- Agent CLI installed and on PATH, or `npx` available for npm-distributed agents (`auggie`, `gemini`)
+- Agent CLI installed and on PATH, or `npx` available for npm-distributed agents (`auggie`, `gemini`, `opencode`)
 - Active API subscription for the agent you're testing
 - Tests for agents not installed are skipped automatically
 
