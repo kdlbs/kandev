@@ -205,12 +205,20 @@ func (r *Repository) UpdateTaskEnvironment(ctx context.Context, env *models.Task
 }
 
 func (r *Repository) validateReadyTaskEnvironment(ctx context.Context, tx *sqlx.Tx, environmentID string) error {
-	taskID, err := r.taskEnvironmentTaskIDTx(ctx, tx, environmentID)
+	taskID, currentStatus, err := r.taskEnvironmentStateTx(ctx, tx, environmentID)
 	if err != nil {
 		return err
 	}
 	if err := r.taskCleanupBarrierLocked(ctx, tx, taskID); err != nil {
 		return err
+	}
+	// Workspace-source materialization updates an already-ready environment
+	// after it adds a folder or repository. That update does not publish a new
+	// ready state, so it must remain compatible with legacy environments whose
+	// canonical inventory is still empty. Launch persistence separately rejects
+	// that state before it calls this repository method.
+	if currentStatus == models.TaskEnvironmentStatusReady {
+		return nil
 	}
 	hasRepos, err := r.taskHasRepositoriesTx(ctx, tx, taskID)
 	if err != nil || !hasRepos {
@@ -226,13 +234,14 @@ func (r *Repository) validateReadyTaskEnvironment(ctx context.Context, tx *sqlx.
 	return nil
 }
 
-func (r *Repository) taskEnvironmentTaskIDTx(ctx context.Context, tx *sqlx.Tx, environmentID string) (string, error) {
+func (r *Repository) taskEnvironmentStateTx(ctx context.Context, tx *sqlx.Tx, environmentID string) (string, models.TaskEnvironmentStatus, error) {
 	var taskID string
-	err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id FROM task_environments WHERE id = ?`), environmentID).Scan(&taskID)
+	var status string
+	err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id, status FROM task_environments WHERE id = ?`), environmentID).Scan(&taskID, &status)
 	if err == sql.ErrNoRows {
-		return "", fmt.Errorf("%w: %s", ErrTaskEnvironmentNotFound, environmentID)
+		return "", "", fmt.Errorf("%w: %s", ErrTaskEnvironmentNotFound, environmentID)
 	}
-	return taskID, err
+	return taskID, models.TaskEnvironmentStatus(status), err
 }
 
 // FinalizeTaskEnvironmentMaterialization writes the complete canonical

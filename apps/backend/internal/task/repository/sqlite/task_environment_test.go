@@ -623,6 +623,45 @@ func TestUpdateTaskEnvironmentRefusesReadyWithEmptyInventoryForRepoBackedTask(t 
 	}
 }
 
+func TestUpdateTaskEnvironmentAllowsExistingReadyEnvironmentWithoutInventory(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	workspaceID := "workspace-update-existing-ready"
+	taskID := "task-update-existing-ready"
+	seedWorkspace(t, repo, workspaceID)
+	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, WorkspaceID: workspaceID, Title: taskID}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	env := &models.TaskEnvironment{
+		ID:           "env-update-existing-ready",
+		TaskID:       taskID,
+		ExecutorType: string(models.ExecutorTypeSSH),
+		Status:       models.TaskEnvironmentStatusReady,
+	}
+	if err := repo.CreateTaskEnvironment(ctx, env); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	if err := repo.CreateRepository(ctx, &models.Repository{ID: taskID + "-repo", WorkspaceID: workspaceID, Name: taskID + "-repo"}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{TaskID: taskID, RepositoryID: taskID + "-repo", BaseBranch: "main"}); err != nil {
+		t.Fatalf("CreateTaskRepository: %v", err)
+	}
+	env.WorkspacePath = "/workspace/task-update-existing-ready"
+	if err := repo.UpdateTaskEnvironment(ctx, env); err != nil {
+		t.Fatalf("UpdateTaskEnvironment on existing ready environment: %v", err)
+	}
+
+	persisted, err := repo.GetTaskEnvironment(ctx, env.ID)
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	if persisted.Status != models.TaskEnvironmentStatusReady || persisted.WorkspacePath != env.WorkspacePath {
+		t.Fatalf("persisted environment = %+v, want ready with updated workspace path", persisted)
+	}
+}
+
 // Same defect, direct-create path: CreateTaskEnvironment must not persist a
 // ready environment with zero repo rows for a repo-backed task either.
 func TestCreateTaskEnvironmentRefusesReadyWithEmptyInventoryForRepoBackedTask(t *testing.T) {

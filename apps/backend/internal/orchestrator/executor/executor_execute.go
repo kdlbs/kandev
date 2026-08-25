@@ -2310,10 +2310,17 @@ func (e *Executor) persistTaskEnvironment(
 			return err
 		}
 		repoBacked := e.taskIsRepoBacked(ctx, taskID)
-		if isInitialMaterializer && len(repos) == 0 && repoBacked {
+		// A sibling can finish while the initial materializer still owns a
+		// CREATING environment. In that case the owner remains responsible for
+		// publishing (or failing) the inventory, so leave the claim untouched
+		// instead of turning the sibling's empty result into a launch error. Once
+		// the claim is no longer CREATING, an empty repo-backed inventory is a
+		// persistence failure and must fail the launch rather than publish an
+		// unusable READY/STOPPED environment.
+		if len(repos) == 0 && len(existingEnv.Repos) == 0 && repoBacked && previousStatus != models.TaskEnvironmentStatusCreating {
 			existingEnv.Status = previousStatus
 			existingEnv.MaterializationSessionID = previousMaterializationSessionID
-			return fmt.Errorf("finalize task environment materialization: ready status requires repository inventory")
+			return fmt.Errorf("persist task environment: ready status requires repository inventory")
 		}
 		// A non-materializing sibling only advances the environment to ready
 		// when inventory is present: already recorded before this launch,
