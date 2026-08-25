@@ -18,15 +18,9 @@ var debugMode = os.Getenv(envDebugMessages) == "true"
 // debugMode is true.
 var acpLog = newACPLogManager(acpLogConfigFromEnv())
 
-// Protocol constants for debug file naming
-const (
-	ProtocolACP        = "acp"
-	ProtocolStreamJSON = "streamjson"
-	ProtocolCodex      = "codex"
-	ProtocolOpenCode   = "opencode"
-	ProtocolAmp        = "amp"
-	ProtocolCopilot    = "copilot"
-)
+// ProtocolACP names the ACP transport in debug file naming (raw-acp-*.jsonl,
+// normalized-acp-*.jsonl). It is the only supported protocol.
+const ProtocolACP = "acp"
 
 // ACPDebugEnabled reports whether agent-message debug logging is on.
 func ACPDebugEnabled() bool { return debugMode }

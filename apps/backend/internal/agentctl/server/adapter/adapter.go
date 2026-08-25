@@ -1,9 +1,9 @@
-// Package adapter provides protocol adapters for different agent communication protocols.
-// This abstraction allows agentctl to work with agents using ACP, REST, MCP, or custom protocols.
+// Package adapter provides protocol adapters for agent communication.
+// Only ACP is supported; non-ACP variants were removed in the ACP-first migration.
 //
 // Architecture:
-//   - Transport layer (transport/*): Handles protocol-level communication (ACP, stream-json, codex, opencode)
-//   - Factory: Creates the appropriate transport adapter based on agent's protocol
+//   - Transport layer (transport/*): Handles protocol-level communication (ACP is the only transport)
+//   - Factory: Creates the ACP transport adapter
 //
 // Agent configuration (commands, discovery, models) is handled by the agent/registry package
 // using agents.json as the source of truth. This package only handles protocol communication.
@@ -52,9 +52,10 @@ const (
 )
 
 // OneShotAdapter is an optional interface implemented by adapters that spawn
-// a new process per prompt (e.g., Amp). When an adapter is one-shot, the
-// process manager skips subprocess creation and the adapter manages its own
-// subprocess lifecycle internally.
+// a new process per prompt. When an adapter is one-shot, the process manager
+// skips subprocess creation and the adapter manages its own subprocess
+// lifecycle internally. No production adapter implements this today; Amp is
+// now an ACP agent and goes through the standard subprocess path.
 type OneShotAdapter interface {
 	IsOneShot() bool
 }
@@ -152,7 +153,7 @@ type AgentInfo struct {
 }
 
 // AgentAdapter defines the interface for protocol adapters.
-// Each adapter translates a specific protocol (ACP, REST, MCP, etc.) into the
+// Each adapter translates ACP, the only supported protocol, into the
 // normalized AgentEvent format that agentctl exposes via its HTTP API.
 //
 // Lifecycle:
