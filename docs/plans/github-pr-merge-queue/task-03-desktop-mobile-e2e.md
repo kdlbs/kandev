@@ -5,14 +5,14 @@ status: done
 wave: 3
 depends_on: ["01-backend-queue-aware-merge", "02-frontend-merge-outcomes"]
 plan: "plan.md"
-spec: "../../specs/github-pr-merge-queue/spec.md"
+spec: "../../specs/integrations/requirements/github-pr-merge-queue.md"
 ---
 
 # Task 03: Desktop And Mobile Merge E2E
 
 ## Inputs
 
-- `docs/specs/github-pr-merge-queue/spec.md`
+- `docs/specs/integrations/requirements/github-pr-merge-queue.md`
 - `docs/plans/github-pr-merge-queue/plan.md`
 - `.agents/skills/e2e/SKILL.md`
 - `.agents/skills/mobile-parity/SKILL.md`

@@ -96,6 +96,27 @@ type EventBus interface {
 	Publish(ctx context.Context, topic string, event *bus.Event) error
 }
 
+// PrimaryAnswered is the local ordering notification for a primary-path
+// clarification response. The resolver invokes its notifier synchronously after
+// durable live delivery confirmation and before the live waiter is released.
+// The event bus remains a fan-out projection for other consumers.
+type PrimaryAnswered struct {
+	SessionID           string
+	TaskID              string
+	PendingID           string
+	ClarificationTurnID string
+	Question            string
+	AnswerText          string
+	Rejected            bool
+	RejectReason        string
+}
+
+// PrimaryAnsweredNotifier arms the orchestrator's primary-answer watchdog at
+// the live delivery boundary. It must return only after the local watchdog has
+// been registered. It is deliberately separate from EventBus: NATS Publish is
+// fire-and-forget and cannot acknowledge local watchdog registration.
+type PrimaryAnsweredNotifier func(context.Context, PrimaryAnswered)
+
 // DetachedClarificationResume contains the durable context required to resume
 // a session after its original clarification waiter has gone away.
 type DetachedClarificationResume struct {

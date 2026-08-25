@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/slash-command-composer.md"
+spec: "../../specs/ui/requirements/slash-command-composer.md"
 ---
 
 # Task 01: Frontend Slash Command Selection

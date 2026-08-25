@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/task-prompt-transcript-visibility.md"
+spec: "../../specs/ui/requirements/task-prompt-transcript-visibility.md"
 ---
 
 # Task 02: Auto-load collapsed transcript history

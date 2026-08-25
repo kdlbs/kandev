@@ -11,7 +11,7 @@ plan: docs/plans/app-status-bar/plan.md
 
 ## Inputs
 
-[Spec: attribution](../../specs/ui/app-status-bar.md#attribution); exact public slot contract; Orca revision `d9d939a33b5858495ffb33489a952f1ac9293610` and MIT license.
+[Spec: attribution](../../specs/ui/requirements/app-status-bar.md#attribution); exact public slot contract; Orca revision `d9d939a33b5858495ffb33489a952f1ac9293610` and MIT license.
 
 ## Files
 

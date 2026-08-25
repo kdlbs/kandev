@@ -37,7 +37,7 @@ type taskScanColumn struct {
 // Automation runs are hidden from the board and from task lists by their
 // provenance, not by ephemerality: their tasks are ordinary persistent tasks
 // that keep their worktree and stay repliable, they just have their own
-// destination (docs/specs/office/automations-settings.md). is_ephemeral keeps
+// destination (docs/specs/office/requirements/automations-settings.md). is_ephemeral keeps
 // its original quick-chat meaning, so every board read pairs the two.
 const (
 	andNotAutomationOrigin  = ` AND COALESCE(origin, '') != '` + models.TaskOriginAutomationRun + `'`

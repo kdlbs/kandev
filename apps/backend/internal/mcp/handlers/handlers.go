@@ -20,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/office/dashboard"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
@@ -100,6 +101,24 @@ type SessionRepository interface {
 	// pending-completion bag for a step. It preserves first-signal-wins for
 	// concurrent requests and replaces a stale signal from an older step.
 	SetSessionMetadataKeyIfAbsentOrDifferentStep(ctx context.Context, sessionID, key, stepID string, value interface{}) (bool, error)
+}
+
+// stepCompletionTurnReader exposes the immutable workflow-step stamp on the
+// latest turn. Production SQLite implements this through the turn repository,
+// while small handler fakes can omit it and retain legacy behavior.
+type stepCompletionTurnReader interface {
+	ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error)
+}
+
+// stepCompletionSignalClaimer binds the metadata write to the task step that
+// launched the calling turn. Production SQLite performs the task-step check
+// and metadata claim in one transaction.
+type stepCompletionSignalClaimer interface {
+	SetSessionMetadataKeyIfAbsentOrDifferentStepIfTaskAtStep(
+		ctx context.Context,
+		taskID, sessionID, key, stepID string,
+		value interface{},
+	) (bool, error)
 }
 
 // conditionalSessionStateUpdater is implemented by repositories that can
@@ -383,10 +402,25 @@ func (h *Handlers) SetPluginService(svc *plugins.Service) {
 }
 
 // RegisterHandlers registers all MCP handlers with the dispatcher.
-func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
+func (h *Handlers) RegisterHandlers(dispatcher *ws.Dispatcher) {
+	d := &guardedMCPDispatcher{Dispatcher: dispatcher, handlers: h}
 	before := d.HandlerCount()
+	h.registerTaskModeHandlers(d)
+	h.registerConfigModeHandlers(d)
 
-	// Task-mode handlers (always registered)
+	after := d.HandlerCount()
+	h.logger.Info("registered MCP handlers", zap.Int("count", after-before))
+}
+
+func (h *Handlers) registerTaskModeHandlers(d *guardedMCPDispatcher) {
+	h.registerTaskReadHandlers(d)
+	h.registerTaskMutationHandlers(d)
+	h.registerTaskPlanHandlers(d)
+	h.registerTaskQuestionHandlers(d)
+	h.registerReviewHandlers(d)
+}
+
+func (h *Handlers) registerTaskReadHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPListWorkspaces, h.handleListWorkspaces)
 	if h.pluginSvc != nil {
 		d.RegisterFunc(ws.ActionMCPListPluginTools, h.handleListPluginTools)
@@ -396,13 +430,20 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPListWorkflowSteps, h.handleListWorkflowSteps)
 	d.RegisterFunc(ws.ActionMCPListRepositories, h.handleListRepositories)
 	d.RegisterFunc(ws.ActionMCPListTasks, h.handleListTasks)
-	d.RegisterFunc(ws.ActionMCPCreateTask, h.handleCreateTask)
-	d.RegisterFunc(ws.ActionMCPUpdateTask, h.handleUpdateTask)
-	d.RegisterFunc(ws.ActionMCPSetTaskTitle, h.handleSetTaskTitle)
 	d.RegisterFunc(ws.ActionMCPGetTaskPRAutomation, h.handleGetTaskPRAutomation)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskPRAutomation, h.handleUpdateTaskPRAutomation)
 	d.RegisterFunc(ws.ActionMCPGetTaskMRAutomation, h.handleGetTaskMRAutomation)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskMRAutomation, h.handleUpdateTaskMRAutomation)
+	d.RegisterFunc(ws.ActionMCPGetTaskConversation, h.handleGetTaskConversation)
+	d.RegisterFunc(ws.ActionMCPListTaskSessions, h.handleListTaskSessions)
+	d.RegisterFunc(ws.ActionMCPListPendingAgentPermissions, h.handleListPendingAgentPermissions)
+	d.RegisterFunc(ws.ActionMCPResolveAgentPermission, h.handleResolveAgentPermission)
+}
+
+func (h *Handlers) registerTaskMutationHandlers(d *guardedMCPDispatcher) {
+	d.RegisterFunc(ws.ActionMCPCreateTask, h.handleCreateTask)
+	d.RegisterFunc(ws.ActionMCPUpdateTask, h.handleUpdateTask)
+	d.RegisterFunc(ws.ActionMCPSetTaskTitle, h.handleSetTaskTitle)
 	d.RegisterFunc(ws.ActionMCPAddTaskDependency, h.handleAddTaskDependency)
 	d.RegisterFunc(ws.ActionMCPRemoveTaskDependency, h.handleRemoveTaskDependency)
 	d.RegisterFunc(ws.ActionMCPAddBranchToTask, h.handleAddBranchToTask)
@@ -412,12 +453,9 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPMessageTask, h.handleMessageTask)
 	d.RegisterFunc(ws.ActionMCPStopTask, h.handleStopTask)
 	d.RegisterFunc(ws.ActionMCPSpawnSession, h.handleSpawnSession)
-	d.RegisterFunc(ws.ActionMCPGetTaskConversation, h.handleGetTaskConversation)
-	d.RegisterFunc(ws.ActionMCPListTaskSessions, h.handleListTaskSessions)
-	d.RegisterFunc(ws.ActionMCPListPendingAgentPermissions, h.handleListPendingAgentPermissions)
-	d.RegisterFunc(ws.ActionMCPResolveAgentPermission, h.handleResolveAgentPermission)
-	d.RegisterFunc(ws.ActionMCPAskUserQuestion, h.handleAskUserQuestion)
-	d.RegisterFunc(ws.ActionMCPAskParentQuestion, h.handleAskParentQuestion)
+}
+
+func (h *Handlers) registerTaskPlanHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPCreateTaskPlan, h.handleCreateTaskPlan)
 	d.RegisterFunc(ws.ActionMCPGetTaskPlan, h.handleGetTaskPlan)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskPlan, h.handleUpdateTaskPlan)
@@ -425,11 +463,15 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPShowWalkthrough, h.handleShowWalkthrough)
 	d.RegisterFunc(ws.ActionMCPGetWalkthrough, h.handleGetWalkthrough)
 	d.RegisterFunc(ws.ActionMCPDeleteWalkthrough, h.handleDeleteWalkthrough)
-	// Plain (non-MCP) action so the web UI can backfill the current walkthrough
-	// on mount — live task.walkthrough.created events can fire before the page's
-	// WS subscription is established. Reuses the same read handler.
+	// Plain actions let the web UI backfill or remove the current walkthrough
+	// when its subscription was established after the creation event.
 	d.RegisterFunc(ws.ActionTaskWalkthroughGet, h.handleGetWalkthrough)
 	d.RegisterFunc(ws.ActionTaskWalkthroughDelete, h.handleDeleteWalkthrough)
+}
+
+func (h *Handlers) registerTaskQuestionHandlers(d *guardedMCPDispatcher) {
+	d.RegisterFunc(ws.ActionMCPAskUserQuestion, h.handleAskUserQuestion)
+	d.RegisterFunc(ws.ActionMCPAskParentQuestion, h.handleAskParentQuestion)
 	d.RegisterFunc(ws.ActionMCPClarificationTimeout, h.handleClarificationTimeout)
 	if h.diagnosticBundles != nil && h.diagnosticMaterializer != nil {
 		d.RegisterFunc(ws.ActionMCPGetDiagnosticBundle, h.handleGetDiagnosticBundle)
@@ -438,29 +480,17 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 		d.RegisterFunc(ws.ActionMCPListPendingQuestions, h.handleListPendingQuestions)
 		d.RegisterFunc(ws.ActionMCPAnswerQuestion, h.handleAnswerQuestion)
 	}
-	h.registerReviewHandlers(d)
+}
 
-	// Config-mode handlers (registered when config deps are set)
+func (h *Handlers) registerConfigModeHandlers(d *guardedMCPDispatcher) {
 	if h.workflowSvc != nil {
-		d.RegisterFunc(ws.ActionMCPCreateWorkflow, h.handleCreateWorkflow)
-		d.RegisterFunc(ws.ActionMCPUpdateWorkflow, h.handleUpdateWorkflow)
-		d.RegisterFunc(ws.ActionMCPDeleteWorkflow, h.handleDeleteWorkflow)
-		d.RegisterFunc(ws.ActionMCPImportWorkflow, h.handleImportWorkflow)
-		d.RegisterFunc(ws.ActionMCPExportWorkflow, h.handleExportWorkflow)
-		d.RegisterFunc(ws.ActionMCPCreateWorkflowStep, h.handleCreateWorkflowStep)
-		d.RegisterFunc(ws.ActionMCPUpdateWorkflowStep, h.handleUpdateWorkflowStep)
-		d.RegisterFunc(ws.ActionMCPDeleteWorkflowStep, h.handleDeleteWorkflowStep)
-		d.RegisterFunc(ws.ActionMCPReorderWorkflowStep, h.handleReorderWorkflowSteps)
+		h.registerWorkflowHandlers(d)
 	}
 	if h.agentSettingsCtrl != nil {
-		d.RegisterFunc(ws.ActionMCPListAgents, h.handleListAgents)
-		d.RegisterFunc(ws.ActionMCPUpdateAgent, h.handleUpdateAgent)
-		d.RegisterFunc(ws.ActionMCPListAgentProfiles, h.handleListAgentProfiles)
-		d.RegisterFunc(ws.ActionMCPCreateAgentProfile, h.handleCreateAgentProfile)
-		d.RegisterFunc(ws.ActionMCPUpdateAgentProfile, h.handleUpdateAgentProfile)
-		d.RegisterFunc(ws.ActionMCPDeleteAgentProfile, h.handleDeleteAgentProfile)
+		h.registerAgentHandlers(d)
 	}
-	// Executor discovery/profile listing is always available (read-only, used in task mode for create_task)
+	// Executor discovery/profile listing is always available for task-mode
+	// create_task, while executor mutations remain config-mode only.
 	if h.taskSvc != nil {
 		d.RegisterFunc(ws.ActionMCPListExecutors, h.handleListExecutors)
 		d.RegisterFunc(ws.ActionMCPListExecutorProfiles, h.handleListExecutorProfiles)
@@ -479,21 +509,41 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 		d.RegisterFunc(ws.ActionMCPRecordStepDecision, h.handleRecordStepDecision)
 	}
 	if h.taskSvc != nil {
-		d.RegisterFunc(ws.ActionMCPMoveTask, h.handleMoveTask)
-		d.RegisterFunc(ws.ActionMCPDeleteTask, h.handleDeleteTask)
-		d.RegisterFunc(ws.ActionMCPArchiveTask, h.handleArchiveTask)
-		d.RegisterFunc(ws.ActionMCPUpdateTaskState, h.handleUpdateTaskState)
-
-		// Executor mutation handlers (config-mode only)
-		if h.workflowSvc != nil {
-			d.RegisterFunc(ws.ActionMCPCreateExecutorProfile, h.handleCreateExecutorProfile)
-			d.RegisterFunc(ws.ActionMCPUpdateExecutorProfile, h.handleUpdateExecutorProfile)
-			d.RegisterFunc(ws.ActionMCPDeleteExecutorProfile, h.handleDeleteExecutorProfile)
-		}
+		h.registerTaskConfigMutationHandlers(d)
 	}
+}
 
-	after := d.HandlerCount()
-	h.logger.Info("registered MCP handlers", zap.Int("count", after-before))
+func (h *Handlers) registerWorkflowHandlers(d *guardedMCPDispatcher) {
+	d.RegisterFunc(ws.ActionMCPCreateWorkflow, h.handleCreateWorkflow)
+	d.RegisterFunc(ws.ActionMCPUpdateWorkflow, h.handleUpdateWorkflow)
+	d.RegisterFunc(ws.ActionMCPDeleteWorkflow, h.handleDeleteWorkflow)
+	d.RegisterFunc(ws.ActionMCPImportWorkflow, h.handleImportWorkflow)
+	d.RegisterFunc(ws.ActionMCPExportWorkflow, h.handleExportWorkflow)
+	d.RegisterFunc(ws.ActionMCPCreateWorkflowStep, h.handleCreateWorkflowStep)
+	d.RegisterFunc(ws.ActionMCPUpdateWorkflowStep, h.handleUpdateWorkflowStep)
+	d.RegisterFunc(ws.ActionMCPDeleteWorkflowStep, h.handleDeleteWorkflowStep)
+	d.RegisterFunc(ws.ActionMCPReorderWorkflowStep, h.handleReorderWorkflowSteps)
+}
+
+func (h *Handlers) registerAgentHandlers(d *guardedMCPDispatcher) {
+	d.RegisterFunc(ws.ActionMCPListAgents, h.handleListAgents)
+	d.RegisterFunc(ws.ActionMCPUpdateAgent, h.handleUpdateAgent)
+	d.RegisterFunc(ws.ActionMCPListAgentProfiles, h.handleListAgentProfiles)
+	d.RegisterFunc(ws.ActionMCPCreateAgentProfile, h.handleCreateAgentProfile)
+	d.RegisterFunc(ws.ActionMCPUpdateAgentProfile, h.handleUpdateAgentProfile)
+	d.RegisterFunc(ws.ActionMCPDeleteAgentProfile, h.handleDeleteAgentProfile)
+}
+
+func (h *Handlers) registerTaskConfigMutationHandlers(d *guardedMCPDispatcher) {
+	d.RegisterFunc(ws.ActionMCPMoveTask, h.handleMoveTask)
+	d.RegisterFunc(ws.ActionMCPDeleteTask, h.handleDeleteTask)
+	d.RegisterFunc(ws.ActionMCPArchiveTask, h.handleArchiveTask)
+	d.RegisterFunc(ws.ActionMCPUpdateTaskState, h.handleUpdateTaskState)
+	if h.workflowSvc != nil {
+		d.RegisterFunc(ws.ActionMCPCreateExecutorProfile, h.handleCreateExecutorProfile)
+		d.RegisterFunc(ws.ActionMCPUpdateExecutorProfile, h.handleUpdateExecutorProfile)
+		d.RegisterFunc(ws.ActionMCPDeleteExecutorProfile, h.handleDeleteExecutorProfile)
+	}
 }
 
 // handleListWorkspaces lists all workspaces.
@@ -502,6 +552,15 @@ func (h *Handlers) handleListWorkspaces(ctx context.Context, msg *ws.Message) (*
 	if err != nil {
 		h.logger.Error("failed to list workspaces", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list workspaces", nil)
+	}
+	if principal, ok := mcpscope.PrincipalFromContext(ctx); ok && principal.IsAutomation() {
+		filtered := make([]*models.Workspace, 0, 1)
+		for _, workspace := range workspaces {
+			if workspace != nil && workspace.ID == principal.WorkspaceID {
+				filtered = append(filtered, workspace)
+			}
+		}
+		workspaces = filtered
 	}
 	dtos := make([]dto.WorkspaceDTO, 0, len(workspaces))
 	for _, w := range workspaces {
@@ -743,11 +802,20 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 	}
 
+	// Resolve the destination step before launch metadata. The profile lookup
+	// below reads it off pendingTask, and CreateTask sends an agent start to
+	// the first auto_start_agent step rather than to the start step — leaving
+	// this empty pinned the metadata and the deferred-launch record to the
+	// start step's profile while the task landed somewhere else.
+	resolvedStepID := req.WorkflowStepID
+	if resolvedStepID == "" {
+		resolvedStepID = h.resolveMCPDestinationStep(ctx, req.WorkflowID, startAgent)
+	}
 	pendingTask := &models.Task{
 		ParentID:       req.ParentID,
 		WorkspaceID:    req.WorkspaceID,
 		WorkflowID:     req.WorkflowID,
-		WorkflowStepID: req.WorkflowStepID,
+		WorkflowStepID: resolvedStepID,
 	}
 	launchConfig, metadata, err := h.resolveMCPLaunchMetadataWithSource(
 		ctx, pendingTask, req.AgentProfileID, req.ExecutorProfileID, req.SourceTaskID, req.SourceSessionID,
@@ -787,7 +855,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		ParentID:               req.ParentID,
 		WorkspaceID:            req.WorkspaceID,
 		WorkflowID:             req.WorkflowID,
-		WorkflowStepID:         req.WorkflowStepID,
+		WorkflowStepID:         resolvedStepID,
 		Title:                  req.Title,
 		Description:            req.Description,
 		Autopilot:              req.Autopilot,
@@ -797,6 +865,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		AssigneeAgentProfileID: req.AssigneeAgentProfileID,
 		Metadata:               metadata,
 		DeferredLaunch:         deferredLaunch,
+		StartAgent:             startAgent,
 		ExternalID:             req.ExternalID,
 	})
 	if err != nil {
@@ -1497,6 +1566,31 @@ func (h *Handlers) resolveWorkflowStepAgentProfile(ctx context.Context, workflow
 	return resp.Step.AgentProfileID, workflowID
 }
 
+// resolveMCPDestinationStep pre-resolves the step a new task will be created
+// on, mirroring the task service's rules: an agent start goes to the first
+// auto_start_agent step, anything else to the start step. Both are computed by
+// the shared selectors, so the two implementations cannot drift. Returns "" when
+// the workflow has no steps or cannot be read, which leaves resolution to
+// CreateTask exactly as before.
+func (h *Handlers) resolveMCPDestinationStep(ctx context.Context, workflowID string, startAgent bool) string {
+	if h.workflowCtrl == nil || workflowID == "" {
+		return ""
+	}
+	resp, err := h.workflowCtrl.ListStepsByWorkflow(ctx, workflowctrl.ListStepsRequest{WorkflowID: workflowID})
+	if err != nil || resp == nil {
+		return ""
+	}
+	if startAgent {
+		if step := workflowmodels.SelectAutoStartStep(resp.Steps); step != nil {
+			return step.ID
+		}
+	}
+	if step := workflowmodels.SelectStartStep(resp.Steps); step != nil {
+		return step.ID
+	}
+	return ""
+}
+
 func (h *Handlers) resolveWorkflowStartStepAgentProfile(ctx context.Context, workflowID string) string {
 	resp, err := h.workflowCtrl.ListStepsByWorkflow(ctx, workflowctrl.ListStepsRequest{WorkflowID: workflowID})
 	if err != nil || resp == nil {
@@ -2170,21 +2264,27 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		return errMsg, err
 	}
 
+	launchStepID, err := h.stepCompletionLaunchStep(ctx, req.SessionID, task.WorkflowStepID)
+	if err != nil {
+		h.logger.Error("failed to resolve step-completion turn",
+			zap.String("task_id", req.TaskID),
+			zap.String("session_id", req.SessionID),
+			zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to resolve calling turn", nil)
+	}
+	if launchStepID != task.WorkflowStepID {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow step changed before signal was recorded", nil)
+	}
+
 	signal := models.PendingStepCompletionSignal{
-		StepID:     task.WorkflowStepID,
+		StepID:     launchStepID,
 		Source:     models.StepCompletionSourceAgent,
 		Summary:    strings.TrimSpace(req.Summary),
 		Handoff:    strings.TrimSpace(req.Handoff),
 		Blockers:   strings.TrimSpace(req.Blockers),
 		SignaledAt: time.Now().UTC(),
 	}
-	stored, err := h.sessionRepo.SetSessionMetadataKeyIfAbsentOrDifferentStep(
-		ctx,
-		req.SessionID,
-		models.SessionMetaKeyPendingStepCompletion,
-		task.WorkflowStepID,
-		signal,
-	)
+	stored, err := h.claimStepCompletionSignal(ctx, req.TaskID, req.SessionID, launchStepID, signal)
 	if err != nil {
 		h.logger.Error("failed to persist step-completion signal",
 			zap.String("task_id", req.TaskID),
@@ -2193,7 +2293,7 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to record signal", nil)
 	}
 	if !stored {
-		return h.handleDuplicateStepComplete(ctx, msg, req.TaskID, req.SessionID, task.WorkflowStepID, session)
+		return h.handleDuplicateStepComplete(ctx, msg, req.TaskID, req.SessionID, launchStepID, session)
 	}
 
 	// Counted here, at the durable bag write, not after publishStepCompletionEvent
@@ -2218,6 +2318,43 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		"step_id":     task.WorkflowStepID,
 		"signaled_at": signal.SignaledAt,
 	})
+}
+
+func (h *Handlers) stepCompletionLaunchStep(ctx context.Context, sessionID, fallback string) (string, error) {
+	reader, ok := h.sessionRepo.(stepCompletionTurnReader)
+	if !ok {
+		return fallback, nil
+	}
+	turns, err := reader.ListTurnsBySession(ctx, sessionID)
+	if err != nil {
+		return "", err
+	}
+	if len(turns) == 0 {
+		return fallback, nil
+	}
+	latest := turns[len(turns)-1]
+	if latest == nil {
+		return "", errors.New("latest turn is missing")
+	}
+	if stepID := models.StringFromAny(latest.Metadata[models.TurnMetaKeyWorkflowStepIDAtStart]); stepID != "" {
+		return stepID, nil
+	}
+	return "", errors.New("latest turn has no workflow-step stamp")
+}
+
+func (h *Handlers) claimStepCompletionSignal(
+	ctx context.Context,
+	taskID, sessionID, stepID string,
+	signal models.PendingStepCompletionSignal,
+) (bool, error) {
+	if claimer, ok := h.sessionRepo.(stepCompletionSignalClaimer); ok {
+		return claimer.SetSessionMetadataKeyIfAbsentOrDifferentStepIfTaskAtStep(
+			ctx, taskID, sessionID, models.SessionMetaKeyPendingStepCompletion, stepID, signal,
+		)
+	}
+	return h.sessionRepo.SetSessionMetadataKeyIfAbsentOrDifferentStep(
+		ctx, sessionID, models.SessionMetaKeyPendingStepCompletion, stepID, signal,
+	)
 }
 
 func (h *Handlers) handleDuplicateStepComplete(
@@ -3873,17 +4010,19 @@ func (h *Handlers) handleCreateTaskPlan(ctx context.Context, msg *ws.Message) (*
 		createdBy = "agent"
 	}
 
+	guard := h.evaluatePlanWriteGuard(ctx, req.TaskID, req.Content)
 	plan, err := h.planService.CreatePlan(ctx, service.CreatePlanRequest{
-		TaskID:    req.TaskID,
-		Title:     req.Title,
-		Content:   req.Content,
-		CreatedBy: createdBy,
+		TaskID:           req.TaskID,
+		Title:            req.Title,
+		Content:          req.Content,
+		CreatedBy:        createdBy,
+		ForceNewRevision: guard.forceNewRevision,
 	})
 	if err != nil {
 		return planws.CreateError(msg, err)
 	}
 
-	return ws.NewResponse(msg.ID, msg.Action, dto.TaskPlanFromModel(plan))
+	return ws.NewResponse(msg.ID, msg.Action, planWritePayload(dto.TaskPlanFromModel(plan), guard))
 }
 
 // handleGetTaskPlan retrieves a task plan.
@@ -3925,17 +4064,19 @@ func (h *Handlers) handleUpdateTaskPlan(ctx context.Context, msg *ws.Message) (*
 		createdBy = "agent"
 	}
 
+	guard := h.evaluatePlanWriteGuard(ctx, req.TaskID, req.Content)
 	plan, err := h.planService.UpdatePlan(ctx, service.UpdatePlanRequest{
-		TaskID:    req.TaskID,
-		Title:     req.Title,
-		Content:   req.Content,
-		CreatedBy: createdBy,
+		TaskID:           req.TaskID,
+		Title:            req.Title,
+		Content:          req.Content,
+		CreatedBy:        createdBy,
+		ForceNewRevision: guard.forceNewRevision,
 	})
 	if err != nil {
 		return planws.UpdateError(msg, err)
 	}
 
-	return ws.NewResponse(msg.ID, msg.Action, dto.TaskPlanFromModel(plan))
+	return ws.NewResponse(msg.ID, msg.Action, planWritePayload(dto.TaskPlanFromModel(plan), guard))
 }
 
 // handleDeleteTaskPlan deletes a task plan.

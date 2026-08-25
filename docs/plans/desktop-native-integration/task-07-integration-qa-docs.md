@@ -13,7 +13,7 @@ depends_on:
     "06-external-links",
   ]
 plan: "plan.md"
-spec: "../../specs/desktop-tauri-app/spec.md"
+spec: "../../specs/desktop/requirements/desktop-tauri-app.md"
 ---
 
 # Task 07: Desktop Integration QA and Public Docs

@@ -394,7 +394,7 @@ func (s *RoutineService) processCronTrigger(ctx context.Context, trigger *Routin
 		// runCount-1 as missed_ticks ("you missed N since the last fire").
 		missedForPayload = runCount - 1
 	}
-	_, err = s.DispatchRoutineRunWithMissed(ctx, routine, trigger, "cron", nil, missedForPayload)
+	_, err = s.DispatchRoutineRunWithMissed(ctx, routine, trigger, shared.RoutineSourceCron, nil, missedForPayload)
 	return err
 }
 
@@ -621,7 +621,7 @@ func (s *RoutineService) materialiseLightweightRoutineRun(
 		ID:             uuid.New().String(),
 		AgentProfileID: routine.AssigneeAgentProfileID,
 		Source:         "routine",
-		Reason:         "routine_dispatch",
+		Reason:         shared.RoutineDispatchReason(run.Source),
 		Payload:        payloadStr,
 		IdempotencyKey: idemKey,
 		RequestedAt:    time.Now().UTC(),

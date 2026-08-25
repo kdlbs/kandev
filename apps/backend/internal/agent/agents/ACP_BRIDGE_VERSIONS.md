@@ -25,6 +25,14 @@ package is pinned, but npm transitive ranges, its cache, and the registry still
 affect reproducibility. Kandev records the version reported by the ACP
 initialize response instead of inferring it from source.
 
+If a managed startup reports the strict npm `ETARGET` error for the selected
+exact package and version, Kandev makes one recovery attempt. The colocated
+agentctl process resolves its own npm cache, removes only that package's
+deterministic `_npx` execution tree, and retries the same command with online
+metadata preference. This applies to standalone, local Docker, and remote SSH
+executors. Sibling trees, the global npm cache, the registry, and the selected
+version remain unchanged.
+
 The **Update agent** action in Settings is the explicit freshness boundary for
 the Kandev host. Its candidate preparation resolves the requested trusted
 `package@effective-version` with online preference, then launches a fresh ACP

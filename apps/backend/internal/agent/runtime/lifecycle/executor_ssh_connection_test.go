@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -764,5 +765,94 @@ func TestSSHManagedBrokerResumeForcesFreshAgentctlWithNewLease(t *testing.T) {
 	}
 	if req.Metadata[MetadataKeySSHHost] != "remote.example" {
 		t.Fatal("connection metadata required for fresh SSH launch was removed")
+	}
+}
+
+func TestExpandIdentityAgentOpenSSHSyntax(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("AGENT_DIR", filepath.Join(home, "agents"))
+	t.Setenv("LEGACY_AGENT", filepath.Join(home, "legacy.sock"))
+	t.Setenv("SSH_AUTH_SOCK", filepath.Join(home, "env.sock"))
+	target := &SSHTarget{
+		Host: "resolved.internal", Port: 2222, User: "deploy",
+		ProxyJump: "jump-alias", OriginalHost: "prod",
+	}
+
+	cases := map[string]string{
+		"~/.ssh/agent.sock":                   filepath.Join(home, ".ssh", "agent.sock"),
+		"${AGENT_DIR}/%n-%h-%p-%r-%j-%%.sock": filepath.Join(home, "agents", "prod-resolved.internal-2222-deploy-jump-alias-%.sock"),
+		"$LEGACY_AGENT":                       filepath.Join(home, "legacy.sock"),
+		"SSH_AUTH_SOCK":                       filepath.Join(home, "env.sock"),
+		"@abstract-agent":                     "@abstract-agent",
+	}
+	for input, want := range cases {
+		got, err := expandIdentityAgent(input, target)
+		if err != nil {
+			t.Errorf("expandIdentityAgent(%q): %v", input, err)
+		} else if got != want {
+			t.Errorf("expandIdentityAgent(%q) = %q, want %q", input, got, want)
+		}
+	}
+
+	allTokens, err := expandIdentityAgent("%d-%i-%k-%L-%l-%u", target)
+	if err != nil || allTokens == "" || !strings.Contains(allTokens, "prod") {
+		t.Fatalf("all token expansion = %q, %v", allTokens, err)
+	}
+	for _, input := range []string{"${MISSING_IDENTITY_AGENT}", "%C", "%Z", "trailing%"} {
+		if _, err := expandIdentityAgent(input, target); err == nil {
+			t.Errorf("expandIdentityAgent(%q) unexpectedly succeeded", input)
+		}
+	}
+}
+
+func TestExpandIdentityAgentRejectsUnsetLegacyVariable(t *testing.T) {
+	const variable = "MISSING_IDENTITY_AGENT"
+	previous, wasSet := os.LookupEnv(variable)
+	if err := os.Unsetenv(variable); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if wasSet {
+			_ = os.Setenv(variable, previous)
+			return
+		}
+		_ = os.Unsetenv(variable)
+	})
+	t.Setenv("SSH_AUTH_SOCK", "/tmp/fallback.sock")
+
+	got, err := expandIdentityAgent("$"+variable, &SSHTarget{Host: "example.com"})
+	if err == nil {
+		t.Fatalf("expandIdentityAgent() returned %q without an error", got)
+	}
+	if !strings.Contains(err.Error(), variable) {
+		t.Fatalf("error = %v, want missing variable name %q", err, variable)
+	}
+}
+
+func TestExpandIdentityAgentEnvironmentDoesNotReprocessSubstitutedTokens(t *testing.T) {
+	const childEnv = "KANDEV_TEST_EXPAND_IDENTITY_AGENT_ENV"
+	if os.Getenv(childEnv) == "1" {
+		t.Setenv("AGENT", "${AGENT}")
+		got, err := expandIdentityAgentEnvironment("${AGENT}")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != "${AGENT}" {
+			t.Fatalf("expanded value = %q, want the substituted token to remain literal", got)
+		}
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run", "^TestExpandIdentityAgentEnvironmentDoesNotReprocessSubstitutedTokens$")
+	cmd.Env = append(os.Environ(), childEnv+"=1")
+	output, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		t.Fatalf("environment expansion did not terminate")
+	}
+	if err != nil {
+		t.Fatalf("child test failed: %v\n%s", err, output)
 	}
 }

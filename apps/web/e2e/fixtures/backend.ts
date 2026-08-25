@@ -475,7 +475,10 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
         // --- Spawn backend ---
         backendProc = spawnBackendProcess(scopedEnv.apply(baselineEnv), debug, backendPort);
         registerProcess(backendProc);
-        await waitForHealth(`${baseUrl}/health`, HEALTH_TIMEOUT_MS, backendProc);
+        // /ready (not /health) — /health flips green as soon as the listener
+        // is bound, before routes are wired; tests that immediately issue API
+        // requests need the readiness contract instead.
+        await waitForHealth(`${baseUrl}/ready`, HEALTH_TIMEOUT_MS, backendProc);
         const frontendUrl = baseUrl;
 
         /**
@@ -499,14 +502,15 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           await waitForPortFree(backendPort);
           backendProc = spawnBackendProcess(nextEnv, debug, backendPort);
           registerProcess(backendProc);
-          // Pass the process so waitForHealth fails fast if it exits (e.g. port still in use)
-          await waitForHealth(`${baseUrl}/health`, HEALTH_TIMEOUT_MS, backendProc);
+          // Pass the process so waitForHealth fails fast if it exits (e.g. port still in use).
+          // /ready, not /health — see the comment on the initial spawn above.
+          await waitForHealth(`${baseUrl}/ready`, HEALTH_TIMEOUT_MS, backendProc);
         };
 
         let recovery: Promise<void> | null = null;
         const ensureReady = async () => {
           try {
-            await waitForHealth(`${baseUrl}/health`, 5_000);
+            await waitForHealth(`${baseUrl}/ready`, 5_000);
             return;
           } catch {
             // A worker can outlive a backend process that a prior test left

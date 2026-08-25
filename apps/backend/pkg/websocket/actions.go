@@ -669,6 +669,7 @@ const (
 	ActionAutomationTriggerTypes        = "automation.trigger_types"
 	ActionAutomationWebhookRevealSecret = "automation.webhook.reveal_secret"
 	ActionAutomationRunDelete           = "automation.run.delete"
+	ActionAutomationRunStop             = "automation.run.stop"
 	ActionAutomationRunsDeleteAll       = "automation.runs.delete_all"
 )
 

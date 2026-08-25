@@ -151,7 +151,7 @@ If identity is missing or ambiguous, omit branch recovery actions.
 - Update live projection and authoritative rebuild to read both error sources.
 - Select the newest active record by `occurred_at`, then stable stamp.
 - Ignore malformed task metadata instead of rejecting the complete summary.
-- Update `docs/specs/platform/bounded-task-status-delivery.md` with this contract.
+- Update `docs/specs/platform/requirements/bounded-task-status-delivery.md` with this contract.
 
 ## Frontend
 

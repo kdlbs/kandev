@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/agents/git-operations-permission-boundary.md"
+spec: "../../specs/agents/requirements/git-operations-permission-boundary.md"
 ---
 
 # Task 01: Document the Git permission boundary
@@ -46,7 +46,7 @@ None.
 
 ## Inputs
 
-- Spec: `docs/specs/agents/git-operations-permission-boundary.md`.
+- Spec: `docs/specs/agents/requirements/git-operations-permission-boundary.md`.
 - Plan: `docs/plans/git-operations-permission-boundary/plan.md`.
 - Issue: [#2951](https://github.com/kdlbs/kandev/issues/2951).
 - Existing Git execution path in `apps/backend/internal/agent/handlers/git_handlers.go`,

@@ -19,12 +19,26 @@ func (m *Manager) CommandEnvironment() (map[string]string, error) {
 	return mergeAgentEnvIntoShellConfigWithError(m.agentEnvSnapshot(), nil)
 }
 
+// Output runs a direct command as an instance-owned process and returns bounded
+// stdout after its complete process tree is reaped. Stderr is drained but is
+// not joined to stdout, so callers that parse stdout cannot mistake a warning
+// path for command output.
+func (m *Manager) Output(parent context.Context, spec tools.CommandSpec) ([]byte, error) {
+	stdout, _, err := m.runManagedCommand(parent, spec)
+	return stdout, err
+}
+
 // CombinedOutput runs a direct command as an instance-owned process and
 // returns bounded stdout/stderr after its complete process tree is reaped.
 func (m *Manager) CombinedOutput(parent context.Context, spec tools.CommandSpec) ([]byte, error) {
+	stdout, stderr, err := m.runManagedCommand(parent, spec)
+	return append(stdout, stderr...), err
+}
+
+func (m *Manager) runManagedCommand(parent context.Context, spec tools.CommandSpec) ([]byte, []byte, error) {
 	ctx, release, err := m.BeginOwnedOperation(parent)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer release()
 
@@ -36,7 +50,7 @@ func (m *Manager) CombinedOutput(parent context.Context, spec tools.CommandSpec)
 		sessionID = "managed-command"
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	proc, err := m.StartPipedProcess(PipedStartRequest{
 		SessionID:  sessionID,
@@ -49,7 +63,7 @@ func (m *Manager) CombinedOutput(parent context.Context, spec tools.CommandSpec)
 		PipeStderr: true,
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	_ = proc.Stdin.Close()
 	stdout := collectManagedCommandOutput(proc.Stdout)
@@ -73,15 +87,16 @@ func (m *Manager) CombinedOutput(parent context.Context, spec tools.CommandSpec)
 		cancel()
 	}
 	if !finished {
-		return nil, errors.Join(ctx.Err(), stopErr)
+		return nil, nil, errors.Join(ctx.Err(), stopErr)
 	}
 
-	output := append(<-stdout, (<-stderr)...)
+	stdoutOutput := <-stdout
+	stderrOutput := <-stderr
 	waitErr := proc.Wait()
 	if canceled {
-		return output, errors.Join(ctx.Err(), stopErr, waitErr)
+		return stdoutOutput, stderrOutput, errors.Join(ctx.Err(), stopErr, waitErr)
 	}
-	return output, waitErr
+	return stdoutOutput, stderrOutput, waitErr
 }
 
 func collectManagedCommandOutput(reader io.ReadCloser) <-chan []byte {

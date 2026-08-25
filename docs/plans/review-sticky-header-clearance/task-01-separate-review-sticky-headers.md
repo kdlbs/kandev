@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/submodule-review.md"
+spec: "../../specs/ui/requirements/submodule-review.md"
 ---
 
 # Task 01: Separate Review sticky headers
@@ -42,7 +42,7 @@ None.
 
 ## Inputs
 
-- `docs/specs/ui/submodule-review.md`, especially the mixed root/submodule sticky-header requirement and scenario.
+- `docs/specs/ui/requirements/submodule-review.md`, especially the mixed root/submodule sticky-header requirement and scenario.
 - `docs/plans/review-sticky-header-clearance/plan.md`, including **Root cause**, **Sticky repository and file lanes**, and **Mobile design contract**.
 - `apps/web/components/review/review-diff-list.tsx`: `showRepoHeaders`, `FileDiffSection`, and programmatic `scrollIntoView` behavior.
 - `/tdd`, `/e2e`, and `/mobile-parity` guidance. Use strict Red-Green-Refactor; no production change before both browser regressions fail for the expected overlap.
@@ -74,7 +74,7 @@ Run focused frontend checks:
 ```bash
 cd apps/web && pnpm run typecheck
 cd apps && pnpm --filter @kandev/web exec eslint components/review/review-diff-list-groups.tsx components/review/review-diff-list.tsx components/review/review-diff-header.tsx e2e/tests/review/submodule-review-helpers.ts e2e/tests/review/submodule-review.spec.ts e2e/tests/review/mobile-submodule-review.spec.ts
-cd apps && pnpm exec prettier --check web/components/review/review-diff-list-groups.tsx web/components/review/review-diff-list.tsx web/components/review/review-diff-header.tsx web/e2e/tests/review/submodule-review-helpers.ts web/e2e/tests/review/submodule-review.spec.ts web/e2e/tests/review/mobile-submodule-review.spec.ts ../docs/specs/ui/submodule-review.md ../docs/plans/review-sticky-header-clearance/plan.md ../docs/plans/review-sticky-header-clearance/task-01-separate-review-sticky-headers.md
+cd apps && pnpm exec prettier --check web/components/review/review-diff-list-groups.tsx web/components/review/review-diff-list.tsx web/components/review/review-diff-header.tsx web/e2e/tests/review/submodule-review-helpers.ts web/e2e/tests/review/submodule-review.spec.ts web/e2e/tests/review/mobile-submodule-review.spec.ts ../docs/specs/ui/requirements/submodule-review.md ../docs/plans/review-sticky-header-clearance/plan.md ../docs/plans/review-sticky-header-clearance/task-01-separate-review-sticky-headers.md
 git diff --check
 ```
 

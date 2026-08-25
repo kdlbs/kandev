@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -65,15 +66,21 @@ func (h *Handlers) handleResolveAgentPermission(ctx context.Context, msg *ws.Mes
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, required.field+" is required", nil)
 		}
 	}
-	if !mcporigin.IsTrustedExternalTransport(ctx) {
+	principal, hasPrincipal := mcpscope.PrincipalFromContext(ctx)
+	isAutomation := hasPrincipal && principal.IsAutomation()
+	if !mcporigin.IsTrustedExternalTransport(ctx) && !isAutomation {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "Agent permission resolution requires external MCP", nil)
 	}
 	if h.agentPermissionSvc == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Agent permission service is not available", nil)
 	}
+	source := models.PermissionSourceExternalMCP
+	if isAutomation && principal.IsAutomation() {
+		source = models.PermissionSourceAutomationMCP
+	}
 	result, err := h.agentPermissionSvc.ResolveAgentPermission(ctx, orchestrator.ResolveAgentPermissionRequest{
 		TaskID: request.TaskID, SessionID: request.SessionID, RequestID: request.RequestID,
-		PendingID: request.PendingID, OptionID: request.OptionID, Source: models.PermissionSourceExternalMCP,
+		PendingID: request.PendingID, OptionID: request.OptionID, Source: source,
 	})
 	if err != nil {
 		return h.agentPermissionError(msg, err)

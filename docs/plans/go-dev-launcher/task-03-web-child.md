@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: ["04-dev-command"]
 plan: "plan.md"
-spec: "../../specs/go-dev-launcher/spec.md"
+spec: "../../specs/platform/requirements/go-dev-launcher.md"
 ---
 
 # Task 03: Vite dev-server child and URL readiness

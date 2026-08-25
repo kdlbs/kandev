@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-release-workflow"]
 plan: "plan.md"
-spec: "../../specs/scoop-release-automation/spec.md"
+spec: "../../specs/release/requirements/scoop-release-automation.md"
 ---
 
 # Task 03: Reconcile release documentation
@@ -26,7 +26,7 @@ spec: "../../specs/scoop-release-automation/spec.md"
 - `python3 scripts/lint-harness-files.test.py`
 - `python3 .github/scripts/lint-harness-files.py --all`
 - `pre-commit run harness-lint --files AGENTS.md .agents/skills/release/SKILL.md`
-- `git diff --check -- AGENTS.md .agents/skills/release/SKILL.md apps/cli/README_internal.md docs/public/release-process.md docs/decisions/0029-release-backfill-and-desktop-diagnostics.md docs/decisions/2026-07-31-npm-nightly-release-channel.md docs/specs/npm-nightly-channel/spec.md docs/specs/scoop-release-automation/spec.md docs/specs/INDEX.md`
+- `git diff --check -- AGENTS.md .agents/skills/release/SKILL.md apps/cli/README_internal.md docs/public/release-process.md docs/decisions/0029-release-backfill-and-desktop-diagnostics.md docs/decisions/2026-07-31-npm-nightly-release-channel.md docs/specs/release/requirements/npm-nightly-channel.md docs/specs/release/requirements/scoop-release-automation.md docs/specs/INDEX.md`
 
 ## Files likely touched
 
@@ -36,8 +36,8 @@ spec: "../../specs/scoop-release-automation/spec.md"
 - `docs/public/release-process.md`
 - `docs/decisions/0029-release-backfill-and-desktop-diagnostics.md`
 - `docs/decisions/2026-07-31-npm-nightly-release-channel.md`
-- `docs/specs/npm-nightly-channel/spec.md`
-- `docs/specs/scoop-release-automation/spec.md`
+- `docs/specs/release/requirements/npm-nightly-channel.md`
+- `docs/specs/release/requirements/scoop-release-automation.md`
 - `docs/specs/INDEX.md`
 
 ## Dependencies

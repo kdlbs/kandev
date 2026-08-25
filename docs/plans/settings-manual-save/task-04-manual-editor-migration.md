@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-save-coordinator"]
 plan: "plan.md"
-spec: "../../specs/ui/settings-manual-save.md"
+spec: "../../specs/ui/requirements/settings-manual-save.md"
 ---
 
 # Task 04: Existing Manual Editor Migration

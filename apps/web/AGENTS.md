@@ -90,7 +90,7 @@ For rebasing or finishing PRs written against the old Next.js runtime, follow [`
 
 Use subscription hooks only; the WS client auto-deduplicates.
 
-**Task overview vs. session detail:** Shared task rows read `Task.statusSummary` and `task.status_summary.updated`; rich streams stay session-detail-only. Extend the bounded projection per the [spec](../../docs/specs/platform/bounded-task-status-delivery.md) and [ADR](../../docs/decisions/2026-08-01-separate-task-summary-session-stream-traffic.md).
+**Task overview vs. session detail:** Shared task rows read `Task.statusSummary` and `task.status_summary.updated`; rich streams stay session-detail-only. Extend the bounded projection per the [spec](../../docs/specs/platform/requirements/bounded-task-status-delivery.md) and [ADR](../../docs/decisions/2026-08-01-separate-task-summary-session-stream-traffic.md).
 **Branch-scoped task state:** For live worktree/session state plus `task_prs`, key by `(repository, checked-out branch)`, not task/repository alone. `branch_switched` invalidates prior status/commits; reject late results with a generation/identity guard and preserve siblings. Historical PRs affect Changes only when `repository_id` and normalized `head_branch` match; Review/PR history may still show them. Test single/multi-repo cases and desktop/mobile Changes behavior.
 **HTTP/WS cache races:** When HTTP hydrates a cache also updated by WebSockets, guard responses with per-scope revision and request/workspace generation; discard or refresh stale responses and cover deferred responses. `useEnsureTaskSession` re-fires `session.ensure` when an open task page sees zero sessions after a prior ensure, so deleting the last session from that page spawns a replacement; test zero-session states through the backend/API instead.
 
@@ -246,7 +246,7 @@ mandatory reason — reasonless or stale entries are errors. For zh-tw/zh-hk run
 `i18n:check` also gates key/catalog drift, `<Trans>` indices, inline plurals,
 module-scope `t()`, em dashes, and the **pseudo-locale** check. Needs **Node 24**.
 Guide: [`docs/i18n.md`](../../docs/i18n.md); spec
-[`docs/specs/platform/i18n.md`](../../docs/specs/platform/i18n.md).
+[`docs/specs/platform/requirements/i18n.md`](../../docs/specs/platform/requirements/i18n.md).
 
 ## Markdown safety
 

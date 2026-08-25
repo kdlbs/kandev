@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
@@ -127,6 +128,23 @@ type WorkspaceTracker struct {
 	monitorRunning int32 // atomic; 1 if monitorLoop tick is in progress
 	gitPollRunning int32 // atomic; 1 if pollGitChanges tick is in progress
 
+	// gitPollTickCount and gitPollTickTotalNanos accumulate the number and
+	// summed duration of completed pollGitChanges ticks since this tracker
+	// started (never reset — only Stop() ends accumulation). Backs the
+	// diagnostic agentctl_git_poll_ms metric read via GitPollTickStats; see
+	// api.handleSystemMetrics.
+	gitPollTickCount      atomic.Int64
+	gitPollTickTotalNanos atomic.Int64
+	gitPollStatsMu        sync.Mutex
+
+	// monitorTickCount and monitorTickTotalNanos accumulate the number and
+	// summed duration of completed workspace monitor scans since this tracker
+	// started. This includes the initial scan and each later monitor tick. It
+	// backs the diagnostic agentctl_monitor_poll_ms metric.
+	monitorTickCount      atomic.Int64
+	monitorTickTotalNanos atomic.Int64
+	monitorStatsMu        sync.Mutex
+
 	// updateMu prevents concurrent updateGitStatus calls from the two polling loops.
 	// Polling loops use TryLock (skip if busy); RefreshGitStatus uses Lock (always completes).
 	updateMu sync.Mutex
@@ -166,6 +184,40 @@ func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
 	// NewWorkspaceTrackerForRepo per repo subdir to get per-repo events.
 	resolvedWorkDir = preferGitRepoChildIfRootIsBare(resolvedWorkDir, tlog)
 	return newWorkspaceTracker(resolvedWorkDir, "", log)
+}
+
+// recordGitPollTick accumulates one pollGitChanges tick's duration into the
+// tracker's running count/total, regardless of whether the tick succeeded or
+// failed — see gitPollTick's deferred call site.
+func (wt *WorkspaceTracker) recordGitPollTick(d time.Duration) {
+	wt.gitPollStatsMu.Lock()
+	defer wt.gitPollStatsMu.Unlock()
+	wt.gitPollTickTotalNanos.Add(d.Nanoseconds())
+	wt.gitPollTickCount.Add(1)
+}
+
+// GitPollTickStats returns the number of completed git poll ticks and their
+// summed duration in nanoseconds since this tracker started. count == 0
+// means no tick has completed yet (the diagnostic metric is unavailable).
+func (wt *WorkspaceTracker) GitPollTickStats() (count int64, totalNanos int64) {
+	wt.gitPollStatsMu.Lock()
+	defer wt.gitPollStatsMu.Unlock()
+	return wt.gitPollTickCount.Load(), wt.gitPollTickTotalNanos.Load()
+}
+
+func (wt *WorkspaceTracker) recordMonitorTick(d time.Duration) {
+	wt.monitorStatsMu.Lock()
+	defer wt.monitorStatsMu.Unlock()
+	wt.monitorTickTotalNanos.Add(d.Nanoseconds())
+	wt.monitorTickCount.Add(1)
+}
+
+// MonitorTickStats returns the number of completed workspace monitor scans
+// and their summed duration in nanoseconds since this tracker started.
+func (wt *WorkspaceTracker) MonitorTickStats() (count int64, totalNanos int64) {
+	wt.monitorStatsMu.Lock()
+	defer wt.monitorStatsMu.Unlock()
+	return wt.monitorTickCount.Load(), wt.monitorTickTotalNanos.Load()
 }
 
 // RepositoryName returns the repository name tag applied to events emitted by
