@@ -68,8 +68,15 @@ func (r *Repository) CreateTaskReviewRun(ctx context.Context, run *models.TaskRe
 // with the same non-empty EntryID already exists (idx_task_review_runs_entry_id).
 // The narrow race this guards is two concurrent redeliveries of the same
 // step-entry both passing FindTaskReviewRunByEntryID's pre-check before
-// either has inserted; the caller is expected to re-fetch by entry ID rather
-// than treat this as a generic failure — see AC-OFFICE-STEP-ENTRY-001.10.
+// either has inserted. Neither caller re-fetches the winner's row on this
+// error today: review.Runner.launch (internal/review/runner.go) returns it
+// as-is, and orchestrator's runCodeReviewCallback logs and swallows it by
+// design, matching every other review-launch failure ("a review failure
+// never blocks the transition") — see AC-OFFICE-STEP-ENTRY-001.10. The loser
+// of the race simply does not get a run for that entry; a later redelivery
+// of the same entry (restart, retry) will find the winner's row through the
+// FindTaskReviewRunByEntryID pre-check instead of hitting this conflict
+// again.
 var ErrTaskReviewRunEntryConflict = errors.New("task review run entry conflict")
 
 // sqliteTaskReviewRunEntryViolationMessage is the substring go-sqlite3 puts in
