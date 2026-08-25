@@ -45,7 +45,7 @@ func agentConversationHost(capability bool, svc AgentConversationService) *plugi
 	}
 }
 
-func assertCode(t *testing.T, err error, want codes.Code) {
+func assertGRPCCode(t *testing.T, err error, want codes.Code) {
 	t.Helper()
 	if err == nil {
 		t.Fatalf("expected error with code %s, got nil", want)
@@ -67,13 +67,13 @@ func TestAgentConversationsDeniedWithoutCapability(t *testing.T) {
 	}
 
 	_, _, err := manager.Ensure(context.Background(), pluginsdk.AgentConversationSpec{WorkspaceID: "ws1", ConversationKey: "coordinator"})
-	assertCode(t, err, codes.PermissionDenied)
+	assertGRPCCode(t, err, codes.PermissionDenied)
 
 	_, err = manager.Dispatch(context.Background(), "ws1", "coordinator", "hello", "occ-1")
-	assertCode(t, err, codes.PermissionDenied)
+	assertGRPCCode(t, err, codes.PermissionDenied)
 
 	_, err = manager.Delete(context.Background(), "ws1", "coordinator")
-	assertCode(t, err, codes.PermissionDenied)
+	assertGRPCCode(t, err, codes.PermissionDenied)
 }
 
 // The capability alone is not enough: an unwired service must report
@@ -82,11 +82,11 @@ func TestAgentConversationsUnavailableWhenNotWired(t *testing.T) {
 	h := &pluginHost{pluginID: "p1", capabilities: manifest.Capabilities{AgentConversation: true}}
 
 	_, _, err := h.AgentConversations().Ensure(context.Background(), pluginsdk.AgentConversationSpec{WorkspaceID: "ws1", ConversationKey: "coordinator"})
-	assertCode(t, err, codes.Unavailable)
+	assertGRPCCode(t, err, codes.Unavailable)
 
 	nilSvc := agentConversationHost(true, nil)
 	_, err = nilSvc.AgentConversations().Dispatch(context.Background(), "ws1", "coordinator", "hello", "occ-1")
-	assertCode(t, err, codes.Unavailable)
+	assertGRPCCode(t, err, codes.Unavailable)
 }
 
 // A declared capability reaches the service, stamped with the calling
@@ -138,7 +138,7 @@ func TestAgentConversationsPrincipalBoundRunFailsClosedAndRebinds(t *testing.T) 
 	principals.runErr = status.Error(codes.PermissionDenied, "principal revoked")
 	svc.lastPluginID = ""
 	_, err = h.AgentConversations().Dispatch(context.Background(), "ws1", "agent", "wake", "occurrence")
-	assertCode(t, err, codes.PermissionDenied)
+	assertGRPCCode(t, err, codes.PermissionDenied)
 	if svc.lastPluginID != "" {
 		t.Fatal("revoked principal must block dispatch before side effects")
 	}
