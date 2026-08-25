@@ -533,6 +533,7 @@ func TestServerSurfaceAutomationHasFixedCoordinatorCatalog(t *testing.T) {
 		"add_task_dependency_kandev", "remove_task_dependency_kandev", "message_task_kandev",
 		"stop_task_kandev", "spawn_session_kandev", "list_pending_questions_kandev",
 		"answer_question_kandev", "list_pending_agent_permissions_kandev", "resolve_agent_permission_kandev",
+		"list_task_inbox_kandev",
 	}
 	assert.ElementsMatch(t, want, getRegisteredToolNames(s))
 }
