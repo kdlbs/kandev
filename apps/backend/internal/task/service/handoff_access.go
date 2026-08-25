@@ -159,7 +159,13 @@ func inAncestorChain(ctx context.Context, repo taskLookup, currentID, targetID s
 
 // ancestorIDs walks parent_id up from taskID, returning the chain of
 // ancestor IDs (excluding taskID itself). The walk stops at empty
-// parent_id or after ancestorWalkHopCap hops, whichever comes first.
+// parent_id or after ancestorWalkHopCap hops, whichever comes first. A
+// not-found parent also stops the walk (returning the chain accumulated
+// so far) rather than propagating the repository's identifier-embedding
+// error — mirroring loadAccessPair's not-found normalization. A dangling
+// parent_id is reachable via ordinary delete_task_kandev usage (deleting
+// a task without reparenting its children), not just corrupt data, so
+// this must degrade to a benign outcome rather than leak.
 func ancestorIDs(ctx context.Context, repo taskLookup, taskID string) ([]string, error) {
 	var out []string
 	current := taskID
@@ -167,6 +173,9 @@ func ancestorIDs(ctx context.Context, repo taskLookup, taskID string) ([]string,
 	for i := 0; i < ancestorWalkHopCap; i++ {
 		t, err := repo.GetTask(ctx, current)
 		if err != nil {
+			if errors.Is(err, repository.ErrTaskNotFound) {
+				return out, nil
+			}
 			return nil, err
 		}
 		if t == nil || t.ParentID == "" {

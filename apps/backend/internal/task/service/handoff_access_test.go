@@ -303,6 +303,55 @@ func TestAncestorIDs_CycleHandled(t *testing.T) {
 	}
 }
 
+// REGRESSION (SEC-001): a dangling parent_id is reachable via ordinary
+// delete_task_kandev usage — it deletes a task via a bare
+// `DELETE FROM tasks WHERE id = ?` with no reparenting or cascade, so a
+// surviving child's parent_id can point at a row that no longer exists.
+// ancestorIDs must treat a not-found parent the same as reaching the end
+// of the chain (return what it has accumulated so far), not propagate the
+// wrapped repository.ErrTaskNotFound the way loadAccessPair already
+// refuses to for its own two direct GetTask calls.
+func TestAncestorIDs_DanglingParentNormalizesToAccumulatedChain(t *testing.T) {
+	// "child" points at "deleted-parent", which does not exist in the
+	// graph — simulating the state left behind by delete_task_kandev
+	// deleting a task that still had children. The dangling id itself is
+	// still recorded (added to the chain before the walk discovers, on
+	// the next hop, that it doesn't exist) — the same
+	// append-before-verify shape TestAncestorIDs_CycleHandled already
+	// tolerates. What matters is the walk stops cleanly instead of
+	// propagating an error: neither loadAccessPair's `current` nor
+	// `target` can ever equal a dangling id (both are validated to exist
+	// before ancestorIDs runs), so its mere presence in this slice is
+	// harmless for the access decision.
+	g := newGraph(newTask("child", "deleted-parent", "ws-1"))
+	got, err := ancestorIDs(context.Background(), g, "child")
+	if err != nil {
+		t.Fatalf("ancestorIDs err = %v, want nil (dangling parent must normalize, not error)", err)
+	}
+	if len(got) != 1 || got[0] != "deleted-parent" {
+		t.Fatalf("ancestorIDs = %v, want [\"deleted-parent\"] (walk stops cleanly at the dangling hop)", got)
+	}
+}
+
+// REGRESSION (SEC-001): the same dangling-parent scenario must not leak a
+// raw internal error out of canReadDocuments either — the guard must reach
+// a normal allow/deny decision instead of propagating the wrapped
+// repository.ErrTaskNotFound (which embeds the deleted task's id) up to
+// mapHandoffError's uncaught default branch.
+func TestCanReadDocuments_DanglingParentDoesNotLeakRawError(t *testing.T) {
+	g := newGraph(
+		newTask("child", "deleted-parent", "ws-1"),
+		newTask("unrelated", "", "ws-1"),
+	)
+	ok, err := canReadDocuments(context.Background(), g, nil, "child", "unrelated")
+	if err != nil {
+		t.Fatalf("canReadDocuments err = %v, want nil (dangling ancestor must not leak)", err)
+	}
+	if ok {
+		t.Fatal("canReadDocuments(child, unrelated) = true, want false (no real relation)")
+	}
+}
+
 // itoa avoids pulling in strconv.
 func itoa(i int) string {
 	if i == 0 {
