@@ -16,6 +16,7 @@ acceptance_criteria:
   - AC-WORKSPACES-BRANCH-POLICIES-001.1
   - AC-WORKSPACES-BRANCH-POLICIES-001.2
   - AC-WORKSPACES-BRANCH-POLICIES-001.3
+  - AC-WORKSPACES-BRANCH-POLICIES-001.6
   - AC-WORKSPACES-BRANCH-POLICIES-002.1
   - AC-WORKSPACES-BRANCH-POLICIES-002.3
   - AC-WORKSPACES-BRANCH-POLICIES-002.4
@@ -41,14 +42,16 @@ deterministic Playwright scenarios.
 ## E2E scenarios
 
 - Desktop repository settings start collapsed, show count/help when expanded,
-  seed Gitflow policies, and persist an edited policy after reload.
-- Desktop task creation groups policies before branches, marks a Hotfix choice
-  as a policy, enables fresh-branch mode, and creates a task using the expected
-  base/template/PR target.
+  list and filter local/remote branch choices with refresh, seed Gitflow
+  policies, and persist an edited policy after reload.
+- Desktop task creation groups policies before branches, keeps each policy on
+  one line with hover/focus details, enables fresh-branch mode, and creates a
+  task using the expected base/template/PR target.
 - Phone repository settings use tap-accessible help and a full-height drawer
   whose fields and safe-area action remain reachable at a compact viewport.
-- Phone task creation shows the policy marker without horizontal overflow and
-  retains the selected policy state through task submission.
+- Phone task creation shows the one-line policy marker and tap details without
+  horizontal overflow, then retains the selected policy state through task
+  submission.
 
 Use API seeding for prerequisites that are not the behavior under test. Use the
 mock backend/provider contracts and existing stable accessibility selectors.

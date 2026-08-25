@@ -35,6 +35,10 @@ test.describe("Repository branch policies on desktop", () => {
       cwd: seedData.repositoryPath,
       env: makeGitEnv(backend.tmpDir),
     });
+    execSync("git update-ref refs/remotes/origin/release-candidate HEAD", {
+      cwd: seedData.repositoryPath,
+      env: makeGitEnv(backend.tmpDir),
+    });
 
     await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/repositories`);
     const repositoryCard = testPage.locator('[data-slot="card"]', { hasText: "E2E Repo" });
@@ -47,12 +51,32 @@ test.describe("Repository branch policies on desktop", () => {
     await policies.getByRole("button", { name: "Add Gitflow policies", exact: true }).click();
 
     const gitflowDialog = testPage.getByRole("dialog", { name: "Add Gitflow policies" });
-    await expect(gitflowDialog.getByRole("combobox", { name: "Production branch" })).toHaveValue(
+    await expect(gitflowDialog.getByRole("combobox", { name: "Production branch" })).toContainText(
       "main",
     );
-    await expect(gitflowDialog.getByRole("combobox", { name: "Development branch" })).toHaveValue(
+    await expect(gitflowDialog.getByRole("combobox", { name: "Development branch" })).toContainText(
       "develop",
     );
+    await gitflowDialog.getByRole("combobox", { name: "Development branch" }).click();
+    await expect(gitflowDialog.getByPlaceholder("Search branches...")).toBeVisible();
+    await expect(gitflowDialog.getByRole("option", { name: /^main local/ })).toBeVisible();
+    await expect(
+      gitflowDialog.getByRole("option", { name: /^origin\/release-candidate origin/ }),
+    ).toBeVisible();
+    await gitflowDialog.getByPlaceholder("Search branches...").fill("release-candidate");
+    await expect(gitflowDialog.getByRole("option", { name: /^main local/ })).toHaveCount(0);
+    await expect(
+      gitflowDialog.getByRole("option", { name: /^origin\/release-candidate origin/ }),
+    ).toBeVisible();
+    await gitflowDialog.getByTestId("branch-refresh-button").click();
+    await expect(gitflowDialog.getByTestId("branch-refresh-button")).toBeEnabled();
+    await gitflowDialog.getByRole("option", { name: /^origin\/release-candidate origin/ }).click();
+    await expect(gitflowDialog.getByRole("combobox", { name: "Development branch" })).toContainText(
+      "origin/release-candidate",
+    );
+    await gitflowDialog.getByRole("combobox", { name: "Development branch" }).click();
+    await gitflowDialog.getByPlaceholder("Search branches...").fill("develop");
+    await gitflowDialog.getByRole("option", { name: /^develop local/ }).click();
     await gitflowDialog
       .getByRole("button", { name: "Create Gitflow policies", exact: true })
       .click();

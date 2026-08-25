@@ -23,8 +23,10 @@ test.describe("Repository branch policies on mobile", () => {
     );
     await testPage.keyboard.press("Escape");
     await drawer.getByRole("textbox", { name: "Policy name" }).fill("Mobile policy");
-    await drawer.getByRole("combobox", { name: "Base branch" }).fill("main");
-    await drawer.getByRole("combobox", { name: "Pull request target" }).fill("main");
+    await drawer.getByRole("combobox", { name: "Base branch" }).tap();
+    await drawer.getByRole("option", { name: /^main local/ }).tap();
+    await drawer.getByRole("combobox", { name: "Pull request target" }).tap();
+    await drawer.getByRole("option", { name: /^main local/ }).tap();
     await drawer
       .getByRole("textbox", { name: "Branch name template" })
       .fill("mobile/{title}-{suffix}");

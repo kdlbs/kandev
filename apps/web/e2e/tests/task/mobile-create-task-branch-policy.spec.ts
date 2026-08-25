@@ -1,7 +1,7 @@
 import { expect, test } from "../../fixtures/test-base";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
-import { expectPolicyOptionContentNotToOverlap } from "./create-task-branch-policy-helpers";
+import { expectPolicyOptionUsesOneLine } from "./create-task-branch-policy-helpers";
 
 useRegularMode();
 
@@ -40,8 +40,15 @@ test.describe("Task branch policy selection on mobile", () => {
       await dialog.getByTestId("branch-chip-trigger").tap();
       const option = testPage.getByRole("option", { name: new RegExp(policy.name) });
       await expect(option).toContainText("Policy");
-      await expectPolicyOptionContentNotToOverlap(option, policy.name);
-      await option.tap({ force: true });
+      await expectPolicyOptionUsesOneLine(option, policy.name);
+      await testPage.getByTestId(`branch-policy-option-info-${policy.id}`).tap();
+      await expect(testPage.getByRole("dialog", { name: policy.name })).toContainText(
+        "Base: main. Template: mobile/{title}-{suffix}. Pull request target: main.",
+      );
+      await testPage.keyboard.press("Escape");
+      await dialog.getByTestId("branch-chip-trigger").tap();
+      const reopenedOption = testPage.getByRole("option", { name: new RegExp(policy.name) });
+      await reopenedOption.tap({ force: true });
       await expect(dialog.getByTestId("branch-chip-trigger")).toContainText(policy.name);
       await expect(dialog.getByTestId("fresh-branch-toggle")).toHaveAttribute(
         "aria-pressed",

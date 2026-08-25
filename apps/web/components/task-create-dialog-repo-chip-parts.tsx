@@ -1,8 +1,17 @@
 "use client";
 
-import { useMemo } from "react";
-import { IconCode, IconFolderPlus, IconGitBranch } from "@tabler/icons-react";
+import { useMemo, useState } from "react";
+import { IconCode, IconFolderPlus, IconGitBranch, IconInfoCircle } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@kandev/ui/drawer";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Pill, type PillAction, type PillOption } from "@/components/task-create-dialog-pill";
 import type { Branch, RepositoryBranchPolicy } from "@/lib/types/http";
 import type { TaskRepoRow } from "@/components/task-create-dialog-types";
@@ -16,6 +25,56 @@ import {
 import { scoreBranch } from "@/lib/utils/branch-filter";
 import { t } from "@/lib/i18n";
 import { useTranslation } from "react-i18next";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
+
+function BranchPolicyOptionInfo({
+  policy,
+  summary,
+  unavailableReason,
+}: {
+  policy: RepositoryBranchPolicy;
+  summary: string;
+  unavailableReason?: string;
+}) {
+  const usesTouchDrawer = useTouchDrawer();
+  const [open, setOpen] = useState(false);
+  const details = unavailableReason ? `${summary} ${unavailableReason}` : summary;
+  const trigger = (
+    <button
+      type="button"
+      aria-label={details}
+      aria-haspopup={usesTouchDrawer ? "dialog" : undefined}
+      aria-expanded={usesTouchDrawer ? open : undefined}
+      data-testid={`branch-policy-option-info-${policy.id}`}
+      className="flex h-11 w-11 shrink-0 cursor-help items-center justify-center rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:h-7 sm:w-7"
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => event.stopPropagation()}
+    >
+      <IconInfoCircle className="h-4 w-4" aria-hidden="true" />
+    </button>
+  );
+
+  if (!usesTouchDrawer) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>{trigger}</TooltipTrigger>
+        <TooltipContent className="max-w-80 text-xs">{details}</TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  return (
+    <Drawer open={open} onOpenChange={setOpen}>
+      <DrawerTrigger asChild>{trigger}</DrawerTrigger>
+      <DrawerContent>
+        <DrawerHeader>
+          <DrawerTitle>{policy.name}</DrawerTitle>
+          <DrawerDescription>{details}</DrawerDescription>
+        </DrawerHeader>
+      </DrawerContent>
+    </Drawer>
+  );
+}
 
 function branchPolicyToOption(policy: RepositoryBranchPolicy, branches: Branch[]): PillOption {
   const baseBranchAvailable = branches.some((branch) => {
@@ -42,22 +101,21 @@ function branchPolicyToOption(policy: RepositoryBranchPolicy, branches: Branch[]
     groupLabel: t("task:branchPoliciesGroup"),
     disabled: !baseBranchAvailable,
     renderLabel: () => (
-      <span className="flex min-w-0 flex-1 flex-col gap-0.5 pr-1">
-        <span className="flex min-w-0 items-center gap-2">
-          <Badge variant="secondary" className="shrink-0 text-xs">
-            {t("task:branchPolicyMarker")}
-          </Badge>
-          <span className="truncate" title={policy.name}>
-            {policy.name}
-          </span>
-        </span>
-        <span className="flex min-w-0 flex-col text-xs text-muted-foreground">
-          <span className="truncate" title={summary}>
-            {summary}
-          </span>
-          {unavailableReason ? <span>{unavailableReason}</span> : null}
+      <span className="flex min-w-0 flex-1 items-center gap-2">
+        <Badge variant="secondary" className="shrink-0 text-xs">
+          {t("task:branchPolicyMarker")}
+        </Badge>
+        <span className="truncate" title={policy.name}>
+          {policy.name}
         </span>
       </span>
+    ),
+    renderAccessory: () => (
+      <BranchPolicyOptionInfo
+        policy={policy}
+        summary={summary}
+        unavailableReason={unavailableReason}
+      />
     ),
   };
 }

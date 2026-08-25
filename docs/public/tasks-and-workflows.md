@@ -84,12 +84,14 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
 Manage named branch policies in **Settings → Workspaces → _workspace_ → Repositories**. A policy
 stores a base branch, a branch-name template, and a pull-request target for one repository. The
 task picker shows policies before raw branches. A selected policy starts a fresh branch. A raw branch
-continues to open the existing branch.
+continues to open the existing branch. Each policy row has an information icon for its saved values.
+The base branch is the starting point. The pull-request target is the merge destination.
 
 When you create a task, Kandev saves the selected policy values on the task repository. Later edits
-or deletion of the policy do not change the task. The saved pull-request target is the default for
-new pull requests, and you can change it before creation. Policies are not offered in **Quick Chat**,
-**Remote**, **Add Sources**, or **Add Branch** flows.
+or deletion of the policy do not change the task. Kandev's pull-request dialog uses the saved target
+by default. You can change it before creation. An agent-run provider CLI does not receive this target
+automatically. Include the target when you ask an agent to create the pull request. Policies are not
+offered in **Quick Chat**, **Remote**, **Add Sources**, or **Add Branch** flows.
 
 Kandev remembers draft or recently used repository, branch, executor, and profile choices. Review the restored values before submitting, especially after changing workspace.
 

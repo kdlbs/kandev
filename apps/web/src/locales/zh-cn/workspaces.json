@@ -171,7 +171,7 @@
   "branchPolicyBaseBranchHelp": "新工作从此分支开始。",
   "branchPolicyPullRequestTarget": "拉取请求目标分支",
   "branchPolicyPullRequestTargetHelpLabel": "关于拉取请求目标",
-  "branchPolicyPullRequestTargetHelp": "使用此策略创建的拉取请求将目标设为此分支。",
+  "branchPolicyPullRequestTargetHelp": "Kandev 的拉取请求对话框默认选择此分支。代理创建拉取请求时必须明确设置此目标分支。",
   "branchPolicyTemplate": "分支名称模板",
   "branchPolicyTemplateHelpLabel": "关于分支模板",
   "branchPolicyTemplateHelp": "使用受支持的占位符，例如 title、task_id、ticket 和 suffix。",

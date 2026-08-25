@@ -2,7 +2,7 @@ import { execSync } from "node:child_process";
 import { expect, test } from "../../fixtures/test-base";
 import { makeGitEnv } from "../../helpers/git-helper";
 import { useRegularMode } from "../../helpers/regular-mode";
-import { expectPolicyOptionContentNotToOverlap } from "./create-task-branch-policy-helpers";
+import { expectPolicyOptionUsesOneLine } from "./create-task-branch-policy-helpers";
 
 useRegularMode();
 
@@ -45,7 +45,17 @@ test.describe("Task creation with branch policies", () => {
       await dialog.getByTestId("branch-chip-trigger").click();
       const option = testPage.getByRole("option", { name: new RegExp(policy.name) });
       await expect(option).toContainText("Policy");
-      await expectPolicyOptionContentNotToOverlap(option, policy.name);
+      await expectPolicyOptionUsesOneLine(option, policy.name);
+      const policyInfo = testPage.getByTestId(`branch-policy-option-info-${policy.id}`);
+      await policyInfo.hover();
+      await expect(testPage.getByRole("tooltip")).toContainText(
+        "Base: main. Template: feature/{title}-{suffix}. Pull request target: develop.",
+      );
+      await testPage.mouse.move(0, 0);
+      await policyInfo.focus();
+      await expect(testPage.getByRole("tooltip")).toContainText(
+        "Base: main. Template: feature/{title}-{suffix}. Pull request target: develop.",
+      );
       await option.click();
       await expect(dialog.getByTestId("branch-chip-trigger")).toContainText(policy.name);
       await expect(dialog.getByTestId("fresh-branch-toggle")).toHaveAttribute(

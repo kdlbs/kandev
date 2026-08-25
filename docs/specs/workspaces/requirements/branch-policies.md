@@ -34,6 +34,9 @@ duplicate repositories and not a restriction on Git itself.
 - Enforcing Gitflow or preventing users from selecting arbitrary branches.
 - Automatically routing merges between release, production, and development
   branches after a pull request is created.
+- Injecting the saved pull-request target into agent prompts, skills, or shell
+  environments. Users must name the target when an agent creates the pull
+  request with a provider CLI.
 - Adding policies to Quick Chat, Remote URL, Add Sources, or the post-creation
   Add Branch flow in the first release.
 - Reordering policies or choosing a repository-wide default policy.
@@ -85,6 +88,10 @@ be saved before policies can be managed.
   existing safe Git-ref validation.
 - **AC-WORKSPACES-BRANCH-POLICIES-001.5:** Deleting a repository deletes its policies. Deleting or editing
   a policy does not rewrite an existing task's policy snapshot.
+- **AC-WORKSPACES-BRANCH-POLICIES-001.6:** Base and pull-request-target controls list distinct local and
+  remote branch refs in a searchable selector with an explicit refresh action.
+  Editing a policy whose saved ref is no longer listed keeps that saved value
+  visible until the user chooses a replacement.
 
 ### REQ-WORKSPACES-BRANCH-POLICIES-002: Guided Gitflow starter
 
@@ -122,8 +129,11 @@ with this template." It MUST NOT be treated as the name of an existing branch.
 
 #### Acceptance criteria
 
-- **AC-WORKSPACES-BRANCH-POLICIES-003.1:** Policy options appear before raw branches and carry a localized
-  `Policy` marker, policy name, base branch, and branch-template preview.
+- **AC-WORKSPACES-BRANCH-POLICIES-003.1:** Policy options appear before raw branches and use a single-line
+  row with a localized `Policy` marker, policy name, and focusable information
+  control. The information control exposes the base branch, branch-template
+  preview, pull-request target, and unavailable-base guidance by hover, keyboard
+  focus, or tap.
 - **AC-WORKSPACES-BRANCH-POLICIES-003.2:** A selected policy remains visibly identifiable as a policy in the
   closed chip, including its base branch. Selection state uses a typed policy ID
   and is never inferred from a label or branch string.
@@ -198,4 +208,3 @@ and touch input and MUST preserve existing repository and task contracts.
 - System design: [Branch policies](../system-design/branch-policies.md)
 - Decision: [Snapshot task branch policies](../../../decisions/2026-08-24-task-snapshotted-branch-policies.md)
 - Implementation plan: [Branch policies plan](../../../plans/branch-policies/plan.md)
-

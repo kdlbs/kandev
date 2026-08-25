@@ -139,7 +139,7 @@ describe("WorkspaceRepoChips duplicate policy", () => {
 });
 
 describe("WorkspaceRepoChips branch policy preview", () => {
-  it("shows the branch template in the policy option preview", () => {
+  it("keeps policy choices on one line and moves details behind an info control", () => {
     renderChips({
       rows: [row({ key: "r0", repositoryId: FRONTEND_ID, branch: "main" })],
       showBranchPolicies: true,
@@ -148,7 +148,10 @@ describe("WorkspaceRepoChips branch policy preview", () => {
     fireEvent.click(screen.getByTestId("branch-chip-trigger"));
 
     const option = screen.getByRole("option", { name: /Feature branches/ });
-    expect(option.textContent).toContain("feature/{title}-{suffix}");
+    expect(option.textContent).not.toContain("feature/{title}-{suffix}");
+    expect(
+      screen.getByTestId("branch-policy-option-info-policy-1").getAttribute("aria-label"),
+    ).toContain("feature/{title}-{suffix}");
   });
 });
 

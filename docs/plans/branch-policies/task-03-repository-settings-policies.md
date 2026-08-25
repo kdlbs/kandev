@@ -15,6 +15,7 @@ acceptance_criteria:
   - AC-WORKSPACES-BRANCH-POLICIES-001.2
   - AC-WORKSPACES-BRANCH-POLICIES-001.3
   - AC-WORKSPACES-BRANCH-POLICIES-001.4
+  - AC-WORKSPACES-BRANCH-POLICIES-001.6
   - AC-WORKSPACES-BRANCH-POLICIES-002.1
   - AC-WORKSPACES-BRANCH-POLICIES-002.2
   - AC-WORKSPACES-BRANCH-POLICIES-002.3
@@ -53,6 +54,8 @@ desktop-dialog versus phone-drawer composition.
   scroll owner, safe-area actions, and 44 CSS pixel touch targets.
 - Add the Gitflow starter with production/development selectors, four-policy
   preview, and atomic submission.
+- Reuse the searchable, refreshable branch selector for policy and Gitflow
+  branch fields, preserving distinct local and remote refs.
 - Add all new copy to English, Portuguese, Simplified Chinese, and both
   Traditional Chinese catalogs; run the existing Traditional Chinese generator.
 

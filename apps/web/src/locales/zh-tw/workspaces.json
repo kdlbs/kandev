@@ -171,7 +171,7 @@
   "branchPolicyBaseBranchHelp": "新工作從此分支開始。",
   "branchPolicyPullRequestTarget": "提取要求目標分支",
   "branchPolicyPullRequestTargetHelpLabel": "關於提取要求目標",
-  "branchPolicyPullRequestTargetHelp": "使用此策略建立的提取要求將目標設為此分支。",
+  "branchPolicyPullRequestTargetHelp": "Kandev 的提取要求對話方塊預設選擇此分支。代理建立提取要求時必須明確設定此目標分支。",
   "branchPolicyTemplate": "分支名稱模板",
   "branchPolicyTemplateHelpLabel": "關於分支模板",
   "branchPolicyTemplateHelp": "使用受支援的佔位符，例如 title、task_id、ticket 和 suffix。",

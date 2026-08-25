@@ -111,8 +111,9 @@ shows that base for feedback.
 
 Runtime worktree creation, local fresh-branch creation, and title-triggered
 branch rename read the task snapshot first. They read the repository template
-only when the snapshot template is empty. Pull-request creation reads the
-snapshot target first and then the task base branch.
+only when the snapshot template is empty. The web pull-request flow reads the
+snapshot target first and then the task base branch. Agent prompts, skills, and
+shell environments do not receive the target in this release.
 
 ## Frontend state and transport
 
@@ -144,7 +145,11 @@ contributor or add a local Save button.
 The policy form contains name, optional description, base branch, branch
 template, and pull-request target. Every technical field has concise visible
 supporting text. Focusable info controls explain examples, template placeholders,
-and how base differs from pull-request target.
+and how base differs from pull-request target. Base and target fields reuse the
+task branch option model: local refs keep their short names, remote refs keep
+their remote prefix, and badges distinguish their source. The shared selector
+provides filtering and force-refresh. A saved ref that disappeared remains a
+temporary option while the user edits the policy.
 
 Desktop uses a dialog. At phone breakpoints the same form logic renders in a
 full-height drawer with one scrolling body and a safe-area footer. Help uses a
@@ -158,10 +163,11 @@ development branch selectors and a preview of the four resulting policies.
 ## Task-create experience
 
 Extend the existing branch `Pill` selector to accept typed grouped options. It
-shows `Branch policies` first and `Branches` second. A policy row contains its
-name, a localized `Policy` badge, base branch, and template preview. Its help
-also identifies the pull-request target. The closed chip renders a compact
-policy name plus base branch.
+shows `Branch policies` first and `Branches` second. A policy row keeps its name,
+localized `Policy` badge, and information control on one line. Hover or keyboard
+focus opens the base, template, target, and unavailable-base details on fine
+pointers; tap opens the same details in a drawer on coarse pointers. The closed
+chip renders a compact policy name plus base branch.
 
 On a local executor, choosing a policy explicitly enables the existing `Fork a
 new branch` state. It does not bypass dirty-tree consent. Choosing a raw branch
@@ -172,8 +178,8 @@ The shared New Task/New Subtask repository picker gets this behavior. Quick Chat
 Remote URL, unsaved-path discovery, Add Sources, and Add Branch do not.
 
 On phone, the existing task selector remains a popover because it is already a
-compact, viewport-contained selection surface. Policy rows wrap their preview
-instead of forcing horizontal scroll.
+compact, viewport-contained selection surface. Policy rows keep one-line
+identity and use a touch drawer for their detailed preview.
 
 ## Accessibility and localization
 

@@ -47,8 +47,9 @@ branch compatibility, stale-policy recovery, and the exact task-create payload.
   selection without changing existing wire values for raw branches.
 - Extend the existing `Pill` option contract or add the smallest branch-specific
   grouped wrapper needed to show policies before branches.
-- Render a localized `Policy` marker, base, template preview, and target help;
-  keep the selected chip visibly policy-specific.
+- Render a one-line localized `Policy` marker and policy name with hover, focus,
+  and touch details for base, template preview, target, and availability; keep
+  the selected chip visibly policy-specific.
 - On local executors, policy selection enables the visible `Fork a new branch`
   mode and preserves dirty-tree consent.
 - Exclude policies from unsaved path, Remote URL, Quick Chat, Add Sources, and

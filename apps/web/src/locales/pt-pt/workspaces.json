@@ -171,7 +171,7 @@
   "branchPolicyBaseBranchHelp": "O novo trabalho começa neste branch.",
   "branchPolicyPullRequestTarget": "Destino do pull request",
   "branchPolicyPullRequestTargetHelpLabel": "Sobre os destinos do pull request",
-  "branchPolicyPullRequestTargetHelp": "Os pull requests desta política têm este branch como destino.",
+  "branchPolicyPullRequestTargetHelp": "A caixa de diálogo de pull request do Kandev seleciona este branch por predefinição. Um agente tem de definir este destino explicitamente quando cria um pull request.",
   "branchPolicyTemplate": "Modelo do nome do branch",
   "branchPolicyTemplateHelpLabel": "Sobre os modelos de branch",
   "branchPolicyTemplateHelp": "Use marcadores suportados, como title, task_id, ticket e suffix.",
