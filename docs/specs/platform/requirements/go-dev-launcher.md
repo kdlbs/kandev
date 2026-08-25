@@ -19,7 +19,7 @@ owners:
 
 #### Acceptance criteria
 
-- **AC-PLATFORM-GO-DEV-LAUNCHER-001.1:** Inside a Kandev task workspace — signalled by `KANDEV_TASK_ID` being set, or by the repo root living under `~/.kandev/tasks/` — any inherited `KANDEV_DATABASE_PATH` is assumed to be leaked from the parent backend and is cleared, so the backend derives its DB from `KANDEV_HOME_DIR`. The launcher prints that it detected a task workspace.
+- **AC-PLATFORM-GO-DEV-LAUNCHER-001.1:** Inside a Kandev task workspace — signalled by `KANDEV_TASK_ID` being set, or by the repo root living under `~/.kandev/tasks/` — the launcher replaces any inherited `KANDEV_DATABASE_PATH` with the task-local path and passes it with `KANDEV_HOME_DIR`. The launcher prints that it detected a task workspace.
 - **AC-PLATFORM-GO-DEV-LAUNCHER-001.2:** Otherwise an explicit `KANDEV_DATABASE_PATH` is honored as an escape hatch.
 - **AC-PLATFORM-GO-DEV-LAUNCHER-001.3:** Otherwise the DB is `<repoRoot>/.kandev-dev/data/kandev.db`.
 - **AC-PLATFORM-GO-DEV-LAUNCHER-001.4:** **GIVEN** a host with non-loopback LAN and Tailscale IPv4 addresses, **WHEN** the `dev`, `start`, or `run` launcher prints its startup banner, **THEN** it prints one `network:` URL for each address using the backend port.
@@ -98,9 +98,9 @@ cannot diverge from supervisor state when an explicit database is selected.
 `KANDEV_DATABASE_PATH` resolution keeps its current three-way rule:
 
 - Inside a Kandev task workspace — signalled by `KANDEV_TASK_ID` being set, or by the
-  repo root living under `~/.kandev/tasks/` — any inherited `KANDEV_DATABASE_PATH` is
-  assumed to be leaked from the parent backend and is cleared, so the backend derives
-  its DB from `KANDEV_HOME_DIR`. The launcher prints that it detected a task workspace.
+  repo root living under `~/.kandev/tasks/` — the launcher replaces any inherited
+  `KANDEV_DATABASE_PATH` with the task-local path and passes it with `KANDEV_HOME_DIR`.
+  The launcher prints that it detected a task workspace.
 - Otherwise an explicit `KANDEV_DATABASE_PATH`, whether selected through the
   environment or YAML, is honored as an escape hatch. It takes precedence over
   an ambient `KANDEV_HOME_DIR`.
@@ -248,7 +248,7 @@ them: building and serving the web app (Vite), the published npm shim, and repo 
 ## Persistence guarantees
 
 - `.kandev-dev/` is the only state `make dev` writes, unless the user explicitly sets
-  `KANDEV_DATABASE_PATH` outside a task workspace.
+  `KANDEV_DATABASE_PATH` or a YAML `homeDir` outside a task workspace.
 - `dev-prod-db-*.db` snapshots are retained five deep in `~/.kandev/data/backups/` and
   never prune other backup families.
 - The supervisor manifest and control socket live under

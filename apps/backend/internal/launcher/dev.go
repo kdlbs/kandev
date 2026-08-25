@@ -157,7 +157,11 @@ func devLaunchConfigFor(opts Options, configs ...*config.Config) (devLaunchConfi
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return devLaunchConfig{}, 1
 	}
-	database = normalizeDevDatabaseTarget(database)
+	database, err = normalizeDevDatabaseTarget(database)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "[kandev] unable to normalize dev database target: "+err.Error())
+		return devLaunchConfig{}, 1
+	}
 	return devLaunchConfig{
 		repoRoot:  repoRoot,
 		ports:     ports,

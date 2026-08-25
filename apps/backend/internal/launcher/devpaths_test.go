@@ -443,6 +443,23 @@ func TestValidateDevDatabaseTargetRejectsPathOutsideDataDir(t *testing.T) {
 	}
 }
 
+func TestValidateDevDatabaseTargetRejectsExplicitRepoLocalPathOutsideDataDir(t *testing.T) {
+	repo := makeRepoTree(t)
+	devHome := devKandevHome(repo)
+
+	for _, source := range []devDatabaseSource{devDatabaseEnvironment, devDatabaseConfiguration} {
+		t.Run(string(source), func(t *testing.T) {
+			target := devDatabaseTarget{
+				path:   filepath.Join(devHome, "supervisor", "kandev.db"),
+				source: source,
+			}
+			if err := validateDevDatabaseTarget(repo, target); err == nil {
+				t.Fatal("validateDevDatabaseTarget accepted an explicit repo-local path outside .kandev-dev/data")
+			}
+		})
+	}
+}
+
 func TestValidateDevDatabaseTargetAcceptsPathInsideDataDir(t *testing.T) {
 	repo := makeRepoTree(t)
 	devHome := devKandevHome(repo)
@@ -492,7 +509,10 @@ func TestNormalizeDevDatabaseTargetMakesPathAbsolute(t *testing.T) {
 		extra:   []string{"KANDEV_DEBUG_DEV_MODE=true", "KANDEV_HOME_DIR=" + relHome, "KANDEV_DATABASE_PATH=" + relPath},
 	}
 
-	normalized := normalizeDevDatabaseTarget(target)
+	normalized, err := normalizeDevDatabaseTarget(target)
+	if err != nil {
+		t.Fatal(err)
+	}
 	wantPath, err := filepath.Abs(relPath)
 	if err != nil {
 		t.Fatal(err)
@@ -574,11 +594,43 @@ func TestNormalizeDevDatabaseTargetNestedCwdRelativeExplicit(t *testing.T) {
 		extra:   []string{"KANDEV_DEBUG_DEV_MODE=true", "KANDEV_HOME_DIR=" + relativeHome, "KANDEV_DATABASE_PATH=" + relativePath},
 	}
 
-	normalized := normalizeDevDatabaseTarget(target)
+	normalized, err := normalizeDevDatabaseTarget(target)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if normalized.path != wantPath {
 		t.Fatalf("normalized path = %q, want %q", normalized.path, wantPath)
 	}
 	if normalized.homeDir != wantHome {
 		t.Fatalf("normalized homeDir = %q, want %q", normalized.homeDir, wantHome)
+	}
+}
+
+func TestNormalizeDevDatabaseTargetRejectsUnavailableWorkingDirectory(t *testing.T) {
+	workingDir := t.TempDir()
+	t.Chdir(workingDir)
+	absolutePath := filepath.Join(workingDir, "absolute.db")
+	if err := os.Remove(workingDir); err != nil {
+		t.Skipf("executor does not allow removing the current directory: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		path string
+	}{
+		{name: "relative database path", path: "relative.db"},
+		{name: "absolute database path", path: absolutePath},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			normalized, err := normalizeDevDatabaseTarget(devDatabaseTarget{
+				path:    tt.path,
+				homeDir: "relative-home",
+				extra:   []string{"KANDEV_DATABASE_PATH=" + tt.path, "KANDEV_HOME_DIR=relative-home"},
+			})
+			if err == nil {
+				t.Fatalf("normalizeDevDatabaseTarget returned %+v after absolute-path resolution failed", normalized)
+			}
+		})
 	}
 }

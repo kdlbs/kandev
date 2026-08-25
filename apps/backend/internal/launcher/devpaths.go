@@ -149,13 +149,17 @@ func validateDevDatabaseTarget(repoRoot string, target devDatabaseTarget) error 
 	if err != nil {
 		return fmt.Errorf("resolve dev database path %q: %w", target.path, err)
 	}
+	devHome, err := filepath.Abs(devKandevHome(repoRoot))
+	if err != nil {
+		return fmt.Errorf("resolve dev home directory: %w", err)
+	}
 	dataDir, err := filepath.Abs(filepath.Join(devKandevHome(repoRoot), "data"))
 	if err != nil {
 		return fmt.Errorf("resolve dev data directory: %w", err)
 	}
-	rel, err := filepath.Rel(dataDir, path)
-	insideDataDir := err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
-	if !insideDataDir && (target.source == devDatabaseDefault || target.source == devDatabaseTask) {
+	insideDataDir := pathWithinDirectory(dataDir, path)
+	insideDevHome := pathWithinDirectory(devHome, path)
+	if (insideDevHome && !insideDataDir) || (!insideDataDir && (target.source == devDatabaseDefault || target.source == devDatabaseTask)) {
 		return fmt.Errorf("refusing dev database path outside repo-local data directory: %s", path)
 	}
 	if insideDataDir {
@@ -166,31 +170,35 @@ func validateDevDatabaseTarget(repoRoot string, target devDatabaseTarget) error 
 	return nil
 }
 
+func pathWithinDirectory(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
+}
+
 // normalizeDevDatabaseTarget sets the target path and homeDir to their
 // absolute forms and updates the corresponding entries in extra so all
 // consumers (backup, output, child environment, supervisor paths) resolve
 // them consistently regardless of the launcher's CWD.
-func normalizeDevDatabaseTarget(target devDatabaseTarget) devDatabaseTarget {
+func normalizeDevDatabaseTarget(target devDatabaseTarget) (devDatabaseTarget, error) {
 	absPath, err := filepath.Abs(target.path)
 	if err != nil {
-		// Abs only fails in pathological cases (e.g. NUL on Windows);
-		// keep the original path as a fallback.
-		return target
+		return devDatabaseTarget{}, fmt.Errorf("resolve database path: %w", err)
 	}
 	target.path = absPath
 
 	absHome, err := filepath.Abs(target.homeDir)
-	if err == nil {
-		target.homeDir = absHome
+	if err != nil {
+		return devDatabaseTarget{}, fmt.Errorf("resolve home directory: %w", err)
 	}
+	target.homeDir = absHome
 
 	for i, item := range target.extra {
 		switch {
 		case strings.HasPrefix(item, "KANDEV_DATABASE_PATH="):
 			target.extra[i] = "KANDEV_DATABASE_PATH=" + absPath
-		case strings.HasPrefix(item, "KANDEV_HOME_DIR=") && err == nil:
+		case strings.HasPrefix(item, "KANDEV_HOME_DIR="):
 			target.extra[i] = "KANDEV_HOME_DIR=" + absHome
 		}
 	}
-	return target
+	return target, nil
 }
