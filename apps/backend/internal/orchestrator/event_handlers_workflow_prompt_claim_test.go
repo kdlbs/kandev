@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/stretchr/testify/require"
 )
 
 // terminalizeAfterPromotionRepo pauses the prompt claim after the session has
@@ -725,26 +726,25 @@ func TestProcessOnEnterImplicitProfileSwitchTerminalizedGuard(t *testing.T) {
 	close(barrierRepo.allowPrompt)
 
 	<-done
-	// The inner goroutine (implicit profile switch) needs time to run its
-	// guarded reload, detect terminalization, and create a replacement.
-	time.Sleep(200 * time.Millisecond)
 
-	// A replacement session must be created with the target profile and be primary.
-	sessions, err := repo.ListTaskSessions(ctx, source.TaskID)
-	requireNoError(t, err)
-	if len(sessions) != 3 {
-		t.Fatalf("session count = %d, want 3 (source + terminalized target + replacement)", len(sessions))
-	}
+	// The inner goroutine (implicit profile switch) must finish before we can
+	// assert on its results. Wait on a progress observation: the replacement
+	// session appearing as primary in the database.
 	var replacement *models.TaskSession
-	for _, s := range sessions {
-		if s.ID != source.ID && s.ID != target.ID {
-			replacement = s
-			break
+	require.Eventually(t, func() bool {
+		sessions, err := repo.ListTaskSessions(ctx, source.TaskID)
+		if err != nil || len(sessions) != 3 {
+			return false
 		}
-	}
-	if replacement == nil || !replacement.IsPrimary {
-		t.Fatalf("replacement = %#v, want primary fresh session", replacement)
-	}
+		for _, s := range sessions {
+			if s.ID != source.ID && s.ID != target.ID && s.IsPrimary {
+				replacement = s
+				return true
+			}
+		}
+		return false
+	}, 5*time.Second, 50*time.Millisecond, "expected a primary replacement session to appear")
+
 	if isTerminalSessionState(replacement.State) {
 		t.Fatalf("replacement state = %s, want nonterminal", replacement.State)
 	}

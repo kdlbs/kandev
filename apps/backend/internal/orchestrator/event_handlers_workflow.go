@@ -2026,11 +2026,12 @@ func (s *Service) reuseSessionForStep(ctx context.Context, taskID string, curren
 
 	promoted, err := s.setNonterminalSessionPrimary(ctx, existing.ID)
 	if err != nil {
-		s.logger.Warn("failed to set reused session as primary",
-			zap.String("session_id", existing.ID), zap.Error(err))
-	} else if !promoted {
+		return nil, fmt.Errorf("conditional primary promotion: %w", err)
+	}
+	if !promoted {
 		return nil, errReusableSessionNoLongerActive
-	} else if task, taskErr := s.repo.GetTask(ctx, taskID); taskErr != nil {
+	}
+	if task, taskErr := s.repo.GetTask(ctx, taskID); taskErr != nil {
 		s.logger.Warn("failed to load task after promoting reused session",
 			zap.String("task_id", taskID), zap.Error(taskErr))
 	} else if task != nil {
@@ -2447,6 +2448,30 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 
 				err := s.autoStartStepPrompt(ctx, taskID, fresh, step, effectivePrompt, planMode, true)
 				if err != nil {
+					if errors.Is(err, errWorkflowAutoStartSessionTerminalized) {
+						s.logger.Info("implicit profile switch: reused session terminalized during dispatch, creating replacement",
+							zap.String("task_id", taskID), zap.String("session_id", sessionID))
+						replacement, replacementErr := s.createNewSessionForStep(
+							ctx, taskID, fresh, fresh.AgentProfileID,
+						)
+						if replacementErr != nil {
+							s.logger.Error("failed to create replacement after terminalized dispatch",
+								zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(replacementErr))
+							return
+						}
+						replacementPrompt := s.buildWorkflowPrompt(
+							ctx, taskDescription, step, taskID, replacement.ID, isPassthrough,
+						)
+						if replacementErr = s.autoStartStepPrompt(
+							ctx, taskID, replacement, step, replacementPrompt, planMode, true,
+						); replacementErr != nil {
+							s.logger.Error("failed to auto-start replacement after terminalized dispatch",
+								zap.String("task_id", taskID), zap.String("session_id", replacement.ID), zap.Error(replacementErr))
+							s.setSessionWaitingForInput(ctx, taskID, replacement.ID, replacement)
+							s.publishSessionWaitingEvent(ctx, taskID, replacement.ID, stepID, replacement)
+						}
+						return
+					}
 					s.logger.Error("failed to launch agent after profile switch",
 						zap.String("task_id", taskID),
 						zap.String("session_id", sessionID),
@@ -3141,18 +3166,31 @@ func (s *Service) autoStartStepPrompt(
 	// prompt built, a concurrent completion/cancellation may have terminalized
 	// it. Reload under the cancel-in-flight guard and bail out with the
 	// standard terminalization error so the caller can create a replacement.
+	// The guard is held through the entire StartCreatedSession call to prevent
+	// terminalization between the reload and the admission of the launch.
 	if session.State == models.TaskSessionStateCreated {
 		lock, release := s.acquireCancelInFlightGuard(sessionID)
 		lock.Lock()
 		fresh, reloadErr := s.repo.GetTaskSession(ctx, sessionID)
-		if reloadErr != nil || fresh == nil || isTerminalSessionState(fresh.State) {
+		if reloadErr != nil {
+			lock.Unlock()
+			release()
+			requeueTaken()
+			return reloadErr
+		}
+		if fresh == nil || isTerminalSessionState(fresh.State) {
 			lock.Unlock()
 			release()
 			requeueTaken()
 			return errWorkflowAutoStartSessionTerminalized
 		}
-		lock.Unlock()
-		release()
+		var releaseOnce sync.Once
+		heldRelease := func() {
+			releaseOnce.Do(func() {
+				lock.Unlock()
+				release()
+			})
+		}
 
 		s.logger.Info("auto-start: session is CREATED, launching agent via StartCreatedSession",
 			zap.String("task_id", taskID),
@@ -3162,6 +3200,10 @@ func (s *Service) autoStartStepPrompt(
 			ctx, taskID, sessionID, session.AgentProfileID,
 			recordedPrompt, true, planMode, true, attachments, references,
 		)
+		// Release the guard as soon as StartCreatedSession has admitted the
+		// launch (succeeded or failed definitively). The deferred release
+		// via heldRelease ensures the guard is always released even on panic.
+		defer heldRelease()
 		if err != nil {
 			s.handleCreatedAutoStartLaunchFailure(
 				ctx, taskID, sessionID, stepName, prompt, err,
