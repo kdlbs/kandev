@@ -50,6 +50,9 @@ const (
 	// ModeOffice registers plan and interaction tools for office agents.
 	// Kanban tools are excluded because office agents use CLI commands instead.
 	ModeOffice = "office"
+	// ModeAutomation registers the fixed workspace coordinator catalog for
+	// scheduled automation agents.
+	ModeAutomation = "automation"
 )
 
 const pluginToolArgumentsKey = "arguments"
@@ -85,7 +88,7 @@ func locatorCount(locators ...string) int {
 // normalizeMode returns a valid MCP mode, defaulting unknown values to ModeTask.
 func normalizeMode(mode string) string {
 	switch mode {
-	case ModeConfig, ModeExternal, ModeOffice, ModeTaskTitlePending:
+	case ModeConfig, ModeExternal, ModeOffice, ModeAutomation, ModeTaskTitlePending:
 		return mode
 	default:
 		return ModeTask
@@ -596,6 +599,8 @@ func surfaceForMode(mode string) mcpprofile.Surface {
 		return mcpprofile.SurfaceExternal
 	case ModeOffice:
 		return mcpprofile.SurfaceOfficeTask
+	case ModeAutomation:
+		return mcpprofile.SurfaceAutomation
 	default:
 		return mcpprofile.SurfaceKanbanTask
 	}
@@ -894,7 +899,9 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 	external := surfaceEnabled(mcpprofile.SurfaceExternal)
 	office := surfaceEnabled(mcpprofile.SurfaceOfficeTask)
 	kanban := surfaceEnabled(mcpprofile.SurfaceKanbanTask)
+	automation := surfaceEnabled(mcpprofile.SurfaceAutomation)
 	return []profileToolGroup{
+		{name: "automation", enabled: automation, register: func(s *Server) { s.registerAutomationTools() }},
 		{name: "configuration-workflows", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigWorkflowTools() }},
 		{name: "configuration-agents", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigAgentTools() }},
 		{name: "configuration-mcp", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigMcpTools() }},
@@ -922,7 +929,7 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 			s.registerAddWorkspaceSourcesTool()
 			s.registerUpdateRepositoryBaseBranchTool()
 		}},
-		{name: "step-completion", enabled: kanban, register: func(s *Server) { s.registerStepCompleteTool() }},
+		{name: "step-completion", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerStepCompleteTool() }},
 		{name: "task-title", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityTaskTitle)), register: func(s *Server) { s.registerSetTaskTitleTool() }},
 		{name: "diagnostics", enabled: kanban, register: func(s *Server) { s.registerDiagnosticBundleTool() }},
 	}
@@ -959,12 +966,52 @@ func (s *Server) registerTools() {
 			group.register(s)
 		}
 	}
-	s.registerPluginTools()
+	if s.profile.Surface != mcpprofile.SurfaceAutomation {
+		s.registerPluginTools()
+	}
 	s.logger.Info("registered MCP tools",
 		zap.String("mode", s.mode),
 		zap.Int("count", len(s.mcpServer.ListTools())),
 		zap.Bool("disable_ask_question", s.disableAskQuestion))
 	s.rebuildToolArgumentValidators()
+}
+
+// registerAutomationTools composes the fixed coordinator catalog from the
+// existing read/task lifecycle registrations, then removes every mutation or
+// task-local capability that is not part of the automation authority. Keeping
+// this allowlist next to the profile registry makes accidental additions
+// visible in the catalog test instead of silently expanding automation power.
+func (s *Server) registerAutomationTools() {
+	s.registerKanbanTools()
+	s.registerTaskDependencyTools()
+	s.registerRelatedTasksTool()
+	s.registerQuestionAnsweringTools()
+	s.registerAgentPermissionTools()
+	s.registerConfigWorkflowTools()
+	s.registerConfigExecutorTools()
+	s.mcpServer.DeleteTools(
+		"delete_task_kandev",
+		"update_task_state_kandev",
+		"create_workflow_kandev",
+		"update_workflow_kandev",
+		"delete_workflow_kandev",
+		"import_workflow_kandev",
+		"export_workflow_kandev",
+		"create_workflow_step_kandev",
+		"update_workflow_step_kandev",
+		"delete_workflow_step_kandev",
+		"reorder_workflow_steps_kandev",
+		"update_agent_kandev",
+		"create_agent_profile_kandev",
+		"delete_agent_profile_kandev",
+		"list_agent_profiles_kandev",
+		"update_agent_profile_kandev",
+		"get_mcp_config_kandev",
+		"update_mcp_config_kandev",
+		"create_executor_profile_kandev",
+		"update_executor_profile_kandev",
+		"delete_executor_profile_kandev",
+	)
 }
 
 func (s *Server) registerDiagnosticBundleTool() {
@@ -1609,9 +1656,9 @@ This tool is available only to autopilot child tasks. It sends a durable questio
 func (s *Server) registerPlanTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("create_task_plan_kandev",
-			mcp.WithDescription("Create or save a task plan. task_id addresses the plan's task: pass your own task ID for your current task, or another task's ID to write that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own)."),
+			mcp.WithDescription("Create or save a task plan. task_id addresses the plan's task: pass your own task ID for your current task, or another task's ID to write that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own). If a plan already exists for this task, this REPLACES ITS ENTIRE CONTENT — same as update_task_plan_kandev through a different door. Read it first with get_task_plan_kandev if you need to preserve any of it."),
 			mcp.WithString("task_id", mcp.Description("The task ID to create a plan for. Defaults to your current task when omitted; pass another task's ID to target it directly.")),
-			mcp.WithString("content", mcp.Required(), mcp.Description("The plan content in markdown format")),
+			mcp.WithString("content", mcp.Required(), mcp.Description("The full plan content in markdown format. This REPLACES any existing plan whole — there is no partial update or append mode. To preserve prior content, call get_task_plan_kandev first and include its content plus your additions in this call.")),
 			mcp.WithString("title", mcp.Description("Optional title for the plan (default: 'Plan')")),
 		),
 		s.wrapHandler("create_task_plan_kandev", s.createTaskPlanHandler()),
@@ -1625,9 +1672,9 @@ func (s *Server) registerPlanTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("update_task_plan_kandev",
-			mcp.WithDescription("Update an existing task plan. task_id selects the task whose plan to modify: your own task by default, or another task's ID to update that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own)."),
+			mcp.WithDescription("Update an existing task plan. task_id selects the task whose plan to modify: your own task by default, or another task's ID to update that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own). This REPLACES THE ENTIRE PLAN — there is no partial update, append, or section-patch mode. The correct sequence is: call get_task_plan_kandev, then send this call with the full document (prior content plus your changes), never just the new section."),
 			mcp.WithString("task_id", mcp.Description("The task ID to update the plan for. Defaults to your current task when omitted; pass another task's ID to target it directly.")),
-			mcp.WithString("content", mcp.Required(), mcp.Description("The updated plan content in markdown format")),
+			mcp.WithString("content", mcp.Required(), mcp.Description("The full plan content in markdown format that REPLACES the entire existing plan. Sending only a new section instead of the whole document will silently delete everything else. Read the current plan with get_task_plan_kandev first and include its content here plus your additions.")),
 			mcp.WithString("title", mcp.Description("Optional new title for the plan")),
 		),
 		s.wrapHandler("update_task_plan_kandev", s.updateTaskPlanHandler()),

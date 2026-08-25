@@ -29,7 +29,7 @@ Use `scripts/release/prepare-desktop-runtime.sh` and `scripts/release/verify-des
 
 ## Architecture
 
-- Frontend code in `src/` is only the startup/error surface. The real product UI is still served by the Go backend after `/health` succeeds.
+- Frontend code in `src/` is only the startup/error surface. The real product UI is still served by the Go backend after `/ready` succeeds.
 - Rust code owns backend process spawning and cleanup. Do not expose broad shell or filesystem permissions to frontend JavaScript.
 - Native menus emit versioned `kandev-desktop-v1-*` events for SPA-owned context and navigation.
   Updater, notification, and external-link operations use narrow generated Tauri commands scoped

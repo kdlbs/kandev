@@ -410,10 +410,20 @@ type Run struct {
 	// SummaryInjected is the continuation-summary content prepended
 	// to the prompt at dispatch time, snapshot for inspection. Empty
 	// when no summary was injected (today: every run, until PR 2).
-	SummaryInjected string     `json:"summary_injected,omitempty" db:"summary_injected"`
-	RequestedAt     time.Time  `json:"requested_at" db:"requested_at"`
-	ClaimedAt       *time.Time `json:"claimed_at" db:"claimed_at"`
-	FinishedAt      *time.Time `json:"finished_at" db:"finished_at"`
+	SummaryInjected string `json:"summary_injected,omitempty" db:"summary_injected"`
+	// ContinuationScope is the continuation-summary scope key
+	// (ContinuationScopeForRun's output) computed once at run creation
+	// and persisted here so every later reader/writer of this run's
+	// continuation summary uses the same value. Computing this at
+	// creation time — before any wakeup can coalesce into this row —
+	// closes a race where a routine wakeup patches context_snapshot
+	// after claim but a re-derivation against the freshly re-fetched
+	// row would disagree with the derivation the claiming scheduler is
+	// still holding in memory.
+	ContinuationScope string     `json:"continuation_scope,omitempty" db:"continuation_scope"`
+	RequestedAt       time.Time  `json:"requested_at" db:"requested_at"`
+	ClaimedAt         *time.Time `json:"claimed_at" db:"claimed_at"`
+	FinishedAt        *time.Time `json:"finished_at" db:"finished_at"`
 
 	// Provider-routing columns (office-provider-routing spec). All
 	// optional and ignored when workspace routing is disabled. The TEXT

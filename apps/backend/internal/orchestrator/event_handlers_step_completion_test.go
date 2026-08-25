@@ -109,6 +109,116 @@ func TestProcessOnTurnComplete_ExplicitSignalGating(t *testing.T) {
 	})
 }
 
+// TestProcessOnTurnComplete_OfficeExplicitSignalGating proves the ADR 0015
+// signal gate (WO-32) blocks an Office task's turn-end transition exactly
+// like it does for kanban: a gated step with no pending signal must not
+// transition, and the session must be parked WAITING_FOR_INPUT rather than
+// silently advancing — the failure mode WO-38 measured for 6.75 hours.
+func TestProcessOnTurnComplete_OfficeExplicitSignalGating(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedOfficeSession(t, repo, "t-office-gate", "s-office-gate", "")
+
+	stepID := "wfs-t-office-gate" // matches seedOfficeSession's stepID convention
+	stepGetter := newMockStepGetter()
+	stepGetter.steps[stepID] = &wfmodels.WorkflowStep{
+		ID: stepID, WorkflowID: "wf-office", Name: "work", Position: 1,
+		AutoAdvanceRequiresSignal: true,
+		Events: wfmodels.StepEvents{
+			OnTurnComplete: []wfmodels.OnTurnCompleteAction{
+				{Type: wfmodels.OnTurnCompleteMoveToNext},
+			},
+		},
+	}
+	svc := createTestServiceWithAgent(repo, stepGetter, newMockTaskRepo(), &mockAgentManager{})
+
+	task, err := repo.GetTask(ctx, "t-office-gate")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "s-office-gate")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+
+	if got := svc.processOnTurnComplete(ctx, task, session); got {
+		t.Fatalf("expected Office gate to BLOCK transition, got transition=true")
+	}
+
+	updatedTask, err := repo.GetTask(ctx, "t-office-gate")
+	if err != nil {
+		t.Fatalf("re-read task: %v", err)
+	}
+	if updatedTask.WorkflowStepID != stepID {
+		t.Errorf("expected task to stay on %q, got %q", stepID, updatedTask.WorkflowStepID)
+	}
+	updatedSession, err := repo.GetTaskSession(ctx, "s-office-gate")
+	if err != nil {
+		t.Fatalf("re-read session: %v", err)
+	}
+	if updatedSession.State != models.TaskSessionStateWaitingForInput {
+		t.Errorf("expected session WAITING_FOR_INPUT, got %q", updatedSession.State)
+	}
+}
+
+// TestProcessOnTurnComplete_OfficeExplicitSignalGating_AllowsWithSignal proves
+// the ADR 0015 gate's ALLOW half for Office: with a pending signal recorded
+// for the current step, turn-end transitions as normal. Uses move_to_step
+// (not move_to_next) to mirror office-default.yml's shipped Work step action.
+func TestProcessOnTurnComplete_OfficeExplicitSignalGating_AllowsWithSignal(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedOfficeSession(t, repo, "t-office-allow", "s-office-allow", "")
+
+	stepID := "wfs-t-office-allow" // matches seedOfficeSession's stepID convention
+	reviewStepID := "wfs-office-review"
+	stepGetter := newMockStepGetter()
+	stepGetter.steps[stepID] = &wfmodels.WorkflowStep{
+		ID: stepID, WorkflowID: "wf-office", Name: "work", Position: 1,
+		AutoAdvanceRequiresSignal: true,
+		Events: wfmodels.StepEvents{
+			OnTurnComplete: []wfmodels.OnTurnCompleteAction{
+				{Type: wfmodels.OnTurnCompleteMoveToStep, Config: map[string]interface{}{"step_id": reviewStepID}},
+			},
+		},
+	}
+	stepGetter.steps[reviewStepID] = &wfmodels.WorkflowStep{
+		ID: reviewStepID, WorkflowID: "wf-office", Name: "review", Position: 2,
+	}
+	svc := createTestServiceWithAgent(repo, stepGetter, newMockTaskRepo(), &mockAgentManager{})
+
+	signal := models.PendingStepCompletionSignal{
+		StepID:     stepID,
+		Source:     models.StepCompletionSourceAgent,
+		Summary:    "work complete",
+		SignaledAt: time.Now().UTC(),
+	}
+	if err := repo.SetSessionMetadataKey(ctx, "s-office-allow", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
+		t.Fatalf("seed pending signal: %v", err)
+	}
+
+	task, err := repo.GetTask(ctx, "t-office-allow")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "s-office-allow")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+
+	if got := svc.processOnTurnComplete(ctx, task, session); !got {
+		t.Fatalf("expected Office gate to ALLOW transition with pending signal, got transition=false")
+	}
+
+	updatedTask, err := repo.GetTask(ctx, "t-office-allow")
+	if err != nil {
+		t.Fatalf("re-read task: %v", err)
+	}
+	if updatedTask.WorkflowStepID != reviewStepID {
+		t.Errorf("expected task to move to %q, got %q", reviewStepID, updatedTask.WorkflowStepID)
+	}
+}
+
 func TestProcessOnTurnComplete_BlocksWhileClarificationPending(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -180,6 +290,46 @@ func TestProcessOnTurnCompleteViaEngine_BlocksWhileClarificationPendingEvenWithS
 	updated, _ := repo.GetTask(ctx, "t1")
 	if updated.WorkflowStepID != "step1" {
 		t.Fatalf("expected workflow step to remain step1, got %q", updated.WorkflowStepID)
+	}
+}
+
+// TestProcessOnTurnCompleteViaEngine_OfficeExplicitSignalGating covers the
+// production engine path for Office sessions. The legacy path has separate
+// coverage, but production uses the workflow engine when it is configured.
+func TestProcessOnTurnCompleteViaEngine_OfficeExplicitSignalGating(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedOfficeSession(t, repo, "t-office-engine", "s-office-engine", "")
+
+	stepID := "wfs-t-office-engine"
+	stepGetter := newMockStepGetter()
+	stepGetter.steps[stepID] = &wfmodels.WorkflowStep{
+		ID: stepID, WorkflowID: "wf-office", Name: "Work", Position: 1,
+		AutoAdvanceRequiresSignal: true,
+		Events: wfmodels.StepEvents{
+			OnTurnComplete: []wfmodels.OnTurnCompleteAction{{Type: wfmodels.OnTurnCompleteMoveToNext}},
+		},
+	}
+	stepGetter.steps["wfs-office-engine-review"] = &wfmodels.WorkflowStep{
+		ID: "wfs-office-engine-review", WorkflowID: "wf-office", Name: "Review", Position: 2,
+	}
+
+	svc := createEngineService(t, repo, stepGetter, &mockAgentManager{})
+	session, err := repo.GetTaskSession(ctx, "s-office-engine")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+
+	if transitioned := svc.processOnTurnCompleteViaEngine(ctx, "t-office-engine", session); transitioned {
+		t.Fatal("expected the engine path to block an Office turn without a signal")
+	}
+
+	task, err := repo.GetTask(ctx, "t-office-engine")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if task.WorkflowStepID != stepID {
+		t.Errorf("workflow step = %q, want %q", task.WorkflowStepID, stepID)
 	}
 }
 

@@ -13,6 +13,7 @@ let identityScope: string | null = "default-user";
 let staging: Staged[] = [];
 let stagingBytes = 0;
 let scheduled = false;
+let drainPromise: Promise<void> | null = null;
 let storageMode: "indexeddb" | "memory" = "indexeddb";
 let persistenceFailures = 0;
 let stagingDropped = 0;
@@ -85,11 +86,11 @@ function makeStagingRoom(level: LogLevel, bytes: number): boolean {
 }
 
 function scheduleDrain(): void {
-  if (scheduled) return;
+  if (scheduled || drainPromise) return;
   scheduled = true;
   const drain = () => {
     scheduled = false;
-    void drainBatch();
+    void requestDrain();
   };
   if (typeof requestIdleCallback === "function") {
     requestIdleCallback(drain, { timeout: 1_000 });
@@ -98,8 +99,24 @@ function scheduleDrain(): void {
   }
 }
 
-async function drainBatch(): Promise<void> {
-  if (storageMode === "memory" || staging.length === 0) return;
+function requestDrain(): Promise<void> {
+  if (drainPromise) return drainPromise;
+  if (storageMode === "memory" || staging.length === 0) return Promise.resolve();
+  drainPromise = drainLoop().finally(() => {
+    drainPromise = null;
+    if (storageMode === "indexeddb" && staging.length > 0) scheduleDrain();
+  });
+  return drainPromise;
+}
+
+async function drainLoop(): Promise<void> {
+  while (storageMode === "indexeddb" && staging.length > 0) {
+    if (!(await drainBatch())) return;
+  }
+}
+
+async function drainBatch(): Promise<boolean> {
+  if (storageMode === "memory" || staging.length === 0) return true;
   const batch: Staged[] = [];
   let bytes = 0;
   while (staging.length > 0 && batch.length < DRAIN_ENTRY_LIMIT) {
@@ -118,14 +135,14 @@ async function drainBatch(): Promise<void> {
       stagingBytes += item.bytes;
     }
     degradePersistence();
-    return;
+    return false;
   }
-  if (staging.length > 0) scheduleDrain();
+  return true;
 }
 
 async function flushStaging(): Promise<void> {
-  while (storageMode === "indexeddb" && staging.length > 0) {
-    await drainBatch();
+  while (drainPromise || (storageMode === "indexeddb" && staging.length > 0)) {
+    await requestDrain();
   }
 }
 
@@ -149,6 +166,7 @@ export function _resetRuntimeForTesting(): void {
   staging = [];
   stagingBytes = 0;
   scheduled = false;
+  drainPromise = null;
   storageMode = "indexeddb";
   persistenceFailures = 0;
   stagingDropped = 0;

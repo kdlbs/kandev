@@ -10,7 +10,8 @@ owners:
 
 ## Overview
 
-Explain what the capability does and why an actor or consumer needs it.
+Explain what the capability does and why an actor or consumer needs it. State
+why this system owns the contract when another system exposes the behavior.
 
 ## Terminology
 
@@ -33,5 +34,4 @@ Explain what the capability does and why an actor or consumer needs it.
 
 ## Out of scope
 
-- List an explicit exclusion.
-
+- List an explicit exclusion, including adjacent system contracts.

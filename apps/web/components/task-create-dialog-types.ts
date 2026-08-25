@@ -443,7 +443,6 @@ export type SubmitHandlersDeps = {
   workspaceId: string | null;
   workflowId: string | null;
   effectiveWorkflowId: string | null;
-  effectiveDefaultStepId: string | null;
   /** Unified repo list from the form. Empty when in GitHub URL mode. */
   repositories: TaskRepoRow[];
   /** Whether the user explicitly changed repository selections in this form. */

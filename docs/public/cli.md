@@ -127,8 +127,10 @@ On a normal start, the launcher:
 2. creates the Kandev data directory with owner-only permissions where the platform supports Unix modes;
 3. selects backend and `agentctl` ports;
 4. starts and supervises the backend;
-5. waits up to 45 seconds for `/health`; and
-6. opens the printed local URL in the default browser.
+5. derives one or more `/health` targets from the effective server binds;
+6. waits up to 45 seconds for any target to return the launcher's health token (the backend is alive and its socket is bound);
+7. waits for `/ready` (the backend has finished startup recovery and can serve real requests); this wait is unbounded by design, since recovery can legitimately take much longer than 45 seconds; and
+8. opens the reachable access URL in the default browser.
 
 The launcher remains in the foreground. Press `Ctrl+C` or terminate it to stop the backend and its managed children cleanly. A force-kill can leave worktree processes or containers running; inspect them before deleting data.
 
@@ -225,9 +227,11 @@ Supported actions are `install`, `uninstall`, `start`, `stop`, `restart`, `statu
 
 There is no separate web-server port in an installed release: the backend serves embedded assets. For the `run`, `start`, and development launcher flows, if `--port`, `KANDEV_BACKEND_PORT`, or `KANDEV_PORT` specifies a port, the launcher checks it before declaring the backend ready, does not substitute another one, and fails startup if the configured listen address cannot bind it. `kandev service install --port` remains the separate installer behavior described above.
 
-The launcher prints `http://localhost:<port>`. When it can enumerate non-loopback interfaces, it also prints `network:` URLs for each unique non-loopback, non-link-local address on the same port, including local-network and Tailscale addresses. IPv6 addresses are shown in brackets. If `KANDEV_SERVER_HOST` restricts the listener, the launcher only prints matching addresses. These lines are informational and are omitted if interface discovery is unavailable.
+The launcher derives readiness targets and the access URL from the effective `server.host` or `server.hosts` values. A specific IP or hostname is probed directly. An IPv4 wildcard is probed through `127.0.0.1`, while the default local browser/access URL remains `http://localhost:<port>` to preserve the established browser origin. An IPv6 wildcard is probed and accessed through `[::1]`. With multiple binds, the launcher probes all targets concurrently but preserves target priority: a lower-priority success is selected only after higher-priority targets complete without the launcher's health token. It prefers a loopback target for the printed or opened access URL.
 
-The backend's default `server.host` is `0.0.0.0`. That can expose Kandev to other machines on the network, and the current local product path is not an authenticated multi-user boundary. Bind it to loopback unless remote access is deliberately protected:
+When it can enumerate non-loopback interfaces, the launcher also prints `network:` URLs for each unique non-loopback, non-link-local address on the same port, including local-network and Tailscale addresses. IPv6 addresses are shown in brackets. If the effective bind restricts the listener, the launcher only prints matching addresses. These lines are informational and are omitted if interface discovery is unavailable.
+
+The backend's default `server.host` is `0.0.0.0`. That can expose Kandev to other machines on the network, and the current local product path is not an authenticated multi-user boundary. The launcher uses `localhost` for its default local access URL, but the backend still listens on every interface. Bind it to loopback unless remote access is deliberately protected:
 
 ```bash
 KANDEV_SERVER_HOST=127.0.0.1 kandev
@@ -335,7 +339,20 @@ kandev --verbose
 KANDEV_HEALTH_TIMEOUT_MS=90000 kandev --verbose
 ```
 
-The launcher prints buffered backend output when startup fails. Common causes are an invalid `config.yaml`, a database migration/permission error, an occupied explicit port, or a damaged runtime bundle.
+The launcher prints buffered backend output once when startup fails, followed by a bounded summary. The summary includes the effective bind addresses, every attempted health target and its last safe outcome, the selected configuration file, the effective `server.host` source, the backend log path, one next step, and a link to this troubleshooting guide. It never prints the launcher's health token or sensitive configuration values.
+
+Use the failure class to choose the next action:
+
+| Failure class | Meaning and recovery |
+|---|---|
+| Early backend exit | The child stopped before readiness. Read the named backend log for the startup error. |
+| Unreachable backend | No target accepted a connection. Check the effective binds, firewall rules, and environment overrides. |
+| Unhealthy HTTP response | A target answered with a non-success status. Inspect that status and the backend log. |
+| Different process | A selected port answered without the launcher's token. Free the port or choose another backend port. |
+
+If the backend is still running when readiness expires, the summary says that the launcher stopped it after readiness failed. It does not describe that case as a backend crash. Common underlying causes include an invalid `config.yaml`, a database migration or permission error, an occupied explicit port, or a damaged runtime bundle.
+
+ACP probe closure messages occur after an agent protocol probe and do not cause a launcher `/health` timeout. Likewise, an `X-Forwarded-Host` warning means that a reverse proxy reached a running backend without trusted-proxy configuration; it is not a launcher readiness failure. Configure the immediate proxy peer under `server.trustedProxies` as described in [Configuration](./configuration.md).
 
 ### Browser does not open
 

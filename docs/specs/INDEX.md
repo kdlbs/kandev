@@ -6,7 +6,7 @@ This catalog is the entry point for the system-oriented specification layout. Ea
 
 | System | Index | Migration | Canonical documents |
 | --- | --- | --- | --- |
-| Agents | [README](agents/README.md) | complete | 25 requirements, 15 designs |
+| Agents | [README](agents/README.md) | complete | 26 requirements, 16 designs |
 | Auth | [README](auth/README.md) | complete | 7 requirements, 2 designs |
 | CLI | [README](cli/README.md) | complete | 2 requirements, 0 designs |
 | Costs | [README](costs/README.md) | complete | 2 requirements, 0 designs |
@@ -19,7 +19,7 @@ This catalog is the entry point for the system-oriented specification layout. Ea
 | Release | [README](release/README.md) | complete | 5 requirements, 0 designs |
 | System page | [README](system-page/README.md) | complete | 3 requirements, 5 designs |
 | Tasks | [README](tasks/README.md) | complete | 69 requirements, 12 designs |
-| UI | [README](ui/README.md) | complete | 95 requirements, 11 designs |
+| UI | [README](ui/README.md) | complete | 96 requirements, 11 designs |
 | Workspaces | [README](workspaces/README.md) | complete | 11 requirements, 3 designs |
 
 ## Migration record
@@ -35,5 +35,6 @@ The former legacy size exceptions for migrated sources were removed. All canonic
 The following specification was added after this migration and remains in the legacy layout until it moves into an owning system:
 
 - [Task Cost & Token Ledger](task-cost-ledger/spec.md) (draft)
+- [Startup listener before recovery](startup-listener-before-recovery/spec.md) (draft)
 
 ## Authoring rule

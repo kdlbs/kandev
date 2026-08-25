@@ -2,7 +2,7 @@
 status: draft
 system: office
 specification_version: 1
-migration: complete
+migration: in_progress
 owners:
   - kandev
 ---
@@ -38,6 +38,8 @@ dashboard projections, and Office testing contracts.
 - [Automation Runs](requirements/automation-runs.md)
 - [Automations — "Pull request merged" trigger](requirements/automations-pr-merged-trigger.md)
 - [Automations in Settings](requirements/automations-settings.md)
+- [Automation Continuity](requirements/automation-continuity.md)
+- [Automation Target Modes](requirements/automation-target-modes.md)
 - [Automations YAML Export](requirements/automations-yaml-export.md)
 - [Office: Cost Tracking & Budget Management](requirements/costs.md)
 - [Office Dashboard](requirements/dashboard.md)
@@ -61,6 +63,7 @@ dashboard projections, and Office testing contracts.
 - [Office: Agents System Design Part 3](system-design/agents-03.md)
 - [Office: Personal Assistant Agent, Channels & Agent Memory](system-design/assistant.md)
 - [Automation Runs](system-design/automation-runs.md)
+- [Automation Target Modes](system-design/automation-target-modes.md)
 - [Automations — "Pull request merged" trigger System Design Part 1](system-design/automations-pr-merged-trigger-01.md)
 - [Automations — "Pull request merged" trigger System Design Part 2](system-design/automations-pr-merged-trigger-02.md)
 - [Automations — "Pull request merged" trigger System Design Part 3](system-design/automations-pr-merged-trigger-03.md)
@@ -97,7 +100,8 @@ dashboard projections, and Office testing contracts.
 
 ## Migration record
 
-All legacy sources assigned to this system are now represented by the canonical requirement and system-design documents above. Source detail is retained in those documents or in their linked design parts.
+Migration remains in progress while legacy source detail is extracted from the
+canonical requirement and system-design documents above.
 
 ## Related systems
 

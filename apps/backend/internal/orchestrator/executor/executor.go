@@ -516,6 +516,10 @@ const McpModeTaskTitlePending = "task-title-pending"
 // docs/specs/office/system-design/agents-03.md.
 const McpModeOffice = "office"
 
+// McpModeAutomation selects the fixed coordinator MCP surface for tasks
+// created by a user-configured automation.
+const McpModeAutomation = "automation"
+
 // LaunchOptions contains optional parameters for LaunchPreparedSession.
 type LaunchOptions struct {
 	AgentProfileID       string
@@ -526,7 +530,7 @@ type LaunchOptions struct {
 	PriorACPSession      string // ACP session ID to resume for the same concrete profile
 	WorkflowStepID       string
 	StartAgent           bool
-	McpMode              string // MCP tool mode: empty task default, McpModeTaskTitlePending, McpModeConfig, or McpModeOffice
+	McpMode              string // MCP tool mode: empty task default, McpModeTaskTitlePending, McpModeConfig, McpModeOffice, or McpModeAutomation
 	McpProfile           *mcpprofile.Context
 	Attachments          []v1.MessageAttachment
 	Env                  map[string]string
@@ -605,6 +609,7 @@ type TaskExecution struct {
 	TaskID           string
 	AgentExecutionID string
 	AgentProfileID   string
+	TurnID           string
 	StartedAt        time.Time
 	SessionState     v1.TaskSessionState
 	LastUpdate       time.Time

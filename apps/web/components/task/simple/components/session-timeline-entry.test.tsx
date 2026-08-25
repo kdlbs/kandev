@@ -221,7 +221,11 @@ describe("SessionTimelineEntry — office (multi-agent)", () => {
       ),
     );
     expect(screen.getByText(/working/)).toBeTruthy();
-    expect(screen.getByTestId("session-state-running")).toBeTruthy();
+    const spinner = screen.getByTestId("session-state-running");
+    expect(spinner.tagName).toBe("SPAN");
+    const spinnerSvg = spinner.querySelector("svg");
+    expect(spinnerSvg).not.toBeNull();
+    expect(spinnerSvg?.classList.contains("animate-spin")).toBe(false);
     // Embed visible because expanded by default while live.
     expect(screen.getByTestId(EMBED_TID)).toBeTruthy();
   });

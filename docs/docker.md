@@ -281,17 +281,21 @@ The volume at `/data` carries over the database, worktrees, npm globals, and `$H
 
 ## Health Check
 
-The backend exposes a `/health` endpoint:
+The backend exposes a `/health` endpoint (liveness: the process is up and its listener is
+bound, even mid-startup) and a `/ready` endpoint (readiness: startup finished and it can
+serve real traffic):
 
 ```bash
 curl http://localhost:38429/health
+curl http://localhost:38429/ready
 ```
 
-For Docker health checks in compose:
+Compose's single `healthcheck:` concept maps to "can serve real traffic," so it should
+point at `/ready`, not `/health`:
 
 ```yaml
 healthcheck:
-  test: ["CMD", "curl", "-f", "http://localhost:38429/health"]
+  test: ["CMD", "curl", "-f", "http://localhost:38429/ready"]
   interval: 30s
   timeout: 5s
   retries: 3

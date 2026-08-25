@@ -10,7 +10,7 @@ WORKFLOW = REPO_ROOT / ".github" / "workflows" / "preview-env.yml"
 
 
 class PreviewEnvironmentWorkflowContractTest(unittest.TestCase):
-    def test_claude_allowlist_authorizes_fork_preview_deployment(self) -> None:
+    def test_safe_to_review_and_allowlists_authorize_fork_preview_deployment(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         _, separator, deploy_job = workflow.partition("  deploy-fork:")
 
@@ -21,7 +21,7 @@ class PreviewEnvironmentWorkflowContractTest(unittest.TestCase):
             deploy_job,
         )
         self.assertIn(
-            "contains(github.event.pull_request.labels.*.name, 'safe-to-test')",
+            "contains(github.event.pull_request.labels.*.name, 'safe-to-review')",
             deploy_job,
         )
         self.assertIn("vars.PREVIEW_ENV_ALLOWLIST != ''", deploy_job)
@@ -30,16 +30,18 @@ class PreviewEnvironmentWorkflowContractTest(unittest.TestCase):
             "contains(fromJSON(vars.CLAUDE_REVIEW_ALLOWLIST), github.event.pull_request.user.login)",
             deploy_job,
         )
+        self.assertEqual(workflow.count("persist-credentials: false"), 3)
 
-    def test_safe_to_test_approval_survives_follow_up_pushes(self) -> None:
+    def test_safe_to_review_approval_survives_follow_up_pushes(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         _, separator, deploy_job = workflow.partition("  deploy-fork:")
 
         self.assertTrue(separator, "Fork preview deploy job is missing")
         self.assertIn(
-            "((contains(github.event.pull_request.labels.*.name, 'safe-to-test')) ||",
+            "((contains(github.event.pull_request.labels.*.name, 'safe-to-review')) ||",
             deploy_job,
         )
+        self.assertNotIn("safe-to-test", deploy_job)
         self.assertNotIn("  strip-safe-to-test:", workflow)
         self.assertNotIn("github.rest.issues.removeLabel", workflow)
 

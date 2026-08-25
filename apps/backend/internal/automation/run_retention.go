@@ -2,6 +2,7 @@ package automation
 
 import (
 	"context"
+	"strings"
 
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
@@ -109,20 +110,35 @@ func (s *Store) PrunableRunTaskIDs(ctx context.Context, finalizedTaskID string, 
 	args = append(args, worktree.StatusDeleted, runWorktreeSweepWindow, keep)
 
 	var taskIDs []string
+	// A reusable automation can have many terminal run rows for one task. The
+	// retention unit is the distinct task checkout, not each run row. Keep the
+	// newest run ordering for each task, and protect the current continuation
+	// even when it has already parked after a successful turn.
 	err := s.ro.SelectContext(ctx, &taskIDs, `
-		SELECT ar.task_id FROM automation_runs ar
-		WHERE ar.automation_id = (
-				SELECT automation_id FROM automation_runs
-				WHERE task_id = ? ORDER BY created_at DESC, id DESC LIMIT 1
+		WITH terminal_tasks AS (
+			SELECT ar.automation_id, ar.task_id,
+				MAX(ar.created_at) AS latest_created_at,
+				MAX(ar.id) AS latest_id
+			FROM automation_runs ar
+			WHERE ar.automation_id = (
+					SELECT automation_id FROM automation_runs
+					WHERE task_id = ? ORDER BY created_at DESC, id DESC LIMIT 1
+				)
+				AND ar.task_id != ''
+				AND ar.status NOT IN (?, ?)
+			GROUP BY ar.automation_id, ar.task_id
+		)
+		SELECT tt.task_id FROM terminal_tasks tt
+		WHERE NOT EXISTS (
+				SELECT 1 FROM automations a
+				WHERE a.id = tt.automation_id AND a.continuation_task_id = tt.task_id
 			)
-			AND ar.task_id != ''
-			AND ar.status NOT IN (?, ?)
 			AND NOT EXISTS (
 				SELECT 1 FROM task_sessions ts
-				WHERE ts.task_id = ar.task_id AND ts.state IN (?, ?)
+				WHERE ts.task_id = tt.task_id AND ts.state IN (?, ?)
 			)
-			AND`+runHasLiveWorktreeSQL+`
-		ORDER BY `+runOrderSQL("ar")+`
+			AND`+strings.ReplaceAll(runHasLiveWorktreeSQL, "ar.task_id", "tt.task_id")+`
+		ORDER BY tt.latest_created_at DESC, tt.latest_id DESC
 		LIMIT ? OFFSET ?`, args...)
 	return taskIDs, err
 }

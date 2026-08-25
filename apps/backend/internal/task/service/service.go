@@ -207,6 +207,7 @@ type PRTaskResolver interface {
 type StartStepResolver interface {
 	ResolveStartStep(ctx context.Context, workflowID string) (string, error)
 	ResolveFirstStep(ctx context.Context, workflowID string) (string, error)
+	ResolveAutoStartStep(ctx context.Context, workflowID string) (string, error)
 }
 
 // StepHistoryRecorder persists an ADR 0015 session-step transition audit
@@ -347,6 +348,7 @@ type Service struct {
 	quickChatDir                    string // Directory for quick-chat workspaces (e.g., ~/.kandev/quick-chat)
 	branchFetcher                   *branchFetcher
 	envDestroyer                    EnvironmentDestroyer
+	sshTaskDirReclaimer             SSHTaskDirReclaimer
 	sessionRunningChecker           SessionRunningChecker
 	remoteBranchLister              RemoteBranchLister
 	repoCloneLocation               RepoCloneLocation

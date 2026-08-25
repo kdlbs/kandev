@@ -2,7 +2,7 @@
 status: draft
 system: agents
 specification_version: 1
-migration: complete
+migration: in_progress
 owners:
   - kandev
 ---
@@ -32,8 +32,6 @@ surface shared by task and Office consumers.
 
 ### Requirements
 
-
-
 - [Agent Resume and Runtime Recovery](requirements/agent-resume-runtime-recovery.md)
 - [Agent Rich Output](requirements/agent-rich-output.md)
 - [Agent Stall Recovery](requirements/agent-stall-recovery.md)
@@ -54,6 +52,7 @@ surface shared by task and Office consumers.
 - [Disable an Agent Profile](requirements/profile-disable.md)
 - [Duplicate an Agent Profile](requirements/profile-duplicate.md)
 - [Agent Roles — Security, QA, and DevOps](requirements/roles.md)
+- [Managed npm runtime recovery](requirements/managed-npm-runtime-recovery.md)
 - [Managed Agent Runtime Versions and Updates](requirements/runtime-updates.md)
 - [Simplify the agent settings profile layout](requirements/settings-profile-layout.md)
 - [Spawn Session Effective Agent Profile](requirements/spawn-session-effective-profile.md)
@@ -62,14 +61,13 @@ surface shared by task and Office consumers.
 
 ### System design
 
-
-
 - [Dynamic Agent Routing System Design Part 1](system-design/dynamic-agent-routing-01.md)
 - [Dynamic Agent Routing System Design Part 2](system-design/dynamic-agent-routing-02.md)
 - [No Silent Model Fallback System Design Part 1](system-design/no-silent-model-fallback-01.md)
 - [No Silent Model Fallback System Design Part 2](system-design/no-silent-model-fallback-02.md)
 - [Managed Agent Runtime Versions and Updates System Design Part 1](system-design/runtime-updates-01.md)
 - [Managed Agent Runtime Versions and Updates System Design Part 2](system-design/runtime-updates-02.md)
+- [Managed npm runtime recovery](system-design/managed-npm-runtime-recovery.md)
 - [Subagent context persistence System Design Part 1](system-design/subagent-context-persistence-01.md)
 - [Subagent context persistence System Design Part 2](system-design/subagent-context-persistence-02.md)
 - [Subagent context persistence System Design Part 3](system-design/subagent-context-persistence-03.md)
@@ -82,7 +80,8 @@ surface shared by task and Office consumers.
 
 ## Migration record
 
-All legacy sources assigned to this system are now represented by the canonical requirement and system-design documents above. Source detail is retained in those documents or in their linked design parts.
+Migration remains in progress while legacy source detail is extracted from the
+canonical requirement and system-design documents above.
 
 ## Related systems
 

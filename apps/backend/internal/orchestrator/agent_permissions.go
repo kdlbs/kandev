@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/auth/authn"
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
@@ -346,6 +347,9 @@ func (s *Service) finalizePermissionDeliveryFailure(ctx context.Context, request
 }
 
 func permissionAuditActor(ctx context.Context) (string, models.PermissionResolutionActorKind) {
+	if principal, ok := mcpscope.PrincipalFromContext(ctx); ok && principal.IsAutomation() {
+		return "automation:" + principal.AutomationID, models.PermissionActorAutomation
+	}
 	identity, ok := authn.IdentityFromContext(ctx)
 	if !ok {
 		return "", models.PermissionActorAutomation

@@ -64,6 +64,33 @@ func (r *Repository) hideBuiltinWorkflows() error {
 	return nil
 }
 
+// healBuiltinWorkflowStepFlags reconciles workflow_steps.auto_advance_requires_signal
+// on system-workflow rows whose steps were materialized before their embedded
+// template started requiring the ADR-0015 completion signal (WO-32:
+// office-default's "work" step). Steps are matched by name within their
+// workflow's template id, scoped to is_system = 1 so user-created and
+// user-customised workflows are never touched.
+func (r *Repository) healBuiltinWorkflowStepFlags() error {
+	templates, err := workflowcfg.LoadTemplates()
+	if err != nil {
+		return fmt.Errorf("load embedded templates for step-flag healing: %w", err)
+	}
+	now := time.Now().UTC()
+	for _, tmpl := range templates {
+		for _, step := range tmpl.Steps {
+			want := dialect.BoolToInt(step.AutoAdvanceRequiresSignal)
+			if _, err := r.db.Exec(r.db.Rebind(`
+				UPDATE workflow_steps SET auto_advance_requires_signal = ?, updated_at = ?
+				WHERE name = ? AND auto_advance_requires_signal != ?
+				  AND workflow_id IN (SELECT id FROM workflows WHERE is_system = 1 AND workflow_template_id = ?)
+			`), want, now, step.Name, want, tmpl.ID); err != nil {
+				return fmt.Errorf("heal step flags for template %s step %s: %w", tmpl.ID, step.Name, err)
+			}
+		}
+	}
+	return nil
+}
+
 // ensureDefaultWorkspace creates a default workspace if none exists
 func (r *Repository) ensureDefaultWorkspace() error {
 	ctx := context.Background()

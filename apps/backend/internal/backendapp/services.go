@@ -769,6 +769,15 @@ func (a *startStepResolverAdapter) ResolveFirstStep(ctx context.Context, workflo
 	return step.ID, nil
 }
 
+// ResolveAutoStartStep implements taskservice.StartStepResolver.
+func (a *startStepResolverAdapter) ResolveAutoStartStep(ctx context.Context, workflowID string) (string, error) {
+	step, err := a.svc.ResolveAutoStartStep(ctx, workflowID)
+	if err != nil {
+		return "", err
+	}
+	return step.ID, nil
+}
+
 // githubSecretAdapter adapts secrets.SecretStore to github.SecretProvider and github.SecretManager.
 type githubSecretAdapter struct {
 	store secrets.SecretStore
@@ -1154,6 +1163,7 @@ func (a pluginsTaskWriterAdapter) CreateTask(ctx context.Context, in plugins.Tas
 		Metadata:       metadata,
 		Repositories:   repositories,
 		PlanMode:       in.PlanMode,
+		StartAgent:     in.StartAgent,
 	})
 	if err != nil {
 		return nil, err

@@ -1,38 +1,35 @@
 "use client";
 
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useState, useEffect, useMemo, useCallback } from "react";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Label } from "@kandev/ui/label";
 import { SettingsFieldLabel } from "@/components/settings/settings-typography";
 import { settingsControlClassName } from "@/components/settings/settings-control";
 import { useAppStore } from "@/components/state-provider";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
-import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { discoverRepositoriesAction } from "@/app/actions/workspaces";
-import { listWorkflows } from "@/lib/api";
-import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
-import type { ExecutorProfile, LocalRepository, Repository } from "@/lib/types/http";
-import type { TriggerType } from "@/lib/types/automation";
-import { getMultiRepoExecutorDisabledReason } from "@/components/task-create-dialog-multi-repo-guard";
-import { AutomationRepositoryRows } from "./automation-repository-rows";
+import type { Executor, ExecutorProfile, LocalRepository, Repository } from "@/lib/types/http";
+import type { TaskMode } from "@/lib/types/automation";
+import type { TaskRepoRow } from "@/components/task-create-dialog-types";
+import { WorkflowSelectorRow } from "@/components/workflow-selector-row";
+import { WorkspaceRepoChips } from "@/components/task-create-dialog-workspace-repo-chips";
+import { AgentSelector, ExecutorProfileSelector } from "@/components/task-create-dialog-selectors";
 import {
-  buildRepositoryItems,
+  useAgentProfileOptions,
+  useExecutorProfileOptions,
+} from "@/components/task-create-dialog-options";
+import { getMultiRepoExecutorDisabledReason } from "@/components/task-create-dialog-multi-repo-guard";
+import { useWorkflows } from "@/hooks/use-workflows";
+import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
+import {
   pickSelectionFromOptionId,
   resolveExecutorType,
-  selectionToOptionId,
   type RepositorySelection,
 } from "./automation-repository-selection";
 
 export type { RepositorySelection } from "./automation-repository-selection";
-export { buildRepositoryItems, pickSelectionFromOptionId, selectionToOptionId };
 
-// getExecutorItemDisabledReason gates the Executor Profile picker: once two
-// or more repositories are selected, executor types that can't launch a
-// multi-repository task are disabled — mirrors the task-creation dialog's
-// pickExecutorDisabledReason (task-create-dialog-computed.ts), reusing the
-// same shared predicate so the two surfaces never drift.
 export function getExecutorItemDisabledReason(
   executorType: string | null | undefined,
   repositorySelections: RepositorySelection[],
@@ -44,112 +41,28 @@ export function getExecutorItemDisabledReason(
 type ConfigSectionProps = {
   workspaceId: string;
   workflowId: string;
-  workflowStepId: string;
   agentProfileId: string;
   executorProfileId: string;
+  taskMode?: TaskMode;
   repositorySelections: RepositorySelection[];
-  conditionType: TriggerType | null;
   dirtyFields?: {
     workflowId: boolean;
-    workflowStepId: boolean;
     agentProfileId: boolean;
     executorProfileId: boolean;
     repositorySelections: boolean;
   };
   onWorkflowChange: (id: string) => void;
-  onStepChange: (id: string) => void;
   onAgentProfileChange: (id: string) => void;
   onExecutorProfileChange: (id: string) => void;
   onRepositoriesChange: (selections: RepositorySelection[]) => void;
 };
 
-/**
- * Stands in for "no selection" in the workflow and step pickers. Radix refuses
- * an empty SelectItem value, so clearing a field needs an id of its own; it is
- * mapped back to "" before it reaches the form.
- */
-const NONE_OPTION_ID = "__none__";
-
 const CLEAN_FIELDS = {
   workflowId: false,
-  workflowStepId: false,
   agentProfileId: false,
   executorProfileId: false,
   repositorySelections: false,
 };
-
-type WorkflowOption = { id: string; name: string };
-
-// A page opened while the backend is restarting gets a bare "Failed to fetch".
-// A single attempt would leave the field empty for the rest of the session, so
-// back off and try again before giving up.
-const WORKFLOW_RETRY_DELAYS_MS = [500, 1500, 4000];
-
-/**
- * Workflows for the workspace being edited, fetched into local state.
- *
- * Deliberately not the `workflows` store slot. That slot is global and both the
- * active workspace and this settings page write to it, so when the two differ
- * they race — the network log shows the two workspaces' requests alternating —
- * and whichever lands last defines the list. That produced two failures: the
- * editor offered another workspace's workflows (a name present in both, like
- * "Feature Dev", makes the wrong one look right, so an automation could be
- * saved against a workflow its workspace does not own), and filtering the
- * shared slot by workspace instead left the list empty whenever the foreign
- * fetch won.
- *
- * Owning the request here makes the list depend only on the workspace this
- * editor is for.
- */
-function useWorkspaceWorkflows(workspaceId: string) {
-  const [workflows, setWorkflows] = useState<WorkflowOption[]>([]);
-  const [failed, setFailed] = useState(false);
-  const [retryNonce, setRetryNonce] = useState(0);
-
-  useEffect(() => {
-    if (!workspaceId) {
-      setWorkflows([]);
-      setFailed(false);
-      return;
-    }
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-
-    const attempt = (index: number) => {
-      listWorkflows(workspaceId, { cache: "no-store", includeHidden: true })
-        .then((response) => {
-          if (cancelled) return;
-          setWorkflows(response.workflows.map((w) => ({ id: w.id, name: w.name })));
-          setFailed(false);
-        })
-        .catch(() => {
-          if (cancelled) return;
-          if (index < WORKFLOW_RETRY_DELAYS_MS.length) {
-            timer = setTimeout(() => attempt(index + 1), WORKFLOW_RETRY_DELAYS_MS[index]);
-            return;
-          }
-          // Keep whatever was already loaded rather than blanking a usable
-          // field on a flake, and say so rather than just looking empty.
-          setFailed(true);
-        });
-    };
-
-    // Clear before fetching, not after. Keeping the previous list across a
-    // workspace change is the exact bug this hook exists to prevent: if the new
-    // workspace's fetch then fails, the old workspace's workflows stay
-    // selectable — and savable — under the new workspace's name.
-    setWorkflows([]);
-    setFailed(false);
-    attempt(0);
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [workspaceId, retryNonce]);
-
-  const retry = useCallback(() => setRetryNonce((nonce) => nonce + 1), []);
-  return { workflows, failed, retry };
-}
 
 function useDiscoveredRepositories(workspaceId: string) {
   const [items, setItems] = useState<LocalRepository[]>([]);
@@ -157,9 +70,8 @@ function useDiscoveredRepositories(workspaceId: string) {
     if (!workspaceId) return;
     let cancelled = false;
     discoverRepositoriesAction(workspaceId)
-      .then((res) => {
-        if (cancelled) return;
-        setItems(res.repositories ?? []);
+      .then((response) => {
+        if (!cancelled) setItems(response.repositories ?? []);
       })
       .catch(() => {
         if (!cancelled) setItems([]);
@@ -171,138 +83,133 @@ function useDiscoveredRepositories(workspaceId: string) {
   return items;
 }
 
-type StepOption = { id: string; name: string };
-
-function getWorkflowStepHelpText(
-  workflowId: string,
-  t: (key: string) => string,
-): string | undefined {
-  if (!workflowId) return t("automations:workflowStepHelpNoWorkflow");
-  return undefined;
+function executorProfiles(executors: Executor[]): ExecutorProfile[] {
+  return executors.flatMap((executor) =>
+    (executor.profiles ?? []).map((profile) => ({
+      ...profile,
+      executor_type: profile.executor_type ?? executor.type,
+      executor_name: profile.executor_name ?? executor.name,
+    })),
+  );
 }
 
-function useWorkflowSteps(workflowId: string) {
-  const [steps, setSteps] = useState<StepOption[]>([]);
-
-  useEffect(() => {
-    if (!workflowId) return;
-    let cancelled = false;
-    listWorkflowSteps(workflowId)
-      .then((response) => {
-        if (cancelled) return;
-        const sorted = [...response.steps].sort((a, b) => a.position - b.position);
-        setSteps(sorted.map((s) => ({ id: s.id, name: s.name })));
-      })
-      .catch(() => {
-        if (!cancelled) setSteps([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workflowId]);
-
-  return steps;
+function selectionRows(selections: RepositorySelection[]): TaskRepoRow[] {
+  return selections.map((selection, index) => ({
+    key: selection.key ?? `automation-repository-${index}`,
+    repositoryId: selection.kind === "registered" ? selection.id : undefined,
+    localPath: selection.kind === "discovered" ? selection.path : undefined,
+    branch: selection.branch ?? (selection.kind === "discovered" ? selection.defaultBranch : ""),
+  }));
 }
 
-type AgentProfileLike = {
-  id: string;
-  label: string;
-  cli_passthrough?: boolean;
-  kind?: "concrete" | "dynamic";
-};
-type ExecutorLike = { type: string; name: string; profiles?: ExecutorProfile[] };
+function selectionFromValue(
+  key: string,
+  value: string,
+  repositories: Repository[],
+  discovered: LocalRepository[],
+): RepositorySelection {
+  const picked = pickSelectionFromOptionId(value, repositories, discovered);
+  return { ...picked, key, branch: "" };
+}
 
-// useConfigSectionComputed derives the Agent Profile / Executor Profile /
-// Repository picker item lists and the executor's multi-repo capability.
-// Pulled out of ConfigSection to keep that component under the
-// function-length lint cap.
-function useConfigSectionComputed({
-  agentProfiles,
-  executors,
-  executorProfileId,
-  repositorySelections,
+function RepositoryAccess({
+  workspaceId,
   repositories,
-  discoveredRepos,
+  discovered,
+  selections,
+  supportsMultiRepo,
+  onChange,
 }: {
-  agentProfiles: AgentProfileLike[];
-  executors: ExecutorLike[];
-  executorProfileId: string;
-  repositorySelections: RepositorySelection[];
+  workspaceId: string;
   repositories: Repository[];
-  discoveredRepos: LocalRepository[];
+  discovered: LocalRepository[];
+  selections: RepositorySelection[];
+  supportsMultiRepo: boolean;
+  onChange: (selections: RepositorySelection[]) => void;
 }) {
   const { t } = useTranslation();
-  const dynamicRoutingEnabled = useFeature("dynamicAgentRouting");
-  const filteredAgentProfiles = agentProfiles.filter(
-    (profile) => !profile.cli_passthrough && (dynamicRoutingEnabled || profile.kind !== "dynamic"),
+  const rows = selectionRows(selections);
+  const updateSelection = (
+    key: string,
+    update: (item: RepositorySelection) => RepositorySelection,
+  ) => onChange(selections.map((item, index) => (rows[index]?.key === key ? update(item) : item)));
+  return (
+    <div className="space-y-2 sm:col-span-2">
+      <div>
+        <h3 className="text-sm font-medium">{t("automations:repositoryModeTitle")}</h3>
+        <p className="text-xs text-muted-foreground">
+          {t("automations:repositoryModeDescription")}
+        </p>
+      </div>
+      <div className="flex min-w-0 flex-wrap items-center gap-2" data-testid="repository-rows">
+        <WorkspaceRepoChips
+          rows={rows}
+          repositories={repositories}
+          discoveredRepositories={discovered}
+          workspaceId={workspaceId}
+          canAddMore={supportsMultiRepo || rows.length === 0}
+          addLabel={t("task:addRepository")}
+          allowDuplicateRepositories={false}
+          onAdd={() =>
+            onChange([
+              ...selections,
+              { kind: "none", key: `automation-repository-${Date.now()}`, branch: "" },
+            ])
+          }
+          onRemove={(key) => onChange(selections.filter((_, index) => rows[index]?.key !== key))}
+          onRowRepositoryChange={(key, value) =>
+            updateSelection(key, () => selectionFromValue(key, value, repositories, discovered))
+          }
+          onRowBranchChange={(key, branch) =>
+            updateSelection(key, (item) => ({ ...item, key, branch }))
+          }
+        />
+      </div>
+      {rows.length === 0 ? (
+        <p className="text-xs text-muted-foreground">
+          {t("automations:repositoryModeNoneDescription")}
+        </p>
+      ) : null}
+    </div>
   );
-  // Profiles returned by the executors list/boot payload don't always carry
-  // their own executor_type/executor_name (only the settings > Executors
-  // page's local mapper attaches those today) — fall back to the parent
-  // executor's fields, mirroring task-create-dialog-computed.ts's identical
-  // enrichment so the two surfaces never disagree on an executor's type.
-  const allExecutorProfiles = executors
-    .filter((executor) => executor.type !== "local")
-    .flatMap((executor) =>
-      (executor.profiles ?? []).map((p) => ({
-        ...p,
-        executor_type: p.executor_type ?? executor.type,
-        executor_name: p.executor_name ?? executor.name,
-      })),
-    );
-  const supportsMultiRepo =
-    getMultiRepoExecutorDisabledReason(resolveExecutorType(executors, executorProfileId)) === null;
-  const executorItems = allExecutorProfiles.map((p) => {
-    const disabledReason = getExecutorItemDisabledReason(p.executor_type, repositorySelections);
-    return {
-      id: p.id,
-      label: p.name,
-      disabled: disabledReason !== null,
-      disabledReason: disabledReason ?? undefined,
-    };
-  });
-  const singleRepositoryItems = useMemo(
-    () => buildRepositoryItems(repositories, discoveredRepos, t),
-    [repositories, discoveredRepos, t],
-  );
-  return { filteredAgentProfiles, executorItems, supportsMultiRepo, singleRepositoryItems };
 }
 
 export function ConfigSection({
   workspaceId,
   workflowId,
-  workflowStepId,
   agentProfileId,
   executorProfileId,
+  taskMode = "automation_run",
   repositorySelections,
-  conditionType,
   dirtyFields = CLEAN_FIELDS,
   onWorkflowChange,
-  onStepChange,
   onAgentProfileChange,
   onExecutorProfileChange,
   onRepositoriesChange,
 }: ConfigSectionProps) {
   const { t } = useTranslation();
   useSettingsData(true);
+  const { workflows: allWorkflows } = useWorkflows(workspaceId);
+  useAllWorkflowSnapshots(workspaceId);
+  const workflows = useMemo(
+    () => allWorkflows.filter((workflow) => workflow.workspaceId === workspaceId),
+    [allWorkflows, workspaceId],
+  );
+  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
   const { repositories } = useRepositories(workspaceId, true);
-  const discoveredRepos = useDiscoveredRepositories(workspaceId);
-
-  const workflowState = useWorkspaceWorkflows(workspaceId);
-  const workflows = workflowState.workflows;
+  const discovered = useDiscoveredRepositories(workspaceId);
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
   const executors = useAppStore((state) => state.executors.items);
-  const steps = useWorkflowSteps(workflowId);
-  const isPRTrigger = conditionType === "github_pr";
-  const { filteredAgentProfiles, executorItems, supportsMultiRepo, singleRepositoryItems } =
-    useConfigSectionComputed({
-      agentProfiles,
-      executors,
-      executorProfileId,
-      repositorySelections,
-      repositories,
-      discoveredRepos,
-    });
+  const agents = useAgentProfileOptions(agentProfiles);
+  const allExecutorProfiles = useMemo(() => executorProfiles(executors), [executors]);
+  const disabledReasonFor = useCallback(
+    (profile: ExecutorProfile) =>
+      getExecutorItemDisabledReason(profile.executor_type, repositorySelections),
+    [repositorySelections],
+  );
+  const executorOptions = useExecutorProfileOptions(allExecutorProfiles, { disabledReasonFor });
+  const supportsMultiRepo =
+    getMultiRepoExecutorDisabledReason(resolveExecutorType(executors, executorProfileId)) === null;
 
   return (
     <div className="space-y-3">
@@ -310,250 +217,53 @@ export function ConfigSection({
         {t("automations:configurationLabel")}
       </Label>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <WorkflowFields
-          workflowId={workflowId}
-          workflowStepId={workflowStepId}
-          workflows={workflows}
-          workflowsFailed={workflowState.failed}
-          onRetryWorkflows={workflowState.retry}
-          steps={steps}
-          workflowDirty={dirtyFields.workflowId}
-          workflowStepDirty={dirtyFields.workflowStepId}
-          onWorkflowChange={onWorkflowChange}
-          onStepChange={onStepChange}
-        />
-        <SelectField
-          label={t("automations:agentProfileLabel")}
-          value={agentProfileId}
-          isDirty={dirtyFields.agentProfileId}
-          onChange={onAgentProfileChange}
-          placeholder={t("automations:agentProfilePlaceholder")}
-          items={filteredAgentProfiles.map((p) => ({
-            id: p.id,
-            label: p.label,
-          }))}
-        />
-        <SelectField
-          label={t("automations:executorProfileLabel")}
-          value={executorProfileId}
-          isDirty={dirtyFields.executorProfileId}
-          onChange={onExecutorProfileChange}
-          placeholder={t("automations:executorProfilePlaceholder")}
-          items={executorItems}
-        />
-        <RepositoryPickerField
-          supportsMultiRepo={supportsMultiRepo}
-          isPRTrigger={isPRTrigger}
+        <div className="space-y-1.5 sm:col-span-2" data-settings-dirty={dirtyFields.workflowId}>
+          <SettingsFieldLabel>{t("automations:workflowLabel")}</SettingsFieldLabel>
+          <WorkflowSelectorRow
+            workflows={workflows}
+            snapshots={snapshots}
+            selectedWorkflowId={workflowId || null}
+            onWorkflowChange={onWorkflowChange}
+            agentProfiles={agentProfiles}
+            clearLabel={taskMode === "normal_task" ? undefined : t("automations:noWorkflow")}
+            placeholder={
+              taskMode === "normal_task"
+                ? t("automations:selectWorkflowRequired")
+                : t("automations:selectWorkflowOptional")
+            }
+          />
+        </div>
+        <div className="space-y-1.5" data-settings-dirty={dirtyFields.agentProfileId}>
+          <SettingsFieldLabel>{t("automations:agentProfileLabel")}</SettingsFieldLabel>
+          <AgentSelector
+            options={agents}
+            value={agentProfileId}
+            onValueChange={onAgentProfileChange}
+            disabled={false}
+            placeholder={t("automations:agentProfilePlaceholder")}
+            triggerClassName={settingsControlClassName()}
+          />
+        </div>
+        <div className="space-y-1.5" data-settings-dirty={dirtyFields.executorProfileId}>
+          <SettingsFieldLabel>{t("automations:executorProfileLabel")}</SettingsFieldLabel>
+          <ExecutorProfileSelector
+            options={executorOptions}
+            value={executorProfileId}
+            onValueChange={onExecutorProfileChange}
+            disabled={false}
+            placeholder={t("automations:executorProfilePlaceholder")}
+            triggerClassName={settingsControlClassName()}
+          />
+        </div>
+        <RepositoryAccess
+          workspaceId={workspaceId}
           repositories={repositories}
-          discoveredRepos={discoveredRepos}
-          repositorySelections={repositorySelections}
-          singleRepositoryItems={singleRepositoryItems}
-          isDirty={dirtyFields.repositorySelections}
-          onRepositoriesChange={onRepositoriesChange}
+          discovered={discovered}
+          selections={repositorySelections}
+          supportsMultiRepo={supportsMultiRepo}
+          onChange={onRepositoriesChange}
         />
       </div>
-    </div>
-  );
-}
-
-// RepositoryPickerField branches between the repeatable multi-repo row list
-// and the legacy single dropdown, gated on executor capability (see
-// getExecutorItemDisabledReason) and PR-trigger overrides (a github_pr
-// trigger always uses the PR's own repository, so the picker stays a single
-// disabled field even when the executor otherwise supports multi-repo).
-function RepositoryPickerField({
-  supportsMultiRepo,
-  isPRTrigger,
-  repositories,
-  discoveredRepos,
-  repositorySelections,
-  singleRepositoryItems,
-  isDirty,
-  onRepositoriesChange,
-}: {
-  supportsMultiRepo: boolean;
-  isPRTrigger: boolean;
-  repositories: Repository[];
-  discoveredRepos: LocalRepository[];
-  repositorySelections: RepositorySelection[];
-  singleRepositoryItems: Array<{ id: string; label: string }>;
-  isDirty: boolean;
-  onRepositoriesChange: (selections: RepositorySelection[]) => void;
-}) {
-  const { t } = useTranslation();
-  if (supportsMultiRepo && !isPRTrigger) {
-    return (
-      <AutomationRepositoryRows
-        testId="repository-rows"
-        repositories={repositories}
-        discoveredRepos={discoveredRepos}
-        selections={repositorySelections}
-        onChange={onRepositoriesChange}
-        isDirty={isDirty}
-      />
-    );
-  }
-  return (
-    <SelectField
-      testId="repository-selector"
-      label={t("automations:repositoryLabel")}
-      value={selectionToOptionId(repositorySelections[0] ?? { kind: "none" })}
-      isDirty={isDirty}
-      onChange={(v) => {
-        const picked = pickSelectionFromOptionId(v, repositories, discoveredRepos);
-        onRepositoriesChange(picked.kind === "none" ? [] : [picked]);
-      }}
-      placeholder={t("automations:repositoryPlaceholderAuto")}
-      items={singleRepositoryItems}
-      disabled={isPRTrigger}
-      helpText={isPRTrigger ? t("automations:prTriggerRepositoryHelp") : undefined}
-    />
-  );
-}
-
-function WorkflowFields({
-  workflowId,
-  workflowStepId,
-  workflows,
-  workflowsFailed,
-  onRetryWorkflows,
-  steps,
-  workflowDirty,
-  workflowStepDirty,
-  onWorkflowChange,
-  onStepChange,
-}: {
-  workflowId: string;
-  workflowStepId: string;
-  workflows: Array<{ id: string; name: string }>;
-  workflowsFailed: boolean;
-  onRetryWorkflows: () => void;
-  steps: StepOption[];
-  workflowDirty: boolean;
-  workflowStepDirty: boolean;
-  onWorkflowChange: (id: string) => void;
-  onStepChange: (id: string) => void;
-}) {
-  // The step list is empty until a workflow is picked. Showing an empty
-  // dropdown next to the workflow select invites users to click it first
-  // and bounce off — keep the field in the DOM (so its testid is stable
-  // for tooling) but disable it and surface a hint until a workflow is
-  // chosen.
-  const { t } = useTranslation();
-  const hasWorkflow = !!workflowId;
-  // Both fields are optional: an automation that only reports has no place on a
-  // board, and demanding a workflow before it can be saved made every such
-  // automation pick one at random. Nothing here blocks saving, so nothing here
-  // says it does.
-  //
-  // Optional also has to mean reversible. A select listing only real workflows
-  // can be set but never unset, which would strand every automation upgraded
-  // from the era when a workflow was mandatory. An explicit None entry is the
-  // way back; picking it clears the step too, since a step without its workflow
-  // is not a selection anyone can act on.
-  return (
-    <>
-      <SelectField
-        testId="workflow-selector"
-        label={t("automations:workflowLabel")}
-        value={workflowId}
-        isDirty={workflowDirty}
-        onChange={(value) => onWorkflowChange(value === NONE_OPTION_ID ? "" : value)}
-        placeholder={
-          workflowsFailed
-            ? t("automations:couldNotLoadWorkflows")
-            : t("automations:selectWorkflowOptional")
-        }
-        items={[
-          { id: NONE_OPTION_ID, label: t("automations:noWorkflow") },
-          ...workflows.map((w) => ({ id: w.id, label: w.name })),
-        ]}
-      />
-      {workflowsFailed && (
-        <p className="text-xs/relaxed text-destructive" data-testid="workflow-load-error">
-          {t("automations:workflowLoadError")}{" "}
-          <button
-            type="button"
-            onClick={onRetryWorkflows}
-            className="cursor-pointer underline underline-offset-2"
-            data-testid="workflow-retry"
-          >
-            {t("automations:tryAgain")}
-          </button>
-        </p>
-      )}
-      <SelectField
-        testId="workflow-step-selector"
-        label={t("automations:workflowStepLabel")}
-        value={workflowStepId}
-        isDirty={workflowStepDirty}
-        onChange={(value) => onStepChange(value === NONE_OPTION_ID ? "" : value)}
-        placeholder={
-          hasWorkflow ? t("automations:selectStepOptional") : t("automations:pickAWorkflowFirst")
-        }
-        items={[
-          { id: NONE_OPTION_ID, label: t("automations:noStep") },
-          ...steps.map((s) => ({ id: s.id, label: s.name })),
-        ]}
-        disabled={!hasWorkflow}
-        helpText={getWorkflowStepHelpText(workflowId, t)}
-      />
-    </>
-  );
-}
-
-function SelectField({
-  testId,
-  label,
-  value,
-  onChange,
-  placeholder,
-  items,
-  disabled,
-  helpText,
-  isDirty = false,
-}: {
-  testId?: string;
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  placeholder: string;
-  items: Array<{ id: string; label: string; disabled?: boolean; disabledReason?: string }>;
-  disabled?: boolean;
-  helpText?: string;
-  isDirty?: boolean;
-}) {
-  const helpId = testId && helpText ? `${testId}-help` : undefined;
-  return (
-    <div className="space-y-1.5">
-      <SettingsFieldLabel>{label}</SettingsFieldLabel>
-      <Select value={value || undefined} onValueChange={onChange} disabled={disabled}>
-        <SelectTrigger
-          data-testid={testId}
-          className={settingsControlClassName("cursor-pointer")}
-          aria-describedby={helpId}
-          data-settings-dirty={isDirty}
-        >
-          <SelectValue placeholder={placeholder} />
-        </SelectTrigger>
-        <SelectContent>
-          {items.map((item) => (
-            <SelectItem
-              key={item.id}
-              value={item.id}
-              disabled={item.disabled}
-              title={item.disabledReason}
-            >
-              {item.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      {helpText && (
-        <p id={helpId} className="text-xs/relaxed text-muted-foreground">
-          {helpText}
-        </p>
-      )}
     </div>
   );
 }
