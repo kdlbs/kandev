@@ -1629,7 +1629,8 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	// the new backend instead of attaching to the old environment. Resolve this
 	// before repository configuration so clone URL requirements are applied to
 	// the fresh launch as well.
-	workspaceReuseRequired = workspaceReuseAllowed(existingEnv, req.ExecutorType, workspaceReuseRequired)
+	repoBacked := e.taskIsRepoBacked(ctx, task.ID)
+	workspaceReuseRequired = workspaceReuseAllowed(existingEnv, req.ExecutorType, workspaceReuseRequired, repoBacked)
 	req.WorkspaceReuseRequired = workspaceReuseRequired
 
 	// For remote executors (containerized *and* SSH), resolve only explicitly
@@ -1688,15 +1689,29 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	return req, execConfig, nil
 }
 
-func workspaceReuseAllowed(existingEnv *models.TaskEnvironment, requestedExecutorType string, required bool) bool {
+func workspaceReuseAllowed(existingEnv *models.TaskEnvironment, requestedExecutorType string, required, repoBacked bool) bool {
 	if !required || existingEnv == nil {
 		return required
 	}
 	if existingEnv.ExecutorType != "" && existingEnv.ExecutorType != requestedExecutorType {
 		return false
 	}
-	if requestedExecutorType == string(models.ExecutorTypeWorktree) {
+	switch requestedExecutorType {
+	case string(models.ExecutorTypeWorktree):
 		return hasLiveWorktreeRepo(existingEnv)
+	case string(models.ExecutorTypeSSH):
+		// Unlike Docker/worktree reuse, the SSH attach-only path
+		// (executor_ssh.go CreateInstance, WorkspaceReuseRequired branch)
+		// has no attach-time rebuild: it skips both the remote prepare
+		// script and checkout verification and trusts env.WorkspacePath
+		// verbatim. A repo-backed task whose canonical inventory is empty
+		// (for example a prior launch whose prepare step failed before
+		// recording any repo rows) must therefore fall through to a full
+		// materialization instead of attaching to a possibly incomplete or
+		// stale checkout.
+		if repoBacked && len(existingEnv.Repos) == 0 {
+			return false
+		}
 	}
 	return true
 }

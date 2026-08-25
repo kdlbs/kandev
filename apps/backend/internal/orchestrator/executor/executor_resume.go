@@ -1022,6 +1022,7 @@ func (e *Executor) buildResumeRequestAtCredentialBoundary(
 		existingEnv,
 		req.ExecutorType,
 		existingEnv != nil && existingEnv.MaterializationSessionID != session.ID,
+		e.taskIsRepoBacked(ctx, task.ID),
 	)
 
 	allRepos, err := e.resolveAllRepoInfoForSession(ctx, task.ID, session.ID)

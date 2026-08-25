@@ -311,6 +311,12 @@ type mockRepository struct {
 	finalizeTaskEnvironmentCalls      []*models.TaskEnvironment
 	updateTaskStateIfCurrentInCalls   []updateTaskStateIfCurrentInCall
 	updateTaskStateIfNotArchivedCalls []updateTaskStateIfNotArchivedCall
+
+	// writeCallLog records the relative order of environment-row and
+	// environment-status writes (e.g. "create_repo", "update_env") so tests
+	// can pin ordering invariants that a call-count assertion alone cannot
+	// catch — see TestPersistTaskEnvironment_NonMaterializerSiblingPersistsReposBeforeReady.
+	writeCallLog []string
 }
 
 type sharedWorkspaceBindingCall struct {
@@ -1153,6 +1159,7 @@ func (m *mockRepository) UpdateTaskEnvironment(_ context.Context, env *models.Ta
 	if env.ID == "" {
 		return nil
 	}
+	m.writeCallLog = append(m.writeCallLog, "update_env")
 	m.updateTaskEnvironmentCalls = append(m.updateTaskEnvironmentCalls, env)
 	m.taskEnvironments[env.ID] = env
 	return nil
@@ -1170,6 +1177,7 @@ func (m *mockRepository) CreateTaskEnvironmentRepo(_ context.Context, repo *mode
 			repo.ID += "-branch-" + repo.BranchSlug
 		}
 	}
+	m.writeCallLog = append(m.writeCallLog, "create_repo")
 	m.taskEnvironmentRepos[repo.TaskEnvironmentID] = append(m.taskEnvironmentRepos[repo.TaskEnvironmentID], repo)
 	return nil
 }
