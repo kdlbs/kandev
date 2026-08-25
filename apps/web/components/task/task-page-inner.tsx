@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { TaskTopBar } from "@/components/task/task-top-bar";
 import { TaskLayout } from "@/components/task/task-layout";
 import { DebugOverlay } from "@/components/debug-overlay";
@@ -277,6 +277,9 @@ export function TaskPageInner(props: TaskPageInnerProps) {
   const [taskMoveError, setTaskMoveError] = useState<unknown>(null);
   const clearTaskMoveError = useCallback(() => setTaskMoveError(null), []);
   const reportTaskMoveError = useCallback((error: unknown) => setTaskMoveError(error), []);
+  useEffect(() => {
+    setTaskMoveError(null);
+  }, [task?.id]);
   const { taskProps, debugEntries, topBarProps, layoutProps } = useTaskPageDerivedProps(props);
   if (!task) return null;
 
