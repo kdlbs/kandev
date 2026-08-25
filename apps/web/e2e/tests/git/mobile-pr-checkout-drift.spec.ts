@@ -211,8 +211,8 @@ test.describe("Mobile rewritten contribution history", () => {
     await expect(contributionWarning).toBeVisible();
     const warningBox = await contributionWarning.boundingBox();
     expect(warningBox).not.toBeNull();
-    expect(warningBox!.width).toBeGreaterThanOrEqual(44);
-    expect(warningBox!.height).toBeGreaterThanOrEqual(44);
+    expect(Math.round(warningBox!.width)).toBeGreaterThanOrEqual(44);
+    expect(Math.round(warningBox!.height)).toBeGreaterThanOrEqual(44);
     await contributionWarning.tap();
     const openMenu = testPage.getByTestId("header-remote-contribution-menu");
     await expect(openMenu).toHaveCount(1);
@@ -226,11 +226,11 @@ test.describe("Mobile rewritten contribution history", () => {
     await expect(dialog).toContainText(providerHistory.head);
     const cancel = dialog.getByRole("button", { name: "Cancel" });
     await expect
-      .poll(async () => (await cancel.boundingBox())?.height ?? 0)
+      .poll(async () => Math.round((await cancel.boundingBox())?.height ?? 0))
       .toBeGreaterThanOrEqual(44);
     const confirm = testPage.getByTestId("remote-contribution-confirm");
     await expect
-      .poll(async () => (await confirm.boundingBox())?.height ?? 0)
+      .poll(async () => Math.round((await confirm.boundingBox())?.height ?? 0))
       .toBeGreaterThanOrEqual(44);
     await cancel.tap();
 

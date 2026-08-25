@@ -85,8 +85,8 @@ test.describe("Mobile task topbar long title layout", () => {
 
     const taskDrawerBox = await taskDrawer.boundingBox();
     expect(taskDrawerBox).not.toBeNull();
-    expect(taskDrawerBox!.width).toBeGreaterThanOrEqual(44);
-    expect(taskDrawerBox!.height).toBeGreaterThanOrEqual(44);
+    expect(Math.round(taskDrawerBox!.width)).toBeGreaterThanOrEqual(44);
+    expect(Math.round(taskDrawerBox!.height)).toBeGreaterThanOrEqual(44);
 
     const metrics = await readMobileTopbarMetrics(testPage, LONG_TASK_TITLE);
     expect(metrics).not.toBeNull();

@@ -54,12 +54,12 @@ branch/diff summary.
 ## Verification
 
 ```bash
-cd apps && pnpm --filter @kandev/web test -- --run components/task/mobile/session-mobile-top-bar-repository.test.tsx components/task/layout-preset-selector.test.tsx components/task/remote-contribution-header-actions.test.tsx components/vcs/vcs-dialog-fields.test.tsx
-cd apps/web && pnpm run typecheck
-cd apps/web && pnpm e2e:run --project mobile-chrome tests/task/mobile-task-topbar-long-title.spec.ts
-cd apps/web && pnpm e2e:run --project mobile-chrome tests/task/mobile-sidebar-task-actions.spec.ts -- --grep "moves a task to another step from the mobile task drawer"
-cd apps/web && pnpm e2e:run --project mobile-chrome tests/git/mobile-local-base-operations.spec.ts tests/git/mobile-pr-checkout-drift.spec.ts
-cd apps/web && pnpm e2e:run --project mobile-chrome tests/gitlab/mobile-gitlab-parity.spec.ts -- --grep "creates and auto-links an MR with GitLab terminology"
+(cd apps && pnpm --filter @kandev/web test -- --run components/task/mobile/session-mobile-top-bar-repository.test.tsx components/task/layout-preset-selector.test.tsx components/task/remote-contribution-header-actions.test.tsx components/vcs/vcs-dialog-fields.test.tsx)
+(cd apps/web && pnpm run typecheck)
+(cd apps/web && pnpm e2e:run --project mobile-chrome tests/task/mobile-task-topbar-long-title.spec.ts)
+(cd apps/web && pnpm e2e:run --project mobile-chrome tests/task/mobile-sidebar-task-actions.spec.ts -- --grep "moves a task to another step from the mobile task drawer")
+(cd apps/web && pnpm e2e:run --project mobile-chrome tests/git/mobile-local-base-operations.spec.ts tests/git/mobile-pr-checkout-drift.spec.ts)
+(cd apps/web && pnpm e2e:run --project mobile-chrome tests/gitlab/mobile-gitlab-parity.spec.ts -- --grep "creates and auto-links an MR with GitLab terminology")
 ```
 
 ## Files likely touched
@@ -135,3 +135,5 @@ None.
 - Review remediation replaced premature `sm` size resets with `md` resets and
   added a 700px touch-viewport regression for the recovery warning and both
   confirmation actions.
+- CodeRabbit quiet-mode follow-up rounded device-scaled geometry assertions and
+  made every verification command run from an independent subshell.
