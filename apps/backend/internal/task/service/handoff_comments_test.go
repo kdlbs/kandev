@@ -204,6 +204,31 @@ func TestListCommentsForCallerLeavesShortBodiesUntouched(t *testing.T) {
 	}
 }
 
+// AC-004.5: a body of exactly 8192 bytes is the boundary case — at the cap,
+// not over it, so it must pass through untouched rather than truncate.
+func TestListCommentsForCallerLeavesExactCapBodyUntouched(t *testing.T) {
+	svc, _ := newDocumentHandoffService(t, nil)
+	reader := &fakeCommentReader{}
+	reader.seed("child-a", 1, 8192)
+	svc.SetCommentReader(reader)
+	ctx := context.Background()
+
+	w, err := svc.ListCommentsForCaller(ctx, "child-a", "self", 20)
+	if err != nil {
+		t.Fatalf("ListCommentsForCaller: %v", err)
+	}
+	c := w.Comments[0]
+	if c.BodyTruncated {
+		t.Fatal("want body_truncated = false for an exactly-8192-byte body")
+	}
+	if c.BodyBytes != 0 {
+		t.Fatalf("body_bytes = %d, want 0 (omitted)", c.BodyBytes)
+	}
+	if len(c.Body) != 8192 {
+		t.Fatalf("body len = %d, want 8192", len(c.Body))
+	}
+}
+
 // AC-004.6-004.9: the aggregate 65536-byte body budget drops whole
 // comments from the oldest end, never emptying a non-empty window.
 func TestListCommentsForCallerBudgetDropsOldestNeverEmpties(t *testing.T) {
