@@ -134,7 +134,13 @@ func (s *Service) AuthorizeTask(ctx context.Context, taskID string) error {
 // only thing the caller supplied — but nothing is disclosed: every rejection,
 // including a step that does not exist at all, returns ErrNotVisible.
 func (s *Service) AuthorizeStep(ctx context.Context, stepID string) error {
-	if !callerIsScoped(ctx) || s.workflowAccessChecker == nil {
+	if !callerIsScoped(ctx) {
+		return nil
+	}
+	if stepID == "" {
+		return ErrNotVisible
+	}
+	if s.workflowAccessChecker == nil {
 		return nil
 	}
 	step, err := s.repo.GetStep(ctx, stepID)

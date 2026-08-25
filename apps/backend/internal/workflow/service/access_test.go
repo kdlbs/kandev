@@ -53,6 +53,8 @@ func TestAuthorizeWorkflowAndWorkspaceFailClosedOnAnEmptyID(t *testing.T) {
 	require.ErrorIs(t, svc.AuthorizeWorkflow(scopedCtx(), ""), ErrNotVisible)
 	require.ErrorIs(t, svc.AuthorizeWorkspace(scopedCtx(), ""), ErrNotVisible)
 	require.ErrorIs(t, svc.AuthorizeTask(scopedCtx(), ""), ErrNotVisible)
+	unwired, _ := setupTestService(t)
+	require.ErrorIs(t, unwired.AuthorizeStep(scopedCtx(), ""), ErrNotVisible)
 	require.Empty(t, recorder.ids, "an unresolvable owner was passed to the task service")
 }
 
