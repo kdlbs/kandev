@@ -112,7 +112,12 @@ func displayURL(stored string) string {
 // httpCreate handles POST /api/v1/tasks/:id/sessions/:sessionId/shares.
 // Query string dry_run=true returns the snapshot inline without uploading.
 func (h *HTTPHandlers) httpCreate(c *gin.Context) {
+	taskID := c.Param("id")
 	sessionID := c.Param("sessionId")
+	if taskID == "" {
+		c.JSON(http.StatusBadRequest, errorBody{Error: "task id is required"})
+		return
+	}
 	if sessionID == "" {
 		c.JSON(http.StatusBadRequest, errorBody{Error: "session id is required"})
 		return
@@ -120,7 +125,7 @@ func (h *HTTPHandlers) httpCreate(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	if strings.EqualFold(c.Query("dry_run"), "true") {
-		snap, err := h.svc.PreviewSnapshot(ctx, sessionID)
+		snap, err := h.svc.PreviewSnapshot(ctx, taskID, sessionID)
 		if mapped, status := mapShareError(err); mapped != nil {
 			c.JSON(status, mapped)
 			return
@@ -129,7 +134,12 @@ func (h *HTTPHandlers) httpCreate(c *gin.Context) {
 		return
 	}
 
-	if err := h.svc.CheckBackendAccess(ctx, sessionID); err != nil {
+	if err := h.svc.CheckBackendAccess(ctx, taskID, sessionID); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			mapped, status := mapShareError(err)
+			c.JSON(status, mapped)
+			return
+		}
 		c.JSON(http.StatusPreconditionFailed, errorBody{
 			Error: err.Error(),
 			Code:  "github_credential_missing",
@@ -140,7 +150,7 @@ func (h *HTTPHandlers) httpCreate(c *gin.Context) {
 	// The gist is a static file: nobody makes a request to us when they open
 	// it, so the creator's locale is the only one we will ever know. Resolve
 	// it here and thread it down rather than letting the builders guess.
-	share, err := h.svc.CreateShare(ctx, sessionID, i18n.FromRequest(c.Request))
+	share, err := h.svc.CreateShare(ctx, taskID, sessionID, i18n.FromRequest(c.Request))
 	if mapped, status := mapShareError(err); mapped != nil {
 		h.logServerError(err, "create share failed", sessionID)
 		c.JSON(status, mapped)
@@ -151,13 +161,23 @@ func (h *HTTPHandlers) httpCreate(c *gin.Context) {
 
 // httpList returns every share row for the session, including revoked.
 func (h *HTTPHandlers) httpList(c *gin.Context) {
+	taskID := c.Param("id")
 	sessionID := c.Param("sessionId")
+	if taskID == "" {
+		c.JSON(http.StatusBadRequest, errorBody{Error: "task id is required"})
+		return
+	}
 	if sessionID == "" {
 		c.JSON(http.StatusBadRequest, errorBody{Error: "session id is required"})
 		return
 	}
-	rows, err := h.svc.ListBySession(c.Request.Context(), sessionID)
+	rows, err := h.svc.ListBySession(c.Request.Context(), taskID, sessionID)
 	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			mapped, status := mapShareError(err)
+			c.JSON(status, mapped)
+			return
+		}
 		h.logServerError(err, "list shares failed", sessionID)
 		c.JSON(http.StatusInternalServerError, errorBody{Error: "failed to list shares"})
 		return
