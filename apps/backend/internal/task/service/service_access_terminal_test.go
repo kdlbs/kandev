@@ -19,9 +19,14 @@ func TestTerminalRouteAuthorizersScopeByOwner(t *testing.T) {
 	ctx := context.Background()
 	svc, _, repo := createTestService(t)
 	seedScopedWorkspaces(t, repo)
+	// Deliberately a torn-down environment: stopped, with a materialization
+	// session that no longer exists. Authorization reads task and workspace
+	// rows, never the in-memory execution, so a dead agent must not turn into
+	// a denial for the owner (the SSR panel renders a denial as empty).
 	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
 		ID: "env-b", TaskID: "task-b", ExecutorType: "worktree",
-		WorkspacePath: "/tmp/b", Status: models.TaskEnvironmentStatusReady,
+		WorkspacePath: "/tmp/b", Status: models.TaskEnvironmentStatusStopped,
+		MaterializationSessionID: "sess-deleted",
 	}); err != nil {
 		t.Fatalf("create task environment: %v", err)
 	}

@@ -254,6 +254,13 @@ func TestSSRTerminalGuardsAbortBeforeReadingState(t *testing.T) {
 
 // TestSSRTerminalRoutesServeOwner is the other half of the guard: the person
 // who owns the task still gets their terminals.
+//
+// The manager here holds no executions and no interactive runner, which is the
+// state after the agent behind the environment has been torn down. That is the
+// case worth pinning: these routes back a server-rendered panel, so an
+// over-eager guard does not surface as an error, it silently empties the
+// owner's terminal list. Authorization must key off task and environment
+// ownership only, never off a live execution.
 func TestSSRTerminalRoutesServeOwner(t *testing.T) {
 	router := scopedShellRouter(t)
 

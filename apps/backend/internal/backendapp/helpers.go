@@ -1451,6 +1451,27 @@ func dockerSessionAuthorizer(taskSvc *taskservice.Service) docker.SessionAuthori
 	return taskSvc
 }
 
+// lifecycleAccessAuthorizer is the task-service surface the lifecycle manager's
+// per-user visibility checks are wired to. Narrowed to an interface so the
+// wiring itself is testable: the three checkers take the same signature, so a
+// crossed wire (session visibility installed in the task slot, say) compiles
+// and silently authorizes the wrong resource.
+type lifecycleAccessAuthorizer interface {
+	AuthorizeSessionAccess(ctx context.Context, sessionID string) error
+	AuthorizeEnvironmentAccess(ctx context.Context, taskEnvironmentID string) error
+	AuthorizeTaskAccess(ctx context.Context, taskID string) error
+}
+
+// wireLifecycleAccessCheckers installs all three per-user visibility checks on
+// the lifecycle manager. Kept together so a surface that needs a new kind of
+// check has one place to add it, rather than a fourth setter call somewhere
+// else in startup that nothing asserts on.
+func wireLifecycleAccessCheckers(lifecycleMgr *lifecycle.Manager, authz lifecycleAccessAuthorizer) {
+	lifecycleMgr.SetSessionAccessChecker(authz.AuthorizeSessionAccess)
+	lifecycleMgr.SetEnvironmentAccessChecker(authz.AuthorizeEnvironmentAccess)
+	lifecycleMgr.SetTaskAccessChecker(authz.AuthorizeTaskAccess)
+}
+
 func dockerTaskTitleProvider(taskRepo *sqliterepo.Repository, log *logger.Logger) docker.TaskTitleProvider {
 	return func(ctx context.Context, taskID string) (string, bool) {
 		if taskRepo == nil || taskID == "" {

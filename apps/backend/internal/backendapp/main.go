@@ -552,9 +552,7 @@ func startAgentInfrastructure(
 	// port reverse proxies (bare lookup + cache) call CheckSessionAccess at
 	// the handler, and the SSR terminal-list routes call CheckTaskAccess /
 	// CheckEnvironmentAccess in a route guard.
-	lifecycleMgr.SetSessionAccessChecker(services.Task.AuthorizeSessionAccess)
-	lifecycleMgr.SetEnvironmentAccessChecker(services.Task.AuthorizeEnvironmentAccess)
-	lifecycleMgr.SetTaskAccessChecker(services.Task.AuthorizeTaskAccess)
+	wireLifecycleAccessCheckers(lifecycleMgr, services.Task)
 	log.Info("Workspace info provider configured for session recovery")
 
 	// TODO(task-model-unification Phase 2, ADR 0004): wire agentruntime.New(lifecycleMgr)
