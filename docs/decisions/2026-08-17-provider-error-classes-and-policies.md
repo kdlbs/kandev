@@ -196,5 +196,5 @@ for dynamic profiles. Concrete-profile interactive retry can retain that
 decision's defaults while consuming the shared classification contract.
 
 Product behavior is specified in
-[Provider Error Recovery](../specs/platform/provider-error-recovery.md) and
-[Dynamic Agent Routing](../specs/agents/dynamic-agent-routing.md).
+[Provider Error Recovery](../specs/platform/requirements/provider-error-recovery.md) and
+[Dynamic Agent Routing](../specs/agents/requirements/dynamic-agent-routing.md).

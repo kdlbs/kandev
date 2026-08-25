@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/plugins/spec.md
+spec: docs/specs/plugins/requirements/plugins.md
 created: 2026-08-04
 status: completed
 ---
@@ -99,7 +99,7 @@ registry registrations and session panel state drive both viewports.
 - Update `docs/plans/plugins/PLUGIN-API.md` and
   `docs/public/plugins-authoring.md` to describe lifecycle-safe reloads, definitive
   revocation, the grouped phone picker, and responsive task-menu presentation.
-- Keep `docs/specs/plugins/spec.md`, ADR-2026-08-01-plugin-task-panel-contributions,
+- Keep `docs/specs/plugins/requirements/plugins.md`, ADR-2026-08-01-plugin-task-panel-contributions,
   and ADR-2026-08-04-plugin-contribution-lifecycle-authority consistent with the final
   implementation.
 - Revert `apps/web/scripts/lib/git-base.mjs` to the PR base/current `main`; its

@@ -88,6 +88,8 @@ type WorkflowSelectorRowProps = {
   selectedWorkflowId: string | null;
   onWorkflowChange: (workflowId: string) => void;
   agentProfiles: AgentProfileOption[];
+  clearLabel?: string;
+  placeholder?: string;
 };
 
 export const WorkflowSelectorRow = memo(function WorkflowSelectorRow({
@@ -96,6 +98,8 @@ export const WorkflowSelectorRow = memo(function WorkflowSelectorRow({
   selectedWorkflowId,
   onWorkflowChange,
   agentProfiles,
+  clearLabel,
+  placeholder,
 }: WorkflowSelectorRowProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -111,12 +115,12 @@ export const WorkflowSelectorRow = memo(function WorkflowSelectorRow({
         <Button
           type="button"
           variant="ghost"
-          className="w-auto justify-between cursor-pointer"
+          className="min-h-11 w-auto justify-between cursor-pointer md:min-h-7"
           data-testid="workflow-selector-trigger"
         >
           <IconLogicBuffer className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           <span className="truncate">
-            {selectedWorkflow?.name ?? t("workflows:selectWorkflow")}
+            {selectedWorkflow?.name ?? placeholder ?? t("workflows:selectWorkflow")}
           </span>
           <IconChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
@@ -125,6 +129,18 @@ export const WorkflowSelectorRow = memo(function WorkflowSelectorRow({
         <div className="text-muted-foreground px-2 py-1.5 text-xs border-b">
           {t("workflows:workflow")}
         </div>
+        {clearLabel ? (
+          <button
+            type="button"
+            onClick={() => {
+              onWorkflowChange("");
+              setOpen(false);
+            }}
+            className="min-h-11 w-full rounded-sm px-2 py-1.5 text-left text-sm hover:bg-muted"
+          >
+            {clearLabel}
+          </button>
+        ) : null}
         {workflows.map((wf) => {
           const isSelected = wf.id === selectedWorkflowId;
           const snapshot = snapshots[wf.id];
@@ -137,7 +153,7 @@ export const WorkflowSelectorRow = memo(function WorkflowSelectorRow({
                 onWorkflowChange(wf.id);
                 setOpen(false);
               }}
-              className="w-full flex flex-col gap-1 px-2 py-1.5 rounded-sm hover:bg-muted transition-colors cursor-pointer text-left relative pr-8"
+              className="relative flex min-h-11 w-full cursor-pointer flex-col gap-1 rounded-sm px-2 py-1.5 pr-8 text-left transition-colors hover:bg-muted"
             >
               <div className="flex items-center gap-2">
                 <IconLogicBuffer className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />

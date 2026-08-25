@@ -370,7 +370,6 @@ check-make-shells:
 	$(CHECK_SHELLS)
 
 ## Run E2E tests (real agents, costs money — manual only)
-## Set agent commands via env vars: E2E_CLAUDE_CODE_COMMAND, E2E_AMP_COMMAND
 ## Enable debug: KANDEV_DEBUG_AGENT_MESSAGES=true KANDEV_DEBUG_LOG_DIR=/tmp/e2e-debug
 test-e2e:
 	@echo "Running E2E adapter tests..."

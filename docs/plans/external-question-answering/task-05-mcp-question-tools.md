@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["03-resolve-bundle", "02-bundle-queries"]
 plan: "plan.md"
-spec: "../../specs/external-question-answering/spec.md"
+spec: "../../specs/integrations/requirements/external-question-answering.md"
 ---
 
 # Task 05: `list_pending_questions_kandev` and `answer_question_kandev`

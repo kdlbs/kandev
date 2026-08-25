@@ -141,7 +141,7 @@ export function WorkspaceRepoChips({
               data-testid="add-repository"
               className={cn(
                 "inline-flex items-center justify-center gap-1.5 rounded-md text-muted-foreground",
-                addLabel ? "h-9 px-2 text-xs" : "h-7 w-7",
+                addLabel ? "h-11 px-2 text-xs md:h-9" : "h-11 w-11 md:h-7 md:w-7",
                 canAddMore
                   ? "hover:bg-muted hover:text-foreground cursor-pointer"
                   : "opacity-40 cursor-not-allowed",

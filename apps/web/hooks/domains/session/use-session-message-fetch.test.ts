@@ -30,12 +30,28 @@ function makeParams(
     initialFetchStartRef: { current: null },
     lastFetchedSessionIdRef: { current: null },
     fetchAndStoreMessages,
-    autoBackfillUntilUserMessage: vi.fn().mockResolvedValue(undefined),
-    hasUserOrAgentMessage: vi.fn().mockReturnValue(true),
   };
 }
 
 describe("doFetchMessages", () => {
+  it("settles a tool-only initial fetch without waiting for older history", async () => {
+    const setMessagesLoading = vi.fn();
+    const params = makeParams(
+      vi.fn().mockResolvedValue([
+        {
+          id: "tool-1",
+          type: "tool_call",
+          author_type: "agent",
+        } as Message,
+      ]),
+      setMessagesLoading,
+    );
+
+    await doFetchMessages(params as never);
+
+    expect(setMessagesLoading).toHaveBeenLastCalledWith(SESSION_ID, false);
+  });
+
   it("keeps the shared loading flag set until overlapping fetches all settle", async () => {
     const first = deferred<Message[]>();
     const second = deferred<Message[]>();

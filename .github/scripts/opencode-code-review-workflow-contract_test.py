@@ -35,6 +35,7 @@ class OpenCodeCodeReviewWorkflowContractTest(unittest.TestCase):
         workflow = WORKFLOW.read_text(encoding="utf-8")
 
         self.assertNotIn("  strip-safe-to-review:", workflow)
+        self.assertNotIn("safe-to-test", workflow)
         self.assertNotIn("github.rest.issues.removeLabel", workflow)
 
     def test_lint_workflow_runs_opencode_contract_test(self) -> None:

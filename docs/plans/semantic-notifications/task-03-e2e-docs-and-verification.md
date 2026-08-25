@@ -7,7 +7,7 @@ depends_on:
   - "01-backend-events-and-persistence"
   - "02-frontend-and-desktop"
 plan: "plan.md"
-spec: "../../specs/platform/notifications.md"
+spec: "../../specs/platform/requirements/notifications.md"
 ---
 
 # Task 03: Verify Notification Settings and Update Contracts
@@ -43,8 +43,8 @@ make lint
 - `apps/web/e2e/tests/settings/mobile-notification-events.spec.ts`
 - `docs/public/websocket-api.md`
 - `docs/public/desktop-app.md`
-- `docs/specs/desktop-tauri-app/spec.md`
-- `docs/specs/office/inbox.md`
+- `docs/specs/desktop/requirements/desktop-tauri-app.md`
+- `docs/specs/office/requirements/inbox.md`
 - `docs/decisions/0039-native-desktop-integration-boundary.md`
 
 ## Dependencies

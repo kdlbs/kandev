@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-session-cookie-port-scope-backend", "04-workspace-cookie-port-scope-frontend"]
 plan: "plan.md"
-spec: "../../specs/fix-multi-instance-cookie-isolation/spec.md"
+spec: "../../specs/auth/requirements/fix-multi-instance-cookie-isolation.md"
 ---
 
 # Task 05: E2E cookie-name assertions

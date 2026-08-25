@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-status-summary-queued-count"]
 plan: "plan.md"
-spec: "../../specs/ui/sidebar-queued-prompt-count.md"
+spec: "../../specs/ui/requirements/sidebar-queued-prompt-count.md"
 ---
 
 # Task 04: Render the Badge in the Task Sidebar

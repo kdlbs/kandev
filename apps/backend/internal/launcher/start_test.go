@@ -2,6 +2,7 @@ package launcher
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -164,18 +165,50 @@ func TestRunStartUsesSelfExecutableAndBackendCWD(t *testing.T) {
 	}
 }
 
+func TestRunStartUsesConfiguredBindForBackendURL(t *testing.T) {
+	clearLauncherConfigurationEnvironment(t)
+	dir := t.TempDir()
+	t.Chdir(dir)
+	homeDir := canonicalTempDir(t)
+	writeLauncherConfig(t, filepath.Join(dir, "config.yaml"), "homeDir: "+homeDir+"\nserver:\n  host: 192.0.2.10\n  port: 48123\n")
+
+	oldExecutablePath := executablePath
+	oldLaunchManaged := launchManaged
+	t.Cleanup(func() {
+		executablePath = oldExecutablePath
+		launchManaged = oldLaunchManaged
+	})
+	executablePath = func() (string, error) {
+		return filepath.Join(homeDir, "bin", "kandev"), nil
+	}
+	var got managedAppConfig
+	launchManaged = func(_ context.Context, cfg managedAppConfig) int {
+		got = cfg
+		return 42
+	}
+
+	if code := runStart(context.Background(), Options{Command: CommandStart, Headless: true}); code != 42 {
+		t.Fatalf("runStart() = %d, want 42", code)
+	}
+	if got.Ports.BackendURL != "http://192.0.2.10:48123" {
+		t.Fatalf("BackendURL = %q, want the configured bind address", got.Ports.BackendURL)
+	}
+}
+
 func TestRunManagedAppAttachesSignalsBeforeBackendLaunch(t *testing.T) {
 	oldNewSupervisor := newSupervisorFn
 	oldLaunchBackend := launchBackendFn
 	oldAttachSignals := attachSignalsFn
 	oldStartParentWatch := startParentWatchFn
 	oldWaitForHealth := waitForHealthFn
+	oldWaitForReady := waitForReadyFn
 	t.Cleanup(func() {
 		newSupervisorFn = oldNewSupervisor
 		launchBackendFn = oldLaunchBackend
 		attachSignalsFn = oldAttachSignals
 		startParentWatchFn = oldStartParentWatch
 		waitForHealthFn = oldWaitForHealth
+		waitForReadyFn = oldWaitForReady
 	})
 
 	var events []string
@@ -207,9 +240,13 @@ func TestRunManagedAppAttachesSignalsBeforeBackendLaunch(t *testing.T) {
 		events = append(events, "start-parent-watch")
 		return newParentWatchdog(0, nil, nil)
 	}
-	waitForHealthFn = func(_ context.Context, _ string, _ childState, _ time.Duration, expectedToken string, _ func()) error {
+	waitForHealthFn = func(_ context.Context, _ backendEndpointSet, _ childState, _ time.Duration, expectedToken string, _ func()) (string, error) {
 		waitedHealthToken = expectedToken
 		events = append(events, "wait-health")
+		return "", nil
+	}
+	waitForReadyFn = func(_ context.Context, _ string, _ childState) error {
+		events = append(events, "wait-ready")
 		return nil
 	}
 	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
@@ -228,7 +265,7 @@ func TestRunManagedAppAttachesSignalsBeforeBackendLaunch(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("runManagedApp() = %d, want 0", code)
 	}
-	want := []string{"new-supervisor", "attach-signals", "start-parent-watch", "launch-backend", "wait-health"}
+	want := []string{"new-supervisor", "attach-signals", "start-parent-watch", "launch-backend", "wait-health", "wait-ready"}
 	if !reflect.DeepEqual(events, want) {
 		t.Fatalf("events = %v, want %v", events, want)
 	}
@@ -243,16 +280,85 @@ func TestRunManagedAppAttachesSignalsBeforeBackendLaunch(t *testing.T) {
 	}
 }
 
+// TestRunManagedAppShutsDownOnReadinessFailure is the regression test for
+// R2-1: a launcher that only waited on /health would report "backend ready"
+// and open a browser onto the bootstrap handler's 503 the moment the socket
+// bound, before startup recovery finished. waitForReadyFn must run after
+// waitForHealthFn succeeds, and its failure must abort before either the
+// ready print or a browser open, exactly like a health failure does.
+func TestRunManagedAppShutsDownOnReadinessFailure(t *testing.T) {
+	oldNewSupervisor := newSupervisorFn
+	oldLaunchBackend := launchBackendFn
+	oldAttachSignals := attachSignalsFn
+	oldStartParentWatch := startParentWatchFn
+	oldWaitForHealth := waitForHealthFn
+	oldWaitForReady := waitForReadyFn
+	oldStatusOutput := launcherStatusOutput
+	t.Cleanup(func() {
+		newSupervisorFn = oldNewSupervisor
+		launchBackendFn = oldLaunchBackend
+		attachSignalsFn = oldAttachSignals
+		startParentWatchFn = oldStartParentWatch
+		waitForHealthFn = oldWaitForHealth
+		waitForReadyFn = oldWaitForReady
+		launcherStatusOutput = oldStatusOutput
+	})
+
+	var output strings.Builder
+	launcherStatusOutput = &output
+
+	newSupervisorFn = newSupervisor
+	attachSignalsFn = func(_ *processSupervisor) {}
+	startParentWatchFn = func(_ *processSupervisor) *parentWatchdog {
+		return newParentWatchdog(0, nil, nil)
+	}
+	launchBackendFn = func(_ backendLaunchConfig) (*restartableBackend, func(), error) {
+		return &restartableBackend{exitCh: make(chan int, 1)}, func() {}, nil
+	}
+	waitForHealthFn = func(_ context.Context, _ backendEndpointSet, _ childState, _ time.Duration, _ string, _ func()) (string, error) {
+		return "", nil
+	}
+	readyWaited := false
+	waitForReadyFn = func(_ context.Context, _ string, _ childState) error {
+		readyWaited = true
+		return errors.New("test readiness failure")
+	}
+	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
+
+	code := runManagedApp(context.Background(), managedAppConfig{
+		Header:     "test",
+		Mode:       "start",
+		Backend:    "kandev",
+		BackendCWD: t.TempDir(),
+		Ports: portConfig{
+			BackendPort: 48123,
+			BackendURL:  "http://localhost:48123",
+		},
+		Opts: Options{Headless: true},
+	})
+	if code != 1 {
+		t.Fatalf("runManagedApp() = %d, want 1", code)
+	}
+	if !readyWaited {
+		t.Fatal("waitForReadyFn was never called")
+	}
+	if !strings.Contains(output.String(), "graceful shutdown started") {
+		t.Fatalf("supervisor shutdown not triggered on readiness failure:\n%s", output.String())
+	}
+}
+
 func TestRunManagedAppPreservesDesktopOwnedHealthToken(t *testing.T) {
 	oldNewSupervisor := newSupervisorFn
 	oldLaunchBackend := launchBackendFn
 	oldAttachSignals := attachSignalsFn
 	oldWaitForHealth := waitForHealthFn
+	oldWaitForReady := waitForReadyFn
 	t.Cleanup(func() {
 		newSupervisorFn = oldNewSupervisor
 		launchBackendFn = oldLaunchBackend
 		attachSignalsFn = oldAttachSignals
 		waitForHealthFn = oldWaitForHealth
+		waitForReadyFn = oldWaitForReady
 	})
 
 	const desktopToken = "desktop-owned-token"
@@ -266,8 +372,11 @@ func TestRunManagedAppPreservesDesktopOwnedHealthToken(t *testing.T) {
 		exitCh <- 0
 		return &restartableBackend{exitCh: exitCh}, func() {}, nil
 	}
-	waitForHealthFn = func(_ context.Context, _ string, _ childState, _ time.Duration, expectedToken string, _ func()) error {
+	waitForHealthFn = func(_ context.Context, _ backendEndpointSet, _ childState, _ time.Duration, expectedToken string, _ func()) (string, error) {
 		waitedHealthToken = expectedToken
+		return "", nil
+	}
+	waitForReadyFn = func(_ context.Context, _ string, _ childState) error {
 		return nil
 	}
 	t.Setenv("KANDEV_HOME_DIR", t.TempDir())

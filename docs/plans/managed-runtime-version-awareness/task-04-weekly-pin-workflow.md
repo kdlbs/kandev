@@ -5,7 +5,7 @@ status: complete
 wave: 2
 depends_on: ["01-default-pins"]
 plan: "plan.md"
-spec: "../../specs/agents/runtime-updates.md"
+spec: "../../specs/agents/requirements/runtime-updates.md"
 ---
 
 # Task 04: Automate weekly pin PRs

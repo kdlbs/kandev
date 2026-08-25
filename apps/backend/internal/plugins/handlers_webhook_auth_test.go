@@ -134,12 +134,23 @@ func TestWebhookAuthGate_AuthenticatedNonPublicReachesRelay(t *testing.T) {
 	}
 }
 
+// browserSignals is the pair of headers the session CSRF gate reads. A zero
+// value models a request carrying neither: a non-browser client replaying a
+// session cookie, or a browser predating Fetch Metadata.
+type browserSignals struct {
+	origin       string
+	secFetchSite string
+}
+
 func doWebhookIdentityRequest(
-	router http.Handler, method, path string, identity authn.Identity, origin string,
+	router http.Handler, method, path string, identity authn.Identity, signals browserSignals,
 ) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader("{}"))
-	if origin != "" {
-		req.Header.Set("Origin", origin)
+	if signals.origin != "" {
+		req.Header.Set("Origin", signals.origin)
+	}
+	if signals.secFetchSite != "" {
+		req.Header.Set("Sec-Fetch-Site", signals.secFetchSite)
 	}
 	req = req.WithContext(authn.WithIdentity(req.Context(), identity))
 	rec := httptest.NewRecorder()
@@ -147,23 +158,132 @@ func doWebhookIdentityRequest(
 	return rec
 }
 
-func TestWebhookAuthGate_SessionRequiresAcceptedOrigin(t *testing.T) {
+// TestWebhookAuthGate_SessionCSRFSignals is the table over
+// (method, Origin, Sec-Fetch-Site, identity) for the session CSRF gate.
+//
+// The gate exists because a session identity is carried by an ambient cookie,
+// so a cross-site page can make the browser attach it. It must therefore
+// admit a genuine same-origin request and refuse a cross-site one. The
+// discriminating signal is *origin*, never the verb: a plugin's GET webhook
+// may have side effects and the host cannot verify that it does not, so
+// exempting safe methods would reopen the hole this gate closes.
+//
+// Sec-Fetch-Site is the signal for the case Origin cannot answer. Browsers do
+// not send Origin on a same-origin GET/HEAD (Fetch, "append a request Origin
+// header": Origin is attached to cross-origin requests and to same-origin
+// requests whose method is neither GET nor HEAD), so an absent Origin is the
+// *normal* state of the SPA polling its own plugin webhook, not evidence of a
+// cross-origin caller.
+func TestWebhookAuthGate_SessionCSRFSignals(t *testing.T) {
 	router, svc := newTestRouter(t)
 	installedWebhookPlugin(t, svc, "kandev-plugin-session-origin", "key1", false)
-	identity := authn.Identity{UserID: "user-1", Role: authn.RoleMember, SessionID: "session-1"}
+	session := authn.Identity{UserID: "user-1", Role: authn.RoleMember, SessionID: "session-1"}
+	pat := authn.Identity{UserID: "user-1", Role: authn.RoleMember, TokenID: "token-1"}
 	path := "/api/plugins/kandev-plugin-session-origin/webhooks/key1"
 
+	const (
+		blocked = http.StatusForbidden
+		relayed = http.StatusServiceUnavailable // reached the relay; see reachedRelay
+	)
+
 	for _, tc := range []struct {
-		name   string
-		origin string
-		want   int
+		name     string
+		method   string
+		identity authn.Identity
+		signals  browserSignals
+		want     int
 	}{
-		{name: "missing", want: http.StatusForbidden},
-		{name: "foreign", origin: "https://attacker.example", want: http.StatusForbidden},
-		{name: "same host", origin: "https://example.com", want: http.StatusServiceUnavailable},
+		// The case broken in production: a plugin panel polling its own
+		// webhook same-origin with GET. No Origin is sent, and before this
+		// gate learned to read Sec-Fetch-Site every such poll was refused 403
+		// on any auth-enabled instance.
+		{
+			name: "same-origin GET without Origin", method: http.MethodGet, identity: session,
+			signals: browserSignals{secFetchSite: "same-origin"}, want: relayed,
+		},
+		{
+			name: "same-origin POST without Origin", method: http.MethodPost, identity: session,
+			signals: browserSignals{secFetchSite: "same-origin"}, want: relayed,
+		},
+		// Header values are lowercase per the Fetch Metadata spec; matching
+		// case-insensitively costs nothing and cannot admit a new value.
+		{
+			name: "same-origin spelled with mixed case", method: http.MethodGet, identity: session,
+			signals: browserSignals{secFetchSite: "Same-Origin"}, want: relayed,
+		},
+		// Sec-Fetch-Site: none is a user-initiated request with no initiator
+		// (address bar, bookmark). A cross-site page cannot cause a request
+		// to be labelled none, so it is not a CSRF vector.
+		{
+			name: "user-initiated navigation", method: http.MethodGet, identity: session,
+			signals: browserSignals{secFetchSite: "none"}, want: relayed,
+		},
+		// A cross-site top-level GET navigation sends no Origin, and the
+		// SameSite=Lax session cookie *is* attached to it — this is the one
+		// ambient-credential vector left on this route, and the gate refuses
+		// it on the fetch-metadata signal alone.
+		{
+			name: "cross-site without Origin", method: http.MethodGet, identity: session,
+			signals: browserSignals{secFetchSite: "cross-site"}, want: blocked,
+		},
+		{
+			name: "cross-site POST without Origin", method: http.MethodPost, identity: session,
+			signals: browserSignals{secFetchSite: "cross-site"}, want: blocked,
+		},
+		// same-site (a sibling subdomain, or the same host on another port)
+		// is refused too: SameSite=Lax does not stop it, and no legitimate
+		// caller reaches this route as same-site without also sending Origin
+		// (see the split-origin case below).
+		{
+			name: "same-site without Origin", method: http.MethodGet, identity: session,
+			signals: browserSignals{secFetchSite: "same-site"}, want: blocked,
+		},
+		// Origin present keeps deciding on its own: a cross-origin fetch
+		// always carries Origin, and httpmw.AllowedOrigin is the single
+		// shared origin trust policy.
+		{
+			name: "foreign Origin", method: http.MethodPost, identity: session,
+			signals: browserSignals{origin: "https://attacker.example"}, want: blocked,
+		},
+		{
+			name: "foreign Origin claiming same-origin", method: http.MethodGet, identity: session,
+			signals: browserSignals{origin: "https://attacker.example", secFetchSite: "same-origin"},
+			want:    blocked,
+		},
+		{
+			name: "accepted Origin", method: http.MethodPost, identity: session,
+			signals: browserSignals{origin: "https://example.com"}, want: relayed,
+		},
+		// The split-origin deployment host-api.ts documents: the SPA on one
+		// port fetching the backend on another. That is cross-origin, so the
+		// browser sends Origin (which AllowedOrigin accepts — it ignores
+		// ports) and labels it same-site. Deciding on Origin first is what
+		// keeps this working; demanding same-origin whenever the header is
+		// present would break every split-origin and desktop install.
+		{
+			name: "accepted Origin on another port", method: http.MethodGet, identity: session,
+			signals: browserSignals{origin: "https://example.com:1420", secFetchSite: "same-site"},
+			want:    relayed,
+		},
+		// Neither signal: refused. An ambient session cookie with no origin
+		// evidence is indistinguishable from a cross-site top-level GET
+		// navigation by a browser predating Fetch Metadata, which
+		// SameSite=Lax does attach the cookie to. A deliberate non-browser
+		// caller uses a PAT, which is not gated at all (next case).
+		{
+			name: "no browser signals at all", method: http.MethodGet, identity: session,
+			signals: browserSignals{}, want: blocked,
+		},
+		// The gate is scoped to ambient-credential identities. A PAT is sent
+		// deliberately by its holder, so a cross-site page cannot borrow it
+		// and the fetch-metadata signal is irrelevant.
+		{
+			name: "PAT identity is not gated", method: http.MethodGet, identity: pat,
+			signals: browserSignals{secFetchSite: "cross-site"}, want: relayed,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			rec := doWebhookIdentityRequest(router, http.MethodGet, path, identity, tc.origin)
+			rec := doWebhookIdentityRequest(router, tc.method, path, tc.identity, tc.signals)
 			if rec.Code != tc.want {
 				t.Fatalf("status = %d, want %d, body=%s", rec.Code, tc.want, rec.Body.String())
 			}
@@ -180,7 +300,7 @@ func TestWebhookAuthGate_NonBrowserIdentitiesDoNotRequireOrigin(t *testing.T) {
 		{UserID: "default", Role: authn.RoleAdmin, Synthetic: true},
 	}
 	for _, identity := range identities {
-		rec := doWebhookIdentityRequest(router, http.MethodPost, path, identity, "")
+		rec := doWebhookIdentityRequest(router, http.MethodPost, path, identity, browserSignals{})
 		if !reachedRelay(rec.Code) {
 			t.Fatalf("identity %+v: status = %d, want 503, body=%s", identity, rec.Code, rec.Body.String())
 		}

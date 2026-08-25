@@ -140,3 +140,25 @@ func TestPluginsTaskWriter_UpdateRejectsSchedulingState(t *testing.T) {
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
 	require.Nil(t, svc.lastUpdate)
 }
+
+// A plugin that creates a task with start_agent launches it right after
+// CreateTask returns, so its create carries the same start intent the REST, WS
+// and MCP surfaces carry — otherwise step resolution parks the task on the
+// start step and the plugin's agent runs in a column configured to run nothing.
+func TestPluginsTaskWriter_CreateCarriesStartAgentIntent(t *testing.T) {
+	for name, startAgent := range map[string]bool{
+		"starting an agent": true,
+		"create only":       false,
+	} {
+		t.Run(name, func(t *testing.T) {
+			svc := &fakePluginTaskWriteService{}
+			a := pluginsTaskWriterAdapter{svc: svc}
+
+			_, err := a.CreateTask(context.Background(), plugins.TaskCreateInput{
+				WorkspaceID: "ws-1", WorkflowID: "wf-1", Title: "x", StartAgent: startAgent,
+			})
+			require.NoError(t, err)
+			require.Equal(t, startAgent, svc.lastCreate.StartAgent)
+		})
+	}
+}

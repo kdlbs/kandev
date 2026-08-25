@@ -8,7 +8,6 @@ import {
   IconAlertCircle,
   IconArrowsMaximize,
   IconDots,
-  IconLoader2,
   IconLock,
   IconSubtask,
   IconUsersGroup,
@@ -329,17 +328,16 @@ export function renderTaskStatusIcon(
   // session creation leaves a session-less SCHEDULING/IN_PROGRESS task, which
   // reads as showRunningSpinner=true — the exact shape the failure marker exists
   // to surface.
-  if (
+  const foregroundActivity =
     showRunningSpinner &&
     !needsMe &&
     !showAutoStartFailed &&
     task.foregroundActivity !== "background"
-  ) {
-    return <IconLoader2 className="h-4 w-4 text-blue-500 animate-spin" />;
-  }
+      ? "generating"
+      : task.foregroundActivity;
   return getTaskStateIcon(task.state, "h-4 w-4", {
     hasPendingClarification,
-    foregroundActivity: task.foregroundActivity,
+    foregroundActivity,
     hasPendingPermission,
     interrupted: showInterrupted,
     autoStartFailed: showAutoStartFailed,

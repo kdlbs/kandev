@@ -77,7 +77,7 @@ func (s *Service) resolveCostForUsage(ctx context.Context, data PromptUsageData)
 // one atomic snapshot when s.pricingLookup satisfies
 // shared.PricingLookupWithVersion, so a concurrent background refresh can
 // never pair one catalogue's rates with a different catalogue's version
-// identifier on the stored row (docs/specs/office/costs.md). Falls back to two
+// identifier on the stored row (docs/specs/office/requirements/costs.md). Falls back to two
 // separate calls — accepting that narrower race — only for a PricingLookup
 // implementation (e.g. a test double) that doesn't support the atomic form;
 // CatalogVersion is optional there too, so a non-implementer simply reports

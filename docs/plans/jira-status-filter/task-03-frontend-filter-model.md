@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/jira-status-filter/spec.md"
+spec: "../../specs/integrations/requirements/jira-status-filter.md"
 ---
 
 # Task 03: Filter model + saved-view back-compat

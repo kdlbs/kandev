@@ -1,0 +1,167 @@
+---
+status: draft
+system: ui
+specification_version: 1
+migration: in_progress
+owners:
+  - kandev
+---
+
+# UI system
+
+## Purpose
+
+The UI system owns presentation behavior for the web application, including
+responsive desktop and mobile surfaces.
+
+## Ownership
+
+This system owns navigation, settings presentation, boards, task and review
+surfaces, walkthroughs, chat controls, visual feedback, and responsive
+interaction contracts that do not own backend state.
+
+A control is not UI-owned only because it appears in the web application. A
+provider or task system keeps ownership when the control configures or displays
+that system's state. The UI system owns only the independent presentation
+contract that other capabilities can reuse.
+
+## Exclusions
+
+- Durable task behavior belongs to the [task system](../tasks/README.md).
+- Agent profile behavior belongs to the [agent system](../agents/README.md).
+- Plugin contribution contracts belong to the [plugin system](../plugins/README.md).
+- Provider-specific state and actions belong to the
+  [integration system](../integrations/README.md).
+
+## Specification map
+
+### Requirements
+
+
+
+- [ACP Model Configuration Summary](requirements/acp-model-configuration-summary.md)
+- [ACP Shell Command Output](requirements/acp-shell-command-output.md)
+- [Adaptive Kanban](requirements/adaptive-kanban.md)
+- [Task Add-Panel PR Submenu](requirements/add-panel-pr-submenu.md)
+- [Agent Launch Prompt Composer](requirements/agent-launch-prompt-composer.md)
+- [Agent-message inline comments](requirements/agent-message-comments.md)
+- [Agent Todo List Panel](requirements/agent-todo-list-panel.md)
+- [App Status Bar](requirements/app-status-bar.md)
+- [Per-workflow column visibility on the kanban board](requirements/board-step-visibility-filter.md)
+- [Browser inspect annotation submission](requirements/browser-inspect-annotations-save.md)
+- [Backend-owned cancel-turn progress](requirements/cancel-turn-progress.md)
+- [Responsive Changes Walkthrough Action](requirements/changes-walkthrough-toolbar-width.md)
+- [Task PR Automation Controls](requirements/ci-pr-automation.md)
+- [Clarification Shared Context](requirements/clarification-context.md)
+- [Clarification submit feedback](requirements/clarification-submit-feedback.md)
+- [Command-panel Sidebar Task Reveal](requirements/command-panel-sidebar-task-reveal.md)
+- [Comment Markdown Rendering](requirements/comment-markdown.md)
+- [Context Compaction Count](requirements/context-compaction-count.md)
+- [Context Window Reset Freshness](requirements/context-window-reset-freshness.md)
+- [Context Window Unmeasured State](requirements/context-window-unmeasured-state.md)
+- [Embedded VS Code Executor Availability](requirements/embedded-vscode-executor-availability.md)
+- [Embedded VS Code Windows Availability](requirements/embedded-vscode-windows-availability.md)
+- [Empty-Turn Notice and Slash-Command Hint](requirements/empty-turn-notice.md)
+- [Entity Reference Composer](requirements/entity-reference-composer.md)
+- [Executor settings card spacing](requirements/executor-settings-card-spacing.md)
+- [External VCS File Links](requirements/external-vcs-file-links.md)
+- [File Tree Chat Context](requirements/file-tree-chat-context.md)
+- [Reload Kandev when a tab is restored from a frozen browser snapshot](requirements/fix-duplicated-tab-stale-data.md)
+- [GitHub PR Review Actions](requirements/github-pr-review-actions.md)
+- [GitHub Saved-Query Default Views](requirements/github-saved-query-defaults.md)
+- [Auto-hide empty workflow steps](requirements/kanban-auto-hide-empty-columns.md)
+- [Repair last-prompt transcript pinning](requirements/last-prompt-pinning-regressions.md)
+- [Repair merge commit details](requirements/merge-commit-details.md)
+- [Mermaid Rendering](requirements/mermaid-rendering.md)
+- [Message favorite star mobile sizing](requirements/message-favorite-star-mobile-size.md)
+- [Message metadata dialog scroll containment](requirements/message-metadata-overflow.md)
+- [Automatically Merge Consecutive Queued Messages](requirements/message-queue-auto-merge.md)
+- [Manage Pending Message Queues](requirements/message-queue-management.md)
+- [Merge Enqueued Messages Individually](requirements/message-queue-merge.md)
+- [Pin the Message Queue Panel](requirements/message-queue-pin.md)
+- [Reorder Queued Messages](requirements/message-queue-reorder.md)
+- [Control Pending Message Auto-run](requirements/message-queue-run.md)
+- [Send Queued Messages Now](requirements/message-queue-send-now.md)
+- [Mobile Workspace Topbar Actions](requirements/mobile-quick-chat-topbar.md)
+- [Mobile Task Navigation](requirements/mobile-task-navigation.md)
+- [Task-scoped port-forwarding discovery](requirements/port-forwarding-discovery.md)
+- [Open proxy URLs in the browser panel](requirements/port-proxy-browser-panel.md)
+- [Responsive PR Detail Header](requirements/pr-detail-header-width.md)
+- [Repair PR-only commit details](requirements/pr-only-commit-details.md)
+- [PR Task Status Summary](requirements/pr-task-status-summary.md)
+- [Pull Request Walkthrough Generation](requirements/pr-walkthrough.md)
+- [Preview Sprites Transient Retry](requirements/preview-sprites-transient-retry.md)
+- [Persistent status motion](requirements/persistent-status-motion.md)
+- [Prompt History Panel](requirements/prompt-history-panel.md)
+- [Render Nerd Font glyphs pasted from a styled terminal](requirements/prompt-paste-nerd-font-glyphs.md)
+- [Prompt Turn Duration on Message Hover](requirements/prompt-turn-duration.md)
+- [Published Docs Preview Reliability](requirements/published-docs-preview-reliability.md)
+- [Quick Chat elevation](requirements/quick-chat-elevation.md)
+- [Quick Chat Idle Dot](requirements/quick-chat-idle-dot.md)
+- [Quick Chat and Terminal Tabs](requirements/quick-terminal.md)
+- [Relative Last Seen in Account Security](requirements/relative-last-seen.md)
+- [Resizable Markdown Table Columns](requirements/resizable-markdown-tables.md)
+- [Review File Status Cues](requirements/review-file-status.md)
+- [Review Markdown Preview](requirements/review-markdown-preview.md)
+- [Search/filter dropdown scroll reset](requirements/search-filter-scroll-reset.md)
+- [Selected option prominence in single-choice pickers](requirements/selected-option-picker-prominence.md)
+- [Session tab delete feedback](requirements/session-tab-delete-feedback.md)
+- [Settings Discovery](requirements/settings-discovery.md)
+- [Settings Manual Save](requirements/settings-manual-save.md)
+- [Settings Prompt Editor](requirements/settings-prompt-editor.md)
+- [Consistent settings typography](requirements/settings-typography.md)
+- [Sidebar Archived Task Views](requirements/sidebar-archived-filter.md)
+- [Sidebar Diff Stat Priority](requirements/sidebar-diff-stat-priority.md)
+- [Sidebar empty task alignment](requirements/sidebar-empty-task-alignment.md)
+- [Sidebar Last Activity Sort](requirements/sidebar-last-activity-sort.md)
+- [Sidebar Queued Prompt Count Badge](requirements/sidebar-queued-prompt-count.md)
+- [Sidebar Task Completion Icons](requirements/sidebar-task-completion-icons.md)
+- [Sidebar Task Row Presentation](requirements/sidebar-task-row-presentation.md)
+- [Direct Sidebar View Creation](requirements/sidebar-view-creation.md)
+- [Slash Command Composer Selection](requirements/slash-command-composer.md)
+- [Subagent Observability](requirements/subagent-observability.md)
+- [Nested Submodule Review](requirements/submodule-review.md)
+- [Task Layout Profiles](requirements/task-layout-profiles.md)
+- [Task Listing Display Preferences](requirements/task-listing-display-preferences.md)
+- [Task transcript history visibility](requirements/task-prompt-transcript-visibility.md)
+- [Task Review Shortcut Switcher](requirements/task-review-shortcut.md)
+- [Task Surface Foreground Refresh and Mobile Create Action](requirements/task-surface-refresh.md)
+- [Task Workspace Content Search](requirements/task-workspace-content-search.md)
+- [Terminal close feedback](requirements/terminal-close-feedback.md)
+- [Transcript Auto-scroll Stability](requirements/transcript-auto-scroll.md)
+- [Transcript Navigation Settings](requirements/transcript-navigation-settings.md)
+- [Voice Mode In Task Behavior](requirements/voice-mode-task-behavior.md)
+- [Walkthrough Feedback Controls](requirements/walkthrough-feedback-controls.md)
+- [Stable Walkthrough Navigation](requirements/walkthrough-navigation-layout.md)
+- [WebKit Task Dialog Rendering](requirements/webkit-task-dialog-rendering.md)
+- [Active workspace first in settings](requirements/workspace-active-first-order.md)
+- [WebSocket Connectivity Warning](requirements/ws-connectivity-warning.md)
+
+### System design
+
+
+
+- [Agent Todo List Panel](system-design/agent-todo-list-panel.md)
+- [App Status Bar](system-design/app-status-bar.md)
+- [Per-workflow column visibility on the kanban board System Design Part 1](system-design/board-step-visibility-filter-01.md)
+- [Per-workflow column visibility on the kanban board System Design Part 2](system-design/board-step-visibility-filter-02.md)
+- [Task PR Automation Controls System Design Part 1](system-design/ci-pr-automation-01.md)
+- [Task PR Automation Controls System Design Part 2](system-design/ci-pr-automation-02.md)
+- [Task PR Automation Controls System Design Part 3](system-design/ci-pr-automation-03.md)
+- [Entity Reference Composer](system-design/entity-reference-composer.md)
+- [Persistent status motion](system-design/persistent-status-motion.md)
+- [Prompt History Panel](system-design/prompt-history-panel.md)
+- [Quick Chat and Terminal Tabs](system-design/quick-terminal.md)
+- [Task Layout Profiles](system-design/task-layout-profiles.md)
+- [Task Transcript History Visibility](system-design/task-prompt-transcript-visibility.md)
+
+## Migration record
+
+Migration remains in progress while legacy source detail is extracted from the
+canonical requirement and system-design documents above.
+
+## Related systems
+
+- [Tasks](../tasks/README.md): supplies task and workflow state.
+- [Plugins](../plugins/README.md): supplies plugin contributions.
+- [Platform](../platform/README.md): supplies shared runtime state.

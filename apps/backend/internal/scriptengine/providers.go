@@ -357,7 +357,16 @@ gh config set git_protocol https --host github.com 2>/dev/null || true`
 		lines := []string{
 			"# GitHub token authentication",
 			"# Configure git credential helper for GitHub HTTPS authentication",
-			`git config --global credential.https://github.com.helper '!/bin/sh -c "echo username=x-access-token; echo password=${GH_TOKEN:-${GITHUB_TOKEN}}"'`,
+			// --replace-all is required, not cosmetic. `gh auth setup-git` (run
+			// below, and by the no-token branch above) leaves the key
+			// multi-valued: an empty entry that resets the helper chain plus
+			// gh's own helper. A plain `git config --global <key> <value>`
+			// refuses to overwrite a multi-valued key and exits 5, which aborts
+			// the whole prepare script under `set -euo pipefail`. That makes the
+			// no-token branch poison the with-token branch: on a host whose home
+			// directory persists between runs (SSH, unlike an ephemeral Docker
+			// container) exactly one launch succeeds and every later one fails.
+			`git config --global --replace-all credential.https://github.com.helper '!/bin/sh -c "echo username=x-access-token; echo password=${GH_TOKEN:-${GITHUB_TOKEN}}"'`,
 			"# Configure gh CLI to use HTTPS protocol",
 			"gh config set git_protocol https --host github.com 2>/dev/null || true",
 			"# Register gh as git credential helper (backup method)",
