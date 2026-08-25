@@ -10,7 +10,7 @@ export function cn(...inputs: ClassValue[]) {
  * Format a cost stored in subcents (hundredths of a cent) as a USD
  * dollar string. The backend persists every cost figure as int64
  * subcents so token-rate math stays integer-only;
- * docs/specs/office-costs/spec.md. UI consumers should never multiply
+ * docs/specs/office/requirements/costs.md. UI consumers should never multiply
  * or divide the raw value themselves — call this helper so the unit
  * boundary lives in one place.
  */

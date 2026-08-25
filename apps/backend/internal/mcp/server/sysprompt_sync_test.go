@@ -256,8 +256,6 @@ func TestSyspromptToolNames_ExactlyMatchMCPOfficeMode(t *testing.T) {
 
 	assert.Equal(t, registered, referenced,
 		"Office first-turn context must advertise exactly the ModeOffice tool inventory")
-	assert.NotContains(t, referenced, "step_complete_kandev")
-	assert.NotContains(t, sysprompt.OfficeContext(), "mcp__kandev__step_complete_kandev")
 }
 
 // TestSyspromptToolNames_NoBareToolReferences catches the opposite drift: a

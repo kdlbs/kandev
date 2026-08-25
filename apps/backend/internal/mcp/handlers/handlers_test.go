@@ -17,9 +17,12 @@ import (
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -140,6 +143,42 @@ func newTestTaskServiceWithWorkflow(t *testing.T) (*service.Service, *sqliterepo
 	workflowSvc := workflowservice.NewService(workflowRepo, log)
 	t.Cleanup(func() { _ = workflowSvc.Close() })
 	return svc, repo, workflowcontroller.NewController(workflowSvc), workflowRepo
+}
+
+func TestHandleListWorkspacesAutomationIsScopedToPrincipalWorkspace(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{
+		ID:        "ws-state-event",
+		Name:      "State Event",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}))
+	foreignWorkspace := &models.Workspace{
+		ID:        "ws-foreign",
+		Name:      "Foreign",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	require.NoError(t, repo.CreateWorkspace(ctx, foreignWorkspace))
+
+	h := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, testLogger(t))
+	ctx = mcpscope.WithPrincipal(ctx, mcpscope.Principal{
+		AutomationID:    "automation-1",
+		WorkspaceID:     "ws-state-event",
+		CallerTaskID:    "automation-task",
+		CallerSessionID: "automation-session",
+		Surface:         mcpprofile.SurfaceAutomation,
+	})
+	response, err := h.handleListWorkspaces(ctx, &ws.Message{ID: "1", Action: ws.ActionMCPListWorkspaces})
+	require.NoError(t, err)
+	require.NotNil(t, response)
+
+	var payload dto.ListWorkspacesResponse
+	require.NoError(t, json.Unmarshal(response.Payload, &payload))
+	require.Equal(t, 1, payload.Total)
+	require.Equal(t, "ws-state-event", payload.Workspaces[0].ID)
 }
 
 func seedMCPHandlerSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID string, state models.TaskSessionState) {

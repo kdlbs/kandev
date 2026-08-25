@@ -455,16 +455,71 @@ func webhookCallerAuthorized(ctx *gin.Context, public bool) bool {
 		ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
 		return false
 	}
-	if identity.SessionID != "" {
-		origin := ctx.GetHeader("Origin")
-		if origin == "" || !commonhttpmw.AllowedOrigin(origin, ctx.Request.Host) {
-			ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-				"error": "an accepted Origin is required for session-authenticated webhooks",
-			})
-			return false
-		}
+	if identity.SessionID != "" && !webhookSameOriginRequest(ctx) {
+		ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+			"error": "a same-origin request is required for session-authenticated webhooks",
+		})
+		return false
 	}
 	return true
+}
+
+// webhookSameOriginRequest reports whether a session-authenticated webhook
+// call is a genuine same-origin request rather than cross-site forgery.
+//
+// A session identity rides on an ambient cookie, so a page on another site can
+// make the browser attach it; a PAT or the synthetic auth-disabled identity
+// cannot be borrowed that way, which is why only sessions reach this check.
+// The signal is the request's origin, never its method: Kandev does not
+// enforce webhooks[].method and cannot see whether a plugin's GET handler has
+// side effects, so exempting safe verbs would reopen exactly the hole this
+// gate closes.
+//
+// The two signals, in order:
+//
+//   - Origin present: decided by httpmw.AllowedOrigin, the shared origin trust
+//     policy. Every cross-origin request carries Origin, including the SPA's
+//     own fetch in a split-origin or desktop install (frontend and backend on
+//     different ports, see apps/web/lib/plugins/host-api.ts), which the browser
+//     labels Sec-Fetch-Site: same-site. Origin therefore has to decide alone
+//     here; also demanding same-origin fetch metadata would break those installs.
+//
+//   - Origin absent: decided by Sec-Fetch-Site. Browsers do not send Origin on
+//     a same-origin GET or HEAD (per Fetch, it is attached to cross-origin
+//     requests and to same-origin requests whose method is neither GET nor
+//     HEAD), so an absent Origin is the normal state of a plugin panel polling
+//     its own webhook, not evidence of a cross-origin caller. Requiring Origin
+//     unconditionally refused every such poll on any auth-enabled instance.
+//
+// same-origin and none (a user-initiated request with no initiator: address
+// bar, bookmark) are accepted; cross-site and same-site are refused. Refusing
+// cross-site closes the one ambient-credential vector left on this route: the
+// SameSite=Lax session cookie is not sent on a cross-site subresource request
+// or POST, but it *is* sent on a cross-site top-level GET navigation, which
+// carries no Origin either.
+//
+// Neither header is refused. A session cookie with no origin signal at all is
+// indistinguishable from a cross-site top-level GET navigation made by a
+// browser that predates Fetch Metadata (or behind something stripping it),
+// which SameSite=Lax does attach the cookie to, so accepting it would reopen
+// the CSRF path this gate exists to close. That costs nothing anyone has
+// today: such a request is already refused before this change, so refusing it
+// still is not a regression, and the deliberate non-browser caller (curl, a
+// CLI, a server-side integration) has a credential built for exactly this,
+// the PAT, which is not ambient and is not gated here at all.
+func webhookSameOriginRequest(ctx *gin.Context) bool {
+	if origin := ctx.GetHeader("Origin"); origin != "" {
+		return commonhttpmw.AllowedOrigin(origin, ctx.Request.Host)
+	}
+	// Fetch Metadata values are lowercase per spec; match leniently, which
+	// cannot admit a value outside the accepted set. An absent header falls to
+	// the default and is refused along with cross-site and same-site.
+	switch strings.ToLower(strings.TrimSpace(ctx.GetHeader("Sec-Fetch-Site"))) {
+	case "same-origin", "none":
+		return true
+	default:
+		return false
+	}
 }
 
 // webhookStatusForResponse validates a plugin-supplied WebhookResponse.Status

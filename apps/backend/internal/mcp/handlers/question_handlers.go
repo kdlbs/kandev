@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/clarification"
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -107,12 +108,11 @@ func (h *Handlers) handleListPendingQuestions(ctx context.Context, msg *ws.Messa
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list pending questions", nil)
 	}
 
-	page, err := h.clarificationBundles.ListUnresolvedClarificationBundles(ctx, opts)
+	page, err := h.listVisiblePendingQuestionBundles(ctx, opts)
 	if err != nil {
 		h.logger.Error("failed to list unresolved clarification bundles", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list pending questions", nil)
 	}
-
 	resp, err := h.buildListPendingQuestionsResponse(ctx, page)
 	if err != nil {
 		h.logger.Error("failed to build list_pending_questions_kandev response", zap.Error(err))
@@ -121,11 +121,69 @@ func (h *Handlers) handleListPendingQuestions(ctx context.Context, msg *ws.Messa
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
 
+// listVisiblePendingQuestionBundles applies the automation self-filter while
+// preserving the requested visible page size. The storage query is ordered
+// and cursor-based, so a page filled with the caller's own bundle must be
+// followed until either enough foreign bundles are found or the source is
+// exhausted. Filtering one fetched page would hide later foreign bundles and
+// incorrectly report that there is no next page.
+func (h *Handlers) listVisiblePendingQuestionBundles(
+	ctx context.Context,
+	opts models.ListClarificationBundlesOptions,
+) (*models.ClarificationBundlePage, error) {
+	principal, isAutomation := mcpscope.PrincipalFromContext(ctx)
+	if !isAutomation || !principal.IsAutomation() {
+		return h.clarificationBundles.ListUnresolvedClarificationBundles(ctx, opts)
+	}
+
+	visible := make([]models.ClarificationBundleSummary, 0, opts.Limit)
+	for {
+		page, err := h.clarificationBundles.ListUnresolvedClarificationBundles(ctx, opts)
+		if err != nil {
+			return nil, err
+		}
+		if page == nil {
+			return nil, fmt.Errorf("clarification bundle lister returned a nil page")
+		}
+
+		visibleBeyondLimit := false
+		for _, bundle := range page.Bundles {
+			if bundle.TaskID == principal.CallerTaskID {
+				continue
+			}
+			if len(visible) >= opts.Limit {
+				visibleBeyondLimit = true
+				break
+			}
+			visible = append(visible, bundle)
+		}
+		if visibleBeyondLimit {
+			return &models.ClarificationBundlePage{Bundles: visible, HasMore: true}, nil
+		}
+		if !page.HasMore || len(page.Bundles) == 0 {
+			return &models.ClarificationBundlePage{Bundles: visible}, nil
+		}
+
+		last := page.Bundles[len(page.Bundles)-1]
+		if last.CreatedAt.Equal(opts.CursorCreatedAt) && last.PendingID == opts.CursorPendingID {
+			return nil, fmt.Errorf("clarification bundle lister returned a non-advancing cursor")
+		}
+		opts.CursorCreatedAt = last.CreatedAt
+		opts.CursorPendingID = last.PendingID
+	}
+}
+
 // resolveBundleVisibility implements L1a-L1c's caller-visibility resolution:
 // an unscoped caller (no identity, or the synthetic auth-disabled identity)
 // bypasses the workspace filter entirely; a scoped caller is limited to the
 // workspace set service.Service.ListWorkspaces already resolves for them.
 func (h *Handlers) resolveBundleVisibility(ctx context.Context, opts *models.ListClarificationBundlesOptions) error {
+	if principal, ok := mcpscope.PrincipalFromContext(ctx); ok && principal.IsAutomation() {
+		opts.Unscoped = false
+		opts.VisibleWorkspaceIDs = []string{principal.WorkspaceID}
+		opts.WorkspaceID = principal.WorkspaceID
+		return nil
+	}
 	if !callerScoped(ctx) {
 		opts.Unscoped = true
 		return nil
@@ -260,6 +318,10 @@ func (h *Handlers) handleAnswerQuestion(ctx context.Context, msg *ws.Message) (*
 	if req.PendingID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "pending_id is required", nil)
 	}
+	if principal, ok := mcpscope.PrincipalFromContext(ctx); ok && principal.IsAutomation() &&
+		!h.automationQuestionVisible(ctx, principal, req.PendingID) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "clarification request not found", nil)
+	}
 
 	res, claimed, err := h.clarificationResolver.ResolveBundle(ctx, req.PendingID, clarification.Outcome{
 		Answers:      req.Answers,
@@ -287,6 +349,32 @@ func (h *Handlers) handleAnswerQuestion(ctx context.Context, msg *ws.Message) (*
 	}
 }
 
+func (h *Handlers) automationQuestionVisible(
+	ctx context.Context,
+	principal mcpscope.Principal,
+	pendingID string,
+) bool {
+	messages, err := h.clarificationBundles.FindMessagesByPendingID(ctx, pendingID)
+	if err != nil || len(messages) == 0 {
+		return false
+	}
+	for _, message := range messages {
+		taskID := message.TaskID
+		if taskID == "" {
+			session, sessionErr := h.taskSvc.GetTaskSession(ctx, message.TaskSessionID)
+			if sessionErr != nil || session == nil {
+				return false
+			}
+			taskID = session.TaskID
+		}
+		task, taskErr := h.taskSvc.GetTask(ctx, taskID)
+		if taskErr != nil || task == nil || task.WorkspaceID != principal.WorkspaceID || taskID == principal.CallerTaskID {
+			return false
+		}
+	}
+	return true
+}
+
 func (h *Handlers) answerQuestionSuccessResponse(msg *ws.Message, claimed bool, res *clarification.Resolution) (*ws.Message, error) {
 	serialized, err := clarification.SerializeResponse(res.Response)
 	if err != nil {
@@ -304,6 +392,9 @@ func (h *Handlers) answerQuestionSuccessResponse(msg *ws.Message, claimed bool, 
 // no identity in context (internal caller) or the synthetic auth-disabled
 // identity. Mirrors clarification.resolvedByFromContext (unexported there).
 func resolvedByFromContext(ctx context.Context) string {
+	if principal, ok := mcpscope.PrincipalFromContext(ctx); ok && principal.IsAutomation() {
+		return "automation:" + principal.AutomationID
+	}
 	identity, ok := authn.IdentityFromContext(ctx)
 	if !ok || identity.Synthetic || identity.UserID == "" {
 		return ""

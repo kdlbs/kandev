@@ -103,10 +103,29 @@ func extractErrorMessage(event *agentctl.AgentEvent) string {
 	return "agent error completion"
 }
 
+func isUninitializedStartupExecution(execution *AgentExecution) bool {
+	if execution == nil || execution.startupAttemptSnapshot() == 0 || execution.isSessionInitialized() {
+		return false
+	}
+	return execution.Status == v1.AgentStatusStarting || execution.Status == v1.AgentStatusRunning
+}
+
 // handleCompleteEventMarkState marks the execution state after a complete event:
 // failed+removed on error, ready on success.
+func isUninitializedStartupFailure(execution *AgentExecution, event *agentctl.AgentEvent) bool {
+	return event != nil && event.PromptGeneration == 0 && isUninitializedStartupExecution(execution)
+}
+
 func (m *Manager) handleCompleteEventMarkState(execution *AgentExecution, event *agentctl.AgentEvent, isError bool) {
 	if isError {
+		// A process can exit while the startup owner is still waiting for ACP
+		// initialization. Leave that failure non-terminal so the startup path can
+		// classify it and perform its bounded managed-runtime recovery, if any.
+		if isUninitializedStartupFailure(execution, event) {
+			m.logger.Debug("deferring uninitialized startup failure to startup owner",
+				zap.String("execution_id", execution.ID))
+			return
+		}
 		errorMsg := extractErrorMessage(event)
 		// A turn aborted by backend graceful shutdown is not an agent failure.
 		// Redirect it to a benign stop so the session stays resumable and the UI
@@ -304,6 +323,14 @@ func (m *Manager) handleCompleteEvent(execution *AgentExecution, event *agentctl
 		event.TurnID = execution.promptTurnIDSnapshot()
 	}
 	isError, stopReason := completeEventResult(event)
+	if isError && isUninitializedStartupFailure(execution, event) {
+		// The startup owner is waiting for this failed process to classify its
+		// stderr. Do not release startup activity or signal prompt completion;
+		// the closed child stream will return the ACP request error to that owner.
+		m.logger.Debug("deferring uninitialized startup error event to startup owner",
+			zap.String("execution_id", execution.ID))
+		return true
+	}
 	claim, claimed := m.claimPromptCompletion(execution, event, isError)
 	if !claimed {
 		return false

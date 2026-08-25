@@ -741,6 +741,7 @@ func mapSidebarViews(views []usermodels.SidebarView) []map[string]any {
 			"sort":            view.Sort,
 			"group":           view.Group,
 			"collapsedGroups": stringSlice(view.CollapsedGroups),
+			"taskRow":         mapSidebarTaskRow(view.TaskRow),
 		})
 	}
 	return result
@@ -756,6 +757,19 @@ func mapSidebarDraft(draft *usermodels.SidebarViewDraft) map[string]any {
 		"filters":    draft.Filters,
 		"sort":       draft.Sort,
 		"group":      draft.Group,
+		"taskRow":    mapSidebarTaskRow(draft.TaskRow),
+	}
+}
+
+func mapSidebarTaskRow(value *usermodels.SidebarTaskRowPresentation) map[string]any {
+	if value == nil {
+		return nil
+	}
+	return map[string]any{
+		"detailsEnabled": value.DetailsEnabled,
+		"detailOrder":    stringSlice(value.DetailOrder),
+		"visibleDetails": stringSlice(value.VisibleDetails),
+		"trailing":       value.Trailing,
 	}
 }
 

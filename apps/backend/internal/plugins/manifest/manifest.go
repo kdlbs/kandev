@@ -1,5 +1,5 @@
 // Package manifest defines the plugin manifest data model and validation
-// rules described in docs/specs/plugins/spec.md ("Data model / Plugin
+// rules described in docs/specs/plugins/requirements/plugins.md ("Data model / Plugin
 // registration"). A manifest is the YAML document an operator supplies to
 // POST /api/plugins/register.
 package manifest

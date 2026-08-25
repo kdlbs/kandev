@@ -2,12 +2,14 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -318,6 +320,60 @@ func TestStopAgentForcePassesForceToBackend(t *testing.T) {
 
 	require.True(t, stopTracker.forced, "force must be forwarded to StopInstance")
 	require.Equal(t, StopReasonBackendShutdown, stopTracker.stopReason)
+}
+
+func TestStopAgentWithReason_BackendFailureKeepsExecutionRetryable(t *testing.T) {
+	log := newTestRegistryLogger()
+	execRegistry := NewExecutorRegistry(log)
+	backend := &retryableStopBackend{
+		MockExecutor: MockExecutor{name: executor.NameStandalone},
+		stopErr:      errors.New("runtime stop failed"),
+	}
+	execRegistry.Register(backend)
+	mgr := NewManager(newTestRegistry(), &MockEventBus{}, execRegistry, nil, nil, nil, ExecutorFallbackWarn, "", log)
+	cleanupManagerStopCh(t, mgr)
+	coordinator := activity.NewCoordinator(activity.Options{})
+	mgr.SetActivityCoordinator(coordinator)
+	runningLease, err := coordinator.AcquireTask(context.Background(), activity.KindExecutionRunning)
+	require.NoError(t, err)
+	mgr.trackActivity(executionActivityKey("exec-retryable-stop"), runningLease)
+
+	require.NoError(t, mgr.executionStore.Add(&AgentExecution{
+		ID:          "exec-retryable-stop",
+		TaskID:      "task-retryable-stop",
+		SessionID:   "session-retryable-stop",
+		RuntimeName: executor.NameStandalone,
+		Status:      v1.AgentStatusRunning,
+	}))
+
+	err = mgr.StopAgentWithReason(context.Background(), "exec-retryable-stop", "idle cleanup", false)
+	require.ErrorIs(t, err, backend.stopErr)
+	_, exists := mgr.executionStore.Get("exec-retryable-stop")
+	require.True(t, exists, "a failed runtime stop must retain the execution for retry")
+
+	bus := mgr.eventBus.(*MockEventBus)
+	require.Empty(t, bus.PublishedEvents, "a failed runtime stop must not publish agent.stopped")
+	_, _, err = coordinator.TryAcquireMaintenance(context.Background(), 0)
+	require.ErrorIs(t, err, activity.ErrBusy, "a failed stop must retain execution activity")
+
+	backend.stopErr = nil
+	require.NoError(t, mgr.StopAgentWithReason(context.Background(), "exec-retryable-stop", "idle cleanup retry", false))
+	_, exists = mgr.executionStore.Get("exec-retryable-stop")
+	require.False(t, exists)
+	require.Len(t, bus.PublishedEvents, 1)
+	require.Equal(t, events.AgentStopped, bus.PublishedEvents[0].Type)
+	maintenance, _, err := coordinator.TryAcquireMaintenance(context.Background(), 0)
+	require.NoError(t, err)
+	maintenance.Release()
+}
+
+type retryableStopBackend struct {
+	MockExecutor
+	stopErr error
+}
+
+func (b *retryableStopBackend) StopInstance(context.Context, *ExecutorInstance, bool) error {
+	return b.stopErr
 }
 
 type forceRecordingStopTracker struct {

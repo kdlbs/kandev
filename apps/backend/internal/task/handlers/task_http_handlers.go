@@ -941,6 +941,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		Metadata:           metadata,
 		DeferredLaunch:     deferredLaunch,
 		PlanMode:           body.PlanMode,
+		StartAgent:         body.StartAgent,
 		ParentID:           body.ParentID,
 		WorkspacePath:      body.WorkspacePath,
 		BlockedBy:          body.BlockedBy,

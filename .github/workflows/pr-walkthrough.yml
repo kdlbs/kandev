@@ -21,12 +21,28 @@ jobs:
       vars.PR_WALKTHROUGH_ENABLED == 'true' &&
       github.event_name == 'pull_request_target' &&
       github.event.pull_request.draft == false &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      (github.event.action == 'opened' ||
-       github.event.action == 'reopened' ||
-       github.event.action == 'ready_for_review' ||
-       github.event.action == 'synchronize' ||
-       (github.event.action == 'labeled' && github.event.label.name == 'generate-pr-walkthrough'))
+      (
+        (
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          (github.event.action == 'opened' ||
+           github.event.action == 'reopened' ||
+           github.event.action == 'ready_for_review' ||
+           github.event.action == 'synchronize' ||
+           (github.event.action == 'labeled' && github.event.label.name == 'generate-pr-walkthrough'))
+        ) ||
+        (
+          github.event.pull_request.head.repo.full_name != github.repository &&
+          (
+            (github.event.action == 'labeled' && github.event.label.name == 'safe-to-review') ||
+            (github.event.action != 'labeled' &&
+             (
+               contains(github.event.pull_request.labels.*.name, 'safe-to-review') ||
+               (vars.CLAUDE_REVIEW_ALLOWLIST != '' &&
+                contains(fromJSON(vars.CLAUDE_REVIEW_ALLOWLIST), github.event.pull_request.user.login))
+             ))
+          )
+        )
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: opencode-review-trusted
@@ -46,10 +62,11 @@ jobs:
         env:
           TRUSTED_SHA: ${{ github.workflow_sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$TRUSTED_SHA"
-          git fetch --no-tags --filter=blob:none --negotiation-tip="$TRUSTED_SHA" origin "$HEAD_SHA"
+          git fetch --no-tags --filter=blob:none --negotiation-tip="$TRUSTED_SHA" origin "refs/pull/${PR_NUMBER}/head"
           test "$(git rev-parse FETCH_HEAD)" = "$HEAD_SHA"
           MERGE_BASE="$(git merge-base "$TRUSTED_SHA" "$HEAD_SHA")"
           test -n "$MERGE_BASE"
@@ -310,7 +327,7 @@ jobs:
           aws s3 cp "$HTML_PATH" "s3://${CLOUDFLARE_R2_BUCKET}/${OBJECT_KEY}" \
             --endpoint-url "$CLOUDFLARE_R2_ENDPOINT" \
             --content-type "text/html; charset=utf-8" \
-            --cache-control "public, max-age=300" \
+            --cache-control "public, max-age=300, no-transform" \
             --only-show-errors
 
           content_type="$(aws s3api head-object \

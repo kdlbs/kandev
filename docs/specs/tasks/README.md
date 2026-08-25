@@ -2,7 +2,7 @@
 status: active
 system: tasks
 specification_version: 1
-migration: complete
+migration: in_progress
 owners:
   - kandev
 ---
@@ -25,108 +25,119 @@ signals, and task-scoped scheduling contracts.
 ## Exclusions
 
 - Agent identity, permissions, and runtime profiles belong to the
-  [agent system](../agents/).
+  [agent system](../agents).
 - Repository and worktree ownership belongs to the
-  [workspace system](../workspaces/).
+  [workspace system](../workspaces).
 - Office-specific autonomous agent identities and dashboards belong to the
-  [Office system](../office/).
-- Presentation-only behavior belongs to the [UI specifications](../ui/).
+  [Office system](../office).
+- Presentation-only behavior belongs to the [UI specifications](../ui).
 
 ## Specification map
 
 ### Requirements
 
-- [Active clarification lifecycle](requirements/clarification-active-lifecycle.md)
+
+
+- [Agent-Generated Task Titles](requirements/agent-generated-titles.md)
+- [Additional Session Workspace Reuse](requirements/additional-session-workspace-reuse.md)
+- [Task Archive Confirmation](requirements/archive-confirmation.md)
+- [Attach Workspace Sources](requirements/attach-workspace-sources.md)
+- [Task Autopilot Mode](requirements/autopilot-mode.md)
+- [Blocked Task Escalation](requirements/blocked-task-escalation.md)
 - [Active clarification lifecycle scenarios](requirements/clarification-active-lifecycle-scenarios.md)
-- [Agent-generated titles](requirements/agent-generated-titles.md)
-- [Additional session workspace reuse](requirements/additional-session-workspace-reuse.md)
-- [Attach workspace sources](requirements/attach-workspace-sources.md)
-- [Archive confirmation](requirements/archive-confirmation.md)
-- [Autopilot mode](requirements/autopilot-mode.md)
-- [Blocked task escalation](requirements/blocked-task-escalation.md)
-- [Cancelled turn completion](requirements/workflow-cancelled-turn-completion.md)
-- [Create dialog advanced dependency settings](requirements/task-dependencies-create-dialog-advanced-settings.md)
-- [Create dialog dependency selector](requirements/task-dependencies-create-dialog-dependency-selector.md)
-- [Documents](requirements/documents.md)
-- [Execution stages](requirements/execution-stages.md)
-- [External task ID idempotency](requirements/external-id-idempotency.md)
+- [Active clarification lifecycle](requirements/clarification-active-lifecycle.md)
+- [Task Documents](requirements/documents.md)
+- [Task Execution Stages](requirements/execution-stages.md)
 - [External task ID idempotency boundaries](requirements/external-id-idempotency-boundaries.md)
 - [External task ID idempotency scenarios](requirements/external-id-idempotency-scenarios.md)
-- [Explicit workflow-step completion signal](requirements/workflow-explicit-completion-signal.md)
-- [Interrupted task indicator](requirements/interrupted-task-indicator.md)
-- [Labels](requirements/labels.md)
-- [Link an existing task to a GitHub issue](requirements/link-existing-task-github-issue.md)
-- [MCP task agent-profile default](requirements/mcp-task-agent-profile-default.md)
-- [Model unification](requirements/model-unification.md)
+- [External task ID idempotency](requirements/external-id-idempotency.md)
+- [Interrupted Task Indicator](requirements/interrupted-task-indicator.md)
+- [Kanban task cache preserves executor fields across merges](requirements/kanban-task-executor-cache-staleness.md)
+- [Task Labels](requirements/labels.md)
+- [Link Existing Task to External References](requirements/link-existing-task-github-issue.md)
+- [MCP-Created Task Agent Profile Default](requirements/mcp-task-agent-profile-default.md)
+- [Missing task route recovery](requirements/missing-task-route-recovery.md)
+- [Task model unification](requirements/model-unification.md)
 - [Multi-branch tasks](requirements/multi-branch.md)
-- [Parent-child message interrupt](requirements/parent-child-message-interrupt.md)
-- [Parent-child task stop](requirements/parent-child-task-stop.md)
-- [Prevent agent autostart on open](requirements/prevent-agent-autostart-on-open.md)
+- [Parent-Child Message Interrupt](requirements/parent-child-message-interrupt.md)
+- [Parent-Child Task Stop](requirements/parent-child-task-stop.md)
+- [Prevent Agent Auto-Start On Open](requirements/prevent-agent-autostart-on-open.md)
 - [Prompt attachments](requirements/prompt-attachments.md)
-- [Quick chat expiration](requirements/quick-chat-expiration.md)
-- [Quick chat repository context](requirements/quick-chat-repository-context.md)
-- [Remote contribution tasks](requirements/remote-contribution-tasks.md)
+- [Quick Chat Sessions, Persistence, and Expiration](requirements/quick-chat-expiration.md)
+- [Quick Chat Repository Context](requirements/quick-chat-repository-context.md)
+- [Remote Contribution Tasks](requirements/remote-contribution-tasks.md)
 - [Rich task title previews](requirements/rich-task-title-previews.md)
-- [Run scheduling](requirements/run-scheduling.md)
-- [Runtime state publication order](requirements/runtime-state-publication-order.md)
-- [Sidebar task edit](requirements/sidebar-task-edit.md)
-- [Subtask checklist](requirements/subtask-checklist.md)
-- [Subtask completion trigger](requirements/subtask-completion-trigger.md)
+- [Queued run scheduling](requirements/run-scheduling.md)
+- [Task Runtime Cleanup](requirements/runtime-cleanup.md)
+- [Runtime Task-State Publication Order](requirements/runtime-state-publication-order.md)
+- [Session Delete Preserves Task Workspaces](requirements/session-delete-resource-cleanup.md)
+- [Sidebar Task Editing](requirements/sidebar-task-edit.md)
+- [Subtasks as Workflow Checklist](requirements/subtask-checklist.md)
+- [Subtask Completion Trigger](requirements/subtask-completion-trigger.md)
 - [Subtask detachment](requirements/subtask-detachment.md)
-- [Subtask reparenting](requirements/subtask-reparenting-drag-drop.md)
-- [Subtree controls](requirements/subtree-controls.md)
-- [Task create escape dismissal](requirements/task-create-escape-dismissal.md)
-- [Task create executor default](requirements/task-create-executor-default.md)
-- [Task create workflow memory](requirements/task-create-workflow-memory.md)
-- [Task dependencies](requirements/task-dependencies.md)
-- [Task launch failure recovery](requirements/task-launch-failure-recovery.md)
-- [Task title length limit](requirements/title-length-limit.md)
-- [User question turn boundary](requirements/user-question-turn-boundary.md)
-- [Without repositories](requirements/without-repositories.md)
-- [Runtime cleanup](requirements/runtime-cleanup.md)
-- [Workflow cycle guardrails](requirements/workflow-cycle-guardrails.md)
-- [Workflow duplication](requirements/workflow-duplication.md)
+- [Subtask re-parenting by drag and drop](requirements/subtask-reparenting-drag-drop.md)
+- [Task Subtree Controls](requirements/subtree-controls.md)
+- [Create Task Escape Dismissal](requirements/task-create-escape-dismissal.md)
+- [Task Create Executor Default](requirements/task-create-executor-default.md)
+- [Task Create Workflow Memory](requirements/task-create-workflow-memory.md)
+- [Task-create advanced settings disclosure](requirements/task-dependencies-create-dialog-advanced-settings.md)
+- [Task-create dependency selector refinement](requirements/task-dependencies-create-dialog-dependency-selector.md)
+- [Task Dependencies and Auto-Start Chains](requirements/task-dependencies.md)
+- [Task Launch Failure Recovery](requirements/task-launch-failure-recovery.md)
+- [Task Title Length Limit](requirements/title-length-limit.md)
+- [User Question Turn Boundary](requirements/user-question-turn-boundary.md)
+- [WIP Limits and Visible Overflow Queues](requirements/wip-limit-pull-system.md)
+- [Tasks Without Repositories](requirements/without-repositories.md)
+- [Cancelled Turn Completion](requirements/workflow-cancelled-turn-completion.md)
+- [Workflow Cycle Guardrails](requirements/workflow-cycle-guardrails.md)
+- [Workflow Duplication](requirements/workflow-duplication.md)
+- [Explicit Workflow-Step Completion Signal](requirements/workflow-explicit-completion-signal.md)
+- [Agent decision recording](requirements/workflow-quorum-decision-recording-agent-surface.md)
+- [Quorum ordering and concurrency](requirements/workflow-quorum-decision-recording-concurrency.md)
+- [Quorum diagnostics](requirements/workflow-quorum-decision-recording-diagnostics.md)
+- [Quorum participant slate](requirements/workflow-quorum-decision-recording-participant-slate.md)
+- [Decision-triggered quorum re-evaluation](requirements/workflow-quorum-decision-recording-reevaluation.md)
+- [Quorum regression behavior](requirements/workflow-quorum-decision-recording-regression.md)
+- [Quorum step binding and thresholds](requirements/workflow-quorum-decision-recording-step-binding.md)
+- [Quorum verdict vocabulary](requirements/workflow-quorum-decision-recording-verdict-vocabulary.md)
 - [Workflow quorum decision recording](requirements/workflow-quorum-decision-recording.md)
-- [Workflow quorum decision recording: agent surface](requirements/workflow-quorum-decision-recording-agent-surface.md)
-- [Workflow quorum decision recording: concurrency](requirements/workflow-quorum-decision-recording-concurrency.md)
-- [Workflow quorum decision recording: diagnostics](requirements/workflow-quorum-decision-recording-diagnostics.md)
-- [Workflow quorum decision recording: participant slate](requirements/workflow-quorum-decision-recording-participant-slate.md)
-- [Workflow quorum decision recording: re-evaluation](requirements/workflow-quorum-decision-recording-reevaluation.md)
-- [Workflow quorum decision recording: regression](requirements/workflow-quorum-decision-recording-regression.md)
-- [Workflow quorum decision recording: step binding](requirements/workflow-quorum-decision-recording-step-binding.md)
-- [Workflow quorum decision recording: verdict vocabulary](requirements/workflow-quorum-decision-recording-verdict-vocabulary.md)
-- [Workflow session settings](requirements/workflow-session-settings.md)
-- [Workflow settings autosave](requirements/workflow-settings-autosave.md)
-- [Workflow step agent-start ownership](requirements/workflow-step-agent-start-ownership.md)
-- [Workflow sync workspace authorization](requirements/workflow-sync-workspace-authz.md)
-- [Workflow task-step transition ledger](requirements/workflow-task-step-transition-ledger.md)
+- [Conditional Workflow Session Settings](requirements/workflow-session-settings.md)
+- [Workflow Settings Autosave](requirements/workflow-settings-autosave.md)
+- [Workflow Step Agent Start Ownership](requirements/workflow-step-agent-start-ownership.md)
+- [Workflow Sync — Per-User Workspace Authorization](requirements/workflow-sync-workspace-authz.md)
 - [Workflow task-step transition ledger scenarios](requirements/workflow-task-step-transition-ledger-scenarios.md)
-- [WIP limits and visible overflow queues](requirements/wip-limit-pull-system.md)
+- [Workflow task-step transition ledger](requirements/workflow-task-step-transition-ledger.md)
 
 ### System design
 
+
+
+- [Attach Workspace Sources](system-design/attach-workspace-sources.md)
 - [Active clarification lifecycle](system-design/clarification-active-lifecycle.md)
-- [Attach workspace sources](system-design/attach-workspace-sources.md)
-- [External task ID idempotency](system-design/external-id-idempotency.md)
 - [External task ID idempotency operations](system-design/external-id-idempotency-operations.md)
-- [Model unification](system-design/model-unification.md)
-- [Remote contribution tasks](system-design/remote-contribution-tasks.md)
-- [Runtime cleanup](system-design/runtime-cleanup.md)
-- [Task dependencies](system-design/task-dependencies.md)
+- [External task ID idempotency](system-design/external-id-idempotency.md)
+- [Task model unification](system-design/model-unification.md)
+- [Remote Contribution Tasks](system-design/remote-contribution-tasks.md)
+- [Task Archive Confirmation](system-design/archive-confirmation.md)
+- [Task Runtime Cleanup](system-design/runtime-cleanup.md)
+- [Queued Run Scheduling](system-design/run-scheduling.md)
+- [Session Delete Preserves Task Workspaces](system-design/session-delete-resource-cleanup.md)
+- [Task Dependencies and Auto-Start Chains](system-design/task-dependencies.md)
+- [Task Launch Failure Recovery](system-design/task-launch-failure-recovery.md)
+- [WIP Limits and Visible Overflow Queues](system-design/wip-limit-pull-system.md)
 - [Workflow quorum decision recording](system-design/workflow-quorum-decision-recording.md)
 - [Workflow task-step transition ledger](system-design/workflow-task-step-transition-ledger.md)
-- [WIP limit and pull system](system-design/wip-limit-pull-system.md)
 
-## Migration status
+## Migration record
 
-All task and workflow sources in this migration are now represented by
-authoritative requirement and system-design documents under this directory.
-The legacy editable sources were split by capability, lifecycle, and contract
-boundary, then removed from the legacy tree.
+Migration remains in progress. The three requirements above now have
+authoritative, wrapper-free requirement/design pairs. Other migrated files still
+need the same extraction before this system can return to a complete migration
+state.
 
 ## Related systems
 
-- [Agents](../agents/): supplies agent identity and execution profiles.
-- [Office](../office/): builds autonomous workflows on task primitives.
-- [UI](../ui/): owns presentation-specific task surfaces.
-- [Workspaces](../workspaces/): owns repositories and task worktrees.
+- [Agents](../agents): supplies agent identity and execution profiles.
+- [Office](../office): builds autonomous workflows on task primitives.
+- [UI](../ui): owns presentation-specific task surfaces.
+- [Workspaces](../workspaces): owns repositories and task worktrees.

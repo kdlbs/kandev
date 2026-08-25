@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-link-foundation"]
 plan: "plan.md"
-spec: "../../specs/ui/external-vcs-file-links.md"
+spec: "../../specs/ui/requirements/external-vcs-file-links.md"
 ---
 
 # Task 02: Toolbar action wiring

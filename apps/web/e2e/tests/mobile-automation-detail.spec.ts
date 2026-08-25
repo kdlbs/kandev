@@ -52,6 +52,46 @@ async function openDetail(testPage: Page, automationId: string) {
   await expect(testPage.getByTestId("runs-drawer-trigger")).toBeVisible({ timeout: 15_000 });
 }
 
+async function seedOpenRun(
+  apiClient: import("../helpers/api-client").ApiClient,
+  seed: Seed & { agentProfileId: string; repositoryId: string },
+  name: string,
+) {
+  const automation = await apiClient.seedAutomation({
+    workspaceId: seed.workspaceId,
+    name,
+    workflowId: seed.workflowId,
+    workflowStepId: seed.startStepId,
+    prompt: STANDING_INSTRUCTION,
+    agentProfileId: seed.agentProfileId,
+  });
+  const task = await apiClient.createTaskWithAgent(
+    seed.workspaceId,
+    `${name} — running task`,
+    seed.agentProfileId,
+    {
+      description: "/sleep 30",
+      workflow_id: seed.workflowId,
+      workflow_step_id: seed.startStepId,
+      repository_ids: [seed.repositoryId],
+    },
+  );
+  await apiClient.setTaskOrigin(task.id, "automation_run");
+  await expect
+    .poll(
+      async () => {
+        const { sessions } = await apiClient.listTaskSessions(task.id);
+        return sessions.find((session) => session.id === task.session_id)?.state;
+      },
+      { timeout: 30_000 },
+    )
+    .toBe("RUNNING");
+  const run = await apiClient.seedAutomationRun(automation.id, "task_created", task.id);
+  expect(run.session_id).not.toBe("");
+  expect(run.turn_id).not.toBe("");
+  return automation;
+}
+
 test.describe("Automation detail on mobile", () => {
   test("shows the runs in a drawer rather than a rail", async ({
     testPage,
@@ -158,6 +198,35 @@ test.describe("Automation detail on mobile", () => {
     await runNow.click();
     // Firing reports what happened — a fire or a skip — rather than going quiet.
     await expect(testPage.getByText(/Triggered|Skipped/)).toBeVisible({ timeout: 15_000 });
+  });
+
+  test("stops the selected running run from the drawer header", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const automation = await seedOpenRun(apiClient, seedData, "Mobile Exact Stop");
+    await openDetail(testPage, automation.id);
+
+    await testPage.getByTestId("runs-drawer-trigger").click();
+    const running = testPage.getByTestId("run-group-running");
+    await expect(running).toBeVisible({ timeout: 10_000 });
+    await running.getByRole("button").first().click();
+
+    const stop = testPage.getByRole("button", { name: "Stop current run" });
+    await expect(stop).toBeVisible({ timeout: 10_000 });
+    const box = await stop.boundingBox();
+    const width = testPage.viewportSize()?.width ?? 0;
+    expect(box, "stop action should have a box").not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+
+    await stop.click();
+    // Selecting a run closes the mobile drawer; the selected-run header is
+    // therefore the terminal-state surface after the stop.
+    await expect(testPage.getByText("Failed", { exact: true }).first()).toBeVisible({
+      timeout: 15_000,
+    });
   });
 
   test("does not scroll sideways with a transcript mounted", async ({

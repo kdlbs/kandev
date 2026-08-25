@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
@@ -199,6 +201,11 @@ func (m *Manager) resolveModelConfigFlight(
 		if isAuthError(resp.Error) {
 			resolution.Status = StatusAuthRequired
 		}
+		m.log.Warn("model config resolution failed",
+			zap.String("agent_type", agentType),
+			zap.String("model", req.Model),
+			zap.String("status", string(resolution.Status)),
+			zap.String("error", resp.Error))
 		return resolution, nil
 	}
 

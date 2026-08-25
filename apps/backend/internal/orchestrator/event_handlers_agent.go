@@ -1689,7 +1689,7 @@ func (s *Service) handleRecoverableFailureLocked(ctx context.Context, data watch
 	// working" and the topbar spinner clears. Kanban / quick-chat tasks
 	// keep the legacy WAITING_FOR_INPUT path so the user can resume via
 	// the Resume / Start fresh recovery buttons in the existing chat
-	// surface. (See docs/specs/office-agent-error-handling.)
+	// surface. (See docs/specs/office/requirements/runtime.md.)
 	nextState := models.TaskSessionStateWaitingForInput
 	if s.isOfficeSession(ctx, data.SessionID) {
 		nextState = models.TaskSessionStateFailed

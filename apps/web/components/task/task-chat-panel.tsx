@@ -15,7 +15,6 @@ import {
   getLastUserMessageId,
   getFirstUserMessageId,
   resolveLastPromptControls,
-  shouldLoadMoreForTranscriptTarget,
 } from "@/components/task/chat/message-list-shared";
 import { AnchoredLastPromptBar } from "@/components/task/chat/anchored-last-prompt-bar";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
@@ -40,16 +39,6 @@ import { useTranslation } from "react-i18next";
 import { TaskChatLaunchError } from "./simple/components/task-chat-launch-error";
 import { useTaskLaunchErrorContext } from "./task-launch-error-context";
 import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
-
-/**
- * Cap on how many extra pages the last-prompt background lookup will fetch
- * (see the `lastPromptLookupPagesRef` effect below) before giving up and
- * falling back to the transcript's manual "Load older messages" pagination.
- * 3 pages of 20 covers a long single agent turn without silently draining
- * an entire long-lived conversation that happens to have no recent user
- * message at all.
- */
-const MAX_LAST_PROMPT_LOOKUP_PAGES = 3;
 
 /** Returns a `clarificationKey` that increments each time a pending
  * clarification is resolved, letting the composer reset its input state for
@@ -449,7 +438,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   const [isFirstMessageHidden, setIsFirstMessageHidden] = useState(false);
   const showScrollToStartButton =
     showScrollToStart && Boolean(firstMessageId) && isFirstMessageHidden;
-  const { loadMore, hasMore, isLoadingMore } = useLazyLoadMessages(resolvedSessionId);
+  const { loadMoreRaw, hasMore } = useLazyLoadMessages(resolvedSessionId);
   // A paginated session's `firstMessageId` only reflects the oldest message in
   // the currently loaded page while `hasMore` is true — jumping there directly
   // lands on a partial-page boundary, not the transcript's real start. Drain
@@ -474,44 +463,8 @@ export const TaskChatPanel = memo(function TaskChatPanel({
       messageListRef.current?.scrollToMessage(firstMessageId, { align: "start" });
     }
   }, [hasMore, firstMessageId]);
-  // Bounded background lookup: the last prompt is usually within a page or
-  // two of a long single agent turn, but a session with no recent user
-  // message at all (e.g. hours of tool-only activity) would otherwise drain
-  // its *entire* history just to power this convenience affordance. Stop
-  // after a handful of pages and fall back to the manual "Load older
-  // messages" pagination the transcript already offers.
-  const lastPromptLookupPagesRef = useRef(0);
-  useEffect(() => {
-    lastPromptLookupPagesRef.current = 0;
-  }, [resolvedSessionId]);
-  useEffect(() => {
-    if (lastPromptMessageId !== null) {
-      lastPromptLookupPagesRef.current = 0;
-      return;
-    }
-    // Never start an older-page lookup against a stale SSR cursor while the
-    // session's initial/refetch load is in flight: both writes independently
-    // update hasMore/oldestCursor, and completion order could regress the
-    // pagination metadata.
-    if (
-      messagesLoading ||
-      isLoadingMore ||
-      lastPromptLookupPagesRef.current >= MAX_LAST_PROMPT_LOOKUP_PAGES
-    )
-      return;
-    if (!shouldLoadMoreForTranscriptTarget("last_prompt", allMessages, hasMore)) return;
-    lastPromptLookupPagesRef.current += 1;
-    void loadMore();
-  }, [
-    allMessages,
-    hasMore,
-    isLoadingMore,
-    loadMore,
-    lastPromptMessageId,
-    messagesLoading,
-    resolvedSessionId,
-  ]);
-  const search = useSessionSearch(resolvedSessionId, loadMore);
+  // Search can target backend rows before the visible transcript boundary.
+  const search = useSessionSearch(resolvedSessionId, loadMoreRaw);
   const { label: agentLabel, name: agentName } = useSessionAgentIdentity(resolvedSessionId);
   usePanelSearch({
     containerRef: panelRef,

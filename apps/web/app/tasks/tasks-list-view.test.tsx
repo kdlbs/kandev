@@ -14,6 +14,9 @@ import { TasksListView, type TasksListViewProps } from "./tasks-list-view";
 
 afterEach(cleanup);
 
+const PLUGIN_TAGS_FACET = "facet:plugin:tags";
+const TASKS_LIST_SECTION = "tasks-list-section";
+
 function message(overrides: Partial<Message>): Message {
   return {
     id: "msg-1",
@@ -127,6 +130,113 @@ describe("TasksListView row — destructive-action guard", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Delete task" }));
     expect(screen.queryByTestId("still-working-warning")).not.toBeNull();
+  });
+});
+
+describe("TasksListView facet grouping", () => {
+  it("keeps a plugin value named untagged separate from the generated ungrouped section", () => {
+    const tagged = makeTask({ id: toTaskId("tagged") });
+    const untagged = makeTask({ id: toTaskId("untagged") });
+
+    render(
+      <StateProvider initialState={{ messages: { bySession: {}, metaBySession: {} } }}>
+        <TooltipProvider>
+          <TasksListView
+            {...props([tagged, untagged])}
+            tasksListGroup={PLUGIN_TAGS_FACET}
+            facetValues={{
+              "facet:plugin:tags:tagged": [{ value: "untagged", label: "Custom untagged" }],
+            }}
+          />
+        </TooltipProvider>
+      </StateProvider>,
+    );
+
+    expect(screen.getAllByTestId(TASKS_LIST_SECTION)).toHaveLength(2);
+  });
+
+  it("keeps the host fallback separate from any plugin value", () => {
+    const tagged = makeTask({ id: toTaskId("tagged") });
+    const untagged = makeTask({ id: toTaskId("untagged") });
+
+    render(
+      <StateProvider initialState={{ messages: { bySession: {}, metaBySession: {} } }}>
+        <TooltipProvider>
+          <TasksListView
+            {...props([tagged, untagged])}
+            tasksListGroup={PLUGIN_TAGS_FACET}
+            facetValues={{
+              "facet:plugin:tags:tagged": [
+                { value: "__host_ungrouped__", label: "Custom host value" },
+              ],
+            }}
+          />
+        </TooltipProvider>
+      </StateProvider>,
+    );
+
+    expect(screen.getAllByTestId(TASKS_LIST_SECTION)).toHaveLength(2);
+  });
+
+  // A wrapping section label used to squeeze the flex sibling swatch down to
+  // ~1px wide, which erased the plugin's colour coding exactly when the label
+  // was long enough to need it.
+  it("keeps the colour swatch from shrinking when a long facet label wraps", () => {
+    const tagged = makeTask({ id: toTaskId("tagged") });
+
+    render(
+      <StateProvider initialState={{ messages: { bySession: {}, metaBySession: {} } }}>
+        <TooltipProvider>
+          <TasksListView
+            {...props([tagged])}
+            tasksListGroup={PLUGIN_TAGS_FACET}
+            facetValues={{
+              "facet:plugin:tags:tagged": [
+                { value: "long", label: "A very long facet label".repeat(6), color: "#0ea5e9" },
+              ],
+            }}
+          />
+        </TooltipProvider>
+      </StateProvider>,
+    );
+
+    const swatch = screen
+      .getByTestId(TASKS_LIST_SECTION)
+      .querySelector('span[style*="background-color"]');
+    expect(swatch).not.toBeNull();
+    expect(swatch?.classList.contains("shrink-0")).toBe(true);
+  });
+
+  it("groups a task under every facet value it carries", () => {
+    const multi = makeTask({ id: toTaskId("multi") });
+    const single = makeTask({ id: toTaskId("single") });
+
+    render(
+      <StateProvider initialState={{ messages: { bySession: {}, metaBySession: {} } }}>
+        <TooltipProvider>
+          <TasksListView
+            {...props([multi, single])}
+            tasksListGroup={PLUGIN_TAGS_FACET}
+            facetValues={{
+              "facet:plugin:tags:multi": [
+                { value: "alpha", label: "Alpha" },
+                { value: "beta", label: "Beta" },
+              ],
+              "facet:plugin:tags:single": [{ value: "beta", label: "Beta" }],
+            }}
+          />
+        </TooltipProvider>
+      </StateProvider>,
+    );
+
+    const titles = screen
+      .getAllByTestId(TASKS_LIST_SECTION)
+      .map((section) => section.textContent ?? "");
+    expect(titles).toHaveLength(2);
+    expect(titles[0]).toContain("Alpha");
+    expect(titles[0]).toContain("1");
+    expect(titles[1]).toContain("Beta");
+    expect(titles[1]).toContain("2");
   });
 });
 

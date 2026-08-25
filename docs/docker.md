@@ -30,7 +30,7 @@ Two flavors are published. The default vanilla image is smallest and bundles npm
 docker pull ghcr.io/kdlbs/kandev:universal
 ```
 
-See [`images.md`](./images.md) for the full comparison, inclusion policy, and recipes for deriving your own image.
+See [`images.md`](images.md) for the full comparison, inclusion policy, and recipes for deriving your own image.
 
 ## Building from Source
 
@@ -97,7 +97,7 @@ docker run -p 38429:38429 \
 
 ### Environment Variables
 
-See [`configuration.md`](./configuration.md) for the full reference (including the YAML form and every knob the backend reads). The table below covers the env vars most often set in a Docker deployment.
+See [`configuration.md`](configuration.md) for the full reference (including the YAML form and every knob the backend reads). The table below covers the env vars most often set in a Docker deployment.
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
@@ -281,17 +281,21 @@ The volume at `/data` carries over the database, worktrees, npm globals, and `$H
 
 ## Health Check
 
-The backend exposes a `/health` endpoint:
+The backend exposes a `/health` endpoint (liveness: the process is up and its listener is
+bound, even mid-startup) and a `/ready` endpoint (readiness: startup finished and it can
+serve real traffic):
 
 ```bash
 curl http://localhost:38429/health
+curl http://localhost:38429/ready
 ```
 
-For Docker health checks in compose:
+Compose's single `healthcheck:` concept maps to "can serve real traffic," so it should
+point at `/ready`, not `/health`:
 
 ```yaml
 healthcheck:
-  test: ["CMD", "curl", "-f", "http://localhost:38429/health"]
+  test: ["CMD", "curl", "-f", "http://localhost:38429/ready"]
   interval: 30s
   timeout: 5s
   retries: 3

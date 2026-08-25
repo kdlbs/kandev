@@ -8,7 +8,7 @@ depends_on:
   - "02-isolate-replaceable-session-delivery"
   - "03-bound-frontend-stream-work"
 plan: "plan.md"
-spec: "../../specs/platform/bounded-task-status-delivery.md"
+spec: "../../specs/platform/requirements/bounded-task-status-delivery.md"
 ---
 
 # Task 04: Prove Overload Containment

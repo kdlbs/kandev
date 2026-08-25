@@ -5,7 +5,7 @@ status: pending
 wave: 7
 depends_on: ["05-responsive-mcp-status-surface", "06-acpdbg-sentinel-probe", "07-responsive-status-e2e"]
 plan: "plan.md"
-spec: "../../specs/mcp-session-observability/spec.md"
+spec: "../../specs/platform/requirements/mcp-session-observability.md"
 ---
 
 # Task 08: Document release troubleshooting

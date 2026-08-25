@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/github-pr-merge-queue/spec.md"
+spec: "../../specs/integrations/requirements/github-pr-merge-queue.md"
 ---
 
 # Task 01: Backend queue-state projection

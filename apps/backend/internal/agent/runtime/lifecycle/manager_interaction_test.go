@@ -39,23 +39,27 @@ func (r *restartProfileResolver) ResolveProfile(_ context.Context, _ string) (*A
 type restartMockAgentctlServer struct {
 	server *httptest.Server
 
-	mu          sync.Mutex
-	httpActions []string
-	wsActions   []string
-	setModelIDs []string
-	setModeIDs  []string
-	setOptions  []restartConfigOption
+	mu                 sync.Mutex
+	httpActions        []string
+	repairPackageSpecs []string
+	wsActions          []string
+	setModelIDs        []string
+	setModeIDs         []string
+	setOptions         []restartConfigOption
 
 	failStop           bool
 	failSessionNew     bool
 	failSessionReset   bool
+	failCacheRepair    bool
 	failMode           bool
 	failModel          bool
 	failConfigOptionID string
+	stderrLines        []string
 	modelState         *streams.SessionModelState
 	newModelState      *streams.SessionModelState
 	onReset            func()
 	onSessionNew       func()
+	onCacheRepair      func()
 }
 
 type restartConfigOption struct {
@@ -116,6 +120,24 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 		m.recordHTTP("stop")
 		if m.failStop {
 			_, _ = w.Write([]byte(`{"success":false,"error":"stop failed"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"success":true}`))
+	})
+	mux.HandleFunc("/api/v1/agent/managed-runtime/cache-repair", func(w http.ResponseWriter, r *http.Request) {
+		m.recordHTTP("cache-repair")
+		var request agentctl.RepairManagedRuntimeCacheRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err == nil {
+			m.mu.Lock()
+			m.repairPackageSpecs = append(m.repairPackageSpecs, request.PackageSpec)
+			m.mu.Unlock()
+		}
+		if m.onCacheRepair != nil {
+			m.onCacheRepair()
+		}
+		if m.failCacheRepair {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"success":false}`))
 			return
 		}
 		_, _ = w.Write([]byte(`{"success":true}`))
@@ -229,11 +251,15 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 					})
 				}
 			case "agent.stderr":
-				resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-					"lines": []string{
+				stderrLines := m.stderrLines
+				if len(stderrLines) == 0 {
+					stderrLines = []string{
 						"npm error code ETARGET",
 						"npm error notarget No matching version found for opencode-ai@1.2.3",
-					},
+					}
+				}
+				resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+					"lines": stderrLines,
 				})
 			default:
 				resp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnknownAction, "unknown action", nil)
@@ -306,6 +332,14 @@ func (m *restartMockAgentctlServer) getHTTPActions() []string {
 	defer m.mu.Unlock()
 	out := make([]string, len(m.httpActions))
 	copy(out, m.httpActions)
+	return out
+}
+
+func (m *restartMockAgentctlServer) getManagedRuntimeRepairSpecs() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]string, len(m.repairPackageSpecs))
+	copy(out, m.repairPackageSpecs)
 	return out
 }
 

@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["03-layout-settings-editor", "04-workbench-default-integration"]
 plan: "plan.md"
-spec: "../../specs/ui/task-layout-profiles.md"
+spec: "../../specs/ui/requirements/task-layout-profiles.md"
 ---
 
 # Task 05: E2E, Docs, And Verification

@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/agents/runtime-updates.md
+spec: docs/specs/agents/requirements/runtime-updates.md
 created: 2026-08-22
 status: complete
 ---

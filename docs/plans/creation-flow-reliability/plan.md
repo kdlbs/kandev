@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/workspaces/creation.md
+spec: docs/specs/workspaces/requirements/creation.md
 created: 2026-07-23
 status: implemented
 ---

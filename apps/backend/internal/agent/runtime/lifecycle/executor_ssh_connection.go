@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -19,11 +20,13 @@ import (
 
 const sshDialTimeout = 30 * time.Second
 
+var sshSystemConfigPath = filepath.Join(string(filepath.Separator), "etc", "ssh", "ssh_config")
+
 // SSHIdentitySource enumerates how kandev obtains an SSH credential.
 type SSHIdentitySource string
 
 const (
-	SSHIdentitySourceAgent SSHIdentitySource = "agent" // use SSH_AUTH_SOCK
+	SSHIdentitySourceAgent SSHIdentitySource = "agent" // use IdentityAgent or SSH_AUTH_SOCK
 	SSHIdentitySourceFile  SSHIdentitySource = "file"  // explicit IdentityFile path
 )
 
@@ -34,7 +37,9 @@ type SSHTarget struct {
 	User           string            // resolved User
 	IdentitySource SSHIdentitySource // agent | file
 	IdentityFile   string            // path when IdentitySource=file
+	IdentityAgent  string            // resolved agent socket override from ssh_config
 	ProxyJump      string            // optional bastion (single hop)
+	OriginalHost   string            // original alias/host, for OpenSSH %n/%k expansion
 
 	// PinnedFingerprint is the SHA256 fingerprint the user trusted in settings.
 	// Empty means "first connect / test mode" — accept any key and return what we saw.
@@ -67,7 +72,9 @@ type SSHConnConfig struct {
 func ResolveSSHTarget(cfg SSHConnConfig) (*SSHTarget, error) {
 	t := initialTargetFromConfig(cfg)
 	if alias := strings.TrimSpace(cfg.HostAlias); alias != "" {
-		inheritFromSSHConfig(alias, t)
+		if err := inheritFromSSHConfig(alias, t); err != nil {
+			return nil, err
+		}
 	}
 	if err := applyTargetDefaults(t); err != nil {
 		return nil, err
@@ -79,6 +86,10 @@ func ResolveSSHTarget(cfg SSHConnConfig) (*SSHTarget, error) {
 // initialTargetFromConfig copies form values into a partially populated target.
 // All fields are trimmed; SSH-config inheritance and final defaults are applied later.
 func initialTargetFromConfig(cfg SSHConnConfig) *SSHTarget {
+	originalHost := strings.TrimSpace(cfg.HostAlias)
+	if originalHost == "" {
+		originalHost = strings.TrimSpace(cfg.Host)
+	}
 	return &SSHTarget{
 		Host:           strings.TrimSpace(cfg.Host),
 		Port:           cfg.Port,
@@ -86,6 +97,7 @@ func initialTargetFromConfig(cfg SSHConnConfig) *SSHTarget {
 		IdentitySource: cfg.IdentitySource,
 		IdentityFile:   strings.TrimSpace(cfg.IdentityFile),
 		ProxyJump:      strings.TrimSpace(cfg.ProxyJump),
+		OriginalHost:   originalHost,
 	}
 }
 
@@ -96,8 +108,8 @@ func initialTargetFromConfig(cfg SSHConnConfig) *SSHTarget {
 // package's package-level Get/GetStrict use a sync.Once to load the config once
 // per process, which breaks tests (and any user who edits their config) — each
 // resolve should see the current on-disk state.
-func inheritFromSSHConfig(alias string, t *SSHTarget) {
-	cfg := loadUserSSHConfig()
+func inheritFromSSHConfig(alias string, t *SSHTarget) error {
+	cfg := loadEffectiveSSHConfig()
 	if t.Host == "" {
 		if v := lookupSSHConfig(cfg, alias, "HostName"); v != "" {
 			t.Host = strings.TrimSpace(v)
@@ -129,17 +141,35 @@ func inheritFromSSHConfig(alias string, t *SSHTarget) {
 			t.ProxyJump = v
 		}
 	}
+	// IdentityAgent refines agent selection and therefore applies even when
+	// the create form explicitly selected "agent". An explicit file source
+	// remains authoritative.
+	if t.IdentitySource != SSHIdentitySourceFile {
+		t.IdentityAgent = strings.TrimSpace(lookupSSHConfig(cfg, alias, "IdentityAgent"))
+	}
+	return nil
 }
 
-// loadUserSSHConfig parses $HOME/.ssh/config on demand. Returns nil if the
-// file is absent or unreadable; lookupSSHConfig handles a nil config by
-// returning the empty string.
-func loadUserSSHConfig() *ssh_config.Config {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
+type effectiveSSHConfig struct {
+	user   *ssh_config.Config
+	system *ssh_config.Config
+}
+
+// loadEffectiveSSHConfig parses both user and system config on every resolve.
+// User values win, matching OpenSSH's first-obtained-value behavior.
+func loadEffectiveSSHConfig() effectiveSSHConfig {
+	home, _ := os.UserHomeDir()
+	return effectiveSSHConfig{
+		user:   loadSSHConfigFile(filepath.Join(home, ".ssh", "config")),
+		system: loadSSHConfigFile(sshSystemConfigPath),
+	}
+}
+
+func loadSSHConfigFile(path string) *ssh_config.Config {
+	if path == "" {
 		return nil
 	}
-	f, err := os.Open(filepath.Join(home, ".ssh", "config"))
+	f, err := os.Open(path)
 	if err != nil {
 		return nil
 	}
@@ -151,20 +181,22 @@ func loadUserSSHConfig() *ssh_config.Config {
 	return cfg
 }
 
-func lookupSSHConfig(cfg *ssh_config.Config, alias, key string) string {
-	if cfg == nil {
-		return ""
+func lookupSSHConfig(cfg effectiveSSHConfig, alias, key string) string {
+	for _, candidate := range []*ssh_config.Config{cfg.user, cfg.system} {
+		if candidate == nil {
+			continue
+		}
+		v, err := candidate.Get(alias, key)
+		if err == nil && v != "" {
+			return v
+		}
 	}
-	v, err := cfg.Get(alias, key)
-	if err != nil {
-		return ""
-	}
-	return v
+	return ""
 }
 
 // applyTargetDefaults fills in port/user/identity defaults and validates that
-// host is set. Identity defaults: ssh-agent if SSH_AUTH_SOCK is set, otherwise
-// fall back to ~/.ssh/id_ed25519.
+// host is set. Identity defaults: ssh-agent if IdentityAgent or SSH_AUTH_SOCK
+// selects a socket, otherwise fall back to ~/.ssh/id_ed25519.
 func applyTargetDefaults(t *SSHTarget) error {
 	if t.Host == "" {
 		return errors.New("ssh: host is required")
@@ -180,7 +212,7 @@ func applyTargetDefaults(t *SSHTarget) error {
 		t.User = current
 	}
 	if t.IdentitySource == "" {
-		if os.Getenv("SSH_AUTH_SOCK") != "" {
+		if t.IdentityAgent != "" || os.Getenv("SSH_AUTH_SOCK") != "" {
 			t.IdentitySource = SSHIdentitySourceAgent
 		} else {
 			t.IdentitySource = SSHIdentitySourceFile
@@ -189,6 +221,12 @@ func applyTargetDefaults(t *SSHTarget) error {
 	}
 	if t.IdentitySource == SSHIdentitySourceFile {
 		t.IdentityFile = expandHome(t.IdentityFile)
+	} else if t.IdentityAgent != "" && !strings.EqualFold(t.IdentityAgent, "none") {
+		expanded, err := expandIdentityAgent(t.IdentityAgent, t)
+		if err != nil {
+			return fmt.Errorf("ssh: expand IdentityAgent %q: %w", t.IdentityAgent, err)
+		}
+		t.IdentityAgent = expanded
 	}
 	return nil
 }
@@ -206,6 +244,109 @@ func expandHome(p string) string {
 		return home
 	}
 	return filepath.Join(home, p[2:])
+}
+
+// expandIdentityAgent implements OpenSSH IdentityAgent tilde, percent-token,
+// ${VAR}, and legacy whole-value $VAR expansion.
+func expandIdentityAgent(value string, t *SSHTarget) (string, error) {
+	tokens, err := identityAgentTokens(t)
+	if err != nil {
+		return "", err
+	}
+	value, err = expandIdentityAgentPercentTokens(expandHome(value), tokens)
+	if err != nil {
+		return "", err
+	}
+	value, err = expandIdentityAgentEnvironment(value)
+	if err != nil {
+		return "", err
+	}
+	if strings.HasPrefix(value, "$") {
+		name := value[1:]
+		if name == "" || strings.ContainsAny(name, "/{}") {
+			return "", fmt.Errorf("invalid legacy environment variable %q", value)
+		}
+		socket, ok := os.LookupEnv(name)
+		if !ok || socket == "" {
+			return "", fmt.Errorf("environment variable %s is not set", name)
+		}
+		return socket, nil
+	}
+	if value == "SSH_AUTH_SOCK" {
+		return os.Getenv("SSH_AUTH_SOCK"), nil
+	}
+	return value, nil
+}
+
+func identityAgentTokens(t *SSHTarget) (map[byte]string, error) {
+	localUser, err := user.Current()
+	if err != nil {
+		return nil, fmt.Errorf("local user: %w", err)
+	}
+	fullHost, err := os.Hostname()
+	if err != nil {
+		return nil, fmt.Errorf("local hostname: %w", err)
+	}
+	original := t.OriginalHost
+	if original == "" {
+		original = t.Host
+	}
+	return map[byte]string{
+		'%': "%", 'd': localUser.HomeDir, 'h': t.Host, 'i': localUser.Uid,
+		'j': t.ProxyJump, 'k': original, 'L': strings.SplitN(fullHost, ".", 2)[0], 'l': fullHost,
+		'n': original, 'p': strconv.Itoa(t.Port), 'r': t.User, 'u': localUser.Username,
+	}, nil
+}
+
+func expandIdentityAgentPercentTokens(value string, tokens map[byte]string) (string, error) {
+	var out strings.Builder
+	for i := 0; i < len(value); i++ {
+		if value[i] != '%' {
+			out.WriteByte(value[i])
+			continue
+		}
+		if i+1 == len(value) {
+			return "", errors.New("trailing % token")
+		}
+		i++
+		replacement, ok := tokens[value[i]]
+		if !ok {
+			return "", fmt.Errorf("unsupported token %%%c", value[i])
+		}
+		out.WriteString(replacement)
+	}
+	return out.String(), nil
+}
+
+func expandIdentityAgentEnvironment(value string) (string, error) {
+	// Scan the original value only. Environment contents can contain `${...}`
+	// text, but that text is replacement data, not another expression to expand.
+	var out strings.Builder
+	for cursor := 0; cursor < len(value); {
+		relativeStart := strings.Index(value[cursor:], "${")
+		if relativeStart == -1 {
+			out.WriteString(value[cursor:])
+			break
+		}
+		start := cursor + relativeStart
+		out.WriteString(value[cursor:start])
+		endRel := strings.IndexByte(value[start+2:], '}')
+		if endRel == -1 {
+			return "", errors.New("unterminated environment variable")
+		}
+		end := start + 2 + endRel
+		name := value[start+2 : end]
+		if name == "" {
+			return "", errors.New("empty environment variable name")
+		}
+		env, ok := os.LookupEnv(name)
+		if !ok {
+			return "", fmt.Errorf("environment variable %s is not set", name)
+		}
+		out.WriteString(env)
+		cursor = end + 1
+	}
+	return out.String(), nil
 }
 
 // SSHFingerprint returns the SHA256 fingerprint of a host key in the
@@ -237,13 +378,19 @@ func buildAuthMethods(target *SSHTarget) ([]ssh.AuthMethod, func(), error) {
 	noop := func() {}
 	switch target.IdentitySource {
 	case SSHIdentitySourceAgent:
-		sock := os.Getenv("SSH_AUTH_SOCK")
+		if strings.EqualFold(target.IdentityAgent, "none") {
+			return nil, noop, errors.New("ssh-agent identity source selected but IdentityAgent is set to none")
+		}
+		sock := target.IdentityAgent
 		if sock == "" {
-			return nil, noop, errors.New("ssh-agent identity source selected but SSH_AUTH_SOCK is not set; start an agent and add your key (ssh-add)")
+			sock = os.Getenv("SSH_AUTH_SOCK")
+		}
+		if sock == "" {
+			return nil, noop, errors.New("ssh-agent identity source selected but SSH_AUTH_SOCK is not set and IdentityAgent did not resolve to a socket; start an agent and add your key (ssh-add)")
 		}
 		conn, err := net.Dial("unix", sock)
 		if err != nil {
-			return nil, noop, fmt.Errorf("failed to connect to ssh-agent: %w", err)
+			return nil, noop, fmt.Errorf("failed to connect to ssh-agent at %s: %w", sock, err)
 		}
 		ag := agent.NewClient(conn)
 		cleanup := func() { _ = conn.Close() }
@@ -455,7 +602,7 @@ func tofuLogOnlyCallback(proxyJump, _ string) ssh.HostKeyCallback {
 // resolveBastion turns the target's ProxyJump value into a connection
 // SSHTarget. Two accepted shapes:
 //
-//   - alias: looked up in ~/.ssh/config (HostName / Port / User / IdentityFile)
+//   - alias: resolved from effective OpenSSH config (HostName / Port / User / IdentityAgent / IdentityFile)
 //   - literal "[user@]host[:port]": parsed inline, no config lookup
 //
 // The literal form has no Host block to inherit from, so passing it straight
@@ -464,19 +611,34 @@ func tofuLogOnlyCallback(proxyJump, _ string) ssh.HostKeyCallback {
 // Identity defaults flow from the target so the same key reaches the bastion.
 func resolveBastion(target *SSHTarget) (*SSHTarget, error) {
 	if user, host, port, ok := parseLiteralProxyJump(target.ProxyJump); ok {
-		return ResolveSSHTarget(SSHConnConfig{
+		bastion, err := ResolveSSHTarget(SSHConnConfig{
 			Host:           host,
 			Port:           port,
 			User:           user,
 			IdentitySource: target.IdentitySource,
 			IdentityFile:   target.IdentityFile,
 		})
+		if err == nil && bastion.IdentitySource == SSHIdentitySourceAgent {
+			bastion.IdentityAgent = target.IdentityAgent
+		}
+		return bastion, err
 	}
-	return ResolveSSHTarget(SSHConnConfig{
-		HostAlias:      target.ProxyJump,
-		IdentitySource: target.IdentitySource,
-		IdentityFile:   target.IdentityFile,
-	})
+
+	// A jump alias owns its explicitly configured auth. If it has no auth
+	// directive, retain Kandev's existing target-auth fallback behavior.
+	effective := loadEffectiveSSHConfig()
+	hasJumpIdentity := lookupSSHConfig(effective, target.ProxyJump, "IdentityFile") != "" ||
+		lookupSSHConfig(effective, target.ProxyJump, "IdentityAgent") != ""
+	cfg := SSHConnConfig{HostAlias: target.ProxyJump}
+	if !hasJumpIdentity {
+		cfg.IdentitySource = target.IdentitySource
+		cfg.IdentityFile = target.IdentityFile
+	}
+	bastion, err := ResolveSSHTarget(cfg)
+	if err == nil && !hasJumpIdentity && bastion.IdentitySource == SSHIdentitySourceAgent {
+		bastion.IdentityAgent = target.IdentityAgent
+	}
+	return bastion, err
 }
 
 // parseLiteralProxyJump recognizes a `[user@]host[:port]` ProxyJump literal,

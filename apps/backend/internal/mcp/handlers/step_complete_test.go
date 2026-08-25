@@ -227,6 +227,51 @@ func TestHandleStepComplete_TerminalSessionRejected(t *testing.T) {
 	}
 }
 
+// TestHandleStepComplete_RejectsSignalFromMovedTurn prevents a stale reviewer
+// turn from satisfying the successor Work step after a rejection moves the
+// task back. The completion signal must belong to the step stamped on the
+// turn that called the tool, not only to the task's current step.
+func TestHandleStepComplete_RejectsSignalFromMovedTurn(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	seedStepCompleteTarget(t, repo, "task-moved", "session-moved", "step-review", models.TaskSessionStateRunning)
+
+	turn := &models.Turn{
+		ID:            "turn-review",
+		TaskSessionID: "session-moved",
+		TaskID:        "task-moved",
+		StartedAt:     time.Now().UTC(),
+		CreatedAt:     time.Now().UTC(),
+		UpdatedAt:     time.Now().UTC(),
+	}
+	stamped, err := repo.CreateTurnWithStepStamp(ctx, turn)
+	require.NoError(t, err)
+	require.True(t, stamped, "review turn must carry its launch step stamp")
+
+	task, err := repo.GetTask(ctx, "task-moved")
+	require.NoError(t, err)
+	task.WorkflowStepID = "step-work"
+	require.NoError(t, repo.UpdateTask(ctx, task))
+
+	bus := &mcpRecordingEventBus{}
+	h := newStepCompleteHandler(t, svc, repo, bus)
+	msg := makeWSMessage(t, ws.ActionMCPStepComplete, map[string]interface{}{
+		"task_id":    "task-moved",
+		"session_id": "session-moved",
+		"summary":    "late reviewer signal",
+	})
+
+	resp, err := h.handleStepComplete(ctx, msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+	assert.Empty(t, bus.events, "a signal from a moved turn must not publish")
+
+	session, err := repo.GetTaskSession(ctx, "session-moved")
+	require.NoError(t, err)
+	_, hasSignal := models.LoadPendingStepSignal(session.Metadata)
+	assert.False(t, hasSignal, "a stale reviewer signal must not be persisted")
+}
+
 // TestHandleStepComplete_FirstCallAccepted covers the happy path: bag is
 // written, event is published with the documented payload shape, and the
 // response reports accepted=true with the persisted step_id + signaled_at.

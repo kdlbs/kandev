@@ -5,7 +5,7 @@ status: completed
 wave: 2
 depends_on: ["01-live-permission-contract"]
 plan: "plan.md"
-spec: "../../specs/agents/external-permission-resolution.md"
+spec: "../../specs/agents/requirements/external-permission-resolution.md"
 ---
 
 # Task 02: Permission audit claim

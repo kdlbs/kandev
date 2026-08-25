@@ -12,6 +12,7 @@
 import { test, expect, type SeedData } from "../../fixtures/test-base";
 import type { Page, Locator } from "@playwright/test";
 import type { ApiClient } from "../../helpers/api-client";
+import { dwell } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
 
 async function seedAndOpenSheet(
@@ -63,6 +64,43 @@ async function taskRowOrder(sheet: Locator, taskIds: string[]) {
     if (id && taskIds.includes(id)) order.push(id);
   }
   return order;
+}
+
+async function touchDrag(page: Page, source: Locator, target: Locator): Promise<void> {
+  const sourceBox = await source.boundingBox();
+  const targetBox = await target.boundingBox();
+  expect(sourceBox).not.toBeNull();
+  expect(targetBox).not.toBeNull();
+
+  const client = await page.context().newCDPSession(page);
+  const start = {
+    x: sourceBox!.x + sourceBox!.width / 2,
+    y: sourceBox!.y + sourceBox!.height / 2,
+  };
+  const end = {
+    x: targetBox!.x + targetBox!.width / 2,
+    y: targetBox!.y + targetBox!.height / 2,
+  };
+  await client.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [{ id: 1, x: start.x, y: start.y }],
+  });
+  await dwell(300, "library-timer", "dnd-kit TouchSensor waits 250ms before activating");
+  for (let step = 1; step <= 12; step += 1) {
+    const progress = step / 12;
+    await client.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [
+        {
+          id: 1,
+          x: start.x + (end.x - start.x) * progress,
+          y: start.y + (end.y - start.y) * progress,
+        },
+      ],
+    });
+  }
+  await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await client.detach();
 }
 
 test.describe("Mobile sidebar — view system", () => {
@@ -150,6 +188,7 @@ test.describe("Mobile sidebar — view system", () => {
     await expect(sheet.getByText("Update deps")).toBeVisible();
 
     await addTitleFilter(testPage, sheet, "auth");
+    const filterEditor = testPage.getByTestId("sidebar-filter-popover");
     // Draft is active — the gear shows its unsaved indicator. Scope to the sheet:
     // the globally-mounted (hidden on mobile) AppSidebar TasksViewPicker renders
     // the same testid, so a page-level query is a strict-mode collision.
@@ -157,6 +196,10 @@ test.describe("Mobile sidebar — view system", () => {
     const blockedNewView = sheet.getByTestId("sidebar-new-view");
     await expect(blockedNewView).toHaveAttribute("aria-disabled", "true");
     await expect(blockedNewView).toHaveAttribute("aria-label", /save or discard changes/i);
+    // The filter editor is a modal drawer on coarse pointers. Close it before
+    // invoking the fixed-bar action underneath it.
+    await testPage.keyboard.press("Escape");
+    await expect(filterEditor).toBeHidden();
     // aria-disabled communicates the blocked state, but this action remains
     // clickable so touch/keyboard users can get the concrete reason toast.
     await blockedNewView.click({ force: true });
@@ -346,6 +389,202 @@ test.describe("Mobile sidebar — view system", () => {
       reloadedSheet.getByTestId("sidebar-view-chip").filter({ hasText: "Mobile last activity" }),
     ).toHaveAttribute("data-active", "true");
     await expect.poll(() => taskRowOrder(reloadedSheet, taskIds)).toEqual(taskIds);
+  });
+
+  test("keeps mobile section labels clear of separator lines", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const sheet = await seedAndOpenSheet(testPage, apiClient, seedData, [
+      "Mobile separator spacing",
+    ]);
+    await sheet.getByTestId("sidebar-filter-gear").click();
+
+    const popover = testPage.getByTestId("sidebar-filter-popover");
+    await expect(popover).toBeVisible();
+
+    for (const { label, sectionLevel } of [
+      { label: "Filters", sectionLevel: 2 },
+      { label: "Sort", sectionLevel: 1 },
+      { label: "Group by", sectionLevel: 1 },
+    ]) {
+      const heading = popover.getByText(label, { exact: true });
+      const section =
+        sectionLevel === 2 ? heading.locator("..").locator("..") : heading.locator("..");
+      const [headingBox, sectionBox] = await Promise.all([
+        heading.boundingBox(),
+        section.boundingBox(),
+      ]);
+      expect(headingBox).not.toBeNull();
+      expect(sectionBox).not.toBeNull();
+      expect(headingBox!.y).toBeGreaterThan(sectionBox!.y + 3);
+    }
+  });
+
+  test("keeps mobile section separators inside the drawer surface", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const sheet = await seedAndOpenSheet(testPage, apiClient, seedData, [
+      "Mobile separator containment",
+    ]);
+    await sheet.getByTestId("sidebar-filter-gear").tap();
+
+    const drawer = testPage.getByTestId("sidebar-filter-drawer");
+    const popover = testPage.getByTestId("sidebar-filter-popover");
+    await expect(drawer).toBeVisible();
+    await expect(popover).toBeVisible();
+
+    const [drawerBox, popoverBox] = await Promise.all([
+      drawer.boundingBox(),
+      popover.boundingBox(),
+    ]);
+    expect(drawerBox).not.toBeNull();
+    expect(popoverBox).not.toBeNull();
+    expect(popoverBox!.x).toBeGreaterThan(drawerBox!.x);
+    expect(popoverBox!.x + popoverBox!.width).toBeLessThan(drawerBox!.x + drawerBox!.width);
+  });
+
+  test("task row settings use the drawer, touch targets, and persisted preview", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    const taskTitle = "Mobile task row layout";
+    const sheet = await seedAndOpenSheet(testPage, apiClient, seedData, [taskTitle]);
+    const gear = sheet.getByTestId("sidebar-filter-gear");
+    await gear.tap();
+
+    const drawer = testPage.getByTestId("sidebar-filter-drawer");
+    const popover = testPage.getByTestId("sidebar-filter-popover");
+    await expect(drawer).toBeVisible();
+    await expect(popover).toBeVisible();
+    await popover.getByTestId("group-key-select").tap();
+    for (const { label, description } of [
+      { label: "None", description: "Keep all tasks in one list." },
+      { label: "Repository", description: "Separate tasks by repository." },
+      { label: "Workflow", description: "Separate tasks by workflow." },
+      { label: "Workflow step", description: "Separate tasks by workflow step." },
+      { label: "Executor type", description: "Separate tasks by executor type." },
+      { label: "State", description: "Separate tasks by state." },
+    ]) {
+      const option = testPage.getByRole("option", { name: label, exact: true });
+      const descriptionId = await option.getAttribute("aria-describedby");
+      expect(descriptionId).toBeTruthy();
+      await expect(testPage.locator(`[id="${descriptionId}"]`)).toHaveText(description);
+    }
+    await testPage.getByRole("option", { name: "Repository", exact: true }).tap();
+    const settings = popover.getByTestId("task-row-settings");
+    await expect(settings.getByTestId("task-row-details-toggle")).toHaveCount(0);
+    await settings.getByTestId("task-row-settings-toggle").tap();
+    await expect(settings.getByTestId("task-row-details-toggle")).toBeVisible();
+
+    await settings.getByTestId("task-row-trailing-select").tap();
+    for (const { label, description } of [
+      { label: "Git changes", description: "Show added and removed lines." },
+      { label: "Relative time", description: "Show when the task was last updated." },
+      {
+        label: "Change request status",
+        description: "Show the pull request or merge request status.",
+      },
+      { label: "Nothing", description: "Leave the right side empty." },
+    ]) {
+      const option = testPage.getByRole("option", { name: label, exact: true });
+      const descriptionId = await option.getAttribute("aria-describedby");
+      expect(descriptionId).toBeTruthy();
+      await expect(testPage.locator(`[id="${descriptionId}"]`)).toHaveText(description);
+    }
+    await testPage.getByRole("option", { name: "Git changes", exact: true }).tap();
+
+    for (const control of [
+      "task-row-details-toggle",
+      "task-row-detail-handle-relative_time",
+      "task-row-detail-toggle-relative_time",
+    ]) {
+      const box = await settings.getByTestId(control).boundingBox();
+      expect(box?.height).toBeGreaterThanOrEqual(40);
+      expect(box?.width).toBeGreaterThanOrEqual(40);
+    }
+    const trailingSelectBox = await settings.getByTestId("task-row-trailing-select").boundingBox();
+    expect(trailingSelectBox).not.toBeNull();
+    expect(trailingSelectBox!.height).toBeGreaterThanOrEqual(44);
+
+    const pullRequestHandle = settings.getByTestId("task-row-detail-handle-pull_request_number");
+    const relativeTimeHandle = settings.getByTestId("task-row-detail-handle-relative_time");
+    await touchDrag(testPage, pullRequestHandle, relativeTimeHandle);
+    await expect
+      .poll(async () =>
+        settings
+          .locator("div[data-testid^='task-row-detail-']")
+          .evaluateAll((rows) =>
+            rows.map((row) => row.getAttribute("data-testid")?.replace("task-row-detail-", "")),
+          ),
+      )
+      .toEqual(["pull_request_number", "relative_time", "repository"]);
+
+    await settings.getByTestId("task-row-detail-toggle-repository").tap();
+    await settings.getByTestId("task-row-details-toggle").tap();
+    const compactRow = sheet.getByTestId("sidebar-task-item").filter({ hasText: taskTitle });
+    const compactRowBox = await compactRow.boundingBox();
+    const compactTitleBox = await compactRow
+      .getByText(taskTitle, { exact: true })
+      .first()
+      .boundingBox();
+    expect(compactRowBox).not.toBeNull();
+    expect(compactTitleBox).not.toBeNull();
+    expect(
+      Math.abs(
+        compactTitleBox!.y +
+          compactTitleBox!.height / 2 -
+          (compactRowBox!.y + compactRowBox!.height / 2),
+      ),
+    ).toBeLessThanOrEqual(1);
+    await settings.getByTestId("task-row-trailing-select").tap();
+    await testPage.getByRole("option", { name: "Relative time", exact: true }).tap();
+    await popover.getByTestId("view-save-as-button").tap();
+    await popover.getByTestId("view-save-as-name-input").fill("Mobile task rows");
+    await popover.getByTestId("view-save-as-confirm").tap();
+
+    const row = compactRow;
+    await expect(row).toBeVisible();
+    await expect(row.getByTestId("sidebar-task-trailing-time")).toBeVisible();
+    await expect(row.getByTestId("sidebar-task-time")).toHaveCount(0);
+    await prCapture.screenshot("mobile-task-row-settings", {
+      caption: "Mobile task-row settings in the inset bottom drawer",
+    });
+    await expect(popover).toHaveCSS("overflow-y", "auto");
+    const drawerBox = await drawer.boundingBox();
+    const viewport = testPage.viewportSize();
+    expect(drawerBox).not.toBeNull();
+    expect(viewport).not.toBeNull();
+    expect(drawerBox!.x).toBeGreaterThanOrEqual(0);
+    expect(drawerBox!.x + drawerBox!.width).toBeLessThanOrEqual(viewport!.width);
+    expect(
+      await testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+    await testPage.keyboard.press("Escape");
+    await expect(popover).toBeHidden();
+
+    await testPage.reload();
+    await new SessionPage(testPage).waitForLoad();
+    await testPage.getByTestId("mobile-session-menu").tap();
+    const reloadedSheet = testPage.getByRole("dialog", { name: "Tasks" });
+    await expect(
+      reloadedSheet.getByTestId("sidebar-view-chip").filter({ hasText: "Mobile task rows" }),
+    ).toHaveAttribute("data-active", "true");
+    await reloadedSheet.getByTestId("sidebar-filter-gear").tap();
+    const reloadedPopover = testPage.getByTestId("sidebar-filter-popover");
+    await expect(reloadedPopover.getByTestId("task-row-details-toggle")).toHaveCount(0);
+    await reloadedPopover.getByTestId("task-row-settings-toggle").tap();
+    await expect(reloadedPopover.getByTestId("task-row-trailing-select")).toContainText(
+      "Relative time",
+    );
+    await testPage.keyboard.press("Escape");
   });
 
   test("many saved views scroll without covering fixed actions", async ({

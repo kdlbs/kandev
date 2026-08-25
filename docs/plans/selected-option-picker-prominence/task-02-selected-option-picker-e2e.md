@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-selected-option-picker-ui"]
 plan: "plan.md"
-spec: "../../specs/ui/selected-option-picker-prominence.md"
+spec: "../../specs/ui/requirements/selected-option-picker-prominence.md"
 ---
 
 # Task 02: Verify selected picker prominence

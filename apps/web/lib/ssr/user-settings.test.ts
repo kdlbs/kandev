@@ -426,6 +426,12 @@ describe("mapUserSettingsResponse", () => {
       filters: [],
       sort: { key: "updatedAt", direction: "desc" },
       group: "workflow",
+      taskRow: {
+        detailsEnabled: true,
+        detailOrder: ["relative_time", "repository", "pull_request_number"],
+        visibleDetails: ["relative_time", "repository", "pull_request_number"],
+        trailing: "git_changes",
+      },
     });
   });
 });

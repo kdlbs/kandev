@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
-	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentruntime"
@@ -26,6 +25,7 @@ func (m *Manager) managedRuntimeNpmStartupFailure(
 	ctx context.Context,
 	execution *AgentExecution,
 	initErr error,
+	packageSpec string,
 ) *routingerr.Error {
 	if execution == nil || execution.agentctl == nil || initErr == nil {
 		return nil
@@ -37,10 +37,14 @@ func (m *Manager) managedRuntimeNpmStartupFailure(
 		return nil
 	}
 	evidence := strings.Join(lines, "\n")
+	combined := strings.TrimSpace(evidence + "\n" + initErr.Error())
+	if !routingerr.ManagedRuntimeNpmResolutionMatchesPackage(combined, packageSpec) {
+		return nil
+	}
 	return routingerr.Classify(routingerr.Input{
 		Phase:      routingerr.PhaseSessionInit,
 		ProviderID: execution.AgentID,
-		Stderr:     strings.TrimSpace(evidence + "\n" + initErr.Error()),
+		Stderr:     combined,
 	})
 }
 
@@ -52,28 +56,6 @@ func managedRuntimeRecoveryAborted(ctx context.Context, m *Manager) error {
 		return errors.New("managed runtime recovery interrupted by shutdown")
 	}
 	return nil
-}
-
-func invalidateManagedRuntimeExecutionTree(
-	ctx context.Context,
-	invalidator ManagedRuntimeCacheInvalidator,
-	spec agents.ManagedNPMRuntimeSpec,
-	packageSpec string,
-) error {
-	if invalidator == nil {
-		return errors.New("managed runtime cache invalidator is unavailable")
-	}
-	if packageSpec == spec.Package {
-		return invalidator.InvalidateExecutionCache(ctx, spec.Package)
-	}
-	version := strings.TrimPrefix(packageSpec, spec.Package+"@")
-	if version == "" || version == packageSpec {
-		return errors.New("managed runtime package spec is not versioned")
-	}
-	if _, err := managedruntime.ParseStableVersion(version); err != nil {
-		return err
-	}
-	return invalidator.InvalidateExecutionCacheVersion(ctx, spec.Package, version)
 }
 
 func (m *Manager) updateExecutionFailure(executionID, message, code, details string) {
@@ -104,7 +86,6 @@ func (m *Manager) publishManagedRuntimeStartupFailure(
 }
 
 type managedRuntimeStartupRetry struct {
-	managed          agents.ManagedNPMRuntimeAgent
 	preferOnlineArgs []string
 	packageSpec      string
 	failureDetails   string
@@ -136,33 +117,42 @@ func (m *Manager) prepareManagedRuntimeStartupRetry(
 	initErr error,
 	agentConfig agents.Agent,
 ) (*managedRuntimeStartupRetry, bool) {
-	if execution == nil || execution.RuntimeName != agentruntime.RuntimeStandalone || execution.agentctl == nil {
+	if execution == nil || !supportsManagedRuntimeCacheRepair(execution.RuntimeName) || execution.agentctl == nil {
 		return nil, false
 	}
 	managed, ok := agentConfig.(agents.ManagedNPMRuntimeAgent)
-	if !ok || m.managedRuntimeCacheInvalidator == nil {
-		return nil, false
-	}
-	classification := m.managedRuntimeNpmStartupFailure(ctx, execution, initErr)
-	if classification == nil || classification.Code != routingerr.CodeManagedRuntimeNpmResolution {
+	if !ok {
 		return nil, false
 	}
 	preferOnlineArgs, packageSpec, ok := onlineManagedRuntimeArgs(execution.AgentArgs, managed.ManagedNPMRuntime())
 	if !ok {
 		return nil, false
 	}
+	classification := m.managedRuntimeNpmStartupFailure(ctx, execution, initErr, packageSpec)
+	if classification == nil || classification.Code != routingerr.CodeManagedRuntimeNpmResolution {
+		return nil, false
+	}
 	return &managedRuntimeStartupRetry{
-		managed:          managed,
 		preferOnlineArgs: preferOnlineArgs,
 		packageSpec:      packageSpec,
 		failureDetails:   classification.RawExcerpt,
 	}, true
 }
 
-// stopAndInvalidateManagedRuntime stops the failed child and removes only its
-// trusted npm execution tree. needsFailure distinguishes an ordinary repair
-// error from cancellation or shutdown, which must win over recovery.
-func (m *Manager) stopAndInvalidateManagedRuntime(
+func supportsManagedRuntimeCacheRepair(runtime agentruntime.Runtime) bool {
+	switch runtime {
+	case agentruntime.RuntimeStandalone, agentruntime.RuntimeDocker, agentruntime.RuntimeSSH:
+		return true
+	default:
+		return false
+	}
+}
+
+// stopAndRepairManagedRuntime stops the failed child and asks its colocated
+// agentctl process to remove only the trusted npm execution tree.
+// needsFailure distinguishes an ordinary repair error from cancellation or
+// shutdown, which must win over recovery.
+func (m *Manager) stopAndRepairManagedRuntime(
 	ctx context.Context,
 	execution *AgentExecution,
 	retry *managedRuntimeStartupRetry,
@@ -179,8 +169,7 @@ func (m *Manager) stopAndInvalidateManagedRuntime(
 		return false, aborted
 	}
 
-	spec := retry.managed.ManagedNPMRuntime()
-	if err := invalidateManagedRuntimeExecutionTree(ctx, m.managedRuntimeCacheInvalidator, spec, retry.packageSpec); err != nil {
+	if err := execution.agentctl.RepairManagedRuntimeCache(ctx, retry.packageSpec); err != nil {
 		if aborted := managedRuntimeRecoveryAborted(ctx, m); aborted != nil {
 			return false, aborted
 		}
@@ -280,7 +269,7 @@ func (m *Manager) retryManagedRuntimeStartup(
 
 	// Stop only the child process. The agentctl server remains alive so the
 	// same execution can reconnect its streams and retain its identity.
-	if needsFailure, err := m.stopAndInvalidateManagedRuntime(ctx, execution, retry); err != nil {
+	if needsFailure, err := m.stopAndRepairManagedRuntime(ctx, execution, retry); err != nil {
 		if needsFailure {
 			failureCode = routingerr.CodeAgentRuntime
 			failureDetails = routingerr.Sanitize(err.Error())
@@ -313,7 +302,7 @@ func (m *Manager) retryManagedRuntimeStartup(
 		failureCause = retryErr
 		var second *routingerr.Error
 		if initializationFailed {
-			second = m.managedRuntimeNpmStartupFailure(ctx, execution, retryErr)
+			second = m.managedRuntimeNpmStartupFailure(ctx, execution, retryErr, retry.packageSpec)
 		}
 		failureCode, failureDetails = managedRuntimeRetryFailureClassification(
 			failureCode, failureDetails, retryErr, initializationFailed, second,

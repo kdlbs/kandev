@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/routines"
+	"github.com/kandev/kandev/internal/office/shared"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
 
@@ -265,8 +266,12 @@ func TestDispatch_LightweightRoutine_EnqueuesWakeup(t *testing.T) {
 	if got.Source != "routine" {
 		t.Errorf("source = %q, want routine", got.Source)
 	}
-	if got.Reason != "routine_dispatch" {
-		t.Errorf("reason = %q, want routine_dispatch", got.Reason)
+	// FireManual is event/user-triggered, not periodic (WO-46 Review round
+	// 1, Blocker 1): it must get RunReasonRoutineDispatchEvent, never the
+	// cron-only RunReasonRoutineDispatch the idle-skip gate treats as a
+	// skippable periodic wake.
+	if got.Reason != shared.RunReasonRoutineDispatchEvent {
+		t.Errorf("reason = %q, want %q", got.Reason, shared.RunReasonRoutineDispatchEvent)
 	}
 	if !strings.Contains(got.Payload, `"routine_id":"`+routine.ID+`"`) {
 		t.Errorf("payload missing routine_id, got %q", got.Payload)
