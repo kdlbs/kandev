@@ -71,6 +71,9 @@ steps:
     events:
       on_enter:
         - type: clear_decisions
+        - type: ensure_participant_seat
+          config:
+            role: reviewer
         - type: queue_run_for_each_participant
           config:
             role: reviewer
@@ -101,6 +104,9 @@ steps:
     events:
       on_enter:
         - type: clear_decisions
+        - type: ensure_participant_seat
+          config:
+            role: approver
         - type: queue_run_for_each_participant
           config:
             role: approver

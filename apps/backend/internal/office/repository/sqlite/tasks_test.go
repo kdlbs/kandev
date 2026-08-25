@@ -85,7 +85,8 @@ func newSearchTestRepo(t *testing.T) *sqlite.Repository {
 			role TEXT NOT NULL DEFAULT '',
 			agent_profile_id TEXT NOT NULL DEFAULT '',
 			decision_required INTEGER NOT NULL DEFAULT 0,
-			position INTEGER NOT NULL DEFAULT 0
+			position INTEGER NOT NULL DEFAULT 0,
+			created_at TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00'
 		)
 	`); err != nil {
 		t.Fatalf("create workflow_step_participants table: %v", err)

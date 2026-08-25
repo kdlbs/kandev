@@ -174,6 +174,7 @@ func (e *Engine) computeGuardOutcome(ctx context.Context, state MachineState, gu
 		return GuardOutcome{Reason: ReasonEvaluationError, Err: fmt.Errorf("build required slate for quorum: %w", err)}
 	}
 	if len(seats) == 0 {
+		e.recordQuorumSlateEmpty(state.TaskID, state.CurrentStepID, guard.Role)
 		return GuardOutcome{Reason: ReasonSlateEmpty}
 	}
 	decisions, err := e.decisions.ListStepDecisions(ctx, state.TaskID, state.CurrentStepID)
@@ -208,7 +209,88 @@ func (e *Engine) requiredSeatsForWorkflow(ctx context.Context, stepID, taskID, w
 	}
 
 	canonical := canonicalizeByTaskRoleAgent(filtered, stepID)
-	return collapseByRoleAgent(canonical), nil
+	seats := collapseByRoleAgent(canonical)
+	return e.dropUnresolvedAgentSeats(ctx, taskID, stepID, role, seats)
+}
+
+// dropUnresolvedAgentSeats implements AC-OFFICE-REVIEW-SEATS-004.3: a seat
+// whose agent profile has been deleted since the seat was cast is removed
+// from the required slate, so the guard does not wait forever on an agent
+// that can never decide, and continues evaluating the remaining seats rather
+// than failing. Its removal is announced through a warning record and a
+// counter (AC-004.8) instead of just shrinking the slate silently. When no
+// AgentProfileResolver is wired, every seat is kept unchanged — matching
+// every other optional Engine dependency's nil-safe default.
+//
+// collapseByRoleAgent already guarantees at most one seat per (role, agent
+// profile id) pair here, and this function is scoped to one role and called
+// once per guard evaluation, so at most one record is emitted per role and
+// unresolved agent per evaluation (AC-004.10) without extra dedup state.
+//
+// A resolver error is not the same condition as a confirmed deletion — it
+// means the resolver could not answer, not that it answered "gone" — so it
+// propagates as a slate-construction error (ReasonEvaluationError in
+// computeGuardOutcome) rather than silently dropping the seat.
+func (e *Engine) dropUnresolvedAgentSeats(
+	ctx context.Context, taskID, stepID, role string, seats []ParticipantInfo,
+) ([]ParticipantInfo, error) {
+	if e.agentProfiles == nil {
+		return seats, nil
+	}
+	kept := make([]ParticipantInfo, 0, len(seats))
+	for _, seat := range seats {
+		if seat.AgentProfileID == "" {
+			kept = append(kept, seat)
+			continue
+		}
+		exists, err := e.agentProfiles.AgentProfileExists(ctx, seat.AgentProfileID)
+		if err != nil {
+			return nil, fmt.Errorf("resolve agent profile %s for quorum seat: %w", seat.AgentProfileID, err)
+		}
+		if exists {
+			kept = append(kept, seat)
+			continue
+		}
+		e.recordParticipantAgentUnresolved(taskID, stepID, role, seat.AgentProfileID)
+	}
+	return kept, nil
+}
+
+// recordParticipantAgentUnresolved emits AC-004.3/004.8's warning record and
+// counter for one seat dropped because its agent profile no longer resolves.
+func (e *Engine) recordParticipantAgentUnresolved(taskID, stepID, role, agentProfileID string) {
+	quorummetrics.RecordParticipantAgentUnresolved(role)
+	if e.logger == nil {
+		return
+	}
+	e.logger.Warn("workflow quorum participant agent profile unresolved",
+		zap.String("task_id", taskID),
+		zap.String("step_id", stepID),
+		zap.String("role", role),
+		zap.String("agent_profile_id", agentProfileID),
+	)
+}
+
+// recordQuorumSlateEmpty emits AC-004.2/004.8's warning record and counter
+// for a guard whose required slate for role came back empty — no
+// decision-required seat resolved for that role at this step. Distinct from
+// the generic AC-24 recordGuardNotFired unit, which is emitted once by the
+// call site after evaluateTransitionGuard returns; this one is scoped
+// specifically to the empty-slate condition and carries role as a typed
+// field the generic unit does not always have. computeGuardOutcome calls
+// this at most once per evaluation, satisfying AC-004.10's "at most one
+// record per role per guard evaluation" for this condition without extra
+// dedup state.
+func (e *Engine) recordQuorumSlateEmpty(taskID, stepID, role string) {
+	quorummetrics.RecordQuorumSlateEmpty(role)
+	if e.logger == nil {
+		return
+	}
+	e.logger.Warn("workflow quorum required slate empty",
+		zap.String("task_id", taskID),
+		zap.String("step_id", stepID),
+		zap.String("role", role),
+	)
 }
 
 // gatherParticipantSlate implements AC-50 step 1, shared by the quorum guard

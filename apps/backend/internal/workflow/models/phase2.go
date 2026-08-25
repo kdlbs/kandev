@@ -65,6 +65,12 @@ type WorkflowStepParticipant struct {
 	AgentProfileID   string          `json:"agent_profile_id"`
 	DecisionRequired bool            `json:"decision_required"`
 	Position         int             `json:"position"`
+	// CreatedAt orders same-role candidates deterministically (the Office
+	// seat caster's CEO listing, and ResolveCurrentRunner's most-recent-
+	// runner fallback tier) on a real, dialect-portable column instead of
+	// SQLite-only rowid. Rows that predate this column backfill to one
+	// constant timestamp so they tie and resolve via a secondary key.
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // WorkflowStepDecision records a participant's verdict on a (task, step) pair.

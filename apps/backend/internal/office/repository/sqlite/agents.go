@@ -406,6 +406,17 @@ func (r *Repository) AgentInstanceExistsByName(
 	return exists, err
 }
 
+// AgentInstanceExists reports whether an office agent instance with id
+// exists and is not soft-deleted. The workflow engine's quorum guard uses
+// this to detect a seat whose agent profile has been deleted since the seat
+// was cast (REQ-OFFICE-REVIEW-SEATS-004.3).
+func (r *Repository) AgentInstanceExists(ctx context.Context, id string) (bool, error) {
+	query := `SELECT EXISTS(SELECT 1 FROM agent_profiles WHERE id = ? AND ` + agentInstanceFilter + `)`
+	var exists bool
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(query), id).Scan(&exists)
+	return exists, err
+}
+
 // DeleteAgentInstance hard-deletes an agent instance by ID. The unified
 // agent_profiles table uses soft-deletion via deleted_at — we set it here so
 // office reads (which all filter `deleted_at IS NULL`) immediately stop
