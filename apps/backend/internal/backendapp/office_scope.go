@@ -241,11 +241,13 @@ func authorizeOfficeUser(
 	refs map[string]string,
 ) error {
 	ctx := c.Request.Context()
+	route := &officeRouteWorkspaces{}
 	scoped := false
 	if wsID := c.Param("wsId"); wsID != "" {
 		if err := taskSvc.AuthorizeWorkspaceAccess(ctx, wsID); err != nil {
 			return err
 		}
+		_ = route.consistent(wsID) // first entry, cannot conflict
 		scoped = true
 	}
 	// officeRepo == nil fails closed for the same reason runSubscriptionCheck
@@ -254,6 +256,9 @@ func authorizeOfficeUser(
 		return repoerrors.ErrWorkspaceNotFound
 	}
 	resolved, err := authorizeOfficeRefs(ctx, refs, resolvers, func(workspaceID string) error {
+		if err := route.consistent(workspaceID); err != nil {
+			return err
+		}
 		return taskSvc.AuthorizeWorkspaceAccess(ctx, workspaceID)
 	})
 	if err != nil {
@@ -296,6 +301,9 @@ func authorizeOfficeAgentCaller(
 	if officeRepo == nil {
 		return repoerrors.ErrWorkspaceNotFound
 	}
+	// Requiring every id to equal the token's workspace also gives the agent
+	// path the same-workspace relationship rule officeRouteWorkspaces gives
+	// the user path, by transitivity.
 	_, err := authorizeOfficeRefs(c.Request.Context(), refs, resolvers, func(workspaceID string) error {
 		if workspaceID != callerWorkspace {
 			return repoerrors.ErrWorkspaceNotFound
@@ -317,6 +325,33 @@ func officeCallerWorkspace(c *gin.Context) string {
 		return caller.WorkspaceID
 	}
 	return ""
+}
+
+// officeRouteWorkspaces enforces the RELATIONSHIP between a route's ids: they
+// must all name the same workspace.
+//
+// Authorizing each id on its own is not enough. A caller who owns two
+// workspaces passes the ownership check on both, so `/workspaces/<A2>/labels/
+// <label in A1>` satisfied every individual check while still crossing a
+// workspace boundary — and `UpdateLabel` then edits by label id alone. No
+// Office route legitimately names two workspaces: a task's reviewers, an
+// agent's channels and runs, and a workspace's labels are all intra-workspace
+// by construction. The quorum handler had already hand-rolled this check
+// (`task.WorkspaceID != workspaceID`), which is what a missing structural
+// rule looks like just before it gets forgotten on the next route.
+type officeRouteWorkspaces struct{ first string }
+
+// consistent records a workspace the route names and rejects a second,
+// different one.
+func (w *officeRouteWorkspaces) consistent(workspaceID string) error {
+	if w.first == "" {
+		w.first = workspaceID
+		return nil
+	}
+	if w.first != workspaceID {
+		return repoerrors.ErrWorkspaceNotFound
+	}
+	return nil
 }
 
 // authorizeOfficeRefs resolves every id the route names and hands each

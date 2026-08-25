@@ -33,6 +33,9 @@ type officeScopeHarness struct {
 const (
 	officeScopeUserA = "user-a"
 	officeScopeUserB = "user-b"
+	// officeScopeUserASecond names user A's SECOND workspace and the
+	// resources in it. It is not a third user.
+	officeScopeUserASecond = "user-a2"
 )
 
 func newOfficeScopeHarness(t *testing.T) *officeScopeHarness {
@@ -53,6 +56,13 @@ func newOfficeScopeHarness(t *testing.T) *officeScopeHarness {
 		h.workspaces[owner] = workspaceID
 		seedOfficeResources(t, officeRepo, workspaceID, owner)
 	}
+	// A SECOND workspace for user A. Owning two workspaces is ordinary, and
+	// it is what separates "the caller may access this id" from "these ids
+	// belong together" -- both of user A's workspaces pass an ownership
+	// check, so only a same-workspace rule stops them being mixed.
+	second := seedOwnedWorkspace(t, taskSvc, officeScopeUserA)
+	h.workspaces[officeScopeUserASecond] = second
+	seedOfficeResources(t, officeRepo, second, officeScopeUserASecond)
 	return h
 }
 
@@ -190,7 +200,7 @@ func officeScopeEngine(h *officeScopeHarness, userID string, reached *string) *g
 	}
 	group := engine.Group("/api/v1/office")
 	group.Use(officeWorkspaceScopeMiddleware(h.authSvc, h.taskSvc, h.officeRepo))
-	for _, tc := range append(officeScopeCases(), officeMixedParamCases()...) {
+	for _, tc := range officeAllScopeCases() {
 		pattern := strings.TrimPrefix(tc.pattern, "/api/v1/office")
 		group.Handle(tc.method, pattern, func(c *gin.Context) {
 			*reached = c.FullPath()
@@ -198,6 +208,23 @@ func officeScopeEngine(h *officeScopeHarness, userID string, reached *string) *g
 		})
 	}
 	return engine
+}
+
+// officeAllScopeCases is every route pattern the behavioural tests drive,
+// deduplicated by method+pattern so gin does not see a double registration.
+func officeAllScopeCases() []officeScopeCase {
+	var all []officeScopeCase
+	seen := map[string]bool{}
+	for _, tc := range append(append(officeScopeCases(), officeMixedParamCases()...),
+		officeCrossWorkspaceCases()...) {
+		key := tc.method + " " + tc.pattern
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		all = append(all, tc)
+	}
+	return all
 }
 
 func officeScopeRequest(t *testing.T, engine *gin.Engine, tc officeScopeCase, path string) *httptest.ResponseRecorder {
@@ -643,7 +670,7 @@ func officeAgentEngine(t *testing.T, h *officeScopeHarness, owner string, reache
 	group := engine.Group("/api/v1/office")
 	group.Use(officeagents.AgentAuthMiddleware(agentSvc))
 	group.Use(officeWorkspaceScopeMiddleware(h.authSvc, h.taskSvc, h.officeRepo))
-	for _, tc := range append(officeScopeCases(), officeMixedParamCases()...) {
+	for _, tc := range officeAllScopeCases() {
 		pattern := strings.TrimPrefix(tc.pattern, "/api/v1/office")
 		group.Handle(tc.method, pattern, func(c *gin.Context) {
 			*reached = c.FullPath()
@@ -711,6 +738,59 @@ func TestOfficeScopeAllowsAgentJWTInsideItsOwnWorkspace(t *testing.T) {
 			if rec.Code != http.StatusOK || reached != tc.pattern {
 				t.Errorf("status = %d (%s), reached = %q; want 200 and %q",
 					rec.Code, rec.Body.String(), reached, tc.pattern)
+			}
+		})
+	}
+}
+
+// officeCrossWorkspaceCases are routes naming more than one resource, with
+// the ids deliberately drawn from two DIFFERENT workspaces that the SAME
+// caller owns. `path` templates {wsA1}/{wsA2} to user A's two workspaces.
+func officeCrossWorkspaceCases() []officeScopeCase {
+	return []officeScopeCase{
+		{"wsId + foreign label", http.MethodPatch, "/api/v1/office/workspaces/:wsId/labels/:id",
+			"/api/v1/office/workspaces/{wsA2}/labels/label-user-a", `{"name":"x"}`},
+		{"wsId + foreign task", http.MethodGet, "/api/v1/office/workspaces/:wsId/tasks/:taskId/labels",
+			"/api/v1/office/workspaces/{wsA2}/tasks/task-user-a/labels", ""},
+		{"agent + foreign channel", http.MethodDelete, "/api/v1/office/agents/:id/channels/:channelId",
+			"/api/v1/office/agents/agent-user-a/channels/channel-user-a2", ""},
+	}
+}
+
+// TestOfficeScopeDeniesIDsFromDifferentWorkspaces pins the RELATIONSHIP
+// between a route's ids, not just each id on its own.
+//
+// Authorizing every id independently is not enough: a caller who owns two
+// workspaces passes the ownership check on both, so pairing workspace A2's
+// `:wsId` with workspace A1's label id satisfied every individual check and
+// still crossed a workspace boundary — `UPDATE office_labels ... WHERE id = ?`
+// would then edit a label the URL never legitimately addressed. The Office
+// data model has no route where two ids should belong to different
+// workspaces (a task's reviewers, an agent's channels and runs, a
+// workspace's labels are all intra-workspace), so a mismatch is refused.
+//
+// This is a workspace-isolation defect rather than a cross-user disclosure:
+// every workspace involved is one the caller may access. The quorum handler
+// already re-checks `task.WorkspaceID != workspaceID` by hand, which is the
+// evidence that the property matters and was being patched per handler.
+func TestOfficeScopeDeniesIDsFromDifferentWorkspaces(t *testing.T) {
+	h := newOfficeScopeHarness(t)
+
+	for _, tc := range officeCrossWorkspaceCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			var reached string
+			engine := officeScopeEngine(h, officeScopeUserA, &reached)
+			path := strings.NewReplacer(
+				"{wsA1}", h.workspaces[officeScopeUserA],
+				"{wsA2}", h.workspaces[officeScopeUserASecond],
+			).Replace(tc.path)
+			rec := officeScopeRequest(t, engine, tc, path)
+
+			if rec.Code != http.StatusNotFound {
+				t.Errorf("status = %d (%s), want %d", rec.Code, rec.Body.String(), http.StatusNotFound)
+			}
+			if reached != "" {
+				t.Errorf("handler %q ran; ids from two workspaces must not be mixed", reached)
 			}
 		})
 	}

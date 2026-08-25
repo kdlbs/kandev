@@ -1,11 +1,15 @@
 package backendapp
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"sort"
 	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/kandev/kandev/internal/auth/authn"
 
 	"github.com/kandev/kandev/internal/office"
 	officeagents "github.com/kandev/kandev/internal/office/agents"
@@ -236,4 +240,148 @@ func officeTestServices() *office.Services {
 		Workspaces:   &officeservice.Service{},
 		Documents:    &taskservice.DocumentService{},
 	}
+}
+
+// officeScopeFixtureIDs maps each resolver key to the id prefix
+// seedOfficeResources uses for that resource kind, so a route pattern can be
+// turned into a concrete URL naming a chosen workspace's rows.
+//
+// TestOfficeMultiIDRoutesRejectMixedWorkspaces asserts every registered
+// resolver has an entry, so adding a resource kind forces a fixture and
+// cannot quietly drop out of the relationship sweep below.
+var officeScopeFixtureIDs = map[string]string{
+	"agents/:id":                  "agent",
+	"tasks/:id":                   "task",
+	"tasks/:taskId":               "task",
+	"runs/:id":                    "run",
+	"runs/:runId":                 "run",
+	"routines/:id":                "routine",
+	"routine-triggers/:triggerId": "trigger",
+	"routine-triggers/:publicId":  "public",
+	"projects/:id":                "project",
+	"skills/:id":                  "skill",
+	"budgets/:id":                 "budget",
+	"approvals/:id":               "approval",
+	"channels/:channelId":         "channel",
+	"labels/:id":                  "label",
+	"reviewers/:agentId":          "agent",
+	"approvers/:agentId":          "agent",
+}
+
+// officeRouteURL renders a route pattern into a concrete URL. Every
+// workspace-bearing param takes its id from workspaces[i] (clamped to the
+// last entry), so passing one workspace builds a same-workspace request and
+// passing two builds a mixed one. Sub-resource params get a literal.
+func officeRouteURL(route string, suffixes []string, workspaceIDs []string) (string, int) {
+	rendered := route
+	bearing := 0
+	pick := func(list []string) string {
+		if bearing < len(list) {
+			return list[bearing]
+		}
+		return list[len(list)-1]
+	}
+	for _, key := range officeRouteParamKeys(route) {
+		param := paramOfScopeKey(key)
+		var value string
+		switch {
+		case param == officeWorkspaceParam:
+			value = pick(workspaceIDs)
+			bearing++
+		case officeScopeFixtureIDs[key] != "":
+			value = officeScopeFixtureIDs[key] + "-" + pick(suffixes)
+			bearing++
+		default:
+			value = "sub-resource"
+		}
+		rendered = strings.Replace(rendered, param, value, 1)
+	}
+	return rendered, bearing
+}
+
+// TestOfficeMultiIDRoutesRejectMixedWorkspaces is the structural form of the
+// relationship rule, generated from the REAL route table rather than a
+// hand-written case list.
+//
+// Five sibling audit fixes hit the same pattern: each individual id check was
+// right, the RELATIONSHIP between the ids was unchecked, and every one of
+// those PRs had passing tests. A completeness test that only asks "does this
+// route have a check" cannot see that class. So for every registered route
+// naming two or more workspace-bearing ids, this drives the guard twice:
+//
+//   - control — all ids from ONE workspace the caller owns, must reach the
+//     handler. Without this the mismatch assertion below would pass on a
+//     malformed URL and prove nothing.
+//   - mixed — the first id from that workspace and the rest from a SECOND
+//     workspace the same caller also owns, must be refused before dispatch.
+//
+// A newly added route naming two resources is covered the day it is added.
+func TestOfficeMultiIDRoutesRejectMixedWorkspaces(t *testing.T) {
+	for key := range officeParamScopeResolvers(nil) {
+		if officeScopeFixtureIDs[key] == "" {
+			t.Fatalf("resolver %q has no officeScopeFixtureIDs entry, so it is invisible "+
+				"to the mixed-workspace sweep; add one (and seed the row in seedOfficeResources)", key)
+		}
+	}
+
+	h := newOfficeScopeHarness(t)
+	wsA1, wsA2 := h.workspaces[officeScopeUserA], h.workspaces[officeScopeUserASecond]
+	checked := 0
+
+	for _, registered := range registeredOfficeRoutes(t) {
+		route, ok := officeRelativeRoute(registered.Path)
+		if !ok {
+			continue
+		}
+		if _, allowed := officeWorkspacelessRoute(route); allowed {
+			continue
+		}
+		if _, bearing := officeRouteURL(route, []string{officeScopeUserA}, []string{wsA1}); bearing < 2 {
+			continue
+		}
+		checked++
+		t.Run(registered.Method+" "+route, func(t *testing.T) {
+			same, _ := officeRouteURL(route,
+				[]string{officeScopeUserA}, []string{wsA1})
+			mixed, _ := officeRouteURL(route,
+				[]string{officeScopeUserA, officeScopeUserASecond}, []string{wsA1, wsA2})
+
+			if code, reached := officeProbeRequest(t, h, registered.Method, route, same); !reached {
+				t.Fatalf("control %s returned %d without reaching the handler; "+
+					"the mixed assertion below would be vacuous", same, code)
+			}
+			code, reached := officeProbeRequest(t, h, registered.Method, route, mixed)
+			if code != http.StatusNotFound || reached {
+				t.Errorf("mixed-workspace %s: status = %d, reached = %v; want 404 and false",
+					mixed, code, reached)
+			}
+		})
+	}
+	if checked == 0 {
+		t.Fatal("no multi-id Office routes were exercised; the sweep is not running")
+	}
+	t.Logf("mixed-workspace sweep covered %d multi-id Office routes", checked)
+}
+
+// officeProbeRequest mounts the guard in front of a recording probe on one
+// route pattern and drives target through it as user A.
+func officeProbeRequest(t *testing.T, h *officeScopeHarness, method, route, target string) (int, bool) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.Use(func(c *gin.Context) {
+		c.Request = c.Request.WithContext(authn.WithIdentity(
+			c.Request.Context(), authn.Identity{UserID: officeScopeUserA, Role: authn.RoleMember}))
+		c.Next()
+	})
+	group := engine.Group(officeRoutePrefix)
+	group.Use(officeWorkspaceScopeMiddleware(h.authSvc, h.taskSvc, h.officeRepo))
+	reached := false
+	group.Handle(method, route, func(c *gin.Context) { reached = true; c.Status(http.StatusOK) })
+
+	req := httptest.NewRequest(method, officeRoutePrefix+target, strings.NewReader("{}"))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	engine.ServeHTTP(rec, req)
+	return rec.Code, reached
 }
