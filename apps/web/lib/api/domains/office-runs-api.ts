@@ -111,6 +111,8 @@ export type RunDetail = {
   summary_injected?: string;
   result_json?: string;
   context_snapshot?: string;
+  // Persisted when the run is created. Identifies the continuation-summary chain.
+  continuation_scope?: string;
   output_summary?: string;
   // Routing snapshot — omitted for legacy concrete-profile runs.
   routing?: RunRouting;
