@@ -8,8 +8,9 @@ They confirm message parsing, turn detection, and normalization still work when 
 ## Prerequisites
 
 - Agent CLI installed and on PATH, or `npx` available for npm-distributed agents (`auggie`, `gemini`, `opencode`)
+- The harness checks only the first command token with `exec.LookPath`. For `npx` commands, it does not check the requested npm package before the test starts. Missing packages or network access can fail the test instead of skipping it.
 - Active API subscription for the agent you're testing
-- Tests for agents not installed are skipped automatically
+- Tests for agents whose command binary is not installed are skipped automatically
 
 ## Running Tests
 
@@ -21,7 +22,7 @@ All commands run from `apps/backend/`.
 make test-e2e
 ```
 
-Agents not on PATH are skipped. The mock agent is always built and tested.
+Agents whose command binary is not on PATH are skipped. The mock agent is always built and tested.
 
 ### Single agent
 
