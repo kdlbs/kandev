@@ -336,9 +336,16 @@ func TestHandleTaskMovedNoSession(t *testing.T) {
 		svc.engineRunQueue = queued
 		svc.enginePrimary = &fakePrimaryAgentResolver{agentProfileID: "resolved-primary"}
 
+		// A real task.moved publication always carries the persisted
+		// step-transition row ID (see publishTaskMovedEvent), so the
+		// fixture sets one here too rather than exercising
+		// officeAutoStartIdempotencyKey's legacy (StepTransitionID==0)
+		// fallback for pre-rollout events, which is covered separately by
+		// TestOfficeAutoStartIdempotencyKeyAcrossRealDeliveries.
 		svc.handleTaskMovedNoSession(ctx, watcher.TaskMovedEventData{
-			TaskID:   "t-office",
-			ToStepID: "step2",
+			TaskID:           "t-office",
+			ToStepID:         "step2",
+			StepTransitionID: 42,
 		})
 
 		select {
@@ -355,15 +362,7 @@ func TestHandleTaskMovedNoSession(t *testing.T) {
 			if req.Reason != officeAutoStartRunReason {
 				t.Errorf("Reason = %q, want %q", req.Reason, officeAutoStartRunReason)
 			}
-			// CreateTask stamps its own UpdatedAt at insert time (see
-			// prepareTaskForCreate), so the expected key must be built from
-			// the persisted task, not the `now` value passed into the
-			// fixture above.
-			persisted, err := repo.GetTask(ctx, "t-office")
-			if err != nil {
-				t.Fatalf("GetTask: %v", err)
-			}
-			wantKey := "task_assigned:t-office:resolved-primary:step2:" + persisted.UpdatedAt.UTC().Format(time.RFC3339Nano)
+			wantKey := "task_assigned:t-office:resolved-primary:step2:42"
 			if req.IdempotencyKey != wantKey {
 				t.Errorf("IdempotencyKey = %q, want %q", req.IdempotencyKey, wantKey)
 			}
