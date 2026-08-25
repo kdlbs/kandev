@@ -100,23 +100,24 @@ export async function expectLongPRRowContained(row: Locator) {
   await expect(deletions).toBeVisible();
   await expect(status).toBeVisible();
 
-  const [rowBox, filenameBox, additionsBox, deletionsBox, statusBox] = await Promise.all([
-    row.boundingBox(),
-    filename.boundingBox(),
-    additions.boundingBox(),
-    deletions.boundingBox(),
-    status.boundingBox(),
-  ]);
-  expect(rowBox).not.toBeNull();
-  expect(filenameBox).not.toBeNull();
-  expect(additionsBox).not.toBeNull();
-  expect(deletionsBox).not.toBeNull();
-  expect(statusBox).not.toBeNull();
-
-  expect(filenameBox!.x + filenameBox!.width).toBeLessThanOrEqual(additionsBox!.x);
-  expect(additionsBox!.x).toBeGreaterThanOrEqual(rowBox!.x);
-  expect(deletionsBox!.x + deletionsBox!.width).toBeLessThanOrEqual(statusBox!.x);
-  expect(statusBox!.x + statusBox!.width).toBeLessThanOrEqual(rowBox!.x + rowBox!.width);
+  await expect
+    .poll(async () => {
+      const [rowBox, filenameBox, additionsBox, deletionsBox, statusBox] = await Promise.all([
+        row.boundingBox(),
+        filename.boundingBox(),
+        additions.boundingBox(),
+        deletions.boundingBox(),
+        status.boundingBox(),
+      ]);
+      if (!rowBox || !filenameBox || !additionsBox || !deletionsBox || !statusBox) return false;
+      return (
+        filenameBox.x + filenameBox.width <= additionsBox.x &&
+        additionsBox.x >= rowBox.x &&
+        deletionsBox.x + deletionsBox.width <= statusBox.x &&
+        statusBox.x + statusBox.width <= rowBox.x + rowBox.width
+      );
+    })
+    .toBe(true);
 
   const statusCenterHitsStatus = await status.evaluate((element) => {
     const box = element.getBoundingClientRect();
