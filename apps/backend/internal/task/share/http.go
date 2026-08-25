@@ -53,6 +53,8 @@ type errorBody struct {
 	Code  string `json:"code,omitempty"`
 }
 
+const shareAuthorizationFailureMessage = "failed to authorize share access"
+
 func toShareResponse(s *Share) shareResponse {
 	out := shareResponse{
 		ID:                s.ID,
@@ -126,6 +128,9 @@ func (h *HTTPHandlers) httpCreate(c *gin.Context) {
 
 	if strings.EqualFold(c.Query("dry_run"), "true") {
 		snap, err := h.svc.PreviewSnapshot(ctx, taskID, sessionID)
+		if h.writeAuthorizationFailure(c, err, sessionID) {
+			return
+		}
 		if mapped, status := mapShareError(err); mapped != nil {
 			c.JSON(status, mapped)
 			return
@@ -135,14 +140,12 @@ func (h *HTTPHandlers) httpCreate(c *gin.Context) {
 	}
 
 	if err := h.svc.CheckBackendAccess(ctx, taskID, sessionID); err != nil {
+		if h.writeAuthorizationFailure(c, err, sessionID) {
+			return
+		}
 		if errors.Is(err, ErrNotFound) {
 			mapped, status := mapShareError(err)
 			c.JSON(status, mapped)
-			return
-		}
-		if errors.Is(err, ErrAuthorization) {
-			h.logServerError(err, "share authorization failed", sessionID)
-			c.JSON(http.StatusInternalServerError, errorBody{Error: "failed to check share access"})
 			return
 		}
 		c.JSON(http.StatusPreconditionFailed, errorBody{
@@ -156,6 +159,9 @@ func (h *HTTPHandlers) httpCreate(c *gin.Context) {
 	// it, so the creator's locale is the only one we will ever know. Resolve
 	// it here and thread it down rather than letting the builders guess.
 	share, err := h.svc.CreateShare(ctx, taskID, sessionID, i18n.FromRequest(c.Request))
+	if h.writeAuthorizationFailure(c, err, sessionID) {
+		return
+	}
 	if mapped, status := mapShareError(err); mapped != nil {
 		h.logServerError(err, "create share failed", sessionID)
 		c.JSON(status, mapped)
@@ -177,6 +183,9 @@ func (h *HTTPHandlers) httpList(c *gin.Context) {
 		return
 	}
 	rows, err := h.svc.ListBySession(c.Request.Context(), taskID, sessionID)
+	if h.writeAuthorizationFailure(c, err, sessionID) {
+		return
+	}
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			mapped, status := mapShareError(err)
@@ -202,6 +211,9 @@ func (h *HTTPHandlers) httpRevoke(c *gin.Context) {
 		return
 	}
 	if err := h.svc.RevokeShare(c.Request.Context(), shareID); err != nil {
+		if h.writeAuthorizationFailure(c, err, shareID) {
+			return
+		}
 		if errors.Is(err, ErrNotFound) {
 			c.JSON(http.StatusNotFound, errorBody{Error: "share not found"})
 			return
@@ -224,6 +236,8 @@ func mapShareError(err error) (*errorBody, int) {
 		return nil, 0
 	}
 	switch {
+	case errors.Is(err, ErrAuthorization):
+		return &errorBody{Error: shareAuthorizationFailureMessage}, http.StatusInternalServerError
 	case errors.Is(err, ErrSessionNotShareable):
 		return &errorBody{Error: "session has no shareable content yet", Code: "session_not_shareable"}, http.StatusConflict
 	case errors.Is(err, ErrNotFound):
@@ -232,6 +246,15 @@ func mapShareError(err error) (*errorBody, int) {
 		return &errorBody{Error: err.Error(), Code: "snapshot_too_large"}, http.StatusRequestEntityTooLarge
 	}
 	return &errorBody{Error: err.Error(), Code: "gist_upload_failed"}, http.StatusBadGateway
+}
+
+func (h *HTTPHandlers) writeAuthorizationFailure(c *gin.Context, err error, ref string) bool {
+	if !errors.Is(err, ErrAuthorization) {
+		return false
+	}
+	h.logServerError(err, "share authorization failed", ref)
+	c.JSON(http.StatusInternalServerError, errorBody{Error: shareAuthorizationFailureMessage})
+	return true
 }
 
 func (h *HTTPHandlers) logServerError(err error, msg, ref string) {

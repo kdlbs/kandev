@@ -31,6 +31,8 @@ share mutations.
 - Pass both nested route IDs into create, preview, list, and backend probes.
 - Authorize revoke through its stored session ID.
 - Map ownership denials to `404 Not Found`.
+- Map authorization infrastructure failures in every share handler to a fixed
+  generic `500 Internal Server Error` and log the wrapped cause server-side.
 - Add focused service and HTTP regression tests before production changes.
 - Preserve authorized, synthetic, and internal caller behavior.
 
@@ -46,6 +48,8 @@ share mutations.
   dependency.
 - Revoke authorizes before the revoked-state shortcut, provider call, and row
   update.
+- Preview, both publish authorization stages, and revoke do not expose an
+  authorization infrastructure error or misclassify it as a provider failure.
 - Foreign and mismatched requests return 404. Authorized and auth-disabled
   requests keep their current successful behavior.
 
@@ -96,14 +100,19 @@ Implemented the task-service authorization boundary for preview, publish,
 backend access, list, and revoke operations. Nested share routes now pass and
 authorize both task and session IDs. Foreign and mismatched access maps to the
 existing 404 response, and revoke authorizes before the revoked shortcut,
-provider delete, or local mutation.
+provider delete, or local mutation. The HTTP handlers now map authorization
+infrastructure failures to a fixed generic 500 response and log the wrapped
+cause without exposing it to callers.
 
 Verification:
 
 ```text
 cd apps/backend && go test -tags fts5 ./internal/task/share -count=1
-134 passed
+145 passed
 
 cd apps/backend && go test -tags fts5 -run '^$' ./internal/backendapp
 package compiled; no tests selected
+
+make -C apps/backend lint
+0 issues
 ```

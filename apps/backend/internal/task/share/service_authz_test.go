@@ -39,11 +39,16 @@ type recordingShareAccess struct {
 	taskSessionCalls int
 	sessionCalls     int
 	taskSessionErr   error
+	taskSessionErrs  []error
 	sessionErr       error
 }
 
 func (a *recordingShareAccess) AuthorizeTaskSessionAccess(context.Context, string, string) error {
+	call := a.taskSessionCalls
 	a.taskSessionCalls++
+	if call < len(a.taskSessionErrs) {
+		return a.taskSessionErrs[call]
+	}
 	return a.taskSessionErr
 }
 

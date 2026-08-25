@@ -22,15 +22,16 @@ system_design:
 ## Summary
 
 Add an auth-project Playwright test for the complete HTTP route matrix. The test
-uses separate authenticated admin and member contexts with real production route
-wiring.
+uses an admin context only for setup, then separate authenticated member A and
+member B contexts with real production route wiring.
 
 ## In scope
 
 - Start the auth project with a file-specific database.
-- Create users A and B with separate browser contexts.
-- Create B's workspace, task, completed session, transcript marker, and share.
-- Prove that A cannot preview, publish, list, or revoke B's share data.
+- Invite member A and member B with separate browser contexts.
+- Create member B's workspace, task, completed session, transcript marker, and
+  share.
+- Prove that member A cannot preview, publish, list, or revoke B's share data.
 - Prove that a mismatched task-session pair returns 404.
 - Prove that B can still use the owner paths after A's denied requests.
 - Prove that A's denied revoke does not revoke B's share.
@@ -43,8 +44,8 @@ wiring.
 
 ## Acceptance
 
-- Every foreign or mismatched share request returns 404 without the transcript
-  marker or share metadata.
+- Every foreign or mismatched share request made by member A returns 404 without
+  the transcript marker or share metadata.
 - No denied publish creates a share. No denied revoke changes B's active share.
 - B can preview, list, publish, and revoke through the same assembled routes.
 
@@ -85,12 +86,12 @@ pnpm e2e:raw --project=auth tests/auth/share-authorization.spec.ts
 ## Results
 
 Implemented an auth-project Playwright regression against the assembled
-production routes. The test seeds the member-owned workspace, mock GitHub
-connection, task, completed session, and transcript through the member's
-authenticated request context. A receives `404` for preview, publish, list,
-and revoke, including a mismatched task-session pair, without transcript or
-share metadata. The member can preview, publish, observe the active share
-after the denied revoke, and revoke it.
+production routes. The admin context only creates two member accounts. Member
+B seeds the member-owned workspace, mock GitHub connection, task, completed
+session, and transcript through the owner context. Member A receives `404` for
+preview, publish, list, and revoke, including a mismatched task-session pair,
+without transcript or share metadata. Member B can preview, publish, observe
+the active share after the denied revoke, and revoke it.
 
 Verification:
 

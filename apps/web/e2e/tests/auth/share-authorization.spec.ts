@@ -27,10 +27,15 @@ async function expectNotFound(response: APIResponse, forbidden: string[]): Promi
 
 test.describe.serial("share authorization", () => {
   const ADMIN = { email: "share-admin@e2e.dev", password: "adminpass123", displayName: "Admin" };
-  const MEMBER = {
-    email: "share-member@e2e.dev",
-    password: "memberpass123",
-    displayName: "Member",
+  const MEMBER_A = {
+    email: "share-attacker@e2e.dev",
+    password: "attackerpass123",
+    displayName: "Member A",
+  };
+  const MEMBER_B = {
+    email: "share-owner@e2e.dev",
+    password: "ownerpass123",
+    displayName: "Member B",
   };
 
   test.beforeAll(async ({ backend }) => {
@@ -44,35 +49,41 @@ test.describe.serial("share authorization", () => {
   test("keeps a member's share routes private from another user", async ({ browser, backend }) => {
     test.setTimeout(90_000);
     const adminContext = await browser.newContext({ baseURL: backend.frontendUrl });
-    const memberContext = await browser.newContext({ baseURL: backend.frontendUrl });
+    const attackerContext = await browser.newContext({ baseURL: backend.frontendUrl });
+    const ownerContext = await browser.newContext({ baseURL: backend.frontendUrl });
 
     try {
       await setupAdmin(adminContext, backend.baseUrl, ADMIN);
-      const inviteToken = await createInviteToken(adminContext, backend.baseUrl, {
-        email: MEMBER.email,
+      const attackerInviteToken = await createInviteToken(adminContext, backend.baseUrl, {
+        email: MEMBER_A.email,
         role: "member",
       });
-      await acceptInvite(memberContext, backend.baseUrl, inviteToken, MEMBER);
+      const ownerInviteToken = await createInviteToken(adminContext, backend.baseUrl, {
+        email: MEMBER_B.email,
+        role: "member",
+      });
+      await acceptInvite(attackerContext, backend.baseUrl, attackerInviteToken, MEMBER_A);
+      await acceptInvite(ownerContext, backend.baseUrl, ownerInviteToken, MEMBER_B);
 
-      const workspaceResponse = await memberContext.request.post(
+      const workspaceResponse = await ownerContext.request.post(
         `${backend.baseUrl}/api/v1/workspaces`,
         { data: { name: "Private Share Workspace" } },
       );
       const workspace = await expectJSON<{ id: string }>(workspaceResponse, 200);
 
-      const githubResponse = await memberContext.request.put(
+      const githubResponse = await ownerContext.request.put(
         `${backend.baseUrl}/api/v1/github/mock/workspace-connections/${workspace.id}`,
         {
           data: {
             source: "pat",
             status: "active",
-            login: "share-member-mock",
+            login: "share-owner-mock",
           },
         },
       );
       await expectJSON(githubResponse, 200);
 
-      const taskResponse = await memberContext.request.post(
+      const taskResponse = await ownerContext.request.post(
         `${backend.baseUrl}/api/v1/_test/tasks`,
         {
           data: {
@@ -84,7 +95,7 @@ test.describe.serial("share authorization", () => {
       );
       const task = await expectJSON<{ task_id: string }>(taskResponse, 200);
 
-      const sessionResponse = await memberContext.request.post(
+      const sessionResponse = await ownerContext.request.post(
         `${backend.baseUrl}/api/v1/_test/task-sessions`,
         {
           data: {
@@ -97,7 +108,7 @@ test.describe.serial("share authorization", () => {
       const session = await expectJSON<{ session_id: string }>(sessionResponse, 200);
 
       const transcriptMarker = "B_PRIVATE_SHARE_TRANSCRIPT_MARKER";
-      const messageResponse = await memberContext.request.post(
+      const messageResponse = await ownerContext.request.post(
         `${backend.baseUrl}/api/v1/_test/messages`,
         {
           data: {
@@ -110,53 +121,53 @@ test.describe.serial("share authorization", () => {
       await expectJSON(messageResponse, 200);
 
       const sharePath = `/api/v1/tasks/${task.task_id}/sessions/${session.session_id}/shares`;
-      const memberPreview = await memberContext.request.post(
+      const ownerPreview = await ownerContext.request.post(
         `${backend.baseUrl}${sharePath}?dry_run=true`,
       );
-      const preview = await expectJSON<SnapshotResponse>(memberPreview, 200);
+      const preview = await expectJSON<SnapshotResponse>(ownerPreview, 200);
       expect(JSON.stringify(preview)).toContain(transcriptMarker);
 
       const foreignValues = [task.task_id, session.session_id, transcriptMarker];
-      const adminPreview = await adminContext.request.post(
+      const attackerPreview = await attackerContext.request.post(
         `${backend.baseUrl}${sharePath}?dry_run=true`,
       );
-      await expectNotFound(adminPreview, foreignValues);
+      await expectNotFound(attackerPreview, foreignValues);
 
-      const adminPublish = await adminContext.request.post(`${backend.baseUrl}${sharePath}`);
-      await expectNotFound(adminPublish, foreignValues);
+      const attackerPublish = await attackerContext.request.post(`${backend.baseUrl}${sharePath}`);
+      await expectNotFound(attackerPublish, foreignValues);
 
-      const memberSharesBeforePublish = await memberContext.request.get(
+      const ownerSharesBeforePublish = await ownerContext.request.get(
         `${backend.baseUrl}${sharePath}`,
       );
       const emptyShares = await expectJSON<{ shares: ShareResponse[] }>(
-        memberSharesBeforePublish,
+        ownerSharesBeforePublish,
         200,
       );
       expect(emptyShares.shares).toHaveLength(0);
 
-      const memberPublish = await memberContext.request.post(`${backend.baseUrl}${sharePath}`);
-      const share = await expectJSON<ShareResponse>(memberPublish, 201);
+      const ownerPublish = await ownerContext.request.post(`${backend.baseUrl}${sharePath}`);
+      const share = await expectJSON<ShareResponse>(ownerPublish, 201);
       expect(share.id).toBeTruthy();
 
-      const adminList = await adminContext.request.get(`${backend.baseUrl}${sharePath}`);
-      await expectNotFound(adminList, [task.task_id, session.session_id, share.id]);
+      const attackerList = await attackerContext.request.get(`${backend.baseUrl}${sharePath}`);
+      await expectNotFound(attackerList, [task.task_id, session.session_id, share.id]);
 
-      const adminRevoke = await adminContext.request.delete(
+      const attackerRevoke = await attackerContext.request.delete(
         `${backend.baseUrl}/api/v1/shares/${share.id}`,
       );
-      await expectNotFound(adminRevoke, [share.id]);
+      await expectNotFound(attackerRevoke, [share.id]);
 
-      const memberSharesAfterDeniedRevoke = await memberContext.request.get(
+      const ownerSharesAfterDeniedRevoke = await ownerContext.request.get(
         `${backend.baseUrl}${sharePath}`,
       );
       const activeShares = await expectJSON<{ shares: ShareResponse[] }>(
-        memberSharesAfterDeniedRevoke,
+        ownerSharesAfterDeniedRevoke,
         200,
       );
       expect(activeShares.shares).toEqual([expect.objectContaining({ id: share.id })]);
       expect(activeShares.shares[0]?.revoked_at).toBeUndefined();
 
-      const otherTaskResponse = await memberContext.request.post(
+      const otherTaskResponse = await ownerContext.request.post(
         `${backend.baseUrl}/api/v1/_test/tasks`,
         {
           data: {
@@ -169,21 +180,23 @@ test.describe.serial("share authorization", () => {
       const otherTask = await expectJSON<{ task_id: string }>(otherTaskResponse, 200);
       const mismatchedPath = `/api/v1/tasks/${otherTask.task_id}/sessions/${session.session_id}/shares`;
 
-      const mismatchedPreview = await memberContext.request.post(
+      const mismatchedPreview = await attackerContext.request.post(
         `${backend.baseUrl}${mismatchedPath}?dry_run=true`,
       );
       await expectNotFound(mismatchedPreview, foreignValues);
 
-      const mismatchedList = await memberContext.request.get(`${backend.baseUrl}${mismatchedPath}`);
+      const mismatchedList = await attackerContext.request.get(
+        `${backend.baseUrl}${mismatchedPath}`,
+      );
       await expectNotFound(mismatchedList, [share.id, transcriptMarker]);
 
-      const memberRevoke = await memberContext.request.delete(
+      const ownerRevoke = await ownerContext.request.delete(
         `${backend.baseUrl}/api/v1/shares/${share.id}`,
       );
-      const revokeBody = await memberRevoke.text();
-      expect(memberRevoke.status(), revokeBody).toBe(204);
+      const revokeBody = await ownerRevoke.text();
+      expect(ownerRevoke.status(), revokeBody).toBe(204);
 
-      const revokedSharesResponse = await memberContext.request.get(
+      const revokedSharesResponse = await ownerContext.request.get(
         `${backend.baseUrl}${sharePath}`,
       );
       const revokedShares = await expectJSON<{ shares: ShareResponse[] }>(
@@ -194,7 +207,8 @@ test.describe.serial("share authorization", () => {
         expect.objectContaining({ id: share.id, revoked_at: expect.any(String) }),
       ]);
     } finally {
-      await memberContext.close();
+      await ownerContext.close();
+      await attackerContext.close();
       await adminContext.close();
     }
   });

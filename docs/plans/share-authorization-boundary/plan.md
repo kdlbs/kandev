@@ -18,8 +18,9 @@ the raw task repository. Therefore, the caller identity did not limit preview
 and list operations. The same service omission also left publish and revoke
 dependent on a GitHub authorization check.
 
-This plan adds the task-service authorization boundary first. Then it adds a
-two-user HTTP regression test against the assembled auth-enabled server.
+This plan adds the task-service authorization boundary first. Then it adds an
+auth-project regression test against the assembled auth-enabled server with an
+admin setup context and two member contexts: attacker A and owner B.
 
 ## Scope
 
@@ -97,10 +98,10 @@ authorization boundary. Preview and list never reached it.
 ## E2E tests
 
 Add `apps/web/e2e/tests/auth/share-authorization.spec.ts` to the isolated auth
-project. The test creates separate authenticated admin and member contexts.
-User B owns the task, session, transcript marker, and share. User A receives
-404 for preview, publish, list, and revoke. The test also proves that B's share
-remains active.
+project. The test uses the admin context only to create two member accounts.
+Member B owns the task, session, transcript marker, and share. Member A
+receives 404 for preview, publish, list, and revoke, including a mismatched
+task-session pair. The test also proves that B's share remains active.
 
 This flow covers `AC-AUTH-AUTH-001.7` at the assembled HTTP boundary.
 
@@ -111,8 +112,24 @@ This flow covers `AC-AUTH-AUTH-001.7` at the assembled HTTP boundary.
 
 ## Verification results
 
-Task 01 and Task 02 are complete. The service, HTTP, and assembled auth-project
-regressions pass.
+Task 01 and Task 02 are complete. The handler regressions and assembled
+member-to-member auth-project regression pass.
+
+Remediation verification:
+
+```text
+cd apps/backend && go test -tags fts5 ./internal/task/share -count=1
+145 passed
+
+cd apps/web && pnpm e2e:raw --project=auth tests/auth/share-authorization.spec.ts
+1 passed
+
+make -C apps/backend lint
+0 issues
+
+python3 scripts/lint-spec-files.py --all
+All specification files passed.
+```
 
 ## Risks
 
