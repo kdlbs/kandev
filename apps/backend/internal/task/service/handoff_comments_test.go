@@ -82,9 +82,12 @@ func TestListCommentsForCallerEnforcesReadAccess(t *testing.T) {
 	}
 }
 
-// AC-005.4/005.6/005.8: an absent, empty, whitespace-only, or "self"
-// (after trimming) task_id targets the caller task.
-func TestListCommentsForCallerSelfFallback(t *testing.T) {
+// AC-OFFICE-AGENT-COMMENT-READS-005.4: the target crosses only from the
+// caller-supplied target argument. There is no "self"/empty sentinel — an
+// unrecognised or empty target is resolved by the guard like any other
+// target (denied, since it matches no real task) rather than substituted
+// with the caller's own task.
+func TestListCommentsForCallerTreatsUnresolvedTargetsLiterally(t *testing.T) {
 	svc, _ := newDocumentHandoffService(t, nil)
 	reader := &fakeCommentReader{}
 	reader.seed("child-a", 2, 10)
@@ -92,26 +95,26 @@ func TestListCommentsForCallerSelfFallback(t *testing.T) {
 	ctx := context.Background()
 
 	for _, target := range []string{"", "  ", "self"} {
-		w, err := svc.ListCommentsForCaller(ctx, "child-a", target, 20)
-		if err != nil {
-			t.Fatalf("target %q: %v", target, err)
-		}
-		if w.Total != 2 {
-			t.Fatalf("target %q: total = %d, want 2", target, w.Total)
+		if _, err := svc.ListCommentsForCaller(ctx, "child-a", target, 20); !errors.Is(err, ErrAccessDenied) {
+			t.Fatalf("target %q: err = %v, want ErrAccessDenied (no sentinel substitution)", target, err)
 		}
 	}
 }
 
-// AC-005.5: task_id resolves to empty (absent) AND there is no caller
-// identity — a validation error naming task_id, not a plain deny.
-func TestListCommentsForCallerRequiresTaskIDWhenNoCaller(t *testing.T) {
+// AC-OFFICE-AGENT-COMMENT-READS-001.13: a caller whose JWT carries no task
+// claim (callerTaskID == "") is denied on this same path for every target —
+// not a distinct missing-target validation error, which would let a caller
+// distinguish "I have no identity" from "I am not related to this task".
+func TestListCommentsForCallerDeniesEveryTargetWhenCallerTaskEmpty(t *testing.T) {
 	svc, _ := newDocumentHandoffService(t, nil)
-	svc.SetCommentReader(&fakeCommentReader{})
+	reader := &fakeCommentReader{}
+	reader.seed("parent", 1, 10)
+	svc.SetCommentReader(reader)
 	ctx := context.Background()
 
-	for _, target := range []string{"", "  ", "self", " self "} {
-		if _, err := svc.ListCommentsForCaller(ctx, "", target, 20); !errors.Is(err, ErrDocumentTaskRequired) {
-			t.Fatalf("caller=%q target=%q: err = %v, want ErrDocumentTaskRequired", "", target, err)
+	for _, target := range []string{"", "  ", "self", "parent"} {
+		if _, err := svc.ListCommentsForCaller(ctx, "", target, 20); !errors.Is(err, ErrAccessDenied) {
+			t.Fatalf("caller=%q target=%q: err = %v, want ErrAccessDenied", "", target, err)
 		}
 	}
 }
@@ -168,7 +171,7 @@ func TestListCommentsForCallerTruncatesLongBodies(t *testing.T) {
 	svc.SetCommentReader(reader)
 	ctx := context.Background()
 
-	w, err := svc.ListCommentsForCaller(ctx, "child-a", "self", 20)
+	w, err := svc.ListCommentsForCaller(ctx, "child-a", "child-a", 20)
 	if err != nil {
 		t.Fatalf("ListCommentsForCaller: %v", err)
 	}
@@ -197,7 +200,7 @@ func TestListCommentsForCallerLeavesShortBodiesUntouched(t *testing.T) {
 	svc.SetCommentReader(reader)
 	ctx := context.Background()
 
-	w, err := svc.ListCommentsForCaller(ctx, "child-a", "self", 20)
+	w, err := svc.ListCommentsForCaller(ctx, "child-a", "child-a", 20)
 	if err != nil {
 		t.Fatalf("ListCommentsForCaller: %v", err)
 	}
@@ -222,7 +225,7 @@ func TestListCommentsForCallerLeavesExactCapBodyUntouched(t *testing.T) {
 	svc.SetCommentReader(reader)
 	ctx := context.Background()
 
-	w, err := svc.ListCommentsForCaller(ctx, "child-a", "self", 20)
+	w, err := svc.ListCommentsForCaller(ctx, "child-a", "child-a", 20)
 	if err != nil {
 		t.Fatalf("ListCommentsForCaller: %v", err)
 	}
@@ -248,7 +251,7 @@ func TestListCommentsForCallerBudgetDropsOldestNeverEmpties(t *testing.T) {
 	svc.SetCommentReader(reader)
 	ctx := context.Background()
 
-	w, err := svc.ListCommentsForCaller(ctx, "child-a", "self", 20)
+	w, err := svc.ListCommentsForCaller(ctx, "child-a", "child-a", 20)
 	if err != nil {
 		t.Fatalf("ListCommentsForCaller: %v", err)
 	}
@@ -295,7 +298,7 @@ func TestListCommentsForCallerProjectsAuthorFields(t *testing.T) {
 	svc.SetCommentReader(reader)
 	ctx := context.Background()
 
-	w, err := svc.ListCommentsForCaller(ctx, "child-a", "self", 20)
+	w, err := svc.ListCommentsForCaller(ctx, "child-a", "child-a", 20)
 	if err != nil {
 		t.Fatalf("ListCommentsForCaller: %v", err)
 	}
@@ -330,7 +333,7 @@ func TestListCommentsForCallerClampsLimitAtServiceBoundary(t *testing.T) {
 			svc.SetCommentReader(reader)
 			ctx := context.Background()
 
-			if _, err := svc.ListCommentsForCaller(ctx, "child-a", "self", tc.requested); err != nil {
+			if _, err := svc.ListCommentsForCaller(ctx, "child-a", "child-a", tc.requested); err != nil {
 				t.Fatalf("ListCommentsForCaller: %v", err)
 			}
 			if reader.lastLimit != tc.want {

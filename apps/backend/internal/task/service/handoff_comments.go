@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/common/truncate"
@@ -92,21 +91,16 @@ type CommentWindow struct {
 }
 
 // ListCommentsForCaller returns targetTaskID's comments after the same
-// read-access guard the document tools use. targetTaskID may be empty,
-// whitespace-only, or the literal "self" (after trimming) to mean
-// callerTaskID (AC-005.4/005.6/005.8); when that resolves to empty because
-// callerTaskID is also empty, this returns ErrDocumentTaskRequired
-// (AC-005.5) rather than falling through to a plain access denial.
+// read-access guard the document tools use. There is no "self"/empty
+// sentinel: targetTaskID crosses only from the caller-supplied argument (a
+// raw path segment on the HTTP transport, interpolated without validation)
+// and is resolved by the guard like any other target
+// (AC-OFFICE-AGENT-COMMENT-READS-005.4). A caller with no task identity
+// (callerTaskID == "") is denied on this same path for every target, rather
+// than surfacing a distinct missing-target validation error
+// (AC-OFFICE-AGENT-COMMENT-READS-001.13).
 func (s *HandoffService) ListCommentsForCaller(ctx context.Context, callerTaskID, targetTaskID string, limit int) (*CommentWindow, error) {
-	resolvedTarget := strings.TrimSpace(targetTaskID)
-	if resolvedTarget == "self" || resolvedTarget == "" {
-		resolvedTarget = callerTaskID
-	}
-	if resolvedTarget == "" {
-		return nil, ErrDocumentTaskRequired
-	}
-
-	ok, err := canReadDocuments(ctx, repoTaskLookupAdapter{r: s.tasks}, blockerLookupAdapter{repo: s.blockers}, callerTaskID, resolvedTarget)
+	ok, err := canReadDocuments(ctx, repoTaskLookupAdapter{r: s.tasks}, blockerLookupAdapter{repo: s.blockers}, callerTaskID, targetTaskID)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +111,7 @@ func (s *HandoffService) ListCommentsForCaller(ctx context.Context, callerTaskID
 	if s.comments == nil {
 		return nil, errCommentReaderNotConfigured
 	}
-	rows, total, err := s.comments.ListTaskCommentsWindow(ctx, resolvedTarget, clampCommentWindowLimit(limit))
+	rows, total, err := s.comments.ListTaskCommentsWindow(ctx, targetTaskID, clampCommentWindowLimit(limit))
 	if err != nil {
 		return nil, err
 	}
