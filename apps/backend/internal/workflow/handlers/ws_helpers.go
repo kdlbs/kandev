@@ -31,7 +31,14 @@ func (h *Handlers) wsGetByID(
 	resp, err := fn(ctx, req.ID)
 	if err != nil {
 		h.logger.Error(logErrMsg, zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, clientErrMsg, nil)
+		// A denial and a genuine miss share one reply. Anything else is a
+		// failure and must not be dressed up as a missing resource — the
+		// authorization step reads the repository, so a database error can
+		// reach here now.
+		if service.IsNotFound(err) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, clientErrMsg, nil)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, clientErrMsg, nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
@@ -50,6 +57,7 @@ func (h *Handlers) wsHandleStringField(
 		if errors.Is(err, service.ErrNotVisible) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, notFoundMessage, nil)
 		}
+
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, clientErrMsg, nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)

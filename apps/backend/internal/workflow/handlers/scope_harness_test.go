@@ -15,6 +15,7 @@ import (
 	sqlite3 "github.com/mattn/go-sqlite3"
 
 	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/common/logger"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -233,9 +234,9 @@ const (
 	userB = "user-b"
 )
 
-func setupScopedRouter(t *testing.T) *scopedHarness {
+func setupScopedRouter(t *testing.T, logOverride ...*logger.Logger) *scopedHarness {
 	t.Helper()
-	h := setupStepRouterWithDriver(t, countingDriverName)
+	h := setupStepRouterWithDriver(t, countingDriverName, logOverride...)
 	if _, err := h.db.Exec(
 		`INSERT INTO workflows (id, workspace_id, name, created_at, updated_at)
 		 VALUES ('wf-a','ws-a','A Flow',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),

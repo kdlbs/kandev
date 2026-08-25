@@ -3,10 +3,16 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
 
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
+
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/workflow/controller"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -320,4 +326,39 @@ func TestWorkflowTemplatesStayUnscoped(t *testing.T) {
 	if !containsTemplate(listed.Templates, "template-1") {
 		t.Fatalf("templates = %#v, want the seeded row visible to any user", listed.Templates)
 	}
+}
+
+// TestDeniedRequestsDoNotLogAsFailures pins the difference between a rejection
+// and a fault. The delete route pre-reads the step so it can publish the
+// deleted event, and that read is now authorized too — so every unauthorized
+// delete used to file a Warn saying the step could not be fetched, which reads
+// as infrastructure trouble in an operator's logs.
+func TestDeniedRequestsDoNotLogAsFailures(t *testing.T) {
+	core, logs := observer.New(zapcore.WarnLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+	h := setupScopedRouter(t, log)
+
+	requireNotFound(t, doAs(t, h, asUser(userB), http.MethodDelete, "/api/v1/workflow/steps/"+h.stepA, nil))
+
+	if entries := logs.FilterLevelExact(zapcore.WarnLevel).All(); len(entries) != 0 {
+		t.Fatalf("denied delete logged %d warning(s): %+v", len(entries), entries)
+	}
+}
+
+// TestWSGetStepSeparatesDeniedFromBroken is the WS twin of the HTTP history
+// route's rule: an unreachable step is not-found, a failing lookup is not.
+// wsGetByID answered NOT_FOUND for everything, and authorizing the step added
+// a database read to that path, so an outage would have reported every step as
+// missing.
+func TestWSGetStepSeparatesDeniedFromBroken(t *testing.T) {
+	h := setupScopedRouter(t)
+	h.service.SetWorkflowAccessChecker(func(context.Context, string) error {
+		return errors.New("database is locked")
+	})
+
+	msg := dispatchAs(t, h, asUser(userB), ws.ActionWorkflowStepGet, map[string]any{"id": h.stepA})
+	requireWSError(t, msg, ws.ErrorCodeInternalError)
 }

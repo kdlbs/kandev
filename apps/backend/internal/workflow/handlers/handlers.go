@@ -253,7 +253,10 @@ func (h *Handlers) httpDeleteStep(c *gin.Context) {
 	ctx := c.Request.Context()
 	stepID := c.Param("id")
 	stepResp, getErr := h.controller.GetStep(ctx, stepID)
-	if getErr != nil {
+	// A step the caller may not see is the ordinary rejection below, not a
+	// failure to read one — warning about it would file every unauthorized
+	// delete under infrastructure trouble.
+	if getErr != nil && !errors.Is(getErr, service.ErrNotVisible) {
 		h.logger.Warn("failed to fetch step before delete; workflow_step.deleted event will not be published",
 			zap.String("step_id", stepID), zap.Error(getErr))
 	}

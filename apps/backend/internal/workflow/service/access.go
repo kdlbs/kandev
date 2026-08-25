@@ -40,6 +40,13 @@ import (
 // substring (see writeStepMutationError).
 var ErrNotVisible = errors.New("workflow resource not found")
 
+// An unwired checker means the workflow service was built without the task
+// domain (unit tests, standalone tools) and leaves the corresponding check
+// open, the same shape SetSessionAccessChecker has always had. Production
+// always wires all four, which backendapp's TestWorkflowAccessCheckersAreWired
+// pins. The fail-closed branches above it still run either way: an empty ID is
+// refused before the checker is consulted, wired or not.
+
 // SetWorkflowAccessChecker wires the task-domain check for a workflow ID.
 // Production passes taskservice.Service.AuthorizeWorkflowAccess.
 func (s *Service) SetWorkflowAccessChecker(checker func(context.Context, string) error) {
@@ -76,11 +83,14 @@ func callerIsScoped(ctx context.Context) bool {
 // handing "" to the task-domain checker would be read as "no scoping applies"
 // (the trap runSubscriptionCheck documents in backendapp/auth.go).
 func (s *Service) AuthorizeWorkflow(ctx context.Context, workflowID string) error {
-	if !callerIsScoped(ctx) || s.workflowAccessChecker == nil {
+	if !callerIsScoped(ctx) {
 		return nil
 	}
 	if workflowID == "" {
 		return ErrNotVisible
+	}
+	if s.workflowAccessChecker == nil {
+		return nil
 	}
 	return normalizeAccessError(s.workflowAccessChecker(ctx, workflowID))
 }
@@ -88,11 +98,14 @@ func (s *Service) AuthorizeWorkflow(ctx context.Context, workflowID string) erro
 // AuthorizeWorkspace checks that the caller may see a workspace. An empty
 // workspace ID fails closed for the same reason as AuthorizeWorkflow.
 func (s *Service) AuthorizeWorkspace(ctx context.Context, workspaceID string) error {
-	if !callerIsScoped(ctx) || s.workspaceAccessChecker == nil {
+	if !callerIsScoped(ctx) {
 		return nil
 	}
 	if workspaceID == "" {
 		return ErrNotVisible
+	}
+	if s.workspaceAccessChecker == nil {
+		return nil
 	}
 	return normalizeAccessError(s.workspaceAccessChecker(ctx, workspaceID))
 }
@@ -101,11 +114,14 @@ func (s *Service) AuthorizeWorkspace(ctx context.Context, workspaceID string) er
 // event actions. An empty ID fails closed for the same reason as
 // AuthorizeWorkflow; callers strip the "this" sentinel before calling.
 func (s *Service) AuthorizeTask(ctx context.Context, taskID string) error {
-	if !callerIsScoped(ctx) || s.taskAccessChecker == nil {
+	if !callerIsScoped(ctx) {
 		return nil
 	}
 	if taskID == "" {
 		return ErrNotVisible
+	}
+	if s.taskAccessChecker == nil {
+		return nil
 	}
 	return normalizeAccessError(s.taskAccessChecker(ctx, taskID))
 }
@@ -142,6 +158,15 @@ func (s *Service) AuthorizeStep(ctx context.Context, stepID string) error {
 		return err
 	}
 	return nil
+}
+
+// IsNotFound reports whether err is the one answer this package gives for
+// both a resource the caller may not see and one that does not exist. Handler
+// layers use it to pick a not-found reply without having to re-derive the
+// classification (and without accidentally reporting a genuine failure as a
+// miss, which would hide an outage behind an empty board).
+func IsNotFound(err error) bool {
+	return isNotFoundError(err)
 }
 
 // normalizeAccessError collapses a denial into ErrNotVisible and lets a

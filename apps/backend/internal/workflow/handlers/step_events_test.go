@@ -122,7 +122,7 @@ func setupStepRouter(t *testing.T) *workflowHarness {
 // setupStepRouterWithDriver builds the harness over a named SQL driver, so the
 // scoping tests can substitute a statement-counting driver and prove a guard
 // rejected a request without the repository ever being queried.
-func setupStepRouterWithDriver(t *testing.T, driverName string) *workflowHarness {
+func setupStepRouterWithDriver(t *testing.T, driverName string, logOverride ...*logger.Logger) *workflowHarness {
 	t.Helper()
 	rawDB, err := sql.Open(driverName, ":memory:")
 	if err != nil {
@@ -151,6 +151,9 @@ func setupStepRouterWithDriver(t *testing.T, driverName string) *workflowHarness
 		t.Fatalf("new repository: %v", err)
 	}
 	log := logger.Default()
+	if len(logOverride) > 0 {
+		log = logOverride[0]
+	}
 	eventBus := bus.NewMemoryEventBus(log)
 	workflowSvc := service.NewService(repo, log)
 	t.Cleanup(func() { _ = workflowSvc.Close() })

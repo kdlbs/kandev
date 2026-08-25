@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/task/models"
@@ -93,8 +94,16 @@ func (s *Service) authorizeWorkflowID(ctx context.Context, workflowID string) er
 		return nil
 	}
 	workspace, err := s.workspaces.GetWorkspace(ctx, workflow.WorkspaceID)
-	if err != nil {
-		return nil //nolint:nilerr // visibility fallback, not an operation failure
+	switch {
+	case errors.Is(err, repoerrors.ErrWorkspaceNotFound):
+		// A dangling workspace reference should not hide the workflow from the
+		// single user who can already see everything else about it.
+		return nil
+	case err != nil:
+		// Anything else is a failed lookup, not an answer. Treating it as
+		// "authorized" would let a transient database error hand a guessed
+		// workflow ID to whoever asked, so it fails closed by propagating.
+		return err
 	}
 	if !workspaceVisibleTo(workspace, userID) {
 		return repoerrors.ErrWorkspaceNotFound
