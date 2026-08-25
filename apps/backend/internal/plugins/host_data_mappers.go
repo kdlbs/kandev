@@ -2,11 +2,14 @@ package plugins
 
 import (
 	"context"
+	"encoding/json"
 	"net/url"
+	"strings"
 	"time"
 
 	agentsettingsdto "github.com/kandev/kandev/internal/agent/settings/dto"
 	analyticsmodels "github.com/kandev/kandev/internal/analytics/models"
+	githubsvc "github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/sysprompt"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -79,14 +82,6 @@ func sessionSnapshotModel(snapshot map[string]any) string {
 	return ""
 }
 
-func timePtrToRFC3339(t *time.Time) *string {
-	if t == nil {
-		return nil
-	}
-	s := t.UTC().Format(time.RFC3339)
-	return &s
-}
-
 func stringPtrOrNil(s string) *string {
 	if s == "" {
 		return nil
@@ -128,7 +123,83 @@ func taskModelToDTO(t *taskmodels.Task) pluginsdk.Task {
 		IsEphemeral:  t.IsEphemeral,
 		Repositories: repos,
 		Metadata:     t.Metadata,
+
+		ArchivedAt:             timePtrToRFC3339(t.ArchivedAt),
+		WorkflowStepID:         t.WorkflowStepID,
+		Position:               int32(t.Position),
+		AssigneeAgentProfileID: t.AssigneeAgentProfileID,
+		Labels:                 decodeTaskLabels(t.Labels),
+		Autopilot:              t.Autopilot,
+		WIPAdmitted:            t.WIPAdmitted,
+		QueuedForStepID:        t.QueuedForStepID,
+		QueuedAt:               timePtrToRFC3339(t.QueuedAt),
+		ProjectID:              t.ProjectID,
+		ExternalID:             t.ExternalID,
 	}
+}
+
+func timePtrToRFC3339(t *time.Time) *string {
+	if t == nil {
+		return nil
+	}
+	s := t.UTC().Format(time.RFC3339)
+	return &s
+}
+
+// decodeTaskLabels turns the model's JSON-array-string into a real slice.
+//
+// A MALFORMED VALUE YIELDS NO LABELS, NOT AN ERROR. Labels are decoration on a
+// read that must not fail because one row holds something unparseable; the
+// alternative is a whole task list refused over a cosmetic field.
+func decodeTaskLabels(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "[]" {
+		return nil
+	}
+	var out []string
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return nil
+	}
+	return out
+}
+
+// taskPRsToDTOs maps kandev's own PR rows onto the plugin contract. Review and
+// check state come along because kandev's PR watcher already syncs them: a
+// plugin asking "what can merge" would otherwise re-query the forge per pull
+// request, which is slower and rate-limited.
+func taskPRsToDTOs(prs []*githubsvc.TaskPR) []pluginsdk.TaskPullRequest {
+	out := make([]pluginsdk.TaskPullRequest, 0, len(prs))
+	for _, pr := range prs {
+		if pr == nil {
+			continue
+		}
+		out = append(out, pluginsdk.TaskPullRequest{
+			Number:     int64(pr.PRNumber),
+			URL:        pr.PRURL,
+			Title:      pr.PRTitle,
+			State:      pr.State,
+			HeadBranch: pr.HeadBranch,
+			BaseBranch: pr.BaseBranch,
+			// IsDraft is nullable on the row (unknown before the first sync);
+			// nil reads as not-draft, matching how kandev's own UI treats it.
+			IsDraft: pr.IsDraft != nil && *pr.IsDraft,
+			// Only github writes these rows today; the field exists so a future
+			// gitlab-backed row is distinguishable rather than mislabelled.
+			Provider:                "github",
+			MergedAt:                timePtrToRFC3339(pr.MergedAt),
+			ClosedAt:                timePtrToRFC3339(pr.ClosedAt),
+			ReviewState:             pr.ReviewState,
+			ChecksState:             pr.ChecksState,
+			MergeableState:          pr.MergeableState,
+			UnresolvedReviewThreads: int32(pr.UnresolvedReviewThreads),
+			ChecksTotal:             int32(pr.ChecksTotal),
+			ChecksPassing:           int32(pr.ChecksPassing),
+			Additions:               int32(pr.Additions),
+			Deletions:               int32(pr.Deletions),
+			AuthorLogin:             pr.AuthorLogin,
+		})
+	}
+	return out
 }
 
 func workspaceModelToDTO(w *taskmodels.Workspace) pluginsdk.Workspace {
@@ -158,11 +229,15 @@ func workflowModelToDTO(w *taskmodels.Workflow) pluginsdk.Workflow {
 
 func workflowStepModelToDTO(s *wfmodels.WorkflowStep) pluginsdk.WorkflowStep {
 	return pluginsdk.WorkflowStep{
-		ID:         s.ID,
-		WorkflowID: s.WorkflowID,
-		Name:       s.Name,
-		Position:   int32(s.Position),
-		StageType:  string(s.StageType),
+		ID:             s.ID,
+		WorkflowID:     s.WorkflowID,
+		Name:           s.Name,
+		Position:       int32(s.Position),
+		StageType:      string(s.StageType),
+		Color:          s.Color,
+		IsStartStep:    s.IsStartStep,
+		WIPLimit:       int32(s.WIPLimit),
+		AgentProfileID: s.AgentProfileID,
 	}
 }
 
