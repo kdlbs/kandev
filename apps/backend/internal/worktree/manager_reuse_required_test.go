@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 )
 
 func TestCreate_ReuseRequiredRejectsMissingCanonicalWorktree(t *testing.T) {
@@ -170,5 +172,66 @@ func TestCreate_ReuseRequiredAllowsAuthorizedEnvironmentFromAnotherTask(t *testi
 	}
 	if got.ID != "canonical-worktree" {
 		t.Fatalf("Create() worktree ID = %q, want canonical-worktree", got.ID)
+	}
+}
+
+// TestCreate_ReuseRequiredRejectsStaleWorktreePathOwnedByAnotherTask
+// confirms that the attach-only ReuseRequired path also validates the
+// worktree path's ownership marker, rejecting a record whose on-disk
+// path belongs to another live task.
+func TestCreate_ReuseRequiredRejectsStaleWorktreePathOwnedByAnotherTask(t *testing.T) {
+	repoPath := initGitRepoWithRemote(t)
+
+	cfg := newTestConfig(t)
+	tasksBase := cfg.TasksBasePath
+
+	// Create the live task's directory and ownership marker.
+	liveTaskDir := filepath.Join(tasksBase, "live-task_reuse")
+	if err := os.MkdirAll(liveTaskDir, 0755); err != nil {
+		t.Fatalf("mkdir live task dir: %v", err)
+	}
+	if err := storageworkspaces.WriteOwnershipMarker(liveTaskDir, storageworkspaces.OwnershipMarker{
+		TaskID:        "task-live-reuse",
+		TaskDirName:   "live-task_reuse",
+		LayoutVersion: storageworkspaces.LayoutVersionSemantic,
+	}); err != nil {
+		t.Fatalf("write live ownership marker: %v", err)
+	}
+
+	// The worktree lives inside the live task's directory, as it would in
+	// production: <tasksBase>/<taskDirName>/<repoName>/
+	liveWorktreePath := filepath.Join(liveTaskDir, "my-repo")
+	if err := os.MkdirAll(liveWorktreePath, 0755); err != nil {
+		t.Fatalf("mkdir live worktree: %v", err)
+	}
+	runGit(t, repoPath, "worktree", "add", "-b", "feature/reuse-stale", liveWorktreePath, "main")
+
+	store := newMockStore()
+	store.worktrees["canonical-reuse"] = &Worktree{
+		ID:                "canonical-reuse",
+		TaskID:            "task-stale-reuse",
+		TaskEnvironmentID: "environment-1",
+		RepositoryID:      "repository-1",
+		Path:              liveWorktreePath,
+		Branch:            "feature/reuse-stale",
+		Status:            StatusActive,
+	}
+	mgr, err := NewManager(cfg, store, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	_, err = mgr.Create(context.Background(), CreateRequest{
+		TaskID:            "task-attach-reuse",
+		SessionID:         "session-attach",
+		TaskEnvironmentID: "environment-1",
+		RepositoryID:      "repository-1",
+		RepositoryPath:    repoPath,
+		BaseBranch:        "main",
+		WorktreeID:        "canonical-reuse",
+		ReuseRequired:     true,
+	})
+	if !errors.Is(err, ErrWorktreePathOwnedByAnotherTask) {
+		t.Fatalf("Create() error = %v, want ErrWorktreePathOwnedByAnotherTask", err)
 	}
 }

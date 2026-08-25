@@ -649,3 +649,76 @@ func TestWorktreePreparer_MultiRepo_RunsPerRepoSetupScript(t *testing.T) {
 		}
 	}
 }
+
+// TestWorktreePreparer_FreshStartRejectsStaleWorktreePath_NestedProjectMarker
+// protects against the ownership-marker walk being confused by a legitimate
+// .kandev-workspace.json file inside a descendant repository checkout. The
+// stale task must still be rejected — the presence of a non-task-root marker
+// must not shadow the task-root marker.
+func TestWorktreePreparer_FreshStartRejectsStaleWorktreePath_NestedProjectMarker(t *testing.T) {
+	repositoryPath := initBareGitRepo(t, "repo-with-marker")
+	preparer, manager, store := newPreparerForTestWithStore(t)
+	ctx := context.Background()
+
+	live, err := manager.Create(ctx, worktree.CreateRequest{
+		TaskID:         "task-live-nested",
+		SessionID:      "session-live-nested",
+		TaskTitle:      "Live task",
+		RepositoryID:   "repository-nested",
+		RepositoryPath: repositoryPath,
+		BaseBranch:     "main",
+		TaskDirName:    "live-task_nested",
+		RepoName:       "repo-with-marker",
+	})
+	if err != nil {
+		t.Fatalf("create live worktree: %v", err)
+	}
+	liveHead := strings.TrimSpace(runGitForPreparerTest(t, live.Path, "rev-parse", "HEAD"))
+
+	// Write a legitimate .kandev-workspace.json inside the repo checkout itself
+	// (as a real project might) to see if it shadows the task-root marker.
+	if err := os.WriteFile(filepath.Join(live.Path, ".kandev-workspace.json"),
+		[]byte(`{"project":"not-kandev","version":1}`), 0644); err != nil {
+		t.Fatalf("write project marker: %v", err)
+	}
+
+	if err := store.CreateWorktree(ctx, &worktree.Worktree{
+		ID:           "worktree-stale-nested",
+		TaskID:       "task-stale-nested",
+		SessionID:    "session-stale-nested",
+		RepositoryID: "repository-nested",
+		Path:         live.Path,
+		Branch:       "feat/stale-nested",
+		Status:       worktree.StatusActive,
+	}); err != nil {
+		t.Fatalf("seed stale worktree: %v", err)
+	}
+
+	result, err := preparer.Prepare(ctx, &EnvPrepareRequest{
+		TaskID:         "task-stale-nested",
+		SessionID:      "", // empty — forces WorktreeID-only lookup
+		TaskTitle:      "Stale task nested-marker",
+		ExecutorType:   executor.NameStandalone,
+		RepositoryID:   "repository-nested",
+		RepositoryPath: repositoryPath,
+		BaseBranch:     "main",
+		WorktreeID:     "worktree-stale-nested",
+		TaskDirName:    "stale-task-nested_def",
+		RepoName:       "repo-with-marker",
+	}, nil)
+	if err != nil {
+		t.Fatalf("prepare returned hard error: %v", err)
+	}
+	if result.Success {
+		t.Fatal("fresh start succeeded despite nested non-ownership marker in repo checkout")
+	}
+	if !errors.Is(result.Error, worktree.ErrWorktreePathOwnedByAnotherTask) {
+		t.Fatalf("prepare error = %v, want ErrWorktreePathOwnedByAnotherTask", result.Error)
+	}
+	if got := strings.TrimSpace(runGitForPreparerTest(t, live.Path, "rev-parse", "HEAD")); got != liveHead {
+		t.Fatalf("live worktree HEAD changed: got %q, want %q", got, liveHead)
+	}
+	if !manager.IsValid(live.Path) {
+		t.Fatal("live worktree was removed or corrupted")
+	}
+}

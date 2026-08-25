@@ -202,6 +202,9 @@ func (m *Manager) reuseRequiredWorktree(ctx context.Context, req CreateRequest) 
 		!m.IsValid(wt.Path) {
 		return nil, ErrReuseWorktreeUnavailable
 	}
+	if err := m.validateExistingWorktreePathOwner(wt.Path, req.TaskID); err != nil {
+		return nil, err
+	}
 	return wt, nil
 }
 
@@ -296,21 +299,26 @@ func (m *Manager) validateExistingWorktreePathOwner(worktreePath, taskID string)
 	}
 	// Normalize: ExpandedTasksBasePath returns the configured value verbatim
 	// (incl. trailing slashes or doubled separators), while filepath.Dir
-	// always yields a cleaned form. Without this, the loop below overshoots
-	// the intended stop point when tasksBase is non-clean.
+	// always yields a cleaned form. Without this, the path computation below
+	// may miscompute the task-root segment.
 	tasksBase = filepath.Clean(tasksBase)
 	relativePath, err := filepath.Rel(tasksBase, worktreePath)
 	if err != nil || relativePath == "." || relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
 		return nil
 	}
-	for candidate := filepath.Clean(worktreePath); candidate != tasksBase; candidate = filepath.Dir(candidate) {
-		owner, found, err := storageworkspaces.ReadOwnershipMarker(candidate)
-		if err != nil {
-			return fmt.Errorf("inspect worktree task root ownership: %w", err)
-		}
-		if found && owner.TaskID != taskID {
-			return fmt.Errorf("%w: path %q belongs to task %q", ErrWorktreePathOwnedByAnotherTask, worktreePath, owner.TaskID)
-		}
+	// The task-root ownership marker always lives at the first path segment
+	// below tasksBase (i.e. <tasksBase>/<taskDirName>/). Walking all levels
+	// up from worktreePath is wrong: a descendant repository that legitimately
+	// contains its own .kandev-workspace.json (e.g. a nested project) would be
+	// mistaken for the task-root marker. Derive the task root from the
+	// relative path and inspect only that one directory.
+	taskRoot := filepath.Join(tasksBase, strings.SplitN(relativePath, string(filepath.Separator), 2)[0])
+	owner, found, err := storageworkspaces.ReadOwnershipMarker(taskRoot)
+	if err != nil {
+		return fmt.Errorf("inspect worktree task root ownership: %w", err)
+	}
+	if found && owner.TaskID != taskID {
+		return fmt.Errorf("%w: path %q belongs to task %q", ErrWorktreePathOwnedByAnotherTask, worktreePath, owner.TaskID)
 	}
 	return nil
 }
