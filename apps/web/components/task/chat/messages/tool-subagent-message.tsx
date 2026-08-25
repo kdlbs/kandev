@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useCallback, memo } from "react";
-import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
+import { IconChevronDown, IconChevronRight, IconX } from "@tabler/icons-react";
 import { GridSpinner } from "@/components/grid-spinner";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
 import type { SubagentTaskPayload, ToolCallMetadata } from "@/components/task/chat/types";
 import { SubagentMetaRow } from "@/components/task/chat/messages/subagent-meta-row";
+import { normalizeToolCallStatus } from "./tool-status";
 import { useTranslation } from "react-i18next";
 
 type ToolSubagentMessageProps = {
@@ -124,16 +125,44 @@ type SubagentHeaderProps = {
   subagentType: string;
   description: string;
   isActive: boolean;
+  status?: ToolCallMetadata["status"];
   childCount: number;
   hasExpandableContent: boolean;
   onToggle: () => void;
 };
+
+function SubagentStatusIcon({
+  isActive,
+  status,
+}: {
+  isActive: boolean;
+  status?: ToolCallMetadata["status"];
+}) {
+  const { t } = useTranslation();
+  if (isActive) {
+    return (
+      <>
+        <span className="text-xs text-muted-foreground italic">{t("task:working")}</span>
+        <GridSpinner className="text-muted-foreground shrink-0" />
+      </>
+    );
+  }
+  const normalized = normalizeToolCallStatus(status);
+  if (normalized !== "error" && normalized !== "cancelled") return null;
+  const label = normalized === "cancelled" ? t("task:cancelled") : t("task:failed");
+  return (
+    <span className="shrink-0" aria-label={label}>
+      <IconX aria-hidden className="h-3.5 w-3.5 text-red-500" />
+    </span>
+  );
+}
 
 function SubagentHeader({
   isExpanded,
   subagentType,
   description,
   isActive,
+  status,
   childCount,
   hasExpandableContent,
   onToggle,
@@ -141,7 +170,6 @@ function SubagentHeader({
   const { t } = useTranslation();
   const shownDescription = stripSubagentTypePrefix(description, subagentType);
   const showDescription = shownDescription !== "";
-  const showInlineWorking = isActive && !hasExpandableContent;
   const content = (
     <>
       {hasExpandableContent &&
@@ -171,10 +199,7 @@ function SubagentHeader({
           {shownDescription}
         </span>
       )}
-      {showInlineWorking && (
-        <span className="text-xs text-muted-foreground italic">{t("task:working")}</span>
-      )}
-      {isActive && <GridSpinner className="text-muted-foreground shrink-0" />}
+      <SubagentStatusIcon isActive={isActive} status={status} />
       {childCount > 0 && (
         <span
           data-testid="subagent-child-count"
@@ -311,6 +336,7 @@ export const ToolSubagentMessage = memo(function ToolSubagentMessage({
         subagentType={subagentType}
         description={description}
         isActive={isActive}
+        status={metadata?.status}
         childCount={childCount}
         hasExpandableContent={hasExpandableContent}
         onToggle={handleToggle}

@@ -309,6 +309,47 @@ describe("ToolSubagentMessage expansion", () => {
   });
 });
 
+describe("subagent header status", () => {
+  const LOADING = { name: "Loading" } as const;
+
+  it("keeps Working and the spinner on an active card that already has children", () => {
+    renderSubagent(subagentMessage({ metadataStatus: "running", payloadStatus: STARTED }), {
+      childMessages: [childTool("child-1", "first child"), childTool("child-2", "second child")],
+    });
+
+    expect(screen.getByText(WORKING)).toBeTruthy();
+    expect(screen.getByRole("status", LOADING)).toBeTruthy();
+  });
+
+  it("shows no Working, spinner, failed mark, or success check on a completed card with children", () => {
+    renderSubagent(subagentMessage({ metadataStatus: COMPLETE, payloadStatus: COMPLETE }), {
+      childMessages: [childTool("child-1", "first child"), childTool("child-2", "second child")],
+    });
+
+    expect(screen.queryByText(WORKING)).toBeNull();
+    expect(screen.queryByRole("status", LOADING)).toBeNull();
+    expect(screen.queryByLabelText("Failed")).toBeNull();
+    expect(screen.queryByLabelText("Cancelled")).toBeNull();
+    expect(screen.queryByLabelText("Command succeeded")).toBeNull();
+  });
+
+  it("marks a failed card with a Failed label and no spinner", () => {
+    renderSubagent(subagentMessage({ metadataStatus: "failed", payloadStatus: COMPLETE }));
+
+    expect(screen.getByLabelText("Failed")).toBeTruthy();
+    expect(screen.queryByRole("status", LOADING)).toBeNull();
+    expect(screen.queryByText(WORKING)).toBeNull();
+  });
+
+  it("marks a cancelled card with a Cancelled label and no spinner", () => {
+    renderSubagent(subagentMessage({ metadataStatus: "cancelled", payloadStatus: COMPLETE }));
+
+    expect(screen.getByLabelText("Cancelled")).toBeTruthy();
+    expect(screen.queryByRole("status", LOADING)).toBeNull();
+    expect(screen.queryByText(WORKING)).toBeNull();
+  });
+});
+
 // A reviewer's verdict is the only thing anyone reads a review-wave card for.
 // It arrives on `toolResponse.content` and, before this, was shown only when
 // the subagent streamed no child tool calls — i.e. never, for Claude.

@@ -104,6 +104,22 @@ over.
   equals the rendered child-message count, since the header already states it.
   A divergence between the two keeps both.
 
+### Header status
+
+- While a card is effectively active (`isSubagentEffectivelyActive`), its
+  header always shows `task:working` and the existing `GridSpinner`, even when
+  the card has expandable children. The previous
+  `isActive && !hasExpandableContent` gate on the Working label is gone: a live
+  wave with nested tool calls must not look like a settled type + description
+  row.
+- After a failed or cancelled finish, the header shows a red `IconX` with
+  `aria-label` `task:failed` or `task:cancelled`. Successful completion shows
+  neither a check nor a Done chip: the spinner and Working copy disappear, and
+  the existing identity and metrics chips appear.
+- UUID, model, duration, and token chips stay identity and metrics. They still
+  render only when the card is not active. No Running / Failed / Done chip is
+  added to the metadata row.
+
 ### Turn-group label
 
 - A collapsed turn group's label states the counts it actually describes. The
@@ -156,6 +172,15 @@ over.
 - **GIVEN** a task whose `active_subagent_count` is two, **WHEN** its kanban card
   renders, **THEN** a chip shows the count; **WHEN** the count drops to zero,
   **THEN** the chip disappears without a reload.
+- **GIVEN** an active subagent with nested child tool calls, **WHEN** its card
+  renders collapsed or expanded, **THEN** the header shows `Working...` and a
+  spinner, and the UUID/model chips are absent.
+- **GIVEN** a successfully completed subagent, **WHEN** its card renders,
+  **THEN** the header has no spinner, no Working copy, and no success check,
+  and the existing identity and metrics chips are visible.
+- **GIVEN** a failed or cancelled subagent, **WHEN** its card renders, **THEN**
+  the header shows a red error mark labelled Failed or Cancelled, with no
+  spinner and no success check.
 
 ## Out of scope
 
@@ -169,6 +194,10 @@ over.
   path. OpenCode, Cursor, and Amp continue to report only what they report.
 - A dedicated subagent list, drill-down panel, or per-subagent filtering on the
   board. The board gets a count chip only.
+- A Running / Failed / Done chip on the subagent metadata row, or a success
+  check on a completed header. Status stays a header glyph plus Working copy.
+- Promoting identity chips (UUID, model) into the active header. They remain
+  settled-card metadata.
 - Any change to `active_subagent_count` derivation, liveness accounting, or the
   busy-signal contract, all owned by
   [background-work-liveness](../../platform/requirements/background-work-liveness.md).
