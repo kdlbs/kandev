@@ -288,9 +288,12 @@ func requestBranchIdentitySlug(req CreateRequest) string {
 func (m *Manager) resolveBaseRefWithFallback(ctx context.Context, req *CreateRequest) (baseRef, warning, detail string, err error) {
 	baseRef = req.BaseBranch
 	if req.RemoteSyncHandled {
-		baseRef = m.preferRefreshedRemoteRef(ctx, req.RepositoryPath, req.BaseBranch)
+		baseRef, err = m.preferRefreshedRemoteRef(ctx, req.RepositoryPath, req.BaseBranch)
 	} else if req.PullBeforeWorktree {
-		baseRef = m.pullBaseBranch(ctx, req.RepositoryPath, req.BaseBranch, req.OnSyncProgress)
+		baseRef, err = m.pullBaseBranch(ctx, req.RepositoryPath, req.BaseBranch, req.OnSyncProgress)
+	}
+	if err != nil {
+		return "", "", "", err
 	}
 
 	baseExists, baseErr := m.branchExists(ctx, req.RepositoryPath, baseRef)
@@ -306,7 +309,10 @@ func (m *Manager) resolveBaseRefWithFallback(ctx context.Context, req *CreateReq
 	fallback := strings.TrimSpace(req.FallbackBaseBranch)
 	resolvedFallback := ""
 	if fallback != "" && fallback != baseRef {
-		resolvedFallback = m.resolveFallbackRef(ctx, req, fallback)
+		resolvedFallback, err = m.resolveFallbackRef(ctx, req, fallback)
+		if err != nil {
+			return "", "", "", err
+		}
 		fallbackExists, fallbackErr := m.branchExists(ctx, req.RepositoryPath, resolvedFallback)
 		if fallbackErr != nil {
 			return "", "", "", fmt.Errorf("could not verify fallback base branch %q: %w", resolvedFallback, fallbackErr)
@@ -329,7 +335,10 @@ func (m *Manager) resolveBaseRefWithFallback(ctx context.Context, req *CreateReq
 	if liveFallback == baseRef {
 		return "", "", "", fmt.Errorf("%w: %s", ErrInvalidBaseBranch, baseRef)
 	}
-	resolvedFallback = m.resolveFallbackRef(ctx, req, liveFallback)
+	resolvedFallback, err = m.resolveFallbackRef(ctx, req, liveFallback)
+	if err != nil {
+		return "", "", "", err
+	}
 	fallbackExists, fallbackErr := m.branchExists(ctx, req.RepositoryPath, resolvedFallback)
 	if fallbackErr != nil {
 		return "", "", "", fmt.Errorf("could not verify live fallback base branch %q: %w", resolvedFallback, fallbackErr)
@@ -341,14 +350,14 @@ func (m *Manager) resolveBaseRefWithFallback(ctx context.Context, req *CreateReq
 	return m.finishBaseFallback(req, baseRef, fallback, resolvedFallback)
 }
 
-func (m *Manager) resolveFallbackRef(ctx context.Context, req *CreateRequest, fallback string) string {
+func (m *Manager) resolveFallbackRef(ctx context.Context, req *CreateRequest, fallback string) (string, error) {
 	if req.RemoteSyncHandled {
 		return m.preferRefreshedRemoteRef(ctx, req.RepositoryPath, fallback)
 	}
 	if req.PullBeforeWorktree {
 		return m.pullBaseBranch(ctx, req.RepositoryPath, fallback, nil)
 	}
-	return fallback
+	return fallback, nil
 }
 
 func (m *Manager) finishBaseFallback(req *CreateRequest, baseRef, fallback, resolvedFallback string) (string, string, string, error) {
@@ -420,7 +429,9 @@ func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRe
 				branchName = req.CheckoutBranch
 				checkoutMode.CheckoutBranch = ""
 			} else {
-				fetchResult, err = m.fetchBranchToLocal(ctx, req.RepositoryPath, req.CheckoutBranch, req.PRNumber)
+				fetchResult, err = m.fetchBranchToLocalWithPolicy(
+					ctx, req.RepositoryPath, req.CheckoutBranch, req.PRNumber, req.PullBeforeWorktree,
+				)
 				if err != nil {
 					return nil, err
 				}
@@ -626,9 +637,16 @@ type FetchBranchResult struct {
 // the base repo, so this is the only way to materialize a fork PR's head
 // without adding the fork as a remote.
 func (m *Manager) fetchBranchToLocal(ctx context.Context, repoPath, branch string, prNumber int) (*FetchBranchResult, error) {
+	return m.fetchBranchToLocalWithPolicy(ctx, repoPath, branch, prNumber, false)
+}
+
+func (m *Manager) fetchBranchToLocalWithPolicy(
+	ctx context.Context, repoPath, branch string, prNumber int, required bool,
+) (*FetchBranchResult, error) {
 	m.logger.Info("syncing checkout branch",
 		zap.String("branch", branch),
 		zap.Int("pr_number", prNumber),
+		zap.Bool("required", required),
 		zap.String("repo_path", repoPath))
 
 	// Acquire the throttle slot FIRST, then build fetchCtx with the
@@ -652,9 +670,23 @@ func (m *Manager) fetchBranchToLocal(ctx context.Context, repoPath, branch strin
 	// the local ref. Retry by fetching only the remote-tracking ref (origin/branch),
 	// which is always safe regardless of worktree state.
 	if isFetchRefusedCheckedOut(outputStr) {
-		if result := m.retryFetchAsRemoteTrackingRef(ctx, repoPath, branch, prNumber); result != nil {
+		if result := m.retryFetchAsRemoteTrackingRef(ctx, repoPath, branch, prNumber, required); result != nil {
+			if required && result.Warning != "" {
+				return nil, fmt.Errorf(
+					"required refresh of checkout branch %q could not verify the refreshed ref: %w",
+					branch, ErrGitCommandFailed,
+				)
+			}
 			return result, nil
 		}
+	}
+
+	if required {
+		reason := classifyGitFallbackReason(err, outputStr, fetchCtxErr)
+		return nil, fmt.Errorf(
+			"required refresh of checkout branch %q failed (%s): %w",
+			branch, reason, syncFailureCause(reason, err, fetchCtxErr),
+		)
 	}
 
 	m.logger.Warn("fetch from origin failed, checking local branch",
@@ -691,7 +723,9 @@ func (m *Manager) fetchBranchToLocal(ctx context.Context, repoPath, branch strin
 // Uses ctx (not the original fetchCtx) and a fresh m.fetchTimeout budget via
 // runGitCombinedAfterAcquire — the parent's fetchCtx is already consumed by
 // the first attempt, so reusing it would leave no room for the retry.
-func (m *Manager) retryFetchAsRemoteTrackingRef(ctx context.Context, repoPath, branch string, prNumber int) *FetchBranchResult {
+func (m *Manager) retryFetchAsRemoteTrackingRef(
+	ctx context.Context, repoPath, branch string, prNumber int, required bool,
+) *FetchBranchResult {
 	retryRef := branch
 	if prNumber > 0 {
 		retryRef = fmt.Sprintf("pull/%d/head", prNumber)
@@ -702,6 +736,12 @@ func (m *Manager) retryFetchAsRemoteTrackingRef(ctx context.Context, repoPath, b
 	m.logger.Info("fetched via remote-tracking ref (branch checked out elsewhere)",
 		zap.String("branch", branch))
 	if prNumber > 0 {
+		if required {
+			// A fork PR has no origin/<branch> ref. FETCH_HEAD is the only
+			// ref produced by the successful pull/<N>/head retry, and is
+			// therefore the safe start point for a required refresh.
+			return &FetchBranchResult{StartPoint: "FETCH_HEAD"}
+		}
 		// Fork PRs have no origin/<branch> ref — the bare
 		// pull/<N>/head retry only updates FETCH_HEAD, so the local
 		// `branch` (already populated by the prior worktree) is the
@@ -730,7 +770,8 @@ func (m *Manager) retryFetchAsRemoteTrackingRef(ctx context.Context, repoPath, b
 // handleFetchFallback and the non-current-branch path in resolveLocalBaseRef.
 func (m *Manager) resolveRetryStartPoint(ctx context.Context, repoPath, branch string) *FetchBranchResult {
 	remoteRef := "origin/" + branch
-	if m.refContains(ctx, repoPath, remoteRef, branch) {
+	remoteContainsLocal, remoteErr := m.refContains(ctx, repoPath, remoteRef, branch)
+	if remoteErr == nil && remoteContainsLocal {
 		return &FetchBranchResult{StartPoint: remoteRef}
 	}
 	m.logger.Info("using local branch (remote-tracking ref does not contain all local commits)",
@@ -745,8 +786,13 @@ func (m *Manager) resolveRetryStartPoint(ctx context.Context, repoPath, branch s
 	// really may miss commits that are on origin, so the existing FetchWarning
 	// surface has to say so rather than report a clean success. The wording
 	// covers both, because this branch cannot tell them apart.
-	if m.refContains(ctx, repoPath, branch, remoteRef) {
+	localContainsRemote, localErr := m.refContains(ctx, repoPath, branch, remoteRef)
+	if localErr == nil && localContainsRemote {
 		return &FetchBranchResult{}
+	}
+	warningDetail := fmt.Sprintf("git merge-base --is-ancestor %s %s reported non-zero", branch, remoteRef)
+	if remoteErr != nil || localErr != nil {
+		warningDetail = "git merge-base ancestry could not be verified"
 	}
 	return &FetchBranchResult{
 		Warning: fmt.Sprintf(
@@ -755,7 +801,7 @@ func (m *Manager) resolveRetryStartPoint(ctx context.Context, repoPath, branch s
 		// No git command failed here, so there is no raw output to carry: the
 		// probe ran and answered "no" (or could not answer). Name the probe
 		// rather than inventing a fake error string.
-		WarningDetail: fmt.Sprintf("git merge-base --is-ancestor %s %s reported non-zero", branch, remoteRef),
+		WarningDetail: warningDetail,
 	}
 }
 
@@ -1272,6 +1318,15 @@ func (m *Manager) copyConfiguredFiles(ctx context.Context, req CreateRequest, wt
 
 // recreate recreates a worktree from stored metadata.
 func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRequest) (*Worktree, error) {
+	// Recreate bypasses the new-worktree path, so perform the same required
+	// base refresh before touching the existing worktree path. A failed refresh
+	// must leave the retryable on-disk state intact.
+	if req.PullBeforeWorktree && !req.RemoteSyncHandled {
+		if _, _, _, err := m.resolveBaseRefWithFallback(ctx, &req); err != nil {
+			return nil, err
+		}
+	}
+
 	// Clean up existing directory if present
 	if existing.Path != "" {
 		if err := os.RemoveAll(existing.Path); err != nil {
@@ -1329,7 +1384,10 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 				return nil, fmt.Errorf("restore contribution branch: %s: %w", strings.TrimSpace(string(output)), branchErr)
 			}
 		} else {
-			if _, fetchErr := m.fetchBranchToLocal(ctx, req.RepositoryPath, existing.Branch, req.PRNumber); fetchErr != nil {
+			if _, fetchErr := m.fetchBranchToLocalWithPolicy(
+				ctx, req.RepositoryPath, existing.Branch, req.PRNumber,
+				req.PullBeforeWorktree && !req.RemoteSyncHandled,
+			); fetchErr != nil {
 				m.logger.Warn("failed to restore worktree branch during recreate",
 					zap.String("worktree_id", existing.ID),
 					zap.String("branch", existing.Branch),

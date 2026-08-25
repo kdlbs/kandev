@@ -13,6 +13,7 @@ type SyncProgressStatus string
 const (
 	SyncProgressRunning   SyncProgressStatus = "running"
 	SyncProgressCompleted SyncProgressStatus = "completed"
+	SyncProgressFailed    SyncProgressStatus = "failed"
 )
 
 // SyncProgressEvent reports pre-worktree base-branch synchronization progress.

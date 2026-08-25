@@ -909,6 +909,7 @@ export class ApiClient {
     repositoryId: string,
     updates: {
       default_branch?: string;
+      pull_before_worktree?: boolean;
       provider?: string;
       provider_repo_id?: string;
       provider_host?: string;

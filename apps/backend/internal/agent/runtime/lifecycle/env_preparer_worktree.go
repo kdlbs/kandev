@@ -417,6 +417,12 @@ func (p *WorktreePreparer) prepareMultiRepo(
 		steps = newSteps
 		stepIdx = nextIdx
 		if err != nil {
+			err = &RepositoryPreparationError{
+				RepositoryID:     spec.RepositoryID,
+				TaskRepositoryID: spec.TaskRepositoryID,
+				RepositoryName:   spec.RepoName,
+				Cause:            err,
+			}
 			p.rollbackWorktrees(ctx, createdIDs)
 			return &EnvPrepareResult{
 				Success:      false,
@@ -607,5 +613,7 @@ func applySyncProgressEvent(step *PrepareStep, event worktree.SyncProgressEvent)
 		now := time.Now()
 		step.Status = PrepareStepCompleted
 		step.EndedAt = &now
+	case worktree.SyncProgressFailed:
+		completeStepError(step, event.Error)
 	}
 }

@@ -67,6 +67,54 @@ func TestRecreate_FetchesBranchFromOriginWhenLocalDeleted(t *testing.T) {
 	}
 }
 
+func TestRecreate_RequiredBaseRefreshFailureStopsPreparation(t *testing.T) {
+	repoPath := initGitRepoWithRemote(t)
+	worktreePath := filepath.Join(t.TempDir(), "task-required", "repo-1")
+	if err := os.MkdirAll(worktreePath, 0755); err != nil {
+		t.Fatalf("create worktree placeholder: %v", err)
+	}
+
+	scriptDir := writeFakeGitScript(t, `
+case "${1:-}" in
+  fetch)
+    echo "fatal: Authentication failed" >&2
+    exit 1
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`)
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	mgr := newRecreateTestManager(t)
+	existing := &Worktree{
+		ID:             "wt-required",
+		SessionID:      "session-required",
+		TaskID:         "task-required",
+		RepositoryID:   "repo-1",
+		RepositoryPath: repoPath,
+		Path:           worktreePath,
+		Branch:         "feature/pr-branch",
+		Status:         StatusDeleted,
+	}
+
+	_, err := mgr.recreate(context.Background(), existing, CreateRequest{
+		SessionID:          "session-required",
+		TaskID:             "task-required",
+		RepositoryID:       "repo-1",
+		RepositoryPath:     repoPath,
+		BaseBranch:         "main",
+		PullBeforeWorktree: true,
+	})
+	if err == nil {
+		t.Fatal("recreate() succeeded after required base refresh failure")
+	}
+	if _, statErr := os.Stat(worktreePath); statErr != nil {
+		t.Fatalf("required refresh failure removed the existing worktree path: %v", statErr)
+	}
+}
+
 // TestRecreate_BranchGoneEverywhereReturnsUnrecoverable pins the degraded
 // path: local branch deleted AND the branch never made it to origin (or was
 // deleted there too). recreate must return ErrBranchUnrecoverable so callers

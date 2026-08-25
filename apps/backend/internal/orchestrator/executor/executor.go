@@ -880,6 +880,13 @@ type authenticatedRepoCloner interface {
 	) (string, error)
 }
 
+type strictAuthenticatedRepoCloner interface {
+	RefreshWorkspaceRepositoryWithBasicAuth(
+		ctx context.Context, workspaceID, provider, providerHost,
+		cloneURL, owner, name, repositoryPath, username, password string,
+	) error
+}
+
 const providerAzureDevOps = "azure_devops"
 
 func (e *Executor) ensureClonedWithWorkspaceAuth(

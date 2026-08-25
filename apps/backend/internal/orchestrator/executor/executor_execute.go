@@ -1354,6 +1354,10 @@ func failingLaunchRepositoryIdentity(
 	if len(req.Repositories) == 0 {
 		return req.RepositoryID, req.TaskRepositoryID
 	}
+	var preparationErr *lifecycle.RepositoryPreparationError
+	if errors.As(launchErr, &preparationErr) && preparationErr != nil {
+		return preparationErr.RepositoryID, preparationErr.TaskRepositoryID
+	}
 
 	branch := extractLaunchFailureBranch(launchErr)
 	if len(req.Repositories) == 1 && branch == "" {

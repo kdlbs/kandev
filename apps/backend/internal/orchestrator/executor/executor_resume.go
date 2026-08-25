@@ -12,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/gitref"
+	"github.com/kandev/kandev/internal/integrations/cloneauth"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
@@ -223,14 +224,45 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 	if info.BaseBranch == "" && repo.DefaultBranch != "" {
 		info.BaseBranch = repo.DefaultBranch
 	}
-	if info.PullBeforeWorktree && isPluginManagedRepository(repo) {
-		if err := e.refreshPluginRepositoryForSession(ctx, tr.TaskID, sessionID, repo); err != nil {
+	if info.PullBeforeWorktree {
+		refreshRequired, refreshErr := e.shouldRefreshRepositoryForSession(ctx, repo)
+		if refreshErr != nil {
+			return nil, refreshErr
+		}
+		if !refreshRequired {
+			return info, nil
+		}
+		if err := e.refreshManagedRepositoryForSession(ctx, tr.TaskID, sessionID, repo); err != nil {
 			return nil, err
 		}
 		info.PullBeforeWorktree = false
 		info.RemoteSyncHandled = true
 	}
 	return info, nil
+}
+
+func (e *Executor) shouldRefreshRepositoryForSession(
+	ctx context.Context, repo *models.Repository,
+) (bool, error) {
+	if repo == nil || repo.SourceType == sourceTypeLocal {
+		return false, nil
+	}
+	provider := strings.ToLower(strings.TrimSpace(repo.Provider))
+	if provider == gitLabProviderID || provider == providerAzureDevOps {
+		return true, nil
+	}
+	if !isGitHubRepository(repo) {
+		return isPluginManagedRepository(repo), nil
+	}
+	policy := TaskGitCredentialPolicy{Mode: taskGitCredentialsModeManaged}
+	if e.githubCredentialPolicyResolver != nil {
+		resolved, err := e.githubCredentialPolicyResolver.ResolveTaskGitCredentialPolicy(ctx, repo.WorkspaceID)
+		if err != nil {
+			return false, fmt.Errorf("resolve task Git credential policy: %w", err)
+		}
+		policy = resolved
+	}
+	return policy.Mode != taskGitCredentialsModeExecutor, nil
 }
 
 func isPluginManagedRepository(repo *models.Repository) bool {
@@ -245,11 +277,11 @@ func isPluginManagedRepository(repo *models.Repository) bool {
 	}
 }
 
-func (e *Executor) refreshPluginRepositoryForSession(
+func (e *Executor) refreshManagedRepositoryForSession(
 	ctx context.Context, taskID, sessionID string, repo *models.Repository,
 ) error {
 	if e.repoCloner == nil || repo.LocalPath == "" {
-		return errors.New("plugin repository refresh is unavailable")
+		return errors.New("managed repository refresh is unavailable")
 	}
 	cloneURL := repositoryCloneURL(repo)
 	if cloneURL == "" {
@@ -261,10 +293,44 @@ func (e *Executor) refreshPluginRepositoryForSession(
 			return ErrNoCloneURL
 		}
 	}
+	credentialOrigin, token := "", ""
+	provider := strings.ToLower(strings.TrimSpace(repo.Provider))
+	if provider == gitLabProviderID && e.gitlabCredentials != nil {
+		var err error
+		credentialOrigin, token, err = e.gitlabCredentials.ResolveGitLabExecutionCredentials(ctx, repo.WorkspaceID)
+		if err != nil {
+			return fmt.Errorf("resolve GitLab refresh credentials: %w", err)
+		}
+	}
+	if provider == providerAzureDevOps && strings.HasPrefix(strings.ToLower(cloneURL), "http") {
+		return e.refreshAzureDevOpsRepositoryForSession(
+			ctx, repo, cloneURL,
+		)
+	}
 	if err := e.repoCloner.RefreshWorkspaceRepositoryWithCredentialRequest(
-		ctx, repositoryGitCredentialRequest(taskID, sessionID, repo, cloneURL), repo.LocalPath, "", "",
+		ctx, repositoryGitCredentialRequest(taskID, sessionID, repo, cloneURL), repo.LocalPath, credentialOrigin, token,
 	); err != nil {
-		return fmt.Errorf("refresh plugin repository before worktree: %w", err)
+		return fmt.Errorf("refresh repository before worktree: %w", err)
+	}
+	return nil
+}
+
+func (e *Executor) refreshAzureDevOpsRepositoryForSession(
+	ctx context.Context, repo *models.Repository, cloneURL string,
+) error {
+	authCloner, ok := e.repoCloner.(strictAuthenticatedRepoCloner)
+	if !ok || e.secretStore == nil {
+		return errors.New("azure DevOps repository refresh authentication is unavailable")
+	}
+	pat, err := e.secretStore.Reveal(ctx, cloneauth.AzureDevOpsPATKey(repo.WorkspaceID))
+	if err != nil {
+		return fmt.Errorf("read Azure DevOps refresh credential: %w", err)
+	}
+	if err := authCloner.RefreshWorkspaceRepositoryWithBasicAuth(
+		ctx, repo.WorkspaceID, repo.Provider, repo.ProviderHost, cloneURL,
+		repo.ProviderOwner, repo.ProviderName, repo.LocalPath, "kandev", pat,
+	); err != nil {
+		return fmt.Errorf("refresh Azure DevOps repository before worktree: %w", err)
 	}
 	return nil
 }

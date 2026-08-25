@@ -446,6 +446,28 @@ export function pointSeedRepositoryAtUnresolvedOrigin(seedData: SeedData, tmpDir
   }
 }
 
+/** Points the seed repository at a valid cached checkout with an unreachable origin. */
+export function pointSeedRepositoryAtFailingOrigin(seedData: SeedData, tmpDir: string) {
+  const remoteDir = path.join(
+    tmpDir,
+    "repos",
+    `e2e-failing-remote-${Date.now()}-${process.pid}.git`,
+  );
+  try {
+    execFileSync(
+      "git",
+      ["-C", seedData.repositoryPath, "remote", "set-url", "origin", `file://${remoteDir}`],
+      { env: makeGitEnv(tmpDir), stdio: "ignore" },
+    );
+  } catch {
+    execFileSync(
+      "git",
+      ["-C", seedData.repositoryPath, "remote", "add", "origin", `file://${remoteDir}`],
+      { env: makeGitEnv(tmpDir), stdio: "ignore" },
+    );
+  }
+}
+
 // Reset the active workspace pointer before every test so that specs which
 // do not use the testPage fixture (e.g. API-only routing tests) start from
 // a known workspace_id instead of whatever a previous test's completeOnboarding

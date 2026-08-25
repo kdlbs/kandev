@@ -18,7 +18,7 @@ Use the task's **Changes** panel to inspect, stage, discard, commit, push, reset
 
 ## Prerequisites and trust boundary
 
-The repository must be a valid Git checkout in the executor workspace and the session's `agentctl` must be reachable. Remote commands use the remote named `origin`; configure its URL and credentials before relying on Pull, Push, or change-request creation. Rebase and Merge use `origin` when it exists, or a local base branch when it does not.
+The repository must be a valid Git checkout in the executor workspace and the session's `agentctl` must be reachable. Remote commands use the remote named `origin`; configure its URL and credentials in the executor where the command runs before relying on Pull, Push, or change-request creation. Rebase and Merge use `origin` when it exists, or a local base branch when it does not. The workspace's provider automation identity does not replace the task's Git credential policy or executor-local SSH setup; see [Executors](executors.md#workspace-automation-identity-and-task-git-transport).
 
 Git commands from the agent shell and Git actions from the **Changes** panel use different permission paths. The Changes panel sends its Git action through Kandev to `agentctl`. It does not run the action inside the agent shell. The agent shell remains subject to the selected agent's permission mode.
 
@@ -79,9 +79,14 @@ For a new task branch, the repository default template is:
 feature/{title}-{suffix}
 ```
 
-`{title}` is an ASCII-safe, lower-case task-title slug and `{suffix}` is a short collision-avoidance value. Repository settings can change the template. When `pull_before_worktree` is omitted it defaults to `true`: Kandev best-effort fetches the base branch before creating the worktree. The public configuration defaults both fetch and fast-forward pull timeouts to 60 seconds. An authentication, network, or timeout failure can fall back to an available local or remote-tracking ref with a visible warning; a base branch that cannot be resolved, including its configured fallback, stops creation.
+`{title}` is an ASCII-safe, lower-case task-title slug and `{suffix}` is a short collision-avoidance value. Repository settings can change the template. When `pull_before_worktree` is omitted it defaults to `true`: Kandev must refresh and verify the base branch before creating or recreating the worktree. The public configuration defaults both fetch and fast-forward pull timeouts to 60 seconds. An authentication, network, timeout, missing-ref, divergent-ref, or uncertain-ancestry failure stops task preparation and records a repository-specific launch error. Kandev does not create the worktree from a stale local or remote-tracking fallback.
 
-When a task opens an existing branch or GitHub PR, Kandev fetches that branch; for a numbered GitHub PR it can fetch `refs/pull/NUMBER/head`, including fork PRs. If the intended branch is already checked out in another worktree, the new worktree uses a suffixed local branch and tracks the original `origin` branch when available. If remote fetch fails but the local branch exists, Kandev can continue with that possibly stale branch and reports the fallback.
+If the repository is intentionally offline, open its workspace repository settings and disable
+**Always pull before creating a new worktree**. This preserves the local workflow, but it also
+opts out of the freshness guarantee and allows the task to use the local base state. Re-enable the
+setting before relying on remote changes for later task launches.
+
+When a task opens an existing branch or GitHub PR, Kandev fetches that branch; for a numbered GitHub PR it can fetch `refs/pull/NUMBER/head`, including fork PRs. If the intended branch is already checked out in another worktree, the new worktree uses a suffixed local branch and tracks the original `origin` branch when available. The required-refresh rule still applies before that new worktree is created.
 
 Tasks created without an initial title can expose the one-shot `set_task_title_kandev` handoff when
 **Settings → General → Task Actions → Agent-generated task titles** is enabled. After the owning
@@ -235,7 +240,8 @@ Before deleting a task or performing a hard reset, commit and push anything you 
 ## Troubleshooting
 
 - **No agent/client available:** launch or prepare the session and confirm its executor is healthy. Workspace Git actions can reconstruct runtime control after a backend restart, but still need a valid task environment.
-- **Remote/authentication error:** test `git fetch origin` inside the same executor workspace. Verify SSH agent forwarding, token/credential helper availability, remote URL, DNS, and firewall access there.
+- **Remote/authentication error during worktree preparation:** test `git fetch origin` inside the same executor workspace. Verify the remote URL, SSH agent or key, known-hosts entry, token or credential-helper availability, DNS, and firewall access there. Do not paste command output containing tokens or authenticated URLs into a task or issue.
+- **Host GitHub SSH setup:** for host-based Git credentials, run `gh config set git_protocol ssh --host github.com`, restart Kandev, and retry the task. For Docker, SSH, or Sprites, configure the same Git and SSH access in that executor instead of relying on the host.
 - **Merge or Rebase without `origin`:** the selected base branch must exist locally. If it does not, Kandev returns `base branch "BASE" does not exist locally` before changing history. If `origin` exists, Kandev does not fall back to a local branch after a fetch or authentication error.
 - **Pull fetched the wrong branch:** Kandev always uses `origin` and, once any upstream exists, the current local branch name. Align local and remote branch names or use an explicit terminal command.
 - **Rebase failed but no rebase remains:** detected rebase conflicts are auto-aborted. Use the returned `conflict_files`, resolve with a manual workflow, or merge instead.

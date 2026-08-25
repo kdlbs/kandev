@@ -416,7 +416,34 @@ func (c *Cloner) RefreshWorkspaceRepositoryWithCredentialRequest(
 	if err != nil {
 		return err
 	}
+	return c.refreshWorkspaceRepository(ctx, targetPath, cloneURL, auth)
+}
 
+// RefreshWorkspaceRepositoryWithBasicAuth strictly refreshes one existing
+// workspace-managed checkout with the same basic-auth contract as cloning.
+func (c *Cloner) RefreshWorkspaceRepositoryWithBasicAuth(
+	ctx context.Context, workspaceID, provider, providerHost,
+	cloneURL, owner, name, repositoryPath, username, password string,
+) error {
+	targetPath, err := c.WorkspaceProviderRepoPath(workspaceID, provider, providerHost, owner, name)
+	if err != nil {
+		return err
+	}
+	if !sameFilesystemPath(targetPath, repositoryPath) {
+		return errors.New("repository path does not match the workspace checkout")
+	}
+	origin, err := gitCredentialOrigin(cloneURL)
+	if err != nil {
+		return err
+	}
+	return c.refreshWorkspaceRepository(ctx, targetPath, cloneURL, &cloneAuth{
+		origin: origin, username: username, password: password,
+	})
+}
+
+func (c *Cloner) refreshWorkspaceRepository(
+	ctx context.Context, targetPath, cloneURL string, auth *cloneAuth,
+) error {
 	mu := c.repoMu(targetPath)
 	mu.Lock()
 	defer mu.Unlock()
