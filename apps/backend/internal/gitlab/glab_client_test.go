@@ -85,6 +85,22 @@ func TestParseGlabToken_MaskedTokenIsNotAToken(t *testing.T) {
 	}
 }
 
+func TestParseGlabToken_MaskedTokenDoesNotFallThroughToScopes(t *testing.T) {
+	output := `gitlab.example.com
+  ✓ Logged in to gitlab.example.com as example-user (/home/example/.config/glab-cli/config.yml)
+  ✓ Token found in configuration file (plaintext): **************************
+  ✓ Token scopes: api`
+	if got := parseGlabToken(output); got != "" {
+		t.Errorf("got %q, want empty", got)
+	}
+}
+
+func TestParseGlabToken_DiagnosticLineIsNotAToken(t *testing.T) {
+	if got := parseGlabToken("error: token exchange failed: unauthorized"); got != "" {
+		t.Errorf("got %q, want empty", got)
+	}
+}
+
 func TestParseGlabToken_Empty(t *testing.T) {
 	if got := parseGlabToken(""); got != "" {
 		t.Errorf("got %q, want empty", got)
