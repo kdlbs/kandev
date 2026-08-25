@@ -2,6 +2,7 @@ package sqlite_test
 
 import (
 	"context"
+	"sort"
 	"testing"
 	"time"
 
@@ -20,6 +21,7 @@ func seedComment(t *testing.T, repo interface {
 		AuthorID:   "agent-1",
 		Body:       body,
 		Source:     "run",
+		CreatedAt:  createdAt,
 	}
 	if err := repo.CreateTaskComment(context.Background(), c); err != nil {
 		t.Fatalf("seed comment %q: %v", body, err)
@@ -54,6 +56,55 @@ func TestListTaskCommentsWindow_OrdersAscendingAndLimits(t *testing.T) {
 		t.Fatalf("order = [%s, %s], want [%s, %s]", comments[0].ID, comments[1].ID, c2.ID, c3.ID)
 	}
 	_ = c1
+}
+
+// AC-003.3: comments sharing an identical created_at break ties on id
+// (DESC for the newest-N selection, which reverses to ASC when presented),
+// so ordering is deterministic instead of depending on row/scan order.
+func TestListTaskCommentsWindow_TiesBreakOnID(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	same := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	c1 := seedComment(t, repo, "task-3", "a", same)
+	c2 := seedComment(t, repo, "task-3", "b", same)
+	c3 := seedComment(t, repo, "task-3", "c", same)
+
+	byID := []*models.TaskComment{c1, c2, c3}
+	sort.Slice(byID, func(i, j int) bool { return byID[i].ID < byID[j].ID })
+	wantAsc := []string{byID[0].ID, byID[1].ID, byID[2].ID}
+
+	comments, total, err := repo.ListTaskCommentsWindow(ctx, "task-3", 20)
+	if err != nil {
+		t.Fatalf("ListTaskCommentsWindow: %v", err)
+	}
+	if total != 3 {
+		t.Fatalf("total = %d, want 3", total)
+	}
+	if len(comments) != 3 {
+		t.Fatalf("len(comments) = %d, want 3", len(comments))
+	}
+	gotAsc := []string{comments[0].ID, comments[1].ID, comments[2].ID}
+	for i := range wantAsc {
+		if gotAsc[i] != wantAsc[i] {
+			t.Fatalf("order = %v, want %v (id-ascending tiebreak on equal created_at)", gotAsc, wantAsc)
+		}
+	}
+
+	// A limit smaller than the tied set must still select the newest-by-id
+	// rows (DESC tiebreak for selection), presented ascending.
+	limited, _, err := repo.ListTaskCommentsWindow(ctx, "task-3", 2)
+	if err != nil {
+		t.Fatalf("ListTaskCommentsWindow(limit=2): %v", err)
+	}
+	if len(limited) != 2 {
+		t.Fatalf("len(limited) = %d, want 2", len(limited))
+	}
+	wantLimited := []string{byID[1].ID, byID[2].ID}
+	gotLimited := []string{limited[0].ID, limited[1].ID}
+	if gotLimited[0] != wantLimited[0] || gotLimited[1] != wantLimited[1] {
+		t.Fatalf("limited order = %v, want %v (selects highest-id pair, presented ascending)", gotLimited, wantLimited)
+	}
 }
 
 // AC-005.1: an empty result set returns a non-nil empty slice, not nil,

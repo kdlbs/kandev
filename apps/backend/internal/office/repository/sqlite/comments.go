@@ -15,7 +15,9 @@ func (r *Repository) CreateTaskComment(ctx context.Context, comment *models.Task
 	if comment.ID == "" {
 		comment.ID = uuid.New().String()
 	}
-	comment.CreatedAt = time.Now().UTC()
+	if comment.CreatedAt.IsZero() {
+		comment.CreatedAt = time.Now().UTC()
+	}
 
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_comments (
