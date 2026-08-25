@@ -35,6 +35,10 @@ const (
 	// unknown one must be indistinguishable (no existence leak).
 	unknownTaskID = "task-zzz"
 	unknownEnvID  = "env-zzz"
+	// unrelatedEnvID is an environment the caller DOES own, but which is not
+	// bound to ownTaskID. Authorizing the two IDs independently admits this
+	// pair; only a pairing check refuses it.
+	unrelatedEnvID = "env-a-other"
 
 	// leakMarker is the initial command stored on the foreign task's
 	// terminal. It must never appear in a response to another user.
@@ -53,11 +57,18 @@ func scopedShellHandlers(t *testing.T) *ShellHandlers {
 		}
 		return errors.New("task not found")
 	})
+	// The caller owns two environments; only ownEnvID is bound to ownTaskID.
 	mgr.SetEnvironmentAccessChecker(func(_ context.Context, envID string) error {
-		if envID == ownEnvID {
+		if envID == ownEnvID || envID == unrelatedEnvID {
 			return nil
 		}
 		return errors.New("task environment not found")
+	})
+	mgr.SetTaskEnvironmentAccessChecker(func(_ context.Context, taskID, envID string) error {
+		if taskID == ownTaskID && envID == ownEnvID {
+			return nil
+		}
+		return errors.New("task not found")
 	})
 	h := NewShellHandlers(mgr, nil, newTestLogger())
 	h.SetTerminalService(seededTerminalService(t))
@@ -231,6 +242,11 @@ func TestSSRTerminalGuardsAbortBeforeReadingState(t *testing.T) {
 			route: "/api/v1/tasks/:id/terminals",
 			path:  "/api/v1/tasks/" + ownTaskID + "/terminals?task_environment_id=" + foreignEnvID,
 		},
+		"task route via unrelated owned environment": {
+			guard: h.authorizeTaskRoute,
+			route: "/api/v1/tasks/:id/terminals",
+			path:  "/api/v1/tasks/" + ownTaskID + "/terminals?task_environment_id=" + unrelatedEnvID,
+		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -314,5 +330,38 @@ func TestSSRTerminalGuardsAreNoOpWithAuthDisabled(t *testing.T) {
 	bare := &lifecycle.Manager{}
 	if err := bare.CheckTaskAccess(context.Background(), ownTaskID); err != nil {
 		t.Errorf("unwired task checker denied the call (%v); pre-auth behavior broken", err)
+	}
+}
+
+// TestSSRTaskTerminalsRefusesUnpairedEnvironment is the pairing regression.
+// Authorizing the task ID and the environment ID independently both succeed
+// for a caller who owns each of them separately; the handler would then merge
+// the path task's ordinary terminals with the unrelated environment's
+// unmanaged shells, labels and initial commands included. The guard must
+// refuse the pair, and must do so before appendUnmanagedShells can run.
+func TestSSRTaskTerminalsRefusesUnpairedEnvironment(t *testing.T) {
+	router := scopedShellRouter(t)
+
+	recorder := getPath(t, router, "/api/v1/tasks/"+ownTaskID+"/terminals?task_environment_id="+unrelatedEnvID)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 (body %s)", recorder.Code, recorder.Body.String())
+	}
+	if got := strings.TrimSpace(recorder.Body.String()); got != `{"error":"task environment not found"}` {
+		t.Errorf("body = %s", got)
+	}
+
+	// The environment is legitimately the caller's own, so the env-keyed route
+	// still serves it. Only the *pair* is refused, not the environment.
+	if code := getPath(t, router, "/api/v1/environments/"+unrelatedEnvID+"/terminals").Code; code != http.StatusOK {
+		t.Errorf("env-keyed route status = %d, want 200; the pairing check must not gate the environment itself", code)
+	}
+
+	// A refused pair is indistinguishable from a foreign one.
+	unrelated := getPath(t, router, "/api/v1/tasks/"+ownTaskID+"/terminals?task_environment_id="+unrelatedEnvID)
+	foreign := getPath(t, router, "/api/v1/tasks/"+ownTaskID+"/terminals?task_environment_id="+foreignEnvID)
+	if unrelated.Code != foreign.Code || unrelated.Body.String() != foreign.Body.String() {
+		t.Errorf("unrelated = %d %s, foreign = %d %s", unrelated.Code, unrelated.Body.String(),
+			foreign.Code, foreign.Body.String())
 	}
 }

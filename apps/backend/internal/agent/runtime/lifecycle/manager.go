@@ -97,6 +97,11 @@ type Manager struct {
 	// without resolving an execution at all. Nil = no scoping.
 	taskAccessCheck func(ctx context.Context, taskID string) error
 
+	// taskEnvironmentAccessCheck authorizes a (task, environment) pair for
+	// surfaces that merge state keyed by both, where authorizing each ID on
+	// its own would not establish that they belong together. Nil = no scoping.
+	taskEnvironmentAccessCheck func(ctx context.Context, taskID, environmentID string) error
+
 	// singleflight deduplicates concurrent GetOrEnsureExecution calls for the same session
 	ensureExecutionGroup singleflight.Group
 
@@ -453,6 +458,13 @@ func (m *Manager) SetTaskAccessChecker(check func(ctx context.Context, taskID st
 	m.taskAccessCheck = check
 }
 
+// SetTaskEnvironmentAccessChecker installs the per-user check for a
+// (task, environment) pair, used by the task-keyed SSR terminal route which
+// merges terminals from the task with unmanaged shells from the environment.
+func (m *Manager) SetTaskEnvironmentAccessChecker(check func(ctx context.Context, taskID, environmentID string) error) {
+	m.taskEnvironmentAccessCheck = check
+}
+
 // CheckSessionAccess authorizes a session-scoped operation for the ctx
 // identity. Handlers that resolve an execution by a bare in-memory lookup
 // (vscode/port reverse proxies) must call this before serving, since only the
@@ -485,6 +497,18 @@ func (m *Manager) CheckTaskAccess(ctx context.Context, taskID string) error {
 		return nil
 	}
 	return m.taskAccessCheck(ctx, taskID)
+}
+
+// CheckTaskEnvironmentAccess authorizes a (task, environment) pair for the ctx
+// identity: both IDs visible, and the environment actually bound to the task.
+// Handlers that merge state keyed by both must use this rather than the two
+// single-ID checks, which pass independently for an unrelated pair. No-op when
+// no checker is set.
+func (m *Manager) CheckTaskEnvironmentAccess(ctx context.Context, taskID, taskEnvironmentID string) error {
+	if m.taskEnvironmentAccessCheck == nil {
+		return nil
+	}
+	return m.taskEnvironmentAccessCheck(ctx, taskID, taskEnvironmentID)
 }
 
 // SetWorkspaceInfoProvider sets the provider for workspace information.

@@ -729,6 +729,12 @@ func (h *ShellHandlers) authorizeEnvironmentRoute(c *gin.Context) {
 // authorizeTaskRoute gates the task-keyed SSR list on :id, plus the optional
 // ?task_environment_id= it forwards to appendUnmanagedShells - without that
 // second check the query param is a second way into a foreign environment.
+//
+// The two IDs are checked as a pair, not independently. This handler merges
+// ordinary terminals belonging to the task with unmanaged shells belonging to
+// the environment, and authorizing each ID on its own passes for a caller who
+// holds both but for whom they are unrelated, which merges two unrelated
+// terminal lists.
 func (h *ShellHandlers) authorizeTaskRoute(c *gin.Context) {
 	taskID := c.Param("id")
 	if taskID != "" {
@@ -737,7 +743,13 @@ func (h *ShellHandlers) authorizeTaskRoute(c *gin.Context) {
 			return
 		}
 	}
-	if !h.allowEnvironment(c, c.Query("task_environment_id")) {
+	envID := c.Query("task_environment_id")
+	if envID == "" {
+		c.Next()
+		return
+	}
+	if err := h.lifecycleMgr.CheckTaskEnvironmentAccess(c.Request.Context(), taskID, envID); err != nil {
+		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "task environment not found"})
 		return
 	}
 	c.Next()

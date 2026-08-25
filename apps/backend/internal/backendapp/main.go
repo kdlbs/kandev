@@ -551,7 +551,7 @@ func startAgentInfrastructure(
 	// GetOrEnsure* execution paths run these checks internally; the vscode and
 	// port reverse proxies (bare lookup + cache) call CheckSessionAccess at
 	// the handler, and the SSR terminal-list routes call CheckTaskAccess /
-	// CheckEnvironmentAccess in a route guard.
+	// CheckEnvironmentAccess / CheckTaskEnvironmentAccess in a route guard.
 	wireLifecycleAccessCheckers(lifecycleMgr, services.Task)
 	log.Info("Workspace info provider configured for session recovery")
 

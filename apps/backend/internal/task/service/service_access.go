@@ -177,6 +177,50 @@ func (s *Service) AuthorizeEnvironmentAccess(ctx context.Context, taskEnvironmen
 	return s.authorizeTaskID(ctx, env.TaskID)
 }
 
+// AuthorizeTaskEnvironmentAccess checks that both identifiers are visible to
+// the caller and that the environment is one the task is actually bound to.
+// Mismatches use the task not-found sentinel, mirroring
+// AuthorizeTaskSessionAccess, so callers cannot enumerate environments by
+// pairing them against a task they do own.
+//
+// Authorizing the two IDs separately is not enough: both checks pass for a
+// caller who owns the task and, independently, owns some unrelated
+// environment, and the terminal route then merges state from the two.
+//
+// The relationship is deliberately not `env.TaskID == taskID`. inherit_parent
+// binds a subtask's session to the parent task's environment, and shared_group
+// binds every member of a workspace group to one canonical environment, so the
+// row's owning task is legitimately a different task in both. What establishes
+// the pair is a session of this task pointing at this environment.
+func (s *Service) AuthorizeTaskEnvironmentAccess(ctx context.Context, taskID, taskEnvironmentID string) error {
+	if _, scoped := callerScope(ctx); !scoped {
+		return nil
+	}
+	if err := s.AuthorizeTaskAccess(ctx, taskID); err != nil {
+		return err
+	}
+	if err := s.AuthorizeEnvironmentAccess(ctx, taskEnvironmentID); err != nil {
+		return err
+	}
+	env, err := s.taskEnvironments.GetTaskEnvironment(ctx, taskEnvironmentID)
+	if err != nil {
+		return err
+	}
+	if env != nil && env.TaskID == taskID {
+		return nil
+	}
+	sessions, err := s.sessions.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	for _, session := range sessions {
+		if session != nil && session.TaskEnvironmentID == taskEnvironmentID {
+			return nil
+		}
+	}
+	return repoerrors.ErrTaskNotFound
+}
+
 // authorizeRepositoryID checks visibility of a repository via its workspace.
 // Denials use ErrRepositoryNotFound (no existence leak).
 func (s *Service) authorizeRepositoryID(ctx context.Context, repositoryID string) error {
