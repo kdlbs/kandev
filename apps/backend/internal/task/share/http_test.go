@@ -146,6 +146,36 @@ func TestHTTP_Create_BlocksWhenGitHubUnauthenticated(t *testing.T) {
 	}
 }
 
+func TestHTTP_Create_HidesAuthorizationInfrastructureErrors(t *testing.T) {
+	t.Parallel()
+	reader := completedSession()
+	backend := &mockBackend{}
+	handlers, svc := newHandlersForTest(t, reader, backend, true)
+	svc.authorizer = &recordingShareAccess{taskSessionErr: errors.New("db transient")}
+	router := newGinRouter(handlers)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/t-1/sessions/s-1/shares", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("want 500, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body errorBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Error != "failed to check share access" || body.Code != "" {
+		t.Fatalf("unexpected authorization error body: %+v", body)
+	}
+	if strings.Contains(rec.Body.String(), "db transient") {
+		t.Fatalf("authorization infrastructure error leaked: %s", rec.Body.String())
+	}
+	if backend.uploads != 0 || len(backend.accessWorkspaces) != 0 {
+		t.Fatalf("authorization infrastructure error reached backend: uploads=%d access=%v", backend.uploads, backend.accessWorkspaces)
+	}
+}
+
 func TestHTTP_Create_DryRunReturnsSnapshotWithoutUpload(t *testing.T) {
 	t.Parallel()
 	reader := completedSession()

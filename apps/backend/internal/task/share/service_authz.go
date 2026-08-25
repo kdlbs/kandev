@@ -17,6 +17,11 @@ type TaskAccessAuthorizer interface {
 	AuthorizeSessionAccess(ctx context.Context, sessionID string) error
 }
 
+// ErrAuthorization marks an authorization failure that is not an object
+// access denial. HTTP callers must not receive the underlying infrastructure
+// error or mistake it for a missing backend credential.
+var ErrAuthorization = errors.New("share authorization failed")
+
 func (s *Service) authorizeTaskSessionAccess(ctx context.Context, taskID, sessionID string) error {
 	if err := s.authorizer.AuthorizeTaskSessionAccess(ctx, taskID, sessionID); err != nil {
 		return normalizeAuthorizationError(err)
@@ -41,5 +46,5 @@ func normalizeAuthorizationError(err error) error {
 		errors.Is(err, models.ErrTaskSessionNotFound) {
 		return ErrNotFound
 	}
-	return fmt.Errorf("authorize share access: %w", err)
+	return fmt.Errorf("%w: %w", ErrAuthorization, err)
 }

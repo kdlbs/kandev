@@ -13,10 +13,10 @@ legacy_specs: []
 
 ## Overview
 
-The share service reads task-session data through the raw task repository.
-Therefore, the caller identity does not limit preview and list operations.
-The same service omission also leaves publish and revoke dependent on a GitHub
-authorization check.
+Before this implementation, the share service read task-session data through
+the raw task repository. Therefore, the caller identity did not limit preview
+and list operations. The same service omission also left publish and revoke
+dependent on a GitHub authorization check.
 
 This plan adds the task-service authorization boundary first. Then it adds a
 two-user HTTP regression test against the assembled auth-enabled server.
@@ -42,21 +42,21 @@ two-user HTTP regression test against the assembled auth-enabled server.
 - Changes to the share dialog or responsive UI.
 - Hosted share storage, workspace sharing, and team-owned shares.
 
-## Confirmed root cause
+## Confirmed root cause (pre-change)
 
-`backendapp` passes `repos.Task` to `share.Provide`. The share service has no
-task access authorizer. `PreviewSnapshot` and `ListBySession` use caller-supplied
-session IDs without an ownership check. The HTTP handlers also ignore the task
-ID in nested routes.
+`backendapp` passed `repos.Task` to `share.Provide`. The share service had no
+task access authorizer. `PreviewSnapshot` and `ListBySession` used
+caller-supplied session IDs without an ownership check. The HTTP handlers also
+ignored the task ID in nested routes.
 
 A focused temporary test used a real SQLite task repository and a member
 identity. The test read a foreign transcript marker through `PreviewSnapshot`.
 It also created, listed, and revoked a foreign share through the raw service.
 The temporary test passed and was then removed.
 
-The assembled GitHub backend currently blocks foreign publish and active-share
-revoke. This provider check is not a valid service authorization boundary.
-Preview and list never reach it.
+Before this implementation, the assembled GitHub backend blocked foreign
+publish and active-share revoke. This provider check was not a valid service
+authorization boundary. Preview and list never reached it.
 
 ## Technical approach
 
@@ -97,9 +97,10 @@ Preview and list never reach it.
 ## E2E tests
 
 Add `apps/web/e2e/tests/auth/share-authorization.spec.ts` to the isolated auth
-project. The test creates two real member contexts. User B owns the task,
-session, transcript marker, and share. User A receives 404 for preview, publish,
-list, and revoke. The test also proves that B's share remains active.
+project. The test creates separate authenticated admin and member contexts.
+User B owns the task, session, transcript marker, and share. User A receives
+404 for preview, publish, list, and revoke. The test also proves that B's share
+remains active.
 
 This flow covers `AC-AUTH-AUTH-001.7` at the assembled HTTP boundary.
 

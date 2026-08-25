@@ -22,7 +22,8 @@ system_design:
 ## Summary
 
 Add an auth-project Playwright test for the complete HTTP route matrix. The test
-uses separate member contexts and real production route wiring.
+uses separate authenticated admin and member contexts with real production route
+wiring.
 
 ## In scope
 

@@ -73,7 +73,8 @@ None.
 
 ## Risks
 
-- The first service statement must be the pair authorization check.
+- Create, preview, list, and backend-access methods must start with the pair
+  authorization check.
 - Revoke must read one share row before it can resolve the owning session.
 - Not-found mapping must not hide unrelated storage or provider errors.
 

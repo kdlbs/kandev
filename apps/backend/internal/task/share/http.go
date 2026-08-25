@@ -140,6 +140,11 @@ func (h *HTTPHandlers) httpCreate(c *gin.Context) {
 			c.JSON(status, mapped)
 			return
 		}
+		if errors.Is(err, ErrAuthorization) {
+			h.logServerError(err, "share authorization failed", sessionID)
+			c.JSON(http.StatusInternalServerError, errorBody{Error: "failed to check share access"})
+			return
+		}
 		c.JSON(http.StatusPreconditionFailed, errorBody{
 			Error: err.Error(),
 			Code:  "github_credential_missing",

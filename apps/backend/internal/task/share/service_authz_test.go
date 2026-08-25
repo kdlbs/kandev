@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 type allowShareAccess struct{}
@@ -71,6 +72,39 @@ func (r *countingTaskReader) GetTaskSession(ctx context.Context, id string) (*mo
 func (r *countingTaskReader) ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error) {
 	r.listMessageCalls++
 	return r.base.ListMessages(ctx, sessionID)
+}
+
+func TestNormalizeAuthorizationError(t *testing.T) {
+	t.Parallel()
+	operationalErr := errors.New("db transient")
+	tests := []struct {
+		name string
+		in   error
+		want error
+	}{
+		{name: "nil", in: nil, want: nil},
+		{name: "share not found", in: ErrNotFound, want: ErrNotFound},
+		{name: "task not found", in: repoerrors.ErrTaskNotFound, want: ErrNotFound},
+		{name: "workspace not found", in: repoerrors.ErrWorkspaceNotFound, want: ErrNotFound},
+		{name: "session not found", in: models.ErrTaskSessionNotFound, want: ErrNotFound},
+		{name: "operational failure", in: operationalErr, want: ErrAuthorization},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := normalizeAuthorizationError(tt.in)
+			if tt.want == nil {
+				if got != nil {
+					t.Fatalf("normalizeAuthorizationError(%v) = %v, want nil", tt.in, got)
+				}
+				return
+			}
+			if !errors.Is(got, tt.want) {
+				t.Fatalf("normalizeAuthorizationError(%v) = %v, want %v", tt.in, got, tt.want)
+			}
+		})
+	}
 }
 
 func TestService_TaskSessionAuthorizationPrecedesSensitiveReads(t *testing.T) {

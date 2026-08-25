@@ -308,6 +308,10 @@ There is no "draft" or "scheduled" state; publish is synchronous.
 - **No GitHub credential** on the kandev instance → API returns
   `412 Precondition Failed` with `code: "github_credential_missing"`.
   The UI surfaces a CTA to the GitHub settings page.
+- **Authorization infrastructure failure** during task or session access
+  resolution → API returns `500 Internal Server Error` with a fixed generic
+  message. The underlying error is logged server-side and is not exposed as a
+  missing GitHub credential.
 - **GitHub API failure during upload** (network, rate limit, 5xx) → API
   returns `502 Bad Gateway` with the upstream message. No row is
   written. The user can retry; no partial state is left behind.
