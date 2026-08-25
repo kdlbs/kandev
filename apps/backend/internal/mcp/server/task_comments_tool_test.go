@@ -1,7 +1,6 @@
 package mcp
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/service"
@@ -143,13 +142,15 @@ func TestListTaskComments_LimitDefaultingAndClamping(t *testing.T) {
 }
 
 // A backend error surfaces as a tool error carrying the backend's message.
+// Asserts against the real service.ErrAccessDenied sentinel rather than a
+// fabricated literal, so this test fails if the sentinel's wording drifts.
 func TestListTaskComments_SurfacesBackendError(t *testing.T) {
-	backend := &testBackend{err: errors.New("document access denied")}
+	backend := &testBackend{err: service.ErrAccessDenied}
 	s := newOfficeModeServer(t, backend, "session-1", "task-A")
 
 	result := callTool(t, s, "list_task_comments_kandev", map[string]interface{}{"task_id": "task-B"})
 	require.True(t, result.IsError)
-	assert.Contains(t, commentsToolResultText(t, result), "document access denied")
+	assert.Contains(t, commentsToolResultText(t, result), service.ErrAccessDenied.Error())
 }
 
 // AC-003.11/AC-005.10: task_id and limit are declared with no JSON Schema
