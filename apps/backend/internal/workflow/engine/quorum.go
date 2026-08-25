@@ -81,8 +81,16 @@ func isRejectionVerdict(decision string) bool {
 }
 
 // evaluateTransitionGuard returns the guard outcome for an action. A nil
-// guard always permits the transition (kanban semantics, unchanged).
+// guard always permits the transition (kanban semantics, unchanged). This is
+// a thin wrapper over evaluateTransitionGuardRecording with record=true, for
+// the committing HandleTrigger and reevaluation paths that must emit AC-004
+// counters/logs; the AC-54/57d read-only diagnostic path calls the recording
+// variant directly with record=false instead.
 func (e *Engine) evaluateTransitionGuard(ctx context.Context, state MachineState, action Action) GuardOutcome {
+	return e.evaluateTransitionGuardRecording(ctx, state, action, true)
+}
+
+func (e *Engine) evaluateTransitionGuardRecording(ctx context.Context, state MachineState, action Action, record bool) GuardOutcome {
 	if action.Guard == nil {
 		return GuardOutcome{Satisfied: true}
 	}
@@ -90,7 +98,7 @@ func (e *Engine) evaluateTransitionGuard(ctx context.Context, state MachineState
 		// Unknown guard variant — fail closed (AC-23/AC-53's sibling code).
 		return GuardOutcome{Reason: ReasonGuardVariantUnrecognized}
 	}
-	return e.computeGuardOutcome(ctx, state, action.Guard.WaitForQuorum)
+	return e.computeGuardOutcomeRecording(ctx, state, action.Guard.WaitForQuorum, record)
 }
 
 // recordGuardNotFired emits the AC-24/24a observability unit for a guarded
@@ -149,6 +157,12 @@ func (e *Engine) recordReevaluationSkip(taskID, stepID string) {
 // use the seat slate at all (AC-43/AC-59) and so skips the slate_empty step
 // entirely.
 func (e *Engine) computeGuardOutcome(ctx context.Context, state MachineState, guard *WaitForQuorumGuard) GuardOutcome {
+	return e.computeGuardOutcomeRecording(ctx, state, guard, true)
+}
+
+func (e *Engine) computeGuardOutcomeRecording(
+	ctx context.Context, state MachineState, guard *WaitForQuorumGuard, record bool,
+) GuardOutcome {
 	if e.decisions == nil {
 		return GuardOutcome{Reason: ReasonDecisionStoreUnwired}
 	}
@@ -169,12 +183,14 @@ func (e *Engine) computeGuardOutcome(ctx context.Context, state MachineState, gu
 		return outcome
 	}
 
-	seats, err := e.requiredSeatsForWorkflow(ctx, state.CurrentStepID, state.TaskID, state.WorkflowID, guard.Role)
+	seats, err := e.requiredSeatsForWorkflowRecording(ctx, state.CurrentStepID, state.TaskID, state.WorkflowID, guard.Role, record)
 	if err != nil {
 		return GuardOutcome{Reason: ReasonEvaluationError, Err: fmt.Errorf("build required slate for quorum: %w", err)}
 	}
 	if len(seats) == 0 {
-		e.recordQuorumSlateEmpty(state.TaskID, state.CurrentStepID, guard.Role)
+		if record {
+			e.recordQuorumSlateEmpty(state.TaskID, state.CurrentStepID, guard.Role)
+		}
 		return GuardOutcome{Reason: ReasonSlateEmpty}
 	}
 	decisions, err := e.decisions.ListStepDecisions(ctx, state.TaskID, state.CurrentStepID)
@@ -195,6 +211,12 @@ func (e *Engine) requiredSeats(ctx context.Context, stepID, taskID, role string)
 }
 
 func (e *Engine) requiredSeatsForWorkflow(ctx context.Context, stepID, taskID, workflowID, role string) ([]ParticipantInfo, error) {
+	return e.requiredSeatsForWorkflowRecording(ctx, stepID, taskID, workflowID, role, true)
+}
+
+func (e *Engine) requiredSeatsForWorkflowRecording(
+	ctx context.Context, stepID, taskID, workflowID, role string, record bool,
+) ([]ParticipantInfo, error) {
 	gathered, err := gatherParticipantSlate(ctx, e.participants, stepID, taskID, workflowID)
 	if err != nil {
 		return nil, err
@@ -210,7 +232,7 @@ func (e *Engine) requiredSeatsForWorkflow(ctx context.Context, stepID, taskID, w
 
 	canonical := canonicalizeByTaskRoleAgent(filtered, stepID)
 	seats := collapseByRoleAgent(canonical)
-	return e.dropUnresolvedAgentSeats(ctx, taskID, stepID, role, seats)
+	return e.dropUnresolvedAgentSeats(ctx, taskID, stepID, role, seats, record)
 }
 
 // dropUnresolvedAgentSeats implements AC-OFFICE-REVIEW-SEATS-004.3: a seat
@@ -232,7 +254,7 @@ func (e *Engine) requiredSeatsForWorkflow(ctx context.Context, stepID, taskID, w
 // propagates as a slate-construction error (ReasonEvaluationError in
 // computeGuardOutcome) rather than silently dropping the seat.
 func (e *Engine) dropUnresolvedAgentSeats(
-	ctx context.Context, taskID, stepID, role string, seats []ParticipantInfo,
+	ctx context.Context, taskID, stepID, role string, seats []ParticipantInfo, record bool,
 ) ([]ParticipantInfo, error) {
 	if e.agentProfiles == nil {
 		return seats, nil
@@ -251,7 +273,9 @@ func (e *Engine) dropUnresolvedAgentSeats(
 			kept = append(kept, seat)
 			continue
 		}
-		e.recordParticipantAgentUnresolved(taskID, stepID, role, seat.AgentProfileID)
+		if record {
+			e.recordParticipantAgentUnresolved(taskID, stepID, role, seat.AgentProfileID)
+		}
 	}
 	return kept, nil
 }
@@ -796,9 +820,15 @@ type QuorumSnapshot struct {
 // is derived from the task row, not the session, so any valid session for
 // the task yields the correct step (see production TransitionStore
 // implementations). Applies no transition, writes no row, executes no
-// action callback, emits no AC-24 log, and increments no AC-24a counter — a
-// diagnostic read never fails on, or mutates, the state it exists to
-// diagnose.
+// action callback, and emits none of the guard-evaluation observability
+// units — no AC-24/24a guard-not-fired log/counter, and no AC-004.2/004.3/
+// 004.8 slate-empty or agent-unresolved log/counter — a diagnostic read
+// never fails on, or mutates, the state it exists to diagnose. Guard
+// evaluation is routed through the ...Recording(..., record bool) variants
+// with record=false for this reason: EvaluateStepQuorum is dashboard-polled,
+// so counting or logging its polls would inflate AC-004.10's "at most one
+// record per guard evaluation" intent for every poll instead of every real
+// evaluation.
 //
 // A store error while evaluating one guard surfaces as that guard's
 // ReasonEvaluationError entry, not a method-level error, so one failing
@@ -845,7 +875,7 @@ func (e *Engine) EvaluateStepQuorum(ctx context.Context, taskID, sessionID strin
 func (e *Engine) evaluateGuardStateReadOnly(
 	ctx context.Context, state MachineState, step StepSpec, action Action,
 ) QuorumGuardState {
-	outcome := e.evaluateTransitionGuard(ctx, state, action)
+	outcome := e.evaluateTransitionGuardRecording(ctx, state, action, false)
 	targetStepID, err := e.resolveTransitionTarget(ctx, state, step, action)
 	if err != nil {
 		outcome = GuardOutcome{Reason: ReasonEvaluationError, Err: err}
