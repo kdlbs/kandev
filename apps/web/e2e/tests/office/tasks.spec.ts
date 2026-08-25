@@ -152,6 +152,19 @@ test.describe("Tasks (Issues)", () => {
     officeApi,
     officeSeed,
   }) => {
+    // Fillers pile up in todo (the CREATED wire state normalizes there - see
+    // office-task-normalize.ts's STATUS_MAP - and it's where a task created
+    // with no workflow_step_id lands) so that column is visibly taller than
+    // the empty in_progress column. Flex row stretch then makes in_progress
+    // span the same height on screen, but its droppable was previously sized
+    // to its own (empty) content - about one min-h box. Dropping in the
+    // resulting blank space, not at the column's own reported center, is
+    // what actually exercises that gap.
+    for (let i = 0; i < 6; i++) {
+      await apiClient.createTask(officeSeed.workspaceId, `Filler ${i}`, {
+        workflow_id: officeSeed.workflowId,
+      });
+    }
     const task = await apiClient.createTask(officeSeed.workspaceId, "Board Drag Task", {
       workflow_id: officeSeed.workflowId,
     });
@@ -162,21 +175,31 @@ test.describe("Tasks (Issues)", () => {
     const card = testPage.getByTestId(`board-card-${task.id}`);
     await expect(card).toBeVisible({ timeout: 15_000 });
 
+    const tallColumn = testPage.getByTestId("board-column-todo");
     const target = testPage.getByTestId("board-column-in_progress");
     await expect(target).toBeVisible();
     // The drop must actually move the card, so it cannot already live there.
     await expect(target.getByTestId(`board-card-${task.id}`)).toHaveCount(0);
 
     const from = await card.boundingBox();
-    const to = await target.boundingBox();
+    const tallBox = await tallColumn.boundingBox();
+    const targetBox = await target.boundingBox();
     expect(from).not.toBeNull();
-    expect(to).not.toBeNull();
+    expect(tallBox).not.toBeNull();
+    expect(targetBox).not.toBeNull();
+
+    // The drop point's Y comes from the tall todo column's real height, not
+    // from the target column's own reported box - so a target droppable
+    // that under-reports its own height (the exact shape of the bug this
+    // reproduces) cannot make the test pass by construction.
+    const dropX = targetBox!.x + targetBox!.width / 2;
+    const dropY = tallBox!.y + tallBox!.height - 10;
 
     // dnd-kit's PointerSensor needs a real pointer path, not a single jump:
     // the 8px activation distance only trips on intermediate moves.
     await testPage.mouse.move(from!.x + from!.width / 2, from!.y + from!.height / 2);
     await testPage.mouse.down();
-    await testPage.mouse.move(to!.x + to!.width / 2, to!.y + to!.height / 2, { steps: 12 });
+    await testPage.mouse.move(dropX, dropY, { steps: 12 });
     await testPage.mouse.up();
 
     // The card lands in the target column...

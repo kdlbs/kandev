@@ -81,7 +81,21 @@ function BoardColumn({
   const { setNodeRef, isOver } = useDroppable({ id: status });
 
   return (
-    <div className="flex flex-col min-w-[240px] max-w-[300px] flex-1">
+    // The droppable ref lives here, not on the inner list: that list sits
+    // inside a Radix ScrollArea viewport whose content box is content-height
+    // (display: table), while this root stretches to the row's tallest
+    // column via the parent flex row's default align-items: stretch. Ref'ing
+    // the inner box means a short column's droppable is only as tall as its
+    // own cards, so dropping in the visible-but-blank space below them finds
+    // no droppable and the card silently snaps back.
+    <div
+      ref={setNodeRef}
+      data-testid={`board-column-${status}`}
+      className={cn(
+        "flex flex-col min-w-[240px] max-w-[300px] flex-1 rounded-md transition-colors",
+        isOver && "bg-accent/40 ring-1 ring-primary/40",
+      )}
+    >
       <div className="flex items-center gap-2 px-2 py-2 mb-2">
         <StatusIcon status={status} className="h-3.5 w-3.5" />
         <span className="text-xs font-medium">{label}</span>
@@ -89,14 +103,9 @@ function BoardColumn({
       </div>
       <ScrollArea className="flex-1">
         <div
-          ref={setNodeRef}
-          data-testid={`board-column-${status}`}
-          className={cn(
-            // min-h keeps an empty column a real drop target; a zero-height
-            // list cannot be dropped onto.
-            "flex flex-col gap-1.5 px-1 pb-2 rounded-md min-h-[64px] transition-colors",
-            isOver && "bg-accent/40 ring-1 ring-primary/40",
-          )}
+          // min-h keeps an empty column a real drop target even before the
+          // root above has any sibling tall enough to stretch it.
+          className="flex flex-col gap-1.5 px-1 pb-2 min-h-[64px]"
         >
           {tasks.map((task) => (
             <BoardCard key={task.id} task={task} />

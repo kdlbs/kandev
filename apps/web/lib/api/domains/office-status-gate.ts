@@ -10,6 +10,8 @@
 import { ApiError } from "../client";
 import { updateTask } from "./office-extended-api";
 import { t } from "@/lib/i18n";
+import type { OfficeTaskStatus } from "@/lib/state/slices/office/types";
+import type { TaskStatus } from "@/app/office/tasks/[id]/types";
 
 export type PendingApprover = { agent_profile_id?: string; name?: string };
 
@@ -35,7 +37,7 @@ export function extractPendingApprovers(err: unknown): PendingApprover[] | null 
 // every caller surfaces the same sentence.
 export async function updateTaskStatusOrTranslateGate(
   taskId: string,
-  status: string,
+  status: OfficeTaskStatus | TaskStatus,
 ): Promise<void> {
   try {
     await updateTask(taskId, { status });
