@@ -17,6 +17,8 @@ func (r *Repository) CreateTaskComment(ctx context.Context, comment *models.Task
 	}
 	if comment.CreatedAt.IsZero() {
 		comment.CreatedAt = time.Now().UTC()
+	} else {
+		comment.CreatedAt = comment.CreatedAt.UTC()
 	}
 
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
