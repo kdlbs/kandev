@@ -12,6 +12,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/kandev/kandev/internal/analytics/models"
 	"github.com/kandev/kandev/internal/auth/authn"
@@ -288,4 +290,95 @@ func mustRouter(t *testing.T) *gin.Engine {
 	t.Helper()
 	router, _ := newStatsRouter(t, nil)
 	return router
+}
+
+// errAuthorizerLookup stands in for a workspace lookup that fails for a reason
+// other than ownership (a database error, say).
+var errAuthorizerLookup = errors.New("workspace lookup failed")
+
+// failingAuthorizer denies every request with a non-ownership error.
+type failingAuthorizer struct{}
+
+func (failingAuthorizer) AuthorizeWorkspaceAccess(context.Context, string) error {
+	return errAuthorizerLookup
+}
+
+// newDenyingRouter mounts the stats routes with an authorizer that never
+// permits: either absent entirely, or failing its lookup.
+func newDenyingRouter(t *testing.T, authorizer WorkspaceAuthorizer, log *commonlogger.Logger) (*gin.Engine, *recordingRepo) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		authn.SetOnGin(c, *memberIdentity("user-a"))
+		c.Next()
+	})
+	repo := &recordingRepo{}
+	RegisterStatsRoutes(router, repo, authorizer, log)
+	return router, repo
+}
+
+// assertDeniedEverywhere pins the shared denial contract across every mounted
+// stats route: 404, the one not-found body, and no repository query.
+func assertDeniedEverywhere(t *testing.T, router *gin.Engine, repo *recordingRepo) {
+	t.Helper()
+	for _, routePath := range registeredStatsPaths(t, router) {
+		rec := doGet(t, router, requestPath(routePath, wsA))
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("%s: status = %d, want 404 (body %s)", routePath, rec.Code, rec.Body.String())
+		}
+		if body := strings.TrimSpace(rec.Body.String()); body != notFoundBody {
+			t.Fatalf("%s: body = %s, want %s", routePath, body, notFoundBody)
+		}
+	}
+	if len(repo.calls) != 0 {
+		t.Fatalf("denied requests reached the analytics repository: %v", repo.calls)
+	}
+}
+
+// TestStatsNilAuthorizerFailsClosed covers the unwired-authorizer branch:
+// scoping that was never injected must deny, not permit. Reviewer-requested
+// coverage of behavior already present on this branch.
+func TestStatsNilAuthorizerFailsClosed(t *testing.T) {
+	router, repo := newDenyingRouter(t, nil, authzTestLogger(t))
+	assertDeniedEverywhere(t, router, repo)
+}
+
+// TestStatsAuthorizerLookupErrorDenies covers a non-ownership authorizer
+// failure: it collapses into the same 404 as a foreign workspace rather than
+// surfacing as a 500 that distinguishes an existing workspace from an absent
+// one. Reviewer-requested coverage of behavior already present on this branch.
+func TestStatsAuthorizerLookupErrorDenies(t *testing.T) {
+	router, repo := newDenyingRouter(t, failingAuthorizer{}, authzTestLogger(t))
+	assertDeniedEverywhere(t, router, repo)
+}
+
+// TestStatsDenialIsAuditable pins the denial log above Debug: a caller probing
+// for workspaces they do not own must leave a trace in the default log stream,
+// not only under a debug level nobody runs in production.
+func TestStatsDenialIsAuditable(t *testing.T) {
+	core, recorded := observer.New(zapcore.DebugLevel)
+	log, err := commonlogger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		authn.SetOnGin(c, *memberIdentity("user-a"))
+		c.Next()
+	})
+	RegisterStatsRoutes(router, &recordingRepo{}, newOwnerAuthorizer(), log)
+
+	if rec := doGet(t, router, "/api/v1/workspaces/"+wsB+"/stats/tasks"); rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+
+	entries := recorded.FilterLevelExact(zapcore.WarnLevel).All()
+	if len(entries) != 1 {
+		t.Fatalf("want exactly one Warn-level denial log, got %d of %d entries", len(entries), recorded.Len())
+	}
+	if got := entries[0].ContextMap()["workspace_id"]; got != wsB {
+		t.Fatalf("denial log workspace_id = %v, want %s", got, wsB)
+	}
 }

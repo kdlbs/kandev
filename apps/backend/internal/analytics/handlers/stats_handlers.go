@@ -234,7 +234,10 @@ func (h *StatsHandlers) authorize(c *gin.Context, workspaceID string) bool {
 		return false
 	}
 	if err := h.authorizer.AuthorizeWorkspaceAccess(c.Request.Context(), workspaceID); err != nil {
-		h.logger.Debug("denied workspace stats request",
+		// Warn, not Debug: these routes read task titles, repository names and
+		// commit activity, so a caller probing workspace IDs they do not own
+		// should be visible in the default log stream.
+		h.logger.Warn("denied workspace stats request",
 			zap.String("workspace_id", workspaceID), zap.Error(err))
 		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": workspaceNotFoundMessage})
 		return false
