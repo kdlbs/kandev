@@ -2402,17 +2402,58 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 			// Launch asynchronously because processOnEnter may also be called
 			// synchronously from finalizeStepEnter (manual task move). In that path,
 			// autoStartStepPrompt would block the caller's goroutine.
+			//
+			// Before dispatching, reload the session under the cancel-in-flight guard
+			// to atomically detect concurrent terminalization. If the session is
+			// already terminal, create a replacement directly instead of attempting
+			// an auto-start that will fail and lose the hand-off.
 			go func() {
-				asyncCtx := context.WithoutCancel(ctx)
-				err := s.autoStartStepPrompt(asyncCtx, taskID, session, step, effectivePrompt, planMode, true)
+				lock, release := s.acquireCancelInFlightGuard(sessionID)
+				lock.Lock()
+				fresh, reloadErr := s.repo.GetTaskSession(ctx, sessionID)
+				if reloadErr != nil || fresh == nil || isTerminalSessionState(fresh.State) {
+					lock.Unlock()
+					release()
+					if reloadErr != nil {
+						s.logger.Error("implicit profile switch: failed to reload session before dispatch",
+							zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(reloadErr))
+						return
+					}
+					s.logger.Info("implicit profile switch: reused session terminalized before dispatch, creating replacement",
+						zap.String("task_id", taskID), zap.String("session_id", sessionID))
+					replacement, replacementErr := s.createNewSessionForStep(
+						ctx, taskID, session, session.AgentProfileID,
+					)
+					if replacementErr != nil {
+						s.logger.Error("failed to create replacement after terminalized profile switch",
+							zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(replacementErr))
+						return
+					}
+					replacementPrompt := s.buildWorkflowPrompt(
+						ctx, taskDescription, step, taskID, replacement.ID, isPassthrough,
+					)
+					if replacementErr = s.autoStartStepPrompt(
+						ctx, taskID, replacement, step, replacementPrompt, planMode, true,
+					); replacementErr != nil {
+						s.logger.Error("failed to auto-start replacement after terminalized profile switch",
+							zap.String("task_id", taskID), zap.String("session_id", replacement.ID), zap.Error(replacementErr))
+						s.setSessionWaitingForInput(ctx, taskID, replacement.ID, replacement)
+						s.publishSessionWaitingEvent(ctx, taskID, replacement.ID, stepID, replacement)
+					}
+					return
+				}
+				lock.Unlock()
+				release()
+
+				err := s.autoStartStepPrompt(ctx, taskID, fresh, step, effectivePrompt, planMode, true)
 				if err != nil {
 					s.logger.Error("failed to launch agent after profile switch",
 						zap.String("task_id", taskID),
 						zap.String("session_id", sessionID),
 						zap.Error(err))
-					s.setSessionWaitingForInput(asyncCtx, taskID, sessionID, session)
-					s.publishSessionWaitingEvent(asyncCtx, taskID, sessionID, stepID, session)
-					s.drainQueuedMessageForPromptableSession(asyncCtx, sessionID)
+					s.setSessionWaitingForInput(ctx, taskID, sessionID, fresh)
+					s.publishSessionWaitingEvent(ctx, taskID, sessionID, stepID, fresh)
+					s.drainQueuedMessageForPromptableSession(ctx, sessionID)
 				}
 			}()
 			return
@@ -3095,7 +3136,24 @@ func (s *Service) autoStartStepPrompt(
 	// preparation from a blocked auto-start). PromptTask will reject CREATED sessions,
 	// so use StartCreatedSession which properly launches the agent on the prepared workspace.
 	// Pass skipMessageRecord=true since recordAutoStartMessage above already recorded it.
+	// Guard against concurrent terminalization before dispatching to a CREATED
+	// session. By the time a nonterminal session was selected, promoted, and the
+	// prompt built, a concurrent completion/cancellation may have terminalized
+	// it. Reload under the cancel-in-flight guard and bail out with the
+	// standard terminalization error so the caller can create a replacement.
 	if session.State == models.TaskSessionStateCreated {
+		lock, release := s.acquireCancelInFlightGuard(sessionID)
+		lock.Lock()
+		fresh, reloadErr := s.repo.GetTaskSession(ctx, sessionID)
+		if reloadErr != nil || fresh == nil || isTerminalSessionState(fresh.State) {
+			lock.Unlock()
+			release()
+			requeueTaken()
+			return errWorkflowAutoStartSessionTerminalized
+		}
+		lock.Unlock()
+		release()
+
 		s.logger.Info("auto-start: session is CREATED, launching agent via StartCreatedSession",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),

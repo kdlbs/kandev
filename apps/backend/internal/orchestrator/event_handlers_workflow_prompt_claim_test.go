@@ -523,3 +523,241 @@ func TestWorkflowAutoStartReleasesTerminalGuardAfterPromptAdmission(t *testing.T
 		t.Fatalf("auto-start prompt: %v", err)
 	}
 }
+
+// terminalizeCreatedSessionRepo pauses the CREATED-path auto-start just before
+// the guard reload, so the test can terminalize the session in that gap and
+// assert the guard detects it and returns errWorkflowAutoStartSessionTerminalized.
+type terminalizeCreatedSessionRepo struct {
+	sessionExecutorStore
+	targetSessionID string
+	lockAcquired    chan struct{} // closed when the guard lock is acquired
+	allowReload     chan struct{} // close to let the reload continue
+}
+
+func (r *terminalizeCreatedSessionRepo) GetTaskSession(ctx context.Context, sessionID string) (*models.TaskSession, error) {
+	if sessionID == r.targetSessionID {
+		select {
+		case r.lockAcquired <- struct{}{}:
+		default:
+		}
+		<-r.allowReload
+	}
+	return r.sessionExecutorStore.GetTaskSession(ctx, sessionID)
+}
+
+// TestWorkflowAutoStartCreatedTerminalizedGuard verifies that the CREATED
+// session branch in autoStartStepPrompt checks terminal state under the
+// cancel-in-flight guard before calling StartCreatedSession, and returns
+// errWorkflowAutoStartSessionTerminalized when the session was terminalized
+// concurrently.
+func TestWorkflowAutoStartCreatedTerminalizedGuard(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-created-guard", "session-created-guard", "step-created-guard")
+	session, err := repo.GetTaskSession(ctx, "session-created-guard")
+	requireNoError(t, err)
+	session.AgentProfileID = "profile-target"
+	session.ExecutorID = "exec-local"
+	session.ExecutorProfileID = "ep1"
+	session.State = models.TaskSessionStateCreated
+	session.IsPrimary = true
+	requireNoError(t, repo.UpdateTaskSession(ctx, session))
+
+	barrierRepo := &terminalizeCreatedSessionRepo{
+		sessionExecutorStore: repo,
+		targetSessionID:      session.ID,
+		lockAcquired:         make(chan struct{}, 1),
+		allowReload:          make(chan struct{}),
+	}
+
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		isAgentRunning:         true,
+		launchAgentFunc: func(_ context.Context, request *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return &executor.LaunchAgentResponse{AgentExecutionID: "execution-created-guard"}, nil
+		},
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[session.TaskID] = &v1.Task{
+		ID: session.TaskID, WorkspaceID: "ws1", WorkflowID: "wf1",
+		Title: "Test Task", Description: "Test", State: v1.TaskStateInProgress,
+	}
+	step := &wfmodels.WorkflowStep{
+		ID:   "step-created-guard",
+		Name: "Target",
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.repo = barrierRepo
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- svc.autoStartStepPrompt(ctx, session.TaskID, session, step, "review the task", false, false)
+	}()
+
+	<-barrierRepo.lockAcquired
+	requireNoError(t, repo.UpdateTaskSessionState(ctx, session.ID, models.TaskSessionStateCompleted, "concurrent completion"))
+	close(barrierRepo.allowReload)
+
+	autoStartErr := <-errCh
+	if !errors.Is(autoStartErr, errWorkflowAutoStartSessionTerminalized) {
+		t.Fatalf("autoStartStepPrompt error = %v, want errWorkflowAutoStartSessionTerminalized", autoStartErr)
+	}
+
+	// The CREATED session must remain terminal (the guard must not have
+	// launched it).
+	finalSession, err := repo.GetTaskSession(ctx, session.ID)
+	requireNoError(t, err)
+	if finalSession.State != models.TaskSessionStateCompleted {
+		t.Errorf("final session state = %s, must remain COMPLETED (was not launched)", finalSession.State)
+	}
+}
+
+// terminalizeImplicitSwitchRepo pauses the implicit profile-switch goroutine
+// just before autoStartStepPrompt, so the test can terminalize the session
+// and assert the goroutine detects it and creates a replacement.
+type terminalizeImplicitSwitchRepo struct {
+	sessionExecutorStore
+	targetSessionID string
+	promptCalled    chan struct{} // closed when autoStartStepPrompt is about to run
+	allowPrompt     chan struct{} // close to let autoStartStepPrompt proceed
+}
+
+func (r *terminalizeImplicitSwitchRepo) GetTaskSession(ctx context.Context, sessionID string) (*models.TaskSession, error) {
+	if sessionID == r.targetSessionID {
+		select {
+		case r.promptCalled <- struct{}{}:
+		default:
+		}
+		<-r.allowPrompt
+	}
+	return r.sessionExecutorStore.GetTaskSession(ctx, sessionID)
+}
+
+func (r *terminalizeImplicitSwitchRepo) GetTask(ctx context.Context, taskID string) (*models.Task, error) {
+	return r.sessionExecutorStore.(interface {
+		GetTask(context.Context, string) (*models.Task, error)
+	}).GetTask(ctx, taskID)
+}
+
+// TestProcessOnEnterImplicitProfileSwitchTerminalizedGuard verifies that the
+// implicit profile-switch goroutine in processOnEnter's default branch detects
+// that a reused session has terminalized before dispatch and creates a
+// replacement session via createNewSessionForStep.
+func TestProcessOnEnterImplicitProfileSwitchTerminalizedGuard(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-implicit-switch", "session-implicit-switch-source", "step-source")
+
+	source, err := repo.GetTaskSession(ctx, "session-implicit-switch-source")
+	requireNoError(t, err)
+	source.AgentProfileID = "profile-source"
+	source.ExecutorID = "exec-local"
+	source.ExecutorProfileID = "ep1"
+	source.TaskEnvironmentID = "env-implicit-switch"
+	source.IsPrimary = true
+	requireNoError(t, repo.UpdateTaskSession(ctx, source))
+	requireNoError(t, repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: source.TaskEnvironmentID, TaskID: source.TaskID,
+		ExecutorType: string(models.ExecutorTypeLocal), Status: models.TaskEnvironmentStatusReady,
+	}))
+
+	target := &models.TaskSession{
+		ID:                "session-implicit-switch-target",
+		TaskID:            source.TaskID,
+		AgentProfileID:    "profile-target",
+		ExecutorID:        source.ExecutorID,
+		ExecutorProfileID: source.ExecutorProfileID,
+		TaskEnvironmentID: source.TaskEnvironmentID,
+		State:             models.TaskSessionStateWaitingForInput,
+		StartedAt:         source.StartedAt,
+		UpdatedAt:         source.UpdatedAt,
+	}
+	requireNoError(t, repo.CreateTaskSession(ctx, target))
+	seedExecutorRunning(t, repo, target.ID, target.TaskID, "execution-implicit-switch")
+
+	barrierRepo := &terminalizeImplicitSwitchRepo{
+		sessionExecutorStore: repo,
+		targetSessionID:      target.ID,
+		promptCalled:         make(chan struct{}, 1),
+		allowPrompt:          make(chan struct{}),
+	}
+
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		isAgentRunning:         true,
+		launchAgentFunc: func(_ context.Context, request *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return &executor.LaunchAgentResponse{AgentExecutionID: "execution-implicit-replacement"}, nil
+		},
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[source.TaskID] = &v1.Task{
+		ID: source.TaskID, WorkspaceID: "ws1", WorkflowID: "wf1",
+		Title: "Test Task", Description: "Test", State: v1.TaskStateInProgress,
+	}
+	stepGetter := newMockStepGetter()
+	// Register the existing step-source so the replacement session's task
+	// (which inherits dbTask.WorkflowStepID) is resolvable.
+	stepGetter.steps["step-source"] = &wfmodels.WorkflowStep{
+		ID: "step-source", WorkflowID: "wf1", Name: "Source", AgentProfileID: source.AgentProfileID,
+	}
+	step := &wfmodels.WorkflowStep{
+		ID:             "step-implicit-switch",
+		WorkflowID:     "wf1",
+		Name:           "Target",
+		AgentProfileID: target.AgentProfileID,
+		Prompt:         "review the task",
+		// No auto_start_agent — implicit profile switch path.
+	}
+	stepGetter.steps[step.ID] = step
+	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
+	svc.repo = barrierRepo
+
+	done := make(chan struct{})
+	go func() {
+		svc.processOnEnter(ctx, source.TaskID, source, step, "Test")
+		close(done)
+	}()
+
+	// Terminalize the reused target session before the goroutine's guarded
+	// reload can detect it.
+	<-barrierRepo.promptCalled
+	requireNoError(t, repo.UpdateTaskSessionState(ctx, target.ID, models.TaskSessionStateCompleted, "concurrent completion"))
+	close(barrierRepo.allowPrompt)
+
+	<-done
+	// The inner goroutine (implicit profile switch) needs time to run its
+	// guarded reload, detect terminalization, and create a replacement.
+	time.Sleep(200 * time.Millisecond)
+
+	// A replacement session must be created with the target profile and be primary.
+	sessions, err := repo.ListTaskSessions(ctx, source.TaskID)
+	requireNoError(t, err)
+	if len(sessions) != 3 {
+		t.Fatalf("session count = %d, want 3 (source + terminalized target + replacement)", len(sessions))
+	}
+	var replacement *models.TaskSession
+	for _, s := range sessions {
+		if s.ID != source.ID && s.ID != target.ID {
+			replacement = s
+			break
+		}
+	}
+	if replacement == nil || !replacement.IsPrimary {
+		t.Fatalf("replacement = %#v, want primary fresh session", replacement)
+	}
+	if isTerminalSessionState(replacement.State) {
+		t.Fatalf("replacement state = %s, want nonterminal", replacement.State)
+	}
+	// The terminalized target must remain in its COMPLETED state.
+	finalTarget, err := repo.GetTaskSession(ctx, target.ID)
+	requireNoError(t, err)
+	if finalTarget.State != models.TaskSessionStateCompleted {
+		t.Errorf("terminalized target state = %s, must remain COMPLETED", finalTarget.State)
+	}
+	// The source session (the previous current session) must not be primary.
+	finalSource, err := repo.GetTaskSession(ctx, source.ID)
+	requireNoError(t, err)
+	if finalSource.IsPrimary {
+		t.Error("source session must not be primary after the implicit switch")
+	}
+}
