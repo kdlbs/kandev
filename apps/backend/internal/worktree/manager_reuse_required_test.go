@@ -140,7 +140,22 @@ func TestCreate_ReuseRequiredRejectsCanonicalWorktreeFromAnotherBranch(t *testin
 
 func TestCreate_ReuseRequiredAllowsAuthorizedEnvironmentFromAnotherTask(t *testing.T) {
 	repoPath := initGitRepoWithRemote(t)
-	worktreePath := filepath.Join(t.TempDir(), "canonical")
+	cfg := newTestConfig(t)
+	tasksBase := cfg.TasksBasePath
+
+	ownerTaskDir := filepath.Join(tasksBase, "owner-task_dir")
+	if err := os.MkdirAll(ownerTaskDir, 0755); err != nil {
+		t.Fatalf("mkdir owner task dir: %v", err)
+	}
+	if err := storageworkspaces.WriteOwnershipMarker(ownerTaskDir, storageworkspaces.OwnershipMarker{
+		TaskID:        "owner-task",
+		TaskDirName:   "owner-task_dir",
+		LayoutVersion: storageworkspaces.LayoutVersionSemantic,
+	}); err != nil {
+		t.Fatalf("write owner ownership marker: %v", err)
+	}
+
+	worktreePath := filepath.Join(ownerTaskDir, "repo-one")
 	runGit(t, repoPath, "worktree", "add", "-b", "shared-environment", worktreePath, "main")
 	store := newMockStore()
 	store.worktrees["canonical-worktree"] = &Worktree{
@@ -152,7 +167,7 @@ func TestCreate_ReuseRequiredAllowsAuthorizedEnvironmentFromAnotherTask(t *testi
 		Branch:            "shared-environment",
 		Status:            StatusActive,
 	}
-	mgr, err := NewManager(newTestConfig(t), store, newTestLogger())
+	mgr, err := NewManager(cfg, store, newTestLogger())
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}

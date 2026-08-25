@@ -202,7 +202,7 @@ func (m *Manager) reuseRequiredWorktree(ctx context.Context, req CreateRequest) 
 		!m.IsValid(wt.Path) {
 		return nil, ErrReuseWorktreeUnavailable
 	}
-	if err := m.validateExistingWorktreePathOwner(wt.Path, req.TaskID); err != nil {
+	if err := m.validateExistingWorktreePathOwner(wt.Path, wt.TaskID); err != nil {
 		return nil, err
 	}
 	return wt, nil
@@ -223,7 +223,7 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 	if req.SessionID != "" {
 		existing, err := m.GetBySessionAndRepo(ctx, req.SessionID, req.RepositoryID, reuseSlug)
 		if err == nil && existing != nil {
-			if err := m.validateExistingWorktreePathOwner(existing.Path, req.TaskID); err != nil {
+			if err := m.validateExistingWorktreePathOwner(existing.Path, existing.TaskID); err != nil {
 				return nil, true, err
 			}
 			if m.IsValid(existing.Path) {
@@ -252,7 +252,7 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 	if req.WorktreeID != "" {
 		existing, err := m.GetByID(ctx, req.WorktreeID)
 		if err == nil && existing != nil {
-			if err := m.validateExistingWorktreePathOwner(existing.Path, req.TaskID); err != nil {
+			if err := m.validateExistingWorktreePathOwner(existing.Path, existing.TaskID); err != nil {
 				return nil, true, err
 			}
 			if m.IsValid(existing.Path) {
@@ -289,8 +289,8 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 // worktree, so checking only the reusable path could delete a live checkout.
 // Paths outside Kandev's task root and legacy unmarked task roots remain
 // eligible for their existing compatibility behavior.
-func (m *Manager) validateExistingWorktreePathOwner(worktreePath, taskID string) error {
-	if worktreePath == "" || taskID == "" {
+func (m *Manager) validateExistingWorktreePathOwner(worktreePath, recordTaskID string) error {
+	if worktreePath == "" || recordTaskID == "" {
 		return nil
 	}
 	tasksBase, err := m.config.ExpandedTasksBasePath()
@@ -317,7 +317,11 @@ func (m *Manager) validateExistingWorktreePathOwner(worktreePath, taskID string)
 	if err != nil {
 		return fmt.Errorf("inspect worktree task root ownership: %w", err)
 	}
-	if found && owner.TaskID != taskID {
+	// Validate against the worktree record's persistent TaskID, not the
+	// requesting task's ID. An inherited/shared-group child reuses the
+	// parent's worktree under the parent's task-root with a different
+	// requesting TaskID, and must not be rejected.
+	if found && owner.TaskID != recordTaskID {
 		return fmt.Errorf("%w: path %q belongs to task %q", ErrWorktreePathOwnedByAnotherTask, worktreePath, owner.TaskID)
 	}
 	return nil
