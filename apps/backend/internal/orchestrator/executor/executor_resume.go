@@ -931,6 +931,11 @@ func (e *Executor) buildResumeRequestAtCredentialBoundary(
 	if session.TaskEnvironmentID != "" {
 		req.TaskEnvironmentID = session.TaskEnvironmentID
 	}
+	req.WorkspaceReuseRequired = workspaceReuseAllowed(
+		existingEnv,
+		req.ExecutorType,
+		existingEnv != nil && existingEnv.MaterializationSessionID != session.ID,
+	)
 
 	allRepos, err := e.resolveAllRepoInfoForSession(ctx, task.ID, session.ID)
 	if err != nil {
@@ -1268,7 +1273,7 @@ func applyResumeRepoBasics(req *LaunchAgentRequest, repository *models.Repositor
 // the prepare script's `git clone --branch <X>` resolves. Local executors skip
 // this path so LocalPreparer doesn't clobber the "use current state" UX.
 func (e *Executor) applyResumeCloneURL(req *LaunchAgentRequest, repository *models.Repository, baseBranch string) error {
-	if e.capabilities == nil || !e.capabilities.RequiresCloneURL(req.ExecutorType) {
+	if req.WorkspaceReuseRequired || e.capabilities == nil || !e.capabilities.RequiresCloneURL(req.ExecutorType) {
 		return nil
 	}
 	cloneURL := repositoryCloneURL(repository)

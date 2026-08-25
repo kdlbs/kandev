@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/acp-shell-command-output.md"
+spec: "../../specs/ui/requirements/acp-shell-command-output.md"
 parallelism: sequential
 ---
 
@@ -34,7 +34,7 @@ rtk make -C apps/backend test
 
 - `apps/backend/internal/agentctl/server/adapter/transport/acp/shell_output.go`
 - `apps/backend/internal/agentctl/server/adapter/transport/acp/tool_call_update_test.go`
-- `docs/specs/ui/acp-shell-command-output.md`
+- `docs/specs/ui/requirements/acp-shell-command-output.md`
 - `docs/plans/acp-shell-command-echo/plan.md`
 - `docs/plans/acp-shell-command-echo/task-01-normalize-omp-shell-output.md`
 
@@ -51,7 +51,7 @@ None.
 - OMP's ACP event mapper emits `$ <command>` as presentation content on command updates and merges result text after it.
 - `NormalizeShellToolUpdate` currently sets `finalStdoutCommitted` for any non-nil `rawOutput`, even when `applyFinalShellResult` recognizes no stdout.
 - ADR-0036 keeps provider output normalization at the ACP adapter boundary.
-- The OMP regression scenario in `docs/specs/ui/acp-shell-command-output.md`.
+- The OMP regression scenario in `docs/specs/ui/requirements/acp-shell-command-output.md`.
 
 ## Output Contract
 

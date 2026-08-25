@@ -110,6 +110,7 @@ const (
 	branchDeletionsFieldKey  = "branch_deletions"
 	deletedFieldKey          = "deleted"
 	versionFieldKey          = "version"
+	serviceFieldKey          = "service"
 	kandevName               = "kandev"
 	startingStatus           = "starting"
 )
@@ -604,7 +605,14 @@ func registerRoutes(p routeParams) {
 	// external answer_question_kandev/list_pending_questions_kandev MCP tools
 	// (R3: both entry points must race through the same claim).
 	clarificationResolver := clarification.NewResolver(
-		clarificationStore, p.taskRepo, p.msgCreator, p.taskSvc, p.orchestratorSvc, p.eventBus, p.log,
+		clarificationStore,
+		p.taskRepo,
+		p.msgCreator,
+		p.taskSvc,
+		p.orchestratorSvc,
+		p.eventBus,
+		p.orchestratorSvc.HandleClarificationPrimaryAnswered,
+		p.log,
 	)
 
 	// Wire pending clarification requests into the office inbox.
@@ -711,15 +719,26 @@ func registerRoutes(p routeParams) {
 		authhttpapi.RegisterRoutes(p.router, p.authSvc, p.log)
 	}
 
-	// /health is a readiness probe, not a liveness probe. It only
-	// returns 200 after main has flipped the package-level `ready`
-	// flag — which happens after route registration, agent-registry
-	// seeding, the HTTP listener accepting connections, and (when
-	// KANDEV_E2E_MOCK is set) the testharness routes being mounted.
-	// Before that, return 503 so callers (including the e2e fixture's
-	// waitForHealth) keep polling instead of racing ahead and hitting
-	// 404s on routes that aren't wired yet.
+	// /health is a liveness probe: it answers 200 unconditionally, matching
+	// the bootstrap handler's /health contract (internal/backendapp/
+	// httpserver.go) so the launcher's healthcheck never depends on startup
+	// progress. By the time this handler is reachable at all, ready is
+	// already true (see the comment on startGatewayAndServe's Store calls),
+	// but it does not gate on that flag — liveness must not depend on
+	// readiness, or the crash loop docs/specs/startup-listener-before-
+	// recovery/spec.md exists to fix comes back.
 	p.router.GET("/health", healthHandler(p))
+
+	// /ready is a readiness probe. It returns 200 only after main has
+	// flipped the package-level `ready` flag — which happens after route
+	// registration, agent-registry seeding, the HTTP listener accepting
+	// connections, and (when KANDEV_E2E_MOCK is set) the testharness routes
+	// being mounted. Before that, return 503 so callers (including the e2e
+	// fixture's readiness wait and Kubernetes' readinessProbe) keep polling
+	// instead of racing ahead and hitting 404s on routes that aren't wired
+	// yet. See docs/specs/health-endpoint-version/spec.md for the exact
+	// contract this endpoint now owns.
+	p.router.GET("/ready", readyHandler(p))
 
 	// /api/v1/features is a public, unauthenticated read of the runtime
 	// feature-flag map. The frontend SSR-fetches it once per page render to
@@ -756,7 +775,7 @@ func registerRoutes(p routeParams) {
 		} else {
 			p.router.NoRoute(func(c *gin.Context) {
 				path := c.Request.URL.Path
-				if strings.HasPrefix(path, "/api/") || path == "/ws" || path == "/health" {
+				if strings.HasPrefix(path, "/api/") || path == "/ws" || path == "/health" || path == "/ready" {
 					c.AbortWithStatus(http.StatusNotFound)
 					return
 				}
@@ -780,40 +799,60 @@ func registerRoutes(p routeParams) {
 	}
 }
 
-// healthHandler serves GET /health. The response always carries the
-// process's running version — in both the ready and not-ready bodies — so an
-// operator can identify the build of a backend that is stuck starting, and so
-// a monitor never needs a credential to read it (see docs/specs/
-// health-endpoint-version/spec.md).
+// healthHandler serves GET /health, the liveness probe. It always answers
+// 200 with the process's running version — regardless of the `ready` flag —
+// mirroring the bootstrap handler's /health contract (httpserver.go) so the
+// launcher's healthcheck never depends on startup progress. See docs/specs/
+// health-endpoint-version/spec.md for the exact response contract.
 func healthHandler(p routeParams) gin.HandlerFunc {
-	// p.version is normally the package-level Version wired in by run()'s
-	// registerRoutes call. Falling back here keeps the never-empty guarantee
-	// (AC-11) true regardless of that call-site wiring, since standing up
-	// run()'s full DI graph in a test just to exercise that one field
-	// assignment is out of proportion to this change.
-	version := p.version
-	if version == "" {
-		version = Version
-	}
+	version := resolveVersion(p)
 	return func(c *gin.Context) {
-		if !ready.Load() {
-			c.JSON(http.StatusServiceUnavailable, gin.H{
-				"status":        startingStatus,
-				"service":       kandevName,
-				versionFieldKey: version,
-			})
-			return
-		}
 		if token := desktopHealthToken(); token != "" {
 			c.Header(desktopHealthTokenHeader, token)
 		}
 		c.JSON(http.StatusOK, gin.H{
-			"status":        "ok",
-			"service":       kandevName,
+			statusKey:       "ok",
+			serviceFieldKey: kandevName,
 			"mode":          "websocket+http",
 			versionFieldKey: version,
 		})
 	}
+}
+
+// readyHandler serves GET /ready, the readiness probe. The response always
+// carries the process's running version — in both the ready and not-ready
+// bodies — so an operator can identify the build of a backend that is stuck
+// starting, and so a monitor never needs a credential to read it (see
+// docs/specs/health-endpoint-version/spec.md).
+func readyHandler(p routeParams) gin.HandlerFunc {
+	version := resolveVersion(p)
+	return func(c *gin.Context) {
+		if !ready.Load() {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				statusKey:       startingStatus,
+				serviceFieldKey: kandevName,
+				versionFieldKey: version,
+			})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			statusKey:       "ok",
+			serviceFieldKey: kandevName,
+			versionFieldKey: version,
+		})
+	}
+}
+
+// resolveVersion returns p.version, falling back to the package-level
+// Version. p.version is normally wired in by run()'s registerRoutes call;
+// the fallback keeps the never-empty guarantee (AC-11) true regardless of
+// that call-site wiring, since standing up run()'s full DI graph in a test
+// just to exercise that one field assignment is out of proportion.
+func resolveVersion(p routeParams) string {
+	if p.version != "" {
+		return p.version
+	}
+	return Version
 }
 
 func desktopHealthToken() string {
@@ -1172,6 +1211,20 @@ func registerSecondaryRoutes(
 		p.log,
 	)
 	p.log.Debug("Registered Clarification handlers (HTTP)")
+
+	// Wire the plugin Host interaction write path (ADR 0052) onto the same
+	// orchestrator permission resolution and the same clarification resolver
+	// instance the REST route and the MCP handlers use, so a plugin's response
+	// is indistinguishable from a user's and takes the same durable claim.
+	// Deliberately here rather than in initOfficeServices: that returns early
+	// when features.office=false (the production default), while plugins run
+	// whenever services.Plugins is non-nil.
+	if p.services.Plugins != nil {
+		p.services.Plugins.SetInteractionResponder(pluginsInteractionResponderAdapter{
+			permissions:    p.orchestratorSvc,
+			clarifications: clarificationResolver,
+		})
+	}
 
 	if p.secretsSvc != nil {
 		secrets.RegisterRoutes(p.router, p.gateway.Dispatcher, p.secretsSvc, p.log)
@@ -1643,16 +1696,20 @@ func registerMCPAndDebugRoutes(
 	p.log.Debug("MCP handler configured for agent lifecycle manager")
 
 	// In-session MCP calls reach this same dispatcher over the agent's own WS
-	// stream, which carries no credential — so scope them to the user who owns
-	// the stream's task. Without this the handlers run with no identity, which
-	// the task service treats as an internal caller and serves unscoped.
+	// stream, which carries no credential. Always attach the server-derived
+	// task/session principal so automation self/workspace boundaries remain in
+	// force even when authentication is disabled or unavailable. Owner identity
+	// scoping is conditional because single-user installs intentionally retain
+	// their existing unscoped behavior.
+	mcpScopeResolver := mcpscope.NewResolver(
+		p.taskRepo,
+		p.authSvc,
+		func() bool { return p.authSvc != nil && p.authSvc.Mode() != auth.ModeDisabled },
+		p.log,
+	)
+	p.lifecycleMgr.SetMCPPrincipalScoper(mcpScopeResolver.ScopePrincipal)
 	if p.authSvc != nil {
-		p.lifecycleMgr.SetMCPIdentityScoper(mcpscope.NewResolver(
-			p.taskRepo,
-			p.authSvc,
-			func() bool { return p.authSvc.Mode() != auth.ModeDisabled },
-			p.log,
-		).Scope)
+		p.lifecycleMgr.SetMCPIdentityScoper(mcpScopeResolver.Scope)
 		p.log.Debug("In-session MCP dispatch scoped to task owner")
 	}
 

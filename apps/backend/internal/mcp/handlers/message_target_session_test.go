@@ -117,7 +117,7 @@ func TestHandleMessageTask_LivePrimaryKeepsPriorityOverNewerSessions(t *testing.
 //
 // The CODE stays INTERNAL_ERROR. "Target session FAILED/CANCELLED ->
 // INTERNAL_ERROR" is written down in
-// docs/specs/tasks/parent-child-message-interrupt.md, so improving the message
+// docs/specs/tasks/requirements/parent-child-message-interrupt.md, so improving the message
 // must not quietly reclassify it: a terminal primary with nothing live is
 // handed to dispatch exactly as before.
 func TestHandleMessageTask_AllSessionsTerminalNamesTheRecoveryTool(t *testing.T) {

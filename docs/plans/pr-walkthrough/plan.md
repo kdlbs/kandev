@@ -1,7 +1,8 @@
 ---
-spec: docs/specs/pr-walkthrough/spec.md
+spec: docs/specs/ui/requirements/pr-walkthrough.md
 created: 2026-08-22
-status: implementing
+status: superseded
+superseded_by: ../pr-walkthrough-portable-runner-fix/plan.md
 ---
 
 # Implementation Plan: Pull Request Walkthrough Generation
@@ -56,14 +57,13 @@ Add `.github/workflows/pr-walkthrough.yml` as a dedicated workflow using the
 `pull_request_target` event family. Gate it with the independent
 `PR_WALKTHROUGH_ENABLED` variable, not `OPENCODE_REVIEW_ENABLED`, and keep it
 decoupled from the code-review App token. The job runs for `opened`,
-`reopened`, and `ready_for_review`, plus a label-triggered rerun only when the
-label is `generate-pr-walkthrough`. The workflow does not subscribe to
-`synchronize` in this increment.
+`reopened`, `ready_for_review`, and `synchronize`. A label-triggered rerun also
+runs when the label is `generate-pr-walkthrough`.
 
 Use the shared base-controlled setup action for OpenCode. Select
-`opencode-go/muse-spark-1.2-contributor#high`. The pinned OpenCode 1.17.7 model
-catalog declares reasoning support and built-in `high` and `xhigh` variants for
-this model, so no custom provider override is needed.
+`opencode-go/muse-spark-1.2-contributor` with `--model`. Select its built-in
+`high` reasoning variant with `--variant`. The pinned OpenCode 1.17.7 model
+catalog declares this variant, so no custom provider override is necessary.
 
 The job will:
 
@@ -102,7 +102,9 @@ The publication contract is:
 - Secret-key secret: `CLOUDFLARE_R2_SECRET_ACCESS_KEY`.
 - Existing account variable: `CLOUDFLARE_ACCOUNT_ID` remains available for
   endpoint construction and is not a secret.
-- Object key: `pr/<pull-request-number>/<head-sha>.html`.
+- Object key: `pr/<pull-request-number>/<short-head-sha>.html`, where
+  `short-head-sha` is the first 12 lowercase hexadecimal characters of the
+  exact head SHA.
 - Object metadata: `Content-Type: text/html; charset=utf-8` and a short cache
   lifetime that does not outlive lifecycle deletion or same-head reruns.
 
@@ -236,7 +238,7 @@ Completed 2026-08-22:
 Wave 1:
 
 - [x] [task-01-walkthrough-skill-renderer](task-01-walkthrough-skill-renderer.md)
-- [ ] [task-02-agent-rendering-contract](task-02-agent-rendering-contract.md)
+- [x] [task-02-agent-rendering-contract](task-02-agent-rendering-contract.md) (superseded by the portable filesystem contract)
 
 Wave 2:
 

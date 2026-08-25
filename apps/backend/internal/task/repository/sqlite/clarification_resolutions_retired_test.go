@@ -11,7 +11,7 @@ import "testing"
 // or a replayed one. The claim path itself has no statement of its own to
 // assert against: CompleteActiveClarificationBundle is the only clarification
 // claim in the repository package, enforced by the compiler once the retired
-// repo/model files are gone (docs/specs/external-question-answering/spec.md,
+// repo/model files are gone (docs/specs/integrations/requirements/external-question-answering.md,
 // P1).
 func TestClarificationResolutionsTableNeverCreated(t *testing.T) {
 	repo := newRepoForSessionTests(t)

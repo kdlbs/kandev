@@ -3,13 +3,13 @@
 - Status: accepted
 - Date: 2026-07-17
 - Area: backend, protocol
-- Related: [docs/specs/plugins/spec.md](../specs/plugins/spec.md) ("Host data API"),
+- Related: [docs/specs/plugins/requirements/plugins.md](../specs/plugins/requirements/plugins.md) ("Host data API"),
   [docs/plans/plugins/GRPC-CONTRACT.md](../plans/plugins/GRPC-CONTRACT.md),
   [docs/plans/plugins/host-data-api/plan.md](../plans/plugins/host-data-api/plan.md)
 
 ## Context
 
-The plugin system (spec `docs/specs/plugins/spec.md`) gives plugins a
+The plugin system (spec `docs/specs/plugins/requirements/plugins.md`) gives plugins a
 capability-gated `Host` gRPC service — `GetState`/`SetState`/`DeleteState`/
 `ListState`/`RevealSecret`/`EmitEvent` — but **no sanctioned way to read or write
 kandev's own domain data** (tasks, sessions, workspaces, workflows, agent

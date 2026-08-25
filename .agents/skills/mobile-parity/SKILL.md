@@ -23,6 +23,16 @@ Apply when task changes user-facing UI:
 
 If task has no UI surface, say why this skill does not apply and continue.
 
+## Specification ownership
+
+When the task uses durable specifications, put mobile outcomes in the system
+that owns the feature contract. Do not create a second UI requirement or design
+only because the feature needs a phone surface. Use the UI system only for an
+independent reusable interaction contract.
+
+Keep the mobile composition in the owning feature design with its backend and
+desktop boundaries. Link to an existing UI contract when the feature reuses one.
+
 ## Mobile Design Contract
 
 When a task changes composition, navigation, overlays, touch behavior, scrolling, or breakpoint behavior, state these choices in the working plan or task notes. Keep them brief; do not create a separate document unless the task already uses a spec or committed plan. For copy, icon, color, or content-only styling inside an unchanged surface, identify the nearest mobile exemplar and the rendered mobile check instead of forcing the full contract.

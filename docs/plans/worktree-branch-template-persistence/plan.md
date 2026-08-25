@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/workspaces/worktree-branch-templates.md
+spec: docs/specs/workspaces/requirements/worktree-branch-templates.md
 created: 2026-08-15
 status: complete
 ---

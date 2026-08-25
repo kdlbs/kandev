@@ -7,7 +7,7 @@ depends_on:
   - "03-classify-provider-failure"
   - "04-render-provider-quota-recovery"
 plan: "plan.md"
-spec: "../../specs/agent-stall-recovery/spec.md"
+spec: "../../specs/agents/requirements/agent-stall-recovery.md"
 ---
 
 # Task 05: Prove Desktop and Mobile Recovery

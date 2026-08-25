@@ -747,7 +747,7 @@ type httpCreateTaskRequest struct {
 	StartWhenUnblocked *bool  `json:"start_when_unblocked,omitempty"`
 	ProjectID          string `json:"project_id,omitempty"`
 	// ExternalID is a caller-supplied identity used for create-idempotency
-	// (docs/specs/tasks/external-id-idempotency/spec.md).
+	// (docs/specs/tasks/requirements/external-id-idempotency.md).
 	ExternalID string   `json:"external_id,omitempty"`
 	Labels     []string `json:"labels,omitempty"`
 	// Office task-handoffs phase 5 — workspace policy. Optional; same
@@ -764,7 +764,7 @@ type createTaskResponse struct {
 	AgentExecutionID string `json:"agent_execution_id,omitempty"`
 	// Deduplicated and CreationComplete are required booleans (not
 	// presence-only markers) on every create-idempotency outcome, per
-	// docs/specs/tasks/external-id-idempotency/spec.md. Deduplicated is true
+	// docs/specs/tasks/requirements/external-id-idempotency.md. Deduplicated is true
 	// for both Found outcomes. CreationComplete is false only for
 	// Found-unsettled — every other outcome (including CreatedIdentityLost)
 	// carries true, because the field means only "this task's required
@@ -941,6 +941,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		Metadata:           metadata,
 		DeferredLaunch:     deferredLaunch,
 		PlanMode:           body.PlanMode,
+		StartAgent:         body.StartAgent,
 		ParentID:           body.ParentID,
 		WorkspacePath:      body.WorkspacePath,
 		BlockedBy:          body.BlockedBy,
@@ -1082,7 +1083,7 @@ type lookupTaskResponse struct {
 }
 
 // httpGetTaskByExternalID is the REST lookup route
-// (docs/specs/tasks/external-id-idempotency/spec.md, "REST — lookup"): a
+// (docs/specs/tasks/system-design/external-id-idempotency.md, "REST — lookup"): a
 // side-effect-free way to ask what holds an identity without risking a
 // create. Returns the task whether settled or not, including archived tasks.
 func (h *TaskHandlers) httpGetTaskByExternalID(c *gin.Context) {
@@ -1098,7 +1099,7 @@ func (h *TaskHandlers) httpGetTaskByExternalID(c *gin.Context) {
 }
 
 // httpReleaseTaskExternalID is the REST release route
-// (docs/specs/tasks/external-id-idempotency/spec.md, "REST — release"): an
+// (docs/specs/tasks/system-design/external-id-idempotency.md, "REST — release"): an
 // operator action for an identity a human has determined is abandoned. Frees
 // the identity without deleting or otherwise modifying the task. MUST NOT be
 // called automatically in response to creation_complete:false — see "The one
@@ -1375,7 +1376,7 @@ type startAgentDispatch struct {
 // step (part of step 6, "required synchronous post-create work") — it MUST
 // run, and be allowed to fail, before settlement (step 7). Only the
 // resulting agent launch is asynchronous dispatch (step 8), which must run
-// after settlement (docs/specs/tasks/external-id-idempotency/spec.md,
+// after settlement (docs/specs/tasks/system-design/external-id-idempotency.md,
 // "Settlement call site (normative, per surface)": "the helper must expose
 // preparation and dispatch separately so settlement can sit between them").
 // A prior shape settled before calling this at all, which satisfied "no

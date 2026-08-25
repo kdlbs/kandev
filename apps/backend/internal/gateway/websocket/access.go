@@ -20,6 +20,9 @@ import (
 type SubscriptionAccessPolicy struct {
 	Task    func(ctx context.Context, taskID string) error
 	Session func(ctx context.Context, sessionID string) error
+	// Run gates run.subscribe. Nil (the zero-AuthPolicy case) leaves every
+	// run subscription unchecked, matching Task/Session.
+	Run func(ctx context.Context, runID string) error
 }
 
 // WorkspaceOwnerResolver resolves a workspace's owning user ID ("" = unowned

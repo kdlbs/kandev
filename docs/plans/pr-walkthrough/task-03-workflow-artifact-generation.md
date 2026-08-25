@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-walkthrough-skill-renderer", "02-agent-rendering-contract"]
 plan: "plan.md"
-spec: "../../specs/pr-walkthrough/spec.md"
+spec: "../../specs/ui/requirements/pr-walkthrough.md"
 ---
 
 # Task 03: Workflow artifact generation
@@ -19,8 +19,8 @@ the separate R2 publication job.
 - **Acceptance:** A non-draft authorized pull request event invokes OpenCode,
   creates distinct `docs/pr-walkthrough/pr-<number>.json` and `.html` files,
   and uploads them as an artifact. The generation job runs on `opened`,
-  `reopened`, `ready_for_review`, and the `generate-pr-walkthrough` label, but
-  not on `synchronize`.
+  `reopened`, `ready_for_review`, `synchronize`, and the
+  `generate-pr-walkthrough` label.
 - **Acceptance:** The job cannot execute PR-owned scripts through OpenCode or
   modify source. OpenCode may invoke only the base-controlled rendering
   adapter, which writes the fixed walkthrough outputs. The job does not request
@@ -31,9 +31,10 @@ the separate R2 publication job.
   boundary. The artifact handoff is explicit for the dependent R2 publication
   job.
 - **Acceptance:** The workflow uses `PR_WALKTHROUGH_ENABLED`, the
-  `opencode-go/muse-spark-1.2-contributor#high` model reference and the model's
-  native high-reasoning variant. The normal review workflow remains
-  independently gated by `OPENCODE_REVIEW_ENABLED`.
+  `opencode-go/muse-spark-1.2-contributor` model reference, and the model's
+  native `high` reasoning variant. The workflow passes the variant through
+  `--variant`. The normal review workflow remains independently gated by
+  `OPENCODE_REVIEW_ENABLED`.
 - **Verification:**
 
   ```text
@@ -77,9 +78,9 @@ per-PR concurrency serializes generation, publication, and linking, and the
 walkthrough label no longer runs the normal code-review job.
 
 The walkthrough has its own enable variable and uses the Muse Spark contributor
-model with its native high-reasoning variant. The pinned OpenCode 1.17.7 CLI
-catalog reports reasoning support plus built-in `high` and `xhigh` variants,
-and the CLI resolved the default-deny agent permissions.
+model with its native high-reasoning variant. The workflow passes the model and
+variant through separate OpenCode 1.17.7 CLI options. Live validation on PR
+`#2936` found and removed the invalid `#high` model suffix.
 
 Verification: workflow contract tests passed; action pinning tests and linter
 passed; `actionlint` passed; `git diff --check` passed. The targeted `zizmor`

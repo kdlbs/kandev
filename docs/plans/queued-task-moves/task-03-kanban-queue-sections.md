@@ -5,7 +5,7 @@ status: completed
 wave: 3
 depends_on: ["02-deferred-destination-lifecycle"]
 plan: "plan.md"
-spec: "../../specs/tasks/wip-limit-pull-system.md"
+spec: "../../specs/tasks/system-design/wip-limit-pull-system.md"
 ---
 
 # Task 03: Add Frontend Queue Guidance

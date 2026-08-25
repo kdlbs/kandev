@@ -79,11 +79,13 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 	// stuck waiting for the first tick. Skipped only in fully-paused initial
 	// state? No: even paused workspaces benefit from a one-time scan so
 	// transitioning to slow/fast later finds a populated cache.
+	initialScanStarted := time.Now()
 	wt.updateGitStatusClass(ctx, subproc.GitBackground)
 	wt.updateFiles(ctx)
 
 	// Cache the last known state (ignore error on initial fetch)
 	lastState, _ := wt.getWorkspaceState(ctx)
+	wt.recordMonitorTick(time.Since(initialScanStarted))
 
 	// Signal that the initial scan is done — tests wait on this instead of
 	// sleeping to avoid races with the goroutine's first getWorkspaceState.
@@ -160,7 +162,9 @@ func (wt *WorkspaceTracker) handleMonitorTimerTick(ctx context.Context, lastStat
 // updates if changes are detected. Returns true if the loop should stop.
 // The deferred flag reset ensures monitorRunning is cleared even on panic.
 func (wt *WorkspaceTracker) monitorTick(ctx context.Context, lastState *workspaceState, consecutiveFailures *int) bool {
+	tickStarted := time.Now()
 	defer func() {
+		wt.recordMonitorTick(time.Since(tickStarted))
 		atomic.StoreInt32(&wt.monitorRunning, 0)
 		// Signal that the tick completed — tests wait on this instead of
 		// spinning on the monitorRunning atomic flag.

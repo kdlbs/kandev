@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -24,6 +25,15 @@ func (s *Service) GetContinuationSummaryForTest(
 	ctx context.Context, agentProfileID, scope string,
 ) (*sqlite.AgentContinuationSummary, error) {
 	return s.repo.GetContinuationSummary(ctx, agentProfileID, scope)
+}
+
+// LoadContinuationSummaryForTest exposes SchedulerIntegration's private
+// loadContinuationSummary so tests can drive the real reader path
+// (as assembleAgentPrompt calls it) without duplicating its scope logic.
+func (si *SchedulerIntegration) LoadContinuationSummaryForTest(
+	ctx context.Context, run *models.Run, agentID, taskID string,
+) string {
+	return si.loadContinuationSummary(ctx, run, agentID, taskID)
 }
 
 // ListTasksTouchedByRunForTest exposes the repo's read query so the
@@ -59,12 +69,52 @@ func BuildPromptContextForTest(svc *Service, ctx context.Context, reason, payloa
 	return si.buildPromptContext(ctx, reason, payload)
 }
 
+// CoalesceRoutineWakeupForTest creates a wakeup-request carrying the
+// given routine_id and coalesces it into an already-claimed run, exactly
+// as the wakeup dispatcher does when a routine fire lands on an
+// in-flight run (wakeup.Dispatcher.Dispatch -> MarkWakeupRequestCoalesced).
+// Used by WO-16's continuation-scope regression tests to reproduce the
+// claim-time vs completion-time snapshot drift without standing up the
+// full wakeup dispatcher.
+func (s *Service) CoalesceRoutineWakeupForTest(
+	ctx context.Context, t *testing.T, agentProfileID, runID, routineID string,
+) {
+	t.Helper()
+	req := &sqlite.WakeupRequest{
+		ID:             "wakeup-" + runID + "-" + routineID,
+		AgentProfileID: agentProfileID,
+		Source:         "routine",
+		Reason:         "routine_trigger",
+		Payload:        fmt.Sprintf(`{"routine_id":%q}`, routineID),
+	}
+	if err := s.repo.CreateWakeupRequest(ctx, req); err != nil {
+		t.Fatalf("create wakeup request: %v", err)
+	}
+	if err := s.repo.MarkWakeupRequestCoalesced(ctx, req.ID, runID); err != nil {
+		t.Fatalf("coalesce wakeup request into run: %v", err)
+	}
+}
+
 // ExecSQL executes raw SQL against the service's database for test setup.
 func (s *Service) ExecSQL(t *testing.T, query string, args ...interface{}) {
 	t.Helper()
 	if _, err := s.repo.ExecRaw(context.Background(), query, args...); err != nil {
 		t.Fatalf("exec sql: %v", err)
 	}
+}
+
+// GetTaskSessionRollupForTest reads task_sessions' AC-10 rollup columns
+// directly, so tests can assert the Office cost subscriber never writes them
+// (docs/specs/task-cost-ledger/spec.md AC-21).
+func (s *Service) GetTaskSessionRollupForTest(t *testing.T, sessionID string) (tokensIn, tokensCachedIn, tokensOut, costSubcents int64) {
+	t.Helper()
+	if err := s.repo.ReaderDB().QueryRowx(
+		`SELECT tokens_in, tokens_cached_in, tokens_out, cost_subcents FROM task_sessions WHERE id = ?`,
+		sessionID,
+	).Scan(&tokensIn, &tokensCachedIn, &tokensOut, &costSubcents); err != nil {
+		t.Fatalf("read task_sessions rollup: %v", err)
+	}
+	return
 }
 
 // GetWorkspaceGroupForTest exposes workspace-group rows for deletion-order tests.

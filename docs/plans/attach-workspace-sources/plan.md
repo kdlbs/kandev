@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/tasks/attach-workspace-sources.md
+spec: docs/specs/tasks/system-design/attach-workspace-sources.md
 created: 2026-07-22
 status: completed
 ---

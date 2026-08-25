@@ -155,7 +155,7 @@ type ResolveOptions struct {
 type healthIndex map[ProviderID]map[string]map[string]models.ProviderHealth
 
 // Resolve runs the resolution algorithm described in
-// docs/specs/office-provider-routing/plan.md §Phase 2.
+// docs/plans/office-execution-profile-routing/plan.md §Phase 2.
 func (r *Resolver) Resolve(
 	ctx context.Context,
 	workspaceID string,

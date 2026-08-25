@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-workflow-contract-and-validation", "02-original-session-initialization"]
 plan: "plan.md"
-spec: "../../specs/workflow-session-settings/spec.md"
+spec: "../../specs/tasks/requirements/workflow-session-settings.md"
 ---
 
 # Task 03: Apply Matching Workflow Rules to the Original Session

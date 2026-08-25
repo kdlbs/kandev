@@ -790,7 +790,9 @@ test.describe("Task creation from GitHub URL", () => {
     await startBtn.click();
     await expect(dialog).not.toBeVisible({ timeout: 10_000 });
 
-    // Task B should also succeed (this would have failed before the fix).
+    // Task B follows a full navigation away from Task A. Dockview can keep
+    // Task A's terminal mounted while Task B hydrates, so this also guards
+    // SessionPage against reading a stale, hidden terminal buffer.
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
     const sessionB = new SessionPage(testPage);
     await sessionB.waitForLoad();

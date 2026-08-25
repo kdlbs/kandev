@@ -5,7 +5,7 @@ status: completed
 wave: 2
 depends_on: ["01-atomic-move-admission"]
 plan: "plan.md"
-spec: "../../specs/tasks/wip-limit-pull-system.md"
+spec: "../../specs/tasks/system-design/wip-limit-pull-system.md"
 ---
 
 # Task 02: Defer Destination Lifecycle Until Promotion

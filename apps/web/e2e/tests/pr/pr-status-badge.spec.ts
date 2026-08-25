@@ -368,6 +368,19 @@ test.describe("PR status badge", () => {
       seedData.repositoryId,
       taskTitle,
     );
+    const settings = await apiClient.getUserSettings();
+    const sidebarViews = settings.settings.sidebar_views as Array<Record<string, unknown>>;
+    await apiClient.saveUserSettings({
+      sidebar_views: sidebarViews.map((view) => ({
+        ...view,
+        task_row: {
+          details_enabled: true,
+          detail_order: ["relative_time", "repository", "pull_request_number"],
+          visible_details: ["relative_time", "repository", "pull_request_number"],
+          trailing: "change_request_status",
+        },
+      })),
+    });
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
@@ -395,6 +408,8 @@ test.describe("PR status badge", () => {
 
     const taskRow = testPage.getByTestId("sidebar-task-item").filter({ hasText: taskTitle });
     await expect(taskRow).toBeVisible({ timeout: 15_000 });
+    const trailingStatus = taskRow.getByTestId("sidebar-task-change-request-status");
+    await expect(trailingStatus).toBeVisible();
     const icon = taskRow.getByTestId(`pr-task-icon-${task.id}`);
     await expect(icon).toHaveAttribute("data-pr-ready-to-merge", "true");
     await icon.hover();
@@ -435,9 +450,8 @@ test.describe("PR status badge", () => {
     ).toBe(true);
 
     await taskRow.focus();
-    // Tab once lands on the row's title-preview trigger (now keyboard-operable,
-    // see task-title-hover-card.tsx), tab again reaches the PR badge.
-    await testPage.keyboard.press("Tab");
+    // The sidebar no longer mounts the task-title preview, so the first tab
+    // after the row reaches the PR badge.
     await testPage.keyboard.press("Tab");
     await expect(icon).toBeFocused();
     const focusedSummary = visibleTaskPRSummary(testPage);

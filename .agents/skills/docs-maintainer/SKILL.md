@@ -10,8 +10,8 @@ Use this skill to decide whether public docs need updates and to make those upda
 ## Docs Boundaries
 
 - Public website docs source lives under `docs/public/**`.
-- Internal product/spec planning stays under `docs/specs/**`.
-- Implementation plans stay under `docs/plans/**`.
+- Product context, requirements, and system designs stay under `docs/specs/**`.
+- Implementation plans and work orders stay under `docs/plans/**`.
 - Architecture decisions stay under `docs/decisions/**`.
 - Raw supporting notes can remain under `docs/**` outside `docs/public/**`, but do not publish them unless rewritten for users.
 - `docs/public/meta.json` owns published-page order and navigation groups. Page paths own routes, and page frontmatter owns titles and descriptions.

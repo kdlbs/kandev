@@ -1,6 +1,6 @@
 // System pages — frontend types mirroring the
 // `apps/backend/internal/system/` HTTP surface (see
-// docs/specs/system-page/spec.md "Backend surface").
+// docs/specs/system-page/requirements/system-page.md "Backend surface").
 
 export interface SystemInfo {
   version: string;

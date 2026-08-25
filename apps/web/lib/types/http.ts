@@ -419,7 +419,13 @@ export type Task = ActiveSubagentCountFields & {
 };
 
 // Task origin values mirror models.TaskOrigin* constants in the Go backend.
-export type TaskOrigin = "manual" | "agent_created" | "routine" | "onboarding";
+export type TaskOrigin =
+  | "manual"
+  | "agent_created"
+  | "routine"
+  | "onboarding"
+  | "automation_run"
+  | "automation_task";
 
 // isFromOffice reads the backend-computed flag (predicate lives in SQL at
 // apps/backend/internal/task/repository/sqlite/task.go). Use to gate

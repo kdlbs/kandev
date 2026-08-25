@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/no-silent-model-fallback/spec.md"
+spec: "../../specs/agents/requirements/no-silent-model-fallback.md"
 ---
 
 # Task 02: Build fallback settings disclosure

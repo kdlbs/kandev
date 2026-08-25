@@ -20,6 +20,7 @@ export type SidebarViewApi = {
   sort: { key: string; direction: string };
   group: string;
   collapsed_groups: string[];
+  task_row?: SidebarTaskRowPresentationApi | null;
 };
 
 export type SidebarViewDraftApi = {
@@ -27,6 +28,14 @@ export type SidebarViewDraftApi = {
   filters: Array<{ id: string; dimension: string; op: string; value: unknown }>;
   sort: { key: string; direction: string };
   group: string;
+  task_row?: SidebarTaskRowPresentationApi | null;
+};
+
+export type SidebarTaskRowPresentationApi = {
+  details_enabled?: boolean;
+  detail_order?: unknown[];
+  visible_details?: unknown[];
+  trailing?: string;
 };
 
 export type SidebarTaskPrefsApi = {

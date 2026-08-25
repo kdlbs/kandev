@@ -12,7 +12,7 @@ depends_on:
     "05-self-update-reload",
   ]
 plan: "plan.md"
-spec: "../../specs/ui/mobile-task-navigation.md"
+spec: "../../specs/ui/requirements/mobile-task-navigation.md"
 decision: "../../decisions/2026-07-27-spa-failure-containment-and-deployment-recovery.md"
 ---
 

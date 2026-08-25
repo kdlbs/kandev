@@ -12,10 +12,7 @@ test.describe("Pull request merged automation on mobile", () => {
     await automations.gotoNew();
     await automations.nameInput.fill(automationName);
 
-    await automations.workflowSelector.tap();
-    await testPage.getByRole("option", { name: "E2E Workflow" }).tap();
-    await automations.workflowStepSelector.tap();
-    await testPage.getByRole("option", { name: seedData.steps[0].name }).tap();
+    await automations.selectWorkflow("E2E Workflow");
 
     await automations.addConditionButton.tap();
     await testPage.getByRole("option", { name: /Pull request merged/i }).tap();

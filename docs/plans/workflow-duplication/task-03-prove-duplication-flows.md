@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-expose-duplicate-action"]
 plan: "plan.md"
-spec: "../../specs/workflow-duplication/spec.md"
+spec: "../../specs/tasks/requirements/workflow-duplication.md"
 ---
 
 # Task 03: Prove Duplication Flows

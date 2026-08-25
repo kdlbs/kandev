@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["07-system-storage-api"]
 plan: "plan.md"
-spec: "../../specs/system-page/storage-maintenance.md"
+spec: "../../specs/system-page/requirements/storage-maintenance.md"
 ---
 
 # Task 08: Responsive Storage settings UI

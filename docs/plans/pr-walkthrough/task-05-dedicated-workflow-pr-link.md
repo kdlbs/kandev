@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["04-r2-html-publication"]
 plan: "plan.md"
-spec: "../../specs/pr-walkthrough/spec.md"
+spec: "../../specs/ui/requirements/pr-walkthrough.md"
 ---
 
 # Task 05: Separate walkthrough workflow and link it from the PR body
@@ -21,8 +21,8 @@ taking ownership of contributor-authored PR content.
 - **Acceptance:** `PR_WALKTHROUGH_ENABLED` controls the walkthrough workflow
   independently of `OPENCODE_REVIEW_ENABLED`.
 - **Acceptance:** The walkthrough runner selects
-  `opencode-go/muse-spark-1.2-contributor#high`, which selects the model's
-  native high-reasoning variant in pinned OpenCode 1.17.7.
+  `opencode-go/muse-spark-1.2-contributor` and passes `high` through the
+  OpenCode 1.17.7 `--variant` option.
 - **Acceptance:** Only the final job receives `pull-requests: write`. It runs
   after public R2 validation, uses the trusted base-commit helper, and receives
   no OpenCode or R2 credential.
@@ -47,8 +47,7 @@ taking ownership of contributor-authored PR content.
 
 ## Results
 
-Created the dedicated workflow and independent gate. Selected Muse Spark's
-native high-reasoning variant and validated it in the pinned 1.17.7 model
-catalog. Added the marker-owned PR-body helper and a
-minimum-permission link job after R2 public validation. Contract and helper
-tests pass.
+Created the dedicated workflow and independent gate. The workflow passes the
+Muse Spark model and its native `high` variant through separate OpenCode 1.17.7
+CLI options. Added the marker-owned PR-body helper and a minimum-permission link
+job after R2 public validation. Contract and helper tests pass.

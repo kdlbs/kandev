@@ -404,7 +404,7 @@ func (m *mockAgentManager) LaunchAgent(ctx context.Context, req *executor.Launch
 	if m.launchAgentFunc != nil {
 		return m.launchAgentFunc(ctx, req)
 	}
-	return nil, nil
+	return &executor.LaunchAgentResponse{AgentExecutionID: "mock-launch-" + req.SessionID}, nil
 }
 func (m *mockAgentManager) StartAgentProcess(ctx context.Context, sessionID string) error {
 	m.mu.Lock()

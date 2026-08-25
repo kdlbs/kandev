@@ -6,10 +6,10 @@ name: Lint Harness Files
 # leave it. `merge_group` cannot carry a `paths:` filter in the first place.
 #
 # The heavier gates push their filtering down into a `changes` job (see
-# `.github/scripts/changed-paths.py`). This job is a checkout plus four short
-# linters, so the whole list is replaced by simply always running: cheaper than
-# the job that would decide whether to run it, and it closes the gap where a
-# harness file outside the old list changed and nothing checked it.
+# `.github/scripts/changed-paths.py`). This job is a checkout plus short
+# linters, so the whole list is replaced by always running this job. This is
+# cheaper than the job that would decide whether to run it. It also closes the
+# gap where a harness file outside the old list changed and nothing checked it.
 # See docs/ci-merge-queue.md.
 on:
   push:
@@ -45,6 +45,12 @@ jobs:
 
       - name: Lint harness files
         run: python3 .github/scripts/lint-harness-files.py --all
+
+      - name: Test specification linter
+        run: python3 scripts/lint-spec-files.test.py
+
+      - name: Lint specifications
+        run: python3 scripts/lint-spec-files.py --all
 
       - name: Test plugin API claim guard
         run: node --test scripts/validate-plugin-api-claims.test.mjs

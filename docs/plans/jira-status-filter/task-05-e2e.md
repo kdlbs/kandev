@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["01-backend-status-endpoint", "04-frontend-ui-wiring"]
 plan: "plan.md"
-spec: "../../specs/jira-status-filter/spec.md"
+spec: "../../specs/integrations/requirements/jira-status-filter.md"
 ---
 
 # Task 05: E2E coverage for the status filter
