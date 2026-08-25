@@ -155,6 +155,7 @@ contract that other capabilities can reuse.
 - [Quick Chat and Terminal Tabs](system-design/quick-terminal.md)
 - [Task Layout Profiles](system-design/task-layout-profiles.md)
 - [Terminal Rendering](system-design/terminal-rendering.md)
+- [Task Transcript History Visibility](system-design/task-prompt-transcript-visibility.md)
 
 ## Migration record
 

@@ -1295,7 +1295,7 @@ func (m *Manager) buildAdapterConfig() error {
 	}
 
 	// Configure one-shot mode when a continue command is provided.
-	// One-shot adapters (e.g., Amp) spawn a new subprocess per prompt.
+	// One-shot adapters spawn a new subprocess per prompt.
 	continueArgs := m.cfg.ContinueArgs
 	if continueArgs == nil && m.cfg.ContinueCommand != "" {
 		continueArgs = config.ParseCommand(m.cfg.ContinueCommand)
@@ -1589,7 +1589,7 @@ func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent
 		m.cfg.ApprovalPolicy = approvalPolicy
 	}
 
-	// Store continue command for one-shot adapters (e.g., Amp)
+	// Store continue command for one-shot adapters
 	if continueArgsPresent {
 		m.cfg.ContinueCommand = continueCommand
 		m.cfg.ContinueArgs = continueArgs
