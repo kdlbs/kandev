@@ -93,16 +93,24 @@ func (s *Service) authorizeWorkflowID(ctx context.Context, workflowID string) er
 	if workflow.WorkspaceID == "" {
 		return nil
 	}
+	// A workflow whose workspace cannot be resolved has no owner to check
+	// against, so neither outcome below is "authorized". This used to be one
+	// `return nil` covering both, which handed any workflow ID that survived
+	// a failed lookup to whoever guessed it.
+	//
+	// The pre-auth unowned row is not this case: workspace_id == "" is
+	// answered above and stays visible to everyone. Here the workflow names a
+	// workspace that is not there — `workflows.workspace_id` carries no
+	// foreign key, so a deleted workspace can leave one behind — and an
+	// orphan belongs to nobody, which under per-user scoping means nobody
+	// sees it.
 	workspace, err := s.workspaces.GetWorkspace(ctx, workflow.WorkspaceID)
 	switch {
 	case errors.Is(err, repoerrors.ErrWorkspaceNotFound):
-		// A dangling workspace reference should not hide the workflow from the
-		// single user who can already see everything else about it.
-		return nil
+		return repoerrors.ErrWorkspaceNotFound
 	case err != nil:
-		// Anything else is a failed lookup, not an answer. Treating it as
-		// "authorized" would let a transient database error hand a guessed
-		// workflow ID to whoever asked, so it fails closed by propagating.
+		// A failed lookup is not an answer at all: propagate it rather than
+		// letting a transient database error read as either allow or deny.
 		return err
 	}
 	if !workspaceVisibleTo(workspace, userID) {
