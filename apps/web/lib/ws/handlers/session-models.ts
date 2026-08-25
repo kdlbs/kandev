@@ -160,7 +160,7 @@ function shouldPreserveExistingModels(
   sessionId: string,
   payload: SessionModelsPayload,
 ): boolean {
-  if (payload.models?.length) return false;
+  if (payload.models?.length || payload.config_options_settled === true) return false;
   const existing = state.sessionModels.bySessionId[sessionId];
   return !!existing && existing.models.length > 0;
 }

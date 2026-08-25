@@ -232,3 +232,30 @@ it("preserves populated flat models when a partial replay drops them", () => {
 
   expect(store.getState().sessionModels.bySessionId["session-1"].models).toEqual(existingModels);
 });
+
+it("clears populated flat models when a settled update removes them", () => {
+  const store = makeStore({
+    sessionModels: {
+      bySessionId: {
+        "session-1": {
+          currentModelId: providerModelId,
+          models: [{ modelId: providerModelId, name: providerModelName }],
+          configOptions: [],
+        },
+      },
+    } as AppState["sessionModels"],
+  });
+  const handler = registerSessionModelsHandlers(store)["session.models_updated"]!;
+
+  handler(
+    makeMessage(
+      makePayload(providerModelId, {
+        models: [],
+        config_options: [],
+        config_options_settled: true,
+      }),
+    ),
+  );
+
+  expect(store.getState().sessionModels.bySessionId["session-1"].models).toEqual([]);
+});

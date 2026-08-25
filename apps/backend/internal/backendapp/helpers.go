@@ -522,10 +522,11 @@ func appendSessionModelsMessageFromState(sessionID string, session *models.TaskS
 	}
 	snapshot, _ := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState])
 	replayState := *modelState
-	if len(replayState.Models) == 0 && len(snapshot.Models) > 0 {
-		replayState.CurrentModelID = snapshot.CurrentModelID
+	if len(replayState.Models) == 0 &&
+		len(replayState.ConfigOptions) == 0 &&
+		!replayState.ConfigOptionsSettled &&
+		len(snapshot.Models) > 0 {
 		replayState.Models = snapshot.Models
-		replayState.ConfigOptions = snapshot.ConfigOptions
 	}
 	if replayState.CurrentModelID == "" && len(replayState.Models) == 0 {
 		return result
