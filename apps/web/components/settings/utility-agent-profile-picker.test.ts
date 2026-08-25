@@ -31,4 +31,35 @@ describe("utilityProfileEligibility", () => {
       true,
     );
   });
+
+  describe("with includeWorkspaceProfiles=true (Config Chat context)", () => {
+    it.each([
+      [
+        "non-inference workspace profile",
+        profile({ workspace_id: "ws-1", inference_capable: false }),
+        true,
+      ],
+      ["non-inference global profile", profile({ inference_capable: false }), true],
+      [
+        "unknown inference workspace profile",
+        profile({ workspace_id: "ws-1", inference_capable: undefined }),
+        true,
+      ],
+    ])("returns %s = %s", (_label, candidate, expected) => {
+      expect(utilityProfileEligibility(candidate, true, true)).toBe(expected);
+    });
+
+    it.each([
+      ["CLI passthrough", true],
+      ["disabled", false],
+    ])("still rejects %s profile", (_label, enabled) => {
+      expect(
+        utilityProfileEligibility(
+          profile({ workspace_id: "ws-1", cli_passthrough: true, enabled }),
+          true,
+          true,
+        ),
+      ).toBe(false);
+    });
+  });
 });

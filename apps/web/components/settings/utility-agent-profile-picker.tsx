@@ -10,9 +10,10 @@ export const utilityProfileEligibility = (
   includeWorkspaceProfiles = false,
 ) =>
   profile.enabled !== false &&
-  profile.inference_capable === true &&
+  !profile.cli_passthrough &&
+  (includeWorkspaceProfiles || profile.inference_capable === true) &&
   (dynamicRoutingEnabled || profile.kind !== "dynamic") &&
-  (includeWorkspaceProfiles || (!profile.cli_passthrough && !profile.workspace_id));
+  (includeWorkspaceProfiles || !profile.workspace_id);
 
 type UtilityAgentProfilePickerProps = {
   profiles: AgentProfileOption[];
