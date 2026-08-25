@@ -228,6 +228,11 @@ func remoteRegularGitMetadataFilesystemPolicy(metadata ...remoteRegularGitMetada
 }
 
 func remoteGitMetadataRuntimeEnv(req *ExecutorCreateRequest) (map[string]string, error) {
+	// Agents without FilesystemPolicyAgent have no policy to merge. The
+	// in-container attestation has already completed — return an empty env.
+	if _, ok := req.AgentConfig.(agents.FilesystemPolicyAgent); !ok {
+		return nil, nil
+	}
 	descriptor, err := remoteFilesystemPolicyDescriptor(req)
 	if err != nil {
 		return nil, err
