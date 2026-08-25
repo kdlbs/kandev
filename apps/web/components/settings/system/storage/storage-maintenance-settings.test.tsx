@@ -13,6 +13,15 @@ const mocks = vi.hoisted(() => ({
 const IDLE_PERIOD_TEST_ID = "storage-idle-period";
 const SAVE_BUTTON_NAME = "Save changes";
 const ANALYZE_TEST_ID = "storage-analyze";
+const RUN_NOW_TEST_ID = "storage-run-now";
+// Mirrors the auth slice the admin gate reads. `undefined` is the
+// auth-disabled single-user mode, which the backend treats as an admin.
+let currentRole: "admin" | "member" | undefined;
+
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (selector: (state: { auth: { user?: { role: string } } }) => unknown) =>
+    selector({ auth: { user: currentRole ? { role: currentRole } : undefined } }),
+}));
 
 vi.mock("@/hooks/domains/system/use-storage-maintenance", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/hooks/domains/system/use-storage-maintenance")>()),
@@ -112,8 +121,44 @@ describe("StorageMaintenanceSettings", () => {
   afterEach(cleanup);
 
   beforeEach(() => {
+    currentRole = "admin";
     mocks.useSystemJob.mockReturnValue(undefined);
     mocks.useStorageMaintenance.mockReturnValue(controller(overview));
+  });
+
+  // Every mutating storage route is admin-only on the backend, so a member's
+  // controls must be disabled here rather than 403 after the click.
+  it("disables the maintenance actions and the policy form for a member", () => {
+    currentRole = "member";
+    const editableOverview = { ...overview, settings: { ...overview.settings, enabled: true } };
+    mocks.useStorageMaintenance.mockReturnValue(controller(editableOverview));
+
+    render(<StorageMaintenanceSettings />, { wrapper: Providers });
+
+    expect((screen.getByTestId(ANALYZE_TEST_ID) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId(RUN_NOW_TEST_ID) as HTMLButtonElement).disabled).toBe(true);
+    const idlePeriod = screen.getByTestId(IDLE_PERIOD_TEST_ID) as HTMLInputElement;
+    expect(idlePeriod.disabled).toBe(true);
+    // A disabled field cannot go dirty, so the shared Save control stays
+    // inert: a member has no way to reach the admin-only PATCH at all.
+    fireEvent.change(idlePeriod, { target: { value: "31" } });
+    expect(
+      (screen.getByRole("button", { name: SAVE_BUTTON_NAME }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
+  // Auth disabled: no user in the boot payload, and the backend's synthetic
+  // identity is an admin. Nothing may change.
+  it("leaves every control live when no user is signed in", () => {
+    currentRole = undefined;
+    const editableOverview = { ...overview, settings: { ...overview.settings, enabled: true } };
+    mocks.useStorageMaintenance.mockReturnValue(controller(editableOverview));
+
+    render(<StorageMaintenanceSettings />, { wrapper: Providers });
+
+    expect((screen.getByTestId(ANALYZE_TEST_ID) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByTestId(RUN_NOW_TEST_ID) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByTestId(IDLE_PERIOD_TEST_ID) as HTMLInputElement).disabled).toBe(false);
   });
 
   it("shows analysis completion inside the Analyze button", () => {
