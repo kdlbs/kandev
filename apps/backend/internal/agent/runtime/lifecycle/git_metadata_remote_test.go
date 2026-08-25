@@ -247,10 +247,10 @@ func TestRemoteRegularGitMetadataPolicyWritesOnlyAttestedCloneDirectories(t *tes
 }
 
 func TestRemoteGitMetadataRequestFailsClosed(t *testing.T) {
-	t.Run("agent has no renderer", func(t *testing.T) {
+	t.Run("agent has no renderer is accepted", func(t *testing.T) {
 		err := validateRemoteGitMetadataRequest(&ExecutorCreateRequest{AgentConfig: agents.NewClaudeACP()})
-		if err == nil || !strings.Contains(err.Error(), "filesystem policy") {
-			t.Fatalf("validateRemoteGitMetadataRequest() error = %v, want renderer rejection", err)
+		if err != nil {
+			t.Fatalf("validateRemoteGitMetadataRequest() error = %v, want pass (no filesystem policy to enforce)", err)
 		}
 	})
 

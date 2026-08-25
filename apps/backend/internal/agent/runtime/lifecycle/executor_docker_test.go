@@ -96,14 +96,14 @@ func TestDockerExecutor_Name(t *testing.T) {
 	}
 }
 
-func TestDockerExecutorRejectsClonePolicyWithoutCompatibleAgent(t *testing.T) {
+func TestDockerExecutorAcceptsClonePolicyWithoutCompatibleAgent(t *testing.T) {
 	exec := NewDockerExecutor(config.DockerConfig{}, "", newTestDockerLogger())
 	err := exec.PrepareGitMetadataProjection(context.Background(), &ExecutorCreateRequest{
 		GitMetadataRequirement: GitMetadataRequirement{Mode: gitMetadataRequirementMutableClone},
 		AgentConfig:            agents.NewClaudeACP(),
 	})
-	if err == nil || !strings.Contains(err.Error(), "filesystem policy") {
-		t.Fatalf("PrepareGitMetadataProjection() error = %v, want incompatible-policy rejection", err)
+	if err != nil {
+		t.Fatalf("PrepareGitMetadataProjection() error = %v, want pass (no filesystem policy to enforce)", err)
 	}
 }
 

@@ -122,6 +122,13 @@ func validateRemoteGitMetadataRequest(req *ExecutorCreateRequest) error {
 	if len(req.GitMetadataProjections) > 1 {
 		return unsupportedGitMetadataProjection("remote multi-repository Git metadata is not available; use local Docker or standalone Codex, or start a single-repository session")
 	}
+	// Agents that do not implement FilesystemPolicyAgent (e.g. OpenCodeACP,
+	// ClaudeACP, CopilotACP) cannot receive a server-authored filesystem
+	// policy overlay. Skip the policy check — in-container Git directory
+	// attestation still runs regardless, and there is no policy to enforce.
+	if _, ok := req.AgentConfig.(agents.FilesystemPolicyAgent); !ok {
+		return nil
+	}
 	if _, err := remoteFilesystemPolicyDescriptor(req); err != nil {
 		return unsupportedGitMetadataProjection("remote Git metadata requires a compatible Codex ACP filesystem policy; update Codex or choose local Docker")
 	}
