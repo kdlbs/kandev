@@ -1607,10 +1607,20 @@ func wireWorkflowEngineForOffice(
 	officeSvc.SetWorkflowEngineDispatcher(dispatcher)
 	log.Info("workflow engine dispatcher wired for office")
 
-	repos.Task.SetStepEntryDispatcher(&engineStepEntryDispatcherAdapter{eng: eng, log: log})
+	repos.Task.SetStepEntryDispatcher(&engineStepEntryDispatcherAdapter{engineProvider: orchestratorSvc, log: log})
 	log.Info("step entry dispatcher wired for workflow engine")
 
 	return dispatcher
+}
+
+// workflowEngineProvider is the seam engineStepEntryDispatcherAdapter reads
+// the engine through. orchestrator.Service.WorkflowEngine satisfies it
+// structurally. Declared as an interface (rather than holding a
+// *workflowengine.Engine field directly) so the adapter always reads the
+// engine that is current *at dispatch time*, not whatever engine existed at
+// boot-wiring time — see DispatchStepEntry.
+type workflowEngineProvider interface {
+	WorkflowEngine() *workflowengine.Engine
 }
 
 // engineStepEntryDispatcherAdapter adapts (*engine.Engine).DispatchStepEntry
@@ -1618,8 +1628,8 @@ func wireWorkflowEngineForOffice(
 // step-transition writer calls synchronously after its own commit. See
 // docs/specs/office/system-design/step-entry-sequence-execution.md.
 type engineStepEntryDispatcherAdapter struct {
-	eng *workflowengine.Engine
-	log *logger.Logger
+	engineProvider workflowEngineProvider
+	log            *logger.Logger
 }
 
 // DispatchStepEntry runs the step's session-independent on_enter sequence and
@@ -1627,8 +1637,30 @@ type engineStepEntryDispatcherAdapter struct {
 // reason (design's Observability section). Excluded (session-shaped) kinds
 // are not logged here — DispatchStepEntry itself skips them silently, which
 // is the contract, not an anomaly to report.
+//
+// The engine is resolved from engineProvider on every call, not captured at
+// construction time: wireWorkflowEngineForOffice runs from
+// startSchedulingRuntime, which executes before later boot wiring (e.g.
+// SetReviewRunner) calls orchestrator.Service.reinitWorkflowEngine, which
+// REPLACES s.workflowEngine with a new *engine.Engine rather than mutating
+// the existing one. A captured pointer would permanently miss any callback
+// registered by a Set* call that runs after this adapter is built —
+// concretely, run_code_review would silently no-op on every step-entry
+// dispatch, since buildWorkflowCallbacks only registers
+// ActionRunCodeReview once SetReviewRunner has been called. This mirrors
+// switchWorkflowDispatcher's existing lazy read of svc.workflowEngine
+// (workflow_callbacks.go).
 func (a *engineStepEntryDispatcherAdapter) DispatchStepEntry(ctx context.Context, taskID, workflowID, stepID, entryID string) {
-	results := a.eng.DispatchStepEntry(ctx, taskID, workflowID, stepID, entryID)
+	eng := a.engineProvider.WorkflowEngine()
+	if eng == nil {
+		a.log.Warn("step entry dispatch skipped: workflow engine not initialised",
+			zap.String("task_id", taskID),
+			zap.String("workflow_id", workflowID),
+			zap.String("step_id", stepID),
+			zap.String("entry_id", entryID))
+		return
+	}
+	results := eng.DispatchStepEntry(ctx, taskID, workflowID, stepID, entryID)
 	for _, result := range results {
 		fields := []zap.Field{
 			zap.String("task_id", taskID),
