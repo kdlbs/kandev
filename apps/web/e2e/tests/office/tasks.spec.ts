@@ -145,4 +145,53 @@ test.describe("Tasks (Issues)", () => {
     expect(Array.isArray(tasks)).toBe(true);
     expect(tasks.length).toBe(0);
   });
+
+  test("dragging a card to another column changes the task status", async ({
+    testPage,
+    apiClient,
+    officeApi,
+    officeSeed,
+  }) => {
+    const task = await apiClient.createTask(officeSeed.workspaceId, "Board Drag Task", {
+      workflow_id: officeSeed.workflowId,
+    });
+
+    await testPage.goto("/office/tasks");
+    await testPage.getByTestId("task-view-board").click();
+
+    const card = testPage.getByTestId(`board-card-${task.id}`);
+    await expect(card).toBeVisible({ timeout: 15_000 });
+
+    const target = testPage.getByTestId("board-column-in_progress");
+    await expect(target).toBeVisible();
+    // The drop must actually move the card, so it cannot already live there.
+    await expect(target.getByTestId(`board-card-${task.id}`)).toHaveCount(0);
+
+    const from = await card.boundingBox();
+    const to = await target.boundingBox();
+    expect(from).not.toBeNull();
+    expect(to).not.toBeNull();
+
+    // dnd-kit's PointerSensor needs a real pointer path, not a single jump:
+    // the 8px activation distance only trips on intermediate moves.
+    await testPage.mouse.move(from!.x + from!.width / 2, from!.y + from!.height / 2);
+    await testPage.mouse.down();
+    await testPage.mouse.move(to!.x + to!.width / 2, to!.y + to!.height / 2, { steps: 12 });
+    await testPage.mouse.up();
+
+    // The card lands in the target column...
+    await expect(target.getByTestId(`board-card-${task.id}`)).toBeVisible({ timeout: 15_000 });
+
+    // ...and the move is persisted, not just an optimistic store patch.
+    await expect
+      .poll(
+        async () => {
+          const persisted = (await officeApi.getTask(task.id)) as Record<string, unknown>;
+          const inner = (persisted.task as Record<string, unknown>) ?? persisted;
+          return ((inner.status as string) ?? (inner.state as string) ?? "").toLowerCase();
+        },
+        { timeout: 15_000 },
+      )
+      .toContain("progress");
+  });
 });

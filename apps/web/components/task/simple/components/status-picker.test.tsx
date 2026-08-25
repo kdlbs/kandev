@@ -4,7 +4,8 @@ import type { ReactNode } from "react";
 import { StateProvider } from "@/components/state-provider";
 import { TaskOptimisticContextProvider } from "@/hooks/use-optimistic-task-mutation";
 import { ApiError } from "@/lib/api/client";
-import { StatusPicker, formatPendingApproversMessage } from "./status-picker";
+import { StatusPicker } from "./status-picker";
+import { formatPendingApproversMessage } from "@/lib/api/domains/office-status-gate";
 import type { Task } from "@/app/office/tasks/[id]/types";
 
 const updateTaskMock = vi.hoisted(() => vi.fn().mockResolvedValue({ ok: true }));
