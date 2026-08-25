@@ -156,7 +156,7 @@ Subscription quota tracking, per-agent cheap-model profile routing, and the prod
 | [pr-detail-header-width](pr-detail-header-width/spec.md) | shipped |
 | [pr-task-status-summary](ui/pr-task-status-summary.md) | shipped |
 | [comment-markdown](ui/comment-markdown.md) | shipped |
-| [resizable-markdown-tables](ui/resizable-markdown-tables.md) | building |
+| [resizable-markdown-tables](ui/requirements/resizable-markdown-tables.md) | building |
 | [transcript-auto-scroll](ui/transcript-auto-scroll.md) | building |
 | [task-transcript-history-visibility](ui/task-prompt-transcript-visibility.md) | implemented |
 | [clarification-context](ui/clarification-context.md) | shipped |
