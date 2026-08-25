@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/gitcredentials"
-	githubpkg "github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/githubauth"
 	"github.com/kandev/kandev/internal/plugins"
 	"github.com/kandev/kandev/internal/repoclone"
@@ -21,6 +20,13 @@ const (
 	gitCredentialGitHubHost       = "github.com"
 )
 
+type gitHubCredentialSource interface {
+	GitCredentialResolver() gitcredentials.Resolver
+	VerifyContributionDestinationForWorkspace(
+		context.Context, string, string, string, string, string, string, string,
+	) error
+}
+
 type gitCredentialTaskRepository interface {
 	GetTask(context.Context, string) (*taskmodels.Task, error)
 	GetTaskSession(context.Context, string) (*taskmodels.TaskSession, error)
@@ -29,7 +35,7 @@ type gitCredentialTaskRepository interface {
 }
 
 func newGitCredentialBroker(
-	githubSvc *githubpkg.Service,
+	githubSvc gitHubCredentialSource,
 	pluginSvc *plugins.Service,
 	repo gitCredentialTaskRepository,
 	reissueSigningKey string,
@@ -41,7 +47,10 @@ func newGitCredentialBroker(
 	if pluginSvc != nil {
 		resolvers = append(resolvers, pluginGitCredentialResolver{service: pluginCredentialServiceAdapter{service: pluginSvc}})
 	}
-	broker := gitcredentials.NewBroker(gitcredentials.NewCompositeResolver(resolvers...), &githubBrokerScopeAuthorizer{repo: repo})
+	broker := gitcredentials.NewBroker(
+		gitcredentials.NewCompositeResolver(resolvers...),
+		&githubBrokerScopeAuthorizer{repo: repo, provider: githubSvc},
+	)
 	if signer, err := gitcredentials.NewReissueCapabilitySigner(reissueSigningKey); err == nil {
 		broker.SetReissueCapabilitySigner(signer)
 	}
