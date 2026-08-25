@@ -50,8 +50,9 @@ afterEach(() => {
   authMock.role = undefined;
 });
 
-// canBuildDockerImage is unit-tested separately; these cover the hop from that
-// decision into the rendered control, which a leaf-only test would miss.
+// isAdminIdentity is unit-tested in lib/auth/is-admin.test.ts; these cover the
+// hop from that decision into the rendered control, which a leaf-only test
+// would miss.
 describe("DockerfileBuildCard build permissions", () => {
   it("disables the build button and explains why for a member", () => {
     renderCard("member");
