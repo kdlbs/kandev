@@ -80,6 +80,7 @@ func TestCIAutomationMergeQueueRecoveryClassifiesReviewedReasons(t *testing.T) {
 		want   string
 	}{
 		{name: "checks failed enum", reason: "CHECKS_FAILED", want: ciAutomationQueueRemovalCauseChecksFailed},
+		{name: "CI checks failed text", reason: "CI checks failed", want: ciAutomationQueueRemovalCauseChecksFailed},
 		{name: "checks timed out text", reason: "Checks timed out", want: ciAutomationQueueRemovalCauseChecksTimedOut},
 		{name: "merge conflict text", reason: "merge conflict", want: ciAutomationQueueRemovalCauseConflict},
 		{name: "manual", reason: "MANUAL", want: ciAutomationQueueRemovalCauseManual},
@@ -95,6 +96,42 @@ func TestCIAutomationMergeQueueRecoveryClassifiesReviewedReasons(t *testing.T) {
 	}
 }
 
+func TestCIAutomationMergeQueueRecoveryRequiresDurableAttemptEvidence(t *testing.T) {
+	pr := &github.TaskPR{HeadSHA: "head-a"}
+	tests := []struct {
+		name  string
+		state *github.TaskCIPRAutomationState
+		want  bool
+	}{
+		{name: "no state", state: nil, want: false},
+		{
+			name:  "passive baseline has no attempt signature",
+			state: &github.TaskCIPRAutomationState{LastQueueAttemptHeadSHA: "head-a"},
+			want:  false,
+		},
+		{
+			name:  "empty attempt head fails closed",
+			state: &github.TaskCIPRAutomationState{LastMergeSignature: "merge-a"},
+			want:  false,
+		},
+		{
+			name: "matching attempted head and signature",
+			state: &github.TaskCIPRAutomationState{
+				LastQueueAttemptHeadSHA: "head-a",
+				LastMergeSignature:      "merge-a",
+			},
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ciAutomationQueueRemovalBelongsToCurrentHead(pr, tt.state); got != tt.want {
+				t.Fatalf("queue removal evidence = %v, want %v for state %+v", got, tt.want, tt.state)
+			}
+		})
+	}
+}
+
 func TestCIAutomationMergeQueueRecoveryUsesConflictEvidenceForUnknownReason(t *testing.T) {
 	pr := &github.TaskPR{MergeableState: "dirty"}
 	if got := ciAutomationQueueRemovalCause("provider changed this", pr); got != ciAutomationQueueRemovalCauseConflict {
@@ -102,6 +139,20 @@ func TestCIAutomationMergeQueueRecoveryUsesConflictEvidenceForUnknownReason(t *t
 	}
 	if got := ciAutomationQueueRemovalCause("provider changed this", &github.TaskPR{MergeQueueState: "UNMERGEABLE"}); got != ciAutomationQueueRemovalCauseConflict {
 		t.Fatalf("unmergeable queue cause = %q, want %q", got, ciAutomationQueueRemovalCauseConflict)
+	}
+}
+
+func TestCIAutomationActiveQueueCheckIgnoresStaleIdentifiers(t *testing.T) {
+	if ciAutomationHasActiveMergeQueueEntry(&github.TaskPR{
+		State: "open", MergeQueueEntryID: "stale-entry", MergeQueueEntryHeadSHA: "stale-head",
+	}) {
+		t.Fatal("stale queue identifiers were treated as an active queue entry")
+	}
+	if !ciAutomationHasActiveMergeQueueEntry(&github.TaskPR{State: "open", MergeQueueState: "queued"}) {
+		t.Fatal("queued merge queue state was not treated as active")
+	}
+	if ciAutomationHasActiveMergeQueueEntry(&github.TaskPR{State: "closed", MergeQueueState: "queued"}) {
+		t.Fatal("closed PR was treated as an active queue entry")
 	}
 }
 
@@ -130,6 +181,10 @@ func TestCIAutomationMergeQueueRecoveryQueuesOneRepairPerRemoval(t *testing.T) {
 		},
 		prFeedback: &github.PRFeedback{},
 	}}
+	ghSvc.ciPRState = &github.TaskCIPRAutomationState{
+		TaskID: "task-1", RepositoryID: "repo-1", PRNumber: 42,
+		LastQueueAttemptHeadSHA: "head-a", LastMergeSignature: "merge-a",
+	}
 	svc.SetGitHubService(ghSvc)
 	pr := &github.TaskPR{
 		TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "widget", PRNumber: 42,

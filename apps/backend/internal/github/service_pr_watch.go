@@ -788,16 +788,34 @@ func resolveTaskPRMergeQueueState(tp *TaskPR, status *PRStatus) taskPRMergeQueue
 		queue.estimate = nonNegativeIntPtr(status.MergeQueueEstimatedTimeToMergeSeconds)
 		queue.entryID = status.MergeQueueEntryID
 		queue.entryHeadSHA = status.MergeQueueEntryHeadSHA
+	} else {
+		// REST and gh CLI status reads do not expose merge-queue fields. They
+		// are still authoritative for the absence of an active entry once the
+		// PR itself was fetched, so do not let an old GraphQL entry identifier
+		// keep auto-merge blocked indefinitely.
+		queue.state, queue.position, queue.estimate = "", nil, nil
+		queue.entryID, queue.entryHeadSHA = "", ""
 	}
-	if status.mergeQueueRecoveryPopulated && status.MergeQueueLastRemovalID != "" &&
-		(queue.lastRemovalID == "" || queue.lastRemovalID != status.MergeQueueLastRemovalID &&
-			(status.MergeQueueLastRemovedAt == nil || queue.lastRemovedAt == nil || status.MergeQueueLastRemovedAt.After(*queue.lastRemovedAt))) {
+	if status.mergeQueueRecoveryPopulated && shouldApplyTaskPRMergeQueueRemoval(queue, status) {
 		queue.lastRemovalID = status.MergeQueueLastRemovalID
 		queue.lastRemovedAt = status.MergeQueueLastRemovedAt
 		queue.lastRemovalReason = status.MergeQueueLastRemovalReason
 		queue.lastRemovalBeforeSHA = status.MergeQueueLastRemovalBeforeSHA
 	}
 	return queue
+}
+
+func shouldApplyTaskPRMergeQueueRemoval(current taskPRMergeQueueState, status *PRStatus) bool {
+	if status == nil || status.MergeQueueLastRemovalID == "" || current.lastRemovalID == status.MergeQueueLastRemovalID {
+		return false
+	}
+	if current.lastRemovalID == "" || current.lastRemovedAt == nil {
+		return true
+	}
+	if status.MergeQueueLastRemovedAt == nil {
+		return false
+	}
+	return status.MergeQueueLastRemovedAt.After(*current.lastRemovedAt)
 }
 
 // resolveTaskPROutcomeFields applies the populated/preserve dance for the

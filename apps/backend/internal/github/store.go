@@ -1784,19 +1784,32 @@ const taskPRColumnsQualified = `gtp.id, gtp.workspace_id, gtp.task_id, gtp.repos
 	gtp.head_sha, gtp.merge_queue_entry_id, gtp.merge_queue_entry_head_sha, gtp.merge_queue_last_removal_id,
 	gtp.merge_queue_last_removed_at, gtp.merge_queue_last_removal_reason, gtp.merge_queue_last_removal_before_sha`
 
-const taskPRColumnCount = 46
-
 type taskPRWriter interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }
 
 func insertTaskPR(ctx context.Context, writer taskPRWriter, tp *TaskPR) error {
-	placeholders := strings.TrimSuffix(strings.Repeat("?,", taskPRColumnCount), ",")
+	values := taskPRValues(tp)
+	columnCount := taskPRColumnCount()
+	if len(values) != columnCount {
+		return fmt.Errorf("task PR insert arity mismatch: %d columns, %d values", columnCount, len(values))
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", columnCount), ",")
 	_, err := writer.ExecContext(ctx,
 		`INSERT INTO github_task_prs (`+taskPRColumns+`) VALUES (`+placeholders+`)`,
-		taskPRValues(tp)...,
+		values...,
 	)
 	return err
+}
+
+func taskPRColumnCount() int {
+	count := 0
+	for _, column := range strings.Split(taskPRColumns, ",") {
+		if strings.TrimSpace(column) != "" {
+			count++
+		}
+	}
+	return count
 }
 
 func taskPRValues(tp *TaskPR) []any {
@@ -2260,7 +2273,7 @@ func (s *Store) UpdateTaskPR(ctx context.Context, tp *TaskPR) error {
 			AND (
 				merge_queue_last_removal_id = ''
 				OR merge_queue_last_removed_at IS NULL
-				OR ? > merge_queue_last_removed_at
+				OR julianday(?) > julianday(merge_queue_last_removed_at)
 			)`,
 		tp.MergeQueueLastRemovalID, tp.MergeQueueLastRemovedAt, tp.MergeQueueLastRemovalReason,
 		tp.MergeQueueLastRemovalBeforeSHA, tp.ID, tp.MergeQueueLastRemovalID,
@@ -2875,22 +2888,15 @@ func (s *Store) RecordTaskCIMergeQueueObservation(ctx context.Context, observati
 		if observation.ActiveQueueHeadSHA == "" {
 			baselineHead = observation.RemovalObservedHeadSHA
 		}
-		mergeAttemptAt := any(nil)
-		if observation.MergeSignature != "" {
-			mergeAttemptAt = now
-		}
 		_, err := tx.ExecContext(ctx, `
 			INSERT INTO github_task_ci_pr_state (
-				task_id, repository_id, pr_number, last_merge_signature, last_merge_attempt_at,
+				task_id, repository_id, pr_number, last_merge_signature,
 				last_queue_attempt_head_sha, last_queue_removal_cause, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(task_id, repository_id, pr_number) DO UPDATE SET
 				last_merge_signature = CASE
 					WHEN excluded.last_merge_signature <> '' THEN excluded.last_merge_signature
 					ELSE github_task_ci_pr_state.last_merge_signature END,
-				last_merge_attempt_at = CASE
-					WHEN excluded.last_merge_signature <> '' THEN excluded.last_merge_attempt_at
-					ELSE github_task_ci_pr_state.last_merge_attempt_at END,
 				last_queue_attempt_head_sha = CASE
 					WHEN excluded.last_queue_attempt_head_sha <> ''
 						THEN excluded.last_queue_attempt_head_sha
@@ -2901,7 +2907,7 @@ func (s *Store) RecordTaskCIMergeQueueObservation(ctx context.Context, observati
 					ELSE github_task_ci_pr_state.last_queue_removal_cause END,
 				updated_at = excluded.updated_at`,
 			observation.TaskID, observation.RepositoryID, observation.PRNumber,
-			observation.MergeSignature, mergeAttemptAt,
+			observation.MergeSignature,
 			observation.ActiveQueueHeadSHA, observation.RemovalCause, now, now)
 		if err != nil {
 			return err

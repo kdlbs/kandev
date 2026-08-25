@@ -109,6 +109,12 @@ func TestTaskPRColumnListsIncludeMergeQueueRecoveryColumns(t *testing.T) {
 	}
 }
 
+func TestTaskPRInsertArityMatchesColumnList(t *testing.T) {
+	if got, want := taskPRColumnCount(), len(taskPRValues(&TaskPR{})); got != want {
+		t.Fatalf("TaskPR insert arity = %d columns and %d values, want equal", got, want)
+	}
+}
+
 // @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-RECOVERY-001.4
 func TestUpdateTaskPRPreservesNewerQueueRemovalObservation(t *testing.T) {
 	store := newTestStore(t)
@@ -121,8 +127,8 @@ func TestUpdateTaskPRPreservesNewerQueueRemovalObservation(t *testing.T) {
 		t.Fatalf("seed TaskPR: %v", err)
 	}
 
-	olderAt := time.Date(2026, 8, 24, 18, 0, 0, 0, time.UTC)
-	newerAt := olderAt.Add(time.Minute)
+	newerAt := time.Date(2026, 8, 24, 18, 0, 0, 0, time.UTC)
+	olderAt := time.Date(2026, 8, 24, 19, 0, 0, 0, time.FixedZone("WEST", 2*60*60))
 	older := *base
 	older.MergeQueueLastRemovalID = "removal-old"
 	older.MergeQueueLastRemovedAt = &olderAt

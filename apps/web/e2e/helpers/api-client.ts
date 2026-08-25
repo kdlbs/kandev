@@ -1716,6 +1716,8 @@ export class ApiClient {
     mergeable_state?: string;
     merge_queue_state?: string;
     merge_queue_position?: number | null;
+    merge_queue_entry_id?: string;
+    merge_queue_entry_head_sha?: string;
     merge_queue_estimated_time_to_merge_seconds?: number | null;
     merge_queue_last_removal_id?: string;
     merge_queue_last_removed_at?: string;

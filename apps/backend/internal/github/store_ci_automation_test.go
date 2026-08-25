@@ -469,18 +469,18 @@ func TestStoreTaskCIPRState_RecordAttemptsAndError(t *testing.T) {
 func TestStoreTaskCIMergeQueueRecoveryState(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	recorder, ok := any(store).(interface {
-		RecordTaskCIMergeQueueObservation(context.Context, TaskCIMergeQueueObservation) error
-	})
-	if !ok {
-		t.Fatal("Store does not implement merge-queue observation checkpoint")
-	}
-
-	if err := recorder.RecordTaskCIMergeQueueObservation(ctx, TaskCIMergeQueueObservation{
+	if err := store.RecordTaskCIMergeQueueObservation(ctx, TaskCIMergeQueueObservation{
 		TaskID: "task-1", RepositoryID: "repo-1", PRNumber: 42,
 		ActiveQueueHeadSHA: "head-a", MergeSignature: "merge-a",
 	}); err != nil {
 		t.Fatalf("record active queue observation: %v", err)
+	}
+	observed, err := store.GetTaskCIPRState(ctx, "task-1", "repo-1", 42)
+	if err != nil {
+		t.Fatalf("get observed queue state: %v", err)
+	}
+	if observed == nil || observed.LastMergeAttemptAt != nil {
+		t.Fatalf("passive queue observation claimed a merge attempt: %+v", observed)
 	}
 	if err := store.RecordTaskCIFixAttempt(ctx, TaskCIFixAttempt{
 		TaskID: "task-1", RepositoryID: "repo-1", PRNumber: 42,

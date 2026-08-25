@@ -41,17 +41,64 @@ const ACTIONABLE_QUEUE_REMOVAL_CAUSES: CIAutomationQueueRemovalCause[] = [
   "conflict",
 ];
 
-function normalizeQueueRemovalCause(value: string | undefined): CIAutomationQueueRemovalCause {
-  switch (value) {
-    case "checks_failed":
-    case "checks_timed_out":
-    case "conflict":
-    case "manual":
-    case "branch_protection":
-      return value;
-    default:
-      return "unknown";
+function normalizedQueueRemovalReason(value: string | undefined): string {
+  return (value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+const QUEUE_REMOVAL_CAUSE_ALIASES: Record<string, CIAutomationQueueRemovalCause> = {
+  checks_failed: "checks_failed",
+  checks_timed_out: "checks_timed_out",
+  conflict: "conflict",
+  manual: "manual",
+  branch_protection: "branch_protection",
+  check_failed: "checks_failed",
+  checks_failure: "checks_failed",
+  ci_checks_failed: "checks_failed",
+  ci_check_failed: "checks_failed",
+  checks_failed_on_merge_group: "checks_failed",
+  checks_failed_on_merge_queue: "checks_failed",
+  ci_checks_failed_on_merge_group: "checks_failed",
+  ci_checks_failed_on_merge_queue: "checks_failed",
+  check_timed_out: "checks_timed_out",
+  checks_timeout: "checks_timed_out",
+  timeout: "checks_timed_out",
+  timed_out: "checks_timed_out",
+  checks_timed_out_on_merge_group: "checks_timed_out",
+  merge_conflict: "conflict",
+  merge_conflicts: "conflict",
+  unmergeable: "conflict",
+  removed_manually: "manual",
+  user_removed: "manual",
+  branch_protection_failed: "branch_protection",
+  required_branch_protection: "branch_protection",
+};
+
+function normalizeQueueRemovalCause(
+  value: string | undefined,
+  pr?: TaskPR,
+): CIAutomationQueueRemovalCause {
+  const normalized = normalizedQueueRemovalReason(value);
+  const knownCause = QUEUE_REMOVAL_CAUSE_ALIASES[normalized];
+  if (knownCause) {
+    return knownCause;
   }
+  if (pr) {
+    const mergeableState = pr.mergeable_state?.trim().toLowerCase() ?? "";
+    const queueState = pr.merge_queue_state?.trim().toLowerCase() ?? "";
+    if (
+      mergeableState === "dirty" ||
+      mergeableState.includes("conflict") ||
+      queueState === "unmergeable" ||
+      queueState.includes("unmergeable")
+    ) {
+      return "conflict";
+    }
+  }
+  return "unknown";
 }
 
 function hasActiveQueueEntry(pr: TaskPR): boolean {
@@ -78,7 +125,11 @@ function queueStateForRemoval(
   state: TaskCIPRAutomationState | undefined,
   removalID: string,
 ): CIAutomationQueueRecoveryState {
-  const removalCause = normalizeQueueRemovalCause(state?.last_queue_removal_cause);
+  const stateCause = normalizeQueueRemovalCause(state?.last_queue_removal_cause);
+  const removalCause =
+    stateCause !== "unknown"
+      ? stateCause
+      : normalizeQueueRemovalCause(pr.merge_queue_last_removal_reason, pr);
   const actionable = ACTIONABLE_QUEUE_REMOVAL_CAUSES.includes(removalCause);
   const headContext = queueHeadContext(pr, state, removalID);
 

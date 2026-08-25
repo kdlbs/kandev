@@ -720,18 +720,22 @@ func ciAutomationNewQueueRemoval(pr *github.TaskPR, state *github.TaskCIPRAutoma
 }
 
 func ciAutomationQueueRemovalBelongsToCurrentHead(pr *github.TaskPR, state *github.TaskCIPRAutomationState) bool {
-	if pr == nil || pr.HeadSHA == "" {
+	if pr == nil || strings.TrimSpace(pr.HeadSHA) == "" || state == nil {
 		return false
 	}
-	return state == nil || state.LastQueueAttemptHeadSHA == "" || state.LastQueueAttemptHeadSHA == pr.HeadSHA
+	attemptHead := strings.TrimSpace(state.LastQueueAttemptHeadSHA)
+	// A removal-only observation may establish a current-head baseline, but it
+	// does not prove that Kandev ever queued this head. Require the merge
+	// signature written by an actual merge attempt or active-entry adoption so
+	// an old removal cannot spend a repair round after automation is enabled.
+	return attemptHead != "" && attemptHead == strings.TrimSpace(pr.HeadSHA) && strings.TrimSpace(state.LastMergeSignature) != ""
 }
 
 func ciAutomationHasActiveMergeQueueEntry(pr *github.TaskPR) bool {
-	if pr == nil {
+	if pr == nil || (pr.State != "" && !strings.EqualFold(strings.TrimSpace(pr.State), "open")) {
 		return false
 	}
-	return pr.MergeQueueEntryID != "" || pr.MergeQueueEntryHeadSHA != "" ||
-		strings.EqualFold(strings.TrimSpace(pr.MergeQueueState), "queued")
+	return strings.TrimSpace(pr.MergeQueueState) != ""
 }
 
 func ciAutomationQueueRemovalSnapshot(pr *github.TaskPR) (*ciAutomationQueueRemovalSnapshotData, bool) {
@@ -759,7 +763,7 @@ func valueOrZeroTime(value *time.Time) time.Time {
 func ciAutomationQueueRemovalCause(reason string, pr *github.TaskPR) string {
 	normalized := normalizeCIAutomationQueueRemovalReason(reason)
 	switch normalized {
-	case "checks_failed", "check_failed", "checks_failure", "checks_failed_on_merge_group", "checks_failed_on_merge_queue":
+	case "checks_failed", "check_failed", "checks_failure", "ci_checks_failed", "ci_check_failed", "checks_failed_on_merge_group", "checks_failed_on_merge_queue":
 		return ciAutomationQueueRemovalCauseChecksFailed
 	case "checks_timed_out", "check_timed_out", "checks_timeout", "timeout", "timed_out", "checks_timed_out_on_merge_group":
 		return ciAutomationQueueRemovalCauseChecksTimedOut

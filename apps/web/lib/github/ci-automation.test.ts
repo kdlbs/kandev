@@ -182,6 +182,22 @@ describe("CI merge queue recovery helpers", () => {
     expect(result.removalCause).toBe("unknown");
   });
 
+  it("classifies the persisted removal reason when CI state is absent", () => {
+    const result = deriveCIAutomationQueueState(
+      makeQueuePR({
+        pr_number: 42,
+        head_sha: "head-a",
+        merge_queue_last_removal_id: "removal-a",
+        merge_queue_last_removal_reason: "CI checks failed on merge group",
+      }),
+      makePRAutomationOptions("", 42),
+      undefined,
+    );
+
+    expect(result.status).toBe("removed_actionable");
+    expect(result.removalCause).toBe("checks_failed");
+  });
+
   it("distinguishes accepted repair, same-head wait, and pending new-head checks", () => {
     const pr = makeQueuePR({
       pr_number: 42,

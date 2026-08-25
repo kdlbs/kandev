@@ -78,3 +78,38 @@ func TestSyncTaskPRPreservesRecoveryAfterQueueEntryDisappears(t *testing.T) {
 		t.Fatalf("queue-unaware sync clobbered recovery state: %#v", got)
 	}
 }
+
+func TestResolveTaskPRMergeQueueStateRejectsOlderOrUntimestampedRemoval(t *testing.T) {
+	newerAt := time.Date(2026, 8, 24, 18, 0, 0, 0, time.UTC)
+	current := &TaskPR{
+		MergeQueueLastRemovalID:     "removal-new",
+		MergeQueueLastRemovedAt:     &newerAt,
+		MergeQueueLastRemovalReason: "new reason",
+	}
+
+	for _, test := range []struct {
+		name      string
+		removalID string
+		removedAt *time.Time
+	}{
+		{
+			name:      "older event",
+			removalID: "removal-old",
+			removedAt: func() *time.Time { value := newerAt.Add(-time.Minute); return &value }(),
+		},
+		{name: "missing timestamp", removalID: "removal-unknown"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			queue := resolveTaskPRMergeQueueState(current, &PRStatus{
+				PR:                          &PR{State: "open"},
+				MergeQueueLastRemovalID:     test.removalID,
+				MergeQueueLastRemovedAt:     test.removedAt,
+				MergeQueueLastRemovalReason: "old reason",
+				mergeQueueRecoveryPopulated: true,
+			})
+			if queue.lastRemovalID != "removal-new" || queue.lastRemovalReason != "new reason" || !timeEqual(queue.lastRemovedAt, &newerAt) {
+				t.Fatalf("queue removal regressed: %+v", queue)
+			}
+		})
+	}
+}
