@@ -166,21 +166,30 @@ func validateDevDatabaseTarget(repoRoot string, target devDatabaseTarget) error 
 	return nil
 }
 
-// normalizeDevDatabaseTarget sets the target path to its absolute form and
-// updates the KANDEV_DATABASE_PATH entry in extra so all consumers (backup,
-// output, child environment) use the same normalised absolute value.
+// normalizeDevDatabaseTarget sets the target path and homeDir to their
+// absolute forms and updates the corresponding entries in extra so all
+// consumers (backup, output, child environment, supervisor paths) resolve
+// them consistently regardless of the launcher's CWD.
 func normalizeDevDatabaseTarget(target devDatabaseTarget) devDatabaseTarget {
-	abs, err := filepath.Abs(target.path)
+	absPath, err := filepath.Abs(target.path)
 	if err != nil {
 		// Abs only fails in pathological cases (e.g. NUL on Windows);
 		// keep the original path as a fallback.
 		return target
 	}
-	target.path = abs
+	target.path = absPath
+
+	absHome, err := filepath.Abs(target.homeDir)
+	if err == nil {
+		target.homeDir = absHome
+	}
+
 	for i, item := range target.extra {
-		if strings.HasPrefix(item, "KANDEV_DATABASE_PATH=") {
-			target.extra[i] = "KANDEV_DATABASE_PATH=" + abs
-			break
+		switch {
+		case strings.HasPrefix(item, "KANDEV_DATABASE_PATH="):
+			target.extra[i] = "KANDEV_DATABASE_PATH=" + absPath
+		case strings.HasPrefix(item, "KANDEV_HOME_DIR=") && err == nil:
+			target.extra[i] = "KANDEV_HOME_DIR=" + absHome
 		}
 	}
 	return target

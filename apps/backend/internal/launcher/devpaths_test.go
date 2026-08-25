@@ -438,71 +438,101 @@ func TestValidateDevDatabaseTargetAcceptsPathInsideDataDir(t *testing.T) {
 
 func TestNormalizeDevDatabaseTargetMakesPathAbsolute(t *testing.T) {
 	relPath := filepath.Join(".kandev-dev", "data", "kandev.db")
+	relHome := ".kandev-dev"
 	target := devDatabaseTarget{
 		path:    relPath,
-		homeDir: "/tmp/dev-home",
+		homeDir: relHome,
 		source:  devDatabaseDefault,
-		extra:   []string{"KANDEV_DEBUG_DEV_MODE=true", "KANDEV_HOME_DIR=/tmp/dev-home", "KANDEV_DATABASE_PATH=" + relPath},
+		extra:   []string{"KANDEV_DEBUG_DEV_MODE=true", "KANDEV_HOME_DIR=" + relHome, "KANDEV_DATABASE_PATH=" + relPath},
 	}
 
 	normalized := normalizeDevDatabaseTarget(target)
-	want, err := filepath.Abs(relPath)
+	wantPath, err := filepath.Abs(relPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if normalized.path != want {
-		t.Fatalf("normalized path = %q, want absolute %q", normalized.path, want)
+	if normalized.path != wantPath {
+		t.Fatalf("normalized path = %q, want absolute %q", normalized.path, wantPath)
+	}
+	wantHome, err := filepath.Abs(relHome)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if normalized.homeDir != wantHome {
+		t.Fatalf("normalized homeDir = %q, want absolute %q", normalized.homeDir, wantHome)
 	}
 
-	found := false
+	foundPath := false
+	foundHome := false
 	for _, item := range normalized.extra {
-		if strings.HasPrefix(item, "KANDEV_DATABASE_PATH=") {
+		switch {
+		case strings.HasPrefix(item, "KANDEV_DATABASE_PATH="):
 			val := item[len("KANDEV_DATABASE_PATH="):]
-			if val != want {
-				t.Fatalf("KANDEV_DATABASE_PATH in extra = %q, want %q", val, want)
+			if val != wantPath {
+				t.Fatalf("KANDEV_DATABASE_PATH in extra = %q, want %q", val, wantPath)
 			}
-			found = true
+			foundPath = true
+		case strings.HasPrefix(item, "KANDEV_HOME_DIR="):
+			val := item[len("KANDEV_HOME_DIR="):]
+			if val != wantHome {
+				t.Fatalf("KANDEV_HOME_DIR in extra = %q, want %q", val, wantHome)
+			}
+			foundHome = true
 		}
 	}
-	if !found {
+	if !foundPath {
 		t.Fatal("KANDEV_DATABASE_PATH not found in normalized extra")
+	}
+	if !foundHome {
+		t.Fatal("KANDEV_HOME_DIR not found in normalized extra")
 	}
 }
 
 func TestNormalizeDevDatabaseTargetNestedCwdRelativeExplicit(t *testing.T) {
 	// Simulate invoking dev from a nested directory like <repo>/apps with a
-	// relative explicit database path. The launcher's CWD is <repo>/apps,
-	// but the backend's CWD will be <repo>. filepath.Abs resolves the path
-	// relative to CWD; normalization must produce the CWD-absolute form so
-	// the child does not resolve it differently.
+	// relative explicit database path and relative YAML homeDir. The
+	// launcher's CWD is <repo>/apps, but the backend's CWD will be <repo>.
+	// filepath.Abs resolves the path relative to CWD; normalization must
+	// produce the CWD-absolute form so the child does not resolve it
+	// differently.
 	repo := makeRepoTree(t)
 	nestedCWD := filepath.Join(repo, "apps")
 	if err := os.MkdirAll(nestedCWD, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	relativePath := "../.kandev-dev/data/kandev.db"
+	relativeHome := "../.kandev-dev"
 
 	// Change to the nested CWD so filepath.Abs resolves relative to it.
 	t.Chdir(nestedCWD)
 
-	want, err := filepath.Abs(relativePath)
+	wantPath, err := filepath.Abs(relativePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want != filepath.Join(repo, ".kandev-dev", "data", "kandev.db") {
-		t.Fatalf("abs path = %q, want %q", want, filepath.Join(repo, ".kandev-dev", "data", "kandev.db"))
+	if wantPath != filepath.Join(repo, ".kandev-dev", "data", "kandev.db") {
+		t.Fatalf("abs path = %q, want %q", wantPath, filepath.Join(repo, ".kandev-dev", "data", "kandev.db"))
+	}
+	wantHome, err := filepath.Abs(relativeHome)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wantHome != filepath.Join(repo, ".kandev-dev") {
+		t.Fatalf("abs home = %q, want %q", wantHome, filepath.Join(repo, ".kandev-dev"))
 	}
 
-	devHome := devKandevHome(repo)
 	target := devDatabaseTarget{
 		path:    relativePath,
-		homeDir: devHome,
+		homeDir: relativeHome,
 		source:  devDatabaseEnvironment,
-		extra:   []string{"KANDEV_DEBUG_DEV_MODE=true", "KANDEV_HOME_DIR=" + devHome, "KANDEV_DATABASE_PATH=" + relativePath},
+		extra:   []string{"KANDEV_DEBUG_DEV_MODE=true", "KANDEV_HOME_DIR=" + relativeHome, "KANDEV_DATABASE_PATH=" + relativePath},
 	}
 
 	normalized := normalizeDevDatabaseTarget(target)
-	if normalized.path != want {
-		t.Fatalf("normalized path = %q, want %q", normalized.path, want)
+	if normalized.path != wantPath {
+		t.Fatalf("normalized path = %q, want %q", normalized.path, wantPath)
+	}
+	if normalized.homeDir != wantHome {
+		t.Fatalf("normalized homeDir = %q, want %q", normalized.homeDir, wantHome)
 	}
 }
