@@ -133,6 +133,31 @@ func TestGitHubBrokerScopeAuthorizerRechecksTaskScopeBeforeLegacyFallback(t *tes
 	}
 }
 
+func TestGitHubBrokerScopeAuthorizerDoesNotBypassProviderIdentityOnLegacyFallback(t *testing.T) {
+	for name, identity := range map[string]gitcredentials.Scope{
+		"mismatched provider identity": {
+			IdentityProviderID: "999",
+		},
+		"unexpected parent identity": {
+			IdentityProviderID: "100", ParentProviderID: "200",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := gitCredentialScopeTestRepository("https://github.com/acme/widgets.git")
+			repo.repository.ProviderHost = ""
+			repo.repository.ProviderRepoID = "100"
+			authorizer := &githubBrokerScopeAuthorizer{repo: repo}
+			scope := gitCredentialScopeForPath("/acme/widgets.git")
+			scope.IdentityProviderID = identity.IdentityProviderID
+			scope.ParentProviderID = identity.ParentProviderID
+
+			if err := authorizer.AuthorizeGitCredential(context.Background(), scope); err == nil {
+				t.Fatal("AuthorizeGitCredential() error = nil, want provider identity denial")
+			}
+		})
+	}
+}
+
 func TestGitHubBrokerScopeAuthorizerAcceptsPluginRepositoryScope(t *testing.T) {
 	repository := &taskmodels.Repository{
 		ID: "repository-1", WorkspaceID: "workspace-1", Provider: "bitbucket",

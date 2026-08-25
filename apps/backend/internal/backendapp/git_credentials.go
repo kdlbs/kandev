@@ -255,9 +255,10 @@ func (a *githubBrokerScopeAuthorizer) AuthorizeGitCredential(ctx context.Context
 		return nil
 	}
 	// Legacy GitHub rows may omit ProviderHost while their persisted clone URL
-	// still proves github.com. This exact-identity fallback is upstream-only;
-	// fork credentials must pass the server-authored destination check above.
-	return a.authorizeRepositoryIdentity(ctx, scope)
+	// still proves github.com. This fallback is upstream-only. Preserve any
+	// provider identity carried by the lease before using that legacy proof;
+	// fork credentials must pass the destination check above.
+	return a.authorizeLegacyGitHubRepositoryIdentity(ctx, scope)
 }
 
 func gitCredentialScopeOwnerRepo(path string) (string, string, error) {
@@ -274,6 +275,27 @@ func (a *githubBrokerScopeAuthorizer) authorizeRepositoryIdentity(ctx context.Co
 	if err != nil {
 		return err
 	}
+	return authorizeRepositoryIdentityRecord(repository, scope)
+}
+
+func (a *githubBrokerScopeAuthorizer) authorizeLegacyGitHubRepositoryIdentity(
+	ctx context.Context, scope gitcredentials.Scope,
+) error {
+	if strings.TrimSpace(scope.ParentProviderID) != "" {
+		return fmt.Errorf("repository parent identity does not match lease scope")
+	}
+	repository, err := a.repo.GetRepository(ctx, scope.RepositoryID)
+	if err != nil {
+		return err
+	}
+	if identity := strings.TrimSpace(scope.IdentityProviderID); identity != "" &&
+		(repository == nil || !strings.EqualFold(strings.TrimSpace(repository.ProviderRepoID), identity)) {
+		return fmt.Errorf("repository provider identity does not match lease scope")
+	}
+	return authorizeRepositoryIdentityRecord(repository, scope)
+}
+
+func authorizeRepositoryIdentityRecord(repository *taskmodels.Repository, scope gitcredentials.Scope) error {
 	if repository == nil {
 		return fmt.Errorf("repository identity does not match lease scope")
 	}
