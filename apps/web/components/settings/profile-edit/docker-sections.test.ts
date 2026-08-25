@@ -54,21 +54,26 @@ describe("canBuildDockerImage", () => {
   // POST /api/v1/docker/build is admin-gated on the backend, so a member must
   // not be shown an enabled control that can only end in a 403.
   it("denies members", () => {
-    expect(canBuildDockerImage("member")).toBe(false);
+    expect(canBuildDockerImage("enabled", "member")).toBe(false);
   });
 
   it("allows admins", () => {
-    expect(canBuildDockerImage("admin")).toBe(true);
+    expect(canBuildDockerImage("enabled", "admin")).toBe(true);
   });
 
-  // An undefined role means authentication is disabled (the synthetic
-  // single-user admin), which must behave exactly as before.
+  // Authentication-disabled mode represents the synthetic single-user admin,
+  // which must behave exactly as before.
   it("allows the single user when authentication is disabled", () => {
-    expect(canBuildDockerImage(undefined)).toBe(true);
+    expect(canBuildDockerImage("disabled", undefined)).toBe(true);
+    expect(canBuildDockerImage(undefined, undefined)).toBe(true);
+  });
+
+  it("denies a cleared session while authentication is enabled", () => {
+    expect(canBuildDockerImage("enabled", undefined)).toBe(false);
   });
 
   it("denies an unrecognized role rather than defaulting open", () => {
-    expect(canBuildDockerImage("")).toBe(false);
-    expect(canBuildDockerImage("Admin")).toBe(false);
+    expect(canBuildDockerImage("enabled", "")).toBe(false);
+    expect(canBuildDockerImage("enabled", "Admin")).toBe(false);
   });
 });
