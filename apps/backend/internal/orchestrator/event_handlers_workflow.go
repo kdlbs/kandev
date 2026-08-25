@@ -1190,10 +1190,6 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 // scheduler's recovery sweep and the "assign task" flow already use to start
 // Office work (internal/office/service/scheduler_recovery.go).
 func (s *Service) autoStartOfficeTaskForLoadedStep(ctx context.Context, task *models.Task, step *wfmodels.WorkflowStep, eventName string, restoreQueuePromotion bool) {
-	s.logger.Info(eventName+": queueing office run (no session, auto-start step)",
-		zap.String("task_id", task.ID),
-		zap.String("to_step_id", step.ID))
-
 	// Async for the same reason as the kanban path above: the event bus
 	// delivers synchronously and blocking here would stall the HTTP handler
 	// that published the move.
@@ -1209,12 +1205,31 @@ func (s *Service) autoStartOfficeTaskForLoadedStep(ctx context.Context, task *mo
 			}
 		}
 
-		if err := s.queueOfficeAutoStartRun(asyncCtx, task, step); err != nil {
+		outcome, err := s.queueOfficeAutoStartRun(asyncCtx, task, step)
+		if err != nil {
 			s.logger.Error(eventName+": failed to queue office auto-start run",
 				zap.String("task_id", task.ID),
 				zap.Error(err))
 			s.handleAutoStartFailure(asyncCtx, task.ID, eventName, hasGuard, restoreQueuePromotion)
+			return
 		}
+		// Log the outcome only after the attempt actually resolves — the log
+		// site this replaced ran before the goroutine below it, so it
+		// asserted a queued run whether or not one was. QueueOutcomeQueued
+		// is the only case that means a new runs row was actually inserted;
+		// deduped/coalesced are logged at Debug so a re-entry that is
+		// correctly suppressed within its own window does not read as a
+		// launch failure.
+		if outcome == engine.QueueOutcomeQueued {
+			s.logger.Info(eventName+": queued office run (no session, auto-start step)",
+				zap.String("task_id", task.ID),
+				zap.String("to_step_id", step.ID))
+			return
+		}
+		s.logger.Debug(eventName+": office auto-start run not queued",
+			zap.String("task_id", task.ID),
+			zap.String("to_step_id", step.ID),
+			zap.String("outcome", string(outcome)))
 	}()
 }
 
@@ -1229,31 +1244,48 @@ const officeAutoStartRunReason = "task_assigned"
 // StartTask (kanban-only), it resolves an agent the same way a "primary"
 // queue_run target would — preferring the task's current runner participant,
 // falling back to its assignee — and queues a run through engineRunQueue.
-func (s *Service) queueOfficeAutoStartRun(ctx context.Context, task *models.Task, step *wfmodels.WorkflowStep) error {
+func (s *Service) queueOfficeAutoStartRun(ctx context.Context, task *models.Task, step *wfmodels.WorkflowStep) (engine.QueueOutcome, error) {
 	if s.engineRunQueue == nil {
-		return fmt.Errorf("office run queue is not wired")
+		return "", fmt.Errorf("office run queue is not wired")
 	}
 	agentProfileID := task.AssigneeAgentProfileID
 	if s.enginePrimary != nil {
 		resolved, err := s.enginePrimary.PrimaryAgentProfileID(ctx, step.ID, task.ID)
 		if err != nil {
-			return fmt.Errorf("resolve primary agent for office auto-start on task %s: %w", task.ID, err)
+			return "", fmt.Errorf("resolve primary agent for office auto-start on task %s: %w", task.ID, err)
 		}
 		if resolved != "" {
 			agentProfileID = resolved
 		}
 	}
 	if agentProfileID == "" {
-		return fmt.Errorf("no agent profile resolved for office auto-start on task %s", task.ID)
+		return "", fmt.Errorf("no agent profile resolved for office auto-start on task %s", task.ID)
 	}
 	return s.engineRunQueue.QueueRun(ctx, engine.QueueRunRequest{
 		AgentProfileID: agentProfileID,
 		TaskID:         task.ID,
 		WorkflowStepID: step.ID,
 		Reason:         officeAutoStartRunReason,
-		IdempotencyKey: fmt.Sprintf("%s:%s:%s:%s", officeAutoStartRunReason, task.ID, agentProfileID, step.ID),
+		IdempotencyKey: officeAutoStartIdempotencyKey(task, agentProfileID, step.ID),
 		Payload:        map[string]any{"task_id": task.ID},
 	})
+}
+
+// officeAutoStartIdempotencyKey includes task.UpdatedAt as the run's
+// per-entry component. office-default.yml routes a rejected review card back
+// to the same (task, agent profile, step) via any_reject -> work, so a key
+// without an instance component collides across every re-entry into the same
+// step for the lifetime of the task: the first attempt after the review
+// round-trip is silently swallowed by the 24h service-level idempotency
+// check, and after that window a later attempt hard-fails against the
+// permanent idx_run_idempotency unique index. task.UpdatedAt is written in
+// the same transaction as the task_step_transitions row for the entry, so it
+// is stable for the lifetime of one step entry and changes on every
+// re-entry.
+func officeAutoStartIdempotencyKey(task *models.Task, agentProfileID, stepID string) string {
+	return fmt.Sprintf("%s:%s:%s:%s:%s",
+		officeAutoStartRunReason, task.ID, agentProfileID, stepID,
+		task.UpdatedAt.UTC().Format(time.RFC3339Nano))
 }
 
 // handleAutoStartFailure records a failed auto-start attempt. It restores the

@@ -19,17 +19,25 @@ import (
 
 // fakeRunQueueAdapter is a minimal engine.RunQueueAdapter test double that
 // captures QueueRun calls on a channel so tests can assert both that a call
-// happened and what it carried, without a sleep-based race.
+// happened and what it carried, without a sleep-based race. outcome
+// defaults to QueueOutcomeQueued when unset and err is nil.
 type fakeRunQueueAdapter struct {
-	calls chan engine.QueueRunRequest
-	err   error
+	calls   chan engine.QueueRunRequest
+	err     error
+	outcome engine.QueueOutcome
 }
 
-func (f *fakeRunQueueAdapter) QueueRun(_ context.Context, req engine.QueueRunRequest) error {
+func (f *fakeRunQueueAdapter) QueueRun(_ context.Context, req engine.QueueRunRequest) (engine.QueueOutcome, error) {
 	if f.calls != nil {
 		f.calls <- req
 	}
-	return f.err
+	if f.err != nil {
+		return "", f.err
+	}
+	if f.outcome == "" {
+		return engine.QueueOutcomeQueued, nil
+	}
+	return f.outcome, nil
 }
 
 // fakePrimaryAgentResolver is a minimal engine.PrimaryAgentResolver test
@@ -347,8 +355,17 @@ func TestHandleTaskMovedNoSession(t *testing.T) {
 			if req.Reason != officeAutoStartRunReason {
 				t.Errorf("Reason = %q, want %q", req.Reason, officeAutoStartRunReason)
 			}
-			if req.IdempotencyKey != "task_assigned:t-office:resolved-primary:step2" {
-				t.Errorf("IdempotencyKey = %q, want task_assigned:t-office:resolved-primary:step2", req.IdempotencyKey)
+			// CreateTask stamps its own UpdatedAt at insert time (see
+			// prepareTaskForCreate), so the expected key must be built from
+			// the persisted task, not the `now` value passed into the
+			// fixture above.
+			persisted, err := repo.GetTask(ctx, "t-office")
+			if err != nil {
+				t.Fatalf("GetTask: %v", err)
+			}
+			wantKey := "task_assigned:t-office:resolved-primary:step2:" + persisted.UpdatedAt.UTC().Format(time.RFC3339Nano)
+			if req.IdempotencyKey != wantKey {
+				t.Errorf("IdempotencyKey = %q, want %q", req.IdempotencyKey, wantKey)
 			}
 		case <-time.After(2 * time.Second):
 			t.Fatal("timed out waiting for QueueRun call")

@@ -74,11 +74,12 @@ func (s *Service) QueueRun(
 	}
 
 	if s.runsService != nil {
-		return s.runsService.QueueRun(ctx, runsservice.QueueRunRequest{
+		_, err := s.runsService.QueueRun(ctx, runsservice.QueueRunRequest{
 			Reason:         reason,
 			IdempotencyKey: idempotencyKey,
 			Payload:        payloadWithAgent(payload, agentInstanceID),
 		})
+		return err
 	}
 	return s.queueRunInline(ctx, agentInstanceID, reason, payload, idempotencyKey)
 }
