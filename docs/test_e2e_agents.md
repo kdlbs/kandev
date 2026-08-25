@@ -64,6 +64,10 @@ go test -tags e2e -v -timeout 5m -run TestAuggie_BasicPrompt ./internal/agentctl
 | `TestOpenCodeACP_BasicPrompt` | OpenCode | acp | Simple prompt completes a turn |
 | `TestMockAgent_BasicPrompt` | Mock Agent | acp | Harness smoke test (no API cost) |
 
+The mock agent has additional tests beyond `TestMockAgent_BasicPrompt` covering tool
+call events, permission flow, multi-turn conversations, session reset/reload, and
+thinking events — see `mock_agent_test.go` for the full list.
+
 ## Debugging Failures
 
 ### Debug message logs
