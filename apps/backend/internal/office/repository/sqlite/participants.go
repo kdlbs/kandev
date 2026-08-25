@@ -117,7 +117,7 @@ func (r *Repository) ListTaskParticipants(ctx context.Context, taskID, role stri
 		FROM workflow_step_participants
 		WHERE step_id = ? AND role = ?
 		  AND (task_id = '' OR task_id = ?)
-		ORDER BY position ASC, id ASC
+		ORDER BY position ASC, agent_profile_id ASC, id ASC
 	`), stepID, role, taskID)
 	if err != nil {
 		return nil, err
@@ -163,7 +163,7 @@ func (r *Repository) ListAllTaskParticipants(ctx context.Context, taskID string)
 		FROM workflow_step_participants
 		WHERE step_id = ?
 		  AND (task_id = '' OR task_id = ?)
-		ORDER BY role ASC, position ASC, id ASC
+		ORDER BY role ASC, position ASC, agent_profile_id ASC, id ASC
 	`), stepID, taskID)
 	if err != nil {
 		return nil, err
