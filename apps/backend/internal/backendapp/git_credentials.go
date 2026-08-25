@@ -124,24 +124,6 @@ func (p repositoryCloneCredentialProvider) ResolveGitCredential(
 	return credential.Username, credential.Password, nil
 }
 
-// pluginRepositoryProviderAuthorizer answers whether an installed, active
-// plugin declares a repository provider, so the task service can accept that
-// provider's descriptor on create-task instead of falling back to core's
-// built-in host table.
-type pluginRepositoryProviderAuthorizer struct{ service *plugins.Service }
-
-func (a pluginRepositoryProviderAuthorizer) AuthorizesRepositoryProvider(providerID string) bool {
-	if a.service == nil || a.service.Registry() == nil || strings.TrimSpace(providerID) == "" {
-		return false
-	}
-	for _, record := range a.service.Registry().List() {
-		if record.Status == plugins.StatusActive && declaresProvider(record.RepositoryProviders, providerID) {
-			return true
-		}
-	}
-	return false
-}
-
 type pluginCredentialServiceAdapter struct{ service *plugins.Service }
 
 func (a pluginCredentialServiceAdapter) Provider(providerID string) (string, string, pluginCredentialRemote, bool) {

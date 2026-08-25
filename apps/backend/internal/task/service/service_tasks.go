@@ -944,7 +944,10 @@ func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repo
 		return s.resolveRepoInputID(ctx, workspaceID, repositoryID, baseBranch)
 	}
 
-	if repoInput.TrustedProviderDescriptor || s.pluginProviderDescriptorAuthorized(repoInput) {
+	// Only the plugin Host Tasks.Create path can set this internal marker.
+	// REST, WebSocket, and MCP callers must go through the built-in resolver;
+	// they cannot assert ownership of a plugin descriptor in request data.
+	if repoInput.TrustedProviderDescriptor {
 		return s.resolveTrustedRemoteRepository(ctx, workspaceID, repoInput, baseBranch)
 	}
 
@@ -1243,44 +1246,6 @@ func (s *Service) resolveRepoInputRemote(
 		baseBranch = repo.DefaultBranch
 	}
 	return repo.ID, baseBranch, repoCreated, nil
-}
-
-// RepositoryProviderAuthorizer reports whether a repository provider identity
-// is declared by an installed, enabled plugin.
-type RepositoryProviderAuthorizer interface {
-	AuthorizesRepositoryProvider(provider string) bool
-}
-
-// pluginProviderDescriptorAuthorized reports whether repoInput carries a
-// provider descriptor owned by an installed plugin, which makes it resolvable
-// through the same path the plugin host itself uses.
-//
-// Without this, a repository picked from a plugin's picker reaches
-// parseRemoteRepositoryURL, whose host table only knows the built-in
-// providers, and task creation fails with "unsupported remote repository
-// host". The plugin registry is the authority on provider ownership, so trust
-// is established server-side; the descriptor stays a plain request body that
-// cannot assert its own trust. Built-in providers keep their existing parse
-// path so their host validation is never bypassed.
-func (s *Service) pluginProviderDescriptorAuthorized(repoInput TaskRepositoryInput) bool {
-	if s.repositoryProviderAuthorizer == nil {
-		return false
-	}
-	provider := strings.TrimSpace(repoInput.Provider)
-	if provider == "" || isBuiltinRepositoryProvider(provider) {
-		return false
-	}
-	return s.repositoryProviderAuthorizer.AuthorizesRepositoryProvider(provider)
-}
-
-// isBuiltinRepositoryProvider reports whether provider is resolved by core's
-// own URL parser rather than by a plugin.
-func isBuiltinRepositoryProvider(provider string) bool {
-	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case providerGitHub, providerGitLab, providerAzureDevOps:
-		return true
-	}
-	return false
 }
 
 // resolveTrustedRemoteRepository persists a complete provider descriptor

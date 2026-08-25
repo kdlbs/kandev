@@ -364,11 +364,6 @@ type Service struct {
 
 	workspaceSourceProviderRefresher WorkspaceSourceProviderRefresher
 
-	// repositoryProviderAuthorizer resolves whether a repository provider
-	// identity belongs to an installed plugin. Optional — when unset, only
-	// the built-in providers can be named on a create-task request.
-	repositoryProviderAuthorizer RepositoryProviderAuthorizer
-
 	workspaceDefaultsInitializer WorkspaceDefaultsInitializer
 	// foregroundActivity resolves the live fine-grained busy substate of a RUNNING
 	// session (satisfied by the orchestrator). Used to compute the task-level
@@ -502,14 +497,6 @@ func (s *Service) SetWorkspaceSourceMaterializer(m WorkspaceSourceMaterializer) 
 // reconciliation used after workspace-source and legacy branch attachments.
 func (s *Service) SetWorkspaceSourceProviderRefresher(r WorkspaceSourceProviderRefresher) {
 	s.workspaceSourceProviderRefresher = r
-}
-
-// SetRepositoryProviderAuthorizer wires the plugin registry lookup that lets
-// create-task requests name a plugin-owned repository provider. Optional —
-// when unset, a provider descriptor from a REST or WebSocket caller falls back
-// to the built-in URL parser and is rejected unless it names a built-in host.
-func (s *Service) SetRepositoryProviderAuthorizer(a RepositoryProviderAuthorizer) {
-	s.repositoryProviderAuthorizer = a
 }
 
 // SetAgentBaseBranchPusher wires the live-update push for

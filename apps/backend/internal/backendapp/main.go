@@ -572,11 +572,6 @@ func startAgentInfrastructure(
 			newRepositoryCloneCredentialProvider(services.GitHub, services.Plugins),
 		)
 	}
-	if services.Plugins != nil {
-		services.Task.SetRepositoryProviderAuthorizer(
-			pluginRepositoryProviderAuthorizer{service: services.Plugins},
-		)
-	}
 	log.Info("Repository cloner configured",
 		zap.String("base_path", cfg.RepoClone.BasePath))
 

@@ -50,11 +50,10 @@ type TaskRepositoryInput struct {
 	// accepted from REST/MCP JSON; callers must still supply every identity and
 	// exact credential-free clone URL field above.
 	//
-	// A descriptor that arrives without this marker can still reach the same
-	// resolver when the plugin registry says an installed plugin owns its
-	// provider — see Service.pluginProviderDescriptorAuthorized. Authorization
-	// is decided server-side either way; this field only records that the
-	// plugin host already made that decision.
+	// A descriptor that arrives without this marker uses the normal built-in
+	// resolver. Plugin descriptors must come through the authenticated plugin
+	// Host Tasks.Create path, which sets this marker only after validating the
+	// active plugin's provider ownership and clone origin.
 	TrustedProviderDescriptor bool `json:"-"`
 }
 

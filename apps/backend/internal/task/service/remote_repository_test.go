@@ -149,52 +149,8 @@ func TestResolveRepositoryRef_TrustedDescriptorRejectsCredentialsAndIncompleteId
 	}
 }
 
-// stubRepositoryProviderAuthorizer stands in for the plugin registry lookup.
-type stubRepositoryProviderAuthorizer struct{ owned string }
-
-func (s stubRepositoryProviderAuthorizer) AuthorizesRepositoryProvider(provider string) bool {
-	return provider == s.owned
-}
-
-func TestResolveRepositoryRef_PluginOwnedProviderResolvesWithoutBuiltinHost(t *testing.T) {
+func TestResolveRepositoryRef_BrowserPluginDescriptorKeepsBuiltinHostRejection(t *testing.T) {
 	svc, _, repo := createTestService(t)
-	svc.SetRepositoryProviderAuthorizer(stubRepositoryProviderAuthorizer{owned: "bitbucket"})
-	ctx := context.Background()
-	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-
-	// The descriptor a plugin repository picker sends through create-task: no
-	// repository_id yet, and a host core's own URL parser does not know.
-	repositoryID, baseBranch, created, err := svc.ResolveRepositoryRef(ctx, "ws-1", TaskRepositoryInput{
-		RemoteURL:      "https://bitbucket.org/acme/widgets.git",
-		Provider:       "bitbucket",
-		ProviderHost:   "https://bitbucket.org",
-		ProviderScope:  "https://bitbucket.org",
-		ProviderRepoID: "{7c445c85}",
-		ProviderOwner:  "acme",
-		ProviderName:   "widgets",
-		DefaultBranch:  "main",
-		BaseBranch:     "develop",
-	})
-	if err != nil {
-		t.Fatalf("ResolveRepositoryRef() unexpected error: %v", err)
-	}
-	if !created || baseBranch != "develop" {
-		t.Fatalf("ResolveRepositoryRef() created=%v base=%q, want true/develop", created, baseBranch)
-	}
-	stored, err := repo.GetRepository(ctx, repositoryID)
-	if err != nil {
-		t.Fatalf("GetRepository: %v", err)
-	}
-	if stored.Provider != "bitbucket" || stored.RemoteURL != "https://bitbucket.org/acme/widgets.git" {
-		t.Fatalf("stored repository = %+v, want the exact plugin descriptor", stored)
-	}
-}
-
-func TestResolveRepositoryRef_UnownedProviderKeepsBuiltinHostRejection(t *testing.T) {
-	svc, _, repo := createTestService(t)
-	svc.SetRepositoryProviderAuthorizer(stubRepositoryProviderAuthorizer{owned: "bitbucket"})
 	ctx := context.Background()
 	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
 		t.Fatalf("CreateWorkspace: %v", err)
@@ -209,13 +165,12 @@ func TestResolveRepositoryRef_UnownedProviderKeepsBuiltinHostRejection(t *testin
 		ProviderName:   "widgets",
 	})
 	if err == nil {
-		t.Fatal("ResolveRepositoryRef() accepted a descriptor for a provider no plugin declares")
+		t.Fatal("ResolveRepositoryRef() accepted a browser-supplied plugin descriptor")
 	}
 }
 
-func TestResolveRepositoryRef_PluginOwnedProviderRejectsForeignCloneOrigin(t *testing.T) {
+func TestResolveRepositoryRef_TrustedDescriptorRejectsForeignCloneOrigin(t *testing.T) {
 	svc, _, repo := createTestService(t)
-	svc.SetRepositoryProviderAuthorizer(stubRepositoryProviderAuthorizer{owned: "bitbucket"})
 	ctx := context.Background()
 	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
 		t.Fatalf("CreateWorkspace: %v", err)
@@ -224,22 +179,21 @@ func TestResolveRepositoryRef_PluginOwnedProviderRejectsForeignCloneOrigin(t *te
 	// An owned provider must not carry a clone URL off its own origin: the
 	// clone would present that provider's managed credentials to another host.
 	_, _, _, err := svc.ResolveRepositoryRef(ctx, "ws-1", TaskRepositoryInput{
-		RemoteURL:      "https://attacker.example.test/acme/widgets.git",
-		Provider:       "bitbucket",
-		ProviderHost:   "https://bitbucket.org",
-		ProviderRepoID: "{7c445c85}",
-		ProviderOwner:  "acme",
-		ProviderName:   "widgets",
+		RemoteURL:                 "https://attacker.example.test/acme/widgets.git",
+		Provider:                  "bitbucket",
+		ProviderHost:              "https://bitbucket.org",
+		ProviderRepoID:            "{7c445c85}",
+		ProviderOwner:             "acme",
+		ProviderName:              "widgets",
+		TrustedProviderDescriptor: true,
 	})
 	if err == nil {
-		t.Fatal("ResolveRepositoryRef() accepted a clone URL outside the provider origin")
+		t.Fatal("ResolveRepositoryRef() accepted a trusted descriptor outside the provider origin")
 	}
 }
 
 func TestResolveRepositoryRef_BuiltinProviderKeepsCoreParsePath(t *testing.T) {
 	svc, _, repo := createTestService(t)
-	// Even if a plugin declares "github", the built-in parser stays authoritative.
-	svc.SetRepositoryProviderAuthorizer(stubRepositoryProviderAuthorizer{owned: "github"})
 	ctx := context.Background()
 	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
 		t.Fatalf("CreateWorkspace: %v", err)
