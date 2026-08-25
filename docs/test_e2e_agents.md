@@ -7,7 +7,7 @@ They confirm message parsing, turn detection, and normalization still work when 
 
 ## Prerequisites
 
-- Agent binary installed and on PATH (`claude`, `amp`, etc.)
+- Agent CLI installed and on PATH, or `npx` available for npm-distributed agents (`auggie`, `gemini`)
 - Active API subscription for the agent you're testing
 - Tests for agents not installed are skipped automatically
 
@@ -25,46 +25,16 @@ Agents not on PATH are skipped. The mock agent is always built and tested.
 
 ### Single agent
 
-**Claude Code** (requires `claude` on PATH):
-
-```bash
-go test -tags e2e -v -timeout 10m -run TestClaudeCode ./internal/agentctl/server/adapter/e2e/
-```
-
-**Copilot** (requires `npx` + GitHub auth):
-
-```bash
-go test -tags e2e -v -timeout 10m -run TestCopilot ./internal/agentctl/server/adapter/e2e/
-```
-
-**Codex** (requires `npx` + OpenAI auth):
-
-```bash
-go test -tags e2e -v -timeout 10m -run TestCodex ./internal/agentctl/server/adapter/e2e/
-```
-
 **Auggie** (requires `npx` + Augment auth):
 
 ```bash
 go test -tags e2e -v -timeout 10m -run TestAuggie ./internal/agentctl/server/adapter/e2e/
 ```
 
-**OpenCode** (requires `npx` + OpenCode auth):
-
-```bash
-go test -tags e2e -v -timeout 10m -run TestOpenCode ./internal/agentctl/server/adapter/e2e/
-```
-
 **Gemini** (requires `npx` + Google auth):
 
 ```bash
 go test -tags e2e -v -timeout 10m -run TestGemini ./internal/agentctl/server/adapter/e2e/
-```
-
-**Amp** (requires `amp` on PATH):
-
-```bash
-go test -tags e2e -v -timeout 10m -run TestAmp ./internal/agentctl/server/adapter/e2e/
 ```
 
 **Mock Agent** (free, no API cost — binary is auto-built):
@@ -76,23 +46,16 @@ go test -tags e2e -v -run TestMockAgent ./internal/agentctl/server/adapter/e2e/
 ### Single test
 
 ```bash
-go test -tags e2e -v -timeout 5m -run TestClaudeCode_ToolUse ./internal/agentctl/server/adapter/e2e/
+go test -tags e2e -v -timeout 5m -run TestAuggie_BasicPrompt ./internal/agentctl/server/adapter/e2e/
 ```
 
 ## Available Tests
 
 | Test | Agent | Protocol | What it checks |
 |------|-------|----------|----------------|
-| `TestClaudeCode_BasicPrompt` | Claude Code | stream-json | Simple prompt completes a turn |
-| `TestClaudeCode_ToolUse` | Claude Code | stream-json | Prompt triggers at least one tool call |
-| `TestClaudeCode_SlashCost` | Claude Code | stream-json | `/cost` slash command completes |
-| `TestCopilot_BasicPrompt` | GitHub Copilot | copilot-sdk | Simple prompt completes a turn |
-| `TestCodex_BasicPrompt` | OpenAI Codex | codex | Simple prompt completes a turn |
 | `TestAuggie_BasicPrompt` | Auggie | acp | Simple prompt completes a turn |
-| `TestOpenCode_BasicPrompt` | OpenCode | opencode | Simple prompt completes a turn |
 | `TestGemini_BasicPrompt` | Gemini | acp | Simple prompt completes a turn |
-| `TestAmp_BasicPrompt` | Amp | stream-json | Simple prompt completes a turn |
-| `TestMockAgent_BasicPrompt` | Mock Agent | stream-json | Harness smoke test (no API cost) |
+| `TestMockAgent_BasicPrompt` | Mock Agent | acp | Harness smoke test (no API cost) |
 
 ## Debugging Failures
 
@@ -135,7 +98,7 @@ When a test fails, `DumpEventsOnFailure` prints all collected events with type, 
 
 ## How It Works
 
-Each test defines an `AgentSpec` with a hardcoded command (e.g. `claude -p --output-format=stream-json ...`).
+Each test defines an `AgentSpec` with a hardcoded command (e.g. `npx -y @augmentcode/auggie --acp`).
 The harness runs the full production code path:
 
 1. Check binary on PATH via `exec.LookPath` — skip if not found
@@ -161,6 +124,6 @@ Tests assert **structural invariants only** — never specific text or tool name
 ## Adding a New Agent
 
 1. Create `{agent}_test.go` with `//go:build e2e`
-2. Define the command as a const (derive from `internal/agent/agents/{agent}.go`)
+2. Define the command as a const (derive from `internal/agent/agents/{agent}_acp.go`)
 3. Write test functions using `RunAgent(t, AgentSpec{...})`
 4. Use `AssertTurnCompleted` for basic turn validation
