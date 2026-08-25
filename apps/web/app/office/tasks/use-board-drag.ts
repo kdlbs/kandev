@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from "react";
 import type { DragEndEvent, DragStartEvent } from "@dnd-kit/core";
-import { PointerSensor, TouchSensor, useSensor, useSensors } from "@dnd-kit/core";
+import { MouseSensor, TouchSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { useAppStoreApi } from "@/components/state-provider";
 import {
   ApprovalGateError,
@@ -76,9 +76,13 @@ export function useBoardDrag() {
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
 
   const sensors = useSensors(
-    // Distance activation is what keeps a plain click opening the task
-    // instead of starting a drag; the card's onClick still navigates.
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    // MouseSensor, not PointerSensor: the board is an overflow-x-auto row
+    // (see task-board.tsx) and PointerSensor also captures touch via
+    // pointer events, where its 8px distance activates before TouchSensor's
+    // delay and hijacks swipe-scroll. MouseSensor + TouchSensor keep the
+    // input streams separate so a quick touch swipe scrolls natively while
+    // a press-and-hold starts a drag. Same convention as sidebar-view-chips.tsx.
+    useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
   );
 

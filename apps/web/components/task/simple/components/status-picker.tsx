@@ -5,7 +5,10 @@ import { IconChevronDown } from "@tabler/icons-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { cn } from "@/lib/utils";
 import { useOptimisticTaskMutation } from "@/hooks/use-optimistic-task-mutation";
-import { updateTaskStatusOrTranslateGate } from "@/lib/api/domains/office-status-gate";
+import {
+  ApprovalGateError,
+  updateTaskStatusOrTranslateGate,
+} from "@/lib/api/domains/office-status-gate";
 import type { Task, TaskStatus } from "@/app/office/tasks/[id]/types";
 import { StatusIcon } from "@/app/office/tasks/[id]/status-icon";
 import { normalizeTaskStatus } from "@/lib/api/domains/office-task-normalize";
@@ -54,7 +57,18 @@ export function StatusPicker({ task }: StatusPickerProps) {
       await mutate(task.id, { status: value }, () =>
         updateTaskStatusOrTranslateGate(task.id, value),
       );
-    } catch {
+    } catch (err) {
+      // The hook already rolled back to the pre-mutation snapshot. The
+      // backend redirected and persisted this status server-side before
+      // returning the error (see ApprovalGateError), so a plain rollback
+      // shows a status the server no longer holds until the WS event
+      // reconciles it. Re-apply the redirected status now via a no-op
+      // mutation, matching use-board-drag.ts's board-drag path.
+      if (err instanceof ApprovalGateError) {
+        await mutate(task.id, { status: err.redirectedStatus as TaskStatus }, () =>
+          Promise.resolve(),
+        );
+      }
       /* toast already raised by hook */
     }
   };
