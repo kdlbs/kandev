@@ -108,6 +108,13 @@ func (s *Service) AuthorizeTaskAccess(ctx context.Context, taskID string) error 
 	return s.authorizeTaskID(ctx, taskID)
 }
 
+// AuthorizeWorkflowAccess is the public form of authorizeWorkflowID, consumed
+// by the workflow service, whose step/export/import surface reaches workflows
+// by ID but does not own workspace permissions.
+func (s *Service) AuthorizeWorkflowAccess(ctx context.Context, workflowID string) error {
+	return s.authorizeWorkflowID(ctx, workflowID)
+}
+
 // AuthorizeWorkspaceAccess is the public form of authorizeWorkspaceID,
 // consumed by the office route-scoping middleware.
 func (s *Service) AuthorizeWorkspaceAccess(ctx context.Context, workspaceID string) error {

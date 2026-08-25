@@ -35,12 +35,16 @@ type Service struct {
 	matchProfile         models.AgentProfileMatcher
 	syncOps              SyncWorkflowOps
 	sessionAccessChecker func(context.Context, string) error
-	historyQueue         chan historyWrite
-	historyStop          chan struct{}
-	historyDone          chan struct{}
-	historyCloseOnce     sync.Once
-	historyMu            sync.RWMutex
-	historyClosed        bool
+	// workflowAccessChecker / workspaceAccessChecker carry the task domain's
+	// per-user visibility rule into this package (see access.go).
+	workflowAccessChecker  func(context.Context, string) error
+	workspaceAccessChecker func(context.Context, string) error
+	historyQueue           chan historyWrite
+	historyStop            chan struct{}
+	historyDone            chan struct{}
+	historyCloseOnce       sync.Once
+	historyMu              sync.RWMutex
+	historyClosed          bool
 }
 
 type historyWrite struct {
@@ -240,6 +244,9 @@ func (s *Service) ListStepsByWorkflow(ctx context.Context, workflowID string) ([
 
 // ListStepsByWorkspaceID returns all workflow steps for all workflows in a workspace.
 func (s *Service) ListStepsByWorkspaceID(ctx context.Context, workspaceID string) ([]*models.WorkflowStep, error) {
+	if err := s.AuthorizeWorkspace(ctx, workspaceID); err != nil {
+		return nil, err
+	}
 	steps, err := s.repo.ListStepsByWorkspaceID(ctx, workspaceID)
 	if err != nil {
 		s.logger.Error("failed to list steps by workspace", zap.String("workspace_id", workspaceID), zap.Error(err))
@@ -548,6 +555,16 @@ func (s *Service) DeleteStep(ctx context.Context, stepID string) error {
 
 // ReorderSteps reorders workflow steps for a workflow.
 func (s *Service) ReorderSteps(ctx context.Context, workflowID string, stepIDs []string) error {
+	// Authorize every named step before writing any of them: the step IDs are
+	// caller-supplied and need not belong to workflowID, and a denial found
+	// halfway through the loop would leave a half-applied reorder behind.
+	// Unscoped callers pay nothing for this pass (AuthorizeStep returns
+	// immediately), so single-user behavior is unchanged.
+	for _, stepID := range stepIDs {
+		if err := s.AuthorizeStep(ctx, stepID); err != nil {
+			return err
+		}
+	}
 	for i, stepID := range stepIDs {
 		step, err := s.repo.GetStep(ctx, stepID)
 		if err != nil {
@@ -629,6 +646,9 @@ type ImportResult struct {
 
 // ExportWorkflow exports a single workflow with its steps as portable JSON.
 func (s *Service) ExportWorkflow(ctx context.Context, workflowID string) (*models.WorkflowExport, error) {
+	if err := s.AuthorizeWorkflow(ctx, workflowID); err != nil {
+		return nil, err
+	}
 	wf, err := s.workflowProvider.GetWorkflow(ctx, workflowID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get workflow: %w", err)
@@ -653,6 +673,9 @@ func (s *Service) ExportWorkflow(ctx context.Context, workflowID string) (*model
 // passes explicit IDs; the back-compat "export everything" path leaves them out
 // so a bare GET of the export endpoint can't leak system flows.
 func (s *Service) ExportWorkflows(ctx context.Context, workspaceID string, workflowIDs []string) (*models.WorkflowExport, error) {
+	if err := s.AuthorizeWorkspace(ctx, workspaceID); err != nil {
+		return nil, err
+	}
 	includeHidden := workflowIDs != nil
 	workflows, err := s.workflowProvider.ListWorkflows(ctx, workspaceID, includeHidden)
 	if err != nil {
@@ -690,6 +713,9 @@ func filterWorkflowsByID(workflows []*taskmodels.Workflow, ids []string) []*task
 
 // ImportWorkflows imports workflows into a workspace. Deduplicates by name.
 func (s *Service) ImportWorkflows(ctx context.Context, workspaceID string, export *models.WorkflowExport) (*ImportResult, error) {
+	if err := s.AuthorizeWorkspace(ctx, workspaceID); err != nil {
+		return nil, err
+	}
 	if err := export.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid export data: %w", err)
 	}

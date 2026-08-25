@@ -179,6 +179,45 @@ func TestCreateWorkspaceStampsOwner(t *testing.T) {
 	}
 }
 
+// TestAuthorizeWorkflowAccess covers the public wrapper the workflow service
+// authorizes its step, export and import surface through. The workflow package
+// owns those routes but not the permission: a workflow is visible exactly when
+// its workspace is.
+func TestAuthorizeWorkflowAccess(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedScopedWorkspaces(t, repo)
+	if err := repo.CreateWorkflow(context.Background(), &models.Workflow{
+		ID: "wf-legacy", WorkspaceID: "ws-legacy", Name: "Pre-auth flow",
+	}); err != nil {
+		t.Fatalf("create legacy workflow: %v", err)
+	}
+
+	if err := svc.AuthorizeWorkflowAccess(ctxAs("user-a"), "wf-b"); !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+		t.Fatalf("foreign workflow access: %v", err)
+	}
+	if err := svc.AuthorizeWorkflowAccess(ctxAs("user-b"), "wf-b"); err != nil {
+		t.Fatalf("owner workflow access: %v", err)
+	}
+	// Identity-less internal callers and the synthetic auth-disabled identity
+	// keep the pre-auth see-everything behavior.
+	if err := svc.AuthorizeWorkflowAccess(context.Background(), "wf-b"); err != nil {
+		t.Fatalf("internal workflow access: %v", err)
+	}
+	if err := svc.AuthorizeWorkflowAccess(ctxSynthetic(), "wf-b"); err != nil {
+		t.Fatalf("synthetic workflow access: %v", err)
+	}
+	// An unowned workspace stays visible until the setup wizard claims it.
+	if err := svc.AuthorizeWorkflowAccess(ctxAs("user-a"), "wf-legacy"); err != nil {
+		t.Fatalf("legacy workflow access: %v", err)
+	}
+	// A workflow that does not exist is reported as the repository reports it,
+	// which the workflow service classifies as not-visible so a missing
+	// workflow and a foreign one answer identically.
+	if err := svc.AuthorizeWorkflowAccess(ctxAs("user-a"), "wf-missing"); err == nil {
+		t.Fatal("missing workflow access: want an error")
+	}
+}
+
 func TestAuthorizeSessionAccess(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	seedScopedWorkspaces(t, repo)

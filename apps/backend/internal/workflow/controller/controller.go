@@ -9,6 +9,17 @@ import (
 	"github.com/kandev/kandev/internal/workflow/service"
 )
 
+// Per-user scoping lives here rather than in the HTTP handlers because the
+// controller is the single entry point every user-facing transport shares:
+// the REST routes, the WebSocket actions (which the gateway's dispatch
+// backstop cannot cover — it parses no workflow_id or step id) and the MCP
+// tool handlers. A guard added one layer up would leave the other two open.
+// The checks themselves belong to the task domain and reach it through the
+// service's Authorize* helpers (internal/workflow/service/access.go).
+//
+// Workflow templates are deliberately unscoped: they are install-global,
+// read-only definitions with no owner.
+
 // Controller handles workflow-related requests
 type Controller struct {
 	svc *service.Service
@@ -66,6 +77,9 @@ type CreateStepsFromTemplateRequest struct {
 }
 
 func (c *Controller) ListStepsByWorkflow(ctx context.Context, req ListStepsRequest) (*ListStepsResponse, error) {
+	if err := c.svc.AuthorizeWorkflow(ctx, req.WorkflowID); err != nil {
+		return nil, err
+	}
 	steps, err := c.svc.ListStepsByWorkflow(ctx, req.WorkflowID)
 	if err != nil {
 		return nil, err
@@ -75,6 +89,9 @@ func (c *Controller) ListStepsByWorkflow(ctx context.Context, req ListStepsReque
 
 // ListStepsByWorkspace returns all workflow steps for all workflows in a workspace.
 func (c *Controller) ListStepsByWorkspace(ctx context.Context, workspaceID string) (*ListStepsResponse, error) {
+	// Authorized inside ListStepsByWorkspaceID rather than here: the
+	// boot-payload builder calls that method without passing through this
+	// controller, so the service is the layer both entry points share.
 	steps, err := c.svc.ListStepsByWorkspaceID(ctx, workspaceID)
 	if err != nil {
 		return nil, err
@@ -83,6 +100,9 @@ func (c *Controller) ListStepsByWorkspace(ctx context.Context, workspaceID strin
 }
 
 func (c *Controller) GetStep(ctx context.Context, id string) (*GetStepResponse, error) {
+	if err := c.svc.AuthorizeStep(ctx, id); err != nil {
+		return nil, err
+	}
 	step, err := c.svc.GetStep(ctx, id)
 	if err != nil {
 		return nil, err
@@ -91,6 +111,9 @@ func (c *Controller) GetStep(ctx context.Context, id string) (*GetStepResponse, 
 }
 
 func (c *Controller) CreateStepsFromTemplate(ctx context.Context, req CreateStepsFromTemplateRequest) error {
+	if err := c.svc.AuthorizeWorkflow(ctx, req.WorkflowID); err != nil {
+		return err
+	}
 	if err := c.svc.EnsureWorkflowMutable(ctx, req.WorkflowID); err != nil {
 		return err
 	}
@@ -117,6 +140,11 @@ type CreateStepRequest struct {
 
 // CreateStep creates a new workflow step.
 func (c *Controller) CreateStep(ctx context.Context, req CreateStepRequest) (*GetStepResponse, error) {
+	// The new step names its workflow in the body; authorize that workflow
+	// before anything else reads or writes.
+	if err := c.svc.AuthorizeWorkflow(ctx, req.WorkflowID); err != nil {
+		return nil, err
+	}
 	if err := c.svc.EnsureWorkflowMutable(ctx, req.WorkflowID); err != nil {
 		return nil, err
 	}
@@ -189,6 +217,9 @@ type UpdateStepRequest struct {
 
 // UpdateStep updates an existing workflow step.
 func (c *Controller) UpdateStep(ctx context.Context, req UpdateStepRequest) (*GetStepResponse, error) {
+	if err := c.svc.AuthorizeStep(ctx, req.ID); err != nil {
+		return nil, err
+	}
 	step, err := c.svc.GetStep(ctx, req.ID)
 	if err != nil {
 		return nil, err
@@ -261,6 +292,12 @@ func (c *Controller) validatePullFromStep(ctx context.Context, step *models.Work
 	if step.ID != "" && step.PullFromStepID == step.ID {
 		return fmt.Errorf("pull_from_step_id cannot reference the same step")
 	}
+	// Authorizing the pull source keeps a foreign step from being told apart
+	// from a nonexistent one: without this, "must reference a step in the same
+	// workflow" would confirm that somebody else's step ID exists.
+	if err := c.svc.AuthorizeStep(ctx, step.PullFromStepID); err != nil {
+		return fmt.Errorf("pull_from_step_id is invalid: %w", err)
+	}
 	source, err := c.svc.GetStep(ctx, step.PullFromStepID)
 	if err != nil {
 		return fmt.Errorf("pull_from_step_id is invalid: %w", err)
@@ -301,6 +338,9 @@ func (c *Controller) validatePullFromStepAcyclic(ctx context.Context, stepID str
 
 // DeleteStep deletes a workflow step.
 func (c *Controller) DeleteStep(ctx context.Context, id string) error {
+	if err := c.svc.AuthorizeStep(ctx, id); err != nil {
+		return err
+	}
 	step, err := c.svc.GetStep(ctx, id)
 	if err != nil {
 		return err
@@ -319,6 +359,11 @@ type ReorderStepsRequest struct {
 
 // ReorderSteps reorders workflow steps for a workflow.
 func (c *Controller) ReorderSteps(ctx context.Context, req ReorderStepsRequest) error {
+	// The workflow is authorized here; the individual step IDs are authorized
+	// by the service, which is where the reorder actually resolves them.
+	if err := c.svc.AuthorizeWorkflow(ctx, req.WorkflowID); err != nil {
+		return err
+	}
 	if err := c.svc.EnsureWorkflowMutable(ctx, req.WorkflowID); err != nil {
 		return err
 	}
@@ -352,6 +397,8 @@ type ImportWorkflowsRequest struct {
 }
 
 // ExportWorkflow exports a single workflow.
+// The export/import trio authorizes inside the service: the MCP config tools
+// call those methods directly instead of coming through this controller.
 func (c *Controller) ExportWorkflow(ctx context.Context, workflowID string) (*models.WorkflowExport, error) {
 	return c.svc.ExportWorkflow(ctx, workflowID)
 }

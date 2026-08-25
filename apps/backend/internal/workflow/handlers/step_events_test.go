@@ -116,13 +116,23 @@ func (h *workflowHarness) dispatch(t *testing.T, action string, payload any) *ws
 
 func setupStepRouter(t *testing.T) *workflowHarness {
 	t.Helper()
-	rawDB, err := sql.Open("sqlite3", ":memory:")
+	return setupStepRouterWithDriver(t, "sqlite3")
+}
+
+// setupStepRouterWithDriver builds the harness over a named SQL driver, so the
+// scoping tests can substitute a statement-counting driver and prove a guard
+// rejected a request without the repository ever being queried.
+func setupStepRouterWithDriver(t *testing.T, driverName string) *workflowHarness {
+	t.Helper()
+	rawDB, err := sql.Open(driverName, ":memory:")
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
 	// Pin the pool to one connection: every connection to an in-memory SQLite
 	// DB gets its own database, so a second one would not see the schema.
 	rawDB.SetMaxOpenConns(1)
+	// The sqlx driver name only selects the bindvar style, so it stays
+	// "sqlite3" even when the pool was opened through a wrapper driver.
 	db := sqlx.NewDb(rawDB, "sqlite3")
 	t.Cleanup(func() { _ = db.Close() })
 
