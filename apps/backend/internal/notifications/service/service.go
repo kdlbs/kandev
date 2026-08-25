@@ -567,7 +567,11 @@ func (s *Service) TestProvider(ctx context.Context, userID, providerID string) e
 		EventType: EventTaskSessionClarificationAsked,
 		Title:     "Test notification",
 		Body:      "If you can read this, notifications are working.",
-		Config:    provider.Config,
+		// The local provider broadcasts to this user's connections, so an
+		// unaddressed test notification never reaches the tab that asked
+		// for it.
+		UserID: userID,
+		Config: provider.Config,
 	})
 }
 

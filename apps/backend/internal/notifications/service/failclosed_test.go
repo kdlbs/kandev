@@ -151,3 +151,21 @@ func TestNilAuthEnforcementBehavesAsAuthDisabled(t *testing.T) {
 		t.Fatalf("delivered to %#v, want the single-user default", got)
 	}
 }
+
+func TestTestNotificationIsAddressedToTheCaller(t *testing.T) {
+	repo := newMultiUserRepository()
+	owned := repo.seedProvider("user-a", "slack://user-a", EventTaskSessionClarificationAsked)
+	svc, capture := newOwnershipTestService(t, repo, ownedWorkspaceTasks{workspaceID: "workspace-a", ownerID: "user-a"}, true)
+
+	if err := svc.TestProvider(context.Background(), "user-a", owned.ID); err != nil {
+		t.Fatalf("test provider: %v", err)
+	}
+	if len(capture.messages) != 1 {
+		t.Fatalf("messages = %#v, want one test notification", capture.messages)
+	}
+	// The local provider broadcasts to Message.UserID; an empty one never
+	// reaches the tab that asked for the test.
+	if capture.messages[0].UserID != "user-a" {
+		t.Fatalf("test notification addressed to %q, want user-a", capture.messages[0].UserID)
+	}
+}
