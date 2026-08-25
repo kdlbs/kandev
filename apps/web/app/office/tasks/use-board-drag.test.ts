@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { applyStatusDrop, type StatusDropDeps } from "./use-board-drag";
+import { ApprovalGateError } from "@/lib/api/domains/office-status-gate";
 import type { OfficeTask, OfficeTaskStatus } from "@/lib/state/slices/office/types";
 
 function task(id: string, status: OfficeTaskStatus): OfficeTask {
@@ -88,8 +89,8 @@ describe("applyStatusDrop", () => {
   });
 
   it("surfaces the approver-gate sentence rather than a bare failure", async () => {
-    // updateTaskStatusOrTranslateGate converts the backend's 409 +
-    // pending_approvers into this Error before it reaches the drop handler.
+    // A plain Error (anything that isn't the typed ApprovalGateError below)
+    // still rolls back to the snapshot and surfaces its message verbatim.
     const gate = "Cannot mark done: awaiting approval from Ada, Grace";
     const d = deps(task("t1", "in_review"), async () => {
       throw new Error(gate);
@@ -97,6 +98,29 @@ describe("applyStatusDrop", () => {
 
     await applyStatusDrop("t1", "done", d);
 
+    expect(d.onError).toHaveBeenCalledWith(gate);
+  });
+
+  it("settles on the redirected status instead of rolling back, when the approver gate redirects", async () => {
+    // The approver gate doesn't reject the move: the backend redirects it to
+    // in_review server-side, persists and broadcasts that, and only then
+    // returns 409 (updateTaskStatusOrTranslateGate throws ApprovalGateError
+    // for exactly this case). Rolling back to the pre-drop snapshot here
+    // would show a status the server no longer holds.
+    const before = task("t1", "todo");
+    const gate = "Cannot mark done: awaiting approval from Ada, Grace";
+    const d = deps(before, async () => {
+      throw new ApprovalGateError(gate, "in_review");
+    });
+
+    await applyStatusDrop("t1", "done", d);
+
+    expect(d.patchTask).toHaveBeenNthCalledWith(1, "t1", { status: "done" });
+    // Patched to the redirected status only, not the whole snapshot: a
+    // spread would reinstate the snapshot's stale rawStatus and the card
+    // would re-normalize back to the old column.
+    expect(d.patchTask).toHaveBeenNthCalledWith(2, "t1", { status: "in_review" });
+    expect(d.patchTask).toHaveBeenCalledTimes(2);
     expect(d.onError).toHaveBeenCalledWith(gate);
   });
 

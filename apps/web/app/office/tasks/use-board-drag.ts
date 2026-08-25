@@ -4,7 +4,10 @@ import { useCallback, useState } from "react";
 import type { DragEndEvent, DragStartEvent } from "@dnd-kit/core";
 import { PointerSensor, TouchSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { useAppStoreApi } from "@/components/state-provider";
-import { updateTaskStatusOrTranslateGate } from "@/lib/api/domains/office-status-gate";
+import {
+  ApprovalGateError,
+  updateTaskStatusOrTranslateGate,
+} from "@/lib/api/domains/office-status-gate";
 import { toast } from "@/lib/toast/sonner";
 import { t } from "@/lib/i18n";
 import type { OfficeTask, OfficeTaskStatus } from "@/lib/state/slices/office/types";
@@ -48,7 +51,16 @@ export async function applyStatusDrop(
   try {
     await deps.updateStatus(taskId, targetStatus);
   } catch (err) {
-    deps.patchTask(taskId, snapshot);
+    if (err instanceof ApprovalGateError) {
+      // The backend already redirected and persisted this status server-side
+      // before returning the error (see ApprovalGateError), so the board is
+      // wrong if it rolls back to the pre-drop snapshot here. Patch status
+      // only: spreading the snapshot would reinstate its stale rawStatus and
+      // the card would re-normalize back to the old column.
+      deps.patchTask(taskId, { status: err.redirectedStatus });
+    } else {
+      deps.patchTask(taskId, snapshot);
+    }
     // The approver gate arrives here already translated into a sentence
     // naming who still has to sign off.
     deps.onError(err instanceof Error ? err.message : t("task:failedToMoveTask"));

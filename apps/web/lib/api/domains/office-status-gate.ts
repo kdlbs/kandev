@@ -33,8 +33,36 @@ export function extractPendingApprovers(err: unknown): PendingApprover[] | null 
   return pending.filter((p): p is PendingApprover => !!p && typeof p === "object");
 }
 
-// Sets a task's status, re-throwing the approver gate as a readable Error so
-// every caller surfaces the same sentence.
+function extractRedirectedStatus(err: unknown): (OfficeTaskStatus | TaskStatus) | null {
+  if (!(err instanceof ApiError)) return null;
+  const body = err.body;
+  if (!body || typeof body !== "object") return null;
+  const status = (body as { status?: unknown }).status;
+  return typeof status === "string" && status.length > 0
+    ? (status as OfficeTaskStatus | TaskStatus)
+    : null;
+}
+
+// Thrown instead of a plain Error when the approver gate fires. The backend
+// does not reject a gated "done" move: it redirects the task to in_review,
+// persists and broadcasts that, and only then returns 409 (see
+// respondStatusUpdateError in the backend handler). A caller that rolls back
+// to its pre-mutation snapshot on any thrown error would show a status the
+// server no longer holds, so this carries the server's actual redirected
+// status through instead of discarding it.
+export class ApprovalGateError extends Error {
+  readonly redirectedStatus: OfficeTaskStatus | TaskStatus;
+
+  constructor(message: string, redirectedStatus: OfficeTaskStatus | TaskStatus) {
+    super(message);
+    this.name = "ApprovalGateError";
+    this.redirectedStatus = redirectedStatus;
+  }
+}
+
+// Sets a task's status, re-throwing the approver gate as an ApprovalGateError
+// so every caller surfaces the same sentence and can settle on the status the
+// server actually redirected to instead of blindly rolling back.
 export async function updateTaskStatusOrTranslateGate(
   taskId: string,
   status: OfficeTaskStatus | TaskStatus,
@@ -44,7 +72,11 @@ export async function updateTaskStatusOrTranslateGate(
   } catch (err) {
     const pending = extractPendingApprovers(err);
     if (pending) {
-      throw new Error(formatPendingApproversMessage(pending));
+      // The gate always redirects to in_review today (see applyApprovalGate
+      // in the backend); reading it from the response body rather than
+      // hardcoding it here keeps this in sync if the backend ever changes.
+      const redirectedStatus = extractRedirectedStatus(err) ?? "in_review";
+      throw new ApprovalGateError(formatPendingApproversMessage(pending), redirectedStatus);
     }
     throw err;
   }
