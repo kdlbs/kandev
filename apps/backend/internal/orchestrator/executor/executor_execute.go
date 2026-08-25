@@ -2263,6 +2263,15 @@ func (e *Executor) persistTaskEnvironment(
 				return
 			}
 		}
+		// Persist per-repo rows for launches that didn't have them yet *before*
+		// the environment can be marked ready below. The environment-repository
+		// rows are the only physical-worktree record, so single-repo launches
+		// write one row here too. Ordering matters: writing status=ready first
+		// and these rows second leaves a window where a crash or a concurrent
+		// reader observes a ready environment with an empty inventory for a
+		// repo-backed task — exactly the state the guards elsewhere in this PR
+		// exist to prevent (see validateReuseEnvironmentInventory).
+		e.persistTaskEnvironmentRepos(ctx, existingEnv.ID, repos)
 		// A non-materializing sibling only advances the environment to ready
 		// when inventory is present: already recorded before this launch,
 		// about to be written by this launch, or not required because the
@@ -2281,10 +2290,6 @@ func (e *Executor) persistTaskEnvironment(
 				zap.Error(err))
 		}
 		session.TaskEnvironmentID = existingEnv.ID
-		// Persist per-repo rows for launches that didn't have them yet. The
-		// environment-repository rows are the only physical-worktree record,
-		// so single-repo launches write one row here too.
-		e.persistTaskEnvironmentRepos(ctx, existingEnv.ID, repos)
 		e.selfHealTaskRepositoryBaseBranches(ctx, taskID, req, resp)
 		return
 	}
