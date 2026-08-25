@@ -2355,8 +2355,27 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		effectivePrompt := s.buildWorkflowPrompt(ctx, taskDescription, step, taskID, sessionID, isPassthrough)
 		if err := s.autoStartStepPrompt(ctx, taskID, session, step, effectivePrompt, hasPlanMode, true); err != nil {
 			if errors.Is(err, errWorkflowAutoStartSessionTerminalized) {
-				s.logger.Info("skipping workflow auto-start after reused session terminalized",
+				s.logger.Info("creating fresh workflow session after reused session terminalized",
 					zap.String("task_id", taskID), zap.String("session_id", sessionID))
+				replacement, replacementErr := s.createNewSessionForStep(
+					ctx, taskID, session, session.AgentProfileID,
+				)
+				if replacementErr != nil {
+					s.logger.Error("failed to create replacement after reused session terminalized",
+						zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(replacementErr))
+					return
+				}
+				replacementPrompt := s.buildWorkflowPrompt(
+					ctx, taskDescription, step, taskID, replacement.ID, isPassthrough,
+				)
+				if replacementErr = s.autoStartStepPrompt(
+					ctx, taskID, replacement, step, replacementPrompt, hasPlanMode, true,
+				); replacementErr != nil {
+					s.logger.Error("failed to auto-start replacement after reused session terminalized",
+						zap.String("task_id", taskID), zap.String("session_id", replacement.ID), zap.Error(replacementErr))
+					s.setSessionWaitingForInput(ctx, taskID, replacement.ID, replacement)
+					s.publishSessionWaitingEvent(ctx, taskID, replacement.ID, step.ID, replacement)
+				}
 				return
 			}
 			s.logger.Error("failed to auto-start agent for step",

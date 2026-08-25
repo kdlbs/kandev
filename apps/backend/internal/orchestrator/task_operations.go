@@ -4050,7 +4050,10 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 		if fresh == nil || isTerminalSessionState(fresh.State) {
 			guard.Unlock()
 			releaseDispatchGuard()
-			s.rollbackForegroundDispatchOnFailure(ctx, taskID, sessionID, foregroundDispatch)
+			failureCtx, cancel := options.failureContext(ctx)
+			defer cancel()
+			s.rollbackForegroundDispatchOnFailure(failureCtx, taskID, sessionID, foregroundDispatch)
+			s.rollbackPromptClaim(failureCtx, taskID, sessionID, rollback)
 			return nil, errWorkflowAutoStartSessionTerminalized
 		}
 		var releaseOnce sync.Once
