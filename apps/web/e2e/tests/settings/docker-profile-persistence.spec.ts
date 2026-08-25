@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { setStoreRole } from "../../helpers/session-store";
 
 /**
  * Regression test for the Docker executor profile UI persisting Dockerfile
@@ -220,23 +221,7 @@ test.describe("Docker executor profile persistence", () => {
     const buildButton = testPage.getByRole("button", { name: "Build Image" });
     await expect(buildButton).toBeEnabled();
 
-    await testPage.waitForFunction(() => Boolean(window.__KANDEV_E2E_STORE__));
-    await testPage.evaluate(() => {
-      const store = window.__KANDEV_E2E_STORE__;
-      if (!store) throw new Error("E2E store bridge is unavailable");
-      store.getState().setAuthState({
-        mode: "enabled",
-        authenticated: true,
-        user: {
-          id: "e2e-member",
-          email: "member@e2e.dev",
-          display_name: "E2E Member",
-          role: "member",
-          status: "active",
-        },
-        ssoProviders: [],
-      });
-    });
+    await setStoreRole(testPage, "member");
 
     await expect(buildButton).toBeDisabled();
     await expect(testPage.getByText("Only administrators can build images.")).toBeVisible();

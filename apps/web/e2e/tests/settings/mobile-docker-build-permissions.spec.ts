@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { setStoreRole } from "../../helpers/session-store";
 
 /**
  * Mobile parity for the admin gating on the Dockerfile build control.
@@ -25,23 +26,7 @@ test.describe("Docker build permissions on mobile", () => {
     const buildButton = testPage.getByRole("button", { name: "Build Image" });
     await expect(buildButton).toBeEnabled();
 
-    await testPage.waitForFunction(() => Boolean(window.__KANDEV_E2E_STORE__));
-    await testPage.evaluate(() => {
-      const store = window.__KANDEV_E2E_STORE__;
-      if (!store) throw new Error("E2E store bridge is unavailable");
-      store.getState().setAuthState({
-        mode: "enabled",
-        authenticated: true,
-        user: {
-          id: "e2e-member",
-          email: "member@e2e.dev",
-          display_name: "E2E Member",
-          role: "member",
-          status: "active",
-        },
-        ssoProviders: [],
-      });
-    });
+    await setStoreRole(testPage, "member");
 
     await expect(buildButton).toBeDisabled();
     const explanation = testPage.getByText("Only administrators can build images.");
@@ -56,11 +41,13 @@ test.describe("Docker build permissions on mobile", () => {
     expect(explanationBox!.x).toBeGreaterThanOrEqual(0);
     expect(explanationBox!.x + explanationBox!.width).toBeLessThanOrEqual(viewportWidth);
 
-    // And it must not introduce document-level horizontal scrolling.
+    // And it must not introduce document-level horizontal scrolling. The DOM
+    // guarantees scrollWidth >= clientWidth, so the only passing value is 0;
+    // asserting that exactly keeps the failure message readable.
     const horizontalOverflow = await testPage.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );
-    expect(horizontalOverflow).toBeLessThanOrEqual(0);
+    expect(horizontalOverflow).toBe(0);
   });
 
   test("admin keeps the build control usable at phone width", async ({ testPage }) => {
@@ -68,23 +55,7 @@ test.describe("Docker build permissions on mobile", () => {
     await expect(testPage.locator("#profile-name")).toHaveValue("Docker", { timeout: 10_000 });
     await testPage.getByRole("button", { name: "Use defaults" }).click();
 
-    await testPage.waitForFunction(() => Boolean(window.__KANDEV_E2E_STORE__));
-    await testPage.evaluate(() => {
-      const store = window.__KANDEV_E2E_STORE__;
-      if (!store) throw new Error("E2E store bridge is unavailable");
-      store.getState().setAuthState({
-        mode: "enabled",
-        authenticated: true,
-        user: {
-          id: "e2e-admin",
-          email: "admin@e2e.dev",
-          display_name: "E2E Admin",
-          role: "admin",
-          status: "active",
-        },
-        ssoProviders: [],
-      });
-    });
+    await setStoreRole(testPage, "admin");
 
     await expect(testPage.getByRole("button", { name: "Build Image" })).toBeEnabled();
     await expect(testPage.getByText("Only administrators can build images.")).toHaveCount(0);
