@@ -533,7 +533,7 @@ describe("PRStatusChip CI automation mobile parity", () => {
 
     const drawer = document.querySelector(DRAWER_SELECTOR);
     expect(drawer?.textContent).toContain("Auto-fix CI and address comments");
-    expect(drawer?.textContent).toContain("Auto-merge when ready");
+    expect(drawer?.textContent).toContain("Auto-merge or requeue when ready");
 
     act(() => {
       fireEvent.click(screen.getByLabelText("Edit auto-fix prompt for this task"));

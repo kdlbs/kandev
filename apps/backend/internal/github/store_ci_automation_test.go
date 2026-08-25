@@ -466,6 +466,51 @@ func TestStoreTaskCIPRState_RecordAttemptsAndError(t *testing.T) {
 	}
 }
 
+func TestStoreTaskCIMergeQueueRecoveryState(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	recorder, ok := any(store).(interface {
+		RecordTaskCIMergeQueueObservation(context.Context, TaskCIMergeQueueObservation) error
+	})
+	if !ok {
+		t.Fatal("Store does not implement merge-queue observation checkpoint")
+	}
+
+	if err := recorder.RecordTaskCIMergeQueueObservation(ctx, TaskCIMergeQueueObservation{
+		TaskID: "task-1", RepositoryID: "repo-1", PRNumber: 42,
+		ActiveQueueHeadSHA: "head-a", MergeSignature: "merge-a",
+	}); err != nil {
+		t.Fatalf("record active queue observation: %v", err)
+	}
+	if err := store.RecordTaskCIFixAttempt(ctx, TaskCIFixAttempt{
+		TaskID: "task-1", RepositoryID: "repo-1", PRNumber: 42,
+		QueueRemovalEventID: "removal-a", QueueRemovalCause: "checks_failed",
+		IncrementRound: true,
+	}); err != nil {
+		t.Fatalf("record queue recovery fix: %v", err)
+	}
+	if err := store.RecordTaskCIMergeAttempt(ctx, TaskCIMergeAttempt{
+		TaskID: "task-1", RepositoryID: "repo-1", PRNumber: 42,
+		Signature: "merge-b", AttemptedHeadSHA: "head-b",
+	}); err != nil {
+		t.Fatalf("record queue merge attempt: %v", err)
+	}
+
+	state, err := store.GetTaskCIPRState(ctx, "task-1", "repo-1", 42)
+	if err != nil {
+		t.Fatalf("get queue automation state: %v", err)
+	}
+	if state == nil {
+		t.Fatal("expected queue automation state")
+	}
+	if state.LastQueueAttemptHeadSHA != "head-b" || state.LastMergeSignature != "merge-b" {
+		t.Fatalf("queue attempt state = %+v, want head-b and merge-b", state)
+	}
+	if state.LastQueueFixEventID != "removal-a" || state.LastQueueRemovalCause != "checks_failed" || state.AutoFixRoundCount != 1 {
+		t.Fatalf("queue repair state = %+v, want removal checkpoint and one round", state)
+	}
+}
+
 func TestStoreTaskCIPRState_MarkExhaustedAndResetOnReenable(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()

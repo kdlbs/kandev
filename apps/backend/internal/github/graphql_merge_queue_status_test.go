@@ -8,7 +8,7 @@ import (
 
 func TestPRFieldsBlockRequestsMergeQueueEntry(t *testing.T) {
 	block := prFieldsBlock()
-	if !strings.Contains(block, "mergeQueueEntry { state position estimatedTimeToMerge }") {
+	if !strings.Contains(block, "mergeQueueEntry { id state position estimatedTimeToMerge headCommit { oid } }") {
 		t.Fatalf("prFieldsBlock() = %s, want merge queue fields", block)
 	}
 }

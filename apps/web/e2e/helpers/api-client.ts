@@ -1493,6 +1493,42 @@ export class ApiClient {
     });
   }
 
+  async mockGitHubTransitionMergeQueue(data: {
+    task_id: string;
+    owner: string;
+    repo: string;
+    pr_number: number;
+    head_sha?: string;
+    merge_queue_state?: string;
+    merge_queue_position?: number | null;
+    merge_queue_entry_id?: string;
+    merge_queue_entry_head_sha?: string;
+    merge_queue_estimated_time_to_merge_seconds?: number | null;
+    merge_queue_last_removal_id?: string;
+    merge_queue_last_removed_at?: string;
+    merge_queue_last_removal_reason?: string;
+    merge_queue_last_removal_before_sha?: string;
+    checks?: Array<{
+      name: string;
+      source?: string;
+      status?: string;
+      conclusion?: string;
+      html_url?: string;
+      output?: string;
+    }>;
+  }): Promise<void> {
+    await this.request("PUT", "/api/v1/github/mock/merge-queue", data);
+  }
+
+  async mockGitHubGetMergeAttempts(): Promise<
+    Array<{ owner: string; repo: string; number: number; merge_method: string }>
+  > {
+    const response = await this.request<{
+      attempts?: Array<{ owner: string; repo: string; number: number; merge_method: string }>;
+    }>("GET", "/api/v1/github/mock/merge-attempts");
+    return response.attempts ?? [];
+  }
+
   async mockGitHubAddIssues(issues: MockIssue[]): Promise<void> {
     await this.request("POST", "/api/v1/github/mock/issues", { issues });
     await this.seedMockGitHubRepositoryAccess(issues);
@@ -1674,12 +1710,17 @@ export class ApiClient {
     base_branch: string;
     author_login: string;
     state?: string;
+    head_sha?: string;
     review_state?: string;
     checks_state?: string;
     mergeable_state?: string;
     merge_queue_state?: string;
     merge_queue_position?: number | null;
     merge_queue_estimated_time_to_merge_seconds?: number | null;
+    merge_queue_last_removal_id?: string;
+    merge_queue_last_removed_at?: string;
+    merge_queue_last_removal_reason?: string;
+    merge_queue_last_removal_before_sha?: string;
     additions?: number;
     deletions?: number;
     review_count?: number;

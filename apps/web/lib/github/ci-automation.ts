@@ -1,4 +1,9 @@
-import type { TaskCIPRAutomationState, TaskPR, TaskPRAutomationOptions } from "@/lib/types/github";
+import type {
+  CIAutomationQueueRemovalCause,
+  TaskCIPRAutomationState,
+  TaskPR,
+  TaskPRAutomationOptions,
+} from "@/lib/types/github";
 
 const DEFAULT_AUTO_FIX_MAX_ROUNDS = 10;
 
@@ -12,6 +17,169 @@ export const DISABLED_PR_AUTOMATION_OPTIONS: Omit<
   prompt_on_merged: false,
   prompt_on_closed: false,
 };
+
+export type CIAutomationQueueStatus =
+  | "none"
+  | "queued"
+  | "removed_actionable"
+  | "removed_not_actionable"
+  | "repair_requested"
+  | "waiting_for_commit"
+  | "waiting_for_checks";
+
+export type CIAutomationQueueRecoveryState = {
+  context: "normal" | "queued" | "recovery";
+  status: CIAutomationQueueStatus;
+  removalCause: CIAutomationQueueRemovalCause;
+  repairAccepted: boolean;
+  waitingForCommit: boolean;
+};
+
+const ACTIONABLE_QUEUE_REMOVAL_CAUSES: CIAutomationQueueRemovalCause[] = [
+  "checks_failed",
+  "checks_timed_out",
+  "conflict",
+];
+
+function normalizeQueueRemovalCause(value: string | undefined): CIAutomationQueueRemovalCause {
+  switch (value) {
+    case "checks_failed":
+    case "checks_timed_out":
+    case "conflict":
+    case "manual":
+    case "branch_protection":
+      return value;
+    default:
+      return "unknown";
+  }
+}
+
+function hasActiveQueueEntry(pr: TaskPR): boolean {
+  return pr.state === "open" && Boolean(pr.merge_queue_state?.trim());
+}
+
+function isReadyForMerge(pr: TaskPR): boolean {
+  if (pr.state !== "open" || pr.checks_state !== "success" || pr.mergeable_state !== "clean") {
+    return false;
+  }
+  if (
+    pr.review_state === "changes_requested" ||
+    pr.pending_review_count > 0 ||
+    pr.unresolved_review_threads > 0
+  ) {
+    return false;
+  }
+  return pr.required_reviews == null || pr.review_count >= pr.required_reviews;
+}
+
+function queueStateForRemoval(
+  pr: TaskPR,
+  options: Pick<TaskPRAutomationOptions, "auto_fix_enabled" | "auto_merge_enabled">,
+  state: TaskCIPRAutomationState | undefined,
+  removalID: string,
+): CIAutomationQueueRecoveryState {
+  const removalCause = normalizeQueueRemovalCause(state?.last_queue_removal_cause);
+  const actionable = ACTIONABLE_QUEUE_REMOVAL_CAUSES.includes(removalCause);
+  const headContext = queueHeadContext(pr, state, removalID);
+
+  if (headContext.repairAccepted) {
+    return {
+      context: "recovery",
+      status: "repair_requested",
+      removalCause,
+      repairAccepted: true,
+      waitingForCommit: options.auto_merge_enabled,
+    };
+  }
+  if (options.auto_merge_enabled && headContext.sameHead) {
+    return {
+      context: "recovery",
+      status: "waiting_for_commit",
+      removalCause,
+      repairAccepted: false,
+      waitingForCommit: true,
+    };
+  }
+  if (shouldWaitForNewHead(pr, options, headContext)) {
+    return {
+      context: "recovery",
+      status: "waiting_for_checks",
+      removalCause,
+      repairAccepted: false,
+      waitingForCommit: false,
+    };
+  }
+  return {
+    context: "recovery",
+    status: actionable ? "removed_actionable" : "removed_not_actionable",
+    removalCause,
+    repairAccepted: false,
+    waitingForCommit: false,
+  };
+}
+
+function queueHeadContext(
+  pr: TaskPR,
+  state: TaskCIPRAutomationState | undefined,
+  removalID: string,
+): {
+  currentHead: string;
+  lastAttemptHead: string;
+  sameHead: boolean;
+  repairAccepted: boolean;
+} {
+  const currentHead = pr.head_sha?.trim() ?? "";
+  const lastAttemptHead = state?.last_queue_attempt_head_sha?.trim() ?? "";
+  const sameHead = Boolean(currentHead && lastAttemptHead && currentHead === lastAttemptHead);
+  return {
+    currentHead,
+    lastAttemptHead,
+    sameHead,
+    repairAccepted: state?.last_queue_fix_event_id === removalID && sameHead,
+  };
+}
+
+function shouldWaitForNewHead(
+  pr: TaskPR,
+  options: Pick<TaskPRAutomationOptions, "auto_merge_enabled">,
+  headContext: ReturnType<typeof queueHeadContext>,
+): boolean {
+  return Boolean(
+    options.auto_merge_enabled &&
+    headContext.lastAttemptHead &&
+    headContext.currentHead &&
+    !headContext.sameHead &&
+    !isReadyForMerge(pr),
+  );
+}
+
+export function deriveCIAutomationQueueState(
+  pr: TaskPR,
+  options: Pick<TaskPRAutomationOptions, "auto_fix_enabled" | "auto_merge_enabled">,
+  state: TaskCIPRAutomationState | undefined,
+): CIAutomationQueueRecoveryState {
+  if (hasActiveQueueEntry(pr)) {
+    return {
+      context: "queued",
+      status: "queued",
+      removalCause: "unknown",
+      repairAccepted: false,
+      waitingForCommit: false,
+    };
+  }
+
+  const removalID = pr.merge_queue_last_removal_id?.trim() ?? "";
+  if (!removalID) {
+    return {
+      context: "normal",
+      status: "none",
+      removalCause: "unknown",
+      repairAccepted: false,
+      waitingForCommit: false,
+    };
+  }
+  return queueStateForRemoval(pr, options, state, removalID);
+}
 
 /**
  * Selects the given PR's own automation switches out of the task-scoped
