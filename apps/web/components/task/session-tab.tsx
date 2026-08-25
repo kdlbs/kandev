@@ -185,7 +185,7 @@ function useSessionTabActions(
     // runAutoSessionTabEffect to recreate it.
     const isActive = panel.api.isActive;
     if (isActive) {
-      const siblingSessionPanel = api.group.panels.find(
+      const siblingSessionPanel = containerApi.panels.find(
         (p) => p.id !== api.id && p.id.startsWith("session:"),
       );
       if (siblingSessionPanel) {
@@ -194,7 +194,7 @@ function useSessionTabActions(
     }
 
     containerApi.removePanel(panel);
-  }, [api.id, containerApi, api.group]);
+  }, [api.id, containerApi]);
 
   const {
     setPrimary: handleSetPrimary,
@@ -203,11 +203,11 @@ function useSessionTabActions(
     remove: handleDelete,
   } = useSessionActions({ sessionId, taskId, onDeleted: handleCloseTab });
   const handleCloseOthers = useCallback(() => {
-    const toClose = api.group.panels.filter(
+    const toClose = containerApi.panels.filter(
       (panel) => panel.id !== api.id && panel.id.startsWith("session:"),
     );
     for (const panel of toClose) containerApi.removePanel(panel);
-  }, [api, containerApi]);
+  }, [api.id, containerApi]);
   return {
     handleSetPrimary,
     handleStop,
