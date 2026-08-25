@@ -5,7 +5,7 @@ status: done
 wave: 9
 depends_on: ["09-public-documentation"]
 plan: "plan.md"
-spec: "../../specs/repository-sets/spec.md"
+spec: "../../specs/workspaces/requirements/repository-sets.md"
 ---
 
 # Task 10: Final Verification And Spec Reconciliation
@@ -15,7 +15,7 @@ spec: "../../specs/repository-sets/spec.md"
 - Formatting, backend tests and lint, frontend typecheck, tests, lint, and the i18n gates all pass,
   and every command's result is recorded in the task file.
 - The spec matches the shipped behavior. Any divergence found while building is reflected in
-  `docs/specs/repository-sets/spec.md`, whose status moves from `draft` to `building`, with the same
+  `docs/specs/workspaces/requirements/repository-sets.md`, whose status moves from `draft` to `building`, with the same
   status in `docs/specs/INDEX.md`.
 - `plan.md` records every task as done, and no task file is left `in_progress`.
 - The change is committed with a Conventional Commits message (`feat: ...`), staged with explicit
@@ -32,7 +32,7 @@ cd apps/web && pnpm vitest run components/task-create-dialog-repository-sets.tes
 
 ## Files likely touched
 
-- `docs/specs/repository-sets/spec.md`, `docs/specs/INDEX.md`
+- `docs/specs/workspaces/requirements/repository-sets.md`, `docs/specs/INDEX.md`
 - `docs/plans/repository-sets/plan.md` and the task files
 - `CLAUDE.md` or a scoped `AGENTS.md`, only if a convention documented there changed
 

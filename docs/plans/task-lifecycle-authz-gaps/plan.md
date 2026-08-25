@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/auth/spec.md
+spec: docs/specs/auth/requirements/auth.md
 created: 2026-08-10
 status: building
 ---
@@ -110,7 +110,7 @@ and treating it as a task ID would deny legitimate reads. `task.create` and
 
 ## Docs
 
-- `docs/specs/auth/spec.md` — the behavioral guarantee (lifecycle mutations are
+- `docs/specs/auth/requirements/auth.md` — the behavioral guarantee (lifecycle mutations are
   ownership-checked below the transport; the backstop's `id` rule) plus two
   scenarios.
 - `apps/backend/CLAUDE.md` — the scoping-model section gains the `id`-vs-`task_id`

@@ -63,6 +63,8 @@ Read `docs/specs/README.md`, the owning system index, and the relevant files in
 
 Apply these rules:
 
+- Confirm the owning system from the durable contract. Do not assign ownership
+  to UI only because users observe the decision there.
 - If the decision changes observable behavior, update the owning requirement
   and its `REQ-*` or `AC-*` criteria.
 - If the decision changes technical boundaries or contracts, update the owning

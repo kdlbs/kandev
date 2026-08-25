@@ -1894,6 +1894,76 @@ func (r *Repository) SetSessionMetadataKeyIfAbsentOrDifferentStep(
 	return rows > 0, nil
 }
 
+// SetSessionMetadataKeyIfAbsentOrDifferentStepIfTaskAtStep claims a pending
+// completion signal only while the session's task remains on the turn's
+// launch step. The task row is locked before the session metadata write so a
+// concurrent workflow move cannot turn a stale signal into a valid successor
+// signal.
+func (r *Repository) SetSessionMetadataKeyIfAbsentOrDifferentStepIfTaskAtStep(
+	ctx context.Context,
+	taskID, sessionID, key, stepID string,
+	value interface{},
+) (bool, error) {
+	valueJSON, err := json.Marshal(value)
+	if err != nil {
+		return false, fmt.Errorf("failed to serialize metadata value: %w", err)
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	_, currentStepID, found, err := r.readTaskStepInTx(ctx, tx, taskID)
+	if err != nil {
+		return false, err
+	}
+	if !found || currentStepID != stepID {
+		return false, nil
+	}
+
+	var sessionTaskID string
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(
+		`SELECT task_id FROM task_sessions WHERE id = ?`,
+	), sessionID).Scan(&sessionTaskID); err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, err
+	}
+	if sessionTaskID != taskID {
+		return false, nil
+	}
+
+	now := time.Now().UTC()
+	driver := r.db.DriverName()
+	path := key
+	stepPath := key
+	if !dialect.IsPostgres(driver) {
+		path = "$." + key
+		stepPath = path + ".step_id"
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(setSessionMetadataKeyIfAbsentOrDifferentStepQuery(driver)),
+		path, string(valueJSON), now, sessionID, stepPath, stepID)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	committed = true
+	return rows > 0, nil
+}
+
 // SetSessionMetadataKeyIfAbsentIfState atomically claims a metadata key only
 // while the session remains in expectedState. It is used when a terminal
 // transition owns a one-time side effect that must not be emitted by a stale
@@ -2445,7 +2515,7 @@ func (r *Repository) GetActiveTaskInfoByAgentProfile(ctx context.Context, agentP
 	// let one nightly report block its profile's deletion forever. Those are
 	// excluded, which makes them non-resumable if the profile goes: replying to
 	// an old run afterwards fails. That is the accepted trade — see
-	// docs/specs/office/automations-settings.md.
+	// docs/specs/office/requirements/automations-settings.md.
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT DISTINCT t.id, t.title, t.is_ephemeral
 		FROM task_sessions ts

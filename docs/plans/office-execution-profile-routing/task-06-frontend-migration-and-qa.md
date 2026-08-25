@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["05-cross-provider-continuation"]
 plan: "plan.md"
-spec: "../../specs/office/routing.md"
+spec: "../../specs/office/requirements/routing.md"
 ---
 
 # Task 06: Frontend, migration cleanup, and QA

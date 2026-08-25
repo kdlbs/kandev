@@ -14,7 +14,13 @@ import { AutomationsPage } from "../pages/automations-page";
  * and no toolbar, which would pass most of what follows while broken.
  */
 
-type Seed = { workspaceId: string; workflowId: string; startStepId: string };
+type Seed = {
+  workspaceId: string;
+  workflowId: string;
+  startStepId: string;
+  agentProfileId: string;
+  repositoryId: string;
+};
 
 const STANDING_INSTRUCTION = "Check the overnight drift report and summarise what changed.";
 
@@ -47,6 +53,42 @@ async function openRunView(testPage: Page, automationId: string) {
   await testPage.goto(`/automations/${automationId}`);
   await expect(testPage.getByTestId("runs-rail")).toBeVisible({ timeout: 15_000 });
   await expect(testPage.getByTestId("run-transcript")).toBeVisible({ timeout: 15_000 });
+}
+
+async function seedOpenRun(apiClient: ApiClient, seed: Seed, name: string) {
+  const automation = await apiClient.seedAutomation({
+    workspaceId: seed.workspaceId,
+    name,
+    workflowId: seed.workflowId,
+    workflowStepId: seed.startStepId,
+    prompt: STANDING_INSTRUCTION,
+    agentProfileId: seed.agentProfileId,
+  });
+  const task = await apiClient.createTaskWithAgent(
+    seed.workspaceId,
+    `${name} — running task`,
+    seed.agentProfileId,
+    {
+      description: "/sleep 30",
+      workflow_id: seed.workflowId,
+      workflow_step_id: seed.startStepId,
+      repository_ids: [seed.repositoryId],
+    },
+  );
+  await apiClient.setTaskOrigin(task.id, "automation_run");
+  await expect
+    .poll(
+      async () => {
+        const { sessions } = await apiClient.listTaskSessions(task.id);
+        return sessions.find((session) => session.id === task.session_id)?.state;
+      },
+      { timeout: 30_000 },
+    )
+    .toBe("RUNNING");
+  const run = await apiClient.seedAutomationRun(automation.id, "task_created", task.id);
+  expect(run.session_id).not.toBe("");
+  expect(run.turn_id).not.toBe("");
+  return { automation, task };
 }
 
 test.describe("Automation run detail disclosure", () => {
@@ -83,7 +125,95 @@ test.describe("Automation run detail disclosure", () => {
   });
 });
 
+test.describe("Automation exact-run controls", () => {
+  test("stops the selected running run and leaves it failed", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { automation } = await seedOpenRun(apiClient, seedData, "Exact Stop");
+    await openRunView(testPage, automation.id);
+
+    const stop = testPage.getByRole("button", { name: "Stop current run" });
+    await expect(stop).toBeVisible({ timeout: 15_000 });
+    await stop.click();
+
+    await expect(testPage.getByTestId("run-group-completed")).toBeVisible({ timeout: 15_000 });
+    await expect(testPage.getByTestId("run-group-completed")).toContainText("Failed");
+    await expect(testPage.getByRole("button", { name: "Stop current run" })).toHaveCount(0);
+  });
+});
+
 test.describe("Automation run composer", () => {
+  test("keeps a reply visible in the complete shared transcript", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Shared transcript reply",
+      seedData.agentProfileId,
+      {
+        description: 'e2e:message("initial shared turn")',
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          return sessions.find((session) => session.id === task.session_id)?.state;
+        },
+        { timeout: 60_000 },
+      )
+      .toBe("WAITING_FOR_INPUT");
+
+    await apiClient.setTaskOrigin(task.id, "automation_run");
+    const turns = await apiClient.listSessionTurns(task.session_id!);
+    expect(turns.turns).toHaveLength(1);
+    const initialTurnId = turns.turns[0].id;
+    const automation = await apiClient.seedAutomation({
+      workspaceId: seedData.workspaceId,
+      name: "Shared transcript automation",
+      workflowId: seedData.workflowId,
+      workflowStepId: seedData.startStepId,
+      prompt: STANDING_INSTRUCTION,
+      agentProfileId: seedData.agentProfileId,
+    });
+    const run = await apiClient.seedAutomationRun(automation.id, "succeeded", task.id, {
+      sessionId: task.session_id,
+      turnId: initialTurnId,
+    });
+    expect(run.session_id).not.toBe("");
+    expect(run.turn_id).not.toBe("");
+
+    await openRunView(testPage, automation.id);
+    const transcript = testPage.getByTestId("run-transcript");
+    await expect(transcript).toContainText("initial shared turn", { timeout: 15_000 });
+
+    const reply = "Reply stays visible in the selected run";
+    const editor = transcript.getByTestId("chat-input-editor");
+    await expect(editor).toBeEditable({ timeout: 15_000 });
+    await editor.fill(reply);
+    const submit = transcript.getByTestId("submit-message-button");
+    await expect(submit).toBeEnabled({ timeout: 15_000 });
+    await submit.click();
+
+    await expect
+      .poll(async () => (await apiClient.listSessionTurns(task.session_id!)).turns.length, {
+        timeout: 15_000,
+      })
+      .toBe(2);
+    const updatedTurns = await apiClient.listSessionTurns(task.session_id!);
+    const replyTurnId = updatedTurns.turns.find((turn) => turn.id !== initialTurnId)?.id;
+    expect(replyTurnId).toBeTruthy();
+    await expect(transcript).toContainText(reply, { timeout: 15_000 });
+    await expect(transcript.locator(`[data-turn-id="${replyTurnId}"]`)).toBeVisible();
+  });
+
   test("sits on the run page's own background, not the task workbench's card", async ({
     testPage,
     apiClient,
@@ -193,14 +323,12 @@ test.describe("Automation concurrency note", () => {
     const automations = new AutomationsPage(testPage, seed.workspaceId);
     await automations.gotoNew();
     await automations.nameInput.fill(name);
-    // A time, not a frequency: the frequency select already reads "every day",
-    // and Radix does not fire onValueChange for the value already selected, so
-    // picking it adds no trigger at all. Changing the time does, and 03:17
-    // keeps the real cron scheduler's one-minute-a-day firing window well away
-    // from the test.
+    // Select the schedule explicitly. A new automation starts unscheduled, so
+    // changing the time alone cannot create a trigger. 03:17 keeps the real
+    // cron scheduler's one-minute-a-day firing window well away from the test.
+    await automations.selectFrequency("every day");
     await automations.timeInput.fill("03:17");
     await automations.selectWorkflow("E2E Workflow");
-    await automations.selectWorkflowStep(seed.steps[0].name);
     await expect(automations.saveButton).toBeEnabled({ timeout: 5_000 });
     await automations.saveButton.click();
     await expect(testPage).toHaveURL(/automations$/, { timeout: 15_000 });

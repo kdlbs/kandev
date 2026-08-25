@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["03-workflow-artifact-generation"]
 plan: "plan.md"
-spec: "../../specs/pr-walkthrough/spec.md"
+spec: "../../specs/ui/requirements/pr-walkthrough.md"
 ---
 
 # Task 04: Publish walkthrough HTML to Cloudflare R2
@@ -81,3 +81,14 @@ Verification: workflow contract tests passed; the publication job has no
 checkout step, and R2 secrets are scoped only to the upload step. Operator
 provisioning is complete; a live upload remains pending the first eligible PR
 workflow run.
+
+Follow-up remediation: added `Cache-Control: no-transform` to the R2 upload so
+Cloudflare cannot rewrite the HTML before the public byte comparison. Updated
+the workflow contract regression to require the cache directive.
+
+Follow-up verification: `python3 .github/scripts/pr-walkthrough-workflow-contract_test.py`
+(22 tests passed), `python3 .github/scripts/lint-action-pinning_test.py` (9 tests
+passed), `python3 .github/scripts/lint-action-pinning.py` (20 workflows passed),
+and `git diff --check` passed. `zizmor` 1.25.2 retained the existing
+`dangerous-triggers` finding for the intentional `pull_request_target` workflow;
+the finding is outside this diff. `actionlint` was unavailable locally.

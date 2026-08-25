@@ -134,8 +134,9 @@ phone panel preference and desktop/tablet layout state remain unchanged.
 
 ## Related specifications and decisions
 
-- [Mobile task navigation](../mobile-task-navigation.md)
-- [Task layout profiles](../task-layout-profiles.md)
+- [Mobile task navigation](../requirements/mobile-task-navigation.md)
+- [Task layout profiles requirements](../requirements/task-layout-profiles.md)
+- [Task layout profiles system design](task-layout-profiles.md)
 - [Remote contribution tasks](../../tasks/system-design/remote-contribution-tasks.md)
 - [Remote contribution head drift](../../../decisions/2026-08-10-remote-contribution-head-drift.md)
 - [Local-first contribution replacement](../../../decisions/2026-08-12-local-first-contribution-replacement.md)

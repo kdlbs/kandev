@@ -4,7 +4,7 @@ import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { OfficeApiClient } from "../../helpers/office-api-client";
 
-// Verifies the spec-aligned skill injection (docs/specs/office/agents.md):
+// Verifies the spec-aligned skill injection (docs/specs/office/requirements/agents.md):
 // when a skill is assigned to an agent profile, launching a session writes
 // it to <worktree>/<projectSkillDir>/kandev-<slug>/SKILL.md and appends
 // the kandev-* glob to .git/info/exclude.

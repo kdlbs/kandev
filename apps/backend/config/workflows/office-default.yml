@@ -28,6 +28,7 @@ steps:
     is_start_step: true
     show_in_command_panel: true
     allow_manual_move: true
+    auto_advance_requires_signal: true
     events:
       on_enter:
         - type: auto_start_agent

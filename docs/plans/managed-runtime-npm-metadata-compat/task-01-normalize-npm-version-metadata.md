@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/agents/runtime-updates.md"
+spec: "../../specs/agents/requirements/runtime-updates.md"
 ---
 
 # Task 01: Normalize npm version metadata
@@ -33,7 +33,7 @@ cd apps/backend && go test -run 'TestHostRuntimeUpdaterResolves|TestPreviewAgent
 
 - `apps/backend/internal/agent/settings/controller/agent_update.go`
 - `apps/backend/internal/agent/settings/controller/agent_update_test.go`
-- `docs/specs/agents/runtime-updates.md`
+- `docs/specs/agents/requirements/runtime-updates.md`
 - `docs/plans/managed-runtime-npm-metadata-compat/plan.md`
 - `docs/plans/managed-runtime-npm-metadata-compat/task-01-normalize-npm-version-metadata.md`
 
@@ -48,7 +48,7 @@ Sequential.
 ## Inputs
 
 - The managed runtime preview contract and the npm metadata compatibility
-  scenario in `docs/specs/agents/runtime-updates.md`.
+  scenario in `docs/specs/agents/requirements/runtime-updates.md`.
 - The confirmed Sprite reproduction: npm `12.0.2` returns a top-level array
   for the exact multi-field query.
 

@@ -94,22 +94,15 @@ type ApprovalResolvedData struct {
 
 // AgentLifecycleData is the subset of agent lifecycle event data needed by office.
 //
-// AgentID is populated by the lifecycle manager for taskless runs
-// (heartbeats, lightweight routines) so the office completion handler
-// can attribute the run without a task lookup. It stays empty for the
-// task-bound path that already uses TaskID. Today no caller emits
-// taskless lifecycle events; the field is reserved for PR 2 of
-// office-heartbeat-rework. Note that AgentID carries the underlying agent
-// TYPE (e.g. "claude-acp"), not an office agent identity — it is unrelated
-// to AgentProfileID below despite the similar name.
+// AgentID is the underlying agent type (for example, "claude-acp"). It is
+// not an Office agent identity and must not be used to look up runs or
+// continuation summaries.
 //
 // AgentProfileID is the office agent instance's own identity
 // (lifecycle.AgentEventPayload's "agent_profile_id", sourced from
-// AgentExecution.officeProfileID()) and is always populated on the
-// task-bound path. runs.agent_profile_id is keyed on this same identity, so
-// callers that need to resolve the specific run a lifecycle event belongs
-// to — as opposed to "some claimed run on this task" — must match on this
-// field, not AgentID (Review round 4, BLOCKING FINDING 2).
+// AgentExecution.officeProfileID()). runs.agent_profile_id is keyed on this
+// same identity, so taskless fallback resolution and summary writes use this
+// field, not AgentID.
 type AgentLifecycleData struct {
 	TaskID         string                 `json:"task_id"`
 	RunID          string                 `json:"run_id"`
@@ -142,7 +135,12 @@ func (s *Service) resolveLifecycleRun(ctx context.Context, data AgentLifecycleDa
 	if data.TaskID != "" {
 		return s.repo.GetClaimedRunByTaskAndAgent(ctx, data.TaskID, data.AgentProfileID)
 	}
-	return s.repo.GetClaimedTasklessRunForAgent(ctx, data.AgentID)
+	agentProfileID := data.AgentProfileID
+	if agentProfileID == "" {
+		// Legacy taskless events used AgentID for the Office identity.
+		agentProfileID = data.AgentID
+	}
+	return s.repo.GetClaimedTasklessRunForAgent(ctx, agentProfileID)
 }
 
 type PromptUsageData struct {
@@ -330,10 +328,8 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 	if err != nil {
 		return nil
 	}
-	// Taskless completion (PR 1 of office-heartbeat-rework): heartbeat
-	// or lightweight-routine fires that don't carry a task_id. Today no
-	// caller emits these, so this branch is dead until PR 2 lands the
-	// agent_heartbeat cron handler.
+	// Taskless completion from a routine or other wakeup does not carry a
+	// task_id, so resolve it by run ID or Office agent profile.
 	if data.TaskID == "" {
 		return s.handleTasklessAgentCompleted(ctx, data)
 	}
@@ -386,8 +382,8 @@ func (s *Service) markRoutingSuccess(ctx context.Context, run *models.Run) {
 }
 
 // handleTasklessAgentCompleted attributes a taskless run completion,
-// finishes the run, and refreshes the per-(agent, "heartbeat")
-// continuation summary so the next fire has bridge context. The
+// finishes the run, and refreshes the per-agent, per-scope continuation
+// summary so the next fire has bridge context. The
 // summary is built deterministically from the run's result_json,
 // workspace activity, and the prior summary — see the office/summary
 // package.
@@ -398,7 +394,7 @@ func (s *Service) markRoutingSuccess(ctx context.Context, run *models.Run) {
 func (s *Service) handleTasklessAgentCompleted(
 	ctx context.Context, data *AgentLifecycleData,
 ) error {
-	if data == nil || (data.AgentID == "" && data.RunID == "") {
+	if data == nil || (data.AgentID == "" && data.AgentProfileID == "" && data.RunID == "") {
 		return nil
 	}
 	run, err := s.resolveLifecycleRun(ctx, *data)
@@ -412,7 +408,7 @@ func (s *Service) handleTasklessAgentCompleted(
 		"agent_id":   data.AgentID,
 		"session_id": data.SessionID,
 	})
-	s.refreshContinuationSummary(ctx, run, data.AgentID)
+	s.refreshContinuationSummary(ctx, run, run.AgentProfileID)
 	s.recordRunOutputSummary(ctx, run, *data)
 	// run came from GetClaimedTasklessRunForAgent: it is the run that
 	// actually launched. Taskless runs typically carry no task_id, so this
@@ -430,27 +426,28 @@ func (s *Service) handleTasklessAgentCompleted(
 }
 
 // refreshContinuationSummary rebuilds the continuation summary for the
-// given agent and upserts it under a scope keyed off the wakeup that
-// produced the run. Errors are logged at warn — the prior row stays
-// intact (last-good wins) and the run completion proceeds.
+// given agent and upserts it under run.ContinuationScope — the scope key
+// models.ContinuationScopeForRun computed once, at run-creation time, and
+// persisted onto the row (see runs/repository/sqlite.CreateRun). Errors
+// are logged at warn — the prior row stays intact (last-good wins) and
+// the run completion proceeds.
 //
-// Scope rules (office-heartbeat-as-routine):
-//   - run came from a routine wakeup (payload has routine_id) →
-//     "routine:<routine_id>" so each routine bridges its own context.
-//   - any other source (self / user / direct dispatch) →
-//     "agent:<agent_id>" so the agent still has somewhere to land its
-//     summary even when no routine is in play.
-//
-// The legacy "heartbeat" scope is retired alongside the agent-level
-// heartbeat cron — every scheduled wake now flows through a routine.
+// This deliberately reads the persisted field rather than recomputing it:
+// run here comes from resolveLifecycleRun's fresh DB fetch, which can
+// observe a context_snapshot a routine wakeup coalesced into this run
+// after it was claimed (MarkWakeupRequestCoalesced patches only
+// context_snapshot). Recomputing against that drifted snapshot could
+// disagree with the scope the claim-time scheduler used when it read the
+// prior continuation summary into the prompt — the persisted column is
+// the single source of truth both sides read.
 func (s *Service) refreshContinuationSummary(
-	ctx context.Context, run *models.Run, agentID string,
+	ctx context.Context, run *models.Run, agentProfileID string,
 ) {
-	if s.repo == nil || run == nil || agentID == "" {
+	if s.repo == nil || run == nil || agentProfileID == "" {
 		return
 	}
-	scope := summaryScopeForRun(run, agentID)
-	inputs, err := summaryLoadInputs(ctx, s.repo, run, agentID, scope)
+	scope := run.ContinuationScope
+	inputs, err := summaryLoadInputs(ctx, s.repo, run, agentProfileID, scope)
 	if err != nil {
 		s.logger.Warn("continuation-summary load inputs failed",
 			zap.String("run_id", run.ID), zap.Error(err))
@@ -458,7 +455,7 @@ func (s *Service) refreshContinuationSummary(
 	}
 	body := summaryBuild(inputs)
 	upsertErr := s.repo.UpsertContinuationSummary(ctx, sqlite.AgentContinuationSummary{
-		AgentProfileID: agentID,
+		AgentProfileID: agentProfileID,
 		Scope:          scope,
 		Content:        body,
 		ContentTokens:  approxTokenCount(body),
@@ -475,37 +472,6 @@ func (s *Service) refreshContinuationSummary(
 // — the summary is capped at 8 KB so the absolute number is small.
 func approxTokenCount(s string) int {
 	return (len(s) + 3) / 4
-}
-
-// summaryScopeForRun returns the (agent_profile_id, scope) scope value
-// for the continuation-summary upsert. Reads run.ContextSnapshot for a
-// routine_id (set by the wakeup dispatcher when source="routine") and
-// returns "routine:<id>" when present; falls back to "agent:<id>" so
-// non-routine fires still have a stable upsert key.
-func summaryScopeForRun(run *models.Run, agentID string) string {
-	if run == nil {
-		return "agent:" + agentID
-	}
-	if id := extractRoutineID(run.ContextSnapshot); id != "" {
-		return "routine:" + id
-	}
-	return "agent:" + agentID
-}
-
-// extractRoutineID pulls routine_id out of a JSON snapshot. Returns ""
-// for missing / malformed payloads so the caller falls back to the
-// agent-scoped summary key.
-func extractRoutineID(snapshot string) string {
-	if snapshot == "" {
-		return ""
-	}
-	var p struct {
-		RoutineID string `json:"routine_id"`
-	}
-	if err := json.Unmarshal([]byte(snapshot), &p); err != nil {
-		return ""
-	}
-	return p.RoutineID
 }
 
 // recordRunOutputSummary persists the agent's final message as the run's
@@ -596,7 +562,7 @@ func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error
 	// Office failure path (v1): every agent error is terminal. The
 	// retry-by-classifier path lives behind HandleRunFailure for
 	// rate-limit-retry callers; we deliberately do NOT call into it
-	// here. See docs/specs/office-agent-error-handling.
+	// here. See docs/specs/office/requirements/runtime.md.
 	errMsg := enrichModelFailureMessage(run, data.ErrorMessage)
 	if err := s.HandleAgentFailure(ctx, run, errMsg); err != nil {
 		return err
@@ -684,7 +650,7 @@ func (s *Service) tryPostStartFallback(
 
 // handlePromptUsage records a cost event from a session/prompt usage
 // update. Cost resolution follows the two-layer order from
-// docs/specs/office/costs.md, and CostSource on the row records which
+// docs/specs/office/requirements/costs.md, and CostSource on the row records which
 // layer actually produced the dollar amount (see resolveCostForUsage in
 // prompt_usage_cost.go — distinct from Estimated, a usage-authority flag):
 //

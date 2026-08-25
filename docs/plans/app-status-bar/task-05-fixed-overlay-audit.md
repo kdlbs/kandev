@@ -11,7 +11,7 @@ plan: docs/plans/app-status-bar/plan.md
 
 ## Inputs
 
-[Spec: responsive/layout](../../specs/ui/app-status-bar.md#responsive-and-layout-contract); task 03 CSS variable; current overlay z-index layers.
+[Spec: responsive/layout](../../specs/ui/requirements/app-status-bar.md#responsive-and-layout-contract); task 03 CSS variable; current overlay z-index layers.
 
 ## Files
 

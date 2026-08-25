@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/walkthrough-feedback-controls/spec.md"
+spec: "../../specs/ui/requirements/walkthrough-feedback-controls.md"
 ---
 
 # Task 01: Remove Inert Walkthrough Cancel
@@ -60,7 +60,7 @@ evidence.
 - `apps/web/e2e/tests/review/walkthrough.spec.ts`
 - `apps/web/e2e/tests/review/mobile-walkthrough.spec.ts`
 - `docs/specs/INDEX.md`
-- `docs/specs/walkthrough-feedback-controls/spec.md`
+- `docs/specs/ui/requirements/walkthrough-feedback-controls.md`
 - `docs/plans/walkthrough-feedback-controls/plan.md`
 - `docs/plans/walkthrough-feedback-controls/task-01-remove-inert-cancel.md`
 
@@ -75,7 +75,7 @@ cycle.
 
 ## Inputs
 
-- [Walkthrough Feedback Controls spec](../../specs/walkthrough-feedback-controls/spec.md)
+- [Walkthrough Feedback Controls spec](../../specs/ui/requirements/walkthrough-feedback-controls.md)
 - [Fix plan](plan.md)
 - `apps/web/components/diff/comment-form.tsx` cancellation behavior
 - Existing desktop and mobile walkthrough Playwright flows

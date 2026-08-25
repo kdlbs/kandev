@@ -5,7 +5,7 @@ status: complete
 wave: 5
 depends_on: ["01-default-pins", "02-effective-version-selection", "03-update-status-api", "05-settings-update-indicator"]
 plan: "plan.md"
-spec: "../../specs/agents/runtime-updates.md"
+spec: "../../specs/agents/requirements/runtime-updates.md"
 ---
 
 # Task 07: Update runtime version documentation

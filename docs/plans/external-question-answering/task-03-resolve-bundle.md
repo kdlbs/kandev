@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-resolutions-table", "02-bundle-queries"]
 plan: "plan.md"
-spec: "../../specs/external-question-answering/spec.md"
+spec: "../../specs/integrations/requirements/external-question-answering.md"
 ---
 
 # Task 03: `ResolveBundle` — the single authorized, idempotent resolution

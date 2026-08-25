@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["01-workspace-connection", "03-task-mr-linking-launch"]
 plan: "plan.md"
-spec: "../../specs/gitlab-integration/spec.md"
+spec: "../../specs/integrations/requirements/gitlab-integration.md"
 ---
 
 # Task 07: GitLab Merge Request Creation Runtime

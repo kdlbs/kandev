@@ -79,10 +79,9 @@ export function PromptHistoryPanelContent({ onNavigateToPrompt }: PromptHistoryP
   // Minimum-display grace so consecutive auto-loads show one continuous
   // indicator instead of a per-page flash (scoped to the active session).
   const showLoadingGrace = useLoadingGrace(sessionId, isLoadingMore);
-  // Pagination continues while the server reports older messages and no loaded
-  // entry is the session's first prompt (#1). If payloads omit ordinals, the
-  // hasMore term alone drives exhaustion.
-  const shouldPaginate = hasMore && !entries.some((entry) => entry.promptNumber === 1);
+  // The shared hook owns the visible transcript boundary. If payloads omit
+  // ordinals, it retains the raw hasMore compatibility behavior.
+  const shouldPaginate = hasMore;
   const showLoading = shouldPaginate && (isLoadingMore || showLoadingGrace);
   const { sentinelRef, onUserGesture } = usePanelOlderPromptSentinel({
     scrollRef,

@@ -23,6 +23,7 @@ import { buildSidebarTaskPrefsActions } from "./sidebar-task-prefs-actions";
 import { buildSidebarViewActions } from "./sidebar-view-actions";
 import { DEFAULT_VIEW } from "./sidebar-view-builtins";
 import type { SidebarView, SidebarViewDraft, SortSpec } from "./sidebar-view-types";
+import { cloneSidebarTaskRowPresentation } from "./sidebar-task-row-presentation";
 import type { SystemHealthResponse } from "@/lib/types/health";
 import type { ActiveDocument, UISlice, UISliceState } from "./types";
 import { buildQuickChatActions } from "./quick-chat-actions";
@@ -69,6 +70,7 @@ export function migrateView(view: SidebarView): SidebarView {
     ...view,
     filters: view.filters.filter((c) => KNOWN_DIMENSIONS.has(c.dimension)),
     sort,
+    taskRow: cloneSidebarTaskRowPresentation(view.taskRow),
   };
 }
 
@@ -81,6 +83,7 @@ export function migrateSidebarViewDraft(draft: SidebarViewDraft): SidebarViewDra
     ...draft,
     filters: draft.filters.filter((c) => KNOWN_DIMENSIONS.has(c.dimension)),
     sort,
+    taskRow: cloneSidebarTaskRowPresentation(draft.taskRow),
   };
 }
 

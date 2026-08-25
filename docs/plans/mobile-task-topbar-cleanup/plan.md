@@ -6,7 +6,7 @@ requirements:
 system_design:
   - ../../specs/ui/system-design/mobile-task-chrome.md
 legacy_specs:
-  - ../../specs/ui/mobile-task-navigation.md
+  - ../../specs/ui/requirements/mobile-task-navigation.md
 ---
 
 # Implementation Plan: Mobile Task Topbar Cleanup
