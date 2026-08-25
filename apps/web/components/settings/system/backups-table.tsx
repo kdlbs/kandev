@@ -124,9 +124,15 @@ function BackupRow({
       </TableCell>
       <TableCell className="text-xs text-right">{formatBytes(row.size_bytes)}</TableCell>
       <TableCell className="text-xs">{formatTimestamp(row.mtime)}</TableCell>
-      <TableCell>
-        {isAdmin && <BackupRowActions row={row} onRestore={onRestore} onDelete={onDelete} />}
-      </TableCell>
+      {/* The whole cell goes, not just its contents: the Actions header is
+          conditional too, and an empty fifth cell would leave the table with
+          four headers and five cells: an unlabeled column for assistive
+          technology and dead width on a phone. */}
+      {isAdmin && (
+        <TableCell>
+          <BackupRowActions row={row} onRestore={onRestore} onDelete={onDelete} />
+        </TableCell>
+      )}
     </TableRow>
   );
 }

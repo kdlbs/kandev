@@ -42,6 +42,14 @@ const RESTORE_TEST_ID = "system-backups-restore";
 const DELETE_TEST_ID = "system-backups-delete";
 const NAME_TEST_ID = "system-backups-name";
 
+function headerCellCount(): number {
+  return screen.getAllByRole("columnheader").length;
+}
+
+function bodyCellCount(): number {
+  return screen.getByTestId("system-backups-row").querySelectorAll("td").length;
+}
+
 describe("BackupsTable", () => {
   afterEach(cleanup);
 
@@ -68,6 +76,9 @@ describe("BackupsTable", () => {
     expect(screen.queryByTestId(DELETE_TEST_ID)).toBeNull();
     expect(screen.getByTestId(NAME_TEST_ID).textContent).toBe(SNAPSHOT.name);
     expect(screen.getByTestId("system-backups-admin-only")).toBeTruthy();
+    // Header and body must agree: an empty action cell with no header leaves
+    // an unlabeled column for assistive technology.
+    expect(headerCellCount()).toBe(bodyCellCount());
   });
 
   it("offers every control to an admin", () => {
@@ -80,6 +91,7 @@ describe("BackupsTable", () => {
     expect(screen.getByTestId(RESTORE_TEST_ID)).toBeTruthy();
     expect(screen.getByTestId(DELETE_TEST_ID)).toBeTruthy();
     expect(screen.queryByTestId("system-backups-admin-only")).toBeNull();
+    expect(headerCellCount()).toBe(bodyCellCount());
   });
 
   // Auth disabled: no user in the boot payload, and the backend's synthetic

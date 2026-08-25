@@ -141,13 +141,19 @@ function StorageActions({
 
 function StorageActionFeedback({
   controller,
+  isAdmin,
 }: {
   controller: ReturnType<typeof useStorageMaintenance>;
+  isAdmin: boolean;
 }) {
   const { t } = useTranslation();
   if (controller.busy) {
     return (
-      <StorageBusyFeedback busy={controller.busy} onRunAnyway={() => void controller.runAnyway()} />
+      <StorageBusyFeedback
+        busy={controller.busy}
+        isAdmin={isAdmin}
+        onRunAnyway={() => void controller.runAnyway()}
+      />
     );
   }
   if (!controller.error) return null;
@@ -162,9 +168,11 @@ function StorageActionFeedback({
 
 function StorageBusyFeedback({
   busy,
+  isAdmin,
   onRunAnyway,
 }: {
   busy: StorageBusyState;
+  isAdmin: boolean;
   onRunAnyway: () => void;
 }) {
   const { t } = useTranslation();
@@ -180,7 +188,10 @@ function StorageBusyFeedback({
             <li key={resource.kind}>{resource.label}</li>
           ))}
         </ul>
-        {busy.forceAvailable && (
+        {/* Run anyway forces POST /storage/run, which is admin only. The busy
+            alert is a second, independent path to that call, so it carries the
+            same gate as the action buttons rather than trusting them. */}
+        {busy.forceAvailable && isAdmin && (
           <>
             <p className="mt-3">{t("system:storageBusyForceHint")}</p>
             <StorageActionButton
@@ -403,7 +414,7 @@ export function StorageMaintenanceSettings() {
     <div className="min-w-0 space-y-6" data-testid="storage-settings-page">
       <StorageActions controller={controller} disabledReason={actionDisabledReason} />
 
-      <StorageActionFeedback controller={controller} />
+      <StorageActionFeedback controller={controller} isAdmin={isAdmin} />
 
       <StoragePageSections
         controller={controller}

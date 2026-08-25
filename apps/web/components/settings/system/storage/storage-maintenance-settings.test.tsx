@@ -276,6 +276,9 @@ describe("StorageMaintenanceSettings busy feedback", () => {
   afterEach(cleanup);
 
   beforeEach(() => {
+    // Reset the role explicitly: without it these tests inherit whatever the
+    // previous describe block left behind and pass only in file order.
+    currentRole = undefined;
     mocks.useSystemJob.mockReturnValue(undefined);
   });
 
@@ -301,10 +304,35 @@ describe("StorageMaintenanceSettings busy feedback", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run anyway" }));
     expect(runAnyway).toHaveBeenCalledTimes(1);
   });
+
+  // Run anyway forces POST /storage/run, which is admin only. The busy alert
+  // is a second, independent path to that call: gating the action buttons
+  // above it is not enough.
+  it("does not expose Run anyway to a member even when force is available", () => {
+    currentRole = "member";
+    const runAnyway = vi.fn();
+    mocks.useStorageMaintenance.mockReturnValue({
+      ...controller(overview),
+      busy: {
+        resources: [{ kind: "execution_running", label: "An agent execution is running" }],
+        forceAvailable: true,
+      },
+      runAnyway,
+    });
+
+    render(<StorageMaintenanceSettings />, { wrapper: Providers });
+
+    expect(screen.queryByTestId("storage-run-anyway")).toBeNull();
+    expect(runAnyway).not.toHaveBeenCalled();
+  });
 });
 
 describe("StorageMaintenanceSettings pending policy", () => {
   afterEach(cleanup);
+
+  beforeEach(() => {
+    currentRole = undefined;
+  });
 
   it("rebases an adopted Go cache path into a dirty policy draft before shared save", async () => {
     const currentController = controller(overview);
@@ -406,6 +434,7 @@ describe("StorageMaintenanceSettings coordinated save", () => {
   afterEach(cleanup);
 
   beforeEach(() => {
+    currentRole = undefined;
     mocks.useSystemJob.mockReturnValue(undefined);
   });
 
