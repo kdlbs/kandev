@@ -21,6 +21,41 @@ function isDifferentSessionPanel(panelId: string, activeSessionId: string | null
 }
 
 /**
+ * When the activated panel is not a session panel and the previous active
+ * session panel is no longer visible (closed by the user), find any remaining
+ * visible session panel and activate it. This prevents runAutoSessionTabEffect
+ * from recreating the closed panel. Returns true when handled.
+ */
+function handleNonSessionSuccessor(
+  api: DockviewReadyEvent["api"],
+  appStore: StoreApi<AppState>,
+  panel: { id: string },
+): boolean {
+  const state = appStore.getState();
+  const isActiveSessionPanelGone =
+    state.tasks.activeSessionId && !api.getPanel(`session:${state.tasks.activeSessionId}`);
+  if (!panel.id.startsWith("session:") && isActiveSessionPanelGone) {
+    const remainingSessionPanel = api.panels.find((p) => p.id.startsWith("session:"));
+    if (remainingSessionPanel) {
+      if (isDebug()) {
+        debug("setupSessionTabSync: activating remaining session panel", {
+          remainingPanelId: remainingSessionPanel.id,
+          closedActiveSessionId: state.tasks.activeSessionId,
+        });
+      }
+      if (state.tasks.activeTaskId) {
+        state.setActiveSession(
+          state.tasks.activeTaskId,
+          remainingSessionPanel.id.slice("session:".length),
+        );
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Sync `activeSessionId` in the store when the user explicitly activates a
  * session tab. Dockview can also activate panels internally while restoring
  * layout or reconciling tabs; those activations must not pin a different
@@ -49,6 +84,7 @@ export function setupSessionTabSync(api: DockviewReadyEvent["api"], appStore: St
       environmentIdBySessionId: state.environmentIdBySessionId,
     });
     if (!target) {
+      if (handleNonSessionSuccessor(api, appStore, panel)) return;
       const shouldRestoreActiveSession = isDifferentSessionPanel(
         panel.id,
         state.tasks.activeSessionId,

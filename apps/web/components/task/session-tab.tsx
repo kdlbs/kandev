@@ -175,8 +175,27 @@ function useSessionTabActions(
 ) {
   const handleCloseTab = useCallback(() => {
     const panel = containerApi.getPanel(api.id);
-    if (panel) containerApi.removePanel(panel);
-  }, [api.id, containerApi]);
+    if (!panel) return;
+
+    // When closing the active session panel and the successor would be a
+    // non-session panel (PR, Plan, File tabs), explicitly activate another
+    // session panel in the same group before removal. This prevents Dockview
+    // from activating a non-session panel, which would leave
+    // activeSessionId pointing to the now-closed panel and cause
+    // runAutoSessionTabEffect to recreate it.
+    const isActive = panel.api.isActive;
+    if (isActive) {
+      const siblingSessionPanel = api.group.panels.find(
+        (p) => p.id !== api.id && p.id.startsWith("session:"),
+      );
+      if (siblingSessionPanel) {
+        siblingSessionPanel.api.setActive();
+      }
+    }
+
+    containerApi.removePanel(panel);
+  }, [api.id, containerApi, api.group]);
+
   const {
     setPrimary: handleSetPrimary,
     stop: handleStop,
@@ -347,23 +366,25 @@ function useSessionTabDialogState(sessionId: string | undefined) {
   };
 }
 
-function useSessionMenuDelete(openMenuDelete: () => void) {
+function useSessionMenuDelete(
+  triggerRef: RefObject<HTMLElement | null>,
+  openMenuDelete: () => void,
+) {
   const menuDeleteAnchorRef = useRef<HTMLElement>(null);
   const menuDeleteFocusBoundaryRef = useRef<HTMLElement>(null);
   const handleMenuDelete = useCallback(
-    (event: Event) => {
-      const anchor = event.currentTarget;
-      if (!(anchor instanceof HTMLElement)) return;
+    (_event: Event) => {
       // Use the tab trigger element as the popover anchor instead of the
       // context menu item. The context menu item becomes disconnected from the
       // DOM when the context menu closes on the popover interaction, causing
       // ActionConfirmPopover.handleConfirm isConnected check to reject the
       // confirm click.
-      menuDeleteAnchorRef.current = anchor.closest('[data-testid^="session-tab-"]') ?? anchor;
-      menuDeleteFocusBoundaryRef.current = anchor.closest('[data-slot="context-menu-content"]');
+      menuDeleteAnchorRef.current = triggerRef.current;
+      menuDeleteFocusBoundaryRef.current =
+        triggerRef.current?.closest('[data-slot="context-menu-content"]') ?? null;
       openMenuDelete();
     },
-    [openMenuDelete],
+    [openMenuDelete, triggerRef],
   );
   return { menuDeleteAnchorRef, menuDeleteFocusBoundaryRef, handleMenuDelete };
 }
@@ -503,8 +524,9 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
   const showMultiSessionBadges = sessionCount > 1;
   const showCloseAction = visibleSessionPanelCount > 1;
   const deleteState = useSessionTabDelete(dialogs.setConfirmDelete, actions.handleDelete);
+  const triggerRef = useRef<HTMLElement>(null);
   const { menuDeleteAnchorRef, menuDeleteFocusBoundaryRef, handleMenuDelete } =
-    useSessionMenuDelete(deleteState.handleMenuDelete);
+    useSessionMenuDelete(triggerRef, deleteState.handleMenuDelete);
   const { handlePointerDownCapture, handleKeyDownCapture } = useSessionTabUserActivationIntent(
     sessionId,
     activeSessionId,
@@ -515,6 +537,7 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
     <>
       <ContextMenu>
         <ContextMenuTrigger
+          ref={triggerRef as React.Ref<HTMLDivElement>}
           className="flex h-full items-center cursor-pointer select-none"
           data-testid={sessionId ? `session-tab-${sessionId}` : undefined}
           onPointerDownCapture={handlePointerDownCapture}

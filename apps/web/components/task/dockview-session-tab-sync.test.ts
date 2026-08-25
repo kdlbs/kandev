@@ -193,6 +193,30 @@ describe("setupSessionTabSync", () => {
     expect(harness.otherPanelSetActive).not.toHaveBeenCalled();
   });
 
+  it("activates a remaining session panel when the closed panel's successor is non-session", () => {
+    const harness = makeDefaultSessionTabSyncHarness();
+
+    startSessionTabSync(harness);
+    // Simulate: active panel (s-active) was closed, removed from panels array
+    harness.api.panels.splice(0, 1);
+    // The new active panel is a non-session panel (e.g., files, pr-detail)
+    harness.fireActivePanelChange("files");
+
+    expect(harness.setActiveSession).toHaveBeenCalledWith(TASK_ID, OTHER_SESSION_ID);
+  });
+
+  it("does not activate a stale session when panel is non-session but active session panel still exists", () => {
+    const harness = makeDefaultSessionTabSyncHarness();
+
+    startSessionTabSync(harness);
+    // Active panel still exists, a non-session panel was activated
+    harness.fireActivePanelChange("files");
+
+    expect(harness.setActiveSession).not.toHaveBeenCalled();
+    expect(harness.activePanelSetActive).not.toHaveBeenCalled();
+    expect(harness.otherPanelSetActive).not.toHaveBeenCalled();
+  });
+
   it("restores active panel for stale session panels without an environment mapping", () => {
     const harness = makeDefaultSessionTabSyncHarness({ includeOtherEnv: false });
 
