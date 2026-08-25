@@ -15,15 +15,17 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import type { ForegroundActivity, TaskSessionState, TaskState } from "@/lib/types/http";
+import { CompositorSpin } from "@kandev/ui/compositor-spin";
 import { cn } from "@/lib/utils";
 
 type IconConfig = {
   Icon: ComponentType<{ className?: string }>;
   className: string;
+  animated?: boolean;
 };
 
 const STYLE_MUTED = "text-muted-foreground";
-const STYLE_LOADING = "text-blue-500 animate-spin";
+const STYLE_LOADING = "text-blue-500";
 const STYLE_WARNING = "text-yellow-500";
 const STYLE_PERMISSION = "text-amber-500";
 const STYLE_ERROR = "text-red-500";
@@ -31,8 +33,8 @@ const WAITING_FOR_INPUT = "WAITING_FOR_INPUT";
 
 const TASK_STATE_ICONS: Record<TaskState, IconConfig> = {
   CREATED: { Icon: IconAlertCircle, className: STYLE_MUTED },
-  SCHEDULING: { Icon: IconLoader2, className: STYLE_LOADING },
-  IN_PROGRESS: { Icon: IconLoader2, className: STYLE_LOADING },
+  SCHEDULING: { Icon: IconLoader2, className: STYLE_LOADING, animated: true },
+  IN_PROGRESS: { Icon: IconLoader2, className: STYLE_LOADING, animated: true },
   REVIEW: { Icon: IconCheck, className: STYLE_WARNING },
   BLOCKED: { Icon: IconAlertCircle, className: STYLE_WARNING },
   WAITING_FOR_INPUT: { Icon: IconMessageQuestion, className: STYLE_WARNING },
@@ -44,7 +46,7 @@ const TASK_STATE_ICONS: Record<TaskState, IconConfig> = {
 
 const SESSION_STATE_ICONS: Record<TaskSessionState, IconConfig> = {
   CREATED: { Icon: IconAlertCircle, className: STYLE_MUTED },
-  STARTING: { Icon: IconLoader2, className: STYLE_LOADING },
+  STARTING: { Icon: IconLoader2, className: STYLE_LOADING, animated: true },
   // (a) generating: the foreground agent is actively producing output. This is
   // the established "session is running" indicator and is deliberately left
   // unchanged — the fine-grained busy signal only ADDS a distinct
@@ -74,7 +76,8 @@ const SESSION_STATE_ICONS: Record<TaskSessionState, IconConfig> = {
 // foreground_activity rather than re-deriving its own icon.
 const SESSION_BACKGROUND_ICON: IconConfig = {
   Icon: IconLoader2,
-  className: "text-emerald-500 animate-spin",
+  className: "text-emerald-500",
+  animated: true,
 };
 
 // The task-level generating affordance — the established running spinner
@@ -84,6 +87,7 @@ const SESSION_BACKGROUND_ICON: IconConfig = {
 const TASK_GENERATING_ICON: IconConfig = {
   Icon: IconLoader2,
   className: STYLE_LOADING,
+  animated: true,
 };
 
 // The task-level background-running affordance:
@@ -100,7 +104,8 @@ const TASK_GENERATING_ICON: IconConfig = {
 // from ever being mistaken for the done check.
 const TASK_BACKGROUND_ICON: IconConfig = {
   Icon: IconLoader,
-  className: "text-violet-500 animate-spin",
+  className: "text-violet-500",
+  animated: true,
 };
 
 const PENDING_PERMISSION_ICON: IconConfig = {
@@ -333,6 +338,18 @@ function getTaskStateIconConfig(state?: TaskState, options: TaskStateIconOptions
   return TASK_STATE_ICONS[state] ?? DEFAULT_TASK_ICON;
 }
 
+function renderConfiguredIcon(config: IconConfig, className?: string) {
+  const wrapperClassName = cn("h-4 w-4", config.className, className);
+  if (!config.animated) {
+    return <config.Icon className={wrapperClassName} />;
+  }
+  return (
+    <CompositorSpin className={wrapperClassName}>
+      <config.Icon className="size-full" />
+    </CompositorSpin>
+  );
+}
+
 export function getTaskStateIcon(
   state?: TaskState,
   className?: string,
@@ -348,7 +365,7 @@ export function getTaskStateIcon(
   if (config === TASK_AUTO_START_FAILED_ICON) {
     return <AutoStartFailedTaskIcon className={cn("h-4 w-4", className)} />;
   }
-  return <config.Icon className={cn("h-4 w-4", config.className, className)} />;
+  return renderConfiguredIcon(config, className);
 }
 
 function getSessionStateIconConfig(
@@ -380,5 +397,5 @@ export function getSessionStateIcon(
     hasPendingClarification,
     hasPendingPermission,
   );
-  return <config.Icon className={cn("h-4 w-4", config.className, className)} />;
+  return renderConfiguredIcon(config, className);
 }

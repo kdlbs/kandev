@@ -171,12 +171,13 @@ type SavedLayout struct {
 // The payload is stored and returned as-is; the server does not interpret
 // clause values beyond passing them through.
 type SidebarView struct {
-	ID              string              `json:"id"`
-	Name            string              `json:"name"`
-	Filters         []SidebarViewClause `json:"filters"`
-	Sort            SidebarViewSort     `json:"sort"`
-	Group           string              `json:"group"`
-	CollapsedGroups []string            `json:"collapsed_groups"`
+	ID              string                      `json:"id"`
+	Name            string                      `json:"name"`
+	Filters         []SidebarViewClause         `json:"filters"`
+	Sort            SidebarViewSort             `json:"sort"`
+	Group           string                      `json:"group"`
+	CollapsedGroups []string                    `json:"collapsed_groups"`
+	TaskRow         *SidebarTaskRowPresentation `json:"task_row,omitempty"`
 }
 
 type SidebarViewClause struct {
@@ -192,10 +193,31 @@ type SidebarViewSort struct {
 }
 
 type SidebarViewDraft struct {
-	BaseViewID string              `json:"base_view_id"`
-	Filters    []SidebarViewClause `json:"filters"`
-	Sort       SidebarViewSort     `json:"sort"`
-	Group      string              `json:"group"`
+	BaseViewID string                      `json:"base_view_id"`
+	Filters    []SidebarViewClause         `json:"filters"`
+	Sort       SidebarViewSort             `json:"sort"`
+	Group      string                      `json:"group"`
+	TaskRow    *SidebarTaskRowPresentation `json:"task_row,omitempty"`
+}
+
+// SidebarTaskRowPresentation controls the optional metadata and trailing
+// presentation for a task row in a saved sidebar view.
+type SidebarTaskRowPresentation struct {
+	DetailsEnabled bool     `json:"details_enabled"`
+	DetailOrder    []string `json:"detail_order"`
+	VisibleDetails []string `json:"visible_details"`
+	Trailing       string   `json:"trailing"`
+}
+
+// DefaultSidebarTaskRowPresentation returns the presentation used by the
+// original sidebar layout.
+func DefaultSidebarTaskRowPresentation() *SidebarTaskRowPresentation {
+	return &SidebarTaskRowPresentation{
+		DetailsEnabled: true,
+		DetailOrder:    []string{"relative_time", "repository", "pull_request_number"},
+		VisibleDetails: []string{"relative_time", "repository", "pull_request_number"},
+		Trailing:       "git_changes",
+	}
 }
 
 type SidebarTaskPrefs struct {

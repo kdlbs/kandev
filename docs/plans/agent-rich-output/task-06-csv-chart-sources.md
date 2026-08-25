@@ -5,7 +5,7 @@ status: done
 wave: 6
 depends_on: ["05-e2e-public-docs"]
 plan: "plan.md"
-spec: "../../specs/agent-rich-output/spec.md"
+spec: "../../specs/agents/requirements/agent-rich-output.md"
 ---
 
 # Task 06: CSV-backed chart sources

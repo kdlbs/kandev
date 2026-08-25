@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/kanban-auto-hide-empty-columns/spec.md"
+spec: "../../specs/ui/requirements/kanban-auto-hide-empty-columns.md"
 ---
 
 # Task 01: Persist the per-workflow auto-hide preference

@@ -5,22 +5,23 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/clarification-submit-feedback.md"
+spec: "../../specs/ui/requirements/clarification-submit-feedback.md"
 ---
 
 # Task 01: Expand mobile clarification Submit target
 
 ## Intent
 
-Give the shared multi-question clarification Submit button a stable 44px touch
-height on coarse-pointer viewports while preserving compact desktop geometry
-and all existing submission behavior.
+Give the shared multi-question clarification header stable touch targets and a
+separate phone action row while preserving compact desktop geometry and all
+existing submission behavior.
 
 ## Root cause
 
 `ClarificationHeaderActions` applies `text-xs px-3 py-1` to the Submit button,
 which renders about 24px tall beside the header's 44px collapse control. The
-mobile loading-spinner E2E checks state and overflow but not button geometry.
+single inline phone row also crowds progress, Submit feedback, Skip, and
+Collapse. Existing mobile E2E checks state and overflow but not action geometry.
 
 ## Acceptance
 
@@ -29,12 +30,14 @@ mobile loading-spinner E2E checks state and overflow but not button geometry.
   than 1px.
 - The pending button remains disabled, shows translated `Submitting...` text
   plus the decorative spinner, and causes no document horizontal overflow.
+- Phone progress occupies a row above batch actions; Submit uses available
+  width; Skip and Collapse remain at least 44px in each dimension.
 - Fine-pointer desktop sizing, answer submission, task-chat/Quick-Chat sharing,
-  labels, colors, and neighboring controls remain unchanged.
+  labels, and colors remain unchanged.
 
 ## Regression test (write first; must fail before production change)
 
-Extend `shows a loading spinner while batch answers submit on mobile` in
+Extend `separates batch actions from the stepper while showing submission feedback` in
 `apps/web/e2e/tests/chat/mobile-clarification.spec.ts`:
 
 1. Capture the enabled Submit button's `boundingBox()` before tapping it.
@@ -49,9 +52,9 @@ change and rerun green.
 ## Files likely touched
 
 - `apps/web/components/task/chat/clarification-overlay-header.tsx`
+- `apps/web/components/task/chat/clarification-input-overlay.tsx`
 - `apps/web/e2e/tests/chat/mobile-clarification.spec.ts`
-- `docs/specs/ui/clarification-submit-feedback.md`
-- `docs/specs/INDEX.md`
+- `docs/specs/ui/requirements/clarification-submit-feedback.md`
 - `docs/plans/clarification-mobile-submit-target/plan.md`
 - `docs/plans/clarification-mobile-submit-target/task-01-expand-mobile-submit-target.md`
 
@@ -84,7 +87,7 @@ Then run from repository root:
 
 ```bash
 # Red before component change; green after.
-(cd apps/web && pnpm e2e:run --project mobile-chrome tests/chat/mobile-clarification.spec.ts -- --grep "loading spinner while batch answers submit on mobile")
+(cd apps/web && pnpm e2e:run --project mobile-chrome tests/chat/mobile-clarification.spec.ts -- --grep "separates batch actions from the stepper")
 
 # Existing fine-pointer pending-state behavior.
 (cd apps/web && pnpm e2e:run --project chromium tests/chat/clarification.spec.ts -- --grep "question shortcuts stay disabled while answers are submitting")
@@ -102,20 +105,22 @@ record capture path plus cleanup in `## Results`.
 
 ## Output contract
 
-Report the exact responsive class change, red and green geometry values,
+Report responsive layout and target changes, red and green geometry values,
 focused command results, screenshot inspection and cleanup, remaining risks,
-and synchronized task/plan/spec status. Do not change skip/collapse controls,
-translations, response lifecycle, or clarification composition.
+and synchronized task/plan/spec status. Do not change translations, response
+lifecycle, or Skip and Collapse semantics.
 
 ## Results
 
-- Production change: added `[@media(pointer:coarse)]:min-h-11` to the shared
-  clarification Submit button. Pixel 5 idle and pending heights are both 44px;
-  fine-pointer desktop keeps the original compact sizing.
+- Production change: added `[@media(pointer:coarse)]:min-h-11` to Submit, split
+  phone progress and actions into two rows, let Submit fill available width,
+  and gave Skip and Collapse 44px coarse-pointer targets. Fine-pointer desktop
+  keeps the compact inline layout.
 - Regression change: the existing mobile held-response test now captures idle
   and pending bounding boxes, requires pending height to be at least 44px, and
-  limits state-to-state height movement to 1px while retaining spinner,
-  disabled-state, completion, and no-overflow assertions.
+  limits state-to-state height movement to 1px. It also proves action-row
+  separation, secondary target sizing, containment, spinner, disabled state,
+  completion, and no overflow.
 - `cd apps && pnpm install --frozen-lockfile` passed in 3.3s; 1,115 workspace
   packages linked from the existing store.
 - Initial RED command, `cd apps/web && pnpm e2e:run --project mobile-chrome

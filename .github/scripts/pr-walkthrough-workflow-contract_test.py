@@ -51,7 +51,7 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
         self.assertIn("vars.PR_WALKTHROUGH_ENABLED == 'true'", self.publication)
         self.assertNotIn("OPENCODE_REVIEW_ENABLED", self.workflow)
 
-    def test_generation_is_limited_to_authorized_same_repository_events(self) -> None:
+    def test_generation_is_limited_to_authorized_repository_events(self) -> None:
         self.assertIn("pull_request_target:", self.workflow)
         self.assertIn(
             "types: [opened, ready_for_review, reopened, synchronize, labeled]",
@@ -61,13 +61,20 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
             "github.event_name == 'pull_request_target'",
             "github.event.pull_request.draft == false",
             "github.event.pull_request.head.repo.full_name == github.repository",
+            "github.event.pull_request.head.repo.full_name != github.repository",
             "github.event.action == 'opened'",
             "github.event.action == 'reopened'",
             "github.event.action == 'ready_for_review'",
             "github.event.action == 'synchronize'",
             "github.event.action == 'labeled' && github.event.label.name == 'generate-pr-walkthrough'",
+            "github.event.label.name == 'safe-to-review'",
+            "github.event.action != 'labeled'",
+            "contains(github.event.pull_request.labels.*.name, 'safe-to-review')",
+            "vars.CLAUDE_REVIEW_ALLOWLIST != ''",
+            "contains(fromJSON(vars.CLAUDE_REVIEW_ALLOWLIST), github.event.pull_request.user.login)",
         ):
             self.assertIn(condition, self.generation)
+        self.assertNotIn("safe-to-test", self.generation)
 
     def test_skill_explains_trusted_context_without_provider_names(self) -> None:
         self.assertNotIn("Kandev", self.skill)
@@ -94,7 +101,11 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
         self.assertIn('test "$(git rev-parse HEAD)" = "$TRUSTED_SHA"', self.generation)
         self.assertIn(
             'git fetch --no-tags --filter=blob:none '
-            '--negotiation-tip="$TRUSTED_SHA" origin "$HEAD_SHA"',
+            '--negotiation-tip="$TRUSTED_SHA" origin "refs/pull/${PR_NUMBER}/head"',
+            self.generation,
+        )
+        self.assertIn(
+            'PR_NUMBER: ${{ github.event.pull_request.number }}',
             self.generation,
         )
         self.assertNotIn("--depth=1", self.generation)
@@ -109,7 +120,7 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
             self.assertNotIn("github.event.pull_request.base.sha", job)
 
         for value in (
-            'git fetch --no-tags --filter=blob:none --negotiation-tip="$TRUSTED_SHA" origin "$HEAD_SHA"',
+            'git fetch --no-tags --filter=blob:none --negotiation-tip="$TRUSTED_SHA" origin "refs/pull/${PR_NUMBER}/head"',
             'git merge-base "$TRUSTED_SHA" "$HEAD_SHA"',
             'git archive "$TRUSTED_SHA" .agents/skills/pr-walkthrough | tar -x',
             '--base-sha "$TRUSTED_SHA"',
@@ -297,7 +308,7 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
             'OBJECT_KEY="pr/${PR_NUMBER}/${SHORT_HEAD_SHA}.html"',
             "aws s3 cp",
             '--content-type "text/html; charset=utf-8"',
-            '--cache-control "public, max-age=300"',
+            '--cache-control "public, max-age=300, no-transform"',
             "aws s3api head-object",
             'test "$content_type" = "text/html; charset=utf-8"',
             'test "$content_length" -gt 0',

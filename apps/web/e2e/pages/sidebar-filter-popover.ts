@@ -183,6 +183,35 @@ export class SidebarFilterPopoverPage {
     await this.page.getByRole("option", { name: groupLabel, exact: true }).click();
   }
 
+  get taskRowSettings(): Locator {
+    return this.popover.getByTestId("task-row-settings");
+  }
+
+  async openTaskRowSettings(): Promise<void> {
+    const toggle = this.taskRowSettings.getByTestId("task-row-settings-toggle");
+    if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+    await expect(this.taskRowSettings.getByTestId("task-row-details-toggle")).toBeVisible();
+  }
+
+  async setTaskRowTrailing(label: string): Promise<void> {
+    await this.taskRowSettings.getByTestId("task-row-trailing-select").click();
+    await this.page.getByRole("option", { name: label, exact: true }).click();
+  }
+
+  async toggleTaskRowDetail(detail: string): Promise<void> {
+    await this.taskRowSettings.getByTestId(`task-row-detail-toggle-${detail}`).click();
+  }
+
+  async taskRowDetailOrder(): Promise<string[]> {
+    return this.taskRowSettings
+      .locator("div[data-testid^='task-row-detail-']")
+      .evaluateAll((rows) =>
+        rows
+          .map((row) => row.getAttribute("data-testid")?.replace("task-row-detail-", ""))
+          .filter((value): value is string => !!value),
+      );
+  }
+
   async saveAs(name: string): Promise<void> {
     await this.popover.getByTestId("view-save-as-button").click();
     await this.popover.getByTestId("view-save-as-name-input").fill(name);

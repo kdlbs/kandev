@@ -115,7 +115,7 @@ function expectPreparingSpinner(): void {
   expect(icon.classList.contains(SLOW_SPIN_CLASS)).toBe(true);
 }
 
-describe("TaskItem status icon", () => {
+describe("TaskItem status icon states", () => {
   it("shows the autopilot icon with an accessible description", () => {
     renderTaskItem({ autopilot: true });
 
@@ -188,7 +188,9 @@ describe("TaskItem status icon", () => {
 
     expectPreparingSpinner();
   });
+});
 
+describe("TaskItem status icon fallbacks", () => {
   it("does not show a spinner for a created task waiting for manual start", () => {
     renderTaskItem({ state: "CREATED" });
 
@@ -606,6 +608,29 @@ describe("TaskItem activity timestamp", () => {
       </StateProvider>,
     );
     expect(screen.getByTestId("sidebar-task-time").textContent).toBe(formatRelativeTime(updatedAt));
+  });
+});
+
+describe("TaskItem task-row presentation", () => {
+  it("moves relative time to the trailing slot and hides the details row", () => {
+    renderTaskItem({
+      taskId: "t1",
+      updatedAt: "2026-07-24T00:00:00Z",
+      repositoryPath: "acme/api",
+      showRepository: true,
+      diffStats: { additions: 2, deletions: 1 },
+      taskRowPresentation: {
+        detailsEnabled: false,
+        detailOrder: ["relative_time", "repository", "pull_request_number"],
+        visibleDetails: [],
+        trailing: "relative_time",
+      },
+    });
+
+    expect(screen.queryByTestId("sidebar-task-time")).toBeNull();
+    expect(screen.queryByTestId("sidebar-task-repository")).toBeNull();
+    expect(screen.queryByTestId("sidebar-task-diff-stats")).toBeNull();
+    expect(screen.getByTestId("sidebar-task-trailing-time")).toBeTruthy();
   });
 });
 

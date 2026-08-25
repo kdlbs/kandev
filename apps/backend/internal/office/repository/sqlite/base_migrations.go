@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/office/models"
 )
 
 // runMigrations applies idempotent schema migrations for office tables
@@ -36,11 +38,53 @@ func (r *Repository) runMigrations() {
 	// Provider routing tables and replayable column migrations. Fresh
 	// schemas include the columns inline; ALTERs converge existing databases.
 	r.migrateProviderRouting()
+	r.migrateContinuationScope()
+}
+
+// migrateContinuationScope adds runs.continuation_scope for databases
+// created before WO-16's claim-time scope persistence. Existing rows receive
+// a scope from their stored context snapshot so queued or claimed taskless
+// runs keep their continuation chain after an upgrade.
+func (r *Repository) migrateContinuationScope() {
+	r.migrate.Apply("runs.continuation_scope",
+		`ALTER TABLE runs ADD COLUMN continuation_scope TEXT NOT NULL DEFAULT ''`)
+	r.backfillContinuationScopes()
+}
+
+func (r *Repository) backfillContinuationScopes() {
+	var legacyRuns []struct {
+		ID              string `db:"id"`
+		AgentProfileID  string `db:"agent_profile_id"`
+		ContextSnapshot string `db:"context_snapshot"`
+	}
+	if err := r.db.Select(&legacyRuns,
+		`SELECT id, agent_profile_id, context_snapshot
+		 FROM runs WHERE continuation_scope = ''`); err != nil {
+		if r.log != nil {
+			r.log.Warn("continuation scope backfill query failed", zap.Error(err))
+		}
+		return
+	}
+	for _, legacyRun := range legacyRuns {
+		scope := models.ContinuationScopeForRun(
+			&models.Run{ContextSnapshot: legacyRun.ContextSnapshot},
+			legacyRun.AgentProfileID,
+		)
+		if _, err := r.db.Exec(r.db.Rebind(`
+			UPDATE runs SET continuation_scope = ?
+			WHERE id = ? AND continuation_scope = ''
+		`), scope, legacyRun.ID); err != nil {
+			if r.log != nil {
+				r.log.Warn("continuation scope backfill update failed",
+					zap.String("run_id", legacyRun.ID), zap.Error(err))
+			}
+		}
+	}
 }
 
 // migrateCostEventContract adds the cache read/write split, turn
 // attribution, and cost-provenance columns to office_cost_events for
-// databases created before this contract (docs/specs/office/costs.md). Every
+// databases created before this contract (docs/specs/office/requirements/costs.md). Every
 // ALTER is nullable with no DEFAULT: a legacy row must read NULL, never 0,
 // because a merged tokens_cached_in cannot be decomposed and an unversioned
 // "0" would be indistinguishable from "no cache activity". Keep this column

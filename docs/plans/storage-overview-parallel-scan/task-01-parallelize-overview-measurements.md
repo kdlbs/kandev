@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/system-page/storage-overview-parallel-scan.md"
+spec: "../../specs/system-page/requirements/storage-overview-parallel-scan.md"
 ---
 
 # Task 01: Parallelize overview measurements

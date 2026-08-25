@@ -11,7 +11,7 @@ const storeMock = vi.hoisted(() => ({
     isLoadingMore: false,
   },
   prepended: [] as Array<{ id: string }>,
-  bySession: [] as Array<{ id: string; author_type?: string }>,
+  bySession: [] as Array<{ id: string; author_type?: string; prompt_index?: number }>,
   setMessagesMetadata: vi.fn(),
 }));
 
@@ -59,11 +59,15 @@ function wireResponse(ids: string[], hasMore: boolean) {
   };
 }
 
-function wireTypedResponse(entries: Array<{ id: string; author_type?: string }>, hasMore: boolean) {
+function wireTypedResponse(
+  entries: Array<{ id: string; author_type?: string; prompt_index?: number }>,
+  hasMore: boolean,
+) {
   return {
     messages: entries.map((entry) => ({
       id: entry.id,
       author_type: entry.author_type ?? "agent",
+      prompt_index: entry.prompt_index,
       created_at: "2026-01-01T00:00:00.000000Z",
     })),
     has_more: hasMore,
@@ -71,6 +75,30 @@ function wireTypedResponse(entries: Array<{ id: string; author_type?: string }>,
 }
 
 describe("useLazyLoadMessages loadMore", () => {
+  it("hides older pages once the first user prompt is loaded", async () => {
+    storeMock.bySession = [{ id: "first", author_type: "user", prompt_index: 1 }];
+    const { result } = renderHook(() => useLazyLoadMessages("s1"));
+
+    expect(result.current.hasMore).toBe(false);
+    await act(async () => {
+      await result.current.loadMore();
+    });
+    expect(listTaskSessionMessages).not.toHaveBeenCalled();
+  });
+
+  it("keeps raw backfill available after the visible prompt boundary", async () => {
+    storeMock.bySession = [{ id: "first", author_type: "user", prompt_index: 1 }];
+    listTaskSessionMessages.mockResolvedValueOnce(wireResponse(["hidden"], false));
+    const { result } = renderHook(() => useLazyLoadMessages("s1"));
+
+    expect(result.current.hasMore).toBe(false);
+    expect(result.current.rawHasMore).toBe(true);
+    await act(async () => {
+      await result.current.loadMoreRaw();
+    });
+    expect(listTaskSessionMessages).toHaveBeenCalledTimes(1);
+  });
+
   it("joins an in-flight request for the same cursor instead of skipping", async () => {
     let resolvePage: (value: unknown) => void = () => {};
     listTaskSessionMessages.mockReturnValueOnce(
@@ -126,6 +154,13 @@ describe("useLazyLoadMessages loadMore", () => {
       await result.current.loadMore();
     });
     expect(listTaskSessionMessages).not.toHaveBeenCalled();
+  });
+
+  it("keeps raw pagination when loaded messages have no prompt ordinal", () => {
+    storeMock.bySession = [{ id: "legacy-user", author_type: "user" }];
+    const { result } = renderHook(() => useLazyLoadMessages("s1"));
+
+    expect(result.current.hasMore).toBe(true);
   });
 });
 
@@ -211,6 +246,31 @@ describe("useLazyLoadMessages minUserPromptsPerLoad", () => {
     });
 
     expect(listTaskSessionMessages).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops accumulating when a page loads prompt #1", async () => {
+    listTaskSessionMessages
+      .mockResolvedValueOnce(
+        wireTypedResponse(
+          [
+            { id: "m3", author_type: "agent" },
+            { id: "m2", author_type: "user", prompt_index: 2 },
+          ],
+          true,
+        ),
+      )
+      .mockResolvedValueOnce(
+        wireTypedResponse([{ id: "m1", author_type: "user", prompt_index: 1 }], true),
+      )
+      .mockResolvedValueOnce(wireTypedResponse([{ id: "hidden" }], false));
+    const { result } = renderHook(() => useLazyLoadMessages("s1", { minUserPromptsPerLoad: 3 }));
+
+    await act(async () => {
+      await result.current.loadMore();
+    });
+
+    expect(listTaskSessionMessages).toHaveBeenCalledTimes(2);
+    expect(storeMock.bySession.some((message) => message.prompt_index === 1)).toBe(true);
   });
 
   it("fetches a single page when no threshold is set (transcript behavior)", async () => {

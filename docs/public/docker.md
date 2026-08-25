@@ -231,7 +231,7 @@ Put `KANDEV_DB_PASSWORD` in a permission-restricted deployment secret, not shell
 
 ## Reverse proxy and network policy
 
-The backend serves SPA, API, `/ws`, `/mcp`, and `/health` on one origin. Proxy the entire root path and preserve WebSocket upgrades. Caddy does this automatically:
+The backend serves SPA, API, `/ws`, `/mcp`, `/health`, and `/ready` on one origin. Proxy the entire root path and preserve WebSocket upgrades. Caddy does this automatically:
 
 ```text
 kandev.example.com {
@@ -263,17 +263,17 @@ Remote Docker profiles are not a workaround: that executor runtime is currently 
 
 ## Health and observability
 
-`GET /health` returns 503 during startup and 200 after routes are registered and the listener is accepting connections:
+`GET /health` returns 200 as soon as the listener is accepting connections, even mid-startup; `GET /ready` returns 503 during startup and 200 after routes are registered:
 
 ```bash
-curl --fail http://localhost:38429/health
+curl --fail http://localhost:38429/ready
 ```
 
-It is a startup/readiness signal, not a deep database, Git, Docker, provider, or agent check. A Compose health check can still use it:
+Neither is a deep database, Git, Docker, provider, or agent check. A Compose health check should use `/ready`, since Compose's single healthcheck concept (`docker ps` status, `depends_on: condition: service_healthy`) maps to "can serve real traffic," not just "process is alive":
 
 ```yaml
 healthcheck:
-  test: ["CMD", "curl", "-f", "http://localhost:38429/health"]
+  test: ["CMD", "curl", "-f", "http://localhost:38429/ready"]
   interval: 30s
   timeout: 5s
   retries: 3
@@ -306,7 +306,7 @@ Delete `kandev-data` only after verifying that its database, workspaces, and cre
 
 ## Troubleshooting
 
-- **UI unreachable:** check `docker ps`, published address/port, host firewall, and `docker logs kandev`; then call `/health`.
+- **UI unreachable:** check `docker ps`, published address/port, host firewall, and `docker logs kandev`; then call `/ready`.
 - **Permission denied under `/data`:** inspect mount ownership and root-squash behavior. The runtime user is UID 1000 after entrypoint setup.
 - **CLI login works only as root:** repeat it with `docker exec --user kandev`; repair ownership of the affected files before restarting.
 - **Image pull fails:** authenticate to GHCR if your network policy requires it and verify the tag/platform with `docker buildx imagetools inspect`.

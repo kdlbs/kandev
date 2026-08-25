@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-resolve-bundle"]
 plan: "plan.md"
-spec: "../../specs/external-question-answering/spec.md"
+spec: "../../specs/integrations/requirements/external-question-answering.md"
 ---
 
 # Task 04: Clarification REST endpoints on `ResolveBundle`, with authorization

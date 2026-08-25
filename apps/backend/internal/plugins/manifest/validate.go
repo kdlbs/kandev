@@ -120,7 +120,7 @@ func buildShiftAlteredKeySet() map[string]bool {
 }
 
 // Validate checks the manifest against the plugin registration rules
-// described in docs/specs/plugins/spec.md. It returns nil if the manifest
+// described in docs/specs/plugins/requirements/plugins.md. It returns nil if the manifest
 // is well-formed, or a joined error describing every violation found.
 func (m *Manifest) Validate() error {
 	var errs []error

@@ -5,7 +5,7 @@ description: "Install, start, and operate Kandev from the command line."
 
 # Kandev CLI
 
-The `kandev` command starts a local Kandev backend, which serves the web UI, HTTP API, WebSocket API, and MCP endpoint. Use it when you want a browser-based installation or a headless/service process. For a packaged system WebView and desktop updates, use the [desktop app](./desktop-app.md) instead.
+The `kandev` command starts a local Kandev backend, which serves the web UI, HTTP API, WebSocket API, and MCP endpoint. Use it when you want a browser-based installation or a headless/service process. For a packaged system WebView and desktop updates, use the [desktop app](desktop-app.md) instead.
 
 ## Quick path
 
@@ -127,8 +127,10 @@ On a normal start, the launcher:
 2. creates the Kandev data directory with owner-only permissions where the platform supports Unix modes;
 3. selects backend and `agentctl` ports;
 4. starts and supervises the backend;
-5. waits up to 45 seconds for `/health`; and
-6. opens the printed local URL in the default browser.
+5. derives one or more `/health` targets from the effective server binds;
+6. waits up to 45 seconds for any target to return the launcher's health token (the backend is alive and its socket is bound);
+7. waits for `/ready` (the backend has finished startup recovery and can serve real requests); this wait is unbounded by design, since recovery can legitimately take much longer than 45 seconds; and
+8. opens the reachable access URL in the default browser.
 
 The launcher remains in the foreground. Press `Ctrl+C` or terminate it to stop the backend and its managed children cleanly. A force-kill can leave worktree processes or containers running; inspect them before deleting data.
 
@@ -212,7 +214,7 @@ kandev service status
 kandev service logs --follow
 ```
 
-Supported actions are `install`, `uninstall`, `start`, `stop`, `restart`, `status`, `logs`, and `config`. Installation accepts `--system`, `--run-as <user>` (only with `--system`), `--port`, `--home-dir`, and `--no-boot-start`. Reinstalling an existing Kandev-managed system service preserves its account unless `--run-as` is supplied explicitly. A first system install from a root login requires `--run-as`, including `--run-as root` when root is intentional. In the current native installer, `--port` is written as `KANDEV_SERVER_PORT`, but the supervising launcher overwrites that value with its own automatic port selection; the option therefore does not reliably pin a service listener today. The service normally prefers `38429` and falls back when it is busy. Windows service installation is not implemented. Managed user services write owner-only install metadata so **Settings > System > Updates** can offer the guarded Apply action; system services and failed guarded updates use the package manager followed by `kandev service install` and `kandev service restart`. See [Run as a service](./run-as-a-service.md) for privileges, paths, upgrades, and recovery.
+Supported actions are `install`, `uninstall`, `start`, `stop`, `restart`, `status`, `logs`, and `config`. Installation accepts `--system`, `--run-as <user>` (only with `--system`), `--port`, `--home-dir`, and `--no-boot-start`. Reinstalling an existing Kandev-managed system service preserves its account unless `--run-as` is supplied explicitly. A first system install from a root login requires `--run-as`, including `--run-as root` when root is intentional. In the current native installer, `--port` is written as `KANDEV_SERVER_PORT`, but the supervising launcher overwrites that value with its own automatic port selection; the option therefore does not reliably pin a service listener today. The service normally prefers `38429` and falls back when it is busy. Windows service installation is not implemented. Managed user services write owner-only install metadata so **Settings > System > Updates** can offer the guarded Apply action; system services and failed guarded updates use the package manager followed by `kandev service install` and `kandev service restart`. See [Run as a service](run-as-a-service.md) for privileges, paths, upgrades, and recovery.
 
 </details>
 
@@ -225,22 +227,24 @@ Supported actions are `install`, `uninstall`, `start`, `stop`, `restart`, `statu
 
 There is no separate web-server port in an installed release: the backend serves embedded assets. For the `run`, `start`, and development launcher flows, if `--port`, `KANDEV_BACKEND_PORT`, or `KANDEV_PORT` specifies a port, the launcher checks it before declaring the backend ready, does not substitute another one, and fails startup if the configured listen address cannot bind it. `kandev service install --port` remains the separate installer behavior described above.
 
-The launcher prints `http://localhost:<port>`. When it can enumerate non-loopback interfaces, it also prints `network:` URLs for each unique non-loopback, non-link-local address on the same port, including local-network and Tailscale addresses. IPv6 addresses are shown in brackets. If `KANDEV_SERVER_HOST` restricts the listener, the launcher only prints matching addresses. These lines are informational and are omitted if interface discovery is unavailable.
+The launcher derives readiness targets and the access URL from the effective `server.host` or `server.hosts` values. A specific IP or hostname is probed directly. An IPv4 wildcard is probed through `127.0.0.1`, while the default local browser/access URL remains `http://localhost:<port>` to preserve the established browser origin. An IPv6 wildcard is probed and accessed through `[::1]`. With multiple binds, the launcher probes all targets concurrently but preserves target priority: a lower-priority success is selected only after higher-priority targets complete without the launcher's health token. It prefers a loopback target for the printed or opened access URL.
 
-The backend's default `server.host` is `0.0.0.0`. That can expose Kandev to other machines on the network, and the current local product path is not an authenticated multi-user boundary. Bind it to loopback unless remote access is deliberately protected:
+When it can enumerate non-loopback interfaces, the launcher also prints `network:` URLs for each unique non-loopback, non-link-local address on the same port, including local-network and Tailscale addresses. IPv6 addresses are shown in brackets. If the effective bind restricts the listener, the launcher only prints matching addresses. These lines are informational and are omitted if interface discovery is unavailable.
+
+The backend's default `server.host` is `0.0.0.0`. That can expose Kandev to other machines on the network, and the current local product path is not an authenticated multi-user boundary. The launcher uses `localhost` for its default local access URL, but the backend still listens on every interface. Bind it to loopback unless remote access is deliberately protected:
 
 ```bash
 KANDEV_SERVER_HOST=127.0.0.1 kandev
 ```
 
-See [Configuration](./configuration.md) before putting Kandev behind a reverse proxy or publishing the port.
+See [Configuration](configuration.md) before putting Kandev behind a reverse proxy or publishing the port.
 
 ## Launcher environment
 
 Flags take precedence over the equivalent port variables. `KANDEV_BACKEND_PORT` takes precedence over `KANDEV_PORT`.
 
 Every CLI launch automatically uses the startup configuration discovery in
-[Configuration](./configuration.md): `config.yaml` in the working directory,
+[Configuration](configuration.md): `config.yaml` in the working directory,
 then `<KANDEV_HOME_DIR>/config.yaml` (or `~/.kandev/config.yaml`), then
 `/etc/kandev/config.yaml`. The first existing file is authoritative; Kandev
 does not merge candidates, and an unreadable or invalid first file stops the
@@ -252,7 +256,7 @@ discovery and carry the selected file into the managed backend process.
 | `KANDEV_BACKEND_PORT` | unset | Backend port when `--port` is absent. |
 | `KANDEV_PORT` | unset | Compatibility backend-port alias. |
 | `KANDEV_HOME_DIR` | `~/.kandev` | Root for application data, tasks, repositories, logs, and launcher state. |
-| `KANDEV_DATABASE_PATH` | `<home>/data/kandev.db` | Advanced SQLite path override. System backups use the sibling `backups/` directory. See [Configuration](./configuration.md). |
+| `KANDEV_DATABASE_PATH` | `<home>/data/kandev.db` | Advanced SQLite path override. System backups use the sibling `backups/` directory. See [Configuration](configuration.md). |
 | `KANDEV_LOG_LEVEL` | `warn` from the launcher | Explicit backend log level; overrides `--verbose` and `--debug` log-level selection. |
 | `KANDEV_HEALTH_TIMEOUT_MS` | `45000` | Positive integer startup-health timeout. Invalid or non-positive values fall back to 45 seconds. |
 | `KANDEV_NO_BROWSER` | unset | The exact value `1` suppresses browser opening. |
@@ -269,7 +273,7 @@ The launcher also sets the selected server and `agentctl` ports for the backend.
 go to `<home>/logs/backend-logs.log`; warn and above still appear on stdout.
 ACP logs can contain full prompts, file content, and tool calls, while
 diagnostic endpoints expose process details. Use debug mode only on a trusted
-machine and remove retained debug logs afterward. [Configuration](./configuration.md)
+machine and remove retained debug logs afterward. [Configuration](configuration.md)
 lists locations and retention.
 
 ## Data and cleanup
@@ -278,7 +282,7 @@ The default persistent root is `~/.kandev` (on Windows, `.kandev` below the user
 
 Runtime program files live in the Homebrew Cellar, the global npm dependency tree, or npm's `_npx` cache. They are not application data. `npm config get cache` and `npm root -g` show the latter two roots.
 
-Uninstalling the package does not remove `<home>`. Before removing that directory, stop Kandev and any service, confirm no task or executor is running, and take a backup. See [Operations](./operations.md) for safe database backup and restore procedures.
+Uninstalling the package does not remove `<home>`. Before removing that directory, stop Kandev and any service, confirm no task or executor is running, and take a backup. See [Operations](operations.md) for safe database backup and restore procedures.
 
 ## Update
 
@@ -335,7 +339,20 @@ kandev --verbose
 KANDEV_HEALTH_TIMEOUT_MS=90000 kandev --verbose
 ```
 
-The launcher prints buffered backend output when startup fails. Common causes are an invalid `config.yaml`, a database migration/permission error, an occupied explicit port, or a damaged runtime bundle.
+The launcher prints buffered backend output once when startup fails, followed by a bounded summary. The summary includes the effective bind addresses, every attempted health target and its last safe outcome, the selected configuration file, the effective `server.host` source, the backend log path, one next step, and a link to this troubleshooting guide. It never prints the launcher's health token or sensitive configuration values.
+
+Use the failure class to choose the next action:
+
+| Failure class | Meaning and recovery |
+|---|---|
+| Early backend exit | The child stopped before readiness. Read the named backend log for the startup error. |
+| Unreachable backend | No target accepted a connection. Check the effective binds, firewall rules, and environment overrides. |
+| Unhealthy HTTP response | A target answered with a non-success status. Inspect that status and the backend log. |
+| Different process | A selected port answered without the launcher's token. Free the port or choose another backend port. |
+
+If the backend is still running when readiness expires, the summary says that the launcher stopped it after readiness failed. It does not describe that case as a backend crash. Common underlying causes include an invalid `config.yaml`, a database migration or permission error, an occupied explicit port, or a damaged runtime bundle.
+
+ACP probe closure messages occur after an agent protocol probe and do not cause a launcher `/health` timeout. Likewise, an `X-Forwarded-Host` warning means that a reverse proxy reached a running backend without trusted-proxy configuration; it is not a launcher readiness failure. Configure the immediate proxy peer under `server.trustedProxies` as described in [Configuration](./configuration.md).
 
 ### Browser does not open
 
@@ -347,4 +364,4 @@ The public CLI has no `--config` option. Confirm the first existing candidate
 in the working-directory, home, and `/etc/kandev/` order, and remember that
 environment values override YAML. For predictable installed/service
 deployments, verify the active home and database paths printed at startup.
-See [Configuration](./configuration.md).
+See [Configuration](configuration.md).

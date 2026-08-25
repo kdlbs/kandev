@@ -9,7 +9,8 @@ requirements:
 
 ## Purpose and boundaries
 
-Explain the technical responsibility and its boundaries.
+Explain why this system owns the technical contract. Name adjacent contracts
+that this design uses but does not own.
 
 ## Requirement mapping
 
@@ -19,7 +20,8 @@ Explain the technical responsibility and its boundaries.
 
 ## Components and responsibilities
 
-Name the runtime components and their responsibilities.
+Name all stable runtime components and their responsibilities. Cover backend
+and frontend components when both implement the same owned outcome.
 
 ## Data and contracts
 

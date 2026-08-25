@@ -96,7 +96,6 @@ import {
   resolveLastPromptControls,
   resolveLastPromptEdge,
   shouldAutoScrollToBottom,
-  shouldLoadMoreForTranscriptTarget,
 } from "./message-list-shared";
 
 describe("anchoredBarScrollOffsetPx", () => {
@@ -499,22 +498,6 @@ describe("getFirstUserMessageId", () => {
       ]),
     ).toBeNull();
     expect(getFirstUserMessageId([])).toBeNull();
-  });
-});
-
-describe("shouldLoadMoreForTranscriptTarget", () => {
-  const message = (id: string, author_type: "user" | "agent") => ({ id, author_type }) as Message;
-
-  it("keeps loading older pages when the latest loaded page has no user prompt", () => {
-    expect(
-      shouldLoadMoreForTranscriptTarget("last_prompt", [message("reply", "agent")], true),
-    ).toBe(true);
-  });
-
-  it("keeps loading for scroll-to-start until pagination reaches the real first prompt", () => {
-    expect(
-      shouldLoadMoreForTranscriptTarget("start", [message("loaded-prompt", "user")], true),
-    ).toBe(true);
   });
 });
 

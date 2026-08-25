@@ -427,6 +427,35 @@ func TestStopExecution_PreservesRuntimeFailureClassification(t *testing.T) {
 	}
 }
 
+func TestPrepareModelSwitch_StopsBeforeReplacementWhenTeardownFails(t *testing.T) {
+	stopErr := errors.New("runtime teardown failed")
+	repo := newMockRepository()
+	repo.sessions["session-model-switch"] = &models.TaskSession{
+		ID: "session-model-switch", TaskID: "task-model-switch",
+	}
+	repo.tasks["task-model-switch"] = &models.Task{ID: "task-model-switch"}
+	manager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "execution-model-switch", nil
+		},
+		stopAgentFunc: func(context.Context, string, bool) error {
+			return stopErr
+		},
+	}
+	exec := newTestExecutor(t, manager, repo)
+
+	session, task, acpSessionID, existingRunning, err := exec.prepareModelSwitch(
+		context.Background(), "task-model-switch", "session-model-switch",
+	)
+
+	if !errors.Is(err, stopErr) {
+		t.Fatalf("prepareModelSwitch error = %v, want %v", err, stopErr)
+	}
+	if session != nil || task != nil || acpSessionID != "" || existingRunning != nil {
+		t.Fatalf("prepareModelSwitch returned replacement inputs after stop failure: session=%#v task=%#v acp=%q running=%#v", session, task, acpSessionID, existingRunning)
+	}
+}
+
 func TestLaunchModelSwitchAgent_CleansStartedExecutionAfterTerminalRace(t *testing.T) {
 	ctx := context.Background()
 	repo := newMockRepository()

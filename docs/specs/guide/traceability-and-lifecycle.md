@@ -67,3 +67,7 @@ Migrate one system at a time. Use this sequence:
 8. Set `migration: complete` and remove obsolete size exceptions.
 
 Do not keep two editable sources of truth during migration.
+
+Do not mark migration complete while requirement files contain generic criteria
+that defer to copied legacy prose. Extract observable behavior into `AC-*` IDs.
+Move technical facts into system designs, then remove the copied source detail.

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -787,6 +788,14 @@ func (s *Service) restoreTaskLifecycleToken(ctx context.Context, taskID, key, ev
 	}
 }
 
+// lifecycleSweepStuckWarningInterval controls how long
+// reconcileTaskLifecycleTokens waits before logging a "still recovering"
+// warning while the sweep is still in flight. It is a var so tests can
+// shorten it. This is a log-only signal: it never cancels the sweep, because
+// the resume calls it drives run under context.WithoutCancel
+// (task_operations.go), so cancellation would not work anyway.
+var lifecycleSweepStuckWarningInterval = 60 * time.Second
+
 // reconcileTaskLifecycleTokens scans durable lifecycle markers at startup.
 // A small fixed worker pool and bounded per-task attempts prevent a corrupted
 // or repeatedly failing row from creating an unbounded goroutine storm.
@@ -839,6 +848,19 @@ func (s *Service) reconcileTaskLifecycleTokens(ctx context.Context) {
 	if len(jobs) == 0 {
 		return
 	}
+
+	start := time.Now()
+	taskCount := len(jobs)
+	s.logger.Info("startup lifecycle sweep starting", zap.Int("task_count", taskCount))
+
+	var processed atomic.Int64
+	sweepDone := make(chan struct{})
+	warnDone := make(chan struct{})
+	go func() {
+		defer close(warnDone)
+		s.warnIfLifecycleSweepStuck(taskCount, &processed, start, sweepDone)
+	}()
+
 	jobIDs := make(chan string)
 	workerCount := 4
 	if len(jobs) < workerCount {
@@ -851,6 +873,7 @@ func (s *Service) reconcileTaskLifecycleTokens(ctx context.Context) {
 			defer wg.Done()
 			for taskID := range jobIDs {
 				s.recoverTaskLifecycleToken(ctx, taskID)
+				processed.Add(1)
 			}
 		}()
 	}
@@ -859,6 +882,30 @@ func (s *Service) reconcileTaskLifecycleTokens(ctx context.Context) {
 	}
 	close(jobIDs)
 	wg.Wait()
+	close(sweepDone)
+	<-warnDone
+
+	s.logger.Info("startup lifecycle sweep finished",
+		zap.Int("task_count", taskCount),
+		zap.Duration("elapsed", time.Since(start)))
+}
+
+// warnIfLifecycleSweepStuck logs a warning if the startup lifecycle sweep is
+// still running after lifecycleSweepStuckWarningInterval, so a slow sweep is
+// diagnosable from logs instead of requiring a goroutine dump. It is
+// log-only: it never cancels the sweep, and it always exits (either the
+// timer fires once, or done closes first).
+func (s *Service) warnIfLifecycleSweepStuck(taskCount int, processed *atomic.Int64, start time.Time, done <-chan struct{}) {
+	timer := time.NewTimer(lifecycleSweepStuckWarningInterval)
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-timer.C:
+		s.logger.Warn("startup lifecycle sweep still running",
+			zap.Int("task_count", taskCount),
+			zap.Int64("processed", processed.Load()),
+			zap.Duration("elapsed", time.Since(start)))
+	}
 }
 
 func (s *Service) recoverTaskLifecycleToken(ctx context.Context, taskID string) {
@@ -2979,7 +3026,7 @@ func (s *Service) autoStartStepPrompt(
 		requiresSignal := step != nil && step.AutoAdvanceRequiresSignal
 		referenceContext := EntityReferenceContext(references)
 		if isOfficeTask {
-			recordedPrompt = sysprompt.InjectOfficeContext(taskID, sessionID, agentPrompt, referenceContext)
+			recordedPrompt = sysprompt.InjectOfficeContextWithOptions(taskID, sessionID, agentPrompt, requiresSignal, referenceContext)
 		} else {
 			recordedPrompt = sysprompt.InjectKandevContextWithOptions(taskID, sessionID, agentPrompt, sysprompt.KandevContextOptions{
 				RequiresCompletionSignal:       requiresSignal,

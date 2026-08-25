@@ -67,10 +67,15 @@ type CreateTaskRequest struct {
 	Metadata       map[string]interface{} `json:"metadata,omitempty"`
 	DeferredLaunch map[string]interface{} `json:"deferred_launch,omitempty"`
 	PlanMode       bool                   `json:"plan_mode,omitempty"`
-	IsEphemeral    bool                   `json:"is_ephemeral,omitempty"` // Ephemeral tasks are hidden from kanban, used for quick chat
-	ParentID       string                 `json:"parent_id,omitempty"`
-	Autopilot      bool                   `json:"autopilot,omitempty"`
-	WorkspacePath  string                 `json:"workspace_path,omitempty"` // Optional host folder for repo-less tasks
+
+	// StartAgent reports that the caller intends to launch an agent for this
+	// task right away. It only steers step resolution (see resolveWorkflowStep)
+	// — the launch itself is the caller's job, after CreateTask returns.
+	StartAgent    bool   `json:"start_agent,omitempty"`
+	IsEphemeral   bool   `json:"is_ephemeral,omitempty"` // Ephemeral tasks are hidden from kanban, used for quick chat
+	ParentID      string `json:"parent_id,omitempty"`
+	Autopilot     bool   `json:"autopilot,omitempty"`
+	WorkspacePath string `json:"workspace_path,omitempty"` // Optional host folder for repo-less tasks
 
 	// ExternalID is a caller-supplied identity used for create-idempotency
 	// (docs/specs/tasks/requirements/external-id-idempotency.md). Accepted on REST

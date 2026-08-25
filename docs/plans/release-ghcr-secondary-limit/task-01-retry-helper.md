@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/release-ghcr-secondary-limit/spec.md"
+spec: "../../specs/release/requirements/release-ghcr-secondary-limit.md"
 ---
 
 # Task 01: Add GHCR retry helper
@@ -38,7 +38,7 @@ sequential
 
 ## Inputs
 
-- `docs/specs/release-ghcr-secondary-limit/spec.md`, especially What, Failure modes, and Scenarios.
+- `docs/specs/release/requirements/release-ghcr-secondary-limit.md`, especially What, Failure modes, and Scenarios.
 - `docs/plans/release-ghcr-secondary-limit/plan.md`, Wave 1.
 - Existing retry conventions in `scripts/release/npm-view-version.sh` and its test.
 
