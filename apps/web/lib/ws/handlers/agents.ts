@@ -100,6 +100,7 @@ function handleProfileCreated(
     name: agent?.name ?? "",
     capability_status: agent?.capability_status,
     capability_error: agent?.capability_error,
+    inference_capable: agent?.inference_capable,
   };
   const nextProfiles = [
     ...state.agentProfiles.items.filter((p) => p.id !== normalized.id),
@@ -141,6 +142,7 @@ function handleProfileUpdated(
     name: agent?.name ?? "",
     capability_status: agent?.capability_status,
     capability_error: agent?.capability_error,
+    inference_capable: agent?.inference_capable,
   };
   const nextProfiles = state.agentProfiles.items.map((p) =>
     p.id === normalized.id ? toAgentProfileOption(agentStub, normalized) : p,
