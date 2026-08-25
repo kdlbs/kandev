@@ -95,12 +95,18 @@ test.describe("Mobile sidebar task actions", () => {
           candidate.classList.contains("whitespace-nowrap") && candidate.textContent === titleText,
       );
       const pr = el.querySelector('[data-testid^="pr-task-icon-"]');
-      if (!titleElement || !pr) return { found: false, gap: -1 };
+      if (!titleElement || !pr) return { found: false, gap: -1, titleTop: -1, prTop: -1 };
       const titleBox = titleElement.getBoundingClientRect();
       const prBox = pr.getBoundingClientRect();
-      return { found: true, gap: prBox.left - titleBox.right };
+      return {
+        found: true,
+        gap: prBox.left - titleBox.right,
+        titleTop: titleBox.top,
+        prTop: prBox.top,
+      };
     }, title);
     expect(spacing.found).toBe(true);
+    expect(Math.abs(spacing.titleTop - spacing.prTop)).toBeLessThan(4);
     expect(spacing.gap).toBeGreaterThanOrEqual(0);
     expect(spacing.gap).toBeLessThan(32);
     await assertNoDocumentHorizontalOverflow(testPage, "mobile sidebar PR badge spacing");

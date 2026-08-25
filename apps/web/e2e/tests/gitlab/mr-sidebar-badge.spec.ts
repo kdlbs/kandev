@@ -188,12 +188,18 @@ test.describe("GitLab MR badge on the sidebar", () => {
           candidate.classList.contains("whitespace-nowrap") && candidate.textContent === titleText,
       );
       const pr = el.querySelector('[data-testid^="pr-task-icon-"]');
-      if (!title || !pr) return { found: false, gap: -1 };
+      if (!title || !pr) return { found: false, gap: -1, titleTop: -1, prTop: -1 };
       const titleBox = title.getBoundingClientRect();
       const prBox = pr.getBoundingClientRect();
-      return { found: true, gap: prBox.left - titleBox.right };
+      return {
+        found: true,
+        gap: prBox.left - titleBox.right,
+        titleTop: titleBox.top,
+        prTop: prBox.top,
+      };
     }, "Sidebar PR and MR badge task");
     expect(spacing.found).toBe(true);
+    expect(Math.abs(spacing.titleTop - spacing.prTop)).toBeLessThan(4);
     expect(spacing.gap).toBeGreaterThanOrEqual(0);
     expect(spacing.gap).toBeLessThan(32);
   });
