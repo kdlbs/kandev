@@ -17,10 +17,17 @@ const RUN_NOW_TEST_ID = "storage-run-now";
 // Mirrors the auth slice the admin gate reads. `undefined` is the
 // auth-disabled single-user mode, which the backend treats as an admin.
 let currentRole: "admin" | "member" | undefined;
+let currentMode: "disabled" | "setup" | "enabled" = "enabled";
 
+// Mirrors the auth slice the admin gate reads. `currentMode` distinguishes
+// auth-disabled single-user mode (synthetic admin) from a cleared session.
 vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (state: { auth: { user?: { role: string } } }) => unknown) =>
-    selector({ auth: { user: currentRole ? { role: currentRole } : undefined } }),
+  useAppStore: (
+    selector: (state: { auth: { mode: string; user?: { role: string } } }) => unknown,
+  ) =>
+    selector({
+      auth: { mode: currentMode, user: currentRole ? { role: currentRole } : undefined },
+    }),
 }));
 
 vi.mock("@/hooks/domains/system/use-storage-maintenance", async (importOriginal) => ({
@@ -122,6 +129,7 @@ describe("StorageMaintenanceSettings", () => {
 
   beforeEach(() => {
     currentRole = "admin";
+    currentMode = "enabled";
     mocks.useSystemJob.mockReturnValue(undefined);
     mocks.useStorageMaintenance.mockReturnValue(controller(overview));
   });
@@ -130,6 +138,7 @@ describe("StorageMaintenanceSettings", () => {
   // controls must be disabled here rather than 403 after the click.
   it("disables the maintenance actions and the policy form for a member", () => {
     currentRole = "member";
+    currentMode = "enabled";
     const editableOverview = { ...overview, settings: { ...overview.settings, enabled: true } };
     mocks.useStorageMaintenance.mockReturnValue(controller(editableOverview));
 
@@ -151,6 +160,7 @@ describe("StorageMaintenanceSettings", () => {
   // identity is an admin. Nothing may change.
   it("leaves every control live when no user is signed in", () => {
     currentRole = undefined;
+    currentMode = "disabled";
     const editableOverview = { ...overview, settings: { ...overview.settings, enabled: true } };
     mocks.useStorageMaintenance.mockReturnValue(controller(editableOverview));
 
@@ -279,6 +289,7 @@ describe("StorageMaintenanceSettings busy feedback", () => {
     // Reset the role explicitly: without it these tests inherit whatever the
     // previous describe block left behind and pass only in file order.
     currentRole = undefined;
+    currentMode = "disabled";
     mocks.useSystemJob.mockReturnValue(undefined);
   });
 
@@ -310,6 +321,7 @@ describe("StorageMaintenanceSettings busy feedback", () => {
   // above it is not enough.
   it("does not expose Run anyway to a member even when force is available", () => {
     currentRole = "member";
+    currentMode = "enabled";
     const runAnyway = vi.fn();
     mocks.useStorageMaintenance.mockReturnValue({
       ...controller(overview),
@@ -332,6 +344,7 @@ describe("StorageMaintenanceSettings pending policy", () => {
 
   beforeEach(() => {
     currentRole = undefined;
+    currentMode = "disabled";
   });
 
   it("rebases an adopted Go cache path into a dirty policy draft before shared save", async () => {
@@ -435,6 +448,7 @@ describe("StorageMaintenanceSettings coordinated save", () => {
 
   beforeEach(() => {
     currentRole = undefined;
+    currentMode = "disabled";
     mocks.useSystemJob.mockReturnValue(undefined);
   });
 

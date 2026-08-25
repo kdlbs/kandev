@@ -9,10 +9,17 @@ const mocks = vi.hoisted(() => ({
 // Mirrors the auth slice the admin gate reads. `undefined` is the
 // auth-disabled single-user mode, which the backend treats as an admin.
 let currentRole: "admin" | "member" | undefined;
+let currentMode: "disabled" | "setup" | "enabled" = "enabled";
 
+// Mirrors the auth slice the admin gate reads. `currentMode` distinguishes
+// auth-disabled single-user mode (synthetic admin) from a cleared session.
 vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (state: { auth: { user?: { role: string } } }) => unknown) =>
-    selector({ auth: { user: currentRole ? { role: currentRole } : undefined } }),
+  useAppStore: (
+    selector: (state: { auth: { mode: string; user?: { role: string } } }) => unknown,
+  ) =>
+    selector({
+      auth: { mode: currentMode, user: currentRole ? { role: currentRole } : undefined },
+    }),
 }));
 
 vi.mock("@/hooks/domains/system/use-backups", () => ({
@@ -67,6 +74,7 @@ describe("BackupsTable", () => {
   // must not be offered a control that can only answer 403.
   it("hides every mutating control from a member but keeps the listing", () => {
     currentRole = "member";
+    currentMode = "enabled";
 
     render(<BackupsTable />);
 
@@ -83,6 +91,7 @@ describe("BackupsTable", () => {
 
   it("offers every control to an admin", () => {
     currentRole = "admin";
+    currentMode = "enabled";
 
     render(<BackupsTable />);
 
@@ -98,6 +107,7 @@ describe("BackupsTable", () => {
   // identity is an admin. Nothing may change.
   it("offers every control when no user is signed in", () => {
     currentRole = undefined;
+    currentMode = "disabled";
 
     render(<BackupsTable />);
 
