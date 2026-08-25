@@ -252,3 +252,29 @@ func (p *stubWorkflowProvider) CreateWorkflow(
 func (p *stubWorkflowProvider) UpdateWorkflow(context.Context, *taskmodels.Workflow) error {
 	return nil
 }
+
+// opaqueWrap wraps an error behind a message that the textual fallback cannot
+// match, so a passing assertion proves the typed set did the classifying.
+type opaqueWrap struct{ err error }
+
+func (o opaqueWrap) Error() string { return "internal failure" }
+func (o opaqueWrap) Unwrap() error { return o.err }
+
+func TestIsNotFoundMatchesSentinelsWithoutRelyingOnWording(t *testing.T) {
+	for name, sentinel := range map[string]error{
+		"not visible":  ErrNotVisible,
+		"workspace":    repoerrors.ErrWorkspaceNotFound,
+		"task":         repoerrors.ErrTaskNotFound,
+		"task session": taskmodels.ErrTaskSessionNotFound,
+	} {
+		t.Run(name, func(t *testing.T) {
+			require.True(t, IsNotFound(sentinel))
+			require.True(t, IsNotFound(fmt.Errorf("wrapped: %w", sentinel)))
+			require.True(t, IsNotFound(opaqueWrap{err: sentinel}),
+				"classification fell through to the textual fallback instead of the typed set")
+		})
+	}
+
+	require.False(t, IsNotFound(nil))
+	require.False(t, IsNotFound(errors.New("connection reset by peer")))
+}
