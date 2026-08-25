@@ -123,6 +123,54 @@ func TestHandleAgentCompleted_WarnsOnLegacyReviewStartedReason(t *testing.T) {
 	}
 }
 
+// TestHandleAgentCompleted_WarnsOnStageIDKeyedPayload pins the primary
+// (non-fallback) branch of the stepID extraction: the scheduler's own
+// RunContext struct (internal/office/scheduler/run.go) carries a "stage_id"
+// JSON key, and buildPromptContext already extracts it first before falling
+// back to "workflow_step_id" (scheduler_integration.go). The detector must
+// take the same primary branch, not only the workflow_step_id fallback the
+// other tests in this file exercise.
+func TestHandleAgentCompleted_WarnsOnStageIDKeyedPayload(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+	createStepDecisionsTable(t, svc)
+
+	createTestAgent(t, svc, "ws-1", "reviewer-1")
+	taskID := createOfficeTask(t, svc, "ws-1", "reviewer-1")
+
+	payload := `{"task_id":"` + taskID + `","stage_type":"approval","stage_id":"step-1"}`
+	if err := svc.QueueRun(ctx, "reviewer-1", service.RunReasonTaskAssigned, payload, "approval-stage-id-no-decision"); err != nil {
+		t.Fatalf("queue run: %v", err)
+	}
+	run, err := svc.ClaimNextRun(ctx)
+	if err != nil || run == nil {
+		t.Fatalf("claim run: %v (run=%v)", err, run)
+	}
+
+	completed := bus.NewEvent(events.AgentCompleted, "test", map[string]string{
+		"task_id":          taskID,
+		"session_id":       "sess-1",
+		"agent_profile_id": "reviewer-1",
+	})
+	if pErr := eb.Publish(ctx, events.AgentCompleted, completed); pErr != nil {
+		t.Fatalf("publish completed: %v", pErr)
+	}
+
+	rowEvents, err := listRunEvents(t, svc, run.ID)
+	if err != nil {
+		t.Fatalf("list run events: %v", err)
+	}
+	found := false
+	for _, e := range rowEvents {
+		if string(e.EventType) == "decision.missing" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("events = %+v, want a decision.missing warn event for stage_id-keyed payload", rowEvents)
+	}
+}
+
 // TestHandleAgentCompleted_NoWarnWhenReviewDecisionRecorded is the
 // counterpart green path: when the reviewer's decision was recorded via
 // record_step_decision_kandev before the run finished, no decision.missing

@@ -298,10 +298,13 @@ func buildApprovalStagePrompt(pc *PromptContext) string {
 }
 
 // writeDecisionContract appends the explicit record_step_decision_kandev contract shared by the
-// review and approval stage prompts: a verdict must be recorded via the tool call to end the turn,
-// since posting a comment alone is not a decision and leaves the task stranded in review.
+// review and approval stage prompts: a verdict must be recorded via the tool call, which the agent
+// must treat as its final action for the turn, since posting a comment alone is not a decision and
+// leaves the task stranded in review. The tool call itself does not halt the agent mid-turn (it
+// returns an ordinary result), so the prompt must not claim otherwise — it instructs the agent to
+// stop on its own after calling it.
 func writeDecisionContract(b *strings.Builder) {
-	b.WriteString("\n\nYou must call the record_step_decision_kandev tool with decision (\"approved\" or \"rejected\") and reason to record your verdict; this call ends your turn.")
+	b.WriteString("\n\nYou must call the record_step_decision_kandev tool with decision (\"approved\" or \"rejected\") and reason to record your verdict. Make this your final tool call for the turn, then stop.")
 	b.WriteString(" Posting a comment alone is not a decision and will not advance the task.")
 }
 
