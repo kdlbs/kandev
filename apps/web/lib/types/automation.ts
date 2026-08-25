@@ -17,6 +17,15 @@ export type RunStatus =
   | "archived"
   | "cancelled";
 
+export type ContinuationPolicy = "new_task" | "reuse_thread";
+export type TaskMode = "automation_run" | "normal_task";
+export type RepositoryMode = "workspace_default" | "selected" | "none";
+
+export type AutomationRepository = {
+  repository_id: string;
+  base_branch: string;
+};
+
 export type Automation = {
   id: string;
   workspace_id: string;
@@ -26,11 +35,16 @@ export type Automation = {
   workflow_step_id: string;
   agent_profile_id: string;
   executor_profile_id: string;
+  task_mode?: TaskMode;
+  repository_mode?: RepositoryMode;
   repository_ids: string[];
+  repositories?: AutomationRepository[];
   prompt: string;
   task_title_template: string;
   enabled: boolean;
   max_concurrent_runs: number;
+  /** How later firings get their task and conversation context. */
+  continuation_policy?: ContinuationPolicy;
   last_triggered_at: string | null;
   created_at: string;
   updated_at: string;
@@ -79,6 +93,12 @@ export type AutomationRun = {
    * without one is reported rather than offered as something to open.
    */
   session_id?: string;
+  /** Exact provider turn represented by this run when a session is shared. */
+  turn_id?: string;
+  thread_action?: "created" | "resumed" | "replaced";
+  thread_reason?: string;
+  /** Snapshot of the rendered task title at admission time. */
+  display_title?: string;
 };
 
 /**
@@ -169,9 +189,13 @@ export type CreateAutomationRequest = {
   agent_profile_id: string;
   executor_profile_id: string;
   repository_ids?: string[];
+  repositories?: AutomationRepository[];
   prompt?: string;
   task_title_template?: string;
   max_concurrent_runs?: number;
+  continuation_policy?: ContinuationPolicy;
+  task_mode?: TaskMode;
+  repository_mode?: RepositoryMode;
   triggers?: Array<{
     type: TriggerType;
     config: Record<string, unknown>;
@@ -187,10 +211,14 @@ export type UpdateAutomationRequest = {
   agent_profile_id?: string;
   executor_profile_id?: string;
   repository_ids?: string[];
+  repositories?: AutomationRepository[];
   prompt?: string;
   task_title_template?: string;
   enabled?: boolean;
   max_concurrent_runs?: number;
+  continuation_policy?: ContinuationPolicy;
+  task_mode?: TaskMode;
+  repository_mode?: RepositoryMode;
 };
 
 // CreateAutomationResponse mirrors the backend's one-time webhook secret

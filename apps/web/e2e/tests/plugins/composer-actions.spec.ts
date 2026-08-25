@@ -1,6 +1,6 @@
 /**
  * E2E: `PluginComposerCapability` against the real native composers
- * (docs/specs/plugins/voice-extraction-host.md).
+ * (docs/specs/plugins/requirements/voice-extraction-host.md).
  *
  * These are the prerequisites the extracted Voice Mode plugin stands on, so
  * everything here goes through a genuinely registered plugin slot and then

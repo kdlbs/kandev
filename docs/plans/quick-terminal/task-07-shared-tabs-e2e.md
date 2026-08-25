@@ -8,7 +8,7 @@ depends_on:
   - "05-detachable-pty-lifecycle"
   - "06-unified-quick-tabs"
 plan: "plan.md"
-spec: "../../specs/quick-terminal/spec.md"
+spec: "../../specs/ui/requirements/quick-terminal.md"
 ---
 
 # Task 07: Prove shared tabs across viewports
@@ -62,7 +62,7 @@ dialog lifecycle assumptions.
 
 ## Inputs
 
-- Every `Scenarios` item in `docs/specs/quick-terminal/spec.md`.
+- Every `Scenarios` item in `docs/specs/ui/requirements/quick-terminal.md`.
 - Plan: `E2E Tests`, `Mobile design contract`, and all lifecycle/geometry risks.
 - Existing patterns:
   `quick-terminal.spec.ts`, `mobile-quick-terminal.spec.ts`,

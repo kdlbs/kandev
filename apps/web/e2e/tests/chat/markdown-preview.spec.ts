@@ -204,7 +204,7 @@ test.describe("Markdown preview", () => {
     seedData,
     backend,
   }) => {
-    // Covers AC-UI-MARKDOWN-TABLE-RESIZE-001.1, .2, .3, .5, and .6.
+    // Covers AC-UI-RESIZABLE-MARKDOWN-TABLES-001.1, .3, and .9.
     const fileName = "resizable-table.md";
     const marker = "Preview table resize marker";
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");

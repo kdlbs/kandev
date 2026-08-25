@@ -5,7 +5,7 @@ status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/platform/background-work-liveness.md"
+spec: "../../specs/platform/requirements/background-work-liveness.md"
 ---
 
 # Task 01: Restore coarse running policy
@@ -36,7 +36,7 @@ spec: "../../specs/platform/background-work-liveness.md"
 - `apps/backend/internal/orchestrator/foreground_activity_signal_test.go`
 - `apps/web/e2e/tests/chat/busy-signal.spec.ts`
 - `apps/web/e2e/tests/chat/mobile-busy-signal.spec.ts`
-- `docs/specs/platform/background-work-liveness.md`
+- `docs/specs/platform/requirements/background-work-liveness.md`
 - `docs/decisions/0049-fine-grained-foreground-idle-busy-signal.md`
 - `docs/decisions/2026-07-28-coarse-running-busy-signal.md`
 - `docs/decisions/INDEX.md`

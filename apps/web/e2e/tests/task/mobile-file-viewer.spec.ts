@@ -318,7 +318,7 @@ test.describe("Mobile file viewer panel", () => {
     seedData,
     backend,
   }) => {
-    // Covers AC-UI-MARKDOWN-TABLE-RESIZE-001.7.
+    // Covers AC-UI-RESIZABLE-MARKDOWN-TABLES-001.12.
     test.setTimeout(90_000);
     const marker = "Mobile file preview table marker";
     const { filePath } = await setupMobileFileViewerTest({

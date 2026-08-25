@@ -5,7 +5,7 @@ status: pending
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/gitlab-mr-task-list-badges/spec.md"
+spec: "../../specs/integrations/requirements/gitlab-mr-task-list-badges.md"
 ---
 
 # Task 02: `/tasks` rich row renders the MR badge

@@ -23,7 +23,7 @@ This document is the migrated task-system source for the capability. The source 
 
 ## Migrated source detail
 
-> Superseded by [Settings Manual Save](../../ui/settings-manual-save.md). This file records the previously shipped autosave behavior and is no longer the product contract.
+> Superseded by [Settings Manual Save](../../ui/requirements/settings-manual-save.md). This file records the previously shipped autosave behavior and is no longer the product contract.
 
 ## Why
 

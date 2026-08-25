@@ -39,6 +39,10 @@ Read `docs/specs/README.md`, the owning system index, and the relevant
 requirement and system-design documents. Use the legacy catalog only when the
 system has not migrated.
 
+Search adjacent systems before you create or move an artifact. A UI symptom does
+not make the repair UI-owned. Update the system that owns the failed contract,
+and include observable UI recovery there when applicable.
+
 Classify the bug:
 
 1. **Implementation violates an active acceptance criterion.** Reference the
@@ -52,6 +56,10 @@ Classify the bug:
 
 Do not create a standalone repair specification. The requirement is the durable
 behavioral source. The plan and work orders record this repair.
+
+Do not create parallel feature and UI requirements for one repair. A separate UI
+requirement is valid only when the repair changes an independent reusable UI
+contract.
 
 Use `/record` when the correction establishes a durable boundary, ownership
 rule, public contract, persistence rule, or security invariant with meaningful

@@ -2,7 +2,7 @@
 status: current
 system: ui
 requirements:
-  - REQ-UI-MARKDOWN-TABLE-RESIZE-001
+  - REQ-UI-RESIZABLE-MARKDOWN-TABLES-001
 ---
 
 # Resizable Markdown Tables System Design
@@ -22,9 +22,9 @@ DOM and editing transactions. Both engines share capability gating, the
 
 ## Requirement mapping
 
-| Requirement                        | Design section                                                                                                                                                                                       |
-| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `REQ-UI-MARKDOWN-TABLE-RESIZE-001` | [Surface contracts](#surface-contracts), [Rendered Markdown flow](#rendered-markdown-flow), [Plan editor flow](#plan-editor-flow), [Responsive and mobile contract](#responsive-and-mobile-contract) |
+| Requirement                            | Design section                                                                                                                                                                                       |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `REQ-UI-RESIZABLE-MARKDOWN-TABLES-001` | [Surface contracts](#surface-contracts), [Rendered Markdown flow](#rendered-markdown-flow), [Plan editor flow](#plan-editor-flow), [Responsive and mobile contract](#responsive-and-mobile-contract) |
 
 ## Surface contracts
 

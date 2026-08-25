@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/agents/dynamic-provider-options.md
+spec: docs/specs/agents/requirements/dynamic-provider-options.md
 decision: docs/decisions/2026-08-07-model-aware-provider-capability-resolution.md
 created: 2026-08-07
 status: complete

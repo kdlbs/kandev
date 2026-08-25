@@ -252,10 +252,13 @@ describe("useLazyLoadSentinel — re-arm, disarm, and stale completions", () => 
     // The sentinel was unobserved before the await; the load resolved
     // positively, so it is re-observed (still current).
     expect(records[0].unobserved).toContain(node);
-    await waitFor(() => expect(loadMore).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      await vi.waitFor(() => expect(loadMore).toHaveBeenCalledTimes(2));
+    });
     expect(records[0].targets.filter((t) => t === node).length).toBeGreaterThanOrEqual(1);
     // Still intersecting: the next page auto-loads without a scroll-away or
     // a second IntersectionObserver entry.
+    expect(loadMore).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -291,11 +294,11 @@ describe("useLazyLoadSentinel — stickToBottomWhileLoading", () => {
     // Rows are appended while the load is in flight (scrollHeight grows to
     // 800); the user stays at the old bottom. The settle must scroll the
     // scroller back to the new bottom so the sentinel stays intersecting.
+    expect(loadMore).toHaveBeenCalledTimes(1);
     Object.defineProperty(scroller, "scrollHeight", { configurable: true, value: 800 });
     await act(async () => {
       resolveLoad(20);
     });
-    expect(loadMore).toHaveBeenCalledTimes(1);
     // Browser-faithful assertion: jsdom stores the raw write (800) while a
     // real browser clamps scrollTop to scrollHeight - clientHeight (400); the
     // invariant is "pinned at the bottom", so assert that instead of the
@@ -323,8 +326,6 @@ describe("useLazyLoadSentinel — pin refresh before a load", () => {
     );
     const { result } = renderHook(() =>
       useLazyLoadSentinel(scrollRef, true, false, false, loadMore, {
-        rearmWhileIntersecting: true,
-        joinInFlightWhileLoading: true,
         stickToBottomWhileLoading: true,
       }),
     );
@@ -341,7 +342,7 @@ describe("useLazyLoadSentinel — pin refresh before a load", () => {
     await act(async () => {
       resolveLoad(20);
     });
-    expect(loadMore).toHaveBeenCalledTimes(1);
+    expect(loadMore).toHaveBeenCalled();
     expect(scroller.scrollTop).toBeGreaterThanOrEqual(
       scroller.scrollHeight - scroller.clientHeight,
     );

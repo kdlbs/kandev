@@ -25,7 +25,7 @@ Two structural facts shaped the design:
    auto-merge automation for GitLab MRs landed as a follow-up on the same
    `gitlab_task_mr_options` / `gitlab_task_mr_state` tables and
    `/tasks/:taskID/mr-automation` endpoint this ADR introduced — see
-   `docs/specs/gitlab-integration/spec.md`'s "MR automation" section. This
+   `docs/specs/integrations/requirements/gitlab-integration.md`'s "MR automation" section. This
    item's absence-of-automation framing describes the state at the time of
    writing, not the current feature set.
 
@@ -90,7 +90,7 @@ dispatch functions turned out byte-for-byte identical below the decision layer.
   checkpoints. A `PATCH` / `update_task_mr_automation_kandev` call naming an MR
   targets it alone; omitting MR identity fans out to every linked MR, which preserves
   the behavior of agents that have no MR identity to send. See
-  `docs/specs/gitlab-integration/spec.md`'s "MR automation" section.
+  `docs/specs/integrations/requirements/gitlab-integration.md`'s "MR automation" section.
 - **Discovered while integrating:** `executeQueuedMessage`'s lifecycle-prompt
   detection (`event_handlers_agent.go`) was hardcoded to the GitHub PR automation
   origin string. A GitLab-originated durable lifecycle entry was queued but never

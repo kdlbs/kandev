@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["01-enabled-hooks", "04-hide-disabled-setting"]
 plan: "plan.md"
-spec: "../../specs/integrations/enable-disable-toggle.md"
+spec: "../../specs/integrations/requirements/enable-disable-toggle.md"
 ---
 
 # Task 05: Decouple left-panel nav visibility from the enabled toggle

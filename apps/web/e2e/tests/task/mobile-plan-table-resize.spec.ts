@@ -18,7 +18,7 @@ test.describe("mobile: Plan table column resizing", () => {
     apiClient,
     seedData,
   }) => {
-    // Covers AC-UI-MARKDOWN-TABLE-RESIZE-001.7 and .8.
+    // Covers AC-UI-RESIZABLE-MARKDOWN-TABLES-001.12.
     test.setTimeout(120_000);
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,

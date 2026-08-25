@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/submodule-review.md
+spec: docs/specs/ui/requirements/submodule-review.md
 created: 2026-08-21
 status: implemented
 ---

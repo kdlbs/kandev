@@ -40,7 +40,7 @@ func setupAuthzHandler(t *testing.T, msgs map[string][]*taskmodels.Message, auth
 	repo := &stubMessageStore{messages: msgs}
 	eventBus := &stubEventBus{}
 	messageCreator := &stubMessageCreator{}
-	resolver := NewResolver(store, repo, messageCreator, authorizer, eventBus, eventBus, logger.Default())
+	resolver := NewResolver(store, repo, messageCreator, authorizer, eventBus, eventBus, nil, logger.Default())
 	h := NewHandlers(store, nil, messageCreator, repo, eventBus, resolver, logger.Default())
 	return h, store
 }
@@ -295,7 +295,7 @@ func TestHttpGetRequest_RepositoryFailure_500NotSilent404(t *testing.T) {
 	store := NewStore(time.Minute)
 	eventBus := &stubEventBus{}
 	messageCreator := &stubMessageCreator{}
-	resolver := NewResolver(store, repo, messageCreator, &stubAuthorizer{}, eventBus, eventBus, logger.Default())
+	resolver := NewResolver(store, repo, messageCreator, &stubAuthorizer{}, eventBus, eventBus, nil, logger.Default())
 	h := NewHandlers(store, nil, messageCreator, repo, eventBus, resolver, logger.Default())
 
 	rec := runGet(t, h, "pending-repo-failure")
@@ -313,7 +313,7 @@ func TestHttpWaitForResponse_RepositoryFailure_500NotSilent404(t *testing.T) {
 	store := NewStore(time.Minute)
 	eventBus := &stubEventBus{}
 	messageCreator := &stubMessageCreator{}
-	resolver := NewResolver(store, repo, messageCreator, &stubAuthorizer{}, eventBus, eventBus, logger.Default())
+	resolver := NewResolver(store, repo, messageCreator, &stubAuthorizer{}, eventBus, eventBus, nil, logger.Default())
 	h := NewHandlers(store, nil, messageCreator, repo, eventBus, resolver, logger.Default())
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -333,7 +333,7 @@ func TestHttpCancelRequest_RepositoryFailure_500NotSilent404(t *testing.T) {
 	store := NewStore(time.Minute)
 	eventBus := &stubEventBus{}
 	messageCreator := &stubMessageCreator{}
-	resolver := NewResolver(store, repo, messageCreator, &stubAuthorizer{}, eventBus, eventBus, logger.Default())
+	resolver := NewResolver(store, repo, messageCreator, &stubAuthorizer{}, eventBus, eventBus, nil, logger.Default())
 	h := NewHandlers(store, nil, messageCreator, repo, eventBus, resolver, logger.Default())
 
 	rec := runCancel(t, h, "pending-repo-failure")

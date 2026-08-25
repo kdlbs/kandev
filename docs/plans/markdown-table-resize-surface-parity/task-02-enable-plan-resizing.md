@@ -7,12 +7,12 @@ depends_on:
   - "01-extend-markdown-previews"
 plan: "plan.md"
 requirements:
-  - REQ-UI-MARKDOWN-TABLE-RESIZE-001
+  - REQ-UI-RESIZABLE-MARKDOWN-TABLES-001
 acceptance_criteria:
-  - AC-UI-MARKDOWN-TABLE-RESIZE-001.4
-  - AC-UI-MARKDOWN-TABLE-RESIZE-001.6
-  - AC-UI-MARKDOWN-TABLE-RESIZE-001.7
-  - AC-UI-MARKDOWN-TABLE-RESIZE-001.8
+  - AC-UI-RESIZABLE-MARKDOWN-TABLES-001.10
+  - AC-UI-RESIZABLE-MARKDOWN-TABLES-001.11
+  - AC-UI-RESIZABLE-MARKDOWN-TABLES-001.12
+  - AC-UI-RESIZABLE-MARKDOWN-TABLES-001.13
 system_design:
   - ../../specs/ui/system-design/resizable-markdown-tables.md
 ---

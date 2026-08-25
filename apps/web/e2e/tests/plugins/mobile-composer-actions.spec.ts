@@ -1,6 +1,6 @@
 /**
  * Pixel 5 coverage for `PluginComposerCapability`
- * (docs/specs/plugins/voice-extraction-host.md, "Mobile Design Contract").
+ * (docs/specs/plugins/requirements/voice-extraction-host.md, "Mobile Design Contract").
  *
  * Capability parity, not layout parity: the same action, the same insertion
  * and the same native submit have to work by touch, from the shipped mobile

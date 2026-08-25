@@ -5,7 +5,7 @@ status: pending
 wave: 5
 depends_on: ["08-dynamic-profile-settings"]
 plan: "plan.md"
-spec: "../../specs/agents/dynamic-agent-routing.md"
+spec: "../../specs/agents/requirements/dynamic-agent-routing.md"
 ---
 
 # Task 12: Profile settings E2E

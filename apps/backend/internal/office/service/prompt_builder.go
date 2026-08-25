@@ -460,13 +460,10 @@ type BuildAgentPromptResult struct {
 // resume, only the wake context is included because the agent CLI
 // retains instructions from the previous session.
 //
-// PR 1 of office-heartbeat-rework added taskless-run support: when
-// taskID is empty AND continuationSummary is non-empty, the summary
-// is prepended (sliced to 1,500 chars) before AGENTS.md so the agent
-// has the "## Active focus" + "## Open blockers" + "## Next action"
-// context without resuming a stale conversation. Today no caller
-// passes taskID=="" so this branch is dead until PR 2 wires the
-// agent_heartbeat cron.
+// Taskless-run support prepends a non-empty continuation summary (sliced to
+// 1,500 chars) before AGENTS.md. This gives routine and other taskless wakes
+// the "## Active focus", "## Open blockers", and "## Next action" context
+// without resuming a stale conversation.
 //
 // agentsMD is the AGENTS.md content read from the manifest (in-memory).
 // Sibling references like `./HEARTBEAT.md` have already been rewritten

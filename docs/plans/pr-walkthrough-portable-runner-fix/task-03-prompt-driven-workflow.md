@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-trusted-pr-context", "02-fixed-renderer-contract"]
 plan: "plan.md"
-spec: "../../specs/pr-walkthrough/spec.md"
+spec: "../../specs/ui/requirements/pr-walkthrough.md"
 ---
 
 # Task 03: Prompt-Driven Workflow

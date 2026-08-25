@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/github-pr-merge-queue/spec.md
+spec: docs/specs/integrations/requirements/github-pr-merge-queue.md
 created: 2026-08-17
 status: complete
 ---

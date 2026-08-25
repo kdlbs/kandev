@@ -5,7 +5,7 @@ status: in_progress
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/plugins/marketplace.md"
+spec: "../../specs/plugins/requirements/marketplace.md"
 ---
 
 # Task 01: Correct Bitbucket attribution
@@ -49,7 +49,7 @@ registry files. The primary session remains sequential by default.
 
 ## Inputs
 
-- `docs/specs/plugins/marketplace.md`, catalog attribution scenarios.
+- `docs/specs/plugins/requirements/marketplace.md`, catalog attribution scenarios.
 - `docs/plans/plugin-marketplace-attribution/plan.md`, repository boundary and
   release requirements.
 - The plugin repository's `manifest.yaml`, `Makefile`, and release workflow.

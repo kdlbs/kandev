@@ -204,6 +204,7 @@ func TestEnabledModeAllowlistMatrix(t *testing.T) {
 		blocked bool
 	}{
 		{name: "health", method: http.MethodGet, path: "/health"},
+		{name: "ready", method: http.MethodGet, path: "/ready"},
 		{name: "features", method: http.MethodGet, path: "/api/v1/features"},
 		{name: "app-state", method: http.MethodGet, path: "/api/v1/app-state"},
 		{name: "login", method: http.MethodPost, path: "/api/v1/auth/login"},
@@ -271,7 +272,7 @@ func TestEnabledModeAllowlistMatrix(t *testing.T) {
 
 		{name: "office without bearer", method: http.MethodGet, path: "/api/v1/office/tasks/t1", blocked: true},
 		{
-			// AC-14 (docs/specs/health-endpoint-version/spec.md): /health
+			// AC-14 (docs/specs/platform/requirements/health-endpoint-version.md): /health
 			// gained a version field, but /api/v1/system/info is not on the
 			// allowlist and must stay rejected — the change must not widen it.
 			name: "system info", method: http.MethodGet, path: "/api/v1/system/info", blocked: true,

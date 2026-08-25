@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/pr-outcome-attribution/spec.md"
+spec: "../../specs/integrations/requirements/pr-outcome-attribution.md"
 ---
 
 # Task 01: Restore GitHub PR Sync Context
@@ -56,8 +56,8 @@ None.
 
 ## Inputs
 
-- `docs/specs/pr-outcome-attribution/spec.md`, section `Sync writer`
-- `docs/specs/platform/workspace-git-status.md`, section
+- `docs/specs/integrations/requirements/pr-outcome-attribution.md`, section `Sync writer`
+- `docs/specs/platform/requirements/workspace-git-status.md`, section
   `Repository-qualified comparison targets`
 - `docs/decisions/2026-08-19-repository-qualified-comparison-targets.md`
 

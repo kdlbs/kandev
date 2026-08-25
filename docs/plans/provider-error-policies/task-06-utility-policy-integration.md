@@ -5,7 +5,7 @@ status: done
 wave: 6
 depends_on: ["04-dynamic-conductor-policy-integration", "05-kanban-recovery-convergence"]
 plan: "plan.md"
-spec: "../../specs/platform/provider-error-recovery.md"
+spec: "../../specs/platform/requirements/provider-error-recovery.md"
 ---
 
 # Task 06: Utility policy integration

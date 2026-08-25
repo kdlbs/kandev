@@ -209,7 +209,9 @@ func TestAutoStartStepPrompt_OfficeWithoutRuntimeEnvFailsClosed(t *testing.T) {
 	if !strings.Contains(content, "KANDEV OFFICE MCP TOOLS") {
 		t.Fatalf("expected Office context, got %q", content)
 	}
-	if strings.Contains(content, "list_workspaces_kandev") || strings.Contains(content, "step_complete_kandev") {
+	// step_complete_kandev is deliberately absent from this check: Office's
+	// canonical context now legitimately advertises it (ADR 0015).
+	if strings.Contains(content, "list_workspaces_kandev") {
 		t.Fatalf("Office auto-start advertised unavailable task-mode tools: %q", content)
 	}
 	if strings.Contains(content, "wrong-task") || strings.Contains(content, "spoof-reference") {

@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/transcript-auto-scroll.md
+spec: docs/specs/ui/requirements/transcript-auto-scroll.md
 created: 2026-07-30
 status: implemented
 ---

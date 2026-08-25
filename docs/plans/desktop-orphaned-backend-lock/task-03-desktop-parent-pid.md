@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-launcher-parent-watchdog"]
 plan: "plan.md"
-spec: "../../specs/desktop-tauri-app/spec.md"
+spec: "../../specs/desktop/requirements/desktop-tauri-app.md"
 parallelism: sequential
 ---
 
@@ -21,7 +21,7 @@ Sequential and last: the launcher must already honor
 ## Inputs
 
 - Plan sections "`KANDEV_LAUNCHER_PARENT_PID`" and "Desktop".
-- Spec: `docs/specs/desktop-tauri-app/spec.md`, the abnormal-termination bullet
+- Spec: `docs/specs/desktop/requirements/desktop-tauri-app.md`, the abnormal-termination bullet
   under "Failure modes" and its matching scenario under "Scenarios".
 - The exact pattern to copy: `launch_and_wait` in
   `apps/desktop/src-tauri/src/backend.rs:263`, which already inserts

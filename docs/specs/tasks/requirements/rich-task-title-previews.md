@@ -25,14 +25,19 @@ This document is the migrated task-system source for the capability. The source 
 
 ## Why
 
-Task titles can be too long for a task row. Users also need a fast way to see
-the direct subtasks and contribution state without opening the parent task.
+Task titles can be too long for a Kanban card. Users also need a fast way to
+see the direct subtasks and contribution state without opening a parent card.
+Repeating a title-only preview in the left sidebar or the task list adds little
+value and competes with those surfaces' navigation.
 
 ## What
 
-- A fine-pointer task row shows a preview after the user points at its title.
+- A fine-pointer Kanban card title shows a preview only when the task has at
+  least one active, direct subtask.
 - The preview shows the full title and as many as 12 direct, active subtasks.
 - Each subtask row shows its task state and its GitHub or GitLab contribution state.
+- The left sidebar and `/tasks` rich list do not mount a task-title preview,
+  including for parent tasks with subtasks.
 - A keyboard user can focus the title trigger and open the same preview.
 - A keyboard user can open a subtask without opening the parent task.
 - A coarse-pointer device keeps the title's direct navigation action.
@@ -59,13 +64,23 @@ Provider-specific code supplies labels, icons, test identifiers, and status rows
 
 ## Failure modes
 
-- If a task has no active direct subtask, the preview shows only the full title.
+- If a Kanban task has no active direct subtask, the title has no preview
+  trigger and keeps the card's normal navigation behavior.
+- A task title in the left sidebar or `/tasks` rich list has no preview,
+  regardless of its subtask count.
 - If GitLab refresh fails, the UI removes cached merge-request data for that workspace.
 - If the device has no fine pointer, the UI does not mount a hover preview.
 
 ## Scenarios
 
-- **GIVEN** a clipped title, **WHEN** a user points at it, **THEN** the preview shows the full title.
+- **GIVEN** a clipped Kanban title with at least one active direct subtask,
+  **WHEN** a user points at it, **THEN** the preview shows the full title and
+  the active direct subtasks.
+- **GIVEN** a childless Kanban card, **WHEN** a user points at its title,
+  **THEN** no title preview opens and the card's normal navigation remains
+  available.
+- **GIVEN** a parent task in the left sidebar or `/tasks` rich list, **WHEN** a
+  user points at its title, **THEN** no task-title preview opens.
 - **GIVEN** a parent with active subtasks, **WHEN** the preview opens, **THEN** it shows each direct subtask up to the limit.
 - **GIVEN** a focused title trigger, **WHEN** a user presses Enter, **THEN** the preview opens and moves focus into its interactive content.
 - **GIVEN** an open preview, **WHEN** a user presses Enter on a subtask, **THEN** the app opens the subtask and not the parent.
@@ -77,6 +92,9 @@ Provider-specific code supplies labels, icons, test identifiers, and status rows
 
 - The feature does not add nested preview levels.
 - The feature does not add backend status projection fields.
+- The feature does not show the task-title preview in the left sidebar or
+  `/tasks` rich list.
+- The feature does not change the separate GitHub PR or GitLab MR badge hovers.
 - The feature does not change mobile task navigation.
 
 ## Implementation plan

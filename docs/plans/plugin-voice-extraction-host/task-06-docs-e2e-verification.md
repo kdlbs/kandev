@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["03-chat-composer-adapters", "04-creation-composer-adapters", "05-authenticated-webhook-handler"]
 plan: "plan.md"
-spec: "../../specs/plugins/voice-extraction-host.md"
+spec: "../../specs/plugins/requirements/voice-extraction-host.md"
 ---
 
 # Task 06: Document And Verify Extraction Prerequisites
@@ -32,7 +32,7 @@ node --test scripts/validate-public-docs.test.mjs
 
 ## Files Likely Touched
 
-- `docs/specs/plugins/spec.md`
+- `docs/specs/plugins/requirements/plugins.md`
 - `docs/plans/plugins/PLUGIN-API.md`
 - `docs/public/plugins-authoring.md`
 - `docs/public/plugins-manifest.md`

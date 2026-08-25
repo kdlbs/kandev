@@ -2,7 +2,7 @@
 created: 2026-08-24
 status: implemented
 requirements:
-  - REQ-UI-MARKDOWN-TABLE-RESIZE-001
+  - REQ-UI-RESIZABLE-MARKDOWN-TABLES-001
 system_design:
   - ../../specs/ui/system-design/resizable-markdown-tables.md
 legacy_specs: []
@@ -78,16 +78,17 @@ dependency-global selectors or import ProseMirror's global table stylesheet.
 
 ## Tests
 
-- `AC-UI-MARKDOWN-TABLE-RESIZE-001.1`, `.2`, `.3`, `.5`, `.6`, and `.8`:
+- `AC-UI-RESIZABLE-MARKDOWN-TABLES-001.1`, `.3`, `.7`, `.8`, `.9`, `.11`,
+  and `.13`:
   extend
   `apps/web/components/task/markdown-preview-content.external-link.test.tsx`
   and retain the existing geometry/hook tests under
   `apps/web/components/shared/` and `apps/web/lib/markdown/`.
-- `AC-UI-MARKDOWN-TABLE-RESIZE-001.4` and `.6`: use a rendered Plan table to
+- `AC-UI-RESIZABLE-MARKDOWN-TABLES-001.10` and `.11`: use a rendered Plan table to
   prove in `apps/web/components/editors/tiptap/tiptap-plan-editor.test.tsx` and
   Playwright that responsive TipTap configuration changes geometry without
   changing serialized Markdown.
-- `AC-UI-MARKDOWN-TABLE-RESIZE-001.7`: cover file-preview and Plan mobile paths
+- `AC-UI-RESIZABLE-MARKDOWN-TABLES-001.12`: cover file-preview and Plan mobile paths
   in the configured Mobile Chrome project.
 
 ## E2E tests

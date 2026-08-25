@@ -194,24 +194,10 @@ func (e *Engine) requiredSeats(ctx context.Context, stepID, taskID, role string)
 }
 
 func (e *Engine) requiredSeatsForWorkflow(ctx context.Context, stepID, taskID, workflowID, role string) ([]ParticipantInfo, error) {
-	var perTask []ParticipantInfo
-	var err error
-	if scoped, ok := e.participants.(WorkflowScopedParticipantStore); ok && workflowID != "" {
-		perTask, err = scoped.ListTaskParticipantsForWorkflow(ctx, taskID, workflowID)
-	} else {
-		perTask, err = e.participants.ListTaskParticipants(ctx, taskID)
-	}
+	gathered, err := gatherParticipantSlate(ctx, e.participants, stepID, taskID, workflowID)
 	if err != nil {
-		return nil, fmt.Errorf("list task participants for quorum: %w", err)
+		return nil, err
 	}
-	template, err := e.participants.ListStepParticipants(ctx, stepID, "")
-	if err != nil {
-		return nil, fmt.Errorf("list step participants for quorum: %w", err)
-	}
-
-	gathered := make([]ParticipantInfo, 0, len(perTask)+len(template))
-	gathered = append(gathered, perTask...)
-	gathered = append(gathered, template...)
 
 	filtered := make([]ParticipantInfo, 0, len(gathered))
 	for _, p := range gathered {
@@ -223,6 +209,35 @@ func (e *Engine) requiredSeatsForWorkflow(ctx context.Context, stepID, taskID, w
 
 	canonical := canonicalizeByTaskRoleAgent(filtered, stepID)
 	return collapseByRoleAgent(canonical), nil
+}
+
+// gatherParticipantSlate implements AC-50 step 1, shared by the quorum guard
+// and every fan-out/resolution call site that must see the same participant
+// population the guard counts: per-task rows for taskID at ANY step
+// (workflow-scoped when the store supports it and workflowID is known)
+// unioned with template rows (task_id="") at the evaluating step only. It
+// does not filter by role/decision_required or dedupe — callers apply their
+// own filter and canonicalizeByTaskRoleAgent/collapseByRoleAgent afterward.
+func gatherParticipantSlate(ctx context.Context, store ParticipantStore, stepID, taskID, workflowID string) ([]ParticipantInfo, error) {
+	var perTask []ParticipantInfo
+	var err error
+	if scoped, ok := store.(WorkflowScopedParticipantStore); ok && workflowID != "" {
+		perTask, err = scoped.ListTaskParticipantsForWorkflow(ctx, taskID, workflowID)
+	} else {
+		perTask, err = store.ListTaskParticipants(ctx, taskID)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("list task participants: %w", err)
+	}
+	template, err := store.ListStepParticipants(ctx, stepID, "")
+	if err != nil {
+		return nil, fmt.Errorf("list step participants: %w", err)
+	}
+
+	gathered := make([]ParticipantInfo, 0, len(perTask)+len(template))
+	gathered = append(gathered, perTask...)
+	gathered = append(gathered, template...)
+	return gathered, nil
 }
 
 // seatCanonKey identifies a row for AC-44 canonicalization: (task_id, role,

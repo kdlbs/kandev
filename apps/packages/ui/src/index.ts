@@ -14,6 +14,7 @@ export * from "./chart";
 export * from "./checkbox";
 export * from "./collapsible";
 export * from "./command";
+export * from "./compositor-spin";
 export * from "./context-menu";
 export * from "./dialog";
 export * from "./drawer";

@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/routing"
 	"github.com/kandev/kandev/internal/office/service"
+	"github.com/kandev/kandev/internal/office/shared"
 )
 
 // ErrRoutingNotSupported is returned by TaskStarter.StartTaskWithRoute
@@ -61,9 +62,12 @@ const (
 	RunReasonTaskChildrenCompleted = "task_children_completed"
 	RunReasonApprovalResolved      = "approval_resolved"
 	RunReasonRoutineTrigger        = "routine_trigger"
-	RunReasonHeartbeat             = "heartbeat"
-	RunReasonBudgetAlert           = "budget_alert"
-	RunReasonAgentError            = "agent_error"
+	// RunReasonHeartbeat aliases shared.RunReasonHeartbeat so this package's
+	// local constant and the shared idle-skip classifier cannot drift apart
+	// the way the un-aliased pair did before WO-46 (Review round 1, S2).
+	RunReasonHeartbeat   = shared.RunReasonHeartbeat
+	RunReasonBudgetAlert = "budget_alert"
+	RunReasonAgentError  = "agent_error"
 
 	// Reactivity-pipeline reasons.
 	RunReasonTaskUnblocked         = "task_unblocked"            // status: blocked → not blocked

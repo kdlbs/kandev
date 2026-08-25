@@ -180,7 +180,7 @@ func scanClarificationBundleRows(rows *sql.Rows, isPostgres bool) ([]models.Clar
 }
 
 // visibilityPredicate builds the L1c/L1d three-way disjunction (spec
-// docs/specs/external-question-answering/spec.md, "L1c"/"L1d"): the task's
+// docs/specs/integrations/requirements/external-question-answering.md, "L1c"/"L1d"): the task's
 // workspace_id is empty, names no existing workspace row, or is in the L1a
 // visible set. For an unscoped caller the predicate is satisfied
 // unconditionally, so no clause is added at all.

@@ -7,7 +7,7 @@ depends_on:
   - "01-glossary-and-converter"
   - "02-register-locales-runtime"
 plan: "plan.md"
-spec: "../../specs/platform/traditional-chinese-locales.md"
+spec: "../../specs/platform/requirements/traditional-chinese-locales.md"
 ---
 
 # Task 03: Generate web zh-tw and zh-hk catalogs from zh-cn

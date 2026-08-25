@@ -53,7 +53,7 @@ test.describe("Plan table column resizing", () => {
     apiClient,
     seedData,
   }) => {
-    // Covers AC-UI-MARKDOWN-TABLE-RESIZE-001.4, .6, and .8.
+    // Covers AC-UI-RESIZABLE-MARKDOWN-TABLES-001.10 and .11.
     test.setTimeout(120_000);
     await testPage.setViewportSize({ width: 1100, height: 800 });
     const { initialPlan, session, taskId } = await seedPlanTable(testPage, apiClient, seedData);

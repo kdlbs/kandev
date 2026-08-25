@@ -333,6 +333,10 @@ export type PluginTaskFilterRegistrationKey = `${string}:${string}`;
  */
 export type TaskFilterRegistration = PluginSDK.TaskFilterRegistration;
 
+/** A plugin-provided, client-side facet for sorting and grouping `/tasks`. */
+export type TaskListFacetRegistration = PluginSDK.TaskListFacetRegistration;
+export type TaskListFacetValue = PluginSDK.TaskListFacetValue;
+
 /** One entry returned by `host.storage.list`. */
 export type PluginStorageEntry = PluginSDK.PluginStorageEntry;
 
