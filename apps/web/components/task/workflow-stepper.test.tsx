@@ -1,6 +1,23 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ComponentProps, ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkflowStepper, type WorkflowStepperStep } from "./workflow-stepper";
+
+const { moveTaskMock } = vi.hoisted(() => ({ moveTaskMock: vi.fn() }));
+
+function Passthrough({ children }: { children: ReactNode }) {
+  return <>{children}</>;
+}
+
+vi.mock("@/lib/api", () => ({
+  moveTask: moveTaskMock,
+}));
+
+vi.mock("@kandev/ui/hover-card", () => ({
+  HoverCard: Passthrough,
+  HoverCardTrigger: Passthrough,
+  HoverCardContent: Passthrough,
+}));
 
 afterEach(() => {
   cleanup();
@@ -86,5 +103,25 @@ describe("WorkflowStepper", () => {
     collapsedMock.mockReturnValue(false);
     const { container } = render(<WorkflowStepper steps={[]} currentStepId={null} />);
     expect(container.innerHTML).toBe("");
+  });
+
+  it("reports a rejected move to the owning surface", async () => {
+    const error = new Error("task has an active session (RUNNING)");
+    moveTaskMock.mockRejectedValueOnce(error);
+    const onMoveError = vi.fn();
+    const props = {
+      steps: STEPS,
+      currentStepId: "b",
+      taskId: "task-1",
+      workflowId: "workflow-1",
+      onMoveError,
+    } as ComponentProps<typeof WorkflowStepper> & { onMoveError: typeof onMoveError };
+
+    render(<WorkflowStepper {...props} />);
+    const moveButton = screen.getAllByRole("button", { name: "Move here" })[0];
+    fireEvent.click(moveButton);
+
+    await waitFor(() => expect(onMoveError).toHaveBeenCalledWith(error));
+    expect(moveButton.hasAttribute("disabled")).toBe(false);
   });
 });
