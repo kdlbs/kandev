@@ -17,6 +17,7 @@
   "buildFailedWithMessage": "A compilação falhou: {{message}}",
   "buildFailedWithStatus": "A compilação falhou ({{status}}): {{text}}",
   "buildImage": "Construir imagem",
+  "buildImageAdminOnly": "Apenas os administradores podem construir imagens.",
   "buildThisDockerImageBeforeCreating": "Construa esta imagem Docker antes de criar o perfil.",
   "building": "A construir...",
   "checking": "A verificar...",

@@ -2,10 +2,17 @@ package handlers
 
 import (
 	"context"
+	"errors"
 
+	"github.com/kandev/kandev/internal/workflow/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
+
+// notFoundMessage is the single reply for anything the caller may not see and
+// anything that does not exist: one wording, so the frame itself cannot be
+// used to tell the two apart.
+const notFoundMessage = "Not found"
 
 func (h *Handlers) wsGetByID(
 	ctx context.Context, msg *ws.Message,
@@ -24,7 +31,14 @@ func (h *Handlers) wsGetByID(
 	resp, err := fn(ctx, req.ID)
 	if err != nil {
 		h.logger.Error(logErrMsg, zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, clientErrMsg, nil)
+		// A denial and a genuine miss share one reply. Anything else is a
+		// failure and must not be dressed up as a missing resource — the
+		// authorization step reads the repository, so a database error can
+		// reach here now.
+		if service.IsNotFound(err) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, clientErrMsg, nil)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, clientErrMsg, nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
@@ -40,6 +54,10 @@ func (h *Handlers) wsHandleStringField(
 	resp, err := fn(ctx, fieldValue)
 	if err != nil {
 		h.logger.Error(logErrMsg, zap.Error(err))
+		if errors.Is(err, service.ErrNotVisible) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, notFoundMessage, nil)
+		}
+
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, clientErrMsg, nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)

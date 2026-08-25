@@ -28,6 +28,31 @@ import (
 	userstore "github.com/kandev/kandev/internal/user/store"
 )
 
+// newDisabledAuthService builds an auth service with the feature off, the
+// pre-auth single-user state.
+func newDisabledAuthService(t *testing.T) *auth.Service {
+	t.Helper()
+	conn, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	users, cleanup, err := userstore.Provide(conn, conn)
+	if err != nil {
+		t.Fatalf("user store: %v", err)
+	}
+	t.Cleanup(func() { _ = cleanup() })
+	st, err := authstore.New(conn, conn)
+	if err != nil {
+		t.Fatalf("auth store: %v", err)
+	}
+	svc, err := auth.NewService(context.Background(), auth.Deps{Cfg: &config.Config{}, Store: st, Users: users})
+	if err != nil {
+		t.Fatalf("auth service: %v", err)
+	}
+	return svc
+}
+
 // newEnabledAuthService builds an auth service in ModeEnabled (features.auth
 // on + an admin identity exists) over an in-memory store pair — the state the
 // plugin SSO bridge requires.
