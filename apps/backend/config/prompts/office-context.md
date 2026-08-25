@@ -16,7 +16,6 @@ Available tools:
 - list_task_documents_kandev: List documents on an accessible related task. Required: task_id.
 - get_task_document_kandev: Read one document on an accessible related task. Required: task_id, document_key.
 - write_task_document_kandev: Create or replace a document on the current task or an ancestor. Required: task_id, document_key, content. Optional: title, type.
-- list_task_comments_kandev: Read a related task's comments (all authors, agent and human). Optional: task_id (defaults to the current task), limit (defaults to 20, max 100).
 - record_step_decision_kandev: Record an approve/reject decision for the current workflow step, as a reviewer or approver. Required: decision ("approved" or "rejected"), reason. Not idempotent: a second call supersedes the first.
 - step_complete_kandev: Signal that every requirement for the current workflow step is satisfied when the step requires an explicit signal. Required: summary.
 {step_complete_instruction}

@@ -435,7 +435,6 @@ const (
 	ActionMCPListTaskDocuments = "mcp.list_task_documents"
 	ActionMCPGetTaskDocument   = "mcp.get_task_document"
 	ActionMCPWriteTaskDocument = "mcp.write_task_document"
-	ActionMCPListTaskComments  = "mcp.list_task_comments"
 	ActionMCPListPluginTools   = "mcp.list_plugin_tools"
 	ActionMCPInvokePluginTool  = "mcp.invoke_plugin_tool"
 

@@ -504,7 +504,6 @@ func (h *Handlers) registerConfigModeHandlers(d *guardedMCPDispatcher) {
 		d.RegisterFunc(ws.ActionMCPListTaskDocuments, h.handleListTaskDocuments)
 		d.RegisterFunc(ws.ActionMCPGetTaskDocument, h.handleGetTaskDocument)
 		d.RegisterFunc(ws.ActionMCPWriteTaskDocument, h.handleWriteTaskDocument)
-		d.RegisterFunc(ws.ActionMCPListTaskComments, h.handleListTaskComments)
 	}
 	if h.dashboardSvc != nil {
 		d.RegisterFunc(ws.ActionMCPRecordStepDecision, h.handleRecordStepDecision)
