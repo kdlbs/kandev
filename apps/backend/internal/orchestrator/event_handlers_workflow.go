@@ -1278,10 +1278,18 @@ func (s *Service) queueOfficeAutoStartRun(ctx context.Context, task *models.Task
 // step for the lifetime of the task: the first attempt after the review
 // round-trip is silently swallowed by the 24h service-level idempotency
 // check, and after that window a later attempt hard-fails against the
-// permanent idx_run_idempotency unique index. task.UpdatedAt is written in
-// the same transaction as the task_step_transitions row for the entry, so it
-// is stable for the lifetime of one step entry and changes on every
-// re-entry.
+// permanent idx_run_idempotency unique index.
+//
+// task.UpdatedAt is a monotonic per-write marker, not a per-entry constant:
+// any write to the row (a metadata key set/removed, not only a step move)
+// bumps it, so it is NOT guaranteed stable across two deliveries of the same
+// entry. It only needs to guarantee the other direction — a real re-entry
+// always changes it, since every writer that moves tasks.workflow_step_id is
+// required to bump updated_at in the same transaction (enforced repo-wide by
+// TestStepTransitionWritersArePinned). Suppressing a duplicate delivery
+// within one entry is NOT this key's job: that is what MetaKeyAutoStartClaimed
+// and MetaKeyQueuePromotionPending (claimed before this function ever runs)
+// plus CoalesceWindowSeconds already guard.
 func officeAutoStartIdempotencyKey(task *models.Task, agentProfileID, stepID string) string {
 	return fmt.Sprintf("%s:%s:%s:%s:%s",
 		officeAutoStartRunReason, task.ID, agentProfileID, stepID,

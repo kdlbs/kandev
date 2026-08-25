@@ -152,3 +152,76 @@ func TestAutoStartOfficeTaskLogsDedupedOutcomeNotAsQueued(t *testing.T) {
 		t.Errorf("a deduped QueueRun call must not be logged as %q, got %d such entries", queuedMsg, n)
 	}
 }
+
+// TestOfficeAutoStartIdempotencyKeyAcrossRealDeliveries connects the two unit
+// facts pinned above (a fixed task.UpdatedAt reproduces the same key; a
+// changed one does not) to the actual re-entry path: handleTaskMovedNoSession
+// reloads the task from the repository on every delivery, so what actually
+// keeps two deliveries of the same step entry deduping is that nothing in
+// between them writes to the task row. Drive that through the real SQLite
+// repo instead of constructing *models.Task values by hand.
+func TestOfficeAutoStartIdempotencyKeyAcrossRealDeliveries(t *testing.T) {
+	ctx := context.Background()
+
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+	requireNoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}))
+	requireNoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}))
+	requireNoError(t, repo.CreateTask(ctx, &models.Task{
+		ID:                     "t-office-real-deliveries",
+		WorkspaceID:            "ws1",
+		WorkflowID:             "wf1",
+		WorkflowStepID:         "step1",
+		ProjectID:              "proj1",
+		Title:                  "Office Task",
+		Description:            "prompt",
+		State:                  v1.TaskStateCreated,
+		AssigneeAgentProfileID: "assignee-profile",
+		CreatedAt:              now,
+		UpdatedAt:              now,
+	}))
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+		ID: "step2", WorkflowID: "wf1", Name: "Work", Position: 1,
+		Events: wfmodels.StepEvents{
+			OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterAutoStartAgent}},
+		},
+	}
+
+	adapter := &fakeRunQueueAdapter{calls: make(chan engine.QueueRunRequest, 3)}
+	svc := createTestServiceWithAgent(repo, stepGetter, newMockTaskRepo(), failIfLaunched(t))
+	svc.engineRunQueue = adapter
+	svc.enginePrimary = &fakePrimaryAgentResolver{agentProfileID: "resolved-primary"}
+
+	deliver := func() engine.QueueRunRequest {
+		svc.handleTaskMovedNoSession(ctx, watcher.TaskMovedEventData{
+			TaskID:   "t-office-real-deliveries",
+			ToStepID: "step2",
+		})
+		select {
+		case req := <-adapter.calls:
+			return req
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for QueueRun to be called")
+			return engine.QueueRunRequest{}
+		}
+	}
+
+	firstDelivery := deliver()
+	secondDelivery := deliver()
+	if firstDelivery.IdempotencyKey != secondDelivery.IdempotencyKey {
+		t.Errorf("two deliveries of the same step entry must produce the same idempotency key, got %q and %q",
+			firstDelivery.IdempotencyKey, secondDelivery.IdempotencyKey)
+	}
+
+	task, err := repo.GetTask(ctx, "t-office-real-deliveries")
+	requireNoError(t, err)
+	requireNoError(t, repo.UpdateTask(ctx, task))
+
+	thirdDelivery := deliver()
+	if thirdDelivery.IdempotencyKey == secondDelivery.IdempotencyKey {
+		t.Errorf("a real re-entry (task row updated in between) must change the idempotency key, but it stayed %q",
+			thirdDelivery.IdempotencyKey)
+	}
+}
