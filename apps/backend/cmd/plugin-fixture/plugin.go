@@ -252,7 +252,15 @@ func (p *fixturePlugin) handleAutomationsProbe(ctx context.Context, workspaceID 
 	ar := host.Automations()
 	automations, _, err := ar.List(ctx, workspaceID, pluginsdk.Page{Limit: 50})
 	if err != nil {
-		return nil, fmt.Errorf("plugin-fixture: ListAutomations: %w", err)
+		// The host may not support the Automations RPC (older backend).
+		// Return a diagnostic so the probe is never a hard failure and the
+		// test runner can distinguish "host too old" from "no automations".
+		body, _ := json.Marshal(map[string]any{
+			"error":                          fmt.Sprintf("list automations: %s", err),
+			"total_automations":              0,
+			"coordinator_target_automations": 0,
+		})
+		return &pluginsdk.PluginActionResponse{Body: body}, nil
 	}
 	// Filter for coordinator-targeted automations (task_mode == automation_run).
 	var coordinatorTarget []*pluginsdk.Automation
