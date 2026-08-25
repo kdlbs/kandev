@@ -79,7 +79,7 @@ func TestHandleListTaskComments_DispatchesToServiceAndProjects(t *testing.T) {
 	h, _, parentID, childID := newCommentsHandoffFixture(t)
 
 	msg := makeWSMessage(t, ws.ActionMCPListTaskComments, map[string]any{
-		"task_id": childID, "caller_task_id": parentID,
+		"task_id": childID, "caller_task_id": parentID, "limit": 20,
 	})
 	resp, err := h.handleListTaskComments(context.Background(), msg)
 	require.NoError(t, err)

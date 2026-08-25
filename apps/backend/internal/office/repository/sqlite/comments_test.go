@@ -48,9 +48,11 @@ func TestTaskComment_CRUD(t *testing.T) {
 // lexicographically (ORDER BY created_at DESC, id DESC), so mixing a
 // local-offset timestamp with a UTC one on the same task can invert true
 // chronological order even though both values name valid instants.
-// Actions.PostComment (internal/office/runtime/actions.go) sets
-// CreatedAt: time.Now() (local server time, not .UTC()), so this is a
-// real production write path, not a hypothetical.
+// This guards CreateTaskComment's own normalization directly; it does not
+// depend on any caller already passing a UTC time. Actions.PostComment
+// (internal/office/runtime/actions.go) sets CreatedAt: time.Now().UTC()
+// itself, but CreateTaskComment must not regress if a future or external
+// caller passes a non-UTC CreatedAt.
 func TestCreateTaskComment_NormalizesNonZeroCreatedAtToUTC(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
