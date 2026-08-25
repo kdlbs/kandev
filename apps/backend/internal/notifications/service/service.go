@@ -41,6 +41,12 @@ type TaskContextReader interface {
 	GetWorkspace(ctx context.Context, id string) (*taskmodels.Workspace, error)
 }
 
+// AuthEnforced reports whether authentication is currently enforced. It is a
+// predicate rather than a snapshot because the mode flips at runtime when the
+// setup wizard completes. A nil AuthEnforced means "not enforced": the
+// single-user install that predates authentication.
+type AuthEnforced func() bool
+
 type Service struct {
 	defaultProvidersMu sync.Mutex
 	repo               notificationstore.Repository
@@ -48,9 +54,15 @@ type Service struct {
 	hub                *gatewayws.Hub
 	logger             *logger.Logger
 	providers          map[models.ProviderType]providers.Provider
+	authEnforced       AuthEnforced
 }
 
-func NewService(repo notificationstore.Repository, taskRepo TaskContextReader, hub *gatewayws.Hub, log *logger.Logger) *Service {
+// NewService builds the notification service. authEnforced decides what
+// happens when a notification's owner cannot be resolved: with authentication
+// enforced the notification is dropped, otherwise it falls back to the single
+// pre-auth user. It is a constructor parameter rather than a setter so no call
+// site can silently leave the fail-closed behavior unwired.
+func NewService(repo notificationstore.Repository, taskRepo TaskContextReader, hub *gatewayws.Hub, log *logger.Logger, authEnforced AuthEnforced) *Service {
 	providerMap := map[models.ProviderType]providers.Provider{
 		models.ProviderTypeLocal:   providers.NewLocalProvider(hub),
 		models.ProviderTypeApprise: providers.NewAppriseProvider(),
@@ -59,11 +71,12 @@ func NewService(repo notificationstore.Repository, taskRepo TaskContextReader, h
 		providerMap[models.ProviderTypeSystem] = providers.NewSystemProvider()
 	}
 	return &Service{
-		repo:      repo,
-		taskRepo:  taskRepo,
-		hub:       hub,
-		logger:    log.WithFields(zap.String("component", "notifications-service")),
-		providers: providerMap,
+		repo:         repo,
+		taskRepo:     taskRepo,
+		hub:          hub,
+		logger:       log.WithFields(zap.String("component", "notifications-service")),
+		providers:    providerMap,
+		authEnforced: authEnforced,
 	}
 }
 
@@ -214,6 +227,10 @@ func (s *Service) handleSemanticOccurrence(ctx context.Context, taskID, sessionI
 	if occurrenceID == "" {
 		return
 	}
+	recipients, ok := s.recipients(ctx, taskID, eventType)
+	if !ok {
+		return
+	}
 	title, body := s.buildSemanticMessage(ctx, taskID, eventType, payload)
 	message := notificationPayload{
 		TaskID:        taskID,
@@ -224,7 +241,7 @@ func (s *Service) handleSemanticOccurrence(ctx context.Context, taskID, sessionI
 		Body:          body,
 		Payload:       payload,
 	}
-	for _, userID := range s.recipients(ctx, taskID, eventType) {
+	for _, userID := range recipients {
 		s.deliverOccurrence(ctx, userID, message)
 	}
 }
@@ -263,61 +280,103 @@ func (s *Service) deliverOccurrence(ctx context.Context, userID string, message 
 	}
 }
 
-// recipients resolves who a notification belongs to. A task event belongs to
-// the single owner of the workspace it happened in; resolving it to a constant
-// is what pushed one user's task titles into another user's webhook. An
-// instance-wide event (a new release) has no owning workspace, so it fans out
-// to every user that owns providers instead of landing on one of them.
-func (s *Service) recipients(ctx context.Context, taskID, eventType string) []string {
+// recipients resolves who a notification belongs to, reporting false when it
+// must not be delivered at all. A task event belongs to the single owner of
+// the workspace it happened in; resolving it to a constant is what pushed one
+// user's task titles into another user's webhook. An instance-wide event (a
+// new release) has no owning workspace, so it fans out to every user that owns
+// providers instead of landing on one of them.
+func (s *Service) recipients(ctx context.Context, taskID, eventType string) ([]string, bool) {
 	if eventType == EventSystemUpdateAvailable {
 		return s.providerOwners(ctx)
 	}
-	return []string{s.workspaceOwnerForTask(ctx, taskID)}
+	owner, ok := s.workspaceOwnerForTask(ctx, taskID)
+	if !ok {
+		return nil, false
+	}
+	return []string{owner}, true
 }
 
 // workspaceOwnerForTask resolves the owner of the workspace a task lives in.
-// It falls back to the default user whenever ownership cannot be established
-// (auth disabled, a pre-auth workspace whose owner_id is still empty, or an
-// unresolvable task) so single-user installs behave exactly as before.
-func (s *Service) workspaceOwnerForTask(ctx context.Context, taskID string) string {
+//
+// A failed lookup is NOT the default user. Under enforced authentication that
+// substitution would hand the task title and session state to the default
+// administrator's webhook and WebSocket connections, which is the very
+// cross-user leak this scoping exists to close, just behind a narrower trigger
+// (a deleted task, a workspace-deletion race, a transient database error).
+// Unresolvable ownership therefore drops the notification; see unresolvedOwner
+// for the one case that still falls back.
+func (s *Service) workspaceOwnerForTask(ctx context.Context, taskID string) (string, bool) {
 	if taskID == "" || s.taskRepo == nil {
-		return userstore.DefaultUserID
+		return s.unresolvedOwner("notification names no resolvable task", zap.String("task_id", taskID))
 	}
 	task, err := s.taskRepo.GetTask(ctx, taskID)
 	if err != nil || task == nil {
-		return userstore.DefaultUserID
+		return s.unresolvedOwner("failed to resolve the task a notification belongs to",
+			zap.String("task_id", taskID), zap.Error(err))
 	}
 	return s.workspaceOwner(ctx, task.WorkspaceID)
 }
 
-func (s *Service) workspaceOwner(ctx context.Context, workspaceID string) string {
+func (s *Service) workspaceOwner(ctx context.Context, workspaceID string) (string, bool) {
 	if workspaceID == "" || s.taskRepo == nil {
-		return userstore.DefaultUserID
+		return s.unresolvedOwner("notification names no resolvable workspace",
+			zap.String("workspace_id", workspaceID))
 	}
 	workspace, err := s.taskRepo.GetWorkspace(ctx, workspaceID)
-	if err != nil || workspace == nil || workspace.OwnerID == "" {
-		return userstore.DefaultUserID
+	if err != nil || workspace == nil {
+		return s.unresolvedOwner("failed to resolve the workspace a notification belongs to",
+			zap.String("workspace_id", workspaceID), zap.Error(err))
 	}
-	return workspace.OwnerID
+	if workspace.OwnerID == "" {
+		// A workspace that loaded successfully and is explicitly unowned is a
+		// pre-auth row the setup wizard has not claimed yet. That wizard
+		// promotes the default-user row into the admin account, so the row
+		// already belongs to whoever will own it. This is a known owner, not
+		// a failed lookup.
+		return userstore.DefaultUserID, true
+	}
+	return workspace.OwnerID, true
 }
 
-func (s *Service) providerOwners(ctx context.Context) []string {
+// unresolvedOwner decides what an unresolvable owner means. With
+// authentication enforced there is more than one account that could wrongly
+// receive the notification, so it is dropped. Otherwise the instance has
+// exactly one user and the pre-auth default keeps single-user behavior
+// byte-identical.
+func (s *Service) unresolvedOwner(reason string, fields ...zap.Field) (string, bool) {
+	if s.authEnforced == nil || !s.authEnforced() {
+		return userstore.DefaultUserID, true
+	}
+	s.logger.Warn(reason+"; dropping it rather than delivering to another account", fields...)
+	return "", false
+}
+
+func (s *Service) providerOwners(ctx context.Context) ([]string, bool) {
 	owners, err := s.repo.ListProviderUserIDs(ctx)
 	if err != nil {
 		s.logger.Error("failed to resolve notification recipients", zap.Error(err))
-		return []string{userstore.DefaultUserID}
+		owner, ok := s.unresolvedOwner("failed to list notification provider owners")
+		if !ok {
+			return nil, false
+		}
+		return []string{owner}, true
 	}
 	if len(owners) == 0 {
-		return []string{userstore.DefaultUserID}
+		return []string{userstore.DefaultUserID}, true
 	}
-	return owners
+	return owners, true
 }
 
 // HandleInboxItem sends notifications for a new office inbox item. The item's
-// workspace names the recipient; an item carrying no workspace context stays
-// with the default user rather than fanning out to everyone.
+// workspace names the recipient. An item carrying no workspace context has no
+// resolvable owner, so under enforced authentication it is dropped rather than
+// delivered to whichever account the fallback would pick.
 func (s *Service) HandleInboxItem(ctx context.Context, workspaceID, itemType, title string) {
-	userID := s.workspaceOwner(ctx, workspaceID)
+	userID, ok := s.workspaceOwner(ctx, workspaceID)
+	if !ok {
+		return
+	}
 	providers, subscriptions, err := s.ListProviders(ctx, userID)
 	if err != nil {
 		s.logger.Error("failed to load notification providers for inbox item", zap.Error(err))

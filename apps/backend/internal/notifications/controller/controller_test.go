@@ -40,7 +40,7 @@ func testCreateProviderEvents(t *testing.T, request dto.UpsertProviderRequest, w
 		t.Fatalf("create logger: %v", err)
 	}
 	repo := &controllerRepository{}
-	controller := NewController(service.NewService(repo, nil, nil, log))
+	controller := NewController(service.NewService(repo, nil, nil, log, nil))
 	provider, err := controller.CreateProvider(context.Background(), request)
 	if err != nil {
 		t.Fatalf("create provider: %v", err)

@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
+	notificationservice "github.com/kandev/kandev/internal/notifications/service"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -87,6 +88,16 @@ func provideAuthService(
 		Backfills: backfills,
 		Log:       log,
 	})
+}
+
+// notificationAuthEnforced tells the notification service whether more than
+// one account can exist. It decides what an unresolvable notification owner
+// means: with authentication enforced the notification is dropped, because
+// falling back to the default user would deliver another user's task title and
+// session state to the administrator's webhook. A nil auth service is a build
+// with authentication unavailable, which is the single-user case.
+func notificationAuthEnforced(authSvc *auth.Service) notificationservice.AuthEnforced {
+	return func() bool { return authSvc != nil && authSvc.Mode() != auth.ModeDisabled }
 }
 
 // gatewayAuthPolicy assembles the WS gateway scoping hooks from the auth and

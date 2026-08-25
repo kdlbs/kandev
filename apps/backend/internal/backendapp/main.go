@@ -837,6 +837,9 @@ func startGatewayAndServe(
 		orchestratorSvc, lifecycleMgr, agentRegistry,
 		repos.Notification, repos.Task, repos.Terminal, services.GitHub, services.GitLab,
 		referenceValidator,
+		// Notifications drop rather than redirect when a task's owner cannot
+		// be resolved while authentication is enforced.
+		services.Auth,
 		cfg.ResolvedHomeDir(),
 		cfg.Limits.LSPMaxConnections,
 	)

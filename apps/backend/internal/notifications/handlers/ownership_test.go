@@ -58,7 +58,7 @@ func newProviderAPI(t *testing.T) *gin.Engine {
 		}
 		c.Next()
 	})
-	RegisterRoutes(router, controller.NewController(service.NewService(repo, nil, nil, log)), log)
+	RegisterRoutes(router, controller.NewController(service.NewService(repo, nil, nil, log, nil)), log)
 	return router
 }
 

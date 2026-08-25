@@ -12,6 +12,7 @@ import (
 	agenthandlers "github.com/kandev/kandev/internal/agent/handlers"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/auth"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/scripts"
 	"github.com/kandev/kandev/internal/entityrefs"
@@ -117,6 +118,7 @@ func provideGateway(
 	githubSvc *github.Service,
 	gitlabSvc *gitlab.Service,
 	referenceValidator entityrefs.SubmissionValidator,
+	authSvc *auth.Service,
 	dataDir string,
 	lspMaxConnections ...int,
 ) (*gateways.Gateway, *notificationservice.Service, *notificationcontroller.Controller, *terminalservice.Service, error) {
@@ -379,7 +381,8 @@ func provideGateway(
 	if taskRepo != nil {
 		notificationTasks = taskRepo
 	}
-	notificationSvc := notificationservice.NewService(notificationRepo, notificationTasks, gateway.Hub, log)
+	notificationSvc := notificationservice.NewService(
+		notificationRepo, notificationTasks, gateway.Hub, log, notificationAuthEnforced(authSvc))
 	notificationCtrl := notificationcontroller.NewController(notificationSvc)
 	if eventBus != nil {
 		_, err = eventBus.Subscribe(events.TurnCompleted, func(ctx context.Context, event *bus.Event) error {

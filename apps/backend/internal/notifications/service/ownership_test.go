@@ -166,7 +166,7 @@ func (t ownedWorkspaceTasks) GetWorkspace(_ context.Context, id string) (*taskmo
 	return &taskmodels.Workspace{ID: id, OwnerID: t.ownerID}, nil
 }
 
-func newOwnershipTestService(t *testing.T, repo notificationstore.Repository, tasks TaskContextReader) (*Service, *captureProvider) {
+func newOwnershipTestService(t *testing.T, repo notificationstore.Repository, tasks TaskContextReader, authEnforced bool) (*Service, *captureProvider) {
 	t.Helper()
 	// Keep the auto-provisioned system provider out so assertions count only
 	// the providers the test seeded; SystemProvider.Available() is true on
@@ -176,7 +176,7 @@ func newOwnershipTestService(t *testing.T, repo notificationstore.Repository, ta
 	if err != nil {
 		t.Fatalf("create logger: %v", err)
 	}
-	svc := NewService(repo, tasks, nil, log)
+	svc := NewService(repo, tasks, nil, log, func() bool { return authEnforced })
 	capture := &captureProvider{}
 	svc.providers[models.ProviderTypeLocal] = capture
 	return svc, capture
@@ -197,7 +197,7 @@ func TestTaskNotificationReachesOnlyTheOwningWorkspacesUser(t *testing.T) {
 	repo := newMultiUserRepository()
 	repo.seedProvider("user-a", "slack://user-a", EventTaskSessionTurnFinished)
 	repo.seedProvider("user-b", "slack://user-b", EventTaskSessionTurnFinished)
-	svc, capture := newOwnershipTestService(t, repo, ownedWorkspaceTasks{workspaceID: "workspace-a", ownerID: "user-a"})
+	svc, capture := newOwnershipTestService(t, repo, ownedWorkspaceTasks{workspaceID: "workspace-a", ownerID: "user-a"}, true)
 
 	svc.HandleTaskTurnFinished(context.Background(), "task-in-workspace-a", "session-1", "turn-1")
 
@@ -219,7 +219,7 @@ func TestClarificationNotificationDoesNotReachAnotherUsersWebhook(t *testing.T) 
 	repo := newMultiUserRepository()
 	repo.seedProvider("user-a", "slack://user-a", EventTaskSessionClarificationAsked)
 	repo.seedProvider("user-b", "slack://user-b", EventTaskSessionClarificationAsked)
-	svc, capture := newOwnershipTestService(t, repo, ownedWorkspaceTasks{workspaceID: "workspace-b", ownerID: "user-b"})
+	svc, capture := newOwnershipTestService(t, repo, ownedWorkspaceTasks{workspaceID: "workspace-b", ownerID: "user-b"}, true)
 
 	svc.HandleClarificationRequested(context.Background(), "task-in-workspace-b", "session-9", "pending-1")
 
@@ -233,7 +233,7 @@ func TestOfficeInboxItemFollowsItsWorkspaceOwner(t *testing.T) {
 	repo := newMultiUserRepository()
 	repo.seedProvider("user-a", "slack://user-a", EventOfficeInboxItem)
 	repo.seedProvider("user-b", "slack://user-b", EventOfficeInboxItem)
-	svc, capture := newOwnershipTestService(t, repo, ownedWorkspaceTasks{workspaceID: "workspace-b", ownerID: "user-b"})
+	svc, capture := newOwnershipTestService(t, repo, ownedWorkspaceTasks{workspaceID: "workspace-b", ownerID: "user-b"}, true)
 
 	svc.HandleInboxItem(context.Background(), "workspace-b", "approval", "Deploy to production")
 
@@ -245,7 +245,7 @@ func TestOfficeInboxItemFollowsItsWorkspaceOwner(t *testing.T) {
 
 func TestSecondUserGetsTheirOwnSeededDefaultProviders(t *testing.T) {
 	repo := newMultiUserRepository()
-	svc, _ := newOwnershipTestService(t, repo, ownedWorkspaceTasks{workspaceID: "workspace-b", ownerID: "user-b"})
+	svc, _ := newOwnershipTestService(t, repo, ownedWorkspaceTasks{workspaceID: "workspace-b", ownerID: "user-b"}, true)
 
 	// user-b has never opened notification settings; a task event in their
 	// workspace must still provision their own defaults rather than reuse
@@ -268,7 +268,7 @@ func TestInstanceWideUpdateNoticeReachesEveryProviderOwner(t *testing.T) {
 	repo := newMultiUserRepository()
 	repo.seedProvider("user-a", "slack://user-a", EventSystemUpdateAvailable)
 	repo.seedProvider("user-b", "slack://user-b", EventSystemUpdateAvailable)
-	svc, capture := newOwnershipTestService(t, repo, ownedWorkspaceTasks{workspaceID: "workspace-a", ownerID: "user-a"})
+	svc, capture := newOwnershipTestService(t, repo, ownedWorkspaceTasks{workspaceID: "workspace-a", ownerID: "user-a"}, true)
 
 	svc.HandleUpdateAvailable(context.Background(), "v9.9.9", "https://example.test/releases/v9.9.9")
 
@@ -281,7 +281,7 @@ func TestInstanceWideUpdateNoticeReachesEveryProviderOwner(t *testing.T) {
 func TestSingleUserInstallKeepsDeliveringToTheDefaultUser(t *testing.T) {
 	repo := newMultiUserRepository()
 	// Authentication disabled: workspaces are still unowned (owner_id='').
-	svc, capture := newOwnershipTestService(t, repo, ownedWorkspaceTasks{workspaceID: "workspace-1", ownerID: ""})
+	svc, capture := newOwnershipTestService(t, repo, ownedWorkspaceTasks{workspaceID: "workspace-1", ownerID: ""}, false)
 
 	// The seeded default provider subscribes to clarifications, not turns.
 	svc.HandleClarificationRequested(context.Background(), "task-1", "session-1", "pending-1")
@@ -304,7 +304,7 @@ func TestSingleUserInstallKeepsDeliveringToTheDefaultUser(t *testing.T) {
 func TestServiceRefusesToTouchAnotherUsersProvider(t *testing.T) {
 	repo := newMultiUserRepository()
 	owned := repo.seedProvider("user-a", "slack://user-a", EventTaskSessionTurnFinished)
-	svc, capture := newOwnershipTestService(t, repo, ownedWorkspaceTasks{workspaceID: "workspace-a", ownerID: "user-a"})
+	svc, capture := newOwnershipTestService(t, repo, ownedWorkspaceTasks{workspaceID: "workspace-a", ownerID: "user-a"}, true)
 
 	stolen := "stolen"
 	if _, err := svc.UpdateProvider(context.Background(), "user-b", owned.ID, ProviderUpdate{Name: &stolen}); !errors.Is(err, ErrProviderNotFound) {
