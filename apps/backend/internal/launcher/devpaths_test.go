@@ -357,3 +357,152 @@ func TestValidateDevDatabaseTargetRejectsExplicitRepoLocalSymlinkEscape(t *testi
 		t.Fatal("validateDevDatabaseTarget accepted an explicit database path through a repo-local symlink")
 	}
 }
+
+func TestValidateDevDatabaseTargetRejectsPathOutsideDataDir(t *testing.T) {
+	repo := makeRepoTree(t)
+	devHome := devKandevHome(repo)
+	dataDir := filepath.Join(devHome, "data")
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name   string
+		path   string
+		source devDatabaseSource
+	}{
+		{
+			name:   "repo-local default sibling of data",
+			path:   filepath.Join(devHome, "kandev.db"),
+			source: devDatabaseDefault,
+		},
+		{
+			name:   "repo-local default under supervisor",
+			path:   filepath.Join(devHome, "supervisor", "kandev.db"),
+			source: devDatabaseDefault,
+		},
+		{
+			name:   "task source sibling of data",
+			path:   filepath.Join(devHome, "kandev.db"),
+			source: devDatabaseTask,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			target := devDatabaseTarget{path: tt.path, source: tt.source}
+			if err := validateDevDatabaseTarget(repo, target); err == nil {
+				t.Fatal("validateDevDatabaseTarget accepted a database path outside .kandev-dev/data")
+			}
+		})
+	}
+}
+
+func TestValidateDevDatabaseTargetAcceptsPathInsideDataDir(t *testing.T) {
+	repo := makeRepoTree(t)
+	devHome := devKandevHome(repo)
+	dataDir := filepath.Join(devHome, "data")
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name   string
+		path   string
+		source devDatabaseSource
+	}{
+		{
+			name:   "repo-local default inside data",
+			path:   filepath.Join(dataDir, "kandev.db"),
+			source: devDatabaseDefault,
+		},
+		{
+			name:   "task source inside data",
+			path:   filepath.Join(dataDir, "kandev.db"),
+			source: devDatabaseTask,
+		},
+		{
+			name:   "environment source inside data",
+			path:   filepath.Join(dataDir, "kandev.db"),
+			source: devDatabaseEnvironment,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			target := devDatabaseTarget{path: tt.path, source: tt.source}
+			if err := validateDevDatabaseTarget(repo, target); err != nil {
+				t.Fatalf("validateDevDatabaseTarget rejected valid database path: %v", err)
+			}
+		})
+	}
+}
+
+func TestNormalizeDevDatabaseTargetMakesPathAbsolute(t *testing.T) {
+	relPath := filepath.Join(".kandev-dev", "data", "kandev.db")
+	target := devDatabaseTarget{
+		path:    relPath,
+		homeDir: "/tmp/dev-home",
+		source:  devDatabaseDefault,
+		extra:   []string{"KANDEV_DEBUG_DEV_MODE=true", "KANDEV_HOME_DIR=/tmp/dev-home", "KANDEV_DATABASE_PATH=" + relPath},
+	}
+
+	normalized := normalizeDevDatabaseTarget(target)
+	want, err := filepath.Abs(relPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if normalized.path != want {
+		t.Fatalf("normalized path = %q, want absolute %q", normalized.path, want)
+	}
+
+	found := false
+	for _, item := range normalized.extra {
+		if strings.HasPrefix(item, "KANDEV_DATABASE_PATH=") {
+			val := item[len("KANDEV_DATABASE_PATH="):]
+			if val != want {
+				t.Fatalf("KANDEV_DATABASE_PATH in extra = %q, want %q", val, want)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("KANDEV_DATABASE_PATH not found in normalized extra")
+	}
+}
+
+func TestNormalizeDevDatabaseTargetNestedCwdRelativeExplicit(t *testing.T) {
+	// Simulate invoking dev from a nested directory like <repo>/apps with a
+	// relative explicit database path. The launcher's CWD is <repo>/apps,
+	// but the backend's CWD will be <repo>. filepath.Abs resolves the path
+	// relative to CWD; normalization must produce the CWD-absolute form so
+	// the child does not resolve it differently.
+	repo := makeRepoTree(t)
+	nestedCWD := filepath.Join(repo, "apps")
+	if err := os.MkdirAll(nestedCWD, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	relativePath := "../.kandev-dev/data/kandev.db"
+
+	// Change to the nested CWD so filepath.Abs resolves relative to it.
+	t.Chdir(nestedCWD)
+
+	want, err := filepath.Abs(relativePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want != filepath.Join(repo, ".kandev-dev", "data", "kandev.db") {
+		t.Fatalf("abs path = %q, want %q", want, filepath.Join(repo, ".kandev-dev", "data", "kandev.db"))
+	}
+
+	devHome := devKandevHome(repo)
+	target := devDatabaseTarget{
+		path:    relativePath,
+		homeDir: devHome,
+		source:  devDatabaseEnvironment,
+		extra:   []string{"KANDEV_DEBUG_DEV_MODE=true", "KANDEV_HOME_DIR=" + devHome, "KANDEV_DATABASE_PATH=" + relativePath},
+	}
+
+	normalized := normalizeDevDatabaseTarget(target)
+	if normalized.path != want {
+		t.Fatalf("normalized path = %q, want %q", normalized.path, want)
+	}
+}

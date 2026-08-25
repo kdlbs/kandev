@@ -138,24 +138,50 @@ func newDevDatabaseTarget(path, homeDir string, source devDatabaseSource, baseEx
 	return devDatabaseTarget{path: path, homeDir: homeDir, source: source, extra: extra}
 }
 
+// validateDevDatabaseTarget checks whether the resolved database target is
+// safe to use in dev mode. Repo-local targets must live under
+// .kandev-dev/data/ and must not traverse symlinks. Repo-local-default or
+// task targets that land outside the repo-local state are rejected outright.
+// External targets (environment or YAML) are allowed without symlink
+// checking; they may be the user's explicit production database.
 func validateDevDatabaseTarget(repoRoot string, target devDatabaseTarget) error {
 	path, err := filepath.Abs(target.path)
 	if err != nil {
 		return fmt.Errorf("resolve dev database path %q: %w", target.path, err)
 	}
-	home, err := filepath.Abs(devKandevHome(repoRoot))
+	dataDir, err := filepath.Abs(filepath.Join(devKandevHome(repoRoot), "data"))
 	if err != nil {
-		return fmt.Errorf("resolve dev state home: %w", err)
+		return fmt.Errorf("resolve dev data directory: %w", err)
 	}
-	rel, err := filepath.Rel(home, path)
-	insideRepoLocalState := err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
-	if !insideRepoLocalState && (target.source == devDatabaseDefault || target.source == devDatabaseTask) {
-		return fmt.Errorf("refusing dev database path outside repo-local state: %s", path)
+	rel, err := filepath.Rel(dataDir, path)
+	insideDataDir := err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
+	if !insideDataDir && (target.source == devDatabaseDefault || target.source == devDatabaseTask) {
+		return fmt.Errorf("refusing dev database path outside repo-local data directory: %s", path)
 	}
-	if insideRepoLocalState {
+	if insideDataDir {
 		if err := rejectSymlinkComponents(path); err != nil {
 			return fmt.Errorf("refusing dev database path %s: %w", path, err)
 		}
 	}
 	return nil
+}
+
+// normalizeDevDatabaseTarget sets the target path to its absolute form and
+// updates the KANDEV_DATABASE_PATH entry in extra so all consumers (backup,
+// output, child environment) use the same normalised absolute value.
+func normalizeDevDatabaseTarget(target devDatabaseTarget) devDatabaseTarget {
+	abs, err := filepath.Abs(target.path)
+	if err != nil {
+		// Abs only fails in pathological cases (e.g. NUL on Windows);
+		// keep the original path as a fallback.
+		return target
+	}
+	target.path = abs
+	for i, item := range target.extra {
+		if strings.HasPrefix(item, "KANDEV_DATABASE_PATH=") {
+			target.extra[i] = "KANDEV_DATABASE_PATH=" + abs
+			break
+		}
+	}
+	return target
 }
