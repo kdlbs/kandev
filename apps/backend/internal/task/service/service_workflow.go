@@ -944,7 +944,7 @@ func (s *Service) feederCandidateSession(ctx context.Context, taskID string) (*m
 		s.logger.Warn("skipping feeder task after active session lookup failed", zap.String("task_id", taskID), zap.Error(err))
 		return nil, true
 	}
-	var fallback *models.TaskSession
+	var primary, fallback *models.TaskSession
 	for _, session := range sessions {
 		if session == nil {
 			continue
@@ -955,12 +955,15 @@ func (s *Service) feederCandidateSession(ctx context.Context, taskID string) (*m
 		if !isSessionActive(session.State) {
 			continue
 		}
-		if session.IsPrimary {
-			return session, false
+		if session.IsPrimary && primary == nil {
+			primary = session
 		}
-		if fallback == nil {
+		if !session.IsPrimary && fallback == nil {
 			fallback = session
 		}
+	}
+	if primary != nil {
+		return primary, false
 	}
 	return fallback, false
 }

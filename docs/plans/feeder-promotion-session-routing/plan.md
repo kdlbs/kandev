@@ -102,6 +102,12 @@ different destination profile.
 - `AC-TASKS-WIP-LIMIT-PULL-SYSTEM-001.2`: add
   `TestService_FeederPromotionSkipsCandidateWhenSessionLookupFails` in the same
   file.
+- `AC-TASKS-WIP-LIMIT-PULL-SYSTEM-001.2`: add
+  `TestService_FeederPromotionBlocksOnOlderRunningSession` to make sure a
+  primary session does not bypass a move-blocking secondary session.
+- `AC-TASKS-WIP-LIMIT-PULL-SYSTEM-001.2`: add
+  `TestService_FeederPromotionUsesNewestActiveFallback` for tasks without an
+  active primary session.
 - Preserve existing feeder admission and blocked-session coverage in
   `service_workflow_test.go`.
 - Preserve existing compatible-profile reuse and different-profile switching
@@ -119,14 +125,18 @@ primary session before the newest active fallback. Both task-service promotion
 branches publish that session ID. Session-list errors still skip the candidate
 before the atomic move.
 
+PR fixup also made the preflight scan every session before selecting the
+primary. Any `STARTING` or `RUNNING` session still blocks promotion. The
+fallback path now has explicit regression coverage.
+
 The exact work-order checks passed:
 
 ```text
-go test -tags fts5 ./internal/task/service ... -count=1: 4 passed
+go test -tags fts5 ./internal/task/service ... -count=1: 6 passed
 go test -tags fts5 ./internal/orchestrator ... -count=1: 23 passed
 ```
 
-The focused task-service checks also passed with `-race`: 4 tests passed.
+The focused task-service checks also passed with `-race`: 6 tests passed.
 
 ## Risks
 

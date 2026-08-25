@@ -76,6 +76,73 @@ func TestService_FeederPromotionSkipsCandidateWhenSessionLookupFails(t *testing.
 	}
 }
 
+// @covers AC-TASKS-WIP-LIMIT-PULL-SYSTEM-001.2
+func TestService_FeederPromotionBlocksOnOlderRunningSession(t *testing.T) {
+	svc, eventBus, repo := setupFeederPromotionSessionTest(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-primary", TaskID: "task-promoted", State: models.TaskSessionStateWaitingForInput,
+		StartedAt: now.Add(time.Minute), UpdatedAt: now.Add(time.Minute), IsPrimary: true,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession(session-primary): %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-running", TaskID: "task-promoted", State: models.TaskSessionStateRunning,
+		StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession(session-running): %v", err)
+	}
+	eventBus.ClearEvents()
+
+	if _, err := svc.MoveTask(ctx, "task-vacating", "wf-target", "step-target", 0); err != nil {
+		t.Fatalf("MoveTask: %v", err)
+	}
+
+	promoted, err := repo.GetTask(ctx, "task-promoted")
+	if err != nil {
+		t.Fatalf("GetTask(task-promoted): %v", err)
+	}
+	if promoted.WorkflowStepID != "step-feeder" {
+		t.Fatalf("promoted task step = %q, want step-feeder", promoted.WorkflowStepID)
+	}
+}
+
+// @covers AC-TASKS-WIP-LIMIT-PULL-SYSTEM-001.2
+func TestService_FeederPromotionUsesNewestActiveFallback(t *testing.T) {
+	svc, eventBus, repo := setupFeederPromotionSessionTest(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	for _, session := range []*models.TaskSession{
+		{ID: "session-older", TaskID: "task-promoted", State: models.TaskSessionStateWaitingForInput, StartedAt: now, UpdatedAt: now},
+		{ID: "session-newer", TaskID: "task-promoted", State: models.TaskSessionStateWaitingForInput, StartedAt: now.Add(time.Minute), UpdatedAt: now.Add(time.Minute)},
+	} {
+		if err := repo.CreateTaskSession(ctx, session); err != nil {
+			t.Fatalf("CreateTaskSession(%s): %v", session.ID, err)
+		}
+	}
+	eventBus.ClearEvents()
+
+	if _, err := svc.MoveTask(ctx, "task-vacating", "wf-target", "step-target", 0); err != nil {
+		t.Fatalf("MoveTask: %v", err)
+	}
+
+	for _, event := range eventBus.GetPublishedEvents() {
+		if event.Type != events.TaskMoved {
+			continue
+		}
+		data, ok := event.Data.(map[string]interface{})
+		if !ok || data["task_id"] != "task-promoted" {
+			continue
+		}
+		if got := data["session_id"]; got != "session-newer" {
+			t.Fatalf("promoted task session_id = %q, want session-newer", got)
+		}
+		return
+	}
+	t.Fatal("promoted task.moved event not published")
+}
+
 func setupFeederPromotionSessionTest(t *testing.T) (*Service, *MockEventBus, *sqliterepo.Repository) {
 	t.Helper()
 	svc, eventBus, repo := createTestService(t)

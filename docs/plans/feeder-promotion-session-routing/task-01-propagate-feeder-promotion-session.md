@@ -47,6 +47,9 @@ cannot read its data.
   ID on `task.moved`. Existing profile reuse and profile switching then run.
 - A session-list error leaves the candidate queued and does not publish a
   sessionless promotion event.
+- A move-blocking session anywhere in the candidate session list prevents
+  promotion, even when another active session is primary.
+- A task without an active primary session uses its newest active fallback.
 - Existing feeder blocking, promotion, profile reuse, and profile-switch tests
   remain green without schema, API, UI, or ledger changes.
 
@@ -54,7 +57,7 @@ cannot read its data.
 
 ```bash
 cd apps/backend
-rtk go test -tags fts5 ./internal/task/service -run 'TestService_(FeederPromotionCarriesPrimarySession|FeederPromotionSkipsCandidateWhenSessionLookupFails|MoveTaskPullsNextFeederTaskOnVacate|MoveTaskPullSkipsBlockedFeederCandidate)' -count=1
+rtk go test -tags fts5 ./internal/task/service -run 'TestService_(FeederPromotionCarriesPrimarySession|FeederPromotionSkipsCandidateWhenSessionLookupFails|FeederPromotionBlocksOnOlderRunningSession|FeederPromotionUsesNewestActiveFallback|MoveTaskPullsNextFeederTaskOnVacate|MoveTaskPullSkipsBlockedFeederCandidate)' -count=1
 rtk go test -tags fts5 ./internal/orchestrator -run 'Test(HandleTaskMovedWithSession|ProcessOnEnter_ProfileSwitch|SwitchSessionForStep_ReusesExistingProfileSession)' -count=1
 ```
 
@@ -101,14 +104,24 @@ Implemented the session propagation fix in
 - `promoteFeederQueuedTask` publishes the selected session ID in both atomic
   and admission-repository branches.
 - Session-list errors keep the candidate queued before promotion.
-- Added `service_workflow_feeder_session_test.go` with propagation and
-  lookup-failure coverage.
+- Added `service_workflow_feeder_session_test.go` with propagation,
+  lookup-failure, older-blocker, and newest-fallback coverage.
+
+PR fixup remediation:
+
+- `feederCandidateSession` scans every session before selecting the primary,
+  so an older `STARTING` or `RUNNING` session cannot be skipped.
+- The fallback path is covered with two active sessions and asserts the newest
+  active session ID is published.
 
 TDD evidence:
 
 ```text
 RED: TestService_FeederPromotionCarriesPrimarySession failed with session_id = "".
 GREEN: the two new tests passed after the production change.
+RED (PR fixup): TestService_FeederPromotionBlocksOnOlderRunningSession promoted
+the candidate while a primary session was found first.
+GREEN (PR fixup): the blocker and fallback regressions pass after the full scan.
 ```
 
 Verification:
