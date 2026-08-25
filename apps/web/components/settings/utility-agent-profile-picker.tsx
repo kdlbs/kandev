@@ -10,7 +10,7 @@ export const utilityProfileEligibility = (
   includeWorkspaceProfiles = false,
 ) =>
   profile.enabled !== false &&
-  profile.inference_capable !== false &&
+  profile.inference_capable === true &&
   (dynamicRoutingEnabled || profile.kind !== "dynamic") &&
   (includeWorkspaceProfiles || (!profile.cli_passthrough && !profile.workspace_id));
 

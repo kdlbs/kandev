@@ -9,6 +9,7 @@ const profile = (overrides: Partial<AgentProfileOption> = {}): AgentProfileOptio
   agent_name: "Mock",
   cli_passthrough: false,
   enabled: true,
+  inference_capable: true,
   ...overrides,
 });
 
@@ -20,6 +21,7 @@ describe("utilityProfileEligibility", () => {
     ["CLI passthrough profile", profile({ cli_passthrough: true }), false],
     ["workspace profile", profile({ workspace_id: "workspace-1" }), false],
     ["non-inference profile", profile({ inference_capable: false }), false],
+    ["profile with unknown inference support", profile({ inference_capable: undefined }), false],
   ])("returns %s = %s", (_label, candidate, expected) => {
     expect(utilityProfileEligibility(candidate)).toBe(expected);
   });

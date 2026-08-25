@@ -25,6 +25,7 @@ const profile = (overrides: Partial<AgentProfileOption>): AgentProfileOption => 
   agent_name: "claude",
   cli_passthrough: false,
   enabled: true,
+  inference_capable: true,
   ...overrides,
 });
 
