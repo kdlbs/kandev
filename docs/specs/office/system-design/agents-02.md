@@ -242,7 +242,7 @@ Three MCP modes coexist:
 |---|---|---|---|
 | `ModeTask` | 27 (kanban + plans + walkthroughs + coordination + completion) | ~3-5K | Interactive kanban sessions |
 | `ModeConfig` | 29 (workflows + agents + executors) | ~8-10K | Config setup sessions |
-| `ModeOffice` | 9 (plans + ask_user + related tasks + task documents) | ~1-2K | Office agent sessions |
+| `ModeOffice` | 12 (plans + tasks + rich output + decisions + completion) | ~1-2K | Office agent sessions |
 
 Agent routing and Office ownership are independent. Workflow-level defaults, per-step agent profiles, and `runner` participants select the execution identity only; they never make a Kanban task Office-owned. A task is Office-owned only when it is linked to an Office project or its workflow matches the workspace's Office workflow.
 
@@ -251,8 +251,9 @@ Agent routing and Office ownership are independent. Workflow-level defaults, per
 - `ask_user_question_kandev` (only meaningful when the user opens the task in advanced mode).
 - `list_related_tasks_kandev`.
 - 3 task-document tools (`list_task_documents_kandev`, `get_task_document_kandev`, `write_task_document_kandev`).
+- `show_rich_output_kandev`, `record_step_decision_kandev`, and gated `step_complete_kandev`.
 
-`ModeOffice` excludes kanban tools, config tools, `list_workspaces_kandev`, `list_workflows_kandev`, `list_workflow_steps_kandev`, and `step_complete_kandev`. Office advances work through its Office task and approval surfaces, not the Kanban workflow-step completion signal. The first-turn Office context lists only tools registered in `ModeOffice` and directs Office mutations to `$KANDEV_CLI`; it never advertises an excluded tool.
+`ModeOffice` excludes kanban/config tools and workspace/workflow listing tools. Its first-turn context lists only registered tools, and Office mutations use `$KANDEV_CLI`.
 
 ### Skills are preferred over MCP tools
 

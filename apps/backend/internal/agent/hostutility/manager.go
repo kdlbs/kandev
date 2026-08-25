@@ -249,20 +249,10 @@ func (m *Manager) deleteInstance(ctx context.Context, inst *instance) {
 	}
 	if m.controlClient != nil {
 		if err := m.controlClient.DeleteInstance(ctx, inst.instanceID); err != nil {
-			// During shutdown agentctl may already be gone, so the delete
-			// returns a not-found/404. That is benign and idempotent: log DEBUG
-			// so it does not add teardown noise. Any other failure stays WARN.
-			if isInstanceNotFound(err) {
-				m.log.Debug("host utility instance already deleted",
-					zap.String("agent_type", inst.agentType),
-					zap.String("instance_id", inst.instanceID),
-					zap.String("error", err.Error()))
-			} else {
-				m.log.Warn("failed to delete host utility instance",
-					zap.String("agent_type", inst.agentType),
-					zap.String("instance_id", inst.instanceID),
-					zap.Error(err))
-			}
+			m.log.Warn("failed to delete host utility instance",
+				zap.String("agent_type", inst.agentType),
+				zap.String("instance_id", inst.instanceID),
+				zap.Error(err))
 		}
 	}
 	if inst.workDir == "" {
@@ -274,19 +264,6 @@ func (m *Manager) deleteInstance(ctx context.Context, inst *instance) {
 			zap.String("path", inst.workDir),
 			zap.Error(err))
 	}
-}
-
-// isInstanceNotFound reports whether a DeleteInstance error means the agentctl
-// instance was already gone. ControlClient.DeleteInstance stringifies the
-// upstream error as "failed to delete instance: <msg> (status 404)" without a
-// wrapped sentinel, so this matches on the 404 status and the not-found phrase
-// rather than errors.Is.
-func isInstanceNotFound(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "status 404") || strings.Contains(msg, "not found")
 }
 
 // eligibleAgents returns enabled agents that implement InferenceAgent AND whose

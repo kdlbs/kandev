@@ -203,12 +203,12 @@ spec:
 
 ## Health Checks
 
-The deployment includes both probes on the `/health` endpoint:
+The deployment's liveness probe calls `/health`; the readiness probe calls `/ready`:
 
-- **Liveness probe**: Restarts the pod if the backend becomes unresponsive (30s interval, 3 failures)
-- **Readiness probe**: Removes the pod from service during startup or issues (10s interval, 3 failures)
+- **Liveness probe**: Restarts the pod if the backend becomes unresponsive (30s interval, 3 failures). `/health` returns 200 as soon as the TCP listener accepts connections, before startup finishes.
+- **Readiness probe**: Removes the pod from service during startup or issues (10s interval, 3 failures). `/ready` returns 503 until the real router is wired in and the pod can serve real traffic, then 200.
 
-The CLI launcher also performs an internal health check — it waits for the backend to be healthy before starting the web server.
+The CLI launcher performs the same two-stage check: it waits for `/health` (the backend process is alive) and then for `/ready` (startup finished, the backend can serve real requests) before starting the web server.
 
 ## Scaling
 

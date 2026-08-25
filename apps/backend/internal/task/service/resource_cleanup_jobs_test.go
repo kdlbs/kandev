@@ -499,7 +499,7 @@ func TestExecuteTaskResourceCleanupJob_CancellationSkipsLegacyCleanup(t *testing
 	err := taskSvc.executeTaskResourceCleanupJob(ctx, &models.TaskResourceCleanupJob{
 		ID: "delete-job-cancelled", TaskID: "task-cancelled",
 		Trigger: models.TaskResourceCleanupTriggerDelete,
-	}, taskResourceCleanupSnapshot{LegacyWorktreeCleanup: true})
+	}, &taskResourceCleanupSnapshot{LegacyWorktreeCleanup: true})
 
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("cleanup error = %v, want context cancellation", err)

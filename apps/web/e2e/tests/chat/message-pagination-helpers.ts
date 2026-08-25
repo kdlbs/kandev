@@ -1,13 +1,15 @@
-import type { Locator } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 
 export const TASK_DESCRIPTION_MARKER = "TASK-DESCRIPTION-FALLBACK-9R4M";
 export const INITIAL_PROMPT_MARKER = "INITIAL-PROMPT-MARKER-7Q2X";
 export const RECENT_AGENT_MARKER = "RECENT-AGENT-MARKER-4K8P";
+export const PRE_PROMPT_MARKER = "HIDDEN-PRE-PROMPT-MARKER-6N3V";
+export const EAGER_HISTORY_PROMPT_MARKER = "EAGER-HISTORY-PROMPT-MARKER-3J6W";
 
-/** Seeds a user prompt followed by one collapsed same-turn tool history. */
-export async function seedCollapsedMessageHistory(
+/** Seeds an older prompt followed by a tool-only newest window. */
+export async function seedToolHeavyOpeningHistory(
   apiClient: ApiClient,
   seedData: SeedData,
   title: string,
@@ -22,18 +24,83 @@ export async function seedCollapsedMessageHistory(
     state: "IDLE",
     repositoryId: seedData.repositoryId,
   });
-
   await apiClient.seedSessionMessage(sessionId, {
     type: "message",
-    content: INITIAL_PROMPT_MARKER,
+    content: EAGER_HISTORY_PROMPT_MARKER,
     authorType: "user",
   });
   await apiClient.seedTaskSession(task.id, {
     sessionId,
     state: "IDLE",
-    commandCount: 80,
+    commandCount: 150,
   });
-  await apiClient.seedToolCallMessages(sessionId, 60);
+  return { taskId: task.id, sessionId };
+}
+
+/** Captures older-page requests made after this watcher is installed. */
+export function watchOlderMessageRequests(page: Page, sessionId: string): string[] {
+  const requests: string[] = [];
+  page.on("request", (request) => {
+    const url = request.url();
+    if (url.includes(`/task-sessions/${sessionId}/messages?`) && url.includes("before=")) {
+      requests.push(url);
+    }
+  });
+  return requests;
+}
+
+/** Seeds collapsed history around the visible prompt boundary. */
+export async function seedCollapsedMessageHistory(
+  apiClient: ApiClient,
+  seedData: SeedData,
+  title: string,
+  options?: { promptOutsideInitialWindow?: boolean },
+): Promise<{ taskId: string; sessionId: string }> {
+  const task = await apiClient.createTask(seedData.workspaceId, title, {
+    description: TASK_DESCRIPTION_MARKER,
+    workflow_id: seedData.workflowId,
+    workflow_step_id: seedData.startStepId,
+    repository_ids: [seedData.repositoryId],
+  });
+  const { session_id: sessionId } = await apiClient.seedTaskSession(task.id, {
+    state: "IDLE",
+    repositoryId: seedData.repositoryId,
+  });
+
+  if (options?.promptOutsideInitialWindow) {
+    await apiClient.seedSessionMessage(sessionId, {
+      type: "message",
+      content: INITIAL_PROMPT_MARKER,
+      authorType: "user",
+    });
+    await apiClient.seedTaskSession(task.id, {
+      sessionId,
+      state: "IDLE",
+      commandCount: 80,
+    });
+    await apiClient.seedToolCallMessages(sessionId, 60);
+  } else {
+    for (let i = 0; i < 20; i += 1) {
+      await apiClient.seedSessionMessage(sessionId, {
+        type: "tool_call",
+        content: `${PRE_PROMPT_MARKER} ${i + 1}`,
+      });
+    }
+    await apiClient.seedSessionMessage(sessionId, {
+      type: "message",
+      content: INITIAL_PROMPT_MARKER,
+      authorType: "user",
+    });
+    await apiClient.seedTaskSession(task.id, {
+      sessionId,
+      state: "IDLE",
+      commandCount: 0,
+    });
+    // Keep the prompt at the oldest edge of the initial 100-message window:
+    // 98 collapsed rows plus the recent agent row follow it, while the 20
+    // pre-prompt rows remain on the next backend page.
+    await apiClient.seedToolCallMessages(sessionId, 98);
+  }
   await apiClient.seedSessionMessage(sessionId, {
     type: "message",
     content: RECENT_AGENT_MARKER,

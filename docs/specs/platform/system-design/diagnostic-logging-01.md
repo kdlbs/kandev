@@ -24,6 +24,9 @@ This design preserves the technical source detail for `REQ-PLATFORM-DIAGNOSTIC-L
 Decisions: [bundles](../../../decisions/2026-07-30-file-backed-diagnostic-bundles.md),
 [bounded logs](../../../decisions/2026-08-22-preserve-newest-bounded-backend-logs.md).
 
+Browser retention: [requirements](../requirements/browser-console-retention.md) and
+[system design](../system-design/browser-console-retention.md).
+
 Implementation plan: [diagnostic-logging](../../../plans/diagnostic-logging/plan.md)
 
 ## Why
@@ -69,9 +72,6 @@ history or returning an unbounded log export.
 - The structured backend in-memory ring buffer is removed. The System Logs
   page, Improve Kandev, and agent diagnostics use the files and bundles
   described below.
-- The structured backend in-memory ring buffer is removed. The System Logs
-  page, Improve Kandev, and agent diagnostics use the files and bundles
-  described below.
 
 ### Error-toast reporting
 
@@ -100,22 +100,22 @@ history or returning an unbounded log export.
 
 ### Browser console history
 
+The browser retention limits, persistence guarantees, write serialization, and
+incremental maintenance contract are authoritative in
+[Browser console retention](../requirements/browser-console-retention.md) and its
+paired [system design](../system-design/browser-console-retention.md).
+
 - The frontend intercepts `console.debug`, `console.info`, `console.warn`, and
   `console.error`, plus `window.error` and `unhandledrejection`, without
   changing their normal browser behavior.
 - Entries remain local to the browser until a diagnostic bundle explicitly
   requests them. Kandev does not continuously stream console logs to the
   backend.
-- Browser history is stored in IndexedDB for a rolling three-day UTC window.
-  Each browser profile has an opaque random installation ID shared by its tabs.
+- Each browser profile has an opaque random installation ID shared by its tabs.
 - Entries are partitioned by the current authenticated Kandev identity. A
   capture returns only that identity's partition; signing into another account
   in the same browser profile cannot expose the previous account's entries.
   Auth-disabled mode uses the existing synthetic single-user scope.
-- The browser store keeps at most 10,000 entries and 20 MiB after
-  serialization across all identity partitions. Each entry is capped at
-  64 KiB. Age is pruned first, then the oldest entries are evicted until both
-  bounds hold.
 - Entries contain a client timestamp, level, source, message, bounded
   JSON-safe arguments, available stack, full URL, and a task ID derived from a
   recognized task route when available.
@@ -125,9 +125,9 @@ history or returning an unbounded log export.
   prototypes or invoking getters. At most 20 arguments are inspected; strings
   are capped at 4 KiB, error messages at 8 KiB, and stacks at 16 KiB before the
   overall 64 KiB entry cap.
-- If IndexedDB is unavailable or fails, the frontend falls back to the existing
-  500-entry in-memory buffer. A resulting bundle identifies the degraded
-  capture in its manifest.
+- Persistence failure and memory fallback behavior follow
+  `AC-PLATFORM-BROWSER-CONSOLE-RETENTION-001.6`. A resulting bundle identifies
+  the degraded capture in its manifest.
 
 ### Performance and resource contract
 
@@ -157,7 +157,7 @@ history or returning an unbounded log export.
   limits above. Its reference-free staging queue holds at most 500 entries or
   2 MiB. It persists at most 50 entries or 256 KiB per transaction, scheduled
   after 250 ms or during browser idle time with a one-second timeout fallback.
-  IndexedDB opening, serialization, pruning, and quota handling never run
+  IndexedDB opening, serialization, retention maintenance, and quota handling never run
   synchronously in the intercepted console call. A full staging queue drops
   lower-priority `debug`/`info` entries first and records loss metadata; it
   never delays the original console call.

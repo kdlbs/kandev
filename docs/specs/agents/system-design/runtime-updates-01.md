@@ -4,7 +4,7 @@ system: agents
 requirements:
   - REQ-AGENTS-RUNTIME-UPDATES-001
 created: 2026-07-26
-updated: 2026-08-22
+updated: 2026-08-24
 owners:
   - Kandev
 ---
@@ -35,11 +35,8 @@ they open its version dialog. Kandev must provide a stable reviewed default for
 unmodified installations without preventing an operator from selecting a newer
 validated version between Kandev releases.
 
-Managed runtimes can also fail when npm has stale package metadata. In that
-case, npm can report `ETARGET` and `No matching version found` for a dependency
-that the configured registry now contains. Kandev currently reports the later
-ACP disconnect instead of the npm cause. The user then has no useful recovery
-action unless they inspect backend logs.
+Managed npm runtime recovery now has an authoritative requirement and design:
+[managed npm runtime recovery](requirements/managed-npm-runtime-recovery.md).
 
 ## What
 
@@ -77,11 +74,8 @@ action unless they inspect backend logs.
   recipe.
 - Jobs for one agent are idempotent while queued or running. Installation and
   version management for the same agent cannot run concurrently.
-- A host-local managed runtime launch detects a strict npm `ETARGET` version
-  resolution failure before ACP initialization. Kandev refreshes npm metadata
-  and retries the same trusted package and version once.
-- If the retry also fails, Kandev reports an npm runtime preparation error and
-  offers one runtime retry action. The user does not need to understand ACP.
+- Managed npm runtime recovery follows the authoritative
+  [recovery requirement](requirements/managed-npm-runtime-recovery.md).
 - When the Agents settings page loads, Kandev checks each available managed
   package against npm's stable `latest` version through one batch status
   request. A newer version marks the existing update control with a blue dot
@@ -324,29 +318,9 @@ produces a repair job.
 
 ## Launch-time stale metadata recovery
 
-- Normal managed runtime commands continue to use `--prefer-offline`.
-- Kandev inspects bounded process stderr when ACP initialization ends before a
-  response. Automatic recovery requires both npm `ETARGET` and a matching
-  `No matching version found for package@version` message.
-- Kandev classifies the npm error from stderr. It does not build a command from
-  package names, versions, paths, or registry values found in stderr.
-- Recovery removes only the deterministic `_npx` execution tree for the
-  trusted built-in package specification. It never clears npm's full cache.
-- Kandev starts the same managed runtime once with `--prefer-online`. The
-  command keeps the same trusted package, exact effective version,
-  ACP arguments, configured npm registry, command prefix, permissions, model,
-  and session identity.
-- Recovery is limited to one retry for each launch attempt. A delayed event
-  from the first child process cannot fail or complete the replacement process.
-- User cancellation and backend shutdown stop recovery. Kandev does not retry
-  a remote executor, a native runtime, a passthrough command, an unrelated npm
-  error, or a second failed online attempt.
-- A successful retry continues the original session without a failure card.
-  Kandev records structured recovery telemetry without exposing host paths or
-  raw process logs.
-- A failed retry emits a stable npm runtime failure code and bounded sanitized
-  details. This evidence is stored with the last agent error so the focused UI
-  survives a page reload.
+The [managed npm runtime recovery requirement](requirements/managed-npm-runtime-recovery.md)
+and its [system design](system-design/managed-npm-runtime-recovery.md) are
+authoritative for launch-time stale metadata recovery.
 
 ## Failure and recovery behavior
 
@@ -366,8 +340,9 @@ produces a repair job.
 - Browser disconnect does not cancel a running job. The jobs endpoint can
   recover process-local progress while the backend remains running.
 - Active sessions are never restarted, replaced, or hot-swapped.
-- A launch-time stale metadata retry is not a version rollback. It prepares the
-  same package selection again and does not change the active version.
+- Launch-time recovery does not change the active version. The authoritative
+  [recovery requirement](requirements/managed-npm-runtime-recovery.md) defines
+  its observable behavior.
 - Registry failure during the batch update-status check returns `unknown` for
   only the affected package. It does not disable the update control, show an
   error badge, or claim that the package is up to date.
@@ -397,9 +372,8 @@ produces a repair job.
   version again; it must not advance to another version.
 - Dialog selection, output, and result remain page-local after a browser page
   restart.
-- A terminal launch-time npm resolution error stores its stable failure code
-  and bounded sanitized details in `last_agent_error`. No database migration is
-  required because the record is JSON metadata with optional fields.
+- Terminal launch-time npm resolution metadata follows the authoritative
+  [recovery design](system-design/managed-npm-runtime-recovery.md).
 
 ## Desktop and mobile behavior
 
@@ -436,3 +410,84 @@ produces a repair job.
   does not present session history loss as a fix for an npm problem.
 - Phone actions stack when needed, remain at least 44 px high, and do not add a
   second scroll container.
+- Launch-time recovery presentation follows the authoritative
+  [recovery requirement](requirements/managed-npm-runtime-recovery.md).
+
+## Scenarios
+
+- **GIVEN** OpenCode latest is partly published and its ACP probe fails,
+  **WHEN** an operator selects an older published stable version and approves
+  **Roll back runtime**, **THEN** Kandev prepares and probes that exact version,
+  persists it only after success, and restores its model list without restart.
+- **GIVEN** a healthy exact active version, **WHEN** Kandev restarts, **THEN**
+  boot probes and later managed commands use the same exact version.
+- **GIVEN** an agent has no operator selection, **WHEN** Kandev builds any of
+  its managed npm ACP commands, **THEN** the command uses the exact reviewed
+  Kandev default and never an unversioned package spec.
+- **GIVEN** an agent has a validated operator selection, **WHEN** Kandev builds
+  a local, container, or SSH managed npm ACP command, **THEN** the command uses
+  that exact selection instead of the Kandev default.
+- **GIVEN** an operator selection exists, **WHEN** the operator chooses **Use
+  Kandev default**, **THEN** Kandev validates the exact default, deletes the
+  selection only after success, and future commands follow shipped defaults.
+- **GIVEN** a candidate fails ACP initialization, **WHEN** the job ends,
+  **THEN** the previous active version and capabilities remain authoritative.
+- **GIVEN** the current version is unknown and the effective version is known,
+  **WHEN** the operator selects a published target, **THEN** the UI offers
+  **Repair runtime** and validation establishes the selected exact version.
+- **GIVEN** effective, current, and target versions match, **WHEN** the dialog
+  opens, **THEN** it shows **Up to date** and starts no job.
+- **GIVEN** a different target is submitted while a job is active for the same
+  agent, **WHEN** the backend receives it, **THEN** it returns the existing job
+  and does not run a second candidate concurrently.
+- **GIVEN** an agent whose interactive passthrough CLI is separate from its
+  managed ACP adapter, **WHEN** the effective ACP version changes, **THEN**
+  later passthrough sessions still launch the declared interactive CLI and do
+  not launch the ACP package under a PTY.
+- **GIVEN** a phone viewport and a long version catalogue or process log,
+  **WHEN** the operator selects and activates a version, **THEN** the drawer
+  remains contained and the primary action remains touch-reachable.
+- **GIVEN** npm reports a newer stable version than the effective version,
+  **WHEN** the Agents settings page loads, **THEN** the existing update control
+  shows a blue dot and exposes both versions in accessible update information.
+- **GIVEN** the update-status lookup fails for one managed package, **WHEN** the
+  Agents settings page loads, **THEN** that package shows no blue dot, its
+  update control remains usable, and other package statuses still render.
+- **GIVEN** npm returns valid stable package metadata in either its object form
+  or a supported one-element collection form, **WHEN** the operator opens a
+  managed runtime update dialog, **THEN** the dialog lists the stable versions,
+  selects npm's stable latest version, and does not show a resolution error.
+- **GIVEN** a managed runtime has a long stable version catalogue, **WHEN** the
+  operator opens its update dialog, **THEN** the dialog shows the status summary
+  and quick choices without rendering the full version history.
+- **GIVEN** the operator opens the full version browser and enters a version
+  fragment, **WHEN** matching versions exist, **THEN** only matching stable
+  versions remain selectable and selecting one previews that exact target.
+- **GIVEN** the operator opens the full version browser on a phone, **WHEN** the
+  operator searches or selects a version, **THEN** the existing update drawer
+  keeps one contained scroll owner, exposes 44px touch rows, and preserves the
+  same target selection behavior as desktop.
+- **GIVEN** the operator opens a long version catalogue, **WHEN** the operator
+  opens the version selector, **THEN** the catalogue appears in an anchored
+  popover without increasing the dialog or drawer height, and selecting a
+  version closes the popover.
+- **GIVEN** a dotted update control on a phone, **WHEN** the operator taps it,
+  **THEN** the existing update drawer opens and shows a live authoritative
+  preview without requiring hover.
+- Managed npm runtime recovery scenarios follow the authoritative
+  [recovery requirement](requirements/managed-npm-runtime-recovery.md).
+
+## Out of scope
+
+- Automatic runtime installation, automatic operator-selection changes, and
+  automatic rollback after launch failure.
+- Global npm cache cleanup, registry replacement, dependency substitution, or
+  automatic selection of another package version.
+- Prerelease, tag, arbitrary package-spec, registry, or shell-command input.
+- Kandev-owned npm artifact retention or a package lockfile.
+- Removing npm or network access from the launch path, or locking transitive
+  dependency ranges inside upstream packages.
+- Restarting or hot-swapping active sessions.
+- Native-only update channels and separately distributed passthrough or
+  authentication packages.
+- Persisting job output or reopening the dialog after a browser restart.

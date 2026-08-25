@@ -2,7 +2,7 @@
 status: draft
 system: cli
 specification_version: 1
-migration: complete
+migration: in_progress
 owners:
   - kandev
 ---
@@ -41,7 +41,8 @@ and CLI-specific compatibility behavior.
 
 ## Migration record
 
-All legacy sources assigned to this system are now represented by the canonical requirement and system-design documents above. Source detail is retained in those documents or in their linked design parts.
+Migration remains in progress while legacy source detail is extracted from the
+canonical requirement and system-design documents above.
 
 ## Related systems
 

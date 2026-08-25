@@ -43,9 +43,8 @@ deployment, and pull request walkthrough generation.
 
 ## Migration
 
-The new shared trust contract replaces the label portions of the legacy
-[Claude fork review allowlist specification](../claude-fork-review-allowlist/spec.md)
-and the legacy
-[PR walkthrough specification](../pr-walkthrough/spec.md). Those documents
-remain useful for provider and walkthrough detail until their content is
-migrated fully.
+The new shared trust contract replaces the label portions of the
+[Claude fork review allowlist requirement](../integrations/requirements/claude-fork-review-allowlist.md)
+and the
+[PR walkthrough requirement](../ui/requirements/pr-walkthrough.md). Provider
+and walkthrough behavior remains in those canonical owning systems.

@@ -86,7 +86,7 @@ func TestManagerReadStderrDeliversCleanedLinesToOptionalConsumer(t *testing.T) {
 		logger:         newTestLogger(t),
 	}
 	m.wg.Add(1)
-	m.readStderr()
+	m.readStderr(make(chan struct{}))
 
 	got := []string{<-consumer.lines, <-consumer.lines}
 	want := []string{"quota", "plain"}
@@ -135,9 +135,10 @@ func TestManagerProcessExitUsesSanitizedStderr(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start process: %v", err)
 	}
+	stderrDone := make(chan struct{})
 	m.wg.Add(2)
-	go m.readStderr()
-	m.waitForExit()
+	go m.readStderr(stderrDone)
+	m.waitForExit(stderrDone)
 	m.wg.Wait()
 
 	event := <-m.updatesCh

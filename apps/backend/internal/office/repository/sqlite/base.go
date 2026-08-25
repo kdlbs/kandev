@@ -363,6 +363,13 @@ func (r *Repository) createRunTables() error {
 		result_json TEXT NOT NULL DEFAULT '{}',
 		assembled_prompt TEXT NOT NULL DEFAULT '',
 		summary_injected TEXT NOT NULL DEFAULT '',
+		-- continuation_scope is the continuation-summary scope key
+		-- (models.ContinuationScopeForRun) decided once at run creation
+		-- and persisted so every later reader/writer of this run's
+		-- continuation summary uses the same value instead of
+		-- re-deriving it against a context_snapshot a coalesced wakeup
+		-- may have since patched.
+		continuation_scope TEXT NOT NULL DEFAULT '',
 		requested_at TIMESTAMP NOT NULL,
 		claimed_at TIMESTAMP,
 		finished_at TIMESTAMP

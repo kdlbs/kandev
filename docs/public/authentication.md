@@ -51,6 +51,15 @@ A server that listens on non-loopback interfaces with authentication disabled lo
 
 Roles: `admin` (user management, authentication settings, destructive system operations, feature toggles) and `member` (everything else, scoped to their own workspaces).
 
+Install-wide data in `Settings > System > Data & storage` follows the same
+split. Members can read the database stats, the backup listing, and the storage
+usage, policy, run history, and quarantine contents. Creating, downloading,
+restoring, and deleting a backup is admin only, because a backup is a copy of
+the whole database and downloading one would export every user's workspaces.
+Changing storage settings, adopting a Go cache, and running an analysis,
+cleanup, or quarantine restore/purge are admin only for the same reason
+database vacuum, optimize, and reset are: they act on the whole install.
+
 ## Personal access tokens
 
 `Settings > Account > API Tokens`. Tokens look like `kandev_pat_…`, are shown **once** at creation, and are sent as a bearer header:
@@ -63,7 +72,7 @@ External MCP clients (Claude Code, Cursor connecting to `/mcp`) must be configur
 
 ## Endpoints that stay public
 
-`/health` (readiness probes), the login/setup/invite pages, `GET /api/v1/features`, and self-authenticating webhook receivers (automation webhooks with `X-Webhook-Secret`, office channel HMAC webhooks). Everything else requires a session or token.
+`/health` (liveness probes) and `/ready` (readiness probes), the login/setup/invite pages, `GET /api/v1/features`, and self-authenticating webhook receivers (automation webhooks with `X-Webhook-Secret`, office channel HMAC webhooks). Everything else requires a session or token.
 
 Plugin webhooks (`/api/plugins/{id}/webhooks/{key}`) are **not** public by default: a plugin's manifest must explicitly declare `webhooks[].public: true` for that specific webhook to accept anonymous requests. Unflagged webhooks require a session or PAT like any other endpoint. See [Plugin manifest reference](plugins-manifest.md).
 

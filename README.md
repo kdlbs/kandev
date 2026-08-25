@@ -94,7 +94,7 @@ Connect Kandev to the tools your team already uses — pull issues into the kanb
 | **Grok** | `grok` *(install `@xai-official/grok` with npm)* |
 | **Hermes** | `hermes` *(install with the official Hermes installer)* |
 
-> All agents communicate via [ACP](https://agentclientprotocol.com) (Agent Client Protocol). Some agents support ACP natively, while others use ACP adapter packages that bridge their native protocols. **CLI Passthrough mode** is available when an integration provides a passthrough command. If your agent isn't supported yet, open an issue or submit a PR with the integration. See [Adding a New Agent CLI](docs/add-agent-cli.md) for a step-by-step guide.
+> All agents communicate via [ACP](https://agentclientprotocol.com) (Agent Client Protocol). Some agents support ACP natively, while others use ACP adapter packages that bridge their native protocols. **CLI Passthrough mode** is available when an integration provides a passthrough command. If your agent isn't supported yet, open an issue or submit a PR with the integration. See [Adding a New Agent CLI](docs/public/add-agent-cli.md) for a step-by-step guide.
 
 Kandev does not pin the managed npm runtimes for Claude, Codex, OpenCode,
 Copilot, or Gemini. Normal launches can reuse npm's best-effort execution

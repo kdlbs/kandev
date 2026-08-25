@@ -21,7 +21,10 @@
  * round-trips a single per-user document through host.storage
  * (get on mount, debounced set, subscribe to pick up a write from another
  * tab/surface), task-card indicator/tag components, generic task-row metadata,
- * and task-menu actions under the "edit" and "primary" groups. It also
+ * and task-menu actions under the "edit" and "primary" groups. It registers a
+ * task-list facet (registerTaskListFacet) whose values a spec drives through
+ * `window.__e2eFacetValues`, so /tasks facet sort and grouping can be exercised
+ * against real plugin registrations. It also
  * registers one composer action on all three composer slots
  * (chat-input-actions, task-create-input-actions, new-session-input-actions),
  * which is how the e2e suite exercises PluginComposerCapability against real
@@ -34,6 +37,12 @@
 (function () {
   var moduleCount = 0;
   var listeners = new Set();
+  // Task-list facet plumbing. Values come from `window.__e2eFacetValues`
+  // (taskId -> [{value,label,color}]) so a spec can drive multi-value
+  // membership, colors, and the untagged fallback against task ids the
+  // fixture cannot know ahead of time. `window.__e2eFacetNotify()` fires
+  // the subscription so the reactive re-read path is exercised for real.
+  var facetListeners = new Set();
 
   function emit() {
     listeners.forEach(function (fn) {
@@ -688,6 +697,26 @@
         icon: "book",
         Component: NotesPanel,
         mobileEnabled: true,
+      });
+      registry.registerTaskListFacet({
+        id: "fixture-tags",
+        label: "Fixture tag",
+        getValues: function (context) {
+          var byTask = window.__e2eFacetValues || {};
+          if (byTask.__throwFor === context.taskId) throw new Error("fixture facet boom");
+          return byTask[context.taskId] || [];
+        },
+        subscribe: function (listener) {
+          facetListeners.add(listener);
+          window.__e2eFacetNotify = function () {
+            facetListeners.forEach(function (fn) {
+              fn();
+            });
+          };
+          return function () {
+            facetListeners.delete(listener);
+          };
+        },
       });
       registry.registerComponent("chat-input-actions", ComposerAction);
       registry.registerComponent("task-create-input-actions", ComposerAction);

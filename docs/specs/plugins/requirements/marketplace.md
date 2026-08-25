@@ -10,7 +10,8 @@ owners:
 ## Overview
 
 Today a user can only install a plugin if they already know its release tarball URL
-or have a `.tar.gz` to upload (see [plugins spec](spec.md) → "Install pipeline").
+or have a `.tar.gz` to upload (see the [plugin installation requirement](plugins.md)
+for the existing install pipeline).
 There is no way to *discover* plugins from inside kandev, no curated list of what
 exists, and no signal for which plugins are worth trusting. Plugin authors have
 nowhere to publish, and teams have no sanctioned way to share an internal set of
@@ -22,7 +23,8 @@ while keeping install-by-URL and sideloading as escape hatches.
 ### REQ-PLUGINS-MARKETPLACE-001: Plugin Marketplace
 
 **Intent:** Today a user can only install a plugin if they already know its release tarball URL or
-have a `.tar.gz` to upload (see [plugins spec](spec.md) → "Install pipeline"). There is no way to
+have a `.tar.gz` to upload (see the [plugin installation requirement](plugins.md) for the existing
+install pipeline). There is no way to
 *discover* plugins from inside kandev, no curated list of what exists, and no signal for which
 plugins are worth trusting. Plugin authors have nowhere to publish, and teams have no sanctioned way
 to share an internal set of plugins. This feature adds a discoverable, curated catalog — kandev's

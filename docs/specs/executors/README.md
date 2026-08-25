@@ -2,7 +2,7 @@
 status: draft
 system: executors
 specification_version: 1
-migration: complete
+migration: in_progress
 owners:
   - kandev
 ---
@@ -36,6 +36,7 @@ failure and recovery contracts.
 - [Executor-Profile Environment Precedence](requirements/executor-profile-env-precedence.md)
 - [Port collision and backend ownership safety](requirements/port-collision-safety.md)
 - [SSH Executor](requirements/ssh-executor.md)
+- [Remote SSH task-directory reclamation](requirements/remote-task-directory-reclamation.md)
 
 ### System design
 
@@ -47,10 +48,12 @@ failure and recovery contracts.
 - [Executor-Profile Environment Precedence System Design Part 4](system-design/executor-profile-env-precedence-04.md)
 - [Executor-Profile Environment Precedence System Design Part 5](system-design/executor-profile-env-precedence-05.md)
 - [SSH Executor](system-design/ssh-executor.md)
+- [Remote SSH task-directory reclamation](system-design/remote-task-directory-reclamation.md)
 
 ## Migration record
 
-All legacy sources assigned to this system are now represented by the canonical requirement and system-design documents above. Source detail is retained in those documents or in their linked design parts.
+Migration remains in progress while legacy source detail is extracted from the
+canonical requirement and system-design documents above.
 
 ## Related systems
 

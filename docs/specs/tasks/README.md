@@ -2,7 +2,7 @@
 status: active
 system: tasks
 specification_version: 1
-migration: complete
+migration: in_progress
 owners:
   - kandev
 ---
@@ -118,16 +118,22 @@ signals, and task-scoped scheduling contracts.
 - [External task ID idempotency](system-design/external-id-idempotency.md)
 - [Task model unification](system-design/model-unification.md)
 - [Remote Contribution Tasks](system-design/remote-contribution-tasks.md)
+- [Task Archive Confirmation](system-design/archive-confirmation.md)
 - [Task Runtime Cleanup](system-design/runtime-cleanup.md)
+- [Queued Run Scheduling](system-design/run-scheduling.md)
 - [Session Delete Preserves Task Workspaces](system-design/session-delete-resource-cleanup.md)
 - [Task Dependencies and Auto-Start Chains](system-design/task-dependencies.md)
+- [Task Launch Failure Recovery](system-design/task-launch-failure-recovery.md)
 - [WIP Limits and Visible Overflow Queues](system-design/wip-limit-pull-system.md)
 - [Workflow quorum decision recording](system-design/workflow-quorum-decision-recording.md)
 - [Workflow task-step transition ledger](system-design/workflow-task-step-transition-ledger.md)
 
 ## Migration record
 
-All legacy sources assigned to this system are now represented by the canonical requirement and system-design documents above. Source detail is retained in those documents or in their linked design parts.
+Migration remains in progress. The three requirements above now have
+authoritative, wrapper-free requirement/design pairs. Other migrated files still
+need the same extraction before this system can return to a complete migration
+state.
 
 ## Related systems
 

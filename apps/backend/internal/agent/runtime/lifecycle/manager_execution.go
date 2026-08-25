@@ -732,7 +732,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 		autoApproveOverride = boolPtr(profileInfo.AutoApprove)
 	}
 	authToken := m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyAuthTokenSecret)
-	if info.ExecutorType == string(models.ExecutorTypeLocalDocker) || info.ExecutorType == string(models.ExecutorTypeRemoteDocker) {
+	if isDockerExecutorType(info.ExecutorType) {
 		controlToken, err := m.revealContainerControlAuthToken(ctx, info.Metadata, getMetadataString(info.Metadata, MetadataKeyContainerID) != "")
 		if err != nil {
 			return nil, fmt.Errorf("resolve container control token: %w", err)
@@ -1022,20 +1022,29 @@ func (m *Manager) persistRuntimeSecret(
 		zap.String("metadata_key", metadataKey))
 }
 
-func (m *Manager) revealRuntimeSecret(ctx context.Context, metadata map[string]interface{}, metadataKey string) string {
-	if m.secretStore == nil {
-		return ""
-	}
+// revealRuntimeSecretValue reveals a configured runtime secret and preserves
+// storage errors for callers that need to report a failed launch.
+func (m *Manager) revealRuntimeSecretValue(ctx context.Context, metadata map[string]interface{}, metadataKey string) (string, error) {
 	secretID := getMetadataString(metadata, metadataKey)
 	if secretID == "" {
-		return ""
+		return "", nil
+	}
+	if m.secretStore == nil {
+		return "", errors.New("runtime secret store is unavailable")
 	}
 	value, err := revealGlobalSecret(ctx, m.secretStore, secretID)
+	if err != nil {
+		return "", fmt.Errorf("reveal runtime secret %q: %w", metadataKey, err)
+	}
+	return value, nil
+}
+
+func (m *Manager) revealRuntimeSecret(ctx context.Context, metadata map[string]interface{}, metadataKey string) string {
+	value, err := m.revealRuntimeSecretValue(ctx, metadata, metadataKey)
 	if err != nil {
 		m.logger.Warn("failed to reveal runtime secret",
 			zap.String("metadata_key", metadataKey),
 			zap.Error(err))
-		return ""
 	}
 	return value
 }

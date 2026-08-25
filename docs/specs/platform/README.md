@@ -2,7 +2,7 @@
 status: draft
 system: platform
 specification_version: 1
-migration: complete
+migration: in_progress
 owners:
   - kandev
 ---
@@ -39,6 +39,7 @@ localization, feature toggles, health, and shared session recovery services.
 - [Bounded Task Status Delivery](requirements/bounded-task-status-delivery.md)
 - [Shared Cron Loop Safety When Office Is Disabled](requirements/cron-office-disabled-safety.md)
 - [Environment-specific browser tab title prefixes](requirements/dev-preview-title-prefixes.md)
+- [Browser console retention](requirements/browser-console-retention.md)
 - [Diagnostic logging](requirements/diagnostic-logging.md)
 - [Duration-aware E2E sharding and CI reliability](requirements/e2e-duration-aware-sharding.md)
 - [Expected runtime log severity](requirements/expected-runtime-log-severity.md)
@@ -69,6 +70,7 @@ localization, feature toggles, health, and shared session recovery services.
 
 
 
+- [Browser console retention](system-design/browser-console-retention.md)
 - [Bounded Task Status Delivery](system-design/bounded-task-status-delivery.md)
 - [Diagnostic logging System Design Part 1](system-design/diagnostic-logging-01.md)
 - [Diagnostic logging System Design Part 2](system-design/diagnostic-logging-02.md)
@@ -82,7 +84,8 @@ localization, feature toggles, health, and shared session recovery services.
 
 ## Migration record
 
-All legacy sources assigned to this system are now represented by the canonical requirement and system-design documents above. Source detail is retained in those documents or in their linked design parts.
+Migration remains in progress while legacy source detail is extracted from the
+canonical requirement and system-design documents above.
 
 ## Related systems
 

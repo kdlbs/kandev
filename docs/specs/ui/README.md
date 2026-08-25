@@ -2,7 +2,7 @@
 status: draft
 system: ui
 specification_version: 1
-migration: complete
+migration: in_progress
 owners:
   - kandev
 ---
@@ -20,11 +20,18 @@ This system owns navigation, settings presentation, boards, task and review
 surfaces, walkthroughs, chat controls, visual feedback, and responsive
 interaction contracts that do not own backend state.
 
+A control is not UI-owned only because it appears in the web application. A
+provider or task system keeps ownership when the control configures or displays
+that system's state. The UI system owns only the independent presentation
+contract that other capabilities can reuse.
+
 ## Exclusions
 
 - Durable task behavior belongs to the [task system](../tasks/README.md).
 - Agent profile behavior belongs to the [agent system](../agents/README.md).
 - Plugin contribution contracts belong to the [plugin system](../plugins/README.md).
+- Provider-specific state and actions belong to the
+  [integration system](../integrations/README.md).
 
 ## Specification map
 
@@ -85,6 +92,7 @@ interaction contracts that do not own backend state.
 - [PR Task Status Summary](requirements/pr-task-status-summary.md)
 - [Pull Request Walkthrough Generation](requirements/pr-walkthrough.md)
 - [Preview Sprites Transient Retry](requirements/preview-sprites-transient-retry.md)
+- [Persistent status motion](requirements/persistent-status-motion.md)
 - [Prompt History Panel](requirements/prompt-history-panel.md)
 - [Render Nerd Font glyphs pasted from a styled terminal](requirements/prompt-paste-nerd-font-glyphs.md)
 - [Prompt Turn Duration on Message Hover](requirements/prompt-turn-duration.md)
@@ -109,6 +117,7 @@ interaction contracts that do not own backend state.
 - [Sidebar Last Activity Sort](requirements/sidebar-last-activity-sort.md)
 - [Sidebar Queued Prompt Count Badge](requirements/sidebar-queued-prompt-count.md)
 - [Sidebar Task Completion Icons](requirements/sidebar-task-completion-icons.md)
+- [Sidebar Task Row Presentation](requirements/sidebar-task-row-presentation.md)
 - [Direct Sidebar View Creation](requirements/sidebar-view-creation.md)
 - [Slash Command Composer Selection](requirements/slash-command-composer.md)
 - [Subagent Observability](requirements/subagent-observability.md)
@@ -142,13 +151,16 @@ interaction contracts that do not own backend state.
 - [Task PR Automation Controls System Design Part 3](system-design/ci-pr-automation-03.md)
 - [Merge Queue Recovery Controls](system-design/ci-pr-merge-queue-recovery-controls.md)
 - [Entity Reference Composer](system-design/entity-reference-composer.md)
+- [Persistent status motion](system-design/persistent-status-motion.md)
 - [Prompt History Panel](system-design/prompt-history-panel.md)
 - [Quick Chat and Terminal Tabs](system-design/quick-terminal.md)
 - [Task Layout Profiles](system-design/task-layout-profiles.md)
+- [Task Transcript History Visibility](system-design/task-prompt-transcript-visibility.md)
 
 ## Migration record
 
-All legacy sources assigned to this system are now represented by the canonical requirement and system-design documents above. Source detail is retained in those documents or in their linked design parts.
+Migration remains in progress while legacy source detail is extracted from the
+canonical requirement and system-design documents above.
 
 ## Related systems
 

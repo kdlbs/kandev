@@ -227,6 +227,22 @@ migration: in_progress
 
         self.assertIn("unknown-requirement-reference", self.rules(violations))
 
+    def test_rejects_a_system_design_reference_owned_by_another_system(self) -> None:
+        self.write("docs/specs/task-system/README.md", self.valid_system_index())
+        self.write("docs/specs/task-system/requirements/dependencies.md", self.valid_requirement())
+        self.write(
+            "docs/specs/ui/README.md",
+            self.valid_system_index().replace("task-system", "ui"),
+        )
+        self.write(
+            "docs/specs/ui/system-design/dependencies.md",
+            self.valid_design().replace("system: task-system", "system: ui"),
+        )
+
+        violations = load_linter().lint_specs(self.root, self.config)
+
+        self.assertIn("cross-system-requirement-reference", self.rules(violations))
+
     def test_rejects_a_requirement_without_acceptance_criteria(self) -> None:
         content = self.valid_requirement().split("#### Acceptance criteria", 1)[0]
         self.write("docs/specs/task-system/requirements/dependencies.md", content)

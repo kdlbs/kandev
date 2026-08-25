@@ -70,9 +70,9 @@ Multiple sessions in the *same* task share the same worktree on disk (same files
 
 ### Auth, connectivity, and host-key trust
 
-- **Auth: SSH key file + system ssh-agent.** Authentication via `golang.org/x/crypto/ssh` using either an explicit `IdentityFile` or the user's running `ssh-agent` (`$SSH_AUTH_SOCK`) — covers 1Password / Secretive / Yubikey / forwarded-agent users who don't keep raw keys on disk. **Passphrase-protected keys are not handled in kandev** — users must load them into `ssh-agent` themselves. Password and keyboard-interactive auth are not supported in v1.
+- **Auth: SSH key file + ssh-agent.** Authentication via `golang.org/x/crypto/ssh` uses either an explicit `IdentityFile` or an ssh-agent. A per-host OpenSSH `IdentityAgent` overrides the backend process's `$SSH_AUTH_SOCK`, covering 1Password / Secretive / Yubikey / forwarded-agent users whose agent socket differs from the desktop process environment. `IdentityAgent none` disables agent authentication for that host. **Passphrase-protected keys are not handled in kandev** — users must load them into `ssh-agent` themselves. Password and keyboard-interactive auth are not supported in v1.
 
-- **`~/.ssh/config` inheritance.** When a `host_alias` is configured, kandev parses `~/.ssh/config` to inherit `HostName`, `Port`, `User`, `IdentityFile`, `ProxyJump`, and `IdentitiesOnly` from the user's existing config. A user whose terminal already does `ssh prod` can paste `prod` into kandev and have it just work.
+- **OpenSSH config inheritance.** When a `host_alias` is configured, kandev resolves user and system OpenSSH client configuration to inherit `HostName`, `Port`, `User`, `IdentityAgent`, `IdentityFile`, and one `ProxyJump`. `IdentityAgent` supports `~`, `${VAR}`, whole-value `$VAR`, `SSH_AUTH_SOCK`, and percent tokens `%%`, `%d`, `%h`, `%i`, `%j`, `%k`, `%L`, `%l`, `%n`, `%p`, `%r`, and `%u`; `%C` is not supported. A user whose terminal already does `ssh prod` can paste `prod` into kandev and have it just work.
 
 - **Connectivity: direct, ProxyJump, mesh-VPN.** Direct TCP to `host:port` (default 22). `ProxyJump` (single bastion in v1; chained jumps deferred) implemented natively via the Go SSH client. Tailscale / WireGuard / corporate VPN: "just works" when the kandev backend process is on the same network namespace.
 
@@ -114,8 +114,10 @@ Multiple sessions in the *same* task share the same worktree on disk (same files
   the same workspace placeholders as preparation. Ordinary Stop and backend restart preserve both
   the workspace and cleanup hook for resume. Cleanup failure is reported in logs but does not prevent
   controller teardown.
-- The task directory remains after controller teardown so a later resume keeps history; automatic
-  task-directory deletion remains out of scope.
+- The task directory remains after controller teardown so a later resume keeps history. Built-in
+  reclamation is never part of the stop path; terminal cleanup hooks may still run there. Built-in
+  reclamation is an opt-in phase of the durable task-resource cleanup job, specified in
+  [Remote task-directory reclamation](requirements/remote-task-directory-reclamation.md).
 
 ### agentctl binary upload with content-hash cache
 
@@ -183,6 +185,12 @@ Multiple sessions in the *same* task share the same worktree on disk (same files
 
 - **GIVEN** a user keeps their SSH key in 1Password (no key file on disk) with their agent running, **WHEN** they select "ssh-agent" as identity source, **THEN** the connection succeeds without kandev ever touching key material; passphrase-protected keys without an agent are explicitly rejected with a "load this key into ssh-agent first" message.
 
+- **GIVEN** a host alias sets `IdentityAgent` to a working agent socket while the backend's `$SSH_AUTH_SOCK` is empty or stale, **WHEN** the user selects "ssh-agent", **THEN** kandev connects through the alias-specific socket.
+
+- **GIVEN** a target and its ProxyJump alias select different `IdentityAgent` sockets, **WHEN** kandev connects through the bastion, **THEN** each hop uses its own configured agent; a jump without an auth directive falls back to the target identity.
+
+- **GIVEN** a literal `[user@]host[:port]` ProxyJump has no matching host stanza, **WHEN** kandev connects through it, **THEN** the jump inherits the target identity.
+
 - **GIVEN** a task already has session A running on an SSH host, **WHEN** the user opens a second session B on the same task, **THEN** kandev reuses the existing task dir (no re-clone), launches a second agentctl on a different remote port with its own local SSH forward over the same SSH connection, and both sessions stream independently against the same worktree.
 
 - **GIVEN** two different tasks are running against the same SSH host, **WHEN** the kandev backend restarts, **THEN** `ResumeRemoteInstance` opens one SSH connection to the host, re-forwards each session's recorded remote port through that single connection, verifies `kill -0 <pid>` on each, and the UI reconnects without losing in-progress turns.
@@ -206,7 +214,7 @@ Multiple sessions in the *same* task share the same worktree on disk (same files
 - **Pushing local uncommitted changes to the remote.** Like Sprites, the remote clones from the git URL — we do not rsync the user's working tree.
 - **Auto-installing dependencies on the remote.** If the user's prepare script needs `node`/`go`/`python`/`docker`, those must already be on the host. We do not bootstrap toolchains.
 - **Multi-user-per-host with isolation guarantees.** v1 assumes the single SSH user on each host is trusted with everything that user can see; we do not sandbox sessions from each other beyond per-session runtime dirs.
-- **Orphaned task-dir cleanup as a background job.** If a task is deleted in kandev, the remote `<workdir_root>/tasks/<task-dir-name>/` is left on disk. A v2 housekeeper can sweep stale dirs.
+- **A background sweep of pre-existing orphaned task dirs.** Reclaiming the remote `<workdir_root>/tasks/<task-dir-name>/` when a task reaches a terminal outcome is no longer out of scope: it is specified in [Remote task-directory reclamation](requirements/remote-task-directory-reclamation.md), which supersedes this bullet. What remains out of scope is a scheduled sweep of directories left behind by tasks Kandev no longer has a row for.
 - **GUI editor for `~/.ssh/config`.** We read existing config; users edit it in their text editor.
 - **Bring-your-own-agentctl** (skip upload, point at an existing install). Always uploaded + content-hash-cached in v1.
 - **Kubernetes / pod-exec transport.** The `k8s` executor type is its own future feature.
@@ -220,7 +228,8 @@ Multiple sessions in the *same* task share the same worktree on disk (same files
 - **"Push working tree" mode** for users who want to test uncommitted changes against a remote (rsync the worktree instead of cloning).
 - **Pooled host capacity**: configure 3 SSH hosts as a pool, kandev round-robins / load-balances tasks across them.
 - **SSH-tunneled MCP servers**: expose a user's local MCP servers to a remote-running agent via reverse forward.
-- **Orphan task-dir housekeeper** as a backend background job.
+- **Orphan task-dir sweeper** as a backend background job, for directories with no surviving task
+  row. The terminal-outcome reclamation itself is now specified rather than deferred.
 - **Byte-for-byte live prepare output streaming.** SSH reports bounded preparation progress and the
   final diagnostic tail, but matching Sprites' continuous stdout/stderr streaming can be added later.
 
