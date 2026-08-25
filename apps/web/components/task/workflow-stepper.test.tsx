@@ -125,6 +125,36 @@ describe("WorkflowStepper", () => {
     expect(moveButton.hasAttribute("disabled")).toBe(false);
   });
 
+  it("ignores a superseded move's rejection so it cannot overwrite a newer result", async () => {
+    // Only the in-flight step's own button is disabled, so the user can start a
+    // second move before the first resolves. A rejection from the abandoned
+    // request must not paint a banner describing a move nobody is waiting on.
+    let rejectFirst!: (error: unknown) => void;
+    moveTaskMock.mockReturnValueOnce(new Promise((_res, rej) => (rejectFirst = rej)));
+    moveTaskMock.mockResolvedValueOnce(undefined);
+    const onMoveError = vi.fn();
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const props = {
+      steps: STEPS,
+      currentStepId: "b",
+      taskId: "task-1",
+      workflowId: "workflow-1",
+      onMoveError,
+    } as ComponentProps<typeof WorkflowStepper> & { onMoveError: typeof onMoveError };
+
+    render(<WorkflowStepper {...props} />);
+    const moveButtons = screen.getAllByRole("button", { name: "Move here" });
+    fireEvent.click(moveButtons[0]);
+    fireEvent.click(moveButtons[1]);
+
+    await waitFor(() => expect(moveTaskMock).toHaveBeenCalledTimes(2));
+    rejectFirst(new Error("task has an active session (RUNNING)"));
+    await waitFor(() => expect(consoleErrorSpy).toHaveBeenCalled());
+
+    expect(onMoveError).not.toHaveBeenCalled();
+    consoleErrorSpy.mockRestore();
+  });
+
   it("notifies the owning surface when a move starts", () => {
     const onMoveStart = vi.fn();
     moveTaskMock.mockResolvedValueOnce(undefined);

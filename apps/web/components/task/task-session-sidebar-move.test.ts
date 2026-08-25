@@ -30,6 +30,25 @@ beforeEach(() => {
 });
 
 describe("useMoveToStep", () => {
+  it("does not clear prior feedback when the move cannot be attempted", async () => {
+    // Missing snapshot/task rows return without touching the server, so wiping
+    // a still-accurate banner on the way past them explains nothing.
+    const store = buildStore({ tasks: [] });
+    const onMoveStart = vi.fn();
+
+    const { result } = renderHook(() => useMoveToStep(store as never, onMoveStart, vi.fn()));
+
+    await act(async () => {
+      await result.current("missing-task", "wf-1", "step-b");
+    });
+    await act(async () => {
+      await result.current("task-1", "wf-missing", "step-b");
+    });
+
+    expect(onMoveStart).not.toHaveBeenCalled();
+    expect(moveTaskByIdMock).not.toHaveBeenCalled();
+  });
+
   it("calls onMoveStart, then optimistically moves the task before the request resolves", async () => {
     const store = buildStore({
       tasks: [{ id: "task-1", workflowStepId: "step-a", position: 0 }],
@@ -110,6 +129,10 @@ describe("useMoveToStep", () => {
     expect(store.getSnapshots()["wf-1"].tasks[0]).toMatchObject({
       workflowStepId: "step-c",
     });
+    // The same staleness signal that skips the rollback must also suppress the
+    // banner: the newer move landed, so reporting would describe a move the
+    // user abandoned while the task sits where they asked for it.
+    expect(onMoveError).not.toHaveBeenCalled();
     consoleErrorSpy.mockRestore();
   });
 });

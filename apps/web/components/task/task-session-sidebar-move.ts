@@ -14,13 +14,17 @@ export function useMoveToStep(
 
   return useCallback(
     async (taskId: string, workflowId: string, targetStepId: string) => {
-      onMoveStart?.();
       const state = store.getState();
       const snapshot = state.kanbanMulti.snapshots[workflowId];
       if (!snapshot) return;
 
       const originalTask = snapshot.tasks.find((t) => t.id === taskId);
       if (!originalTask) return;
+
+      // Only signal the start once a move is actually going out: the guards
+      // above return without touching the server, and clearing the banner on
+      // the way past them would wipe a still-accurate message for nothing.
+      onMoveStart?.();
 
       const targetTasks = snapshot.tasks
         .filter((t) => t.workflowStepId === targetStepId && t.id !== taskId)
@@ -42,24 +46,29 @@ export function useMoveToStep(
           position: nextPosition,
         });
       } catch (error) {
-        // Rollback only the moved task, and only if it still has the optimistic values
+        console.error("Failed to move task:", error);
+        // The optimistic values still being in place is what makes this the
+        // move the store is showing. Once a newer move has overwritten them
+        // this rejection describes an abandoned request, so it must neither
+        // roll back nor paint a banner over the newer move's outcome.
         const cur = store.getState().kanbanMulti.snapshots[workflowId];
         const curTask = cur?.tasks.find((t) => t.id === taskId);
-        if (cur && curTask?.workflowStepId === targetStepId && curTask.position === nextPosition) {
-          store.getState().setWorkflowSnapshot(workflowId, {
-            ...cur,
-            tasks: cur.tasks.map((t) =>
-              t.id === taskId
-                ? {
-                    ...t,
-                    workflowStepId: originalTask.workflowStepId,
-                    position: originalTask.position,
-                  }
-                : t,
-            ),
-          });
-        }
-        console.error("Failed to move task:", error);
+        const isCurrentMove =
+          !!cur && curTask?.workflowStepId === targetStepId && curTask.position === nextPosition;
+        if (!isCurrentMove) return;
+
+        store.getState().setWorkflowSnapshot(workflowId, {
+          ...cur,
+          tasks: cur.tasks.map((t) =>
+            t.id === taskId
+              ? {
+                  ...t,
+                  workflowStepId: originalTask.workflowStepId,
+                  position: originalTask.position,
+                }
+              : t,
+          ),
+        });
         onMoveError?.(error);
       }
     },
