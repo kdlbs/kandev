@@ -69,16 +69,21 @@ export function ActionConfirmPopover({
   const descriptionId = useId();
   const cancelRef = useRef<HTMLButtonElement>(null);
   const confirmedRef = useRef(false);
+  const anchorWasConnectedRef = useRef(false);
   const confirmIsDisabled = disabled || confirmDisabled;
 
-  // Intentionally runs on every render: an anchor can disappear through live
-  // data without changing the confirmation's open state, so each render must
-  // re-check the guard before the shell can invoke a stale action.
+  // Detect when the anchor element was connected but becomes disconnected
+  // (e.g., removed from the DOM by its parent). Only close the popover on a
+  // genuine disconnect transition — skip the auto-close on re-renders where
+  // the ref was never set.
   useLayoutEffect(() => {
-    // Keep a confirmed close marked until Radix finishes close-autofocus. An
-    // early reset can refocus this anchor while a following popover is opening.
     if (!open) return;
-    if (isConnected(anchorRef.current)) return;
+    const connected = isConnected(anchorRef.current);
+    if (connected) {
+      anchorWasConnectedRef.current = true;
+      return;
+    }
+    if (!anchorWasConnectedRef.current) return;
     onCancel?.();
     onOpenChange(false);
   });
