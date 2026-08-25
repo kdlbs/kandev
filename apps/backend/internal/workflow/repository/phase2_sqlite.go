@@ -280,7 +280,7 @@ func (r *Repository) ListStepParticipantsForTask(
 		SELECT id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at
 		FROM workflow_step_participants
 		WHERE step_id = ? AND (task_id = '' OR task_id = ?)
-		ORDER BY role ASC, position ASC, id ASC
+		ORDER BY role ASC, position ASC, agent_profile_id ASC, id ASC
 	`), stepID, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("list step participants for task: %w", err)
@@ -320,7 +320,7 @@ func (r *Repository) ListParticipantsForTaskAnyStep(
 		SELECT id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at
 		FROM workflow_step_participants
 		WHERE task_id = ?
-		ORDER BY role ASC, position ASC, id ASC
+		ORDER BY role ASC, position ASC, agent_profile_id ASC, id ASC
 	`), taskID)
 	if err != nil {
 		return nil, fmt.Errorf("list participants for task: %w", err)
@@ -363,7 +363,7 @@ func (r *Repository) ListParticipantsForTaskWorkflow(
 		FROM workflow_step_participants p
 		JOIN workflow_steps ws ON ws.id = p.step_id
 		WHERE p.task_id = ? AND ws.workflow_id = ?
-		ORDER BY p.role ASC, p.position ASC, p.id ASC
+		ORDER BY p.role ASC, p.position ASC, p.agent_profile_id ASC, p.id ASC
 	`), taskID, workflowID)
 	if err != nil {
 		return nil, fmt.Errorf("list participants for task workflow: %w", err)
@@ -444,7 +444,7 @@ func (r *Repository) ListStepParticipants(ctx context.Context, stepID string) ([
 		SELECT id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at
 		FROM workflow_step_participants
 		WHERE step_id = ? AND task_id = ''
-		ORDER BY role ASC, position ASC, id ASC
+		ORDER BY role ASC, position ASC, agent_profile_id ASC, id ASC
 	`), stepID)
 	if err != nil {
 		return nil, fmt.Errorf("list step participants: %w", err)
