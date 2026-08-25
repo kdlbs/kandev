@@ -47,6 +47,12 @@ func (e *Executor) validateReuseEnvironmentInventory(ctx context.Context, req *L
 	// check and rebuild fresh worktree/repo specs. A non-empty but wrong
 	// inventory below is the guard's actual purpose and must still refuse.
 	if len(rows) == 0 {
+		req.WorkspaceReuseRequired = workspaceReuseAllowed(
+			env,
+			req.ExecutorType,
+			req.WorkspaceReuseRequired,
+			e.taskIsRepoBacked(ctx, req.TaskID),
+		)
 		return nil
 	}
 	for _, spec := range specs {
@@ -105,6 +111,13 @@ func (e *Executor) reuseExistingEnvironment(ctx context.Context, req *LaunchAgen
 			zap.String("task_id", req.TaskID),
 			zap.String("env_executor_type", env.ExecutorType),
 			zap.String("req_executor_type", req.ExecutorType))
+		return
+	}
+	// A repo-backed environment with no canonical rows is being freshly
+	// materialized. Do not forward any environment or sibling runtime handle:
+	// those handles could reconnect to the incomplete workspace, and
+	// PreviousExecutionID would route the new session through the resume path.
+	if !req.WorkspaceReuseRequired && e.taskIsRepoBacked(ctx, req.TaskID) && len(env.Repos) == 0 {
 		return
 	}
 

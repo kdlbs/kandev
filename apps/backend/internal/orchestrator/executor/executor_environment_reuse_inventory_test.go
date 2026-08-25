@@ -18,6 +18,7 @@ import (
 // inventory, which must still be refused.
 func TestValidateReuseEnvironmentInventory_ZeroRowsIsRecoverable(t *testing.T) {
 	repo := newMockRepository()
+	repo.taskRepositories["task-repo-1"] = &models.TaskRepository{ID: "task-repo-1", TaskID: "task-1", RepositoryID: "repo-1"}
 	e := newTestExecutor(t, &mockAgentManager{}, repo)
 	req := &LaunchAgentRequest{
 		TaskID:                 "task-1",
@@ -28,6 +29,9 @@ func TestValidateReuseEnvironmentInventory_ZeroRowsIsRecoverable(t *testing.T) {
 
 	if err := e.validateReuseEnvironmentInventory(context.Background(), req, env); err != nil {
 		t.Fatalf("validateReuseEnvironmentInventory() with zero recorded rows = %v, want nil (recoverable)", err)
+	}
+	if req.WorkspaceReuseRequired {
+		t.Fatal("zero inventory kept WorkspaceReuseRequired=true, want fresh materialization")
 	}
 }
 

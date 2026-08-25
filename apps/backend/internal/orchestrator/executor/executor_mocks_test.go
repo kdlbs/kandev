@@ -279,6 +279,8 @@ type mockRepository struct {
 	getTaskSessionFunc                 func(ctx context.Context, id string) (*models.TaskSession, error)
 	getTaskEnvironmentFunc             func(ctx context.Context, id string) (*models.TaskEnvironment, error)
 	getTaskEnvironmentByTaskIDFunc     func(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
+	createTaskEnvironmentRepoErr       error
+	finalizeTaskEnvironmentErr         error
 	createTaskSessionFunc              func(ctx context.Context, session *models.TaskSession) error
 	updateTaskSessionStateFunc         func(ctx context.Context, sessionID string, state models.TaskSessionState, errorMessage string) error
 	listActiveTaskSessionsByTaskIDFunc func(ctx context.Context, taskID string) ([]*models.TaskSession, error)
@@ -1165,12 +1167,18 @@ func (m *mockRepository) UpdateTaskEnvironment(_ context.Context, env *models.Ta
 	return nil
 }
 func (m *mockRepository) FinalizeTaskEnvironmentMaterialization(_ context.Context, env *models.TaskEnvironment, repos []*models.TaskEnvironmentRepo, _ string) error {
+	if m.finalizeTaskEnvironmentErr != nil {
+		return m.finalizeTaskEnvironmentErr
+	}
 	m.finalizeTaskEnvironmentCalls = append(m.finalizeTaskEnvironmentCalls, env)
 	m.taskEnvironments[env.ID] = env
 	m.taskEnvironmentRepos[env.ID] = repos
 	return nil
 }
 func (m *mockRepository) CreateTaskEnvironmentRepo(_ context.Context, repo *models.TaskEnvironmentRepo) error {
+	if m.createTaskEnvironmentRepoErr != nil {
+		return m.createTaskEnvironmentRepoErr
+	}
 	if repo.ID == "" {
 		repo.ID = repo.TaskEnvironmentID + "-repo-" + repo.RepositoryID
 		if repo.BranchSlug != "" {

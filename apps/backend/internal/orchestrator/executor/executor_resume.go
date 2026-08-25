@@ -748,7 +748,15 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 			return nil, err
 		}
 	}
-	e.persistTaskEnvironment(ctx, task.ID, session, existingEnv, req, resp, execCfg)
+	if err := e.persistTaskEnvironment(ctx, task.ID, session, existingEnv, req, resp, execCfg); err != nil {
+		e.cleanupUnstartedExecutionAfterPersistError(ctx, session.ID, resp.AgentExecutionID, err)
+		e.markTaskEnvironmentMaterializationFailed(ctx, existingEnv, session.ID)
+		if startAgent {
+			e.rollbackResumeStateAfterFailure(ctx, task.ID, session.ID, resumeInitialState, err,
+				resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot))
+		}
+		return nil, err
+	}
 
 	worktreePath := resp.WorktreePath
 	worktreeBranch := resp.WorktreeBranch
@@ -1038,6 +1046,9 @@ func (e *Executor) buildResumeRequestAtCredentialBoundary(
 		req.PullBeforeWorktree = allRepos[0].PullBeforeWorktree
 		req.RemoteSyncHandled = allRepos[0].RemoteSyncHandled
 		req.RefreshRepository = allRepos[0].RefreshRepository
+	}
+	if err := e.validateReuseEnvironmentInventory(ctx, req, existingEnv); err != nil {
+		return nil, "", execConfig, existingEnv, nil, err
 	}
 
 	e.reuseExistingEnvironment(ctx, req, existingEnv)

@@ -166,9 +166,19 @@ func (r *Repository) UpdateTaskEnvironment(ctx context.Context, env *models.Task
 	if env.ExecutorType == string(models.ExecutorTypeWorktree) && env.WorkspacePath == "" && env.Status != models.TaskEnvironmentStatusCreating {
 		return fmt.Errorf("update task environment: worktree-mode env requires workspace_path (id=%s)", env.ID)
 	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if env.Status == models.TaskEnvironmentStatusReady {
+		if err := r.validateReadyTaskEnvironment(ctx, tx, env.ID); err != nil {
+			return err
+		}
+	}
 	env.UpdatedAt = time.Now().UTC()
 
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_environments SET
 			executor_type = ?, executor_id = ?, executor_profile_id = ?,
 			control_port = ?, status = ?, materialization_session_id = ?,
@@ -191,7 +201,38 @@ func (r *Repository) UpdateTaskEnvironment(ctx context.Context, env *models.Task
 	if rows == 0 {
 		return fmt.Errorf("%w: %s", ErrTaskEnvironmentNotFound, env.ID)
 	}
+	return tx.Commit()
+}
+
+func (r *Repository) validateReadyTaskEnvironment(ctx context.Context, tx *sqlx.Tx, environmentID string) error {
+	taskID, err := r.taskEnvironmentTaskIDTx(ctx, tx, environmentID)
+	if err != nil {
+		return err
+	}
+	if err := r.taskCleanupBarrierLocked(ctx, tx, taskID); err != nil {
+		return err
+	}
+	hasRepos, err := r.taskHasRepositoriesTx(ctx, tx, taskID)
+	if err != nil || !hasRepos {
+		return err
+	}
+	var inventoryCount int
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT COUNT(1) FROM task_environment_repos WHERE task_environment_id = ?`), environmentID).Scan(&inventoryCount); err != nil {
+		return err
+	}
+	if inventoryCount == 0 {
+		return fmt.Errorf("update task environment: ready status requires repository inventory for repo-backed task (id=%s)", environmentID)
+	}
 	return nil
+}
+
+func (r *Repository) taskEnvironmentTaskIDTx(ctx context.Context, tx *sqlx.Tx, environmentID string) (string, error) {
+	var taskID string
+	err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id FROM task_environments WHERE id = ?`), environmentID).Scan(&taskID)
+	if err == sql.ErrNoRows {
+		return "", fmt.Errorf("%w: %s", ErrTaskEnvironmentNotFound, environmentID)
+	}
+	return taskID, err
 }
 
 // FinalizeTaskEnvironmentMaterialization writes the complete canonical
