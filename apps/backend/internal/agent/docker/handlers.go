@@ -138,14 +138,25 @@ func callerScoped(ctx context.Context) bool {
 // authorizeContainerLabels reports whether the caller may see the container
 // described by labels. A container with no owning session or task, or with no
 // authorizer wired, is denied rather than exposed.
+//
+// The session label goes stale when a session is rolled back or removed while
+// its task and container live on, so a failed session check falls back to the
+// task label — the container GC treats kandev.task_id as the durable owner for
+// the same reason. The fallback cannot widen access: both labels are stamped
+// from one launch config, and AuthorizeSessionAccess resolves through the
+// task's workspace anyway, so it admits nobody AuthorizeTaskAccess would deny.
 func authorizeContainerLabels(ctx context.Context, labels map[string]string, authorizer SessionAuthorizer) error {
 	if authorizer == nil {
 		return errContainerUnowned
 	}
-	if sessionID := labels[sessionIDLabel]; sessionID != "" {
-		return authorizer.AuthorizeSessionAccess(ctx, sessionID)
+	sessionID, taskID := labels[sessionIDLabel], labels[taskIDLabel]
+	if sessionID != "" {
+		err := authorizer.AuthorizeSessionAccess(ctx, sessionID)
+		if err == nil || taskID == "" {
+			return err
+		}
 	}
-	if taskID := labels[taskIDLabel]; taskID != "" {
+	if taskID != "" {
 		return authorizer.AuthorizeTaskAccess(ctx, taskID)
 	}
 	return errContainerUnowned

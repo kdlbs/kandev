@@ -404,3 +404,85 @@ func TestNoIdentityIsUnscoped(t *testing.T) {
 		t.Fatalf("unauthenticated listing = %s", list.Body.String())
 	}
 }
+
+// TestStaleSessionLabelFallsBackToTaskOwnership covers a container whose
+// session row is gone (rolled back or removed) while its task and container
+// live on: the owner must still see and control it.
+func TestStaleSessionLabelFallsBackToTaskOwnership(t *testing.T) {
+	client, authorizer, titles := twoUserFixture()
+	delete(authorizer.sessionOwners, "session-a")
+	router := dockerTestRouter(t, client, titles.provider(), authorizer, member("user-a"))
+
+	list := do(router, http.MethodGet, "/api/v1/docker/containers", "")
+	if !strings.Contains(list.Body.String(), "ctr-a") {
+		t.Fatalf("owner lost their container to a stale session label: %s", list.Body.String())
+	}
+
+	stop := do(router, http.MethodPost, "/api/v1/docker/containers/ctr-a/stop", "")
+	if stop.Code != http.StatusOK {
+		t.Fatalf("stop with stale session label = %d, want 200; body = %s", stop.Code, stop.Body.String())
+	}
+	remove := do(router, http.MethodDelete, "/api/v1/docker/containers/ctr-a", "")
+	if remove.Code != http.StatusOK {
+		t.Fatalf("remove with stale session label = %d, want 200; body = %s", remove.Code, remove.Body.String())
+	}
+}
+
+// TestStaleSessionLabelStillDeniesForeignTask pins that the task label is a
+// fallback, not a bypass: a stale session on someone else's task stays hidden.
+func TestStaleSessionLabelStillDeniesForeignTask(t *testing.T) {
+	client, authorizer, titles := twoUserFixture()
+	delete(authorizer.sessionOwners, "session-a")
+	router := dockerTestRouter(t, client, titles.provider(), authorizer, member("user-b"))
+
+	list := do(router, http.MethodGet, "/api/v1/docker/containers", "")
+	if strings.Contains(list.Body.String(), "ctr-a") {
+		t.Fatalf("foreign container leaked via task fallback: %s", list.Body.String())
+	}
+	stop := do(router, http.MethodPost, "/api/v1/docker/containers/ctr-a/stop", "")
+	if stop.Code != http.StatusNotFound || len(client.stopped) != 0 {
+		t.Fatalf("foreign stop = %d, stopped = %v", stop.Code, client.stopped)
+	}
+}
+
+// TestNilAuthorizerDeniesScopedCallers pins the fail-closed half of the wiring
+// contract: with no authorizer wired (partial builds), a scoped caller sees
+// nothing and can act on nothing.
+func TestNilAuthorizerDeniesScopedCallers(t *testing.T) {
+	client, _, titles := twoUserFixture()
+	router := dockerTestRouter(t, client, titles.provider(), nil, member("user-a"))
+
+	list := do(router, http.MethodGet, "/api/v1/docker/containers", "")
+	if list.Code != http.StatusOK || strings.Contains(list.Body.String(), "ctr-") {
+		t.Fatalf("nil-authorizer listing = %d %s, want an empty listing", list.Code, list.Body.String())
+	}
+	stop := do(router, http.MethodPost, "/api/v1/docker/containers/ctr-a/stop", "")
+	if stop.Code != http.StatusNotFound {
+		t.Fatalf("nil-authorizer stop = %d, want 404", stop.Code)
+	}
+	remove := do(router, http.MethodDelete, "/api/v1/docker/containers/ctr-a", "")
+	if remove.Code != http.StatusNotFound {
+		t.Fatalf("nil-authorizer remove = %d, want 404", remove.Code)
+	}
+	if len(client.stopped) != 0 || len(client.removed) != 0 {
+		t.Fatalf("nil-authorizer reached Docker: stopped=%v removed=%v", client.stopped, client.removed)
+	}
+}
+
+// TestBuildWithoutAnyIdentityIsRejected documents the deliberate asymmetry
+// between /build and the container routes. Every HTTP request goes through the
+// global identity middleware, so an identity-free request is unreachable in
+// production; where the container routes stay unscoped for internal callers,
+// the host-level build fails closed with RequireAdmin's 401.
+func TestBuildWithoutAnyIdentityIsRejected(t *testing.T) {
+	client, authorizer, titles := twoUserFixture()
+	router := dockerTestRouter(t, client, titles.provider(), authorizer, nil)
+
+	build := do(router, http.MethodPost, "/api/v1/docker/build", `{"dockerfile":"FROM scratch","tag":"x:1"}`)
+	if build.Code != http.StatusUnauthorized {
+		t.Fatalf("identity-free build = %d, want 401; body = %s", build.Code, build.Body.String())
+	}
+	if len(client.builtTags) != 0 {
+		t.Fatalf("identity-free build reached Docker: %v", client.builtTags)
+	}
+}
