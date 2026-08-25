@@ -9,6 +9,15 @@ import type { KanbanState } from "@/lib/state/slices";
 import { issueFieldsFromMetadata } from "@/lib/metadata-utils";
 import { repositorySlug } from "@/lib/repository-slug";
 
+const EMPTY_REPOSITORIES: Repository[] = [];
+
+export function selectWorkspaceRepositories(
+  itemsByWorkspaceId: Record<string, Repository[]>,
+  workspaceId: string | null | undefined,
+): Repository[] {
+  return (workspaceId && itemsByWorkspaceId[workspaceId]) || EMPTY_REPOSITORIES;
+}
+
 type ACPDebugInfo = {
   sessionId: unknown;
   updatedAt: unknown;

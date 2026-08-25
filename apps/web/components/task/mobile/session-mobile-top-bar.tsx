@@ -474,32 +474,12 @@ function MobileTopBarActions({
   );
 }
 
-// eslint-disable-next-line max-lines-per-function -- Coordinates the mobile task header and Git actions.
-export const SessionMobileTopBar = memo(function SessionMobileTopBar(
-  props: SessionMobileTopBarProps,
-) {
-  const { t } = useTranslation();
+function useSessionMobileTopBarState(props: SessionMobileTopBarProps) {
   const [commitDialogOpen, setCommitDialogOpen] = useState(false);
   const [prDialogOpen, setPrDialogOpen] = useState(false);
   const [prBranchPushed, setPrBranchPushed] = useState(false);
-  const {
-    commits,
-    displayBranch,
-    uncommittedAdditions,
-    uncommittedDeletions,
-    uncommittedCount,
-    totalAdditions,
-    totalDeletions,
-  } = useMobileGitMetrics(props.sessionId, props.worktreeBranch, props.baseBranch);
-  const {
-    isGitLoading,
-    handlePull,
-    handlePush,
-    handleRebase,
-    handleMerge,
-    handleCommit,
-    handleCreatePR,
-  } = useMobileGitActions(
+  const metrics = useMobileGitMetrics(props.sessionId, props.worktreeBranch, props.baseBranch);
+  const actions = useMobileGitActions(
     {
       sessionId: props.sessionId,
       baseBranch: props.baseBranch,
@@ -509,6 +489,45 @@ export const SessionMobileTopBar = memo(function SessionMobileTopBar(
     setPrDialogOpen,
     setPrBranchPushed,
   );
+
+  return {
+    ...metrics,
+    ...actions,
+    commitDialogOpen,
+    setCommitDialogOpen,
+    prDialogOpen,
+    setPrDialogOpen,
+    prBranchPushed,
+    setPrBranchPushed,
+  };
+}
+
+export const SessionMobileTopBar = memo(function SessionMobileTopBar(
+  props: SessionMobileTopBarProps,
+) {
+  const { t } = useTranslation();
+  const {
+    commits,
+    displayBranch,
+    uncommittedAdditions,
+    uncommittedDeletions,
+    uncommittedCount,
+    totalAdditions,
+    totalDeletions,
+    commitDialogOpen,
+    setCommitDialogOpen,
+    prDialogOpen,
+    setPrDialogOpen,
+    prBranchPushed,
+    setPrBranchPushed,
+    isGitLoading,
+    handlePull,
+    handlePush,
+    handleRebase,
+    handleMerge,
+    handleCommit,
+    handleCreatePR,
+  } = useSessionMobileTopBarState(props);
   return (
     <header className="flex items-center justify-between px-2 py-2 bg-background">
       <div className="flex items-center gap-2 min-w-0 flex-1">

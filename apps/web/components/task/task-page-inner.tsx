@@ -22,6 +22,7 @@ import {
   buildDebugEntries,
   buildArchivedValue,
   resolveTaskProps,
+  selectWorkspaceRepositories,
 } from "@/components/task/task-page-content-helpers";
 import type { useSessionResumption } from "@/hooks/domains/session/use-session-resumption";
 import type { useSessionAgentctl } from "@/hooks/domains/session/use-session-agentctl";
@@ -227,7 +228,7 @@ function useTaskPageDerivedProps({
   onTaskUnarchived,
 }: TaskPageInnerProps) {
   const workspaceRepositories = useAppStore((state) =>
-    task?.workspace_id ? (state.repositories.itemsByWorkspaceId[task.workspace_id] ?? []) : [],
+    selectWorkspaceRepositories(state.repositories.itemsByWorkspaceId, task?.workspace_id),
   );
   const taskProps = resolveTaskProps(task, repository, workspaceRepositories);
   const remote = resolveRemoteExecutor(resumption.sessionStatus as RemoteExecutorStatus | null);

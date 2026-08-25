@@ -126,6 +126,12 @@ func TestRepositoryBranchPolicyServiceGitflowStarterIsAtomicAndOneTime(t *testin
 func TestRepositoryBranchPolicyServiceRejectsImproveWorkspaceMutations(t *testing.T) {
 	svc, eventBus, repo := createTestService(t)
 	seedBranchPolicyRepository(t, repo)
+	if err := repo.CreateRepositoryBranchPolicy(context.Background(), &models.RepositoryBranchPolicy{
+		ID: "policy-improve", RepositoryID: "repo-policy-service", Name: "Existing",
+		BaseBranch: "main", BranchTemplate: "feature/{title}-{suffix}", PullRequestTarget: "main",
+	}); err != nil {
+		t.Fatalf("seed branch policy: %v", err)
+	}
 	workspace, err := repo.GetWorkspace(context.Background(), "ws-policy-service")
 	if err != nil {
 		t.Fatalf("get workspace: %v", err)
@@ -141,6 +147,25 @@ func TestRepositoryBranchPolicyServiceRejectsImproveWorkspaceMutations(t *testin
 	})
 	if !errors.Is(err, ErrRepositoryBranchPolicyReadOnly) {
 		t.Fatalf("create read-only workspace error = %v", err)
+	}
+
+	_, err = svc.UpdateRepositoryBranchPolicy(context.Background(), "policy-improve", &UpdateRepositoryBranchPolicyRequest{
+		Name: stringPointer("Renamed"),
+	})
+	if !errors.Is(err, ErrRepositoryBranchPolicyReadOnly) {
+		t.Fatalf("update read-only workspace error = %v", err)
+	}
+
+	_, err = svc.CreateGitflowRepositoryBranchPolicies(context.Background(), &CreateGitflowRepositoryBranchPoliciesRequest{
+		RepositoryID: "repo-policy-service", ProductionBranch: "main", DevelopmentBranch: "develop",
+	})
+	if !errors.Is(err, ErrRepositoryBranchPolicyReadOnly) {
+		t.Fatalf("gitflow read-only workspace error = %v", err)
+	}
+
+	err = svc.DeleteRepositoryBranchPolicy(context.Background(), "policy-improve")
+	if !errors.Is(err, ErrRepositoryBranchPolicyReadOnly) {
+		t.Fatalf("delete read-only workspace error = %v", err)
 	}
 	if len(eventBus.GetPublishedEvents()) != 0 {
 		t.Fatalf("read-only mutation published events = %d", len(eventBus.GetPublishedEvents()))
