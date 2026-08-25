@@ -27,9 +27,10 @@ export type StatusDropDeps = {
  * Applies a card drop onto a status column: optimistic patch, the mutation,
  * then a rollback to the pre-drop snapshot if the backend refuses.
  *
- * The board is a projection of `office.tasks.items`, so patching the store IS
- * the visible move; there is no board-local ordering to keep in step. Rollback
- * restores the whole prior task rather than just its status, matching
+ * The regular board is a projection of `office.tasks.items`. During server
+ * search, the displayed task list is a separate result projection, so the
+ * caller also receives each patch to keep that view in step. Rollback restores
+ * the whole prior task rather than just its status, matching
  * useOptimisticTaskMutation, so a snapshot's `rawStatus` survives the trip.
  *
  * Drops are column-to-column only. Cards are not reordered within a column:
@@ -71,9 +72,27 @@ export async function applyStatusDrop(
  * Wires the office task board to dnd-kit. Droppable ids are status values and
  * draggable ids are task ids, so a drag end reads as (taskId -> status).
  */
-export function useBoardDrag() {
+export function useBoardDrag(
+  tasks: OfficeTask[] = [],
+  onTaskPatch?: (taskId: string, patch: Partial<OfficeTask>) => void,
+) {
   const storeApi = useAppStoreApi();
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+
+  const getTask = useCallback(
+    (taskId: string) =>
+      tasks.find((task) => task.id === taskId) ??
+      storeApi.getState().office.tasks.items.find((task) => task.id === taskId),
+    [storeApi, tasks],
+  );
+
+  const patchTask = useCallback(
+    (taskId: string, patch: Partial<OfficeTask>) => {
+      storeApi.getState().patchTaskInStore(taskId, patch);
+      onTaskPatch?.(taskId, patch);
+    },
+    [onTaskPatch, storeApi],
+  );
 
   const sensors = useSensors(
     // MouseSensor, not PointerSensor: the board is an overflow-x-auto row
@@ -98,13 +117,13 @@ export function useBoardDrag() {
       const { active, over } = event;
       if (!over) return;
       await applyStatusDrop(String(active.id), String(over.id) as OfficeTaskStatus, {
-        getTask: (id) => storeApi.getState().office.tasks.items.find((task) => task.id === id),
-        patchTask: (id, patch) => storeApi.getState().patchTaskInStore(id, patch),
+        getTask,
+        patchTask,
         updateStatus: (id, status) => updateTaskStatusOrTranslateGate(id, status),
         onError: (message) => toast.error(message),
       });
     },
-    [storeApi],
+    [getTask, patchTask],
   );
 
   return { activeTaskId, sensors, handleDragStart, handleDragEnd, handleDragCancel };

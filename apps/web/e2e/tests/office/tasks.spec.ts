@@ -217,4 +217,68 @@ test.describe("Tasks (Issues)", () => {
       )
       .toContain("progress");
   });
+
+  test("dragging a searched card updates the visible search result", async ({
+    testPage,
+    apiClient,
+    officeApi,
+    officeSeed,
+  }) => {
+    for (let i = 0; i < 6; i++) {
+      await apiClient.createTask(officeSeed.workspaceId, `Searched Board Filler ${i}`, {
+        workflow_id: officeSeed.workflowId,
+      });
+    }
+    const task = await apiClient.createTask(officeSeed.workspaceId, "Searched Board Drag Task", {
+      workflow_id: officeSeed.workflowId,
+    });
+
+    await testPage.goto("/office/tasks");
+    await testPage.getByTestId("task-view-board").click();
+
+    const searchInput = testPage.getByPlaceholder(/search tasks/i);
+    const searchResponse = testPage.waitForResponse(
+      (response) =>
+        response.url().includes("/tasks/search?") &&
+        response.request().method() === "GET" &&
+        response.ok(),
+    );
+    await searchInput.fill("Searched Board");
+    await searchResponse;
+
+    const card = testPage.getByTestId(`board-card-${task.id}`);
+    await expect(card).toBeVisible({ timeout: 15_000 });
+
+    const tallColumn = testPage.getByTestId("board-column-todo");
+    const target = testPage.getByTestId("board-column-in_progress");
+    await expect(target.getByTestId(`board-card-${task.id}`)).toHaveCount(0);
+
+    const from = await card.boundingBox();
+    const tallBox = await tallColumn.boundingBox();
+    const targetBox = await target.boundingBox();
+    expect(from).not.toBeNull();
+    expect(tallBox).not.toBeNull();
+    expect(targetBox).not.toBeNull();
+
+    await testPage.mouse.move(from!.x + from!.width / 2, from!.y + from!.height / 2);
+    await testPage.mouse.down();
+    await testPage.mouse.move(
+      targetBox!.x + targetBox!.width / 2,
+      tallBox!.y + tallBox!.height - 10,
+      { steps: 12 },
+    );
+    await testPage.mouse.up();
+
+    await expect
+      .poll(
+        async () => {
+          const persisted = (await officeApi.getTask(task.id)) as Record<string, unknown>;
+          const inner = (persisted.task as Record<string, unknown>) ?? persisted;
+          return ((inner.status as string) ?? (inner.state as string) ?? "").toLowerCase();
+        },
+        { timeout: 15_000 },
+      )
+      .toContain("progress");
+    await expect(target.getByTestId(`board-card-${task.id}`)).toBeVisible({ timeout: 15_000 });
+  });
 });

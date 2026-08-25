@@ -27,6 +27,7 @@ const CARD_CLASS = "rounded-md border border-border bg-card p-3";
 
 type TaskBoardProps = {
   tasks: OfficeTask[];
+  onTaskPatch?: (taskId: string, patch: Partial<OfficeTask>) => void;
 };
 
 function CardBody({ task }: { task: OfficeTask }) {
@@ -134,11 +135,13 @@ export function groupTasksByStatus(
   return grouped;
 }
 
-export function TaskBoard({ tasks }: TaskBoardProps) {
+export function TaskBoard({ tasks, onTaskPatch }: TaskBoardProps) {
   const { t } = useTranslation();
   const meta = useAppStore((s) => s.office.meta);
-  const { activeTaskId, sensors, handleDragStart, handleDragEnd, handleDragCancel } =
-    useBoardDrag();
+  const { activeTaskId, sensors, handleDragStart, handleDragEnd, handleDragCancel } = useBoardDrag(
+    tasks,
+    onTaskPatch,
+  );
   const columns = meta
     ? meta.statuses.map((s) => ({ status: s.id as OfficeTaskStatus, label: s.label }))
     : FALLBACK_COLUMNS.map((c) => ({ status: c.status, label: t(c.labelKey) }));
