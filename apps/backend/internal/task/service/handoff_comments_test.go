@@ -16,11 +16,13 @@ import (
 // `limit` while preserving that ascending order, mirroring the production
 // contract without touching SQLite.
 type fakeCommentReader struct {
-	byTask map[string][]*officemodels.TaskComment
-	err    error
+	byTask    map[string][]*officemodels.TaskComment
+	err       error
+	lastLimit int
 }
 
 func (f *fakeCommentReader) ListTaskCommentsWindow(_ context.Context, taskID string, limit int) ([]*officemodels.TaskComment, int, error) {
+	f.lastLimit = limit
 	if f.err != nil {
 		return nil, 0, f.err
 	}
@@ -293,5 +295,40 @@ func TestListCommentsForCallerProjectsAuthorFields(t *testing.T) {
 	c := w.Comments[0]
 	if c.AuthorType != "user" || c.AuthorID != "user-9" || c.Source != "user" {
 		t.Fatalf("projection = %+v", c)
+	}
+}
+
+// The mcp.list_task_comments WS action reaches ListCommentsForCaller
+// directly, without the MCP tool wrapper's resolveCommentsLimit
+// normalization. Assert the service clamps at its own boundary so a raw,
+// unnormalized limit never reaches SQLite's LIMIT clause (LIMIT 0 returns
+// zero rows, a negative LIMIT returns the whole table under SQLite's
+// "no limit" semantics).
+func TestListCommentsForCallerClampsLimitAtServiceBoundary(t *testing.T) {
+	cases := []struct {
+		name      string
+		requested int
+		want      int
+	}{
+		{"omitted/zero defaults", 0, commentWindowDefaultLimit},
+		{"negative defaults", -1, commentWindowDefaultLimit},
+		{"within range passes through", 5, 5},
+		{"over max clamps", 500, commentWindowMaxLimit},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _ := newDocumentHandoffService(t, nil)
+			reader := &fakeCommentReader{}
+			reader.seed("child-a", 1, 10)
+			svc.SetCommentReader(reader)
+			ctx := context.Background()
+
+			if _, err := svc.ListCommentsForCaller(ctx, "child-a", "self", tc.requested); err != nil {
+				t.Fatalf("ListCommentsForCaller: %v", err)
+			}
+			if reader.lastLimit != tc.want {
+				t.Fatalf("limit passed to ListTaskCommentsWindow = %d, want %d", reader.lastLimit, tc.want)
+			}
+		})
 	}
 }

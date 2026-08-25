@@ -14,6 +14,32 @@ const (
 	commentResponseBudgetBytes = 65536
 )
 
+// commentWindowDefaultLimit and commentWindowMaxLimit mirror the MCP tool's
+// resolveCommentsLimit bounds (default 20, clamp 100). The MCP tool wrapper
+// already normalizes before dispatch, but this service method is also
+// reachable directly over the mcp.list_task_comments WS action, which has no
+// argument-schema validation of its own — clamp here too so any non-positive
+// or oversized limit degrades to a bounded window instead of reaching
+// SQLite's LIMIT clause raw (LIMIT 0 returns nothing, a negative LIMIT
+// returns the entire table).
+const (
+	commentWindowDefaultLimit = 20
+	commentWindowMaxLimit     = 100
+)
+
+// clampCommentWindowLimit normalizes a caller-supplied limit to the
+// documented [1, commentWindowMaxLimit] window, defaulting a non-positive
+// value to commentWindowDefaultLimit.
+func clampCommentWindowLimit(limit int) int {
+	if limit <= 0 {
+		return commentWindowDefaultLimit
+	}
+	if limit > commentWindowMaxLimit {
+		return commentWindowMaxLimit
+	}
+	return limit
+}
+
 // errCommentReaderNotConfigured is returned when ListCommentsForCaller is
 // called before SetCommentReader wires a backing store. Deliberately not a
 // shared sentinel like ErrAccessDenied / ErrDocumentTaskRequired — a caller
@@ -70,7 +96,7 @@ func (s *HandoffService) ListCommentsForCaller(ctx context.Context, callerTaskID
 	if s.comments == nil {
 		return nil, errCommentReaderNotConfigured
 	}
-	rows, total, err := s.comments.ListTaskCommentsWindow(ctx, resolvedTarget, limit)
+	rows, total, err := s.comments.ListTaskCommentsWindow(ctx, resolvedTarget, clampCommentWindowLimit(limit))
 	if err != nil {
 		return nil, err
 	}
