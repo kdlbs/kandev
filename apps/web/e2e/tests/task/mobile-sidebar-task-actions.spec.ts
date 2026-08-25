@@ -580,6 +580,7 @@ test.describe("Mobile sidebar task actions", () => {
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
   });
 
+  // @covers AC-UI-MOBILE-TASK-CHROME-001.3
   test("moves a task to another step from the mobile task drawer", async ({
     testPage,
     apiClient,

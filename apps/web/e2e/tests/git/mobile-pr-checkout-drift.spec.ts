@@ -100,7 +100,8 @@ test.describe("Mobile rewritten contribution history", () => {
     git.exec("git clean -fd");
   });
 
-  test("local-first contribution menu preserves local history after a rewrite", async ({
+  // @covers AC-UI-MOBILE-TASK-CHROME-001.4
+  test("Changes recovery menu preserves local history after a rewrite", async ({
     testPage,
     apiClient,
     seedData,
@@ -203,29 +204,28 @@ test.describe("Mobile rewritten contribution history", () => {
     await swipeUpOnElement(testPage, scroller);
     await expect.poll(() => scroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
 
-    const gitActions = testPage.getByTestId("mobile-git-actions");
-    await gitActions.tap();
-    const openMenu = testPage.locator('[data-slot="dropdown-menu-content"][data-state="open"]');
+    const contributionWarning = changes.getByTestId("header-remote-contribution-warning");
+    await expect(contributionWarning).toBeVisible();
+    const warningBox = await contributionWarning.boundingBox();
+    expect(warningBox).not.toBeNull();
+    expect(warningBox!.width).toBeGreaterThanOrEqual(44);
+    expect(warningBox!.height).toBeGreaterThanOrEqual(44);
+    await contributionWarning.tap();
+    const openMenu = testPage.getByTestId("header-remote-contribution-menu");
     await expect(openMenu).toHaveCount(1);
-    const menuItems = openMenu.locator('[data-slot="dropdown-menu-item"]');
-    await expect(menuItems.filter({ hasText: /^Commit/ })).not.toHaveAttribute(
-      "aria-disabled",
-      "true",
-    );
-    await expect(openMenu.getByTestId("mobile-replace-pr-branch")).toBeVisible();
-    await expect(openMenu.getByTestId("mobile-use-pr-version")).toBeVisible();
-    await expect(openMenu.getByTestId("mobile-view-pr-version")).toContainText("PR #902 version");
-    await expect(openMenu).toContainText("Replace the published PR branch");
-    await expect(openMenu).toContainText("Use the current PR version");
-    await expect(openMenu).toContainText("Open PR #902 version");
-    await expect(menuItems.filter({ hasText: /^Pull$/ })).toHaveCount(0);
+    await expect(openMenu.getByTestId("header-replace-pr-branch")).toBeVisible();
+    await expect(openMenu.getByTestId("header-use-pr-version")).toBeVisible();
+    await expect(openMenu.getByTestId("header-view-pr-version")).toContainText("PR #902 version");
     await expect(openMenu.locator('[data-slot="dropdown-menu-sub-trigger"]')).toHaveCount(0);
-    await openMenu.getByTestId("mobile-replace-pr-branch").tap();
-    const drawer = testPage.getByTestId("mobile-remote-contribution-drawer");
-    await expect(drawer).toBeVisible();
-    await expect(drawer).toContainText(providerHistory.head);
-    await expect(testPage.getByTestId("mobile-remote-contribution-confirm")).toHaveClass(/h-11/);
-    await drawer.getByRole("button", { name: "Cancel" }).tap();
+    await openMenu.getByTestId("header-replace-pr-branch").tap();
+    const dialog = testPage.getByTestId("remote-contribution-resolution-dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText(providerHistory.head);
+    const confirm = testPage.getByTestId("remote-contribution-confirm");
+    const confirmBox = await confirm.boundingBox();
+    expect(confirmBox).not.toBeNull();
+    expect(confirmBox!.height).toBeGreaterThanOrEqual(44);
+    await dialog.getByRole("button", { name: "Cancel" }).tap();
 
     expect(git.getCurrentSha()).toBe(localHead);
     expect(git.exec("git status --porcelain").trim()).toBe("");
@@ -235,7 +235,7 @@ test.describe("Mobile rewritten contribution history", () => {
       ),
     ).toBe(true);
     await prCapture.screenshot("remote-contribution-drift-mobile", {
-      caption: "Pixel 5 preserves the local checkout and offers explicit provider version choices",
+      caption: "Pixel 5 Changes preserves the local checkout and offers provider version choices",
     });
   });
 });

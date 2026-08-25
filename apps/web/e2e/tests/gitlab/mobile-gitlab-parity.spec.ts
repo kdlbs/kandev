@@ -330,6 +330,7 @@ test.describe("Mobile GitLab parity", () => {
     await assertNoDocumentHorizontalOverflow(testPage, "GitLab mobile watch settings");
   });
 
+  // @covers AC-UI-MOBILE-TASK-CHROME-001.4
   test("creates and auto-links an MR with GitLab terminology", async ({
     testPage,
     apiClient,
@@ -368,10 +369,11 @@ test.describe("Mobile GitLab parity", () => {
     ).toBeVisible({
       timeout: 45_000,
     });
-    const actions = testPage.getByTestId("mobile-git-actions");
-    await expectTouchTarget(actions, "mobile Git actions");
-    await actions.tap();
-    await testPage.getByRole("menuitem", { name: "Create MR", exact: true }).tap();
+    await testPage.getByRole("button", { name: "Changes" }).tap();
+    const changes = testPage.getByTestId("mobile-changes-panel");
+    const createMR = changes.getByTestId("commits-repo-create-pr");
+    await expect(createMR).toBeVisible();
+    await createMR.tap();
     const dialog = testPage.getByRole("dialog", { name: "Create merge request" });
     await expect(dialog).toBeVisible();
     await assertLocatorWithinViewportX(dialog, "mobile create MR dialog");
