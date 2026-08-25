@@ -781,6 +781,7 @@ export class ApiClient {
       is_start_step?: boolean;
       events?: {
         on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
+        on_turn_start?: Array<{ type: string; config?: Record<string, unknown> }>;
         on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
       };
     },

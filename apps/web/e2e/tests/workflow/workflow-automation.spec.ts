@@ -385,31 +385,19 @@ test.describe("Workflow automation", () => {
   }) => {
     const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Kanban Board Workflow");
 
-    await apiClient.createWorkflowStep(workflow.id, "Backlog", 0);
-    await apiClient.createWorkflowStep(workflow.id, "In Progress", 1);
-    await apiClient.createWorkflowStep(workflow.id, "Review", 2);
-    await apiClient.createWorkflowStep(workflow.id, "Done", 3);
-
-    // Fetch step IDs after creation to set up events
-    const { steps } = await apiClient.listWorkflowSteps(workflow.id);
-    const backlogStep = steps.find((s) => s.name === "Backlog")!;
-    const inProgressStep = steps.find((s) => s.name === "In Progress")!;
-
-    // Backlog: on_turn_start moves to next (In Progress),
-    // on_turn_complete uses template-level step_id (no-op in API-created steps)
-    await apiClient.updateWorkflowStep(backlogStep.id, {
+    const backlogStep = await apiClient.createWorkflowStep(workflow.id, "Backlog", 0, {
       events: {
         on_turn_start: [{ type: "move_to_next" }],
         on_turn_complete: [{ type: "move_to_step", config: { step_id: "review" } }],
       },
     });
-
-    // In Progress: on_turn_complete with invalid step_id (should be skipped)
-    await apiClient.updateWorkflowStep(inProgressStep.id, {
+    const inProgressStep = await apiClient.createWorkflowStep(workflow.id, "In Progress", 1, {
       events: {
         on_turn_complete: [{ type: "move_to_step", config: { step_id: "review" } }],
       },
     });
+    await apiClient.createWorkflowStep(workflow.id, "Review", 2);
+    await apiClient.createWorkflowStep(workflow.id, "Done", 3);
 
     await apiClient.saveUserSettings({
       workspace_id: seedData.workspaceId,
