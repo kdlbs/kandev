@@ -923,6 +923,7 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		{name: "review", enabled: kanban, register: func(s *Server) { s.registerReviewTools() }},
 		{name: "related-tasks", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerRelatedTasksTool() }},
 		{name: "office-documents", enabled: office, register: func(s *Server) { s.registerTaskDocumentTools() }},
+		{name: "office-comments", enabled: office, register: func(s *Server) { s.registerTaskCommentsTool() }},
 		{name: "office-decisions", enabled: office, register: func(s *Server) { s.registerRecordStepDecisionTool() }},
 		{name: "task-branch-sources", enabled: kanban, register: func(s *Server) {
 			s.registerAddBranchToTaskTool()

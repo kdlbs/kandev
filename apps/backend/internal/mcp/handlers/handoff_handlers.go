@@ -143,6 +143,34 @@ func (h *Handlers) handleWriteTaskDocument(ctx context.Context, msg *ws.Message)
 	return ws.NewResponse(msg.ID, msg.Action, doc)
 }
 
+// handleListTaskComments dispatches mcp.list_task_comments. Unlike the
+// document handlers above, this does not client-side-reject an empty
+// TaskID: ListCommentsForCaller owns the self/"self"/empty resolution
+// (AC-005.4/005.6/005.8) and the caller-required validation (AC-005.5, F13),
+// so rejecting here first would short-circuit that logic before it runs.
+func (h *Handlers) handleListTaskComments(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	if h.handoffSvc == nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "handoff service not configured", nil)
+	}
+	svc := h.handoffSvc
+	var req struct {
+		TaskID       string `json:"task_id"`
+		CallerTaskID string `json:"caller_task_id"`
+		Limit        int    `json:"limit"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	window, err := svc.ListCommentsForCaller(ctx, req.CallerTaskID, req.TaskID, req.Limit)
+	if err != nil {
+		if !errors.Is(err, service.ErrAccessDenied) && !errors.Is(err, service.ErrDocumentTaskRequired) {
+			h.logger.Error("list task comments", zap.Error(err))
+		}
+		return mapHandoffError(msg, err)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, window)
+}
+
 func mapHandoffError(msg *ws.Message, err error) (*ws.Message, error) {
 	switch {
 	case errors.Is(err, service.ErrAccessDenied):
