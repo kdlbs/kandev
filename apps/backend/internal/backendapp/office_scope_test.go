@@ -376,12 +376,18 @@ func TestOfficeScopeDeniesWhenOfficeRepoNil(t *testing.T) {
 	}
 }
 
-// TestOfficeScopeAgentJWTCallerUnaffected drives the REAL AgentAuthMiddleware
-// with a REAL minted runtime token in front of the guard: an agent caller is
-// already constrained to its workspace claim and must keep reaching by-ID
-// routes it could reach before, including ones in another user's workspace
-// that this guard would otherwise refuse.
-func TestOfficeScopeAgentJWTCallerUnaffected(t *testing.T) {
+// TestOfficeScopeAgentTokenNotBrowserIdentityDecides pins WHICH credential
+// the guard reads: a request carrying a valid agent token for workspace A is
+// authorized as that agent even though the surrounding browser identity
+// belongs to user B, who cannot access workspace A at all. Swap the two and
+// this request would be denied.
+//
+// It is deliberately NOT a claim that the agent path is safe in general —
+// same-workspace access succeeding proves nothing on its own. The
+// cross-workspace half is TestOfficeScopeConfinesAgentJWTToItsOwnWorkspace,
+// which asserts a workspace-A token is refused on every workspace-B by-ID
+// route.
+func TestOfficeScopeAgentTokenNotBrowserIdentityDecides(t *testing.T) {
 	h := newOfficeScopeHarness(t)
 	agentSvc := officeagents.NewAgentService(h.officeRepo, testLogger(t), nil)
 	agentSvc.SetAuth(officeagents.NewAgentAuth("test-signing-key"))
