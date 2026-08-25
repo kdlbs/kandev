@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -28,23 +27,30 @@ const (
 	desktopNativeNotificationsEnv      = "KANDEV_DESKTOP_NATIVE_NOTIFICATIONS"
 )
 
-var ErrProviderNotFound = errors.New("notification provider not found")
+// ErrProviderNotFound is the store sentinel, re-exported so HTTP handlers can
+// keep mapping it to 404 without importing the store package. A provider owned
+// by another user surfaces as this error too, so a 404 never reveals that
+// somebody else's provider exists.
+var ErrProviderNotFound = notificationstore.ErrProviderNotFound
 
-// taskGetter is the minimal repository interface needed by the notification service.
-type taskGetter interface {
+// TaskContextReader resolves the workspace a notified task belongs to and that
+// workspace's owner. Notification recipients are derived from it: a task event
+// belongs to whoever owns the workspace it happened in, never to a constant.
+type TaskContextReader interface {
 	GetTask(ctx context.Context, id string) (*taskmodels.Task, error)
+	GetWorkspace(ctx context.Context, id string) (*taskmodels.Workspace, error)
 }
 
 type Service struct {
 	defaultProvidersMu sync.Mutex
 	repo               notificationstore.Repository
-	taskRepo           taskGetter
+	taskRepo           TaskContextReader
 	hub                *gatewayws.Hub
 	logger             *logger.Logger
 	providers          map[models.ProviderType]providers.Provider
 }
 
-func NewService(repo notificationstore.Repository, taskRepo taskGetter, hub *gatewayws.Hub, log *logger.Logger) *Service {
+func NewService(repo notificationstore.Repository, taskRepo TaskContextReader, hub *gatewayws.Hub, log *logger.Logger) *Service {
 	providerMap := map[models.ProviderType]providers.Provider{
 		models.ProviderTypeLocal:   providers.NewLocalProvider(hub),
 		models.ProviderTypeApprise: providers.NewAppriseProvider(),
@@ -124,10 +130,12 @@ func (s *Service) CreateProvider(ctx context.Context, userID, name string, provi
 	return provider, nil
 }
 
-func (s *Service) UpdateProvider(ctx context.Context, providerID string, updates ProviderUpdate) (*models.Provider, error) {
-	provider, err := s.repo.GetProvider(ctx, providerID)
+// UpdateProvider mutates a provider the caller owns. A provider ID belonging
+// to another user resolves to ErrProviderNotFound before any write happens.
+func (s *Service) UpdateProvider(ctx context.Context, userID, providerID string, updates ProviderUpdate) (*models.Provider, error) {
+	provider, err := s.ownedProvider(ctx, userID, providerID)
 	if err != nil {
-		return nil, ErrProviderNotFound
+		return nil, err
 	}
 	if updates.Name != nil {
 		provider.Name = strings.TrimSpace(*updates.Name)
@@ -158,8 +166,22 @@ func (s *Service) UpdateProvider(ctx context.Context, providerID string, updates
 	return provider, nil
 }
 
-func (s *Service) DeleteProvider(ctx context.Context, providerID string) error {
-	return s.repo.DeleteProvider(ctx, providerID)
+// DeleteProvider removes a provider the caller owns.
+func (s *Service) DeleteProvider(ctx context.Context, userID, providerID string) error {
+	return s.repo.DeleteProvider(ctx, userID, providerID)
+}
+
+// ownedProvider reads a provider scoped to userID, normalizing a store double
+// that reports a miss as (nil, nil) into ErrProviderNotFound.
+func (s *Service) ownedProvider(ctx context.Context, userID, providerID string) (*models.Provider, error) {
+	provider, err := s.repo.GetProvider(ctx, userID, providerID)
+	if err != nil {
+		return nil, err
+	}
+	if provider == nil {
+		return nil, ErrProviderNotFound
+	}
+	return provider, nil
 }
 
 type ProviderUpdate struct {
@@ -192,29 +214,41 @@ func (s *Service) handleSemanticOccurrence(ctx context.Context, taskID, sessionI
 	if occurrenceID == "" {
 		return
 	}
-	userID := userstore.DefaultUserID
+	title, body := s.buildSemanticMessage(ctx, taskID, eventType, payload)
+	message := notificationPayload{
+		TaskID:        taskID,
+		TaskSessionID: sessionID,
+		OccurrenceID:  occurrenceID,
+		EventType:     eventType,
+		Title:         title,
+		Body:          body,
+		Payload:       payload,
+	}
+	for _, userID := range s.recipients(ctx, taskID, eventType) {
+		s.deliverOccurrence(ctx, userID, message)
+	}
+}
+
+// deliverOccurrence fans one occurrence out over a single recipient's own
+// providers. Every provider it can reach belongs to userID, so a webhook only
+// ever receives events from workspaces its owner can see.
+func (s *Service) deliverOccurrence(ctx context.Context, userID string, message notificationPayload) {
 	providers, subscriptions, err := s.ListProviders(ctx, userID)
 	if err != nil {
 		s.logger.Error("failed to load notification providers", zap.Error(err))
 		return
 	}
-	title, body := s.buildSemanticMessage(ctx, taskID, eventType, payload)
 	for _, provider := range providers {
-		if !provider.Enabled {
+		if !provider.Enabled || !containsEvent(subscriptions[provider.ID], message.EventType) {
 			continue
 		}
-		events := subscriptions[provider.ID]
-		if !containsEvent(events, eventType) {
-			continue
-		}
-		delivery := &models.Delivery{
+		inserted, err := s.repo.InsertDelivery(ctx, &models.Delivery{
 			UserID:        userID,
 			ProviderID:    provider.ID,
-			EventType:     eventType,
-			TaskSessionID: sessionID,
-			OccurrenceID:  occurrenceID,
-		}
-		inserted, err := s.repo.InsertDelivery(ctx, delivery)
+			EventType:     message.EventType,
+			TaskSessionID: message.TaskSessionID,
+			OccurrenceID:  message.OccurrenceID,
+		})
 		if err != nil {
 			s.logger.Error("failed to record notification delivery", zap.Error(err))
 			continue
@@ -222,24 +256,68 @@ func (s *Service) handleSemanticOccurrence(ctx context.Context, taskID, sessionI
 		if !inserted {
 			continue
 		}
-		if err := s.dispatchProvider(ctx, provider, notificationPayload{
-			TaskID:        taskID,
-			TaskSessionID: sessionID,
-			OccurrenceID:  occurrenceID,
-			EventType:     eventType,
-			Title:         title,
-			Body:          body,
-			Payload:       payload,
-		}); err != nil {
+		if err := s.dispatchProvider(ctx, userID, provider, message); err != nil {
 			s.logger.Warn("notification delivery failed", zap.String("provider_id", provider.ID), zap.Error(err))
-			_ = s.repo.DeleteDelivery(ctx, provider.ID, eventType, occurrenceID)
+			_ = s.repo.DeleteDelivery(ctx, provider.ID, message.EventType, message.OccurrenceID)
 		}
 	}
 }
 
-// HandleInboxItem sends notifications for a new office inbox item.
-func (s *Service) HandleInboxItem(ctx context.Context, itemType, title string) {
-	userID := userstore.DefaultUserID
+// recipients resolves who a notification belongs to. A task event belongs to
+// the single owner of the workspace it happened in; resolving it to a constant
+// is what pushed one user's task titles into another user's webhook. An
+// instance-wide event (a new release) has no owning workspace, so it fans out
+// to every user that owns providers instead of landing on one of them.
+func (s *Service) recipients(ctx context.Context, taskID, eventType string) []string {
+	if eventType == EventSystemUpdateAvailable {
+		return s.providerOwners(ctx)
+	}
+	return []string{s.workspaceOwnerForTask(ctx, taskID)}
+}
+
+// workspaceOwnerForTask resolves the owner of the workspace a task lives in.
+// It falls back to the default user whenever ownership cannot be established
+// (auth disabled, a pre-auth workspace whose owner_id is still empty, or an
+// unresolvable task) so single-user installs behave exactly as before.
+func (s *Service) workspaceOwnerForTask(ctx context.Context, taskID string) string {
+	if taskID == "" || s.taskRepo == nil {
+		return userstore.DefaultUserID
+	}
+	task, err := s.taskRepo.GetTask(ctx, taskID)
+	if err != nil || task == nil {
+		return userstore.DefaultUserID
+	}
+	return s.workspaceOwner(ctx, task.WorkspaceID)
+}
+
+func (s *Service) workspaceOwner(ctx context.Context, workspaceID string) string {
+	if workspaceID == "" || s.taskRepo == nil {
+		return userstore.DefaultUserID
+	}
+	workspace, err := s.taskRepo.GetWorkspace(ctx, workspaceID)
+	if err != nil || workspace == nil || workspace.OwnerID == "" {
+		return userstore.DefaultUserID
+	}
+	return workspace.OwnerID
+}
+
+func (s *Service) providerOwners(ctx context.Context) []string {
+	owners, err := s.repo.ListProviderUserIDs(ctx)
+	if err != nil {
+		s.logger.Error("failed to resolve notification recipients", zap.Error(err))
+		return []string{userstore.DefaultUserID}
+	}
+	if len(owners) == 0 {
+		return []string{userstore.DefaultUserID}
+	}
+	return owners
+}
+
+// HandleInboxItem sends notifications for a new office inbox item. The item's
+// workspace names the recipient; an item carrying no workspace context stays
+// with the default user rather than fanning out to everyone.
+func (s *Service) HandleInboxItem(ctx context.Context, workspaceID, itemType, title string) {
+	userID := s.workspaceOwner(ctx, workspaceID)
 	providers, subscriptions, err := s.ListProviders(ctx, userID)
 	if err != nil {
 		s.logger.Error("failed to load notification providers for inbox item", zap.Error(err))
@@ -258,14 +336,14 @@ func (s *Service) HandleInboxItem(ctx context.Context, itemType, title string) {
 		if !containsEvent(events, EventOfficeInboxItem) {
 			continue
 		}
-		if err := s.dispatchGenericNotification(ctx, provider, EventOfficeInboxItem, notifTitle, body); err != nil {
+		if err := s.dispatchGenericNotification(ctx, userID, provider, EventOfficeInboxItem, notifTitle, body); err != nil {
 			s.logger.Warn("inbox item notification delivery failed",
 				zap.String("provider_id", provider.ID), zap.Error(err))
 		}
 	}
 }
 
-func (s *Service) dispatchGenericNotification(ctx context.Context, provider *models.Provider, eventType, title, body string) error {
+func (s *Service) dispatchGenericNotification(ctx context.Context, userID string, provider *models.Provider, eventType, title, body string) error {
 	adapter := s.providers[provider.Type]
 	if adapter == nil {
 		return fmt.Errorf("unknown provider type: %s", provider.Type)
@@ -274,7 +352,7 @@ func (s *Service) dispatchGenericNotification(ctx context.Context, provider *mod
 		EventType: eventType,
 		Title:     title,
 		Body:      body,
-		UserID:    userstore.DefaultUserID,
+		UserID:    userID,
 		Config:    provider.Config,
 	})
 }
@@ -289,7 +367,10 @@ type notificationPayload struct {
 	Payload       map[string]string
 }
 
-func (s *Service) dispatchProvider(ctx context.Context, provider *models.Provider, payload notificationPayload) error {
+// dispatchProvider hands the message to the adapter. Message.UserID is the
+// resolved recipient rather than a constant: the local provider broadcasts it
+// over that user's WebSocket connections.
+func (s *Service) dispatchProvider(ctx context.Context, userID string, provider *models.Provider, payload notificationPayload) error {
 	adapter := s.providers[provider.Type]
 	if adapter == nil {
 		return fmt.Errorf("unknown provider type: %s", provider.Type)
@@ -302,7 +383,7 @@ func (s *Service) dispatchProvider(ctx context.Context, provider *models.Provide
 		TaskID:        payload.TaskID,
 		TaskSessionID: payload.TaskSessionID,
 		OccurrenceID:  payload.OccurrenceID,
-		UserID:        userstore.DefaultUserID,
+		UserID:        userID,
 		Config:        provider.Config,
 	})
 }
@@ -413,10 +494,11 @@ func (s *Service) ensureSystemProvider(ctx context.Context, userID string) error
 	})
 }
 
-func (s *Service) TestProvider(ctx context.Context, providerID string) error {
-	provider, err := s.repo.GetProvider(ctx, providerID)
+// TestProvider fires a test notification through a provider the caller owns.
+func (s *Service) TestProvider(ctx context.Context, userID, providerID string) error {
+	provider, err := s.ownedProvider(ctx, userID, providerID)
 	if err != nil {
-		return ErrProviderNotFound
+		return err
 	}
 	adapter := s.providers[provider.Type]
 	if adapter == nil {

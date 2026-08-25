@@ -77,13 +77,16 @@ func (r *controllerRepository) CreateProvider(_ context.Context, provider *model
 }
 
 func (r *controllerRepository) UpdateProvider(context.Context, *models.Provider) error { return nil }
-func (r *controllerRepository) GetProvider(_ context.Context, id string) (*models.Provider, error) {
+func (r *controllerRepository) GetProvider(_ context.Context, _, id string) (*models.Provider, error) {
 	return r.providers[id], nil
 }
 func (r *controllerRepository) ListProvidersByUser(context.Context, string) ([]*models.Provider, error) {
 	return nil, nil
 }
-func (r *controllerRepository) DeleteProvider(context.Context, string) error { return nil }
+func (r *controllerRepository) ListProviderUserIDs(context.Context) ([]string, error) {
+	return nil, nil
+}
+func (r *controllerRepository) DeleteProvider(context.Context, string, string) error { return nil }
 func (r *controllerRepository) ListSubscriptionsByProvider(context.Context, string) ([]*models.Subscription, error) {
 	return nil, nil
 }

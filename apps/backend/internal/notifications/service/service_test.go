@@ -9,6 +9,7 @@ import (
 	gatewayws "github.com/kandev/kandev/internal/gateway/websocket"
 	"github.com/kandev/kandev/internal/notifications/models"
 	"github.com/kandev/kandev/internal/notifications/providers"
+	notificationstore "github.com/kandev/kandev/internal/notifications/store"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
 )
@@ -29,22 +30,37 @@ func (r *notificationTestRepository) CreateProvider(_ context.Context, provider 
 func (r *notificationTestRepository) UpdateProvider(context.Context, *models.Provider) error {
 	return nil
 }
-func (r *notificationTestRepository) GetProvider(_ context.Context, id string) (*models.Provider, error) {
+func (r *notificationTestRepository) GetProvider(_ context.Context, userID, id string) (*models.Provider, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, provider := range r.providers {
-		if provider.ID == id {
+		if provider.ID == id && provider.UserID == userID {
 			return provider, nil
 		}
 	}
-	return nil, nil
+	return nil, notificationstore.ErrProviderNotFound
 }
 func (r *notificationTestRepository) ListProvidersByUser(context.Context, string) ([]*models.Provider, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return append([]*models.Provider(nil), r.providers...), nil
 }
-func (r *notificationTestRepository) DeleteProvider(context.Context, string) error { return nil }
+func (r *notificationTestRepository) ListProviderUserIDs(context.Context) ([]string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	seen := map[string]bool{}
+	owners := make([]string, 0, len(r.providers))
+	for _, provider := range r.providers {
+		if !seen[provider.UserID] {
+			seen[provider.UserID] = true
+			owners = append(owners, provider.UserID)
+		}
+	}
+	return owners, nil
+}
+func (r *notificationTestRepository) DeleteProvider(context.Context, string, string) error {
+	return nil
+}
 func (r *notificationTestRepository) ListSubscriptionsByProvider(_ context.Context, providerID string) ([]*models.Subscription, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -108,10 +124,17 @@ func (p *failOnceProvider) Send(_ context.Context, message providers.Message) er
 	return nil
 }
 
-type notificationTestTaskGetter struct{ task *taskmodels.Task }
+type notificationTestTaskGetter struct {
+	task      *taskmodels.Task
+	workspace *taskmodels.Workspace
+}
 
 func (g notificationTestTaskGetter) GetTask(context.Context, string) (*taskmodels.Task, error) {
 	return g.task, nil
+}
+
+func (g notificationTestTaskGetter) GetWorkspace(context.Context, string) (*taskmodels.Workspace, error) {
+	return g.workspace, nil
 }
 
 func TestNewServiceSuppressesSystemProviderForDesktopOwnedLaunch(t *testing.T) {
@@ -367,12 +390,12 @@ func TestProviderSendsClarificationAction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create logger: %v", err)
 	}
-	provider := &models.Provider{ID: "provider-1", Type: models.ProviderTypeLocal}
+	provider := &models.Provider{ID: "provider-1", UserID: "user-1", Type: models.ProviderTypeLocal}
 	service := NewService(&notificationTestRepository{providers: []*models.Provider{provider}}, nil, nil, log)
 	capture := &captureProvider{}
 	service.providers[models.ProviderTypeLocal] = capture
 
-	if err := service.TestProvider(context.Background(), provider.ID); err != nil {
+	if err := service.TestProvider(context.Background(), "user-1", provider.ID); err != nil {
 		t.Fatalf("test provider: %v", err)
 	}
 	if len(capture.messages) != 1 || capture.messages[0].EventType != EventTaskSessionClarificationAsked {

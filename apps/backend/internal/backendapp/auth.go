@@ -67,6 +67,12 @@ func provideAuthService(
 		// Pre-auth workspaces (owner_id='') become the admin's at setup.
 		repos.Task.ClaimUnownedWorkspaces,
 	}
+	// Notification providers deliberately have no entry here. Unlike
+	// workspaces and secrets, every provider row has always been written with
+	// a concrete owner (userstore.DefaultUserID) rather than an empty one, and
+	// Setup promotes that very row into the admin account, so pre-auth
+	// providers already belong to the admin and there is nothing to claim.
+	//
 	// Pre-auth secrets (user_id='') are claimed the same way. Interface
 	// assertion keeps SecretStore mocks free of the method.
 	if claimer, ok := repos.Secrets.(interface {

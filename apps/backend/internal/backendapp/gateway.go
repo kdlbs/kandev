@@ -372,7 +372,14 @@ func provideGateway(
 		gateway.Hub.Broadcast(msg)
 	})
 
-	notificationSvc := notificationservice.NewService(notificationRepo, taskRepo, gateway.Hub, log)
+	// taskRepo is a typed pointer that may be nil here, and a nil pointer in a
+	// non-nil interface would defeat the service's own nil check when it
+	// resolves a notification's owning workspace.
+	var notificationTasks notificationservice.TaskContextReader
+	if taskRepo != nil {
+		notificationTasks = taskRepo
+	}
+	notificationSvc := notificationservice.NewService(notificationRepo, notificationTasks, gateway.Hub, log)
 	notificationCtrl := notificationcontroller.NewController(notificationSvc)
 	if eventBus != nil {
 		_, err = eventBus.Subscribe(events.TurnCompleted, func(ctx context.Context, event *bus.Event) error {
@@ -416,7 +423,8 @@ func provideGateway(
 			}
 			itemType, _ := data["type"].(string)
 			title, _ := data["title"].(string)
-			notificationSvc.HandleInboxItem(ctx, itemType, title)
+			workspaceID, _ := data["workspace_id"].(string)
+			notificationSvc.HandleInboxItem(ctx, workspaceID, itemType, title)
 			return nil
 		})
 		if err != nil {
