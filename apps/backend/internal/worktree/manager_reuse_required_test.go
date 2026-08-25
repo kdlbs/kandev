@@ -250,3 +250,149 @@ func TestCreate_ReuseRequiredRejectsStaleWorktreePathOwnedByAnotherTask(t *testi
 		t.Fatalf("Create() error = %v, want ErrWorktreePathOwnedByAnotherTask", err)
 	}
 }
+
+// TestCreate_ReuseRequiredRejectsSymlinkedWorktreePath confirms that the
+// attach-only ReuseRequired path rejects a persisted worktree path whose
+// existing components beneath tasksBase contain a symlink. A stale record
+// whose final repo directory has been symlinked to another task's checkout
+// must not follow the symlink via os.Stat/os.ReadFile inside IsValid.
+func TestCreate_ReuseRequiredRejectsSymlinkedWorktreePath(t *testing.T) {
+	repoPath := initGitRepoWithRemote(t)
+	cfg := newTestConfig(t)
+	tasksBase := cfg.TasksBasePath
+
+	// Create two task directories under tasksBase.
+	liveTaskDir := filepath.Join(tasksBase, "live-task_sym")
+	if err := os.MkdirAll(liveTaskDir, 0755); err != nil {
+		t.Fatalf("mkdir live task dir: %v", err)
+	}
+	if err := storageworkspaces.WriteOwnershipMarker(liveTaskDir, storageworkspaces.OwnershipMarker{
+		TaskID:        "task-live-sym",
+		TaskDirName:   "live-task_sym",
+		LayoutVersion: storageworkspaces.LayoutVersionSemantic,
+	}); err != nil {
+		t.Fatalf("write live ownership marker: %v", err)
+	}
+	liveWorktreePath := filepath.Join(liveTaskDir, "my-repo")
+	runGit(t, repoPath, "worktree", "add", "-b", "feature/live", liveWorktreePath, "main")
+
+	// Create a stale task directory whose "repo" entry is a symlink to the
+	// live checkout. A clean redo that creates the stale worktree before the
+	// live one and then replaces the final component with a symlink would be
+	// more realistic, but a direct symlink is deterministic and exercises the
+	// same code path: the record's TaskID !== the live marker's TaskID.
+	staleTaskDir := filepath.Join(tasksBase, "stale-task_sym")
+	if err := os.MkdirAll(staleTaskDir, 0755); err != nil {
+		t.Fatalf("mkdir stale task dir: %v", err)
+	}
+	if err := storageworkspaces.WriteOwnershipMarker(staleTaskDir, storageworkspaces.OwnershipMarker{
+		TaskID:        "task-stale-sym",
+		TaskDirName:   "stale-task_sym",
+		LayoutVersion: storageworkspaces.LayoutVersionSemantic,
+	}); err != nil {
+		t.Fatalf("write stale ownership marker: %v", err)
+	}
+	// The symlink — the stale record's persisted path points to a symlink
+	// leading into the live task's checkout.
+	staleWorktreePath := filepath.Join(staleTaskDir, "my-repo")
+	if err := os.Symlink(liveWorktreePath, staleWorktreePath); err != nil {
+		t.Fatalf("symlink stale -> live: %v", err)
+	}
+
+	store := newMockStore()
+	store.worktrees["canonical-sym"] = &Worktree{
+		ID:                "canonical-sym",
+		TaskID:            "task-stale-sym",
+		TaskEnvironmentID: "environment-1",
+		RepositoryID:      "repository-1",
+		Path:              staleWorktreePath,
+		Branch:            "feature/live",
+		Status:            StatusActive,
+	}
+	mgr, err := NewManager(cfg, store, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	_, err = mgr.Create(context.Background(), CreateRequest{
+		TaskID:            "task-attach-sym",
+		SessionID:         "session-attach-sym",
+		TaskEnvironmentID: "environment-1",
+		RepositoryID:      "repository-1",
+		RepositoryPath:    repoPath,
+		BaseBranch:        "main",
+		WorktreeID:        "canonical-sym",
+		ReuseRequired:     true,
+	})
+	if !errors.Is(err, ErrWorktreePathOwnedByAnotherTask) && !strings.Contains(err.Error(), "unsafe worktree path") {
+		t.Fatalf("Create() error = %v, want ErrWorktreePathOwnedByAnotherTask or unsafe path error", err)
+	}
+}
+
+// TestCreate_TryReuseExistingRejectsSymlinkedWorktreePath confirms that the
+// normal reuse path (tryReuseExisting) rejects a persisted worktree whose
+// path beneath tasksBase contains a symlink. Uses the session-based lookup
+// branch.
+func TestCreate_TryReuseExistingRejectsSymlinkedWorktreePath(t *testing.T) {
+	repoPath := initGitRepoWithRemote(t)
+	cfg := newTestConfig(t)
+	tasksBase := cfg.TasksBasePath
+
+	liveTaskDir := filepath.Join(tasksBase, "live-task_sym2")
+	if err := os.MkdirAll(liveTaskDir, 0755); err != nil {
+		t.Fatalf("mkdir live task dir: %v", err)
+	}
+	if err := storageworkspaces.WriteOwnershipMarker(liveTaskDir, storageworkspaces.OwnershipMarker{
+		TaskID:        "task-live-sym2",
+		TaskDirName:   "live-task_sym2",
+		LayoutVersion: storageworkspaces.LayoutVersionSemantic,
+	}); err != nil {
+		t.Fatalf("write live ownership marker: %v", err)
+	}
+	liveWorktreePath := filepath.Join(liveTaskDir, "my-repo")
+	runGit(t, repoPath, "worktree", "add", "-b", "feature/live2", liveWorktreePath, "main")
+
+	// Stale task: the final "repo" component is a symlink to the live checkout.
+	staleTaskDir := filepath.Join(tasksBase, "stale-task_sym2")
+	if err := os.MkdirAll(staleTaskDir, 0755); err != nil {
+		t.Fatalf("mkdir stale task dir: %v", err)
+	}
+	if err := storageworkspaces.WriteOwnershipMarker(staleTaskDir, storageworkspaces.OwnershipMarker{
+		TaskID:        "task-stale-sym2",
+		TaskDirName:   "stale-task_sym2",
+		LayoutVersion: storageworkspaces.LayoutVersionSemantic,
+	}); err != nil {
+		t.Fatalf("write stale ownership marker: %v", err)
+	}
+	staleWorktreePath := filepath.Join(staleTaskDir, "my-repo")
+	if err := os.Symlink(liveWorktreePath, staleWorktreePath); err != nil {
+		t.Fatalf("symlink stale2 -> live2: %v", err)
+	}
+
+	store := newMockStore()
+	store.worktrees["wt-sym2"] = &Worktree{
+		ID:           "wt-sym2",
+		TaskID:       "task-stale-sym2",
+		SessionID:    "session-reuse-sym2",
+		RepositoryID: "repository-1",
+		Path:         staleWorktreePath,
+		Branch:       "feature/live2",
+		Status:       StatusActive,
+	}
+	mgr, err := NewManager(cfg, store, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	_, err = mgr.Create(context.Background(), CreateRequest{
+		TaskID:         "task-attach-sym2",
+		SessionID:      "session-reuse-sym2",
+		RepositoryID:   "repository-1",
+		RepositoryPath: repoPath,
+		BaseBranch:     "main",
+		WorktreeID:     "wt-sym2",
+	})
+	if !errors.Is(err, ErrWorktreePathOwnedByAnotherTask) && !strings.Contains(err.Error(), "unsafe worktree path") {
+		t.Fatalf("Create() error = %v, want ErrWorktreePathOwnedByAnotherTask or unsafe path error", err)
+	}
+}

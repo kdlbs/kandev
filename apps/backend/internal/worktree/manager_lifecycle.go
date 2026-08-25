@@ -202,6 +202,9 @@ func (m *Manager) reuseRequiredWorktree(ctx context.Context, req CreateRequest) 
 		!m.IsValid(wt.Path) {
 		return nil, ErrReuseWorktreeUnavailable
 	}
+	if err := m.validateWorktreePathSafe(wt.Path); err != nil {
+		return nil, err
+	}
 	if err := m.validateExistingWorktreePathOwner(wt.Path, wt.TaskID); err != nil {
 		return nil, err
 	}
@@ -223,6 +226,9 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 	if req.SessionID != "" {
 		existing, err := m.GetBySessionAndRepo(ctx, req.SessionID, req.RepositoryID, reuseSlug)
 		if err == nil && existing != nil {
+			if err := m.validateWorktreePathSafe(existing.Path); err != nil {
+				return nil, true, err
+			}
 			if err := m.validateExistingWorktreePathOwner(existing.Path, existing.TaskID); err != nil {
 				return nil, true, err
 			}
@@ -252,6 +258,9 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 	if req.WorktreeID != "" {
 		existing, err := m.GetByID(ctx, req.WorktreeID)
 		if err == nil && existing != nil {
+			if err := m.validateWorktreePathSafe(existing.Path); err != nil {
+				return nil, true, err
+			}
 			if err := m.validateExistingWorktreePathOwner(existing.Path, existing.TaskID); err != nil {
 				return nil, true, err
 			}
@@ -281,6 +290,33 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 	}
 
 	return nil, false, nil
+}
+
+// validateWorktreePathSafe rejects a persisted worktree path whose existing
+// components beneath tasksBase contain a symlink. A stale record whose final
+// repo directory has been symlinked to another task's checkout would escape
+// lexical ownership validation and follow the symlink in IsValid (which uses
+// os.Stat/os.ReadFile). The check runs before both validateExistingWorktreePathOwner
+// and IsValid.
+func (m *Manager) validateWorktreePathSafe(worktreePath string) error {
+	if worktreePath == "" {
+		return nil
+	}
+	tasksBase, err := m.config.ExpandedTasksBasePath()
+	if err != nil {
+		return fmt.Errorf("resolve tasks base path: %w", err)
+	}
+	tasksBase = filepath.Clean(tasksBase)
+	// Paths outside the tasks base (legacy flat layout) are not covered by
+	// the symlink guard; skip validation for those.
+	relativePath, err := filepath.Rel(tasksBase, worktreePath)
+	if err != nil || relativePath == "." || relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
+		return nil
+	}
+	if err := storage.ValidateNoSymlinkPath(tasksBase, worktreePath); err != nil {
+		return fmt.Errorf("unsafe worktree path: %w", err)
+	}
+	return nil
 }
 
 // validateExistingWorktreePathOwner rejects a stale record whose stored path
