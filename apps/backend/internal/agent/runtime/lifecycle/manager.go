@@ -92,6 +92,11 @@ type Manager struct {
 	// resolves executions by environment ID. Nil = no scoping.
 	environmentAccessCheck func(ctx context.Context, environmentID string) error
 
+	// taskAccessCheck is the task-keyed sibling of sessionAccessCheck, used by
+	// the task-keyed SSR terminal list which reads terminal rows by task ID
+	// without resolving an execution at all. Nil = no scoping.
+	taskAccessCheck func(ctx context.Context, taskID string) error
+
 	// singleflight deduplicates concurrent GetOrEnsureExecution calls for the same session
 	ensureExecutionGroup singleflight.Group
 
@@ -441,6 +446,13 @@ func (m *Manager) SetEnvironmentAccessChecker(check func(ctx context.Context, en
 	m.environmentAccessCheck = check
 }
 
+// SetTaskAccessChecker installs the per-user task visibility check used by
+// the task-keyed SSR terminal route. The checker must return nil for contexts
+// without a request identity (internal callers).
+func (m *Manager) SetTaskAccessChecker(check func(ctx context.Context, taskID string) error) {
+	m.taskAccessCheck = check
+}
+
 // CheckSessionAccess authorizes a session-scoped operation for the ctx
 // identity. Handlers that resolve an execution by a bare in-memory lookup
 // (vscode/port reverse proxies) must call this before serving, since only the
@@ -462,6 +474,17 @@ func (m *Manager) CheckEnvironmentAccess(ctx context.Context, taskEnvironmentID 
 		return nil
 	}
 	return m.environmentAccessCheck(ctx, taskEnvironmentID)
+}
+
+// CheckTaskAccess authorizes a task-scoped operation for the ctx identity.
+// The task-keyed sibling of CheckSessionAccess, for handlers that read
+// task-owned state (the SSR terminal list) without going through an
+// execution. No-op when no checker is set.
+func (m *Manager) CheckTaskAccess(ctx context.Context, taskID string) error {
+	if m.taskAccessCheck == nil {
+		return nil
+	}
+	return m.taskAccessCheck(ctx, taskID)
 }
 
 // SetWorkspaceInfoProvider sets the provider for workspace information.
