@@ -354,7 +354,12 @@ function useSessionMenuDelete(openMenuDelete: () => void) {
     (event: Event) => {
       const anchor = event.currentTarget;
       if (!(anchor instanceof HTMLElement)) return;
-      menuDeleteAnchorRef.current = anchor;
+      // Use the tab trigger element as the popover anchor instead of the
+      // context menu item. The context menu item becomes disconnected from the
+      // DOM when the context menu closes on the popover interaction, causing
+      // ActionConfirmPopover.handleConfirm isConnected check to reject the
+      // confirm click.
+      menuDeleteAnchorRef.current = anchor.closest('[data-testid^="session-tab-"]') ?? anchor;
       menuDeleteFocusBoundaryRef.current = anchor.closest('[data-slot="context-menu-content"]');
       openMenuDelete();
     },
