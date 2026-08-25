@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-build-duplication-drafts"]
 plan: "plan.md"
-spec: "../../specs/workflow-duplication/spec.md"
+spec: "../../specs/tasks/requirements/workflow-duplication.md"
 ---
 
 # Task 02: Expose Duplicate Action

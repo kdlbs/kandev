@@ -287,11 +287,12 @@ test.describe("File Tree Multi-Select", () => {
 
   // --- Right-Click Context Menu ---
 
-  test("right-click single file shows context menu with delete", async ({
+  test("right-click single file uses local delete confirmation", async ({
     testPage,
     apiClient,
     seedData,
     backend,
+    prCapture,
   }) => {
     const git = new GitHelper(
       path.join(backend.tmpDir, "repos", "e2e-repo"),
@@ -312,9 +313,19 @@ test.describe("File Tree Multi-Select", () => {
     await expect(file).toBeVisible({ timeout: 15_000 });
 
     await file.click({ button: "right" });
-    await expect(testPage.getByRole("menuitem", { name: "Delete" })).toBeVisible({
+    const deleteItem = testPage.getByRole("menuitem", { name: "Delete" });
+    await expect(deleteItem).toBeVisible({
       timeout: 5_000,
     });
+
+    await deleteItem.click();
+    await expect(testPage.getByTestId("file-delete-confirm-popover")).toBeVisible();
+    await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
+    await prCapture.screenshot("desktop-file-delete-confirmation", {
+      caption: "Desktop file context menu with one-file delete confirmation",
+    });
+    await testPage.getByTestId("file-delete-confirm").click();
+    await expect(file).not.toBeVisible({ timeout: 10_000 });
   });
 
   test("right-click on multi-selection shows bulk delete", async ({

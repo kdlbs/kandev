@@ -21,6 +21,8 @@ const {
   installPluginUploadSpy,
   listPluginsSpy,
   syncPluginsSpy,
+  getMarketplaceCatalogSpy,
+  refreshMarketplaceSpy,
 } = vi.hoisted(() => ({
   enablePluginSpy: vi.fn(),
   disablePluginSpy: vi.fn(),
@@ -29,6 +31,8 @@ const {
   installPluginUploadSpy: vi.fn(),
   listPluginsSpy: vi.fn(),
   syncPluginsSpy: vi.fn(),
+  getMarketplaceCatalogSpy: vi.fn(),
+  refreshMarketplaceSpy: vi.fn(),
 }));
 
 vi.mock("@/lib/api/domains/plugins-api", () => ({
@@ -45,8 +49,7 @@ vi.mock("@/lib/api/domains/plugins-api", () => ({
     return Promise.resolve({ disabled: true });
   },
   uninstallPlugin: (...args: [string]) => {
-    uninstallPluginSpy(...args);
-    return Promise.resolve({ deleted: true });
+    return uninstallPluginSpy(...args);
   },
   installPluginFromUrl: (...args: [string]) => installPluginFromUrlSpy(...args),
   installPluginUpload: (...args: [File]) => installPluginUploadSpy(...args),
@@ -57,6 +60,11 @@ vi.mock("@/lib/api/domains/plugins-api", () => ({
   getPluginSettings: () => Promise.resolve({ auto_update_default: false }),
   updatePluginSettings: (enabled: boolean) => Promise.resolve({ auto_update_default: enabled }),
   setPluginAutoUpdate: () => Promise.resolve(undefined),
+}));
+
+vi.mock("@/lib/api/domains/marketplace-api", () => ({
+  getMarketplaceCatalog: (...args: unknown[]) => getMarketplaceCatalogSpy(...args),
+  refreshMarketplace: (...args: unknown[]) => refreshMarketplaceSpy(...args),
 }));
 
 const { loadPluginsSpy, unloadPluginSpy } = vi.hoisted(() => ({
@@ -93,8 +101,10 @@ vi.mock("@/components/state-provider", () => ({
 import PluginsSettingsPage from "./page";
 
 const PLUGIN_ID = "acme-tools";
+const PLUGIN_DISPLAY_NAME = "Acme Tools";
 const NEW_PLUGIN_ID = "new-plugin";
 const SYNC_BUTTON_TESTID = "plugins-sync-button";
+const CHECK_UPDATES_BUTTON_TESTID = "plugins-check-updates-button";
 const INSTALL_TRIGGER_TESTID = "install-plugin-trigger";
 const INSTALL_URL_INPUT_TESTID = "install-plugin-url-input";
 const INSTALL_URL_SUBMIT_TESTID = "install-plugin-url-submit";
@@ -110,7 +120,7 @@ function activePlugin(overrides: Partial<PluginRecord> = {}): PluginRecord {
     id: PLUGIN_ID,
     api_version: 1,
     version: "1.0.0",
-    display_name: "Acme Tools",
+    display_name: PLUGIN_DISPLAY_NAME,
     description: "desc",
     author: "acme",
     categories: ["productivity"],
@@ -149,10 +159,38 @@ function emptySyncResult(overrides: Partial<SyncResult> = {}): SyncResult {
   return { added: [], installed: [], missing: [], errors: [], ...overrides };
 }
 
+function catalogEntry(overrides: Record<string, unknown> = {}) {
+  return {
+    id: PLUGIN_ID,
+    name: PLUGIN_DISPLAY_NAME,
+    description: "",
+    author: "acme",
+    categories: [],
+    icon_url: "",
+    repo_url: "",
+    version: "2.0.0",
+    min_kandev_version: "",
+    package_url: "https://example.test/acme-tools-2.0.0.tar.gz",
+    package_sha256: "",
+    stars: 0,
+    updated_at: "",
+    install_state: "update_available",
+    installed_version: "1.0.0",
+    source_id: "official",
+    source_name: "Kandev Official",
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
+  uninstallPluginSpy.mockResolvedValue({ deleted: true });
   installPluginFromUrlSpy.mockResolvedValue({ plugin: installedPlugin() });
   installPluginUploadSpy.mockResolvedValue({ plugin: installedPlugin() });
   syncPluginsSpy.mockResolvedValue(emptySyncResult());
+  getMarketplaceCatalogSpy.mockReset();
+  getMarketplaceCatalogSpy.mockResolvedValue({ plugins: [], sources: [] });
+  refreshMarketplaceSpy.mockReset();
+  refreshMarketplaceSpy.mockResolvedValue({ refreshed: true });
 });
 
 afterEach(() => {
@@ -186,7 +224,7 @@ describe("PluginsSettingsPage", () => {
 
     render(<PluginsSettingsPage />);
 
-    expect(screen.getByText("Acme Tools")).toBeTruthy();
+    expect(screen.getByText(PLUGIN_DISPLAY_NAME)).toBeTruthy();
     expect(screen.getByText(/acme-tools.*v1\.0\.0/)).toBeTruthy();
     expect(screen.getAllByText(/active/i).length).toBeGreaterThan(0);
     expect(screen.getAllByTestId("plugin-unsigned-badge")).toHaveLength(1);
@@ -235,7 +273,8 @@ describe("PluginsSettingsPage", () => {
 
     render(<PluginsSettingsPage />);
     fireEvent.click(screen.getByRole("button", { name: /uninstall/i }));
-    fireEvent.click(screen.getByRole("button", { name: /confirm uninstall/i }));
+    expect(screen.getByTestId("plugin-uninstall-confirm-popover").textContent).toContain("Acme");
+    fireEvent.click(screen.getByTestId("plugin-uninstall-confirm"));
 
     await vi.waitFor(() => expect(uninstallPluginSpy).toHaveBeenCalledWith(PLUGIN_ID));
     expect(unloadPluginSpy).toHaveBeenCalledWith(PLUGIN_ID);
@@ -251,6 +290,30 @@ describe("PluginsSettingsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
 
     expect(uninstallPluginSpy).not.toHaveBeenCalled();
+  });
+
+  it("disables auto-update while an uninstall request is pending", async () => {
+    let resolveUninstall!: (result: { deleted: boolean }) => void;
+    uninstallPluginSpy.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveUninstall = resolve;
+      }),
+    );
+    setStoreState([activePlugin({ auto_update: null })]);
+
+    render(<PluginsSettingsPage />);
+    fireEvent.click(screen.getByRole("button", { name: /uninstall/i }));
+    fireEvent.click(screen.getByTestId("plugin-uninstall-confirm"));
+
+    await vi.waitFor(() => expect(uninstallPluginSpy).toHaveBeenCalledWith(PLUGIN_ID));
+    const autoUpdate = screen.getByTestId(`plugin-auto-update-${PLUGIN_ID}`);
+    try {
+      expect((autoUpdate as HTMLButtonElement).disabled).toBe(true);
+    } finally {
+      resolveUninstall({ deleted: true });
+      const removePlugin = storeState.removePlugin as ReturnType<typeof vi.fn>;
+      await vi.waitFor(() => expect(removePlugin).toHaveBeenCalledWith(PLUGIN_ID));
+    }
   });
 });
 
@@ -421,6 +484,7 @@ describe("PluginsSettingsPage sync button", () => {
     const setPlugins = storeState.setPlugins as ReturnType<typeof vi.fn>;
     await vi.waitFor(() => expect(setPlugins).toHaveBeenCalledWith([]));
     await vi.waitFor(() => expect(toast.success).toHaveBeenCalledWith("Sync: 1 sideloaded"));
+    expect(refreshMarketplaceSpy).not.toHaveBeenCalled();
   });
 
   it("toasts 'Everything up to date' when the sync finds nothing to do", async () => {
@@ -464,5 +528,154 @@ describe("PluginsSettingsPage sync button", () => {
 
     await vi.waitFor(() => expect(toast.error).toHaveBeenCalledWith("backend unreachable"));
     expect(listPluginsSpy.mock.calls.length).toBe(callsBeforeClick);
+  });
+});
+
+describe("PluginsSettingsPage marketplace updates", () => {
+  it("checks for updates without a filesystem sync and refreshes the row in place", async () => {
+    setStoreState([activePlugin()]);
+    getMarketplaceCatalogSpy.mockResolvedValueOnce({ plugins: [], sources: [] });
+    getMarketplaceCatalogSpy.mockResolvedValueOnce({ plugins: [catalogEntry()], sources: [] });
+
+    render(<PluginsSettingsPage />);
+    await vi.waitFor(() => expect(getMarketplaceCatalogSpy).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByTestId(CHECK_UPDATES_BUTTON_TESTID));
+
+    await vi.waitFor(() =>
+      expect(screen.getByTestId(`plugin-latest-version-${PLUGIN_ID}`).textContent).toContain(
+        "2.0.0",
+      ),
+    );
+    expect(screen.queryByTestId(`plugin-update-available-${PLUGIN_ID}`)).toBeNull();
+    expect(screen.getByTestId(`plugin-update-${PLUGIN_ID}`).getAttribute("data-variant")).toBe(
+      "default",
+    );
+
+    const refreshOrder = refreshMarketplaceSpy.mock.invocationCallOrder[0];
+    const catalogOrder = getMarketplaceCatalogSpy.mock.invocationCallOrder[1];
+    expect(refreshOrder).toBeLessThan(catalogOrder);
+    expect(syncPluginsSpy).not.toHaveBeenCalled();
+  });
+
+  it("shows a checking indicator while a triggered check is in flight, then a last-checked timestamp", async () => {
+    setStoreState([]);
+    render(<PluginsSettingsPage />);
+    await vi.waitFor(() => expect(screen.getByTestId("plugins-updates-last-checked")).toBeTruthy());
+
+    let resolveCatalog!: (v: { plugins: unknown[]; sources: unknown[] }) => void;
+    getMarketplaceCatalogSpy.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveCatalog = resolve;
+      }),
+    );
+    fireEvent.click(screen.getByTestId(CHECK_UPDATES_BUTTON_TESTID));
+
+    await vi.waitFor(() => expect(screen.getByTestId("plugins-updates-checking")).toBeTruthy());
+    resolveCatalog({ plugins: [], sources: [] });
+    await vi.waitFor(() => expect(screen.queryByTestId("plugins-updates-checking")).toBeNull());
+    expect(screen.getByTestId("plugins-updates-last-checked")).toBeTruthy();
+  });
+
+  it("contains a marketplace check failure: the inline error renders while the plugin list and sync summary stay intact", async () => {
+    setStoreState([activePlugin()]);
+    getMarketplaceCatalogSpy.mockRejectedValue(new Error("marketplace is unavailable"));
+
+    render(<PluginsSettingsPage />);
+    fireEvent.click(screen.getByTestId(CHECK_UPDATES_BUTTON_TESTID));
+
+    await vi.waitFor(() =>
+      expect(screen.getByTestId("plugins-update-check-error").textContent).toContain(
+        "marketplace is unavailable",
+      ),
+    );
+    expect(screen.getByText(PLUGIN_DISPLAY_NAME)).toBeTruthy();
+    expect(syncPluginsSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("PluginsSettingsPage marketplace update lifecycle", () => {
+  it("reloads the Installed catalog after a successful Browse install", async () => {
+    setStoreState([]);
+    getMarketplaceCatalogSpy.mockResolvedValue({
+      plugins: [
+        catalogEntry({
+          id: NEW_PLUGIN_ID,
+          name: "New Plugin",
+          version: "1.0.0",
+          install_state: "available",
+          installed_version: undefined,
+          package_url: NEW_PLUGIN_URL,
+        }),
+      ],
+      sources: [
+        {
+          id: "official",
+          name: "Official",
+          url: "https://example.test",
+          enabled: true,
+          builtin: true,
+          healthy: true,
+        },
+      ],
+    });
+
+    render(<PluginsSettingsPage />);
+    fireEvent.mouseDown(screen.getByTestId("plugins-tab-browse"));
+    await vi.waitFor(() =>
+      expect(screen.getByTestId(`marketplace-install-${NEW_PLUGIN_ID}`)).toBeTruthy(),
+    );
+    const callsBeforeInstall = getMarketplaceCatalogSpy.mock.calls.length;
+
+    fireEvent.click(screen.getByTestId(`marketplace-install-${NEW_PLUGIN_ID}`));
+
+    await vi.waitFor(() => expect(installPluginFromUrlSpy).toHaveBeenCalledWith(NEW_PLUGIN_URL));
+    await vi.waitFor(() =>
+      expect(getMarketplaceCatalogSpy.mock.calls.length).toBeGreaterThanOrEqual(
+        callsBeforeInstall + 2,
+      ),
+    );
+  });
+
+  it("after a successful manual update, the version updates and the update button disappears", async () => {
+    setStoreState([activePlugin()]);
+    getMarketplaceCatalogSpy.mockResolvedValueOnce({ plugins: [catalogEntry()], sources: [] });
+    installPluginFromUrlSpy.mockResolvedValueOnce({ plugin: activePlugin({ version: "2.0.0" }) });
+    getMarketplaceCatalogSpy.mockResolvedValueOnce({
+      plugins: [catalogEntry({ install_state: "installed", installed_version: "2.0.0" })],
+      sources: [],
+    });
+
+    render(<PluginsSettingsPage />);
+    await vi.waitFor(() => expect(screen.getByTestId(`plugin-update-${PLUGIN_ID}`)).toBeTruthy());
+
+    fireEvent.click(screen.getByTestId(`plugin-update-${PLUGIN_ID}`));
+
+    await vi.waitFor(() =>
+      expect(installPluginFromUrlSpy).toHaveBeenCalledWith(
+        "https://example.test/acme-tools-2.0.0.tar.gz",
+      ),
+    );
+    await vi.waitFor(() => expect(screen.queryByTestId(`plugin-update-${PLUGIN_ID}`)).toBeNull());
+    expect(toast.success).toHaveBeenCalledWith(expect.stringContaining(PLUGIN_DISPLAY_NAME));
+  });
+
+  it("shows an inline error on a failed manual update and keeps the Update button clickable", async () => {
+    setStoreState([activePlugin()]);
+    getMarketplaceCatalogSpy.mockResolvedValue({ plugins: [catalogEntry()], sources: [] });
+    installPluginFromUrlSpy.mockRejectedValueOnce(new Error("bad checksum"));
+
+    render(<PluginsSettingsPage />);
+    await vi.waitFor(() => expect(screen.getByTestId(`plugin-update-${PLUGIN_ID}`)).toBeTruthy());
+
+    fireEvent.click(screen.getByTestId(`plugin-update-${PLUGIN_ID}`));
+
+    await vi.waitFor(() =>
+      expect(screen.getByTestId(`plugin-update-error-${PLUGIN_ID}`).textContent).toContain(
+        "bad checksum",
+      ),
+    );
+    const button = screen.getByTestId(`plugin-update-${PLUGIN_ID}`) as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
   });
 });

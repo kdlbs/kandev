@@ -50,6 +50,11 @@ type TaskCreateInput struct {
 	PlanMode       bool
 	Priority       string
 	Labels         []string
+	// StartAgent reports that the caller will launch an agent for this task
+	// right after creation. The adapter maps it onto CreateTaskRequest so step
+	// resolution sends the task to the first step that runs agents rather than
+	// to the workflow's parking start step.
+	StartAgent bool
 }
 
 // TaskLaunchInput contains validated launch fields for a freshly-created
@@ -181,6 +186,7 @@ func (r taskReader) Create(ctx context.Context, in pluginsdk.CreateTaskInput) (*
 		PlanMode:       launch.PlanMode,
 		Priority:       in.Priority,
 		Labels:         in.Labels,
+		StartAgent:     in.StartAgent,
 	})
 	if err != nil {
 		return nil, err

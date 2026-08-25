@@ -417,7 +417,6 @@ export type SubmitHandlersDeps = {
   workspaceId: string | null;
   workflowId: string | null;
   effectiveWorkflowId: string | null;
-  effectiveDefaultStepId: string | null;
   /** Unified repo list from the form. Empty when in GitHub URL mode. */
   repositories: TaskRepoRow[];
   /** All on-machine discovered repos — used to look up `default_branch` for `localPath` rows. */

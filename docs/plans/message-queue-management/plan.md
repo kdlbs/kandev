@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/message-queue-management.md
+spec: docs/specs/ui/requirements/message-queue-management.md
 decision: docs/decisions/2026-08-03-separate-message-queue-provenance-cancellation-and-capacity.md
 created: 2026-08-03
 status: implemented

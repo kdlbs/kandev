@@ -191,7 +191,11 @@ func TestWSAddMessage_CreatedSessionPreservesReferencesThroughCanonicalizationAn
 			isFromOffice: true,
 			spoofed:      sysprompt.InjectKandevContext("wrong-task", "wrong-session", "Do the work", true),
 			wantMarker:   "KANDEV OFFICE MCP TOOLS",
-			notMarker:    "step_complete_kandev",
+			// Office's own canonical block now legitimately mentions
+			// step_complete_kandev (ADR 0015), so check that the stale
+			// task-mode block (with its client-qualified alias mention) was
+			// fully replaced instead of asserting the bare name is absent.
+			notMarker: "mcp__kandev__step_complete_kandev",
 		},
 		{
 			name:         "Kanban",

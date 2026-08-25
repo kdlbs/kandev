@@ -20,6 +20,7 @@ export type SidebarViewApi = {
   sort: { key: string; direction: string };
   group: string;
   collapsed_groups: string[];
+  task_row?: SidebarTaskRowPresentationApi | null;
 };
 
 export type SidebarViewDraftApi = {
@@ -27,6 +28,14 @@ export type SidebarViewDraftApi = {
   filters: Array<{ id: string; dimension: string; op: string; value: unknown }>;
   sort: { key: string; direction: string };
   group: string;
+  task_row?: SidebarTaskRowPresentationApi | null;
+};
+
+export type SidebarTaskRowPresentationApi = {
+  details_enabled?: boolean;
+  detail_order?: unknown[];
+  visible_details?: unknown[];
+  trailing?: string;
 };
 
 export type SidebarTaskPrefsApi = {
@@ -106,6 +115,7 @@ export type UserSettings = {
   app_status_bar_enabled?: boolean;
   app_status_bar_order?: AppStatusBarOrderApi;
   kanban_hidden_step_ids?: Record<string, string[]>;
+  workflow_ids_with_auto_hide_empty_steps?: string[];
   revision?: number;
   updated_at: string;
 };
@@ -171,4 +181,5 @@ export type UserSettingsUpdatePayload = {
   app_status_bar_enabled?: boolean;
   app_status_bar_order?: AppStatusBarOrderApi;
   kanban_hidden_step_ids?: Record<string, string[]>;
+  workflow_ids_with_auto_hide_empty_steps?: string[];
 };

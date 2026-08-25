@@ -5,7 +5,7 @@ status: pending
 wave: 9
 depends_on: ["04-core-route-engine", "06-logical-session-integration", "10-office-routing-handoff"]
 plan: "plan.md"
-spec: "../../specs/agents/dynamic-agent-routing.md"
+spec: "../../specs/agents/requirements/dynamic-agent-routing.md"
 ---
 
 # Task 11: Core routing observability

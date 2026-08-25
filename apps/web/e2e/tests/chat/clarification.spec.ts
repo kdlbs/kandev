@@ -103,6 +103,56 @@ test.describe("Clarification flow", () => {
     await expect(session.chat).toContainText(/You answered|selected_option/);
   });
 
+  // R2/R11 + W3: a duplicate submit is a 200 with claimed: false, not a 409 —
+  // the losing client must apply the winner's own answer instead of stranding
+  // the overlay on "pending" or rendering its own (overwritten) submission.
+  test("losing a race renders the winner's answer and closes the overlay", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Clarification Lost Race",
+      "clarification",
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    await testPage.route("**/api/v1/clarification/*/respond", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: true,
+          claimed: false,
+          status: "answered",
+          response: {
+            pending_id: "lost-race-pending-id",
+            answers: [
+              {
+                question_id: "db",
+                selected_options: [],
+                custom_text: "SQLite, decided by another answerer",
+              },
+            ],
+            rejected: false,
+          },
+          resume: "published",
+        }),
+      });
+    });
+
+    // The user picks a different option locally; the response above must win.
+    await session.clarificationOption("PostgreSQL").click();
+
+    await expect(session.clarificationOverlay()).not.toBeVisible({ timeout: 30_000 });
+    await expect(session.chat).toContainText("SQLite, decided by another answerer");
+    await expect(session.chat).not.toContainText("PostgreSQL");
+  });
+
   test("moves answered task from Review to In progress without reload", async ({
     testPage,
     apiClient,

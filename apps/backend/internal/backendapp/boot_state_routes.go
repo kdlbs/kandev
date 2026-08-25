@@ -594,10 +594,11 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 			"showInTopbar": settings.SystemMetricsDisplay.ShowInTopbar,
 			"simplified":   settings.SystemMetricsDisplay.Simplified,
 		},
-		"appStatusBarEnabled":   settings.AppStatusBarEnabled,
-		"appStatusBarOrder":     mapAppStatusBarOrder(settings.AppStatusBarOrder),
-		"hiddenWorkflowStepIds": stringSliceMap(settings.KanbanHiddenStepIDs),
-		"loaded":                true,
+		"appStatusBarEnabled":               settings.AppStatusBarEnabled,
+		"appStatusBarOrder":                 mapAppStatusBarOrder(settings.AppStatusBarOrder),
+		"hiddenWorkflowStepIds":             stringSliceMap(settings.KanbanHiddenStepIDs),
+		"workflowIdsWithAutoHideEmptySteps": stringSlice(settings.WorkflowIDsWithAutoHideEmptySteps),
+		"loaded":                            true,
 	}
 }
 
@@ -740,6 +741,7 @@ func mapSidebarViews(views []usermodels.SidebarView) []map[string]any {
 			"sort":            view.Sort,
 			"group":           view.Group,
 			"collapsedGroups": stringSlice(view.CollapsedGroups),
+			"taskRow":         mapSidebarTaskRow(view.TaskRow),
 		})
 	}
 	return result
@@ -755,6 +757,19 @@ func mapSidebarDraft(draft *usermodels.SidebarViewDraft) map[string]any {
 		"filters":    draft.Filters,
 		"sort":       draft.Sort,
 		"group":      draft.Group,
+		"taskRow":    mapSidebarTaskRow(draft.TaskRow),
+	}
+}
+
+func mapSidebarTaskRow(value *usermodels.SidebarTaskRowPresentation) map[string]any {
+	if value == nil {
+		return nil
+	}
+	return map[string]any{
+		"detailsEnabled": value.DetailsEnabled,
+		"detailOrder":    stringSlice(value.DetailOrder),
+		"visibleDetails": stringSlice(value.VisibleDetails),
+		"trailing":       value.Trailing,
 	}
 }
 

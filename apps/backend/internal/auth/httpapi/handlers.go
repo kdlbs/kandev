@@ -128,7 +128,7 @@ func (h *Handlers) logout(c *gin.Context) {
 	// deliberately left alone: on a host serving a default-port instance (or a
 	// not-yet-upgraded one), it is that instance's LIVE session cookie, not an
 	// inert legacy jar — expiring it would log the other instance out (see
-	// docs/specs/fix-multi-instance-cookie-isolation/spec.md: the upgraded
+	// docs/specs/auth/requirements/fix-multi-instance-cookie-isolation.md: the upgraded
 	// instance does not proactively delete the legacy cookie).
 	clearSessionCookie(c, h.svc.CookieNameForRequest(c.Request))
 	c.Status(http.StatusNoContent)

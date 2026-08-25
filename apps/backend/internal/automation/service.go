@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 )
 
 // ErrTaskNotFound is the sentinel that run-cleanup paths check to distinguish
@@ -53,6 +54,66 @@ var ErrAutomationNotFound = errors.New("automation: not found")
 // exact shape the delete ordering was built to prevent: an enabled automation
 // pointed at a profile that isn't there, failing quietly on a schedule.
 var ErrAgentProfileNotFound = errors.New("automation: agent profile not found")
+
+var ErrInvalidContinuationPolicy = errors.New("automation: invalid continuation policy")
+
+// ErrAutomationRunNotDispatchable means the run was stopped or otherwise
+// settled before its agent turn could be started. The event handler must not
+// launch work for this run.
+var ErrAutomationRunNotDispatchable = errors.New("automation: run is not dispatchable")
+
+// ErrAutomationRunNotLive is returned by the orchestrator when an exact run
+// binding is no longer the live turn. The service maps that outcome to the
+// same not-found result as a missing or terminal run, so a stale stop request
+// cannot affect a newer turn in a shared session.
+var ErrAutomationRunNotLive = errors.New("automation: run is not live")
+
+// RunStopper cancels one exact task/session/turn binding. The bool is false
+// when the binding is already terminal or stale; that is not an internal
+// failure and must not cancel a successor turn.
+type RunStopper interface {
+	StopAutomationRun(ctx context.Context, taskID, sessionID, turnID string) (bool, error)
+}
+
+// RunLivenessChecker answers whether an exact bound turn is still live or
+// blocked. Errors fail closed and leave the run open for a later retry.
+type RunLivenessChecker interface {
+	AutomationRunLive(ctx context.Context, taskID, sessionID, turnID string) (bool, error)
+}
+
+// RunDispatch is the exact identity returned after an agent turn is accepted.
+// The service binds it while holding the automation run lock, so stopping or
+// deleting an automation cannot race the task/session/turn admission.
+type RunDispatch struct {
+	TaskID    string
+	SessionID string
+	TurnID    string
+}
+
+// RunDispatcher serializes accepted-turn dispatch with exact-run stop and
+// run-history deletion.
+type RunDispatcher interface {
+	DispatchRun(
+		ctx context.Context,
+		runID string,
+		action ThreadAction,
+		reason string,
+		dispatch func() (RunDispatch, error),
+	) error
+}
+
+func validateContinuationSettings(policy ContinuationPolicy, maxRuns int) error {
+	if policy == "" {
+		policy = ContinuationPolicyNewTask
+	}
+	if policy != ContinuationPolicyNewTask && policy != ContinuationPolicyReuseThread {
+		return fmt.Errorf("%w: %q", ErrInvalidContinuationPolicy, policy)
+	}
+	if policy == ContinuationPolicyReuseThread && maxRuns != 1 {
+		return fmt.Errorf("reuse_thread requires max_concurrent_runs = 1")
+	}
+	return nil
+}
 
 // TaskDeleter deletes a task and cleans up its resources.
 // Satisfied by *taskservice.Service; injected to avoid a cyclic import.
@@ -105,6 +166,8 @@ type Service struct {
 	eventBus    bus.EventBus
 	logger      *logger.Logger
 	taskDeleter TaskDeleter // optional; nil-safe
+	runStopper  RunStopper  // optional; wired by the orchestrator composition
+	runLiveness RunLivenessChecker
 	// workflowLocator gates workflow ownership. Optional: when nil (isolated
 	// tests) ownership is not enforced.
 	workflowLocator WorkflowLocator
@@ -117,8 +180,9 @@ type Service struct {
 	// = validation skipped (not yet wired at startup, or an isolated test).
 	repoLookup RepositoryLookup
 
-	// taskOriginLookup resolves a task's workspace and whether it is an
-	// automation run, used by the merged-PR subscriber's state machine.
+	// taskOriginLookup resolves a task's workspace and whether it is a hidden
+	// automation run. It is used by the merged-PR subscriber and by cleanup so
+	// visible automation-created tasks are never treated as disposable runs.
 	// Nil = not wired; the github_pr_merged trigger type then never fires.
 	taskOriginLookup TaskOriginLookup
 
@@ -179,6 +243,18 @@ func (s *Service) Store() *Store {
 // Optional: when nil, run deletion skips task teardown.
 func (s *Service) SetTaskDeleter(d TaskDeleter) {
 	s.taskDeleter = d
+}
+
+// SetRunStopper wires exact automation-turn cancellation. It is kept as a
+// narrow interface so the automation package does not depend on the
+// orchestrator implementation.
+func (s *Service) SetRunStopper(stopper RunStopper) {
+	s.runStopper = stopper
+}
+
+// SetRunLivenessChecker wires restart reconciliation for exact bound turns.
+func (s *Service) SetRunLivenessChecker(checker RunLivenessChecker) {
+	s.runLiveness = checker
 }
 
 // SetWorkflowLocator wires the workflow ownership check.
@@ -281,8 +357,8 @@ func (s *Service) SetWorkspaceAuthorizer(fn func(ctx context.Context, workspaceI
 }
 
 // SetTaskOriginLookup wires the task workspace/origin resolver used by the
-// github_pr_merged trigger subscriber. Must be called before Start, following
-// the SetWorkflowLocator precedent.
+// github_pr_merged trigger subscriber and run cleanup. Must be called before
+// Start, following the SetWorkflowLocator precedent.
 func (s *Service) SetTaskOriginLookup(l TaskOriginLookup) {
 	s.taskOriginLookup = l
 }
@@ -293,10 +369,10 @@ func (s *Service) TaskOriginLookup() TaskOriginLookup {
 }
 
 // SetRepositoryLookup wires the repository ownership validator for
-// repository_ids on create/update. This is a security control (prevents a
+// repository bindings on create/update. This is a security control (prevents a
 // crafted request attaching another workspace's repository), so an unset
-// lookup fails closed for any non-empty repository_ids list rather than
-// silently skipping validation — see validateRepositoryIDs.
+// lookup fails closed for any non-empty repository list rather than silently
+// skipping validation.
 func (s *Service) SetRepositoryLookup(lookup RepositoryLookup) {
 	s.repoLookup = lookup
 }
@@ -383,10 +459,36 @@ func (s *Service) CreateAutomation(ctx context.Context, req *CreateAutomationReq
 	if maxRuns <= 0 {
 		maxRuns = 1
 	}
+	continuationPolicy := req.ContinuationPolicy
+	if continuationPolicy == "" {
+		continuationPolicy = ContinuationPolicyNewTask
+	}
+	if err := validateContinuationSettings(continuationPolicy, maxRuns); err != nil {
+		return nil, err
+	}
 
-	// Workflow + step are optional for every automation: no automation run is
-	// placed on a board, so no automation needs a starting column. When a step
-	// is supplied, it must belong to the selected workflow.
+	taskMode := req.TaskMode
+	if taskMode == "" {
+		taskMode = TaskModeAutomationRun
+	}
+	repositories, err := s.resolveAutomationRepositories(ctx, req.WorkspaceID, req.Repositories, req.RepositoryIDs)
+	if err != nil {
+		return nil, err
+	}
+	repositoryMode := RepositoryModeNone
+	if len(repositories) > 0 {
+		repositoryMode = RepositoryModeSelected
+	}
+	if req.RepositoryMode != "" && req.RepositoryMode != repositoryMode {
+		return nil, fmt.Errorf("%w: %q", ErrInvalidRepositoryMode, req.RepositoryMode)
+	}
+	repositoryIDs := repositoryIDs(repositories)
+	if err := validateAutomationTarget(taskMode, repositoryMode, req.WorkflowID, repositoryIDs); err != nil {
+		return nil, err
+	}
+	// Hidden automation runs may omit a workflow. Visible normal tasks require
+	// one, and when a workflow is supplied its ownership and optional starting
+	// step are still checked.
 	if err := s.authorizeWorkflowOwnership(ctx, req.WorkspaceID, req.WorkflowID); err != nil {
 		return nil, err
 	}
@@ -394,21 +496,22 @@ func (s *Service) CreateAutomation(ctx context.Context, req *CreateAutomationReq
 		return nil, err
 	}
 	a := &Automation{
-		WorkspaceID:       req.WorkspaceID,
-		Name:              req.Name,
-		Description:       req.Description,
-		WorkflowID:        req.WorkflowID,
-		WorkflowStepID:    req.WorkflowStepID,
-		AgentProfileID:    req.AgentProfileID,
-		ExecutorProfileID: req.ExecutorProfileID,
-		RepositoryIDs:     req.RepositoryIDs,
-		Prompt:            req.Prompt,
-		TaskTitleTemplate: req.TaskTitleTemplate,
-		Enabled:           true,
-		MaxConcurrentRuns: maxRuns,
-	}
-	if err := s.validateRepositoryIDs(ctx, req.WorkspaceID, req.RepositoryIDs); err != nil {
-		return nil, err
+		WorkspaceID:        req.WorkspaceID,
+		Name:               req.Name,
+		Description:        req.Description,
+		WorkflowID:         req.WorkflowID,
+		WorkflowStepID:     req.WorkflowStepID,
+		AgentProfileID:     req.AgentProfileID,
+		ExecutorProfileID:  req.ExecutorProfileID,
+		TaskMode:           taskMode,
+		RepositoryMode:     repositoryMode,
+		Repositories:       repositories,
+		RepositoryIDs:      repositoryIDs,
+		Prompt:             req.Prompt,
+		TaskTitleTemplate:  req.TaskTitleTemplate,
+		Enabled:            true,
+		MaxConcurrentRuns:  maxRuns,
+		ContinuationPolicy: continuationPolicy,
 	}
 	if err := s.validateAgentProfileID(ctx, req.AgentProfileID); err != nil {
 		return nil, err
@@ -477,7 +580,82 @@ func (s *Service) UpdateAutomation(ctx context.Context, id string, req *UpdateAu
 	if err := s.authorizeUpdatedReferences(ctx, id, req); err != nil {
 		return nil, err
 	}
-	if err := s.store.UpdateAutomation(ctx, id, req); err != nil {
+	existing, err := s.store.GetAutomation(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if existing == nil {
+		return nil, ErrAutomationNotFound
+	}
+	taskMode := existing.TaskMode
+	if taskMode == "" {
+		taskMode = TaskModeAutomationRun
+	}
+	if req.TaskMode != nil {
+		taskMode = *req.TaskMode
+	}
+	repositories := existing.Repositories
+	if req.Repositories != nil || req.RepositoryIDs != nil {
+		repositories, err = s.resolveAutomationRepositories(
+			ctx, existing.WorkspaceID, req.Repositories, req.RepositoryIDs,
+		)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if req.RepositoryMode != nil {
+		switch *req.RepositoryMode {
+		case RepositoryModeNone:
+			repositories = nil
+		case RepositoryModeWorkspaceDefault:
+			return nil, fmt.Errorf("%w: %q", ErrInvalidRepositoryMode, *req.RepositoryMode)
+		}
+	}
+	repositoryMode := RepositoryModeNone
+	if len(repositories) > 0 {
+		repositoryMode = RepositoryModeSelected
+	}
+	if req.RepositoryMode != nil && *req.RepositoryMode != repositoryMode {
+		return nil, fmt.Errorf("%w: %q", ErrInvalidRepositoryMode, *req.RepositoryMode)
+	}
+	workflowID := existing.WorkflowID
+	if req.WorkflowID != nil {
+		workflowID = *req.WorkflowID
+	}
+	repositoryIDs := repositoryIDs(repositories)
+	if err := validateAutomationTarget(taskMode, repositoryMode, workflowID, repositoryIDs); err != nil {
+		return nil, err
+	}
+	policy := existing.ContinuationPolicy
+	if policy == "" {
+		policy = ContinuationPolicyNewTask
+	}
+	maxRuns := existing.MaxConcurrentRuns
+	if req.ContinuationPolicy != nil {
+		policy = *req.ContinuationPolicy
+	}
+	if req.MaxConcurrentRuns != nil {
+		maxRuns = *req.MaxConcurrentRuns
+	}
+	storeReq := req
+	if policy == ContinuationPolicyReuseThread && maxRuns <= 0 {
+		maxRuns = 1
+		normalized := 1
+		clone := *req
+		clone.MaxConcurrentRuns = &normalized
+		storeReq = &clone
+	}
+	if err := validateContinuationSettings(policy, maxRuns); err != nil {
+		return nil, err
+	}
+	if req.Repositories != nil || req.RepositoryIDs != nil || req.RepositoryMode != nil {
+		clone := *storeReq
+		clone.Repositories = repositories
+		clone.RepositoryIDs = nil
+		clone.RepositoryMode = &repositoryMode
+		storeReq = &clone
+	}
+	if err := s.store.UpdateAutomation(ctx, id, storeReq); err != nil {
 		return nil, err
 	}
 	return s.store.GetAutomation(ctx, id)
@@ -488,7 +666,7 @@ func (s *Service) UpdateAutomation(ctx context.Context, id string, req *UpdateAu
 // step. All three need the stored automation to learn that workspace, so it is
 // loaded once here rather than by each check.
 func (s *Service) authorizeUpdatedReferences(ctx context.Context, id string, req *UpdateAutomationRequest) error {
-	if req.RepositoryIDs == nil && req.WorkflowID == nil && req.WorkflowStepID == nil {
+	if req.Repositories == nil && req.RepositoryIDs == nil && req.WorkflowID == nil && req.WorkflowStepID == nil {
 		return nil
 	}
 	existing, err := s.store.GetAutomation(ctx, id)
@@ -498,8 +676,10 @@ func (s *Service) authorizeUpdatedReferences(ctx context.Context, id string, req
 	if existing == nil {
 		return fmt.Errorf("automation not found: %s", id)
 	}
-	if req.RepositoryIDs != nil {
-		if err := s.validateRepositoryIDs(ctx, existing.WorkspaceID, req.RepositoryIDs); err != nil {
+	if req.Repositories != nil || req.RepositoryIDs != nil {
+		if _, err := s.resolveAutomationRepositories(
+			ctx, existing.WorkspaceID, req.Repositories, req.RepositoryIDs,
+		); err != nil {
 			return err
 		}
 	}
@@ -520,31 +700,41 @@ func (s *Service) authorizeUpdatedReferences(ctx context.Context, id string, req
 	return s.authorizeWorkflowStepOwnership(ctx, existing.WorkspaceID, workflowID, stepID)
 }
 
-// validateRepositoryIDs rejects a duplicate entry, or any ID that isn't a
-// repository belonging to workspaceID. An empty list always passes. A
-// non-empty list with no RepositoryLookup wired fails closed
-// (ErrRepositoryLookupUnavailable) rather than silently skipping the check —
-// this validates cross-workspace access, so "unconfigured" must not mean
-// "unchecked".
-func (s *Service) validateRepositoryIDs(ctx context.Context, workspaceID string, repositoryIDs []string) error {
-	if len(repositoryIDs) == 0 {
-		return nil
+func (s *Service) resolveAutomationRepositories(
+	ctx context.Context,
+	workspaceID string,
+	repositories []AutomationRepository,
+	legacyIDs []string,
+) ([]AutomationRepository, error) {
+	if repositories == nil {
+		repositories = repositoriesFromIDs(legacyIDs)
+	}
+	if len(repositories) == 0 {
+		return []AutomationRepository{}, nil
 	}
 	if s.repoLookup == nil {
-		return ErrRepositoryLookupUnavailable
+		return nil, ErrRepositoryLookupUnavailable
 	}
-	seen := make(map[string]bool, len(repositoryIDs))
-	for _, id := range repositoryIDs {
-		if seen[id] {
-			return fmt.Errorf("%w: %s", ErrDuplicateRepositoryID, id)
+	result := make([]AutomationRepository, 0, len(repositories))
+	seen := make(map[string]bool, len(repositories))
+	for _, repository := range repositories {
+		if seen[repository.RepositoryID] {
+			return nil, fmt.Errorf("%w: %s", ErrDuplicateRepositoryID, repository.RepositoryID)
 		}
-		seen[id] = true
-		repoWorkspaceID, _, ok := s.repoLookup.GetRepository(ctx, id)
+		seen[repository.RepositoryID] = true
+		repoWorkspaceID, defaultBranch, ok := s.repoLookup.GetRepository(ctx, repository.RepositoryID)
 		if !ok || repoWorkspaceID != workspaceID {
-			return fmt.Errorf("%w: %s", ErrRepositoryNotInWorkspace, id)
+			return nil, fmt.Errorf("%w: %s", ErrRepositoryNotInWorkspace, repository.RepositoryID)
 		}
+		if strings.TrimSpace(repository.BaseBranch) == "" {
+			repository.BaseBranch = defaultBranch
+		}
+		if strings.TrimSpace(repository.BaseBranch) == "" {
+			return nil, fmt.Errorf("%w: repository %s requires a base branch", ErrInvalidRepositoryMode, repository.RepositoryID)
+		}
+		result = append(result, repository)
 	}
-	return nil
+	return result, nil
 }
 
 // DeleteAutomation removes an automation.
@@ -552,7 +742,194 @@ func (s *Service) DeleteAutomation(ctx context.Context, id string) error {
 	if err := s.authorizeAutomation(ctx, id); err != nil {
 		return err
 	}
-	return s.store.DeleteAutomation(ctx, id)
+	unlock := s.automationRunLock(id)
+	defer unlock()
+	if err := s.stopOpenAutomationRuns(ctx, id); err != nil {
+		return err
+	}
+	cleanupTaskIDs, err := s.hiddenAutomationTaskIDs(ctx, id)
+	if err != nil {
+		return err
+	}
+	if _, err := s.store.DeleteAutomationWithCleanup(ctx, id, cleanupTaskIDs); err != nil {
+		return err
+	}
+	_ = s.ReconcileCleanupJobs(ctx)
+	return nil
+}
+
+func (s *Service) hiddenAutomationTaskIDs(ctx context.Context, automationID string) ([]string, error) {
+	taskIDs, err := s.store.ListAutomationTaskIDs(ctx, automationID)
+	if err != nil {
+		return nil, err
+	}
+	if s.taskOriginLookup == nil {
+		return taskIDs, nil
+	}
+	hidden := make([]string, 0, len(taskIDs))
+	seen := make(map[string]struct{}, len(taskIDs))
+	for _, taskID := range taskIDs {
+		if taskID == "" {
+			continue
+		}
+		if _, ok := seen[taskID]; ok {
+			continue
+		}
+		seen[taskID] = struct{}{}
+		_, isAutomationRun, ok := s.taskOriginLookup.TaskWorkspaceAndAutomationOrigin(ctx, taskID)
+		if ok && isAutomationRun {
+			hidden = append(hidden, taskID)
+		}
+	}
+	return hidden, nil
+}
+
+// DeleteAutomationsByWorkspace applies the same ownership and cleanup path as
+// an individual automation deletion. Workspace reset must not bypass hidden
+// task capture and leave reusable worktrees orphaned.
+func (s *Service) DeleteAutomationsByWorkspace(ctx context.Context, workspaceID string) (int, error) {
+	automations, err := s.store.ListAutomations(ctx, workspaceID)
+	if err != nil {
+		return 0, err
+	}
+	deleted := 0
+	for _, a := range automations {
+		if a == nil {
+			continue
+		}
+		if err := s.DeleteAutomation(ctx, a.ID); err != nil {
+			return deleted, err
+		}
+		deleted++
+	}
+	return deleted, nil
+}
+
+// stopOpenAutomationRuns quiesces live bound turns before their automation
+// references are removed. An admitted row without a binding has no runtime
+// to stop and is safely removed by the deletion transaction.
+func (s *Service) stopOpenAutomationRuns(ctx context.Context, automationID string) error {
+	runs, err := s.store.ListOpenRuns(ctx, automationID)
+	if err != nil {
+		return fmt.Errorf("list open automation runs: %w", err)
+	}
+	for _, run := range runs {
+		if run == nil || run.TaskID == "" || run.SessionID == "" || run.TurnID == "" || s.runStopper == nil {
+			continue
+		}
+		stopped, stopErr := s.runStopper.StopAutomationRun(ctx, run.TaskID, run.SessionID, run.TurnID)
+		if stopErr != nil {
+			return fmt.Errorf("stop automation run %s: %w", run.ID, stopErr)
+		}
+		if stopped {
+			if markErr := s.store.MarkRunTerminal(ctx, run.ID, run.SessionID, run.TurnID, RunStatusFailed, "automation deleted"); markErr != nil {
+				return fmt.Errorf("mark automation run %s failed: %w", run.ID, markErr)
+			}
+		}
+	}
+	return nil
+}
+
+// ReconcileOpenRuns settles rows left open by a process stop. Admission rows
+// without a binding are never guessed into a task and fail immediately. Bound
+// rows are settled only when the orchestrator confirms that their exact turn
+// is no longer live or blocked.
+func (s *Service) ReconcileOpenRuns(ctx context.Context) error {
+	runs, err := s.store.ListAllOpenRuns(ctx)
+	if err != nil {
+		return err
+	}
+	for _, run := range runs {
+		if run == nil {
+			continue
+		}
+		if run.TaskID == "" || run.SessionID == "" || run.TurnID == "" {
+			if err := s.store.MarkRunTerminal(ctx, run.ID, "", "", RunStatusFailed, "backend stopped before the automation turn was bound"); err != nil {
+				s.logger.Warn("failed to reconcile unbound automation run", zap.String("run_id", run.ID), zap.Error(err))
+			}
+			continue
+		}
+		if s.runLiveness == nil {
+			continue
+		}
+		live, checkErr := s.runLiveness.AutomationRunLive(ctx, run.TaskID, run.SessionID, run.TurnID)
+		if checkErr != nil {
+			s.logger.Warn("failed to inspect automation run liveness", zap.String("run_id", run.ID), zap.Error(checkErr))
+			continue
+		}
+		if !live {
+			if err := s.store.MarkRunTerminal(ctx, run.ID, run.SessionID, run.TurnID, RunStatusFailed, "automation turn was stale after backend recovery"); err != nil {
+				s.logger.Warn("failed to reconcile stale automation run", zap.String("run_id", run.ID), zap.Error(err))
+			}
+		}
+	}
+	return nil
+}
+
+// ReconcileCleanupJobs retries hidden-task cleanup left after automation
+// deletion. A missing task is already clean; every other failure remains
+// durable with a safe error for the next startup/reconciliation pass.
+func (s *Service) ReconcileCleanupJobs(ctx context.Context) error {
+	jobs, err := s.store.ListCleanupJobs(ctx)
+	if err != nil {
+		return err
+	}
+	if s.taskDeleter == nil {
+		return nil
+	}
+	for _, job := range jobs {
+		if job == nil {
+			continue
+		}
+		delErr := s.taskDeleter.DeleteTask(ctx, job.TaskID)
+		if delErr == nil || errors.Is(delErr, ErrTaskNotFound) {
+			if err := s.store.DeleteCleanupJob(ctx, job.TaskID); err != nil {
+				s.logger.Warn("failed to remove completed automation cleanup job", zap.String("task_id", job.TaskID), zap.Error(err))
+			}
+			continue
+		}
+		if err := s.store.UpdateCleanupJobError(ctx, job.TaskID, delErr.Error()); err != nil {
+			s.logger.Warn("failed to persist automation cleanup error", zap.String("task_id", job.TaskID), zap.Error(err))
+		}
+	}
+	return nil
+}
+
+// StopRun cancels one open automation run. The stored binding is authoritative;
+// callers never provide task, session, or turn identities themselves.
+func (s *Service) StopRun(ctx context.Context, automationID, runID string) (*AutomationRun, error) {
+	if err := s.authorizeAutomation(ctx, automationID); err != nil {
+		return nil, err
+	}
+	unlock := s.automationRunLock(automationID)
+	defer unlock()
+
+	run, err := s.store.GetRun(ctx, runID)
+	if err != nil {
+		return nil, fmt.Errorf("get run: %w", err)
+	}
+	if run == nil || run.AutomationID != automationID ||
+		(run.Status != RunStatusTriggered && run.Status != RunStatusTaskCreated) {
+		return nil, ErrAutomationNotFound
+	}
+	if run.TaskID != "" && run.SessionID != "" && run.TurnID != "" {
+		if s.runStopper == nil {
+			return nil, errors.New("automation run stopper is not configured")
+		}
+		stopped, stopErr := s.runStopper.StopAutomationRun(ctx, run.TaskID, run.SessionID, run.TurnID)
+		if stopErr != nil {
+			return nil, stopErr
+		}
+		if !stopped {
+			return nil, ErrAutomationNotFound
+		}
+	}
+	if err := s.store.MarkRunTerminal(ctx, run.ID, run.SessionID, run.TurnID, RunStatusFailed, "stopped by user"); err != nil {
+		return nil, err
+	}
+	run.Status = RunStatusFailed
+	run.ErrorMessage = "stopped by user"
+	return run, nil
 }
 
 // EnableAutomation sets enabled = true.
@@ -629,15 +1006,16 @@ func (s *Service) UpdateTrigger(ctx context.Context, id string, req *UpdateTrigg
 	if err := s.authorizeTrigger(ctx, id); err != nil {
 		return err
 	}
+	existing, err := s.store.GetTrigger(ctx, id)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		return fmt.Errorf("trigger not found: %s", id)
+	}
 	if req.Config != nil {
-		existing, err := s.store.GetTrigger(ctx, id)
-		if err != nil {
+		if err := validateScheduledConfig(existing.Type, *req.Config); err != nil {
 			return err
-		}
-		if existing != nil {
-			if err := validateScheduledConfig(existing.Type, *req.Config); err != nil {
-				return err
-			}
 		}
 	}
 	return s.store.UpdateTrigger(ctx, id, req)
@@ -727,6 +1105,73 @@ func (s *Service) automationRunLock(automationID string) func() {
 	return mu.Unlock
 }
 
+// DispatchRun serializes the fallible agent dispatch with exact-run stop and
+// deletion. The callback is invoked only while the admitted run is still
+// open; its exact task/session/turn identity is bound before the lock is
+// released, so a stop can never settle a different firing.
+func (s *Service) DispatchRun(
+	ctx context.Context,
+	runID string,
+	action ThreadAction,
+	reason string,
+	dispatch func() (RunDispatch, error),
+) error {
+	if runID == "" || dispatch == nil {
+		return ErrAutomationRunNotDispatchable
+	}
+	run, err := s.store.GetRun(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if run == nil {
+		return ErrAutomationRunNotDispatchable
+	}
+	unlock := s.automationRunLock(run.AutomationID)
+	defer unlock()
+
+	run, err = s.store.GetRun(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if run == nil || run.Status != RunStatusTriggered {
+		return ErrAutomationRunNotDispatchable
+	}
+
+	dispatchResult, err := dispatch()
+	if err != nil {
+		return s.markDispatchFailed(ctx, runID, err)
+	}
+	if dispatchResult.TaskID == "" || dispatchResult.SessionID == "" || dispatchResult.TurnID == "" {
+		return s.markDispatchFailed(ctx, runID, errors.New("automation dispatch returned no exact identity"))
+	}
+	if err := s.store.BindRun(ctx, runID, dispatchResult.TaskID, dispatchResult.SessionID, dispatchResult.TurnID, action, reason); err != nil {
+		return s.markDispatchFailed(ctx, runID, err)
+	}
+	return nil
+}
+
+func (s *Service) markDispatchFailed(ctx context.Context, runID string, dispatchErr error) error {
+	if err := s.store.MarkRunTerminal(ctx, runID, "", "", RunStatusFailed, dispatchErr.Error()); err != nil {
+		return fmt.Errorf("%w (mark run failed: %v)", dispatchErr, err)
+	}
+	return dispatchErr
+}
+
+// lockRun returns the per-automation lock for a persisted run. Binding uses
+// the same lock as DispatchRun and StopRun, while the store's status guard
+// remains the final protection against a row deleted between the lookup and
+// the update.
+func (s *Service) lockRun(ctx context.Context, runID string) (func(), error) {
+	run, err := s.store.GetRun(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	if run == nil {
+		return nil, ErrAutomationRunNotDispatchable
+	}
+	return s.automationRunLock(run.AutomationID), nil
+}
+
 // createRunLocked persists a run row while holding the per-automation lock
 // that DeleteAllRuns also acquires. Without this, a run created between
 // DeleteAllRuns' task-id snapshot and its final row purge would be deleted
@@ -744,51 +1189,125 @@ func (s *Service) DeleteRun(ctx context.Context, runID string) error {
 	if err != nil {
 		return fmt.Errorf("get run: %w", err)
 	}
+	if run == nil {
+		return s.store.DeleteRun(ctx, runID)
+	}
 	// Authorized here rather than in the WS handler, like every other exported
 	// operation on this service. A destructive call that depends on its caller
 	// remembering to check is one new caller away from not being checked.
-	if run != nil {
-		if authErr := s.authorizeAutomation(ctx, run.AutomationID); authErr != nil {
-			return authErr
-		}
+	if err := s.authorizeAutomation(ctx, run.AutomationID); err != nil {
+		return err
 	}
-	if run != nil && run.TaskID != "" && s.taskDeleter != nil {
-		if delErr := s.taskDeleter.DeleteTask(ctx, run.TaskID); delErr != nil {
-			if !errors.Is(delErr, ErrTaskNotFound) {
-				return fmt.Errorf("delete task: %w", delErr)
-			}
-			s.logger.Debug("run task already gone, continuing delete",
-				zap.String("run_id", runID),
-				zap.String("task_id", run.TaskID))
-		}
+	unlock := s.automationRunLock(run.AutomationID)
+	defer unlock()
+	if err := s.deleteRunTaskIfUnreferenced(ctx, run); err != nil {
+		return err
 	}
 	return s.store.DeleteRun(ctx, runID)
 }
 
+func (s *Service) deleteRunTaskIfUnreferenced(ctx context.Context, run *AutomationRun) error {
+	if run.TaskID == "" || s.taskDeleter == nil {
+		return nil
+	}
+	if s.taskOriginLookup != nil {
+		_, isAutomationRun, ok := s.taskOriginLookup.TaskWorkspaceAndAutomationOrigin(ctx, run.TaskID)
+		if ok && !isAutomationRun {
+			return nil
+		}
+	}
+	referenced, err := s.runTaskHasReferences(ctx, run)
+	if err != nil {
+		return err
+	}
+	if referenced {
+		return nil
+	}
+	if err := s.taskDeleter.DeleteTask(ctx, run.TaskID); err != nil {
+		if !errors.Is(err, ErrTaskNotFound) {
+			return fmt.Errorf("delete task: %w", err)
+		}
+		s.logger.Debug("run task already gone, continuing delete",
+			zap.String("run_id", run.ID), zap.String("task_id", run.TaskID))
+	}
+	return nil
+}
+
+func (s *Service) runTaskHasReferences(ctx context.Context, run *AutomationRun) (bool, error) {
+	otherRun, err := s.store.IsTaskReferencedByRun(ctx, run.AutomationID, run.ID, run.TaskID)
+	if err != nil {
+		return false, fmt.Errorf("check run task references: %w", err)
+	}
+	if otherRun {
+		return true, nil
+	}
+	continuation, err := s.store.IsContinuationTask(ctx, run.AutomationID, run.TaskID)
+	if err != nil {
+		return false, fmt.Errorf("check continuation task reference: %w", err)
+	}
+	if continuation {
+		return true, nil
+	}
+	foreign, err := s.store.IsTaskReferencedByOtherAutomation(ctx, run.AutomationID, run.TaskID)
+	if err != nil {
+		return false, fmt.Errorf("check foreign task references: %w", err)
+	}
+	return foreign, nil
+}
+
 // DeleteAllRuns removes every run for an automation, deleting each associated
-// task first. Task deletion is best-effort: not-found errors are ignored.
+// hidden task first. Visible automation-created tasks belong to the normal
+// task lifecycle and remain available after their run history is cleared.
+// Task deletion is best-effort: not-found errors are ignored.
 func (s *Service) DeleteAllRuns(ctx context.Context, automationID string) error {
 	if err := s.authorizeAutomation(ctx, automationID); err != nil {
 		return err
 	}
-	defer s.automationRunLock(automationID)()
-	if s.taskDeleter != nil {
-		taskIDs, err := s.store.ListRunTaskIDs(ctx, automationID)
-		if err != nil {
-			return fmt.Errorf("list run task ids: %w", err)
+	unlock := s.automationRunLock(automationID)
+	defer unlock()
+	taskIDs, err := s.store.ListRunTaskIDs(ctx, automationID)
+	if err != nil {
+		return fmt.Errorf("list run task ids: %w", err)
+	}
+	a, err := s.store.GetAutomation(ctx, automationID)
+	if err != nil {
+		return err
+	}
+	if a != nil && a.ContinuationTaskID != "" {
+		taskIDs = append(taskIDs, a.ContinuationTaskID)
+	}
+	seen := make(map[string]struct{}, len(taskIDs))
+	for _, taskID := range taskIDs {
+		if taskID == "" {
+			continue
 		}
-		for _, taskID := range taskIDs {
-			if delErr := s.taskDeleter.DeleteTask(ctx, taskID); delErr != nil {
-				if !errors.Is(delErr, ErrTaskNotFound) {
-					return fmt.Errorf("delete task %s: %w", taskID, delErr)
-				}
-				s.logger.Debug("run task already gone, skipping",
-					zap.String("automation_id", automationID),
-					zap.String("task_id", taskID))
+		if _, ok := seen[taskID]; ok {
+			continue
+		}
+		seen[taskID] = struct{}{}
+		if s.taskOriginLookup != nil {
+			_, isAutomationRun, ok := s.taskOriginLookup.TaskWorkspaceAndAutomationOrigin(ctx, taskID)
+			if ok && !isAutomationRun {
+				continue
 			}
 		}
+		foreign, refErr := s.store.IsTaskReferencedByOtherAutomation(ctx, automationID, taskID)
+		if refErr != nil {
+			return fmt.Errorf("check task %s references: %w", taskID, refErr)
+		}
+		if foreign || s.taskDeleter == nil {
+			continue
+		}
+		if delErr := s.taskDeleter.DeleteTask(ctx, taskID); delErr != nil {
+			if !errors.Is(delErr, ErrTaskNotFound) {
+				return fmt.Errorf("delete task %s: %w", taskID, delErr)
+			}
+			s.logger.Debug("run task already gone, skipping",
+				zap.String("automation_id", automationID),
+				zap.String("task_id", taskID))
+		}
 	}
-	return s.store.DeleteAllRuns(ctx, automationID)
+	return s.store.ClearContinuationAndDeleteAllRuns(ctx, automationID)
 }
 
 // --- Trigger firing ---
@@ -799,8 +1318,30 @@ func (s *Service) DeleteAllRuns(ctx context.Context, automationID string) error 
 // indistinguishable from a fire that happened.
 type FireResult struct {
 	Skipped bool
+	// RunID identifies the admitted run when the trigger was accepted.
+	RunID string
 	// Reason is human-readable and set only when Skipped.
 	Reason string
+}
+
+// RenderRunDisplayTitle resolves the title snapshot stored with a firing. It
+// is evaluated before admission so later edits to the automation cannot change
+// the title shown for an already-admitted run.
+func RenderRunDisplayTitle(a *Automation, triggerType TriggerType, triggerData json.RawMessage) string {
+	if a == nil {
+		return ""
+	}
+	if a.TaskTitleTemplate != "" {
+		if title := InterpolatePrompt(a.TaskTitleTemplate, triggerType, triggerData); title != "" {
+			return taskservice.TruncateTaskTitle(title)
+		}
+	}
+	if info := GetTriggerTypeInfo(triggerType); info != nil && info.DefaultTaskTitle != "" {
+		if title := InterpolatePrompt(info.DefaultTaskTitle, triggerType, triggerData); title != "" {
+			return taskservice.TruncateTaskTitle(title)
+		}
+	}
+	return taskservice.TruncateTaskTitle(fmt.Sprintf("[Auto] %s", a.Name))
 }
 
 // FireTrigger publishes an AutomationTriggered event for the given trigger.
@@ -822,27 +1363,18 @@ func (s *Service) FireTrigger(ctx context.Context, automationID, triggerID strin
 	if !a.Enabled {
 		return FireResult{Skipped: true, Reason: "automation is disabled"}, nil
 	}
-
-	// Check dedup.
-	if dedupKey != "" {
-		exists, err := s.store.HasRunWithDedupKey(ctx, automationID, dedupKey)
-		if err != nil {
-			return FireResult{}, fmt.Errorf("check dedup: %w", err)
-		}
-		if exists {
-			s.logger.Debug("skipping duplicate trigger",
-				zap.String("automation_id", automationID),
-				zap.String("dedup_key", dedupKey))
-			return FireResult{Skipped: true, Reason: "this trigger has already fired"}, nil
-		}
+	// Serialize deduplication, the concurrency admission check, and the run
+	// insert. Otherwise two scheduler/webhook callers can both observe a free
+	// slot and publish two fires, or DeleteAllRuns can remove a row after its
+	// task snapshot but before the row is inserted.
+	admittedRun, capReason, duplicate, admissionErr := s.admitTrigger(
+		ctx, a, triggerID, triggerType, triggerData, dedupKey,
+	)
+	if admissionErr != nil {
+		return FireResult{}, admissionErr
 	}
-
-	// Enforce max_concurrent_runs: a run is "active" while still in
-	// task_created (succeeded/failed/skipped don't count). If at the cap,
-	// record a skipped run so the user can see the cap kicked in.
-	capReason, capErr := s.maybeSkipForConcurrencyCap(ctx, a, triggerID, triggerType, triggerData, dedupKey)
-	if capErr != nil {
-		return FireResult{}, capErr
+	if duplicate {
+		return FireResult{Skipped: true, Reason: "this trigger has already fired"}, nil
 	}
 
 	// Record that the trigger was evaluated now that the cap check itself
@@ -867,74 +1399,181 @@ func (s *Service) FireTrigger(ctx context.Context, automationID, triggerID strin
 
 	evt := &AutomationTriggeredEvent{
 		AutomationID: automationID,
+		RunID:        admittedRun.ID,
 		TriggerID:    triggerID,
 		TriggerType:  triggerType,
 		TriggerData:  triggerData,
 		DedupKey:     dedupKey,
 	}
 
+	event := bus.NewEvent(events.AutomationTriggered, "automation_service", evt)
+	if err := s.eventBus.Publish(ctx, events.AutomationTriggered, event); err != nil {
+		if markErr := s.store.MarkRunTerminal(ctx, admittedRun.ID, "", "", RunStatusFailed, err.Error()); markErr != nil {
+			return FireResult{}, fmt.Errorf("publish automation triggered: %w; mark admitted run failed: %v", err, markErr)
+		}
+		return FireResult{}, fmt.Errorf("publish automation triggered: %w", err)
+	}
 	if updateErr := s.store.UpdateLastTriggered(ctx, automationID, now); updateErr != nil {
 		s.logger.Warn("failed to update last_triggered_at",
 			zap.String("automation_id", automationID), zap.Error(updateErr))
-	}
-
-	event := bus.NewEvent(events.AutomationTriggered, "automation_service", evt)
-	if err := s.eventBus.Publish(ctx, events.AutomationTriggered, event); err != nil {
-		return FireResult{}, fmt.Errorf("publish automation triggered: %w", err)
 	}
 
 	s.logger.Info("automation trigger fired",
 		zap.String("automation_id", automationID),
 		zap.String("trigger_id", triggerID),
 		zap.String("type", string(triggerType)))
-	return FireResult{}, nil
+	return FireResult{RunID: admittedRun.ID}, nil
 }
 
-// RecordRun records a trigger run outcome.
-func (s *Service) RecordRun(ctx context.Context, run *AutomationRun) error {
-	return s.createRunLocked(ctx, run)
+func (s *Service) admitTrigger(
+	ctx context.Context,
+	a *Automation,
+	triggerID string,
+	triggerType TriggerType,
+	triggerData json.RawMessage,
+	dedupKey string,
+) (*AutomationRun, string, bool, error) {
+	unlock := s.automationRunLock(a.ID)
+	defer unlock()
+	return s.admitTriggerLocked(ctx, a, triggerID, triggerType, triggerData, dedupKey)
 }
 
-// maybeSkipForConcurrencyCap enforces max_concurrent_runs. Returns the
-// human-readable skip reason, empty when the trigger may proceed. When
-// skipped, a "skipped" run row is persisted so the user can see the cap
-// kicked in.
-func (s *Service) maybeSkipForConcurrencyCap(ctx context.Context, a *Automation, triggerID string, triggerType TriggerType, triggerData json.RawMessage, dedupKey string) (string, error) {
-	if a.MaxConcurrentRuns <= 0 {
-		return "", nil
+func (s *Service) admitTriggerLocked(
+	ctx context.Context,
+	a *Automation,
+	triggerID string,
+	triggerType TriggerType,
+	triggerData json.RawMessage,
+	dedupKey string,
+) (*AutomationRun, string, bool, error) {
+	if dedupKey != "" {
+		exists, err := s.store.HasRunWithDedupKey(ctx, a.ID, dedupKey)
+		if err != nil {
+			return nil, "", false, fmt.Errorf("check dedup: %w", err)
+		}
+		if exists {
+			s.logger.Debug("skipping duplicate trigger",
+				zap.String("automation_id", a.ID), zap.String("dedup_key", dedupKey))
+			return nil, "", true, nil
+		}
 	}
-	automationID := a.ID
-	active, err := s.store.CountActiveRuns(ctx, automationID)
+
+	capReason, active, full, err := s.automationCapacity(ctx, a)
 	if err != nil {
-		return "", fmt.Errorf("count active runs: %w", err)
+		return nil, "", false, err
+	}
+	if full {
+		s.recordSkippedTrigger(ctx, a, triggerID, triggerType, triggerData, dedupKey, capReason, active)
+		return nil, capReason, false, nil
+	}
+
+	run := &AutomationRun{
+		AutomationID: a.ID,
+		TriggerID:    triggerID,
+		TriggerType:  triggerType,
+		Status:       RunStatusTriggered,
+		DedupKey:     dedupKey,
+		TriggerData:  triggerData,
+		DisplayTitle: RenderRunDisplayTitle(a, triggerType, triggerData),
+	}
+	if err := s.store.CreateRun(ctx, run); err != nil {
+		return nil, "", false, fmt.Errorf("record admitted run: %w", err)
+	}
+	return run, "", false, nil
+}
+
+func (s *Service) automationCapacity(ctx context.Context, a *Automation) (string, int, bool, error) {
+	if a.MaxConcurrentRuns <= 0 {
+		return "", 0, false, nil
+	}
+	active, err := s.store.CountActiveRuns(ctx, a.ID)
+	if err != nil {
+		return "", 0, false, fmt.Errorf("count active runs: %w", err)
 	}
 	if active < a.MaxConcurrentRuns {
-		return "", nil
+		return "", active, false, nil
 	}
-	reason := fmt.Sprintf("max_concurrent_runs=%d reached", a.MaxConcurrentRuns)
-	// github_pr_merged cap-skip rows must NOT consume the dedup key so that a
-	// later event for the same PR can retry. Write an empty key for this type.
+	return fmt.Sprintf("max_concurrent_runs=%d reached", a.MaxConcurrentRuns), active, true, nil
+}
+
+func (s *Service) recordSkippedTrigger(
+	ctx context.Context,
+	a *Automation,
+	triggerID string,
+	triggerType TriggerType,
+	triggerData json.RawMessage,
+	dedupKey, reason string,
+	active int,
+) {
 	skipDedupKey := dedupKey
 	if triggerType == TriggerTypeGitHubPRMerged {
 		skipDedupKey = ""
 	}
 	skipRun := &AutomationRun{
-		AutomationID: automationID,
+		AutomationID: a.ID,
 		TriggerID:    triggerID,
 		TriggerType:  triggerType,
 		Status:       RunStatusSkipped,
 		DedupKey:     skipDedupKey,
 		TriggerData:  triggerData,
 		ErrorMessage: reason,
+		DisplayTitle: RenderRunDisplayTitle(a, triggerType, triggerData),
 	}
-	if recErr := s.createRunLocked(ctx, skipRun); recErr != nil {
-		s.logger.Warn("failed to record skipped run", zap.Error(recErr))
+	if err := s.store.CreateRun(ctx, skipRun); err != nil {
+		s.logger.Warn("failed to record skipped run", zap.Error(err))
 	}
 	s.logger.Info("automation trigger skipped: concurrency cap reached",
-		zap.String("automation_id", automationID),
-		zap.Int("active", active),
-		zap.Int("max", a.MaxConcurrentRuns))
-	return reason, nil
+		zap.String("automation_id", a.ID), zap.Int("active", active), zap.Int("max", a.MaxConcurrentRuns))
+}
+
+// RecordRun records a trigger run outcome.
+func (s *Service) RecordRun(ctx context.Context, run *AutomationRun) error {
+	if run == nil {
+		return fmt.Errorf("automation run is required")
+	}
+	unlock := s.automationRunLock(run.AutomationID)
+	defer unlock()
+	if run.TriggerDataJSON == "" {
+		run.TriggerDataJSON = string(run.TriggerData)
+	}
+	adopted, err := s.store.AdoptTriggeredRun(ctx, run)
+	if err != nil {
+		return err
+	}
+	if adopted {
+		return nil
+	}
+	return s.store.CreateRun(ctx, run)
+}
+
+func (s *Service) BindRunTask(ctx context.Context, runID, taskID string) error {
+	unlock, err := s.lockRun(ctx, runID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return s.store.BindRunTask(ctx, runID, taskID)
+}
+
+func (s *Service) SetContinuationTaskID(ctx context.Context, automationID, taskID string) error {
+	return s.store.SetContinuationTaskID(ctx, automationID, taskID)
+}
+
+func (s *Service) BindRun(ctx context.Context, runID, taskID, sessionID, turnID string, action ThreadAction, reason string) error {
+	unlock, err := s.lockRun(ctx, runID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return s.store.BindRun(ctx, runID, taskID, sessionID, turnID, action, reason)
+}
+
+func (s *Service) MarkRunTerminal(ctx context.Context, runID, sessionID, turnID string, status RunStatus, errMsg string) error {
+	return s.store.MarkRunTerminal(ctx, runID, sessionID, turnID, status, errMsg)
+}
+
+func (s *Service) MarkRunTerminalByBinding(ctx context.Context, taskID, sessionID, turnID string, status RunStatus, errMsg string) error {
+	return s.store.MarkRunTerminalByBinding(ctx, taskID, sessionID, turnID, status, errMsg)
 }
 
 // MarkRunFailedByTaskID transitions a still-pending run (task_created) into

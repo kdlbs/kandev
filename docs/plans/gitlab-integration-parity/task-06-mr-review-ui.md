@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-task-mr-linking-launch", "04-reviewers-subscriptions"]
 plan: "plan.md"
-spec: "../../specs/gitlab-integration/spec.md"
+spec: "../../specs/integrations/requirements/gitlab-integration.md"
 ---
 
 # Task 06: Linked Merge Request Review UI

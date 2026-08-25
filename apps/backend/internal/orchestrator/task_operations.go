@@ -39,6 +39,7 @@ import (
 type PromptResult struct {
 	StopReason   string // The reason the agent stopped (e.g., "end_turn")
 	AgentMessage string // The agent's accumulated response message
+	TurnID       string // The exact turn accepted for this prompt, when known.
 }
 
 // CoordinatorTaskStopStatus is the idempotent product result returned to a
@@ -285,7 +286,11 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 				agentProfileID = *workspace.DefaultAgentProfileID
 			}
 		}
-		if executorID == "" && executorProfileID == "" {
+		// An inherit_parent child must keep the parent's effective executor. An
+		// empty executor here is meaningful: it selects the local executor when
+		// the parent also used the workspace default. For other subtasks, keep
+		// the historical worktree default so they receive an isolated checkout.
+		if executorID == "" && executorProfileID == "" && !isInheritParentWorkspace(task) {
 			executorID = models.ExecutorIDWorktree
 		}
 	}
@@ -388,6 +393,14 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 		zap.String("session_id", sessionID))
 
 	return sessionID, nil
+}
+
+func isInheritParentWorkspace(task *v1.Task) bool {
+	if task == nil {
+		return false
+	}
+	mode, _ := workspacePolicyMode(task.Metadata)
+	return mode == "inherit_parent"
 }
 
 // StartCreatedSession starts agent execution for a task using a session that is in CREATED state.
@@ -661,8 +674,10 @@ func (s *Service) wrapCreatedSessionPrompt(
 		}
 		return prompt
 	case isOfficeTask:
-		return sysprompt.InjectOfficeContext(
-			taskID, sessionID, prompt, referenceContext, promptReferenceContext,
+		return sysprompt.InjectOfficeContextWithOptions(
+			taskID, sessionID, prompt,
+			s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID),
+			referenceContext, promptReferenceContext,
 		)
 	default:
 		return sysprompt.InjectKandevContextWithOptions(taskID, sessionID, prompt, sysprompt.KandevContextOptions{
@@ -1132,7 +1147,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 
 	// Office tasks restrict the MCP toolset: kanban tools (move/update/list
 	// task, etc.) are excluded because office agents call those via the
-	// kandev CLI ($KANDEV_CLI). See docs/specs/office-agent-cli/spec.md.
+	// kandev CLI ($KANDEV_CLI). See docs/specs/office/system-design/agents-03.md.
 	mcpMode := ""
 	if isOfficeTask {
 		mcpMode = executor.McpModeOffice
@@ -1164,6 +1179,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	}
 
 	s.postLaunchStart(ctx, taskID, execution, effectivePrompt, planModeActive || configMode, planModeActive, autoStart, attachments)
+	execution.TurnID = initialTurnID
 	s.clearTaskLaunchErrorIfStamp(ctx, taskID, launchErrorStamp)
 
 	// The agent is running, so the reservation becomes a consumption.
@@ -1238,8 +1254,10 @@ func (s *Service) applyLaunchPromptContext(ctx context.Context, p launchPromptCo
 	// that whitelists it as trusted content.
 	prompt, spawnContext := applySpawnOriginContext(p.prompt, p.spawnOrigin)
 	if p.isOfficeTask {
-		return sysprompt.InjectOfficeContext(
-			p.taskID, p.sessionID, prompt, p.referenceContext, spawnContext,
+		return sysprompt.InjectOfficeContextWithOptions(
+			p.taskID, p.sessionID, prompt,
+			s.StepRequiresCompletionSignal(ctx, p.taskID),
+			p.referenceContext, spawnContext,
 		)
 	}
 	return sysprompt.InjectKandevContextWithOptions(p.taskID, p.sessionID, prompt, sysprompt.KandevContextOptions{
@@ -1370,7 +1388,17 @@ func (s *Service) prepareSessionForStart(
 	if err != nil {
 		return "", false, err
 	}
-	s.propagateInheritedEnvironment(ctx, task, sessionID)
+	if err := s.propagateInheritedEnvironment(ctx, task, sessionID); err != nil {
+		// This legacy creation path cannot bind an inherited ID until it has a
+		// session row. Compensate before returning so callers never observe a
+		// partial sibling session when the required parent/group workspace is
+		// unavailable.
+		if deleteErr := s.repo.DeleteTaskSession(ctx, sessionID); deleteErr != nil {
+			s.logger.Warn("failed to compensate inherited workspace session",
+				zap.String("session_id", sessionID), zap.Error(deleteErr))
+		}
+		return "", false, err
+	}
 	return sessionID, created, nil
 }
 
@@ -4018,7 +4046,7 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	if publicationErr != nil {
 		return nil, &acceptedPromptDispatchError{err: publicationErr}
 	}
-	return &PromptResult{StopReason: result.StopReason, AgentMessage: result.AgentMessage}, nil
+	return &PromptResult{StopReason: result.StopReason, AgentMessage: result.AgentMessage, TurnID: rollback.turnID}, nil
 }
 
 func (s *Service) finishPromptDispatchFailure(
@@ -4863,65 +4891,20 @@ func (s *Service) trySwitchModel(ctx context.Context, taskID, sessionID, model, 
 	}, true, nil
 }
 
-// RespondToPermission sends a response to a permission request for a session
-func (s *Service) RespondToPermission(ctx context.Context, sessionID, pendingID, optionID string, cancelled, rejected bool) error {
-	if err := s.authorizeSession(ctx, sessionID); err != nil {
-		return err
+// RespondToPermission is the existing web/internal compatibility entry point.
+// Option selections use the same strict audited service as external MCP;
+// dismissal uses a separate generation-safe internal cancellation operation.
+func (s *Service) RespondToPermission(ctx context.Context, taskID, sessionID, requestID, pendingID, optionID string, cancelled, rejected bool) error {
+	_ = rejected // The immutable provider option kind determines rejection.
+	request := ResolveAgentPermissionRequest{
+		TaskID: taskID, SessionID: sessionID, RequestID: requestID,
+		PendingID: pendingID, OptionID: optionID, Source: models.PermissionSourceWeb,
 	}
-
-	s.logger.Debug("responding to permission request",
-		zap.String("session_id", sessionID),
-		zap.String("pending_id", pendingID),
-		zap.String("option_id", optionID),
-		zap.Bool("cancelled", cancelled),
-		zap.Bool("rejected", rejected))
-
-	// Respond to the permission via agentctl
-	if err := s.executor.RespondToPermission(ctx, sessionID, pendingID, optionID, cancelled); err != nil {
-		// Permission likely expired — update message so frontend reflects this
-		if s.messageCreator != nil {
-			if updateErr := s.messageCreator.UpdatePermissionMessage(ctx, sessionID, pendingID, models.PermissionStatusExpired); updateErr != nil {
-				s.logger.Warn("failed to mark expired permission message",
-					zap.String("session_id", sessionID),
-					zap.String("pending_id", pendingID),
-					zap.Error(updateErr))
-			}
-		}
-		return err
+	if cancelled {
+		return s.cancelAgentPermission(ctx, request)
 	}
-
-	// Determine status based on response. cancelled=true means the user dismissed
-	// the dialog; rejected=true means the user explicitly clicked Deny with a
-	// reject option. Both map to "rejected" message status.
-	status := models.PermissionStatusApproved
-	if cancelled || rejected {
-		status = models.PermissionStatusRejected
-	}
-
-	// Update the permission message with the new status
-	if s.messageCreator != nil {
-		if err := s.messageCreator.UpdatePermissionMessage(ctx, sessionID, pendingID, status); err != nil {
-			s.logger.Warn("failed to update permission message status",
-				zap.String("session_id", sessionID),
-				zap.String("pending_id", pendingID),
-				zap.String("status", string(status)),
-				zap.Error(err))
-			// Don't fail the whole operation if message update fails
-		}
-	}
-
-	if !cancelled {
-		session, err := s.repo.GetTaskSession(ctx, sessionID)
-		if err != nil {
-			s.logger.Warn("failed to load task session after permission response",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-			return nil
-		}
-		s.setSessionRunning(ctx, session.TaskID, sessionID, session)
-	}
-
-	return nil
+	_, err := s.ResolveAgentPermission(ctx, request)
+	return err
 }
 
 // DrainQueuedMessage dispatches one queued message for a session that is ready

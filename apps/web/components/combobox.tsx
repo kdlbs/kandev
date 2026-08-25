@@ -1,9 +1,10 @@
 "use client";
 
-import { memo, useState } from "react";
+import { memo, useState, type Ref } from "react";
 import { IconCheck, IconChevronDown, IconLoader2 } from "@tabler/icons-react";
 
 import { cn } from "@/lib/utils";
+import { prioritizeSelectedOption, selectorOptionClassName } from "@/lib/utils/selector-options";
 import { Button } from "@kandev/ui/button";
 import {
   Command,
@@ -63,6 +64,8 @@ interface ComboboxProps {
   headerAction?: React.ReactNode;
   /** When true, swap the trigger chevron for a spinner to indicate loading. */
   loading?: boolean;
+  /** Ref for consumers that anchor a local confirmation to this trigger. */
+  triggerRef?: Ref<HTMLButtonElement>;
 }
 
 function TriggerLabel({
@@ -92,8 +95,13 @@ function OptionsList({
   value: string;
   onSelect: (value: string) => void;
 }) {
-  const enabled = options.filter((o) => !o.disabled);
-  const disabled = options.filter((o) => o.disabled);
+  const orderedOptions = prioritizeSelectedOption(options, value, (option) => option.value);
+  const selected = orderedOptions.find((option) => option.value === value);
+  const remaining = selected
+    ? orderedOptions.filter((option) => option.value !== value)
+    : orderedOptions;
+  const enabled = remaining.filter((o) => !o.disabled);
+  const disabled = remaining.filter((o) => o.disabled);
 
   const renderItem = (option: ComboboxOption) => {
     const item = (
@@ -103,7 +111,7 @@ function OptionsList({
         keywords={option.keywords ?? [option.label, option.description ?? ""]}
         onSelect={() => !option.disabled && onSelect(option.value)}
         disabled={option.disabled}
-        className={cn("relative pr-7", option.disabled && "opacity-40 cursor-not-allowed")}
+        className={selectorOptionClassName(option.value === value, option.disabled)}
       >
         <div className="flex min-w-0 flex-1 items-center">
           {option.renderLabel ? option.renderLabel() : option.label}
@@ -133,7 +141,8 @@ function OptionsList({
 
   return (
     <>
-      <CommandGroup>{enabled.map(renderItem)}</CommandGroup>
+      {selected && <CommandGroup>{renderItem(selected)}</CommandGroup>}
+      {enabled.length > 0 && <CommandGroup>{enabled.map(renderItem)}</CommandGroup>}
       {disabled.length > 0 && (
         <>
           <CommandSeparator />
@@ -166,14 +175,12 @@ export const Combobox = memo(function Combobox({
   filter,
   headerAction,
   loading = false,
+  triggerRef,
 }: ComboboxProps) {
   const [open, setOpen] = useState(false);
   const portalContainer = useTaskCreateDialogPopoverContainer();
-  // Track the highlighted item. Defaults to the selected value so the current
-  // selection is highlighted when the popover opens (not the first item).
+  // Keep the selected value highlighted when the popover opens, not the first item.
   const [highlighted, setHighlighted] = useState("");
-
-  const selectedOption = options.find((option) => option.value === value);
 
   return (
     <Popover
@@ -185,6 +192,7 @@ export const Combobox = memo(function Combobox({
     >
       <PopoverTrigger asChild>
         <Button
+          ref={triggerRef}
           variant="ghost"
           role="combobox"
           aria-label={ariaLabel}
@@ -195,7 +203,7 @@ export const Combobox = memo(function Combobox({
         >
           <div className="flex min-w-0 flex-1 items-center">
             <TriggerLabel
-              selectedOption={selectedOption}
+              selectedOption={options.find((option) => option.value === value)}
               plainTrigger={plainTrigger}
               placeholder={placeholder}
             />

@@ -95,8 +95,11 @@ type MessageCreator interface {
 	// parentToolCallID is the parent Task tool call ID for subagent nesting (empty for top-level).
 	UpdateToolCallMessage(ctx context.Context, taskID, toolCallID, parentToolCallID, status, result, agentSessionID, title, turnID, msgType string, normalized *streams.NormalizedPayload) error
 	CreateSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error
-	CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error)
-	UpdatePermissionMessage(ctx context.Context, sessionID, pendingID string, status models.PermissionStatus) error
+	CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error)
+	UpdatePermissionMessage(ctx context.Context, taskID, sessionID, requestID, pendingID string, status models.PermissionStatus) error
+	ClaimPermissionResolution(ctx context.Context, request models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error)
+	FinalizePermissionResolution(ctx context.Context, request models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error)
+	GetPermissionResolutionAudit(ctx context.Context, taskID, sessionID, requestID, pendingID string) (*models.PermissionResolutionAudit, error)
 	// CreateAgentMessageStreaming creates a new agent message with a pre-generated ID for streaming updates
 	CreateAgentMessageStreaming(ctx context.Context, messageID, taskID, content, agentSessionID, turnID string) error
 	// AppendAgentMessage appends additional content to an existing streaming message
@@ -114,7 +117,7 @@ type MessageCreator interface {
 // (Task tool) invocation observed on a tool-call frame. It returns nothing —
 // a repository failure never fails the enclosing message write, turn, or
 // agent stream (AC-27 in
-// docs/specs/subagent-context-persistence/spec.md). Implemented by
+// docs/specs/agents/requirements/subagent-context-persistence.md). Implemented by
 // taskservice.Service via an adapter; optional, so an installation that
 // never wires it behaves exactly as before.
 type SubagentContextRecorder interface {
@@ -2311,6 +2314,9 @@ func (s *Service) Start(ctx context.Context) error {
 
 	// Reconcile queued tasks when WIP limits or feeder settings change.
 	s.subscribeWorkflowQueueEvents()
+
+	// Invalidate the compiled-step cache when workflow steps change.
+	s.subscribeWorkflowStepCacheEvents()
 
 	// Restore durable dynamic policy waits after the route and lifecycle
 	// services are ready. Only un-dispatched pending states are scheduled.

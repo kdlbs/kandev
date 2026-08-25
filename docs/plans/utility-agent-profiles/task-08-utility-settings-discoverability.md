@@ -5,7 +5,7 @@ status: completed
 wave: 5
 depends_on: ["04-settings-profile-pickers"]
 plan: "plan.md"
-spec: "../../specs/agents/utility-agent-profiles.md"
+spec: "../../specs/agents/requirements/utility-agent-profiles.md"
 ---
 
 # Task 08: Improve utility settings discoverability

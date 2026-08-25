@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-provider-event-and-delivery"]
 plan: "plan.md"
-spec: "../../specs/platform/notifications.md"
+spec: "../../specs/platform/requirements/notifications.md"
 ---
 
 # Task 02: Replay Cached Updates When a Local User Subscribes

@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["02-publish-agent-runtime-availability"]
 plan: "plan.md"
-spec: "../../specs/platform/agent-runtime-availability.md"
+spec: "../../specs/platform/requirements/agent-runtime-availability.md"
 ---
 
 # Task 03: Surface runtime failure and recovery

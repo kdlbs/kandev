@@ -17,14 +17,12 @@ import type { TaskRepoRow } from "@/components/task-create-dialog-types";
 import { cn, formatUserHomePath } from "@/lib/utils";
 import { scoreBranch } from "@/lib/utils/branch-filter";
 import { scoreRepo } from "@/lib/utils/repo-filter";
+import { Pill, type PillAction, type PillOption } from "@/components/task-create-dialog-pill";
 import {
-  Pill,
-  sortBranches,
   branchToOption,
   computeBranchPlaceholder,
-  type PillAction,
-  type PillOption,
-} from "@/components/task-create-dialog-pill";
+  sortBranches,
+} from "@/components/task-create-dialog-branch-options";
 import {
   computeBranchIntent,
   computeBranchPrefix,
@@ -143,7 +141,7 @@ export function WorkspaceRepoChips({
               data-testid="add-repository"
               className={cn(
                 "inline-flex items-center justify-center gap-1.5 rounded-md text-muted-foreground",
-                addLabel ? "h-9 px-2 text-xs" : "h-7 w-7",
+                addLabel ? "h-11 px-2 text-xs md:h-9" : "h-11 w-11 md:h-7 md:w-7",
                 canAddMore
                   ? "hover:bg-muted hover:text-foreground cursor-pointer"
                   : "opacity-40 cursor-not-allowed",
@@ -444,6 +442,7 @@ function RepoChip({
       <Pill
         icon={<IconCode className="h-3 w-3 shrink-0 text-muted-foreground" />}
         value={repoLabel}
+        selectedValue={row.repositoryId || row.localPath || ""}
         placeholder={t("task:repository")}
         options={repoOptions}
         onSelect={onRepositoryChange}

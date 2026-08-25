@@ -134,3 +134,60 @@ describe("structured PR task status summary", () => {
     expect(summary.rows).toEqual([{ kind: "merge", status: "draft", tone: "muted" }]);
   });
 });
+
+describe("queued PR task status summaries", () => {
+  it("replaces mergeability with queue semantics and metadata", () => {
+    const summary = derivePRTaskStatusSummary(
+      makePR({
+        merge_queue_state: "awaiting_checks",
+        merge_queue_position: 3,
+        merge_queue_estimated_time_to_merge_seconds: 61,
+        mergeable_state: "dirty",
+      }),
+      false,
+    );
+
+    expect(summary.rows.at(-1)).toEqual({
+      kind: "merge",
+      status: "queue_awaiting_checks",
+      tone: "queued",
+      detail: {
+        key: "github:mergeQueuePositionAndEstimate",
+        values: { position: 3, count: 2 },
+      },
+    });
+  });
+
+  it("uses generic queued copy for an unknown provider enum", () => {
+    const summary = derivePRTaskStatusSummary(
+      makePR({
+        merge_queue_state: "future_provider_state",
+        merge_queue_position: 1,
+      }),
+      false,
+    );
+
+    expect(summary.rows.at(-1)).toEqual({
+      kind: "merge",
+      status: "queue_queued",
+      tone: "queued",
+      detail: {
+        key: "github:mergeQueuePosition",
+        values: { position: 1 },
+      },
+    });
+  });
+
+  it("does not surface queue metadata for a terminal PR", () => {
+    const summary = derivePRTaskStatusSummary(
+      makePR({
+        state: "merged",
+        merge_queue_state: "queued",
+        merge_queue_position: 1,
+      }),
+      false,
+    );
+
+    expect(summary.rows).not.toContainEqual(expect.objectContaining({ tone: "queued" }));
+  });
+});

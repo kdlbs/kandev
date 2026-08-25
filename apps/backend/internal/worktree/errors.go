@@ -88,6 +88,11 @@ var (
 	// the just-created physical worktree instead of admitting it after
 	// cleanup inventory was captured.
 	ErrTaskCleanupInProgress = errors.New("task cleanup in progress")
+
+	// ErrReuseWorktreeUnavailable is returned when an attach-only launch cannot
+	// find a valid canonical worktree. Callers must surface this as a workspace
+	// reuse failure; they must never fall through to git worktree add.
+	ErrReuseWorktreeUnavailable = errors.New("required worktree is unavailable for reuse")
 )
 
 // containsAuthFailure checks if git output indicates an authentication failure.

@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/platform/startup-configuration-parity.md"
+spec: "../../specs/platform/requirements/startup-configuration-parity.md"
 ---
 
 # Task 01: Configuration catalog and source resolution

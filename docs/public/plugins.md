@@ -127,6 +127,14 @@ Either path runs the same pipeline:
    Before persistence, credential-like values such as PATs, bearer tokens,
    labeled secrets/API keys, and the host home path are redacted; plugin stdout
    is not stored verbatim.
+6. Once the new version is confirmed running, delete the plugin's older
+   extracted versions, keeping the version now running plus the one it
+   replaced as a rollback target (see "Version retention on disk"). This step
+   is skipped entirely when the install or the spawn fails, and a deletion that
+   fails is logged without failing the install. Skipping it is not the same as
+   deleting nothing: an install that extracted successfully but could not be
+   recorded is rolled back, which removes that one new version directory and
+   restarts the previous one.
 
 A successful install that failed to spawn returns HTTP 201 with a
 `warning` field rather than failing outright. The package is installed,
@@ -246,6 +254,25 @@ Each `<id>.yml` registration record stores the installed package metadata and
 host-managed runtime fields, including `signed`, `last_error`, and
 `last_error_at`. The diagnostic fields are empty until a runtime failure is
 recorded and are cleared after successful recovery.
+
+### Version retention on disk
+
+Two extracted versions is the steady state for a plugin that runs: the one
+currently running and the one it replaced, which is what a failed upgrade falls
+back to. Older versions are deleted once a newer one is confirmed running,
+either right after the install that superseded them or at the next backend
+start. The retained count is fixed and not configurable.
+
+It is a steady state rather than a hard cap, because the cleanup is
+conservative and never insists. Kandev deletes a version directory only after
+confirming that the plugin's process is up, so a plugin that is disabled,
+errored, or was never started keeps every version it has, and a deletion that
+fails leaves that version in place until the next attempt. It never
+touches `data/`, a directory whose name does not match the version declared by
+the `manifest.yaml` inside it, or anything outside `~/.kandev/plugins/<id>/`.
+Because an upgrade previously left its predecessor behind forever, an instance
+that has been auto-updating for a long time can reclaim a substantial amount of
+disk on its first restart after upgrading to this version.
 
 ## Security posture
 

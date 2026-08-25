@@ -41,6 +41,7 @@ Architecture notes and per-area conventions live alongside the code they describ
 - `apps/backend/internal/agentctl/AGENTS.md` — agentctl HTTP server: route groups, adapter model, ACP protocol.
 - `apps/backend/internal/agentctl/server/api/AGENTS.md` — reverse-proxy body rewriting (`Accept-Encoding`), iframe-blocking header stripping.
 - `apps/backend/internal/integrations/AGENTS.md` — adding a new third-party integration (Jira/Linear pattern, both backend and frontend halves). The `/add-integration` skill mirrors this for scaffolding new integrations.
+- `apps/backend/internal/office/AGENTS.md` — Office (autonomous agent management): pointer to the 15-file `docs/specs/office/` spec set with status per file, plus local traps (run-vs-task-start, retired `heartbeat` source, continuation summary scoping, participant slate ownership, routine idle-skip, dual advancement signals).
 - `apps/desktop/AGENTS.md` — Tauri desktop app: runtime resources, Rust process lifecycle, packaging, signing, and smoke tests.
 - `apps/web/AGENTS.md` — Vite/React SPA frontend: shadcn imports, Go boot-payload hydration, store slice structure (incl. `office`), WS format, component conventions, TS lint limits.
 
@@ -141,15 +142,25 @@ history and remains immutable.
 ### Knowledge
 
 - **Public docs:** Website-ready user documentation lives in `docs/public/**`. Use `/docs-maintainer` when a change affects CLI commands, config keys, install/deploy flows, workflows, executors, public APIs, screenshots, or user-facing terminology.
-- **Specs:** Feature specs live in `docs/specs/<slug>/spec.md` — the durable "what & why" of a feature, written before coding. Use `/spec` to write or update a spec. See `docs/specs/INDEX.md`.
+- **Specifications:** Durable product context, requirements, and system designs
+  live under `docs/specs/**`. New work uses
+  `docs/specs/<system>/requirements/` and
+  `docs/specs/<system>/system-design/`. Read `docs/specs/README.md` and the
+  relevant file in `docs/specs/guide/`. Choose the owner from the durable
+  contract, not the affected code layer. Keep one vertical requirement/design
+  pair and include its UI outcomes there. Use `docs/specs/INDEX.md` only to
+  find unmigrated legacy specifications. Run `python3
+  scripts/lint-spec-files.py --all` after specification changes.
 - **Decisions:** Architecture decisions are recorded in `docs/decisions/`. Read `docs/decisions/INDEX.md` for an overview. When making significant architectural choices, create a new ADR via `/record decision`.
-- **Plans:** Implementation plans are generated from specs via `/plan` and committed under `docs/plans/<slug>/plan.md`, with individual sibling task files named `docs/plans/<slug>/task-<NN>-<short-slug>.md`. Specs are the living requirements; plans and task files are implementation records for the current buildout.
+- **Plans:** Implementation plans are generated from requirements and system
+  designs through `/plan`. `docs/plans/<initiative>/plan.md` is a work-package
+  manifest. Its sibling `task-<NN>-<short-slug>.md` files are work orders.
 
 ### Plan Implementation
 
-- Specs, plans, and task files are the durable source of implementation scope,
-  dependency order, and task-level validation. Keep their statuses and recorded
-  command results accurate. The feature and fix skills define the workflow.
+- Requirements and system designs define durable behavior and technical
+  boundaries. Plans and work orders define implementation scope, dependency
+  order, and task-level validation. Keep their statuses and results accurate.
 
 ### Observability
 
@@ -178,10 +189,11 @@ or model tiers.
 The read-only `pr-poller` is the sole repository-defined exception: use it only
 after the user explicitly asks to wait for or monitor PR updates.
 
-Use the user's strong model for specs, plans, task files, and high-risk design.
-When the user asks to proceed with feature planning, produce the spec, plan,
-and task files as one design package; pause after a spec only when the user
-explicitly requests spec review or a material open question prevents planning.
+Use the user's strong model for requirements, system designs, plans, work
+orders, and high-risk design. When the user asks to proceed with feature
+planning, produce all four artifact types as one design package. Pause after
+requirements only when the user requests review or a material question blocks
+planning.
 At the completed-plan checkpoint, return control with a concise handoff. Do not
 call `ask_user_question_kandev` (or an equivalent approval prompt) to ask the
 user to approve the package or switch models. The user reviews the files,
@@ -194,7 +206,7 @@ requested change", TDD checklists, verification commands, or commit steps does
 not opt a feature or behavior-changing fix out of spec-driven development. If
 the request neither references an existing reviewed package nor explicitly asks
 to implement a package created during a prior design turn, run
-`spec-driven-development` through the plan/task checkpoint and stop before
+`spec-driven-development` through the plan/work-order checkpoint and stop before
 production or permanent test changes. End that turn at the design-package
 handoff; do not ask for approval or a model switch. A generic implementation
 envelope is not an explicit opt-out; the user must either explicitly ask to
@@ -238,7 +250,7 @@ Contract authority is intentionally split by implementation boundary: frontend a
 
 Runtime feature toggles add a SQLite-backed override tier managed through `Settings > System > Feature Toggles`. Effective values use this precedence: explicit environment variable > SQLite override > profile default. The typed runtime flag registry lives in `apps/backend/internal/runtimeflags/registry.go`; each registration owns the public metadata, environment variable, config reader, and config applier. Do not add parallel per-flag maps or switches.
 
-Profile selection: `KANDEV_E2E_MOCK=true` → `e2e`, `KANDEV_DEBUG_DEV_MODE=true` or `KANDEV_DEBUG_PPROF_ENABLED=true` → `dev`, otherwise `prod`. The Go dev launcher (`apps/backend/internal/launcher/dev.go`) and `apps/web/e2e/fixtures/backend.ts` set only the selector — they no longer hardcode the underlying values.
+Profile selection: `KANDEV_E2E_MOCK=true` → `e2e`, `KANDEV_DEBUG_DEV_MODE=true` → `dev`, otherwise `prod`. `KANDEV_DEBUG_PPROF_ENABLED=true` enables pprof behavior but does not select the `dev` profile on its own. The Go dev launcher (`apps/backend/internal/launcher/dev.go`) and `apps/web/e2e/fixtures/backend.ts` set only the selector — they no longer hardcode the underlying values.
 
 Stable operator startup settings have a separate typed source contract in
 `apps/backend/internal/common/config/catalog.go` and `source.go`. The catalog

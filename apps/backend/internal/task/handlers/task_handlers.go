@@ -138,7 +138,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api := router.Group("/api/v1")
 	api.GET("/workflows/:id/tasks", h.httpListTasks)
 	api.GET("/workspaces/:id/tasks", h.httpListTasksByWorkspace)
-	// Task create-idempotency (docs/specs/tasks/external-id-idempotency):
+	// Task create-idempotency (docs/specs/tasks/requirements/external-id-idempotency.md):
 	// side-effect-free lookup, and an operator-only release. Both take
 	// external_id as a query parameter.
 	api.GET("/workspaces/:id/tasks/by-external-id", h.httpGetTaskByExternalID)
@@ -165,6 +165,11 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.POST("/tasks/:id/archive", h.httpArchiveTask)
 	api.POST("/tasks/:id/unarchive", h.httpUnarchiveTask)
 	api.GET("/tasks/:id/subtask-count", h.httpTaskSubtaskCount)
+
+	// Task-cost-ledger read surface (docs/specs/task-cost-ledger/spec.md
+	// AC-18): per-task and per-session usage/cost totals.
+	api.GET("/tasks/:id/usage", h.httpGetTaskUsageTotals)
+	api.GET("/tasks/:id/sessions/:sessionId/usage", h.httpGetTaskSessionUsageTotals)
 
 	// Task dependencies ("this task is blocked by that one"). Task-scoped
 	// equivalents of the Office-only blocker routes; both go through the single

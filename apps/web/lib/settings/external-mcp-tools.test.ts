@@ -3,19 +3,15 @@ import { EXTERNAL_MCP_TOOL_GROUPS, countExternalMcpTools } from "./external-mcp-
 import enSettings from "@/src/locales/en/settings.json";
 
 describe("external MCP tool catalog", () => {
-  // NOTE: this pins the CATALOG, which currently lags the backend. `ModeExternal`
-  // registers 33 tools (12 workflow + 4 agent + 4 mcp + 5 executor + 7 task +
-  // 1 create_task — see `TestServerModeExternal_ToolCount`), and this catalog
-  // lists 30: `list_repositories_kandev`, `import_workflow_kandev` and
-  // `get_task_conversation_kandev` are missing, so the page under-advertises
-  // the endpoint by three.
-  //
-  // That drift predates this file's localization and is left alone here on
-  // purpose: adding the three means writing three new user-facing descriptions
-  // that have to be checked against the backend's own wording, which is a
-  // content change and not a copy migration. Update this number with them.
-  it("lists 30 tools, the catalog's current contents", () => {
-    expect(countExternalMcpTools()).toBe(30);
+  // Pins the catalog against `ModeExternal`'s registered tool count: 13
+  // workflow (incl. list_repositories + import_workflow + export_workflow) +
+  // 4 agent + 4 mcp + 5 executor + 7 task (incl. list_task_sessions +
+  // get_task_conversation) + 1 create_task + 2 task-dependency + 2
+  // question-answering (list_pending_questions + answer_question) + 2 agent
+  // permission (list_pending_agent_permissions + resolve_agent_permission) =
+  // 40 — see `TestServerModeExternal_ToolCount`.
+  it("lists 40 tools, matching every tool ModeExternal registers", () => {
+    expect(countExternalMcpTools()).toBe(40);
   });
 
   it("every tool name is unique and ends with the kandev suffix", () => {
@@ -29,6 +25,12 @@ describe("external MCP tool catalog", () => {
   it("includes create_task_kandev (the only task-spawning tool exposed externally)", () => {
     const names = EXTERNAL_MCP_TOOL_GROUPS.flatMap((g) => g.tools.map((t) => t.name));
     expect(names).toContain("create_task_kandev");
+  });
+
+  it("includes external agent permission discovery and exact resolution", () => {
+    const names = EXTERNAL_MCP_TOOL_GROUPS.flatMap((g) => g.tools.map((t) => t.name));
+    expect(names).toContain("list_pending_agent_permissions_kandev");
+    expect(names).toContain("resolve_agent_permission_kandev");
   });
 
   it("does not expose session-scoped tools (plan, ask_user_question)", () => {

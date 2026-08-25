@@ -122,6 +122,18 @@ func (m *mockAgentManager) RespondToPermissionBySessionID(ctx context.Context, s
 	return nil
 }
 
+func (m *mockAgentManager) ListPendingPermissionsBySessionID(context.Context, string) ([]streams.PendingAgentPermission, error) {
+	return nil, nil
+}
+
+func (m *mockAgentManager) ResolvePermissionBySessionID(context.Context, string, string, string, string) (*streams.PermissionResolveResponse, error) {
+	return nil, nil
+}
+
+func (m *mockAgentManager) CancelPermissionBySessionID(context.Context, string, string, string) (*streams.PermissionCancelResponse, error) {
+	return nil, nil
+}
+
 func (m *mockAgentManager) RestartAgentProcess(ctx context.Context, agentExecutionID string) error {
 	return nil
 }
@@ -265,6 +277,7 @@ type mockRepository struct {
 	// Optional hook to inject behavior into GetTaskSession (e.g. simulate a
 	// transient DB error); if nil, the default map lookup is used.
 	getTaskSessionFunc                 func(ctx context.Context, id string) (*models.TaskSession, error)
+	getTaskEnvironmentFunc             func(ctx context.Context, id string) (*models.TaskEnvironment, error)
 	getTaskEnvironmentByTaskIDFunc     func(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
 	createTaskSessionFunc              func(ctx context.Context, session *models.TaskSession) error
 	updateTaskSessionStateFunc         func(ctx context.Context, sessionID string, state models.TaskSessionState, errorMessage string) error
@@ -293,9 +306,16 @@ type mockRepository struct {
 	setSessionMetadataKeyCalls        []setSessionMetadataKeyCall
 	setSessionPrimaryCalls            []string
 	createTaskEnvironmentCalls        []*models.TaskEnvironment
+	sharedWorkspaceBindingCalls       []sharedWorkspaceBindingCall
 	updateTaskEnvironmentCalls        []*models.TaskEnvironment
+	finalizeTaskEnvironmentCalls      []*models.TaskEnvironment
 	updateTaskStateIfCurrentInCalls   []updateTaskStateIfCurrentInCall
 	updateTaskStateIfNotArchivedCalls []updateTaskStateIfNotArchivedCall
+}
+
+type sharedWorkspaceBindingCall struct {
+	Session *models.TaskSession
+	GroupID string
 }
 
 // updateTaskStateIfCurrentInCall records one UpdateTaskStateIfCurrentIn
@@ -368,6 +388,18 @@ func (m *mockRepository) CreateTaskSession(ctx context.Context, session *models.
 	}
 	m.mu.Unlock()
 	return fn(ctx, session)
+}
+
+func (m *mockRepository) CreateTaskSessionWithSharedGroupWorkspaceBinding(ctx context.Context, session *models.TaskSession, environment *models.TaskEnvironment, groupID string) error {
+	m.mu.Lock()
+	m.sharedWorkspaceBindingCalls = append(m.sharedWorkspaceBindingCalls, sharedWorkspaceBindingCall{Session: session, GroupID: groupID})
+	if environment.ID == "" {
+		environment.ID = "environment-" + session.ID
+	}
+	session.TaskEnvironmentID = environment.ID
+	m.taskEnvironments[environment.ID] = environment
+	m.mu.Unlock()
+	return m.CreateTaskSession(ctx, session)
 }
 
 func (m *mockRepository) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
@@ -1080,7 +1112,10 @@ func (m *mockRepository) ListEnvironments(ctx context.Context) ([]*models.Enviro
 }
 
 // Task environment operations
-func (m *mockRepository) GetTaskEnvironment(_ context.Context, id string) (*models.TaskEnvironment, error) {
+func (m *mockRepository) GetTaskEnvironment(ctx context.Context, id string) (*models.TaskEnvironment, error) {
+	if m.getTaskEnvironmentFunc != nil {
+		return m.getTaskEnvironmentFunc(ctx, id)
+	}
 	if env, ok := m.taskEnvironments[id]; ok {
 		return env, nil
 	}
@@ -1120,6 +1155,12 @@ func (m *mockRepository) UpdateTaskEnvironment(_ context.Context, env *models.Ta
 	}
 	m.updateTaskEnvironmentCalls = append(m.updateTaskEnvironmentCalls, env)
 	m.taskEnvironments[env.ID] = env
+	return nil
+}
+func (m *mockRepository) FinalizeTaskEnvironmentMaterialization(_ context.Context, env *models.TaskEnvironment, repos []*models.TaskEnvironmentRepo, _ string) error {
+	m.finalizeTaskEnvironmentCalls = append(m.finalizeTaskEnvironmentCalls, env)
+	m.taskEnvironments[env.ID] = env
+	m.taskEnvironmentRepos[env.ID] = repos
 	return nil
 }
 func (m *mockRepository) CreateTaskEnvironmentRepo(_ context.Context, repo *models.TaskEnvironmentRepo) error {

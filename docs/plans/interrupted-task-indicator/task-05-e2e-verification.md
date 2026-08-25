@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["04-frontend-icon-rendering"]
 plan: "plan.md"
-spec: "../../specs/tasks/interrupted-task-indicator.md"
+spec: "../../specs/tasks/requirements/interrupted-task-indicator.md"
 ---
 
 # Task 05: E2E verification and final checks

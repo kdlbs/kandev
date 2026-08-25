@@ -96,6 +96,19 @@ func doRequest(router *gin.Engine, method, path string, body string, headers map
 	return rec
 }
 
+// doAuthedRequest attaches a resolved caller identity, standing in for
+// httpmw.Middleware without wiring it into focused handler tests.
+func doAuthedRequest(router *gin.Engine, method, path string, body string, headers map[string]string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req = req.WithContext(authn.WithIdentity(req.Context(), authn.Identity{UserID: "user_1", Role: authn.RoleMember}))
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	return rec
+}
+
 func doMultipartInstall(t *testing.T, router *gin.Engine, pkg *bytes.Buffer) *httptest.ResponseRecorder {
 	t.Helper()
 	var body bytes.Buffer
@@ -465,7 +478,7 @@ runtime:
 
 func TestWebhookHandlerUnknownPluginReturns404(t *testing.T) {
 	router, _ := newTestRouter(t)
-	rec := doRequest(router, http.MethodPost, "/api/plugins/missing/webhooks/key1", "{}", nil)
+	rec := doAuthedRequest(router, http.MethodPost, "/api/plugins/missing/webhooks/key1", "{}", nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404, body=%s", rec.Code, rec.Body.String())
 	}
@@ -481,7 +494,7 @@ func TestWebhookHandlerUndeclaredKeyReturns404(t *testing.T) {
 		t.Fatalf("Install: %v", err)
 	}
 
-	rec := doRequest(router, http.MethodPost, "/api/plugins/kandev-plugin-slack/webhooks/undeclared-key", "{}", nil)
+	rec := doAuthedRequest(router, http.MethodPost, "/api/plugins/kandev-plugin-slack/webhooks/undeclared-key", "{}", nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404, body=%s", rec.Code, rec.Body.String())
 	}
@@ -497,7 +510,7 @@ func TestWebhookHandlerOversizedBodyReturns413(t *testing.T) {
 	}
 
 	oversized := strings.Repeat("a", int(maxWebhookBodyBytes+1))
-	rec := doRequest(router, http.MethodPost, "/api/plugins/kandev-plugin-slack/webhooks/key1", oversized, nil)
+	rec := doAuthedRequest(router, http.MethodPost, "/api/plugins/kandev-plugin-slack/webhooks/key1", oversized, nil)
 	if rec.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status = %d, want 413, body=%s", rec.Code, rec.Body.String())
 	}
@@ -527,13 +540,13 @@ func TestReadCappedWebhookBodyUsesDeclaredLimit(t *testing.T) {
 
 func TestWebhookRelayHeadersStripHostCredentials(t *testing.T) {
 	headers := http.Header{
-		"Authorization": []string{"Bearer kandev-pat"},
+		"Authorization": []string{"Bearer kandev_pat_secret"},
 		"Cookie":        []string{"kandev_session=secret"},
 		"Content-Type":  []string{"audio/webm"},
 		"X-Plugin-Key":  []string{"plugin-secret"},
 	}
 
-	got := flattenWebhookHeaders(headers)
+	got := flattenHeaders(headers, "kandev_session", false)
 
 	if _, ok := got["Authorization"]; ok {
 		t.Fatal("Authorization header was forwarded to plugin")
@@ -555,7 +568,7 @@ func TestWebhookHandlerNotRunningReturns503(t *testing.T) {
 		t.Fatalf("Disable: %v", err)
 	}
 
-	rec := doRequest(router, http.MethodPost, "/api/plugins/kandev-plugin-slack/webhooks/key1", "{}", nil)
+	rec := doAuthedRequest(router, http.MethodPost, "/api/plugins/kandev-plugin-slack/webhooks/key1", "{}", nil)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503, body=%s", rec.Code, rec.Body.String())
 	}

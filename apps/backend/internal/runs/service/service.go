@@ -3,7 +3,7 @@
 // and exposes a RunQueueAdapter the workflow engine can use to
 // enqueue runs without depending on the office package.
 //
-// Phase 3 of task-model-unification (see docs/specs/task-model-unification/plan.md
+// Phase 3 of task-model-unification (see docs/specs/tasks/system-design/model-unification.md
 // sections B3.2 and B3.5) lifted this logic out of internal/office/service
 // and added an event-driven claim signal so engine-emitted runs reach
 // the scheduler in a few ms instead of waiting up to one tick (5s).

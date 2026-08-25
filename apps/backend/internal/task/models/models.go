@@ -94,7 +94,12 @@ const (
 	MetaKeyAgentProfileID    = "agent_profile_id"
 	MetaKeyExecutorID        = "executor_id"
 	MetaKeyExecutorProfileID = "executor_profile_id"
-	MetaKeyDeferredLaunch    = "deferred_launch"
+	// Automation target metadata is written to continuation tasks so a
+	// change from hidden to visible ownership or from repository-backed to
+	// repository-free execution cannot silently reuse the old task.
+	MetaKeyAutomationTaskMode       = "automation_task_mode"
+	MetaKeyAutomationRepositoryMode = "automation_repository_mode"
+	MetaKeyDeferredLaunch           = "deferred_launch"
 	// MetaKeyQueuedMoveExitPending identifies a queued manual move whose
 	// source-step on_exit side effect is not yet complete. Its value records the
 	// source step so recovery can resume the work after a restart.
@@ -781,6 +786,9 @@ const (
 	TaskOriginRoutine       = "routine"
 	TaskOriginOnboarding    = "onboarding"
 	TaskOriginAutomationRun = "automation_run"
+	// TaskOriginAutomationTask is a normal, user-visible task created by an
+	// automation. Unlike automation_run, it remains in Kanban/sidebar flows.
+	TaskOriginAutomationTask = "automation_task"
 )
 
 // Task represents a task in the database
@@ -834,7 +842,7 @@ type Task struct {
 	Identifier             string `json:"identifier,omitempty"` // e.g. "KAN-42"
 
 	// ExternalID is a caller-supplied identity used for create-idempotency
-	// (docs/specs/tasks/external-id-idempotency/spec.md). Empty when the task
+	// (docs/specs/tasks/requirements/external-id-idempotency.md). Empty when the task
 	// holds none. Unique per (workspace_id, external_id) when non-empty.
 	ExternalID string `json:"external_id,omitempty"`
 	// ExternalIDSettledAt is non-nil once the create that claimed ExternalID
@@ -1035,9 +1043,11 @@ type TaskWorkspaceFolder struct {
 // attachment operation, so a later materialization failure can compensate
 // without touching pre-existing sources.
 type WorkspaceSourceBatch struct {
-	TaskID            string                            `json:"task_id"`
-	Sources           []WorkspaceSource                 `json:"sources,omitempty"`
-	RepositoryUpdates []WorkspaceSourceRepositoryUpdate `json:"repository_updates,omitempty"`
+	TaskID                    string                            `json:"task_id"`
+	Sources                   []WorkspaceSource                 `json:"sources,omitempty"`
+	RepositoryUpdates         []WorkspaceSourceRepositoryUpdate `json:"repository_updates,omitempty"`
+	ExpectedParentID          string                            `json:"-"`
+	ExpectedParentWorkspaceID string                            `json:"-"`
 }
 
 // WorkspaceSourceRepositoryUpdate records a legacy association branch derived
@@ -1130,6 +1140,100 @@ const (
 	// already gone. No ACP outcome ever reaches the wire in this state.
 	PermissionStatusExpired PermissionStatus = "expired"
 )
+
+type PermissionResolutionActorKind string
+
+const (
+	PermissionActorBrowser             PermissionResolutionActorKind = "browser"
+	PermissionActorPersonalAccessToken PermissionResolutionActorKind = "personal_access_token"
+	PermissionActorAutomation          PermissionResolutionActorKind = "automation"
+	PermissionActorSynthetic           PermissionResolutionActorKind = "synthetic"
+)
+
+type PermissionResolutionSource string
+
+const (
+	PermissionSourceWeb         PermissionResolutionSource = "web"
+	PermissionSourceExternalMCP PermissionResolutionSource = "external_mcp"
+	PermissionSourceAutomation  PermissionResolutionSource = "automation"
+	// PermissionSourceAutomationMCP identifies a resolution made by the
+	// fixed in-session coordinator surface. It is distinct from legacy
+	// backend automation and from the authenticated external MCP bridge.
+	PermissionSourceAutomationMCP PermissionResolutionSource = "automation_mcp"
+)
+
+type PermissionResolutionResult string
+
+const (
+	PermissionResolutionDispatching   PermissionResolutionResult = "dispatching"
+	PermissionResolutionAccepted      PermissionResolutionResult = "accepted"
+	PermissionResolutionStale         PermissionResolutionResult = "stale"
+	PermissionResolutionExpired       PermissionResolutionResult = "expired"
+	PermissionResolutionFailed        PermissionResolutionResult = "failed"
+	PermissionResolutionIndeterminate PermissionResolutionResult = "indeterminate"
+)
+
+// PermissionResolutionAudit is the durable, presentation-free record of one
+// exact resolution attempt. Credential-bearing action data is not part of this
+// type by design.
+type PermissionResolutionAudit struct {
+	ClaimID     string                        `json:"claim_id"`
+	ActorUserID string                        `json:"actor_user_id,omitempty"`
+	ActorKind   PermissionResolutionActorKind `json:"actor_kind"`
+	Source      PermissionResolutionSource    `json:"source"`
+	RequestID   string                        `json:"request_id"`
+	PendingID   string                        `json:"pending_id"`
+	OptionID    string                        `json:"option_id"`
+	OptionKind  string                        `json:"option_kind"`
+	SelectedAt  time.Time                     `json:"selected_at"`
+	FinalizedAt *time.Time                    `json:"finalized_at,omitempty"`
+	Result      PermissionResolutionResult    `json:"result"`
+}
+
+type PermissionResolutionClaimOutcome string
+
+const (
+	PermissionClaimed           PermissionResolutionClaimOutcome = "claimed"
+	PermissionClaimNotFound     PermissionResolutionClaimOutcome = "not_found"
+	PermissionClaimInProgress   PermissionResolutionClaimOutcome = "in_progress"
+	PermissionClaimAlreadyFinal PermissionResolutionClaimOutcome = "already_final"
+)
+
+type PermissionResolutionClaimRequest struct {
+	TaskID    string
+	SessionID string
+	Audit     PermissionResolutionAudit
+}
+
+type PermissionResolutionClaimResult struct {
+	Outcome PermissionResolutionClaimOutcome
+	Message *Message
+}
+
+type PermissionResolutionFinalizeOutcome string
+
+const (
+	PermissionFinalized             PermissionResolutionFinalizeOutcome = "finalized"
+	PermissionFinalizeNotFound      PermissionResolutionFinalizeOutcome = "not_found"
+	PermissionFinalizeClaimMismatch PermissionResolutionFinalizeOutcome = "claim_mismatch"
+	PermissionFinalizeAlreadyFinal  PermissionResolutionFinalizeOutcome = "already_final"
+)
+
+type PermissionResolutionFinalizeRequest struct {
+	TaskID      string
+	SessionID   string
+	RequestID   string
+	PendingID   string
+	ClaimID     string
+	Result      PermissionResolutionResult
+	Status      PermissionStatus
+	FinalizedAt time.Time
+}
+
+type PermissionResolutionFinalizeResult struct {
+	Outcome PermissionResolutionFinalizeOutcome
+	Message *Message
+}
 
 // TaskPendingAction is the compact task-list projection for a session blocked
 // on user input.
@@ -1358,6 +1462,15 @@ type TaskSession struct {
 	// panel; the frontend snapshots the PRIOR value at that moment to draw
 	// the divider before overwriting it.
 	LastReadMessageID string `json:"last_read_message_id,omitempty"`
+
+	// Usage/cost rollup columns (docs/specs/task-cost-ledger/spec.md AC-28,
+	// AC-29). task_usage_events is the source of truth; these are the
+	// running totals internal/task/usage's writer maintains transactionally
+	// alongside each ledger insert via IncrementTaskSessionUsageTx.
+	CostSubcents   int64 `json:"cost_subcents"`
+	TokensIn       int64 `json:"tokens_in"`
+	TokensCachedIn int64 `json:"tokens_cached_in"`
+	TokensOut      int64 `json:"tokens_out"`
 }
 
 // ToAPI converts internal TaskSession to API type
@@ -1809,13 +1922,26 @@ type TaskEnvironment struct {
 	// needed (the orchestrator does this in service_turns.go for WorkspaceInfo).
 	ControlPort int                   `json:"control_port"` // agentctl control port
 	Status      TaskEnvironmentStatus `json:"status"`
+	// MaterializationSessionID durably identifies the one session allowed to
+	// turn a creating environment into a physical workspace. It is empty once
+	// the environment is ready; sibling sessions must attach only.
+	MaterializationSessionID string `json:"-"`
 
 	// WorkspacePath points at the agent workspace root (the task root when
 	// TaskDirName is set, otherwise the single repo's worktree path).
 	// Physical worktree identity lives on Repos, never on the environment row.
 	WorkspacePath string `json:"workspace_path,omitempty"`
 	ContainerID   string `json:"container_id,omitempty"`
-	SandboxID     string `json:"sandbox_id,omitempty"`
+	// ContainerBootstrapNonceSecretID is an environment-scoped encrypted secret
+	// reference used only to establish a new agentctl control connection to an
+	// already-owned Docker container. It is deliberately not exposed in API
+	// responses and is distinct from session runtime/auth metadata.
+	ContainerBootstrapNonceSecretID string `json:"-"`
+	// ContainerControlAuthTokenSecretID is the environment-scoped encrypted
+	// agentctl control-token reference for a running Docker container. It is
+	// deliberately separate from a session's agent runtime/auth metadata.
+	ContainerControlAuthTokenSecretID string `json:"-"`
+	SandboxID                         string `json:"sandbox_id,omitempty"`
 
 	// TaskDirName is the semantic directory name for the task (e.g. "fix-bug_ab12").
 	// Set when the task uses the multi-repo task-directory layout
@@ -2087,7 +2213,7 @@ type TaskReviewRun struct {
 // TaskReviewFinding is one anchored, advisory review comment produced by a
 // review run. It renders in the Changes/Review diff at File/StartLine..EndLine
 // of Repository, and carries FileDiffHash so a client can tell whether the
-// diff has moved under it (see ../../../../docs/specs/native-code-review/spec.md).
+// diff has moved under it (see ../../../../docs/specs/agents/requirements/native-code-review.md).
 type TaskReviewFinding struct {
 	ID             string              `json:"id"`
 	RunID          string              `json:"run_id"`

@@ -880,7 +880,10 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		return err
 	}
 	defer activityLease.Release()
-	m.releaseActivity(executionActivityKey(executionID))
+	// Keep the execution's running activity lease until backend teardown
+	// succeeds. A failed stop remains retryable, so maintenance must not treat
+	// a potentially live runtime as idle. RemoveExecution releases the lease on
+	// the successful path.
 
 	m.logger.Info("stopping agent",
 		zap.String("execution_id", executionID),
@@ -910,8 +913,12 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		execution.agentctl.Close()
 	}
 
-	// Stop the agent execution via the runtime that created it
-	_ = m.stopAgentViaBackend(ctx, executionID, execution, reason, force, agentStopFailed)
+	// Stop the agent execution via the runtime that created it. A failed stop
+	// must remain tracked: removing it here would turn a retryable cleanup into
+	// an unobservable orphan process.
+	if err := m.stopAgentViaBackend(ctx, executionID, execution, reason, force, agentStopFailed); err != nil {
+		return fmt.Errorf("stop runtime for execution %q: %w", executionID, err)
+	}
 
 	// Update execution status and remove from tracking
 	_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
@@ -1714,6 +1721,12 @@ func (m *Manager) markCompletedWithTurnID(
 	if (exitCode != 0 || errorMessage != "") && m.IsShuttingDown() {
 		return m.markStoppedDuringShutdown(execution, exitCode, errorMessage, turnID)
 	}
+	if (exitCode != 0 || errorMessage != "") && isUninitializedStartupExecution(execution) {
+		m.logger.Debug("deferring uninitialized startup process exit to startup owner",
+			zap.String("execution_id", execution.ID),
+			zap.Int("exit_code", exitCode))
+		return nil
+	}
 
 	_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
 		now := time.Now()
@@ -1938,6 +1951,49 @@ func (m *Manager) RespondToPermissionBySessionID(sessionID, pendingID, optionID 
 	}
 
 	return m.RespondToPermission(execution.ID, pendingID, optionID, cancelled)
+}
+
+// ListPendingPermissionsBySessionID reads safe live snapshots from the current
+// execution for a task session. It never starts or resumes an execution.
+func (m *Manager) ListPendingPermissionsBySessionID(ctx context.Context, sessionID string) ([]streams.PendingAgentPermission, error) {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return nil, fmt.Errorf("%w: %s", ErrNoExecutionForSession, sessionID)
+	}
+	if execution.agentctl == nil {
+		return nil, fmt.Errorf("agent execution has no agentctl client: %s", execution.ID)
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	return execution.agentctl.ListPendingPermissions(requestCtx)
+}
+
+// ResolvePermissionBySessionID selects one exact option on one exact request
+// generation in the current execution.
+func (m *Manager) ResolvePermissionBySessionID(ctx context.Context, sessionID, requestID, pendingID, optionID string) (*streams.PermissionResolveResponse, error) {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return nil, fmt.Errorf("%w: %s", ErrNoExecutionForSession, sessionID)
+	}
+	if execution.agentctl == nil {
+		return nil, fmt.Errorf("agent execution has no agentctl client: %s", execution.ID)
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	return execution.agentctl.ResolvePermission(requestCtx, requestID, pendingID, optionID)
+}
+
+func (m *Manager) CancelPermissionBySessionID(ctx context.Context, sessionID, requestID, pendingID string) (*streams.PermissionCancelResponse, error) {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return nil, fmt.Errorf("%w: %s", ErrNoExecutionForSession, sessionID)
+	}
+	if execution.agentctl == nil {
+		return nil, fmt.Errorf("agent execution has no agentctl client: %s", execution.ID)
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	return execution.agentctl.CancelPermission(requestCtx, requestID, pendingID)
 }
 
 // stopAgentViaBackend stops the agent execution via the runtime that created it.

@@ -168,7 +168,11 @@ func (s *Server) handleFileContent(c *gin.Context) {
 
 	content, size, isBinary, resolvedPath, err := s.procMgr.GetWorkspaceTracker().GetFileContent(scopedPath)
 	if err != nil {
-		c.JSON(400, types.FileContentResponse{Path: path, Error: err.Error(), Size: size})
+		status := http.StatusBadRequest
+		if errors.Is(err, process.ErrFileNotFound) {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, types.FileContentResponse{Path: path, Error: err.Error(), Size: size})
 		return
 	}
 

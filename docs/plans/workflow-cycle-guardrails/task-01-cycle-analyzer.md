@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/workflow-cycle-guardrails/spec.md"
+spec: "../../specs/tasks/requirements/workflow-cycle-guardrails.md"
 ---
 
 # Task 01: Workflow replay cycle analyzer

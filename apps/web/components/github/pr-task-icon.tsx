@@ -20,6 +20,7 @@ const RED_500 = CHANGE_REQUEST_STATUS_COLORS.danger;
 const YELLOW_500 = CHANGE_REQUEST_STATUS_COLORS.warning;
 const SKY_400 = CHANGE_REQUEST_STATUS_COLORS.review;
 const EMERALD_400 = CHANGE_REQUEST_STATUS_COLORS.ready;
+const QUEUED = CHANGE_REQUEST_STATUS_COLORS.queued;
 const GREEN_500 = CHANGE_REQUEST_STATUS_COLORS.passing;
 
 /** Maps the task-level PR projection to the same visual language as live PRs. */
@@ -86,6 +87,14 @@ export function isPRDraft(pr: TaskPR): boolean {
   return pr.state === "open" && pr.mergeable_state === "draft";
 }
 
+export function isPRQueued(pr: TaskPR): boolean {
+  return (
+    pr.state === "open" &&
+    typeof pr.merge_queue_state === "string" &&
+    pr.merge_queue_state.trim() !== ""
+  );
+}
+
 // CI passed but the PR is still waiting on human review (reviewers requested
 // or pending review state). Distinct from yellow "CI running". An approved
 // PR with extra reviewers still pending also counts — GitHub's
@@ -126,6 +135,10 @@ function openMergeBlockerColor(pr: TaskPR): string | null {
 export function getPRStatusColor(pr: TaskPR): string {
   if (pr.state === "merged") return PURPLE_500;
   if (pr.state === "closed") return RED_500;
+  // An active queue entry is the authoritative non-terminal state. Queue
+  // membership must remain visible while provider checks or mergeability
+  // fields hydrate, even when those fields still describe an earlier state.
+  if (isPRQueued(pr)) return QUEUED;
   if (pr.review_state === "changes_requested" || pr.checks_state === "failure") {
     return RED_500;
   }

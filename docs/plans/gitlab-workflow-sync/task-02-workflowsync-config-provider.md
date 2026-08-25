@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/gitlab-workflow-sync/spec.md"
+spec: "../../specs/integrations/requirements/gitlab-workflow-sync.md"
 ---
 
 # Task 02: Workflow Sync Config Provider Field And Schema

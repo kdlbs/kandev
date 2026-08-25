@@ -1,0 +1,284 @@
+---
+status: draft
+system: system-page
+requirements:
+  - REQ-SYSTEM-PAGE-SYSTEM-PAGE-001
+created: 2026-05-18
+owners:
+  - tbd
+---
+# System pages System Design Part 1
+
+## Purpose and boundaries
+
+This design preserves the technical source detail for `REQ-SYSTEM-PAGE-SYSTEM-PAGE-001` during migration.
+
+## Requirement mapping
+
+| Requirement | Design section |
+| --- | --- |
+| `REQ-SYSTEM-PAGE-SYSTEM-PAGE-001` | [Migrated source detail](#migrated-source-detail) |
+
+## Migrated source detail
+
+## Why
+
+Today, settings-style operational concerns (health, disk usage, current version, OSS attribution, log access, database maintenance) have no home in kandev's UI. The existing settings sidebar is product-configuration only (executors, agents, integrations); the only system-shaped entry — Changelog — sits awkwardly inside it. When something goes wrong, users have no path inside the app to see "where is my database, how big is it, what version am I on, is there an update, where are the logs." This forces them into the filesystem and into GitHub, and it makes recoverable problems (bloated SQLite, corrupt state) look unrecoverable.
+
+Radarr and Sonarr solve this with a dedicated **System** area: a group of read-only diagnostic pages plus a small number of gated maintenance actions. This spec brings the same shape to kandev, scoped to the kandev-specific surface (database diagnostics, SQLite backups/maintenance, worktrees, GitHub releases, and daily backend log files).
+
+## What (v1)
+
+A new **System** group is added to the existing settings sidebar (`apps/web/components/settings/settings-app-sidebar.tsx`), alongside General/Workspaces/Agents/Executors/Integrations/etc. The group contains nine child pages, each on its own route under `/settings/system/*`. The existing `/settings/changelog` route is removed and its UI is absorbed into the new **Updates** page.
+
+### Pages
+
+1. **Status** — `/settings/system/status`
+   - **Health issues** card: renders the existing `GET /api/v1/system/health` payload (warning/error/info issues with messages and links).
+   - **Disk usage** card: shows total kandev data footprint with a per-subdirectory breakdown (`data dir / worktrees / repos / sessions / tasks / quick-chat / backups`), an "as of HH:MM" timestamp, and a **Refresh** button. The disk walk is lazy and asynchronous: the first visit after a cold start (or after the 2h cache expires) returns `null` immediately and the page shows a loading spinner while the walk runs in the background; subsequent visits within 2h return the cached value instantly.
+   - **Version + update** card: short summary of current version and "update available" badge, with a CTA to the Updates page.
+2. **Feature Toggles** — `/settings/system/feature-toggles`
+   - Install-wide runtime flags, risk metadata, environment locks, and restart handling.
+   - The full contract lives in [Feature Toggles](../../platform/requirements/feature-toggles.md).
+3. **Database** — `/settings/system/database`
+   - Read-only: database driver, database size, and schema version. SQLite additionally shows the configured file path, WAL size, and last-backup timestamp from the sibling `backups/` directory. Postgres shows database-level size and does not render SQLite file/WAL/backup rows.
+   - SQLite-only **VACUUM** button — safe, reclaims space; shows progress and final size delta.
+   - SQLite-only **Optimize** button — runs `PRAGMA optimize`; shows progress.
+   - SQLite-only **Factory Reset** button. This action is destructive.
+     - It wipes the database, worktrees, repository clones, session directories, task directories, and Quick Chat directories.
+     - The modal requires the literal string `RESET`. The user also acknowledges the pre-reset snapshot and required restart.
+     - The server stops active work and creates `<database-dir>/backups/pre-reset-<ts>.db`.
+     - The server drops the database tables, runs migrations, removes managed directories, and restarts.
+     - The frontend disables the UI and waits for the backend. It then shows the empty onboarding state.
+4. **Backups** — `/settings/system/backups`
+   - Lists existing snapshots in `<database-dir>/backups/` with name, size, and mtime. `<database-dir>` is the parent of the configured SQLite database path.
+   - Per-row actions: **Download**, **Restore** (gated like Factory Reset), **Delete** (confirm-only).
+   - **Create snapshot** button at the top of the list; uses the existing `VACUUM INTO` path.
+5. **Logs** — `/settings/system/logs`
+   - One **Customize bundle** action that opens source selection with backend
+     and frontend evidence selected by default; the runtime index and
+     debug-only ACP evidence remain explicit opt-ins. Bundle collection keeps
+     collecting/preparing/partial/busy/error feedback on the page.
+   - Visible disclosure that the ZIP contains up to three days of install-wide
+     backend logs and up to four connected browser profiles subject to fixed
+     byte limits, including URLs, console arguments, stacks, and runtime
+     metadata.
+   - The page does not render a tail, file table, copy/refresh controls, or individual-file downloads.
+   - If a source is unavailable, truncated by the fixed diagnostic budgets, or
+     reports queue loss, the page still downloads a partial ZIP and names the
+     omission without blocking normal application work.
+   - The active files, browser capture, ZIP lifecycle, sink thresholds, and
+     frontend-error ingestion contracts are defined by
+     [Diagnostic logging](../../platform/requirements/diagnostic-logging.md).
+6. **Updates** — `/settings/system/updates`
+   - Shows running version, latest available version, and a "new version available" badge if newer.
+   - **Check now** button — forces a re-poll (rate-limited 30s per process).
+   - **Update channel** — Stable is the install-wide default. A verified managed npm/npx user
+     service can select Nightly through the shared Settings save flow. Desktop, Homebrew,
+     unmanaged, system-service, local, and unknown installs remain Stable with a visible reason.
+   - A service update keeps its progress surface while the backend restarts. Once `/system/info` confirms the target version, the page reloads the document so the tab runs the new frontend bundle.
+   - Update alerts are configured with the existing provider/event matrix under
+     **Settings > General > Notifications**. The Updates page does not own a
+     second notification enable switch or delivery-channel preference.
+   - Below: the embedded changelog list (the content currently rendered at `/settings/changelog` via `@/generated/changelog.json`).
+7. **Licenses** — `/settings/system/licenses`
+   - Renders a JSON manifest of all third-party OSS dependencies (npm + Go), each with its license name, version, repository URL, and license text. The manifest is generated at build time and committed to the repo.
+   - Searchable list (filter by package name or license type), one-line per row, expand to see full license text.
+8. **Storage** — `/settings/system/storage`
+   - Analyzes Kandev task workspaces, quarantine, managed Go cache, and Docker storage.
+   - Configures opt-in idle-time maintenance and exposes manual analyze/run actions.
+   - Lists cleanup history and restorable quarantined task workspaces.
+   - The full ownership, API, persistence, and safety contract lives in
+     [Storage Maintenance](../requirements/storage-maintenance.md).
+9. **About** — `/settings/system/about`
+   - Version, build commit, build timestamp, Go runtime version, Node runtime version, OS/arch.
+   - Links: GitHub repo, documentation, license, "Report an issue".
+
+### Sidebar badge
+
+The **System** group header (and the **Status** child entry) show a numeric badge equal to `count(health.issues where severity != info) + (updateAvailable ? 1 : 0)`. The badge is sourced from the existing `useSystemHealth` hook plus the new updates hook; no new WS topic is required for v1.
+
+### Backend surface
+
+A new package `apps/backend/internal/system/` owns these endpoints. It absorbs the existing
+`internal/health/` package as a sub-component. Read routes use the normal authenticated install
+identity; selected mutation routes use the existing admin guard. See [Permissions](#permissions)
+for the exact split and destructive-action confirmation pattern.
+
+```
+GET    /api/v1/system/health                      (existing; unchanged)
+GET    /api/v1/system/info                        - versions, commit, build time, OS/arch
+GET    /api/v1/system/disk-usage                  - cached breakdown + computedAt; null while computing
+POST   /api/v1/system/disk-usage/refresh          - kick async recompute; 202
+GET    /api/v1/system/database                    - driver, path, sizeBytes, walSizeBytes, schemaVersion, lastBackupAt
+POST   /api/v1/system/database/vacuum             - 202 + jobId
+POST   /api/v1/system/database/optimize           - 202 + jobId
+POST   /api/v1/system/database/reset              - factory reset; body { confirm: "RESET" }
+GET    /api/v1/system/backups                     - list snapshots
+POST   /api/v1/system/backups                     - create snapshot; 202 + jobId
+GET    /api/v1/system/backups/:name/download      - stream snapshot file
+POST   /api/v1/system/backups/:name/restore       - restore; body { confirm: "RESTORE" }
+DELETE /api/v1/system/backups/:name               - delete snapshot
+POST   /api/v1/system/logs/bundles                - create source-selectable diagnostic ZIP job
+GET    /api/v1/system/logs/bundles/:id            - bundle collection/build status
+POST   /api/v1/system/logs/bundles/:id/frontend   - bounded frontend capture chunk
+GET    /api/v1/system/logs/bundles/:id/download   - stream ready/partial ZIP
+POST   /api/v1/system/logs/frontend-errors        - bounded/rate-limited error-toast report
+POST   /api/v1/system/improve-kandev/bundle/lease - owner-verified 24h task-context copy
+GET    /api/v1/system/updates                     - { current, latest, latest_url, latest_checked_at, update_available, channel, channel_editable, channel_unsupported_reason, install: { running_as_service, managed_service, mode?, manager?, kind?, metadata_path? }, apply_supported, apply_unsupported_reason?, manual_commands? }
+POST   /api/v1/system/updates/check               - force selected-source re-poll; rate-limited 30s
+PATCH  /api/v1/system/updates/channel             - persist Stable/Nightly for a verified managed npm/npx user service; body { channel }
+POST   /api/v1/system/updates/apply               - queue service-only self-update; body { confirm: "UPDATE", target_version }
+GET    /api/v1/system/message-queue/settings       - configured/effective queue limit and source
+PATCH  /api/v1/system/message-queue/settings       - save and live-apply admin queue limit
+```
+
+The System API has no global casing convention. Updates and Info use the snake_case JSON fields
+shown above, while endpoints such as Disk Usage and Database use their documented camelCase
+fields. Earlier camelCase Updates names in this draft (`latestCheckedAt`, `releaseUrl`, and
+`applySupported`) were documentation errors, corrected here without renaming any wire field.
+
+Storage endpoints are defined separately in [Storage Maintenance](../requirements/storage-maintenance.md).
+
+Long-running operations (vacuum, optimize, reset, restore, snapshot create, disk walk) return `202 Accepted` with a `jobId` and publish progress on the existing event bus. The frontend subscribes via WS (`system.job.update` event) to render progress and final result. On success/failure the operation flips a corresponding entry in the existing health surface (e.g., a "VACUUM completed: reclaimed X MB" info issue that auto-expires).
+
+### Updates poller
+
+A background goroutine in `internal/system/updates/poller.go` starts on backend boot and polls the
+selected channel every 6 hours. Stable reads GitHub Releases for `kdlbs/kandev`; Nightly reads the
+public npm `kandev@nightly` dist-tag. It persists isolated channel targets in `kandev_meta`:
+
+- `latest_version TEXT` — highest published semver tag (e.g., `1.2.4`)
+- `latest_version_url TEXT` — URL to that GitHub release
+- `latest_version_checked_at INTEGER` — unix timestamp of last successful poll
+- `latest_version_nightly`, `latest_version_nightly_url`,
+  `latest_version_nightly_checked_at` — equivalent npm Nightly cache keys
+
+The `GET /api/v1/system/updates` handler reads from `kandev_meta` only; it never contacts an
+upstream synchronously. Its nested `install` object reports the current service install state
+(`running_as_service`, `managed_service`, `mode`, `manager`, `kind`, and `metadata_path`) so the UI
+can decide whether one-click apply is allowed. The response's `channel` is the effective selected
+source for this install. Only a
+verified managed npm/npx user service can persist and expose Nightly; unsupported installs report
+Stable even if an old Nightly preference remains stored, set `channel_editable=false`, and include
+`channel_unsupported_reason`. The PATCH write path repeats the managed-service verification before
+resolving or persisting either channel and returns `409 Conflict` for an unsupported install.
+`channel_unsupported_reason` remains present with an empty string when channel editing is supported.
+`POST /api/v1/system/updates/check` triggers a selected-source refresh, rate-limited
+per-process to one call per 30 seconds. If the GitHub or npm call fails (offline, rate limited,
+5xx), the channel's last-known value remains cached and `latest_checked_at` exposes the staleness.
+
+`POST /api/v1/system/updates/apply` is available only when Kandev is running as a kandev-managed user service (`systemd --user` or launchd user agent) and the selected channel exposes an applicable target. The request includes the exact `target_version` shown to the user. While holding the update-cache lock, the backend rejects a stale target with `409 Conflict`; otherwise it writes that version to an update intent under `<KANDEV_HOME_DIR>/service/update-intents/`, starts a manager-owned helper (`systemd-run --user` on Linux, or a one-shot transient LaunchAgent plist bootstrapped via `launchctl bootstrap` on macOS), and returns a `self-update` system job id. Under `KANDEV_E2E_MOCK=true`, the helper path is fake so UI and backend tests can exercise the flow without mutating npm/Homebrew or restarting the service.
+
+### Disk-usage cache
+
+Cache is an in-memory `{ value *Breakdown, computedAt time.Time, computing bool }` guarded by a mutex. The walk is lazy — never runs at boot. `GET /api/v1/system/disk-usage` returns immediately:
+
+- If `value == nil && !computing` → start the walk in a goroutine, return `{ data: null, computing: true }`.
+- If `value == nil && computing` → return `{ data: null, computing: true }`.
+- If `value != nil && time.Since(computedAt) < 2h` → return `{ data: value, computing: false }`.
+- If `value != nil && time.Since(computedAt) >= 2h` → return `{ data: value, computing: true }` and start a background refresh.
+
+`POST /api/v1/system/disk-usage/refresh` forces a refresh regardless of TTL. The job publishes a `system.job.update` event so the frontend can swap the cached value for the fresh one without polling.
+
+### Licenses generation
+
+Generation is **lockfile-driven and committed to the repo**. The file is read statically in dev, build, prod, and release with zero runtime cost and no network access.
+
+- **Generator:** `apps/web/scripts/generate-licenses.ts` — pure function of two inputs.
+  - npm side: walks `pnpm-lock.yaml` via `license-checker-rseidelsohn` (or equivalent), capturing `{ name, version, licenses, repository, licenseFile }` per package.
+  - Go side: resolves modules from `apps/backend/go.sum` via `go-licenses report` (or by reading vendored LICENSE files), captured into the same shape.
+  - If `go-licenses` is present but fails without producing a usable report, the generator reuses valid committed Go entries and marks them with `stale: true`; the Licenses page surfaces a stale-data warning for those entries.
+  - Output: `apps/web/generated/licenses.json`, **committed to git**.
+- **Local trigger:** `pnpm licenses:gen` — devs run it after a dep bump.
+- **CI gate:** A workflow step in `.github/workflows/` runs the generator and warns if the result differs from the committed file. This surfaces license drift whenever `pnpm-lock.yaml` or `go.sum` changes, without requiring it to run on every `pnpm build`.
+
+The page reads the JSON statically; no backend endpoint is needed.
+
+## Scenarios
+
+- **GIVEN** a user opens `/settings/system/status` for the first time after backend boot, **WHEN** the page mounts, **THEN** the Disk Usage card shows a spinner and "Calculating…", the backend kicks off the walk, and the value populates within seconds without further interaction (via WS job update or 5s poll fallback).
+- **GIVEN** the disk-usage cache is 30 minutes old, **WHEN** the user reopens the Status page, **THEN** the cached value renders instantly with "as of <30 min ago>" and **no** refresh kicks off.
+- **GIVEN** the disk-usage cache is 3 hours old, **WHEN** the user reopens the Status page, **THEN** the stale value renders immediately, the page badge shows "Refreshing…", and the value updates when the background walk completes.
+- **GIVEN** the user is on `1.2.3` and the GitHub latest release is `1.2.4`, **WHEN** they open `/settings/system/updates`, **THEN** an "Update available" badge renders next to the version, the changelog list shows `1.2.4` highlighted as the new entry, and the System sidebar group shows a `1` badge.
+- **GIVEN** the user wants to change update-alert delivery, **WHEN** they open
+  `/settings/system/updates`, **THEN** the page directs them to the existing
+  Notifications provider/event settings instead of rendering a separate
+  update-notification channel control.
+- **GIVEN** the user is running a kandev-managed user service and a newer release exists, **WHEN** they open `/settings/system/updates`, **THEN** the page shows **Apply update** and the confirmation queues a `self-update` job.
+- **GIVEN** the user runs a verified managed npm/npx user service, **WHEN** they select and save
+  Nightly, **THEN** the choice survives reload and update discovery follows `kandev@nightly`.
+- **GIVEN** the install is Desktop, Homebrew, unmanaged, system-service, local, or unknown,
+  **WHEN** Updates renders, **THEN** Stable remains effective and Nightly shows a visible
+  unsupported reason.
+- **GIVEN** a service update is in progress, **WHEN** `/system/info` first reports the requested target version, **THEN** the tab reloads exactly once and renders from the confirmed backend's frontend assets; an older version or temporary outage does not trigger the reload.
+- **GIVEN** the user is not running as a kandev-managed service or is running a `--system` service, **WHEN** they open `/settings/system/updates`, **THEN** the page does not render an update-apply control and instead shows the manual update commands.
+- **GIVEN** the user clicks **VACUUM** on the Database page, **WHEN** the operation completes, **THEN** the DB size delta is shown ("Reclaimed 12.3 MB"), the page Database stats refresh, and a transient info issue appears on the Status page.
+- **GIVEN** the backend uses Postgres, **WHEN** the user opens the Database page, **THEN** the page shows the PostgreSQL driver and database size without issuing SQLite-only PRAGMA queries, and SQLite-only maintenance controls are not rendered.
+- **GIVEN** the user clicks **Factory Reset**, types `RESET`, and confirms, **WHEN** the backend executes, **THEN** a fresh snapshot is created first, all tables are dropped and migrations re-run, the backend restarts, and the frontend redirects to the empty onboarding state once it reconnects.
+- **GIVEN** `KANDEV_DATABASE_PATH` points to `<custom>/named.db`, **WHEN** the user opens Database and Backups, **THEN** Database reports that exact path and Backups lists snapshots from `<custom>/backups/`.
+- **GIVEN** `KANDEV_DATABASE_PATH` points to `<custom>/named.db`, **WHEN** a restore succeeds, **THEN** Kandev stages `<custom>/named.db.new`, stops active executions, closes the SQLite pool, removes stale WAL sidecars, and replaces `<custom>/named.db`.
+- **GIVEN** a snapshot exists only in the old default directory, **WHEN** a custom database path is active, **THEN** Kandev does not list or move it.
+- **GIVEN** the backend cannot reach GitHub, **WHEN** the poller fires, **THEN** the failure is logged but the previous `latest_version` and `latest_version_checked_at` remain in `kandev_meta`; the Updates page surfaces the stale value with a "Last checked <time>" subtitle.
+- **GIVEN** the user clicks **Check now** twice within 30 seconds, **WHEN** the second click fires, **THEN** the endpoint returns `429 Too Many Requests` and the UI shows "Already checked, try again in <N>s".
+- **GIVEN** retained backend logs and a connected browser with local console history, **WHEN** the user downloads diagnostics from `/settings/system/logs`, **THEN** one ZIP contains separate backend/frontend directories and a manifest describing both captures.
+- **GIVEN** the user opens `/settings/system/licenses` while offline, **WHEN** the page renders, **THEN** every dependency's license text is available locally (no network calls).
+- **GIVEN** no queue-limit environment variable is set, **WHEN** an admin saves
+  a new limit on `/settings/general/message-queue`, **THEN** later queue
+  admissions use it immediately without deleting existing messages or
+  requiring a restart.
+
+## Data model
+
+The existing key/value `kandev_meta` table stores stable target keys `latest_version`,
+`latest_version_url`, and `latest_version_checked_at`. Nightly uses the isolated keys
+`latest_version_nightly`, `latest_version_nightly_url`, and
+`latest_version_nightly_checked_at`. The install-wide `settings` table contains
+`updates_channel` with value `stable` or `nightly`; missing or invalid values read as Stable.
+No new SQLite table is required.
+
+## State machine — long-running jobs
+
+Jobs (vacuum, optimize, reset, restore, snapshot create, disk walk) progress through:
+
+```
+queued → running → succeeded
+                 ↘ failed
+```
+
+Each transition publishes `system.job.update` with `{ jobId, kind, state, message, result? }` on the event bus. Reset and restore additionally emit a `system.restart.pending` event that the frontend uses to switch into a "waiting for backend" state.
+
+## Permissions
+
+System read endpoints use the normal authenticated/synthetic install identity. The existing admin
+guard covers database vacuum/optimize/reset, manual update checks, update-channel changes, and
+update apply. Backup create/restore/delete and disk-usage
+refresh currently remain on the base authenticated group. Reset and restore additionally validate
+their confirmation bodies server-side as defence in depth.
+The Message Queue settings GET is readable by members, while its PATCH is admin-only.
+
+## Failure modes
+
+- **GitHub poll failure** — log + keep the previous `kandev_meta` row; `/api/v1/system/updates` returns the stale value.
+- **npm Nightly poll failure** — log + keep the previous Nightly cache; malformed or missing
+  `dist-tags.nightly` fails closed and is never offered.
+- **Disk walk failure** (permission error on a subdir) — return the partial result with a `warnings: [...]` array per subdir; the page renders a per-row warning icon.
+- **VACUUM failure** — DB is unaffected (VACUUM is atomic); the job ends `failed` with the SQLite error string. Status page shows a recoverable error issue.
+- **Non-SQLite maintenance call** — `vacuum`, `optimize`, and `reset` jobs fail with `not supported for <driver> driver` before running SQLite-only SQL; factory reset also rejects before stopping active executions.
+- **Factory reset failure mid-run** — the pre-reset snapshot remains in the sibling SQLite backup directory. The user can restore it from the Backups page on the next boot. Recovery is documented inline in the failure UI.
+- **Restore failure** — the original DB file and SQLite sidecars remain available when checkpointing is busy, and are restored from quarantine when replacement fails; restore stages the snapshot, validates the checkpoint result, quarantines the originals, and rolls them back if installation fails. PostgreSQL restore is rejected before staging or shutdown.
+- **Log file missing / unreadable** — bundle creation continues with available
+  sources, marks the result partial, and records the missing/unreadable backend
+  source in `manifest.json`.
+
+## Persistence guarantees
+
+- `kandev_meta` writes are SQLite-atomic.
+- The SQLite backup directory is `backups/` under the parent of the configured database path. The default remains `<home>/data/backups/`.
+- Snapshot files in the SQLite backup directory are created via `VACUUM INTO <tmp>` then atomic-renamed. Partial files cannot appear.
+- Restore writes the snapshot to `<configured-database-path>.new`, stops scheduling, active executions, and database-backed workers, checkpoints and closes the SQLite pool, then quarantines the main file and `-wal`/`-shm` sidecars before installing the staged file. A failed replacement restores the quarantine. The frontend requires an immediate backend restart before database-backed work resumes.
+- Kandev does not migrate snapshots from another backup directory. It cannot prove that those files belong to the configured database.
+- The existing boot-time backup retention (newest 2) is preserved, but **only auto-snapshots are subject to it**. Snapshots are distinguished by filename prefix:
+  - `kandev-<version>-<ts>.db` — created automatically on a version-change boot or as the pre-reset snapshot before factory reset. Pruned by the existing "keep newest 2" rule (operating only on files with the `kandev-` prefix).
+  - `manual-<ts>.db` — created by the user clicking **Create snapshot** in the Backups page. Never auto-pruned; lives until the user deletes it explicitly from the same page.
+- Existing snapshots are not renamed or moved. Kandev cannot verify that an unprefixed or legacy snapshot belongs to the active configured database.

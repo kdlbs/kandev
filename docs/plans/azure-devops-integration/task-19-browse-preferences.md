@@ -5,7 +5,7 @@ status: completed
 wave: 11
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/azure-devops-integration/spec.md"
+spec: "../../specs/integrations/requirements/azure-devops-integration.md"
 ---
 
 # Task 19: Portable Azure Browse Preferences

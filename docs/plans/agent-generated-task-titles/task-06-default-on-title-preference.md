@@ -5,7 +5,7 @@ status: done
 wave: 6
 depends_on: ["05-single-owner-title-handoff"]
 plan: "plan.md"
-spec: "../../specs/tasks/agent-generated-titles.md"
+spec: "../../specs/tasks/requirements/agent-generated-titles.md"
 ---
 
 # Task 06: Default-on title preference

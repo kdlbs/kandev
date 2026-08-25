@@ -275,15 +275,16 @@ test.describe("Multi-session UX", () => {
     await expect(deleteItem).toBeVisible({ timeout: 5_000 });
     await deleteItem.click();
 
-    // Confirmation dialog should appear
-    const dialog = session.alertDialog();
-    await expect(dialog).toBeVisible({ timeout: 5_000 });
-    await expect(dialog).toContainText("Delete session?");
+    // The context-menu action uses an anchored, non-modal confirmation.
+    const confirmation = testPage.getByTestId("session-delete-confirm-popover");
+    await expect(confirmation).toBeVisible({ timeout: 5_000 });
+    await expect(confirmation).toContainText("Delete session?");
+    await expect(session.alertDialog()).toHaveCount(0);
 
     // Cancel the deletion
-    const cancelBtn = dialog.getByRole("button", { name: "Cancel" });
+    const cancelBtn = confirmation.getByRole("button", { name: "Cancel" });
     await cancelBtn.click();
-    await expect(dialog).not.toBeVisible({ timeout: 5_000 });
+    await expect(confirmation).not.toBeVisible({ timeout: 5_000 });
 
     // Verify session still exists
     const { sessions } = await apiClient.listTaskSessions(task.id);
@@ -331,12 +332,13 @@ test.describe("Multi-session UX", () => {
     await tab1.click({ button: "right" });
 
     await session.contextMenuItem("Delete").click();
-    const dialog = session.alertDialog();
-    await expect(dialog).toBeVisible({ timeout: 5_000 });
+    const confirmation = testPage.getByTestId("session-delete-confirm-popover");
+    await expect(confirmation).toBeVisible({ timeout: 5_000 });
+    await expect(session.alertDialog()).toHaveCount(0);
 
-    const confirmBtn = dialog.getByRole("button", { name: "Delete" });
+    const confirmBtn = confirmation.getByTestId("session-delete-confirm");
     await confirmBtn.click();
-    await expect(dialog).not.toBeVisible({ timeout: 5_000 });
+    await expect(confirmation).not.toBeVisible({ timeout: 5_000 });
 
     // Wait for the deleted session's tab to disappear (identified by session ID,
     // not display number, because the remaining session gets renumbered to #1).
@@ -533,10 +535,11 @@ test.describe("Session deletion preserves the task workspace", () => {
     await expect(tab).toBeVisible({ timeout: 10_000 });
     await tab.click({ button: "right" });
     await session.contextMenuItem("Delete").click();
-    const dialog = session.alertDialog();
-    await expect(dialog).toBeVisible({ timeout: 5_000 });
-    await expect(dialog).toContainText("task workspace and its files are kept");
-    await dialog.getByRole("button", { name: "Delete" }).click();
+    const confirmation = testPage.getByTestId("session-delete-confirm-popover");
+    await expect(confirmation).toBeVisible({ timeout: 5_000 });
+    await expect(confirmation).toContainText("task workspace and its files are kept");
+    await expect(session.alertDialog()).toHaveCount(0);
+    await confirmation.getByTestId("session-delete-confirm").click();
 
     // The task workspace and its uncommitted marker survive session deletion.
     await expect

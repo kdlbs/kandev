@@ -6,7 +6,7 @@ wave: 7
 depends_on:
   - "07-files-panel-surface"
 plan: "plan.md"
-spec: "../../specs/tasks/attach-workspace-sources.md"
+spec: "../../specs/tasks/system-design/attach-workspace-sources.md"
 ---
 
 # Task 12: Unified Files workspace actions

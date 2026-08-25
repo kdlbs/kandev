@@ -99,17 +99,44 @@ func OfficeContext() string { return prompts.Get("office-context") }
 
 // FormatOfficeContext injects the active task and session IDs into the Office context.
 func FormatOfficeContext(taskID, sessionID string) string {
+	return FormatOfficeContextWithOptions(taskID, sessionID, false)
+}
+
+const officeStepCompleteInstruction = "This workflow step requires an explicit completion signal. " +
+	"Call step_complete_kandev as the LAST action after every requirement is satisfied. " +
+	"Do not call it before a question or during partial progress. " +
+	"If the tool is not visible, use the client's tool search or discovery with the canonical name.\n"
+
+// FormatOfficeContextWithOptions formats the Office context for the current
+// workflow step. The imperative completion instruction is present only when
+// the step's auto-advance policy requires the signal.
+func FormatOfficeContextWithOptions(taskID, sessionID string, requiresSignal bool) string {
+	instruction := ""
+	if requiresSignal {
+		instruction = officeStepCompleteInstruction
+	}
 	return Resolve("office-context", map[string]string{
-		"task_id":    taskID,
-		"session_id": sessionID,
+		"task_id":                   taskID,
+		"session_id":                sessionID,
+		"step_complete_instruction": instruction,
 	})
 }
 
 // InjectOfficeContext ensures a first-turn prompt has the restricted Office context.
 // trustedContents must contain only exact server-generated system block contents.
 func InjectOfficeContext(taskID, sessionID, prompt string, trustedContents ...string) string {
+	return InjectOfficeContextWithOptions(taskID, sessionID, prompt, false, trustedContents...)
+}
+
+// InjectOfficeContextWithOptions injects the restricted Office context and
+// adds the completion instruction only for a signal-gated workflow step.
+func InjectOfficeContextWithOptions(
+	taskID, sessionID, prompt string,
+	requiresSignal bool,
+	trustedContents ...string,
+) string {
 	return canonicalizeKandevContext(
-		FormatOfficeContext(taskID, sessionID),
+		FormatOfficeContextWithOptions(taskID, sessionID, requiresSignal),
 		prompt,
 		trustedContextContents(sessionID, trustedContents...),
 	)
@@ -132,7 +159,7 @@ func KandevContext() string {
 	})
 }
 
-const userQuestionSection = `- ask_user_question_kandev: Ask the user 1-4 related questions and wait for all answers. Use this whenever you need user input to proceed.
+const userQuestionSection = `- ask_user_question_kandev: Ask the user 1-4 related questions and wait for all answers. Use this whenever you need user input to proceed. Treat this call as a hard user-input barrier: do not call another tool, do not continue working, and do not provide a final response until the tool returns completed user answers or a structured rejection. If the tool reports a validation error before creating a question, correct the request and retry. If an accepted question returns without completed answers or a structured rejection, end your turn immediately. This includes a timeout, disconnect, or pending wait. For an incomplete result, do not infer an answer or continue the task.
 `
 
 const parentQuestionSection = `- ask_parent_question_kandev: Ask the direct parent task one or more critical questions. Use this only when you cannot continue safely without a parent decision. The question is sent to the parent task, and this call MUST end your turn; do not use an operator-question tool.

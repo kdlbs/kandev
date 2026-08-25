@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-idempotent-missing-resources"]
 plan: "plan.md"
-spec: "../../specs/tasks/runtime-cleanup.md"
+spec: "../../specs/tasks/system-design/runtime-cleanup.md"
 ---
 
 # Task 02: Bound Cleanup Retries

@@ -205,6 +205,7 @@ func createTestServiceWithSessionsRepo(
 		TaskEnvironments:  repo,
 		Reviews:           repo,
 		ResourceCleanups:  repo,
+		Usage:             repo,
 	}, eventBus, log, RepositoryDiscoveryConfig{})
 	svc.SetWorkspaceBootstrapper(repo)
 	svc.SetWorkflowStepGetter(&testWorkflowStepGetter{repo: repo})

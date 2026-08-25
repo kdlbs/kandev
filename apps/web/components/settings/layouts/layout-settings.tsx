@@ -1,31 +1,18 @@
 "use client";
 
-import { useState } from "react";
-import {
-  IconAlertTriangle,
-  IconLayoutDashboard,
-  IconRestore,
-  IconTrash,
-} from "@tabler/icons-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { IconAlertTriangle, IconLayoutDashboard, IconRestore } from "@tabler/icons-react";
 import { Alert, AlertDescription, AlertTitle } from "@kandev/ui/alert";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@kandev/ui/alert-dialog";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import { Input } from "@kandev/ui/input";
 import { Separator } from "@kandev/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { LayoutEditor } from "./layout-editor";
 import { LayoutProfileList } from "./layout-profile-list";
+import { LayoutProfileDeleteConfirmation } from "./layout-profile-delete-confirmation";
 import { useLayoutSettings } from "./use-layout-settings";
 import { useTranslation } from "react-i18next";
 import { SettingsTarget } from "@/components/settings/settings-target";
@@ -79,33 +66,12 @@ function ResetBuiltInButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-function DeleteProfileButton({ onClick }: { onClick: () => void }) {
-  const { t } = useTranslation();
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          type="button"
-          size="icon-sm"
-          variant="outline"
-          className="min-h-11 min-w-11 cursor-pointer sm:min-h-8 sm:min-w-8"
-          aria-label={t("settings:deleteLayoutProfile")}
-          onClick={onClick}
-        >
-          <IconTrash className="h-4 w-4" />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{t("settings:deleteThisCustomLayoutAfterConfirmation")}</TooltipContent>
-    </Tooltip>
-  );
-}
-
 function SelectedLayoutHeader({
   controller,
-  onDelete,
+  deleteAction,
 }: {
   controller: Controller;
-  onDelete: () => void;
+  deleteAction: ReactNode;
 }) {
   const { t } = useTranslation();
   return (
@@ -151,7 +117,7 @@ function SelectedLayoutHeader({
         {controller.selectedBuiltInOverride && (
           <ResetBuiltInButton onClick={controller.resetBuiltIn} />
         )}
-        {controller.selectedCustom && <DeleteProfileButton onClick={onDelete} />}
+        {deleteAction}
       </div>
     </div>
   );
@@ -181,51 +147,28 @@ function SelectedLayoutEditor({ controller }: { controller: Controller }) {
   );
 }
 
-function DeleteProfileDialog({
-  controller,
-  open,
-  onOpenChange,
-}: {
-  controller: Controller;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-}) {
-  const { t } = useTranslation();
-  const confirm = () => {
-    controller.deleteSelected();
-    onOpenChange(false);
-  };
-  return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          {/* The profile name is user data — interpolated, never translated. */}
-          <AlertDialogTitle>
-            {t("settings:deleteLayoutProfileNamed", {
-              name: controller.selectedCustom?.name ?? t("settings:layoutProfile"),
-            })}
-          </AlertDialogTitle>
-          <AlertDialogDescription>
-            {controller.selectedCustom?.is_default
-              ? t("settings:theBuiltInDefaultLayoutWill")
-              : t("settings:thisProfileWillBeRemovedWhen")}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer">{t("settings:cancel")}</AlertDialogCancel>
-          <AlertDialogAction className="cursor-pointer" onClick={confirm}>
-            {t("settings:delete")}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
-}
-
 export function LayoutSettings() {
   const { t } = useTranslation();
   const controller = useLayoutSettings();
-  const [deleteOpen, setDeleteOpen] = useState(false);
+  const { isFinePointer } = useResponsiveBreakpoint();
+  const deleteAnchorRef = useRef<HTMLButtonElement>(null);
+  const [deleteProfileId, setDeleteProfileId] = useState<string | null>(null);
+  const selectedCustomId = controller.selectedCustom?.id ?? null;
+  const deleteOpen = deleteProfileId !== null && deleteProfileId === selectedCustomId;
+
+  useEffect(() => {
+    if (deleteProfileId && deleteProfileId !== selectedCustomId) setDeleteProfileId(null);
+  }, [deleteProfileId, selectedCustomId]);
+
+  const requestDelete = () => {
+    if (selectedCustomId) setDeleteProfileId(selectedCustomId);
+  };
+  const closeDelete = () => setDeleteProfileId(null);
+  const confirmDelete = () => {
+    if (!deleteOpen) return;
+    closeDelete();
+    controller.deleteSelected();
+  };
   const invalidName = controller.profiles.some((profile) => !profile.name.trim());
   useSettingsSaveContributor({
     id: "layout-profiles",
@@ -262,11 +205,24 @@ export function LayoutSettings() {
           className="min-w-0 space-y-3"
           aria-label={t("settings:layoutEditorForProfile", { name: controller.selectedName })}
         >
-          <SelectedLayoutHeader controller={controller} onDelete={() => setDeleteOpen(true)} />
+          <SelectedLayoutHeader
+            controller={controller}
+            deleteAction={
+              controller.selectedCustom ? (
+                <LayoutProfileDeleteConfirmation
+                  profile={controller.selectedCustom}
+                  isFinePointer={isFinePointer}
+                  open={deleteOpen}
+                  anchorRef={deleteAnchorRef}
+                  onOpenChange={(open) => (open ? requestDelete() : closeDelete())}
+                  onConfirm={confirmDelete}
+                />
+              ) : null
+            }
+          />
           <SelectedLayoutEditor controller={controller} />
         </section>
       </div>
-      <DeleteProfileDialog controller={controller} open={deleteOpen} onOpenChange={setDeleteOpen} />
     </SettingsTarget>
   );
 }

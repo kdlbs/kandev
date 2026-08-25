@@ -28,7 +28,6 @@ test.describe("Automations settings page", () => {
 
     // Select workflow and step
     await automations.selectWorkflow("E2E Workflow");
-    await automations.selectWorkflowStep(seedData.steps[0].name);
 
     // Save — button should be enabled now
     await expect(automations.saveButton).toBeEnabled({ timeout: 5_000 });
@@ -40,6 +39,58 @@ test.describe("Automations settings page", () => {
     await expect(testPage.getByText("Daily Check")).toBeVisible();
   });
 
+  test("shows continuity choices and persists a reusable automation", async ({
+    testPage,
+    seedData,
+  }) => {
+    const automations = new AutomationsPage(testPage, seedData.workspaceId);
+    await automations.gotoNew();
+
+    await expect(testPage.getByText("Context between runs", { exact: true })).toBeVisible();
+    await expect(
+      testPage.getByText(
+        "Choose whether each run starts fresh or continues the same conversation and files.",
+        { exact: true },
+      ),
+    ).toBeVisible();
+    await expect(
+      testPage.getByText(
+        "Each run starts with a separate conversation and files. These tasks do not appear in Kanban or the sidebar. Use this option for independent jobs and concurrent runs.",
+        { exact: true },
+      ),
+    ).toBeVisible();
+    await expect(
+      testPage.getByText(
+        "Runs continue the same conversation and files, so the agent keeps prior context and changes. Runs execute one at a time.",
+        { exact: true },
+      ),
+    ).toBeVisible();
+
+    const reuse = testPage.getByRole("radio", { name: "Continue the previous session" });
+    await expect(reuse).not.toBeChecked();
+    await reuse.check();
+    await expect(reuse).toBeChecked();
+    await expect(testPage.getByRole("spinbutton")).toHaveValue("1");
+    await expect(testPage.getByRole("spinbutton")).toBeDisabled();
+    await expect(
+      testPage.getByText("This option supports one active run at a time."),
+    ).toBeVisible();
+
+    await testPage.getByTestId("automation-name-input").fill("Reusable Context");
+    await automations.selectFrequency("every day");
+    await automations.selectWorkflow("E2E Workflow");
+    await expect(automations.saveButton).toBeEnabled({ timeout: 5_000 });
+    await automations.saveButton.click();
+
+    await expect(testPage).toHaveURL(/automations$/, { timeout: 15_000 });
+    await automations.openByName("Reusable Context");
+    await expect(testPage).toHaveURL(/automations\/[a-f0-9-]+$/, { timeout: 10_000 });
+    await expect(
+      testPage.getByRole("radio", { name: "Continue the previous session" }),
+    ).toBeChecked();
+    await expect(testPage.getByRole("spinbutton")).toHaveValue("1");
+  });
+
   test("create automation with custom schedule expression", async ({ testPage, seedData }) => {
     const automations = new AutomationsPage(testPage, seedData.workspaceId);
     await automations.gotoNew();
@@ -49,7 +100,6 @@ test.describe("Automations settings page", () => {
 
     // Select workflow and step
     await automations.selectWorkflow("E2E Workflow");
-    await automations.selectWorkflowStep(seedData.steps[0].name);
 
     await expect(automations.saveButton).toBeEnabled({ timeout: 5_000 });
     await automations.saveButton.click();
@@ -78,7 +128,6 @@ test.describe("Automations settings page", () => {
     await automations.nameInput.fill("Original Name");
     await automations.selectFrequency("every hour");
     await automations.selectWorkflow("E2E Workflow");
-    await automations.selectWorkflowStep(seedData.steps[0].name);
     await expect(automations.saveButton).toBeEnabled({ timeout: 5_000 });
     await automations.saveButton.click();
 
@@ -110,7 +159,6 @@ test.describe("Automations settings page", () => {
     await automations.nameInput.fill("To Be Deleted");
     await automations.selectFrequency("every week");
     await automations.selectWorkflow("E2E Workflow");
-    await automations.selectWorkflowStep(seedData.steps[0].name);
     await expect(automations.saveButton).toBeEnabled({ timeout: 5_000 });
     await automations.saveButton.click();
 
@@ -145,7 +193,6 @@ test.describe("Automations settings page", () => {
 
     // Select workflow and step
     await automations.selectWorkflow("E2E Workflow");
-    await automations.selectWorkflowStep(seedData.steps[0].name);
 
     // Save
     await expect(automations.saveButton).toBeEnabled({ timeout: 5_000 });
@@ -190,7 +237,6 @@ test.describe("Automations settings page", () => {
     await automations.nameInput.fill("Reveal Me");
     await testPage.getByText("Or use a webhook instead").click();
     await automations.selectWorkflow("E2E Workflow");
-    await automations.selectWorkflowStep(seedData.steps[0].name);
     await expect(automations.saveButton).toBeEnabled({ timeout: 5_000 });
     await automations.saveButton.click();
 
@@ -218,14 +264,39 @@ test.describe("Automations settings page", () => {
     await expect(secretInput).not.toHaveValue(/^•+$/);
   });
 
-  test("repository defaults to none on a fresh automation", async ({ testPage, seedData }) => {
+  test("repository starts empty with no workspace fallback", async ({ testPage, seedData }) => {
     const automations = new AutomationsPage(testPage, seedData.workspaceId);
     await automations.gotoNew();
 
-    // The repository selector should show "None" by default
-    await expect(testPage.getByTestId("repository-selector")).toContainText(/None|no repository/i, {
-      timeout: 10_000,
-    });
+    await expect(testPage.getByTestId("repo-chip")).toHaveCount(0);
+    await expect(testPage.getByText(/run without repository files/i)).toBeVisible();
+    await expect(testPage.getByText(/use workspace default/i)).toHaveCount(0);
+  });
+
+  test("shares workflow previews and repository branch chips with New Task", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const automations = new AutomationsPage(testPage, seedData.workspaceId);
+    await automations.gotoNew();
+
+    await automations.workflowSelector.click();
+    await expect(testPage.getByText(seedData.steps[0].name, { exact: true })).toBeVisible();
+    await testPage.keyboard.press("Escape");
+
+    const { repositories } = await apiClient.listRepositories(seedData.workspaceId);
+    const repository = repositories[0];
+    expect(repository).toBeTruthy();
+    await testPage.getByRole("button", { name: "Add repository" }).click();
+    await testPage.getByTestId("repo-chip-trigger").click();
+    await testPage.getByText(repository!.name, { exact: true }).last().click();
+
+    await expect(testPage.getByTestId("repo-chip")).toHaveAttribute(
+      "data-repository-id",
+      repository!.id,
+    );
+    await expect(testPage.getByTestId("branch-chip-trigger")).toBeEnabled();
   });
 
   test("create page keeps scrolling inside the settings pane", async ({ testPage, seedData }) => {
@@ -262,7 +333,6 @@ test.describe("Automations settings page", () => {
     await automations.nameInput.fill("Toggle Test");
     await automations.selectFrequency("every day");
     await automations.selectWorkflow("E2E Workflow");
-    await automations.selectWorkflowStep(seedData.steps[0].name);
     await expect(automations.saveButton).toBeEnabled({ timeout: 5_000 });
     await automations.saveButton.click();
     await expect(testPage).toHaveURL(/automations$/, { timeout: 15_000 });

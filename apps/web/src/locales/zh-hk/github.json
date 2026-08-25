@@ -575,5 +575,18 @@
   "timeAgoWeeks_one": "{{count}} 周前",
   "timeAgoWeeks_other": "{{count}} 周前",
   "timeAgoYears_one": "{{count}} 年前",
-  "timeAgoYears_other": "{{count}} 年前"
+  "timeAgoYears_other": "{{count}} 年前",
+  "mergeQueueEstimate_one": "預計合併時間：{{count}} 分鐘",
+  "mergeQueueEstimate_other": "預計合併時間：{{count}} 分鐘",
+  "mergeQueuePosition": "位置 {{position}}",
+  "mergeQueuePositionAndEstimate_one": "位置 {{position}}。預計合併時間：{{count}} 分鐘",
+  "mergeQueuePositionAndEstimate_other": "位置 {{position}}。預計合併時間：{{count}} 分鐘",
+  "mergeQueuePositionAndSubMinuteEstimate": "位置 {{position}}。預計合併時間：少於一分鐘",
+  "mergeQueueStateAwaitingChecks": "等待檢查",
+  "mergeQueueStateLocked": "已鎖定",
+  "mergeQueueStateMergeable": "可合併",
+  "mergeQueueStateQueued": "排隊中",
+  "mergeQueueStateUnmergeable": "不可合併",
+  "mergeQueueStatus": "合併佇列：{{state}}",
+  "mergeQueueSubMinuteEstimate": "預計合併時間：少於一分鐘"
 }

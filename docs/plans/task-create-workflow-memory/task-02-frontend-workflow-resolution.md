@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-backend-workflow-memory"]
 plan: "plan.md"
-spec: "../../specs/tasks/task-create-workflow-memory.md"
+spec: "../../specs/tasks/requirements/task-create-workflow-memory.md"
 ---
 
 # Task 02: Restore the Remembered Workflow

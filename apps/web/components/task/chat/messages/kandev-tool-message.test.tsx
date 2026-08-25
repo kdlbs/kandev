@@ -166,6 +166,7 @@ describe("KandevToolMessage host context", () => {
 const COMPLETED = "COMPLETED";
 const FIX_LOGIN_BUG = "Fix login bug";
 const CHANGE_TOUR = "Change tour";
+const PERMISSION_ACTION_ROW = 'data-testid="permission-action-row"';
 
 // The expandable row only renders its body when expanded. For tests that
 // need to inspect the body, set status to "running" which auto-expands the
@@ -466,6 +467,7 @@ function pendingPermissionMessage(toolCallId: string): Message {
     type: "permission_request",
     created_at: "2026-05-21T10:00:01Z",
     metadata: {
+      request_id: "req-1",
       pending_id: "pend-1",
       tool_call_id: toolCallId,
       action_type: "mcp_tool",
@@ -489,7 +491,7 @@ describe("KandevToolMessage permission UI", () => {
         permissionMessage={pendingPermissionMessage("tc-1")}
       />,
     );
-    expect(html).toContain('data-testid="permission-action-row"');
+    expect(html).toContain(PERMISSION_ACTION_ROW);
     expect(html).toContain('data-testid="permission-approve"');
     expect(html).toContain('data-testid="permission-reject"');
   });
@@ -503,8 +505,25 @@ describe("KandevToolMessage permission UI", () => {
         })}
       />,
     );
-    expect(html).not.toContain('data-testid="permission-action-row"');
+    expect(html).not.toContain(PERMISSION_ACTION_ROW);
     expect(html).not.toContain('data-testid="permission-approve"');
+  });
+
+  it("does not render active actions for a legacy permission without request identity", () => {
+    const permissionMessage = pendingPermissionMessage("tc-1");
+    delete (permissionMessage.metadata as Record<string, unknown>).request_id;
+    const html = renderToStaticMarkup(
+      <KandevToolMessage
+        comment={kandevToolCall({
+          status: "pending",
+          toolName: "mcp__kandev__list_workspaces_kandev",
+        })}
+        permissionMessage={permissionMessage}
+      />,
+    );
+    expect(html).not.toContain(PERMISSION_ACTION_ROW);
+    expect(html).not.toContain('data-testid="permission-approve"');
+    expect(html).not.toContain('data-testid="permission-reject"');
   });
 
   it("renders an amber pending clock icon while waiting for approval", () => {
@@ -555,7 +574,7 @@ describe("KandevToolMessage resolved-permission overlay", () => {
       />,
     );
     expect(html).not.toContain("tabler-icon-clock");
-    expect(html).not.toContain('data-testid="permission-action-row"');
+    expect(html).not.toContain(PERMISSION_ACTION_ROW);
   });
 
   it("does NOT mark the tool complete just because the permission was approved", () => {
