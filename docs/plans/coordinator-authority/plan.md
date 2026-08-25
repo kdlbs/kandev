@@ -15,10 +15,12 @@ parent/child topology. Default-off, flag-gated, audited, and fail-closed.
 | 02  | Authority     | `internal/coordinator/` central authority, capability check, flag gate, audit | ✓    |
 | 03  | Call sites    | `stop_task.go`, `handlers.go`, `task_target_access.go`, `handoff_service.go`  | ✓    |
 | 04  | Agent surface | MCP server descriptions, sysprompt injection                                  | ✓    |
-| 05  | Operator API  | Gin handlers: grant CRUD, audit query                                         |      |
-| 06  | Operator UI   | Settings tab: grants table, grant dialog, revoke, audit viewer                |      |
-| 07  | Docs          | Public operator docs                                                          |      |
+| 05  | Operator API  | Gin handlers: grant CRUD, audit query                                         | ✓    |
+| 06  | Operator UI   | Settings tab: grants table, grant dialog, revoke, audit viewer                | ✓    |
+| 07  | Docs          | Public operator docs                                                          | ✓    |
 | 08  | Specs & Plan  | Requirements, system design, ADR, plan file                                   | ✓    |
+| 09  | Runtime QA    | Task-owned exact-head auth-enabled: grant/revoke/denied-after-revoke/audit     | ✓    |
+| 10  | CI fixup      | Frontend test fix, thread resolution, credential audit, push                   | ✓    |
 
 ## Dependencies
 
