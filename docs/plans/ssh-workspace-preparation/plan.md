@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ssh-executor/spec.md
+spec: docs/specs/executors/requirements/ssh-executor.md
 issue: https://github.com/kdlbs/kandev/issues/2413
 created: 2026-08-08
 status: implemented

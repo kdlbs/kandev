@@ -1,7 +1,7 @@
 ---
-spec: docs/specs/agent-resume-runtime-recovery/spec.md
+spec: docs/specs/agents/requirements/agent-resume-runtime-recovery.md
 related_specs:
-  - docs/specs/agents/runtime-updates.md
+  - docs/specs/agents/requirements/runtime-updates.md
 created: 2026-07-27
 status: implemented
 ---

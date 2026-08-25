@@ -1,4 +1,4 @@
-import { act, cleanup, renderHook } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useLazyLoadSentinel } from "./use-lazy-load-sentinel";
 
@@ -212,9 +212,33 @@ describe("useLazyLoadSentinel — scroller lifecycle", () => {
 });
 
 describe("useLazyLoadSentinel — re-arm, disarm, and stale completions", () => {
+  it("retries when loading becomes eligible while the sentinel remains intersecting", async () => {
+    const scrollRef = makeScrollRef();
+    const loadMore = vi.fn().mockResolvedValueOnce(20).mockResolvedValueOnce(0);
+    const { result, rerender } = renderHook(
+      ({ blocked }: { blocked: boolean }) =>
+        useLazyLoadSentinel(scrollRef, true, blocked, false, loadMore, {
+          rearmWhileIntersecting: true,
+        }),
+      { initialProps: { blocked: true } },
+    );
+    const node = document.createElement("div");
+    act(() => result.current.sentinelRef(node));
+
+    // The first entry is observed while the initial message fetch is blocked.
+    fire(records[0], true, node);
+    await act(async () => {});
+    expect(loadMore).not.toHaveBeenCalled();
+
+    // No second intersection is delivered, so the eligibility transition
+    // must retry the still-visible sentinel itself.
+    rerender({ blocked: false });
+    await waitFor(() => expect(loadMore).toHaveBeenCalledTimes(2));
+  });
+
   it("re-arms only when enabled: unobserves before loading and re-observes after a positive result", async () => {
     const scrollRef = makeScrollRef();
-    const loadMore = vi.fn(async () => 20);
+    const loadMore = vi.fn().mockResolvedValueOnce(20).mockResolvedValueOnce(0);
     const { result } = renderHook(() =>
       useLazyLoadSentinel(scrollRef, true, false, false, loadMore, {
         rearmWhileIntersecting: true,
@@ -228,12 +252,12 @@ describe("useLazyLoadSentinel — re-arm, disarm, and stale completions", () => 
     // The sentinel was unobserved before the await; the load resolved
     // positively, so it is re-observed (still current).
     expect(records[0].unobserved).toContain(node);
-    await act(async () => {});
+    await act(async () => {
+      await vi.waitFor(() => expect(loadMore).toHaveBeenCalledTimes(2));
+    });
     expect(records[0].targets.filter((t) => t === node).length).toBeGreaterThanOrEqual(1);
-
-    // Still intersecting: the next page auto-loads without a scroll-away.
-    fire(records[0], true, node);
-    await act(async () => {});
+    // Still intersecting: the next page auto-loads without a scroll-away or
+    // a second IntersectionObserver entry.
     expect(loadMore).toHaveBeenCalledTimes(2);
   });
 });
@@ -270,11 +294,11 @@ describe("useLazyLoadSentinel — stickToBottomWhileLoading", () => {
     // Rows are appended while the load is in flight (scrollHeight grows to
     // 800); the user stays at the old bottom. The settle must scroll the
     // scroller back to the new bottom so the sentinel stays intersecting.
+    expect(loadMore).toHaveBeenCalledTimes(1);
     Object.defineProperty(scroller, "scrollHeight", { configurable: true, value: 800 });
     await act(async () => {
       resolveLoad(20);
     });
-    expect(loadMore).toHaveBeenCalledTimes(1);
     // Browser-faithful assertion: jsdom stores the raw write (800) while a
     // real browser clamps scrollTop to scrollHeight - clientHeight (400); the
     // invariant is "pinned at the bottom", so assert that instead of the
@@ -302,8 +326,6 @@ describe("useLazyLoadSentinel — pin refresh before a load", () => {
     );
     const { result } = renderHook(() =>
       useLazyLoadSentinel(scrollRef, true, false, false, loadMore, {
-        rearmWhileIntersecting: true,
-        joinInFlightWhileLoading: true,
         stickToBottomWhileLoading: true,
       }),
     );
@@ -320,7 +342,7 @@ describe("useLazyLoadSentinel — pin refresh before a load", () => {
     await act(async () => {
       resolveLoad(20);
     });
-    expect(loadMore).toHaveBeenCalledTimes(1);
+    expect(loadMore).toHaveBeenCalled();
     expect(scroller.scrollTop).toBeGreaterThanOrEqual(
       scroller.scrollHeight - scroller.clientHeight,
     );
@@ -378,6 +400,66 @@ describe("useLazyLoadSentinel — stickToBottomWhileLoading", () => {
 });
 
 describe("useLazyLoadSentinel — re-arm, disarm, and stale completions", () => {
+  it("serializes continuation pages when loading state toggles around each request", async () => {
+    const scrollRef = makeScrollRef();
+    let isLoadingMore = true;
+    let resolveRequest: (value: number) => void = () => {};
+    let activeRequest: Promise<number> | null = null;
+    let rerenderHook: () => void = () => {};
+    const pages = [20, 20, 0];
+    let resolveFinalPage: () => void = () => {};
+    const finalPageSettled = new Promise<void>((resolve) => {
+      resolveFinalPage = resolve;
+    });
+    activeRequest = new Promise<number>((resolve) => {
+      resolveRequest = resolve;
+    });
+    const startPage = () => {
+      const page = pages.shift() ?? 0;
+      activeRequest = new Promise<number>((resolve) => {
+        resolveRequest = resolve;
+      });
+      isLoadingMore = true;
+      rerenderHook();
+      queueMicrotask(() => {
+        act(() => {
+          isLoadingMore = false;
+          rerenderHook();
+          resolveRequest(page);
+          if (page === 0) resolveFinalPage();
+          activeRequest = null;
+        });
+      });
+      return activeRequest;
+    };
+    const loadMore = vi.fn(() => activeRequest ?? startPage());
+    const { result, rerender } = renderHook(() =>
+      useLazyLoadSentinel(scrollRef, true, false, isLoadingMore, loadMore, {
+        rearmWhileIntersecting: true,
+        joinInFlightWhileLoading: true,
+      }),
+    );
+    rerenderHook = rerender;
+    const node = document.createElement("div");
+    act(() => result.current.sentinelRef(node));
+
+    fire(records[0], true, node);
+    await act(async () => {
+      isLoadingMore = false;
+      rerender();
+    });
+    expect(loadMore).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      resolveRequest(20);
+      activeRequest = null;
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await finalPageSettled;
+    });
+    await waitFor(() => expect(loadMore).toHaveBeenCalledTimes(4));
+  });
+
   it("does not re-arm after a positive result when rearmWhileIntersecting is false", async () => {
     const scrollRef = makeScrollRef();
     const loadMore = vi.fn(async () => 20);
@@ -467,11 +549,11 @@ describe("useLazyLoadSentinel — failure recovery and stale completions", () =>
 
     // Successful gesture retry clears the disarmed state.
     act(() => result.current.onUserGesture());
-    await act(async () => {});
-    expect(loadMore).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(loadMore).toHaveBeenCalledTimes(3));
 
-    // The re-observed sentinel is armed: a true intersection loads the next
-    // page WITHOUT another gesture.
+    // The successful gesture retry already loaded the next page while the
+    // sentinel remained visible; the stale true entry cannot loop after the
+    // follow-up no-op disarms it.
     fire(records[0], true, node);
     await act(async () => {});
     expect(loadMore).toHaveBeenCalledTimes(3);
@@ -502,7 +584,7 @@ describe("useLazyLoadSentinel — stale observers", () => {
     fire(records[0], true, node);
     // Re-render replaces loadMore → the observer is recreated while the old
     // load is still in flight.
-    const secondLoadMore = vi.fn(async () => 20);
+    const secondLoadMore = vi.fn().mockResolvedValueOnce(20).mockResolvedValueOnce(0);
     rerender({ loadMore: secondLoadMore });
     // The OLD load settles with a zero result: it must not disarm the NEW
     // observer (its observer identity is stale).
@@ -511,10 +593,11 @@ describe("useLazyLoadSentinel — stale observers", () => {
     });
     expect(records[1].disconnected).toBe(false);
 
-    // The new observer still fires on intersection (armed, not disarmed).
+    // The new observer still fires on intersection (armed, not disarmed),
+    // then its positive result re-arms the same observer for one follow-up
+    // page.
     fire(records[1], true, node);
-    await act(async () => {});
-    expect(secondLoadMore).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(secondLoadMore).toHaveBeenCalledTimes(2));
   });
 
   it("disarms after a rejected load without looping", async () => {

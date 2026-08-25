@@ -159,12 +159,12 @@ test.describe("Mobile sidebar task actions", () => {
     expect(cardBox.y).toBeGreaterThan(0);
   });
 
-  test("keeps the archive confirmation readable on a phone", async ({
+  test("keeps the inline archive confirmation readable on a phone", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
-    const task = await apiClient.seedTask(seedData.workspaceId, "Mobile archive dialog target", {
+    const task = await apiClient.seedTask(seedData.workspaceId, "Mobile archive inline target", {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
     });
@@ -177,62 +177,31 @@ test.describe("Mobile sidebar task actions", () => {
     const drawer = testPage.getByRole("dialog", { name: "Tasks" });
     const taskRow = drawer
       .getByTestId("sidebar-task-item")
-      .filter({ hasText: "Mobile archive dialog target" });
+      .filter({ hasText: "Mobile archive inline target" });
     await taskRow.getByRole("button", { name: "Task actions" }).tap();
     await testPage.getByRole("menuitem", { name: "Archive", exact: true }).tap();
 
-    const dialog = testPage.getByRole("alertdialog");
-    await expect(dialog).toBeVisible();
-    await expect(dialog).toHaveClass(/font-sans/);
-    const header = dialog.locator('[data-slot="alert-dialog-header"]');
-    await expect
-      .poll(async () =>
-        header.evaluate((element) => {
-          const style = getComputedStyle(element);
-          return { justifyItems: style.justifyItems, textAlign: style.textAlign };
-        }),
-      )
-      .toEqual({ justifyItems: "start", textAlign: "left" });
-    await expect(dialog.locator('[data-slot="alert-dialog-description"]')).toHaveClass(/text-sm/);
-    await dialog.evaluate(async (element) => {
-      await Promise.all(
-        element
-          .getAnimations({ subtree: true })
-          .map((animation) => animation.finished.catch(() => undefined)),
-      );
-    });
+    const confirmation = taskRow.getByTestId("task-archive-inline-confirmation");
+    await expect(confirmation).toBeVisible();
+    await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
+    await expect(confirmation).toContainText("Mobile archive inline target");
 
-    const [dialogBox, viewport] = await Promise.all([
-      dialog.boundingBox(),
-      testPage.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight })),
-    ]);
-    if (!dialogBox) throw new Error("archive confirmation dialog has no layout box");
-    expect(dialogBox.width).toBeGreaterThanOrEqual(viewport.width - 40);
-    expect(dialogBox.x).toBeGreaterThanOrEqual(8);
-    expect(dialogBox.x + dialogBox.width).toBeLessThanOrEqual(viewport.width - 8);
-    expect(dialogBox.y).toBeGreaterThanOrEqual(8);
-    expect(dialogBox.y + dialogBox.height).toBeLessThanOrEqual(viewport.height - 8);
+    for (const button of [
+      confirmation.getByRole("button", { name: "Cancel" }),
+      confirmation.getByTestId("archive-task-confirm"),
+    ]) {
+      const box = await button.boundingBox();
+      if (!box) throw new Error("inline archive action has no layout box");
+      expect(box.width).toBeGreaterThanOrEqual(44);
+      expect(box.height).toBeGreaterThanOrEqual(44);
+      await expect(button).toBeInViewport();
+    }
 
-    const typography = await dialog.evaluate((element) => {
-      const description = element.querySelector('[data-slot="alert-dialog-description"]');
-      const cancel = element.querySelector('[data-slot="alert-dialog-cancel"]');
-      const action = element.querySelector('[data-slot="alert-dialog-action"]');
-      return {
-        dialogFontFamily: getComputedStyle(element).fontFamily,
-        descriptionFontFamily: description ? getComputedStyle(description).fontFamily : "",
-        descriptionFontSize: description ? getComputedStyle(description).fontSize : "",
-        cancelFontFamily: cancel ? getComputedStyle(cancel).fontFamily : "",
-        cancelFontSize: cancel ? getComputedStyle(cancel).fontSize : "",
-        actionFontFamily: action ? getComputedStyle(action).fontFamily : "",
-        actionFontSize: action ? getComputedStyle(action).fontSize : "",
-      };
-    });
-    expect(typography.dialogFontFamily).toContain("Figtree");
-    expect(typography.descriptionFontFamily).toBe(typography.dialogFontFamily);
-    expect(typography.cancelFontFamily).toBe(typography.dialogFontFamily);
-    expect(typography.descriptionFontSize).toBe(typography.cancelFontSize);
-    expect(typography.actionFontFamily).toBe(typography.dialogFontFamily);
-    expect(typography.actionFontSize).toBe(typography.descriptionFontSize);
+    const pageWidth = await testPage.evaluate(() => ({
+      scroll: document.documentElement.scrollWidth,
+      client: document.documentElement.clientWidth,
+    }));
+    expect(pageWidth.scroll).toBeLessThanOrEqual(pageWidth.client);
   });
 
   test("keeps the tablet task switcher as a left-side sheet", async ({

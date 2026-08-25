@@ -7,7 +7,7 @@ depends_on:
   - "01-timing-profile"
   - "02-shard-planner"
 plan: "plan.md"
-spec: "../../specs/e2e-duration-aware-sharding/spec.md"
+spec: "../../specs/platform/requirements/e2e-duration-aware-sharding.md"
 ---
 
 # Task 03: Wire manifests into the CI workflow

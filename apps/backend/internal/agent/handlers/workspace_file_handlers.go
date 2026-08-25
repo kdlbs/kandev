@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"unicode/utf8"
@@ -117,11 +118,22 @@ func (h *WorkspaceFileHandlers) wsGetFileContent(ctx context.Context, msg *ws.Me
 	// Request file content from agentctl
 	response, err := client.RequestFileContent(ctx, req.Path, req.Repo)
 	if err != nil {
+		if isMissingFileContentError(err) {
+			h.logger.Debug("file not found (expected for deleted or stale files)",
+				zap.String("session_id", req.SessionID),
+				zap.String("path", req.Path))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, err.Error(), nil)
+		}
 		h.logger.Error("failed to get file content", zap.Error(err), zap.String("session_id", req.SessionID), zap.String("path", req.Path))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, fmt.Sprintf("Failed to get file content: %v", err), nil)
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, response)
+}
+
+func isMissingFileContentError(err error) bool {
+	// The client derives this sentinel from the agentctl file-content 404 status.
+	return errors.Is(err, agentctl.ErrFileNotFound)
 }
 
 // wsGetFileContentAtRef handles workspace.file.get_at_ref action

@@ -183,6 +183,8 @@ export type ModelConfigSelectorProps = {
   placeholder?: string;
   ariaLabel?: string;
   variant?: "compact" | "field";
+  /** Aligns the picker with the trigger edge for context-specific settings surfaces. */
+  popoverAlign?: "start" | "center" | "end";
   popoverSide?: "top" | "bottom";
   triggerClassName?: string;
   triggerSummary?: "all" | "changed";
@@ -274,6 +276,7 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
   placeholder,
   ariaLabel,
   variant = "field",
+  popoverAlign = "end",
   popoverSide = "bottom",
   triggerClassName: customTriggerClassName,
   triggerSummary = "all",
@@ -333,7 +336,7 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
         variant={variant}
       />
       <PopoverContent
-        align="end"
+        align={popoverAlign}
         side={popoverSide}
         className="w-[min(24rem,calc(100vw-1rem))] max-h-[min(32rem,calc(100vh-1rem))] gap-2 overflow-hidden p-2"
       >

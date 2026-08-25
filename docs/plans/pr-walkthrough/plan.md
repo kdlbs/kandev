@@ -1,7 +1,8 @@
 ---
-spec: docs/specs/pr-walkthrough/spec.md
+spec: docs/specs/ui/requirements/pr-walkthrough.md
 created: 2026-08-22
-status: implementing
+status: superseded
+superseded_by: ../pr-walkthrough-portable-runner-fix/plan.md
 ---
 
 # Implementation Plan: Pull Request Walkthrough Generation
@@ -101,7 +102,9 @@ The publication contract is:
 - Secret-key secret: `CLOUDFLARE_R2_SECRET_ACCESS_KEY`.
 - Existing account variable: `CLOUDFLARE_ACCOUNT_ID` remains available for
   endpoint construction and is not a secret.
-- Object key: `pr/<pull-request-number>/<head-sha>.html`.
+- Object key: `pr/<pull-request-number>/<short-head-sha>.html`, where
+  `short-head-sha` is the first 12 lowercase hexadecimal characters of the
+  exact head SHA.
 - Object metadata: `Content-Type: text/html; charset=utf-8` and a short cache
   lifetime that does not outlive lifecycle deletion or same-head reruns.
 
@@ -235,7 +238,7 @@ Completed 2026-08-22:
 Wave 1:
 
 - [x] [task-01-walkthrough-skill-renderer](task-01-walkthrough-skill-renderer.md)
-- [ ] [task-02-agent-rendering-contract](task-02-agent-rendering-contract.md)
+- [x] [task-02-agent-rendering-contract](task-02-agent-rendering-contract.md) (superseded by the portable filesystem contract)
 
 Wave 2:
 

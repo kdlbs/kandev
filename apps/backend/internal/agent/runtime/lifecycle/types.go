@@ -50,7 +50,7 @@ type AgentExecution struct {
 	WorkspaceSourceRoots []string             // Canonical durable source roots permitted by agentctl file operations
 	ACPSessionID         string               // ACP session ID to resume, if available
 	AgentCommand         string               // Command to start the agent subprocess
-	ContinueCommand      string               // Command for follow-up prompts (one-shot agents like Amp)
+	ContinueCommand      string               // Command for follow-up prompts (one-shot agents)
 	AgentArgs            []string             // Structured argv for AgentCommand
 	ContinueArgs         []string             // Structured argv for ContinueCommand
 	RuntimeName          agentruntime.Runtime // Name of the runtime used (e.g., "docker", "standalone")
@@ -827,7 +827,9 @@ type LaunchRequest struct {
 	WorkspaceID       string // Kandev workspace ID — used to build the scratch dir for repo-less tasks
 	SessionID         string
 	TaskEnvironmentID string // Env this session belongs to (shared across sessions in same task)
-	TaskTitle         string // Human-readable task title for semantic worktree naming
+	// WorkspaceReuseRequired selects attach-only environment preparation.
+	WorkspaceReuseRequired bool
+	TaskTitle              string // Human-readable task title for semantic worktree naming
 	// AgentProfileID is the stable Office identity for routed Office launches.
 	// For non-Office launches it is also the concrete execution profile.
 	AgentProfileID string

@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/prompt-paste-nerd-font-glyphs/spec.md"
+spec: "../../specs/ui/requirements/prompt-paste-nerd-font-glyphs.md"
 parallelism: sequential
 ---
 

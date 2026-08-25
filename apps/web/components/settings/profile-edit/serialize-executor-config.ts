@@ -16,6 +16,7 @@ export type ExecutorProfileConfigForm = {
   imageTag: string;
   isSSH: boolean;
   sshShell: string;
+  sshReclaimTaskDir: boolean;
 };
 
 export function buildSaveConfig(
@@ -40,6 +41,7 @@ export function buildSaveConfig(
   setTextConfig(config, "dockerfile", form.isDocker ? form.dockerfile : "");
   setTextConfig(config, "image_tag", form.isDocker ? form.imageTag.trim() : "");
   setTextConfig(config, "ssh_shell", form.isSSH ? form.sshShell.trim() : "");
+  setBoolConfig(config, "ssh_reclaim_task_dir", form.isSSH, form.sshReclaimTaskDir);
   return config;
 }
 
@@ -54,6 +56,23 @@ function setJsonConfig(
     : value !== null && typeof value === "object" && Object.keys(value).length > 0;
   if (enabled && hasValue) config[key] = JSON.stringify(value);
   else delete config[key];
+}
+
+// setBoolConfig writes an explicit "true"/"false" rather than deleting the key
+// when off, so a profile records that reclamation was considered and declined.
+// The backend treats anything other than "true" as disabled, so both the
+// absent and the "false" case keep the pre-existing keep-forever behavior.
+function setBoolConfig(
+  config: Record<string, string>,
+  key: string,
+  enabled: boolean,
+  value: boolean,
+): void {
+  if (!enabled) {
+    delete config[key];
+    return;
+  }
+  config[key] = value ? "true" : "false";
 }
 
 function setTextConfig(config: Record<string, string>, key: string, value: string): void {

@@ -14,12 +14,12 @@
 > (`routing.AgentOverrides.TierPerReason`). Onboarding seeds
 > `Economy` for all three reasons so the default behaviour matches
 > the legacy cheap-profile shortcut without an agent edit. See the
-> updated spec/plan under `docs/specs/office-provider-routing/` for
+> updated spec/plan under `docs/specs/office/requirements/routing.md` for
 > the unified model.
 
 ## Context
 
-Office provider routing (`docs/specs/office-provider-routing/`) introduced a workspace-scoped routing surface that maps every Office agent to a *logical* provider order + model tier (frontier / balanced / economy). The launch path picks the first eligible provider for the agent's tier and falls back across providers on classified provider-unavailable errors.
+Office provider routing (`docs/specs/office/requirements/routing.md`) introduced a workspace-scoped routing surface that maps every Office agent to a *logical* provider order + model tier (frontier / balanced / economy). The launch path picks the first eligible provider for the agent's tier and falls back across providers on classified provider-unavailable errors.
 
 A pre-existing field, `agent_settings.cheap_agent_profile_id` (`apps/backend/internal/agent/settings/models/models.go`), solves a different but overlapping problem: it lets a single agent profile name a *cheaper variant* profile to use on specific wake reasons (heartbeats today; potentially other low-stakes triggers later). The variant is a concrete `AgentProfile` row with its own provider/model/mode — orthogonal to the workspace tier mapping.
 
@@ -48,6 +48,6 @@ Today there is no caller-level interaction: routing is gated on `office_workspac
 
 ## References
 
-- `docs/specs/office-provider-routing/spec.md` — routing feature spec
-- `docs/specs/office-provider-routing/plan.md` — routing implementation plan
+- `docs/specs/office/requirements/routing.md` — routing feature requirements
+- `docs/plans/office-execution-profile-routing/plan.md` — routing implementation plan
 - `apps/backend/internal/agent/settings/models/models.go` — `AgentSettings.CheapAgentProfileID`

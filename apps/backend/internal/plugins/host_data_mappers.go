@@ -244,3 +244,60 @@ func sessionCodeStatsModelToDTO(s *analyticsmodels.SessionCodeStats) pluginsdk.S
 	}
 	return dto
 }
+
+// interactionModelToDTO converts the assembled durable interaction into the
+// public plugin DTO. Timestamps become RFC3339 UTC strings like every other
+// Host DTO. The permission title is the agent's prompt text, which the
+// message row stores as its content — it is agent-authored, not a
+// kandev-injected system block, so it needs no sanitization pass.
+func interactionModelToDTO(i *taskmodels.Interaction) pluginsdk.Interaction {
+	return pluginsdk.Interaction{
+		ID:                i.ID,
+		Kind:              string(i.Kind),
+		TaskID:            i.TaskID,
+		SessionID:         i.SessionID,
+		TurnID:            i.TurnID,
+		Status:            string(i.Status),
+		Title:             i.Title,
+		Context:           i.Context,
+		ToolCallID:        i.ToolCallID,
+		ActionType:        i.ActionType,
+		Options:           interactionOptionsToDTOs(i.Options),
+		Questions:         interactionQuestionsToDTOs(i.Questions),
+		AgentDisconnected: i.AgentDisconnected,
+		CreatedAt:         i.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt:         i.UpdatedAt.UTC().Format(time.RFC3339),
+	}
+}
+
+func interactionOptionsToDTOs(options []taskmodels.InteractionOption) []pluginsdk.InteractionOption {
+	if len(options) == 0 {
+		return nil
+	}
+	out := make([]pluginsdk.InteractionOption, len(options))
+	for i, option := range options {
+		out[i] = pluginsdk.InteractionOption{
+			OptionID:    option.ID,
+			Label:       option.Label,
+			Kind:        option.Kind,
+			Description: option.Description,
+		}
+	}
+	return out
+}
+
+func interactionQuestionsToDTOs(questions []taskmodels.InteractionQuestion) []pluginsdk.InteractionQuestion {
+	if len(questions) == 0 {
+		return nil
+	}
+	out := make([]pluginsdk.InteractionQuestion, len(questions))
+	for i, question := range questions {
+		out[i] = pluginsdk.InteractionQuestion{
+			ID:      question.ID,
+			Title:   question.Title,
+			Prompt:  question.Prompt,
+			Options: interactionOptionsToDTOs(question.Options),
+		}
+	}
+	return out
+}

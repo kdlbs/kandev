@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/integrations/clickable-integration-cards.md
+spec: docs/specs/integrations/requirements/clickable-integration-cards.md
 created: 2026-08-21
 status: complete
 ---

@@ -15,7 +15,7 @@ import (
 )
 
 // Status is a plugin's lifecycle state, per the state machine in
-// docs/specs/plugins/spec.md ("State machine"):
+// docs/specs/plugins/requirements/plugins.md ("State machine"):
 //
 //	registered -> active -> disabled -> uninstalled
 //	registered|active|disabled --failure--> error

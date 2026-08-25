@@ -40,7 +40,16 @@ type QuickChatSession struct {
 // most recently active first. It is the single source of truth for the quick
 // chat tab strip: the boot payload and the runtime resync endpoint both read it,
 // so a client that reloads and a client that resyncs converge on the same list.
+//
+// Quick-chat names are user-authored text, so the workspace check belongs here
+// rather than in the callers: the resync endpoint takes its workspace ID
+// straight from the URL. Today listQuickChatTasks also happens to authorize on
+// the way through ListTasksByWorkspace, but that is an implementation detail of
+// how this list is assembled, not a guarantee this function should lean on.
 func (s *Service) ListQuickChatSessions(ctx context.Context, workspaceID string) ([]QuickChatSession, error) {
+	if err := s.authorizeWorkspaceID(ctx, workspaceID); err != nil {
+		return nil, err
+	}
 	tasks, err := s.listQuickChatTasks(ctx, workspaceID)
 	if err != nil {
 		return nil, err

@@ -5,8 +5,8 @@ status: done
 wave: 2
 depends_on: ["01-classify-session-challenges"]
 plan: "plan.md"
-spec: "../../specs/auth/spec.md"
-related_spec: "../../specs/integrations/github-authentication.md"
+spec: "../../specs/auth/requirements/auth.md"
+related_spec: "../../specs/integrations/requirements/github-authentication.md"
 ---
 
 # Task 02: Prove provider page behavior end to end

@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/pr-walkthrough/spec.md"
+spec: "../../specs/ui/requirements/pr-walkthrough.md"
 ---
 
 # Task 02: Fixed Renderer Contract

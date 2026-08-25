@@ -75,6 +75,32 @@ func TestBuildPrompt_BlockersResolved(t *testing.T) {
 	}
 }
 
+func TestBuildPrompt_LegacyRunReasonsRemainCompatible(t *testing.T) {
+	tests := []struct {
+		name     string
+		reason   string
+		contains string
+	}{
+		{name: "blockers resolved", reason: "blockers_resolved", contains: "All blockers"},
+		{name: "children completed", reason: "children_completed", contains: "All child tasks"},
+		{name: "review started", reason: "review_started", contains: "You are reviewing"},
+		{name: "approval started", reason: "approval_started", contains: "You are approving"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prompt := service.BuildPrompt(&service.PromptContext{
+				Reason:         tt.reason,
+				TaskIdentifier: "KAN-legacy",
+				TaskTitle:      "Legacy workflow task",
+			})
+			if !strings.Contains(prompt, tt.contains) {
+				t.Errorf("legacy reason %q should use its existing prompt, got:\n%s", tt.reason, prompt)
+			}
+		})
+	}
+}
+
 func TestBuildPrompt_ApprovalResolved(t *testing.T) {
 	pc := &service.PromptContext{
 		Reason:         service.RunReasonApprovalResolved,
@@ -342,7 +368,7 @@ func TestBuildPrompt_ReviewStage(t *testing.T) {
 		"Auth service",
 		"Task description:",
 		"Implement OAuth2 flow.",
-		"Builder's comments:",
+		"Recent task comments:",
 		"Done the implementation",
 		"Added tests",
 		"Review the implementation carefully",
@@ -358,6 +384,25 @@ func TestBuildPrompt_ReviewStage(t *testing.T) {
 	// Should NOT contain the default work assignment phrasing.
 	if strings.Contains(prompt, "You have been assigned") {
 		t.Errorf("review prompt should not contain assignment phrasing:\n%s", prompt)
+	}
+}
+
+func TestBuildPrompt_ApprovalStageUsesNeutralLifecycleLanguage(t *testing.T) {
+	prompt := service.BuildPrompt(&service.PromptContext{
+		Reason:         service.RunReasonTaskAssigned,
+		TaskIdentifier: "KAN-11",
+		TaskTitle:      "Approve the deployment",
+		StageType:      "approval",
+	})
+
+	if !strings.Contains(prompt, "Confirm that the approval requirements are met") {
+		t.Errorf("approval prompt should describe its own requirements:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "All reviewers have approved") {
+		t.Errorf("approval prompt should not assume a prior review:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "mark the task done") {
+		t.Errorf("approval prompt should not assume approval is the final lifecycle step:\n%s", prompt)
 	}
 }
 

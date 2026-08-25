@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/platform/workspace-git-status.md"
+spec: "../../specs/platform/requirements/workspace-git-status.md"
 ---
 
 # Task 01: Add `GitOperator.IsAncestor` helper
@@ -16,7 +16,7 @@ inline.
 
 ## Context / Inputs
 
-- Spec: `docs/specs/platform/workspace-git-status.md` → "Base-commit staleness and refresh"
+- Spec: `docs/specs/platform/requirements/workspace-git-status.md` → "Base-commit staleness and refresh"
   (a stored base is stale when it is a strict ancestor of `merge-base(HEAD, origin/<base_branch>)`).
 - Existing helpers to mirror for style/error handling: `GetMergeBase` and `GetRevParse` in
   `apps/backend/internal/agentctl/server/process/git_log.go` (both use `runGitCommand`).

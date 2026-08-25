@@ -63,14 +63,18 @@ func (s *sequencePrimary) WorkflowStepIDForTask(_ context.Context, _ string) (st
 	return "step-1", nil
 }
 
-// fakeParticipants returns a static slice for any step.
+// fakeParticipants returns a static slice for any step. ListStepParticipants
+// and ListTaskParticipants both return the same f.list, matching (and
+// exercising) the union/dedupe path that gatherParticipantSlate feeds into
+// canonicalizeByTaskRoleAgent/collapseByRoleAgent.
 type fakeParticipants struct {
-	list          []ParticipantInfo
-	err           error
-	taskStepID    string
-	stepID        *string
-	taskID        *string
-	resolveTaskID *string
+	list              []ParticipantInfo
+	err               error
+	taskStepID        string
+	stepID            *string
+	taskID            *string
+	resolveTaskID     *string
+	taskParticipantID *string
 }
 
 func (f fakeParticipants) ListStepParticipants(_ context.Context, stepID, taskID string) ([]ParticipantInfo, error) {
@@ -90,7 +94,10 @@ func (f fakeParticipants) WorkflowStepIDForTask(_ context.Context, taskID string
 	return f.taskStepID, f.err
 }
 
-func (f fakeParticipants) ListTaskParticipants(_ context.Context, _ string) ([]ParticipantInfo, error) {
+func (f fakeParticipants) ListTaskParticipants(_ context.Context, taskID string) ([]ParticipantInfo, error) {
+	if f.taskParticipantID != nil {
+		*f.taskParticipantID = taskID
+	}
 	return f.list, f.err
 }
 
@@ -390,19 +397,28 @@ func TestQueueRunCallback_TargetParticipantRole(t *testing.T) {
 	}
 }
 
+// A cross-task participant_role target must stay step-scoped to the target
+// task's resolved current step (WO-30 review round 1: the any-step slate is
+// only safe for the same-task case, since only there does in.State.WorkflowID
+// scope the read to the task's actual current workflow — see
+// resolveParticipantRoleStepScoped). This asserts the single
+// ListStepParticipants(stepID, taskID) call the pre-WO-30 code made, and that
+// the any-step/any-workflow ListTaskParticipants query is never reached.
 func TestQueueRunCallback_ParticipantRoleUsesResolvedTargetStep(t *testing.T) {
 	q := &fakeRunQueue{}
 	var listedStepID string
-	var listedTaskID string
+	var listedStepTaskID string
+	var listedPerTaskID string
 	var stepResolverTaskID string
 	parts := fakeParticipants{
 		list: []ParticipantInfo{
 			{ID: "p-target", Role: "reviewer", AgentProfileID: "rev-target"},
 		},
-		taskStepID:    "target-step",
-		stepID:        &listedStepID,
-		taskID:        &listedTaskID,
-		resolveTaskID: &stepResolverTaskID,
+		taskStepID:        "target-step",
+		stepID:            &listedStepID,
+		taskID:            &listedStepTaskID,
+		resolveTaskID:     &stepResolverTaskID,
+		taskParticipantID: &listedPerTaskID,
 	}
 	cb := QueueRunCallback{Adapter: q, Participants: parts}
 	in := newQueueRunInput("participant_role:reviewer", "target-task")
@@ -420,8 +436,11 @@ func TestQueueRunCallback_ParticipantRoleUsesResolvedTargetStep(t *testing.T) {
 	if listedStepID != "target-step" {
 		t.Fatalf("participants listed for step %q, want target-step", listedStepID)
 	}
-	if listedTaskID != "target-task" {
-		t.Fatalf("participants listed for task %q, want target-task", listedTaskID)
+	if listedStepTaskID != "target-task" {
+		t.Fatalf("cross-task participant lookup must stay step-scoped to task_id=target-task, got %q", listedStepTaskID)
+	}
+	if listedPerTaskID != "" {
+		t.Fatalf("cross-task participant_role must not reach the any-step/any-workflow ListTaskParticipants query, got task_id %q", listedPerTaskID)
 	}
 	got := q.calls[0]
 	if got.WorkflowStepID != "target-step" {

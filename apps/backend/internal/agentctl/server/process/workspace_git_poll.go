@@ -113,6 +113,8 @@ func (wt *WorkspaceTracker) handleGitPollTimerTick(ctx context.Context, consecut
 // (commits, branch switches, staging). Returns true if the loop should stop.
 // The deferred flag reset ensures gitPollRunning is cleared even on panic.
 func (wt *WorkspaceTracker) gitPollTick(ctx context.Context, consecutiveFailures *int) bool {
+	start := time.Now()
+	defer func() { wt.recordGitPollTick(time.Since(start)) }()
 	defer atomic.StoreInt32(&wt.gitPollRunning, 0)
 
 	if !wt.workDirExists() {

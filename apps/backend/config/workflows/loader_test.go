@@ -270,6 +270,45 @@ func TestLoadTemplates_HiddenFlag(t *testing.T) {
 	}
 }
 
+// TestLoadTemplates_OfficeDefaultWorkStepRequiresSignal verifies that the
+// office-default template's `work` step gates its turn-end auto-advance
+// (Work -> Review) on the ADR 0015 declarative completion signal, now that
+// step_complete_kandev is registered for the Office MCP surface. Without
+// this flag the new signal would be decorative: the step would still
+// advance on bare turn-end regardless of whether the agent called the tool.
+func TestLoadTemplates_OfficeDefaultWorkStepRequiresSignal(t *testing.T) {
+	templates, err := LoadTemplates()
+	if err != nil {
+		t.Fatalf("LoadTemplates() returned error: %v", err)
+	}
+
+	var officeDefault *models.WorkflowTemplate
+	for _, tmpl := range templates {
+		if tmpl.ID == "office-default" {
+			officeDefault = tmpl
+			break
+		}
+	}
+	if officeDefault == nil {
+		t.Fatal("office-default template not found")
+	}
+
+	var work *models.StepDefinition
+	for i := range officeDefault.Steps {
+		if officeDefault.Steps[i].ID == "work" {
+			work = &officeDefault.Steps[i]
+			break
+		}
+	}
+	if work == nil {
+		t.Fatal("office-default template step \"work\" not found")
+	}
+
+	if got := boolFieldForTest(t, work, "AutoAdvanceRequiresSignal"); !got {
+		t.Error("office-default template step \"work\" must set auto_advance_requires_signal: true")
+	}
+}
+
 func TestLoadTemplates_ReportKandevIssuePromptContract(t *testing.T) {
 	templates, err := LoadTemplates()
 	if err != nil {

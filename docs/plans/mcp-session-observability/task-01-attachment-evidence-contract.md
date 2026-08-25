@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/mcp-session-observability/spec.md"
+spec: "../../specs/platform/requirements/mcp-session-observability.md"
 ---
 
 # Task 01: Establish the attachment evidence contract

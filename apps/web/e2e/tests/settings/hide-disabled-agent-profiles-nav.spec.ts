@@ -1,6 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 
-// Covers docs/specs/agents/hide-disabled-profiles-nav.md's nav-visibility
+// Covers docs/specs/agents/requirements/hide-disabled-profiles-nav.md's nav-visibility
 // scenarios: with "Hide disabled agent profiles from left panel navigation"
 // off (the default), a disabled profile still shows in the Settings left
 // panel's Agents tree; turning the setting on hides it; re-enabling the

@@ -1,6 +1,6 @@
 # ADR-2026-07-24-opt-in-authentication: Opt-in Authentication and Per-User Workspace Scoping
 
-**Status:** accepted
+**Status:** accepted (amended 2026-08-12)
 **Date:** 2026-07-24
 **Area:** backend, frontend, protocol, security
 
@@ -59,9 +59,19 @@ a login screen or any behavioral change.
    justification.
 6. **Explicit public allowlist** in `auth/httpmw`: readiness probe, SPA
    shell/static, bootstrap reads (`features`, `app-state`), credential
-   endpoints, and self-authenticating webhooks. `/mcp` enforces PATs in its
-   own group middleware; office agent JWTs pass through the global layer to
-   `AgentAuthMiddleware`.
+   endpoints, and self-authenticating webhooks (automation, office channels).
+   `/mcp` enforces PATs in its own group middleware; office agent JWTs pass
+   through the global layer to `AgentAuthMiddleware`. Plugin webhooks
+   (`/api/plugins/*/webhooks/*`) are NOT in this allowlist — see the
+   2026-08-12 plugin-webhook-auth-gate ADR amendment below.
+
+**Amendment (2026-08-12):** point 6 originally allowlisted plugin webhooks
+too, on the premise that "the plugin subprocess owns signature validation."
+That premise was unenforced: nothing in the manifest schema or the plugin SDK
+required a plugin to authenticate its own webhook. See
+`2026-08-12-plugin-webhook-auth-gate.md` for the fix — plugin webhooks now
+require a real caller identity by default; a manifest opts a specific webhook
+out via `webhooks[].public: true`.
 
 ## Consequences
 
@@ -75,7 +85,8 @@ a login screen or any behavioral change.
   `auth_identities`; no migration required.
 - Office workspace-scoped HTTP routes are ownership-gated via a group
   middleware (agent-JWT callers keep their workspace-claim scoping); office
-  run subscriptions remain unchecked — accepted gap, noted in the spec.
+  run subscriptions (`run.subscribe`) are now ownership-gated too, closed by
+  WO-02 — see `apps/backend/AGENTS.md` and the spec.
 - The session-access check is enforced at the lifecycle chokepoint AND at
   the reverse-proxy handlers (vscode/port) that resolve executions by bare
   lookup; message read/search and repository-script routes carry explicit

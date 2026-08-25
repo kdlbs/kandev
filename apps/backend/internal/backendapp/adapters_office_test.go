@@ -35,6 +35,18 @@ func (r *adapterStartStepResolver) ResolveStartStep(ctx context.Context, workflo
 	return stepID, err
 }
 
+func (r *adapterStartStepResolver) ResolveAutoStartStep(ctx context.Context, workflowID string) (string, error) {
+	var stepID string
+	err := r.repo.DB().QueryRowContext(ctx,
+		`SELECT id FROM workflow_steps WHERE workflow_id = ? AND events LIKE '%auto_start_agent%' ORDER BY position LIMIT 1`,
+		workflowID,
+	).Scan(&stepID)
+	if err == sql.ErrNoRows {
+		return r.ResolveStartStep(ctx, workflowID)
+	}
+	return stepID, err
+}
+
 func (r *adapterStartStepResolver) ResolveFirstStep(ctx context.Context, workflowID string) (string, error) {
 	var stepID string
 	err := r.repo.DB().QueryRowContext(ctx,

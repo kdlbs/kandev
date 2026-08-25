@@ -198,6 +198,25 @@ describe("ProfileFormFields no-silent-model-fallback rows", () => {
 });
 
 describe("ProfileFormFields model options", () => {
+  it("constrains a single start model field on desktop", () => {
+    renderForm(formData());
+
+    const row = screen.getByTestId("profile-capabilities-model-row");
+    expect(row.firstElementChild?.className).toContain("md:max-w-xl");
+  });
+
+  it("keeps the model and mode fields balanced when modes are available", () => {
+    renderForm(formData({ mode: "default" }), {
+      ...modelConfig,
+      available_modes: [{ id: "default", name: "Default" }],
+      current_mode_id: "default",
+    });
+
+    const row = screen.getByTestId("profile-capabilities-model-row");
+    expect(row.firstElementChild?.className).toContain("flex-1");
+    expect(screen.getByTestId("profile-mode-field")).not.toBeNull();
+  });
+
   it("loads model-specific options in the profile model selector", async () => {
     const dynamicModelConfig: ModelConfig = {
       default_model: "model-a",

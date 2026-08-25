@@ -33,7 +33,7 @@ function formatDate(dateStr: string): string {
 }
 
 // formatCurrency converts subcents (hundredths of a cent — the office
-// cost storage unit per docs/specs/office-costs/spec.md) to a USD string.
+// cost storage unit per docs/specs/office/requirements/costs.md) to a USD string.
 function formatCurrency(subcents: number): string {
   return new Intl.NumberFormat(undefined, {
     style: "currency",

@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/pr-outcome-attribution/spec.md
+spec: docs/specs/integrations/requirements/pr-outcome-attribution.md
 created: 2026-08-22
 status: implemented
 ---

@@ -5,7 +5,7 @@ status: in_progress
 wave: 4
 depends_on: ["04-runtime-propagation-backend-dispatch"]
 plan: "plan.md"
-spec: "../../specs/plugins/agent-tools.md"
+spec: "../../specs/plugins/requirements/agent-tools.md"
 adr: "../../decisions/2026-08-11-plugin-tools-through-kandev-mcp.md"
 ---
 

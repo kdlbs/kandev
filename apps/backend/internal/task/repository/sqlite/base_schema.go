@@ -23,6 +23,7 @@ func (r *Repository) initSchema() error {
 		r.initSessionSchema,
 		r.initDynamicRoutingSchema,
 		r.initStepTransitionsSchema,
+		r.initTaskUsageEventsSchema,
 		r.initAttachmentsSchema,
 		r.initTaskResourceCleanupSchema,
 		r.initGitSchema,
@@ -34,6 +35,7 @@ func (r *Repository) initSchema() error {
 		r.ensureDefaultExecutorsAndEnvironments,
 		r.runMigrations,
 		r.hideBuiltinWorkflows,
+		r.healBuiltinWorkflowStepFlags,
 		r.normalizeTaskWorktreeOwnership,
 		r.healDuplicateTaskEnvironments,
 		r.ensureTaskEnvironmentTaskUniqueIndex,
@@ -734,7 +736,7 @@ func (r *Repository) initSessionSchema() error {
 
 // initSubagentContextSchema creates task_session_subagents, the durable
 // relational record of a subagent (Task tool) invocation. See
-// docs/specs/subagent-context-persistence/spec.md. The three measurement
+// docs/specs/agents/requirements/subagent-context-persistence.md. The three measurement
 // columns (total_tokens, tool_use_count, duration_ms) deliberately carry no
 // DEFAULT: an unreported value must store NULL, never 0 (75% of observed
 // invocations report none of them). turn_id carries no FOREIGN KEY so a turn
@@ -934,8 +936,11 @@ const sessionWorktreeSchemaDDL = `
 		executor_profile_id TEXT DEFAULT '',
 		control_port INTEGER DEFAULT 0,
 		status TEXT NOT NULL DEFAULT 'creating',
+		materialization_session_id TEXT DEFAULT '',
 		workspace_path TEXT DEFAULT '',
 		container_id TEXT DEFAULT '',
+		container_bootstrap_nonce_secret_id TEXT DEFAULT '',
+		container_control_auth_token_secret_id TEXT DEFAULT '',
 		sandbox_id TEXT DEFAULT '',
 		task_dir_name TEXT DEFAULT '',
 		created_at TIMESTAMP NOT NULL,

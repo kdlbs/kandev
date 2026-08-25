@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
@@ -106,6 +108,52 @@ func TestHandleStopTask_AuthorizesOnlyDirectParentInWorkspace(t *testing.T) {
 			}
 			if len(stopper.calls) != 1 || stopper.calls[0] != tt.targetID {
 				t.Fatalf("stopper calls = %v", stopper.calls)
+			}
+		})
+	}
+}
+
+func TestHandleStopTaskAutomationUsesTrustedCallerWithoutLookingUpSender(t *testing.T) {
+	tasks := map[string]*models.Task{
+		"automation-target": {ID: "automation-target", WorkspaceID: "ws-1"},
+		"foreign-sender":    {ID: "foreign-sender", WorkspaceID: "ws-2"},
+	}
+	for _, senderID := range []string{"foreign-sender", "missing-sender"} {
+		t.Run(senderID, func(t *testing.T) {
+			var lookups []string
+			stopper := &recordingTaskStopper{result: orchestrator.CoordinatorTaskStopResult{
+				Status: orchestrator.CoordinatorTaskStopStatusStopped,
+			}}
+			h := &Handlers{
+				taskStopper: stopper,
+				stopTaskGetter: func(_ context.Context, taskID string) (*models.Task, error) {
+					lookups = append(lookups, taskID)
+					task, ok := tasks[taskID]
+					if !ok {
+						return nil, taskrepo.ErrTaskNotFound
+					}
+					return task, nil
+				},
+				logger: testLogger(t),
+			}
+			ctx := mcpscope.WithPrincipal(context.Background(), mcpscope.Principal{
+				AutomationID: "automation-1", WorkspaceID: "ws-1",
+				CallerTaskID: "automation-caller", CallerSessionID: "session-1",
+				Surface: mcpprofile.SurfaceAutomation,
+			})
+			msg := makeWSMessage(t, ws.ActionMCPStopTask, map[string]interface{}{
+				"task_id": "automation-target", "sender_task_id": senderID,
+			})
+
+			resp, err := h.handleStopTask(ctx, msg)
+			if err != nil {
+				t.Fatalf("handleStopTask: %v", err)
+			}
+			if resp.Type != ws.MessageTypeResponse {
+				t.Fatalf("response type = %q, want response", resp.Type)
+			}
+			if len(lookups) != 1 || lookups[0] != "automation-target" {
+				t.Fatalf("task lookups = %v, want only target lookup", lookups)
 			}
 		})
 	}

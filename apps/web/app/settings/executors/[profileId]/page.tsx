@@ -32,6 +32,10 @@ import {
 import { ProfileScriptCards } from "@/components/settings/profile-edit/profile-script-cards";
 import { SSHAgentReadinessCard } from "@/components/settings/ssh-agent-readiness-card";
 import {
+  SSHTaskDirReclamationCard,
+  isSSHReclaimEnabled,
+} from "@/components/settings/ssh-task-dir-reclamation-card";
+import {
   type GitIdentityMode,
   type GitIdentityState,
 } from "@/components/settings/profile-edit/remote-credentials-card";
@@ -280,6 +284,9 @@ function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
   const [dockerfile, setDockerfile] = useState(profile.config?.dockerfile ?? "");
   const [imageTag, setImageTag] = useState(profile.config?.image_tag ?? "");
   const [sshShell, setSshShell] = useState(profile.config?.ssh_shell ?? "");
+  const [sshReclaimTaskDir, setSshReclaimTaskDir] = useState(() =>
+    isSSHReclaimEnabled(profile.config),
+  );
   const { envVarRows, addEnvVar, removeEnvVar, updateEnvVar } = useEnvVarRows(profile.env_vars);
   const [placeholders, setPlaceholders] = useState<ScriptPlaceholder[]>([]);
   const [spritesSecretId, setSpritesSecretId] = useState<string | null>(() =>
@@ -323,6 +330,8 @@ function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
     setImageTag,
     sshShell,
     setSshShell,
+    sshReclaimTaskDir,
+    setSshReclaimTaskDir,
     envVarRows,
     addEnvVar,
     removeEnvVar,
@@ -373,6 +382,14 @@ function ExecutorSpecificSections({ executor, profile, form, secrets }: ProfileE
           shell={form.sshShell}
           baselineShell={profile.config?.ssh_shell ?? ""}
           onShellChange={form.setSshShell}
+        />
+      )}
+      {executor.type === "ssh" && (
+        <SSHTaskDirReclamationCard
+          executor={executor}
+          profile={profile}
+          enabled={form.sshReclaimTaskDir}
+          onEnabledChange={form.setSshReclaimTaskDir}
         />
       )}
       {form.isSprites && (

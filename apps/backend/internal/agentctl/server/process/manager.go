@@ -94,6 +94,7 @@ const processDefaultExitGrace = 5 * time.Second
 
 const processGroupTerminateGrace = 2 * time.Second
 const processGroupPollInterval = 50 * time.Millisecond
+const processStderrDrainTimeout = time.Second
 
 // Manager manages the agent subprocess
 type Manager struct {
@@ -570,6 +571,55 @@ func (m *Manager) snapshotTrackers() (*WorkspaceTracker, []*WorkspaceTracker) {
 	repos := make([]*WorkspaceTracker, len(m.repoTrackers))
 	copy(repos, m.repoTrackers)
 	return m.workspaceTracker, repos
+}
+
+// GitPollStats aggregates completed git-status poll tick counts and their
+// mean duration across this instance's root and per-repo workspace trackers.
+// Backs the diagnostic agentctl_git_poll_ms metric (api.handleSystemMetrics).
+// count == 0 means no tracker has completed a tick yet.
+func (m *Manager) GitPollStats() (count int64, meanMillis float64) {
+	root, trackers := m.snapshotTrackers()
+	var totalCount, totalNanos int64
+	accumulate := func(wt *WorkspaceTracker) {
+		if wt == nil {
+			return
+		}
+		c, n := wt.GitPollTickStats()
+		totalCount += c
+		totalNanos += n
+	}
+	accumulate(root)
+	for _, t := range trackers {
+		accumulate(t)
+	}
+	if totalCount == 0 {
+		return 0, 0
+	}
+	return totalCount, float64(totalNanos) / float64(totalCount) / float64(time.Millisecond)
+}
+
+// MonitorPollStats aggregates completed workspace monitor scans and their
+// mean duration across this instance's root and per-repo workspace trackers.
+// The initial scan is included. count == 0 means no scan has completed yet.
+func (m *Manager) MonitorPollStats() (count int64, meanMillis float64) {
+	root, trackers := m.snapshotTrackers()
+	var totalCount, totalNanos int64
+	accumulate := func(wt *WorkspaceTracker) {
+		if wt == nil {
+			return
+		}
+		c, n := wt.MonitorTickStats()
+		totalCount += c
+		totalNanos += n
+	}
+	accumulate(root)
+	for _, t := range trackers {
+		accumulate(t)
+	}
+	if totalCount == 0 {
+		return 0, 0
+	}
+	return totalCount, float64(totalNanos) / float64(totalCount) / float64(time.Millisecond)
 }
 
 // StartAllWorkspaceTrackers starts root + per-repo trackers (idempotent) so file-change events fire in passthrough mode.
@@ -1160,10 +1210,12 @@ func (m *Manager) Start(ctx context.Context) error {
 		return errors.Join(fmt.Errorf("failed to connect adapter: %w", err), reapErr)
 	}
 
-	// Start stderr reader and exit waiter
+	// Start stderr reader and exit waiter. Keep the completion channel local to
+	// this process generation so a delayed reader cannot signal a replacement.
+	stderrDone := make(chan struct{})
 	m.wg.Add(2)
-	go m.readStderr()
-	go m.waitForExit()
+	go m.readStderr(stderrDone)
+	go m.waitForExit(stderrDone)
 
 	// Forward adapter updates to our channel
 	m.wg.Add(1)
@@ -1243,7 +1295,7 @@ func (m *Manager) buildAdapterConfig() error {
 	}
 
 	// Configure one-shot mode when a continue command is provided.
-	// One-shot adapters (e.g., Amp) spawn a new subprocess per prompt.
+	// One-shot adapters spawn a new subprocess per prompt.
 	continueArgs := m.cfg.ContinueArgs
 	if continueArgs == nil && m.cfg.ContinueCommand != "" {
 		continueArgs = config.ParseCommand(m.cfg.ContinueCommand)
@@ -1537,7 +1589,7 @@ func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent
 		m.cfg.ApprovalPolicy = approvalPolicy
 	}
 
-	// Store continue command for one-shot adapters (e.g., Amp)
+	// Store continue command for one-shot adapters
 	if continueArgsPresent {
 		m.cfg.ContinueCommand = continueCommand
 		m.cfg.ContinueArgs = continueArgs
@@ -2205,9 +2257,10 @@ func waitForProcessGroupExit(ctx context.Context, pid int) bool {
 	}
 }
 
-// readStderr reads and logs stderr from the agent
-func (m *Manager) readStderr() {
+// readStderr reads and logs stderr from the agent.
+func (m *Manager) readStderr(stderrDone chan<- struct{}) {
 	defer m.wg.Done()
+	defer close(stderrDone)
 
 	scanner := bufio.NewScanner(m.stderr)
 	for scanner.Scan() {
@@ -2223,6 +2276,9 @@ func (m *Manager) readStderr() {
 		if m.stderrSanitizer != nil {
 			line, keep = m.stderrSanitizer.SanitizeStderrLine(rawLine)
 		}
+		if !keep {
+			line, keep = safeManagedNpmStderrLine(rawLine)
+		}
 		if !keep || line == "" {
 			continue
 		}
@@ -2234,6 +2290,19 @@ func (m *Manager) readStderr() {
 
 	if err := scanner.Err(); err != nil {
 		m.logger.Debug("stderr reader error", zap.Error(err))
+	}
+}
+
+func (m *Manager) waitForStderrDrain(stderrDone <-chan struct{}) {
+	if stderrDone == nil {
+		return
+	}
+	timer := time.NewTimer(processStderrDrainTimeout)
+	defer timer.Stop()
+	select {
+	case <-stderrDone:
+	case <-timer.C:
+		m.logger.Warn("timed out waiting for agent stderr to drain")
 	}
 }
 
@@ -2278,12 +2347,17 @@ func (m *Manager) ClearStderrBuffer() {
 }
 
 // waitForExit waits for the process to exit
-func (m *Manager) waitForExit() {
+func (m *Manager) waitForExit(stderrDone <-chan struct{}) {
 	defer m.wg.Done()
 	defer close(m.doneCh)
 
 	pid := m.agentPID()
+	// StderrPipe must be drained before Wait closes its parent-side pipe. The
+	// second bounded wait covers a reader that was still blocked when the
+	// process-exit wait began and was released by Wait closing the pipe.
+	m.waitForStderrDrain(stderrDone)
 	err := m.cmd.Wait()
+	m.waitForStderrDrain(stderrDone)
 	intentionalStop := m.Status() == StatusStopping
 
 	switch {

@@ -74,6 +74,19 @@ describe("buildTaskCommands", () => {
     expect(requestArchive).toHaveBeenCalledTimes(1);
   });
 
+  it("registers the archive confirmation dismiss callback", () => {
+    const onDismiss = vi.fn();
+    const archive = build({
+      onArchiveConfirmationDismiss: onDismiss,
+    } as Partial<Parameters<typeof buildTaskCommands>[0]>).find(
+      (cmd) => cmd.id === ARCHIVE_COMMAND_ID,
+    ) as CommandItem & { onConfirmationDismiss?: () => void };
+
+    archive.onConfirmationDismiss?.();
+
+    expect(onDismiss).toHaveBeenCalledOnce();
+  });
+
   it("hides the archive command for an archived task", () => {
     const commands = build({ isTaskArchived: true });
 

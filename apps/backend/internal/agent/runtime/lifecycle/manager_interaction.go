@@ -880,7 +880,10 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		return err
 	}
 	defer activityLease.Release()
-	m.releaseActivity(executionActivityKey(executionID))
+	// Keep the execution's running activity lease until backend teardown
+	// succeeds. A failed stop remains retryable, so maintenance must not treat
+	// a potentially live runtime as idle. RemoveExecution releases the lease on
+	// the successful path.
 
 	m.logger.Info("stopping agent",
 		zap.String("execution_id", executionID),
@@ -910,8 +913,12 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		execution.agentctl.Close()
 	}
 
-	// Stop the agent execution via the runtime that created it
-	_ = m.stopAgentViaBackend(ctx, executionID, execution, reason, force, agentStopFailed)
+	// Stop the agent execution via the runtime that created it. A failed stop
+	// must remain tracked: removing it here would turn a retryable cleanup into
+	// an unobservable orphan process.
+	if err := m.stopAgentViaBackend(ctx, executionID, execution, reason, force, agentStopFailed); err != nil {
+		return fmt.Errorf("stop runtime for execution %q: %w", executionID, err)
+	}
 
 	// Update execution status and remove from tracking
 	_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
@@ -1713,6 +1720,12 @@ func (m *Manager) markCompletedWithTurnID(
 	// stop so the session stays resumable and the UI shows no red error banner.
 	if (exitCode != 0 || errorMessage != "") && m.IsShuttingDown() {
 		return m.markStoppedDuringShutdown(execution, exitCode, errorMessage, turnID)
+	}
+	if (exitCode != 0 || errorMessage != "") && isUninitializedStartupExecution(execution) {
+		m.logger.Debug("deferring uninitialized startup process exit to startup owner",
+			zap.String("execution_id", execution.ID),
+			zap.Int("exit_code", exitCode))
+		return nil
 	}
 
 	_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {

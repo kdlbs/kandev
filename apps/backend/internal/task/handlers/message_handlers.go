@@ -446,7 +446,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		requiresSignal := h.orchestrator != nil && h.orchestrator.StepRequiresCompletionSignal(ctx, req.TaskID)
 		referenceContext := orchestrator.EntityReferenceContext(req.EntityReferences)
 		if task.IsFromOffice {
-			storedContent = sysprompt.InjectOfficeContext(req.TaskID, req.TaskSessionID, storedContent, referenceContext)
+			storedContent = sysprompt.InjectOfficeContextWithOptions(req.TaskID, req.TaskSessionID, storedContent, requiresSignal, referenceContext)
 		} else {
 			storedContent = sysprompt.InjectKandevContextWithOptions(req.TaskID, req.TaskSessionID, storedContent, sysprompt.KandevContextOptions{
 				RequiresCompletionSignal:       requiresSignal,

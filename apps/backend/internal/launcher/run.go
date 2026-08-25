@@ -23,6 +23,12 @@ func runInstalled(ctx context.Context, opts Options) int {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
 	}
+	endpoints, err := resolveBackendEndpoints(startupConfig, ports.BackendPort)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+		return 1
+	}
+	ports.BackendURL = endpoints.accessURL
 	bundle, err := resolveRuntimeBundle()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
@@ -47,5 +53,6 @@ func runInstalled(ctx context.Context, opts Options) int {
 		LogLevel:   logLevel,
 		Opts:       opts,
 		Startup:    startupConfig,
+		Endpoints:  endpoints,
 	})
 }

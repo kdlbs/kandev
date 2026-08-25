@@ -46,7 +46,7 @@ func newRepoForBuiltinWorkflowTests(t *testing.T) *Repository {
 func loadStepsForWorkflow(t *testing.T, repo *Repository, workflowID string) []*wfmodels.WorkflowStep {
 	t.Helper()
 	rows, err := repo.db.QueryContext(context.Background(), repo.db.Rebind(`
-		SELECT id, name, position, stage_type, events
+		SELECT id, name, position, stage_type, events, auto_advance_requires_signal
 		FROM workflow_steps WHERE workflow_id = ? ORDER BY position
 	`), workflowID)
 	if err != nil {
@@ -58,9 +58,11 @@ func loadStepsForWorkflow(t *testing.T, repo *Repository, workflowID string) []*
 	for rows.Next() {
 		step := &wfmodels.WorkflowStep{WorkflowID: workflowID}
 		var stage, events string
-		if err := rows.Scan(&step.ID, &step.Name, &step.Position, &stage, &events); err != nil {
+		var autoAdvanceRequiresSignal int
+		if err := rows.Scan(&step.ID, &step.Name, &step.Position, &stage, &events, &autoAdvanceRequiresSignal); err != nil {
 			t.Fatalf("scan step: %v", err)
 		}
+		step.AutoAdvanceRequiresSignal = autoAdvanceRequiresSignal != 0
 		step.StageType = wfmodels.StageType(stage)
 		if events != "" {
 			if err := json.Unmarshal([]byte(events), &step.Events); err != nil {
@@ -126,6 +128,19 @@ func TestEnsureOfficeDefaultWorkflow_CreatesFiveSteps(t *testing.T) {
 		}
 		if steps[i].StageType != want.StageType {
 			t.Errorf("step %d stage_type = %q, want %q", i, steps[i].StageType, want.StageType)
+		}
+	}
+
+	work := findStepByNameLocal(steps, "Work")
+	if work == nil {
+		t.Fatal("missing Work step")
+	}
+	if !work.AutoAdvanceRequiresSignal {
+		t.Error("Work.AutoAdvanceRequiresSignal = false, want true (ADR-0015 completion signal gate)")
+	}
+	for _, name := range []string{"Backlog", "Review", "Approval", "Done"} {
+		if step := findStepByNameLocal(steps, name); step != nil && step.AutoAdvanceRequiresSignal {
+			t.Errorf("%s.AutoAdvanceRequiresSignal = true, want false", name)
 		}
 	}
 }
@@ -398,6 +413,125 @@ func TestRepositoryInitialization_HealsBuiltinWorkflowVisibility(t *testing.T) {
 		if !updatedAt.After(legacyTime) {
 			t.Errorf("workflow %q updated_at = %v, want after %v", workflowID, updatedAt, legacyTime)
 		}
+	}
+}
+
+func TestHealBuiltinWorkflowStepFlags_HealsStaleOfficeWorkStep(t *testing.T) {
+	repo := newRepoForBuiltinWorkflowTests(t)
+	ctx := context.Background()
+	legacyTime := time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)
+
+	_, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
+		INSERT INTO workflows (
+			id, workspace_id, name, workflow_template_id, is_system, hidden, created_at, updated_at
+		) VALUES ('stale-office-heal', 'ws-1', 'Office', 'office-default', 1, 1, ?, ?)
+	`), legacyTime, legacyTime)
+	if err != nil {
+		t.Fatalf("insert stale office workflow: %v", err)
+	}
+	_, err = repo.db.ExecContext(ctx, repo.db.Rebind(`
+		INSERT INTO workflow_steps (
+			id, workflow_id, name, position, stage_type, events, auto_advance_requires_signal, created_at, updated_at
+		) VALUES ('stale-office-heal-work', 'stale-office-heal', 'Work', 1, 'work', '{}', 0, ?, ?)
+	`), legacyTime, legacyTime)
+	if err != nil {
+		t.Fatalf("insert stale work step: %v", err)
+	}
+
+	if err := repo.healBuiltinWorkflowStepFlags(); err != nil {
+		t.Fatalf("healBuiltinWorkflowStepFlags: %v", err)
+	}
+
+	steps := loadStepsForWorkflow(t, repo, "stale-office-heal")
+	work := findStepByNameLocal(steps, "Work")
+	if work == nil {
+		t.Fatal("missing Work step")
+	}
+	if !work.AutoAdvanceRequiresSignal {
+		t.Error("healBuiltinWorkflowStepFlags() left Work.AutoAdvanceRequiresSignal = false, want true")
+	}
+
+	var updatedAt time.Time
+	if err := repo.db.QueryRowContext(ctx, `SELECT updated_at FROM workflow_steps WHERE id = 'stale-office-heal-work'`).Scan(&updatedAt); err != nil {
+		t.Fatalf("query step updated_at: %v", err)
+	}
+	if !updatedAt.After(legacyTime) {
+		t.Errorf("Work step updated_at = %v, want after %v", updatedAt, legacyTime)
+	}
+}
+
+// TestRepositoryInitialization_HealsBuiltinWorkflowStepFlags verifies that
+// initSchema keeps the boot registration for the reconciler. Direct tests
+// above would not catch removing the step from the initialization sequence.
+func TestRepositoryInitialization_HealsBuiltinWorkflowStepFlags(t *testing.T) {
+	repo := newRepoForBuiltinWorkflowTests(t)
+	ctx := context.Background()
+	legacyTime := time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)
+
+	_, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
+		INSERT INTO workflows (
+			id, workspace_id, name, workflow_template_id, is_system, hidden, created_at, updated_at
+		) VALUES ('stale-office-boot', 'ws-1', 'Office', 'office-default', 1, 1, ?, ?)
+	`), legacyTime, legacyTime)
+	if err != nil {
+		t.Fatalf("insert stale boot workflow: %v", err)
+	}
+	_, err = repo.db.ExecContext(ctx, repo.db.Rebind(`
+		INSERT INTO workflow_steps (
+			id, workflow_id, name, position, stage_type, events, auto_advance_requires_signal, created_at, updated_at
+		) VALUES ('stale-office-boot-work', 'stale-office-boot', 'Work', 1, 'work', '{}', 0, ?, ?)
+	`), legacyTime, legacyTime)
+	if err != nil {
+		t.Fatalf("insert stale boot work step: %v", err)
+	}
+
+	if err := repo.initSchema(); err != nil {
+		t.Fatalf("reinitialize repository: %v", err)
+	}
+
+	steps := loadStepsForWorkflow(t, repo, "stale-office-boot")
+	work := findStepByNameLocal(steps, "Work")
+	if work == nil {
+		t.Fatal("missing Work step")
+	}
+	if !work.AutoAdvanceRequiresSignal {
+		t.Error("initSchema left Work.AutoAdvanceRequiresSignal = false, want true")
+	}
+}
+
+func TestHealBuiltinWorkflowStepFlags_KeepsUserWorkflowStepUntouched(t *testing.T) {
+	repo := newRepoForBuiltinWorkflowTests(t)
+	ctx := context.Background()
+	legacyTime := time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)
+
+	_, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
+		INSERT INTO workflows (
+			id, workspace_id, name, workflow_template_id, is_system, hidden, created_at, updated_at
+		) VALUES ('user-office', 'ws-1', 'My Office', 'office-default', 0, 0, ?, ?)
+	`), legacyTime, legacyTime)
+	if err != nil {
+		t.Fatalf("insert user office workflow: %v", err)
+	}
+	_, err = repo.db.ExecContext(ctx, repo.db.Rebind(`
+		INSERT INTO workflow_steps (
+			id, workflow_id, name, position, stage_type, events, auto_advance_requires_signal, created_at, updated_at
+		) VALUES ('user-office-work', 'user-office', 'Work', 1, 'work', '{}', 0, ?, ?)
+	`), legacyTime, legacyTime)
+	if err != nil {
+		t.Fatalf("insert user work step: %v", err)
+	}
+
+	if err := repo.healBuiltinWorkflowStepFlags(); err != nil {
+		t.Fatalf("healBuiltinWorkflowStepFlags: %v", err)
+	}
+
+	steps := loadStepsForWorkflow(t, repo, "user-office")
+	work := findStepByNameLocal(steps, "Work")
+	if work == nil {
+		t.Fatal("missing Work step")
+	}
+	if work.AutoAdvanceRequiresSignal {
+		t.Error("healBuiltinWorkflowStepFlags() touched a user-customised (is_system=0) workflow's step")
 	}
 }
 

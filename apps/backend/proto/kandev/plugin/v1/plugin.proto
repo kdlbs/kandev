@@ -101,6 +101,19 @@ service Host {
   // event — raw system prompts are never exposed to plugins.
   rpc ListMessages(ListMessagesRequest) returns (ListMessagesResponse);
 
+  // Pending agent interactions — capability api_read:interactions. The
+  // DURABLE record of every permission request and clarification bundle still
+  // owed a human response, under the same turn/session authority kandev's own
+  // list surfaces use. Session state alone cannot answer this: WAITING_FOR_INPUT
+  // also describes an ordinarily completed turn, so a state-only consumer
+  // reports attention that is not owed. Reading the record is what lets a
+  // consumer that started late, restarted, or missed an event reconcile.
+  // GetInteraction resolves ANY interaction — including terminal ones — so a
+  // replayed or missed event converges on the current result instead of
+  // NotFound.
+  rpc ListPendingInteractions(ListPendingInteractionsRequest) returns (ListPendingInteractionsResponse);
+  rpc GetInteraction(GetInteractionRequest) returns (GetInteractionResponse);
+
   // Utility agent — capability agent_invoke. Runs a one-shot, non-interactive
   // completion using the operator-configured "utility agent" profile (Settings
   // > System), so a plugin can delegate a lightweight LLM step without holding
@@ -120,6 +133,18 @@ service Host {
   rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
   rpc PreviewPluginOwnedTaskTree(PreviewPluginOwnedTaskTreeRequest) returns (PreviewPluginOwnedTaskTreeResponse);
   rpc DeletePluginOwnedTaskTree(DeletePluginOwnedTaskTreeRequest) returns (DeletePluginOwnedTaskTreeResponse);
+
+  // Interaction responses — capability api_write:interactions. Each routes
+  // through the same first-party service the native UI uses, so the agent
+  // unblocks, the durable record turns terminal, and every surface converges
+  // through the normal events. Terminal-once: an interaction that already has
+  // a resolution answers FailedPrecondition rather than dispatching a second
+  // response, and an unknown id answers NotFound — the two outcomes a
+  // reconciling cache needs to distinguish "someone else got there first" from
+  // "I am holding a stale id".
+  rpc RespondToPermission(RespondToPermissionRequest) returns (RespondToPermissionResponse);
+  rpc AnswerClarification(AnswerClarificationRequest) returns (AnswerClarificationResponse);
+  rpc CancelClarification(CancelClarificationRequest) returns (CancelClarificationResponse);
 }
 
 message Event {
@@ -581,6 +606,109 @@ message ListMessagesRequest {
 message ListMessagesResponse {
   repeated Message messages = 1;
   PageInfo page_info = 2;
+}
+
+// ── Pending interactions (api_read/api_write:interactions) ───────────────────
+//
+// One Interaction is one thing a human still owes an answer to: a tool
+// permission request, or a whole clarification bundle (its per-question rows
+// collapsed into `questions`). `id` is the pending id every response RPC keys
+// on, and the same id the permission_request.received / clarification.* bus
+// events and the persisted request messages carry — that shared key is what an
+// event-driven cache reconciles its snapshot against.
+message InteractionOption {
+  string option_id = 1;
+  string label = 2;
+  // ACP permission-option kind ("allow_once" | "allow_always" |
+  // "reject_once" | "reject_always") on a permission; empty on a
+  // clarification option.
+  string kind = 3;
+  // Longer explanation of a clarification option; empty on a permission.
+  string description = 4;
+}
+message InteractionQuestion {
+  string id = 1;
+  string title = 2;
+  string prompt = 3;
+  repeated InteractionOption options = 4;
+}
+message Interaction {
+  string id = 1;   // pending id
+  string kind = 2; // "permission" | "clarification"
+  string task_id = 3;
+  string session_id = 4;
+  string turn_id = 5;
+  // "pending" | "approved" | "rejected" | "answered" | "cancelled" | "expired".
+  // Anything other than "pending" is terminal and no longer answerable. A
+  // clarification bundle is only terminal once every question is.
+  string status = 6;
+  string title = 7;   // permission prompt, or the bundle's first question
+  string context = 8; // shared clarification context; empty on a permission
+  string tool_call_id = 9;
+  string action_type = 10;
+  repeated InteractionOption options = 11;     // permission options
+  repeated InteractionQuestion questions = 12; // clarification questions
+  // A still-pending clarification whose original waiter has gone away (the
+  // agent moved on, or kandev restarted). Still answerable — the answer
+  // resumes the session in a NEW turn — so this is not a resolution.
+  bool agent_disconnected = 13;
+  string created_at = 14; // RFC3339
+  string updated_at = 15; // RFC3339
+}
+message InteractionFilter {
+  repeated string session_ids = 1; // empty → not constrained by session
+  repeated string task_ids = 2;    // empty → not constrained by task
+  repeated string kinds = 3;       // empty → both kinds
+}
+message ListPendingInteractionsRequest {
+  InteractionFilter filter = 1;
+  Page page = 2;
+}
+message ListPendingInteractionsResponse {
+  repeated Interaction interactions = 1;
+  PageInfo page_info = 2;
+}
+message GetInteractionRequest {
+  string id = 1;
+}
+message GetInteractionResponse {
+  Interaction interaction = 1;
+}
+
+// ── Interaction responses (api_write:interactions) ───────────────────────────
+message RespondToPermissionRequest {
+  string id = 1; // pending id
+  // Must name one of the interaction's declared options. kandev derives the
+  // approve/deny outcome from that option's kind, so a plugin cannot report an
+  // outcome the agent never offered.
+  string option_id = 2;
+  // Dismiss the request instead of selecting an option (the ACP "cancelled"
+  // outcome). option_id must be empty when this is set.
+  bool cancelled = 3;
+}
+message RespondToPermissionResponse {
+  Interaction interaction = 1; // the interaction in its new terminal state
+}
+message ClarificationAnswer {
+  string question_id = 1;
+  repeated string selected_options = 2; // option ids
+  string custom_text = 3;
+}
+message AnswerClarificationRequest {
+  string id = 1; // pending id
+  // Exactly one answer per question in the bundle; the agent stays blocked
+  // until every question is answered.
+  repeated ClarificationAnswer answers = 2;
+}
+message AnswerClarificationResponse {
+  Interaction interaction = 1;
+}
+message CancelClarificationRequest {
+  string id = 1; // pending id
+  string reason = 2; // surfaced to the agent as the decline reason
+}
+message CancelClarificationResponse {
+  Interaction interaction = 1;
 }
 
 // ── Utility agent invocation (agent_invoke) ──────────────────────────────────
