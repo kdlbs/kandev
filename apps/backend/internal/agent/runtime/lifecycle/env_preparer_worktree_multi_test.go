@@ -521,6 +521,70 @@ func TestWorktreePreparer_FreshStartRejectsStaleWorktreePathOwnedByLiveTask(t *t
 	}
 }
 
+// TestWorktreePreparer_FreshStartRejectsStaleWorktreePathOwnedByLiveTask_WorktreeIDOnly
+// exercises the WorktreeID-only lookup branch of tryReuseExisting (when
+// SessionID is empty), confirming the ownership check fires there too.
+func TestWorktreePreparer_FreshStartRejectsStaleWorktreePathOwnedByLiveTask_WorktreeIDOnly(t *testing.T) {
+	repositoryPath := initBareGitRepo(t, "shared-repository")
+	preparer, manager, store := newPreparerForTestWithStore(t)
+	ctx := context.Background()
+
+	live, err := manager.Create(ctx, worktree.CreateRequest{
+		TaskID:         "task-live",
+		SessionID:      "session-live",
+		TaskTitle:      "Live task",
+		RepositoryID:   "repository-shared",
+		RepositoryPath: repositoryPath,
+		BaseBranch:     "main",
+		TaskDirName:    "live-task_wtid",
+		RepoName:       "shared-repository",
+	})
+	if err != nil {
+		t.Fatalf("create live worktree: %v", err)
+	}
+	liveHead := strings.TrimSpace(runGitForPreparerTest(t, live.Path, "rev-parse", "HEAD"))
+
+	if err := store.CreateWorktree(ctx, &worktree.Worktree{
+		ID:           "worktree-stale-wtid",
+		TaskID:       "task-stale-wtid",
+		SessionID:    "session-stale-wtid",
+		RepositoryID: "repository-shared",
+		Path:         live.Path,
+		Branch:       "feat/stale-wtid",
+		Status:       worktree.StatusActive,
+	}); err != nil {
+		t.Fatalf("seed stale worktree: %v", err)
+	}
+
+	result, err := preparer.Prepare(ctx, &EnvPrepareRequest{
+		TaskID:         "task-stale-wtid",
+		SessionID:      "", // empty — forces WorktreeID-only lookup
+		TaskTitle:      "Stale task WTID-only",
+		ExecutorType:   executor.NameStandalone,
+		RepositoryID:   "repository-shared",
+		RepositoryPath: repositoryPath,
+		BaseBranch:     "main",
+		WorktreeID:     "worktree-stale-wtid",
+		TaskDirName:    "stale-task-wtid_xyz",
+		RepoName:       "shared-repository",
+	}, nil)
+	if err != nil {
+		t.Fatalf("prepare returned hard error: %v", err)
+	}
+	if result.Success {
+		t.Fatal("fresh start succeeded by reusing a live task's worktree path via WorktreeID-only lookup")
+	}
+	if !errors.Is(result.Error, worktree.ErrWorktreePathOwnedByAnotherTask) {
+		t.Fatalf("prepare error = %v, want ErrWorktreePathOwnedByAnotherTask", result.Error)
+	}
+	if got := strings.TrimSpace(runGitForPreparerTest(t, live.Path, "rev-parse", "HEAD")); got != liveHead {
+		t.Fatalf("live worktree HEAD changed: got %q, want %q", got, liveHead)
+	}
+	if !manager.IsValid(live.Path) {
+		t.Fatal("live worktree was removed or corrupted")
+	}
+}
+
 func runGitForPreparerTest(t *testing.T, directory string, args ...string) string {
 	t.Helper()
 	command := exec.Command("git", args...)

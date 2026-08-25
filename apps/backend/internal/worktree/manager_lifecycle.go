@@ -294,6 +294,11 @@ func (m *Manager) validateExistingWorktreePathOwner(worktreePath, taskID string)
 	if err != nil {
 		return fmt.Errorf("resolve tasks base path: %w", err)
 	}
+	// Normalize: ExpandedTasksBasePath returns the configured value verbatim
+	// (incl. trailing slashes or doubled separators), while filepath.Dir
+	// always yields a cleaned form. Without this, the loop below overshoots
+	// the intended stop point when tasksBase is non-clean.
+	tasksBase = filepath.Clean(tasksBase)
 	relativePath, err := filepath.Rel(tasksBase, worktreePath)
 	if err != nil || relativePath == "." || relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
 		return nil
