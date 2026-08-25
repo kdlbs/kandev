@@ -1306,7 +1306,10 @@ func registerSecondaryRoutes(
 		p.log.Debug("Registered Plugins handlers (HTTP)")
 	}
 
-	docker.RegisterDockerRoutes(p.router, p.lifecycleMgr.DockerClientProvider(), dockerTaskTitleProvider(p.taskRepo, p.log), p.log)
+	docker.RegisterDockerRoutes(
+		p.router, p.lifecycleMgr.DockerClientProvider(),
+		dockerTaskTitleProvider(p.taskRepo, p.log), dockerSessionAuthorizer(p.taskSvc), p.log,
+	)
 	p.log.Debug("Registered Docker management handlers (HTTP)")
 
 	registerHealthRoutes(p)
@@ -1471,6 +1474,17 @@ func workspaceIDFromPath(path string) string {
 		return rest[:slash]
 	}
 	return rest
+}
+
+// dockerSessionAuthorizer scopes the Docker management endpoints to the
+// caller's own task sessions. Returning an untyped nil when the task service
+// is absent (partial builds) keeps the handlers failing closed instead of
+// calling through a typed-nil interface.
+func dockerSessionAuthorizer(taskSvc *taskservice.Service) docker.SessionAuthorizer {
+	if taskSvc == nil {
+		return nil
+	}
+	return taskSvc
 }
 
 func dockerTaskTitleProvider(taskRepo *sqliterepo.Repository, log *logger.Logger) docker.TaskTitleProvider {
