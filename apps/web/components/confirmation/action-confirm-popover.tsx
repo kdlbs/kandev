@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useLayoutEffect, useRef, type ReactNode, type RefObject } from "react";
+import { memo, useId, useLayoutEffect, useRef, type ReactNode, type RefObject } from "react";
 import { Button } from "@kandev/ui/button";
 import {
   Popover,
@@ -150,7 +150,7 @@ type ActionConfirmPopoverContentProps = {
   onConfirm: () => void;
 };
 
-function ActionConfirmPopoverContent({
+const ActionConfirmPopoverContent = memo(function ActionConfirmPopoverContent({
   titleId,
   descriptionId,
   title,
@@ -236,7 +236,7 @@ function ActionConfirmPopoverContent({
       </div>
     </PopoverContent>
   );
-}
+});
 
 function closeActionConfirm(
   confirmedRef: { current: boolean },
