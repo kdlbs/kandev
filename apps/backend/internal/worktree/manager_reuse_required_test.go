@@ -396,3 +396,54 @@ func TestCreate_TryReuseExistingRejectsSymlinkedWorktreePath(t *testing.T) {
 		t.Fatalf("Create() error = %v, want ErrWorktreePathOwnedByAnotherTask or unsafe path error", err)
 	}
 }
+
+func TestCreate_ReuseRequiredAllowsTransferredEnvironmentOwner(t *testing.T) {
+	repoPath := initGitRepoWithRemote(t)
+	cfg := newTestConfig(t)
+	ownerTaskDir := filepath.Join(cfg.TasksBasePath, "owner-task_transfer")
+	if err := os.MkdirAll(ownerTaskDir, 0755); err != nil {
+		t.Fatalf("mkdir owner task dir: %v", err)
+	}
+	if err := storageworkspaces.WriteOwnershipMarker(ownerTaskDir, storageworkspaces.OwnershipMarker{
+		TaskID:        "task-owner-transfer",
+		TaskDirName:   "owner-task_transfer",
+		LayoutVersion: storageworkspaces.LayoutVersionSemantic,
+	}); err != nil {
+		t.Fatalf("write owner ownership marker: %v", err)
+	}
+	worktreePath := filepath.Join(ownerTaskDir, "repo")
+	runGit(t, repoPath, "worktree", "add", "-b", "feature/transferred", worktreePath, "main")
+
+	store := newMockStore()
+	store.worktrees["transferred-worktree"] = &Worktree{
+		ID:                "transferred-worktree",
+		TaskID:            "task-borrower-transfer",
+		TaskDirName:       "owner-task_transfer",
+		TaskEnvironmentID: "environment-transfer",
+		RepositoryID:      "repository-transfer",
+		Path:              worktreePath,
+		Branch:            "feature/transferred",
+		Status:            StatusActive,
+	}
+	mgr, err := NewManager(cfg, store, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	got, err := mgr.Create(context.Background(), CreateRequest{
+		TaskID:            "task-borrower-transfer",
+		SessionID:         "session-borrower-transfer",
+		TaskEnvironmentID: "environment-transfer",
+		RepositoryID:      "repository-transfer",
+		RepositoryPath:    repoPath,
+		BaseBranch:        "main",
+		WorktreeID:        "transferred-worktree",
+		ReuseRequired:     true,
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v, want transferred environment reuse", err)
+	}
+	if got.ID != "transferred-worktree" || got.Path != worktreePath {
+		t.Fatalf("Create() = %#v, want transferred worktree", got)
+	}
+}

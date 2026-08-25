@@ -198,15 +198,17 @@ func (m *Manager) reuseRequiredWorktree(ctx context.Context, req CreateRequest) 
 	if wt == nil || wt.Status != StatusActive ||
 		wt.RepositoryID != req.RepositoryID ||
 		wt.TaskEnvironmentID != req.TaskEnvironmentID ||
-		(requestedBranchSlug != "" && SanitizeBranchSlug(wt.BranchSlug) != requestedBranchSlug) ||
-		!m.IsValid(wt.Path) {
+		(requestedBranchSlug != "" && SanitizeBranchSlug(wt.BranchSlug) != requestedBranchSlug) {
 		return nil, ErrReuseWorktreeUnavailable
 	}
 	if err := m.validateWorktreePathSafe(wt.Path); err != nil {
 		return nil, err
 	}
-	if err := m.validateExistingWorktreePathOwner(wt.Path, wt.TaskID); err != nil {
+	if err := m.validateExistingWorktreePathOwner(wt.Path, wt); err != nil {
 		return nil, err
+	}
+	if !m.IsValid(wt.Path) {
+		return nil, ErrReuseWorktreeUnavailable
 	}
 	return wt, nil
 }
@@ -229,7 +231,7 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 			if err := m.validateWorktreePathSafe(existing.Path); err != nil {
 				return nil, true, err
 			}
-			if err := m.validateExistingWorktreePathOwner(existing.Path, existing.TaskID); err != nil {
+			if err := m.validateExistingWorktreePathOwner(existing.Path, existing); err != nil {
 				return nil, true, err
 			}
 			if m.IsValid(existing.Path) {
@@ -261,7 +263,7 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 			if err := m.validateWorktreePathSafe(existing.Path); err != nil {
 				return nil, true, err
 			}
-			if err := m.validateExistingWorktreePathOwner(existing.Path, existing.TaskID); err != nil {
+			if err := m.validateExistingWorktreePathOwner(existing.Path, existing); err != nil {
 				return nil, true, err
 			}
 			if m.IsValid(existing.Path) {
@@ -319,14 +321,26 @@ func (m *Manager) validateWorktreePathSafe(worktreePath string) error {
 	return nil
 }
 
+func worktreeOwnershipIdentity(wt *Worktree) (string, bool) {
+	if wt != nil && wt.TaskDirName != "" {
+		return wt.TaskDirName, true
+	}
+	if wt != nil {
+		// Older in-memory and persisted records may not project TaskDirName.
+		// Keep their existing ownership check until they are refreshed.
+		return wt.TaskID, false
+	}
+	return "", false
+}
+
 // validateExistingWorktreePathOwner rejects a stale record whose stored path
 // now lies under another task's marked root. It deliberately runs before both
 // reuse and recreate: recreate removes the recorded path before adding a new
 // worktree, so checking only the reusable path could delete a live checkout.
 // Paths outside Kandev's task root and legacy unmarked task roots remain
 // eligible for their existing compatibility behavior.
-func (m *Manager) validateExistingWorktreePathOwner(worktreePath, recordTaskID string) error {
-	if worktreePath == "" || recordTaskID == "" {
+func (m *Manager) validateExistingWorktreePathOwner(worktreePath string, wt *Worktree) error {
+	if worktreePath == "" {
 		return nil
 	}
 	tasksBase, err := m.config.ExpandedTasksBasePath()
@@ -342,6 +356,10 @@ func (m *Manager) validateExistingWorktreePathOwner(worktreePath, recordTaskID s
 	if err != nil || relativePath == "." || relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
 		return nil
 	}
+	recordIdentity, stableTaskDirName := worktreeOwnershipIdentity(wt)
+	if recordIdentity == "" {
+		return nil
+	}
 	// The task-root ownership marker always lives at the first path segment
 	// below tasksBase (i.e. <tasksBase>/<taskDirName>/). Walking all levels
 	// up from worktreePath is wrong: a descendant repository that legitimately
@@ -353,11 +371,15 @@ func (m *Manager) validateExistingWorktreePathOwner(worktreePath, recordTaskID s
 	if err != nil {
 		return fmt.Errorf("inspect worktree task root ownership: %w", err)
 	}
-	// Validate against the worktree record's persistent TaskID, not the
-	// requesting task's ID. An inherited/shared-group child reuses the
-	// parent's worktree under the parent's task-root with a different
-	// requesting TaskID, and must not be rejected.
-	if found && owner.TaskID != recordTaskID {
+	// Validate against the environment's stable task directory name, not the
+	// mutable task ID. Shared environments can transfer ownership while their
+	// physical task root and marker remain unchanged. Older records without the
+	// projected directory name retain the task-ID compatibility check.
+	ownerMatches := owner.TaskDirName == recordIdentity
+	if !stableTaskDirName {
+		ownerMatches = owner.TaskID == recordIdentity
+	}
+	if found && !ownerMatches {
 		return fmt.Errorf("%w: path %q belongs to task %q", ErrWorktreePathOwnedByAnotherTask, worktreePath, owner.TaskID)
 	}
 	return nil
