@@ -46,6 +46,14 @@ const (
 
 	// conversationProbeKey is the stable conversation_key the fixture uses.
 	conversationProbeKey = "fixture-conversation"
+
+	// automationsProbeActionKey exercises the Automation reader path: the
+	// fixture lists automations scoped to the workspace and returns the
+	// first coordinator-targeted automation (task_mode = automation_run)
+	// as a binding receipt. The operator creates these automations via the
+	// WS API (automation.create) before the fixture runs; the plugin never
+	// creates them directly.
+	automationsProbeActionKey = "coordinators.automation_setup"
 )
 
 // deliveryRecord is one recorded OnEvent delivery, appended as a JSON line
@@ -197,6 +205,8 @@ func (p *fixturePlugin) HandleAction(ctx context.Context, req *pluginsdk.PluginA
 		return p.handleConversationProbe(ctx, req.Context.WorkspaceID)
 	case conversationEnsureActionKey:
 		return p.handleConversationEnsure(ctx, req.Context.WorkspaceID)
+	case automationsProbeActionKey:
+		return p.handleAutomationsProbe(ctx, req.Context.WorkspaceID)
 	default:
 		return nil, fmt.Errorf("plugin-fixture: unknown action %q", req.ActionKey)
 	}
@@ -224,6 +234,76 @@ func (p *fixturePlugin) createWatchTask(ctx context.Context, workspaceID string)
 	body, err := json.Marshal(map[string]any{"watch_created": true, fixtureTaskIDKey: task.ID})
 	if err != nil {
 		return nil, fmt.Errorf("plugin-fixture: marshaling watch response: %w", err)
+	}
+	return &pluginsdk.PluginActionResponse{Body: body}, nil
+}
+
+// handleAutomationsProbe reads the workspace's automations via the host
+// AutomationReader and returns the first coordinator-targeted automation
+// (task_mode = "automation_run") as a binding receipt — proving the plugin
+// sees automations created by the operator through the WS API. The operator
+// must create the automation before the probe runs; the plugin never writes
+// automation records directly.
+func (p *fixturePlugin) handleAutomationsProbe(ctx context.Context, workspaceID string) (*pluginsdk.PluginActionResponse, error) {
+	host := p.Host()
+	if host == nil {
+		return nil, fmt.Errorf("plugin-fixture: host unavailable")
+	}
+	ar := host.Automations()
+	automations, _, err := ar.List(ctx, workspaceID, pluginsdk.Page{Limit: 50})
+	if err != nil {
+		return nil, fmt.Errorf("plugin-fixture: ListAutomations: %w", err)
+	}
+	// Filter for coordinator-targeted automations (task_mode == automation_run).
+	var coordinatorTarget []*pluginsdk.Automation
+	for _, a := range automations {
+		if a.TaskMode == "automation_run" {
+			coordinatorTarget = append(coordinatorTarget, &a)
+		}
+	}
+	type bindingReceipt struct {
+		AutomationID     string `json:"automation_id"`
+		Name             string `json:"name"`
+		TaskMode         string `json:"task_mode"`
+		AgentProfileID   string `json:"agent_profile_id"`
+		WorkflowID       string `json:"workflow_id"`
+		RepositoryMode   string `json:"repository_mode"`
+		Prompt           string `json:"prompt"`
+		TaskTitleTmpl    string `json:"task_title_template"`
+		Triggered        bool   `json:"triggered"`
+		TriggerType      string `json:"trigger_type,omitempty"`
+		ConcurrentRuns   int32  `json:"max_concurrent_runs"`
+		TotalAutomations int    `json:"total_automations"`
+	}
+	result := map[string]any{
+		"total_automations":              len(automations),
+		"coordinator_target_automations": len(coordinatorTarget),
+	}
+	if len(coordinatorTarget) > 0 {
+		b := coordinatorTarget[0]
+		triggerType := ""
+		if len(b.Triggers) > 0 {
+			triggerType = b.Triggers[0].Type
+		}
+		receipt := bindingReceipt{
+			AutomationID:     b.ID,
+			Name:             b.Name,
+			TaskMode:         b.TaskMode,
+			AgentProfileID:   b.AgentProfileID,
+			WorkflowID:       b.WorkflowID,
+			RepositoryMode:   b.RepositoryMode,
+			Prompt:           b.Prompt,
+			TaskTitleTmpl:    b.TaskTitleTemplate,
+			Triggered:        triggerType != "",
+			TriggerType:      triggerType,
+			ConcurrentRuns:   b.MaxConcurrentRuns,
+			TotalAutomations: len(automations),
+		}
+		result["binding_receipt"] = receipt
+	}
+	body, err := json.Marshal(result)
+	if err != nil {
+		return nil, fmt.Errorf("plugin-fixture: marshaling automation probe response: %w", err)
 	}
 	return &pluginsdk.PluginActionResponse{Body: body}, nil
 }

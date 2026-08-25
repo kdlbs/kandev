@@ -308,6 +308,73 @@ func TestHandleWebhook_WriteKeyRoundTripsHostWrites(t *testing.T) {
 	require.Empty(t, rec.TaskError)
 }
 
+// TestHandleAction_AutomationProbeReturnsNoTargetsWhenNoAutomationRunMode
+// proves the automation probe returns an empty binding when no
+// coordinator-targeted automations exist.
+func TestHandleAction_AutomationProbeReturnsNoTargetsWhenNoAutomationRunMode(t *testing.T) {
+	p := &fixturePlugin{dataDir: t.TempDir()}
+	p.SetHost(&fakeHost{
+		automations: []pluginsdk.Automation{
+			{ID: "auto-1", Name: "Daily Build", TaskMode: "build"},
+		},
+	})
+	resp, err := p.HandleAction(context.Background(), &pluginsdk.PluginActionRequest{
+		ActionKey: automationsProbeActionKey,
+		Context:   pluginsdk.VerifiedActionContext{WorkspaceID: "workspace-42"},
+	})
+	require.NoError(t, err)
+	m := map[string]any{}
+	require.NoError(t, json.Unmarshal(resp.Body, &m))
+	require.Equal(t, float64(1), m["total_automations"])
+	require.Equal(t, float64(0), m["coordinator_target_automations"])
+	require.NotContains(t, m, "binding_receipt")
+}
+
+// TestHandleAction_AutomationProbeReturnsBindingReceipt proves the automation
+// probe returns a binding receipt for the first coordinator-targeted automation
+// in the workspace, simulating what the operator sets up via the WS API.
+func TestHandleAction_AutomationProbeReturnsBindingReceipt(t *testing.T) {
+	p := &fixturePlugin{dataDir: t.TempDir()}
+	p.SetHost(&fakeHost{
+		automations: []pluginsdk.Automation{
+			{
+				ID:                "coord-auto-1",
+				Name:              "Coordinator Review Trigger",
+				TaskMode:          "automation_run",
+				AgentProfileID:    "coordinator-agent-v1",
+				WorkflowID:        "review-workflow",
+				RepositoryMode:    "all",
+				Prompt:            "Review changes for quality",
+				TaskTitleTemplate: "Automated review",
+				MaxConcurrentRuns: 3,
+				Triggers: []pluginsdk.AutomationTrigger{
+					{Type: "pr.opened", ConfigJSON: `{"branches":["main"]}`},
+				},
+			},
+			{ID: "auto-2", Name: "CI Build", TaskMode: "build"},
+		},
+	})
+	resp, err := p.HandleAction(context.Background(), &pluginsdk.PluginActionRequest{
+		ActionKey: automationsProbeActionKey,
+		Context:   pluginsdk.VerifiedActionContext{WorkspaceID: "workspace-42"},
+	})
+	require.NoError(t, err)
+	m := map[string]any{}
+	require.NoError(t, json.Unmarshal(resp.Body, &m))
+	require.Equal(t, float64(2), m["total_automations"])
+	require.Equal(t, float64(1), m["coordinator_target_automations"])
+	require.Contains(t, m, "binding_receipt")
+
+	receipt, ok := m["binding_receipt"].(map[string]any)
+	require.True(t, ok, "binding_receipt must be a map")
+	require.Equal(t, "coord-auto-1", receipt["automation_id"])
+	require.Equal(t, "automation_run", receipt["task_mode"])
+	require.Equal(t, "coordinator-agent-v1", receipt["agent_profile_id"])
+	require.Equal(t, "all", receipt["repository_mode"])
+	require.Equal(t, float64(3), receipt["max_concurrent_runs"])
+	require.Equal(t, "coordinator-agent-v1", receipt["agent_profile_id"])
+}
+
 // readSingleJSON reads path and decodes its whole contents as a single T.
 func readSingleJSON[T any](t *testing.T, path string) T {
 	t.Helper()
@@ -351,10 +418,28 @@ type fakeHost struct {
 	lastCreateInput pluginsdk.CreateTaskInput
 	lastSendTask    string
 	lastSendText    string
+
+	// Pre-populated automations for automation probe tests.
+	automations []pluginsdk.Automation
 }
 
 func (h *fakeHost) Tasks() pluginsdk.TaskReader       { return fakeHostTaskReader{h} }
 func (h *fakeHost) Messages() pluginsdk.MessageReader { return fakeHostMessageReader{h} }
+func (h *fakeHost) Automations() pluginsdk.AutomationReader {
+	return fakeHostAutomationReader{automations: h.automations}
+}
+
+type fakeHostAutomationReader struct {
+	automations []pluginsdk.Automation
+}
+
+func (r fakeHostAutomationReader) List(_ context.Context, _ string, _ pluginsdk.Page) ([]pluginsdk.Automation, *pluginsdk.PageInfo, error) {
+	return r.automations, &pluginsdk.PageInfo{}, nil
+}
+
+func (fakeHostAutomationReader) Get(_ context.Context, _, _ string) (*pluginsdk.Automation, error) {
+	return nil, nil
+}
 
 type fakeHostTaskReader struct{ h *fakeHost }
 
