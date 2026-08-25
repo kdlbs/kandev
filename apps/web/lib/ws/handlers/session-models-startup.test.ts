@@ -209,3 +209,26 @@ it("hydrates from a settled startup payload when the model differs from persiste
   handler(makeMessage(makeStartupPayload(providerModelId, providerModelId, false, "high")));
   expectCurrentModel(store, providerModelId);
 });
+
+it("preserves populated flat models when a partial replay drops them", () => {
+  const existingModels = [
+    { modelId: providerModelId, name: providerModelName },
+    { modelId: lunaModelId, name: "GPT-5.6 Luna" },
+  ];
+  const store = makeStore({
+    sessionModels: {
+      bySessionId: {
+        "session-1": {
+          currentModelId: providerModelId,
+          models: existingModels,
+          configOptions: [],
+        },
+      },
+    } as AppState["sessionModels"],
+  });
+  const handler = registerSessionModelsHandlers(store)["session.models_updated"]!;
+
+  handler(makeMessage(makePayload(providerModelId, { models: [], config_options: [] })));
+
+  expect(store.getState().sessionModels.bySessionId["session-1"].models).toEqual(existingModels);
+});
