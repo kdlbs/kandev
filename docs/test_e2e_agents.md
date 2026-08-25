@@ -37,6 +37,12 @@ go test -tags e2e -v -timeout 10m -run TestAuggie ./internal/agentctl/server/ada
 go test -tags e2e -v -timeout 10m -run TestGemini ./internal/agentctl/server/adapter/e2e/
 ```
 
+**OpenCode** (requires `npx` + OpenCode auth):
+
+```bash
+go test -tags e2e -v -timeout 10m -run TestOpenCodeACP ./internal/agentctl/server/adapter/e2e/
+```
+
 **Mock Agent** (free, no API cost — binary is auto-built):
 
 ```bash
@@ -55,6 +61,7 @@ go test -tags e2e -v -timeout 5m -run TestAuggie_BasicPrompt ./internal/agentctl
 |------|-------|----------|----------------|
 | `TestAuggie_BasicPrompt` | Auggie | acp | Simple prompt completes a turn |
 | `TestGemini_BasicPrompt` | Gemini | acp | Simple prompt completes a turn |
+| `TestOpenCodeACP_BasicPrompt` | OpenCode | acp | Simple prompt completes a turn |
 | `TestMockAgent_BasicPrompt` | Mock Agent | acp | Harness smoke test (no API cost) |
 
 ## Debugging Failures
@@ -124,6 +131,6 @@ Tests assert **structural invariants only** — never specific text or tool name
 ## Adding a New Agent
 
 1. Create `{agent}_test.go` with `//go:build e2e`
-2. Define the command as a const (derive from `internal/agent/agents/{agent}_acp.go`)
+2. Define the command as a const (derive from the agent's definition in `internal/agent/agents/` — e.g. `auggie.go`, `opencode_acp.go`; the `_acp` suffix varies by agent)
 3. Write test functions using `RunAgent(t, AgentSpec{...})`
 4. Use `AssertTurnCompleted` for basic turn validation
