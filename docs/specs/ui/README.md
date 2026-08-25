@@ -50,6 +50,7 @@ contract that other capabilities can reuse.
 - [Per-workflow column visibility on the kanban board](requirements/board-step-visibility-filter.md)
 - [Browser inspect annotation submission](requirements/browser-inspect-annotations-save.md)
 - [Backend-owned cancel-turn progress](requirements/cancel-turn-progress.md)
+- [Changes File Row Containment](requirements/changes-file-row-containment.md)
 - [Responsive Changes Walkthrough Action](requirements/changes-walkthrough-toolbar-width.md)
 - [Task PR Automation Controls](requirements/ci-pr-automation.md)
 - [Clarification Shared Context](requirements/clarification-context.md)
@@ -143,6 +144,7 @@ contract that other capabilities can reuse.
 
 - [Agent Todo List Panel](system-design/agent-todo-list-panel.md)
 - [App Status Bar](system-design/app-status-bar.md)
+- [Changes File Row Containment](system-design/changes-file-row-containment.md)
 - [Per-workflow column visibility on the kanban board System Design Part 1](system-design/board-step-visibility-filter-01.md)
 - [Per-workflow column visibility on the kanban board System Design Part 2](system-design/board-step-visibility-filter-02.md)
 - [Task PR Automation Controls System Design Part 1](system-design/ci-pr-automation-01.md)
