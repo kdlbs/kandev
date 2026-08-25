@@ -48,6 +48,8 @@ branch/diff summary.
   Changes without the deleted phone-only Git modules.
 - Long-title phone geometry, desktop layout selection, and tablet/desktop task
   chrome retain their existing behavior.
+- Changes recovery controls retain 44 CSS-pixel touch targets through the phone
+  range below `md`, including widths between `sm` and `md`.
 
 ## Verification
 
@@ -130,3 +132,6 @@ None.
 - A Pixel 5 Changes capture was inspected for the simplified header, contextual
   recovery placement, and horizontal containment, then cleaned with
   `pnpm e2e:clean`.
+- Review remediation replaced premature `sm` size resets with `md` resets and
+  added a 700px touch-viewport regression for the recovery warning and both
+  confirmation actions.

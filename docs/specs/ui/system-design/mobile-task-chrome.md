@@ -20,8 +20,8 @@ contract changes.
 
 ## Requirement mapping
 
-| Requirement | Design section |
-| --- | --- |
+| Requirement                     | Design section                                                                                                                                                    |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `REQ-UI-MOBILE-TASK-CHROME-001` | [Components and responsibilities](#components-and-responsibilities), [Interaction flow](#interaction-flow), and [Mobile design contract](#mobile-design-contract) |
 
 ## Current mismatch
@@ -107,14 +107,17 @@ state or operation semantics.
 - **Scroll, viewport, safe area, and touch:** Existing fixed top bar,
   `h-dvh` workbench, panel scroll owner, bottom navigation, drawer safe area,
   and menu containment remain. Removing two controls reduces crowding. The
-  retained task-drawer trigger has a 44-by-44 CSS-pixel hit target.
+  retained task-drawer trigger has a 44-by-44 CSS-pixel hit target. Standalone
+  Changes recovery controls and their dialog actions retain 44 CSS-pixel touch
+  targets through the full phone range below `md`.
 - **Shared state and logic:** Phone and desktop continue to share task and Git
   state, mutations, eligibility, and feedback. Only phone composition loses
   duplicate entry points.
 - **Mobile Playwright proof:** Tests assert both removed triggers are absent,
   the retained task drawer remains contained and can move the active task, Git
   operations complete through Changes, long titles do not overlap actions, and
-  document horizontal overflow stays absent.
+  document horizontal overflow stays absent. Remote recovery geometry is also
+  verified at 700 CSS pixels, between the `sm` and `md` breakpoints.
 
 ## Failure and recovery
 

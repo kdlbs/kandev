@@ -117,6 +117,9 @@ dialogs, or remote-contribution components.
 - Phone top-bar composition and long-title geometry passed: 1 Playwright test.
 - Phone task movement through the retained drawer passed: 1 Playwright test.
 - Phone local rebase and remote-contribution recovery through Changes passed: 2 Playwright tests.
+- Review remediation added a 700px touch-viewport regression proving the
+  recovery warning and confirmation actions stay at least 44 CSS pixels through
+  the full phone breakpoint.
 - Phone GitLab MR creation through Changes passed: 1 Playwright test.
 - A captured Pixel 5 Changes state was inspected for top-bar composition,
   action placement, and horizontal containment; generated capture artifacts

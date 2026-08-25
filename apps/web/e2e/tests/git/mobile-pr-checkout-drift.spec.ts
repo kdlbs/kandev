@@ -108,6 +108,9 @@ test.describe("Mobile rewritten contribution history", () => {
     backend,
     prCapture,
   }) => {
+    // Phone composition extends through 767px. Exercise the range where an
+    // `sm:` reset would otherwise shrink touch controls before `md`.
+    await testPage.setViewportSize({ width: 700, height: 500 });
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
     const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
     const localHead = seedStaleCheckout(git, seedData.repositoryRemoteURL);
@@ -221,11 +224,15 @@ test.describe("Mobile rewritten contribution history", () => {
     const dialog = testPage.getByTestId("remote-contribution-resolution-dialog");
     await expect(dialog).toBeVisible();
     await expect(dialog).toContainText(providerHistory.head);
+    const cancel = dialog.getByRole("button", { name: "Cancel" });
+    await expect
+      .poll(async () => (await cancel.boundingBox())?.height ?? 0)
+      .toBeGreaterThanOrEqual(44);
     const confirm = testPage.getByTestId("remote-contribution-confirm");
-    const confirmBox = await confirm.boundingBox();
-    expect(confirmBox).not.toBeNull();
-    expect(confirmBox!.height).toBeGreaterThanOrEqual(44);
-    await dialog.getByRole("button", { name: "Cancel" }).tap();
+    await expect
+      .poll(async () => (await confirm.boundingBox())?.height ?? 0)
+      .toBeGreaterThanOrEqual(44);
+    await cancel.tap();
 
     expect(git.getCurrentSha()).toBe(localHead);
     expect(git.exec("git status --porcelain").trim()).toBe("");
@@ -235,7 +242,8 @@ test.describe("Mobile rewritten contribution history", () => {
       ),
     ).toBe(true);
     await prCapture.screenshot("remote-contribution-drift-mobile", {
-      caption: "Pixel 5 Changes preserves the local checkout and offers provider version choices",
+      caption:
+        "700px touch Changes preserves the local checkout and offers provider version choices",
     });
   });
 });

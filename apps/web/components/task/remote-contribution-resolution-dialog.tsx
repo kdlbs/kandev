@@ -55,7 +55,7 @@ export function RemoteContributionResolutionDialog({
           <Button
             type="button"
             variant="outline"
-            className="h-11 sm:h-9"
+            className="h-11 md:h-9"
             onClick={() => onOpenChange(false)}
           >
             {t("common:cancel")}
@@ -63,7 +63,7 @@ export function RemoteContributionResolutionDialog({
           <Button
             type="button"
             variant="destructive"
-            className="h-11 sm:h-9"
+            className="h-11 md:h-9"
             data-testid="remote-contribution-confirm"
             disabled={isLoading}
             onClick={onConfirm}
