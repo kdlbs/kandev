@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -319,6 +320,25 @@ func TestResolveLaunchAuthToken(t *testing.T) {
 		}
 		if got != "the-ssh-token" {
 			t.Fatalf("resolveLaunchAuthToken() = %q, want %q", got, "the-ssh-token")
+		}
+	})
+
+	t.Run("ssh reports a session secret reveal failure", func(t *testing.T) {
+		store := newInMemorySecretStore()
+		revealErr := errors.New("secret backend unavailable")
+		store.revealErr = revealErr
+		store.store["session-auth"] = &secrets.SecretWithValue{Value: "the-ssh-token"}
+		m := &Manager{logger: log, secretStore: store}
+
+		req := &LaunchRequest{ExecutorType: string(models.ExecutorTypeSSH)}
+		metadata := map[string]interface{}{MetadataKeyAuthTokenSecret: "session-auth"}
+
+		got, err := m.resolveLaunchAuthToken(context.Background(), req, metadata)
+		if !errors.Is(err, revealErr) {
+			t.Fatalf("resolveLaunchAuthToken() error = %v, want %v", err, revealErr)
+		}
+		if got != "" {
+			t.Fatalf("resolveLaunchAuthToken() = %q, want empty", got)
 		}
 	})
 

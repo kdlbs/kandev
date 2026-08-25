@@ -927,7 +927,7 @@ func (m *Manager) resolveLaunchAuthToken(ctx context.Context, req *LaunchRequest
 	if isDockerExecutorType(req.ExecutorType) {
 		return m.revealContainerControlAuthToken(ctx, metadata, req.WorkspaceReuseRequired)
 	}
-	return m.revealRuntimeSecret(ctx, metadata, MetadataKeyAuthTokenSecret), nil
+	return m.revealRuntimeSecretValue(ctx, metadata, MetadataKeyAuthTokenSecret)
 }
 
 func resumeRemoteInstancePreflight(ctx context.Context, rt ExecutorBackend, req *ExecutorCreateRequest) error {
