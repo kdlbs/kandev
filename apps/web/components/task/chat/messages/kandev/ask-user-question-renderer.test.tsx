@@ -36,4 +36,26 @@ describe("AskUserQuestionRenderer", () => {
     expect(html).not.toContain(">context</code>");
     expect(html).not.toContain('title="For **production**"');
   });
+
+  it("keeps summary links passive while expanded prompt links stay interactive", () => {
+    const html = renderToStaticMarkup(
+      <AskUserQuestionRenderer
+        status="running"
+        args={{
+          questions: [
+            {
+              id: "q1",
+              prompt: "Read the [storage guide](https://example.com/storage).",
+              options: [],
+            },
+          ],
+        }}
+        result={{}}
+      />,
+    );
+    const root = document.createElement("div");
+    root.innerHTML = html;
+
+    expect(root.querySelectorAll('a[href="https://example.com/storage"]')).toHaveLength(1);
+  });
 });
