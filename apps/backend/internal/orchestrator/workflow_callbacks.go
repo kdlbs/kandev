@@ -304,6 +304,7 @@ func (c *runCodeReviewCallback) Execute(ctx context.Context, in engine.ActionInp
 		AgentProfileID: profileID,
 		Trigger:        taskmodels.ReviewTriggerWorkflowStep,
 		WorkflowStepID: in.Step.ID,
+		EntryID:        in.EntryID,
 	})
 	if err != nil {
 		c.svc.logger.Warn("workflow step code review did not start",
