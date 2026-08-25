@@ -6,7 +6,7 @@ wave: 1
 depends_on: []
 plan: "plan.md"
 requirements:
-  - ../../specs/tasks/requirements/confirmation-warning-hierarchy.md
+  - ../../specs/ui/requirements/confirmation-warning-hierarchy.md
 acceptance_criteria:
   - AC-TASKS-CONFIRMATION-WARNING-001.1
   - AC-TASKS-CONFIRMATION-WARNING-001.2
@@ -15,7 +15,7 @@ acceptance_criteria:
   - AC-TASKS-CONFIRMATION-SURFACE-002.2
   - AC-TASKS-CONFIRMATION-SURFACE-002.3
 system_design:
-  - ../../specs/tasks/system-design/confirmation-warning-hierarchy.md
+  - ../../specs/ui/system-design/confirmation-warning-hierarchy.md
 ---
 
 # Task 01: Compact warning and stable archive surface
@@ -71,16 +71,16 @@ against a rebuilt frontend.
 ## Verification
 
 ```bash
-cd apps && pnpm install --frozen-lockfile
-cd apps && pnpm --filter @kandev/web test -- --run components/task/task-archive-confirm-dialog.test.tsx components/task/task-delete-confirm-dialog.test.tsx components/task/task-archive-confirmation.test.tsx
-cd apps && pnpm --filter @kandev/web test -- --run components/confirmation/action-confirm-popover.test.tsx components/task/task-switcher-context-menu.test.tsx
-cd apps && pnpm --filter @kandev/web exec eslint components/task/task-still-working-warning.tsx components/task/task-archive-confirm-dialog.test.tsx components/task/task-delete-confirm-dialog.test.tsx components/task/task-archive-confirmation.test.tsx
-cd apps && pnpm --filter @kandev/web exec eslint components/confirmation/action-confirm-popover.tsx components/task/task-archive-confirmation.tsx components/task/task-switcher-context-menu.tsx
-cd apps/web && pnpm run typecheck
-cd apps/web && pnpm run i18n:ratchet
-make build-web
-cd apps/web && pnpm e2e:run --project chromium tests/task/archive-confirmation-preference.spec.ts tests/kanban/card-menu-delete-archive.spec.ts
-cd apps/web && pnpm e2e:run --project mobile-chrome tests/task/mobile-sidebar-task-actions.spec.ts -- --grep "keeps the inline archive confirmation readable on a phone"
+(cd apps && pnpm install --frozen-lockfile)
+(cd apps && pnpm --filter @kandev/web test -- --run components/task/task-archive-confirm-dialog.test.tsx components/task/task-delete-confirm-dialog.test.tsx components/task/task-archive-confirmation.test.tsx)
+(cd apps && pnpm --filter @kandev/web test -- --run components/confirmation/action-confirm-popover.test.tsx components/task/task-switcher-context-menu.test.tsx)
+(cd apps && pnpm --filter @kandev/web exec eslint components/task/task-still-working-warning.tsx components/task/task-archive-confirm-dialog.test.tsx components/task/task-delete-confirm-dialog.test.tsx components/task/task-archive-confirmation.test.tsx)
+(cd apps && pnpm --filter @kandev/web exec eslint components/confirmation/action-confirm-popover.tsx components/task/task-archive-confirmation.tsx components/task/task-switcher-context-menu.tsx)
+(cd apps/web && pnpm run typecheck)
+(cd apps/web && pnpm run i18n:ratchet)
+(make build-web)
+(cd apps/web && pnpm e2e:run --project chromium tests/task/archive-confirmation-preference.spec.ts tests/kanban/card-menu-delete-archive.spec.ts)
+(cd apps/web && pnpm e2e:run --project mobile-chrome tests/task/mobile-sidebar-task-actions.spec.ts)
 ```
 
 The compactness regression must fail before the shared class change and pass
@@ -121,8 +121,8 @@ None.
 
 ## Inputs
 
-- `docs/specs/tasks/requirements/confirmation-warning-hierarchy.md`
-- `docs/specs/tasks/system-design/confirmation-warning-hierarchy.md`
+- `docs/specs/ui/requirements/confirmation-warning-hierarchy.md`
+- `docs/specs/ui/system-design/confirmation-warning-hierarchy.md`
 - `apps/web/components/task/task-still-working-warning.tsx`
 - Existing archive/delete warning tests and phone exemplar in
   `apps/web/e2e/tests/task/mobile-sidebar-task-actions.spec.ts`

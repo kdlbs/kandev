@@ -121,6 +121,7 @@ contract that other capabilities can reuse.
 - [Slash Command Composer Selection](requirements/slash-command-composer.md)
 - [Subagent Observability](requirements/subagent-observability.md)
 - [Nested Submodule Review](requirements/submodule-review.md)
+- [Task Confirmation Warning Hierarchy](requirements/confirmation-warning-hierarchy.md)
 - [Task Layout Profiles](requirements/task-layout-profiles.md)
 - [Task Listing Display Preferences](requirements/task-listing-display-preferences.md)
 - [Task transcript history visibility](requirements/task-prompt-transcript-visibility.md)
@@ -152,6 +153,7 @@ contract that other capabilities can reuse.
 - [Persistent status motion](system-design/persistent-status-motion.md)
 - [Prompt History Panel](system-design/prompt-history-panel.md)
 - [Quick Chat and Terminal Tabs](system-design/quick-terminal.md)
+- [Task Confirmation Warning Hierarchy](system-design/confirmation-warning-hierarchy.md)
 - [Task Layout Profiles](system-design/task-layout-profiles.md)
 - [Task Transcript History Visibility](system-design/task-prompt-transcript-visibility.md)
 

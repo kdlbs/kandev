@@ -1,6 +1,6 @@
 ---
 status: current
-system: tasks
+system: ui
 requirements:
   - REQ-TASKS-CONFIRMATION-WARNING-001
   - REQ-TASKS-CONFIRMATION-SURFACE-002
@@ -122,4 +122,4 @@ actions at or above 44px, and asserts zero document horizontal overflow.
 ## Related decisions
 
 - [ADR 0049: Fine-grained foreground-idle busy signal](../../../decisions/0049-fine-grained-foreground-idle-busy-signal.md)
-- [Mobile task navigation](../../ui/mobile-task-navigation.md)
+- [Mobile task navigation](../requirements/mobile-task-navigation.md)

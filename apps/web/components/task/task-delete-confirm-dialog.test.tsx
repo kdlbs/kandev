@@ -10,6 +10,7 @@ vi.mock("@/lib/api", () => ({
 }));
 
 import { TaskDeleteConfirmDialog } from "./task-delete-confirm-dialog";
+import { expectCompactWarning } from "./task-confirm-dialog.test-helpers";
 
 type SeedTask = { id: string; foregroundActivity?: "generating" | "background" | null };
 
@@ -40,17 +41,6 @@ function renderDialog(ui: ReactNode, tasks: SeedTask[] = []) {
 }
 
 const WARNING_TESTID = "still-working-warning";
-
-function expectCompactWarning() {
-  const warning = screen.getByTestId(WARNING_TESTID);
-  expect(warning.getAttribute("role")).toBe("alert");
-  expect(warning.className).toContain("gap-1.5");
-  expect(warning.className).toContain("p-2.5");
-  expect(warning.className).toContain("text-xs");
-  expect(warning.className).toContain("leading-5");
-  expect(warning.className).toContain("text-pretty");
-  expect(warning.querySelector("svg")?.getAttribute("class")).toContain("h-3.5");
-}
 
 beforeEach(() => {
   mockGetSubtaskCount.mockReset();
@@ -215,7 +205,7 @@ describe("TaskDeleteConfirmDialog still-working guard", () => {
       [{ id: "task-1", foregroundActivity: "generating" }],
     );
 
-    expectCompactWarning();
+    expectCompactWarning(screen.getByTestId(WARNING_TESTID));
   });
 
   it("warns when the task is generating", () => {

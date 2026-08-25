@@ -2,9 +2,9 @@
 created: 2026-08-24
 status: complete
 requirements:
-  - ../../specs/tasks/requirements/confirmation-warning-hierarchy.md
+  - ../../specs/ui/requirements/confirmation-warning-hierarchy.md
 system_design:
-  - ../../specs/tasks/system-design/confirmation-warning-hierarchy.md
+  - ../../specs/ui/system-design/confirmation-warning-hierarchy.md
 legacy_specs: []
 ---
 

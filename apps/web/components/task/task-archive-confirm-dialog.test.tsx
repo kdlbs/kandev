@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { StateProvider, useAppStore } from "@/components/state-provider";
 import { defaultState } from "@/lib/state/default-state";
+import { expectCompactWarning } from "./task-confirm-dialog.test-helpers";
 
 const mockGetSubtaskCount = vi.fn();
 
@@ -54,17 +55,6 @@ function renderWithTasks(ui: ReactNode, tasks: SeedTask[], confirmTaskArchive = 
 }
 
 const WARNING_TESTID = "still-working-warning";
-
-function expectCompactWarning() {
-  const warning = screen.getByTestId(WARNING_TESTID);
-  expect(warning.getAttribute("role")).toBe("alert");
-  expect(warning.className).toContain("gap-1.5");
-  expect(warning.className).toContain("p-2.5");
-  expect(warning.className).toContain("text-xs");
-  expect(warning.className).toContain("leading-5");
-  expect(warning.className).toContain("text-pretty");
-  expect(warning.querySelector("svg")?.getAttribute("class")).toContain("h-3.5");
-}
 
 function DisableArchiveConfirmationButton() {
   const settings = useAppStore((state) => state.userSettings);
@@ -288,7 +278,7 @@ describe("TaskArchiveConfirmDialog still-working guard", () => {
       [{ id: "task-1", foregroundActivity: "generating" }],
     );
 
-    expectCompactWarning();
+    expectCompactWarning(screen.getByTestId(WARNING_TESTID));
   });
 
   it("warns when the task is generating", () => {

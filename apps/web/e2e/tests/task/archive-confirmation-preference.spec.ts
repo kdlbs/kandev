@@ -36,18 +36,13 @@ test.describe("Archive confirmation preference", () => {
       caption: "Fine-pointer archive confirmation popover",
     });
 
-    const openMetrics = await testPage.evaluate((taskId) => {
-      const row = document.querySelector<HTMLElement>(
-        `[data-testid="sidebar-task-item"][data-task-row-id="${taskId}"]`,
-      );
-      const surface = document.querySelector<HTMLElement>(
-        '[data-testid="task-archive-confirm-popover"]',
-      );
-      if (!row || !surface) throw new Error("archive geometry targets are missing");
-      const rowBox = row.getBoundingClientRect();
-      const surfaceBox = surface.getBoundingClientRect();
+    const openRowMetrics = await taskRow.evaluate((element) => {
+      const rowBox = element.getBoundingClientRect();
+      return { rowHeight: rowBox.height };
+    });
+    const openSurfaceMetrics = await popover.evaluate((element) => {
+      const surfaceBox = element.getBoundingClientRect();
       return {
-        rowHeight: rowBox.height,
         surface: {
           x: surfaceBox.x,
           y: surfaceBox.y,
@@ -58,7 +53,11 @@ test.describe("Archive confirmation preference", () => {
         documentWidth: document.documentElement.scrollWidth,
         viewportWidth: document.documentElement.clientWidth,
       };
-    }, task.task_id);
+    });
+    const openMetrics = {
+      rowHeight: openRowMetrics.rowHeight,
+      ...openSurfaceMetrics,
+    };
 
     expect(openMetrics.rowHeight).toBeCloseTo(heightBefore, 3);
     expect(openMetrics.surface.width).toBeGreaterThan(256);
@@ -145,23 +144,24 @@ test.describe("Archive confirmation preference", () => {
       caption: "Compact still-working warning in full archive dialog",
     });
 
-    const hierarchy = await testPage.evaluate(() => {
-      const warning = document.querySelector<HTMLElement>('[data-testid="still-working-warning"]');
-      const description = document.querySelector<HTMLElement>(
+    const hierarchy = await dialog.evaluate((dialogElement) => {
+      const warning = dialogElement.querySelector<HTMLElement>(
+        '[data-testid="still-working-warning"]',
+      );
+      const description = dialogElement.querySelector<HTMLElement>(
         '[data-slot="alert-dialog-description"]',
       );
-      const dialog = document.querySelector<HTMLElement>('[role="alertdialog"]');
-      if (!warning || !description || !dialog) throw new Error("dialog hierarchy targets missing");
+      if (!warning || !description) throw new Error("dialog hierarchy targets missing");
       const warningStyle = getComputedStyle(warning);
       const descriptionStyle = getComputedStyle(description);
       const warningBox = warning.getBoundingClientRect();
-      const dialogBox = dialog.getBoundingClientRect();
+      const dialogBox = dialogElement.getBoundingClientRect();
       return {
         warningFontSize: warningStyle.fontSize,
         warningLineHeight: warningStyle.lineHeight,
         descriptionFontSize: descriptionStyle.fontSize,
-        warningWidth: warningBox.width,
-        dialogWidth: dialogBox.width,
+        warning: { left: warningBox.left, right: warningBox.right },
+        dialog: { left: dialogBox.left, right: dialogBox.right },
         documentWidth: document.documentElement.scrollWidth,
         viewportWidth: document.documentElement.clientWidth,
       };
@@ -170,7 +170,8 @@ test.describe("Archive confirmation preference", () => {
       Number.parseFloat(hierarchy.descriptionFontSize),
     );
     expect(hierarchy.warningLineHeight).toBe("20px");
-    expect(hierarchy.warningWidth).toBeLessThanOrEqual(hierarchy.dialogWidth);
+    expect(hierarchy.warning.left).toBeGreaterThanOrEqual(hierarchy.dialog.left);
+    expect(hierarchy.warning.right).toBeLessThanOrEqual(hierarchy.dialog.right);
     expect(hierarchy.documentWidth).toBeLessThanOrEqual(hierarchy.viewportWidth);
 
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click();

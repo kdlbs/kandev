@@ -1,6 +1,6 @@
 ---
 status: active
-system: tasks
+system: ui
 created: 2026-08-24
 owners:
   - kandev
