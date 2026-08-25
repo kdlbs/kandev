@@ -486,3 +486,39 @@ func TestBuildWithoutAnyIdentityIsRejected(t *testing.T) {
 		t.Fatalf("identity-free build reached Docker: %v", client.builtTags)
 	}
 }
+
+// TestUnownedContainerIsDeniedOnStopAndRemove is the other half of the task
+// fallback: a container that resolves through neither label must stay denied,
+// so the fallback cannot be widened into a fail-open path.
+func TestUnownedContainerIsDeniedOnStopAndRemove(t *testing.T) {
+	client, authorizer, titles := twoUserFixture()
+	client.containers = append(client.containers, ContainerInfo{
+		ID: "ctr-unlabeled", Name: "stray", State: "running",
+	})
+	// A container carrying Kandev's marker label but neither ownership label
+	// must be denied too, not just a wholly unlabeled one.
+	client.containers = append(client.containers, ContainerInfo{
+		ID: "ctr-marker-only", Name: "marked", State: "running",
+		Labels: map[string]string{"kandev.managed": "true"},
+	})
+	router := dockerTestRouter(t, client, titles.provider(), authorizer, member("user-a"))
+
+	for _, containerID := range []string{"ctr-unlabeled", "ctr-marker-only"} {
+		stop := do(router, http.MethodPost, "/api/v1/docker/containers/"+containerID+"/stop", "")
+		if stop.Code != http.StatusNotFound {
+			t.Fatalf("%s stop = %d, want 404; body = %s", containerID, stop.Code, stop.Body.String())
+		}
+		remove := do(router, http.MethodDelete, "/api/v1/docker/containers/"+containerID, "")
+		if remove.Code != http.StatusNotFound {
+			t.Fatalf("%s remove = %d, want 404; body = %s", containerID, remove.Code, remove.Body.String())
+		}
+	}
+	if len(client.stopped) != 0 || len(client.removed) != 0 {
+		t.Fatalf("unowned container reached Docker: stopped=%v removed=%v", client.stopped, client.removed)
+	}
+
+	list := do(router, http.MethodGet, "/api/v1/docker/containers", "")
+	if strings.Contains(list.Body.String(), "ctr-unlabeled") || strings.Contains(list.Body.String(), "ctr-marker-only") {
+		t.Fatalf("unowned container leaked into listing: %s", list.Body.String())
+	}
+}

@@ -17,6 +17,7 @@
   "buildFailedWithMessage": "Ɓũĩĺď ƒàĩĺēď: {{message}}",
   "buildFailedWithStatus": "Ɓũĩĺď ƒàĩĺēď ({{status}}): {{text}}",
   "buildImage": "Ɓũĩĺď Ĩḿàĝē",
+  "buildImageAdminOnly": "Ōńĺŷ àďḿĩńĩśţŕàţōŕś ćàń ƀũĩĺď ĩḿàĝēś.",
   "buildThisDockerImageBeforeCreating": "Ɓũĩĺď ţĥĩś Ďōćķēŕ ĩḿàĝē ƀēƒōŕē ćŕēàţĩńĝ ţĥē ƥŕōƒĩĺē.",
   "building": "Ɓũĩĺďĩńĝ...",
   "checking": "Ćĥēćķĩńĝ...",

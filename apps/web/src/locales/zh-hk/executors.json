@@ -17,6 +17,7 @@
   "buildFailedWithMessage": "構建失敗：{{message}}",
   "buildFailedWithStatus": "構建失敗（{{status}}）：{{text}}",
   "buildImage": "構建鏡像",
+  "buildImageAdminOnly": "只有管理員可以構建鏡像。",
   "buildThisDockerImageBeforeCreating": "建立設定前請先構建此 Docker 鏡像。",
   "building": "正在構建…",
   "checking": "正在檢查…",
