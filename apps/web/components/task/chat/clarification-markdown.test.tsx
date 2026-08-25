@@ -54,4 +54,15 @@ describe("ClarificationMarkdown", () => {
     expect(links[0]?.getAttribute("rel")).toBe("noopener noreferrer");
     expect(container.textContent).toContain("unsafe");
   });
+
+  it("keeps repository-relative links passive", () => {
+    const { container } = render(
+      <ClarificationMarkdown variant="inline">
+        {"Read [the guide](README.md)."}
+      </ClarificationMarkdown>,
+    );
+
+    expect(container.querySelector("a")).toBeNull();
+    expect(container.textContent).toContain("the guide");
+  });
 });

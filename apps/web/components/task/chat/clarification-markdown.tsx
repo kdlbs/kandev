@@ -37,15 +37,15 @@ function markdownComponents(linkBehavior: "interactive" | "passive"): Components
       );
     },
     a: ({ children, href }) => {
-      if (linkBehavior === "passive" || !href) {
+      const isWebLink = href ? /^https?:\/\//i.test(href) : false;
+      if (linkBehavior === "passive" || !isWebLink) {
         return <span className="text-primary underline underline-offset-2">{children}</span>;
       }
-      const isLocal = href.startsWith("#") || href.startsWith("/");
       return (
         <a
           href={href}
-          target={isLocal ? "_self" : "_blank"}
-          rel={isLocal ? undefined : "noopener noreferrer"}
+          target="_blank"
+          rel="noopener noreferrer"
           className="break-words text-primary underline underline-offset-2"
         >
           {children}

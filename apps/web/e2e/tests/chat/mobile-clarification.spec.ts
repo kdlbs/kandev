@@ -189,7 +189,7 @@ test.describe("Mobile clarification multiline answer", () => {
     );
 
     const overlay = session.clarificationOverlay();
-    await expect(overlay).toBeVisible({ timeout: 30_000 });
+    await expect(overlay).toBeVisible();
     const card = session.clarificationQuestionCardById("markdown");
     const option = session.clarificationOption("Postgres");
 
