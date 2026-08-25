@@ -1284,12 +1284,17 @@ func (s *Service) queueOfficeAutoStartRun(ctx context.Context, task *models.Task
 // any write to the row (a metadata key set/removed, not only a step move)
 // bumps it, so it is NOT guaranteed stable across two deliveries of the same
 // entry. It only needs to guarantee the other direction — a real re-entry
-// always changes it, since every writer that moves tasks.workflow_step_id is
-// required to bump updated_at in the same transaction (enforced repo-wide by
-// TestStepTransitionWritersArePinned). Suppressing a duplicate delivery
-// within one entry is NOT this key's job: that is what MetaKeyAutoStartClaimed
-// and MetaKeyQueuePromotionPending (claimed before this function ever runs)
-// plus CoalesceWindowSeconds already guard.
+// always changes it, since every one of the 7 functions that can mutate
+// tasks.workflow_step_id independently stamps a fresh updated_at in the same
+// transaction as its step write (see each one's own occurredAt argument to
+// recordStepTransition). TestStepTransitionWritersArePinned enforces that
+// this set of functions is closed — a new mutator added anywhere in the
+// backend fails the test until it is registered and wired the same way — not
+// that each one bumps updated_at, which is a per-function convention
+// verified by inspection rather than a single shared assertion. Suppressing
+// a duplicate delivery within one entry is NOT this key's job: that is what
+// MetaKeyAutoStartClaimed and MetaKeyQueuePromotionPending (claimed before
+// this function ever runs) plus CoalesceWindowSeconds already guard.
 func officeAutoStartIdempotencyKey(task *models.Task, agentProfileID, stepID string) string {
 	return fmt.Sprintf("%s:%s:%s:%s:%s",
 		officeAutoStartRunReason, task.ID, agentProfileID, stepID,

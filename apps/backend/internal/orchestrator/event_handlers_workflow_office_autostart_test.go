@@ -217,6 +217,9 @@ func TestOfficeAutoStartIdempotencyKeyAcrossRealDeliveries(t *testing.T) {
 
 	task, err := repo.GetTask(ctx, "t-office-real-deliveries")
 	requireNoError(t, err)
+	// No field on task is changed here: updateTaskTx always stamps a fresh
+	// updated_at (task.go:538's r.nowUTC() call), so a bare UpdateTask is
+	// enough to simulate the row write a real step re-entry performs.
 	requireNoError(t, repo.UpdateTask(ctx, task))
 
 	thirdDelivery := deliver()
