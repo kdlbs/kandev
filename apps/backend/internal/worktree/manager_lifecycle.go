@@ -706,6 +706,12 @@ func (m *Manager) fetchBranchToLocalWithPolicy(
 	}
 
 	if required {
+		if isRemoteBranchMissingError(outputStr) {
+			return nil, fmt.Errorf(
+				"required refresh of checkout branch %q found no remote ref: %w",
+				branch, ErrInvalidBaseBranch,
+			)
+		}
 		reason := classifyGitFallbackReason(err, outputStr, fetchCtxErr)
 		return nil, fmt.Errorf(
 			"required refresh of checkout branch %q failed (%s): %w",

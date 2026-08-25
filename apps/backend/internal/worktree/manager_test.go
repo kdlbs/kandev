@@ -1002,6 +1002,45 @@ esac
 	}
 }
 
+func TestFetchBranchToLocal_RequiredRefreshReportsMissingBranch(t *testing.T) {
+	scriptDir := writeFakeGitScript(t, `
+case "${1:-}" in
+  fetch)
+    echo "fatal: couldn't find remote ref feature/pr-branch" >&2
+    exit 128
+    ;;
+  rev-parse)
+    if [ "${2:-}" = "--verify" ]; then
+      exit 1
+    fi
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`)
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	result, err := mgr.fetchBranchToLocalWithPolicy(
+		context.Background(), t.TempDir(), "feature/pr-branch", 0, true,
+	)
+	if err == nil {
+		t.Fatal("required checkout refresh succeeded for a missing remote branch")
+	}
+	if result != nil {
+		t.Fatalf("required checkout refresh returned a result: %+v", result)
+	}
+	if !errors.Is(err, ErrInvalidBaseBranch) {
+		t.Fatalf("error = %v, want ErrInvalidBaseBranch", err)
+	}
+}
+
 func TestFetchBranchToLocal_FetchFailsNoBranch(t *testing.T) {
 	scriptDir := writeFakeGitScript(t, `
 case "${1:-}" in
