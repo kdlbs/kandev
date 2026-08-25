@@ -32,22 +32,7 @@ func registeredOfficeRoutes(t *testing.T) gin.RoutesInfo {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
-	office.RegisterAllRoutes(engine.Group(officeRoutePrefix), &office.Services{
-		Agents:       &officeagents.AgentService{},
-		Skills:       &skills.SkillService{},
-		Projects:     &projects.ProjectService{},
-		Costs:        &costs.CostService{},
-		Routines:     &routines.RoutineService{},
-		Approvals:    &approvals.ApprovalService{},
-		Channels:     &channels.ChannelService{},
-		Config:       &officeconfig.ConfigService{},
-		Dashboard:    &dashboard.DashboardService{},
-		Labels:       &labels.LabelService{},
-		Onboarding:   &onboarding.OnboardingService{},
-		TreeControls: &officeservice.Service{},
-		Workspaces:   &officeservice.Service{},
-		Documents:    &taskservice.DocumentService{},
-	}, testLogger(t))
+	office.RegisterAllRoutes(engine.Group(officeRoutePrefix), officeTestServices(), testLogger(t))
 
 	routes := engine.Routes()
 	if len(routes) < 100 {
@@ -64,22 +49,24 @@ type officeRouteCoverage struct {
 
 // classifyOfficeRoute mirrors authorizeOfficeRequest's decision, on a route
 // PATTERN rather than a live request.
+//
+// A `:wsId` param covers the route, but it does NOT excuse the route's other
+// id params. That exemption is what let the mixed-parameter label routes ship
+// unscoped: `/workspaces/:wsId/labels/:id` looked "covered" while its handler
+// mutated by label id alone. Every non-workspace param must still resolve.
 func classifyOfficeRoute(route string, resolvers map[string]officeWorkspaceResolver) officeRouteCoverage {
 	if _, ok := officeWorkspacelessRoute(route); ok {
 		return officeRouteCoverage{how: "workspace-less allowlist"}
 	}
-	keys := officeRouteParamKeys(route)
-	for _, key := range keys {
-		if paramOfScopeKey(key) == ":wsId" {
-			return officeRouteCoverage{how: "wsId param"}
-		}
-	}
 	var (
-		resolved []string
-		unknown  []string
+		hasWorkspaceParam bool
+		resolved          []string
+		unknown           []string
 	)
-	for _, key := range keys {
+	for _, key := range officeRouteParamKeys(route) {
 		switch {
+		case paramOfScopeKey(key) == officeWorkspaceParam:
+			hasWorkspaceParam = true
 		case resolvers[key] != nil:
 			resolved = append(resolved, key)
 		case officeScopedSubResourceParams[key] != "":
@@ -91,10 +78,14 @@ func classifyOfficeRoute(route string, resolvers map[string]officeWorkspaceResol
 	if len(unknown) > 0 {
 		return officeRouteCoverage{uncovered: "unresolvable id param(s) " + strings.Join(unknown, ", ")}
 	}
-	if len(resolved) > 0 {
+	switch {
+	case hasWorkspaceParam && len(resolved) > 0:
+		return officeRouteCoverage{how: "wsId param + resolver " + strings.Join(resolved, ", ")}
+	case hasWorkspaceParam:
+		return officeRouteCoverage{how: "wsId param"}
+	case len(resolved) > 0:
 		return officeRouteCoverage{how: "resolver " + strings.Join(resolved, ", ")}
-	}
-	if officeBodyScopeResolvers[route] != nil {
+	case officeBodyScopeResolvers[route] != nil:
 		return officeRouteCoverage{how: "body resolver"}
 	}
 	return officeRouteCoverage{uncovered: "no :wsId, no id param, no body resolver, not on the allowlist"}
@@ -222,5 +213,27 @@ func TestOfficeScopeCasesMatchRegisteredRoutes(t *testing.T) {
 			t.Errorf("officeScopeCases exercises %s %s, which is not a registered Office route",
 				tc.method, tc.pattern)
 		}
+	}
+}
+
+// officeTestServices returns the zero-value service set registeredOfficeRoutes
+// uses, so the production mount can be exercised without building real Office
+// services.
+func officeTestServices() *office.Services {
+	return &office.Services{
+		Agents:       &officeagents.AgentService{},
+		Skills:       &skills.SkillService{},
+		Projects:     &projects.ProjectService{},
+		Costs:        &costs.CostService{},
+		Routines:     &routines.RoutineService{},
+		Approvals:    &approvals.ApprovalService{},
+		Channels:     &channels.ChannelService{},
+		Config:       &officeconfig.ConfigService{},
+		Dashboard:    &dashboard.DashboardService{},
+		Labels:       &labels.LabelService{},
+		Onboarding:   &onboarding.OnboardingService{},
+		TreeControls: &officeservice.Service{},
+		Workspaces:   &officeservice.Service{},
+		Documents:    &taskservice.DocumentService{},
 	}
 }

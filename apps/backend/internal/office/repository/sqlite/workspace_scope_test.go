@@ -66,6 +66,8 @@ func seedScopedResources(t *testing.T, repo *sqlite.Repository, workspaceID, suf
 	exec(`INSERT INTO office_channels (id, workspace_id, agent_profile_id, platform, created_at, updated_at)
 		VALUES (?, ?, ?, 'telegram', ?, ?)`,
 		"channel-"+suffix, workspaceID, "agent-"+suffix, now, now)
+	exec(`INSERT INTO office_labels (id, workspace_id, name) VALUES (?, ?, ?)`,
+		"label-"+suffix, workspaceID, "l-"+suffix)
 }
 
 // scopeResolvers is every by-ID workspace resolver the Office HTTP scope
@@ -82,6 +84,7 @@ func scopeResolvers(repo *sqlite.Repository) map[string]func(context.Context, st
 		"budget":   repo.WorkspaceIDForBudget,
 		"approval": repo.WorkspaceIDForApproval,
 		"channel":  repo.WorkspaceIDForChannel,
+		"label":    repo.WorkspaceIDForLabel,
 	}
 }
 

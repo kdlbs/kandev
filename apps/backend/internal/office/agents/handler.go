@@ -107,6 +107,19 @@ func CallerFromContext(c *gin.Context) *models.AgentInstance {
 	return agentCallerFromCtx(c)
 }
 
+// ClaimsFromContext exposes the validated agent JWT claims (or nil for UI
+// requests). The workspace claim is what AgentAuthMiddleware compares against
+// `:wsId`; the HTTP scope guard needs the same value to confine a token to
+// its own workspace on by-ID routes, where there is no `:wsId` to compare.
+func ClaimsFromContext(c *gin.Context) *AgentClaims {
+	val, ok := c.Get(ctxKeyAgentClaims)
+	if !ok {
+		return nil
+	}
+	claims, _ := val.(*AgentClaims)
+	return claims
+}
+
 // -- Agent handlers --
 
 func (h *Handler) listAgents(c *gin.Context) {

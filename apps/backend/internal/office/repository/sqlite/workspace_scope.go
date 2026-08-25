@@ -95,6 +95,14 @@ func (r *Repository) WorkspaceIDForApproval(ctx context.Context, approvalID stri
 	return r.scopeWorkspaceID(ctx, `SELECT workspace_id FROM office_approvals WHERE id = ?`, approvalID)
 }
 
+// WorkspaceIDForLabel resolves a label to its workspace. The label handlers
+// update and delete by label id alone, ignoring the `:wsId` on their own
+// route, so this is the only thing standing between a caller's own workspace
+// id and another workspace's label.
+func (r *Repository) WorkspaceIDForLabel(ctx context.Context, labelID string) (string, error) {
+	return r.scopeWorkspaceID(ctx, `SELECT workspace_id FROM office_labels WHERE id = ?`, labelID)
+}
+
 // WorkspaceIDForChannel resolves an agent communication channel to its
 // workspace.
 func (r *Repository) WorkspaceIDForChannel(ctx context.Context, channelID string) (string, error) {

@@ -12,6 +12,8 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/kandev/kandev/internal/auth"
+	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/office"
 	officeagents "github.com/kandev/kandev/internal/office/agents"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -47,6 +49,9 @@ import (
 // RegisterRoutes calls they mirror.
 const officeRoutePrefix = "/api/v1/office"
 
+// officeWorkspaceParam is the path param naming a workspace directly.
+const officeWorkspaceParam = ":wsId"
+
 // officeWorkspaceResolver answers "which workspace owns this id". Every
 // implementation must return an error (not "") for an unknown id — see the
 // fail-closed note on authorizeOfficeWorkspace.
@@ -77,6 +82,12 @@ func officeParamScopeResolvers(repo *officesqlite.Repository) map[string]officeW
 		"budgets/:id":                 repo.WorkspaceIDForBudget,
 		"approvals/:id":               repo.WorkspaceIDForApproval,
 		"channels/:channelId":         repo.WorkspaceIDForChannel,
+		// Sibling ids on a `:wsId` route. The label handlers update and
+		// delete by label id alone and read task labels by task id alone,
+		// ignoring the `:wsId` they are mounted under, so authorizing only
+		// the workspace leaves them reachable across workspaces.
+		"labels/:id":    repo.WorkspaceIDForLabel,
+		"tasks/:taskId": repo.WorkspaceIDForTask,
 		// A reviewer/approver is an agent, and must live in the same
 		// workspace as the task it is being attached to.
 		"reviewers/:agentId": repo.WorkspaceIDForAgent,
@@ -105,6 +116,7 @@ var officeScopedSubResourceParams = map[string]string{
 	"instructions/:filename": "an instruction file, addressed under its agent",
 	"memory/:entryId":        "a memory entry, addressed under its agent",
 	"blockers/:blockerId":    "a task blocker, addressed under its task",
+	"labels/:labelName":      "a label name, resolved under its task and workspace by the service",
 }
 
 // officeWorkspacelessRoutes are the Office routes that legitimately carry no
@@ -176,11 +188,6 @@ func officeWorkspaceScopeMiddleware(
 			c.Next()
 			return
 		}
-		// Agent JWT callers are already constrained to their workspace claim.
-		if officeagents.CallerFromContext(c) != nil {
-			c.Next()
-			return
-		}
 		if err := authorizeOfficeRequest(c, taskSvc, officeRepo, resolvers); err != nil {
 			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
 			return
@@ -208,59 +215,153 @@ func authorizeOfficeRequest(
 	if _, allowed := officeWorkspacelessRoute(route); allowed {
 		return nil
 	}
+	refs, err := officeScopeRefs(c, route)
+	if err != nil {
+		return repoerrors.ErrWorkspaceNotFound
+	}
+	if officeagents.CallerFromContext(c) != nil {
+		return authorizeOfficeAgentCaller(c, officeRepo, resolvers, refs)
+	}
+	return authorizeOfficeUser(c, taskSvc, officeRepo, resolvers, refs)
+}
+
+// authorizeOfficeUser authorizes a browser/session caller: every workspace
+// the route names, by `:wsId` or by resource id, must be one they may access.
+//
+// `:wsId` does NOT short-circuit the id checks. It used to, and that left the
+// mixed-parameter routes open: the label handlers take `/workspaces/:wsId/
+// labels/:id` and then call UpdateLabel/DeleteLabel with the label id alone,
+// so pairing an owned workspace id with a foreign label id mutated another
+// user's label. `/workspaces/:wsId/tasks/:taskId/...` has the same shape.
+func authorizeOfficeUser(
+	c *gin.Context,
+	taskSvc *taskservice.Service,
+	officeRepo *officesqlite.Repository,
+	resolvers map[string]officeWorkspaceResolver,
+	refs map[string]string,
+) error {
+	ctx := c.Request.Context()
+	scoped := false
 	if wsID := c.Param("wsId"); wsID != "" {
-		return taskSvc.AuthorizeWorkspaceAccess(c.Request.Context(), wsID)
+		if err := taskSvc.AuthorizeWorkspaceAccess(ctx, wsID); err != nil {
+			return err
+		}
+		scoped = true
 	}
 	// officeRepo == nil fails closed for the same reason runSubscriptionCheck
 	// does: this is a security check, not a visibility fallback.
+	if len(refs) > 0 && officeRepo == nil {
+		return repoerrors.ErrWorkspaceNotFound
+	}
+	resolved, err := authorizeOfficeRefs(ctx, refs, resolvers, func(workspaceID string) error {
+		return taskSvc.AuthorizeWorkspaceAccess(ctx, workspaceID)
+	})
+	if err != nil {
+		return err
+	}
+	if !scoped && !resolved {
+		return repoerrors.ErrWorkspaceNotFound
+	}
+	return nil
+}
+
+// authorizeOfficeAgentCaller authorizes a sandbox agent's JWT against the
+// resources the route names.
+//
+// AgentAuthMiddleware compares the token's workspace claim to `:wsId` only,
+// which is no comparison at all on a by-ID route — and the handlers' own
+// agent-caller guards check ROLE and self-identity (isAdminRole, caller.ID ==
+// target), never workspace. So a CEO-role token minted in workspace A could
+// read, update or delete a workspace B agent. Resolving the route's ids and
+// requiring them to land in the caller's own workspace is what closes that;
+// the token stays confined to the workspace it was minted for.
+func authorizeOfficeAgentCaller(
+	c *gin.Context,
+	officeRepo *officesqlite.Repository,
+	resolvers map[string]officeWorkspaceResolver,
+	refs map[string]string,
+) error {
+	callerWorkspace := officeCallerWorkspace(c)
+	if callerWorkspace == "" {
+		return repoerrors.ErrWorkspaceNotFound
+	}
+	if len(refs) == 0 {
+		// A `:wsId` route (already compared against the claim upstream) or a
+		// body-keyed route whose body named nothing resolvable.
+		if c.Param("wsId") != "" {
+			return nil
+		}
+		return repoerrors.ErrWorkspaceNotFound
+	}
 	if officeRepo == nil {
 		return repoerrors.ErrWorkspaceNotFound
 	}
-	refs, err := officeScopeRefs(c, route)
-	if err != nil || len(refs) == 0 {
-		return repoerrors.ErrWorkspaceNotFound
+	_, err := authorizeOfficeRefs(c.Request.Context(), refs, resolvers, func(workspaceID string) error {
+		if workspaceID != callerWorkspace {
+			return repoerrors.ErrWorkspaceNotFound
+		}
+		return nil
+	})
+	return err
+}
+
+// officeCallerWorkspace is the workspace an agent token is confined to. The
+// JWT claim is authoritative (it is what AgentAuthMiddleware compares against
+// `:wsId`); the caller agent's own workspace is the fallback for a token
+// minted without one. Empty means "cannot be scoped", which the caller denies.
+func officeCallerWorkspace(c *gin.Context) string {
+	if claims := officeagents.ClaimsFromContext(c); claims != nil && claims.WorkspaceID != "" {
+		return claims.WorkspaceID
 	}
-	scoped := false
+	if caller := officeagents.CallerFromContext(c); caller != nil {
+		return caller.WorkspaceID
+	}
+	return ""
+}
+
+// authorizeOfficeRefs resolves every id the route names and hands each
+// resolved workspace to check. Reports whether any id was actually
+// authorized, so callers can tell "allowed" from "nothing was checked".
+//
+// The empty-resolution branch is the trap runSubscriptionCheck documents:
+// AuthorizeWorkspaceAccess reads workspaceID == "" as "no workspace scoping
+// applies" and returns nil, so handing it an unresolved id would turn this
+// guard into an unconditional allow. Deny before it ever gets there.
+//
+// An id whose `<collection>/:<param>` pair has no resolver denies, unless it
+// is a listed child of a resource checked on the same route — "no resolver"
+// must never mean "allowed".
+func authorizeOfficeRefs(
+	ctx context.Context,
+	refs map[string]string,
+	resolvers map[string]officeWorkspaceResolver,
+	check func(workspaceID string) error,
+) (bool, error) {
+	authorized := false
 	for key, id := range refs {
 		resolve, known := resolvers[key]
 		if !known {
 			if _, sub := officeScopedSubResourceParams[key]; sub {
 				continue
 			}
-			return repoerrors.ErrWorkspaceNotFound
+			return false, repoerrors.ErrWorkspaceNotFound
 		}
-		if err := authorizeOfficeWorkspace(c.Request.Context(), taskSvc, resolve, id); err != nil {
-			return err
+		if id == "" {
+			return false, repoerrors.ErrWorkspaceNotFound
 		}
-		scoped = true
+		workspaceID, err := resolve(ctx, id)
+		if err != nil {
+			return false, err
+		}
+		if workspaceID == "" {
+			return false, repoerrors.ErrWorkspaceNotFound
+		}
+		if err := check(workspaceID); err != nil {
+			return false, err
+		}
+		authorized = true
 	}
-	if !scoped {
-		return repoerrors.ErrWorkspaceNotFound
-	}
-	return nil
-}
-
-// authorizeOfficeWorkspace resolves one id and authorizes the workspace it
-// belongs to.
-//
-// The empty-resolution branch is the trap runSubscriptionCheck documents:
-// AuthorizeWorkspaceAccess reads workspaceID == "" as "no workspace scoping
-// applies" and returns nil, so handing it an unresolved id would turn this
-// guard into an unconditional allow. Deny before it ever gets there.
-func authorizeOfficeWorkspace(
-	ctx context.Context, taskSvc *taskservice.Service, resolve officeWorkspaceResolver, id string,
-) error {
-	if id == "" {
-		return repoerrors.ErrWorkspaceNotFound
-	}
-	workspaceID, err := resolve(ctx, id)
-	if err != nil {
-		return err
-	}
-	if workspaceID == "" {
-		return repoerrors.ErrWorkspaceNotFound
-	}
-	return taskSvc.AuthorizeWorkspaceAccess(ctx, workspaceID)
+	return authorized, nil
 }
 
 // officeScopeRefs returns the resource ids this request names, keyed by the
@@ -268,6 +369,9 @@ func authorizeOfficeWorkspace(
 func officeScopeRefs(c *gin.Context, route string) (map[string]string, error) {
 	refs := map[string]string{}
 	for _, key := range officeRouteParamKeys(route) {
+		if paramOfScopeKey(key) == officeWorkspaceParam {
+			continue // authorized directly, not through a resolver
+		}
 		refs[key] = c.Param(strings.TrimPrefix(paramOfScopeKey(key), ":"))
 	}
 	if len(refs) > 0 {
@@ -349,4 +453,27 @@ func officeWorkspacelessRoute(route string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// mountOfficeRoutes builds the Office route group with its two middlewares
+// and registers every Office handler on it.
+//
+// Extracted from the caller so TestOfficeRouteGroupMountsScopeGuard can pin
+// the `.Use` lines themselves: every other test here mounts the guard by
+// hand, so deleting it from the production group would leave all of them
+// green while reopening the hole in the shipped binary. That is the same gap
+// TestGatewayAuthPolicyWiresRunSubscriptionCheck exists to close for the WS
+// gateway.
+func mountOfficeRoutes(
+	router *gin.Engine,
+	svcs *office.Services,
+	authSvc *auth.Service,
+	taskSvc *taskservice.Service,
+	officeRepo *officesqlite.Repository,
+	log *logger.Logger,
+) {
+	api := router.Group(officeRoutePrefix)
+	api.Use(officeagents.AgentAuthMiddleware(svcs.Agents))
+	api.Use(officeWorkspaceScopeMiddleware(authSvc, taskSvc, officeRepo))
+	office.RegisterAllRoutes(api, svcs, log)
 }

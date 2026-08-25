@@ -61,7 +61,6 @@ import (
 	mcpserver "github.com/kandev/kandev/internal/mcp/server"
 	notificationcontroller "github.com/kandev/kandev/internal/notifications/controller"
 	notificationhandlers "github.com/kandev/kandev/internal/notifications/handlers"
-	"github.com/kandev/kandev/internal/office"
 	officeagents "github.com/kandev/kandev/internal/office/agents"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	officetestharness "github.com/kandev/kandev/internal/office/testharness"
@@ -1365,10 +1364,7 @@ func registerSecondaryRoutes(
 
 	// Register office routes
 	if p.services.OfficeSvcs != nil {
-		api := p.router.Group("/api/v1/office")
-		api.Use(officeagents.AgentAuthMiddleware(p.services.OfficeSvcs.Agents))
-		api.Use(officeWorkspaceScopeMiddleware(p.authSvc, p.taskSvc, p.officeRepo))
-		office.RegisterAllRoutes(api, p.services.OfficeSvcs, p.log)
+		mountOfficeRoutes(p.router, p.services.OfficeSvcs, p.authSvc, p.taskSvc, p.officeRepo, p.log)
 		p.log.Debug("Registered Office handlers (HTTP)")
 	}
 }

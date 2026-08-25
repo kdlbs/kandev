@@ -95,6 +95,9 @@ func seedOfficeResources(t *testing.T, repo *officesqlite.Repository, workspaceI
 	exec(`INSERT INTO office_channels (id, workspace_id, agent_profile_id, platform, created_at, updated_at)
 		VALUES (?, ?, ?, 'telegram', ?, ?)`,
 		"channel-"+suffix, workspaceID, "agent-"+suffix, now, now)
+	exec(`INSERT INTO office_labels (id, workspace_id, name) VALUES (?, ?, ?)`,
+		"label-"+suffix, workspaceID, "l-"+suffix)
+	exec(`INSERT INTO office_task_labels (task_id, label_id) VALUES (?, ?)`, "task-"+suffix, "label-"+suffix)
 	if err := repo.CreateRun(ctx, &models.Run{
 		ID:             "run-" + suffix,
 		AgentProfileID: "agent-" + suffix,
@@ -149,6 +152,29 @@ func officeScopeCases() []officeScopeCase {
 	}
 }
 
+// officeMixedParamCases are the routes that carry BOTH a `:wsId` and a
+// sibling resource id. Their handlers ignore the workspace and act on the
+// sibling id alone (UpdateLabel(id), ListLabelsForTask(taskId), ...), so
+// authorizing only the workspace leaves them reachable across workspaces.
+//
+// `path` is templated: {ws} is the CALLER's own workspace and the ids belong
+// to user A, which is the attack shape — a legitimate workspace id paired
+// with somebody else's resource.
+func officeMixedParamCases() []officeScopeCase {
+	return []officeScopeCase{
+		{"label-update", http.MethodPatch, "/api/v1/office/workspaces/:wsId/labels/:id",
+			"/api/v1/office/workspaces/{ws}/labels/label-user-a", `{"name":"x"}`},
+		{"label-delete", http.MethodDelete, "/api/v1/office/workspaces/:wsId/labels/:id",
+			"/api/v1/office/workspaces/{ws}/labels/label-user-a", ""},
+		{"task-labels-list", http.MethodGet, "/api/v1/office/workspaces/:wsId/tasks/:taskId/labels",
+			"/api/v1/office/workspaces/{ws}/tasks/task-user-a/labels", ""},
+		{"task-label-remove", http.MethodDelete, "/api/v1/office/workspaces/:wsId/tasks/:taskId/labels/:labelName",
+			"/api/v1/office/workspaces/{ws}/tasks/task-user-a/labels/l-user-a", ""},
+		{"task-quorum", http.MethodGet, "/api/v1/office/workspaces/:wsId/tasks/:taskId/quorum",
+			"/api/v1/office/workspaces/{ws}/tasks/task-user-a/quorum", ""},
+	}
+}
+
 // officeScopeEngine mounts the real guard in front of a recording terminal
 // handler on every case's route pattern. The recorder is what proves a denial
 // happened BEFORE dispatch rather than inside a handler.
@@ -164,7 +190,7 @@ func officeScopeEngine(h *officeScopeHarness, userID string, reached *string) *g
 	}
 	group := engine.Group("/api/v1/office")
 	group.Use(officeWorkspaceScopeMiddleware(h.authSvc, h.taskSvc, h.officeRepo))
-	for _, tc := range officeScopeCases() {
+	for _, tc := range append(officeScopeCases(), officeMixedParamCases()...) {
 		pattern := strings.TrimPrefix(tc.pattern, "/api/v1/office")
 		group.Handle(tc.method, pattern, func(c *gin.Context) {
 			*reached = c.FullPath()
@@ -460,6 +486,225 @@ func TestOfficeScopeDeniesRoutesWithNoRegisteredResolver(t *testing.T) {
 
 			if rec.Code != http.StatusNotFound || reached {
 				t.Errorf("%s: status = %d, reached = %v; want 404 and false", pattern, rec.Code, reached)
+			}
+		})
+	}
+}
+
+// TestOfficeRouteGroupMountsScopeGuard pins the PRODUCTION mount, not the
+// guard's own logic: mountOfficeRoutes must attach both the agent-JWT
+// middleware and the workspace scope guard to the Office group.
+//
+// Every other test in this file builds its own group and calls
+// officeWorkspaceScopeMiddleware directly, so deleting the `.Use` line from
+// the real mount would leave all of them green while reopening the hole in
+// the shipped binary — exactly the gap
+// TestGatewayAuthPolicyWiresRunSubscriptionCheck exists to close for the WS
+// gateway.
+//
+// The services are zero values, so a request that reaches a handler panics
+// rather than answering: an unmounted guard fails loudly here either way.
+func TestOfficeRouteGroupMountsScopeGuard(t *testing.T) {
+	h := newOfficeScopeHarness(t)
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.Use(func(c *gin.Context) {
+		c.Request = c.Request.WithContext(authn.WithIdentity(
+			c.Request.Context(), authn.Identity{UserID: officeScopeUserB, Role: authn.RoleMember}))
+		c.Next()
+	})
+	mountOfficeRoutes(engine, officeTestServices(), h.authSvc, h.taskSvc, h.officeRepo, testLogger(t))
+
+	// The scope guard: user B naming user A's agent must be refused before
+	// the (zero-value, would-panic) handler runs.
+	rec := httptest.NewRecorder()
+	engine.ServeHTTP(rec, httptest.NewRequest(
+		http.MethodGet, "/api/v1/office/agents/agent-"+officeScopeUserA+"/memory", nil))
+	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "workspace not found") {
+		t.Errorf("scope guard not mounted: status = %d, body = %q", rec.Code, rec.Body.String())
+	}
+
+	// The agent-JWT middleware: an unparseable bearer token must be rejected
+	// with 401, which only that middleware produces.
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/office/meta", nil)
+	req.Header.Set("Authorization", "Bearer not-a-real-token")
+	authRec := httptest.NewRecorder()
+	engine.ServeHTTP(authRec, req)
+	if authRec.Code != http.StatusUnauthorized {
+		t.Errorf("agent auth middleware not mounted: status = %d, want %d",
+			authRec.Code, http.StatusUnauthorized)
+	}
+}
+
+// TestOfficeScopeFailsClosedForEveryResourceKind is the fail-closed sweep. A
+// sibling audit fix shipped a resolver that answered ("", nil) for a missing
+// row, which AuthorizeWorkspaceAccess reads as "no scoping applies" and
+// allows — so it is not enough that ONE resolver denies an unknown id. Every
+// resource kind is driven with an id that names nothing, and with an id whose
+// row carries workspace_id = "".
+func TestOfficeScopeFailsClosedForEveryResourceKind(t *testing.T) {
+	h := newOfficeScopeHarness(t)
+	// A full set of rows under workspace_id = "": present, but unscoped.
+	seedOfficeResources(t, h.officeRepo, "", "unscoped")
+
+	for _, tc := range officeScopeCases() {
+		if tc.path == "" {
+			continue // the :wsId case has no resource id to unresolve
+		}
+		for variant, suffix := range map[string]string{
+			"unknown id":                  "-does-not-exist",
+			"row with empty workspace_id": "-unscoped",
+		} {
+			swap := func(s string) string { return strings.ReplaceAll(s, "-"+officeScopeUserA, suffix) }
+			t.Run(tc.name+"/"+variant, func(t *testing.T) {
+				var reached string
+				engine := officeScopeEngine(h, officeScopeUserA, &reached)
+				rec := officeScopeRequest(t, engine,
+					officeScopeCase{method: tc.method, pattern: tc.pattern, body: swap(tc.body)},
+					swap(tc.path))
+
+				if rec.Code != http.StatusNotFound {
+					t.Errorf("status = %d (%s), want %d", rec.Code, rec.Body.String(), http.StatusNotFound)
+				}
+				if reached != "" {
+					t.Errorf("handler %q ran; the guard must fail closed", reached)
+				}
+			})
+		}
+	}
+}
+
+// TestOfficeScopeDeniesForeignSiblingIDOnWorkspaceRoute covers the routes
+// that carry both a `:wsId` and a sibling resource id. Authorizing only the
+// workspace and returning left these open: user B pairs their OWN workspace
+// id (which passes) with user A's label or task id, and the handler acts on
+// the sibling id alone — `UpdateLabel(c.Param("id"), ...)` never looks at the
+// workspace it was mounted under.
+func TestOfficeScopeDeniesForeignSiblingIDOnWorkspaceRoute(t *testing.T) {
+	h := newOfficeScopeHarness(t)
+
+	for _, tc := range officeMixedParamCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			var reached string
+			engine := officeScopeEngine(h, officeScopeUserB, &reached)
+			// User B's own workspace: the :wsId check passes on its own.
+			path := strings.Replace(tc.path, "{ws}", h.workspaces[officeScopeUserB], 1)
+			rec := officeScopeRequest(t, engine, tc, path)
+
+			if rec.Code != http.StatusNotFound {
+				t.Errorf("status = %d (%s), want %d", rec.Code, rec.Body.String(), http.StatusNotFound)
+			}
+			if reached != "" {
+				t.Errorf("handler %q ran; the sibling id must be authorized too", reached)
+			}
+		})
+	}
+}
+
+// TestOfficeScopeAllowsOwnerOnWorkspaceRoute is the counterpart: resolving
+// the sibling id must not lock the owner out of their own labels and tasks.
+func TestOfficeScopeAllowsOwnerOnWorkspaceRoute(t *testing.T) {
+	h := newOfficeScopeHarness(t)
+
+	for _, tc := range officeMixedParamCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			var reached string
+			engine := officeScopeEngine(h, officeScopeUserA, &reached)
+			path := strings.Replace(tc.path, "{ws}", h.workspaces[officeScopeUserA], 1)
+			rec := officeScopeRequest(t, engine, tc, path)
+
+			if rec.Code != http.StatusOK || reached != tc.pattern {
+				t.Errorf("status = %d (%s), reached = %q; want 200 and %q",
+					rec.Code, rec.Body.String(), reached, tc.pattern)
+			}
+		})
+	}
+}
+
+// officeAgentEngine mounts the real AgentAuthMiddleware plus the guard, and
+// returns a runtime token minted for the given workspace's agent.
+func officeAgentEngine(t *testing.T, h *officeScopeHarness, owner string, reached *string) (*gin.Engine, string) {
+	t.Helper()
+	agentSvc := officeagents.NewAgentService(h.officeRepo, testLogger(t), nil)
+	agentSvc.SetAuth(officeagents.NewAgentAuth("test-signing-key"))
+	token, err := agentSvc.MintRuntimeJWT(
+		"agent-"+owner, "task-"+owner, h.workspaces[owner], "run-"+owner, "", "")
+	if err != nil {
+		t.Fatalf("mint runtime jwt: %v", err)
+	}
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	group := engine.Group("/api/v1/office")
+	group.Use(officeagents.AgentAuthMiddleware(agentSvc))
+	group.Use(officeWorkspaceScopeMiddleware(h.authSvc, h.taskSvc, h.officeRepo))
+	for _, tc := range append(officeScopeCases(), officeMixedParamCases()...) {
+		pattern := strings.TrimPrefix(tc.pattern, "/api/v1/office")
+		group.Handle(tc.method, pattern, func(c *gin.Context) {
+			*reached = c.FullPath()
+			c.JSON(http.StatusOK, gin.H{"ok": true})
+		})
+	}
+	return engine, token
+}
+
+// TestOfficeScopeConfinesAgentJWTToItsOwnWorkspace closes the second half of
+// the same premise error. AgentAuthMiddleware compares the token's workspace
+// claim to `:wsId` ONLY, so on a by-ID route it compares nothing — and the
+// handlers' own agent-caller guards check role and self-identity
+// (isAdminRole, caller.ID == target), never workspace. A CEO-role token
+// minted in workspace A could therefore read, update or delete a workspace B
+// agent. The guard now resolves the route's ids for agent callers too and
+// requires them to land in the token's own workspace.
+func TestOfficeScopeConfinesAgentJWTToItsOwnWorkspace(t *testing.T) {
+	h := newOfficeScopeHarness(t)
+
+	for _, tc := range officeScopeCases() {
+		if tc.path == "" {
+			continue // the :wsId case is already compared by AgentAuthMiddleware
+		}
+		t.Run(tc.name, func(t *testing.T) {
+			var reached string
+			// Token minted for user B's workspace, request names user A's
+			// resources.
+			engine, token := officeAgentEngine(t, h, officeScopeUserB, &reached)
+			req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer "+token)
+			rec := httptest.NewRecorder()
+			engine.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusNotFound {
+				t.Errorf("status = %d (%s), want %d", rec.Code, rec.Body.String(), http.StatusNotFound)
+			}
+			if reached != "" {
+				t.Errorf("handler %q ran; an agent token must not leave its workspace", reached)
+			}
+		})
+	}
+}
+
+// TestOfficeScopeAllowsAgentJWTInsideItsOwnWorkspace is the regression guard
+// on the other side: confining agent tokens must not break the by-ID routes
+// the Office agent runtime actually uses inside its own workspace.
+func TestOfficeScopeAllowsAgentJWTInsideItsOwnWorkspace(t *testing.T) {
+	h := newOfficeScopeHarness(t)
+
+	for _, tc := range officeScopeCases() {
+		if tc.path == "" {
+			continue
+		}
+		t.Run(tc.name, func(t *testing.T) {
+			var reached string
+			engine, token := officeAgentEngine(t, h, officeScopeUserA, &reached)
+			req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer "+token)
+			rec := httptest.NewRecorder()
+			engine.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK || reached != tc.pattern {
+				t.Errorf("status = %d (%s), reached = %q; want 200 and %q",
+					rec.Code, rec.Body.String(), reached, tc.pattern)
 			}
 		})
 	}
