@@ -65,6 +65,7 @@ type WorkflowStepperProps = {
   taskId?: string | null;
   workflowId?: string | null;
   isArchived?: boolean;
+  onMoveStart?: () => void;
   onMoveError?: (error: unknown) => void;
 };
 
@@ -74,6 +75,7 @@ const WorkflowStepper = memo(function WorkflowStepper({
   taskId,
   workflowId,
   isArchived,
+  onMoveStart,
   onMoveError,
 }: WorkflowStepperProps) {
   const { t } = useTranslation();
@@ -90,6 +92,7 @@ const WorkflowStepper = memo(function WorkflowStepper({
   const handleMove = useCallback(
     async (stepId: string) => {
       if (!taskId || !workflowId) return;
+      onMoveStart?.();
       disablePlanMode();
       setMovingToStepId(stepId);
       try {
@@ -105,7 +108,7 @@ const WorkflowStepper = memo(function WorkflowStepper({
         setMovingToStepId(null);
       }
     },
-    [taskId, workflowId, disablePlanMode, onMoveError],
+    [taskId, workflowId, disablePlanMode, onMoveStart, onMoveError],
   );
 
   // Collapse to a minimal view when the full stepper can't fit (w-full keeps the measurement track-driven).

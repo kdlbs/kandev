@@ -124,4 +124,21 @@ describe("WorkflowStepper", () => {
     await waitFor(() => expect(onMoveError).toHaveBeenCalledWith(error));
     expect(moveButton.hasAttribute("disabled")).toBe(false);
   });
+
+  it("notifies the owning surface when a move starts", () => {
+    const onMoveStart = vi.fn();
+    moveTaskMock.mockResolvedValueOnce(undefined);
+    const props = {
+      steps: STEPS,
+      currentStepId: "b",
+      taskId: "task-1",
+      workflowId: "workflow-1",
+      onMoveStart,
+    } as ComponentProps<typeof WorkflowStepper> & { onMoveStart: typeof onMoveStart };
+
+    render(<WorkflowStepper {...props} />);
+    fireEvent.click(screen.getAllByRole("button", { name: "Move here" })[0]);
+
+    expect(onMoveStart).toHaveBeenCalledTimes(1);
+  });
 });
