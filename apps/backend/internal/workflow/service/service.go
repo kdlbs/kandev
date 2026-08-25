@@ -39,6 +39,7 @@ type Service struct {
 	// per-user visibility rule into this package (see access.go).
 	workflowAccessChecker  func(context.Context, string) error
 	workspaceAccessChecker func(context.Context, string) error
+	taskAccessChecker      func(context.Context, string) error
 	historyQueue           chan historyWrite
 	historyStop            chan struct{}
 	historyDone            chan struct{}
@@ -555,25 +556,36 @@ func (s *Service) DeleteStep(ctx context.Context, stepID string) error {
 
 // ReorderSteps reorders workflow steps for a workflow.
 func (s *Service) ReorderSteps(ctx context.Context, workflowID string, stepIDs []string) error {
-	// Authorize every named step before writing any of them: the step IDs are
-	// caller-supplied and need not belong to workflowID, and a denial found
-	// halfway through the loop would leave a half-applied reorder behind.
-	// Unscoped callers pay nothing for this pass (AuthorizeStep returns
-	// immediately), so single-user behavior is unchanged.
-	for _, stepID := range stepIDs {
-		if err := s.AuthorizeStep(ctx, stepID); err != nil {
-			return err
-		}
+	if err := s.AuthorizeWorkflow(ctx, workflowID); err != nil {
+		return err
 	}
-	for i, stepID := range stepIDs {
+	// Resolve and check every step before writing any of them. The step IDs
+	// are caller-supplied and are not required by anything upstream to belong
+	// to workflowID, so a reorder could set positions on another workflow's
+	// steps — including a read-only one, whose guard only ever saw the
+	// workflow named in the URL. A rejection found halfway through the write
+	// loop would also leave a half-applied reorder behind.
+	steps := make([]*models.WorkflowStep, 0, len(stepIDs))
+	for _, stepID := range stepIDs {
 		step, err := s.repo.GetStep(ctx, stepID)
 		if err != nil {
 			s.logger.Error("failed to get step for reorder", zap.String("step_id", stepID), zap.Error(err))
 			return err
 		}
+		if step == nil || step.WorkflowID != workflowID {
+			// Same answer as a step that does not exist: the caller named an
+			// ID this workflow does not own, and whether it exists elsewhere
+			// is not theirs to learn.
+			s.logger.Warn("refused to reorder a step from another workflow",
+				zap.String("step_id", stepID), zap.String("workflow_id", workflowID))
+			return ErrNotVisible
+		}
+		steps = append(steps, step)
+	}
+	for i, step := range steps {
 		step.Position = i
 		if err := s.repo.UpdateStep(ctx, step); err != nil {
-			s.logger.Error("failed to update step position", zap.String("step_id", stepID), zap.Error(err))
+			s.logger.Error("failed to update step position", zap.String("step_id", step.ID), zap.Error(err))
 			return err
 		}
 	}
@@ -763,6 +775,9 @@ func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, 
 		if err := models.ValidateWorkflowStep(step); err != nil {
 			return nil, fmt.Errorf("validate step %q: %w", sp.Name, err)
 		}
+		if err := s.validateImportedStepReferences(ctx, step, sp.Name); err != nil {
+			return nil, err
+		}
 		steps = append(steps, step)
 	}
 
@@ -796,6 +811,32 @@ func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, 
 		}
 	}
 	return wf, nil
+}
+
+// validateImportedStepReferences authorizes the tasks an imported step would
+// queue work on.
+//
+// Transition targets need no check here. An export names them by position:
+// WorkflowExport.Validate rejects a raw `step_id` under on_turn_start and
+// on_turn_complete and requires each position to exist in the document, and
+// ConvertPositionToStepID then maps every one onto a step this import just
+// created. The Phase 2 triggers carry no reference at all, because that
+// converter drops those lists. If either of those stops being true, the
+// same-workflow check for step targets belongs here.
+//
+// A queue_run task target has no positional form, and an on_enter action is
+// copied through the conversion verbatim, so a hand-written document can name
+// any task in the install — authorize it against the importing caller exactly
+// as the step-write API does.
+func (s *Service) validateImportedStepReferences(
+	ctx context.Context, step *models.WorkflowStep, name string,
+) error {
+	for _, taskID := range models.CollectStepEventReferences(step.Events).TaskIDs {
+		if err := s.AuthorizeTask(ctx, taskID); err != nil {
+			return fmt.Errorf("step %q: %w", name, err)
+		}
+	}
+	return nil
 }
 
 // stepFromPortable builds a WorkflowStep from its portable form, remapping

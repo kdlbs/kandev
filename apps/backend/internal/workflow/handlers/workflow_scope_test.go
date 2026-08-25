@@ -297,8 +297,9 @@ func TestWorkflowScopeNoOpsWithAuthDisabled(t *testing.T) {
 
 			// An unresolved-owner failure would be invisible above if the guard
 			// short-circuited on a nil checker, so assert it never called out.
-			if workflows, workspaces := h.owner.calls(); len(workflows) != 0 || len(workspaces) != 0 {
-				t.Fatalf("unscoped caller consulted the task domain: workflows=%v workspaces=%v", workflows, workspaces)
+			if workflows, workspaces, tasks := h.owner.calls(); len(workflows) != 0 || len(workspaces) != 0 || len(tasks) != 0 {
+				t.Fatalf("unscoped caller consulted the task domain: workflows=%v workspaces=%v tasks=%v",
+					workflows, workspaces, tasks)
 			}
 		})
 	}

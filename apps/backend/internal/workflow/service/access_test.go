@@ -44,6 +44,7 @@ func TestAuthorizeWorkflowAndWorkspaceFailClosedOnAnEmptyID(t *testing.T) {
 	recorder := &callRecorder{}
 	svc.SetWorkflowAccessChecker(recorder.check)
 	svc.SetWorkspaceAccessChecker(recorder.check)
+	svc.SetTaskAccessChecker(recorder.check)
 
 	// An empty ID means the owner could not be resolved. The task service
 	// reads workspaceID=="" as "no scoping applies" and would allow it, which
@@ -51,6 +52,7 @@ func TestAuthorizeWorkflowAndWorkspaceFailClosedOnAnEmptyID(t *testing.T) {
 	// runSubscriptionCheck for the same trap).
 	require.ErrorIs(t, svc.AuthorizeWorkflow(scopedCtx(), ""), ErrNotVisible)
 	require.ErrorIs(t, svc.AuthorizeWorkspace(scopedCtx(), ""), ErrNotVisible)
+	require.ErrorIs(t, svc.AuthorizeTask(scopedCtx(), ""), ErrNotVisible)
 	require.Empty(t, recorder.ids, "an unresolvable owner was passed to the task service")
 }
 
@@ -59,6 +61,7 @@ func TestAuthorizeHelpersNoOpWhenAuthIsDisabled(t *testing.T) {
 	recorder := &callRecorder{err: repoerrors.ErrWorkspaceNotFound}
 	svc.SetWorkflowAccessChecker(recorder.check)
 	svc.SetWorkspaceAccessChecker(recorder.check)
+	svc.SetTaskAccessChecker(recorder.check)
 
 	for name, ctx := range map[string]context.Context{
 		"synthetic identity": syntheticCtx(),
@@ -68,6 +71,7 @@ func TestAuthorizeHelpersNoOpWhenAuthIsDisabled(t *testing.T) {
 			require.NoError(t, svc.AuthorizeWorkflow(ctx, "wf-1"))
 			require.NoError(t, svc.AuthorizeWorkspace(ctx, "ws-1"))
 			require.NoError(t, svc.AuthorizeStep(ctx, "step-1"))
+			require.NoError(t, svc.AuthorizeTask(ctx, "task-1"))
 			require.NoError(t, svc.AuthorizeWorkflow(ctx, ""), "an empty ID must not fail closed for an unscoped caller")
 		})
 	}
@@ -188,15 +192,33 @@ func TestServiceEntryPointsAuthorizeThemselves(t *testing.T) {
 		require.Empty(t, svc.workflowProvider.(*stubWorkflowProvider).created)
 	})
 
-	t.Run("reorder rejects a step the caller may not see", func(t *testing.T) {
+	// ReorderSteps is the layer that writes the positions, so it authorizes
+	// the workflow itself rather than trusting a caller to have done it. The
+	// membership check below cannot stand in for this one: steps that really
+	// do belong to a workflow the caller cannot see would otherwise reorder.
+	t.Run("reorder authorizes the workflow it is asked to reorder", func(t *testing.T) {
 		svc, _ := setupTestService(t)
-		// Position 7, so the reorder this test denies would visibly move the
-		// step to 0 if the guard were missing.
 		step := &models.WorkflowStep{WorkflowID: "wf-a", Name: "Backlog", Color: "#111111", Position: 7}
 		require.NoError(t, svc.CreateStep(context.Background(), step))
 		svc.SetWorkflowAccessChecker(denyAll)
 
+		require.ErrorIs(t, svc.ReorderSteps(scopedCtx(), "wf-a", []string{step.ID}), ErrNotVisible)
+		stored, err := svc.GetStep(context.Background(), step.ID)
+		require.NoError(t, err)
+		require.Equal(t, 7, stored.Position, "a denied reorder wrote anyway")
+	})
+
+	t.Run("reorder rejects a step from another workflow", func(t *testing.T) {
+		svc, _ := setupTestService(t)
+		// Position 7, so the reorder this test denies would visibly move the
+		// step to 0 if the guard were missing. wf-b is authorized: the step
+		// belonging to wf-a is the only reason to refuse.
+		step := &models.WorkflowStep{WorkflowID: "wf-a", Name: "Backlog", Color: "#111111", Position: 7}
+		require.NoError(t, svc.CreateStep(context.Background(), step))
+		svc.SetWorkflowAccessChecker(func(context.Context, string) error { return nil })
+
 		require.ErrorIs(t, svc.ReorderSteps(scopedCtx(), "wf-b", []string{step.ID}), ErrNotVisible)
+
 		stored, err := svc.GetStep(context.Background(), step.ID)
 		require.NoError(t, err)
 		require.Equal(t, 7, stored.Position, "a denied reorder wrote anyway")

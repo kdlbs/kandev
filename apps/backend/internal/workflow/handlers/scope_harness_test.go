@@ -126,11 +126,13 @@ func (c *countingConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driv
 // assert *when* the workflow service calls out, not just the outcome.
 type scopedOwnership struct {
 	workflowWorkspace map[string]string
+	taskWorkspace     map[string]string
 	workspaceOwner    map[string]string
 
 	mu             sync.Mutex
 	workflowCalls  []string
 	workspaceCalls []string
+	taskCalls      []string
 }
 
 func (o *scopedOwnership) authorizeWorkflow(ctx context.Context, workflowID string) error {
@@ -161,6 +163,26 @@ func (o *scopedOwnership) authorizeWorkspace(ctx context.Context, workspaceID st
 	return o.visible(userID, workspaceID)
 }
 
+func (o *scopedOwnership) authorizeTask(ctx context.Context, taskID string) error {
+	o.mu.Lock()
+	o.taskCalls = append(o.taskCalls, taskID)
+	o.mu.Unlock()
+	userID, scoped := scopeOf(ctx)
+	if !scoped {
+		return nil
+	}
+	workspaceID, ok := o.taskWorkspace[taskID]
+	if !ok {
+		// The task service reports a foreign or missing task with the task
+		// sentinel, not the workspace one.
+		return repoerrors.ErrTaskNotFound
+	}
+	if err := o.visible(userID, workspaceID); err != nil {
+		return repoerrors.ErrTaskNotFound
+	}
+	return nil
+}
+
 func (o *scopedOwnership) visible(userID, workspaceID string) error {
 	owner, ok := o.workspaceOwner[workspaceID]
 	if !ok {
@@ -172,16 +194,18 @@ func (o *scopedOwnership) visible(userID, workspaceID string) error {
 	return nil
 }
 
-func (o *scopedOwnership) calls() (workflows, workspaces []string) {
+func (o *scopedOwnership) calls() (workflows, workspaces, tasks []string) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	return append([]string(nil), o.workflowCalls...), append([]string(nil), o.workspaceCalls...)
+	return append([]string(nil), o.workflowCalls...),
+		append([]string(nil), o.workspaceCalls...),
+		append([]string(nil), o.taskCalls...)
 }
 
 func (o *scopedOwnership) resetCalls() {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.workflowCalls, o.workspaceCalls = nil, nil
+	o.workflowCalls, o.workspaceCalls, o.taskCalls = nil, nil, nil
 }
 
 func scopeOf(ctx context.Context) (string, bool) {
@@ -201,6 +225,7 @@ type scopedHarness struct {
 	queries  *stepQueryLog
 	stepA    string
 	stepB    string
+	stepB2   string
 }
 
 const (
@@ -214,7 +239,8 @@ func setupScopedRouter(t *testing.T) *scopedHarness {
 	if _, err := h.db.Exec(
 		`INSERT INTO workflows (id, workspace_id, name, created_at, updated_at)
 		 VALUES ('wf-a','ws-a','A Flow',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
-		        ('wf-b','ws-b','B Flow',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`); err != nil {
+		        ('wf-b','ws-b','B Flow',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
+		        ('wf-b2','ws-b','B Second Flow',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`); err != nil {
 		t.Fatalf("seed workflows: %v", err)
 	}
 	// Seed the steps before the checkers are wired: an identity-less request is
@@ -225,6 +251,11 @@ func setupScopedRouter(t *testing.T) *scopedHarness {
 	stepB := createStepViaHTTP(t, h.router, map[string]interface{}{
 		"workflow_id": "wf-b", "name": "B Backlog", "position": 0,
 	})
+	// A second workflow for the same owner, so "not yours" and "not this
+	// workflow" can be told apart.
+	stepB2 := createStepViaHTTP(t, h.router, map[string]interface{}{
+		"workflow_id": "wf-b2", "name": "B Second Backlog", "position": 0,
+	})
 
 	provider := &fakeWorkflowProvider{workflows: []*taskmodels.Workflow{
 		{ID: "wf-a", WorkspaceID: "ws-a", Name: "A Flow"},
@@ -233,16 +264,18 @@ func setupScopedRouter(t *testing.T) *scopedHarness {
 	h.service.SetWorkflowProvider(provider)
 
 	owner := &scopedOwnership{
-		workflowWorkspace: map[string]string{"wf-a": "ws-a", "wf-b": "ws-b"},
+		workflowWorkspace: map[string]string{"wf-a": "ws-a", "wf-b": "ws-b", "wf-b2": "ws-b"},
+		taskWorkspace:     map[string]string{"task-a": "ws-a", "task-b": "ws-b"},
 		workspaceOwner:    map[string]string{"ws-a": userA, "ws-b": userB},
 	}
 	h.service.SetWorkflowAccessChecker(owner.authorizeWorkflow)
 	h.service.SetWorkspaceAccessChecker(owner.authorizeWorkspace)
+	h.service.SetTaskAccessChecker(owner.authorizeTask)
 
 	stepQueries.reset()
 	return &scopedHarness{
 		workflowHarness: h, owner: owner, provider: provider, queries: stepQueries,
-		stepA: stepA.ID, stepB: stepB.ID,
+		stepA: stepA.ID, stepB: stepB.ID, stepB2: stepB2.ID,
 	}
 }
 
@@ -333,6 +366,14 @@ func stepNames(t *testing.T, h *scopedHarness, workflowID string) []string {
 		names = append(names, step.Name)
 	}
 	return names
+}
+
+// decodeJSON decodes a successful response body into out.
+func decodeJSON(t *testing.T, rec *httptest.ResponseRecorder, out any) {
+	t.Helper()
+	if err := json.Unmarshal(rec.Body.Bytes(), out); err != nil {
+		t.Fatalf("decode %s: %v", rec.Body.String(), err)
+	}
 }
 
 func requireStatus(t *testing.T, rec *httptest.ResponseRecorder, want int) {

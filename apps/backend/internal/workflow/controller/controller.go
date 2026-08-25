@@ -185,7 +185,7 @@ func (c *Controller) CreateStep(ctx context.Context, req CreateStepRequest) (*Ge
 	if req.PullFromStepID != nil {
 		step.PullFromStepID = strings.TrimSpace(*req.PullFromStepID)
 	}
-	if err := c.validatePullFromStep(ctx, step); err != nil {
+	if err := c.validateStepReferences(ctx, step); err != nil {
 		return nil, err
 	}
 	demotedStartSteps, err := c.svc.CreateStepWithStartStepUpdates(ctx, step)
@@ -275,7 +275,7 @@ func (c *Controller) UpdateStep(ctx context.Context, req UpdateStepRequest) (*Ge
 	if req.PullFromStepID != nil {
 		step.PullFromStepID = strings.TrimSpace(*req.PullFromStepID)
 	}
-	if err := c.validatePullFromStep(ctx, step); err != nil {
+	if err := c.validateStepReferences(ctx, step); err != nil {
 		return nil, err
 	}
 	demotedStartSteps, err := c.svc.UpdateStepWithStartStepUpdates(ctx, step)
@@ -283,6 +283,55 @@ func (c *Controller) UpdateStep(ctx context.Context, req UpdateStepRequest) (*Ge
 		return nil, err
 	}
 	return &GetStepResponse{Step: step, DemotedStartSteps: demotedStartSteps}, nil
+}
+
+// validateStepReferences checks every ID the step carries that names another
+// resource: its pull source, its move_to_step transition targets, and the
+// tasks its queue_run actions would start work on.
+//
+// Two different rejections, deliberately. A reference the caller cannot see is
+// not-found, indistinguishable from one that does not exist. A step the caller
+// *can* see but that lives in another workflow is a validation error naming
+// the reason, because there is nothing to hide from them and the editor has to
+// be able to explain it.
+func (c *Controller) validateStepReferences(ctx context.Context, step *models.WorkflowStep) error {
+	if err := c.validatePullFromStep(ctx, step); err != nil {
+		return err
+	}
+	refs := models.CollectStepEventReferences(step.Events)
+	for _, targetID := range refs.StepIDs {
+		if err := c.validateEventStepTarget(ctx, step, targetID); err != nil {
+			return err
+		}
+	}
+	for _, taskID := range refs.TaskIDs {
+		if err := c.svc.AuthorizeTask(ctx, taskID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateEventStepTarget keeps a transition inside its own workflow. The
+// engine dereferences the target when the trigger fires and drives the task
+// with whatever it finds there — that step's prompt and agent profile — so a
+// target in somebody else's workflow both parks the task outside its board and
+// runs it under their configuration.
+func (c *Controller) validateEventStepTarget(ctx context.Context, step *models.WorkflowStep, targetID string) error {
+	if targetID == step.ID {
+		return nil // a self-transition names no other step
+	}
+	if err := c.svc.AuthorizeStep(ctx, targetID); err != nil {
+		return err
+	}
+	target, err := c.svc.GetStep(ctx, targetID)
+	if err != nil {
+		return fmt.Errorf("move_to_step target is invalid: %w", err)
+	}
+	if target.WorkflowID != step.WorkflowID {
+		return fmt.Errorf("move_to_step must reference a step in the same workflow")
+	}
+	return nil
 }
 
 func (c *Controller) validatePullFromStep(ctx context.Context, step *models.WorkflowStep) error {

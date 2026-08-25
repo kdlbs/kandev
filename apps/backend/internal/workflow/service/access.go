@@ -52,6 +52,14 @@ func (s *Service) SetWorkspaceAccessChecker(checker func(context.Context, string
 	s.workspaceAccessChecker = checker
 }
 
+// SetTaskAccessChecker wires the task-domain check for a task ID. A step's
+// queue_run action can name a task to start work on, so the step-write API
+// accepts task IDs too. Production passes
+// taskservice.Service.AuthorizeTaskAccess.
+func (s *Service) SetTaskAccessChecker(checker func(context.Context, string) error) {
+	s.taskAccessChecker = checker
+}
+
 // callerIsScoped mirrors internal/task/service's callerScope: false means the
 // caller is an internal one or authentication is disabled, and no scoping
 // applies. The workflow package repeats the three lines rather than importing
@@ -87,6 +95,19 @@ func (s *Service) AuthorizeWorkspace(ctx context.Context, workspaceID string) er
 		return ErrNotVisible
 	}
 	return normalizeAccessError(s.workspaceAccessChecker(ctx, workspaceID))
+}
+
+// AuthorizeTask checks that the caller may see a task named inside a step's
+// event actions. An empty ID fails closed for the same reason as
+// AuthorizeWorkflow; callers strip the "this" sentinel before calling.
+func (s *Service) AuthorizeTask(ctx context.Context, taskID string) error {
+	if !callerIsScoped(ctx) || s.taskAccessChecker == nil {
+		return nil
+	}
+	if taskID == "" {
+		return ErrNotVisible
+	}
+	return normalizeAccessError(s.taskAccessChecker(ctx, taskID))
 }
 
 // AuthorizeStep checks that the caller may see a workflow step, resolving the
