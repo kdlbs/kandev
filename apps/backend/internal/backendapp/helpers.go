@@ -1367,41 +1367,9 @@ func registerSecondaryRoutes(
 	if p.services.OfficeSvcs != nil {
 		api := p.router.Group("/api/v1/office")
 		api.Use(officeagents.AgentAuthMiddleware(p.services.OfficeSvcs.Agents))
-		api.Use(officeWorkspaceScopeMiddleware(p.authSvc, p.taskSvc))
+		api.Use(officeWorkspaceScopeMiddleware(p.authSvc, p.taskSvc, p.officeRepo))
 		office.RegisterAllRoutes(api, p.services.OfficeSvcs, p.log)
 		p.log.Debug("Registered Office handlers (HTTP)")
-	}
-}
-
-// officeWorkspaceScopeMiddleware enforces per-user workspace ownership on
-// office routes that carry a `:wsId` param (opt-in auth). Office endpoints are
-// dual-consumed: sandbox agents authenticate with a workspace-scoped JWT
-// (validated + workspace-claim-checked by AgentAuthMiddleware, which sets an
-// agent caller in context — those requests skip this check), while browser
-// users authenticate with a session cookie and must own the target workspace.
-// Routes without a `:wsId` param (agent runtime callbacks, approval/routine by
-// ID) are not gated here; they remain governed by AgentAuthMiddleware.
-func officeWorkspaceScopeMiddleware(authSvc *auth.Service, taskSvc *taskservice.Service) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if authSvc == nil || authSvc.Mode() == auth.ModeDisabled {
-			c.Next()
-			return
-		}
-		// Agent JWT callers are already constrained to their workspace claim.
-		if officeagents.CallerFromContext(c) != nil {
-			c.Next()
-			return
-		}
-		wsID := c.Param("wsId")
-		if wsID == "" {
-			c.Next()
-			return
-		}
-		if err := taskSvc.AuthorizeWorkspaceAccess(c.Request.Context(), wsID); err != nil {
-			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
-			return
-		}
-		c.Next()
 	}
 }
 
