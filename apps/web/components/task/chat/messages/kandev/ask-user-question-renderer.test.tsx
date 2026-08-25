@@ -55,7 +55,10 @@ describe("AskUserQuestionRenderer", () => {
     );
     const root = document.createElement("div");
     root.innerHTML = html;
+    const header = root.querySelector(".cursor-pointer");
+    const expandedBody = root.querySelector(".mt-2.ml-7");
 
-    expect(root.querySelectorAll('a[href="https://example.com/storage"]')).toHaveLength(1);
+    expect(header?.querySelector('a[href="https://example.com/storage"]')).toBeNull();
+    expect(expandedBody?.querySelectorAll('a[href="https://example.com/storage"]')).toHaveLength(1);
   });
 });
