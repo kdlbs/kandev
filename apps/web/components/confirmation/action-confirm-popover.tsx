@@ -1,6 +1,14 @@
 "use client";
 
-import { memo, useId, useLayoutEffect, useRef, type ReactNode, type RefObject } from "react";
+import {
+  memo,
+  useCallback,
+  useId,
+  useLayoutEffect,
+  useRef,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import { Button } from "@kandev/ui/button";
 import {
   Popover,
@@ -75,16 +83,19 @@ export function ActionConfirmPopover({
     onOpenChange(false);
   });
 
-  const handleOpenChange = (nextOpen: boolean) => {
-    if (nextOpen) {
-      confirmedRef.current = false;
-      onOpenChange(true);
-      return;
-    }
-    closeActionConfirm(confirmedRef, onCancel, onOpenChange);
-  };
+  const handleOpenChange = useCallback(
+    (nextOpen: boolean) => {
+      if (nextOpen) {
+        confirmedRef.current = false;
+        onOpenChange(true);
+        return;
+      }
+      closeActionConfirm(confirmedRef, onCancel, onOpenChange);
+    },
+    [onCancel, onOpenChange],
+  );
 
-  const handleConfirm = () => {
+  const handleConfirm = useCallback(() => {
     if (confirmIsDisabled) return;
     if (!isConnected(anchorRef.current)) {
       handleOpenChange(false);
@@ -97,7 +108,9 @@ export function ActionConfirmPopover({
         .then(onConfirm)
         .catch(() => undefined);
     });
-  };
+  }, [anchorRef, confirmIsDisabled, handleOpenChange, onConfirm]);
+
+  const handleCancel = useCallback(() => handleOpenChange(false), [handleOpenChange]);
 
   return (
     <Popover modal={false} open={open} onOpenChange={handleOpenChange}>
@@ -121,7 +134,7 @@ export function ActionConfirmPopover({
         focusBoundaryRef={focusBoundaryRef}
         confirmedRef={confirmedRef}
         anchorRef={anchorRef}
-        onCancel={() => handleOpenChange(false)}
+        onCancel={handleCancel}
         onConfirm={handleConfirm}
       />
     </Popover>
