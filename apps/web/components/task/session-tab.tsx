@@ -379,9 +379,14 @@ function useSessionMenuDelete(
       // DOM when the context menu closes on the popover interaction, causing
       // ActionConfirmPopover.handleConfirm isConnected check to reject the
       // confirm click.
+      // The focus boundary is also the trigger element (not the context menu
+      // content) so the popover stays open when the context menu closes and
+      // focuses the trigger. Without this, Radix's default
+      // ContextMenu onCloseAutoFocus focuses the trigger, which fires
+      // onFocusOutside on the popover, and the disconnected context-menu-content
+      // boundary ref would fail the contains() check, closing the popover.
       menuDeleteAnchorRef.current = triggerRef.current;
-      menuDeleteFocusBoundaryRef.current =
-        triggerRef.current?.closest('[data-slot="context-menu-content"]') ?? null;
+      menuDeleteFocusBoundaryRef.current = triggerRef.current;
       openMenuDelete();
     },
     [openMenuDelete, triggerRef],
