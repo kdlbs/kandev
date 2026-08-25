@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -24,10 +25,15 @@ type quickChatAuthzRepo struct {
 	workspaces map[string]*models.Workspace
 }
 
+// GetWorkspace mirrors the sqlite repository's error shape exactly: a missing
+// row wraps the sentinel with the requested ID (workspace.go:351). Returning the
+// bare sentinel here would make the byte-identity assertion below pass for the
+// wrong reason -- the point is that handleNotFound substitutes its own fallback
+// message, so the ID the caller probed for never reaches the response.
 func (r *quickChatAuthzRepo) GetWorkspace(_ context.Context, id string) (*models.Workspace, error) {
 	workspace, ok := r.workspaces[id]
 	if !ok {
-		return nil, repoerrors.ErrWorkspaceNotFound
+		return nil, fmt.Errorf("%w: %s", repoerrors.ErrWorkspaceNotFound, id)
 	}
 	return workspace, nil
 }
@@ -89,9 +95,13 @@ func TestHTTPListQuickChatSessionsDeniesForeignWorkspace(t *testing.T) {
 	assert.NotContains(t, foreign.Body.String(), "A's secret chat")
 	assert.NotContains(t, foreign.Body.String(), "session-chat")
 
+	// The probed ID must not survive into either body; that is what lets the
+	// two cases collapse into one response.
+	assert.Equal(t, http.StatusNotFound, missing.Code)
+	assert.NotContains(t, missing.Body.String(), "ws-nonexistent")
+
 	// A workspace the caller may not see must be indistinguishable from one
 	// that does not exist, byte for byte.
-	assert.Equal(t, missing.Code, foreign.Code)
 	assert.Equal(t, missing.Body.String(), foreign.Body.String())
 }
 
