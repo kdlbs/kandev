@@ -191,22 +191,43 @@ func devStartupConfig(repoRoot string, configs ...*config.Config) (*config.Confi
 }
 
 func loadDevBootstrapConfig(repoRoot string) (*config.Config, error) {
+	// Temporarily remove ambient KANDEV_HOME_DIR so a working-directory or
+	// system YAML homeDir is not silently overridden by the parent process's
+	// homeDir (which in dev mode is the parent backend's value, not an
+	// explicit instruction). This must happen before the fast-path check
+	// below because devStartupConfig sets KANDEV_DEBUG_DEV_MODE=true before
+	// calling us.
+	prevHome, homePresent := os.LookupEnv("KANDEV_HOME_DIR")
+	if homePresent {
+		if err := os.Unsetenv("KANDEV_HOME_DIR"); err != nil {
+			return nil, err
+		}
+		defer func() {
+			_ = os.Setenv("KANDEV_HOME_DIR", prevHome) // best effort restore
+		}()
+	}
+
 	if os.Getenv("KANDEV_E2E_MOCK") != "" || os.Getenv("KANDEV_DEBUG_DEV_MODE") != "" {
 		return loadBootstrapConfigWithHome(devKandevHome(repoRoot))
 	}
 
 	const selector = "KANDEV_DEBUG_DEV_MODE"
-	previous, present := os.LookupEnv(selector)
+	prevMode, modePresent := os.LookupEnv(selector)
 	if err := os.Setenv(selector, "true"); err != nil {
 		return nil, err
 	}
 	cfg, err := loadBootstrapConfigWithHome(devKandevHome(repoRoot))
-	if present {
-		if restoreErr := os.Setenv(selector, previous); err == nil {
+	if modePresent {
+		if restoreErr := os.Setenv(selector, prevMode); err == nil {
 			err = restoreErr
 		}
 	} else if restoreErr := os.Unsetenv(selector); err == nil {
 		err = restoreErr
+	}
+	if homePresent {
+		if restoreErr := os.Setenv("KANDEV_HOME_DIR", prevHome); err == nil {
+			err = restoreErr
+		}
 	}
 	return cfg, err
 }

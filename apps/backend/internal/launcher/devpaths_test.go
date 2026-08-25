@@ -238,6 +238,52 @@ func TestDevLaunchConfigIgnoresAmbientHomeForSupervisorState(t *testing.T) {
 	}
 }
 
+func TestResolveDevDatabaseTargetPreservesYamlHomeOverAmbientEnv(t *testing.T) {
+	// GIVEN a working-directory YAML with an explicit homeDir AND an ambient
+	// KANDEV_HOME_DIR that differs, WHEN the config is loaded through
+	// devStartupConfig AND resolved through resolveDevDatabaseTarget,
+	// THEN the YAML homeDir is preserved rather than silently discarded.
+	repo := makeRepoTree(t)
+	clearLauncherConfigurationEnvironment(t)
+	t.Setenv("KANDEV_TASK_ID", "")
+	configuredHome := filepath.Join(t.TempDir(), "configured-kandev")
+	ambientHome := filepath.Join(t.TempDir(), "ambient-home")
+
+	// Place a config.yaml in the working directory with an explicit homeDir.
+	t.Chdir(repo)
+	configPath := filepath.Join(repo, "config.yaml")
+	writeLauncherConfig(t, configPath, "homeDir: "+configuredHome+"\n")
+
+	// Set ambient KANDEV_HOME_DIR to a different value. Without the fix,
+	// loadDevBootstrapConfig would pick up this env and the homeDir source
+	// would become SourceEnvironment, causing devStateHome to fall back.
+	t.Setenv("KANDEV_HOME_DIR", ambientHome)
+
+	cfg, exitCode := devStartupConfig(repo)
+	if exitCode != 0 {
+		t.Fatalf("devStartupConfig() = %d, want 0", exitCode)
+	}
+	if cfg.SourceFor("homeDir") != commonconfig.SourceConfiguration {
+		t.Fatalf("homeDir source = %q, want SourceConfiguration (YAML); ambient KANDEV_HOME_DIR must not override YAML during dev bootstrap", cfg.SourceFor("homeDir"))
+	}
+	if got := cfg.ResolvedHomeDir(); got != configuredHome {
+		t.Fatalf("resolved homeDir = %q, want YAML value %q", got, configuredHome)
+	}
+
+	// Now resolve the database target with this config.
+	target := resolveDevDatabaseTarget(repo, cfg)
+	if target.homeDir != configuredHome {
+		t.Fatalf("target homeDir = %q, want YAML-configured home %q", target.homeDir, configuredHome)
+	}
+	wantDB := filepath.Join(configuredHome, "data", "kandev.db")
+	if target.path != wantDB {
+		t.Fatalf("target database path = %q, want configured home data path %q", target.path, wantDB)
+	}
+	if target.source != devDatabaseConfigHome {
+		t.Fatalf("target source = %q, want devDatabaseConfigHome", target.source)
+	}
+}
+
 func TestResolveDevBackendEnvHonorsEnvironmentDatabaseBeforeAmbientHome(t *testing.T) {
 	repo := makeRepoTree(t)
 	t.Setenv("KANDEV_TASK_ID", "")
