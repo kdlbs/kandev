@@ -15,26 +15,24 @@ import (
 // TestOfficeAutoStartIdempotencyKey pins the key shape the fix depends on:
 // office-default.yml's any_reject -> work transition routes a rejected
 // review card back to the same (task, agent profile, step) tuple, so the key
-// must carry task.UpdatedAt as a per-entry component or every re-entry
-// collides with the first one forever (silently deduped within 24h, then a
-// hard failure against the permanent idx_run_idempotency unique index).
+// must use the immutable transition row and ignore unrelated task writes.
 func TestOfficeAutoStartIdempotencyKey(t *testing.T) {
 	entryOne := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	entryTwo := time.Date(2026, 1, 1, 1, 0, 0, 0, time.UTC)
+	unrelatedWrite := entryOne.Add(time.Hour)
 
-	taskAtEntryOne := &models.Task{ID: "t1", UpdatedAt: entryOne}
-	taskAtEntryOneAgain := &models.Task{ID: "t1", UpdatedAt: entryOne}
-	taskAtEntryTwo := &models.Task{ID: "t1", UpdatedAt: entryTwo}
+	taskAtEntryOne := &models.Task{ID: "t1", UpdatedAt: entryOne, WorkflowStepTransitionID: 17}
+	taskAtEntryOneAgain := &models.Task{ID: "t1", UpdatedAt: unrelatedWrite, WorkflowStepTransitionID: 17}
+	taskAtEntryTwo := &models.Task{ID: "t1", UpdatedAt: unrelatedWrite, WorkflowStepTransitionID: 18}
 
-	keyOne := officeAutoStartIdempotencyKey(taskAtEntryOne, "agent-1", "step2")
-	keyOneRepeat := officeAutoStartIdempotencyKey(taskAtEntryOneAgain, "agent-1", "step2")
-	keyTwo := officeAutoStartIdempotencyKey(taskAtEntryTwo, "agent-1", "step2")
+	keyOne := officeAutoStartIdempotencyKey(taskAtEntryOne, "agent-1", "step2", taskAtEntryOne.WorkflowStepTransitionID)
+	keyOneRepeat := officeAutoStartIdempotencyKey(taskAtEntryOneAgain, "agent-1", "step2", taskAtEntryOneAgain.WorkflowStepTransitionID)
+	keyTwo := officeAutoStartIdempotencyKey(taskAtEntryTwo, "agent-1", "step2", taskAtEntryTwo.WorkflowStepTransitionID)
 
 	if keyOne != keyOneRepeat {
-		t.Errorf("key must be identical within one step entry (same task.UpdatedAt): %q != %q", keyOne, keyOneRepeat)
+		t.Errorf("key must ignore unrelated task writes within one step entry: %q != %q", keyOne, keyOneRepeat)
 	}
 	if keyOne == keyTwo {
-		t.Errorf("key must differ across step entries (different task.UpdatedAt), got identical key %q for both", keyOne)
+		t.Errorf("key must differ across step entries, got identical key %q", keyOne)
 	}
 }
 
@@ -189,15 +187,16 @@ func TestOfficeAutoStartIdempotencyKeyAcrossRealDeliveries(t *testing.T) {
 		},
 	}
 
-	adapter := &fakeRunQueueAdapter{calls: make(chan engine.QueueRunRequest, 3)}
+	adapter := &fakeRunQueueAdapter{calls: make(chan engine.QueueRunRequest, 4)}
 	svc := createTestServiceWithAgent(repo, stepGetter, newMockTaskRepo(), failIfLaunched(t))
 	svc.engineRunQueue = adapter
 	svc.enginePrimary = &fakePrimaryAgentResolver{agentProfileID: "resolved-primary"}
 
-	deliver := func() engine.QueueRunRequest {
+	deliver := func(stepTransitionID int64) engine.QueueRunRequest {
 		svc.handleTaskMovedNoSession(ctx, watcher.TaskMovedEventData{
-			TaskID:   "t-office-real-deliveries",
-			ToStepID: "step2",
+			TaskID:           "t-office-real-deliveries",
+			ToStepID:         "step2",
+			StepTransitionID: stepTransitionID,
 		})
 		select {
 		case req := <-adapter.calls:
@@ -208,23 +207,42 @@ func TestOfficeAutoStartIdempotencyKeyAcrossRealDeliveries(t *testing.T) {
 		}
 	}
 
-	firstDelivery := deliver()
-	secondDelivery := deliver()
+	task, err := repo.GetTask(ctx, "t-office-real-deliveries")
+	requireNoError(t, err)
+	task.WorkflowStepID = "step2"
+	requireNoError(t, repo.UpdateTask(ctx, task))
+	entryID := task.WorkflowStepTransitionID
+	if entryID == 0 {
+		t.Fatal("step transition did not return a ledger identifier")
+	}
+
+	firstDelivery := deliver(entryID)
+	secondDelivery := deliver(entryID)
 	if firstDelivery.IdempotencyKey != secondDelivery.IdempotencyKey {
 		t.Errorf("two deliveries of the same step entry must produce the same idempotency key, got %q and %q",
 			firstDelivery.IdempotencyKey, secondDelivery.IdempotencyKey)
 	}
 
-	task, err := repo.GetTask(ctx, "t-office-real-deliveries")
-	requireNoError(t, err)
-	// No field on task is changed here: updateTaskTx always stamps a fresh
-	// updated_at (task.go:538's r.nowUTC() call), so a bare UpdateTask is
-	// enough to simulate the row write a real step re-entry performs.
+	// An unrelated task write changes updated_at but must not change the entry ID.
 	requireNoError(t, repo.UpdateTask(ctx, task))
 
-	thirdDelivery := deliver()
-	if thirdDelivery.IdempotencyKey == secondDelivery.IdempotencyKey {
-		t.Errorf("a real re-entry (task row updated in between) must change the idempotency key, but it stayed %q",
-			thirdDelivery.IdempotencyKey)
+	thirdDelivery := deliver(entryID)
+	if thirdDelivery.IdempotencyKey != secondDelivery.IdempotencyKey {
+		t.Errorf("an unrelated task write must not change the idempotency key, got %q and %q",
+			secondDelivery.IdempotencyKey, thirdDelivery.IdempotencyKey)
+	}
+
+	task.WorkflowStepID = "step1"
+	requireNoError(t, repo.UpdateTask(ctx, task))
+	task.WorkflowStepID = "step2"
+	requireNoError(t, repo.UpdateTask(ctx, task))
+	reentryID := task.WorkflowStepTransitionID
+	if reentryID == 0 || reentryID == entryID {
+		t.Fatalf("re-entry must have a new ledger identifier, got first=%d re-entry=%d", entryID, reentryID)
+	}
+	fourthDelivery := deliver(reentryID)
+	if fourthDelivery.IdempotencyKey == thirdDelivery.IdempotencyKey {
+		t.Errorf("a leave-and-re-enter transition must change the idempotency key, but it stayed %q",
+			fourthDelivery.IdempotencyKey)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -613,7 +614,7 @@ func (s *Service) handleTaskMoved(ctx context.Context, data watcher.TaskMovedEve
 			return
 		}
 		if prerequisites != nil && prerequisites.targetStep != nil {
-			s.autoStartTaskForLoadedStep(ctx, task, prerequisites.targetStep, "task.moved", data.QueuePromotion)
+			s.autoStartTaskForLoadedStep(ctx, task, prerequisites.targetStep, "task.moved", data.QueuePromotion, data.StepTransitionID)
 		} else {
 			s.handleTaskMovedNoSession(ctx, data)
 		}
@@ -695,7 +696,7 @@ func (s *Service) loadTaskMovedSessionPrerequisites(
 // If the target step has auto_start_agent, it creates a session and starts the agent
 // using agent/executor profile IDs from the task's metadata.
 func (s *Service) handleTaskMovedNoSession(ctx context.Context, data watcher.TaskMovedEventData) {
-	s.autoStartTaskForStep(ctx, data.TaskID, data.ToStepID, "task.moved")
+	s.autoStartTaskForStep(ctx, data.TaskID, data.ToStepID, "task.moved", data.StepTransitionID)
 }
 
 func (s *Service) handleTaskQueuePromoted(ctx context.Context, data watcher.TaskEventData) {
@@ -749,7 +750,7 @@ func (s *Service) handleTaskQueuePromoted(ctx context.Context, data watcher.Task
 		}()
 		return
 	}
-	s.autoStartTaskForLoadedStep(ctx, task, targetStep, "task.queue_promoted", true)
+	s.autoStartTaskForLoadedStep(ctx, task, targetStep, "task.queue_promoted", true, data.StepTransitionID)
 }
 
 func (s *Service) claimTaskEventMetadata(ctx context.Context, task *models.Task, key string) bool {
@@ -1075,7 +1076,7 @@ func (s *Service) syncTaskStateForQueuePromotion(ctx context.Context, task *mode
 	return nil
 }
 
-func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, eventName string) {
+func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, eventName string, stepTransitionID int64) {
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		s.logger.Warn(eventName+": failed to load task for auto-start",
@@ -1108,10 +1109,10 @@ func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, even
 			zap.Error(err))
 		return
 	}
-	s.autoStartTaskForLoadedStep(ctx, task, step, eventName, false)
+	s.autoStartTaskForLoadedStep(ctx, task, step, eventName, false, stepTransitionID)
 }
 
-func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.Task, step *wfmodels.WorkflowStep, eventName string, restoreQueuePromotion bool) {
+func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.Task, step *wfmodels.WorkflowStep, eventName string, restoreQueuePromotion bool, stepTransitionID int64) {
 	if task == nil || task.QueuedForStepID != "" || step == nil {
 		return
 	}
@@ -1129,7 +1130,7 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 	}
 
 	if s.isOfficeTask(ctx, task.ID) {
-		s.autoStartOfficeTaskForLoadedStep(ctx, task, step, eventName, restoreQueuePromotion)
+		s.autoStartOfficeTaskForLoadedStep(ctx, task, step, eventName, restoreQueuePromotion, stepTransitionID)
 		return
 	}
 
@@ -1189,7 +1190,7 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 // a run through the engine's Office adapters instead, the same mechanism the
 // scheduler's recovery sweep and the "assign task" flow already use to start
 // Office work (internal/office/service/scheduler_recovery.go).
-func (s *Service) autoStartOfficeTaskForLoadedStep(ctx context.Context, task *models.Task, step *wfmodels.WorkflowStep, eventName string, restoreQueuePromotion bool) {
+func (s *Service) autoStartOfficeTaskForLoadedStep(ctx context.Context, task *models.Task, step *wfmodels.WorkflowStep, eventName string, restoreQueuePromotion bool, stepTransitionID int64) {
 	// Async for the same reason as the kanban path above: the event bus
 	// delivers synchronously and blocking here would stall the HTTP handler
 	// that published the move.
@@ -1205,7 +1206,7 @@ func (s *Service) autoStartOfficeTaskForLoadedStep(ctx context.Context, task *mo
 			}
 		}
 
-		outcome, err := s.queueOfficeAutoStartRun(asyncCtx, task, step)
+		outcome, err := s.queueOfficeAutoStartRun(asyncCtx, task, step, stepTransitionID)
 		if err != nil {
 			s.logger.Error(eventName+": failed to queue office auto-start run",
 				zap.String("task_id", task.ID),
@@ -1244,7 +1245,7 @@ const officeAutoStartRunReason = "task_assigned"
 // StartTask (kanban-only), it resolves an agent the same way a "primary"
 // queue_run target would — preferring the task's current runner participant,
 // falling back to its assignee — and queues a run through engineRunQueue.
-func (s *Service) queueOfficeAutoStartRun(ctx context.Context, task *models.Task, step *wfmodels.WorkflowStep) (engine.QueueOutcome, error) {
+func (s *Service) queueOfficeAutoStartRun(ctx context.Context, task *models.Task, step *wfmodels.WorkflowStep, stepTransitionID int64) (engine.QueueOutcome, error) {
 	if s.engineRunQueue == nil {
 		return "", fmt.Errorf("office run queue is not wired")
 	}
@@ -1266,39 +1267,21 @@ func (s *Service) queueOfficeAutoStartRun(ctx context.Context, task *models.Task
 		TaskID:         task.ID,
 		WorkflowStepID: step.ID,
 		Reason:         officeAutoStartRunReason,
-		IdempotencyKey: officeAutoStartIdempotencyKey(task, agentProfileID, step.ID),
+		IdempotencyKey: officeAutoStartIdempotencyKey(task, agentProfileID, step.ID, stepTransitionID),
 		Payload:        map[string]any{"task_id": task.ID},
 	})
 }
 
-// officeAutoStartIdempotencyKey includes task.UpdatedAt as the run's
-// per-entry component. office-default.yml routes a rejected review card back
-// to the same (task, agent profile, step) via any_reject -> work, so a key
-// without an instance component collides across every re-entry into the same
-// step for the lifetime of the task: the first attempt after the review
-// round-trip is silently swallowed by the 24h service-level idempotency
-// check, and after that window a later attempt hard-fails against the
-// permanent idx_run_idempotency unique index.
-//
-// task.UpdatedAt is a monotonic per-write marker, not a per-entry constant:
-// any write to the row (a metadata key set/removed, not only a step move)
-// bumps it, so it is NOT guaranteed stable across two deliveries of the same
-// entry. It only needs to guarantee the other direction — a real re-entry
-// always changes it, since every one of the 7 functions that can mutate
-// tasks.workflow_step_id independently stamps a fresh updated_at in the same
-// transaction as its step write (see each one's own occurredAt argument to
-// recordStepTransition). TestStepTransitionWritersArePinned enforces that
-// this set of functions is closed — a new mutator added anywhere in the
-// backend fails the test until it is registered and wired the same way — not
-// that each one bumps updated_at, which is a per-function convention
-// verified by inspection rather than a single shared assertion. Suppressing
-// a duplicate delivery within one entry is NOT this key's job: that is what
-// MetaKeyAutoStartClaimed and MetaKeyQueuePromotionPending (claimed before
-// this function ever runs) plus CoalesceWindowSeconds already guard.
-func officeAutoStartIdempotencyKey(task *models.Task, agentProfileID, stepID string) string {
+// officeAutoStartIdempotencyKey uses the immutable workflow-step transition
+// row as the per-entry component. A legacy event without that field uses the
+// task timestamp as a compatibility fallback until the event is republished.
+func officeAutoStartIdempotencyKey(task *models.Task, agentProfileID, stepID string, stepTransitionID int64) string {
+	entryID := strconv.FormatInt(stepTransitionID, 10)
+	if stepTransitionID == 0 {
+		entryID = "legacy:" + task.UpdatedAt.UTC().Format(time.RFC3339Nano)
+	}
 	return fmt.Sprintf("%s:%s:%s:%s:%s",
-		officeAutoStartRunReason, task.ID, agentProfileID, stepID,
-		task.UpdatedAt.UTC().Format(time.RFC3339Nano))
+		officeAutoStartRunReason, task.ID, agentProfileID, stepID, entryID)
 }
 
 // handleAutoStartFailure records a failed auto-start attempt. It restores the
