@@ -73,6 +73,56 @@ func TestInstallAttestedCloneGitMetadataPolicyAttestsBeforeRendering(t *testing.
 	}
 }
 
+func TestInstallAttestedCloneGitMetadataPolicyPreservesEnvForNonPolicyAgent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/workspace/attest-git-metadata" {
+			t.Fatalf("attestation path = %q", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"attested":true,"checkouts":[{"checkout_path":"/executor/workspace","git_dir":"/executor/workspace/.git"}]}`))
+	}))
+	defer server.Close()
+	parsed, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(parsed.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+
+	req := &ExecutorCreateRequest{
+		GitMetadataRequirement: cloneGitMetadataRequirement(true),
+		AgentConfig:            agents.NewClaudeACP(),
+		Env:                    map[string]string{"GIT_CREDENTIALS": "token=abc", "SSH_AUTH_SOCK": "/tmp/agent.sock", "RUNTIME_TOKEN": "preserve-me"},
+	}
+	instance := &ExecutorInstance{
+		Client:               agentctl.NewClient(parsed.Hostname(), port, log),
+		WorkspacePath:        "/executor/workspace",
+		WorkspaceSourceRoots: []string{"/executor/workspace"},
+	}
+
+	if err := installAttestedCloneGitMetadataPolicy(context.Background(), req, instance); err != nil {
+		t.Fatalf("installAttestedCloneGitMetadataPolicy error = %v, want nil (preserve env for non-policy agent)", err)
+	}
+	policyEnv, ok := instance.Metadata["runtime_env"].(map[string]string)
+	if !ok {
+		t.Fatalf("runtime_env missing or wrong type: %#v", instance.Metadata["runtime_env"])
+	}
+	if policyEnv["RUNTIME_TOKEN"] != "preserve-me" {
+		t.Fatalf("runtime_env lost RUNTIME_TOKEN: %#v", policyEnv)
+	}
+	if policyEnv["GIT_CREDENTIALS"] != "token=abc" {
+		t.Fatalf("runtime_env lost GIT_CREDENTIALS: %#v", policyEnv)
+	}
+	if policyEnv["SSH_AUTH_SOCK"] != "/tmp/agent.sock" {
+		t.Fatalf("runtime_env lost SSH_AUTH_SOCK: %#v", policyEnv)
+	}
+	if _, ok := policyEnv["CODEX_CONFIG"]; ok {
+		t.Fatalf("non-policy agent runtime_env leaked CODEX_CONFIG: %#v", policyEnv)
+	}
+}
+
 func TestInstallAttestedCloneGitMetadataPolicyFailsClosed(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnprocessableEntity)
