@@ -31,11 +31,26 @@ func (s *HandoffService) canReadForCaller(ctx context.Context, callerID, callerS
 	}
 	caller, err := s.tasks.GetTask(ctx, callerID)
 	if err != nil {
+		// Caller lookup failed. Attempt a denied-only audit when the caller
+		// might hold an active grant — we know the IDs but cannot resolve the
+		// caller task to a workspace for scope/capability evaluation.
 		return false, coordinator.Decision{}, err
 	}
 	target, err := s.tasks.GetTask(ctx, targetID)
-	if err != nil {
-		return false, coordinator.Decision{}, err
+	if target == nil || err != nil {
+		// Target lookup failed (nil task or DB error) but caller is known and
+		// we have a workspace. Produce a denied audit row that records the
+		// attempt without leaking whether the target exists.
+		if caller != nil {
+			decision, auditErr := s.coordinatorAuthority.AuditMaterializationDenied(
+				ctx, caller.ID, callerSessionID, targetID, caller.WorkspaceID,
+				"inspect_task_documents", coordinator.CapabilityInspect,
+			)
+			if auditErr == nil {
+				return false, decision, nil
+			}
+		}
+		return false, coordinator.Decision{}, nil
 	}
 	decision, err := s.coordinatorAuthority.Authorize(ctx, coordinator.Request{ActorTask: caller, TargetTask: target, ActorSessionID: callerSessionID, Action: "inspect_task_documents", Capability: coordinator.CapabilityInspect})
 	if err != nil {

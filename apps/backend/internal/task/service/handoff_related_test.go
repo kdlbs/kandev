@@ -243,6 +243,129 @@ func TestListRelatedForCaller_ReturnsSiblingDescription(t *testing.T) {
 	}
 }
 
+// TestListRelatedForCallerSession_TargetMaterializationFailure audits denial
+// without leaking target existence (Finding 2). When the caller holds a valid
+// coordinator grant but the target task cannot be resolved, the system must
+// produce a denied audit row rather than returning a zero Decision that
+// bypasses finishCoordinatorRead.
+func TestListRelatedForCallerSession_TargetMaterializationFailure_AuditsDeniedNoLeak(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("caller", "", "ws-1")
+	// Do NOT add the target task — it doesn't exist in the DB.
+	store := &handoffCoordinatorStore{
+		principal: &models.WorkspaceAgentPrincipal{
+			ID: "principal-1", WorkspaceID: "ws-1", PluginInstallationID: "plugin-1",
+			LogicalKey: "coordinator", BackingTaskID: "caller", BackingSessionID: "caller-session",
+		},
+		grants: []*models.CoordinatorGrant{{
+			ID: "grant-1", PrincipalID: "principal-1", WorkspaceID: "ws-1",
+			ScopeKind: coordinator.ScopeWorkspace, ScopeID: "ws-1", Capabilities: "inspect",
+		}},
+	}
+	svc := newCascadeService(t, tasks, newCascadeWSGroupRepo())
+	svc.SetCoordinatorAuthority(coordinator.New(store, func() bool { return true }))
+
+	// ListRelatedForCallerSession on a nonexistent target with a valid grant.
+	_, err := svc.ListRelatedForCallerSession(context.Background(), "caller", "caller-session", "nonexistent-target")
+	if !errors.Is(err, ErrAccessDenied) {
+		t.Fatalf("nonexistent target error = %v, want ErrAccessDenied (no leak)", err)
+	}
+	// Verify a denied audit row was produced for the attempt.
+	if len(store.audits) != 1 {
+		t.Fatalf("audits = %d rows, want 1 denied audit row", len(store.audits))
+	}
+	if store.audits[0].Decision != "denied" {
+		t.Errorf("audit decision = %q, want denied", store.audits[0].Decision)
+	}
+	if store.audits[0].ActorTaskID != "caller" {
+		t.Errorf("audit actor_task_id = %q, want caller", store.audits[0].ActorTaskID)
+	}
+	if store.audits[0].TargetTaskID != "nonexistent-target" {
+		t.Errorf("audit target_task_id = %q, want nonexistent-target", store.audits[0].TargetTaskID)
+	}
+	// PrincipalID is empty because target materialization failed before the
+	// principal could be resolved — the audit still records the denied attempt.
+	if store.audits[0].Detail != "materialization_failure" {
+		t.Errorf("audit detail = %q, want materialization_failure", store.audits[0].Detail)
+	}
+	// Prove the caller error does NOT reveal "nonexistent" or "not found" in
+	// its message — only ErrAccessDenied.
+	if err != ErrAccessDenied {
+		t.Errorf("error message = %q, want only ErrAccessDenied (no existence leak)", err)
+	}
+}
+
+// TestGetDocumentForCallerSession_TargetMaterializationFailure audits denial
+// without leaking target existence (Finding 2 variant for document reads).
+func TestGetDocumentForCallerSession_TargetMaterializationFailure_AuditsDeniedNoLeak(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("caller", "", "ws-1")
+	store := &handoffCoordinatorStore{
+		principal: &models.WorkspaceAgentPrincipal{
+			ID: "principal-1", WorkspaceID: "ws-1", PluginInstallationID: "plugin-1",
+			LogicalKey: "coordinator", BackingTaskID: "caller", BackingSessionID: "caller-session",
+		},
+		grants: []*models.CoordinatorGrant{{
+			ID: "grant-1", PrincipalID: "principal-1", WorkspaceID: "ws-1",
+			ScopeKind: coordinator.ScopeWorkspace, ScopeID: "ws-1", Capabilities: "inspect",
+		}},
+	}
+	svc := newCascadeService(t, tasks, newCascadeWSGroupRepo())
+	svc.SetCoordinatorAuthority(coordinator.New(store, func() bool { return true }))
+
+	_, err := svc.GetDocumentForCallerSession(context.Background(), "caller", "caller-session", "nonexistent-target", "some-key")
+	if !errors.Is(err, ErrAccessDenied) {
+		t.Fatalf("nonexistent target error = %v, want ErrAccessDenied (no leak)", err)
+	}
+	// Must have a denied audit row.
+	if len(store.audits) != 1 {
+		t.Fatalf("audits = %d rows, want 1 denied audit row", len(store.audits))
+	}
+	if store.audits[0].Decision != "denied" {
+		t.Errorf("audit decision = %q, want denied", store.audits[0].Decision)
+	}
+	if store.audits[0].ActorTaskID != "caller" {
+		t.Errorf("audit actor_task_id = %q, want caller", store.audits[0].ActorTaskID)
+	}
+	if store.audits[0].TargetTaskID != "nonexistent-target" {
+		t.Errorf("audit target_task_id = %q, want nonexistent-target", store.audits[0].TargetTaskID)
+	}
+	// Error must be opaque ErrAccessDenied.
+	if err != ErrAccessDenied {
+		t.Errorf("error message = %q, want only ErrAccessDenied", err)
+	}
+}
+
+// TestListDocumentsForCallerSession_TargetMaterializationFailure audits
+// denial without leaking target existence (Finding 2 variant).
+func TestListDocumentsForCallerSession_TargetMaterializationFailure_AuditsDeniedNoLeak(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("caller", "", "ws-1")
+	store := &handoffCoordinatorStore{
+		principal: &models.WorkspaceAgentPrincipal{
+			ID: "principal-1", WorkspaceID: "ws-1", PluginInstallationID: "plugin-1",
+			LogicalKey: "coordinator", BackingTaskID: "caller", BackingSessionID: "caller-session",
+		},
+		grants: []*models.CoordinatorGrant{{
+			ID: "grant-1", PrincipalID: "principal-1", WorkspaceID: "ws-1",
+			ScopeKind: coordinator.ScopeWorkspace, ScopeID: "ws-1", Capabilities: "inspect",
+		}},
+	}
+	svc := newCascadeService(t, tasks, newCascadeWSGroupRepo())
+	svc.SetCoordinatorAuthority(coordinator.New(store, func() bool { return true }))
+
+	_, err := svc.ListDocumentsForCallerSession(context.Background(), "caller", "caller-session", "nonexistent-target")
+	if !errors.Is(err, ErrAccessDenied) {
+		t.Fatalf("nonexistent target error = %v, want ErrAccessDenied (no leak)", err)
+	}
+	if len(store.audits) != 1 {
+		t.Fatalf("audits = %d rows, want 1 denied audit row", len(store.audits))
+	}
+	if store.audits[0].Decision != "denied" {
+		t.Errorf("audit decision = %q, want denied", store.audits[0].Decision)
+	}
+}
+
 // TestListRelated_OmitsEmptyDescription confirms the projection stays lean
 // when a related task has no description (omitempty keeps the MCP output
 // usable on workflows with many historical tasks).

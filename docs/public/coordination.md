@@ -323,3 +323,66 @@ When Office is enabled, it prototypes **Blocked by** and **Blocking** properties
 - **Changed base did not retarget the PR:** the base-update tool changes Kandev's comparison context, not Git history or provider PR metadata.
 
 Related: [Tasks and workflows](tasks-and-workflows.md), [Sessions and review](sessions-and-review.md), [Automation and MCP](automation-and-mcp.md), [Agents and profiles](agents-and-profiles.md), and [Executors](executors.md).
+
+## Coordinator task authority
+
+A A **coordinator grant** is an explicit operator-level permission that lets one
+task (the _coordinator_) act on unrelated tasks within a workspace or
+workflow. This is how an orchestrator task monitors and redirects its board
+without being the direct parent of every task it manages.
+
+### Capabilities
+
+- **Inspect**: read documents, relations, and metadata on any task in scope.
+- **Orchestrate**: stop, interrupt (deliver urgent messages), and attach
+  workspace sources on any task in scope.
+
+Coordinator authority is additive: a coordinator retains its existing
+parent/child capabilities and gains these on top.
+
+### What a grant does NOT enable
+
+- **Destructive operations**: `delete_task`, `archive_task`, and credential
+- **Cross-workspace authority**: a grant is strictly scoped to one workspace.
+- **Mutating the grant system**: no MCP or API tool can create, revoke, or
+  modify a coordinator grant.
+
+### Creating and managing grants
+
+Grants are managed through **Settings → Workspace → Coordinators** in the web
+UI, or through the `/api/v1/workspaces/:id/coordinator-grants` API endpoint:
+
+- **Create**: specify the coordinator task UUID, the scope (`workspace` or
+- **List**: view active and revoked grants per workspace or per task.
+- **Revoke**: soft-delete the grant. Revocation takes effect on the next
+  privileged call; no restart is needed.
+
+### Audit trail
+
+Every privileged action (stop, interrupt, attach workspace sources) that either
+succeeds via a grant or is denied while the actor holds an active grant in the
+workspace is recorded in the workspace's audit log. The log contains:
+
+- Actor task and session
+- Target task
+- Action and capability requested
+- Decision (`allowed` / `denied`)
+- Grant ID that was used
+- Result and detail (reason codes only, never task content)
+
+Denials for tasks that hold no grant are not audited, so audit volume stays
+proportional to coordinator activity.
+
+### Threat model
+
+A coordinator grant is as strong as operator access to the system. Any user who
+can reach the Settings → Coordinators page or the `/api/v1/coordinator-grants`
+API can grant coordinator authority. Enable per-user authentication on shared
+instances.
+
+### Recovery
+
+- **Revoke all grants** for a coordinator: the next privileged call falls back
+- **Disable the runtime flag** `features.coordinatorTaskAuthority`: the
+- **Delete the grant row**: the audit trail is retained, but the grant no
+  longer exists.

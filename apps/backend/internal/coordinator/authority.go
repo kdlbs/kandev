@@ -163,6 +163,34 @@ func (a *Authority) auditDenied(ctx context.Context, request Request, principalI
 	return Decision{Basis: BasisDenied, AuditID: event.ID}, nil
 }
 
+// AuditMaterializationDenied produces a denied audit row when caller or target
+// task materialization fails, without running the full grant-checking path
+// (which requires both tasks to be resolved). This prevents the "zero Decision
+// bypasses audit" problem (Finding 2). Returns a denied Decision with an audit
+// ID when the store succeeds, or a zero Decision on store error.
+func (a *Authority) AuditMaterializationDenied(ctx context.Context, actorTaskID, callerSessionID, targetTaskID, workspaceID, action string, capability Capability) (Decision, error) {
+	if a == nil || a.store == nil {
+		return Decision{Basis: BasisDenied}, nil
+	}
+	event := &models.CoordinatorAuditEvent{
+		ID:             uuid.NewString(),
+		ActorTaskID:    actorTaskID,
+		ActorSessionID: callerSessionID,
+		TargetTaskID:   targetTaskID,
+		WorkspaceID:    workspaceID,
+		Action:         action,
+		Capability:     string(capability),
+		Decision:       "denied",
+		DenyReason:     "materialization_failure",
+		Result:         "ok",
+		Detail:         "materialization_failure",
+	}
+	if err := a.store.CreateCoordinatorAuditEvent(ctx, event); err != nil {
+		return Decision{Basis: BasisDenied}, err
+	}
+	return Decision{Basis: BasisDenied, AuditID: event.ID}, nil
+}
+
 func matchingGrant(grants []*models.CoordinatorGrant, request Request) (*models.CoordinatorGrant, string) {
 	if request.ActorTask.WorkspaceID != request.TargetTask.WorkspaceID {
 		return nil, "cross_workspace"

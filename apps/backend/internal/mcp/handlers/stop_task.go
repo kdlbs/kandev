@@ -53,15 +53,21 @@ func (h *Handlers) handleStopTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 		return lookupError.response, lookupError.err
 	}
 
+	var decision coordinator.Decision
 	if automationCaller {
 		if target.ID == principal.CallerTaskID || target.WorkspaceID != principal.WorkspaceID {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "target task not found", nil)
 		}
-	} else if !canStopTask(sender, target) {
-		decision, err := h.authorizeCoordinatorAction(ctx, sender, target, req.SenderSessionID, "stop_task", coordinator.CapabilityOrchestrate)
-		if err != nil || !decision.Allowed {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden,
-			"only a task's direct parent in the same workspace can stop it", nil)
+	} else {
+		var authErr error
+		decision, authErr = h.authorizeCoordinatorAction(ctx, sender, target, req.SenderSessionID, "stop_task", coordinator.CapabilityOrchestrate)
+		if authErr != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to authorize target task", nil)
+		}
+		if !decision.Allowed {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden,
+				"only a task's direct parent in the same workspace can stop it", nil)
+		}
 	}
 	if h.taskStopper == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "task stop is not configured", nil)
