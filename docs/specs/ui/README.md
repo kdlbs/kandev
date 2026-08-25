@@ -128,6 +128,7 @@ contract that other capabilities can reuse.
 - [Task Surface Foreground Refresh and Mobile Create Action](requirements/task-surface-refresh.md)
 - [Task Workspace Content Search](requirements/task-workspace-content-search.md)
 - [Terminal close feedback](requirements/terminal-close-feedback.md)
+- [Terminal Rendering](requirements/terminal-rendering.md)
 - [Transcript Auto-scroll Stability](requirements/transcript-auto-scroll.md)
 - [Transcript Navigation Settings](requirements/transcript-navigation-settings.md)
 - [Voice Mode In Task Behavior](requirements/voice-mode-task-behavior.md)
@@ -153,6 +154,7 @@ contract that other capabilities can reuse.
 - [Prompt History Panel](system-design/prompt-history-panel.md)
 - [Quick Chat and Terminal Tabs](system-design/quick-terminal.md)
 - [Task Layout Profiles](system-design/task-layout-profiles.md)
+- [Terminal Rendering](system-design/terminal-rendering.md)
 
 ## Migration record
 
