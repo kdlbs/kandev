@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -114,32 +115,33 @@ func glabReadToken(ctx context.Context, hostname string) (string, error) {
 	return parseGlabToken(stdout.String() + "\n" + stderr.String()), nil
 }
 
-// glabTokenLabels are the label variants `glab auth status -t` has used for
-// the token line. glab >= 1.x prints "Token found:"; older builds printed a
-// bare "Token:". Longest first so "Token found:" is not mis-split by "Token:".
-var glabTokenLabels = []string{"token found:", "token:"}
+// glabTokenLinePattern matches the token line in `glab auth status -t`
+// output by STRUCTURE — a label that mentions "token" followed by a colon —
+// rather than by exact wording. The exact label has already drifted twice
+// as glab's CLI evolved: a bare "Token:", then "Token found:", then "Token
+// found in configuration file (plaintext):". Matching the structural
+// convention (mentions token, ends in ": <value>") instead of any one of
+// those strings survives the next rewording too, including a hypothetical
+// future "Token (from keyring):" once glab moves off the plaintext file.
+var glabTokenLinePattern = regexp.MustCompile(`(?i)token[^:\n]*:\s*(\S.*)$`)
 
 // parseGlabToken finds the token line in the combined output of
 // `glab auth status -t` and returns the token (or "" if none).
 func parseGlabToken(output string) string {
 	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)
-		lower := strings.ToLower(line)
-		idx, label := -1, ""
-		for _, candidate := range glabTokenLabels {
-			if at := strings.Index(lower, candidate); at >= 0 {
-				idx, label = at, candidate
-				break
-			}
-		}
-		if idx < 0 {
+		m := glabTokenLinePattern.FindStringSubmatch(line)
+		if m == nil {
 			continue
 		}
-		token := strings.TrimSpace(line[idx+len(label):])
+		token := strings.TrimSpace(m[1])
 		// glab sometimes prefixes lines with ANSI / arrows; strip leading
 		// non-alphanumerics until we hit token characters.
 		token = strings.TrimLeft(token, " \t-→>")
-		if token != "" && token != "<no token>" {
+		// Without -t (or a masked display), the value is a run of asterisks
+		// rather than an absent line — reject that instead of "authenticating"
+		// with a redacted placeholder.
+		if token != "" && token != "<no token>" && strings.Trim(token, "*") != "" {
 			return token
 		}
 	}
