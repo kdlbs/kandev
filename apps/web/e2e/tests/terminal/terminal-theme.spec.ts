@@ -1,9 +1,11 @@
 import { expect, test } from "../../fixtures/test-base";
 import { seedIdleSession } from "../../helpers/session";
 import {
+  expectTerminalTheme,
   readTerminalHostBuffer,
   readTerminalHostTheme,
   readTerminalViewportY,
+  terminalThemeContract,
 } from "./terminal-test-helpers";
 
 async function activeTerminalHost(testPage: Parameters<typeof seedIdleSession>[0]) {
@@ -25,9 +27,7 @@ test.describe("adaptive terminal themes", () => {
     await expect(testPage.locator("html")).toHaveClass(/(^|\s)dark(\s|$)/);
     const theme = await readTerminalHostTheme(host);
 
-    expect(theme, "the initial xterm should expose its theme snapshot").not.toBeNull();
-    expect(theme?.red).toBe("#f44747");
-    expect(theme?.background).not.toBe("rgb(255, 255, 255)");
+    expectTerminalTheme(theme, "dark", "the initial xterm");
   });
 
   test("updates an open terminal when the application theme changes", async ({
@@ -72,8 +72,7 @@ test.describe("adaptive terminal themes", () => {
     const viewportBeforeTheme = await readTerminalViewportY(host);
 
     const initialTheme = await readTerminalHostTheme(host);
-    expect(initialTheme, "the active xterm should expose its theme snapshot").not.toBeNull();
-    expect(initialTheme?.minimumContrastRatio).toBe(4.5);
+    expectTerminalTheme(initialTheme, "light", "the active xterm before switching");
     const initialBuffer = await readTerminalHostBuffer(host);
 
     const themeToggle = testPage.getByRole("button", {
@@ -89,7 +88,12 @@ test.describe("adaptive terminal themes", () => {
         timeout: 5_000,
         message: "the open terminal should receive the resolved dark theme",
       })
-      .not.toEqual(initialTheme);
+      .toMatchObject(terminalThemeContract("dark"));
+    expectTerminalTheme(
+      await readTerminalHostTheme(host),
+      "dark",
+      "the active xterm after switching",
+    );
     await expect
       .poll(() => readTerminalHostBuffer(host), {
         timeout: 5_000,

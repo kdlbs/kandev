@@ -1,7 +1,7 @@
 // Routing: /t/{taskId}. The mobile- prefix selects the Pixel 5 project.
 import { expect, test } from "../../fixtures/test-base";
 import { openTaskSession } from "../../helpers/session";
-import { readTerminalHostTheme } from "./terminal-test-helpers";
+import { expectTerminalTheme, readTerminalHostTheme } from "./terminal-test-helpers";
 import { switchToTerminalPanel, waitForShellReady } from "./mobile-terminal-helpers";
 
 test.describe("mobile adaptive terminal theme", () => {
@@ -32,8 +32,7 @@ test.describe("mobile adaptive terminal theme", () => {
       .locator('[data-testid="terminal-xterm-host"]:visible');
     const theme = await readTerminalHostTheme(host);
 
-    expect(theme, "the mobile xterm should expose its theme snapshot").not.toBeNull();
-    expect(theme?.minimumContrastRatio).toBe(4.5);
+    expectTerminalTheme(theme, "light", "the mobile xterm");
     await prCapture.screenshot("mobile-terminal-theme-light", {
       caption: "Pixel 5 task terminal with the readable light-theme palette",
     });
