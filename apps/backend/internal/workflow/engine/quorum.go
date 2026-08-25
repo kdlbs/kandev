@@ -256,10 +256,24 @@ func (e *Engine) dropUnresolvedAgentSeats(
 	return kept, nil
 }
 
+// quorumRoleLabel sanitizes an operator-supplied guard/participant role
+// before it becomes an expvar counter label (AC-OFFICE-REVIEW-SEATS-004.6/
+// .11): a role outside the fixed ParticipantRole set folds to the
+// SeatRoleLabelInvalid sentinel already used by the sibling
+// ensure_participant_seat counter, so a malformed or arbitrary guard.Role
+// string cannot grow the metric's label cardinality. The raw string still
+// reaches the paired warning record as a typed field, never the counter.
+func quorumRoleLabel(role string) string {
+	if !ValidParticipantRole(role) {
+		return SeatRoleLabelInvalid
+	}
+	return role
+}
+
 // recordParticipantAgentUnresolved emits AC-004.3/004.8's warning record and
 // counter for one seat dropped because its agent profile no longer resolves.
 func (e *Engine) recordParticipantAgentUnresolved(taskID, stepID, role, agentProfileID string) {
-	quorummetrics.RecordParticipantAgentUnresolved(role)
+	quorummetrics.RecordParticipantAgentUnresolved(quorumRoleLabel(role))
 	if e.logger == nil {
 		return
 	}
@@ -282,7 +296,7 @@ func (e *Engine) recordParticipantAgentUnresolved(taskID, stepID, role, agentPro
 // record per role per guard evaluation" for this condition without extra
 // dedup state.
 func (e *Engine) recordQuorumSlateEmpty(taskID, stepID, role string) {
-	quorummetrics.RecordQuorumSlateEmpty(role)
+	quorummetrics.RecordQuorumSlateEmpty(quorumRoleLabel(role))
 	if e.logger == nil {
 		return
 	}

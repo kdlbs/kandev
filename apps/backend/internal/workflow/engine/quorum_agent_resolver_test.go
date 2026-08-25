@@ -70,7 +70,7 @@ func TestRequiredSeats_DropsSeatWithUnresolvedAgentProfile(t *testing.T) {
 
 func TestRequiredSeats_UnresolvedAgentIncrementsCounterAndLogs(t *testing.T) {
 	parts := scopedParticipants{template: []ParticipantInfo{
-		{ID: "p1", StepID: "review", Role: "reviewer-counter-role", AgentProfileID: "rev-gone", DecisionRequired: true},
+		{ID: "p1", StepID: "review", Role: "reviewer", AgentProfileID: "rev-gone", DecisionRequired: true},
 	}}
 	resolver := &fakeAgentProfileResolver{unresolved: map[string]bool{"rev-gone": true}}
 	core, logs := observer.New(zap.WarnLevel)
@@ -83,15 +83,15 @@ func TestRequiredSeats_UnresolvedAgentIncrementsCounterAndLogs(t *testing.T) {
 		WithDecisionStore(newFakeDecisionStore()), WithParticipantStore(parts),
 		WithAgentProfileResolver(resolver), WithLogger(log))
 
-	before := readParticipantAgentUnresolvedCounter("reviewer-counter-role")
-	seats, err := eng.requiredSeatsForWorkflow(context.Background(), "review", "task-1", "", "reviewer-counter-role")
+	before := readParticipantAgentUnresolvedCounter("reviewer")
+	seats, err := eng.requiredSeatsForWorkflow(context.Background(), "review", "task-1", "", "reviewer")
 	if err != nil {
 		t.Fatalf("requiredSeatsForWorkflow: %v", err)
 	}
 	if len(seats) != 0 {
 		t.Fatalf("expected the unresolved seat to be dropped, got %+v", seats)
 	}
-	after := readParticipantAgentUnresolvedCounter("reviewer-counter-role")
+	after := readParticipantAgentUnresolvedCounter("reviewer")
 	if after-before != 1 {
 		t.Fatalf("counter delta = %d, want 1", after-before)
 	}
@@ -106,8 +106,54 @@ func TestRequiredSeats_UnresolvedAgentIncrementsCounterAndLogs(t *testing.T) {
 	}
 	fields := entry.ContextMap()
 	if fields["task_id"] != "task-1" || fields["step_id"] != "review" ||
-		fields["role"] != "reviewer-counter-role" || fields["agent_profile_id"] != "rev-gone" {
+		fields["role"] != "reviewer" || fields["agent_profile_id"] != "rev-gone" {
 		t.Errorf("unexpected log fields: %+v", fields)
+	}
+}
+
+// TestRequiredSeats_MalformedRoleSanitizesCounterLabel covers
+// AC-OFFICE-REVIEW-SEATS-004.6/.11: a guard.Role outside the fixed
+// ParticipantRole set must not become an expvar counter label verbatim — it
+// folds to the SeatRoleLabelInvalid sentinel, while the raw operator string
+// still reaches the paired warning record as a typed field.
+func TestRequiredSeats_MalformedRoleSanitizesCounterLabel(t *testing.T) {
+	const malformedRole = "not-a-real-role"
+	parts := scopedParticipants{template: []ParticipantInfo{
+		{ID: "p1", StepID: "review", Role: malformedRole, AgentProfileID: "rev-gone", DecisionRequired: true},
+	}}
+	resolver := &fakeAgentProfileResolver{unresolved: map[string]bool{"rev-gone": true}}
+	core, logs := observer.New(zap.WarnLevel)
+	zapLogger := zap.New(core)
+	log, err := logger.NewFromZap(zapLogger)
+	if err != nil {
+		t.Fatalf("build logger: %v", err)
+	}
+	eng := New(quorumStore(nil), MapRegistry{},
+		WithDecisionStore(newFakeDecisionStore()), WithParticipantStore(parts),
+		WithAgentProfileResolver(resolver), WithLogger(log))
+
+	before := readParticipantAgentUnresolvedCounter(SeatRoleLabelInvalid)
+	seats, err := eng.requiredSeatsForWorkflow(context.Background(), "review", "task-1", "", malformedRole)
+	if err != nil {
+		t.Fatalf("requiredSeatsForWorkflow: %v", err)
+	}
+	if len(seats) != 0 {
+		t.Fatalf("expected the unresolved seat to be dropped, got %+v", seats)
+	}
+	after := readParticipantAgentUnresolvedCounter(SeatRoleLabelInvalid)
+	if after-before != 1 {
+		t.Fatalf("%s counter delta = %d, want 1", SeatRoleLabelInvalid, after-before)
+	}
+	if got := readParticipantAgentUnresolvedCounter(malformedRole); got != 0 {
+		t.Fatalf("expected no counter entry under the raw operator string %q, got %d", malformedRole, got)
+	}
+
+	entries := logs.All()
+	if len(entries) != 1 {
+		t.Fatalf("expected exactly one warning log, got %d: %+v", len(entries), entries)
+	}
+	if fields := entries[0].ContextMap(); fields["role"] != malformedRole {
+		t.Errorf("expected the warning record to carry the raw role %q, got %+v", malformedRole, fields)
 	}
 }
 
