@@ -6,8 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	officemodels "github.com/kandev/kandev/internal/office/models"
+	"unicode/utf8"
 )
 
 // fakeCommentReader is a minimal in-memory CommentReader. Comments for a
@@ -16,12 +15,12 @@ import (
 // `limit` while preserving that ascending order, mirroring the production
 // contract without touching SQLite.
 type fakeCommentReader struct {
-	byTask    map[string][]*officemodels.TaskComment
+	byTask    map[string][]CommentRecord
 	err       error
 	lastLimit int
 }
 
-func (f *fakeCommentReader) ListTaskCommentsWindow(_ context.Context, taskID string, limit int) ([]*officemodels.TaskComment, int, error) {
+func (f *fakeCommentReader) ListTaskCommentsWindow(_ context.Context, taskID string, limit int) ([]CommentRecord, int, error) {
 	f.lastLimit = limit
 	if f.err != nil {
 		return nil, 0, f.err
@@ -35,19 +34,19 @@ func (f *fakeCommentReader) ListTaskCommentsWindow(_ context.Context, taskID str
 	if start < 0 {
 		start = 0
 	}
-	window := make([]*officemodels.TaskComment, len(all[start:]))
+	window := make([]CommentRecord, len(all[start:]))
 	copy(window, all[start:])
 	return window, total, nil
 }
 
 func (f *fakeCommentReader) seed(taskID string, n int, bodyLen int) {
 	if f.byTask == nil {
-		f.byTask = map[string][]*officemodels.TaskComment{}
+		f.byTask = map[string][]CommentRecord{}
 	}
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	for i := 0; i < n; i++ {
 		body := strings.Repeat("x", bodyLen)
-		f.byTask[taskID] = append(f.byTask[taskID], &officemodels.TaskComment{
+		f.byTask[taskID] = append(f.byTask[taskID], CommentRecord{
 			ID:         "c-" + taskID + "-" + itoa(i),
 			TaskID:     taskID,
 			AuthorType: "agent",
@@ -159,8 +158,13 @@ func TestListCommentsForCallerDependencyNotConfigured(t *testing.T) {
 // returned untouched with neither field set.
 func TestListCommentsForCallerTruncatesLongBodies(t *testing.T) {
 	svc, _ := newDocumentHandoffService(t, nil)
-	reader := &fakeCommentReader{}
-	reader.seed("child-a", 1, 9000)
+	body := strings.Repeat("x", 8191) + "é"
+	reader := &fakeCommentReader{byTask: map[string][]CommentRecord{
+		"child-a": {{
+			ID: "utf8-boundary", TaskID: "child-a", AuthorType: "agent", AuthorID: "agent-1",
+			Source: "run", Body: body, CreatedAt: time.Now().UTC(),
+		}},
+	}}
 	svc.SetCommentReader(reader)
 	ctx := context.Background()
 
@@ -175,11 +179,14 @@ func TestListCommentsForCallerTruncatesLongBodies(t *testing.T) {
 	if !c.BodyTruncated {
 		t.Fatal("want body_truncated = true for a 9000-byte body")
 	}
-	if c.BodyBytes != 9000 {
-		t.Fatalf("body_bytes = %d, want 9000", c.BodyBytes)
+	if c.BodyBytes != len(body) {
+		t.Fatalf("body_bytes = %d, want %d", c.BodyBytes, len(body))
 	}
-	if len(c.Body) != 8192 {
-		t.Fatalf("truncated body len = %d, want 8192", len(c.Body))
+	if len(c.Body) != 8191 {
+		t.Fatalf("truncated body len = %d, want 8191", len(c.Body))
+	}
+	if !utf8.ValidString(c.Body) {
+		t.Fatal("truncated body must remain valid UTF-8")
 	}
 }
 
@@ -277,10 +284,10 @@ func TestListCommentsForCallerBudgetDropsOldestNeverEmpties(t *testing.T) {
 func TestListCommentsForCallerProjectsAuthorFields(t *testing.T) {
 	svc, _ := newDocumentHandoffService(t, nil)
 	reader := &fakeCommentReader{
-		byTask: map[string][]*officemodels.TaskComment{
+		byTask: map[string][]CommentRecord{
 			"child-a": {{
 				ID: "c1", TaskID: "child-a", AuthorType: "user", AuthorID: "user-9",
-				Source: "user", Body: "hi", ReplyChannelID: "secret-channel",
+				Source: "user", Body: "hi",
 				CreatedAt: time.Now().UTC(),
 			}},
 		},

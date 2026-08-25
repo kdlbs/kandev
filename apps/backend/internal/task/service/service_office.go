@@ -199,38 +199,3 @@ func (s *Service) ListComments(ctx context.Context, taskID string) ([]*orchmodel
 	}
 	return s.comments.ListTaskComments(ctx, taskID)
 }
-
-// CommentReader is the minimal read surface HandoffService.ListCommentsForCaller
-// depends on. Implemented by the office sqlite Repository's
-// ListTaskCommentsWindow; wired via HandoffService.SetCommentReader.
-//
-// The row type is Office-owned, and ARCH-TASK-OFFICE-IMPORT keeps new
-// task-tier files free of Office imports; this file is already baselined
-// for it, so the interface is declared here rather than widening the
-// baseline with a new file.
-type CommentReader interface {
-	ListTaskCommentsWindow(ctx context.Context, taskID string, limit int) ([]*orchmodels.TaskComment, int, error)
-}
-
-// projectComment maps a stored office comment onto the task-service-owned
-// wire projection (CommentProjection, defined in handoff_comments.go),
-// applying the per-body byte cap. Lives here rather than in
-// handoff_comments.go for the same ARCH-TASK-OFFICE-IMPORT reason as
-// CommentReader above.
-func projectComment(c *orchmodels.TaskComment) CommentProjection {
-	p := CommentProjection{
-		ID:         c.ID,
-		TaskID:     c.TaskID,
-		AuthorType: c.AuthorType,
-		AuthorID:   c.AuthorID,
-		Source:     c.Source,
-		Body:       c.Body,
-		CreatedAt:  c.CreatedAt,
-	}
-	if len(c.Body) > commentBodyMaxBytes {
-		p.BodyBytes = len(c.Body)
-		p.Body = runeSafeTruncateUTF8(c.Body, commentBodyMaxBytes)
-		p.BodyTruncated = true
-	}
-	return p
-}

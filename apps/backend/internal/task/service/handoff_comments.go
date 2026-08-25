@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/kandev/kandev/internal/common/truncate"
 )
 
 // commentBodyMaxBytes and commentResponseBudgetBytes are the per-comment
@@ -46,6 +48,25 @@ func clampCommentWindowLimit(limit int) int {
 // must never confuse "dependency unconfigured" with either of those
 // (AC-005.2/AC-005.3).
 var errCommentReaderNotConfigured = errors.New("comment reader not configured")
+
+// CommentRecord is the task-service-owned projection returned by a comment
+// store. It contains only fields needed by the handoff read contract and does
+// not expose an Office persistence model to this service.
+type CommentRecord struct {
+	ID         string
+	TaskID     string
+	AuthorType string
+	AuthorID   string
+	Source     string
+	Body       string
+	CreatedAt  time.Time
+}
+
+// CommentReader is the minimal read surface HandoffService.ListCommentsForCaller
+// depends on. Persistence adapters convert their storage model to CommentRecord.
+type CommentReader interface {
+	ListTaskCommentsWindow(ctx context.Context, taskID string, limit int) ([]CommentRecord, int, error)
+}
 
 // CommentProjection is the wire shape of a single comment returned by
 // ListCommentsForCaller. It deliberately omits ReplyChannelID and any
@@ -135,18 +156,22 @@ func trimCommentsToBudget(comments []CommentProjection, budgetBytes int) []Comme
 	return comments[start:]
 }
 
-// runeSafeTruncateUTF8 cuts s to at most maxBytes at a rune boundary,
-// returning valid UTF-8. Deliberately duplicates
-// internal/office/truncate.UTF8 instead of importing it: ARCH-TASK-OFFICE-IMPORT
-// forbids internal/task/ files from adding new internal/office imports, and
-// this file has no other reason to cross that boundary.
-func runeSafeTruncateUTF8(s string, maxBytes int) string {
-	if len(s) <= maxBytes {
-		return s
+// projectComment maps a stored comment onto the task-service-owned wire
+// projection and applies the per-body byte cap.
+func projectComment(c CommentRecord) CommentProjection {
+	p := CommentProjection{
+		ID:         c.ID,
+		TaskID:     c.TaskID,
+		AuthorType: c.AuthorType,
+		AuthorID:   c.AuthorID,
+		Source:     c.Source,
+		Body:       c.Body,
+		CreatedAt:  c.CreatedAt,
 	}
-	cut := maxBytes
-	for cut > 0 && (s[cut]&0xC0) == 0x80 {
-		cut--
+	if len(c.Body) > commentBodyMaxBytes {
+		p.BodyBytes = len(c.Body)
+		p.Body = truncate.UTF8(c.Body, commentBodyMaxBytes)
+		p.BodyTruncated = true
 	}
-	return s[:cut]
+	return p
 }

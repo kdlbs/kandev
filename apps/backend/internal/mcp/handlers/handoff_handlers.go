@@ -7,6 +7,7 @@ import (
 
 	"go.uber.org/zap"
 
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -161,7 +162,11 @@ func (h *Handlers) handleListTaskComments(ctx context.Context, msg *ws.Message) 
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
-	window, err := svc.ListCommentsForCaller(ctx, req.CallerTaskID, req.TaskID, req.Limit)
+	callerTaskID := req.CallerTaskID
+	if principal, ok := mcpscope.PrincipalFromContext(ctx); ok {
+		callerTaskID = principal.CallerTaskID
+	}
+	window, err := svc.ListCommentsForCaller(ctx, callerTaskID, req.TaskID, req.Limit)
 	if err != nil {
 		if !errors.Is(err, service.ErrAccessDenied) && !errors.Is(err, service.ErrDocumentTaskRequired) {
 			h.logger.Error("list task comments", zap.Error(err))

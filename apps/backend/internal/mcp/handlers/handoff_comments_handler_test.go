@@ -6,7 +6,8 @@ import (
 	"testing"
 	"time"
 
-	officemodels "github.com/kandev/kandev/internal/office/models"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -19,10 +20,10 @@ import (
 // one in internal/task/service/handoff_comments_test.go (unexported there,
 // so this package needs its own).
 type fakeCommentReader struct {
-	byTask map[string][]*officemodels.TaskComment
+	byTask map[string][]service.CommentRecord
 }
 
-func (f *fakeCommentReader) ListTaskCommentsWindow(_ context.Context, taskID string, limit int) ([]*officemodels.TaskComment, int, error) {
+func (f *fakeCommentReader) ListTaskCommentsWindow(_ context.Context, taskID string, limit int) ([]service.CommentRecord, int, error) {
 	all := f.byTask[taskID]
 	total := len(all)
 	if limit <= 0 || limit > len(all) {
@@ -51,9 +52,13 @@ func newCommentsHandoffFixture(t *testing.T) (*Handlers, *service.HandoffService
 		ID: "child-c", WorkspaceID: "ws-comments", WorkflowID: "wf-comments",
 		Title: "Child", ParentID: "parent-c", State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now,
 	}))
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{
+		ID: "unrelated-c", WorkspaceID: "ws-comments", WorkflowID: "wf-comments",
+		Title: "Unrelated", State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now,
+	}))
 
 	handoffSvc := service.NewHandoffService(repo, nil, nil, nil, nil, testLogger(t))
-	handoffSvc.SetCommentReader(&fakeCommentReader{byTask: map[string][]*officemodels.TaskComment{
+	handoffSvc.SetCommentReader(&fakeCommentReader{byTask: map[string][]service.CommentRecord{
 		"child-c": {{
 			ID: "c1", TaskID: "child-c", AuthorType: "agent", AuthorID: "worker-1",
 			Source: "run", Body: "stage deliverable", CreatedAt: now,
@@ -121,6 +126,22 @@ func TestHandleListTaskComments_MapsAccessDeniedToForbidden(t *testing.T) {
 		"task_id": childID, "caller_task_id": "unrelated-task",
 	})
 	resp, err := h.handleListTaskComments(context.Background(), msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeForbidden)
+}
+
+func TestHandleListTaskCommentsUsesTrustedPrincipalCaller(t *testing.T) {
+	h, _, parentID, childID := newCommentsHandoffFixture(t)
+	ctx := mcpscope.WithPrincipal(context.Background(), mcpscope.Principal{
+		CallerTaskID:    "unrelated-c",
+		CallerSessionID: "unrelated-session",
+		Surface:         mcpprofile.SurfaceOfficeTask,
+	})
+
+	msg := makeWSMessage(t, ws.ActionMCPListTaskComments, map[string]any{
+		"task_id": childID, "caller_task_id": parentID, "limit": 20,
+	})
+	resp, err := h.handleListTaskComments(ctx, msg)
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeForbidden)
 }

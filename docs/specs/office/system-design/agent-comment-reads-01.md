@@ -255,8 +255,10 @@ validation error naming `task_id`.
 
 ## Persistence
 
-Read-only. No schema change, no migration, no new index; the existing
-`(task_id, created_at)` index serves the window.
+The read path is read-only and needs no schema change or new index. On startup,
+the Office repository backfills parseable legacy `task_comments.created_at`
+values to the canonical UTC representation before the window query relies on
+lexical ordering. The existing `(task_id, created_at)` index serves the window.
 
 Both the count and the page are taken inside one read transaction on the
 read-only connection, so the returned count never exceeds the reported total. A

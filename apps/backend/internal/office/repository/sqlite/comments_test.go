@@ -5,7 +5,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jmoiron/sqlx"
+	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/office/repository/sqlite"
 )
 
 func TestTaskComment_CRUD(t *testing.T) {
@@ -106,5 +109,47 @@ func TestCreateTaskComment_NormalizesNonZeroCreatedAtToUTC(t *testing.T) {
 
 	if comments[0].CreatedAt.Location() != time.UTC {
 		t.Errorf("olderLocal.CreatedAt location = %v, want UTC (normalized on write)", comments[0].CreatedAt.Location())
+	}
+}
+
+func TestRepositoryInitNormalizesLegacyCommentTimestamps(t *testing.T) {
+	db, err := sqlx.Open("sqlite3", ":memory:")
+	requireNoError(t, err)
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = db.Close() })
+
+	_, _, err = settingsstore.Provide(db, db, nil)
+	requireNoError(t, err)
+	_, err = sqlite.NewWithDB(db, db, nil)
+	requireNoError(t, err)
+
+	_, err = db.Exec(`
+		INSERT INTO task_comments (id, task_id, author_type, author_id, body, source, created_at)
+		VALUES
+			('legacy-older', 'task-legacy', 'agent', 'agent-1', 'older-local', 'run', '2026-01-01 09:00:00+08:00'),
+			('newer-utc', 'task-legacy', 'agent', 'agent-1', 'newer-utc', 'run', '2026-01-01 02:00:00+00:00')
+	`)
+	requireNoError(t, err)
+
+	repo, err := sqlite.NewWithDB(db, db, nil)
+	requireNoError(t, err)
+
+	comments, total, err := repo.ListTaskCommentsWindow(context.Background(), "task-legacy", 1)
+	requireNoError(t, err)
+	if total != 2 {
+		t.Fatalf("total = %d, want 2", total)
+	}
+	if len(comments) != 1 {
+		t.Fatalf("len(comments) = %d, want 1", len(comments))
+	}
+	if comments[0].Body != "newer-utc" {
+		t.Fatalf("newest comment = %q, want newer-utc", comments[0].Body)
+	}
+}
+
+func requireNoError(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
 	}
 }

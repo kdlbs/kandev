@@ -21,6 +21,7 @@ import (
 // collapsed: those rows never landed on main so the migrations were
 // pure no-ops at first boot.
 func (r *Repository) runMigrations() {
+	r.migrateTaskCommentTimestamps()
 	r.migrateSchedulerColumns()
 	r.migrateFailureColumns()
 	r.migrateRunPayloadIndexes()
