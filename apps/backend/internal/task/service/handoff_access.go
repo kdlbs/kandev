@@ -97,17 +97,26 @@ func canWriteDocuments(ctx context.Context, repo taskLookup, currentTaskID, targ
 
 // loadAccessPair resolves both tasks and runs the always-required guards:
 // non-empty IDs and matching workspaces. Returns (current, target, true)
-// only when access evaluation should proceed.
+// only when access evaluation should proceed. A not-found task (the
+// repository's ErrTaskNotFound sentinel, which embeds the raw task id)
+// normalizes to a plain deny rather than propagating — callers must not
+// leak the identifier via a raw error message.
 func loadAccessPair(ctx context.Context, repo taskLookup, currentTaskID, targetTaskID string) (*models.Task, *models.Task, bool, error) {
 	if currentTaskID == "" || targetTaskID == "" {
 		return nil, nil, false, nil
 	}
 	current, err := repo.GetTask(ctx, currentTaskID)
 	if err != nil {
+		if errors.Is(err, repository.ErrTaskNotFound) {
+			return nil, nil, false, nil
+		}
 		return nil, nil, false, err
 	}
 	target, err := repo.GetTask(ctx, targetTaskID)
 	if err != nil {
+		if errors.Is(err, repository.ErrTaskNotFound) {
+			return nil, nil, false, nil
+		}
 		return nil, nil, false, err
 	}
 	if current == nil || target == nil {

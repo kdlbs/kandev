@@ -2,9 +2,11 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
 )
 
 // fakeTaskLookup is a tiny in-memory implementation of taskLookup keyed
@@ -13,11 +15,15 @@ type fakeTaskLookup struct {
 	tasks map[string]*models.Task
 }
 
+// GetTask mirrors the production repository shape (task/repository/sqlite
+// GetTask): a missing id returns repository.ErrTaskNotFound wrapped with
+// the id, never a nil/nil result. Access-guard tests rely on this to prove
+// loadAccessPair normalizes not-found into a plain deny.
 func (f *fakeTaskLookup) GetTask(ctx context.Context, id string) (*models.Task, error) {
 	if t, ok := f.tasks[id]; ok {
 		return t, nil
 	}
-	return nil, nil
+	return nil, fmt.Errorf("%w: %s", repository.ErrTaskNotFound, id)
 }
 func (f *fakeTaskLookup) GetTasksByIDs(ctx context.Context, ids []string) ([]*models.Task, error) {
 	var out []*models.Task
@@ -195,6 +201,30 @@ func TestCanReadDocuments_MissingTasksDeny(t *testing.T) {
 	ok, _ = canReadDocuments(context.Background(), g, nil, "missing", "known")
 	if ok {
 		t.Error("missing caller must deny")
+	}
+}
+
+// REGRESSION (AC-001.11): a not-found task must normalize to a plain deny,
+// not leak the wrapped repository.ErrTaskNotFound (which embeds the raw
+// task id) up through the access guard.
+func TestLoadAccessPair_NotFoundNormalizesToPlainDeny(t *testing.T) {
+	g := newGraph(newTask("known", "", "ws-1"))
+	ctx := context.Background()
+
+	current, target, ok, err := loadAccessPair(ctx, g, "known", "missing")
+	if err != nil {
+		t.Fatalf("loadAccessPair err = %v, want nil (plain deny)", err)
+	}
+	if ok || current != nil || target != nil {
+		t.Fatalf("loadAccessPair(known, missing) = (%v, %v, %v), want (nil, nil, false)", current, target, ok)
+	}
+
+	current, target, ok, err = loadAccessPair(ctx, g, "missing", "known")
+	if err != nil {
+		t.Fatalf("loadAccessPair err = %v, want nil (plain deny)", err)
+	}
+	if ok || current != nil || target != nil {
+		t.Fatalf("loadAccessPair(missing, known) = (%v, %v, %v), want (nil, nil, false)", current, target, ok)
 	}
 }
 
