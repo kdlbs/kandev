@@ -293,7 +293,7 @@ func (r *Repository) ListCoordinatorAuditEvents(ctx context.Context, workspaceID
 	}
 	query += ` ORDER BY occurred_at DESC, id DESC`
 	if limit > 0 {
-		query += ` LIMIT ?`
+		query += ` LIMIT ?` //nolint:goconst
 		args = append(args, limit)
 	}
 	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(query), args...)
@@ -351,7 +351,7 @@ func (r *Repository) ListWorkspaceAgentPrincipalAuditEventsFiltered(ctx context.
 	}
 	query += ` ORDER BY occurred_at DESC, id DESC`
 	if limit > 0 {
-		query += ` LIMIT ?`
+		query += ` LIMIT ?` //nolint:goconst
 		args = append(args, limit)
 	}
 	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(query), args...)

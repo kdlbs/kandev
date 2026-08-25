@@ -89,7 +89,7 @@ func (m *pluginHostAgentConversationManager) Ensure(ctx context.Context, spec pl
 		// A principal revocation may race task/session creation. Delete only a
 		// brand-new run; an existing run may belong to a prior valid binding and
 		// must merely become unusable, not be destroyed by a retry.
-		if result == "created" {
+		if result == "created" { //nolint:goconst
 			_, _ = svc.Delete(ctx, pluginID, spec.WorkspaceID, spec.ConversationKey)
 		}
 		return pluginsdk.AgentConversationDescriptor{}, "", err
