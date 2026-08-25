@@ -42,6 +42,29 @@ func (a pluginsAutomationSourceAdapter) GetPluginAutomation(ctx context.Context,
 	return &out, nil
 }
 
+func pluginAutomationTriggers(items []automation.AutomationTrigger) []pluginsdk.AutomationTrigger {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]pluginsdk.AutomationTrigger, len(items))
+	for i, t := range items {
+		configJSON := ""
+		if len(t.Config) > 0 {
+			configJSON = string(t.Config)
+		} else if t.ConfigJSON != "" {
+			// Ensure the ConfigJSON is valid JSON even if stored as text
+			configJSON = t.ConfigJSON
+		}
+		out[i] = pluginsdk.AutomationTrigger{
+			ID:         t.ID,
+			Type:       string(t.Type),
+			ConfigJSON: configJSON,
+			Enabled:    t.Enabled,
+		}
+	}
+	return out
+}
+
 func pluginAutomationDescriptor(item *automation.Automation) pluginsdk.Automation {
 	updatedAt := ""
 	if !item.UpdatedAt.IsZero() {
@@ -58,5 +81,11 @@ func pluginAutomationDescriptor(item *automation.Automation) pluginsdk.Automatio
 		Enabled:           item.Enabled,
 		MaxConcurrentRuns: int32(item.MaxConcurrentRuns),
 		UpdatedAt:         updatedAt,
+		WorkflowID:        item.WorkflowID,
+		WorkflowStepID:    item.WorkflowStepID,
+		TaskMode:          string(item.TaskMode),
+		RepositoryMode:    string(item.RepositoryMode),
+		TaskTitleTemplate: item.TaskTitleTemplate,
+		Triggers:          pluginAutomationTriggers(item.Triggers),
 	}
 }

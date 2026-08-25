@@ -309,6 +309,55 @@ func taskRelationsFromProto(p *pluginv1.TaskRelations) *TaskRelations {
 // Automation is the compact, workspace-scoped configuration projection a
 // plugin receives after an automation.triggered delivery. It has no secrets,
 // repository bindings, or run history.
+// AutomationTrigger is a triggering rule that activates an automation.
+// ConfigJSON is an opaque JSON string whose shape depends on the trigger type
+// (scheduled → cron expression, github_pr → repo/event filter, etc.). The
+// host validates the config; the plugin reads it for display/guidance only.
+type AutomationTrigger struct {
+	ID         string
+	Type       string
+	ConfigJSON string
+	Enabled    bool
+}
+
+func (t AutomationTrigger) toProto() *pluginv1.AutomationTrigger {
+	return &pluginv1.AutomationTrigger{
+		Id: t.ID, Type: t.Type, ConfigJson: t.ConfigJSON, Enabled: t.Enabled,
+	}
+}
+
+func automationTriggerFromProto(p *pluginv1.AutomationTrigger) *AutomationTrigger {
+	if p == nil {
+		return nil
+	}
+	return &AutomationTrigger{
+		ID: p.GetId(), Type: p.GetType(),
+		ConfigJSON: p.GetConfigJson(), Enabled: p.GetEnabled(),
+	}
+}
+
+func automationTriggersFromProto(items []*pluginv1.AutomationTrigger) []AutomationTrigger {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]AutomationTrigger, len(items))
+	for i, item := range items {
+		out[i] = *automationTriggerFromProto(item)
+	}
+	return out
+}
+
+func automationTriggersToProto(items []AutomationTrigger) []*pluginv1.AutomationTrigger {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]*pluginv1.AutomationTrigger, len(items))
+	for i := range items {
+		out[i] = items[i].toProto()
+	}
+	return out
+}
+
 type Automation struct {
 	ID                string
 	WorkspaceID       string
@@ -320,6 +369,15 @@ type Automation struct {
 	Enabled           bool
 	MaxConcurrentRuns int32
 	UpdatedAt         string
+
+	// Automation setup/binding surface — fields the coordinator plugin needs
+	// to display automation guidance to the operator.
+	WorkflowID        string
+	WorkflowStepID    string
+	TaskMode          string
+	RepositoryMode    string
+	TaskTitleTemplate string
+	Triggers          []AutomationTrigger
 }
 
 func (a Automation) toProto() *pluginv1.Automation {
@@ -327,7 +385,11 @@ func (a Automation) toProto() *pluginv1.Automation {
 		Id: a.ID, WorkspaceId: a.WorkspaceID, Name: a.Name, Description: a.Description,
 		AgentProfileId: a.AgentProfileID, ExecutorProfileId: a.ExecutorProfileID,
 		Prompt: a.Prompt, Enabled: a.Enabled, MaxConcurrentRuns: a.MaxConcurrentRuns,
-		UpdatedAt: a.UpdatedAt,
+		UpdatedAt:  a.UpdatedAt,
+		WorkflowId: a.WorkflowID, WorkflowStepId: a.WorkflowStepID,
+		TaskMode: a.TaskMode, RepositoryMode: a.RepositoryMode,
+		TaskTitleTemplate: a.TaskTitleTemplate,
+		Triggers:          automationTriggersToProto(a.Triggers),
 	}
 }
 
@@ -339,7 +401,11 @@ func automationFromProto(p *pluginv1.Automation) *Automation {
 		ID: p.GetId(), WorkspaceID: p.GetWorkspaceId(), Name: p.GetName(), Description: p.GetDescription(),
 		AgentProfileID: p.GetAgentProfileId(), ExecutorProfileID: p.GetExecutorProfileId(),
 		Prompt: p.GetPrompt(), Enabled: p.GetEnabled(), MaxConcurrentRuns: p.GetMaxConcurrentRuns(),
-		UpdatedAt: p.GetUpdatedAt(),
+		UpdatedAt:  p.GetUpdatedAt(),
+		WorkflowID: p.GetWorkflowId(), WorkflowStepID: p.GetWorkflowStepId(),
+		TaskMode: p.GetTaskMode(), RepositoryMode: p.GetRepositoryMode(),
+		TaskTitleTemplate: p.GetTaskTitleTemplate(),
+		Triggers:          automationTriggersFromProto(p.GetTriggers()),
 	}
 }
 

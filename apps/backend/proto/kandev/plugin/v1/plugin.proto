@@ -452,6 +452,16 @@ message GetTaskRelationsResponse {
 // Automation is the compact, workspace-scoped configuration projection for a
 // trigger consumer. It deliberately excludes webhook secrets, repository
 // bindings, run history, and implementation-specific task placement fields.
+message AutomationTrigger {
+  string id = 1;
+  string type = 2;
+  // Opaque JSON configuration whose shape depends on type (scheduled, github_pr,
+  // webhook, etc.). The host validates the config; the plugin reads it for
+  // display/guidance only.
+  string config_json = 3;
+  bool enabled = 4;
+}
+
 message Automation {
   string id = 1;
   string workspace_id = 2;
@@ -463,6 +473,24 @@ message Automation {
   bool enabled = 8;
   int32 max_concurrent_runs = 9;
   string updated_at = 10;
+
+  // Workflow and step this automation targets. Coordinator-only (task_mode =
+  // "automation_run") automations may omit the workflow; normal-task
+  // automations require it.
+  string workflow_id = 11;
+  string workflow_step_id = 12;
+  // "automation_run" for coordinator-only hidden runs or "normal_task" for
+  // visible kanban tasks. The coordinator plugin reads this to distinguish
+  // its own target automation from ordinary workspace automations.
+  string task_mode = 13;
+  // "workspace_default", "selected", or "none". Controls how the automation
+  // resolves its repository environment.
+  string repository_mode = 14;
+  // Title template for tasks created by this automation.
+  string task_title_template = 15;
+  // The triggers that activate this automation. Present only when the plugin
+  // also declares api_read:automations AND has a matching event subscription.
+  repeated AutomationTrigger triggers = 16;
 }
 message ListAutomationsRequest {
   string workspace_id = 1;
