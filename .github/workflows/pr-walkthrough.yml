@@ -413,5 +413,5 @@ jobs:
           gh api --method PATCH \
             "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
             --input pr-update.json \
-            > /dev/null
+            --silent
           echo "Added the walkthrough link to the top of the PR description." >> "$GITHUB_STEP_SUMMARY"

@@ -348,6 +348,8 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
         self.assertIn("scripts/pr-walkthrough-pr-body", self.link)
         self.assertIn("--github-response", self.link)
         self.assertIn("--input", self.link)
+        patch_call = self.link.split("gh api --method PATCH", 1)[1].split("echo", 1)[0]
+        self.assertIn("--silent", patch_call)
         self.assertIn(
             "PUBLIC_URL: ${{ needs.pr-walkthrough-publish.outputs.url }}",
             self.link,
