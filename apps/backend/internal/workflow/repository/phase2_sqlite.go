@@ -56,20 +56,6 @@ func (r *Repository) initPhase2Schema() error {
 		ADD COLUMN created_at TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00'
 	`)
 
-	// Must run before participantsNaturalKeyIndexName is created below: a
-	// database that predates the unique index can already hold rows sharing
-	// the same (step_id, task_id, role, agent_profile_id) identity, and
-	// CREATE UNIQUE INDEX over them fails outright, aborting backend startup.
-	if err := r.dedupeParticipantsBeforeUniqueIndex(); err != nil {
-		return fmt.Errorf("failed to dedupe workflow_step_participants before unique index: %w", err)
-	}
-	if _, err := r.db.Exec(`
-	CREATE UNIQUE INDEX IF NOT EXISTS ` + participantsNaturalKeyIndexName + `
-		ON workflow_step_participants(step_id, task_id, role, agent_profile_id);
-	`); err != nil {
-		return fmt.Errorf("failed to create %s: %w", participantsNaturalKeyIndexName, err)
-	}
-
 	decisionsSchema := `
 	CREATE TABLE IF NOT EXISTS workflow_step_decisions (
 		id TEXT PRIMARY KEY,
@@ -90,8 +76,26 @@ func (r *Repository) initPhase2Schema() error {
 	CREATE INDEX IF NOT EXISTS idx_workflow_step_decisions_active
 		ON workflow_step_decisions(task_id, role) WHERE superseded_at IS NULL;
 	`
+	// Created before the participant dedupe below: dedupeParticipantsBeforeUniqueIndex
+	// remaps workflow_step_decisions.participant_id off a losing duplicate, which
+	// needs this table to already exist (including on a fresh database's first
+	// initPhase2Schema run).
 	if _, err := r.db.Exec(decisionsSchema); err != nil {
 		return fmt.Errorf("failed to create workflow_step_decisions table: %w", err)
+	}
+
+	// Must run before participantsNaturalKeyIndexName is created below: a
+	// database that predates the unique index can already hold rows sharing
+	// the same (step_id, task_id, role, agent_profile_id) identity, and
+	// CREATE UNIQUE INDEX over them fails outright, aborting backend startup.
+	if err := r.dedupeParticipantsBeforeUniqueIndex(); err != nil {
+		return fmt.Errorf("failed to dedupe workflow_step_participants before unique index: %w", err)
+	}
+	if _, err := r.db.Exec(`
+	CREATE UNIQUE INDEX IF NOT EXISTS ` + participantsNaturalKeyIndexName + `
+		ON workflow_step_participants(step_id, task_id, role, agent_profile_id);
+	`); err != nil {
+		return fmt.Errorf("failed to create %s: %w", participantsNaturalKeyIndexName, err)
 	}
 
 	// Must run before decisionActiveDeciderIndexName is created below: an
@@ -152,9 +156,33 @@ const participantsNaturalKeyIndexName = "idx_workflow_step_participants_natural_
 
 // dedupeParticipantsBeforeUniqueIndex keeps one row per (step_id, task_id,
 // role, agent_profile_id) group — the earliest by position, tiebroken by id
-// for determinism — and deletes the rest. A database with no duplicate rows
-// leaves this a no-op. Mirrors dedupeActiveStepDecisionsBeforeUniqueIndex.
+// for determinism — and deletes the rest. Before deleting, it remaps any
+// workflow_step_decisions.participant_id pointing at a losing duplicate onto
+// the surviving row: a decision already recorded against a duplicate would
+// otherwise be left with a dangling participant_id after the delete, making
+// mapDecisionsToSeats drop it and a completed review look undecided. A
+// database with no duplicate rows leaves this a no-op. Mirrors
+// dedupeActiveStepDecisionsBeforeUniqueIndex.
 func (r *Repository) dedupeParticipantsBeforeUniqueIndex() error {
+	if _, err := r.db.Exec(`
+		WITH ranked AS (
+			SELECT
+				id,
+				FIRST_VALUE(id) OVER (
+					PARTITION BY step_id, task_id, role, agent_profile_id
+					ORDER BY position ASC, id ASC
+				) AS survivor_id
+			FROM workflow_step_participants
+		)
+		UPDATE workflow_step_decisions
+		SET participant_id = (
+			SELECT survivor_id FROM ranked WHERE ranked.id = workflow_step_decisions.participant_id
+		)
+		WHERE participant_id IN (SELECT id FROM ranked WHERE ranked.id != ranked.survivor_id)
+	`); err != nil {
+		return fmt.Errorf("remap decisions off duplicate participants: %w", err)
+	}
+
 	_, err := r.db.Exec(`
 		WITH ranked AS (
 			SELECT

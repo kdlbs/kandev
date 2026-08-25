@@ -7,9 +7,12 @@ import (
 )
 
 // AgentProfileExistenceRepo captures the office-repo subset needed to answer
-// whether an agent profile still exists and is not soft-deleted.
+// whether an agent profile still exists and is not soft-deleted. This must
+// resolve any agent_profiles row — Office agent or shallow Kanban profile —
+// since a seat's agent_profile_id can come from the task's runner rather
+// than an Office-scoped candidate.
 type AgentProfileExistenceRepo interface {
-	AgentInstanceExists(ctx context.Context, id string) (bool, error)
+	AgentProfileExists(ctx context.Context, id string) (bool, error)
 }
 
 // AgentProfileResolverAdapter implements engine.AgentProfileResolver against
@@ -30,7 +33,7 @@ func (a *AgentProfileResolverAdapter) AgentProfileExists(ctx context.Context, ag
 	if agentProfileID == "" {
 		return false, nil
 	}
-	return a.Office.AgentInstanceExists(ctx, agentProfileID)
+	return a.Office.AgentProfileExists(ctx, agentProfileID)
 }
 
 // Compile-time interface assertion.

@@ -13,7 +13,7 @@ type fakeAgentProfileExistenceRepo struct {
 	gotID string
 }
 
-func (f *fakeAgentProfileExistenceRepo) AgentInstanceExists(_ context.Context, id string) (bool, error) {
+func (f *fakeAgentProfileExistenceRepo) AgentProfileExists(_ context.Context, id string) (bool, error) {
 	f.gotID = id
 	return f.exists, f.err
 }

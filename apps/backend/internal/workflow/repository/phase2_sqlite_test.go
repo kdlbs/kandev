@@ -758,6 +758,19 @@ func TestInitPhase2Schema_DedupesPreExistingDuplicateParticipantsBeforeUniqueInd
 		t.Fatalf("upsert solo participant: %v", err)
 	}
 
+	// A decision recorded against the losing duplicate must not be orphaned
+	// by the delete below — it should be remapped onto the surviving row so
+	// mapDecisionsToSeats can still find it.
+	strandedDecision := &models.WorkflowStepDecision{
+		ID: "stranded-decision", TaskID: "t-dedupe-participants", StepID: step.ID,
+		ParticipantID: "dup-higher-position",
+		Decision:      "approved", DecidedAt: time.Now().UTC(),
+		DeciderType: "human", DeciderID: "carol", Role: "reviewer",
+	}
+	if err := repo.RecordStepDecision(ctx, strandedDecision); err != nil {
+		t.Fatalf("record decision against duplicate participant: %v", err)
+	}
+
 	if err := repo.initPhase2Schema(); err != nil {
 		t.Fatalf("initPhase2Schema did not tolerate pre-existing duplicate participants: %v", err)
 	}
@@ -781,6 +794,18 @@ func TestInitPhase2Schema_DedupesPreExistingDuplicateParticipantsBeforeUniqueInd
 	}
 	if byID["profile-solo"] == nil && findParticipantByAgent(got, "profile-solo") == nil {
 		t.Fatalf("expected the unrelated agent's row (profile-solo) to remain untouched, got %+v", got)
+	}
+
+	remapped, err := repo.ListStepDecisions(ctx, "t-dedupe-participants", step.ID)
+	if err != nil {
+		t.Fatalf("list decisions: %v", err)
+	}
+	if len(remapped) != 1 {
+		t.Fatalf("expected the stranded decision to survive the dedupe, got %d: %+v", len(remapped), remapped)
+	}
+	if remapped[0].ParticipantID != "dup-lower-position" {
+		t.Fatalf("expected the decision to be remapped onto the surviving participant dup-lower-position, got %q",
+			remapped[0].ParticipantID)
 	}
 
 	// The index must now genuinely be enforcing uniqueness: a fresh
