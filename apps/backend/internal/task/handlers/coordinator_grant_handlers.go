@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -61,11 +63,15 @@ func RegisterCoordinatorGrantRoutes(
 
 func (h *CoordinatorGrantHandlers) registerHTTP(router *gin.Engine) {
 	api := router.Group("/api/v1")
+	// Read-only listing endpoints are accessible to all workspace members.
 	api.GET("/workspaces/:id/coordinator-grants", h.httpListWorkspaceCoordinatorGrants)
-	api.POST("/workspaces/:id/coordinator-grants", h.httpCreateWorkspaceCoordinatorGrant)
 	api.GET("/tasks/:id/coordinator-grants", h.httpListTaskCoordinatorGrants)
-	api.DELETE("/coordinator-grants/:id", h.httpRevokeCoordinatorGrant)
 	api.GET("/workspaces/:id/coordinator-audit", h.httpListWorkspaceCoordinatorAudit)
+
+	// Mutation endpoints (create, revoke) require admin privileges.
+	admin := router.Group("/api/v1", authn.RequireAdmin())
+	admin.POST("/workspaces/:id/coordinator-grants", h.httpCreateWorkspaceCoordinatorGrant)
+	admin.DELETE("/coordinator-grants/:id", h.httpRevokeCoordinatorGrant)
 }
 
 // coordinatorGrantListResponse is the shared list envelope for both
@@ -424,18 +430,11 @@ func (h *CoordinatorGrantHandlers) httpListWorkspaceCoordinatorAudit(c *gin.Cont
 func parseCapabilities(raw string) []string {
 	seen := make(map[string]bool)
 	var result []string
-	for _, s := range splitAndTrim(raw) {
-		switch s {
-		case "inspect":
-			if !seen["inspect"] {
-				result = append(result, "inspect")
-				seen["inspect"] = true
-			}
-		case "orchestrate":
-			if !seen["orchestrate"] {
-				result = append(result, "orchestrate")
-				seen["orchestrate"] = true
-			}
+	for _, s := range strings.Split(raw, ",") {
+		s = strings.TrimSpace(s)
+		if (s == "inspect" || s == "orchestrate") && !seen[s] {
+			result = append(result, s)
+			seen[s] = true
 		}
 	}
 	return result
@@ -443,48 +442,7 @@ func parseCapabilities(raw string) []string {
 
 // joinCapabilities joins capabilities into a comma-separated string.
 func joinCapabilities(caps []string) string {
-	result := ""
-	for i, c := range caps {
-		if i > 0 {
-			result += ","
-		}
-		result += c
-	}
-	return result
-}
-
-// splitAndTrim splits a comma-separated string and trims whitespace from each part.
-func splitAndTrim(s string) []string {
-	var result []string
-	current := ""
-	for _, ch := range s {
-		if ch == ',' {
-			trimmed := trimSpace(current)
-			if trimmed != "" {
-				result = append(result, trimmed)
-			}
-			current = ""
-		} else {
-			current += string(ch)
-		}
-	}
-	trimmed := trimSpace(current)
-	if trimmed != "" {
-		result = append(result, trimmed)
-	}
-	return result
-}
-
-// trimSpace returns s with leading and trailing whitespace removed.
-func trimSpace(s string) string {
-	start, end := 0, len(s)
-	for start < end && (s[start] == ' ' || s[start] == '\t' || s[start] == '\n' || s[start] == '\r') {
-		start++
-	}
-	for end > start && (s[end-1] == ' ' || s[end-1] == '\t' || s[end-1] == '\n' || s[end-1] == '\r') {
-		end--
-	}
-	return s[start:end]
+	return strings.Join(caps, ",")
 }
 
 // parseLimitParam parses a limit query parameter with a default and maximum.
@@ -512,10 +470,9 @@ func parseLimitParam(raw string, defaultLimit, maxLimit int) int {
 // resolveUserID extracts the authenticated user ID from the gin context.
 // Falls back to an empty string for unauthenticated requests.
 func resolveUserID(c *gin.Context) string {
-	if userID, exists := c.Get("user_id"); exists {
-		if s, ok := userID.(string); ok {
-			return s
-		}
+	id, ok := authn.FromGin(c)
+	if !ok {
+		return ""
 	}
-	return ""
+	return id.UserID
 }

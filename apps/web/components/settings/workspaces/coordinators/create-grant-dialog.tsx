@@ -37,6 +37,8 @@ type GrantFormFieldsProps = {
   setCapOrch: (v: boolean) => void;
   note: string;
   setNote: (v: string) => void;
+  scopeId: string;
+  setScopeId: (v: string) => void;
 };
 
 function GrantFormFields(props: GrantFormFieldsProps) {
@@ -72,6 +74,19 @@ function GrantFormFields(props: GrantFormFieldsProps) {
         </Select>
         <p className="text-xs text-muted-foreground">{t("workspaces:scopeKindDescription")}</p>
       </div>
+      {props.scopeKind === "workflow" && (
+        <div className="space-y-2">
+          <Label htmlFor="grant-scope-id">{t("workspaces:workflowId")}</Label>
+          <Input
+            id="grant-scope-id"
+            placeholder="workflow-uuid"
+            value={props.scopeId}
+            onChange={(e) => props.setScopeId(e.target.value)}
+            data-testid="grant-scope-id-input"
+          />
+          <p className="text-xs text-muted-foreground">{t("workspaces:workflowIdDescription")}</p>
+        </div>
+      )}
       <div className="space-y-2">
         <Label>{t("workspaces:capabilities")}</Label>
         <div className="flex items-center gap-2">
@@ -115,6 +130,7 @@ export function CreateGrantDialog({ workspaceId, onCreated }: Props) {
 
   const [coordinatorTaskId, setCoordinatorTaskId] = useState("");
   const [scopeKind, setScopeKind] = useState<"workspace" | "workflow">("workspace");
+  const [scopeId, setScopeId] = useState("");
   const [capInsp, setCapInsp] = useState(false);
   const [capOrch, setCapOrch] = useState(false);
   const [note, setNote] = useState("");
@@ -125,7 +141,7 @@ export function CreateGrantDialog({ workspaceId, onCreated }: Props) {
       return;
     }
     if (!capInsp && !capOrch) {
-      toast.error(t("workspaces:capabilitiesDescription"));
+      toast.error(t("workspaces:capabilitiesRequired"));
       return;
     }
 
@@ -136,6 +152,7 @@ export function CreateGrantDialog({ workspaceId, onCreated }: Props) {
     const body: CreateGrantRequest = {
       coordinator_task_id: coordinatorTaskId,
       scope_kind: scopeKind,
+      scope_id: scopeKind === "workflow" ? scopeId : undefined,
       capabilities: caps.join(","),
       note: note || undefined,
     };
@@ -174,6 +191,8 @@ export function CreateGrantDialog({ workspaceId, onCreated }: Props) {
             setCoordinatorTaskId={setCoordinatorTaskId}
             scopeKind={scopeKind}
             setScopeKind={setScopeKind}
+            scopeId={scopeId}
+            setScopeId={setScopeId}
             capInsp={capInsp}
             setCapInsp={setCapInsp}
             capOrch={capOrch}

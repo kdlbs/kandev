@@ -43,6 +43,18 @@ const principalGrantScopeIndexName = "uniq_active_principal_coordinator_grants_s
 // (coordinator_task_id, scope_kind, scope_id).
 const sqlitePrincipalGrantScopeViolationMessage = "UNIQUE constraint failed: task_coordinator_grants.principal_id, task_coordinator_grants.scope_kind, task_coordinator_grants.scope_id"
 
+// sqliteTaskGrantScopeViolationMessage is the SQLite message for the
+// task-bound partial index, which fires when principal_id is empty
+// and the same (coordinator_task_id, scope_kind, scope_id) combination
+// already has an active grant.
+const sqliteTaskGrantScopeViolationMessage = "UNIQUE constraint failed: task_coordinator_grants.coordinator_task_id, task_coordinator_grants.scope_kind, task_coordinator_grants.scope_id"
+
+// taskGrantScopeIndexName is the name of the task-bound partial unique
+// index on (coordinator_task_id, scope_kind, scope_id) WHERE principal_id IS NULL AND revoked_at IS NULL.
+const taskGrantScopeIndexName = "uniq_active_task_coordinator_grants_scope"
+
+// isPrincipalGrantScopeUniqueViolation reports whether err is a violation of
+
 // isPrincipalConflictViolation reports whether err would make either the
 // durable context or its active task/session binding ambiguous.
 func isPrincipalConflictViolation(err error) bool {
@@ -52,10 +64,25 @@ func isPrincipalConflictViolation(err error) bool {
 }
 
 // isPrincipalGrantScopeUniqueViolation reports whether err is a violation of
-// uniq_active_principal_coordinator_grants_scope specifically - i.e. the
+// uniq_active_principal_coordinator_grants_scope specifically — i.e. the
 // principal already holds an active grant for the same scope.
 func isPrincipalGrantScopeUniqueViolation(err error) bool {
 	return isUniqueViolation(err, principalGrantScopeIndexName, sqlitePrincipalGrantScopeViolationMessage)
+}
+
+// isTaskGrantScopeUniqueViolation reports whether err is a violation of
+// uniq_active_task_coordinator_grants_scope — i.e. the same
+// (coordinator_task_id, scope_kind, scope_id) combination already has an
+// active grant with no principal_id (the HTTP API path).
+func isTaskGrantScopeUniqueViolation(err error) bool {
+	return isUniqueViolation(err, taskGrantScopeIndexName, sqliteTaskGrantScopeViolationMessage)
+}
+
+// isCoordinatorGrantScopeUniqueViolation checks both the principal-bound and
+// task-bound unique indexes, covering both the plugin (principal_id non-empty)
+// and HTTP API (principal_id empty) code paths.
+func isCoordinatorGrantScopeUniqueViolation(err error) bool {
+	return isPrincipalGrantScopeUniqueViolation(err) || isTaskGrantScopeUniqueViolation(err)
 }
 
 func isUniqueViolation(err error, pgConstraintName, sqliteMessage string) bool {

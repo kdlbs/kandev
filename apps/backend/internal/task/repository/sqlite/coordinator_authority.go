@@ -123,7 +123,7 @@ func (r *Repository) CreateCoordinatorGrant(ctx context.Context, grant *models.C
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), grant.ID, grant.CoordinatorTaskID, grant.PrincipalID, grant.WorkspaceID, grant.ScopeKind, grant.ScopeID,
 		grant.Capabilities, grant.Note, grant.GrantedByUserID, grant.GrantedAt, grant.RevokedAt, grant.RevokedByUserID)
-	if isPrincipalGrantScopeUniqueViolation(err) {
+	if isCoordinatorGrantScopeUniqueViolation(err) {
 		return repoerrors.ErrCoordinatorGrantConflict
 	}
 	return err
