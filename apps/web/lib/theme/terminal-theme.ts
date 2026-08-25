@@ -38,10 +38,10 @@ const lightAnsiColors = {
   brightBlack: "#666666",
   brightRed: "#c41a16",
   brightGreen: "#006400",
-  brightYellow: "#795e00",
-  brightBlue: "#0451a5",
+  brightYellow: "#9c6500",
+  brightBlue: "#1769aa",
   brightMagenta: "#9c00a8",
-  brightCyan: "#005a5a",
+  brightCyan: "#007a7a",
   brightWhite: "#000000",
 } as const;
 

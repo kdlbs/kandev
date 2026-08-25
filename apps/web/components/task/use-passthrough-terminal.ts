@@ -233,6 +233,8 @@ export function useTerminalInit({
   keyboardShortcutsRef,
   onFindInPanelRef,
 }: TerminalInitHookOptions) {
+  const resolvedThemeRef = useRef(resolvedTheme);
+  resolvedThemeRef.current = resolvedTheme;
   const refs = {
     xtermRef,
     fitAddonRef,
@@ -242,10 +244,8 @@ export function useTerminalInit({
     webglAddonRef,
   };
   useEffect(() => {
-    log("Terminal init effect");
     const container = terminalRef.current;
     if (!container) {
-      log("No container ref");
       return;
     }
     if (isInitializedRef.current) {
@@ -263,7 +263,7 @@ export function useTerminalInit({
           fontFamily,
           fontSize,
           disableWebgl,
-          resolvedTheme,
+          resolvedTheme: resolvedThemeRef.current,
           onToggleBottomTerminal,
           sendInput,
           keyboardShortcutsRef,

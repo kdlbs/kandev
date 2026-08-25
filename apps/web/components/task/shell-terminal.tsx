@@ -69,6 +69,8 @@ function useTerminalInit({
   const resolvedThemeRef = useRef(resolvedTheme);
   resolvedThemeRef.current = resolvedTheme;
 
+  // Theme changes update the existing xterm through useTerminalTheme; this
+  // initialization effect intentionally does not rerun for them.
   useEffect(() => {
     const container = terminalRef.current;
     if (!container || xtermRef.current) return;
@@ -144,7 +146,6 @@ function useTerminalInit({
     lastOutputLengthRef,
     outputRef,
     onReady,
-    resolvedThemeRef,
   ]);
 }
 

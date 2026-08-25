@@ -30,6 +30,8 @@ Add unit and browser regressions before the correction. Record the expected fail
 - Extend the read-only xterm browser bridge with theme and minimum-contrast snapshots.
 - Add a desktop test that changes theme while one terminal stays open.
 - Add a Pixel 5 test for the existing mobile terminal in light mode.
+- Document the shared `PassthroughTerminal` rendering path used by tablet
+  terminals instead of duplicating the browser regression for a third viewport.
 - Add `@covers` comments where the acceptance mapping is not clear from the test name.
 
 ## Out of scope

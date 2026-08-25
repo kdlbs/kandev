@@ -44,11 +44,13 @@ Adaptive terminals use the application background, foreground, cursor, and selec
 ## Live theme flow
 
 1. `useTheme` supplies the current `resolvedTheme` to each adaptive terminal.
-2. The constructor applies the matching theme before `terminal.open` shows output.
-3. A synchronization hook observes later `resolvedTheme` changes.
-4. The hook waits for the root theme class and CSS variables to update.
-5. The hook assigns the new value to `terminal.options.theme`.
-6. Xterm redraws the existing buffer without a new terminal or connection.
+2. `AppThemeProvider` applies the initial root theme class in a layout effect,
+   before descendant terminal construction effects run.
+3. The constructor applies the matching theme before `terminal.open` shows output.
+4. A synchronization hook observes later `resolvedTheme` changes.
+5. The hook waits for the root theme class and CSS variables to update.
+6. The hook assigns the new value to `terminal.options.theme`.
+7. Xterm redraws the existing buffer without a new terminal or connection.
 
 The synchronization hook cancels pending work during unmount. It does nothing when the terminal is not ready or is already disposed.
 
@@ -60,15 +62,21 @@ The nearest mobile implementation is `apps/web/components/task/mobile/mobile-ter
 
 ## Failure and recovery
 
-The initial constructor path prevents a light-theme flash during terminal creation. The synchronization path handles later theme changes.
+The initial root-theme layout effect and constructor path prevent a light-theme
+flash during terminal creation. The synchronization path handles later theme
+changes.
 
 If a theme update races terminal disposal, the cancellation guard prevents writes to the disposed instance. A theme update never reconnects the socket, clears the buffer, or changes terminal dimensions.
 
 ## Test contract
 
-Unit tests cover palette selection and the minimum contrast value. Browser tests cover the theme that reaches a live xterm instance.
+Unit tests cover palette selection, distinct light bright variants, the minimum
+contrast value, initial root-theme ordering, and deferred hook cleanup. Browser
+tests cover the theme that reaches a live xterm instance.
 
-The desktop browser test changes the theme while one terminal remains open. It checks that the buffer survives and that later shell output uses the same connection.
+The desktop browser test changes the theme while one terminal remains open. It
+checks that the buffer, focus, scroll position, and running command survive,
+and that later shell output uses the same connection.
 
 The mobile browser test opens the existing phone terminal in light mode. It checks the same palette and contrast contract without changing the phone composition.
 

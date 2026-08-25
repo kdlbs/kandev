@@ -79,6 +79,14 @@ describe("getTerminalTheme", () => {
     expect(darkTheme.red).toBe("#f44747");
   });
 
+  it("keeps light bright ANSI variants visually distinct", () => {
+    const theme = getTerminalTheme(createThemeContainer(), "light");
+
+    expect(theme.brightBlue).not.toBe(theme.blue);
+    expect(theme.brightCyan).not.toBe(theme.cyan);
+    expect(theme.brightYellow).not.toBe(theme.yellow);
+  });
+
   it("keeps fixed-dark terminals independent of the application theme", () => {
     expect(getFixedDarkTerminalTheme()).toMatchObject({
       background: "#0b0b0c",

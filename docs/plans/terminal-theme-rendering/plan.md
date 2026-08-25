@@ -22,7 +22,8 @@ The current renderer combines a light background with a dark-only ANSI palette. 
 - Enforce a 4.5:1 minimum contrast ratio through xterm.
 - Update open adaptive terminals when the resolved theme changes.
 - Keep fixed-dark terminals on the shared dark palette.
-- Cover desktop and phone task terminals with Playwright.
+- Cover desktop and phone task terminals with Playwright, and document the
+  shared rendering path used by tablet task terminals.
 
 ### Out of scope
 
@@ -45,6 +46,10 @@ Add `apps/web/components/task/use-terminal-theme.ts`. The hook receives the xter
 
 The hook updates `terminal.options.theme` after the root theme class commits. It cancels pending work during cleanup and never reconstructs the terminal.
 
+`AppThemeProvider` applies the initial root theme class in a layout effect, so
+descendant terminal construction effects read CSS variables for the resolved
+theme on the first render.
+
 Pass `resolvedTheme` through `ShellTerminal` and `PassthroughTerminal`. Keep their current connection, resize, input, search, and mobile behavior.
 
 ### Browser evidence
@@ -60,7 +65,7 @@ Add desktop and mobile terminal theme specs. The desktop flow changes theme whil
 | `AC-UI-TERMINAL-RENDERING-001.1` | `terminal-theme.test.ts` selects the initial light and dark palettes. |
 | `AC-UI-TERMINAL-RENDERING-001.2` | `terminal-theme.test.ts` checks the shared contrast setting. Desktop and mobile specs inspect the live xterm value. |
 | `AC-UI-TERMINAL-RENDERING-001.3` | `terminal-theme.spec.ts` changes the application theme and observes the live xterm theme. |
-| `AC-UI-TERMINAL-RENDERING-001.4` | `terminal-theme.spec.ts` keeps buffer content and accepts new shell output after the theme change. |
+| `AC-UI-TERMINAL-RENDERING-001.4` | `terminal-theme.spec.ts` keeps buffer content, focus, scroll position, and a running command while accepting new shell output after the theme change. |
 | `AC-UI-TERMINAL-RENDERING-001.5` | Desktop and `mobile-terminal-theme.spec.ts` check the same light-theme contract. |
 | `AC-UI-TERMINAL-RENDERING-001.6` | `terminal-theme.test.ts` checks the shared fixed-dark theme. |
 
@@ -70,6 +75,9 @@ The first work order must fail against the current implementation. The expected 
 
 - `apps/web/e2e/tests/terminal/terminal-theme.spec.ts` uses the `chromium` project for `AC-UI-TERMINAL-RENDERING-001.1` through `.4`.
 - `apps/web/e2e/tests/terminal/mobile-terminal-theme.spec.ts` uses the `mobile-chrome` Pixel 5 project for `AC-UI-TERMINAL-RENDERING-001.2` and `.5`.
+- Tablet task terminals use the same `PassthroughTerminal` and
+  `useTerminalTheme` path as the desktop and phone surfaces. The shared-path
+  evidence covers tablet rendering without adding a separate viewport test.
 
 ## Work orders
 
@@ -81,6 +89,7 @@ The first work order must fail against the current implementation. The expected 
 Passed on 2026-08-25:
 
 - `cd apps/web && pnpm test -- lib/theme/terminal-theme.test.ts`
+- `cd apps/web && pnpm test -- components/task/use-terminal-theme.test.ts components/theme/app-theme.test.tsx`
 - `cd apps/web && pnpm run typecheck`
 - Targeted ESLint for all changed terminal, theme, bridge, and E2E files with zero warnings.
 - `cd apps/web && pnpm e2e:run tests/terminal/terminal-theme.spec.ts`

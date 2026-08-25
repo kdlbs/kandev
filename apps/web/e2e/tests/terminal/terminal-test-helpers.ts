@@ -17,6 +17,13 @@ export async function readTerminalHostBuffer(host: Locator): Promise<string> {
   });
 }
 
+export async function readTerminalViewportY(host: Locator): Promise<number> {
+  return host.evaluate((element) => {
+    type XtermHost = HTMLElement & { __xtermReadViewportY?: () => number };
+    return (element as XtermHost).__xtermReadViewportY?.() ?? -1;
+  });
+}
+
 export async function readTerminalHostTheme(host: Locator): Promise<TerminalThemeSnapshot | null> {
   return host.evaluate((element) => {
     type XtermHost = HTMLElement & {

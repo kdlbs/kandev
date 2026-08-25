@@ -29,8 +29,7 @@ test.describe("mobile adaptive terminal theme", () => {
     await expect(testPage.locator("html")).toHaveClass(/(^|\s)light(\s|$)/);
     const host = testPage
       .getByTestId("terminal-panel")
-      .locator('[data-testid="terminal-xterm-host"]:visible')
-      .first();
+      .locator('[data-testid="terminal-xterm-host"]:visible');
     const theme = await readTerminalHostTheme(host);
 
     expect(theme, "the mobile xterm should expose its theme snapshot").not.toBeNull();

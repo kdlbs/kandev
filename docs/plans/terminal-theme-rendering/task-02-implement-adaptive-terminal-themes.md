@@ -44,13 +44,17 @@ Implement the shared light, dark, and fixed-dark theme contract. Update open ada
 ## Acceptance
 
 - Every xterm constructor uses the shared palette and minimum contrast contract.
-- An open adaptive terminal updates all theme colors without losing buffer content, focus, scroll position, or new shell output.
+- An open adaptive terminal updates all theme colors without losing buffer content, focus, scroll position, a running command, or new shell output.
 - Desktop, mobile, and fixed-dark terminal checks pass without changing their lifecycle behavior.
 
 ## Verification
 
 ```bash
 cd apps/web && pnpm test -- lib/theme/terminal-theme.test.ts
+```
+
+```bash
+cd apps/web && pnpm test -- components/task/use-terminal-theme.test.ts components/theme/app-theme.test.tsx
 ```
 
 ```bash
@@ -73,6 +77,8 @@ cd apps/web && pnpm e2e:run --project mobile-chrome tests/terminal/mobile-termin
 
 - `apps/web/lib/theme/terminal-theme.ts`
 - `apps/web/components/task/use-terminal-theme.ts`
+- `apps/web/components/task/use-terminal-theme.test.ts`
+- `apps/web/components/theme/app-theme.test.tsx`
 - `apps/web/components/task/use-passthrough-terminal.ts`
 - `apps/web/components/task/passthrough-terminal.tsx`
 - `apps/web/components/task/shell-terminal.tsx`
@@ -104,6 +110,8 @@ cd apps/web && pnpm e2e:run --project mobile-chrome tests/terminal/mobile-termin
 
 Implemented the shared light and dark palettes, xterm minimum contrast
 setting, adaptive live-theme synchronization, and fixed-dark PTY theme. The
-existing terminal instance, buffer, WebSocket, and mobile composition remain
-unchanged. Unit, typecheck, targeted lint, desktop production E2E, and Pixel 5
-production E2E verification all pass.
+root theme now applies before descendant terminal construction effects, and
+the light bright variants remain visually distinct. The existing terminal
+instance, buffer, WebSocket, focus, scroll position, running command, and
+mobile composition remain unchanged. Unit, typecheck, targeted lint, desktop
+production E2E, and Pixel 5 production E2E verification all pass.
