@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/analytics/dto"
 	"github.com/kandev/kandev/internal/analytics/models"
 	"github.com/kandev/kandev/internal/analytics/repository"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 )
@@ -236,9 +237,14 @@ func (h *StatsHandlers) authorize(c *gin.Context, workspaceID string) bool {
 	if err := h.authorizer.AuthorizeWorkspaceAccess(c.Request.Context(), workspaceID); err != nil {
 		// Warn, not Debug: these routes read task titles, repository names and
 		// commit activity, so a caller probing workspace IDs they do not own
-		// should be visible in the default log stream.
+		// should be visible in the default log stream. The caller's user ID is
+		// what makes a run of denials attributable to one enumerating client;
+		// nothing else about the identity is logged.
+		identity, _ := authn.IdentityFromContext(c.Request.Context())
 		h.logger.Warn("denied workspace stats request",
-			zap.String("workspace_id", workspaceID), zap.Error(err))
+			zap.String("workspace_id", workspaceID),
+			zap.String("user_id", identity.UserID),
+			zap.Error(err))
 		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": workspaceNotFoundMessage})
 		return false
 	}

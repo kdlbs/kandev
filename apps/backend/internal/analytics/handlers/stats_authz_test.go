@@ -378,7 +378,13 @@ func TestStatsDenialIsAuditable(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("want exactly one Warn-level denial log, got %d of %d entries", len(entries), recorded.Len())
 	}
-	if got := entries[0].ContextMap()["workspace_id"]; got != wsB {
+	fields := entries[0].ContextMap()
+	if got := fields["workspace_id"]; got != wsB {
 		t.Fatalf("denial log workspace_id = %v, want %s", got, wsB)
+	}
+	// Without the caller, the line says a workspace was probed but not by whom,
+	// which is the half that makes enumeration detectable.
+	if got := fields["user_id"]; got != "user-a" {
+		t.Fatalf("denial log user_id = %v, want user-a", got)
 	}
 }
