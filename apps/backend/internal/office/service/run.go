@@ -24,6 +24,7 @@ const (
 	RunReasonTaskBlockersResolved  = "task_blockers_resolved"
 	RunReasonTaskChildrenCompleted = "task_children_completed"
 	RunReasonApprovalResolved      = "approval_resolved"
+	RunReasonTaskReviewRequested   = "task_review_requested"
 	RunReasonRoutineTrigger        = "routine_trigger"
 	// RunReasonHeartbeat aliases shared.RunReasonHeartbeat so this package's
 	// local constant and the shared idle-skip classifier cannot drift apart

@@ -377,22 +377,9 @@ func (s *Service) warnIfReviewDecisionMissing(ctx context.Context, run *models.R
 		return
 	}
 	parsed := ParseRunPayload(run.Payload)
-	stageType := parsed["stage_type"]
-	if stageType == "" {
-		switch run.Reason {
-		case legacyRunReasonReviewStarted:
-			stageType = stageTypeReview
-		case legacyRunReasonApprovalStarted:
-			stageType = stageTypeApproval
-		}
-	}
-	if stageType != stageTypeReview && stageType != stageTypeApproval {
+	taskID, stepID, stageType := s.resolveReviewStage(ctx, run.Reason, parsed)
+	if !isReviewOrApprovalStage(stageType) {
 		return
-	}
-	taskID := parsed["task_id"]
-	stepID := parsed["stage_id"]
-	if stepID == "" {
-		stepID = parsed["workflow_step_id"]
 	}
 	if taskID == "" || stepID == "" {
 		return

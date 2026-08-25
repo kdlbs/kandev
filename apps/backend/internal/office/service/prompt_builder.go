@@ -80,6 +80,8 @@ func BuildPrompt(pc *PromptContext) string {
 		prompt = buildLegacyStagePrompt(pc, stageTypeReview)
 	case legacyRunReasonApprovalStarted:
 		prompt = buildLegacyStagePrompt(pc, stageTypeApproval)
+	case RunReasonTaskReviewRequested:
+		prompt = buildTaskAssignedPrompt(pc)
 	case RunReasonTaskComment:
 		prompt = buildTaskCommentPrompt(pc)
 	case RunReasonTaskBlockersResolved:

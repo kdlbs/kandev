@@ -113,6 +113,22 @@ func TestBuildPrompt_LegacyRunReasonsRemainCompatible(t *testing.T) {
 	}
 }
 
+func TestBuildPrompt_TaskReviewRequestedUsesStageType(t *testing.T) {
+	prompt := service.BuildPrompt(&service.PromptContext{
+		Reason:         service.RunReasonTaskReviewRequested,
+		StageType:      "approval",
+		TaskIdentifier: "KAN-review",
+		TaskTitle:      "Approve release",
+	})
+
+	if !strings.HasPrefix(prompt, "You are approving") {
+		t.Errorf("task_review_requested approver prompt = %q, want approver framing", prompt)
+	}
+	if !strings.Contains(prompt, "record_step_decision_kandev") {
+		t.Errorf("task_review_requested prompt missing decision tool contract: %q", prompt)
+	}
+}
+
 func TestBuildPrompt_ApprovalResolved(t *testing.T) {
 	pc := &service.PromptContext{
 		Reason:         service.RunReasonApprovalResolved,
