@@ -195,10 +195,21 @@ const ActionConfirmPopoverContent = memo(function ActionConfirmPopoverContent({
         cancelRef.current?.focus();
       }}
       onFocusOutside={(event) => {
+        // Only prevent close when focus stays within the boundary. If the
+        // boundary element has been replaced (React reconciliation), the old
+        // disconnected element's contains() returns false, so the check works
+        // correctly with a live triggerRef.
         if (focusBoundaryRef?.current?.contains(event.target as Node)) event.preventDefault();
       }}
       onInteractOutside={(event) => {
         const target = event.target as Node;
+        // If the interaction target is no longer in the DOM (e.g., the context
+        // menu content was just removed), it's a stale event from a preceding
+        // close — prevent it from closing the popover.
+        if (!target.isConnected) {
+          event.preventDefault();
+          return;
+        }
         if (anchorRef.current?.contains(target) || focusBoundaryRef?.current?.contains(target)) {
           event.preventDefault();
         }
