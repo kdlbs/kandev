@@ -113,7 +113,9 @@ contract that other capabilities can reuse.
 - [Sidebar Diff Stat Priority](requirements/sidebar-diff-stat-priority.md)
 - [Sidebar empty task alignment](requirements/sidebar-empty-task-alignment.md)
 - [Sidebar Last Activity Sort](requirements/sidebar-last-activity-sort.md)
+@@
 - [Sidebar Queued Prompt Count Badge](requirements/sidebar-queued-prompt-count.md)
+- [Sidebar Task Focus](requirements/sidebar-task-focus.md)
 - [Sidebar Task Completion Icons](requirements/sidebar-task-completion-icons.md)
 - [Sidebar Task Row Presentation](requirements/sidebar-task-row-presentation.md)
 - [Direct Sidebar View Creation](requirements/sidebar-view-creation.md)
@@ -150,6 +152,7 @@ contract that other capabilities can reuse.
 - [Task PR Automation Controls System Design Part 3](system-design/ci-pr-automation-03.md)
 - [Entity Reference Composer](system-design/entity-reference-composer.md)
 - [Persistent status motion](system-design/persistent-status-motion.md)
+- [Sidebar Task Focus](system-design/sidebar-task-focus.md)
 - [Prompt History Panel](system-design/prompt-history-panel.md)
 - [Quick Chat and Terminal Tabs](system-design/quick-terminal.md)
 - [Resizable Markdown Table Columns](system-design/resizable-markdown-tables.md)

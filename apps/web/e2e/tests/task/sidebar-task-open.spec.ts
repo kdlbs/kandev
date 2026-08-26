@@ -28,6 +28,10 @@ test.describe("Sidebar task open", () => {
       },
     );
 
+    await testPage.addInitScript((taskId) => {
+      window.localStorage.setItem("kandev.taskColors", JSON.stringify({ [taskId]: "red" }));
+    }, task.id);
+
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
 
@@ -39,6 +43,13 @@ test.describe("Sidebar task open", () => {
     // Must reach the task route and mount the dockview — not just rewrite the URL.
     await expect(testPage).toHaveURL(new RegExp(`/t/${task.id}`), { timeout: 15_000 });
     await expect(testPage.getByTestId("dockview-task-layout")).toBeVisible({ timeout: 15_000 });
+    // @covers AC-UI-SIDEBAR-TASK-FOCUS-001.1/001.2
+    await expect(item).toHaveAttribute("data-active", "true");
+    await expect(item).toHaveClass(/bg-primary\/15/);
+    await expect(item).toHaveClass(/ring-1/);
+    await expect(item).toHaveClass(/ring-inset/);
+    await expect(item).toHaveClass(/ring-foreground\/25/);
+    await expect(item.locator("div.absolute.left-0.top-0.bottom-0")).toHaveClass(/bg-red-500/);
   });
 
   test("returning Home clears the selected-task highlight in the sidebar", async ({
@@ -64,7 +75,6 @@ test.describe("Sidebar task open", () => {
 
     const item = session.sidebarTaskItem("Home Deselect Target").first();
     await expect(item).toHaveAttribute("data-active", "true", { timeout: 10_000 });
-
     // Back to Home — the global sidebar must drop the selection highlight.
     await testPage.getByRole("link", { name: "Home", exact: true }).click();
     await expect(item).toHaveAttribute("data-active", "false", { timeout: 10_000 });

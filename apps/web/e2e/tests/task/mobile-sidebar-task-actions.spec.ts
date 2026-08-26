@@ -183,6 +183,36 @@ test.describe("Mobile sidebar task actions", () => {
     });
   });
 
+  test("keeps the active task treatment in the phone task drawer", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.createTask(seedData.workspaceId, "Mobile active task focus", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+
+    await testPage.addInitScript((taskId) => {
+      window.localStorage.setItem("kandev.taskColors", JSON.stringify({ [taskId]: "red" }));
+    }, task.id);
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.mobileSessionMenu.tap();
+
+    const drawer = testPage.getByRole("dialog", { name: "Tasks" });
+    const row = drawer.getByTestId("sidebar-task-item").filter({ hasText: task.title });
+    await expect(row).toHaveAttribute("data-active", "true");
+    // @covers AC-UI-SIDEBAR-TASK-FOCUS-001.3/001.4
+    await expect(row).toHaveClass(/bg-primary\/15/);
+    await expect(row).toHaveClass(/ring-1/);
+    await expect(row).toHaveClass(/ring-inset/);
+    await expect(row).toHaveClass(/ring-foreground\/25/);
+    await expect(row.locator("div.absolute.left-0.top-0.bottom-0")).toHaveClass(/bg-red-500/);
+    await assertNoDocumentHorizontalOverflow(testPage, "mobile active task focus");
+  });
+
   test("opens the phone task switcher as an inset bottom card", async ({
     testPage,
     apiClient,

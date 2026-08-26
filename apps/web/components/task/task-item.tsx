@@ -166,11 +166,16 @@ function taskItemRowClassName(
   isRoot: boolean,
   hasDetails: boolean,
 ): string {
+  const rowSurfaceClass = isSelected
+    ? "bg-primary/15 hover:bg-primary/20"
+    : "hover:bg-foreground/[0.05]";
+
   return cn(
     "group relative flex w-full gap-2 py-2 pr-3 text-left text-sm outline-none cursor-pointer",
     hasDetails ? "items-start" : "items-center",
-    "transition-colors duration-75 hover:bg-foreground/[0.05]",
-    isSelected && "bg-primary/10",
+    "transition-colors duration-75",
+    rowSurfaceClass,
+    isSelected && !isMultiSelected && "ring-1 ring-inset ring-foreground/25",
     // When a row is both the active task and multi-selected, keep the stronger
     // active background and just add the selection ring on top.
     isMultiSelected && !isSelected && "bg-primary/5",
