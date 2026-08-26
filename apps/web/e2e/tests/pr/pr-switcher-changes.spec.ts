@@ -228,9 +228,12 @@ test.describe("PR switcher changes panel", () => {
     });
     await session.clickTab("Changes");
 
-    // PR sections should NOT be visible for a task without a PR
+    // PR-specific content must not leak from the previous task. The unified
+    // commits section can still be present for ordinary local commits, even
+    // when the task has no linked PR.
     await expect(session.prFilesSection()).not.toBeVisible({ timeout: 10_000 });
-    await expect(session.commitsSection()).not.toBeVisible();
+    await expect(session.changes.getByText("add dashboard component")).not.toBeVisible();
+    await expect(session.changes.getByText("add api client")).not.toBeVisible();
 
     // --- Switch back to Task A to confirm data reappears ---
     await session.taskInSidebar("Auth Fix Task").click();

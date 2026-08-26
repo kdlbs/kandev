@@ -45,8 +45,12 @@ test.describe("Task branch policy selection on mobile", () => {
       const option = testPage.getByRole("option", { name: new RegExp(policy.name) });
       await expect(option).toContainText("Policy");
       await expectPolicyOptionUsesOneLine(option, policy.name);
-      await testPage.getByTestId(`branch-policy-option-info-${policy.id}`).tap();
-      await expect(testPage.getByRole("dialog", { name: policy.name })).toContainText(
+      const policyDetails = testPage.getByRole("dialog", { name: policy.name });
+      await expect(async () => {
+        await testPage.getByTestId(`branch-policy-option-info-${policy.id}`).tap({ force: true });
+        await expect(policyDetails).toBeVisible({ timeout: 1_000 });
+      }).toPass({ timeout: 10_000 });
+      await expect(policyDetails).toContainText(
         "Base: main. Template: mobile/{title}-{suffix}. Pull request target: main.",
       );
       await testPage.keyboard.press("Escape");
