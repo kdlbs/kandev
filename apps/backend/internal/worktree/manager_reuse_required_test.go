@@ -28,6 +28,106 @@ func TestCreate_ReuseRequiredRejectsMissingCanonicalWorktree(t *testing.T) {
 	}
 }
 
+// TestCreate_RecreatesPersistedWorktreeWhenTasksBaseWasRemoved verifies that
+// normal reuse treats a removed managed tasks root as a missing worktree. The
+// persisted task-root identity still identifies the original safe slot, so the
+// lifecycle may recreate it rather than treating the absent validation anchor
+// as a symlink-safety failure.
+func TestCreate_RecreatesPersistedWorktreeWhenTasksBaseWasRemoved(t *testing.T) {
+	repoPath := initGitRepoWithRemote(t)
+	cfg := newTestConfig(t)
+	taskDirName := "task-one_recovery"
+	worktreePath := filepath.Join(cfg.TasksBasePath, taskDirName, "repo-one")
+	if err := os.MkdirAll(filepath.Dir(worktreePath), 0o755); err != nil {
+		t.Fatalf("mkdir task directory: %v", err)
+	}
+	runGit(t, repoPath, "worktree", "add", "-b", "recover-missing-tasks-base", worktreePath, "main")
+
+	store := newMockStore()
+	store.worktrees["canonical-worktree"] = &Worktree{
+		ID:                "canonical-worktree",
+		TaskID:            "task-one",
+		TaskDirName:       taskDirName,
+		SessionID:         "session-one",
+		TaskEnvironmentID: "environment-one",
+		RepositoryID:      "repository-one",
+		Path:              worktreePath,
+		Branch:            "recover-missing-tasks-base",
+		Status:            StatusActive,
+	}
+	mgr, err := NewManager(cfg, store, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	if err := os.RemoveAll(cfg.TasksBasePath); err != nil {
+		t.Fatalf("remove tasks base: %v", err)
+	}
+
+	got, err := mgr.Create(context.Background(), CreateRequest{
+		TaskID:            "task-one",
+		SessionID:         "session-one",
+		TaskEnvironmentID: "environment-one",
+		RepositoryID:      "repository-one",
+		RepositoryPath:    repoPath,
+		BaseBranch:        "main",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if got.Path != worktreePath {
+		t.Fatalf("Create() path = %q, want %q", got.Path, worktreePath)
+	}
+	if !mgr.IsValid(worktreePath) {
+		t.Fatalf("Create() did not recreate a valid worktree at %q", worktreePath)
+	}
+	owner, found, err := storageworkspaces.ReadOwnershipMarker(filepath.Dir(worktreePath))
+	if err != nil {
+		t.Fatalf("read recreated ownership marker: %v", err)
+	}
+	if !found || owner.TaskDirName != taskDirName || owner.TaskID != "task-one" {
+		t.Fatalf("recreated ownership marker = %#v, found=%v", owner, found)
+	}
+}
+
+// TestCreate_ReuseRequiredRejectsRemovedTasksBase confirms attach-only reuse
+// remains fail-closed: it must not recreate a missing canonical checkout.
+func TestCreate_ReuseRequiredRejectsRemovedTasksBase(t *testing.T) {
+	cfg := newTestConfig(t)
+	worktreePath := filepath.Join(cfg.TasksBasePath, "task-one_recovery", "repo-one")
+	store := newMockStore()
+	store.worktrees["canonical-worktree"] = &Worktree{
+		ID:                "canonical-worktree",
+		TaskID:            "task-one",
+		TaskDirName:       "task-one_recovery",
+		TaskEnvironmentID: "environment-one",
+		RepositoryID:      "repository-one",
+		Path:              worktreePath,
+		Branch:            "recover-missing-tasks-base",
+		Status:            StatusActive,
+	}
+	mgr, err := NewManager(cfg, store, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+	if err := os.RemoveAll(cfg.TasksBasePath); err != nil {
+		t.Fatalf("remove tasks base: %v", err)
+	}
+
+	_, err = mgr.Create(context.Background(), CreateRequest{
+		TaskID:            "task-one",
+		TaskEnvironmentID: "environment-one",
+		RepositoryID:      "repository-one",
+		RepositoryPath:    t.TempDir(),
+		BaseBranch:        "main",
+		WorktreeID:        "canonical-worktree",
+		ReuseRequired:     true,
+	})
+	if !errors.Is(err, ErrReuseWorktreeUnavailable) {
+		t.Fatalf("Create() error = %v, want ErrReuseWorktreeUnavailable", err)
+	}
+}
+
 func TestCreate_ReuseRequiredReturnsCanonicalWorktreeWithoutChangingGitState(t *testing.T) {
 	repoPath := initGitRepoWithRemote(t)
 	worktreePath := filepath.Join(t.TempDir(), "canonical")

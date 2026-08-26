@@ -315,6 +315,14 @@ func (m *Manager) validateWorktreePathSafe(worktreePath string) error {
 	if err != nil || relativePath == "." || relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
 		return nil
 	}
+	if _, err := os.Lstat(tasksBase); errors.Is(err, os.ErrNotExist) {
+		// A removed task base has no components to follow. Normal reuse will
+		// recreate the persisted managed root before adding the worktree;
+		// attach-only reuse still rejects the missing checkout via IsValid.
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("inspect tasks base path: %w", err)
+	}
 	if err := storage.ValidateNoSymlinkPath(tasksBase, worktreePath); err != nil {
 		return fmt.Errorf("unsafe worktree path: %w", err)
 	}
@@ -1521,6 +1529,48 @@ func (m *Manager) copyConfiguredFiles(ctx context.Context, req CreateRequest, wt
 	wt.CopyFilesWarnings = warnings
 }
 
+// restoreMissingTasksBaseForRecreate rebuilds the task-root directory only when
+// the configured managed base disappeared. The persisted task directory name
+// fixes the root identity, while a fresh symlink validation protects the newly
+// created path before Git is allowed to populate it.
+func (m *Manager) restoreMissingTasksBaseForRecreate(worktreePath string, existing *Worktree) error {
+	tasksBase, err := m.config.ExpandedTasksBasePath()
+	if err != nil {
+		return fmt.Errorf("resolve tasks base path for recreate: %w", err)
+	}
+	tasksBase = filepath.Clean(tasksBase)
+	relativePath, err := filepath.Rel(tasksBase, worktreePath)
+	if err != nil || relativePath == "." || relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
+		return nil
+	}
+	if _, err := os.Lstat(tasksBase); !errors.Is(err, os.ErrNotExist) {
+		if err != nil {
+			return fmt.Errorf("inspect tasks base path for recreate: %w", err)
+		}
+		return nil
+	}
+
+	taskDirName := strings.SplitN(relativePath, string(filepath.Separator), 2)[0]
+	if existing.TaskDirName != "" && existing.TaskDirName != taskDirName {
+		return fmt.Errorf("cannot recreate worktree: persisted task root %q does not match path root %q", existing.TaskDirName, taskDirName)
+	}
+	taskRoot := filepath.Join(tasksBase, taskDirName)
+	if err := os.MkdirAll(taskRoot, 0o755); err != nil {
+		return fmt.Errorf("recreate missing tasks base: %w", err)
+	}
+	markerTaskDirName := taskDirName
+	if err := storageworkspaces.WriteOwnershipMarker(taskRoot, storageworkspaces.OwnershipMarker{
+		TaskID: existing.TaskID, TaskDirName: markerTaskDirName,
+		LayoutVersion: storageworkspaces.LayoutVersionSemantic,
+	}); err != nil {
+		return fmt.Errorf("mark recreated task directory ownership: %w", err)
+	}
+	if err := storage.ValidateNoSymlinkPath(tasksBase, worktreePath); err != nil {
+		return fmt.Errorf("unsafe recreated worktree path: %w", err)
+	}
+	return nil
+}
+
 // recreate recreates a worktree from stored metadata.
 func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRequest) (*Worktree, error) {
 	if err := m.refreshRepositoryForMaterialization(ctx, &req); err != nil {
@@ -1563,6 +1613,9 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 	worktreePath := existing.Path
 	if worktreePath == "" {
 		return nil, fmt.Errorf("cannot recreate worktree: existing record has no path")
+	}
+	if err := m.restoreMissingTasksBaseForRecreate(worktreePath, existing); err != nil {
+		return nil, err
 	}
 
 	// Archive deletes the local branch (removeWorktree runs `git branch -D`),
