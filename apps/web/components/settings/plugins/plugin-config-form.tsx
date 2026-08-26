@@ -256,14 +256,13 @@ function AgentProfileSelect({
   const selectedID = typeof value === "string" ? value : "";
   const selectedProfile = profiles.find((profile) => profile.id === selectedID);
   const eligibleProfiles = profiles.filter((profile) => utilityProfileEligibility(profile));
-  let selectedLabel: string | undefined;
-  if (selectedProfile) {
-    selectedLabel = selectedProfile.label || selectedProfile.agent_name || selectedProfile.id;
-  } else if (selectedID) {
-    selectedLabel = t("settings:utilityUnavailableProfile", { name: selectedID });
-  }
   const isStale =
     selectedID !== "" && !eligibleProfiles.some((profile) => profile.id === selectedID);
+  const selectedProfileLabel =
+    selectedProfile?.label || selectedProfile?.agent_name || selectedProfile?.id || selectedID;
+  const selectedLabel = isStale
+    ? t("settings:utilityUnavailableProfile", { name: selectedProfileLabel })
+    : selectedProfileLabel || undefined;
 
   return (
     <Select

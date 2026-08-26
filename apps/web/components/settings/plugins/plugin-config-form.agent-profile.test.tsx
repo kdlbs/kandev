@@ -82,6 +82,12 @@ describe("PluginConfigForm agent profile field", () => {
     expect(screen.getByText("Unavailable: deleted-profile")).not.toBeNull();
   });
 
+  it("marks an ineligible saved profile as unavailable", () => {
+    renderField([profile({ id: "disabled", label: "Disabled", enabled: false })], "disabled");
+
+    expect(screen.getByText("Unavailable: Disabled")).not.toBeNull();
+  });
+
   it("hides the Not set option for required fields", () => {
     renderField([profile({ id: "eligible", label: ELIGIBLE_PROFILE_LABEL })], "", {
       required: true,
