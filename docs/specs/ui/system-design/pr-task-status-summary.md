@@ -66,6 +66,13 @@ The frontend store remains the cache. A successful load adds each returned
 tracks workspace context and association deletion tombstones; the
 implementation adds no database field, task-summary field, or public API.
 
+Every `TaskPR` API and WebSocket payload includes its owning `workspace_id`.
+The backend exposes that identity to the WebSocket broadcaster for typed
+in-process events and routes PR updates and detachments through the
+fail-closed workspace path when authentication is enforced. The frontend
+applies an update only when its workspace ID matches the active workspace;
+missing or mismatched updates are ignored before the cache changes.
+
 `ChangeRequestTaskStatusSummaryData` gains an optional `author` value. GitHub
 sets this value from `TaskPR.author_login`. Other providers can omit it.
 

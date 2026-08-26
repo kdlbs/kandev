@@ -5,6 +5,7 @@ import { derivePRTaskStatusSummary } from "./pr-task-status-summary";
 function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
   return {
     id: "pr-id",
+    workspace_id: "workspace-1",
     task_id: "task-id",
     owner: "kdlbs",
     repo: "kandev",

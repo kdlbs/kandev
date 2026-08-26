@@ -66,6 +66,7 @@ const baseStatus: Omit<GitStatusEntry, "repository_name" | "head_commit" | "remo
 function taskPR(overrides: Partial<TaskPR> = {}): TaskPR {
   return {
     id: "pr-current",
+    workspace_id: "workspace-1",
     task_id: "task-1",
     repository_id: "repo-frontend",
     owner: "acme",

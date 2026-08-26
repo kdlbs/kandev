@@ -47,6 +47,17 @@ behavior or introducing a new touch surface.
   preserving its passive behavior and the containing task row's existing activation semantics.
   The shared integration intentionally updates sidebar, Kanban-card, and rich-list uses together.
 
+### Workspace-scoped PR events
+
+- Keep `workspace_id` in the frontend `TaskPR` payload contract so WebSocket
+  updates carry their authoritative owner.
+- Validate the payload workspace against the active workspace before applying
+  an update. Missing or mismatched events are ignored without changing the
+  scoped cache.
+- Expose `TaskPR.WorkspaceID` to the backend broadcaster and route typed PR
+  updates and detachments through the fail-closed workspace path when auth is
+  enforced.
+
 ### Localization
 
 - Add only missing summary labels and known-state values to
@@ -69,6 +80,12 @@ behavior or introducing a new touch surface.
   `apps/web/components/github/pr-task-icon.test.ts`.
   **How:** preserve the existing malformed-store and attribute cases, and replace the obsolete
   `getPRTooltip` string cases while leaving status-derivation coverage intact.
+- **What:** workspace ownership remains intact across singleton task switches and live PR events.
+  **Files:** `apps/web/components/github/pr-detail-panel.test.tsx`,
+  `apps/web/lib/ws/handlers/github.test.ts`, and
+  `apps/backend/internal/gateway/websocket/task_notifications_test.go`.
+  **How:** preserve task PR scope metadata during direct test state updates, reject a foreign
+  workspace event in the browser store, and route a typed backend event only to its owner.
 
 ## E2E Tests
 
@@ -120,8 +137,16 @@ Completed on 2026-08-07.
 - A gated PR screenshot was captured and visually inspected at
   `apps/web/.pr-assets/pr-status-badge--readable-task-pr-summary.png`; the following normal E2E run
   cleaned the ignored `.pr-assets` directory before successful runner teardown.
+- Review blocker fixup on 2026-08-26: the singleton task-switch test preserves the scoped `taskPRs`
+  metadata; frontend handlers reject missing or foreign `workspace_id` updates; and typed backend
+  TaskPR events expose their owner and use fail-closed workspace routing. The focused frontend
+  suite passed 95 tests across 6 files, the backend gateway/GitHub suites passed across 2 packages,
+  frontend typecheck and lint passed, changed-file Go lint passed, and the i18n/specification checks
+  passed. The full frontend Vitest suite was stopped after the requested 15-minute local window
+  without a failure result or terminal summary.
 
-No blockers or residual in-scope risks remain.
+No in-scope code blockers or residual risks remain. Full-suite completion remains delegated to PR CI
+because the local run did not reach a terminal result within the 15-minute window.
 
 ## Implementation Waves And Parallel Candidates
 
@@ -161,5 +186,5 @@ cd apps && pnpm --filter @kandev/web run i18n:ratchet
 ## Documentation Impact
 
 No public documentation change is required. This work changes an in-product informational
-disclosure, not a command, setting, workflow, API, or public term. No ADR is warranted because it
-adds no architectural boundary or persistent contract.
+disclosure, not a command or public term. The workspace event identity and fail-closed routing
+boundary are recorded in the system design above; no separate ADR is warranted.

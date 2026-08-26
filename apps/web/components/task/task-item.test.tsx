@@ -47,6 +47,7 @@ function renderTaskItem(
 function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
   return {
     id: "id",
+    workspace_id: "workspace-1",
     task_id: "t1",
     owner: "o",
     repo: "r",

@@ -96,6 +96,35 @@ describe("registerGitHubHandlers CI options", () => {
 });
 
 describe("registerGitHubHandlers", () => {
+  it("ignores a task PR update owned by another workspace", () => {
+    const store = createAppStore();
+    const activeWorkspaceId = "workspace-b";
+    const foreignWorkspaceId = "workspace-a";
+    const existing = { id: "association-b", task_id: TASK_ID };
+
+    store.getState().setActiveWorkspace(activeWorkspaceId);
+    store.getState().setTaskPRs(
+      { [TASK_ID]: [existing as never] },
+      {
+        workspaceId: activeWorkspaceId,
+        workspaceContextGeneration: store.getState().workspaceContextGeneration,
+      },
+    );
+
+    const handler = registerGitHubHandlers(store)["github.task_pr.updated"]!;
+    handler({
+      payload: {
+        id: "association-a",
+        task_id: TASK_ID,
+        workspace_id: foreignWorkspaceId,
+      },
+    } as Parameters<typeof handler>[0]);
+
+    expect(store.getState().taskPRs.byTaskId[TASK_ID]?.map((pr) => pr.id)).toEqual([
+      "association-b",
+    ]);
+  });
+
   it("removes the detached PR association without touching sibling PRs", () => {
     const store = createAppStore();
     const first = {

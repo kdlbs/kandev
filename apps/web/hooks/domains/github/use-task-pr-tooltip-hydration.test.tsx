@@ -26,6 +26,7 @@ function deferred<T>() {
 function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
   return {
     id: "pr-1",
+    workspace_id: WORKSPACE_A,
     task_id: "task-1",
     repository_id: "repository-1",
     owner: "acme",

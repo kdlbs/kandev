@@ -10,6 +10,7 @@ import type { TaskPR } from "@/lib/types/github";
 
 const listTaskPRsMock = vi.hoisted(() => vi.fn());
 const TASK_ID = "task-1";
+const WORKSPACE_ID = "workspace-1";
 
 vi.mock("@/lib/api/domains/github-api", () => ({
   listTaskPRs: listTaskPRsMock,
@@ -26,6 +27,7 @@ function renderWithStore(initialState: Partial<AppState> | undefined, ui: ReactN
 function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
   return {
     id: "id",
+    workspace_id: WORKSPACE_ID,
     task_id: TASK_ID,
     owner: "o",
     repo: "r",
@@ -111,7 +113,7 @@ describe("PRTaskIcon corrupted store entry", () => {
 
   it("opens a loading disclosure for a compact PR projection", () => {
     renderWithStore(
-      { workspaces: { items: [], activeId: "workspace-1" } },
+      { workspaces: { items: [], activeId: WORKSPACE_ID } },
       <TaskContributionIcons
         taskId={TASK_ID}
         prInfo={{ number: 7, state: "open", aggregateState: "pending" }}
@@ -127,7 +129,7 @@ describe("PRTaskIcon corrupted store entry", () => {
 
   it("opens a loading disclosure when a compact PR projection receives keyboard focus", () => {
     renderWithStore(
-      { workspaces: { items: [], activeId: "workspace-1" } },
+      { workspaces: { items: [], activeId: WORKSPACE_ID } },
       <TaskContributionIcons
         taskId={TASK_ID}
         prInfo={{ number: 7, state: "open", aggregateState: "pending" }}
@@ -149,7 +151,7 @@ describe("PRTaskIcon corrupted store entry", () => {
     });
     listTaskPRsMock.mockReturnValue(response);
     renderWithStore(
-      { workspaces: { items: [], activeId: "workspace-1" } },
+      { workspaces: { items: [], activeId: WORKSPACE_ID } },
       <TaskContributionIcons
         taskId={TASK_ID}
         prInfo={{ number: 7, state: "open", aggregateState: "pending" }}

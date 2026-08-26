@@ -544,6 +544,11 @@ type TaskPR struct {
 	AutoMergeObservedAt *time.Time `json:"auto_merge_observed_at" db:"auto_merge_observed_at"`
 }
 
+// GetWorkspaceID lets workspace-scoped notification handlers route the typed
+// in-process task PR event to the owning workspace instead of broadcasting it
+// as an unattributed instance-wide update.
+func (p TaskPR) GetWorkspaceID() string { return p.WorkspaceID }
+
 // TaskCIOptions stores task-level PR automation preferences.
 //
 // The five automation switches below (AutoFixEnabled, AutoMergeEnabled,

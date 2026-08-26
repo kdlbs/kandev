@@ -40,6 +40,7 @@ the bounded task-status projection and not the full pull-request record.
 - **AC-UI-PR-TASK-STATUS-SUMMARY-001.16:** When the task-scoped load fails or returns no PR records, the disclosure shall show a localized unavailable state. A later disclosure shall retry the load.
 - **AC-UI-PR-TASK-STATUS-SUMMARY-001.17:** Each GitHub PR summary shall show the non-empty PR author login below the PR title. A missing author login shall not create an empty label.
 - **AC-UI-PR-TASK-STATUS-SUMMARY-001.18:** On a coarse pointer, the task row shall remain the primary touch target. After task navigation, the existing PR-status drawer shall show the same author login.
+- **AC-UI-PR-TASK-STATUS-SUMMARY-001.19:** TaskPR API and WebSocket payloads shall carry the owning workspace ID. The backend shall route typed PR events by that ID, and the frontend shall ignore missing or mismatched updates before changing the active workspace cache.
 
 ## Migrated source detail
 
