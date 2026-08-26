@@ -138,6 +138,47 @@ describe("useMoveToStep", () => {
 });
 
 describe("useMoveToStep concurrency", () => {
+  it("still rolls back a rejected move after a different task moved", async () => {
+    // The sidebar shares one hook across every row, so a move of task-2 must not
+    // make task-1's pending move look superseded and strand it in a step the
+    // backend refused.
+    const store = buildStore({
+      tasks: [
+        { id: "task-1", workflowStepId: "step-a", position: 0 },
+        { id: "task-2", workflowStepId: "step-a", position: 1 },
+      ],
+    });
+    const onMoveError = vi.fn();
+    let rejectFirstMove!: (error: unknown) => void;
+    moveTaskByIdMock.mockReturnValueOnce(new Promise((_res, rej) => (rejectFirstMove = rej)));
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { result } = renderHook(() => useMoveToStep(store as never, vi.fn(), onMoveError));
+
+    let firstMove!: Promise<void>;
+    act(() => {
+      firstMove = result.current("task-1", "wf-1", "step-b");
+    });
+
+    // An unrelated task moves and succeeds while task-1 is still in flight.
+    moveTaskByIdMock.mockResolvedValueOnce(undefined);
+    await act(async () => {
+      await result.current("task-2", "wf-1", "step-c");
+    });
+
+    const error = new Error("task has an active session (RUNNING)");
+    rejectFirstMove(error);
+    await act(async () => {
+      await firstMove;
+    });
+
+    const tasks = store.getSnapshots()["wf-1"].tasks;
+    expect(tasks.find((t) => t.id === "task-1")).toMatchObject({ workflowStepId: "step-a" });
+    expect(tasks.find((t) => t.id === "task-2")).toMatchObject({ workflowStepId: "step-c" });
+    expect(onMoveError).toHaveBeenCalledWith(error);
+    consoleErrorSpy.mockRestore();
+  });
+
   it("does not roll back when a same-step retry is still in flight", async () => {
     // Two moves to the same step compute identical optimistic values, so the
     // snapshot cannot distinguish them; only the generation can.

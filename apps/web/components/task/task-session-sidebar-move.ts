@@ -16,7 +16,14 @@ export function useMoveToStep(
   // second write is byte-identical to the first, so the first's rejection would
   // match and roll back a move that is still in flight. The generation says
   // which request the store is actually showing.
-  const moveRequestRef = useRef(0);
+  //
+  // Counted per task, not per hook: the sidebar calls this once and shares it
+  // across every row, so a single counter would let a move of task B mark a
+  // pending move of task A superseded and strand A in a step the backend
+  // refused. Entries are never dropped, because reusing a generation while an
+  // older request for that task is still in flight would recreate the very
+  // collision the counter exists to prevent.
+  const moveRequestsRef = useRef(new Map<string, number>());
 
   return useCallback(
     async (taskId: string, workflowId: string, targetStepId: string) => {
@@ -31,7 +38,9 @@ export function useMoveToStep(
       // above return without touching the server, and clearing the banner on
       // the way past them would wipe a still-accurate message for nothing.
       onMoveStart?.();
-      const requestId = ++moveRequestRef.current;
+      const moveKey = `${workflowId}:${taskId}`;
+      const requestId = (moveRequestsRef.current.get(moveKey) ?? 0) + 1;
+      moveRequestsRef.current.set(moveKey, requestId);
 
       const targetTasks = snapshot.tasks
         .filter((t) => t.workflowStepId === targetStepId && t.id !== taskId)
@@ -61,7 +70,7 @@ export function useMoveToStep(
         const cur = store.getState().kanbanMulti.snapshots[workflowId];
         const curTask = cur?.tasks.find((t) => t.id === taskId);
         const isCurrentMove =
-          requestId === moveRequestRef.current &&
+          requestId === moveRequestsRef.current.get(moveKey) &&
           !!cur &&
           curTask?.workflowStepId === targetStepId &&
           curTask.position === nextPosition;
