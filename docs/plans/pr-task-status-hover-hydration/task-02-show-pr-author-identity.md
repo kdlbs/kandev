@@ -52,10 +52,10 @@ user flows end to end.
 ## Verification
 
 ```bash
-cd apps && pnpm --filter @kandev/web exec vitest run components/github/pr-task-status-summary.test.ts components/integrations/change-request-task-status-summary.test.tsx components/github/pr-ci-popover.test.ts components/github/pr-status-chip.test.tsx
-cd apps/web && pnpm e2e:run tests/pr/pr-sidebar-hover-hydration.spec.ts
-cd apps/web && pnpm e2e:run --project mobile-chrome tests/task/mobile-task-status-summary.spec.ts
-cd apps/web && pnpm run typecheck
+(cd apps && pnpm --filter @kandev/web exec vitest run components/github/pr-task-status-summary.test.ts components/integrations/change-request-task-status-summary.test.tsx components/github/pr-ci-popover.test.ts components/github/pr-status-chip.test.tsx)
+(cd apps/web && pnpm e2e:run tests/pr/pr-sidebar-hover-hydration.spec.ts)
+(cd apps/web && pnpm e2e:run --project mobile-chrome tests/task/mobile-task-status-summary.spec.ts)
+(cd apps/web && pnpm run typecheck)
 ```
 
 ## Files likely touched

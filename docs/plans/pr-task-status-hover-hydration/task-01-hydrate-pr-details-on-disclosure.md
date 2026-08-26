@@ -53,11 +53,11 @@ the existing store.
 ## Verification
 
 ```bash
-cd apps && pnpm install --frozen-lockfile
-cd apps && pnpm --filter @kandev/web exec vitest run hooks/domains/github/use-task-pr-tooltip-hydration.test.tsx components/github/pr-task-icon.render.test.tsx components/task/task-item.test.tsx
-cd apps/web && pnpm run typecheck
-cd apps && pnpm --filter @kandev/web run i18n:check
-cd apps && pnpm --filter @kandev/web run i18n:ratchet
+(cd apps && pnpm install --frozen-lockfile)
+(cd apps && pnpm --filter @kandev/web exec vitest run hooks/domains/github/use-task-pr-tooltip-hydration.test.tsx components/github/pr-task-icon.render.test.tsx components/task/task-item.test.tsx)
+(cd apps/web && pnpm run typecheck)
+(cd apps && pnpm --filter @kandev/web run i18n:check)
+(cd apps && pnpm --filter @kandev/web run i18n:ratchet)
 ```
 
 ## Files likely touched
