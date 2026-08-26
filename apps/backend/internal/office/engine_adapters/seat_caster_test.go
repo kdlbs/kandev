@@ -14,20 +14,11 @@ import (
 // fakeSeatCasterWorkflowRepo is a minimal SeatCasterWorkflowRepo fake for
 // SeatCasterAdapter tests.
 type fakeSeatCasterWorkflowRepo struct {
-	stepID  string
-	stepErr error
-
 	runner    string
 	runnerErr error
 
-	gotStepTaskID   string
 	gotRunnerStepID string
 	gotRunnerTaskID string
-}
-
-func (f *fakeSeatCasterWorkflowRepo) GetTaskWorkflowStepID(_ context.Context, taskID string) (string, error) {
-	f.gotStepTaskID = taskID
-	return f.stepID, f.stepErr
 }
 
 func (f *fakeSeatCasterWorkflowRepo) ResolveCurrentRunner(_ context.Context, stepID, taskID string) (string, error) {
@@ -38,10 +29,10 @@ func (f *fakeSeatCasterWorkflowRepo) ResolveCurrentRunner(_ context.Context, ste
 
 func TestSeatCasterAdapter_EmptyCandidateListFallsBackToRunner(t *testing.T) {
 	office := &fakeOfficeRepo{fields: &sqlite.TaskExecutionFields{ID: "t-1", WorkspaceID: "ws-1"}}
-	wf := &fakeSeatCasterWorkflowRepo{stepID: "step-1", runner: "runner-agent"}
+	wf := &fakeSeatCasterWorkflowRepo{runner: "runner-agent"}
 	a := NewSeatCasterAdapter(office, wf)
 
-	got, err := a.CastParticipantSeat(context.Background(), "t-1", "reviewer")
+	got, err := a.CastParticipantSeat(context.Background(), "t-1", "step-1", "reviewer")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -64,10 +55,10 @@ func TestSeatCasterAdapter_EmptyCandidateListFallsBackToRunner(t *testing.T) {
 
 func TestSeatCasterAdapter_EmptyCandidateListAndNoRunnerIsUnfillable(t *testing.T) {
 	office := &fakeOfficeRepo{fields: &sqlite.TaskExecutionFields{ID: "t-1", WorkspaceID: "ws-1"}}
-	wf := &fakeSeatCasterWorkflowRepo{stepID: "step-1", runner: ""}
+	wf := &fakeSeatCasterWorkflowRepo{runner: ""}
 	a := NewSeatCasterAdapter(office, wf)
 
-	got, err := a.CastParticipantSeat(context.Background(), "t-1", "reviewer")
+	got, err := a.CastParticipantSeat(context.Background(), "t-1", "step-1", "reviewer")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -90,10 +81,10 @@ func TestSeatCasterAdapter_SingleCandidateIsRunnerRecordsSelfReview(t *testing.T
 			{ID: "agent-A", Role: models.AgentRoleCEO, Status: models.AgentStatusIdle, CreatedAt: now},
 		},
 	}
-	wf := &fakeSeatCasterWorkflowRepo{stepID: "step-1", runner: "agent-A"}
+	wf := &fakeSeatCasterWorkflowRepo{runner: "agent-A"}
 	a := NewSeatCasterAdapter(office, wf)
 
-	got, err := a.CastParticipantSeat(context.Background(), "t-1", "reviewer")
+	got, err := a.CastParticipantSeat(context.Background(), "t-1", "step-1", "reviewer")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -118,10 +109,10 @@ func TestSeatCasterAdapter_FirstCandidateIsRunnerSeatsSecond(t *testing.T) {
 			{ID: "agent-B", Role: models.AgentRoleCEO, Status: models.AgentStatusIdle, CreatedAt: t2},
 		},
 	}
-	wf := &fakeSeatCasterWorkflowRepo{stepID: "step-1", runner: "agent-A"}
+	wf := &fakeSeatCasterWorkflowRepo{runner: "agent-A"}
 	a := NewSeatCasterAdapter(office, wf)
 
-	got, err := a.CastParticipantSeat(context.Background(), "t-1", "reviewer")
+	got, err := a.CastParticipantSeat(context.Background(), "t-1", "step-1", "reviewer")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -146,10 +137,10 @@ func TestSeatCasterAdapter_FirstCandidateNotRunnerSeatsFirstAsEligiblePool(t *te
 			{ID: "agent-B", Role: models.AgentRoleCEO, Status: models.AgentStatusIdle, CreatedAt: t2},
 		},
 	}
-	wf := &fakeSeatCasterWorkflowRepo{stepID: "step-1", runner: "someone-else"}
+	wf := &fakeSeatCasterWorkflowRepo{runner: "someone-else"}
 	a := NewSeatCasterAdapter(office, wf)
 
-	got, err := a.CastParticipantSeat(context.Background(), "t-1", "reviewer")
+	got, err := a.CastParticipantSeat(context.Background(), "t-1", "step-1", "reviewer")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -174,10 +165,10 @@ func TestSeatCasterAdapter_ExcludesStoppedAndPendingApprovalCandidates(t *testin
 			{ID: "agent-ok", Role: models.AgentRoleCEO, Status: models.AgentStatusIdle, CreatedAt: t0.Add(2 * time.Minute)},
 		},
 	}
-	wf := &fakeSeatCasterWorkflowRepo{stepID: "step-1", runner: ""}
+	wf := &fakeSeatCasterWorkflowRepo{runner: ""}
 	a := NewSeatCasterAdapter(office, wf)
 
-	got, err := a.CastParticipantSeat(context.Background(), "t-1", "reviewer")
+	got, err := a.CastParticipantSeat(context.Background(), "t-1", "step-1", "reviewer")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -206,10 +197,10 @@ func TestSeatCasterAdapter_OrdersCandidatesByCreatedAtThenIdentifier(t *testing.
 			{ID: "agent-B", Role: models.AgentRoleCEO, Status: models.AgentStatusIdle, CreatedAt: tEarly},
 		},
 	}
-	wf := &fakeSeatCasterWorkflowRepo{stepID: "step-1", runner: ""}
+	wf := &fakeSeatCasterWorkflowRepo{runner: ""}
 	a := NewSeatCasterAdapter(office, wf)
 
-	got, err := a.CastParticipantSeat(context.Background(), "t-1", "reviewer")
+	got, err := a.CastParticipantSeat(context.Background(), "t-1", "step-1", "reviewer")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -220,7 +211,7 @@ func TestSeatCasterAdapter_OrdersCandidatesByCreatedAtThenIdentifier(t *testing.
 
 func TestSeatCasterAdapter_RejectsEmptyTaskID(t *testing.T) {
 	a := NewSeatCasterAdapter(&fakeOfficeRepo{}, &fakeSeatCasterWorkflowRepo{})
-	if _, err := a.CastParticipantSeat(context.Background(), "", "reviewer"); err == nil {
+	if _, err := a.CastParticipantSeat(context.Background(), "", "step-1", "reviewer"); err == nil {
 		t.Fatal("expected error for empty task id")
 	}
 }
@@ -228,7 +219,7 @@ func TestSeatCasterAdapter_RejectsEmptyTaskID(t *testing.T) {
 func TestSeatCasterAdapter_PropagatesWorkspaceResolutionError(t *testing.T) {
 	office := &fakeOfficeRepo{fieldsErr: errors.New("boom")}
 	a := NewSeatCasterAdapter(office, &fakeSeatCasterWorkflowRepo{})
-	if _, err := a.CastParticipantSeat(context.Background(), "t-1", "reviewer"); err == nil {
+	if _, err := a.CastParticipantSeat(context.Background(), "t-1", "step-1", "reviewer"); err == nil {
 		t.Fatal("expected error")
 	}
 }
@@ -236,25 +227,25 @@ func TestSeatCasterAdapter_PropagatesWorkspaceResolutionError(t *testing.T) {
 func TestSeatCasterAdapter_PropagatesTaskWithNoWorkspaceAsError(t *testing.T) {
 	office := &fakeOfficeRepo{fields: &sqlite.TaskExecutionFields{ID: "t-1"}}
 	a := NewSeatCasterAdapter(office, &fakeSeatCasterWorkflowRepo{})
-	if _, err := a.CastParticipantSeat(context.Background(), "t-1", "reviewer"); err == nil {
+	if _, err := a.CastParticipantSeat(context.Background(), "t-1", "step-1", "reviewer"); err == nil {
 		t.Fatal("expected error for a task with no workspace")
 	}
 }
 
-func TestSeatCasterAdapter_PropagatesStepLookupError(t *testing.T) {
+func TestSeatCasterAdapter_RejectsEmptyStepID(t *testing.T) {
 	office := &fakeOfficeRepo{fields: &sqlite.TaskExecutionFields{ID: "t-1", WorkspaceID: "ws-1"}}
-	wf := &fakeSeatCasterWorkflowRepo{stepErr: errors.New("boom")}
+	wf := &fakeSeatCasterWorkflowRepo{}
 	a := NewSeatCasterAdapter(office, wf)
-	if _, err := a.CastParticipantSeat(context.Background(), "t-1", "reviewer"); err == nil {
-		t.Fatal("expected error")
+	if _, err := a.CastParticipantSeat(context.Background(), "t-1", "", "reviewer"); err == nil {
+		t.Fatal("expected error for empty step id")
 	}
 }
 
 func TestSeatCasterAdapter_PropagatesRunnerResolutionError(t *testing.T) {
 	office := &fakeOfficeRepo{fields: &sqlite.TaskExecutionFields{ID: "t-1", WorkspaceID: "ws-1"}}
-	wf := &fakeSeatCasterWorkflowRepo{stepID: "step-1", runnerErr: errors.New("boom")}
+	wf := &fakeSeatCasterWorkflowRepo{runnerErr: errors.New("boom")}
 	a := NewSeatCasterAdapter(office, wf)
-	if _, err := a.CastParticipantSeat(context.Background(), "t-1", "reviewer"); err == nil {
+	if _, err := a.CastParticipantSeat(context.Background(), "t-1", "step-1", "reviewer"); err == nil {
 		t.Fatal("expected error")
 	}
 }
@@ -264,23 +255,20 @@ func TestSeatCasterAdapter_PropagatesCandidateListingError(t *testing.T) {
 		fields:  &sqlite.TaskExecutionFields{ID: "t-1", WorkspaceID: "ws-1"},
 		listErr: errors.New("boom"),
 	}
-	wf := &fakeSeatCasterWorkflowRepo{stepID: "step-1", runner: "runner-agent"}
+	wf := &fakeSeatCasterWorkflowRepo{runner: "runner-agent"}
 	a := NewSeatCasterAdapter(office, wf)
-	if _, err := a.CastParticipantSeat(context.Background(), "t-1", "reviewer"); err == nil {
+	if _, err := a.CastParticipantSeat(context.Background(), "t-1", "step-1", "reviewer"); err == nil {
 		t.Fatal("expected error")
 	}
 }
 
-func TestSeatCasterAdapter_UsesTaskCurrentStepToResolveRunner(t *testing.T) {
+func TestSeatCasterAdapter_UsesEnteredStepToResolveRunner(t *testing.T) {
 	office := &fakeOfficeRepo{fields: &sqlite.TaskExecutionFields{ID: "t-1", WorkspaceID: "ws-1"}}
-	wf := &fakeSeatCasterWorkflowRepo{stepID: "step-42", runner: "runner-agent"}
+	wf := &fakeSeatCasterWorkflowRepo{runner: "runner-agent"}
 	a := NewSeatCasterAdapter(office, wf)
 
-	if _, err := a.CastParticipantSeat(context.Background(), "t-1", "reviewer"); err != nil {
+	if _, err := a.CastParticipantSeat(context.Background(), "t-1", "step-42", "reviewer"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
-	}
-	if wf.gotStepTaskID != "t-1" {
-		t.Errorf("GetTaskWorkflowStepID called with task %q, want t-1", wf.gotStepTaskID)
 	}
 	if wf.gotRunnerStepID != "step-42" || wf.gotRunnerTaskID != "t-1" {
 		t.Errorf("ResolveCurrentRunner called with step=%q task=%q, want step-42/t-1",

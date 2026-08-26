@@ -11,11 +11,11 @@ import (
 )
 
 // SeatCasterWorkflowRepo captures the workflow-repo subset the seat caster
-// needs to resolve the task's current runner (REQ-OFFICE-REVIEW-SEATS-002's
-// "the task's runner" fallback and self-review comparison): the task's
-// current step, then the runner precedence chain rooted at that step.
+// needs to resolve the task's runner (REQ-OFFICE-REVIEW-SEATS-002's "the
+// task's runner" fallback and self-review comparison). The caller supplies
+// the immutable step that the task entered, so this adapter does not re-read
+// mutable task state after the transition commits.
 type SeatCasterWorkflowRepo interface {
-	GetTaskWorkflowStepID(ctx context.Context, taskID string) (string, error)
 	ResolveCurrentRunner(ctx context.Context, stepID, taskID string) (string, error)
 }
 
@@ -51,10 +51,13 @@ func NewSeatCasterAdapter(office OfficeRepo, workflow SeatCasterWorkflowRepo) *S
 
 // CastParticipantSeat satisfies engine.ParticipantSeatCaster.
 func (a *SeatCasterAdapter) CastParticipantSeat(
-	ctx context.Context, taskID, role string,
+	ctx context.Context, taskID, stepID, role string,
 ) (engine.ParticipantSeatCastResult, error) {
 	if taskID == "" {
 		return engine.ParticipantSeatCastResult{}, fmt.Errorf("task_id is required to cast a participant seat")
+	}
+	if stepID == "" {
+		return engine.ParticipantSeatCastResult{}, fmt.Errorf("step_id is required to cast a participant seat")
 	}
 	fields, err := a.Office.GetTaskExecutionFields(ctx, taskID)
 	if err != nil {
@@ -64,10 +67,6 @@ func (a *SeatCasterAdapter) CastParticipantSeat(
 		return engine.ParticipantSeatCastResult{}, fmt.Errorf("task %s has no workspace", taskID)
 	}
 
-	stepID, err := a.Workflow.GetTaskWorkflowStepID(ctx, taskID)
-	if err != nil {
-		return engine.ParticipantSeatCastResult{}, fmt.Errorf("get task workflow step: %w", err)
-	}
 	runner, err := a.Workflow.ResolveCurrentRunner(ctx, stepID, taskID)
 	if err != nil {
 		return engine.ParticipantSeatCastResult{}, fmt.Errorf("resolve task runner: %w", err)

@@ -178,7 +178,10 @@ type ParticipantSeatCastResult struct {
 // office package implements this against the workspace's CEO-role agent
 // roster; the engine treats the result as opaque.
 type ParticipantSeatCaster interface {
-	CastParticipantSeat(ctx context.Context, taskID, role string) (ParticipantSeatCastResult, error)
+	// stepID is the immutable workflow step that the task entered. Callers
+	// must pass this value instead of asking the adapter to re-read mutable
+	// task state after the transition commits.
+	CastParticipantSeat(ctx context.Context, taskID, stepID, role string) (ParticipantSeatCastResult, error)
 }
 
 // AgentProfileResolver answers whether an agent profile id still resolves to

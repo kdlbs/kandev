@@ -33,5 +33,7 @@ func (r *Repository) dispatchStepEntry(ctx context.Context, taskID, workflowID, 
 	if r.stepEntryDispatcher == nil || entryID == "" || stepID == "" {
 		return
 	}
-	r.stepEntryDispatcher.DispatchStepEntry(ctx, taskID, workflowID, stepID, entryID)
+	// The transition is committed before this hook runs. Do not let request
+	// cancellation strand the committed entry before its on_enter actions run.
+	r.stepEntryDispatcher.DispatchStepEntry(context.WithoutCancel(ctx), taskID, workflowID, stepID, entryID)
 }

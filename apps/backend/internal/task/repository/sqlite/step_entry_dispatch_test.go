@@ -24,12 +24,16 @@ type fakeStepEntryDispatcher struct {
 
 type stepEntryDispatchCall struct {
 	taskID, workflowID, stepID, entryID string
+	ctxErr                              error
 }
 
-func (f *fakeStepEntryDispatcher) DispatchStepEntry(_ context.Context, taskID, workflowID, stepID, entryID string) {
+func (f *fakeStepEntryDispatcher) DispatchStepEntry(ctx context.Context, taskID, workflowID, stepID, entryID string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.calls = append(f.calls, stepEntryDispatchCall{taskID: taskID, workflowID: workflowID, stepID: stepID, entryID: entryID})
+	f.calls = append(f.calls, stepEntryDispatchCall{
+		taskID: taskID, workflowID: workflowID, stepID: stepID, entryID: entryID,
+		ctxErr: ctx.Err(),
+	})
 }
 
 func (f *fakeStepEntryDispatcher) callsForTask(taskID string) []stepEntryDispatchCall {
@@ -51,6 +55,24 @@ func (f *fakeStepEntryDispatcher) callsForTask(taskID string) []stepEntryDispatc
 func TestDispatchStepEntryNilDispatcherIsNoOp(t *testing.T) {
 	repo := newStepTransitionsTestRepo(t)
 	createStepTransitionsTestTask(t, repo, "task-nil-dispatcher", "wf-1", "step-a")
+}
+
+func TestDispatchStepEntryUsesLiveContextAfterCommit(t *testing.T) {
+	repo := newStepTransitionsTestRepo(t)
+	fake := &fakeStepEntryDispatcher{}
+	repo.SetStepEntryDispatcher(fake)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	repo.dispatchStepEntry(ctx, "task-1", "wf-1", "step-1", "entry-1")
+
+	calls := fake.callsForTask("task-1")
+	if len(calls) != 1 {
+		t.Fatalf("dispatch calls = %d, want 1", len(calls))
+	}
+	if calls[0].ctxErr != nil {
+		t.Fatalf("post-commit dispatch received canceled context: %v", calls[0].ctxErr)
+	}
 }
 
 func TestCreateTaskDispatchesStepEntryWithLedgerRowID(t *testing.T) {

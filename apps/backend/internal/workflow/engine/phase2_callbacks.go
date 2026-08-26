@@ -551,7 +551,7 @@ func (c EnsureParticipantSeatCallback) Execute(ctx context.Context, in ActionInp
 		c.recordSeatEnsureError(taskID, stepID, role, err)
 		return ActionResult{}, err
 	}
-	cast, err := c.Caster.CastParticipantSeat(ctx, taskID, role)
+	cast, err := c.Caster.CastParticipantSeat(ctx, taskID, stepID, role)
 	if err != nil {
 		c.recordSeatEnsureError(taskID, stepID, role, err)
 		return ActionResult{}, fmt.Errorf("ensure_participant_seat cast: %w", err)
