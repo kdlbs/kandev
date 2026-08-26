@@ -347,6 +347,65 @@ test.describe("agentctl kandev CLI", () => {
     expect((comments.comments ?? []).some((c) => c.body === body)).toBe(true);
   });
 
+  test("comment list reads the caller's own task and is denied on an unrelated task", async ({
+    apiClient,
+    officeApi,
+    backend,
+    officeSeed,
+  }) => {
+    // Two independent root tasks in the same workspace: no parent/child,
+    // sibling, or blocker relation between them.
+    const ownTask = await apiClient.createTask(
+      officeSeed.workspaceId,
+      `CLI Comment List Own ${Date.now()}`,
+      { workflow_id: officeSeed.workflowId },
+    );
+    const unrelatedTask = await apiClient.createTask(
+      officeSeed.workspaceId,
+      `CLI Comment List Unrelated ${Date.now()}`,
+      { workflow_id: officeSeed.workflowId },
+    );
+
+    const ownBody = `own-task-comment-${Date.now()}`;
+    await officeApi.createTaskComment(ownTask.id as string, ownBody);
+    await officeApi.createTaskComment(
+      unrelatedTask.id as string,
+      `unrelated-comment-${Date.now()}`,
+    );
+
+    const run = await apiClient.seedRun({
+      agentProfileId: officeSeed.agentId,
+      reason: "task_assigned",
+      status: "claimed",
+      taskId: ownTask.id,
+    });
+    const { token } = await apiClient.mintRuntimeToken({
+      agentProfileId: officeSeed.agentId,
+      workspaceId: officeSeed.workspaceId,
+      runId: run.run_id,
+      taskId: ownTask.id,
+    });
+
+    const env: NodeJS.ProcessEnv = {
+      KANDEV_API_URL: backend.baseUrl,
+      KANDEV_API_KEY: token,
+      KANDEV_WORKSPACE_ID: officeSeed.workspaceId,
+      KANDEV_AGENT_ID: officeSeed.agentId,
+      KANDEV_RUN_ID: run.run_id,
+      KANDEV_TASK_ID: ownTask.id as string,
+    };
+
+    // Same-task read succeeds and returns the guarded window.
+    const ownRes = runCLI(env, ["comment", "list", "--task", ownTask.id as string]);
+    expect(ownRes.exitCode, `stderr=${ownRes.stderr}`).toBe(0);
+    const ownParsed = JSON.parse(ownRes.stdout) as { comments?: Array<{ body?: string }> };
+    expect((ownParsed.comments ?? []).some((c) => c.body === ownBody)).toBe(true);
+
+    // Cross-task read on an unrelated in-workspace task is denied.
+    const deniedRes = runCLI(env, ["comment", "list", "--task", unrelatedTask.id as string]);
+    expect(deniedRes.exitCode).toBe(1);
+  });
+
   test("routines create persists a routine with the supplied name", async ({
     apiClient,
     officeApi,
