@@ -121,8 +121,36 @@ test.describe("mobile: Plan formatting toolbar", () => {
     const horizontalOverflow = await toolbar.locator(":scope > div").evaluate((element) => ({
       scrollWidth: element.scrollWidth,
       clientWidth: element.clientWidth,
+      scrollLeft: element.scrollLeft,
     }));
-    expect(horizontalOverflow.scrollWidth).toBeLessThanOrEqual(horizontalOverflow.clientWidth);
+    expect(horizontalOverflow.scrollWidth).toBe(horizontalOverflow.clientWidth);
+    expect(horizontalOverflow.scrollLeft).toBe(0);
+
+    const narrowOverflow = await toolbar.locator(":scope > div").evaluate((element) => {
+      const scroller = element as HTMLElement;
+      const originalWidth = scroller.style.width;
+      scroller.style.width = "100px";
+      const scrollWidth = scroller.scrollWidth;
+      const clientWidth = scroller.clientWidth;
+      scroller.scrollLeft = 16;
+      const canScroll = scroller.scrollLeft > 0;
+      scroller.style.width = originalWidth;
+      scroller.scrollLeft = 0;
+      return { scrollWidth, clientWidth, canScroll };
+    });
+    expect(narrowOverflow.scrollWidth).toBeGreaterThan(narrowOverflow.clientWidth);
+    expect(narrowOverflow.canScroll).toBe(true);
+
+    const documentOverflow = await testPage.evaluate(() => ({
+      documentWidth: document.documentElement.scrollWidth,
+      documentClientWidth: document.documentElement.clientWidth,
+      bodyWidth: document.body.scrollWidth,
+      bodyClientWidth: document.body.clientWidth,
+    }));
+    expect(documentOverflow.documentWidth).toBeLessThanOrEqual(
+      documentOverflow.documentClientWidth,
+    );
+    expect(documentOverflow.bodyWidth).toBeLessThanOrEqual(documentOverflow.bodyClientWidth);
 
     const keyboardHeight = 300;
     await simulateKeyboardOpen(testPage, keyboardHeight);

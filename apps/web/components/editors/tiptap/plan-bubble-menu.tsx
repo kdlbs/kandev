@@ -351,6 +351,34 @@ function useMobileVisibilityChange(
   );
 }
 
+function resolveMobileToolbarPosition({
+  keyboardOpen,
+  viewportBottom,
+  barHeight,
+  baseBottomOffset,
+  containerBottom,
+}: {
+  keyboardOpen: boolean;
+  viewportBottom: number;
+  barHeight: number;
+  baseBottomOffset?: string;
+  containerBottom?: number;
+}) {
+  if (typeof containerBottom === "number") {
+    const visibleBottom = keyboardOpen
+      ? Math.min(containerBottom, viewportBottom)
+      : containerBottom;
+    return { top: `${visibleBottom - barHeight}px`, bottom: "auto" };
+  }
+
+  return resolveVisualViewportPosition({
+    keyboardOpen,
+    viewportBottom,
+    barHeight,
+    baseBottomOffset,
+  });
+}
+
 function MobileFormattingToolbar({
   content,
   label,
@@ -366,17 +394,19 @@ function MobileFormattingToolbar({
   mobileBottomOffset?: string;
   mobileContainerRef?: RefObject<HTMLElement | null>;
 }) {
-  const [containerBounds, setContainerBounds] = useState<{ left: number; width: number } | null>(
-    null,
-  );
+  const [containerBounds, setContainerBounds] = useState<{
+    left: number;
+    width: number;
+    bottom: number;
+  } | null>(null);
 
   useEffect(() => {
     const container = mobileContainerRef?.current;
     if (!container) return;
 
     const updateBounds = () => {
-      const { left, width } = container.getBoundingClientRect();
-      setContainerBounds({ left, width });
+      const { left, width, bottom } = container.getBoundingClientRect();
+      setContainerBounds({ left, width, bottom });
     };
     updateBounds();
 
@@ -384,22 +414,25 @@ function MobileFormattingToolbar({
       typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updateBounds);
     resizeObserver?.observe(container);
     window.addEventListener("resize", updateBounds);
+    window.addEventListener("scroll", updateBounds);
     window.visualViewport?.addEventListener("resize", updateBounds);
     window.visualViewport?.addEventListener("scroll", updateBounds);
     return () => {
       resizeObserver?.disconnect();
       window.removeEventListener("resize", updateBounds);
+      window.removeEventListener("scroll", updateBounds);
       window.visualViewport?.removeEventListener("resize", updateBounds);
       window.visualViewport?.removeEventListener("scroll", updateBounds);
     };
   }, [mobileContainerRef]);
 
   if (typeof document === "undefined") return null;
-  const position = resolveVisualViewportPosition({
+  const position = resolveMobileToolbarPosition({
     keyboardOpen,
     viewportBottom,
     barHeight: PLAN_FORMATTING_TOOLBAR_HEIGHT_PX,
     baseBottomOffset: mobileBottomOffset,
+    containerBottom: containerBounds?.bottom,
   });
   const horizontalPosition = containerBounds
     ? {

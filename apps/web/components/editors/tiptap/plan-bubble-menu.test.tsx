@@ -219,12 +219,24 @@ describe("PlanBubbleMenu responsive presentation", () => {
     });
     document.body.appendChild(container);
 
-    render(<PlanBubbleMenu editor={editor} mobileContainerRef={{ current: container }} />);
+    const renderMenu = () => (
+      <PlanBubbleMenu editor={editor} mobileContainerRef={{ current: container }} />
+    );
+    const { rerender } = render(renderMenu());
 
     const toolbar = screen.getByRole("toolbar", { name: PLAN_TOOLBAR_LABEL });
     expect(toolbar.getAttribute("style")).toContain("left: 240px");
     expect(toolbar.getAttribute("style")).toContain("width: 320px");
     expect(toolbar.getAttribute("style")).toContain("right: auto");
+    expect(toolbar.getAttribute("style")).toContain("top: 544px");
+    expect(toolbar.getAttribute("style")).toContain("bottom: auto");
+
+    act(() => {
+      mocks.viewport.keyboardOpen = true;
+      mocks.viewport.viewportBottom = 500;
+      rerender(renderMenu());
+    });
+    expect(toolbar.getAttribute("style")).toContain("top: 444px");
     container.remove();
   });
 
@@ -257,5 +269,26 @@ describe("PlanBubbleMenu responsive presentation", () => {
       editor.emit("blur");
     });
     expect(screen.queryByRole("toolbar", { name: PLAN_TOOLBAR_LABEL })).toBeNull();
+  });
+});
+
+describe("PlanBubbleMenu code-block suppression", () => {
+  it("hides the mobile toolbar inside a code block", () => {
+    const editor = createEditor({ codeBlock: true });
+
+    render(<PlanBubbleMenu editor={editor} onComment={vi.fn()} />);
+
+    expect(screen.queryByRole("toolbar", { name: PLAN_TOOLBAR_LABEL })).toBeNull();
+  });
+
+  it("hides the desktop selection bubble inside a code block", () => {
+    mocks.breakpoint.isFinePointer = true;
+    mocks.breakpoint.isMobile = false;
+    mocks.breakpoint.usesDesktopWorkbench = true;
+    const editor = createEditor({ codeBlock: true });
+
+    render(<PlanBubbleMenu editor={editor} onComment={vi.fn()} />);
+
+    expect(screen.getByTestId("plan-selection-bubble").getAttribute("data-visible")).toBe("false");
   });
 });
