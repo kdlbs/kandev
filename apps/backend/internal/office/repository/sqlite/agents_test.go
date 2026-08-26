@@ -708,6 +708,91 @@ func TestAgentInstanceExistsByName(t *testing.T) {
 	}
 }
 
+// TestAgentProfileExists_ResolvesShallowKanbanProfile guards
+// REQ-OFFICE-REVIEW-SEATS-004.3's quorum-guard resolution: a seat's
+// agent_profile_id can come from the casting resolution's runner fallback,
+// and a task's runner is not guaranteed to be an Office agent
+// (workspace_id != ”). AgentProfileExists must resolve a shallow Kanban
+// profile (workspace_id = ”) rather than treat it as deleted, unlike
+// agentInstanceFilter-scoped reads elsewhere in this file.
+func TestAgentProfileExists_ResolvesShallowKanbanProfile(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	if _, err := repo.ExecRaw(ctx,
+		`INSERT INTO agents (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)`,
+		"cli-kanban", "cli-kanban", now, now); err != nil {
+		t.Fatalf("seed agents row: %v", err)
+	}
+	if _, err := repo.ExecRaw(ctx,
+		`INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, workspace_id, role, created_at, updated_at)
+			VALUES (?, ?, ?, ?, '', '', ?, ?)`,
+		"kanban-runner", "cli-kanban", "Kanban Runner", "Kanban Runner", now, now); err != nil {
+		t.Fatalf("seed shallow kanban profile: %v", err)
+	}
+
+	exists, err := repo.AgentProfileExists(ctx, "kanban-runner")
+	if err != nil {
+		t.Fatalf("AgentProfileExists: %v", err)
+	}
+	if !exists {
+		t.Error("AgentProfileExists = false for a live shallow Kanban profile, want true")
+	}
+
+	unknown, err := repo.AgentProfileExists(ctx, "does-not-exist")
+	if err != nil {
+		t.Fatalf("AgentProfileExists (unknown id): %v", err)
+	}
+	if unknown {
+		t.Error("AgentProfileExists = true for an unknown id, want false")
+	}
+}
+
+// TestAgentProfileExists_FalseForSoftDeletedOfficeAgent proves the migrated
+// AgentProfileExists still honors the soft-delete boundary Office agents
+// rely on, matching the previous AgentInstanceExists behavior.
+func TestAgentProfileExists_FalseForSoftDeletedOfficeAgent(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	if err := repo.CreateAgentInstance(ctx, fullAgentInstance("office-agent", "ws-1", "Office Agent")); err != nil {
+		t.Fatalf("create office-agent: %v", err)
+	}
+	if err := repo.DeleteAgentInstance(ctx, "office-agent"); err != nil {
+		t.Fatalf("DeleteAgentInstance: %v", err)
+	}
+
+	exists, err := repo.AgentProfileExists(ctx, "office-agent")
+	if err != nil {
+		t.Fatalf("AgentProfileExists: %v", err)
+	}
+	if exists {
+		t.Error("AgentProfileExists = true for a soft-deleted Office agent, want false")
+	}
+}
+
+// TestAgentProfileExists_TrueForActiveOfficeAgent covers the third case
+// requested alongside the shallow-Kanban and soft-deleted cases above: a
+// live, non-deleted Office agent (workspace_id != ”) must resolve true,
+// same as it did under the pre-migration AgentInstanceExists name.
+func TestAgentProfileExists_TrueForActiveOfficeAgent(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	if err := repo.CreateAgentInstance(ctx, fullAgentInstance("office-agent-active", "ws-1", "Office Agent")); err != nil {
+		t.Fatalf("create office-agent-active: %v", err)
+	}
+
+	exists, err := repo.AgentProfileExists(ctx, "office-agent-active")
+	if err != nil {
+		t.Fatalf("AgentProfileExists: %v", err)
+	}
+	if !exists {
+		t.Error("AgentProfileExists = false for a live Office agent, want true")
+	}
+}
+
 func TestDeleteAgentInstance_MissingRowIsNotAnError(t *testing.T) {
 	repo := newTestRepo(t)
 

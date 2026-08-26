@@ -287,7 +287,10 @@ test.describe("GitLab MR status chip", () => {
 
     const chip = session.mrStatusChip();
     await expect(chip).toBeVisible({ timeout: 15_000 });
-    await expect(chip).toHaveAttribute("data-mr-count", "2");
+    // The shared workspace MR map hydrates after the task page mounts. Wait
+    // for the persisted two-MR state rather than treating the first visible
+    // chip render as complete.
+    await expect(chip).toHaveAttribute("data-mr-count", "2", { timeout: 15_000 });
     const autoFixBadge = chip.getByTestId("mr-status-auto-fix-chip");
     await expect(autoFixBadge).toBeVisible();
     // The round comes from the armed MR, which has no fix rounds yet.

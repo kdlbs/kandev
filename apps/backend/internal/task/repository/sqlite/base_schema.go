@@ -37,6 +37,7 @@ func (r *Repository) initSchema() error {
 		r.runMigrations,
 		r.hideBuiltinWorkflows,
 		r.healBuiltinWorkflowStepFlags,
+		r.healBuiltinWorkflowStepParticipantSeats,
 		r.normalizeTaskWorktreeOwnership,
 		r.healDuplicateTaskEnvironments,
 		r.ensureTaskEnvironmentTaskUniqueIndex,
@@ -1097,6 +1098,7 @@ const taskReviewSchemaDDL = `
 		prompt_tokens INTEGER NOT NULL DEFAULT 0,
 		response_tokens INTEGER NOT NULL DEFAULT 0,
 		duration_ms INTEGER NOT NULL DEFAULT 0,
+		entry_id TEXT NOT NULL DEFAULT '',
 		created_at TIMESTAMP NOT NULL,
 		completed_at TIMESTAMP,
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE

@@ -1,10 +1,10 @@
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test, expect } from "../../fixtures/test-base";
-import type { SeedData } from "../../fixtures/test-base";
+import { expect } from "@playwright/test";
+import { restoreSeedRepositoryOrigin, test, type SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
-import { waitForSessionAgentctlReady } from "../../helpers/session-store";
+import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 
 /**
  * The dev script runs as a real OS process, so these assertions read the OS
@@ -79,9 +79,18 @@ async function readPidWhenWritten(file: string): Promise<number> {
 async function seedDevScriptTask(
   apiClient: ApiClient,
   seedData: SeedData,
+  backendTmpDir: string,
   title: string,
   devScript: string,
 ) {
+  // Worktree preparation reads the shared seed checkout. Restore both its
+  // remote and working tree so a preceding source-mutating scenario cannot
+  // leave this launch with a dirty index or detached branch.
+  restoreSeedRepositoryOrigin(seedData);
+  const git = new GitHelper(seedData.repositoryPath, makeGitEnv(backendTmpDir));
+  git.exec("git reset --hard origin/main");
+  git.exec("git clean -fdx");
+
   await apiClient.updateRepository(seedData.repositoryId, { dev_script: devScript });
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
@@ -96,6 +105,27 @@ async function seedDevScriptTask(
     },
   );
   if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+
+  // The session can be created before the executor has prepared its workspace.
+  // Starting the process before that preparation completes is a real race, not
+  // a reason to retry the test.
+  await expect
+    .poll(
+      async () => {
+        const environment = await apiClient.getTaskEnvironment(task.id);
+        if (environment?.status === "failed") {
+          throw new Error("dev process seed environment failed before it became ready");
+        }
+        return environment?.status ?? "missing";
+      },
+      {
+        timeout: 90_000,
+        intervals: [500, 1000, 2000],
+        message: "dev process seed environment never became ready",
+      },
+    )
+    .toBe("ready");
+
   return { taskId: task.id, sessionId: task.session_id };
 }
 
@@ -104,14 +134,7 @@ async function seedDevScriptTask(
  * launch prepares asynchronously — the retry is on that preparation, not on a
  * UI shadow.
  */
-async function startDevProcess(
-  apiClient: ApiClient,
-  testPage: import("@playwright/test").Page,
-  taskId: string,
-  sessionId: string,
-): Promise<void> {
-  await testPage.goto(`/t/${taskId}`);
-  await waitForSessionAgentctlReady(testPage, sessionId, 90_000);
+async function startDevProcess(apiClient: ApiClient, sessionId: string): Promise<void> {
   await expect
     .poll(
       async () => {
@@ -148,21 +171,22 @@ test.describe("dev server process lifecycle", () => {
 
   test("archiving the task stops the dev script, including its background children", async ({
     apiClient,
+    backend,
     seedData,
-    testPage,
   }) => {
     const parentPidFile = pidFilePath("kandev-dev-archive-parent-");
     const childPidFile = pidFilePath("kandev-dev-archive-child-");
     const { taskId, sessionId } = await seedDevScriptTask(
       apiClient,
       seedData,
+      backend.tmpDir,
       "Dev server archive",
       // `sleep &` stands in for the worker a real dev server forks: it must die
       // with its parent, which only holds if the whole process group is reaped.
       `sleep 600 & echo $! > ${childPidFile}; echo $$ > ${parentPidFile}; wait`,
     );
 
-    await startDevProcess(apiClient, testPage, taskId, sessionId);
+    await startDevProcess(apiClient, sessionId);
     const parentPid = await readPidWhenWritten(parentPidFile);
     const childPid = await readPidWhenWritten(childPidFile);
     expect(isRunning(parentPid)).toBe(true);
@@ -174,16 +198,17 @@ test.describe("dev server process lifecycle", () => {
     await expectProcessReaped(childPid);
   });
 
-  test("deleting the task stops the dev script", async ({ apiClient, seedData, testPage }) => {
+  test("deleting the task stops the dev script", async ({ apiClient, backend, seedData }) => {
     const pidFile = pidFilePath("kandev-dev-delete-");
     const { taskId, sessionId } = await seedDevScriptTask(
       apiClient,
       seedData,
+      backend.tmpDir,
       "Dev server delete",
       `echo $$ > ${pidFile}; exec sleep 600`,
     );
 
-    await startDevProcess(apiClient, testPage, taskId, sessionId);
+    await startDevProcess(apiClient, sessionId);
     const pid = await readPidWhenWritten(pidFile);
     expect(isRunning(pid)).toBe(true);
 
@@ -194,19 +219,20 @@ test.describe("dev server process lifecycle", () => {
 
   test("the header control stops the dev script without archiving the task", async ({
     apiClient,
+    backend,
     seedData,
-    testPage,
   }) => {
     const parentPidFile = pidFilePath("kandev-dev-stop-parent-");
     const childPidFile = pidFilePath("kandev-dev-stop-child-");
-    const { taskId, sessionId } = await seedDevScriptTask(
+    const { sessionId } = await seedDevScriptTask(
       apiClient,
       seedData,
+      backend.tmpDir,
       "Dev server manual stop",
       `sleep 600 & echo $! > ${childPidFile}; echo $$ > ${parentPidFile}; wait`,
     );
 
-    await startDevProcess(apiClient, testPage, taskId, sessionId);
+    await startDevProcess(apiClient, sessionId);
     const parentPid = await readPidWhenWritten(parentPidFile);
     const childPid = await readPidWhenWritten(childPidFile);
     expect(isRunning(parentPid)).toBe(true);

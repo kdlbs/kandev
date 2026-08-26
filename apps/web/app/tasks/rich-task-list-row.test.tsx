@@ -27,6 +27,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
 function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
   return {
     id: "id",
+    workspace_id: "ws1",
     task_id: "task-1",
     owner: "o",
     repo: "r",

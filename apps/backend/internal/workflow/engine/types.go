@@ -55,6 +55,15 @@ const (
 	ActionClearDecisions             ActionKind = "clear_decisions"
 	ActionQueueRunForEachParticipant ActionKind = "queue_run_for_each_participant"
 
+	// ActionEnsureParticipantSeat guarantees a decision-required seat exists
+	// for the declared role somewhere in the task's workflow before the
+	// following queue_run_for_each_participant fan-out runs
+	// (REQ-OFFICE-REVIEW-SEATS-001). Always compiled — a missing, empty, or
+	// unrecognized role is detected and reported by
+	// EnsureParticipantSeatCallback at runtime, not skipped at compile time,
+	// because the config is operator-editable and survives template changes.
+	ActionEnsureParticipantSeat ActionKind = "ensure_participant_seat"
+
 	// Phase 8 (ADR-0004) cross-strategy delegation actions.
 	//
 	// ActionCreateChildTask creates a new task with parent_id == current
@@ -90,6 +99,7 @@ type Action struct {
 	QueueRunForEachParticipant *QueueRunForEachParticipantAction
 	CreateChildTask            *CreateChildTaskAction
 	SwitchWorkflow             *SwitchWorkflowAction
+	EnsureParticipantSeat      *EnsureParticipantSeatAction
 }
 
 // TransitionGuard is the typed `if:` clause attached to a transition action.
@@ -175,6 +185,15 @@ type QueueRunForEachParticipantAction struct {
 	Role    string
 	Reason  string
 	Payload map[string]any
+}
+
+// EnsureParticipantSeatAction declares the role that must hold a
+// decision-required seat somewhere in the task's workflow before fan-out
+// runs. Role is read from the action config's "role" key by CompileStep. An
+// empty or unrecognized Role is a runtime condition the callback reports and
+// skips, not a build-time compile failure.
+type EnsureParticipantSeatAction struct {
+	Role string
 }
 
 // CreateChildTaskAction defines a "spawn a child task" action. The new
@@ -325,6 +344,11 @@ func compileOnEnter(step *wfmodels.WorkflowStep) []Action {
 				Kind:     ActionQueueRun,
 				QueueRun: readQueueRunConfig(action.Config),
 			})
+		case wfmodels.OnEnterEnsureParticipantSeat:
+			actions = append(actions, Action{
+				Kind:                  ActionEnsureParticipantSeat,
+				EnsureParticipantSeat: readEnsureParticipantSeatConfig(action.Config),
+			})
 		}
 	}
 	return actions
@@ -466,6 +490,18 @@ func readQueueRunForEachParticipantConfig(config map[string]any) *QueueRunForEac
 		Reason:  reason,
 		Payload: payload,
 	}
+}
+
+// readEnsureParticipantSeatConfig reads the role for an
+// ensure_participant_seat action. An empty or missing role is valid at
+// compile time — EnsureParticipantSeatCallback detects and reports it as a
+// runtime condition (AC-OFFICE-REVIEW-SEATS-001.11).
+func readEnsureParticipantSeatConfig(config map[string]any) *EnsureParticipantSeatAction {
+	if config == nil {
+		return &EnsureParticipantSeatAction{}
+	}
+	role, _ := config["role"].(string)
+	return &EnsureParticipantSeatAction{Role: role}
 }
 
 // readSessionMode reads the target mode for a set_session_mode action from its

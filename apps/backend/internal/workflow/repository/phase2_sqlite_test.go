@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -211,6 +212,241 @@ func TestDeleteStepParticipant_RemovesRow(t *testing.T) {
 
 	if err := repo.DeleteStepParticipant(ctx, ""); err == nil {
 		t.Fatalf("expected error deleting empty id")
+	}
+}
+
+func TestEnsureRoleSeat_InsertsWhenAbsent(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	step := newPhase2TestStep(t, repo, "Review")
+
+	seat, inserted, err := repo.EnsureRoleSeat(ctx, "wf-test", step.ID, "task-1", string(models.ParticipantRoleReviewer), "agent-a")
+	if err != nil {
+		t.Fatalf("ensure role seat: %v", err)
+	}
+	if !inserted {
+		t.Fatalf("expected inserted=true for a fresh seat")
+	}
+	if seat.StepID != step.ID || seat.TaskID != "task-1" || seat.AgentProfileID != "agent-a" {
+		t.Fatalf("unexpected seat: %+v", seat)
+	}
+	if seat.Role != models.ParticipantRoleReviewer {
+		t.Fatalf("expected role reviewer, got %q", seat.Role)
+	}
+	if !seat.DecisionRequired {
+		t.Fatalf("expected a newly ensured seat to be decision_required")
+	}
+	if seat.Position != 0 {
+		t.Fatalf("expected position 0, got %d", seat.Position)
+	}
+	if seat.CreatedAt.IsZero() {
+		t.Fatalf("expected created_at to be set")
+	}
+
+	got, err := repo.GetStepParticipant(ctx, seat.ID)
+	if err != nil {
+		t.Fatalf("get participant: %v", err)
+	}
+	if got.AgentProfileID != "agent-a" {
+		t.Fatalf("seat not persisted: %+v", got)
+	}
+}
+
+func TestEnsureRoleSeat_StampsAutoProvenance(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	step := newPhase2TestStep(t, repo, "Review")
+
+	seat, _, err := repo.EnsureRoleSeat(ctx, "wf-test", step.ID, "task-1", string(models.ParticipantRoleReviewer), "agent-a")
+	if err != nil {
+		t.Fatalf("ensure role seat: %v", err)
+	}
+	if seat.Provenance != models.ParticipantProvenanceAuto {
+		t.Fatalf("expected provenance %q, got %q", models.ParticipantProvenanceAuto, seat.Provenance)
+	}
+
+	got, err := repo.GetStepParticipant(ctx, seat.ID)
+	if err != nil {
+		t.Fatalf("get participant: %v", err)
+	}
+	if got.Provenance != models.ParticipantProvenanceAuto {
+		t.Fatalf("persisted provenance = %q, want %q", got.Provenance, models.ParticipantProvenanceAuto)
+	}
+}
+
+func TestEnsureRoleSeat_NoOpWhenSeatExistsAtAnyStepInWorkflow(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	review := newPhase2TestStep(t, repo, "Review")
+	done := newPhase2TestStep(t, repo, "Done")
+
+	first, inserted, err := repo.EnsureRoleSeat(ctx, "wf-test", review.ID, "task-1", string(models.ParticipantRoleReviewer), "agent-a")
+	if err != nil {
+		t.Fatalf("ensure role seat (first): %v", err)
+	}
+	if !inserted {
+		t.Fatalf("expected first call to insert")
+	}
+
+	// Entering a later step in the same workflow, for the same task and
+	// role, must observe the seat already placed at Review and write
+	// nothing new — even though the seat lives at a different step than
+	// the one now being entered (AC-OFFICE-REVIEW-SEATS-001.5, -003.5).
+	second, inserted, err := repo.EnsureRoleSeat(ctx, "wf-test", done.ID, "task-1", string(models.ParticipantRoleReviewer), "agent-b")
+	if err != nil {
+		t.Fatalf("ensure role seat (second): %v", err)
+	}
+	if inserted {
+		t.Fatalf("expected second call to be a no-op, got inserted=true")
+	}
+	if second.ID != first.ID || second.StepID != review.ID || second.AgentProfileID != "agent-a" {
+		t.Fatalf("expected the pre-existing seat back unchanged, got %+v", second)
+	}
+
+	rows, err := repo.ListParticipantsForTaskWorkflow(ctx, "task-1", "wf-test")
+	if err != nil {
+		t.Fatalf("list workflow participants: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected exactly one seat for the role in the workflow, got %d: %+v", len(rows), rows)
+	}
+}
+
+func TestEnsureRoleSeat_ScopedToWorkflowNotOtherWorkflows(t *testing.T) {
+	repo, db := setupTestRepoWithDB(t)
+	ctx := context.Background()
+	if _, err := db.Exec(`INSERT INTO workflows (id, workspace_id, name, created_at, updated_at)
+		VALUES ('wf-other', '', 'Other', datetime('now'), datetime('now'))`); err != nil {
+		t.Fatalf("insert second workflow: %v", err)
+	}
+	stepA := newPhase2TestStep(t, repo, "Review")
+	stepB := &models.WorkflowStep{WorkflowID: "wf-other", Name: "Review", Position: 0}
+	if err := repo.CreateStep(ctx, stepB); err != nil {
+		t.Fatalf("create step in other workflow: %v", err)
+	}
+
+	if _, inserted, err := repo.EnsureRoleSeat(ctx, "wf-test", stepA.ID, "task-1", string(models.ParticipantRoleReviewer), "agent-a"); err != nil || !inserted {
+		t.Fatalf("ensure role seat in wf-test: inserted=%v err=%v", inserted, err)
+	}
+
+	// A seat in a different workflow for the same task+role must not
+	// suppress a fresh seat here — the existence check is workflow-scoped.
+	seat, inserted, err := repo.EnsureRoleSeat(ctx, "wf-other", stepB.ID, "task-1", string(models.ParticipantRoleReviewer), "agent-b")
+	if err != nil {
+		t.Fatalf("ensure role seat in wf-other: %v", err)
+	}
+	if !inserted {
+		t.Fatalf("expected a new seat in the other workflow, got no-op")
+	}
+	if seat.StepID != stepB.ID || seat.AgentProfileID != "agent-b" {
+		t.Fatalf("unexpected seat: %+v", seat)
+	}
+}
+
+func TestEnsureRoleSeat_RejectsBadInput(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	step := newPhase2TestStep(t, repo, "Review")
+
+	cases := []struct {
+		name                                             string
+		workflowID, stepID, taskID, role, agentProfileID string
+	}{
+		{"empty workflow", "", step.ID, "task-1", string(models.ParticipantRoleReviewer), "agent-a"},
+		{"empty step", "wf-test", "", "task-1", string(models.ParticipantRoleReviewer), "agent-a"},
+		{"empty task", "wf-test", step.ID, "", string(models.ParticipantRoleReviewer), "agent-a"},
+		{"empty agent", "wf-test", step.ID, "task-1", string(models.ParticipantRoleReviewer), ""},
+		{"invalid role", "wf-test", step.ID, "task-1", "not-a-role", "agent-a"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, _, err := repo.EnsureRoleSeat(ctx, tc.workflowID, tc.stepID, tc.taskID, tc.role, tc.agentProfileID); err == nil {
+				t.Fatalf("expected error for %s", tc.name)
+			}
+		})
+	}
+}
+
+func TestEnsureRoleSeat_ConcurrentEntriesConvergeOnOneSeat(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	review := newPhase2TestStep(t, repo, "Review")
+	done := newPhase2TestStep(t, repo, "Done")
+
+	// SQLite's single-writer lock serializes these transactions, so this
+	// exercises EnsureRoleSeat's retry-on-natural-key-violation path
+	// (rather than true concurrent execution, which the Postgres-gated
+	// counterpart covers) whenever both check-then-insert attempts race
+	// into the same natural key.
+	var wg sync.WaitGroup
+	results := make([]*models.WorkflowStepParticipant, 2)
+	errs := make([]error, 2)
+	steps := []*models.WorkflowStep{review, done}
+	agents := []string{"agent-a", "agent-b"}
+	for i := range 2 {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			seat, _, err := repo.EnsureRoleSeat(ctx, "wf-test", steps[i].ID, "task-race", string(models.ParticipantRoleReviewer), agents[i])
+			results[i] = seat
+			errs[i] = err
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("ensure role seat[%d]: %v", i, err)
+		}
+	}
+	if results[0].ID != results[1].ID {
+		t.Fatalf("expected both callers to converge on the same seat id, got %q and %q", results[0].ID, results[1].ID)
+	}
+
+	rows, err := repo.ListParticipantsForTaskWorkflow(ctx, "task-race", "wf-test")
+	if err != nil {
+		t.Fatalf("list workflow participants: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected exactly one seat to survive the race, got %d: %+v", len(rows), rows)
+	}
+}
+
+func TestHasRoleSeatForTaskWorkflow(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	step := newPhase2TestStep(t, repo, "Review")
+
+	has, err := repo.HasRoleSeatForTaskWorkflow(ctx, "wf-test", "task-1", string(models.ParticipantRoleReviewer))
+	if err != nil {
+		t.Fatalf("has role seat: %v", err)
+	}
+	if has {
+		t.Fatalf("expected no seat before any is written")
+	}
+
+	if _, _, err := repo.EnsureRoleSeat(ctx, "wf-test", step.ID, "task-1", string(models.ParticipantRoleReviewer), "agent-a"); err != nil {
+		t.Fatalf("ensure role seat: %v", err)
+	}
+
+	has, err = repo.HasRoleSeatForTaskWorkflow(ctx, "wf-test", "task-1", string(models.ParticipantRoleReviewer))
+	if err != nil {
+		t.Fatalf("has role seat: %v", err)
+	}
+	if !has {
+		t.Fatalf("expected a seat after EnsureRoleSeat")
+	}
+
+	has, err = repo.HasRoleSeatForTaskWorkflow(ctx, "wf-test", "task-1", string(models.ParticipantRoleApprover))
+	if err != nil {
+		t.Fatalf("has role seat (other role): %v", err)
+	}
+	if has {
+		t.Fatalf("expected no seat for a different role")
+	}
+
+	if _, err := repo.HasRoleSeatForTaskWorkflow(ctx, "", "task-1", string(models.ParticipantRoleReviewer)); err == nil {
+		t.Fatalf("expected error for empty workflow id")
 	}
 }
 
@@ -503,6 +739,119 @@ func TestInitPhase2Schema_DedupesPreExistingDuplicateActiveDecisionsBeforeUnique
 	}
 }
 
+// TestInitPhase2Schema_DedupesPreExistingDuplicateParticipantsBeforeUniqueIndex
+// mirrors TestInitPhase2Schema_DedupesPreExistingDuplicateActiveDecisionsBeforeUniqueIndex
+// above for the new participantsNaturalKeyIndexName: an install that predates
+// the unique (step_id, task_id, role, agent_profile_id) index can already
+// hold more than one row sharing that identity (no DB-level guard existed
+// before this index), and CREATE UNIQUE INDEX over them fails outright,
+// aborting backend startup. Drops the index the initial setupTestRepo call
+// already created, reinserts a duplicate-identity scenario directly
+// (bypassing UpsertStepParticipant's own upsert-by-id path), and reruns
+// initPhase2Schema to prove it tolerates and repairs a database that already
+// has the conflicting rows.
+func TestInitPhase2Schema_DedupesPreExistingDuplicateParticipantsBeforeUniqueIndex(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	step := newPhase2TestStep(t, repo, "Review")
+
+	if _, err := repo.db.Exec(`DROP INDEX IF EXISTS ` + participantsNaturalKeyIndexName); err != nil {
+		t.Fatalf("drop unique index to simulate a pre-fix install: %v", err)
+	}
+
+	insertRow := func(id string, position int) {
+		t.Helper()
+		if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
+			INSERT INTO workflow_step_participants
+				(id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at)
+			VALUES (?, ?, '', 'reviewer', 'profile-dup', 0, ?, ?)
+		`), id, step.ID, position, time.Now().UTC()); err != nil {
+			t.Fatalf("insert duplicate participant %s: %v", id, err)
+		}
+	}
+	// Duplicate group: same (step_id, task_id, role, agent_profile_id)
+	// identity — the exact shape a pre-index install could accumulate.
+	insertRow("dup-higher-position", 5)
+	insertRow("dup-lower-position", 1)
+	// A distinct agent_profile_id's row must survive untouched.
+	if err := repo.UpsertStepParticipant(ctx, &models.WorkflowStepParticipant{
+		StepID: step.ID, Role: models.ParticipantRoleReviewer, AgentProfileID: "profile-solo",
+	}); err != nil {
+		t.Fatalf("upsert solo participant: %v", err)
+	}
+
+	// A decision recorded against the losing duplicate must not be orphaned
+	// by the delete below — it should be remapped onto the surviving row so
+	// mapDecisionsToSeats can still find it.
+	strandedDecision := &models.WorkflowStepDecision{
+		ID: "stranded-decision", TaskID: "t-dedupe-participants", StepID: step.ID,
+		ParticipantID: "dup-higher-position",
+		Decision:      "approved", DecidedAt: time.Now().UTC(),
+		DeciderType: "human", DeciderID: "carol", Role: "reviewer",
+	}
+	if err := repo.RecordStepDecision(ctx, strandedDecision); err != nil {
+		t.Fatalf("record decision against duplicate participant: %v", err)
+	}
+
+	if err := repo.initPhase2Schema(); err != nil {
+		t.Fatalf("initPhase2Schema did not tolerate pre-existing duplicate participants: %v", err)
+	}
+
+	got, err := repo.ListStepParticipants(ctx, step.ID)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 participants after dedupe (1 per agent_profile_id), got %d: %+v", len(got), got)
+	}
+	byID := map[string]*models.WorkflowStepParticipant{}
+	for _, p := range got {
+		byID[p.ID] = p
+	}
+	if byID["dup-lower-position"] == nil {
+		t.Fatalf("expected the lowest-position duplicate (dup-lower-position) to survive, got %+v", got)
+	}
+	if byID["dup-higher-position"] != nil {
+		t.Fatalf("expected the higher-position duplicate to be deleted, but it is still present")
+	}
+	if byID["profile-solo"] == nil && findParticipantByAgent(got, "profile-solo") == nil {
+		t.Fatalf("expected the unrelated agent's row (profile-solo) to remain untouched, got %+v", got)
+	}
+
+	remapped, err := repo.ListStepDecisions(ctx, "t-dedupe-participants", step.ID)
+	if err != nil {
+		t.Fatalf("list decisions: %v", err)
+	}
+	if len(remapped) != 1 {
+		t.Fatalf("expected the stranded decision to survive the dedupe, got %d: %+v", len(remapped), remapped)
+	}
+	if remapped[0].ParticipantID != "dup-lower-position" {
+		t.Fatalf("expected the decision to be remapped onto the surviving participant dup-lower-position, got %q",
+			remapped[0].ParticipantID)
+	}
+
+	// The index must now genuinely be enforcing uniqueness: a fresh
+	// conflicting insert should fail the same way it would on a database
+	// that never had duplicates.
+	_, err = repo.db.ExecContext(ctx, repo.db.Rebind(`
+		INSERT INTO workflow_step_participants
+			(id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at)
+		VALUES (?, ?, '', 'reviewer', 'profile-dup', 0, 9, ?)
+	`), "post-dedupe-conflict", step.ID, time.Now().UTC())
+	if err == nil {
+		t.Fatalf("expected the recreated unique index to reject a new conflicting participant row")
+	}
+}
+
+func findParticipantByAgent(rows []*models.WorkflowStepParticipant, agentProfileID string) *models.WorkflowStepParticipant {
+	for _, p := range rows {
+		if p.AgentProfileID == agentProfileID {
+			return p
+		}
+	}
+	return nil
+}
+
 // TestRecordStepDecision_DifferentDecidersIndependent verifies decisions
 // recorded by distinct deciders coexist as separate active rows.
 func TestRecordStepDecision_DifferentDecidersIndependent(t *testing.T) {
@@ -671,6 +1020,51 @@ func TestResolveCurrentRunner_FallsBackToLatestTaskRunner(t *testing.T) {
 	}
 	if got != "runner-on-review" {
 		t.Fatalf("expected runner-on-review, got %q", got)
+	}
+}
+
+// TestResolveCurrentRunner_LatestTaskRunnerOrdersByCreatedAtNotInsertionOrder
+// pins the AC fix for the third tier's Postgres-incompatible `ORDER BY rowid
+// DESC` (rowid is SQLite-only and has no Postgres equivalent). The fix
+// reorders by `created_at DESC, agent_profile_id ASC` instead. This test
+// decouples row-insertion order from created_at order — the row inserted
+// LAST has the EARLIEST created_at — so a lingering rowid/insertion-order
+// dependency would pick the wrong runner.
+func TestResolveCurrentRunner_LatestTaskRunnerOrdersByCreatedAtNotInsertionOrder(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	work := newPhase2TestStep(t, repo, "Work")
+	review := newPhase2TestStep(t, repo, "Review")
+	done := newPhase2TestStep(t, repo, "Done")
+
+	older := time.Now().UTC().Add(-time.Hour).Truncate(time.Millisecond)
+	newer := time.Now().UTC().Truncate(time.Millisecond)
+
+	// Inserted FIRST (lowest rowid/insertion order) but carries the NEWER
+	// created_at timestamp.
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
+		INSERT INTO workflow_step_participants
+			(id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at)
+		VALUES (?, ?, ?, 'runner', ?, 0, 0, ?)
+	`), "runner-row-inserted-first", work.ID, "task-reorder", "runner-newer-created-at", newer); err != nil {
+		t.Fatalf("insert first runner row: %v", err)
+	}
+	// Inserted SECOND (highest rowid/insertion order) but carries the OLDER
+	// created_at timestamp.
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
+		INSERT INTO workflow_step_participants
+			(id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at)
+		VALUES (?, ?, ?, 'runner', ?, 0, 0, ?)
+	`), "runner-row-inserted-second", review.ID, "task-reorder", "runner-older-created-at", older); err != nil {
+		t.Fatalf("insert second runner row: %v", err)
+	}
+
+	got, err := repo.ResolveCurrentRunner(ctx, done.ID, "task-reorder")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got != "runner-newer-created-at" {
+		t.Fatalf("expected the row with the newer created_at (runner-newer-created-at) regardless of insertion order, got %q", got)
 	}
 }
 

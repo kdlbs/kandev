@@ -4,7 +4,7 @@ system: ui
 requirements:
   - REQ-UI-QUICK-TERMINAL-001
 created: 2026-08-03
-updated: 2026-08-06
+updated: 2026-08-26
 owners:
   - kandev
 ---
@@ -36,6 +36,10 @@ them without losing work, and return to the most recent terminal without managin
 - Existing conversation launchers preserve their kind-specific behavior: generic Quick Chat
   shortcuts select an ordinary chat, configuration entry points select the workspace's
   configuration chat, and either opens its existing setup when no matching conversation exists.
+- `ConfigChatPanel` keeps its floating `PopoverTrigger` mounted, visible, and operable while the
+  controlled popover is open. The existing top-aligned popover geometry leaves the trigger below
+  the panel on desktop and phone viewports, and a second trigger activation follows the same close
+  path as the panel header. The trigger tooltip stays suppressed while the panel is open.
 - The existing Quick Terminal launchers use a reuse-or-create policy scoped to the active workspace:
   they open the most recently activated terminal tab when one exists, and create the first terminal
   tab otherwise.
@@ -257,6 +261,9 @@ checks, and Agents-page authorization behavior remain unchanged.
 - **GIVEN** a terminal and an ordinary chat both exist, **WHEN** the user alternates the Quick
   Terminal and generic Quick Chat launchers, **THEN** each launcher opens the most recently active
   matching tab without changing configuration-chat launcher behavior.
+- **GIVEN** Configuration Chat is open on a Settings route, **WHEN** the floating launcher renders
+  below the panel, **THEN** it remains visible, keyboard-focusable, and touch-operable, and another
+  activation closes the panel.
 - **GIVEN** an active terminal tab with sibling tabs, **WHEN** the user closes it, **THEN** only its
   PTY is stopped and the nearest remaining same-workspace tab becomes active.
 - **GIVEN** terminal tabs belong to two workspaces, **WHEN** the active workspace changes, **THEN**
