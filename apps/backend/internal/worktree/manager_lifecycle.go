@@ -1529,6 +1529,28 @@ func (m *Manager) copyConfiguredFiles(ctx context.Context, req CreateRequest, wt
 	wt.CopyFilesWarnings = warnings
 }
 
+// removeRecreatedWorktreePath deletes only a managed worktree path through
+// no-follow directory handles. Legacy paths outside tasksBase retain their
+// existing behavior because they are not controlled by the managed root.
+func (m *Manager) removeRecreatedWorktreePath(ctx context.Context, worktreePath string) error {
+	tasksBase, err := m.config.ExpandedTasksBasePath()
+	if err != nil {
+		return fmt.Errorf("resolve tasks base path for recreate removal: %w", err)
+	}
+	tasksBase = filepath.Clean(tasksBase)
+	relativePath, err := filepath.Rel(tasksBase, worktreePath)
+	if err != nil || relativePath == "." || relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
+		if err := os.RemoveAll(worktreePath); err != nil {
+			return fmt.Errorf("remove existing worktree path: %w", err)
+		}
+		return nil
+	}
+	if err := storageworkspaces.RemoveDirectoryNoFollow(ctx, tasksBase, worktreePath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove existing worktree path without following links: %w", err)
+	}
+	return nil
+}
+
 // restoreMissingTasksBaseForRecreate rebuilds the task-root directory only when
 // the configured managed base disappeared. The persisted task directory name
 // fixes the root identity, while a fresh symlink validation protects the newly
@@ -1586,10 +1608,12 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 		}
 	}
 
-	// Clean up existing directory if present
+	// Clean up the recorded directory through no-follow descriptors. Reuse
+	// validation can race with a local rename, so path-based RemoveAll here
+	// could otherwise be redirected into another task root.
 	if existing.Path != "" {
-		if err := os.RemoveAll(existing.Path); err != nil {
-			m.logger.Debug("failed to remove existing worktree path", zap.Error(err))
+		if err := m.removeRecreatedWorktreePath(ctx, existing.Path); err != nil {
+			return nil, err
 		}
 	}
 

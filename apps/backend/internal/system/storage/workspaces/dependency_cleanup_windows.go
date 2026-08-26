@@ -15,6 +15,12 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// RemoveDirectoryNoFollow opens every path component without following links and
+// removes the target through the resulting native handles.
+func RemoveDirectoryNoFollow(ctx context.Context, root, target string) error {
+	return removeDependencyDirectory(ctx, root, target)
+}
+
 // Windows uses native handles rooted at the workspace. OBJ_DONT_REPARSE and
 // FILE_OPEN_REPARSE_POINT make each component no-follow; deletion is then
 // requested on the opened handle rather than by path.
