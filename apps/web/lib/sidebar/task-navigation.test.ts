@@ -166,6 +166,19 @@ describe("revealSidebarTask edge cases", () => {
     expect(row.scrollIntoView).not.toHaveBeenCalled();
   });
 
+  it("clears an applied cue when navigation is canceled", async () => {
+    vi.useFakeTimers();
+    const viewport = mountViewport();
+    const row = mountRow(viewport, TEST_TASK_ID, { x: 0, y: 120, width: 320, height: 24 });
+
+    await expect(revealSidebarTask(TEST_TASK_ID, (callback) => callback())).resolves.toBe(true);
+    expect(row.classList.contains(TASK_ROW_REVEAL_CLASS)).toBe(true);
+
+    cancelSidebarTaskReveal();
+
+    expect(row.classList.contains(TASK_ROW_REVEAL_CLASS)).toBe(false);
+  });
+
   it("ignores a matching row inside a hidden sidebar viewport", async () => {
     const hiddenViewport = mountViewport(false);
     const hiddenRow = mountRow(hiddenViewport, TEST_TASK_ID, {

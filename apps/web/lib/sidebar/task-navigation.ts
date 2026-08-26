@@ -18,6 +18,11 @@ let activeTaskRowCue: ActiveTaskRowCue | null = null;
 /** Invalidates the current reveal so a pending selection cannot scroll a stale row. */
 export function cancelSidebarTaskReveal(): void {
   latestNavigationRequestId += 1;
+  if (!activeTaskRowCue) return;
+
+  window.clearTimeout(activeTaskRowCue.timeoutId);
+  activeTaskRowCue.row.classList.remove(TASK_ROW_REVEAL_CLASS);
+  activeTaskRowCue = null;
 }
 
 /** CSS selector for a rendered task row by its stable task id. */

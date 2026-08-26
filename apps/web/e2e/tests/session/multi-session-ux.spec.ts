@@ -134,7 +134,6 @@ test.describe("Multi-session UX", () => {
 
     await expect(testPage).toHaveURL(new RegExp(`/t/${task.id}$`));
     const session = new SessionPage(testPage);
-    await session.waitForLoad();
     await expect(session.sessionTabBySessionId(primary.session_id)).toBeVisible({
       timeout: 10_000,
     });
