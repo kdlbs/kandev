@@ -4,6 +4,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { expect, type Locator } from "@playwright/test";
 import type { ApiClient } from "../../helpers/api-client";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { dwell } from "../../helpers/causal-waits";
 import type { SeedData } from "../../fixtures/test-base";
 import { makeGitEnv } from "../../helpers/git-helper";
@@ -11,16 +12,6 @@ import { makeGitEnv } from "../../helpers/git-helper";
 const GIT_PROTOCOL_ARGS = ["-c", "protocol.file.allow=always"];
 const GIT_INDEX_LOCK_ATTEMPTS = 3;
 const GIT_INDEX_LOCK_RETRY_MS = 300;
-
-async function waitForFiniteAnimations(surface: Locator): Promise<void> {
-  await surface.evaluate(async (element) => {
-    const animations = element.getAnimations({ subtree: true }).filter((animation) => {
-      const iterations = animation.effect?.getComputedTiming().iterations;
-      return typeof iterations === "number" && Number.isFinite(iterations);
-    });
-    await Promise.all(animations.map((animation) => animation.finished.catch(() => undefined)));
-  });
-}
 
 export async function expectStickyReviewHeaderClearance(
   review: Locator,

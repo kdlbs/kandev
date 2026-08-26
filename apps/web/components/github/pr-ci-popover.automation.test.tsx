@@ -53,7 +53,7 @@ import { PRCIPopover } from "./pr-ci-popover";
 import { MultiPRCIPopover } from "./multi-pr-ci-popover";
 
 const AUTO_FIX_LABEL = "Auto-fix CI and address comments";
-const AUTO_MERGE_LABEL = "Auto-merge when ready";
+const AUTO_MERGE_LABEL = "Auto-merge or requeue when ready";
 const MERGED_PROMPT_LABEL = "PR merged";
 const CLOSED_PROMPT_LABEL = "PR closed without merging";
 const REVIEW_REQUEST_PROMPT_LABEL = "Your review is requested";
@@ -103,6 +103,7 @@ function makeOptions(overrides: Partial<TaskCIAutomationOptions> = {}): TaskCIAu
 function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
   return {
     id: "id",
+    workspace_id: "workspace-1",
     task_id: "task-1",
     owner: "o",
     repo: "r",
@@ -133,12 +134,12 @@ function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
   };
 }
 
-function renderPopover() {
+function renderPopover(pr: TaskPR = makePR()) {
   return render(
     <TooltipProvider>
       <StateProvider>
         <ToastProvider>
-          <PRCIPopover pr={makePR()} enabled={true} />
+          <PRCIPopover pr={pr} enabled={true} />
         </ToastProvider>
       </StateProvider>
     </TooltipProvider>,
@@ -303,6 +304,73 @@ describe("PRCIPopover automation status", () => {
     fireEvent.click(screen.getByTestId(REVIEW_FOLLOW_UP_TRIGGER));
     expect(screen.getByLabelText(REVIEW_REQUEST_PROMPT_LABEL)).not.toBeNull();
     expect(screen.queryByLabelText(/edit.*review/i)).toBeNull();
+  });
+
+  it("shows active queue context without adding another switch", () => {
+    renderPopover(
+      makePR({
+        merge_queue_state: "queued",
+        merge_queue_entry_id: "entry-a",
+        head_sha: "head-a",
+      }),
+    );
+
+    expect(screen.getByText("Merge queue automation")).not.toBeNull();
+    expect(screen.getByText("PR #1 is in the merge queue")).not.toBeNull();
+    expect(screen.getByTestId("ci-merge-queue-recovery-status").textContent).toContain(
+      "Active merge queue attempt",
+    );
+    expect(screen.getAllByRole("switch")).toHaveLength(2);
+  });
+
+  it("shows classified recovery state and generic copy for unknown causes", () => {
+    hookMocks.options = makeOptions({
+      pr_states: [
+        {
+          task_id: "task-1",
+          repository_id: "",
+          pr_number: 1,
+          last_fix_signature: "",
+          last_fix_checkpoint_json: "",
+          last_fix_enqueued_at: null,
+          last_fix_session_id: null,
+          auto_fix_round_count: 0,
+          auto_fix_exhausted_at: null,
+          last_merge_signature: "",
+          last_merge_attempt_at: null,
+          last_queue_attempt_head_sha: "head-a",
+          last_queue_fix_event_id: "",
+          last_queue_removal_cause: "provider_changed",
+          last_error: null,
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+    });
+    renderPopover(
+      makePR({
+        head_sha: "head-a",
+        merge_queue_last_removal_id: "removal-a",
+        merge_queue_last_removal_reason: "provider changed this",
+      }),
+    );
+
+    expect(screen.getByText("Merge queue recovery")).not.toBeNull();
+    expect(screen.getByText("PR #1 was removed from the merge queue")).not.toBeNull();
+    expect(screen.getByTestId("ci-merge-queue-recovery-status").textContent).toContain(
+      "No automatic repair",
+    );
+    expect(screen.queryByText("provider changed this")).toBeNull();
+  });
+});
+
+describe("PRCIPopover linked PR status", () => {
+  beforeEach(() => {
+    resetHookMocks();
+  });
+
+  afterEach(() => {
+    cleanup();
   });
 
   it("uses the PR title in the header and omits the redundant detail link", () => {

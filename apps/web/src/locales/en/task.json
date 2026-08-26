@@ -1726,6 +1726,12 @@
   "failedToStartImplementingPlan": "Failed to start implementing the plan",
   "failedToStartImplementationSession": "Failed to start implementation session",
   "failedToMoveTask": "Failed to move task",
+  "taskMoveErrorGeneric": "The task could not be moved. Try again.",
+  "taskMoveErrorActiveSession": "Stop the active session before moving the task.",
+  "taskMoveErrorArchived": "Archived tasks cannot be moved.",
+  "taskMoveErrorDifferentWorkspace": "The task and target workflow must use the same workspace.",
+  "taskMoveErrorWorkflowStep": "The target step does not belong to the target workflow.",
+  "taskMoveErrorWipLimit": "The target workflow step is at its WIP limit.",
   "movedTasksStepDescription_one": "The task is now in the selected step.",
   "movedTasksStepDescription_other": "The tasks are now in the selected step.",
   "movedTasksToStep_one": "Moved task to step",
@@ -1875,5 +1881,12 @@
   "baseBranchNotSet": "Base branch not set",
   "launchRecoveryFailed": "Recovery could not start",
   "tryRecoveryAgain": "Try the recovery action again.",
-  "launchFailedSeeDetails": "The task launch failed. Open the task details for recovery actions."
+  "launchFailedSeeDetails": "The task launch failed. Open the task details for recovery actions.",
+  "branchPoliciesGroup": "Branch policies",
+  "branchesGroup": "Branches",
+  "branchPolicyMarker": "Policy",
+  "branchPolicyOptionSummary": "from {{base}} to {{target}}",
+  "branchPolicySelected": "{{name}} (from {{base}})",
+  "branchPolicyUnavailable": "Base branch unavailable. Refresh branches or edit this policy.",
+  "branchPolicyRequiresSingleRepository": "Branch policies require a single repository with the local executor."
 }

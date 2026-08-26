@@ -4,7 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-REMOTE-CONTRIBUTION-TASKS-001
 created: 2026-08-04
-updated: 2026-08-19
+updated: 2026-08-24
 owners:
   - product
 ---
@@ -352,7 +352,7 @@ THEN Kandev keeps the checkout unchanged and asks the user to commit or discard 
 ### Provide the same choice on mobile
 
 GIVEN a diverged contribution on a phone viewport
-WHEN the user opens the Git actions menu
+WHEN the user opens Changes and its remote-contribution actions
 THEN the user can replace the PR branch, use the PR version, or inspect the PR version without a desktop
 workflow
 

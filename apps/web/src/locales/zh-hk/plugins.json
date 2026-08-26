@@ -91,6 +91,7 @@
   "sortName": "名稱",
   "sortRecentlyUpdated": "最近更新",
   "sourceNamePlaceholder": "來源名稱（例如 Acme Internal）",
+  "sourceUrlPlaceholder": "https://.../index.json",
   "sourceOfficial": "官方",
   "sourceUnreachable": "無法存取",
   "sourceUnreachableDetail": "<0>{{name}}</0> 無法存取{{detail}}；其外掛程式已隱藏。",

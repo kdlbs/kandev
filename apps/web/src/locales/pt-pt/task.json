@@ -1681,6 +1681,12 @@
   "failedToStartImplementingPlan": "Falha ao iniciar a implementação do plano",
   "failedToStartImplementationSession": "Falha ao iniciar a sessão de implementação",
   "failedToMoveTask": "Falha ao mover a tarefa",
+  "taskMoveErrorGeneric": "Não foi possível mover a tarefa. Tente novamente.",
+  "taskMoveErrorActiveSession": "Pare a sessão ativa antes de mover a tarefa.",
+  "taskMoveErrorArchived": "As tarefas arquivadas não podem ser movidas.",
+  "taskMoveErrorDifferentWorkspace": "A tarefa e o fluxo de trabalho de destino têm de usar a mesma área de trabalho.",
+  "taskMoveErrorWorkflowStep": "O passo de destino não pertence ao fluxo de trabalho de destino.",
+  "taskMoveErrorWipLimit": "O passo de destino atingiu o limite WIP.",
   "movedTasksStepDescription_one": "A tarefa está agora no passo selecionado.",
   "movedTasksStepDescription_other": "As tarefas estão agora no passo selecionado.",
   "movedTasksToStep_one": "Tarefa movida para o passo",
@@ -1875,5 +1881,12 @@
   "baseBranchNotSet": "Branch base não definido",
   "launchRecoveryFailed": "Não foi possível iniciar a recuperação",
   "tryRecoveryAgain": "Tente novamente a ação de recuperação.",
-  "launchFailedSeeDetails": "O início da tarefa falhou. Abra os detalhes da tarefa para ver as ações de recuperação."
+  "launchFailedSeeDetails": "O início da tarefa falhou. Abra os detalhes da tarefa para ver as ações de recuperação.",
+  "branchPoliciesGroup": "Políticas de branches",
+  "branchesGroup": "Branches Git",
+  "branchPolicyMarker": "Política",
+  "branchPolicyOptionSummary": "de {{base}} para {{target}}",
+  "branchPolicySelected": "{{name}} (de {{base}})",
+  "branchPolicyUnavailable": "O branch base não está disponível. Atualize os branches ou edite esta política.",
+  "branchPolicyRequiresSingleRepository": "As políticas de branches requerem um único repositório com o executor local."
 }

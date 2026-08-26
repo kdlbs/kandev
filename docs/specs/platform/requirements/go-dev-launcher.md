@@ -27,6 +27,7 @@ owners:
 - **AC-PLATFORM-GO-DEV-LAUNCHER-001.6:** **GIVEN** a host with an IPv6 address, **WHEN** the startup banner is printed, **THEN** the address is rendered as `http://[<address>]:<port>`.
 - **AC-PLATFORM-GO-DEV-LAUNCHER-001.7:** **GIVEN** interface enumeration returns an error, **WHEN** the launcher starts, **THEN** it continues startup and prints the localhost URL without a `network:` line.
 - **AC-PLATFORM-GO-DEV-LAUNCHER-001.8:** **GIVEN** `KANDEV_SERVER_HOST` is a loopback or specific bind address, **WHEN** the startup banner is printed, **THEN** it omits unrelated network addresses.
+- **AC-PLATFORM-GO-DEV-LAUNCHER-001.9:** **WHEN** the `dev`, `start`, or `run` launcher prints its startup banner, it shall include a `version:` line whose value is the same build version printed by `--version` for that binary. An unstamped build shall print `dev`.
 
 ## Migrated source detail
 
@@ -142,6 +143,13 @@ cannot enumerate its interfaces, the launcher still starts and prints the localh
 URL. When `KANDEV_SERVER_HOST` restricts the backend to loopback or specific addresses,
 the banner omits unreachable interface addresses and only advertises matching binds.
 
+### Startup output advertises the build version
+
+The startup banner for `dev`, `start`, and `run` also prints a `version:` line. Its
+value is the launcher build version, the same value returned by `--version`; an
+unstamped local binary reports `dev`. The line is informational and does not alter
+the existing header, URL, database, or log-level lines.
+
 ### Backend restart from the UI still rebuilds
 
 The restart supervisor (ADR 0019) writes a launch manifest and listens on a control
@@ -250,3 +258,10 @@ them: building and serving the web app (Vite), the published npm shim, and repo 
   **THEN** it continues startup and prints the localhost URL without a `network:` line.
 - **GIVEN** `KANDEV_SERVER_HOST` is a loopback or specific bind address, **WHEN** the
   startup banner is printed, **THEN** it omits unrelated network addresses.
+- **GIVEN** a stamped or unstamped launcher binary, **WHEN** `dev`, `start`, or `run`
+  prints its startup banner, **THEN** the banner includes `version:` with the same
+  value that `--version` prints, using `dev` for an unstamped binary.
+
+## System design
+
+The technical design for launcher startup identity is in [Go dev launcher and startup version](../system-design/go-dev-launcher.md).

@@ -144,7 +144,7 @@ func TestRunStartUsesSelfExecutableAndBackendCWD(t *testing.T) {
 	// dir must be canonical (macOS temp dirs sit under the /var -> /private/var link).
 	t.Setenv("KANDEV_HOME_DIR", canonicalTempDir(t))
 
-	code := runStart(context.Background(), Options{Command: CommandStart, BackendPort: 48123, Headless: true})
+	code := runStart(context.Background(), Options{Command: CommandStart, BackendPort: 48123, Headless: true}, BuildInfo{})
 	if code != 42 {
 		t.Fatalf("runStart() = %d, want 42", code)
 	}
@@ -187,7 +187,7 @@ func TestRunStartUsesConfiguredBindForBackendURL(t *testing.T) {
 		return 42
 	}
 
-	if code := runStart(context.Background(), Options{Command: CommandStart, Headless: true}); code != 42 {
+	if code := runStart(context.Background(), Options{Command: CommandStart, Headless: true}, BuildInfo{}); code != 42 {
 		t.Fatalf("runStart() = %d, want 42", code)
 	}
 	if got.Ports.BackendURL != "http://192.0.2.10:48123" {

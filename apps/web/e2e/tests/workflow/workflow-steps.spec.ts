@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
+import { SessionPage } from "../../pages/session-page";
 
 test.describe("Workflow steps", () => {
   test("task appears in correct column after API move", async ({
@@ -59,6 +60,99 @@ test.describe("Workflow steps", () => {
 
     await expect(kanban.taskCardByTitle("Step A Task")).toBeVisible();
     await expect(kanban.taskCardByTitle("Step B Task")).toBeVisible();
+  });
+
+  test("explains a rejected move on the task page", async ({ testPage, apiClient, seedData }) => {
+    const targetStep = seedData.steps.find((s) => !s.is_start_step);
+    if (!targetStep) {
+      test.skip(true, "No non-start step available to test move feedback");
+      return;
+    }
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Workflow Move Feedback Task",
+      seedData.agentProfileId,
+      {
+        description: "e2e:delay(5000)",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await testPage.route(`**/api/v1/tasks/${task.id}/move`, async (route) => {
+      await route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: "task has an active session (RUNNING)",
+          code: "task_move_active_session",
+        }),
+      });
+    });
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await expect(session.stepper).toBeVisible();
+
+    await session.stepper.getByTestId(`workflow-step-${targetStep.name}`).hover();
+    await testPage.getByRole("button", { name: "Move here" }).click();
+
+    const moveError = testPage.getByTestId("task-move-error-banner");
+    await expect(moveError).toBeVisible();
+    await expect(moveError).toContainText("Stop the active session before moving the task.");
+    await expect(
+      session.stepperStep(seedData.steps.find((s) => s.is_start_step)?.name ?? ""),
+    ).toBeVisible();
+  });
+
+  test("explains a rejected move from the task sidebar", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const targetStep = seedData.steps.find((s) => !s.is_start_step);
+    if (!targetStep) {
+      test.skip(true, "No non-start step available to test move feedback");
+      return;
+    }
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Workflow Sidebar Move Feedback Task",
+      seedData.agentProfileId,
+      {
+        description: "e2e:delay(5000)",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await testPage.route(`**/api/v1/tasks/${task.id}/move`, async (route) => {
+      await route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: "task has an active session (RUNNING)",
+          code: "task_move_active_session",
+        }),
+      });
+    });
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    await session.openSidebarTaskContextMenu("Workflow Sidebar Move Feedback Task");
+    await testPage.getByTestId("task-context-move-to").hover();
+    await testPage.getByTestId(`task-context-step-${targetStep.id}`).click();
+
+    const moveError = testPage.getByTestId("task-move-error-banner");
+    await expect(moveError).toBeVisible();
+    await expect(moveError).toContainText("Stop the active session before moving the task.");
   });
 
   test("an unstarted feeder task fills available WIP capacity", async ({

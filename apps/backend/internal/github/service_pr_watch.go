@@ -371,6 +371,7 @@ func (s *Service) associatePRWithTask(
 		PRTitle:      pr.Title,
 		HeadBranch:   pr.HeadBranch,
 		BaseBranch:   pr.BaseBranch,
+		HeadSHA:      pr.HeadSHA,
 		AuthorLogin:  pr.AuthorLogin,
 		State:        pr.State,
 		Additions:    pr.Additions,
@@ -737,37 +738,84 @@ func (s *Service) findTaskPRForStatus(ctx context.Context, taskID string, pr *PR
 }
 
 type taskPRSyncState struct {
-	checksTotal, checksPassing                  int
-	unresolved, reviewCount, pendingReviewCount int
-	requiredReviews                             *int
-	baseBranch, mergeableState, state           string
-	mergeQueueState                             string
-	mergeQueuePosition, mergeQueueEstimate      *int
-	mergedAt, closedAt                          *time.Time
-	isDraft                                     *bool
-	changedFiles                                *int
-	mergedByLogin, closedByLogin                *string
-	autoMergeObservedAt                         *time.Time
+	checksTotal, checksPassing                           int
+	unresolved, reviewCount, pendingReviewCount          int
+	requiredReviews                                      *int
+	baseBranch, mergeableState, state                    string
+	mergeQueueState                                      string
+	mergeQueuePosition, mergeQueueEstimate               *int
+	mergeQueueEntryID, mergeQueueEntryHeadSHA            string
+	mergeQueueLastRemovalID, mergeQueueLastRemovalReason string
+	mergeQueueLastRemovalBeforeSHA                       string
+	mergeQueueLastRemovedAt                              *time.Time
+	headSHA                                              string
+	mergedAt, closedAt                                   *time.Time
+	isDraft                                              *bool
+	changedFiles                                         *int
+	mergedByLogin, closedByLogin                         *string
+	autoMergeObservedAt                                  *time.Time
 }
 
-func resolveTaskPRMergeQueueFields(tp *TaskPR, status *PRStatus) (string, *int, *int) {
-	var state string
-	var position, estimate *int
+type taskPRMergeQueueState struct {
+	state, entryID, entryHeadSHA                           string
+	position, estimate                                     *int
+	lastRemovalID, lastRemovalReason, lastRemovalBeforeSHA string
+	lastRemovedAt                                          *time.Time
+}
+
+func resolveTaskPRMergeQueueState(tp *TaskPR, status *PRStatus) taskPRMergeQueueState {
+	var queue taskPRMergeQueueState
 	if tp != nil {
-		state = tp.MergeQueueState
-		position = tp.MergeQueuePosition
-		estimate = tp.MergeQueueEstimatedTimeToMergeSeconds
+		queue.state = tp.MergeQueueState
+		queue.position = tp.MergeQueuePosition
+		queue.estimate = tp.MergeQueueEstimatedTimeToMergeSeconds
+		queue.entryID = tp.MergeQueueEntryID
+		queue.entryHeadSHA = tp.MergeQueueEntryHeadSHA
+		queue.lastRemovalID = tp.MergeQueueLastRemovalID
+		queue.lastRemovedAt = tp.MergeQueueLastRemovedAt
+		queue.lastRemovalReason = tp.MergeQueueLastRemovalReason
+		queue.lastRemovalBeforeSHA = tp.MergeQueueLastRemovalBeforeSHA
 	}
 	if status == nil || status.PR == nil {
-		return state, position, estimate
+		return queue
 	}
 	if strings.EqualFold(status.PR.State, prStateMerged) || strings.EqualFold(status.PR.State, prStateClosed) {
-		return "", nil, nil
+		queue.state, queue.position, queue.estimate = "", nil, nil
+		queue.entryID, queue.entryHeadSHA = "", ""
+	} else if status.mergeQueuePopulated {
+		queue.state = normalizeMergeQueueState(status.MergeQueueState)
+		queue.position = positiveIntPtr(status.MergeQueuePosition)
+		queue.estimate = nonNegativeIntPtr(status.MergeQueueEstimatedTimeToMergeSeconds)
+		queue.entryID = status.MergeQueueEntryID
+		queue.entryHeadSHA = status.MergeQueueEntryHeadSHA
+	} else {
+		// REST and gh CLI status reads do not expose merge-queue fields. They
+		// are still authoritative for the absence of an active entry once the
+		// PR itself was fetched, so do not let an old GraphQL entry identifier
+		// keep auto-merge blocked indefinitely.
+		queue.state, queue.position, queue.estimate = "", nil, nil
+		queue.entryID, queue.entryHeadSHA = "", ""
 	}
-	if !status.mergeQueuePopulated {
-		return state, position, estimate
+	if status.mergeQueueRecoveryPopulated && shouldApplyTaskPRMergeQueueRemoval(queue, status) {
+		queue.lastRemovalID = status.MergeQueueLastRemovalID
+		queue.lastRemovedAt = status.MergeQueueLastRemovedAt
+		queue.lastRemovalReason = status.MergeQueueLastRemovalReason
+		queue.lastRemovalBeforeSHA = status.MergeQueueLastRemovalBeforeSHA
 	}
-	return normalizeMergeQueueState(status.MergeQueueState), positiveIntPtr(status.MergeQueuePosition), nonNegativeIntPtr(status.MergeQueueEstimatedTimeToMergeSeconds)
+	return queue
+}
+
+func shouldApplyTaskPRMergeQueueRemoval(current taskPRMergeQueueState, status *PRStatus) bool {
+	if status == nil || status.MergeQueueLastRemovalID == "" || current.lastRemovalID == status.MergeQueueLastRemovalID {
+		return false
+	}
+	if current.lastRemovalID == "" || current.lastRemovedAt == nil {
+		return true
+	}
+	if status.MergeQueueLastRemovedAt == nil {
+		return false
+	}
+	return status.MergeQueueLastRemovedAt.After(*current.lastRemovedAt)
 }
 
 // resolveTaskPROutcomeFields applies the populated/preserve dance for the
@@ -895,16 +943,24 @@ func (s *Service) prepareTaskPRSyncState(ctx context.Context, tp *TaskPR, status
 	if status.PR.Draft {
 		nextMergeableState = "draft"
 	}
-	mergeQueueState, mergeQueuePosition, mergeQueueEstimate := resolveTaskPRMergeQueueFields(tp, status)
+	queue := resolveTaskPRMergeQueueState(tp, status)
 	nextState, nextMergedAt, nextClosedAt := resolveTerminalMergeState(tp, status.PR)
 	nextIsDraft, nextChangedFiles, nextMergedByLogin, nextClosedByLogin, nextAutoMergeObservedAt :=
 		resolveTaskPROutcomeFields(tp, status)
+	nextHeadSHA := tp.HeadSHA
+	if status.PR.HeadSHA != "" {
+		nextHeadSHA = status.PR.HeadSHA
+	}
 	return taskPRSyncState{
 		checksTotal: nextChecksTotal, checksPassing: nextChecksPassing,
 		unresolved: nextUnresolved, reviewCount: nextReviewCount, pendingReviewCount: nextPendingReviewCount,
 		requiredReviews: nextRequiredReviews, baseBranch: nextBaseBranch, mergeableState: nextMergeableState,
-		mergeQueueState: mergeQueueState, mergeQueuePosition: mergeQueuePosition, mergeQueueEstimate: mergeQueueEstimate,
-		state: nextState, mergedAt: nextMergedAt, closedAt: nextClosedAt,
+		mergeQueueState: queue.state, mergeQueuePosition: queue.position, mergeQueueEstimate: queue.estimate,
+		mergeQueueEntryID: queue.entryID, mergeQueueEntryHeadSHA: queue.entryHeadSHA,
+		mergeQueueLastRemovalID: queue.lastRemovalID, mergeQueueLastRemovalReason: queue.lastRemovalReason,
+		mergeQueueLastRemovalBeforeSHA: queue.lastRemovalBeforeSHA, mergeQueueLastRemovedAt: queue.lastRemovedAt,
+		headSHA: nextHeadSHA,
+		state:   nextState, mergedAt: nextMergedAt, closedAt: nextClosedAt,
 		isDraft: nextIsDraft, changedFiles: nextChangedFiles,
 		mergedByLogin: nextMergedByLogin, closedByLogin: nextClosedByLogin,
 		autoMergeObservedAt: nextAutoMergeObservedAt,
@@ -916,6 +972,7 @@ func taskPRChangedFields(tp *TaskPR, status *PRStatus, next taskPRSyncState) []s
 		return nil
 	}
 	changed := make([]string, 0, 16)
+	changed = appendChangedField(changed, "head_sha", tp.HeadSHA != next.headSHA)
 	changed = appendChangedField(changed, "state", tp.State != next.state)
 	changed = appendChangedField(changed, "pr_title", tp.PRTitle != status.PR.Title)
 	changed = appendChangedField(changed, "additions", tp.Additions != status.PR.Additions)
@@ -925,7 +982,13 @@ func taskPRChangedFields(tp *TaskPR, status *PRStatus, next taskPRSyncState) []s
 	changed = appendChangedField(changed, "mergeable_state", tp.MergeableState != next.mergeableState)
 	changed = appendChangedField(changed, "merge_queue_state", tp.MergeQueueState != next.mergeQueueState)
 	changed = appendChangedField(changed, "merge_queue_position", !intPtrEqual(tp.MergeQueuePosition, next.mergeQueuePosition))
+	changed = appendChangedField(changed, "merge_queue_entry_id", tp.MergeQueueEntryID != next.mergeQueueEntryID)
+	changed = appendChangedField(changed, "merge_queue_entry_head_sha", tp.MergeQueueEntryHeadSHA != next.mergeQueueEntryHeadSHA)
 	changed = appendChangedField(changed, "merge_queue_estimated_time_to_merge_seconds", !intPtrEqual(tp.MergeQueueEstimatedTimeToMergeSeconds, next.mergeQueueEstimate))
+	changed = appendChangedField(changed, "merge_queue_last_removal_id", tp.MergeQueueLastRemovalID != next.mergeQueueLastRemovalID)
+	changed = appendChangedField(changed, "merge_queue_last_removed_at", !timeEqual(tp.MergeQueueLastRemovedAt, next.mergeQueueLastRemovedAt))
+	changed = appendChangedField(changed, "merge_queue_last_removal_reason", tp.MergeQueueLastRemovalReason != next.mergeQueueLastRemovalReason)
+	changed = appendChangedField(changed, "merge_queue_last_removal_before_sha", tp.MergeQueueLastRemovalBeforeSHA != next.mergeQueueLastRemovalBeforeSHA)
 	changed = appendChangedField(changed, "review_count", tp.ReviewCount != next.reviewCount)
 	changed = appendChangedField(
 		changed,
@@ -988,6 +1051,7 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 	changed := len(changedFields) > 0
 
 	tp.State = next.state
+	tp.HeadSHA = next.headSHA
 	tp.PRTitle = status.PR.Title
 	tp.Additions = status.PR.Additions
 	tp.Deletions = status.PR.Deletions
@@ -998,7 +1062,13 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 	tp.MergeableState = next.mergeableState
 	tp.MergeQueueState = next.mergeQueueState
 	tp.MergeQueuePosition = next.mergeQueuePosition
+	tp.MergeQueueEntryID = next.mergeQueueEntryID
+	tp.MergeQueueEntryHeadSHA = next.mergeQueueEntryHeadSHA
 	tp.MergeQueueEstimatedTimeToMergeSeconds = next.mergeQueueEstimate
+	tp.MergeQueueLastRemovalID = next.mergeQueueLastRemovalID
+	tp.MergeQueueLastRemovedAt = next.mergeQueueLastRemovedAt
+	tp.MergeQueueLastRemovalReason = next.mergeQueueLastRemovalReason
+	tp.MergeQueueLastRemovalBeforeSHA = next.mergeQueueLastRemovalBeforeSHA
 	tp.ReviewCount = next.reviewCount
 	tp.PendingReviewCount = next.pendingReviewCount
 	tp.RequiredReviews = next.requiredReviews

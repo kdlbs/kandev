@@ -370,6 +370,39 @@ message Task {
   bool is_ephemeral = 15;
   repeated TaskRepository repositories = 16;
   google.protobuf.Struct metadata = 17; // free-form; plugin-tolerant
+  // RFC3339, set only when the task is archived. Present so a plugin reading
+  // with include_archived can tell a live task from a retired one; absent is
+  // the normal case, not an unknown.
+  optional string archived_at = 18;
+  // Pull requests opened for this task, newest first. A plugin that reports on
+  // delivery cannot otherwise get from a task to its change: the link lives in
+  // github_task_prs, and neither the checkout branch (which is the BASE branch)
+  // nor the title (rewritten to conventional-commit form on the PR) matches.
+  repeated TaskPullRequest pull_requests = 19;
+  // The step the task currently stands on, and its order within that step.
+  // Without these a plugin can read a task's State (created/in progress/review/
+  // completed) but not WHERE on the board it is, so it cannot render, group by,
+  // or reason about a workflow at all.
+  string workflow_step_id = 20;
+  int32 position = 21;
+  // The agent profile running this task, empty when unassigned. Canonically a
+  // `runner` row in workflow_step_participants (ADR 0005 Wave F); this is the
+  // same read-time projection kandev's own callers consume.
+  string assignee_agent_profile_id = 22;
+  // Task labels. Stored as a JSON array string on the model; carried here as a
+  // real repeated field so a plugin does not have to re-parse it.
+  repeated string labels = 23;
+  bool autopilot = 24;
+  // Whether the task consumes a slot in its current step's WIP capacity. A
+  // queued task stays visible but admits nothing, so a capacity report that
+  // counted rows rather than this would over-count.
+  bool wip_admitted = 25;
+  string queued_for_step_id = 26;
+  optional string queued_at = 27; // RFC3339
+  // Office project this task belongs to, empty for kanban-board tasks.
+  string project_id = 28;
+  // Caller-supplied create-idempotency key, empty when the task holds none.
+  string external_id = 29;
 }
 message TaskRepository {
   string id = 1;
@@ -378,6 +411,33 @@ message TaskRepository {
   int32 position = 4;
   string checkout_branch = 5;
 }
+// TaskPullRequest is the read-side view of a task's linked pull request. It
+// carries provider-neutral fields only; provider-specific review metadata stays
+// out of the plugin contract.
+message TaskPullRequest {
+  int64 number = 1;
+  string url = 2;
+  string title = 3;
+  string state = 4; // "open" | "closed" | "merged"
+  string head_branch = 5;
+  string base_branch = 6;
+  bool is_draft = 7;
+  string provider = 8; // "github" | "gitlab"
+  optional string merged_at = 9; // RFC3339
+  // Readiness, already synced by kandev's own PR watcher. A plugin reporting on
+  // what can merge would otherwise re-fetch every one of these from the forge
+  // per pull request, which is both slower and rate-limited.
+  string review_state = 10; // approved | changes_requested | pending | ""
+  string checks_state = 11; // success | failure | pending | ""
+  string mergeable_state = 12; // clean | blocked | behind | dirty | unstable | draft | unknown | ""
+  int32 unresolved_review_threads = 13;
+  int32 checks_total = 14;
+  int32 checks_passing = 15;
+  int32 additions = 16;
+  int32 deletions = 17;
+  string author_login = 18;
+  optional string closed_at = 19; // RFC3339
+}
 
 message TaskFilter {
   repeated string workspace_ids = 1; // empty → all the plugin may see
@@ -385,6 +445,9 @@ message TaskFilter {
   repeated string states = 3;
   optional string parent_id = 4;
   bool include_ephemeral = 5; // default false (kanban-visible only)
+  // default false, matching the previous hardcoded behaviour: a plugin that
+  // does not ask still sees only live tasks.
+  bool include_archived = 6;
 }
 message ListTasksRequest {
   TaskFilter filter = 1;
@@ -444,6 +507,26 @@ message WorkflowStep {
   string name = 3;
   int32 position = 4;
   string stage_type = 5; // work | review | approval | custom
+  // Presentation and capacity, so a plugin rendering a board reads the same
+  // step colour the operator already sees rather than inventing its own, and
+  // can report a step against its own WIP limit.
+  string color = 6;
+  bool is_start_step = 7;
+  int32 wip_limit = 8; // 0 means unlimited
+  // The agent profile this step runs work under, empty when it inherits.
+  string agent_profile_id = 9;
+  // The on_enter action TYPES configured on this step, as authored
+  // (e.g. "auto_start_agent", "queue_run"), so a plugin can describe this
+  // step's intent instead of guessing from the step name or stage_type.
+  // This lists what is configured, not a guarantee that every listed type
+  // executes on every transition path: an ordinary task move currently runs
+  // only a subset (auto_start_agent, configure_session, enable_plan_mode,
+  // set_session_mode, reset_agent_context); queue_run,
+  // queue_run_for_each_participant, clear_decisions, and run_code_review
+  // currently execute only via engine-driven triggers (e.g. Office). Action
+  // config is deliberately not exposed: it carries target task ids, payloads
+  // and profile ids. Plugins must ignore action types they do not recognize.
+  repeated string on_enter_action_types = 10;
 }
 message ListWorkflowStepsRequest {
   string workflow_id = 1;

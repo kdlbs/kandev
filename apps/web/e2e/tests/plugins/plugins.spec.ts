@@ -616,6 +616,86 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await expect(modal).not.toBeVisible();
   });
 
+  test("long plugin modal content stays contained and its final control remains operable", async ({
+    testPage,
+    prCapture,
+  }) => {
+    test.setTimeout(60_000);
+
+    await openInstallDialog(testPage);
+    await uploadPackage(testPage, PACKAGE_PATH);
+    await expect(testPage.getByTestId(`plugin-row-${PLUGIN_ID}`)).toBeVisible({ timeout: 15_000 });
+    await expect(
+      testPage.getByTestId(`plugin-row-${PLUGIN_ID}`).getByText("Active", { exact: true }),
+    ).toBeVisible({ timeout: 30_000 });
+
+    await testPage.goto("/");
+    await testPage.reload();
+    await waitForPluginBundleReady(testPage);
+    await testPage.keyboard.press("ControlOrMeta+Shift+J");
+
+    const dialog = testPage.getByRole("dialog", { name: "Demo Modal" });
+    const body = dialog.locator('[data-testid^="plugin-modal-body-"]');
+    const title = dialog.locator('[data-slot="dialog-title"]');
+    const close = dialog.locator('[data-slot="dialog-close"]');
+    const finalAction = dialog.getByTestId("hello-long-modal-final-action");
+    await expect(dialog).toBeVisible();
+    await expect(body).toHaveCount(1);
+    await expect(finalAction).toBeVisible();
+    await dialog.evaluate(async (element) => {
+      const animations = element.getAnimations({ subtree: true }).filter((animation) => {
+        if (animation.playState !== "running") return false;
+        const iterations = animation.effect?.getComputedTiming().iterations;
+        return typeof iterations === "number" && Number.isFinite(iterations);
+      });
+      await Promise.all(animations.map((animation) => animation.finished.catch(() => undefined)));
+    });
+
+    const metrics = await body.evaluate((element) => {
+      const node = element as HTMLElement;
+      return { clientHeight: node.clientHeight, scrollHeight: node.scrollHeight };
+    });
+    expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
+
+    const viewport = await testPage.evaluate(() => ({ width: innerWidth, height: innerHeight }));
+    for (const [label, locator] of [
+      ["dialog", dialog],
+      ["title", title],
+      ["close", close],
+    ] as const) {
+      const box = await locator.boundingBox();
+      if (!box) throw new Error(`${label} has no layout box`);
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.y).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+      expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
+    }
+
+    await body.evaluate((element) => {
+      const node = element as HTMLElement;
+      node.scrollTop = node.scrollHeight;
+    });
+    await expect
+      .poll(() => body.evaluate((element) => (element as HTMLElement).scrollTop))
+      .toBeGreaterThan(0);
+    await expect(finalAction).toBeInViewport();
+    const finalBox = await finalAction.boundingBox();
+    if (!finalBox) throw new Error("final plugin action has no layout box");
+    expect(finalBox.y).toBeGreaterThanOrEqual(0);
+    expect(finalBox.y + finalBox.height).toBeLessThanOrEqual(viewport.height);
+    await finalAction.click();
+    await expect(finalAction).toHaveText("Plugin modal action complete");
+    if (prCapture.capturing) {
+      await prCapture.screenshot("long-plugin-modal", {
+        caption:
+          "Long plugin modal content remains scrollable while the title, close control, and final action stay usable.",
+      });
+    }
+
+    await close.click();
+    await expect(dialog).not.toBeVisible();
+  });
+
   // `PluginModalHost` owns a TooltipProvider so plugin modal content remains
   // safe in both AppShell and isolated mounts. The unit test for this asserts
   // via focus, because jsdom does not

@@ -1681,6 +1681,12 @@
   "failedToStartImplementingPlan": "开始实施计划失败",
   "failedToStartImplementationSession": "启动实施会话失败",
   "failedToMoveTask": "移动任务失败",
+  "taskMoveErrorGeneric": "无法移动任务。请重试。",
+  "taskMoveErrorActiveSession": "请先停止活动会话，再移动任务。",
+  "taskMoveErrorArchived": "已归档的任务无法移动。",
+  "taskMoveErrorDifferentWorkspace": "任务和目标工作流必须使用同一工作区。",
+  "taskMoveErrorWorkflowStep": "目标步骤不属于目标工作流。",
+  "taskMoveErrorWipLimit": "目标工作流步骤已达到 WIP 限制。",
   "movedTasksStepDescription_one": "任务现已位于所选步骤中。",
   "movedTasksStepDescription_other": "任务现已位于所选步骤中。",
   "movedTasksToStep_one": "已将任务移动到步骤",
@@ -1875,5 +1881,12 @@
   "baseBranchNotSet": "未设置基础分支",
   "launchRecoveryFailed": "无法开始恢复",
   "tryRecoveryAgain": "请再次尝试恢复操作。",
-  "launchFailedSeeDetails": "任务启动失败。打开任务详情以查看恢复操作。"
+  "launchFailedSeeDetails": "任务启动失败。打开任务详情以查看恢复操作。",
+  "branchPoliciesGroup": "分支策略",
+  "branchesGroup": "分支",
+  "branchPolicyMarker": "策略",
+  "branchPolicyOptionSummary": "从 {{base}} 到 {{target}}",
+  "branchPolicySelected": "{{name}}（从 {{base}}）",
+  "branchPolicyUnavailable": "基础分支不可用。请刷新分支或编辑此策略。",
+  "branchPolicyRequiresSingleRepository": "使用本地执行器时，分支策略需要单个仓库。"
 }

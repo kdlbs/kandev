@@ -39,6 +39,7 @@ test("nests multi-repository changes below each repository on desktop and mobile
   execSync('git commit --allow-empty -m "init"', { cwd: extraRepoDir, env: gitEnv });
   const extraRepo = await apiClient.createRepository(seedData.workspaceId, extraRepoDir, "main", {
     name: "indent-extra-repo",
+    pull_before_worktree: false,
   });
 
   const task = await apiClient.createTaskWithAgent(

@@ -1171,6 +1171,47 @@ func TestResolveResumeBaseBranchKeepsLegacyValueWhenRepositoryRowsAreAmbiguous(t
 	}
 }
 
+func TestResumeUsesTaskRepositoryBranchPolicyTemplateSnapshot(t *testing.T) {
+	for _, testCase := range []struct {
+		name     string
+		snapshot string
+		want     string
+	}{
+		{name: "policy snapshot overrides repository template", snapshot: "policy/{title}", want: "policy/{title}"},
+		{name: "empty snapshot falls back to repository template", want: "repository/{title}"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			repo := newMockRepository()
+			repo.repositories["repo-1"] = &models.Repository{
+				ID: "repo-1", WorkspaceID: "workspace-1", Name: "widgets", SourceType: sourceTypeLocal,
+				LocalPath: t.TempDir(), WorktreeBranchTemplate: "repository/{title}",
+			}
+			repo.taskRepositories["task-repo-1"] = &models.TaskRepository{
+				ID: "task-repo-1", TaskID: "task-1", RepositoryID: "repo-1",
+				BranchPolicyBranchTemplate: testCase.snapshot,
+			}
+			exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+			info, err := exec.resolveTaskRepoInfoForSession(context.Background(), "session-1", repo.taskRepositories["task-repo-1"])
+			if err != nil {
+				t.Fatalf("resolveTaskRepoInfoForSession: %v", err)
+			}
+			if info.WorktreeBranchTemplate != testCase.want {
+				t.Fatalf("resolved worktree template = %q, want %q", info.WorktreeBranchTemplate, testCase.want)
+			}
+
+			req := &LaunchAgentRequest{}
+			exec.applyResumeWorktreeConfig(
+				context.Background(), &v1.Task{ID: "task-1", Title: "Resume task"}, req,
+				repo.repositories["repo-1"], "repo-1", repo.repositories["repo-1"].LocalPath, "main", nil,
+			)
+			if req.WorktreeBranchTemplate != testCase.want {
+				t.Fatalf("resume request worktree template = %q, want %q", req.WorktreeBranchTemplate, testCase.want)
+			}
+		})
+	}
+}
+
 func TestApplyResumeWorktreeConfigPreservesSelectedRepositoryDestination(t *testing.T) {
 	primaryDestination := resumeTestContributionDestination("200")
 	selectedDestination := resumeTestContributionDestination("201")

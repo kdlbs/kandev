@@ -32,6 +32,7 @@ export const defaultState = {
   workspaces: defaultWorkspaceState.workspaces,
   repositories: defaultWorkspaceState.repositories,
   repositorySets: defaultWorkspaceState.repositorySets,
+  repositoryBranchPolicies: defaultWorkspaceState.repositoryBranchPolicies,
   repositoryBranches: defaultWorkspaceState.repositoryBranches,
   repositoryScripts: defaultWorkspaceState.repositoryScripts,
   executors: defaultSettingsState.executors,
@@ -263,6 +264,23 @@ function mergeGitHubState(initialState: HydrationState) {
       ...defaultState.githubAppRegistrations,
       ...initialState.githubAppRegistrations,
     },
+    taskPRs: mergeTaskPRState(initialState),
+  };
+}
+
+function mergeTaskPRState(initialState: HydrationState) {
+  const incoming = initialState.taskPRs;
+  return {
+    ...defaultState.taskPRs,
+    ...incoming,
+    byTaskId: { ...defaultState.taskPRs.byTaskId, ...incoming?.byTaskId },
+    deletedAssociationIdsByTaskId: {
+      ...defaultState.taskPRs.deletedAssociationIdsByTaskId,
+      ...incoming?.deletedAssociationIdsByTaskId,
+    },
+    workspaceId: incoming?.workspaceId ?? initialState.workspaces?.activeId ?? null,
+    workspaceContextGeneration:
+      incoming?.workspaceContextGeneration ?? initialState.workspaceContextGeneration ?? 0,
   };
 }
 
@@ -311,6 +329,10 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     workspaces: { ...defaultState.workspaces, ...initialState.workspaces },
     repositories: { ...defaultState.repositories, ...initialState.repositories },
     repositorySets: { ...defaultState.repositorySets, ...initialState.repositorySets },
+    repositoryBranchPolicies: {
+      ...defaultState.repositoryBranchPolicies,
+      ...initialState.repositoryBranchPolicies,
+    },
     repositoryBranches: { ...defaultState.repositoryBranches, ...initialState.repositoryBranches },
     repositoryScripts: { ...defaultState.repositoryScripts, ...initialState.repositoryScripts },
     executors: { ...defaultState.executors, ...initialState.executors },
@@ -364,7 +386,6 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
       ...initialState.embeddedVscodeSupport,
     },
     ...mergeGitHubState(initialState),
-    taskPRs: { ...defaultState.taskPRs, ...initialState.taskPRs },
     taskIssues: { ...defaultState.taskIssues, ...initialState.taskIssues },
     pendingPrUrlByTaskId: {
       ...defaultState.pendingPrUrlByTaskId,

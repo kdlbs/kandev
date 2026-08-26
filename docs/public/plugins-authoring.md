@@ -854,11 +854,20 @@ declared `scope`, strips selectors from the untrusted body, and calls the
 plugin's optional `ActionHandler` with a `VerifiedActionContext`.
 
 ```yaml
+min_kandev_version: "0.91.1"
 actions:
   - key: "pullrequests.link"
     scope: "task"
+    access: "authenticated"
     max_body_bytes: 32768
 ```
+
+`access` defaults to `authenticated`. Set it to `admin` for instance-wide
+configuration or credentials that only a Kandev administrator may manage. The
+host checks this policy before reading the bounded envelope or invoking the
+plugin, so the plugin does not need to infer roles from actor IDs. An `admin`
+action requires `min_kandev_version: "0.91.1"` or later; validation rejects a
+missing or older minimum because earlier hosts do not enforce action access.
 
 ```ts
 const result = await host.api.invokeAction(
@@ -882,7 +891,8 @@ Kandev verifies the repository worktree and derives its non-empty head branch; a
 only host-verified `actorID`, `workspaceID`, `taskID`, `sessionID`, `repositoryID`,
 and derived `headBranch` plus
 the bounded JSON `Body`. Unknown actions return 404; bad envelopes and
-scope-selector combinations return 400; unauthenticated calls return 401.
+scope-selector combinations return 400; unauthenticated calls return 401; and
+members calling an `admin` action receive 403.
 
 The host gives each action 15 seconds and cancels its RPC when the browser
 abandons the request. Pass the `AbortSignal` supplied to your UI calls, and in

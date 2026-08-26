@@ -16,7 +16,7 @@ func itoa(n int) string { return strconv.Itoa(n) }
 
 var errTestHealth = errors.New("test health failure")
 
-func TestRunDevLaunchesBackendThenWebAndOpensBrowser(t *testing.T) {
+func TestRunDevBuildVersionAndLaunchesBackendThenWebAndOpensBrowser(t *testing.T) {
 	repo := makeRepoTree(t)
 	t.Chdir(repo)
 	t.Setenv("KANDEV_TASK_ID", "")
@@ -89,9 +89,15 @@ func TestRunDevLaunchesBackendThenWebAndOpensBrowser(t *testing.T) {
 		return &managedProcess{}, func() {}, nil
 	}
 
-	code := runDev(context.Background(), Options{Command: CommandDev})
+	var code int
+	output := captureLauncherStdout(t, func() {
+		code = runDev(context.Background(), Options{Command: CommandDev}, BuildInfo{Version: "1.2.3"})
+	})
 	if code != 0 {
 		t.Fatalf("runDev() = %d, want 0", code)
+	}
+	if !strings.Contains(output, "[kandev] version: 1.2.3\n") {
+		t.Fatalf("startup output = %q, missing build version", output)
 	}
 	want := []string{
 		"new-supervisor",
@@ -212,7 +218,7 @@ func TestRunDevUsesConfiguredHealthTimeoutForBackendAndWeb(t *testing.T) {
 		return &managedProcess{}, func() {}, nil
 	}
 
-	if code := runDev(context.Background(), Options{Command: CommandDev}); code != 0 {
+	if code := runDev(context.Background(), Options{Command: CommandDev}, BuildInfo{}); code != 0 {
 		t.Fatalf("runDev() = %d, want 0", code)
 	}
 	want := 12345 * time.Millisecond
@@ -266,7 +272,7 @@ func TestRunDevHeadlessSkipsBrowser(t *testing.T) {
 		return &managedProcess{}, func() {}, nil
 	}
 
-	code := runDev(context.Background(), Options{Command: CommandDev, Headless: true})
+	code := runDev(context.Background(), Options{Command: CommandDev, Headless: true}, BuildInfo{})
 	if code != 0 {
 		t.Fatalf("runDev(headless) = %d, want 0", code)
 	}
@@ -296,7 +302,7 @@ func TestRunDevAbortsOnBackupFailureBeforeLaunch(t *testing.T) {
 		return nil, nil, nil
 	}
 
-	code := runDev(context.Background(), Options{Command: CommandDev})
+	code := runDev(context.Background(), Options{Command: CommandDev}, BuildInfo{})
 	if code != 1 {
 		t.Fatalf("runDev() = %d, want 1", code)
 	}
@@ -350,7 +356,7 @@ func TestRunDevShutsDownTreeOnBackendHealthFailure(t *testing.T) {
 		return nil, nil, nil
 	}
 
-	code := runDev(context.Background(), Options{Command: CommandDev})
+	code := runDev(context.Background(), Options{Command: CommandDev}, BuildInfo{})
 	if code != 1 {
 		t.Fatalf("runDev() = %d, want 1", code)
 	}
@@ -415,7 +421,7 @@ func TestRunDevShutsDownTreeOnBackendReadinessFailure(t *testing.T) {
 		return nil, nil, nil
 	}
 
-	code := runDev(context.Background(), Options{Command: CommandDev})
+	code := runDev(context.Background(), Options{Command: CommandDev}, BuildInfo{})
 	if code != 1 {
 		t.Fatalf("runDev() = %d, want 1", code)
 	}
@@ -480,7 +486,7 @@ func TestRunDevShutsDownTreeWhenWebChildExits(t *testing.T) {
 	// signal waitForAppExit selects on.
 	close(webDone)
 
-	code := runDev(context.Background(), Options{Command: CommandDev, Headless: true})
+	code := runDev(context.Background(), Options{Command: CommandDev, Headless: true}, BuildInfo{})
 	if code != 7 {
 		t.Fatalf("runDev() = %d, want the web child's exit code 7", code)
 	}
@@ -492,7 +498,7 @@ func TestRunDevShutsDownTreeWhenWebChildExits(t *testing.T) {
 func TestRunDevFailsWhenRepoRootNotFound(t *testing.T) {
 	t.Chdir(t.TempDir())
 
-	code := runDev(context.Background(), Options{Command: CommandDev})
+	code := runDev(context.Background(), Options{Command: CommandDev}, BuildInfo{})
 	if code != 2 {
 		t.Fatalf("runDev() = %d, want 2", code)
 	}

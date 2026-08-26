@@ -15,6 +15,7 @@ const CONFLICT_BANNER_TEST_ID = "pr-conflict-banner";
 function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
   return {
     id: "id",
+    workspace_id: "workspace-1",
     task_id: "task-1",
     owner: "o",
     repo: "r",

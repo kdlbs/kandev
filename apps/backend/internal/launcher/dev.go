@@ -20,7 +20,7 @@ var (
 // Settings-triggered restart rebuilds from source) plus the Vite dev server.
 // All dev state lives under <repoRoot>/.kandev-dev/ so `make dev` never
 // mutates the user's production ~/.kandev.
-func runDev(ctx context.Context, opts Options) int {
+func runDev(ctx context.Context, opts Options, build BuildInfo) int {
 	cfg, code := devLaunchConfigFor(opts)
 	if code != 0 {
 		return code
@@ -29,7 +29,7 @@ func runDev(ctx context.Context, opts Options) int {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
 	}
-	logStartup("dev mode: using local repo", cfg.ports, cfg.dbPath, cfg.logLevel, serverHostForConfig(cfg.startup))
+	logStartup("dev mode: using local repo", build.Version, cfg.ports, cfg.dbPath, cfg.logLevel, serverHostForConfig(cfg.startup))
 
 	ignoreBrokenPipeSignal()
 	setLauncherShutdownDebug(cfg.debug || os.Getenv("KANDEV_SHUTDOWN_DEBUG") == "1")
@@ -77,7 +77,10 @@ func runDev(ctx context.Context, opts Options) int {
 		return 1
 	}
 	fmt.Printf("[kandev] backend ready at %s\n", cfg.ports.BackendURL)
+	return runDevWeb(ctx, opts, cfg, supervisor, backend)
+}
 
+func runDevWeb(ctx context.Context, opts Options, cfg devLaunchConfig, supervisor *processSupervisor, backend *restartableBackend) int {
 	webURL := fmt.Sprintf("http://localhost:%d", cfg.ports.WebPort)
 	fmt.Println("[kandev] starting web...")
 	webProc, err := launchWebChild(cfg.repoRoot, cfg.ports, supervisor)
