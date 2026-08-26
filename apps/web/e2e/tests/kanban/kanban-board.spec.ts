@@ -102,6 +102,7 @@ test.describe("Kanban board", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     await testPage.setViewportSize({ width: 1280, height: 800 });
     const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Mouse pan workflow");
@@ -142,6 +143,9 @@ test.describe("Kanban board", () => {
     await expect
       .poll(() => scrollWindow.evaluate((element) => element.scrollLeft))
       .toBeGreaterThan(0);
+    await prCapture.screenshot("desktop-kanban-mouse-pan", {
+      caption: "Desktop Kanban after dragging empty board space to pan horizontally.",
+    });
 
     const pannedPosition = await scrollWindow.evaluate((element) => element.scrollLeft);
     expect(pannedPosition).toBeGreaterThan(0);
@@ -167,7 +171,27 @@ test.describe("Kanban board", () => {
     await scrollWindow.evaluate((element) => {
       element.scrollLeft = 0;
     });
-    await kanban.moveTaskWithinWorkflow(task.id, targetStep.id);
+    const sourceCard = kanban.taskCard(task.id);
+    const targetColumn = kanban.columnByStepId(targetStep.id);
+    const sourceBox = await sourceCard.boundingBox();
+    if (!sourceBox) throw new Error("Kanban DnD source has no layout box");
+    await testPage.mouse.move(
+      sourceBox.x + sourceBox.width / 2,
+      sourceBox.y + sourceBox.height / 2,
+    );
+    await testPage.mouse.down();
+    await testPage.mouse.move(
+      sourceBox.x + sourceBox.width / 2 + 20,
+      sourceBox.y + sourceBox.height / 2,
+    );
+    await expect(sourceCard).toHaveClass(/opacity-50/);
+    const targetBox = await targetColumn.boundingBox();
+    if (!targetBox) throw new Error("Kanban DnD target has no layout box");
+    await testPage.mouse.move(
+      targetBox.x + targetBox.width / 2,
+      targetBox.y + targetBox.height / 2,
+    );
+    await testPage.mouse.up();
 
     await expect
       .poll(async () => (await apiClient.getTask(task.id)).workflow_step_id)
