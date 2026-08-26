@@ -507,18 +507,36 @@ func appendSessionModelsMessage(sessionID string, session *models.TaskSession, l
 	if lifecycleMgr == nil {
 		return result
 	}
-	modelState := lifecycleMgr.GetModelStateForSession(sessionID)
-	if modelState == nil || (modelState.CurrentModelID == "" && len(modelState.Models) == 0) {
+	return appendSessionModelsMessageFromState(
+		sessionID,
+		session,
+		lifecycleMgr.GetModelStateForSession(sessionID),
+		result,
+	)
+}
+
+func appendSessionModelsMessageFromState(sessionID string, session *models.TaskSession, modelState *lifecycle.CachedModelState, result []*ws.Message) []*ws.Message {
+	if modelState == nil {
 		return result
 	}
 	snapshot, _ := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState])
+	replayState := *modelState
+	if len(replayState.Models) == 0 &&
+		len(replayState.ConfigOptions) == 0 &&
+		!replayState.ConfigOptionsSettled &&
+		len(snapshot.Models) > 0 {
+		replayState.Models = snapshot.Models
+	}
+	if replayState.CurrentModelID == "" && len(replayState.Models) == 0 {
+		return result
+	}
 	notification, err := ws.NewNotification(ws.ActionSessionModelsUpdated, lifecycle.SessionModelsEventPayload{
 		TaskID:               session.TaskID,
 		SessionID:            sessionID,
-		CurrentModelID:       modelState.CurrentModelID,
-		Models:               modelState.Models,
-		ConfigOptions:        modelState.ConfigOptions,
-		ConfigOptionsSettled: modelState.ConfigOptionsSettled || snapshot.ConfigOptionsSettled,
+		CurrentModelID:       replayState.CurrentModelID,
+		Models:               replayState.Models,
+		ConfigOptions:        replayState.ConfigOptions,
+		ConfigOptionsSettled: replayState.ConfigOptionsSettled || snapshot.ConfigOptionsSettled,
 		ConfigBaseline:       sessionACPConfigBaseline(session),
 	})
 	if err == nil {

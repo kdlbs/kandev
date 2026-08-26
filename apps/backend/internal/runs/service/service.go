@@ -32,8 +32,26 @@ import (
 // declarations MUST match. When Phase 2 final lands the duplicate is
 // dropped and the engine's interface is imported here directly.
 type RunQueueAdapter interface {
-	QueueRun(ctx context.Context, req QueueRunRequest) error
+	QueueRun(ctx context.Context, req QueueRunRequest) (QueueOutcome, error)
 }
+
+// QueueOutcome reports what QueueRun actually did with a request. A
+// duplicated declaration lives in internal/workflow/engine (see that
+// package's RunQueueAdapter doc); both MUST match.
+type QueueOutcome string
+
+const (
+	// QueueOutcomeQueued means a new runs row was inserted.
+	QueueOutcomeQueued QueueOutcome = "queued"
+	// QueueOutcomeDeduped means an existing row with the same
+	// IdempotencyKey already exists within the dedupe window, so nothing
+	// was inserted.
+	QueueOutcomeDeduped QueueOutcome = "deduped"
+	// QueueOutcomeCoalesced means the request was merged into an existing
+	// queued row for the same agent + reason within the coalescing
+	// window, so nothing new was inserted.
+	QueueOutcomeCoalesced QueueOutcome = "coalesced"
+)
 
 // QueueRunRequest carries everything the queue needs to insert a row.
 // Fields:
@@ -141,40 +159,40 @@ func (s *Service) SubscribeSignal() <-chan struct{} { return s.signalCh }
 //  5. Publish OfficeRunQueued.
 //  6. Signal the scheduler (B3.5 — event-driven claim).
 //
-// Error semantics: idempotent / coalesced requests return nil — the
-// caller cannot distinguish a fresh insert from a deduplicated one
-// at the API level, which matches today's office.QueueRun contract.
-func (s *Service) QueueRun(ctx context.Context, req QueueRunRequest) error {
+// The returned QueueOutcome lets the caller distinguish a fresh insert from
+// a deduplicated or coalesced request instead of treating any nil error as
+// "a run was queued".
+func (s *Service) QueueRun(ctx context.Context, req QueueRunRequest) (QueueOutcome, error) {
 	agentInstanceID, err := s.resolveAgentInstance(ctx, req)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if agentInstanceID == "" {
-		return fmt.Errorf("queue run: agent_profile_id is required")
+		return "", fmt.Errorf("queue run: agent_profile_id is required")
 	}
 
 	if req.IdempotencyKey != "" {
 		dup, err := s.repo.CheckIdempotencyKey(ctx, req.IdempotencyKey, IdempotencyWindowHours)
 		if err != nil {
-			return fmt.Errorf("idempotency check: %w", err)
+			return "", fmt.Errorf("idempotency check: %w", err)
 		}
 		if dup {
 			s.log.Debug("run skipped (idempotent)",
 				zap.String("key", req.IdempotencyKey))
-			return nil
+			return QueueOutcomeDeduped, nil
 		}
 	}
 
 	payloadMap := runPayload(req, agentInstanceID)
 	payload, err := encodePayload(payloadMap)
 	if err != nil {
-		return fmt.Errorf("encode payload: %w", err)
+		return "", fmt.Errorf("encode payload: %w", err)
 	}
 
 	if shouldCoalesceRun(req) {
 		coalesced, err := s.repo.CoalesceRun(ctx, agentInstanceID, req.Reason, CoalesceWindowSeconds, payload)
 		if err != nil {
-			return fmt.Errorf("coalesce check: %w", err)
+			return "", fmt.Errorf("coalesce check: %w", err)
 		}
 		if coalesced {
 			s.log.Debug("run coalesced",
@@ -183,13 +201,13 @@ func (s *Service) QueueRun(ctx context.Context, req QueueRunRequest) error {
 			// Coalesced rows are merged into an existing queued row, so
 			// no new signal is needed — the scheduler already saw the
 			// original insert.
-			return nil
+			return QueueOutcomeCoalesced, nil
 		}
 	}
 
 	row, err := s.insertRun(ctx, agentInstanceID, req, payload)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	s.log.Info("run queued",
@@ -199,7 +217,7 @@ func (s *Service) QueueRun(ctx context.Context, req QueueRunRequest) error {
 
 	s.publishRunQueued(ctx, row, req.IdempotencyKey)
 	s.signal()
-	return nil
+	return QueueOutcomeQueued, nil
 }
 
 // insertRun creates the runs row and returns it. Pulled out of

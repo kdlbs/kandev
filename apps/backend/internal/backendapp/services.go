@@ -240,7 +240,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	if githubSvc != nil {
 		githubSvc.SetCredentialBroker(github.NewCredentialBrokerFromBroker(gitCredentialBroker))
 	}
-	shareHTTP := initShareHandlers(dbPool, repos.Task, githubSvc, log, version)
+	shareHTTP := initShareHandlers(dbPool, repos.Task, taskSvc, githubSvc, log, version)
 
 	// Plumb code-host branch listing into the task service so provider-backed
 	// ("Remote") repos serve branches from their owning provider rather than relying
@@ -1047,12 +1047,13 @@ func initSentryService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secr
 func initShareHandlers(
 	dbPool *db.Pool,
 	taskRepo share.TaskReader,
+	authorizer share.TaskAccessAuthorizer,
 	githubSvc *github.Service,
 	log *logger.Logger,
 	version string,
 ) *share.HTTPHandlers {
 	h, _, err := share.Provide(
-		dbPool.Writer(), dbPool.Reader(), taskRepo, githubSvc, log,
+		dbPool.Writer(), dbPool.Reader(), taskRepo, authorizer, githubSvc, log,
 		share.Config{KandevVersion: version},
 	)
 	if err != nil {

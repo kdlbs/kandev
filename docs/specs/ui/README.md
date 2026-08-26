@@ -152,6 +152,7 @@ contract that other capabilities can reuse.
 - [Persistent status motion](system-design/persistent-status-motion.md)
 - [Prompt History Panel](system-design/prompt-history-panel.md)
 - [Quick Chat and Terminal Tabs](system-design/quick-terminal.md)
+- [Resizable Markdown Table Columns](system-design/resizable-markdown-tables.md)
 - [Task Layout Profiles](system-design/task-layout-profiles.md)
 - [Task Transcript History Visibility](system-design/task-prompt-transcript-visibility.md)
 

@@ -461,6 +461,10 @@ func TestService_MoveTaskWithOptionsAllowsRunningPrimarySession(t *testing.T) {
 	if got := data["session_id"]; got != "session-running-primary" {
 		t.Fatalf("session_id = %v, want session-running-primary", got)
 	}
+	transitionID, ok := data["step_transition_id"].(int64)
+	if !ok || transitionID == 0 {
+		t.Fatalf("step_transition_id = %v (%T), want a positive ledger identifier", data["step_transition_id"], data["step_transition_id"])
+	}
 }
 
 func TestService_MoveTaskQueuesFullWIPLimitedTarget(t *testing.T) {

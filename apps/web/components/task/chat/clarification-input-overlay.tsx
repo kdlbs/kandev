@@ -21,6 +21,7 @@ import {
   countRunes,
 } from "./clarification-overlay-parts";
 import { ClarificationHeaderActions } from "./clarification-overlay-header";
+import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 
 type ClarificationInputOverlayProps = {
@@ -43,6 +44,15 @@ type SingleQuestionMeta = {
   question: ClarificationQuestion;
   questionId: string;
 };
+
+function clarificationHeaderClassName(total: number): string {
+  return cn(
+    "flex min-h-11 justify-between",
+    total > 1
+      ? "flex-col items-stretch gap-2 px-3 py-2 md:flex-row md:items-center md:gap-3 md:px-4 md:py-0"
+      : "items-center gap-3 px-4",
+  );
+}
 
 function readSingleQuestionMeta(message: Message | null | undefined): SingleQuestionMeta | null {
   if (!message) return null;
@@ -603,7 +613,7 @@ export function ClarificationInputOverlay({
   return (
     <div className="relative" data-testid="clarification-overlay">
       <div
-        className="flex min-h-11 items-center justify-between gap-3 px-4"
+        className={clarificationHeaderClassName(total)}
         data-testid="clarification-overlay-header"
       >
         <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -620,7 +630,7 @@ export function ClarificationInputOverlay({
           {total > 1 && (
             <span
               data-testid="clarification-group-progress"
-              className="min-w-0 truncate text-xs text-muted-foreground"
+              className="ml-auto min-w-0 truncate text-xs text-muted-foreground md:ml-0"
             >
               {group.answeredCount} of {group.total} answered
             </span>

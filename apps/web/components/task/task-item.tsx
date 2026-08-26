@@ -328,7 +328,7 @@ function TaskStateIcon({
 }
 
 function TaskItemTitle({ title }: { title: string }) {
-  return <ScrollOnOverflow className="min-w-0 w-full">{title}</ScrollOnOverflow>;
+  return <ScrollOnOverflow className="min-w-0">{title}</ScrollOnOverflow>;
 }
 
 function TaskItemContent({
