@@ -201,6 +201,7 @@ describe("agent profile events", () => {
 
     expect(store.getState().settingsAgents.items).toHaveLength(0);
     expect(store.getState().agentProfiles.items[0]?.inference_capable).toBe(true);
+    expect(store.getState().agentProfiles.version).toBe(1);
   });
 
   it("does not resurrect a deleted profile from a delayed create event", () => {

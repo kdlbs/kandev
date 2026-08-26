@@ -133,7 +133,11 @@ function handleProfileCreated(
       : item,
   );
   return {
-    agentProfiles: { ...state.agentProfiles, items: nextProfiles },
+    agentProfiles: {
+      ...state.agentProfiles,
+      items: nextProfiles,
+      version: state.agentProfiles.version + 1,
+    },
     settingsAgents: { items: nextAgents },
   };
 }
@@ -165,7 +169,11 @@ function handleProfileUpdated(
       : item,
   );
   return {
-    agentProfiles: { ...state.agentProfiles, items: nextProfiles },
+    agentProfiles: {
+      ...state.agentProfiles,
+      items: nextProfiles,
+      version: state.agentProfiles.version + 1,
+    },
     settingsAgents: { items: nextAgents },
   };
 }
@@ -200,6 +208,7 @@ function handleProfileDeleted(
     agentProfiles: {
       ...state.agentProfiles,
       items: state.agentProfiles.items.filter((p) => p.id !== normalized.id),
+      version: state.agentProfiles.version + 1,
     },
     settingsAgents: { items: nextAgents },
   };
