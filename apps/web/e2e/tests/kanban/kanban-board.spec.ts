@@ -98,4 +98,101 @@ test.describe("Kanban board", () => {
     await expect(search).toBeVisible({ timeout: 5_000 });
     await expect(stageNavigator).toHaveCount(0);
   });
+  test("pans overflowing board space without blocking card moves", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await testPage.setViewportSize({ width: 1280, height: 800 });
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Mouse pan workflow");
+    const sourceStep = await apiClient.createWorkflowStep(workflow.id, "Source", 0, {
+      is_start_step: true,
+    });
+    const targetStep = await apiClient.createWorkflowStep(workflow.id, "Target", 1);
+    for (let position = 2; position < 6; position += 1) {
+      await apiClient.createWorkflowStep(workflow.id, `Overflow ${position}`, position);
+    }
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: workflow.id,
+    });
+    const task = await apiClient.createTask(seedData.workspaceId, "Mouse pan move task", {
+      workflow_id: workflow.id,
+      workflow_step_id: sourceStep.id,
+    });
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    const scrollWindow = testPage.getByTestId("desktop-kanban-scroll-window");
+    const sourceScrollRegion = kanban
+      .columnByStepId(sourceStep.id)
+      .getByTestId("kanban-column-scroll");
+    await expect(sourceScrollRegion).toBeVisible();
+    const [windowBox, sourceScrollBox] = await Promise.all([
+      scrollWindow.boundingBox(),
+      sourceScrollRegion.boundingBox(),
+    ]);
+    if (!windowBox || !sourceScrollBox) throw new Error("Kanban pan targets have no layout boxes");
+
+    const startX = sourceScrollBox.x + Math.min(sourceScrollBox.width - 12, 80);
+    const startY = sourceScrollBox.y + sourceScrollBox.height - 8;
+    await testPage.mouse.move(startX, startY);
+    await testPage.mouse.down();
+    await testPage.mouse.move(startX - 60, startY);
+    await expect
+      .poll(() => scrollWindow.evaluate((element) => element.scrollLeft))
+      .toBeGreaterThan(0);
+
+    const pannedPosition = await scrollWindow.evaluate((element) => element.scrollLeft);
+    await testPage.mouse.move(windowBox.x - 8, startY);
+    await testPage.mouse.move(startX - 100, startY);
+    await expect
+      .poll(() => scrollWindow.evaluate((element) => element.scrollLeft))
+      .toBe(pannedPosition);
+    await testPage.mouse.up();
+    await testPage.mouse.move(startX - 140, startY);
+    await expect
+      .poll(() => scrollWindow.evaluate((element) => element.scrollLeft))
+      .toBe(pannedPosition);
+    await expect
+      .poll(() =>
+        testPage.evaluate(
+          () => document.documentElement.scrollWidth === document.documentElement.clientWidth,
+        ),
+      )
+      .toBe(true);
+
+    await scrollWindow.evaluate((element) => {
+      element.scrollLeft = 0;
+    });
+    const sourceCard = kanban.taskCard(task.id);
+    const targetColumn = kanban.columnByStepId(targetStep.id);
+    const [sourceBox, targetBox] = await Promise.all([
+      sourceCard.boundingBox(),
+      targetColumn.boundingBox(),
+    ]);
+    if (!sourceBox || !targetBox) throw new Error("Kanban DnD targets have no layout boxes");
+    await testPage.mouse.move(
+      sourceBox.x + sourceBox.width / 2,
+      sourceBox.y + sourceBox.height / 2,
+    );
+    await testPage.mouse.down();
+    await testPage.mouse.move(
+      sourceBox.x + sourceBox.width / 2 + 20,
+      sourceBox.y + sourceBox.height / 2,
+    );
+    await testPage.mouse.move(
+      targetBox.x + targetBox.width / 2,
+      targetBox.y + targetBox.height / 2,
+      {
+        steps: 12,
+      },
+    );
+    await testPage.mouse.up();
+
+    await expect
+      .poll(async () => (await apiClient.getTask(task.id)).workflow_step_id)
+      .toBe(targetStep.id);
+    await expect(kanban.taskCardInColumn("Mouse pan move task", targetStep.id)).toBeVisible();
+  });
 });
