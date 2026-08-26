@@ -33,16 +33,17 @@ identity and never creates a second selection model.
 
 `TaskItem` in `apps/web/components/task/task-item.tsx` owns the row classes and
 the leading `SelectionBar`. An active row uses a stronger primary-tinted
-surface without adding an active-task outline, equivalent to:
+surface with a 1px primary-accent border on the top and bottom edges only,
+equivalent to:
 
 ```text
-bg-primary/15 hover:bg-primary/20
+border-y border-primary/50 bg-primary/15 hover:bg-primary/20
 ```
 
 The task color remains the color of the leading marker. The primary-tinted
-surface keeps the active state legible when the marker is red, yellow, or
-another saturated color without adding a border or ring. Inactive rows retain
-their current hover treatment and marker opacity.
+surface and horizontal borders keep the active state legible when the marker is
+red, yellow, or another saturated color without adding side borders. Inactive
+rows retain their current hover treatment and marker opacity.
 
 The existing `data-active="true"` and `aria-current` attributes remain on the
 active row. Multi-selection continues to use its existing background and ring
@@ -57,8 +58,9 @@ The desktop path is `AppSidebar` → `TasksSection` → `TaskSessionSidebar` →
 The mobile path is `SessionTaskSwitcherSheet` → `MobileTaskList` → the same
 `TaskSwitcher` and `TaskItem`. No mobile-only markup, state, scroll owner, or
 touch target is needed for this styling-only change. The mobile row remains an
-existing primary tap target inside the sheet, and the background treatment stays
-inside the row bounds so it cannot create document-level horizontal overflow.
+existing primary tap target inside the sheet, and the background and horizontal
+borders stay inside the row bounds so they cannot create document-level
+horizontal overflow.
 
 ## Data and persistence
 
@@ -76,7 +78,8 @@ do not require separate row state.
 ## Verification
 
 The existing desktop sidebar-open flow shall verify the active row's
-`data-active` state and background-only active treatment. The mobile sidebar
-task-action flow shall verify the same treatment inside the task-switcher sheet
-and retain its viewport-overflow assertion. The shared `TaskItem` test suite
-remains a targeted regression check for row rendering and action behavior.
+`data-active` state, background, and top-and-bottom-only border treatment. The
+mobile sidebar task-action flow shall verify the same treatment inside the
+task-switcher sheet and retain its viewport-overflow assertion. The shared
+`TaskItem` test suite remains a targeted regression check for row rendering and
+action behavior.

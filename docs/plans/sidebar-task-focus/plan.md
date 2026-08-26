@@ -21,7 +21,8 @@ prove the desktop sidebar and mobile task-switcher surfaces.
 
 ### In scope
 
-- Add a stronger theme-aware active-row surface without an active-task border.
+- Add a stronger theme-aware active-row surface with only top and bottom
+  active-task borders.
 - Preserve the existing task-color marker and all activation semantics.
 - Verify the shared treatment in desktop and mobile task switchers.
 
@@ -34,8 +35,9 @@ prove the desktop sidebar and mobile task-switcher surfaces.
 ## Technical approach
 
 - Update `taskItemRowClassName` in `apps/web/components/task/task-item.tsx`
-  so the existing `isSelected` state adds only the active surface while
-  keeping the custom `SelectionBar` and multi-selection ring unchanged.
+  so the existing `isSelected` state adds the active surface and horizontal
+  borders while keeping the custom `SelectionBar` and multi-selection ring
+  unchanged.
 - Keep `TaskRowItem` and `MobileTaskList` data flow unchanged because both
   already reach the shared `TaskItem` with active-task state.
 - Extend the existing desktop sidebar-open Playwright flow and mobile sidebar
@@ -55,11 +57,11 @@ prove the desktop sidebar and mobile task-switcher surfaces.
 ## E2E tests
 
 - `apps/web/e2e/tests/task/sidebar-task-open.spec.ts` shall assert the active
-  row's `data-active` state, background, and absence of an active ring after
+  row's `data-active` state, background, and top-and-bottom-only borders after
   opening a task.
 - `apps/web/e2e/tests/task/mobile-sidebar-task-actions.spec.ts` shall assert
-  the same background-only active treatment inside the mobile task sheet and
-  keep its document-horizontal-overflow assertion.
+  the same active treatment inside the mobile task sheet and keep its
+  document-horizontal-overflow assertion.
 
 ## Work orders
 
@@ -94,3 +96,10 @@ prove the desktop sidebar and mobile task-switcher surfaces.
   Keep the multi-selection utility independent and verify both states.
 - The shared row is mounted in more than one responsive surface. Run both
   desktop and mobile E2E projects against a fresh production build.
+
+## Top-and-bottom border comparison variant
+
+- The active row keeps the primary-tinted background and custom marker, with a
+  1px primary-accent border on the top and bottom edges only.
+- Desktop E2E first failed on the expected missing top border, then passed after
+  adding the horizontal border utilities.

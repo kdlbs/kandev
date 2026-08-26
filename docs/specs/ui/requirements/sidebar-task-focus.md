@@ -36,8 +36,9 @@ sidebar, so that I can identify it quickly after scanning or switching tasks.
 
 - **AC-UI-SIDEBAR-TASK-FOCUS-001.1:** When a row represents the active task on
   desktop, the row shall show a persistent background treatment that is
-  visually stronger than the inactive-row hover treatment and shall not add an
-  outline or border around the row.
+  visually stronger than the inactive-row hover treatment and may add a
+  horizontal border on the top and bottom edges only. The active treatment
+  shall not add left or right borders.
 - **AC-UI-SIDEBAR-TASK-FOCUS-001.2:** When the active task has any supported task
   color, the active treatment shall remain readable and the task color marker
   shall remain visible; the active treatment shall not use the task color as

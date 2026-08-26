@@ -8,11 +8,21 @@ export async function expectActiveTaskRow(row: Locator): Promise<void> {
     const style = window.getComputedStyle(element);
     return {
       backgroundColor: style.backgroundColor,
-      boxShadow: style.boxShadow,
+      borderTopStyle: style.borderTopStyle,
+      borderTopWidth: style.borderTopWidth,
+      borderBottomStyle: style.borderBottomStyle,
+      borderBottomWidth: style.borderBottomWidth,
+      borderLeftWidth: style.borderLeftWidth,
+      borderRightWidth: style.borderRightWidth,
     };
   });
 
   expect(visualState.backgroundColor).not.toBe("transparent");
   expect(visualState.backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
-  expect(visualState.boxShadow).toBe("none");
+  expect(visualState.borderTopStyle).toBe("solid");
+  expect(visualState.borderTopWidth).toBe("1px");
+  expect(visualState.borderBottomStyle).toBe("solid");
+  expect(visualState.borderBottomWidth).toBe("1px");
+  expect(visualState.borderLeftWidth).toBe("0px");
+  expect(visualState.borderRightWidth).toBe("0px");
 }

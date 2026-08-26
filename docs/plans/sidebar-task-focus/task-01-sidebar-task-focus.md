@@ -20,10 +20,10 @@ system_design:
 
 ## Summary
 
-Give the active shared task row a stronger theme-aware background without an
-active-task border. Preserve the user's task-color marker, existing row state
-attributes, separate multi-selection ring, and current desktop/mobile
-interaction behavior.
+Give the active shared task row a stronger theme-aware background with only a
+top and bottom active-task border. Preserve the user's task-color marker,
+existing row state attributes, separate multi-selection ring, and current
+desktop/mobile interaction behavior.
 
 ## In scope
 
@@ -38,8 +38,8 @@ interaction behavior.
 
 ## Acceptance
 
-- An active desktop row has the stronger background without an active-task
-  border, while an inactive row does not.
+- An active desktop row has the stronger background with 1px top and bottom
+  borders only, while an inactive row does not.
 - Active rows retain their custom color marker and existing `data-active` /
   `aria-current` semantics.
 - The mobile task-switcher shows the same active treatment without horizontal
@@ -69,8 +69,8 @@ None.
 - Tailwind utility order could let the generic hover class override the active
   surface. Keep active and active-hover utilities together in the selected
   branch and verify the rendered row.
-- Removing the active ring must not affect the existing multi-selection ring or
-  the current row padding.
+- The horizontal border must not add side borders or affect the existing
+  multi-selection ring or current row padding.
 
 ## Parallelism
 
@@ -101,3 +101,7 @@ For the background-only comparison variant, the desktop regression first failed
 on the existing active ring, then desktop and mobile E2E passed after removing
 that ring. The focused unit test suite (49 tests), typecheck, lint, and
 specification checks also passed.
+
+For the top-and-bottom border comparison variant, the desktop regression first
+failed on the missing top border, then passed after adding the horizontal border
+utilities. The mobile assertion is run against the same shared row styling.

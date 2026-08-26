@@ -167,7 +167,7 @@ function taskItemRowClassName(
   hasDetails: boolean,
 ): string {
   const rowSurfaceClass = isSelected
-    ? "bg-primary/15 hover:bg-primary/20"
+    ? "border-y border-primary/50 bg-primary/15 hover:bg-primary/20"
     : "hover:bg-foreground/[0.05]";
 
   return cn(
