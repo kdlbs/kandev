@@ -10,6 +10,16 @@ import { StatusSurfaceMetrics } from "./status-surface-metrics";
 const responsiveState = vi.hoisted(() => ({ isMobile: false }));
 const subscribeMock = vi.hoisted(() => vi.fn());
 const metricsTestId = "app-status-metrics";
+const cpuAccessibleName = "CPU 42%";
+const memoryAccessibleName = "Memory 51%";
+const allHostMetricAccessibleNames = [
+  cpuAccessibleName,
+  memoryAccessibleName,
+  "Disk 63%",
+  "System load (1 min) 2.5",
+  "CPU temperature 71°C",
+  "network_rx 12.3MB/s",
+];
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({
@@ -73,6 +83,20 @@ function renderMetrics(drawerOpen = false, simplified = false, loading = false) 
                           available: true,
                         },
                         { id: "io_load", label: "Load average", value: 2.5, available: true },
+                        {
+                          id: "cpu_temp",
+                          label: "CPU temperature",
+                          unit: "°C",
+                          value: 71,
+                          available: true,
+                        },
+                        {
+                          id: "network_rx",
+                          label: "Network receive",
+                          unit: "MB/s",
+                          value: 12.3,
+                          available: true,
+                        },
                       ],
                     },
                     {
@@ -120,8 +144,8 @@ describe("StatusSurfaceMetrics", () => {
 
     expect(subscribeMock).toHaveBeenCalledWith(true);
     expect(screen.getByTestId(metricsTestId)).toBeTruthy();
-    expect(screen.getByLabelText("CPU 42%")).toBeTruthy();
-    expect(screen.getByLabelText("Memory 51%")).toBeTruthy();
+    expect(screen.getByLabelText(cpuAccessibleName)).toBeTruthy();
+    expect(screen.getByLabelText(memoryAccessibleName)).toBeTruthy();
     expect(screen.getByLabelText("Disk 63%")).toBeTruthy();
     expect(screen.getAllByTestId("system-metric-meter")).toHaveLength(3);
     const systemLoad = screen.getByLabelText("System load (1 min) 2.5");
@@ -134,6 +158,8 @@ describe("StatusSurfaceMetrics", () => {
     ).not.toHaveLength(0);
     expect(screen.queryByLabelText("Executor metrics")).toBeNull();
     expect(screen.queryByLabelText("Memory 99%")).toBeNull();
+    expect(screen.queryByLabelText("CPU temperature 71°C")).toBeNull();
+    expect(screen.queryByLabelText("network_rx 12.3MB/s")).toBeNull();
   });
 
   it("keeps the desktop metrics item hidden while the first snapshot is loading", () => {
@@ -163,6 +189,16 @@ describe("StatusSurfaceMetrics", () => {
     expect(metricsRow?.className).toContain("min-w-0");
   });
 
+  it("renders every received host metric in the phone Status drawer", () => {
+    responsiveState.isMobile = true;
+    renderMetrics(true);
+
+    expect(screen.getByLabelText(cpuAccessibleName).parentElement?.className).toContain("grid");
+    for (const accessibleName of allHostMetricAccessibleNames) {
+      expect(screen.getByLabelText(accessibleName)).toBeTruthy();
+    }
+  });
+
   it("keeps the phone metrics row hidden while the first snapshot is loading", () => {
     responsiveState.isMobile = true;
     renderMetrics(true, false, true);
@@ -177,8 +213,8 @@ describe("StatusSurfaceMetrics", () => {
 
     expect(screen.queryByLabelText("Host metrics")).toBeNull();
     expect(screen.queryAllByTestId("system-metric-meter")).toHaveLength(0);
-    expect(screen.getByLabelText("CPU 42%")).toBeTruthy();
-    expect(screen.getByLabelText("Memory 51%")).toBeTruthy();
+    expect(screen.getByLabelText(cpuAccessibleName)).toBeTruthy();
+    expect(screen.getByLabelText(memoryAccessibleName)).toBeTruthy();
   });
 
   it("omits the host marker and meters in simplified phone drawer mode", () => {
@@ -187,7 +223,8 @@ describe("StatusSurfaceMetrics", () => {
 
     expect(screen.queryByLabelText("Host metrics")).toBeNull();
     expect(screen.queryAllByTestId("system-metric-meter")).toHaveLength(0);
-    expect(screen.getByLabelText("CPU 42%")).toBeTruthy();
-    expect(screen.getByLabelText("Memory 51%")).toBeTruthy();
+    for (const accessibleName of allHostMetricAccessibleNames) {
+      expect(screen.getByLabelText(accessibleName)).toBeTruthy();
+    }
   });
 });

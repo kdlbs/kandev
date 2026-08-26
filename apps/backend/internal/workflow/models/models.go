@@ -2,6 +2,7 @@ package models
 
 import (
 	"maps"
+	"strings"
 	"time"
 )
 
@@ -343,6 +344,83 @@ type SessionStepHistory struct {
 	ActorID    *string                `json:"actor_id,omitempty"`
 	Metadata   map[string]interface{} `json:"metadata,omitempty"`
 	CreatedAt  time.Time              `json:"created_at"`
+}
+
+// StepEventReferences are the IDs a step's event actions name, and that
+// something else dereferences later: a move_to_step action names the step to
+// transition to, a queue_run action names the task to queue work on. Both are
+// caller-supplied through the step-write API and both are read by the engine,
+// which runs on the event bus with no request identity of its own — so the
+// write is the only place they can be checked against a caller.
+//
+// Every trigger that RemapStepEvents rewrites must also be collected here.
+type StepEventReferences struct {
+	// StepIDs are move_to_step targets.
+	StepIDs []string
+	// TaskIDs are queue_run targets, excluding the "this" sentinel and the
+	// empty default, which both mean "the task the trigger fired on".
+	TaskIDs []string
+}
+
+// CollectStepEventReferences gathers every step and task ID named by a step's
+// event actions.
+func CollectStepEventReferences(events StepEvents) StepEventReferences {
+	var refs StepEventReferences
+	for _, a := range events.OnEnter {
+		if a.Type == OnEnterQueueRun {
+			refs.addTask(a.Config)
+		}
+	}
+	for _, a := range events.OnTurnStart {
+		if a.Type == OnTurnStartMoveToStep {
+			refs.addStep(a.Config)
+		}
+	}
+	for _, a := range events.OnTurnComplete {
+		if a.Type == OnTurnCompleteMoveToStep {
+			refs.addStep(a.Config)
+		}
+	}
+	for _, actions := range [][]GenericAction{
+		events.OnComment, events.OnBlockerResolved, events.OnChildrenCompleted,
+		events.OnApprovalResolved, events.OnHeartbeat, events.OnBudgetAlert, events.OnAgentError,
+	} {
+		for _, a := range actions {
+			switch a.Type {
+			case GenericActionMoveToStep:
+				refs.addStep(a.Config)
+			case GenericActionQueueRun:
+				refs.addTask(a.Config)
+			}
+		}
+	}
+	return refs
+}
+
+func (r *StepEventReferences) addStep(config map[string]any) {
+	if id := configID(config, "step_id"); id != "" {
+		r.StepIDs = append(r.StepIDs, id)
+	}
+}
+
+// addTask skips the sentinels the engine resolves to the current task
+// (internal/workflow/engine.resolveTaskID), which name no task at all.
+func (r *StepEventReferences) addTask(config map[string]any) {
+	if id := configID(config, "task_id"); id != "" && id != QueueRunTaskIDThis {
+		r.TaskIDs = append(r.TaskIDs, id)
+	}
+}
+
+// QueueRunTaskIDThis mirrors engine.TaskIDThis. The constant is repeated
+// rather than imported because the engine imports this package.
+const QueueRunTaskIDThis = "this"
+
+func configID(config map[string]any, key string) string {
+	if config == nil {
+		return ""
+	}
+	value, _ := config[key].(string)
+	return strings.TrimSpace(value)
 }
 
 // RemapStepEvents returns a copy of events with all step_id references

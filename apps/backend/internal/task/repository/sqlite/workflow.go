@@ -52,7 +52,7 @@ func (r *Repository) AddTaskToWorkflow(ctx context.Context, taskID, workflowID, 
 		return tx.Commit()
 	}
 
-	if err := r.recordStepTransition(ctx, tx, stepTransitionInput{
+	if _, err := r.recordStepTransition(ctx, tx, stepTransitionInput{
 		taskID:             taskID,
 		fromWorkflowID:     fromWorkflowID,
 		fromWorkflowStepID: fromStepID,
@@ -97,7 +97,7 @@ func (r *Repository) RemoveTaskFromWorkflow(ctx context.Context, taskID, workflo
 	}
 
 	detachCtx := steptelemetry.WithAttribution(ctx, detachAttribution(ctx))
-	if err := r.recordStepTransition(detachCtx, tx, stepTransitionInput{
+	if _, err := r.recordStepTransition(detachCtx, tx, stepTransitionInput{
 		taskID:             taskID,
 		fromWorkflowID:     fromWorkflowID,
 		fromWorkflowStepID: fromStepID,

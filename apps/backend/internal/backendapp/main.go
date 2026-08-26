@@ -550,9 +550,9 @@ func startAgentInfrastructure(
 	// LSP, terminals) enforce per-user workspace scoping (opt-in auth). The
 	// GetOrEnsure* execution paths run these checks internally; the vscode and
 	// port reverse proxies (bare lookup + cache) call CheckSessionAccess at
-	// the handler.
-	lifecycleMgr.SetSessionAccessChecker(services.Task.AuthorizeSessionAccess)
-	lifecycleMgr.SetEnvironmentAccessChecker(services.Task.AuthorizeEnvironmentAccess)
+	// the handler, and the SSR terminal-list routes call CheckTaskAccess /
+	// CheckEnvironmentAccess / CheckTaskEnvironmentAccess in a route guard.
+	wireLifecycleAccessCheckers(lifecycleMgr, services.Task)
 	log.Info("Workspace info provider configured for session recovery")
 
 	// TODO(task-model-unification Phase 2, ADR 0004): wire agentruntime.New(lifecycleMgr)
@@ -837,6 +837,9 @@ func startGatewayAndServe(
 		orchestratorSvc, lifecycleMgr, agentRegistry,
 		repos.Notification, repos.Task, repos.Terminal, services.GitHub, services.GitLab,
 		referenceValidator,
+		// Notifications drop rather than redirect when a task's owner cannot
+		// be resolved while authentication is enforced.
+		services.Auth,
 		cfg.ResolvedHomeDir(),
 		cfg.Limits.LSPMaxConnections,
 	)
@@ -1605,8 +1608,10 @@ type runsServiceEngineAdapter struct {
 
 // QueueRun enqueues a run, translating the engine's QueueRunRequest into the
 // runs-service request shape.
-func (a *runsServiceEngineAdapter) QueueRun(ctx context.Context, req workflowengine.QueueRunRequest) error {
-	return a.svc.QueueRun(ctx, runsservice.QueueRunRequest{
+func (a *runsServiceEngineAdapter) QueueRun(
+	ctx context.Context, req workflowengine.QueueRunRequest,
+) (workflowengine.QueueOutcome, error) {
+	outcome, err := a.svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: req.AgentProfileID,
 		TaskID:         req.TaskID,
 		WorkflowStepID: req.WorkflowStepID,
@@ -1614,6 +1619,7 @@ func (a *runsServiceEngineAdapter) QueueRun(ctx context.Context, req workfloweng
 		IdempotencyKey: req.IdempotencyKey,
 		Payload:        req.Payload,
 	})
+	return workflowengine.QueueOutcome(outcome), err
 }
 
 // wireRuntimeSkillDeployer plugs the runtime-tier SkillDeployer into the

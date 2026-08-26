@@ -362,23 +362,23 @@ test.describe("Workflow automation", () => {
    * Kanban board workflow with on_turn_start: move_to_next on Backlog.
    *
    * Workflow:
-   *   Backlog (on_turn_start: move_to_next, on_turn_complete: move_to_step("in-progress"))
-   *   In Progress (on_enter: auto_start_agent, on_turn_complete: move_to_step("in-progress"))
+   *   Backlog (on_turn_start: move_to_next, on_turn_complete: malformed move_to_step)
+   *   In Progress (on_enter: auto_start_agent, on_turn_complete: malformed move_to_step)
    *   Review (on_turn_start: move_to_previous)
    *   Done (on_turn_start: move_to_step("in-progress"))
    *
    * No step has is_start_step, so the task lands at position 0 (Backlog).
-   * The on_turn_complete events target the current In Progress step, so the
-   * completion transition is a validated same-step no-op.
+   * The on_turn_complete events use malformed step_position-only configs, which
+   * the runtime skips because move_to_step requires a step_id.
    *
    * Flow:
    * 1. Create task in Backlog (no start_agent) and navigate to the task page
    * 2. Send a chat message — only the WS message path runs on_turn_start via
    *    dispatchPromptAsync, so the Backlog → In Progress move triggers here
-   * 3. Agent completes → on_turn_complete targets the current In Progress step
-   *    and leaves the task there as a same-step no-op
+   * 3. Agent completes → malformed on_turn_complete move_to_step is skipped
+   *    → task stays in In Progress
    */
-  test("kanban workflow: on_turn_start moves task and same-step completion is a no-op", async ({
+  test("kanban workflow: on_turn_start moves task, malformed on_turn_complete is skipped", async ({
     testPage,
     apiClient,
     seedData,
@@ -395,20 +395,19 @@ test.describe("Workflow automation", () => {
     const backlogStep = steps.find((s) => s.name === "Backlog")!;
     const inProgressStep = steps.find((s) => s.name === "In Progress")!;
 
-    // Backlog: on_turn_start moves to next (In Progress). The completion
-    // target is a concrete step ID so it satisfies the workflow reference
-    // contract introduced by the scoped workflow-step API.
+    // Backlog: on_turn_start moves to next (In Progress),
+    // on_turn_complete has a malformed step_position-only config and is skipped.
     await apiClient.updateWorkflowStep(backlogStep.id, {
       events: {
         on_turn_start: [{ type: "move_to_next" }],
-        on_turn_complete: [{ type: "move_to_step", config: { step_id: inProgressStep.id } }],
+        on_turn_complete: [{ type: "move_to_step", config: { step_position: 99 } }],
       },
     });
 
-    // In Progress: a same-step completion target is accepted and is a no-op.
+    // In Progress: malformed on_turn_complete move_to_step (should be skipped)
     await apiClient.updateWorkflowStep(inProgressStep.id, {
       events: {
-        on_turn_complete: [{ type: "move_to_step", config: { step_id: inProgressStep.id } }],
+        on_turn_complete: [{ type: "move_to_step", config: { step_position: 99 } }],
       },
     });
 
@@ -442,13 +441,13 @@ test.describe("Workflow automation", () => {
     });
 
     // Agent response confirms the mock agent ran; on_turn_complete then fires
-    // with a same-step target and leaves the task in In Progress.
+    // with malformed move_to_step — gracefully skipped because step_id is missing.
     await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
       timeout: 30_000,
     });
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
 
-    // Task stays in In Progress on the kanban board.
+    // Task stays in In Progress on the kanban board (malformed action is a no-op).
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
     const card = kanban.taskCardInColumn("Kanban Flow Task", inProgressStep.id);
