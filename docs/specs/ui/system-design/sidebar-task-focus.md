@@ -33,15 +33,16 @@ identity and never creates a second selection model.
 
 `TaskItem` in `apps/web/components/task/task-item.tsx` owns the row classes and
 the leading `SelectionBar`. An active row uses a stronger primary-tinted
-surface and a theme-aware foreground ring, equivalent to:
+surface and a theme-aware primary ring, equivalent to:
 
 ```text
-bg-primary/15 hover:bg-primary/20 ring-1 ring-inset ring-foreground/25
+bg-primary/15 hover:bg-primary/20 ring-1 ring-inset ring-primary/50
 ```
 
-The task color remains the color of the leading marker. The neutral ring keeps
+The task color remains the color of the leading marker. The primary ring keeps
 the active state legible when the marker is red, yellow, or another saturated
-color. Inactive rows retain their current hover treatment and marker opacity.
+color while keeping the focus treatment coherent with the tinted surface.
+Inactive rows retain their current hover treatment and marker opacity.
 
 The existing `data-active="true"` and `aria-current` attributes remain on the
 active row. Multi-selection continues to use its existing background and ring

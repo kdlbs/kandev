@@ -175,7 +175,7 @@ function taskItemRowClassName(
     hasDetails ? "items-start" : "items-center",
     "transition-colors duration-75",
     rowSurfaceClass,
-    isSelected && !isMultiSelected && "ring-1 ring-inset ring-foreground/25",
+    isSelected && !isMultiSelected && "ring-1 ring-inset ring-primary/50",
     // When a row is both the active task and multi-selected, keep the stronger
     // active background and just add the selection ring on top.
     isMultiSelected && !isSelected && "bg-primary/5",
