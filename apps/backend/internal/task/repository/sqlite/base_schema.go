@@ -17,6 +17,7 @@ func (r *Repository) initSchema() error {
 	steps := []func() error{
 		r.initCoreSchema,
 		r.initRepositorySetsSchema,
+		r.initRepositoryBranchPoliciesSchema,
 		r.initPlansSchema,
 		r.initWalkthroughsSchema,
 		r.initDocumentsSchema,
@@ -424,6 +425,11 @@ func (r *Repository) initTaskSchema() error {
 		repository_id TEXT NOT NULL,
 		base_branch TEXT DEFAULT '',
 		checkout_branch TEXT DEFAULT '',
+		branch_policy_id TEXT DEFAULT '',
+		branch_policy_name TEXT DEFAULT '',
+		branch_policy_base_branch TEXT DEFAULT '',
+		branch_policy_branch_template TEXT DEFAULT '',
+		branch_policy_pull_request_target TEXT DEFAULT '',
 		position INTEGER DEFAULT 0,
 		metadata TEXT DEFAULT '{}',
 		created_at TIMESTAMP NOT NULL,
@@ -507,6 +513,30 @@ const repositorySetsSchemaDDL = `
 
 func (r *Repository) initRepositorySetsSchema() error {
 	_, err := r.db.Exec(repositorySetsSchemaDDL)
+	return err
+}
+
+const repositoryBranchPoliciesSchemaDDL = `
+	CREATE TABLE IF NOT EXISTS repository_branch_policies (
+		id TEXT PRIMARY KEY,
+		repository_id TEXT NOT NULL,
+		name TEXT NOT NULL,
+		description TEXT NOT NULL DEFAULT '',
+		base_branch TEXT NOT NULL,
+		branch_template TEXT NOT NULL,
+		pull_request_target TEXT NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_repository_branch_policies_repository_id
+		ON repository_branch_policies(repository_id);
+	CREATE UNIQUE INDEX IF NOT EXISTS uniq_repository_branch_policies_repository_lower_name
+		ON repository_branch_policies(repository_id, LOWER(name));
+`
+
+func (r *Repository) initRepositoryBranchPoliciesSchema() error {
+	_, err := r.db.Exec(repositoryBranchPoliciesSchemaDDL)
 	return err
 }
 

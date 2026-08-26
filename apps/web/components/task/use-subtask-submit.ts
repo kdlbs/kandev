@@ -33,6 +33,8 @@ type UseSubtaskSubmitOpts = {
   onClose: () => void;
   /** Workspace mode for the new subtask (handoffs phase 5). */
   workspaceMode: SubtaskWorkspaceMode;
+  /** Whether the selected executor profile runs directly on the local clone. */
+  isLocalExecutor?: boolean;
 };
 
 type CreateSubtaskArgs = {
@@ -48,6 +50,8 @@ type CreateSubtaskArgs = {
   autoTitle: boolean;
   autopilot: boolean;
   workspaceMode: SubtaskWorkspaceMode;
+  isLocalExecutor: boolean;
+  freshBranchEnabled: boolean;
   setActiveTask: (taskId: string) => void;
   setActiveSession: (taskId: string, sessionId: string) => void;
 };
@@ -65,6 +69,8 @@ async function createSubtask({
   autoTitle,
   autopilot,
   workspaceMode,
+  isLocalExecutor,
+  freshBranchEnabled,
   setActiveTask,
   setActiveSession,
 }: CreateSubtaskArgs) {
@@ -78,6 +84,10 @@ async function createSubtask({
           repositories: fs.repositories,
           discoveredRepositories: fs.discoveredRepositories,
           workspaceRepositories: availableRepositories,
+          isLocalExecutor,
+          freshBranch: freshBranchEnabled
+            ? { confirmDiscard: false, consentedDirtyFiles: [] }
+            : undefined,
         });
   const response = await createTask({
     workspace_id: workspaceId,
@@ -123,7 +133,9 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
     setIsCreating,
     onClose,
     workspaceMode,
+    isLocalExecutor = false,
   } = opts;
+  const freshBranchEnabled = fs.freshBranchEnabled;
   const { toast } = useToast();
   const setActiveTask = useAppStore((s) => s.setActiveTask);
   const setActiveSession = useAppStore((s) => s.setActiveSession);
@@ -157,6 +169,8 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
           autoTitle,
           autopilot,
           workspaceMode,
+          isLocalExecutor,
+          freshBranchEnabled,
           setActiveTask,
           setActiveSession,
         });
@@ -187,6 +201,8 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
       setActiveTask,
       setActiveSession,
       workspaceMode,
+      isLocalExecutor,
+      freshBranchEnabled,
       setIsCreating,
       onClose,
       toast,

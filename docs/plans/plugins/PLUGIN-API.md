@@ -428,6 +428,10 @@ actions:
     max_body_bytes: 16384
 ```
 
+Browser-invoked actions may additionally declare `access: "admin"`. Omitting
+`access` preserves the default `authenticated` policy. The host rejects a
+non-administrator before it forwards any request body to an admin action.
+
 This action is invoked by the host backend, not the browser callback. Kandev resolves the
 active plugin that owns the repository's persisted provider ID and supplies a verified
 workspace context plus this snake-case body:

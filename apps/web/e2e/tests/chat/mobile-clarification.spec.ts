@@ -175,6 +175,63 @@ test.describe("Mobile clarification multiline answer", () => {
     await expect(context).toHaveCount(1);
   });
 
+  test("renders lightweight markdown without overflow and submits through formatted content", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Mobile Clarification Markdown",
+      { scenario: "clarification-markdown" },
+    );
+
+    const overlay = session.clarificationOverlay();
+    await expect(overlay).toBeVisible();
+    const card = session.clarificationQuestionCardById("markdown");
+    const option = session.clarificationOption("Postgres");
+
+    await expect(card.getByTestId("clarification-question-title").locator("code")).toHaveText("DB");
+    await expect(card.locator("ol > li")).toHaveCount(2);
+    await expect(
+      option.getByTestId("clarification-option-description").locator("strong"),
+    ).toHaveText("production");
+    await expect(option.locator("a")).toHaveCount(0);
+
+    await option.scrollIntoViewIfNeeded();
+    const [optionBox, overlayBox] = await Promise.all([
+      option.boundingBox(),
+      overlay.boundingBox(),
+    ]);
+    if (!optionBox || !overlayBox) {
+      throw new Error("expected formatted mobile option and overlay to have bounding boxes");
+    }
+    expect(optionBox.x).toBeGreaterThanOrEqual(overlayBox.x - 1);
+    expect(optionBox.x + optionBox.width).toBeLessThanOrEqual(overlayBox.x + overlayBox.width + 1);
+    await expect(
+      testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).resolves.toBe(true);
+
+    await option.locator("code").tap();
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await expect(
+      session
+        .activeChat()
+        .getByTestId("clarification-request-message")
+        .locator("code")
+        .filter({ hasText: "Postgres" }),
+    ).toBeVisible();
+    await expect(
+      testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).resolves.toBe(true);
+  });
+
   test("separates batch actions from the stepper while showing submission feedback", async ({
     testPage,
     apiClient,

@@ -36,7 +36,7 @@ func registeredOfficeRoutes(t *testing.T) gin.RoutesInfo {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
-	office.RegisterAllRoutes(engine.Group(officeRoutePrefix), officeTestServices(), testLogger(t))
+	office.RegisterAllRoutes(engine.Group(officeRoutePrefix), officeTestServices(), nil, testLogger(t))
 
 	routes := engine.Routes()
 	if len(routes) < 100 {

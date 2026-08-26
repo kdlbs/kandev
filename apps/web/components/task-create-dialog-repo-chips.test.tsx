@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
-import type { Branch, Repository } from "@/lib/types/http";
+import type { Branch, Repository, RepositoryBranchPolicy } from "@/lib/types/http";
 import type { DialogFormState, TaskRepoRow } from "./task-create-dialog-types";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 
@@ -10,12 +10,17 @@ const lastBranchSource = vi.hoisted((): { value: unknown } => ({ value: null }))
 const mockBranches = vi.hoisted((): { value: { branches: Branch[]; isLoading: boolean } } => ({
   value: { branches: [], isLoading: false },
 }));
+const mockPolicies = vi.hoisted((): { value: RepositoryBranchPolicy[] } => ({ value: [] }));
 
 vi.mock("@/hooks/domains/workspace/use-repository-branches", () => ({
   useBranches: (source: unknown) => {
     lastBranchSource.value = source;
     return mockBranches.value;
   },
+}));
+
+vi.mock("@/hooks/domains/workspace/use-repository-branch-policies", () => ({
+  useRepositoryBranchPolicies: () => ({ policies: mockPolicies.value }),
 }));
 
 // The Remote-mode branch of RepoChipsRow renders RemoteRepoChipsRow, which
@@ -29,7 +34,11 @@ vi.mock("./task-create-dialog-remote-repo-chip", () => ({
 
 import { RepoChipsRow } from "./task-create-dialog-repo-chips";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  mockBranches.value = { branches: [], isLoading: false };
+  mockPolicies.value = [];
+});
 
 const REPO_FRONT_ID = "repo-front";
 const REPO_BACK_ID = "repo-back";
@@ -234,6 +243,51 @@ describe("RepoChipsRow", () => {
     );
 
     expect(onRowBranchChange).toHaveBeenCalledWith("r0", "main");
+  });
+
+  it("disables branch policies for multi-repo local execution", () => {
+    mockBranches.value = {
+      branches: [{ name: "main", type: "local" } as Branch],
+      isLoading: false,
+    };
+    mockPolicies.value = [
+      {
+        id: "policy-1",
+        repository_id: REPO_FRONT_ID as RepositoryBranchPolicy["repository_id"],
+        name: "Feature policy",
+        description: "",
+        base_branch: "main",
+        branch_template: "feature/{title}-{suffix}",
+        pull_request_target: "develop",
+        created_at: "2026-08-24T10:00:00Z",
+        updated_at: "2026-08-24T10:00:00Z",
+      },
+    ];
+    renderInProvider(
+      <RepoChipsRow
+        fs={makeFs({
+          repositories: [
+            row({ key: "r0", repositoryId: REPO_FRONT_ID }),
+            row({ key: "r1", repositoryId: REPO_BACK_ID, branch: "main" }),
+          ],
+        })}
+        repositories={[makeRepo(REPO_FRONT_ID, "frontend"), makeRepo(REPO_BACK_ID, "backend")]}
+        isTaskStarted={false}
+        workspaceId="ws-1"
+        onRowRepositoryChange={NOOP}
+        onRowBranchChange={NOOP}
+        isLocalExecutor
+        freshBranchAvailable={false}
+      />,
+    );
+
+    fireEvent.click(screen.getAllByTestId("branch-chip-trigger")[0]);
+
+    const option = screen.getByRole("option", { name: /Feature policy/ });
+    expect(option.getAttribute("aria-disabled")).toBe("true");
+    expect(
+      screen.getByTestId("branch-policy-option-info-policy-1").getAttribute("aria-label"),
+    ).toContain("single repository");
   });
 
   it("local-executor row shows the loading placeholder while resolving the current branch", () => {

@@ -49,4 +49,14 @@ describe("useSubtaskFormState — remoteRepos seed", () => {
     expect(result.current.remoteRepos).toHaveLength(1);
     expect(result.current.remoteRepos[0]?.url).toBe(PASTED_URL);
   });
+
+  it("keeps fresh-branch state writable for local policy branches", () => {
+    const { result } = renderHook(() => useSubtaskFormState("ws-1"));
+
+    expect(result.current.freshBranchEnabled).toBe(false);
+    act(() => {
+      result.current.setFreshBranchEnabled(true);
+    });
+    expect(result.current.freshBranchEnabled).toBe(true);
+  });
 });

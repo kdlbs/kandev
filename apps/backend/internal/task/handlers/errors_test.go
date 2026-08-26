@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -91,6 +92,25 @@ func TestErrorsAreClassifiable(t *testing.T) {
 		handleNotFound(ctx, newTestLogger(t), fmt.Errorf("create task: %w", wfmodels.NewWIPLimitError("review", 2, 2)), "task not created")
 		if rec.Code != http.StatusConflict {
 			t.Fatalf("status=%d, want %d", rec.Code, http.StatusConflict)
+		}
+	})
+
+	t.Run("stale branch policies include a stable error code", func(t *testing.T) {
+		gin.SetMode(gin.TestMode)
+		rec := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(rec)
+		err := fmt.Errorf("%w: %w", service.ErrInvalidRepositoryBranchPolicy, service.ErrRepositoryBranchPolicyStale)
+		handleNotFound(ctx, newTestLogger(t), err, "task not created")
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d, want %d", rec.Code, http.StatusBadRequest)
+		}
+		var payload map[string]string
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if payload["error_code"] != service.BranchPolicyStaleErrorCode {
+			t.Fatalf("error_code=%q, want %q", payload["error_code"], service.BranchPolicyStaleErrorCode)
 		}
 	})
 }

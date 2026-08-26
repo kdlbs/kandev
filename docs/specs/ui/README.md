@@ -48,11 +48,14 @@ contract that other capabilities can reuse.
 - [Per-workflow column visibility on the kanban board](requirements/board-step-visibility-filter.md)
 - [Browser inspect annotation submission](requirements/browser-inspect-annotations-save.md)
 - [Backend-owned cancel-turn progress](requirements/cancel-turn-progress.md)
+- [Changes File Row Containment](requirements/changes-file-row-containment.md)
 - [Responsive Changes Walkthrough Action](requirements/changes-walkthrough-toolbar-width.md)
 - [Task PR Automation Controls](requirements/ci-pr-automation.md)
+- [Merge Queue Recovery Controls](requirements/ci-pr-merge-queue-recovery-controls.md)
 - [Clarification Shared Context](requirements/clarification-context.md)
 - [Clarification submit feedback](requirements/clarification-submit-feedback.md)
 - [Command-panel Sidebar Task Reveal](requirements/command-panel-sidebar-task-reveal.md)
+- [Compact Workflow Step Navigation](requirements/compact-workflow-step-navigation.md)
 - [Comment Markdown Rendering](requirements/comment-markdown.md)
 - [Composer Suggestion Overlays](requirements/composer-suggestion-overlays.md)
 - [Context Compaction Count](requirements/context-compaction-count.md)
@@ -82,6 +85,7 @@ contract that other capabilities can reuse.
 - [Control Pending Message Auto-run](requirements/message-queue-run.md)
 - [Send Queued Messages Now](requirements/message-queue-send-now.md)
 - [Mobile Workspace Topbar Actions](requirements/mobile-quick-chat-topbar.md)
+- [Mobile Task Chrome](requirements/mobile-task-chrome.md)
 - [Mobile Task Navigation](requirements/mobile-task-navigation.md)
 - [Task-scoped port-forwarding discovery](requirements/port-forwarding-discovery.md)
 - [Open proxy URLs in the browser panel](requirements/port-proxy-browser-panel.md)
@@ -127,6 +131,7 @@ contract that other capabilities can reuse.
 - [Task Surface Foreground Refresh and Mobile Create Action](requirements/task-surface-refresh.md)
 - [Task Workspace Content Search](requirements/task-workspace-content-search.md)
 - [Terminal close feedback](requirements/terminal-close-feedback.md)
+- [Terminal Rendering](requirements/terminal-rendering.md)
 - [Transcript Auto-scroll Stability](requirements/transcript-auto-scroll.md)
 - [Transcript Navigation Settings](requirements/transcript-navigation-settings.md)
 - [Voice Mode In Task Behavior](requirements/voice-mode-task-behavior.md)
@@ -138,22 +143,25 @@ contract that other capabilities can reuse.
 
 ### System design
 
-
-
 - [Agent Todo List Panel](system-design/agent-todo-list-panel.md)
 - [App Status Bar](system-design/app-status-bar.md)
+- [Changes File Row Containment](system-design/changes-file-row-containment.md)
 - [Composer Suggestion Overlays](system-design/composer-suggestion-overlays.md)
+- [Compact Workflow Step Navigation](system-design/compact-workflow-step-navigation.md)
 - [Per-workflow column visibility on the kanban board System Design Part 1](system-design/board-step-visibility-filter-01.md)
 - [Per-workflow column visibility on the kanban board System Design Part 2](system-design/board-step-visibility-filter-02.md)
 - [Task PR Automation Controls System Design Part 1](system-design/ci-pr-automation-01.md)
 - [Task PR Automation Controls System Design Part 2](system-design/ci-pr-automation-02.md)
 - [Task PR Automation Controls System Design Part 3](system-design/ci-pr-automation-03.md)
+- [Merge Queue Recovery Controls](system-design/ci-pr-merge-queue-recovery-controls.md)
 - [Entity Reference Composer](system-design/entity-reference-composer.md)
+- [Mobile Task Chrome](system-design/mobile-task-chrome.md)
 - [Persistent status motion](system-design/persistent-status-motion.md)
 - [Prompt History Panel](system-design/prompt-history-panel.md)
 - [Quick Chat and Terminal Tabs](system-design/quick-terminal.md)
 - [Resizable Markdown Table Columns](system-design/resizable-markdown-tables.md)
 - [Task Layout Profiles](system-design/task-layout-profiles.md)
+- [Terminal Rendering](system-design/terminal-rendering.md)
 - [Task Transcript History Visibility](system-design/task-prompt-transcript-visibility.md)
 
 ## Migration record

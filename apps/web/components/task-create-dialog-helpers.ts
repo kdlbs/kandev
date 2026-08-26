@@ -339,6 +339,7 @@ export function buildRepositoriesPayload(opts: {
       if (row.repositoryId) {
         return {
           repository_id: row.repositoryId,
+          ...(row.branchPolicyId ? { branch_policy_id: row.branchPolicyId } : {}),
           base_branch: branches.base_branch,
           checkout_branch: branches.checkout_branch,
           ...fresh,

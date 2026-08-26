@@ -140,6 +140,13 @@ const (
 	RepositorySetDeleted = "repository_set.deleted"
 )
 
+// Event types for repository branch policies.
+const (
+	RepositoryBranchPolicyCreated = "repository_branch_policy.created"
+	RepositoryBranchPolicyUpdated = "repository_branch_policy.updated"
+	RepositoryBranchPolicyDeleted = "repository_branch_policy.deleted"
+)
+
 // Event types for repository scripts
 const (
 	RepositoryScriptCreated = "repository.script.created"

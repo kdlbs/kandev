@@ -86,7 +86,7 @@ func TestTaskPRColumnListsIncludeMergeQueueColumns(t *testing.T) {
 	}
 }
 
-func TestRestoreTaskPRPreservesMergeQueueFields(t *testing.T) {
+func TestRestoreTaskPRClearsQueueFieldsFromQueueUnawareRead(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 	position := 3
@@ -111,7 +111,7 @@ func TestRestoreTaskPRPreservesMergeQueueFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RestoreTaskPR: %v", err)
 	}
-	assertTaskPRMergeQueueFields(t, "RestoreTaskPR", restored, seed.MergeQueueState, &position, &estimate)
+	assertTaskPRMergeQueueFields(t, "RestoreTaskPR", restored, "", nil, nil)
 }
 
 func mustGetTaskPR(t *testing.T, store *Store, ctx context.Context, id string) *TaskPR {
