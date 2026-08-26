@@ -37,7 +37,8 @@ func (r *Repository) initPhase2Schema() error {
 		agent_profile_id TEXT NOT NULL,
 		decision_required INTEGER NOT NULL DEFAULT 0,
 		position INTEGER NOT NULL DEFAULT 0,
-		created_at TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00'
+		created_at TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00',
+		provenance TEXT NOT NULL DEFAULT 'manual'
 	);
 	CREATE INDEX IF NOT EXISTS idx_workflow_step_participants_step ON workflow_step_participants(step_id);
 	CREATE INDEX IF NOT EXISTS idx_workflow_step_participants_role ON workflow_step_participants(step_id, role);
@@ -54,6 +55,14 @@ func (r *Repository) initPhase2Schema() error {
 	r.migrate.Apply("workflow_step_participants.created_at", `
 		ALTER TABLE workflow_step_participants
 		ADD COLUMN created_at TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00'
+	`)
+	// provenance predates this column on any database that already had this
+	// table; the ADD COLUMN default backfills existing rows to "manual" so a
+	// pre-existing seat is never treated as claimable (AddTaskParticipant
+	// only claims a seat whose provenance is "auto").
+	r.migrate.Apply("workflow_step_participants.provenance", `
+		ALTER TABLE workflow_step_participants
+		ADD COLUMN provenance TEXT NOT NULL DEFAULT 'manual'
 	`)
 
 	decisionsSchema := `
@@ -516,13 +525,14 @@ func (r *Repository) ListTaskParticipantsByRole(
 // GetStepParticipant returns a single participant by id.
 func (r *Repository) GetStepParticipant(ctx context.Context, id string) (*models.WorkflowStepParticipant, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at
+		SELECT id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at, provenance
 		FROM workflow_step_participants WHERE id = ?
 	`), id)
 	p := &models.WorkflowStepParticipant{}
 	var role string
 	var decisionRequired int
-	err := row.Scan(&p.ID, &p.StepID, &p.TaskID, &role, &p.AgentProfileID, &decisionRequired, &p.Position, &p.CreatedAt)
+	var provenance string
+	err := row.Scan(&p.ID, &p.StepID, &p.TaskID, &role, &p.AgentProfileID, &decisionRequired, &p.Position, &p.CreatedAt, &provenance)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("workflow step participant not found: %s", id)
 	}
@@ -531,6 +541,7 @@ func (r *Repository) GetStepParticipant(ctx context.Context, id string) (*models
 	}
 	p.Role = models.ParticipantRole(role)
 	p.DecisionRequired = decisionRequired == 1
+	p.Provenance = models.ParticipantProvenance(provenance)
 	return p, nil
 }
 
@@ -851,8 +862,9 @@ func (r *Repository) ensureRoleSeatTx(
 	existing := &models.WorkflowStepParticipant{}
 	var existingRole string
 	var existingDecisionRequired int
+	var existingProvenance string
 	err = tx.QueryRowContext(ctx, tx.Rebind(`
-		SELECT p.id, p.step_id, p.task_id, p.role, p.agent_profile_id, p.decision_required, p.position, p.created_at
+		SELECT p.id, p.step_id, p.task_id, p.role, p.agent_profile_id, p.decision_required, p.position, p.created_at, p.provenance
 		FROM workflow_step_participants p
 		JOIN workflow_steps ws ON ws.id = p.step_id
 		WHERE p.task_id = ? AND ws.workflow_id = ? AND p.role = ?
@@ -860,7 +872,7 @@ func (r *Repository) ensureRoleSeatTx(
 		LIMIT 1
 	`), taskID, workflowID, role).Scan(
 		&existing.ID, &existing.StepID, &existing.TaskID, &existingRole,
-		&existing.AgentProfileID, &existingDecisionRequired, &existing.Position, &existing.CreatedAt,
+		&existing.AgentProfileID, &existingDecisionRequired, &existing.Position, &existing.CreatedAt, &existingProvenance,
 	)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, false, fmt.Errorf("check existing role seat: %w", err)
@@ -868,6 +880,7 @@ func (r *Repository) ensureRoleSeatTx(
 	if err == nil {
 		existing.Role = models.ParticipantRole(existingRole)
 		existing.DecisionRequired = existingDecisionRequired == 1
+		existing.Provenance = models.ParticipantProvenance(existingProvenance)
 		if cerr := tx.Commit(); cerr != nil {
 			return nil, false, fmt.Errorf("commit: %w", cerr)
 		}
@@ -883,13 +896,14 @@ func (r *Repository) ensureRoleSeatTx(
 		DecisionRequired: true,
 		Position:         0,
 		CreatedAt:        time.Now().UTC(),
+		Provenance:       models.ParticipantProvenanceAuto,
 	}
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`
 		INSERT INTO workflow_step_participants
-			(id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			(id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at, provenance)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), seat.ID, seat.StepID, seat.TaskID, string(seat.Role), seat.AgentProfileID,
-		dialect.BoolToInt(seat.DecisionRequired), seat.Position, seat.CreatedAt); err != nil {
+		dialect.BoolToInt(seat.DecisionRequired), seat.Position, seat.CreatedAt, string(seat.Provenance)); err != nil {
 		if isParticipantsNaturalKeyViolation(err) {
 			return nil, false, err
 		}

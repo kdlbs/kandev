@@ -252,6 +252,28 @@ func TestEnsureRoleSeat_InsertsWhenAbsent(t *testing.T) {
 	}
 }
 
+func TestEnsureRoleSeat_StampsAutoProvenance(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	step := newPhase2TestStep(t, repo, "Review")
+
+	seat, _, err := repo.EnsureRoleSeat(ctx, "wf-test", step.ID, "task-1", string(models.ParticipantRoleReviewer), "agent-a")
+	if err != nil {
+		t.Fatalf("ensure role seat: %v", err)
+	}
+	if seat.Provenance != models.ParticipantProvenanceAuto {
+		t.Fatalf("expected provenance %q, got %q", models.ParticipantProvenanceAuto, seat.Provenance)
+	}
+
+	got, err := repo.GetStepParticipant(ctx, seat.ID)
+	if err != nil {
+		t.Fatalf("get participant: %v", err)
+	}
+	if got.Provenance != models.ParticipantProvenanceAuto {
+		t.Fatalf("persisted provenance = %q, want %q", got.Provenance, models.ParticipantProvenanceAuto)
+	}
+}
+
 func TestEnsureRoleSeat_NoOpWhenSeatExistsAtAnyStepInWorkflow(t *testing.T) {
 	repo := setupTestRepo(t)
 	ctx := context.Background()
