@@ -252,6 +252,9 @@ func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskReq
 	if err := s.inheritParentRepositories(ctx, req); err != nil {
 		return nil, err
 	}
+	if err := s.preflightRepositorySelections(ctx, req); err != nil {
+		return nil, err
+	}
 	if err := s.validateTaskRepositoryPolicies(ctx, req.WorkspaceID, req.Repositories); err != nil {
 		return nil, err
 	}

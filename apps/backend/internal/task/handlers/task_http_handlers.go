@@ -41,6 +41,8 @@ type workspaceSourceJSON struct {
 	GitHubURL      string `json:"github_url"`
 	RemoteURL      string `json:"remote_url"`
 	Provider       string `json:"provider"`
+	ProviderHost   string `json:"provider_host"`
+	ProviderScope  string `json:"provider_scope"`
 	ProviderRepoID string `json:"provider_repo_id"`
 	ProviderOwner  string `json:"provider_owner"`
 	ProviderName   string `json:"provider_name"`
@@ -701,6 +703,8 @@ type httpTaskRepositoryInput struct {
 	GitHubURL      string `json:"github_url"`
 	RemoteURL      string `json:"remote_url"`
 	Provider       string `json:"provider"`
+	ProviderHost   string `json:"provider_host"`
+	ProviderScope  string `json:"provider_scope"`
 	ProviderRepoID string `json:"provider_repo_id"`
 	ProviderOwner  string `json:"provider_owner"`
 	ProviderName   string `json:"provider_name"`
@@ -1362,6 +1366,8 @@ func convertCreateTaskRepositories(c *gin.Context, inputs []httpTaskRepositoryIn
 			GitHubURL:      r.GitHubURL,
 			RemoteURL:      r.RemoteURL,
 			Provider:       r.Provider,
+			ProviderHost:   r.ProviderHost,
+			ProviderScope:  r.ProviderScope,
 			ProviderRepoID: r.ProviderRepoID,
 			ProviderOwner:  r.ProviderOwner,
 			ProviderName:   r.ProviderName,
@@ -1590,6 +1596,8 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 				GitHubURL:      r.GitHubURL,
 				RemoteURL:      r.RemoteURL,
 				Provider:       r.Provider,
+				ProviderHost:   r.ProviderHost,
+				ProviderScope:  r.ProviderScope,
 				ProviderRepoID: r.ProviderRepoID,
 				ProviderOwner:  r.ProviderOwner,
 				ProviderName:   r.ProviderName,
