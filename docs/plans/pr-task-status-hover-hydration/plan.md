@@ -28,6 +28,9 @@ work depends on it.
 - Load persisted full PR records for only the disclosed task.
 - Deduplicate concurrent loads, reuse store data, guard HTTP and WebSocket
   races, and permit retry after an error.
+- Preserve workspace ownership for live TaskPR updates. The browser must reject
+  missing or foreign workspace IDs, and typed backend events must route by their
+  owning workspace without falling back to a global broadcast.
 - Show the GitHub author login in the task summary.
 - Show the same author login in the existing coarse-pointer PR-status drawer.
 - Add focused component, desktop Playwright, and mobile Playwright coverage.
@@ -59,6 +62,16 @@ Before response application, compare the active workspace and current store
 records. Preserve matching records that arrived from WebSocket events. Add only
 missing PR identities from the HTTP result.
 
+### Workspace-scoped live PR updates
+
+Treat `TaskPR.workspace_id` as the authoritative owner of a live update. The
+frontend handler applies an update only when that ID is present and matches the
+active workspace, preserving the current scoped cache for missing or foreign
+payloads. The backend exposes `TaskPR.WorkspaceID` to the notification
+broadcaster and routes typed PR updates and detachments through the fail-closed
+workspace path when authentication is enforced, so an unattributed event is
+dropped instead of broadcast globally.
+
 ### Author presentation
 
 Add optional author data to `ChangeRequestTaskStatusSummaryData`. Derive the
@@ -83,6 +96,7 @@ the existing localized `task:byAuthor` key for author presentation.
 | `AC-UI-PR-TASK-STATUS-SUMMARY-001.17` | Summary derivation and shared render tests cover a present and missing author login. |
 | Existing `.1` to `.12` | Existing PR icon and shared summary suites remain green. |
 | `AC-UI-PR-TASK-STATUS-SUMMARY-001.18` | Existing status-chip component tests and mobile Playwright coverage prove drawer author visibility and unchanged task-row navigation. |
+| `AC-UI-PR-TASK-STATUS-SUMMARY-001.19` | `github.test.ts` proves missing and foreign live updates leave the active scoped cache unchanged; `task_notifications_test.go` proves typed events reach only the owning workspace and unattributed events are dropped when auth is enforced; the singleton panel test preserves taskPR scope metadata during task switching. |
 
 ## E2E tests
 
@@ -137,6 +151,13 @@ subagents.
   unrelated errors. Both changed E2E files pass the same lint directly.
 - PR review fixup coverage also verifies task-id and workspace-context races,
   deletion tombstones, and keyboard focus continuity during hydration.
+- Workspace-routing review fixup on 2026-08-26 added the `workspace_id` frontend
+  contract, missing/foreign event guards, typed backend workspace extraction, and
+  fail-closed notification tests. The focused frontend suite passed 95 tests
+  across 6 files and the backend gateway/GitHub suites passed 2,176 tests. The
+  full frontend Vitest run was stopped after the requested 15-minute local
+  window without a failure result or terminal summary; the PR checks remain the
+  authoritative broad-suite validation.
 
 ## Documentation impact
 
@@ -155,3 +176,5 @@ requirement and adds its system design.
   active tooltip content.
 - Adding author text can increase summary height and can wrap in translated
   layouts. Desktop and mobile tests must retain viewport containment.
+- A missing or mismatched workspace ID must never be replaced with the active
+  workspace or reach a global notification broadcast.

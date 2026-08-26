@@ -16,9 +16,6 @@ spec: "../../specs/ui/requirements/pr-task-status-summary.md"
   icon-supported review, CI, and merge/state rows; long titles wrap and missing rows stay absent.
 - Existing icon color, multi-PR count, merge-readiness logic, `data-pr-*` attributes, task-row
   activation, and coarse-pointer behavior remain unchanged; all new copy is localized.
-- TaskPR API and WebSocket updates retain their owning workspace ID. Foreign or unattributed live
-  updates cannot mutate the active workspace cache, and typed backend events cannot fan out across
-  workspace owners when authentication is enforced.
 - Focused component tests, desktop hover E2E, mobile task-row E2E, typecheck, and i18n checks pass.
 
 ## TDD Sequence
@@ -100,8 +97,6 @@ one small vertical slice and overlap on the same component contract.
   accessibility copy.
 - Keep the compact indicator passive and preserve parent row click/keyboard behavior on every
   shared surface.
-- Treat `TaskPR.workspace_id` as the authoritative event owner. Apply live updates only for the
-  active workspace and route typed backend events through the fail-closed workspace broadcaster.
 
 ## Results
 
@@ -130,13 +125,6 @@ GREEN evidence:
   `apps/web/.pr-assets/pr-status-badge--readable-task-pr-summary.png` for visual inspection. The
   subsequent standard E2E cleanup removed the ignored capture and every E2E run completed teardown.
 
-Review blocker fixup on 2026-08-26 preserved scoped task PR metadata during singleton task
-switching, made `workspace_id` authoritative for frontend WebSocket updates, and added fail-closed
-backend routing for typed TaskPR notifications. The focused frontend suite passed 95 tests across 6
-files; backend gateway/GitHub suites passed across 2 packages; frontend typecheck and lint,
-changed-file Go lint, i18n checks, and specification lint passed. The full frontend Vitest suite was
-stopped after the requested 15-minute local window without a failure result or terminal summary.
-
 Files changed:
 
 - `apps/web/components/github/pr-task-icon.tsx`
@@ -150,10 +138,8 @@ Files changed:
 - `apps/web/e2e/tests/task/mobile-task-status-summary.spec.ts`
 - This spec, plan, task, and `docs/specs/INDEX.md`.
 
-No in-scope code blockers or residual risks remain. Existing ready-to-merge, aggregate color,
-task-row activation, and coarse-pointer detail ownership are preserved. Full-suite completion is
-delegated to PR CI because the local run did not reach a terminal result within the 15-minute
-window.
+No blockers or residual in-scope risks remain. Existing ready-to-merge, aggregate color, task-row
+activation, and coarse-pointer detail ownership are preserved.
 
 ## Output contract
 
