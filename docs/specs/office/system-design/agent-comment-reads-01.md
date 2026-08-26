@@ -335,8 +335,10 @@ parent, and blockers, and denies any cross-workspace pair.
 
 Placing the guard at the endpoint rather than at a tool is what makes it
 complete. The office route group authenticates agents with a workspace-scoped
-JWT, and the workspace-scope middleware skips agent callers and is in any case
-gated on a `:wsId` path parameter this route does not carry — so before this
+JWT. The workspace-scope middleware defers this exact agent comment route to
+the shared guard because the route has no `:wsId` parameter and must return one
+forbidden response for missing, foreign, and unrelated targets. Other Office
+routes still use the workspace-scope middleware before dispatch. Before this
 change any Office agent could read any task's comments in its workspace, and
 both CLI commands reached that read. One handler fix closes both entry points.
 A guarded tool beside an unguarded endpoint would have closed neither, which is

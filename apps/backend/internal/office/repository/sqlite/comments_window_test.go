@@ -2,12 +2,203 @@ package sqlite_test
 
 import (
 	"context"
+	"database/sql"
+	"database/sql/driver"
+	"path/filepath"
 	"sort"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/jmoiron/sqlx"
+	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	sqlite3 "github.com/mattn/go-sqlite3"
 )
+
+type commentWindowTraceState struct {
+	countProfiled chan struct{}
+	release       chan struct{}
+	releaseOnce   sync.Once
+	countOnce     sync.Once
+}
+
+var commentWindowTraceStateGlobal struct {
+	mu    sync.Mutex
+	state *commentWindowTraceState
+}
+
+func init() {
+	sql.Register("sqlite3_comments_window_test", commentWindowDriver{})
+}
+
+type commentWindowDriver struct{}
+
+func (commentWindowDriver) Open(name string) (driver.Conn, error) {
+	conn, err := (&sqlite3.SQLiteDriver{}).Open(name)
+	if err != nil {
+		return nil, err
+	}
+	commentWindowTraceStateGlobal.mu.Lock()
+	state := commentWindowTraceStateGlobal.state
+	commentWindowTraceStateGlobal.mu.Unlock()
+	return &commentWindowConn{Conn: conn, state: state}, nil
+}
+
+type commentWindowConn struct {
+	driver.Conn
+	state *commentWindowTraceState
+}
+
+func (c *commentWindowConn) Prepare(query string) (driver.Stmt, error) {
+	stmt, err := c.Conn.Prepare(query)
+	if err != nil || c.state == nil || !isCommentCountQuery(query) {
+		return stmt, err
+	}
+	return &commentWindowStmt{Stmt: stmt, state: c.state}, nil
+}
+
+func (c *commentWindowConn) PrepareContext(ctx context.Context, query string) (driver.Stmt, error) {
+	preparer, ok := c.Conn.(driver.ConnPrepareContext)
+	if !ok {
+		return c.Prepare(query)
+	}
+	stmt, err := preparer.PrepareContext(ctx, query)
+	if err != nil || c.state == nil || !isCommentCountQuery(query) {
+		return stmt, err
+	}
+	return &commentWindowStmt{Stmt: stmt, state: c.state}, nil
+}
+
+func (c *commentWindowConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
+	beginner, ok := c.Conn.(driver.ConnBeginTx)
+	if !ok {
+		legacy, ok := c.Conn.(interface {
+			Begin() (driver.Tx, error)
+		})
+		if !ok {
+			return nil, driver.ErrSkip
+		}
+		return legacy.Begin()
+	}
+	return beginner.BeginTx(ctx, opts)
+}
+
+func (c *commentWindowConn) QueryContext(
+	ctx context.Context, query string, args []driver.NamedValue,
+) (driver.Rows, error) {
+	queryer, ok := c.Conn.(driver.QueryerContext)
+	if !ok {
+		return nil, driver.ErrSkip
+	}
+	rows, err := queryer.QueryContext(ctx, query, args)
+	if err != nil || c.state == nil || !isCommentCountQuery(query) {
+		return rows, err
+	}
+	return &commentWindowRows{Rows: rows, state: c.state}, nil
+}
+
+func (c *commentWindowConn) ExecContext(
+	ctx context.Context, query string, args []driver.NamedValue,
+) (driver.Result, error) {
+	execer, ok := c.Conn.(driver.ExecerContext)
+	if !ok {
+		return nil, driver.ErrSkip
+	}
+	return execer.ExecContext(ctx, query, args)
+}
+
+type commentWindowRows struct {
+	driver.Rows
+	state *commentWindowTraceState
+}
+
+func (r *commentWindowRows) Next(dest []driver.Value) error {
+	err := r.Rows.Next(dest)
+	if err == nil {
+		r.state.countOnce.Do(func() {
+			r.state.countProfiled <- struct{}{}
+			<-r.state.release
+		})
+	}
+	return err
+}
+
+type commentWindowStmt struct {
+	driver.Stmt
+	state *commentWindowTraceState
+}
+
+func isCommentCountQuery(query string) bool {
+	return strings.Contains(strings.ToUpper(query), "SELECT COUNT(*) FROM TASK_COMMENTS")
+}
+
+func (s *commentWindowStmt) Query(args []driver.Value) (driver.Rows, error) {
+	legacy, ok := s.Stmt.(interface {
+		Query([]driver.Value) (driver.Rows, error)
+	})
+	if !ok {
+		return nil, driver.ErrSkip
+	}
+	rows, err := legacy.Query(args)
+	if err != nil {
+		return rows, err
+	}
+	return &commentWindowRows{Rows: rows, state: s.state}, nil
+}
+
+func (s *commentWindowStmt) QueryContext(
+	ctx context.Context, args []driver.NamedValue,
+) (driver.Rows, error) {
+	queryer, ok := s.Stmt.(driver.StmtQueryContext)
+	if !ok {
+		return nil, driver.ErrSkip
+	}
+	rows, err := queryer.QueryContext(ctx, args)
+	if err != nil {
+		return rows, err
+	}
+	return &commentWindowRows{Rows: rows, state: s.state}, nil
+}
+
+func newConcurrentCommentWindowRepo(t *testing.T, state *commentWindowTraceState) *sqlite.Repository {
+	t.Helper()
+	commentWindowTraceStateGlobal.mu.Lock()
+	commentWindowTraceStateGlobal.state = state
+	commentWindowTraceStateGlobal.mu.Unlock()
+	t.Cleanup(func() {
+		state.releaseOnce.Do(func() { close(state.release) })
+		commentWindowTraceStateGlobal.mu.Lock()
+		commentWindowTraceStateGlobal.state = nil
+		commentWindowTraceStateGlobal.mu.Unlock()
+	})
+
+	dsn := filepath.Join(t.TempDir(), "comments.db") + "?_journal_mode=WAL&_busy_timeout=5000"
+	writer, err := sqlx.Open("sqlite3_comments_window_test", dsn)
+	if err != nil {
+		t.Fatalf("open writer: %v", err)
+	}
+	reader, err := sqlx.Open("sqlite3_comments_window_test", dsn)
+	if err != nil {
+		t.Fatalf("open reader: %v", err)
+	}
+	writer.SetMaxOpenConns(4)
+	reader.SetMaxOpenConns(4)
+	t.Cleanup(func() {
+		_ = writer.Close()
+		_ = reader.Close()
+	})
+	if _, _, err := settingsstore.Provide(writer, reader, nil); err != nil {
+		t.Fatalf("settings store: %v", err)
+	}
+	repo, err := sqlite.NewWithDB(writer, reader, nil)
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+	return repo
+}
 
 // seedComment creates a comment with an explicit CreatedAt so ordering
 // assertions don't depend on wall-clock timing between inserts.
@@ -144,5 +335,78 @@ func TestListTaskCommentsWindow_TotalIndependentOfLimit(t *testing.T) {
 	}
 	if len(comments) != 1 {
 		t.Fatalf("len(comments) = %d, want 1", len(comments))
+	}
+}
+
+// AC-003.7/AC-006.1/AC-006.3: the count and page share one read snapshot,
+// while a concurrent writer can commit before the page query runs. The trace
+// callback gives the writer a deterministic point between those two queries.
+func TestListTaskCommentsWindow_SnapshotAllowsConcurrentWrite(t *testing.T) {
+	state := &commentWindowTraceState{
+		countProfiled: make(chan struct{}, 1),
+		release:       make(chan struct{}),
+	}
+	repo := newConcurrentCommentWindowRepo(t, state)
+	ctx := context.Background()
+	seedComment(t, repo, "task-concurrent", "before", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+
+	type windowResult struct {
+		comments []*models.TaskComment
+		total    int
+		err      error
+	}
+	readDone := make(chan windowResult, 1)
+	go func() {
+		comments, total, err := repo.ListTaskCommentsWindow(ctx, "task-concurrent", 20)
+		readDone <- windowResult{comments: comments, total: total, err: err}
+	}()
+
+	select {
+	case <-state.countProfiled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("read did not reach the count query")
+	}
+
+	writeDone := make(chan error, 1)
+	go func() {
+		writeDone <- repo.CreateTaskComment(ctx, &models.TaskComment{
+			TaskID:     "task-concurrent",
+			AuthorType: "agent",
+			AuthorID:   "agent-1",
+			Body:       "after",
+			Source:     "run",
+			CreatedAt:  time.Date(2026, 1, 1, 0, 1, 0, 0, time.UTC),
+		})
+	}()
+	select {
+	case err := <-writeDone:
+		if err != nil {
+			t.Fatalf("concurrent write: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		state.releaseOnce.Do(func() { close(state.release) })
+		t.Fatal("concurrent write blocked while the read transaction was paused")
+	}
+	state.releaseOnce.Do(func() { close(state.release) })
+
+	var got windowResult
+	select {
+	case got = <-readDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("read did not finish after releasing the snapshot barrier")
+	}
+	if got.err != nil {
+		t.Fatalf("ListTaskCommentsWindow: %v", got.err)
+	}
+	if got.total != 1 || len(got.comments) != 1 || got.comments[0].Body != "before" {
+		t.Fatalf("snapshot = total %d comments %v, want the complete pre-write snapshot", got.total, got.comments)
+	}
+
+	comments, total, err := repo.ListTaskCommentsWindow(ctx, "task-concurrent", 20)
+	if err != nil {
+		t.Fatalf("post-write ListTaskCommentsWindow: %v", err)
+	}
+	if total != 2 || len(comments) != 2 {
+		t.Fatalf("post-write window = total %d comments %d, want 2", total, len(comments))
 	}
 }
