@@ -245,6 +245,60 @@ func TestRecreate_ManagedRefreshUsesRefreshedPRHeadWithoutNetwork(t *testing.T) 
 	}
 }
 
+func TestRecreate_ManagedRefreshUsesRemoteWhenLocalCheckoutBranchIsBehind(t *testing.T) {
+	repoPath := initGitRepoWithRemote(t)
+	wantSHA := advanceRemoteBranch(t, repoPath, "feature/pr-branch")
+	runGit(t, repoPath, "remote", "set-url", "origin", "https://127.0.0.1:1/never.git")
+	worktreePath := filepath.Join(t.TempDir(), "task-managed-branch", "repo-1")
+	if err := os.MkdirAll(worktreePath, 0755); err != nil {
+		t.Fatalf("create worktree placeholder: %v", err)
+	}
+
+	mgr := newRecreateTestManager(t)
+	wt, err := mgr.recreate(context.Background(), &Worktree{
+		ID: "wt-managed-branch", SessionID: "session-managed-branch", TaskID: "task-managed-branch",
+		RepositoryID: "repo-1", RepositoryPath: repoPath, Path: worktreePath,
+		Branch: "feature/pr-branch", Status: StatusDeleted,
+	}, CreateRequest{
+		SessionID: "session-managed-branch", TaskID: "task-managed-branch", RepositoryID: "repo-1",
+		RepositoryPath: repoPath, CheckoutBranch: "feature/pr-branch", PullBeforeWorktree: true,
+		RefreshRepository: func(context.Context) error { return nil },
+	})
+	if err != nil {
+		t.Fatalf("recreate(): %v", err)
+	}
+	if got := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD")); got != wantSHA {
+		t.Fatalf("worktree HEAD = %q, want refreshed branch head %q", got, wantSHA)
+	}
+}
+
+func TestRecreate_ManagedRefreshUsesRemotePRHeadWhenLocalCheckoutBranchIsBehind(t *testing.T) {
+	repoPath, wantSHA := initManagedPRCheckoutBranch(t, 977, "feature/managed-fork-pr-behind")
+	runGit(t, repoPath, "remote", "set-url", "origin", "https://127.0.0.1:1/never.git")
+	worktreePath := filepath.Join(t.TempDir(), "task-managed-pr-behind", "repo-1")
+	if err := os.MkdirAll(worktreePath, 0755); err != nil {
+		t.Fatalf("create worktree placeholder: %v", err)
+	}
+
+	mgr := newRecreateTestManager(t)
+	wt, err := mgr.recreate(context.Background(), &Worktree{
+		ID: "wt-managed-pr-behind", SessionID: "session-managed-pr-behind", TaskID: "task-managed-pr-behind",
+		RepositoryID: "repo-1", RepositoryPath: repoPath, Path: worktreePath,
+		Branch: "feature/managed-fork-pr-behind", Status: StatusDeleted,
+	}, CreateRequest{
+		SessionID: "session-managed-pr-behind", TaskID: "task-managed-pr-behind", RepositoryID: "repo-1",
+		RepositoryPath: repoPath, CheckoutBranch: "feature/managed-fork-pr-behind", PRNumber: 977,
+		PullBeforeWorktree: true,
+		RefreshRepository:  func(context.Context) error { return nil },
+	})
+	if err != nil {
+		t.Fatalf("recreate(): %v", err)
+	}
+	if got := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD")); got != wantSHA {
+		t.Fatalf("worktree HEAD = %q, want refreshed PR head %q", got, wantSHA)
+	}
+}
+
 // TestCreate_RestoresReleasedWorktreeAfterArchive is the whole unarchive
 // round trip at the worktree layer. Archiving a task removes the worktree
 // directory and releases its reference (status=deleted + deleted_at) while

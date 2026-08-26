@@ -34,6 +34,8 @@ to contain current fetched remote state and any preserved local commits.
 - Replace stale-ref success events with failed sync progress events.
 - Select the remote ref when it contains the local ref.
 - Select the local ref when it contains the fetched remote ref.
+- Apply the selected refreshed ref when materializing an existing managed
+  checkout branch during Create or recreate, including managed PR refs.
 - Preserve local-only behavior when `PullBeforeWorktree` is false.
 - Keep Git commands non-interactive and bounded by the existing admission and
   timeout contracts.
@@ -42,7 +44,7 @@ to contain current fetched remote state and any preserved local commits.
 
 - Credential-route selection from Task 01.
 - Reset, merge, rebase, or automatic divergence recovery.
-- Branch recovery for existing reusable worktrees.
+- Refreshing an active reusable worktree without recreating it.
 - Task error rendering.
 
 ## Acceptance
@@ -51,6 +53,9 @@ to contain current fetched remote state and any preserved local commits.
   fallback ref.
 - Comparable local and remote refs select the containing ref without losing
   commits. Diverged or unverified refs return an error without mutation.
+- Managed checkout branches use the refreshed remote start point when the local
+  branch is behind it, for both normal branches and `origin/pr/<N>` refs during
+  Create and recreate.
 - Pull-before-worktree disabled retains current offline local behavior.
 
 ## Verification
@@ -103,8 +108,16 @@ rtk go test ./internal/worktree/... ./internal/agent/runtime/lifecycle/... -race
   instead of selecting stale local fallbacks.
 - Base-ref selection accepts only verified containing refs and rejects diverged
   or uncertain ancestry without mutation.
+- Managed checkout preparation now compares local and refreshed normal/PR refs,
+  preserves a local-ahead branch, and passes a refreshed remote start point to
+  Create and recreate instead of checking out a stale local branch.
 - Disabled pull-before-worktree behavior remains available for offline local
   workflows.
 - Verified with:
   - `rtk go test ./internal/worktree -run 'PullBaseBranch|RequiredRefresh|BaseRef|Fallback' -race`
   - `rtk go test ./internal/worktree/... ./internal/agent/runtime/lifecycle/... -race`
+  - `rtk go test ./internal/worktree -run 'Test(CreateWorktree|Recreate)_ManagedRefreshUsesRemote.*Behind' -count=1`
+  - `rtk go test ./internal/worktree ./internal/orchestrator/executor ./internal/agent/runtime/lifecycle ./internal/repoclone -race -count=1`
+  - `rtk make -C apps/backend lint`
+  - `rtk pnpm e2e:run --project chromium tests/task/launch-failure-recovery.spec.ts`
+  - `rtk pnpm e2e:run --project mobile-chrome tests/task/mobile-launch-failure-recovery.spec.ts`

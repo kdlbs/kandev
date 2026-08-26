@@ -120,6 +120,19 @@ verified behavior.
 - Backend lint, public-doc validators, specification lint, and `git diff
   --check` passed.
 
+### Review remediation results
+
+- Rebuilt the PR branch from the focused worktree-refresh, launch-failure, and
+  required fixture-origin commits; unrelated automation and broad E2E timing
+  changes are no longer part of the branch.
+- Added Create and recreate regressions for normal managed branches and
+  `origin/pr/<N>` refs with a pre-existing local branch behind the refreshed
+  source. The refreshed source is now passed to `git worktree add -B` after
+  ancestry selection.
+- Reverified 2,972 affected backend race tests, zero backend lint issues, 3/3
+  desktop launch-failure tests, and 2/2 mobile launch-failure tests with strict
+  no-retry E2E execution.
+
 ## Risks
 
 - A managed refresh that ignores task Git policy can replace an

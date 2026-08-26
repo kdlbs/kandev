@@ -2,6 +2,7 @@ package worktree
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -286,6 +287,51 @@ func TestCreateWorktree_ManagedRefreshUsesRefreshedPRHead(t *testing.T) {
 	}
 }
 
+func TestCreateWorktree_ManagedRefreshUsesRemoteWhenLocalCheckoutBranchIsBehind(t *testing.T) {
+	repoPath := initGitRepoWithRemote(t)
+	wantSHA := advanceRemoteBranch(t, repoPath, "feature/pr-branch")
+	runGit(t, repoPath, "remote", "set-url", "origin", "https://127.0.0.1:1/never.git")
+
+	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+	wt, err := mgr.Create(context.Background(), CreateRequest{
+		TaskID: "task-managed-branch", SessionID: "session-managed-branch", RepositoryID: "repo-managed-branch",
+		RepositoryPath: repoPath, BaseBranch: "main", CheckoutBranch: "feature/pr-branch",
+		PullBeforeWorktree: true, TaskDirName: "task-managed-branch", RepoName: "repo-managed-branch",
+		RefreshRepository: func(context.Context) error { return nil },
+	})
+	if err != nil {
+		t.Fatalf("Create(): %v", err)
+	}
+	if got := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD")); got != wantSHA {
+		t.Fatalf("worktree HEAD = %q, want refreshed branch head %q", got, wantSHA)
+	}
+}
+
+func TestCreateWorktree_ManagedRefreshUsesRemotePRHeadWhenLocalCheckoutBranchIsBehind(t *testing.T) {
+	repoPath, wantSHA := initManagedPRCheckoutBranch(t, 976, "feature/managed-fork-pr")
+	runGit(t, repoPath, "remote", "set-url", "origin", "https://127.0.0.1:1/never.git")
+
+	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+	wt, err := mgr.Create(context.Background(), CreateRequest{
+		TaskID: "task-managed-pr-behind", SessionID: "session-managed-pr-behind", RepositoryID: "repo-managed-pr-behind",
+		RepositoryPath: repoPath, BaseBranch: "main", CheckoutBranch: "feature/managed-fork-pr", PRNumber: 976,
+		PullBeforeWorktree: true, TaskDirName: "task-managed-pr-behind", RepoName: "repo-managed-pr-behind",
+		RefreshRepository: func(context.Context) error { return nil },
+	})
+	if err != nil {
+		t.Fatalf("Create(): %v", err)
+	}
+	if got := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD")); got != wantSHA {
+		t.Fatalf("worktree HEAD = %q, want refreshed PR head %q", got, wantSHA)
+	}
+}
+
 // TestCreateWorktree_RemoteBaseRefDoesNotSetUpstream verifies that when a worktree
 // is created with a remote-tracking ref as the base (e.g. origin/feature/foo),
 // the new branch does NOT inherit upstream tracking from that ref.
@@ -376,6 +422,47 @@ func initGitRepoWithRemote(t *testing.T) string {
 	runGit(t, cloneDir, "checkout", "main")
 
 	return cloneDir
+}
+
+func advanceRemoteBranch(t *testing.T, repoPath, branch string) string {
+	t.Helper()
+	originURL := strings.TrimSpace(runGit(t, repoPath, "remote", "get-url", "origin"))
+	remoteClone := filepath.Join(t.TempDir(), "remote-clone")
+	runGit(t, filepath.Dir(remoteClone), "clone", originURL, remoteClone)
+	runGit(t, remoteClone, "config", "user.email", "remote@example.com")
+	runGit(t, remoteClone, "config", "user.name", "Remote User")
+	runGit(t, remoteClone, "config", "commit.gpgsign", "false")
+	runGit(t, remoteClone, "checkout", branch)
+	writeRepoFile(t, remoteClone, "remote-refresh.txt", "refreshed\n")
+	runGit(t, remoteClone, "add", "remote-refresh.txt")
+	runGit(t, remoteClone, "commit", "-m", "refreshed branch commit")
+	wantSHA := strings.TrimSpace(runGit(t, remoteClone, "rev-parse", "HEAD"))
+	runGit(t, remoteClone, "push", "origin", branch)
+	runGit(t, repoPath, "fetch", "origin", branch)
+	return wantSHA
+}
+
+func initManagedPRCheckoutBranch(t *testing.T, prNumber int, branch string) (string, string) {
+	t.Helper()
+	repoPath, _ := initGitRepoWithPullRef(t, prNumber, branch)
+	prRef := fmt.Sprintf("pull/%d/head:refs/remotes/origin/pr/%d", prNumber, prNumber)
+	runGit(t, repoPath, "fetch", "origin", prRef)
+	runGit(t, repoPath, "branch", branch, fmt.Sprintf("origin/pr/%d", prNumber))
+	originURL := strings.TrimSpace(runGit(t, repoPath, "remote", "get-url", "origin"))
+	remoteClone := filepath.Join(t.TempDir(), "remote-pr-clone")
+	runGit(t, filepath.Dir(remoteClone), "clone", originURL, remoteClone)
+	runGit(t, remoteClone, "config", "user.email", "remote@example.com")
+	runGit(t, remoteClone, "config", "user.name", "Remote User")
+	runGit(t, remoteClone, "config", "commit.gpgsign", "false")
+	runGit(t, remoteClone, "fetch", "origin", prRef)
+	runGit(t, remoteClone, "checkout", "-b", branch, fmt.Sprintf("origin/pr/%d", prNumber))
+	writeRepoFile(t, remoteClone, "remote-pr-refresh.txt", "refreshed PR\n")
+	runGit(t, remoteClone, "add", "remote-pr-refresh.txt")
+	runGit(t, remoteClone, "commit", "-m", "refreshed PR commit")
+	wantSHA := strings.TrimSpace(runGit(t, remoteClone, "rev-parse", "HEAD"))
+	runGit(t, remoteClone, "push", "origin", "HEAD:"+pullHeadRef(prNumber))
+	runGit(t, repoPath, "fetch", "origin", prRef)
+	return repoPath, wantSHA
 }
 
 func initGitRepoForWorktreeTest(t *testing.T) string {

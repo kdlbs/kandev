@@ -419,18 +419,24 @@ func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRe
 	}
 	if req.CheckoutBranch != "" {
 		if req.RemoteSyncHandled {
-			prepared, prepareErr := m.prepareBranchFromRefreshedOrigin(
+			selectedRef, prepareErr := m.prepareBranchFromRefreshedOrigin(
 				ctx, req.RepositoryPath, req.CheckoutBranch, req.CheckoutBranch, req.PRNumber,
 			)
 			if prepareErr != nil {
 				return nil, prepareErr
 			}
-			if !prepared {
+			if selectedRef == "" {
 				if req.PRNumber > 0 {
 					return nil, fmt.Errorf("%w: refreshed pull request head %d was not materialized", ErrBranchUnrecoverable, req.PRNumber)
 				}
 				branchName = req.CheckoutBranch
 				checkoutMode.CheckoutBranch = ""
+			} else {
+				// A refreshed remote that contains the old local checkout branch
+				// must be the actual worktree start point. Passing it only to the
+				// preparation probe would still let git worktree add check out the
+				// stale local branch.
+				startPoint = selectedRef
 			}
 		} else {
 			// PRNumber != 0 means the caller wants the refs/pull/<N>/head ref;
@@ -604,7 +610,13 @@ func (m *Manager) addWorktreeForBranch(ctx context.Context, req CreateRequest, w
 	}
 
 	// Try checking out the PR branch directly (common case: single task per PR).
-	id, err := m.gitAddWorktreeExisting(ctx, req.RepositoryPath, req.CheckoutBranch, worktreePath)
+	var id string
+	var err error
+	if req.RemoteSyncHandled && startPoint != req.CheckoutBranch {
+		id, err = m.gitAddWorktreeExistingAtRef(ctx, req.RepositoryPath, req.CheckoutBranch, worktreePath, startPoint)
+	} else {
+		id, err = m.gitAddWorktreeExisting(ctx, req.RepositoryPath, req.CheckoutBranch, worktreePath)
+	}
 	if err == nil {
 		m.setUpstreamIfExists(ctx, worktreePath, req.CheckoutBranch, req.CheckoutBranch)
 		return id, req.CheckoutBranch, nil
@@ -840,24 +852,40 @@ func (m *Manager) resolveRetryStartPoint(ctx context.Context, repoPath, branch s
 // it automatically prunes and retries. If the repository uses git-crypt, it creates
 // the worktree without checkout, then unlocks git-crypt and performs the checkout.
 func (m *Manager) gitAddWorktreeExisting(ctx context.Context, repoPath, branchName, worktreePath string) (string, error) {
+	return m.gitAddWorktreeExistingAtRef(ctx, repoPath, branchName, worktreePath, "")
+}
+
+// gitAddWorktreeExistingAtRef creates a worktree for an existing branch at a
+// selected start point. A non-empty start point resets the branch with git's
+// -B worktree option, which is safe here because the caller has already proved
+// that the refreshed remote contains the old local branch.
+func (m *Manager) gitAddWorktreeExistingAtRef(ctx context.Context, repoPath, branchName, worktreePath, startPoint string) (string, error) {
 	release, err := acquireWorktreeTargetPath(ctx, worktreePath)
 	if err != nil {
 		return "", fmt.Errorf("acquire worktree target path: %w", err)
 	}
 	defer release()
-	return m.gitAddWorktreeExistingLocked(ctx, repoPath, branchName, worktreePath)
+	return m.gitAddWorktreeExistingLocked(ctx, repoPath, branchName, worktreePath, startPoint)
 }
 
-func (m *Manager) gitAddWorktreeExistingLocked(ctx context.Context, repoPath, branchName, worktreePath string) (string, error) {
+func (m *Manager) gitAddWorktreeExistingLocked(ctx context.Context, repoPath, branchName, worktreePath, startPoint string) (string, error) {
 	worktreeID := uuid.New().String()
 	usesGitCrypt := m.usesGitCrypt(repoPath)
 
 	// Build worktree add command
 	args := []string{"worktree", "add"}
+	if startPoint != "" {
+		args = append(args, "-B", branchName)
+	}
 	if usesGitCrypt {
 		args = append(args, "--no-checkout")
 	}
-	args = append(args, worktreePath, branchName)
+	args = append(args, worktreePath)
+	if startPoint == "" {
+		args = append(args, branchName)
+	} else {
+		args = append(args, startPoint)
+	}
 
 	cmd := newGitCommand(ctx, args...)
 	cmd.Dir = repoPath
@@ -880,7 +908,7 @@ func (m *Manager) gitAddWorktreeExistingLocked(ctx context.Context, repoPath, br
 	if isGitCryptSmudgeError(outStr) && !usesGitCrypt {
 		m.logger.Warn("git-crypt smudge error detected, retrying with --no-checkout",
 			zap.String("output", outStr))
-		return m.gitAddWorktreeExistingWithGitCrypt(ctx, repoPath, branchName, worktreePath)
+		return m.gitAddWorktreeExistingWithGitCrypt(ctx, repoPath, branchName, worktreePath, startPoint)
 	}
 
 	if !isBranchCheckedOutError(outStr) {
@@ -896,18 +924,26 @@ func (m *Manager) gitAddWorktreeExistingLocked(ctx context.Context, repoPath, br
 	}
 
 	// Retry after pruning stale worktree
-	return m.retryWorktreeExisting(ctx, repoPath, branchName, worktreePath, usesGitCrypt)
+	return m.retryWorktreeExisting(ctx, repoPath, branchName, worktreePath, usesGitCrypt, startPoint)
 }
 
 // retryWorktreeExisting retries worktree creation after pruning stale worktrees.
-func (m *Manager) retryWorktreeExisting(ctx context.Context, repoPath, branchName, worktreePath string, usesGitCrypt bool) (string, error) {
+func (m *Manager) retryWorktreeExisting(ctx context.Context, repoPath, branchName, worktreePath string, usesGitCrypt bool, startPoint string) (string, error) {
 	worktreeID := uuid.New().String()
 
 	args := []string{"worktree", "add"}
+	if startPoint != "" {
+		args = append(args, "-B", branchName)
+	}
 	if usesGitCrypt {
 		args = append(args, "--no-checkout")
 	}
-	args = append(args, worktreePath, branchName)
+	args = append(args, worktreePath)
+	if startPoint == "" {
+		args = append(args, branchName)
+	} else {
+		args = append(args, startPoint)
+	}
 
 	retryCmd := newGitCommand(ctx, args...)
 	retryCmd.Dir = repoPath
@@ -937,10 +973,20 @@ func (m *Manager) retryWorktreeExisting(ctx context.Context, repoPath, branchNam
 
 // gitAddWorktreeExistingWithGitCrypt creates a worktree for an existing branch
 // using --no-checkout, then unlocks git-crypt. Used as fallback when smudge error detected.
-func (m *Manager) gitAddWorktreeExistingWithGitCrypt(ctx context.Context, repoPath, branchName, worktreePath string) (string, error) {
+func (m *Manager) gitAddWorktreeExistingWithGitCrypt(ctx context.Context, repoPath, branchName, worktreePath, startPoint string) (string, error) {
 	worktreeID := uuid.New().String()
 
-	cmd := newGitCommand(ctx, "worktree", "add", "--no-checkout", worktreePath, branchName)
+	args := []string{"worktree", "add"}
+	if startPoint != "" {
+		args = append(args, "-B", branchName)
+	}
+	args = append(args, "--no-checkout", worktreePath)
+	if startPoint == "" {
+		args = append(args, branchName)
+	} else {
+		args = append(args, startPoint)
+	}
+	cmd := newGitCommand(ctx, args...)
 	cmd.Dir = repoPath
 	output, err := runGitCmdCombinedOutput(ctx, cmd)
 	if err != nil {
@@ -1263,22 +1309,30 @@ func (m *Manager) gitAddWorktreeWithGitCryptLocked(ctx context.Context, repoPath
 // for the recreate path, retrying with --no-checkout when a git-crypt smudge
 // error is detected. Returns the effective usesGitCrypt flag (forced to true
 // if the retry path was taken so the caller knows to unlock+checkout).
-func (m *Manager) gitAddWorktreeForRecreate(ctx context.Context, repoPath, branch, worktreePath string) (bool, error) {
+func (m *Manager) gitAddWorktreeForRecreate(ctx context.Context, repoPath, branch, worktreePath, startPoint string) (bool, error) {
 	release, err := acquireWorktreeTargetPath(ctx, worktreePath)
 	if err != nil {
 		return false, fmt.Errorf("acquire worktree target path: %w", err)
 	}
 	defer release()
-	return m.gitAddWorktreeForRecreateLocked(ctx, repoPath, branch, worktreePath)
+	return m.gitAddWorktreeForRecreateLocked(ctx, repoPath, branch, worktreePath, startPoint)
 }
 
-func (m *Manager) gitAddWorktreeForRecreateLocked(ctx context.Context, repoPath, branch, worktreePath string) (bool, error) {
+func (m *Manager) gitAddWorktreeForRecreateLocked(ctx context.Context, repoPath, branch, worktreePath, startPoint string) (bool, error) {
 	usesGitCrypt := m.usesGitCrypt(repoPath)
 	args := []string{"worktree", "add"}
+	if startPoint != "" {
+		args = append(args, "-B", branch)
+	}
 	if usesGitCrypt {
 		args = append(args, "--no-checkout")
 	}
-	args = append(args, worktreePath, branch)
+	args = append(args, worktreePath)
+	if startPoint == "" {
+		args = append(args, branch)
+	} else {
+		args = append(args, startPoint)
+	}
 
 	cmd := newGitCommand(ctx, args...)
 	cmd.Dir = repoPath
@@ -1290,7 +1344,17 @@ func (m *Manager) gitAddWorktreeForRecreateLocked(ctx context.Context, repoPath,
 	if isGitCryptSmudgeError(outStr) && !usesGitCrypt {
 		m.logger.Warn("git-crypt smudge error during recreate, retrying with --no-checkout",
 			zap.String("output", outStr))
-		retryCmd := newGitCommand(ctx, "worktree", "add", "--no-checkout", worktreePath, branch)
+		retryArgs := []string{"worktree", "add"}
+		if startPoint != "" {
+			retryArgs = append(retryArgs, "-B", branch)
+		}
+		retryArgs = append(retryArgs, "--no-checkout", worktreePath)
+		if startPoint == "" {
+			retryArgs = append(retryArgs, branch)
+		} else {
+			retryArgs = append(retryArgs, startPoint)
+		}
+		retryCmd := newGitCommand(ctx, retryArgs...)
 		retryCmd.Dir = repoPath
 		if retryOutput, retryErr := runGitCmdCombinedOutput(ctx, retryCmd); retryErr != nil {
 			m.logger.Error("failed to recreate worktree (--no-checkout)",
@@ -1411,27 +1475,32 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 			return nil, materializeErr
 		}
 	}
+	refreshedStartPoint := ""
+	if req.RemoteSyncHandled && req.RemoteContribution == nil {
+		sourceBranch := existing.Branch
+		if req.CheckoutBranch != "" {
+			sourceBranch = req.CheckoutBranch
+		}
+		selectedRef, prepareErr := m.prepareBranchFromRefreshedOrigin(
+			ctx, req.RepositoryPath, existing.Branch, sourceBranch, req.PRNumber,
+		)
+		if prepareErr != nil {
+			return nil, prepareErr
+		}
+		if selectedRef == "" {
+			return nil, fmt.Errorf("%w: refreshed branch %q was not materialized", ErrBranchUnrecoverable, sourceBranch)
+		}
+		if selectedRef != existing.Branch {
+			refreshedStartPoint = selectedRef
+		}
+		exists = true
+	}
 	if !exists {
 		if req.RemoteContribution != nil {
 			branchCmd := m.newNonInteractiveGitCmd(ctx, req.RepositoryPath, "branch", existing.Branch, contributionRef)
 			if output, branchErr := runGitCmdCombinedOutput(ctx, branchCmd); branchErr != nil {
 				return nil, fmt.Errorf("restore contribution branch: %s: %w", strings.TrimSpace(string(output)), branchErr)
 			}
-		} else if req.RemoteSyncHandled {
-			sourceBranch := existing.Branch
-			if req.CheckoutBranch != "" {
-				sourceBranch = req.CheckoutBranch
-			}
-			prepared, prepareErr := m.prepareBranchFromRefreshedOrigin(
-				ctx, req.RepositoryPath, existing.Branch, sourceBranch, req.PRNumber,
-			)
-			if prepareErr != nil {
-				return nil, prepareErr
-			}
-			if !prepared {
-				return nil, fmt.Errorf("%w: refreshed branch %q was not materialized", ErrBranchUnrecoverable, sourceBranch)
-			}
-			exists = true
 		} else {
 			if _, fetchErr := m.fetchBranchToLocalWithPolicy(
 				ctx, req.RepositoryPath, existing.Branch, req.PRNumber,
@@ -1459,7 +1528,7 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 	}
 
 	// Try to add worktree using existing branch
-	usesGitCrypt, err := m.gitAddWorktreeForRecreate(ctx, req.RepositoryPath, existing.Branch, worktreePath)
+	usesGitCrypt, err := m.gitAddWorktreeForRecreate(ctx, req.RepositoryPath, existing.Branch, worktreePath, refreshedStartPoint)
 	if err != nil {
 		return nil, err
 	}

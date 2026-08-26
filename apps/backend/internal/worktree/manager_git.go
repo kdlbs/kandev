@@ -120,47 +120,58 @@ func (m *Manager) preferRefreshedRemoteRef(ctx context.Context, repoPath, branch
 	return m.selectContainingRef(ctx, repoPath, branch, remoteRef)
 }
 
-// prepareCheckoutFromRefreshedOrigin makes a refreshed remote branch available
-// as a local branch without contacting origin. It returns false when neither a
-// local nor remote-tracking ref exists, preserving the existing "create a new
-// branch from base" behavior.
+// prepareCheckoutFromRefreshedOrigin verifies a refreshed remote branch and
+// returns whether a usable local or remote ref exists without contacting
+// origin. It returns false when neither ref exists, preserving the existing
+// "create a new branch from base" behavior.
 func (m *Manager) prepareCheckoutFromRefreshedOrigin(ctx context.Context, repoPath, branch string) (bool, error) {
-	return m.prepareBranchFromRefreshedOrigin(ctx, repoPath, branch, branch, 0)
+	selected, err := m.prepareBranchFromRefreshedOrigin(ctx, repoPath, branch, branch, 0)
+	return selected != "", err
 }
 
-// prepareBranchFromRefreshedOrigin makes a provider-refreshed source branch
-// available as a local branch without contacting origin. A PR number selects
-// the dedicated origin/pr/<N> ref, which is also how fork PR heads are kept
-// available after the authenticated refresh.
+// prepareBranchFromRefreshedOrigin selects a provider-refreshed source branch
+// without contacting origin. A PR number selects the dedicated origin/pr/<N>
+// ref, which is also how fork PR heads are kept available after the
+// authenticated refresh. When both refs exist, the selected ref is the one
+// that contains the other. A local-only ref is preserved, a refreshed remote
+// ref is returned to the caller as the worktree start point, and divergence or
+// an unverified relationship fails closed.
 func (m *Manager) prepareBranchFromRefreshedOrigin(
 	ctx context.Context, repoPath, localBranch, sourceBranch string, prNumber int,
-) (bool, error) {
-	if exists, err := m.branchExists(ctx, repoPath, localBranch); err != nil {
-		return false, err
-	} else if exists {
-		return true, nil
-	}
+) (string, error) {
 	remoteRef := "origin/" + sourceBranch
 	if prNumber > 0 {
 		remoteRef = fmt.Sprintf("origin/pr/%d", prNumber)
 	}
-	if exists, err := m.branchExists(ctx, repoPath, remoteRef); err != nil {
-		return false, err
-	} else if !exists {
-		return false, nil
+	localExists, err := m.branchExists(ctx, repoPath, localBranch)
+	if err != nil {
+		return "", err
+	}
+	remoteExists, err := m.branchExists(ctx, repoPath, remoteRef)
+	if err != nil {
+		return "", err
+	}
+	if !localExists && !remoteExists {
+		return "", nil
+	}
+	if !remoteExists {
+		return "", fmt.Errorf("required fetched remote ref %q is missing", remoteRef)
+	}
+	if !localExists {
+		release, err := subproc.AcquireGit(ctx, subproc.GitLifecycle)
+		if err != nil {
+			return "", err
+		}
+		defer release()
+		cmd := m.newNonInteractiveGitCmd(ctx, repoPath, "branch", "--track", localBranch, remoteRef)
+		if output, runErr := cmd.CombinedOutput(); runErr != nil {
+			return "", fmt.Errorf("create local branch %q from refreshed origin: %s: %w",
+				localBranch, strings.TrimSpace(string(output)), runErr)
+		}
+		return localBranch, nil
 	}
 
-	release, err := subproc.AcquireGit(ctx, subproc.GitLifecycle)
-	if err != nil {
-		return false, err
-	}
-	defer release()
-	cmd := m.newNonInteractiveGitCmd(ctx, repoPath, "branch", "--track", localBranch, remoteRef)
-	if output, runErr := cmd.CombinedOutput(); runErr != nil {
-		return false, fmt.Errorf("create local branch %q from refreshed origin: %s: %w",
-			localBranch, strings.TrimSpace(string(output)), runErr)
-	}
-	return true, nil
+	return m.selectContainingRef(ctx, repoPath, localBranch, remoteRef)
 }
 
 // Branch recovery statuses reported by BranchRecoveryStatus.
