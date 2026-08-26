@@ -486,6 +486,110 @@ func TestSwitchWorkflowDispatcherRoutesOnEnterToDestinationProfileSession(t *tes
 	}
 }
 
+// spyDecisionStore counts ClearStepDecisions calls; the other DecisionStore
+// methods are unused by the clear_decisions action.
+type spyDecisionStore struct {
+	clearCalls int
+}
+
+func (s *spyDecisionStore) ListStepDecisions(context.Context, string, string) ([]engine.DecisionInfo, error) {
+	return nil, nil
+}
+
+func (s *spyDecisionStore) RecordStepDecision(context.Context, engine.DecisionInfo) error {
+	return nil
+}
+
+func (s *spyDecisionStore) ClearStepDecisions(context.Context, string, string) (int64, error) {
+	s.clearCalls++
+	return 0, nil
+}
+
+// TestSwitchWorkflowDispatcherOnEnterSkipsSessionIndependentAction is the
+// route-axis test for the step-entry-sequence-execution fix: a workflow-switch
+// arrival's on_enter dispatch still executes a session-shaped action
+// (set_session_mode, its only production path on this route) exactly once,
+// but must no longer execute a session-independent action (clear_decisions)
+// — that half of the entry sequence now runs exactly once, via the
+// ledger-driven DispatchStepEntry path the registered step-transition writers
+// call after their own commit, not via this route's HandleTrigger call.
+func TestSwitchWorkflowDispatcherOnEnterSkipsSessionIndependentAction(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step2")
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	session.AgentProfileID = "profile-a"
+	session.ExecutorID = "exec-local"
+	session.ExecutorProfileID = "executor-profile"
+	session.IsPrimary = true
+	session.TaskEnvironmentID = "env-1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-1", TaskID: "t1", Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("create task environment: %v", err)
+	}
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+		ID:             "step2",
+		WorkflowID:     "wf1",
+		AgentProfileID: "profile-b",
+		Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{
+			{Type: wfmodels.OnEnterSetSessionMode, Config: map[string]any{"mode": "acceptEdits"}},
+			{Type: wfmodels.OnEnterClearDecisions},
+		}},
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["t1"] = &v1.Task{ID: "t1", WorkflowID: "wf1", State: v1.TaskStateInProgress}
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return &executor.LaunchAgentResponse{AgentExecutionID: "workflow-profile-execution"}, nil
+		},
+	}
+	log := testLogger()
+	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+	svc := createTestServiceWithAgent(repo, stepGetter, taskRepo, agentMgr)
+	svc.logger = log
+	svc.executor = exec
+	svc.scheduler = scheduler.NewScheduler(queue.NewTaskQueue(10), exec, taskRepo, log, scheduler.SchedulerConfig{})
+	decisions := &spyDecisionStore{}
+	svc.SetEngineDecisionStore(decisions)
+	svc.initWorkflowEngine()
+
+	if err := switchWorkflowDispatcher(svc)(ctx, "t1", "s1", engine.TriggerOnEnter, "op-1"); err != nil {
+		t.Fatalf("dispatcher returned error: %v", err)
+	}
+
+	sessions, err := repo.ListTaskSessions(ctx, "t1")
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	var destination *models.TaskSession
+	for _, candidate := range sessions {
+		if candidate.AgentProfileID == "profile-b" {
+			destination = candidate
+			break
+		}
+	}
+	if destination == nil {
+		t.Fatal("expected destination profile session")
+	}
+	if len(agentMgr.setSessionModeCalls) != 1 || agentMgr.setSessionModeCalls[0].SessionID != destination.ID {
+		t.Fatalf("set_session_mode calls = %+v, want exactly one for destination %q", agentMgr.setSessionModeCalls, destination.ID)
+	}
+	if decisions.clearCalls != 0 {
+		t.Fatalf("clear_decisions calls via the switch route = %d, want 0 (session-independent actions now run only through the ledger-driven DispatchStepEntry path)", decisions.clearCalls)
+	}
+}
+
 func TestSwitchWorkflowDispatcherSkipsPreflightForAppliedOperation(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

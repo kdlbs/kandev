@@ -823,6 +823,10 @@ type Task struct {
 	ArchivedByCascadeID string    `json:"archived_by_cascade_id,omitempty"`
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
+	// WorkflowStepTransitionID is the immutable ledger row identifier for the
+	// latest workflow-step write. Repositories populate it after a transition;
+	// it is transient and is not stored in the tasks table.
+	WorkflowStepTransitionID int64 `json:"-"`
 
 	// Office extensions.
 	//
@@ -1016,15 +1020,20 @@ type Workspace struct {
 
 // TaskRepository represents a repository associated with a task
 type TaskRepository struct {
-	ID             string                 `json:"id"`
-	TaskID         string                 `json:"task_id"`
-	RepositoryID   string                 `json:"repository_id"`
-	BaseBranch     string                 `json:"base_branch"`
-	CheckoutBranch string                 `json:"checkout_branch,omitempty"`
-	Position       int                    `json:"position"`
-	Metadata       map[string]interface{} `json:"metadata,omitempty"`
-	CreatedAt      time.Time              `json:"created_at"`
-	UpdatedAt      time.Time              `json:"updated_at"`
+	ID                            string                 `json:"id"`
+	TaskID                        string                 `json:"task_id"`
+	RepositoryID                  string                 `json:"repository_id"`
+	BaseBranch                    string                 `json:"base_branch"`
+	CheckoutBranch                string                 `json:"checkout_branch,omitempty"`
+	BranchPolicyID                string                 `json:"branch_policy_id,omitempty"`
+	BranchPolicyName              string                 `json:"branch_policy_name,omitempty"`
+	BranchPolicyBaseBranch        string                 `json:"branch_policy_base_branch,omitempty"`
+	BranchPolicyBranchTemplate    string                 `json:"branch_policy_branch_template,omitempty"`
+	BranchPolicyPullRequestTarget string                 `json:"branch_policy_pull_request_target,omitempty"`
+	Position                      int                    `json:"position"`
+	Metadata                      map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt                     time.Time              `json:"created_at"`
+	UpdatedAt                     time.Time              `json:"updated_at"`
 }
 
 // TaskWorkspaceFolder is a canonical host-folder attachment owned by a task.
@@ -1652,6 +1661,21 @@ type Repository struct {
 	DeletedAt              *time.Time                `json:"deleted_at,omitempty"`
 }
 
+// RepositoryBranchPolicy is a reusable branch workflow owned by one repository.
+// It is configuration, not task history: task repositories copy these fields
+// into their snapshot columns when a policy is selected.
+type RepositoryBranchPolicy struct {
+	ID                string    `json:"id"`
+	RepositoryID      string    `json:"repository_id"`
+	Name              string    `json:"name"`
+	Description       string    `json:"description,omitempty"`
+	BaseBranch        string    `json:"base_branch"`
+	BranchTemplate    string    `json:"branch_template"`
+	PullRequestTarget string    `json:"pull_request_target"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
+}
+
 // RepositorySet is a named, reusable group of workspace repositories that fills
 // the task-creation repository picker in one action.
 //
@@ -2189,25 +2213,31 @@ const (
 // A task keeps a bounded history of runs; findings reference the run that
 // produced them so the UI can attribute and supersede them.
 type TaskReviewRun struct {
-	ID              string           `json:"id"`
-	TaskID          string           `json:"task_id"`
-	SessionID       string           `json:"session_id"`
-	Trigger         ReviewRunTrigger `json:"trigger"`
-	WorkflowStepID  string           `json:"workflow_step_id"`
-	AgentID         string           `json:"agent_id"`
-	Model           string           `json:"model"`
-	Status          ReviewRunStatus  `json:"status"`
-	ErrorCode       string           `json:"error_code"`
-	ErrorMessage    string           `json:"error_message"`
-	Summary         string           `json:"summary"`
-	FindingCount    int              `json:"finding_count"`
-	FileCount       int              `json:"file_count"`
-	RepositoryCount int              `json:"repository_count"`
-	PromptTokens    int              `json:"prompt_tokens"`
-	ResponseTokens  int              `json:"response_tokens"`
-	DurationMs      int              `json:"duration_ms"`
-	CreatedAt       time.Time        `json:"created_at"`
-	CompletedAt     *time.Time       `json:"completed_at,omitempty"`
+	ID             string           `json:"id"`
+	TaskID         string           `json:"task_id"`
+	SessionID      string           `json:"session_id"`
+	Trigger        ReviewRunTrigger `json:"trigger"`
+	WorkflowStepID string           `json:"workflow_step_id"`
+	// EntryID is the step-transition ledger row identifier of the step entry
+	// that requested this run, when the run was requested by the
+	// run_code_review step-entry action. Empty for manual/MCP-triggered runs.
+	// Durable dedup key for AC-OFFICE-STEP-ENTRY-001.10: a redelivery of the
+	// same entry must rejoin this run rather than start a second one.
+	EntryID         string          `json:"entry_id,omitempty"`
+	AgentID         string          `json:"agent_id"`
+	Model           string          `json:"model"`
+	Status          ReviewRunStatus `json:"status"`
+	ErrorCode       string          `json:"error_code"`
+	ErrorMessage    string          `json:"error_message"`
+	Summary         string          `json:"summary"`
+	FindingCount    int             `json:"finding_count"`
+	FileCount       int             `json:"file_count"`
+	RepositoryCount int             `json:"repository_count"`
+	PromptTokens    int             `json:"prompt_tokens"`
+	ResponseTokens  int             `json:"response_tokens"`
+	DurationMs      int             `json:"duration_ms"`
+	CreatedAt       time.Time       `json:"created_at"`
+	CompletedAt     *time.Time      `json:"completed_at,omitempty"`
 }
 
 // TaskReviewFinding is one anchored, advisory review comment produced by a

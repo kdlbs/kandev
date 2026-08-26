@@ -79,12 +79,22 @@ func TestBuildPrompt_LegacyRunReasonsRemainCompatible(t *testing.T) {
 	tests := []struct {
 		name     string
 		reason   string
-		contains string
+		contains []string
 	}{
-		{name: "blockers resolved", reason: "blockers_resolved", contains: "All blockers"},
-		{name: "children completed", reason: "children_completed", contains: "All child tasks"},
-		{name: "review started", reason: "review_started", contains: "You are reviewing"},
-		{name: "approval started", reason: "approval_started", contains: "You are approving"},
+		{name: "blockers resolved", reason: "blockers_resolved", contains: []string{"All blockers"}},
+		{name: "children completed", reason: "children_completed", contains: []string{"All child tasks"}},
+		{name: "review started", reason: "review_started", contains: []string{
+			"You are reviewing",
+			"Legacy workflow task",
+			"record_step_decision_kandev",
+			"Posting a comment alone is not a decision",
+		}},
+		{name: "approval started", reason: "approval_started", contains: []string{
+			"You are approving",
+			"Legacy workflow task",
+			"record_step_decision_kandev",
+			"Posting a comment alone is not a decision",
+		}},
 	}
 
 	for _, tt := range tests {
@@ -94,10 +104,28 @@ func TestBuildPrompt_LegacyRunReasonsRemainCompatible(t *testing.T) {
 				TaskIdentifier: "KAN-legacy",
 				TaskTitle:      "Legacy workflow task",
 			})
-			if !strings.Contains(prompt, tt.contains) {
-				t.Errorf("legacy reason %q should use its existing prompt, got:\n%s", tt.reason, prompt)
+			for _, c := range tt.contains {
+				if !strings.Contains(prompt, c) {
+					t.Errorf("legacy reason %q missing %q, got:\n%s", tt.reason, c, prompt)
+				}
 			}
 		})
+	}
+}
+
+func TestBuildPrompt_TaskReviewRequestedUsesStageType(t *testing.T) {
+	prompt := service.BuildPrompt(&service.PromptContext{
+		Reason:         service.RunReasonTaskReviewRequested,
+		StageType:      "approval",
+		TaskIdentifier: "KAN-review",
+		TaskTitle:      "Approve release",
+	})
+
+	if !strings.HasPrefix(prompt, "You are approving") {
+		t.Errorf("task_review_requested approver prompt = %q, want approver framing", prompt)
+	}
+	if !strings.Contains(prompt, "record_step_decision_kandev") {
+		t.Errorf("task_review_requested prompt missing decision tool contract: %q", prompt)
 	}
 }
 

@@ -28,7 +28,7 @@ var (
 	}
 )
 
-func runStart(ctx context.Context, opts Options) int {
+func runStart(ctx context.Context, opts Options, build BuildInfo) int {
 	startupConfig, err := loadBootstrapConfig()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
@@ -64,6 +64,7 @@ func runStart(ctx context.Context, opts Options) int {
 	}
 	return launchManaged(ctx, managedAppConfig{
 		Header:     "start mode: using local build",
+		Version:    normalizedBuildVersion(build.Version),
 		Mode:       "start",
 		Backend:    self,
 		BackendCWD: filepath.Dir(self),
@@ -77,6 +78,7 @@ func runStart(ctx context.Context, opts Options) int {
 
 type managedAppConfig struct {
 	Header     string
+	Version    string
 	Mode       string
 	Backend    string
 	BackendCWD string
@@ -131,7 +133,7 @@ func runManagedApp(ctx context.Context, cfg managedAppConfig) int {
 	}
 	cfg.Ports.BackendURL = cfg.Endpoints.accessURL
 	ignoreBrokenPipeSignal()
-	logStartup(cfg.Header, cfg.Ports, resolveDatabasePathForConfig(cfg.Startup), cfg.LogLevel, serverHostForConfig(cfg.Startup))
+	logStartup(cfg.Header, cfg.Version, cfg.Ports, resolveDatabasePathForConfig(cfg.Startup), cfg.LogLevel, serverHostForConfig(cfg.Startup))
 	setLauncherShutdownDebug(cfg.Opts.Debug || os.Getenv("KANDEV_SHUTDOWN_DEBUG") == "1")
 	shutdownDebugf("runManagedApp start mode=%q backend=%q backend_cwd=%q debug=%t", cfg.Mode, cfg.Backend, cfg.BackendCWD, cfg.Opts.Debug)
 
@@ -191,8 +193,9 @@ func runManagedApp(ctx context.Context, cfg managedAppConfig) int {
 	return waitForAppExit(supervisor, backend)
 }
 
-func logStartup(header string, ports portConfig, dbPath, logLevel string, serverHosts ...string) {
+func logStartup(header, version string, ports portConfig, dbPath, logLevel string, serverHosts ...string) {
 	fmt.Println("[kandev] " + header)
+	fmt.Println("[kandev] version:", normalizedBuildVersion(version))
 	fmt.Println("[kandev] url:", ports.BackendURL)
 	serverHost := os.Getenv("KANDEV_SERVER_HOST")
 	if len(serverHosts) > 0 && serverHosts[0] != "" {
@@ -209,6 +212,13 @@ func logStartup(header string, ports portConfig, dbPath, logLevel string, server
 	if logLevel != "" {
 		fmt.Println("[kandev] log level:", logLevel)
 	}
+}
+
+func normalizedBuildVersion(version string) string {
+	if version == "" {
+		return "dev"
+	}
+	return version
 }
 
 func openBrowser(url string) {

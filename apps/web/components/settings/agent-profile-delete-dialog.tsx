@@ -171,49 +171,59 @@ export function AgentProfileDeleteConflictDialog({
 
   return (
     <AlertDialog open={!!conflict} onOpenChange={onOpenChange}>
-      <AlertDialogContent>
+      <AlertDialogContent
+        data-testid="agent-profile-delete-conflict-dialog"
+        data-layout="contained"
+        className="max-h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden"
+      >
         <AlertDialogHeader>
           <AlertDialogTitle>
             {hasHardBlockers ? t("agents:cannotDeleteAgentProfile") : t(DELETE_PROFILE_TITLE_KEY)}
           </AlertDialogTitle>
-          <AlertDialogDescription asChild>
-            <div>
-              <p>{t("agents:profileInUseIntro")}</p>
-              <SessionConflictSection
-                title={t("agents:conflictTasksTitle")}
-                sessions={tasks}
-                fallback={t("agents:untitledTask")}
-              />
-              <SessionConflictSection
-                title={t("agents:conflictQuickChatsTitle")}
-                sessions={quickChats}
-                fallback={t("agents:untitledQuickChat")}
-              />
-              <WatcherConflictSection watchersByKind={watchersByKind} />
-              <RoutingTierConflictSection
-                routingTiers={routingTiers}
-                workspaceLabels={new Map(workspaces.map((w) => [w.id, w.name]))}
-                providerLabels={new Map(providers.map((p) => [p.id, p.name]))}
-              />
-              <AutomationConflictSection
-                automations={automations}
-                workspaceLabels={new Map(workspaces.map((w) => [w.id, w.name]))}
-              />
-              <UtilityAgentConflictSection utilityAgents={utilityAgents} />
-              {hasHardBlockers ? (
-                <p className="mt-2">{t("agents:changeTierMappingsFirst")}</p>
-              ) : (
-                <p className="mt-2">{t("agents:deleteAnywayConsequences")}</p>
-              )}
-            </div>
-          </AlertDialogDescription>
         </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer">{t(CANCEL_LABEL_KEY)}</AlertDialogCancel>
+        <AlertDialogDescription
+          asChild
+          data-testid="agent-profile-delete-conflict-body"
+          className="min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain text-left"
+        >
+          <div>
+            <p>{t("agents:profileInUseIntro")}</p>
+            <SessionConflictSection
+              title={t("agents:conflictTasksTitle")}
+              sessions={tasks}
+              fallback={t("agents:untitledTask")}
+            />
+            <SessionConflictSection
+              title={t("agents:conflictQuickChatsTitle")}
+              sessions={quickChats}
+              fallback={t("agents:untitledQuickChat")}
+            />
+            <WatcherConflictSection watchersByKind={watchersByKind} />
+            <RoutingTierConflictSection
+              routingTiers={routingTiers}
+              workspaceLabels={new Map(workspaces.map((w) => [w.id, w.name]))}
+              providerLabels={new Map(providers.map((p) => [p.id, p.name]))}
+            />
+            <AutomationConflictSection
+              automations={automations}
+              workspaceLabels={new Map(workspaces.map((w) => [w.id, w.name]))}
+            />
+            <UtilityAgentConflictSection utilityAgents={utilityAgents} />
+            {hasHardBlockers ? (
+              <p className="mt-2">{t("agents:changeTierMappingsFirst")}</p>
+            ) : (
+              <p className="mt-2">{t("agents:deleteAnywayConsequences")}</p>
+            )}
+          </div>
+        </AlertDialogDescription>
+        <AlertDialogFooter data-testid="agent-profile-delete-conflict-footer">
+          <AlertDialogCancel className="min-h-11 w-full cursor-pointer sm:min-h-9 sm:w-auto">
+            {t(CANCEL_LABEL_KEY)}
+          </AlertDialogCancel>
           {hasHardBlockers ? null : (
             <AlertDialogAction
               onClick={onConfirm}
-              className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className="min-h-11 w-full cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90 sm:min-h-9 sm:w-auto"
             >
               {t("agents:deleteAnyway")}
             </AlertDialogAction>

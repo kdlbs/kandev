@@ -19,6 +19,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
@@ -249,6 +250,9 @@ func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskReq
 	// parent's worktree (the UI omits repositories expecting this). Mirrors the
 	// MCP create_task path so UI- and agent-created subtasks behave identically.
 	if err := s.inheritParentRepositories(ctx, req); err != nil {
+		return nil, err
+	}
+	if err := s.validateTaskRepositoryPolicies(ctx, req.WorkspaceID, req.Repositories); err != nil {
 		return nil, err
 	}
 
@@ -830,6 +834,19 @@ func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceI
 		if repositoryID == "" {
 			return fmt.Errorf("repository_id is required")
 		}
+		policy, err := s.resolveTaskRepositoryPolicy(ctx, repositoryID, repoInput)
+		if err != nil {
+			return err
+		}
+		if policy != nil {
+			if repoInput.RemoteContribution != nil {
+				if policy.BaseBranch != repoInput.RemoteContribution.BaseBranch {
+					return fmt.Errorf("remote contribution base branch %q does not match branch policy base branch %q", repoInput.RemoteContribution.BaseBranch, policy.BaseBranch)
+				}
+			} else if !repoInput.PreserveBaseBranch {
+				baseBranch = policy.BaseBranch
+			}
+		}
 		// Multi-branch validation: the same repository may appear multiple
 		// times in a task on different branches. Identity is
 		// (repository_id, base_branch, checkout_branch) — base_branch matters
@@ -872,6 +889,13 @@ func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceI
 			CheckoutBranch: repoInput.CheckoutBranch,
 			Position:       i,
 			Metadata:       metadata,
+		}
+		if policy != nil {
+			taskRepo.BranchPolicyID = policy.ID
+			taskRepo.BranchPolicyName = policy.Name
+			taskRepo.BranchPolicyBaseBranch = policy.BaseBranch
+			taskRepo.BranchPolicyBranchTemplate = policy.BranchTemplate
+			taskRepo.BranchPolicyPullRequestTarget = policy.PullRequestTarget
 		}
 		if err := s.taskRepos.CreateTaskRepository(ctx, taskRepo); err != nil {
 			s.logger.Error("failed to create task repository", zap.Error(err))
@@ -943,6 +967,9 @@ func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repo
 		return s.resolveRepoInputID(ctx, workspaceID, repositoryID, baseBranch)
 	}
 
+	// Only the plugin Host Tasks.Create path can set this internal marker.
+	// REST, WebSocket, and MCP callers must go through the built-in resolver;
+	// they cannot assert ownership of a plugin descriptor in request data.
 	if repoInput.TrustedProviderDescriptor {
 		return s.resolveTrustedRemoteRepository(ctx, workspaceID, repoInput, baseBranch)
 	}
@@ -1286,6 +1313,9 @@ func validateTrustedRemoteRepository(input TaskRepositoryInput) error {
 	if _, err := validateProviderScope(input.ProviderScope); err != nil {
 		return errors.New("trusted remote repository provider_scope is invalid")
 	}
+	if err := repoclone.ValidateHTTPSCloneOrigin(input.RemoteURL, input.ProviderHost); err != nil {
+		return fmt.Errorf("trusted remote repository clone origin: %w", err)
+	}
 	parsed, _, err := normalizeRemoteRepositoryURL(input.RemoteURL)
 	if err != nil {
 		return err
@@ -1515,6 +1545,15 @@ func (s *Service) ReplaceTaskRepositories(ctx context.Context, taskID, workspace
 
 // replaceTaskRepositories deletes all existing task-repository associations and recreates them.
 func (s *Service) replaceTaskRepositories(ctx context.Context, taskID, workspaceID string, repositories []TaskRepositoryInput) error {
+	existing, err := s.taskRepos.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		s.logger.Error("failed to load existing task repositories", zap.Error(err))
+		return err
+	}
+	preserveTaskRepositoryPolicySnapshots(repositories, existing)
+	if err := s.validateTaskRepositoryPolicies(ctx, workspaceID, repositories); err != nil {
+		return err
+	}
 	if err := s.taskRepos.DeleteTaskRepositoriesByTask(ctx, taskID); err != nil {
 		s.logger.Error("failed to delete task repositories", zap.Error(err))
 		return err

@@ -550,9 +550,9 @@ func startAgentInfrastructure(
 	// LSP, terminals) enforce per-user workspace scoping (opt-in auth). The
 	// GetOrEnsure* execution paths run these checks internally; the vscode and
 	// port reverse proxies (bare lookup + cache) call CheckSessionAccess at
-	// the handler.
-	lifecycleMgr.SetSessionAccessChecker(services.Task.AuthorizeSessionAccess)
-	lifecycleMgr.SetEnvironmentAccessChecker(services.Task.AuthorizeEnvironmentAccess)
+	// the handler, and the SSR terminal-list routes call CheckTaskAccess /
+	// CheckEnvironmentAccess / CheckTaskEnvironmentAccess in a route guard.
+	wireLifecycleAccessCheckers(lifecycleMgr, services.Task)
 	log.Info("Workspace info provider configured for session recovery")
 
 	// TODO(task-model-unification Phase 2, ADR 0004): wire agentruntime.New(lifecycleMgr)
@@ -837,6 +837,9 @@ func startGatewayAndServe(
 		orchestratorSvc, lifecycleMgr, agentRegistry,
 		repos.Notification, repos.Task, repos.Terminal, services.GitHub, services.GitLab,
 		referenceValidator,
+		// Notifications drop rather than redirect when a task's owner cannot
+		// be resolved while authentication is enforced.
+		services.Auth,
 		cfg.ResolvedHomeDir(),
 		cfg.Limits.LSPMaxConnections,
 	)
@@ -1545,6 +1548,9 @@ func startSchedulingRuntime(
 //   - DecisionStore          — workflow_step_decisions
 //   - PrimaryAgentResolver   — current task runner / workflow_steps.agent_profile_id
 //   - CEOAgentResolver       — agent_profiles WHERE role='ceo' AND workspace_id != ”
+//   - ParticipantSeatWriter  — workflow_step_participants (REQ-OFFICE-REVIEW-SEATS-001)
+//   - ParticipantSeatCaster  — casting resolution over workspace CEO agents (REQ-OFFICE-REVIEW-SEATS-002)
+//   - AgentProfileResolver   — drops a required seat whose agent profile was deleted since casting (REQ-OFFICE-REVIEW-SEATS-004.3)
 //
 // The orchestrator's engine is rebuilt with these options applied, then
 // the office service is given a dispatcher pointing at it. The four
@@ -1581,6 +1587,15 @@ func wireWorkflowEngineForOffice(
 	orchestratorSvc.SetPrimaryAgentResolver(primary)
 	orchestratorSvc.SetEngineTaskCreator(taskCreator)
 	orchestratorSvc.SetEngineWorkflowSwitcher(workflowSwitcher)
+	// REQ-OFFICE-REVIEW-SEATS-001/-002: the writer persists seats; the
+	// caster resolves who fills them via the casting resolution algorithm
+	// (system design "Casting resolution") over the workspace's CEO agents,
+	// falling back to the task's runner when none are eligible.
+	orchestratorSvc.SetEngineParticipantSeatWriter(workflowadapters.NewParticipantSeatWriterAdapter(repos.Workflow))
+	orchestratorSvc.SetEngineParticipantSeatCaster(officeengineadapters.NewSeatCasterAdapter(repos.Office, repos.Workflow))
+	// REQ-OFFICE-REVIEW-SEATS-004.3: drop a required seat whose agent profile
+	// was deleted after casting, rather than waiting forever on it.
+	orchestratorSvc.SetEngineAgentProfileResolver(officeengineadapters.NewAgentProfileResolverAdapter(repos.Office))
 	eng := orchestratorSvc.WorkflowEngine()
 	if eng == nil {
 		log.Warn("workflow engine not initialised; office engine dispatcher disabled")
@@ -1591,7 +1606,75 @@ func wireWorkflowEngineForOffice(
 	dispatcher := officeenginedispatcher.New(eng, repos.Task, log)
 	officeSvc.SetWorkflowEngineDispatcher(dispatcher)
 	log.Info("workflow engine dispatcher wired for office")
+
+	repos.Task.SetStepEntryDispatcher(&engineStepEntryDispatcherAdapter{engineProvider: orchestratorSvc, log: log})
+	log.Info("step entry dispatcher wired for workflow engine")
+
 	return dispatcher
+}
+
+// workflowEngineProvider is the seam engineStepEntryDispatcherAdapter reads
+// the engine through. orchestrator.Service.WorkflowEngine satisfies it
+// structurally. Declared as an interface (rather than holding a
+// *workflowengine.Engine field directly) so the adapter always reads the
+// engine that is current *at dispatch time*, not whatever engine existed at
+// boot-wiring time — see DispatchStepEntry.
+type workflowEngineProvider interface {
+	WorkflowEngine() *workflowengine.Engine
+}
+
+// engineStepEntryDispatcherAdapter adapts (*engine.Engine).DispatchStepEntry
+// to tasksqlite.StepEntryDispatcher, the seam every registered
+// step-transition writer calls synchronously after its own commit. See
+// docs/specs/office/system-design/step-entry-sequence-execution.md.
+type engineStepEntryDispatcherAdapter struct {
+	engineProvider workflowEngineProvider
+	log            *logger.Logger
+}
+
+// DispatchStepEntry runs the step's session-independent on_enter sequence and
+// logs the entry identity, step, attempted action kinds, and any failure
+// reason (design's Observability section). Excluded (session-shaped) kinds
+// are not logged here — DispatchStepEntry itself skips them silently, which
+// is the contract, not an anomaly to report.
+//
+// The engine is resolved from engineProvider on every call, not captured at
+// construction time: wireWorkflowEngineForOffice runs from
+// startSchedulingRuntime, which executes before later boot wiring (e.g.
+// SetReviewRunner) calls orchestrator.Service.reinitWorkflowEngine, which
+// REPLACES s.workflowEngine with a new *engine.Engine rather than mutating
+// the existing one. A captured pointer would permanently miss any callback
+// registered by a Set* call that runs after this adapter is built —
+// concretely, run_code_review would silently no-op on every step-entry
+// dispatch, since buildWorkflowCallbacks only registers
+// ActionRunCodeReview once SetReviewRunner has been called. This mirrors
+// switchWorkflowDispatcher's existing lazy read of svc.workflowEngine
+// (workflow_callbacks.go).
+func (a *engineStepEntryDispatcherAdapter) DispatchStepEntry(ctx context.Context, taskID, workflowID, stepID, entryID string) {
+	eng := a.engineProvider.WorkflowEngine()
+	if eng == nil {
+		a.log.Warn("step entry dispatch skipped: workflow engine not initialised",
+			zap.String("task_id", taskID),
+			zap.String("workflow_id", workflowID),
+			zap.String("step_id", stepID),
+			zap.String("entry_id", entryID))
+		return
+	}
+	results := eng.DispatchStepEntry(ctx, taskID, workflowID, stepID, entryID)
+	for _, result := range results {
+		fields := []zap.Field{
+			zap.String("task_id", taskID),
+			zap.String("workflow_id", workflowID),
+			zap.String("step_id", stepID),
+			zap.String("entry_id", entryID),
+			zap.String("action_kind", string(result.Kind)),
+		}
+		if result.Err != nil {
+			a.log.Warn("step entry action failed", append(fields, zap.Error(result.Err))...)
+			continue
+		}
+		a.log.Debug("step entry action dispatched", fields...)
+	}
 }
 
 // runsServiceEngineAdapter bridges runs/service.Service.QueueRun (which
@@ -1605,8 +1688,10 @@ type runsServiceEngineAdapter struct {
 
 // QueueRun enqueues a run, translating the engine's QueueRunRequest into the
 // runs-service request shape.
-func (a *runsServiceEngineAdapter) QueueRun(ctx context.Context, req workflowengine.QueueRunRequest) error {
-	return a.svc.QueueRun(ctx, runsservice.QueueRunRequest{
+func (a *runsServiceEngineAdapter) QueueRun(
+	ctx context.Context, req workflowengine.QueueRunRequest,
+) (workflowengine.QueueOutcome, error) {
+	outcome, err := a.svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: req.AgentProfileID,
 		TaskID:         req.TaskID,
 		WorkflowStepID: req.WorkflowStepID,
@@ -1614,6 +1699,7 @@ func (a *runsServiceEngineAdapter) QueueRun(ctx context.Context, req workfloweng
 		IdempotencyKey: req.IdempotencyKey,
 		Payload:        req.Payload,
 	})
+	return workflowengine.QueueOutcome(outcome), err
 }
 
 // wireRuntimeSkillDeployer plugs the runtime-tier SkillDeployer into the

@@ -23,6 +23,7 @@ import {
 } from "@/components/task/task-move-context-menu";
 import { TaskNestContextMenuItems } from "@/components/task/task-nest-context-menu";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { TaskColorMenu } from "./task-switcher-color-menu";
 import {
   TaskPluginLinkMenu,
@@ -168,22 +169,23 @@ export function TaskItemWithContextMenu(props: ContextMenuProps) {
     setMenuKey((k) => k + 1);
   };
   const { handleOpenChange, triggerProps } = useMenuTouchDragCancel(setContextOpen);
+  const { isFinePointer } = useResponsiveBreakpoint();
   const archive = useTaskSwitcherArchiveConfirmation({
     task: menuProps.task,
     onArchiveTask: menuProps.onArchiveTask,
     isArchiving: menuProps.isArchiving,
     closeMenu,
   });
+  const archiveConfirmation = archive.archiveOpen ? archive.archiveConfirmation : undefined;
+  const inlineArchiveConfirmation = isFinePointer ? undefined : archiveConfirmation;
+  const portaledArchiveConfirmation = isFinePointer ? archiveConfirmation : undefined;
 
   return (
     <ContextMenu key={menuKey} onOpenChange={handleOpenChange}>
       <ContextMenuTrigger asChild>
         <div ref={archive.archiveAnchorRef} tabIndex={-1} {...triggerProps}>
-          {cloneWithMenuOpen(
-            children,
-            contextOpen,
-            archive.archiveOpen ? archive.archiveConfirmation : undefined,
-          )}
+          {cloneWithMenuOpen(children, contextOpen, inlineArchiveConfirmation)}
+          {portaledArchiveConfirmation}
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent

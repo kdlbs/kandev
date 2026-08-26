@@ -37,7 +37,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 0029 | [Release backfill and desktop diagnostics](0029-release-backfill-and-desktop-diagnostics.md)                                        | accepted (amended 2026-07-16) | infra, workflow             | 2026-07-01 |
 | 0030 | [Workspace-scoped integration settings](0030-workspace-scoped-integration-settings.md)                                             | accepted   | backend, frontend           | 2026-07-01 |
 | 0031 | [Office skill reference files](0031-office-skill-reference-files.md)                                                                | accepted   | backend                     | 2026-07-06 |
-| 0032 | [Configurable worktree branch names](0032-configurable-worktree-branch-names.md)                                                    | accepted   | backend, frontend           | 2026-07-07 |
+| 0032 | [Configurable worktree branch names](0032-configurable-worktree-branch-names.md)                                                    | accepted (amended 2026-08-24) | backend, frontend | 2026-07-07 |
 | 0033 | [Durable plan implementation start marker](0033-durable-plan-implementation-start.md)                                               | accepted   | backend, frontend           | 2026-07-09 |
 | 0034 | [Agent Client Protocol Codex ACP Bridge](0034-agentclientprotocol-codex-acp.md)                                                     | accepted (amended 2026-07-25) | backend, protocol | 2026-07-10 |
 | 0035 | [Version AgentReady events by prompt generation](0035-version-agent-ready-events-by-prompt-generation.md)                          | accepted   | backend                     | 2026-07-14 |
@@ -97,6 +97,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-15-executor-authoritative-model-selection | [Let the Executor Own Model Selection](2026-08-15-executor-authoritative-model-selection.md) | accepted | backend, frontend, protocol, persistence | 2026-08-15 |
 | 2026-08-18-context-reset-preserves-runtime-configuration | [Preserve ACP Runtime Configuration Across Context Reset](2026-08-18-context-reset-preserves-runtime-configuration.md) | accepted | backend, protocol, workflow | 2026-08-18 |
 | 2026-08-19-parent-authorized-child-workspace-sources | [Parent-authorized child workspace sources](2026-08-19-parent-authorized-child-workspace-sources.md) | accepted | backend, protocol, security | 2026-08-19 |
+| 2026-08-24-task-snapshotted-branch-policies | [Snapshot Repository Branch Policies on Tasks](2026-08-24-task-snapshotted-branch-policies.md) | proposed | backend, frontend, persistence | 2026-08-24 |
 | 2026-07-28-coarse-running-busy-signal | [Restore Coarse Running Prompt Admission](2026-07-28-coarse-running-busy-signal.md) | accepted | backend, frontend, protocol | 2026-07-28 |
 | 2026-07-29-agent-stall-user-controlled-recovery | [Keep Agent Stall Recovery User Controlled](2026-07-29-agent-stall-user-controlled-recovery.md) | accepted | backend, frontend, protocol | 2026-07-29 |
 | 2026-07-29-quarantine-retention-override | [Make Quarantine Retention Overridable but Visible](2026-07-29-quarantine-retention-override.md) | accepted | backend, frontend | 2026-07-29 |
@@ -203,5 +204,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-22-pr-walkthrough-description-link | [Own a top-level PR walkthrough callout](2026-08-22-pr-walkthrough-description-link.md) | accepted | workflow, infra, security, GitHub | 2026-08-22 |
 | 2026-08-23-pr-walkthrough-short-urls | [Use 12-character SHA prefixes for PR walkthrough URLs](2026-08-23-pr-walkthrough-short-urls.md) | accepted | workflow, infra | 2026-08-23 |
 | 2026-08-23-pr-walkthrough-workflow-provenance | [Use the workflow SHA for trusted PR walkthrough inputs](2026-08-23-pr-walkthrough-workflow-provenance.md) | accepted | workflow, infra, security | 2026-08-23 |
+| 2026-08-24-opt-in-ssh-task-directory-reclamation | [Opt-in reclamation of remote SSH task directories](2026-08-24-opt-in-ssh-task-directory-reclamation.md) | accepted | backend, frontend, operations | 2026-08-24 |
 | 2026-08-24-agentctl-local-managed-runtime-cache-repair | [Run cache repair where npm runs](2026-08-24-agentctl-local-managed-runtime-cache-repair.md) | accepted | backend, agentctl, protocol, security | 2026-08-24 |
 | 2026-08-24-unified-fork-approval-label | [Use One Maintainer Approval Label for Contributor PR Automation](2026-08-24-unified-fork-approval-label.md) | accepted | infra, workflow, security | 2026-08-24 |
+| 2026-08-25-required-worktree-refresh-fails-closed | [Required Worktree Refresh Fails Closed](2026-08-25-required-worktree-refresh-fails-closed.md) | accepted | backend, security, operations | 2026-08-25 |

@@ -171,11 +171,34 @@ ownership check and does not change **Inherit executor Git credentials** mode. A
 already open keeps the environment from its launch; reopen it after a new session launch, resume,
 or a Git credential-policy change.
 
+### Workspace automation identity and task Git transport
+
+The workspace GitHub connection is the automation identity Kandev uses for provider operations,
+such as finding or creating a pull request. The task Git credential policy is separate: it decides
+whether Git uses Kandev-managed credentials or the selected executor's own Git and SSH setup.
+Changing the workspace connection does not install an SSH key in an executor.
+
+For **Inherit executor Git credentials**, configure the executor where Git runs. Local and Worktree
+use the Kandev host's Git configuration, SSH agent, known-hosts file, and credential helpers.
+Docker uses the credentials in the container, while SSH and Sprites use the credentials configured
+on the remote environment. A host `gh` login or `~/.ssh` file is not automatically available in a
+Docker, SSH, or Sprite executor.
+
+To make host GitHub CLI operations prefer SSH, run this on the Kandev host:
+
+```bash
+gh config set git_protocol ssh --host github.com
+```
+
+Restart Kandev after changing the host GitHub protocol. The restart lets Kandev reconcile managed
+repository origins before the next task launch. For an SSH or Docker executor, configure the
+equivalent GitHub SSH access, known-hosts entry, and agent or key on that executor instead.
+
 ## Worktree
 
 Worktree creates a dedicated host Git worktree and runs the standalone `agentctl` service against it. It separates branches and files between tasks, but the process still has the Kandev user's host permissions, network access, and readable credentials.
 
-Repository settings control base branch, branch naming, pull-before-create, repository setup/cleanup scripts, and optional copies of ignored files. Copy ignored files narrowly: `.env` and similar files often contain production secrets. Multi-repository tasks receive one materialized worktree per attachment; use the per-repository setup scripts because the profile-level prepare script is currently skipped for that path.
+Repository settings control base branch, branch naming, pull-before-create, repository setup/cleanup scripts, and optional copies of ignored files. With **Always pull before creating a new worktree** enabled, the base refresh is required for a new or recreated worktree. An authentication, network, timeout, missing-ref, divergent-ref, or uncertain-ancestry failure stops the launch; Kandev does not use a stale local fallback. Disable this setting only for an intentional offline local workflow. Copy ignored files narrowly: `.env` and similar files often contain production secrets. Multi-repository tasks receive one materialized worktree per attachment; use the per-repository setup scripts because the profile-level prepare script is currently skipped for that path.
 
 Normal stop keeps the task environment available. Task deletion or **Reset Environment** removes the tracked worktree when configured to clean worktrees. Preserve or push valuable changes first; see [Git Operations](git-operations.md).
 
@@ -183,6 +206,7 @@ Typical failures:
 
 - dirty or conflicting source repository state;
 - base branch missing locally or remotely;
+- required refresh credentials, network access, or remote ancestry cannot be verified;
 - worktree path already registered in Git metadata;
 - setup dependencies absent on the host;
 - repository cleanup failure leaving a stale worktree.

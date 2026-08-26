@@ -5,47 +5,14 @@ import { IconChevronDown } from "@tabler/icons-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { cn } from "@/lib/utils";
 import { useOptimisticTaskMutation } from "@/hooks/use-optimistic-task-mutation";
-import { ApiError } from "@/lib/api/client";
-import { updateTask } from "@/lib/api/domains/office-extended-api";
+import {
+  ApprovalGateError,
+  updateTaskStatusOrTranslateGate,
+} from "@/lib/api/domains/office-status-gate";
 import type { Task, TaskStatus } from "@/app/office/tasks/[id]/types";
 import { StatusIcon } from "@/app/office/tasks/[id]/status-icon";
 import { normalizeTaskStatus } from "@/lib/api/domains/office-task-normalize";
 import { useTranslation } from "react-i18next";
-import { t } from "@/lib/i18n";
-
-type PendingApprover = { agent_profile_id?: string; name?: string };
-
-// formatPendingApproversMessage builds the toast text the user sees when
-// the backend rejects an in_review → done transition because not every
-// approver has signed off. The backend echoes a `pending_approvers`
-// array on the 409 body; we render the names in order.
-export function formatPendingApproversMessage(pending: PendingApprover[]): string {
-  const names = pending.map((p) => p.name?.trim() || p.agent_profile_id || "").filter(Boolean);
-  if (names.length === 0) return t("task:cannotMarkDoneAwaitingApprovals");
-  return t("task:cannotMarkDoneAwaitingApprovalFrom", { names: names.join(", ") });
-}
-
-function extractPendingApprovers(err: unknown): PendingApprover[] | null {
-  if (!(err instanceof ApiError)) return null;
-  if (err.status !== 409) return null;
-  const body = err.body;
-  if (!body || typeof body !== "object") return null;
-  const pending = (body as { pending_approvers?: unknown }).pending_approvers;
-  if (!Array.isArray(pending)) return null;
-  return pending.filter((p): p is PendingApprover => !!p && typeof p === "object");
-}
-
-async function updateStatusOrTranslateGate(taskId: string, status: TaskStatus): Promise<void> {
-  try {
-    await updateTask(taskId, { status });
-  } catch (err) {
-    const pending = extractPendingApprovers(err);
-    if (pending) {
-      throw new Error(formatPendingApproversMessage(pending));
-    }
-    throw err;
-  }
-}
 
 // `labelKey` holds a catalog key, not copy: this table is module scope, so a
 // resolved `t()` here would freeze at the boot locale.
@@ -87,8 +54,21 @@ export function StatusPicker({ task }: StatusPickerProps) {
     setOpen(false);
     if (value === current) return;
     try {
-      await mutate(task.id, { status: value }, () => updateStatusOrTranslateGate(task.id, value));
-    } catch {
+      await mutate(task.id, { status: value }, () =>
+        updateTaskStatusOrTranslateGate(task.id, value),
+      );
+    } catch (err) {
+      // The hook already rolled back to the pre-mutation snapshot. The
+      // backend redirected and persisted this status server-side before
+      // returning the error (see ApprovalGateError), so a plain rollback
+      // shows a status the server no longer holds until the WS event
+      // reconciles it. Re-apply the redirected status now via a no-op
+      // mutation, matching use-board-drag.ts's board-drag path.
+      if (err instanceof ApprovalGateError) {
+        await mutate(task.id, { status: err.redirectedStatus as TaskStatus }, () =>
+          Promise.resolve(),
+        );
+      }
       /* toast already raised by hook */
     }
   };

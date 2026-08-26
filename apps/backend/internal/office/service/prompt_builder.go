@@ -80,6 +80,8 @@ func BuildPrompt(pc *PromptContext) string {
 		prompt = buildLegacyStagePrompt(pc, stageTypeReview)
 	case legacyRunReasonApprovalStarted:
 		prompt = buildLegacyStagePrompt(pc, stageTypeApproval)
+	case RunReasonTaskReviewRequested:
+		prompt = buildTaskAssignedPrompt(pc)
 	case RunReasonTaskComment:
 		prompt = buildTaskCommentPrompt(pc)
 	case RunReasonTaskBlockersResolved:
@@ -278,6 +280,7 @@ func buildReviewStagePrompt(pc *PromptContext) string {
 	}
 	b.WriteString("\nReview the implementation carefully. Check for correctness, edge cases, and code quality.\n")
 	b.WriteString("Submit your verdict: approve if the work is satisfactory, or reject with specific feedback on what needs to change.")
+	writeDecisionContract(&b)
 	return b.String()
 }
 
@@ -292,7 +295,19 @@ func buildApprovalStagePrompt(pc *PromptContext) string {
 	}
 	b.WriteString("\nConfirm that the approval requirements are met for this workflow.\n")
 	b.WriteString("Submit your verdict: approve if the requirements are met, or reject with specific feedback on what needs to change.")
+	writeDecisionContract(&b)
 	return b.String()
+}
+
+// writeDecisionContract appends the explicit record_step_decision_kandev contract shared by the
+// review and approval stage prompts: a verdict must be recorded via the tool call, which the agent
+// must treat as its final action for the turn, since posting a comment alone is not a decision and
+// leaves the task stranded in review. The tool call itself does not halt the agent mid-turn (it
+// returns an ordinary result), so the prompt must not claim otherwise — it instructs the agent to
+// stop on its own after calling it.
+func writeDecisionContract(b *strings.Builder) {
+	b.WriteString("\n\nYou must call the record_step_decision_kandev tool with decision (\"approved\" or \"rejected\") and reason to record your verdict. Make this your final tool call for the turn, then stop.")
+	b.WriteString(" Posting a comment alone is not a decision and will not advance the task.")
 }
 
 func buildShipStagePrompt(pc *PromptContext) string {

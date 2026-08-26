@@ -9,6 +9,7 @@ test.describe("Mobile task status summary", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     test.setTimeout(90_000);
 
@@ -116,5 +117,14 @@ test.describe("Mobile task status summary", () => {
     // The passive PR icon must not steal the row's native touch target.
     await targetRow.tap();
     await expect(testPage).toHaveURL(new RegExp(`/t/${targetTask.task_id}$`));
+    await session.waitForLoad();
+    await expect(session.prStatusChip()).toBeVisible({ timeout: 15_000 });
+    await session.tapPRStatusChip();
+    const author = session.prStatusChipDrawer().getByTestId("pr-popover-author");
+    await expect(author).toBeInViewport({ ratio: 1 });
+    await expect(author).toHaveText("by e2e");
+    await prCapture.screenshot("mobile-task-status-summary-author", {
+      caption: "Mobile PR status drawer with the linked author identity",
+    });
   });
 });

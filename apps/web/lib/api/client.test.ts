@@ -110,6 +110,31 @@ describe("fetchJson", () => {
   });
 });
 
+describe("ApiError response classification", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("preserves machine-readable error codes from the backend", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(
+            JSON.stringify({ error: "invalid branch policy", error_code: "branch_policy_stale" }),
+            { status: 400, headers: { "Content-Type": "application/json" } },
+          ),
+        ),
+    );
+
+    await expect(fetchJson("/api/v1/tasks", { baseUrl: BACKEND_URL })).rejects.toMatchObject({
+      name: "ApiError",
+      errorCode: "branch_policy_stale",
+    });
+  });
+});
+
 describe("fetchBlob", () => {
   afterEach(() => {
     setOnUnauthorized(null);

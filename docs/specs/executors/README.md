@@ -36,6 +36,7 @@ failure and recovery contracts.
 - [Executor-Profile Environment Precedence](requirements/executor-profile-env-precedence.md)
 - [Port collision and backend ownership safety](requirements/port-collision-safety.md)
 - [SSH Executor](requirements/ssh-executor.md)
+- [Remote SSH task-directory reclamation](requirements/remote-task-directory-reclamation.md)
 
 ### System design
 
@@ -47,6 +48,7 @@ failure and recovery contracts.
 - [Executor-Profile Environment Precedence System Design Part 4](system-design/executor-profile-env-precedence-04.md)
 - [Executor-Profile Environment Precedence System Design Part 5](system-design/executor-profile-env-precedence-05.md)
 - [SSH Executor](system-design/ssh-executor.md)
+- [Remote SSH task-directory reclamation](system-design/remote-task-directory-reclamation.md)
 
 ## Migration record
 

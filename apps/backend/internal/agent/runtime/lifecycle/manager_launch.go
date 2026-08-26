@@ -858,11 +858,9 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		metadata[MetadataKeyContributionDestinations] = contributionDestinations
 	}
 
-	allowLegacyContainerControlFallback := reqWithWorktree.WorkspaceReuseRequired &&
-		(reqWithWorktree.ExecutorType == string(models.ExecutorTypeLocalDocker) || reqWithWorktree.ExecutorType == string(models.ExecutorTypeRemoteDocker))
-	containerControlAuthToken, err := m.revealContainerControlAuthToken(ctx, metadata, allowLegacyContainerControlFallback)
+	launchAuthToken, err := m.resolveLaunchAuthToken(ctx, reqWithWorktree, metadata)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("resolve container control token: %w", err)
+		return nil, nil, nil, fmt.Errorf("resolve launch auth token: %w", err)
 	}
 
 	var autoApproveOverride *bool
@@ -893,7 +891,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		McpMode:                        reqWithWorktree.McpMode,
 		McpProviders:                   reqWithWorktree.McpProviders,
 		McpProfile:                     reqWithWorktree.McpProfile,
-		AuthToken:                      containerControlAuthToken,
+		AuthToken:                      launchAuthToken,
 		BootstrapNonce:                 m.revealRuntimeSecret(ctx, metadata, MetadataKeyBootstrapNonceSecret),
 		AgentctlStartupConfig:          m.agentctlStartupConfig,
 		OnProgress:                     onProgress,
@@ -913,6 +911,23 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		return nil, nil, nil, fmt.Errorf("failed to create execution: %w", err)
 	}
 	return execReq, execInstance, rt, nil
+}
+
+func isDockerExecutorType(executorType string) bool {
+	return executorType == string(models.ExecutorTypeLocalDocker) || executorType == string(models.ExecutorTypeRemoteDocker)
+}
+
+// resolveLaunchAuthToken returns the agentctl token a launch/resume hands the
+// backend. Docker uses the environment-scoped container control token (#2843)
+// so a sibling session can authenticate to a shared container, falling back
+// to the session token only when workspace reuse is required and no
+// container-control secret exists yet. Every other executor uses its own
+// session handshake token directly, which SSH resume requires.
+func (m *Manager) resolveLaunchAuthToken(ctx context.Context, req *LaunchRequest, metadata map[string]interface{}) (string, error) {
+	if isDockerExecutorType(req.ExecutorType) {
+		return m.revealContainerControlAuthToken(ctx, metadata, req.WorkspaceReuseRequired)
+	}
+	return m.revealRuntimeSecretValue(ctx, metadata, MetadataKeyAuthTokenSecret)
 }
 
 func resumeRemoteInstancePreflight(ctx context.Context, rt ExecutorBackend, req *ExecutorCreateRequest) error {
@@ -1028,6 +1043,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 		WorktreeBranchTicket:    req.WorktreeBranchTicket,
 		PullBeforeWorktree:      req.PullBeforeWorktree,
 		RemoteSyncHandled:       req.RemoteSyncHandled,
+		RefreshRepository:       req.RefreshRepository,
 		TaskDirName:             req.TaskDirName,
 		RepoName:                req.RepoName,
 		BranchSlug:              req.BranchSlug,
@@ -1060,6 +1076,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 				WorktreeBranchTicket:    r.WorktreeBranchTicket,
 				PullBeforeWorktree:      r.PullBeforeWorktree,
 				RemoteSyncHandled:       r.RemoteSyncHandled,
+				RefreshRepository:       r.RefreshRepository,
 				RepoSetupScript:         setup,
 				BranchSlug:              r.BranchSlug,
 				BranchIdentitySlug:      r.BranchIdentitySlug,
