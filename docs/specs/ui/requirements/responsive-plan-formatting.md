@@ -45,13 +45,16 @@ use both without racing overlapping controls.
 - **AC-UI-RESPONSIVE-PLAN-FORMATTING-001.1:** When a fine-pointer desktop user
   selects non-code-block Plan text, Kandev shall show the existing formatting
   controls next to the selection and hide them when the selection is empty.
-- **AC-UI-RESPONSIVE-PLAN-FORMATTING-001.2:** When a user focuses the Plan
-  editor outside a code block in Kandev's phone or touch-tablet layout, Kandev
-  shall present the formatting controls in a docked strip instead of
-  positioning them next to the text selection.
-- **AC-UI-RESPONSIVE-PLAN-FORMATTING-001.3:** The docked strip shall expose the
-  desktop formatting capabilities. Selection-only actions shall be disabled
-  when the editor has no eligible text selection.
+- **AC-UI-RESPONSIVE-PLAN-FORMATTING-001.2:** When a user selects
+  non-whitespace Plan text outside a code block in Kandev's phone or
+  touch-tablet layout, Kandev shall present the formatting controls in a docked
+  strip instead of positioning them next to the text selection. When the Plan
+  editor has only a caret or a whitespace-only selection, the docked strip
+  shall remain hidden.
+- **AC-UI-RESPONSIVE-PLAN-FORMATTING-001.3:** When an eligible text selection is
+  present, the docked strip shall expose the desktop formatting capabilities.
+  Selection-only actions shall not be presented without an eligible text
+  selection.
 - **AC-UI-RESPONSIVE-PLAN-FORMATTING-001.4:** Kandev shall leave the device's
   native Cut, Copy, Paste, and related selection actions available while the
   docked strip is shown.
@@ -66,8 +69,10 @@ use both without racing overlapping controls.
 - **AC-UI-RESPONSIVE-PLAN-FORMATTING-001.7:** Every docked action shall have an
   accessible name, expose its pressed or disabled state when applicable, and
   provide a touch target of at least 44 CSS pixels in the active dimension.
-  The strip can scroll horizontally, but it shall not cause document-level
-  horizontal overflow.
+  The compact docked strip shall be no taller than 48 CSS pixels, and its
+  visual action surfaces shall be no larger than 32 CSS pixels. The strip can
+  scroll horizontally, but it shall not cause document-level horizontal
+  overflow.
 - **AC-UI-RESPONSIVE-PLAN-FORMATTING-001.8:** When the user taps a docked
   formatting action, Kandev shall preserve the editor selection and software
   keyboard, apply the action once, and keep the editor ready for continued

@@ -75,8 +75,10 @@ test.describe("mobile: Plan formatting toolbar", () => {
     await expect(editor).toHaveCount(1);
 
     await editor.focus();
-    await testPage.keyboard.press("Control+A");
     const toolbar = testPage.getByTestId("plan-mobile-formatting-toolbar");
+    await expect(toolbar).toHaveCount(0);
+
+    await testPage.keyboard.press("Control+A");
     await expect(toolbar).toBeVisible({ timeout: 10_000 });
     if (prCapture.capturing) {
       await prCapture.screenshot("mobile-plan-formatting-toolbar", {
@@ -110,13 +112,16 @@ test.describe("mobile: Plan formatting toolbar", () => {
       toolbar.locator('button[data-testid^="plan-formatting-action-"] > span'),
     ).toHaveCount(8);
     for (const { width, height } of visualActionSizes) {
-      expect(width).toBeLessThanOrEqual(40);
-      expect(height).toBeLessThanOrEqual(40);
+      expect(width).toBeLessThanOrEqual(32);
+      expect(height).toBeLessThanOrEqual(32);
     }
+    await expect
+      .poll(() => toolbar.evaluate((element) => Math.round(element.getBoundingClientRect().height)))
+      .toBe(48);
     await expect(testPage.getByTestId("plan-formatting-action-comment")).toBeEnabled();
     await expect
       .poll(() => editor.evaluate((element) => getComputedStyle(element, "::after").height))
-      .toBe("56px");
+      .toBe("48px");
 
     const horizontalOverflow = await toolbar.locator(":scope > div").evaluate((element) => ({
       scrollWidth: element.scrollWidth,
@@ -155,7 +160,7 @@ test.describe("mobile: Plan formatting toolbar", () => {
     const keyboardHeight = 300;
     await simulateKeyboardOpen(testPage, keyboardHeight);
     const expectedKeyboardTop = await testPage.evaluate(
-      (height) => `${window.innerHeight - height - 56}px`,
+      (height) => `${window.innerHeight - height - 48}px`,
       keyboardHeight,
     );
     await expect
@@ -166,7 +171,7 @@ test.describe("mobile: Plan formatting toolbar", () => {
       .toBe("auto");
     await expect
       .poll(() => editor.evaluate((element) => getComputedStyle(element, "::after").height))
-      .toBe("304px");
+      .toBe("296px");
 
     const finalLine = editor.getByText(FINAL_LINE, { exact: true });
     const editorScrollContainer = testPage.getByTestId("plan-editor-scroll-container");
@@ -191,7 +196,7 @@ test.describe("mobile: Plan formatting toolbar", () => {
 
     await simulateViewportScroll(testPage, 48);
     const expectedScrolledTop = await testPage.evaluate(
-      (height) => `${window.innerHeight - height + 48 - 56}px`,
+      (height) => `${window.innerHeight - height + 48 - 48}px`,
       keyboardHeight,
     );
     await expect

@@ -153,7 +153,7 @@ afterEach(() => {
 });
 
 describe("PlanBubbleMenu responsive presentation", () => {
-  it("docks a focused mobile toolbar instead of mounting a selection bubble", () => {
+  it("docks a focused mobile toolbar for selected text instead of mounting a selection bubble", () => {
     const editor = createEditor();
 
     render(<PlanBubbleMenu editor={editor} onComment={vi.fn()} mobileBottomOffset="3.25rem" />);
@@ -161,16 +161,44 @@ describe("PlanBubbleMenu responsive presentation", () => {
     expect(screen.getByRole("toolbar", { name: PLAN_TOOLBAR_LABEL })).toBeTruthy();
     expect(screen.queryByTestId("plan-selection-bubble")).toBeNull();
   });
+});
 
-  it("keeps selection-only actions disabled and preserves selection on toolbar taps", () => {
+describe("PlanBubbleMenu mobile selection behavior", () => {
+  it("does not mount the mobile toolbar for a caret or whitespace-only selection", () => {
     const editor = createEditor({ from: 1, to: 1, text: "" });
 
     render(<PlanBubbleMenu editor={editor} onComment={vi.fn()} />);
 
+    expect(screen.queryByRole("toolbar", { name: PLAN_TOOLBAR_LABEL })).toBeNull();
+
+    act(() => {
+      editor.setSelection(1, 8, "   ");
+      editor.emit("transaction");
+    });
+    expect(screen.queryByRole("toolbar", { name: PLAN_TOOLBAR_LABEL })).toBeNull();
+
+    act(() => {
+      editor.setSelection(1, 8, "selected");
+      editor.emit("transaction");
+    });
+    expect(screen.getByRole("toolbar", { name: PLAN_TOOLBAR_LABEL })).toBeTruthy();
+  });
+
+  it("uses compact visual actions while preserving selection on toolbar taps", () => {
+    const editor = createEditor();
+
+    render(<PlanBubbleMenu editor={editor} onComment={vi.fn()} />);
+
     const comment = screen.getByRole("button", { name: "editors:commentCmdShiftC" });
-    expect((comment as HTMLButtonElement).disabled).toBe(true);
+    expect((comment as HTMLButtonElement).disabled).toBe(false);
 
     const bold = screen.getByRole("button", { name: "editors:boldCmdB" });
+    expect(bold.className).toContain("h-11");
+    expect(bold.className).toContain("min-w-11");
+    const visualSurface = bold.querySelector("span");
+    expect(visualSurface?.className).toContain("h-8");
+    expect(visualSurface?.className).toContain("w-8");
+
     const pointerDown = new Event("pointerdown", { bubbles: true, cancelable: true });
     bold.dispatchEvent(pointerDown);
     expect(pointerDown.defaultPrevented).toBe(true);
@@ -178,12 +206,14 @@ describe("PlanBubbleMenu responsive presentation", () => {
     fireEvent.click(bold);
 
     expect(editor.state.selection.from).toBe(1);
-    expect(editor.state.selection.to).toBe(1);
+    expect(editor.state.selection.to).toBe(8);
     expect(editor.chainMock.focus).toHaveBeenCalledTimes(1);
     expect(editor.chainMock.toggleBold).toHaveBeenCalledTimes(1);
     expect(editor.chainMock.run).toHaveBeenCalledTimes(1);
   });
+});
 
+describe("PlanBubbleMenu responsive layout", () => {
   it("keeps the dock visible while the link input owns focus", () => {
     const editor = createEditor();
 
@@ -228,7 +258,7 @@ describe("PlanBubbleMenu responsive presentation", () => {
     expect(toolbar.getAttribute("style")).toContain("left: 240px");
     expect(toolbar.getAttribute("style")).toContain("width: 320px");
     expect(toolbar.getAttribute("style")).toContain("right: auto");
-    expect(toolbar.getAttribute("style")).toContain("top: 544px");
+    expect(toolbar.getAttribute("style")).toContain("top: 552px");
     expect(toolbar.getAttribute("style")).toContain("bottom: auto");
 
     act(() => {
@@ -236,7 +266,7 @@ describe("PlanBubbleMenu responsive presentation", () => {
       mocks.viewport.viewportBottom = 500;
       rerender(renderMenu());
     });
-    expect(toolbar.getAttribute("style")).toContain("top: 444px");
+    expect(toolbar.getAttribute("style")).toContain("top: 452px");
     container.remove();
   });
 

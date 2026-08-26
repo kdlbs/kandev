@@ -25,7 +25,7 @@ vi.mock("@/components/shared/mermaid-error-toast", () => ({
 }));
 
 vi.mock("./plan-bubble-menu", () => ({
-  PLAN_FORMATTING_TOOLBAR_HEIGHT_PX: 56,
+  PLAN_FORMATTING_TOOLBAR_HEIGHT_PX: 48,
   PlanBubbleMenu: (props: {
     mobileBottomOffset?: string;
     mobileContainerRef?: { current: HTMLElement | null };
@@ -222,7 +222,7 @@ describe("TipTapPlanEditor mobile formatting clearance", () => {
 
     const editorContent = editorScrollContainer?.querySelector<HTMLElement>(".ProseMirror");
     expect(editorContent?.style.getPropertyValue("--plan-toolbar-clearance")).toBe(
-      "max(56px, calc(356px - 3.25rem - env(safe-area-inset-bottom, 0px)))",
+      "max(48px, calc(348px - 3.25rem - env(safe-area-inset-bottom, 0px)))",
     );
     expect(planBubble.mobileContainerRef?.current).toBe(
       view.container.querySelector(".tiptap-plan-wrapper"),

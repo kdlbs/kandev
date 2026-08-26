@@ -50,11 +50,13 @@ the editor, overwrite a preference, or change Markdown serialization. The
 desktop and docked variants share the formatting controls and command handlers;
 only their container, visibility rule, sizing, and position differ.
 
-The mobile entry point is focus in the existing Plan tab. The strip is a
-persistent, one-dimensional editor accessory while the editor is focused. This
-fits a frequent set of shallow actions better than a drawer. Formatting actions
-come first, followed by link and the selection-only Comment action. The inline
-link input temporarily replaces the actions in the same docked surface.
+The mobile entry point is a non-whitespace text selection in the existing Plan
+tab. The strip is a one-dimensional editor accessory while an eligible
+selection is focused. A caret or whitespace-only selection leaves the strip
+hidden to preserve editing space. This fits a frequent set of shallow actions
+better than a drawer. Formatting actions come first, followed by link and the
+selection-only Comment action. The inline link input temporarily replaces the
+actions in the same docked surface and remains mounted while it owns focus.
 
 The nearest shipped mobile exemplar is `MobileTerminalKeybar`. It contributes
 visual-viewport positioning, keyboard focus retention, fixed-height horizontal
@@ -86,11 +88,13 @@ selection, code-block context, link state, and active inline marks. It also
 subscribes to editor focus and blur events because Tiptap's React editor-state
 selector updates on transactions, not focus changes alone.
 
-The docked strip is visible while the Plan editor is focused or while its link
-input owns focus. It is hidden in a code block. Bold, italic, underline,
-strikethrough, inline code, highlight, and link reuse the current editor command
-chains. Comment remains available only when the Plan panel supplied its comment
-callback and the current selection contains non-whitespace text.
+The docked strip is visible when the Plan editor is focused and its current
+selection contains non-whitespace text, or while its link input owns focus. It
+is hidden for a caret, a whitespace-only selection, and a code block. Bold,
+italic, underline, strikethrough, inline code, highlight, and link reuse the
+current editor command chains. Comment remains available only when the Plan
+panel supplied its comment callback and the current selection contains
+non-whitespace text.
 
 The desktop BubbleMenu retains its non-empty-selection visibility condition.
 It consumes the same reactive active-mark snapshot as the docked strip so
@@ -116,8 +120,9 @@ must not widen the document or create a second vertical scroller.
 ## Interaction and accessibility
 
 Docked icon buttons use semantic `button` elements with localized accessible
-names, `aria-pressed` for toggled marks, and `disabled` for unavailable
-selection-only actions. Each button has a minimum 44-pixel touch dimension.
+names and `aria-pressed` for toggled marks. Each button has a minimum 44-pixel
+touch dimension even though the compact visual action surface is 32 pixels and
+the dock is 48 pixels tall.
 
 Formatting buttons prevent default on both `pointerdown` and `mousedown` so a
 touch does not move focus or collapse the selection before the command runs.
@@ -133,7 +138,8 @@ intercept native clipboard actions on the editable content.
 - A missing or destroyed editor keeps both presentations unmounted.
 - A focus transition outside the editor and link input hides the docked strip;
   refocusing restores it from current editor state.
-- An empty selection disables Comment without affecting caret formatting.
+- A caret or whitespace-only selection hides the dock without affecting the
+  editor's native keyboard and selection behavior.
 - If the visual viewport changes repeatedly while the keyboard animates, the
   latest hook snapshot determines position; no timer, polling loop, or global
   store is introduced.
@@ -149,7 +155,7 @@ the existing Tiptap link command and current rendering protections.
 ## Verification
 
 Component tests cover the responsive branch, reactive mark/selection state,
-focus visibility, link mode, disabled Comment state, selection-preserving
+selection-driven visibility, link mode, compact sizing, selection-preserving
 pointer behavior, and the shared visual-viewport positioning helper. Existing
 terminal keybar tests guard the extracted geometry against regression.
 
@@ -163,8 +169,9 @@ level horizontal overflow.
 Desktop browser emulation cannot render Android or iOS native selection chrome.
 Final device acceptance therefore checks Android Chrome and iOS Safari to
 confirm that native Cut, Copy, and Paste remain usable while Kandev's strip
-stays at the keyboard edge. Automated tests prove the Kandev geometry and
-formatting outcome rather than claiming to inspect operating-system UI.
+stays at the keyboard edge. Automated tests prove the Kandev geometry,
+selection-driven visibility, compact sizing, and formatting outcome rather than
+claiming to inspect operating-system UI.
 
 No production telemetry is added; deterministic component and browser evidence
 is sufficient for this local presentation correction.

@@ -25,9 +25,10 @@ system_design:
 ## Summary
 
 Implement the responsive Plan formatting presentation as one vertical TDD
-slice. Preserve the desktop Tiptap selection bubble, add the phone/tablet
-keyboard-edge strip, and prove both the deterministic geometry and real mobile
-formatting outcome before marking the package complete.
+slice. Preserve the desktop Tiptap selection bubble, add the compact
+phone/tablet keyboard-edge strip for non-whitespace selections, and prove both
+the deterministic geometry and real mobile formatting outcome before marking
+the package complete.
 
 ## In scope
 
@@ -38,7 +39,9 @@ formatting outcome before marking the package complete.
 - Extract and reuse a pure visual-viewport bottom-bar position helper without
   changing terminal keybar behavior.
 - Implement the docked toolbar, mobile task-navigation offset plumbing, editor
-  bottom clearance, shared formatting controls, and link/comment states.
+  bottom clearance, shared formatting controls, and link state. Keep the dock
+  hidden for caret or whitespace-only selections and size it at 48 pixels with
+  32-pixel visual action surfaces around 44-pixel touch targets.
 - Add the localized toolbar name and run focused i18n validation.
 - Capture a rendered phone screenshot after the production-build E2E passes and
   record whether physical Android Chrome and iOS Safari checks were available.
@@ -53,11 +56,14 @@ formatting outcome before marking the package complete.
 ## Acceptance
 
 - The component and browser regressions fail before production changes for the
-  diagnosed selection-anchored behavior, then pass with desktop selection
-  bubbles and mobile docked controls using the same commands.
-- The docked strip tracks visual-viewport resize/scroll, clears task navigation
-  and safe areas, preserves selection/focus, exposes accessible 44-pixel touch
-  controls, and does not create document-level horizontal overflow.
+  diagnosed selection-anchored behavior and caret-visible dock, then pass with
+  desktop selection bubbles and compact mobile docked controls using the same
+  commands.
+- The docked strip appears only for a focused non-whitespace selection, tracks
+  visual-viewport resize/scroll, clears task navigation and safe areas,
+  preserves selection/focus, exposes accessible 44-pixel touch controls with
+  compact visual sizing, and does not create document-level horizontal
+  overflow.
 - Existing terminal keybar positioning, Plan table behavior, type checking,
   focused lint, and i18n checks remain green.
 
@@ -148,11 +154,12 @@ mobile regression verifies that the final editor line remains above the dock
 when the keyboard is open. The terminal keybar now consumes the shared
 position helper. Localized toolbar labels were added to all five catalogs, and
 the permanent mobile browser regression captures the keyboard-edge and Bold
-flow.
+flow. The dock now appears only for a focused non-whitespace selection, with a
+48-pixel bar and 32-pixel visual action surfaces around 44-pixel touch targets.
 
 Verification completed:
 
-- 40 focused Vitest tests passed across 4 files.
+- 43 focused Vitest tests passed across 4 files.
 - Production-build `mobile-chrome` E2E passed.
 - Web typecheck passed.
 - Changed-file ESLint passed.

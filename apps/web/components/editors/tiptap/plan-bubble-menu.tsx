@@ -31,7 +31,7 @@ import {
   useVisualViewportOffset,
 } from "@/hooks/use-visual-viewport-offset";
 
-export const PLAN_FORMATTING_TOOLBAR_HEIGHT_PX = 56;
+export const PLAN_FORMATTING_TOOLBAR_HEIGHT_PX = 48;
 
 type PlanBubbleMenuProps = {
   editor: Editor;
@@ -49,6 +49,7 @@ type PlanBubbleMenuProps = {
 type EditorSnapshot = {
   isFocused: boolean;
   isCodeBlock: boolean;
+  hasTextSelection: boolean;
   hasCommentSelection: boolean;
   isBold: boolean;
   isItalic: boolean;
@@ -62,10 +63,12 @@ type EditorSnapshot = {
 function readEditorSnapshot(editor: Editor): EditorSnapshot {
   const { from, to } = editor.state.selection;
   const selectedText = editor.state.doc.textBetween(from, to, " ").trim();
+  const hasTextSelection = from !== to && selectedText.length > 0;
   return {
     isFocused: editor.isFocused,
     isCodeBlock: editor.isActive("codeBlock"),
-    hasCommentSelection: from !== to && selectedText.length > 0,
+    hasTextSelection,
+    hasCommentSelection: hasTextSelection,
     isBold: editor.isActive("bold"),
     isItalic: editor.isActive("italic"),
     isUnderline: editor.isActive("underline"),
@@ -118,7 +121,7 @@ function ToggleButtonIcon({
   return (
     <span
       className={cn(
-        "inline-flex h-10 w-10 items-center justify-center rounded transition-colors",
+        "inline-flex h-8 w-8 items-center justify-center rounded transition-colors",
         accent ? "bg-primary text-primary-foreground hover:bg-primary/90" : "hover:bg-muted/80",
         isActive && "bg-muted text-primary ring-1 ring-inset ring-primary/50",
       )}
@@ -453,7 +456,7 @@ function MobileFormattingToolbar({
         height: `${PLAN_FORMATTING_TOOLBAR_HEIGHT_PX}px`,
       }}
     >
-      <div className="flex h-full w-full min-w-0 items-center gap-0 overflow-x-auto overscroll-x-contain px-0 py-1">
+      <div className="flex h-full w-full min-w-0 items-center gap-0 overflow-x-auto overscroll-x-contain px-0 py-0">
         {content}
       </div>
     </div>,
@@ -475,7 +478,9 @@ export function PlanBubbleMenu({
   const snapshot = useEditorSnapshot(editor);
   const isMobilePresentation = isMobile || isTablet || !usesDesktopWorkbench;
   const mobileVisible =
-    isMobilePresentation && (snapshot.isFocused || showLinkInput) && !snapshot.isCodeBlock;
+    isMobilePresentation &&
+    ((snapshot.isFocused && snapshot.hasTextSelection) || showLinkInput) &&
+    !snapshot.isCodeBlock;
   useMobileVisibilityChange(onMobileVisibilityChange, mobileVisible, keyboardOpen, bottomOffset);
 
   const handleLinkClick = useCallback(() => {

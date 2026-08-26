@@ -13,11 +13,12 @@ legacy_specs: []
 ## Overview
 
 Replace the Plan editor's selection-anchored formatting bubble on phone and
-touch-tablet layouts with a fixed strip above the software keyboard. Preserve
-the current desktop bubble, formatting commands, Plan comment handoff, and plan
-data flow. Implement the correction as one vertical TDD work order so both the
-component regression and mobile browser outcome fail before production code
-changes and pass together afterward.
+touch-tablet layouts with a compact fixed strip above the software keyboard,
+shown only for a focused non-whitespace text selection. Preserve the current
+desktop bubble, formatting commands, Plan comment handoff, and plan data flow.
+Implement the correction as one vertical TDD work order so both the component
+regression and mobile browser outcome fail before production code changes and
+pass together afterward.
 
 The confirmed root cause is `PlanBubbleMenu`: every non-empty selection mounts
 Tiptap's selection-anchored `BubbleMenu` with top placement on every viewport.
@@ -30,8 +31,9 @@ flipping, or `z-index` cannot reliably separate them.
 ### In scope
 
 - Preserve the current selection bubble on compact and full desktop layouts.
-- Render a focus-driven docked formatting strip in phone and touch-tablet Plan
-  layouts.
+- Render a selection-driven docked formatting strip in phone and touch-tablet
+  Plan layouts, with a compact 48-pixel bar and 32-pixel visual action surfaces
+  around 44-pixel touch targets.
 - Share active-mark state, command handlers, link mode, and Plan comment
   selection behavior across both presentations.
 - Reuse the terminal keybar's visual-viewport positioning behavior through a
@@ -59,9 +61,9 @@ flipping, or `z-index` cannot reliably separate them.
 - Refactor `PlanBubbleMenu` so its controls and reactive Tiptap state are shared.
   Keep BubbleMenu selection anchoring only for desktop; render the docked
   surface for phone and tablet.
-- Subscribe separately to editor focus/blur and Tiptap transactions. Keep the
-  mobile surface mounted while its link input has focus, hide it in code blocks,
-  and disable Comment when no eligible selection exists.
+- Subscribe separately to editor focus/blur and Tiptap transactions. Show the
+  mobile surface only for a focused non-whitespace text selection, keep it
+  mounted while its link input has focus, and hide it in code blocks.
 - Preserve editor selection with pointer-down and mouse-down prevention before
   running existing command chains.
 
@@ -85,20 +87,20 @@ flipping, or `z-index` cannot reliably separate them.
   Traditional Chinese catalogs. The scoped Traditional Chinese converter was
   used because the full catalog command is currently blocked by unrelated
   pre-existing residual keys in `agents.json`.
-- Expose toolbar semantics, action names, pressed states, disabled Comment
-  state, and minimum 44-pixel touch geometry.
+- Expose toolbar semantics, action names, pressed states, compact 48/32-pixel
+  visual geometry, and minimum 44-pixel touch geometry.
 
 ## Tests
 
 | Acceptance criterion | Evidence |
 | --- | --- |
 | `AC-UI-RESPONSIVE-PLAN-FORMATTING-001.1` | `plan-bubble-menu.test.tsx` proves the fine-pointer selection bubble and code-block exclusion remain. |
-| `AC-UI-RESPONSIVE-PLAN-FORMATTING-001.2` | Component RED/GREEN coverage proves phone/tablet focus renders the docked strip without a BubbleMenu. |
-| `AC-UI-RESPONSIVE-PLAN-FORMATTING-001.3` | Component tests cover shared actions, active states, and disabled selection-only Comment. |
+| `AC-UI-RESPONSIVE-PLAN-FORMATTING-001.2` | Component and mobile browser RED/GREEN coverage proves a focused non-whitespace selection renders the docked strip while a caret or whitespace-only selection keeps it hidden. |
+| `AC-UI-RESPONSIVE-PLAN-FORMATTING-001.3` | Component tests cover shared actions and active states on the eligible-selection surface; the hidden empty-selection state prevents selection-only actions from being presented. |
 | `AC-UI-RESPONSIVE-PLAN-FORMATTING-001.4` | Source regression asserts no selection/callout suppression; physical Android/iOS acceptance covers native chrome. |
 | `AC-UI-RESPONSIVE-PLAN-FORMATTING-001.5` | Shared helper/unit tests and mobile browser viewport resize/scroll assertions cover keyboard-edge tracking. |
 | `AC-UI-RESPONSIVE-PLAN-FORMATTING-001.6` | Component positioning/padding coverage and mobile task-nav geometry assertions cover clearance and final-line reachability. |
-| `AC-UI-RESPONSIVE-PLAN-FORMATTING-001.7` | Component accessibility assertions and mobile bounding-box/overflow checks cover names, states, touch size, and containment. |
+| `AC-UI-RESPONSIVE-PLAN-FORMATTING-001.7` | Component accessibility assertions and mobile bounding-box/overflow checks cover selection-driven visibility, names, states, 44-pixel touch size, compact 48/32-pixel sizing, and containment. |
 | `AC-UI-RESPONSIVE-PLAN-FORMATTING-001.8` | Component pointer-event coverage and mobile Bold flow prove focus, selection, one command, and continued editing. |
 
 The component regression covers mobile Plan formatting outside the selection
@@ -114,13 +116,15 @@ Add `apps/web/e2e/tests/task/mobile-plan-formatting-toolbar.spec.ts` for the
 
 1. Seed Plan content through the existing mock MCP plan-writing pattern and
    open the mobile Plan tab.
-2. Focus the real ProseMirror editor, select a known phrase, and assert the
-   docked toolbar replaces the selection bubble.
+2. Focus the real ProseMirror editor and assert that a caret does not mount the
+   dock. Select a known phrase and assert the compact docked toolbar replaces
+   the selection bubble.
 3. Simulate visual-viewport keyboard resize and scroll using the established
    terminal-keybar event pattern. Assert the toolbar follows the visible bottom
    edge and clears mobile navigation.
-4. Assert at least 44-pixel action targets, internal horizontal containment,
-   and no document-level horizontal overflow.
+4. Assert the 48-pixel toolbar, 32-pixel visual action surfaces, 44-pixel
+   action targets, internal horizontal containment, and no document-level
+   horizontal overflow.
 5. Tap Bold and assert the known phrase is formatted and the editor remains
    ready for input. Component coverage verifies that the command runs once.
 
@@ -136,15 +140,17 @@ device evidence separately when those devices are available.
 Implemented in Task 01. Focused unit coverage, production-build mobile E2E,
 type checking, changed-file lint, i18n validation, spec lint, and whitespace
 checks pass. Review follow-up also covers keyboard occlusion through the final
-editor line and constrains the tablet dock to the Plan pane. Fresh desktop and
-mobile captures were produced for the PR. Native Android Chrome and iOS Safari
-checks were not available; Playwright mobile emulation covers the automated
-geometry and selection contract.
+editor line, constrains the tablet dock to the Plan pane, hides the dock for
+caret and whitespace-only selections, and keeps its compact visual controls
+inside accessible touch targets. Fresh desktop and mobile captures were
+produced for the PR. Native Android Chrome and iOS Safari checks were not
+available; Playwright mobile emulation covers the automated geometry and
+selection contract.
 
 ## Risks
 
 - Tiptap's React editor-state selector observes transactions but not focus
-  events. Relying on it alone would leave focus-driven visibility stale.
+  events. Relying on it alone would leave selection-and-focus visibility stale.
 - Toolbar taps can collapse a mobile selection unless both pointer-down and
   mouse-down focus transfer are prevented before the command runs.
 - A fixed bar that ignores the mobile task-navigation offset can replace the
