@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useCallback, memo } from "react";
-import { IconChevronDown, IconChevronRight, IconX } from "@tabler/icons-react";
+import { IconCheck, IconChevronDown, IconChevronRight, IconX } from "@tabler/icons-react";
 import { GridSpinner } from "@/components/grid-spinner";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
 import type { SubagentTaskPayload, ToolCallMetadata } from "@/components/task/chat/types";
 import { SubagentMetaRow } from "@/components/task/chat/messages/subagent-meta-row";
+import { isTerminalToolCallStatus } from "@/lib/utils/tool-call-status";
 import { normalizeToolCallStatus } from "./tool-status";
 import { useTranslation } from "react-i18next";
 
@@ -33,24 +34,30 @@ function arePropsEqual(
   );
 }
 
-const TERMINAL_TOOL_STATUSES = new Set([
-  "complete",
-  "completed",
-  "success",
-  "error",
-  "failed",
-  "cancelled",
-]);
+const LIVE_SUBAGENT_PAYLOAD_STATUSES = new Set(["pendingInit", "started", "async_launched"]);
+
+function isSubagentPayloadLive(status: string | undefined): boolean {
+  if (!status) return false;
+  if (LIVE_SUBAGENT_PAYLOAD_STATUSES.has(status)) return true;
+  return !isTerminalToolCallStatus(status);
+}
 
 export function isSubagentEffectivelyActive(
   metadata: ToolCallMetadata | undefined,
   isContainingTurnActive: boolean,
 ): boolean {
   const status = metadata?.status;
-  if (status && TERMINAL_TOOL_STATUSES.has(status)) return false;
   if (status === "running") return true;
+
+  const normalized = normalizeToolCallStatus(status);
+  if (normalized === "error" || normalized === "cancelled") return false;
+
   const payloadStatus = metadata?.normalized?.subagent_task?.status;
-  return isContainingTurnActive && (status === "in_progress" || payloadStatus === "started");
+  if (payloadStatus && isTerminalToolCallStatus(payloadStatus)) return false;
+  if (!isContainingTurnActive) return false;
+
+  if (status === "in_progress" || isSubagentPayloadLive(payloadStatus)) return true;
+  return normalized === "complete" && isSubagentPayloadLive(payloadStatus);
 }
 
 // The result is what the subagent was dispatched to produce, so it is shown
@@ -140,19 +147,27 @@ function SubagentStatusIcon({
 }) {
   const { t } = useTranslation();
   if (isActive) {
+    const workingLabel = t("task:statusWorking");
     return (
-      <>
+      <span className="inline-flex items-center gap-1.5 shrink-0" title={workingLabel}>
         <span className="text-xs text-muted-foreground italic">{t("task:working")}</span>
         <GridSpinner className="text-muted-foreground shrink-0" />
-      </>
+      </span>
     );
   }
   const normalized = normalizeToolCallStatus(status);
-  if (normalized !== "error" && normalized !== "cancelled") return null;
-  const label = normalized === "cancelled" ? t("task:cancelled") : t("task:failed");
+  if (normalized === "error" || normalized === "cancelled") {
+    const label = normalized === "cancelled" ? t("task:statusCancelled") : t("task:failed");
+    return (
+      <span className="shrink-0" title={label} aria-label={label}>
+        <IconX aria-hidden className="h-3.5 w-3.5 text-red-500" />
+      </span>
+    );
+  }
+  const completedLabel = t("task:statusCompleted");
   return (
-    <span className="shrink-0" aria-label={label}>
-      <IconX aria-hidden className="h-3.5 w-3.5 text-red-500" />
+    <span className="shrink-0" title={completedLabel} aria-label={completedLabel}>
+      <IconCheck aria-hidden className="h-3.5 w-3.5 text-muted-foreground" />
     </span>
   );
 }

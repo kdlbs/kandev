@@ -11,6 +11,9 @@ const SUBAGENT_CHEVRON = "subagent-chevron";
 const IN_PROGRESS = "in_progress";
 const STARTED = "started";
 const WORKING = "Working...";
+const COMPLETED = "Completed";
+const FAILED = "Failed";
+const CANCELLED = "Cancelled";
 const SUBAGENT_DESCRIPTION = "subagent-description";
 const SUBAGENT_RESULT_TEXT = "subagent-result-text";
 const CHILD_TOOL_LABEL = "Read SyncRunner.ts";
@@ -148,8 +151,64 @@ describe("isSubagentEffectivelyActive", () => {
       expected: true,
     },
     {
-      name: "terminal metadata overrides a started payload in an active turn",
+      name: "started payload stays active after spawn completes during its turn",
       metadataStatus: COMPLETE,
+      payloadStatus: STARTED,
+      isContainingTurnActive: true,
+      expected: true,
+    },
+    {
+      name: "pendingInit payload stays active after spawn completes during its turn",
+      metadataStatus: COMPLETE,
+      payloadStatus: "pendingInit",
+      isContainingTurnActive: true,
+      expected: true,
+    },
+    {
+      name: "pendingInit payload settles with its turn after spawn completes",
+      metadataStatus: COMPLETE,
+      payloadStatus: "pendingInit",
+      isContainingTurnActive: false,
+      expected: false,
+    },
+    {
+      name: "terminal nested payload stays settled after spawn completes",
+      metadataStatus: COMPLETE,
+      payloadStatus: COMPLETE,
+      isContainingTurnActive: true,
+      expected: false,
+    },
+    {
+      name: "async_launched payload stays active after spawn completes during its turn",
+      metadataStatus: COMPLETE,
+      payloadStatus: "async_launched",
+      isContainingTurnActive: true,
+      expected: true,
+    },
+    {
+      name: "async_launched payload settles with its turn after spawn completes",
+      metadataStatus: COMPLETE,
+      payloadStatus: "async_launched",
+      isContainingTurnActive: false,
+      expected: false,
+    },
+    {
+      name: "ACP completed nested payload settles after spawn completes",
+      metadataStatus: COMPLETE,
+      payloadStatus: "completed",
+      isContainingTurnActive: true,
+      expected: false,
+    },
+    {
+      name: "failed metadata stays settled during an active turn",
+      metadataStatus: "failed",
+      payloadStatus: STARTED,
+      isContainingTurnActive: true,
+      expected: false,
+    },
+    {
+      name: "cancelled metadata stays settled during an active turn",
+      metadataStatus: "cancelled",
       payloadStatus: STARTED,
       isContainingTurnActive: true,
       expected: false,
@@ -211,6 +270,50 @@ describe("ToolSubagentMessage", () => {
     expect(screen.queryByRole("status", { name: "Loading" })).toBeNull();
     expect(screen.queryByText(WORKING)).toBeNull();
     expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("shows Working after spawn completes while the nested Codex task is still pendingInit", () => {
+    renderSubagent(
+      subagentMessage({ metadataStatus: COMPLETE, payloadStatus: "pendingInit" }),
+      { isContainingTurnActive: true },
+    );
+
+    expect(screen.getByRole("status", { name: "Loading" })).toBeTruthy();
+    expect(screen.getByText(WORKING)).toBeTruthy();
+    expect(screen.getByTitle("Working")).toBeTruthy();
+  });
+
+  it("shows Working after spawn completes while the nested Claude task is still async_launched", () => {
+    renderSubagent(
+      subagentMessage({ metadataStatus: COMPLETE, payloadStatus: "async_launched" }),
+      { isContainingTurnActive: true },
+    );
+
+    expect(screen.getByRole("status", { name: "Loading" })).toBeTruthy();
+    expect(screen.getByText(WORKING)).toBeTruthy();
+    expect(screen.getByTitle("Working")).toBeTruthy();
+  });
+
+  it("shows a completed check with a mapped hover after the turn settles", () => {
+    renderSubagent(subagentMessage({ metadataStatus: COMPLETE, payloadStatus: COMPLETE }));
+
+    expect(screen.getByTitle(COMPLETED)).toBeTruthy();
+    expect(screen.queryByRole("status", { name: "Loading" })).toBeNull();
+    expect(screen.queryByText(WORKING)).toBeNull();
+  });
+
+  it("names a failed status on hover", () => {
+    renderSubagent(subagentMessage({ metadataStatus: "failed", payloadStatus: COMPLETE }));
+
+    expect(screen.getByTitle(FAILED)).toBeTruthy();
+    expect(screen.queryByText(WORKING)).toBeNull();
+  });
+
+  it("names a cancelled status on hover", () => {
+    renderSubagent(subagentMessage({ metadataStatus: "cancelled", payloadStatus: COMPLETE }));
+
+    expect(screen.getByTitle(CANCELLED)).toBeTruthy();
+    expect(screen.queryByText(WORKING)).toBeNull();
   });
 });
 
