@@ -13,6 +13,7 @@ import {
   buildTaskFromKanban,
   hasResolvedTaskDetails,
   resolveEffectiveTask,
+  resolveTaskPullRequestProps,
   resolveTaskContentState,
   resolveTaskProps,
   selectWorkspaceRepositories,
@@ -173,6 +174,31 @@ describe("resolveTaskProps", () => {
       kandev: "release",
       "repo-2": "develop",
       other: "develop",
+    });
+  });
+});
+
+describe("resolveTaskPullRequestProps", () => {
+  it("supports the office task shape while preserving policy targets", () => {
+    const props = resolveTaskPullRequestProps(
+      {
+        title: "Open a pull request",
+        repositories: [
+          {
+            repository_id: "repo-1",
+            base_branch: "develop",
+            branch_policy_pull_request_target: "main",
+          },
+        ],
+      } as unknown as Task,
+      [{ id: "repo-1", name: "kandev" } as Repository],
+    );
+
+    expect(props).toMatchObject({
+      baseBranch: "develop",
+      pullRequestTarget: "main",
+      pullRequestTargetsByRepository: { "repo-1": "main", kandev: "main" },
+      taskTitle: "Open a pull request",
     });
   });
 });

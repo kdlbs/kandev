@@ -141,6 +141,7 @@ export function RepoChipsRow({
   const hasDiscovered = fs.discoveredRepositories.length > 0;
   const canAddMore = repositories.length > 0 || hasDiscovered;
   const addHint = computeAddHint(canAddMore, repositories.length);
+  const branchPolicyDisabledReason = policyDisabled(isLocalExecutor, freshBranchAvailable);
 
   return (
     // min-h-9 reserves enough vertical space for the tallest mode body so the
@@ -162,6 +163,7 @@ export function RepoChipsRow({
         addHint={addHint}
         freshBranchAvailable={freshBranchAvailable}
         freshBranchEnabled={freshBranchEnabled}
+        branchPolicyDisabledReason={branchPolicyDisabledReason}
         onRowRepositoryChange={onRowRepositoryChange}
         onRowBranchChange={onRowBranchChange}
         onRowPolicyChange={onRowPolicyChange}
@@ -251,6 +253,7 @@ function ModeBody({
   addHint,
   freshBranchAvailable,
   freshBranchEnabled,
+  branchPolicyDisabledReason,
   onRowRepositoryChange,
   onRowBranchChange,
   onRowPolicyChange,
@@ -272,6 +275,7 @@ function ModeBody({
   addHint: string | undefined;
   freshBranchAvailable?: boolean;
   freshBranchEnabled?: boolean;
+  branchPolicyDisabledReason?: string;
   onRowRepositoryChange: (key: string, value: string) => void;
   onRowBranchChange: (key: string, value: string) => void;
   onRowPolicyChange?: (key: string, policyId: string, baseBranch: string) => void;
@@ -316,6 +320,7 @@ function ModeBody({
       currentLocalBranch={fs.currentLocalBranch}
       currentLocalBranchLoading={fs.currentLocalBranchLoading}
       freshBranchEnabled={fs.freshBranchEnabled}
+      branchPolicyDisabledReason={branchPolicyDisabledReason}
       canAddMore={canAddMore}
       addHint={addHint}
       onAdd={fs.addRepository}
@@ -379,4 +384,13 @@ function computeAddHint(canAddMore: boolean, workspaceRepoCount: number): string
   if (canAddMore) return undefined;
   if (workspaceRepoCount === 0) return t("task:noRepositoriesAvailableInWorkspace");
   return t("task:allWorkspaceRepositoriesAdded");
+}
+
+function policyDisabled(
+  isLocalExecutor: boolean | undefined,
+  freshBranchAvailable: boolean | undefined,
+): string | undefined {
+  return isLocalExecutor && !freshBranchAvailable
+    ? t("task:branchPolicyRequiresSingleRepository")
+    : undefined;
 }

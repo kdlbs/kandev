@@ -34,6 +34,7 @@ type WorkspaceRepoChipsProps = {
   currentLocalBranch?: string;
   currentLocalBranchLoading?: boolean;
   freshBranchEnabled?: boolean;
+  branchPolicyDisabledReason?: string;
   showBranchPolicies?: boolean;
   canAddMore: boolean;
   addHint?: string;
@@ -68,6 +69,7 @@ export function WorkspaceRepoChips({
   currentLocalBranch,
   currentLocalBranchLoading,
   freshBranchEnabled,
+  branchPolicyDisabledReason,
   showBranchPolicies = false,
   canAddMore,
   addHint,
@@ -115,6 +117,7 @@ export function WorkspaceRepoChips({
             currentLocalBranch: currentLocalBranch ?? "",
             freshBranchEnabled: !!freshBranchEnabled,
           })}
+          branchPolicyDisabledReason={branchPolicyDisabledReason}
           onRepositoryChange={(value) => onRowRepositoryChange(row.key, value)}
           onBranchChange={(value) => onRowBranchChange(row.key, value)}
           onPolicyChange={
@@ -258,6 +261,7 @@ type RepoChipProps = {
   onBranchChange: (value: string) => void;
   onPolicyChange?: (policyId: string, baseBranch: string) => void;
   onPolicySelected?: () => void;
+  branchPolicyDisabledReason?: string;
   showBranchPolicies?: boolean;
   onRemove: () => void;
   onCreateRepository?: () => void;
@@ -470,6 +474,7 @@ function RepoChipContent({
   onBranchChange,
   onPolicyChange,
   onPolicySelected,
+  branchPolicyDisabledReason,
   onRemove,
   onCreateRepository,
   onRefreshRepositories,
@@ -488,6 +493,7 @@ function RepoChipContent({
     branchOptions,
     branchesLoading,
     preferredDefaultBranchLoading,
+    policyDisabledReason: branchPolicyDisabledReason,
     onBranchChange,
     onPolicyChange,
     onPolicySelected,

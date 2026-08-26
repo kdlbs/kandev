@@ -1881,5 +1881,6 @@
   "branchPolicyMarker": "策略",
   "branchPolicyOptionSummary": "从 {{base}} 到 {{target}}",
   "branchPolicySelected": "{{name}}（从 {{base}}）",
-  "branchPolicyUnavailable": "基础分支不可用。请刷新分支或编辑此策略。"
+  "branchPolicyUnavailable": "基础分支不可用。请刷新分支或编辑此策略。",
+  "branchPolicyRequiresSingleRepository": "使用本地执行器时，分支策略需要单个仓库。"
 }

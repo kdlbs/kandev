@@ -157,6 +157,8 @@
   "branchPoliciesSaveRepositoryFirst": "Save this repository before adding branch policies.",
   "branchPoliciesEmpty": "No branch policies yet.",
   "branchPoliciesLoading": "Loading branch policies...",
+  "branchPoliciesLoadFailed": "Could not load branch policies. Try again.",
+  "branchPoliciesRetry": "Retry",
   "branchPolicyAdd": "Add policy",
   "branchPolicyAddTitle": "Add branch policy",
   "branchPolicyEditTitle": "Edit branch policy",

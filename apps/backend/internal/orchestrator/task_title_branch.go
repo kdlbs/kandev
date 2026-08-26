@@ -49,10 +49,6 @@ type TitleBranchRenameResult struct {
 	Failed    []TitleBranchFailure      `json:"failed,omitempty"`
 }
 
-func renderTitleBranchName(title string, task *models.Task, repository *models.Repository, suffix string) (string, error) {
-	return renderTitleBranchNameForTaskRepository(title, task, repository, nil, suffix)
-}
-
 func renderTitleBranchNameForTaskRepository(
 	title string,
 	task *models.Task,

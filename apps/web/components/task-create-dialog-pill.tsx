@@ -28,6 +28,7 @@ export type PillOption = {
   group?: string;
   groupLabel?: string;
   disabled?: boolean;
+  disabledReason?: string;
 };
 
 export type PillAction = {

@@ -209,7 +209,6 @@ function createRepositoryBranchPolicyActions(
   | "setRepositoryBranchPoliciesLoading"
   | "upsertRepositoryBranchPolicy"
   | "removeRepositoryBranchPolicy"
-  | "invalidateRepositoryBranchPolicies"
 > {
   return {
     setRepositoryBranchPolicies: (repositoryId, policies, expectedRevision) =>
@@ -247,10 +246,6 @@ function createRepositoryBranchPolicyActions(
         }
         draft.repositoryBranchPolicies.revisionByRepositoryId[repositoryId] =
           (draft.repositoryBranchPolicies.revisionByRepositoryId[repositoryId] ?? 0) + 1;
-      }),
-    invalidateRepositoryBranchPolicies: (repositoryId) =>
-      set((draft) => {
-        draft.repositoryBranchPolicies.loadedByRepositoryId[repositoryId] = false;
       }),
   };
 }

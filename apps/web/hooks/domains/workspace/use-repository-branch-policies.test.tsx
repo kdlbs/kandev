@@ -76,6 +76,23 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 
 describe("useRepositoryBranchPolicies mutation races", () => {
+  it("surfaces an initial policy list failure instead of treating it as empty", async () => {
+    const failedState = initialState();
+    failedState.repositoryBranchPolicies!.loadedByRepositoryId[REPOSITORY_ID] = false;
+    listPoliciesMock.mockRejectedValueOnce(new Error("temporary failure"));
+
+    const failedWrapper = ({ children }: { children: ReactNode }) => (
+      <StateProvider initialState={failedState}>{children}</StateProvider>
+    );
+    const { result } = renderHook(() => useRepositoryBranchPolicies(REPOSITORY_ID), {
+      wrapper: failedWrapper,
+    });
+
+    await waitFor(() => expect(result.current.hasError).toBe(true));
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.policies).toEqual([]);
+  });
+
   it("refreshes instead of applying an older create response after a WS update", async () => {
     const response = deferred<RepositoryBranchPolicy>();
     const current = policy("current", "Current policy");

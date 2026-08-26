@@ -157,6 +157,8 @@
   "branchPoliciesSaveRepositoryFirst": "請先儲存此儲存庫，再新增分支策略。",
   "branchPoliciesEmpty": "暫無分支策略。",
   "branchPoliciesLoading": "正在載入分支策略...",
+  "branchPoliciesLoadFailed": "無法載入分支策略。請重試。",
+  "branchPoliciesRetry": "重試",
   "branchPolicyAdd": "新增策略",
   "branchPolicyAddTitle": "新增分支策略",
   "branchPolicyEditTitle": "編輯分支策略",

@@ -59,15 +59,14 @@ describe("repositoryBranchPolicies slice", () => {
     ).toEqual(["new"]);
   });
 
-  it("removes a policy and invalidates the loaded marker", () => {
+  it("removes a policy without invalidating the loaded marker", () => {
     const store = createStore();
     store.getState().setRepositoryBranchPolicies("repo-1", [policy("1", "Feature")]);
 
     store.getState().removeRepositoryBranchPolicy("repo-1", "1");
-    store.getState().invalidateRepositoryBranchPolicies("repo-1");
 
     expect(store.getState().repositoryBranchPolicies.itemsByRepositoryId["repo-1"]).toEqual([]);
-    expect(store.getState().repositoryBranchPolicies.loadedByRepositoryId["repo-1"]).toBe(false);
+    expect(store.getState().repositoryBranchPolicies.loadedByRepositoryId["repo-1"]).toBe(true);
   });
 
   it("bumps the revision when an event removes a policy before the first list response", () => {

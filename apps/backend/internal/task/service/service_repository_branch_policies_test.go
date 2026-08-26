@@ -68,6 +68,20 @@ func TestRepositoryBranchPolicyServiceNormalizesAndRejectsInvalidUpdates(t *test
 	}
 }
 
+func TestNormalizeRepositoryBranchPolicyDefaultsPullRequestTarget(t *testing.T) {
+	policy, err := normalizeRepositoryBranchPolicy(&models.RepositoryBranchPolicy{
+		Name:           "Feature",
+		BaseBranch:     "develop",
+		BranchTemplate: "feature/{title}-{suffix}",
+	})
+	if err != nil {
+		t.Fatalf("normalizeRepositoryBranchPolicy: %v", err)
+	}
+	if policy.PullRequestTarget != "develop" {
+		t.Fatalf("pull request target = %q, want base branch", policy.PullRequestTarget)
+	}
+}
+
 func TestRepositoryBranchPolicyServiceGitflowStarterIsAtomicAndOneTime(t *testing.T) {
 	isolateGitEnvForTest(t)
 	svc, eventBus, repo := createTestService(t)

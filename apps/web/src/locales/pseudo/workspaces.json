@@ -157,6 +157,8 @@
   "branchPoliciesSaveRepositoryFirst": "Śàvē ţĥĩś ŕēƥōśĩţōŕŷ ƀēƒōŕē àďďĩńĝ ƀŕàńćĥ ƥōĺĩćĩēś.",
   "branchPoliciesEmpty": "Ńō ƀŕàńćĥ ƥōĺĩćĩēś ŷēţ.",
   "branchPoliciesLoading": "Ĺōàďĩńĝ ƀŕàńćĥ ƥōĺĩćĩēś...",
+  "branchPoliciesLoadFailed": "Ćōũĺď ńōţ ĺōàď ƀŕàńćĥ ƥōĺĩćĩēś. Ţŕŷ àĝàĩń.",
+  "branchPoliciesRetry": "Ŕēţŕŷ",
   "branchPolicyAdd": "Àďď ƥōĺĩćŷ",
   "branchPolicyAddTitle": "Àďď ƀŕàńćĥ ƥōĺĩćŷ",
   "branchPolicyEditTitle": "Ēďĩţ ƀŕàńćĥ ƥōĺĩćŷ",

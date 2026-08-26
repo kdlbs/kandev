@@ -63,9 +63,7 @@ function resolveWorkspacePath(noRepository: boolean, workspacePath: string): str
 
 function isStaleBranchPolicyError(error: unknown): boolean {
   return (
-    error instanceof ApiError &&
-    error.status === 400 &&
-    error.message.includes("selected policy is no longer available")
+    error instanceof ApiError && error.status === 400 && error.errorCode === "branch_policy_stale"
   );
 }
 

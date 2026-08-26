@@ -373,13 +373,10 @@ describe("useTaskSubmitHandlers — handleCreateSubmit (CLI-mode parity)", () =>
     const refreshBranchPolicies = vi.fn(async () => undefined);
     const onOpenChange = vi.fn();
     const createTask = vi.fn().mockRejectedValue(
-      new ApiError(
-        "invalid repository branch policy: selected policy is no longer available",
-        400,
-        {
-          error: "invalid repository branch policy: selected policy is no longer available",
-        },
-      ),
+      new ApiError("invalid repository branch policy", 400, {
+        error: "invalid repository branch policy",
+        error_code: "branch_policy_stale",
+      }),
     );
     const deps = makeDeps({
       createTask,

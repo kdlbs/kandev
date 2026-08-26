@@ -285,10 +285,8 @@ export function RepositoryBranchPolicies({
   const { toast } = useToast();
   const isSaved = !repository.id.startsWith("temp-repo-");
   const idPrefix = `branch-policy-${repository.id.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
-  const { policies, isLoading, create, update, remove, seedGitflow } = useRepositoryBranchPolicies(
-    repository.id,
-    isSaved,
-  );
+  const { policies, hasError, isLoading, refresh, create, update, remove, seedGitflow } =
+    useRepositoryBranchPolicies(repository.id, isSaved);
   const {
     branches,
     isLoading: branchesLoading,
@@ -373,12 +371,12 @@ export function RepositoryBranchPolicies({
 
   return (
     <details
-      className="rounded-md border border-border/70 p-3"
+      className="group rounded-md border border-border/70 p-3"
       data-testid={`branch-policies-${repository.id}`}
     >
       <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
         <span className="flex items-center gap-2 font-medium">
-          <IconChevronDown className="h-4 w-4 transition-transform details-open:rotate-180" />
+          <IconChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" />
           {t("workspaces:branchPoliciesTitle")}
           <span className="rounded-full bg-muted px-2 py-0.5 text-xs tabular-nums">
             {policies.length}
@@ -392,7 +390,20 @@ export function RepositoryBranchPolicies({
             {t("workspaces:branchPoliciesSaveRepositoryFirst")}
           </p>
         ) : null}
-        {isSaved && policies.length === 0 ? (
+        {isSaved && hasError ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm text-destructive">{t("workspaces:branchPoliciesLoadFailed")}</p>
+            <Button
+              type="button"
+              variant="outline"
+              className={TOUCH_TARGET_CLASS}
+              onClick={() => void refresh().catch(() => undefined)}
+            >
+              {t("workspaces:branchPoliciesRetry")}
+            </Button>
+          </div>
+        ) : null}
+        {isSaved && !hasError && policies.length === 0 ? (
           <p className="text-sm text-muted-foreground">{t("workspaces:branchPoliciesEmpty")}</p>
         ) : null}
         <div className="space-y-2">
@@ -451,7 +462,7 @@ export function RepositoryBranchPolicies({
               <IconPlus className="mr-2 h-4 w-4" />
               {t("workspaces:branchPolicyAdd")}
             </Button>
-            {policies.length === 0 ? (
+            {!hasError && policies.length === 0 ? (
               <Button
                 type="button"
                 variant="outline"

@@ -1,4 +1,6 @@
 import { execSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import { expect, test } from "../../fixtures/test-base";
 import { makeGitEnv } from "../../helpers/git-helper";
 import { useRegularMode } from "../../helpers/regular-mode";
@@ -105,6 +107,76 @@ test.describe("Task creation with branch policies", () => {
         .toString()
         .trim();
       expect(currentBranch).toMatch(/^feature\/policy-task-/);
+    } finally {
+      await apiClient.deleteExecutorProfile(localProfile.id).catch(() => {});
+    }
+  });
+
+  test("disables policy selection for a multi-repository local task", async ({
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    const secondRepositoryPath = path.join(
+      backend.tmpDir,
+      "repos",
+      `branch-policy-multi-repo-${Date.now()}`,
+    );
+    fs.mkdirSync(secondRepositoryPath, { recursive: true });
+    execSync("git init -b main", {
+      cwd: secondRepositoryPath,
+      env: makeGitEnv(backend.tmpDir),
+    });
+    execSync('git commit --allow-empty -m "init"', {
+      cwd: secondRepositoryPath,
+      env: makeGitEnv(backend.tmpDir),
+    });
+    const secondRepositoryName = `Policy second repository ${Date.now()}`;
+    await apiClient.createRepository(seedData.workspaceId, secondRepositoryPath, "main", {
+      name: secondRepositoryName,
+    });
+    const policy = await apiClient.createRepositoryBranchPolicy(seedData.repositoryId, {
+      name: `Multi-repo Feature ${Date.now()}`,
+      base_branch: "main",
+      branch_template: "feature/{title}-{suffix}",
+      pull_request_target: "main",
+    });
+    const { executors } = await apiClient.listExecutors();
+    const localExecutor = executors.find((executor) => executor.type === "local");
+    if (!localExecutor) {
+      test.skip(true, "No local executor available");
+      return;
+    }
+    const localProfile = await apiClient.createExecutorProfile(
+      localExecutor.id,
+      `E2E Multi-repo Branch Policy Local ${Date.now()}`,
+    );
+
+    try {
+      await testPage.goto("/");
+      await testPage.getByTestId("create-task-button").first().click();
+      const dialog = testPage.getByTestId("create-task-dialog");
+      await expect(dialog).toBeVisible();
+      await dialog.getByTestId("executor-profile-selector").click();
+      await testPage.getByRole("option", { name: new RegExp(localProfile.name) }).click();
+
+      await dialog.getByTestId("add-repository").click();
+      const repositoryChips = dialog.getByTestId("repo-chip-trigger");
+      await expect(repositoryChips).toHaveCount(2);
+      await repositoryChips.nth(1).click();
+      await testPage.getByRole("option", { name: new RegExp(secondRepositoryName) }).click();
+      await expect(repositoryChips.nth(1)).toContainText(secondRepositoryName);
+
+      const branchChips = dialog.getByTestId("branch-chip-trigger");
+      await expect(branchChips).toHaveCount(2);
+      await branchChips.nth(0).click();
+      const policyOption = testPage.getByRole("option", { name: new RegExp(policy.name) });
+      await expect(policyOption).toHaveAttribute("aria-disabled", "true");
+      await expect(testPage.getByTestId(`branch-policy-option-info-${policy.id}`)).toHaveAttribute(
+        "aria-label",
+        /single repository/,
+      );
     } finally {
       await apiClient.deleteExecutorProfile(localProfile.id).catch(() => {});
     }

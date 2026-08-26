@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
 import {
   createGitflowRepositoryBranchPolicies,
@@ -21,6 +21,7 @@ type InitialPolicyLoadArgs = {
   repositoryId: string | null;
   revisionRef: { current: number };
   setLoading: (repositoryId: string, loading: boolean) => void;
+  setError: (hasError: boolean) => void;
   setPolicies: (
     repositoryId: string,
     policies: RepositoryBranchPolicy[],
@@ -34,26 +35,30 @@ function useInitialRepositoryBranchPolicies({
   repositoryId,
   revisionRef,
   setLoading,
+  setError,
   setPolicies,
 }: InitialPolicyLoadArgs) {
   useEffect(() => {
     if (!enabled || !repositoryId || isLoaded) return;
     let cancelled = false;
     setLoading(repositoryId, true);
+    setError(false);
     const requestRevision = revisionRef.current;
     listRepositoryBranchPolicies(repositoryId, { cache: "no-store" })
       .then((response) => {
         if (!cancelled)
           setPolicies(repositoryId, response.repository_branch_policies, requestRevision);
       })
-      .catch(() => undefined)
+      .catch(() => {
+        if (!cancelled) setError(true);
+      })
       .finally(() => {
         if (!cancelled) setLoading(repositoryId, false);
       });
     return () => {
       cancelled = true;
     };
-  }, [enabled, isLoaded, repositoryId, revisionRef, setLoading, setPolicies]);
+  }, [enabled, isLoaded, repositoryId, revisionRef, setError, setLoading, setPolicies]);
 }
 
 type PolicyMutationArgs = {
@@ -137,6 +142,7 @@ function useRepositoryBranchPolicyMutations({
 }
 
 export function useRepositoryBranchPolicies(repositoryId: string | null, enabled = true) {
+  const [hasError, setHasError] = useState(false);
   const policies = useAppStore((state) =>
     repositoryId
       ? (state.repositoryBranchPolicies.itemsByRepositoryId[repositoryId] ?? EMPTY_POLICIES)
@@ -165,20 +171,25 @@ export function useRepositoryBranchPolicies(repositoryId: string | null, enabled
   const refresh = useCallback(async () => {
     if (!enabled || !repositoryId) return;
     setLoading(repositoryId, true);
+    setHasError(false);
     const requestRevision = revisionRef.current;
     try {
       const response = await listRepositoryBranchPolicies(repositoryId, { cache: "no-store" });
       setPolicies(repositoryId, response.repository_branch_policies, requestRevision);
+    } catch (error) {
+      setHasError(true);
+      throw error;
     } finally {
       setLoading(repositoryId, false);
     }
-  }, [enabled, repositoryId, setLoading, setPolicies]);
+  }, [enabled, repositoryId, setHasError, setLoading, setPolicies]);
 
   useInitialRepositoryBranchPolicies({
     enabled,
     isLoaded,
     repositoryId,
     revisionRef,
+    setError: setHasError,
     setLoading,
     setPolicies,
   });
@@ -191,5 +202,5 @@ export function useRepositoryBranchPolicies(repositoryId: string | null, enabled
     setPolicies,
   });
 
-  return { policies, isLoading, refresh, ...mutations };
+  return { policies, isLoading, hasError, refresh, ...mutations };
 }

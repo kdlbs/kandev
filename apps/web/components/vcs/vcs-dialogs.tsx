@@ -71,10 +71,7 @@ export function resolvePullRequestBaseBranch(
   const selectedBase = selectedRepo.split(" · ")[0];
   const baseTarget = targetsByRepository[selectedBase];
   if (baseTarget) return baseTarget;
-  const matchingKey = Object.keys(targetsByRepository)
-    .filter((key) => selectedBase.startsWith(`${key}-`))
-    .sort((left, right) => right.length - left.length)[0];
-  return matchingKey ? targetsByRepository[matchingKey] : fallback;
+  return fallback;
 }
 
 type FileSummary = { count: number; additions: number; deletions: number };

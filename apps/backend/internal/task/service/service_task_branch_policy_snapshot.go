@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -91,7 +92,13 @@ func (s *Service) resolveTaskRepositoryPolicy(ctx context.Context, repositoryID 
 	}
 	policy, err := s.branchPolicies.GetRepositoryBranchPolicy(ctx, input.BranchPolicyID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: selected policy is no longer available", ErrInvalidRepositoryBranchPolicy)
+		if errors.Is(err, repoerrors.ErrRepositoryBranchPolicyNotFound) {
+			return nil, fmt.Errorf("%w: %w", ErrInvalidRepositoryBranchPolicy, ErrRepositoryBranchPolicyStale)
+		}
+		return nil, fmt.Errorf("%w: resolve selected policy: %v", ErrInvalidRepositoryBranchPolicy, err)
+	}
+	if policy == nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidRepositoryBranchPolicy, ErrRepositoryBranchPolicyStale)
 	}
 	if policy.RepositoryID != repositoryID {
 		return nil, fmt.Errorf("%w: selected policy does not belong to repository", ErrInvalidRepositoryBranchPolicy)

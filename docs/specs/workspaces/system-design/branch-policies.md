@@ -65,6 +65,7 @@ atomic Gitflow-starter operations. The service owns:
 
 - workspace/repository authorization;
 - normalized validation and case-insensitive conflicts;
+- defaulting an omitted pull-request target to the normalized base branch;
 - branch-template validation through the existing renderer;
 - transactions and structured mutation logs.
 

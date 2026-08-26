@@ -76,12 +76,17 @@ function BranchPolicyOptionInfo({
   );
 }
 
-function branchPolicyToOption(policy: RepositoryBranchPolicy, branches: Branch[]): PillOption {
+function branchPolicyToOption(
+  policy: RepositoryBranchPolicy,
+  branches: Branch[],
+  policyDisabledReason?: string,
+): PillOption {
   const baseBranchAvailable = branches.some((branch) => {
     if (branch.name === policy.base_branch) return true;
     return branch.type === "remote" && `${branch.remote}/${branch.name}` === policy.base_branch;
   });
-  const unavailableReason = baseBranchAvailable ? undefined : t("task:branchPolicyUnavailable");
+  const unavailableReason =
+    policyDisabledReason ?? (baseBranchAvailable ? undefined : t("task:branchPolicyUnavailable"));
   const summary = t("workspaces:branchPolicySummary", {
     base: policy.base_branch,
     template: policy.branch_template,
@@ -99,7 +104,8 @@ function branchPolicyToOption(policy: RepositoryBranchPolicy, branches: Branch[]
     ].filter(Boolean),
     group: "policies",
     groupLabel: t("task:branchPoliciesGroup"),
-    disabled: !baseBranchAvailable,
+    disabled: Boolean(unavailableReason),
+    disabledReason: unavailableReason,
     renderLabel: () => (
       <span className="flex min-w-0 flex-1 items-center gap-2">
         <Badge variant="secondary" className="shrink-0 text-xs">
@@ -127,6 +133,7 @@ export function useRepoChipBranchPicker({
   branchOptions,
   branchesLoading,
   preferredDefaultBranchLoading,
+  policyDisabledReason,
   onBranchChange,
   onPolicyChange,
   onPolicySelected,
@@ -137,6 +144,7 @@ export function useRepoChipBranchPicker({
   branchOptions: PillOption[];
   branchesLoading: boolean;
   preferredDefaultBranchLoading?: boolean;
+  policyDisabledReason?: string;
   onBranchChange: (value: string) => void;
   onPolicyChange?: (policyId: string, baseBranch: string) => void;
   onPolicySelected?: () => void;
@@ -146,8 +154,9 @@ export function useRepoChipBranchPicker({
   const branchValue = preferredDefaultBranchLoading ? "" : row.branch;
   const selectedPolicy = branchPolicies.find((policy) => policy.id === row.branchPolicyId);
   const policyOptions = useMemo(
-    () => branchPolicies.map((policy) => branchPolicyToOption(policy, branches)),
-    [branchPolicies, branches],
+    () =>
+      branchPolicies.map((policy) => branchPolicyToOption(policy, branches, policyDisabledReason)),
+    [branchPolicies, branches, policyDisabledReason],
   );
   const branchPickerOptions = useMemo(
     () => [...policyOptions, ...branchOptions],

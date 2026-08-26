@@ -20,6 +20,7 @@ const (
 	repositoryBranchPolicyNameMaxLength        = 100
 	repositoryBranchPolicyDescriptionMaxLength = 500
 	defaultGitflowDevelopmentBranch            = "develop"
+	BranchPolicyStaleErrorCode                 = "branch_policy_stale"
 )
 
 var (
@@ -28,6 +29,7 @@ var (
 	ErrRepositoryBranchPolicyAlreadySeeded = errors.New("repository branch policies already seeded")
 	ErrRepositoryBranchPolicyReadOnly      = errors.New("this workspace is managed by Improve Kandev and is read-only")
 	ErrRepositoryBranchPolicyStoreMissing  = errors.New("repository branch policy store is unavailable")
+	ErrRepositoryBranchPolicyStale         = errors.New("repository branch policy is no longer available")
 )
 
 type CreateRepositoryBranchPolicyRequest struct {
@@ -294,6 +296,9 @@ func normalizeRepositoryBranchPolicy(policy *models.RepositoryBranchPolicy) (*mo
 	policy.BaseBranch = strings.TrimSpace(policy.BaseBranch)
 	policy.BranchTemplate = strings.TrimSpace(policy.BranchTemplate)
 	policy.PullRequestTarget = strings.TrimSpace(policy.PullRequestTarget)
+	if policy.PullRequestTarget == "" {
+		policy.PullRequestTarget = policy.BaseBranch
+	}
 	if policy.Name == "" || len([]rune(policy.Name)) > repositoryBranchPolicyNameMaxLength {
 		return nil, fmt.Errorf("%w: name must be between 1 and %d characters", ErrInvalidRepositoryBranchPolicy, repositoryBranchPolicyNameMaxLength)
 	}

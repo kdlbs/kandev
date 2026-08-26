@@ -56,8 +56,9 @@ duplicate repositories and not a restriction on Git itself.
 ### REQ-WORKSPACES-BRANCH-POLICIES-001: Repository policy management
 
 Each saved repository MUST support zero or more named branch policies. A policy
-MUST contain a name, base branch, branch template, and pull-request target. It
-MAY contain a short description.
+MUST contain a name, base branch, and branch template. Clients MAY omit the
+pull-request target; the service MUST default it to the normalized base branch
+before validation and persistence. A policy MAY contain a short description.
 
 The repository editor MUST place policy management in a disclosure section that
 is collapsed on each page load. The section header MUST show the policy count.

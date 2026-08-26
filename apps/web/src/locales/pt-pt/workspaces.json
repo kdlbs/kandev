@@ -157,6 +157,8 @@
   "branchPoliciesSaveRepositoryFirst": "Guarde este repositório antes de adicionar políticas de branches.",
   "branchPoliciesEmpty": "Ainda não existem políticas de branches.",
   "branchPoliciesLoading": "A carregar políticas de branches...",
+  "branchPoliciesLoadFailed": "Não foi possível carregar as políticas de branches. Tente novamente.",
+  "branchPoliciesRetry": "Tentar novamente",
   "branchPolicyAdd": "Adicionar política",
   "branchPolicyAddTitle": "Adicionar política de branches",
   "branchPolicyEditTitle": "Editar política de branches",

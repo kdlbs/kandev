@@ -1881,5 +1881,6 @@
   "branchPolicyMarker": "Política",
   "branchPolicyOptionSummary": "de {{base}} para {{target}}",
   "branchPolicySelected": "{{name}} (de {{base}})",
-  "branchPolicyUnavailable": "O branch base não está disponível. Atualize os branches ou edite esta política."
+  "branchPolicyUnavailable": "O branch base não está disponível. Atualize os branches ou edite esta política.",
+  "branchPolicyRequiresSingleRepository": "As políticas de branches requerem um único repositório com o executor local."
 }

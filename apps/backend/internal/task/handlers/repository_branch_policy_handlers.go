@@ -108,24 +108,6 @@ func (h *RepositoryBranchPolicyHandlers) abort(c *gin.Context, action string, er
 	c.JSON(status, gin.H{"error": err.Error()})
 }
 
-func (h *RepositoryBranchPolicyHandlers) writableRepository(c *gin.Context, repositoryID string) bool {
-	repository, err := h.service.GetRepository(c.Request.Context(), repositoryID)
-	if err != nil || repository == nil {
-		h.abort(c, "get repository", repoerrors.ErrRepositoryNotFound)
-		return false
-	}
-	workspace, err := h.service.GetWorkspace(c.Request.Context(), repository.WorkspaceID)
-	if err != nil {
-		h.abort(c, "get workspace", err)
-		return false
-	}
-	if workspace.IsImproveKandev() {
-		c.JSON(http.StatusConflict, gin.H{"error": workspaceReadOnlyMsg})
-		return false
-	}
-	return true
-}
-
 func (h *RepositoryBranchPolicyHandlers) httpList(c *gin.Context) {
 	policies, err := h.service.ListRepositoryBranchPolicies(c.Request.Context(), c.Param("id"))
 	if err != nil {
@@ -139,9 +121,6 @@ func (h *RepositoryBranchPolicyHandlers) httpCreate(c *gin.Context) {
 	var body repositoryBranchPolicyCreateBody
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
-		return
-	}
-	if !h.writableRepository(c, c.Param("id")) {
 		return
 	}
 	policy, err := h.service.CreateRepositoryBranchPolicy(c.Request.Context(), &service.CreateRepositoryBranchPolicyRequest{
@@ -159,9 +138,6 @@ func (h *RepositoryBranchPolicyHandlers) httpGitflow(c *gin.Context) {
 	var body repositoryBranchPolicyGitflowBody
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
-		return
-	}
-	if !h.writableRepository(c, c.Param("id")) {
 		return
 	}
 	policies, err := h.service.CreateGitflowRepositoryBranchPolicies(c.Request.Context(), &service.CreateGitflowRepositoryBranchPoliciesRequest{
@@ -194,9 +170,6 @@ func (h *RepositoryBranchPolicyHandlers) httpUpdate(c *gin.Context) {
 		h.abort(c, "get repository branch policy", err)
 		return
 	}
-	if !h.writableRepository(c, policy.RepositoryID) {
-		return
-	}
 	updated, err := h.service.UpdateRepositoryBranchPolicy(c.Request.Context(), policy.ID, &service.UpdateRepositoryBranchPolicyRequest{
 		Name: body.Name, Description: body.Description, BaseBranch: body.BaseBranch,
 		BranchTemplate: body.BranchTemplate, PullRequestTarget: body.PullRequestTarget,
@@ -214,9 +187,6 @@ func (h *RepositoryBranchPolicyHandlers) httpDelete(c *gin.Context) {
 		h.abort(c, "get repository branch policy", err)
 		return
 	}
-	if !h.writableRepository(c, policy.RepositoryID) {
-		return
-	}
 	if err := h.service.DeleteRepositoryBranchPolicy(c.Request.Context(), policy.ID); err != nil {
 		h.abort(c, "delete repository branch policy", err)
 		return
@@ -227,11 +197,11 @@ func (h *RepositoryBranchPolicyHandlers) httpDelete(c *gin.Context) {
 func (h *RepositoryBranchPolicyHandlers) wsError(msg *ws.Message, action string, err error) (*ws.Message, error) {
 	switch branchPolicyStatus(err) {
 	case http.StatusBadRequest:
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), taskErrorDetails(err))
 	case http.StatusConflict:
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), nil)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), taskErrorDetails(err))
 	case http.StatusNotFound:
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, err.Error(), nil)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, err.Error(), taskErrorDetails(err))
 	default:
 		h.logger.Error("repository branch policy request failed", zap.String("action", action), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to "+action, nil)

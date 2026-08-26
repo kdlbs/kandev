@@ -1881,5 +1881,6 @@
   "branchPolicyMarker": "Ƥōĺĩćŷ",
   "branchPolicyOptionSummary": "ƒŕōḿ {{base}} ţō {{target}}",
   "branchPolicySelected": "{{name}} (ƒŕōḿ {{base}})",
-  "branchPolicyUnavailable": "Ɓàśē ƀŕàńćĥ ũńàvàĩĺàƀĺē. Ŕēƒŕēśĥ ƀŕàńćĥēś ōŕ ēďĩţ ţĥĩś ƥōĺĩćŷ."
+  "branchPolicyUnavailable": "Ɓàśē ƀŕàńćĥ ũńàvàĩĺàƀĺē. Ŕēƒŕēśĥ ƀŕàńćĥēś ōŕ ēďĩţ ţĥĩś ƥōĺĩćŷ.",
+  "branchPolicyRequiresSingleRepository": "Ɓŕàńćĥ ƥōĺĩćĩēś ŕēqũĩŕē à śĩńĝĺē ŕēƥōśĩţōŕŷ ŵĩţĥ ţĥē ĺōćàĺ ēxēćũţōŕ."
 }

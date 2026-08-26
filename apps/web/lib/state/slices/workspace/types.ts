@@ -117,7 +117,6 @@ export type WorkspaceSliceActions = {
   setRepositoryBranchPoliciesLoading: (repositoryId: string, loading: boolean) => void;
   upsertRepositoryBranchPolicy: (policy: RepositoryBranchPolicy) => void;
   removeRepositoryBranchPolicy: (repositoryId: string, policyId: string) => void;
-  invalidateRepositoryBranchPolicies: (repositoryId: string) => void;
 };
 
 export type WorkspaceSlice = WorkspaceSliceState & WorkspaceSliceActions;

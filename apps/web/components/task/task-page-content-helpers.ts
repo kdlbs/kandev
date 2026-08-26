@@ -241,7 +241,7 @@ export function resolveTaskIds(task: Task | null) {
 }
 
 function buildPullRequestTargetsByRepository(
-  task: Task | null,
+  task: Pick<Task, "repositories"> | null,
   repositories: Repository[],
 ): Record<string, string> {
   const targets: Record<string, string> = {};
@@ -261,6 +261,19 @@ function buildPullRequestTargetsByRepository(
   return targets;
 }
 
+export function resolveTaskPullRequestProps(
+  task: Pick<Task, "title" | "repositories"> | null,
+  repositories: Repository[] = [],
+) {
+  const primaryRepository = task?.repositories?.[0];
+  return {
+    baseBranch: primaryRepository?.base_branch,
+    pullRequestTarget: primaryRepository?.branch_policy_pull_request_target || undefined,
+    pullRequestTargetsByRepository: buildPullRequestTargetsByRepository(task, repositories),
+    taskTitle: task?.title,
+  };
+}
+
 export function resolveTaskProps(
   task: Task | null,
   repository: Repository | null,
@@ -268,9 +281,9 @@ export function resolveTaskProps(
 ) {
   const ids = resolveTaskIds(task);
   const issue = issueFieldsFromMetadata(task?.metadata);
+  const pullRequestProps = resolveTaskPullRequestProps(task, repositories);
   return {
     ...ids,
-    taskTitle: task?.title,
     taskDescription: task?.description,
     issueUrl: issue.issueUrl,
     issueNumber: issue.issueNumber,
@@ -282,7 +295,7 @@ export function resolveTaskProps(
      * repository filter use, never the local clone path.
      */
     repositoryLabel: repository ? repositorySlug(repository) : null,
-    pullRequestTargetsByRepository: buildPullRequestTargetsByRepository(task, repositories),
+    ...pullRequestProps,
     /**
      * Total number of repositories linked to the task. Used by the top-bar
      * breadcrumb to render a "+N" chip next to the primary repo name when

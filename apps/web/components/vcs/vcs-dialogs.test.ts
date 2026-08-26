@@ -60,4 +60,8 @@ describe("resolvePullRequestBaseBranch", () => {
       "develop",
     );
   });
+
+  it("does not use a policy from a repository with a shared name prefix", () => {
+    expect(resolvePullRequestBaseBranch("api-gateway-x", { api: "develop" }, "main")).toBe("main");
+  });
 });

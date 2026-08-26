@@ -307,7 +307,6 @@ export type AppState = KanbanSlice & {
   setRepositoryBranchPoliciesLoading: (repositoryId: string, loading: boolean) => void;
   upsertRepositoryBranchPolicy: (policy: RepositoryBranchPolicy) => void;
   removeRepositoryBranchPolicy: (repositoryId: string, policyId: string) => void;
-  invalidateRepositoryBranchPolicies: (repositoryId: string) => void;
   setSettingsData: (next: Partial<SettingsDataState>) => void;
   setEditors: (editors: EditorsState["items"]) => void;
   setEditorsLoading: (loading: boolean) => void;
