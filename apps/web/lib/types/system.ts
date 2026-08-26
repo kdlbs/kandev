@@ -1,6 +1,6 @@
 // System pages — frontend types mirroring the
 // `apps/backend/internal/system/` HTTP surface (see
-// docs/specs/system-page/spec.md "Backend surface").
+// docs/specs/system-page/requirements/system-page.md "Backend surface").
 
 export interface SystemInfo {
   version: string;
@@ -47,7 +47,6 @@ export type SnapshotKind = "auto" | "manual";
 
 export interface SnapshotInfo {
   name: string;
-  path: string;
   size_bytes: number;
   /** ISO timestamp. */
   mtime: string;

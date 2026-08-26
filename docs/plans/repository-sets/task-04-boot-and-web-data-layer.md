@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-http-ws-surface"]
 plan: "plan.md"
-spec: "../../specs/repository-sets/spec.md"
+spec: "../../specs/workspaces/requirements/repository-sets.md"
 ---
 
 # Task 04: Boot Payload And Web Data Layer For Sets

@@ -26,7 +26,7 @@ import (
 var ErrDuplicateUsageEvent = errors.New("duplicate usage_event_id")
 
 // usageEventIndexName is the partial unique index enforcing at most one row
-// per non-NULL usage_event_id (docs/specs/office/costs.md).
+// per non-NULL usage_event_id (docs/specs/office/requirements/costs.md).
 const usageEventIndexName = "uniq_office_cost_usage_event"
 
 // sqliteUsageEventViolationMessage is the substring go-sqlite3 puts in a

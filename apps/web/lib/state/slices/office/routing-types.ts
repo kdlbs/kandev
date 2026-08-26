@@ -60,7 +60,7 @@ export type TierPerReason = Partial<Record<WakeReason, Tier>>;
 
 // Per-role tier policy: workspace-level default for every agent of a given
 // role, overridable per-agent and shadowed by tier_per_reason. See
-// docs/specs/office-agent-tier-routing/spec.md.
+// docs/specs/office/requirements/office-agent-tier-routing.md.
 export type RoleTierMap = Partial<Record<AgentRole, Tier>>;
 
 // The four precedence levels a resolved tier can come from, in

@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/platform/workspace-git-status.md
+spec: docs/specs/platform/requirements/workspace-git-status.md
 created: 2026-08-19
 status: implemented
 ---
@@ -20,7 +20,7 @@ This repairs the reported case where the fork's stale `origin/main` made Kandev 
 
 Related contracts:
 
-- [Workspace Git Status](../../specs/platform/workspace-git-status.md)
+- [Workspace Git Status](../../specs/platform/requirements/workspace-git-status.md)
 - [Remote Contribution Tasks](../../specs/tasks/system-design/remote-contribution-tasks.md)
 - [ADR: Qualify Git Comparison Targets by Repository](../../decisions/2026-08-19-repository-qualified-comparison-targets.md)
 - [ADR: Multi-branch task support](../../decisions/0013-multi-branch-tasks.md)

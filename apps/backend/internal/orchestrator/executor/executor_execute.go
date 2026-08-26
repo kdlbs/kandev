@@ -47,6 +47,9 @@ func (e *Executor) resolveTaskSessionMCPMode(ctx context.Context, taskID string,
 	if err != nil {
 		return "", fmt.Errorf("load task for MCP mode: %w", err)
 	}
+	if task != nil && task.Origin == models.TaskOriginAutomationRun {
+		return McpModeAutomation, nil
+	}
 	if task != nil && task.IsFromOffice {
 		return McpModeOffice, nil
 	}
@@ -75,6 +78,9 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 		// task launches resolve the persisted task above and therefore still get
 		// the exact office/autopilot capability set.
 		return mcpprofile.Legacy("", session != nil && session.IsPassthrough, nil), nil
+	}
+	if task.Origin == models.TaskOriginAutomationRun {
+		return mcpprofile.NewAutomation(), nil
 	}
 	surface := mcpprofile.SurfaceKanbanTask
 	if task.IsFromOffice {
@@ -1348,6 +1354,10 @@ func failingLaunchRepositoryIdentity(
 	if len(req.Repositories) == 0 {
 		return req.RepositoryID, req.TaskRepositoryID
 	}
+	var preparationErr *lifecycle.RepositoryPreparationError
+	if errors.As(launchErr, &preparationErr) && preparationErr != nil {
+		return preparationErr.RepositoryID, preparationErr.TaskRepositoryID
+	}
 
 	branch := extractLaunchFailureBranch(launchErr)
 	if len(req.Repositories) == 1 && branch == "" {
@@ -1682,23 +1692,23 @@ func workspaceReuseAllowed(existingEnv *models.TaskEnvironment, requestedExecuto
 	if !required || existingEnv == nil {
 		return required
 	}
-	if existingEnv.ExecutorType == "" {
-		// Older environments did not persist their executor type. They remain
-		// attachable for local/container launchers, but a worktree launch may
-		// attach only when the durable inventory contains a physical worktree.
-		// Inventory-only rows deliberately have no WorktreeID and cannot satisfy
-		// the worktree preparer's attach-only contract.
-		if requestedExecutorType == string(models.ExecutorTypeWorktree) {
-			for _, repo := range existingEnv.Repos {
-				if repo != nil && repo.WorktreeID != "" && repo.DeletedAt == nil && repo.Status != taskEnvironmentRepoStatusFailed && repo.Status != taskEnvironmentRepoStatusDeleted {
-					return true
-				}
-			}
-			return false
+	if existingEnv.ExecutorType != "" && existingEnv.ExecutorType != requestedExecutorType {
+		return false
+	}
+	if requestedExecutorType == string(models.ExecutorTypeWorktree) {
+		return hasLiveWorktreeRepo(existingEnv)
+	}
+	return true
+}
+
+func hasLiveWorktreeRepo(env *models.TaskEnvironment) bool {
+	for _, repo := range env.Repos {
+		if repo == nil || repo.WorktreeID == "" || repo.DeletedAt != nil || repo.Status == taskEnvironmentRepoStatusFailed || repo.Status == taskEnvironmentRepoStatusDeleted {
+			continue
 		}
 		return true
 	}
-	return existingEnv.ExecutorType == requestedExecutorType
+	return false
 }
 
 func mergeEnv(req *LaunchAgentRequest, env map[string]string) {
@@ -1744,6 +1754,7 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 			WorktreeBranchTemplate:  info.WorktreeBranchTemplate,
 			PullBeforeWorktree:      info.PullBeforeWorktree,
 			RemoteSyncHandled:       info.RemoteSyncHandled,
+			RefreshRepository:       info.RefreshRepository,
 		}
 		if info.Repository != nil {
 			spec.RepoName = info.Repository.Name
@@ -1814,6 +1825,7 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 		req.WorktreeBranchTemplate = repoInfo.WorktreeBranchTemplate
 		req.PullBeforeWorktree = repoInfo.PullBeforeWorktree
 		req.RemoteSyncHandled = repoInfo.RemoteSyncHandled
+		req.RefreshRepository = repoInfo.RefreshRepository
 		if repoInfo.Repository != nil {
 			req.DefaultBranch = repoInfo.Repository.DefaultBranch
 			if req.UseWorktree {
@@ -2468,9 +2480,13 @@ func (e *Executor) refreshTaskEnvironmentRepo(ctx context.Context, row, w *model
 		return
 	}
 	row.BranchSlug = w.BranchSlug
-	row.WorktreeID = w.WorktreeID
-	row.WorktreePath = w.WorktreePath
-	row.WorktreeBranch = w.WorktreeBranch
+	// Concrete launch results populate the physical tuple together; inventory-only
+	// rows have no WorktreeID and must not replace it.
+	if w.WorktreeID != "" {
+		row.WorktreeID = w.WorktreeID
+		row.WorktreePath = w.WorktreePath
+		row.WorktreeBranch = w.WorktreeBranch
+	}
 	row.Position = position
 	row.ErrorMessage = w.ErrorMessage
 	if err := e.repo.UpdateTaskEnvironmentRepo(ctx, row); err != nil {
@@ -2484,9 +2500,10 @@ func (e *Executor) refreshTaskEnvironmentRepo(ctx context.Context, row, w *model
 
 func taskEnvironmentRepoNeedsRefresh(row, w *models.TaskEnvironmentRepo, position int) bool {
 	return row.BranchSlug != w.BranchSlug ||
-		row.WorktreeID != w.WorktreeID ||
-		row.WorktreePath != w.WorktreePath ||
-		row.WorktreeBranch != w.WorktreeBranch ||
+		(w.WorktreeID != "" &&
+			(row.WorktreeID != w.WorktreeID ||
+				row.WorktreePath != w.WorktreePath ||
+				row.WorktreeBranch != w.WorktreeBranch)) ||
 		row.Position != position ||
 		row.ErrorMessage != w.ErrorMessage
 }

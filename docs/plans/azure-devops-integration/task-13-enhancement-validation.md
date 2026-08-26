@@ -5,7 +5,7 @@ status: done
 wave: 7
 depends_on: ["08-availability-and-identity", "09-azure-presets", "12-unified-repository-picker"]
 plan: "plan.md"
-spec: "../../specs/azure-devops-integration/spec.md"
+spec: "../../specs/integrations/requirements/azure-devops-integration.md"
 ---
 
 # Task 13: Cross-Provider E2E, Security Review, And Documentation

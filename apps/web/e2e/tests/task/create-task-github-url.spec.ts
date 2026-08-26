@@ -44,6 +44,7 @@ test.describe("Task creation from GitHub URL", () => {
       provider: "github",
       provider_owner: "test-owner",
       provider_name: "test-repo",
+      pull_before_worktree: false,
     });
 
     // Seed mock GitHub branches for the repo we'll reference
@@ -116,6 +117,7 @@ test.describe("Task creation from GitHub URL", () => {
       provider: "github",
       provider_owner: "test-owner",
       provider_name: "test-repo",
+      pull_before_worktree: false,
     });
 
     await apiClient.mockGitHubAddBranches("test-owner", "test-repo", [
@@ -195,6 +197,7 @@ test.describe("Task creation from GitHub URL", () => {
       provider: "github",
       provider_owner: "owner-a",
       provider_name: "repo-a",
+      pull_before_worktree: false,
     });
     await apiClient.mockGitHubAddBranches("owner-a", "repo-a", [{ name: "main" }]);
 
@@ -216,6 +219,7 @@ test.describe("Task creation from GitHub URL", () => {
       provider: "github",
       provider_owner: "owner-b",
       provider_name: "repo-b",
+      pull_before_worktree: false,
     });
     await apiClient.mockGitHubAddBranches("owner-b", "repo-b", [{ name: "main" }]);
 
@@ -269,6 +273,7 @@ test.describe("Task creation from GitHub URL", () => {
       provider: "github",
       provider_owner: "test-owner",
       provider_name: "test-repo",
+      pull_before_worktree: false,
     });
 
     // Seed branches including the PR head branch
@@ -345,6 +350,7 @@ test.describe("Task creation from GitHub URL", () => {
       provider: "github",
       provider_owner: "test-owner",
       provider_name: "test-repo",
+      pull_before_worktree: false,
     });
 
     await apiClient.mockGitHubAddBranches("test-owner", "test-repo", [
@@ -455,6 +461,7 @@ test.describe("Task creation from GitHub URL", () => {
       provider: "github",
       provider_owner: "pr-owner",
       provider_name: "pr-wt-repo",
+      pull_before_worktree: false,
     });
 
     // Seed mock GitHub branches and PR
@@ -568,6 +575,7 @@ test.describe("Task creation from GitHub URL", () => {
       provider: "github",
       provider_owner: "warn-owner",
       provider_name: "warn-repo",
+      pull_before_worktree: false,
     });
 
     await apiClient.mockGitHubAddBranches("warn-owner", "warn-repo", [
@@ -686,6 +694,7 @@ test.describe("Task creation from GitHub URL", () => {
       provider: "github",
       provider_owner: "shared-owner",
       provider_name: "shared-repo",
+      pull_before_worktree: false,
     });
 
     await apiClient.mockGitHubAddBranches("shared-owner", "shared-repo", [
@@ -790,7 +799,9 @@ test.describe("Task creation from GitHub URL", () => {
     await startBtn.click();
     await expect(dialog).not.toBeVisible({ timeout: 10_000 });
 
-    // Task B should also succeed (this would have failed before the fix).
+    // Task B follows a full navigation away from Task A. Dockview can keep
+    // Task A's terminal mounted while Task B hydrates, so this also guards
+    // SessionPage against reading a stale, hidden terminal buffer.
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
     const sessionB = new SessionPage(testPage);
     await sessionB.waitForLoad();

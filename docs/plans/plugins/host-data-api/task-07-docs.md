@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["04-host-data-impl"]
 plan: "plan.md"
-spec: "../../../specs/plugins/spec.md"
+spec: "../../../specs/plugins/requirements/plugins.md"
 adr: "../../../decisions/0043-plugin-host-data-api.md"
 ---
 
@@ -76,7 +76,7 @@ reference and reconciled the spec section against the shipped code.
   call) to §4; rewrote the §5 "Capability gating" bullet to remove the stale
   "api_read/api_write reserved" wording and describe the real per-RPC gating
   plus the write RPCs' current `Unimplemented` behavior.
-- `docs/specs/plugins/spec.md` — fixed capability-vocabulary drift against code
+- `docs/specs/plugins/requirements/plugins.md` — fixed capability-vocabulary drift against code
   (see below) and added a "Declaring data access" note under the manifest
   capabilities section; reworded the interceptor description to match the
   actual per-RPC inline checks (no shared unary interceptor exists in code);

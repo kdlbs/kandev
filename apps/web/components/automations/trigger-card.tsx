@@ -135,6 +135,7 @@ export function TriggerCard({
   return (
     <div
       className="rounded-lg border bg-card"
+      data-testid={`trigger-card-${trigger.type}`}
       data-settings-dirty={isDirty}
       data-settings-dirty-level="container"
     >

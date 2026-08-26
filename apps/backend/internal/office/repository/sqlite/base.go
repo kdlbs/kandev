@@ -267,7 +267,7 @@ func (r *Repository) createCostTables() error {
 	// columns must stay byte-identical to — see base_migrations.go). NULL
 	// means "not recorded" (legacy row, or an adapter that did not report
 	// cache data); 0 would silently claim zero cache activity. See
-	// docs/specs/office/costs.md.
+	// docs/specs/office/requirements/costs.md.
 	_, err := r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS office_cost_events (
 		id TEXT PRIMARY KEY,
@@ -363,6 +363,13 @@ func (r *Repository) createRunTables() error {
 		result_json TEXT NOT NULL DEFAULT '{}',
 		assembled_prompt TEXT NOT NULL DEFAULT '',
 		summary_injected TEXT NOT NULL DEFAULT '',
+		-- continuation_scope is the continuation-summary scope key
+		-- (models.ContinuationScopeForRun) decided once at run creation
+		-- and persisted so every later reader/writer of this run's
+		-- continuation summary uses the same value instead of
+		-- re-deriving it against a context_snapshot a coalesced wakeup
+		-- may have since patched.
+		continuation_scope TEXT NOT NULL DEFAULT '',
 		requested_at TIMESTAMP NOT NULL,
 		claimed_at TIMESTAMP,
 		finished_at TIMESTAMP

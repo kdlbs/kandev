@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-upstream-field-sourcing"]
 plan: "plan.md"
-spec: "../../specs/pr-outcome-attribution/spec.md"
+spec: "../../specs/integrations/requirements/pr-outcome-attribution.md"
 ---
 
 # Task 03: Sync writer

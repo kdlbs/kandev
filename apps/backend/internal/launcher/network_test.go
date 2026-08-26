@@ -6,8 +6,11 @@ import (
 	"io"
 	"net"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/kandev/kandev/internal/common/config"
 )
 
 func TestLogStartupPrintsNetworkAddress(t *testing.T) {
@@ -130,6 +133,85 @@ func TestNetworkAddressesForBindHost(t *testing.T) {
 				t.Fatalf("networkAddressesForBindHost(%q) = %v, want %v", test.bindHost, got, test.want)
 			}
 		})
+	}
+}
+
+func TestResolveBackendEndpointsMapsBindsAndPrefersLoopback(t *testing.T) {
+	tests := []struct {
+		name       string
+		server     config.ServerConfig
+		wantBinds  []string
+		wantURLs   []string
+		wantAccess string
+	}{
+		{
+			name:       "specific address",
+			server:     config.ServerConfig{Host: "192.0.2.10"},
+			wantBinds:  []string{"192.0.2.10"},
+			wantURLs:   []string{"http://192.0.2.10:38429/health"},
+			wantAccess: "http://192.0.2.10:38429",
+		},
+		{
+			name:       "ipv4 wildcard",
+			server:     config.ServerConfig{Host: "0.0.0.0"},
+			wantBinds:  []string{"0.0.0.0"},
+			wantURLs:   []string{"http://127.0.0.1:38429/health"},
+			wantAccess: "http://localhost:38429",
+		},
+		{
+			name:       "ipv6 wildcard",
+			server:     config.ServerConfig{Host: "::"},
+			wantBinds:  []string{"::"},
+			wantURLs:   []string{"http://[::1]:38429/health"},
+			wantAccess: "http://[::1]:38429",
+		},
+		{
+			name:      "multi bind loopback first",
+			server:    config.ServerConfig{Host: "192.0.2.10,127.0.0.1,192.0.2.10"},
+			wantBinds: []string{"192.0.2.10", "127.0.0.1"},
+			wantURLs: []string{
+				"http://127.0.0.1:38429/health",
+				"http://192.0.2.10:38429/health",
+			},
+			wantAccess: "http://127.0.0.1:38429",
+		},
+		{
+			name:       "hostname normalized",
+			server:     config.ServerConfig{Host: "LOCALHOST."},
+			wantBinds:  []string{"LOCALHOST."},
+			wantURLs:   []string{"http://localhost:38429/health"},
+			wantAccess: "http://localhost:38429",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := resolveBackendEndpoints(&config.Config{Server: test.server}, 38429)
+			if err != nil {
+				t.Fatalf("resolveBackendEndpoints() error = %v", err)
+			}
+			if !reflect.DeepEqual(got.bindHosts, test.wantBinds) {
+				t.Fatalf("bind hosts = %v, want %v", got.bindHosts, test.wantBinds)
+			}
+			if !reflect.DeepEqual(got.healthTargets, test.wantURLs) {
+				t.Fatalf("health targets = %v, want %v", got.healthTargets, test.wantURLs)
+			}
+			if got.accessURL != test.wantAccess {
+				t.Fatalf("access URL = %q, want %q", got.accessURL, test.wantAccess)
+			}
+		})
+	}
+}
+
+func TestResolveBackendEndpointsPreservesDefaultBrowserOrigin(t *testing.T) {
+	got, err := resolveBackendEndpoints(&config.Config{}, 38429)
+	if err != nil {
+		t.Fatalf("resolveBackendEndpoints() error = %v", err)
+	}
+	if got.healthTargets[0] != "http://127.0.0.1:38429/health" {
+		t.Fatalf("default health target = %q, want loopback probe", got.healthTargets[0])
+	}
+	if got.accessURL != "http://localhost:38429" {
+		t.Fatalf("default browser URL = %q, want localhost origin", got.accessURL)
 	}
 }
 

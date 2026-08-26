@@ -5,7 +5,7 @@ status: completed
 wave: 4
 depends_on: ["03-status-bar-item"]
 plan: "plan.md"
-spec: "../../specs/lsp-file-intelligence/spec.md"
+spec: "../../specs/platform/requirements/lsp-file-intelligence.md"
 ---
 
 # Task 04: Desktop and Mobile E2E Plus Docs

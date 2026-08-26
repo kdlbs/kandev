@@ -232,6 +232,24 @@ func TestFailingLaunchRepositoryID_UsesExactBranchToken(t *testing.T) {
 	}
 }
 
+func TestFailingLaunchRepositoryIdentityUsesPreparationError(t *testing.T) {
+	req := &LaunchAgentRequest{Repositories: []RepoSpec{
+		{RepositoryID: "repo-front", TaskRepositoryID: "tr-1", BaseBranch: "main"},
+		{RepositoryID: "repo-back", TaskRepositoryID: "tr-2", BaseBranch: "main"},
+	}}
+	launchErr := &lifecycle.RepositoryPreparationError{
+		RepositoryID:     "repo-back",
+		TaskRepositoryID: "tr-2",
+		RepositoryName:   "backend",
+		Cause:            errors.New("required refresh failed"),
+	}
+
+	repositoryID, taskRepositoryID := failingLaunchRepositoryIdentity(req, launchErr)
+	if repositoryID != "repo-back" || taskRepositoryID != "tr-2" {
+		t.Fatalf("failing launch identity = %q/%q, want repo-back/tr-2", repositoryID, taskRepositoryID)
+	}
+}
+
 func TestLaunchPreparedSession_MultiRepo_PersistsPerRepoEnvironmentAndWorktreeRows(t *testing.T) {
 	repo := newMockRepository()
 	taskID := "task-multi-2"
@@ -387,20 +405,22 @@ func TestLaunchPreparedSession_ReuseRejectsIncompleteCanonicalRepositoryInventor
 	seedMultiRepoTask(t, repo, taskID)
 	seedWorktreeExecutor(repo)
 
-	environment := &models.TaskEnvironment{
-		ID:           "env-incomplete",
-		TaskID:       taskID,
-		ExecutorType: string(models.ExecutorTypeWorktree),
-		Status:       models.TaskEnvironmentStatusReady,
-	}
-	repo.taskEnvironments[environment.ID] = environment
-	repo.taskEnvironmentRepos[environment.ID] = []*models.TaskEnvironmentRepo{{
-		TaskEnvironmentID: environment.ID,
+	environmentRepos := []*models.TaskEnvironmentRepo{{
+		TaskEnvironmentID: "env-incomplete",
 		RepositoryID:      "repo-front",
 		BranchSlug:        "main",
 		WorktreeID:        "wt-front",
 		Status:            "active",
 	}}
+	environment := &models.TaskEnvironment{
+		ID:           "env-incomplete",
+		TaskID:       taskID,
+		ExecutorType: string(models.ExecutorTypeWorktree),
+		Status:       models.TaskEnvironmentStatusReady,
+		Repos:        environmentRepos,
+	}
+	repo.taskEnvironments[environment.ID] = environment
+	repo.taskEnvironmentRepos[environment.ID] = environmentRepos
 	repo.sessions[sessionID] = &models.TaskSession{
 		ID: sessionID, TaskID: taskID, TaskEnvironmentID: environment.ID,
 		AgentProfileID: "profile-123", ExecutorID: models.ExecutorIDWorktree,

@@ -1,6 +1,6 @@
 # ADR-2026-08-12-validated-managed-runtime-version-selection: Validate and Persist Managed Runtime Version Selection
 
-**Status:** accepted (amended 2026-08-21)
+**Status:** accepted (amended 2026-08-21 and 2026-08-24)
 **Date:** 2026-08-12
 **Area:** backend, frontend, protocol, workflow
 **Supersedes:**
@@ -87,6 +87,12 @@ removes version-tag drift while preserving npm cache reuse. Explicit previews,
 manual updates, and the bounded stale-metadata retry use online-preferred
 metadata. Kandev accepts that a cold or incomplete npm cache can still place the
 registry on the launch path.
+
+The stale-metadata retry runs cache repair through the `agentctl` instance that
+hosts the npm process. This boundary covers local PC, local Docker, and remote
+SSH runtimes. It preserves the configured registry and the exact selected
+version. [ADR-2026-08-24](2026-08-24-agentctl-local-managed-runtime-cache-repair.md)
+owns the cache-repair placement and security rationale.
 
 A weekly repository workflow compares the shipped defaults with each trusted
 package's stable npm `latest` tag and opens a reviewable PR for changes. It does

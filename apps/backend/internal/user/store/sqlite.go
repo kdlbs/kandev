@@ -712,6 +712,7 @@ func DefaultSidebarViews() []models.SidebarView {
 		Sort:            models.SidebarViewSort{Key: "state", Direction: "asc"},
 		Group:           "repository",
 		CollapsedGroups: []string{},
+		TaskRow:         models.DefaultSidebarTaskRowPresentation(),
 	}}
 }
 

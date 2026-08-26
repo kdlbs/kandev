@@ -146,6 +146,7 @@ export function MobileTaskList(props: MobileTaskListProps) {
     onReorderSubtasks: handleReorderSubtasks,
     pinnedTaskIds,
     showActivityTime: view.sort.key === "lastActivityAt",
+    taskRowPresentation: view.taskRow,
   });
   return <TaskSwitcher {...switcherProps} />;
 }

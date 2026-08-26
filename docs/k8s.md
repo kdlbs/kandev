@@ -46,7 +46,7 @@ Kandev publishes two flavors: the default vanilla image (smallest, npm-installab
 image: ghcr.io/kdlbs/kandev:universal
 ```
 
-See [`images.md`](./images.md) for the full comparison, inclusion policy, and recipes for deriving your own image when you need something neither flavor includes.
+See [`images.md`](images.md) for the full comparison, inclusion policy, and recipes for deriving your own image when you need something neither flavor includes.
 
 ## Deploying to Kubernetes
 
@@ -90,7 +90,7 @@ No extra configuration is needed. The frontend automatically uses `window.locati
 
 The kandev image ships with `git`, `gh` (GitHub CLI), `node`, and `npm`, but **does not bundle the coding-agent CLIs** (`claude-code`, `codex`, `auggie`, etc.) — agent choice is per-user, and bundling all of them would bloat the image significantly.
 
-> Looking to add tools *beyond* agent CLIs - language toolchains, build tools, internal CLIs? See [`images.md`](./images.md) for the universal-image option and recipes for deriving your own image.
+> Looking to add tools *beyond* agent CLIs - language toolchains, build tools, internal CLIs? See [`images.md`](images.md) for the universal-image option and recipes for deriving your own image.
 
 To install an agent inside the running pod, open **Settings → Agents** in the UI and click **Install** on the agent card under "Available to Install". The backend runs the agent's hard-coded install script (`npm install -g <pkg>`) and rescans on success.
 
@@ -125,7 +125,7 @@ Kandev reads configuration via `KANDEV_`-prefixed environment variables (Viper).
 
 ### Core Settings
 
-See [`configuration.md`](./configuration.md) for the full reference (every backend knob and its YAML form). The tables below cover what's most commonly set in K8s manifests.
+See [`configuration.md`](configuration.md) for the full reference (every backend knob and its YAML form). The tables below cover what's most commonly set in K8s manifests.
 
 | Env Var | Required | Default | Description |
 |---------|----------|---------|-------------|
@@ -203,12 +203,12 @@ spec:
 
 ## Health Checks
 
-The deployment includes both probes on the `/health` endpoint:
+The deployment's liveness probe calls `/health`; the readiness probe calls `/ready`:
 
-- **Liveness probe**: Restarts the pod if the backend becomes unresponsive (30s interval, 3 failures)
-- **Readiness probe**: Removes the pod from service during startup or issues (10s interval, 3 failures)
+- **Liveness probe**: Restarts the pod if the backend becomes unresponsive (30s interval, 3 failures). `/health` returns 200 as soon as the TCP listener accepts connections, before startup finishes.
+- **Readiness probe**: Removes the pod from service during startup or issues (10s interval, 3 failures). `/ready` returns 503 until the real router is wired in and the pod can serve real traffic, then 200.
 
-The CLI launcher also performs an internal health check — it waits for the backend to be healthy before starting the web server.
+The CLI launcher performs the same two-stage check: it waits for `/health` (the backend process is alive) and then for `/ready` (startup finished, the backend can serve real requests) before starting the web server.
 
 ## Scaling
 

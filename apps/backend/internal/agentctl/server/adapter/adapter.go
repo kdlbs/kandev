@@ -1,9 +1,9 @@
-// Package adapter provides protocol adapters for different agent communication protocols.
-// This abstraction allows agentctl to work with agents using ACP, REST, MCP, or custom protocols.
+// Package adapter provides protocol adapters for agent communication.
+// Only ACP is supported; non-ACP variants were removed in the ACP-first migration.
 //
 // Architecture:
-//   - Transport layer (transport/*): Handles protocol-level communication (ACP, stream-json, codex, opencode)
-//   - Factory: Creates the appropriate transport adapter based on agent's protocol
+//   - Transport layer (transport/*): Handles protocol-level communication (ACP is the only transport)
+//   - Factory: Creates the ACP transport adapter
 //
 // Agent configuration (commands, discovery, models) is handled by the agent/registry package
 // using agents.json as the source of truth. This package only handles protocol communication.
@@ -52,9 +52,10 @@ const (
 )
 
 // OneShotAdapter is an optional interface implemented by adapters that spawn
-// a new process per prompt (e.g., Amp). When an adapter is one-shot, the
-// process manager skips subprocess creation and the adapter manages its own
-// subprocess lifecycle internally.
+// a new process per prompt. When an adapter is one-shot, the process manager
+// skips subprocess creation and the adapter manages its own subprocess
+// lifecycle internally. No production adapter implements this today; Amp is
+// now an ACP agent and goes through the standard subprocess path.
 type OneShotAdapter interface {
 	IsOneShot() bool
 }
@@ -152,7 +153,7 @@ type AgentInfo struct {
 }
 
 // AgentAdapter defines the interface for protocol adapters.
-// Each adapter translates a specific protocol (ACP, REST, MCP, etc.) into the
+// Each adapter translates ACP, the only supported protocol, into the
 // normalized AgentEvent format that agentctl exposes via its HTTP API.
 //
 // Lifecycle:
@@ -166,15 +167,13 @@ type AgentInfo struct {
 //  8. Call Close() when done
 type AgentAdapter interface {
 	// PrepareEnvironment performs protocol-specific setup before the agent process starts.
-	// For ACP, this is a no-op (MCP servers are passed through the protocol).
-	// For OpenCode, this returns environment variables for server authentication.
+	// The ACP adapter is a no-op (MCP servers are passed through the protocol).
 	// Must be called before the agent subprocess is started.
 	// Returns a map of environment variables to add to the subprocess environment.
 	PrepareEnvironment() (map[string]string, error)
 
 	// PrepareCommandArgs returns extra command-line arguments for the agent process.
-	// For Codex, this returns -c flags for MCP servers and sandbox config.
-	// For other protocols, this returns nil (no extra args needed).
+	// The ACP adapter returns nil (no extra args needed).
 	// Must be called after PrepareEnvironment and before starting the subprocess.
 	PrepareCommandArgs() []string
 
@@ -183,8 +182,7 @@ type AgentAdapter interface {
 	Connect(stdin io.Writer, stdout io.Reader) error
 
 	// Initialize establishes the connection with the agent and exchanges capabilities.
-	// For subprocess-based agents (ACP), this sends the initialize request.
-	// For HTTP-based agents (REST), this might do a health check.
+	// Sends the ACP initialize request over the subprocess's stdin/stdout.
 	Initialize(ctx context.Context) error
 
 	// GetAgentInfo returns information about the connected agent.
@@ -216,8 +214,8 @@ type AgentAdapter interface {
 	GetSessionID() string
 
 	// GetOperationID returns the current operation/turn ID.
-	// Returns empty string if no operation is in progress or not supported by the protocol.
-	// For Codex this is the turn ID, for ACP this may be empty.
+	// Returns empty string if no operation is in progress, or if the connected
+	// ACP agent does not report a turn ID.
 	GetOperationID() string
 
 	// SetPermissionHandler sets the handler for permission requests.
@@ -227,10 +225,11 @@ type AgentAdapter interface {
 	Close() error
 
 	// RequiresProcessKill returns true if the adapter's subprocess needs to be
-	// explicitly killed during shutdown. Adapters that communicate via stdin/stdout
-	// (ACP, Codex, Claude Code) return false because closing stdin causes the
-	// subprocess to exit. HTTP-server-based adapters (OpenCode) return true because
-	// they don't exit on stdin close.
+	// explicitly killed during shutdown. Most ACP agents return false because
+	// closing stdin causes the subprocess to exit. Some agents (e.g. opencode
+	// acp) keep an internal HTTP server and MCP child processes alive after
+	// stdin closes, so their config sets this true to force an immediate
+	// process-group kill instead of waiting on a graceful stdin close.
 	RequiresProcessKill() bool
 }
 
@@ -276,7 +275,9 @@ type Config struct {
 	// Used for display purposes.
 	AgentName string
 
-	// For HTTP-based adapters (REST)
+	// BaseURL, AuthHeader, AuthValue, and Headers are unused by any adapter
+	// today (no HTTP-based transport exists). Config.ToSharedConfig still
+	// propagates them to shared.Config, but no transport reads them.
 	BaseURL    string            // Base URL of the agent's HTTP API
 	AuthHeader string            // Optional auth header name
 	AuthValue  string            // Optional auth header value
@@ -349,7 +350,7 @@ func (c *Config) ToSharedConfig() *shared.Config {
 //
 // Delivery is opportunistic: whether the agent folds the prompt into the running
 // turn or runs it as the next turn is the agent's decision and is not advertised
-// over the protocol. See docs/specs/platform/mid-turn-steering.md.
+// over the protocol. See docs/specs/platform/requirements/mid-turn-steering.md.
 type SteerablePrompter interface {
 	SupportsSteering() bool
 	PromptSteer(

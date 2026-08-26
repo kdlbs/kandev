@@ -38,11 +38,10 @@ GitHub PR and GitLab MR URLs trigger backend association callbacks. Azure PR URL
 ## Adapter Model
 
 Protocol adapters in `server/adapter/transport/` normalize different agent CLIs:
-- `AgentAdapter` interface defines `Start()`, `Stop()`, `Prompt()`, `Cancel()`
-- Transports: `acp` (Claude Code), `codex` (OpenAI Codex), `opencode`, `shared`, `streamjson`
-- Top-level adapters: `CopilotAdapter` (GitHub Copilot SDK), `AmpAdapter` (Sourcegraph Amp)
+- `AgentAdapter` interface defines `Connect()`, `Initialize()`, `NewSession()`, `LoadSession()`, `Prompt()`, `Cancel()`, `Updates()`, `Close()`, among others
+- Transports: `acp` (all supported agent CLIs speak ACP), `shared` (cross-transport helpers). Only the ACP protocol is supported; non-ACP variants were removed in the ACP-first migration
 - `process.Manager` owns subprocess, wires stdio to adapter
-- Factory pattern in `server/adapter/factory.go` selects adapter by agent type
+- `NewAdapter` in `server/adapter/factory.go` selects the adapter by protocol (`agent.Protocol`), not by agent type; agent identity and CLI-specific config come from Go constructors in `internal/agent/agents/`, registered by `internal/agent/registry.Registry.LoadDefaults()`
 
 The `acp` transport is split by concern across `adapter_*.go` files: `adapter.go` (core/lifecycle), `adapter_session.go` (initialize/new/load/resume), `adapter_prompt.go` (prompt/cancel), `adapter_updates.go` (`session/update` notification fan-out), `adapter_tools.go` (`convertToolCallUpdate` / `convertToolCallResultUpdate` -> normalized payloads), `adapter_permissions.go`, and `adapter_helpers.go`. Agent-specific ACP extensions use the package-private `acpDialect` function table in `dialect.go`; keep observed wire translation in `dialect_<agent>.go`. Dialect hooks return normalized data or request descriptions and never receive `*Adapter` or execute RPCs. Shared capability normalization used by both live sessions and utility probes belongs in `internal/agentctl/acpcompat/`. Tool-call conversion lives in `adapter_tools.go`, not `adapter.go`. See ADR-0043.
 

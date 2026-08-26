@@ -7,7 +7,7 @@ depends_on:
   - "01-preserve-task-prompt-fallback"
   - "02-auto-load-collapsed-history"
 plan: "plan.md"
-spec: "../../specs/ui/task-prompt-transcript-visibility.md"
+spec: "../../specs/ui/requirements/task-prompt-transcript-visibility.md"
 ---
 
 # Task 03: Prove complete transcript navigation

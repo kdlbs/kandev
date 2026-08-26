@@ -401,6 +401,10 @@ test.describe("Quick Chat", () => {
     const sourceRepo = path.join(backend.tmpDir, "repos", "e2e-repo");
     const contextBranch = "quick-chat-context-branch";
     execFileSync("git", ["branch", "-f", contextBranch], { cwd: sourceRepo });
+    // Repository-backed quick chat performs a required refresh before it
+    // materializes the worktree. Publish the local context branch to the
+    // fixture's offline origin so that refresh succeeds deterministically.
+    execFileSync("git", ["push", "--force", "origin", contextBranch], { cwd: sourceRepo });
     try {
       const dialog = await openQuickChatSetup(testPage);
       await expect(dialog.getByTestId("quick-chat-introduction")).toContainText(
@@ -418,7 +422,7 @@ test.describe("Quick Chat", () => {
       await dialog.getByTestId("repo-chip-trigger").click();
       await testPage.getByRole("option").first().click();
       await dialog.getByTestId("branch-chip-trigger").click();
-      await testPage.getByRole("option", { name: contextBranch }).click();
+      await testPage.locator(`[role="option"][data-value="${contextBranch}"]`).click();
 
       const startRequest = testPage.waitForRequest(
         (request) => request.url().includes("/quick-chat") && request.method() === "POST",
@@ -438,6 +442,7 @@ test.describe("Quick Chat", () => {
         }).trim(),
       ).toBe("main");
     } finally {
+      execFileSync("git", ["push", "origin", "--delete", contextBranch], { cwd: sourceRepo });
       execFileSync("git", ["branch", "-D", contextBranch], { cwd: sourceRepo });
     }
   });

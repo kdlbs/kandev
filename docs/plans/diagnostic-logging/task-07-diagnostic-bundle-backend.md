@@ -5,7 +5,7 @@ status: completed
 wave: 3
 depends_on: ["01-backend-log-sinks"]
 plan: "plan.md"
-spec: "../../specs/platform/diagnostic-logging.md"
+spec: "../../specs/platform/requirements/diagnostic-logging.md"
 ---
 
 # Task 07: Diagnostic bundle backend

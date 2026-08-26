@@ -5,7 +5,7 @@ status: pending
 wave: 5
 depends_on: ["03-persist-attachment-reports", "04-release-diagnostic-operations"]
 plan: "plan.md"
-spec: "../../specs/mcp-session-observability/spec.md"
+spec: "../../specs/platform/requirements/mcp-session-observability.md"
 ---
 
 # Task 05: Build the responsive MCP status surface

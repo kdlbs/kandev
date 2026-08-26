@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/github-pr-review-actions.md
+spec: docs/specs/ui/requirements/github-pr-review-actions.md
 created: 2026-07-23
 status: completed
 ---

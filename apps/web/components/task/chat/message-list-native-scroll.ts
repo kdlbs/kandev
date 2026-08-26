@@ -31,9 +31,21 @@ import { scheduleClampedScrollRestore } from "./clamped-scroll-restore";
 function useScrollPositionOnPrepend(
   scrollRef: React.RefObject<HTMLDivElement | null>,
   items: RenderItem[],
+  isLoadingMore: boolean,
   isProgrammaticScrollLocked: () => boolean,
 ) {
-  const scrollState = useRef({ scrollHeight: 0, scrollTop: 0 });
+  const scrollState = useRef<{
+    scrollHeight: number;
+    scrollTop: number;
+    anchorKey: string | null;
+    anchorTop: number | null;
+  }>({ scrollHeight: 0, scrollTop: 0, anchorKey: null, anchorTop: null });
+  const isLoadingMoreRef = useRef(isLoadingMore);
+  const olderLoadPendingRef = useRef(false);
+  const newestItemKeyRef = useRef<string | null>(getNewestNonSyntheticItemKey(items));
+  isLoadingMoreRef.current = isLoadingMore;
+  if (isLoadingMore) olderLoadPendingRef.current = true;
+  newestItemKeyRef.current = getNewestNonSyntheticItemKey(items);
   const prevItemCountRef = useRef(items.length);
   const prevFirstKeyRef = useRef<string | null>(getOldestNonSyntheticItemKey(items));
 
@@ -43,8 +55,11 @@ function useScrollPositionOnPrepend(
     /** Captures the container's current scrollHeight/scrollTop so a later
      * prepend can restore the visual position. */
     const onScroll = () => {
-      scrollState.current.scrollHeight = el.scrollHeight;
-      scrollState.current.scrollTop = el.scrollTop;
+      // Native overflow anchoring can adjust scrollTop while the older page is
+      // being inserted. Keep the pre-request baseline until our layout effect
+      // has restored the visual position explicitly.
+      if (isLoadingMoreRef.current) return;
+      scrollState.current = capturePrependScrollState(el, newestItemKeyRef.current);
     };
     onScroll();
     el.addEventListener("scroll", onScroll, { passive: true });
@@ -54,7 +69,7 @@ function useScrollPositionOnPrepend(
   useLayoutEffect(() => {
     const el = scrollRef.current;
     const nextFirstKey = getOldestNonSyntheticItemKey(items);
-    const prepend =
+    const identityPrepend =
       !!el &&
       isPrependUpdate({
         prevItemCount: prevItemCountRef.current,
@@ -62,15 +77,22 @@ function useScrollPositionOnPrepend(
         prevFirstKey: prevFirstKeyRef.current,
         nextFirstKey,
       });
+    const olderLoadSettled = olderLoadPendingRef.current && !isLoadingMore;
+    const prepend = olderLoadSettled || (!olderLoadPendingRef.current && identityPrepend);
     prevItemCountRef.current = items.length;
     prevFirstKeyRef.current = nextFirstKey;
+    if (olderLoadSettled) olderLoadPendingRef.current = false;
     if (!el || !prepend || isProgrammaticScrollLocked()) return;
     const prev = scrollState.current;
-    const delta = el.scrollHeight - prev.scrollHeight;
-    if (delta > 0) {
-      el.scrollTop = prev.scrollTop + delta;
+    const anchor = findMessageRow(el, prev.anchorKey);
+    if (anchor && prev.anchorTop !== null) {
+      el.scrollTop += anchor.getBoundingClientRect().top - prev.anchorTop;
+    } else {
+      const delta = el.scrollHeight - prev.scrollHeight;
+      if (delta > 0) el.scrollTop = prev.scrollTop + delta;
     }
-  }, [items, scrollRef, isProgrammaticScrollLocked]);
+    scrollState.current = capturePrependScrollState(el, newestItemKeyRef.current);
+  }, [items, scrollRef, isLoadingMore, isProgrammaticScrollLocked]);
 }
 
 function getOldestNonSyntheticItemKey(items: RenderItem[]): string | null {
@@ -79,6 +101,36 @@ function getOldestNonSyntheticItemKey(items: RenderItem[]): string | null {
     return item.type !== "message" || item.message.id !== TASK_DESCRIPTION_SYNTHETIC_ID;
   });
   return oldestRealItem ? getItemKey(oldestRealItem) : null;
+}
+
+function getNewestNonSyntheticItemKey(items: RenderItem[]): string | null {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (item.type === "prepare_progress" || item.type === "agent_error_notice") continue;
+    if (item.type === "message" && item.message.id === TASK_DESCRIPTION_SYNTHETIC_ID) continue;
+    return getItemKey(item);
+  }
+  return null;
+}
+
+function findMessageRow(scrollRoot: HTMLElement, itemKey: string | null): HTMLElement | null {
+  if (!itemKey) return null;
+  const expectedId = `msg-${itemKey}`;
+  return (
+    Array.from(scrollRoot.querySelectorAll<HTMLElement>("[id^='msg-']")).find(
+      (candidate) => candidate.id === expectedId,
+    ) ?? null
+  );
+}
+
+function capturePrependScrollState(scrollRoot: HTMLElement, anchorKey: string | null) {
+  const anchor = findMessageRow(scrollRoot, anchorKey);
+  return {
+    scrollHeight: scrollRoot.scrollHeight,
+    scrollTop: scrollRoot.scrollTop,
+    anchorKey,
+    anchorTop: anchor?.getBoundingClientRect().top ?? null,
+  };
 }
 
 /**
@@ -578,7 +630,7 @@ export function useNativeScrollManagement(params: {
     resyncIsNearBottom,
   );
   const handleScrollToMessage = useScrollToMessage(scrollRef, runGuardedScroll);
-  useScrollPositionOnPrepend(scrollRef, items, isProgrammaticScrollLocked);
+  useScrollPositionOnPrepend(scrollRef, items, isLoadingMore, isProgrammaticScrollLocked);
   const { sentinelRef } = useLazyLoadSentinel(
     scrollRef,
     hasMore,

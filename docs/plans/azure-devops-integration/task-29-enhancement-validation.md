@@ -10,7 +10,7 @@ depends_on:
     "28-automation-settings",
   ]
 plan: "plan.md"
-spec: "../../specs/azure-devops-integration/spec.md"
+spec: "../../specs/integrations/requirements/azure-devops-integration.md"
 ---
 
 # Task 29: Azure Enhancement Validation

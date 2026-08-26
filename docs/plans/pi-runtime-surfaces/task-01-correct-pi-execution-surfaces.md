@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/cli-mode-parity/spec.md"
+spec: "../../specs/cli/requirements/cli-mode-parity.md"
 ---
 
 # Task 01: Correct Pi Execution Surfaces
@@ -18,9 +18,9 @@ installation and discovery with the executable users actually run.
 
 ## Inputs
 
-- `docs/specs/cli-mode-parity/spec.md`, sections **ACP and passthrough commands
+- `docs/specs/cli/requirements/cli-mode-parity.md`, sections **ACP and passthrough commands
   remain distinct** and the three Pi scenarios.
-- `docs/specs/agents/runtime-updates.md`, managed-runtime command-routing
+- `docs/specs/agents/requirements/runtime-updates.md`, managed-runtime command-routing
   boundary.
 - `docs/decisions/2026-08-12-validated-managed-runtime-version-selection.md`,
   amended ACP-only ownership decision.

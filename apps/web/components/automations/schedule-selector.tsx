@@ -29,10 +29,13 @@ type ScheduleSelectorProps = {
   onChange: (config: Record<string, unknown>) => void;
 };
 
+type ScheduleFrequency = Frequency | "none";
+
 // Catalog keys rather than copy: both tables are built at module load, so a
 // `t()` here would freeze at the boot locale (docs/i18n.md). Each render
 // resolves them.
-const FREQUENCY_OPTIONS: { value: Frequency; labelKey: string }[] = [
+const FREQUENCY_OPTIONS: { value: ScheduleFrequency; labelKey: string }[] = [
+  { value: "none", labelKey: "automations:scheduleNone" },
   { value: "every-5m", labelKey: "automations:frequencyEvery5Minutes" },
   { value: "every-15m", labelKey: "automations:frequencyEvery15Minutes" },
   { value: "every-30m", labelKey: "automations:frequencyEvery30Minutes" },
@@ -115,13 +118,34 @@ const pad = (value: number) => String(value).padStart(2, "0");
  * for one would be a promise the automation will not keep.
  */
 function previewFor(
-  frequency: Frequency,
+  frequency: ScheduleFrequency,
   customDraft: string,
   storedExpression: string,
   expression: string,
 ): string {
+  if (frequency === "none") return "";
   if (frequency === "custom") return customDraft;
   return storedExpression ? expression : "";
+}
+
+function activeFrequency(
+  hasStoredSchedule: boolean,
+  customMode: boolean,
+  parsedFrequency: Frequency,
+): ScheduleFrequency {
+  if (customMode) return "custom";
+  if (!hasStoredSchedule) return "none";
+  return parsedFrequency;
+}
+
+function activeExpression(
+  frequency: ScheduleFrequency,
+  customDraft: string,
+  parsed: ScheduleSpec,
+): string {
+  if (frequency === "none") return "";
+  if (frequency === "custom") return customDraft;
+  return buildExpression(parsed);
 }
 
 /**
@@ -155,9 +179,10 @@ export function ScheduleSelector({ config, isDirty = false, onChange }: Schedule
   const { t } = useTranslation();
   const storedExpression = (config?.cron_expression as string) ?? "";
   const storedTimezone = (config?.timezone as string) ?? "";
+  const hasStoredSchedule = Boolean(storedExpression.trim());
 
   const parsed = useMemo(() => parseExpression(storedExpression), [storedExpression]);
-  const [customMode, setCustomMode] = useState(parsed.frequency === "custom");
+  const [customMode, setCustomMode] = useState(hasStoredSchedule && parsed.frequency === "custom");
   const [customDraft, setCustomDraft] = useState(parsed.expression);
   const [customError, setCustomError] = useState<string | null>(null);
 
@@ -165,10 +190,10 @@ export function ScheduleSelector({ config, isDirty = false, onChange }: Schedule
   useEffect(() => {
     const next = parseExpression(storedExpression);
     setCustomDraft(next.expression);
-    if (next.frequency === "custom") setCustomMode(true);
-  }, [storedExpression]);
+    setCustomMode(hasStoredSchedule && next.frequency === "custom");
+  }, [hasStoredSchedule, storedExpression]);
 
-  const frequency: Frequency = customMode ? "custom" : parsed.frequency;
+  const frequency = activeFrequency(hasStoredSchedule, customMode, parsed.frequency);
 
   // A schedule that has never been saved adopts the viewer's own timezone. One
   // that was saved without a timezone stays on UTC — the backend has been
@@ -176,7 +201,7 @@ export function ScheduleSelector({ config, isDirty = false, onChange }: Schedule
   // automation by the offset without anyone asking for it.
   const isNewSchedule = !storedExpression;
   const timezone = storedTimezone || (isNewSchedule ? browserTimeZone() : "");
-  const expression = frequency === "custom" ? customDraft : buildExpression(parsed);
+  const expression = activeExpression(frequency, customDraft, parsed);
   const wallClock = usesTimezone(expression);
 
   const previewExpression = previewFor(frequency, customDraft, storedExpression, expression);
@@ -194,12 +219,16 @@ export function ScheduleSelector({ config, isDirty = false, onChange }: Schedule
   /** The spec currently on screen, including an in-progress custom draft. */
   const currentSpec = (): ScheduleSpec => ({
     ...parsed,
-    frequency,
+    frequency: frequency === "none" ? parsed.frequency : frequency,
     expression: frequency === "custom" ? customDraft.trim() : parsed.expression,
   });
 
-  const handleFrequency = (value: Frequency) => {
+  const handleFrequency = (value: ScheduleFrequency) => {
     setCustomError(null);
+    if (value === "none") {
+      setCustomMode(false);
+      return;
+    }
     if (value === "custom") {
       // Seed the field with the schedule already in effect, so opening the
       // escape hatch never changes when the automation runs.
@@ -269,17 +298,22 @@ function FrequencySelect({
   value,
   onChange,
 }: {
-  value: Frequency;
-  onChange: (value: Frequency) => void;
+  value: ScheduleFrequency;
+  onChange: (value: ScheduleFrequency) => void;
 }) {
   const { t } = useTranslation();
+  const options =
+    value === "none"
+      ? FREQUENCY_OPTIONS
+      : FREQUENCY_OPTIONS.filter((option) => option.value !== "none");
+
   return (
-    <Select value={value} onValueChange={(next) => onChange(next as Frequency)}>
+    <Select value={value} onValueChange={(next) => onChange(next as ScheduleFrequency)}>
       <SelectTrigger className="w-[170px] h-8" data-testid="schedule-frequency">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        {FREQUENCY_OPTIONS.map((option) => (
+        {options.map((option) => (
           <SelectItem key={option.value} value={option.value}>
             {t(option.labelKey)}
           </SelectItem>
@@ -299,7 +333,7 @@ function FrequencyDetail({
   onCustomDraftChange,
   onCustomBlur,
 }: {
-  frequency: Frequency;
+  frequency: ScheduleFrequency;
   spec: ScheduleSpec;
   isDirty: boolean;
   customDraft: string;
@@ -309,6 +343,8 @@ function FrequencyDetail({
   onCustomBlur: () => void;
 }) {
   const { t } = useTranslation();
+
+  if (frequency === "none") return null;
 
   if (frequency === "custom") {
     return (

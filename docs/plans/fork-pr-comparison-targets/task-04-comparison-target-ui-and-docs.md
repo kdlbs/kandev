@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-pr-reconciliation-and-lifecycle"]
 plan: "plan.md"
-spec: "../../specs/platform/workspace-git-status.md"
+spec: "../../specs/platform/requirements/workspace-git-status.md"
 ---
 
 # Task 04: Desktop/mobile presentation and public docs
