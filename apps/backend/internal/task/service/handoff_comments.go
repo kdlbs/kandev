@@ -15,14 +15,14 @@ const (
 	commentResponseBudgetBytes = 65536
 )
 
-// commentWindowDefaultLimit and commentWindowMaxLimit mirror the MCP tool's
-// resolveCommentsLimit bounds (default 20, clamp 100). The MCP tool wrapper
-// already normalizes before dispatch, but this service method is also
-// reachable directly over the mcp.list_task_comments WS action, which has no
-// argument-schema validation of its own — clamp here too so any non-positive
-// or oversized limit degrades to a bounded window instead of reaching
-// SQLite's LIMIT clause raw (LIMIT 0 returns nothing, a negative LIMIT
-// returns the entire table).
+// commentWindowDefaultLimit and commentWindowMaxLimit bound the comment
+// window returned to callers (default 20, clamp 100). The dashboard HTTP
+// handler (handler_comments.go) parses its "limit" query parameter with
+// strconv.Atoi and discards the error, so a missing, non-numeric, zero, or
+// negative value all reach this method as 0 or negative with no validation
+// of its own — clamp here so any non-positive or oversized limit degrades to
+// a bounded window instead of reaching SQLite's LIMIT clause raw (LIMIT 0
+// returns nothing, a negative LIMIT returns the entire table).
 const (
 	commentWindowDefaultLimit = 20
 	commentWindowMaxLimit     = 100
