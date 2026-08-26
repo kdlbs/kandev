@@ -20,6 +20,20 @@ type fakePluginTaskWriteService struct {
 	lastUpdate *taskservice.UpdateTaskRequest
 	lastID     string
 	deletedID  string
+
+	getTaskResult *taskmodels.Task
+	getTaskErr    error
+	lastGetTaskID string
+
+	moveResult   *taskservice.MoveTaskResult
+	moveErr      error
+	moveCalls    int
+	lastMoveID   string
+	lastMoveWfID string
+	lastMoveStep string
+	lastMovePos  int
+	lastMoveOpts taskservice.MoveTaskOptions
+	lastMoveCtx  context.Context
 }
 
 func (f *fakePluginTaskWriteService) CreateTask(_ context.Context, req *taskservice.CreateTaskRequest) (taskservice.CreateTaskResult, error) {
@@ -37,6 +51,38 @@ func (f *fakePluginTaskWriteService) UpdateTask(_ context.Context, id string, re
 func (f *fakePluginTaskWriteService) DeleteTask(_ context.Context, id string) error {
 	f.deletedID = id
 	return nil
+}
+
+func (f *fakePluginTaskWriteService) GetTask(_ context.Context, id string) (*taskmodels.Task, error) {
+	f.lastGetTaskID = id
+	if f.getTaskErr != nil {
+		return nil, f.getTaskErr
+	}
+	if f.getTaskResult != nil {
+		return f.getTaskResult, nil
+	}
+	return &taskmodels.Task{ID: id}, nil
+}
+
+func (f *fakePluginTaskWriteService) MoveTaskWithOptions(ctx context.Context, id, workflowID, workflowStepID string, position int, opts taskservice.MoveTaskOptions) (*taskservice.MoveTaskResult, error) {
+	f.moveCalls++
+	f.lastMoveCtx = ctx
+	f.lastMoveID = id
+	f.lastMoveWfID = workflowID
+	f.lastMoveStep = workflowStepID
+	f.lastMovePos = position
+	f.lastMoveOpts = opts
+	if f.moveErr != nil {
+		return nil, f.moveErr
+	}
+	if f.moveResult != nil {
+		return f.moveResult, nil
+	}
+	return &taskservice.MoveTaskResult{
+		Task:         &taskmodels.Task{ID: id, WorkflowID: workflowID, WorkflowStepID: workflowStepID},
+		Transitioned: true,
+		FromStepID:   "step-from",
+	}, nil
 }
 
 func TestPluginsTaskWriter_CreateMapsSourceToMetadata(t *testing.T) {
@@ -108,15 +154,40 @@ func TestPluginsTaskWriter_UpdateMapsFieldMask(t *testing.T) {
 
 	title := "Renamed"
 	state := "IN_PROGRESS"
-	step := "step-2"
-	_, err := a.UpdateTask(context.Background(), plugins.TaskUpdateInput{ID: "task-1", Title: &title, State: &state, WorkflowStepID: &step})
+	_, err := a.UpdateTask(context.Background(), plugins.TaskUpdateInput{ID: "task-1", Title: &title, State: &state})
 	require.NoError(t, err)
 	require.Equal(t, "task-1", svc.lastID)
 	require.Equal(t, "Renamed", *svc.lastUpdate.Title)
 	require.NotNil(t, svc.lastUpdate.State)
 	require.Equal(t, v1.TaskStateInProgress, *svc.lastUpdate.State)
-	require.Equal(t, "step-2", *svc.lastUpdate.WorkflowStepID)
 	require.Nil(t, svc.lastUpdate.Description, "an unset field stays nil")
+}
+
+// TestPluginsTaskWriter_UpdateRejectsWorkflowStepID pins AC-004.3: UpdateTask
+// never calls publishTaskMovedEvent, so writing workflow_step_id directly
+// through it would move the card without firing on_enter actions like
+// auto-start. A plugin must use MoveTask instead.
+func TestPluginsTaskWriter_UpdateRejectsWorkflowStepID(t *testing.T) {
+	svc := &fakePluginTaskWriteService{}
+	a := pluginsTaskWriterAdapter{svc: svc}
+
+	step := "step-2"
+	_, err := a.UpdateTask(context.Background(), plugins.TaskUpdateInput{ID: "task-1", WorkflowStepID: &step})
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.Nil(t, svc.lastUpdate, "the service is never called when workflow_step_id is present")
+}
+
+// TestPluginsTaskWriter_UpdateRejectsEmptyWorkflowStepID pins that the
+// rejection fires on presence, not on a non-empty value — a plugin cannot
+// smuggle a move through by clearing the field to "".
+func TestPluginsTaskWriter_UpdateRejectsEmptyWorkflowStepID(t *testing.T) {
+	svc := &fakePluginTaskWriteService{}
+	a := pluginsTaskWriterAdapter{svc: svc}
+
+	empty := ""
+	_, err := a.UpdateTask(context.Background(), plugins.TaskUpdateInput{ID: "task-1", WorkflowStepID: &empty})
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.Nil(t, svc.lastUpdate)
 }
 
 func TestPluginsTaskWriter_UpdateRejectsUnknownState(t *testing.T) {

@@ -388,6 +388,11 @@ func (s *Service) UpdateTaskMetadata(ctx context.Context, id string, metadata ma
 type MoveTaskResult struct {
 	Task         *models.Task
 	WorkflowStep *wfmodels.WorkflowStep
+	// FromStepID and Transitioned are read off Task's own write-transaction
+	// result (Task.FromStepID / Task.WorkflowStepTransitionID != 0), not from
+	// this call's earlier pre-move snapshot — see Task.FromStepID's doc.
+	FromStepID   string
+	Transitioned bool
 }
 
 // MoveTaskOptions controls non-default move behavior for trusted callers.
@@ -574,6 +579,13 @@ func (s *Service) MoveTaskWithOptions(
 		s.publishTaskEvent(ctx, events.TaskStateChanged, task, &oldState)
 	}
 
+	// Captured now, before the post-commit GetTask refresh below replaces
+	// task with a plain read that carries neither transient field (see
+	// models.Task.FromStepID's doc) — these are the write transaction's own
+	// result, not the pre-move oldStepID/stepChanged computed above.
+	resultFromStepID := task.FromStepID
+	resultTransitioned := task.WorkflowStepTransitionID != 0
+
 	// Publish task.moved event so the orchestrator can process on_exit/on_enter actions
 	if stepChanged {
 		s.publishTaskMovedEvent(ctx, task, oldWorkflowID, oldStepID, workflowStepID, sessionID)
@@ -601,7 +613,7 @@ func (s *Service) MoveTaskWithOptions(
 		zap.String("workflow_step_id", workflowStepID),
 		zap.Int("position", position))
 
-	result := &MoveTaskResult{Task: task}
+	result := &MoveTaskResult{Task: task, FromStepID: resultFromStepID, Transitioned: resultTransitioned}
 
 	// Fetch the workflow step info if getter is available
 	if s.workflowStepGetter != nil {

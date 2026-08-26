@@ -1231,6 +1231,88 @@ func updateTaskInputFromProto(p *pluginv1.UpdateTaskRequest) UpdateTaskInput {
 	}
 }
 
+// MoveTaskInput is the Go-native mirror of kandev.plugin.v1.MoveTaskRequest.
+// Unlike Update, Move transitions the task through the same path the board's
+// own move uses, so on_enter actions (auto-start included) actually fire.
+// WorkflowID is optional: nil inherits the task's current workflow; a
+// pointer to "" is rejected rather than treated as inherit. Position is not
+// optional: an omitted position and a position of zero are the same
+// request, both placing the task at the top of the target step.
+type MoveTaskInput struct {
+	TaskID         string
+	WorkflowStepID string
+	WorkflowID     *string
+	Position       int32
+}
+
+func (in MoveTaskInput) toProto() *pluginv1.MoveTaskRequest {
+	return &pluginv1.MoveTaskRequest{
+		TaskId:         in.TaskID,
+		WorkflowStepId: in.WorkflowStepID,
+		WorkflowId:     in.WorkflowID,
+		Position:       in.Position,
+	}
+}
+
+func moveTaskInputFromProto(p *pluginv1.MoveTaskRequest) MoveTaskInput {
+	if p == nil {
+		return MoveTaskInput{}
+	}
+	return MoveTaskInput{
+		TaskID:         p.GetTaskId(),
+		WorkflowStepID: p.GetWorkflowStepId(),
+		WorkflowID:     p.WorkflowId,
+		Position:       p.GetPosition(),
+	}
+}
+
+// MoveTaskOutcome is the Go-native mirror of kandev.plugin.v1.MoveTaskResponse.
+// Transitioned reports whether a ledger row was written for this move (false
+// when the task was already on the target step). QueuedForStepID is the sole
+// admission discriminator, reported on both values of Transitioned: nil means
+// admitted (when Transitioned) or not applicable (when not); non-nil means
+// queued for that step holding no WIP slot. FromStepID is the step the task
+// left; empty when Transitioned is false.
+type MoveTaskOutcome struct {
+	Task            *Task
+	Transitioned    bool
+	QueuedForStepID *string
+	FromStepID      string
+}
+
+func (o MoveTaskOutcome) toProto() (*pluginv1.MoveTaskResponse, error) {
+	var protoTask *pluginv1.Task
+	if o.Task != nil {
+		var err error
+		protoTask, err = o.Task.toProto()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &pluginv1.MoveTaskResponse{
+		Task:            protoTask,
+		Transitioned:    o.Transitioned,
+		QueuedForStepId: o.QueuedForStepID,
+		FromStepId:      o.FromStepID,
+	}, nil
+}
+
+func moveTaskOutcomeFromProto(p *pluginv1.MoveTaskResponse) (*MoveTaskOutcome, error) {
+	if p == nil {
+		return nil, nil
+	}
+	task, err := taskFromProto(p.GetTask())
+	if err != nil {
+		return nil, err
+	}
+	return &MoveTaskOutcome{
+		Task:            &task,
+		Transitioned:    p.GetTransitioned(),
+		QueuedForStepID: p.QueuedForStepId,
+		FromStepID:      p.GetFromStepId(),
+	}, nil
+}
+
 // MessageDispatch is the Go-native mirror of
 // kandev.plugin.v1.SendMessageResponse — the result of delivering a prompt to a
 // task session. Status is "queued" (the session was running and the message

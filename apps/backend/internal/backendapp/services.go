@@ -40,8 +40,10 @@ import (
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/sentry"
+	"github.com/kandev/kandev/internal/steptelemetry"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/task/share"
 	userservice "github.com/kandev/kandev/internal/user/service"
@@ -1154,6 +1156,8 @@ type pluginTaskWriteService interface {
 	CreateTask(ctx context.Context, req *taskservice.CreateTaskRequest) (taskservice.CreateTaskResult, error)
 	UpdateTask(ctx context.Context, id string, req *taskservice.UpdateTaskRequest) (*taskmodels.Task, error)
 	DeleteTask(ctx context.Context, id string) error
+	GetTask(ctx context.Context, id string) (*taskmodels.Task, error)
+	MoveTaskWithOptions(ctx context.Context, id, workflowID, workflowStepID string, position int, opts taskservice.MoveTaskOptions) (*taskservice.MoveTaskResult, error)
 }
 
 type pluginsTaskWriterAdapter struct {
@@ -1287,10 +1291,20 @@ func firstPluginPRNumber(values ...*int64) int {
 }
 
 func (a pluginsTaskWriterAdapter) UpdateTask(ctx context.Context, in plugins.TaskUpdateInput) (*taskmodels.Task, error) {
+	// workflow_step_id is rejected on this path regardless of value (including
+	// a present but empty string) — Update never calls publishTaskMovedEvent,
+	// so writing the column directly would move the card without firing
+	// on_enter actions like auto-start. Use Move instead, which routes through
+	// MoveTaskWithOptions. Checked before the state validation below so a
+	// request that also carries an invalid state is still named as a
+	// rejected move, not a state error.
+	if in.WorkflowStepID != nil {
+		return nil, status.Error(codes.InvalidArgument,
+			"workflow_step_id cannot be set via UpdateTask: use MoveTask to transition a task between workflow steps")
+	}
 	req := &taskservice.UpdateTaskRequest{
-		Title:          in.Title,
-		Description:    in.Description,
-		WorkflowStepID: in.WorkflowStepID,
+		Title:       in.Title,
+		Description: in.Description,
 	}
 	if in.State != nil {
 		// v1.TaskState is a string type, so the cast can't fail — validate the
@@ -1304,6 +1318,95 @@ func (a pluginsTaskWriterAdapter) UpdateTask(ctx context.Context, in plugins.Tas
 		req.State = &state
 	}
 	return a.svc.UpdateTask(ctx, in.ID, req)
+}
+
+func (a pluginsTaskWriterAdapter) MoveTask(ctx context.Context, in plugins.TaskMoveInput) (*plugins.TaskMoveResult, error) {
+	workflowID, err := a.resolvePluginMoveWorkflowID(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+
+	// Attach attribution before calling MoveTaskWithOptions: that method only
+	// falls back to its own default attribution when none is already present
+	// on the context (steptelemetry.HasTrigger), so setting it here — exactly
+	// like BulkMoveTasks does — survives untouched into the recorded ledger row.
+	ctx = steptelemetry.WithAttribution(ctx, steptelemetry.Attribution{
+		Trigger:   steptelemetry.TriggerPluginMove,
+		ActorKind: steptelemetry.ActorIntegration,
+		ActorID:   in.Source,
+	})
+
+	result, err := a.svc.MoveTaskWithOptions(ctx, in.TaskID, workflowID, in.WorkflowStepID, int(in.Position), taskservice.MoveTaskOptions{
+		StepHistoryTrigger: wfmodels.StepTransitionTriggerPluginMove,
+		StepHistoryActor:   wfmodels.StepTransitionActorSystem,
+	})
+	if err != nil {
+		return nil, classifyPluginMoveError(err)
+	}
+	return &plugins.TaskMoveResult{
+		Task:         result.Task,
+		Transitioned: result.Transitioned,
+		FromStepID:   result.FromStepID,
+	}, nil
+}
+
+// resolvePluginMoveWorkflowID resolves the effective workflow id for a plugin
+// move: an explicit WorkflowID is used as-is; a nil WorkflowID inherits the
+// task's current workflow, requiring a lookup MoveTaskWithOptions doesn't do
+// on its own (it takes a plain workflow id with no "inherit current" case).
+//
+// A task with no current workflow resolves to "", passed through rather than
+// rejected here (AC-005.11 still ends in InvalidArgument, just not from this
+// function) — the binding precedence ladder requires the task's own state
+// (archived/active-session, AC-001.7/001.8) to be checked before its
+// destination (AC-001.6/005.11) is judged. Those state checks live inside
+// MoveTaskWithOptions' validateTaskMove, called after this function returns,
+// so failing fast here on an empty workflow id would answer InvalidArgument
+// for an archived task instead of FailedPrecondition. Passing "" through
+// instead lets validateTaskMove's GetWorkflow("") fail naturally — after the
+// state gates — with a "workflow not found" error classifyPluginMoveError
+// already maps to InvalidArgument.
+func (a pluginsTaskWriterAdapter) resolvePluginMoveWorkflowID(ctx context.Context, in plugins.TaskMoveInput) (string, error) {
+	if in.WorkflowID != nil {
+		return *in.WorkflowID, nil
+	}
+	task, err := a.svc.GetTask(ctx, in.TaskID)
+	if err != nil {
+		if errors.Is(err, repoerrors.ErrTaskNotFound) {
+			return "", status.Errorf(codes.NotFound, "task %q not found", in.TaskID)
+		}
+		return "", err
+	}
+	return task.WorkflowID, nil
+}
+
+// classifyPluginMoveError maps MoveTaskWithOptions' bare validation errors to
+// the plugin MoveTask RPC's binding error-mapping table. It intentionally does
+// NOT reuse mcp/handlers.classifyMoveTaskError: that classifier lowercases and
+// buckets archived/active-session/different-workspace/step-not-in-workflow
+// into a single Conflict code, but this table requires FailedPrecondition for
+// the first two and InvalidArgument for the latter two.
+func classifyPluginMoveError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, repoerrors.ErrTaskNotFound) {
+		return status.Error(codes.NotFound, err.Error())
+	}
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "archived tasks cannot be moved"):
+		return status.Error(codes.FailedPrecondition, msg)
+	case strings.Contains(msg, "task has an active session"):
+		return status.Error(codes.FailedPrecondition, msg)
+	case strings.Contains(msg, "workflow not found"),
+		strings.Contains(msg, "workflow step not found"),
+		strings.Contains(msg, "target workflow is in a different workspace"),
+		strings.Contains(msg, "target workflow step does not belong to target workflow"):
+		return status.Error(codes.InvalidArgument, msg)
+	default:
+		return status.Error(codes.Internal, msg)
+	}
 }
 
 // validPluginTaskState reports whether state is a state a plugin may set via
