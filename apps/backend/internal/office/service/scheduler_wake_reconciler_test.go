@@ -83,10 +83,10 @@ func TestParentWakeReconciler_EmitsRunForStuckParent(t *testing.T) {
 		t.Fatalf("run idempotency key = %q, want nil (NULL)", *run.IdempotencyKey)
 	}
 
-	// Tick 2: the receipt now matches the (unchanged) child set, so the
-	// sweep must be a no-op — no second run, and the steady-state counter
-	// increments so production can tell a working sweep from a dead one.
-	skipBefore := service.ParentWakeUnchangedSkipTotalForTest()
+	// Tick 2: the tick-1 run is still queued, so ListStuckParents' NOT
+	// EXISTS-against-runs filter excludes parent-1 from the candidate set
+	// entirely (see wake_receipts_test.go for a dedicated test of that
+	// filter) — the sweep must be a no-op, with no second run.
 	if err := handler.Tick(ctx); err != nil {
 		t.Fatalf("tick 2: %v", err)
 	}
@@ -96,9 +96,6 @@ func TestParentWakeReconciler_EmitsRunForStuckParent(t *testing.T) {
 	}
 	if len(runsAfter) != 1 {
 		t.Fatalf("tick 2 created a new run: %#v", runsAfter)
-	}
-	if got := service.ParentWakeUnchangedSkipTotalForTest(); got != skipBefore+1 {
-		t.Fatalf("parent_wake_unchanged_skip_total = %d, want %d", got, skipBefore+1)
 	}
 }
 

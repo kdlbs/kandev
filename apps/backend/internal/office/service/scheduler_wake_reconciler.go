@@ -2,8 +2,6 @@ package service
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -17,7 +15,9 @@ import (
 )
 
 // maxWakeReconcilePerTick caps the number of stuck parents processed in one
-// tick, mirroring maxRecoveryPerTick (scheduler_recovery.go).
+// tick, mirroring maxRecoveryPerTick (scheduler_recovery.go). ListStuckParents
+// filters out non-actionable candidates in SQL before this cap is applied, so
+// it bounds real work, not resting parents.
 const maxWakeReconcilePerTick = 5
 
 // ParentWakeReconciler is a level-triggered backstop for the
@@ -73,7 +73,7 @@ func (h *ParentWakeReconciler) Tick(ctx context.Context) error {
 func (h *ParentWakeReconciler) reconcile(ctx context.Context) {
 	svc := h.scheduler.svc
 
-	candidates, err := svc.repo.ListStuckParents(ctx, maxWakeReconcilePerTick)
+	candidates, err := svc.repo.ListStuckParents(ctx, RunReasonTaskChildrenCompleted, maxWakeReconcilePerTick)
 	if err != nil {
 		if ctx.Err() != nil {
 			return
@@ -92,26 +92,18 @@ func (h *ParentWakeReconciler) reconcile(ctx context.Context) {
 }
 
 // reconcileOne re-delivers the wake for a single stuck parent, unless its
-// receipt already matches the current child set or its assignee cannot
-// accept a run right now.
+// assignee cannot accept a run right now. ListStuckParents' SQL already
+// guarantees every candidate it returns has a stale-or-missing receipt (its
+// LEFT JOIN excludes an exact child-set-key match) and no active/finished
+// wake run covering it (its NOT EXISTS against runs) — a second, Go-side
+// receipt fetch-and-compare here would be structurally unreachable: nothing
+// but this reconciler ever writes parent_child_wake_receipts, and ticks run
+// sequentially, so the receipt cannot change between the SQL SELECT and a
+// Go-side read of it. Do not re-add that check without a reason the SQL
+// guarantee no longer holds; see the doc comment on ListStuckParents.
 func (h *ParentWakeReconciler) reconcileOne(
 	ctx context.Context, svc *Service, c sqlite.StuckParentCandidate,
 ) {
-	childHash := hashChildSetKey(c.ChildSetKey)
-
-	receipt, err := svc.repo.GetWakeReceipt(ctx, c.ParentTaskID)
-	if err != nil {
-		if ctx.Err() != nil {
-			return
-		}
-		h.logger.Error("wake sweep: get wake receipt failed",
-			zap.String("parent_task_id", c.ParentTaskID), zap.Error(err))
-		return
-	}
-	if receipt != nil && receipt.ChildSetHash == childHash {
-		svc.recordWakeUnchangedSkip(c.ParentTaskID)
-		return
-	}
 	svc.recordWakeReceiptStale(c.ParentTaskID)
 
 	if c.AssigneeAgentProfileID == "" {
@@ -123,7 +115,7 @@ func (h *ParentWakeReconciler) reconcileOne(
 		return
 	}
 
-	payload, err := h.buildPayload(ctx, svc, c.ParentTaskID)
+	payload, err := h.buildPayload(ctx, svc, c.ParentTaskID, c.WorkflowStepID)
 	if err != nil {
 		if ctx.Err() != nil {
 			return
@@ -133,19 +125,25 @@ func (h *ParentWakeReconciler) reconcileOne(
 		return
 	}
 
-	h.emit(ctx, svc, c, childHash, payload)
+	h.emit(ctx, svc, c, payload)
 }
 
 // childrenCompletedPayload mirrors the shape enrichChildrenContext
 // (scheduler_integration.go) expects on a task_children_completed run's
-// payload column. TaskID is declared first so it marshals first in the
-// JSON text: ParseRunPayload decodes this payload into a
-// map[string]string for its task_id lookup, and a later type mismatch on
-// the children array must not stop task_id from having already been set.
+// payload column. TaskID and WorkflowStepID are declared first so they
+// marshal first in the JSON text: ParseRunPayload decodes this payload
+// into a map[string]string for its task_id/workflow_step_id lookups, and
+// a later type mismatch on the children array must not stop either from
+// having already been set. WorkflowStepID lets evaluateRunStaleness
+// (scheduler_staleness.go) cancel a re-delivered wake if the parent has
+// since moved to another workflow step — the exact situation this
+// reconciler's re-delivered runs are most likely to hit, since it only
+// exists to redeliver a wake after time has already passed.
 type childrenCompletedPayload struct {
-	TaskID    string                     `json:"task_id"`
-	Children  []childSummaryPayloadEntry `json:"children"`
-	Truncated bool                       `json:"truncated"`
+	TaskID         string                     `json:"task_id"`
+	WorkflowStepID string                     `json:"workflow_step_id"`
+	Children       []childSummaryPayloadEntry `json:"children"`
+	Truncated      bool                       `json:"truncated"`
 }
 
 type childSummaryPayloadEntry struct {
@@ -163,7 +161,7 @@ type childSummaryPayloadEntry struct {
 // written can still appear here; that's fine, this is prompt context, not
 // the stuck-parent predicate the sweep itself uses.
 func (h *ParentWakeReconciler) buildPayload(
-	ctx context.Context, svc *Service, parentTaskID string,
+	ctx context.Context, svc *Service, parentTaskID, workflowStepID string,
 ) (string, error) {
 	children, truncated, err := svc.repo.GetChildSummaries(ctx, parentTaskID)
 	if err != nil {
@@ -181,9 +179,10 @@ func (h *ParentWakeReconciler) buildPayload(
 	}
 
 	out, err := json.Marshal(childrenCompletedPayload{
-		TaskID:    parentTaskID,
-		Children:  entries,
-		Truncated: truncated,
+		TaskID:         parentTaskID,
+		WorkflowStepID: workflowStepID,
+		Children:       entries,
+		Truncated:      truncated,
 	})
 	if err != nil {
 		return "", fmt.Errorf("marshal payload: %w", err)
@@ -195,7 +194,7 @@ func (h *ParentWakeReconciler) buildPayload(
 // single transaction, so a failure between the two never leaves a receipt
 // claiming delivery of a wake that was never actually queued.
 func (h *ParentWakeReconciler) emit(
-	ctx context.Context, svc *Service, c sqlite.StuckParentCandidate, childHash, payload string,
+	ctx context.Context, svc *Service, c sqlite.StuckParentCandidate, payload string,
 ) {
 	tx, err := svc.repo.Writer().BeginTxx(ctx, nil)
 	if err != nil {
@@ -227,7 +226,7 @@ func (h *ParentWakeReconciler) emit(
 	}
 
 	deliveredAt := time.Now().UTC()
-	if err := svc.repo.UpsertWakeReceiptTx(ctx, tx, c.ParentTaskID, childHash, runReq.ID, deliveredAt); err != nil {
+	if err := svc.repo.UpsertWakeReceiptTx(ctx, tx, c.ParentTaskID, c.ChildSetKey, runReq.ID, deliveredAt); err != nil {
 		if ctx.Err() != nil {
 			return
 		}
@@ -246,12 +245,4 @@ func (h *ParentWakeReconciler) emit(
 	}
 
 	svc.recordWakeEmitted(c.ParentTaskID, runReq.ID)
-}
-
-// hashChildSetKey hashes the sorted "id:state,..." child-set key produced
-// by ListStuckParents into the fixed-width value stored in
-// parent_child_wake_receipts.child_set_hash.
-func hashChildSetKey(key string) string {
-	sum := sha256.Sum256([]byte(key))
-	return hex.EncodeToString(sum[:])
 }

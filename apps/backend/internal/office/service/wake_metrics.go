@@ -15,12 +15,17 @@ import (
 // These are ParentWakeReconciler's only steady-state signal
 // (scheduler_wake_reconciler.go): production cannot otherwise tell a
 // working sweep (candidates found, nothing to do) from a dead one
-// (handler not ticking at all).
+// (handler not ticking at all). The steady-state no-op case — a parent
+// whose receipt already matches its current child set, or whose wake
+// already has an active/finished run — is filtered out in
+// ListStuckParents' SQL before a tick ever sees it, so parent_wake_
+// candidates_total itself staying flat is that steady-state signal; there
+// is no separate "unchanged, skipped" counter, because nothing ever
+// reaches Go to skip.
 var (
 	parentWakeCandidatesTotal         = expvar.NewInt("parent_wake_candidates_total")
 	parentWakeReceiptStaleTotal       = expvar.NewInt("parent_wake_receipt_stale_total")
 	parentWakeEmittedTotal            = expvar.NewInt("parent_wake_emitted_total")
-	parentWakeUnchangedSkipTotal      = expvar.NewInt("parent_wake_unchanged_skip_total")
 	parentWakeAssigneeUnresolvedTotal = expvar.NewInt("parent_wake_assignee_unresolved_total")
 )
 
@@ -28,7 +33,6 @@ const (
 	metricWakeCandidate          = "wake.metric.candidate"
 	metricWakeReceiptStale       = "wake.metric.receipt_stale"
 	metricWakeEmitted            = "wake.metric.emitted"
-	metricWakeUnchangedSkip      = "wake.metric.unchanged_skip"
 	metricWakeAssigneeUnresolved = "wake.metric.assignee_unresolved"
 )
 
@@ -62,16 +66,6 @@ func (s *Service) recordWakeEmitted(parentTaskID, runID string) {
 	}
 	s.logger.Info(metricWakeEmitted,
 		zap.String("parent_task_id", parentTaskID), zap.String("run_id", runID))
-}
-
-// recordWakeUnchangedSkip bumps the count of candidates whose receipt
-// already matches the current child set — the steady-state, no-op case.
-func (s *Service) recordWakeUnchangedSkip(parentTaskID string) {
-	parentWakeUnchangedSkipTotal.Add(1)
-	if s.logger == nil {
-		return
-	}
-	s.logger.Debug(metricWakeUnchangedSkip, zap.String("parent_task_id", parentTaskID))
 }
 
 // recordWakeAssigneeUnresolved bumps the count of candidates skipped
