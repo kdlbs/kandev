@@ -960,6 +960,10 @@ func (s *Service) populateWorkspaceRepositorySpecs(ctx context.Context, taskID s
 	branchPlans := worktree.BuildBranchIdentityPlans(workspaceBranchIdentityInputs(projections))
 	for index, projection := range projections {
 		taskRepository, repository := projection.taskRepository, projection.repository
+		branchTemplate := repository.WorktreeBranchTemplate
+		if taskRepository.BranchPolicyBranchTemplate != "" {
+			branchTemplate = taskRepository.BranchPolicyBranchTemplate
+		}
 		remoteContribution, hasRemoteContribution, err := models.LoadRemoteContribution(taskRepository.Metadata)
 		if err != nil {
 			return fmt.Errorf("load workspace remote contribution: %w", err)
@@ -972,7 +976,7 @@ func (s *Service) populateWorkspaceRepositorySpecs(ctx context.Context, taskID s
 			RepositoryID: taskRepository.RepositoryID, RepositoryPath: repository.LocalPath, RepositoryURL: repository.RemoteURL, RepoName: projection.repoName,
 			BaseBranch: taskRepository.BaseBranch, DefaultBranch: repository.DefaultBranch,
 			CheckoutBranch: taskRepository.CheckoutBranch, WorktreeBranchPrefix: repository.WorktreeBranchPrefix,
-			WorktreeBranchTemplate: repository.WorktreeBranchTemplate, PullBeforeWorktree: repository.PullBeforeWorktree,
+			WorktreeBranchTemplate: branchTemplate, PullBeforeWorktree: repository.PullBeforeWorktree,
 		}
 		if hasRemoteContribution {
 			spec.RemoteContribution = &remoteContribution

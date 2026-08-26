@@ -42,10 +42,10 @@ export function defaultSubtaskWorkspaceMode(
  * `useGitHubUrlBranchesEffect` without any forking of those components.
  *
  * The subtask flow only exercises a slice of the full state: repo rows,
- * GitHub URL mode, agent/executor profiles. The remaining fields (title,
- * workflow, draft, fresh-branch, discovered repos) are kept as inert stubs
- * because the subtask dialog renders its own title input and inherits the
- * parent's workflow.
+ * GitHub URL mode, agent/executor profiles, and fresh-branch selection for a
+ * local executor in a new workspace. The remaining fields (title, workflow,
+ * draft, and discovered repos) are kept as inert stubs because the subtask
+ * dialog renders its own title input and inherits the parent's workflow.
  */
 export function useSubtaskFormState(workspaceId: string | null): DialogFormState {
   const repos = useRepositoriesState();
@@ -55,6 +55,7 @@ export function useSubtaskFormState(workspaceId: string | null): DialogFormState
   const [agentProfileId, setAgentProfileId] = useState("");
   const [executorProfileId, setExecutorProfileId] = useState("");
   const [autopilot, setAutopilot] = useState(false);
+  const [freshBranchEnabled, setFreshBranchEnabled] = useState(false);
   const [useRemote, setUseRemote] = useState(false);
   const [githubUrlError, setGitHubUrlError] = useState<string | null>(null);
   // Discovered (on-disk) repos — populated by useDiscoverReposEffect when the
@@ -79,7 +80,9 @@ export function useSubtaskFormState(workspaceId: string | null): DialogFormState
       descriptionInputRef,
       // Repo chip row — what RepoChipsRow + useDialogHandlers actually drive.
       repositories: repos.repositories,
+      repositoriesDirty: repos.repositoriesDirty,
       setRepositories: repos.setRepositories,
+      setRepositoriesDirty: repos.setRepositoriesDirty,
       addRepository: repos.addRepository,
       removeRepository: repos.removeRepository,
       updateRepository: repos.updateRepository,
@@ -121,10 +124,14 @@ export function useSubtaskFormState(workspaceId: string | null): DialogFormState
       setWorkflowAgentProfileId: NOOP,
       clearDraft: NOOP,
       ...INERT_FRESH_BRANCH_AND_NOREPO,
+      freshBranchEnabled,
+      setFreshBranchEnabled,
     }),
     [
       repos.repositories,
+      repos.repositoriesDirty,
       repos.setRepositories,
+      repos.setRepositoriesDirty,
       repos.addRepository,
       repos.removeRepository,
       repos.updateRepository,
@@ -138,6 +145,7 @@ export function useSubtaskFormState(workspaceId: string | null): DialogFormState
       agentProfileId,
       executorProfileId,
       autopilot,
+      freshBranchEnabled,
       useRemote,
       githubUrlError,
       discoveredRepositories,
@@ -169,12 +177,10 @@ const INERT_TITLE_DRAFT = {
   setAutopilot: NOOP,
 } as const;
 
-// Fresh-branch (local-executor-only) and no-repo / scratch workspace mode are
-// top-level create-task features; subtasks inherit their parent's repo
-// context, so these are kept inert.
+// No-repo / scratch workspace mode is a top-level create-task feature. The
+// fresh-branch fields are real state above because new-workspace subtasks can
+// create a policy branch with a local executor.
 const INERT_FRESH_BRANCH_AND_NOREPO = {
-  freshBranchEnabled: false,
-  setFreshBranchEnabled: NOOP,
   currentLocalBranch: "",
   setCurrentLocalBranch: NOOP,
   currentLocalBranchLoading: false,

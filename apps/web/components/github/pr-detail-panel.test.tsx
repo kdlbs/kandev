@@ -172,7 +172,10 @@ describe("PRDetailPanelComponent — task switch on the singleton legacy panel",
     await act(async () => {
       getStoreApi().setState((prev) => ({
         ...prev,
-        taskPRs: { byTaskId: { ...prev.taskPRs.byTaskId, "task-2": [pr2] } },
+        taskPRs: {
+          ...prev.taskPRs,
+          byTaskId: { ...prev.taskPRs.byTaskId, "task-2": [pr2] },
+        },
         tasks: { ...prev.tasks, activeTaskId: "task-2", activeSessionId: "session-2" },
       }));
     });

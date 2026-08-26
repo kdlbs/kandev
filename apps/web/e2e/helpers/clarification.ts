@@ -16,10 +16,10 @@ type SeedOptions = {
 };
 
 /**
- * Create a task + session running a mock-agent scenario, navigate to it, and
- * return a ready SessionPage. Shared by the clarification specs (overlay,
- * resize, and mobile) so the seed → navigate → waitForLoad flow lives in one
- * place.
+ * Create a task + session running a mock-agent scenario, wait for blocking
+ * scenarios to reach their causal backend state, navigate to it, and return a
+ * ready SessionPage. Shared by the clarification specs (overlay, resize, and
+ * mobile) so the seed → wait → navigate → waitForLoad flow lives in one place.
  */
 export async function seedClarificationSession(
   testPage: Page,
@@ -47,7 +47,7 @@ export async function seedClarificationSession(
       taskId: task.id,
       sessionId: task.session_id,
       expectedState: "WAITING_FOR_INPUT",
-      message: "clarification session should be waiting for input before navigation",
+      message: "clarification session should reach its blocking state before navigation",
       timeout: 60_000,
     });
   }

@@ -387,6 +387,10 @@ export const test = backendFixture.extend<
         apiClient.mockGitLabReset(seedData.workspaceId).catch(() => undefined),
         apiClient.clearGitLabRepositoryRemote(seedData.repositoryId).catch(() => undefined),
       ]);
+      // GitLab reset removes origin from the shared seed checkout. Restore the
+      // fixture's offline origin before the test so pull-enabled worktree
+      // preparation starts from the same valid repository state every time.
+      restoreSeedRepositoryOrigin(seedData);
       try {
         await use();
       } finally {
@@ -431,6 +435,28 @@ export function pointSeedRepositoryAtUnresolvedOrigin(seedData: SeedData, tmpDir
     env: makeGitEnv(tmpDir),
     stdio: "ignore",
   });
+  try {
+    execFileSync(
+      "git",
+      ["-C", seedData.repositoryPath, "remote", "set-url", "origin", `file://${remoteDir}`],
+      { env: makeGitEnv(tmpDir), stdio: "ignore" },
+    );
+  } catch {
+    execFileSync(
+      "git",
+      ["-C", seedData.repositoryPath, "remote", "add", "origin", `file://${remoteDir}`],
+      { env: makeGitEnv(tmpDir), stdio: "ignore" },
+    );
+  }
+}
+
+/** Points the seed repository at a valid cached checkout with an unreachable origin. */
+export function pointSeedRepositoryAtFailingOrigin(seedData: SeedData, tmpDir: string) {
+  const remoteDir = path.join(
+    tmpDir,
+    "repos",
+    `e2e-failing-remote-${Date.now()}-${process.pid}.git`,
+  );
   try {
     execFileSync(
       "git",

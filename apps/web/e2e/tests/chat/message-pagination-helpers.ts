@@ -7,6 +7,8 @@ export const INITIAL_PROMPT_MARKER = "INITIAL-PROMPT-MARKER-7Q2X";
 export const RECENT_AGENT_MARKER = "RECENT-AGENT-MARKER-4K8P";
 export const PRE_PROMPT_MARKER = "HIDDEN-PRE-PROMPT-MARKER-6N3V";
 export const EAGER_HISTORY_PROMPT_MARKER = "EAGER-HISTORY-PROMPT-MARKER-3J6W";
+export const VISIBLE_PAGE_MARKER = "VISIBLE-PAGE-MARKER-8D5H";
+export const SHORT_PAGE_BOUNDARY_MARKER = "SHORT-PAGE-BOUNDARY-MARKER-5T1C";
 
 /** Seeds an older prompt followed by a tool-only newest window. */
 export async function seedToolHeavyOpeningHistory(
@@ -109,6 +111,65 @@ export async function seedCollapsedMessageHistory(
   return { taskId: task.id, sessionId };
 }
 
+/** Seeds several backend pages of standalone messages behind the newest window. */
+export async function seedVisibleMessageHistory(
+  apiClient: ApiClient,
+  seedData: SeedData,
+  title: string,
+): Promise<{ taskId: string; sessionId: string }> {
+  const task = await apiClient.createTask(seedData.workspaceId, title, {
+    description: TASK_DESCRIPTION_MARKER,
+    workflow_id: seedData.workflowId,
+    workflow_step_id: seedData.startStepId,
+    repository_ids: [seedData.repositoryId],
+  });
+  const { session_id: sessionId } = await apiClient.seedTaskSession(task.id, {
+    state: "IDLE",
+    repositoryId: seedData.repositoryId,
+  });
+  await apiClient.seedSessionMessage(sessionId, {
+    type: "message",
+    content: INITIAL_PROMPT_MARKER,
+    authorType: "user",
+  });
+  await apiClient.seedAgentMessages(sessionId, 140, VISIBLE_PAGE_MARKER);
+  return { taskId: task.id, sessionId };
+}
+
+/** Seeds a boundary-changing older page whose rendered height stays inside
+ * the sentinel's 200px preload margin: one short message plus one collapsed
+ * group containing the other 19 backend rows. */
+export async function seedShortBoundaryPageHistory(
+  apiClient: ApiClient,
+  seedData: SeedData,
+  title: string,
+): Promise<{ taskId: string; sessionId: string }> {
+  const task = await apiClient.createTask(seedData.workspaceId, title, {
+    description: TASK_DESCRIPTION_MARKER,
+    workflow_id: seedData.workflowId,
+    workflow_step_id: seedData.startStepId,
+    repository_ids: [seedData.repositoryId],
+  });
+  const { session_id: sessionId } = await apiClient.seedTaskSession(task.id, {
+    state: "IDLE",
+    repositoryId: seedData.repositoryId,
+  });
+  await apiClient.seedAgentMessages(sessionId, 20, "SHORT-PAGE-OLDER-FILLER");
+  await apiClient.seedSessionMessage(sessionId, {
+    type: "message",
+    content: SHORT_PAGE_BOUNDARY_MARKER,
+  });
+  for (let index = 0; index < 19; index += 1) {
+    await apiClient.seedSessionMessage(sessionId, {
+      type: "tool_call",
+      content: `short-page completed tool ${index + 1}`,
+      metadata: { status: "complete" },
+    });
+  }
+  await apiClient.seedAgentMessages(sessionId, 100, VISIBLE_PAGE_MARKER);
+  return { taskId: task.id, sessionId };
+}
+
 /** Reads a rendered standalone message's viewport position from the list. */
 export async function readStandaloneMessageTop(list: Locator, marker: string): Promise<number> {
   return list.evaluate((element, messageMarker) => {
@@ -119,12 +180,22 @@ export async function readStandaloneMessageTop(list: Locator, marker: string): P
   }, marker);
 }
 
+/** Reads one already-rendered message row by its stable DOM id. */
+export async function readMessageRowTopById(list: Locator, rowId: string): Promise<number> {
+  return list.evaluate((element, id) => {
+    const row = Array.from(element.querySelectorAll<HTMLElement>("[id^='msg-']")).find(
+      (candidate) => candidate.id === id,
+    );
+    return row?.getBoundingClientRect().top ?? Number.NaN;
+  }, rowId);
+}
+
 /** Scrolls the native transcript to the oldest loaded edge and captures the
  * anchored row's position before the next older-page request can prepend. */
 export async function scrollToOldestLoadedEdge(
   list: Locator,
   marker: string,
-): Promise<{ rowTop: number; scrollHeight: number }> {
+): Promise<{ rowId: string | null; rowTop: number; scrollHeight: number }> {
   return list.evaluate((element, messageMarker) => {
     element.scrollTop = 0;
     element.dispatchEvent(new Event("scroll", { bubbles: true }));
@@ -132,8 +203,19 @@ export async function scrollToOldestLoadedEdge(
       (candidate) => candidate.textContent?.includes(messageMarker),
     );
     return {
+      rowId: row?.id ?? null,
       rowTop: row?.getBoundingClientRect().top ?? Number.NaN,
       scrollHeight: element.scrollHeight,
     };
   }, marker);
+}
+
+/** Applies a small upward movement after prepend restoration. */
+export async function scrollUpSlightly(list: Locator): Promise<number> {
+  return list.evaluate((element) => {
+    const previous = element.scrollTop;
+    element.scrollTop = Math.max(0, previous - 24);
+    element.dispatchEvent(new Event("scroll", { bubbles: true }));
+    return previous - element.scrollTop;
+  });
 }

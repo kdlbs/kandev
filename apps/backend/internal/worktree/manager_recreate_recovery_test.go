@@ -67,6 +67,54 @@ func TestRecreate_FetchesBranchFromOriginWhenLocalDeleted(t *testing.T) {
 	}
 }
 
+func TestRecreate_RequiredBaseRefreshFailureStopsPreparation(t *testing.T) {
+	repoPath := initGitRepoWithRemote(t)
+	worktreePath := filepath.Join(t.TempDir(), "task-required", "repo-1")
+	if err := os.MkdirAll(worktreePath, 0755); err != nil {
+		t.Fatalf("create worktree placeholder: %v", err)
+	}
+
+	scriptDir := writeFakeGitScript(t, `
+case "${1:-}" in
+  fetch)
+    echo "fatal: Authentication failed" >&2
+    exit 1
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`)
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	mgr := newRecreateTestManager(t)
+	existing := &Worktree{
+		ID:             "wt-required",
+		SessionID:      "session-required",
+		TaskID:         "task-required",
+		RepositoryID:   "repo-1",
+		RepositoryPath: repoPath,
+		Path:           worktreePath,
+		Branch:         "feature/pr-branch",
+		Status:         StatusDeleted,
+	}
+
+	_, err := mgr.recreate(context.Background(), existing, CreateRequest{
+		SessionID:          "session-required",
+		TaskID:             "task-required",
+		RepositoryID:       "repo-1",
+		RepositoryPath:     repoPath,
+		BaseBranch:         "main",
+		PullBeforeWorktree: true,
+	})
+	if err == nil {
+		t.Fatal("recreate() succeeded after required base refresh failure")
+	}
+	if _, statErr := os.Stat(worktreePath); statErr != nil {
+		t.Fatalf("required refresh failure removed the existing worktree path: %v", statErr)
+	}
+}
+
 // TestRecreate_BranchGoneEverywhereReturnsUnrecoverable pins the degraded
 // path: local branch deleted AND the branch never made it to origin (or was
 // deleted there too). recreate must return ErrBranchUnrecoverable so callers
@@ -159,6 +207,95 @@ func TestRecreate_ForkPRFetchesPullHeadRef(t *testing.T) {
 	gotSHA := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD"))
 	if gotSHA != prHeadSHA {
 		t.Errorf("worktree HEAD = %q, want %q (PR head)", gotSHA, prHeadSHA)
+	}
+}
+
+func TestRecreate_ManagedRefreshUsesRefreshedPRHeadWithoutNetwork(t *testing.T) {
+	repoPath, wantSHA := initGitRepoWithPullRef(t, 975, "feature/managed-fork-pr")
+	runGit(t, repoPath, "fetch", "origin", "pull/975/head:refs/remotes/origin/pr/975")
+	runGit(t, repoPath, "remote", "set-url", "origin", "https://127.0.0.1:1/never.git")
+	worktreePath := filepath.Join(t.TempDir(), "task-managed-pr", "repo-1")
+	if err := os.MkdirAll(worktreePath, 0755); err != nil {
+		t.Fatalf("create worktree placeholder: %v", err)
+	}
+
+	mgr := newRecreateTestManager(t)
+	refreshCalls := 0
+	wt, err := mgr.recreate(context.Background(), &Worktree{
+		ID: "wt-managed-pr", SessionID: "session-managed-pr", TaskID: "task-managed-pr",
+		RepositoryID: "repo-1", RepositoryPath: repoPath, Path: worktreePath,
+		Branch: "feature/managed-fork-pr", Status: StatusDeleted,
+	}, CreateRequest{
+		SessionID: "session-managed-pr", TaskID: "task-managed-pr", RepositoryID: "repo-1",
+		RepositoryPath: repoPath, CheckoutBranch: "feature/managed-fork-pr", PRNumber: 975,
+		PullBeforeWorktree: true,
+		RefreshRepository: func(context.Context) error {
+			refreshCalls++
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("recreate(): %v", err)
+	}
+	if refreshCalls != 1 {
+		t.Fatalf("refresh calls = %d, want 1", refreshCalls)
+	}
+	if got := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD")); got != wantSHA {
+		t.Fatalf("worktree HEAD = %q, want refreshed PR head %q", got, wantSHA)
+	}
+}
+
+func TestRecreate_ManagedRefreshUsesRemoteWhenLocalCheckoutBranchIsBehind(t *testing.T) {
+	repoPath := initGitRepoWithRemote(t)
+	wantSHA := advanceRemoteBranch(t, repoPath, "feature/pr-branch")
+	runGit(t, repoPath, "remote", "set-url", "origin", "https://127.0.0.1:1/never.git")
+	worktreePath := filepath.Join(t.TempDir(), "task-managed-branch", "repo-1")
+	if err := os.MkdirAll(worktreePath, 0755); err != nil {
+		t.Fatalf("create worktree placeholder: %v", err)
+	}
+
+	mgr := newRecreateTestManager(t)
+	wt, err := mgr.recreate(context.Background(), &Worktree{
+		ID: "wt-managed-branch", SessionID: "session-managed-branch", TaskID: "task-managed-branch",
+		RepositoryID: "repo-1", RepositoryPath: repoPath, Path: worktreePath,
+		Branch: "feature/pr-branch", Status: StatusDeleted,
+	}, CreateRequest{
+		SessionID: "session-managed-branch", TaskID: "task-managed-branch", RepositoryID: "repo-1",
+		RepositoryPath: repoPath, CheckoutBranch: "feature/pr-branch", PullBeforeWorktree: true,
+		RefreshRepository: func(context.Context) error { return nil },
+	})
+	if err != nil {
+		t.Fatalf("recreate(): %v", err)
+	}
+	if got := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD")); got != wantSHA {
+		t.Fatalf("worktree HEAD = %q, want refreshed branch head %q", got, wantSHA)
+	}
+}
+
+func TestRecreate_ManagedRefreshUsesRemotePRHeadWhenLocalCheckoutBranchIsBehind(t *testing.T) {
+	repoPath, wantSHA := initManagedPRCheckoutBranch(t, 977, "feature/managed-fork-pr-behind")
+	runGit(t, repoPath, "remote", "set-url", "origin", "https://127.0.0.1:1/never.git")
+	worktreePath := filepath.Join(t.TempDir(), "task-managed-pr-behind", "repo-1")
+	if err := os.MkdirAll(worktreePath, 0755); err != nil {
+		t.Fatalf("create worktree placeholder: %v", err)
+	}
+
+	mgr := newRecreateTestManager(t)
+	wt, err := mgr.recreate(context.Background(), &Worktree{
+		ID: "wt-managed-pr-behind", SessionID: "session-managed-pr-behind", TaskID: "task-managed-pr-behind",
+		RepositoryID: "repo-1", RepositoryPath: repoPath, Path: worktreePath,
+		Branch: "feature/managed-fork-pr-behind", Status: StatusDeleted,
+	}, CreateRequest{
+		SessionID: "session-managed-pr-behind", TaskID: "task-managed-pr-behind", RepositoryID: "repo-1",
+		RepositoryPath: repoPath, CheckoutBranch: "feature/managed-fork-pr-behind", PRNumber: 977,
+		PullBeforeWorktree: true,
+		RefreshRepository:  func(context.Context) error { return nil },
+	})
+	if err != nil {
+		t.Fatalf("recreate(): %v", err)
+	}
+	if got := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD")); got != wantSHA {
+		t.Fatalf("worktree HEAD = %q, want refreshed PR head %q", got, wantSHA)
 	}
 }
 

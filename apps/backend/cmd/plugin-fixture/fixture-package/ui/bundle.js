@@ -760,6 +760,22 @@
 
       registry.registerKeybinding("open-demo", function () {
         function DemoModalContent() {
+          var completedState = React.useState(false);
+          var completed = completedState[0];
+          var setCompleted = completedState[1];
+          var longRows = [];
+          for (var index = 0; index < 32; index += 1) {
+            longRows.push(
+              jsx(
+                "p",
+                { key: "long-modal-row-" + index },
+                "Long plugin modal content row " +
+                  String(index + 1) +
+                  " keeps the opaque plugin surface growing beyond the viewport.",
+              ),
+            );
+          }
+
           // The Tooltip is the point of this modal in e2e: PluginModalHost
           // mounts outside AppShell, so without its own TooltipProvider a
           // Tooltip here throws on render and the error boundary swallows the
@@ -767,13 +783,30 @@
           // hover, so real pointer hover is only assertable here.
           return jsx(
             "div",
-            { id: "hello-demo-modal", "data-testid": "hello-demo-modal" },
+            {
+              id: "hello-demo-modal",
+              "data-testid": "hello-demo-modal",
+              style: { display: "grid", gap: "8px" },
+            },
             "Hello from the plugin modal",
             jsx(
               ui.Tooltip,
               null,
               jsx(ui.TooltipTrigger, { "data-testid": "hello-modal-tooltip-trigger" }, "hover me"),
               jsx(ui.TooltipContent, null, "Tooltip inside a plugin modal"),
+            ),
+            jsx("div", { "data-testid": "hello-long-modal-content" }, longRows),
+            jsx(
+              "button",
+              {
+                type: "button",
+                "data-testid": "hello-long-modal-final-action",
+                style: { minHeight: "44px", padding: "8px 12px" },
+                onClick: function () {
+                  setCompleted(true);
+                },
+              },
+              completed ? "Plugin modal action complete" : "Complete plugin modal action",
             ),
           );
         }

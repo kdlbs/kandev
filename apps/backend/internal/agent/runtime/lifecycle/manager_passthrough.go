@@ -226,6 +226,13 @@ func (m *Manager) resolvePassthroughAgent(ctx context.Context, execution *AgentE
 	}, nil
 }
 
+func rejectPassthroughGitMetadataPolicy(execution *AgentExecution) error {
+	if execution != nil && len(execution.GitMetadataProjections) > 0 {
+		return errors.New("cannot enforce task Git metadata permissions in passthrough mode; choose ACP")
+	}
+	return nil
+}
+
 // promptForPassthroughCommand returns the prompt that should be passed to
 // BuildPassthroughCommand.
 //
@@ -633,6 +640,9 @@ func setPassthroughMCPEnv(execution *AgentExecution, env map[string]string) {
 // passthroughAgentCommand validates passthrough support and builds the command for a passthrough session.
 // Returns the PassthroughAgent, PassthroughConfig, RuntimeConfig pointer, command, and any error.
 func (m *Manager) passthroughAgentCommand(ctx context.Context, execution *AgentExecution, profileInfo *AgentProfileInfo) (agents.PassthroughAgent, agents.PassthroughConfig, *agents.RuntimeConfig, agents.Command, error) {
+	if err := rejectPassthroughGitMetadataPolicy(execution); err != nil {
+		return nil, agents.PassthroughConfig{}, nil, agents.Command{}, err
+	}
 	agentConfig, err := m.getAgentConfigForExecution(execution)
 	if err != nil {
 		return nil, agents.PassthroughConfig{}, nil, agents.Command{}, fmt.Errorf("failed to get agent config: %w", err)
@@ -821,6 +831,9 @@ func profilePermissionValues(p *AgentProfileInfo) map[string]bool {
 // freshPassthroughCommand resolves the agent config and profile, and builds a
 // bare passthrough command with no session, resume, or prompt flags.
 func (m *Manager) freshPassthroughCommand(ctx context.Context, execution *AgentExecution) (agents.PassthroughConfig, *agents.RuntimeConfig, agents.Command, error) {
+	if err := rejectPassthroughGitMetadataPolicy(execution); err != nil {
+		return agents.PassthroughConfig{}, nil, agents.Command{}, err
+	}
 	resolved, err := m.resolvePassthroughAgent(ctx, execution)
 	if err != nil {
 		return agents.PassthroughConfig{}, nil, agents.Command{}, err
@@ -966,6 +979,9 @@ func (m *Manager) resumePassthroughSession(ctx context.Context, sessionID, expec
 	defer execution.passthroughLifecycleMu.Unlock()
 	if expectedProcessID != "" && execution.PassthroughProcessID != expectedProcessID {
 		return errPassthroughProcessReplaced
+	}
+	if err := rejectPassthroughGitMetadataPolicy(execution); err != nil {
+		return err
 	}
 
 	resolved, err := m.resolvePassthroughAgent(ctx, execution)

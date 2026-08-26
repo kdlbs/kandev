@@ -72,6 +72,29 @@ func TestResolveGitMetadataRejectsSymlinkedGitEntry(t *testing.T) {
 	}
 }
 
+func TestResolveGitMetadataRejectsSymlinkedHead(t *testing.T) {
+	repo := initGitMetadataRepository(t)
+	checkout := filepath.Join(t.TempDir(), "task-checkout")
+	runGitMetadata(t, repo, "worktree", "add", "-b", "task-branch", checkout)
+
+	gitDir := runGitMetadata(t, checkout, "rev-parse", "--path-format=absolute", "--git-dir")
+	headPath := filepath.Join(gitDir, "HEAD")
+	forgedHead := filepath.Join(t.TempDir(), "forged-HEAD")
+	if err := os.WriteFile(forgedHead, []byte("ref: refs/heads/attacker\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(headPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(forgedHead, headPath); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	if _, err := ResolveGitMetadata(checkout); !errors.Is(err, ErrGitMetadataProjectionInvalid) {
+		t.Fatalf("ResolveGitMetadata error = %v, want symlinked HEAD rejection", err)
+	}
+}
+
 func TestResolveGitMetadataRejectsSymlinkedWritableDependencies(t *testing.T) {
 	for _, dependency := range []string{"objects", "logs"} {
 		t.Run(dependency, func(t *testing.T) {

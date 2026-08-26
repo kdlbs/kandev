@@ -19,7 +19,7 @@ import type { DockerContainer } from "@/lib/api/domains/settings-api";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { SettingsCardHeader } from "@/components/settings/settings-card-header";
 import { settingsActionClassName } from "@/components/settings/settings-control";
-import { useAppStore } from "@/components/state-provider";
+import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
 import { useTranslation } from "react-i18next";
 
 const DEFAULT_IMAGE_TAG = "kandev/multi-agent:latest";
@@ -203,16 +203,6 @@ function BuildActionRow({
   );
 }
 
-/**
- * Building an image is a host-level operation with no per-user resource, so the
- * backend gates POST /api/v1/docker/build on the admin role. An undefined role
- * means authentication is disabled (the synthetic single-user admin), which
- * keeps the control enabled exactly as before.
- */
-export function canBuildDockerImage(role: string | undefined): boolean {
-  return role === undefined || role === "admin";
-}
-
 export function DockerfileBuildCard({
   dockerfile,
   onDockerfileChange,
@@ -225,8 +215,9 @@ export function DockerfileBuildCard({
   const { t } = useTranslation();
   const { buildStatus, buildLog, runBuild } = useBuildStream(onBuildSuccess);
   const logRef = useRef<HTMLPreElement>(null);
-  const role = useAppStore((state) => state.auth.user?.role);
-  const canBuild = canBuildDockerImage(role);
+  // Building an image is a host-level operation with no per-user resource, so
+  // the backend gates POST /api/v1/docker/build on the admin role.
+  const canBuild = useIsAdmin();
 
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;

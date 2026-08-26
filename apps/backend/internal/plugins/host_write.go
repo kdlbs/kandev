@@ -213,8 +213,9 @@ func (r taskReader) Update(ctx context.Context, in pluginsdk.UpdateTaskInput) (*
 		}
 		return nil, err
 	}
-	dto := taskModelToDTO(updated)
-	return &dto, nil
+	items := []pluginsdk.Task{taskModelToDTO(updated)}
+	r.host.attachPullRequests(ctx, items)
+	return &items[0], nil
 }
 
 // resolveCreatePlacement fills the workspace and workflow a created task lands
@@ -446,7 +447,9 @@ func (m pluginOwnedTaskTreeManager) Preview(ctx context.Context, rootTaskID stri
 	if err != nil {
 		return nil, err
 	}
-	return tasksToDTOs(tasks), nil
+	dtos := tasksToDTOs(tasks)
+	m.host.attachPullRequests(ctx, dtos)
+	return dtos, nil
 }
 
 func (m pluginOwnedTaskTreeManager) Delete(ctx context.Context, rootTaskID string) ([]string, error) {

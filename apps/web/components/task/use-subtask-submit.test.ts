@@ -245,6 +245,7 @@ function makeSubmitOptions(
   };
 }
 
+// eslint-disable-next-line max-lines-per-function -- subtask submission cases share one hook harness.
 describe("useSubtaskSubmit", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -279,6 +280,42 @@ describe("useSubtaskSubmit", () => {
     });
 
     expect(mockCreateTask).toHaveBeenCalledWith(expect.objectContaining({ autopilot: true }));
+  });
+
+  it("passes fresh-branch metadata when a local executor uses a policy row", async () => {
+    const buildRepositoriesPayload = await import("@/components/task-create-dialog-helpers");
+    const opts = makeSubmitOptions({
+      isLocalExecutor: true,
+      fs: {
+        useRemote: false,
+        remoteRepos: [],
+        prInfoByUrl: {},
+        repositories: [
+          {
+            key: "row-1",
+            repositoryId: "repo-1",
+            branch: "main",
+            branchPolicyId: "policy-1",
+          },
+        ],
+        discoveredRepositories: [],
+        agentProfileId: "",
+        executorProfileId: "local-profile",
+        freshBranchEnabled: true,
+      } as unknown as Parameters<typeof useSubtaskSubmit>[0]["fs"],
+    });
+    const { result } = renderHook(() => useSubtaskSubmit(opts));
+
+    await act(async () => {
+      await result.current.handleSubmit({ preventDefault: vi.fn() } as never);
+    });
+
+    expect(buildRepositoriesPayload.buildRepositoriesPayload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        isLocalExecutor: true,
+        freshBranch: { confirmDiscard: false, consentedDirtyFiles: [] },
+      }),
+    );
   });
 
   it("requires a title when auto-title mode is omitted", async () => {

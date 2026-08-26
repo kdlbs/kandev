@@ -201,6 +201,7 @@ type HandoffService struct {
 	eventPublisher     TaskEventPublisher
 	resourceCleaner    TaskResourceCleaner
 	taskAccessCheck    func(ctx context.Context, taskID string) error
+	comments           CommentReader
 	logger             *logger.Logger
 	parentLock         parentMutex
 	workspaceGroupLock parentMutex
@@ -291,6 +292,15 @@ func (s *HandoffService) SetTaskResourceCleaner(c TaskResourceCleaner) {
 // of every archive and delete route.
 func (s *HandoffService) SetTaskAccessChecker(check func(ctx context.Context, taskID string) error) {
 	s.taskAccessCheck = check
+}
+
+// SetCommentReader wires the read-only comment store queried by
+// ListCommentsForCaller. Optional — when nil, ListCommentsForCaller reports
+// an internal error rather than falling back to an empty list (AC-005.2:
+// an unconfigured dependency must never look like "the task has no
+// comments").
+func (s *HandoffService) SetCommentReader(r CommentReader) {
+	s.comments = r
 }
 
 // authorizeTask applies the configured per-user task check. No-op when unwired.

@@ -285,6 +285,13 @@ func directChildName(parent, child string) (string, error) {
 }
 
 func readCurrentBranchRef(headPath string) (string, error) {
+	info, err := os.Lstat(headPath)
+	if err != nil {
+		return "", err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return "", errors.New("HEAD is not regular file")
+	}
 	content, err := os.ReadFile(headPath)
 	if err != nil {
 		return "", err

@@ -814,6 +814,140 @@ func (m *Manager) prepareExecutionCreateRequest(
 	}, nil
 }
 
+type workspaceExecutionGitMetadataIdentity struct {
+	repositoryID string
+	branchSlug   string
+}
+
+type workspaceExecutionGitMetadataTarget struct {
+	spec       WorkspaceRepositorySpec
+	branchSlug string
+}
+
+type workspaceExecutionGitMetadataIndex struct {
+	byID         map[string][]*worktree.Worktree
+	byIdentity   map[workspaceExecutionGitMetadataIdentity][]*worktree.Worktree
+	byRepository map[string][]*worktree.Worktree
+}
+
+func workspaceExecutionRepositoryBranchSlug(spec WorkspaceRepositorySpec) (string, error) {
+	raw := spec.BranchIdentitySlug
+	if raw == "" {
+		raw = spec.BranchSlug
+	}
+	if raw == "" {
+		return "", nil
+	}
+	slug := worktree.SanitizeBranchSlug(raw)
+	if slug == "" {
+		return "", errors.New(gitMetadataProjectionInvalid)
+	}
+	return slug, nil
+}
+
+func workspaceExecutionGitMetadataTargets(specs []WorkspaceRepositorySpec) ([]workspaceExecutionGitMetadataTarget, error) {
+	targets := make([]workspaceExecutionGitMetadataTarget, 0, len(specs))
+	identities := make(map[workspaceExecutionGitMetadataIdentity]struct{}, len(specs))
+	for _, spec := range specs {
+		if spec.RepositoryID == "" || spec.RepositoryPath == "" {
+			return nil, errors.New(gitMetadataProjectionInvalid)
+		}
+		branchSlug, err := workspaceExecutionRepositoryBranchSlug(spec)
+		if err != nil {
+			return nil, err
+		}
+		identity := workspaceExecutionGitMetadataIdentity{repositoryID: spec.RepositoryID, branchSlug: branchSlug}
+		if _, exists := identities[identity]; exists {
+			return nil, errors.New(gitMetadataProjectionInvalid)
+		}
+		identities[identity] = struct{}{}
+		targets = append(targets, workspaceExecutionGitMetadataTarget{spec: spec, branchSlug: branchSlug})
+	}
+	return targets, nil
+}
+
+func indexWorkspaceExecutionGitMetadataWorktrees(worktrees []*worktree.Worktree) workspaceExecutionGitMetadataIndex {
+	index := workspaceExecutionGitMetadataIndex{
+		byID:         make(map[string][]*worktree.Worktree, len(worktrees)),
+		byIdentity:   make(map[workspaceExecutionGitMetadataIdentity][]*worktree.Worktree, len(worktrees)),
+		byRepository: make(map[string][]*worktree.Worktree, len(worktrees)),
+	}
+	for _, wt := range worktrees {
+		if wt == nil || wt.Status != worktree.StatusActive || wt.RepositoryID == "" {
+			continue
+		}
+		branchSlug := worktree.SanitizeBranchSlug(wt.BranchSlug)
+		identity := workspaceExecutionGitMetadataIdentity{repositoryID: wt.RepositoryID, branchSlug: branchSlug}
+		index.byRepository[wt.RepositoryID] = append(index.byRepository[wt.RepositoryID], wt)
+		index.byIdentity[identity] = append(index.byIdentity[identity], wt)
+		if wt.ID != "" {
+			index.byID[wt.ID] = append(index.byID[wt.ID], wt)
+		}
+	}
+	return index
+}
+
+func selectWorkspaceExecutionGitMetadataWorktree(target workspaceExecutionGitMetadataTarget, index workspaceExecutionGitMetadataIndex) (*worktree.Worktree, error) {
+	identity := workspaceExecutionGitMetadataIdentity{repositoryID: target.spec.RepositoryID, branchSlug: target.branchSlug}
+	var candidates []*worktree.Worktree
+	switch {
+	case target.spec.WorktreeID != "":
+		candidates = index.byID[target.spec.WorktreeID]
+	case target.branchSlug != "":
+		candidates = index.byIdentity[identity]
+	default:
+		// Legacy records have no branch identity. Accept one unambiguous
+		// active record for this repository, but reject ambiguity.
+		candidates = index.byRepository[target.spec.RepositoryID]
+	}
+	if len(candidates) != 1 {
+		return nil, errors.New(gitMetadataProjectionInvalid)
+	}
+	wt := candidates[0]
+	branchSlug := worktree.SanitizeBranchSlug(wt.BranchSlug)
+	if wt.ID == "" || wt.RepositoryID != target.spec.RepositoryID || wt.Path == "" ||
+		(wt.BranchSlug != "" && branchSlug == "") ||
+		(target.spec.WorktreeID != "" && wt.ID != target.spec.WorktreeID) ||
+		(target.branchSlug != "" && branchSlug != target.branchSlug) {
+		return nil, errors.New(gitMetadataProjectionInvalid)
+	}
+	return wt, nil
+}
+
+func (m *Manager) projectWorkspaceExecutionGitMetadata(
+	targets []workspaceExecutionGitMetadataTarget,
+	index workspaceExecutionGitMetadataIndex,
+) ([]*worktree.GitMetadataProjection, error) {
+	projections := make([]*worktree.GitMetadataProjection, 0, len(targets))
+	seenCheckouts := make(map[string]struct{}, len(targets))
+	usedWorktrees := make(map[string]struct{}, len(targets))
+	for _, target := range targets {
+		wt, err := selectWorkspaceExecutionGitMetadataWorktree(target, index)
+		if err != nil {
+			return nil, err
+		}
+		if _, used := usedWorktrees[wt.ID]; used {
+			return nil, errors.New(gitMetadataProjectionInvalid)
+		}
+		usedWorktrees[wt.ID] = struct{}{}
+
+		// Use the current repository path from WorkspaceInfo. The persisted
+		// worktree path is only the checkout location and is not authority for
+		// which repository receives the metadata projection.
+		projection, err := worktree.ResolveGitMetadataForRepository(wt.Path, target.spec.RepositoryPath)
+		if err != nil {
+			m.logger.Warn("resolve workspace Git metadata failed", zap.String("repository_id", wt.RepositoryID), zap.Error(err))
+			return nil, errors.New(gitMetadataProjectionInvalid)
+		}
+		if _, exists := seenCheckouts[projection.CheckoutPath]; exists {
+			return nil, errors.New(gitMetadataProjectionInvalid)
+		}
+		seenCheckouts[projection.CheckoutPath] = struct{}{}
+		projections = append(projections, projection)
+	}
+	return projections, nil
+}
+
 func (m *Manager) workspaceExecutionGitMetadataProjections(ctx context.Context, taskID string, info *WorkspaceInfo) ([]*worktree.GitMetadataProjection, error) {
 	if info == nil || info.ExecutorType != string(models.ExecutorTypeWorktree) || len(info.WorkspaceRepositories) == 0 {
 		return nil, nil
@@ -821,30 +955,18 @@ func (m *Manager) workspaceExecutionGitMetadataProjections(ctx context.Context, 
 	if m.worktreeMgr == nil {
 		return nil, fmt.Errorf("%s: worktree manager is not configured", gitMetadataProjectionInvalid)
 	}
+	targets, err := workspaceExecutionGitMetadataTargets(info.WorkspaceRepositories)
+	if err != nil {
+		return nil, err
+	}
 	worktrees, err := m.worktreeMgr.GetAllByTaskID(ctx, taskID)
 	if err != nil {
 		m.logger.Warn("list workspace Git metadata failed", zap.Error(err))
 		return nil, errors.New(gitMetadataProjectionInvalid)
 	}
-	projections := make([]*worktree.GitMetadataProjection, 0, len(worktrees))
-	seen := make(map[string]struct{}, len(worktrees))
-	for _, wt := range worktrees {
-		if wt == nil || wt.Path == "" || wt.RepositoryPath == "" {
-			continue
-		}
-		projection, err := worktree.ResolveGitMetadataForRepository(wt.Path, wt.RepositoryPath)
-		if err != nil {
-			m.logger.Warn("resolve workspace Git metadata failed", zap.String("repository_id", wt.RepositoryID), zap.Error(err))
-			return nil, errors.New(gitMetadataProjectionInvalid)
-		}
-		if _, exists := seen[projection.CheckoutPath]; exists {
-			continue
-		}
-		seen[projection.CheckoutPath] = struct{}{}
-		projections = append(projections, projection)
-	}
-	if len(projections) == 0 {
-		return nil, fmt.Errorf("%s: no task worktrees found", gitMetadataProjectionInvalid)
+	projections, err := m.projectWorkspaceExecutionGitMetadata(targets, indexWorkspaceExecutionGitMetadataWorktrees(worktrees))
+	if err != nil {
+		return nil, err
 	}
 	if err := validateGitMetadataProjections(projections); err != nil {
 		return nil, fmt.Errorf("%s: %w", gitMetadataProjectionInvalid, err)
