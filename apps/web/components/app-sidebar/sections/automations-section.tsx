@@ -16,6 +16,7 @@ import { useLiveRefresh } from "@/components/runs/use-live-refresh";
 import { useWorkspaceAutomations } from "@/components/runs/use-workspace-automations";
 import { AUTOMATIONS_HREF } from "@/components/runs/runs-view";
 import { usePathname } from "@/lib/routing/client-router";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useNow } from "@/hooks/use-now";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import {
@@ -127,6 +128,7 @@ export function AutomationsSection({ collapsed }: { collapsed: boolean }) {
   const { t } = useTranslation();
   const pathname = usePathname();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const { isMobile } = useResponsiveBreakpoint();
   // Folded until asked for. Automations are a background concern — they run
   // whether or not anyone is looking — so they should not push the tasks
   // someone came here to work on off the bottom of the rail.
@@ -139,7 +141,7 @@ export function AutomationsSection({ collapsed }: { collapsed: boolean }) {
   // has to say how many it is hiding — a section that starts shut and shows
   // nothing reads as empty, and nobody opens it. Health summaries are the
   // heavier read and buy nothing until the rows themselves are on screen.
-  const showing = !collapsed && expanded;
+  const showing = !collapsed && expanded && !isMobile;
   const listScope = collapsed ? undefined : (workspaceId ?? undefined);
   const summaryScope = showing ? (workspaceId ?? undefined) : undefined;
   const { automations } = useWorkspaceAutomations(listScope);

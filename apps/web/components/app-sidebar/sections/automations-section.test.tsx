@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   listAutomationSummaries: vi.fn(),
   activeWorkspaceId: { current: "workspace-1" as string | undefined },
   sectionExpanded: { current: {} as Record<string, boolean> },
+  responsive: { isMobile: false },
   toggleSection: vi.fn(),
   setCollapsed: vi.fn(),
 }));
@@ -42,6 +43,10 @@ vi.mock("@/lib/api/domains/automation-api", () => ({
 vi.mock("@/lib/routing/client-router", () => ({
   usePathname: () => `/automations/${AUTOMATION_ID}`,
   useRouter: () => ({ push: vi.fn() }),
+}));
+
+vi.mock("@/hooks/use-responsive-breakpoint", () => ({
+  useResponsiveBreakpoint: () => mocks.responsive,
 }));
 
 import { AutomationsSection } from "./automations-section";
@@ -78,6 +83,7 @@ function renderOpenSection() {
 beforeEach(() => {
   mocks.activeWorkspaceId.current = WORKSPACE_ID;
   mocks.sectionExpanded.current = {};
+  mocks.responsive.isMobile = false;
   mocks.listAutomations.mockReset();
   mocks.listAutomationSummaries.mockReset();
   mocks.listAutomations.mockResolvedValue([mkAutomation()]);
@@ -266,6 +272,25 @@ describe("AutomationsSection live running state", () => {
       await waitFor(() => expect(mocks.listAutomationSummaries).toHaveBeenCalledTimes(3));
       expect(screen.queryByTestId(`sidebar-automation-running-${AUTOMATION_ID}`)).toBeNull();
       expect(screen.getByText("Idle.")).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("AutomationsSection responsive visibility", () => {
+  it("does not fetch or poll health while the desktop rail is hidden on mobile", async () => {
+    mocks.responsive.isMobile = true;
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      renderOpenSection();
+      await screen.findByTestId(`sidebar-automation-${AUTOMATION_ID}`);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(LIVE_REFRESH_INTERVAL_MS * 2);
+      });
+
+      expect(mocks.listAutomationSummaries).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
