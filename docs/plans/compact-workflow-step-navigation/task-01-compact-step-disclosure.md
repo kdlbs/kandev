@@ -65,7 +65,10 @@ pnpm e2e:run --host --no-build --project mobile-chrome -- tests/task/mobile-side
 - `apps/web/components/task/workflow-stepper.tsx`
 - `apps/web/components/task/workflow-step-disclosure.tsx`
 - `apps/web/components/task/workflow-stepper.test.tsx`
+- `apps/web/e2e/helpers/animations.ts`
 - `apps/web/e2e/tests/layout/task-topbar-workflow-stepper.spec.ts`
+- `apps/web/e2e/tests/plugins/bitbucket-packaged-plugin.spec.ts`
+- `apps/web/e2e/tests/review/submodule-review-helpers.ts`
 - `docs/plans/compact-workflow-step-navigation/plan.md`
 - `docs/plans/compact-workflow-step-navigation/task-01-compact-step-disclosure.md`
 
@@ -104,6 +107,7 @@ Completed 2026-08-26.
 - Added component coverage for expanded and compact states, ordered disclosure content, eligibility, movement payload, coarse-pointer behavior, archived state, and empty workflows.
 - Added Chromium coverage for hover, keyboard focus, Escape dismissal, focus return, movement, and tablet touch-drawer containment.
 - Re-ran the existing Pixel 5 mobile task-drawer movement scenario successfully.
+- Applied PR review remediation: defined the disclosure-owned step type, added failed-move recovery coverage, and centralized finite-animation waiting for the affected E2E helpers.
 
 Verification commands passed:
 
@@ -114,4 +118,6 @@ pnpm run i18n:ratchet -- --files components/task/workflow-stepper.tsx components
 pnpm exec eslint components/task/workflow-stepper.tsx components/task/workflow-step-disclosure.tsx components/task/workflow-stepper.test.tsx e2e/tests/layout/task-topbar-workflow-stepper.spec.ts
 pnpm e2e:run --host --no-build --project chromium -- tests/layout/task-topbar-workflow-stepper.spec.ts --workers=1
 pnpm e2e:run --host --no-build --project mobile-chrome -- tests/task/mobile-sidebar-task-actions.spec.ts --grep "moves a task to another step from the mobile task drawer" --workers=1
+pnpm exec eslint components/task/workflow-stepper.tsx components/task/workflow-step-disclosure.tsx components/task/workflow-stepper.test.tsx e2e/helpers/animations.ts e2e/tests/layout/task-topbar-workflow-stepper.spec.ts e2e/tests/plugins/bitbucket-packaged-plugin.spec.ts e2e/tests/review/submodule-review-helpers.ts
+pnpm e2e:run --host --no-build --project chromium -- tests/layout/task-topbar-workflow-stepper.spec.ts --workers=1
 ```

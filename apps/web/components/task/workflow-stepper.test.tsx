@@ -134,6 +134,13 @@ const DISCLOSURE_STEPS: WorkflowStepperStep[] = [
   ...STEPS,
   { id: "d", name: "Done", color: "#444", position: 3, allow_manual_move: false },
 ];
+const TASK_ID = "task-1";
+const WORKFLOW_ID = "workflow-1";
+const DISCLOSURE_TEST_ID = "workflow-step-disclosure";
+const MOVE_A_TEST_ID = "workflow-step-disclosure-move-a";
+const MOVE_C_TEST_ID = "workflow-step-disclosure-move-c";
+const MOVE_D_TEST_ID = "workflow-step-disclosure-move-d";
+const TRIGGER_LABEL = "Step 2 of 4: Work";
 
 describe("WorkflowStepper", () => {
   it("renders every step when there is room (not collapsed)", () => {
@@ -174,27 +181,27 @@ describe("WorkflowStepper compact disclosure", () => {
       <WorkflowStepper
         steps={DISCLOSURE_STEPS}
         currentStepId="b"
-        taskId="task-1"
-        workflowId="workflow-1"
+        taskId={TASK_ID}
+        workflowId={WORKFLOW_ID}
       />,
     );
 
-    const trigger = screen.getByRole("button", { name: "Step 2 of 4: Work" });
+    const trigger = screen.getByRole("button", { name: TRIGGER_LABEL });
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
 
     fireEvent.mouseEnter(trigger);
 
-    expect(screen.getByTestId("workflow-step-disclosure")).toBeTruthy();
+    expect(screen.getByTestId(DISCLOSURE_TEST_ID)).toBeTruthy();
     expect(screen.getByTestId("workflow-step-disclosure-row-a")).toBeTruthy();
     expect(screen.getByTestId("workflow-step-disclosure-row-b").getAttribute("aria-current")).toBe(
       "step",
     );
     expect(screen.getByTestId("workflow-step-disclosure-row-c")).toBeTruthy();
     expect(screen.getByTestId("workflow-step-disclosure-row-d")).toBeTruthy();
-    expect(screen.getByTestId("workflow-step-disclosure-move-a")).toBeTruthy();
+    expect(screen.getByTestId(MOVE_A_TEST_ID)).toBeTruthy();
     expect(screen.queryByTestId("workflow-step-disclosure-move-b")).toBeNull();
-    expect(screen.getByTestId("workflow-step-disclosure-move-c")).toBeTruthy();
-    expect(screen.queryByTestId("workflow-step-disclosure-move-d")).toBeNull();
+    expect(screen.getByTestId(MOVE_C_TEST_ID)).toBeTruthy();
+    expect(screen.queryByTestId(MOVE_D_TEST_ID)).toBeNull();
   });
 
   it("moves an eligible target with the existing payload and closes after success", async () => {
@@ -204,22 +211,42 @@ describe("WorkflowStepper compact disclosure", () => {
       <WorkflowStepper
         steps={DISCLOSURE_STEPS}
         currentStepId="b"
-        taskId="task-1"
-        workflowId="workflow-1"
+        taskId={TASK_ID}
+        workflowId={WORKFLOW_ID}
       />,
     );
 
-    fireEvent.mouseEnter(screen.getByRole("button", { name: "Step 2 of 4: Work" }));
-    fireEvent.click(screen.getByTestId("workflow-step-disclosure-move-c"));
+    fireEvent.mouseEnter(screen.getByRole("button", { name: TRIGGER_LABEL }));
+    fireEvent.click(screen.getByTestId(MOVE_C_TEST_ID));
 
     await waitFor(() =>
-      expect(moveTask).toHaveBeenCalledWith("task-1", {
-        workflow_id: "workflow-1",
+      expect(moveTask).toHaveBeenCalledWith(TASK_ID, {
+        workflow_id: WORKFLOW_ID,
         workflow_step_id: "c",
         position: 0,
       }),
     );
-    await waitFor(() => expect(screen.queryByTestId("workflow-step-disclosure")).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId(DISCLOSURE_TEST_ID)).toBeNull());
+  });
+
+  it("keeps the disclosure open and re-enables the target after a failed move", async () => {
+    collapsedMock.mockReturnValue(true);
+    vi.mocked(moveTask).mockRejectedValue(new Error("network error"));
+    render(
+      <WorkflowStepper
+        steps={DISCLOSURE_STEPS}
+        currentStepId="b"
+        taskId={TASK_ID}
+        workflowId={WORKFLOW_ID}
+      />,
+    );
+
+    fireEvent.mouseEnter(screen.getByRole("button", { name: TRIGGER_LABEL }));
+    const moveButton = screen.getByTestId(MOVE_C_TEST_ID);
+    fireEvent.click(moveButton);
+
+    await waitFor(() => expect(moveButton.hasAttribute("disabled")).toBe(false));
+    expect(screen.getByTestId(DISCLOSURE_TEST_ID)).toBeTruthy();
   });
 
   it("uses the same step choices in a coarse-pointer drawer", () => {
@@ -229,18 +256,18 @@ describe("WorkflowStepper compact disclosure", () => {
       <WorkflowStepper
         steps={DISCLOSURE_STEPS}
         currentStepId="b"
-        taskId="task-1"
-        workflowId="workflow-1"
+        taskId={TASK_ID}
+        workflowId={WORKFLOW_ID}
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Step 2 of 4: Work" }));
+    fireEvent.click(screen.getByRole("button", { name: TRIGGER_LABEL }));
 
     expect(screen.getByRole("dialog")).toBeTruthy();
-    expect(screen.getByTestId("workflow-step-disclosure")).toBeTruthy();
-    expect(screen.getByTestId("workflow-step-disclosure-move-a")).toBeTruthy();
-    expect(screen.getByTestId("workflow-step-disclosure-move-c")).toBeTruthy();
-    expect(screen.queryByTestId("workflow-step-disclosure-move-d")).toBeNull();
+    expect(screen.getByTestId(DISCLOSURE_TEST_ID)).toBeTruthy();
+    expect(screen.getByTestId(MOVE_A_TEST_ID)).toBeTruthy();
+    expect(screen.getByTestId(MOVE_C_TEST_ID)).toBeTruthy();
+    expect(screen.queryByTestId(MOVE_D_TEST_ID)).toBeNull();
   });
 });
 
@@ -260,8 +287,8 @@ describe("WorkflowStepper fallback states", () => {
       <WorkflowStepper
         steps={STEPS}
         currentStepId="b"
-        taskId="task-1"
-        workflowId="workflow-1"
+        taskId={TASK_ID}
+        workflowId={WORKFLOW_ID}
         isArchived
       />,
     );

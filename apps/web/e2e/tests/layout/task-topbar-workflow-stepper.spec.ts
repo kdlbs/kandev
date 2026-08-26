@@ -1,5 +1,5 @@
-import { type Locator } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { SessionPage } from "../../pages/session-page";
 
 const COMPACT_TASK_TITLE = `Compact workflow navigation ${"W".repeat(90)}`;
@@ -13,15 +13,6 @@ function adjacentStep(
   const target = sorted[currentIndex + 1] ?? sorted[currentIndex - 1];
   if (!target) throw new Error("compact workflow step test requires an adjacent target");
   return target;
-}
-
-async function waitForFiniteAnimations(locator: Locator): Promise<void> {
-  await locator.evaluate(async (element) => {
-    const animations = element.getAnimations().filter((animation) => {
-      return animation.effect?.getComputedTiming().iterations !== Infinity;
-    });
-    await Promise.all(animations.map((animation) => animation.finished.catch(() => undefined)));
-  });
 }
 
 test.describe("Compact task topbar workflow stepper", () => {

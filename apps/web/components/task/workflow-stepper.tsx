@@ -12,26 +12,16 @@ import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { useLayoutStore } from "@/lib/state/layout-store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useToolbarCollapsed } from "@/hooks/use-toolbar-collapsed";
-import type { KanbanStepEvents } from "@/lib/state/slices/kanban/types";
 import { useTranslation } from "react-i18next";
 import {
   MinimalWorkflowStepper,
   StepCircleIndicator,
   canMoveToStep,
   getStepLabelClass,
+  type WorkflowStepperStep,
 } from "./workflow-step-disclosure";
 
-type Step = {
-  id: string;
-  name: string;
-  color: string;
-  position: number;
-  events?: KanbanStepEvents;
-  allow_manual_move?: boolean;
-  prompt?: string;
-  is_start_step?: boolean;
-  agent_profile_id?: string;
-};
+type Step = WorkflowStepperStep;
 
 const PLAN_CONTEXT_PATH = "plan:context";
 
@@ -279,4 +269,4 @@ function StepHoverContent({
 }
 
 export { WorkflowStepper };
-export type { Step as WorkflowStepperStep };
+export type { WorkflowStepperStep } from "./workflow-step-disclosure";

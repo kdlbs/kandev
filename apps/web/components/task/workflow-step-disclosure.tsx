@@ -15,8 +15,20 @@ import {
 import { IconArrowRight } from "@tabler/icons-react";
 import { StepCapabilityIcons } from "@/components/step-capability-icons";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
+import type { KanbanStepEvents } from "@/lib/state/slices/kanban/types";
 import { useTranslation } from "react-i18next";
-import type { WorkflowStepperStep } from "./workflow-stepper";
+
+export type WorkflowStepperStep = {
+  id: string;
+  name: string;
+  color: string;
+  position: number;
+  events?: KanbanStepEvents;
+  allow_manual_move?: boolean;
+  prompt?: string;
+  is_start_step?: boolean;
+  agent_profile_id?: string;
+};
 
 type Step = WorkflowStepperStep;
 

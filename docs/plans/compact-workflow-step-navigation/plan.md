@@ -83,7 +83,7 @@ Keep `apps/web/e2e/tests/task/mobile-sidebar-task-actions.spec.ts` unchanged. It
 | `AC-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001.3` | Touch-drawer component test and tablet E2E                    |
 | `AC-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001.4` | Eligibility and current-step component tests                  |
 | `AC-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001.5` | `moveTask` payload component test and API-poll E2E assertions |
-| `AC-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001.6` | Keyboard component test and tablet geometry assertions        |
+| `AC-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001.6` | Keyboard desktop E2E and tablet geometry assertions           |
 | `AC-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001.7` | Archived compact-state component test                         |
 | `AC-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001.8` | Existing expanded-mode component test                         |
 | `AC-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001.9` | Existing Pixel 5 mobile task-drawer E2E scenario              |
@@ -108,6 +108,8 @@ Completed 2026-08-26.
 - Chromium E2E: compact hover, keyboard dismissal, focus return, and tablet touch-drawer scenarios passed.
 - Mobile-chrome E2E: existing phone **Move to** scenario passed.
 - Tablet geometry: the touch drawer stayed inside the viewport, the document did not gain horizontal overflow, and target rows measured at least 44px.
+- PR fixup: 9 component tests passed, focused ESLint passed with no warnings, and the Chromium compact-step E2E passed after review remediation.
+- PR fixup: the shared finite-animation helper replaced duplicate E2E implementations without changing the phone movement path.
 
 ## Risks
 
