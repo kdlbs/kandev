@@ -395,6 +395,14 @@ func (ss *SchedulerService) cascadeChildrenCompleted(
 	if err != nil || parentAssignee == "" {
 		return
 	}
+	// NOTE: ListChildStates is a separate read from AreAllChildrenTerminal,
+	// with no enclosing transaction. A concurrent child insert between the
+	// two reads can produce a key over a not-actually-all-terminal
+	// snapshot. The parent gets a spurious wake but is woken again (with a
+	// correct key) once the real all-terminal condition is reached, so
+	// this is an accepted race, not a correctness bug — it just makes the
+	// key marginally less precise, never wrong in the direction of
+	// silently dropping a wake.
 	children, err := ss.repo.ListChildStates(ctx, task.ParentID)
 	if err != nil {
 		ss.logger.Error("list child states failed",
@@ -410,15 +418,23 @@ func (ss *SchedulerService) cascadeChildrenCompleted(
 	})
 }
 
-// childrenCompletedIdempotencyKey digests the parent's child set (ids and
-// states, already ordered by id via ListChildStates) into an idempotency
-// key for the task_children_completed wake. See cascadeChildrenCompleted
-// for why this must vary across delegation waves instead of being
-// permanently unique per (parent, agent).
+// childrenCompletedIdempotencyKey digests the parent's child ID set
+// (already ordered by id via ListChildStates) into an idempotency key for
+// the task_children_completed wake. See cascadeChildrenCompleted for why
+// this must vary across delegation waves instead of being permanently
+// unique per (parent, agent).
+//
+// Only IDs go into the digest, not each child's state string. By the time
+// this runs, cascadeChildrenCompleted has already confirmed every child is
+// terminal, so a wave is identified by WHICH children exist, not which
+// terminal state each one happens to be in — hashing the state as well
+// would make an unrelated terminal-to-terminal edit (e.g. a cancelled
+// sibling later marked completed by a user) look like a new wave and
+// produce a spurious wake, even though the child set never changed.
 func childrenCompletedIdempotencyKey(parentID, agentID string, children []sqlite.ChildState) string {
 	parts := make([]string, 0, len(children))
 	for _, c := range children {
-		parts = append(parts, c.TaskID+":"+c.State)
+		parts = append(parts, c.TaskID)
 	}
 	sum := sha256.Sum256([]byte(strings.Join(parts, ",")))
 	return fmt.Sprintf("%s:%s:%s:%x", RunReasonTaskChildrenCompleted, parentID, agentID, sum)

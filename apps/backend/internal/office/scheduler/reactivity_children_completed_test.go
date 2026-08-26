@@ -222,3 +222,42 @@ func TestCascadeChildrenCompleted_DistinctWaveBeyondIdempotencyWindow_NoInsertEr
 		t.Fatalf("persisted runs = %d, want 2 (distinct wave past the window must not collide)", got)
 	}
 }
+
+// TestCascadeChildrenCompleted_ChildTerminalStateEdited_DoesNotPersistNewRun
+// is the regression test for a review finding (PR #3059): reactToStatusChange
+// invokes cascadeChildrenCompleted on any transition into "done", regardless
+// of the child's PRIOR state, so a sibling that is later edited from
+// CANCELLED to COMPLETED (a terminal-to-terminal transition, not a new
+// delegation wave) fires this cascade again. If the idempotency key digested
+// each child's state string, that edit alone would change the digest and
+// persist a spurious second run even though the child ID set never changed.
+// The parent must be woken exactly once for an unchanged child set.
+func TestCascadeChildrenCompleted_ChildTerminalStateEdited_DoesNotPersistNewRun(t *testing.T) {
+	repo := newReactivityTestRepo(t)
+	ss := newChildrenCompletedTestScheduler(t, repo)
+	createChildrenCompletedAgent(t, repo, "agent-1")
+	setupChildrenCompletedParent(t, ss, "parent-1", "agent-1")
+	queue := newChildrenCompletedQueue(t, ss)
+	ctx := context.Background()
+
+	insertChildTask(t, ss, "child-1", "parent-1", "CANCELLED")
+	task := &TaskSnapshot{ID: "child-1", WorkspaceID: "ws-1", ParentID: "parent-1"}
+	ss.cascadeChildrenCompleted(ctx, task, queue)
+
+	if got := runsCountForReason(t, ss, RunReasonTaskChildrenCompleted); got != 1 {
+		t.Fatalf("after first terminal state: persisted runs = %d, want 1", got)
+	}
+
+	ageRunsRequestedAt(t, ss, 10*time.Second)
+
+	// Same child, edited from CANCELLED to COMPLETED — still the only
+	// child of parent-1, so the child ID set is unchanged.
+	if _, err := ss.repo.ExecRaw(ctx, `UPDATE tasks SET state = 'COMPLETED' WHERE id = 'child-1'`); err != nil {
+		t.Fatalf("edit child-1 state: %v", err)
+	}
+	ss.cascadeChildrenCompleted(ctx, task, queue)
+
+	if got := runsCountForReason(t, ss, RunReasonTaskChildrenCompleted); got != 1 {
+		t.Fatalf("after terminal-to-terminal edit: persisted runs = %d, want 1 (unchanged child set must not re-wake)", got)
+	}
+}
