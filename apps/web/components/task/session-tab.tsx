@@ -370,7 +370,6 @@ function useSessionMenuDelete(
   triggerRef: RefObject<HTMLElement | null>,
   openMenuDelete: () => void,
 ) {
-  const menuDeleteFocusBoundaryRef = useRef<HTMLElement>(null);
   const handleMenuDelete = useCallback(
     (_event: Event) => {
       // The popover anchor ref is the trigger element so it stays connected
@@ -384,12 +383,15 @@ function useSessionMenuDelete(
       // ContextMenu onCloseAutoFocus focuses the trigger, which fires
       // onFocusOutside on the popover, and the disconnected context-menu-content
       // boundary ref would fail the contains() check, closing the popover.
-      menuDeleteFocusBoundaryRef.current = triggerRef.current;
       openMenuDelete();
     },
     [openMenuDelete, triggerRef],
   );
-  return { menuDeleteAnchorRef: triggerRef, menuDeleteFocusBoundaryRef, handleMenuDelete };
+  return {
+    menuDeleteAnchorRef: triggerRef,
+    menuDeleteFocusBoundaryRef: triggerRef,
+    handleMenuDelete,
+  };
 }
 
 /** Tab body: inline rename input while renaming, normal trigger content otherwise. */
