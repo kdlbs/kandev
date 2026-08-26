@@ -32,8 +32,15 @@ test.describe("Mobile plugin task-list facet", () => {
 
     await testPage.getByRole("button", { name: "Open menu" }).tap();
     const menu = testPage.getByRole("dialog", { name: "Menu" });
-    await menu.getByTestId("mobile-tasks-list-group").tap();
-    await testPage.getByRole("listbox").getByRole("option", { name: "Fixture tag" }).tap();
+    const groupSelect = menu.getByTestId("mobile-tasks-list-group");
+    await groupSelect.evaluate((element) => element.scrollIntoView({ block: "center" }));
+    await expect(groupSelect).toBeInViewport();
+    await groupSelect.tap();
+    const fixtureTag = testPage.getByRole("listbox").getByRole("option", { name: "Fixture tag" });
+    await expect(fixtureTag).toBeInViewport();
+    await fixtureTag.tap();
+    await expect(groupSelect).toContainText("Fixture tag");
+    await expect(testPage.getByRole("listbox")).not.toBeVisible();
 
     const section = testPage.getByTestId("tasks-list-section");
     await expect(section).toHaveCount(1);

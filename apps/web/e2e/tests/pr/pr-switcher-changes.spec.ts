@@ -201,7 +201,9 @@ test.describe("PR switcher changes panel", () => {
 
     // --- Switch to Task B ---
     await session.taskInSidebar("Dashboard Task").click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL((url) => url.pathname.includes(taskB.id), {
+      timeout: 15_000,
+    });
     await session.clickTab("Changes");
 
     // Wait for PR data to load for Task B
@@ -221,7 +223,9 @@ test.describe("PR switcher changes panel", () => {
 
     // --- Switch to Task C (no PR) ---
     await session.taskInSidebar("No PR Task").click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL((url) => url.pathname.includes(taskC.id), {
+      timeout: 15_000,
+    });
     await session.clickTab("Changes");
 
     // PR sections should NOT be visible for a task without a PR
@@ -230,7 +234,9 @@ test.describe("PR switcher changes panel", () => {
 
     // --- Switch back to Task A to confirm data reappears ---
     await session.taskInSidebar("Auth Fix Task").click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL((url) => url.pathname.includes(taskA.id), {
+      timeout: 15_000,
+    });
     await session.clickTab("Changes");
 
     await expect(session.prFilesSection()).toBeVisible({ timeout: 15_000 });
