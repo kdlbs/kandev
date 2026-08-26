@@ -5,7 +5,7 @@ import { useToast } from "@/components/toast-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { setChatDraftContent } from "@/lib/local-storage";
 import { moveTask } from "@/lib/api/domains/kanban-api";
-import { getTaskMoveErrorDetail } from "@/components/task/task-move-error-banner";
+import { getTaskMoveErrorDetail } from "@/components/task/task-move-error-message";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { useLayoutStore } from "@/lib/state/layout-store";
 import { useDockviewStore } from "@/lib/state/dockview-store";

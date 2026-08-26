@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { getTaskMoveErrorDetail, getTaskMoveErrorMessage } from "./task-move-error-banner";
+import { getTaskMoveErrorDetail, getTaskMoveErrorMessage } from "./task-move-error-message";
 
 describe("getTaskMoveErrorMessage", () => {
   const fallback = "fallback";
