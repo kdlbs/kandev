@@ -347,6 +347,7 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 	})
 	s.markRoutingSuccess(ctx, run)
 	s.recordRunOutputSummary(ctx, run, *data)
+	s.warnIfReviewDecisionMissing(ctx, run)
 	// resolveLifecycleRun prefers the immutable run ID from the event and
 	// falls back to task plus agent only for legacy events. Releasing here
 	// (rather than unconditionally inside transitionRunTerminal) is safe —
@@ -362,6 +363,49 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 	s.releaseTaskCheckoutForRun(ctx, run)
 	s.stampRunFinished(ctx, run)
 	return nil
+}
+
+// warnIfReviewDecisionMissing flags a review or approval run that finished
+// without the agent ever calling record_step_decision_kandev. A reviewer can
+// post a full critique and reject the work in a comment, but if that comment
+// never becomes a recorded decision the workflow engine has nothing to act
+// on and the task strands in its current step forever. This does not fix
+// the missing decision — it only surfaces it as a warn-level run event so
+// the stall is visible instead of silent.
+func (s *Service) warnIfReviewDecisionMissing(ctx context.Context, run *models.Run) {
+	if run == nil {
+		return
+	}
+	parsed := ParseRunPayload(run.Payload)
+	taskID, stepID, stageType := s.resolveReviewStage(ctx, run.Reason, parsed)
+	if !isReviewOrApprovalStage(stageType) {
+		return
+	}
+	if taskID == "" || stepID == "" {
+		return
+	}
+	has, err := s.repo.HasActiveStepDecision(ctx, taskID, stepID, run.AgentProfileID)
+	if err != nil {
+		s.logger.Warn("failed to check step decision presence",
+			zap.String("task_id", taskID),
+			zap.String("run_id", run.ID),
+			zap.Error(err))
+		return
+	}
+	if has {
+		return
+	}
+	s.logger.Warn("review/approval run finished without a recorded step decision",
+		zap.String("task_id", taskID),
+		zap.String("run_id", run.ID),
+		zap.String("stage_type", stageType),
+		zap.String("step_id", stepID),
+		zap.String("agent_profile_id", run.AgentProfileID))
+	s.AppendRunEvent(ctx, run.ID, "decision.missing", string(models.RunEventLevelWarn), map[string]interface{}{
+		"task_id":    taskID,
+		"stage_type": stageType,
+		"step_id":    stepID,
+	})
 }
 
 // markRoutingSuccess delegates to the routing dispatcher (when wired)

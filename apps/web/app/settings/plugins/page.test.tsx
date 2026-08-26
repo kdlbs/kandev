@@ -321,7 +321,7 @@ describe("PluginsSettingsPage", () => {
 describe("PluginsSettingsPage member view", () => {
   it("keeps instance-global plugin controls hidden from members", () => {
     setStoreState([activePlugin()]);
-    storeState.auth = { user: { role: "member" } };
+    storeState.auth = { mode: "enabled", user: { role: "member" } };
 
     render(<PluginsSettingsPage />);
 

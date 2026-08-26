@@ -37,8 +37,6 @@ contract that other capabilities can reuse.
 
 ### Requirements
 
-
-
 - [ACP Model Configuration Summary](requirements/acp-model-configuration-summary.md)
 - [ACP Shell Command Output](requirements/acp-shell-command-output.md)
 - [Adaptive Kanban](requirements/adaptive-kanban.md)
@@ -56,6 +54,7 @@ contract that other capabilities can reuse.
 - [Clarification submit feedback](requirements/clarification-submit-feedback.md)
 - [Command-panel Sidebar Task Reveal](requirements/command-panel-sidebar-task-reveal.md)
 - [Comment Markdown Rendering](requirements/comment-markdown.md)
+- [Composer Suggestion Overlays](requirements/composer-suggestion-overlays.md)
 - [Context Compaction Count](requirements/context-compaction-count.md)
 - [Context Window Reset Freshness](requirements/context-window-reset-freshness.md)
 - [Context Window Unmeasured State](requirements/context-window-unmeasured-state.md)
@@ -128,6 +127,7 @@ contract that other capabilities can reuse.
 - [Task Surface Foreground Refresh and Mobile Create Action](requirements/task-surface-refresh.md)
 - [Task Workspace Content Search](requirements/task-workspace-content-search.md)
 - [Terminal close feedback](requirements/terminal-close-feedback.md)
+- [Terminal Rendering](requirements/terminal-rendering.md)
 - [Transcript Auto-scroll Stability](requirements/transcript-auto-scroll.md)
 - [Transcript Navigation Settings](requirements/transcript-navigation-settings.md)
 - [Voice Mode In Task Behavior](requirements/voice-mode-task-behavior.md)
@@ -143,6 +143,7 @@ contract that other capabilities can reuse.
 
 - [Agent Todo List Panel](system-design/agent-todo-list-panel.md)
 - [App Status Bar](system-design/app-status-bar.md)
+- [Composer Suggestion Overlays](system-design/composer-suggestion-overlays.md)
 - [Per-workflow column visibility on the kanban board System Design Part 1](system-design/board-step-visibility-filter-01.md)
 - [Per-workflow column visibility on the kanban board System Design Part 2](system-design/board-step-visibility-filter-02.md)
 - [Task PR Automation Controls System Design Part 1](system-design/ci-pr-automation-01.md)
@@ -152,7 +153,9 @@ contract that other capabilities can reuse.
 - [Persistent status motion](system-design/persistent-status-motion.md)
 - [Prompt History Panel](system-design/prompt-history-panel.md)
 - [Quick Chat and Terminal Tabs](system-design/quick-terminal.md)
+- [Resizable Markdown Table Columns](system-design/resizable-markdown-tables.md)
 - [Task Layout Profiles](system-design/task-layout-profiles.md)
+- [Terminal Rendering](system-design/terminal-rendering.md)
 - [Task Transcript History Visibility](system-design/task-prompt-transcript-visibility.md)
 
 ## Migration record

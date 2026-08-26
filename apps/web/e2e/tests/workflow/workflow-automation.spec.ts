@@ -362,23 +362,23 @@ test.describe("Workflow automation", () => {
    * Kanban board workflow with on_turn_start: move_to_next on Backlog.
    *
    * Workflow:
-   *   Backlog (on_turn_start: move_to_next, on_turn_complete: move_to_step("review"))
-   *   In Progress (on_enter: auto_start_agent, on_turn_complete: move_to_step("review"))
+   *   Backlog (on_turn_start: move_to_next, on_turn_complete: malformed move_to_step)
+   *   In Progress (on_enter: auto_start_agent, on_turn_complete: malformed move_to_step)
    *   Review (on_turn_start: move_to_previous)
    *   Done (on_turn_start: move_to_step("in-progress"))
    *
    * No step has is_start_step, so the task lands at position 0 (Backlog).
-   * The on_turn_complete events use template-level step_id references ("review",
-   * "in-progress") which don't resolve to actual step UUIDs — they're no-ops.
+   * The on_turn_complete events use malformed step_position-only configs, which
+   * the runtime skips because move_to_step requires a step_id.
    *
    * Flow:
    * 1. Create task in Backlog (no start_agent) and navigate to the task page
    * 2. Send a chat message — only the WS message path runs on_turn_start via
    *    dispatchPromptAsync, so the Backlog → In Progress move triggers here
-   * 3. Agent completes → on_turn_complete fires with move_to_step("review")
-   *    which is gracefully skipped (invalid step_id) → task stays in In Progress
+   * 3. Agent completes → malformed on_turn_complete move_to_step is skipped
+   *    → task stays in In Progress
    */
-  test("kanban workflow: on_turn_start moves task, invalid step_id in on_turn_complete is skipped", async ({
+  test("kanban workflow: on_turn_start moves task, malformed on_turn_complete is skipped", async ({
     testPage,
     apiClient,
     seedData,
@@ -396,18 +396,18 @@ test.describe("Workflow automation", () => {
     const inProgressStep = steps.find((s) => s.name === "In Progress")!;
 
     // Backlog: on_turn_start moves to next (In Progress),
-    // on_turn_complete uses template-level step_id (no-op in API-created steps)
+    // on_turn_complete has a malformed step_position-only config and is skipped.
     await apiClient.updateWorkflowStep(backlogStep.id, {
       events: {
         on_turn_start: [{ type: "move_to_next" }],
-        on_turn_complete: [{ type: "move_to_step", config: { step_id: "review" } }],
+        on_turn_complete: [{ type: "move_to_step", config: { step_position: 99 } }],
       },
     });
 
-    // In Progress: on_turn_complete with invalid step_id (should be skipped)
+    // In Progress: malformed on_turn_complete move_to_step (should be skipped)
     await apiClient.updateWorkflowStep(inProgressStep.id, {
       events: {
-        on_turn_complete: [{ type: "move_to_step", config: { step_id: "review" } }],
+        on_turn_complete: [{ type: "move_to_step", config: { step_position: 99 } }],
       },
     });
 
@@ -441,13 +441,13 @@ test.describe("Workflow automation", () => {
     });
 
     // Agent response confirms the mock agent ran; on_turn_complete then fires
-    // with move_to_step("review") — invalid step_id → gracefully skipped.
+    // with malformed move_to_step — gracefully skipped because step_id is missing.
     await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
       timeout: 30_000,
     });
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
 
-    // Task stays in In Progress on the kanban board (invalid step_id is a no-op).
+    // Task stays in In Progress on the kanban board (malformed action is a no-op).
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
     const card = kanban.taskCardInColumn("Kanban Flow Task", inProgressStep.id);

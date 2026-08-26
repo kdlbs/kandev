@@ -17,6 +17,7 @@
   "buildFailedWithMessage": "Build failed: {{message}}",
   "buildFailedWithStatus": "Build failed ({{status}}): {{text}}",
   "buildImage": "Build Image",
+  "buildImageAdminOnly": "Only administrators can build images.",
   "buildThisDockerImageBeforeCreating": "Build this Docker image before creating the profile.",
   "building": "Building...",
   "checking": "Checking...",

@@ -198,6 +198,80 @@ test.describe("Markdown preview", () => {
     expect(await testPage.evaluate(() => "markdownXss" in window)).toBe(false);
   });
 
+  test("resizes adjacent columns in a rendered Markdown file preview", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    // Covers AC-UI-RESIZABLE-MARKDOWN-TABLES-001.1, .3, and .9.
+    const fileName = "resizable-table.md";
+    const marker = "Preview table resize marker";
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    fs.writeFileSync(
+      path.join(repoDir, fileName),
+      [
+        "| Setting | Effect | Notes |",
+        "| --- | --- | --- |",
+        `| strictDepBuilds | Blocks unapproved scripts | ${marker} |`,
+        "| allowBuilds | Allows approved scripts | Ephemeral width |",
+      ].join("\n"),
+    );
+
+    const { session } = await seedTaskWithSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Markdown Preview Table Resize Test",
+    );
+    await openFileInPreview(testPage, session, fileName);
+
+    const preview = testPage.getByTestId("markdown-preview");
+    const table = preview.locator("table", { hasText: marker });
+    const wrapper = table.locator("xpath=..");
+    const cells = table.locator("tbody tr").first().locator("td");
+    const separator = preview.getByTestId("markdown-table-resizer-0");
+    await expect(table).toBeVisible();
+    await expect(separator).toBeVisible();
+    await expect(separator).toHaveAccessibleName("Resize table columns 1 and 2");
+    await expect(wrapper).toHaveAttribute("data-md-source-start", "1");
+    await expect(wrapper).toHaveClass(/markdown-table-scroll/);
+
+    const initialWidths = await cells.evaluateAll((elements) =>
+      elements.map((element) => element.getBoundingClientRect().width),
+    );
+    const initialTableWidth = await table.evaluate(
+      (element) => element.getBoundingClientRect().width,
+    );
+    const [separatorBox, cellBox] = await Promise.all([
+      separator.boundingBox(),
+      cells.first().boundingBox(),
+    ]);
+    expect(separatorBox).not.toBeNull();
+    expect(cellBox).not.toBeNull();
+
+    const boundaryX = separatorBox!.x + separatorBox!.width / 2;
+    const rowY = cellBox!.y + cellBox!.height / 2;
+    await testPage.mouse.move(boundaryX, rowY);
+    await testPage.mouse.down();
+    await testPage.mouse.move(boundaryX + 40, rowY);
+    await testPage.mouse.up();
+
+    const resizedWidths = await cells.evaluateAll((elements) =>
+      elements.map((element) => element.getBoundingClientRect().width),
+    );
+    expect(resizedWidths[0] - initialWidths[0]).toBeCloseTo(40, 0);
+    expect(initialWidths[1] - resizedWidths[1]).toBeCloseTo(40, 0);
+    expect(resizedWidths[2]).toBeCloseTo(initialWidths[2], 0);
+    expect(await table.evaluate((element) => element.getBoundingClientRect().width)).toBeCloseTo(
+      initialTableWidth,
+      0,
+    );
+    expect(
+      await preview.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+    ).toBe(true);
+  });
+
   test("markdown preview persists across page refresh", async ({
     testPage,
     apiClient,
