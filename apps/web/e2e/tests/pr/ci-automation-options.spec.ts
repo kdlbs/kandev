@@ -227,11 +227,17 @@ test.describe("PR CI automation options", () => {
       });
 
     await popover.getByLabel("Explain CI automation options").hover();
-    await expect(testPage.getByText(/1 minute PR refresh loop/)).toBeVisible();
-    await expect(testPage.getByText(/notification switches wake the task's agent/)).toBeVisible();
-    await expect(
-      testPage.getByText(/workspace's connected GitHub account is requested for review/i),
-    ).toBeVisible();
+    const queueRecoveryHelp = testPage.getByRole("tooltip");
+    await expect(queueRecoveryHelp).toContainText("Auto-fix repairs actionable queue removals.");
+    await expect(queueRecoveryHelp).toContainText(
+      "Auto-merge submits an eligible head or requeues it after a new commit.",
+    );
+    await expect(queueRecoveryHelp).toContainText(
+      "Both controls form the repair and requeue loop.",
+    );
+    await expect(queueRecoveryHelp).toContainText(
+      "Kandev never requeues the same head after removal.",
+    );
 
     await openPromptDialog(session);
     const promptDialog = testPage.getByRole("dialog", { name: "Auto-fix prompt" });
