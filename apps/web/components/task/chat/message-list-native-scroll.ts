@@ -1,3 +1,5 @@
+/* eslint-disable max-lines -- pagination and anchoring state share one scroll owner. */
+
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useAppStoreApi } from "@/components/state-provider";
@@ -156,14 +158,16 @@ function getOldestNonSyntheticItemKey(items: RenderItem[]): string | null {
   return oldestRealItem ? getItemKey(oldestRealItem) : null;
 }
 
-/** Oldest standalone transcript row. Collapsed turn groups are deliberately
- * excluded: prepending tools can replace a group's synthetic key while only
- * extending the same visible activity row. */
-function getOldestStandaloneMessageKey(items: RenderItem[]): string | null {
-  const oldestMessage = items.find(
-    (item) => item.type === "message" && item.message.id !== TASK_DESCRIPTION_SYNTHETIC_ID,
+/** Stable descriptor for the oldest visible row; turn ids survive group extension. */
+function getOldestVisibleBoundaryKey(items: RenderItem[]): string | null {
+  const item = items.find(
+    (candidate) =>
+      candidate.type === "turn_group" ||
+      (candidate.type === "message" && candidate.message.id !== TASK_DESCRIPTION_SYNTHETIC_ID),
   );
-  return oldestMessage?.type === "message" ? oldestMessage.message.id : null;
+  if (!item) return null;
+  if (item.type === "turn_group") return `turn:${item.turnId ?? item.id}`;
+  return item.type === "message" ? `message:${item.message.id}` : item.id;
 }
 
 function getNewestNonSyntheticItemKey(items: RenderItem[]): string | null {
@@ -226,7 +230,7 @@ function useLazyLoadSentinel(params: {
       const request = requestRef.current;
       const requestDebug = request?.debug;
       if (!request || !requestDebug) return;
-      const boundaryAfter = getOldestStandaloneMessageKey(itemsRef.current);
+      const boundaryAfter = getOldestVisibleBoundaryKey(itemsRef.current);
       const scroller = scrollRef.current;
       const boundaryUnchanged = request.boundaryBefore === boundaryAfter;
       paginationDebug("older page settled", {
@@ -250,7 +254,7 @@ function useLazyLoadSentinel(params: {
 
   const loadPage = useCallback(async () => {
     const request: PaginationRequest = {
-      boundaryBefore: getOldestStandaloneMessageKey(itemsRef.current),
+      boundaryBefore: getOldestVisibleBoundaryKey(itemsRef.current),
     };
     requestRef.current = request;
     if (isDebug()) {
@@ -275,7 +279,7 @@ function useLazyLoadSentinel(params: {
   const shouldContinueWhileIntersecting = useCallback(() => {
     const request = requestRef.current;
     if (!request) return false;
-    const boundaryAfter = getOldestStandaloneMessageKey(itemsRef.current);
+    const boundaryAfter = getOldestVisibleBoundaryKey(itemsRef.current);
     const boundaryUnchanged = request.boundaryBefore === boundaryAfter;
     return boundaryUnchanged && hasMoreRef.current;
   }, []);

@@ -149,8 +149,8 @@ function transcriptMessage(id: string): RenderItem {
   return { type: "message", message: { id } as Message };
 }
 
-function transcriptActivity(id: string): RenderItem {
-  return { type: "turn_group", id, turnId: null, messages: [] };
+function transcriptActivity(id: string, turnId = id): RenderItem {
+  return { type: "turn_group", id, turnId, messages: [] };
 }
 
 function NativeScrollManagementHarness({
@@ -243,7 +243,7 @@ describe("useNativeScrollManagement transcript pagination", () => {
     const newest = transcriptMessage("newest");
     const { rerender } = render(
       <NativeScrollManagementHarness
-        items={[transcriptActivity("activity-before"), newest]}
+        items={[transcriptActivity("activity-before", "turn-1"), newest]}
         loadMore={loadMore}
       />,
     );
@@ -252,7 +252,7 @@ describe("useNativeScrollManagement transcript pagination", () => {
     await wrappedLoadMore();
     rerender(
       <NativeScrollManagementHarness
-        items={[transcriptActivity("activity-after"), newest]}
+        items={[transcriptActivity("activity-after", "turn-1"), newest]}
         loadMore={loadMore}
       />,
     );
@@ -264,7 +264,7 @@ describe("useNativeScrollManagement transcript pagination", () => {
     await wrappedLoadMore();
     rerender(
       <NativeScrollManagementHarness
-        items={[transcriptMessage("older"), transcriptActivity("activity-after"), newest]}
+        items={[transcriptActivity("activity-new", "turn-2"), newest]}
         loadMore={loadMore}
       />,
     );
