@@ -188,6 +188,21 @@ describe("agent profile events", () => {
     expect(stored?.model).toBe("new-model");
   });
 
+  it("preserves event capability before the owning settings agent is hydrated", () => {
+    const store = makeStore();
+    const handlers = handlersFor(store);
+
+    handlers[PROFILE_CREATED](
+      message(PROFILE_CREATED, {
+        profile: profilePayload(),
+        inference_capable: true,
+      }),
+    );
+
+    expect(store.getState().settingsAgents.items).toHaveLength(0);
+    expect(store.getState().agentProfiles.items[0]?.inference_capable).toBe(true);
+  });
+
   it("does not resurrect a deleted profile from a delayed create event", () => {
     const store = makeStore();
     const handlers = handlersFor(store);

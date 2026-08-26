@@ -1,6 +1,7 @@
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
+import type { BackendMessageMap } from "@/lib/types/backend";
 import {
   compareTimestamps,
   isStaleAvailableAgentsSnapshot,
@@ -19,6 +20,26 @@ function getAgentId(raw: unknown): string {
   const obj = (raw ?? {}) as Record<string, unknown>;
   const value = obj.agentId ?? obj.agent_id;
   return typeof value === "string" ? value : "";
+}
+
+function getInferenceCapable(raw: unknown): boolean | undefined {
+  const value = (raw as { inference_capable?: unknown } | undefined)?.inference_capable;
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function profileEventAgent(
+  state: AppState,
+  agentID: string,
+  inferenceCapable: boolean | undefined,
+) {
+  const agent = state.settingsAgents.items.find((item) => item.id === agentID);
+  return {
+    id: agentID,
+    name: agent?.name ?? "",
+    capability_status: agent?.capability_status,
+    capability_error: agent?.capability_error,
+    inference_capable: agent?.inference_capable ?? inferenceCapable,
+  };
 }
 
 /**
@@ -88,20 +109,14 @@ function handleProfileCreated(
   state: AppState,
   profile: unknown,
   eventTimestamp: string | undefined,
+  inferenceCapable: boolean | undefined,
 ): Partial<AppState> {
   const normalized = normalizeAgentProfile(profile);
   if (isOfficeScoped(normalized)) return {};
   if (isStaleProfileEvent(state, normalized, eventTimestamp)) return {};
   deletionTombstones.delete(normalized.id); // a genuinely newer create wins
   const agentId = getAgentId(profile);
-  const agent = state.settingsAgents.items.find((a) => a.id === agentId);
-  const agentStub = {
-    id: agentId,
-    name: agent?.name ?? "",
-    capability_status: agent?.capability_status,
-    capability_error: agent?.capability_error,
-    inference_capable: agent?.inference_capable,
-  };
+  const agentStub = profileEventAgent(state, agentId, inferenceCapable);
   const nextProfiles = [
     ...state.agentProfiles.items.filter((p) => p.id !== normalized.id),
     toAgentProfileOption(agentStub, normalized),
@@ -131,19 +146,13 @@ function handleProfileUpdated(
   state: AppState,
   profile: unknown,
   eventTimestamp: string | undefined,
+  inferenceCapable: boolean | undefined,
 ): Partial<AppState> {
   const normalized = normalizeAgentProfile(profile);
   if (isOfficeScoped(normalized)) return {};
   if (isStaleProfileEvent(state, normalized, eventTimestamp)) return {};
   const agentId = getAgentId(profile);
-  const agent = state.settingsAgents.items.find((a) => a.id === agentId);
-  const agentStub = {
-    id: agentId,
-    name: agent?.name ?? "",
-    capability_status: agent?.capability_status,
-    capability_error: agent?.capability_error,
-    inference_capable: agent?.inference_capable,
-  };
+  const agentStub = profileEventAgent(state, agentId, inferenceCapable);
   const nextProfiles = state.agentProfiles.items.map((p) =>
     p.id === normalized.id ? toAgentProfileOption(agentStub, normalized) : p,
   );
@@ -194,6 +203,36 @@ function handleProfileDeleted(
     },
     settingsAgents: { items: nextAgents },
   };
+}
+
+function applyProfileCreatedEvent(
+  store: StoreApi<AppState>,
+  message: BackendMessageMap["agent.profile.created"],
+) {
+  store.setState((state) => ({
+    ...state,
+    ...handleProfileCreated(
+      state,
+      message.payload.profile,
+      message.timestamp,
+      getInferenceCapable(message.payload),
+    ),
+  }));
+}
+
+function applyProfileUpdatedEvent(
+  store: StoreApi<AppState>,
+  message: BackendMessageMap["agent.profile.updated"],
+) {
+  store.setState((state) => ({
+    ...state,
+    ...handleProfileUpdated(
+      state,
+      message.payload.profile,
+      message.timestamp,
+      getInferenceCapable(message.payload),
+    ),
+  }));
 }
 
 export function registerAgentsHandlers(store: StoreApi<AppState>): WsHandlers {
@@ -281,18 +320,8 @@ export function registerAgentsHandlers(store: StoreApi<AppState>): WsHandlers {
         };
       });
     },
-    "agent.profile.created": (message) => {
-      store.setState((state) => ({
-        ...state,
-        ...handleProfileCreated(state, message.payload.profile, message.timestamp),
-      }));
-    },
-    "agent.profile.updated": (message) => {
-      store.setState((state) => ({
-        ...state,
-        ...handleProfileUpdated(state, message.payload.profile, message.timestamp),
-      }));
-    },
+    "agent.profile.created": (message) => applyProfileCreatedEvent(store, message),
+    "agent.profile.updated": (message) => applyProfileUpdatedEvent(store, message),
     "agent.profile.deleted": (message) => {
       store.setState((state) => ({
         ...state,
