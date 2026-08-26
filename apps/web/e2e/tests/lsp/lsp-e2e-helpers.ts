@@ -95,6 +95,11 @@ export async function createKotlinTask(
     path.join(backend.tmpDir, "repos", options.repositoryDirectory ?? "e2e-repo"),
     makeGitEnv(backend.tmpDir),
   );
+  // Task repositories use main unless a test explicitly supplies another
+  // branch. A preceding Git test can leave the shared seed repository checked
+  // out on a feature branch; committing the LSP fixture there makes the task's
+  // main checkout legitimately omit the file.
+  git.exec("git checkout -f main");
   for (const [index, filePath] of filePaths.entries()) {
     const isTypeScript = filePath.endsWith(".ts");
     const defaultContent = isTypeScript
@@ -131,6 +136,13 @@ export async function createKotlinTask(
     },
   );
   if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+
+  await expect
+    .poll(async () => (await apiClient.getTaskEnvironment(task.id))?.status ?? null, {
+      timeout: 45_000,
+      message: "Kotlin task environment did not become ready",
+    })
+    .toBe("ready");
 
   const session = new SessionPage(page);
   if (options.navigate !== false) {

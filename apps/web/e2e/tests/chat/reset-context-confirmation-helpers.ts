@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { waitForSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
 type ContextWindowStoreWindow = Window & {
@@ -43,6 +44,13 @@ export async function seedResetContextSession(
 
   if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
+  await waitForSessionDone(
+    apiClient,
+    task.id,
+    task.session_id,
+    "reset-context session did not settle before navigation",
+    30_000,
+  );
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
