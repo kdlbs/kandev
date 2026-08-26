@@ -3610,8 +3610,16 @@ type WorkflowStep struct {
 	WipLimit    int32  `protobuf:"varint,8,opt,name=wip_limit,json=wipLimit,proto3" json:"wip_limit,omitempty"` // 0 means unlimited
 	// The agent profile this step runs work under, empty when it inherits.
 	AgentProfileId string `protobuf:"bytes,9,opt,name=agent_profile_id,json=agentProfileId,proto3" json:"agent_profile_id,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// The on_enter action TYPES this step runs, so a plugin can describe what
+	// moving a task here will do. Action config is deliberately not exposed:
+	// it carries target task ids, payloads and profile ids. The ordinary move
+	// path handles auto_start_agent, configure_session, enable_plan_mode,
+	// set_session_mode and reset_agent_context. Other action types can run only
+	// on applicable workflow-engine paths. Plugins must ignore action types they
+	// do not recognize.
+	OnEnterActionTypes []string `protobuf:"bytes,10,rep,name=on_enter_action_types,json=onEnterActionTypes,proto3" json:"on_enter_action_types,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *WorkflowStep) Reset() {
@@ -3705,6 +3713,13 @@ func (x *WorkflowStep) GetAgentProfileId() string {
 		return x.AgentProfileId
 	}
 	return ""
+}
+
+func (x *WorkflowStep) GetOnEnterActionTypes() []string {
+	if x != nil {
+		return x.OnEnterActionTypes
+	}
+	return nil
 }
 
 type ListWorkflowStepsRequest struct {
@@ -7381,7 +7396,7 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\x04page\x18\x02 \x01(\v2\x16.kandev.plugin.v1.PageR\x04page\"\x8a\x01\n" +
 	"\x15ListWorkflowsResponse\x128\n" +
 	"\tworkflows\x18\x01 \x03(\v2\x1a.kandev.plugin.v1.WorkflowR\tworkflows\x127\n" +
-	"\tpage_info\x18\x02 \x01(\v2\x1a.kandev.plugin.v1.PageInfoR\bpageInfo\"\x8f\x02\n" +
+	"\tpage_info\x18\x02 \x01(\v2\x1a.kandev.plugin.v1.PageInfoR\bpageInfo\"\xc2\x02\n" +
 	"\fWorkflowStep\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1f\n" +
 	"\vworkflow_id\x18\x02 \x01(\tR\n" +
@@ -7393,7 +7408,9 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\x05color\x18\x06 \x01(\tR\x05color\x12\"\n" +
 	"\ris_start_step\x18\a \x01(\bR\visStartStep\x12\x1b\n" +
 	"\twip_limit\x18\b \x01(\x05R\bwipLimit\x12(\n" +
-	"\x10agent_profile_id\x18\t \x01(\tR\x0eagentProfileId\";\n" +
+	"\x10agent_profile_id\x18\t \x01(\tR\x0eagentProfileId\x121\n" +
+	"\x15on_enter_action_types\x18\n" +
+	" \x03(\tR\x12onEnterActionTypes\";\n" +
 	"\x18ListWorkflowStepsRequest\x12\x1f\n" +
 	"\vworkflow_id\x18\x01 \x01(\tR\n" +
 	"workflowId\"Q\n" +

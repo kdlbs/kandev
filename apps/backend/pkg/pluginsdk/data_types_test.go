@@ -176,6 +176,19 @@ func TestWorkflowStepProtoRoundTrip(t *testing.T) {
 	require.Equal(t, step, workflowStepFromProto(proto))
 }
 
+func TestWorkflowStepProtoRoundTrip_OnEnterActionTypes(t *testing.T) {
+	step := WorkflowStep{
+		ID:                 "step-1",
+		WorkflowID:         "wf-1",
+		Name:               "Work",
+		Position:           1,
+		StageType:          "work",
+		OnEnterActionTypes: []string{"auto_start_agent", "run_code_review", "set_session_mode"},
+	}
+	proto := step.toProto()
+	require.Equal(t, step, workflowStepFromProto(proto))
+}
+
 func TestAgentProfileProtoRoundTrip(t *testing.T) {
 	profile := AgentProfile{
 		ID:          "profile-1",

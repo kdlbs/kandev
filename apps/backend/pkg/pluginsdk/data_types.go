@@ -508,6 +508,10 @@ type WorkflowStep struct {
 	IsStartStep    bool
 	WIPLimit       int32 // 0 means unlimited
 	AgentProfileID string
+	// OnEnterActionTypes is nil when the step has no on_enter actions, never
+	// an empty non-nil slice. Config maps are deliberately not exposed.
+	// Callers must ignore action types they do not recognize.
+	OnEnterActionTypes []string
 }
 
 func (s WorkflowStep) toProto() *pluginv1.WorkflowStep {
@@ -521,6 +525,7 @@ func (s WorkflowStep) toProto() *pluginv1.WorkflowStep {
 		IsStartStep:    s.IsStartStep,
 		WipLimit:       s.WIPLimit,
 		AgentProfileId: s.AgentProfileID,
+		OnEnterActionTypes: s.OnEnterActionTypes,
 	}
 }
 
@@ -538,6 +543,7 @@ func workflowStepFromProto(p *pluginv1.WorkflowStep) WorkflowStep {
 		IsStartStep:    p.GetIsStartStep(),
 		WIPLimit:       p.GetWipLimit(),
 		AgentProfileID: p.GetAgentProfileId(),
+		OnEnterActionTypes: p.GetOnEnterActionTypes(),
 	}
 }
 
