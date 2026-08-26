@@ -35,6 +35,10 @@ test.describe("Repository branch policies on desktop", () => {
       cwd: seedData.repositoryPath,
       env: makeGitEnv(backend.tmpDir),
     });
+    execSync("git push origin HEAD:refs/heads/release-candidate", {
+      cwd: seedData.repositoryPath,
+      env: makeGitEnv(backend.tmpDir),
+    });
     execSync("git update-ref refs/remotes/origin/release-candidate HEAD", {
       cwd: seedData.repositoryPath,
       env: makeGitEnv(backend.tmpDir),
