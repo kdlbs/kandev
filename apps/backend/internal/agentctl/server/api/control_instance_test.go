@@ -8,10 +8,15 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/instance"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/pkg/agent"
 )
 
 func TestDeleteInstanceUnknownReturnsNotFound(t *testing.T) {
-	server := NewControlServer(&config.Config{}, &instance.Manager{}, logger.Default())
+	mgr := instance.NewManager(&config.Config{
+		Defaults: config.InstanceDefaults{Protocol: agent.ProtocolACP},
+	}, logger.Default())
+	t.Cleanup(func() { _ = mgr.Shutdown(t.Context()) })
+	server := NewControlServer(&config.Config{}, mgr, logger.Default())
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/instances/missing", nil)
 	resp := httptest.NewRecorder()
 

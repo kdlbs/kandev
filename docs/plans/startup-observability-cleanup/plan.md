@@ -57,11 +57,13 @@ change.
 
 ### Agent stderr exit sequencing
 
-Keep `readStderr` running concurrently with the child process. Change
+Keep `readStderr` running concurrently with the child process. Replace the
+manager's `Cmd.StderrPipe` with an explicitly owned `os.Pipe`, then change
 `internal/agentctl/server/process.Manager.waitForExit` to call `cmd.Wait()`
 before the bounded wait on the generation-specific stderr completion channel.
-Preserve recent-stderr sanitization, exit events, intentional-stop behavior,
-and process-group reaping.
+Close the owned reader when the bounded drain expires. Preserve recent-stderr
+sanitization, exit events, intentional-stop behavior, and process-group
+reaping.
 
 ### Idempotent instance stop
 
@@ -107,15 +109,15 @@ needed for these acceptance criteria.
 - The full launcher package ran 259 tests successfully, with two pre-existing
   service configuration tests selecting the host's `/root/.kandev/config.yaml`
   instead of their temporary fixture.
-- The full process-manager package passed 706 tests after the stderr sequencing
-  fix.
+- The full process-manager package passed 707 tests after the stderr sequencing
+  fix and owned-pipe correction.
 - The combined instance and control-server packages passed 463 tests after the
   idempotent-stop fix.
 
 ## Risks
 
-- Moving `cmd.Wait` before the bounded stderr wait must keep the reader
-  concurrent so a child that writes a full pipe cannot deadlock.
+- The owned stderr writer must close in the parent after startup, while the
+  reader remains concurrent so a child that writes a full pipe cannot deadlock.
 - Treating a missing map entry as already stopped must be tied to the original
   instance pointer so an ID reuse cannot be mistaken for completed cleanup.
 - The startup banner is consumed by people and scripts, so existing line order

@@ -27,6 +27,7 @@ existing sanitized exit diagnostics.
 
 ## In scope
 
+- Replace the manager's `Cmd.StderrPipe` with an explicitly owned stderr pipe.
 - Change `Manager.waitForExit` to wait for process exit before stderr drain.
 - Preserve generation-specific completion channels and the bounded timeout.
 - Add regression coverage for running, successful, intentional-stop, and
@@ -65,8 +66,8 @@ keeps lifecycle changes sequential for review.
 
 ## Risks
 
-- `cmd.Wait` must run while `readStderr` is draining so a full pipe cannot
-  block the child before it exits.
+- The manager must close its parent stderr writer after start and close its
+  reader if the bounded post-exit drain expires.
 
 ## Parallelism
 
@@ -80,12 +81,14 @@ keeps lifecycle changes sequential for review.
 
 ## Results
 
-Changed `Manager.waitForExit` to wait for the child process before waiting on
-the generation-specific stderr reader. Added regression coverage proving a
-live process does not emit the drain timeout warning and that exit diagnostics
-still wait for or bound the reader drain.
+Changed the manager to use an explicitly owned stderr pipe, then wait for the
+child process before waiting on the generation-specific stderr reader. Added
+regression coverage proving a live process does not emit the drain timeout
+warning, exit diagnostics preserve stderr after `Cmd.Wait`, and the reader
+drain remains bounded.
 
 Verification:
 
 - `go test ./internal/agentctl/server/process -run 'TestWaitForExit.*|TestReadStderr.*Generation' -count=1` passed.
-- `go test ./internal/agentctl/server/process -count=1` passed with 706 tests.
+- `go test ./internal/agentctl/server/process -count=1` passed with 707 tests.
+- Race-enabled stderr exit tests passed, including owned-pipe preservation.

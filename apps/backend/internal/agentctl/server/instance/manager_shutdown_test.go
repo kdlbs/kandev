@@ -221,6 +221,11 @@ func TestStopInstanceReturnsSuccessForCompletedDuplicateStop(t *testing.T) {
 	require.NoError(t, err)
 	stopStarted := make(chan struct{})
 	releaseStop := make(chan struct{})
+	var releaseStopOnce sync.Once
+	releaseStopFn := func() {
+		releaseStopOnce.Do(func() { close(releaseStop) })
+	}
+	t.Cleanup(releaseStopFn)
 	procMgr := &fakeProcessManager{
 		stopStarted: stopStarted,
 		stopRelease: releaseStop,
@@ -246,7 +251,7 @@ func TestStopInstanceReturnsSuccessForCompletedDuplicateStop(t *testing.T) {
 
 	secondDone := make(chan error, 1)
 	go func() { secondDone <- mgr.stopInstance(context.Background(), inst.ID, inst) }()
-	close(releaseStop)
+	releaseStopFn()
 
 	require.NoError(t, <-firstDone)
 	require.NoError(t, <-secondDone)
