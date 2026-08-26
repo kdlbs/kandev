@@ -1689,7 +1689,12 @@ export class ApiClient {
     checks_passing?: number;
     unresolved_review_threads?: number;
   }): Promise<void> {
-    await this.request("POST", "/api/v1/github/mock/task-prs", data);
+    const workspaceId = data.workspace_id?.trim() || (await this.activeWorkspaceId());
+    await this.request(
+      "POST",
+      "/api/v1/github/mock/task-prs",
+      workspaceId ? { ...data, workspace_id: workspaceId } : data,
+    );
   }
 
   async associateGitHubTaskPR(data: {
