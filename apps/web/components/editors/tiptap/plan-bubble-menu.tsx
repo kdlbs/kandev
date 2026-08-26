@@ -107,6 +107,27 @@ type ToggleButtonProps = {
   toggle?: boolean;
 };
 
+function ToggleButtonIcon({
+  icon: Icon,
+  docked,
+  accent,
+  isActive,
+}: Pick<ToggleButtonProps, "icon" | "docked" | "accent" | "isActive">) {
+  if (!docked) return <Icon className="h-3.5 w-3.5" aria-hidden="true" />;
+
+  return (
+    <span
+      className={cn(
+        "inline-flex h-10 w-10 items-center justify-center rounded transition-colors",
+        accent ? "bg-primary text-primary-foreground hover:bg-primary/90" : "hover:bg-muted/80",
+        isActive && "bg-muted text-primary ring-1 ring-inset ring-primary/50",
+      )}
+    >
+      <Icon className="h-4 w-4" aria-hidden="true" />
+    </span>
+  );
+}
+
 function ToggleButton({
   icon: Icon,
   isActive,
@@ -128,22 +149,23 @@ function ToggleButton({
       data-testid={testId}
       className={cn(
         "rounded cursor-pointer transition-colors shrink-0",
-        docked ? "h-11 min-w-11 p-2" : "p-1.5",
-        accent ? "bg-primary text-primary-foreground hover:bg-primary/90" : "hover:bg-muted/80",
-        isActive && "bg-muted text-primary ring-1 ring-inset ring-primary/50",
+        docked ? "h-11 min-w-11 p-0" : "p-1.5",
+        !docked && accent && "bg-primary text-primary-foreground hover:bg-primary/90",
+        !docked && !accent && "hover:bg-muted/80",
+        !docked && isActive && "bg-muted text-primary ring-1 ring-inset ring-primary/50",
         disabled && "cursor-not-allowed opacity-50",
       )}
       onPointerDown={(e) => e.preventDefault()}
       onMouseDown={(e) => e.preventDefault()}
       onClick={onClick}
     >
-      <Icon className={cn(docked ? "h-5 w-5" : "h-3.5 w-3.5")} aria-hidden="true" />
+      <ToggleButtonIcon icon={Icon} docked={docked} accent={accent} isActive={isActive} />
     </button>
   );
 }
 
 function MenuSeparator({ docked = false }: { docked?: boolean }) {
-  return <div className={cn("w-px bg-border/50 mx-0.5", docked ? "h-7" : "h-5")} />;
+  return <div className={cn("w-px bg-border/50", docked ? "h-7 mx-0" : "h-5 mx-0.5")} />;
 }
 
 function LinkInput({
@@ -212,7 +234,8 @@ function FormatToolbar({
   return (
     <div
       className={cn(
-        "flex items-center gap-0.5",
+        "flex items-center",
+        docked ? "gap-0" : "gap-0.5",
         !docked && "bg-popover border border-border/50 rounded-lg shadow-lg p-1",
       )}
     >
@@ -397,7 +420,7 @@ function MobileFormattingToolbar({
         height: `${PLAN_FORMATTING_TOOLBAR_HEIGHT_PX}px`,
       }}
     >
-      <div className="flex h-full w-full min-w-0 items-center gap-1 overflow-x-auto overscroll-x-contain px-2 py-1">
+      <div className="flex h-full w-full min-w-0 items-center gap-0 overflow-x-auto overscroll-x-contain px-0 py-1">
         {content}
       </div>
     </div>,

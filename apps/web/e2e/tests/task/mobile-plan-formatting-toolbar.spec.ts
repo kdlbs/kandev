@@ -86,7 +86,33 @@ test.describe("mobile: Plan formatting toolbar", () => {
 
     const bold = testPage.getByTestId("plan-formatting-action-bold");
     await expect(bold).toBeVisible();
-    expect((await bold.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    const actionButtons = toolbar.locator('button[data-testid^="plan-formatting-action-"]');
+    await expect(actionButtons).toHaveCount(8);
+    const actionSizes = await actionButtons.evaluateAll((elements) =>
+      elements.map((element) => {
+        const { width, height } = element.getBoundingClientRect();
+        return { width, height };
+      }),
+    );
+    for (const { width, height } of actionSizes) {
+      expect(width).toBeGreaterThanOrEqual(44);
+      expect(height).toBeGreaterThanOrEqual(44);
+    }
+    const visualActionSizes = await toolbar
+      .locator('button[data-testid^="plan-formatting-action-"] > span')
+      .evaluateAll((elements) =>
+        elements.map((element) => {
+          const { width, height } = element.getBoundingClientRect();
+          return { width, height };
+        }),
+      );
+    await expect(
+      toolbar.locator('button[data-testid^="plan-formatting-action-"] > span'),
+    ).toHaveCount(8);
+    for (const { width, height } of visualActionSizes) {
+      expect(width).toBeLessThanOrEqual(40);
+      expect(height).toBeLessThanOrEqual(40);
+    }
     await expect(testPage.getByTestId("plan-formatting-action-comment")).toBeEnabled();
     await expect
       .poll(() => editor.evaluate((element) => getComputedStyle(element, "::after").height))
@@ -96,7 +122,7 @@ test.describe("mobile: Plan formatting toolbar", () => {
       scrollWidth: element.scrollWidth,
       clientWidth: element.clientWidth,
     }));
-    expect(horizontalOverflow.scrollWidth).toBeGreaterThanOrEqual(horizontalOverflow.clientWidth);
+    expect(horizontalOverflow.scrollWidth).toBeLessThanOrEqual(horizontalOverflow.clientWidth);
 
     const keyboardHeight = 300;
     await simulateKeyboardOpen(testPage, keyboardHeight);
