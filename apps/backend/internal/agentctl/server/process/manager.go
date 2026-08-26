@@ -2352,11 +2352,11 @@ func (m *Manager) waitForExit(stderrDone <-chan struct{}) {
 	defer close(m.doneCh)
 
 	pid := m.agentPID()
-	// StderrPipe must be drained before Wait closes its parent-side pipe. The
-	// second bounded wait covers a reader that was still blocked when the
-	// process-exit wait began and was released by Wait closing the pipe.
-	m.waitForStderrDrain(stderrDone)
+	// Wait while the stderr reader drains concurrently. Waiting for stderr
+	// completion before Wait would time out for every still-running process.
 	err := m.cmd.Wait()
+	// Wait closes the parent-side stderr pipe, so this bounded wait covers a
+	// reader that was still blocked when the process exited.
 	m.waitForStderrDrain(stderrDone)
 	intentionalStop := m.Status() == StatusStopping
 

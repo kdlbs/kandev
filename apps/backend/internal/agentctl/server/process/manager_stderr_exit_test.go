@@ -32,6 +32,65 @@ func (r *gatedStderrReader) Read(p []byte) (int, error) {
 
 func (r *gatedStderrReader) Close() error { return nil }
 
+func TestManagerLongRunningProcessHelper(t *testing.T) {
+	if os.Getenv("KANDEV_MANAGER_LONG_RUNNING_HELPER") != "1" {
+		return
+	}
+	time.Sleep(2 * time.Second)
+}
+
+func TestWaitForExitDoesNotWarnWhileProcessIsRunning(t *testing.T) {
+	log, observed := newObservedTestLogger(t)
+	cmd := exec.Command(os.Args[0], "-test.run=TestManagerLongRunningProcessHelper")
+	cmd.Env = append(os.Environ(), "KANDEV_MANAGER_LONG_RUNNING_HELPER=1")
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		t.Fatalf("stderr pipe: %v", err)
+	}
+	m := &Manager{
+		cmd:          cmd,
+		stderr:       stderr,
+		logger:       log,
+		doneCh:       make(chan struct{}),
+		updatesCh:    make(chan adapter.AgentEvent, 1),
+		groupAliveFn: func(int) bool { return false },
+	}
+	m.status.Store(StatusRunning)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start process: %v", err)
+	}
+	t.Cleanup(func() {
+		if cmd.ProcessState == nil && cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		m.wg.Wait()
+	})
+
+	stderrDone := make(chan struct{})
+	m.wg.Add(2)
+	go m.readStderr(stderrDone)
+	waitDone := make(chan struct{})
+	go func() {
+		m.waitForExit(stderrDone)
+		close(waitDone)
+	}()
+
+	time.Sleep(processStderrDrainTimeout + 100*time.Millisecond)
+	if observedLogsContain(observed, "timed out waiting for agent stderr to drain") {
+		t.Fatal("waitForExit warned about stderr while the process was still running")
+	}
+
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatalf("kill process: %v", err)
+	}
+	select {
+	case <-waitDone:
+	case <-time.After(time.Second):
+		t.Fatal("waitForExit did not finish after process exit")
+	}
+	m.wg.Wait()
+}
+
 func TestWaitForExitWaitsForStderrReaderBeforePublishingError(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
