@@ -311,10 +311,13 @@ export function CreateProjectDialog({ open, onOpenChange, workspaceId }: CreateP
   const { form, update, submitting, handleAddRepo, handleRemoveRepo, handleCreate } =
     useProjectForm(workspaceId, () => onOpenChange(false));
 
+  // ProjectRepositoryPicker renders its popover inline. Paint clipping keeps
+  // that wide popover from creating a horizontal scroll range on the dialog.
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         data-testid="create-project-dialog"
+        data-layout="contained"
         className="max-h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-clip sm:max-w-lg"
       >
         <DialogHeader>

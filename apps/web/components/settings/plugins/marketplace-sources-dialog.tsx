@@ -45,6 +45,7 @@ export function MarketplaceSourcesDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         data-testid="marketplace-sources-dialog"
+        data-layout="contained"
         className="max-h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden"
       >
         <DialogHeader>
@@ -173,7 +174,7 @@ function AddSourceForm({ onChanged }: { onChanged: () => void }) {
       />
       <div className="flex items-center gap-2">
         <Input
-          placeholder="https://.../index.json"
+          placeholder={t("plugins:sourceUrlPlaceholder")}
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           className="min-h-11 sm:min-h-7"

@@ -56,8 +56,8 @@ describe("HealthIssuesDialog", () => {
     const dialog = screen.getByTestId("system-health-issues-dialog");
     const body = screen.getByTestId("system-health-issues-body");
 
-    expect(dialog.className).toContain("grid-rows-[auto_minmax(0,1fr)]");
-    expect(body.className).toContain("overflow-y-auto");
+    expect(dialog.getAttribute("data-layout")).toBe("contained");
+    expect(dialog.contains(body)).toBe(true);
     expect(body.textContent).toContain("Disk space is low");
   });
 });

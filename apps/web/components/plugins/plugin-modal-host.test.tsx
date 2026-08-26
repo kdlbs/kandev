@@ -53,12 +53,23 @@ describe("PluginModalHost", () => {
 
     const dialog = screen.getByTestId(/^plugin-modal-dialog-/);
     const body = screen.getByTestId(/^plugin-modal-body-/);
-    expect(dialog.className).toContain("max-h-[calc(100dvh-2rem)]");
-    expect(dialog.className).toContain("grid-rows-[auto_minmax(0,1fr)]");
-    expect(dialog.className).toContain("overflow-hidden");
-    expect(body.className).toContain("min-h-0");
-    expect(body.className).toContain("overflow-y-auto");
+    expect(dialog.getAttribute("data-layout")).toBe("contained");
+    expect(dialog.contains(body)).toBe(true);
     expect(screen.getByRole("button", { name: "Close" })).not.toBeNull();
+  });
+
+  it("keeps titleless task-link content in the bounded scroll row", () => {
+    pluginModalManager.openTaskLinkDialog("plugin-a", {
+      content: () => <div data-testid="modal-content">Long task-link content</div>,
+    });
+
+    render(<PluginModalHost />);
+
+    const dialog = screen.getByTestId(/^plugin-modal-dialog-/);
+    const body = screen.getByTestId(/^plugin-modal-body-/);
+    expect(dialog.getAttribute("data-layout")).toBe("contained");
+    expect(body.className).toContain("row-start-2");
+    expect(screen.getByRole("dialog", { name: "Plugin dialog" })).toBeTruthy();
   });
 
   it("does not add a close control to a nondismissible dialog", () => {

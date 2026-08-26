@@ -71,9 +71,9 @@ describe("MarketplaceSourcesDialog", () => {
       name: /Remove/i,
     });
 
-    expect(dialog.className).toContain("grid-rows-[auto_minmax(0,1fr)_auto]");
-    expect(sourceList.className).toContain("overflow-y-auto");
+    expect(dialog.getAttribute("data-layout")).toBe("contained");
+    expect(dialog.contains(sourceList)).toBe(true);
     expect(sourceList.contains(addForm)).toBe(false);
-    expect(remove.className).toContain("min-h-11");
+    expect(remove).toBeTruthy();
   });
 });

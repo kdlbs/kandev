@@ -94,6 +94,7 @@ function PluginDialog({ modal, dismissible, onOpenChange }: ModalSurfaceProps) {
       <DialogContent
         {...noDescriptionProps}
         data-testid={`plugin-modal-dialog-${instanceId}`}
+        data-layout="contained"
         className={
           modal.layout === "task-link"
             ? `${DIALOG_CONTAINMENT_CLASSES} w-[calc(100vw-2rem)] sm:max-w-lg`
@@ -119,7 +120,7 @@ function PluginDialog({ modal, dismissible, onOpenChange }: ModalSurfaceProps) {
         )}
         <div
           data-testid={`plugin-modal-body-${instanceId}`}
-          className="min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain"
+          className="row-start-2 min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain"
         >
           <PluginErrorBoundary context={`modal "${instanceId}" (plugin "${pluginId}")`}>
             <Content />

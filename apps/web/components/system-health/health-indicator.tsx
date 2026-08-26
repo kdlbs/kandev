@@ -61,6 +61,7 @@ export function HealthIssuesDialog({ open, onOpenChange, issues }: HealthIssuesD
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         data-testid="system-health-issues-dialog"
+        data-layout="contained"
         className="max-h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)] grid-rows-[auto_minmax(0,1fr)] overflow-hidden sm:max-w-[480px]"
       >
         <DialogHeader>

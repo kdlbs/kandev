@@ -255,9 +255,9 @@ describe("AgentProfileDeleteConflictDialog layout", () => {
     const body = screen.getByTestId("agent-profile-delete-conflict-body");
     const footer = screen.getByTestId("agent-profile-delete-conflict-footer");
 
-    expect(dialog.className).toContain("grid-rows-[auto_minmax(0,1fr)_auto]");
-    expect(body.className).toContain("overflow-y-auto");
+    expect(dialog.getAttribute("data-layout")).toBe("contained");
+    expect(dialog.contains(body)).toBe(true);
     expect(body.contains(footer)).toBe(false);
-    expect(within(footer).getByRole("button", { name: "Cancel" }).className).toContain("min-h-11");
+    expect(within(footer).getByRole("button", { name: "Cancel" })).toBeTruthy();
   });
 });

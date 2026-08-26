@@ -173,6 +173,7 @@ export function AgentProfileDeleteConflictDialog({
     <AlertDialog open={!!conflict} onOpenChange={onOpenChange}>
       <AlertDialogContent
         data-testid="agent-profile-delete-conflict-dialog"
+        data-layout="contained"
         className="max-h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden"
       >
         <AlertDialogHeader>
