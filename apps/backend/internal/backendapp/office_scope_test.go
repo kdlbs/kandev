@@ -14,8 +14,10 @@ import (
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/config"
 	officeagents "github.com/kandev/kandev/internal/office/agents"
+	officedashboard "github.com/kandev/kandev/internal/office/dashboard"
 	"github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/office/shared"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
 
@@ -546,7 +548,7 @@ func TestOfficeRouteGroupMountsScopeGuard(t *testing.T) {
 			c.Request.Context(), authn.Identity{UserID: officeScopeUserB, Role: authn.RoleMember}))
 		c.Next()
 	})
-	mountOfficeRoutes(engine, officeTestServices(), h.authSvc, h.taskSvc, h.officeRepo, testLogger(t))
+	mountOfficeRoutes(engine, officeTestServices(), h.authSvc, h.taskSvc, h.officeRepo, nil, testLogger(t))
 
 	// The scope guard: user B naming user A's agent must be refused before
 	// the (zero-value, would-panic) handler runs.
@@ -738,6 +740,90 @@ func TestOfficeScopeAllowsAgentJWTInsideItsOwnWorkspace(t *testing.T) {
 			if rec.Code != http.StatusOK || reached != tc.pattern {
 				t.Errorf("status = %d (%s), reached = %q; want 200 and %q",
 					rec.Code, rec.Body.String(), reached, tc.pattern)
+			}
+		})
+	}
+}
+
+// TestOfficeScopeDefersAgentCommentReadToRelationGuard mounts the production
+// Office scope middleware and dashboard handler together. The comment route
+// must reach HandoffService so missing, foreign, and unrelated targets all
+// return the same access-denied response instead of leaking a 404 from the
+// workspace resolver.
+func TestOfficeScopeDefersAgentCommentReadToRelationGuard(t *testing.T) {
+	taskSvc, taskRepo, officeRepo := newRunSubscriptionCheckHarness(t)
+	log := testLogger(t)
+	config := &config.Config{}
+	config.Features.Auth = true
+	config.Auth.SessionTTLHours = 720
+	authSvc := newEnabledAuthService(t, config)
+
+	workspaceA := seedOwnedWorkspace(t, taskSvc, "comment-user-a")
+	workspaceB := seedOwnedWorkspace(t, taskSvc, "comment-user-b")
+	seedOfficeResources(t, officeRepo, workspaceA, "comment-a")
+	seedOfficeResources(t, officeRepo, workspaceB, "comment-b")
+
+	agentSvc := officeagents.NewAgentService(officeRepo, log, nil)
+	agentSvc.SetAuth(officeagents.NewAgentAuth("comment-test-key"))
+	token, err := agentSvc.MintRuntimeJWT(
+		"agent-comment-a", "task-comment-a", workspaceA, "run-comment-a", "", "")
+	if err != nil {
+		t.Fatalf("mint runtime jwt: %v", err)
+	}
+
+	handoff := taskservice.NewHandoffService(
+		taskRepo,
+		taskRepo,
+		taskservice.NewDocumentService(taskRepo, log),
+		officeRepo,
+		officeRepo,
+		log,
+	)
+	handoff.SetCommentReader(&officeCommentReaderAdapter{reader: officeRepo})
+	dashboardSvc := officedashboard.NewDashboardService(
+		officeRepo,
+		log,
+		shared.NewActivityLogger(officeRepo, log),
+		agentSvc,
+		nil,
+	)
+
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	group := engine.Group(officeRoutePrefix)
+	group.Use(officeagents.AgentAuthMiddleware(agentSvc))
+	group.Use(officeWorkspaceScopeMiddleware(authSvc, taskSvc, officeRepo))
+	officedashboard.RegisterRoutes(group, dashboardSvc, officeRepo, nil, handoff, log)
+
+	cases := []struct {
+		name string
+		path string
+	}{
+		{name: "missing", path: officeRoutePrefix + "/tasks/does-not-exist/comments"},
+		{name: "foreign workspace", path: officeRoutePrefix + "/tasks/task-comment-b/comments"},
+		{name: "unrelated same workspace", path: officeRoutePrefix + "/tasks/task-comment-a2/comments"},
+	}
+	// Add an existing task in the caller workspace that is not related to the
+	// JWT task. The seeded comment-a task is the caller task itself.
+	now := time.Now().UTC()
+	if _, err := officeRepo.ExecRaw(context.Background(),
+		`INSERT INTO tasks (id, workspace_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+		"task-comment-a2", workspaceA, "unrelated", now, now); err != nil {
+		t.Fatalf("seed unrelated task: %v", err)
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			req.Header.Set("Authorization", "Bearer "+token)
+			rec := httptest.NewRecorder()
+			engine.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, body=%q; want 403", rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), taskservice.ErrAccessDenied.Error()) {
+				t.Fatalf("body = %q, want %q", rec.Body.String(), taskservice.ErrAccessDenied.Error())
 			}
 		})
 	}

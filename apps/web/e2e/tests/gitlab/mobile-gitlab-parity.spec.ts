@@ -37,6 +37,7 @@ async function seedMultiRepoGitLabTask(
     provider_host: GITLAB_HOST,
     provider_owner: "platform",
     provider_name: "kandev",
+    pull_before_worktree: false,
   });
   const secondaryRepoDir = path.join(tmpDir, "repos", "mobile-gitlab-secondary");
   fs.mkdirSync(secondaryRepoDir, { recursive: true });
@@ -53,6 +54,7 @@ async function seedMultiRepoGitLabTask(
       provider_host: GITLAB_HOST,
       provider_owner: "platform",
       provider_name: "docs",
+      pull_before_worktree: false,
     },
   );
   return apiClient.createTask(seedData.workspaceId, "Mobile contextual GitLab link", {
@@ -83,6 +85,7 @@ test.describe("Mobile GitLab parity", () => {
       provider_host: GITLAB_HOST,
       provider_owner: "platform",
       provider_name: "kandev",
+      pull_before_worktree: false,
     });
 
     const gitlab = new GitLabPage(testPage);
@@ -126,6 +129,7 @@ test.describe("Mobile GitLab parity", () => {
       provider_host: GITLAB_HOST,
       provider_owner: "platform",
       provider_name: "kandev",
+      pull_before_worktree: false,
     });
 
     const gitlab = new GitLabPage(testPage);
@@ -345,6 +349,7 @@ test.describe("Mobile GitLab parity", () => {
       provider_host: backend.baseUrl,
       provider_owner: "platform",
       provider_name: "kandev",
+      pull_before_worktree: false,
     });
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,

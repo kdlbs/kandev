@@ -1354,6 +1354,10 @@ func failingLaunchRepositoryIdentity(
 	if len(req.Repositories) == 0 {
 		return req.RepositoryID, req.TaskRepositoryID
 	}
+	var preparationErr *lifecycle.RepositoryPreparationError
+	if errors.As(launchErr, &preparationErr) && preparationErr != nil {
+		return preparationErr.RepositoryID, preparationErr.TaskRepositoryID
+	}
 
 	branch := extractLaunchFailureBranch(launchErr)
 	if len(req.Repositories) == 1 && branch == "" {
@@ -1750,6 +1754,7 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 			WorktreeBranchTemplate:  info.WorktreeBranchTemplate,
 			PullBeforeWorktree:      info.PullBeforeWorktree,
 			RemoteSyncHandled:       info.RemoteSyncHandled,
+			RefreshRepository:       info.RefreshRepository,
 		}
 		if info.Repository != nil {
 			spec.RepoName = info.Repository.Name
@@ -1820,6 +1825,7 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 		req.WorktreeBranchTemplate = repoInfo.WorktreeBranchTemplate
 		req.PullBeforeWorktree = repoInfo.PullBeforeWorktree
 		req.RemoteSyncHandled = repoInfo.RemoteSyncHandled
+		req.RefreshRepository = repoInfo.RefreshRepository
 		if repoInfo.Repository != nil {
 			req.DefaultBranch = repoInfo.Repository.DefaultBranch
 			if req.UseWorktree {
