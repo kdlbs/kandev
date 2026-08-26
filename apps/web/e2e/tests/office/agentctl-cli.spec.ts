@@ -347,18 +347,26 @@ test.describe("agentctl kandev CLI", () => {
     expect((comments.comments ?? []).some((c) => c.body === body)).toBe(true);
   });
 
-  test("comment list reads the caller's own task and is denied on an unrelated task", async ({
+  test("comment list reads the caller's own task, reads a child task, and is denied on an unrelated task", async ({
     apiClient,
     officeApi,
     backend,
     officeSeed,
   }) => {
-    // Two independent root tasks in the same workspace: no parent/child,
-    // sibling, or blocker relation between them.
+    // ownTask is the caller's task. childTask is a genuine child of ownTask,
+    // so this also exercises AC-OFFICE-AGENT-COMMENT-READS-008.1: a parent
+    // task's agent reading a comment its child posted. unrelatedTask is an
+    // independent root task in the same workspace with no parent/child,
+    // sibling, or blocker relation to either.
     const ownTask = await apiClient.createTask(
       officeSeed.workspaceId,
       `CLI Comment List Own ${Date.now()}`,
       { workflow_id: officeSeed.workflowId },
+    );
+    const childTask = await apiClient.createTask(
+      officeSeed.workspaceId,
+      `CLI Comment List Child ${Date.now()}`,
+      { workflow_id: officeSeed.workflowId, parent_id: ownTask.id as string },
     );
     const unrelatedTask = await apiClient.createTask(
       officeSeed.workspaceId,
@@ -367,7 +375,9 @@ test.describe("agentctl kandev CLI", () => {
     );
 
     const ownBody = `own-task-comment-${Date.now()}`;
+    const childBody = `child-task-comment-${Date.now()}`;
     await officeApi.createTaskComment(ownTask.id as string, ownBody);
+    await officeApi.createTaskComment(childTask.id as string, childBody);
     await officeApi.createTaskComment(
       unrelatedTask.id as string,
       `unrelated-comment-${Date.now()}`,
@@ -400,6 +410,13 @@ test.describe("agentctl kandev CLI", () => {
     expect(ownRes.exitCode, `stderr=${ownRes.stderr}`).toBe(0);
     const ownParsed = JSON.parse(ownRes.stdout) as { comments?: Array<{ body?: string }> };
     expect((ownParsed.comments ?? []).some((c) => c.body === ownBody)).toBe(true);
+
+    // Descendant read succeeds: the parent's agent can read the comment its
+    // child task posted, with no human action between the two runs.
+    const childRes = runCLI(env, ["comment", "list", "--task", childTask.id as string]);
+    expect(childRes.exitCode, `stderr=${childRes.stderr}`).toBe(0);
+    const childParsed = JSON.parse(childRes.stdout) as { comments?: Array<{ body?: string }> };
+    expect((childParsed.comments ?? []).some((c) => c.body === childBody)).toBe(true);
 
     // Cross-task read on an unrelated in-workspace task is denied.
     const deniedRes = runCLI(env, ["comment", "list", "--task", unrelatedTask.id as string]);

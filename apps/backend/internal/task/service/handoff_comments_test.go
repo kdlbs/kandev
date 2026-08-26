@@ -82,6 +82,29 @@ func TestListCommentsForCallerEnforcesReadAccess(t *testing.T) {
 	}
 }
 
+// AC-OFFICE-AGENT-COMMENT-READS-008.1: the feature's sole acceptance-path
+// scenario is a PARENT reading a CHILD's comment (the child posted a stage
+// deliverable; the parent reads it on its next run). Every other case in
+// this file exercises the caller reading an ancestor ("child-a" -> "parent")
+// or itself — none cover this descendant direction end-to-end through
+// ListCommentsForCaller (windowing, projection, truncation), even though
+// the underlying canReadDocuments guard supports it generically.
+func TestListCommentsForCallerAllowsDescendantRead(t *testing.T) {
+	svc, _ := newDocumentHandoffService(t, nil)
+	reader := &fakeCommentReader{}
+	reader.seed("child-a", 1, 10)
+	svc.SetCommentReader(reader)
+	ctx := context.Background()
+
+	w, err := svc.ListCommentsForCaller(ctx, "parent", "child-a", 20)
+	if err != nil {
+		t.Fatalf("parent reading child-a's comments: %v", err)
+	}
+	if w.Total != 1 || len(w.Comments) != 1 {
+		t.Fatalf("window = %+v, want exactly the one comment child-a posted", w)
+	}
+}
+
 // AC-OFFICE-AGENT-COMMENT-READS-005.4: the target crosses only from the
 // caller-supplied target argument. There is no "self"/empty sentinel — an
 // unrecognised or empty target is resolved by the guard like any other
@@ -308,12 +331,12 @@ func TestListCommentsForCallerProjectsAuthorFields(t *testing.T) {
 	}
 }
 
-// The mcp.list_task_comments WS action reaches ListCommentsForCaller
-// directly, without the MCP tool wrapper's resolveCommentsLimit
-// normalization. Assert the service clamps at its own boundary so a raw,
-// unnormalized limit never reaches SQLite's LIMIT clause (LIMIT 0 returns
-// zero rows, a negative LIMIT returns the whole table under SQLite's
-// "no limit" semantics).
+// The dashboard HTTP handler's strconv.Atoi(c.Query("limit")) performs no
+// validation of its own (see handoff_comments.go), so a missing, zero, or
+// negative "limit" query parameter reaches ListCommentsForCaller unclamped.
+// Assert the service clamps at its own boundary so a raw, unnormalized limit
+// never reaches SQLite's LIMIT clause (LIMIT 0 returns zero rows, a negative
+// LIMIT returns the whole table under SQLite's "no limit" semantics).
 func TestListCommentsForCallerClampsLimitAtServiceBoundary(t *testing.T) {
 	cases := []struct {
 		name      string
