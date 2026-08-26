@@ -47,6 +47,11 @@ func (f *fakeUtilityRunner) ExecuteProfilePrompt(_ context.Context, profileID, p
 func configuredUtilityHost(t *testing.T) *testDataHost {
 	t.Helper()
 	d := newTestDataHost(manifest.Capabilities{AgentInvoke: true})
+	d.host.configSchema = map[string]any{
+		"properties": map[string]any{
+			utilityAgentConfigKey: map[string]any{"type": "string", "format": "utility-agent"},
+		},
+	}
 	d.host.configs = &fakeConfigReader{configs: map[string]any{utilityAgentConfigKey: "utility-agent-42"}}
 	d.utilAgents.agent = &UtilityAgent{Name: "summarizer", AgentID: "claude-acp", Model: "claude-opus-4-8", AgentProfileID: "profile-42", ProfileBindingState: "explicit", Enabled: true}
 	d.utilRun.text = "the summary"
@@ -81,6 +86,7 @@ func TestPluginHost_InvokeUtilityAgent_UsesConfiguredAgentProfileBeforeUtilityAg
 	d.host.configSchema = map[string]any{
 		"properties": map[string]any{
 			agentProfileConfigKey: map[string]any{"type": "string", "format": "agent-profile"},
+			utilityAgentConfigKey: map[string]any{"type": "string", "format": "utility-agent"},
 		},
 	}
 	d.host.configs = &fakeConfigReader{configs: map[string]any{
@@ -103,11 +109,32 @@ func TestPluginHost_InvokeUtilityAgent_UsesConfiguredAgentProfileBeforeUtilityAg
 	}
 }
 
+func TestPluginHost_InvokeUtilityAgent_RejectsUndeclaredLegacyUtilityAgentConfig(t *testing.T) {
+	d := configuredUtilityHost(t)
+	d.host.configSchema = map[string]any{
+		"properties": map[string]any{
+			agentProfileConfigKey: map[string]any{"type": "string", "format": "agent-profile"},
+		},
+	}
+
+	_, err := d.host.InvokeUtilityAgent(context.Background(), "summarize yesterday")
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("InvokeUtilityAgent() status = %s, want %s; err = %v", status.Code(err), codes.FailedPrecondition, err)
+	}
+	if status.Convert(err).Message() != "no agent profile configured for this plugin" {
+		t.Fatalf("InvokeUtilityAgent() message = %q", status.Convert(err).Message())
+	}
+	if d.utilAgents.calls != 0 || d.utilRun.calls != 0 {
+		t.Fatalf("stale utility config touched agent lookup %d times and runner %d times", d.utilAgents.calls, d.utilRun.calls)
+	}
+}
+
 func TestPluginHost_InvokeUtilityAgent_FallsBackToLegacyUtilityAgentWhenDirectProfileIsUnset(t *testing.T) {
 	d := configuredUtilityHost(t)
 	d.host.configSchema = map[string]any{
 		"properties": map[string]any{
 			agentProfileConfigKey: map[string]any{"type": "string", "format": "agent-profile"},
+			utilityAgentConfigKey: map[string]any{"type": "string", "format": "utility-agent"},
 		},
 	}
 	d.host.configs = &fakeConfigReader{configs: map[string]any{utilityAgentConfigKey: "utility-agent-42"}}

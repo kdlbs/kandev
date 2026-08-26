@@ -114,7 +114,9 @@ type Host interface {
 	// InvokeUtilityAgent runs a one-shot, non-interactive completion using the
 	// plugin's configured `agent_profile` (format `agent-profile`) or legacy
 	// `utility_agent` (format `utility-agent`) selection and returns its text.
-	// `agent_profile` takes precedence when both are declared. Requires the
+	// A non-empty `agent_profile` takes precedence when both are declared; an
+	// unset direct selection falls back only to a declared `utility_agent`.
+	// Requires the
 	// `agent_invoke` capability and returns gRPC FailedPrecondition for a
 	// missing, disabled, CLI-passthrough, or workspace-scoped selection.
 	InvokeUtilityAgent(ctx context.Context, prompt string) (string, error)

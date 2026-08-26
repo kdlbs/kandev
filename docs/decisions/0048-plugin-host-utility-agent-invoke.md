@@ -36,7 +36,8 @@ configuration and the existing host-utility tier.
    workspace-scoped, or non-inference profile is a
    `FailedPrecondition`. A non-empty declared `agent_profile` is the direct
    execution selection and takes precedence over `utility_agent`; when it is
-   unset, the legacy selection remains available.
+   unset, the legacy selection remains available only if the manifest also
+   declares that legacy selector.
    Existing plugins may continue declaring `utility_agent` with
    `format: utility-agent`; that legacy selector resolves the utility agent's
    effective profile as before.

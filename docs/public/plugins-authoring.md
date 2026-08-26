@@ -517,7 +517,7 @@ subscription vocabulary and wildcard rules are in the
 | Message send   | Messages().Send                                  | api_write: messages                                                         | Sends a prompt to a task session and records plugin:<id> author                                                                                                                             |
 | Interactions   | Interactions().ListPending, Interactions().Get   | api_read: interactions                                                      | Durable record of agent requests still owed a human answer; Get resolves resolved ones too                                                                                                  |
 | Interaction responses | Interactions().RespondToPermission, .AnswerClarification, .CancelClarification | api_write: interactions           | Routed through the services the native UI drives; first terminal response wins                                                                                                             |
-| Agent invocation | InvokeUtilityAgent(ctx, prompt)                | agent_invoke: true plus config_schema.agent_profile (format: agent-profile), or legacy utility_agent | One-shot completion using the selected eligible direct profile. A non-empty declared `agent_profile` wins; an unset direct value falls back to legacy utility_agent; stale bindings are FailedPrecondition |
+| Agent invocation | InvokeUtilityAgent(ctx, prompt)                | agent_invoke: true plus config_schema.agent_profile (format: agent-profile), or legacy utility_agent | One-shot completion using the selected eligible direct profile. A non-empty declared `agent_profile` wins; an unset direct value falls back only to a declared legacy `utility_agent`; stale bindings are FailedPrecondition |
 
 The Go signatures, filters, DTOs, and pagination types live in
 apps/backend/pkg/pluginsdk/host.go and data_types.go. api_write task/message
@@ -819,7 +819,7 @@ Existing plugins may continue to declare `utility_agent` with
 `format: utility-agent`; Kandev resolves that utility agent's effective
 profile. Do not declare both unless the direct profile is intentionally the
 preferred route: a non-empty declared `agent_profile` takes precedence, while
-an unset direct value falls back to the legacy selector.
+an unset direct value falls back only when the legacy selector is also declared.
 
 **Capability gating.** Every Host RPC except `GetConfig` and `EmitEvent` is
 checked against your manifest's `capabilities` before the handler runs:

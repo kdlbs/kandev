@@ -94,9 +94,11 @@ func (h *pluginHost) InvokeUtilityAgent(ctx context.Context, prompt string) (str
 			return h.invokeConfiguredAgentProfile(ctx, profileID, profiles, runner, prompt)
 		}
 	}
-	agentID, _ := config[utilityAgentConfigKey].(string)
-	if agentID != "" {
-		return h.invokeConfiguredUtilityAgent(ctx, agentID, agents, runner, prompt)
+	if hasUtilityAgentConfig(h.configSchema) {
+		agentID, _ := config[utilityAgentConfigKey].(string)
+		if agentID != "" {
+			return h.invokeConfiguredUtilityAgent(ctx, agentID, agents, runner, prompt)
+		}
 	}
 	if hasAgentProfileConfig(h.configSchema) {
 		return "", errNoAgentProfile()
@@ -169,12 +171,20 @@ func (h *pluginHost) invokeConfiguredAgentProfile(
 }
 
 func hasAgentProfileConfig(schema map[string]any) bool {
+	return hasConfigField(schema, agentProfileConfigKey, "agent-profile")
+}
+
+func hasUtilityAgentConfig(schema map[string]any) bool {
+	return hasConfigField(schema, utilityAgentConfigKey, "utility-agent")
+}
+
+func hasConfigField(schema map[string]any, key, format string) bool {
 	properties, ok := schema["properties"].(map[string]any)
 	if !ok {
 		return false
 	}
-	property, ok := properties[agentProfileConfigKey].(map[string]any)
-	return ok && property["format"] == "agent-profile"
+	property, ok := properties[key].(map[string]any)
+	return ok && property["format"] == format
 }
 
 func errNoUtilityAgent() error {
