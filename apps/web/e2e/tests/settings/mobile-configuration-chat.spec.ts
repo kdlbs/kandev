@@ -19,6 +19,7 @@ test.describe("Configuration Chat on mobile", () => {
     expect(launcherBox).not.toBeNull();
     expect(launcherBox!.x).toBeGreaterThanOrEqual(0);
     expect(launcherBox!.x + launcherBox!.width).toBeLessThanOrEqual(viewport!.width);
+    expect(launcherBox!.y).toBeGreaterThanOrEqual(0);
     expect(launcherBox!.y + launcherBox!.height).toBeLessThanOrEqual(viewport!.height);
 
     await launcher.tap();

@@ -1,6 +1,6 @@
 ---
 created: 2026-08-26
-status: draft
+status: done
 requirements:
   - REQ-UI-QUICK-TERMINAL-001
 system_design:
