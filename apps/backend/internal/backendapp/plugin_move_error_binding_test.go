@@ -32,8 +32,10 @@ import (
 // so the error text classifyPluginMoveError matches against is whatever the
 // real validators produce today, not a hand-written stand-in.
 type pluginMoveErrorBindingHarness struct {
-	adapter pluginsTaskWriterAdapter
-	repo    *sqliterepo.Repository
+	adapter     pluginsTaskWriterAdapter
+	repo        *sqliterepo.Repository
+	workflowSvc *workflowservice.Service
+	db          *sqlx.DB
 }
 
 func newPluginMoveErrorBindingHarness(t *testing.T) *pluginMoveErrorBindingHarness {
@@ -75,6 +77,12 @@ func newPluginMoveErrorBindingHarness(t *testing.T) *pluginMoveErrorBindingHarne
 	}, bus.NewMemoryEventBus(log), log, taskservice.RepositoryDiscoveryConfig{})
 	workflowSvc := workflowservice.NewService(workflowRepo, log)
 	taskSvc.SetWorkflowStepGetter(&workflowStepGetterAdapter{svc: workflowSvc})
+	// Matches production wiring (backendapp.wireServices calls
+	// taskSvc.SetStepHistoryRecorder(workflowSvc)) so a plugin move against a
+	// task with a live session writes the ADR 0015 session_step_history audit
+	// row the same way it does at runtime.
+	taskSvc.SetStepHistoryRecorder(workflowSvc)
+	t.Cleanup(func() { _ = workflowSvc.Close() })
 
 	ctx := context.Background()
 	require.NoError(t, taskRepo.CreateWorkspace(ctx, &taskmodels.Workspace{ID: "ws-1", Name: "Workspace 1"}))
@@ -86,8 +94,10 @@ func newPluginMoveErrorBindingHarness(t *testing.T) *pluginMoveErrorBindingHarne
 	require.NoError(t, workflowSvc.CreateStep(ctx, &wfmodels.WorkflowStep{ID: "step-home", WorkflowID: "wf-home", Name: "Home", Position: 0}))
 
 	return &pluginMoveErrorBindingHarness{
-		adapter: pluginsTaskWriterAdapter{svc: taskSvc},
-		repo:    taskRepo,
+		adapter:     pluginsTaskWriterAdapter{svc: taskSvc},
+		repo:        taskRepo,
+		workflowSvc: workflowSvc,
+		db:          database,
 	}
 }
 
@@ -105,6 +115,31 @@ func (h *pluginMoveErrorBindingHarness) createTask(t *testing.T, id string, arch
 	if archived {
 		require.NoError(t, h.repo.ArchiveTask(ctx, id))
 	}
+}
+
+// createSession attaches a primary task session in the given state, letting
+// tests exercise MoveTaskWithOptions' session-resolution and ADR 0015
+// session_step_history recording paths.
+func (h *pluginMoveErrorBindingHarness) createSession(t *testing.T, id, taskID string, state taskmodels.TaskSessionState) {
+	t.Helper()
+	require.NoError(t, h.repo.CreateTaskSession(context.Background(), &taskmodels.TaskSession{
+		ID: id, TaskID: taskID, State: state, IsPrimary: true,
+	}))
+}
+
+// lastSessionStepHistoryTrigger reads back the most recently written ADR 0015
+// session_step_history.trigger for a session, flushing the workflow
+// service's async history-writer queue first (EnqueueStepTransition is
+// fire-and-forget; Close drains it and waits for the writer goroutine to
+// exit before returning).
+func (h *pluginMoveErrorBindingHarness) lastSessionStepHistoryTrigger(t *testing.T, sessionID string) string {
+	t.Helper()
+	require.NoError(t, h.workflowSvc.Close())
+	var trigger string
+	err := h.db.Get(&trigger,
+		`SELECT trigger FROM session_step_history WHERE session_id = ? ORDER BY id DESC LIMIT 1`, sessionID)
+	require.NoError(t, err, "expected a session_step_history row for session %q", sessionID)
+	return trigger
 }
 
 // TestClassifyPluginMoveError_BindsToRealValidatorStrings pins AC-004.6: the
@@ -219,4 +254,71 @@ func TestResolvePluginMoveWorkflowID_StaleReadFailsSafeNotSilentlyWrong(t *testi
 	require.NoError(t, getErr)
 	require.Equal(t, "step-target", final.WorkflowStepID, "the failed stale move must not have changed the step set by the interceding real move")
 	require.Equal(t, "wf-target", final.WorkflowID)
+}
+
+// TestConcurrentReassignmentSurvivesMatchingStepStaleMove pins the SEC-001 fix
+// (Review round 2): the sibling gap in
+// TestResolvePluginMoveWorkflowID_StaleReadFailsSafeNotSilentlyWrong, which
+// only covers a stale workflow id whose requested step does NOT belong to it
+// (caught for free by validateTaskMove's own targetStep.WorkflowID check).
+// Here the requested step DOES belong to the stale, pre-read workflow — so
+// without a write-time CAS check, the stale move would pass validateTaskMove
+// outright and silently revert the concurrent, legitimate reassignment with
+// no error at all. MoveTaskOptions.ExpectedWorkflowID must catch this.
+func TestConcurrentReassignmentSurvivesMatchingStepStaleMove(t *testing.T) {
+	h := newPluginMoveErrorBindingHarness(t)
+	h.createTask(t, "task-race-2", false)
+
+	staleWorkflowID, err := h.adapter.resolvePluginMoveWorkflowID(context.Background(), plugins.TaskMoveInput{
+		TaskID: "task-race-2",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "wf-home", staleWorkflowID)
+
+	// Simulate the race: another caller reassigns the task to a different
+	// workflow before the plugin's own move (using the now-stale pre-read)
+	// commits.
+	_, err = h.adapter.svc.MoveTaskWithOptions(context.Background(), "task-race-2", "wf-target", "step-target", 0, taskservice.MoveTaskOptions{})
+	require.NoError(t, err)
+
+	// The plugin's stale move now targets step-home, which DOES belong to the
+	// stale wf-home — the exploit case. Without the CAS guard this would pass
+	// validateTaskMove and silently move the task back to wf-home/step-home.
+	_, err = h.adapter.svc.MoveTaskWithOptions(context.Background(), "task-race-2", staleWorkflowID, "step-home", 0, taskservice.MoveTaskOptions{
+		ExpectedWorkflowID: &staleWorkflowID,
+	})
+	require.ErrorIs(t, err, taskservice.ErrWorkflowResolutionConflict)
+	require.Equal(t, codes.Aborted, status.Code(classifyPluginMoveError(err)))
+
+	final, getErr := h.repo.GetTask(context.Background(), "task-race-2")
+	require.NoError(t, getErr)
+	require.Equal(t, "wf-target", final.WorkflowID, "the concurrent reassignment must survive the rejected stale move")
+	require.Equal(t, "step-target", final.WorkflowStepID)
+}
+
+// TestPluginMoveWithLiveNonBlockingSessionRecordsPluginMoveTrigger pins the
+// AC-003.2/AC-003.5 test-rigor gap (Review round 2): every existing plugin
+// move test either has no session at all, or a Starting/Running session that
+// validateMoveSessions rejects outright (isSessionMoveBlocked) before
+// MoveTaskWithOptions ever reaches recordManualStepTransition. None of them
+// prove what happens for a session that is live (resolvePrimaryOrActiveSession
+// picks it up via isSessionActive, so it becomes the ADR 0015 audit row's
+// session_id) but not move-blocking — WaitingForInput is exactly that gap.
+// Without the plugin adapter's opts.StepHistoryTrigger reaching the recorder,
+// recordManualStepTransition's zero-value fallback would silently default the
+// row to StepTransitionTriggerManual instead of plugin_move.
+func TestPluginMoveWithLiveNonBlockingSessionRecordsPluginMoveTrigger(t *testing.T) {
+	h := newPluginMoveErrorBindingHarness(t)
+	h.createTask(t, "task-live-waiting", false)
+	h.createSession(t, "session-waiting", "task-live-waiting", taskmodels.TaskSessionStateWaitingForInput)
+	wf := "wf-target"
+
+	_, err := h.adapter.MoveTask(context.Background(), plugins.TaskMoveInput{
+		TaskID: "task-live-waiting", WorkflowStepID: "step-target", WorkflowID: &wf, Source: "plugin:acme",
+	})
+	require.NoError(t, err, "a WaitingForInput session is live but not move-blocking (isSessionMoveBlocked covers only Starting/Running)")
+
+	trigger := h.lastSessionStepHistoryTrigger(t, "session-waiting")
+	require.Equal(t, string(wfmodels.StepTransitionTriggerPluginMove), trigger,
+		"a plugin move against a task with a live session must record plugin_move, not fall back to manual")
 }

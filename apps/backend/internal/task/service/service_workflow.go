@@ -420,7 +420,22 @@ type MoveTaskOptions struct {
 	// StepHistoryActor identifies the caller. Agent moves must not inherit the
 	// owner identity that MCP uses for authorization.
 	StepHistoryActor wfmodels.StepTransitionActor
+	// ExpectedWorkflowID guards a caller that resolved "the task's current
+	// workflow" via a separate pre-read (rather than passing an explicit,
+	// intentional target workflow) against a concurrent reassignment landing
+	// between that read and this call. When set, MoveTaskWithOptions compares
+	// it to the task's WorkflowID from the fresh GetTask this method already
+	// performs and fails with ErrWorkflowResolutionConflict on a mismatch,
+	// instead of silently reverting whatever the concurrent move just did.
+	ExpectedWorkflowID *string
 }
+
+// ErrWorkflowResolutionConflict indicates a caller's pre-resolved "current
+// workflow" (see MoveTaskOptions.ExpectedWorkflowID) no longer matches the
+// task's actual workflow by the time the move is applied — a concurrent
+// reassignment won the race. The move is rejected rather than silently
+// reverting that reassignment.
+var ErrWorkflowResolutionConflict = errors.New("task workflow changed since resolution")
 
 type workflowMoveLimitsRepository interface {
 	CountTasksByWorkflowStepExcludingTask(ctx context.Context, stepID, excludeTaskID string) (int, error)
@@ -486,6 +501,10 @@ func (s *Service) MoveTaskWithOptions(
 	task, err := s.tasks.GetTask(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if opts.ExpectedWorkflowID != nil && task.WorkflowID != *opts.ExpectedWorkflowID {
+		return nil, fmt.Errorf("%w: resolved %q, task is now in %q",
+			ErrWorkflowResolutionConflict, *opts.ExpectedWorkflowID, task.WorkflowID)
 	}
 
 	targetStep, err := s.validateTaskMove(ctx, task, workflowID, workflowStepID, opts)

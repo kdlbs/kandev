@@ -1326,6 +1326,20 @@ func (a pluginsTaskWriterAdapter) MoveTask(ctx context.Context, in plugins.TaskM
 		return nil, err
 	}
 
+	opts := taskservice.MoveTaskOptions{
+		StepHistoryTrigger: wfmodels.StepTransitionTriggerPluginMove,
+		StepHistoryActor:   wfmodels.StepTransitionActorSystem,
+	}
+	if in.WorkflowID == nil {
+		// workflowID above was inherited from a separate GetTask pre-read
+		// (resolvePluginMoveWorkflowID), not named explicitly by the plugin.
+		// Guard against a concurrent reassignment landing between that read
+		// and the write below: MoveTaskWithOptions re-checks this against the
+		// task's WorkflowID from its own fresh GetTask and fails the move
+		// instead of silently reverting the concurrent change.
+		opts.ExpectedWorkflowID = &workflowID
+	}
+
 	// Attach attribution before calling MoveTaskWithOptions: that method only
 	// falls back to its own default attribution when none is already present
 	// on the context (steptelemetry.HasTrigger), so setting it here — exactly
@@ -1336,10 +1350,7 @@ func (a pluginsTaskWriterAdapter) MoveTask(ctx context.Context, in plugins.TaskM
 		ActorID:   in.Source,
 	})
 
-	result, err := a.svc.MoveTaskWithOptions(ctx, in.TaskID, workflowID, in.WorkflowStepID, int(in.Position), taskservice.MoveTaskOptions{
-		StepHistoryTrigger: wfmodels.StepTransitionTriggerPluginMove,
-		StepHistoryActor:   wfmodels.StepTransitionActorSystem,
-	})
+	result, err := a.svc.MoveTaskWithOptions(ctx, in.TaskID, workflowID, in.WorkflowStepID, int(in.Position), opts)
 	if err != nil {
 		return nil, classifyPluginMoveError(err)
 	}
@@ -1386,26 +1397,36 @@ func (a pluginsTaskWriterAdapter) resolvePluginMoveWorkflowID(ctx context.Contex
 // buckets archived/active-session/different-workspace/step-not-in-workflow
 // into a single Conflict code, but this table requires FailedPrecondition for
 // the first two and InvalidArgument for the latter two.
+//
+// Every branch returns a fixed, generic message rather than the underlying
+// err.Error() text: validateTaskMove's messages are meant for trusted
+// board/MCP callers and can name internal identifiers, so forwarding them
+// verbatim to a plugin (an external, less-trusted caller) over the gRPC
+// status would leak implementation detail the plugin has no legitimate need
+// for. This mirrors classifyMoveTaskError's own fixed-message convention.
 func classifyPluginMoveError(err error) error {
 	if err == nil {
 		return nil
 	}
 	if errors.Is(err, repoerrors.ErrTaskNotFound) {
-		return status.Error(codes.NotFound, err.Error())
+		return status.Error(codes.NotFound, "task not found")
+	}
+	if errors.Is(err, taskservice.ErrWorkflowResolutionConflict) {
+		return status.Error(codes.Aborted, "task workflow changed concurrently, retry the move")
 	}
 	msg := err.Error()
 	switch {
 	case strings.Contains(msg, "archived tasks cannot be moved"):
-		return status.Error(codes.FailedPrecondition, msg)
+		return status.Error(codes.FailedPrecondition, "task is archived and cannot be moved")
 	case strings.Contains(msg, "task has an active session"):
-		return status.Error(codes.FailedPrecondition, msg)
+		return status.Error(codes.FailedPrecondition, "task has an active session and cannot be moved")
 	case strings.Contains(msg, "workflow not found"),
 		strings.Contains(msg, "workflow step not found"),
 		strings.Contains(msg, "target workflow is in a different workspace"),
 		strings.Contains(msg, "target workflow step does not belong to target workflow"):
-		return status.Error(codes.InvalidArgument, msg)
+		return status.Error(codes.InvalidArgument, "invalid move_task request: unknown or mismatched workflow, step, or workspace")
 	default:
-		return status.Error(codes.Internal, msg)
+		return status.Error(codes.Internal, "failed to move task")
 	}
 }
 

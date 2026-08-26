@@ -83,6 +83,38 @@ func TestPluginsTaskWriter_MoveNilWorkflowIDInheritsCurrent(t *testing.T) {
 	require.Equal(t, "wf-current", svc.lastMoveWfID)
 }
 
+// TestPluginsTaskWriter_MoveNilWorkflowIDSetsExpectedWorkflowIDForCAS pins the
+// SEC-001 fix (Review round 2): when workflow_id is inherited via the
+// resolvePluginMoveWorkflowID pre-read rather than named explicitly, MoveTask
+// must pass that resolved value as MoveTaskOptions.ExpectedWorkflowID so
+// MoveTaskWithOptions can reject the write if a concurrent reassignment lands
+// before it — see TestConcurrentReassignmentSurvivesMatchingStepStaleMove for
+// the mechanism itself.
+func TestPluginsTaskWriter_MoveNilWorkflowIDSetsExpectedWorkflowIDForCAS(t *testing.T) {
+	svc := &fakePluginTaskWriteService{getTaskResult: &taskmodels.Task{ID: "task-1", WorkflowID: "wf-current"}}
+	a := pluginsTaskWriterAdapter{svc: svc}
+
+	_, err := a.MoveTask(context.Background(), plugins.TaskMoveInput{TaskID: "task-1", WorkflowStepID: "step-2"})
+	require.NoError(t, err)
+	require.NotNil(t, svc.lastMoveOpts.ExpectedWorkflowID, "an inherited workflow id must be CAS-guarded against a concurrent reassignment")
+	require.Equal(t, "wf-current", *svc.lastMoveOpts.ExpectedWorkflowID)
+}
+
+// TestPluginsTaskWriter_MoveExplicitWorkflowIDSkipsExpectedWorkflowID pins the
+// other half of the SEC-001 fix: a plugin that explicitly names a target
+// workflow_id is intentionally requesting a cross-workflow move, so that
+// request must never be CAS-guarded against the task's current workflow —
+// doing so would reject every legitimate explicit reassignment.
+func TestPluginsTaskWriter_MoveExplicitWorkflowIDSkipsExpectedWorkflowID(t *testing.T) {
+	svc := &fakePluginTaskWriteService{getTaskResult: &taskmodels.Task{ID: "task-1", WorkflowID: "wf-current"}}
+	a := pluginsTaskWriterAdapter{svc: svc}
+	wf := "wf-explicit"
+
+	_, err := a.MoveTask(context.Background(), plugins.TaskMoveInput{TaskID: "task-1", WorkflowStepID: "step-2", WorkflowID: &wf})
+	require.NoError(t, err)
+	require.Nil(t, svc.lastMoveOpts.ExpectedWorkflowID, "an explicit workflow_id is an intentional target and must not be CAS-guarded")
+}
+
 // TestPluginsTaskWriter_MoveNoWorkflowNoneNamedDefersToSharedPath pins the
 // AC-005.11/precedence-ladder fix: when the task has no current workflow and
 // none was named, resolution must NOT short-circuit with its own

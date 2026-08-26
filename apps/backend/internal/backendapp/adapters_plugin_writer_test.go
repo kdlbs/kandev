@@ -190,6 +190,33 @@ func TestPluginsTaskWriter_UpdateRejectsEmptyWorkflowStepID(t *testing.T) {
 	require.Nil(t, svc.lastUpdate)
 }
 
+// TestPluginsTaskWriter_UpdateWorkflowStepIDGuardRunsBeforeStateValidation
+// pins AC-004.3's guard ordering: the workflow_step_id-presence rejection
+// must be the first check in UpdateTask, before state validation, so a
+// request carrying both an invalid state AND workflow_step_id is named as a
+// rejected move (not a state error) — per the doc comment on that check. Both
+// TestPluginsTaskWriter_UpdateRejectsWorkflowStepID and
+// TestPluginsTaskWriter_UpdateRejectsUnknownState alone only pin
+// codes.InvalidArgument, which either check alone satisfies — this test
+// combines both invalid fields in one request and asserts on the message to
+// prove which check actually fired, so a future reorder that runs state
+// validation first would fail this test even though the status code is
+// unchanged.
+func TestPluginsTaskWriter_UpdateWorkflowStepIDGuardRunsBeforeStateValidation(t *testing.T) {
+	svc := &fakePluginTaskWriteService{}
+	a := pluginsTaskWriterAdapter{svc: svc}
+
+	step := "step-2"
+	badState := "NOT_A_STATE"
+	_, err := a.UpdateTask(context.Background(), plugins.TaskUpdateInput{
+		ID: "task-1", WorkflowStepID: &step, State: &badState,
+	})
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.Contains(t, status.Convert(err).Message(), "workflow_step_id",
+		"the workflow_step_id guard must fire first, not the state-validation error")
+	require.Nil(t, svc.lastUpdate, "the service is never called when workflow_step_id is present")
+}
+
 func TestPluginsTaskWriter_UpdateRejectsUnknownState(t *testing.T) {
 	svc := &fakePluginTaskWriteService{}
 	a := pluginsTaskWriterAdapter{svc: svc}
