@@ -48,6 +48,7 @@ describe("structured PR task status summary", () => {
     expect(summary).toEqual({
       number: 2966,
       title: "Make pull request status easier to scan",
+      author: "octocat",
       rows: [
         { kind: "review", status: "approved", tone: "success" },
         { kind: "ci", status: "passed", tone: "success" },
@@ -132,6 +133,12 @@ describe("structured PR task status summary", () => {
     const summary = derivePRTaskStatusSummary(makePR({ mergeable_state: "draft" }), true);
 
     expect(summary.rows).toEqual([{ kind: "merge", status: "draft", tone: "muted" }]);
+  });
+
+  it("omits an empty author identity", () => {
+    const summary = derivePRTaskStatusSummary(makePR({ author_login: "  " }), false);
+
+    expect(summary).not.toHaveProperty("author");
   });
 });
 

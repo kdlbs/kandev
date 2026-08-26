@@ -11,6 +11,10 @@ import {
   CHANGE_REQUEST_STATUS_RANK,
   getChangeRequestAggregateStatusColor,
 } from "@/components/integrations/change-request-task-status-color";
+import {
+  useTaskPRTooltipHydration,
+  type TaskPRTooltipHydrationStatus,
+} from "@/hooks/domains/github/use-task-pr-tooltip-hydration";
 import type { TaskPR } from "@/lib/types/github";
 import { derivePRTaskStatusSummary, PRTaskStatusSummary } from "./pr-task-status-summary";
 
@@ -233,15 +237,80 @@ export function pickDefaultPR(prs: TaskPR[]): TaskPR | null {
   return best;
 }
 
-export function PRTaskIcon({ taskId }: { taskId: string }) {
+export type TaskPRInfo = {
+  number: number;
+  state: string;
+  aggregateState?: string;
+};
+
+export function PRTaskIcon({ taskId, prInfo }: { taskId: string; prInfo?: TaskPRInfo }) {
   const prs = useAppStore((state) => state.taskPRs.byTaskId[taskId] ?? null);
 
   // Defensive: an upstream payload may briefly seed byTaskId[taskId] with a
   // non-array value (e.g. an empty object from a partial hydration). Bail
   // instead of falling through into MultiPRIcon, where for-of throws.
-  if (!Array.isArray(prs) || prs.length === 0) return null;
+  if (!Array.isArray(prs) || prs.length === 0) {
+    return prInfo ? <CompactPRIcon taskId={taskId} prInfo={prInfo} /> : null;
+  }
   if (prs.length === 1) return <SinglePRIcon taskId={taskId} pr={prs[0]} />;
   return <MultiPRIcon taskId={taskId} prs={prs} />;
+}
+
+function CompactPRIcon({ taskId, prInfo }: { taskId: string; prInfo: TaskPRInfo }) {
+  const { t } = useTranslation();
+  const hydration = useTaskPRTooltipHydration(taskId);
+  const tooltip = useChangeRequestTaskTooltipState(() => {
+    void hydration.hydrate();
+  });
+  const color = getPRAggregateStatusColor(prInfo.aggregateState ?? prInfo.state);
+
+  return (
+    <Tooltip open={tooltip.open}>
+      <TooltipTrigger asChild>
+        <span
+          data-testid={`pr-task-icon-${taskId}`}
+          data-pr-state={prInfo.state}
+          data-pr-count="1"
+          role="img"
+          tabIndex={0}
+          aria-label={t("github:pullRequestStatus", { number: prInfo.number })}
+          onPointerEnter={tooltip.onPointerEnter}
+          onPointerLeave={tooltip.onPointerLeave}
+          onFocus={tooltip.onFocus}
+          onBlur={tooltip.onBlur}
+          className={cn("inline-flex items-center shrink-0", color)}
+        >
+          <IconGitPullRequest aria-hidden="true" className="h-3.5 w-3.5" />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent
+        sideOffset={6}
+        onEscapeKeyDown={tooltip.onEscapeKeyDown}
+        className="w-80 max-w-[calc(100vw-1rem)] p-3"
+      >
+        <CompactPRTooltipContent status={hydration.status} />
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function CompactPRTooltipContent({ status }: { status: TaskPRTooltipHydrationStatus }) {
+  const { t } = useTranslation();
+  if (status === "loading") {
+    return (
+      <span data-testid="pr-task-tooltip-loading" className="text-sm text-muted-foreground">
+        {t("github:taskPrDetailsLoading")}
+      </span>
+    );
+  }
+  if (status === "unavailable") {
+    return (
+      <span data-testid="pr-task-tooltip-unavailable" className="text-sm text-muted-foreground">
+        {t("github:taskPrDetailsUnavailable")}
+      </span>
+    );
+  }
+  return null;
 }
 
 function SinglePRIcon({ taskId, pr }: { taskId: string; pr: TaskPR }) {

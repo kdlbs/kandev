@@ -150,6 +150,7 @@ contract that other capabilities can reuse.
 - [Task PR Automation Controls System Design Part 3](system-design/ci-pr-automation-03.md)
 - [Entity Reference Composer](system-design/entity-reference-composer.md)
 - [Persistent status motion](system-design/persistent-status-motion.md)
+- [PR Task Status Summary](system-design/pr-task-status-summary.md)
 - [Prompt History Panel](system-design/prompt-history-panel.md)
 - [Quick Chat and Terminal Tabs](system-design/quick-terminal.md)
 - [Resizable Markdown Table Columns](system-design/resizable-markdown-tables.md)

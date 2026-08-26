@@ -478,6 +478,8 @@
   "taskAutoFixPrompt": "Prompt de correção automática da tarefa",
   "taskGitAccess": "Acesso Git das tarefas",
   "taskLabelled": "Tarefa: {{title}}",
+  "taskPrDetailsLoading": "A carregar os detalhes do pull request...",
+  "taskPrDetailsUnavailable": "Detalhes do pull request indisponíveis",
   "taskPrompt": "Prompt da tarefa",
   "tasks": "Tarefas",
   "tasksCreatedByThisWatcherLand": "As tarefas criadas por esta vigilância vão para a área de trabalho selecionada.",

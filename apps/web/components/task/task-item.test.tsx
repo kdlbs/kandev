@@ -647,6 +647,7 @@ describe("TaskItem contribution badges", () => {
 
     const prIcon = screen.getByTestId(PR_ICON_TEST_ID);
     const mrIcon = screen.getByTestId(MR_ICON_TEST_ID);
+    expect(prIcon.getAttribute("role")).toBe("img");
     expect(prIcon.compareDocumentPosition(mrIcon) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 

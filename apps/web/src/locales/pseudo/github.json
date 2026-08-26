@@ -497,6 +497,8 @@
   "taskAutoFixPrompt": "Ţàśķ àũţō-ƒĩx ƥŕōḿƥţ",
   "taskGitAccess": "Ţàśķ Ĝĩţ àććēśś",
   "taskLabelled": "Ţàśķ: {{title}}",
+  "taskPrDetailsLoading": "Ĺōàďĩńĝ ƥũĺĺ ŕēqũēśţ ďēţàĩĺś...",
+  "taskPrDetailsUnavailable": "Ƥũĺĺ ŕēqũēśţ ďēţàĩĺś ũńàvàĩĺàƀĺē",
   "taskPrompt": "Ţàśķ Ƥŕōḿƥţ",
   "tasks": "Ţàśķś",
   "tasksCreatedByThisWatcherLand": "Ţàśķś ćŕēàţēď ƀŷ ţĥĩś ŵàţćĥēŕ ĺàńď ĩń ţĥē śēĺēćţēď ŵōŕķśƥàćē.",

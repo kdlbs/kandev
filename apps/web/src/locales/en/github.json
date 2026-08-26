@@ -497,6 +497,8 @@
   "taskAutoFixPrompt": "Task auto-fix prompt",
   "taskGitAccess": "Task Git access",
   "taskLabelled": "Task: {{title}}",
+  "taskPrDetailsLoading": "Loading pull request details...",
+  "taskPrDetailsUnavailable": "Pull request details unavailable",
   "taskPrompt": "Task Prompt",
   "tasks": "Tasks",
   "tasksCreatedByThisWatcherLand": "Tasks created by this watcher land in the selected workspace.",

@@ -259,6 +259,7 @@ describe("PRStatusChip mobile branch", () => {
     expect(document.querySelector("[data-testid='pr-topbar-popover-inner']")).not.toBeNull();
     expect(document.querySelector("[data-testid='pr-status-chip-drawer-close']")).not.toBeNull();
     expect(screen.getByTestId("pr-popover-title").textContent).toBe("#42 Test PR");
+    expect(screen.getByTestId("pr-popover-author").textContent).toBe("by alice");
     expect(drawer?.textContent).not.toContain("Open PR details");
   });
 

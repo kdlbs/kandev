@@ -1,11 +1,16 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider } from "@/components/state-provider";
+import { TaskContributionIcons } from "@/components/task/task-contribution-icons";
 import { PRTaskIcon } from "./pr-task-icon";
 import type { AppState } from "@/lib/state/store";
 import type { TaskPR } from "@/lib/types/github";
+
+vi.mock("@/lib/api/domains/github-api", () => ({
+  listTaskPRs: vi.fn(() => new Promise(() => {})),
+}));
 
 function renderWithStore(initialState: Partial<AppState> | undefined, ui: ReactNode) {
   return render(
@@ -94,5 +99,38 @@ describe("PRTaskIcon corrupted store entry", () => {
     const icon = container.querySelector('[data-testid="pr-task-icon-task-1"]');
     expect(icon).not.toBeNull();
     expect(icon?.getAttribute("data-pr-count")).toBe("2");
+  });
+
+  it("opens a loading disclosure for a compact PR projection", () => {
+    renderWithStore(
+      { workspaces: { items: [], activeId: "workspace-1" } },
+      <TaskContributionIcons
+        taskId="task-1"
+        prInfo={{ number: 7, state: "open", aggregateState: "pending" }}
+      />,
+    );
+
+    const icon = screen.getByTestId("pr-task-icon-task-1");
+    expect(icon.getAttribute("role")).toBe("img");
+    fireEvent.pointerEnter(icon, { pointerType: "mouse" });
+
+    expect(screen.getAllByTestId("pr-task-tooltip-loading").length).toBeGreaterThan(0);
+  });
+
+  it("opens a loading disclosure when a compact PR projection receives keyboard focus", () => {
+    renderWithStore(
+      { workspaces: { items: [], activeId: "workspace-1" } },
+      <TaskContributionIcons
+        taskId="task-1"
+        prInfo={{ number: 7, state: "open", aggregateState: "pending" }}
+      />,
+    );
+
+    const icon = screen.getByTestId("pr-task-icon-task-1");
+    const matches = vi.spyOn(icon, "matches").mockReturnValue(true);
+    fireEvent.focus(icon);
+    matches.mockRestore();
+
+    expect(screen.getAllByTestId("pr-task-tooltip-loading").length).toBeGreaterThan(0);
   });
 });
