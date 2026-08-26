@@ -136,3 +136,43 @@ describe("useMoveToStep", () => {
     consoleErrorSpy.mockRestore();
   });
 });
+
+describe("useMoveToStep concurrency", () => {
+  it("does not roll back when a same-step retry is still in flight", async () => {
+    // Two moves to the same step compute identical optimistic values, so the
+    // snapshot cannot distinguish them; only the generation can.
+    const store = buildStore({
+      tasks: [{ id: "task-1", workflowStepId: "step-a", position: 0 }],
+    });
+    const onMoveError = vi.fn();
+    let rejectFirstMove!: (error: unknown) => void;
+    moveTaskByIdMock.mockReturnValueOnce(new Promise((_res, rej) => (rejectFirstMove = rej)));
+    let resolveSecondMove!: () => void;
+    moveTaskByIdMock.mockReturnValueOnce(new Promise<void>((res) => (resolveSecondMove = res)));
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { result } = renderHook(() => useMoveToStep(store as never, vi.fn(), onMoveError));
+
+    let firstMove!: Promise<void>;
+    let secondMove!: Promise<void>;
+    act(() => {
+      firstMove = result.current("task-1", "wf-1", "step-b");
+      secondMove = result.current("task-1", "wf-1", "step-b");
+    });
+
+    rejectFirstMove(new Error("stale rejection"));
+    await act(async () => {
+      await firstMove;
+    });
+
+    // The second move is still pending, so its optimistic state must stand.
+    expect(store.getSnapshots()["wf-1"].tasks[0]).toMatchObject({ workflowStepId: "step-b" });
+    expect(onMoveError).not.toHaveBeenCalled();
+
+    resolveSecondMove();
+    await act(async () => {
+      await secondMove;
+    });
+    consoleErrorSpy.mockRestore();
+  });
+});

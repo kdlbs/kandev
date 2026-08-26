@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { useAppStoreApi } from "@/components/state-provider";
 import { useTaskActions } from "@/hooks/use-task-actions";
 
@@ -11,6 +11,12 @@ export function useMoveToStep(
   onMoveError?: (error: unknown) => void,
 ) {
   const { moveTaskById } = useTaskActions();
+  // The optimistic values alone cannot tell two moves apart when both target the
+  // same step at the same computed position (a double tap, a rapid retry): the
+  // second write is byte-identical to the first, so the first's rejection would
+  // match and roll back a move that is still in flight. The generation says
+  // which request the store is actually showing.
+  const moveRequestRef = useRef(0);
 
   return useCallback(
     async (taskId: string, workflowId: string, targetStepId: string) => {
@@ -25,6 +31,7 @@ export function useMoveToStep(
       // above return without touching the server, and clearing the banner on
       // the way past them would wipe a still-accurate message for nothing.
       onMoveStart?.();
+      const requestId = ++moveRequestRef.current;
 
       const targetTasks = snapshot.tasks
         .filter((t) => t.workflowStepId === targetStepId && t.id !== taskId)
@@ -54,7 +61,10 @@ export function useMoveToStep(
         const cur = store.getState().kanbanMulti.snapshots[workflowId];
         const curTask = cur?.tasks.find((t) => t.id === taskId);
         const isCurrentMove =
-          !!cur && curTask?.workflowStepId === targetStepId && curTask.position === nextPosition;
+          requestId === moveRequestRef.current &&
+          !!cur &&
+          curTask?.workflowStepId === targetStepId &&
+          curTask.position === nextPosition;
         if (!isCurrentMove) return;
 
         store.getState().setWorkflowSnapshot(workflowId, {
