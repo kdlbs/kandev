@@ -359,14 +359,16 @@ func (r *Repository) insertTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 	// WIP diverted it), so this satisfies the spec's feeder-step scenario for
 	// free. A task created with no workflow writes nothing.
 	genesisCtx := steptelemetry.WithAttribution(ctx, genesisAttribution(ctx))
-	if err := r.recordStepTransition(genesisCtx, tx, stepTransitionInput{
+	transitionID, err := r.recordStepTransition(genesisCtx, tx, stepTransitionInput{
 		taskID:           task.ID,
 		toWorkflowID:     task.WorkflowID,
 		toWorkflowStepID: task.WorkflowStepID,
 		occurredAt:       task.CreatedAt,
-	}); err != nil {
+	})
+	if err != nil {
 		return err
 	}
+	task.WorkflowStepTransitionID = transitionID
 	if task.AssigneeAgentProfileID != "" && task.WorkflowStepID != "" {
 		return upsertRunnerInTx(ctx, tx, r.db.Rebind, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID)
 	}
@@ -563,16 +565,18 @@ func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 		return fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
 	}
 
-	if err := r.recordStepTransition(ctx, tx, stepTransitionInput{
+	transitionID, err := r.recordStepTransition(ctx, tx, stepTransitionInput{
 		taskID:             task.ID,
 		fromWorkflowID:     fromWorkflowID,
 		fromWorkflowStepID: fromStepID,
 		toWorkflowID:       task.WorkflowID,
 		toWorkflowStepID:   task.WorkflowStepID,
 		occurredAt:         task.UpdatedAt,
-	}); err != nil {
+	})
+	if err != nil {
 		return err
 	}
+	task.WorkflowStepTransitionID = transitionID
 
 	return syncRunnerInTx(ctx, tx, r.db.Rebind, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID)
 }
@@ -1244,16 +1248,18 @@ func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, ta
 	if rows == 0 {
 		return fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
 	}
-	if err := r.recordStepTransition(ctx, tx, stepTransitionInput{
+	transitionID, err := r.recordStepTransition(ctx, tx, stepTransitionInput{
 		taskID:             task.ID,
 		fromWorkflowID:     fromWorkflowID,
 		fromWorkflowStepID: fromStepID,
 		toWorkflowID:       task.WorkflowID,
 		toWorkflowStepID:   task.WorkflowStepID,
 		occurredAt:         task.UpdatedAt,
-	}); err != nil {
+	})
+	if err != nil {
 		return err
 	}
+	task.WorkflowStepTransitionID = transitionID
 	if err := syncRunnerInTx(ctx, tx, r.db.Rebind, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
 		return err
 	}
@@ -1340,16 +1346,18 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 	if rows == 0 {
 		return false, nil
 	}
-	if err := r.recordStepTransition(ctx, tx, stepTransitionInput{
+	transitionID, err := r.recordStepTransition(ctx, tx, stepTransitionInput{
 		taskID:             task.ID,
 		fromWorkflowID:     fromWorkflowID,
 		fromWorkflowStepID: fromStepID,
 		toWorkflowID:       task.WorkflowID,
 		toWorkflowStepID:   task.WorkflowStepID,
 		occurredAt:         task.UpdatedAt,
-	}); err != nil {
+	})
+	if err != nil {
 		return false, err
 	}
+	task.WorkflowStepTransitionID = transitionID
 	if err := syncRunnerInTx(ctx, tx, r.db.Rebind, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
 		return false, err
 	}
@@ -2636,16 +2644,18 @@ func (r *Repository) RestoreTaskMessageRollbackIfSessionState(
 	}
 	// workflow_id is not part of this UPDATE — a rollback restore only moves
 	// the step, never the workflow — so to_workflow_id equals from_workflow_id.
-	if err := r.recordStepTransition(ctx, tx, stepTransitionInput{
+	transitionID, err := r.recordStepTransition(ctx, tx, stepTransitionInput{
 		taskID:             task.ID,
 		fromWorkflowID:     fromWorkflowID,
 		fromWorkflowStepID: fromStepID,
 		toWorkflowID:       fromWorkflowID,
 		toWorkflowStepID:   task.WorkflowStepID,
 		occurredAt:         updatedAt,
-	}); err != nil {
+	})
+	if err != nil {
 		return false, err
 	}
+	task.WorkflowStepTransitionID = transitionID
 	if err := syncRunnerInTx(ctx, tx, r.db.Rebind, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
 		return false, err
 	}

@@ -8,6 +8,7 @@ import (
 	"github.com/kandev/kandev/internal/task/service"
 	workflowctrl "github.com/kandev/kandev/internal/workflow/controller"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowsvc "github.com/kandev/kandev/internal/workflow/service"
 	"github.com/kandev/kandev/internal/workflow/stepevents"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -94,7 +95,7 @@ func (h *Handlers) handleExportWorkflow(ctx context.Context, msg *ws.Message) (*
 	export, err := h.workflowSvc.ExportWorkflow(ctx, workflowID)
 	if err != nil {
 		h.logger.Error("failed to export workflow", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to export workflow", nil)
+		return h.workflowScopeError(msg, err, "Failed to export workflow")
 	}
 	return ws.NewResponse(msg.ID, msg.Action, export)
 }
@@ -141,7 +142,7 @@ func (h *Handlers) handleImportWorkflow(ctx context.Context, msg *ws.Message) (*
 	result, err := h.workflowSvc.ImportWorkflows(ctx, req.WorkspaceID, &export)
 	if err != nil {
 		h.logger.Error("failed to import workflows", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to import workflows", nil)
+		return h.workflowScopeError(msg, err, "Failed to import workflows")
 	}
 	return ws.NewResponse(msg.ID, msg.Action, result)
 }
@@ -193,7 +194,7 @@ func (h *Handlers) handleCreateWorkflowStep(ctx context.Context, msg *ws.Message
 	resp, err := h.workflowCtrl.CreateStep(ctx, createReq)
 	if err != nil {
 		h.logger.Error("failed to create workflow step", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create workflow step", nil)
+		return h.workflowScopeError(msg, err, "Failed to create workflow step")
 	}
 	h.publishWorkflowStepEvents(ctx, events.WorkflowStepUpdated, resp.DemotedStartSteps)
 	h.publishWorkflowStepEvent(ctx, events.WorkflowStepCreated, resp.Step)
@@ -242,7 +243,7 @@ func (h *Handlers) handleUpdateWorkflowStep(ctx context.Context, msg *ws.Message
 	resp, err := h.workflowCtrl.UpdateStep(ctx, updateReq)
 	if err != nil {
 		h.logger.Error("failed to update workflow step", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update workflow step", nil)
+		return h.workflowScopeError(msg, err, "Failed to update workflow step")
 	}
 	h.publishWorkflowStepEvents(ctx, events.WorkflowStepUpdated, resp.DemotedStartSteps)
 	h.publishWorkflowStepEvent(ctx, events.WorkflowStepUpdated, resp.Step)
@@ -263,7 +264,7 @@ func (h *Handlers) handleDeleteWorkflowStep(ctx context.Context, msg *ws.Message
 
 	if err := h.workflowCtrl.DeleteStep(ctx, stepID); err != nil {
 		h.logger.Error("failed to delete workflow step", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete workflow step", nil)
+		return h.workflowScopeError(msg, err, "Failed to delete workflow step")
 	}
 	if stepResp != nil {
 		h.publishWorkflowStepEvent(ctx, events.WorkflowStepDeleted, stepResp.Step)
@@ -291,9 +292,21 @@ func (h *Handlers) handleReorderWorkflowSteps(ctx context.Context, msg *ws.Messa
 		StepIDs:    req.StepIDs,
 	}); err != nil {
 		h.logger.Error("failed to reorder workflow steps", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to reorder workflow steps", nil)
+		return h.workflowScopeError(msg, err, "Failed to reorder workflow steps")
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"success": true})
+}
+
+// workflowScopeError answers a workflow-surface failure. A resource the
+// caller may not see, and one that does not exist, share the single not-found
+// reply the workflow package produces for both; anything else is a genuine
+// server failure. Without this, an agent that named a workflow, step or task
+// it cannot reach was told the backend broke.
+func (h *Handlers) workflowScopeError(msg *ws.Message, err error, clientErrMsg string) (*ws.Message, error) {
+	if workflowsvc.IsNotFound(err) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, clientErrMsg, nil)
+	}
+	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, clientErrMsg, nil)
 }
 
 // workflowStepEventSource labels workflow-step events published by this surface.

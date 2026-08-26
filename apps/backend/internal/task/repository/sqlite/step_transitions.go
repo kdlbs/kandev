@@ -59,9 +59,10 @@ type stepTransitionInput struct {
 }
 
 // recordStepTransition writes exactly one ledger row when the step actually
-// changed. It is a no-op when fromStepID == toStepID (position-only reorder,
-// re-issued move to the current step) and when both sides are empty (a task
-// with no workflow at all — a row with both sides NULL is forbidden).
+// changed and returns its immutable ledger identifier. It is a no-op when
+// fromStepID == toStepID (position-only reorder, re-issued move to the current
+// step) and when both sides are empty (a task with no workflow at all — a row
+// with both sides NULL is forbidden).
 //
 // The missing-table case needs no detection code and must not get any: if
 // the CREATE TABLE was silently swallowed by the migration runner, the
@@ -69,12 +70,12 @@ type stepTransitionInput struct {
 // returns unchanged, and the enclosing transaction rolls back — which is
 // precisely the spec's required behaviour (the step change does not commit
 // with no row). Never log-and-continue on this error.
-func (r *Repository) recordStepTransition(ctx context.Context, tx stepTransitionTx, in stepTransitionInput) error {
+func (r *Repository) recordStepTransition(ctx context.Context, tx stepTransitionTx, in stepTransitionInput) (int64, error) {
 	if in.fromWorkflowStepID == in.toWorkflowStepID {
-		return nil
+		return 0, nil
 	}
 	if in.fromWorkflowStepID == "" && in.toWorkflowStepID == "" {
-		return nil
+		return 0, nil
 	}
 
 	occurredAt := in.occurredAt
@@ -86,11 +87,7 @@ func (r *Repository) recordStepTransition(ctx context.Context, tx stepTransition
 	}
 
 	attribution := steptelemetry.FromContext(ctx)
-	_, err := tx.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO task_step_transitions
-			(task_id, session_id, from_workflow_id, from_workflow_step_id, to_workflow_id, to_workflow_step_id, trigger, actor_kind, actor_id, contract_version, occurred_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`),
+	args := []interface{}{
 		in.taskID,
 		nullableString(attribution.SessionID),
 		nullableString(in.fromWorkflowID),
@@ -102,9 +99,31 @@ func (r *Repository) recordStepTransition(ctx context.Context, tx stepTransition
 		nullableString(attribution.ActorID),
 		steptelemetry.ContractVersion,
 		occurredAt,
-	)
-	if err != nil {
-		return err
+	}
+	var id int64
+	if dialect.IsPostgres(r.db.DriverName()) {
+		err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		INSERT INTO task_step_transitions
+			(task_id, session_id, from_workflow_id, from_workflow_step_id, to_workflow_id, to_workflow_step_id, trigger, actor_kind, actor_id, contract_version, occurred_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		RETURNING id
+	`), args...).Scan(&id)
+		if err != nil {
+			return 0, err
+		}
+	} else {
+		result, err := tx.ExecContext(ctx, r.db.Rebind(`
+			INSERT INTO task_step_transitions
+				(task_id, session_id, from_workflow_id, from_workflow_step_id, to_workflow_id, to_workflow_step_id, trigger, actor_kind, actor_id, contract_version, occurred_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`), args...)
+		if err != nil {
+			return 0, err
+		}
+		id, err = result.LastInsertId()
+		if err != nil {
+			return 0, err
+		}
 	}
 	// Counted at INSERT time, not at commit: a later statement in the same
 	// caller-owned transaction failing after this point (rare — e.g. the
@@ -113,7 +132,7 @@ func (r *Repository) recordStepTransition(ctx context.Context, tx stepTransition
 	// ("is the writer alive"), not a commit-confirmed row-for-row audit
 	// trail; the ledger table itself is that audit trail.
 	steptelemetry.RecordLedgerRow(r.log, attribution.Trigger)
-	return nil
+	return id, nil
 }
 
 // genesisAttribution is the task-creation ledger row's attribution: the

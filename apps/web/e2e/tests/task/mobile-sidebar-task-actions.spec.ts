@@ -5,6 +5,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { activeSessionId, seedSecondaryClarificationTask } from "../../helpers/clarification";
 import { makeGitEnv } from "../../helpers/git-helper";
 import { waitForActiveSessionForegroundActivity } from "../../helpers/session-store";
+import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("Mobile sidebar task actions", () => {
@@ -50,6 +51,66 @@ test.describe("Mobile sidebar task actions", () => {
         { message: "pending clarification task should not overflow the phone viewport" },
       )
       .toBe(true);
+  });
+
+  test("keeps a linked PR badge beside its title in the phone drawer", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const title = "Mobile sidebar PR badge spacing";
+    const task = await apiClient.createTask(seedData.workspaceId, title, {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: 902,
+      pr_url: "https://github.com/testorg/testrepo/pull/902",
+      pr_title: "Mobile sidebar spacing",
+      head_branch: "feature/mobile-sidebar-spacing",
+      base_branch: "main",
+      author_login: "e2e",
+      state: "open",
+      checks_state: "success",
+      mergeable_state: "clean",
+    });
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.mobileSessionMenu.tap();
+
+    const drawer = testPage.getByRole("dialog", { name: "Tasks" });
+    const row = drawer.getByTestId("sidebar-task-item").filter({ hasText: title });
+    await expect(row).toBeVisible();
+    const prIcon = row.getByTestId(`pr-task-icon-${task.id}`);
+    await expect(prIcon).toBeVisible({ timeout: 15_000 });
+
+    const spacing = await row.evaluate((el, titleText) => {
+      const titleElement = [...el.querySelectorAll("span")].find(
+        (candidate) =>
+          candidate.classList.contains("whitespace-nowrap") && candidate.textContent === titleText,
+      );
+      const pr = el.querySelector('[data-testid^="pr-task-icon-"]');
+      if (!titleElement || !pr) return { found: false, gap: -1, titleTop: -1, prTop: -1 };
+      const titleBox = titleElement.getBoundingClientRect();
+      const prBox = pr.getBoundingClientRect();
+      return {
+        found: true,
+        gap: prBox.left - titleBox.right,
+        titleTop: titleBox.top,
+        prTop: prBox.top,
+      };
+    }, title);
+    expect(spacing.found).toBe(true);
+    expect(Math.abs(spacing.titleTop - spacing.prTop)).toBeLessThan(4);
+    expect(spacing.gap).toBeGreaterThanOrEqual(0);
+    expect(spacing.gap).toBeLessThan(32);
+    await assertNoDocumentHorizontalOverflow(testPage, "mobile sidebar PR badge spacing");
   });
 
   test("switches to the selected task and its chat from the phone task drawer", async ({

@@ -1350,6 +1350,43 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
   outline: none;
 }
 
+.tiptap-plan-wrapper .tableWrapper {
+  position: relative;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.tiptap-plan-wrapper .tableWrapper :is(th, td) {
+  position: relative;
+}
+
+.tiptap-plan-wrapper .column-resize-handle {
+  position: absolute;
+  z-index: 20;
+  top: 0;
+  right: -0.3125rem;
+  bottom: -1px;
+  width: 0.625rem;
+  pointer-events: none;
+  touch-action: none;
+}
+
+.tiptap-plan-wrapper .column-resize-handle::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  content: "";
+  transform: translateX(-50%);
+  background: var(--primary);
+}
+
+.tiptap-plan-wrapper .resize-cursor,
+.tiptap-plan-wrapper .resize-cursor * {
+  cursor: col-resize !important;
+}
+
 /* Task lists (TipTap-specific data attribute) */
 .tiptap-plan-wrapper .tiptap ul[data-type="taskList"] {
   list-style: none !important;

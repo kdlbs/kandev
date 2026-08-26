@@ -804,6 +804,7 @@ export class ApiClient {
       provider_host?: string;
       provider_owner?: string;
       provider_name?: string;
+      pull_before_worktree?: boolean;
     },
   ): Promise<{ id: string }> {
     return this.request("POST", `/api/v1/workspaces/${workspaceId}/repositories`, {
@@ -815,6 +816,9 @@ export class ApiClient {
       ...(opts?.provider_host ? { provider_host: opts.provider_host } : {}),
       ...(opts?.provider_owner ? { provider_owner: opts.provider_owner } : {}),
       ...(opts?.provider_name ? { provider_name: opts.provider_name } : {}),
+      ...(opts?.pull_before_worktree !== undefined
+        ? { pull_before_worktree: opts.pull_before_worktree }
+        : {}),
     });
   }
 
@@ -909,6 +913,7 @@ export class ApiClient {
     repositoryId: string,
     updates: {
       default_branch?: string;
+      pull_before_worktree?: boolean;
       provider?: string;
       provider_repo_id?: string;
       provider_host?: string;

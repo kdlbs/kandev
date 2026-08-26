@@ -11,11 +11,31 @@ import (
 //
 // Implementations MUST be safe for concurrent use and SHOULD treat
 // (IdempotencyKey) as a uniqueness key when set: if a request with the same
-// idempotency key has already been queued the implementation returns nil
-// without enqueuing a duplicate.
+// idempotency key has already been queued the implementation returns
+// QueueOutcomeDeduped (nil error) without enqueuing a duplicate.
 type RunQueueAdapter interface {
-	QueueRun(ctx context.Context, req QueueRunRequest) error
+	QueueRun(ctx context.Context, req QueueRunRequest) (QueueOutcome, error)
 }
+
+// QueueOutcome reports what QueueRun actually did with a request, so a
+// caller that needs to log or act on the result — not just detect an error —
+// doesn't have to infer it from side effects. A duplicated declaration lives
+// in internal/runs/service (see that package's RunQueueAdapter doc); both
+// MUST match.
+type QueueOutcome string
+
+const (
+	// QueueOutcomeQueued means a new runs row was inserted.
+	QueueOutcomeQueued QueueOutcome = "queued"
+	// QueueOutcomeDeduped means an existing row with the same
+	// IdempotencyKey already exists within the dedupe window, so nothing
+	// was inserted.
+	QueueOutcomeDeduped QueueOutcome = "deduped"
+	// QueueOutcomeCoalesced means the request was merged into an existing
+	// queued row for the same agent + reason within the coalescing
+	// window, so nothing new was inserted.
+	QueueOutcomeCoalesced QueueOutcome = "coalesced"
+)
 
 // QueueRunRequest is the typed payload the engine hands to RunQueueAdapter.
 //

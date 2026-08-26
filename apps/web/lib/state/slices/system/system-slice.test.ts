@@ -61,7 +61,6 @@ const DB_STATS: DatabaseStats = {
 
 const SNAPSHOT: SnapshotInfo = {
   name: "manual-1.db",
-  path: "/data/backups/manual-1.db",
   size_bytes: 1024,
   mtime: "2026-05-17T00:00:00Z",
   kind: "manual",

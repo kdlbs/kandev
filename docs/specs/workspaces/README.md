@@ -41,6 +41,7 @@ Git state.
 - [Repository Sets](requirements/repository-sets.md)
 - [Copy and Move Secrets Between Scopes](requirements/secret-scope-transfer.md)
 - [Workspace Base-Branch Propagation](requirements/workspace-base-branch-propagation.md)
+- [Worktree Base Refresh](requirements/worktree-base-refresh.md)
 - [Worktree Branch Templates](requirements/worktree-branch-templates.md)
 
 ### System design
@@ -49,6 +50,7 @@ Git state.
 
 - [Improve Kandev](system-design/improve-kandev.md)
 - [Copy and Move Secrets Between Scopes](system-design/secret-scope-transfer.md)
+- [Worktree Base Refresh](system-design/worktree-base-refresh.md)
 
 ## Migration record
 

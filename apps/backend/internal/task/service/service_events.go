@@ -368,20 +368,21 @@ func snapshotTaskForPublication(task *models.Task) *models.Task {
 func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, task *models.Task, oldState *v1.TaskState, extra map[string]interface{}, oldWorkflowIDs []string, activity *taskActivitySnapshot) {
 
 	data := map[string]interface{}{
-		"task_id":          task.ID,
-		"workspace_id":     task.WorkspaceID,
-		"workflow_id":      task.WorkflowID,
-		"workflow_step_id": task.WorkflowStepID,
-		"title":            task.Title,
-		"description":      task.Description,
-		"state":            string(task.State),
-		"priority":         task.Priority,
-		"position":         task.Position,
-		"wip_admitted":     task.WIPAdmitted,
-		"created_at":       task.CreatedAt.Format(time.RFC3339Nano),
-		"updated_at":       task.UpdatedAt.Format(time.RFC3339Nano),
-		"is_ephemeral":     task.IsEphemeral,
-		"autopilot":        task.Autopilot,
+		"task_id":            task.ID,
+		"step_transition_id": task.WorkflowStepTransitionID,
+		"workspace_id":       task.WorkspaceID,
+		"workflow_id":        task.WorkflowID,
+		"workflow_step_id":   task.WorkflowStepID,
+		"title":              task.Title,
+		"description":        task.Description,
+		"state":              string(task.State),
+		"priority":           task.Priority,
+		"position":           task.Position,
+		"wip_admitted":       task.WIPAdmitted,
+		"created_at":         task.CreatedAt.Format(time.RFC3339Nano),
+		"updated_at":         task.UpdatedAt.Format(time.RFC3339Nano),
+		"is_ephemeral":       task.IsEphemeral,
+		"autopilot":          task.Autopilot,
 		// Consumers that restore quick-chat tabs filter on origin, so it has to
 		// travel with the event and not just the HTTP DTO.
 		"origin": task.Origin,
@@ -728,6 +729,7 @@ func (s *Service) publishTaskMovedEvent(ctx context.Context, task *models.Task, 
 	}
 	data := map[string]interface{}{
 		"task_id":                   task.ID,
+		"step_transition_id":        task.WorkflowStepTransitionID,
 		"from_workflow_id":          fromWorkflowID,
 		"to_workflow_id":            task.WorkflowID,
 		"from_step_id":              fromStepID,
