@@ -148,6 +148,7 @@ afterEach(() => {
   mocks.breakpoint.isTablet = false;
   mocks.breakpoint.usesDesktopWorkbench = false;
   mocks.viewport.keyboardOpen = false;
+  mocks.viewport.bottomOffset = 0;
   mocks.viewport.viewportBottom = 800;
 });
 
@@ -181,6 +182,50 @@ describe("PlanBubbleMenu responsive presentation", () => {
     expect(editor.chainMock.focus).toHaveBeenCalledTimes(1);
     expect(editor.chainMock.toggleBold).toHaveBeenCalledTimes(1);
     expect(editor.chainMock.run).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the dock visible while the link input owns focus", () => {
+    const editor = createEditor();
+
+    render(<PlanBubbleMenu editor={editor} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "editors:link" }));
+    expect(screen.getByRole("textbox", { name: "editors:pasteLink" })).toBeTruthy();
+
+    act(() => {
+      editor.setFocused(false);
+      editor.emit("blur");
+    });
+
+    expect(screen.getByRole("toolbar", { name: PLAN_TOOLBAR_LABEL })).toBeTruthy();
+  });
+
+  it("confines a touch-tablet dock to the Plan editor bounds", () => {
+    mocks.breakpoint.isMobile = false;
+    mocks.breakpoint.isTablet = true;
+    mocks.breakpoint.usesDesktopWorkbench = false;
+    const editor = createEditor();
+    const container = document.createElement("div");
+    vi.spyOn(container, "getBoundingClientRect").mockReturnValue({
+      left: 240,
+      right: 560,
+      width: 320,
+      top: 0,
+      bottom: 600,
+      height: 600,
+      x: 240,
+      y: 0,
+      toJSON: () => ({}),
+    });
+    document.body.appendChild(container);
+
+    render(<PlanBubbleMenu editor={editor} mobileContainerRef={{ current: container }} />);
+
+    const toolbar = screen.getByRole("toolbar", { name: PLAN_TOOLBAR_LABEL });
+    expect(toolbar.getAttribute("style")).toContain("left: 240px");
+    expect(toolbar.getAttribute("style")).toContain("width: 320px");
+    expect(toolbar.getAttribute("style")).toContain("right: auto");
+    container.remove();
   });
 
   it("preserves the desktop selection bubble for fine-pointer layouts", () => {

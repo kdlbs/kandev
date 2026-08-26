@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ElementType, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useState,
+  type ElementType,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import { createPortal } from "react-dom";
 import { BubbleMenu } from "@tiptap/react/menus";
 import type { Editor } from "@tiptap/core";
@@ -31,7 +38,12 @@ type PlanBubbleMenuProps = {
   onComment?: (selection: TextSelection) => void;
   /** Internal mobile layout offset. It is not part of the plugin editor contract. */
   mobileBottomOffset?: string;
-  onMobileVisibilityChange?: (visible: boolean) => void;
+  mobileContainerRef?: RefObject<HTMLElement | null>;
+  onMobileVisibilityChange?: (
+    visible: boolean,
+    keyboardBottomOffset: number,
+    keyboardOpen: boolean,
+  ) => void;
 };
 
 type EditorSnapshot = {
@@ -70,13 +82,11 @@ function useEditorSnapshot(editor: Editor): EditorSnapshot {
   useEffect(() => {
     const update = () => setSnapshot(readEditorSnapshot(editor));
     editor.on("transaction", update);
-    editor.on("selectionUpdate", update);
     editor.on("focus", update);
     editor.on("blur", update);
     update();
     return () => {
       editor.off("transaction", update);
-      editor.off("selectionUpdate", update);
       editor.off("focus", update);
       editor.off("blur", update);
     };
@@ -296,19 +306,71 @@ function shouldShowBubbleMenu({
   return true;
 }
 
+function useMobileVisibilityChange(
+  onMobileVisibilityChange: PlanBubbleMenuProps["onMobileVisibilityChange"],
+  mobileVisible: boolean,
+  keyboardOpen: boolean,
+  bottomOffset: number,
+) {
+  useEffect(() => {
+    onMobileVisibilityChange?.(
+      mobileVisible,
+      mobileVisible && keyboardOpen ? bottomOffset : 0,
+      keyboardOpen,
+    );
+  }, [bottomOffset, keyboardOpen, mobileVisible, onMobileVisibilityChange]);
+
+  useEffect(
+    () => () => {
+      onMobileVisibilityChange?.(false, 0, false);
+    },
+    [onMobileVisibilityChange],
+  );
+}
+
 function MobileFormattingToolbar({
   content,
   label,
   keyboardOpen,
   viewportBottom,
   mobileBottomOffset,
+  mobileContainerRef,
 }: {
   content: ReactNode;
   label: string;
   keyboardOpen: boolean;
   viewportBottom: number;
   mobileBottomOffset?: string;
+  mobileContainerRef?: RefObject<HTMLElement | null>;
 }) {
+  const [containerBounds, setContainerBounds] = useState<{ left: number; width: number } | null>(
+    null,
+  );
+
+  useEffect(() => {
+    const container = mobileContainerRef?.current;
+    if (!container) return;
+
+    const updateBounds = () => {
+      const { left, width } = container.getBoundingClientRect();
+      setContainerBounds({ left, width });
+    };
+    updateBounds();
+
+    const resizeObserver =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updateBounds);
+    resizeObserver?.observe(container);
+    window.addEventListener("resize", updateBounds);
+    window.visualViewport?.addEventListener("resize", updateBounds);
+    window.visualViewport?.addEventListener("scroll", updateBounds);
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", updateBounds);
+      window.visualViewport?.removeEventListener("resize", updateBounds);
+      window.visualViewport?.removeEventListener("scroll", updateBounds);
+    };
+  }, [mobileContainerRef]);
+
   if (typeof document === "undefined") return null;
   const position = resolveVisualViewportPosition({
     keyboardOpen,
@@ -316,13 +378,24 @@ function MobileFormattingToolbar({
     barHeight: PLAN_FORMATTING_TOOLBAR_HEIGHT_PX,
     baseBottomOffset: mobileBottomOffset,
   });
+  const horizontalPosition = containerBounds
+    ? {
+        left: `${containerBounds.left}px`,
+        right: "auto",
+        width: `${containerBounds.width}px`,
+      }
+    : undefined;
   return createPortal(
     <div
       data-testid="plan-mobile-formatting-toolbar"
       role="toolbar"
       aria-label={label}
       className="fixed left-0 right-0 z-40 border-t border-border bg-popover/95 backdrop-blur"
-      style={{ ...position, height: `${PLAN_FORMATTING_TOOLBAR_HEIGHT_PX}px` }}
+      style={{
+        ...position,
+        ...horizontalPosition,
+        height: `${PLAN_FORMATTING_TOOLBAR_HEIGHT_PX}px`,
+      }}
     >
       <div className="flex h-full w-full min-w-0 items-center gap-1 overflow-x-auto overscroll-x-contain px-2 py-1">
         {content}
@@ -336,27 +409,18 @@ export function PlanBubbleMenu({
   editor,
   onComment,
   mobileBottomOffset,
+  mobileContainerRef,
   onMobileVisibilityChange,
 }: PlanBubbleMenuProps) {
   const { t } = useTranslation();
   const { isMobile, isTablet, usesDesktopWorkbench } = useResponsiveBreakpoint();
-  const { keyboardOpen, viewportBottom } = useVisualViewportOffset();
+  const { bottomOffset, keyboardOpen, viewportBottom } = useVisualViewportOffset();
   const [showLinkInput, setShowLinkInput] = useState(false);
   const snapshot = useEditorSnapshot(editor);
   const isMobilePresentation = isMobile || isTablet || !usesDesktopWorkbench;
   const mobileVisible =
     isMobilePresentation && (snapshot.isFocused || showLinkInput) && !snapshot.isCodeBlock;
-
-  useEffect(() => {
-    onMobileVisibilityChange?.(mobileVisible);
-  }, [mobileVisible, onMobileVisibilityChange]);
-
-  useEffect(
-    () => () => {
-      onMobileVisibilityChange?.(false);
-    },
-    [onMobileVisibilityChange],
-  );
+  useMobileVisibilityChange(onMobileVisibilityChange, mobileVisible, keyboardOpen, bottomOffset);
 
   const handleLinkClick = useCallback(() => {
     const existing = editor.getAttributes("link").href as string | undefined;
@@ -427,6 +491,7 @@ export function PlanBubbleMenu({
         keyboardOpen={keyboardOpen}
         viewportBottom={viewportBottom}
         mobileBottomOffset={mobileBottomOffset}
+        mobileContainerRef={mobileContainerRef}
       />
     );
   }

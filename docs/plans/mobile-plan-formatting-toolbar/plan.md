@@ -135,9 +135,11 @@ device evidence separately when those devices are available.
 
 Implemented in Task 01. Focused unit coverage, production-build mobile E2E,
 type checking, changed-file lint, i18n validation, spec lint, and whitespace
-checks pass. Fresh desktop and mobile captures were produced for the PR. Native
-Android Chrome and iOS Safari checks were not available; Playwright mobile
-emulation covers the automated geometry and selection contract.
+checks pass. Review follow-up also covers keyboard occlusion through the final
+editor line and constrains the tablet dock to the Plan pane. Fresh desktop and
+mobile captures were produced for the PR. Native Android Chrome and iOS Safari
+checks were not available; Playwright mobile emulation covers the automated
+geometry and selection contract.
 
 ## Risks
 

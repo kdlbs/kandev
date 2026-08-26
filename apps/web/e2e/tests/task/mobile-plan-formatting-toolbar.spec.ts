@@ -7,6 +7,13 @@ import { planScript } from "../../helpers/seed-session-messages";
 import { SessionPage } from "../../pages/session-page";
 
 const PLAN_TEXT = "Select this mobile plan text";
+const FINAL_LINE = "Reachable final mobile plan line";
+const PLAN_CONTENT = [
+  "## Mobile formatting",
+  PLAN_TEXT,
+  ...Array.from({ length: 40 }, (_, index) => `Mobile detail ${index + 1}`),
+  FINAL_LINE,
+].join("\n\n");
 
 async function seedMobilePlan(
   testPage: Page,
@@ -18,7 +25,7 @@ async function seedMobilePlan(
     "Mobile Plan formatting toolbar",
     seedData.agentProfileId,
     {
-      description: planScript(`## Mobile formatting\n\n${PLAN_TEXT}`),
+      description: planScript(PLAN_CONTENT),
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
       repository_ids: [seedData.repositoryId],
@@ -64,7 +71,8 @@ test.describe("mobile: Plan formatting toolbar", () => {
   }) => {
     test.setTimeout(150_000);
     const session = await seedMobilePlan(testPage, apiClient, seedData);
-    const editor = session.planPanel.locator(".ProseMirror:visible").first();
+    const editor = session.planPanel.locator(".ProseMirror:visible");
+    await expect(editor).toHaveCount(1);
 
     await editor.focus();
     await testPage.keyboard.press("Control+A");
@@ -80,10 +88,9 @@ test.describe("mobile: Plan formatting toolbar", () => {
     await expect(bold).toBeVisible();
     expect((await bold.boundingBox())?.height).toBeGreaterThanOrEqual(44);
     await expect(testPage.getByTestId("plan-formatting-action-comment")).toBeEnabled();
-    await expect(testPage.getByTestId("plan-editor-scroll-container")).toHaveCSS(
-      "padding-bottom",
-      "56px",
-    );
+    await expect
+      .poll(() => editor.evaluate((element) => getComputedStyle(element, "::after").height))
+      .toBe("56px");
 
     const horizontalOverflow = await toolbar.locator(":scope > div").evaluate((element) => ({
       scrollWidth: element.scrollWidth,
@@ -103,6 +110,30 @@ test.describe("mobile: Plan formatting toolbar", () => {
     await expect
       .poll(() => toolbar.evaluate((element) => (element as HTMLElement).style.bottom))
       .toBe("auto");
+    await expect
+      .poll(() => editor.evaluate((element) => getComputedStyle(element, "::after").height))
+      .toBe("304px");
+
+    const finalLine = editor.getByText(FINAL_LINE, { exact: true });
+    const editorScrollContainer = testPage.getByTestId("plan-editor-scroll-container");
+    const scrollMetrics = await editorScrollContainer.evaluate((element) => {
+      const scrollContainer = element as HTMLElement;
+      scrollContainer.scrollTop = scrollContainer.scrollHeight;
+      return {
+        scrollTop: scrollContainer.scrollTop,
+        scrollHeight: scrollContainer.scrollHeight,
+        clientHeight: scrollContainer.clientHeight,
+      };
+    });
+    expect(scrollMetrics.scrollHeight).toBeGreaterThan(scrollMetrics.clientHeight);
+    expect(scrollMetrics.scrollTop).toBeGreaterThan(0);
+    const finalLineRect = await finalLine.evaluate((element) => {
+      const { bottom, height } = element.getBoundingClientRect();
+      return { bottom, height };
+    });
+    const toolbarTop = await toolbar.evaluate((element) => element.getBoundingClientRect().top);
+    expect(finalLineRect.height).toBeGreaterThan(0);
+    expect(finalLineRect.bottom).toBeLessThanOrEqual(toolbarTop + 1);
 
     await simulateViewportScroll(testPage, 48);
     const expectedScrolledTop = await testPage.evaluate(

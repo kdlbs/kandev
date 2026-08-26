@@ -46,6 +46,24 @@ export type TextSelection = {
   position: { x: number; y: number };
 };
 
+export function resolvePlanEditorPadding({
+  visible,
+  keyboardOpen,
+  keyboardBottomOffset,
+  mobileBottomOffset,
+}: {
+  visible: boolean;
+  keyboardOpen: boolean;
+  keyboardBottomOffset: number;
+  mobileBottomOffset?: string;
+}): string {
+  if (!visible) return "";
+  if (!keyboardOpen) return `${PLAN_FORMATTING_TOOLBAR_HEIGHT_PX}px`;
+
+  const navigationOffset = mobileBottomOffset ? ` - ${mobileBottomOffset}` : "";
+  return `max(${PLAN_FORMATTING_TOOLBAR_HEIGHT_PX}px, calc(${keyboardBottomOffset + PLAN_FORMATTING_TOOLBAR_HEIGHT_PX}px${navigationOffset} - env(safe-area-inset-bottom, 0px)))`;
+}
+
 type TipTapPlanEditorProps = {
   taskId: string;
   value: string;
@@ -442,13 +460,29 @@ export function TipTapPlanEditor(props: TipTapPlanEditorProps) {
     [onSelectionChangeRef],
   );
 
-  const handleMobileVisibilityChange = useCallback((visible: boolean) => {
-    const scrollContainer = wrapperRef.current?.querySelector<HTMLElement>(
-      '[data-testid="plan-editor-scroll-container"]',
-    );
-    if (!scrollContainer) return;
-    scrollContainer.style.paddingBottom = visible ? `${PLAN_FORMATTING_TOOLBAR_HEIGHT_PX}px` : "";
-  }, []);
+  const handleMobileVisibilityChange = useCallback(
+    (visible: boolean, keyboardBottomOffset: number, keyboardOpen: boolean) => {
+      // Direct style mutation avoids re-rendering the ProseMirror subtree when the dock toggles.
+      const paddingBottom = resolvePlanEditorPadding({
+        visible,
+        keyboardOpen,
+        keyboardBottomOffset,
+        mobileBottomOffset: props.mobileBottomOffset,
+      });
+      const scrollContainer = wrapperRef.current?.querySelector<HTMLElement>(
+        '[data-testid="plan-editor-scroll-container"]',
+      );
+      if (!scrollContainer) return;
+      const editorContent = scrollContainer.querySelector<HTMLElement>(".ProseMirror");
+      const clearanceTarget = editorContent ?? scrollContainer;
+      if (!paddingBottom) {
+        clearanceTarget.style.removeProperty("--plan-toolbar-clearance");
+        return;
+      }
+      clearanceTarget.style.setProperty("--plan-toolbar-clearance", paddingBottom);
+    },
+    [props.mobileBottomOffset],
+  );
 
   return (
     <div
@@ -466,6 +500,7 @@ export function TipTapPlanEditor(props: TipTapPlanEditorProps) {
             editor={editor}
             onComment={handleBubbleComment}
             mobileBottomOffset={props.mobileBottomOffset}
+            mobileContainerRef={wrapperRef}
             onMobileVisibilityChange={handleMobileVisibilityChange}
           />
           <PlanDragHandle editor={editor} />

@@ -46,9 +46,9 @@ use both without racing overlapping controls.
   selects non-code-block Plan text, Kandev shall show the existing formatting
   controls next to the selection and hide them when the selection is empty.
 - **AC-UI-RESPONSIVE-PLAN-FORMATTING-001.2:** When a user focuses the Plan
-  editor in Kandev's phone or touch-tablet layout, Kandev shall present the
-  formatting controls in a docked strip instead of positioning them next to
-  the text selection.
+  editor outside a code block in Kandev's phone or touch-tablet layout, Kandev
+  shall present the formatting controls in a docked strip instead of
+  positioning them next to the text selection.
 - **AC-UI-RESPONSIVE-PLAN-FORMATTING-001.3:** The docked strip shall expose the
   desktop formatting capabilities. Selection-only actions shall be disabled
   when the editor has no eligible text selection.

@@ -64,15 +64,16 @@ formatting outcome before marking the package complete.
 ## Verification
 
 ```bash
-cd apps/web && pnpm exec vitest run \
+cd apps/web
+pnpm exec vitest run \
   components/editors/tiptap/plan-bubble-menu.test.tsx \
   components/editors/tiptap/tiptap-plan-editor.test.tsx \
   hooks/use-visual-viewport-offset.test.ts \
   components/task/mobile/mobile-terminal-keybar.test.tsx
-cd apps/web && pnpm e2e:run --project mobile-chrome \
+pnpm e2e:run --project mobile-chrome \
   tests/task/mobile-plan-formatting-toolbar.spec.ts
-cd apps/web && pnpm run typecheck
-cd apps/web && pnpm exec eslint \
+pnpm run typecheck
+pnpm exec eslint \
   components/editors/tiptap/plan-bubble-menu.tsx \
   components/editors/tiptap/plan-bubble-menu.test.tsx \
   components/editors/tiptap/tiptap-plan-editor.tsx \
@@ -83,7 +84,7 @@ cd apps/web && pnpm exec eslint \
   hooks/use-visual-viewport-offset.ts \
   hooks/use-visual-viewport-offset.test.ts \
   e2e/tests/task/mobile-plan-formatting-toolbar.spec.ts
-cd apps/web && pnpm run i18n:check
+pnpm run i18n:check
 ```
 
 ## Files likely touched
@@ -142,13 +143,16 @@ Implemented the shared Plan formatting controls with a desktop Tiptap
 selection bubble and a portal-mounted mobile/tablet dock. The dock preserves
 selection and focus, exposes accessible touch targets, tracks visual-viewport
 keyboard geometry, clears task navigation and safe areas, and reserves editor
-space. The terminal keybar now consumes the shared position helper. Localized
-toolbar labels were added to all five catalogs, and the permanent mobile
-browser regression captures the keyboard-edge and Bold flow.
+space. Tablet bounds constrain the portaled dock to the Plan pane, and the
+mobile regression verifies that the final editor line remains above the dock
+when the keyboard is open. The terminal keybar now consumes the shared
+position helper. Localized toolbar labels were added to all five catalogs, and
+the permanent mobile browser regression captures the keyboard-edge and Bold
+flow.
 
 Verification completed:
 
-- 38 focused Vitest tests passed across 4 files.
+- 40 focused Vitest tests passed across 4 files.
 - Production-build `mobile-chrome` E2E passed.
 - Web typecheck passed.
 - Changed-file ESLint passed.

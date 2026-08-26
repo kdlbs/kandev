@@ -964,6 +964,13 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
   margin-top: 0.5em;
 }
 
+.tiptap-plan-wrapper .ProseMirror::after {
+  content: "";
+  display: block;
+  /* The outer EditorContent owns scrolling, so the spacer extends its range. */
+  height: var(--plan-toolbar-clearance, 0px);
+}
+
 .markdown-body pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;

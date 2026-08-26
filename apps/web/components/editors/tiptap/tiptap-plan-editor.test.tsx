@@ -6,7 +6,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const breakpoint = { isFinePointer: true, isMobile: false };
 const planBubble = vi.hoisted(() => ({
   mobileBottomOffset: undefined as string | undefined,
-  onMobileVisibilityChange: undefined as ((visible: boolean) => void) | undefined,
+  mobileContainerRef: undefined as { current: HTMLElement | null } | undefined,
+  onMobileVisibilityChange: undefined as
+    | ((visible: boolean, keyboardBottomOffset: number, keyboardOpen: boolean) => void)
+    | undefined,
 }));
 
 vi.mock("@/components/theme/app-theme", () => ({
@@ -25,9 +28,15 @@ vi.mock("./plan-bubble-menu", () => ({
   PLAN_FORMATTING_TOOLBAR_HEIGHT_PX: 56,
   PlanBubbleMenu: (props: {
     mobileBottomOffset?: string;
-    onMobileVisibilityChange?: (visible: boolean) => void;
+    mobileContainerRef?: { current: HTMLElement | null };
+    onMobileVisibilityChange?: (
+      visible: boolean,
+      keyboardBottomOffset: number,
+      keyboardOpen: boolean,
+    ) => void;
   }) => {
     planBubble.mobileBottomOffset = props.mobileBottomOffset;
+    planBubble.mobileContainerRef = props.mobileContainerRef;
     planBubble.onMobileVisibilityChange = props.onMobileVisibilityChange;
     return null;
   },
@@ -87,6 +96,7 @@ afterEach(() => {
   breakpoint.isFinePointer = true;
   breakpoint.isMobile = false;
   planBubble.mobileBottomOffset = undefined;
+  planBubble.mobileContainerRef = undefined;
   planBubble.onMobileVisibilityChange = undefined;
 });
 
@@ -208,8 +218,14 @@ describe("TipTapPlanEditor mobile formatting clearance", () => {
     );
     expect(editorScrollContainer).not.toBeNull();
 
-    act(() => planBubble.onMobileVisibilityChange?.(true));
+    act(() => planBubble.onMobileVisibilityChange?.(true, 300, true));
 
-    expect(editorScrollContainer?.getAttribute("style")).toContain("padding-bottom: 56px");
+    const editorContent = editorScrollContainer?.querySelector<HTMLElement>(".ProseMirror");
+    expect(editorContent?.style.getPropertyValue("--plan-toolbar-clearance")).toBe(
+      "max(56px, calc(356px - 3.25rem - env(safe-area-inset-bottom, 0px)))",
+    );
+    expect(planBubble.mobileContainerRef?.current).toBe(
+      view.container.querySelector(".tiptap-plan-wrapper"),
+    );
   });
 });
