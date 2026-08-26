@@ -99,3 +99,4 @@ None.
 - Rendered an automation-scoped animated loader for running rows while preserving localized state text and non-running dots.
 - Added component coverage for idle-to-running-to-idle transitions and desktop Chromium coverage for a seeded open run without navigation.
 - Passed focused Vitest (22 tests), typecheck, targeted ESLint, Chromium E2E (4 tests), and specification lint.
+- Fixup preserved the last successful summary after refresh errors and gated polling at the shared 768px mobile boundary; the added regressions passed with the focused suite at 30 tests, typecheck, targeted ESLint, and Chromium E2E (4 tests).

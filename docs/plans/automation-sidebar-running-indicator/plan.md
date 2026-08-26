@@ -101,8 +101,9 @@ this desktop-only surface.
 ## Verification results
 
 - PASS `pnpm --filter @kandev/web exec vitest run components/app-sidebar/sections/automations-section.test.tsx components/runs/use-live-refresh.test.ts` (22 tests).
+- PASS fixup regression suite covering the responsive visibility and refresh-error cases with the same targets plus `components/runs/use-automation-summaries.test.ts` (30 tests).
 - PASS `pnpm --filter @kandev/web run typecheck`.
-- PASS targeted ESLint for the changed sidebar component and component test.
+- PASS targeted ESLint for the changed sidebar component, component test, summary hook, and summary-hook test.
 - PASS `pnpm e2e:run --project chromium tests/automations-sidebar.spec.ts` (4 tests).
 - PASS `python3 scripts/lint-spec-files.py --all`.
 
