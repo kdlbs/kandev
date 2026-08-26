@@ -20,9 +20,10 @@ system_design:
 
 ## Summary
 
-Give the active shared task row a stronger theme-aware background and inset
-ring. Preserve the user's task-color marker, existing row state attributes,
-and current desktop/mobile interaction behavior.
+Give the active shared task row a stronger theme-aware background without an
+active-task border. Preserve the user's task-color marker, existing row state
+attributes, separate multi-selection ring, and current desktop/mobile
+interaction behavior.
 
 ## In scope
 
@@ -37,8 +38,8 @@ and current desktop/mobile interaction behavior.
 
 ## Acceptance
 
-- An active desktop row has the stronger surface and inset ring, while an
-  inactive row does not.
+- An active desktop row has the stronger background without an active-task
+  border, while an inactive row does not.
 - Active rows retain their custom color marker and existing `data-active` /
   `aria-current` semantics.
 - The mobile task-switcher shows the same active treatment without horizontal
@@ -68,8 +69,8 @@ None.
 - Tailwind utility order could let the generic hover class override the active
   surface. Keep active and active-hover utilities together in the selected
   branch and verify the rendered row.
-- A visible border could change row dimensions. Use an inset ring and retain
-  the current padding.
+- Removing the active ring must not affect the existing multi-selection ring or
+  the current row padding.
 
 ## Parallelism
 
@@ -84,9 +85,10 @@ None.
 
 ## Results
 
-Implemented the shared active-row surface and inset ring in `TaskItem`, while
-preserving the custom task-color marker and existing multi-selection ring. The
-desktop and mobile E2E flows now assert the treatment for a red task color.
+Implemented the shared active-row surface without an active-task ring in
+`TaskItem`, while preserving the custom task-color marker and existing
+multi-selection ring. The desktop and mobile E2E flows now assert the
+background-only treatment for a red task color.
 
 - Red desktop E2E failed on the expected old `bg-primary/10` class.
 - Focused `TaskItem` suite: 49 tests passed.
@@ -94,3 +96,8 @@ desktop and mobile E2E flows now assert the treatment for a red task color.
 - Desktop sidebar E2E: 2 tests passed.
 - Mobile active-task E2E: 1 test passed, including the no-horizontal-overflow
   assertion.
+
+For the background-only comparison variant, the desktop regression first failed
+on the existing active ring, then desktop and mobile E2E passed after removing
+that ring. The focused unit test suite (49 tests), typecheck, lint, and
+specification checks also passed.
