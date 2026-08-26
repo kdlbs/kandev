@@ -572,6 +572,7 @@ export function WorkspaceRepositoriesClient({
             <RepositoryCard
               key={repo.id}
               repository={repo}
+              workspaceId={workspace.id}
               savedRepository={savedRepositoriesById.get(repo.id)}
               isRepositoryDirty={isRepositoryDirty(repo, savedRepositoriesById.get(repo.id))}
               areScriptsDirty={areRepositoryScriptsDirty(repo, savedRepositoriesById.get(repo.id))}

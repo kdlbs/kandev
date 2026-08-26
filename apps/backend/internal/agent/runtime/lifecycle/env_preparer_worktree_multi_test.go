@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -289,6 +290,51 @@ func TestWorktreePreparer_MultiRepo_RollbackOnPartialFailure(t *testing.T) {
 	for _, wt := range all {
 		if wt.Status == worktree.StatusActive {
 			t.Errorf("expected no active worktrees after rollback; found %s in %s", wt.ID, wt.Path)
+		}
+	}
+}
+
+func TestWorktreePreparer_MultiRepo_RequiredRefreshIdentifiesFailingRepository(t *testing.T) {
+	repoA := initBareGitRepo(t, "good-refresh")
+	repoB := initBareGitRepo(t, "bad-refresh")
+
+	preparer, mgr := newPreparerForTest(t)
+	req := &EnvPrepareRequest{
+		TaskID:       "task-refresh-fail",
+		SessionID:    "sess-refresh-fail",
+		TaskTitle:    "Required refresh failure",
+		ExecutorType: executor.NameStandalone,
+		TaskDirName:  "refresh-fail_eee",
+		Repositories: []RepoPrepareSpec{
+			{TaskRepositoryID: "tr-good", RepositoryID: "repo-good", RepositoryPath: repoA, RepoName: "good", BaseBranch: "main"},
+			{TaskRepositoryID: "tr-bad", RepositoryID: "repo-bad", RepositoryPath: repoB, RepoName: "backend", BaseBranch: "main", PullBeforeWorktree: true},
+		},
+	}
+
+	res, err := preparer.Prepare(context.Background(), req, nil)
+	if err != nil {
+		t.Fatalf("prepare returned hard error: %v", err)
+	}
+	if res.Success {
+		t.Fatal("required refresh failure unexpectedly succeeded")
+	}
+	if !strings.Contains(res.ErrorMessage, "repo-bad") || !strings.Contains(res.ErrorMessage, "backend") {
+		t.Fatalf("error = %q, want failing repository identity and name", res.ErrorMessage)
+	}
+	var preparationErr *RepositoryPreparationError
+	if !errors.As(res.Error, &preparationErr) {
+		t.Fatalf("error = %T %v, want RepositoryPreparationError", res.Error, res.Error)
+	}
+	if preparationErr.RepositoryID != "repo-bad" || preparationErr.TaskRepositoryID != "tr-bad" {
+		t.Fatalf("preparation error identity = %+v, want repo-bad/tr-bad", preparationErr)
+	}
+	if all, listErr := mgr.GetAllByTaskID(context.Background(), "task-refresh-fail"); listErr != nil {
+		t.Fatalf("list worktrees: %v", listErr)
+	} else {
+		for _, wt := range all {
+			if wt.Status == worktree.StatusActive {
+				t.Fatalf("active worktree after required refresh failure = %s, want none", wt.ID)
+			}
 		}
 	}
 }

@@ -1875,5 +1875,12 @@
   "baseBranchNotSet": "Ɓàśē ƀŕàńćĥ ńōţ śēţ",
   "launchRecoveryFailed": "Ŕēćōvēŕŷ ćōũĺď ńōţ śţàŕţ",
   "tryRecoveryAgain": "Ţŕŷ ţĥē ŕēćōvēŕŷ àćţĩōń àĝàĩń.",
-  "launchFailedSeeDetails": "Ţĥē ţàśķ ĺàũńćĥ ƒàĩĺēď. Ōƥēń ţĥē ţàśķ ďēţàĩĺś ƒōŕ ŕēćōvēŕŷ àćţĩōńś."
+  "launchFailedSeeDetails": "Ţĥē ţàśķ ĺàũńćĥ ƒàĩĺēď. Ōƥēń ţĥē ţàśķ ďēţàĩĺś ƒōŕ ŕēćōvēŕŷ àćţĩōńś.",
+  "branchPoliciesGroup": "Ɓŕàńćĥ ƥōĺĩćĩēś",
+  "branchesGroup": "Ɓŕàńćĥēś",
+  "branchPolicyMarker": "Ƥōĺĩćŷ",
+  "branchPolicyOptionSummary": "ƒŕōḿ {{base}} ţō {{target}}",
+  "branchPolicySelected": "{{name}} (ƒŕōḿ {{base}})",
+  "branchPolicyUnavailable": "Ɓàśē ƀŕàńćĥ ũńàvàĩĺàƀĺē. Ŕēƒŕēśĥ ƀŕàńćĥēś ōŕ ēďĩţ ţĥĩś ƥōĺĩćŷ.",
+  "branchPolicyRequiresSingleRepository": "Ɓŕàńćĥ ƥōĺĩćĩēś ŕēqũĩŕē à śĩńĝĺē ŕēƥōśĩţōŕŷ ŵĩţĥ ţĥē ĺōćàĺ ēxēćũţōŕ."
 }

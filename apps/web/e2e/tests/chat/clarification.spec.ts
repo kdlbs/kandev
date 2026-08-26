@@ -24,6 +24,26 @@ function seedClarificationTask(
   return seedClarificationSession(testPage, apiClient, seedData, title, { scenario });
 }
 
+async function waitForPendingClarificationMessages(
+  apiClient: ApiClient,
+  sessionId: string,
+  expectedCount: number,
+  message: string,
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const { messages } = await apiClient.listSessionMessages(sessionId);
+        return messages.filter(
+          (candidate) =>
+            candidate.type === "clarification_request" && candidate.metadata?.status === "pending",
+        ).length;
+      },
+      { message, timeout: 60_000 },
+    )
+    .toBe(expectedCount);
+}
+
 const PLAN_WITH_CLARIFICATION_SCRIPT = [
   'e2e:mcp:kandev:create_task_plan_kandev({"task_id":"{task_id}","content":"## Plan\\n\\nEdit 1 item","title":"Implementation Plan"})',
   "e2e:delay(100)",
@@ -171,6 +191,13 @@ test.describe("Clarification flow", () => {
     );
     if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
+    await waitForPendingClarificationMessages(
+      apiClient,
+      task.session_id,
+      1,
+      "custom clarification should be durably pending before navigation",
+    );
+
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -305,6 +332,14 @@ test.describe("Clarification flow", () => {
     );
     if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId: task.session_id,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "timed-out clarification should be ready for a deferred answer before navigation",
+      timeout: 60_000,
+    });
+
     await testPage.goto(`/t/${task.id}`);
 
     const session = new SessionPage(testPage);
@@ -321,14 +356,6 @@ test.describe("Clarification flow", () => {
         message: "clarification timeout must not run on_turn_complete auto-advance",
       })
       .toBe(timeoutStep.id);
-
-    await waitForSessionState(apiClient, {
-      taskId: task.id,
-      sessionId: task.session_id,
-      expectedState: "WAITING_FOR_INPUT",
-      message: "timed-out clarification session must remain ready for a deferred answer",
-      timeout: 30_000,
-    });
 
     // Agent moved on; a late custom answer remains editable and goes through
     // the event fallback as a new prompt.
@@ -389,6 +416,14 @@ test.describe("Clarification flow", () => {
     );
     if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId: task.session_id,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "timed-out clarification should be ready for a deferred answer before navigation",
+      timeout: 60_000,
+    });
+
     await testPage.goto(`/t/${task.id}`);
 
     const session = new SessionPage(testPage);
@@ -397,14 +432,6 @@ test.describe("Clarification flow", () => {
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
     await expect(session.chat).toContainText("Question timed out", { timeout: 30_000 });
     await expect(session.clarificationDeferredNotice()).toBeVisible({ timeout: 10_000 });
-
-    await waitForSessionState(apiClient, {
-      taskId: task.id,
-      sessionId: task.session_id,
-      expectedState: "WAITING_FOR_INPUT",
-      message: "timed-out clarification session must remain ready for a deferred answer",
-      timeout: 30_000,
-    });
 
     let respondCalls = 0;
     await testPage.route("**/api/v1/clarification/*/respond", async (route) => {
@@ -467,6 +494,54 @@ test.describe("Clarification flow", () => {
       throw new Error("expected both label and description to have bounding boxes");
     }
     expect(descriptionBox.y).toBeGreaterThanOrEqual(labelBox.y + labelBox.height - 1);
+  });
+
+  test("renders lightweight markdown across active and resolved clarification text", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Clarification Markdown",
+      "clarification-markdown",
+    );
+
+    const overlay = session.clarificationOverlay();
+    await expect(overlay).toBeVisible();
+    const card = session.clarificationQuestionCardById("markdown");
+    const firstOption = session.clarificationOption("Postgres");
+
+    await expect(card.getByTestId("clarification-question-title").locator("code")).toHaveText("DB");
+    await expect(card.locator("strong").filter({ hasText: "one" })).toBeVisible();
+    await expect(card.locator("ol > li")).toHaveCount(2);
+    const guidance = card.getByRole("link", { name: "storage guidance" });
+    await expect(guidance).toHaveAttribute("href", "https://example.com/storage");
+    await expect(guidance).toHaveAttribute("rel", "noopener noreferrer");
+
+    await expect(firstOption.getByTestId("clarification-option-label").locator("code")).toHaveText(
+      "Postgres",
+    );
+    await expect(
+      firstOption.getByTestId("clarification-option-description").locator("strong"),
+    ).toHaveText("production");
+    await expect(firstOption.locator("a")).toHaveCount(0);
+
+    const context = session.clarificationContext();
+    await expect(context).toContainText("Keep `context` literal.");
+    await expect(context.locator("code")).toHaveCount(0);
+
+    await firstOption.locator("code").click();
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+
+    const resolved = session.activeChat().getByTestId("clarification-request-message");
+    await expect(resolved).toBeVisible();
+    await expect(resolved.locator("code").filter({ hasText: "DB" })).toBeVisible();
+    await expect(resolved.locator("strong").filter({ hasText: "one" })).toBeVisible();
+    await expect(resolved.locator("ol > li")).toHaveCount(2);
+    await expect(resolved.locator("code").filter({ hasText: "Postgres" })).toBeVisible();
   });
 
   test("plan mode + clarification does not leave pointer-events stuck on body", async ({
@@ -852,6 +927,13 @@ test.describe("Multi-question clarification carousel", () => {
     );
     if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
+    await waitForPendingClarificationMessages(
+      apiClient,
+      task.session_id,
+      3,
+      "plan clarification bundle should be durably pending before navigation",
+    );
+
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -1022,6 +1104,14 @@ test.describe("Multi-question clarification carousel", () => {
       },
     );
     if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId: task.session_id,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "multi-question clarification should block the agent before navigation",
+      timeout: 60_000,
+    });
 
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);

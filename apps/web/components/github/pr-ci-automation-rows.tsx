@@ -9,7 +9,11 @@ import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Switch } from "@kandev/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
-import { autoFixRoundForState } from "@/lib/github/ci-automation";
+import {
+  autoFixRoundForState,
+  type CIAutomationQueueRecoveryState,
+  deriveCIAutomationQueueState,
+} from "@/lib/github/ci-automation";
 import type {
   TaskCIAutomationPatch,
   TaskCIPRAutomationState,
@@ -42,7 +46,7 @@ export function CIAutomationInfoButton() {
         </Button>
       </TooltipTrigger>
       <TooltipContent side="top" align="end" className="max-w-[280px] text-xs leading-relaxed">
-        {t("github:watchesThisTaskSLinkedPull")}
+        {t("github:ciAutomationQueueRecoveryHelp")}
       </TooltipContent>
     </Tooltip>
   );
@@ -55,6 +59,7 @@ export function CIAutomationRow({
   disabled,
   onCheckedChange,
   help,
+  supportingText,
   describedBy,
 }: {
   id: string;
@@ -63,6 +68,7 @@ export function CIAutomationRow({
   disabled: boolean;
   onCheckedChange: (checked: boolean) => void;
   help?: ReactNode;
+  supportingText?: ReactNode;
   describedBy?: string;
 }) {
   const { isFinePointer, isMobile } = useResponsiveBreakpoint();
@@ -70,11 +76,18 @@ export function CIAutomationRow({
 
   return (
     <div className={`flex items-center justify-between gap-3 px-1 ${minHeight}`}>
-      <div className="flex min-w-0 flex-1 items-center gap-1.5">
-        <Label htmlFor={id} className="min-w-0 cursor-pointer text-xs leading-5">
-          {label}
-        </Label>
-        {help}
+      <div className="flex min-w-0 flex-1 flex-col items-start">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <Label htmlFor={id} className="min-w-0 cursor-pointer text-xs leading-5">
+            {label}
+          </Label>
+          {help}
+        </div>
+        {supportingText ? (
+          <span className="max-w-full break-words text-[10px] leading-4 text-muted-foreground">
+            {supportingText}
+          </span>
+        ) : null}
       </div>
       <Switch
         id={id}
@@ -334,23 +347,109 @@ function ReviewRequestedPromptRow({
   );
 }
 
+type CIAutomationTranslate = (key: string, options?: Record<string, unknown>) => string;
+
+function queueContextTitle(
+  t: CIAutomationTranslate,
+  context: CIAutomationQueueRecoveryState["context"],
+): string {
+  switch (context) {
+    case "queued":
+      return t("github:mergeQueueAutomation");
+    case "recovery":
+      return t("github:mergeQueueRecovery");
+    default:
+      return t("github:automation");
+  }
+}
+
+function queueRemovalCauseLabel(
+  t: CIAutomationTranslate,
+  cause: CIAutomationQueueRecoveryState["removalCause"],
+): string {
+  switch (cause) {
+    case "checks_failed":
+      return t("github:mergeQueueRemovalCauseChecksFailed");
+    case "checks_timed_out":
+      return t("github:mergeQueueRemovalCauseChecksTimedOut");
+    case "conflict":
+      return t("github:mergeQueueRemovalCauseConflict");
+    default:
+      return "";
+  }
+}
+
+function autoFixQueueSupport(
+  t: CIAutomationTranslate,
+  queueState: CIAutomationQueueRecoveryState,
+  enabled: boolean,
+): string | undefined {
+  switch (queueState.status) {
+    case "queued":
+      return t("github:autoFixQueueSupportQueued");
+    case "removed_actionable":
+      return enabled ? undefined : t("github:autoFixQueueSupportEnable");
+    case "repair_requested":
+      return t("github:autoFixQueueSupportRequested");
+    case "removed_not_actionable":
+      return t("github:autoFixQueueSupportNotActionable");
+    case "waiting_for_checks":
+      return t("github:autoFixQueueSupportNewHead");
+    default:
+      return undefined;
+  }
+}
+
+function autoMergeQueueSupport(
+  t: CIAutomationTranslate,
+  queueState: CIAutomationQueueRecoveryState,
+  enabled: boolean,
+): string | undefined {
+  switch (queueState.status) {
+    case "queued":
+      return t("github:autoMergeQueueSupportQueued");
+    case "repair_requested":
+    case "waiting_for_commit":
+      return t("github:autoMergeQueueSupportWaitingForCommit");
+    case "waiting_for_checks":
+      return t("github:autoMergeQueueSupportWaitingForChecks");
+    default:
+      if (queueState.context !== "recovery") return undefined;
+      return enabled
+        ? t("github:autoMergeQueueSupportNewHead")
+        : t("github:autoMergeQueueSupportDisabled");
+  }
+}
+
 export function CIAutomationHeader({
   pr,
+  queueState,
   disabled,
   onEditPrompt,
 }: {
   pr: TaskPR;
+  queueState: CIAutomationQueueRecoveryState;
   disabled: boolean;
   onEditPrompt: () => void;
 }) {
   const { t } = useTranslation();
+  const title = queueContextTitle(t, queueState.context);
+  let subtitle = t("github:automationForPr", { number: pr.pr_number });
+  if (queueState.context === "queued") {
+    subtitle = t("github:automationForPrQueued", { number: pr.pr_number });
+  } else if (queueState.context === "recovery") {
+    const cause = queueRemovalCauseLabel(t, queueState.removalCause);
+    if (cause) {
+      subtitle = t("github:automationForPrRemoved", { number: pr.pr_number, cause });
+    } else {
+      subtitle = t("github:automationForPrRemovedGeneric", { number: pr.pr_number });
+    }
+  }
   return (
     <div className="flex items-center justify-between gap-2 px-1">
       <div className="flex min-w-0 flex-col">
-        <div className="text-xs font-medium text-foreground">{t("github:automation")}</div>
-        <div className="truncate text-[11px] text-muted-foreground">
-          {t("github:automationForPr", { number: pr.pr_number })}
-        </div>
+        <div className="text-xs font-medium text-foreground">{title}</div>
+        <div className="truncate text-[11px] text-muted-foreground">{subtitle}</div>
       </div>
       <div className="flex shrink-0 items-center gap-1">
         <CIAutomationInfoButton />
@@ -366,6 +465,49 @@ export function CIAutomationHeader({
           <IconEdit className="h-3.5 w-3.5" />
         </Button>
       </div>
+    </div>
+  );
+}
+
+export function CIAutomationQueueStatusRow({
+  queueState,
+}: {
+  queueState: CIAutomationQueueRecoveryState;
+}) {
+  const { t } = useTranslation();
+  if (queueState.status === "none") return null;
+  let message: string;
+  switch (queueState.status) {
+    case "queued":
+      message = t("github:mergeQueueRecoveryStatusQueued");
+      break;
+    case "removed_actionable":
+      message = t("github:mergeQueueRecoveryStatusActionable");
+      break;
+    case "removed_not_actionable":
+      message = t("github:mergeQueueRecoveryStatusNotActionable");
+      break;
+    case "repair_requested":
+      if (queueState.waitingForCommit) {
+        message = t("github:mergeQueueRecoveryStatusRepairRequestedWaiting");
+      } else {
+        message = t("github:mergeQueueRecoveryStatusRepairRequested");
+      }
+      break;
+    case "waiting_for_commit":
+      message = t("github:mergeQueueRecoveryStatusWaitingForCommit");
+      break;
+    case "waiting_for_checks":
+      message = t("github:mergeQueueRecoveryStatusWaitingForChecks");
+      break;
+  }
+  return (
+    <div
+      data-testid="ci-merge-queue-recovery-status"
+      role="status"
+      className="break-words px-1 text-[11px] leading-4 text-muted-foreground"
+    >
+      {message}
     </div>
   );
 }
@@ -387,6 +529,13 @@ export function CIAutomationOptionRows({
 }) {
   const { t } = useTranslation();
   const scopeKey = prAutomationScopeKey(pr);
+  const queueState = deriveCIAutomationQueueState(pr, prOptions, automationState);
+  const autoFixSupportingText = autoFixQueueSupport(t, queueState, prOptions.auto_fix_enabled);
+  const autoMergeSupportingText = autoMergeQueueSupport(
+    t,
+    queueState,
+    prOptions.auto_merge_enabled,
+  );
   return (
     <>
       <CIAutomationRow
@@ -395,6 +544,7 @@ export function CIAutomationOptionRows({
         checked={prOptions.auto_fix_enabled}
         disabled={disabled}
         onCheckedChange={(checked) => patchOption({ auto_fix_enabled: checked })}
+        supportingText={autoFixSupportingText}
         help={
           prOptions.auto_fix_enabled ? (
             <CIAutoFixRoundHelpButton state={automationState} maxRounds={autoFixMaxRounds} />
@@ -403,11 +553,13 @@ export function CIAutomationOptionRows({
       />
       <CIAutomationRow
         id={`task-ci-auto-merge-${scopeKey}`}
-        label={t("github:autoMergeWhenReady")}
+        label={t("github:autoMergeOrRequeueWhenReady")}
         checked={prOptions.auto_merge_enabled}
         disabled={disabled}
         onCheckedChange={(checked) => patchOption({ auto_merge_enabled: checked })}
+        supportingText={autoMergeSupportingText}
       />
+      <CIAutomationQueueStatusRow queueState={queueState} />
       <ReviewFollowUpSection
         scopeKey={scopeKey}
         prOptions={prOptions}

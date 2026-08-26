@@ -248,6 +248,132 @@ test.describe("Subtask basics", () => {
       });
     }
   });
+
+  test("creates a policy branch for a local-executor subtask", async ({
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    execSync("git branch -f develop", {
+      cwd: seedData.repositoryPath,
+      env: makeGitEnv(backend.tmpDir),
+    });
+    const policy = await apiClient.createRepositoryBranchPolicy(seedData.repositoryId, {
+      name: `Subtask policy ${Date.now()}`,
+      base_branch: "main",
+      branch_template: "feature/{title}-{suffix}",
+      pull_request_target: "develop",
+    });
+    const { executors } = await apiClient.listExecutors();
+    const localExecutor = executors.find((executor) =>
+      ["local", "local_pc"].includes(executor.type),
+    );
+    if (!localExecutor) {
+      test.skip(true, "No local executor available");
+      return;
+    }
+    const localProfile = await apiClient.createExecutorProfile(
+      localExecutor.id,
+      `E2E Subtask Local ${Date.now()}`,
+    );
+    const parentTitle = `Policy subtask parent ${Date.now()}`;
+    const childTitle = `Policy subtask child ${Date.now()}`;
+
+    try {
+      const parent = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        parentTitle,
+        seedData.agentProfileId,
+        {
+          description: "/e2e:simple-message",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+          executor_profile_id: seedData.worktreeExecutorProfileId,
+        },
+      );
+      await testPage.goto(`/t/${parent.id}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await session.waitForChatIdle({ timeout: 30_000 });
+      await session.openCreateSubtaskForSidebarTask(parentTitle);
+
+      const dialog = testPage.getByTestId("new-subtask-dialog");
+      await dialog.getByTestId("subtask-workspace-mode-new").click();
+      await dialog.getByTestId("executor-profile-selector").click();
+      await testPage.getByRole("option", { name: new RegExp(localProfile.name) }).click();
+      await dialog.getByTestId("branch-chip-trigger").click();
+      await testPage.getByRole("option", { name: new RegExp(policy.name) }).click();
+      await expect(dialog.getByTestId("fresh-branch-toggle")).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      let submittedRepositories: Array<Record<string, unknown>> | undefined;
+      testPage.on("request", (request) => {
+        if (request.method() !== "POST" || !request.url().endsWith("/api/v1/tasks")) return;
+        submittedRepositories = (JSON.parse(request.postData() ?? "{}").repositories ??
+          []) as Array<Record<string, unknown>>;
+      });
+      await dialog.getByTestId("subtask-title-input").fill(childTitle);
+      await dialog.getByTestId("subtask-prompt-input").fill("/e2e:simple-message");
+      await dialog.getByRole("button", { name: "Create Subtask", exact: true }).click();
+      await expect.poll(() => submittedRepositories).toBeDefined();
+      expect(submittedRepositories?.[0]).toEqual(
+        expect.objectContaining({ branch_policy_id: policy.id, fresh_branch: true }),
+      );
+      await expect(dialog).toBeHidden({ timeout: 30_000 });
+      let childId: string | undefined;
+      await expect
+        .poll(async () => {
+          const response = await apiClient.listTasks(seedData.workspaceId);
+          childId = response.tasks.find((task) => task.title === childTitle)?.id;
+          return childId;
+        })
+        .toBeTruthy();
+      expect(childId).toBeTruthy();
+      type PolicyRepositorySnapshot = {
+        base_branch?: string;
+        branch_policy_id?: string;
+        branch_policy_name?: string;
+        branch_policy_branch_template?: string;
+        branch_policy_pull_request_target?: string;
+        checkout_branch?: string;
+      };
+      let repository: PolicyRepositorySnapshot | undefined;
+      await expect
+        .poll(async () => {
+          const response = await apiClient.rawRequest("GET", `/api/v1/tasks/${childId}`);
+          if (!response.ok) return undefined;
+          const task = (await response.json()) as { repositories?: PolicyRepositorySnapshot[] };
+          repository = task.repositories?.[0];
+          return repository;
+        })
+        .toEqual(
+          expect.objectContaining({
+            branch_policy_id: policy.id,
+            branch_policy_name: policy.name,
+            branch_policy_branch_template: "feature/{title}-{suffix}",
+            branch_policy_pull_request_target: "develop",
+          }),
+        );
+
+      expect(repository!.base_branch).toMatch(/^feature\/policy-subtask-child-/);
+      await expect
+        .poll(async () =>
+          execSync("git branch --show-current", {
+            cwd: seedData.repositoryPath,
+            env: makeGitEnv(backend.tmpDir),
+          })
+            .toString()
+            .trim(),
+        )
+        .toBe(repository!.base_branch);
+    } finally {
+      await apiClient.deleteExecutorProfile(localProfile.id).catch(() => {});
+      await apiClient.deleteRepositoryBranchPolicy(policy.id).catch(() => {});
+    }
+  });
 });
 
 test.describe("MCP subtask creation", () => {

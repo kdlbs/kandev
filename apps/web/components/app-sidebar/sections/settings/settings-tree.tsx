@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { PluginSlot } from "@/components/plugins/plugin-slot";
 import { useAppStore } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
+import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
 import { usePlugins } from "@/hooks/domains/plugins/use-plugins";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
 import { useSettingsDiscovery } from "@/hooks/domains/settings/use-settings-discovery";
@@ -34,12 +35,6 @@ export {
   type SettingsMenuItem,
   type SettingsMenuSection,
 } from "./settings-menu-sections";
-
-/** null user (disabled/synthetic single-user mode) counts as admin for gating. */
-function useIsAdmin(): boolean {
-  const role = useAppStore((s) => s.auth.user?.role);
-  return role === undefined || role === "admin";
-}
 
 /**
  * Item counts for rows whose page owns a list. `undefined` until the backing

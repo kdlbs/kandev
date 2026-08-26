@@ -17,10 +17,11 @@ const ALL_CATEGORIES = "__all__";
 type MarketplaceBrowserProps = {
   /** Installs a plugin from its package URL; resolves when the install settles. The result is unused here — failures already toast. */
   onInstallUrl: (url: string) => Promise<{ ok: boolean; error?: string }>;
+  canManage?: boolean;
 };
 
 /** The "Browse" tab: search/filter/sort the catalog and install from it. */
-export function MarketplaceBrowser({ onInstallUrl }: MarketplaceBrowserProps) {
+export function MarketplaceBrowser({ onInstallUrl, canManage = true }: MarketplaceBrowserProps) {
   const [text, setText] = useState("");
   const [category, setCategory] = useState<string>(ALL_CATEGORIES);
   const [sort, setSort] = useState<CatalogQuery["sort"]>("stars");
@@ -62,6 +63,7 @@ export function MarketplaceBrowser({ onInstallUrl }: MarketplaceBrowserProps) {
         onSort={setSort}
         onManageSources={() => setSourcesOpen(true)}
         onRefresh={reload}
+        canManage={canManage}
       />
 
       <DegradedSourcesBanner catalog={catalog} />
@@ -73,14 +75,17 @@ export function MarketplaceBrowser({ onInstallUrl }: MarketplaceBrowserProps) {
         filtered={Boolean(text.trim() || category !== ALL_CATEGORIES)}
         installingId={installingId}
         onInstall={install}
+        canManage={canManage}
       />
 
-      <MarketplaceSourcesDialog
-        open={sourcesOpen}
-        sources={catalog.sources}
-        onOpenChange={setSourcesOpen}
-        onChanged={reload}
-      />
+      {canManage && (
+        <MarketplaceSourcesDialog
+          open={sourcesOpen}
+          sources={catalog.sources}
+          onOpenChange={setSourcesOpen}
+          onChanged={reload}
+        />
+      )}
     </div>
   );
 }
@@ -105,6 +110,7 @@ type ToolbarProps = {
   onSort: (v: CatalogQuery["sort"]) => void;
   onManageSources: () => void;
   onRefresh: () => void;
+  canManage: boolean;
 };
 
 function MarketplaceToolbar(props: ToolbarProps) {
@@ -142,20 +148,22 @@ function MarketplaceToolbar(props: ToolbarProps) {
           <SelectItem value="name">{t("plugins:sortName")}</SelectItem>
         </SelectContent>
       </Select>
-      <div className="ml-auto flex items-center gap-2">
-        <Button variant="secondary" onClick={props.onRefresh} className="cursor-pointer">
-          <IconRefresh className="h-4 w-4" />
-          {t("plugins:refresh")}
-        </Button>
-        <Button
-          variant="outline"
-          onClick={props.onManageSources}
-          className="cursor-pointer"
-          data-testid="marketplace-manage-sources"
-        >
-          {t("plugins:sources")}
-        </Button>
-      </div>
+      {props.canManage && (
+        <div className="ml-auto flex items-center gap-2">
+          <Button variant="secondary" onClick={props.onRefresh} className="cursor-pointer">
+            <IconRefresh className="h-4 w-4" />
+            {t("plugins:refresh")}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={props.onManageSources}
+            className="cursor-pointer"
+            data-testid="marketplace-manage-sources"
+          >
+            {t("plugins:sources")}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
@@ -199,6 +207,7 @@ type ListProps = {
   filtered: boolean;
   installingId: string | null;
   onInstall: (entry: MarketplaceEntry) => void;
+  canManage: boolean;
 };
 
 function MarketplaceList({
@@ -208,6 +217,7 @@ function MarketplaceList({
   filtered,
   installingId,
   onInstall,
+  canManage,
 }: ListProps) {
   const { t } = useTranslation();
   if (error) {
@@ -243,6 +253,7 @@ function MarketplaceList({
             entry={entry}
             busy={installingId === entry.id}
             onInstall={onInstall}
+            canManage={canManage}
           />
         ))}
       </div>

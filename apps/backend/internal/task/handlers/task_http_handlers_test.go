@@ -1657,6 +1657,22 @@ func TestResolveFreshBranchName(t *testing.T) {
 	}
 }
 
+func TestResolveFreshBranchNameForTaskUsesPolicySnapshot(t *testing.T) {
+	task := &models.Task{
+		ID:         "task-123",
+		Identifier: "KAN-7",
+		Metadata:   map[string]interface{}{},
+	}
+	taskRepository := &models.TaskRepository{
+		BranchPolicyBranchTemplate: "bugfix/{ticket}-{title}-{suffix}",
+	}
+
+	got := resolveFreshBranchNameForTask("", "Fix login", task, taskRepository)
+	if !strings.HasPrefix(got, "bugfix/kan-7-fix-login-") {
+		t.Fatalf("policy branch = %q, want bugfix/kan-7-fix-login-*", got)
+	}
+}
+
 type freshBranchIdentityRepository struct {
 	mockRepository
 	task         *models.Task

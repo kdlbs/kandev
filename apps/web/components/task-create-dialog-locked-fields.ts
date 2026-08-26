@@ -31,6 +31,7 @@ export function useLockedFieldSync(
     if (lockedWorkflow && workflowId && workflowId !== fs.selectedWorkflowId) {
       fs.setSelectedWorkflowId(workflowId);
     }
+    if (initialValues?.repositories?.length) return;
     if (!repoId) return;
     const current = fs.repositories[0];
     if (current?.repositoryId === repoId && current?.branch === (branch ?? "")) return;
