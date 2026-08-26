@@ -13,47 +13,6 @@ vi.mock("@/hooks/use-compact-task-chrome", () => ({
   useTouchDrawer: () => mocks.touchDrawer,
 }));
 
-vi.mock("@kandev/ui/hover-card", async () => {
-  const React = await vi.importActual<typeof import("react")>("react");
-  const HoverCardContext = React.createContext<{
-    open: boolean;
-    onOpenChange: (open: boolean) => void;
-  } | null>(null);
-
-  return {
-    HoverCard: ({
-      children,
-      open,
-      onOpenChange,
-    }: {
-      children: React.ReactNode;
-      open?: boolean;
-      onOpenChange?: (open: boolean) => void;
-    }) => {
-      const [uncontrolledOpen, setUncontrolledOpen] = React.useState(false);
-      const isOpen = open ?? uncontrolledOpen;
-      const setOpen = onOpenChange ?? setUncontrolledOpen;
-      return (
-        <HoverCardContext.Provider value={{ open: isOpen, onOpenChange: setOpen }}>
-          {children}
-        </HoverCardContext.Provider>
-      );
-    },
-    HoverCardTrigger: ({ children }: { children: React.ReactElement }) => {
-      const context = React.useContext(HoverCardContext);
-      return React.cloneElement(children as React.ReactElement<Record<string, unknown>>, {
-        onMouseEnter: () => context?.onOpenChange(true),
-        onFocus: () => context?.onOpenChange(true),
-        onMouseLeave: () => context?.onOpenChange(false),
-      });
-    },
-    HoverCardContent: ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => {
-      const context = React.useContext(HoverCardContext);
-      return context?.open ? <div {...props}>{children}</div> : null;
-    },
-  };
-});
-
 vi.mock("@kandev/ui/drawer", async () => {
   const React = await vi.importActual<typeof import("react")>("react");
   const DrawerContext = React.createContext<{

@@ -25,14 +25,14 @@ system_design:
 
 ## Summary
 
-Add the ordered workflow-step disclosure to the compact task top bar. Prove desktop hover, tablet touch, and task movement through one TDD cycle.
+Add the ordered workflow-step disclosure to the compact task top bar. Prove desktop hover, keyboard movement, tablet touch, and task movement through one TDD cycle.
 
 ## In scope
 
 - Add the shared disclosure body and responsive surface selection.
 - Reuse current-step state, target eligibility, plan-mode cleanup, and the task-move API.
 - Add focused component tests for interaction, accessibility, movement, and archived behavior.
-- Add desktop and tablet E2E coverage for the compact top bar.
+- Add desktop and tablet E2E coverage for the compact top bar, including keyboard activation and trigger geometry.
 - Run the existing phone task-move E2E scenario as mobile parity proof.
 
 ## Out of scope
@@ -45,9 +45,9 @@ Add the ordered workflow-step disclosure to the compact task top bar. Prove desk
 
 ## Acceptance
 
-- The compact trigger shows all ordered steps through hover, focus, or coarse-pointer activation.
+- The compact trigger shows all ordered steps through hover, focus, or coarse-pointer activation. Fine-pointer movement controls are reachable by keyboard, and coarse-pointer activation has a 44px hit area with a visible cue.
 - The disclosure identifies the current step and moves the task only to eligible targets.
-- The hover card and drawer stay usable, contained, and accessible. Archived and full-stepper states retain their existing behavior.
+- The Popover and drawer stay usable, contained, and accessible. Archived and full-stepper states retain their existing behavior.
 
 ## Verification
 
@@ -58,6 +58,7 @@ pnpm exec vitest run components/task/workflow-stepper.test.tsx
 pnpm run i18n:check
 pnpm e2e:run --host --project chromium -- tests/layout/task-topbar-workflow-stepper.spec.ts --workers=1
 pnpm e2e:run --host --no-build --project mobile-chrome -- tests/task/mobile-sidebar-task-actions.spec.ts --grep "moves a task to another step from the mobile task drawer" --workers=1
+pnpm exec tsc --noEmit
 ```
 
 ## Files likely touched
@@ -81,7 +82,7 @@ None.
 - Hover content must stay open while the pointer moves from the trigger to a movement control.
 - A move error must clear the target state without closing the disclosure.
 - Width-based collapse must remain stable while the disclosure portal mounts.
-- Touch rows must meet the 44px target size without making the desktop hover card too wide.
+- Touch rows must meet the 44px target size without making the desktop Popover too wide.
 
 ## Parallelism
 
@@ -103,11 +104,11 @@ Completed 2026-08-26.
 - Added a semantic compact-step trigger for active tasks and preserved the static archived presentation.
 - Reused the existing step eligibility policy and task-move payload, including plan-mode cleanup and move-state handling.
 - Added a shared ordered disclosure body with current-step identification and 44px target rows.
-- Selected a fine-pointer hover card or coarse-pointer drawer through the existing responsive pointer hook.
+- Selected a fine-pointer Popover or coarse-pointer drawer through the existing responsive pointer hook. The Popover exposes dialog semantics and keeps movement controls keyboard tabbable; the coarse trigger exposes a 44px hit area and disclosure cue.
 - Added component coverage for expanded and compact states, ordered disclosure content, eligibility, movement payload, coarse-pointer behavior, archived state, and empty workflows.
-- Added Chromium coverage for hover, keyboard focus, Escape dismissal, focus return, movement, and tablet touch-drawer containment.
+- Added Chromium coverage for hover, Popover dialog semantics, keyboard Tab and Enter movement, Escape dismissal, focus return, tablet trigger geometry, and touch-drawer containment.
 - Re-ran the existing Pixel 5 mobile task-drawer movement scenario successfully.
-- Applied PR review remediation: defined the disclosure-owned step type, added failed-move recovery coverage, and centralized finite-animation waiting for the affected E2E helpers.
+- Applied PR review remediation: defined the disclosure-owned step type, added failed-move recovery coverage, centralized finite-animation waiting for the affected E2E helpers, replaced the non-interactive hover surface with a keyboard-accessible Popover, and added coarse-pointer trigger geometry and cue coverage.
 
 Verification commands passed:
 

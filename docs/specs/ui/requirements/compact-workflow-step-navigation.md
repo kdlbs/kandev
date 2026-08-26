@@ -31,11 +31,11 @@ The UI system owns this responsive disclosure. The task system continues to own 
 #### Acceptance criteria
 
 - **AC-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001.1:** When the full stepper cannot fit, the system shall show the current step name and its position in the workflow.
-- **AC-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001.2:** When a fine-pointer user hovers or focuses the compact stepper, the system shall show every workflow step in workflow order.
-- **AC-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001.3:** When a coarse-pointer user activates the compact stepper, the system shall show the same step choices in a touch surface.
+- **AC-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001.2:** When a fine-pointer user hovers or focuses the compact stepper, the system shall show every workflow step in workflow order in an interactive dialog surface. The surface shall expose its move controls to keyboard users.
+- **AC-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001.3:** When a coarse-pointer user activates the compact stepper, the system shall show the same step choices in a touch surface. The trigger shall provide a minimum 44px hit area and a visible disclosure cue.
 - **AC-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001.4:** When the disclosure is open, the system shall identify the current step and enable each eligible target.
 - **AC-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001.5:** When a user selects an eligible target, the system shall use the existing task-move behavior and eligibility rules.
-- **AC-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001.6:** When the disclosure opens, it shall remain inside the viewport and provide keyboard navigation, Escape dismissal, and focus return.
+- **AC-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001.6:** When the disclosure opens, it shall remain inside the viewport and provide keyboard navigation, including Tab to an eligible step-specific move control and Enter activation, Escape dismissal, and focus return. The trigger and dialog surface shall expose matching ARIA semantics.
 - **AC-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001.7:** When a task is archived, the compact presentation shall remain a static archived indicator and shall not offer task movement.
 - **AC-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001.8:** When the task top bar has sufficient space, the existing full-stepper presentation and move behavior shall remain unchanged.
 - **AC-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001.9:** When a phone does not show the task top bar, the mobile task drawer shall retain its existing **Move to** path.

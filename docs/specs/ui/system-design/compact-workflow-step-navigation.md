@@ -23,7 +23,7 @@ This design changes only the compact branch in `WorkflowStepper`. It does not ch
 
 - `WorkflowStepper` sorts the steps, finds the current index, measures available width, and owns task-move state.
 - `useToolbarCollapsed` continues to select the full or compact presentation from the center area's measured width.
-- The compact presentation becomes an interactive trigger for active tasks. It keeps the current step marker, name, and position count.
+- The compact presentation becomes an interactive trigger for active tasks. It keeps the current step marker, name, and position count. On coarse pointers it also exposes a 44px hit area and a visible disclosure cue.
 - A shared disclosure body shows all sorted steps. It marks the current step and shows movement controls for eligible targets.
 - `canMoveToStep` remains the single UI policy for target eligibility. Adjacent steps and steps with `allow_manual_move` remain eligible.
 - `useTouchDrawer` selects the disclosure surface from pointer precision. This selection does not duplicate task state or move logic.
@@ -58,9 +58,9 @@ The move callback continues to call `moveTask` with `workflow_id`, `workflow_ste
 
 ### Fine pointer
 
-The compact trigger uses an interactive `HoverCard`. A hover or keyboard focus opens a vertical list below the trigger.
+The compact trigger uses a controlled interactive `Popover`. Hover or keyboard focus opens a vertical list below the trigger. The trigger declares `aria-haspopup="dialog"`, and the Popover content exposes the matching dialog role and accessible name. Its movement buttons remain tabbable, so keyboard users can tab to a step-specific action and activate it with Enter.
 
-The hover delay and close delay match the full stepper. Users can move the pointer from the trigger into the content.
+The hover and close delays match the full stepper. Users can move the pointer from the trigger into the content. Pointer opening does not steal focus, while keyboard opening moves focus into the interactive content. Escape closes the Popover and returns focus to the trigger.
 
 ### Coarse pointer
 
@@ -81,11 +81,11 @@ This drawer is the tablet fallback because the desktop top bar still renders at 
 
 ## Accessibility and geometry
 
-The compact trigger is a semantic button. Its accessible name includes the current step, step number, and total step count.
+The compact trigger is a semantic button. Its accessible name includes the current step, step number, and total step count. On coarse pointers its active area is at least 44px high and includes a visible chevron cue.
 
-The current row uses `aria-current="step"`. Eligible movement controls are keyboard accessible and use existing translated labels.
+The current row uses `aria-current="step"`. Eligible movement controls are direct keyboard-tab stops and use existing translated labels. The fine-pointer disclosure uses Popover dialog semantics instead of a hover-card surface, because the move controls are interactive.
 
-The hover card stays within the viewport through Radix collision handling. The drawer uses internal scrolling and bottom safe-area padding.
+The Popover stays within the viewport through Radix collision handling. The drawer uses internal scrolling and bottom safe-area padding.
 
 The disclosure supports Escape dismissal and focus return. Touch rows use a minimum active height of 44px.
 
@@ -101,9 +101,9 @@ If live workflow data changes while the disclosure is open, React derives the li
 
 Component tests cover compact content, eligibility, fine-pointer disclosure, touch-drawer selection, archived behavior, and move callbacks.
 
-Desktop E2E coverage forces the measured compact state at a narrow top-bar width. It opens all steps and moves the task through the UI.
+Desktop E2E coverage forces the measured compact state at a narrow top-bar width. It opens all steps, verifies the dialog role, tabs to a step-specific move control, activates it with Enter, and moves the task through the UI.
 
-Tablet E2E coverage uses `tabletTestPage`. It opens the touch drawer, checks containment, and selects an eligible step.
+Tablet E2E coverage uses `tabletTestPage`. It verifies the compact trigger hit area, opens the touch drawer, checks containment, and selects an eligible step.
 
 The existing Pixel 5 task-drawer scenario proves that phone users retain step movement without the desktop top bar.
 

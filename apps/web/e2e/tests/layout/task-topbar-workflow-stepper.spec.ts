@@ -38,23 +38,36 @@ test.describe("Compact task topbar workflow stepper", () => {
     await trigger.hover();
 
     const disclosure = testPage.getByTestId("workflow-step-disclosure");
+    const disclosureSurface = testPage.getByRole("dialog", { name: "Move to" });
     await expect(disclosure).toBeVisible();
-    await trigger.focus();
-    await expect(trigger).toBeFocused();
-    await expect(disclosure).toBeVisible();
-    await testPage.keyboard.press("Escape");
-    await expect(disclosure).toBeHidden();
-    await expect(trigger).toBeFocused();
+    await expect(disclosureSurface).toBeVisible();
     await testPage.mouse.move(0, 0);
-    await trigger.hover();
-    await expect(disclosure).toBeVisible();
+    await expect(disclosureSurface).toBeHidden();
+    await trigger.focus();
+    await expect(disclosureSurface).toBeVisible();
+    await testPage.keyboard.press("Escape");
+    await expect(disclosureSurface).toBeHidden();
+    await expect(trigger).toBeFocused();
+    await testPage.keyboard.press("Tab");
+    await trigger.focus();
+    await expect(disclosureSurface).toBeVisible();
     await expect(disclosure.locator('[data-testid^="workflow-step-disclosure-row-"]')).toHaveCount(
       seedData.steps.length,
     );
 
     const moveButton = testPage.getByTestId(`workflow-step-disclosure-move-${targetStep.id}`);
     await expect(moveButton).toBeVisible();
-    await moveButton.click();
+
+    let moveButtonFocused = false;
+    for (let tabCount = 0; tabCount < seedData.steps.length + 2; tabCount += 1) {
+      if (await moveButton.evaluate((element) => element === document.activeElement)) {
+        moveButtonFocused = true;
+        break;
+      }
+      await testPage.keyboard.press("Tab");
+    }
+    expect(moveButtonFocused).toBe(true);
+    await testPage.keyboard.press("Enter");
 
     await expect
       .poll(async () => (await apiClient.getTask(task.task_id)).workflow_step_id, {
@@ -80,6 +93,10 @@ test.describe("Compact task topbar workflow stepper", () => {
 
     const trigger = tabletTestPage.getByTestId("workflow-stepper-minimal");
     await expect(trigger).toBeVisible();
+    const triggerBox = await trigger.boundingBox();
+    expect(triggerBox).not.toBeNull();
+    if (!triggerBox) return;
+    expect(triggerBox.height).toBeGreaterThanOrEqual(44);
     await trigger.tap();
 
     const drawer = tabletTestPage.getByRole("dialog", { name: "Move to" });

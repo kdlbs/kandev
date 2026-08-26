@@ -1,8 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useRef,
+  useState,
+  type ComponentPropsWithoutRef,
+  type FocusEvent,
+  type RefObject,
+} from "react";
 import { cn } from "@kandev/ui/lib/utils";
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "@kandev/ui/hover-card";
 import { Button } from "@kandev/ui/button";
 import {
   Drawer,
@@ -12,7 +19,8 @@ import {
   DrawerTitle,
   DrawerTrigger,
 } from "@kandev/ui/drawer";
-import { IconArrowRight } from "@tabler/icons-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
+import { IconArrowRight, IconChevronDown } from "@tabler/icons-react";
 import { StepCapabilityIcons } from "@/components/step-capability-icons";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import type { KanbanStepEvents } from "@/lib/state/slices/kanban/types";
@@ -91,6 +99,206 @@ export function MinimalWorkflowStepper({
   );
 }
 
+type CompactWorkflowDisclosureControls = {
+  open: boolean;
+  setOpen: (open: boolean) => void;
+  triggerRef: RefObject<HTMLButtonElement | null>;
+  setTriggerRef: (node: HTMLButtonElement | null) => void;
+  contentRef: RefObject<HTMLDivElement | null>;
+  openDisclosure: () => void;
+  openDisclosureFromFocus: () => void;
+  scheduleClose: () => void;
+  cancelScheduledClose: () => void;
+  handleTriggerFocus: () => void;
+  handleTriggerBlur: (event: FocusEvent<HTMLButtonElement>) => void;
+  handleContentFocus: () => void;
+  handleContentBlur: (event: FocusEvent<HTMLDivElement>) => void;
+  handleOpenAutoFocus: (event: Event) => void;
+  handleCloseAutoFocus: (event: Event) => void;
+};
+
+function isElementWithin<T extends HTMLElement>(
+  target: EventTarget | null,
+  ref: RefObject<T | null>,
+): boolean {
+  return target instanceof Node && ref.current?.contains(target) === true;
+}
+
+function useCompactDisclosureCloseTimer(
+  triggerRef: RefObject<HTMLButtonElement | null>,
+  contentRef: RefObject<HTMLDivElement | null>,
+  setOpen: (open: boolean) => void,
+) {
+  const closeTimerRef = useRef<number | null>(null);
+  const cancelScheduledClose = () => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  };
+  const scheduleClose = () => {
+    cancelScheduledClose();
+    closeTimerRef.current = window.setTimeout(() => {
+      closeTimerRef.current = null;
+      const activeElement = document.activeElement;
+      const focusIsInsideDisclosure =
+        isElementWithin(activeElement, triggerRef) || isElementWithin(activeElement, contentRef);
+      if (!focusIsInsideDisclosure) setOpen(false);
+    }, 100);
+  };
+  useEffect(
+    () => () => {
+      if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
+    },
+    [],
+  );
+  return { cancelScheduledClose, scheduleClose };
+}
+
+function useCompactWorkflowDisclosure(): CompactWorkflowDisclosureControls {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const setTriggerRef = (node: HTMLButtonElement | null) => {
+    triggerRef.current = node;
+  };
+  const contentRef = useRef<HTMLDivElement>(null);
+  const suppressFocusOpenRef = useRef(false);
+  const openedFromFocusRef = useRef(false);
+  const contentHasFocusRef = useRef(false);
+  const { cancelScheduledClose, scheduleClose } = useCompactDisclosureCloseTimer(
+    triggerRef,
+    contentRef,
+    setOpen,
+  );
+  const openDisclosure = () => {
+    openedFromFocusRef.current = false;
+    cancelScheduledClose();
+    setOpen(true);
+  };
+  const openDisclosureFromFocus = () => {
+    openedFromFocusRef.current = !open;
+    cancelScheduledClose();
+    setOpen(true);
+  };
+  const handleTriggerFocus = () => {
+    if (suppressFocusOpenRef.current) {
+      suppressFocusOpenRef.current = false;
+      return;
+    }
+    openDisclosureFromFocus();
+  };
+  const handleTriggerBlur = (event: FocusEvent<HTMLButtonElement>) => {
+    suppressFocusOpenRef.current = false;
+    if (isElementWithin(event.relatedTarget, contentRef)) {
+      cancelScheduledClose();
+      return;
+    }
+    scheduleClose();
+  };
+  const handleContentBlur = (event: FocusEvent<HTMLDivElement>) => {
+    const relatedTarget = event.relatedTarget;
+    if (isElementWithin(relatedTarget, contentRef)) {
+      contentHasFocusRef.current = true;
+      cancelScheduledClose();
+      return;
+    }
+    contentHasFocusRef.current = false;
+    if (isElementWithin(relatedTarget, triggerRef)) {
+      cancelScheduledClose();
+      return;
+    }
+    scheduleClose();
+  };
+  const handleContentFocus = () => {
+    contentHasFocusRef.current = true;
+    cancelScheduledClose();
+  };
+  const handleCloseAutoFocus = (event: Event) => {
+    event.preventDefault();
+    if (contentHasFocusRef.current) {
+      contentHasFocusRef.current = false;
+      suppressFocusOpenRef.current = true;
+      triggerRef.current?.focus();
+    }
+  };
+  const handleOpenAutoFocus = (event: Event) => {
+    if (!openedFromFocusRef.current) event.preventDefault();
+    openedFromFocusRef.current = false;
+  };
+  return {
+    open,
+    setOpen,
+    triggerRef,
+    setTriggerRef,
+    contentRef,
+    openDisclosure,
+    openDisclosureFromFocus,
+    scheduleClose,
+    cancelScheduledClose,
+    handleTriggerFocus,
+    handleTriggerBlur,
+    handleContentFocus,
+    handleContentBlur,
+    handleOpenAutoFocus,
+    handleCloseAutoFocus,
+  };
+}
+
+type CompactWorkflowTriggerProps = ComponentPropsWithoutRef<"button"> & {
+  current: Step;
+  currentIndex: number;
+  total: number;
+  usesTouchDrawer: boolean;
+  controls: CompactWorkflowDisclosureControls;
+};
+
+const CompactWorkflowTrigger = forwardRef<HTMLButtonElement, CompactWorkflowTriggerProps>(
+  function CompactWorkflowTrigger(
+    { current, currentIndex, total, usesTouchDrawer, controls, className, ...buttonProps },
+    ref,
+  ) {
+    const { t } = useTranslation();
+    const currentDisplayIndex = currentIndex >= 0 ? currentIndex : 0;
+    return (
+      <button
+        {...buttonProps}
+        type="button"
+        ref={(node) => {
+          controls.setTriggerRef(node);
+          if (typeof ref === "function") ref(node);
+          else if (ref) ref.current = node;
+        }}
+        data-testid="workflow-stepper-minimal"
+        aria-haspopup="dialog"
+        aria-expanded={controls.open}
+        aria-label={t("task:stepOf", {
+          stepNumber: currentDisplayIndex + 1,
+          totalSteps: total,
+          stepLabel: current.name,
+        })}
+        onMouseEnter={controls.openDisclosure}
+        onMouseLeave={controls.scheduleClose}
+        onFocus={controls.handleTriggerFocus}
+        onBlur={controls.handleTriggerBlur}
+        className={cn(
+          "flex min-w-0 cursor-pointer items-center gap-1.5 rounded-md px-2 py-0.5 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
+          usesTouchDrawer && "min-h-11",
+          className,
+        )}
+      >
+        <MinimalStepContents current={current} currentIndex={currentIndex} total={total} />
+        {usesTouchDrawer && (
+          <IconChevronDown
+            data-testid="workflow-stepper-touch-disclosure-cue"
+            aria-hidden="true"
+            className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+          />
+        )}
+      </button>
+    );
+  },
+);
+
 function CompactWorkflowStepDisclosure({
   sortedSteps,
   current,
@@ -112,31 +320,19 @@ function CompactWorkflowStepDisclosure({
 }) {
   const { t } = useTranslation();
   const usesTouchDrawer = useTouchDrawer();
-  const [open, setOpen] = useState(false);
-  const currentDisplayIndex = currentIndex >= 0 ? currentIndex : 0;
+  const controls = useCompactWorkflowDisclosure();
   const trigger = (
-    <button
-      type="button"
-      data-testid="workflow-stepper-minimal"
-      aria-haspopup="dialog"
-      aria-expanded={open}
-      aria-label={t("task:stepOf", {
-        stepNumber: currentDisplayIndex + 1,
-        totalSteps: sortedSteps.length,
-        stepLabel: current.name,
-      })}
-      className="flex min-w-0 cursor-pointer items-center gap-1.5 rounded-md px-2 py-0.5 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
-    >
-      <MinimalStepContents
-        current={current}
-        currentIndex={currentIndex}
-        total={sortedSteps.length}
-      />
-    </button>
+    <CompactWorkflowTrigger
+      current={current}
+      currentIndex={currentIndex}
+      total={sortedSteps.length}
+      usesTouchDrawer={usesTouchDrawer}
+      controls={controls}
+    />
   );
   const handleDisclosureMove = async (stepId: string) => {
     const moved = await onMove(stepId);
-    if (moved) setOpen(false);
+    if (moved) controls.setOpen(false);
     return moved;
   };
   const content = (
@@ -153,7 +349,7 @@ function CompactWorkflowStepDisclosure({
 
   if (usesTouchDrawer) {
     return (
-      <Drawer open={open} onOpenChange={setOpen}>
+      <Drawer open={controls.open} onOpenChange={controls.setOpen}>
         <DrawerTrigger asChild>{trigger}</DrawerTrigger>
         <DrawerContent className="max-h-[80dvh]">
           <DrawerHeader className="shrink-0 text-left">
@@ -169,12 +365,25 @@ function CompactWorkflowStepDisclosure({
   }
 
   return (
-    <HoverCard open={open} onOpenChange={setOpen} openDelay={200} closeDelay={100}>
-      <HoverCardTrigger asChild>{trigger}</HoverCardTrigger>
-      <HoverCardContent side="bottom" align="center" className="w-72 max-w-[calc(100vw-1rem)] p-2">
+    <Popover open={controls.open} onOpenChange={controls.setOpen}>
+      <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+      <PopoverContent
+        ref={controls.contentRef}
+        role="dialog"
+        aria-label={t("task:moveTo")}
+        side="bottom"
+        align="center"
+        className="w-72 max-w-[calc(100vw-1rem)] p-2"
+        onOpenAutoFocus={controls.handleOpenAutoFocus}
+        onCloseAutoFocus={controls.handleCloseAutoFocus}
+        onMouseEnter={controls.openDisclosure}
+        onMouseLeave={controls.scheduleClose}
+        onFocusCapture={controls.handleContentFocus}
+        onBlurCapture={controls.handleContentBlur}
+      >
         {content}
-      </HoverCardContent>
-    </HoverCard>
+      </PopoverContent>
+    </Popover>
   );
 }
 
