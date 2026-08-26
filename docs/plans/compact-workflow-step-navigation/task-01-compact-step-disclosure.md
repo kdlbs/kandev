@@ -17,6 +17,7 @@ acceptance_criteria:
   - AC-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001.7
   - AC-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001.8
   - AC-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001.9
+  - AC-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001.10
 system_design:
   - ../../specs/ui/system-design/compact-workflow-step-navigation.md
 ---
@@ -45,7 +46,7 @@ Add the ordered workflow-step disclosure to the compact task top bar. Prove desk
 
 ## Acceptance
 
-- The compact trigger shows all ordered steps through hover, focus, or coarse-pointer activation. Fine-pointer movement controls are reachable by keyboard, and coarse-pointer activation has a 44px hit area with a visible cue.
+- The compact trigger shows all ordered steps through hover, focus, or coarse-pointer activation. Fine-pointer movement controls are reachable by keyboard and retain compact desktop sizing; coarse-pointer activation has a 44px trigger and action hit area with a visible cue.
 - The disclosure identifies the current step and moves the task only to eligible targets.
 - The Popover and drawer stay usable, contained, and accessible. Archived and full-stepper states retain their existing behavior.
 
@@ -82,7 +83,7 @@ None.
 - Hover content must stay open while the pointer moves from the trigger to a movement control.
 - A move error must clear the target state without closing the disclosure.
 - Width-based collapse must remain stable while the disclosure portal mounts.
-- Touch rows must meet the 44px target size without making the desktop Popover too wide.
+- Coarse-pointer rows and action controls must meet the 44px target size without making the desktop Popover controls visually oversized.
 
 ## Parallelism
 
@@ -109,6 +110,7 @@ Completed 2026-08-26.
 - Added Chromium coverage for hover, Popover dialog semantics, keyboard Tab and Enter movement, Escape dismissal, focus return, tablet trigger geometry, and touch-drawer containment.
 - Re-ran the existing Pixel 5 mobile task-drawer movement scenario successfully.
 - Applied PR review remediation: defined the disclosure-owned step type, added failed-move recovery coverage, centralized finite-animation waiting for the affected E2E helpers, replaced the non-interactive hover surface with a keyboard-accessible Popover, and added coarse-pointer trigger geometry and cue coverage.
+- Applied desktop density correction: fine-pointer move buttons use compact `h-7` sizing, while coarse-pointer action controls retain the 44px touch hit area.
 
 Verification commands passed:
 

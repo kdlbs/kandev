@@ -85,6 +85,8 @@ The compact trigger is a semantic button. Its accessible name includes the curre
 
 The current row uses `aria-current="step"`. Eligible movement controls are direct keyboard-tab stops and use existing translated labels. The fine-pointer disclosure uses Popover dialog semantics instead of a hover-card surface, because the move controls are interactive.
 
+Fine-pointer movement controls use the surrounding compact desktop button density. The 44px minimum applies to the coarse-pointer drawer's action hit areas and rows, not to the desktop button's visual height.
+
 The Popover stays within the viewport through Radix collision handling. The drawer uses internal scrolling and bottom safe-area padding.
 
 The disclosure supports Escape dismissal and focus return. Touch rows use a minimum active height of 44px.

@@ -503,7 +503,7 @@ function StepDisclosureBody({
                   data-testid={`workflow-step-disclosure-move-${step.id}`}
                   size="sm"
                   variant="default"
-                  className="h-11 shrink-0 cursor-pointer rounded-sm px-2.5 text-xs"
+                  className="h-7 shrink-0 cursor-pointer rounded-sm px-2.5 text-xs [@media(pointer:coarse)]:h-11"
                   disabled={movingToStepId !== null}
                   onClick={() => void onMove(step.id)}
                 >

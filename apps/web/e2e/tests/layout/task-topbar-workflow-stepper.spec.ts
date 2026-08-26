@@ -57,6 +57,10 @@ test.describe("Compact task topbar workflow stepper", () => {
 
     const moveButton = testPage.getByTestId(`workflow-step-disclosure-move-${targetStep.id}`);
     await expect(moveButton).toBeVisible();
+    const moveButtonBox = await moveButton.boundingBox();
+    expect(moveButtonBox).not.toBeNull();
+    if (!moveButtonBox) return;
+    expect(moveButtonBox.height).toBeLessThan(40);
 
     let moveButtonFocused = false;
     for (let tabCount = 0; tabCount < seedData.steps.length + 2; tabCount += 1) {
@@ -123,7 +127,14 @@ test.describe("Compact task topbar workflow stepper", () => {
     if (!targetRowBox) return;
     expect(targetRowBox.height).toBeGreaterThanOrEqual(44);
 
-    await tabletTestPage.getByTestId(`workflow-step-disclosure-move-${targetStep.id}`).tap();
+    const targetButton = tabletTestPage.getByTestId(
+      `workflow-step-disclosure-move-${targetStep.id}`,
+    );
+    const targetButtonBox = await targetButton.boundingBox();
+    expect(targetButtonBox).not.toBeNull();
+    if (!targetButtonBox) return;
+    expect(targetButtonBox.height).toBeGreaterThanOrEqual(44);
+    await targetButton.tap();
     await expect
       .poll(async () => (await apiClient.getTask(task.task_id)).workflow_step_id, {
         timeout: 15_000,

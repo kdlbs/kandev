@@ -39,6 +39,7 @@ The UI system owns this responsive disclosure. The task system continues to own 
 - **AC-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001.7:** When a task is archived, the compact presentation shall remain a static archived indicator and shall not offer task movement.
 - **AC-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001.8:** When the task top bar has sufficient space, the existing full-stepper presentation and move behavior shall remain unchanged.
 - **AC-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001.9:** When a phone does not show the task top bar, the mobile task drawer shall retain its existing **Move to** path.
+- **AC-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001.10:** Fine-pointer movement controls shall retain compact desktop sizing. The 44px minimum shall apply only to coarse-pointer touch hit areas and mobile controls.
 
 ## Out of scope
 

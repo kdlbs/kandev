@@ -48,7 +48,7 @@ Extract one disclosure body that renders each step from a shared row model. The 
 
 Reuse `StepCircleIndicator`, `task:currentStep`, `task:moveHere`, `task:moving`, and `task:stepOf`. Do not add untranslated copy.
 
-Use `useTouchDrawer` to select the surface. Fine pointers use a controlled `Popover` with hover and focus behavior, dialog semantics, and keyboard focus handling. Coarse pointers use `Drawer` with internal overflow, safe-area padding, a 44px trigger hit area, and a visible disclosure cue.
+Use `useTouchDrawer` to select the surface. Fine pointers use a controlled `Popover` with hover and focus behavior, dialog semantics, keyboard focus handling, and compact desktop-sized movement buttons. Coarse pointers use `Drawer` with internal overflow, safe-area padding, a 44px trigger hit area, 44px action hit areas, and a visible disclosure cue. Apply touch sizing only through coarse-pointer styles.
 
 Keep the move request in `handleMove`. Return its success result so the temporary surface closes only after a successful request.
 
@@ -88,6 +88,7 @@ Keep `apps/web/e2e/tests/task/mobile-sidebar-task-actions.spec.ts` unchanged. It
 | `AC-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001.7` | Archived compact-state component test                         |
 | `AC-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001.8` | Existing expanded-mode component test                         |
 | `AC-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001.9` | Existing Pixel 5 mobile task-drawer E2E scenario              |
+| `AC-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001.10` | Desktop compact button and coarse-pointer hit-area E2E     |
 
 ## E2E tests
 
@@ -109,6 +110,7 @@ Completed 2026-08-26.
 - i18n checks: passed with no new violations.
 - Chromium E2E: compact Popover dialog semantics, keyboard Tab and Enter movement, Escape dismissal, focus return, and tablet touch-drawer scenarios passed.
 - Mobile-chrome E2E: the existing phone **Move to** scenario passed.
+- Desktop density: the fine-pointer move button measured below 40px, while the coarse-pointer move button and disclosure trigger remained at least 44px.
 - Tablet geometry: the disclosure trigger and touch rows measured at least 44px, the touch drawer stayed inside the viewport, and the document did not gain horizontal overflow.
 
 ## Risks
