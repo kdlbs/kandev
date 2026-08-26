@@ -32,6 +32,7 @@ export const defaultState = {
   workspaces: defaultWorkspaceState.workspaces,
   repositories: defaultWorkspaceState.repositories,
   repositorySets: defaultWorkspaceState.repositorySets,
+  repositoryBranchPolicies: defaultWorkspaceState.repositoryBranchPolicies,
   repositoryBranches: defaultWorkspaceState.repositoryBranches,
   repositoryScripts: defaultWorkspaceState.repositoryScripts,
   executors: defaultSettingsState.executors,
@@ -311,6 +312,10 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     workspaces: { ...defaultState.workspaces, ...initialState.workspaces },
     repositories: { ...defaultState.repositories, ...initialState.repositories },
     repositorySets: { ...defaultState.repositorySets, ...initialState.repositorySets },
+    repositoryBranchPolicies: {
+      ...defaultState.repositoryBranchPolicies,
+      ...initialState.repositoryBranchPolicies,
+    },
     repositoryBranches: { ...defaultState.repositoryBranches, ...initialState.repositoryBranches },
     repositoryScripts: { ...defaultState.repositoryScripts, ...initialState.repositoryScripts },
     executors: { ...defaultState.executors, ...initialState.executors },

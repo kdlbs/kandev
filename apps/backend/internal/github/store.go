@@ -117,6 +117,7 @@ const createTablesSQL = `
 		pr_title TEXT NOT NULL,
 		head_branch TEXT NOT NULL,
 		base_branch TEXT NOT NULL,
+		head_sha TEXT NOT NULL DEFAULT '',
 		author_login TEXT NOT NULL,
 		state TEXT NOT NULL DEFAULT 'open',
 		review_state TEXT NOT NULL DEFAULT '',
@@ -124,7 +125,13 @@ const createTablesSQL = `
 		mergeable_state TEXT NOT NULL DEFAULT '',
 		merge_queue_state TEXT NOT NULL DEFAULT '',
 		merge_queue_position INTEGER,
+		merge_queue_entry_id TEXT NOT NULL DEFAULT '',
+		merge_queue_entry_head_sha TEXT NOT NULL DEFAULT '',
 		merge_queue_estimated_time_to_merge_seconds INTEGER,
+		merge_queue_last_removal_id TEXT NOT NULL DEFAULT '',
+		merge_queue_last_removed_at DATETIME,
+		merge_queue_last_removal_reason TEXT NOT NULL DEFAULT '',
+		merge_queue_last_removal_before_sha TEXT NOT NULL DEFAULT '',
 		review_count INTEGER DEFAULT 0,
 		pending_review_count INTEGER DEFAULT 0,
 		required_reviews INTEGER,
@@ -411,6 +418,9 @@ const createTablesSQL = `
 		auto_fix_exhausted_at DATETIME,
 		last_merge_signature TEXT NOT NULL DEFAULT '',
 		last_merge_attempt_at DATETIME,
+		last_queue_attempt_head_sha TEXT NOT NULL DEFAULT '',
+		last_queue_fix_event_id TEXT NOT NULL DEFAULT '',
+		last_queue_removal_cause TEXT NOT NULL DEFAULT '',
 		review_request_initialized BOOLEAN NOT NULL DEFAULT 0,
 		last_review_requested BOOLEAN NOT NULL DEFAULT 0,
 		last_observed_pr_state TEXT NOT NULL DEFAULT '',
@@ -606,9 +616,16 @@ var taskPRMergeQueueColumnDDL = []struct {
 	name string
 	ddl  string
 }{
+	{"head_sha", "TEXT NOT NULL DEFAULT ''"},
 	{"merge_queue_state", "TEXT NOT NULL DEFAULT ''"},
 	{"merge_queue_position", "INTEGER"},
+	{"merge_queue_entry_id", "TEXT NOT NULL DEFAULT ''"},
+	{"merge_queue_entry_head_sha", "TEXT NOT NULL DEFAULT ''"},
 	{"merge_queue_estimated_time_to_merge_seconds", "INTEGER"},
+	{"merge_queue_last_removal_id", "TEXT NOT NULL DEFAULT ''"},
+	{"merge_queue_last_removed_at", "DATETIME"},
+	{"merge_queue_last_removal_reason", "TEXT NOT NULL DEFAULT ''"},
+	{"merge_queue_last_removal_before_sha", "TEXT NOT NULL DEFAULT ''"},
 }
 
 func (s *Store) addTaskPRMergeQueueColumns() error {
@@ -1055,6 +1072,9 @@ func (s *Store) addTaskPRAgentAutomationColumns() error {
 			{"closed_prompt_override", "ALTER TABLE github_task_ci_options ADD COLUMN closed_prompt_override TEXT"},
 		},
 		"github_task_ci_pr_state": {
+			{"last_queue_attempt_head_sha", "ALTER TABLE github_task_ci_pr_state ADD COLUMN last_queue_attempt_head_sha TEXT NOT NULL DEFAULT ''"},
+			{"last_queue_fix_event_id", "ALTER TABLE github_task_ci_pr_state ADD COLUMN last_queue_fix_event_id TEXT NOT NULL DEFAULT ''"},
+			{"last_queue_removal_cause", "ALTER TABLE github_task_ci_pr_state ADD COLUMN last_queue_removal_cause TEXT NOT NULL DEFAULT ''"},
 			{"review_request_initialized", "ALTER TABLE github_task_ci_pr_state ADD COLUMN review_request_initialized BOOLEAN NOT NULL DEFAULT 0"},
 			{"last_review_requested", "ALTER TABLE github_task_ci_pr_state ADD COLUMN last_review_requested BOOLEAN NOT NULL DEFAULT 0"},
 			{"last_observed_pr_state", "ALTER TABLE github_task_ci_pr_state ADD COLUMN last_observed_pr_state TEXT NOT NULL DEFAULT ''"},
@@ -1358,6 +1378,7 @@ func (s *Store) migratePRTablesForMultiRepo() error {
 			pr_title TEXT NOT NULL,
 			head_branch TEXT NOT NULL,
 			base_branch TEXT NOT NULL,
+			head_sha TEXT NOT NULL DEFAULT '',
 			author_login TEXT NOT NULL,
 			state TEXT NOT NULL DEFAULT 'open',
 			review_state TEXT NOT NULL DEFAULT '',
@@ -1365,7 +1386,13 @@ func (s *Store) migratePRTablesForMultiRepo() error {
 			mergeable_state TEXT NOT NULL DEFAULT '',
 			merge_queue_state TEXT NOT NULL DEFAULT '',
 			merge_queue_position INTEGER,
+			merge_queue_entry_id TEXT NOT NULL DEFAULT '',
+			merge_queue_entry_head_sha TEXT NOT NULL DEFAULT '',
 			merge_queue_estimated_time_to_merge_seconds INTEGER,
+			merge_queue_last_removal_id TEXT NOT NULL DEFAULT '',
+			merge_queue_last_removed_at DATETIME,
+			merge_queue_last_removal_reason TEXT NOT NULL DEFAULT '',
+			merge_queue_last_removal_before_sha TEXT NOT NULL DEFAULT '',
 			review_count INTEGER DEFAULT 0,
 			pending_review_count INTEGER DEFAULT 0,
 			required_reviews INTEGER,
@@ -1395,15 +1422,19 @@ func (s *Store) migratePRTablesForMultiRepo() error {
 		// would have aborted otherwise).
 		`INSERT INTO github_task_prs_new (
 			id, workspace_id, task_id, repository_id, owner, repo, pr_number, pr_url, pr_title,
-			head_branch, base_branch, author_login, state, review_state, checks_state,
-			mergeable_state, merge_queue_state, merge_queue_position, merge_queue_estimated_time_to_merge_seconds,
+			head_branch, base_branch, head_sha, author_login, state, review_state, checks_state,
+			mergeable_state, merge_queue_state, merge_queue_position, merge_queue_entry_id, merge_queue_entry_head_sha,
+			merge_queue_estimated_time_to_merge_seconds, merge_queue_last_removal_id, merge_queue_last_removed_at,
+			merge_queue_last_removal_reason, merge_queue_last_removal_before_sha,
 			review_count, pending_review_count, comment_count,
 			additions, deletions, created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at,
 			is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at
 		) SELECT
 			id, COALESCE(workspace_id, ''), task_id, COALESCE(repository_id, ''), owner, repo, pr_number, pr_url, pr_title,
-			head_branch, base_branch, author_login, state, review_state, checks_state,
-			mergeable_state, merge_queue_state, merge_queue_position, merge_queue_estimated_time_to_merge_seconds,
+			head_branch, base_branch, COALESCE(head_sha, ''), author_login, state, review_state, checks_state,
+			mergeable_state, merge_queue_state, merge_queue_position, COALESCE(merge_queue_entry_id, ''), COALESCE(merge_queue_entry_head_sha, ''),
+			merge_queue_estimated_time_to_merge_seconds, COALESCE(merge_queue_last_removal_id, ''), merge_queue_last_removed_at,
+			COALESCE(merge_queue_last_removal_reason, ''), COALESCE(merge_queue_last_removal_before_sha, ''),
 			review_count, pending_review_count, comment_count,
 			additions, deletions, created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at,
 			is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at
@@ -1720,22 +1751,7 @@ func (s *Store) CreateTaskPR(ctx context.Context, tp *TaskPR) error {
 	}
 	now := time.Now().UTC()
 	tp.UpdatedAt = now
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO github_task_prs (id, workspace_id, task_id, repository_id, owner, repo, pr_number, pr_url, pr_title, head_branch, base_branch, author_login,
-			state, review_state, checks_state, mergeable_state, merge_queue_state, merge_queue_position, merge_queue_estimated_time_to_merge_seconds, review_count, pending_review_count, required_reviews, comment_count,
-			unresolved_review_threads, checks_total, checks_passing, additions, deletions,
-			created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at,
-			is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at)
-		VALUES (
-			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-		)`,
-		tp.ID, tp.WorkspaceID, tp.TaskID, tp.RepositoryID, tp.Owner, tp.Repo, tp.PRNumber, tp.PRURL, tp.PRTitle, tp.HeadBranch, tp.BaseBranch, tp.AuthorLogin,
-		tp.State, tp.ReviewState, tp.ChecksState, tp.MergeableState, tp.MergeQueueState, tp.MergeQueuePosition, tp.MergeQueueEstimatedTimeToMergeSeconds, tp.ReviewCount, tp.PendingReviewCount, tp.RequiredReviews, tp.CommentCount,
-		tp.UnresolvedReviewThreads, tp.ChecksTotal, tp.ChecksPassing, tp.Additions, tp.Deletions,
-		tp.CreatedAt, tp.MergedAt, tp.ClosedAt, tp.LastSyncedAt, tp.DetachedAt, tp.UpdatedAt,
-		tp.IsDraft, tp.ChangedFiles, tp.MergedByLogin, tp.ClosedByLogin, tp.AutoMergeObservedAt)
-	return err
+	return insertTaskPR(ctx, s.db, tp)
 }
 
 // taskPRColumns is the explicit column list for every github_task_prs read.
@@ -1752,7 +1768,9 @@ const taskPRColumns = `id, workspace_id, task_id, repository_id, owner, repo, pr
 	mergeable_state, merge_queue_state, merge_queue_position, merge_queue_estimated_time_to_merge_seconds, review_count, pending_review_count, required_reviews, comment_count,
 	unresolved_review_threads, checks_total, checks_passing, additions, deletions,
 	created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at,
-	is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at`
+	is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at,
+	head_sha, merge_queue_entry_id, merge_queue_entry_head_sha, merge_queue_last_removal_id,
+	merge_queue_last_removed_at, merge_queue_last_removal_reason, merge_queue_last_removal_before_sha`
 
 // taskPRColumnsQualified is taskPRColumns with each column qualified by the
 // `gtp` alias, for queries that join github_task_prs against another table.
@@ -1762,7 +1780,52 @@ const taskPRColumnsQualified = `gtp.id, gtp.workspace_id, gtp.task_id, gtp.repos
 	gtp.pending_review_count, gtp.required_reviews, gtp.comment_count, gtp.unresolved_review_threads,
 	gtp.checks_total, gtp.checks_passing, gtp.additions, gtp.deletions,
 	gtp.created_at, gtp.merged_at, gtp.closed_at, gtp.last_synced_at, gtp.detached_at, gtp.updated_at,
-	gtp.is_draft, gtp.changed_files, gtp.merged_by_login, gtp.closed_by_login, gtp.auto_merge_observed_at`
+	gtp.is_draft, gtp.changed_files, gtp.merged_by_login, gtp.closed_by_login, gtp.auto_merge_observed_at,
+	gtp.head_sha, gtp.merge_queue_entry_id, gtp.merge_queue_entry_head_sha, gtp.merge_queue_last_removal_id,
+	gtp.merge_queue_last_removed_at, gtp.merge_queue_last_removal_reason, gtp.merge_queue_last_removal_before_sha`
+
+type taskPRWriter interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+func insertTaskPR(ctx context.Context, writer taskPRWriter, tp *TaskPR) error {
+	values := taskPRValues(tp)
+	columnCount := taskPRColumnCount()
+	if len(values) != columnCount {
+		return fmt.Errorf("task PR insert arity mismatch: %d columns, %d values", columnCount, len(values))
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", columnCount), ",")
+	_, err := writer.ExecContext(ctx,
+		`INSERT INTO github_task_prs (`+taskPRColumns+`) VALUES (`+placeholders+`)`,
+		values...,
+	)
+	return err
+}
+
+func taskPRColumnCount() int {
+	count := 0
+	for _, column := range strings.Split(taskPRColumns, ",") {
+		if strings.TrimSpace(column) != "" {
+			count++
+		}
+	}
+	return count
+}
+
+func taskPRValues(tp *TaskPR) []any {
+	return []any{
+		tp.ID, tp.WorkspaceID, tp.TaskID, tp.RepositoryID, tp.Owner, tp.Repo, tp.PRNumber, tp.PRURL,
+		tp.PRTitle, tp.HeadBranch, tp.BaseBranch, tp.AuthorLogin, tp.State, tp.ReviewState,
+		tp.ChecksState, tp.MergeableState, tp.MergeQueueState, tp.MergeQueuePosition,
+		tp.MergeQueueEstimatedTimeToMergeSeconds, tp.ReviewCount, tp.PendingReviewCount,
+		tp.RequiredReviews, tp.CommentCount, tp.UnresolvedReviewThreads, tp.ChecksTotal,
+		tp.ChecksPassing, tp.Additions, tp.Deletions, tp.CreatedAt, tp.MergedAt, tp.ClosedAt,
+		tp.LastSyncedAt, tp.DetachedAt, tp.UpdatedAt, tp.IsDraft, tp.ChangedFiles,
+		tp.MergedByLogin, tp.ClosedByLogin, tp.AutoMergeObservedAt, tp.HeadSHA,
+		tp.MergeQueueEntryID, tp.MergeQueueEntryHeadSHA, tp.MergeQueueLastRemovalID,
+		tp.MergeQueueLastRemovedAt, tp.MergeQueueLastRemovalReason, tp.MergeQueueLastRemovalBeforeSHA,
+	}
+}
 
 // GetTaskPR returns the first PR association for a task. For multi-repo tasks
 // the result is non-deterministic across repos — use ListTaskPRsByTask instead.
@@ -1923,18 +1986,25 @@ func (s *Store) RestoreTaskPR(ctx context.Context, taskID, repositoryID string, 
 
 	isDraft, changedFiles, mergedByLogin, closedByLogin, autoMergeObservedAt :=
 		resolveTaskPROutcomeFields(&outgoing, status)
-	mergeQueueState, mergeQueuePosition, mergeQueueEstimate := resolveTaskPRMergeQueueFields(&outgoing, status)
+	queue := resolveTaskPRMergeQueueState(&outgoing, status)
+	headSHA := outgoing.HeadSHA
+	if pr.HeadSHA != "" {
+		headSHA = pr.HeadSHA
+	}
 
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE github_task_prs SET owner = ?, repo = ?, pr_url = ?, pr_title = ?,
-			head_branch = ?, base_branch = ?, author_login = ?, state = ?, mergeable_state = ?,
-			merge_queue_state = ?, merge_queue_position = ?, merge_queue_estimated_time_to_merge_seconds = ?,
+			head_branch = ?, base_branch = ?, head_sha = ?, author_login = ?, state = ?, mergeable_state = ?,
+			merge_queue_state = ?, merge_queue_position = ?, merge_queue_entry_id = ?, merge_queue_entry_head_sha = ?, merge_queue_estimated_time_to_merge_seconds = ?,
+			merge_queue_last_removal_id = ?, merge_queue_last_removed_at = ?, merge_queue_last_removal_reason = ?, merge_queue_last_removal_before_sha = ?,
 			additions = ?, deletions = ?, merged_at = ?, closed_at = ?, detached_at = NULL, updated_at = ?,
 			is_draft = ?, changed_files = ?, merged_by_login = ?, closed_by_login = ?,
 			auto_merge_observed_at = COALESCE(auto_merge_observed_at, ?)
 		 WHERE task_id = ? AND repository_id = ? AND pr_number = ?`,
-		pr.RepoOwner, pr.RepoName, pr.HTMLURL, pr.Title, pr.HeadBranch, pr.BaseBranch, pr.AuthorLogin,
-		pr.State, pr.MergeableState, mergeQueueState, mergeQueuePosition, mergeQueueEstimate, pr.Additions, pr.Deletions, pr.MergedAt, pr.ClosedAt, time.Now().UTC(),
+		pr.RepoOwner, pr.RepoName, pr.HTMLURL, pr.Title, pr.HeadBranch, pr.BaseBranch, headSHA, pr.AuthorLogin,
+		pr.State, pr.MergeableState, queue.state, queue.position, queue.entryID, queue.entryHeadSHA, queue.estimate,
+		queue.lastRemovalID, queue.lastRemovedAt, queue.lastRemovalReason, queue.lastRemovalBeforeSHA,
+		pr.Additions, pr.Deletions, pr.MergedAt, pr.ClosedAt, time.Now().UTC(),
 		isDraft, changedFiles, mergedByLogin, closedByLogin, autoMergeObservedAt,
 		taskID, repositoryID, pr.Number); err != nil {
 		return nil, err
@@ -2091,8 +2161,16 @@ func (s *Store) ReplaceTaskPR(ctx context.Context, tp *TaskPR, status *PRStatus)
 	if outgoing.ID != "" {
 		queueSource = outgoing
 	}
-	tp.MergeQueueState, tp.MergeQueuePosition, tp.MergeQueueEstimatedTimeToMergeSeconds =
-		resolveTaskPRMergeQueueFields(queueSource, status)
+	queue := resolveTaskPRMergeQueueState(queueSource, status)
+	tp.MergeQueueState, tp.MergeQueuePosition, tp.MergeQueueEstimatedTimeToMergeSeconds = queue.state, queue.position, queue.estimate
+	tp.MergeQueueEntryID, tp.MergeQueueEntryHeadSHA = queue.entryID, queue.entryHeadSHA
+	tp.MergeQueueLastRemovalID, tp.MergeQueueLastRemovedAt = queue.lastRemovalID, queue.lastRemovedAt
+	tp.MergeQueueLastRemovalReason, tp.MergeQueueLastRemovalBeforeSHA = queue.lastRemovalReason, queue.lastRemovalBeforeSHA
+	if status != nil && status.PR != nil && status.PR.HeadSHA != "" {
+		tp.HeadSHA = status.PR.HeadSHA
+	} else if tp.HeadSHA == "" && outgoing.ID != "" {
+		tp.HeadSHA = outgoing.HeadSHA
+	}
 
 	if tp.RepositoryID != "" {
 		if _, err := tx.ExecContext(ctx,
@@ -2109,18 +2187,7 @@ func (s *Store) ReplaceTaskPR(ctx context.Context, tp *TaskPR, status *PRStatus)
 			return nil, err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO github_task_prs (id, workspace_id, task_id, repository_id, owner, repo, pr_number, pr_url, pr_title, head_branch, base_branch, author_login,
-			state, review_state, checks_state, mergeable_state, merge_queue_state, merge_queue_position, merge_queue_estimated_time_to_merge_seconds, review_count, pending_review_count, required_reviews, comment_count,
-			unresolved_review_threads, checks_total, checks_passing, additions, deletions,
-			created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at,
-			is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		tp.ID, tp.WorkspaceID, tp.TaskID, tp.RepositoryID, tp.Owner, tp.Repo, tp.PRNumber, tp.PRURL, tp.PRTitle, tp.HeadBranch, tp.BaseBranch, tp.AuthorLogin,
-		tp.State, tp.ReviewState, tp.ChecksState, tp.MergeableState, tp.MergeQueueState, tp.MergeQueuePosition, tp.MergeQueueEstimatedTimeToMergeSeconds, tp.ReviewCount, tp.PendingReviewCount, tp.RequiredReviews, tp.CommentCount,
-		tp.UnresolvedReviewThreads, tp.ChecksTotal, tp.ChecksPassing, tp.Additions, tp.Deletions,
-		tp.CreatedAt, tp.MergedAt, tp.ClosedAt, tp.LastSyncedAt, tp.DetachedAt, tp.UpdatedAt,
-		tp.IsDraft, tp.ChangedFiles, tp.MergedByLogin, tp.ClosedByLogin, tp.AutoMergeObservedAt); err != nil {
+	if err := insertTaskPR(ctx, tx, tp); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -2159,7 +2226,9 @@ func replaceTaskPROutgoingRow(ctx context.Context, tx *sqlx.Tx, tp *TaskPR) (*Ta
 
 // UpdateTaskPR updates a task-PR association. This is the sync writer's
 // exclusive write path.
-// UpdateTaskPR writes auto_merge_observed_at through a SQL-level
+// UpdateTaskPR writes queue-removal evidence in a separate guarded statement
+// so a delayed observation cannot replace a newer event already committed by
+// another sync. It writes auto_merge_observed_at through a SQL-level
 // COALESCE(auto_merge_observed_at, ?) rather than a direct SET. The Go-side
 // latch check in resolveTaskPROutcomeFields (tp.AutoMergeObservedAt == nil)
 // reads a snapshot that can be stale by the time this statement executes —
@@ -2170,9 +2239,14 @@ func replaceTaskPROutgoingRow(ctx context.Context, tx *sqlx.Tx, tp *TaskPR) (*Ta
 // is silently discarded instead of overwriting it (AC-16/AC-17).
 func (s *Store) UpdateTaskPR(ctx context.Context, tp *TaskPR) error {
 	tp.UpdatedAt = time.Now().UTC()
-	_, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `
 		UPDATE github_task_prs SET state = ?, review_state = ?, checks_state = ?, mergeable_state = ?,
-			merge_queue_state = ?, merge_queue_position = ?, merge_queue_estimated_time_to_merge_seconds = ?,
+			head_sha = ?, merge_queue_state = ?, merge_queue_position = ?, merge_queue_entry_id = ?, merge_queue_entry_head_sha = ?, merge_queue_estimated_time_to_merge_seconds = ?,
 			review_count = ?, pending_review_count = ?, required_reviews = ?, comment_count = ?,
 			unresolved_review_threads = ?, checks_total = ?, checks_passing = ?,
 			additions = ?, deletions = ?, pr_title = ?, base_branch = ?,
@@ -2180,14 +2254,33 @@ func (s *Store) UpdateTaskPR(ctx context.Context, tp *TaskPR) error {
 			is_draft = ?, changed_files = ?, merged_by_login = ?, closed_by_login = ?,
 			auto_merge_observed_at = COALESCE(auto_merge_observed_at, ?)
 		WHERE id = ?`,
-		tp.State, tp.ReviewState, tp.ChecksState, tp.MergeableState, tp.MergeQueueState, tp.MergeQueuePosition, tp.MergeQueueEstimatedTimeToMergeSeconds,
+		tp.State, tp.ReviewState, tp.ChecksState, tp.MergeableState, tp.HeadSHA, tp.MergeQueueState, tp.MergeQueuePosition, tp.MergeQueueEntryID, tp.MergeQueueEntryHeadSHA, tp.MergeQueueEstimatedTimeToMergeSeconds,
 		tp.ReviewCount, tp.PendingReviewCount, tp.RequiredReviews, tp.CommentCount,
 		tp.UnresolvedReviewThreads, tp.ChecksTotal, tp.ChecksPassing,
 		tp.Additions, tp.Deletions, tp.PRTitle, tp.BaseBranch,
 		tp.MergedAt, tp.ClosedAt, tp.LastSyncedAt, tp.UpdatedAt,
 		tp.IsDraft, tp.ChangedFiles, tp.MergedByLogin, tp.ClosedByLogin,
-		tp.AutoMergeObservedAt, tp.ID)
-	return err
+		tp.AutoMergeObservedAt, tp.ID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE github_task_prs SET
+			merge_queue_last_removal_id = ?, merge_queue_last_removed_at = ?,
+			merge_queue_last_removal_reason = ?, merge_queue_last_removal_before_sha = ?
+		WHERE id = ?
+			AND ? <> ''
+			AND merge_queue_last_removal_id <> ?
+			AND (
+				merge_queue_last_removal_id = ''
+				OR merge_queue_last_removed_at IS NULL
+				OR julianday(?) > julianday(merge_queue_last_removed_at)
+			)`,
+		tp.MergeQueueLastRemovalID, tp.MergeQueueLastRemovedAt, tp.MergeQueueLastRemovalReason,
+		tp.MergeQueueLastRemovalBeforeSHA, tp.ID, tp.MergeQueueLastRemovalID,
+		tp.MergeQueueLastRemovalID, tp.MergeQueueLastRemovedAt); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // --- Task CI automation operations ---
@@ -2715,18 +2808,26 @@ func (s *Store) RecordTaskCIFixAttempt(ctx context.Context, attempt TaskCIFixAtt
 			INSERT INTO github_task_ci_pr_state (
 				task_id, repository_id, pr_number, last_fix_signature, last_fix_checkpoint_json,
 				last_fix_enqueued_at, last_fix_session_id, auto_fix_round_count, auto_fix_exhausted_at,
+				last_queue_fix_event_id, last_queue_removal_cause,
 				created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
 			ON CONFLICT(task_id, repository_id, pr_number) DO UPDATE SET
 				last_fix_signature = excluded.last_fix_signature,
 				last_fix_checkpoint_json = excluded.last_fix_checkpoint_json,
 				last_fix_enqueued_at = excluded.last_fix_enqueued_at,
 				last_fix_session_id = excluded.last_fix_session_id,
 				auto_fix_round_count = github_task_ci_pr_state.auto_fix_round_count + excluded.auto_fix_round_count,
+				last_queue_fix_event_id = CASE
+					WHEN excluded.last_queue_fix_event_id <> '' THEN excluded.last_queue_fix_event_id
+					ELSE github_task_ci_pr_state.last_queue_fix_event_id END,
+				last_queue_removal_cause = CASE
+					WHEN excluded.last_queue_removal_cause <> '' THEN excluded.last_queue_removal_cause
+					ELSE github_task_ci_pr_state.last_queue_removal_cause END,
 				last_error = NULL,
 				updated_at = excluded.updated_at`,
 			attempt.TaskID, attempt.RepositoryID, attempt.PRNumber, attempt.Signature,
-			attempt.CheckpointJSON, when, nullableString(attempt.SessionID), roundCount, now, now)
+			attempt.CheckpointJSON, when, nullableString(attempt.SessionID), roundCount,
+			attempt.QueueRemovalEventID, attempt.QueueRemovalCause, now, now)
 		return err
 	})
 }
@@ -2759,14 +2860,67 @@ func (s *Store) RecordTaskCIMergeAttempt(ctx context.Context, attempt TaskCIMerg
 	return s.mutateTaskCIPRState(ctx, attempt.TaskID, func(ctx context.Context, tx *sqlx.Tx, now time.Time) error {
 		_, err := tx.ExecContext(ctx, `
 			INSERT INTO github_task_ci_pr_state (
-				task_id, repository_id, pr_number, last_merge_signature, last_merge_attempt_at, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?)
+				task_id, repository_id, pr_number, last_merge_signature, last_merge_attempt_at,
+				last_queue_attempt_head_sha, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(task_id, repository_id, pr_number) DO UPDATE SET
 				last_merge_signature = excluded.last_merge_signature,
 				last_merge_attempt_at = excluded.last_merge_attempt_at,
+				last_queue_attempt_head_sha = CASE
+					WHEN excluded.last_queue_attempt_head_sha <> '' THEN excluded.last_queue_attempt_head_sha
+					ELSE github_task_ci_pr_state.last_queue_attempt_head_sha END,
 				last_error = NULL,
 				updated_at = excluded.updated_at`,
-			attempt.TaskID, attempt.RepositoryID, attempt.PRNumber, attempt.Signature, when, now, now)
+			attempt.TaskID, attempt.RepositoryID, attempt.PRNumber, attempt.Signature, when,
+			attempt.AttemptedHeadSHA, now, now)
+		return err
+	})
+}
+
+// RecordTaskCIMergeQueueObservation persists an active queue attempt or a
+// conservative current-head baseline when a removal is observed first. The
+// baseline is written only when no queue attempt has been recorded yet, so a
+// later poll cannot move the guard to a newer head and accidentally requeue a
+// removal that belongs to an older attempt.
+func (s *Store) RecordTaskCIMergeQueueObservation(ctx context.Context, observation TaskCIMergeQueueObservation) error {
+	return s.mutateTaskCIPRState(ctx, observation.TaskID, func(ctx context.Context, tx *sqlx.Tx, now time.Time) error {
+		baselineHead := ""
+		if observation.ActiveQueueHeadSHA == "" {
+			baselineHead = observation.RemovalObservedHeadSHA
+		}
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO github_task_ci_pr_state (
+				task_id, repository_id, pr_number, last_merge_signature,
+				last_queue_attempt_head_sha, last_queue_removal_cause, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(task_id, repository_id, pr_number) DO UPDATE SET
+				last_merge_signature = CASE
+					WHEN excluded.last_merge_signature <> '' THEN excluded.last_merge_signature
+					ELSE github_task_ci_pr_state.last_merge_signature END,
+				last_queue_attempt_head_sha = CASE
+					WHEN excluded.last_queue_attempt_head_sha <> ''
+						THEN excluded.last_queue_attempt_head_sha
+					ELSE github_task_ci_pr_state.last_queue_attempt_head_sha END,
+				last_queue_removal_cause = CASE
+					WHEN excluded.last_queue_removal_cause <> ''
+						THEN excluded.last_queue_removal_cause
+					ELSE github_task_ci_pr_state.last_queue_removal_cause END,
+				updated_at = excluded.updated_at`,
+			observation.TaskID, observation.RepositoryID, observation.PRNumber,
+			observation.MergeSignature,
+			observation.ActiveQueueHeadSHA, observation.RemovalCause, now, now)
+		if err != nil {
+			return err
+		}
+		if baselineHead == "" {
+			return nil
+		}
+		_, err = tx.ExecContext(ctx, `
+			UPDATE github_task_ci_pr_state
+			SET last_queue_attempt_head_sha = ?, updated_at = ?
+			WHERE task_id = ? AND repository_id = ? AND pr_number = ?
+			  AND last_queue_attempt_head_sha = ''`,
+			baselineHead, now, observation.TaskID, observation.RepositoryID, observation.PRNumber)
 		return err
 	})
 }

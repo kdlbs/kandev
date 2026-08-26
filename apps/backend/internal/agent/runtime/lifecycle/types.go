@@ -750,22 +750,25 @@ func (ae *AgentExecution) EndSessionSpan() {
 // the top level. When LaunchRequest.Repositories is set, each entry produces
 // one prepared worktree under the shared TaskDirName.
 type RepoLaunchSpec struct {
-	TaskRepositoryID        string
-	RepositoryID            string
-	RepositoryPath          string
-	RepositoryURL           string // Clone URL for remote executors that need to clone
-	RepoName                string // Repository name used as subdirectory inside TaskDirName
-	BaseBranch              string
-	DefaultBranch           string // Repository's default_branch, used as fallback when BaseBranch is missing
-	CheckoutBranch          string
-	PRNumber                int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
-	RemoteContribution      *models.RemoteContribution
-	WorktreeID              string // Existing worktree ID to reuse (skip creation if set)
-	WorktreeBranchPrefix    string
-	WorktreeBranchTemplate  string
-	WorktreeBranchTicket    string
-	PullBeforeWorktree      bool
-	RemoteSyncHandled       bool
+	TaskRepositoryID       string
+	RepositoryID           string
+	RepositoryPath         string
+	RepositoryURL          string // Clone URL for remote executors that need to clone
+	RepoName               string // Repository name used as subdirectory inside TaskDirName
+	BaseBranch             string
+	DefaultBranch          string // Repository's default_branch, used as fallback when BaseBranch is missing
+	CheckoutBranch         string
+	PRNumber               int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	RemoteContribution     *models.RemoteContribution
+	WorktreeID             string // Existing worktree ID to reuse (skip creation if set)
+	WorktreeBranchPrefix   string
+	WorktreeBranchTemplate string
+	WorktreeBranchTicket   string
+	PullBeforeWorktree     bool
+	RemoteSyncHandled      bool
+	// RefreshRepository is an optional provider-authenticated refresh deferred
+	// until worktree materialization. A valid reusable worktree bypasses it.
+	RefreshRepository       func(context.Context) error
 	RepoSetupScript         string // Repository-level setup script (optional)
 	RepoCleanupScript       string // Repository-level cleanup script (optional)
 	CopyFiles               string // Comma-separated paths/globs to copy from the source repo (gitignored .env / config files)
@@ -890,22 +893,25 @@ type LaunchRequest struct {
 	CopyFiles string
 
 	// Worktree configuration
-	UseWorktree             bool   // Whether to use a Git worktree for isolation
-	WorktreeID              string // Existing worktree ID to reuse (skip creation if set)
-	RepositoryID            string // Repository ID for worktree tracking
-	TaskRepositoryID        string // Exact task_repositories row for worktree recovery
-	RepositoryPath          string // Path to the main repository (for worktree creation)
-	BaseBranch              string // Base branch for the worktree (e.g., "main")
-	DefaultBranch           string // Repository's default_branch, used as fallback when BaseBranch is missing
-	CheckoutBranch          string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
-	PRNumber                int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
-	RemoteContribution      *models.RemoteContribution
-	ComparisonTarget        *models.ComparisonTarget
-	WorktreeBranchPrefix    string // Branch prefix for worktree branches
-	WorktreeBranchTemplate  string // Branch name template for worktree branches
-	WorktreeBranchTicket    string // External ticket value for branch templates
-	PullBeforeWorktree      bool   // Whether to pull from remote before creating the worktree
-	RemoteSyncHandled       bool   // Authenticated provider refresh already completed
+	UseWorktree            bool   // Whether to use a Git worktree for isolation
+	WorktreeID             string // Existing worktree ID to reuse (skip creation if set)
+	RepositoryID           string // Repository ID for worktree tracking
+	TaskRepositoryID       string // Exact task_repositories row for worktree recovery
+	RepositoryPath         string // Path to the main repository (for worktree creation)
+	BaseBranch             string // Base branch for the worktree (e.g., "main")
+	DefaultBranch          string // Repository's default_branch, used as fallback when BaseBranch is missing
+	CheckoutBranch         string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
+	PRNumber               int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	RemoteContribution     *models.RemoteContribution
+	ComparisonTarget       *models.ComparisonTarget
+	WorktreeBranchPrefix   string // Branch prefix for worktree branches
+	WorktreeBranchTemplate string // Branch name template for worktree branches
+	WorktreeBranchTicket   string // External ticket value for branch templates
+	PullBeforeWorktree     bool   // Whether to pull from remote before creating the worktree
+	RemoteSyncHandled      bool   // Authenticated provider refresh already completed
+	// RefreshRepository is an optional provider-authenticated refresh deferred
+	// until worktree materialization. A valid reusable worktree bypasses it.
+	RefreshRepository       func(context.Context) error
 	ContributionDestination *models.ContributionDestination
 
 	// Task directory mode: place worktree at ~/.kandev/tasks/{TaskDirName}/{RepoName}/
@@ -957,6 +963,7 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 		WorktreeBranchTicket:    r.WorktreeBranchTicket,
 		PullBeforeWorktree:      r.PullBeforeWorktree,
 		RemoteSyncHandled:       r.RemoteSyncHandled,
+		RefreshRepository:       r.RefreshRepository,
 		CopyFiles:               r.CopyFiles,
 		BranchSlug:              r.BranchSlug,
 		BranchIdentitySlug:      r.BranchIdentitySlug,

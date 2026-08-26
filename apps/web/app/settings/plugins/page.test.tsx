@@ -146,6 +146,7 @@ function installedPlugin(overrides: Partial<PluginRecord> = {}): PluginRecord {
 
 function setStoreState(plugins: PluginRecord[]) {
   storeState = {
+    auth: { user: null },
     plugins: { items: plugins, loading: false, loaded: true, error: null },
     setPlugins: vi.fn(),
     setPluginsLoading: vi.fn(),
@@ -314,6 +315,22 @@ describe("PluginsSettingsPage", () => {
       const removePlugin = storeState.removePlugin as ReturnType<typeof vi.fn>;
       await vi.waitFor(() => expect(removePlugin).toHaveBeenCalledWith(PLUGIN_ID));
     }
+  });
+});
+
+describe("PluginsSettingsPage member view", () => {
+  it("keeps instance-global plugin controls hidden from members", () => {
+    setStoreState([activePlugin()]);
+    storeState.auth = { mode: "enabled", user: { role: "member" } };
+
+    render(<PluginsSettingsPage />);
+
+    expect(screen.getByText(PLUGIN_DISPLAY_NAME)).toBeTruthy();
+    expect(screen.queryByTestId(SYNC_BUTTON_TESTID)).toBeNull();
+    expect(screen.queryByTestId(CHECK_UPDATES_BUTTON_TESTID)).toBeNull();
+    expect(screen.queryByTestId(INSTALL_TRIGGER_TESTID)).toBeNull();
+    expect(screen.queryByTestId("plugins-auto-update-default")).toBeNull();
+    expect(screen.queryByRole("button", { name: /disable|uninstall|update/i })).toBeNull();
   });
 });
 

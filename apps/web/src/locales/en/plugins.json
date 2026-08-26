@@ -92,6 +92,7 @@
   "sortName": "Name",
   "sortRecentlyUpdated": "Recently updated",
   "sourceNamePlaceholder": "Source name (e.g. Acme Internal)",
+  "sourceUrlPlaceholder": "https://.../index.json",
   "sourceOfficial": "Official",
   "sourceUnreachable": "Unreachable",
   "sourceUnreachableDetail": "<0>{{name}}</0> is unreachable{{detail}}; its plugins are hidden.",

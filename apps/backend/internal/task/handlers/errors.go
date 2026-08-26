@@ -31,11 +31,26 @@ func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback stri
 		return
 	}
 	if isValidationError(err) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, taskErrorBody(err))
 		return
 	}
 	log.Error("request failed", zap.Error(err))
 	c.JSON(http.StatusInternalServerError, gin.H{"error": "request failed"})
+}
+
+func taskErrorBody(err error) gin.H {
+	body := gin.H{"error": err.Error()}
+	for key, value := range taskErrorDetails(err) {
+		body[key] = value
+	}
+	return body
+}
+
+func taskErrorDetails(err error) map[string]interface{} {
+	if errors.Is(err, service.ErrRepositoryBranchPolicyStale) {
+		return map[string]interface{}{"error_code": service.BranchPolicyStaleErrorCode}
+	}
+	return nil
 }
 
 func handleSelectedMoveError(c *gin.Context, log *logger.Logger, err error) {

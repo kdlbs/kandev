@@ -675,14 +675,37 @@ func taskRepositoriesForEvent(ctx context.Context, s *Service, task *models.Task
 func serializeTaskRepositories(repos []*models.TaskRepository) []map[string]interface{} {
 	out := make([]map[string]interface{}, 0, len(repos))
 	for _, r := range repos {
-		out = append(out, map[string]interface{}{
-			"id":              r.ID,
-			"task_id":         r.TaskID,
-			"repository_id":   r.RepositoryID,
-			"base_branch":     r.BaseBranch,
-			"checkout_branch": r.CheckoutBranch,
-			"position":        r.Position,
-		})
+		serialized := map[string]interface{}{
+			"id":            r.ID,
+			"task_id":       r.TaskID,
+			"repository_id": r.RepositoryID,
+			"base_branch":   r.BaseBranch,
+			"position":      r.Position,
+			"created_at":    r.CreatedAt.Format(time.RFC3339Nano),
+			"updated_at":    r.UpdatedAt.Format(time.RFC3339Nano),
+		}
+		if r.CheckoutBranch != "" {
+			serialized["checkout_branch"] = r.CheckoutBranch
+		}
+		if r.BranchPolicyID != "" {
+			serialized["branch_policy_id"] = r.BranchPolicyID
+		}
+		if r.BranchPolicyName != "" {
+			serialized["branch_policy_name"] = r.BranchPolicyName
+		}
+		if r.BranchPolicyBaseBranch != "" {
+			serialized["branch_policy_base_branch"] = r.BranchPolicyBaseBranch
+		}
+		if r.BranchPolicyBranchTemplate != "" {
+			serialized["branch_policy_branch_template"] = r.BranchPolicyBranchTemplate
+		}
+		if r.BranchPolicyPullRequestTarget != "" {
+			serialized["branch_policy_pull_request_target"] = r.BranchPolicyPullRequestTarget
+		}
+		if len(r.Metadata) > 0 {
+			serialized["metadata"] = r.Metadata
+		}
+		out = append(out, serialized)
 	}
 	return out
 }

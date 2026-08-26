@@ -7,8 +7,8 @@ import { SessionMobileTopBar } from "./session-mobile-top-bar";
 
 afterEach(cleanup);
 
-// The phone bar's git machinery is not what this file is about; stub the two
-// hooks that reach for session state so the header renders standalone.
+// Git metrics are not what this file is about; stub the two session-data hooks
+// so the header renders standalone.
 vi.mock("@/hooks/domains/session/use-session-git-status", () => ({
   useSessionGitStatus: () => ({ files: [] }),
   useSessionGitStatusByRepo: () => [],
@@ -16,12 +16,6 @@ vi.mock("@/hooks/domains/session/use-session-git-status", () => ({
 
 vi.mock("@/hooks/domains/session/use-session-commits", () => ({
   useSessionCommits: () => ({ commits: [] }),
-}));
-
-vi.mock("@/hooks/domains/session/use-remote-contribution-relation", () => ({
-  useRemoteContributionRelation: () => ({
-    relation: { action: "none", canPull: false, canReplaceRemote: false, canUseRemote: false },
-  }),
 }));
 
 // Trailing controls the header composes but this file does not exercise.

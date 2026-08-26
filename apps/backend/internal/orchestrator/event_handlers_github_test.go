@@ -220,6 +220,20 @@ func (m *mockGitHubService) RecordTaskCIMergeAttempt(_ context.Context, attempt 
 	m.mergeAttempts = append(m.mergeAttempts, attempt)
 	return nil
 }
+func (m *mockGitHubService) RecordTaskCIMergeQueueObservation(_ context.Context, observation github.TaskCIMergeQueueObservation) error {
+	if m.ciPRState == nil {
+		m.ciPRState = &github.TaskCIPRAutomationState{
+			TaskID: observation.TaskID, RepositoryID: observation.RepositoryID, PRNumber: observation.PRNumber,
+		}
+	}
+	if observation.ActiveQueueHeadSHA != "" {
+		m.ciPRState.LastQueueAttemptHeadSHA = observation.ActiveQueueHeadSHA
+	}
+	if observation.RemovalCause != "" {
+		m.ciPRState.LastQueueRemovalCause = observation.RemovalCause
+	}
+	return nil
+}
 func (m *mockGitHubService) RecordTaskCIError(_ context.Context, taskID, repositoryID string, prNumber int, message string) error {
 	m.ciErrors = append(m.ciErrors, github.TaskCIPRAutomationState{
 		TaskID:       taskID,

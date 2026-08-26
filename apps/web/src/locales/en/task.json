@@ -1875,5 +1875,12 @@
   "baseBranchNotSet": "Base branch not set",
   "launchRecoveryFailed": "Recovery could not start",
   "tryRecoveryAgain": "Try the recovery action again.",
-  "launchFailedSeeDetails": "The task launch failed. Open the task details for recovery actions."
+  "launchFailedSeeDetails": "The task launch failed. Open the task details for recovery actions.",
+  "branchPoliciesGroup": "Branch policies",
+  "branchesGroup": "Branches",
+  "branchPolicyMarker": "Policy",
+  "branchPolicyOptionSummary": "from {{base}} to {{target}}",
+  "branchPolicySelected": "{{name}} (from {{base}})",
+  "branchPolicyUnavailable": "Base branch unavailable. Refresh branches or edit this policy.",
+  "branchPolicyRequiresSingleRepository": "Branch policies require a single repository with the local executor."
 }
