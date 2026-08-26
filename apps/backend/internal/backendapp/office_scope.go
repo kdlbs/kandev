@@ -505,10 +505,11 @@ func mountOfficeRoutes(
 	authSvc *auth.Service,
 	taskSvc *taskservice.Service,
 	officeRepo *officesqlite.Repository,
+	handoffSvc *taskservice.HandoffService,
 	log *logger.Logger,
 ) {
 	api := router.Group(officeRoutePrefix)
 	api.Use(officeagents.AgentAuthMiddleware(svcs.Agents))
 	api.Use(officeWorkspaceScopeMiddleware(authSvc, taskSvc, officeRepo))
-	office.RegisterAllRoutes(api, svcs, log)
+	office.RegisterAllRoutes(api, svcs, handoffSvc, log)
 }

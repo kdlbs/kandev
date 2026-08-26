@@ -546,7 +546,7 @@ func TestOfficeRouteGroupMountsScopeGuard(t *testing.T) {
 			c.Request.Context(), authn.Identity{UserID: officeScopeUserB, Role: authn.RoleMember}))
 		c.Next()
 	})
-	mountOfficeRoutes(engine, officeTestServices(), h.authSvc, h.taskSvc, h.officeRepo, testLogger(t))
+	mountOfficeRoutes(engine, officeTestServices(), h.authSvc, h.taskSvc, h.officeRepo, nil, testLogger(t))
 
 	// The scope guard: user B naming user A's agent must be refused before
 	// the (zero-value, would-panic) handler runs.
