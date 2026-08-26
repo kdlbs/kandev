@@ -82,5 +82,5 @@ RED: The real Codex envelope test failed because `extractMcpResult` returned
 null when `structuredContent` was null.
 
 GREEN: The parser now falls through to JSON text content only for null or
-undefined structured values. The focused suite passed 50 tests, and frontend
+undefined structured values. The focused suite passed 51 tests, and frontend
 typecheck passed.

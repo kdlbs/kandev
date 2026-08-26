@@ -63,7 +63,7 @@ parser fixture is the faithful test for the Codex null envelope.
 
 ## Verification results
 
-Task 01 completed. The focused parser and renderer suite passed 50 tests, and
+Task 01 completed. The focused parser and renderer suite passed 51 tests, and
 frontend typecheck passed.
 
 ## Risks
