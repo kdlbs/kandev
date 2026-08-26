@@ -113,7 +113,6 @@ contract that other capabilities can reuse.
 - [Sidebar Diff Stat Priority](requirements/sidebar-diff-stat-priority.md)
 - [Sidebar empty task alignment](requirements/sidebar-empty-task-alignment.md)
 - [Sidebar Last Activity Sort](requirements/sidebar-last-activity-sort.md)
-@@
 - [Sidebar Queued Prompt Count Badge](requirements/sidebar-queued-prompt-count.md)
 - [Sidebar Task Focus](requirements/sidebar-task-focus.md)
 - [Sidebar Task Completion Icons](requirements/sidebar-task-completion-icons.md)

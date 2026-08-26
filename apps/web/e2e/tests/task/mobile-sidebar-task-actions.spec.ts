@@ -5,6 +5,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { activeSessionId, seedSecondaryClarificationTask } from "../../helpers/clarification";
 import { makeGitEnv } from "../../helpers/git-helper";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { expectActiveTaskRow } from "../../helpers/active-task-row";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("Mobile sidebar task actions", () => {
@@ -203,12 +204,8 @@ test.describe("Mobile sidebar task actions", () => {
 
     const drawer = testPage.getByRole("dialog", { name: "Tasks" });
     const row = drawer.getByTestId("sidebar-task-item").filter({ hasText: task.title });
-    await expect(row).toHaveAttribute("data-active", "true");
     // @covers AC-UI-SIDEBAR-TASK-FOCUS-001.3/001.4
-    await expect(row).toHaveClass(/bg-primary\/15/);
-    await expect(row).toHaveClass(/ring-1/);
-    await expect(row).toHaveClass(/ring-inset/);
-    await expect(row).toHaveClass(/ring-foreground\/25/);
+    await expectActiveTaskRow(row);
     await expect(row.locator("div.absolute.left-0.top-0.bottom-0")).toHaveClass(/bg-red-500/);
     await assertNoDocumentHorizontalOverflow(testPage, "mobile active task focus");
   });
