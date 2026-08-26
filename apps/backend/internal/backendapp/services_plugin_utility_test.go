@@ -6,6 +6,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agent/hostutility"
 	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -18,6 +19,14 @@ import (
 	utilityservice "github.com/kandev/kandev/internal/utility/service"
 	utilitystore "github.com/kandev/kandev/internal/utility/store"
 )
+
+type pluginHostUtilityManagerStub struct {
+	err error
+}
+
+func (s pluginHostUtilityManagerStub) ExecuteProfilePrompt(context.Context, string, string) (*hostutility.PromptResult, error) {
+	return nil, s.err
+}
 
 type pluginUtilityAgentRepository struct {
 	utilitystore.Repository
@@ -121,6 +130,15 @@ func TestPluginsAgentProfileAdapter_MapsIneligibleProfile(t *testing.T) {
 	_, err := adapter.GetProfileByID(context.Background(), "not-inference-capable")
 	if !errors.Is(err, plugins.ErrAgentProfileIneligible) {
 		t.Fatalf("GetProfileByID() error = %v, want plugin ineligible error", err)
+	}
+}
+
+func TestPluginsHostUtilityAdapter_MapsRevalidationIneligibleProfile(t *testing.T) {
+	adapter := pluginsHostUtilityAdapter{mgr: pluginHostUtilityManagerStub{err: profilebinding.ErrProfileIneligible}}
+
+	_, err := adapter.ExecuteProfilePrompt(context.Background(), "profile-1", "prompt")
+	if !errors.Is(err, plugins.ErrAgentProfileIneligible) {
+		t.Fatalf("ExecuteProfilePrompt() error = %v, want plugin ineligible error", err)
 	}
 }
 

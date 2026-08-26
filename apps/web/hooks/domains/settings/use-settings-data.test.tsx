@@ -17,6 +17,8 @@ vi.mock("@/lib/api", () => ({
 
 import { useSettingsData } from "./use-settings-data";
 
+const MOCK_AGENT_NAME = "Mock Agent";
+
 function wrapper({ children }: { children: ReactNode }) {
   return createElement(StateProvider, null, children);
 }
@@ -25,7 +27,8 @@ function useSettingsSnapshot() {
   useSettingsData();
   const agentsLoaded = useAppStore((state) => state.settingsData.agentsLoaded);
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
-  return { agentsLoaded, agentProfiles };
+  const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
+  return { agentsLoaded, agentProfiles, setAgentProfiles };
 }
 
 beforeEach(() => {
@@ -44,12 +47,12 @@ describe("useSettingsData", () => {
   it("retries an empty agent list before declaring that no profiles exist", async () => {
     const profile = {
       id: "profile-1",
-      agentDisplayName: "Mock Agent",
+      agentDisplayName: MOCK_AGENT_NAME,
       name: "Default",
       cliPassthrough: false,
     };
     mocks.listAgents.mockResolvedValueOnce({ agents: [], total: 0 }).mockResolvedValueOnce({
-      agents: [{ id: "agent-1", name: "Mock Agent", profiles: [profile] }],
+      agents: [{ id: "agent-1", name: MOCK_AGENT_NAME, profiles: [profile] }],
       total: 1,
     });
 
@@ -78,5 +81,54 @@ describe("useSettingsData", () => {
     expect(mocks.listAgents).toHaveBeenCalledTimes(5);
     expect(result.current.agentsLoaded).toBe(true);
     expect(result.current.agentProfiles).toEqual([]);
+  });
+
+  it("keeps a profile created by WebSocket while the initial list request is pending", async () => {
+    let resolveAgents: (response: { agents: unknown[]; total: number }) => void;
+    mocks.listAgents.mockReturnValue(
+      new Promise((resolve) => {
+        resolveAgents = resolve;
+      }),
+    );
+    const { result } = renderHook(() => useSettingsSnapshot(), { wrapper });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    act(() => {
+      result.current.setAgentProfiles([
+        {
+          id: "profile-live",
+          label: `${MOCK_AGENT_NAME} • Live profile`,
+          agent_id: "agent-1",
+          agent_name: MOCK_AGENT_NAME,
+          cli_passthrough: false,
+          inference_capable: true,
+          updatedAt: "2026-08-26T18:00:01Z",
+        },
+      ]);
+    });
+    await act(async () => {
+      resolveAgents!({
+        agents: [
+          {
+            id: "agent-1",
+            name: MOCK_AGENT_NAME,
+            profiles: [
+              {
+                id: "profile-stale",
+                agentDisplayName: MOCK_AGENT_NAME,
+                name: "Stale profile",
+                cliPassthrough: false,
+              },
+            ],
+          },
+        ],
+        total: 1,
+      });
+      await Promise.resolve();
+    });
+
+    expect(result.current.agentProfiles.map((profile) => profile.id)).toContain("profile-live");
   });
 });

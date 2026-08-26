@@ -1093,12 +1093,22 @@ func initPluginsService(
 	return svc
 }
 
+type pluginHostUtilityManager interface {
+	ExecuteProfilePrompt(ctx context.Context, profileID, prompt string) (*hostutility.PromptResult, error)
+}
+
 type pluginsHostUtilityAdapter struct {
-	mgr *hostutility.Manager
+	mgr pluginHostUtilityManager
 }
 
 func (a pluginsHostUtilityAdapter) ExecuteProfilePrompt(ctx context.Context, profileID, prompt string) (string, error) {
 	res, err := a.mgr.ExecuteProfilePrompt(ctx, profileID, prompt)
+	if errors.Is(err, profilebinding.ErrProfileNotFound) {
+		return "", plugins.ErrAgentProfileNotFound
+	}
+	if errors.Is(err, profilebinding.ErrProfileIneligible) {
+		return "", plugins.ErrAgentProfileIneligible
+	}
 	if err != nil {
 		return "", err
 	}

@@ -272,6 +272,42 @@ func TestPluginHost_InvokeUtilityAgent_PreservesDirectProfileRunnerFailure(t *te
 	}
 }
 
+func TestPluginHost_InvokeUtilityAgent_MapsDirectProfileRevalidationFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{
+			name: "deleted",
+			err:  ErrAgentProfileNotFound,
+			want: `configured agent profile "profile-99" not found`,
+		},
+		{
+			name: "ineligible",
+			err:  ErrAgentProfileIneligible,
+			want: `configured agent profile "profile-99" is not eligible for utility execution`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := configuredUtilityHost(t)
+			d.host.configSchema = map[string]any{
+				"properties": map[string]any{
+					agentProfileConfigKey: map[string]any{"type": "string", "format": "agent-profile"},
+				},
+			}
+			d.host.configs = &fakeConfigReader{configs: map[string]any{agentProfileConfigKey: "profile-99"}}
+			d.profiles.profilesByID = map[string]*AgentProfile{"profile-99": {Enabled: true, InferenceCapable: true}}
+			d.utilRun.err = tc.err
+
+			_, err := d.host.InvokeUtilityAgent(context.Background(), "summarize")
+			if status.Code(err) != codes.FailedPrecondition || status.Convert(err).Message() != tc.want {
+				t.Fatalf("InvokeUtilityAgent() error = %v, want FailedPrecondition %q", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestPluginHost_InvokeUtilityAgent_DirectProfile_PreservesStoreFailure(t *testing.T) {
 	storeErr := status.Error(codes.Unavailable, "agent profile store unavailable")
 	d := configuredUtilityHost(t)

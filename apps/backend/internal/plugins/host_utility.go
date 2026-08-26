@@ -167,7 +167,14 @@ func (h *pluginHost) invokeConfiguredAgentProfile(
 	if !profile.Enabled || profile.CLIPassthrough || profile.WorkspaceID != "" || !profile.InferenceCapable {
 		return "", status.Errorf(codes.FailedPrecondition, "configured agent profile %q is not eligible for utility execution", profileID)
 	}
-	return runner.ExecuteProfilePrompt(ctx, profileID, prompt)
+	response, err := runner.ExecuteProfilePrompt(ctx, profileID, prompt)
+	if errors.Is(err, ErrAgentProfileNotFound) {
+		return "", status.Errorf(codes.FailedPrecondition, "configured agent profile %q not found", profileID)
+	}
+	if errors.Is(err, ErrAgentProfileIneligible) {
+		return "", status.Errorf(codes.FailedPrecondition, "configured agent profile %q is not eligible for utility execution", profileID)
+	}
+	return response, err
 }
 
 func hasAgentProfileConfig(schema map[string]any) bool {
