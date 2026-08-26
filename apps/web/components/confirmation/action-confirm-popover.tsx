@@ -195,6 +195,14 @@ const ActionConfirmPopoverContent = memo(function ActionConfirmPopoverContent({
         cancelRef.current?.focus();
       }}
       onFocusOutside={(event) => {
+        // If focus moved to/from the Radix context menu content (which is
+        // being removed because the popover opening shifted focus), keep the
+        // popover open. The menu content is rendered in a portal, so it is
+        // outside the focus boundary check below.
+        if ((event.target as Element)?.closest?.("[data-radix-menu-content]")) {
+          event.preventDefault();
+          return;
+        }
         // Only prevent close when focus stays within the boundary. If the
         // boundary element has been replaced (React reconciliation), the old
         // disconnected element's contains() returns false, so the check works
@@ -203,6 +211,12 @@ const ActionConfirmPopoverContent = memo(function ActionConfirmPopoverContent({
       }}
       onInteractOutside={(event) => {
         const target = event.target as Node;
+        // If the interaction target is inside the Radix context menu content
+        // (which is being removed in a portal), keep the popover open.
+        if ((target as Element)?.closest?.("[data-radix-menu-content]")) {
+          event.preventDefault();
+          return;
+        }
         // If the interaction target is no longer in the DOM (e.g., the context
         // menu content was just removed), it's a stale event from a preceding
         // close — prevent it from closing the popover.
