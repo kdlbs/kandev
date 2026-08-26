@@ -109,6 +109,15 @@ func openWindowsDependencyHandle(
 	name string,
 	createOption uint32,
 ) (windows.Handle, error) {
+	return openWindowsDependencyHandleWithDisposition(parent, name, windows.FILE_OPEN, createOption)
+}
+
+func openWindowsDependencyHandleWithDisposition(
+	parent windows.Handle,
+	name string,
+	disposition uint32,
+	createOption uint32,
+) (windows.Handle, error) {
 	objectName, err := windows.NewNTUnicodeString(name)
 	if err != nil {
 		return 0, err
@@ -130,7 +139,7 @@ func openWindowsDependencyHandle(
 		&allocationSize,
 		0,
 		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
-		windows.FILE_OPEN,
+		disposition,
 		createOption|windows.FILE_OPEN_REPARSE_POINT,
 		0,
 		0,

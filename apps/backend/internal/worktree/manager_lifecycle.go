@@ -201,13 +201,14 @@ func (m *Manager) reuseRequiredWorktree(ctx context.Context, req CreateRequest) 
 		(requestedBranchSlug != "" && SanitizeBranchSlug(wt.BranchSlug) != requestedBranchSlug) {
 		return nil, ErrReuseWorktreeUnavailable
 	}
-	if err := m.validateWorktreePathSafe(wt.Path); err != nil {
+	handle, valid, err := m.openReusableWorktreePath(wt.Path, wt)
+	if err != nil {
 		return nil, err
 	}
-	if err := m.validateExistingWorktreePathOwner(wt.Path, wt); err != nil {
-		return nil, err
+	if handle != nil {
+		defer func() { _ = handle.Close() }()
 	}
-	if !m.IsValid(wt.Path) {
+	if !valid {
 		return nil, ErrReuseWorktreeUnavailable
 	}
 	return wt, nil
@@ -228,13 +229,14 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 	if req.SessionID != "" {
 		existing, err := m.GetBySessionAndRepo(ctx, req.SessionID, req.RepositoryID, reuseSlug)
 		if err == nil && existing != nil {
-			if err := m.validateWorktreePathSafe(existing.Path); err != nil {
+			handle, valid, err := m.openReusableWorktreePath(existing.Path, existing)
+			if err != nil {
 				return nil, true, err
 			}
-			if err := m.validateExistingWorktreePathOwner(existing.Path, existing); err != nil {
-				return nil, true, err
+			if handle != nil {
+				defer func() { _ = handle.Close() }()
 			}
-			if m.IsValid(existing.Path) {
+			if valid {
 				if err := m.validateReusableContribution(ctx, req, existing); err != nil {
 					return nil, true, err
 				}
@@ -260,13 +262,14 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 	if req.WorktreeID != "" {
 		existing, err := m.GetByID(ctx, req.WorktreeID)
 		if err == nil && existing != nil {
-			if err := m.validateWorktreePathSafe(existing.Path); err != nil {
+			handle, valid, err := m.openReusableWorktreePath(existing.Path, existing)
+			if err != nil {
 				return nil, true, err
 			}
-			if err := m.validateExistingWorktreePathOwner(existing.Path, existing); err != nil {
-				return nil, true, err
+			if handle != nil {
+				defer func() { _ = handle.Close() }()
 			}
-			if m.IsValid(existing.Path) {
+			if valid {
 				if err := m.validateReusableContribution(ctx, req, existing); err != nil {
 					return nil, true, err
 				}
@@ -294,39 +297,81 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 	return nil, false, nil
 }
 
-// validateWorktreePathSafe rejects a persisted worktree path whose existing
-// components beneath tasksBase contain a symlink. A stale record whose final
-// repo directory has been symlinked to another task's checkout would escape
-// lexical ownership validation and follow the symlink in IsValid (which uses
-// os.Stat/os.ReadFile). The check runs before both validateExistingWorktreePathOwner
-// and IsValid.
-func (m *Manager) validateWorktreePathSafe(worktreePath string) error {
+// validateWorktreePathSafe opens a persisted worktree path through no-follow
+// directory handles. The handle is returned to the caller so the same
+// directory identity is used for ownership and reuse decisions. Missing paths
+// remain eligible for the normal recreate flow, while symlinked components
+// fail closed.
+func (m *Manager) validateWorktreePathSafe(worktreePath string) (storageworkspaces.DirectoryHandle, error) {
 	if worktreePath == "" {
-		return nil
+		return nil, nil
 	}
 	tasksBase, err := m.config.ExpandedTasksBasePath()
 	if err != nil {
-		return fmt.Errorf("resolve tasks base path: %w", err)
+		return nil, fmt.Errorf("resolve tasks base path: %w", err)
 	}
 	tasksBase = filepath.Clean(tasksBase)
-	// Paths outside the tasks base (legacy flat layout) are not covered by
-	// the symlink guard; skip validation for those.
+	// Paths outside the tasks base use the legacy flat layout. They do not have
+	// a task-root ownership marker, but still get a no-follow handle so reuse
+	// cannot follow a replacement link while checking the checkout.
 	relativePath, err := filepath.Rel(tasksBase, worktreePath)
 	if err != nil || relativePath == "." || relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
-		return nil
+		// Legacy paths are not below tasksBase, but they still get a pinned
+		// no-follow handle so IsValid cannot be redirected by a symlink race.
+		return m.openNoFollowWorktreePath(worktreePath)
 	}
 	if _, err := os.Lstat(tasksBase); errors.Is(err, os.ErrNotExist) {
 		// A removed task base has no components to follow. Normal reuse will
 		// recreate the persisted managed root before adding the worktree;
 		// attach-only reuse still rejects the missing checkout via IsValid.
-		return nil
+		return nil, nil
 	} else if err != nil {
-		return fmt.Errorf("inspect tasks base path: %w", err)
+		return nil, fmt.Errorf("inspect tasks base path: %w", err)
 	}
-	if err := storage.ValidateNoSymlinkPath(tasksBase, worktreePath); err != nil {
-		return fmt.Errorf("unsafe worktree path: %w", err)
+	return m.openNoFollowWorktreePath(worktreePath)
+}
+
+func (m *Manager) openNoFollowWorktreePath(worktreePath string) (storageworkspaces.DirectoryHandle, error) {
+	cleanPath := filepath.Clean(worktreePath)
+	if !filepath.IsAbs(cleanPath) {
+		return nil, nil
 	}
-	return nil
+	handle, err := storageworkspaces.OpenDirectoryNoFollow(filepath.Dir(cleanPath), cleanPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("unsafe worktree path: %w", err)
+	}
+	if err := handle.VerifyPath(cleanPath); err != nil {
+		_ = handle.Close()
+		return nil, fmt.Errorf("worktree path changed during validation: %w", err)
+	}
+	return handle, nil
+}
+
+func (m *Manager) openReusableWorktreePath(worktreePath string, wt *Worktree) (storageworkspaces.DirectoryHandle, bool, error) {
+	handle, err := m.validateWorktreePathSafe(worktreePath)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := m.validateExistingWorktreePathOwner(worktreePath, wt); err != nil {
+		if handle != nil {
+			_ = handle.Close()
+		}
+		return nil, false, err
+	}
+	if handle == nil || !handle.IsValidWorktree() {
+		if handle != nil {
+			_ = handle.Close()
+		}
+		return nil, false, nil
+	}
+	if err := handle.VerifyPath(filepath.Clean(worktreePath)); err != nil {
+		_ = handle.Close()
+		return nil, false, fmt.Errorf("worktree path changed during reuse validation: %w", err)
+	}
+	return handle, true, nil
 }
 
 func worktreeOwnershipIdentity(wt *Worktree) (string, bool) {
@@ -1577,18 +1622,23 @@ func (m *Manager) restoreMissingTasksBaseForRecreate(worktreePath string, existi
 		return fmt.Errorf("cannot recreate worktree: persisted task root %q does not match path root %q", existing.TaskDirName, taskDirName)
 	}
 	taskRoot := filepath.Join(tasksBase, taskDirName)
-	if err := os.MkdirAll(taskRoot, 0o755); err != nil {
+	// Build the missing base and task root through no-follow directory handles.
+	// This keeps a concurrent replacement of tasksBase from redirecting marker
+	// creation into an external directory.
+	taskRootHandle, err := storageworkspaces.CreateDirectoryNoFollow(tasksBase, taskRoot, 0o755)
+	if err != nil {
 		return fmt.Errorf("recreate missing tasks base: %w", err)
 	}
+	defer func() { _ = taskRootHandle.Close() }()
+	if err := taskRootHandle.VerifyPath(taskRoot); err != nil {
+		return fmt.Errorf("recreated task root changed during recovery: %w", err)
+	}
 	markerTaskDirName := taskDirName
-	if err := storageworkspaces.WriteOwnershipMarker(taskRoot, storageworkspaces.OwnershipMarker{
+	if err := storageworkspaces.WriteOwnershipMarkerNoFollow(taskRootHandle, storageworkspaces.OwnershipMarker{
 		TaskID: existing.TaskID, TaskDirName: markerTaskDirName,
 		LayoutVersion: storageworkspaces.LayoutVersionSemantic,
 	}); err != nil {
 		return fmt.Errorf("mark recreated task directory ownership: %w", err)
-	}
-	if err := storage.ValidateNoSymlinkPath(tasksBase, worktreePath); err != nil {
-		return fmt.Errorf("unsafe recreated worktree path: %w", err)
 	}
 	return nil
 }
