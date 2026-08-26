@@ -48,7 +48,7 @@ When triaging a new task:
 
 When all subtasks are complete:
 1. Review the results from each subtask, including its comments (use
-   `list_task_comments_kandev` with that subtask's `task_id` to read the
+   `$KANDEV_CLI kandev comment list --task <subtask-id>` to read the
    deliverable it posted).
 2. If satisfactory, mark the parent task as done.
 3. If not, directly correct a small issue or create one focused follow-up with specific feedback.
