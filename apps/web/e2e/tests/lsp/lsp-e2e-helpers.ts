@@ -259,16 +259,7 @@ export async function openDesktopFile(
   session: SessionPage,
   filePath: string,
 ): Promise<void> {
-  await session.clickTab("Files");
-  await expect(session.files).toBeVisible({ timeout: 10_000 });
   const pathSegments = filePath.split("/");
-  for (let index = 1; index < pathSegments.length; index++) {
-    const ancestor = session.fileTreeNode(pathSegments.slice(0, index).join("/"));
-    await expect(ancestor).toBeVisible({ timeout: 15_000 });
-    if ((await ancestor.locator(".tabler-icon-chevron-right").count()) > 0) {
-      await ancestor.click();
-    }
-  }
   const fileNode = session.fileTreeNode(filePath);
   // Git status updates can auto-activate the Changes panel just after the
   // file tree renders. Re-select Files and click only while the row is still
@@ -281,6 +272,14 @@ export async function openDesktopFile(
       async () => {
         try {
           await session.clickTab("Files", { force: true });
+          if (!(await session.files.isVisible())) return false;
+          for (let index = 1; index < pathSegments.length; index++) {
+            const ancestor = session.fileTreeNode(pathSegments.slice(0, index).join("/"));
+            if (!(await ancestor.isVisible())) return false;
+            if ((await ancestor.locator(".tabler-icon-chevron-right").count()) > 0) {
+              await ancestor.click();
+            }
+          }
           if (!(await fileNode.isVisible())) return false;
           await fileNode.click({ timeout: 2_000 });
           return true;
