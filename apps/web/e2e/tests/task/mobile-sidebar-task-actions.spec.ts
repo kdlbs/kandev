@@ -4,6 +4,7 @@ import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { activeSessionId, seedSecondaryClarificationTask } from "../../helpers/clarification";
 import { makeGitEnv } from "../../helpers/git-helper";
+import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("Mobile sidebar task actions", () => {
@@ -49,6 +50,66 @@ test.describe("Mobile sidebar task actions", () => {
         { message: "pending clarification task should not overflow the phone viewport" },
       )
       .toBe(true);
+  });
+
+  test("keeps a linked PR badge beside its title in the phone drawer", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const title = "Mobile sidebar PR badge spacing";
+    const task = await apiClient.createTask(seedData.workspaceId, title, {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: 902,
+      pr_url: "https://github.com/testorg/testrepo/pull/902",
+      pr_title: "Mobile sidebar spacing",
+      head_branch: "feature/mobile-sidebar-spacing",
+      base_branch: "main",
+      author_login: "e2e",
+      state: "open",
+      checks_state: "success",
+      mergeable_state: "clean",
+    });
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.mobileSessionMenu.tap();
+
+    const drawer = testPage.getByRole("dialog", { name: "Tasks" });
+    const row = drawer.getByTestId("sidebar-task-item").filter({ hasText: title });
+    await expect(row).toBeVisible();
+    const prIcon = row.getByTestId(`pr-task-icon-${task.id}`);
+    await expect(prIcon).toBeVisible({ timeout: 15_000 });
+
+    const spacing = await row.evaluate((el, titleText) => {
+      const titleElement = [...el.querySelectorAll("span")].find(
+        (candidate) =>
+          candidate.classList.contains("whitespace-nowrap") && candidate.textContent === titleText,
+      );
+      const pr = el.querySelector('[data-testid^="pr-task-icon-"]');
+      if (!titleElement || !pr) return { found: false, gap: -1, titleTop: -1, prTop: -1 };
+      const titleBox = titleElement.getBoundingClientRect();
+      const prBox = pr.getBoundingClientRect();
+      return {
+        found: true,
+        gap: prBox.left - titleBox.right,
+        titleTop: titleBox.top,
+        prTop: prBox.top,
+      };
+    }, title);
+    expect(spacing.found).toBe(true);
+    expect(Math.abs(spacing.titleTop - spacing.prTop)).toBeLessThan(4);
+    expect(spacing.gap).toBeGreaterThanOrEqual(0);
+    expect(spacing.gap).toBeLessThan(32);
+    await assertNoDocumentHorizontalOverflow(testPage, "mobile sidebar PR badge spacing");
   });
 
   test("switches to the selected task and its chat from the phone task drawer", async ({
@@ -612,5 +673,128 @@ test.describe("Mobile sidebar task actions", () => {
     await expect
       .poll(async () => (await apiClient.getTask(task.task_id)).workflow_step_id)
       .toBe(targetStep.id);
+  });
+
+  test("creates a policy branch for a local-executor subtask", async ({
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    execSync("git branch -f develop", {
+      cwd: seedData.repositoryPath,
+      env: makeGitEnv(backend.tmpDir),
+    });
+    const policy = await apiClient.createRepositoryBranchPolicy(seedData.repositoryId, {
+      name: `Mobile subtask policy ${Date.now()}`,
+      base_branch: "main",
+      branch_template: "feature/{title}-{suffix}",
+      pull_request_target: "develop",
+    });
+    const { executors } = await apiClient.listExecutors();
+    const localExecutor = executors.find((executor) =>
+      ["local", "local_pc"].includes(executor.type),
+    );
+    if (!localExecutor) {
+      test.skip(true, "No local executor available");
+      return;
+    }
+    const localProfile = await apiClient.createExecutorProfile(
+      localExecutor.id,
+      `E2E Mobile Subtask Local ${Date.now()}`,
+    );
+    const parentTitle = `Mobile policy subtask parent ${Date.now()}`;
+    const childTitle = `Mobile policy subtask child ${Date.now()}`;
+
+    try {
+      const parent = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        parentTitle,
+        seedData.agentProfileId,
+        {
+          description: "/e2e:simple-message",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+          executor_profile_id: seedData.worktreeExecutorProfileId,
+        },
+      );
+      await testPage.setViewportSize({ width: 390, height: 844 });
+      await testPage.goto(`/t/${parent.id}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await session.waitForChatIdle({ timeout: 30_000 });
+      await testPage.getByTestId("mobile-session-menu").tap();
+      const taskSheet = testPage.getByRole("dialog", { name: "Tasks" });
+      const taskRow = taskSheet.getByTestId("sidebar-task-item").filter({ hasText: parentTitle });
+      await taskRow.getByRole("button", { name: "Task actions" }).tap();
+      await testPage.getByRole("menuitem", { name: "Create Subtask", exact: true }).tap();
+
+      const dialog = testPage.getByTestId("new-subtask-dialog");
+      await dialog.getByTestId("subtask-workspace-mode-new").tap();
+      await dialog.getByTestId("executor-profile-selector").tap();
+      await testPage.getByRole("option", { name: new RegExp(localProfile.name) }).tap();
+      await dialog.getByTestId("branch-chip-trigger").tap();
+      await testPage.getByRole("option", { name: new RegExp(policy.name) }).tap({ force: true });
+      await expect(dialog.getByTestId("fresh-branch-toggle")).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      await dialog.getByTestId("subtask-title-input").fill(childTitle);
+      await dialog.getByTestId("subtask-prompt-input").fill("/e2e:simple-message");
+      await dialog.getByRole("button", { name: "Create Subtask", exact: true }).tap();
+      await expect(dialog).toBeHidden({ timeout: 30_000 });
+      let childId: string | undefined;
+      await expect
+        .poll(async () => {
+          const response = await apiClient.listTasks(seedData.workspaceId);
+          childId = response.tasks.find((task) => task.title === childTitle)?.id;
+          return childId;
+        })
+        .toBeTruthy();
+      expect(childId).toBeTruthy();
+      type PolicyRepositorySnapshot = {
+        base_branch?: string;
+        branch_policy_id?: string;
+        branch_policy_name?: string;
+        branch_policy_branch_template?: string;
+        branch_policy_pull_request_target?: string;
+        checkout_branch?: string;
+      };
+      let repository: PolicyRepositorySnapshot | undefined;
+      await expect
+        .poll(async () => {
+          const response = await apiClient.rawRequest("GET", `/api/v1/tasks/${childId}`);
+          if (!response.ok) return undefined;
+          const task = (await response.json()) as { repositories?: PolicyRepositorySnapshot[] };
+          repository = task.repositories?.[0];
+          return repository;
+        })
+        .toEqual(
+          expect.objectContaining({
+            branch_policy_id: policy.id,
+            branch_policy_name: policy.name,
+            branch_policy_branch_template: "feature/{title}-{suffix}",
+            branch_policy_pull_request_target: "develop",
+          }),
+        );
+      // The branch-name renderer bounds the title segment to keep refs
+      // portable, so assert the policy template prefix and generated suffix
+      // rather than the unbounded title slug.
+      expect(repository!.base_branch).toMatch(/^feature\/mobile-policy-subtas-/);
+      await expect
+        .poll(async () =>
+          execSync("git branch --show-current", {
+            cwd: seedData.repositoryPath,
+            env: makeGitEnv(backend.tmpDir),
+          })
+            .toString()
+            .trim(),
+        )
+        .toBe(repository!.base_branch);
+    } finally {
+      await apiClient.deleteExecutorProfile(localProfile.id).catch(() => {});
+      await apiClient.deleteRepositoryBranchPolicy(policy.id).catch(() => {});
+    }
   });
 });

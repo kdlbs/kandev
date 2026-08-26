@@ -32,6 +32,7 @@ dashboard projections, and Office testing contracts.
 
 
 
+- [Office: Agent Comment Reads](requirements/agent-comment-reads.md)
 - [Office: Agents](requirements/agents.md)
 - [Office: Personal Assistant Agent, Channels & Agent Memory](requirements/assistant.md)
 - [Automation runs — status-scoped delete all](requirements/automation-runs-delete-all-by-status.md)
@@ -58,6 +59,7 @@ dashboard projections, and Office testing contracts.
 
 
 
+- [Office: Agent Comment Reads System Design](system-design/agent-comment-reads-01.md)
 - [Office: Agents System Design Part 1](system-design/agents-01.md)
 - [Office: Agents System Design Part 2](system-design/agents-02.md)
 - [Office: Agents System Design Part 3](system-design/agents-03.md)

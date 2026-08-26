@@ -823,6 +823,10 @@ type Task struct {
 	ArchivedByCascadeID string    `json:"archived_by_cascade_id,omitempty"`
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
+	// WorkflowStepTransitionID is the immutable ledger row identifier for the
+	// latest workflow-step write. Repositories populate it after a transition;
+	// it is transient and is not stored in the tasks table.
+	WorkflowStepTransitionID int64 `json:"-"`
 
 	// Office extensions.
 	//
@@ -1016,15 +1020,20 @@ type Workspace struct {
 
 // TaskRepository represents a repository associated with a task
 type TaskRepository struct {
-	ID             string                 `json:"id"`
-	TaskID         string                 `json:"task_id"`
-	RepositoryID   string                 `json:"repository_id"`
-	BaseBranch     string                 `json:"base_branch"`
-	CheckoutBranch string                 `json:"checkout_branch,omitempty"`
-	Position       int                    `json:"position"`
-	Metadata       map[string]interface{} `json:"metadata,omitempty"`
-	CreatedAt      time.Time              `json:"created_at"`
-	UpdatedAt      time.Time              `json:"updated_at"`
+	ID                            string                 `json:"id"`
+	TaskID                        string                 `json:"task_id"`
+	RepositoryID                  string                 `json:"repository_id"`
+	BaseBranch                    string                 `json:"base_branch"`
+	CheckoutBranch                string                 `json:"checkout_branch,omitempty"`
+	BranchPolicyID                string                 `json:"branch_policy_id,omitempty"`
+	BranchPolicyName              string                 `json:"branch_policy_name,omitempty"`
+	BranchPolicyBaseBranch        string                 `json:"branch_policy_base_branch,omitempty"`
+	BranchPolicyBranchTemplate    string                 `json:"branch_policy_branch_template,omitempty"`
+	BranchPolicyPullRequestTarget string                 `json:"branch_policy_pull_request_target,omitempty"`
+	Position                      int                    `json:"position"`
+	Metadata                      map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt                     time.Time              `json:"created_at"`
+	UpdatedAt                     time.Time              `json:"updated_at"`
 }
 
 // TaskWorkspaceFolder is a canonical host-folder attachment owned by a task.
@@ -1650,6 +1659,21 @@ type Repository struct {
 	CreatedAt              time.Time                 `json:"created_at"`
 	UpdatedAt              time.Time                 `json:"updated_at"`
 	DeletedAt              *time.Time                `json:"deleted_at,omitempty"`
+}
+
+// RepositoryBranchPolicy is a reusable branch workflow owned by one repository.
+// It is configuration, not task history: task repositories copy these fields
+// into their snapshot columns when a policy is selected.
+type RepositoryBranchPolicy struct {
+	ID                string    `json:"id"`
+	RepositoryID      string    `json:"repository_id"`
+	Name              string    `json:"name"`
+	Description       string    `json:"description,omitempty"`
+	BaseBranch        string    `json:"base_branch"`
+	BranchTemplate    string    `json:"branch_template"`
+	PullRequestTarget string    `json:"pull_request_target"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 // RepositorySet is a named, reusable group of workspace repositories that fills

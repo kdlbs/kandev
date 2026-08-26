@@ -20,9 +20,14 @@ import (
 )
 
 // Snapshot is the public representation of a backup file on disk.
+// Snapshot is the metadata one backup file exposes over the API. It
+// deliberately carries no on-disk path: GET /backups is readable by any
+// authenticated user (only the mutating and downloading routes are admin
+// only), and the absolute path would disclose the install's data directory to
+// all of them. Callers name a snapshot by Name; the service resolves it to a
+// path itself via resolveSnapshotPath.
 type Snapshot struct {
 	Name      string    `json:"name"`
-	Path      string    `json:"path"`
 	SizeBytes int64     `json:"size_bytes"`
 	ModTime   time.Time `json:"mtime"`
 	Kind      string    `json:"kind"` // "auto" | "manual"
@@ -121,7 +126,6 @@ func (s *Service) List() ([]Snapshot, error) {
 		}
 		out = append(out, Snapshot{
 			Name:      e.Name(),
-			Path:      filepath.Join(dir, e.Name()),
 			SizeBytes: info.Size(),
 			ModTime:   info.ModTime().UTC(),
 			Kind:      kind,

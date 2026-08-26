@@ -60,6 +60,9 @@ func (r *Repository) runMigrations() error {
 	if err := r.ensureRepositorySetsSchema(); err != nil {
 		return err
 	}
+	if err := r.ensureRepositoryBranchPoliciesSchema(); err != nil {
+		return err
+	}
 	r.migrate.Apply("task_sessions.execution_profile_id", `ALTER TABLE task_sessions ADD COLUMN execution_profile_id TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("task_sessions.route_generation", `ALTER TABLE task_sessions ADD COLUMN route_generation INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("task_sessions.route_state", `ALTER TABLE task_sessions ADD COLUMN route_state TEXT NOT NULL DEFAULT ''`)
@@ -77,6 +80,11 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("executors_running.local_pid", `ALTER TABLE executors_running ADD COLUMN local_pid INTEGER DEFAULT 0`)
 	r.migrate.Apply("tasks.is_ephemeral", `ALTER TABLE tasks ADD COLUMN is_ephemeral INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("task_repositories.checkout_branch", `ALTER TABLE task_repositories ADD COLUMN checkout_branch TEXT DEFAULT ''`)
+	r.migrate.Apply("task_repositories.branch_policy_id", `ALTER TABLE task_repositories ADD COLUMN branch_policy_id TEXT DEFAULT ''`)
+	r.migrate.Apply("task_repositories.branch_policy_name", `ALTER TABLE task_repositories ADD COLUMN branch_policy_name TEXT DEFAULT ''`)
+	r.migrate.Apply("task_repositories.branch_policy_base_branch", `ALTER TABLE task_repositories ADD COLUMN branch_policy_base_branch TEXT DEFAULT ''`)
+	r.migrate.Apply("task_repositories.branch_policy_branch_template", `ALTER TABLE task_repositories ADD COLUMN branch_policy_branch_template TEXT DEFAULT ''`)
+	r.migrate.Apply("task_repositories.branch_policy_pull_request_target", `ALTER TABLE task_repositories ADD COLUMN branch_policy_pull_request_target TEXT DEFAULT ''`)
 	// Multi-branch support: drop the old UNIQUE(task_id, repository_id) and
 	// replace it with UNIQUE(task_id, repository_id, checkout_branch) so the
 	// same repo can appear multiple times in a task on different branches.
@@ -590,6 +598,15 @@ func (r *Repository) ensureRepositorySetsSchema() error {
 	return nil
 }
 
+// ensureRepositoryBranchPoliciesSchema replays the policy DDL for databases
+// created before repository branch policies existed.
+func (r *Repository) ensureRepositoryBranchPoliciesSchema() error {
+	if _, err := r.db.Exec(repositoryBranchPoliciesSchemaDDL); err != nil {
+		return fmt.Errorf("create repository branch policies schema: %w", err)
+	}
+	return nil
+}
+
 // recreateTable checks whether tableName's DDL contains triggerPhrase and, if so,
 // runs statements inside a transaction with FK enforcement disabled.
 // This is the standard SQLite pattern for dropping columns or FK constraints,
@@ -1058,6 +1075,11 @@ func (r *Repository) recreateTaskRepositoriesForMultiBranch(trigger string) erro
 				repository_id TEXT NOT NULL,
 				base_branch TEXT DEFAULT '',
 				checkout_branch TEXT DEFAULT '',
+				branch_policy_id TEXT DEFAULT '',
+				branch_policy_name TEXT DEFAULT '',
+				branch_policy_base_branch TEXT DEFAULT '',
+				branch_policy_branch_template TEXT DEFAULT '',
+				branch_policy_pull_request_target TEXT DEFAULT '',
 				position INTEGER DEFAULT 0,
 				metadata TEXT DEFAULT '{}',
 				created_at TIMESTAMP NOT NULL,
@@ -1069,6 +1091,9 @@ func (r *Repository) recreateTaskRepositoriesForMultiBranch(trigger string) erro
 			`INSERT INTO task_repositories_new SELECT
 				id, task_id, repository_id, base_branch,
 				COALESCE(checkout_branch, ''),
+				COALESCE(branch_policy_id, ''), COALESCE(branch_policy_name, ''),
+				COALESCE(branch_policy_base_branch, ''), COALESCE(branch_policy_branch_template, ''),
+				COALESCE(branch_policy_pull_request_target, ''),
 				position, metadata, created_at, updated_at
 			FROM task_repositories`,
 			`DROP TABLE task_repositories`,

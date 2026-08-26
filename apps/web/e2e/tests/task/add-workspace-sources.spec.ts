@@ -24,7 +24,7 @@ async function chooseDirectory(
   const picker = page.locator('[data-testid="folder-picker-popover"][data-state="open"]');
   await expect(picker).toBeVisible();
   for (const segment of relativeDirectory.split(path.sep).filter(Boolean)) {
-    await picker.getByTestId("folder-picker-entry").filter({ hasText: segment }).click();
+    await picker.getByRole("button", { name: segment, exact: true }).click();
   }
   await picker.getByTestId("folder-picker-choose").click();
 }
@@ -32,6 +32,7 @@ async function chooseDirectory(
 function createSourceDirectories(root: string) {
   const gitEnv = makeGitEnv(root);
   const repositoryPath = path.join(root, "sources", "second-local-repository");
+  const originPath = path.join(root, "sources", "second-local-repository-origin.git");
   const folderPath = path.join(root, "sources", "plain-local-folder");
   fs.mkdirSync(repositoryPath, { recursive: true });
   fs.mkdirSync(folderPath, { recursive: true });
@@ -40,6 +41,18 @@ function createSourceDirectories(root: string) {
   execFileSync("git", ["init", "-b", "main"], { cwd: repositoryPath, env: gitEnv });
   execFileSync("git", ["add", "."], { cwd: repositoryPath, env: gitEnv });
   execFileSync("git", ["commit", "-m", "initial source"], { cwd: repositoryPath, env: gitEnv });
+  // Workspace-source materialization refreshes required branches before it
+  // creates the attached worktree. Give this local fixture a real offline
+  // origin so that refresh succeeds deterministically.
+  execFileSync("git", ["init", "--bare", "-b", "main", originPath], { env: gitEnv });
+  execFileSync("git", ["remote", "add", "origin", originPath], {
+    cwd: repositoryPath,
+    env: gitEnv,
+  });
+  execFileSync("git", ["push", "--set-upstream", "origin", "main"], {
+    cwd: repositoryPath,
+    env: gitEnv,
+  });
   return { repositoryPath, folderPath };
 }
 

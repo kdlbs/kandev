@@ -302,6 +302,7 @@ func buildWorktreeCreateRequest(req *EnvPrepareRequest) worktree.CreateRequest {
 		WorktreeBranchTicket:    req.WorktreeBranchTicket,
 		PullBeforeWorktree:      req.PullBeforeWorktree,
 		RemoteSyncHandled:       req.RemoteSyncHandled,
+		RefreshRepository:       req.RefreshRepository,
 		WorktreeID:              req.WorktreeID,
 		ReuseRequired:           req.WorkspaceReuseRequired,
 		TaskDirName:             req.TaskDirName,
@@ -417,6 +418,12 @@ func (p *WorktreePreparer) prepareMultiRepo(
 		steps = newSteps
 		stepIdx = nextIdx
 		if err != nil {
+			err = &RepositoryPreparationError{
+				RepositoryID:     spec.RepositoryID,
+				TaskRepositoryID: spec.TaskRepositoryID,
+				RepositoryName:   spec.RepoName,
+				Cause:            err,
+			}
 			p.rollbackWorktrees(ctx, createdIDs)
 			return &EnvPrepareResult{
 				Success:      false,
@@ -528,6 +535,7 @@ func (p *WorktreePreparer) prepareOneRepo(
 	subReq.WorktreeBranchTicket = spec.WorktreeBranchTicket
 	subReq.PullBeforeWorktree = spec.PullBeforeWorktree
 	subReq.RemoteSyncHandled = spec.RemoteSyncHandled
+	subReq.RefreshRepository = spec.RefreshRepository
 	subReq.BranchSlug = spec.BranchSlug
 	subReq.BranchIdentitySlug = repoBranchIdentitySlug(spec)
 	// Strip the multi-repo list to avoid re-entering the multi-repo branch.
@@ -607,5 +615,7 @@ func applySyncProgressEvent(step *PrepareStep, event worktree.SyncProgressEvent)
 		now := time.Now()
 		step.Status = PrepareStepCompleted
 		step.EndedAt = &now
+	case worktree.SyncProgressFailed:
+		completeStepError(step, event.Error)
 	}
 }

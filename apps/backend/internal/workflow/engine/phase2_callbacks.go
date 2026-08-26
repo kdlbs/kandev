@@ -77,7 +77,7 @@ func (c QueueRunCallback) Execute(ctx context.Context, in ActionInput) (ActionRe
 			IdempotencyKey: idempotencyKey(in, agentID, taskID),
 			Payload:        queueRunPayload(in, in.Action.QueueRun.Payload, taskID),
 		}
-		if err := c.Adapter.QueueRun(ctx, req); err != nil {
+		if _, err := c.Adapter.QueueRun(ctx, req); err != nil {
 			return ActionResult{}, fmt.Errorf("queue_run for agent %s: %w", agentID, err)
 		}
 	}
@@ -421,7 +421,7 @@ func (c QueueRunForEachParticipantCallback) Execute(ctx context.Context, in Acti
 			IdempotencyKey: idempotencyKey(in, p.AgentProfileID, taskID),
 			Payload:        queueRunPayload(in, cfg.Payload, taskID),
 		}
-		if err := c.Adapter.QueueRun(ctx, req); err != nil {
+		if _, err := c.Adapter.QueueRun(ctx, req); err != nil {
 			return ActionResult{}, fmt.Errorf("queue_run for participant %s: %w", p.ID, err)
 		}
 	}

@@ -1875,5 +1875,12 @@
   "baseBranchNotSet": "Branch base não definido",
   "launchRecoveryFailed": "Não foi possível iniciar a recuperação",
   "tryRecoveryAgain": "Tente novamente a ação de recuperação.",
-  "launchFailedSeeDetails": "O início da tarefa falhou. Abra os detalhes da tarefa para ver as ações de recuperação."
+  "launchFailedSeeDetails": "O início da tarefa falhou. Abra os detalhes da tarefa para ver as ações de recuperação.",
+  "branchPoliciesGroup": "Políticas de branches",
+  "branchesGroup": "Branches Git",
+  "branchPolicyMarker": "Política",
+  "branchPolicyOptionSummary": "de {{base}} para {{target}}",
+  "branchPolicySelected": "{{name}} (de {{base}})",
+  "branchPolicyUnavailable": "O branch base não está disponível. Atualize os branches ou edite esta política.",
+  "branchPolicyRequiresSingleRepository": "As políticas de branches requerem um único repositório com o executor local."
 }

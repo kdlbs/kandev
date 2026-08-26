@@ -189,7 +189,9 @@ test.describe("PR CI automation options", () => {
     await expect(
       popover.getByRole("switch", { name: "Auto-fix CI and address comments" }),
     ).toBeVisible();
-    await expect(popover.getByRole("switch", { name: "Auto-merge when ready" })).toBeVisible();
+    await expect(
+      popover.getByRole("switch", { name: "Auto-merge or requeue when ready" }),
+    ).toBeVisible();
     const reviewFollowUp = popover.getByTestId("ci-review-follow-up-trigger");
     await expect(reviewFollowUp).toHaveAttribute("aria-expanded", "false");
     await reviewFollowUp.click();
@@ -211,7 +213,7 @@ test.describe("PR CI automation options", () => {
     ).toBeVisible();
 
     await popover.getByRole("switch", { name: "Auto-fix CI and address comments" }).click();
-    await popover.getByRole("switch", { name: "Auto-merge when ready" }).click();
+    await popover.getByRole("switch", { name: "Auto-merge or requeue when ready" }).click();
     await popover.getByRole("switch", { name: "Your review is requested" }).click();
     await popover.getByRole("switch", { name: "PR merged" }).click();
 
@@ -225,11 +227,17 @@ test.describe("PR CI automation options", () => {
       });
 
     await popover.getByLabel("Explain CI automation options").hover();
-    await expect(testPage.getByText(/1 minute PR refresh loop/)).toBeVisible();
-    await expect(testPage.getByText(/notification switches wake the task's agent/)).toBeVisible();
-    await expect(
-      testPage.getByText(/workspace's connected GitHub account is requested for review/i),
-    ).toBeVisible();
+    const queueRecoveryHelp = testPage.getByRole("tooltip");
+    await expect(queueRecoveryHelp).toContainText("Auto-fix repairs actionable queue removals.");
+    await expect(queueRecoveryHelp).toContainText(
+      "Auto-merge submits an eligible head or requeues it after a new commit.",
+    );
+    await expect(queueRecoveryHelp).toContainText(
+      "Both controls form the repair and requeue loop.",
+    );
+    await expect(queueRecoveryHelp).toContainText(
+      "Kandev never requeues the same head after removal.",
+    );
 
     await openPromptDialog(session);
     const promptDialog = testPage.getByRole("dialog", { name: "Auto-fix prompt" });
@@ -264,7 +272,7 @@ test.describe("PR CI automation options", () => {
       }),
     ).toBeChecked();
     await expect(
-      reloaded.prTopbarPopover().getByRole("switch", { name: "Auto-merge when ready" }),
+      reloaded.prTopbarPopover().getByRole("switch", { name: "Auto-merge or requeue when ready" }),
     ).toBeChecked();
   });
 
@@ -303,7 +311,7 @@ test.describe("PR CI automation options", () => {
       popover.getByRole("switch", { name: "Auto-fix CI and address comments" }),
     ).toBeVisible();
     await popover.getByRole("switch", { name: "Auto-fix CI and address comments" }).click();
-    await popover.getByRole("switch", { name: "Auto-merge when ready" }).click();
+    await popover.getByRole("switch", { name: "Auto-merge or requeue when ready" }).click();
 
     await expect
       .poll(async () => apiClient.getTaskCIAutomationOptions(taskId))
@@ -327,7 +335,9 @@ test.describe("PR CI automation options", () => {
     await expect(
       popover.getByRole("switch", { name: "Auto-fix CI and address comments" }),
     ).not.toBeChecked();
-    await expect(popover.getByRole("switch", { name: "Auto-merge when ready" })).not.toBeChecked();
+    await expect(
+      popover.getByRole("switch", { name: "Auto-merge or requeue when ready" }),
+    ).not.toBeChecked();
 
     // Reload: independence must persist across a full page load. Select each
     // tab explicitly — the default tab tracks live "worst status" data (real
@@ -340,14 +350,14 @@ test.describe("PR CI automation options", () => {
       reloadedPopover.getByRole("switch", { name: "Auto-fix CI and address comments" }),
     ).toBeChecked();
     await expect(
-      reloadedPopover.getByRole("switch", { name: "Auto-merge when ready" }),
+      reloadedPopover.getByRole("switch", { name: "Auto-merge or requeue when ready" }),
     ).toBeChecked();
     await reloadedPopover.getByRole("tab", { name: `${REPO} #${secondPRNumber}` }).click();
     await expect(
       reloadedPopover.getByRole("switch", { name: "Auto-fix CI and address comments" }),
     ).not.toBeChecked();
     await expect(
-      reloadedPopover.getByRole("switch", { name: "Auto-merge when ready" }),
+      reloadedPopover.getByRole("switch", { name: "Auto-merge or requeue when ready" }),
     ).not.toBeChecked();
   });
 
@@ -366,5 +376,175 @@ test.describe("PR CI automation options", () => {
     await expect(popover.getByRole("alert")).toContainText(
       "Lifecycle prompt could not be delivered to a task session.",
     );
+  });
+
+  test("desktop merge queue recovery proves repair and new-head requeue", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const queuedHead = "head-queued-desktop";
+    const replacementHead = "head-replacement-desktop";
+    const taskId = await seedTaskWithPR(apiClient, seedData, "CI merge queue recovery", {
+      head_sha: queuedHead,
+      checks_state: "success",
+      checks_total: 1,
+      checks_passing: 1,
+      unresolved_review_threads: 0,
+      mergeable_state: "clean",
+      merge_queue_state: "queued",
+      merge_queue_position: 1,
+      merge_queue_entry_id: "entry-desktop-a",
+      merge_queue_entry_head_sha: queuedHead,
+    });
+    await apiClient.mockGitHubSetMergeOutcome(OWNER, REPO, PR_NUMBER, "queued");
+
+    const session = await openTask(testPage, taskId);
+    const popover = session.prTopbarPopover();
+    await expect(popover.getByText("Merge queue automation")).toBeVisible();
+    await expect(popover.getByText("PR #144 is in the merge queue")).toBeVisible();
+    await expect(popover.getByTestId("ci-merge-queue-recovery-status")).toContainText(
+      "Active merge queue attempt",
+    );
+    await expect(popover.getByRole("switch")).toHaveCount(2);
+
+    await popover.getByRole("switch", { name: "Auto-fix CI and address comments" }).click();
+    await popover.getByRole("switch", { name: "Auto-merge or requeue when ready" }).click();
+    await expect
+      .poll(async () => apiClient.getTaskCIAutomationOptions(taskId))
+      .toMatchObject({
+        pr_options: expect.arrayContaining([
+          expect.objectContaining({
+            pr_number: PR_NUMBER,
+            auto_fix_enabled: true,
+            auto_merge_enabled: true,
+          }),
+        ]),
+      });
+    await expect.poll(() => apiClient.mockGitHubGetMergeAttempts()).toHaveLength(0);
+
+    await apiClient.mockGitHubTransitionMergeQueue({
+      task_id: taskId,
+      owner: OWNER,
+      repo: REPO,
+      pr_number: PR_NUMBER,
+      head_sha: queuedHead,
+      merge_queue_state: "",
+      merge_queue_entry_id: "",
+      merge_queue_entry_head_sha: "",
+      merge_queue_last_removal_id: "removal-desktop-a",
+      merge_queue_last_removed_at: new Date().toISOString(),
+      merge_queue_last_removal_reason: "checks failed on merge group",
+      merge_queue_last_removal_before_sha: "merge-group-desktop-a",
+      checks: [
+        {
+          name: "merge group checks",
+          status: "completed",
+          conclusion: "failure",
+          html_url: "https://example.test/checks/merge-group-desktop",
+        },
+      ],
+    });
+
+    await expect
+      .poll(async () => {
+        const options = await apiClient.getTaskCIAutomationOptions(taskId);
+        const state = options.pr_states?.find((item) => item.pr_number === PR_NUMBER);
+        return {
+          round: state?.auto_fix_round_count,
+          event: state?.last_queue_fix_event_id,
+          cause: state?.last_queue_removal_cause,
+        };
+      })
+      .toEqual({ round: 1, event: "removal-desktop-a", cause: "checks_failed" });
+    await expect(popover.getByText("Merge queue recovery")).toBeVisible();
+    await expect(popover.getByText("PR #144 was removed: checks failed")).toBeVisible();
+    await expect(popover.getByTestId("ci-merge-queue-recovery-status")).toContainText(
+      "Repair requested. Waiting for a new commit before requeue",
+    );
+
+    // A clean replacement of the same head is still blocked by the durable
+    // queue-attempt head guard, so it cannot create a merge request.
+    await apiClient.mockGitHubTransitionMergeQueue({
+      task_id: taskId,
+      owner: OWNER,
+      repo: REPO,
+      pr_number: PR_NUMBER,
+      head_sha: queuedHead,
+      merge_queue_state: "",
+      merge_queue_entry_id: "",
+      merge_queue_entry_head_sha: "",
+      merge_queue_last_removal_id: "removal-desktop-a",
+      merge_queue_last_removal_reason: "checks failed on merge group",
+      merge_queue_last_removal_before_sha: "merge-group-desktop-a",
+      checks: [
+        {
+          name: "merge group checks",
+          status: "completed",
+          conclusion: "success",
+          html_url: "https://example.test/checks/merge-group-desktop",
+        },
+      ],
+    });
+    await expect.poll(() => apiClient.mockGitHubGetMergeAttempts()).toHaveLength(0);
+
+    await apiClient.mockGitHubTransitionMergeQueue({
+      task_id: taskId,
+      owner: OWNER,
+      repo: REPO,
+      pr_number: PR_NUMBER,
+      head_sha: replacementHead,
+      merge_queue_state: "",
+      merge_queue_entry_id: "",
+      merge_queue_entry_head_sha: "",
+      merge_queue_last_removal_id: "removal-desktop-a",
+      merge_queue_last_removal_reason: "checks failed on merge group",
+      merge_queue_last_removal_before_sha: "merge-group-desktop-a",
+      checks: [
+        {
+          name: "merge group checks",
+          status: "completed",
+          conclusion: "success",
+          html_url: "https://example.test/checks/merge-group-desktop",
+        },
+      ],
+    });
+    await expect.poll(() => apiClient.mockGitHubGetMergeAttempts()).toHaveLength(1);
+    await expect
+      .poll(async () => apiClient.getTaskCIAutomationOptions(taskId))
+      .toMatchObject({
+        pr_states: expect.arrayContaining([
+          expect.objectContaining({ last_queue_attempt_head_sha: replacementHead }),
+        ]),
+      });
+
+    // Reflect GitHub accepting the queued merge request. The old removal
+    // evidence remains durable, but the active entry takes presentation
+    // precedence and a second merge request is still prohibited.
+    await apiClient.mockGitHubTransitionMergeQueue({
+      task_id: taskId,
+      owner: OWNER,
+      repo: REPO,
+      pr_number: PR_NUMBER,
+      head_sha: replacementHead,
+      merge_queue_state: "queued",
+      merge_queue_position: 1,
+      merge_queue_entry_id: "entry-desktop-b",
+      merge_queue_entry_head_sha: replacementHead,
+      checks: [
+        {
+          name: "merge group checks",
+          status: "completed",
+          conclusion: "success",
+          html_url: "https://example.test/checks/merge-group-desktop",
+        },
+      ],
+    });
+    await expect(popover.getByText("Merge queue automation")).toBeVisible();
+    await expect(popover.getByTestId("ci-merge-queue-recovery-status")).toContainText(
+      "Active merge queue attempt",
+    );
+    await expect.poll(() => apiClient.mockGitHubGetMergeAttempts()).toHaveLength(1);
   });
 });

@@ -22,6 +22,7 @@ import {
   buildDebugEntries,
   buildArchivedValue,
   resolveTaskProps,
+  selectWorkspaceRepositories,
 } from "@/components/task/task-page-content-helpers";
 import type { useSessionResumption } from "@/hooks/domains/session/use-session-resumption";
 import type { useSessionAgentctl } from "@/hooks/domains/session/use-session-agentctl";
@@ -225,7 +226,10 @@ function useTaskPageDerivedProps({
   officeTaskHref,
   onTaskUnarchived,
 }: TaskPageInnerProps) {
-  const taskProps = resolveTaskProps(task, repository);
+  const workspaceRepositories = useAppStore((state) =>
+    selectWorkspaceRepositories(state.repositories.itemsByWorkspaceId, task?.workspace_id),
+  );
+  const taskProps = resolveTaskProps(task, repository, workspaceRepositories);
   const remote = resolveRemoteExecutor(resumption.sessionStatus as RemoteExecutorStatus | null);
   const embeddedVscode = useEmbeddedVscodeSupport(effectiveSessionId, resumption.sessionStatus);
   const activeSessionMetadata = useAppStore((state) =>
@@ -287,6 +291,8 @@ export function TaskPageInner(props: TaskPageInnerProps) {
         <VcsDialogsProvider
           sessionId={effectiveSessionId}
           baseBranch={taskProps.baseBranch}
+          pullRequestBaseBranch={taskProps.pullRequestTarget}
+          pullRequestTargetsByRepository={taskProps.pullRequestTargetsByRepository}
           taskTitle={taskProps.taskTitle}
           displayBranch={merged.worktreeBranch}
         >

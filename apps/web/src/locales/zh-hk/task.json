@@ -1875,5 +1875,12 @@
   "baseBranchNotSet": "未設定基礎分支",
   "launchRecoveryFailed": "無法開始恢復",
   "tryRecoveryAgain": "請再次嘗試恢復操作。",
-  "launchFailedSeeDetails": "任務啓動失敗。開啟任務詳情以查看恢復操作。"
+  "launchFailedSeeDetails": "任務啓動失敗。開啟任務詳情以查看恢復操作。",
+  "branchPoliciesGroup": "分支策略",
+  "branchesGroup": "分支",
+  "branchPolicyMarker": "策略",
+  "branchPolicyOptionSummary": "從 {{base}} 到 {{target}}",
+  "branchPolicySelected": "{{name}}（從 {{base}}）",
+  "branchPolicyUnavailable": "基礎分支不可用。請刷新分支或編輯此策略。",
+  "branchPolicyRequiresSingleRepository": "使用本機執行器時，分支策略需要單一儲存庫。"
 }

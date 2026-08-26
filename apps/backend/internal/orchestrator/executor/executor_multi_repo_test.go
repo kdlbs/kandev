@@ -232,6 +232,24 @@ func TestFailingLaunchRepositoryID_UsesExactBranchToken(t *testing.T) {
 	}
 }
 
+func TestFailingLaunchRepositoryIdentityUsesPreparationError(t *testing.T) {
+	req := &LaunchAgentRequest{Repositories: []RepoSpec{
+		{RepositoryID: "repo-front", TaskRepositoryID: "tr-1", BaseBranch: "main"},
+		{RepositoryID: "repo-back", TaskRepositoryID: "tr-2", BaseBranch: "main"},
+	}}
+	launchErr := &lifecycle.RepositoryPreparationError{
+		RepositoryID:     "repo-back",
+		TaskRepositoryID: "tr-2",
+		RepositoryName:   "backend",
+		Cause:            errors.New("required refresh failed"),
+	}
+
+	repositoryID, taskRepositoryID := failingLaunchRepositoryIdentity(req, launchErr)
+	if repositoryID != "repo-back" || taskRepositoryID != "tr-2" {
+		t.Fatalf("failing launch identity = %q/%q, want repo-back/tr-2", repositoryID, taskRepositoryID)
+	}
+}
+
 func TestLaunchPreparedSession_MultiRepo_PersistsPerRepoEnvironmentAndWorktreeRows(t *testing.T) {
 	repo := newMockRepository()
 	taskID := "task-multi-2"

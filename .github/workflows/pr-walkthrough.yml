@@ -392,7 +392,18 @@ jobs:
           test -f scripts/pr-walkthrough-pr-body
           test -n "$PUBLIC_URL"
 
-          gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" > pr-response.json
+          pr_response_ok=false
+          for attempt in 1 2 3; do
+            if gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" > pr-response.json &&
+              python3 -c 'import json; json.load(open("pr-response.json", encoding="utf-8"))'; then
+              pr_response_ok=true
+              break
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              sleep 2
+            fi
+          done
+          test "$pr_response_ok" = true
 
           set +e
           python3 scripts/pr-walkthrough-pr-body \
@@ -410,8 +421,18 @@ jobs:
           fi
           test "$update_status" -eq 0
 
-          gh api --method PATCH \
-            "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
-            --input pr-update.json \
-            > /dev/null
+          patch_ok=false
+          for attempt in 1 2 3; do
+            if gh api --method PATCH \
+              "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
+              --input pr-update.json \
+              --silent; then
+              patch_ok=true
+              break
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              sleep 2
+            fi
+          done
+          test "$patch_ok" = true
           echo "Added the walkthrough link to the top of the PR description." >> "$GITHUB_STEP_SUMMARY"

@@ -202,6 +202,18 @@ func TestBranchMaterializer_SecondBranchKeepsTaskRootPromoted(t *testing.T) {
 	}
 }
 
+func TestTaskRepositoryBranchTemplatePrefersPolicySnapshot(t *testing.T) {
+	repo := &models.Repository{WorktreeBranchTemplate: "feature/{title}"}
+	legacy := &models.TaskRepository{}
+	if got := taskRepositoryBranchTemplate(repo, legacy); got != "feature/{title}" {
+		t.Fatalf("legacy template = %q, want repository fallback", got)
+	}
+	policy := &models.TaskRepository{BranchPolicyBranchTemplate: "bugfix/{title}-{suffix}"}
+	if got := taskRepositoryBranchTemplate(repo, policy); got != "bugfix/{title}-{suffix}" {
+		t.Fatalf("policy template = %q, want snapshot template", got)
+	}
+}
+
 // setupMaterializerScenario creates a bare origin repo + a clone that
 // serves as the "primary" worktree at <task-root>/kandev/. Returns the
 // repository path, the task root, and the primary worktree path.

@@ -2,6 +2,7 @@
 status: active
 system: ui
 created: 2026-08-02
+updated: 2026-08-23
 owners:
   - kandev
 ---
@@ -25,7 +26,7 @@ Starting another agent inside an existing task is another prompt-authoring flow,
 - **AC-UI-AGENT-LAUNCH-PROMPT-COMPOSER-001.4:** Copying the initial prompt, choosing blank context, or generating a session summary updates that same composer without losing its authoring tools.
 - **AC-UI-AGENT-LAUNCH-PROMPT-COMPOSER-001.5:** The Start Agent button and the existing Ctrl/Cmd+Enter shortcut launch with the current prompt and attachments. Enter used to select an open mention result never launches the agent.
 - **AC-UI-AGENT-LAUNCH-PROMPT-COMPOSER-001.6:** The Start Agent action remains disabled while the prompt is empty, while context is being summarized, while launch is in progress, or when no compatible agent profile is available.
-- **AC-UI-AGENT-LAUNCH-PROMPT-COMPOSER-001.7:** Desktop and phone layouts expose the same capabilities and launch result. On phone, the existing mobile sessions entry point opens the dialog; its prompt menu and controls remain touch reachable without horizontal document overflow.
+- **AC-UI-AGENT-LAUNCH-PROMPT-COMPOSER-001.7:** Desktop and phone layouts expose the same capabilities and launch result. On phone, the existing mobile sessions entry point opens the dialog; the prompt menu follows the shared [composer suggestion overlay requirements](composer-suggestion-overlays.md), and the controls remain touch reachable without horizontal document overflow.
 - **AC-UI-AGENT-LAUNCH-PROMPT-COMPOSER-001.8:** Agent launch continues to use the existing session launch contract, task environment, context selection, profile compatibility rules, and guarded enhancement delivery.
 
 ## Migrated source detail
@@ -42,7 +43,7 @@ Starting another agent inside an existing task is another prompt-authoring flow,
 - Copying the initial prompt, choosing blank context, or generating a session summary updates that same composer without losing its authoring tools.
 - The Start Agent button and the existing Ctrl/Cmd+Enter shortcut launch with the current prompt and attachments. Enter used to select an open mention result never launches the agent.
 - The Start Agent action remains disabled while the prompt is empty, while context is being summarized, while launch is in progress, or when no compatible agent profile is available.
-- Desktop and phone layouts expose the same capabilities and launch result. On phone, the existing mobile sessions entry point opens the dialog; its prompt menu and controls remain touch reachable without horizontal document overflow.
+- Desktop and phone layouts expose the same capabilities and launch result. On phone, the existing mobile sessions entry point opens the dialog; the prompt menu follows the shared [composer suggestion overlay requirements](composer-suggestion-overlays.md), and the controls remain touch reachable without horizontal document overflow.
 - Agent launch continues to use the existing session launch contract, task environment, context selection, profile compatibility rules, and guarded enhancement delivery.
 
 ## Failure modes
