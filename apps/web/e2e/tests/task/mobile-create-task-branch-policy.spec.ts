@@ -39,28 +39,38 @@ test.describe("Task branch policy selection on mobile", () => {
       await mobile.mobileFab.tap();
       const dialog = testPage.getByTestId("create-task-dialog");
       await expect(dialog).toBeVisible();
-      await dialog.getByTestId("executor-profile-selector").tap();
-      await testPage.getByRole("option", { name: new RegExp(localProfile.name) }).tap();
-      await dialog.getByTestId("branch-chip-trigger").tap();
-      const option = testPage.getByRole("option", { name: new RegExp(policy.name) });
+      const executorSelector = dialog.getByTestId("executor-profile-selector");
+      await expect(async () => {
+        await executorSelector.tap();
+        await testPage.getByRole("option", { name: new RegExp(localProfile.name) }).click();
+        await expect(executorSelector).toContainText(localProfile.name, { timeout: 1_000 });
+      }).toPass({ timeout: 10_000 });
+      const branchTrigger = dialog.getByTestId("branch-chip-trigger");
+      await branchTrigger.tap();
+      const policyOption = () => testPage.getByRole("option", { name: new RegExp(policy.name) });
+      const option = policyOption();
       await expect(option).toContainText("Policy");
+      await expect(option).not.toHaveAttribute("aria-disabled", "true", { timeout: 30_000 });
       await expectPolicyOptionUsesOneLine(option, policy.name);
+      await expect(async () => {
+        if (!(await policyOption().isVisible())) await branchTrigger.tap();
+        await policyOption().evaluate((element) => (element as HTMLElement).click());
+        await expect(branchTrigger).toContainText(policy.name, { timeout: 1_000 });
+      }).toPass({ timeout: 10_000 });
+      await expect(dialog.getByTestId("fresh-branch-toggle")).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+
+      await branchTrigger.tap();
       const policyDetails = testPage.getByRole("dialog", { name: policy.name });
       await expect(async () => {
-        await testPage.getByTestId(`branch-policy-option-info-${policy.id}`).tap({ force: true });
+        if (!(await policyOption().isVisible())) await branchTrigger.tap();
+        await testPage.getByTestId(`branch-policy-option-info-${policy.id}`).dispatchEvent("click");
         await expect(policyDetails).toBeVisible({ timeout: 1_000 });
       }).toPass({ timeout: 10_000 });
       await expect(policyDetails).toContainText(
         "Base: main. Template: mobile/{title}-{suffix}. Pull request target: main.",
-      );
-      await testPage.keyboard.press("Escape");
-      await dialog.getByTestId("branch-chip-trigger").tap();
-      const reopenedOption = testPage.getByRole("option", { name: new RegExp(policy.name) });
-      await reopenedOption.tap({ force: true });
-      await expect(dialog.getByTestId("branch-chip-trigger")).toContainText(policy.name);
-      await expect(dialog.getByTestId("fresh-branch-toggle")).toHaveAttribute(
-        "aria-pressed",
-        "true",
       );
       expect(
         await testPage.evaluate(() => document.documentElement.scrollWidth),
