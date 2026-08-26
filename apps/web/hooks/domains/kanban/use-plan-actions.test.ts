@@ -4,6 +4,7 @@ import type { ContextFile } from "@/lib/state/context-files-store";
 
 const mockGetState = vi.fn();
 const mockMoveTask = vi.hoisted(() => vi.fn());
+const mockToast = vi.hoisted(() => vi.fn());
 const mockAppState = vi.hoisted(() => ({
   value: {
     kanban: { workflowId: "workflow-1", steps: [], tasks: [] },
@@ -35,7 +36,7 @@ vi.mock("@/components/state-provider", () => ({
 }));
 
 vi.mock("@/components/toast-provider", () => ({
-  useToast: () => ({ toast: vi.fn() }),
+  useToast: () => ({ toast: mockToast }),
 }));
 
 vi.mock("@/lib/ws/connection", () => ({
@@ -155,32 +156,35 @@ describe("collectImplementPlanInput", () => {
   });
 });
 
+/** Plan step followed by an auto-start work step, with task-1 sitting on Plan. */
+function setUpPlanActionsState() {
+  vi.clearAllMocks();
+  mockMoveTask.mockResolvedValue(undefined);
+  mockAppState.value = {
+    ...mockAppState.value,
+    kanban: {
+      workflowId: "workflow-1",
+      steps: [
+        {
+          id: "plan-step",
+          title: "Plan",
+          position: 1,
+          events: { on_enter: [{ type: "enable_plan_mode" }] },
+        },
+        {
+          id: "work-step",
+          title: "Work",
+          position: 2,
+          events: { on_enter: [{ type: "auto_start_agent" }] },
+        },
+      ],
+      tasks: [{ id: "task-1", workflowStepId: "plan-step" }],
+    },
+  };
+}
+
 describe("usePlanActions", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockMoveTask.mockResolvedValue(undefined);
-    mockAppState.value = {
-      ...mockAppState.value,
-      kanban: {
-        workflowId: "workflow-1",
-        steps: [
-          {
-            id: "plan-step",
-            title: "Plan",
-            position: 1,
-            events: { on_enter: [{ type: "enable_plan_mode" }] },
-          },
-          {
-            id: "work-step",
-            title: "Work",
-            position: 2,
-            events: { on_enter: [{ type: "auto_start_agent" }] },
-          },
-        ],
-        tasks: [{ id: "task-1", workflowStepId: "plan-step" }],
-      },
-    };
-  });
+  beforeEach(setUpPlanActionsState);
 
   it("keeps the implement handler available in plan mode before an auto-start work step", () => {
     const chatInputRef = {
@@ -260,5 +264,36 @@ describe("usePlanActions", () => {
     );
 
     expect(result.current.implementPlanHandler).toBeUndefined();
+  });
+});
+
+describe("usePlanActions proceed failures", () => {
+  beforeEach(setUpPlanActionsState);
+
+  it("puts the backend's refusal reason in the proceed toast", async () => {
+    // A phone has no console to fall back on: if the toast drops the reason the
+    // user is told the step failed and nothing about why.
+    mockMoveTask.mockRejectedValueOnce(new Error("task has an active session (RUNNING)"));
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { result } = renderHook(() =>
+      usePlanActions({
+        resolvedSessionId: "session-1",
+        taskId: "task-1",
+        planModeEnabled: true,
+        handlePlanModeChange: vi.fn(),
+        chatInputRef: { current: null },
+      }),
+    );
+
+    await act(async () => {
+      await result.current.proceed();
+    });
+
+    expect(mockToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description: "task has an active session (RUNNING)",
+        variant: "error",
+      }),
+    );
   });
 });
