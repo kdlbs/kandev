@@ -12,6 +12,9 @@ function renderBoard() {
           <button type="button" data-testid="card-action">
             <svg data-testid="card-action-icon" />
           </button>
+          <div data-kanban-card="" data-testid="task-card-shell">
+            <span data-testid="task-card-shell-child" />
+          </div>
           <div data-testid="draggable-card" draggable />
         </div>
       )}
@@ -60,6 +63,10 @@ describe("AdaptiveDesktopKanban mouse panning", () => {
     fireEvent.mouseMove(window, { buttons: 1, clientX: 100 });
     expect(window.scrollLeft).toBe(400);
 
+    fireEvent.mouseDown(screen.getByTestId("task-card-shell-child"), { button: 0, clientX: 200 });
+    fireEvent.mouseMove(window, { buttons: 1, clientX: 100 });
+    expect(window.scrollLeft).toBe(400);
+
     fireEvent.mouseDown(screen.getByTestId("draggable-card"), { button: 0, clientX: 200 });
     fireEvent.mouseMove(window, { buttons: 1, clientX: 100 });
     expect(window.scrollLeft).toBe(400);
@@ -70,7 +77,9 @@ describe("AdaptiveDesktopKanban mouse panning", () => {
     window.scrollLeft = 400;
 
     startPan(window);
+    expect(window.style.scrollSnapType).toBe("none");
     fireEvent.mouseUp(window);
+    expect(window.style.scrollSnapType).toBe("");
     const releasedPosition = window.scrollLeft;
     fireEvent.mouseMove(window, { buttons: 0, clientX: 100 });
     expect(window.scrollLeft).toBe(releasedPosition);

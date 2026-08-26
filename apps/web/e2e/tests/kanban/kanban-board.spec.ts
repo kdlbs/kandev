@@ -144,16 +144,18 @@ test.describe("Kanban board", () => {
       .toBeGreaterThan(0);
 
     const pannedPosition = await scrollWindow.evaluate((element) => element.scrollLeft);
+    expect(pannedPosition).toBeGreaterThan(0);
     await testPage.mouse.move(windowBox.x - 8, startY);
-    await testPage.mouse.move(startX - 100, startY);
-    await expect
-      .poll(() => scrollWindow.evaluate((element) => element.scrollLeft))
-      .toBe(pannedPosition);
+    await scrollWindow.evaluate((element) => {
+      element.scrollLeft = 0;
+    });
+    const reentryX = windowBox.x + 16;
+    await testPage.mouse.move(reentryX, startY);
+    await expect.poll(() => scrollWindow.evaluate((element) => element.scrollLeft)).toBe(0);
     await testPage.mouse.up();
+    await expect(scrollWindow).toHaveClass(/cursor-grab/);
     await testPage.mouse.move(startX - 140, startY);
-    await expect
-      .poll(() => scrollWindow.evaluate((element) => element.scrollLeft))
-      .toBe(pannedPosition);
+    await expect.poll(() => scrollWindow.evaluate((element) => element.scrollLeft)).toBe(0);
     await expect
       .poll(() =>
         testPage.evaluate(
@@ -165,30 +167,7 @@ test.describe("Kanban board", () => {
     await scrollWindow.evaluate((element) => {
       element.scrollLeft = 0;
     });
-    const sourceCard = kanban.taskCard(task.id);
-    const targetColumn = kanban.columnByStepId(targetStep.id);
-    const [sourceBox, targetBox] = await Promise.all([
-      sourceCard.boundingBox(),
-      targetColumn.boundingBox(),
-    ]);
-    if (!sourceBox || !targetBox) throw new Error("Kanban DnD targets have no layout boxes");
-    await testPage.mouse.move(
-      sourceBox.x + sourceBox.width / 2,
-      sourceBox.y + sourceBox.height / 2,
-    );
-    await testPage.mouse.down();
-    await testPage.mouse.move(
-      sourceBox.x + sourceBox.width / 2 + 20,
-      sourceBox.y + sourceBox.height / 2,
-    );
-    await testPage.mouse.move(
-      targetBox.x + targetBox.width / 2,
-      targetBox.y + targetBox.height / 2,
-      {
-        steps: 12,
-      },
-    );
-    await testPage.mouse.up();
+    await kanban.moveTaskWithinWorkflow(task.id, targetStep.id);
 
     await expect
       .poll(async () => (await apiClient.getTask(task.id)).workflow_step_id)

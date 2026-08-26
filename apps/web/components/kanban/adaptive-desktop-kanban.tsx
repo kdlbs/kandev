@@ -23,6 +23,7 @@ const INTERACTIVE_TARGET_SELECTOR = [
   "summary",
   "[contenteditable]",
   "[draggable='true']",
+  "[data-kanban-card]",
   "[role]",
   "[tabindex]",
 ].join(", ");
@@ -37,11 +38,13 @@ export function AdaptiveDesktopKanban({
   isDragging = false,
   renderColumn,
 }: AdaptiveDesktopKanbanProps) {
+  const scrollWindowRef = useRef<HTMLDivElement | null>(null);
   const panStartRef = useRef<PanStart | null>(null);
   const [isPanning, setIsPanning] = useState(false);
 
   const cancelPan = () => {
     panStartRef.current = null;
+    scrollWindowRef.current?.style.removeProperty("scroll-snap-type");
     setIsPanning(false);
   };
 
@@ -67,6 +70,7 @@ export function AdaptiveDesktopKanban({
 
     if (!isPanning) {
       window.getSelection()?.removeAllRanges();
+      event.currentTarget.style.scrollSnapType = "none";
       setIsPanning(true);
     }
     event.preventDefault();
@@ -76,6 +80,7 @@ export function AdaptiveDesktopKanban({
   return (
     <div data-testid="desktop-kanban-layout" className="h-full min-h-0 min-w-0">
       <div
+        ref={scrollWindowRef}
         data-testid="desktop-kanban-scroll-window"
         className={`h-full min-h-0 min-w-0 overflow-x-auto snap-x snap-mandatory ${
           isPanning ? "cursor-grabbing select-none" : "cursor-grab"
