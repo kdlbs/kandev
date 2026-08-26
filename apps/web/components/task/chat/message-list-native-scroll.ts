@@ -1,5 +1,3 @@
-/* eslint-disable max-lines -- pagination and anchoring state share one scroll owner. */
-
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useAppStoreApi } from "@/components/state-provider";
@@ -11,6 +9,7 @@ import {
 import type { Message } from "@/lib/types/http";
 import { TASK_DESCRIPTION_SYNTHETIC_ID, type RenderItem } from "@/hooks/use-processed-messages";
 import { getItemKey, shouldAutoScrollToBottom } from "./message-list-shared";
+import { getOldestVisibleBoundaryKey } from "./message-list-native-boundary";
 import {
   isPrependUpdate,
   hasTranscriptProgressedPastView,
@@ -156,18 +155,6 @@ function getOldestNonSyntheticItemKey(items: RenderItem[]): string | null {
     return item.type !== "message" || item.message.id !== TASK_DESCRIPTION_SYNTHETIC_ID;
   });
   return oldestRealItem ? getItemKey(oldestRealItem) : null;
-}
-
-/** Stable descriptor for the oldest visible row; turn ids survive group extension. */
-function getOldestVisibleBoundaryKey(items: RenderItem[]): string | null {
-  const item = items.find(
-    (candidate) =>
-      candidate.type === "turn_group" ||
-      (candidate.type === "message" && candidate.message.id !== TASK_DESCRIPTION_SYNTHETIC_ID),
-  );
-  if (!item) return null;
-  if (item.type === "turn_group") return `turn:${item.turnId ?? item.id}`;
-  return item.type === "message" ? `message:${item.message.id}` : item.id;
 }
 
 function getNewestNonSyntheticItemKey(items: RenderItem[]): string | null {
