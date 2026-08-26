@@ -121,3 +121,12 @@ rtk go test ./internal/worktree/... ./internal/agent/runtime/lifecycle/... -race
   - `rtk make -C apps/backend lint`
   - `rtk pnpm e2e:run --project chromium tests/task/launch-failure-recovery.spec.ts`
   - `rtk pnpm e2e:run --project mobile-chrome tests/task/mobile-launch-failure-recovery.spec.ts`
+
+PR fixup remediation:
+
+- Reproduced all six failed shard causes and fixed only refresh-contract fixture
+  and locator issues. Offline local repositories now opt out explicitly, and
+  the Git Changes Panel PR-deduplication case uses a disposable repository.
+- With `--retries=0`, the affected desktop E2E command passed 21/21 tests, the
+  affected mobile command passed 2/2 tests, and the complete Git Changes Panel
+  file passed 21/21 tests. Prettier and `git diff --check` passed.

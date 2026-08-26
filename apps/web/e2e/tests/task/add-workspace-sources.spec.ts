@@ -24,7 +24,7 @@ async function chooseDirectory(
   const picker = page.locator('[data-testid="folder-picker-popover"][data-state="open"]');
   await expect(picker).toBeVisible();
   for (const segment of relativeDirectory.split(path.sep).filter(Boolean)) {
-    await picker.getByTestId("folder-picker-entry").filter({ hasText: segment }).click();
+    await picker.getByRole("button", { name: segment, exact: true }).click();
   }
   await picker.getByTestId("folder-picker-choose").click();
 }

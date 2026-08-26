@@ -133,6 +133,20 @@ verified behavior.
   desktop launch-failure tests, and 2/2 mobile launch-failure tests with strict
   no-retry E2E execution.
 
+### PR fixup remediation results
+
+- Reproduced the six failed E2E shard causes at the focused branch head: local
+  origin fixture collisions, ambiguous folder and branch locators, missing
+  offline refresh opt-outs, shared Git history, and a GitLab setup that needed
+  to remain offline.
+- Kept the remediation scoped to the refresh contract: exact folder/branch
+  locators, explicit offline options for local fixtures, and a disposable
+  repository for the PR-deduplication history assertion. No generic timing
+  changes were restored.
+- With retries disabled, the affected desktop command passed 21/21 tests, the
+  affected mobile command passed 2/2 tests, and the complete Git Changes Panel
+  file passed 21/21 tests. Prettier and `git diff --check` also passed.
+
 ## Risks
 
 - A managed refresh that ignores task Git policy can replace an

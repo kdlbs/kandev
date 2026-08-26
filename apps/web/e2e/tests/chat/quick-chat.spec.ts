@@ -422,7 +422,7 @@ test.describe("Quick Chat", () => {
       await dialog.getByTestId("repo-chip-trigger").click();
       await testPage.getByRole("option").first().click();
       await dialog.getByTestId("branch-chip-trigger").click();
-      await testPage.getByRole("option", { name: contextBranch }).click();
+      await testPage.locator(`[role="option"][data-value="${contextBranch}"]`).click();
 
       const startRequest = testPage.waitForRequest(
         (request) => request.url().includes("/quick-chat") && request.method() === "POST",

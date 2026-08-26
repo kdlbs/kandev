@@ -27,13 +27,13 @@ test.describe("mobile: multi-repository session picker", () => {
       seedData.workspaceId,
       primaryRepoDir,
       "main",
-      { name: "Mobile primary" },
+      { name: "Mobile primary", pull_before_worktree: false },
     );
     const secondaryRepo = await apiClient.createRepository(
       seedData.workspaceId,
       secondaryRepoDir,
       "main",
-      { name: "Mobile secondary" },
+      { name: "Mobile secondary", pull_before_worktree: false },
     );
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
