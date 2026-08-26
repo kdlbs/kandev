@@ -100,6 +100,20 @@ func TestTaskPRsToDTOsCarriesReadinessNotJustIdentity(t *testing.T) {
 	require.Equal(t, "2026-08-21T12:00:00Z", *out[0].MergedAt)
 }
 
+func TestTaskPRsToDTOsReturnsNewestFirst(t *testing.T) {
+	prs := []*githubsvc.TaskPR{
+		{PRNumber: 100, PRTitle: "older", CreatedAt: time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)},
+		{PRNumber: 200, PRTitle: "newer", CreatedAt: time.Date(2026, 8, 21, 0, 0, 0, 0, time.UTC)},
+	}
+
+	out := taskPRsToDTOs(prs)
+
+	require.Len(t, out, 2)
+	require.Equal(t, int64(200), out[0].Number)
+	require.Equal(t, "newer", out[0].Title)
+	require.Equal(t, int64(100), out[1].Number)
+}
+
 // IsDraft is nullable on the row: unknown before the first sync. Nil must read
 // as not-draft rather than panicking the whole task list.
 func TestTaskPRsToDTOsTreatsAnUnknownDraftFlagAsNotDraft(t *testing.T) {
@@ -149,6 +163,39 @@ func TestAttachPullRequestsIsSilentWhenTheSourceIsMissingOrFailing(t *testing.T)
 	(&pluginHost{taskPRs: failing}).attachPullRequests(context.Background(), tasks)
 	require.Empty(t, tasks[0].PullRequests)
 	require.Equal(t, 1, failing.calls)
+}
+
+func TestTaskReaderGetAttachesPullRequests(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"tasks"}})
+	task := &taskmodels.Task{ID: "task-1", Title: "with a PR"}
+	d.tasks.tasksByID = map[string]*taskmodels.Task{"task-1": task}
+	src := &stubPRSource{byTask: map[string][]*githubsvc.TaskPR{
+		"task-1": {{PRNumber: 42, PRTitle: "fix"}},
+	}}
+	d.host.taskPRs = src
+
+	got, err := d.host.Tasks().Get(context.Background(), "task-1")
+
+	require.NoError(t, err)
+	require.Len(t, got.PullRequests, 1)
+	require.Equal(t, int64(42), got.PullRequests[0].Number)
+}
+
+func TestAttachPullRequestsUsesSourceWiredAfterHostCreation(t *testing.T) {
+	var source taskPRSource
+	h := &pluginHost{taskPRsDep: func() taskPRSource { return source }}
+	tasks := []pluginsdk.Task{{ID: "task-1"}}
+
+	h.attachPullRequests(context.Background(), tasks)
+	require.Empty(t, tasks[0].PullRequests)
+
+	source = &stubPRSource{byTask: map[string][]*githubsvc.TaskPR{
+		"task-1": {{PRNumber: 99}},
+	}}
+	h.attachPullRequests(context.Background(), tasks)
+
+	require.Len(t, tasks[0].PullRequests, 1)
+	require.Equal(t, int64(99), tasks[0].PullRequests[0].Number)
 }
 
 // A board plugin reads the step's own colour rather than inventing a palette,

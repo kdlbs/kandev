@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -168,11 +169,18 @@ func decodeTaskLabels(raw string) []string {
 // plugin asking "what can merge" would otherwise re-query the forge per pull
 // request, which is slower and rate-limited.
 func taskPRsToDTOs(prs []*githubsvc.TaskPR) []pluginsdk.TaskPullRequest {
-	out := make([]pluginsdk.TaskPullRequest, 0, len(prs))
+	ordered := make([]*githubsvc.TaskPR, 0, len(prs))
 	for _, pr := range prs {
-		if pr == nil {
-			continue
+		if pr != nil {
+			ordered = append(ordered, pr)
 		}
+	}
+	sort.SliceStable(ordered, func(i, j int) bool {
+		return ordered[i].CreatedAt.After(ordered[j].CreatedAt)
+	})
+
+	out := make([]pluginsdk.TaskPullRequest, 0, len(ordered))
+	for _, pr := range ordered {
 		out = append(out, pluginsdk.TaskPullRequest{
 			Number:     int64(pr.PRNumber),
 			URL:        pr.PRURL,

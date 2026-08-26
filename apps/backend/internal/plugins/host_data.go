@@ -170,9 +170,9 @@ type agentProfileDataSource interface {
 //
 // SEPARATE FROM taskDataSource ON PURPOSE. A task's pull requests live in
 // github_task_prs, owned by internal/github, not on the task row — so the link
-// is not derivable from anything taskDataSource returns. It is also wired LATE
-// (SetTaskPRSource) because the github service is constructed after plugins
-// have started; a nil source simply yields tasks with no PullRequests rather
+// is not derivable from anything taskDataSource returns. It is wired separately
+// (SetTaskPRSource) because GitHub is optional and may be available after a
+// host is created; a nil source simply yields tasks with no PullRequests rather
 // than failing the read.
 type taskPRSource interface {
 	ListTaskPRsByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]*githubsvc.TaskPR, error)
@@ -372,14 +372,18 @@ func (r taskReader) List(ctx context.Context, filter pluginsdk.TaskFilter, page 
 // supplementary to a task read, and refusing the whole list over them would
 // take away more than it protects.
 func (h *pluginHost) attachPullRequests(ctx context.Context, tasks []pluginsdk.Task) {
-	if h.taskPRs == nil || len(tasks) == 0 {
+	source := h.taskPRs
+	if h.taskPRsDep != nil {
+		source = h.taskPRsDep()
+	}
+	if source == nil || len(tasks) == 0 {
 		return
 	}
 	ids := make([]string, 0, len(tasks))
 	for i := range tasks {
 		ids = append(ids, tasks[i].ID)
 	}
-	byTask, err := h.taskPRs.ListTaskPRsByTaskIDs(ctx, ids)
+	byTask, err := source.ListTaskPRsByTaskIDs(ctx, ids)
 	if err != nil {
 		return
 	}
@@ -409,8 +413,9 @@ func (r taskReader) Get(ctx context.Context, id string) (*pluginsdk.Task, error)
 		}
 		return nil, err
 	}
-	dto := taskModelToDTO(task)
-	return &dto, nil
+	items := []pluginsdk.Task{taskModelToDTO(task)}
+	r.host.attachPullRequests(ctx, items)
+	return &items[0], nil
 }
 
 type sessionReader struct{ host *pluginHost }
