@@ -27,7 +27,7 @@ import {
 import { createPlanSlashExtension, type PlanSlashCommand } from "./plan-slash-commands";
 import { PlanSearchExtension } from "./search-highlight-extension";
 import { PlanSlashMenu } from "./plan-slash-menu";
-import { PlanBubbleMenu } from "./plan-bubble-menu";
+import { PLAN_FORMATTING_TOOLBAR_HEIGHT_PX, PlanBubbleMenu } from "./plan-bubble-menu";
 import { PlanDragHandle } from "./plan-drag-handle";
 import type { MenuState } from "@/components/task/chat/tiptap-suggestion";
 import { DOMParser as PmDOMParser } from "@tiptap/pm/model";
@@ -35,6 +35,7 @@ import type { Editor } from "@tiptap/core";
 import { useTranslation } from "react-i18next";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { MIN_MARKDOWN_COLUMN_WIDTH } from "@/lib/markdown/table-resize";
+import { cn } from "@/lib/utils";
 
 export type { CommentForEditor };
 
@@ -55,6 +56,8 @@ type TipTapPlanEditorProps = {
   onCommentClick?: (id: string, position: { x: number; y: number }) => void;
   onCommentDeleted?: (ids: string[]) => void;
   onEditorReady?: (editor: Editor) => void;
+  /** Internal mobile layout offset; not part of the plugin editor contract. */
+  mobileBottomOffset?: string;
 };
 
 const lowlight = createLowlight(common);
@@ -439,15 +442,32 @@ export function TipTapPlanEditor(props: TipTapPlanEditorProps) {
     [onSelectionChangeRef],
   );
 
+  const handleMobileVisibilityChange = useCallback((visible: boolean) => {
+    const scrollContainer = wrapperRef.current?.querySelector<HTMLElement>(
+      '[data-testid="plan-editor-scroll-container"]',
+    );
+    if (!scrollContainer) return;
+    scrollContainer.style.paddingBottom = visible ? `${PLAN_FORMATTING_TOOLBAR_HEIGHT_PX}px` : "";
+  }, []);
+
   return (
     <div
       ref={wrapperRef}
       className={`tiptap-plan-wrapper markdown-body h-full relative ${resolvedTheme === "dark" ? "dark" : ""}`}
     >
-      <EditorContent editor={editor} className="h-full" />
+      <EditorContent
+        editor={editor}
+        data-testid="plan-editor-scroll-container"
+        className={cn("h-full min-h-0 overflow-y-auto overscroll-contain")}
+      />
       {editor && isReady && (
         <>
-          <PlanBubbleMenu editor={editor} onComment={handleBubbleComment} />
+          <PlanBubbleMenu
+            editor={editor}
+            onComment={handleBubbleComment}
+            mobileBottomOffset={props.mobileBottomOffset}
+            onMobileVisibilityChange={handleMobileVisibilityChange}
+          />
           <PlanDragHandle editor={editor} />
         </>
       )}

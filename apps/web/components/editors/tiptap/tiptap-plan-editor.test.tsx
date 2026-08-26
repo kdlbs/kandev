@@ -4,6 +4,10 @@ import { columnResizingPluginKey } from "@tiptap/pm/tables";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const breakpoint = { isFinePointer: true, isMobile: false };
+const planBubble = vi.hoisted(() => ({
+  mobileBottomOffset: undefined as string | undefined,
+  onMobileVisibilityChange: undefined as ((visible: boolean) => void) | undefined,
+}));
 
 vi.mock("@/components/theme/app-theme", () => ({
   useTheme: () => ({ resolvedTheme: "light" }),
@@ -17,7 +21,17 @@ vi.mock("@/components/shared/mermaid-error-toast", () => ({
   useMermaidErrorToast: () => undefined,
 }));
 
-vi.mock("./plan-bubble-menu", () => ({ PlanBubbleMenu: () => null }));
+vi.mock("./plan-bubble-menu", () => ({
+  PLAN_FORMATTING_TOOLBAR_HEIGHT_PX: 56,
+  PlanBubbleMenu: (props: {
+    mobileBottomOffset?: string;
+    onMobileVisibilityChange?: (visible: boolean) => void;
+  }) => {
+    planBubble.mobileBottomOffset = props.mobileBottomOffset;
+    planBubble.onMobileVisibilityChange = props.onMobileVisibilityChange;
+    return null;
+  },
+}));
 vi.mock("./plan-drag-handle", () => ({ PlanDragHandle: () => null }));
 vi.mock("./plan-slash-menu", () => ({ PlanSlashMenu: () => null }));
 
@@ -72,6 +86,8 @@ afterEach(() => {
   cleanup();
   breakpoint.isFinePointer = true;
   breakpoint.isMobile = false;
+  planBubble.mobileBottomOffset = undefined;
+  planBubble.onMobileVisibilityChange = undefined;
 });
 
 describe("TipTapPlanEditor table resizing", () => {
@@ -170,5 +186,30 @@ describe("TipTapPlanEditor table resizing", () => {
     });
 
     expect(onChange).not.toHaveBeenCalled();
+  });
+});
+
+describe("TipTapPlanEditor mobile formatting clearance", () => {
+  it("passes the mobile navigation offset and reserves space when the dock is visible", async () => {
+    breakpoint.isFinePointer = false;
+    breakpoint.isMobile = true;
+    const view = render(
+      <TipTapPlanEditor
+        taskId="task-1"
+        value="Mobile plan content"
+        onChange={() => undefined}
+        mobileBottomOffset="3.25rem"
+      />,
+    );
+
+    await waitFor(() => expect(planBubble.mobileBottomOffset).toBe("3.25rem"));
+    const editorScrollContainer = view.container.querySelector(
+      '[data-testid="plan-editor-scroll-container"]',
+    );
+    expect(editorScrollContainer).not.toBeNull();
+
+    act(() => planBubble.onMobileVisibilityChange?.(true));
+
+    expect(editorScrollContainer?.getAttribute("style")).toContain("padding-bottom: 56px");
   });
 });
