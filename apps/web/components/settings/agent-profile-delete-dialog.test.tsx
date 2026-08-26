@@ -241,3 +241,23 @@ describe("AgentProfileDeleteConflictDialog", () => {
     expect(screen.queryByText(/Delete agent profile/i)).toBeNull();
   });
 });
+
+describe("AgentProfileDeleteConflictDialog layout", () => {
+  it("keeps conflict details scrollable and decisions outside the scroll region", () => {
+    renderConflictDialog({
+      activeSessions: [{ task_id: "t1", task_title: "Live task", is_ephemeral: false }],
+      watchers: [],
+      routingTiers: [],
+      automations: [],
+    });
+
+    const dialog = screen.getByTestId("agent-profile-delete-conflict-dialog");
+    const body = screen.getByTestId("agent-profile-delete-conflict-body");
+    const footer = screen.getByTestId("agent-profile-delete-conflict-footer");
+
+    expect(dialog.className).toContain("grid-rows-[auto_minmax(0,1fr)_auto]");
+    expect(body.className).toContain("overflow-y-auto");
+    expect(body.contains(footer)).toBe(false);
+    expect(within(footer).getByRole("button", { name: "Cancel" }).className).toContain("min-h-11");
+  });
+});

@@ -42,6 +42,7 @@ contract that other capabilities can reuse.
 - [Adaptive Kanban](requirements/adaptive-kanban.md)
 - [Task Add-Panel PR Submenu](requirements/add-panel-pr-submenu.md)
 - [Agent Launch Prompt Composer](requirements/agent-launch-prompt-composer.md)
+- [Growing dialog content containment](requirements/dialog-content-containment.md)
 - [Agent-message inline comments](requirements/agent-message-comments.md)
 - [Agent Todo List Panel](requirements/agent-todo-list-panel.md)
 - [App Status Bar](requirements/app-status-bar.md)
@@ -138,8 +139,7 @@ contract that other capabilities can reuse.
 
 ### System design
 
-
-
+- [Growing Dialog Content Containment](system-design/dialog-content-containment.md)
 - [Agent Todo List Panel](system-design/agent-todo-list-panel.md)
 - [App Status Bar](system-design/app-status-bar.md)
 - [Composer Suggestion Overlays](system-design/composer-suggestion-overlays.md)
