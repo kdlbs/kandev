@@ -211,6 +211,17 @@ func TestAuthorizeWorkflowAccess(t *testing.T) {
 	if err := svc.AuthorizeWorkflowAccess(ctxAs("user-a"), "wf-legacy"); err != nil {
 		t.Fatalf("legacy workflow access: %v", err)
 	}
+	// So does a workflow carrying no workspace at all (schema default, never
+	// backfilled). This is the pre-auth row the orphan branch above must not
+	// swallow: it names no owner rather than naming a missing one.
+	if err := repo.CreateWorkflow(context.Background(), &models.Workflow{
+		ID: "wf-no-workspace", Name: "Pre-auth, workspaceless",
+	}); err != nil {
+		t.Fatalf("create workspaceless workflow: %v", err)
+	}
+	if err := svc.AuthorizeWorkflowAccess(ctxAs("user-a"), "wf-no-workspace"); err != nil {
+		t.Fatalf("workspaceless workflow access: %v", err)
+	}
 	// A failed workspace lookup is not an answer. The dangling-reference
 	// fallback below it returns nil, so a transient database error used to
 	// read as "authorized" and hand a guessed workflow ID to whoever asked.
@@ -219,11 +230,23 @@ func TestAuthorizeWorkflowAccess(t *testing.T) {
 	if err := svc.AuthorizeWorkflowAccess(ctxAs("user-a"), "wf-b"); !errors.Is(err, broken) {
 		t.Fatalf("failed workspace lookup: %v, want the lookup error", err)
 	}
-	// A workspace row that is genuinely gone keeps the documented fallback:
-	// the workflow stays visible rather than disappearing from its owner.
+	// A workspace row that is genuinely gone is a different answer from a
+	// failed lookup, and it is still not "authorized": the workflow names an
+	// owner that does not exist, so nobody sees it. (An unowned pre-auth row
+	// is the workspace_id == "" case below, not this one.)
 	svc.workspaces = &brokenWorkspaceReader{WorkspaceRepository: repo, err: repoerrors.ErrWorkspaceNotFound}
-	if err := svc.AuthorizeWorkflowAccess(ctxAs("user-a"), "wf-b"); err != nil {
-		t.Fatalf("dangling workspace reference: %v, want the visibility fallback", err)
+	if err := svc.AuthorizeWorkflowAccess(ctxAs("user-a"), "wf-b"); !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+		t.Fatalf("orphaned workflow: %v, want the not-found denial", err)
+	}
+	if err := svc.AuthorizeWorkflowAccess(ctxAs("user-b"), "wf-b"); !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+		t.Fatalf("orphaned workflow for its former owner: %v, want the not-found denial", err)
+	}
+	// Unscoped callers are unaffected: they never reach the lookup.
+	if err := svc.AuthorizeWorkflowAccess(context.Background(), "wf-b"); err != nil {
+		t.Fatalf("internal caller hit the orphan branch: %v", err)
+	}
+	if err := svc.AuthorizeWorkflowAccess(ctxSynthetic(), "wf-b"); err != nil {
+		t.Fatalf("synthetic caller hit the orphan branch: %v", err)
 	}
 	svc.workspaces = repo
 

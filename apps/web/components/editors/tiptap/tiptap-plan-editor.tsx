@@ -33,6 +33,8 @@ import type { MenuState } from "@/components/task/chat/tiptap-suggestion";
 import { DOMParser as PmDOMParser } from "@tiptap/pm/model";
 import type { Editor } from "@tiptap/core";
 import { useTranslation } from "react-i18next";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { MIN_MARKDOWN_COLUMN_WIDTH } from "@/lib/markdown/table-resize";
 
 export type { CommentForEditor };
 
@@ -56,6 +58,13 @@ type TipTapPlanEditorProps = {
 };
 
 const lowlight = createLowlight(common);
+
+function serializePlanMarkdown(editor: Editor): string {
+  const { markdown } = editor.storage as unknown as {
+    markdown?: { getMarkdown?: () => string };
+  };
+  return markdown?.getMarkdown?.() ?? editor.getText();
+}
 
 /** Regex matching common markdown syntax signals. */
 const MD_SIGNALS = /^#{1,6}\s|^\s*[-*+]\s|^\s*\d+\.\s|```|\*\*|__|\[.+\]\(/m;
@@ -102,6 +111,7 @@ function buildEditorExtensions(
   slashExtension: ReturnType<typeof createPlanSlashExtension>,
   onOrphanedComments: (ids: string[]) => void,
   taskId: string | null,
+  tableResizeEnabled: boolean,
 ) {
   return [
     StarterKit.configure({ codeBlock: false }),
@@ -113,7 +123,13 @@ function buildEditorExtensions(
     Underline,
     TaskList,
     TaskItem.configure({ nested: true }),
-    Table.configure({ resizable: false }),
+    Table.configure({
+      resizable: tableResizeEnabled,
+      renderWrapper: true,
+      handleWidth: 10,
+      cellMinWidth: MIN_MARKDOWN_COLUMN_WIDTH,
+      lastColumnResizable: false,
+    }),
     TableRow,
     TableCell,
     TableHeader,
@@ -295,6 +311,8 @@ type PlanEditorState = {
 /** Hook encapsulating TipTap editor setup, extensions, and lifecycle effects. */
 function usePlanEditor(props: TipTapPlanEditorProps): PlanEditorState {
   const { t } = useTranslation();
+  const { isFinePointer, isMobile } = useResponsiveBreakpoint();
+  const tableResizeEnabled = isFinePointer && !isMobile;
   const {
     value,
     onChange,
@@ -312,6 +330,7 @@ function usePlanEditor(props: TipTapPlanEditorProps): PlanEditorState {
   const onCommentClickRef = useRef(onCommentClick);
   const onCommentDeletedRef = useRef(onCommentDeleted);
   const onEditorReadyRef = useRef(onEditorReady);
+  const serializedMarkdownRef = useRef<string | null>(null);
   const [isReady, setIsReady] = useState(false);
 
   const slash = useSlashMenu();
@@ -341,29 +360,49 @@ function usePlanEditor(props: TipTapPlanEditorProps): PlanEditorState {
 
   /* eslint-disable react-hooks/refs -- stableOrphanHandler reads ref for deferred access, not during render */
   const extensions = useMemo(
-    () => buildEditorExtensions(placeholder, slash.extension, stableOrphanHandler, props.taskId),
-    [placeholder, props.taskId, slash.extension, stableOrphanHandler],
+    () =>
+      buildEditorExtensions(
+        placeholder,
+        slash.extension,
+        stableOrphanHandler,
+        props.taskId,
+        tableResizeEnabled,
+      ),
+    [placeholder, props.taskId, slash.extension, stableOrphanHandler, tableResizeEnabled],
   );
   /* eslint-enable react-hooks/refs */
 
-  const editor = useEditor({
-    immediatelyRender: false,
-    extensions,
-    content: value,
-    editorProps: {
-      attributes: { class: "tiptap-plan-editor", spellcheck: "false" },
-      handlePaste: pasteHandler,
+  const editor = useEditor(
+    {
+      immediatelyRender: false,
+      extensions,
+      content: value,
+      editorProps: {
+        attributes: { class: "tiptap-plan-editor", spellcheck: "false" },
+        handlePaste: pasteHandler,
+      },
+      onUpdate: ({ editor: ed }) => {
+        const markdown = serializePlanMarkdown(ed);
+        if (serializedMarkdownRef.current === null) {
+          serializedMarkdownRef.current = markdown;
+          return;
+        }
+        if (markdown === serializedMarkdownRef.current) return;
+        serializedMarkdownRef.current = markdown;
+        onChangeRef.current(markdown);
+      },
+      onBeforeCreate: () => {
+        serializedMarkdownRef.current = null;
+        setIsReady(false);
+      },
+      onCreate: ({ editor: ed }) => {
+        serializedMarkdownRef.current = serializePlanMarkdown(ed);
+        setIsReady(true);
+        onEditorReadyRef.current?.(ed);
+      },
     },
-    onUpdate: ({ editor: ed }) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const md = (ed.storage as any).markdown?.getMarkdown?.() as string | undefined;
-      onChangeRef.current(md ?? ed.getText());
-    },
-    onCreate: ({ editor: ed }) => {
-      setIsReady(true);
-      onEditorReadyRef.current?.(ed);
-    },
-  });
+    [tableResizeEnabled],
+  );
 
   useEffect(() => {
     editorRef.current = editor;

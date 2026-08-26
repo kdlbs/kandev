@@ -60,9 +60,11 @@ type stepTransitionInput struct {
 }
 
 // recordStepTransition writes exactly one ledger row when the step actually
-// changed, and returns that row's own identifier — the step-entry
-// requirement's entry identity (AC-OFFICE-STEP-ENTRY-001.2, .7). It is a
-// no-op (empty entryID, nil error) when fromStepID == toStepID
+// changed and returns that row's own immutable ledger identifier. Callers
+// that need the step-entry requirement's entry identity (AC-OFFICE-STEP-
+// ENTRY-001.2, .7) derive it from this id via formatEntryID; callers that
+// need the identifier for models.Task.WorkflowStepTransitionID use it
+// directly. It is a no-op (id 0, nil error) when fromStepID == toStepID
 // (position-only reorder, re-issued move to the current step) and when both
 // sides are empty (a task with no workflow at all — a row with both sides
 // NULL is forbidden). Retrieval of the identifier is dialect-appropriate
@@ -76,12 +78,12 @@ type stepTransitionInput struct {
 // returns unchanged, and the enclosing transaction rolls back — which is
 // precisely the spec's required behaviour (the step change does not commit
 // with no row). Never log-and-continue on this error.
-func (r *Repository) recordStepTransition(ctx context.Context, tx stepTransitionTx, in stepTransitionInput) (entryID string, err error) {
+func (r *Repository) recordStepTransition(ctx context.Context, tx stepTransitionTx, in stepTransitionInput) (id int64, err error) {
 	if in.fromWorkflowStepID == in.toWorkflowStepID {
-		return "", nil
+		return 0, nil
 	}
 	if in.fromWorkflowStepID == "" && in.toWorkflowStepID == "" {
-		return "", nil
+		return 0, nil
 	}
 
 	occurredAt := in.occurredAt
@@ -113,21 +115,18 @@ func (r *Repository) recordStepTransition(ctx context.Context, tx stepTransition
 	}
 
 	if dialect.IsPostgres(r.db.DriverName()) {
-		var id int64
 		if err := tx.QueryRowContext(ctx, r.db.Rebind(insertSQL+" RETURNING id"), args...).Scan(&id); err != nil {
-			return "", err
+			return 0, err
 		}
-		entryID = strconv.FormatInt(id, 10)
 	} else {
 		result, execErr := tx.ExecContext(ctx, r.db.Rebind(insertSQL), args...)
 		if execErr != nil {
-			return "", execErr
+			return 0, execErr
 		}
-		id, idErr := result.LastInsertId()
-		if idErr != nil {
-			return "", idErr
+		id, err = result.LastInsertId()
+		if err != nil {
+			return 0, err
 		}
-		entryID = strconv.FormatInt(id, 10)
 	}
 
 	// Counted at INSERT time, not at commit: a later statement in the same
@@ -137,7 +136,18 @@ func (r *Repository) recordStepTransition(ctx context.Context, tx stepTransition
 	// ("is the writer alive"), not a commit-confirmed row-for-row audit
 	// trail; the ledger table itself is that audit trail.
 	steptelemetry.RecordLedgerRow(r.log, attribution.Trigger)
-	return entryID, nil
+	return id, nil
+}
+
+// formatEntryID converts recordStepTransition's ledger identifier into the
+// step-entry requirement's entry identity string (AC-OFFICE-STEP-ENTRY-
+// 001.2, .7). id 0 means recordStepTransition was a no-op — dispatchStepEntry
+// relies on "" (not "0") to detect that case, so it must not be formatted.
+func formatEntryID(id int64) string {
+	if id == 0 {
+		return ""
+	}
+	return strconv.FormatInt(id, 10)
 }
 
 // genesisAttribution is the task-creation ledger row's attribution: the

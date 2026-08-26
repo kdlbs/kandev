@@ -155,6 +155,35 @@ function shouldPreserveExistingConfigOptions(
   return !!existing && existing.configOptions.length > 0;
 }
 
+function shouldPreserveExistingModels(
+  state: AppState,
+  sessionId: string,
+  payload: SessionModelsPayload,
+): boolean {
+  if (payload.models?.length || payload.config_options_settled === true) return false;
+  const existing = state.sessionModels.bySessionId[sessionId];
+  return !!existing && existing.models.length > 0;
+}
+
+function shouldSkipModelsUpdate(resolved: { isEmpty: boolean; populated: boolean }): boolean {
+  return resolved.isEmpty && resolved.populated;
+}
+
+function resolveModels(
+  preserve: boolean,
+  existing: SessionModelsState["bySessionId"][string]["models"] | undefined,
+  acpModels: SessionModelsPayload["models"],
+): SessionModelsState["bySessionId"][string]["models"] {
+  if (preserve && existing) return existing;
+  return (acpModels ?? []).map((model) => ({
+    modelId: model.model_id,
+    name: model.name,
+    description: model.description,
+    usageMultiplier: model.usage_multiplier,
+    meta: model.meta,
+  }));
+}
+
 function debugModelsUpdate(
   state: AppState,
   sessionId: string,
@@ -164,6 +193,7 @@ function debugModelsUpdate(
     isEmpty: boolean;
     populated: boolean;
     preserveConfigOptions: boolean;
+    preserveModels: boolean;
   },
 ) {
   if (!isDebug()) return;
@@ -179,8 +209,9 @@ function debugModelsUpdate(
     existingCurrentModelId: existing?.currentModelId ?? "",
     existingModelsLen: existing?.models.length ?? 0,
     existingConfigOptionIds: (existing?.configOptions ?? []).map((o) => o.id),
-    willSkip: resolved.isEmpty && resolved.populated,
+    willSkip: shouldSkipModelsUpdate(resolved),
     preserveConfigOptions: resolved.preserveConfigOptions,
+    preserveModels: resolved.preserveModels,
   });
 }
 
@@ -244,6 +275,7 @@ function resolveModelsUpdatedState(
   isEmpty: boolean;
   populated: boolean;
   preserveConfigOptions: boolean;
+  preserveModels: boolean;
   existingEntry: SessionModelsState["bySessionId"][string] | undefined;
   existingFallback: string | undefined;
 } {
@@ -262,6 +294,7 @@ function resolveModelsUpdatedState(
     ),
     populated: hasPopulatedModels(state, sessionId),
     preserveConfigOptions: shouldPreserveExistingConfigOptions(state, sessionId, payload),
+    preserveModels: shouldPreserveExistingModels(state, sessionId, payload),
     existingEntry,
     existingFallback,
   };
@@ -323,7 +356,7 @@ export function registerSessionModelsHandlers(store: StoreApi<AppState>): WsHand
         : {};
       const resolved = resolveModelsUpdatedState(state, sessionId, payload, pendingRuntime);
       debugModelsUpdate(state, sessionId, payload, resolved);
-      if (resolved.isEmpty && resolved.populated) {
+      if (shouldSkipModelsUpdate(resolved)) {
         return;
       }
       clearStaleContextWindow(state, sessionId, resolved.currentModelId);
@@ -336,17 +369,16 @@ export function registerSessionModelsHandlers(store: StoreApi<AppState>): WsHand
         resolved.currentModelId,
       );
       const configOptionsSettled = resolvedConfigOptionsSettled(payload, resolved.existingEntry);
+      const models = resolveModels(
+        resolved.preserveModels,
+        resolved.existingEntry?.models,
+        acpModels,
+      );
 
       state.setSessionModels(sessionId, {
         currentModelId: resolved.currentModelId,
         fallbackModel: resolved.existingFallback,
-        models: acpModels.map((m) => ({
-          modelId: m.model_id,
-          name: m.name,
-          description: m.description,
-          usageMultiplier: m.usage_multiplier,
-          meta: m.meta,
-        })),
+        models,
         configOptions,
         ...(configOptionsSettled === undefined ? {} : { configOptionsSettled }),
         configBaseline:

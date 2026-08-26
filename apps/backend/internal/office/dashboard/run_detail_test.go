@@ -2,6 +2,7 @@ package dashboard_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -394,5 +395,17 @@ func TestGetRunDetail_PromptArtifactsAndSnapshots(t *testing.T) {
 	}
 	if resp.ContextSnapshot == "" {
 		t.Errorf("expected context_snapshot to round-trip from default '{}', got empty string")
+	}
+
+	raw, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("marshal run detail response: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("decode run detail response: %v", err)
+	}
+	if got := payload["continuation_scope"]; got != "agent:agent-1" {
+		t.Errorf("continuation_scope = %v, want %q", got, "agent:agent-1")
 	}
 }

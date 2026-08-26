@@ -827,19 +827,10 @@ func (si *SchedulerIntegration) buildPromptContext(
 		si.enrichChildrenContext(pc, payload)
 	}
 
-	if reason == RunReasonTaskAssigned || reason == legacyRunReasonReviewStarted || reason == legacyRunReasonApprovalStarted {
-		pc.StageID = parsed["stage_id"]
-		if pc.StageID == "" {
-			pc.StageID = parsed["workflow_step_id"]
-		}
-		pc.StageType = parsed["stage_type"]
+	if reason == RunReasonTaskAssigned || reason == RunReasonTaskReviewRequested ||
+		reason == legacyRunReasonReviewStarted || reason == legacyRunReasonApprovalStarted {
+		_, pc.StageID, pc.StageType = si.svc.resolveReviewStage(ctx, reason, parsed)
 		pc.ReviewFeedback = parsed["feedback"]
-		switch reason {
-		case legacyRunReasonReviewStarted:
-			pc.StageType = stageTypeReview
-		case legacyRunReasonApprovalStarted:
-			pc.StageType = stageTypeApproval
-		}
 
 		if (pc.StageType == stageTypeReview || pc.StageType == stageTypeApproval) && pc.TaskID != "" {
 			si.enrichBuilderComments(ctx, pc)

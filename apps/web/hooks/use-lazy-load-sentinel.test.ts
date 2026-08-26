@@ -291,6 +291,7 @@ describe("useLazyLoadSentinel — stickToBottomWhileLoading", () => {
     act(() => result.current.sentinelRef(node));
 
     fire(records[0], true, node);
+    expect(loadMore).toHaveBeenCalledTimes(1);
     // Rows are appended while the load is in flight (scrollHeight grows to
     // 800); the user stays at the old bottom. The settle must scroll the
     // scroller back to the new bottom so the sentinel stays intersecting.

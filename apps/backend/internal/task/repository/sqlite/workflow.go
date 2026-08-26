@@ -52,7 +52,7 @@ func (r *Repository) AddTaskToWorkflow(ctx context.Context, taskID, workflowID, 
 		return tx.Commit()
 	}
 
-	entryID, err := r.recordStepTransition(ctx, tx, stepTransitionInput{
+	transitionID, err := r.recordStepTransition(ctx, tx, stepTransitionInput{
 		taskID:             taskID,
 		fromWorkflowID:     fromWorkflowID,
 		fromWorkflowStepID: fromStepID,
@@ -67,7 +67,7 @@ func (r *Repository) AddTaskToWorkflow(ctx context.Context, taskID, workflowID, 
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	r.dispatchStepEntry(ctx, taskID, workflowID, workflowStepID, entryID)
+	r.dispatchStepEntry(ctx, taskID, workflowID, workflowStepID, formatEntryID(transitionID))
 	return nil
 }
 

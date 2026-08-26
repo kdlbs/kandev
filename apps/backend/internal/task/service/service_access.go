@@ -93,16 +93,24 @@ func (s *Service) authorizeWorkflowID(ctx context.Context, workflowID string) er
 	if workflow.WorkspaceID == "" {
 		return nil
 	}
+	// A workflow whose workspace cannot be resolved has no owner to check
+	// against, so neither outcome below is "authorized". This used to be one
+	// `return nil` covering both, which handed any workflow ID that survived
+	// a failed lookup to whoever guessed it.
+	//
+	// The pre-auth unowned row is not this case: workspace_id == "" is
+	// answered above and stays visible to everyone. Here the workflow names a
+	// workspace that is not there — `workflows.workspace_id` carries no
+	// foreign key, so a deleted workspace can leave one behind — and an
+	// orphan belongs to nobody, which under per-user scoping means nobody
+	// sees it.
 	workspace, err := s.workspaces.GetWorkspace(ctx, workflow.WorkspaceID)
 	switch {
 	case errors.Is(err, repoerrors.ErrWorkspaceNotFound):
-		// A dangling workspace reference should not hide the workflow from the
-		// single user who can already see everything else about it.
-		return nil
+		return repoerrors.ErrWorkspaceNotFound
 	case err != nil:
-		// Anything else is a failed lookup, not an answer. Treating it as
-		// "authorized" would let a transient database error hand a guessed
-		// workflow ID to whoever asked, so it fails closed by propagating.
+		// A failed lookup is not an answer at all: propagate it rather than
+		// letting a transient database error read as either allow or deny.
 		return err
 	}
 	if !workspaceVisibleTo(workspace, userID) {
@@ -175,6 +183,50 @@ func (s *Service) AuthorizeEnvironmentAccess(ctx context.Context, taskEnvironmen
 		return err
 	}
 	return s.authorizeTaskID(ctx, env.TaskID)
+}
+
+// AuthorizeTaskEnvironmentAccess checks that both identifiers are visible to
+// the caller and that the environment is one the task is actually bound to.
+// Mismatches use the task not-found sentinel, mirroring
+// AuthorizeTaskSessionAccess, so callers cannot enumerate environments by
+// pairing them against a task they do own.
+//
+// Authorizing the two IDs separately is not enough: both checks pass for a
+// caller who owns the task and, independently, owns some unrelated
+// environment, and the terminal route then merges state from the two.
+//
+// The relationship is deliberately not `env.TaskID == taskID`. inherit_parent
+// binds a subtask's session to the parent task's environment, and shared_group
+// binds every member of a workspace group to one canonical environment, so the
+// row's owning task is legitimately a different task in both. What establishes
+// the pair is a session of this task pointing at this environment.
+func (s *Service) AuthorizeTaskEnvironmentAccess(ctx context.Context, taskID, taskEnvironmentID string) error {
+	if _, scoped := callerScope(ctx); !scoped {
+		return nil
+	}
+	if err := s.AuthorizeTaskAccess(ctx, taskID); err != nil {
+		return err
+	}
+	if err := s.AuthorizeEnvironmentAccess(ctx, taskEnvironmentID); err != nil {
+		return err
+	}
+	env, err := s.taskEnvironments.GetTaskEnvironment(ctx, taskEnvironmentID)
+	if err != nil {
+		return err
+	}
+	if env != nil && env.TaskID == taskID {
+		return nil
+	}
+	sessions, err := s.sessions.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	for _, session := range sessions {
+		if session != nil && session.TaskEnvironmentID == taskEnvironmentID {
+			return nil
+		}
+	}
+	return repoerrors.ErrTaskNotFound
 }
 
 // authorizeRepositoryID checks visibility of a repository via its workspace.

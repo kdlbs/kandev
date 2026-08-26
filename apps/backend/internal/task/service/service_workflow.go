@@ -733,9 +733,16 @@ func (s *Service) promoteNextQueuedTask(ctx context.Context, targetStep *wfmodel
 	}
 	fromStepID := candidate.WorkflowStepID
 	oldWorkflowID := candidate.WorkflowID
-	if fromStepID != targetStep.ID && s.feederCandidateBlocked(ctx, candidate.ID) {
-		skipped[candidate.ID] = struct{}{}
-		return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
+	promotionSessionID := ""
+	if fromStepID != targetStep.ID {
+		promotionSession, blocked := s.feederCandidateSession(ctx, candidate.ID)
+		if blocked {
+			skipped[candidate.ID] = struct{}{}
+			return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
+		}
+		if promotionSession != nil {
+			promotionSessionID = promotionSession.ID
+		}
 	}
 	if moveLifecyclePending(candidate) {
 		skipped[candidate.ID] = struct{}{}
@@ -744,7 +751,7 @@ func (s *Service) promoteNextQueuedTask(ctx context.Context, targetStep *wfmodel
 	if candidate.WorkflowStepID == targetStep.ID {
 		return s.promoteSameStepQueuedTask(ctx, candidate, fromStepID, targetStep, position, skipped)
 	}
-	return s.promoteFeederQueuedTask(ctx, candidate, fromStepID, oldWorkflowID, targetStep, position, skipped)
+	return s.promoteFeederQueuedTask(ctx, candidate, fromStepID, oldWorkflowID, targetStep, position, skipped, promotionSessionID)
 }
 
 func queuedMoveExitPending(task *models.Task) bool {
@@ -840,7 +847,7 @@ func promoteQueuedTaskAtomically(ctx context.Context, tasks interface{}, task *m
 	return true, claimed, err
 }
 
-func (s *Service) promoteFeederQueuedTask(ctx context.Context, candidate *models.Task, fromStepID, oldWorkflowID string, targetStep *wfmodels.WorkflowStep, position int, skipped map[string]struct{}) bool {
+func (s *Service) promoteFeederQueuedTask(ctx context.Context, candidate *models.Task, fromStepID, oldWorkflowID string, targetStep *wfmodels.WorkflowStep, position int, skipped map[string]struct{}, sessionID string) bool {
 	oldState := candidate.State
 	if candidate.Metadata == nil {
 		candidate.Metadata = make(map[string]interface{})
@@ -872,7 +879,7 @@ func (s *Service) promoteFeederQueuedTask(ctx context.Context, candidate *models
 			s.publishTaskEvent(ctx, events.TaskStateChanged, candidate, &oldState)
 		}
 		s.recordQueuedPromotion(ctx, candidate.ID, fromStepID, targetStep.ID)
-		s.publishTaskMovedEvent(ctx, candidate, oldWorkflowID, fromStepID, targetStep.ID, "")
+		s.publishTaskMovedEvent(ctx, candidate, oldWorkflowID, fromStepID, targetStep.ID, sessionID)
 		return true
 	} else if admissionRepo, ok := s.tasks.(workflowMoveAdmissionRepository); ok {
 		claimed, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, candidate, targetStep.ID, targetStep.WIPLimit)
@@ -890,7 +897,7 @@ func (s *Service) promoteFeederQueuedTask(ctx context.Context, candidate *models
 			s.publishTaskEvent(ctx, events.TaskStateChanged, candidate, &oldState)
 		}
 		s.recordQueuedPromotion(ctx, candidate.ID, fromStepID, targetStep.ID)
-		s.publishTaskMovedEvent(ctx, candidate, oldWorkflowID, fromStepID, targetStep.ID, "")
+		s.publishTaskMovedEvent(ctx, candidate, oldWorkflowID, fromStepID, targetStep.ID, sessionID)
 		return true
 	}
 	// ctx here still carries the identity of whoever triggered the move that
@@ -931,18 +938,34 @@ func (s *Service) recordQueuedPromotion(ctx context.Context, taskID, fromStepID,
 	}
 }
 
-func (s *Service) feederCandidateBlocked(ctx context.Context, taskID string) bool {
+func (s *Service) feederCandidateSession(ctx context.Context, taskID string) (*models.TaskSession, bool) {
 	sessions, err := s.sessions.ListTaskSessions(ctx, taskID)
 	if err != nil {
 		s.logger.Warn("skipping feeder task after active session lookup failed", zap.String("task_id", taskID), zap.Error(err))
-		return true
+		return nil, true
 	}
+	var primary, fallback *models.TaskSession
 	for _, session := range sessions {
+		if session == nil {
+			continue
+		}
 		if isSessionMoveBlocked(session.State) {
-			return true
+			return nil, true
+		}
+		if !isSessionActive(session.State) {
+			continue
+		}
+		if session.IsPrimary && primary == nil {
+			primary = session
+		}
+		if !session.IsPrimary && fallback == nil {
+			fallback = session
 		}
 	}
-	return false
+	if primary != nil {
+		return primary, false
+	}
+	return fallback, false
 }
 
 func (s *Service) nextQueuedCandidate(ctx context.Context, targetStep *wfmodels.WorkflowStep, skipped map[string]struct{}) (*models.Task, error) {

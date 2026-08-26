@@ -823,6 +823,10 @@ type Task struct {
 	ArchivedByCascadeID string    `json:"archived_by_cascade_id,omitempty"`
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
+	// WorkflowStepTransitionID is the immutable ledger row identifier for the
+	// latest workflow-step write. Repositories populate it after a transition;
+	// it is transient and is not stored in the tasks table.
+	WorkflowStepTransitionID int64 `json:"-"`
 
 	// Office extensions.
 	//

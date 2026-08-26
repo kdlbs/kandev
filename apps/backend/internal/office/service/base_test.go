@@ -82,7 +82,8 @@ func newTestService(t *testing.T, overrides ...service.ServiceOptions) *service.
 	}
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS workflow_steps (
 		id TEXT PRIMARY KEY,
-		agent_profile_id TEXT NOT NULL DEFAULT ''
+		agent_profile_id TEXT NOT NULL DEFAULT '',
+		stage_type TEXT NOT NULL DEFAULT 'custom'
 	)`); err != nil {
 		t.Fatalf("create workflow_steps: %v", err)
 	}
