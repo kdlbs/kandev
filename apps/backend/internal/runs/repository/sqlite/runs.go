@@ -9,13 +9,18 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/runs/commentkeys"
 )
 
-// CreateRun creates a new run queue entry.
+// CreateRunTx creates a new run queue entry using a transaction the caller
+// owns. Callers that need to combine the insert with other transactional
+// writes (for example the parent-wake reconciler's receipt upsert) use
+// this directly; CreateRun wraps it with a private transaction for the
+// common single-statement case.
 //
 // ContinuationScope is decided here, once, before the row exists to be
 // coalesced into — never at read or write time downstream. A routine
@@ -23,7 +28,7 @@ import (
 // only ever patches context_snapshot, so every later reader/writer of
 // this run's continuation summary reads the value persisted here instead
 // of re-deriving it against a snapshot that may have drifted.
-func (r *Repository) CreateRun(ctx context.Context, req *models.Run) error {
+func (r *Repository) CreateRunTx(ctx context.Context, tx *sqlx.Tx, req *models.Run) error {
 	if req.ID == "" {
 		req.ID = uuid.New().String()
 	}
@@ -31,7 +36,7 @@ func (r *Repository) CreateRun(ctx context.Context, req *models.Run) error {
 	req.RequestedAt = time.Now().UTC()
 	req.ContinuationScope = models.ContinuationScopeForRun(req, req.AgentProfileID)
 
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	_, err := tx.ExecContext(ctx, tx.Rebind(`
 		INSERT INTO runs (
 			id, agent_profile_id, reason, payload, status, coalesced_count,
 			idempotency_key, context_snapshot, capabilities, input_snapshot,
@@ -44,6 +49,21 @@ func (r *Repository) CreateRun(ctx context.Context, req *models.Run) error {
 		req.SessionID, req.RetryCount, req.ScheduledRetryAt, req.RequestedAt,
 		req.ErrorMessage, req.CancelReason, req.ContinuationScope)
 	return err
+}
+
+// CreateRun creates a new run queue entry in a transaction owned by this
+// method. See CreateRunTx for the field-defaulting / continuation-scope
+// derivation this delegates to.
+func (r *Repository) CreateRun(ctx context.Context, req *models.Run) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.CreateRunTx(ctx, tx, req); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func ensureRunDefaults(req *models.Run) {

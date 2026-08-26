@@ -182,3 +182,17 @@ func BuildSkillManifestForTest(
 // Skill delivery test helpers were removed in ADR 0005 Wave E along
 // with the office-tier delivery code. Coverage moved into
 // internal/agent/runtime/lifecycle/skill.
+
+// GetWakeReceiptForTest exposes the repo's parent_child_wake_receipts read
+// so ParentWakeReconciler tests can assert a paused/unresolved-assignee
+// skip leaves no partial receipt behind.
+func (s *Service) GetWakeReceiptForTest(ctx context.Context, parentTaskID string) (*sqlite.WakeReceipt, error) {
+	return s.repo.GetWakeReceipt(ctx, parentTaskID)
+}
+
+// ParentWakeUnchangedSkipTotalForTest exposes the current value of the
+// parent_wake_unchanged_skip_total expvar counter so tests can assert the
+// steady-state no-op path increments it.
+func ParentWakeUnchangedSkipTotalForTest() int64 {
+	return parentWakeUnchangedSkipTotal.Value()
+}

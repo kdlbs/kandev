@@ -162,7 +162,12 @@ func (r *Repository) GetTaskAssignee(ctx context.Context, taskID string) (string
 	return assignee, nil
 }
 
-// AreAllChildrenTerminal checks if all child tasks of a parent are in terminal state.
+// AreAllChildrenTerminal checks if all child tasks of a parent are in
+// terminal state. Unlike ListStuckParents (wake_receipts.go), this counts
+// every child regardless of archived_at, so an archived child stuck
+// mid-flight can block it forever — that divergence is intentional on the
+// reconciler's side (see ListStuckParents), not a bug here; do not add an
+// archived_at filter to this query to "match" it.
 func (r *Repository) AreAllChildrenTerminal(ctx context.Context, parentID string) (bool, error) {
 	var nonTerminal int
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`

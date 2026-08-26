@@ -185,6 +185,9 @@ func (r *Repository) createExtensionTables() error {
 	if err := r.createAgentWakeupRequestTable(); err != nil {
 		return err
 	}
+	if err := r.createParentChildWakeReceiptsTable(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -689,6 +692,24 @@ func (r *Repository) createAgentWakeupRequestTable() error {
 	CREATE INDEX IF NOT EXISTS idx_wakeup_agent_status ON agent_wakeup_requests(agent_profile_id, status);
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_wakeup_idempotency ON agent_wakeup_requests(idempotency_key)
 		WHERE idempotency_key IS NOT NULL AND idempotency_key != '';
+	`)
+	return err
+}
+
+// createParentChildWakeReceiptsTable creates the table backing
+// ParentWakeReconciler's level-triggered sweep (see
+// scheduler_wake_reconciler.go). One row per parent task records the
+// child set (hash of sorted child IDs + terminal states) a
+// task_children_completed run was last delivered for, so a healthy
+// steady state costs one indexed lookup per tick and emits nothing.
+func (r *Repository) createParentChildWakeReceiptsTable() error {
+	_, err := r.db.Exec(`
+	CREATE TABLE IF NOT EXISTS parent_child_wake_receipts (
+		parent_task_id   TEXT PRIMARY KEY,
+		child_set_hash   TEXT NOT NULL,
+		delivered_run_id TEXT NOT NULL DEFAULT '',
+		delivered_at     TIMESTAMP NOT NULL
+	);
 	`)
 	return err
 }
