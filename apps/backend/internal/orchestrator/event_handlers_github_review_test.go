@@ -405,7 +405,7 @@ func TestAutoStart_BothPathsFireExactlyOnce(t *testing.T) {
 
 	// Path A: promotion event-driven auto-start on the same task.
 	// autoStartTaskForStep spawns a goroutine — we synchronise via the launched channel.
-	svc.autoStartTaskForStep(ctx, taskID, stepID, "task.queue_promoted")
+	svc.autoStartTaskForStep(ctx, taskID, stepID, "task.queue_promoted", 0)
 
 	// Wait for exactly one launch. Allow 2 seconds for the async goroutine.
 	deadline := time.After(2 * time.Second)
@@ -568,7 +568,7 @@ func TestAutoStart_NoTokenDoesNotBlock(t *testing.T) {
 	}
 	svc := createTestServiceWithScheduler(repo, sg, taskRepo, agentMgr)
 
-	svc.autoStartTaskForStep(ctx, taskID, stepID, "task.moved")
+	svc.autoStartTaskForStep(ctx, taskID, stepID, "task.moved", 0)
 
 	select {
 	case <-launched:
@@ -627,7 +627,7 @@ func TestAutoStart_FailedLaunchWithoutGuardDoesNotStampClaimed(t *testing.T) {
 	}
 	svc := createTestServiceWithScheduler(repo, sg, taskRepo, agentMgr)
 
-	svc.autoStartTaskForStep(ctx, taskID, stepID, "task.moved")
+	svc.autoStartTaskForStep(ctx, taskID, stepID, "task.moved", 0)
 
 	select {
 	case <-attempted:

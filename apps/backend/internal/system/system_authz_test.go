@@ -10,7 +10,9 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
@@ -18,6 +20,8 @@ import (
 	"github.com/kandev/kandev/internal/auth/httpmw"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/system/backups"
 	"github.com/kandev/kandev/internal/system/jobs"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
@@ -37,6 +41,11 @@ const (
 	authzJSONContentType = "application/json"
 )
 
+// authzJobTimeout bounds the wait for an async backup job. It only has to
+// cover a VACUUM INTO of a one-table database, so a generous value costs
+// nothing on the happy path and still fails loudly rather than hanging.
+const authzJobTimeout = 30 * time.Second
+
 // systemRouterForSyntheticIdentity mirrors the auth-disabled request path:
 // httpmw injects the synthetic single-user admin on every request.
 func systemRouterForSyntheticIdentity() *gin.Engine {
@@ -52,6 +61,49 @@ type backupsAuthzFixture struct {
 	service    *backups.Service
 	tracker    *jobs.Tracker
 	backupsDir string
+
+	// POST /backups returns a job id and does its filesystem work in a
+	// tracker goroutine, so a test that returns without waiting races
+	// t.TempDir()'s RemoveAll against a VACUUM INTO still writing into
+	// backupsDir. The tracker publishes every transition on the event bus,
+	// so awaiting the terminal one is a real barrier rather than a sleep:
+	// jobs.Tracker.run publishes it only after the job function has
+	// returned, which is after the last write.
+	mu   sync.Mutex
+	done map[string]chan struct{}
+}
+
+// jobDone returns the channel closed when jobID reaches a terminal state,
+// creating it if neither side has seen the job yet. Both the subscriber and
+// the waiter go through here, so a job that finishes before anyone waits is
+// still observed.
+func (f *backupsAuthzFixture) jobDone(jobID string) chan struct{} {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	channel, ok := f.done[jobID]
+	if !ok {
+		channel = make(chan struct{})
+		f.done[jobID] = channel
+	}
+	return channel
+}
+
+// awaitJob blocks until the job finishes. It is the barrier that keeps the
+// tracker goroutine from outliving the test and its temporary directory.
+func (f *backupsAuthzFixture) awaitJob(t *testing.T, response *httptest.ResponseRecorder) {
+	t.Helper()
+	var body struct {
+		JobID string `json:"job_id"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || body.JobID == "" {
+		t.Fatalf("create response carried no job id: %s", response.Body.String())
+	}
+	select {
+	case <-f.jobDone(body.JobID):
+	case <-time.After(authzJobTimeout):
+		t.Fatalf("backup job %s did not finish in %s; state = %+v",
+			body.JobID, authzJobTimeout, f.tracker.Get(body.JobID))
+	}
 }
 
 func newBackupsAuthzFixture(t *testing.T) *backupsAuthzFixture {
@@ -75,9 +127,27 @@ func newBackupsAuthzFixture(t *testing.T) *backupsAuthzFixture {
 	if err := os.WriteFile(snapshot, []byte(authzSnapshotContent), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	tracker := jobs.NewTracker(nil, testLoggerForAuthz(t))
-	service := backups.NewService(databasePath, db.NewPool(connection, connection), tracker, testLoggerForAuthz(t))
-	return &backupsAuthzFixture{service: service, tracker: tracker, backupsDir: backupsDir}
+	fixture := &backupsAuthzFixture{backupsDir: backupsDir, done: map[string]chan struct{}{}}
+	// A real logger: MemoryEventBus.Subscribe logs unconditionally and nil-
+	// derefs on a nil one, even though Publish tolerates it.
+	eventBus := bus.NewMemoryEventBus(testLoggerForAuthz(t))
+	subscription, err := eventBus.Subscribe(events.SystemJobUpdate, func(_ context.Context, event *bus.Event) error {
+		job, ok := event.Data.(*jobs.Job)
+		if !ok || (job.State != jobs.StateSucceeded && job.State != jobs.StateFailed) {
+			return nil
+		}
+		close(fixture.jobDone(job.ID))
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = subscription.Unsubscribe() })
+	fixture.tracker = jobs.NewTracker(eventBus, testLoggerForAuthz(t))
+	fixture.service = backups.NewService(
+		databasePath, db.NewPool(connection, connection), fixture.tracker, testLoggerForAuthz(t),
+	)
+	return fixture
 }
 
 func (f *backupsAuthzFixture) router(t *testing.T, router *gin.Engine) *gin.Engine {
@@ -198,6 +268,10 @@ func TestBackupsRoutesUnchangedForAdminAndSyntheticIdentity(t *testing.T) {
 			if create.Code != http.StatusAccepted {
 				t.Fatalf("create status = %d, want 202; body=%s", create.Code, create.Body.String())
 			}
+			// Wait here, not at the end: the job writes into the same
+			// directory the assertions below read, so letting it run loose
+			// would race the delete assertion as well as the cleanup.
+			fixture.awaitJob(t, create)
 
 			restore := serve(router, newRequest(http.MethodPost, authzSnapshotPath+"/restore", `{"confirm":"NOPE"}`))
 			if restore.Code != http.StatusBadRequest {

@@ -51,6 +51,29 @@ func (r *Repository) GetTaskWorkflowStepID(ctx context.Context, taskID string) (
 	return r.stepIDForTask(ctx, taskID)
 }
 
+// GetWorkflowStepStageType returns the persisted stage type for a workflow
+// step. It returns an empty string when the step does not exist so callers
+// can apply compatibility fallbacks for older run payloads.
+func (r *Repository) GetWorkflowStepStageType(ctx context.Context, stepID string) (string, error) {
+	if stepID == "" {
+		return "", nil
+	}
+	var stageType sql.NullString
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
+		`SELECT stage_type FROM workflow_steps WHERE id = ?`,
+	), stepID).Scan(&stageType)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if !stageType.Valid {
+		return "", nil
+	}
+	return stageType.String, nil
+}
+
 // AddTaskParticipant inserts a (task, agent, role) row idempotently into
 // workflow_step_participants under the task's current workflow step. A
 // second call with the same natural key is a no-op. Returns nil silently

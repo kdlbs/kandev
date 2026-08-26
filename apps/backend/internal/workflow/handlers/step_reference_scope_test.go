@@ -58,7 +58,10 @@ func TestMoveToStepTargetCannotLeaveTheWorkflow(t *testing.T) {
 		h.queries.reset()
 		rec := doAs(t, h, asUser(userB), http.MethodPost, "/api/v1/workflow/steps",
 			moveToStepBody("wf-b", "Smuggler", h.stepA))
-		requireNotFound(t, rec)
+		requireStatus(t, rec, http.StatusBadRequest)
+		if !strings.Contains(rec.Body.String(), "same workflow") {
+			t.Fatalf("body = %s, want the same-workflow reason", rec.Body.String())
+		}
 		requireNoStepWrites(t, h)
 	})
 
@@ -71,19 +74,47 @@ func TestMoveToStepTargetCannotLeaveTheWorkflow(t *testing.T) {
 					{"type": "move_to_step", "config": map[string]any{"step_id": h.stepA}},
 				},
 			}})
-		requireNotFound(t, rec)
+		requireStatus(t, rec, http.StatusBadRequest)
 		requireNoStepWrites(t, h)
 	})
 
-	t.Run("a foreign target answers exactly like a nonexistent one", func(t *testing.T) {
+	// A target that resolves to nothing is accepted, and a target that resolves
+	// into another workflow is not. Those two answers differ on purpose.
+	//
+	// The alternative — one reply for both — is what shipped in #3031, and it
+	// broke ordinary step edits: `move_to_step` configs are routinely authored
+	// with symbolic IDs ("review") that only the template applier remaps, and
+	// the engine skips an unresolvable target instead of failing the trigger.
+	// Refusing those rejected a documented, load-bearing behaviour.
+	//
+	// The cost is that a caller holding a step UUID can learn it belongs to
+	// some other workflow. That is a UUID they already had, it stays refused
+	// either way, and no ID they supply can ever become valid later: step IDs
+	// are generated server-side on every write path.
+	t.Run("an unresolvable target is accepted, a foreign one is not", func(t *testing.T) {
 		h := setupScopedRouter(t)
+		symbolic := doAs(t, h, asUser(userB), http.MethodPost, "/api/v1/workflow/steps",
+			moveToStepBody("wf-b", "Symbolic", "review"))
+		requireStatus(t, symbolic, http.StatusCreated)
+
 		foreign := doAs(t, h, asUser(userB), http.MethodPost, "/api/v1/workflow/steps",
 			moveToStepBody("wf-b", "Smuggler", h.stepA))
-		missing := doAs(t, h, asUser(userB), http.MethodPost, "/api/v1/workflow/steps",
-			moveToStepBody("wf-b", "Smuggler", "no-such-step"))
-		if foreign.Code != missing.Code || foreign.Body.String() != missing.Body.String() {
-			t.Fatalf("foreign target %d %s differs from missing target %d %s",
-				foreign.Code, foreign.Body.String(), missing.Code, missing.Body.String())
+		requireStatus(t, foreign, http.StatusBadRequest)
+	})
+
+	// The e2e suite runs with authentication disabled and edits steps exactly
+	// this way (workflow-automation.spec.ts). Pinning it here means the next
+	// change to this validator fails in a Go test in seconds rather than in a
+	// browser shard an hour later.
+	t.Run("a symbolic target is accepted with auth disabled", func(t *testing.T) {
+		h := setupScopedRouter(t)
+		for _, ctx := range []context.Context{asSyntheticUser(), context.Background()} {
+			rec := doAs(t, h, ctx, http.MethodPut, "/api/v1/workflow/steps/"+h.stepB,
+				map[string]any{"events": map[string]any{
+					"on_turn_start":    []map[string]any{{"type": "move_to_next"}},
+					"on_turn_complete": []map[string]any{{"type": "move_to_step", "config": map[string]any{"step_id": "review"}}},
+				}})
+			requireStatus(t, rec, http.StatusOK)
 		}
 	})
 

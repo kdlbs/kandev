@@ -42,6 +42,16 @@ export async function seedClarificationSession(
 
   if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
+  if (!waitForIdle) {
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId: task.session_id,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "clarification session should be waiting for input before navigation",
+      timeout: 60_000,
+    });
+  }
+
   await testPage.goto(`/t/${task.id}`);
 
   const session = new SessionPage(testPage);

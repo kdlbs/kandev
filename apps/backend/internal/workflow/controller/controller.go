@@ -317,17 +317,33 @@ func (c *Controller) validateStepReferences(ctx context.Context, step *models.Wo
 // with whatever it finds there — that step's prompt and agent profile — so a
 // target in somebody else's workflow both parks the task outside its board and
 // runs it under their configuration.
+//
+// A target that resolves to nothing is left alone, because reaching nothing is
+// the whole point: `move_to_step` configs are authored with symbolic IDs
+// ("review", "in-progress") that only the template applier remaps, and the
+// engine skips an unresolvable target rather than failing the trigger. That
+// tolerance is load-bearing product behaviour, not an oversight, so rejecting
+// it here broke ordinary step edits that had nothing to do with scoping.
+//
+// It is also safe: an unresolvable ID reaches no other user's step, and it
+// cannot be armed later, since step IDs are generated server-side on every
+// write path (create, template apply, import, sync) and never accepted from a
+// caller.
 func (c *Controller) validateEventStepTarget(ctx context.Context, step *models.WorkflowStep, targetID string) error {
 	if targetID == step.ID {
 		return nil // a self-transition names no other step
 	}
-	if err := c.svc.AuthorizeStep(ctx, targetID); err != nil {
-		return err
-	}
 	target, err := c.svc.GetStep(ctx, targetID)
 	if err != nil {
+		if service.IsNotFound(err) {
+			return nil
+		}
 		return fmt.Errorf("move_to_step target is invalid: %w", err)
 	}
+	// Membership carries the authorization: the step being written lives in an
+	// already-authorized workflow, so a target inside that same workflow is
+	// authorized by construction, and one outside it is refused whether or not
+	// the caller can see it.
 	if target.WorkflowID != step.WorkflowID {
 		return fmt.Errorf("move_to_step must reference a step in the same workflow")
 	}
