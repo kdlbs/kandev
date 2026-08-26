@@ -45,12 +45,15 @@ work depends on it.
 ### Task-scoped disclosure hydration
 
 Add a hook under `hooks/domains/github` that uses `listTaskPRs([taskId])` when
-`taskPRs.byTaskId[taskId]` is empty. Scope the in-flight registry to the Zustand
-store and key it by workspace and task.
+`taskPRs.byTaskId[taskId]` is empty for the active workspace context. Scope the
+in-flight registry to the Zustand store and key it by workspace, workspace
+context generation, and task. Preserve deletion tombstones so a late response
+cannot restore an association removed while it was pending.
 
 Update `PRTaskIcon` and `TaskContributionIcons` so compact and full data use one
 tooltip trigger. Compact content shows localized loading or unavailable text.
-Successful data updates replace the content without closing the tooltip.
+Successful data updates replace the content without unmounting the trigger or
+closing the tooltip.
 
 Before response application, compare the active workspace and current store
 records. Preserve matching records that arrived from WebSocket events. Add only
@@ -76,7 +79,7 @@ the existing localized `task:byAuthor` key for author presentation.
 
 | Acceptance criteria | Evidence |
 | --- | --- |
-| `AC-UI-PR-TASK-STATUS-SUMMARY-001.13` to `.16` | A new hydration-hook test covers task scope, one in-flight request, cache reuse, empty/error retry, workspace changes, and HTTP/WS ordering. Render tests cover mouse and keyboard disclosure states. |
+| `AC-UI-PR-TASK-STATUS-SUMMARY-001.13` to `.16` | A new hydration-hook test covers task scope, one in-flight request, cache reuse, workspace and task-context changes, deletion during an HTTP request, empty/error retry, and HTTP/WS ordering. Render tests cover mouse and keyboard disclosure states, including focus continuity. |
 | `AC-UI-PR-TASK-STATUS-SUMMARY-001.17` | Summary derivation and shared render tests cover a present and missing author login. |
 | Existing `.1` to `.12` | Existing PR icon and shared summary suites remain green. |
 | `AC-UI-PR-TASK-STATUS-SUMMARY-001.18` | Existing status-chip component tests and mobile Playwright coverage prove drawer author visibility and unchanged task-row navigation. |
@@ -118,7 +121,8 @@ subagents.
 
 ## Verification results
 
-- Focused web unit suite: 126 tests passed across 7 files.
+- Focused web unit suite: 163 tests passed across 10 files after the review
+  fixup, including the workspace-context generation regression test.
 - Web typecheck passed.
 - Web i18n check and ratchet passed.
 - Full web lint passed.
@@ -131,6 +135,8 @@ subagents.
   and validated through `apps/web/.pr-assets/manifest.json`.
 - The repository-wide E2E sleep-policy lint remains baseline-red with 188
   unrelated errors. Both changed E2E files pass the same lint directly.
+- PR review fixup coverage also verifies task-id and workspace-context races,
+  deletion tombstones, and keyboard focus continuity during hydration.
 
 ## Documentation impact
 

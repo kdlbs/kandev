@@ -139,7 +139,9 @@ describe("useTaskPRTooltipHydration request coordination", () => {
     expect(listTaskPRsMock).toHaveBeenCalledTimes(1);
     expect(result.current.store.getState().taskPRs.byTaskId["task-1"]).toEqual([pr]);
   });
+});
 
+describe("useTaskPRTooltipHydration context guards", () => {
   it("keeps a WebSocket entry when the older HTTP response resolves later", async () => {
     const response = deferred<{ task_prs: Record<string, TaskPR[]> }>();
     listTaskPRsMock.mockReturnValue(response.promise);
@@ -177,6 +179,60 @@ describe("useTaskPRTooltipHydration request coordination", () => {
     });
 
     expect(result.current.store.getState().taskPRs.byTaskId["task-1"]).toBeUndefined();
+  });
+
+  it("does not apply a response after the task id changes", async () => {
+    const response = deferred<{ task_prs: Record<string, TaskPR[]> }>();
+    listTaskPRsMock.mockReturnValue(response.promise);
+    const { result, rerender } = renderHook(
+      ({ taskId }: { taskId: string }) => useHydrationWithStore(taskId),
+      {
+        initialProps: { taskId: "task-1" },
+        wrapper: createStateWrapper(),
+      },
+    );
+    const request = result.current.hydration.hydrate();
+
+    rerender({ taskId: "task-2" });
+    await act(async () => {
+      response.resolve({ task_prs: { "task-1": [makePR()] } });
+      await request;
+    });
+
+    expect(result.current.store.getState().taskPRs.byTaskId["task-1"]).toBeUndefined();
+  });
+
+  it("does not reuse task PRs left behind after a workspace switch", async () => {
+    listTaskPRsMock.mockResolvedValue({ task_prs: { "task-1": [] } });
+    const { result } = renderHook(() => useHydrationWithStore("task-1"), {
+      wrapper: createStateWrapper({ taskPRs: { byTaskId: { "task-1": [makePR()] } } }),
+    });
+
+    act(() => {
+      result.current.store.getState().resetKanbanWorkspaceContext();
+      result.current.store.getState().setActiveWorkspace("workspace-b");
+    });
+    await act(async () => {
+      await result.current.hydration.hydrate();
+    });
+
+    expect(listTaskPRsMock).toHaveBeenCalledWith(["task-1"], { cache: "no-store" });
+  });
+
+  it("does not reuse task PRs after the workspace context generation changes", async () => {
+    listTaskPRsMock.mockResolvedValue({ task_prs: { "task-1": [] } });
+    const { result } = renderHook(() => useHydrationWithStore("task-1"), {
+      wrapper: createStateWrapper({ taskPRs: { byTaskId: { "task-1": [makePR()] } } }),
+    });
+
+    act(() => {
+      result.current.store.getState().resetKanbanWorkspaceContext();
+    });
+    await act(async () => {
+      await result.current.hydration.hydrate();
+    });
+
+    expect(listTaskPRsMock).toHaveBeenCalledWith(["task-1"], { cache: "no-store" });
   });
 });
 
@@ -223,5 +279,24 @@ describe("useTaskPRTooltipHydration retry states", () => {
 
     expect(listTaskPRsMock).toHaveBeenCalledTimes(2);
     expect(result.current.store.getState().taskPRs.byTaskId["task-1"]).toEqual([pr]);
+  });
+
+  it("does not resurrect an association deleted while the request was pending", async () => {
+    const response = deferred<{ task_prs: Record<string, TaskPR[]> }>();
+    listTaskPRsMock.mockReturnValue(response.promise);
+    const { result } = renderHook(() => useHydrationWithStore("task-1"), {
+      wrapper: createStateWrapper(),
+    });
+    const request = result.current.hydration.hydrate();
+
+    act(() => {
+      result.current.store.getState().removeTaskPR("task-1", "pr-1");
+    });
+    await act(async () => {
+      response.resolve({ task_prs: { "task-1": [makePR()] } });
+      await request;
+    });
+
+    expect(result.current.store.getState().taskPRs.byTaskId["task-1"]).toBeUndefined();
   });
 });

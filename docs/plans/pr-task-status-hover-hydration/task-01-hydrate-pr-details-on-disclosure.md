@@ -28,7 +28,8 @@ the existing store.
 ## In scope
 
 - Add a task-scoped hydration hook with store-scoped request deduplication.
-- Guard workspace changes and preserve matching WebSocket store records.
+- Guard workspace and workspace-context changes, preserve matching WebSocket
+  store records, and honor deletion tombstones.
 - Render compact loading and unavailable tooltip content.
 - Start the load on mouse pointer entry or visible keyboard focus.
 - Add localized loading and unavailable copy in all required locales.
@@ -97,5 +98,7 @@ None.
 - Added localized loading and unavailable tooltip states in all required
   locales.
 - Added pointer and keyboard disclosure coverage plus focused hydration tests.
+- Added task-id and workspace-context generation race coverage, plus protection
+  against resurrecting an association deleted while an HTTP request is pending.
 - Focused unit tests, typecheck, i18n checks, ratchet, full web lint, desktop
   E2E, mobile E2E, and the E2E build passed.

@@ -263,6 +263,23 @@ function mergeGitHubState(initialState: HydrationState) {
       ...defaultState.githubAppRegistrations,
       ...initialState.githubAppRegistrations,
     },
+    taskPRs: mergeTaskPRState(initialState),
+  };
+}
+
+function mergeTaskPRState(initialState: HydrationState) {
+  const incoming = initialState.taskPRs;
+  return {
+    ...defaultState.taskPRs,
+    ...incoming,
+    byTaskId: { ...defaultState.taskPRs.byTaskId, ...incoming?.byTaskId },
+    deletedAssociationIdsByTaskId: {
+      ...defaultState.taskPRs.deletedAssociationIdsByTaskId,
+      ...incoming?.deletedAssociationIdsByTaskId,
+    },
+    workspaceId: incoming?.workspaceId ?? initialState.workspaces?.activeId ?? null,
+    workspaceContextGeneration:
+      incoming?.workspaceContextGeneration ?? initialState.workspaceContextGeneration ?? 0,
   };
 }
 
@@ -364,7 +381,6 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
       ...initialState.embeddedVscodeSupport,
     },
     ...mergeGitHubState(initialState),
-    taskPRs: { ...defaultState.taskPRs, ...initialState.taskPRs },
     taskIssues: { ...defaultState.taskIssues, ...initialState.taskIssues },
     pendingPrUrlByTaskId: {
       ...defaultState.pendingPrUrlByTaskId,

@@ -5,6 +5,8 @@ import type { StoreApi } from "zustand";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { listTaskPRs } from "@/lib/api/domains/github-api";
 import type { AppState } from "@/lib/state/store";
+import { isCurrentWorkspaceContext } from "@/lib/state/workspace-context";
+import type { TaskPRScope } from "@/lib/state/slices/github/types";
 import type { TaskPR } from "@/lib/types/github";
 
 export type TaskPRTooltipHydrationStatus = "idle" | "loading" | "unavailable";
@@ -17,8 +19,14 @@ function hasTaskPRs(value: unknown): value is TaskPR[] {
   return Array.isArray(value) && value.length > 0;
 }
 
-function requestKey(workspaceId: string, taskId: string): string {
-  return `${workspaceId}\u0000${taskId}`;
+function requestKey(
+  workspaceId: string,
+  workspaceContextGeneration: number,
+  taskId: string,
+): string {
+  // The NUL delimiter is only an in-memory scope-key boundary; API IDs are
+  // opaque stable values and are not expected to contain it.
+  return `${workspaceId}\u0000${workspaceContextGeneration}\u0000${taskId}`;
 }
 
 function getRequestRegistry(store: StoreApi<AppState>): TaskPRRequestRegistry {
@@ -37,31 +45,53 @@ function isSamePR(left: TaskPR, right: TaskPR): boolean {
 }
 
 /** Merge only missing identities so a newer WebSocket row remains authoritative. */
-function mergeMissingTaskPRs(store: StoreApi<AppState>, taskId: string, prs: TaskPR[]): void {
+function getTaskPRsForScope(state: AppState, taskId: string, scope: TaskPRScope): TaskPR[] | null {
+  if (
+    state.taskPRs.workspaceId === scope.workspaceId &&
+    state.taskPRs.workspaceContextGeneration === scope.workspaceContextGeneration &&
+    hasTaskPRs(state.taskPRs.byTaskId[taskId])
+  ) {
+    return state.taskPRs.byTaskId[taskId];
+  }
+  return null;
+}
+
+export function getTaskPRsForCurrentWorkspace(state: AppState, taskId: string): TaskPR[] | null {
+  return getTaskPRsForScope(state, taskId, {
+    workspaceId: state.workspaces.activeId,
+    workspaceContextGeneration: state.workspaceContextGeneration,
+  });
+}
+
+function mergeMissingTaskPRs(
+  store: StoreApi<AppState>,
+  taskId: string,
+  prs: TaskPR[],
+  scope: TaskPRScope,
+): void {
   for (const pr of prs) {
-    const current = store.getState().taskPRs.byTaskId[taskId];
+    const taskPRs = store.getState().taskPRs;
+    if (taskPRs.deletedAssociationIdsByTaskId?.[taskId]?.[pr.id]) continue;
+    const current = taskPRs.byTaskId[taskId];
     const currentPRs = Array.isArray(current) ? current : [];
     if (currentPRs.some((candidate) => isSamePR(candidate, pr))) continue;
-    store.getState().setTaskPR(taskId, pr);
+    store.getState().setTaskPR(taskId, pr, scope);
   }
 }
 
 function requestTaskPRs(
   store: StoreApi<AppState>,
-  workspaceId: string,
+  scope: TaskPRScope & { workspaceId: string },
   taskId: string,
 ): Promise<TaskPR[]> {
   const registry = getRequestRegistry(store);
-  const key = requestKey(workspaceId, taskId);
+  const key = requestKey(scope.workspaceId, scope.workspaceContextGeneration, taskId);
   const existing = registry.get(key);
   if (existing) return existing;
 
-  const request = listTaskPRs([taskId], { cache: "no-store" }).then((response) => {
-    if (store.getState().workspaces.activeId !== workspaceId) return [];
-    const prs = response.task_prs?.[taskId] ?? [];
-    mergeMissingTaskPRs(store, taskId, prs);
-    return prs;
-  });
+  const request = listTaskPRs([taskId], { cache: "no-store" }).then(
+    (response) => response.task_prs?.[taskId] ?? [],
+  );
   registry.set(key, request);
   request.then(
     () => {
@@ -80,8 +110,9 @@ export function useTaskPRTooltipHydration(taskId: string): {
 } {
   const store = useAppStoreApi();
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const workspaceContextGeneration = useAppStore((state) => state.workspaceContextGeneration);
   const [status, setStatus] = useState<TaskPRTooltipHydrationStatus>("idle");
-  const scopeKey = `${workspaceId ?? ""}\u0000${taskId}`;
+  const scopeKey = `${workspaceId ?? ""}\u0000${workspaceContextGeneration}\u0000${taskId}`;
   const scopeRef = useRef({ key: scopeKey, generation: 0 });
   if (scopeRef.current.key !== scopeKey) {
     scopeRef.current = {
@@ -95,25 +126,32 @@ export function useTaskPRTooltipHydration(taskId: string): {
 
   const hydrate = useCallback(() => {
     const generation = scopeRef.current.generation;
+    const scope = workspaceId ? { workspaceId, workspaceContextGeneration } : null;
     const isCurrentScope = () =>
       scopeRef.current.generation === generation &&
-      store.getState().workspaces.activeId === workspaceId;
-    const current = store.getState().taskPRs.byTaskId[taskId];
-    if (hasTaskPRs(current)) {
-      if (isCurrentScope()) setStatus("idle");
-      return Promise.resolve(current);
-    }
-    if (!workspaceId) {
-      if (isCurrentScope()) setStatus("unavailable");
+      scope !== null &&
+      isCurrentWorkspaceContext(
+        store.getState(),
+        scope.workspaceId,
+        scope.workspaceContextGeneration,
+      );
+    if (!scope) {
+      if (scopeRef.current.generation === generation) setStatus("unavailable");
       return Promise.resolve([]);
+    }
+    const current = store.getState();
+    const cached = getTaskPRsForScope(current, taskId, scope);
+    if (cached) {
+      if (isCurrentScope()) setStatus("idle");
+      return Promise.resolve(cached);
     }
 
     if (isCurrentScope()) setStatus("loading");
-    return requestTaskPRs(store, workspaceId, taskId).then(
+    return requestTaskPRs(store, scope, taskId).then(
       (prs) => {
         if (isCurrentScope()) {
-          const settled = store.getState().taskPRs.byTaskId[taskId];
-          setStatus(hasTaskPRs(settled) ? "idle" : "unavailable");
+          mergeMissingTaskPRs(store, taskId, prs, scope);
+          setStatus(getTaskPRsForScope(store.getState(), taskId, scope) ? "idle" : "unavailable");
         }
         return prs;
       },
@@ -122,7 +160,7 @@ export function useTaskPRTooltipHydration(taskId: string): {
         return [];
       },
     );
-  }, [store, taskId, workspaceId]);
+  }, [store, taskId, workspaceContextGeneration, workspaceId]);
 
   return { status, hydrate };
 }

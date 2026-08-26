@@ -99,5 +99,7 @@ cd apps/web && pnpm run typecheck
 - Reused the existing mobile PR-status drawer and preserved task-row
   navigation.
 - Added summary, popover, drawer, desktop E2E, and mobile E2E coverage.
+- Kept one mounted tooltip trigger across compact-to-full hydration so keyboard
+  focus and an open disclosure survive the store update.
 - Focused unit tests, typecheck, full web lint, desktop E2E, mobile E2E, and the
   E2E build passed.

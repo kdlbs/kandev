@@ -13,13 +13,25 @@ export function registerGitHubHandlers(store: StoreApi<AppState>): WsHandlers {
     "github.task_pr.updated": (message) => {
       const pr = message.payload as TaskPR;
       if (pr.task_id) {
-        store.getState().setTaskPR(pr.task_id, pr);
+        const state = store.getState();
+        store.getState().setTaskPR(pr.task_id, pr, {
+          workspaceId: state.workspaces.activeId,
+          workspaceContextGeneration: state.workspaceContextGeneration,
+        });
       }
     },
     "github.task_pr.deleted": (message) => {
       const deleted = message.payload as TaskPRDeletedEvent;
       if (deleted.task_id && deleted.association_id) {
-        store.getState().removeTaskPR(deleted.task_id, deleted.association_id);
+        const state = store.getState();
+        if (state.workspaces.activeId && state.workspaces.activeId !== deleted.workspace_id) return;
+        const scope = state.workspaces.activeId
+          ? {
+              workspaceId: state.workspaces.activeId,
+              workspaceContextGeneration: state.workspaceContextGeneration,
+            }
+          : undefined;
+        store.getState().removeTaskPR(deleted.task_id, deleted.association_id, scope);
       }
     },
     "github.task_ci_options.updated": (message) => {
