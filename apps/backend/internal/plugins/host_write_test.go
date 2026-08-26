@@ -3,6 +3,7 @@ package plugins
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	agentsettingsdto "github.com/kandev/kandev/internal/agent/settings/dto"
@@ -546,6 +547,59 @@ func TestPluginHost_Tasks_MoveRejectsNegativePosition(t *testing.T) {
 	}
 	if d.taskWriter.moveCalls != 0 {
 		t.Fatalf("task writer called despite negative position")
+	}
+}
+
+// TestPluginHost_Tasks_MoveInvalidFieldPrecedenceOrder pins AC-004.3 (TEST-002):
+// when two fields are simultaneously invalid, the ladder in Move (task_id ->
+// workflow_step_id -> present-but-empty workflow_id -> negative position)
+// must report the FIRST offending field, not whichever the implementation
+// happens to check last. Each case names two invalid fields and asserts the
+// error text matches the earlier one in the ladder, not the later one.
+func TestPluginHost_Tasks_MoveInvalidFieldPrecedenceOrder(t *testing.T) {
+	empty := ""
+	cases := []struct {
+		name      string
+		in        pluginsdk.MoveTaskInput
+		wantFirst string
+		notLater  string
+	}{
+		{
+			name:      "empty task_id beats empty workflow_step_id",
+			in:        pluginsdk.MoveTaskInput{TaskID: "", WorkflowStepID: "", Position: -1},
+			wantFirst: "task_id is required",
+			notLater:  "workflow_step_id is required",
+		},
+		{
+			name:      "empty workflow_step_id beats present-but-empty workflow_id",
+			in:        pluginsdk.MoveTaskInput{TaskID: "task-1", WorkflowStepID: "", WorkflowID: &empty, Position: -1},
+			wantFirst: "workflow_step_id is required",
+			notLater:  "workflow_id must not be empty",
+		},
+		{
+			name:      "present-but-empty workflow_id beats negative position",
+			in:        pluginsdk.MoveTaskInput{TaskID: "task-1", WorkflowStepID: "step-2", WorkflowID: &empty, Position: -1},
+			wantFirst: "workflow_id must not be empty",
+			notLater:  "position must not be negative",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
+			_, err := d.host.Tasks().Move(context.Background(), tc.in)
+			if status.Code(err) != codes.InvalidArgument {
+				t.Fatalf("Move() error = %v, want InvalidArgument", err)
+			}
+			if !strings.Contains(err.Error(), tc.wantFirst) {
+				t.Fatalf("Move() error = %q, want it to name the earlier ladder field %q", err.Error(), tc.wantFirst)
+			}
+			if strings.Contains(err.Error(), tc.notLater) {
+				t.Fatalf("Move() error = %q, must not report the later ladder field %q ahead of %q", err.Error(), tc.notLater, tc.wantFirst)
+			}
+			if d.taskWriter.moveCalls != 0 {
+				t.Fatalf("task writer called despite invalid input")
+			}
+		})
 	}
 }
 

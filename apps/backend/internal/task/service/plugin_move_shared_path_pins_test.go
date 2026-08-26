@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"sync"
 	"testing"
 
@@ -229,6 +230,96 @@ func TestSharedMovePath_ConcurrentDifferentStepMovesRecordDistinctTransitions(t 
 		if trigger != string(steptelemetry.TriggerPluginMove) {
 			t.Fatalf("ledger trigger = %q, want %s for each committed move row", trigger, steptelemetry.TriggerPluginMove)
 		}
+	}
+}
+
+// TestSharedMovePath_SameStepMoveReportsNoTransitionAndEmptyFromStepID pins
+// AC-PLUGINS-STEP-MOVE-002.6 and AC-PLUGINS-STEP-MOVE-005.1: a plugin move
+// that names the step the task already occupies is a no-op write through the
+// real shared path (updateMovedTask's early oldStepID == targetStep.ID
+// branch, which calls the plain repository UpdateTask/updateTaskTx — not one
+// of the WIP-admission call sites). System-design.md's "Both outcome fields
+// come from the write transaction" requires FromStepID be empty whenever
+// Transitioned is false; models.Task.FromStepID's own doc says the same
+// ("Empty when no transition occurred"). This drives the real repository,
+// not a mock, so a regression in updateTaskTx's FromStepID assignment fails
+// here rather than only in a hand-constructed MoveTaskResult fixture.
+func TestSharedMovePath_SameStepMoveReportsNoTransitionAndEmptyFromStepID(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	svc.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+		"step-source": {ID: "step-source", WorkflowID: "wf-source", Name: "Source", Position: 0},
+	}})
+	createMoveTask(t, ctx, repo, "task-stationary", "wf-source", "step-source", nil)
+
+	result, err := svc.MoveTaskWithOptions(pluginMoveContext("plugin:acme"), "task-stationary", "wf-source", "step-source", 0, pluginMoveOptions())
+	if err != nil {
+		t.Fatalf("MoveTaskWithOptions: %v", err)
+	}
+	if result.Transitioned {
+		t.Fatalf("Transitioned = true, want false for a same-step move (no ledger row)")
+	}
+	if result.FromStepID != "" {
+		t.Fatalf("FromStepID = %q, want empty when Transitioned is false (design: both outcome fields come from the write transaction)", result.FromStepID)
+	}
+
+	// The genesis task_created row is the only ledger row — the no-op move
+	// must not have appended a second one.
+	triggers := stepTransitionTriggers(t, repo, "task-stationary")
+	if len(triggers) != 1 {
+		t.Fatalf("ledger rows for task-stationary = %d (%v), want exactly 1 (genesis only, no row for the no-op move)", len(triggers), triggers)
+	}
+}
+
+// lastStepTransitionActor reads back the actor_kind/actor_id columns of the
+// most recent task_step_transitions row for taskID, mirroring
+// stepTransitionTriggers' direct-SQL approach since the ledger has no
+// application-layer reader.
+func lastStepTransitionActor(t *testing.T, repo *sqliterepo.Repository, taskID string) (actorKind, actorID string) {
+	t.Helper()
+	var kind sql.NullString
+	var id sql.NullString
+	err := repo.DB().QueryRow(
+		`SELECT actor_kind, actor_id FROM task_step_transitions WHERE task_id = ? ORDER BY id DESC LIMIT 1`, taskID,
+	).Scan(&kind, &id)
+	if err != nil {
+		t.Fatalf("query last task_step_transitions row for %s: %v", taskID, err)
+	}
+	return kind.String, id.String
+}
+
+// TestSharedMovePath_PluginMoveRecordsIntegrationActorOnLedgerRow pins
+// AC-003.1: a plugin-initiated move must land its actor_kind/actor_id on the
+// committed task_step_transitions row exactly as
+// backendapp.pluginsTaskWriterAdapter.MoveTask attaches them
+// (steptelemetry.ActorIntegration + the plugin's source string), not merely
+// pass them through in-memory — this drives the real repository write, so a
+// regression in how recordStepTransition persists the attribution fails here.
+func TestSharedMovePath_PluginMoveRecordsIntegrationActorOnLedgerRow(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	svc.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+		"step-source": {ID: "step-source", WorkflowID: "wf-source", Name: "Source", Position: 0},
+		"step-target": {ID: "step-target", WorkflowID: "wf-source", Name: "Target", Position: 1},
+	}})
+	createMoveTask(t, ctx, repo, "task-attributed", "wf-source", "step-source", nil)
+
+	result, err := svc.MoveTaskWithOptions(pluginMoveContext("plugin:acme"), "task-attributed", "wf-source", "step-target", 0, pluginMoveOptions())
+	if err != nil {
+		t.Fatalf("MoveTaskWithOptions: %v", err)
+	}
+	if !result.Transitioned {
+		t.Fatalf("Transitioned = false, want true for a cross-step move")
+	}
+
+	actorKind, actorID := lastStepTransitionActor(t, repo, "task-attributed")
+	if actorKind != string(steptelemetry.ActorIntegration) {
+		t.Fatalf("ledger actor_kind = %q, want %q", actorKind, steptelemetry.ActorIntegration)
+	}
+	if actorID != "plugin:acme" {
+		t.Fatalf("ledger actor_id = %q, want %q", actorID, "plugin:acme")
 	}
 }
 
