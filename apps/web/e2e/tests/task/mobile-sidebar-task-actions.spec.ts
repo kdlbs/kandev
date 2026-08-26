@@ -5,7 +5,10 @@ import { test, expect } from "../../fixtures/test-base";
 import { activeSessionId, seedSecondaryClarificationTask } from "../../helpers/clarification";
 import { makeGitEnv } from "../../helpers/git-helper";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
-import { expectActiveTaskRow } from "../../helpers/active-task-row";
+import {
+  expectActiveTaskRow,
+  expectActiveTaskRowWithoutColor,
+} from "../../helpers/active-task-row";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("Mobile sidebar task actions", () => {
@@ -208,6 +211,32 @@ test.describe("Mobile sidebar task actions", () => {
     await expectActiveTaskRow(row);
     await expect(row.locator("div.absolute.left-0.top-0.bottom-0")).toHaveClass(/bg-red-500/);
     await assertNoDocumentHorizontalOverflow(testPage, "mobile active task focus");
+  });
+
+  test("does not show a left marker for an uncolored active task in the phone drawer", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.createTask(
+      seedData.workspaceId,
+      "Mobile uncolored active task focus",
+      {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+      },
+    );
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await testPage.getByTestId("mobile-session-menu").tap();
+
+    const drawer = testPage.getByRole("dialog", { name: "Tasks" });
+    const row = drawer.getByTestId("sidebar-task-item").filter({ hasText: task.title });
+    // @covers AC-UI-SIDEBAR-TASK-FOCUS-001.5
+    await expectActiveTaskRowWithoutColor(row);
+    await assertNoDocumentHorizontalOverflow(testPage, "mobile uncolored active task focus");
   });
 
   test("opens the phone task switcher as an inset bottom card", async ({

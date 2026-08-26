@@ -40,9 +40,11 @@ equivalent to:
 border-y border-primary/50 bg-primary/15 hover:bg-primary/20
 ```
 
-The task color remains the color of the leading marker. The primary-tinted
-surface and horizontal borders keep the active state legible when the marker is
-red, yellow, or another saturated color without adding side borders. Inactive
+When `useTaskColor` returns a supported color, `SelectionBar` renders that task
+color as the leading marker and preserves its existing active and inactive
+opacity. When no supported task color is assigned, `SelectionBar` renders
+nothing. The primary-tinted surface and horizontal borders keep the active state
+legible without adding a default left status marker or side borders. Inactive
 rows retain their current hover treatment and marker opacity.
 
 The existing `data-active="true"` and `aria-current` attributes remain on the
@@ -71,15 +73,17 @@ the only inputs to the treatment.
 ## Failure and compatibility
 
 If no task is active, rows retain their current inactive appearance. If a task
-color is missing or invalid, the existing primary marker fallback remains in
-place. Theme tokens are used for the active surface, so light and dark themes
-do not require separate row state.
+color is missing or invalid, no leading marker is rendered and the active row
+uses only its background and horizontal border treatment. Theme tokens are used
+for the active surface, so light and dark themes do not require separate row
+state.
 
 ## Verification
 
 The existing desktop sidebar-open flow shall verify the active row's
-`data-active` state, background, and top-and-bottom-only border treatment. The
-mobile sidebar task-action flow shall verify the same treatment inside the
-task-switcher sheet and retain its viewport-overflow assertion. The shared
-`TaskItem` test suite remains a targeted regression check for row rendering and
-action behavior.
+`data-active` state, background, top-and-bottom-only border treatment, and
+absence of a leading marker when no task color is assigned. The mobile sidebar
+task-action flow shall verify the same treatment inside the task-switcher sheet,
+including the no-color marker rule, and retain its viewport-overflow assertion.
+The shared `TaskItem` test suite remains a targeted regression check for row
+rendering and action behavior.

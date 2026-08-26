@@ -608,22 +608,14 @@ function RowConnector({ depth, leftPx }: { depth: number; leftPx: number }) {
 }
 
 function SelectionBar({ isSelected, color }: { isSelected: boolean; color: TaskColor | null }) {
-  if (color) {
-    return (
-      <div
-        className={cn(
-          "absolute left-0 top-0 bottom-0 w-[3px] transition-opacity",
-          TASK_COLOR_BAR_CLASS[color],
-          isSelected ? "opacity-100" : "opacity-60",
-        )}
-      />
-    );
-  }
+  if (!color) return null;
+
   return (
     <div
       className={cn(
-        "absolute left-0 top-0 bottom-0 w-[2px] bg-primary transition-opacity",
-        isSelected ? "opacity-100" : "opacity-0",
+        "absolute left-0 top-0 bottom-0 w-[3px] transition-opacity",
+        TASK_COLOR_BAR_CLASS[color],
+        isSelected ? "opacity-100" : "opacity-60",
       )}
     />
   );

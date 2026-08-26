@@ -12,6 +12,7 @@ acceptance_criteria:
   - AC-UI-SIDEBAR-TASK-FOCUS-001.2
   - AC-UI-SIDEBAR-TASK-FOCUS-001.3
   - AC-UI-SIDEBAR-TASK-FOCUS-001.4
+  - AC-UI-SIDEBAR-TASK-FOCUS-001.5
 system_design:
   - ../../specs/ui/system-design/sidebar-task-focus.md
 ---
@@ -21,15 +22,16 @@ system_design:
 ## Summary
 
 Give the active shared task row a stronger theme-aware background with only a
-top and bottom active-task border. Preserve the user's task-color marker,
-existing row state attributes, separate multi-selection ring, and current
-desktop/mobile interaction behavior.
+top and bottom active-task border. Preserve the user's task-color marker when a
+color is assigned, omit the default marker when no color is assigned, and
+preserve existing row state attributes, the separate multi-selection ring, and
+current desktop/mobile interaction behavior.
 
 ## In scope
 
 - Update the active branch of `taskItemRowClassName` in `task-item.tsx`.
-- Keep the task-color `SelectionBar` visible for active rows.
-- Add desktop and mobile E2E assertions for the shared active treatment.
+- Keep the task-color `SelectionBar` visible only when a task color is set.
+- Add desktop and mobile E2E assertions for colored and uncolored active rows.
 
 ## Out of scope
 
@@ -40,7 +42,8 @@ desktop/mobile interaction behavior.
 
 - An active desktop row has the stronger background with 1px top and bottom
   borders only, while an inactive row does not.
-- Active rows retain their custom color marker and existing `data-active` /
+- Active rows retain their custom color marker when set, render no default
+  leading marker when uncolored, and retain existing `data-active` /
   `aria-current` semantics.
 - The mobile task-switcher shows the same active treatment without horizontal
   overflow or loss of the row's primary tap behavior.
@@ -105,3 +108,10 @@ specification checks also passed.
 For the top-and-bottom border comparison variant, the desktop regression first
 failed on the missing top border, then passed after adding the horizontal border
 utilities. The mobile assertion is run against the same shared row styling.
+
+For the conditional marker refinement, the desktop regression first failed on
+the default marker in an uncolored active row. `SelectionBar` now renders only
+when a supported task color is assigned. Desktop E2E passed with 2 tests, and
+the mobile colored and uncolored active-row flows passed with 2 tests, including
+the no-horizontal-overflow assertions. The focused unit suite (49 tests), web
+typecheck, web lint, and specification checks also passed.

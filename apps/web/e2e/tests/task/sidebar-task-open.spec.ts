@@ -2,7 +2,10 @@ import { test, expect } from "../../fixtures/test-base";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
-import { expectActiveTaskRow } from "../../helpers/active-task-row";
+import {
+  expectActiveTaskRow,
+  expectActiveTaskRowWithoutColor,
+} from "../../helpers/active-task-row";
 
 // Regression: the AppSidebar is mounted globally, so clicking a task in its
 // Tasks list from a non-task page (the board) must NAVIGATE to the task route
@@ -72,6 +75,7 @@ test.describe("Sidebar task open", () => {
 
     const item = session.sidebarTaskItem("Home Deselect Target").first();
     await expect(item).toHaveAttribute("data-active", "true", { timeout: 10_000 });
+    await expectActiveTaskRowWithoutColor(item);
     // Back to Home — the global sidebar must drop the selection highlight.
     await testPage.getByRole("link", { name: "Home", exact: true }).click();
     await expect(item).toHaveAttribute("data-active", "false", { timeout: 10_000 });

@@ -23,7 +23,9 @@ prove the desktop sidebar and mobile task-switcher surfaces.
 
 - Add a stronger theme-aware active-row surface with only top and bottom
   active-task borders.
-- Preserve the existing task-color marker and all activation semantics.
+- Preserve the existing task-color marker when a color is assigned, with no
+  default left marker for uncolored tasks, and preserve all activation
+  semantics.
 - Verify the shared treatment in desktop and mobile task switchers.
 
 ### Out of scope
@@ -36,8 +38,8 @@ prove the desktop sidebar and mobile task-switcher surfaces.
 
 - Update `taskItemRowClassName` in `apps/web/components/task/task-item.tsx`
   so the existing `isSelected` state adds the active surface and horizontal
-  borders while keeping the custom `SelectionBar` and multi-selection ring
-  unchanged.
+  borders. Keep `SelectionBar` conditional on an assigned task color and keep
+  the multi-selection ring unchanged.
 - Keep `TaskRowItem` and `MobileTaskList` data flow unchanged because both
   already reach the shared `TaskItem` with active-task state.
 - Extend the existing desktop sidebar-open Playwright flow and mobile sidebar
@@ -50,18 +52,20 @@ prove the desktop sidebar and mobile task-switcher surfaces.
   check for the shared row's existing state and action behavior. No React
   component test is added solely for static class markup.
 - The desktop E2E flow maps to `AC-UI-SIDEBAR-TASK-FOCUS-001.1` and
-  `AC-UI-SIDEBAR-TASK-FOCUS-001.2`.
+  `AC-UI-SIDEBAR-TASK-FOCUS-001.2`, with its uncolored active-row assertion
+  covering `AC-UI-SIDEBAR-TASK-FOCUS-001.5`.
 - The mobile E2E flow maps to `AC-UI-SIDEBAR-TASK-FOCUS-001.3` and
-  `AC-UI-SIDEBAR-TASK-FOCUS-001.4`.
+  `AC-UI-SIDEBAR-TASK-FOCUS-001.4`, with the uncolored active-row flow also
+  covering `AC-UI-SIDEBAR-TASK-FOCUS-001.5`.
 
 ## E2E tests
 
 - `apps/web/e2e/tests/task/sidebar-task-open.spec.ts` shall assert the active
-  row's `data-active` state, background, and top-and-bottom-only borders after
-  opening a task.
+  row's `data-active` state, background, top-and-bottom-only borders, and no
+  leading marker when opening an uncolored task.
 - `apps/web/e2e/tests/task/mobile-sidebar-task-actions.spec.ts` shall assert
-  the same active treatment inside the mobile task sheet and keep its
-  document-horizontal-overflow assertion.
+  the same active treatment inside the mobile task sheet for colored and
+  uncolored tasks, and keep its document-horizontal-overflow assertion.
 
 ## Work orders
 
@@ -103,3 +107,16 @@ prove the desktop sidebar and mobile task-switcher surfaces.
   1px primary-accent border on the top and bottom edges only.
 - Desktop E2E first failed on the expected missing top border, then passed after
   adding the horizontal border utilities.
+
+## Conditional marker refinement
+
+- Red desktop E2E first failed because an uncolored active row still rendered
+  the default left marker.
+- `SelectionBar` now renders only for a supported, explicitly assigned task
+  color. Uncolored active rows use the background and horizontal borders only.
+- Desktop sidebar E2E — 2 tests passed, including the uncolored active-row
+  assertion.
+- Mobile active-task E2E — 2 tests passed for colored and uncolored rows,
+  including the no-horizontal-overflow assertion.
+- Focused unit tests (49 passed), typecheck, lint, and specification checks
+  passed.

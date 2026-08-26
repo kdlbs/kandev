@@ -50,6 +50,10 @@ sidebar, so that I can identify it quickly after scanning or switching tasks.
 - **AC-UI-SIDEBAR-TASK-FOCUS-001.4:** The treatment shall preserve the existing
   task activation, keyboard focus, multi-selection, task-color, metadata, and
   task-action-menu behavior.
+- **AC-UI-SIDEBAR-TASK-FOCUS-001.5:** When the active task has no supported task
+  color assigned, the active treatment shall not render a leading color or
+  status marker. The leading marker shall appear only when the user assigns a
+  supported task color.
 
 ## Out of scope
 

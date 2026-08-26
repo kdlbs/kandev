@@ -26,3 +26,8 @@ export async function expectActiveTaskRow(row: Locator): Promise<void> {
   expect(visualState.borderLeftWidth).toBe("0px");
   expect(visualState.borderRightWidth).toBe("0px");
 }
+
+export async function expectActiveTaskRowWithoutColor(row: Locator): Promise<void> {
+  await expectActiveTaskRow(row);
+  await expect(row.locator("div.absolute.left-0.top-0.bottom-0")).toHaveCount(0);
+}
