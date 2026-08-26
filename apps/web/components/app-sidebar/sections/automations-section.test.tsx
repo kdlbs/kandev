@@ -2,6 +2,7 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Automation } from "@/lib/types/automation";
+import { LIVE_REFRESH_INTERVAL_MS } from "@/components/runs/use-live-refresh";
 
 const WORKSPACE_ID = "workspace-1";
 const AUTOMATION_ID = "automation-1";
@@ -77,6 +78,8 @@ function renderOpenSection() {
 beforeEach(() => {
   mocks.activeWorkspaceId.current = WORKSPACE_ID;
   mocks.sectionExpanded.current = {};
+  mocks.listAutomations.mockReset();
+  mocks.listAutomationSummaries.mockReset();
   mocks.listAutomations.mockResolvedValue([mkAutomation()]);
   mocks.listAutomationSummaries.mockResolvedValue([]);
 });
@@ -220,6 +223,52 @@ describe("AutomationsSection", () => {
     renderSection();
 
     await waitFor(() => expect(mocks.listAutomations).toHaveBeenCalledWith("workspace-other"));
+  });
+});
+
+describe("AutomationsSection live running state", () => {
+  it("refreshes a visible row and swaps its indicator as the run state changes", async () => {
+    mocks.listAutomationSummaries
+      .mockResolvedValueOnce([{ automation_id: AUTOMATION_ID, open_runs: 0 }])
+      .mockResolvedValueOnce([{ automation_id: AUTOMATION_ID, open_runs: 1 }])
+      .mockResolvedValueOnce([
+        {
+          automation_id: AUTOMATION_ID,
+          open_runs: 0,
+          last_run: {
+            id: "run-1",
+            automation_id: AUTOMATION_ID,
+            status: "succeeded",
+            created_at: new Date().toISOString(),
+          },
+        },
+      ]);
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      renderOpenSection();
+      await screen.findByTestId(`sidebar-automation-${AUTOMATION_ID}`);
+      await waitFor(() => expect(mocks.listAutomationSummaries).toHaveBeenCalledTimes(1));
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(LIVE_REFRESH_INTERVAL_MS);
+      });
+      const runningIndicator = await screen.findByTestId(
+        `sidebar-automation-running-${AUTOMATION_ID}`,
+      );
+      expect(runningIndicator.classList).toContain("animate-spin");
+      expect(runningIndicator.getAttribute("aria-hidden")).toBe("true");
+      expect(screen.getByText("Running.")).toBeTruthy();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(LIVE_REFRESH_INTERVAL_MS);
+      });
+      await waitFor(() => expect(mocks.listAutomationSummaries).toHaveBeenCalledTimes(3));
+      expect(screen.queryByTestId(`sidebar-automation-running-${AUTOMATION_ID}`)).toBeNull();
+      expect(screen.getByText("Idle.")).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
