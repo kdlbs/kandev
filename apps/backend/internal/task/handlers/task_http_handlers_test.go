@@ -1209,6 +1209,7 @@ func TestHandleSelectedMoveError(t *testing.T) {
 		name             string
 		err              error
 		want             int
+		wantCode         string
 		wantBodyContains string
 	}{
 		{
@@ -1217,9 +1218,10 @@ func TestHandleSelectedMoveError(t *testing.T) {
 			want: http.StatusNotFound,
 		},
 		{
-			name: "move conflict",
-			err:  errors.New("task task-1 cannot be moved: task has an active session (running)"),
-			want: http.StatusConflict,
+			name:     "move conflict",
+			err:      errors.New("task task-1 cannot be moved: task has an active session (running)"),
+			want:     http.StatusConflict,
+			wantCode: moveConflictCodeActiveSession,
 		},
 		{
 			name: "bad request validation",
@@ -1242,6 +1244,11 @@ func TestHandleSelectedMoveError(t *testing.T) {
 			handleSelectedMoveError(c, log, tc.err)
 
 			assert.Equal(t, tc.want, rec.Code)
+			if tc.wantCode != "" {
+				var body map[string]any
+				require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+				assert.Equal(t, tc.wantCode, body["code"])
+			}
 			if tc.wantBodyContains != "" {
 				assert.Contains(t, rec.Body.String(), tc.wantBodyContains)
 			}

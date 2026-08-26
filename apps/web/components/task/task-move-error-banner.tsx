@@ -12,7 +12,7 @@ type TaskMoveErrorBannerProps = {
 export function TaskMoveErrorBanner({ error }: TaskMoveErrorBannerProps) {
   const { t } = useTranslation();
   const title = t("task:failedToMoveTask");
-  const detail = getTaskMoveErrorDetail(error, title);
+  const detail = getTaskMoveErrorDetail(error, title, t);
 
   return (
     <div className="px-3 pt-2" data-testid="task-move-error-banner">

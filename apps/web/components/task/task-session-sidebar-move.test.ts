@@ -137,7 +137,7 @@ describe("useMoveToStep", () => {
   });
 });
 
-describe("useMoveToStep concurrency", () => {
+describe("useMoveToStep concurrency across tasks", () => {
   it("still rolls back a rejected move after a different task moved", async () => {
     // The sidebar shares one hook across every row, so a move of task-2 must not
     // make task-1's pending move look superseded and strand it in a step the
@@ -178,7 +178,9 @@ describe("useMoveToStep concurrency", () => {
     expect(onMoveError).toHaveBeenCalledWith(error);
     consoleErrorSpy.mockRestore();
   });
+});
 
+describe("useMoveToStep concurrency for one task", () => {
   it("does not roll back when a same-step retry is still in flight", async () => {
     // Two moves to the same step compute identical optimistic values, so the
     // snapshot cannot distinguish them; only the generation can.
@@ -214,6 +216,96 @@ describe("useMoveToStep concurrency", () => {
     await act(async () => {
       await secondMove;
     });
+    consoleErrorSpy.mockRestore();
+  });
+});
+
+describe("useMoveToStep rollback after overlapping failures", () => {
+  it("rolls back to the committed position when overlapping moves both fail", async () => {
+    const store = buildStore({
+      tasks: [{ id: "task-1", workflowStepId: "step-a", position: 0 }],
+    });
+    const onMoveError = vi.fn();
+    let rejectFirstMove!: (error: unknown) => void;
+    let rejectSecondMove!: (error: unknown) => void;
+    moveTaskByIdMock
+      .mockReturnValueOnce(new Promise((_resolve, reject) => (rejectFirstMove = reject)))
+      .mockReturnValueOnce(new Promise((_resolve, reject) => (rejectSecondMove = reject)));
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { result } = renderHook(() => useMoveToStep(store as never, vi.fn(), onMoveError));
+
+    let firstMove!: Promise<void>;
+    let secondMove!: Promise<void>;
+    act(() => {
+      firstMove = result.current("task-1", "wf-1", "step-b");
+      secondMove = result.current("task-1", "wf-1", "step-c");
+    });
+
+    rejectFirstMove(new Error("first move rejected"));
+    await act(async () => {
+      await firstMove;
+    });
+    expect(store.getSnapshots()["wf-1"].tasks[0]).toMatchObject({
+      workflowStepId: "step-c",
+    });
+
+    const secondError = new Error("second move rejected");
+    rejectSecondMove(secondError);
+    await act(async () => {
+      await secondMove;
+    });
+
+    expect(store.getSnapshots()["wf-1"].tasks[0]).toMatchObject({
+      workflowStepId: "step-a",
+      position: 0,
+    });
+    expect(onMoveError).toHaveBeenCalledWith(secondError);
+    consoleErrorSpy.mockRestore();
+  });
+});
+
+describe("useMoveToStep rollback after an earlier success", () => {
+  it("keeps an earlier successful position when the latest move fails first", async () => {
+    const store = buildStore({
+      tasks: [{ id: "task-1", workflowStepId: "step-a", position: 0 }],
+    });
+    const onMoveError = vi.fn();
+    let resolveFirstMove!: () => void;
+    let rejectSecondMove!: (error: unknown) => void;
+    moveTaskByIdMock
+      .mockReturnValueOnce(new Promise<void>((resolve) => (resolveFirstMove = resolve)))
+      .mockReturnValueOnce(new Promise((_resolve, reject) => (rejectSecondMove = reject)));
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { result } = renderHook(() => useMoveToStep(store as never, vi.fn(), onMoveError));
+
+    let firstMove!: Promise<void>;
+    let secondMove!: Promise<void>;
+    act(() => {
+      firstMove = result.current("task-1", "wf-1", "step-b");
+      secondMove = result.current("task-1", "wf-1", "step-c");
+    });
+
+    const secondError = new Error("second move rejected");
+    rejectSecondMove(secondError);
+    await act(async () => {
+      await secondMove;
+    });
+    expect(store.getSnapshots()["wf-1"].tasks[0]).toMatchObject({
+      workflowStepId: "step-c",
+    });
+
+    resolveFirstMove();
+    await act(async () => {
+      await firstMove;
+    });
+
+    expect(store.getSnapshots()["wf-1"].tasks[0]).toMatchObject({
+      workflowStepId: "step-b",
+      position: 0,
+    });
+    expect(onMoveError).toHaveBeenCalledWith(secondError);
     consoleErrorSpy.mockRestore();
   });
 });

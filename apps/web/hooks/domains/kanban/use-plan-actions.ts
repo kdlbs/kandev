@@ -90,7 +90,7 @@ export function useNextWorkflowStep(taskId: string | null) {
       // and says why in the response. Reporting only the headline left the user
       // on a phone with no way to see the reason short of devtools.
       const title = t("task:failedToProceedToNextStep");
-      const detail = getTaskMoveErrorDetail(err, title);
+      const detail = getTaskMoveErrorDetail(err, title, t);
       toast({
         title,
         ...(detail !== null && { description: detail }),
