@@ -49,10 +49,17 @@ describe("utilityProfileEligibility", () => {
       expect(utilityProfileEligibility(candidate, true, true)).toBe(expected);
     });
 
-    it.each([
-      ["CLI passthrough", true],
-      ["disabled", false],
-    ])("still rejects %s profile", (_label, enabled) => {
+    it("allows CLI passthrough profiles", () => {
+      expect(
+        utilityProfileEligibility(
+          profile({ workspace_id: "ws-1", cli_passthrough: true }),
+          true,
+          true,
+        ),
+      ).toBe(true);
+    });
+
+    it.each([["disabled", false]])("still rejects %s profile", (_label, enabled) => {
       expect(
         utilityProfileEligibility(
           profile({ workspace_id: "ws-1", cli_passthrough: true, enabled }),
