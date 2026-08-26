@@ -303,8 +303,12 @@ test.describe("Subtask basics", () => {
       await dialog.getByTestId("subtask-workspace-mode-new").click();
       await dialog.getByTestId("executor-profile-selector").click();
       await testPage.getByRole("option", { name: new RegExp(localProfile.name) }).click();
+      await expect(dialog.getByTestId("executor-profile-selector")).toContainText(
+        localProfile.name,
+      );
       await dialog.getByTestId("branch-chip-trigger").click();
       await testPage.getByRole("option", { name: new RegExp(policy.name) }).click();
+      await expect(dialog.getByTestId("branch-chip-trigger")).toContainText(policy.name);
       await expect(dialog.getByTestId("fresh-branch-toggle")).toHaveAttribute(
         "aria-pressed",
         "true",

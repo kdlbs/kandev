@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { waitForSessionAgentctlReady } from "../../helpers/session-store";
 
 /**
  * The dev script runs as a real OS process, so these assertions read the OS
@@ -103,7 +104,14 @@ async function seedDevScriptTask(
  * launch prepares asynchronously — the retry is on that preparation, not on a
  * UI shadow.
  */
-async function startDevProcess(apiClient: ApiClient, sessionId: string): Promise<void> {
+async function startDevProcess(
+  apiClient: ApiClient,
+  testPage: import("@playwright/test").Page,
+  taskId: string,
+  sessionId: string,
+): Promise<void> {
+  await testPage.goto(`/t/${taskId}`);
+  await waitForSessionAgentctlReady(testPage, sessionId, 90_000);
   await expect
     .poll(
       async () => {
@@ -141,6 +149,7 @@ test.describe("dev server process lifecycle", () => {
   test("archiving the task stops the dev script, including its background children", async ({
     apiClient,
     seedData,
+    testPage,
   }) => {
     const parentPidFile = pidFilePath("kandev-dev-archive-parent-");
     const childPidFile = pidFilePath("kandev-dev-archive-child-");
@@ -153,7 +162,7 @@ test.describe("dev server process lifecycle", () => {
       `sleep 600 & echo $! > ${childPidFile}; echo $$ > ${parentPidFile}; wait`,
     );
 
-    await startDevProcess(apiClient, sessionId);
+    await startDevProcess(apiClient, testPage, taskId, sessionId);
     const parentPid = await readPidWhenWritten(parentPidFile);
     const childPid = await readPidWhenWritten(childPidFile);
     expect(isRunning(parentPid)).toBe(true);
@@ -165,7 +174,7 @@ test.describe("dev server process lifecycle", () => {
     await expectProcessReaped(childPid);
   });
 
-  test("deleting the task stops the dev script", async ({ apiClient, seedData }) => {
+  test("deleting the task stops the dev script", async ({ apiClient, seedData, testPage }) => {
     const pidFile = pidFilePath("kandev-dev-delete-");
     const { taskId, sessionId } = await seedDevScriptTask(
       apiClient,
@@ -174,7 +183,7 @@ test.describe("dev server process lifecycle", () => {
       `echo $$ > ${pidFile}; exec sleep 600`,
     );
 
-    await startDevProcess(apiClient, sessionId);
+    await startDevProcess(apiClient, testPage, taskId, sessionId);
     const pid = await readPidWhenWritten(pidFile);
     expect(isRunning(pid)).toBe(true);
 
@@ -186,17 +195,18 @@ test.describe("dev server process lifecycle", () => {
   test("the header control stops the dev script without archiving the task", async ({
     apiClient,
     seedData,
+    testPage,
   }) => {
     const parentPidFile = pidFilePath("kandev-dev-stop-parent-");
     const childPidFile = pidFilePath("kandev-dev-stop-child-");
-    const { sessionId } = await seedDevScriptTask(
+    const { taskId, sessionId } = await seedDevScriptTask(
       apiClient,
       seedData,
       "Dev server manual stop",
       `sleep 600 & echo $! > ${childPidFile}; echo $$ > ${parentPidFile}; wait`,
     );
 
-    await startDevProcess(apiClient, sessionId);
+    await startDevProcess(apiClient, testPage, taskId, sessionId);
     const parentPid = await readPidWhenWritten(parentPidFile);
     const childPid = await readPidWhenWritten(childPidFile);
     expect(isRunning(parentPid)).toBe(true);

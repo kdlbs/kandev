@@ -80,7 +80,12 @@ test.describe("Setup script progress UX", () => {
       const session = new SessionPage(testPage);
       await session.waitForLoad();
 
-      await expect.poll(() => fs.existsSync(gitStartedFile)).toBe(true);
+      await expect
+        .poll(() => fs.existsSync(gitStartedFile), {
+          message: "repository preparation should reach its deterministic git gate",
+          timeout: 45_000,
+        })
+        .toBe(true);
       fs.writeFileSync(gitReleaseFile, "release");
       await expect
         .poll(() => fs.existsSync(startedFile), {
