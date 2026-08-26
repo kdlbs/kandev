@@ -37,6 +37,9 @@ async function setupTaskWithFilePanel(args: {
     makeGitEnv(args.backendTmpDir),
   );
   const filename = "leak-fixture.ts";
+  // Local-executor specs can leave the worker-scoped seed clone on a task
+  // branch. Make this fixture independent of file execution order.
+  git.exec("git checkout main");
   git.createFile(filename, "// leak fixture\n");
   git.stageAll();
   git.commit("seed leak fixture");
