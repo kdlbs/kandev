@@ -85,7 +85,10 @@ test.describe("Workflow steps", () => {
       await route.fulfill({
         status: 409,
         contentType: "application/json",
-        body: JSON.stringify({ error: "task has an active session (RUNNING)" }),
+        body: JSON.stringify({
+          error: "task has an active session (RUNNING)",
+          code: "task_move_active_session",
+        }),
       });
     });
 
@@ -99,7 +102,7 @@ test.describe("Workflow steps", () => {
 
     const moveError = testPage.getByTestId("task-move-error-banner");
     await expect(moveError).toBeVisible();
-    await expect(moveError).toContainText("task has an active session (RUNNING)");
+    await expect(moveError).toContainText("Stop the active session before moving the task.");
     await expect(
       session.stepperStep(seedData.steps.find((s) => s.is_start_step)?.name ?? ""),
     ).toBeVisible();
@@ -132,7 +135,10 @@ test.describe("Workflow steps", () => {
       await route.fulfill({
         status: 409,
         contentType: "application/json",
-        body: JSON.stringify({ error: "task has an active session (RUNNING)" }),
+        body: JSON.stringify({
+          error: "task has an active session (RUNNING)",
+          code: "task_move_active_session",
+        }),
       });
     });
 
@@ -146,7 +152,7 @@ test.describe("Workflow steps", () => {
 
     const moveError = testPage.getByTestId("task-move-error-banner");
     await expect(moveError).toBeVisible();
-    await expect(moveError).toContainText("task has an active session (RUNNING)");
+    await expect(moveError).toContainText("Stop the active session before moving the task.");
   });
 
   test("an unstarted feeder task fills available WIP capacity", async ({
