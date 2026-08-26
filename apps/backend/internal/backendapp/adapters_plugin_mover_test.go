@@ -187,21 +187,32 @@ func TestPluginsTaskWriter_MovePositionCastAndResultMapping(t *testing.T) {
 // table this classifier is responsible for (the rows reachable from
 // MoveTaskWithOptions' bare validation errors; capability/request-shape rows
 // are classified earlier, in internal/plugins/host_write.go).
+//
+// SEC-002 (Review round 2): the classifier's whole job is to strip the real
+// validator's internal text off the gRPC boundary. Pinning only the status
+// code (as this table did before) lets a future change keep the code right
+// while silently re-forwarding err.Error() into the message — reopening the
+// exact info-disclosure surface SEC-002 closed. Every case therefore also
+// asserts the exact fixed message, and every input error below embeds an
+// internal-only fragment (an id, a raw validator sentence) that must NOT
+// appear in the output message.
 func TestClassifyPluginMoveError(t *testing.T) {
 	cases := []struct {
-		name string
-		err  error
-		want codes.Code
+		name    string
+		err     error
+		want    codes.Code
+		wantMsg string
 	}{
-		{"nil is nil", nil, codes.OK},
-		{"archived task, AC-001.7", errors.New("archived tasks cannot be moved"), codes.FailedPrecondition},
-		{"active session, AC-001.8", errors.New("task has an active session (starting)"), codes.FailedPrecondition},
-		{"unknown workflow, AC-001.6", errors.New("failed to get target workflow: workflow not found: wf-x"), codes.InvalidArgument},
-		{"unknown step, AC-001.6", errors.New("failed to get target workflow step: workflow step not found: step-x"), codes.InvalidArgument},
-		{"different workspace, AC-001.6", errors.New("target workflow is in a different workspace"), codes.InvalidArgument},
-		{"step not in workflow, AC-001.6", errors.New("target workflow step does not belong to target workflow"), codes.InvalidArgument},
-		{"task not found sentinel, AC-005.6", fmt.Errorf("%w: task-1", repoerrors.ErrTaskNotFound), codes.NotFound},
-		{"unmapped error falls back to Internal", errors.New("something unexpected"), codes.Internal},
+		{"nil is nil", nil, codes.OK, ""},
+		{"archived task, AC-001.7", errors.New("archived tasks cannot be moved"), codes.FailedPrecondition, "task is archived and cannot be moved"},
+		{"active session, AC-001.8", errors.New("task has an active session (starting)"), codes.FailedPrecondition, "task has an active session and cannot be moved"},
+		{"unknown workflow, AC-001.6", errors.New("failed to get target workflow: workflow not found: wf-x"), codes.InvalidArgument, "invalid move_task request: unknown or mismatched workflow, step, or workspace"},
+		{"unknown step, AC-001.6", errors.New("failed to get target workflow step: workflow step not found: step-x"), codes.InvalidArgument, "invalid move_task request: unknown or mismatched workflow, step, or workspace"},
+		{"different workspace, AC-001.6", errors.New("target workflow is in a different workspace"), codes.InvalidArgument, "invalid move_task request: unknown or mismatched workflow, step, or workspace"},
+		{"step not in workflow, AC-001.6", errors.New("target workflow step does not belong to target workflow"), codes.InvalidArgument, "invalid move_task request: unknown or mismatched workflow, step, or workspace"},
+		{"task not found sentinel, AC-005.6", fmt.Errorf("%w: task-1", repoerrors.ErrTaskNotFound), codes.NotFound, "task not found"},
+		{"workflow resolution conflict, SEC-001", fmt.Errorf("%w: resolved %q, task is now in %q", taskservice.ErrWorkflowResolutionConflict, "wf-home", "wf-away"), codes.Aborted, "task workflow changed concurrently, retry the move"},
+		{"unmapped error falls back to Internal", errors.New("something unexpected"), codes.Internal, "failed to move task"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -210,7 +221,14 @@ func TestClassifyPluginMoveError(t *testing.T) {
 				require.NoError(t, got)
 				return
 			}
-			require.Equal(t, tc.want, status.Code(got))
+			st := status.Convert(got)
+			require.Equal(t, tc.want, st.Code())
+			require.Equal(t, tc.wantMsg, st.Message())
+			require.NotContains(t, st.Message(), "wf-x", "message must not leak the internal error's workflow/step id")
+			require.NotContains(t, st.Message(), "step-x", "message must not leak the internal error's workflow/step id")
+			require.NotContains(t, st.Message(), "task-1", "message must not leak the internal error's task id")
+			require.NotContains(t, st.Message(), "wf-home", "message must not leak the internal error's workflow id")
+			require.NotContains(t, st.Message(), "wf-away", "message must not leak the internal error's workflow id")
 		})
 	}
 }

@@ -150,8 +150,15 @@ func (h *pluginMoveErrorBindingHarness) lastSessionStepHistoryTrigger(t *testing
 // test, per Review round 1's must-fix finding (test-supervisor proved by
 // mutation that TestClassifyPluginMoveError's stand-in literals do not
 // notice such a change).
+// SEC-002 (Review round 2): each subtest below also asserts the exact fixed
+// message and the absence of the real, identity-bearing fragment this
+// specific move actually produced internally (a workflow/step/task id, or
+// the raw validator sentence) — status.Code alone would still pass if the
+// classifier regressed to forwarding err.Error() verbatim, since the status
+// code discrimination is unaffected by that regression.
 func TestClassifyPluginMoveError_BindsToRealValidatorStrings(t *testing.T) {
 	wf := "wf-target"
+	const invalidArgMsg = "invalid move_task request: unknown or mismatched workflow, step, or workspace"
 
 	t.Run("archived task, AC-001.7", func(t *testing.T) {
 		h := newPluginMoveErrorBindingHarness(t)
@@ -159,7 +166,9 @@ func TestClassifyPluginMoveError_BindsToRealValidatorStrings(t *testing.T) {
 		_, err := h.adapter.MoveTask(context.Background(), plugins.TaskMoveInput{
 			TaskID: "task-archived", WorkflowStepID: "step-target", WorkflowID: &wf, Source: "plugin:acme",
 		})
-		require.Equal(t, codes.FailedPrecondition, status.Code(err))
+		st := status.Convert(err)
+		require.Equal(t, codes.FailedPrecondition, st.Code())
+		require.Equal(t, "task is archived and cannot be moved", st.Message())
 	})
 
 	t.Run("active session, AC-001.8", func(t *testing.T) {
@@ -171,7 +180,10 @@ func TestClassifyPluginMoveError_BindsToRealValidatorStrings(t *testing.T) {
 		_, err := h.adapter.MoveTask(context.Background(), plugins.TaskMoveInput{
 			TaskID: "task-live-session", WorkflowStepID: "step-target", WorkflowID: &wf, Source: "plugin:acme",
 		})
-		require.Equal(t, codes.FailedPrecondition, status.Code(err))
+		st := status.Convert(err)
+		require.Equal(t, codes.FailedPrecondition, st.Code())
+		require.Equal(t, "task has an active session and cannot be moved", st.Message())
+		require.NotContains(t, st.Message(), "RUNNING", "message must not leak the session's internal state value")
 	})
 
 	t.Run("unknown workflow, AC-001.6", func(t *testing.T) {
@@ -181,7 +193,10 @@ func TestClassifyPluginMoveError_BindsToRealValidatorStrings(t *testing.T) {
 		_, err := h.adapter.MoveTask(context.Background(), plugins.TaskMoveInput{
 			TaskID: "task-unknown-wf", WorkflowStepID: "step-target", WorkflowID: &missing, Source: "plugin:acme",
 		})
-		require.Equal(t, codes.InvalidArgument, status.Code(err))
+		st := status.Convert(err)
+		require.Equal(t, codes.InvalidArgument, st.Code())
+		require.Equal(t, invalidArgMsg, st.Message())
+		require.NotContains(t, st.Message(), missing, "message must not leak the requested workflow id")
 	})
 
 	t.Run("different workspace, AC-001.6", func(t *testing.T) {
@@ -191,16 +206,23 @@ func TestClassifyPluginMoveError_BindsToRealValidatorStrings(t *testing.T) {
 		_, err := h.adapter.MoveTask(context.Background(), plugins.TaskMoveInput{
 			TaskID: "task-cross-workspace", WorkflowStepID: "step-target", WorkflowID: &other, Source: "plugin:acme",
 		})
-		require.Equal(t, codes.InvalidArgument, status.Code(err))
+		st := status.Convert(err)
+		require.Equal(t, codes.InvalidArgument, st.Code())
+		require.Equal(t, invalidArgMsg, st.Message())
+		require.NotContains(t, st.Message(), other, "message must not leak the target workflow id")
 	})
 
 	t.Run("unknown step, AC-001.6", func(t *testing.T) {
 		h := newPluginMoveErrorBindingHarness(t)
 		h.createTask(t, "task-unknown-step", false)
+		missingStep := "step-does-not-exist"
 		_, err := h.adapter.MoveTask(context.Background(), plugins.TaskMoveInput{
-			TaskID: "task-unknown-step", WorkflowStepID: "step-does-not-exist", WorkflowID: &wf, Source: "plugin:acme",
+			TaskID: "task-unknown-step", WorkflowStepID: missingStep, WorkflowID: &wf, Source: "plugin:acme",
 		})
-		require.Equal(t, codes.InvalidArgument, status.Code(err))
+		st := status.Convert(err)
+		require.Equal(t, codes.InvalidArgument, st.Code())
+		require.Equal(t, invalidArgMsg, st.Message())
+		require.NotContains(t, st.Message(), missingStep, "message must not leak the requested step id")
 	})
 
 	t.Run("step not in workflow, AC-001.6", func(t *testing.T) {
@@ -210,7 +232,11 @@ func TestClassifyPluginMoveError_BindsToRealValidatorStrings(t *testing.T) {
 		_, err := h.adapter.MoveTask(context.Background(), plugins.TaskMoveInput{
 			TaskID: "task-step-wrong-workflow", WorkflowStepID: "step-home", WorkflowID: &wf, Source: "plugin:acme",
 		})
-		require.Equal(t, codes.InvalidArgument, status.Code(err))
+		st := status.Convert(err)
+		require.Equal(t, codes.InvalidArgument, st.Code())
+		require.Equal(t, invalidArgMsg, st.Message())
+		require.NotContains(t, st.Message(), "step-home", "message must not leak the requested step id")
+		require.NotContains(t, st.Message(), "wf-home", "message must not leak the task's actual workflow id")
 	})
 
 	t.Run("task not found, AC-005.6", func(t *testing.T) {
@@ -218,7 +244,10 @@ func TestClassifyPluginMoveError_BindsToRealValidatorStrings(t *testing.T) {
 		_, err := h.adapter.MoveTask(context.Background(), plugins.TaskMoveInput{
 			TaskID: "task-missing", WorkflowStepID: "step-target", WorkflowID: &wf, Source: "plugin:acme",
 		})
-		require.Equal(t, codes.NotFound, status.Code(err))
+		st := status.Convert(err)
+		require.Equal(t, codes.NotFound, st.Code())
+		require.Equal(t, "task not found", st.Message())
+		require.NotContains(t, st.Message(), "task-missing", "message must not leak the requested task id")
 	})
 }
 
