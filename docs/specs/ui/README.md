@@ -53,6 +53,7 @@ contract that other capabilities can reuse.
 - [Clarification Shared Context](requirements/clarification-context.md)
 - [Clarification submit feedback](requirements/clarification-submit-feedback.md)
 - [Command-panel Sidebar Task Reveal](requirements/command-panel-sidebar-task-reveal.md)
+- [Compact Workflow Step Navigation](requirements/compact-workflow-step-navigation.md)
 - [Comment Markdown Rendering](requirements/comment-markdown.md)
 - [Composer Suggestion Overlays](requirements/composer-suggestion-overlays.md)
 - [Context Compaction Count](requirements/context-compaction-count.md)
@@ -138,11 +139,10 @@ contract that other capabilities can reuse.
 
 ### System design
 
-
-
 - [Agent Todo List Panel](system-design/agent-todo-list-panel.md)
 - [App Status Bar](system-design/app-status-bar.md)
 - [Composer Suggestion Overlays](system-design/composer-suggestion-overlays.md)
+- [Compact Workflow Step Navigation](system-design/compact-workflow-step-navigation.md)
 - [Per-workflow column visibility on the kanban board System Design Part 1](system-design/board-step-visibility-filter-01.md)
 - [Per-workflow column visibility on the kanban board System Design Part 2](system-design/board-step-visibility-filter-02.md)
 - [Task PR Automation Controls System Design Part 1](system-design/ci-pr-automation-01.md)
