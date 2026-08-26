@@ -16,29 +16,44 @@ requirements:
 
 ## Purpose and boundaries
 
-Office owns which tools an Office agent may call and what an Office agent is
-told it can do. This design adds one read tool to that surface.
+Office owns the agent-facing office HTTP surface, which tools an Office agent
+may call, and what an Office agent is told it can do. This design repairs one
+existing endpoint on that surface, `GET /api/v1/office/tasks/{id}/comments`,
+and removes a comment read tool from the MCP surface rather than adding one.
 
 It uses, and does not own:
 
 - the `task_comments` store and its repository, owned by Office persistence;
 - the cross-task read relation, owned by the task system's handoff access
   guard and shared verbatim with the task document tools;
-- the MCP profile registry that decides which surface registers which tool
-  group.
+- the byte budget, ordering, and window projection, owned by the task system's
+  handoff comment service, which this design re-points at rather than rewrites;
+- the agent JWT middleware that authenticates the office route group.
 
-One deliberate exception to that last boundary. This design does change the
-shared guard's own not-found handling, in `loadAccessPair`, and claims that
-change as in scope. The reason is in [Failure and recovery](#failure-and-recovery):
-the guard as written today does not deny a missing task, it returns the
-repository's not-found error, and that error embeds the task identifier. Fixing
-that only at this tool's call site would leave the comment surface and the
+Two deliberate exceptions to those boundaries are claimed as in scope.
+
+**The shared guard's not-found handling.** This design covers a change to
+`loadAccessPair` that has already landed on the branch (commit `260405a9d`);
+it is recorded here because it belongs to this contract, not because it is
+outstanding. The guard as originally written did not deny a missing task; it
+returned the repository's not-found error, and that error embedded the task
+identifier.
+Fixing that only at this endpoint would leave the comment surface and the
 document surface answering the does-this-task-exist question differently, which
-`REQ-OFFICE-AGENT-COMMENT-READS-001` forbids in terms: the read relation must be
-evaluated by the same shared implementation, so the two surfaces cannot diverge.
-The blast radius is bounded. `loadAccessPair` has exactly two callers, both
-inside the guard file, and no existing test asserts the leaking behaviour. The
-change is security-positive for the document tools as well as for this one.
+`REQ-OFFICE-AGENT-COMMENT-READS-001` forbids in terms: the relation must be
+evaluated by the same shared implementation, so the two surfaces cannot
+diverge. The blast radius is bounded. `loadAccessPair` has exactly two callers,
+both inside the guard file, and no existing test asserts the leaking behaviour.
+The change is security-positive for the document tools as well.
+
+**An exported agent-claims accessor.** The office agents package exposes
+`CallerFromContext`, which returns the authenticated agent instance and carries
+no task identity. The caller task lives in the validated JWT's `AgentClaims`,
+set on the request context under an unexported key with no exported reader.
+This design adds one exported accessor beside `CallerFromContext`, on the same
+justification the existing one records: so other office packages can enforce
+agent-scoped authorization without depending on the package's internal
+context-key constants.
 
 ## Requirement mapping
 
@@ -47,7 +62,7 @@ change is security-positive for the document tools as well as for this one.
 | `REQ-OFFICE-AGENT-COMMENT-READS-001` | [Purpose and boundaries](#purpose-and-boundaries), [Components and responsibilities](#components-and-responsibilities), [Failure and recovery](#failure-and-recovery), [Security](#security) |
 | `REQ-OFFICE-AGENT-COMMENT-READS-002` | [Data and contracts](#data-and-contracts) |
 | `REQ-OFFICE-AGENT-COMMENT-READS-003` | [Data and contracts](#data-and-contracts), [Ordering and windowing](#ordering-and-windowing) |
-| `REQ-OFFICE-AGENT-COMMENT-READS-004` | [Data and contracts](#data-and-contracts) |
+| `REQ-OFFICE-AGENT-COMMENT-READS-004` | [Data and contracts](#data-and-contracts), [Ordering and windowing](#ordering-and-windowing) |
 | `REQ-OFFICE-AGENT-COMMENT-READS-005` | [Data and contracts](#data-and-contracts), [Failure and recovery](#failure-and-recovery) |
 | `REQ-OFFICE-AGENT-COMMENT-READS-006` | [Persistence](#persistence) |
 | `REQ-OFFICE-AGENT-COMMENT-READS-007` | [The advertised-surface contract](#the-advertised-surface-contract) |
@@ -55,104 +70,131 @@ change is security-positive for the document tools as well as for this one.
 
 ## Components and responsibilities
 
-- **MCP tool group.** A new Office-only tool group registers
-  `list_task_comments_kandev`, alongside the existing office-documents and
-  office-decisions groups. Its enable predicate is the Office surface alone.
-- **MCP tool handler.** Reads the caller identity from the server's bound task,
-  never from arguments; normalises `task_id` and `limit` by raw-type
-  discrimination, not the typed argument accessors, per
-  [Where argument decisions are made](#where-argument-decisions-are-made);
-  forwards one payload carrying both the target and the caller.
-- **Backend action handler.** Validates the payload, invokes the access-checked
-  read, and maps service errors onto the existing handoff error codes.
-- **Access-checked read.** A method on the cross-task handoff service that
-  applies the same read guard the document reads apply, then delegates to the
-  comment store. This method is the only new place the guard is called.
+- **Comment read endpoint.** The existing dashboard handler for
+  `GET /api/v1/office/tasks/:id/comments`. It gains a caller branch: an agent
+  caller takes the guarded, bounded path; every other caller keeps today's
+  behaviour byte for byte.
+- **Agent-claims accessor.** The new exported reader described above. It is the
+  only source of the caller task identity.
+- **Access-checked read.** `ListCommentsForCaller` on the cross-task handoff
+  service: applies the shared read guard, then the window, budget, and
+  projection. It already exists, and the guard, window, budget, and projection
+  are unchanged by the transport move. One thing about it does change, and it
+  is not optional. Its first act is a `self`/empty-target sentinel that
+  substitutes the caller's own task for the requested one. Under the deleted
+  MCP tool that sentinel was an argument convenience; on this transport the
+  target is a path segment the CLI interpolates without validation, so
+  `--task self` arrives as a literal target and substitutes. That is what
+  `AC-OFFICE-AGENT-COMMENT-READS-005.4` forbids in terms, and under a token
+  carrying no task claim it yields a missing-target validation error where
+  `AC-OFFICE-AGENT-COMMENT-READS-001.13` requires the denial sentinel for
+  every target. The sentinel is therefore removed: an unrecognised target is
+  resolved by the guard like any other, and only a target the caller is
+  entitled to name is read. Blast radius is nil, because once the tool is
+  deleted this endpoint is the function's only caller. Two tests assert the
+  removed behaviour and are retired with it,
+  `TestListCommentsForCallerSelfFallback` and
+  `TestListCommentsForCallerRequiresTaskIDWhenNoCaller` — the second cites an
+  acceptance criterion this revision deleted. Build replaces them with
+  coverage of the contract above; it does not delete them silently, and it
+  does not weaken them to pass. This is the only place the guard is called for
+  comments.
 - **Comment store.** Supplies the windowed read and the total count.
-- **Office first-turn context and role instructions.** Advertise the tool and
-  direct the coordinator to use it.
+- **agentctl CLI.** `kandev comment list --task <id> [--limit N]` and
+  `kandev tasks conversation --id <id>` both already call this endpoint and
+  print the response body verbatim. Neither needs a wire change. The
+  `--limit` flag help, which reads `0 = all`, is corrected: for an agent caller
+  the server defaults and clamps, so `all` is no longer reachable and the flag
+  is documented as "0 = server default".
+- **Office first-turn context, the skills reference, and role instructions.**
+  Advertise the CLI command and direct the coordinator to use it.
+- **Deleted.** The Office MCP comment tool, its registration, its backend
+  action handler, and the sysprompt line advertising it. The guarded read must
+  have exactly one entry point; leaving the tool beside the repaired endpoint
+  would be two.
 
 ## Data and contracts
 
-The tool accepts `task_id` (optional; defaults to the caller task, and accepts
-the literal `self`) and `limit` (optional).
+The endpoint takes the target task from its path parameter and, for an agent
+caller, the caller task from JWT claims. Its only query parameter is `limit`.
 
-### Where argument decisions are made
+### The dual-caller split
 
-Both arguments are declared with **no JSON Schema type keyword** — the
-`WithAny`-shaped declaration the MCP library already provides, which emits an
-empty `{}` property schema rather than `"type": "string"` or `"type": "number"`.
-That is not a stylistic choice, and it is the whole reason this subsection
-exists.
+This endpoint is consumed by the human dashboard SPA as well as by agents.
+Applying the guard and the default limit unconditionally would break the human
+Office comment view: it would lose the per-comment run lifecycle fields it
+renders the Queued / Working / Failed badge from, and would silently show a
+browser user the newest twenty comments of a longer thread. The split is by
+caller kind, and the precedent is in the same file: `createComment` already
+rejects an agent caller by testing `CallerFromContext(c) != nil`, so agent-kind
+branching on this route is established, not invented here.
 
-Tool argument validation is a real, enforced layer that runs **before** the
-handler: the server validates the incoming arguments against the declared input
-schema and returns an error result without ever calling the handler when they do
-not match. So a declared type is not advisory. Anything the schema rejects never
-reaches the code that was supposed to decide what to do with it.
+An agent caller therefore receives the guard, the default and clamp, the byte
+budget, the window fields, and the reduced projection. Any other caller
+receives exactly what it receives today. The existing Playwright coverage under
+`apps/web/e2e/tests/office/` and the SPA's `listComments` client are the
+regression surface for that second half.
 
-That collides with two contract requirements. `limit` must never produce an
-error from any layer, yet a `"type": "number"` declaration would reject the
-string, boolean, and null values the contract requires to be *defaulted*.
-`task_id` must produce a handler validation error naming the field for a
-wrong-typed value, and must treat null as omitted, yet a `"type": "string"`
-declaration would reject both at the wrong layer, with a generic schema message
-and no chance for the null case to be read as "use the caller task". Declaring
-either type would make the requirement unimplementable rather than merely
-untidy. Untyped declarations are what let every value reach the handler, so the
-handler is the single place these decisions are made.
+Which branch each acceptance criterion binds follows from that split, and three
+of them must be read with it in hand because they carry no caller qualifier.
+`AC-OFFICE-AGENT-COMMENT-READS-003.7` and `-003.8` — the single read
+transaction and the repeat-call ordering determinism — and
+`AC-OFFICE-AGENT-COMMENT-READS-005.1`, the empty-result total, bind the agent
+branch only. None can bind the browser branch without contradicting
+`AC-OFFICE-AGENT-COMMENT-READS-003.11`, which preserves it: the legacy list
+query sorts on `created_at` with no tiebreak, so meeting the ordering criterion
+there would mean changing that query, and the browser response carries no
+`total` field at all, so meeting the transaction and empty-result criteria
+there would mean adding one. Each of those is precisely the change `-003.11`
+exists to prevent. `REQ-OFFICE-AGENT-COMMENT-READS-003` is framed around a
+coordinator re-reading a child's thread, which is the agent branch; the browser
+branch is preserved by this document, not specified by it.
 
-The handler therefore reads the raw argument map (`GetArguments()`) and
-discriminates on the dynamic type itself:
+The browser branch reads no query parameter at all.
+`AC-OFFICE-AGENT-COMMENT-READS-003.11` says a valid positive `limit` *may* be
+honoured there; this design resolves that permission to no. The handler as it
+stands passes only the path parameter to the list call and never touches the
+query string, so honouring `limit` would be new behaviour rather than preserved
+behaviour, and it would leave the human Office comment view one query parameter
+away from a silently truncated thread. A permission that no builder is required
+to exercise is one no test can observe either way, so it is settled here in the
+negative: the browser branch ignores `limit` entirely and returns the full
+list, which is what the same criterion's own first clause already requires.
 
-- **`task_id`** — absent, or present and null, or a string that is empty or
-  whitespace-only, or the exact string `self`: the caller task. Present and a
-  non-empty string after trimming: that task identifier, compared to `self`
-  case-sensitively. Present and any other type: a validation error naming
-  `task_id`.
-- **`limit`** — every value is defaulted or clamped, and no value is an error.
-  JSON numbers arrive as `float64`, so "is not an integer" is a whole-number
-  test on that value, never a Go `int` type assertion: treat the value as an
-  integer only when it equals its own truncation, and default anything else.
-  A fractional `7.5` is therefore **not** truncated to 7 — it is not an
-  integer, so it takes the default of 20. Absent, null, a non-number, zero and
-  negative take that same default; above 100 clamps to 100.
+### Where the limit decision is made
 
-The typed convenience accessors must **not** be used for either argument.
-`GetString` and the shared `copyOptionalStringArg` helper collapse "absent",
-"null", and "wrong type" into the same fallback value, which is precisely the
-distinction `task_id` depends on: a silently substituted `task_id` returns the
-coordinator its own comments while it believes it is reading the child's, the
-exact fan-in misread this document exists to remove. A helper cannot report a
-type error it has already discarded.
+A query string carries no types, so `limit` arrives as a string or not at all
+and there is no schema layer that can reject it before the handler. Parsing is
+therefore the handler's, and the contract that `limit` never produces an error
+from any layer falls out of the transport rather than having to be defended
+against one, which is the main simplification the CLI transport buys.
 
-`copyOptionalLimitArg` is prohibited on the same grounds and is the easier trap,
-because it sits beside `copyOptionalStringArg` and already performs the raw-map
-read described above — so it reads as the precedent to copy. It truncates
-(`raw.(float64)` then `int(limit)`), which would turn `7.5` into 7 where the
-rule above requires the default of 20. Neither helper is reused here.
+Absent, empty, unparseable, zero, or negative takes the default of 20; above
+100 clamps to 100. A fractional `7.5` does not parse as an integer, so it takes
+the default rather than truncating to 7. Nothing here is an error, and nothing
+here is invisible: `total` and `has_more` report every omission. The clamping
+itself is not re-implemented at the handler — the handoff service already
+clamps at its own boundary, so the handler passes the parsed value through and
+the bound holds even if a future caller reaches the service directly.
 
-The asymmetry between the two arguments is intentional. `limit` bounds a
-result, so a substituted value returns the right subject in the wrong quantity,
-which the window fields then report. `task_id` selects the subject, so a
-substituted value returns the wrong subject silently.
+### The agent projection
 
-Each returned comment projects exactly: identifier, task identifier,
-`author_type`, `author_id`, `source`, body, creation timestamp, and — only when
-the body was cut — a truncation marker plus the original body length in bytes.
-`reply_channel_id` and the per-comment run lifecycle fields are not projected;
-the first is internal reply routing and the second is a rendering concern for
-the human comment list.
+Each comment returned to an agent projects exactly: identifier, task
+identifier, `author_type`, `author_id`, `source`, body, creation timestamp,
+and — only when the body was cut — a truncation marker plus the original body
+length in bytes. `reply_channel_id` and the per-comment run lifecycle fields
+are not projected; the first is internal reply routing and the second is a
+rendering concern for the human comment list.
 
 Bodies are cut with the existing shared rune-safe byte truncation helper rather
 than a new cut, so the boundary rule lives in one place. The per-body cap is
 8192 bytes.
 
-Every response carries the window: `total`, `returned`, and `has_more`, which
-is true exactly when `returned` is below `total`. The window describes only
-omitted comments. Whether an individual body was shortened is carried on that
-comment as `body_truncated`, never in the window. Two names because they are
-two facts, and one name for both is how a coordinator concludes it has the
+Every agent response carries the window: `total`, `returned`, and `has_more`,
+which is true exactly when `returned` is below `total`. The window describes
+only omitted comments. Whether an individual body was shortened is carried on
+that comment as `body_truncated`, never in the window. Two names because they
+are two facts, and one name for both is how a coordinator concludes it has the
 whole note when it has the first half of it.
 
 Author fields are projected as data. No filter parameter exists for them. Two
@@ -178,14 +220,10 @@ straddle the boundary differently on successive calls. `id` is a random
 identifier, so this ordering is repeatable but is not insertion order; the
 requirement and the exclusions both say so.
 
-`limit` is defaulted at 20 for absent, null, zero, negative, and
-non-integer values, and clamped at 100 above. Neither is an error, and neither
-is invisible: `has_more` and `total` report the omission.
-
 A second bound sits above `limit`: the response carries at most 65536 bytes of
 body in total. At the clamped maximum the per-body cap alone would permit a
 response near 800KB, which no consuming agent can use, and the point of this
-tool is that the result is usable. When the selected window exceeds the budget,
+read is that the result is usable. When the selected window exceeds the budget,
 whole comments are dropped from the oldest end, preserving the same
 newest-wins rule the window selection already uses; the dropped comments leave
 `total` untouched, so `has_more` reports them.
@@ -202,15 +240,25 @@ alone.
 
 ## Control flow
 
-Caller agent → MCP tool handler → backend action handler → access-checked read
-→ comment store, and the projection back out. The caller task identity crosses
-the first boundary from server state rather than from the model's arguments;
-the target identifier crosses from the arguments.
+Caller agent → `agentctl kandev comment list` → office HTTP route group → agent
+auth middleware → comment read endpoint → access-checked read → comment store,
+and the projection back out as the response body the CLI prints. The caller
+task identity crosses from validated JWT claims; the target identifier crosses
+from the request path. Neither is ever read from a flag the model chose beyond
+the target it is entitled to name.
+
+The wiring is a pass-through, not a new assembly: `registerSecondaryRoutes`
+already holds the handoff service and already registers the office route group
+a few lines later, so the dashboard handler receives it the way the document
+handler receives its own service. Office already imports the task service in
+this package, so the architecture lint that bans the reverse direction is not
+engaged.
 
 The acceptance path: a child agent posts its deliverable through the existing
-signed runtime comment path; later, the parent's run calls the tool naming the
-child, the descendant branch of the read guard admits it, and the body is
-returned. Nothing between the two runs is human.
+signed runtime comment path; later, the parent's run runs
+`agentctl kandev comment list --task <child>`, the descendant branch of the
+read guard admits it, and the body is printed. Nothing between the two runs is
+human.
 
 ## Failure and recovery
 
@@ -219,26 +267,27 @@ reported defect.
 
 - **Accessible and empty** is a success with an empty list, an explicit empty
   array rather than a null, and a zero total.
-- **Not permitted** is a forbidden error carrying the existing shared
+- **Not permitted** is a forbidden status carrying the existing shared
   access-denied sentinel, whose message is the literal string `document access
   denied`. A missing task and an unrelated task must produce that same forbidden
   outcome and that same message, because distinguishing them would let a caller
-  enumerate task identifiers.
+  enumerate task identifiers. An agent whose JWT carries no task — routine
+  dispatch mints exactly such a token — is denied on this same path for every
+  target, rather than being allowed to fall through to the unguarded read.
 
-  That sameness is not what the guard does today, and closing the gap is the one
-  shared change this design owns. `loadAccessPair` calls the task repository for
-  the caller and the target and returns the repository's error unchanged. On an
-  absent identifier that repository returns a not-found error which embeds the
-  identifier it was given, and the MCP handoff error mapper has no case for it,
-  so it falls through to an internal error carrying that text. The guard's
-  `current == nil || target == nil` denial branch below it is reachable only
-  under test, because the test double returns a bare `(nil, nil)` where the
-  repository returns `(nil, not-found)`, and the guard's missing-task test
-  discards the error, so the divergence is invisible. Normalisation therefore
-  happens inside `loadAccessPair`: a not-found from either lookup becomes a
-  plain deny, with no error, before any caller sees it. The test double is
-  corrected in the same change to return the repository's shape, so the guard's
-  tests stop passing on a branch production never reaches.
+  That sameness was not what the guard did, and closing the gap is the one
+  shared change this design owns; as noted above it has already landed.
+  `loadAccessPair` called the task repository for the caller and the target and
+  returned the repository's error unchanged. On an absent identifier that
+  repository returns a not-found error which embeds the identifier it was
+  given. The guard's `current == nil || target == nil` denial
+  branch below it is reachable only under test, because the test double returns
+  a bare `(nil, nil)` where the repository returns `(nil, not-found)`, and the
+  guard's missing-task test discards the error, so the divergence is invisible.
+  Normalisation therefore happens inside `loadAccessPair`: a not-found from
+  either lookup becomes a plain deny, with no error, before any caller sees it.
+  The test double is corrected in the same change to return the repository's
+  shape, so the guard's tests stop passing on a branch production never reaches.
 
   Renaming the `document access denied` sentinel text to something
   surface-neutral is deliberately out of scope. That both surfaces read
@@ -246,19 +295,31 @@ reported defect.
   existing assertions for nothing.
 - **Dependency unconfigured or storage read failed** is an internal error. This
   path must not degrade to an empty list. The adjacent per-comment run-status
-  lookup in the human comments handler does degrade to an empty map, which is
-  right there and wrong here: an empty comment list is read by a coordinator as
-  "the child produced nothing" and ends the delegation.
-
-A caller task identity that resolves to empty with no `task_id` argument is a
-validation error naming `task_id`.
+  lookup in the same handler does degrade to an empty map, which is right there
+  and wrong here: an empty comment list is read by a coordinator as "the child
+  produced nothing" and ends the delegation. That existing degradation stays on
+  the browser branch, where the cost of a missing badge is a missing badge.
 
 ## Persistence
 
-The read path is read-only and needs no schema change or new index. On startup,
-the Office repository backfills parseable legacy `task_comments.created_at`
-values to the canonical UTC representation before the window query relies on
-lexical ordering. The existing `(task_id, created_at)` index serves the window.
+The read path is read-only and needs no schema change or new index. The
+existing `(task_id, created_at)` index serves the window.
+
+Legacy rows are a known edge, and this design excludes them deliberately rather
+than repairing them in passing. `CreateTaskComment` normalises a non-zero
+`created_at` to UTC on write, so every row written after that fix compares
+correctly under the lexical ordering the window relies on; rows written before
+it may carry another offset and do not. Backfilling those is owned by the
+follow-up card *Backfill legacy non-UTC `task_comments.created_at`*
+(`f5984c8c-ecdb-4e58-b326-1c742c29bfbc`) and is not a precondition of this
+work. Until it lands, a row whose stored timestamp is not in the canonical UTC
+representation falls outside the ordering guarantee of
+`REQ-OFFICE-AGENT-COMMENT-READS-003`. It is still returned, still counted in
+`total`, and still subject to the guard and the budget — nothing is hidden and
+nothing errors; only its position relative to a canonical row is unspecified.
+No startup backfill is described here on purpose: a partial one, whose
+behaviour on a value it cannot parse would itself need stating, would reopen
+the very ordering question it appears to close.
 
 Both the count and the page are taken inside one read transaction on the
 read-only connection, so the returned count never exceeds the reported total. A
@@ -267,48 +328,57 @@ lock is taken that a writer could block on.
 
 ## Security
 
-The read relation is not re-derived here. The tool calls the same guard the
+The read relation is not re-derived here. The endpoint calls the same guard the
 document reads call, so the two cannot drift into two answers to one question.
 The relation admits self, ancestors, descendants, siblings sharing a non-empty
 parent, and blockers, and denies any cross-workspace pair.
 
-Task-identifier enumeration is closed at that guard rather than at this tool, by
-the `loadAccessPair` normalisation described in
+Placing the guard at the endpoint rather than at a tool is what makes it
+complete. The office route group authenticates agents with a workspace-scoped
+JWT, and the workspace-scope middleware skips agent callers and is in any case
+gated on a `:wsId` path parameter this route does not carry — so before this
+change any Office agent could read any task's comments in its workspace, and
+both CLI commands reached that read. One handler fix closes both entry points.
+A guarded tool beside an unguarded endpoint would have closed neither, which is
+why the tool is deleted rather than kept.
+
+Task-identifier enumeration is closed at that guard rather than at this
+endpoint, by the `loadAccessPair` normalisation described in
 [Failure and recovery](#failure-and-recovery). Before that change an absent
 identifier produced an error naming it; after it, a missing task is
-indistinguishable from an existing unrelated one on every surface that uses the
+indistinguishable from an existing unrelated one on every surface using the
 guard.
 
-The caller identity comes from the bound session, so a caller cannot claim to
-be a task it is not.
+The caller identity comes from validated JWT claims, so a caller cannot claim
+to be a task it is not, and a token with no task claim reads nothing.
 
-The tool is registered for the Office surface only.
-
-Out of scope and recorded here so it is not mistaken for a new hole: the
-`agentctl kandev tasks conversation` command reads the dashboard comments
-endpoint, which applies no cross-task relation check. That path predates this
-work and is unchanged by it. This design does not route around that endpoint
-and does not widen it.
+Recorded so it is not mistaken for a new hole: the dashboard task **document**
+routes apply no relation check either. That gap predates this work, is the same
+shape as the one closed here, and is neither widened nor fixed here.
 
 ## The advertised-surface contract
 
 The Office first-turn context is asserted to advertise exactly the tool set the
-Office surface registers. Registering the tool without adding it to that
-context is a build failure, not a silent drift, and adding it to the context
-without registering it fails the same way. The injected Office comment
-reference currently documents only the write command; it gains the read. The
-Coordinator role instructions — the `ceo` role, at
-`apps/backend/internal/office/configloader/instructions/ceo/AGENTS.md`, which is
-the role that creates subtasks and reviews their results — gain the direction to
-read a delegated child's comments before concluding the child produced nothing — without that, the tool
-exists and the coordinator still does not call it.
+Office surface registers, so removing the tool and leaving its sysprompt line
+is a build failure rather than silent drift; the assertion is what keeps the
+deletion honest in both directions.
+
+The capability is advertised where Office agents actually read: the injected
+comment reference under the task-ops skill currently documents only the write
+command and gains the read, and the coordinator role instructions — the `ceo`
+role, at
+`apps/backend/internal/office/configloader/instructions/ceo/AGENTS.md`, the role
+that creates subtasks and reviews their results — gain the direction to read a
+delegated child's comments with that command before concluding the child
+produced nothing. Without that, the endpoint works and the coordinator still
+does not call it.
 
 ## Observability
 
-The tool's calls are logged through the existing wrapped-handler path with the
-tool name, so a coordinator's read attempts are visible next to its other tool
-calls. No new metric: the failure this addresses is a missing capability, not a
-rate to watch.
+Requests are visible in the office route group's existing HTTP logging, so a
+coordinator's read attempts are traceable alongside its other runtime calls. No
+new metric: the failure this addresses is a missing capability and an unguarded
+read, not a rate to watch.
 
 ## Related decisions
 
