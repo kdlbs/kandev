@@ -26,20 +26,20 @@ const (
 // carried at the top level. When EnvPrepareRequest.Repositories is non-empty,
 // each entry produces one prepared worktree under the shared TaskDirName.
 type RepoPrepareSpec struct {
-	TaskRepositoryID        string
-	RepositoryID            string
-	RepositoryPath          string
-	RepoName                string
-	BaseBranch              string
-	DefaultBranch           string // Repository's default_branch, used as fallback when BaseBranch is missing
-	CheckoutBranch          string
-	PRNumber                int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
-	RemoteContribution      *models.RemoteContribution
-	WorktreeID              string
+	TaskRepositoryID   string
+	RepositoryID       string
+	RepositoryPath     string
+	RepoName           string
+	BaseBranch         string
+	DefaultBranch      string // Repository's default_branch, used as fallback when BaseBranch is missing
+	CheckoutBranch     string
+	PRNumber           int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	RemoteContribution *models.RemoteContribution
+	WorktreeID         string
 	// WorkspaceReuseRequired makes preparation attach to the exact canonical
 	// environment. It forbids worktree creation/recreation and all repository
 	// mutating setup paths.
-	WorkspaceReuseRequired bool
+	WorkspaceReuseRequired  bool
 	WorktreeBranch          string
 	WorktreeBranchPrefix    string
 	WorktreeBranchTemplate  string

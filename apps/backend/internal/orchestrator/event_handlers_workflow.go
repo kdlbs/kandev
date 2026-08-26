@@ -3405,7 +3405,29 @@ func (s *Service) queueAutoStartPrompt(
 	if userMessageRecorded {
 		meta[metaKeyUserMessageRecorded] = true
 	}
-	_, err := s.messageQueue.QueueMessageWithMetadata(
+	transitionID, usesControlLane, err := s.currentWorkflowTransitionID(ctx, taskID, origin.StepID)
+	if err != nil {
+		return err
+	}
+	if usesControlLane {
+		// The task moved again (or the transition ledger no longer names this
+		// step), so this older on-entry invocation has no prompt to deliver.
+		if transitionID == 0 {
+			return nil
+		}
+		if _, _, accepted, err := s.messageQueue.QueueWorkflowControlMessage(
+			ctx, sessionID, taskID, prompt, "", messagequeue.QueuedByWorkflow,
+			planMode, toQueuedAttachments(attachments), meta, transitionID,
+		); err != nil {
+			return fmt.Errorf("failed to queue workflow control prompt: %w", err)
+		} else if !accepted {
+			return nil
+		}
+		s.publishQueueStatusEvent(ctx, sessionID)
+		s.scheduleAutoResumeForWorkflowQueue(ctx, sessionID)
+		return nil
+	}
+	_, err = s.messageQueue.QueueMessageWithMetadata(
 		ctx,
 		sessionID,
 		taskID,

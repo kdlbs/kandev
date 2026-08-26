@@ -137,6 +137,46 @@ func TestDeleteTaskSessionPurgesQueuedMessages(t *testing.T) {
 	}
 }
 
+func TestDeleteTaskSessionCancelsUndeliveredDeliveryReceipts(t *testing.T) {
+	// A durable receipt is independently retried after the source turn ends.
+	// Deleting its target session must therefore tombstone the receipt as well
+	// as its visible FIFO row; otherwise the worker could recreate a prompt for
+	// a session that no longer exists.
+	repo := newRepoForArchiveTests(t, "task-session-delivery-cancel")
+	ctx := context.Background()
+	seedLiveSessionForQueue(t, repo, "target-session", "task-session-delivery-cancel")
+
+	mqRepo, err := messagequeue.NewSQLiteRepository(repo.db, repo.db)
+	if err != nil {
+		t.Fatalf("NewSQLiteRepository: %v", err)
+	}
+	ledger := mqRepo.(messagequeue.DeliveryLedger)
+	delivery, _, err := ledger.CreateOrGetDelivery(ctx, messagequeue.Delivery{
+		SenderTaskID:    "source-task",
+		SenderSessionID: "source-session",
+		SourceTurnID:    "source-turn",
+		IdempotencyKey:  "report-v1",
+		TargetTaskID:    "task-session-delivery-cancel",
+		TargetSessionID: "target-session",
+		Content:         "review is ready",
+		State:           messagequeue.DeliveryPendingCapacity,
+	})
+	if err != nil {
+		t.Fatalf("CreateOrGetDelivery: %v", err)
+	}
+
+	if err := repo.DeleteTaskSession(ctx, "target-session"); err != nil {
+		t.Fatalf("DeleteTaskSession: %v", err)
+	}
+	stored, err := ledger.GetDelivery(ctx, delivery.ID)
+	if err != nil {
+		t.Fatalf("GetDelivery: %v", err)
+	}
+	if stored.State != messagequeue.DeliveryCancelled {
+		t.Fatalf("delivery state after session delete = %q, want %q", stored.State, messagequeue.DeliveryCancelled)
+	}
+}
+
 func seedLiveSessionForQueue(t *testing.T, repo *Repository, sessionID, taskID string) {
 	t.Helper()
 	now := time.Now().UTC()

@@ -23,6 +23,9 @@ import (
 
 const sessionModelConfigKey = "model"
 
+const streamEventMessageStreaming = "message_streaming"
+const streamEventThinkingStreaming = "thinking_streaming"
+
 // usageEventIDNamespace seeds the deterministic UUID usageEventIDFor derives
 // for a prompt-usage completion. Arbitrary but fixed — any stable value
 // works since it only needs to be consistent across process restarts, never
@@ -93,8 +96,17 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		}
 		return
 	}
+	// Rearm only after the guards above: a frame this handler treats as too
+	// stale to persist (already-completed execution, terminal failed
+	// execution) must not count as fresh activity evidence. Evaluated per
+	// GetActiveTurn against the *current* active turn, so a late frame from a
+	// finished execution could otherwise rearm a successor turn's intent.
 	switch eventType {
-	case "message_streaming", "thinking_streaming", agentEventComplete:
+	case streamEventMessageStreaming, streamEventThinkingStreaming, agentEventToolCall, agentEventToolUpdate:
+		s.rearmCompletionIntentForActivity(ctx, sessionID)
+	}
+	switch eventType {
+	case streamEventMessageStreaming, streamEventThinkingStreaming, agentEventComplete:
 		s.observeDynamicAttempt(
 			payload.SessionID,
 			payload.ExecutionID,
@@ -122,10 +134,10 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 
 	// Handle different event types
 	switch eventType {
-	case "message_streaming":
+	case streamEventMessageStreaming:
 		s.handleMessageStreamingEvent(ctx, payload)
 
-	case "thinking_streaming":
+	case streamEventThinkingStreaming:
 		s.handleThinkingStreamingEvent(ctx, payload)
 
 	case agentEventToolCall:
@@ -181,6 +193,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		); changed {
 			s.publishForegroundActivitySnapshot(ctx, taskID, sessionID, publication)
 		}
+		s.persistBackgroundWorkAttestation(ctx, sessionID)
 
 	case "plan":
 		s.handleSessionTodosEvent(ctx, payload)
@@ -525,6 +538,7 @@ func (s *Service) handleToolCallEvent(ctx context.Context, payload *lifecycle.Ag
 		) && kind == streams.BackgroundWorkKindSubagent {
 			s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
 		}
+		s.persistBackgroundWorkAttestation(ctx, payload.SessionID)
 	case toolOwnershipForeground:
 		if s.markForegroundGenerating(payload.SessionID, payload.ExecutionID) {
 			s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
@@ -807,6 +821,7 @@ func (s *Service) trackBackgroundToolUpdate(
 			) && kind == streams.BackgroundWorkKindSubagent {
 				s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
 			}
+			s.persistBackgroundWorkAttestation(ctx, payload.SessionID)
 			return
 		}
 		// A finished top-level background task no longer holds the turn open.
@@ -822,6 +837,7 @@ func (s *Service) trackBackgroundToolUpdate(
 		) {
 			s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
 		}
+		s.persistBackgroundWorkAttestation(ctx, payload.SessionID)
 		return
 	}
 	if s.hasBackgroundTask(
@@ -854,6 +870,7 @@ func (s *Service) trackBackgroundToolUpdate(
 	) && kind == streams.BackgroundWorkKindSubagent {
 		s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
 	}
+	s.persistBackgroundWorkAttestation(ctx, payload.SessionID)
 }
 
 // resolveToolUpdateOwnership preserves the ownership established by the

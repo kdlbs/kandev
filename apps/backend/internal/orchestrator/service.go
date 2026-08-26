@@ -880,6 +880,15 @@ type Service struct {
 	// contextWindowGuards serializes live context usage writes and gives each
 	// session a generation boundary that reset_agent_context can invalidate.
 	contextWindowGuards sync.Map
+	// backgroundAttestationLocks serializes persistBackgroundWorkAttestation's
+	// read-then-write per session (map[sessionID]*sync.Mutex). Its callers
+	// (stream event handlers, execution retirement) hold different, unrelated
+	// per-session guards or none at all, so without a lock dedicated to this
+	// one piece of persisted state, two concurrent callers for the same
+	// session — e.g. registration and completion racing — could commit their
+	// writes in either order: an older "true" landing after a newer "false"
+	// leaves a stale attested=true that blocks completion settlement forever.
+	backgroundAttestationLocks sync.Map
 
 	// suppressToast: sessionID -> true. Set by failure handlers that create
 	// guidance messages with actions. Cleared by updateTaskSessionState which
@@ -973,6 +982,24 @@ type Service struct {
 	sendNowCancel  context.CancelFunc
 	sendNowStopped bool
 	sendNowWorkers sync.WaitGroup
+
+	// completionIntentReconciler retries only durable, due completion intents.
+	// Its lifecycle is independent from the provider turn that created an
+	// intent, and shutdown waits for the single bounded scanner to exit.
+	completionIntentReconcileMu       sync.Mutex
+	completionIntentReconcileCtx      context.Context
+	completionIntentReconcileCancel   context.CancelFunc
+	completionIntentReconcileStopped  bool
+	completionIntentReconcileStarted  bool
+	completionIntentReconcileWorkers  sync.WaitGroup
+	completionIntentReconcileInterval time.Duration
+
+	// completionIntentRearmThrottle records, per session, the last time
+	// rearmCompletionIntentForActivity actually touched the database. Token
+	// streaming calls this once per chunk while holding the session's
+	// cancelInFlight guard; throttling collapses that to a bounded rate
+	// instead of three DB round trips per chunk on the hottest path.
+	completionIntentRearmThrottle sync.Map
 }
 
 type RouteAction string
@@ -1142,24 +1169,25 @@ func NewService(
 	// Create the service (watcher will be created after we have handlers)
 	sendNowCtx, sendNowCancel := context.WithCancel(context.Background())
 	s := &Service{
-		config:                       cfg,
-		logger:                       svcLogger,
-		eventBus:                     eventBus,
-		taskRepo:                     taskRepo,
-		repo:                         repo,
-		agentManager:                 agentManager,
-		queue:                        taskQueue,
-		executor:                     exec,
-		scheduler:                    sched,
-		messageQueue:                 msgQueue,
-		taskLaunchRecoveryRepo:       taskLaunchRecoveryRepo,
-		clarificationWatchdogTimeout: 15 * time.Second,
-		gitSnapshotCache:             newGitSnapshotCache(),
-		dynamicRecoveryTimers:        make(map[string]*time.Timer),
-		reservedPromptCallbacks:      newReservedPromptCallbackOwner(),
-		sendNowCtx:                   sendNowCtx,
-		sendNowCancel:                sendNowCancel,
-		idleReaper:                   newIdleSessionReaper(),
+		config:                            cfg,
+		logger:                            svcLogger,
+		eventBus:                          eventBus,
+		taskRepo:                          taskRepo,
+		repo:                              repo,
+		agentManager:                      agentManager,
+		queue:                             taskQueue,
+		executor:                          exec,
+		scheduler:                         sched,
+		messageQueue:                      msgQueue,
+		taskLaunchRecoveryRepo:            taskLaunchRecoveryRepo,
+		clarificationWatchdogTimeout:      15 * time.Second,
+		gitSnapshotCache:                  newGitSnapshotCache(),
+		dynamicRecoveryTimers:             make(map[string]*time.Timer),
+		reservedPromptCallbacks:           newReservedPromptCallbackOwner(),
+		sendNowCtx:                        sendNowCtx,
+		sendNowCancel:                     sendNowCancel,
+		idleReaper:                        newIdleSessionReaper(),
+		completionIntentReconcileInterval: completionIntentReconcileInterval,
 	}
 	// Always publish queue-status after a task-scoped queue purge so the
 	// status-summary projector zeros queued_prompt_count. Unlike the
@@ -1172,6 +1200,23 @@ func NewService(
 			s.publishTaskQueueStatusEvent(ctx, taskID, "")
 		})
 	}
+	// The delivery recovery worker admits durable receipts into a session's
+	// visible FIFO queue directly through messagequeue.Service, bypassing the
+	// WS/MCP handler layers that normally publish message.queue.status_changed
+	// after a queue mutation and that normally drain a newly-queued message
+	// into an idle session. Without the status publish, the frontend's queue
+	// store never learns about the new entry. Without the drain, a receipt
+	// rescheduled after a direct-dispatch failure against a WAITING session
+	// (or recovered after restart once the target is already idle) can sit
+	// "queued" indefinitely: the ordinary FIFO only drains one entry per turn
+	// completion, and a session that is already idle has no future
+	// turn-completion event to trigger that drain. drainQueuedMessageForPromptableSession
+	// is a self-guarding no-op when the session turns out to be busy or a
+	// drain is already in flight, so it is safe to call unconditionally here.
+	msgQueue.SetQueuePromotionNotifier(func(ctx context.Context, sessionID string) {
+		s.publishQueueStatusEvent(ctx, sessionID)
+		s.drainQueuedMessageForPromptableSession(ctx, sessionID)
+	})
 	exec.SetOnContextWindowReset(s.clearContextWindowForReset)
 
 	// Wire executor state changes through the orchestrator so events are published
@@ -2232,6 +2277,7 @@ func (s *Service) Start(ctx context.Context) error {
 	s.logger.Info("starting orchestrator service")
 	s.resetReservedPromptCallbacks()
 	s.resetSendNowWorkers()
+	s.resetCompletionIntentReconciler()
 
 	// Reconcile session state from persisted runtime state on startup.
 	// This does NOT launch any agent processes — sessions are recovered lazily
@@ -2251,6 +2297,7 @@ func (s *Service) Start(ctx context.Context) error {
 		s.mu.Unlock()
 		return err
 	}
+	s.reconcileDueCompletionIntents(ctx)
 	s.reconcileExecutorSessionsOnStartup(ctx)
 	if s.workflowStore != nil {
 		s.workflowStore.ReconcileQueuedTasks(ctx)
@@ -2279,6 +2326,10 @@ func (s *Service) Start(ctx context.Context) error {
 		s.running = false
 		s.mu.Unlock()
 		return err
+	}
+	s.startCompletionIntentReconciler()
+	if s.messageQueue != nil {
+		s.messageQueue.StartDeliveryRecovery(ctx)
 	}
 
 	// Subscribe to GitHub integration events
@@ -2351,6 +2402,10 @@ func (s *Service) Stop() error {
 	var errs []error
 	s.stopIdleSessionReaper()
 	s.stopReservedPromptCallbacks()
+	s.stopCompletionIntentReconciler()
+	if s.messageQueue != nil {
+		s.messageQueue.StopDeliveryRecovery()
+	}
 
 	if err := s.scheduler.Stop(); err != nil {
 		s.logger.Error("failed to stop scheduler", zap.Error(err))

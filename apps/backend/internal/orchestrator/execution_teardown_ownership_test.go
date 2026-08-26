@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -142,6 +143,158 @@ func TestReapPromptUnreadyExecution_StopsOnlyWhenRecoveryOwnsExecution(t *testin
 
 	require.Error(t, err)
 	require.Zero(t, stopCalls.Load(), "recovery must not duplicate coordinator-owned teardown")
+}
+
+// TestRetireExecutionActivityAndPublish_ClearsStaleBackgroundAttestation
+// covers the case where an execution terminates or is cancelled while
+// background work is tracked but no background-complete/tool-update frame
+// ever arrives (the only other call sites for persistBackgroundWorkAttestation).
+// Without recomputing the attestation on retirement, a persisted
+// background_work_attested=true survives indefinitely and every later
+// completion intent on a resumed session is rearmed forever as
+// background_work_attested (stale_session_settlement.go's fail-closed
+// active-work barrier).
+func TestRetireExecutionActivityAndPublish_ClearsStaleBackgroundAttestation(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	const (
+		taskID      = "task-retire-attestation"
+		sessionID   = "session-retire-attestation"
+		executionID = "execution-retire-attestation"
+	)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+
+	svc := newCoordinatorStopTestService(repo, newMockTaskRepo(), &mockAgentManager{})
+	svc.registerBackgroundWork(sessionID, "detached-tool-call", executionID, "work")
+	// A prior stream frame already attested outstanding background work, as
+	// persistBackgroundWorkAttestation would have done while it was tracked.
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyBackgroundWorkAttested, true))
+
+	// The execution dies with no accompanying background-complete or
+	// tool-update frame — only teardown retires the in-memory record.
+	svc.retireExecutionActivityAndPublish(ctx, taskID, sessionID, executionID)
+
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	require.NoError(t, err)
+	attested, _ := session.Metadata[models.SessionMetaKeyBackgroundWorkAttested].(bool)
+	require.False(t, attested,
+		"stale background_work_attested must be cleared once the owning execution retires")
+}
+
+// gatedAttestationRepo lets a test control exactly when the first
+// SetSessionMetadataKey write for the background-attestation key commits,
+// so a concurrent second call can be proven to observe (or not observe) the
+// live state correctly.
+type gatedAttestationRepo struct {
+	sessionExecutorStore
+	firstWriteEntered chan struct{}
+	releaseFirstWrite chan struct{}
+
+	mu     sync.Mutex
+	calls  int
+	writes []bool
+}
+
+func (r *gatedAttestationRepo) SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error {
+	if key == models.SessionMetaKeyBackgroundWorkAttested {
+		r.mu.Lock()
+		r.calls++
+		isFirst := r.calls == 1
+		r.mu.Unlock()
+		if isFirst {
+			close(r.firstWriteEntered)
+			<-r.releaseFirstWrite
+		}
+		r.mu.Lock()
+		r.writes = append(r.writes, value.(bool))
+		r.mu.Unlock()
+	}
+	return r.sessionExecutorStore.SetSessionMetadataKey(ctx, sessionID, key, value)
+}
+
+// TestPersistBackgroundWorkAttestationSerializesConcurrentWrites is the
+// concurrency regression for the write-ordering race: persistBackgroundWorkAttestation
+// used to compute its boolean under turnActivity's lock but write it after
+// releasing that lock, with no serialization between callers. Two concurrent
+// calls for the same session (e.g. a registration and a completion racing)
+// could commit their writes in either order — an older "true" landing after
+// a newer "false" — leaving a stale attested=true that never clears. This
+// proves the fix: a second call blocks until the first fully commits, so
+// writes land in call order and each read reflects the true live state at
+// the moment it actually runs, not a value captured earlier.
+func TestPersistBackgroundWorkAttestationSerializesConcurrentWrites(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	gated := &gatedAttestationRepo{
+		sessionExecutorStore: repo,
+		firstWriteEntered:    make(chan struct{}),
+		releaseFirstWrite:    make(chan struct{}),
+	}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.repo = gated
+
+	svc.registerBackgroundWork("s1", "tool-1", "exec-1", "work-1")
+
+	firstDone := make(chan struct{})
+	go func() {
+		svc.persistBackgroundWorkAttestation(ctx, "s1")
+		close(firstDone)
+	}()
+
+	select {
+	case <-gated.firstWriteEntered:
+	case <-time.After(time.Second):
+		t.Fatal("first persist call never reached its write")
+	}
+
+	// The live state changes to "no outstanding work" while the first call's
+	// write is still pending — this is the actual current reality by the
+	// time the second call below runs.
+	svc.completeBackgroundTaskForExecution("s1", "tool-1", "exec-1")
+
+	secondDone := make(chan struct{})
+	go func() {
+		svc.persistBackgroundWorkAttestation(ctx, "s1")
+		close(secondDone)
+	}()
+
+	// The second call must not be able to read or write while the first call
+	// still holds the per-session attestation lock.
+	select {
+	case <-secondDone:
+		t.Fatal("second persist call completed before the first was released — calls are not serialized")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(gated.releaseFirstWrite)
+	select {
+	case <-firstDone:
+	case <-time.After(time.Second):
+		t.Fatal("first persist call never finished after being released")
+	}
+	select {
+	case <-secondDone:
+	case <-time.After(time.Second):
+		t.Fatal("second persist call never finished")
+	}
+
+	gated.mu.Lock()
+	writes := append([]bool(nil), gated.writes...)
+	gated.mu.Unlock()
+	if len(writes) != 2 || !writes[0] || writes[1] {
+		t.Fatalf("writes = %v, want [true false] in that order", writes)
+	}
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	attested, _ := session.Metadata[models.SessionMetaKeyBackgroundWorkAttested].(bool)
+	if attested {
+		t.Fatal("final persisted attestation = true, want false to match the actual current state")
+	}
 }
 
 func TestReapPromptUnreadyExecution_RetiresActivityAfterForcedStop(t *testing.T) {

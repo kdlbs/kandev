@@ -278,6 +278,13 @@ func TestHandleStepComplete_RejectsSignalFromMovedTurn(t *testing.T) {
 func TestHandleStepComplete_FirstCallAccepted(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	seedStepCompleteTarget(t, repo, "task-first", "session-first", "step-1", models.TaskSessionStateRunning)
+	_, err := repo.CreateTurnWithStepStamp(context.Background(), &models.Turn{
+		ID:            "turn-first",
+		TaskID:        "task-first",
+		TaskSessionID: "session-first",
+		StartedAt:     time.Now().UTC(),
+	})
+	require.NoError(t, err)
 	seedAgentProfileSnapshot(t, repo, "session-first", "claude-first-call")
 	bus := &mcpRecordingEventBus{}
 	h := newStepCompleteHandler(t, svc, repo, bus)
@@ -300,6 +307,8 @@ func TestHandleStepComplete_FirstCallAccepted(t *testing.T) {
 	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
 	assert.Equal(t, true, payload["accepted"])
 	assert.Equal(t, "step-1", payload["step_id"])
+	intentID, ok := payload["completion_intent_id"].(string)
+	require.True(t, ok, "accepted completion must return a durable intent id")
 	// signaled_at is part of the documented response contract — pin its
 	// presence + RFC3339Nano shape so a future refactor can't silently
 	// drop or rename the field.
@@ -317,6 +326,16 @@ func TestHandleStepComplete_FirstCallAccepted(t *testing.T) {
 	assert.Equal(t, models.StepCompletionSourceAgent, bag.Source)
 	assert.Equal(t, "implementation finished", bag.Summary)
 	assert.Equal(t, "tests next", bag.Handoff)
+
+	intent, err := repo.GetCompletionIntent(context.Background(), intentID)
+	require.NoError(t, err)
+	assert.Equal(t, "turn-first", intent.TurnID)
+	assert.Equal(t, "task-first", intent.TaskID)
+	assert.Equal(t, "step-1", intent.WorkflowStepID)
+	assert.Equal(t, "implementation finished", intent.Summary)
+	assert.Equal(t, models.CompletionIntentStatePending, intent.State)
+	assert.WithinDuration(t, intent.RequestedAt.Add(models.CompletionIntentQuietGrace), intent.EligibleAt, time.Microsecond,
+		"accepted completion intent must wait through the conservative quiet grace")
 
 	// Bus event published with the public payload shape (no handoff/blockers
 	// on the wire — those live in the bag only).

@@ -199,7 +199,10 @@ const coordinatorTaskControlSection = " Optional: session_id, delivery_mode. " +
 	"- stop_task_kandev: Halt all live sessions observed for a direct child, with no prompt and no replacement turn. " +
 	"Only the target task's direct parent may call it. Required params: task_id. " +
 	"A stopped session is CANCELLED and cannot be resumed, so message_task_kandev will not restart it: " +
-	"use spawn_session_kandev to put the task back to work."
+	"use spawn_session_kandev to put the task back to work.\n" +
+	"- settle_stale_session_kandev: Settle one exact quiet administrative turn without cancelling its session. " +
+	"Required params: session_id, turn_id. Only a same-workspace peer session, direct parent, or verified spawn supervisor may call it, " +
+	"and only when an eligible completion intent proves the exact turn is stale. Active or ambiguous turns return active_turn/not_stale unchanged."
 
 // taskTitleSection is included only for task sessions whose task metadata says
 // the provisional title still needs an agent-generated replacement. It ends in

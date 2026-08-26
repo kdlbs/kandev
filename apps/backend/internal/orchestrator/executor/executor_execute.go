@@ -1124,7 +1124,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	// overwrite the stale row.
 	hasRunning, _ := e.repo.HasExecutorRunningRow(ctx, sessionID)
 	if hasRunning {
-		result, err := e.startAgentOnExistingWorkspace(ctx, task, session, prompt, startAgent, opts.McpMode, opts.Env, opts.TurnID)
+		result, err := e.startAgentOnExistingWorkspace(ctx, task, session, prompt, startAgent, opts.McpMode, opts.Env, opts.OnInitialPromptAccepted, opts.TurnID)
 		if !errors.Is(err, ErrStaleExecution) && !errors.Is(err, ErrAgentCommandMissing) {
 			return result, err
 		}
@@ -1205,6 +1205,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		req.OfficeAgentProfileID = session.AgentProfileID
 	}
 	req.StartAgent = startAgent
+	req.OnInitialPromptAccepted = opts.OnInitialPromptAccepted
 	mergeEnv(req, opts.Env)
 	if opts.RouteOverride != nil {
 		req.RouteOverride = opts.RouteOverride
@@ -1897,7 +1898,7 @@ func dockerLocalCloneSource(repositoryPath string) string {
 // re-launch path. Pre-refactor this also consulted session.AgentExecutionID and
 // reconciled DB drift; that's now structurally impossible because executors_running
 // is owned by the lifecycle manager and writes are atomic with executionStore.Add.
-func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.Task, session *models.TaskSession, prompt string, startAgent bool, mcpMode string, env map[string]string, turnIDs ...string) (*TaskExecution, error) {
+func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.Task, session *models.TaskSession, prompt string, startAgent bool, mcpMode string, env map[string]string, onInitialPromptAccepted func(), turnIDs ...string) (*TaskExecution, error) {
 	executionID, err := e.agentManager.GetExecutionIDForSession(ctx, session.ID)
 	if err != nil || executionID == "" {
 		// No execution exists in memory (e.g. backend restarted since workspace was prepared).
@@ -1935,6 +1936,17 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 		}
 	}
 	e.bindPromptTurnID(ctx, session.ID, executionID, turnIDs)
+	if onInitialPromptAccepted != nil {
+		configurer, ok := e.agentManager.(interface {
+			SetInitialPromptAcceptedCallback(context.Context, string, func()) error
+		})
+		if !ok {
+			return nil, ErrPromptDispatchCallbackUnsupported
+		}
+		if err := configurer.SetInitialPromptAcceptedCallback(ctx, executionID, onInitialPromptAccepted); err != nil {
+			return nil, err
+		}
+	}
 	if err := e.configureExistingWorkspace(ctx, task, session, executionID, mcpMode, env); err != nil {
 		return nil, err
 	}

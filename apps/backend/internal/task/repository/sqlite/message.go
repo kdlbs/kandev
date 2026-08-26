@@ -784,6 +784,31 @@ func (r *Repository) CompletePendingToolCallsForTurn(ctx context.Context, turnID
 	return rows, nil
 }
 
+// HasPendingToolCallsForTurn reports whether the captured turn still owns a
+// non-terminal tool call. Stale-session settlement uses this before it closes
+// a signal-gated turn so a completion intent cannot interrupt active tool
+// work. Permission requests are excluded because their status belongs to the
+// user decision rather than the tool lifecycle.
+func (r *Repository) HasPendingToolCallsForTurn(ctx context.Context, turnID string) (bool, error) {
+	drv := r.db.DriverName()
+	status := dialect.JSONExtract(drv, "metadata", "status")
+	query := fmt.Sprintf(`
+		SELECT EXISTS(
+			SELECT 1
+			FROM task_session_messages
+			WHERE turn_id = ?
+			  AND type != 'permission_request'
+			  AND %s
+			  AND (%s IS NULL OR %s NOT IN ('complete', 'error'))
+		)
+	`, dialect.JSONExtractIsNotNull(drv, "metadata", "tool_call_id"), status, status)
+	var pending bool
+	if err := r.db.QueryRowContext(ctx, r.db.Rebind(query), turnID).Scan(&pending); err != nil {
+		return false, fmt.Errorf("check pending tool calls for turn %s: %w", turnID, err)
+	}
+	return pending, nil
+}
+
 // UpdateMessage updates an existing message
 func (r *Repository) UpdateMessage(ctx context.Context, message *models.Message) error {
 	metadataJSON, err := json.Marshal(message.Metadata)

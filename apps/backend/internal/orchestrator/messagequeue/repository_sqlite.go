@@ -185,6 +185,33 @@ func (r *sqliteRepository) initSchema() error {
 		session_id TEXT PRIMARY KEY,
 		auto_run   INTEGER NOT NULL DEFAULT 1
 	);
+
+	CREATE TABLE IF NOT EXISTS message_deliveries (
+		id                TEXT PRIMARY KEY,
+		sender_task_id    TEXT NOT NULL DEFAULT '',
+		sender_session_id TEXT NOT NULL,
+		source_turn_id    TEXT NOT NULL,
+		idempotency_key   TEXT NOT NULL,
+		target_task_id    TEXT NOT NULL,
+		target_session_id TEXT NOT NULL,
+		delivery_mode     TEXT NOT NULL DEFAULT '',
+		content           TEXT NOT NULL,
+		metadata_json     TEXT NOT NULL DEFAULT '{}',
+		state             TEXT NOT NULL,
+		queue_entry_id    TEXT NOT NULL DEFAULT '',
+		attempts          INTEGER NOT NULL DEFAULT 0,
+		next_attempt_at   TIMESTAMP NOT NULL,
+		lease_owner       TEXT,
+		lease_expires_at  TIMESTAMP,
+		last_error        TEXT NOT NULL DEFAULT '',
+		created_at        TIMESTAMP NOT NULL,
+		updated_at        TIMESTAMP NOT NULL,
+		delivered_at      TIMESTAMP
+	);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_message_deliveries_source_idempotency
+		ON message_deliveries(sender_session_id, source_turn_id, idempotency_key);
+	CREATE INDEX IF NOT EXISTS idx_message_deliveries_due
+		ON message_deliveries(state, next_attempt_at, lease_expires_at);
 	`)
 	if err != nil {
 		return err
@@ -218,14 +245,8 @@ func (r *sqliteRepository) Insert(ctx context.Context, msg *QueuedMessage, maxPe
 		return err
 	}
 
-	if maxPerSession > 0 {
-		var count int
-		if err := tx.GetContext(ctx, &count, r.db.Rebind(`SELECT COUNT(*) FROM queued_messages WHERE session_id = ?`), msg.SessionID); err != nil {
-			return fmt.Errorf("count: %w", err)
-		}
-		if count >= maxPerSession {
-			return ErrQueueFull
-		}
+	if err := r.ensureQueueCapacity(ctx, tx, msg.SessionID, maxPerSession); err != nil {
+		return err
 	}
 
 	var maxPos sql.NullInt64
@@ -428,14 +449,8 @@ func (r *sqliteRepository) Restore(ctx context.Context, msg *QueuedMessage, maxP
 		return err
 	}
 
-	if maxPerSession > 0 {
-		var count int
-		if err := tx.GetContext(ctx, &count, r.db.Rebind(`SELECT COUNT(*) FROM queued_messages WHERE session_id = ?`), msg.SessionID); err != nil {
-			return fmt.Errorf("count: %w", err)
-		}
-		if count >= maxPerSession {
-			return ErrQueueFull
-		}
+	if err := r.ensureQueueCapacity(ctx, tx, msg.SessionID, maxPerSession); err != nil {
+		return err
 	}
 	if msg.ID == "" {
 		msg.ID = uuid.New().String()
@@ -494,14 +509,8 @@ func (r *sqliteRepository) AppendOrInsertTail(ctx context.Context, sessionID, ta
 	}
 
 	// No matching tail — insert a fresh entry while still inside the same tx.
-	if maxPerSession > 0 {
-		var count int
-		if err := tx.GetContext(ctx, &count, r.db.Rebind(`SELECT COUNT(*) FROM queued_messages WHERE session_id = ?`), sessionID); err != nil {
-			return nil, false, fmt.Errorf("count: %w", err)
-		}
-		if count >= maxPerSession {
-			return nil, false, ErrQueueFull
-		}
+	if err := r.ensureQueueCapacity(ctx, tx, sessionID, maxPerSession); err != nil {
+		return nil, false, err
 	}
 	var maxPos sql.NullInt64
 	if err := tx.GetContext(ctx, &maxPos, r.db.Rebind(`SELECT MAX(position) FROM queued_messages WHERE session_id = ?`), sessionID); err != nil {
@@ -787,6 +796,51 @@ func PurgeTaskInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, taskI
 	`), taskID); err != nil {
 		return 0, fmt.Errorf("advance lifecycle queue generation: %w", err)
 	}
+	// RETURNING queue_entry_id identifies exactly the rows this call just
+	// cancelled (not deliveries already terminal beforehand), so the matching
+	// FIFO row can be deleted below even when it belongs to the OTHER party's
+	// task and so was never touched by the task_id-scoped DELETE above — e.g.
+	// an inbound cross-task delivery already admitted into the target
+	// session's queue is stamped with the target's task_id, so purging the
+	// sender only cancels the delivery here unless we also clean up the row.
+	// Left as an orphaned queued row, the target session would still reserve
+	// and deliver a prompt whose receipt is cancelled: AcknowledgeQueueEntryAndDelivery's
+	// terminal-state CAS matches nothing, the caller treats ErrEntryNotFound
+	// as already-handled, and the FIFO row survives to be redelivered again.
+	cancelRows, err := tx.QueryContext(ctx, db.Rebind(`
+		UPDATE message_deliveries
+		SET state = ?, lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
+		WHERE (sender_task_id = ? OR target_task_id = ?)
+		  AND state NOT IN (?, ?, ?)
+		RETURNING queue_entry_id
+	`), DeliveryCancelled, time.Now().UTC(), taskID, taskID,
+		DeliveryDelivered, DeliveryCancelled, DeliveryTerminalFailed)
+	if err != nil {
+		return 0, fmt.Errorf("cancel delivery receipts for purged task: %w", err)
+	}
+	var cancelledQueueEntryIDs []string
+	for cancelRows.Next() {
+		var queueEntryID string
+		if err := cancelRows.Scan(&queueEntryID); err != nil {
+			_ = cancelRows.Close()
+			return 0, fmt.Errorf("scan cancelled delivery queue entry id: %w", err)
+		}
+		if queueEntryID != "" {
+			cancelledQueueEntryIDs = append(cancelledQueueEntryIDs, queueEntryID)
+		}
+	}
+	if err := cancelRows.Err(); err != nil {
+		_ = cancelRows.Close()
+		return 0, fmt.Errorf("iterate cancelled delivery queue entry ids: %w", err)
+	}
+	if err := cancelRows.Close(); err != nil {
+		return 0, fmt.Errorf("close cancelled delivery queue entry ids: %w", err)
+	}
+	for _, queueEntryID := range cancelledQueueEntryIDs {
+		if _, err := tx.ExecContext(ctx, db.Rebind(`DELETE FROM queued_messages WHERE id = ?`), queueEntryID); err != nil {
+			return 0, fmt.Errorf("remove queue entry for cancelled delivery: %w", err)
+		}
+	}
 	return int(removed), nil
 }
 
@@ -875,14 +929,44 @@ func (r *sqliteRepository) ensureQueueCapacity(ctx context.Context, tx *sqlx.Tx,
 	if maxPerSession <= 0 {
 		return nil
 	}
-	var count int
-	if err := tx.GetContext(ctx, &count, r.db.Rebind(`SELECT COUNT(*) FROM queued_messages WHERE session_id = ?`), sessionID); err != nil {
-		return fmt.Errorf("count: %w", err)
+	rows, err := tx.QueryxContext(ctx, r.db.Rebind(`SELECT metadata_json FROM queued_messages WHERE session_id = ?`), sessionID)
+	if err != nil {
+		return fmt.Errorf("list queue metadata for capacity: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	count := 0
+	for rows.Next() {
+		var metadataJSON string
+		if err := rows.Scan(&metadataJSON); err != nil {
+			return fmt.Errorf("scan queue metadata for capacity: %w", err)
+		}
+		workflowControl, err := isWorkflowControlMetadataJSON(metadataJSON)
+		if err != nil {
+			return err
+		}
+		if !workflowControl {
+			count++
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate queue metadata for capacity: %w", err)
 	}
 	if count >= maxPerSession {
 		return ErrQueueFull
 	}
 	return nil
+}
+
+func isWorkflowControlMetadataJSON(metadataJSON string) (bool, error) {
+	if metadataJSON == "" || metadataJSON == "{}" {
+		return false, nil
+	}
+	metadata := map[string]interface{}{}
+	if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
+		return false, fmt.Errorf("decode queue metadata for capacity: %w", err)
+	}
+	control, _ := metadata[MetadataWorkflowControl].(bool)
+	return control, nil
 }
 
 // ListBySession returns all entries for a session ordered by position ascending.
@@ -1175,6 +1259,15 @@ func (r *sqliteRepository) reserveHead(ctx context.Context, sessionID string, re
 		return nil, true, fmt.Errorf("reserve head: %w", err)
 	}
 	if msg.IsDurableLifecycle() {
+		if msg.IsReservedInFlight() {
+			ambiguous, err := r.peerDeliveryReservationIsAmbiguous(ctx, tx, msg)
+			if err != nil {
+				return nil, true, err
+			}
+			if ambiguous {
+				return nil, false, nil
+			}
+		}
 		reserved, err := r.reserveLifecycleHead(ctx, tx, msg, storedMetadataJSON)
 		return reserved, true, err
 	}
@@ -1239,6 +1332,31 @@ func (r *sqliteRepository) reserveOrdinaryHead(
 		return nil, err
 	}
 	return msg, nil
+}
+
+// peerDeliveryReservationIsAmbiguous fails closed: an unresolved query error
+// (unlike a confirmed sql.ErrNoRows absence) must block reservation rather
+// than let ReserveHead replay a prompt whose true delivery state could not be
+// determined.
+func (r *sqliteRepository) peerDeliveryReservationIsAmbiguous(ctx context.Context, tx *sqlx.Tx, msg *QueuedMessage) (bool, error) {
+	if msg == nil {
+		return false, nil
+	}
+	deliveryID, _ := msg.Metadata[MetadataDeliveryID].(string)
+	if deliveryID == "" {
+		return false, nil
+	}
+	var state DeliveryState
+	err := tx.GetContext(ctx, &state, r.db.Rebind(`
+		SELECT state FROM message_deliveries WHERE id = ?
+	`), deliveryID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("check peer delivery reservation ambiguity: %w", err)
+	}
+	return state == DeliveryAmbiguous, nil
 }
 
 // AcknowledgeByID removes a reserved durable entry after executor acceptance.

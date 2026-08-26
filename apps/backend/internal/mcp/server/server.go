@@ -1122,7 +1122,7 @@ func (s *Server) registerKanbanTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("message_task_kandev",
-			mcp.WithDescription(`Send a prompt to an existing Kandev task session, not a native subagent. Use delivery_mode="queued" (default) for information that can wait, or delivery_mode="interrupt" for urgent replacement work on a running direct child; non-parent interrupts fail and if cancellation is unsafe, the prompt remains queued. Halt-only work uses stop_task_kandev. The primary session is used by default; if it is terminal, Kandev tries the newest session that can accept messages, or names spawn_session_kandev when none can. Pass reply_to_question_id for an autopilot child question. Returns "queued", "sent", or "started".`),
+			mcp.WithDescription(`Send a prompt to an existing Kandev task session, not a native subagent. Use delivery_mode="queued" (default) to wait, or delivery_mode="interrupt" for urgent replacement work on a running direct child. Non-parent interrupts fail; unsafe cancellation means the prompt remains queued. Use stop_task_kandev to halt only. Busy queued peer messages get a durable delivery receipt; repeat idempotency_key to reuse it. The primary session is used by default; terminal tasks use the newest messageable session or spawn_session_kandev. Pass reply_to_question_id for an autopilot child question. Returns "queued", "sent", or "started".`),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The target task's full UUID (not a truncated prefix)")),
 			mcp.WithString("session_id", mcp.Description("Optional target session ID (must belong to task_id). Omit to message the task's primary session. Required when messaging a sibling session on your OWN task (task_id may then be your own task ID) — e.g. a session you spawned with spawn_session_kandev.")),
 			mcp.WithString("prompt", mcp.Required(), mcp.Description("The message to deliver to the task's agent")),
@@ -1131,9 +1131,27 @@ func (s *Server) registerKanbanTools() {
 				mcp.DefaultString("queued"),
 				mcp.Description(`How to deliver this message if the target is currently running/starting. "queued" (default): wait for the current turn to finish, like any other peer message. "interrupt": cancel the target's current turn now and deliver this message immediately instead — only allowed when you are the target task's direct parent; requesting "interrupt" as a non-parent is rejected with an error rather than silently queued.`),
 			),
+			mcp.WithString("idempotency_key", mcp.Description("Optional stable key for a queued busy-session message. Repeating it from the same source turn returns the existing delivery receipt.")),
 			mcp.WithString("reply_to_question_id", mcp.Description("Optional question ID from an autopilot child. When set, the direct parent answer is recorded against that pending question and the delivery is idempotent.")),
 		),
 		s.wrapHandler("message_task_kandev", s.messageTaskHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("get_message_delivery_kandev",
+			mcp.WithDescription("Get the safe status of a durable message_task delivery receipt. Only the receipt's source or exact target session may inspect it; prompt content is not returned."),
+			mcp.WithReadOnlyHintAnnotation(true),
+			mcp.WithString("delivery_id", mcp.Required(), mcp.Description("The delivery_id returned by message_task_kandev")),
+		),
+		s.wrapHandler("get_message_delivery_kandev", s.getMessageDeliveryHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("retry_message_delivery_kandev",
+			mcp.WithDescription("Retry a recoverable message delivery receipt. This reopens bounded server-side admission; it does not require the source agent turn to remain active."),
+			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithIdempotentHintAnnotation(true),
+			mcp.WithString("delivery_id", mcp.Required(), mcp.Description("The recoverable delivery_id to retry")),
+		),
+		s.wrapHandler("retry_message_delivery_kandev", s.retryMessageDeliveryHandler()),
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("stop_task_kandev",
@@ -1145,6 +1163,18 @@ func (s *Server) registerKanbanTools() {
 			mcp.WithString(mcpKeyTaskID, mcp.Required(), mcp.Description("The direct child task's full UUID (not a truncated prefix)")),
 		),
 		s.wrapHandler("stop_task_kandev", s.stopTaskHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("settle_stale_session_kandev",
+			mcp.WithDescription(`Settle one demonstrably stale administrative turn without cancelling the session. This is not a general stop tool: it requires the exact session and turn ID, and succeeds only for a same-workspace peer session, direct parent, or server-recorded spawn supervisor when an eligible completion intent proves the turn is quiet and stale. Active, ambiguous, or successor turns return active_turn/not_stale unchanged. Worktrees, commits, task data, history, and queued messages are preserved.`),
+			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithDestructiveHintAnnotation(false),
+			mcp.WithIdempotentHintAnnotation(true),
+			mcp.WithOpenWorldHintAnnotation(false),
+			mcp.WithString("session_id", mcp.Required(), mcp.Description("The exact stale target session ID")),
+			mcp.WithString("turn_id", mcp.Required(), mcp.Description("The exact active turn ID captured by stale evidence")),
+		),
+		s.wrapHandler("settle_stale_session_kandev", s.settleStaleSessionHandler()),
 	)
 	s.registerSpawnSessionTool()
 	s.mcpServer.AddTool(

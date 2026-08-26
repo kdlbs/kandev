@@ -9,6 +9,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator"
@@ -49,6 +50,10 @@ type fakeOrchestrator struct {
 	// the retry-after-resume path can succeed on the second call.
 	promptErrFirst  error
 	startCreatedErr error
+	// deferInitialAcceptance models a runtime crash/window before agentctl has
+	// accepted the initial prompt. Otherwise the fake accepts synchronously.
+	deferInitialAcceptance  bool
+	startCreatedCallbackErr error
 	// interruptErr is returned by every InterruptForPeerMessage call — lets
 	// tests exercise the "interrupt failed, message must stay queued" path.
 	interruptErr error
@@ -62,6 +67,58 @@ type fakeOrchestrator struct {
 type failingQueueSnapshotRepository struct {
 	messagequeue.Repository
 	failSessionID string
+}
+
+type failingDirectDeliveryAcknowledgementRepository struct {
+	messagequeue.Repository
+	messagequeue.DeliveryLedger
+}
+
+func (failingDirectDeliveryAcknowledgementRepository) AcknowledgeDirectDelivery(
+	context.Context, string, string, time.Time,
+) (*messagequeue.Delivery, error) {
+	return nil, errors.New("injected direct delivery acknowledgement failure")
+}
+
+// The old best-effort ambiguous transition fails too. The acceptance marker
+// added for this boundary is intentionally not overridden: tests prove it is
+// established before either terminal write is attempted.
+func (failingDirectDeliveryAcknowledgementRepository) MarkDirectDeliveryAmbiguous(
+	context.Context, string, string, string,
+) (*messagequeue.Delivery, error) {
+	return nil, errors.New("injected direct delivery ambiguity transition failure")
+}
+
+// flakyMarkDirectDeliveryAcceptanceUncertainRepository fails
+// MarkDirectDeliveryAcceptanceUncertain a fixed number of times before
+// delegating to the real implementation, modeling a transient database error
+// on the durable non-replayable acceptance marker write.
+type flakyMarkDirectDeliveryAcceptanceUncertainRepository struct {
+	messagequeue.Repository
+	messagequeue.DeliveryLedger
+	mu        sync.Mutex
+	failsLeft int
+	callCount int
+}
+
+func (r *flakyMarkDirectDeliveryAcceptanceUncertainRepository) MarkDirectDeliveryAcceptanceUncertain(
+	ctx context.Context, deliveryID, leaseOwner string,
+) (*messagequeue.Delivery, error) {
+	r.mu.Lock()
+	r.callCount++
+	if r.failsLeft > 0 {
+		r.failsLeft--
+		r.mu.Unlock()
+		return nil, errors.New("injected transient acceptance marker failure")
+	}
+	r.mu.Unlock()
+	return r.DeliveryLedger.MarkDirectDeliveryAcceptanceUncertain(ctx, deliveryID, leaseOwner)
+}
+
+func (r *flakyMarkDirectDeliveryAcceptanceUncertainRepository) calls() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.callCount
 }
 
 func (r *failingQueueSnapshotRepository) ListBySession(
@@ -128,6 +185,17 @@ func (f *fakeOrchestrator) PromptTask(_ context.Context, taskID, sessionID, prom
 	return &orchestrator.PromptResult{}, nil
 }
 
+func (f *fakeOrchestrator) PromptTaskWithAcceptedCallback(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool, afterDispatch func() error) (*orchestrator.PromptResult, error) {
+	result, err := f.PromptTask(ctx, taskID, sessionID, prompt, model, planMode, attachments, dispatchOnly)
+	if err != nil || afterDispatch == nil {
+		return result, err
+	}
+	if callbackErr := afterDispatch(); callbackErr != nil {
+		return nil, callbackErr
+	}
+	return result, nil
+}
+
 func (f *fakeOrchestrator) StartCreatedSession(_ context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, _, _ bool, _ []v1.MessageAttachment, _ []v1.EntityReference) (*executor.TaskExecution, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -142,6 +210,21 @@ func (f *fakeOrchestrator) StartCreatedSession(_ context.Context, taskID, sessio
 		return nil, f.startCreatedErr
 	}
 	return &executor.TaskExecution{SessionID: sessionID}, nil
+}
+
+func (f *fakeOrchestrator) StartCreatedSessionWithAcceptedCallback(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode, autoStart bool, attachments []v1.MessageAttachment, references []v1.EntityReference, afterDispatch func() error) (*executor.TaskExecution, error) {
+	execution, err := f.StartCreatedSession(ctx, taskID, sessionID, agentProfileID, prompt, skipMessageRecord, planMode, autoStart, attachments, references)
+	if err != nil || f.deferInitialAcceptance || afterDispatch == nil {
+		return execution, err
+	}
+	if f.startCreatedCallbackErr != nil {
+		return execution, f.startCreatedCallbackErr
+	}
+	// The production launch goroutine records callback failure as an ambiguous
+	// receipt after agentctl has accepted; it must not make the already accepted
+	// launch look rejected to its caller.
+	_ = afterDispatch()
+	return execution, nil
 }
 
 func (f *fakeOrchestrator) ResumeTaskSession(_ context.Context, _, _ string) (*executor.TaskExecution, error) {
@@ -642,10 +725,9 @@ func TestHandleMessageTask_RunningSession_Queues(t *testing.T) {
 // naturally. Being the parent is necessary but not sufficient - the caller
 // must opt in; see TestHandleMessageTask_ParentToChildRunningSession_OmittedDeliveryMode_DoesNotInterrupt
 // for the (default) queued-and-wait behavior parents get otherwise. The
-// reported status is "sent" (not "queued") because the interrupt actually
-// dispatched it immediately - see queueThenInterruptTaskMessage's doc
-// comment. See InterruptForPeerMessage's doc comment for why this matters
-// for long-running children.
+// reported status remains "queued" until the asynchronously scheduled
+// execution reaches agentctl acceptance. See InterruptForPeerMessage's doc
+// comment for why this matters for long-running children.
 func TestHandleMessageTask_ParentToChildRunningSession_Interrupts(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	parent, child, sess := seedChildTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
@@ -660,7 +742,7 @@ func TestHandleMessageTask_ParentToChildRunningSession_Interrupts(t *testing.T) 
 
 	var payload map[string]interface{}
 	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
-	assert.Equal(t, "sent", payload["status"])
+	assert.Equal(t, "queued", payload["status"])
 
 	// The message was queued first exactly like any other message_task
 	// call...
@@ -676,6 +758,62 @@ func TestHandleMessageTask_ParentToChildRunningSession_Interrupts(t *testing.T) 
 	assert.Equal(t, child.ID, orch.interruptCalls[0].taskID)
 	assert.Equal(t, sess.ID, orch.interruptCalls[0].sessionID)
 	assert.Equal(t, status.Entries[0].ID, orch.interruptCalls[0].entryID)
+}
+
+func TestHandleMessageTask_InterruptReceiptQueuesOnceWhenDispatchIsDeferred(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	parent, child, session := seedChildTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{ID: "sender-sess-1", TaskID: parent.ID, State: models.TaskSessionStateRunning}))
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{ID: "interrupt-source-turn", TaskID: parent.ID, TaskSessionID: "sender-sess-1", StartedAt: time.Now().UTC()}))
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	queueDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(queueDB, queueDB)
+	require.NoError(t, err)
+	orch.queue = messagequeue.NewService(queueRepo, 1, testLogger(t))
+	orch.interruptErr = errors.New("defer interrupt")
+
+	message := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayloadWithMode(child.ID, "durable interrupt", parent.ID, deliveryModeInterrupt))
+	first, err := h.handleMessageTask(ctx, message)
+	require.NoError(t, err)
+	second, err := h.handleMessageTask(ctx, message)
+	require.NoError(t, err)
+	var firstPayload, secondPayload map[string]interface{}
+	require.NoError(t, json.Unmarshal(first.Payload, &firstPayload))
+	require.NoError(t, json.Unmarshal(second.Payload, &secondPayload))
+	assert.Equal(t, "queued", firstPayload["status"])
+	assert.Equal(t, "queued", firstPayload["delivery_status"])
+	assert.Equal(t, firstPayload["delivery_id"], secondPayload["delivery_id"])
+	assert.Equal(t, 1, orch.queue.GetStatus(ctx, session.ID).Count)
+}
+
+func TestHandleMessageTask_InterruptSchedulingNeverClaimsDelivery(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	parent, child, session := seedChildTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{ID: "sender-sess-1", TaskID: parent.ID, State: models.TaskSessionStateRunning}))
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{ID: "interrupt-scheduled-source-turn", TaskID: parent.ID, TaskSessionID: "sender-sess-1", StartedAt: time.Now().UTC()}))
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	queueDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(queueDB, queueDB)
+	require.NoError(t, err)
+	orch.queue = messagequeue.NewService(queueRepo, 2, testLogger(t))
+
+	response, err := h.handleMessageTask(ctx, makeWSMessage(t, ws.ActionMCPMessageTask, senderPayloadWithMode(child.ID, "scheduled but unaccepted", parent.ID, deliveryModeInterrupt)))
+	require.NoError(t, err)
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(response.Payload, &payload))
+	assert.Equal(t, "queued", payload["status"])
+	assert.Equal(t, "queued", payload["delivery_status"])
+
+	// The fake reports the same "dispatched" scheduling result as the real
+	// interrupt path. It deliberately does not run agentctl acceptance, so a
+	// false delivered receipt here would expose the old post-return bug.
+	require.Len(t, orch.interruptCalls, 1)
+	stored, err := queueRepo.(messagequeue.DeliveryLedger).GetDelivery(ctx, payload["delivery_id"].(string))
+	require.NoError(t, err)
+	assert.Equal(t, messagequeue.DeliveryQueued, stored.State)
+	assert.Equal(t, 1, orch.queue.GetStatus(ctx, session.ID).Count)
 }
 
 // TestHandleMessageTask_ParentToChildRunningSession_InterruptFailure_KeepsMessageQueued
@@ -947,6 +1085,509 @@ func TestHandleMessageTask_QueueFull_ReturnsStructuredError(t *testing.T) {
 	queued, ok := errResp.Details["queued_messages"].([]interface{})
 	require.True(t, ok, "queued_messages should be an array")
 	assert.Len(t, queued, messagequeue.DefaultMaxPerSession)
+}
+
+func TestHandleMessageTask_BusyTargetPersistsIdempotentDeliveryReceipt(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, session := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+	h, orchestrator := newMessageTaskHandler(t, svc, repo)
+
+	queueDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(queueDB, queueDB)
+	require.NoError(t, err)
+	orchestrator.queue = messagequeue.NewService(queueRepo, 1, testLogger(t))
+	ledger, ok := queueRepo.(messagequeue.DeliveryLedger)
+	require.True(t, ok)
+
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{
+		ID:            "sender-turn-1",
+		TaskID:        sender.ID,
+		TaskSessionID: "sender-sess-1",
+		StartedAt:     time.Now().UTC(),
+	}))
+	require.NoError(t, func() error {
+		_, err := orchestrator.queue.QueueMessage(ctx, session.ID, target.ID, "already queued", "", messagequeue.QueuedByUser, false, nil)
+		return err
+	}())
+
+	payload := senderPayload(target.ID, "review is ready", sender.ID)
+	payload["idempotency_key"] = "review-report-v1"
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, payload)
+	resp, err := h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var first map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &first))
+	assert.Equal(t, "pending_capacity", first["delivery_status"])
+	receiptID, ok := first["delivery_id"].(string)
+	require.True(t, ok)
+	assert.NotEmpty(t, receiptID)
+	assert.Equal(t, "review-report-v1", first["idempotency_key"])
+
+	resp, err = h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+	var repeated map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &repeated))
+	assert.Equal(t, receiptID, repeated["delivery_id"])
+	assert.Equal(t, "review-report-v1", repeated["idempotency_key"])
+
+	receipt, err := ledger.GetDelivery(ctx, receiptID)
+	require.NoError(t, err)
+	require.NotNil(t, receipt)
+	assert.Equal(t, "sender-turn-1", receipt.SourceTurnID)
+	assert.Equal(t, "review-report-v1", receipt.IdempotencyKey)
+	assert.Equal(t, messagequeue.DeliveryPendingCapacity, receipt.State)
+	assert.Equal(t, 1, orchestrator.queue.GetStatus(ctx, session.ID).Count)
+}
+
+func TestHandleMessageTask_WaitingReceiptIsDeliveredOnce(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, session := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	queueDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(queueDB, queueDB)
+	require.NoError(t, err)
+	orch.queue = messagequeue.NewService(queueRepo, 1, testLogger(t))
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{ID: "waiting-source-turn", TaskID: sender.ID, TaskSessionID: "sender-sess-1", StartedAt: time.Now().UTC()}))
+
+	message := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "durable waiting", sender.ID))
+	first, err := h.handleMessageTask(ctx, message)
+	require.NoError(t, err)
+	second, err := h.handleMessageTask(ctx, message)
+	require.NoError(t, err)
+	var firstPayload, secondPayload map[string]interface{}
+	require.NoError(t, json.Unmarshal(first.Payload, &firstPayload))
+	require.NoError(t, json.Unmarshal(second.Payload, &secondPayload))
+	assert.Equal(t, "sent", firstPayload["status"])
+	assert.Equal(t, "delivered", firstPayload["delivery_status"])
+	assert.Equal(t, firstPayload["delivery_id"], secondPayload["delivery_id"])
+	require.Len(t, orch.promptCalls, 1)
+	receipt, err := queueRepo.(messagequeue.DeliveryLedger).GetDelivery(ctx, firstPayload["delivery_id"].(string))
+	require.NoError(t, err)
+	assert.Equal(t, messagequeue.DeliveryDelivered, receipt.State)
+	assert.Equal(t, session.ID, receipt.TargetSessionID)
+	// Model a backend restart after the accepted-prompt callback committed the
+	// receipt but before the MCP handler returned. The expired-lease scanner
+	// must not reclaim or redeliver this accepted prompt.
+	processed, err := orch.queue.ProcessDueDeliveries(ctx, time.Now().UTC().Add(2*time.Minute), "restarted-worker")
+	require.NoError(t, err)
+	assert.Equal(t, 0, processed)
+	require.Len(t, orch.promptCalls, 1)
+}
+
+// TestHandleMessageTask_WaitingReceiptSurvivesTransientAcceptanceMarkerFailure
+// proves a transient database error on the durable non-replayable acceptance
+// marker is retried rather than silently stranding the receipt in a
+// reservation the recovery worker would later reclaim and redeliver, even
+// though agentctl already accepted the prompt.
+func TestHandleMessageTask_WaitingReceiptSurvivesTransientAcceptanceMarkerFailure(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	queueDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(queueDB, queueDB)
+	require.NoError(t, err)
+	ledger := queueRepo.(messagequeue.DeliveryLedger)
+	flaky := &flakyMarkDirectDeliveryAcceptanceUncertainRepository{Repository: queueRepo, DeliveryLedger: ledger, failsLeft: 2}
+	orch.queue = messagequeue.NewService(flaky, 1, testLogger(t))
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{ID: "waiting-source-turn-flaky", TaskID: sender.ID, TaskSessionID: "sender-sess-1", StartedAt: time.Now().UTC()}))
+
+	response, err := h.handleMessageTask(ctx, makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "durable waiting flaky", sender.ID)))
+	require.NoError(t, err)
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(response.Payload, &payload))
+	assert.Equal(t, "sent", payload["status"])
+	assert.Equal(t, "delivered", payload["delivery_status"])
+	require.Len(t, orch.promptCalls, 1)
+	assert.Equal(t, 3, flaky.calls(), "expected 2 failed attempts plus 1 successful retry")
+
+	stored, err := ledger.GetDelivery(ctx, payload["delivery_id"].(string))
+	require.NoError(t, err)
+	assert.Equal(t, messagequeue.DeliveryDelivered, stored.State)
+
+	// The retried marker must have committed durably: an expired-lease scan
+	// must not treat this accepted prompt as an abandoned reservation.
+	processed, err := orch.queue.ProcessDueDeliveries(ctx, time.Now().UTC().Add(2*time.Minute), "restarted-worker")
+	require.NoError(t, err)
+	assert.Zero(t, processed, "a retried-but-durably-accepted prompt must not replay")
+	require.Len(t, orch.promptCalls, 1)
+}
+
+func TestHandleMessageTask_WaitingReceiptDoubleTerminalWriteFailureIsAmbiguous(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, session := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	queueDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(queueDB, queueDB)
+	require.NoError(t, err)
+	ledger := queueRepo.(messagequeue.DeliveryLedger)
+	orch.queue = messagequeue.NewService(failingDirectDeliveryAcknowledgementRepository{
+		Repository: queueRepo, DeliveryLedger: ledger,
+	}, 1, testLogger(t))
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{ID: "waiting-source-turn-ambiguous", TaskID: sender.ID, TaskSessionID: "sender-sess-1", StartedAt: time.Now().UTC()}))
+
+	response, err := h.handleMessageTask(ctx, makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "durable waiting", sender.ID)))
+	require.NoError(t, err)
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(response.Payload, &payload))
+	assert.Equal(t, "sent", payload["status"])
+	assert.Equal(t, "ambiguous", payload["delivery_status"])
+	require.Len(t, orch.promptCalls, 1)
+
+	stored, err := ledger.GetDelivery(ctx, payload["delivery_id"].(string))
+	require.NoError(t, err)
+	assert.Equal(t, messagequeue.DeliveryAmbiguous, stored.State)
+	assert.Equal(t, "accepted_prompt_terminalization_pending", stored.LastError)
+	processed, err := orch.queue.ProcessDueDeliveries(ctx, time.Now().UTC().Add(2*time.Minute), "restart-worker")
+	require.NoError(t, err)
+	assert.Zero(t, processed, "an ambiguous accepted direct prompt must not replay")
+	assert.Len(t, orch.promptCalls, 1)
+	_ = session
+}
+
+func TestHandleMessageTask_CreatedReceiptStartsOnce(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateCreated)
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	queueDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(queueDB, queueDB)
+	require.NoError(t, err)
+	orch.queue = messagequeue.NewService(queueRepo, 1, testLogger(t))
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{ID: "created-source-turn", TaskID: sender.ID, TaskSessionID: "sender-sess-1", StartedAt: time.Now().UTC()}))
+
+	message := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "durable created", sender.ID))
+	first, err := h.handleMessageTask(ctx, message)
+	require.NoError(t, err)
+	_, err = h.handleMessageTask(ctx, message)
+	require.NoError(t, err)
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(first.Payload, &payload))
+	assert.Equal(t, "started", payload["status"])
+	assert.Equal(t, "delivered", payload["delivery_status"])
+	require.Len(t, orch.startCreatedCalls, 1)
+}
+
+func TestHandleMessageTask_CreatedReceiptBeforeAcceptanceRemainsReclaimable(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, session := seedTaskWithSession(t, svc, repo, models.TaskSessionStateCreated)
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	queueDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(queueDB, queueDB)
+	require.NoError(t, err)
+	orch.queue = messagequeue.NewService(queueRepo, 1, testLogger(t))
+	orch.deferInitialAcceptance = true
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{ID: "created-crash-source-turn", TaskID: sender.ID, TaskSessionID: "sender-sess-1", StartedAt: time.Now().UTC()}))
+
+	message := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "initial crash boundary", sender.ID))
+	response, err := h.handleMessageTask(ctx, message)
+	require.NoError(t, err)
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(response.Payload, &payload))
+	assert.Equal(t, "started", payload["status"])
+	assert.Equal(t, string(messagequeue.DeliveryReserved), payload["delivery_status"])
+
+	// A duplicate source-turn request observes the same durable receipt rather
+	// than starting a second first turn while the original has not accepted.
+	_, err = h.handleMessageTask(ctx, message)
+	require.NoError(t, err)
+	require.Len(t, orch.startCreatedCalls, 1)
+
+	// Simulate restart after the direct lease expires. Pre-acceptance work is
+	// reclaimable; only the callback failure/accepted case becomes ambiguous.
+	processed, err := orch.queue.ProcessDueDeliveries(ctx, time.Now().UTC().Add(2*time.Minute), "restart-worker")
+	require.NoError(t, err)
+	assert.Equal(t, 1, processed)
+	receipt, err := queueRepo.(messagequeue.DeliveryLedger).GetDelivery(ctx, payload["delivery_id"].(string))
+	require.NoError(t, err)
+	assert.Equal(t, messagequeue.DeliveryQueued, receipt.State)
+	assert.Equal(t, 1, orch.queue.GetStatus(ctx, session.ID).Count)
+}
+
+func TestHandleMessageTask_CreatedReceiptDoubleTerminalWriteFailureIsAmbiguous(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateCreated)
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	queueDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(queueDB, queueDB)
+	require.NoError(t, err)
+	ledger := queueRepo.(messagequeue.DeliveryLedger)
+	orch.queue = messagequeue.NewService(failingDirectDeliveryAcknowledgementRepository{Repository: queueRepo, DeliveryLedger: ledger}, 1, testLogger(t))
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{ID: "created-ambiguous-source-turn", TaskID: sender.ID, TaskSessionID: "sender-sess-1", StartedAt: time.Now().UTC()}))
+
+	response, err := h.handleMessageTask(ctx, makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "accepted initial prompt", sender.ID)))
+	require.NoError(t, err)
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(response.Payload, &payload))
+	assert.Equal(t, "started", payload["status"])
+	assert.Equal(t, string(messagequeue.DeliveryAmbiguous), payload["delivery_status"])
+	stored, err := ledger.GetDelivery(ctx, payload["delivery_id"].(string))
+	require.NoError(t, err)
+	assert.Equal(t, messagequeue.DeliveryAmbiguous, stored.State)
+	assert.Equal(t, "accepted_prompt_terminalization_pending", stored.LastError)
+
+	processed, err := orch.queue.ProcessDueDeliveries(ctx, time.Now().UTC().Add(2*time.Minute), "restart-worker")
+	require.NoError(t, err)
+	assert.Zero(t, processed, "an accepted initial prompt with failed receipt acknowledgement must not replay")
+	require.Len(t, orch.startCreatedCalls, 1)
+}
+
+func TestHandleMessageTask_DirectReceiptFindsTransitionQueuedEntry(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, session := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	queueDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(queueDB, queueDB)
+	require.NoError(t, err)
+	orch.queue = messagequeue.NewService(queueRepo, 1, testLogger(t))
+	orch.turnStartResult.Queued = true
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{ID: "transition-source-turn", TaskID: sender.ID, TaskSessionID: "sender-sess-1", StartedAt: time.Now().UTC()}))
+
+	response, err := h.handleMessageTask(ctx, makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "queue behind transition", sender.ID)))
+	require.NoError(t, err)
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(response.Payload, &payload))
+	assert.Equal(t, "queued", payload["status"])
+	assert.Equal(t, "queued", payload["delivery_status"])
+	receipt, err := queueRepo.(messagequeue.DeliveryLedger).GetDelivery(ctx, payload["delivery_id"].(string))
+	require.NoError(t, err)
+	assert.NotEmpty(t, receipt.QueueEntryID)
+	assert.Equal(t, 1, orch.queue.GetStatus(ctx, session.ID).Count)
+}
+
+func TestMessageDeliveryRecoveryIsScopedToRecordedSourceSession(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, session := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+	h, orchestrator := newMessageTaskHandler(t, svc, repo)
+	queueDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(queueDB, queueDB)
+	require.NoError(t, err)
+	orchestrator.queue = messagequeue.NewService(queueRepo, 1, testLogger(t))
+	ledger := queueRepo.(messagequeue.DeliveryLedger)
+	delivery, _, err := ledger.CreateOrGetDelivery(ctx, messagequeue.Delivery{
+		SenderTaskID: sender.ID, SenderSessionID: "sender-sess-1", SourceTurnID: "sender-turn-1",
+		IdempotencyKey: "recover-v1", TargetTaskID: target.ID, TargetSessionID: session.ID,
+		Content: "retained report", State: messagequeue.DeliveryPendingCapacity,
+	})
+	require.NoError(t, err)
+	claimed, err := ledger.ClaimDueDeliveries(ctx, time.Now().UTC(), "worker-a", time.Minute, 1)
+	require.NoError(t, err)
+	require.Len(t, claimed, 1)
+	_, err = ledger.MarkDeliveryRecoverable(ctx, delivery.ID, "worker-a", "target_queue_full")
+	require.NoError(t, err)
+
+	payload := map[string]interface{}{"delivery_id": delivery.ID, "sender_task_id": sender.ID, "sender_session_id": "sender-sess-1"}
+	resp, err := h.handleGetMessageDelivery(ctx, makeWSMessage(t, ws.ActionMCPGetMessageDelivery, payload))
+	require.NoError(t, err)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+	var status map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &status))
+	assert.Equal(t, "recoverable", status["delivery_status"])
+	assert.NotContains(t, status, "content")
+
+	resp, err = h.handleRetryMessageDelivery(ctx, makeWSMessage(t, ws.ActionMCPRetryMessageDelivery, payload))
+	require.NoError(t, err)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+	restored, err := ledger.GetDelivery(ctx, delivery.ID)
+	require.NoError(t, err)
+	assert.Equal(t, messagequeue.DeliveryPendingCapacity, restored.State)
+
+	payload["sender_session_id"] = session.ID
+	resp, err = h.handleGetMessageDelivery(ctx, makeWSMessage(t, ws.ActionMCPGetMessageDelivery, payload))
+	require.NoError(t, err)
+	assert.Equal(t, ws.MessageTypeError, resp.Type, "a task ID alone cannot inspect another recorded session's receipt")
+}
+
+// failingRetryDeliveryRepository wraps a real DeliveryLedger but makes
+// RetryDelivery fail with a plain (non-ErrEntryNotFound) error, simulating a
+// genuine storage failure rather than "no row in the recoverable state".
+type failingRetryDeliveryRepository struct {
+	messagequeue.Repository
+	messagequeue.DeliveryLedger
+}
+
+func (r *failingRetryDeliveryRepository) RetryDelivery(ctx context.Context, deliveryID string, nextAttemptAt time.Time) (*messagequeue.Delivery, error) {
+	return nil, errors.New("simulated storage failure")
+}
+
+// TestHandleRetryMessageDelivery_StorageFailureIsInternalErrorNotConflict
+// covers the error-taxonomy fix: RetryDeliveryReceipt's ledger-capability
+// check and RetryDelivery's own storage errors used to collapse into the
+// same ws.ErrorCodeConflict "delivery is not recoverable" as the genuine
+// client-facing case (no row in the recoverable state), which told a caller
+// to give up on a receipt that a transient DB error, not receipt state, had
+// blocked.
+func TestHandleRetryMessageDelivery_StorageFailureIsInternalErrorNotConflict(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, session := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+	h, orchestrator := newMessageTaskHandler(t, svc, repo)
+	queueDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(queueDB, queueDB)
+	require.NoError(t, err)
+	ledger := queueRepo.(messagequeue.DeliveryLedger)
+	wrapped := &failingRetryDeliveryRepository{Repository: queueRepo, DeliveryLedger: ledger}
+	orchestrator.queue = messagequeue.NewService(wrapped, 1, testLogger(t))
+
+	delivery, _, err := ledger.CreateOrGetDelivery(ctx, messagequeue.Delivery{
+		SenderTaskID: sender.ID, SenderSessionID: "sender-sess-1", SourceTurnID: "sender-turn-1",
+		IdempotencyKey: "storage-failure-v1", TargetTaskID: target.ID, TargetSessionID: session.ID,
+		Content: "retained report", State: messagequeue.DeliveryPendingCapacity,
+	})
+	require.NoError(t, err)
+	claimed, err := ledger.ClaimDueDeliveries(ctx, time.Now().UTC(), "worker-a", time.Minute, 1)
+	require.NoError(t, err)
+	require.Len(t, claimed, 1)
+	_, err = ledger.MarkDeliveryRecoverable(ctx, delivery.ID, "worker-a", "target_queue_full")
+	require.NoError(t, err)
+
+	payload := map[string]interface{}{"delivery_id": delivery.ID, "sender_task_id": sender.ID, "sender_session_id": "sender-sess-1"}
+	resp, err := h.handleRetryMessageDelivery(ctx, makeWSMessage(t, ws.ActionMCPRetryMessageDelivery, payload))
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeError, resp.Type)
+	var errPayload map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &errPayload))
+	assert.Equal(t, ws.ErrorCodeInternalError, errPayload["code"],
+		"a storage failure must not be reported as the client-facing 'not recoverable' conflict")
+}
+
+func TestGetMessageDeliveryDeliveredReceiptClearsAcceptanceUncertainty(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, session := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	queueDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(queueDB, queueDB)
+	require.NoError(t, err)
+	orch.queue = messagequeue.NewService(queueRepo, 1, testLogger(t))
+	ledger := queueRepo.(messagequeue.DeliveryLedger)
+	delivery, _, err := ledger.CreateOrGetDelivery(ctx, messagequeue.Delivery{
+		SenderTaskID: sender.ID, SenderSessionID: "sender-sess-1", SourceTurnID: "projection-source-turn",
+		IdempotencyKey: "projection-v1", TargetTaskID: target.ID, TargetSessionID: session.ID,
+		Content: "accepted prompt", State: messagequeue.DeliveryPendingCapacity,
+	})
+	require.NoError(t, err)
+	_, claimed, err := ledger.ReserveDeliveryForDirectDispatch(ctx, delivery.ID, "mcp-direct", time.Minute)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	_, err = ledger.MarkDirectDeliveryAcceptanceUncertain(ctx, delivery.ID, "mcp-direct")
+	require.NoError(t, err)
+	_, err = ledger.AcknowledgeDirectDelivery(ctx, delivery.ID, "mcp-direct", time.Now().UTC())
+	require.NoError(t, err)
+
+	response, err := h.handleGetMessageDelivery(ctx, makeWSMessage(t, ws.ActionMCPGetMessageDelivery, map[string]interface{}{
+		"delivery_id": delivery.ID, "sender_task_id": sender.ID, "sender_session_id": "sender-sess-1",
+	}))
+	require.NoError(t, err)
+	var status map[string]interface{}
+	require.NoError(t, json.Unmarshal(response.Payload, &status))
+	assert.Equal(t, "delivered", status["delivery_status"])
+	assert.Empty(t, status["last_error"])
+}
+
+func TestHandleMessageTask_WaitingRetryBudgetExhaustionKeepsReceiptNonReplayable(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	queueDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(queueDB, queueDB)
+	require.NoError(t, err)
+	ledger := queueRepo.(messagequeue.DeliveryLedger)
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{
+		ID: "waiting-source-turn-exhaust", TaskID: sender.ID,
+		TaskSessionID: "sender-sess-1", StartedAt: time.Now().UTC(),
+	}))
+
+	// Simulate transient database failure: fail the first few marker writes,
+	// then succeed. This proves the retry loop keeps trying past what would
+	// have been the old bounded budget and eventually commits the marker.
+	alwaysFailing := &flakyMarkDirectDeliveryAcceptanceUncertainRepository{
+		Repository: queueRepo, DeliveryLedger: ledger,
+		failsLeft: 5,
+	}
+	orch.queue = messagequeue.NewService(alwaysFailing, 1, testLogger(t))
+
+	resp, err := h.handleMessageTask(ctx, makeWSMessage(t, ws.ActionMCPMessageTask,
+		senderPayload(target.ID, "exhaustion test", sender.ID)))
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	// Extract the delivery_id from the response payload.
+	var result map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &result))
+	deliveryID, ok := result["delivery_id"].(string)
+	require.True(t, ok, "response must include delivery_id")
+	deliveryStatus, _ := result["delivery_status"].(string)
+
+	// The receipt must be marked as delivered after the retry loop eventually
+	// succeeded in writing the non-replayable marker.
+	stored, err := ledger.GetDelivery(ctx, deliveryID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.Equal(t, messagequeue.DeliveryDelivered, stored.State,
+		"receipt must be delivered after retry loop eventually persists the marker (status from response: %s)", deliveryStatus)
+
+	// The retry loop must have been exercised beyond the initial quick
+	// retries (the backoff is attempt*500ms, so 5 failures = ~7.5s),
+	// proving the marker keeps retrying and does not give up early.
+	calls := alwaysFailing.calls()
+	assert.GreaterOrEqual(t, calls, 5,
+		"the marker retry loop must keep retrying past initial failures (got %d calls)", calls)
+}
+
+func TestHandleMessageTask_RejectedBusyTargetDoesNotPersistDeliveryReceipt(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, session := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+	h, orchestrator := newMessageTaskHandler(t, svc, repo)
+
+	queueDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(queueDB, queueDB)
+	require.NoError(t, err)
+	orchestrator.queue = messagequeue.NewService(queueRepo, 1, testLogger(t))
+	ledger, ok := queueRepo.(messagequeue.DeliveryLedger)
+	require.True(t, ok)
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{
+		ID:            "sender-turn-rejected",
+		TaskID:        sender.ID,
+		TaskSessionID: "sender-sess-1",
+		StartedAt:     time.Now().UTC(),
+	}))
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, session.ID, models.TaskSessionStateFailed, "provider failed"))
+
+	payload := senderPayload(target.ID, "do not accept this", sender.ID)
+	payload["idempotency_key"] = "rejected-report-v1"
+	resp, err := h.handleMessageTask(ctx, makeWSMessage(t, ws.ActionMCPMessageTask, payload))
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, ws.MessageTypeError, resp.Type)
+
+	_, created, err := ledger.CreateOrGetDelivery(ctx, messagequeue.Delivery{
+		SenderTaskID:    sender.ID,
+		SenderSessionID: "sender-sess-1",
+		SourceTurnID:    "sender-turn-rejected",
+		IdempotencyKey:  "rejected-report-v1",
+		TargetTaskID:    target.ID,
+		TargetSessionID: session.ID,
+		Content:         "do not accept this",
+		State:           messagequeue.DeliveryPendingCapacity,
+	})
+	require.NoError(t, err)
+	assert.True(t, created, "a rejected dispatch must not leave an accepted receipt")
 }
 
 func TestHandleMessageTask_WaitingForInput_PromptsAgent(t *testing.T) {
