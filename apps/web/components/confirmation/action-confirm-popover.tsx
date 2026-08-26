@@ -69,21 +69,11 @@ export function ActionConfirmPopover({
   const descriptionId = useId();
   const cancelRef = useRef<HTMLButtonElement>(null);
   const confirmedRef = useRef(false);
-  const anchorWasConnectedRef = useRef(false);
   const confirmIsDisabled = disabled || confirmDisabled;
 
-  // Detect when the anchor element was connected but becomes disconnected
-  // (e.g., removed from the DOM by its parent). Only close the popover on a
-  // genuine disconnect transition — skip the auto-close on re-renders where
-  // the ref was never set.
   useLayoutEffect(() => {
     if (!open) return;
-    const connected = isConnected(anchorRef.current);
-    if (connected) {
-      anchorWasConnectedRef.current = true;
-      return;
-    }
-    if (!anchorWasConnectedRef.current) return;
+    if (isConnected(anchorRef.current)) return;
     onCancel?.();
     onOpenChange(false);
   });

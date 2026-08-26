@@ -370,28 +370,26 @@ function useSessionMenuDelete(
   triggerRef: RefObject<HTMLElement | null>,
   openMenuDelete: () => void,
 ) {
-  const menuDeleteAnchorRef = useRef<HTMLElement>(null);
   const menuDeleteFocusBoundaryRef = useRef<HTMLElement>(null);
   const handleMenuDelete = useCallback(
     (_event: Event) => {
-      // Use the tab trigger element as the popover anchor instead of the
-      // context menu item. The context menu item becomes disconnected from the
-      // DOM when the context menu closes on the popover interaction, causing
-      // ActionConfirmPopover.handleConfirm isConnected check to reject the
-      // confirm click.
+      // The popover anchor ref is the trigger element so it stays connected
+      // throughout the confirmation flow. The trigger ref is always up-to-date
+      // because React updates it on each commit; passing a snapshot (e.g.
+      // triggerRef.current copied here) would point to a stale disconnected
+      // element if React replaces the trigger DOM node during a later render.
       // The focus boundary is also the trigger element (not the context menu
       // content) so the popover stays open when the context menu closes and
       // focuses the trigger. Without this, Radix's default
       // ContextMenu onCloseAutoFocus focuses the trigger, which fires
       // onFocusOutside on the popover, and the disconnected context-menu-content
       // boundary ref would fail the contains() check, closing the popover.
-      menuDeleteAnchorRef.current = triggerRef.current;
       menuDeleteFocusBoundaryRef.current = triggerRef.current;
       openMenuDelete();
     },
     [openMenuDelete, triggerRef],
   );
-  return { menuDeleteAnchorRef, menuDeleteFocusBoundaryRef, handleMenuDelete };
+  return { menuDeleteAnchorRef: triggerRef, menuDeleteFocusBoundaryRef, handleMenuDelete };
 }
 
 /** Tab body: inline rename input while renaming, normal trigger content otherwise. */
