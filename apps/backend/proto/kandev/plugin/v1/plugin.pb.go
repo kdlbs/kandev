@@ -3610,13 +3610,17 @@ type WorkflowStep struct {
 	WipLimit    int32  `protobuf:"varint,8,opt,name=wip_limit,json=wipLimit,proto3" json:"wip_limit,omitempty"` // 0 means unlimited
 	// The agent profile this step runs work under, empty when it inherits.
 	AgentProfileId string `protobuf:"bytes,9,opt,name=agent_profile_id,json=agentProfileId,proto3" json:"agent_profile_id,omitempty"`
-	// The on_enter action TYPES this step runs, so a plugin can describe what
-	// moving a task here will do. Action config is deliberately not exposed:
-	// it carries target task ids, payloads and profile ids. The ordinary move
-	// path handles auto_start_agent, configure_session, enable_plan_mode,
-	// set_session_mode and reset_agent_context. Other action types can run only
-	// on applicable workflow-engine paths. Plugins must ignore action types they
-	// do not recognize.
+	// The on_enter action TYPES configured on this step, as authored
+	// (e.g. "auto_start_agent", "queue_run"), so a plugin can describe this
+	// step's intent instead of guessing from the step name or stage_type.
+	// This lists what is configured, not a guarantee that every listed type
+	// executes on every transition path: an ordinary task move currently runs
+	// only a subset (auto_start_agent, configure_session, enable_plan_mode,
+	// set_session_mode, reset_agent_context); queue_run,
+	// queue_run_for_each_participant, clear_decisions, and run_code_review
+	// currently execute only via engine-driven triggers (e.g. Office). Action
+	// config is deliberately not exposed: it carries target task ids, payloads
+	// and profile ids. Plugins must ignore action types they do not recognize.
 	OnEnterActionTypes []string `protobuf:"bytes,10,rep,name=on_enter_action_types,json=onEnterActionTypes,proto3" json:"on_enter_action_types,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache

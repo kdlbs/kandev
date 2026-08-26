@@ -237,15 +237,15 @@ func workflowModelToDTO(w *taskmodels.Workflow) pluginsdk.Workflow {
 
 func workflowStepModelToDTO(s *wfmodels.WorkflowStep) pluginsdk.WorkflowStep {
 	return pluginsdk.WorkflowStep{
-		ID:             s.ID,
-		WorkflowID:     s.WorkflowID,
-		Name:           s.Name,
-		Position:       int32(s.Position),
-		StageType:      string(s.StageType),
-		Color:          s.Color,
-		IsStartStep:    s.IsStartStep,
-		WIPLimit:       int32(s.WIPLimit),
-		AgentProfileID: s.AgentProfileID,
+		ID:                 s.ID,
+		WorkflowID:         s.WorkflowID,
+		Name:               s.Name,
+		Position:           int32(s.Position),
+		StageType:          string(s.StageType),
+		Color:              s.Color,
+		IsStartStep:        s.IsStartStep,
+		WIPLimit:           int32(s.WIPLimit),
+		AgentProfileID:     s.AgentProfileID,
 		OnEnterActionTypes: onEnterActionTypesToDTO(s.Events.OnEnter),
 	}
 }

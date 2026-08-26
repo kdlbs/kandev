@@ -508,23 +508,28 @@ type WorkflowStep struct {
 	IsStartStep    bool
 	WIPLimit       int32 // 0 means unlimited
 	AgentProfileID string
-	// OnEnterActionTypes is nil when the step has no on_enter actions, never
-	// an empty non-nil slice. Config maps are deliberately not exposed.
-	// Callers must ignore action types they do not recognize.
+	// OnEnterActionTypes lists the on_enter action types configured on this
+	// step, as authored. This lists what is configured, not a guarantee that
+	// every listed type executes on every transition path. The ordinary move
+	// path handles auto_start_agent, configure_session, enable_plan_mode,
+	// set_session_mode and reset_agent_context. Other action types can run only
+	// on applicable workflow-engine paths. Config maps are deliberately not
+	// exposed. Nil when the step has no on_enter actions, never an empty
+	// non-nil slice. Callers must ignore action types they do not recognize.
 	OnEnterActionTypes []string
 }
 
 func (s WorkflowStep) toProto() *pluginv1.WorkflowStep {
 	return &pluginv1.WorkflowStep{
-		Id:             s.ID,
-		WorkflowId:     s.WorkflowID,
-		Name:           s.Name,
-		Position:       s.Position,
-		StageType:      s.StageType,
-		Color:          s.Color,
-		IsStartStep:    s.IsStartStep,
-		WipLimit:       s.WIPLimit,
-		AgentProfileId: s.AgentProfileID,
+		Id:                 s.ID,
+		WorkflowId:         s.WorkflowID,
+		Name:               s.Name,
+		Position:           s.Position,
+		StageType:          s.StageType,
+		Color:              s.Color,
+		IsStartStep:        s.IsStartStep,
+		WipLimit:           s.WIPLimit,
+		AgentProfileId:     s.AgentProfileID,
 		OnEnterActionTypes: s.OnEnterActionTypes,
 	}
 }
@@ -534,17 +539,27 @@ func workflowStepFromProto(p *pluginv1.WorkflowStep) WorkflowStep {
 		return WorkflowStep{}
 	}
 	return WorkflowStep{
-		ID:             p.GetId(),
-		WorkflowID:     p.GetWorkflowId(),
-		Name:           p.GetName(),
-		Position:       p.GetPosition(),
-		StageType:      p.GetStageType(),
-		Color:          p.GetColor(),
-		IsStartStep:    p.GetIsStartStep(),
-		WIPLimit:       p.GetWipLimit(),
-		AgentProfileID: p.GetAgentProfileId(),
-		OnEnterActionTypes: p.GetOnEnterActionTypes(),
+		ID:                 p.GetId(),
+		WorkflowID:         p.GetWorkflowId(),
+		Name:               p.GetName(),
+		Position:           p.GetPosition(),
+		StageType:          p.GetStageType(),
+		OnEnterActionTypes: nonEmptyStrings(p.GetOnEnterActionTypes()),
+		Color:              p.GetColor(),
+		IsStartStep:        p.GetIsStartStep(),
+		WIPLimit:           p.GetWipLimit(),
+		AgentProfileID:     p.GetAgentProfileId(),
 	}
+}
+
+// nonEmptyStrings enforces the documented nil-not-empty invariant at the SDK
+// decode boundary, independent of what a caller happened to serialize onto
+// the wire.
+func nonEmptyStrings(s []string) []string {
+	if len(s) == 0 {
+		return nil
+	}
+	return s
 }
 
 func workflowStepsFromProto(items []*pluginv1.WorkflowStep) []WorkflowStep {
