@@ -110,7 +110,7 @@ func withAgents(t *testing.T, deps *testDeps, agents []*models.AgentInstance) {
 
 	router := gin.New()
 	group := router.Group("/api/v1/office")
-	dashboard.RegisterRoutes(group, svc, deps.repo, nil, log)
+	dashboard.RegisterRoutes(group, svc, deps.repo, nil, nil, log)
 
 	deps.svc = svc
 	deps.router = router

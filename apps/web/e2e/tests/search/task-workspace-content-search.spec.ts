@@ -75,7 +75,7 @@ test("@search searches all task repositories and opens the selected match", asyn
     seedData.workspaceId,
     extraRepoDir,
     "main",
-    { name: EXTRA_REPOSITORY_NAME },
+    { name: EXTRA_REPOSITORY_NAME, pull_before_worktree: false },
   );
 
   const task = await apiClient.createTaskWithAgent(

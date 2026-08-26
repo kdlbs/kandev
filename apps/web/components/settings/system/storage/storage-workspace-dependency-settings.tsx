@@ -26,6 +26,8 @@ type Props = {
   settings: StorageMaintenanceSettings;
   savedSettings: StorageMaintenanceSettings;
   pending: boolean;
+  /** Overrides the default pending explanation, e.g. for the admin gate. */
+  pendingReason?: string;
   onChange: (settings: StorageMaintenanceSettings) => void;
   onCleanDependencies?: () => void;
 };
@@ -34,6 +36,7 @@ export function StorageWorkspaceDependencySettings({
   settings,
   savedSettings,
   pending,
+  pendingReason,
   onChange,
   onCleanDependencies,
 }: Props) {
@@ -43,7 +46,7 @@ export function StorageWorkspaceDependencySettings({
   const dependencyCleanupDirty = dependenciesEnabled !== savedDependenciesEnabled;
   let dependencyActionDisabledReason: string | undefined;
   if (pending) {
-    dependencyActionDisabledReason = t("system:storageActionPending");
+    dependencyActionDisabledReason = pendingReason ?? t("system:storageActionPending");
   } else if (!savedDependenciesEnabled) {
     dependencyActionDisabledReason = t("system:storageEnableWorkspaceDependenciesAndSave");
   }

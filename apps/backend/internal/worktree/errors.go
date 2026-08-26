@@ -136,6 +136,16 @@ func isRemoteRefMissingError(err error) bool {
 		strings.Contains(msg, "remote head refers to nonexistent ref")
 }
 
+// isRemoteBranchMissingError reports the Git fetch result for a branch that
+// does not exist on an otherwise usable remote. Transport and authentication
+// failures must remain generic so callers do not mistake an unavailable
+// remote for a deleted branch.
+func isRemoteBranchMissingError(output string) bool {
+	lowerOutput := strings.ToLower(output)
+	return strings.Contains(lowerOutput, "couldn't find remote ref") ||
+		(strings.Contains(lowerOutput, "remote ref") && strings.Contains(lowerOutput, "not found"))
+}
+
 // ClassifyGitError wraps a raw git error with a user-friendly sentinel error
 // based on the command output.
 func ClassifyGitError(output string, _ error) error {

@@ -4,11 +4,13 @@ import type { ReactNode } from "react";
 import { StateProvider } from "@/components/state-provider";
 import { TaskOptimisticContextProvider } from "@/hooks/use-optimistic-task-mutation";
 import { ApiError } from "@/lib/api/client";
-import { StatusPicker, formatPendingApproversMessage } from "./status-picker";
+import { StatusPicker } from "./status-picker";
+import { formatPendingApproversMessage } from "@/lib/api/domains/office-status-gate";
 import type { Task } from "@/app/office/tasks/[id]/types";
 
 const updateTaskMock = vi.hoisted(() => vi.fn().mockResolvedValue({ ok: true }));
 const toastErrorMock = vi.hoisted(() => vi.fn());
+const applyPatchMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/api/domains/office-extended-api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api/domains/office-extended-api")>(
@@ -37,6 +39,7 @@ afterEach(() => {
 });
 
 const TRIGGER_TEST_ID = "status-picker-trigger";
+const APPROVALS_PENDING_MESSAGE = "approvals pending";
 
 const task: Task = {
   id: "t-1",
@@ -60,7 +63,7 @@ const task: Task = {
 function Wrapper({ children }: { children: ReactNode }) {
   const ctx = {
     task,
-    applyPatch: vi.fn(),
+    applyPatch: applyPatchMock,
     restore: vi.fn(),
   };
   return (
@@ -112,8 +115,8 @@ describe("StatusPicker", () => {
 
   it("toasts the formatted approvers message on a 409 gate response", async () => {
     updateTaskMock.mockRejectedValueOnce(
-      new ApiError("approvals pending", 409, {
-        error: "approvals pending",
+      new ApiError(APPROVALS_PENDING_MESSAGE, 409, {
+        error: APPROVALS_PENDING_MESSAGE,
         pending_approvers: [
           { agent_profile_id: "a1", name: "CEO" },
           { agent_profile_id: "a2", name: "Eng Lead" },
@@ -134,6 +137,31 @@ describe("StatusPicker", () => {
     expect(toastErrorMock).toHaveBeenCalledWith(
       "Cannot mark done: awaiting approval from CEO, Eng Lead",
     );
+  });
+
+  it("settles on the redirected status instead of the pre-drag snapshot", async () => {
+    updateTaskMock.mockRejectedValueOnce(
+      new ApiError(APPROVALS_PENDING_MESSAGE, 409, {
+        error: APPROVALS_PENDING_MESSAGE,
+        pending_approvers: [{ agent_profile_id: "a1", name: "CEO" }],
+        status: "in_review",
+      }),
+    );
+    render(
+      <Wrapper>
+        <StatusPicker task={task} />
+      </Wrapper>,
+    );
+    fireEvent.click(screen.getByTestId(TRIGGER_TEST_ID));
+    const option = await screen.findByTestId("status-picker-option-done");
+    await act(async () => {
+      fireEvent.click(option);
+    });
+
+    // The hook's own rollback restores "todo" first; the picker's catch
+    // must then re-apply the server's redirected status on top of it, so
+    // the final patch is the redirect, not the rollback.
+    expect(applyPatchMock).toHaveBeenLastCalledWith({ status: "in_review" });
   });
 });
 
