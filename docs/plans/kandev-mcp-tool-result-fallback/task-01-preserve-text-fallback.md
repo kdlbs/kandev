@@ -38,15 +38,15 @@ parser so a null structured value does not hide JSON text content.
 ## Acceptance
 
 - The regression fails because the parser returns null before the correction.
-- The corrected parser returns the JSON text payload for null structured
-  content.
+- The corrected parser returns the JSON text payload when `structuredContent`
+  is null.
 - All focused parser and native Kandev renderer tests pass after the change.
 
 ## Verification
 
 ```bash
-cd apps && pnpm --filter @kandev/web test -- --run components/task/chat/messages/kandev/parse.test.ts components/task/chat/messages/kandev-tool-message.test.tsx
-cd apps/web && pnpm run typecheck
+(cd apps && pnpm --filter @kandev/web test -- --run components/task/chat/messages/kandev/parse.test.ts components/task/chat/messages/kandev-tool-message.test.tsx)
+(cd apps/web && pnpm run typecheck)
 ```
 
 ## Files likely touched
