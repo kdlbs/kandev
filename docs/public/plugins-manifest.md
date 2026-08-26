@@ -61,7 +61,7 @@ webhooks:
     access: public # public (default) or authenticated
     max_body_bytes: 4194304 # public maximum 4 MiB; authenticated maximum 16 MiB
 
-actions: # authenticated browser-to-plugin calls
+actions: # authenticated manifest-declared actions; some are backend-invoked
   - key: "connection.save"
     scope: "workspace" # workspace | task | repository
     access: admin # authenticated (default) | admin

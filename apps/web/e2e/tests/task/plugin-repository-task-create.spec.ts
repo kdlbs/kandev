@@ -43,20 +43,25 @@ async function removeFixtureRepositories(apiClient: ApiClient, workspaceId: stri
 
 async function selectFixtureRepository(page: Page): Promise<void> {
   await page.getByTestId("source-mode-remote").click();
-  await page.getByTestId("remote-repo-chip-trigger").first().click();
+  const repositoryTrigger = page.getByTestId("remote-repo-chip-trigger");
+  await expect(repositoryTrigger).toHaveCount(1);
+  await repositoryTrigger.click();
   const repositoryOption = page
     .getByTestId("remote-repo-option")
     .filter({ hasText: "TEAM/fixture" });
+  await expect(repositoryOption).toHaveCount(1);
   await expect(repositoryOption).toBeVisible({ timeout: 15_000 });
-  await repositoryOption.first().click();
-  await expect(page.getByTestId("remote-repo-chip-trigger").first()).toContainText("TEAM/fixture");
+  await repositoryOption.click();
+  await expect(repositoryTrigger).toContainText("TEAM/fixture");
 }
 
 async function selectFixtureBranch(page: Page): Promise<void> {
-  const branch = page.getByTestId("remote-branch-chip-trigger").first();
+  const branch = page.getByTestId("remote-branch-chip-trigger");
+  await expect(branch).toHaveCount(1);
   await expect(branch).toBeEnabled({ timeout: 15_000 });
   await branch.click();
   const option = page.getByRole("option", { name: FIXTURE_BRANCH, exact: false });
+  await expect(option).toHaveCount(1);
   await expect(option).toBeVisible({ timeout: 15_000 });
   await option.click();
   await expect(branch).toContainText(FIXTURE_BRANCH);

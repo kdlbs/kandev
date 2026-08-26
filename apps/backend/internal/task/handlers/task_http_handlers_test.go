@@ -101,12 +101,14 @@ func TestWorkspaceSourceHTTPStatusMapsRepositoryNotFound(t *testing.T) {
 }
 
 func TestParseHTTPWorkspaceSourcesPreservesSnakeCaseFields(t *testing.T) {
-	sources, err := parseHTTPWorkspaceSources([]json.RawMessage{json.RawMessage(`{"kind":"repository","repository_id":"repo-1","base_branch":"main","checkout_branch":"feature/x"}`)})
+	sources, err := parseHTTPWorkspaceSources([]json.RawMessage{json.RawMessage(`{"kind":"repository","repository_id":"repo-1","base_branch":"main","checkout_branch":"feature/x","provider_host":"https://provider.example.test","provider_scope":"account-1"}`)})
 	require.NoError(t, err)
 	require.Len(t, sources, 1)
 	assert.Equal(t, "repo-1", sources[0].RepositoryID)
 	assert.Equal(t, "main", sources[0].BaseBranch)
 	assert.Equal(t, "feature/x", sources[0].CheckoutBranch)
+	assert.Equal(t, "https://provider.example.test", sources[0].ProviderHost)
+	assert.Equal(t, "account-1", sources[0].ProviderScope)
 }
 
 func TestQuickChatResolveParamsForcesWorktreeForRepositoryContext(t *testing.T) {

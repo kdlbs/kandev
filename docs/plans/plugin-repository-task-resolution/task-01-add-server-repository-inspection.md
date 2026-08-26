@@ -70,8 +70,8 @@ rtk go test ./cmd/plugin-fixture -run 'Repository|Action|FixturePackage' -race
 
 ## Files likely touched
 
-- `apps/backend/internal/plugins/repository_provider.go`
-- `apps/backend/internal/plugins/repository_provider_test.go`
+- `apps/backend/internal/plugins/repository_provider_inspect.go`
+- `apps/backend/internal/plugins/repository_provider_inspect_test.go`
 - `apps/backend/cmd/plugin-fixture/plugin.go`
 - `apps/backend/cmd/plugin-fixture/main_test.go`
 - `apps/backend/cmd/plugin-fixture/fixture_package_test.go`

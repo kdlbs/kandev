@@ -122,8 +122,10 @@ func TestInspectRepositoryProviderBoundsResponseAndTimeout(t *testing.T) {
 	}
 	_, err = svc.inspectRepositoryProvider(t.Context(), "workspace-1", request,
 		func(ctx context.Context, _ string, _ pluginDispatchGeneration, _ *pluginsdk.PluginActionRequest) (*pluginsdk.PluginActionResponse, error) {
-			<-ctx.Done()
-			return nil, ctx.Err()
+			if _, ok := ctx.Deadline(); !ok {
+				return nil, errors.New("inspection context has no deadline")
+			}
+			return nil, context.DeadlineExceeded
 		})
 	assertRepositoryProviderError(t, err, RepositoryProviderErrorUnavailable)
 }

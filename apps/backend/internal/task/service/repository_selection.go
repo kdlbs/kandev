@@ -52,19 +52,24 @@ func NewRepositorySelectionError(code RepositorySelectionErrorCode, cause error)
 }
 
 func (s *Service) preflightRepositorySelections(ctx context.Context, req *CreateTaskRequest) error {
-	if s.repositorySelectionResolver == nil {
-		for _, input := range req.Repositories {
-			if requiresPluginRepositorySelection(input) {
-				return NewRepositorySelectionError(RepositorySelectionErrorUnavailable, nil)
-			}
+	return s.preflightRepositoryInputs(ctx, req.WorkspaceID, req.Repositories)
+}
+
+func (s *Service) preflightRepositoryInputs(
+	ctx context.Context, workspaceID string, inputs []TaskRepositoryInput,
+) error {
+	for index, input := range inputs {
+		needsInspection, err := repositorySelectionNeedsInspection(input)
+		if err != nil {
+			return err
 		}
-		return nil
-	}
-	for index, input := range req.Repositories {
-		if !requiresPluginRepositorySelection(input) {
+		if !needsInspection {
 			continue
 		}
-		resolved, err := s.repositorySelectionResolver.ResolveRepositorySelection(ctx, req.WorkspaceID, input)
+		if s.repositorySelectionResolver == nil {
+			return NewRepositorySelectionError(RepositorySelectionErrorUnavailable, nil)
+		}
+		resolved, err := s.repositorySelectionResolver.ResolveRepositorySelection(ctx, workspaceID, input)
 		if err != nil {
 			return normalizeRepositorySelectionError(err)
 		}
@@ -72,25 +77,32 @@ func (s *Service) preflightRepositorySelections(ctx context.Context, req *Create
 		if err != nil {
 			return err
 		}
-		req.Repositories[index] = resolved
+		inputs[index] = resolved
 	}
 	return nil
 }
 
-func requiresPluginRepositorySelection(input TaskRepositoryInput) bool {
-	if input.RepositoryID != "" || input.TrustedProviderDescriptor || effectiveRemoteURL(input) == "" || strings.TrimSpace(input.Provider) == "" {
-		return false
+func repositorySelectionNeedsInspection(input TaskRepositoryInput) (bool, error) {
+	if input.RepositoryID != "" || input.TrustedProviderDescriptor || effectiveRemoteURL(input) == "" {
+		return false, nil
 	}
-	switch {
-	case strings.EqualFold(input.Provider, providerGitHub):
-		return false
-	case strings.EqualFold(input.Provider, providerGitLab):
-		return false
-	case strings.EqualFold(input.Provider, providerAzureDevOps):
-		return false
-	default:
-		return true
+
+	provider := strings.TrimSpace(input.Provider)
+	if provider != "" &&
+		!strings.EqualFold(provider, providerGitHub) &&
+		!strings.EqualFold(provider, providerGitLab) &&
+		!strings.EqualFold(provider, providerAzureDevOps) {
+		return true, nil
 	}
+
+	parsedProvider, _, _, _, err := parseRemoteRepositoryURL(effectiveRemoteURL(input), provider)
+	if err != nil {
+		return false, NewRepositorySelectionError(RepositorySelectionErrorInvalid, nil)
+	}
+	if provider != "" && !strings.EqualFold(parsedProvider, provider) {
+		return false, NewRepositorySelectionError(RepositorySelectionErrorInvalid, nil)
+	}
+	return false, nil
 }
 
 func trustResolvedRepositorySelection(

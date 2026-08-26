@@ -1608,6 +1608,11 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	if err != nil {
 		return nil, err
 	}
+	if req.Repositories != nil {
+		if err := s.preflightRepositoryInputs(ctx, task.WorkspaceID, req.Repositories); err != nil {
+			return nil, err
+		}
+	}
 	oldWorkflowStepID := task.WorkflowStepID
 	var oldState *v1.TaskState
 	stateChanged := false

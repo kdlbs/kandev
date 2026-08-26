@@ -179,6 +179,95 @@ func TestCreateTaskTrustedPluginDescriptorSkipsRepositoryInspection(t *testing.T
 	}
 }
 
+func TestCreateTaskRejectsUnresolvedPluginURLWithMissingOrBuiltinProviderBeforePersistence(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider string
+	}{
+		{name: "missing provider", provider: ""},
+		{name: "builtin provider", provider: providerGitHub},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, _, repo := createTestService(t)
+			ctx := context.Background()
+			createRepositorySelectionWorkspace(t, repo)
+
+			_, err := svc.CreateTask(ctx, &CreateTaskRequest{
+				WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "invalid plugin selection",
+				Repositories: []TaskRepositoryInput{{
+					RemoteURL: "https://bitbucket.example.test/projects/TEAM/fixture",
+					Provider:  tt.provider, BaseBranch: "main",
+				}},
+			})
+			assertRepositorySelectionError(t, err, RepositorySelectionErrorInvalid, "")
+
+			tasks, listErr := repo.ListTasks(ctx, "wf-1")
+			if listErr != nil {
+				t.Fatalf("ListTasks: %v", listErr)
+			}
+			if len(tasks) != 0 {
+				t.Fatalf("tasks after invalid selection = %d, want zero", len(tasks))
+			}
+			repositories, listErr := repo.ListRepositories(ctx, "ws-1")
+			if listErr != nil {
+				t.Fatalf("ListRepositories: %v", listErr)
+			}
+			if len(repositories) != 0 {
+				t.Fatalf("repositories after invalid selection = %d, want zero", len(repositories))
+			}
+		})
+	}
+}
+
+func TestUpdateTaskPreflightsPluginRepositoryBeforeReplacingExistingRepositories(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	createRepositorySelectionWorkspace(t, repo)
+	if err := repo.CreateRepository(ctx, &models.Repository{ID: "repo-existing", WorkspaceID: "ws-1", Name: "existing", DefaultBranch: "main"}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	created, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "original",
+		Repositories: []TaskRepositoryInput{{RepositoryID: "repo-existing", BaseBranch: "main"}},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	resolver := &repositorySelectionResolverStub{resolve: func(TaskRepositoryInput) (TaskRepositoryInput, error) {
+		return TaskRepositoryInput{}, errors.New("provider response contains a secret")
+	}}
+	svc.SetRepositorySelectionResolver(resolver)
+	updatedTitle := "must not be written"
+	_, err = svc.UpdateTask(ctx, created.Task.ID, &UpdateTaskRequest{
+		Title: &updatedTitle,
+		Repositories: []TaskRepositoryInput{{
+			RemoteURL: "https://bitbucket.example.test/projects/TEAM/fixture",
+			Provider:  "fixture-source-control", BaseBranch: "main",
+		}},
+	})
+	assertRepositorySelectionError(t, err, RepositorySelectionErrorUnavailable, "secret")
+	if len(resolver.calls) != 1 {
+		t.Fatalf("resolver calls = %d, want one", len(resolver.calls))
+	}
+
+	storedTask, err := repo.GetTask(ctx, created.Task.ID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if storedTask.Title != "original" {
+		t.Fatalf("stored title = %q, want original", storedTask.Title)
+	}
+	associated, err := repo.ListTaskRepositories(ctx, created.Task.ID)
+	if err != nil {
+		t.Fatalf("ListTaskRepositories: %v", err)
+	}
+	if len(associated) != 1 || associated[0].RepositoryID != "repo-existing" {
+		t.Fatalf("task repositories after failed update = %+v, want existing association", associated)
+	}
+}
+
 func createRepositorySelectionWorkspace(t *testing.T, repo interface {
 	CreateWorkspace(context.Context, *models.Workspace) error
 	CreateWorkflow(context.Context, *models.Workflow) error

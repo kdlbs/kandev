@@ -56,11 +56,14 @@ No database migration or public task-create schema change is required. The
 existing task-create repository fields remain selection hints. The internal
 `TrustedProviderDescriptor` marker remains unavailable to JSON callers.
 
-The task service calls the resolver only when all these conditions are true:
+The task service classifies each selection before persistence:
 
-1. `repository_id` is empty.
-2. `provider` names a manifest-owned plugin provider, not a built-in provider.
-3. A remote URL selection is present.
+- An existing `repository_id` or an internal trusted descriptor uses its
+  existing server-owned path.
+- A remote URL with a non-built-in provider uses the plugin resolver.
+- A remote URL with a blank or built-in provider is parsed through the existing
+  built-in path. An unsupported, malformed, or provider-mismatched URL fails
+  closed before any task or repository write.
 
 The resolver returns the existing internal repository input shape with a
 complete descriptor and `TrustedProviderDescriptor` set by server code. It
@@ -139,7 +142,7 @@ resolver.
 The plugin service and task service jointly enforce these rules before writes:
 
 - The response provider ID equals the manifest-owned provider ID.
-- Provider host is a normalized HTTP or HTTPS origin without user information.
+- Provider host is a normalized HTTPS origin without user information.
 - Provider scope is either empty or a valid normalized scope.
 - Immutable provider repository ID, owner or project, name, clone URL, and
   default branch are present.

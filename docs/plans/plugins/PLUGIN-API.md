@@ -929,7 +929,7 @@ interface RepositoryProviderRegistration {
     repository: RepositoryInspection;
     signal: AbortSignal;
   }): Promise<RepositoryProviderBranch[]>;
-  // Browser picker callback. Its result is not authority for a native task write.
+// Browser picker callback. Its result is not authoritative for a native task write.
   inspectURL(context: {
     workspaceId: string;
     url: string;

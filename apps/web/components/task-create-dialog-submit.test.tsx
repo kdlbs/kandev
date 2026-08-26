@@ -107,7 +107,7 @@ vi.mock("@/components/task-create-dialog-fresh-branch-consent", () => ({
   }),
 }));
 
-import { useTaskSubmitHandlers } from "./task-create-dialog-submit";
+import { taskSubmitErrorMessage, useTaskSubmitHandlers } from "./task-create-dialog-submit";
 import {
   readQueuedTaskCreateLastUsedState,
   resetTaskCreateLastUsedSync,
@@ -532,5 +532,22 @@ describe("useTaskSubmitHandlers — handleCreateWithoutAgent", () => {
     expect(buildCreateTaskPayloadMock).toHaveBeenCalledWith(
       expect.objectContaining({ withAgent: false }),
     );
+  });
+});
+
+describe("taskSubmitErrorMessage", () => {
+  it("uses localized copy for repository selection error codes", () => {
+    expect(
+      taskSubmitErrorMessage(
+        new ApiError("raw upstream provider failure", 503, {
+          error: "raw upstream provider failure",
+          error_code: "repository_selection_unavailable",
+        }),
+      ),
+    ).toBe("The repository provider is unavailable. Check the connection and try again.");
+  });
+
+  it("preserves non-repository error messages", () => {
+    expect(taskSubmitErrorMessage(new Error("ordinary failure"))).toBe("ordinary failure");
   });
 });

@@ -52,10 +52,13 @@ to register the repository in a separate step.
 - **AC-PLUGINS-REPOSITORY-TASK-CREATION-001.2:** Kandev shall resolve an
   unregistered plugin repository by invoking the active manifest owner's
   workspace-scoped `repositories.inspect` action from the backend.
-- **AC-PLUGINS-REPOSITORY-TASK-CREATION-001.3:** Kandev shall treat every
-  provider host, scope, repository ID, owner, name, clone URL, and default
-  branch received from REST, WebSocket, or MCP task-create input as untrusted.
-  It shall persist only the descriptor returned by the verified plugin action.
+- **AC-PLUGINS-REPOSITORY-TASK-CREATION-001.3:** For a first-use plugin
+  selection, Kandev shall treat every provider host, scope, repository ID,
+  owner, name, clone URL, and default branch received from REST, WebSocket, or
+  MCP task-create input as untrusted. It shall persist only the descriptor
+  returned by the verified plugin action. Existing repository IDs, valid
+  built-in provider URLs, and authorized plugin Host `Tasks.Create` calls shall
+  continue through their existing server-owned paths.
 - **AC-PLUGINS-REPOSITORY-TASK-CREATION-001.4:** Before persistence, Kandev
   shall verify manifest ownership, workspace scope, provider identity,
   immutable repository identity, a credential-free HTTPS clone URL, and clone

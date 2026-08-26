@@ -67,6 +67,20 @@ function isStaleBranchPolicyError(error: unknown): boolean {
   );
 }
 
+const REPOSITORY_SELECTION_ERROR_KEYS: Record<string, string> = {
+  repository_selection_invalid: "task:repositorySelectionInvalid",
+  repository_selection_not_found: "task:repositorySelectionNotFound",
+  repository_selection_unavailable: "task:repositorySelectionUnavailable",
+};
+
+export function taskSubmitErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    const key = REPOSITORY_SELECTION_ERROR_KEYS[error.errorCode ?? ""];
+    if (key) return t(key);
+  }
+  return error instanceof Error ? error.message : t(GENERIC_ERROR_KEY);
+}
+
 // eslint-disable-next-line max-lines-per-function
 export function useTaskSubmitHandlers({
   isSessionMode,
@@ -303,7 +317,7 @@ export function useTaskSubmitHandlers({
     } catch (error) {
       toast({
         title: t("task:failedToCreateSession"),
-        description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
+        description: taskSubmitErrorMessage(error),
         variant: "error",
       });
     } finally {
@@ -379,7 +393,7 @@ export function useTaskSubmitHandlers({
       closeDialog = !(await refreshStaleBranchPolicies(error));
       toast({
         title: t("task:failedToUpdateTask"),
-        description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
+        description: taskSubmitErrorMessage(error),
         variant: "error",
       });
     } finally {
@@ -411,7 +425,7 @@ export function useTaskSubmitHandlers({
       closeDialog = !(await refreshStaleBranchPolicies(error));
       toast({
         title: t("task:failedToUpdateTask"),
-        description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
+        description: taskSubmitErrorMessage(error),
         variant: "error",
       });
     } finally {
@@ -574,7 +588,7 @@ export function useTaskSubmitHandlers({
         await refreshStaleBranchPolicies(error);
         toast({
           title: t("task:failedToStartTaskPlanMode"),
-          description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
+          description: taskSubmitErrorMessage(error),
           variant: "error",
         });
       } finally {
@@ -606,7 +620,7 @@ export function useTaskSubmitHandlers({
       await refreshStaleBranchPolicies(error);
       toast({
         title: t("task:failedToStartTaskPlanMode"),
-        description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
+        description: taskSubmitErrorMessage(error),
         variant: "error",
       });
     } finally {
@@ -676,7 +690,7 @@ export function useTaskSubmitHandlers({
       await refreshStaleBranchPolicies(error);
       toast({
         title: t("task:failedToCreateTask"),
-        description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
+        description: taskSubmitErrorMessage(error),
         variant: "error",
       });
     } finally {
@@ -746,7 +760,7 @@ export function useTaskSubmitHandlers({
       await refreshStaleBranchPolicies(error);
       toast({
         title: t("task:failedToCreateTask"),
-        description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
+        description: taskSubmitErrorMessage(error),
         variant: "error",
       });
     } finally {
