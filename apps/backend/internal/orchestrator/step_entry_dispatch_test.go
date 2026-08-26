@@ -73,11 +73,11 @@ type stepEntryFakeRunQueue struct {
 	calls []engine.QueueRunRequest
 }
 
-func (f *stepEntryFakeRunQueue) QueueRun(_ context.Context, req engine.QueueRunRequest) error {
+func (f *stepEntryFakeRunQueue) QueueRun(_ context.Context, req engine.QueueRunRequest) (engine.QueueOutcome, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, req)
-	return nil
+	return "", nil
 }
 
 func (f *stepEntryFakeRunQueue) callCount() int {

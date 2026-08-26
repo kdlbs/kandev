@@ -808,12 +808,12 @@ type selectiveFailRunQueue struct {
 	failFor map[string]error
 }
 
-func (f *selectiveFailRunQueue) QueueRun(_ context.Context, req QueueRunRequest) error {
+func (f *selectiveFailRunQueue) QueueRun(_ context.Context, req QueueRunRequest) (QueueOutcome, error) {
 	f.calls = append(f.calls, req)
 	if err, ok := f.failFor[req.AgentProfileID]; ok {
-		return err
+		return "", err
 	}
-	return nil
+	return "", nil
 }
 
 // TestQueueRunForEachParticipantCallback_OneParticipantFailureDoesNotAbortFanOut
