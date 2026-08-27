@@ -97,6 +97,7 @@ type UpdateUserSettingsRequest struct {
 	SystemMetricsDisplay              *SystemMetricsDisplaySettingsPatch
 	AppStatusBarEnabled               *bool
 	AppStatusBarOrder                 *models.AppStatusBarOrder
+	QuickChatTabOrderByWorkspace      *map[string][]string
 	KanbanHiddenStepIDs               *map[string][]string
 	WorkflowIDsWithAutoHideEmptySteps *[]string
 }
@@ -314,10 +315,24 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 	if req.AppStatusBarOrder != nil {
 		settings.AppStatusBarOrder = *req.AppStatusBarOrder
 	}
+	if req.QuickChatTabOrderByWorkspace != nil {
+		settings.QuickChatTabOrderByWorkspace = cloneStringSliceMap(*req.QuickChatTabOrderByWorkspace)
+	}
 	if err := applyTerminalFontPreferences(settings, req); err != nil {
 		return err
 	}
 	return nil
+}
+
+func cloneStringSliceMap(source map[string][]string) map[string][]string {
+	if source == nil {
+		return map[string][]string{}
+	}
+	clone := make(map[string][]string, len(source))
+	for key, values := range source {
+		clone[key] = append([]string{}, values...)
+	}
+	return clone
 }
 
 // applyWorkspaceAndTaskListPreferences copies workspace, board, and task-list

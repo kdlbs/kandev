@@ -16,6 +16,7 @@ import { cancelPtyTerminalStart } from "@/components/settings/pty-terminal-lifec
 import { isQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
 import { persistQuickChatRename } from "@/lib/quick-chat/rename";
 import type { QuickChatSessionKind, QuickTerminalTab } from "@/lib/state/slices/ui/types";
+import { useQuickChatTabOrder } from "./use-quick-chat-tab-order";
 
 const noop = () => {};
 
@@ -44,6 +45,7 @@ function useQuickChatStore(workspaceId: string) {
       renameQuickChatSession: s.renameQuickChatSession,
       openQuickChat: s.openQuickChat,
       agentProfiles: s.agentProfiles.items ?? [],
+      agentGeneratedTaskTitles: s.userSettings.agentGeneratedTaskTitles,
       taskSessions: s.taskSessions.items || {},
     })),
   );
@@ -174,6 +176,7 @@ async function startQuickChatForAgent(
   const response = await startQuickChat(workspaceId, {
     agent_profile_id: agentId,
     title: initialName,
+    ...(store.agentGeneratedTaskTitles ? { auto_title: true } : {}),
     repositories: repositories.length > 0 ? repositories : undefined,
   });
   return { sessionId: response.session_id, name: initialName, taskId: response.task_id };
@@ -241,7 +244,11 @@ export function useAgentSelection(workspaceId: string, store: QuickChatStore) {
   return { pendingAgentId, reset, handleSelectAgent };
 }
 
-function useQuickChatSessionClose(store: QuickChatStore, resetPendingStarts: () => void) {
+function useQuickChatSessionClose(
+  store: QuickChatStore,
+  resetPendingStarts: () => void,
+  removeTabReference: (reference: string) => void,
+) {
   const { t } = useTranslation();
   const { toast } = useToast();
   const [sessionToClose, setSessionToClose] = useState<string | null>(null);
@@ -263,11 +270,13 @@ function useQuickChatSessionClose(store: QuickChatStore, resetPendingStarts: () 
     const taskId = resolveTaskId(store, sessionId);
     if (!taskId) {
       store.removeQuickChatSession(sessionId);
+      removeTabReference(`conversation:${sessionId}`);
       return;
     }
     try {
       await deleteQuickChatTask(taskId);
       store.removeQuickChatSession(sessionId);
+      removeTabReference(`conversation:${sessionId}`);
     } catch (error) {
       console.error("Failed to delete quick chat task:", error);
       toast({
@@ -276,11 +285,15 @@ function useQuickChatSessionClose(store: QuickChatStore, resetPendingStarts: () 
         variant: "error",
       });
     }
-  }, [sessionToClose, store, toast]);
+  }, [removeTabReference, sessionToClose, store, toast]);
   return { sessionToClose, setSessionToClose, handleCloseTab, handleConfirmClose };
 }
 
-function useQuickTerminalClose(store: QuickChatStore, resetPendingStarts: () => void) {
+function useQuickTerminalClose(
+  store: QuickChatStore,
+  resetPendingStarts: () => void,
+  removeTabReference: (reference: string) => void,
+) {
   const { toast } = useToast();
   const { t } = useTranslation();
 
@@ -295,6 +308,7 @@ function useQuickTerminalClose(store: QuickChatStore, resetPendingStarts: () => 
       } catch (error) {
         if (error instanceof ApiError && error.status === 404) {
           store.removeQuickTerminal(tabId);
+          removeTabReference(`terminal:${tabId}`);
           return;
         }
         const message = error instanceof Error ? error.message : String(error);
@@ -307,8 +321,9 @@ function useQuickTerminalClose(store: QuickChatStore, resetPendingStarts: () => 
         return;
       }
       store.removeQuickTerminal(tabId);
+      removeTabReference(`terminal:${tabId}`);
     },
-    [resetPendingStarts, store, t, toast],
+    [removeTabReference, resetPendingStarts, store, t, toast],
   );
 
   return handleCloseTerminal;
@@ -320,6 +335,7 @@ type QuickChatTabActionsOptions = {
   activeSession: QuickChatStore["sessions"][number] | undefined;
   store: QuickChatStore;
   resetPendingStarts: () => void;
+  removeTabReference: (reference: string) => void;
   setSetupKey: React.Dispatch<React.SetStateAction<number>>;
 };
 
@@ -349,11 +365,12 @@ function useQuickChatTabActions({
   activeSession,
   store,
   resetPendingStarts,
+  removeTabReference,
   setSetupKey,
 }: QuickChatTabActionsOptions) {
   const { sessionToClose, setSessionToClose, handleCloseTab, handleConfirmClose } =
-    useQuickChatSessionClose(store, resetPendingStarts);
-  const handleCloseTerminal = useQuickTerminalClose(store, resetPendingStarts);
+    useQuickChatSessionClose(store, resetPendingStarts, removeTabReference);
+  const handleCloseTerminal = useQuickTerminalClose(store, resetPendingStarts, removeTabReference);
   const handleRename = useQuickChatRename(store);
 
   const handleOpenChange = useCallback(
@@ -441,7 +458,15 @@ function useQuickChatTabActions({
 
 export function useQuickChatModal(workspaceId: string, onSupersedeConfigStart = noop) {
   const store = useQuickChatStore(workspaceId);
-  const { sessions, terminalTabs, activeSession, activeTerminalTab } = useWorkspaceQuickChat(store);
+  const {
+    sessions: workspaceSessions,
+    terminalTabs: workspaceTerminalTabs,
+    activeSession,
+    activeTerminalTab,
+  } = useWorkspaceQuickChat(store);
+  const tabOrder = useQuickChatTabOrder(workspaceId, workspaceSessions, workspaceTerminalTabs);
+  const sessions = tabOrder.sessions;
+  const terminalTabs = tabOrder.terminalTabs;
   const [setupKey, setSetupKey] = useState(0);
   const {
     pendingAgentId,
@@ -458,6 +483,7 @@ export function useQuickChatModal(workspaceId: string, onSupersedeConfigStart = 
     activeSession,
     store,
     resetPendingStarts,
+    removeTabReference: tabOrder.removeTabReference,
     setSetupKey,
   });
 
@@ -477,6 +503,10 @@ export function useQuickChatModal(workspaceId: string, onSupersedeConfigStart = 
     activeSessionId: activeSession?.sessionId ?? null,
     activeSession,
     ...tabActions,
+    tabOrder: tabOrder.order,
+    persistTabOrder: tabOrder.persistOrder,
+    tabOrderSyncError: tabOrder.syncError,
+    tabOrderSyncPending: tabOrder.syncPending,
     setupKey,
     activeSessionNeedsAgent: Boolean(
       activeSession && isQuickChatSetupSessionId(activeSession.sessionId),

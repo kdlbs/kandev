@@ -386,6 +386,9 @@ export type AppState = KanbanSlice & {
   clearQuickChatUnseenIdle: UIA["clearQuickChatUnseenIdle"];
   recordQuickChatSettled: UIA["recordQuickChatSettled"];
   removeQuickChatSession: UIA["removeQuickChatSession"];
+  setQuickChatTabOrder: UIA["setQuickChatTabOrder"];
+  clearQuickChatTabOrder: UIA["clearQuickChatTabOrder"];
+  setQuickChatTabOrderSyncState: UIA["setQuickChatTabOrderSyncState"];
   closeQuickChat: () => void;
   closeQuickChatSession: (sessionId: string) => void;
   setActiveQuickChatSession: (sessionId: string, workspaceId: string) => void;

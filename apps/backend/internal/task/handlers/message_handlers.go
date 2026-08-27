@@ -106,6 +106,84 @@ func (h *MessageHandlers) claimTaskTitleSession(ctx context.Context, task *model
 	return claimer.ClaimTaskTitleSession(ctx, taskID, sessionID)
 }
 
+func (h *MessageHandlers) resolveMessageTaskAndTitleOwner(
+	ctx context.Context,
+	msg *ws.Message,
+	taskID string,
+	sessionID string,
+	configMode bool,
+	startCreatedSession bool,
+	hasMessageContent bool,
+) (*models.Task, bool, *ws.Message) {
+	if !startCreatedSession && (configMode || !hasMessageContent) {
+		return nil, false, nil
+	}
+
+	task, err := h.service.GetTask(ctx, taskID)
+	if err != nil {
+		h.logger.Error("failed to resolve first-turn MCP capabilities", zap.String("task_id", taskID), zap.Error(err))
+		wsErr, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task", nil)
+		return nil, false, wsErr
+	}
+	if configMode {
+		return task, false, nil
+	}
+	if startCreatedSession {
+		titleOwner, claimErr := h.claimTaskTitleSession(ctx, task, taskID, sessionID)
+		if claimErr != nil {
+			h.logger.Error("failed to claim first-turn task title",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(claimErr))
+			wsErr, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to claim task title", nil)
+			return nil, false, wsErr
+		}
+		return task, titleOwner, nil
+	}
+	if !service.IsRestorableQuickChatTask(task) {
+		return task, false, nil
+	}
+	return task, models.IsAgentTitleOwner(task.Metadata, sessionID), nil
+}
+
+func (h *MessageHandlers) injectMessageContext(
+	ctx context.Context,
+	req wsAddMessageRequest,
+	sessionResp *dto.GetTaskSessionResponse,
+	task *models.Task,
+	configMode bool,
+	startCreatedSession bool,
+	titleOwner bool,
+	content string,
+) string {
+	requiresSignal := h.orchestrator != nil && h.orchestrator.StepRequiresCompletionSignal(ctx, req.TaskID)
+	referenceContext := orchestrator.EntityReferenceContext(req.EntityReferences)
+	var pullRequestTargetContext string
+	content, pullRequestTargetContext = sysprompt.InjectPullRequestTargetContext(
+		content, h.taskPullRequestTargets(ctx, task),
+	)
+	if task.IsFromOffice {
+		return sysprompt.InjectOfficeContextWithOptions(
+			req.TaskID, req.TaskSessionID, content, requiresSignal,
+			referenceContext, pullRequestTargetContext,
+		)
+	}
+	if sessionResp.Session.IsPassthrough {
+		if !startCreatedSession && titleOwner {
+			return sysprompt.PendingTaskTitlePassthroughInstruction() + "\n\n" + content
+		}
+		return content
+	}
+	return sysprompt.InjectKandevContextWithOptions(req.TaskID, req.TaskSessionID, content, sysprompt.KandevContextOptions{
+		RequiresCompletionSignal:       requiresSignal,
+		IncludeCoordinatorTaskControls: !configMode,
+		IncludeTaskTitleTool:           !configMode && titleOwner,
+		Autopilot:                      task.Autopilot,
+		IncludeUserQuestionTool:        !task.Autopilot && !sessionResp.Session.IsPassthrough,
+		IncludeParentQuestionTool:      task.Autopilot && task.ParentID != "",
+	}, referenceContext, pullRequestTargetContext)
+}
+
 // RegisterMessageRoutes registers message HTTP + WebSocket handlers
 func RegisterMessageRoutes(
 	router *gin.Engine,
@@ -415,8 +493,8 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		WithContextFiles(req.ContextFiles).
 		WithEntityReferences(req.EntityReferences)
 
-	// First message on a CREATED session is the kanban "type in chat to start
-	// the agent" path. Wrap with the Kandev MCP system block before persisting
+	// The first prompt on a new or eager Quick Chat session is the kanban "type
+	// in chat to start the agent" path. Wrap with the Kandev MCP system block before persisting
 	// so the DB row matches what the agent receives (and "Show formatted"
 	// reveals it). The orchestrator's wrap in StartCreatedSession is
 	// mode-aware and canonicalizing, so passing the wrapped content through
@@ -431,39 +509,24 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// the agent CLI's TTY and the user sees it verbatim — they don't want a
 	// wall of MCP-tool boilerplate prepended to "hello".
 	storedContent := orchestrator.AppendEntityReferenceContext(req.Content, req.EntityReferences)
-	if startCreatedSession && !sessionResp.Session.IsPassthrough && (req.Content != "" || len(req.Attachments) > 0) {
-		task, err := h.service.GetTask(ctx, req.TaskID)
-		if err != nil {
-			h.logger.Error("failed to resolve first-turn MCP capabilities", zap.String("task_id", req.TaskID), zap.Error(err))
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task", nil)
-		}
-		configMode, _ := sessionResp.Session.Metadata["config_mode"].(bool)
-		titleOwner, claimErr := h.claimTaskTitleSession(ctx, task, req.TaskID, req.TaskSessionID)
-		if claimErr != nil {
-			h.logger.Error("failed to claim first-turn task title", zap.String("task_id", req.TaskID), zap.String("session_id", req.TaskSessionID), zap.Error(claimErr))
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to claim task title", nil)
-		}
-		requiresSignal := h.orchestrator != nil && h.orchestrator.StepRequiresCompletionSignal(ctx, req.TaskID)
-		referenceContext := orchestrator.EntityReferenceContext(req.EntityReferences)
-		var pullRequestTargetContext string
-		storedContent, pullRequestTargetContext = sysprompt.InjectPullRequestTargetContext(
-			storedContent, h.taskPullRequestTargets(ctx, task),
+	configMode, _ := sessionResp.Session.Metadata["config_mode"].(bool)
+	var task *models.Task
+	titleOwner := false
+	hasMessageContent := req.Content != "" || len(req.Attachments) > 0
+	task, titleOwner, wsErr = h.resolveMessageTaskAndTitleOwner(
+		ctx, msg, req.TaskID, req.TaskSessionID, configMode, startCreatedSession, hasMessageContent,
+	)
+	if wsErr != nil {
+		return wsErr, nil
+	}
+	if (startCreatedSession || titleOwner) && hasMessageContent {
+		// The first prompt on a new or eager Quick Chat session is the kanban
+		// "type in chat to start the agent" path. Wrap with the Kandev MCP
+		// system block before persisting so the DB row matches what the agent
+		// receives (and "Show formatted" reveals it).
+		storedContent = h.injectMessageContext(
+			ctx, req, sessionResp, task, configMode, startCreatedSession, titleOwner, storedContent,
 		)
-		if task.IsFromOffice {
-			storedContent = sysprompt.InjectOfficeContextWithOptions(
-				req.TaskID, req.TaskSessionID, storedContent, requiresSignal,
-				referenceContext, pullRequestTargetContext,
-			)
-		} else {
-			storedContent = sysprompt.InjectKandevContextWithOptions(req.TaskID, req.TaskSessionID, storedContent, sysprompt.KandevContextOptions{
-				RequiresCompletionSignal:       requiresSignal,
-				IncludeCoordinatorTaskControls: !configMode,
-				IncludeTaskTitleTool:           !configMode && titleOwner,
-				Autopilot:                      task.Autopilot,
-				IncludeUserQuestionTool:        !task.Autopilot && !sessionResp.Session.IsPassthrough,
-				IncludeParentQuestionTool:      task.Autopilot && task.ParentID != "",
-			}, referenceContext, pullRequestTargetContext)
-		}
 	}
 	req.Content = storedContent
 	if err := h.service.ClaimMessageAttachments(ctx, req.TaskID, req.TaskSessionID, req.Attachments); err != nil {

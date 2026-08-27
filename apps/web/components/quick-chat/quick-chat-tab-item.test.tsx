@@ -2,6 +2,8 @@ import { afterEach, describe, it, expect, vi } from "vitest";
 import { cleanup, render, fireEvent } from "@testing-library/react";
 import { QuickChatTabItem } from "./quick-chat-tab-item";
 
+const responsiveMock = vi.hoisted(() => ({ isFinePointer: true }));
+
 vi.mock("@kandev/ui/context-menu", () => ({
   ContextMenu: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   ContextMenuTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -19,7 +21,33 @@ vi.mock("@kandev/ui/context-menu", () => ({
   ),
 }));
 
-afterEach(cleanup);
+vi.mock("@kandev/ui/dropdown-menu", () => ({
+  DropdownMenu: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DropdownMenuTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DropdownMenuContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DropdownMenuItem: ({
+    children,
+    onSelect,
+    ...props
+  }: {
+    children: React.ReactNode;
+    onSelect?: () => void;
+    [key: string]: unknown;
+  }) => (
+    <button type="button" {...props} onClick={() => onSelect?.()}>
+      {children}
+    </button>
+  ),
+}));
+
+vi.mock("@/hooks/use-responsive-breakpoint", () => ({
+  useResponsiveBreakpoint: () => responsiveMock,
+}));
+
+afterEach(() => {
+  cleanup();
+  responsiveMock.isFinePointer = true;
+});
 
 function makeProps(overrides: Partial<Parameters<typeof QuickChatTabItem>[0]> = {}) {
   return {
@@ -59,7 +87,42 @@ describe("QuickChatTabItem rename", () => {
 
     expect(getByLabelText("Configuration chat")).toBeTruthy();
   });
+});
 
+describe("QuickChatTabItem coarse-pointer actions", () => {
+  it("exposes reachable rename, reorder, and close actions with touch targets", () => {
+    responsiveMock.isFinePointer = false;
+    const onMoveLeft = vi.fn();
+    const onMoveRight = vi.fn();
+    const onClose = vi.fn();
+
+    const { getByRole, getAllByRole, getByLabelText } = render(
+      <QuickChatTabItem
+        {...makeProps({ onMoveLeft, onMoveRight, onClose })}
+        canMoveLeft
+        canMoveRight
+      />,
+    );
+
+    const actions = getByRole("button", { name: "Actions for Original" });
+    expect(actions.className).toContain("h-11");
+    expect(actions.className).toContain("w-11");
+
+    fireEvent.click(actions);
+    fireEvent.click(getByRole("button", { name: "Move Original left" }));
+    fireEvent.click(getByRole("button", { name: "Move Original right" }));
+    fireEvent.click(getByRole("button", { name: "Close Original" }));
+
+    expect(onMoveLeft).toHaveBeenCalledOnce();
+    expect(onMoveRight).toHaveBeenCalledOnce();
+    expect(onClose).toHaveBeenCalledOnce();
+
+    fireEvent.click(getAllByRole("button", { name: "Rename" })[0]);
+    expect(getByLabelText(RENAME_LABEL)).toBeTruthy();
+  });
+});
+
+describe("QuickChatTabItem rename actions", () => {
   it("commits the rename on Enter, calling onRename exactly once", () => {
     const onRename = vi.fn();
     const { getByText, getByLabelText } = render(<QuickChatTabItem {...makeProps({ onRename })} />);
@@ -73,6 +136,59 @@ describe("QuickChatTabItem rename", () => {
     expect(onRename).toHaveBeenCalledWith("New name");
   });
 
+  it("commits the rename with Save and replaces close with edit actions", () => {
+    const onRename = vi.fn();
+    const { getByText, getByLabelText, getByRole, queryByLabelText, queryByRole } = render(
+      <QuickChatTabItem {...makeProps({ onRename })} />,
+    );
+    startEditing(getByText("Original"));
+
+    const input = getByLabelText(RENAME_LABEL) as HTMLInputElement;
+    expect(input.className).toContain("border-input");
+    expect(input.className).toContain("text-base");
+    fireEvent.change(input, { target: { value: "  Saved name  " } });
+    fireEvent.click(getByRole("button", { name: "Save" }));
+
+    expect(onRename).toHaveBeenCalledTimes(1);
+    expect(onRename).toHaveBeenCalledWith("Saved name");
+    expect(queryByLabelText(RENAME_LABEL)).toBeNull();
+    expect(queryByRole("button", { name: "Close Original" })).toBeTruthy();
+  });
+
+  it("restores the previous name with Cancel without calling onRename", () => {
+    const onRename = vi.fn();
+    const { getByText, getByLabelText, getByRole, queryByLabelText } = render(
+      <QuickChatTabItem {...makeProps({ onRename })} />,
+    );
+    startEditing(getByText("Original"));
+
+    fireEvent.change(getByLabelText(RENAME_LABEL), { target: { value: "Draft" } });
+    fireEvent.click(getByRole("button", { name: "Cancel" }));
+
+    expect(onRename).not.toHaveBeenCalled();
+    expect(queryByLabelText(RENAME_LABEL)).toBeNull();
+    expect(getByText("Original")).toBeTruthy();
+  });
+
+  it("does not commit twice when focus moves to Save", () => {
+    const onRename = vi.fn();
+    const { getByText, getByLabelText, getByRole } = render(
+      <QuickChatTabItem {...makeProps({ onRename })} />,
+    );
+    startEditing(getByText("Original"));
+
+    const input = getByLabelText(RENAME_LABEL) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "Saved once" } });
+    const save = getByRole("button", { name: "Save" });
+    fireEvent.blur(input, { relatedTarget: save });
+    fireEvent.click(save);
+
+    expect(onRename).toHaveBeenCalledTimes(1);
+    expect(onRename).toHaveBeenCalledWith("Saved once");
+  });
+});
+
+describe("QuickChatTabItem rename edge cases", () => {
   it("discards the draft on Escape — onRename is NOT called even after blur fires on unmount", () => {
     const onRename = vi.fn();
     const { getByText, getByLabelText } = render(<QuickChatTabItem {...makeProps({ onRename })} />);
@@ -124,7 +240,9 @@ describe("QuickChatTabItem activity", () => {
   it("shows the grid spinner while its conversation is working", () => {
     const { getByRole } = render(<QuickChatTabItem {...makeProps({ isWorking: true })} />);
 
-    expect(getByRole("status", { name: "Loading" })).toBeTruthy();
+    const spinner = getByRole("status", { name: "Loading" });
+    expect(spinner).toBeTruthy();
+    expect(spinner.closest("button")?.className).toContain("gap-1.5");
   });
 
   it("does not show a spinner for a settled conversation", () => {
