@@ -10,7 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/webapp"
 )
 
-func TestBootKanbanSnapshotHydratesTaskStatusSummaryInBatch(t *testing.T) {
+func TestBootKanbanSnapshotReconcilesExistingPendingSummary(t *testing.T) {
 	harness := newBootStateTestHarness(t)
 	ctx := context.Background()
 	workspaces, err := harness.taskSvc.ListWorkspaces(ctx)
@@ -25,12 +25,13 @@ func TestBootKanbanSnapshotHydratesTaskStatusSummaryInBatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list workflow steps: %v", err)
 	}
-	task, err := harness.taskSvc.CreateTask(ctx, &service.CreateTaskRequest{
+	taskResult, err := harness.taskSvc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID:    workspaces[0].ID,
 		WorkflowID:     workflows[0].ID,
 		WorkflowStepID: steps[0].ID,
 		Title:          "Summary hydration task",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -73,8 +74,14 @@ func TestBootKanbanSnapshotHydratesTaskStatusSummaryInBatch(t *testing.T) {
 		if item.ID != task.ID {
 			continue
 		}
-		if item.StatusSummary == nil || item.StatusSummary.Revision != 7 || item.StatusSummary.PendingAction != "clarification" {
+		if item.StatusSummary == nil || item.StatusSummary.Revision != 8 || item.StatusSummary.PendingAction != "" ||
+			item.StatusSummary.ForegroundActivity != "background" {
 			t.Fatalf("boot status summary = %#v", item.StatusSummary)
+		}
+		persisted, loadErr := harness.taskRepo.LoadTaskStatusSummaries(ctx, []string{task.ID})
+		if loadErr != nil || persisted[task.ID] == nil || persisted[task.ID].Revision != 8 ||
+			persisted[task.ID].PendingAction != "" {
+			t.Fatalf("persisted reconciled summary = %#v, err=%v", persisted[task.ID], loadErr)
 		}
 		return
 	}
@@ -108,12 +115,13 @@ func TestBootKanbanSnapshotStampsQueuedPromptCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list workflow steps: %v", err)
 	}
-	task, err := harness.taskSvc.CreateTask(ctx, &service.CreateTaskRequest{
+	taskResult, err := harness.taskSvc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID:    workspaces[0].ID,
 		WorkflowID:     workflows[0].ID,
 		WorkflowStepID: steps[0].ID,
 		Title:          "Queued count boot task",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("create task: %v", err)
 	}

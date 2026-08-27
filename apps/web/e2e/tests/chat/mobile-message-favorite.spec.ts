@@ -4,7 +4,7 @@ import { SessionPage } from "../../pages/session-page";
 const SEEDED_MESSAGE = "Mobile favorite touch target fixture message";
 
 test.describe("Mobile chat message favorite toggle", () => {
-  test("offers a 44px target and toggles a message by touch", async ({
+  test("matches sibling action icon size and toggles a message by touch", async ({
     testPage,
     apiClient,
     seedData,
@@ -30,21 +30,24 @@ test.describe("Mobile chat message favorite toggle", () => {
     const messageBody = chat
       .locator("[data-agent-message-body][data-message-id]")
       .filter({ hasText: SEEDED_MESSAGE });
-    const star = messageBody
-      .locator("xpath=..")
-      .getByRole("button", { name: "Mark message as favorite" });
+    const actionsRow = messageBody.locator("xpath=..");
+    const star = actionsRow.getByRole("button", { name: "Mark message as favorite" });
+    const copy = actionsRow.getByRole("button", { name: "Copy message to clipboard" });
     await expect(star).toBeVisible();
+    await expect(copy).toBeVisible();
 
-    const box = await star.boundingBox();
-    expect(box).not.toBeNull();
-    expect(box!.width).toBeGreaterThanOrEqual(44);
-    expect(box!.height).toBeGreaterThanOrEqual(44);
+    // The star must render at the same size as the sibling action icons on
+    // the phone viewport instead of the oversized 44px target.
+    const starBox = await star.boundingBox();
+    const copyBox = await copy.boundingBox();
+    expect(starBox).not.toBeNull();
+    expect(copyBox).not.toBeNull();
+    expect(Math.abs(starBox!.width - copyBox!.width)).toBeLessThanOrEqual(2);
+    expect(Math.abs(starBox!.height - copyBox!.height)).toBeLessThanOrEqual(2);
 
     await star.tap();
     await expect(
-      messageBody
-        .locator("xpath=..")
-        .getByRole("button", { name: "Remove message from favorites" }),
+      actionsRow.getByRole("button", { name: "Remove message from favorites" }),
     ).toBeVisible();
   });
 });

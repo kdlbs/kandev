@@ -11,8 +11,12 @@ import { buildStartRequest } from "@/lib/services/session-launch-helpers";
 import { useToast } from "@/components/toast-provider";
 import { linkToTask } from "@/lib/links";
 import type { SubmitHandlersDeps } from "@/components/task-create-dialog-types";
+import { t } from "@/lib/i18n";
 import { useFreshBranchConsent } from "@/components/task-create-dialog-fresh-branch-consent";
 import { queueTaskCreateLastUsedFromPayload } from "@/components/task-create-dialog-handlers";
+import { ApiError } from "@/lib/api/client";
+
+const GENERIC_ERROR_KEY = "common:anErrorOccurred";
 
 import {
   activatePlanMode,
@@ -20,13 +24,12 @@ import {
   buildRepositoriesPayload,
   computeIsTaskStarted,
   findDuplicateRemoteRepo,
+  findUnresolvedProviderRemote,
   validateCreateInputs,
   hasPendingAttachmentUploads,
   toMessageAttachments,
 } from "@/components/task-create-dialog-helpers";
-
-const GENERIC_ERROR_MESSAGE = "An error occurred";
-const DUPLICATE_REPO_TITLE = "Duplicate repository";
+import { hasRegisteredRepositoryProviderCandidate } from "@/lib/plugins/repository-provider-url-resolution";
 
 function notifyQueuedTask(
   response: { queued_for_step_id?: string | null },
@@ -34,26 +37,33 @@ function notifyQueuedTask(
 ) {
   if (!response.queued_for_step_id) return;
   notify({
-    title: "Task queued",
-    description: "The workflow step is at its WIP limit; this task will start when capacity opens.",
+    title: t("task:taskQueued"),
+    description: t("task:taskQueuedWipLimit"),
   });
 }
 
 type NoAgentTaskRequirements = {
   description: string;
-  workflowStepId: string;
   workspaceId: string;
   workflowId: string;
 };
 
 function hasNoAgentTaskRequirements(input: {
   description: string;
-  workflowStepId: string | null;
   workspaceId: string | null;
   workflowId: string | null;
 }): input is NoAgentTaskRequirements {
-  return Boolean(
-    input.description && input.workflowStepId && input.workspaceId && input.workflowId,
+  return Boolean(input.description && input.workspaceId && input.workflowId);
+}
+
+function resolveWorkspacePath(noRepository: boolean, workspacePath: string): string | undefined {
+  if (!noRepository) return undefined;
+  return workspacePath.trim() || undefined;
+}
+
+function isStaleBranchPolicyError(error: unknown): boolean {
+  return (
+    error instanceof ApiError && error.status === 400 && error.errorCode === "branch_policy_stale"
   );
 }
 
@@ -62,13 +72,14 @@ export function useTaskSubmitHandlers({
   isSessionMode,
   isEditMode,
   autoTitle = false,
+  autopilot = false,
   isPassthroughProfile,
   taskName,
   workspaceId,
   workflowId,
   effectiveWorkflowId,
-  effectiveDefaultStepId,
   repositories,
+  repositoriesDirty,
   discoveredRepositories,
   workspaceRepositories,
   useRemote,
@@ -81,6 +92,8 @@ export function useTaskSubmitHandlers({
   onSuccess,
   onCreateSession,
   onOpenChange,
+  createTask,
+  refreshBranchPolicies,
   preserveTaskCreateLastUsedOnClose,
   taskId,
   parentTaskId,
@@ -102,6 +115,7 @@ export function useTaskSubmitHandlers({
   repositoryLocalPath,
   noRepository,
   workspacePath,
+  blockedBy,
   transformDescriptionBeforeSubmit,
 }: SubmitHandlersDeps) {
   const router = useRouter();
@@ -118,7 +132,17 @@ export function useTaskSubmitHandlers({
       workspaceId,
       repositoryLocalPath,
       toast,
+      createTask,
     });
+
+  const refreshStaleBranchPolicies = useCallback(
+    async (error: unknown) => {
+      if (!isStaleBranchPolicyError(error)) return false;
+      if (refreshBranchPolicies) await refreshBranchPolicies().catch(() => undefined);
+      return true;
+    },
+    [refreshBranchPolicies],
+  );
 
   const buildFreshBranchPayload = (consentedDirtyFiles: string[]) =>
     isFreshBranchActive ? { confirmDiscard: true, consentedDirtyFiles } : undefined;
@@ -157,12 +181,39 @@ export function useTaskSubmitHandlers({
     const duplicate = findDuplicateRemoteRepo(remoteRepos);
     if (!duplicate) return false;
     toast({
-      title: DUPLICATE_REPO_TITLE,
-      description: `${duplicate} is added more than once — remove the duplicate row.`,
+      title: t("task:duplicateRepository"),
+      description: t("task:duplicateRepositoryDescription", { repository: duplicate }),
       variant: "error",
     });
     return true;
   }, [useRemote, remoteRepos, toast]);
+
+  const checkRemoteResolution = useCallback((): boolean => {
+    if (!useRemote) return false;
+    const unresolved = findUnresolvedProviderRemote(remoteRepos, (url) => {
+      if (!hasRegisteredRepositoryProviderCandidate(url)) return false;
+      return (
+        !prInfoByUrl.settled(url) ||
+        Boolean(prInfoByUrl.inspection?.(url)) ||
+        Boolean(prInfoByUrl.error(url))
+      );
+    });
+    if (!unresolved) return false;
+    const resolutionError = prInfoByUrl.error(unresolved.url);
+    toast({
+      title: t("task:repositoryStillBeingVerified"),
+      description: resolutionError
+        ? t("task:repositoryProviderVerificationFailed")
+        : t("task:repositoryProviderVerificationPending"),
+      variant: "error",
+    });
+    return true;
+  }, [prInfoByUrl, remoteRepos, toast, useRemote]);
+
+  const hasRemoteSubmitBlocker = useCallback(
+    () => checkRemoteResolution() || checkRemoteDuplicates(),
+    [checkRemoteDuplicates, checkRemoteResolution],
+  );
 
   const resetForm = useCallback(() => {
     setHasTitle(false);
@@ -202,8 +253,7 @@ export function useTaskSubmitHandlers({
         freshBranch: buildFreshBranchPayload(consentedDirtyFiles),
       });
     },
-    // buildFreshBranchPayload is a closure over current scope; lint exception kept narrow.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // buildFreshBranchPayload is a closure over current scope; dependencies stay explicit below.
     [
       noRepository,
       useRemote,
@@ -252,8 +302,8 @@ export function useTaskSubmitHandlers({
       router.push(linkToTask(taskId));
     } catch (error) {
       toast({
-        title: "Failed to create session",
-        description: error instanceof Error ? error.message : GENERIC_ERROR_MESSAGE,
+        title: t("task:failedToCreateSession"),
+        description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
         variant: "error",
       });
     } finally {
@@ -280,21 +330,30 @@ export function useTaskSubmitHandlers({
       ? (editingTask.description ?? "")
       : (descriptionInputRef.current?.getValue() ?? "");
     const trimmedDescription = description.trim();
-    const repositoriesPayload = isStartedEdit ? [] : getRepositoriesPayload();
+    const repositoriesPayload = !isStartedEdit && repositoriesDirty ? getRepositoriesPayload() : [];
     const titleChanged = trimmedTitle !== editingTask.title;
 
     const updatePayload: Parameters<typeof updateTask>[1] = {
       ...(titleChanged && { title: trimmedTitle }),
       ...(!isStartedEdit && { description: trimmedDescription }),
-      ...(repositoriesPayload.length > 0 && { repositories: repositoriesPayload }),
+      ...(!isStartedEdit && repositoriesDirty && { repositories: repositoriesPayload }),
     };
 
     const updatedTask = await updateTask(editingTask.id, updatePayload);
     return { updatedTask, trimmedDescription };
-  }, [editingTask, taskName, descriptionInputRef, getRepositoriesPayload, isStartedEdit]);
+  }, [
+    editingTask,
+    taskName,
+    descriptionInputRef,
+    getRepositoriesPayload,
+    isStartedEdit,
+    repositoriesDirty,
+  ]);
 
   const handleEditSubmit = useCallback(async () => {
+    if (checkRemoteResolution()) return;
     setIsCreatingTask(true);
+    let closeDialog = true;
     try {
       const result = await performTaskUpdate();
       if (!result) return;
@@ -317,43 +376,57 @@ export function useTaskSubmitHandlers({
 
       onSuccess?.(updatedTask, "edit", { taskSessionId });
     } catch (error) {
+      closeDialog = !(await refreshStaleBranchPolicies(error));
       toast({
-        title: "Failed to update task",
-        description: error instanceof Error ? error.message : GENERIC_ERROR_MESSAGE,
+        title: t("task:failedToUpdateTask"),
+        description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
         variant: "error",
       });
     } finally {
-      onOpenChange(false);
+      if (closeDialog) onOpenChange(false);
       setIsCreatingTask(false);
     }
   }, [
     performTaskUpdate,
+    checkRemoteResolution,
     agentProfileId,
     executorId,
     executorProfileId,
     onSuccess,
     onOpenChange,
+    refreshStaleBranchPolicies,
     toast,
     setIsCreatingTask,
   ]);
 
   const handleUpdateWithoutAgent = useCallback(async () => {
+    if (checkRemoteResolution()) return;
     setIsCreatingTask(true);
+    let closeDialog = true;
     try {
       const result = await performTaskUpdate();
       if (!result) return;
       onSuccess?.(result.updatedTask, "edit");
     } catch (error) {
+      closeDialog = !(await refreshStaleBranchPolicies(error));
       toast({
-        title: "Failed to update task",
-        description: error instanceof Error ? error.message : GENERIC_ERROR_MESSAGE,
+        title: t("task:failedToUpdateTask"),
+        description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
         variant: "error",
       });
     } finally {
-      onOpenChange(false);
+      if (closeDialog) onOpenChange(false);
       setIsCreatingTask(false);
     }
-  }, [performTaskUpdate, onSuccess, onOpenChange, toast, setIsCreatingTask]);
+  }, [
+    checkRemoteResolution,
+    performTaskUpdate,
+    onSuccess,
+    onOpenChange,
+    refreshStaleBranchPolicies,
+    toast,
+    setIsCreatingTask,
+  ]);
 
   const performCreate = useCallback(
     async (opts: {
@@ -385,7 +458,9 @@ export function useTaskSubmitHandlers({
           // payload omits the key entirely — matches the noRepository=false
           // case and keeps "no path provided" semantically distinct from
           // "empty path string" on the wire.
-          workspacePath: noRepository ? workspacePath.trim() || undefined : undefined,
+          workspacePath: resolveWorkspacePath(noRepository, workspacePath),
+          autopilot,
+          blockedBy,
         });
         submittedPayload = payload;
         return payload;
@@ -417,11 +492,13 @@ export function useTaskSubmitHandlers({
       workspaceId,
       effectiveWorkflowId,
       autoTitle,
+      blockedBy,
       agentProfileId,
       executorId,
       executorProfileId,
       isPassthroughProfile,
       parentTaskId,
+      autopilot,
       noRepository,
       workspacePath,
       onSuccess,
@@ -494,9 +571,10 @@ export function useTaskSubmitHandlers({
       try {
         await performEditWithPlanMode();
       } catch (error) {
+        await refreshStaleBranchPolicies(error);
         toast({
-          title: "Failed to start task in plan mode",
-          description: error instanceof Error ? error.message : GENERIC_ERROR_MESSAGE,
+          title: t("task:failedToStartTaskPlanMode"),
+          description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
           variant: "error",
         });
       } finally {
@@ -511,7 +589,7 @@ export function useTaskSubmitHandlers({
     if (hasPendingAttachmentUploads(selectedAttachments)) return;
     const attachments = toMessageAttachments(selectedAttachments);
     if (!validateForCreate(trimmedTitle, trimmedDescription)) return;
-    if (checkRemoteDuplicates()) return;
+    if (hasRemoteSubmitBlocker()) return;
     const consent = await ensureFreshBranchConsent();
     if (consent === null) return;
     setIsCreatingTask(true);
@@ -525,9 +603,10 @@ export function useTaskSubmitHandlers({
         attachments,
       });
     } catch (error) {
+      await refreshStaleBranchPolicies(error);
       toast({
-        title: "Failed to start task in plan mode",
-        description: error instanceof Error ? error.message : GENERIC_ERROR_MESSAGE,
+        title: t("task:failedToStartTaskPlanMode"),
+        description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
         variant: "error",
       });
     } finally {
@@ -538,9 +617,10 @@ export function useTaskSubmitHandlers({
     performEditWithPlanMode,
     taskName,
     validateForCreate,
-    checkRemoteDuplicates,
+    hasRemoteSubmitBlocker,
     ensureFreshBranchConsent,
     performCreate,
+    refreshStaleBranchPolicies,
     toast,
     descriptionInputRef,
     setIsCreatingTask,
@@ -586,16 +666,17 @@ export function useTaskSubmitHandlers({
     if (hasPendingAttachmentUploads(selectedAttachments)) return;
     const attachments = toMessageAttachments(selectedAttachments);
     if (!validateForCreate(trimmedTitle, trimmedDescription)) return;
-    if (checkRemoteDuplicates()) return;
+    if (hasRemoteSubmitBlocker()) return;
     const consent = await ensureFreshBranchConsent();
     if (consent === null) return;
     setIsCreatingTask(true);
     try {
       await submitCreateTask({ trimmedTitle, trimmedDescription, consent, attachments });
     } catch (error) {
+      await refreshStaleBranchPolicies(error);
       toast({
-        title: "Failed to create task",
-        description: error instanceof Error ? error.message : GENERIC_ERROR_MESSAGE,
+        title: t("task:failedToCreateTask"),
+        description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
         variant: "error",
       });
     } finally {
@@ -604,9 +685,10 @@ export function useTaskSubmitHandlers({
   }, [
     taskName,
     validateForCreate,
-    checkRemoteDuplicates,
+    hasRemoteSubmitBlocker,
     ensureFreshBranchConsent,
     submitCreateTask,
+    refreshStaleBranchPolicies,
     toast,
     descriptionInputRef,
     setIsCreatingTask,
@@ -621,12 +703,11 @@ export function useTaskSubmitHandlers({
     if (!validateForCreate(trimmedTitle, trimmedDescription)) return;
     const requirements = {
       description: trimmedDescription,
-      workflowStepId: effectiveDefaultStepId,
       workspaceId,
       workflowId: effectiveWorkflowId,
     };
     if (!hasNoAgentTaskRequirements(requirements)) return;
-    if (checkRemoteDuplicates()) return;
+    if (hasRemoteSubmitBlocker()) return;
 
     const consent = await ensureFreshBranchConsent();
     if (consent === null) return;
@@ -646,9 +727,10 @@ export function useTaskSubmitHandlers({
           executorProfileId,
           withAgent: false,
           attachments,
-          workspacePath: noRepository ? workspacePath.trim() || undefined : undefined,
+          workspacePath: resolveWorkspacePath(noRepository, workspacePath),
+          autopilot,
+          blockedBy,
         });
-        p.workflow_step_id = requirements.workflowStepId;
         submittedPayload = p;
         return p;
       };
@@ -661,9 +743,10 @@ export function useTaskSubmitHandlers({
       preserveTaskCreateLastUsedOnClose?.();
       onOpenChange(false);
     } catch (error) {
+      await refreshStaleBranchPolicies(error);
       toast({
-        title: "Failed to create task",
-        description: error instanceof Error ? error.message : GENERIC_ERROR_MESSAGE,
+        title: t("task:failedToCreateTask"),
+        description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
         variant: "error",
       });
     } finally {
@@ -675,16 +758,17 @@ export function useTaskSubmitHandlers({
     workspaceId,
     effectiveWorkflowId,
     agentProfileId,
-    effectiveDefaultStepId,
     executorId,
     executorProfileId,
     noRepository,
+    autopilot,
     workspacePath,
     validateForCreate,
-    checkRemoteDuplicates,
+    hasRemoteSubmitBlocker,
     getRepositoriesPayload,
     ensureFreshBranchConsent,
     createTaskWithFreshBranchRetry,
+    refreshStaleBranchPolicies,
     onSuccess,
     onOpenChange,
     preserveTaskCreateLastUsedOnClose,
@@ -692,6 +776,7 @@ export function useTaskSubmitHandlers({
     toast,
     descriptionInputRef,
     setIsCreatingTask,
+    blockedBy,
   ]);
 
   const editSubmitHandler = isStartedEdit ? handleUpdateWithoutAgent : handleEditSubmit;

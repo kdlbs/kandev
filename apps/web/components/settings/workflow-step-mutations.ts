@@ -6,6 +6,7 @@ import { createWorkflowStepAction, updateWorkflowStepAction } from "@/app/action
 
 // See `workflow-card-actions.ts`: both fields are persisted verbatim, so the
 // seeded step name deliberately stays English.
+// i18n-exempt: persisted workflow step name, same contract as DEFAULT_CUSTOM_STEPS.
 const NEW_STEP_DEFAULTS = { name: "New Step", color: "bg-slate-500" } as const;
 
 function fallbackErrorMessage(error: unknown): string {

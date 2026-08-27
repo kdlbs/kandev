@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { backendFixture, type BackendContext } from "./backend";
 import { ApiClient } from "../helpers/api-client";
+import { dwell } from "../helpers/causal-waits";
 import { PrAssetCapture } from "../helpers/pr-asset-capture";
 import { makeGitEnv } from "../helpers/git-helper";
 import type { WorkflowStep } from "../../lib/types/http";
@@ -16,6 +17,9 @@ const DEFAULT_SIDEBAR_VIEW = {
   group: "repository",
   collapsed_groups: [],
 };
+
+const AGENT_PROFILE_READY_TIMEOUT_MS = 30_000;
+const AGENT_PROFILE_READY_POLL_MS = 250;
 
 export type SeedData = {
   workspaceId: string;
@@ -31,6 +35,68 @@ export type SeedData = {
   /** Executor profile ID for the worktree executor — use to create tasks with git worktree isolation. */
   worktreeExecutorProfileId: string;
 };
+
+async function waitForSeedAgentProfile(
+  apiClient: ApiClient,
+  backend: BackendContext,
+  profileId: string,
+): Promise<string> {
+  const deadline = Date.now() + AGENT_PROFILE_READY_TIMEOUT_MS;
+  let lastObservation = "no response";
+
+  while (Date.now() < deadline) {
+    try {
+      await backend.ensureReady();
+      const { agents } = await apiClient.listAgents();
+      const profiles = agents.flatMap((agent) => agent.profiles ?? []);
+      const profile = profiles.find((candidate) => candidate.id === profileId);
+
+      if (profile && profile.enabled !== false) return profile.id;
+
+      if (profile) {
+        await apiClient.updateAgentProfile(profileId, { enabled: true });
+        return profile.id;
+      }
+
+      // Profile-mode tests intentionally restart the same database with the
+      // production registry. Its orphan reconciler soft-deletes the E2E mock
+      // profile because mock-agent is disabled there. When the E2E profile is
+      // restored, create a fresh disposable profile instead of waiting for a
+      // user-deleted row that the backend correctly will not resurrect.
+      // Virtual families such as Dynamic are settings containers, not
+      // launchable profile owners. They may be the first API row after the
+      // registry keeps them visible with routing disabled, so never use one
+      // as the replacement-profile target. Use the stable ID because the
+      // display name is localized and capitalized.
+      const agent =
+        agents.find((candidate) => candidate.name === "mock-agent") ??
+        agents.find((candidate) => candidate.id !== "dynamic");
+      if (agent) {
+        const replacement = await apiClient.createAgentProfile(agent.id, "mock-fast", {
+          model: "mock-fast",
+        });
+        return replacement.id;
+      }
+
+      lastObservation =
+        `seed profile ${profileId} was not returned by /api/v1/agents ` +
+        `(available profiles: ${profiles.map((candidate) => candidate.id).join(", ") || "none"})`;
+    } catch (error) {
+      lastObservation = error instanceof Error ? error.message : String(error);
+    }
+
+    await dwell(
+      AGENT_PROFILE_READY_POLL_MS,
+      "poll-interval",
+      "agent profile readiness has no event notification",
+    );
+  }
+
+  throw new Error(
+    `E2E backend did not expose enabled seed agent profile ${profileId} within ` +
+      `${AGENT_PROFILE_READY_TIMEOUT_MS}ms (${lastObservation})`,
+  );
+}
 
 export const test = backendFixture.extend<
   {
@@ -73,7 +139,11 @@ export const test = backendFixture.extend<
           lastText = await probe.text();
           break;
         }
-        await new Promise((r) => setTimeout(r, 250));
+        await dwell(
+          250,
+          "poll-interval",
+          "sampling interval for the mock-harness health probe above; the backend is still booting and there is no page, let alone a socket, to receive a ready signal on",
+        );
       }
       if (lastStatus === 404) {
         throw new Error(
@@ -137,9 +207,18 @@ export const test = backendFixture.extend<
       while (Date.now() < agentsDeadline) {
         const { agents } = await apiClient.listAgents();
         lastAgentCount = agents.length;
-        agentProfileId = agents[0]?.profiles[0]?.id;
+        // Virtual families (for example Dynamic) sort before concrete
+        // providers but do not own executable profiles. Search all returned
+        // families instead of assuming the first row is launchable.
+        agentProfileId = agents
+          .filter((agent) => agent.id !== "dynamic")
+          .flatMap((agent) => agent.profiles ?? [])[0]?.id;
         if (agentProfileId) break;
-        await new Promise((r) => setTimeout(r, 250));
+        await dwell(
+          250,
+          "poll-interval",
+          "sampling interval for the seeded-agent-profile poll above; seeding is asynchronous backend work read back over HTTP, with no page in this fixture",
+        );
       }
       if (!agentProfileId) {
         throw new Error(
@@ -179,6 +258,16 @@ export const test = backendFixture.extend<
   // SSR always resolves to the correct workspace regardless of what commitSettings
   // may have written during previous tests.
   testPage: async ({ browser, backend, apiClient, seedData }, use) => {
+    await backend.ensureReady();
+    // A suite-level test may restart the worker backend after the worker-scoped
+    // seed fixture ran. Health only proves that the listener is serving; it does
+    // not prove that the persisted seed profile is present and enabled for the
+    // task-create dialog. Re-establish that invariant before opening a page.
+    seedData.agentProfileId = await waitForSeedAgentProfile(
+      apiClient,
+      backend,
+      seedData.agentProfileId,
+    );
     // Clean up tasks, test-created workflows, and extra agent profiles from
     // previous tests in this worker. Keep the seeded workflow and the seed
     // agent profile so the worker-scoped seedData fixture remains valid.
@@ -214,6 +303,10 @@ export const test = backendFixture.extend<
       kanban_view_mode: "",
       // Keep startup routing deterministic for tests that open bare home.
       startup_page: "task_overview",
+      // Reset to the default (off). Prevent-auto-start tests flip this via
+      // saveUserSettings; without this reset it would leak into unrelated
+      // tests running later in the same worker.
+      prevent_auto_start_agent_on_open: false,
       // Reset to the default (off). Anchored-bar tests flip this via
       // saveUserSettings; without this reset it would leak into unrelated
       // tests running later in the same worker.
@@ -294,10 +387,15 @@ export const test = backendFixture.extend<
         apiClient.mockGitLabReset(seedData.workspaceId).catch(() => undefined),
         apiClient.clearGitLabRepositoryRemote(seedData.repositoryId).catch(() => undefined),
       ]);
+      // GitLab reset removes origin from the shared seed checkout. Restore the
+      // fixture's offline origin before the test so pull-enabled worktree
+      // preparation starts from the same valid repository state every time.
+      restoreSeedRepositoryOrigin(seedData);
       try {
         await use();
       } finally {
         await apiClient.clearGitLabRepositoryRemote(seedData.repositoryId).catch(() => undefined);
+        restoreSeedRepositoryOrigin(seedData);
       }
     },
     { auto: true },
@@ -306,14 +404,71 @@ export const test = backendFixture.extend<
 
 /**
  * Restores the fixture's offline origin after a GitLab E2E cleanup removes it.
- * This lets focused tests distinguish a deleted remote ref from a transport error.
+ * Refresh the remote-tracking refs because branch recovery must offer remote
+ * branches, not only the local branch that remains checked out.
  */
 export function restoreSeedRepositoryOrigin(seedData: SeedData) {
   const baseArgs = ["-C", seedData.repositoryPath, "remote"];
   try {
-    execFileSync("git", [...baseArgs, "set-url", "origin", seedData.repositoryRemoteURL]);
+    execFileSync("git", [...baseArgs, "set-url", "origin", seedData.repositoryRemoteURL], {
+      stdio: "ignore",
+    });
   } catch {
-    execFileSync("git", [...baseArgs, "add", "origin", seedData.repositoryRemoteURL]);
+    execFileSync("git", [...baseArgs, "add", "origin", seedData.repositoryRemoteURL], {
+      stdio: "ignore",
+    });
+  }
+  execFileSync("git", ["-C", seedData.repositoryPath, "fetch", "--no-tags", "origin"], {
+    stdio: "ignore",
+  });
+}
+
+/** Points the seed repository at an empty remote whose HEAD cannot resolve. */
+export function pointSeedRepositoryAtUnresolvedOrigin(seedData: SeedData, tmpDir: string) {
+  const remoteDir = path.join(
+    tmpDir,
+    "repos",
+    `e2e-unresolved-remote-${Date.now()}-${process.pid}.git`,
+  );
+  fs.mkdirSync(path.dirname(remoteDir), { recursive: true });
+  execFileSync("git", ["init", "--bare", "--initial-branch=main", remoteDir], {
+    env: makeGitEnv(tmpDir),
+    stdio: "ignore",
+  });
+  try {
+    execFileSync(
+      "git",
+      ["-C", seedData.repositoryPath, "remote", "set-url", "origin", `file://${remoteDir}`],
+      { env: makeGitEnv(tmpDir), stdio: "ignore" },
+    );
+  } catch {
+    execFileSync(
+      "git",
+      ["-C", seedData.repositoryPath, "remote", "add", "origin", `file://${remoteDir}`],
+      { env: makeGitEnv(tmpDir), stdio: "ignore" },
+    );
+  }
+}
+
+/** Points the seed repository at a valid cached checkout with an unreachable origin. */
+export function pointSeedRepositoryAtFailingOrigin(seedData: SeedData, tmpDir: string) {
+  const remoteDir = path.join(
+    tmpDir,
+    "repos",
+    `e2e-failing-remote-${Date.now()}-${process.pid}.git`,
+  );
+  try {
+    execFileSync(
+      "git",
+      ["-C", seedData.repositoryPath, "remote", "set-url", "origin", `file://${remoteDir}`],
+      { env: makeGitEnv(tmpDir), stdio: "ignore" },
+    );
+  } catch {
+    execFileSync(
+      "git",
+      ["-C", seedData.repositoryPath, "remote", "add", "origin", `file://${remoteDir}`],
+      { env: makeGitEnv(tmpDir), stdio: "ignore" },
+    );
   }
 }
 
@@ -336,6 +491,9 @@ test.beforeEach(async ({ apiClient, seedData }) => {
     sidebar_active_view_id: DEFAULT_SIDEBAR_VIEW.id,
     sidebar_draft: null,
     saved_layouts: [],
+    // Status-surface specs opt in from their local beforeEach hooks; unrelated
+    // tests start from the portable setting's default-off state.
+    app_status_bar_enabled: false,
     lsp_auto_start_languages: [],
     lsp_auto_install_languages: [],
     lsp_server_configs: {},

@@ -35,7 +35,7 @@ func (f *fakeRepository) GetCompletedTaskActivity(context.Context, string, int) 
 	return nil, nil
 }
 
-func (f *fakeRepository) GetAgentUsage(context.Context, string, int, *time.Time) ([]*models.AgentUsage, error) {
+func (f *fakeRepository) GetModelUsage(context.Context, string, int, *time.Time) ([]*models.ModelUsage, error) {
 	return nil, nil
 }
 
@@ -58,9 +58,11 @@ func (f *fakeRepository) ListSessionCodeStats(
 	return f.stats, nil
 }
 
+func int64Ptr(v int64) *int64 { return &v }
+
 func TestService_ListSessionCodeStats_DelegatesToRepositoryAndReturnsResults(t *testing.T) {
 	want := []*models.SessionCodeStats{
-		{SessionID: "sess-1", LinesAddedCommitted: 10, LinesDeletedCommitted: 2, LinesAddedPeakPending: 5, LinesDeletedPeakPending: 1},
+		{SessionID: "sess-1", LinesAddedCommitted: int64Ptr(10), LinesDeletedCommitted: int64Ptr(2), LinesAddedPeakPending: 5, LinesDeletedPeakPending: 1},
 	}
 	repo := &fakeRepository{stats: want}
 	svc := New(repo)

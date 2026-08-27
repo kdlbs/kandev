@@ -112,6 +112,7 @@ type Service struct {
 	eventBus                 bus.EventBus
 	logger                   *logger.Logger
 	taskDeleter              TaskDeleter
+	comparisonTargetObserver ComparisonTargetObserver
 	taskIssueStore           TaskIssueStore
 	// cascadeTaskDeleter is the cascade-delete entry point used by the
 	// watch reset flow. It is distinct from taskDeleter (which only deletes
@@ -128,6 +129,7 @@ type Service struct {
 	mergeMethodsCache    *ttlCache
 	accessibleReposCache *ttlCache
 	repoErrorCache       *ttlCache
+	forkParentCache      *ttlCache
 	protectionCache      *branchProtectionCache
 	rateTracker          *RateTracker
 	promptResolver       PromptResolver
@@ -197,6 +199,7 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 		mergeMethodsCache:       newMergeMethodsCache(),
 		accessibleReposCache:    newAccessibleReposCache(),
 		repoErrorCache:          newRepoErrorCache(),
+		forkParentCache:         newForkParentCache(),
 		protectionCache:         newBranchProtectionCache(),
 		rateTracker:             NewRateTracker(eventBus, log),
 		tokenClientFactory:      func(token string) Client { return NewPATClient(token) },
@@ -208,6 +211,7 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 	}
 	if store != nil {
 		service.resolver = NewCredentialResolver(store, secrets)
+		service.resolver.SetRateTracker(service.rateTracker)
 		service.resolver.SetLegacyFactory(func(ctx context.Context) (Client, string, error) {
 			return NewClient(ctx, secrets, log)
 		})

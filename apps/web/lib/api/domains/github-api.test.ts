@@ -52,12 +52,9 @@ import * as githubAuthApi from "./github-auth-api";
 const workspaceID = "ws/1";
 const appRegistrationID = "registration/one";
 const publicKandevURL = "https://kandev.example";
-
 type FetchInput = Parameters<typeof fetch>[0];
 type FetchInit = Parameters<typeof fetch>[1];
-
 const fetchSpy = vi.fn<(...args: [FetchInput, FetchInit?]) => Promise<Response>>();
-
 beforeEach(() => {
   fetchSpy.mockReset();
   vi.stubGlobal("fetch", fetchSpy);
@@ -94,6 +91,16 @@ describe("workspace GitHub authentication", () => {
       "http://api.test/api/v1/github/status?workspace_id=workspace%2Fone",
     );
     expect(call?.[1]).toMatchObject({ cache: "no-store" });
+  });
+
+  it("requests a fresh rate-limit snapshot when requested", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ workspace_id: workspaceID }));
+
+    await fetchGitHubStatus(workspaceID, { cache: "no-store" }, true);
+
+    expect(lastCallUrl()).toBe(
+      "http://api.test/api/v1/github/status?workspace_id=ws%2F1&refresh_rate_limit=true",
+    );
   });
 
   it("selects an exact named CLI account", async () => {

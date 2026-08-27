@@ -20,18 +20,30 @@ func IsInternalID(id string) bool {
 // underlying store remains available to integration services for their
 // deterministic internal keys.
 type UserVisibleStore struct {
-	store  SecretStore
-	scoped ScopedSecretStore
+	store SecretStore
+	// scoped carries both the scope-aware read/lifecycle surface and the
+	// transfer surface the wrapper exposes to the service.
+	scoped userVisibleScopedStore
 }
 
+// userVisibleScopedStore is the store surface UserVisibleStore forwards:
+// scope-aware reads/lifecycle plus atomic scope transfers.
+type userVisibleScopedStore interface {
+	ScopedSecretStore
+	SecretTransferStore
+}
+
+// NewUserVisibleStore wraps a SecretStore, returning a store that exposes
+// only user-managed credentials; it returns nil when store is nil.
 func NewUserVisibleStore(store SecretStore) SecretStore {
 	if store == nil {
 		return nil
 	}
-	scoped, _ := store.(ScopedSecretStore)
+	scoped, _ := store.(userVisibleScopedStore)
 	return &UserVisibleStore{store: store, scoped: scoped}
 }
 
+// Create creates a secret owned by the current user.
 func (s *UserVisibleStore) Create(ctx context.Context, secret *SecretWithValue) error {
 	if secret != nil && IsInternalID(secret.ID) {
 		return internalSecretNotFound(secret.ID)
@@ -39,6 +51,8 @@ func (s *UserVisibleStore) Create(ctx context.Context, secret *SecretWithValue) 
 	return s.store.Create(ctx, secret)
 }
 
+// Get returns the global user-visible secret with the given id, treating
+// internal ids and non-global scopes as not found.
 func (s *UserVisibleStore) Get(ctx context.Context, id string) (*Secret, error) {
 	if IsInternalID(id) {
 		return nil, internalSecretNotFound(id)
@@ -53,6 +67,7 @@ func (s *UserVisibleStore) Get(ctx context.Context, id string) (*Secret, error) 
 	return secret, nil
 }
 
+// Reveal returns the plaintext value of the user-visible secret with the given id.
 func (s *UserVisibleStore) Reveal(ctx context.Context, id string) (string, error) {
 	if IsInternalID(id) {
 		return "", internalSecretNotFound(id)
@@ -63,6 +78,7 @@ func (s *UserVisibleStore) Reveal(ctx context.Context, id string) (string, error
 	return s.store.Reveal(ctx, id)
 }
 
+// Update updates the user-visible secret with the given id.
 func (s *UserVisibleStore) Update(ctx context.Context, id string, req *UpdateSecretRequest) error {
 	if IsInternalID(id) {
 		return internalSecretNotFound(id)
@@ -73,6 +89,7 @@ func (s *UserVisibleStore) Update(ctx context.Context, id string, req *UpdateSec
 	return s.store.Update(ctx, id, req)
 }
 
+// Delete deletes the user-visible secret with the given id.
 func (s *UserVisibleStore) Delete(ctx context.Context, id string) error {
 	if IsInternalID(id) {
 		return internalSecretNotFound(id)
@@ -83,6 +100,7 @@ func (s *UserVisibleStore) Delete(ctx context.Context, id string) error {
 	return s.store.Delete(ctx, id)
 }
 
+// List returns all user-visible (non-internal) secrets.
 func (s *UserVisibleStore) List(ctx context.Context) ([]*SecretListItem, error) {
 	if s.scoped != nil {
 		return s.ListScoped(ctx, SecretListOptions{Scope: ScopeGlobal})
@@ -100,6 +118,7 @@ func (s *UserVisibleStore) List(ctx context.Context) ([]*SecretListItem, error) 
 	return visible, nil
 }
 
+// ListScoped returns user-visible secrets matching the given scope options.
 func (s *UserVisibleStore) ListScoped(ctx context.Context, opts SecretListOptions) ([]*SecretListItem, error) {
 	if opts.Scope == "" {
 		opts.Scope = ScopeGlobal
@@ -117,6 +136,7 @@ func (s *UserVisibleStore) ListScoped(ctx context.Context, opts SecretListOption
 	return filterInternalSecretItems(items), nil
 }
 
+// GetForWorkspace returns the user-visible secret with the given id scoped to the workspace.
 func (s *UserVisibleStore) GetForWorkspace(ctx context.Context, id, workspaceID string) (*Secret, error) {
 	if IsInternalID(id) {
 		return nil, internalSecretNotFound(id)
@@ -127,6 +147,7 @@ func (s *UserVisibleStore) GetForWorkspace(ctx context.Context, id, workspaceID 
 	return s.scoped.GetForWorkspace(ctx, id, workspaceID)
 }
 
+// RevealGlobal returns the plaintext value of the global user-visible secret with the given id.
 func (s *UserVisibleStore) RevealGlobal(ctx context.Context, id string) (string, error) {
 	if IsInternalID(id) {
 		return "", internalSecretNotFound(id)
@@ -137,6 +158,7 @@ func (s *UserVisibleStore) RevealGlobal(ctx context.Context, id string) (string,
 	return s.store.Reveal(ctx, id)
 }
 
+// RevealForWorkspace returns the plaintext value of the user-visible secret with the given id scoped to the workspace.
 func (s *UserVisibleStore) RevealForWorkspace(ctx context.Context, id, workspaceID string) (string, error) {
 	if IsInternalID(id) {
 		return "", internalSecretNotFound(id)
@@ -150,6 +172,7 @@ func (s *UserVisibleStore) RevealForWorkspace(ctx context.Context, id, workspace
 	return s.store.Reveal(ctx, id)
 }
 
+// DeleteWorkspaceSecrets deletes all user-visible secrets scoped to the given workspace.
 func (s *UserVisibleStore) DeleteWorkspaceSecrets(ctx context.Context, workspaceID string) error {
 	if s.scoped == nil {
 		return fmt.Errorf("workspace-scoped secret storage is unavailable")
@@ -157,6 +180,29 @@ func (s *UserVisibleStore) DeleteWorkspaceSecrets(ctx context.Context, workspace
 	return s.scoped.DeleteWorkspaceSecrets(ctx, workspaceID)
 }
 
+// CopyScoped copies the user-visible secret to the target scope after the destination verifier approves.
+func (s *UserVisibleStore) CopyScoped(ctx context.Context, sourceID, sourceWorkspaceID string, targetScope SecretScope, targetWorkspaceID string, requestedName *string, verifyDestination func(context.Context) error) (*Secret, error) {
+	if IsInternalID(sourceID) {
+		return nil, internalSecretNotFound(sourceID)
+	}
+	if s.scoped == nil {
+		return nil, fmt.Errorf("workspace-scoped secret storage is unavailable")
+	}
+	return s.scoped.CopyScoped(ctx, sourceID, sourceWorkspaceID, targetScope, targetWorkspaceID, requestedName, verifyDestination)
+}
+
+// MoveScoped moves the user-visible secret to the target scope after the destination verifier approves.
+func (s *UserVisibleStore) MoveScoped(ctx context.Context, sourceID, sourceWorkspaceID string, targetScope SecretScope, targetWorkspaceID string, requestedName *string, verifyDestination func(context.Context) error) (*Secret, error) {
+	if IsInternalID(sourceID) {
+		return nil, internalSecretNotFound(sourceID)
+	}
+	if s.scoped == nil {
+		return nil, fmt.Errorf("workspace-scoped secret storage is unavailable")
+	}
+	return s.scoped.MoveScoped(ctx, sourceID, sourceWorkspaceID, targetScope, targetWorkspaceID, requestedName, verifyDestination)
+}
+
+// DeleteWorkspaceSecretsTx deletes workspace-scoped user-visible secrets inside the given transaction.
 func (s *UserVisibleStore) DeleteWorkspaceSecretsTx(ctx context.Context, tx *sqlx.Tx, workspaceID string) error {
 	if s.scoped == nil {
 		return fmt.Errorf("workspace-scoped secret storage is unavailable")
@@ -171,10 +217,12 @@ func (s *UserVisibleStore) DeleteWorkspaceSecretsTx(ctx context.Context, tx *sql
 // The wrapped store is owned and closed by the repository container.
 func (s *UserVisibleStore) Close() error { return nil }
 
+// internalSecretNotFound returns the store's sentinel not-found error annotated with the given secret id.
 func internalSecretNotFound(id string) error {
 	return fmt.Errorf("%w: %s", ErrNotFound, id)
 }
 
+// filterInternalSecretItems returns only the user-managed items, dropping internal ones.
 func filterInternalSecretItems(items []*SecretListItem) []*SecretListItem {
 	visible := make([]*SecretListItem, 0, len(items))
 	for _, item := range items {

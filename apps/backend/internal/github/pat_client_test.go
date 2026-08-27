@@ -18,7 +18,7 @@ func TestConvertPatPR(t *testing.T) {
 		Title:     "Feature Y",
 		HTMLURL:   "https://github.com/org/repo/pull/10",
 		State:     "open",
-		Draft:     false,
+		Draft:     boolPtr(false),
 		Additions: 200,
 		Deletions: 30,
 		CreatedAt: time.Date(2025, 3, 1, 0, 0, 0, 0, time.UTC),
@@ -66,6 +66,9 @@ func TestConvertPatPR(t *testing.T) {
 	if pr.Mergeable {
 		t.Error("expected mergeable = false when nil")
 	}
+	if !pr.IsDraftObserved {
+		t.Error("expected IsDraftObserved = true when draft is present in the response")
+	}
 	if len(pr.RequestedReviewers) != 2 {
 		t.Fatalf("requested reviewers = %d, want 2", len(pr.RequestedReviewers))
 	}
@@ -77,6 +80,42 @@ func TestConvertPatPR(t *testing.T) {
 	}
 	if pr.MergedAt != nil {
 		t.Error("expected nil MergedAt")
+	}
+}
+
+// TestConvertPatPR_MissingDraftAndChangedFilesLeavesUnobserved covers
+// AC-12a on the REST decode path: a response that omits draft and
+// changed_files must decode to unobserved (Observed=false), not a
+// fabricated false/0 masquerading as a real observation.
+func TestConvertPatPR_MissingDraftAndChangedFilesLeavesUnobserved(t *testing.T) {
+	raw := &patPR{Number: 11, State: "open"}
+	pr := convertPatPR(raw, "org", "repo")
+	if pr.IsDraftObserved {
+		t.Error("IsDraftObserved = true, want false when draft is absent from the response")
+	}
+	if pr.ChangedFilesObserved {
+		t.Error("ChangedFilesObserved = true, want false when changed_files is absent from the response")
+	}
+}
+
+// TestConvertPatPR_ExplicitFalseAndZeroAreObserved covers AC-12a's other
+// half: a response that genuinely reports draft=false and changed_files=0
+// must be distinguishable from one that omits them — both mark
+// Observed=true.
+func TestConvertPatPR_ExplicitFalseAndZeroAreObserved(t *testing.T) {
+	raw := &patPR{Number: 11, State: "open", Draft: boolPtr(false), ChangedFiles: intPtr(0)}
+	pr := convertPatPR(raw, "org", "repo")
+	if !pr.IsDraftObserved {
+		t.Error("IsDraftObserved = false, want true for an explicit draft=false")
+	}
+	if pr.Draft {
+		t.Error("Draft = true, want false")
+	}
+	if !pr.ChangedFilesObserved {
+		t.Error("ChangedFilesObserved = false, want true for an explicit changed_files=0")
+	}
+	if pr.ChangedFiles != 0 {
+		t.Errorf("ChangedFiles = %d, want 0", pr.ChangedFiles)
 	}
 }
 
@@ -376,6 +415,35 @@ func TestPATClient_FindPRByBranch_UsesGraphQLHeadRefName(t *testing.T) {
 	}
 	if pr == nil || pr.Number != 12 || pr.HeadBranch != "feature" {
 		t.Fatalf("unexpected PR: %#v", pr)
+	}
+}
+
+func TestPATClient_FindPRByHead_UsesExactSourceRepository(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/kdlbs/kandev/pulls" {
+			t.Errorf("path = %q, want /repos/kdlbs/kandev/pulls", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("head"); got != "alice:feature" {
+			t.Errorf("head = %q, want alice:feature", got)
+		}
+		if got := r.URL.Query().Get("per_page"); got != "100" {
+			t.Errorf("per_page = %q, want 100", got)
+		}
+		_, _ = w.Write([]byte(`[{"number":12,"title":"fork PR","html_url":"https://x/12","state":"open",
+			"head":{"ref":"feature","sha":"abc123","repo":{"id":200,"name":"kandev","full_name":"alice/kandev","owner":{"login":"alice"}}},
+			"base":{"ref":"main","repo":{"id":100,"name":"kandev","full_name":"kdlbs/kandev","owner":{"login":"kdlbs"}}},
+			"user":{"login":"alice"}}]`))
+	}))
+	t.Cleanup(srv.Close)
+
+	pr, err := newPATClientPointingAt(t, srv.URL).FindPRByHead(
+		context.Background(), "kdlbs", "kandev", "alice", "kandev", "feature",
+	)
+	if err != nil {
+		t.Fatalf("FindPRByHead: %v", err)
+	}
+	if pr == nil || pr.Number != 12 || pr.HeadRepoOwner != "alice" || pr.HeadRepoName != "kandev" {
+		t.Fatalf("PR = %#v, want source alice/kandev", pr)
 	}
 }
 

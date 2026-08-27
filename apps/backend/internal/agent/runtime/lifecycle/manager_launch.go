@@ -17,9 +17,11 @@ import (
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/gitconfigenv"
+	"github.com/kandev/kandev/internal/mcp/plugintools"
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
@@ -176,6 +178,76 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 	return metadata
 }
 
+// collectComparisonTargets projects the validated per-repository comparison
+// targets into the same workspace-subpath keys used by base branches. The
+// target remains credential-free and is revalidated at the runtime boundary.
+func collectComparisonTargets(req *LaunchRequest) (map[string]models.ComparisonTarget, error) {
+	if req == nil {
+		return nil, nil
+	}
+	specs := req.RepoSpecs()
+	if len(specs) == 0 {
+		if req.ComparisonTarget == nil {
+			return nil, nil
+		}
+		if err := req.ComparisonTarget.Validate(); err != nil {
+			return nil, fmt.Errorf("validate comparison target: %w", err)
+		}
+		return map[string]models.ComparisonTarget{"": *req.ComparisonTarget}, nil
+	}
+	targets := make(map[string]models.ComparisonTarget)
+	for index, spec := range specs {
+		if spec.ComparisonTarget == nil {
+			continue
+		}
+		if err := spec.ComparisonTarget.Validate(); err != nil {
+			return nil, fmt.Errorf("validate comparison target for repository %q: %w", spec.RepoName, err)
+		}
+		key := ""
+		if index > 0 {
+			key = baseBranchMetadataKey(spec)
+		}
+		if existing, ok := targets[key]; ok && !existing.Equal(*spec.ComparisonTarget) {
+			return nil, fmt.Errorf("multiple comparison targets map to workspace repository %q", key)
+		}
+		targets[key] = *spec.ComparisonTarget
+	}
+	if len(targets) == 0 {
+		return nil, nil
+	}
+	return targets, nil
+}
+
+func comparisonTargetsFromWorkspaceRepositories(specs []WorkspaceRepositorySpec) (map[string]models.ComparisonTarget, error) {
+	if len(specs) == 0 {
+		return nil, nil
+	}
+	targets := make(map[string]models.ComparisonTarget)
+	for index, spec := range specs {
+		if spec.ComparisonTarget == nil {
+			continue
+		}
+		if err := spec.ComparisonTarget.Validate(); err != nil {
+			return nil, fmt.Errorf("validate comparison target for repository %q: %w", spec.RepoName, err)
+		}
+		key := ""
+		if index > 0 {
+			key = baseBranchMetadataKey(RepoLaunchSpec{
+				RepoName:   spec.RepoName,
+				BranchSlug: spec.BranchSlug,
+			})
+		}
+		if existing, ok := targets[key]; ok && !existing.Equal(*spec.ComparisonTarget) {
+			return nil, fmt.Errorf("comparison target collision for workspace repository %q", key)
+		}
+		targets[key] = *spec.ComparisonTarget
+	}
+	if len(targets) == 0 {
+		return nil, nil
+	}
+	return targets, nil
+}
+
 // collectRemoteContributions projects the validated per-repository bindings
 // into the workspace-subpath keys understood by agentctl. The first repository
 // owns the workspace root; sibling destinations use the same deterministic key
@@ -215,6 +287,55 @@ func collectRemoteContributions(req *LaunchRequest) (map[string]models.RemoteCon
 		return nil, nil
 	}
 	return bindings, nil
+}
+
+// collectContributionDestinations projects server-authored managed fork
+// destinations using the same workspace-subpath keys as remote contributions.
+func collectContributionDestinations(req *LaunchRequest) (map[string]models.ContributionDestination, error) {
+	if req == nil {
+		return nil, nil
+	}
+	specs := req.RepoSpecs()
+	if len(specs) == 0 {
+		if req.ContributionDestination == nil {
+			return nil, nil
+		}
+		if err := req.ContributionDestination.Validate(); err != nil {
+			return nil, fmt.Errorf("validate contribution destination: %w", err)
+		}
+		return map[string]models.ContributionDestination{"": *req.ContributionDestination}, nil
+	}
+	destinations := make(map[string]models.ContributionDestination)
+	for index, spec := range specs {
+		if spec.ContributionDestination == nil {
+			continue
+		}
+		if err := spec.ContributionDestination.Validate(); err != nil {
+			return nil, fmt.Errorf("validate contribution destination for repository %q: %w", spec.RepoName, err)
+		}
+		key := ""
+		if index > 0 {
+			key = baseBranchMetadataKey(spec)
+		}
+		if existing, ok := destinations[key]; ok {
+			if !sameContributionDestinationTarget(existing, *spec.ContributionDestination) {
+				return nil, fmt.Errorf("multiple contribution destinations target workspace repository %q", key)
+			}
+			continue
+		}
+		destinations[key] = *spec.ContributionDestination
+	}
+	if len(destinations) == 0 {
+		return nil, nil
+	}
+	return destinations, nil
+}
+
+func sameContributionDestinationTarget(left, right models.ContributionDestination) bool {
+	return strings.EqualFold(left.TargetRepository.Host, right.TargetRepository.Host) &&
+		left.TargetRepository.Path == right.TargetRepository.Path &&
+		left.TargetRepository.ProviderID == right.TargetRepository.ProviderID &&
+		left.TargetRepository.RemoteURL == right.TargetRepository.RemoteURL
 }
 
 // collectBaseBranches builds the per-repo {RepositoryName → base_branch}
@@ -310,11 +431,13 @@ func (m *Manager) resolveProfileLaunchTokens(profileInfo *AgentProfileInfo) (cli
 	return cliFlagTokens, commandPrefixTokens, nil
 }
 
-// buildAgentCommand builds the agent command strings for the execution.
-// Returns both the initial command and the continue command (for one-shot agents like Amp).
-// Returns an error when a configured command_prefix cannot be resolved, so a
-// configured profile fails closed instead of launching unwrapped.
-func (m *Manager) buildAgentCommand(req *LaunchRequest, profileInfo *AgentProfileInfo, agentConfig agents.Agent, preferNative bool) (agentCommands, error) {
+func (m *Manager) buildAgentCommandWithContext(
+	ctx context.Context,
+	req *LaunchRequest,
+	profileInfo *AgentProfileInfo,
+	agentConfig agents.Agent,
+	preferNative bool,
+) (agentCommands, error) {
 	model := ""
 	autoApprove := false
 	permissionValues := make(map[string]bool)
@@ -334,6 +457,11 @@ func (m *Manager) buildAgentCommand(req *LaunchRequest, profileInfo *AgentProfil
 		model = req.ModelOverride
 	}
 	cliFlagTokens = appendRouteOverrideFlags(cliFlagTokens, req)
+	runtime := models.ExecutorType(req.ExecutorType).Runtime()
+	managedRuntimeVersion, err := m.resolveManagedRuntimeVersion(ctx, runtime, agentConfig)
+	if err != nil {
+		return agentCommands{}, err
+	}
 	// Only pass SessionID (for --resume flag) if the agent supports recovery.
 	// Agents with CanRecover=false (e.g. Auggie) use history context injection instead.
 	sessionID := req.ACPSessionID
@@ -341,14 +469,15 @@ func (m *Manager) buildAgentCommand(req *LaunchRequest, profileInfo *AgentProfil
 		sessionID = ""
 	}
 	cmdOpts := agents.CommandOptions{
-		Model:               model,
-		SessionID:           sessionID,
-		AutoApprove:         autoApprove,
-		PermissionValues:    permissionValues,
-		CLIFlagTokens:       cliFlagTokens,
-		CommandPrefixTokens: commandPrefixTokens,
-		Runtime:             models.ExecutorType(req.ExecutorType).Runtime(),
-		PreferNativeBinary:  preferNative,
+		Model:                 model,
+		SessionID:             sessionID,
+		AutoApprove:           autoApprove,
+		PermissionValues:      permissionValues,
+		CLIFlagTokens:         cliFlagTokens,
+		CommandPrefixTokens:   commandPrefixTokens,
+		Runtime:               runtime,
+		PreferNativeBinary:    preferNative,
+		ManagedRuntimeVersion: managedRuntimeVersion,
 	}
 	args := m.commandBuilder.BuildCommandArgs(agentConfig, cmdOpts)
 	continueArgs := m.commandBuilder.BuildContinueCommandArgs(agentConfig, cmdOpts)
@@ -356,6 +485,38 @@ func (m *Manager) buildAgentCommand(req *LaunchRequest, profileInfo *AgentProfil
 		return agentCommands{}, err
 	}
 	return newAgentCommands(args, continueArgs), nil
+}
+
+func (m *Manager) resolveManagedRuntimeVersion(
+	ctx context.Context,
+	_ agentruntime.Runtime,
+	agentConfig agents.Agent,
+) (string, error) {
+	managed, ok := agentConfig.(agents.ManagedNPMRuntimeAgent)
+	if !ok {
+		return "", nil
+	}
+	spec := managed.ManagedNPMRuntime()
+	effectiveVersion := spec.DefaultVersion
+	if effectiveVersion == "" {
+		// Test and embedded agents may construct a spec literal. PackageSpec
+		// still resolves a known built-in package's reviewed default.
+		packageSpec := spec.PackageSpec("")
+		if packageSpec != spec.Package {
+			effectiveVersion = strings.TrimPrefix(packageSpec, spec.Package+"@")
+		}
+	}
+	if m.managedRuntimeSelections == nil {
+		return effectiveVersion, nil
+	}
+	selection, found, err := m.managedRuntimeSelections.Get(ctx, agentConfig.ID(), spec.Package)
+	if err != nil {
+		return "", fmt.Errorf("resolve active managed runtime version for %s: %w", agentConfig.ID(), err)
+	}
+	if !found || selection.Package != spec.Package {
+		return effectiveVersion, nil
+	}
+	return selection.Version, nil
 }
 
 func validateBuiltAgentCommands(args, continueArgs []string) error {
@@ -538,6 +699,9 @@ func (m *Manager) launchPrepareRequest(req *LaunchRequest, profileInfo *AgentPro
 	if req.SessionID != "" {
 		reqWithWorktree.Metadata["session_id"] = req.SessionID
 	}
+	if req.TurnID != "" {
+		reqWithWorktree.Metadata["prompt_turn_id"] = req.TurnID
+	}
 
 	if err := mergeRouteOverrideEnv(&reqWithWorktree); err != nil {
 		return LaunchRequest{}, "", err
@@ -679,6 +843,25 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 	if len(remoteContributions) > 0 {
 		metadata[MetadataKeyRemoteContributions] = remoteContributions
 	}
+	comparisonTargets, err := collectComparisonTargets(reqWithWorktree)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if len(comparisonTargets) > 0 {
+		metadata[MetadataKeyComparisonTargets] = comparisonTargets
+	}
+	contributionDestinations, err := collectContributionDestinations(reqWithWorktree)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if len(contributionDestinations) > 0 {
+		metadata[MetadataKeyContributionDestinations] = contributionDestinations
+	}
+
+	launchAuthToken, err := m.resolveLaunchAuthToken(ctx, reqWithWorktree, metadata)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("resolve launch auth token: %w", err)
+	}
 
 	var autoApproveOverride *bool
 	if profileInfo != nil {
@@ -690,8 +873,10 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		TaskTitle:                      reqWithWorktree.TaskTitle,
 		SessionID:                      reqWithWorktree.SessionID,
 		TaskEnvironmentID:              reqWithWorktree.TaskEnvironmentID,
+		WorkspaceReuseRequired:         reqWithWorktree.WorkspaceReuseRequired,
 		AgentProfileID:                 executionProfileID(reqWithWorktree),
 		OfficeAgentProfileID:           reqWithWorktree.AgentProfileID,
+		PromptTurnID:                   reqWithWorktree.TurnID,
 		WorkspacePath:                  reqWithWorktree.WorkspacePath,
 		WorkspaceSourceRoots:           workspaceSourceRoots(reqWithWorktree.WorkspaceFolders, workspaceRepositorySpecsFromLaunch(reqWithWorktree)),
 		Protocol:                       string(agentConfig.Runtime().Protocol),
@@ -705,21 +890,44 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		PreviousExecutionID:            reqWithWorktree.PreviousExecutionID,
 		McpMode:                        reqWithWorktree.McpMode,
 		McpProviders:                   reqWithWorktree.McpProviders,
-		AuthToken:                      m.revealRuntimeSecret(ctx, metadata, MetadataKeyAuthTokenSecret),
+		McpProfile:                     reqWithWorktree.McpProfile,
+		AuthToken:                      launchAuthToken,
 		BootstrapNonce:                 m.revealRuntimeSecret(ctx, metadata, MetadataKeyBootstrapNonceSecret),
+		AgentctlStartupConfig:          m.agentctlStartupConfig,
 		OnProgress:                     onProgress,
 		RemoteContributions:            remoteContributions,
+		ContributionDestinations:       contributionDestinations,
+		ComparisonTargets:              comparisonTargets,
 	}
 
-	if err := resumeRemoteInstancePreflight(ctx, rt, execReq); err != nil {
+	launchCtx, launchCancel := withLaunchPhaseTimeout(ctx)
+	defer launchCancel()
+	if err := resumeRemoteInstancePreflight(launchCtx, rt, execReq); err != nil {
 		return nil, nil, nil, err
 	}
 
-	execInstance, err := rt.CreateInstance(ctx, execReq)
+	execInstance, err := rt.CreateInstance(launchCtx, execReq)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to create execution: %w", err)
 	}
 	return execReq, execInstance, rt, nil
+}
+
+func isDockerExecutorType(executorType string) bool {
+	return executorType == string(models.ExecutorTypeLocalDocker) || executorType == string(models.ExecutorTypeRemoteDocker)
+}
+
+// resolveLaunchAuthToken returns the agentctl token a launch/resume hands the
+// backend. Docker uses the environment-scoped container control token (#2843)
+// so a sibling session can authenticate to a shared container, falling back
+// to the session token only when workspace reuse is required and no
+// container-control secret exists yet. Every other executor uses its own
+// session handshake token directly, which SSH resume requires.
+func (m *Manager) resolveLaunchAuthToken(ctx context.Context, req *LaunchRequest, metadata map[string]interface{}) (string, error) {
+	if isDockerExecutorType(req.ExecutorType) {
+		return m.revealContainerControlAuthToken(ctx, metadata, req.WorkspaceReuseRequired)
+	}
+	return m.revealRuntimeSecretValue(ctx, metadata, MetadataKeyAuthTokenSecret)
 }
 
 func resumeRemoteInstancePreflight(ctx context.Context, rt ExecutorBackend, req *ExecutorCreateRequest) error {
@@ -798,6 +1006,7 @@ func (m *Manager) runEnvironmentPreparerWithProgress(
 		return &EnvPrepareResult{
 			Success:      false,
 			ErrorMessage: err.Error(),
+			Error:        err,
 		}
 	}
 
@@ -807,33 +1016,39 @@ func (m *Manager) runEnvironmentPreparerWithProgress(
 func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName executor.Name) *EnvPrepareRequest {
 	repoSetupScript, _ := req.Metadata[MetadataKeyRepoSetupScript].(string)
 	prepReq := &EnvPrepareRequest{
-		TaskID:                 req.TaskID,
-		WorkspaceID:            req.WorkspaceID,
-		SessionID:              req.SessionID,
-		TaskTitle:              req.TaskTitle,
-		ExecutorType:           execName,
-		WorkspacePath:          workspacePath,
-		RepositoryPath:         req.RepositoryPath,
-		RepositoryID:           req.RepositoryID,
-		UseWorktree:            req.UseWorktree,
-		WorktreeID:             req.WorktreeID,
-		SetupScript:            req.SetupScript,
-		RepoSetupScript:        repoSetupScript,
-		BaseBranch:             req.BaseBranch,
-		DefaultBranch:          req.DefaultBranch,
-		CheckoutBranch:         req.CheckoutBranch,
-		PRNumber:               req.PRNumber,
-		RemoteContribution:     req.RemoteContribution,
-		WorktreeBranch:         getMetadataString(req.Metadata, MetadataKeyWorktreeBranch),
-		WorktreeBranchPrefix:   req.WorktreeBranchPrefix,
-		WorktreeBranchTemplate: req.WorktreeBranchTemplate,
-		WorktreeBranchTicket:   req.WorktreeBranchTicket,
-		PullBeforeWorktree:     req.PullBeforeWorktree,
-		TaskDirName:            req.TaskDirName,
-		RepoName:               req.RepoName,
-		BranchSlug:             req.BranchSlug,
-		BranchIdentitySlug:     req.BranchIdentitySlug,
-		Env:                    req.Env,
+		TaskID:                  req.TaskID,
+		WorkspaceID:             req.WorkspaceID,
+		SessionID:               req.SessionID,
+		TaskEnvironmentID:       req.TaskEnvironmentID,
+		TaskTitle:               req.TaskTitle,
+		ExecutorType:            execName,
+		WorkspacePath:           workspacePath,
+		RepositoryPath:          req.RepositoryPath,
+		RepositoryID:            req.RepositoryID,
+		TaskRepositoryID:        req.TaskRepositoryID,
+		UseWorktree:             req.UseWorktree,
+		WorkspaceReuseRequired:  req.WorkspaceReuseRequired,
+		WorktreeID:              req.WorktreeID,
+		SetupScript:             req.SetupScript,
+		RepoSetupScript:         repoSetupScript,
+		BaseBranch:              req.BaseBranch,
+		DefaultBranch:           req.DefaultBranch,
+		CheckoutBranch:          req.CheckoutBranch,
+		PRNumber:                req.PRNumber,
+		RemoteContribution:      req.RemoteContribution,
+		ContributionDestination: req.ContributionDestination,
+		WorktreeBranch:          getMetadataString(req.Metadata, MetadataKeyWorktreeBranch),
+		WorktreeBranchPrefix:    req.WorktreeBranchPrefix,
+		WorktreeBranchTemplate:  req.WorktreeBranchTemplate,
+		WorktreeBranchTicket:    req.WorktreeBranchTicket,
+		PullBeforeWorktree:      req.PullBeforeWorktree,
+		RemoteSyncHandled:       req.RemoteSyncHandled,
+		RefreshRepository:       req.RefreshRepository,
+		TaskDirName:             req.TaskDirName,
+		RepoName:                req.RepoName,
+		BranchSlug:              req.BranchSlug,
+		BranchIdentitySlug:      req.BranchIdentitySlug,
+		Env:                     req.Env,
 	}
 	// Multi-repo: forward the repo list when the launch request carries one.
 	// Each per-repo entry inherits the request-level RepoSetupScript when its
@@ -846,22 +1061,26 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 				setup = repoSetupScript
 			}
 			specs = append(specs, RepoPrepareSpec{
-				RepositoryID:           r.RepositoryID,
-				RepositoryPath:         r.RepositoryPath,
-				RepoName:               r.RepoName,
-				BaseBranch:             r.BaseBranch,
-				DefaultBranch:          r.DefaultBranch,
-				CheckoutBranch:         r.CheckoutBranch,
-				PRNumber:               r.PRNumber,
-				RemoteContribution:     r.RemoteContribution,
-				WorktreeID:             r.WorktreeID,
-				WorktreeBranchPrefix:   r.WorktreeBranchPrefix,
-				WorktreeBranchTemplate: r.WorktreeBranchTemplate,
-				WorktreeBranchTicket:   r.WorktreeBranchTicket,
-				PullBeforeWorktree:     r.PullBeforeWorktree,
-				RepoSetupScript:        setup,
-				BranchSlug:             r.BranchSlug,
-				BranchIdentitySlug:     r.BranchIdentitySlug,
+				TaskRepositoryID:        r.TaskRepositoryID,
+				RepositoryID:            r.RepositoryID,
+				RepositoryPath:          r.RepositoryPath,
+				RepoName:                r.RepoName,
+				BaseBranch:              r.BaseBranch,
+				DefaultBranch:           r.DefaultBranch,
+				CheckoutBranch:          r.CheckoutBranch,
+				PRNumber:                r.PRNumber,
+				RemoteContribution:      r.RemoteContribution,
+				WorktreeID:              r.WorktreeID,
+				WorktreeBranchPrefix:    r.WorktreeBranchPrefix,
+				WorktreeBranchTemplate:  r.WorktreeBranchTemplate,
+				WorktreeBranchTicket:    r.WorktreeBranchTicket,
+				PullBeforeWorktree:      r.PullBeforeWorktree,
+				RemoteSyncHandled:       r.RemoteSyncHandled,
+				RefreshRepository:       r.RefreshRepository,
+				RepoSetupScript:         setup,
+				BranchSlug:              r.BranchSlug,
+				BranchIdentitySlug:      r.BranchIdentitySlug,
+				ContributionDestination: r.ContributionDestination,
 			})
 		}
 		prepReq.Repositories = specs
@@ -884,6 +1103,20 @@ func (m *Manager) launchApplyPrepareResult(
 			ErrorMessage: result.ErrorMessage,
 			Steps:        result.Steps,
 		})
+		// Prefer the typed chain on result.Error so errors.Is/errors.As reach
+		// the underlying sentinel (worktree.ErrBranchCheckedOut, etc.). Fall
+		// back to the textual ErrorMessage when the preparer did not supply a
+		// typed error. The formatted message is identical in both cases.
+		if result.Error != nil {
+			displayMessage := result.ErrorMessage
+			if displayMessage == "" {
+				displayMessage = result.Error.Error()
+			}
+			return fmt.Errorf("environment preparation failed: %w", &prepareResultError{
+				message: displayMessage,
+				cause:   result.Error,
+			})
+		}
 		return fmt.Errorf("environment preparation failed: %s", result.ErrorMessage)
 	}
 	if result.WorkspacePath != "" {
@@ -1017,7 +1250,7 @@ func (m *Manager) markAgentStartPending(execution *AgentExecution) {
 // dedicated singleflight key so they don't race on the shared AgentExecution
 // pointer.
 func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *AgentExecution, req *LaunchRequest) error {
-	_, err := m.doCoalescedExecution(ctx, "promote:"+req.SessionID, func(sharedCtx context.Context) (interface{}, error) {
+	_, err := m.doCoalescedExecution(ctx, req.SessionID, func(sharedCtx context.Context) (interface{}, error) {
 		activityLease, acquireErr := m.acquireActivity(sharedCtx, activity.KindExecutionPreparing)
 		if acquireErr != nil {
 			return nil, acquireErr
@@ -1047,8 +1280,8 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		if !agentConfig.Enabled() {
 			return nil, fmt.Errorf("agent type %q is disabled", agentTypeName)
 		}
-		preferNative := m.preferNativeBinary(agentConfig, execution.RuntimeName, execution.Metadata)
-		cmds, err := m.buildAgentCommand(req, profileInfo, agentConfig, preferNative)
+		preferNative := m.preferNativeBinary(agentConfig, execution.RuntimeName, execution.MetadataSnapshot())
+		cmds, err := m.buildAgentCommandWithContext(sharedCtx, req, profileInfo, agentConfig, preferNative)
 		if err != nil {
 			return nil, err
 		}
@@ -1224,7 +1457,7 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 
 	// Build the in-memory AgentExecution from the runtime instance. Extracted
 	// to keep launchInternal under the cyclomatic-complexity budget.
-	execution, err := m.buildExecutionFromInstance(req, execReq, execInstance, rt, profileInfo, agentConfig, prepResult)
+	execution, err := m.buildExecutionFromInstance(ctx, req, execReq, execInstance, rt, profileInfo, agentConfig, prepResult)
 	if err != nil {
 		// Command resolution failed (e.g. a configured command_prefix could not
 		// be tokenised). The execution isn't built yet, so stop the runtime
@@ -1241,9 +1474,6 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 			execInstance.Client.Close()
 		}
 		return nil, err
-	}
-	if profileInfo != nil && len(profileInfo.EnvVars) > 0 {
-		m.cacheResolvedProfileEnv(execution, m.resolveAgentProfileEnvVars(ctx, profileInfo.EnvVars))
 	}
 	if !reqWithWorktree.IsPassthrough {
 		if err := m.materializeRuntimeProjectMCP(ctx, execution, agentConfig); err != nil {
@@ -1269,6 +1499,7 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 // into an in-memory *AgentExecution ready for Add. Pulled out of launchInternal
 // to keep the orchestration loop's cyclomatic complexity within the linter budget.
 func (m *Manager) buildExecutionFromInstance(
+	ctx context.Context,
 	req *LaunchRequest,
 	execReq *ExecutorCreateRequest,
 	execInstance *ExecutorInstance,
@@ -1291,7 +1522,7 @@ func (m *Manager) buildExecutionFromInstance(
 	// promoteWorkspaceExecution's call site rather than re-deriving from the
 	// requested ExecutorType.
 	preferNative := m.preferNativeBinary(agentConfig, execution.RuntimeName, execReq.Metadata)
-	cmds, err := m.buildAgentCommand(req, profileInfo, agentConfig, preferNative)
+	cmds, err := m.buildAgentCommandWithContext(ctx, req, profileInfo, agentConfig, preferNative)
 	if err != nil {
 		return nil, err
 	}
@@ -1553,10 +1784,19 @@ func (m *Manager) SetExecutionDescription(_ context.Context, executionID string,
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
-	if execution.Metadata == nil {
-		execution.Metadata = make(map[string]interface{})
+	execution.setMetadataValue("task_description", description)
+	return nil
+}
+
+// SetPromptTurnID binds the next prompt completion to a durable Kandev turn.
+// The value is kept on the in-memory execution so it can be snapshotted onto
+// the terminal stream event before AgentReady can admit a successor prompt.
+func (m *Manager) SetPromptTurnID(_ context.Context, executionID, turnID string) error {
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists {
+		return fmt.Errorf("execution %q not found", executionID)
 	}
-	execution.Metadata["task_description"] = description
+	execution.setPromptTurnID(turnID)
 	return nil
 }
 
@@ -1566,10 +1806,7 @@ func (m *Manager) SetExecutionEnv(_ context.Context, executionID string, env map
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
-	if execution.Metadata == nil {
-		execution.Metadata = make(map[string]interface{})
-	}
-	execution.Metadata["runtime_env"] = cloneStringMap(env)
+	execution.setMetadataValue("runtime_env", cloneStringMap(env))
 	return nil
 }
 
@@ -1620,6 +1857,22 @@ func (m *Manager) SetMcpProvidersForSession(ctx context.Context, sessionID strin
 		return fmt.Errorf("set MCP providers for session %s: %w", sessionID, err)
 	}
 	return nil
+}
+
+// SetPluginToolsForAllExecutions pushes a complete revisioned catalog to each
+// live agentctl. One unavailable execution does not prevent the others from
+// converging; stale delivery is rejected by agentctl's snapshot revision.
+func (m *Manager) SetPluginToolsForAllExecutions(ctx context.Context, snapshot plugintools.Snapshot) error {
+	var refreshErr error
+	for _, execution := range m.ListExecutions() {
+		if execution == nil || execution.agentctl == nil {
+			continue
+		}
+		if err := execution.agentctl.SetPluginTools(ctx, snapshot); err != nil {
+			refreshErr = errors.Join(refreshErr, fmt.Errorf("refresh execution %s plugin tools: %w", execution.ID, err))
+		}
+	}
+	return refreshErr
 }
 
 // resolveApprovalPolicyAndDisplayName resolves the approval policy and agent display name
@@ -1682,32 +1935,34 @@ func (m *Manager) createBootMessage(ctx context.Context, execution *AgentExecuti
 
 // getTaskDescriptionFromMetadata extracts the task description string from execution metadata.
 func getTaskDescriptionFromMetadata(execution *AgentExecution) string {
-	if execution.Metadata == nil {
-		return ""
-	}
-	if desc, ok := execution.Metadata["task_description"].(string); ok {
-		return desc
-	}
-	return ""
+	return execution.metadataString("task_description")
 }
 
 // getAttachmentsFromMetadata extracts attachments from execution metadata.
 func getAttachmentsFromMetadata(execution *AgentExecution) []MessageAttachment {
-	if execution.Metadata == nil {
-		return nil
-	}
-	attachments, ok := execution.Metadata["attachments"].([]MessageAttachment)
-	if ok {
-		return attachments
-	}
-	return nil
+	value, _ := execution.metadataValue("attachments")
+	attachments, _ := value.([]MessageAttachment)
+	return attachments
 }
 
 // configureAndStartAgent configures the agent command and starts the agent subprocess.
 // Returns the effective boot command (full command with adapter args, or base command).
 func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentExecution, approvalPolicy string) (string, error) {
-	env := runtimeEnvFromMetadata(execution.Metadata)
-	m.mergeAgentProfileEnvForExecution(ctx, execution, env)
+	env := execution.RuntimeEnvironment()
+	metadataEnv := runtimeEnvFromMetadata(execution.MetadataSnapshot())
+	if env == nil {
+		env = metadataEnv
+		if err := m.mergeAgentProfileEnvForExecution(ctx, execution, env); err != nil {
+			m.updateExecutionError(execution.ID, "failed to resolve agent profile environment: "+err.Error())
+			return "", fmt.Errorf("resolve agent profile environment: %w", err)
+		}
+	} else {
+		// SetExecutionEnv carries per-run values such as repository credentials.
+		// Overlay them on the launch snapshot without re-reading profile secrets.
+		for key, value := range metadataEnv {
+			env[key] = value
+		}
+	}
 	if err := spillLargeWakePayloadEnv(env, execution.WorkspacePath, m.logger.Zap()); err != nil {
 		m.updateExecutionError(execution.ID, "failed to prepare agent env: "+err.Error())
 		return "", fmt.Errorf("failed to prepare agent env: %w", err)
@@ -1752,7 +2007,7 @@ func runtimeEnvFromMetadata(metadata map[string]interface{}) map[string]string {
 
 // initializeAgentSession handles post-startup initialization: boot message, ACP session,
 // MCP servers. It finalizes the boot message on success or failure.
-func (m *Manager) initializeAgentSession(ctx context.Context, execution *AgentExecution, bootCommand, agentDisplayName, taskDescription string) error {
+func (m *Manager) initializeAgentSession(ctx context.Context, execution *AgentExecution, bootCommand, agentDisplayName, taskDescription, approvalPolicy string) error {
 	bootMsg, bootStopCh := m.createBootMessage(ctx, execution, bootCommand, agentDisplayName)
 
 	// Give the agent process a moment to initialize
@@ -1773,6 +2028,25 @@ func (m *Manager) initializeAgentSession(ctx context.Context, execution *AgentEx
 
 	attachments := getAttachmentsFromMetadata(execution)
 	if err := m.initializeACPSession(ctx, execution, agentConfig, taskDescription, attachments, mcpServers); err != nil {
+		attempted, retryErr := m.retryManagedRuntimeStartup(
+			ctx,
+			execution,
+			err,
+			agentConfig,
+			approvalPolicy,
+			taskDescription,
+			attachments,
+			mcpServers,
+		)
+		if attempted {
+			if retryErr == nil {
+				m.finalizeBootMessage(execution, bootMsg, bootStopCh, execution.agentctl, containerStateExited)
+				return nil
+			}
+			err = retryErr
+		} else if retryErr != nil {
+			err = retryErr
+		}
 		m.finalizeBootMessage(execution, bootMsg, bootStopCh, execution.agentctl, "failed")
 		m.updateExecutionError(execution.ID, "failed to initialize ACP: "+err.Error())
 		return fmt.Errorf("failed to initialize ACP: %w", err)

@@ -164,6 +164,49 @@ func TestBuildBatchedPRQuery_GroupsByRepo(t *testing.T) {
 	}
 }
 
+// TestPRFieldsBlock_RequestsOutcomeFields covers AC-08: the shared field
+// block requests changedFiles, mergedBy, autoMergeRequest, and a
+// CLOSED_EVENT timeline selection, so both the batched PR query and the
+// batched branch query return the same fields.
+func TestPRFieldsBlock_RequestsOutcomeFields(t *testing.T) {
+	block := prFieldsBlock()
+	for _, want := range []string{"changedFiles", "mergedBy { login }", "autoMergeRequest", "CLOSED_EVENT"} {
+		if !strings.Contains(block, want) {
+			t.Errorf("prFieldsBlock() missing %q: %s", want, block)
+		}
+	}
+	if strings.Contains(block, "closedBy") {
+		t.Errorf("prFieldsBlock() must not request closedBy (absent from PullRequest type): %s", block)
+	}
+
+	prQuery, _ := buildBatchedPRQuery([]graphQLPRRef{{Owner: "o", Repo: "r", Number: 1}})
+	if !strings.Contains(prQuery, "changedFiles") || !strings.Contains(prQuery, "CLOSED_EVENT") {
+		t.Errorf("buildBatchedPRQuery must include the outcome fields: %s", prQuery)
+	}
+	branchQuery, _ := buildBatchedBranchQuery([]graphQLBranchRef{{Owner: "o", Repo: "r", Branch: "feat"}})
+	if !strings.Contains(branchQuery, "changedFiles") || !strings.Contains(branchQuery, "CLOSED_EVENT") {
+		t.Errorf("buildBatchedBranchQuery must include the outcome fields: %s", branchQuery)
+	}
+}
+
+// TestPRFieldsBlock_PinsLastOneForClosedEventOrdering is the AC-08a
+// regression: closedEventActor (below) trusts the query to hand it at most
+// one timelineItems node and unconditionally reads nodes[0], so "most
+// recent closure" is guaranteed entirely by the GraphQL connection argument,
+// not by any Go-side ordering logic. TestPRFieldsBlock_RequestsOutcomeFields
+// only substring-matches "CLOSED_EVENT", which stays green if `last: 1` were
+// changed to `first: N` — GitHub connection ordering is oldest-first, so
+// `first: N` would silently attribute closure to the PR's FIRST close
+// instead of its latest one across a reopen cycle, with every existing
+// single-node test still passing. Pin the exact argument.
+func TestPRFieldsBlock_PinsLastOneForClosedEventOrdering(t *testing.T) {
+	block := prFieldsBlock()
+	const want = "timelineItems(last: 1, itemTypes: CLOSED_EVENT)"
+	if !strings.Contains(block, want) {
+		t.Errorf("prFieldsBlock() = %s, want it to contain %q", block, want)
+	}
+}
+
 func TestBuildBatchedBranchQuery_AliasesAllBranches(t *testing.T) {
 	q, _ := buildBatchedBranchQuery([]graphQLBranchRef{
 		{Owner: "o", Repo: "r", Branch: "feat-1"},
@@ -177,6 +220,144 @@ func TestBuildBatchedBranchQuery_AliasesAllBranches(t *testing.T) {
 	}
 	if strings.Contains(q, `ref(qualifiedName:`) {
 		t.Errorf("branch lookup should not require a base-repo ref: %s", q)
+	}
+}
+
+// TestConvertBatchedPRResult_SetsOutcomeFieldsPopulatedUnconditionally
+// covers AC-10: the batched GraphQL path always marks the outcome-field
+// group populated, since it always fetches a full pull request.
+func TestConvertBatchedPRResult_SetsOutcomeFieldsPopulatedUnconditionally(t *testing.T) {
+	status := convertBatchedPRResult(&batchedPRResult{State: "OPEN"}, "o", "r", 1)
+	if !status.OutcomeFieldsPopulated {
+		t.Error("OutcomeFieldsPopulated = false, want true")
+	}
+}
+
+// TestConvertBatchedPRResult_MergedByAndChangedFiles covers AC-12's upstream
+// half: a merged PR with a non-null mergedBy and a real changedFiles count
+// converts onto PR, not just PRStatus.
+func TestConvertBatchedPRResult_MergedByAndChangedFiles(t *testing.T) {
+	raw := &batchedPRResult{
+		State:        "MERGED",
+		MergedAt:     "2026-08-12T00:00:00Z",
+		ChangedFiles: intPtr(8),
+	}
+	raw.MergedBy.Login = "carlosflorencio"
+	status := convertBatchedPRResult(raw, "kdlbs", "kandev", 2554)
+	if status.PR.ChangedFiles != 8 {
+		t.Errorf("ChangedFiles = %d, want 8", status.PR.ChangedFiles)
+	}
+	if !status.PR.ChangedFilesObserved {
+		t.Error("ChangedFilesObserved = false, want true for an explicit changedFiles=8")
+	}
+	if status.PR.MergedByLogin != "carlosflorencio" {
+		t.Errorf("MergedByLogin = %q, want carlosflorencio", status.PR.MergedByLogin)
+	}
+}
+
+// TestConvertBatchedPRResult_MissingIsDraftAndChangedFilesLeavesUnobserved
+// covers AC-12a: a batched GraphQL result that omits isDraft and
+// changedFiles must decode to unobserved (Observed=false), so
+// resolveTaskPROutcomeFields writes NULL for those columns instead of a
+// fabricated false/0 that would masquerade as a real observation.
+// TestConvertBatchedPRResult_SetsOutcomeFieldsPopulatedUnconditionally
+// above proves the *group* flag stays true for this exact input — this test
+// proves the two field-level flags do NOT, which is what AC-12a actually
+// requires ("each field is judged on its own presence").
+func TestConvertBatchedPRResult_MissingIsDraftAndChangedFilesLeavesUnobserved(t *testing.T) {
+	status := convertBatchedPRResult(&batchedPRResult{State: "OPEN"}, "o", "r", 1)
+	if status.PR.IsDraftObserved {
+		t.Error("IsDraftObserved = true, want false when isDraft is absent from the response")
+	}
+	if status.PR.ChangedFilesObserved {
+		t.Error("ChangedFilesObserved = true, want false when changedFiles is absent from the response")
+	}
+}
+
+// TestConvertBatchedPRResult_ExplicitFalseAndZeroAreObserved covers AC-12a's
+// other half: a response that genuinely reports isDraft=false and
+// changedFiles=0 must be distinguishable from one that omits them — both
+// mark Observed=true.
+func TestConvertBatchedPRResult_ExplicitFalseAndZeroAreObserved(t *testing.T) {
+	status := convertBatchedPRResult(
+		&batchedPRResult{State: "OPEN", IsDraft: boolPtr(false), ChangedFiles: intPtr(0)}, "o", "r", 1,
+	)
+	if !status.PR.IsDraftObserved {
+		t.Error("IsDraftObserved = false, want true for an explicit isDraft=false")
+	}
+	if status.PR.Draft {
+		t.Error("Draft = true, want false")
+	}
+	if !status.PR.ChangedFilesObserved {
+		t.Error("ChangedFilesObserved = false, want true for an explicit changedFiles=0")
+	}
+	if status.PR.ChangedFiles != 0 {
+		t.Errorf("ChangedFiles = %d, want 0", status.PR.ChangedFiles)
+	}
+}
+
+// TestConvertBatchedPRResult_ClosedEventActorPopulatesAttribution covers
+// AC-14: a closed PR carrying a ClosedEvent timeline node with a non-empty
+// actor login marks closure attribution populated and copies the login.
+func TestConvertBatchedPRResult_ClosedEventActorPopulatesAttribution(t *testing.T) {
+	raw := &batchedPRResult{State: "CLOSED"}
+	raw.TimelineItems.Nodes = []timelineClosedEventNode{{}}
+	raw.TimelineItems.Nodes[0].Actor = &timelineActor{Login: "nova28"}
+	status := convertBatchedPRResult(raw, "kdlbs", "kandev", 2476)
+	if !status.ClosureAttributionPopulated {
+		t.Fatal("ClosureAttributionPopulated = false, want true")
+	}
+	if status.ClosedByLogin != "nova28" {
+		t.Errorf("ClosedByLogin = %q, want nova28", status.ClosedByLogin)
+	}
+}
+
+// TestConvertBatchedPRResult_NullActorLeavesAttributionUnpopulated covers
+// AC-15's decode half: no timeline node, or a node with a null actor, must
+// not mark closure attribution populated.
+func TestConvertBatchedPRResult_NullActorLeavesAttributionUnpopulated(t *testing.T) {
+	t.Run("no timeline nodes", func(t *testing.T) {
+		status := convertBatchedPRResult(&batchedPRResult{State: "CLOSED"}, "o", "r", 1)
+		if status.ClosureAttributionPopulated {
+			t.Error("ClosureAttributionPopulated = true, want false")
+		}
+		if status.ClosedByLogin != "" {
+			t.Errorf("ClosedByLogin = %q, want empty", status.ClosedByLogin)
+		}
+	})
+	t.Run("null actor", func(t *testing.T) {
+		raw := &batchedPRResult{State: "CLOSED"}
+		raw.TimelineItems.Nodes = []timelineClosedEventNode{{}}
+		status := convertBatchedPRResult(raw, "o", "r", 1)
+		if status.ClosureAttributionPopulated {
+			t.Error("ClosureAttributionPopulated = true, want false")
+		}
+	})
+}
+
+// TestConvertBatchedPRResult_ClosedEventActorReflectsLatestClosureAfterReopen
+// is the AC-08a close-reopen-close regression. A PR closed by "alice",
+// reopened, then closed again by "bob" must attribute closure to "bob" — the
+// PR's CURRENT closure, not its first one ever. `timelineItems(last: 1, ...)`
+// is what makes this true: GitHub only ever sends the single most-recent
+// CLOSED_EVENT node in the slice this test constructs, so decoding it and
+// reading nodes[0] (closedEventActor's actual logic) yields "bob". This
+// documents the semantic the pinned `last: 1` argument
+// (TestPRFieldsBlock_PinsLastOneForClosedEventOrdering) exists to guarantee.
+func TestConvertBatchedPRResult_ClosedEventActorReflectsLatestClosureAfterReopen(t *testing.T) {
+	raw := &batchedPRResult{State: "CLOSED"}
+	// What GitHub returns for timelineItems(last: 1, itemTypes: CLOSED_EVENT)
+	// after alice's close, a reopen, then bob's close: only bob's event.
+	raw.TimelineItems.Nodes = []timelineClosedEventNode{
+		{Actor: &timelineActor{Login: "bob"}},
+	}
+	status := convertBatchedPRResult(raw, "kdlbs", "kandev", 3001)
+	if !status.ClosureAttributionPopulated {
+		t.Fatal("ClosureAttributionPopulated = false, want true")
+	}
+	if status.ClosedByLogin != "bob" {
+		t.Errorf("ClosedByLogin = %q, want %q (the reopen cycle's later closer, not alice's earlier close)",
+			status.ClosedByLogin, "bob")
 	}
 }
 
@@ -217,6 +398,29 @@ func TestRunBatchedPRQuery_DecodesAliasesBackToRefs(t *testing.T) {
 	}
 	if status.PR == nil || status.PR.Title != "PR A" {
 		t.Errorf("PR.Title mismatch: %#v", status.PR)
+	}
+}
+
+func TestNormalizeGraphQLCheckRollupState_CheckRollup(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "success", raw: "SUCCESS", want: checkStatusSuccess},
+		{name: "failure", raw: "FAILURE", want: checkConclusionFail},
+		{name: "error", raw: "ERROR", want: checkConclusionFail},
+		{name: "pending", raw: "PENDING", want: checkStatusPending},
+		{name: "expected", raw: "EXPECTED", want: checkStatusPending},
+		{name: "empty", raw: "", want: ""},
+		{name: "unknown", raw: "NEUTRAL", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeGraphQLCheckRollupState(tt.raw); got != tt.want {
+				t.Fatalf("normalizeGraphQLCheckRollupState(%q) = %q, want %q", tt.raw, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -610,9 +814,9 @@ func TestRunBatchedBranchQuery_DecodesPRNode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	status, ok := got[graphqlBranchKey("o", "r", "feat")]
+	status, ok := got.Statuses[graphqlBranchKey("o", "r", "feat")]
 	if !ok {
-		t.Fatalf("expected branch result, got keys: %v", keysOf(got))
+		t.Fatalf("expected branch result, got keys: %v", keysOf(got.Statuses))
 	}
 	if status.PR == nil || status.PR.Number != 7 {
 		t.Errorf("expected PR number 7, got %#v", status.PR)
@@ -629,7 +833,7 @@ func TestRunBatchedBranchQuery_SkipsUnusedReviewThreadPagination(t *testing.T) {
 		t.Fatalf("run: %v", err)
 	}
 
-	status := got[graphqlBranchKey("o", "r", "feat")]
+	status := got.Statuses[graphqlBranchKey("o", "r", "feat")]
 	if status == nil || status.PR == nil || status.PR.Number != 7 {
 		t.Fatalf("branch status = %#v, want discovered PR #7", status)
 	}
@@ -656,8 +860,13 @@ func TestRunBatchedBranchQuery_EmptyNodesReturnsNoResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("expected no branch result, got %#v", got)
+	if len(got.Statuses) != 0 {
+		t.Fatalf("expected no branch result, got %#v", got.Statuses)
+	}
+	// Zero nodes is a definitive "no open PR on this branch"; callers rely on
+	// it to skip a redundant per-watch lookup.
+	if _, ok := got.ResolvedEmpty[graphqlBranchKey("o", "r", "feat")]; !ok {
+		t.Fatalf("expected branch to be recorded as definitively empty, got %#v", got.ResolvedEmpty)
 	}
 }
 
@@ -697,8 +906,13 @@ func TestRunBatchedBranchQuery_SkipsAmbiguousForkHeads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("expected ambiguous fork heads to be skipped, got %#v", got)
+	if len(got.Statuses) != 0 {
+		t.Fatalf("expected ambiguous fork heads to be skipped, got %#v", got.Statuses)
+	}
+	// Ambiguity is not a definitive negative — the caller must keep its
+	// per-watch fallback rather than conclude there is no PR.
+	if _, ok := got.ResolvedEmpty[graphqlBranchKey("o", "r", "feat")]; ok {
+		t.Fatal("ambiguous branch must not be recorded as definitively empty")
 	}
 }
 
@@ -738,8 +952,11 @@ func TestRunBatchedBranchQuery_SkipsMultipleBranchMatchesEvenWithOwnerMatch(t *t
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("expected duplicate branch matches to be skipped, got %#v", got)
+	if len(got.Statuses) != 0 {
+		t.Fatalf("expected duplicate branch matches to be skipped, got %#v", got.Statuses)
+	}
+	if _, ok := got.ResolvedEmpty[graphqlBranchKey("o", "r", "feat")]; ok {
+		t.Fatal("ambiguous branch must not be recorded as definitively empty")
 	}
 }
 

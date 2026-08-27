@@ -3,8 +3,10 @@ package backendapp
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	goruntime "runtime"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -12,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/plugins/delivery"
 	"github.com/kandev/kandev/internal/plugins/pkgtar/pkgtartest"
 	"github.com/kandev/kandev/internal/plugins/store"
+	"github.com/kandev/kandev/internal/webapp"
 	"github.com/kandev/kandev/pkg/pluginsdk"
 )
 
@@ -107,6 +110,45 @@ func installTestPluginForBoot(t *testing.T, svc *plugins.Service, id string, wit
 	return rec
 }
 
+func testPluginPackageWithRepositoryProviders(t *testing.T, id string, providers []string) *bytes.Buffer {
+	t.Helper()
+	platformKey := goruntime.GOOS + "-" + goruntime.GOARCH
+	manifestYAML := fmt.Sprintf(`
+id: %s
+api_version: 1
+version: "1.0.0"
+display_name: Test Plugin %s
+repository_providers: %s
+runtime:
+  type: binary
+  executables:
+    %s: server/plugin
+ui:
+  bundle: "/ui/bundle.js"
+`, id, id, yamlStringList(providers), platformKey)
+
+	var buf bytes.Buffer
+	if err := pkgtartest.WritePackage(&buf, map[string][]byte{
+		"manifest.yaml": []byte(manifestYAML),
+		"server/plugin": []byte("#!/bin/sh\necho fake\n"),
+		"ui/bundle.js":  []byte("export default {};"),
+	}); err != nil {
+		t.Fatalf("WritePackage: %v", err)
+	}
+	return &buf
+}
+
+func yamlStringList(values []string) string {
+	if len(values) == 0 {
+		return "[]"
+	}
+	quoted := make([]string, len(values))
+	for i, value := range values {
+		quoted[i] = fmt.Sprintf("%q", value)
+	}
+	return "[" + strings.Join(quoted, ", ") + "]"
+}
+
 // testPluginPackageVersioned mirrors testPluginPackage but lets the caller
 // pin a specific manifest version, so tests can simulate an update (same id,
 // bumped version) via a second Install call.
@@ -180,6 +222,65 @@ func TestBootActivePluginsPopulatesFromActiveUIPlugins(t *testing.T) {
 	}
 	if len(entry.StyleURLs) != 1 || entry.StyleURLs[0] != "/api/plugins/kandev-plugin-hello/ui/ui/style.css" {
 		t.Fatalf("entry.StyleURLs = %v, want [/api/plugins/kandev-plugin-hello/ui/ui/style.css]", entry.StyleURLs)
+	}
+}
+
+func TestBootActivePluginsProjectsRepositoryProviderIDs(t *testing.T) {
+	svc := newTestPluginsService(t)
+	if _, err := svc.Install(context.Background(), testPluginPackageWithRepositoryProviders(t, "kandev-plugin-bitbucket", []string{"bitbucket", "forge"})); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	if _, err := svc.Install(context.Background(), testPluginPackageWithRepositoryProviders(t, "kandev-plugin-no-provider", nil)); err != nil {
+		t.Fatalf("Install empty provider declaration: %v", err)
+	}
+	if _, err := svc.Install(context.Background(), testPluginPackage(t, "kandev-plugin-legacy-provider", true)); err != nil {
+		t.Fatalf("Install legacy provider declaration: %v", err)
+	}
+
+	entries := bootActivePlugins(routeParams{services: &Services{Plugins: svc}})
+	if len(entries) != 3 {
+		t.Fatalf("bootActivePlugins() len = %d, want 3: %+v", len(entries), entries)
+	}
+	byID := make(map[string]webapp.ActivePluginPayload, len(entries))
+	for _, entry := range entries {
+		byID[entry.ID] = entry
+	}
+
+	providerJSON, err := json.Marshal(byID["kandev-plugin-bitbucket"])
+	if err != nil {
+		t.Fatalf("marshal provider payload: %v", err)
+	}
+	var provider map[string]any
+	if err := json.Unmarshal(providerJSON, &provider); err != nil {
+		t.Fatalf("unmarshal provider payload: %v", err)
+	}
+	if got, ok := provider["repositoryProviderIds"]; !ok || fmt.Sprint(got) != "[bitbucket forge]" {
+		t.Fatalf("repositoryProviderIds = %v (present=%t), want [bitbucket forge]", got, ok)
+	}
+
+	emptyJSON, err := json.Marshal(byID["kandev-plugin-no-provider"])
+	if err != nil {
+		t.Fatalf("marshal empty provider payload: %v", err)
+	}
+	var empty map[string]any
+	if err := json.Unmarshal(emptyJSON, &empty); err != nil {
+		t.Fatalf("unmarshal empty provider payload: %v", err)
+	}
+	gotEmpty, present := empty["repositoryProviderIds"]
+	if !present || fmt.Sprint(gotEmpty) != "[]" {
+		t.Fatalf("repositoryProviderIds = %v (present=%t), want []", gotEmpty, present)
+	}
+
+	legacyJSON, err := json.Marshal(byID["kandev-plugin-legacy-provider"])
+	if err != nil {
+		t.Fatalf("marshal legacy payload: %v", err)
+	}
+	var legacy map[string]any
+	if err := json.Unmarshal(legacyJSON, &legacy); err != nil {
+		t.Fatalf("unmarshal legacy payload: %v", err)
+	}
+	if _, present := legacy["repositoryProviderIds"]; present {
+		t.Fatalf("legacy repositoryProviderIds must be omitted: %s", legacyJSON)
 	}
 }
 

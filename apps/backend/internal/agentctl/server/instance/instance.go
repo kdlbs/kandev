@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -165,7 +166,8 @@ type CreateRequest struct {
 	McpMode string `json:"mcp_mode,omitempty"`
 
 	// McpProviders limits task-mode review automation tools to attached providers.
-	McpProviders []string `json:"mcp_providers,omitempty"`
+	McpProviders []string            `json:"mcp_providers,omitempty"`
+	McpProfile   *mcpprofile.Context `json:"mcp_profile,omitempty"`
 
 	// RequiresProcessKill forces the agent's process group to be killed on
 	// shutdown instead of relying on stdin close. Required for agents whose
@@ -182,9 +184,11 @@ type CreateRequest struct {
 	// Each WorkspaceTracker reads its entry at startup and uses it as the
 	// first candidate when resolving BaseCommit / Ahead / Behind. Empty
 	// disables the override.
-	BaseBranches         map[string]string                    `json:"base_branches,omitempty"`
-	RemoteContributions  map[string]models.RemoteContribution `json:"remote_contributions,omitempty"`
-	WorkspaceSourceRoots []string                             `json:"workspace_source_roots,omitempty"`
+	BaseBranches             map[string]string                         `json:"base_branches,omitempty"`
+	ComparisonTargets        map[string]models.ComparisonTarget        `json:"comparison_targets,omitempty"`
+	RemoteContributions      map[string]models.RemoteContribution      `json:"remote_contributions,omitempty"`
+	ContributionDestinations map[string]models.ContributionDestination `json:"contribution_destinations,omitempty"`
+	WorkspaceSourceRoots     []string                                  `json:"workspace_source_roots,omitempty"`
 }
 
 // CreateResponse contains the result of creating a new agent instance.

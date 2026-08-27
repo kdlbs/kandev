@@ -23,12 +23,38 @@ func TestGitHubCredentialBrokerConfigValidation(t *testing.T) {
 
 func TestGitHubCredentialBrokerConfigEnvironmentBinding(t *testing.T) {
 	t.Setenv("KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL", "https://kandev.example.com")
+	t.Setenv("KANDEV_GITHUB_CREDENTIAL_BROKER_REISSUE_SIGNING_KEY", "test-signing-key")
 	cfg, err := LoadWithPath(t.TempDir())
 	if err != nil {
 		t.Fatalf("LoadWithPath: %v", err)
 	}
 	if got := cfg.GitHubCredentialBroker.PublicBaseURL; got != "https://kandev.example.com" {
 		t.Fatalf("broker public base URL = %q", got)
+	}
+	if got := cfg.GitHubCredentialBroker.ReissueSigningKey; got != "test-signing-key" {
+		t.Fatalf("broker reissue signing key was not bound")
+	}
+}
+
+func TestWebTitlePrefixEnvironmentBinding(t *testing.T) {
+	t.Setenv("KANDEV_WEB_TITLE_PREFIX", "TEST")
+	cfg, err := LoadWithPath(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadWithPath: %v", err)
+	}
+	if got := cfg.Server.WebTitlePrefix; got != "TEST" {
+		t.Fatalf("web title prefix = %q, want %q", got, "TEST")
+	}
+}
+
+func TestWebTitlePrefixDefaultsEmpty(t *testing.T) {
+	t.Setenv("KANDEV_WEB_TITLE_PREFIX", "")
+	cfg, err := LoadWithPath(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadWithPath: %v", err)
+	}
+	if got := cfg.Server.WebTitlePrefix; got != "" {
+		t.Fatalf("web title prefix = %q, want empty", got)
 	}
 }
 
@@ -183,7 +209,6 @@ func TestFeatures_ProductionDefaults(t *testing.T) {
 	// Force a clean env so KANDEV_FEATURES_* and profile-selector vars from the
 	// host shell cannot change the production-profile defaults under test.
 	t.Setenv("KANDEV_FEATURES_OFFICE", "")
-	unsetEnv(t, "KANDEV_FEATURES_APP_STATUS_BAR")
 	unsetEnv(t, "KANDEV_FEATURES_AUTH")
 	unsetEnv(t, "KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF")
 	t.Setenv("KANDEV_DEBUG_DEV_MODE", "")
@@ -197,9 +222,6 @@ func TestFeatures_ProductionDefaults(t *testing.T) {
 	}
 	if cfg.Features.Office {
 		t.Errorf("Features.Office = true, want false (production default must be off)")
-	}
-	if cfg.Features.AppStatusBar {
-		t.Error("Features.AppStatusBar = true, want false (status surface must remain opt-in by default)")
 	}
 	if cfg.Features.Auth {
 		t.Error("Features.Auth = true, want false (authentication must remain opt-in by default)")
@@ -238,15 +260,23 @@ func TestFeatures_ClaudeBackgroundPromptHandoffEnabledByEnv(t *testing.T) {
 	}
 }
 
-func TestFeatures_AppStatusBarDisabledByEnv(t *testing.T) {
-	t.Setenv("KANDEV_FEATURES_APP_STATUS_BAR", "false")
+func TestFeaturesConfigIgnoresRetiredAppStatusBarEnv(t *testing.T) {
+	t.Setenv("KANDEV_FEATURES_APP_STATUS_BAR", "true")
 
 	cfg, err := LoadWithPath(t.TempDir())
 	if err != nil {
 		t.Fatalf("LoadWithPath: %v", err)
 	}
-	if cfg.Features.AppStatusBar {
-		t.Error("Features.AppStatusBar = true, want false (KANDEV_FEATURES_APP_STATUS_BAR=false must hide it)")
+	raw, err := json.Marshal(cfg.Features)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	var response map[string]bool
+	if err := json.Unmarshal(raw, &response); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if _, ok := response["appStatusBar"]; ok {
+		t.Fatal("retired KANDEV_FEATURES_APP_STATUS_BAR still affects the feature response")
 	}
 }
 
@@ -475,5 +505,76 @@ func TestFeaturesConfig_JSONShape(t *testing.T) {
 		if got, ok := decoded[jsonName]; !ok || !got {
 			t.Errorf("FeaturesConfig JSON missing true field %q: %#v", jsonName, decoded)
 		}
+	}
+	if _, ok := decoded["appStatusBar"]; ok {
+		t.Fatal("retired appStatusBar remains in FeaturesConfig JSON")
+	}
+}
+
+// TestAuthCookieNameDefaultsEmpty pins the config-default contract: the
+// seeded default is EMPTY so the auth service port-scopes its internal
+// "kandev_session" base from the request host; a seeded non-empty default
+// would suppress suffixing in production.
+func TestAuthCookieNameDefaultsEmpty(t *testing.T) {
+	t.Setenv("KANDEV_AUTH_COOKIE_NAME", "")
+	cfg, err := LoadWithPath(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadWithPath: %v", err)
+	}
+	if got := cfg.Auth.CookieName; got != "" {
+		t.Fatalf("default auth.cookieName = %q, want empty", got)
+	}
+}
+
+// TestAuthCookieNameFromConfigFile pins config.yaml precedence for
+// auth.cookieName.
+func TestAuthCookieNameFromConfigFile(t *testing.T) {
+	dir := t.TempDir()
+	cfgYAML := "auth:\n  cookieName: my_session\n"
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(cfgYAML), 0o600); err != nil {
+		t.Fatalf("write config.yaml: %v", err)
+	}
+	t.Setenv("KANDEV_AUTH_COOKIE_NAME", "")
+
+	cfg, err := LoadWithPath(dir)
+	if err != nil {
+		t.Fatalf("LoadWithPath: %v", err)
+	}
+	if got := cfg.Auth.CookieName; got != "my_session" {
+		t.Fatalf("auth.cookieName from config = %q, want %q", got, "my_session")
+	}
+}
+
+// TestAuthCookieNameFromEnv pins the canonical environment override
+// KANDEV_AUTH_COOKIE_NAME (explicit BindEnv — the automatic camelCase
+// mapping would expose the undocumented KANDEV_AUTH_COOKIENAME instead).
+func TestAuthCookieNameFromEnv(t *testing.T) {
+	t.Setenv("KANDEV_AUTH_COOKIE_NAME", "env_session")
+
+	cfg, err := LoadWithPath(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadWithPath: %v", err)
+	}
+	if got := cfg.Auth.CookieName; got != "env_session" {
+		t.Fatalf("auth.cookieName from env = %q, want %q", got, "env_session")
+	}
+}
+
+// TestAuthCookieNameEnvOverridesFile pins precedence: environment wins over
+// config.yaml for auth.cookieName.
+func TestAuthCookieNameEnvOverridesFile(t *testing.T) {
+	dir := t.TempDir()
+	cfgYAML := "auth:\n  cookieName: file_session\n"
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(cfgYAML), 0o600); err != nil {
+		t.Fatalf("write config.yaml: %v", err)
+	}
+	t.Setenv("KANDEV_AUTH_COOKIE_NAME", "env_session")
+
+	cfg, err := LoadWithPath(dir)
+	if err != nil {
+		t.Fatalf("LoadWithPath: %v", err)
+	}
+	if got := cfg.Auth.CookieName; got != "env_session" {
+		t.Fatalf("auth.cookieName = %q, want env override %q", got, "env_session")
 	}
 }

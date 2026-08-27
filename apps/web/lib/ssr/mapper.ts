@@ -10,6 +10,21 @@ import {
 
 type KanbanTask = KanbanState["tasks"][number];
 
+// Split out so the snapshot->task mapper (already at the complexity limit
+// from its long list of `??` fallbacks) doesn't need to absorb one more.
+function resolveAutoStartFailed(task: WorkflowSnapshot["tasks"][number]): boolean {
+  return task.auto_start_failed ?? false;
+}
+
+function primaryExecutorFields(task: Task) {
+  return {
+    primaryExecutorId: task.primary_executor_id ?? undefined,
+    primaryExecutorType: task.primary_executor_type ?? undefined,
+    primaryExecutorName: task.primary_executor_name ?? undefined,
+    isRemoteExecutor: task.is_remote_executor ?? false,
+  };
+}
+
 export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
   // Handle empty snapshot (ephemeral tasks have no workflow)
   if (!snapshot.workflow) {
@@ -31,27 +46,47 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
       const primary = primaryTaskRepository(task.repositories);
       return {
         id: task.id,
+        workflowId: snapshot.workflow.id,
         workflowStepId,
         title: task.title,
         description: task.description ?? undefined,
+        autopilot: task.autopilot ?? false,
         position: task.position ?? 0,
         state: task.state,
+        // Preserve WIP admission and queue metadata during HTTP snapshot
+        // refreshes. The Go boot mapper, WebSocket handler, and canonical
+        // task mapper already carry these fields. This path must keep the
+        // same values so queue classification and ordering stay consistent
+        // after a workflow switch or reconnect.
+        priority: task.priority,
+        createdAt: task.created_at,
+        wipAdmitted: task.wip_admitted,
+        queuedForStepId: task.queued_for_step_id,
+        queuedAt: task.queued_at,
         repositoryId: primary?.repository_id ?? undefined,
         repositories: task.repositories?.map((r) => ({
           id: r.id,
           repository_id: r.repository_id,
           base_branch: r.base_branch,
           checkout_branch: r.checkout_branch,
+          branch_policy_id: r.branch_policy_id,
+          branch_policy_name: r.branch_policy_name,
+          branch_policy_base_branch: r.branch_policy_base_branch,
+          branch_policy_branch_template: r.branch_policy_branch_template,
+          branch_policy_pull_request_target: r.branch_policy_pull_request_target,
           position: r.position,
         })),
         primarySessionId: task.primary_session_id ?? undefined,
         primarySessionState: task.primary_session_state ?? undefined,
+        ...primaryExecutorFields(task),
         primarySessionPendingAction: pickPendingAction(task.primary_session_pending_action),
         taskPendingAction: pickPendingAction(task.task_pending_action),
         foregroundActivity: task.foreground_activity ?? undefined,
+        autoStartFailed: resolveAutoStartFailed(task),
         activeSubagentCount: task.active_subagent_count ?? undefined,
         sessionCount: task.session_count ?? undefined,
         reviewStatus: task.review_status ?? undefined,
+        statusSummary: task.status_summary,
         parentTaskId: task.parent_id ?? undefined,
         metadata: task.metadata,
         workspaceMode: workspaceModeFromMetadata(task.metadata),
@@ -99,6 +134,7 @@ export function taskToState(
       activeSessionId: resolvedSessionId,
       pinnedSessionId: null,
       lastSessionByTaskId: resolvedSessionId ? { [task.id]: resolvedSessionId } : {},
+      resumeSkippedSessionIds: {},
     },
     messages:
       resolvedSessionId && messages
@@ -109,6 +145,7 @@ export function taskToState(
             metaBySession: {
               [resolvedSessionId]: {
                 isLoading: false,
+                isLoadingMore: false,
                 hasMore: messages.hasMore ?? false,
                 oldestCursor: messages.oldestCursor ?? messages.items[0]?.id ?? null,
               },

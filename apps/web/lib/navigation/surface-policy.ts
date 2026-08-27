@@ -40,6 +40,7 @@ export const PALETTE_ONLY: NavSurface[] = ["palette"];
  * claim a surface that never draws it — `core-destinations.test.ts` enforces that.
  */
 export const MOBILE_MENU_SECTIONS: NavSection[] = [
+  "primary",
   "plugins",
   "integrations",
   "insights",
@@ -51,15 +52,15 @@ export const MOBILE_MENU_UTILITY_SECTIONS: StaticNavSection[] = ["insights", "ut
 
 /**
  * Destinations deliberately not offered in the mobile menu, each with the mobile
- * affordance that owns it instead. Everything else must be offered there: the
- * sidebar is hidden below `md`, so an omission means unreachable on a phone —
- * which is exactly how `/stats` ended up with no phone entry point.
- * `core-destinations.test.ts` fails on any omission that is not listed here.
+ * affordance that owns it instead — the sidebar is hidden below `md`, so an
+ * omission means unreachable on a phone, which is exactly how `/stats` ended up
+ * with no phone entry point. `core-destinations.test.ts` fails on any omission
+ * that is not listed here. Empty today: every destination is offered, and a
+ * surface that already covers one opts out at its own call site instead (the
+ * kanban drawer passes `omitSections={["primary"]}` because its brand link and
+ * View toggle cover Home and Tasks).
  */
-export const MOBILE_MENU_EXEMPTIONS: Record<string, string> = {
-  home: "the mobile header's brand link is the phone's home affordance",
-  tasks: "the mobile menu's View toggle switches between Kanban and List",
-};
+export const MOBILE_MENU_EXEMPTIONS: Record<string, string> = {};
 
 /** Catalog key the palette groups navigation commands under. */
 export const PALETTE_NAVIGATION_GROUP_KEY = "common:commandGroupNavigation";

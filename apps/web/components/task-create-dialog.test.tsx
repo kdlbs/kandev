@@ -14,12 +14,24 @@ const USER_EDIT = "User edit";
 const PROMPT_RESULT_RECOVERY_TEST_ID = "prompt-result-recovery";
 const ENHANCE_PROMPT_BUTTON_TEST_ID = "enhance-prompt-button";
 
+type EscapeEvent = { preventDefault: () => void };
+
 let allowProgrammaticSet = true;
 let mockFs: DialogFormState;
+let dialogEscapeHandler: ((event: EscapeEvent) => void) | undefined;
 
 vi.mock("@kandev/ui/dialog", () => ({
   Dialog: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  DialogContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  DialogContent: ({
+    children,
+    onEscapeKeyDown,
+  }: {
+    children: ReactNode;
+    onEscapeKeyDown?: (event: EscapeEvent) => void;
+  }) => {
+    dialogEscapeHandler = onEscapeKeyDown;
+    return <div>{children}</div>;
+  },
   DialogHeader: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   DialogFooter: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }));
@@ -64,6 +76,7 @@ vi.mock("@/hooks/use-keyboard-shortcut", () => ({
 }));
 
 vi.mock("@/components/task-create-dialog-footer", () => ({
+  isNativeSubmitDisabled: () => false,
   TaskCreateDialogFooter: () => null,
 }));
 
@@ -84,6 +97,7 @@ vi.mock("@/components/task-create-dialog-repo-chips", () => ({
 }));
 
 vi.mock("@/hooks/use-task-create-dialog-popover-container", () => ({
+  useTaskCreateDialogPopoverContainer: () => null,
   TaskCreateDialogPopoverContainerProvider: ({ children }: { children: ReactNode }) => (
     <>{children}</>
   ),
@@ -94,8 +108,24 @@ vi.mock("@/components/task-create-dialog-handlers", () => ({
 }));
 
 vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (state: { userSettings: { taskCreateLastUsed: null } }) => unknown) =>
-    selector({ userSettings: { taskCreateLastUsed: null } }),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  useAppStore: (selector: (state: any) => unknown) =>
+    selector({
+      userSettings: { taskCreateLastUsed: null },
+      repositorySets: {
+        itemsByWorkspaceId: {},
+        loadingByWorkspaceId: {},
+        loadedByWorkspaceId: {},
+        revisionByWorkspaceId: {},
+      },
+      setRepositorySets: () => undefined,
+      setRepositorySetsLoading: () => undefined,
+    }),
+  useAppStoreApi: () => ({
+    getState: () => ({
+      repositoryBranchPolicies: { revisionByRepositoryId: {} },
+    }),
+  }),
 }));
 
 vi.mock("@/components/task-create-dialog-submit", () => ({
@@ -230,7 +260,11 @@ vi.mock("@/components/task-create-dialog-state", () => ({
 
 function buildMockFs(initialDescription = ORIGINAL_PROMPT): DialogFormState {
   return {
+    blockedBy: [],
+    setBlockedBy: () => undefined,
     taskName: "Task title",
+    autopilot: false,
+    setAutopilot: () => undefined,
     setTaskName: () => undefined,
     hasTitle: true,
     setHasTitle: () => undefined,
@@ -243,7 +277,9 @@ function buildMockFs(initialDescription = ORIGINAL_PROMPT): DialogFormState {
     currentDefaults: { name: "Task title", description: initialDescription },
     descriptionInputRef: createRef<TaskFormInputsHandle>(),
     repositories: [],
+    repositoriesDirty: false,
     setRepositories: () => undefined,
+    setRepositoriesDirty: () => undefined,
     addRepository: () => undefined,
     removeRepository: () => undefined,
     updateRepository: () => undefined,
@@ -284,6 +320,7 @@ function buildMockFs(initialDescription = ORIGINAL_PROMPT): DialogFormState {
     prInfoByUrl: {
       info: () => undefined,
       loading: () => false,
+      settled: () => true,
       error: () => undefined,
       ensure: () => undefined,
       clear: () => undefined,
@@ -306,10 +343,11 @@ function buildMockFs(initialDescription = ORIGINAL_PROMPT): DialogFormState {
   };
 }
 
-function renderDialog() {
+function renderDialog(mode: "create" | "edit" | "session" = "create") {
   return render(
     <TaskCreateDialog
       open
+      mode={mode}
       onOpenChange={() => undefined}
       workspaceId="workspace-1"
       workflowId={null}
@@ -328,7 +366,30 @@ beforeEach(() => {
   enhancePromptMock.mockReset();
   toastMock.mockReset();
   setHasDescriptionMock.mockReset();
+  dialogEscapeHandler = undefined;
   mockFs = buildMockFs();
+});
+
+describe("TaskCreateDialog Escape dismissal", () => {
+  it("prevents Escape from dismissing create mode", () => {
+    renderDialog();
+    const event = { preventDefault: vi.fn() };
+
+    expect(dialogEscapeHandler).toBeTypeOf("function");
+    dialogEscapeHandler?.(event);
+
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+  });
+
+  it.each(["edit", "session"] as const)("keeps Escape dismissal available in %s mode", (mode) => {
+    renderDialog(mode);
+    const event = { preventDefault: vi.fn() };
+
+    expect(dialogEscapeHandler).toBeTypeOf("function");
+    dialogEscapeHandler?.(event);
+
+    expect(event.preventDefault).not.toHaveBeenCalled();
+  });
 });
 
 describe("TaskCreateDialog prompt enhancement", () => {

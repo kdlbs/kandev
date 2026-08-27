@@ -1,7 +1,8 @@
+import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, it } from "node:test";
 
 import shim from "./native-shim.js";
 
@@ -25,14 +26,14 @@ describe("native npm shim", () => {
   });
 
   it("maps supported platforms to runtime packages", () => {
-    expect(platformPackage("linux", "x64")).toBe("@kdlbs/runtime-linux-x64");
-    expect(platformPackage("darwin", "arm64")).toBe("@kdlbs/runtime-darwin-arm64");
-    expect(platformPackage("win32", "x64")).toBe("@kdlbs/runtime-win32-x64");
+    assert.equal(platformPackage("linux", "x64"), "@kdlbs/runtime-linux-x64");
+    assert.equal(platformPackage("darwin", "arm64"), "@kdlbs/runtime-darwin-arm64");
+    assert.equal(platformPackage("win32", "x64"), "@kdlbs/runtime-win32-x64");
   });
 
   it("uses exe suffix on Windows only", () => {
-    expect(binaryName("kandev", "win32")).toBe("kandev.exe");
-    expect(binaryName("kandev", "linux")).toBe("kandev");
+    assert.equal(binaryName("kandev", "win32"), "kandev.exe");
+    assert.equal(binaryName("kandev", "linux"), "kandev");
   });
 
   it("resolves KANDEV_BUNDLE_DIR before npm packages", () => {
@@ -42,8 +43,8 @@ describe("native npm shim", () => {
       throw new Error("should not resolve npm package");
     });
 
-    expect(runtime.bundleDir).toBe(tmpDir);
-    expect(runtime.executable).toBe(path.join(tmpDir, "bin", "kandev"));
+    assert.equal(runtime.bundleDir, tmpDir);
+    assert.equal(runtime.executable, path.join(tmpDir, "bin", "kandev"));
   });
 
   it("resolves the installed runtime package", () => {
@@ -53,13 +54,13 @@ describe("native npm shim", () => {
 
     const runtime = resolveRuntime({}, () => pkgJSON);
 
-    expect(runtime.bundleDir).toBe(tmpDir);
+    assert.equal(runtime.bundleDir, tmpDir);
   });
 
   it("rejects bundles without the native kandev binary", () => {
     fs.mkdirSync(path.join(tmpDir, "bin"), { recursive: true });
     fs.writeFileSync(path.join(tmpDir, "bin", "agentctl"), "fake");
 
-    expect(() => validateRuntime(tmpDir)).toThrow(/Kandev native binary not found/);
+    assert.throws(() => validateRuntime(tmpDir), /Kandev native binary not found/);
   });
 });

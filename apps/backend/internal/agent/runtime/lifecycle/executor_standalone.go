@@ -100,20 +100,23 @@ func buildStandaloneCreateInstanceRequest(
 			req.AutoApprovePermissions,
 			req.AutoApprovePermissionsOverride,
 		),
-		AutoStart:            false,
-		McpServers:           req.McpServers,
-		SessionID:            req.SessionID,
-		TaskID:               req.TaskID,
-		DisableAskQuestion:   disableAskQuestion,
-		AssumeMcpSse:         assumeMcpSse,
-		AssumeMcpHttp:        assumeMcpHttp,
-		McpMode:              req.McpMode,
-		McpProviders:         req.McpProviders,
-		RequiresProcessKill:  requiresProcessKill,
-		StripEnv:             stripEnv,
-		BaseBranches:         getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
-		RemoteContributions:  req.RemoteContributions,
-		WorkspaceSourceRoots: req.WorkspaceSourceRoots,
+		AutoStart:                false,
+		McpServers:               req.McpServers,
+		SessionID:                req.SessionID,
+		TaskID:                   req.TaskID,
+		DisableAskQuestion:       disableAskQuestion,
+		AssumeMcpSse:             assumeMcpSse,
+		AssumeMcpHttp:            assumeMcpHttp,
+		McpMode:                  req.McpMode,
+		McpProviders:             req.McpProviders,
+		McpProfile:               req.McpProfile,
+		RequiresProcessKill:      requiresProcessKill,
+		StripEnv:                 stripEnv,
+		BaseBranches:             getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
+		RemoteContributions:      req.RemoteContributions,
+		ContributionDestinations: req.ContributionDestinations,
+		ComparisonTargets:        req.ComparisonTargets,
+		WorkspaceSourceRoots:     req.WorkspaceSourceRoots,
 	}
 }
 
@@ -136,7 +139,7 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 	if req.AgentConfig != nil {
 		agentType = req.AgentConfig.ID()
 	}
-	disableAskQuestion := agents.IsPassthroughOnly(req.AgentConfig)
+	disableAskQuestion := !agents.SupportsInteractiveMCPTools(req.AgentConfig)
 	assumeMcpSse := false
 	assumeMcpHttp := false
 	requiresProcessKill := false

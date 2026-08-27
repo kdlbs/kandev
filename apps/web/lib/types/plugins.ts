@@ -20,6 +20,11 @@ export interface PluginWebhook {
   key: string;
   description?: string;
   method?: string;
+  /** API v1 defaults to "public" for compatibility. API v2 defaults to
+   * "authenticated", requiring a caller identity (session or PAT). Explicit
+   * values override either default. See docs/public/plugins-manifest.md. */
+  access?: "public" | "authenticated";
+  max_body_bytes?: number;
 }
 
 export interface PluginUIPage {
@@ -40,6 +45,12 @@ export interface PluginKeybinding {
   id: string;
   default: string;
   description: string;
+  /**
+   * Lets this binding fire while an input, textarea or contenteditable has
+   * focus. Off by default so a plugin cannot shadow ordinary typing; the
+   * backend only accepts it on a combo carrying a ctrl/cmd/mod/alt modifier.
+   */
+  allow_in_editor?: boolean;
 }
 
 export interface PluginUISection {
@@ -74,6 +85,8 @@ export interface PluginRecord {
    */
   repo_url?: string;
   capabilities: PluginCapabilities;
+  /** Manifest-owned repository providers, serialized by the plugin API. */
+  repository_providers?: string[];
   webhooks?: PluginWebhook[];
   config_schema?: Record<string, unknown>;
   ui?: PluginUISection;

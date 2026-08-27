@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -18,10 +19,14 @@ import (
 
 // TaskEventData contains data from task events
 type TaskEventData struct {
-	TaskID   string        `json:"task_id"`
-	Task     *v1.Task      `json:"task,omitempty"`
-	OldState *v1.TaskState `json:"old_state,omitempty"`
-	NewState *v1.TaskState `json:"new_state,omitempty"`
+	TaskID           string        `json:"task_id"`
+	StepTransitionID int64         `json:"step_transition_id,omitempty"`
+	Task             *v1.Task      `json:"task,omitempty"`
+	OldState         *v1.TaskState `json:"old_state,omitempty"`
+	NewState         *v1.TaskState `json:"new_state,omitempty"`
+	WIPAdmitted      bool          `json:"wip_admitted"`
+	QueuedForStepID  string        `json:"queued_for_step_id,omitempty"`
+	QueuedAt         *time.Time    `json:"queued_at,omitempty"`
 }
 
 // AgentEventData contains data from agent events
@@ -34,8 +39,17 @@ type AgentEventData struct {
 	ExecutionProfileID string                 `json:"execution_profile_id,omitempty"`
 	ExitCode           *int                   `json:"exit_code,omitempty"`
 	ErrorMessage       string                 `json:"error_message,omitempty"`
+	FailureCode        string                 `json:"failure_code,omitempty"`
+	FailureDetails     string                 `json:"failure_details,omitempty"`
 	ProviderError      *streams.ProviderError `json:"provider_error,omitempty"`
 	PromptGeneration   uint64                 `json:"prompt_generation,omitempty"`
+	// DynamicRouteAttempt marks failures and stream evidence that belong to a
+	// dynamic provider attempt. Fallback is fail-closed unless the evidence is
+	// explicitly known to contain no output or effects.
+	DynamicRouteAttempt bool `json:"dynamic_route_attempt,omitempty"`
+	EvidenceKnown       bool `json:"evidence_known,omitempty"`
+	OutputObserved      bool `json:"output_observed,omitempty"`
+	EffectObserved      bool `json:"effect_observed,omitempty"`
 }
 
 // ACPSessionEventData contains data from ACP session events
@@ -51,6 +65,7 @@ type PermissionRequestData struct {
 	TaskID        string                   `json:"task_id"`
 	TaskSessionID string                   `json:"session_id"`
 	AgentID       string                   `json:"agent_id"`
+	RequestID     string                   `json:"request_id"`
 	PendingID     string                   `json:"pending_id"`
 	ToolCallID    string                   `json:"tool_call_id"`
 	Title         string                   `json:"title"`
@@ -65,12 +80,17 @@ type GitEventData = lifecycle.GitEventPayload
 
 // TaskMovedEventData contains data from task.moved events (manual step changes).
 type TaskMovedEventData struct {
-	TaskID          string `json:"task_id"`
-	FromStepID      string `json:"from_step_id"`
-	ToStepID        string `json:"to_step_id"`
-	SessionID       string `json:"session_id"`
-	WorkflowID      string `json:"workflow_id"`
-	TaskDescription string `json:"task_description"`
+	TaskID           string     `json:"task_id"`
+	StepTransitionID int64      `json:"step_transition_id,omitempty"`
+	FromStepID       string     `json:"from_step_id"`
+	ToStepID         string     `json:"to_step_id"`
+	SessionID        string     `json:"session_id"`
+	WorkflowID       string     `json:"workflow_id"`
+	TaskDescription  string     `json:"task_description"`
+	WIPAdmitted      bool       `json:"wip_admitted"`
+	QueuedForStepID  string     `json:"queued_for_step_id,omitempty"`
+	QueuedAt         *time.Time `json:"queued_at,omitempty"`
+	QueuePromotion   bool       `json:"queue_promotion,omitempty"`
 }
 
 // ContextWindowData contains data from context window events

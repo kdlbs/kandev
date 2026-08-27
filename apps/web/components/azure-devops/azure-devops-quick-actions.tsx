@@ -8,10 +8,7 @@ import { CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@kandev/ui/tabs";
-import {
-  ScriptEditor,
-  computeEditorHeight,
-} from "@/components/settings/profile-edit/script-editor";
+import { SettingsPromptEditor } from "@/components/settings/settings-prompt-editor";
 import type { ScriptPlaceholder } from "@/components/settings/profile-edit/script-editor-completions";
 import {
   ACTION_PRESET_ICON_CHOICES,
@@ -39,8 +36,8 @@ type Translate = (key: string, values?: Record<string, unknown>) => string;
  * A function rather than a module-scope constant: `t()` at module scope would
  * freeze the descriptions at the boot locale. `key` is the placeholder token
  * the backend substitutes and `example` is sample data — neither is copy.
- * Memoize at every call site: ScriptEditor keys its completion-provider
- * registration on array identity.
+ * Memoize at every call site so the shared editor does not rebuild the
+ * completion provider on every keystroke.
  */
 function actionPromptPlaceholders(t: Translate): ScriptPlaceholder[] {
   return [
@@ -91,6 +88,7 @@ const PROMPT_TITLE_TOKEN = "{{title}}";
 // the row below, so it must stay locale-neutral — the same contract as
 // `newPreset` in components/github/action-presets-section.tsx.
 function newAction(): AzureDevOpsActionPreset {
+  // i18n-exempt: persisted, editable preset label. See the comment above.
   return {
     id: `preset_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
     label: "New action",
@@ -165,36 +163,35 @@ function ActionPromptPanel({
   onPatch: (patch: Partial<AzureDevOpsActionPreset>) => void;
 }) {
   const { t } = useTranslation();
-  // ScriptEditor keys its completion-provider registration on array identity, so
-  // a fresh array per render would re-register on every keystroke.
   const placeholders = useMemo(() => actionPromptPlaceholders(t), [t]);
   return (
     <div className="space-y-1 px-3 pb-3 sm:px-2 sm:pb-2">
-      <div
-        className="overflow-hidden rounded-md border"
-        data-settings-dirty={action.promptTemplate !== baseline?.promptTemplate}
-        data-settings-dirty-level="container"
-      >
-        <ScriptEditor
-          value={action.promptTemplate}
-          onChange={(promptTemplate) => onPatch({ promptTemplate })}
-          language="markdown"
-          height={computeEditorHeight(action.promptTemplate)}
-          lineNumbers="off"
-          placeholders={placeholders}
-        />
-      </div>
-      <p className="text-[11px] text-muted-foreground/60">
-        {/* The three tokens are prompt syntax, passed as values so neither
-            i18next interpolation nor the pseudo-locale rewrites them. */}
-        <Trans
-          i18nKey="azuredevops:promptPlaceholdersHint"
-          values={{ open: PROMPT_OPEN_BRACES, url: PROMPT_URL_TOKEN, title: PROMPT_TITLE_TOKEN }}
-        >
-          Type {PROMPT_OPEN_BRACES} to see available placeholders. <code>{PROMPT_URL_TOKEN}</code>{" "}
-          and <code>{PROMPT_TITLE_TOKEN}</code> are substituted when the action runs.
-        </Trans>
-      </p>
+      <SettingsPromptEditor
+        value={action.promptTemplate}
+        onChange={(promptTemplate) => onPatch({ promptTemplate })}
+        placeholders={placeholders}
+        promptReferences
+        isDirty={action.promptTemplate !== baseline?.promptTemplate}
+        testId={`azure-action-prompt-editor-${action.id}`}
+        help={
+          <p className="text-[11px] text-muted-foreground/60">
+            {/* The three tokens are prompt syntax, passed as values so neither
+                i18next interpolation nor the pseudo-locale rewrites them. */}
+            <Trans
+              i18nKey="azuredevops:promptPlaceholdersHint"
+              values={{
+                open: PROMPT_OPEN_BRACES,
+                url: PROMPT_URL_TOKEN,
+                title: PROMPT_TITLE_TOKEN,
+              }}
+            >
+              Type {PROMPT_OPEN_BRACES} to see available placeholders.{" "}
+              <code>{PROMPT_URL_TOKEN}</code> and <code>{PROMPT_TITLE_TOKEN}</code> are substituted
+              when the action runs.
+            </Trans>
+          </p>
+        }
+      />
     </div>
   );
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/common/logger"
 	lspinstaller "github.com/kandev/kandev/internal/lsp/installer"
+	"github.com/kandev/kandev/internal/mcp/plugintools"
 	mcpproviders "github.com/kandev/kandev/internal/mcp/providers"
 	"github.com/kandev/kandev/internal/mcp/server"
 	"github.com/kandev/kandev/internal/system/metrics"
@@ -99,6 +100,7 @@ func (s *Server) setupRoutes() {
 
 		// Process control
 		api.POST("/agent/configure", s.handleAgentConfigure)
+		api.POST("/agent/managed-runtime/cache-repair", s.handleManagedRuntimeCacheRepair)
 		api.POST("/start", s.handleStart)
 		api.POST("/stop", s.handleStop)
 
@@ -127,6 +129,9 @@ func (s *Server) setupRoutes() {
 		// and triggers a fresh git-status emit so the UI updates without
 		// waiting for the next poll tick.
 		api.POST("/workspace/base-branches", s.handleSetBaseBranches)
+		// Provider-qualified comparison targets are authenticated internal state;
+		// the backend uses this route after association, retarget, and resume.
+		api.POST("/workspace/comparison-targets", s.handleSetComparisonTargets)
 
 		// Workspace file operations (simple HTTP)
 		api.GET("/workspace/tree", s.handleFileTree)
@@ -184,6 +189,8 @@ func (s *Server) setupRoutes() {
 		api.POST("/git/pull", s.handleGitPull)
 		api.POST("/git/push", s.handleGitPush)
 		api.POST("/git/push-preflight", s.handleGitPushPreflight)
+		api.POST("/git/contribution/replace", s.handleGitReplaceContribution)
+		api.POST("/git/contribution/use", s.handleGitUseContribution)
 		api.POST("/git/rebase", s.handleGitRebase)
 		api.POST("/git/merge", s.handleGitMerge)
 		api.POST("/git/abort", s.handleGitAbort)
@@ -211,6 +218,7 @@ func (s *Server) setupRoutes() {
 		s.mcpServer.RegisterRoutes(s.router)
 		api.PUT("/mcp/mode", s.handleSetMcpMode)
 		api.PUT("/mcp/providers", s.handleSetMcpProviders)
+		api.PUT("/mcp/plugin-tools", s.handleSetPluginTools)
 	}
 
 	// pprof + memory stats (enabled via KANDEV_DEBUG_PPROF_ENABLED=true)
@@ -343,6 +351,19 @@ func (s *Server) handleSetMcpProviders(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"mcp_providers": providers})
 }
 
+func (s *Server) handleSetPluginTools(c *gin.Context) {
+	var snapshot plugintools.Snapshot
+	if err := c.ShouldBindJSON(&snapshot); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := s.mcpServer.SetPluginTools(snapshot); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"generation": snapshot.Generation, "revision": snapshot.Revision})
+}
+
 // Status response
 type StatusResponse struct {
 	AgentStatus string                 `json:"agent_status"`
@@ -407,10 +428,10 @@ func (s *Server) handleStart(c *gin.Context) {
 type AgentConfigureRequest struct {
 	Command         string            `json:"command"`
 	AgentArgs       optionalArgs      `json:"agent_args"`
-	ContinueCommand string            `json:"continue_command,omitempty"` // For one-shot agents (Amp): command for follow-up prompts
+	ContinueCommand string            `json:"continue_command,omitempty"` // For one-shot agents: command for follow-up prompts
 	ContinueArgs    optionalArgs      `json:"continue_args"`
 	Env             map[string]string `json:"env,omitempty"`
-	ApprovalPolicy  string            `json:"approval_policy,omitempty"` // For Codex: "untrusted", "on-failure", "on-request", "never"
+	ApprovalPolicy  string            `json:"approval_policy,omitempty"` // "untrusted", "on-failure", "on-request", or "never"
 }
 
 type optionalArgs struct {

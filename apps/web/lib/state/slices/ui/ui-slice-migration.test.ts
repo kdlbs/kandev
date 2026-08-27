@@ -19,6 +19,12 @@ function makeSidebarDraft(baseViewId = "view-a"): SidebarViewDraft {
     filters: [],
     sort: { key: "state", direction: "asc" },
     group: "none",
+    taskRow: {
+      detailsEnabled: true,
+      detailOrder: ["relative_time", "repository", "pull_request_number"],
+      visibleDetails: ["relative_time", "repository", "pull_request_number"],
+      trailing: "git_changes",
+    },
   };
 }
 
@@ -82,5 +88,17 @@ describe("migrateSidebarViewDraft archived compatibility", () => {
     draft.group = "repository";
 
     expect(migrateSidebarViewDraft(draft)).toEqual(draft);
+  });
+});
+
+describe("migrate sidebar activity sort", () => {
+  it("preserves lastActivityAt on saved views and drafts", () => {
+    const view = makeSidebarView("view-activity", "Recent activity");
+    view.sort = { key: "lastActivityAt", direction: "desc" };
+    const draft = makeSidebarDraft("view-activity");
+    draft.sort = { key: "lastActivityAt", direction: "asc" };
+
+    expect(migrateView(view).sort).toEqual(view.sort);
+    expect(migrateSidebarViewDraft(draft).sort).toEqual(draft.sort);
   });
 });

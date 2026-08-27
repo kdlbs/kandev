@@ -69,7 +69,13 @@ function automationActor(status: GitHubStatus): string | null {
   return status.automation?.actor?.login ?? null;
 }
 
-function StatusLine({ status }: { status: GitHubStatus }) {
+function StatusLine({
+  status,
+  onRateLimitOpen,
+}: {
+  status: GitHubStatus;
+  onRateLimitOpen: () => void;
+}) {
   const { t } = useTranslation();
   const connection = status.automation;
   if (!connection) {
@@ -99,7 +105,7 @@ function StatusLine({ status }: { status: GitHubStatus }) {
         {t(sourceLabelKeys[connection.source])}
       </Badge>
       {connection.status !== "active" && <Badge variant="outline">{connection.status}</Badge>}
-      <GitHubRateLimitDisplay info={status.rate_limit} />
+      <GitHubRateLimitDisplay info={status.rate_limit} onOpen={onRateLimitOpen} />
     </div>
   );
 }
@@ -120,15 +126,17 @@ function AutomationStatusSummary({
   status,
   app,
   taskAccess,
+  onRateLimitOpen,
 }: {
   status: GitHubStatus;
   app?: GitHubAppRegistrationCatalogItem;
   taskAccess: Omit<TaskGitCredentialsState, "save">;
+  onRateLimitOpen: () => void;
 }) {
   const appAutomation = status.automation?.source === "github_app_installation";
   return (
     <div className="min-w-0 space-y-1">
-      <StatusLine status={status} />
+      <StatusLine status={status} onRateLimitOpen={onRateLimitOpen} />
       <AutomationActorExplanation status={status} appAutomation={appAutomation} />
       {appAutomation && <AppRegistrationDetails app={app} />}
       <AutomationError status={status} />
@@ -280,7 +288,12 @@ export function GitHubAutomationSettings({ workspaceId }: { workspaceId: string 
       className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
       data-testid="github-workspace-automation"
     >
-      <AutomationStatusSummary status={status} app={activeApp} taskAccess={taskAccess} />
+      <AutomationStatusSummary
+        status={status}
+        app={activeApp}
+        taskAccess={taskAccess}
+        onRateLimitOpen={refresh}
+      />
       <AutomationActions
         status={status}
         workspaceId={workspaceId}

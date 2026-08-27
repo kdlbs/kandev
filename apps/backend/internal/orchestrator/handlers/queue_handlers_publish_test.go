@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/require"
 )
 
@@ -65,12 +66,37 @@ func TestPublishStatusIncludesTaskIDWhenResolvable(t *testing.T) {
 	msg := &messagequeue.QueuedMessage{SessionID: "s1", TaskID: "task-1", Content: "x", QueuedBy: messagequeue.QueuedByUser}
 	_, err := svc.QueueMessageWithMetadata(ctx, msg.SessionID, msg.TaskID, msg.Content, "", msg.QueuedBy, false, nil, nil)
 	require.NoError(t, err)
+	require.NoError(t, svc.SetAutoRun(ctx, "s1", false))
 
 	handlers.publishStatus(ctx, "s1")
 
 	require.NotNil(t, events.lastData, "expected a published queue status event")
 	require.Equal(t, "task-1", events.lastData["task_id"])
 	require.Equal(t, "s1", events.lastData["session_id"])
+	require.Equal(t, false, events.lastData["auto_run"])
+	require.Equal(t, true, events.lastData["merge_enabled"])
+}
+
+func TestWsQueueMessagePublishesUserPromptActivity(t *testing.T) {
+	handlers, _, events := setupQueueHandlersWithResolver(t, func(_ context.Context, sessionID string) (string, error) {
+		if sessionID == "s1" {
+			return "task-1", nil
+		}
+		return "", nil
+	})
+
+	response, err := handlers.wsQueueMessage(context.Background(), createTestMessage(t, ws.ActionMessageQueueAdd, map[string]interface{}{
+		"session_id": "s1",
+		"task_id":    "task-1",
+		"content":    "queued prompt",
+		"user_id":    "user-1",
+	}))
+	require.NoError(t, err)
+	require.NotNil(t, response)
+	require.NotNil(t, events.lastData)
+	require.Equal(t, "user-1", events.lastData["queued_by"])
+	require.IsType(t, time.Time{}, events.lastData["queued_at"])
+	require.False(t, events.lastData["queued_at"].(time.Time).IsZero())
 }
 
 func TestPublishStatusOmitsTaskIDWhenResolutionFails(t *testing.T) {

@@ -25,6 +25,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
@@ -54,6 +55,38 @@ func TestErrSessionWorkspaceNotReady_UnrelatedError(t *testing.T) {
 
 	if errors.Is(unrelated, ErrSessionWorkspaceNotReady) {
 		t.Errorf("expected errors.Is to be false for unrelated error")
+	}
+}
+
+func TestPrepareExecutionCreateRequest_ReuseRequiredDockerUsesEnvironmentControlToken(t *testing.T) {
+	mgr := newTestManager(t)
+	store := newInMemorySecretStore()
+	store.store["session-auth"] = &secrets.SecretWithValue{Value: "sibling-session-token"}
+	store.store["container-control"] = &secrets.SecretWithValue{Value: "environment-control-token"}
+	mgr.secretStore = store
+
+	prepared, err := mgr.prepareExecutionCreateRequest(context.Background(), "task-1", &WorkspaceInfo{
+		TaskID:            "task-1",
+		SessionID:         "session-2",
+		TaskEnvironmentID: "environment-1",
+		WorkspacePath:     "/workspace",
+		AgentID:           "auggie",
+		ExecutorType:      string(models.ExecutorTypeLocalDocker),
+		Metadata: map[string]interface{}{
+			MetadataKeyContainerID:                "container-1",
+			MetadataKeyAuthTokenSecret:            "session-auth",
+			MetadataKeyContainerControlAuthSecret: "container-control",
+		},
+	}, "execution-2")
+	if err != nil {
+		t.Fatalf("prepareExecutionCreateRequest() error = %v", err)
+	}
+
+	if got := prepared.request.AuthToken; got != "environment-control-token" {
+		t.Fatalf("reconnect auth token = %q, want environment control token", got)
+	}
+	if !prepared.request.WorkspaceReuseRequired {
+		t.Fatal("on-demand execution for a task environment must attach rather than provision a replacement workspace")
 	}
 }
 
@@ -311,10 +344,10 @@ func TestCoalescedExecutionCreationHasManagerDeadline(t *testing.T) {
 			if !errors.Is(err, context.DeadlineExceeded) {
 				t.Fatalf("creation error = %v, want manager deadline", err)
 			}
-			if elapsed := time.Since(startedAt); elapsed != coalescedExecutionCreationTimeout {
-				t.Fatalf("manager deadline elapsed after %v, want %v", elapsed, coalescedExecutionCreationTimeout)
+			if elapsed := time.Since(startedAt); elapsed != constants.AgentLaunchTimeout {
+				t.Fatalf("manager deadline elapsed after %v, want %v", elapsed, constants.AgentLaunchTimeout)
 			}
-		case <-time.After(coalescedExecutionCreationTimeout + time.Second):
+		case <-time.After(constants.AgentLaunchTimeout + time.Second):
 			t.Fatal("blocked creation outlived the manager startup deadline")
 		}
 

@@ -17,6 +17,18 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 )
 
+// Advertised model ids. mock-slow is a delay tier (see delayRange) that E2E
+// fixtures select for slow responses; it must be advertised for the
+// no-silent-model-fallback strict policy to accept it.
+const (
+	modelFast           = "mock-fast"
+	modelSmart          = "mock-smart"
+	modelSlow           = "mock-slow"
+	reasoningEffortLow  = "low"
+	reasoningEffortMed  = "medium"
+	reasoningEffortHigh = "high"
+)
+
 // logOutput is the writer for log messages (stderr). Tests can override this.
 var logOutput io.Writer = os.Stderr
 
@@ -177,18 +189,18 @@ func mockSessionConfigOptionsForModel(model string) []acp.SessionConfigOption {
 	effortID := acp.SessionConfigId("effort")
 	effortName := "Effort"
 	effortDescription := "Controls how much reasoning the mock model uses"
-	effortValue := acp.SessionConfigValueId("medium")
+	effortValue := acp.SessionConfigValueId(reasoningEffortMed)
 	effortOptions := acp.SessionConfigSelectOptionsUngrouped{
-		{Value: "low", Name: "Low", Description: ptr("Faster responses with less reasoning")},
-		{Value: "medium", Name: "Medium", Description: ptr("Balanced speed and reasoning")},
-		{Value: "high", Name: "High", Description: ptr("More reasoning for complex tasks")},
+		{Value: reasoningEffortLow, Name: "Low", Description: ptr("Faster responses with less reasoning")},
+		{Value: reasoningEffortMed, Name: "Medium", Description: ptr("Balanced speed and reasoning")},
+		{Value: reasoningEffortHigh, Name: "High", Description: ptr("More reasoning for complex tasks")},
 	}
-	if model == "mock-smart" {
+	if model == modelSmart {
 		effortDescription = "Controls the reasoning depth for the smart mock model"
-		effortValue = "high"
+		effortValue = reasoningEffortHigh
 		effortOptions = acp.SessionConfigSelectOptionsUngrouped{
-			{Value: "low", Name: "Low", Description: ptr("Use less reasoning")},
-			{Value: "high", Name: "High", Description: ptr("Use deeper reasoning")},
+			{Value: reasoningEffortLow, Name: "Low", Description: ptr("Use less reasoning")},
+			{Value: reasoningEffortHigh, Name: "High", Description: ptr("Use deeper reasoning")},
 			{Value: "max", Name: "Max", Description: ptr("Use maximum reasoning")},
 		}
 	}
@@ -199,8 +211,13 @@ func mockSessionConfigOptionsForModel(model string) []acp.SessionConfigOption {
 			Id:           "model",
 			Name:         "Model",
 			Options: acp.SessionConfigSelectOptions{Ungrouped: &acp.SessionConfigSelectOptionsUngrouped{
-				{Value: "mock-fast", Name: "Mock Fast", Description: ptr("Fast mock model for testing")},
-				{Value: "mock-smart", Name: "Mock Smart", Description: ptr("Smart mock model for testing")},
+				{Value: modelFast, Name: "Mock Fast", Description: ptr("Fast mock model for testing")},
+				{Value: modelSmart, Name: "Mock Smart", Description: ptr("Smart mock model for testing")},
+				// E2E fixtures use "mock-slow" for the slow-response delay tier.
+				// It must be advertised so the no-silent-model-fallback strict
+				// policy (which fails session start when the profile model is
+				// absent from the advertised list) does not reject it.
+				{Value: modelSlow, Name: "Mock Slow", Description: ptr("Slow mock model for testing")},
 			}},
 			Type: "select",
 		}},
@@ -296,6 +313,12 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 	// (a JSON-RPC error response), which handlePrompt's emitter cannot do —
 	// so intercept it here and return the error from Prompt directly.
 	if resp, err, handled := a.handleOverloaded(promptCtx, req.SessionId, prompt); handled {
+		return resp, err
+	}
+	// Same rationale as /overloaded above: /transport-lost must also surface a
+	// real prompt-time ACP error, so it is intercepted here rather than routed
+	// through handlePrompt's emitter.
+	if resp, err, handled := a.handleTransportLost(promptCtx, req.SessionId, prompt); handled {
 		return resp, err
 	}
 	e := &emitter{ctx: promptCtx, conn: a.conn, sid: req.SessionId}
@@ -408,6 +431,7 @@ func (a *mockAgent) CloseSession(_ context.Context, req acp.CloseSessionRequest)
 	delete(a.commandsEmitted, req.SessionId)
 	a.mu.Unlock()
 	_ = os.Remove(overloadedCounterPath(req.SessionId))
+	_ = os.Remove(transportLostCounterPath(req.SessionId))
 	return acp.CloseSessionResponse{}, nil
 }
 
@@ -477,8 +501,9 @@ func mockAvailableCommands() []acp.AvailableCommand {
 		{Name: "detached-background", Description: "Launch work that outlives the foreground turn (default 8s)", Input: hint("duration (e.g. 8s)")},
 		{Name: "async-subagent-lifecycle", Description: "Replay an async Agent lifecycle (default 20s)", Input: hint("duration (e.g. 20s)")},
 		{Name: "async-subagent-teardown", Description: "Replay async Agent work with a missing completion"},
-		{Name: "error", Description: "Simulate an error"},
+		{Name: toolKeyError, Description: "Simulate an error"},
 		{Name: "overloaded", Description: "Simulate a transient 529 Overloaded error (fails once, then recovers)"},
+		{Name: "transport-lost", Description: "Simulate an ACP transport disconnect (fails once, then recovers)"},
 		{Name: "thinking", Description: "Emit thinking/reasoning blocks"},
 		{Name: "crash", Description: "Simulate agent crash"},
 		{Name: "all", Description: "Demonstrate all message types"},

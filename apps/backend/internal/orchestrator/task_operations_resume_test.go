@@ -179,14 +179,20 @@ func TestGetTaskSessionStatus_FailedSessionWithoutResumableFlagFallsBack(t *test
 
 	// Seed a worktree so canRestoreWorkspace returns true.
 	now := time.Now().UTC()
-	if err := repo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
-		ID:             "wt1",
-		SessionID:      "session1",
-		WorktreeID:     "wid1",
-		RepositoryID:   "repo1",
-		WorktreePath:   "/tmp/worktrees/session1",
-		WorktreeBranch: "feature/test",
-		CreatedAt:      now,
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env1", TaskID: "task1", ExecutorType: "worktree",
+		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	if err := repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+		ID:                "wt1",
+		TaskEnvironmentID: "env1",
+		WorktreeID:        "wid1",
+		RepositoryID:      "repo1",
+		WorktreePath:      "/tmp/worktrees/session1",
+		WorktreeBranch:    "feature/test",
+		CreatedAt:         now,
 	}); err != nil {
 		t.Fatalf("failed to create worktree: %v", err)
 	}
@@ -230,14 +236,20 @@ func TestGetTaskSessionStatus_CancelledSessionStaysWorkspaceRestore(t *testing.T
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCancelled)
 
 	now := time.Now().UTC()
-	if err := repo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
-		ID:             "wt1",
-		SessionID:      "session1",
-		WorktreeID:     "wid1",
-		RepositoryID:   "repo1",
-		WorktreePath:   "/tmp/worktrees/session1",
-		WorktreeBranch: "feature/test",
-		CreatedAt:      now,
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env1", TaskID: "task1", ExecutorType: "worktree",
+		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	if err := repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+		ID:                "wt1",
+		TaskEnvironmentID: "env1",
+		WorktreeID:        "wid1",
+		RepositoryID:      "repo1",
+		WorktreePath:      "/tmp/worktrees/session1",
+		WorktreeBranch:    "feature/test",
+		CreatedAt:         now,
 	}); err != nil {
 		t.Fatalf("failed to create worktree: %v", err)
 	}

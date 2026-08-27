@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"sync"
 	"time"
 
@@ -55,7 +56,7 @@ type WorkspaceGroupRepo interface {
 // the sqlite task repository.
 type SessionWorktreeReader interface {
 	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
-	ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error)
+	ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskEnvironmentRepo, error)
 	GetTask(ctx context.Context, id string) (*models.Task, error)
 	// HasExecutorRunningRow tells cleanup whether a session still has
 	// an executors_running row — i.e. an agent is (or recently was)
@@ -123,6 +124,23 @@ func (p WorkspacePolicy) MetadataBlock() map[string]interface{} {
 	return map[string]interface{}{"workspace": ws}
 }
 
+// MergeMetadataBlock folds MetadataBlock into caller-supplied task metadata,
+// allocating base only when there is something to write. The policy block wins
+// for the keys it owns, so a caller cannot inject conflicting policy through
+// raw metadata. Both task-create surfaces (HTTP and MCP) go through here, which
+// is what keeps their metadata precedence identical.
+func (p WorkspacePolicy) MergeMetadataBlock(base map[string]interface{}) map[string]interface{} {
+	block := p.MetadataBlock()
+	if len(block) == 0 {
+		return base
+	}
+	if base == nil {
+		base = map[string]interface{}{}
+	}
+	maps.Copy(base, block)
+	return base
+}
+
 // NeedsAttachment returns true when AttachWorkspacePolicy has work to do
 // (group membership recording or sequential blocker chaining).
 func (p WorkspacePolicy) NeedsAttachment() bool {
@@ -182,6 +200,8 @@ type HandoffService struct {
 	runCanceller       RunCanceller
 	eventPublisher     TaskEventPublisher
 	resourceCleaner    TaskResourceCleaner
+	taskAccessCheck    func(ctx context.Context, taskID string) error
+	comments           CommentReader
 	logger             *logger.Logger
 	parentLock         parentMutex
 	workspaceGroupLock parentMutex
@@ -258,6 +278,37 @@ type taskResourceCleanupCoordinator interface {
 // Optional — when nil the cascade does not tear down runtime resources.
 func (s *HandoffService) SetTaskResourceCleaner(c TaskResourceCleaner) {
 	s.resourceCleaner = c
+}
+
+// SetTaskAccessChecker installs the per-user task check applied by the cascade
+// entry points. Same contract as orchestrator.Service.SetTaskAccessChecker: the
+// checker returns nil for contexts without a request identity, so internal
+// callers (event bus, schedulers, workflow engine) stay unscoped, and leaving it
+// unwired keeps the pre-auth see-everything behavior.
+//
+// The cascade methods walk the task repository directly and never reach
+// Service.DeleteTask / Service.ArchiveTask, so they inherit nothing from the
+// task service's authorize* helpers — without this they are the unguarded half
+// of every archive and delete route.
+func (s *HandoffService) SetTaskAccessChecker(check func(ctx context.Context, taskID string) error) {
+	s.taskAccessCheck = check
+}
+
+// SetCommentReader wires the read-only comment store queried by
+// ListCommentsForCaller. Optional — when nil, ListCommentsForCaller reports
+// an internal error rather than falling back to an empty list (AC-005.2:
+// an unconfigured dependency must never look like "the task has no
+// comments").
+func (s *HandoffService) SetCommentReader(r CommentReader) {
+	s.comments = r
+}
+
+// authorizeTask applies the configured per-user task check. No-op when unwired.
+func (s *HandoffService) authorizeTask(ctx context.Context, taskID string) error {
+	if s.taskAccessCheck == nil || taskID == "" {
+		return nil
+	}
+	return s.taskAccessCheck(ctx, taskID)
 }
 
 // NewHandoffService creates a HandoffService. blockers and wsGroups may be

@@ -16,8 +16,8 @@ Kandev has native Windows x64 desktop and npm/npx releases. WSL 2 remains useful
 
 | Path | Best for | Main limitations |
 |---|---|---|
-| [Desktop app](./desktop-app.md) | Normal interactive use, native menus/notifications/updates | Windows x64 and WebView2; no service/background mode |
-| [npm/npx CLI](./cli.md) | Browser UI, terminal operation, headless use | Node.js with npm 7+ is needed for the package shim |
+| [Desktop app](desktop-app.md) | Normal interactive use, native menus/notifications/updates | Windows x64 and WebView2; no service/background mode |
+| [npm/npx CLI](cli.md) | Browser UI, terminal operation, headless use | Node.js with npm 7+ is needed for the package shim |
 | WSL 2 CLI | Linux-only agent tools and shell scripts | Browser launch and Windows/WSL path interop are dependency-bound |
 | Native source checkout | Contributors testing Windows-specific code | Manual toolchain and curated Windows test subset; not the simplest product install |
 
@@ -26,7 +26,7 @@ Kandev has native Windows x64 desktop and npm/npx releases. WSL 2 remains useful
 The recommended Windows product path is the x64 NSIS installer from [GitHub Releases](https://github.com/kdlbs/kandev/releases):
 
 1. Download the file whose name begins `kandev-desktop-windows-x64-` and ends in `.exe`, plus its `.sha256` file.
-2. Verify its SHA-256 value as shown in [Desktop App](./desktop-app.md).
+2. Verify its SHA-256 value as shown in [Desktop App](desktop-app.md).
 3. Run the installer and launch Kandev from the Start menu.
 
 The desktop app bundles Kandev and `agentctl`; Node.js is not required. It uses Microsoft WebView2 and binds its owned backend to `127.0.0.1`. Current Windows normally includes WebView2; repair or install the runtime if the app cannot create its window.
@@ -65,7 +65,7 @@ $env:KANDEV_SERVER_HOST = '127.0.0.1'
 kandev
 ```
 
-Without that override, the backend default is `0.0.0.0`; Windows Firewall may prompt for network access. Do not allow public/private-network exposure unless you deliberately built an authenticated network boundary. See [Configuration](./configuration.md).
+Without that override, the backend default is `0.0.0.0`; Windows Firewall may prompt for network access. Do not allow public/private-network exposure unless you deliberately built an authenticated network boundary. See [Configuration](configuration.md).
 
 ## Windows paths and command discovery
 
@@ -106,14 +106,14 @@ Kandev supports native Git repositories and worktrees. Windows still imposes fil
 
 - repository setup, cleanup, dev, and executor prepare scripts must use syntax available to their selected Windows shell; POSIX shell snippets do not become PowerShell automatically;
 - creating symbolic links often requires Windows Developer Mode or an elevated account;
-- a repository `copyFiles` entry using `:symlink` can therefore warn/fail on Windows—use a normal copy unless live linkage is required and symlinks are enabled; and
+- a repository `copyFiles` entry using `:symlink` can therefore warn/fail on Windows. Use a normal copy unless live linkage is required and symlinks are enabled; and
 - Kandev invokes its managed Git worktree commands with command-scoped `core.longpaths=true`. It does not change Git's system, global, or repository configuration.
 
 Windows long-path policy and each application's long-path awareness still apply. External Git clients and tools do not inherit Kandev's command-scoped setting. If Kandev still reports `Filename too long`, enable Win32 long paths when allowed by local policy or use a shorter `KANDEV_HOME_DIR`. Configure `core.longpaths` separately only when an external Git client needs it.
 
 Kandev uses Windows Job Objects and process-tree termination for managed child cleanup. An abruptly killed terminal or externally launched child can still outlive a session; inspect Task Manager and executor resources before deleting a worktree.
 
-See [Git operations](./git-operations.md) for branch/worktree lifecycle and [Executors](./executors.md) for prepare scripts and copied files.
+See [Git operations](git-operations.md) for branch/worktree lifecycle and [Executors](executors.md) for prepare scripts and copied files.
 
 ## Docker Desktop
 
@@ -130,7 +130,7 @@ docker version
 docker info
 ```
 
-The local Docker executor creates its client lazily, so Kandev can start even when Docker Desktop is stopped; the executor fails when first used and retries on a later attempt. Windows drive sharing, bind mounts, corporate Docker policies, and WSL-backed Docker Desktop are external dependencies. Do not expose an unauthenticated Docker TCP endpoint. See [Docker](./docker.md).
+The local Docker executor creates its client lazily, so Kandev can start even when Docker Desktop is stopped; the executor fails when first used and retries on a later attempt. Windows drive sharing, bind mounts, corporate Docker policies, and WSL-backed Docker Desktop are external dependencies. Do not expose an unauthenticated Docker TCP endpoint. See [Docker](docker.md).
 
 <details>
 <summary>Run Kandev in WSL 2</summary>
@@ -190,7 +190,7 @@ The release bundle carries remote `agentctl` helpers for Linux `amd64`/`arm64` a
 
 `kandev service` supports systemd on Linux and launchd on macOS only. Native Windows Service Control Manager integration is not implemented. For interactive Windows use, choose Desktop or keep the CLI process in a terminal. Do not wrap it in an arbitrary service manager without designing user profile, `PATH`, network, process-tree, update, and data permissions explicitly.
 
-WSL systemd availability depends on the distribution and WSL configuration. Even when systemd works inside WSL, its service lifecycle is tied to the WSL VM and is not the same as a native Windows service. Treat this as deployment-specific and follow [Run as a service](./run-as-a-service.md) only after verifying systemd in that distribution.
+WSL systemd availability depends on the distribution and WSL configuration. Even when systemd works inside WSL, its service lifecycle is tied to the WSL VM and is not the same as a native Windows service. Treat this as deployment-specific and follow [Run as a service](run-as-a-service.md) only after verifying systemd in that distribution.
 
 ## Build from source on Windows
 
@@ -201,6 +201,16 @@ winget install ezwinports.make
 ```
 
 The repository bootstrap script is Bash/package-manager oriented and does not provision a native Windows toolchain automatically. Use Git Bash or another compatible shell for Unix-oriented root recipes, install the pinned tools manually, and follow the contributor guide. `make dev` builds a `winjob.exe` helper so `Ctrl+C` can close a native development process tree.
+
+### CGO link failure with a non-ASCII toolchain path
+
+The `kandev` binary and the backend tests build with CGO and SQLite FTS5. If the MinGW/GCC toolchain resolves to a path with non-ASCII characters (most commonly an accented Windows username, which puts the toolchain under `C:\Users\<name>\`), a UTF-8 locale in Git Bash makes GCC mis-decode its own install path when it hands it to `ld`. The link then fails with `cannot find crt2.o`, `crtbegin.o`, and `-lm`, even though the files exist.
+
+The CGO Make targets (`build-kandev`, `build-agentctl`, the `-tags fts5` test targets, and `deadcode`) set `LC_ALL=C` automatically when they run under Git Bash/MSYS on Windows. This prevents the CGO link error in `make build` and `make dev`. Use `make test-windows` for the supported Windows-clean test suite. The complete `make test-backend` suite still contains tests with Unix-only fixtures. `LC_ALL=C` (rather than `LANG=C`) is used so the fix still applies when the shell already exports `LC_ALL` or `LC_CTYPE` as a UTF-8 locale, which would otherwise override `LANG`. The prefix is empty on Unix and native `cmd`/PowerShell`; on Git Bash/MSYS it is always applied, which is a harmless no-op on an ASCII toolchain path and the actual fix on a non-ASCII one.
+
+When invoking `go build`/`go test` directly, prefix the command with `LC_ALL=C` (for example `LC_ALL=C go build -tags fts5 ./cmd/kandev`). To remove the cause entirely, install the toolchain at an ASCII path outside `C:\Users\<name>` and point `CC`/`CXX` at it. Do not force the C locale globally (for example `export LC_ALL=C`) in your shell profile; that disables the UTF-8 locale for all of Git Bash.
+
+A third option removes the cause at the OS level. Enable Windows' **Beta: Use Unicode UTF-8 for worldwide language support** (Region control panel, **Administrative** tab, **Change system locale**, then reboot). This sets the system ANSI code page to UTF-8, so GCC and `ld` agree on the path encoding and the accented toolchain path links directly under a UTF-8 locale, with no `LC_ALL=C` prefix and no toolchain relocation. It is a **beta**, system-wide setting: it requires a reboot and can change how other non-UTF-8 applications interpret text, so treat it as opt-in.
 
 Backend Windows CI runs `go build ./...`, `go vet ./...`, and focused race tests for Windows-sensitive process, agent-launcher, instance-port, and websocket-tunnel packages. It does not run every backend package or the full product E2E suite. The repository's broader Windows-clean target adds web and CLI unit tests:
 

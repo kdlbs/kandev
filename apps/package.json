@@ -20,6 +20,7 @@
   "devDependencies": {
     "@commitlint/cli": "^20.4.2",
     "@commitlint/config-conventional": "^20.4.2",
+    "@playwright/cli": "0.1.17",
     "@types/node": "^20",
     "knip": "6.31.0",
     "prettier": "^3.6.2",

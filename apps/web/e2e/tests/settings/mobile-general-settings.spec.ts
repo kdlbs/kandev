@@ -1,6 +1,48 @@
 import { test, expect } from "../../fixtures/test-base";
 
 test.describe("Mobile general settings", () => {
+  test("keeps the device chart-motion setting contained and persistent", async ({ testPage }) => {
+    await testPage.setViewportSize({ width: 390, height: 844 });
+    await testPage.addInitScript(() => {
+      if (window.localStorage.getItem("kandev.settings.richOutputAnimations") === null) {
+        window.localStorage.setItem("kandev.settings.richOutputAnimations", "true");
+      }
+    });
+    await testPage.goto("/settings/preferences/appearance");
+
+    const card = testPage.getByTestId("rich-output-motion-settings-card");
+    const row = testPage.getByTestId("rich-output-motion-toggle-row");
+    const toggle = card.getByRole("switch", { name: "Animate rich-output charts" });
+    await card.scrollIntoViewIfNeeded();
+    await expect(toggle).toBeChecked();
+    const [cardBox, rowBox, toggleBox] = await Promise.all([
+      card.boundingBox(),
+      row.boundingBox(),
+      toggle.boundingBox(),
+    ]);
+    expect(cardBox).not.toBeNull();
+    expect(rowBox).not.toBeNull();
+    expect(toggleBox).not.toBeNull();
+    expect(cardBox!.x).toBeGreaterThanOrEqual(0);
+    expect(cardBox!.x + cardBox!.width).toBeLessThanOrEqual(390);
+    expect(rowBox!.width).toBeLessThanOrEqual(cardBox!.width);
+    expect(toggleBox!.width).toBeGreaterThanOrEqual(44);
+    expect(toggleBox!.height).toBeGreaterThanOrEqual(44);
+
+    await toggle.tap();
+    await testPage
+      .getByTestId("settings-floating-save")
+      .getByRole("button", { name: "Save changes" })
+      .tap();
+    await expect(testPage.getByTestId("settings-floating-save")).not.toBeVisible();
+    expect(await testPage.evaluate(() => document.documentElement.scrollWidth)).toBe(
+      await testPage.evaluate(() => document.documentElement.clientWidth),
+    );
+
+    await testPage.reload();
+    await expect(toggle).not.toBeChecked();
+  });
+
   test("keeps host sleep inhibition reachable and contained on a phone viewport", async ({
     testPage,
     apiClient,
@@ -43,30 +85,34 @@ test.describe("Mobile general settings", () => {
       await toggle.click();
       await expect(toggle).toHaveAttribute("data-settings-dirty", "true");
       const controlRow = card.getByTestId("sleep-inhibition-control-row");
-      const controlRowBox = await controlRow.boundingBox();
-      expect(controlRowBox).not.toBeNull();
-      expect(controlRowBox!.height).toBeGreaterThanOrEqual(44);
+      const initialControlRowBox = await controlRow.boundingBox();
+      expect(initialControlRowBox).not.toBeNull();
+      expect(initialControlRowBox!.height).toBeGreaterThanOrEqual(44);
 
       const floatingSave = testPage.getByTestId("settings-floating-save");
       await expect(floatingSave).toBeVisible();
       await card.scrollIntoViewIfNeeded();
-      const cardContent = card.locator('[data-slot="card-content"]');
-      const [cardContentBox, saveBox] = await Promise.all([
-        cardContent.boundingBox(),
+      const [controlRowBox, saveBox] = await Promise.all([
+        controlRow.boundingBox(),
         floatingSave.boundingBox(),
       ]);
-      expect(cardContentBox).not.toBeNull();
+      expect(controlRowBox).not.toBeNull();
       expect(saveBox).not.toBeNull();
-      expect(cardContentBox!.y + cardContentBox!.height).toBeLessThanOrEqual(saveBox!.y + 2);
+      expect(controlRowBox!.y + controlRowBox!.height).toBeLessThanOrEqual(saveBox!.y + 2);
       expect(await testPage.evaluate(() => document.documentElement.scrollWidth)).toBe(
         await testPage.evaluate(() => document.documentElement.clientWidth),
       );
-      await testPage.waitForTimeout(1_000);
-      await testPage
-        .locator("[data-sonner-toast], [data-testid='toast-message']")
-        .evaluateAll((toasts) => {
-          for (const toast of toasts) (toast as HTMLElement).style.display = "none";
-        });
+      // Keeping stray toasts out of the capture. This ran unconditionally and
+      // cost every mobile shard a second, even though `prCapture.screenshot` is
+      // a no-op without `CAPTURE_PR_ASSETS` -- so the second bought nothing on
+      // the runs that pay for it. Gated, and waiting for the toasts to go
+      // rather than for a budget and then painting over whatever is left: a
+      // toast that outlives this fails the capture instead of being hidden.
+      if (prCapture.capturing) {
+        await expect(
+          testPage.locator("[data-sonner-toast], [data-testid='toast-message']"),
+        ).toHaveCount(0, { timeout: 10_000 });
+      }
       await prCapture.screenshot("sleep-inhibition-mobile-draft", {
         caption: "Mobile Task Actions sleep inhibition card above Save changes",
       });
@@ -87,7 +133,7 @@ test.describe("Mobile general settings", () => {
     prCapture,
   }) => {
     await testPage.setViewportSize({ width: 390, height: 844 });
-    await testPage.goto("/settings/general/task-actions");
+    await testPage.goto("/settings/preferences/task-behavior");
 
     const autoScrollControl = testPage.getByRole("switch", {
       name: "Show transcript auto-scroll control",
@@ -129,7 +175,7 @@ test.describe("Mobile general settings", () => {
     const nextLayout = initialLayout === "tree" ? "flat" : "tree";
 
     try {
-      await testPage.goto("/settings/general/appearance");
+      await testPage.goto("/settings/preferences/appearance");
       const layout = testPage.getByTestId("changes-panel-layout-select");
       await layout.click();
       await testPage
@@ -138,17 +184,37 @@ test.describe("Mobile general settings", () => {
 
       const floating = testPage.getByTestId("settings-floating-save");
       const saveButton = floating.getByRole("button", { name: "Save changes" });
+      const resetButton = floating.getByRole("button", { name: "Reset" });
+      const surface = floating.getByTestId("settings-floating-save-surface");
+      const contentArea = testPage.getByTestId("settings-scroll-container");
       await expect(saveButton).toBeVisible();
+      await expect(resetButton).toBeVisible();
       await expect(layout).toHaveAttribute("data-settings-dirty", "true");
       await expect(testPage.getByTestId("changes-panel-layout-card")).toHaveAttribute(
         "data-settings-dirty",
         "true",
       );
       const saveBox = await saveButton.boundingBox();
+      const surfaceBox = await surface.boundingBox();
       expect(saveBox).not.toBeNull();
+      expect(surfaceBox).not.toBeNull();
+      const contentBox = await contentArea.boundingBox();
+      expect(contentBox).not.toBeNull();
+      expect(surfaceBox!.height).toBeLessThanOrEqual(52);
       expect(saveBox!.height).toBeGreaterThanOrEqual(44);
       expect(saveBox!.x + saveBox!.width).toBeLessThanOrEqual(390 - 16 + 1);
       expect(saveBox!.y + saveBox!.height).toBeLessThanOrEqual(844 - 16 + 1);
+      expect(surfaceBox!.x).toBeGreaterThanOrEqual(0);
+      expect(surfaceBox!.x + surfaceBox!.width).toBeLessThanOrEqual(390);
+      expect(
+        Math.abs(surfaceBox!.x + surfaceBox!.width / 2 - (contentBox!.x + contentBox!.width / 2)),
+      ).toBeLessThanOrEqual(2);
+      expect(
+        Math.abs(surfaceBox!.y + surfaceBox!.height - (contentBox!.y + contentBox!.height - 80)),
+      ).toBeLessThanOrEqual(2);
+      const resetBox = await resetButton.boundingBox();
+      expect(resetBox).not.toBeNull();
+      expect(resetBox!.height).toBeGreaterThanOrEqual(44);
 
       const lastControl = testPage.locator("#metrics-disk-path");
       await lastControl.scrollIntoViewIfNeeded();
@@ -159,7 +225,7 @@ test.describe("Mobile general settings", () => {
         await testPage.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
       ).toBe(false);
 
-      await saveButton.click();
+      await saveButton.tap();
       await expect(floating).not.toBeVisible({ timeout: 15_000 });
       await expect(layout).toHaveAttribute("data-settings-dirty", "false");
       await expect(testPage.getByTestId("changes-panel-layout-card")).toHaveAttribute(
@@ -173,40 +239,42 @@ test.describe("Mobile general settings", () => {
     }
   });
 
-  test("opens a dedicated General settings page from the overview", async ({ testPage }) => {
-    await testPage.goto("/settings/general");
+  test("opens a dedicated Preferences page from the settings index", async ({ testPage }) => {
+    // `/settings` is the index on a phone: the settings menu as a page.
+    await testPage.goto("/settings");
 
-    await expect(testPage.getByRole("link", { name: /Terminal/ })).toBeVisible({
+    await expect(testPage.getByRole("link", { name: /Terminal & Editors/ })).toBeVisible({
       timeout: 15_000,
     });
 
-    await testPage.getByRole("link", { name: /Terminal/ }).click();
+    await testPage.getByRole("link", { name: /Terminal & Editors/ }).click();
 
-    await expect(testPage).toHaveURL(/\/settings\/general\/terminal$/);
-    await expect(testPage.getByRole("heading", { name: "Terminal", exact: true })).toBeVisible();
+    await expect(testPage).toHaveURL(/\/settings\/preferences\/terminal-editors$/);
     await expect(testPage.getByTestId("terminal-font-select")).toBeVisible();
     await expect(testPage.getByTestId("terminal-font-size-input")).toBeVisible();
   });
 
-  test("opens Settings navigation and returns home from a nested settings page", async ({
-    testPage,
-  }) => {
-    await testPage.goto("/settings/general/terminal");
+  test("moves between settings pages and back home without a nav drawer", async ({ testPage }) => {
+    await testPage.goto("/settings/preferences/terminal-editors");
 
-    await expect(testPage.getByRole("heading", { name: "Terminal", exact: true })).toBeVisible();
+    await expect(testPage.getByTestId("terminal-font-select")).toBeVisible();
+    // Settings has no hamburger: the page is the navigation, reached through the
+    // breadcrumb's Settings crumb.
+    await expect(testPage.getByTestId("app-nav-trigger")).toHaveCount(0);
 
-    await testPage.getByTestId("settings-mobile-menu-button").click();
-    const menu = testPage.getByTestId("settings-mobile-menu");
-    await expect(menu).toBeVisible();
+    await testPage.getByRole("link", { name: "Settings", exact: true }).click();
+    const index = testPage.getByTestId("settings-index");
+    await expect(index).toBeVisible();
 
-    await menu.getByRole("link", { name: "Appearance" }).click();
+    await index.getByRole("link", { name: "Appearance" }).click();
 
-    await expect(testPage).toHaveURL(/\/settings\/general\/appearance$/);
-    await expect(menu).not.toBeVisible();
-    await expect(testPage.getByRole("heading", { name: "Appearance", exact: true })).toBeVisible();
+    await expect(testPage).toHaveURL(/\/settings\/preferences\/appearance$/);
+    await expect(
+      testPage.getByRole("heading", { level: 2, name: "Appearance", exact: true }),
+    ).toBeVisible();
 
-    await testPage.getByTestId("settings-mobile-menu-button").click();
-    await testPage.getByTestId("settings-mobile-menu").getByRole("link", { name: "Home" }).click();
+    // The topbar home crumb leaves the settings surface entirely.
+    await testPage.getByTestId("topbar-phone-home").click();
 
     await expect(testPage).toHaveURL(/\/(?:\?.*)?$/);
     await expect(testPage.getByTestId("kanban-board")).toBeVisible();

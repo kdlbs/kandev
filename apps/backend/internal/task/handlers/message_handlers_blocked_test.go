@@ -66,6 +66,14 @@ func (r *messageAddSwitchRepo) GetMessage(_ context.Context, id string) (*models
 	return nil, sql.ErrNoRows
 }
 
+// GetMessageWithPromptIndex returns the message for id with its derived prompt index, mirroring the repository contract.
+func (r *messageAddSwitchRepo) GetMessageWithPromptIndex(_ context.Context, id string) (*models.Message, error) {
+	if r.idempotentMessage != nil && r.idempotentMessage.ID == id {
+		return r.idempotentMessage, nil
+	}
+	return nil, sql.ErrNoRows
+}
+
 func (r *messageAddSwitchRepo) GetTask(_ context.Context, id string) (*models.Task, error) {
 	r.taskGetCalls++
 	if task, ok := r.tasks[id]; ok {
@@ -101,7 +109,14 @@ type capturedFirstTurn struct {
 }
 
 type firstTurnCaptureOrchestrator struct {
-	started chan capturedFirstTurn
+	started          chan capturedFirstTurn
+	turnStartResult  orchestrator.ProcessOnTurnStartResult
+	queuedPromptCall *queuedPromptCall
+}
+
+type queuedPromptCall struct {
+	taskID, sessionID, prompt string
+	userMessageRecorded       bool
 }
 
 func (o *firstTurnCaptureOrchestrator) PromptTask(
@@ -128,7 +143,12 @@ func (o *firstTurnCaptureOrchestrator) StartCreatedSession(
 	return nil
 }
 
-func (o *firstTurnCaptureOrchestrator) ProcessOnTurnStart(context.Context, string, string) error {
+func (o *firstTurnCaptureOrchestrator) ProcessOnTurnStart(context.Context, string, string) (orchestrator.ProcessOnTurnStartResult, error) {
+	return o.turnStartResult, nil
+}
+
+func (o *firstTurnCaptureOrchestrator) QueueUserPrompt(_ context.Context, taskID, sessionID, prompt, _ string, _ bool, _ []v1.MessageAttachment, _ map[string]interface{}, userMessageRecorded bool) error {
+	o.queuedPromptCall = &queuedPromptCall{taskID: taskID, sessionID: sessionID, prompt: prompt, userMessageRecorded: userMessageRecorded}
 	return nil
 }
 
@@ -171,7 +191,11 @@ func TestWSAddMessage_CreatedSessionPreservesReferencesThroughCanonicalizationAn
 			isFromOffice: true,
 			spoofed:      sysprompt.InjectKandevContext("wrong-task", "wrong-session", "Do the work", true),
 			wantMarker:   "KANDEV OFFICE MCP TOOLS",
-			notMarker:    "step_complete_kandev",
+			// Office's own canonical block now legitimately mentions
+			// step_complete_kandev (ADR 0015), so check that the stale
+			// task-mode block (with its client-qualified alias mention) was
+			// fully replaced instead of asserting the bare name is absent.
+			notMarker: "mcp__kandev__step_complete_kandev",
 		},
 		{
 			name:         "Kanban",
@@ -543,11 +567,15 @@ func (o *switchingTurnStartOrchestrator) StartCreatedSession(
 	return nil
 }
 
-func (o *switchingTurnStartOrchestrator) ProcessOnTurnStart(context.Context, string, string) error {
+func (o *switchingTurnStartOrchestrator) ProcessOnTurnStart(context.Context, string, string) (orchestrator.ProcessOnTurnStartResult, error) {
 	o.repo.sessions["s1"].State = models.TaskSessionStateCompleted
 	if o.switchPrimary {
 		o.repo.primaryID = "s2"
 	}
+	return orchestrator.ProcessOnTurnStartResult{}, nil
+}
+
+func (*switchingTurnStartOrchestrator) QueueUserPrompt(context.Context, string, string, string, string, bool, []v1.MessageAttachment, map[string]interface{}, bool) error {
 	return nil
 }
 
@@ -626,6 +654,48 @@ func TestWSAddMessageUsesSessionSelectedByOnTurnStart(t *testing.T) {
 	}
 	assert.Equal(t, "s2", orch.getStartedSession())
 	assert.Empty(t, orch.getForwardedSession())
+}
+
+func TestWSAddMessage_QueuesPromptWhenOnTurnStartQueuesTask(t *testing.T) {
+	now := time.Now().UTC()
+	repo := &messageAddSwitchRepo{
+		tasks: map[string]*models.Task{
+			"t1": {ID: "t1", State: v1.TaskStateInProgress, UpdatedAt: now},
+		},
+		sessions: map[string]*models.TaskSession{
+			"s1": {ID: "s1", TaskID: "t1", State: models.TaskSessionStateWaitingForInput, UpdatedAt: now},
+		},
+		primaryID: "s1",
+	}
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	require.NoError(t, err)
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	orch := &firstTurnCaptureOrchestrator{
+		turnStartResult: orchestrator.ProcessOnTurnStartResult{Queued: true},
+	}
+	h := NewMessageHandlers(svc, orch, log)
+
+	req, err := ws.NewRequest("req-queued", ws.ActionMessageAdd, map[string]interface{}{
+		"task_id":    "t1",
+		"session_id": "s1",
+		"content":    "wait for admission",
+	})
+	require.NoError(t, err)
+	resp, err := h.wsAddMessage(context.Background(), req)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+	require.NotNil(t, orch.queuedPromptCall)
+	assert.Equal(t, "t1", orch.queuedPromptCall.taskID)
+	assert.Equal(t, "s1", orch.queuedPromptCall.sessionID)
+	assert.Equal(t, "wait for admission", orch.queuedPromptCall.prompt)
+	assert.True(t, orch.queuedPromptCall.userMessageRecorded)
+	assert.Len(t, repo.messages, 1, "the initiating user message is persisted once")
 }
 
 func TestWSAddMessageRetryAcceptsMessagePersistedAfterSessionSwitch(t *testing.T) {
@@ -765,7 +835,12 @@ func (o fgActivityOrchestrator) ResumeTaskSession(context.Context, string, strin
 func (o fgActivityOrchestrator) StartCreatedSession(context.Context, string, string, string, string, bool, bool, bool, []v1.MessageAttachment, []v1.EntityReference) error {
 	return nil
 }
-func (o fgActivityOrchestrator) ProcessOnTurnStart(context.Context, string, string) error { return nil }
+func (o fgActivityOrchestrator) ProcessOnTurnStart(context.Context, string, string) (orchestrator.ProcessOnTurnStartResult, error) {
+	return orchestrator.ProcessOnTurnStartResult{}, nil
+}
+func (o fgActivityOrchestrator) QueueUserPrompt(context.Context, string, string, string, string, bool, []v1.MessageAttachment, map[string]interface{}, bool) error {
+	return nil
+}
 func (o fgActivityOrchestrator) StepRequiresCompletionSignal(context.Context, string) bool {
 	return false
 }
@@ -794,7 +869,10 @@ func (*recordingAdmissionOrchestrator) ResumeTaskSession(context.Context, string
 func (*recordingAdmissionOrchestrator) StartCreatedSession(context.Context, string, string, string, string, bool, bool, bool, []v1.MessageAttachment, []v1.EntityReference) error {
 	return nil
 }
-func (*recordingAdmissionOrchestrator) ProcessOnTurnStart(context.Context, string, string) error {
+func (*recordingAdmissionOrchestrator) ProcessOnTurnStart(context.Context, string, string) (orchestrator.ProcessOnTurnStartResult, error) {
+	return orchestrator.ProcessOnTurnStartResult{}, nil
+}
+func (*recordingAdmissionOrchestrator) QueueUserPrompt(context.Context, string, string, string, string, bool, []v1.MessageAttachment, map[string]interface{}, bool) error {
 	return nil
 }
 func (*recordingAdmissionOrchestrator) StepRequiresCompletionSignal(context.Context, string) bool {
@@ -837,7 +915,10 @@ func (*steerRecordingOrchestrator) ResumeTaskSession(context.Context, string, st
 func (*steerRecordingOrchestrator) StartCreatedSession(context.Context, string, string, string, string, bool, bool, bool, []v1.MessageAttachment, []v1.EntityReference) error {
 	return nil
 }
-func (*steerRecordingOrchestrator) ProcessOnTurnStart(context.Context, string, string) error {
+func (*steerRecordingOrchestrator) ProcessOnTurnStart(context.Context, string, string) (orchestrator.ProcessOnTurnStartResult, error) {
+	return orchestrator.ProcessOnTurnStartResult{}, nil
+}
+func (*steerRecordingOrchestrator) QueueUserPrompt(context.Context, string, string, string, string, bool, []v1.MessageAttachment, map[string]interface{}, bool) error {
 	return nil
 }
 func (*steerRecordingOrchestrator) StepRequiresCompletionSignal(context.Context, string) bool {

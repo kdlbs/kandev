@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { backendFixture as test } from "../../fixtures/backend";
 import { createInviteToken, login } from "../../helpers/auth";
+import { dwell } from "../../helpers/causal-waits";
 
 /**
  * Not an assertion suite — captures screenshots of every auth surface into
@@ -46,7 +47,12 @@ test.describe.serial("auth screenshots", () => {
     await page.getByTestId("setup-submit").click();
     await page.waitForURL("**/");
     await expect(page.getByTestId("setup-email")).toHaveCount(0, { timeout: 15_000 });
-    await page.waitForTimeout(1500);
+    await dwell(
+      page,
+      1500,
+      "unverified",
+      "settling the first post-setup render before capturing it; this suite exists to produce reviewable screenshots rather than assertions, and no specific timer was identified behind the number",
+    );
     await shot(page, "02-app-after-setup");
     await ctx.close();
   });
@@ -187,18 +193,30 @@ test.describe.serial("auth screenshots", () => {
     await login(ctx, backend.baseUrl, MEMBER);
     const page = await ctx.newPage();
     await page.goto("/");
-    await page.waitForTimeout(2000);
+    await dwell(
+      page,
+      2000,
+      "unverified",
+      "settling the member's first app render before capturing it; capture quality, not synchronisation, and no specific timer was identified behind the number",
+    );
     await shot(page, "11-member-app");
     // Dismiss the first-run onboarding wizard (it overlays the sidebar), then
     // hover the current-user chip to verify the border (not accent-fill) hover.
     const skip = page.getByRole("button", { name: /skip/i });
     if (await skip.isVisible().catch(() => false)) {
       await skip.click();
-      await page.waitForTimeout(400);
+      // The wizard overlays the sidebar, so the capture below is only right
+      // once it is gone. Assert that rather than budgeting for it.
+      await expect(skip).toBeHidden({ timeout: 5_000 });
     }
     const chip = page.getByTestId("current-user-chip");
     await chip.hover();
-    await page.waitForTimeout(300);
+    await dwell(
+      page,
+      300,
+      "product-timer",
+      "the chip's hover treatment is a CSS transition in our own styles; it publishes nothing on completion, and capturing mid-transition is what this shot exists to avoid",
+    );
     await chip.screenshot({ path: path.join(SHOT_DIR, "12-user-chip-hover.png") });
     await ctx.close();
   });

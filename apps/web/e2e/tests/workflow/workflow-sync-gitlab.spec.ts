@@ -3,10 +3,13 @@ import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
 
 const GITLAB_PROJECT = "platform/kandev";
 
+const SYNCED_WORKFLOW_DESCRIPTION = "rev 1 (2026-08-08) — synced from GitLab";
+
 const VALID_WORKFLOW_YAML = `version: 1
 type: kandev_workflow
 workflows:
   - name: GitLab Synced Workflow
+    description: "${SYNCED_WORKFLOW_DESCRIPTION}"
     steps:
       - name: Open
         position: 0
@@ -114,6 +117,13 @@ test.describe("GitLab workflow sync", () => {
     await expect(card).toBeVisible();
     await expect(card.getByText("Open")).toBeVisible();
     await expect(card.getByText("Closed")).toBeVisible();
+
+    // Synced workflows are read-only: the description renders the synced
+    // value but must not be editable, or a later reconcile would just
+    // revert a user's in-UI edit.
+    const descriptionInput = card.getByLabel("Description", { exact: true });
+    await expect(descriptionInput).toHaveValue(SYNCED_WORKFLOW_DESCRIPTION);
+    await expect(descriptionInput).toBeDisabled();
   });
 
   test("requires a project path before Save is enabled", async ({ testPage, seedData }) => {
@@ -125,6 +135,70 @@ test.describe("GitLab workflow sync", () => {
 
     await dialog.getByTestId("workflow-sync-url-input").fill(GITLAB_PROJECT);
     await expect(dialog.getByTestId("workflow-sync-save")).toBeEnabled();
+  });
+
+  test("removes sync through inline actions without a native dialog", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.configureGitLab(seedData.workspaceId);
+    const configResponse = await apiClient.rawRequest(
+      "POST",
+      `/api/v1/workflow-sync/config?workspace_id=${encodeURIComponent(seedData.workspaceId)}`,
+      {
+        provider: "gitlab",
+        project_path: GITLAB_PROJECT,
+        branch: "main",
+        path: ".kandev/workflows",
+        interval_seconds: 300,
+        poll_enabled: true,
+      },
+    );
+    expect(configResponse.ok).toBe(true);
+
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId);
+
+    let nativeDialogSeen = false;
+    testPage.on("dialog", async (nativeDialog) => {
+      nativeDialogSeen = true;
+      await nativeDialog.dismiss();
+    });
+
+    const dialog = testPage.getByTestId("workflow-sync-dialog");
+    await testPage.getByTestId("workflow-sync-open").click();
+    await expect(dialog).toBeVisible();
+    await dialog.getByTestId("workflow-sync-remove").click();
+    await expect(dialog.getByTestId("workflow-sync-remove-confirmation")).toBeVisible();
+    await expect(testPage.getByRole("dialog")).toHaveCount(1);
+
+    await dialog
+      .getByTestId("workflow-sync-remove-confirmation")
+      .getByRole("button", { name: "Cancel" })
+      .click();
+    await expect(dialog.getByTestId("workflow-sync-remove")).toBeVisible();
+    expect(
+      (
+        await apiClient.rawRequest(
+          "GET",
+          `/api/v1/workflow-sync/config?workspace_id=${encodeURIComponent(seedData.workspaceId)}`,
+        )
+      ).status,
+    ).toBe(200);
+
+    await dialog.getByTestId("workflow-sync-remove").click();
+    await dialog.getByTestId("workflow-sync-remove-confirm").click();
+    await expect(dialog).not.toBeVisible();
+    expect(nativeDialogSeen).toBe(false);
+    expect(
+      (
+        await apiClient.rawRequest(
+          "GET",
+          `/api/v1/workflow-sync/config?workspace_id=${encodeURIComponent(seedData.workspaceId)}`,
+        )
+      ).status,
+    ).toBe(204);
   });
 
   // A branch name containing a slash (a common convention, e.g.

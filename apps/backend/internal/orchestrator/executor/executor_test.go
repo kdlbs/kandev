@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -82,7 +83,7 @@ func TestMockRepositoryGetTaskSessionReturnsDetachedMutableFields(t *testing.T) 
 		ExecutorSnapshot:     newSnapshot(),
 		EnvironmentSnapshot:  newSnapshot(),
 		RepositorySnapshot:   newSnapshot(),
-		Worktrees: []*models.TaskSessionWorktree{
+		Worktrees: []*models.TaskEnvironmentRepo{
 			{ID: "worktree-1", WorktreePath: "/original"},
 			nil,
 		},
@@ -179,6 +180,67 @@ func TestPrepareSession_Success(t *testing.T) {
 	}
 }
 
+func TestPrepareSession_SharedGroupUsesTransactionalWorkspaceBinding(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	task := &v1.Task{
+		ID:          "task-shared",
+		WorkspaceID: "workspace-shared",
+		Metadata: map[string]interface{}{
+			"workspace": map[string]interface{}{"mode": "shared_group", "group_id": "group-1"},
+		},
+	}
+
+	sessionID, err := exec.PrepareSession(context.Background(), task, "profile-123", "executor-123", "", "")
+	if err != nil {
+		t.Fatalf("PrepareSession: %v", err)
+	}
+	if len(repo.sharedWorkspaceBindingCalls) != 1 {
+		t.Fatalf("shared workspace binding calls = %d, want 1", len(repo.sharedWorkspaceBindingCalls))
+	}
+	call := repo.sharedWorkspaceBindingCalls[0]
+	if call.GroupID != "group-1" || call.Session.ID != sessionID || call.Session.TaskEnvironmentID == "" {
+		t.Fatalf("shared binding = %+v, want group-1 and a bound session", call)
+	}
+}
+
+func TestPrepareSessionForExistingEnvironmentRejectsFailedWorkspaceBeforeCreatingSession(t *testing.T) {
+	repo := newMockRepository()
+	repo.taskEnvironments["environment-failed"] = &models.TaskEnvironment{
+		ID: "environment-failed", Status: models.TaskEnvironmentStatusFailed,
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	task := &v1.Task{ID: "task-workflow", WorkspaceID: "workspace-workflow"}
+
+	_, err := exec.PrepareSessionForExistingEnvironment(context.Background(), task, "profile-123", "executor-123", "", "", "environment-failed")
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("PrepareSessionForExistingEnvironment error = %v, want workspace reuse unsafe", err)
+	}
+	if len(repo.createTaskSessionCalls) != 0 {
+		t.Fatalf("replacement session creations = %d, want 0", len(repo.createTaskSessionCalls))
+	}
+}
+
+func TestPrepareSessionForExistingEnvironmentRejectsIncompleteWorkspaceInventory(t *testing.T) {
+	repo := newMockRepository()
+	repo.taskEnvironments["environment-ready"] = &models.TaskEnvironment{
+		ID: "environment-ready", Status: models.TaskEnvironmentStatusReady,
+	}
+	repo.taskRepositories["task-repo-workflow"] = &models.TaskRepository{
+		ID: "task-repo-workflow", TaskID: "task-workflow", RepositoryID: "repository-workflow",
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	task := &v1.Task{ID: "task-workflow", WorkspaceID: "workspace-workflow"}
+
+	_, err := exec.PrepareSessionForExistingEnvironment(context.Background(), task, "profile-123", "executor-123", "", "", "environment-ready")
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("PrepareSessionForExistingEnvironment error = %v, want workspace reuse unsafe", err)
+	}
+	if len(repo.createTaskSessionCalls) != 0 {
+		t.Fatalf("replacement session creations = %d, want 0", len(repo.createTaskSessionCalls))
+	}
+}
+
 func TestPrepareSessionSnapshotsProfileRuntimeConfig(t *testing.T) {
 	repo := newMockRepository()
 	agentManager := &mockAgentManager{
@@ -207,6 +269,122 @@ func TestPrepareSessionSnapshotsProfileRuntimeConfig(t *testing.T) {
 	options, ok := snapshot["config_options"].(map[string]string)
 	if !ok || options["reasoning_effort"] != "high" {
 		t.Fatalf("profile snapshot config options = %#v", snapshot["config_options"])
+	}
+}
+
+func TestPrepareSessionConsumesInitialRuntimeSeedOnlyForFirstSession(t *testing.T) {
+	repo := newMockRepository()
+	executor := newTestExecutor(t, &mockAgentManager{}, repo)
+	seed := models.SessionRuntimeConfig{
+		Model:         "gpt-5.6-sol",
+		Mode:          "acceptEdits",
+		ConfigOptions: map[string]string{"reasoning_effort": "high"},
+	}
+	task := &v1.Task{
+		ID:          "task-runtime-seed",
+		WorkspaceID: "workspace-123",
+		Title:       "Runtime seed task",
+		Metadata: map[string]interface{}{
+			models.MetaKeyInitialSessionRuntimeConfig:          seed,
+			models.MetaKeyInitialSessionRuntimeConfigProfileID: "profile-123",
+		},
+	}
+
+	firstID, err := executor.PrepareSession(
+		context.Background(), task, "profile-123", "executor-123", "", "",
+	)
+	if err != nil {
+		t.Fatalf("PrepareSession first: %v", err)
+	}
+	first, err := repo.GetTaskSession(context.Background(), firstID)
+	if err != nil {
+		t.Fatalf("GetTaskSession first: %v", err)
+	}
+	firstOverrides, ok := models.LoadSessionRuntimeConfigOverrides(first.Metadata)
+	if !ok || firstOverrides.Model != seed.Model || firstOverrides.Mode != seed.Mode {
+		t.Fatalf("first runtime overrides = %#v, want %#v", firstOverrides, seed)
+	}
+	if firstOverrides.ConfigOptions["reasoning_effort"] != "high" {
+		t.Fatalf("first runtime options = %#v", firstOverrides.ConfigOptions)
+	}
+	if _, exists := first.Metadata[models.MetaKeyInitialSessionRuntimeConfig]; exists {
+		t.Fatalf("launch-only seed leaked into first session metadata: %#v", first.Metadata)
+	}
+	if _, exists := first.Metadata[models.MetaKeyInitialSessionRuntimeConfigProfileID]; exists {
+		t.Fatalf("launch-only seed owner leaked into first session metadata: %#v", first.Metadata)
+	}
+
+	secondID, err := executor.PrepareSession(
+		context.Background(), task, "profile-123", "executor-123", "", "",
+	)
+	if err != nil {
+		t.Fatalf("PrepareSession second: %v", err)
+	}
+	second, err := repo.GetTaskSession(context.Background(), secondID)
+	if err != nil {
+		t.Fatalf("GetTaskSession second: %v", err)
+	}
+	if _, ok := models.LoadSessionRuntimeConfigOverrides(second.Metadata); ok {
+		t.Fatalf("second session unexpectedly received initial runtime overrides: %#v", second.Metadata)
+	}
+	if _, exists := second.Metadata[models.MetaKeyInitialSessionRuntimeConfig]; exists {
+		t.Fatalf("launch-only seed leaked into second session metadata: %#v", second.Metadata)
+	}
+	if _, exists := second.Metadata[models.MetaKeyInitialSessionRuntimeConfigProfileID]; exists {
+		t.Fatalf("launch-only seed owner leaked into second session metadata: %#v", second.Metadata)
+	}
+
+	firstOverrides.ConfigOptions["reasoning_effort"] = "low"
+	if seed.ConfigOptions["reasoning_effort"] != "high" {
+		t.Fatalf("seed options aliased prepared session: %#v", seed.ConfigOptions)
+	}
+}
+
+func TestPrepareSessionDoesNotApplyInitialRuntimeSeedAfterProfileSelectionChanges(t *testing.T) {
+	seed := models.SessionRuntimeConfig{
+		Model:         "gpt-5.6-sol",
+		Mode:          "acceptEdits",
+		ConfigOptions: map[string]string{"reasoning_effort": "high"},
+	}
+	for _, testCase := range []struct {
+		name            string
+		selectedProfile string
+	}{
+		{name: "explicit profile", selectedProfile: "explicit-profile"},
+		{name: "workflow profile", selectedProfile: "workflow-profile"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			repo := newMockRepository()
+			executor := newTestExecutor(t, &mockAgentManager{}, repo)
+			task := &v1.Task{
+				ID:          "task-runtime-seed-" + testCase.selectedProfile,
+				WorkspaceID: "workspace-123",
+				Title:       "Changed initial runtime seed profile",
+				Metadata: map[string]interface{}{
+					models.MetaKeyInitialSessionRuntimeConfig:          seed,
+					models.MetaKeyInitialSessionRuntimeConfigProfileID: "creator-profile",
+				},
+			}
+
+			sessionID, err := executor.PrepareSession(
+				context.Background(), task, testCase.selectedProfile, "executor-123", "", "",
+			)
+			if err != nil {
+				t.Fatalf("PrepareSession: %v", err)
+			}
+			created, err := repo.GetTaskSession(context.Background(), sessionID)
+			if err != nil {
+				t.Fatalf("GetTaskSession: %v", err)
+			}
+			_, hasOverrides := models.LoadSessionRuntimeConfigOverrides(created.Metadata)
+			if hasOverrides {
+				t.Fatalf("changed profile must not receive the creator runtime seed: %#v", created.Metadata)
+			}
+			_, hasOwner := created.Metadata[models.MetaKeyInitialSessionRuntimeConfigProfileID]
+			if hasOwner {
+				t.Fatalf("launch-only seed owner must not leak into the session: %#v", created.Metadata)
+			}
+		})
 	}
 }
 
@@ -426,6 +604,80 @@ func TestLaunchPreparedSession_Success(t *testing.T) {
 	}
 }
 
+func TestLaunchPreparedSession_PropagatesTaskEnvironmentPersistenceFailure(t *testing.T) {
+	repo := newMockRepository()
+	persistErr := errors.New("inventory write failed")
+	repo.createTaskEnvironmentRepoErr = persistErr
+	repo.executors[models.ExecutorIDLocal] = &models.Executor{
+		ID: models.ExecutorIDLocal, Type: models.ExecutorTypeLocal, Status: models.ExecutorStatusActive,
+	}
+	repo.repositories["repo-1"] = &models.Repository{
+		ID: "repo-1", WorkspaceID: "workspace-1", SourceType: sourceTypeLocal, LocalPath: "/repo-1", Name: "repo-1",
+	}
+	repo.taskRepositories["task-repo-1"] = &models.TaskRepository{
+		ID: "task-repo-1", TaskID: "task-1", RepositoryID: "repo-1", Position: 0,
+	}
+	repo.taskEnvironments["env-1"] = &models.TaskEnvironment{
+		ID: "env-1", TaskID: "task-1", ExecutorType: string(models.ExecutorTypeLocal), Status: models.TaskEnvironmentStatusReady,
+	}
+	repo.sessions["session-1"] = &models.TaskSession{
+		ID: "session-1", TaskID: "task-1", AgentProfileID: "profile-1", ExecutorID: models.ExecutorIDLocal,
+		TaskEnvironmentID: "env-1", State: models.TaskSessionStateCreated, StartedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	stopped := false
+	agentManager := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, _ *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			return &LaunchAgentResponse{
+				AgentExecutionID: "exec-new",
+				Worktrees:        []RepoWorktreeResult{{RepositoryID: "repo-1", WorktreeID: "wt-1"}},
+			}, nil
+		},
+		stopAgentFunc: func(_ context.Context, executionID string, _ bool) error {
+			if executionID == "exec-new" {
+				stopped = true
+			}
+			return nil
+		},
+	}
+	exec := newTestExecutor(t, agentManager, repo)
+
+	_, err := exec.LaunchPreparedSession(context.Background(), &v1.Task{
+		ID: "task-1", WorkspaceID: "workspace-1", Title: "Task 1",
+	}, "session-1", LaunchOptions{AgentProfileID: "profile-1", ExecutorID: models.ExecutorIDLocal})
+	if !errors.Is(err, persistErr) {
+		t.Fatalf("LaunchPreparedSession error = %v, want %v", err, persistErr)
+	}
+	if !stopped {
+		t.Fatal("persistence failure did not stop the unstarted execution")
+	}
+}
+
+func TestLaunchPreparedSession_RejectsNilLaunchResponse(t *testing.T) {
+	repo := newMockRepository()
+	repo.sessions["session-nil-response"] = &models.TaskSession{
+		ID:             "session-nil-response",
+		TaskID:         "task-nil-response",
+		AgentProfileID: "profile-123",
+		State:          models.TaskSessionStateCreated,
+		StartedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+	}
+	exec := newTestExecutor(t, &mockAgentManager{
+		launchAgentFunc: func(context.Context, *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			return nil, nil
+		},
+	}, repo)
+
+	_, err := exec.LaunchPreparedSession(context.Background(), &v1.Task{
+		ID:          "task-nil-response",
+		WorkspaceID: "workspace-123",
+		Title:       "Test Task",
+	}, "session-nil-response", LaunchOptions{AgentProfileID: "profile-123", StartAgent: true})
+	if err == nil {
+		t.Fatal("LaunchPreparedSession succeeded with a nil launch response")
+	}
+}
+
 func TestLaunchPreparedSession_PersistsResolvedExecutorID(t *testing.T) {
 	repo := newMockRepository()
 	now := time.Now().UTC()
@@ -636,10 +888,14 @@ func TestLaunchPreparedSession_InheritsEnvFromSessionEnvironmentID(t *testing.T)
 	parentEnv := &models.TaskEnvironment{
 		ID:            "env-parent",
 		TaskID:        "task-parent",
-		WorktreeID:    "wt-parent",
-		WorktreePath:  "/tmp/parent",
 		WorkspacePath: "/tmp/parent",
 		Status:        models.TaskEnvironmentStatusReady,
+		Repos: []*models.TaskEnvironmentRepo{{
+			TaskEnvironmentID: "env-parent",
+			RepositoryID:      "repo-parent",
+			WorktreeID:        "wt-parent",
+			WorktreePath:      "/tmp/parent",
+		}},
 	}
 	repo.taskEnvironments[parentEnv.ID] = parentEnv
 
@@ -687,14 +943,54 @@ func TestLaunchPreparedSession_InheritsEnvFromSessionEnvironmentID(t *testing.T)
 	// existingEnv.WorktreeID must flow through. When it didn't, this
 	// assertion is a no-op — the env-id inheritance above is the load-
 	// bearing check for the regression we're guarding against.
-	if gotUseWorktree && gotWorktreeID != parentEnv.WorktreeID {
+	if gotUseWorktree && gotWorktreeID != "wt-parent" {
 		t.Errorf("expected reused WorktreeID=%q from inherited env; got %q",
-			parentEnv.WorktreeID, gotWorktreeID)
+			"wt-parent", gotWorktreeID)
 	}
 	// No fresh env row should be created — the inherited one was reused.
 	if len(repo.createTaskEnvironmentCalls) != 0 {
 		t.Errorf("expected zero CreateTaskEnvironment calls (env inherited); got %d",
 			len(repo.createTaskEnvironmentCalls))
+	}
+}
+
+func TestLaunchPreparedSession_RejectsUnavailableInheritedEnvironment(t *testing.T) {
+	repo := newMockRepository()
+	session := &models.TaskSession{
+		ID:                "session-child",
+		TaskID:            "task-child",
+		AgentProfileID:    "profile-123",
+		TaskEnvironmentID: "env-parent",
+		State:             models.TaskSessionStateCreated,
+		StartedAt:         time.Now(),
+		UpdatedAt:         time.Now(),
+	}
+	repo.sessions[session.ID] = session
+	repo.getTaskEnvironmentFunc = func(_ context.Context, id string) (*models.TaskEnvironment, error) {
+		if id != session.TaskEnvironmentID {
+			t.Fatalf("GetTaskEnvironment id = %q, want %q", id, session.TaskEnvironmentID)
+		}
+		return nil, errors.New("environment row disappeared")
+	}
+
+	launched := false
+	executor := newTestExecutor(t, &mockAgentManager{
+		launchAgentFunc: func(context.Context, *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			launched = true
+			return nil, nil
+		},
+	}, repo)
+
+	_, err := executor.LaunchPreparedSession(context.Background(), &v1.Task{ID: session.TaskID, WorkspaceID: "ws-1"}, session.ID,
+		LaunchOptions{AgentProfileID: session.AgentProfileID, Prompt: "test", StartAgent: true})
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("LaunchPreparedSession() error = %v, want ErrWorkspaceReuseUnsafe", err)
+	}
+	if launched {
+		t.Fatal("LaunchAgent was called for an unavailable inherited environment")
+	}
+	if len(repo.createTaskEnvironmentCalls) != 0 {
+		t.Fatalf("created %d task environments for an unavailable inherited environment", len(repo.createTaskEnvironmentCalls))
 	}
 }
 
@@ -2567,9 +2863,9 @@ func TestRepositoryCloneURL(t *testing.T) {
 			want: "",
 		},
 		{
-			name: "bitbucket repo",
+			name: "plugin provider without persisted clone URL fails closed",
 			repo: &models.Repository{Provider: "bitbucket", ProviderOwner: "acme", ProviderName: "app"},
-			want: "https://bitbucket.org/acme/app.git",
+			want: "",
 		},
 		{
 			name: "unknown provider returns empty",
@@ -2612,15 +2908,38 @@ type recordingAuthenticatedCloner struct {
 	workspaceID string
 	provider    string
 	password    string
+	request     repoclone.GitCredentialRequest
 }
 
-func (c *recordingAuthenticatedCloner) EnsureWorkspaceClonedForProvider(
-	_ context.Context, workspaceID, _, provider, _, _, _, _, _ string,
+type sessionScopedWorkspaceAuth interface {
+	ensureClonedWithWorkspaceAuthForSession(
+		context.Context, string, string, *models.Repository, string,
+	) (string, error)
+}
+
+func TestExecutorExposesSessionScopedWorkspaceClone(t *testing.T) {
+	t.Parallel()
+
+	exec := &Executor{}
+	if _, supported := any(exec).(sessionScopedWorkspaceAuth); !supported {
+		t.Fatal("Executor does not expose a session-scoped workspace clone operation")
+	}
+}
+
+func (c *recordingAuthenticatedCloner) EnsureWorkspaceClonedWithCredentialRequest(
+	_ context.Context, request repoclone.GitCredentialRequest, _, _ string,
 ) (string, error) {
 	c.normalCalls++
-	c.workspaceID = workspaceID
-	c.provider = provider
+	c.workspaceID = request.WorkspaceID
+	c.provider = request.Provider
+	c.request = request
 	return "/repos/normal", nil
+}
+
+func (c *recordingAuthenticatedCloner) RefreshWorkspaceRepositoryWithCredentialRequest(
+	context.Context, repoclone.GitCredentialRequest, string, string, string,
+) error {
+	return nil
 }
 
 func (c *recordingAuthenticatedCloner) ShouldRecloneForWorkspace(_, _ string) bool { return false }
@@ -2672,11 +2991,25 @@ func TestEnsureClonedWithWorkspaceAuth(t *testing.T) {
 	if _, err := exec.ensureClonedWithWorkspaceAuth(context.Background(), github, "https://github.com/acme/api.git"); err != nil {
 		t.Fatal(err)
 	}
+	bitbucket := &models.Repository{
+		ID: "repository-3", WorkspaceID: "workspace-3", Provider: "bitbucket",
+		ProviderHost: "https://bitbucket.org", ProviderOwner: "acme", ProviderName: "api",
+	}
+	if _, err := exec.ensureClonedWithWorkspaceAuthForSession(
+		context.Background(), "task-3", "session-3", bitbucket,
+		"https://bitbucket.org/acme/api.git",
+	); err != nil {
+		t.Fatal(err)
+	}
+	if cloner.request.TaskID != "task-3" || cloner.request.SessionID != "session-3" ||
+		cloner.request.RepositoryID != "repository-3" {
+		t.Fatalf("plugin clone scope = %+v", cloner.request)
+	}
 	azureSSH := "git@ssh.dev.azure.com:v3/acme/Platform/api"
 	if _, err := exec.ensureClonedWithWorkspaceAuth(context.Background(), azure, azureSSH); err != nil {
 		t.Fatal(err)
 	}
-	if cloner.normalCalls != 2 || cloner.authCalls != 1 {
+	if cloner.normalCalls != 3 || cloner.authCalls != 1 {
 		t.Fatalf("non-Azure-HTTPS providers must use ordinary cloning: %+v", cloner)
 	}
 	if cloner.workspaceID != "workspace-1" || cloner.provider != "azure_devops" {

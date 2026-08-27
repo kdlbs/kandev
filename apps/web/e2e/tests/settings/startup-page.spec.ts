@@ -1,6 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 
-const APPEARANCE_PATH = "/settings/general/appearance";
+const APPEARANCE_PATH = "/settings/preferences/appearance";
 
 test.describe("Startup page", () => {
   test("saves the last-task choice, resumes it at bare home, and keeps Home on the overview", async ({

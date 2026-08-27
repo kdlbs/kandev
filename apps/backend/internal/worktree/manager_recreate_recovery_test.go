@@ -3,9 +3,12 @@ package worktree
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // archiveDeletesLocalBranch simulates what task archive does to a worktree's
@@ -61,6 +64,100 @@ func TestRecreate_FetchesBranchFromOriginWhenLocalDeleted(t *testing.T) {
 	gotSHA := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD"))
 	if gotSHA != branchSHA {
 		t.Errorf("worktree HEAD = %q, want %q (pushed branch tip)", gotSHA, branchSHA)
+	}
+}
+
+func TestRecreate_RequiredBaseRefreshFailureStopsPreparation(t *testing.T) {
+	repoPath := initGitRepoWithRemote(t)
+	worktreePath := filepath.Join(t.TempDir(), "task-required", "repo-1")
+	if err := os.MkdirAll(worktreePath, 0755); err != nil {
+		t.Fatalf("create worktree placeholder: %v", err)
+	}
+
+	scriptDir := writeFakeGitScript(t, `
+case "${1:-}" in
+  fetch)
+    echo "fatal: Authentication failed" >&2
+    exit 1
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`)
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	mgr := newRecreateTestManager(t)
+	existing := &Worktree{
+		ID:             "wt-required",
+		SessionID:      "session-required",
+		TaskID:         "task-required",
+		RepositoryID:   "repo-1",
+		RepositoryPath: repoPath,
+		Path:           worktreePath,
+		Branch:         "feature/pr-branch",
+		Status:         StatusDeleted,
+	}
+
+	_, err := mgr.recreate(context.Background(), existing, CreateRequest{
+		SessionID:          "session-required",
+		TaskID:             "task-required",
+		RepositoryID:       "repo-1",
+		RepositoryPath:     repoPath,
+		BaseBranch:         "main",
+		PullBeforeWorktree: true,
+	})
+	if err == nil {
+		t.Fatal("recreate() succeeded after required base refresh failure")
+	}
+	if _, statErr := os.Stat(worktreePath); statErr != nil {
+		t.Fatalf("required refresh failure removed the existing worktree path: %v", statErr)
+	}
+}
+
+// TestRecreate_RejectsSymlinkedAncestorBeforeRemoval ensures recreate does not
+// delete through an ancestor that changed into a symlink after earlier reuse
+// validation.
+func TestRecreate_RejectsSymlinkedAncestorBeforeRemoval(t *testing.T) {
+	repoPath := initGitRepoWithRemote(t)
+	cfg := newTestConfig(t)
+	mgr, err := NewManager(cfg, newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	outside := t.TempDir()
+	liveWorktree := filepath.Join(outside, "repo-one")
+	if err := os.MkdirAll(liveWorktree, 0o755); err != nil {
+		t.Fatalf("mkdir live worktree: %v", err)
+	}
+	canary := filepath.Join(liveWorktree, "must-survive")
+	if err := os.WriteFile(canary, []byte("live task data"), 0o600); err != nil {
+		t.Fatalf("write canary: %v", err)
+	}
+	taskRoot := filepath.Join(cfg.TasksBasePath, "task-one")
+	if err := os.Symlink(outside, taskRoot); err != nil {
+		t.Fatalf("replace task root with symlink: %v", err)
+	}
+
+	_, err = mgr.recreate(context.Background(), &Worktree{
+		ID:           "wt-symlink-race",
+		TaskID:       "task-one",
+		TaskDirName:  "task-one",
+		RepositoryID: "repo-one",
+		Path:         filepath.Join(taskRoot, "repo-one"),
+		Branch:       "feature/pr-branch",
+		Status:       StatusActive,
+	}, CreateRequest{
+		TaskID:         "task-one",
+		RepositoryID:   "repo-one",
+		RepositoryPath: repoPath,
+	})
+	if err == nil {
+		t.Fatal("recreate() error = nil, want symlinked ancestor rejection")
+	}
+	if _, statErr := os.Stat(canary); statErr != nil {
+		t.Fatalf("recreate() touched live worktree through symlink: %v", statErr)
 	}
 }
 
@@ -157,4 +254,166 @@ func TestRecreate_ForkPRFetchesPullHeadRef(t *testing.T) {
 	if gotSHA != prHeadSHA {
 		t.Errorf("worktree HEAD = %q, want %q (PR head)", gotSHA, prHeadSHA)
 	}
+}
+
+func TestRecreate_ManagedRefreshUsesRefreshedPRHeadWithoutNetwork(t *testing.T) {
+	repoPath, wantSHA := initGitRepoWithPullRef(t, 975, "feature/managed-fork-pr")
+	runGit(t, repoPath, "fetch", "origin", "pull/975/head:refs/remotes/origin/pr/975")
+	runGit(t, repoPath, "remote", "set-url", "origin", "https://127.0.0.1:1/never.git")
+	worktreePath := filepath.Join(t.TempDir(), "task-managed-pr", "repo-1")
+	if err := os.MkdirAll(worktreePath, 0755); err != nil {
+		t.Fatalf("create worktree placeholder: %v", err)
+	}
+
+	mgr := newRecreateTestManager(t)
+	refreshCalls := 0
+	wt, err := mgr.recreate(context.Background(), &Worktree{
+		ID: "wt-managed-pr", SessionID: "session-managed-pr", TaskID: "task-managed-pr",
+		RepositoryID: "repo-1", RepositoryPath: repoPath, Path: worktreePath,
+		Branch: "feature/managed-fork-pr", Status: StatusDeleted,
+	}, CreateRequest{
+		SessionID: "session-managed-pr", TaskID: "task-managed-pr", RepositoryID: "repo-1",
+		RepositoryPath: repoPath, CheckoutBranch: "feature/managed-fork-pr", PRNumber: 975,
+		PullBeforeWorktree: true,
+		RefreshRepository: func(context.Context) error {
+			refreshCalls++
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("recreate(): %v", err)
+	}
+	if refreshCalls != 1 {
+		t.Fatalf("refresh calls = %d, want 1", refreshCalls)
+	}
+	if got := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD")); got != wantSHA {
+		t.Fatalf("worktree HEAD = %q, want refreshed PR head %q", got, wantSHA)
+	}
+}
+
+func TestRecreate_ManagedRefreshUsesRemoteWhenLocalCheckoutBranchIsBehind(t *testing.T) {
+	repoPath := initGitRepoWithRemote(t)
+	wantSHA := advanceRemoteBranch(t, repoPath, "feature/pr-branch")
+	runGit(t, repoPath, "remote", "set-url", "origin", "https://127.0.0.1:1/never.git")
+	worktreePath := filepath.Join(t.TempDir(), "task-managed-branch", "repo-1")
+	if err := os.MkdirAll(worktreePath, 0755); err != nil {
+		t.Fatalf("create worktree placeholder: %v", err)
+	}
+
+	mgr := newRecreateTestManager(t)
+	wt, err := mgr.recreate(context.Background(), &Worktree{
+		ID: "wt-managed-branch", SessionID: "session-managed-branch", TaskID: "task-managed-branch",
+		RepositoryID: "repo-1", RepositoryPath: repoPath, Path: worktreePath,
+		Branch: "feature/pr-branch", Status: StatusDeleted,
+	}, CreateRequest{
+		SessionID: "session-managed-branch", TaskID: "task-managed-branch", RepositoryID: "repo-1",
+		RepositoryPath: repoPath, CheckoutBranch: "feature/pr-branch", PullBeforeWorktree: true,
+		RefreshRepository: func(context.Context) error { return nil },
+	})
+	if err != nil {
+		t.Fatalf("recreate(): %v", err)
+	}
+	if got := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD")); got != wantSHA {
+		t.Fatalf("worktree HEAD = %q, want refreshed branch head %q", got, wantSHA)
+	}
+}
+
+func TestRecreate_ManagedRefreshUsesRemotePRHeadWhenLocalCheckoutBranchIsBehind(t *testing.T) {
+	repoPath, wantSHA := initManagedPRCheckoutBranch(t, 977, "feature/managed-fork-pr-behind")
+	runGit(t, repoPath, "remote", "set-url", "origin", "https://127.0.0.1:1/never.git")
+	worktreePath := filepath.Join(t.TempDir(), "task-managed-pr-behind", "repo-1")
+	if err := os.MkdirAll(worktreePath, 0755); err != nil {
+		t.Fatalf("create worktree placeholder: %v", err)
+	}
+
+	mgr := newRecreateTestManager(t)
+	wt, err := mgr.recreate(context.Background(), &Worktree{
+		ID: "wt-managed-pr-behind", SessionID: "session-managed-pr-behind", TaskID: "task-managed-pr-behind",
+		RepositoryID: "repo-1", RepositoryPath: repoPath, Path: worktreePath,
+		Branch: "feature/managed-fork-pr-behind", Status: StatusDeleted,
+	}, CreateRequest{
+		SessionID: "session-managed-pr-behind", TaskID: "task-managed-pr-behind", RepositoryID: "repo-1",
+		RepositoryPath: repoPath, CheckoutBranch: "feature/managed-fork-pr-behind", PRNumber: 977,
+		PullBeforeWorktree: true,
+		RefreshRepository:  func(context.Context) error { return nil },
+	})
+	if err != nil {
+		t.Fatalf("recreate(): %v", err)
+	}
+	if got := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD")); got != wantSHA {
+		t.Fatalf("worktree HEAD = %q, want refreshed PR head %q", got, wantSHA)
+	}
+}
+
+// TestCreate_RestoresReleasedWorktreeAfterArchive is the whole unarchive
+// round trip at the worktree layer. Archiving a task removes the worktree
+// directory and releases its reference (status=deleted + deleted_at) while
+// deliberately keeping the git branch, so the next launch must rebuild the
+// directory from the released record — including reactivating that record.
+// Leaving deleted_at set would hide the restored worktree from every lookup
+// that filters on `deleted_at IS NULL`, so the session would silently get a
+// brand-new worktree instead of its own work back.
+func TestCreate_RestoresReleasedWorktreeAfterArchive(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	ctx := context.Background()
+	seedReferenceCleanupSession(t, store, "task-archived", "session-archived", models.TaskSessionStateCompleted)
+
+	repoPath := initGitRepoWithRemote(t)
+	req := CreateRequest{
+		TaskID:         "task-archived",
+		SessionID:      "session-archived",
+		TaskTitle:      "Archived work",
+		RepositoryID:   "repository",
+		RepositoryPath: repoPath,
+		BaseBranch:     "main",
+		TaskDirName:    "task-archived",
+		RepoName:       "repository",
+	}
+	wt, err := mgr.Create(ctx, req)
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+	// Work the user never pushed. It only survives because archive keeps the
+	// branch (DestroyWorktree passes removeBranch=false).
+	runGit(t, wt.Path, "commit", "--allow-empty", "-m", "unpushed work")
+	workSHA := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD"))
+
+	// Archive: remove the directory, release the reference, keep the branch.
+	if err := mgr.RemoveByID(ctx, wt.ID, false); err != nil {
+		t.Fatalf("archive worktree: %v", err)
+	}
+	if _, statErr := os.Stat(wt.Path); !os.IsNotExist(statErr) {
+		t.Fatalf("archive should remove the worktree directory, stat error = %v", statErr)
+	}
+
+	// Unarchive + resume: the launch carries the stored worktree ID.
+	resumeReq := req
+	resumeReq.WorktreeID = wt.ID
+	restored, err := mgr.Create(ctx, resumeReq)
+	if err != nil {
+		t.Fatalf("resume after unarchive must recreate the worktree: %v", err)
+	}
+	if restored.Path != wt.Path {
+		t.Fatalf("restored path = %q, want the original %q", restored.Path, wt.Path)
+	}
+	if restored.Branch != wt.Branch {
+		t.Fatalf("restored branch = %q, want the original %q", restored.Branch, wt.Branch)
+	}
+	if got := strings.TrimSpace(runGit(t, restored.Path, "rev-parse", "HEAD")); got != workSHA {
+		t.Fatalf("restored HEAD = %q, want the pre-archive work %q", got, workSHA)
+	}
+
+	// The record must be visible again to the session-scoped lookup the next
+	// launch uses; a lingering deleted_at would strand it.
+	found, err := store.GetWorktreeBySessionAndRepository(ctx, "session-archived", "repository", restored.BranchSlug)
+	if err != nil {
+		t.Fatalf("look up restored worktree: %v", err)
+	}
+	if found == nil {
+		t.Fatal("restored worktree is still hidden from the session lookup (deleted_at was not cleared)")
+	}
+	if found.ID != wt.ID {
+		t.Fatalf("session lookup returned worktree %q, want the restored %q", found.ID, wt.ID)
+	}
+	assertWorktreeReferenceStatus(t, store, wt.ID, StatusActive)
 }

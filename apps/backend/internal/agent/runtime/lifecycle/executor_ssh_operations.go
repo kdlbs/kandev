@@ -25,6 +25,7 @@ import (
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 const (
@@ -123,7 +124,9 @@ func runSSHCommandStdin(ctx context.Context, client *ssh.Client, cmd string, std
 	}
 	defer func() { _ = session.Close() }()
 
-	var outBuf, errBuf bytes.Buffer
+	// Synchronized because the cancellation path below reads these while
+	// session.Run is still going — see syncBuffer.
+	var outBuf, errBuf syncBuffer
 	session.Stdout = &outBuf
 	session.Stderr = &errBuf
 	if stdin != nil {
@@ -141,6 +144,34 @@ func runSSHCommandStdin(ctx context.Context, client *ssh.Client, cmd string, std
 	case err := <-done:
 		return outBuf.String(), errBuf.String(), err
 	}
+}
+
+// syncBuffer is a bytes.Buffer safe for concurrent use by one writer and one
+// reader. It exists for runSSHCommandStdin's cancellation path: that path
+// returns while session.Run is still executing, so golang.org/x/crypto/ssh's
+// stdout/stderr copier goroutines are still writing into these buffers when we
+// read them — a data race on a plain bytes.Buffer, and one that outlives the
+// call, since the copiers keep writing until the remote command actually ends.
+//
+// Deliberately not an io.ReaderFrom: bytes.Buffer implements ReadFrom, and
+// io.Copy prefers it, which would let the copier reach the underlying buffer
+// without taking the lock. Exposing only Write keeps every mutation guarded.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+// String returns a consistent snapshot of whatever the remote has sent so far.
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 // detectRemoteInfo runs a tiny probe to learn about the host. The support gate
@@ -432,6 +463,20 @@ func ensureRemoteTaskDir(ctx context.Context, client *ssh.Client, workdirRoot, t
 	return taskDir, nil
 }
 
+// ensureReuseRequiredRemoteTaskDirExists verifies the canonical task directory
+// before a sibling launch creates its session-scoped runtime directory beneath
+// it. Attach-only reuse must never turn a missing workspace into a replacement
+// directory through the later mkdir -p for that session directory.
+func ensureReuseRequiredRemoteTaskDirExists(ctx context.Context, client *ssh.Client, taskDir string) error {
+	if strings.TrimSpace(taskDir) == "" {
+		return fmt.Errorf("%w: missing remote task directory", models.ErrWorkspaceReuseUnsafe)
+	}
+	if _, _, err := runSSHCommand(ctx, client, "test -d "+shellQuote(taskDir)); err != nil {
+		return fmt.Errorf("%w: remote task directory is unavailable", models.ErrWorkspaceReuseUnsafe)
+	}
+	return nil
+}
+
 // ensureRemoteSessionDir creates <taskDir>/.kandev/sessions/<sessionID>/ and
 // returns the absolute remote path. Per-session runtime data (PID file, logs,
 // agentctl socket) lives here.
@@ -440,7 +485,11 @@ func ensureRemoteSessionDir(ctx context.Context, client *ssh.Client, taskDir, se
 		return "", errors.New("ssh: session ID is empty")
 	}
 	sessionDir := taskDir + "/.kandev/sessions/" + sessionID
-	if _, _, err := runSSHCommand(ctx, client, "mkdir -p "+shellQuote(sessionDir)); err != nil {
+	// Change into the canonical directory before creating session-scoped state.
+	// A path-based mkdir -p could recreate taskDir after an attach-only probe
+	// observed it, whereas cd fails if the canonical workspace disappeared.
+	command := "cd -- " + shellQuote(taskDir) + " && mkdir -p -- " + shellQuote(".kandev/sessions/"+sessionID)
+	if _, _, err := runSSHCommand(ctx, client, command); err != nil {
 		return "", fmt.Errorf("ssh: mkdir session dir: %w", err)
 	}
 	return sessionDir, nil
@@ -583,7 +632,11 @@ echo "$AGENTCTL_PID"
 
 const sshAgentctlLogTailLines = 25
 
-func buildSSHCreateInstanceRequest(req *ExecutorCreateRequest, workspacePath string) agentctl.CreateInstanceRequest {
+func buildSSHCreateInstanceRequest(
+	req *ExecutorCreateRequest,
+	workspacePath string,
+	agentctlBin string,
+) agentctl.CreateInstanceRequest {
 	return agentctl.CreateInstanceRequest{
 		ID:            req.InstanceID,
 		WorkspacePath: workspacePath,
@@ -595,14 +648,17 @@ func buildSSHCreateInstanceRequest(req *ExecutorCreateRequest, workspacePath str
 			req.AutoApprovePermissions,
 			req.AutoApprovePermissionsOverride,
 		),
-		McpServers:          req.McpServers,
-		McpMode:             req.McpMode,
-		McpProviders:        req.McpProviders,
-		RequiresProcessKill: requiresProcessKillFromReq(req),
-		StripEnv:            stripEnvFromReq(req),
-		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
-		RemoteContributions: req.RemoteContributions,
-		Env:                 sshRemoteAgentEnv(req),
+		McpServers:               req.McpServers,
+		McpMode:                  req.McpMode,
+		McpProviders:             req.McpProviders,
+		McpProfile:               req.McpProfile,
+		RequiresProcessKill:      requiresProcessKillFromReq(req),
+		StripEnv:                 stripEnvFromReq(req),
+		BaseBranches:             getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
+		RemoteContributions:      req.RemoteContributions,
+		ContributionDestinations: req.ContributionDestinations,
+		ComparisonTargets:        req.ComparisonTargets,
+		Env:                      sshRemoteContributionEnv(req, agentctlBin),
 	}
 }
 
@@ -617,11 +673,12 @@ func createRemoteAgentInstance(
 	client *ssh.Client,
 	controlPort int,
 	workspacePath string,
+	agentctlBin string,
 	req *ExecutorCreateRequest,
 	authToken string,
 	log *logger.Logger,
 ) (int, error) {
-	body, err := json.Marshal(buildSSHCreateInstanceRequest(req, workspacePath))
+	body, err := json.Marshal(buildSSHCreateInstanceRequest(req, workspacePath, agentctlBin))
 	if err != nil {
 		return 0, fmt.Errorf("ssh: marshal create-instance: %w", err)
 	}

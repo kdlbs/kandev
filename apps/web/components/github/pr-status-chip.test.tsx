@@ -6,14 +6,15 @@ import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import { PRStatusChip, aggregateChipStatus } from "./pr-status-chip";
 import { PR_CI_DESKTOP_POPOVER_SCROLL_CLASS } from "./pr-ci-popover";
+import {
+  makeTestCIOptions as makeCIOptions,
+  makeTestPR as makePR,
+} from "./pr-status-chip.test-fixtures";
 import type { AppState } from "@/lib/state/store";
-import type { TaskCIAutomationOptions, TaskPR } from "@/lib/types/github";
+import type { TaskPR } from "@/lib/types/github";
 
 const AUTO_FIX_BADGE_TESTID = "pr-status-auto-fix-chip";
-
-const testConstants = vi.hoisted(() => ({
-  defaultCIFixPrompt: "Default CI fix prompt",
-}));
+const testConstants = vi.hoisted(() => ({ defaultCIFixPrompt: "Default CI fix prompt" }));
 
 const responsiveMock = vi.hoisted(() => ({
   breakpoint: "desktop" as "mobile" | "tablet" | "compactDesktop" | "desktop",
@@ -51,6 +52,7 @@ vi.mock("@/lib/api/domains/github-api", async (importOriginal) => {
       using_default_prompt: true,
       updated_at: "2026-06-18T10:00:00Z",
       pr_states: [],
+      pr_options: [],
     }),
     listWorkspaceTaskPRs: vi.fn().mockResolvedValue({ task_prs: {} }),
   };
@@ -68,53 +70,6 @@ function renderWithStore(initialState: Partial<AppState> | undefined, ui: ReactN
       </ToastProvider>
     </StateProvider>,
   );
-}
-
-function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
-  return {
-    id: "pr-id",
-    task_id: "task-1",
-    owner: "acme",
-    repo: "demo",
-    pr_number: 42,
-    pr_url: "https://github.com/acme/demo/pull/42",
-    pr_title: "Test PR",
-    head_branch: "feat",
-    base_branch: "main",
-    author_login: "alice",
-    state: "open",
-    review_state: "approved",
-    checks_state: "success",
-    mergeable_state: "clean",
-    review_count: 1,
-    pending_review_count: 0,
-    comment_count: 0,
-    unresolved_review_threads: 0,
-    checks_total: 2,
-    checks_passing: 2,
-    additions: 0,
-    deletions: 0,
-    created_at: "",
-    merged_at: null,
-    closed_at: null,
-    last_synced_at: null,
-    updated_at: "",
-    ...overrides,
-  };
-}
-
-function makeCIOptions(overrides: Partial<TaskCIAutomationOptions> = {}): TaskCIAutomationOptions {
-  return {
-    task_id: "task-1",
-    auto_fix_enabled: false,
-    auto_merge_enabled: false,
-    auto_fix_prompt_override: null,
-    effective_auto_fix_prompt: testConstants.defaultCIFixPrompt,
-    using_default_prompt: true,
-    updated_at: "2026-06-18T10:00:00Z",
-    pr_states: [],
-    ...overrides,
-  };
 }
 
 beforeEach(() => {
@@ -299,10 +254,12 @@ describe("PRStatusChip mobile branch", () => {
 
     const drawer = document.querySelector(DRAWER_SELECTOR);
     expect(drawer).not.toBeNull();
+    expect(drawer?.className).toContain("max-h-[80dvh]");
     // Inner popover body + close button render inside the drawer.
     expect(document.querySelector("[data-testid='pr-topbar-popover-inner']")).not.toBeNull();
     expect(document.querySelector("[data-testid='pr-status-chip-drawer-close']")).not.toBeNull();
     expect(screen.getByTestId("pr-popover-title").textContent).toBe("#42 Test PR");
+    expect(screen.getByTestId("pr-popover-author").textContent).toBe("by alice");
     expect(drawer?.textContent).not.toContain("Open PR details");
   });
 
@@ -577,7 +534,7 @@ describe("PRStatusChip CI automation mobile parity", () => {
 
     const drawer = document.querySelector(DRAWER_SELECTOR);
     expect(drawer?.textContent).toContain("Auto-fix CI and address comments");
-    expect(drawer?.textContent).toContain("Auto-merge when ready");
+    expect(drawer?.textContent).toContain("Auto-merge or requeue when ready");
 
     act(() => {
       fireEvent.click(screen.getByLabelText("Edit auto-fix prompt for this task"));
@@ -625,6 +582,37 @@ describe("aggregateChipStatus", () => {
     const conflict = makePR({ id: "dirty", mergeable_state: "dirty" });
     const failing = makePR({ id: "fail", checks_state: "failure" });
     expect(aggregateChipStatus([conflict, failing])).toBe("failed");
+  });
+
+  it("uses the dedicated queued chip status", () => {
+    expect(aggregateChipStatus([makePR({ merge_queue_state: "queued" })])).toBe("queued");
+  });
+
+  it("keeps queued status ahead of dirty mergeability", () => {
+    expect(
+      aggregateChipStatus([makePR({ merge_queue_state: "queued", mergeable_state: "dirty" })]),
+    ).toBe("queued");
+  });
+
+  it("keeps queued status ahead of failure on the same PR", () => {
+    expect(
+      aggregateChipStatus([
+        makePR({
+          merge_queue_state: "queued",
+          checks_state: "failure",
+          review_state: "changes_requested",
+        }),
+      ]),
+    ).toBe("queued");
+  });
+
+  it("lets a failing sibling retain chip priority over a queued PR", () => {
+    expect(
+      aggregateChipStatus([
+        makePR({ merge_queue_state: "queued" }),
+        makePR({ pr_number: 2, checks_state: "failure" }),
+      ]),
+    ).toBe("failed");
   });
 });
 

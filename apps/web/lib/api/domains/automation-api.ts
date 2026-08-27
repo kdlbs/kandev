@@ -14,6 +14,8 @@ import type {
   WorkspaceAutomationRun,
 } from "@/lib/types/automation";
 
+// i18n-exempt: precondition diagnostic for a programmer error; callers branch
+// on the error type, never render this message.
 const WS_UNAVAILABLE = "WebSocket client not available";
 
 function requireClient() {
@@ -172,5 +174,15 @@ export async function deleteAllAutomationRuns(
   return requireClient().request<{ deleted: boolean }>("automation.runs.delete_all", {
     automation_id: automationId,
     workspace_id: workspaceId,
+  });
+}
+
+export async function stopAutomationRun(
+  automationId: string,
+  runId: string,
+): Promise<{ run_id: string; status: string }> {
+  return requireClient().request<{ run_id: string; status: string }>("automation.run.stop", {
+    automation_id: automationId,
+    run_id: runId,
   });
 }

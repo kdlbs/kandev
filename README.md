@@ -41,7 +41,7 @@ Open source, multi-provider, no telemetry, not tied to any cloud.
 - **Workspace isolation** - Git worktrees prevent concurrent agents from conflicting
 - **Multi-repository tasks** - Span a single task across multiple repositories, with one worktree per repo, per-repo branches, per-repo PRs, and per-repo grouping in the Changes panel and review dialog
 - **Flexible runtimes** - Run agents as local processes, in isolated Docker containers, on remote servers via SSH, or in cloud executors like sprites.dev
-- **Runtime settings** - Executor profiles, secrets, custom prompts, utility agents, voice mode, and resource metrics are configurable from Settings
+- **Runtime settings** - Executor profiles, secrets, custom prompts, utility agents, and resource metrics are configurable from Settings
 - **Task-agent MCP** - Agents can create subtasks, target sibling repos, attach extra branches for multiple PRs, message other tasks, read conversations, and inspect related tasks
 - **External MCP** - Manage Kandev from outside coding agents over streamable HTTP or SSE, with copyable config snippets for popular agent CLIs
 - **Workflow portability** - Export and import workflows as portable YAML across workspaces or Kandev installs
@@ -85,7 +85,7 @@ Connect Kandev to the tools your team already uses — pull issues into the kanb
 | **Factory Droid** | `droid` |
 | **iFlow (beta)** | `@iflow-ai/iflow-cli` |
 | **Kilocode** | `@kilocode/cli` |
-| **Pi** | `pi-acp` |
+| **Pi** | ACP adapter: `pi-acp`; CLI passthrough: `pi` |
 | **Kimi** | `kimi` *(install Kimi CLI from Moonshot AI)* |
 | **Kiro** | `kiro-cli-chat` *(install Kiro CLI from AWS)* |
 | **Qoder** | `qodercli` *(install Qoder CLI)* |
@@ -94,7 +94,7 @@ Connect Kandev to the tools your team already uses — pull issues into the kanb
 | **Grok** | `grok` *(install `@xai-official/grok` with npm)* |
 | **Hermes** | `hermes` *(install with the official Hermes installer)* |
 
-> All agents communicate via [ACP](https://agentclientprotocol.com) (Agent Client Protocol). Some agents support ACP natively, while others use ACP adapter packages that bridge their native protocols. **CLI Passthrough mode** is available when an integration provides a passthrough command. If your agent isn't supported yet, open an issue or submit a PR with the integration. See [Adding a New Agent CLI](docs/add-agent-cli.md) for a step-by-step guide.
+> All agents communicate via [ACP](https://agentclientprotocol.com) (Agent Client Protocol). Some agents support ACP natively, while others use ACP adapter packages that bridge their native protocols. **CLI Passthrough mode** is available when an integration provides a passthrough command. If your agent isn't supported yet, open an issue or submit a PR with the integration. See [Adding a New Agent CLI](docs/public/add-agent-cli.md) for a step-by-step guide.
 
 Kandev does not pin the managed npm runtimes for Claude, Codex, OpenCode,
 Copilot, or Gemini. Normal launches can reuse npm's best-effort execution
@@ -312,8 +312,8 @@ Built with these excellent open-source projects:
 
 <a href="https://www.star-history.com/?repos=kdlbs%2Fkandev&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=kdlbs/kandev&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=kdlbs/kandev&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=kdlbs/kandev&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=kdlbs/kandev&type=date&theme=dark&legend=top-left&sealed_token=VcdQXTkas2odX-D8DZINZOcBVuA6ZfkugIzgWgnAi0lqW3gwdqlh_Ei77fi2bdXwc3HnCFz3NQAYtRnoKxspsck-pIQxTdEwEIveR27Y3k8cKBWJxYGOCFqYhHiJGcECnrrMU_NhWcWWTWaz0t5cX-3Fm-1BOouTejaUEy9w78CSuoakpeUJby66XlCB" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=kdlbs/kandev&type=date&legend=top-left&sealed_token=VcdQXTkas2odX-D8DZINZOcBVuA6ZfkugIzgWgnAi0lqW3gwdqlh_Ei77fi2bdXwc3HnCFz3NQAYtRnoKxspsck-pIQxTdEwEIveR27Y3k8cKBWJxYGOCFqYhHiJGcECnrrMU_NhWcWWTWaz0t5cX-3Fm-1BOouTejaUEy9w78CSuoakpeUJby66XlCB" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=kdlbs/kandev&type=date&legend=top-left&sealed_token=VcdQXTkas2odX-D8DZINZOcBVuA6ZfkugIzgWgnAi0lqW3gwdqlh_Ei77fi2bdXwc3HnCFz3NQAYtRnoKxspsck-pIQxTdEwEIveR27Y3k8cKBWJxYGOCFqYhHiJGcECnrrMU_NhWcWWTWaz0t5cX-3Fm-1BOouTejaUEy9w78CSuoakpeUJby66XlCB" />
  </picture>
 </a>

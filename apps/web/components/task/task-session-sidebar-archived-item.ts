@@ -1,12 +1,13 @@
 import type { TaskSwitcherItem } from "./task-switcher";
 import type { useArchivedTaskState } from "./task-archived-context";
+import { t } from "@/lib/i18n";
 
 export function buildArchivedSidebarItem(
   s: ReturnType<typeof useArchivedTaskState>,
 ): TaskSwitcherItem {
   return {
     id: s.archivedTaskId!,
-    title: s.archivedTaskTitle ?? "Archived task",
+    title: s.archivedTaskTitle ?? t("task:archivedTask"),
     state: undefined,
     sessionState: undefined,
     description: undefined,
@@ -14,7 +15,7 @@ export function buildArchivedSidebarItem(
     workflowName: undefined,
     workflowStepId: undefined,
     workflowStepTitle: undefined,
-    repositoryPath: s.archivedTaskRepositoryPath,
+    repositoryPath: s.archivedTaskRepositoryLabel,
     diffStats: undefined,
     isRemoteExecutor: false,
     remoteExecutorType: undefined,

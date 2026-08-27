@@ -11,7 +11,13 @@ import { test, expect } from "../fixtures/test-base";
 const BOOTSTRAP_URL = "**/api/v1/system/improve-kandev/bootstrap";
 const HEALTH_URL = "**/api/v1/system/health";
 
-type ForkStatus = "writable" | "ready" | "blocked_emu" | "unknown";
+type ForkStatus =
+  | "writable"
+  | "ready"
+  | "creatable"
+  | "blocked_emu"
+  | "blocked_managed"
+  | "unknown";
 
 type BootstrapOverrides = {
   /** Override the dedicated workspace the response points at. */
@@ -23,7 +29,13 @@ type BootstrapOverrides = {
   github_login?: string;
   has_write_access?: boolean;
   fork_status?: ForkStatus;
-  fork_message?: string;
+  fork_reason_code?:
+    | "account_cannot_fork"
+    | "app_unsupported"
+    | "fork_conflict"
+    | "fork_not_writable"
+    | "fork_not_ready"
+    | "managed_unavailable";
   issueWorkflowId?: string;
   /**
    * When provided, the bootstrap route handler awaits this promise before
@@ -31,7 +43,25 @@ type BootstrapOverrides = {
    * `loading` state long enough to assert the disabled submit UI.
    */
   bootstrapHold?: Promise<void>;
+  /**
+   * Issues returned by the mocked system/health endpoint. Defaults to none.
+   * The dialog must only gate on issues meaning "no GitHub credential exists
+   * anywhere"; anything else is scoped to something this flow never uses.
+   */
+  healthIssues?: Array<Record<string, string>>;
 };
+
+function githubHealthIssue(id: string, message: string): Record<string, string> {
+  return {
+    id,
+    category: "github",
+    title: "GitHub",
+    message,
+    severity: "warning",
+    fix_url: "/settings/integrations/github",
+    fix_label: "Configure GitHub",
+  };
+}
 
 async function mockImproveKandevApis(
   page: Page,
@@ -49,7 +79,10 @@ async function mockImproveKandevApis(
     route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ healthy: true, issues: [] }),
+      body: JSON.stringify({
+        healthy: (overrides.healthIssues ?? []).length === 0,
+        issues: overrides.healthIssues ?? [],
+      }),
     }),
   );
 
@@ -71,7 +104,7 @@ async function mockImproveKandevApis(
         github_login: overrides.github_login ?? "octocat",
         has_write_access: hasWrite,
         fork_status: forkStatus,
-        ...(overrides.fork_message ? { fork_message: overrides.fork_message } : {}),
+        ...(overrides.fork_reason_code ? { fork_reason_code: overrides.fork_reason_code } : {}),
       }),
     });
   });
@@ -103,7 +136,10 @@ test.describe("Improve Kandev dialog", () => {
     await contribute.click();
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible({ timeout: 10_000 });
 
-    await testPage.keyboard.press("Escape");
+    await testPage
+      .getByTestId("create-task-dialog")
+      .getByRole("button", { name: "Cancel", exact: true })
+      .click();
     await expect(testPage.getByTestId("create-task-dialog")).toBeHidden();
     await testPage.getByTestId("sidebar-improve-kandev-button").click();
 
@@ -225,6 +261,83 @@ test.describe("Improve Kandev dialog", () => {
       .not.toContainEqual(expect.objectContaining({ title }));
   });
 
+  test("a second bug can be filed after reopening the dialog in the dedicated workspace", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    // Seed the dedicated workspace under a temporary name (repositories and
+    // workflows cannot be created in the immutable workspace via the API),
+    // then rename it — same approach as the isolation test above.
+    const staging = await apiClient.createWorkspace("Improve Kandev Setup");
+    const dedicatedWorkflow = await apiClient.createWorkflow(
+      staging.id,
+      "Improve Kandev",
+      "simple",
+    );
+    const dedicatedRepo = await apiClient.createRepository(
+      staging.id,
+      seedData.repositoryPath,
+      "main",
+    );
+    await apiClient.updateWorkspace(staging.id, { name: "Improve Kandev" });
+    await apiClient.saveUserSettings({ agent_generated_task_titles: false });
+    const dedicated = staging;
+    await mockImproveKandevApis(testPage, seedData, {
+      workspaceId: dedicated.id,
+      workflowId: dedicatedWorkflow.id,
+      issueWorkflowId: dedicatedWorkflow.id,
+      repositoryId: dedicatedRepo.id,
+    });
+
+    await testPage.goto("/");
+    // Activate the dedicated workspace — the state a user is in after their
+    // first contribution navigates them there.
+    await testPage.getByTestId("sidebar-workspace-trigger").click();
+    await testPage.getByTestId(`sidebar-workspace-item-${dedicated.id}`).click();
+    await expect(testPage.getByTestId("sidebar-workspace-trigger")).toHaveText(/Improve Kandev/);
+
+    // First bug: New Task opens the Improve dialog, dismiss the intro, submit.
+    await testPage.getByTestId("create-task-button").click();
+    const introDialog = testPage.getByRole("dialog", { name: "Improve Kandev" });
+    await introDialog.getByTestId("improve-kandev-skip-intro").click();
+    await testPage.getByTestId("improve-kandev-proceed").click();
+
+    const createDialog = testPage.getByTestId("create-task-dialog");
+    await expect(createDialog).toBeVisible({ timeout: 10_000 });
+    await createDialog.getByTestId("task-title-input").fill("First contribution");
+    await createDialog
+      .getByTestId("task-description-input")
+      .fill("First bug: column header overlap on narrow viewports.");
+    const submit = createDialog.getByTestId("submit-start-agent");
+    await expect(submit).toBeEnabled({ timeout: 10_000 });
+    await submit.click();
+    await expect(createDialog).toBeHidden({ timeout: 10_000 });
+    await expect
+      .poll(async () => (await apiClient.listTasks(dedicated.id)).tasks)
+      .toContainEqual(expect.objectContaining({ title: "First contribution" }));
+
+    // Second bug: reopen the dialog in the same workspace. The bootstrap probe
+    // must re-run and unblock submit — regression: it stayed at the idle
+    // "Preparing kandev repository in background" banner with submit disabled
+    // forever because the workspace-choice gate was never re-asserted.
+    await testPage.getByTestId("create-task-button").click();
+    await expect(createDialog).toBeVisible({ timeout: 10_000 });
+    // Contributor banner proves this is the Improve dialog with bootstrap
+    // ready (the generic create dialog never renders it).
+    await expect(createDialog.getByText("@octocat")).toBeVisible({ timeout: 10_000 });
+    await createDialog.getByTestId("task-title-input").fill("Second contribution");
+    await createDialog
+      .getByTestId("task-description-input")
+      .fill("Second bug: missing keyboard shortcut for marking a task Done.");
+    await expect(submit).toBeEnabled({ timeout: 10_000 });
+    await submit.click();
+    await expect(createDialog).toBeHidden({ timeout: 10_000 });
+    await expect
+      .poll(async () => (await apiClient.listTasks(dedicated.id)).tasks)
+      .toContainEqual(expect.objectContaining({ title: "Second contribution" }));
+  });
+
   test("New task button opens the Improve Kandev dialog in the dedicated workspace", async ({
     testPage,
     apiClient,
@@ -261,6 +374,7 @@ test.describe("Improve Kandev dialog", () => {
     await mockImproveKandevApis(testPage, seedData, {
       github_login: "octocat",
       has_write_access: false,
+      fork_status: "creatable",
     });
 
     await testPage.goto("/");
@@ -289,7 +403,7 @@ test.describe("Improve Kandev dialog", () => {
     // Contributor banner (fork mode)
     await expect(createDialog.getByText("@octocat")).toBeVisible();
     await expect(
-      createDialog.getByText(/agent will fork kdlbs\/kandev to your account/i),
+      createDialog.getByText(/will prepare a writable fork for this task/i),
     ).toBeVisible();
 
     // Workflow preview header
@@ -341,16 +455,11 @@ test.describe("Improve Kandev dialog", () => {
   }) => {
     await apiClient.createWorkspace("Improve Kandev");
     await apiClient.saveUserSettings({ agent_generated_task_titles: false });
-    const blockedMessage =
-      "Your GitHub account appears to be an Enterprise Managed User (EMU) account, " +
-      "which typically cannot fork repositories outside your owning enterprise. " +
-      "The PR step would fail when forking kdlbs/kandev. Contact your GitHub admin " +
-      "if you'd like to enable this, or contribute via another account.";
     await mockImproveKandevApis(testPage, seedData, {
       github_login: "alice_corp",
       has_write_access: false,
       fork_status: "blocked_emu",
-      fork_message: blockedMessage,
+      fork_reason_code: "account_cannot_fork",
     });
 
     await testPage.goto("/");
@@ -363,8 +472,43 @@ test.describe("Improve Kandev dialog", () => {
 
     const createDialog = testPage.getByTestId("create-task-dialog");
     await expect(createDialog).toBeVisible({ timeout: 10_000 });
-    await expect(createDialog.getByText(blockedMessage)).toBeVisible();
+    await expect(
+      createDialog.getByText("This GitHub account cannot fork kdlbs/kandev."),
+    ).toBeVisible();
     await createDialog.getByTestId("task-title-input").fill("EMU contribution");
+    await createDialog.getByTestId("task-description-input").fill("Describe the problem");
+    await expect(createDialog.getByTestId("submit-start-agent")).toBeDisabled();
+
+    await createDialog.getByRole("tab", { name: "Open issue" }).click();
+    await expect(createDialog.getByTestId("submit-start-agent")).toBeEnabled({ timeout: 10_000 });
+  });
+
+  test("blocks implementation but keeps issue reporting available when managed fork setup is blocked", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.createWorkspace("Improve Kandev");
+    await apiClient.saveUserSettings({ agent_generated_task_titles: false });
+    await mockImproveKandevApis(testPage, seedData, {
+      github_login: "automation",
+      has_write_access: false,
+      fork_status: "blocked_managed",
+      fork_reason_code: "managed_unavailable",
+    });
+
+    await testPage.goto("/");
+    await testPage.getByTestId("sidebar-improve-kandev-button").click();
+    await testPage.getByTestId("improve-kandev-proceed").click();
+
+    const createDialog = testPage.getByTestId("create-task-dialog");
+    await expect(createDialog).toBeVisible({ timeout: 10_000 });
+    await expect(
+      createDialog.getByText(
+        "Managed GitHub access could not prepare a verified fork for this task. Check the workspace GitHub connection or open an issue instead.",
+      ),
+    ).toBeVisible();
+    await createDialog.getByTestId("task-title-input").fill("Managed fork recovery");
     await createDialog.getByTestId("task-description-input").fill("Describe the problem");
     await expect(createDialog.getByTestId("submit-start-agent")).toBeDisabled();
 
@@ -557,5 +701,72 @@ test.describe("Improve Kandev dialog", () => {
 
     await expect(testPage.getByText(/cannot be changed/i)).toBeVisible({ timeout: 15_000 });
     await expect(testPage.getByRole("button", { name: /Add Local Repository/i })).toHaveCount(0);
+  });
+
+  // The gate must ask "is there any GitHub credential at all", not "is every
+  // workspace's connection healthy". A user on GitHub in one workspace and a
+  // different code host in others carries the unhealthy issue permanently, and
+  // it used to lock this dialog behind a warning about workspaces the flow
+  // never touches.
+  test("an unhealthy connection in another workspace does not block the intro", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    await apiClient.createWorkspace("Improve Kandev");
+    await mockImproveKandevApis(testPage, seedData, {
+      healthIssues: [
+        githubHealthIssue(
+          "github_workspace_connections_unhealthy",
+          "1 of 2 configured GitHub workspace connections need attention " +
+            "(1 invalid, 0 suspended, 0 revoked).",
+        ),
+      ],
+    });
+
+    await testPage.goto("/");
+    await testPage.getByTestId("sidebar-improve-kandev-button").click();
+
+    await expect(testPage.getByRole("dialog", { name: "Improve Kandev" })).toBeVisible();
+    await expect(testPage.getByText(/Kandev is open source/)).toBeVisible();
+    await expect(testPage.getByTestId("improve-kandev-proceed")).toBeEnabled();
+    await expect(testPage.getByText(/needs the/)).toHaveCount(0);
+
+    await prCapture.screenshot("intro-reachable-with-unrelated-connection-issue", {
+      caption: "Intro is reachable when an unrelated workspace's connection is unhealthy",
+    });
+  });
+
+  // The catalog string interpolates the CLI name inside its <code> element, so
+  // a values object missing `binary` renders the literal placeholder to users.
+  test("the gh-auth notice renders the CLI name, not a raw placeholder", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    await apiClient.createWorkspace("Improve Kandev");
+    await mockImproveKandevApis(testPage, seedData, {
+      healthIssues: [
+        githubHealthIssue(
+          "github_not_authenticated",
+          "Configure a GitHub connection for a workspace.",
+        ),
+      ],
+    });
+
+    await testPage.goto("/");
+    await testPage.getByTestId("sidebar-improve-kandev-button").click();
+
+    const dialog = testPage.getByRole("dialog", { name: "Improve Kandev" });
+    await expect(dialog.getByText(/GitHub CLI not authenticated/i)).toBeVisible();
+    await expect(dialog.locator("code", { hasText: /^gh$/ })).toBeVisible();
+    await expect(dialog.getByText(/\{\{/)).toHaveCount(0);
+    await expect(testPage.getByTestId("improve-kandev-proceed")).toHaveCount(0);
+
+    await prCapture.screenshot("gh-auth-notice", {
+      caption: "The gh-auth notice renders the CLI name instead of {{binary}}",
+    });
   });
 });

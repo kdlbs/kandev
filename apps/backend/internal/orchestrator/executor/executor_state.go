@@ -221,8 +221,9 @@ func (e *Executor) applyProfile(ctx context.Context, profileID string, cfg *exec
 // Hoisted to constants so the table below doesn't duplicate string
 // literals that exist elsewhere in the package.
 const (
-	profileKeyRemoteCredentials = "remote_credentials"
-	profileKeyRemoteAuthSecrets = "remote_auth_secrets"
+	profileKeyRemoteCredentials  = "remote_credentials"
+	profileKeyRemoteAuthSecrets  = "remote_auth_secrets"
+	profileKeyAgentConfigBundles = "agent_config_bundles"
 )
 
 // profileConfigPassthroughKeys are profile.Config keys copied verbatim
@@ -232,6 +233,7 @@ var profileConfigPassthroughKeys = []string{
 	"sprites_network_policy_rules",
 	profileKeyRemoteCredentials,
 	profileKeyRemoteAuthSecrets,
+	profileKeyAgentConfigBundles,
 	"remote_auth_target_home",
 	"git_user_name",
 	"git_user_email",
@@ -255,6 +257,12 @@ var profileConfigRenameKeys = map[string]string{
 var profileConfigAuthoritativeKeys = []string{
 	lifecycle.MetadataKeySSHWorkdirRoot,
 	lifecycle.MetadataKeySSHShell,
+	// Reclaiming the remote task directory is destructive and irreversible.
+	// A task that could supply ssh_reclaim_task_dir in its own metadata
+	// would be arming a deletion on a host its profile never opted in, so
+	// the profile value wins unconditionally — including when it is empty,
+	// which the reader treats as disabled.
+	lifecycle.MetadataKeySSHReclaimTaskDir,
 }
 
 // applyProfileConfigToMetadata projects profile.Config keys into the

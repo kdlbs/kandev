@@ -75,6 +75,7 @@ const overview: StorageOverviewResponse = {
   capabilities: {
     managed_go_cache_path: "/data/cache/go-build",
     go_cache_adoption_available: true,
+    temporary_artifacts_available: true,
     docker_available: true,
     docker_host: "unix:///var/run/docker.sock",
     host_global_docker_cleanup_allowed: true,
@@ -83,6 +84,18 @@ const overview: StorageOverviewResponse = {
     workspaces: { active_bytes: 10, candidate_bytes: 20 },
     go_cache: { path: "/data/cache/go-build", size_bytes: 30, owned: true, enabled: false },
     quarantine: { count: 2, size_bytes: 35 },
+    temporary_artifacts: {
+      available: true,
+      total_count: 0,
+      total_bytes: 0,
+      active_count: 0,
+      active_bytes: 0,
+      protected_count: 0,
+      protected_bytes: 0,
+      stale_count: 0,
+      stale_bytes: 0,
+      skipped_count: 0,
+    },
     docker: {
       available: true,
       build_cache_bytes: 40,

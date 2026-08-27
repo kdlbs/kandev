@@ -18,6 +18,7 @@ import (
 	"go.uber.org/zap"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/scriptengine"
 )
 
@@ -228,12 +229,12 @@ func (r *SpritesExecutor) runPrepareScript(
 		return nil
 	}
 
-	stepCtx, cancel := context.WithTimeout(ctx, spritePrepareTimeout)
+	stepCtx, cancel := context.WithTimeout(preparationContext(ctx), constants.SetupScriptTimeout)
 	defer cancel()
 
 	r.logger.Debug("running prepare script")
 	cmd := sprite.CommandContext(stepCtx, "bash", "-c", script)
-	cmd.Env = r.buildSpriteEnv(req.Env)
+	cmd.Env = r.buildSpriteEnv(req.Env, req.AgentctlStartupConfig)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -310,6 +311,13 @@ func (r *SpritesExecutor) resolvePrepareScript(req *ExecutorCreateRequest) (stri
 			return "", err
 		}
 		script += contributionScript
+	}
+	if destination, ok := req.ContributionDestinations[""]; ok {
+		destinationScript, err := scriptengine.ContributionDestinationSetupScript(&destination)
+		if err != nil {
+			return "", err
+		}
+		script += destinationScript
 	}
 
 	installScripts := r.collectAgentInstallScripts(req)
@@ -441,14 +449,17 @@ func spriteCreateInstanceRequest(req *ExecutorCreateRequest) agentctl.CreateInst
 			req.AutoApprovePermissions,
 			req.AutoApprovePermissionsOverride,
 		),
-		McpServers:          req.McpServers,
-		McpMode:             req.McpMode,
-		McpProviders:        req.McpProviders,
-		RequiresProcessKill: requiresProcessKillFromReq(req),
-		StripEnv:            stripEnvFromReq(req),
-		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
-		RemoteContributions: req.RemoteContributions,
-		Env:                 cloneStringMap(req.Env),
+		McpServers:               req.McpServers,
+		McpMode:                  req.McpMode,
+		McpProviders:             req.McpProviders,
+		McpProfile:               req.McpProfile,
+		RequiresProcessKill:      requiresProcessKillFromReq(req),
+		StripEnv:                 stripEnvFromReq(req),
+		BaseBranches:             getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
+		RemoteContributions:      req.RemoteContributions,
+		ContributionDestinations: req.ContributionDestinations,
+		ComparisonTargets:        req.ComparisonTargets,
+		Env:                      cloneStringMap(req.Env),
 	}
 }
 

@@ -2,54 +2,40 @@
 
 import { IconGitPullRequest } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/components/state-provider";
+import { useChangeRequestTaskTooltipState } from "@/components/integrations/use-change-request-task-tooltip-state";
+import {
+  CHANGE_REQUEST_STATUS_COLORS,
+  CHANGE_REQUEST_STATUS_RANK,
+  getChangeRequestAggregateStatusColor,
+} from "@/components/integrations/change-request-task-status-color";
+import {
+  getTaskPRsForCurrentWorkspace,
+  useTaskPRTooltipHydration,
+  type TaskPRTooltipHydrationStatus,
+} from "@/hooks/domains/github/use-task-pr-tooltip-hydration";
 import type { TaskPR } from "@/lib/types/github";
+import { derivePRTaskStatusSummary, PRTaskStatusSummary } from "./pr-task-status-summary";
 
-const MUTED_FOREGROUND = "text-muted-foreground";
-const PURPLE_500 = "text-purple-500";
-const RED_500 = "text-red-500";
-const YELLOW_500 = "text-yellow-500";
-const SKY_400 = "text-sky-400";
-const EMERALD_400 = "text-emerald-400";
-const GREEN_500 = "text-green-500";
+const MUTED_FOREGROUND = CHANGE_REQUEST_STATUS_COLORS.muted;
+const PURPLE_500 = CHANGE_REQUEST_STATUS_COLORS.merged;
+const RED_500 = CHANGE_REQUEST_STATUS_COLORS.danger;
+const YELLOW_500 = CHANGE_REQUEST_STATUS_COLORS.warning;
+const SKY_400 = CHANGE_REQUEST_STATUS_COLORS.review;
+const EMERALD_400 = CHANGE_REQUEST_STATUS_COLORS.ready;
+const QUEUED = CHANGE_REQUEST_STATUS_COLORS.queued;
+const GREEN_500 = CHANGE_REQUEST_STATUS_COLORS.passing;
 
 /** Maps the task-level PR projection to the same visual language as live PRs. */
 export function getPRAggregateStatusColor(state: string | null | undefined): string {
-  switch (state?.toLowerCase()) {
-    case "merged":
-      return PURPLE_500;
-    case "closed":
-    case "failure":
-      return RED_500;
-    case "pending":
-      return YELLOW_500;
-    case "awaiting_review":
-      return SKY_400;
-    case "ready":
-      return EMERALD_400;
-    case "passing":
-      return GREEN_500;
-    case "draft":
-    case "blocked":
-    case "neutral":
-    case "open":
-    default:
-      return MUTED_FOREGROUND;
-  }
+  return getChangeRequestAggregateStatusColor(state);
 }
 
-const STATUS_RANK: Record<string, number> = {
-  // Higher = more attention-worthy. Drives the aggregated icon color when a
-  // task has multiple PRs (we surface the worst state).
-  [RED_500]: 5,
-  [YELLOW_500]: 4,
-  [SKY_400]: 3,
-  [EMERALD_400]: 2,
-  [GREEN_500]: 1,
-  [PURPLE_500]: 0,
-  [MUTED_FOREGROUND]: 0,
-};
+// Higher = more attention-worthy. Drives the aggregated icon color when a
+// task has multiple PRs (we surface the worst state).
+const STATUS_RANK = CHANGE_REQUEST_STATUS_RANK;
 
 function hasExplicitPRChecksPassed(pr: TaskPR): boolean {
   return pr.checks_state === "success";
@@ -86,6 +72,7 @@ export function isPRReadyToMerge(pr: TaskPR): boolean {
   if (pr.required_reviews != null && pr.review_count < pr.required_reviews) {
     return false;
   }
+  if (pr.pending_review_count > 0) return false;
   if (pr.review_state === "approved") return true;
   // No review process: no requested reviewers and no submitted reviews. GitHub
   // sets mergeable_state=clean when branch protection is satisfied, so this
@@ -93,8 +80,24 @@ export function isPRReadyToMerge(pr: TaskPR): boolean {
   return pr.review_state === "" && pr.pending_review_count === 0;
 }
 
+// GitHub overloads `blocked` for merge queues and unrelated repository rules.
+// Keep readiness clean-only, but allow a neutral merge attempt so GitHub can
+// authoritatively accept the PR into a queue or return the actual blocker.
+export function canAttemptPRMerge(pr: TaskPR): boolean {
+  if (pr.mergeable_state !== "clean" && pr.mergeable_state !== "blocked") return false;
+  return isPRReadyToMerge({ ...pr, mergeable_state: "clean" });
+}
+
 export function isPRDraft(pr: TaskPR): boolean {
   return pr.state === "open" && pr.mergeable_state === "draft";
+}
+
+export function isPRQueued(pr: TaskPR): boolean {
+  return (
+    pr.state === "open" &&
+    typeof pr.merge_queue_state === "string" &&
+    pr.merge_queue_state.trim() !== ""
+  );
 }
 
 // CI passed but the PR is still waiting on human review (reviewers requested
@@ -116,6 +119,7 @@ export function isPRAwaitingReview(pr: TaskPR): boolean {
 export function isPRWaitingOnBranchProtection(pr: TaskPR): boolean {
   if (pr.state !== "open") return false;
   if (pr.mergeable_state !== "blocked") return false;
+  if (isPRReadyToMerge(pr)) return false;
   if (!hasPRChecksPassedForDisplay(pr)) return false;
   if (pr.review_state === "changes_requested") return false;
   return !isPRAwaitingReview(pr);
@@ -136,6 +140,10 @@ function openMergeBlockerColor(pr: TaskPR): string | null {
 export function getPRStatusColor(pr: TaskPR): string {
   if (pr.state === "merged") return PURPLE_500;
   if (pr.state === "closed") return RED_500;
+  // An active queue entry is the authoritative non-terminal state. Queue
+  // membership must remain visible while provider checks or mergeability
+  // fields hydrate, even when those fields still describe an earlier state.
+  if (isPRQueued(pr)) return QUEUED;
   if (pr.review_state === "changes_requested" || pr.checks_state === "failure") {
     return RED_500;
   }
@@ -166,21 +174,6 @@ export function getPRStatusColor(pr: TaskPR): string {
   return MUTED_FOREGROUND;
 }
 
-export function getPRTooltip(pr: TaskPR): string {
-  const parts = [`PR #${pr.pr_number}: ${pr.pr_title}`];
-  if (pr.state !== "open") parts.push(`State: ${pr.state}`);
-  if (pr.review_state) parts.push(`Review: ${pr.review_state}`);
-  if (pr.checks_state) parts.push(`CI: ${pr.checks_state}`);
-  if (isPRDraft(pr)) {
-    parts.push("Draft");
-  } else if (isPRReadyToMerge(pr)) {
-    parts.push("Ready to merge");
-  } else if (pr.mergeable_state && pr.mergeable_state !== "unknown" && pr.state === "open") {
-    parts.push(`Mergeable: ${pr.mergeable_state}`);
-  }
-  return parts.join(" | ");
-}
-
 /**
  * Picks the most attention-worthy color across N PRs. For multi-repo tasks one
  * red PR should dominate the visual even if the others are green. Terminal
@@ -192,7 +185,7 @@ export function aggregatePRStatusColor(prs: TaskPR[]): string {
   if (prs.length === 0) return MUTED_FOREGROUND;
   const open = prs.filter((p) => p.state === "open");
   const target = open.length > 0 ? open : prs;
-  let bestColor = MUTED_FOREGROUND;
+  let bestColor: string = MUTED_FOREGROUND;
   let bestRank = -1;
   for (const pr of target) {
     const color = getPRStatusColor(pr);
@@ -245,64 +238,152 @@ export function pickDefaultPR(prs: TaskPR[]): TaskPR | null {
   return best;
 }
 
-export function PRTaskIcon({ taskId }: { taskId: string }) {
-  const prs = useAppStore((state) => state.taskPRs.byTaskId[taskId] ?? null);
+export type TaskPRInfo = {
+  number: number;
+  state: string;
+  aggregateState?: string;
+};
+
+export function PRTaskIcon({ taskId, prInfo }: { taskId: string; prInfo?: TaskPRInfo }) {
+  const prs = useAppStore((state) => getTaskPRsForCurrentWorkspace(state, taskId));
+  const hydration = useTaskPRTooltipHydration(taskId);
+  const fullPRs = Array.isArray(prs) && prs.length > 0 ? prs : [];
 
   // Defensive: an upstream payload may briefly seed byTaskId[taskId] with a
   // non-array value (e.g. an empty object from a partial hydration). Bail
-  // instead of falling through into MultiPRIcon, where for-of throws.
-  if (!Array.isArray(prs) || prs.length === 0) return null;
-  if (prs.length === 1) return <SinglePRIcon taskId={taskId} pr={prs[0]} />;
-  return <MultiPRIcon taskId={taskId} prs={prs} />;
+  // instead of falling through into a full-data summary, where for-of throws.
+  if (fullPRs.length === 0 && !prInfo) return null;
+
+  return <PRTaskIconView taskId={taskId} prInfo={prInfo} prs={fullPRs} hydration={hydration} />;
 }
 
-function SinglePRIcon({ taskId, pr }: { taskId: string; pr: TaskPR }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          data-testid={`pr-task-icon-${taskId}`}
-          data-pr-state={pr.state}
-          data-pr-count="1"
-          data-pr-ready-to-merge={isPRReadyToMerge(pr) ? "true" : "false"}
-          className={cn("inline-flex items-center shrink-0", getPRStatusColor(pr))}
-        >
-          <IconGitPullRequest className="h-3.5 w-3.5" />
-        </span>
-      </TooltipTrigger>
-      <TooltipContent>{getPRTooltip(pr)}</TooltipContent>
-    </Tooltip>
+type TaskPRIconPresentation = {
+  hasFullData: boolean;
+  singlePR: TaskPR | null;
+  readyToMerge: boolean;
+  allReadyToMerge: boolean;
+  summaries: ReturnType<typeof derivePRTaskStatusSummary>[];
+  iconColor: string;
+  displayState: string | undefined;
+  displayCount: number;
+};
+
+function getTaskPRIconPresentation(prs: TaskPR[], prInfo?: TaskPRInfo): TaskPRIconPresentation {
+  const hasFullData = prs.length > 0;
+  const singlePR = prs.length === 1 ? prs[0] : null;
+  const readyToMerge = singlePR ? isPRReadyToMerge(singlePR) : false;
+  return {
+    hasFullData,
+    singlePR,
+    readyToMerge,
+    allReadyToMerge: areAllOpenPRsReadyToMerge(prs),
+    summaries: prs.map((pr) => derivePRTaskStatusSummary(pr, isPRReadyToMerge(pr))),
+    iconColor: getTaskPRIconColor(prs, prInfo),
+    displayState: singlePR?.state ?? (hasFullData ? undefined : prInfo?.state),
+    displayCount: hasFullData ? prs.length : 1,
+  };
+}
+
+function PRTaskIconView({
+  taskId,
+  prInfo,
+  prs,
+  hydration,
+}: {
+  taskId: string;
+  prInfo?: TaskPRInfo;
+  prs: TaskPR[];
+  hydration: ReturnType<typeof useTaskPRTooltipHydration>;
+}) {
+  const { t } = useTranslation();
+  const hasFullData = prs.length > 0;
+  const tooltip = useChangeRequestTaskTooltipState(
+    !hasFullData && prInfo
+      ? () => {
+          void hydration.hydrate();
+        }
+      : undefined,
   );
-}
+  const {
+    singlePR,
+    readyToMerge,
+    allReadyToMerge,
+    summaries,
+    iconColor,
+    displayState,
+    displayCount,
+  } = getTaskPRIconPresentation(prs, prInfo);
 
-function MultiPRIcon({ taskId, prs }: { taskId: string; prs: TaskPR[] }) {
-  const aggregateColor = aggregatePRStatusColor(prs);
-  const allReady = areAllOpenPRsReadyToMerge(prs);
+  const ariaLabel =
+    prs.length > 1
+      ? t("github:pullRequestStatuses", { count: prs.length })
+      : t("github:pullRequestStatus", { number: singlePR?.pr_number ?? prInfo?.number });
+
   return (
-    <Tooltip>
+    <Tooltip open={tooltip.open}>
       <TooltipTrigger asChild>
         <span
           data-testid={`pr-task-icon-${taskId}`}
-          data-pr-count={prs.length}
-          data-pr-ready-to-merge={allReady ? "true" : "false"}
-          className={cn("inline-flex items-center gap-0.5 shrink-0", aggregateColor)}
+          data-pr-state={displayState}
+          data-pr-count={displayCount}
+          data-pr-ready-to-merge={
+            hasFullData ? String(prs.length === 1 ? readyToMerge : allReadyToMerge) : undefined
+          }
+          role="img"
+          tabIndex={0}
+          aria-label={ariaLabel}
+          onPointerEnter={tooltip.onPointerEnter}
+          onPointerLeave={tooltip.onPointerLeave}
+          onFocus={tooltip.onFocus}
+          onBlur={tooltip.onBlur}
+          className={cn(
+            "inline-flex items-center shrink-0",
+            prs.length > 1 && "gap-0.5",
+            iconColor,
+          )}
         >
-          <IconGitPullRequest className="h-3.5 w-3.5" />
-          <span className="text-[9px] font-semibold leading-none">{prs.length}</span>
+          <IconGitPullRequest aria-hidden="true" className="h-3.5 w-3.5" />
+          {prs.length > 1 ? (
+            <span className="text-[9px] font-semibold leading-none tabular-nums">{prs.length}</span>
+          ) : null}
         </span>
       </TooltipTrigger>
-      <TooltipContent>
-        <div className="flex flex-col gap-1 text-xs">
-          {prs.map((pr) => (
-            <div key={pr.id} className="flex items-center gap-2">
-              <span className={cn("inline-flex shrink-0", getPRStatusColor(pr))}>
-                <IconGitPullRequest className="h-3 w-3" />
-              </span>
-              <span>{getPRTooltip(pr)}</span>
-            </div>
-          ))}
-        </div>
+      <TooltipContent
+        sideOffset={6}
+        onEscapeKeyDown={tooltip.onEscapeKeyDown}
+        className="w-80 max-w-[calc(100vw-1rem)] p-3"
+      >
+        {hasFullData ? (
+          <PRTaskStatusSummary summaries={summaries} />
+        ) : (
+          <CompactPRTooltipContent status={hydration.status} />
+        )}
       </TooltipContent>
     </Tooltip>
   );
+}
+
+function getTaskPRIconColor(prs: TaskPR[], prInfo?: TaskPRInfo): string {
+  if (prs.length === 1) return getPRStatusColor(prs[0]);
+  if (prs.length > 1) return aggregatePRStatusColor(prs);
+  return getPRAggregateStatusColor(prInfo?.aggregateState ?? prInfo?.state);
+}
+
+function CompactPRTooltipContent({ status }: { status: TaskPRTooltipHydrationStatus }) {
+  const { t } = useTranslation();
+  if (status === "loading" || status === "idle") {
+    return (
+      <span data-testid="pr-task-tooltip-loading" className="text-sm text-muted-foreground">
+        {t("github:taskPrDetailsLoading")}
+      </span>
+    );
+  }
+  if (status === "unavailable") {
+    return (
+      <span data-testid="pr-task-tooltip-unavailable" className="text-sm text-muted-foreground">
+        {t("github:taskPrDetailsUnavailable")}
+      </span>
+    );
+  }
+  return null;
 }

@@ -35,6 +35,7 @@ function makeWorkflow(id: string, workspaceId: string) {
     workspace_id: workspaceId,
     name: id,
     description: null,
+    prompt: undefined as string | undefined,
     sort_order: 0,
     agent_profile_id: null,
     hidden: false,
@@ -187,6 +188,20 @@ describe("useWorkflows — explicit workspace selection", () => {
     await waitFor(() =>
       expect(mockSetWorkflows).toHaveBeenCalledWith([
         expect.objectContaining({ id: "wf-B", workspaceId: "ws-B" }),
+      ]),
+    );
+  });
+
+  it("maps the workflow's prompt into the store item", async () => {
+    mockListWorkflows.mockResolvedValueOnce({
+      workflows: [{ ...makeWorkflow("wf-B", "ws-B"), prompt: "Do the thing" }],
+    });
+
+    renderHook(() => useWorkflows("ws-B", true));
+
+    await waitFor(() =>
+      expect(mockSetWorkflows).toHaveBeenCalledWith([
+        expect.objectContaining({ id: "wf-B", prompt: "Do the thing" }),
       ]),
     );
   });

@@ -6,6 +6,7 @@ import { useToast } from "@/components/toast-provider";
 import { nativeNotifications } from "@/lib/desktop/native-notification-client";
 import { listNotificationProviders } from "@/lib/api";
 import type { NotificationProvider } from "@/lib/types/http";
+import { t } from "@/lib/i18n";
 
 function localSessionNotificationsEnabled(
   providers: Array<{ type: string; enabled: boolean; events: string[] }>,
@@ -32,9 +33,12 @@ export function useSessionFailureToast() {
       return;
     }
     shownRef.current.add(notification.sessionId);
+    const description = notification.isLaunchFailure
+      ? t("task:launchFailedSeeDetails")
+      : notification.message;
     toast({
-      title: "Task failed to start",
-      description: notification.message,
+      title: t("task:taskFailedToStart"),
+      description,
       variant: "error",
     });
     if (nativeNotifications.isAvailable()) {
@@ -72,8 +76,8 @@ export function useSessionFailureToast() {
           if (!localSessionNotificationsEnabled(providers)) return;
           await nativeNotifications.show({
             eventId: `session.failed:${notification.sessionId}`,
-            title: "Task failed to start",
-            body: notification.message,
+            title: t("task:taskFailedToStart"),
+            body: description,
             taskId: notification.taskId,
             sessionId: notification.sessionId,
           });

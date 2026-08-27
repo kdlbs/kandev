@@ -72,8 +72,12 @@ func (s *Service) ChangePassword(ctx context.Context, userID, currentSessionID, 
 	return s.store.DeleteSessionsByUser(ctx, userID, currentSessionID)
 }
 
-// ResolveSessionToken authenticates a raw session-cookie value.
-func (s *Service) ResolveSessionToken(ctx context.Context, token string) (authn.Identity, bool) {
+// ResolveSessionToken authenticates a raw session-cookie value. The passed
+// ip is the request's resolved client IP: on the throttled touch path it
+// refreshes the stored session IP, but only when non-empty and differing
+// from the recorded value (an empty ip never overwrites; same-IP requests
+// only touch timestamps).
+func (s *Service) ResolveSessionToken(ctx context.Context, token, ip string) (authn.Identity, bool) {
 	if token == "" {
 		return authn.Identity{}, false
 	}
@@ -91,7 +95,11 @@ func (s *Service) ResolveSessionToken(ctx context.Context, token string) (authn.
 		return authn.Identity{}, false
 	}
 	if now.Sub(sess.LastSeenAt) > sessionTouchInterval {
-		_ = s.store.TouchSession(ctx, sess.ID, now, now.Add(s.SessionTTL()))
+		refreshIP := ""
+		if ip != "" && ip != sess.IP {
+			refreshIP = ip
+		}
+		_ = s.store.TouchSession(ctx, sess.ID, now, now.Add(s.SessionTTL()), refreshIP)
 	}
 	return authn.Identity{UserID: user.ID, Role: roleOf(user), SessionID: sess.ID}, true
 }

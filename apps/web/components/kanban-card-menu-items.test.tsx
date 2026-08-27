@@ -8,6 +8,8 @@ import {
   type KanbanCardMenuEntry,
 } from "./kanban-card-menu-items";
 
+const PluginBitbucketIcon = () => null;
+
 // Regression: React synthetic events bubble through the fiber tree from a Radix portal; without stopPropagation the parent Card's onClick fires instead of the confirm dialog.
 describe("KanbanCardDropdownMenuItems — click propagation", () => {
   function renderWithParent(entries: KanbanCardMenuEntry[], parentOnClick: () => void) {
@@ -132,6 +134,35 @@ describe("buildKanbanCardMenuEntries — external issue links", () => {
 
     expect(itemLabels(linkMenu)).toEqual(["GitHub Pull Request", "GitHub Issue", "Jira Ticket"]);
   });
+
+  it("adds registered Link actions to the native Link submenu", () => {
+    const entries = buildKanbanCardMenuEntries({
+      workflows: [],
+      stepsByWorkflowId: {},
+      onLinkPullRequest: vi.fn(),
+      pluginLinkActions: [
+        {
+          id: "bitbucket-pull-request",
+          label: "Bitbucket Pull Request",
+          icon: PluginBitbucketIcon,
+          onSelect: vi.fn(),
+        },
+      ],
+    } as never);
+
+    const linkMenu = entries.find((entry) => entry.kind === "submenu" && entry.key === "link");
+    expect(itemLabels(linkMenu)).toContain("Bitbucket Pull Request");
+    const bitbucket =
+      linkMenu?.kind === "submenu"
+        ? linkMenu.children.find(
+            (entry) => entry.kind === "item" && entry.key === "link-plugin-bitbucket-pull-request",
+          )
+        : undefined;
+    expect(bitbucket?.kind).toBe("item");
+    if (bitbucket?.kind === "item") {
+      expect((bitbucket.icon as { type?: unknown })?.type).toBe(PluginBitbucketIcon);
+    }
+  });
 });
 
 describe("buildKanbanCardMenuEntries — !onEdit does not disable plugin edit actions", () => {
@@ -186,6 +217,7 @@ describe("buildKanbanCardMenuEntries — 'primary' group plugin actions", () => 
     pluginRegistry.forPlugin(PLUGIN_ID).registerTaskMenuAction({
       id: "quick-tag",
       label: "Quick tag",
+      icon: PluginBitbucketIcon,
       group: "primary",
       run: vi.fn(),
     });
@@ -220,7 +252,10 @@ describe("buildKanbanCardMenuEntries — 'primary' group plugin actions", () => 
 
     const primaryEntry = entries[primaryIndex];
     expect(primaryEntry.kind).toBe("item");
-    if (primaryEntry.kind === "item") expect(primaryEntry.label).toBe("Quick tag");
+    if (primaryEntry.kind === "item") {
+      expect(primaryEntry.label).toBe("Quick tag");
+      expect((primaryEntry.icon as { type?: unknown })?.type).toBe(PluginBitbucketIcon);
+    }
   });
 
   it("does not add a 'primary' entry when visible(context) returns false", () => {

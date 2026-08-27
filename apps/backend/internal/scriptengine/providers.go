@@ -78,6 +78,62 @@ func RemoteContributionSetupScript(binding *models.RemoteContribution) (string, 
 		branchSuffix, branchSuffix), nil
 }
 
+// ContributionDestinationSetupScript configures a server-bound fork as the
+// push remote for the current branch. It never changes origin or the branch's
+// upstream remote, so fetch and pull continue to use the canonical checkout.
+func ContributionDestinationSetupScript(destination *models.ContributionDestination) (string, error) {
+	return ContributionDestinationSetupScriptAt(destination, "/workspace")
+}
+
+// ContributionDestinationSetupScriptAt is the workspace-path variant used by
+// host and SSH preparers whose checkout root is not /workspace.
+func ContributionDestinationSetupScriptAt(destination *models.ContributionDestination, workspacePath string) (string, error) {
+	if destination == nil {
+		return "", nil
+	}
+	if err := destination.Validate(); err != nil {
+		return "", fmt.Errorf("validate contribution destination: %w", err)
+	}
+	remoteName := destination.ContributionRemoteName()
+	return fmt.Sprintf(`
+
+# ---- kandev-managed: configure contribution destination ----
+# origin and the branch upstream remain canonical; only ordinary pushes use
+# this exact, server-verified destination repository.
+(
+  set -eu
+  cd %s
+  destination_remote=%s
+  destination_url=%s
+  if configured_url=$(git config --get "remote.$destination_remote.url" 2>/dev/null); then
+    if [ "$configured_url" != "$destination_url" ]; then
+      echo 'kandev: contribution destination identity conflict' >&2
+      exit 1
+    fi
+  else
+    git remote add "$destination_remote" "$destination_url"
+  fi
+  configured_push_urls=$(git config --get-all "remote.$destination_remote.pushurl" 2>/dev/null || true)
+  if [ -n "$configured_push_urls" ]; then
+    while IFS= read -r configured_push_url; do
+      if [ "$configured_push_url" != "$destination_url" ]; then
+        echo 'kandev: contribution destination push identity conflict' >&2
+        exit 1
+      fi
+    done <<EOF
+$configured_push_urls
+EOF
+  else
+    git config --add "remote.$destination_remote.pushurl" "$destination_url"
+  fi
+  current_branch=$(git branch --show-current)
+  if [ -n "$current_branch" ]; then
+    git config "branch.$current_branch.pushRemote" "$destination_remote"
+  fi
+)
+	`, shellQuote(workspacePath), shellQuote(remoteName), shellQuote(destination.TargetRepository.RemoteURL)), nil
+}
+
 // RepositoryProvider returns git-related placeholders from metadata and environment.
 // Parameters:
 //   - metadata: executor create request metadata (contains "repository_path", "base_branch", etc.)
@@ -301,7 +357,16 @@ gh config set git_protocol https --host github.com 2>/dev/null || true`
 		lines := []string{
 			"# GitHub token authentication",
 			"# Configure git credential helper for GitHub HTTPS authentication",
-			`git config --global credential.https://github.com.helper '!/bin/sh -c "echo username=x-access-token; echo password=${GH_TOKEN:-${GITHUB_TOKEN}}"'`,
+			// --replace-all is required, not cosmetic. `gh auth setup-git` (run
+			// below, and by the no-token branch above) leaves the key
+			// multi-valued: an empty entry that resets the helper chain plus
+			// gh's own helper. A plain `git config --global <key> <value>`
+			// refuses to overwrite a multi-valued key and exits 5, which aborts
+			// the whole prepare script under `set -euo pipefail`. That makes the
+			// no-token branch poison the with-token branch: on a host whose home
+			// directory persists between runs (SSH, unlike an ephemeral Docker
+			// container) exactly one launch succeeds and every later one fails.
+			`git config --global --replace-all credential.https://github.com.helper '!/bin/sh -c "echo username=x-access-token; echo password=${GH_TOKEN:-${GITHUB_TOKEN}}"'`,
 			"# Configure gh CLI to use HTTPS protocol",
 			"gh config set git_protocol https --host github.com 2>/dev/null || true",
 			"# Register gh as git credential helper (backup method)",

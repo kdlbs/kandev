@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Input } from "@kandev/ui/input";
 import { IconSearch, IconX, IconLoader2 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
+import { t } from "@/lib/i18n";
 
 interface TaskSearchInputProps {
   value: string;
@@ -18,7 +19,7 @@ interface TaskSearchInputProps {
 export function TaskSearchInput({
   value,
   onChange,
-  placeholder = "Search tasks...",
+  placeholder = t("kanban:searchTasksPlaceholder"),
   debounceMs = 300,
   isLoading = false,
   className,

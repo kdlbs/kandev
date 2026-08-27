@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { extractKandevStem, extractMcpResult, shortId } from "./parse";
+import { extractKandevArgs, extractKandevStem, extractMcpResult, shortId } from "./parse";
+
+describe("extractKandevArgs", () => {
+  it("unwraps arguments from the real Codex ACP MCP envelope", () => {
+    const argumentsValue = { version: 1, title: "Service failures", blocks: [] };
+    expect(
+      extractKandevArgs({
+        raw_input: {
+          server: "kandev",
+          tool: "show_rich_output_kandev",
+          arguments: argumentsValue,
+        },
+      }),
+    ).toEqual(argumentsValue);
+  });
+});
 
 describe("extractKandevStem", () => {
   it("strips the mcp__kandev__ namespace and the _kandev suffix", () => {
@@ -8,6 +23,10 @@ describe("extractKandevStem", () => {
 
   it("handles the codex-style kandev/ prefix", () => {
     expect(extractKandevStem("kandev/list_tasks_kandev")).toBe("list_tasks");
+  });
+
+  it("handles the dotted Codex ACP title fallback", () => {
+    expect(extractKandevStem("mcp.kandev.show_rich_output_kandev")).toBe("show_rich_output");
   });
 
   it("handles a bare suffix-only name", () => {
@@ -67,6 +86,54 @@ describe("extractMcpResult", () => {
 
   it("returns plain objects untouched", () => {
     expect(extractMcpResult({ foo: 1 })).toEqual({ foo: 1 });
+  });
+
+  it("prefers standard MCP structuredContent over its text fallback", () => {
+    expect(
+      extractMcpResult({
+        content: [{ type: "text", text: "fallback" }],
+        structuredContent: { version: 1, resolved_charts: [] },
+      }),
+    ).toEqual({ version: 1, resolved_charts: [] });
+  });
+
+  it("falls back to text content when structuredContent is null", () => {
+    expect(
+      extractMcpResult({
+        _meta: null,
+        content: [{ type: "text", text: '{"total":2,"workspaces":[{"id":"w1"}]}' }],
+        structuredContent: null,
+      }),
+    ).toEqual({ total: 2, workspaces: [{ id: "w1" }] });
+  });
+
+  it("falls back to text content when structured_content is null", () => {
+    expect(
+      extractMcpResult({
+        content: [{ type: "text", text: '{"total":1}' }],
+        structured_content: null,
+      }),
+    ).toEqual({ total: 1 });
+  });
+
+  it("unwraps the raw result wrapper emitted by ACP clients", () => {
+    expect(extractMcpResult({ result: '{"version":1,"resolved_charts":[]}' })).toEqual({
+      version: 1,
+      resolved_charts: [],
+    });
+  });
+
+  it("unwraps the real Codex ACP rawOutput result object", () => {
+    const snapshot = { version: 1, resolved_charts: [] };
+    expect(
+      extractMcpResult({
+        error: null,
+        result: {
+          content: [{ type: "text", text: JSON.stringify(snapshot) }],
+          structuredContent: snapshot,
+        },
+      }),
+    ).toEqual(snapshot);
   });
 });
 

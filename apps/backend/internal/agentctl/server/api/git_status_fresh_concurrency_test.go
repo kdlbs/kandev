@@ -180,54 +180,6 @@ func statusesByRepo(t *testing.T, result MultiRepoGitStatusResult, wantRepos []s
 	return statuses
 }
 
-func mapKeys[V any](values map[string]V) []string {
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	return keys
-}
-
-func assertRepoNames(t *testing.T, got, want []string) {
-	t.Helper()
-	gotSet := make(map[string]bool, len(got))
-	for _, repo := range got {
-		gotSet[repo] = true
-	}
-	for _, repo := range want {
-		if !gotSet[repo] {
-			t.Errorf("repositories %v missing %q", got, repo)
-		}
-	}
-}
-
-func newMultiRepoStatusServer(t *testing.T) (*Server, []string) {
-	t.Helper()
-	taskRoot := t.TempDir()
-	repoNames := []string{"alpha", "beta"}
-	for _, repo := range repoNames {
-		newStatusTestRepo(t, taskRoot, repo)
-	}
-	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error"})
-	cfg := &config.InstanceConfig{WorkDir: taskRoot}
-	return NewServer(cfg, process.NewManager(cfg, log), nil, nil, log), repoNames
-}
-
-func newStatusTestRepo(t *testing.T, taskRoot, name string) string {
-	t.Helper()
-	repoDir := filepath.Join(taskRoot, name)
-	if err := os.Mkdir(repoDir, 0o755); err != nil {
-		t.Fatalf("mkdir %s: %v", name, err)
-	}
-	runGitAPI(t, repoDir, "init", "--initial-branch=main")
-	runGitAPI(t, repoDir, "config", "user.email", "test@test.com")
-	runGitAPI(t, repoDir, "config", "user.name", "Test User")
-	writeFileAPI(t, repoDir, "README.md", name+"\n")
-	runGitAPI(t, repoDir, "add", ".")
-	runGitAPI(t, repoDir, "commit", "-m", "initial")
-	return repoDir
-}
-
 type gitStatusCommandGate struct {
 	events  *os.File
 	release *os.File

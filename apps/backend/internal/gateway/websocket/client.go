@@ -137,10 +137,11 @@ func (c *Client) ReadPump(_ context.Context) {
 	for {
 		_, message, err := c.conn.ReadMessage()
 		if err != nil {
+			// CloseNormalClosure (1000): Normal browser close
 			// CloseGoingAway (1001): Client navigating away
 			// CloseNoStatusReceived (1005): Client closed without status (normal browser close)
 			// CloseAbnormalClosure (1006): Abnormal close (network drop)
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNoStatusReceived, websocket.CloseAbnormalClosure) {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseNoStatusReceived, websocket.CloseAbnormalClosure) {
 				c.logger.Error("WebSocket read error", zap.Error(err))
 			}
 			break
@@ -237,7 +238,7 @@ func (c *Client) handleMessage(msg *ws.Message) {
 	// Per-user scoping backstop: refuse before the handler runs if the payload
 	// names a task or session this client may not touch. See dispatch_scope.go
 	// for why this lives here and not only in each handler.
-	if err := c.authorizeAction(dispatchCtx, msg.Payload); err != nil {
+	if err := c.authorizeAction(dispatchCtx, msg.Action, msg.Payload); err != nil {
 		c.logger.Debug("denied out-of-scope action",
 			zap.String("action", msg.Action),
 			zap.String("user_id", c.identity.UserID),
@@ -502,6 +503,18 @@ func (c *Client) handleRunSubscribe(msg *ws.Message) {
 		c.sendError(msg.ID, msg.Action, ws.ErrorCodeValidation, "run_id is required", nil)
 		return
 	}
+
+	// Per-user scoping: a client may only observe runs in its own
+	// workspaces. Every hook error maps to the same fixed (code, message)
+	// pair below so an unknown run id and a foreign run id are
+	// indistinguishable on the wire (no existence leak).
+	if check := c.hub.authPolicy.Subscriptions.Run; check != nil {
+		if err := check(c.dispatchContext(), req.RunID); err != nil {
+			c.sendError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "cannot subscribe to this run", nil)
+			return
+		}
+	}
+
 	c.hub.SubscribeToRun(c, req.RunID)
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 		"success": true,

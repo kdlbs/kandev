@@ -27,7 +27,7 @@ const promptQueueingMetaKey = "promptQueueing"
 // the bridge, is not advertised over ACP, and its version is not observable
 // here. Mid-turn delivery is therefore opportunistic, and a caller must be
 // correct whether the agent folds the prompt or runs it as the next turn. See
-// docs/specs/platform/mid-turn-steering.md.
+// docs/specs/platform/requirements/mid-turn-steering.md.
 //
 // Every malformed shape fails closed to false: absent `_meta`, absent
 // namespace, a namespace that is not an object, a missing key, or a value that

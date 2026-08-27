@@ -166,7 +166,7 @@ function DocumentsSection({ docs }: { docs: TaskContextDTO["available_documents"
               {refLabel(d.task)}
             </Badge>
             <span className="font-mono text-foreground">{d.key}</span>
-            {d.title && <span className="text-muted-foreground">— {d.title}</span>}
+            {d.title && <span className="text-muted-foreground">- {d.title}</span>}
           </li>
         ))}
       </ul>

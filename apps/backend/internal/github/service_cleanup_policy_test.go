@@ -92,9 +92,8 @@ func TestShouldDeleteReviewTask_AutoPolicy_LifecyclePromptPreserves(t *testing.T
 		Number: 99, State: prStateMerged, RepoOwner: "acme", RepoName: "widget",
 	})
 	enabled := true
-	if _, err := store.UpdateTaskCIOptions(ctx, "task-99", TaskCIOptionsPatch{
-		PromptOnMerged: &enabled,
-	}); err != nil {
+	if _, err := store.UpdateTaskPRAutomationOptions(ctx, "task-99", "", 99,
+		TaskPRAutomationOptionsPatch{PromptOnMerged: &enabled}, false); err != nil {
 		t.Fatalf("enable merged prompt: %v", err)
 	}
 	svc.taskSessionChecker = &recordingSessionChecker{}
@@ -112,9 +111,8 @@ func TestShouldDeleteReviewTask_AutoPolicy_LifecyclePromptPreservesWithoutSessio
 		Number: 99, State: prStateMerged, RepoOwner: "acme", RepoName: "widget",
 	})
 	enabled := true
-	if _, err := store.UpdateTaskCIOptions(ctx, "task-99", TaskCIOptionsPatch{
-		PromptOnMerged: &enabled,
-	}); err != nil {
+	if _, err := store.UpdateTaskPRAutomationOptions(ctx, "task-99", "", 99,
+		TaskPRAutomationOptionsPatch{PromptOnMerged: &enabled}, false); err != nil {
 		t.Fatalf("enable merged prompt: %v", err)
 	}
 	svc.taskSessionChecker = nil

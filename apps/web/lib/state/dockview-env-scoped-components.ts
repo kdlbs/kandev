@@ -14,6 +14,7 @@ export const ENV_SCOPED_DOCKVIEW_COMPONENTS = new Set([
   "diff-viewer",
   "pr-detail",
   "mr-detail",
+  "review-detail",
 ]);
 
 export function isEnvScopedDockviewComponent(component: string | null | undefined): boolean {

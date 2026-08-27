@@ -26,10 +26,12 @@ var ErrUtilityAgentNotFound = errors.New("utility agent not found")
 // UtilityAgent is the execution-relevant portion of a configured utility
 // agent. backendapp adapts internal/utility/service.Service to this shape.
 type UtilityAgent struct {
-	Name    string
-	AgentID string
-	Model   string
-	Enabled bool
+	Name                string
+	AgentID             string
+	Model               string
+	AgentProfileID      string
+	ProfileBindingState string
+	Enabled             bool
 }
 
 type utilityAgentSource interface {
@@ -39,7 +41,7 @@ type utilityAgentSource interface {
 // utilityRunner runs a one-shot completion for an agent type + model and
 // returns the response text.
 type utilityRunner interface {
-	ExecutePrompt(ctx context.Context, agentType, model, mode, prompt string) (string, error)
+	ExecuteProfilePrompt(ctx context.Context, profileID, prompt string) (string, error)
 }
 
 // InvokeUtilityAgent runs the named utility agent selected in this plugin's
@@ -78,7 +80,10 @@ func (h *pluginHost) InvokeUtilityAgent(ctx context.Context, prompt string) (str
 	if !agent.Enabled {
 		return "", status.Errorf(codes.FailedPrecondition, "configured utility agent %q is disabled", agentID)
 	}
-	return runner.ExecutePrompt(ctx, agent.AgentID, agent.Model, "", prompt)
+	if agent.ProfileBindingState == "unconfigured" || agent.AgentProfileID == "" {
+		return "", status.Errorf(codes.FailedPrecondition, "configured utility agent %q has no usable agent profile", agentID)
+	}
+	return runner.ExecuteProfilePrompt(ctx, agent.AgentProfileID, prompt)
 }
 
 func errNoUtilityAgent() error {

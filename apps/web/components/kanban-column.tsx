@@ -2,19 +2,16 @@
 
 import { useMemo } from "react";
 import { useDroppable } from "@dnd-kit/core";
-import {
-  KanbanCard,
-  resolveTaskRepositoryChips,
-  Task,
-  type KanbanPresentation,
-} from "./kanban-card";
+import { Task, type KanbanPresentation } from "./kanban-card";
 import { Badge } from "@kandev/ui/badge";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/components/state-provider";
 import type { KanbanExternalLinkAvailability } from "./kanban-external-link-availability";
 import type { Repository } from "@/lib/types/http";
 import { countAdmittedTasks, formatWipCount, isOverWipLimit } from "@/lib/kanban/wip-limit";
+import { partitionWipTasks } from "@/lib/kanban/wip-queue";
 import { useTranslation } from "react-i18next";
+import { VirtualizedColumnTaskList } from "./kanban/virtualized-column-task-list";
 
 export interface WorkflowStep {
   id: string;
@@ -56,6 +53,7 @@ function ColumnHeader({ step, tasks }: { step: WorkflowStep; tasks: Task[] }) {
   const admittedTaskCount = countAdmittedTasks(tasks);
   const overWipLimit = isOverWipLimit(admittedTaskCount, step.wip_limit);
   const wipCountLabel = formatWipCount(admittedTaskCount, step.wip_limit);
+  const queuedCount = partitionWipTasks(tasks, step.id).queued.length;
 
   return (
     <div className="flex items-center justify-between pb-2 mb-3 px-1">
@@ -76,6 +74,11 @@ function ColumnHeader({ step, tasks }: { step: WorkflowStep; tasks: Task[] }) {
         >
           {wipCountLabel}
         </Badge>
+        {queuedCount > 0 && (
+          <span className="text-xs text-muted-foreground" data-testid="kanban-queued-count">
+            {t("kanban:queuedCount", { count: queuedCount })}
+          </span>
+        )}
       </div>
     </div>
   );
@@ -116,7 +119,8 @@ export function KanbanColumn({
 
   // Ordered ids of the cards rendered in this column — the source of truth for
   // shift-click range selection (matches exactly what the user sees).
-  const columnTaskIds = useMemo(() => tasks.map((t) => t.id), [tasks]);
+  const { admitted, queued } = useMemo(() => partitionWipTasks(tasks, step.id), [tasks, step.id]);
+  const orderedTasks = useMemo(() => [...admitted, ...queued], [admitted, queued]);
 
   return (
     <div
@@ -131,50 +135,30 @@ export function KanbanColumn({
       {/* Column Header */}
       {!hideHeader && <ColumnHeader step={step} tasks={tasks} />}
 
-      {/* Tasks */}
-      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden space-y-2 px-1 pt-1">
-        {tasks.map((task) => (
-          <KanbanCard
-            key={task.id}
-            task={queuedTaskWithTitle(task, steps, step)}
-            workspaceId={activeWorkspaceId}
-            presentation={presentation}
-            externalLinkAvailability={externalLinkAvailability}
-            repositoryChips={resolveTaskRepositoryChips(task, repositories)}
-            onClick={onPreviewTask}
-            onOpenFullPage={onOpenTask}
-            onEdit={onEditTask}
-            onDelete={onDeleteTask}
-            onArchive={onArchiveTask}
-            onMove={onMoveTask}
-            steps={steps}
-            showMaximizeButton={showMaximizeButton}
-            isDeleting={deletingTaskId === task.id}
-            isArchiving={archivingTaskId === task.id}
-            isSelected={selectedIds?.has(task.id)}
-            selectedIds={selectedIds}
-            onToggleSelect={onToggleSelect}
-            onRangeSelect={
-              onSelectRange ? (taskId) => onSelectRange(taskId, columnTaskIds) : undefined
-            }
-            isMultiSelectMode={isMultiSelectMode}
-          />
-        ))}
-      </div>
+      <VirtualizedColumnTaskList
+        orderedTasks={orderedTasks}
+        queuedStartIndex={admitted.length}
+        queuedCount={queued.length}
+        step={step}
+        steps={steps}
+        presentation={presentation}
+        workspaceId={activeWorkspaceId}
+        repositories={repositories}
+        externalLinkAvailability={externalLinkAvailability}
+        showMaximizeButton={showMaximizeButton}
+        deletingTaskId={deletingTaskId}
+        archivingTaskId={archivingTaskId}
+        selectedIds={selectedIds}
+        onPreviewTask={onPreviewTask}
+        onOpenTask={onOpenTask}
+        onEditTask={onEditTask}
+        onDeleteTask={onDeleteTask}
+        onArchiveTask={onArchiveTask}
+        onMoveTask={onMoveTask}
+        onToggleSelect={onToggleSelect}
+        onSelectRange={onSelectRange}
+        isMultiSelectMode={isMultiSelectMode}
+      />
     </div>
   );
-}
-
-function queuedTaskWithTitle(
-  task: Task,
-  steps: WorkflowStep[] | undefined,
-  step: WorkflowStep,
-): Task {
-  if (!task.queuedForStepId) return task;
-  return {
-    ...task,
-    queuedForStepTitle:
-      steps?.find((candidate) => candidate.id === task.queuedForStepId)?.title ??
-      (task.queuedForStepId === step.id ? step.title : undefined),
-  };
 }

@@ -6,6 +6,7 @@ import { StorageSettingHelp } from "./storage-setting-help";
 import { SettingRow } from "./storage-policy-fields";
 
 // Keep this display snapshot in sync with backend DependencyDirectoryAllowlist.
+// i18n-exempt: dependency directory name on disk.
 const DEPENDENCY_DIRECTORIES = [
   "node_modules",
   "bower_components",
@@ -25,6 +26,8 @@ type Props = {
   settings: StorageMaintenanceSettings;
   savedSettings: StorageMaintenanceSettings;
   pending: boolean;
+  /** Overrides the default pending explanation, e.g. for the admin gate. */
+  pendingReason?: string;
   onChange: (settings: StorageMaintenanceSettings) => void;
   onCleanDependencies?: () => void;
 };
@@ -33,6 +36,7 @@ export function StorageWorkspaceDependencySettings({
   settings,
   savedSettings,
   pending,
+  pendingReason,
   onChange,
   onCleanDependencies,
 }: Props) {
@@ -42,7 +46,7 @@ export function StorageWorkspaceDependencySettings({
   const dependencyCleanupDirty = dependenciesEnabled !== savedDependenciesEnabled;
   let dependencyActionDisabledReason: string | undefined;
   if (pending) {
-    dependencyActionDisabledReason = t("system:storageActionPending");
+    dependencyActionDisabledReason = pendingReason ?? t("system:storageActionPending");
   } else if (!savedDependenciesEnabled) {
     dependencyActionDisabledReason = t("system:storageEnableWorkspaceDependenciesAndSave");
   }

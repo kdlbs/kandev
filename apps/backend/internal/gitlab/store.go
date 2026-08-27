@@ -223,6 +223,11 @@ func (s *Store) createTables() error {
 	if err := s.migrateMRAutomationAutomationColumns(); err != nil {
 		return err
 	}
+	// Must follow migrateMRAutomationAutomationColumns, which adds the
+	// mr_scope_migrated_at column this migration is guarded by.
+	if err := s.migrateTaskMROptionsToMRScope(); err != nil {
+		return err
+	}
 	if err := s.migrateConfigRevision(); err != nil {
 		return err
 	}
@@ -235,7 +240,10 @@ func (s *Store) createTables() error {
 	if err := s.migrateMRWatchUniqueKey(); err != nil {
 		return err
 	}
-	return s.ensureMRWatchIndexes()
+	if err := s.ensureMRWatchIndexes(); err != nil {
+		return err
+	}
+	return s.healTaskOwnedOrphans()
 }
 
 // migrateTaskMRAutomationFields adds the reviewer/merge-readiness columns
@@ -247,10 +255,10 @@ func (s *Store) createTables() error {
 // TABLE above (which is a no-op on an existing table).
 func (s *Store) migrateTaskMRAutomationFields() error {
 	columns := []struct{ name, ddl string }{
-		{"detailed_merge_status", "TEXT NOT NULL DEFAULT ''"},
-		{"reviewer_count", "INTEGER NOT NULL DEFAULT 0"},
-		{"unapproved_reviewers", "INTEGER NOT NULL DEFAULT 0"},
-		{"unresolved_discussions", "INTEGER NOT NULL DEFAULT 0"},
+		{"detailed_merge_status", sqlTextDefaultEmpty},
+		{"reviewer_count", sqlIntegerDefaultZero},
+		{"unapproved_reviewers", sqlIntegerDefaultZero},
+		{"unresolved_discussions", sqlIntegerDefaultZero},
 	}
 	return addMissingColumns(s, "gitlab_task_mrs", columns)
 }
@@ -367,13 +375,13 @@ func (s *Store) migrateWatchColumns() error {
 		name string
 		ddl  string
 	}{
-		{"repository_id", "TEXT NOT NULL DEFAULT ''"},
-		{"base_branch", "TEXT NOT NULL DEFAULT ''"},
+		{"repository_id", sqlTextDefaultEmpty},
+		{"base_branch", sqlTextDefaultEmpty},
 		{"max_inflight_tasks", "INTEGER"},
-		{"last_error", "TEXT NOT NULL DEFAULT ''"},
-		{"last_error_at", "DATETIME"},
+		{"last_error", sqlTextDefaultEmpty},
+		{"last_error_at", sqlDateTime},
 		{"generation", "INTEGER NOT NULL DEFAULT 1"},
-		{"deleting", "BOOLEAN NOT NULL DEFAULT 0"},
+		{"deleting", sqlBooleanDefaultFalse},
 	}
 	for _, table := range []string{"gitlab_review_watches", "gitlab_issue_watches"} {
 		existing, err := s.tableColumns(table)
@@ -586,6 +594,21 @@ func (s *Store) GetTaskMR(ctx context.Context, taskID, repositoryID, projectPath
 	return &tm, nil
 }
 
+// GetTaskMRByID returns one association by its stable primary key. It is used
+// by source-aware detach cleanup before the row is removed.
+func (s *Store) GetTaskMRByID(ctx context.Context, id string) (*TaskMR, error) {
+	var tm TaskMR
+	err := s.ro.GetContext(ctx, &tm, `
+		SELECT `+taskMRSelectCols+` FROM gitlab_task_mrs WHERE id = ? LIMIT 1`, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &tm, nil
+}
+
 // ListTaskMRsByTask returns every MR association for a task, oldest first.
 func (s *Store) ListTaskMRsByTask(ctx context.Context, taskID string) ([]*TaskMR, error) {
 	var mrs []TaskMR
@@ -621,12 +644,15 @@ func (s *Store) ListTaskMRsByWorkspaceID(ctx context.Context, workspaceID string
 }
 
 // DeleteTaskMR removes a single task↔MR row, cascading to that MR's
-// lifecycle checkpoint (gitlab_task_mr_state). Without this, re-linking the
+// lifecycle checkpoint (gitlab_task_mr_state) and its per-MR automation
+// switches (gitlab_task_mr_automation_options). Without this, re-linking the
 // same MR later would inherit the old checkpoint and could suppress its next
-// lifecycle prompt — gitlab_task_mrs has no FK relationship to
-// gitlab_task_mr_state (it's keyed by (task_id, repository_id, project_path,
-// mr_iid), not by gitlab_task_mrs.id) for the database to cascade this
-// automatically.
+// lifecycle prompt, or silently re-arm a switch — including auto-merge — that
+// no surface displays but the evaluator still reads. gitlab_task_mrs has no FK
+// relationship to either table (both are keyed by (task_id, repository_id,
+// project_path, mr_iid), not by gitlab_task_mrs.id) for the database to
+// cascade this automatically. Keep in step with
+// DeleteTaskMRForWorkspace, which performs the same three-table cleanup.
 func (s *Store) DeleteTaskMR(ctx context.Context, id string) error {
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -650,6 +676,12 @@ func (s *Store) DeleteTaskMR(ctx context.Context, id string) error {
 	}
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM gitlab_task_mr_state WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`,
+		mr.TaskID, mr.RepositoryID, mr.ProjectPath, mr.MRIID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM gitlab_task_mr_automation_options
+		 WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`,
 		mr.TaskID, mr.RepositoryID, mr.ProjectPath, mr.MRIID); err != nil {
 		return err
 	}

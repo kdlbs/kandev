@@ -63,7 +63,30 @@ test.describe("Task default layout shape", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForDockviewReady();
-    await testPage.waitForTimeout(500); // let the session-tab swap settle
+
+    // The session-tab swap re-lays-out the dockview groups after it reports
+    // ready, so their geometry is still moving here. Wait for the group
+    // rectangles to stop changing instead of guessing how long that takes:
+    // the assertion below reads those exact rectangles.
+    let previousGroups: string | null = null;
+    await expect
+      .poll(
+        async () => {
+          const current = await testPage.evaluate(() =>
+            JSON.stringify(
+              Array.from(document.querySelectorAll(".dv-groupview")).map((el) => {
+                const r = el.getBoundingClientRect();
+                return [Math.round(r.x), Math.round(r.width)];
+              }),
+            ),
+          );
+          const settled = current === previousGroups && current !== "[]";
+          previousGroups = current;
+          return settled;
+        },
+        { timeout: 10_000, message: "dockview group layout did not settle" },
+      )
+      .toBe(true);
 
     const container = await testPage.getByTestId("dockview-task-layout").evaluate((el) => {
       const r = el.getBoundingClientRect();

@@ -122,6 +122,42 @@ func TestTaskPublication_ActivityRefreshDoesNotOvertakeOrdinaryUpdate(t *testing
 	<-activityDone
 }
 
+func TestTaskPublication_PreservesSameSecondActivityOrdering(t *testing.T) {
+	svc, eventBus, _ := createTestService(t)
+	messageAt := time.Date(2026, 8, 18, 10, 20, 0, 100_000_000, time.UTC)
+	taskUpdatedAt := messageAt.Add(800 * time.Millisecond)
+
+	svc.publishTaskEventNow(context.Background(), events.TaskUpdated, &models.Task{
+		ID:          "task-precision",
+		WorkspaceID: "ws-1",
+		CreatedAt:   messageAt.Add(-time.Minute),
+		UpdatedAt:   taskUpdatedAt,
+	}, nil, nil, nil, nil)
+
+	published := eventBus.GetPublishedEvents()
+	if len(published) != 1 {
+		t.Fatalf("published events = %d, want 1", len(published))
+	}
+	data, ok := published[0].Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("event data type = %T, want map[string]interface{}", published[0].Data)
+	}
+	updatedAt, ok := data["updated_at"].(string)
+	if !ok {
+		t.Fatalf("updated_at type = %T, want string", data["updated_at"])
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, updatedAt)
+	if err != nil {
+		t.Fatalf("parse updated_at %q: %v", updatedAt, err)
+	}
+	if !parsed.Equal(taskUpdatedAt) {
+		t.Fatalf("published updated_at = %s, want %s", parsed, taskUpdatedAt)
+	}
+	if !parsed.After(messageAt) {
+		t.Fatalf("task mutation at %s was not ordered after same-second message at %s", parsed, messageAt)
+	}
+}
+
 func TestTaskPublication_QueuedActivityOutlivesCallerCancellation(t *testing.T) {
 	svc, eventBus, repo := createTestServiceWithSessionsRepo(t, func(repo *sqliterepo.Repository) repository.SessionRepository {
 		return cancellationAwareSessionRepository{SessionRepository: repo}
@@ -405,6 +441,30 @@ func TestTaskPublication_TaskCreatedAfterTombstoneClearsAndPublishes(t *testing.
 	}
 }
 
+func TestMessageEventChangesPendingActionForAuthorityMutations(t *testing.T) {
+	tests := []struct {
+		name        string
+		eventType   string
+		messageType models.MessageType
+		want        bool
+	}{
+		{name: "ordinary add can establish turn authority", eventType: events.MessageAdded, messageType: models.MessageTypeMessage, want: true},
+		{name: "ordinary delete can remove turn authority", eventType: events.MessageDeleted, messageType: models.MessageTypeAgentPlan, want: true},
+		{name: "ordinary update preserves turn authority", eventType: events.MessageUpdated, messageType: models.MessageTypeMessage, want: false},
+		{name: "clarification add changes pending action", eventType: events.MessageAdded, messageType: models.MessageTypeClarificationRequest, want: true},
+		{name: "clarification update changes pending action", eventType: events.MessageUpdated, messageType: models.MessageTypeClarificationRequest, want: true},
+		{name: "permission delete changes pending action", eventType: events.MessageDeleted, messageType: models.MessageTypePermissionRequest, want: true},
+		{name: "unrelated event", eventType: events.TurnStarted, messageType: models.MessageTypeClarificationRequest, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := messageEventChangesPendingAction(tt.eventType, &models.Message{Type: tt.messageType}); got != tt.want {
+				t.Fatalf("messageEventChangesPendingAction(%s, %s) = %t, want %t", tt.eventType, tt.messageType, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestTaskPublication_TaskUpdatedIncludesNullArchivedAtForActiveTasks(t *testing.T) {
 	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()
@@ -528,6 +588,58 @@ func TestPublishTaskUpdated_FallbackRepositoryID(t *testing.T) {
 	}
 	if len(repos) != 1 || repos[0]["repository_id"] != "repo-x" {
 		t.Fatalf("expected repositories payload with repo-x, got %#v", repos)
+	}
+}
+
+func TestPublishTaskUpdated_EmitsAutopilot(t *testing.T) {
+	svc, eventBus, _ := createTestService(t)
+	svc.PublishTaskUpdated(context.Background(), &models.Task{
+		ID: "task-autopilot", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Autopilot: true,
+	})
+
+	data := singlePublishedEventData(t, eventBus)
+	if got, ok := data["autopilot"].(bool); !ok || !got {
+		t.Fatalf("autopilot payload = %#v, want true", data["autopilot"])
+	}
+}
+
+// TestPublishTaskUpdated_EmitsAutoStartFailed regression-tests the WS gap
+// found in Review round 2: setTaskAutoStartFailedMarker /
+// clearTaskAutoStartFailedMarker both call PublishTaskUpdated expecting open
+// clients to see the flip, but publishTaskEventNow hand-builds the payload
+// map and never carried auto_start_failed, so the publishes were dead code
+// and the badge only ever appeared after a reload (REST snapshot).
+func TestPublishTaskUpdated_EmitsAutoStartFailed(t *testing.T) {
+	svc, eventBus, _ := createTestService(t)
+	svc.PublishTaskUpdated(context.Background(), &models.Task{
+		ID: "task-auto-start-failed", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1",
+		Metadata: map[string]interface{}{models.MetaKeyAutoStartFailed: true},
+	})
+
+	data := singlePublishedEventData(t, eventBus)
+	if got, ok := data["auto_start_failed"].(bool); !ok || !got {
+		t.Fatalf("auto_start_failed payload = %#v, want true", data["auto_start_failed"])
+	}
+}
+
+// TestPublishTaskUpdated_EmitsAutoStartFailedFalseWhenCleared proves the
+// clear path also propagates: a task with no MetaKeyAutoStartFailed key
+// publishes an explicit `false`, not an omitted field, so
+// preserveOmittedField on the frontend does not pin the stale `true` from a
+// previous failure.
+func TestPublishTaskUpdated_EmitsAutoStartFailedFalseWhenCleared(t *testing.T) {
+	svc, eventBus, _ := createTestService(t)
+	svc.PublishTaskUpdated(context.Background(), &models.Task{
+		ID: "task-auto-start-cleared", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1",
+	})
+
+	data := singlePublishedEventData(t, eventBus)
+	got, ok := data["auto_start_failed"].(bool)
+	if !ok {
+		t.Fatalf("auto_start_failed payload missing or wrong type: %#v", data["auto_start_failed"])
+	}
+	if got {
+		t.Fatalf("auto_start_failed payload = true, want false for a task without the marker")
 	}
 }
 

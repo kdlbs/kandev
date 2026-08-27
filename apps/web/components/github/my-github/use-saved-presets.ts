@@ -7,15 +7,14 @@ import {
   updateGitHubWorkspaceSettings,
 } from "@/lib/api/domains/github-api";
 import { createQueuedUserSettingsSync } from "@/lib/user-settings-sync";
+import {
+  readSavedPresets,
+  setSavedPresetDefault,
+  type SavedPreset,
+  type SavedPresetKind,
+} from "./saved-preset-model";
 
-export type SavedPreset = {
-  id: string;
-  kind: "pr" | "issue";
-  label: string;
-  customQuery: string;
-  repoFilter: string;
-  createdAt: string;
-};
+export type { SavedPreset } from "./saved-preset-model";
 
 const listeners = new Set<() => void>();
 let snapshot: SavedPreset[] = [];
@@ -43,36 +42,33 @@ function publish(next: SavedPreset[]) {
   for (const l of listeners) l();
 }
 
-function readServerPresets(value: unknown): SavedPreset[] | null {
-  if (!Array.isArray(value)) return null;
-  return value.flatMap((candidate): SavedPreset[] => {
-    if (typeof candidate !== "object" || candidate === null) return [];
-    const preset = candidate as Record<string, unknown>;
-    const kind = preset.kind;
-    if (
-      typeof preset.id !== "string" ||
-      (kind !== "pr" && kind !== "issue") ||
-      typeof preset.label !== "string"
-    ) {
-      return [];
-    }
-    return [
-      {
-        ...(preset as SavedPreset),
-        repoFilter: typeof preset.repoFilter === "string" ? preset.repoFilter : "",
-      },
-    ];
-  });
-}
-
 const syncServer = createQueuedUserSettingsSync<SavedPreset[]>((next) => ({
   github_saved_presets: next,
 }));
+// Portable presets use a module snapshot shared by every hook instance, so queue the
+// complete read/persist/publish mutation rather than only its already-built payload.
+let portableMutationQueue = Promise.resolve();
+let portableMutationGeneration = 0;
 
-let workspaceSyncQueue = Promise.resolve();
+function queuePortableMutation(mutation: () => Promise<void>): Promise<void> {
+  const generation = portableMutationGeneration;
+  const queued = portableMutationQueue
+    .catch(() => undefined)
+    .then(() => {
+      if (generation !== portableMutationGeneration) return;
+      return mutation();
+    });
+  portableMutationQueue = queued;
+  return queued;
+}
+
+// Shared across hook instances so writes for the same workspace stay ordered.
+// Separate workspaces remain independent during navigation between them.
+const workspaceSyncQueues = new Map<string, Promise<void>>();
 
 function syncWorkspaceSavedPresets(workspaceId: string, next: SavedPreset[]): Promise<void> {
-  workspaceSyncQueue = workspaceSyncQueue
+  const previous = workspaceSyncQueues.get(workspaceId) ?? Promise.resolve();
+  const queued = previous
     .catch(() => undefined)
     .then(() =>
       updateGitHubWorkspaceSettings({
@@ -80,12 +76,24 @@ function syncWorkspaceSavedPresets(workspaceId: string, next: SavedPreset[]): Pr
         saved_presets: next,
       }).then(() => undefined),
     );
-  return workspaceSyncQueue;
+  workspaceSyncQueues.set(workspaceId, queued);
+  void queued
+    .finally(() => {
+      if (workspaceSyncQueues.get(workspaceId) === queued) workspaceSyncQueues.delete(workspaceId);
+    })
+    .catch(() => undefined);
+  return queued;
 }
 
 export function __resetSnapshotForTests() {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("__resetSnapshotForTests must not be called in production");
+  }
   snapshot = [];
   snapshotVersion = 0;
+  portableMutationGeneration += 1;
+  portableMutationQueue = Promise.resolve();
+  workspaceSyncQueues.clear();
   for (const l of listeners) l();
 }
 
@@ -96,8 +104,8 @@ function useUserSavedPresetsSync(enabled: boolean) {
     const initialVersion = snapshotVersion;
     fetchUserSettings({ cache: "no-store" })
       .then((response) => {
-        const serverPresets = readServerPresets(response.settings.github_saved_presets);
-        if (cancelled || !serverPresets || snapshotVersion !== initialVersion) return;
+        const serverPresets = readSavedPresets(response.settings.github_saved_presets);
+        if (cancelled || snapshotVersion !== initialVersion) return;
         publish(serverPresets);
       })
       .catch(() => {});
@@ -121,11 +129,11 @@ function useWorkspaceSavedPresets(workspaceId: string | null) {
     fetchGitHubWorkspaceSettings(workspaceId)
       .then((settings) => {
         if (cancelled || seq !== writeSeq.current) return;
-        const serverPresets = readServerPresets(settings.saved_presets) ?? [];
+        const serverPresets = readSavedPresets(settings.saved_presets);
         setWorkspacePresets(serverPresets);
       })
       .catch(() => {
-        if (!cancelled) setWorkspacePresets(undefined);
+        if (!cancelled && seq === writeSeq.current) setWorkspacePresets(undefined);
       });
     return () => {
       cancelled = true;
@@ -138,47 +146,210 @@ function useWorkspaceSavedPresets(workspaceId: string | null) {
   return { workspacePresets, setWorkspacePresets: setWorkspacePresetsFromLocal };
 }
 
+function discardSavedPreset(presets: SavedPreset[], id: string): SavedPreset[] {
+  return presets.filter((preset) => preset.id !== id);
+}
+
+function restoreSavedPreset(
+  presets: SavedPreset[],
+  preset: SavedPreset,
+  originalIndex: number,
+): SavedPreset[] {
+  if (presets.some((candidate) => candidate.id === preset.id)) return presets;
+  const restored =
+    preset.isDefault &&
+    presets.some((candidate) => candidate.kind === preset.kind && candidate.isDefault)
+      ? { ...preset, isDefault: false }
+      : preset;
+  // Best-effort: the insertion point may shift if concurrent saves ran before rollback.
+  const insertionIndex = Math.min(originalIndex, presets.length);
+  return [...presets.slice(0, insertionIndex), restored, ...presets.slice(insertionIndex)];
+}
+
+type SavedPresetMutationContext = {
+  workspaceId: string | null;
+  presets: SavedPreset[];
+  portableGeneration: number;
+};
+
+function readMutationPresets(context: SavedPresetMutationContext): SavedPreset[] {
+  return context.workspaceId === null ? snapshot : context.presets;
+}
+
+function persistSavedPresets(
+  context: SavedPresetMutationContext,
+  next: SavedPreset[],
+): Promise<void> {
+  if (context.workspaceId !== null) {
+    return syncWorkspaceSavedPresets(context.workspaceId, next);
+  }
+  return syncServer(next);
+}
+
+function useSavedPresetMutationContext(
+  workspaceId: string | null,
+  activePresets: SavedPreset[],
+  setWorkspacePresets: (next: SavedPreset[]) => void,
+) {
+  const mutationContextRef = useRef<SavedPresetMutationContext>({
+    workspaceId,
+    presets: activePresets,
+    portableGeneration: portableMutationGeneration,
+  });
+  if (
+    mutationContextRef.current.workspaceId !== workspaceId ||
+    mutationContextRef.current.portableGeneration !== portableMutationGeneration
+  ) {
+    mutationContextRef.current = {
+      workspaceId,
+      presets: activePresets,
+      portableGeneration: portableMutationGeneration,
+    };
+  } else {
+    mutationContextRef.current.presets = activePresets;
+  }
+  const applyLocal = useCallback(
+    (context: SavedPresetMutationContext, next: SavedPreset[]) => {
+      if (
+        context.workspaceId === null &&
+        context.portableGeneration !== portableMutationGeneration
+      ) {
+        return;
+      }
+      context.presets = next;
+      if (mutationContextRef.current !== context) return;
+      if (context.workspaceId !== null) setWorkspacePresets(next);
+      else publish(next);
+    },
+    [setWorkspacePresets],
+  );
+  return { mutationContextRef, applyLocal };
+}
+
 export function useSavedPresets(workspaceId: string | null = null) {
   const presets = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   const { workspacePresets, setWorkspacePresets } = useWorkspaceSavedPresets(workspaceId);
+  const workspacePresetsRef = useRef(workspacePresets);
+  workspacePresetsRef.current = workspacePresets;
   useUserSavedPresetsSync(!workspaceId);
-  const activePresets = workspaceId ? (workspacePresets ?? []) : presets;
+  const activePresets = workspaceId ? (workspacePresets ?? emptySnapshot) : presets;
+  const { mutationContextRef, applyLocal } = useSavedPresetMutationContext(
+    workspaceId,
+    activePresets,
+    setWorkspacePresets,
+  );
+  const mutationQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const previousWorkspaceIdRef = useRef(workspaceId);
+  if (previousWorkspaceIdRef.current !== workspaceId) {
+    previousWorkspaceIdRef.current = workspaceId;
+    mutationQueueRef.current = Promise.resolve();
+  }
 
+  const queueMutation = useCallback(
+    (mutation: () => Promise<void>) => {
+      if (workspaceId === null) return queuePortableMutation(mutation);
+      const queued = mutationQueueRef.current.catch(() => undefined).then(mutation);
+      mutationQueueRef.current = queued;
+      return queued;
+    },
+    [workspaceId],
+  );
+
+  /**
+   * @returns The created preset, or null while workspace settings are unavailable.
+   * @throws The persistence error after rolling back the optimistic update.
+   */
   const save = useCallback(
-    (input: Omit<SavedPreset, "id" | "createdAt">) => {
-      if (workspaceId && workspacePresets === undefined) return null;
+    async (input: Omit<SavedPreset, "id" | "createdAt" | "isDefault">) => {
+      if (workspaceId && workspacePresetsRef.current === undefined) return null;
+      const context = mutationContextRef.current;
       const preset: SavedPreset = {
         ...input,
-        id: `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+        id: `p_${crypto.randomUUID()}`,
         createdAt: new Date().toISOString(),
+        isDefault: false,
       };
-      const next = [...activePresets, preset];
-      if (workspaceId) {
-        setWorkspacePresets(next);
-        void syncWorkspaceSavedPresets(workspaceId, next).catch(() => {});
+      const append = (current: SavedPreset[]) =>
+        current.some((saved) => saved.id === preset.id) ? current : [...current, preset];
+      applyLocal(context, append(readMutationPresets(context)));
+      try {
+        await queueMutation(async () => {
+          await persistSavedPresets(context, append(readMutationPresets(context)));
+        });
         return preset;
+      } catch (error) {
+        const current = readMutationPresets(context);
+        const rolledBack = discardSavedPreset(current, preset.id);
+        if (rolledBack.length !== current.length) applyLocal(context, rolledBack);
+        throw error;
       }
-      publish(next);
-      void syncServer(next);
-      return preset;
     },
-    [activePresets, workspaceId, workspacePresets, setWorkspacePresets],
+    [applyLocal, queueMutation, workspaceId],
   );
 
+  /**
+   * @returns Whether an existing preset was removed.
+   * @throws The persistence error; the removed preset is restored before rejection.
+   */
   const remove = useCallback(
-    (id: string) => {
-      if (workspaceId && workspacePresets === undefined) return;
-      const next = activePresets.filter((p) => p.id !== id);
-      if (workspaceId) {
-        setWorkspacePresets(next);
-        void syncWorkspaceSavedPresets(workspaceId, next).catch(() => {});
-        return;
+    async (id: string) => {
+      if (workspaceId && workspacePresetsRef.current === undefined) return false;
+      const context = mutationContextRef.current;
+      const current = readMutationPresets(context);
+      const originalIndex = current.findIndex((preset) => preset.id === id);
+      if (originalIndex === -1) return false;
+      const removedPreset = current[originalIndex];
+      applyLocal(context, discardSavedPreset(current, id));
+      try {
+        await queueMutation(async () => {
+          // Re-read the scoped context so concurrent saves appended after the optimistic remove
+          // are included in the persisted payload; the removed id is already absent.
+          await persistSavedPresets(context, discardSavedPreset(readMutationPresets(context), id));
+        });
+        return true;
+      } catch (error) {
+        const latest = readMutationPresets(context);
+        const rolledBack = restoreSavedPreset(latest, removedPreset, originalIndex);
+        if (rolledBack !== latest) applyLocal(context, rolledBack);
+        throw error;
       }
-      publish(next);
-      void syncServer(next);
     },
-    [activePresets, workspaceId, workspacePresets, setWorkspacePresets],
+    [applyLocal, queueMutation, workspaceId],
   );
 
-  return { presets: activePresets, save, remove };
+  /**
+   * @returns Whether a changed default was persisted; loading and unchanged targets return false.
+   * @remarks Queued same-kind calls run in invocation order, so the last changed target wins.
+   * @throws The persistence error when the settings update fails.
+   */
+  const setDefault = useCallback(
+    async (kind: SavedPresetKind, id: string | null) => {
+      if (workspaceId && workspacePresetsRef.current === undefined) return false;
+      const context = mutationContextRef.current;
+      let persisted = false;
+      await queueMutation(async () => {
+        const current = readMutationPresets(context);
+        const next = setSavedPresetDefault(current, kind, id);
+        if (next === current) {
+          // No-op when already matched or the target was removed while queued.
+          return;
+        }
+        await persistSavedPresets(context, next);
+        persisted = true;
+        // `setDefault` publishes only after persistence succeeds (no optimistic update).
+        // Re-read the scoped context so that concurrent mutations applied
+        // during the await (e.g. sibling-hook writes for portable user settings)
+        // are merged in before publishing the new default state.
+        // This is also a no-op when a concurrent remove deleted the target:
+        // setSavedPresetDefault returns the same reference for a missing id.
+        const latest = readMutationPresets(context);
+        const remerged = setSavedPresetDefault(latest, kind, id);
+        if (remerged !== latest) applyLocal(context, remerged);
+      });
+      return persisted;
+    },
+    [applyLocal, queueMutation, workspaceId],
+  );
+
+  return { presets: activePresets, save, remove, setDefault };
 }

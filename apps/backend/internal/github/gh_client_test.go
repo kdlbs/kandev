@@ -69,6 +69,7 @@ func TestGhMergeStatusCode(t *testing.T) {
 		{"404 Not Found phrase", errors.New("404 Not Found"), true, 404},
 		{"status 404", errors.New("request failed (status: 404)"), true, 404},
 		{"HTTP 403", errors.New("HTTP 403: Forbidden"), true, 403},
+		{"HTTP 400", errors.New("HTTP 400: Bad Request"), true, 400},
 		{"HTTP 405", errors.New("gh: HTTP 405: Method Not Allowed"), true, 405},
 		{"status 405", errors.New("status: 405"), true, 405},
 		{"405 phrase", errors.New("405 Method Not Allowed"), true, 405},
@@ -395,7 +396,7 @@ func TestConvertGHPR(t *testing.T) {
 		HeadRefName: "feature-branch",
 		HeadRefOid:  "abc123def456",
 		BaseRefName: "main",
-		IsDraft:     true,
+		IsDraft:     boolPtr(true),
 		Mergeable:   "MERGEABLE",
 		Additions:   100,
 		Deletions:   50,
@@ -427,6 +428,9 @@ func TestConvertGHPR(t *testing.T) {
 	if !pr.Draft {
 		t.Error("expected draft = true")
 	}
+	if !pr.IsDraftObserved {
+		t.Error("expected IsDraftObserved = true when isDraft is present in the response")
+	}
 	if !pr.Mergeable {
 		t.Error("expected mergeable = true")
 	}
@@ -444,6 +448,41 @@ func TestConvertGHPR(t *testing.T) {
 	}
 	if pr.MergedAt != nil {
 		t.Error("expected nil MergedAt")
+	}
+}
+
+// TestConvertGHPR_MissingIsDraftAndChangedFilesLeavesUnobserved covers
+// AC-12a on the gh CLI decode path: a response that omits isDraft and
+// changedFiles must decode to unobserved (Observed=false), not a fabricated
+// false/0 masquerading as a real observation.
+func TestConvertGHPR_MissingIsDraftAndChangedFilesLeavesUnobserved(t *testing.T) {
+	raw := &ghPR{Number: 7, State: "OPEN"}
+	pr := convertGHPR(raw, "owner", "repo")
+	if pr.IsDraftObserved {
+		t.Error("IsDraftObserved = true, want false when isDraft is absent from the response")
+	}
+	if pr.ChangedFilesObserved {
+		t.Error("ChangedFilesObserved = true, want false when changedFiles is absent from the response")
+	}
+}
+
+// TestConvertGHPR_ExplicitFalseAndZeroAreObserved covers AC-12a's other
+// half: a response that genuinely reports isDraft=false and changedFiles=0
+// must be distinguishable from one that omits them — both mark Observed=true.
+func TestConvertGHPR_ExplicitFalseAndZeroAreObserved(t *testing.T) {
+	raw := &ghPR{Number: 7, State: "OPEN", IsDraft: boolPtr(false), ChangedFiles: intPtr(0)}
+	pr := convertGHPR(raw, "owner", "repo")
+	if !pr.IsDraftObserved {
+		t.Error("IsDraftObserved = false, want true for an explicit isDraft=false")
+	}
+	if pr.Draft {
+		t.Error("Draft = true, want false")
+	}
+	if !pr.ChangedFilesObserved {
+		t.Error("ChangedFilesObserved = false, want true for an explicit changedFiles=0")
+	}
+	if pr.ChangedFiles != 0 {
+		t.Errorf("ChangedFiles = %d, want 0", pr.ChangedFiles)
 	}
 }
 

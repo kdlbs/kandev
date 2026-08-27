@@ -16,10 +16,7 @@ import {
   iconForPresetKey,
   type JiraStoredPreset,
 } from "@/components/jira/my-jira/presets";
-import {
-  ScriptEditor,
-  computeEditorHeight,
-} from "@/components/settings/profile-edit/script-editor";
+import { SettingsPromptEditor } from "@/components/settings/settings-prompt-editor";
 import type { ScriptPlaceholder } from "@/components/settings/profile-edit/script-editor-completions";
 import { Trans, useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
@@ -65,6 +62,7 @@ const MY_JIRA_ROUTE = "/jira";
 // seeded in one locale and saved unedited would keep that locale's text forever.
 // Same contract as `newPreset` in components/github/action-presets-section.tsx.
 function newPreset(): JiraStoredPreset {
+  // i18n-exempt: persisted, editable preset label. See the comment above.
   return {
     id: `preset_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
     label: "New action",
@@ -201,38 +199,38 @@ function PresetPromptEditor({
   // array on every render would re-register the provider on every keystroke.
   const placeholders = useMemo(() => jiraPromptPlaceholders(t), [t]);
   return (
-    <div className="px-2 pb-2 space-y-1">
-      <div className="rounded-md border overflow-hidden" data-settings-dirty={isDirty}>
-        <ScriptEditor
-          value={preset.prompt_template}
-          onChange={(v) => onPatch({ prompt_template: v })}
-          language="markdown"
-          height={computeEditorHeight(preset.prompt_template)}
-          lineNumbers="off"
-          placeholders={placeholders}
-        />
-      </div>
-      <p className="text-[11px] text-muted-foreground/60">
-        {/* The five `{{…}}` tokens are passed as values, never written into the
-            catalog, where i18next would interpolate them away. */}
-        <Trans
-          i18nKey="jira:presetPromptPlaceholderHelp"
-          values={{
-            token: "{{",
-            key: "{{key}}",
-            url: "{{url}}",
-            title: "{{title}}",
-            description: "{{description}}",
-          }}
-        >
-          Type {"{{token}}"} to see available placeholders.{" "}
-          <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{key}}"}</code>,{" "}
-          <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{url}}"}</code>,{" "}
-          <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{title}}"}</code>, and{" "}
-          <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{description}}"}</code> are
-          substituted when the action runs.
-        </Trans>
-      </p>
+    <div className="px-2 pb-2">
+      <SettingsPromptEditor
+        value={preset.prompt_template}
+        onChange={(v) => onPatch({ prompt_template: v })}
+        placeholders={placeholders}
+        promptReferences
+        isDirty={isDirty}
+        testId={`jira-task-prompt-editor-${preset.id}`}
+        help={
+          <p className="text-[11px] text-muted-foreground/60">
+            {/* The five `{{…}}` tokens are passed as values, never written into the
+                catalog, where i18next would interpolate them away. */}
+            <Trans
+              i18nKey="jira:presetPromptPlaceholderHelp"
+              values={{
+                token: "{{",
+                key: "{{key}}",
+                url: "{{url}}",
+                title: "{{title}}",
+                description: "{{description}}",
+              }}
+            >
+              Type {"{{token}}"} to see available placeholders.{" "}
+              <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{key}}"}</code>,{" "}
+              <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{url}}"}</code>,{" "}
+              <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{title}}"}</code>, and{" "}
+              <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{description}}"}</code>{" "}
+              are substituted when the action runs.
+            </Trans>
+          </p>
+        }
+      />
     </div>
   );
 }

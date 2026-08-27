@@ -62,11 +62,20 @@ export function ImproveKandevDialog(props: ImproveKandevDialogProps) {
   );
 
   // When the dedicated workspace exists, bootstrap proceeds immediately.
+  // Keyed on `open` too: useResetOnClose clears the confirmation on close, and
+  // without this the effect only re-ran when improveWorkspaceMissing changed —
+  // a re-open with the workspace already known would sit forever at the idle
+  // "Preparing kandev repository" banner with submit blocked.
+  //
+  // The re-probe on every open is intentional: bootstrap is idempotent
+  // (backend reuses the existing workspace/workflow/repo) and re-checks the
+  // user's fork/write access, which can change between opens. Do not
+  // short-circuit it on a previously-successful result.
   useEffect(() => {
-    if (!improveWorkspaceMissing) {
+    if (open && !improveWorkspaceMissing) {
       setWorkspaceChoiceConfirmed(true);
     }
-  }, [improveWorkspaceMissing]);
+  }, [improveWorkspaceMissing, open]);
 
   useResetOnClose(open, {
     setMode,
@@ -146,6 +155,15 @@ export function ImproveKandevDialog(props: ImproveKandevDialogProps) {
   );
 }
 
+// Only a "no GitHub credential exists anywhere" state can block this flow.
+// The other issues in the `github` category are scoped to something this
+// contribution never touches: a connection that went bad in an unrelated
+// workspace, or an exhausted rate limit that clears itself. Blocking on the
+// whole category meant a user with GitHub configured in one workspace and
+// Azure DevOps in two others could not open the dialog at all, with no
+// setting that would clear it.
+const BLOCKING_GITHUB_ISSUE_IDS = new Set(["github_unavailable", "github_not_authenticated"]);
+
 function useGitHubAuthCheck(
   open: boolean,
   workspaceId: string | null,
@@ -158,7 +176,7 @@ function useGitHubAuthCheck(
       try {
         const health = await fetchSystemHealth();
         if (cancelled) return;
-        const ghIssue = health.issues.find((i) => i.category === "github");
+        const ghIssue = health.issues.find((i) => BLOCKING_GITHUB_ISSUE_IDS.has(i.id));
         if (!ghIssue) {
           setAuth({ kind: "ok" });
           return;
@@ -292,11 +310,14 @@ function GhAuthMissing({
         <div>
           <p className="font-medium text-foreground">{t("common:githubCliNotAuthenticated")}</p>
           <p className="mt-1 text-muted-foreground">
-            {/* `gh` is the CLI's binary name, so it stays literal in the children
-                and never becomes a catalog key. */}
+            {/* `gh` is the CLI's binary name, so it is passed as a value rather
+                than becoming a catalog key. The catalog string interpolates it
+                inside the <code> element (`<1>{{binary}}</1>`), so the JSX child
+                below is a fallback only: omitting the value renders the literal
+                "{{binary}}" to the user. */}
             <Trans
               i18nKey="common:theFinalStepOpensAPullRequest"
-              values={{ message: auth.message }}
+              values={{ binary: "gh", message: auth.message }}
             >
               The final step of this workflow opens a pull request, which needs the <code>gh</code>{" "}
               CLI to be authenticated. {auth.message}

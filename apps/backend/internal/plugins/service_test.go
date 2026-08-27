@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	goruntime "runtime"
 	"strings"
 	"sync"
@@ -297,6 +298,99 @@ runtime:
 	return &buf
 }
 
+func testAgentToolPackage(t *testing.T, id, toolName string) *bytes.Buffer {
+	t.Helper()
+	platformKey := goruntime.GOOS + "-" + goruntime.GOARCH
+	manifestYAML := fmt.Sprintf(`
+id: %s
+api_version: 1
+version: 1.0.0
+display_name: Test Plugin
+runtime:
+  type: binary
+  executables:
+    %s: server/plugin
+agent_tools:
+  - name: %s
+    description: Test tool
+    surfaces: [kanban-task]
+    input_schema:
+      type: object
+`, id, platformKey, toolName)
+	var buf bytes.Buffer
+	if err := pkgtartest.WritePackage(&buf, map[string][]byte{
+		"manifest.yaml": []byte(manifestYAML),
+		"server/plugin": []byte("#!/bin/sh\necho fake\n"),
+	}); err != nil {
+		t.Fatalf("WritePackage: %v", err)
+	}
+	return &buf
+}
+
+type installBarrierStore struct {
+	store.Store
+	firstSave    chan struct{}
+	secondSave   chan struct{}
+	releaseFirst chan struct{}
+	saves        int
+	mu           sync.Mutex
+}
+
+func (s *installBarrierStore) Save(record *store.Record) error {
+	s.mu.Lock()
+	s.saves++
+	call := s.saves
+	s.mu.Unlock()
+	switch call {
+	case 1:
+		close(s.firstSave)
+		<-s.releaseFirst
+	case 2:
+		close(s.secondSave)
+	}
+	return s.Store.Save(record)
+}
+
+func TestServiceInstallSerializesAgentToolCollisionValidation(t *testing.T) {
+	dir := t.TempDir()
+	barrier := &installBarrierStore{
+		Store: store.NewFSStore(dir), firstSave: make(chan struct{}),
+		secondSave: make(chan struct{}), releaseFirst: make(chan struct{}),
+	}
+	svc := NewService(barrier, NewRegistry(), nil, testLogger(t))
+	svc.SetPluginsDir(dir)
+	svc.SetRuntime(newFakeRuntime())
+	firstPackage := testAgentToolPackage(t, "plugin-a", "echo")
+	secondPackage := testAgentToolPackage(t, "plugin_a", "echo")
+
+	errs := make(chan error, 2)
+	go func() {
+		_, err := svc.Install(context.Background(), firstPackage)
+		errs <- err
+	}()
+	<-barrier.firstSave
+	go func() {
+		_, err := svc.Install(context.Background(), secondPackage)
+		errs <- err
+	}()
+
+	secondCrossedBoundary := false
+	select {
+	case <-barrier.secondSave:
+		secondCrossedBoundary = true
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(barrier.releaseFirst)
+	firstErr, secondErr := <-errs, <-errs
+
+	if secondCrossedBoundary {
+		t.Error("second install persisted before the first catalog mutation completed")
+	}
+	if (firstErr == nil) == (secondErr == nil) {
+		t.Fatalf("install errors = %v, %v; want exactly one collision", firstErr, secondErr)
+	}
+}
+
 // newTestService wires a Service against a real FSStore rooted at a temp
 // plugins dir, a fresh Registry, and a fakeRuntime — mirroring what Provide
 // does, minus the real runtime.Manager.
@@ -325,6 +419,150 @@ func installTestPlugin(t *testing.T, svc *Service, id string) *store.Record {
 		t.Fatalf("Install(%q): %v", id, err)
 	}
 	return rec
+}
+
+func TestServiceRejectsActiveRepositoryProviderOwnerCollision(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	if _, err := svc.Install(t.Context(), testPackageWithRepositoryProvider(t, "kandev-plugin-first", "bitbucket")); err != nil {
+		t.Fatalf("install first provider owner: %v", err)
+	}
+
+	if _, err := svc.Install(t.Context(), testPackageWithRepositoryProvider(t, "kandev-plugin-second", "bitbucket")); err == nil {
+		t.Fatal("Install() expected active repository provider ownership collision, got nil")
+	}
+}
+
+func TestServiceRejectsNoncanonicalRepositoryProviderOwner(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	if _, err := svc.Install(t.Context(), testPackageWithRepositoryProvider(t, "kandev-plugin-first", "Bitbucket")); err == nil {
+		t.Fatal("Install() expected non-canonical repository provider rejection, got nil")
+	}
+}
+
+func TestServiceRejectsActiveReferenceSourceOwnerCollisionAndReleasesOnDisable(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	if _, err := svc.Install(t.Context(), testPackageWithReferenceSource(t, "kandev-plugin-first", "bitbucket.pull-requests")); err != nil {
+		t.Fatalf("install first reference source owner: %v", err)
+	}
+	if _, err := svc.Install(t.Context(), testPackageWithReferenceSource(t, "kandev-plugin-second", "bitbucket.pull-requests")); err == nil {
+		t.Fatal("Install() expected active reference source ownership collision, got nil")
+	}
+
+	if err := svc.Disable("kandev-plugin-first"); err != nil {
+		t.Fatalf("Disable first reference source owner: %v", err)
+	}
+	if _, err := svc.Install(t.Context(), testPackageWithReferenceSource(t, "kandev-plugin-second", "bitbucket.pull-requests")); err != nil {
+		t.Fatalf("install reference source after owner disable: %v", err)
+	}
+}
+
+func TestServiceRejectsActiveReferenceProviderKindOwnerCollision(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	if _, err := svc.Install(t.Context(), testPackageWithReferenceSourceDescriptor(t, "kandev-plugin-first", "bitbucket.pull-requests", "bitbucket", "pull_request")); err != nil {
+		t.Fatalf("install first reference owner: %v", err)
+	}
+
+	if _, err := svc.Install(t.Context(), testPackageWithReferenceSourceDescriptor(t, "kandev-plugin-second", "bitbucket.prs", "bitbucket", "pull_request")); err == nil {
+		t.Fatal("Install() expected active reference provider/kind ownership collision, got nil")
+	}
+
+	if err := svc.Disable("kandev-plugin-first"); err != nil {
+		t.Fatalf("Disable first reference provider/kind owner: %v", err)
+	}
+	if _, err := svc.Install(t.Context(), testPackageWithReferenceSourceDescriptor(t, "kandev-plugin-second", "bitbucket.prs", "bitbucket", "pull_request")); err != nil {
+		t.Fatalf("install reference provider/kind after owner disable: %v", err)
+	}
+}
+
+func TestServiceRejectsHostOwnedReferenceIdentity(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	svc.SetReservedReferenceIdentities([]ReferenceIdentity{{
+		Source: "github_pull_requests", Provider: "github", Kind: "pull_request",
+	}})
+
+	if _, err := svc.Install(t.Context(), testPackageWithReferenceSourceDescriptor(
+		t, "kandev-plugin-shadow", "github_pull_requests", "shadow", "pull_request",
+	)); err == nil || !strings.Contains(err.Error(), "owned by the host") {
+		t.Fatalf("Install() error = %v, want host-owned source collision", err)
+	}
+}
+
+func TestServiceDemotesPersistedHostOwnedReferenceCollision(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	if _, err := svc.Install(t.Context(), testPackageWithReferenceSourceDescriptor(
+		t, "kandev-plugin-shadow", "github_pull_requests", "github", "pull_request",
+	)); err != nil {
+		t.Fatalf("install pre-reservation plugin: %v", err)
+	}
+
+	svc.SetReservedReferenceIdentities([]ReferenceIdentity{{
+		Source: "github_pull_requests", Provider: "github", Kind: "pull_request",
+	}})
+	record, _ := svc.Get("kandev-plugin-shadow")
+	if record.Status != StatusError {
+		t.Fatalf("persisted collision status = %s, want %s", record.Status, StatusError)
+	}
+}
+
+func testPackageWithRepositoryProvider(t *testing.T, id, provider string) *bytes.Buffer {
+	return testPackageWithRepositoryProviderVersion(t, id, "1.0.0", provider)
+}
+
+func testPackageWithRepositoryProviderVersion(t *testing.T, id, version, provider string) *bytes.Buffer {
+	t.Helper()
+	platformKey := goruntime.GOOS + "-" + goruntime.GOARCH
+	manifestYAML := fmt.Sprintf(`
+id: %s
+api_version: 1
+version: %q
+display_name: Test Plugin
+repository_providers: [%s]
+runtime:
+  type: binary
+  executables:
+    %s: server/plugin
+`, id, version, provider, platformKey)
+	var buf bytes.Buffer
+	if err := pkgtartest.WritePackage(&buf, map[string][]byte{
+		"manifest.yaml": []byte(manifestYAML),
+		"server/plugin": []byte("#!/bin/sh\necho fake\n"),
+	}); err != nil {
+		t.Fatalf("WritePackage: %v", err)
+	}
+	return &buf
+}
+
+func testPackageWithReferenceSource(t *testing.T, id, source string) *bytes.Buffer {
+	return testPackageWithReferenceSourceDescriptor(t, id, source, "bitbucket", "pull_request")
+}
+
+func testPackageWithReferenceSourceDescriptor(t *testing.T, id, source, provider, kind string) *bytes.Buffer {
+	t.Helper()
+	platformKey := goruntime.GOOS + "-" + goruntime.GOARCH
+	manifestYAML := fmt.Sprintf(`
+id: %s
+api_version: 1
+version: "1.0.0"
+display_name: Test Plugin
+reference_sources:
+  - source: %s
+    provider: %s
+    kind: %s
+    display_name: Bitbucket
+    kind_label: Pull request
+runtime:
+  type: binary
+  executables:
+    %s: server/plugin
+`, id, source, provider, kind, platformKey)
+	var buf bytes.Buffer
+	if err := pkgtartest.WritePackage(&buf, map[string][]byte{
+		"manifest.yaml": []byte(manifestYAML),
+		"server/plugin": []byte("#!/bin/sh\necho fake\n"),
+	}); err != nil {
+		t.Fatalf("WritePackage: %v", err)
+	}
+	return &buf
 }
 
 func TestServiceListReturnsInstalledPlugins(t *testing.T) {
@@ -571,6 +809,51 @@ func TestServiceDisableFromActiveStopsRuntime(t *testing.T) {
 	}
 }
 
+func TestServiceRevokesDeclaredProviderLeasesWhenPluginBecomesInactive(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	if _, err := svc.Install(t.Context(), testPackageWithRepositoryProvider(t, "kandev-plugin-bitbucket", "bitbucket")); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	var revoked []string
+	svc.SetGitCredentialLeaseRevoker(func(providerID string) {
+		revoked = append(revoked, providerID)
+	})
+
+	if err := svc.Disable("kandev-plugin-bitbucket"); err != nil {
+		t.Fatalf("Disable: %v", err)
+	}
+	if got, want := revoked, []string{"bitbucket"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("revoked provider leases = %#v, want %#v", got, want)
+	}
+
+	if err := svc.Uninstall(t.Context(), "kandev-plugin-bitbucket"); err != nil {
+		t.Fatalf("Uninstall: %v", err)
+	}
+	if got, want := revoked, []string{"bitbucket", "bitbucket"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("revoked provider leases after uninstall = %#v, want %#v", got, want)
+	}
+}
+
+func TestServiceRevokesProviderLeasesBeforeReplacingActivePlugin(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	if _, err := svc.Install(t.Context(), testPackageWithRepositoryProviderVersion(t, "kandev-plugin-bitbucket", "1.0.0", "bitbucket")); err != nil {
+		t.Fatalf("install initial plugin: %v", err)
+	}
+
+	var revoked []string
+	svc.SetGitCredentialLeaseRevoker(func(providerID string) {
+		revoked = append(revoked, providerID)
+	})
+
+	if _, err := svc.Install(t.Context(), testPackageWithRepositoryProviderVersion(t, "kandev-plugin-bitbucket", "1.1.0", "bitbucket")); err != nil {
+		t.Fatalf("upgrade plugin: %v", err)
+	}
+	if got, want := revoked, []string{"bitbucket"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("revoked provider leases during active upgrade = %#v, want %#v", got, want)
+	}
+}
+
 func TestServiceDisableIsIdempotentWhenAlreadyDisabled(t *testing.T) {
 	svc, _, _ := newTestService(t)
 	installTestPlugin(t, svc, "kandev-plugin-slack")
@@ -748,6 +1031,94 @@ func TestServiceEnable_ConcurrentCallsForSameID_OnlyOneActivationNoError(t *test
 	}
 	if rec.Status != StatusActive {
 		t.Fatalf("Status = %q, want %q", rec.Status, StatusActive)
+	}
+}
+
+func TestServiceEnableConcurrentProviderOwnersActivatesOnlyOne(t *testing.T) {
+	svc, _, rt := newTestService(t)
+	if _, err := svc.Install(t.Context(), testPackageWithRepositoryProvider(t, "kandev-plugin-first", "bitbucket")); err != nil {
+		t.Fatalf("install first: %v", err)
+	}
+	if err := svc.Disable("kandev-plugin-first"); err != nil {
+		t.Fatalf("disable first: %v", err)
+	}
+	if _, err := svc.Install(t.Context(), testPackageWithRepositoryProvider(t, "kandev-plugin-second", "bitbucket")); err != nil {
+		t.Fatalf("install second: %v", err)
+	}
+	if err := svc.Disable("kandev-plugin-second"); err != nil {
+		t.Fatalf("disable second: %v", err)
+	}
+
+	started, release := rt.blockNextStart()
+	firstResult := make(chan error, 1)
+	secondResult := make(chan error, 1)
+	go func() { firstResult <- svc.Enable("kandev-plugin-first") }()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first provider owner did not reach runtime start")
+	}
+	go func() { secondResult <- svc.Enable("kandev-plugin-second") }()
+	select {
+	case err := <-secondResult:
+		t.Fatalf("competing owner completed before reservation released: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	release()
+
+	if err := <-firstResult; err != nil {
+		t.Fatalf("first owner activation: %v", err)
+	}
+	if err := <-secondResult; err == nil || !strings.Contains(err.Error(), "already owned") {
+		t.Fatalf("second owner activation error = %v, want ownership collision", err)
+	}
+	first, _ := svc.Get("kandev-plugin-first")
+	second, _ := svc.Get("kandev-plugin-second")
+	if first.Status != StatusActive || second.Status == StatusActive {
+		t.Fatalf("statuses = first:%s second:%s, want exactly first active", first.Status, second.Status)
+	}
+}
+
+func TestServiceDispatchLeaseBlocksDisableUntilRequestCompletes(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	record := installTestPlugin(t, svc, "kandev-plugin-actions")
+	_, release, err := svc.beginPluginDispatch(record.ID, dispatchGeneration(record))
+	if err != nil {
+		t.Fatalf("begin dispatch: %v", err)
+	}
+
+	disabled := make(chan error, 1)
+	go func() { disabled <- svc.Disable(record.ID) }()
+	select {
+	case err := <-disabled:
+		t.Fatalf("Disable completed while dispatch lease was active: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	release()
+	select {
+	case err := <-disabled:
+		if err != nil {
+			t.Fatalf("Disable after dispatch release: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Disable remained blocked after dispatch release")
+	}
+}
+
+func TestServiceRecoveryCannotReclaimOwnedProvider(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	if _, err := svc.Install(t.Context(), testPackageWithRepositoryProvider(t, "kandev-plugin-recovering", "bitbucket")); err != nil {
+		t.Fatalf("install recovering plugin: %v", err)
+	}
+	svc.handleStatusChange("kandev-plugin-recovering", false, errors.New("health check failed"))
+	if _, err := svc.Install(t.Context(), testPackageWithRepositoryProvider(t, "kandev-plugin-owner", "bitbucket")); err != nil {
+		t.Fatalf("install replacement owner: %v", err)
+	}
+
+	svc.handleStatusChange("kandev-plugin-recovering", true, nil)
+	recovering, _ := svc.Get("kandev-plugin-recovering")
+	if recovering.Status == StatusActive {
+		t.Fatal("health recovery reclaimed a provider already owned by another active plugin")
 	}
 }
 

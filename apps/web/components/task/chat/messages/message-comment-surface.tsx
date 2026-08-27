@@ -430,6 +430,7 @@ function useMessageCommentActions({
   rootRef: RefObject<HTMLDivElement | null>;
   close: () => void;
 }) {
+  const { t } = useTranslation();
   const addComment = useCommentsStore((state) => state.addComment);
   const updateComment = useCommentsStore((state) => state.updateComment);
   const removeComment = useCommentsStore((state) => state.removeComment);
@@ -449,7 +450,7 @@ function useMessageCommentActions({
       const renderedText = rootRef.current?.textContent ?? "";
       const comment = commentFromTarget(message, sessionId, target, renderedText, feedback);
       if (!comment) {
-        setSaveError("The agent response changed. Select the text again.");
+        setSaveError(t("task:agentResponseChangedSelectAgain"));
         return null;
       }
       setSaveError(null);

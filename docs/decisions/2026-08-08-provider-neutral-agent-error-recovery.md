@@ -1,8 +1,26 @@
 # ADR-2026-08-08-provider-neutral-agent-error-recovery: Separate Agent Error Evidence From Recovery Policy
 
-**Status:** accepted
+**Status:** accepted (amended 2026-08-13 and 2026-08-17)
 **Date:** 2026-08-08
 **Area:** backend, frontend, protocol
+
+## Amendment (2026-08-13)
+
+[ADR-2026-08-13-dynamic-agent-profile-routing](2026-08-13-dynamic-agent-profile-routing.md)
+changes which boundary selects recovery policy. Concrete profiles use the
+interactive same-profile policy. Dynamic profiles use configured routing and
+durable shared health in either Kanban or Office. References below to “Kanban
+interactive” mean a concrete-profile session; references to “Office unattended
+routing” mean a dynamic-profile session. The provider-neutral evidence and
+classification contracts remain unchanged.
+
+## Amendment (2026-08-17)
+
+[ADR-2026-08-17-provider-error-classes-and-policies](2026-08-17-provider-error-classes-and-policies.md)
+retains the provider-neutral evidence and semantic-code boundary. It replaces
+workspace-specific provider allow-lists with shared `transient` and `hard`
+policy classes, versioned per-candidate policies, and a common durable policy
+evaluator. Unknown or effect-unsafe failures still fail closed.
 
 ## Context
 
@@ -70,6 +88,7 @@ The initial policies are:
 | Semantic cause | Kanban interactive policy | Office unattended policy |
 | --- | --- | --- |
 | `network_unavailable`, `provider_overloaded`, `provider_unavailable`, `model_capacity` | Short same-profile retry when high-confidence and replay-safe | Retry the same route for a few seconds; only degrade and fall through after the short budget is exhausted |
+| `agent_transport_lost` | Short same-profile retry when high-confidence (the ACP wire-level transport-death signature) | Launch path: short same-profile retry (3 attempts), then routing gives up on the candidate without degrading the provider, since the resume token is provider-specific and fallback is not allowed. Post-start path: the routing handler declines to act (fallback disallowed short-circuits before the retry check), so a mid-turn transport loss is not retried or parked by Office routing |
 | `rate_limited` | Retry only a confirmed short throttle; honor a bounded retry hint | Retry the same route when a validated wait is at most 60 seconds; otherwise treat it as a long-horizon route block and fall through |
 | `quota_limited` | Show reset/remediation information; no automatic prompt replay | Fall through to the next configured provider; if all routes are exhausted, park until a validated reset or the Office quota backoff |
 | `auth_required`, `missing_credentials`, `subscription_required`, `model_unavailable`, `provider_not_configured` | User action; no automatic retry or route change | Mark the failed route user-action-required and try another configured route; if none works, block and surface inbox/settings remediation without a timed retry for that route |

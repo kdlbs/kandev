@@ -1,7 +1,6 @@
 package statussummary
 
 import (
-	"strconv"
 	"strings"
 	"time"
 )
@@ -36,6 +35,7 @@ type PullRequestInput struct {
 	ReviewState           string
 	ChecksState           string
 	MergeableState        string
+	MergeQueueState       string
 	UnresolvedReviewCount int
 	PendingReviewCount    int
 	RequiredReviews       int
@@ -49,8 +49,10 @@ type PullRequestInput struct {
 // does not masquerade as an authoritative empty value.
 type RebuildInput struct {
 	Sessions         []RebuildSession
+	TaskError        *ActiveErrorSummary
 	PendingActions   map[string]string
 	ActivityObserved bool
+	LastActivityAt   *time.Time
 	Git              []RebuildGit
 	GitObserved      bool
 	PullRequests     []PullRequestInput
@@ -97,6 +99,10 @@ func BuildFromAuthoritative(input RebuildInput) TaskStatusSummary {
 			}
 		}
 	}
+	if taskError := normalizeRebuildError(input.TaskError, input.Now); taskError != nil {
+		state.taskError = taskError
+		state.taskErrorObserved = true
+	}
 	for sessionID, action := range input.PendingActions {
 		if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(action) == "" {
 			continue
@@ -111,33 +117,14 @@ func BuildFromAuthoritative(input RebuildInput) TaskStatusSummary {
 		}
 		state.git[repository] = git.Summary
 	}
-	for index, pullRequest := range input.PullRequests {
-		key := strings.TrimSpace(pullRequest.Key)
-		if key == "" {
-			key = strings.TrimSpace(pullRequest.URL)
-		}
-		if key == "" && pullRequest.Number > 0 {
-			key = strconv.Itoa(pullRequest.Number)
-		}
-		if key == "" {
-			key = strconv.Itoa(index)
-		}
-		state.prs[key] = pullRequestObservation{
-			state:                 pullRequest.State,
-			number:                maxInt(pullRequest.Number, 0),
-			url:                   pullRequest.URL,
-			reviewState:           pullRequest.ReviewState,
-			checksState:           pullRequest.ChecksState,
-			mergeableState:        pullRequest.MergeableState,
-			unresolvedReviewCount: maxInt(pullRequest.UnresolvedReviewCount, 0),
-			pendingReviewCount:    maxInt(pullRequest.PendingReviewCount, 0),
-			requiredReviews:       maxInt(pullRequest.RequiredReviews, 0),
-			checksTotal:           maxInt(pullRequest.ChecksTotal, 0),
-			checksPassing:         maxInt(pullRequest.ChecksPassing, 0),
-		}
-	}
+	applyPullRequestInputs(state, input.PullRequests)
 	state.queuedCount = maxInt(input.QueuedPromptCount, 0)
-	return deriveSummary(state)
+	summary := deriveSummary(state)
+	if input.LastActivityAt != nil {
+		lastActivityAt := input.LastActivityAt.UTC()
+		summary.LastActivityAt = &lastActivityAt
+	}
+	return summary
 }
 
 func normalizeRebuildError(input *ActiveErrorSummary, now time.Time) *ActiveErrorSummary {
@@ -149,6 +136,10 @@ func normalizeRebuildError(input *ActiveErrorSummary, now time.Time) *ActiveErro
 		copy.OccurredAt = now.UTC()
 	}
 	copy.Preview = truncateString(copy.Preview, MaxActiveErrorPreviewBytes)
+	copy.SessionID = truncateString(copy.SessionID, maxSessionIDBytes)
+	copy.TaskRepositoryID = truncateString(copy.TaskRepositoryID, maxTaskRepositoryIDBytes)
+	copy.Category = truncateString(copy.Category, maxActiveErrorCategoryBytes)
+	copy.RecoveryActions = normalizeRecoveryActions(copy.RecoveryActions)
 	if copy.Stamp == "" {
 		copy.Stamp = copy.OccurredAt.UTC().Format(time.RFC3339Nano) + ":" + copy.Preview
 	}

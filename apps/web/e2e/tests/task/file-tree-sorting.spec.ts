@@ -6,6 +6,28 @@ import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
 
+async function waitForWorkspace(testPage: Page, session: SessionPage): Promise<void> {
+  try {
+    await session.waitForChatIdle({ timeout: 30_000 });
+    return;
+  } catch (error) {
+    // Workspace setup can fail before the mock agent becomes interactive. Use
+    // the same recovery path available to a user, then keep the test bounded.
+    const freshButton = session.recoveryFreshButton();
+    try {
+      await expect(freshButton).toBeVisible({ timeout: 2_000 });
+    } catch {
+      throw error;
+    }
+
+    await freshButton.click();
+    const preparing = testPage.getByPlaceholder("Preparing workspace...");
+    await expect(preparing).toBeVisible({ timeout: 30_000 });
+    await expect(preparing).not.toBeVisible({ timeout: 60_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
+  }
+}
+
 async function seedSimpleTask(
   testPage: Page,
   apiClient: ApiClient,
@@ -28,7 +50,7 @@ async function seedSimpleTask(
 
   const session = new SessionPage(testPage);
   await session.waitForLoad();
-  await session.waitForChatIdle({ timeout: 30_000 });
+  await waitForWorkspace(testPage, session);
 
   return session;
 }
@@ -42,6 +64,8 @@ test.describe("File tree sorting", () => {
     seedData,
     backend,
   }) => {
+    test.setTimeout(120_000);
+
     // Seed a nested folder containing a mix of dirs (incl. a dot-dir) and files
     // (incl. dotfiles). If the sort is wrong, dotfiles will appear above .vscode.
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");

@@ -1,7 +1,16 @@
 import type React from "react";
-import type { LocalRepository, Repository, Executor, Task } from "@/lib/types/http";
+import type {
+  LocalRepository,
+  Repository,
+  RepositorySet,
+  Executor,
+  Task,
+  CreateTaskResponse,
+} from "@/lib/types/http";
+import type { createTask } from "@/lib/api";
 import type { UseBranchesByURLResult } from "@/hooks/domains/github/use-branches-by-url";
 import type { UsePRInfoByURLResult } from "@/hooks/domains/github/use-pr-info-by-url";
+import type { RepositoryInspection } from "@/lib/plugins/types";
 import type { UtilityGenerationResult } from "@/hooks/use-utility-agent-generator";
 import type { AgentProfileOption, WorkspaceState } from "@/lib/state/slices";
 import type {
@@ -18,6 +27,61 @@ import type {
   useExecutorProfileOptions,
 } from "@/components/task-create-dialog-options";
 import type { useToast } from "@/components/toast-provider";
+
+export type TaskCreateSubmit = (
+  payload: Parameters<typeof createTask>[0],
+) => Promise<CreateTaskResponse>;
+
+export interface TaskCreateDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  mode?: "create" | "edit" | "session";
+  workspaceId: string | null;
+  workflowId: string | null;
+  defaultStepId: string | null;
+  steps: Array<{
+    id: string;
+    title: string;
+    events?: {
+      on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
+      on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
+    };
+  }>;
+  editingTask?: {
+    id: string;
+    title: string;
+    description?: string;
+    workflowStepId: string;
+    state?: Task["state"];
+    repositoryId?: string;
+    repositories?: TaskRepositorySnapshot[];
+  } | null;
+  onSuccess?: (
+    task: Task,
+    mode: "create" | "edit",
+    meta?: { taskSessionId?: string | null; willNavigate?: boolean },
+  ) => void;
+  onCreateSession?: (data: {
+    prompt: string;
+    agentProfileId: string;
+    executorId: string;
+    attachments?: ReturnType<
+      typeof import("@/components/task-create-dialog-helpers").toMessageAttachments
+    >;
+  }) => void;
+  /** Optional trusted create-mode transport; edit and session modes ignore it. */
+  createTask?: TaskCreateSubmit;
+  initialValues?: TaskCreateDialogInitialValues;
+  taskId?: string | null;
+  parentTaskId?: string;
+  lockedFields?: { repository?: boolean; branch?: boolean; workflow?: boolean };
+  transformDescriptionBeforeSubmit?: (description: string) => Promise<string> | string;
+  descriptionPlaceholder?: string;
+  aboveDescriptionSlot?: React.ReactNode;
+  extraFormSlot?: React.ReactNode;
+  bottomSlot?: React.ReactNode;
+  submitBlockedReason?: string | null;
+}
 
 export type DialogPromptEnhance = {
   onEnhance: () => void;
@@ -46,6 +110,26 @@ export type TaskRepoRow = {
   /** On-machine repo path, when the user picked from discovered repos. */
   localPath?: string;
   branch: string;
+  /** Saved repository policy selected for this row. */
+  branchPolicyId?: string;
+};
+
+/** Repository fields needed to rehydrate an edit form without losing a policy snapshot. */
+export type TaskRepositorySnapshot = {
+  repository_id: string;
+  base_branch?: string;
+  id?: string;
+  task_id?: string;
+  checkout_branch?: string;
+  branch_policy_id?: string;
+  branch_policy_name?: string;
+  branch_policy_base_branch?: string;
+  branch_policy_branch_template?: string;
+  branch_policy_pull_request_target?: string;
+  position?: number;
+  metadata?: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
 };
 
 /**
@@ -56,13 +140,17 @@ export type TaskRepoRow = {
 export type TaskRemoteRepoRow = {
   key: string; // stable client-side React key
   url: string; // canonical https://… or paste-as-typed
+  /** Exact credential-free clone URL returned by provider URL inspection. */
+  remoteUrl?: string;
   branch: string;
   source: "picker" | "paste";
   prNumber?: number;
   prBaseBranch?: string;
   prHeadBranch?: string;
   // Optional metadata when source === "picker":
-  provider?: "github" | "gitlab" | "azure_devops";
+  provider?: string;
+  providerHost?: string;
+  providerScope?: string;
   providerRepoId?: string;
   providerOwner?: string;
   providerName?: string;
@@ -85,14 +173,19 @@ export type StepType = {
 export type TaskCreateDialogInitialValues = {
   title: string;
   description?: string;
+  /** Existing task repository rows, including immutable policy snapshots. */
+  repositories?: TaskRepositorySnapshot[];
   repositoryId?: string;
   branch?: string;
   /** Existing remote branch to check out directly in the worktree (e.g. a PR's head branch),
    * instead of creating a new branch off `branch`. */
   checkoutBranch?: string;
   state?: Task["state"];
-  /** When set, opens the dialog in GitHub URL mode pre-filled with this value
-   * (e.g. "github.com/owner/repo"). Used when no matching workspace repo exists. */
+  /** Provider-neutral remote URL used to seed remote mode. */
+  remoteUrl?: string;
+  /** Already-authorized provider descriptor; avoids an async inspection race on submit. */
+  remoteRepository?: RepositoryInspection;
+  /** @deprecated Use remoteUrl. Kept for GitHub launch callers during migration. */
   githubUrl?: string;
   prNumber?: number;
   prBaseBranch?: string;
@@ -235,6 +328,9 @@ export type TaskFormInputsHandle = {
 };
 
 export type DialogFormState = {
+  /** Predecessor task IDs chosen in the dialog's "Depends on" selector. */
+  blockedBy: string[];
+  setBlockedBy: (v: string[]) => void;
   taskName: string;
   setTaskName: (v: string) => void;
   hasTitle: boolean;
@@ -256,7 +352,10 @@ export type DialogFormState = {
    * order is the position the backend sees. There is no "primary" concept.
    */
   repositories: TaskRepoRow[];
+  /** False while rows are hydrated from an existing task; true after user edits. */
+  repositoriesDirty: boolean;
   setRepositories: React.Dispatch<React.SetStateAction<TaskRepoRow[]>>;
+  setRepositoriesDirty: (dirty: boolean) => void;
   addRepository: () => void;
   removeRepository: (key: string) => void;
   updateRepository: (key: string, patch: Partial<TaskRepoRow>) => void;
@@ -327,6 +426,9 @@ export type DialogFormState = {
   /** Optional host folder for repo-less tasks; empty means scratch workspace. */
   workspacePath: string;
   setWorkspacePath: (v: string) => void;
+  /** Create-mode opt-in. Autopilot is immutable after task creation. */
+  autopilot: boolean;
+  setAutopilot: (v: boolean) => void;
 };
 
 export type SubmitHandlersDeps = {
@@ -334,14 +436,17 @@ export type SubmitHandlersDeps = {
   isEditMode: boolean;
   /** Create-mode opt-in: derive a provisional title from the prompt. */
   autoTitle?: boolean;
+  /** Create-mode opt-in. The backend fixes this value at task creation. */
+  autopilot: boolean;
   isPassthroughProfile: boolean;
   taskName: string;
   workspaceId: string | null;
   workflowId: string | null;
   effectiveWorkflowId: string | null;
-  effectiveDefaultStepId: string | null;
   /** Unified repo list from the form. Empty when in GitHub URL mode. */
   repositories: TaskRepoRow[];
+  /** Whether the user explicitly changed repository selections in this form. */
+  repositoriesDirty: boolean;
   /** All on-machine discovered repos — used to look up `default_branch` for `localPath` rows. */
   discoveredRepositories: LocalRepository[];
   /** Workspace repositories — used to look up `default_branch` for `repositoryId` rows. */
@@ -366,6 +471,7 @@ export type SubmitHandlersDeps = {
     workflowStepId: string;
     state?: Task["state"];
     repositoryId?: string;
+    repositories?: TaskRepositorySnapshot[];
   } | null;
   onSuccess?: (
     task: Task,
@@ -381,6 +487,10 @@ export type SubmitHandlersDeps = {
     >;
   }) => void;
   onOpenChange: (open: boolean) => void;
+  /** Create-mode transport override. Omitted to use Kandev's REST task endpoint. */
+  createTask?: TaskCreateSubmit;
+  /** Refreshes selected branch-policy options after a stale task submission. */
+  refreshBranchPolicies?: () => Promise<void>;
   preserveTaskCreateLastUsedOnClose?: () => void;
   taskId: string | null;
   parentTaskId?: string;
@@ -403,6 +513,8 @@ export type SubmitHandlersDeps = {
   repositoryLocalPath: string;
   /** When true, the task is created with no repositories (repo-less mode). */
   noRepository: boolean;
+  /** Predecessor task IDs to link at creation time. */
+  blockedBy?: string[];
   /** Optional host folder for repo-less tasks; empty means kandev creates a scratch workspace. */
   workspacePath: string;
   /**
@@ -453,6 +565,7 @@ export type DialogFormBodyProps = {
   onTaskNameChange: (v: string) => void;
   onRowRepositoryChange: (key: string, value: string) => void;
   onRowBranchChange: (key: string, value: string) => void;
+  onRowPolicyChange?: (key: string, policyId: string, baseBranch: string) => void;
   onAgentProfileChange: (v: string) => void;
   onExecutorProfileChange: (v: string) => void;
   onWorkflowChange: (v: string) => void;
@@ -460,6 +573,22 @@ export type DialogFormBodyProps = {
   onToggleFreshBranch: (enabled: boolean) => void;
   onToggleNoRepository?: () => void;
   onWorkspacePathChange: (value: string) => void;
+  /** Repository sets available in this workspace, and how to apply or define one. */
+  repositorySets?: {
+    sets: RepositorySet[];
+    onApply: (set: RepositorySet) => void;
+    /**
+     * Present when the current selection can be saved as a new set. Null when
+     * there is no workspace-repository row to save, so the action is never a
+     * dead end.
+     */
+    save?: {
+      workspaceId: string;
+      rows: TaskRepoRow[];
+      open: boolean;
+      setOpen: (open: boolean) => void;
+    } | null;
+  };
   localRepositoryCreation?: {
     executorSelection:
       | import("@/components/task-create-dialog-handlers").DirectLocalExecutorSelection
@@ -495,10 +624,10 @@ export type DialogFormBodyProps = {
   /** When true, hides the workflow picker so the enforced workflow can't be swapped. */
   workflowLocked?: boolean;
   /**
-   * Called by the voice-input button after a non-empty transcript is inserted
-   * into the description when the user has voice auto-send enabled. The dialog
+   * Called by a plugin composer action after it inserted text into the
+   * description and wants the form submitted the native way. The dialog
    * routes this to a programmatic form submit so dictation can create the task
    * hands-free.
    */
-  onVoiceAutoSend?: () => void;
+  onComposerSubmit?: () => boolean | Promise<boolean>;
 };

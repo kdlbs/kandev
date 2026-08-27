@@ -4,12 +4,14 @@ import { useTranslation } from "react-i18next";
 import { useRouter } from "@/lib/routing/client-router";
 import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
-import { IconPlus, IconBolt } from "@tabler/icons-react";
+import { IconPlus } from "@tabler/icons-react";
 import { toast } from "@/lib/toast/sonner";
 import { useAutomations } from "@/hooks/domains/settings/use-automations";
 import { AutomationsTable } from "./automations-table";
 import { AutomationBoardMoveNotice } from "./board-move-notice";
+import { AutomationsExportButton } from "./automations-export-button";
 import { useAutomationEnabledDrafts } from "./use-automation-enabled-drafts";
+import { WorkspaceSectionHeader } from "@/components/settings/workspaces/workspace-section-header";
 
 type AutomationsListPageProps = {
   workspaceId: string;
@@ -47,23 +49,25 @@ export function AutomationsListPage({ workspaceId }: AutomationsListPageProps) {
 
   return (
     <div className="space-y-6" data-testid="automations-list-page">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold flex items-center gap-2">
-            <IconBolt className="h-5 w-5" />
-            {t("common:automations")}
-          </h2>
-          <p className="text-sm text-muted-foreground">{t("automations:listDescription")}</p>
-        </div>
-        <Button
-          data-testid="new-automation-button"
-          className="cursor-pointer"
-          onClick={() => router.push(`/settings/workspace/${workspaceId}/automations/new`)}
-        >
-          <IconPlus className="h-4 w-4 mr-1" />
-          {t("automations:newAutomation")}
-        </Button>
-      </div>
+      <WorkspaceSectionHeader
+        tab="automations"
+        description={t("automations:listDescription")}
+        action={
+          <div className="flex items-center gap-2">
+            <AutomationsExportButton workspaceId={workspaceId} />
+            <Button
+              type="button"
+              size="sm"
+              data-testid="new-automation-button"
+              className="min-h-11 cursor-pointer md:min-h-7"
+              onClick={() => router.push(`/settings/workspaces/${workspaceId}/automations/new`)}
+            >
+              <IconPlus className="h-4 w-4 mr-2" />
+              {t("automations:newAutomation")}
+            </Button>
+          </div>
+        }
+      />
       <Separator />
       {/* Above the table on purpose: it explains why the table's automations
           stopped showing up where the reader last saw them, so it has to be

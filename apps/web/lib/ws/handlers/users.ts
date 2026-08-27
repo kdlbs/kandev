@@ -5,16 +5,24 @@ import type { WsHandlers } from "@/lib/ws/handlers/types";
 import { mapUserSettingsData } from "@/lib/ssr/user-settings";
 import { fromApiSidebarDraft, fromApiSidebarView } from "@/lib/state/slices/ui/sidebar-view-wire";
 import { migrateSidebarViewDraft, migrateView } from "@/lib/state/slices/ui/ui-slice";
+import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
 
 export function registerUsersHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     "user.settings.updated": (message) => {
-      store.setState((state) => ({
-        ...state,
-        sidebarViews: buildSidebarViewsState(state, message.payload),
-        sidebarTaskPrefs: buildSidebarTaskPrefsState(state, message.payload),
-        userSettings: buildUserSettingsState(state, message.payload),
-      }));
+      store.setState((state) => {
+        const order = compareUserSettingsRevisions(
+          message.payload.revision,
+          state.userSettings.revision,
+        );
+        if (order !== null && order <= 0) return state;
+        return {
+          ...state,
+          sidebarViews: buildSidebarViewsState(state, message.payload),
+          sidebarTaskPrefs: buildSidebarTaskPrefsState(state, message.payload),
+          userSettings: buildUserSettingsState(state, message.payload),
+        };
+      });
     },
   };
 }

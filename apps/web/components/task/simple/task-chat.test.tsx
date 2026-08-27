@@ -8,6 +8,7 @@ import type {
   TaskSession,
   TimelineEvent,
 } from "@/app/office/tasks/[id]/types";
+import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 
 // Stub out everything that would otherwise drag the WS layer / portals into
 // the test runtime. We assert merge/order, "Show older sessions", and that
@@ -549,6 +550,7 @@ describe("TaskChat user comment run badge", () => {
   });
 });
 
+// eslint-disable-next-line max-lines-per-function -- the grouped chat failure cases share one fixture.
 describe("TaskChat run error entries", () => {
   function failedSession(
     id: string,
@@ -592,6 +594,29 @@ describe("TaskChat run error entries", () => {
     expect(screen.getByTestId("run-error-raw-payload").textContent).toContain("Internal error");
   });
 
+  it("renders the managed npm recovery entry with one touch-safe action", () => {
+    const sessions: TaskSession[] = [
+      failedSession("s-npm", "agent-npm", "2026-05-01T11:30:00Z", "runtime failed"),
+    ];
+    sessions[0].metadata = {
+      last_agent_error: {
+        message: "managed npm runtime failed to prepare",
+        code: "managed_runtime_npm_resolution",
+        details: "npm error code ETARGET",
+      },
+    };
+    render(wrap(<TaskChat taskId="task-1" comments={[]} sessions={sessions} />));
+
+    expect(screen.getByTestId("run-error-managed-runtime-npm-recovery")).toBeTruthy();
+    expect(screen.getByText(/npm could not prepare the runtime/i)).toBeTruthy();
+    expect(screen.getByTestId("run-error-managed-runtime-retry-button")).toBeTruthy();
+    expect(screen.getByTestId("run-error-managed-runtime-retry-button").className).toContain(
+      "min-h-11",
+    );
+    expect(screen.queryByTestId("run-error-resume-button")).toBeNull();
+    expect(screen.queryByTestId("run-error-fresh-button")).toBeNull();
+  });
+
   it("does not render an error entry for non-FAILED sessions", () => {
     const sessions: TaskSession[] = [
       {
@@ -608,5 +633,68 @@ describe("TaskChat run error entries", () => {
     render(wrap(<TaskChat taskId="task-1" comments={[]} sessions={sessions} />));
     expect(screen.queryByText(/agent stopped with an error/i)).toBeNull();
     expect(screen.queryByTestId("run-error-raw-payload")).toBeNull();
+  });
+
+  it("renders a task-owned launch error before the empty state", () => {
+    const statusSummary: TaskStatusSummary = {
+      revision: 3,
+      updated_at: T_11,
+      active_error: {
+        stamp: "task-stamp-1",
+        occurred_at: T_11,
+        preview: "Choose a base branch",
+        category: "base_branch_missing",
+        recovery_actions: ["pick_base_branch"],
+      },
+    };
+    render(
+      wrap(
+        <TaskChat
+          taskId="task-1"
+          workspaceId="workspace-1"
+          comments={[]}
+          sessions={[]}
+          statusSummary={statusSummary}
+        />,
+      ),
+    );
+    expect(screen.getByTestId("task-launch-error-entry")).toBeTruthy();
+    expect(screen.getByText(/choose a base branch/i)).toBeTruthy();
+    expect(screen.getByText(/no comments yet/i)).toBeTruthy();
+  });
+
+  it("does not duplicate a summary error when its failed session is rendered", () => {
+    const sessions = [failedSession("s-typed", "agent-typed", T_11, "raw payload")];
+    sessions[0].metadata = {
+      last_agent_error: {
+        message: "The selected base branch is unavailable.",
+        code: "base_branch_missing",
+        recovery_actions: ["retry_default"],
+        stamp: "session-stamp-1",
+      },
+    };
+    render(
+      wrap(
+        <TaskChat
+          taskId="task-1"
+          workspaceId="workspace-1"
+          comments={[]}
+          sessions={sessions}
+          statusSummary={{
+            revision: 4,
+            updated_at: T_11,
+            active_error: {
+              session_id: "s-typed",
+              stamp: "session-stamp-1",
+              occurred_at: T_11,
+              preview: "The selected base branch is unavailable.",
+              category: "base_branch_missing",
+              recovery_actions: ["retry_default"],
+            },
+          }}
+        />,
+      ),
+    );
+    expect(screen.getAllByTestId("task-launch-error-entry")).toHaveLength(1);
   });
 });

@@ -9,7 +9,7 @@
 Kandev ships a single binary (npm/Homebrew/GitHub release) plus its Next.js web app from one repo. Two related problems were driving scope every time we cut a release:
 
 1. **In-progress features leak into production.** Large multi-PR work (Office, ADR-0004, ADR-0005) stays in `main` for weeks before it is user-ready. Releasing in the middle exposes half-finished surfaces to users.
-2. **Dev / e2e configuration is scattered.** `KANDEV_MOCK_AGENT`, `KANDEV_DEBUG_DEV_MODE`, `KANDEV_FEATURES_OFFICE`, `AGENTCTL_AUTO_APPROVE_PERMISSIONS`, `KANDEV_PLAN_COALESCE_WINDOW_MS`, etc. live as hardcoded literals in `apps/cli/src/dev.ts` and `apps/web/e2e/fixtures/backend.ts`. To answer "what does e2e mode actually set?" a contributor has to grep both files. Knobs drift between dev and e2e for no reason other than "nobody updated both places."
+2. **Dev / e2e configuration is scattered.** `KANDEV_MOCK_AGENT`, `KANDEV_DEBUG_DEV_MODE`, `KANDEV_FEATURES_OFFICE`, `AGENTCTL_AUTO_APPROVE_PERMISSIONS`, `KANDEV_PLAN_COALESCE_WINDOW_MS`, etc. live as hardcoded literals in the Go dev launcher (`apps/backend/internal/launcher/dev.go`) and `apps/web/e2e/fixtures/backend.ts`. To answer "what does e2e mode actually set?" a contributor has to grep both files. Knobs drift between dev and e2e for no reason other than "nobody updated both places."
 
 We needed:
 
@@ -57,8 +57,14 @@ Top-level sections are purely for human readability (the loader walks every leaf
 | signal | profile | who sets it |
 |---|---|---|
 | `KANDEV_E2E_MOCK=true` | `e2e` | `apps/web/e2e/fixtures/backend.ts` |
-| `KANDEV_DEBUG_DEV_MODE=true` (or `…_PPROF_ENABLED=true`) | `dev` | `apps/cli/src/dev.ts` |
+| `KANDEV_DEBUG_DEV_MODE=true` | `dev` | `apps/backend/internal/launcher/dev.go` |
 | (neither) | `prod` | the default for any other launch |
+
+`KANDEV_DEBUG_PPROF_ENABLED` is a legacy debug behavior variable. It enables
+pprof when a launcher sets it, but it does not select the `dev` profile. This
+keeps `make start-debug` on the production profile while it retains debug
+diagnostics; that launcher supplies the explicit `Debug` title prefix. See
+[ADR-2026-08-10-debug-launcher-profile-selection](2026-08-10-debug-launcher-profile-selection.md).
 
 `profiles.ApplyProfile()` then walks every leaf and calls `os.Setenv` **only when the var is not already set** and **only when the resolved value is non-empty**. Empty means "leave unset."
 
@@ -85,11 +91,11 @@ A self-hoster setting `KANDEV_FEATURES_OFFICE=true` in their k8s manifest beats 
 - A `features` slice in the Zustand store mirrors the response.
 - The root layout (`apps/web/app/layout.tsx`) SSR-fetches the flags once per request and seeds `StateProvider` initialState, so the first paint reflects the deployment's flags. No flash of feature UI.
 - `useFeature(name)` reads a single flag.
-- Page-level gating uses Next.js `notFound()` from a server-side layout (e.g. `apps/web/app/office/layout.tsx`); nav entries use `useFeature` and render `null` when off.
+- Page-level gating reads the flag from the store and renders an unavailable screen (e.g. `OfficeRoutes` in `apps/web/src/office-routes.tsx` renders `OfficeUnavailable` when `features.office` is off); nav entries use `useFeature` and render `null` when off.
 
 ### Launchers
 
-- `apps/cli/src/dev.ts` sets only `KANDEV_DEBUG_DEV_MODE=true` — the *selector*. profiles.yaml's `dev:` column supplies the rest.
+- `apps/backend/internal/launcher/dev.go` sets only `KANDEV_DEBUG_DEV_MODE=true` — the *selector*. profiles.yaml's `dev:` column supplies the rest.
 - `apps/web/e2e/fixtures/backend.ts` sets only `KANDEV_E2E_MOCK=true` — the selector for e2e. profiles.yaml's `e2e:` column supplies the rest. Per-host paths (DB, worktree base, Docker binaries) stay in the fixture because they're runtime-computed, not environmental.
 
 ## Consequences
@@ -168,6 +174,6 @@ Same pattern — pick the section that matches the knob's purpose (`mocks`, `deb
 - `apps/web/app/layout.tsx` — SSR-fetch + StateProvider seeding
 - `apps/web/lib/state/slices/features/` — Zustand slice
 - `apps/web/hooks/domains/features/use-feature.ts` — client hook
-- `apps/web/app/office/layout.tsx` — page-level `notFound()` gating
-- `apps/cli/src/dev.ts` — sets only the `KANDEV_DEBUG_DEV_MODE` selector
+- `apps/web/src/office-routes.tsx` — office flag gating (renders `OfficeUnavailable` when off)
+- `apps/backend/internal/launcher/dev.go` — sets only the `KANDEV_DEBUG_DEV_MODE` selector
 - `apps/web/e2e/fixtures/backend.ts` — sets only the `KANDEV_E2E_MOCK` selector + per-host paths

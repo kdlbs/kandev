@@ -883,7 +883,7 @@ func (f *flippingActiveSessionReader) ListTaskSessions(_ context.Context, taskID
 	return []*models.TaskSession{{ID: f.sessionID, TaskID: f.taskID}}, nil
 }
 
-func (f *flippingActiveSessionReader) ListTaskSessionWorktrees(context.Context, string) ([]*models.TaskSessionWorktree, error) {
+func (f *flippingActiveSessionReader) ListTaskSessionWorktrees(context.Context, string) ([]*models.TaskEnvironmentRepo, error) {
 	return nil, nil
 }
 

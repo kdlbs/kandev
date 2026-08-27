@@ -1,7 +1,9 @@
 package scriptengine
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -78,6 +80,36 @@ func TestRemoteContributionSetupScriptRejectsInvalidBinding(t *testing.T) {
 	}
 	if script != "" {
 		t.Fatalf("script = %q, want empty script on validation error", script)
+	}
+}
+
+func TestContributionDestinationSetupScriptPreservesOriginAndRoutesPushes(t *testing.T) {
+	destination := &models.ContributionDestination{
+		Version:  models.ContributionDestinationVersion,
+		Provider: models.ContributionDestinationProviderGitHub,
+		SourceRepository: models.ContributionDestinationRepository{
+			Host: "github.com", Path: "kdlbs/kandev", ProviderID: "100", RemoteURL: "https://github.com/kdlbs/kandev.git",
+		},
+		TargetRepository: models.ContributionDestinationRepository{
+			Host: "github.com", Path: "agent/kandev", ProviderID: "200", RemoteURL: "https://github.com/agent/kandev.git",
+		},
+	}
+	script, err := ContributionDestinationSetupScriptAt(destination, "/remote/task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"cd '/remote/task'",
+		"remote.$destination_remote.pushurl",
+		"branch.$current_branch.pushRemote",
+		"https://github.com/agent/kandev.git",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("destination setup script missing %q", want)
+		}
+	}
+	if strings.Contains(script, "remote.origin") || strings.Contains(script, "origin.url") {
+		t.Error("destination setup script rewrites origin")
 	}
 }
 
@@ -227,4 +259,91 @@ func TestGitHubAuthProvider(t *testing.T) {
 			t.Error("expected gh auth setup-git backup")
 		}
 	})
+
+	// `gh auth setup-git` — emitted by the no-token branch above and by the
+	// with-token branch itself — leaves credential.https://github.com.helper
+	// multi-valued. A plain `git config --global <key> <value>` refuses to
+	// overwrite a multi-valued key and exits 5, aborting the prepare script
+	// under `set -euo pipefail`.
+	t.Run("credential helper write uses --replace-all", func(t *testing.T) {
+		provider := GitHubAuthProvider(map[string]string{"GH_TOKEN": "ghp_test"})
+		vars := provider()
+		setup := vars["github.auth_setup"]
+		if !strings.Contains(setup, "git config --global --replace-all credential.https://github.com.helper") {
+			t.Errorf("credential helper must be written with --replace-all, got %q", setup)
+		}
+	})
+}
+
+// TestGitHubAuthCredentialWriteIsIdempotent is a behavioural regression test: it
+// runs the complete auth setup against a real git binary and a real (temporary)
+// global config twice. The first setup leaves the key multi-valued, so the
+// second setup proves that the write handles the persistent state. Asserting
+// the flag string alone would not catch a future rewrite that drops back to a
+// single-value write by another spelling — git's exit 5 is the contract.
+func TestGitHubAuthCredentialWriteIsIdempotent(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+
+	home := t.TempDir()
+	bin := t.TempDir()
+	ghPath := filepath.Join(bin, "gh")
+	ghScript := `#!/bin/sh
+case "$1 $2" in
+  "config set")
+    exit 0
+    ;;
+  "auth setup-git")
+    git config --global --add credential.https://github.com.helper ""
+    git config --global --add credential.https://github.com.helper "!/fake/gh auth git-credential"
+    exit 0
+    ;;
+esac
+exit 0
+`
+	if err := os.WriteFile(ghPath, []byte(ghScript), 0o755); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+
+	env := []string{
+		"HOME=" + home,
+		"XDG_CONFIG_HOME=" + home,
+		"GH_TOKEN=ghp_test",
+		"PATH=" + bin + string(os.PathListSeparator) + os.Getenv("PATH"),
+	}
+	runGit := func(args ...string) (string, error) {
+		cmd := exec.Command("git", args...)
+		cmd.Env = env
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
+
+	setup := GitHubAuthProvider(map[string]string{"GH_TOKEN": "ghp_test"})()["github.auth_setup"]
+
+	// Run the complete setup twice. The fake gh command models the extra values
+	// that `gh auth setup-git` adds after the token helper write.
+	for i := 1; i <= 2; i++ {
+		cmd := exec.Command("sh", "-c", setup)
+		cmd.Env = env
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("run %d: full auth setup failed: %v: %s", i, err, out)
+		}
+	}
+
+	out, err := runGit("config", "--global", "--get-all", "credential.https://github.com.helper")
+	if err != nil {
+		t.Fatalf("reading back config failed: %v: %s", err, out)
+	}
+	values := strings.Split(strings.TrimRight(out, "\r\n"), "\n")
+	if len(values) != 3 {
+		t.Fatalf("expected the full setup to leave three helper values, got %d: %q", len(values), values)
+	}
+	if !strings.Contains(values[0], "x-access-token") ||
+		values[1] != "" || values[2] != "!/fake/gh auth git-credential" {
+		t.Errorf("unexpected helper values after full setup: %q", values)
+	}
 }

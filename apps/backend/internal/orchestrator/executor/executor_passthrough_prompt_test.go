@@ -322,10 +322,10 @@ func TestExecutor_Prompt_PassthroughAttachmentsUseSessionWorktreeFallback(t *tes
 	}
 	seedPassthroughSession(t, repo, agentManager, "task-1", "sess-1", "exec-1")
 	workDir := t.TempDir()
-	repo.sessions["sess-1"].Worktrees = []*models.TaskSessionWorktree{{
-		SessionID:    "sess-1",
-		RepositoryID: "repo-1",
-		WorktreePath: workDir,
+	repo.sessions["sess-1"].Worktrees = []*models.TaskEnvironmentRepo{{
+		TaskEnvironmentID: "env-1",
+		RepositoryID:      "repo-1",
+		WorktreePath:      workDir,
 	}}
 	exec := newTestExecutor(t, agentManager, repo)
 
@@ -361,9 +361,9 @@ func TestExecutor_Prompt_PassthroughAttachmentsUseMultiWorktreeRootFallback(t *t
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		t.Fatalf("create worktree dir: %v", err)
 	}
-	repo.sessions["sess-1"].Worktrees = []*models.TaskSessionWorktree{
-		{SessionID: "sess-1", RepositoryID: "repo-1", WorktreePath: workDir},
-		{SessionID: "sess-1", RepositoryID: "repo-2", WorktreePath: filepath.Join(t.TempDir(), "repo-two")},
+	repo.sessions["sess-1"].Worktrees = []*models.TaskEnvironmentRepo{
+		{TaskEnvironmentID: "env-1", RepositoryID: "repo-1", WorktreePath: workDir},
+		{TaskEnvironmentID: "env-1", RepositoryID: "repo-2", WorktreePath: filepath.Join(t.TempDir(), "repo-two")},
 	}
 	exec := newTestExecutor(t, agentManager, repo)
 

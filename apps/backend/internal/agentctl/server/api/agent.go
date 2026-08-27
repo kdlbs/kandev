@@ -13,6 +13,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	acptransport "github.com/kandev/kandev/internal/agentctl/server/adapter/transport/acp"
+	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/constants"
@@ -59,9 +60,10 @@ type NewSessionRequest struct {
 
 // NewSessionResponse is the response to a new session call
 type NewSessionResponse struct {
-	Success   bool   `json:"success"`
-	SessionID string `json:"session_id,omitempty"`
-	Error     string `json:"error,omitempty"`
+	Success    bool                       `json:"success"`
+	SessionID  string                     `json:"session_id,omitempty"`
+	ModelState *streams.SessionModelState `json:"model_state,omitempty"`
+	Error      string                     `json:"error,omitempty"`
 }
 
 // LoadSessionRequest is a request to load an existing ACP session
@@ -72,9 +74,10 @@ type LoadSessionRequest struct {
 
 // LoadSessionResponse is the response to a load session call
 type LoadSessionResponse struct {
-	Success   bool   `json:"success"`
-	SessionID string `json:"session_id,omitempty"`
-	Error     string `json:"error,omitempty"`
+	Success    bool                       `json:"success"`
+	SessionID  string                     `json:"session_id,omitempty"`
+	ModelState *streams.SessionModelState `json:"model_state,omitempty"`
+	Error      string                     `json:"error,omitempty"`
 }
 
 // PromptRequest is a request to send a prompt to the agent
@@ -268,6 +271,12 @@ func (s *Server) handleAgentStreamRequest(ctx context.Context, msg *ws.Message) 
 		return s.handleWSCancel(ctx, msg)
 	case "agent.permissions.respond":
 		return s.handleWSPermissionRespond(ctx, msg)
+	case "agent.permissions.list":
+		return s.handleWSPermissionList(msg)
+	case "agent.permissions.resolve":
+		return s.handleWSPermissionResolve(msg)
+	case "agent.permissions.cancel":
+		return s.handleWSPermissionCancel(msg)
 	case "agent.stderr":
 		return s.handleWSStderr(ctx, msg)
 	case "agent.session.set_mode":
@@ -284,6 +293,79 @@ func (s *Server) handleAgentStreamRequest(ctx context.Context, msg *ws.Message) 
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnknownAction, fmt.Sprintf("unknown action: %s", msg.Action), nil)
 		return resp
 	}
+}
+
+func (s *Server) handleWSPermissionCancel(msg *ws.Message) *ws.Message {
+	var req streams.PermissionCancelRequest
+	if err := msg.ParsePayload(&req); err != nil || req.RequestID == "" || req.PendingID == "" {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "request_id and pending_id are required", nil)
+		return resp
+	}
+	result, err := s.procMgr.CancelPermission(req.RequestID, req.PendingID)
+	if err == nil {
+		resp, _ := ws.NewResponse(msg.ID, msg.Action, result)
+		return resp
+	}
+	var operationErr *process.PermissionOperationError
+	if !errors.As(err, &operationErr) {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "permission cancellation failed", nil)
+		return resp
+	}
+	code := ws.ErrorCodeConflict
+	switch operationErr.Code {
+	case streams.PermissionErrorNotFound:
+		code = ws.ErrorCodeNotFound
+	case streams.PermissionErrorDeliveryFailed:
+		code = ws.ErrorCodeInternalError
+	}
+	resp, _ := ws.NewError(msg.ID, msg.Action, code, operationErr.Code, map[string]any{"permission_code": operationErr.Code})
+	return resp
+}
+
+func (s *Server) handleWSPermissionList(msg *ws.Message) *ws.Message {
+	permissions := s.procMgr.ListPendingPermissions()
+	resp, _ := ws.NewResponse(msg.ID, msg.Action, streams.PermissionListResponse{
+		Permissions: permissions,
+		Total:       len(permissions),
+	})
+	return resp
+}
+
+func (s *Server) handleWSPermissionResolve(msg *ws.Message) *ws.Message {
+	var req streams.PermissionResolveRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid request", nil)
+		return resp
+	}
+	if req.RequestID == "" || req.PendingID == "" || req.OptionID == "" {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "request_id, pending_id, and option_id are required", nil)
+		return resp
+	}
+
+	result, err := s.procMgr.ResolvePermission(req.RequestID, req.PendingID, req.OptionID)
+	if err == nil {
+		resp, _ := ws.NewResponse(msg.ID, msg.Action, result)
+		return resp
+	}
+
+	var operationErr *process.PermissionOperationError
+	if !errors.As(err, &operationErr) {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "permission resolution failed", nil)
+		return resp
+	}
+	code := ws.ErrorCodeConflict
+	switch operationErr.Code {
+	case streams.PermissionErrorNotFound:
+		code = ws.ErrorCodeNotFound
+	case streams.PermissionErrorOptionNotOffered:
+		code = ws.ErrorCodeValidation
+	case streams.PermissionErrorDeliveryFailed:
+		code = ws.ErrorCodeInternalError
+	}
+	resp, _ := ws.NewError(msg.ID, msg.Action, code, operationErr.Code, map[string]any{
+		"permission_code": operationErr.Code,
+	})
+	return resp
 }
 
 func (s *Server) handleWSInitialize(ctx context.Context, msg *ws.Message) *ws.Message {
@@ -469,8 +551,9 @@ func (s *Server) handleWSNewSession(ctx context.Context, msg *ws.Message) *ws.Me
 	}
 
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, NewSessionResponse{
-		Success:   true,
-		SessionID: sessionID,
+		Success:    true,
+		SessionID:  sessionID,
+		ModelState: sessionModelState(adapter),
 	})
 	return resp
 }
@@ -519,8 +602,9 @@ func (s *Server) handleWSLoadSession(ctx context.Context, msg *ws.Message) *ws.M
 	s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, nil)
 
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, LoadSessionResponse{
-		Success:   true,
-		SessionID: req.SessionID,
+		Success:    true,
+		SessionID:  req.SessionID,
+		ModelState: sessionModelState(adapter),
 	})
 	return resp
 }
@@ -766,10 +850,19 @@ func (s *Server) handleWSResetSession(ctx context.Context, msg *ws.Message) *ws.
 	}
 
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, NewSessionResponse{
-		Success:   true,
-		SessionID: sessionID,
+		Success:    true,
+		SessionID:  sessionID,
+		ModelState: sessionModelState(agentAdapter),
 	})
 	return resp
+}
+
+func sessionModelState(agentAdapter adapter.AgentAdapter) *streams.SessionModelState {
+	provider, ok := agentAdapter.(adapter.SessionModelStateProvider)
+	if !ok {
+		return nil
+	}
+	return provider.GetSessionModelState()
 }
 
 // promptOrSteer routes a prompt to the steering path when the caller asked for it

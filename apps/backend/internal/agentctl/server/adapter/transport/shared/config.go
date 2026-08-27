@@ -38,7 +38,9 @@ type Config struct {
 	// Used for display purposes.
 	AgentName string
 
-	// For HTTP-based adapters (REST)
+	// BaseURL, AuthHeader, AuthValue, and Headers are unused by any adapter
+	// today (no HTTP-based transport exists). Populated by
+	// adapter.Config.ToSharedConfig but never read by a transport.
 	BaseURL    string            // Base URL of the agent's HTTP API
 	AuthHeader string            // Optional auth header name
 	AuthValue  string            // Optional auth header value
@@ -59,6 +61,10 @@ type Config struct {
 	// adapter's return value to decide whether to kill the entire process
 	// group on shutdown so MCP child processes don't leak.
 	RequiresProcessKill bool
+
+	// NotificationQueueCapacity is the resolved ACP inbound notification queue
+	// capacity. Zero keeps compatibility for directly constructed test configs.
+	NotificationQueueCapacity int
 }
 
 // GetPermissionTimeout returns the configured permission timeout or the default.

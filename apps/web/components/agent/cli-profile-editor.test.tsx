@@ -145,6 +145,56 @@ describe("CliProfileEditor", () => {
   });
 });
 
+describe("CliProfileEditor fallback settings", () => {
+  it("keeps inline fallback settings collapsed and disables the explicit choice in automatic mode", () => {
+    const profile = {
+      id: toAgentProfileId("p-fallback"),
+      name: "fallback",
+      agentId: "claude",
+      agentDisplayName: "Claude",
+      model: MODEL_ID,
+      fallbackModel: "claude-opus-4",
+      autoFallback: true,
+      mode: "",
+      allowIndexing: false,
+      autoApprove: false,
+      cliFlags: [],
+      cliPassthrough: false,
+      createdAt: CREATED_AT,
+      updatedAt: CREATED_AT,
+    };
+
+    render(
+      <StateProvider
+        initialState={{
+          settingsAgents: { items: [] },
+          availableAgents: {
+            items: [baseAvailableAgent],
+            tools: [],
+            loaded: true,
+            loading: false,
+          },
+        }}
+      >
+        <CliProfileEditor mode="edit" profile={profile} onSaved={vi.fn()} />
+      </StateProvider>,
+    );
+
+    const trigger = screen.getByTestId("profile-fallback-settings-trigger");
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.getByTestId("profile-fallback-settings-summary").textContent).toContain(
+      "Automatic fallback enabled",
+    );
+
+    fireEvent.click(trigger);
+
+    const fallbackSwitch = screen.getByRole("switch", { name: "Agent fallback" });
+    expect((fallbackSwitch as HTMLButtonElement).disabled).toBe(true);
+    const modelComboboxes = screen.getAllByTestId("profile-model-combobox-trigger");
+    expect((modelComboboxes.at(-1) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
 describe("CliProfileEditor recommended flags", () => {
   it("can hide passthrough while showing recommended CLI flags", () => {
     render(

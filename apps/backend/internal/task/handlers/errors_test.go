@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -93,6 +94,47 @@ func TestErrorsAreClassifiable(t *testing.T) {
 			t.Fatalf("status=%d, want %d", rec.Code, http.StatusConflict)
 		}
 	})
+
+	t.Run("stale branch policies include a stable error code", func(t *testing.T) {
+		gin.SetMode(gin.TestMode)
+		rec := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(rec)
+		err := fmt.Errorf("%w: %w", service.ErrInvalidRepositoryBranchPolicy, service.ErrRepositoryBranchPolicyStale)
+		handleNotFound(ctx, newTestLogger(t), err, "task not created")
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d, want %d", rec.Code, http.StatusBadRequest)
+		}
+		var payload map[string]string
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if payload["error_code"] != service.BranchPolicyStaleErrorCode {
+			t.Fatalf("error_code=%q, want %q", payload["error_code"], service.BranchPolicyStaleErrorCode)
+		}
+	})
+}
+
+func TestMoveConflictCode(t *testing.T) {
+	cases := []struct {
+		name string
+		err  string
+		want string
+	}{
+		{"active session", "task has an active session (running)", moveConflictCodeActiveSession},
+		{"archived task", "archived tasks cannot be moved", moveConflictCodeArchived},
+		{"different workspace", "target workflow is in a different workspace", moveConflictCodeDifferentWorkspace},
+		{"workflow step", "target workflow step does not belong to target workflow", moveConflictCodeWorkflowStep},
+		{"WIP limit", "WIP limit exceeded for workflow step", moveConflictCodeWIPLimit},
+		{"unrelated", "database is locked", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := moveConflictCode(errors.New(tc.err)); got != tc.want {
+				t.Fatalf("moveConflictCode(%q) = %q, want %q", tc.err, got, tc.want)
+			}
+		})
+	}
 }
 
 // TestIsTimeoutError pins the UX-classification contract for the prompt

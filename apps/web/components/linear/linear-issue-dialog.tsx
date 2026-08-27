@@ -301,7 +301,7 @@ function DetailsCard({ issue }: { issue: LinearIssue }) {
           <PersonCell name={issue.creatorName} avatar={issue.creatorIcon} />
         </DetailRow>
         <DetailRow label={t("linear:priority")}>
-          <span className={priorityClass(issue.priority)}>{issue.priorityLabel || "—"}</span>
+          <span className={priorityClass(issue.priority)}>{issue.priorityLabel || "-"}</span>
         </DetailRow>
         <DetailRow label={t("linear:team")}>
           <span className="font-mono text-xs">{issue.teamKey}</span>

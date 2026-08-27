@@ -5,10 +5,12 @@ import { defaultState } from "@/lib/state/default-state";
 import type { AppState } from "@/lib/state/store";
 import type { BackendMessageMap } from "@/lib/types/backend";
 
+/** Creates a vanilla Zustand store seeded with a structured clone of the default app state. */
 function makeStore() {
   return createStore<AppState>(() => structuredClone(defaultState) as AppState);
 }
 
+/** Builds a `user.settings.updated` notification frame merging the given payload over default values. */
 function userSettingsMessage(
   payload: Partial<BackendMessageMap["user.settings.updated"]["payload"]>,
 ): BackendMessageMap["user.settings.updated"] {
@@ -41,6 +43,105 @@ describe("startup page websocket sync", () => {
       } as unknown as Partial<BackendMessageMap["user.settings.updated"]["payload"]>),
     );
     expect(store.getState().userSettings.startupPage).toBe("task_overview");
+  });
+});
+
+describe("status bar visibility websocket sync", () => {
+  it("updates status bar visibility and preserves it when omitted", () => {
+    const store = makeStore();
+
+    expect(
+      (store.getState().userSettings as unknown as Record<string, unknown>).appStatusBarEnabled,
+    ).toBe(false);
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({
+        app_status_bar_enabled: true,
+      } as unknown as Partial<BackendMessageMap["user.settings.updated"]["payload"]>),
+    );
+    expect(
+      (store.getState().userSettings as unknown as Record<string, unknown>).appStatusBarEnabled,
+    ).toBe(true);
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
+    expect(
+      (store.getState().userSettings as unknown as Record<string, unknown>).appStatusBarEnabled,
+    ).toBe(true);
+  });
+
+  it("ignores older settings revisions and accepts newer ones", () => {
+    const store = makeStore();
+    store.setState((state) => ({
+      ...state,
+      userSettings: {
+        ...state.userSettings,
+        appStatusBarEnabled: false,
+        revision: 2,
+      },
+    }));
+    const handler = registerUsersHandlers(store)["user.settings.updated"];
+
+    handler?.(
+      userSettingsMessage({
+        app_status_bar_enabled: true,
+        revision: 1,
+      }),
+    );
+    expect(store.getState().userSettings).toMatchObject({
+      appStatusBarEnabled: false,
+      revision: 2,
+    });
+
+    handler?.(
+      userSettingsMessage({
+        app_status_bar_enabled: true,
+        revision: 3,
+      }),
+    );
+    expect(store.getState().userSettings).toMatchObject({
+      appStatusBarEnabled: true,
+      revision: 3,
+    });
+  });
+});
+
+describe("last seen display websocket sync", () => {
+  it("applies a relative value and normalizes unknown values", () => {
+    const store = makeStore();
+    expect(store.getState().userSettings.lastSeenDisplay).toBe("absolute");
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({ last_seen_display: "relative" }),
+    );
+    expect(store.getState().userSettings.lastSeenDisplay).toBe("relative");
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({
+        last_seen_display: "unexpected",
+      } as unknown as Partial<BackendMessageMap["user.settings.updated"]["payload"]>),
+    );
+    expect(store.getState().userSettings.lastSeenDisplay).toBe("absolute");
+  });
+
+  it("preserves the current value when omitted", () => {
+    const store = makeStore();
+    store.setState((state) => ({
+      ...state,
+      userSettings: { ...state.userSettings, lastSeenDisplay: "relative" },
+    }));
+    registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
+    expect(store.getState().userSettings.lastSeenDisplay).toBe("relative");
+  });
+
+  it("ignores older settings revisions", () => {
+    const store = makeStore();
+    store.setState((state) => ({
+      ...state,
+      userSettings: { ...state.userSettings, lastSeenDisplay: "absolute", revision: 2 },
+    }));
+    const handler = registerUsersHandlers(store)["user.settings.updated"];
+    handler?.(userSettingsMessage({ last_seen_display: "relative", revision: 1 }));
+    expect(store.getState().userSettings.lastSeenDisplay).toBe("absolute");
   });
 });
 
@@ -195,6 +296,18 @@ describe("todo list panel websocket sync", () => {
 
     registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
     expect(store.getState().userSettings.showTodoListPanel).toBe(true);
+  });
+
+  it("syncs the not-empty sub-option and preserves it when omitted", () => {
+    const store = makeStore();
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({ show_todo_list_panel_only_when_not_empty: true }),
+    );
+    expect(store.getState().userSettings.showTodoListPanelOnlyWhenNotEmpty).toBe(true);
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
+    expect(store.getState().userSettings.showTodoListPanelOnlyWhenNotEmpty).toBe(true);
   });
 });
 

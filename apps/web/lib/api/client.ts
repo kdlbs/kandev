@@ -17,12 +17,20 @@ export type ApiRequestOptions = {
 export class ApiError extends Error {
   readonly status: number;
   readonly body: unknown;
+  readonly errorCode?: string;
   readonly retryAfterSeconds?: number;
   constructor(message: string, status: number, body: unknown, retryAfterSeconds?: number) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.body = body;
+    this.errorCode =
+      body &&
+      typeof body === "object" &&
+      "error_code" in body &&
+      typeof (body as { error_code?: unknown }).error_code === "string"
+        ? (body as { error_code: string }).error_code
+        : undefined;
     this.retryAfterSeconds = retryAfterSeconds;
   }
 }
@@ -88,6 +96,29 @@ export async function fetchJson<T>(pathOrUrl: string, options?: ApiRequestOption
   const text = await response.text();
   if (!text) return undefined as T;
   return JSON.parse(text) as T;
+}
+
+/**
+ * Fetches a binary response body (e.g. a zip download) as a Blob. Unlike
+ * fetchJson, no Content-Type is forced on the request and the body is never
+ * parsed as JSON — the caller consumes raw bytes. Non-2xx responses reject
+ * with the same ApiError classification fetchJson uses, so callers get one
+ * error shape to handle regardless of which fetch helper they used.
+ */
+export async function fetchBlob(pathOrUrl: string, options?: ApiRequestOptions): Promise<Blob> {
+  const baseUrl = options?.baseUrl ?? getBackendConfig().apiBaseUrl;
+  const url = resolveUrl(pathOrUrl, baseUrl);
+  const response = await fetch(url, {
+    ...options?.init,
+    cache: options?.cache,
+    credentials: "include",
+    headers: requestHeaders(options?.init?.headers),
+  });
+  if (!response.ok) {
+    if (response.status === 401 && isKandevAuthChallenge(response)) onUnauthorized?.();
+    await throwFromResponse(response);
+  }
+  return response.blob();
 }
 
 // buildRequestHeaders assembles the JSON content-type header plus the

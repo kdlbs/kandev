@@ -9,6 +9,7 @@ import type { MoveTaskError } from "@/hooks/use-drag-and-drop";
 export type ViewContentProps = {
   workflowId: string;
   steps: WorkflowStep[];
+  moveTargetSteps: WorkflowStep[];
   tasks: Task[];
   onPreviewTask: (task: Task) => void;
   onOpenTask: (task: Task) => void;
@@ -35,7 +36,8 @@ export type MobileWorkflowNavigation = {
 export type ViewRegistryEntry = {
   id: string;
   storedValue: string;
-  label: string;
+  /** Catalog key; resolved wherever the entry is labelled. */
+  labelKey: string;
   icon: ComponentType<{ className?: string }>;
   component: ComponentType<ViewContentProps>;
   enabled: boolean;
@@ -45,7 +47,7 @@ export const VIEW_REGISTRY: ViewRegistryEntry[] = [
   {
     id: "kanban",
     storedValue: "",
-    label: "Kanban",
+    labelKey: "kanban:kanban",
     icon: IconLayoutColumns,
     component: SwimlaneKanbanContent as ComponentType<ViewContentProps>,
     enabled: true,
@@ -53,7 +55,7 @@ export const VIEW_REGISTRY: ViewRegistryEntry[] = [
   {
     id: "graph2",
     storedValue: "graph2",
-    label: "Pipeline",
+    labelKey: "kanban:pipeline",
     icon: IconTimeline,
     component: SwimlaneGraph2Content as ComponentType<ViewContentProps>,
     enabled: true,

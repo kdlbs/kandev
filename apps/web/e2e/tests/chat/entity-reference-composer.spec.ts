@@ -241,6 +241,12 @@ test.describe("Entity reference composer", () => {
     await expect(testPage.getByRole("option").filter({ hasText: targetTitle })).toBeVisible({
       timeout: 10_000,
     });
+
+    await editor.press("Escape");
+    await expect(testPage.getByRole("option").filter({ hasText: targetTitle })).toHaveCount(0);
+    await expect(editor).toBeFocused();
+    await editor.pressSequentially(" continued");
+    await expect(editor).toHaveText(new RegExp(`@${targetTitle} continued`));
   });
 
   test("task chat restores a keyboard-selected draft and explicitly sends durable metadata", async ({
@@ -438,5 +444,68 @@ test.describe("Entity reference composer", () => {
     expect(await searchObserved).toBe(false);
     await expect(testPage.getByTestId("entity-reference-menu")).toHaveCount(0);
     await expect(editor).toHaveText("#Literal passthrough reference");
+  });
+
+  test("pasted hash text stays literal and dismissed entity reference stays closed", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+    const target = linearReference("linear-lifecycle", "ENG-401", "Lifecycle Reference Target");
+    const pastedText = "#2730 explicit profile overridden seems an issue";
+    const active = await createReadyTask(apiClient, seedData, "Entity Reference Lifecycle Task");
+    const session = await openTaskChat(testPage, active.id);
+    const editor = visibleEditor(session.activeChat());
+    const menu = testPage.getByTestId("entity-reference-menu");
+
+    await testPage.route("**/api/v1/workspaces/*/mentions/search?*", async (route) => {
+      const query = new URL(route.request().url()).searchParams.get("q") ?? "";
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(externalSearchResponse(query, [target])),
+      });
+    });
+    await testPage.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await testPage.evaluate(async (text) => navigator.clipboard.writeText(text), pastedText);
+
+    const searchObserved = testPage
+      .waitForRequest((request) => new URL(request.url()).pathname.endsWith("/mentions/search"), {
+        timeout: 750,
+      })
+      .then(
+        () => true,
+        () => false,
+      );
+    await editor.click();
+    await editor.press("Control+V");
+
+    expect(await searchObserved).toBe(false);
+    await expect(menu).toHaveCount(0);
+    await expect(editor).toHaveText(pastedText);
+
+    await editor.pressSequentially(" #E2E");
+    await expect(referenceOption(testPage, target.title)).toBeVisible({ timeout: 10_000 });
+    await editor.press("Backspace");
+    await expect(referenceOption(testPage, target.title)).toBeVisible({ timeout: 10_000 });
+    await editor.pressSequentially("E");
+    await editor.press("ArrowLeft");
+    await editor.press("Delete");
+    await expect(referenceOption(testPage, target.title)).toBeVisible({ timeout: 10_000 });
+    await editor.pressSequentially("E");
+    await editor.press("Escape");
+    await expect(menu).toHaveCount(0);
+    await expect(editor).toBeFocused();
+    await editor.pressSequentially(" continued");
+    await expect(menu).toHaveCount(0);
+    await expect(editor).toHaveText(
+      /#2730 explicit profile overridden seems an issue #E2E continued/,
+    );
+
+    await editor.pressSequentially(" #Late");
+    await expect(referenceOption(testPage, target.title)).toBeVisible({ timeout: 10_000 });
+    await testPage.locator("body").click({ position: { x: 4, y: 4 } });
+    await expect(menu).toHaveCount(0);
   });
 });

@@ -8,7 +8,7 @@ import { IconAdjustments } from "@tabler/icons-react";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { Button } from "@kandev/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
-import { PageTopbar } from "@/components/page-topbar";
+import { PageShell } from "@/components/page-shell";
 import { AzureDevOpsIcon } from "@/components/icons/azure-devops-icon";
 import {
   AzureDevOpsFilters,
@@ -84,7 +84,7 @@ type PageProps = {
 
 function NotConfigured({ workspaceId }: { workspaceId?: string }) {
   const href = workspaceId
-    ? `/settings/workspace/${encodeURIComponent(workspaceId)}/integrations/azure-devops`
+    ? `/settings/workspaces/${encodeURIComponent(workspaceId)}/integrations/azure-devops`
     : "/settings/integrations/azure-devops";
   return (
     <div className="max-w-2xl p-6">
@@ -593,27 +593,27 @@ function AzureDevOpsPageContent({ workspaceId, workflows, steps, repositories }:
   };
 
   return (
-    <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <PageTopbar
-        title="Azure DevOps"
-        subtitle={t("azuredevops:boardsAndRepos", {
-          organizationUrl: state.connection.data.organizationUrl,
-        })}
-        icon={<AzureDevOpsIcon className="h-4 w-4" />}
-        actions={
-          <Button
-            type="button"
-            variant="outline"
-            size="icon-lg"
-            onClick={() => state.setMobileFiltersOpen(true)}
-            className="cursor-pointer md:hidden"
-            aria-label={t("azuredevops:openAzureDevopsFilters")}
-            data-testid="azure-devops-mobile-filter-button"
-          >
-            <IconAdjustments className="h-4 w-4" />
-          </Button>
-        }
-      />
+    <PageShell
+      title="Azure DevOps"
+      subtitle={t("azuredevops:boardsAndRepos", {
+        organizationUrl: state.connection.data.organizationUrl,
+      })}
+      icon={<AzureDevOpsIcon className="h-4 w-4" />}
+      scroll="none"
+      actions={
+        <Button
+          type="button"
+          variant="outline"
+          size="icon-lg"
+          onClick={() => state.setMobileFiltersOpen(true)}
+          className="cursor-pointer md:hidden"
+          aria-label={t("azuredevops:openAzureDevopsFilters")}
+          data-testid="azure-devops-mobile-filter-button"
+        >
+          <IconAdjustments className="h-4 w-4" />
+        </Button>
+      }
+    >
       <AzureDevOpsScopeBar
         selected={state.selection}
         onSelect={state.selectScope}
@@ -681,7 +681,7 @@ function AzureDevOpsPageContent({ workspaceId, workflows, steps, repositories }:
         onOpenChange={state.setSaveViewOpen}
         onSave={state.saveCurrentView}
       />
-    </main>
+    </PageShell>
   );
 }
 

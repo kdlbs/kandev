@@ -104,20 +104,21 @@ test.describe("agent install streaming", () => {
     const enqueueRes = await apiClient.rawRequest("POST", "/api/v1/agent-install/mock-agent");
     const job = (await enqueueRes.json()) as { job_id: string };
 
-    // Wait for it to finish (mock script is fast).
-    let finalStatus = "";
-    const deadline = Date.now() + 8_000;
-    while (Date.now() < deadline) {
-      const snap = (await (
-        await fetch(`${backend.baseUrl}/api/v1/agent-install/jobs/${job.job_id}`)
-      ).json()) as { status: string };
-      if (snap.status === "succeeded" || snap.status === "failed") {
-        finalStatus = snap.status;
-        break;
-      }
-      await new Promise((r) => setTimeout(r, 50));
-    }
-    expect(["succeeded", "failed"]).toContain(finalStatus);
+    // Wait for it to finish (mock script is fast). `expect.poll` owns the
+    // interval and the deadline, so this keeps the terminal-status assertion
+    // while dropping the hand-rolled sleep -- and it reports the last status it
+    // saw on timeout, where the loop reported the empty string it started with.
+    await expect
+      .poll(
+        async () => {
+          const snap = (await (
+            await fetch(`${backend.baseUrl}/api/v1/agent-install/jobs/${job.job_id}`)
+          ).json()) as { status: string };
+          return snap.status;
+        },
+        { timeout: 8_000, message: "install job never reached a terminal status" },
+      )
+      .toMatch(/^(succeeded|failed)$/);
 
     const listRes = await fetch(`${backend.baseUrl}/api/v1/agent-install/jobs`);
     expect(listRes.status).toBe(200);
@@ -172,11 +173,18 @@ async function openGatewayWS(baseUrl: string): Promise<WebSocket> {
   return ws;
 }
 
+/**
+ * Poll a flag these specs maintain themselves until it flips.
+ *
+ * What is being waited on is a local variable that a WebSocket listener writes,
+ * not a page, a response or a store, so none of the transport primitives in
+ * `helpers/causal-waits.ts` applies. `expect.poll` is the right tool anyway: it
+ * owns the interval and the deadline, so the hand-rolled 50ms sleep goes with
+ * the loop, and a timeout reports the label through Playwright rather than as a
+ * bare thrown Error.
+ */
 async function waitFor(check: () => boolean, timeoutMs: number, label: string) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (check()) return;
-    await new Promise((r) => setTimeout(r, 50));
-  }
-  throw new Error(`Timed out waiting for ${label}`);
+  await expect
+    .poll(check, { timeout: timeoutMs, message: `Timed out waiting for ${label}` })
+    .toBe(true);
 }

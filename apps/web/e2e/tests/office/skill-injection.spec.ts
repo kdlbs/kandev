@@ -4,7 +4,7 @@ import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { OfficeApiClient } from "../../helpers/office-api-client";
 
-// Verifies the spec-aligned skill injection (docs/specs/office/agents.md):
+// Verifies the spec-aligned skill injection (docs/specs/office/requirements/agents.md):
 // when a skill is assigned to an agent profile, launching a session writes
 // it to <worktree>/<projectSkillDir>/kandev-<slug>/SKILL.md and appends
 // the kandev-* glob to .git/info/exclude.
@@ -57,7 +57,7 @@ test("skill injection writes assigned skill to session worktree on launch", asyn
       .poll(
         async () => {
           const env = await apiClient.getTaskEnvironment(task.id);
-          worktreePath = env?.workspace_path ?? env?.worktree_path ?? "";
+          worktreePath = env?.workspace_path ?? env?.repos?.[0]?.worktree_path ?? "";
           return worktreePath;
         },
         { timeout: 30_000, message: "task environment workspace_path never appeared" },

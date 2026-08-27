@@ -4,6 +4,9 @@
 **Date:** 2026-05-16
 **Area:** backend
 
+**Amended:** 2026-08-08 by
+[ADR-2026-08-08-task-owned-worktree-lifetime](2026-08-08-task-owned-worktree-lifetime.md)
+
 ## Context
 
 Kandev's office service runs a background garbage collector that, every three hours, walks `~/.kandev/tasks/` and removes "orphaned" worktree directories. It also walks kandev-labeled Docker containers and removes ones whose tasks are gone or terminal. The intent was good — agents crash, leave state behind, and disks fill. The implementation was not.
@@ -20,7 +23,7 @@ The bug was not "wrong table." It was "destructive action on a negative signal."
 
 Concretely:
 
-1. **Authoritative inventory first.** Each sweep starts by querying the source of truth for what is alive: `task_session_worktrees.worktree_path` for worktrees, `tasks` for containers. Anything not in the inventory is a *candidate* for deletion, not yet condemned.
+1. **Authoritative inventory first.** Each sweep starts by querying the source of truth for what is alive: `task_environment_repos.worktree_path` through its owning `task_environments` row for worktrees, and `tasks` for containers. Anything not in the inventory is a *candidate* for deletion, not yet condemned.
 
 2. **Fail-closed on error.** A failure to read the inventory — query error, closed pool, missing dependency — aborts the sweep with a logged warning. The GC never proceeds with an empty or partial inventory.
 

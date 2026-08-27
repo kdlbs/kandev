@@ -8,10 +8,9 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, closed]
   pull_request_target:
-    # `labeled` is needed so a maintainer applying `safe-to-test` to a fork PR
+    # `labeled` is needed so a maintainer applying `safe-to-review` to a fork PR
     # triggers a deploy against the current head SHA. Subsequent fork pushes
-    # (synchronize) do NOT re-trigger the label path — see deploy-fork's
-    # if-gate and strip-safe-to-test below.
+    # (synchronize) re-use the maintainer's approval for the new head.
     types: [opened, synchronize, reopened, closed, labeled]
 
 concurrency:
@@ -38,6 +37,7 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
 
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
@@ -73,12 +73,10 @@ jobs:
   #     JSON array of logins)
   #   - CLAUDE_REVIEW_ALLOWLIST repo variable (trusted login list, all events;
   #     the Claude workflow also adds the approval labels on open)
-  #   - `safe-to-test` label (maintainer opt-in, per-commit). Explicitly
-  #     blocked on `synchronize` so a contributor's push cannot re-use a
-  #     stale label — the maintainer must re-apply it after each push for
-  #     the `labeled` event to trigger a fresh deploy of the new SHA. This
-  #     matters more here than for claude-code-review.yml because deploy
-  #     actually runs the fork's `cmd/preview` code with SPRITES_API_TOKEN.
+  #   - `safe-to-review` label (maintainer opt-in, durable until removed). It
+  #     authorizes the current and subsequent fork heads. This matters more
+  #     here than for claude-code-review.yml because deploy actually runs the
+  #     fork's `cmd/preview` code with SPRITES_API_TOKEN.
   # -----------------------------------------------------------------------
   # Branch order matters: keep cheap/safe checks before `fromJSON(vars.*)`,
   # which throws (and skips the whole job) if the repo variable is
@@ -88,7 +86,7 @@ jobs:
       github.event.action != 'closed' &&
       github.event_name == 'pull_request_target' &&
       github.event.pull_request.head.repo.full_name != github.repository &&
-      ((github.event.action != 'synchronize' && contains(github.event.pull_request.labels.*.name, 'safe-to-test')) ||
+      ((contains(github.event.pull_request.labels.*.name, 'safe-to-review')) ||
        (vars.PREVIEW_ENV_ALLOWLIST != '' && contains(fromJSON(vars.PREVIEW_ENV_ALLOWLIST), github.event.pull_request.user.login)) ||
        (vars.CLAUDE_REVIEW_ALLOWLIST != '' && contains(fromJSON(vars.CLAUDE_REVIEW_ALLOWLIST), github.event.pull_request.user.login)))
     runs-on: ubuntu-latest
@@ -101,13 +99,14 @@ jobs:
         with:
           # pull_request_target checks out base by default; explicitly use PR head.
           # Safe: the preview CLI only reads files to build artifacts and posts comments.
-          # NOTE: The allowlist gate (safe-to-test, PREVIEW_ENV_ALLOWLIST,
+          # NOTE: The allowlist gate (safe-to-review, PREVIEW_ENV_ALLOWLIST,
           # CLAUDE_REVIEW_ALLOWLIST)
           # authorizes running the fork's cmd/preview code with SPRITES_API_TOKEN and GH_TOKEN.
-          # The safe-to-test label must be re-applied after each new push for
-          # the label-only path (see strip-safe-to-test job).
+          # The safe-to-review label remains an explicit maintainer approval for
+          # follow-up pushes until the maintainer removes it.
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
 
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
@@ -136,39 +135,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # -----------------------------------------------------------------------
-  # Strip safe-to-test label on new pushes to fork PRs.
-  # Together with the `github.event.action != 'synchronize'` guard on the
-  # label path in deploy-fork's if-gate, this gives true per-commit opt-in:
-  # the maintainer must re-apply `safe-to-test` after each push for the
-  # deploy job to run again. A new push on its own never re-triggers deploy
-  # on the label path.
-  # -----------------------------------------------------------------------
-  strip-safe-to-test:
-    if: >
-      github.event_name == 'pull_request_target' &&
-      github.event.action == 'synchronize' &&
-      github.event.pull_request.head.repo.full_name != github.repository &&
-      contains(github.event.pull_request.labels.*.name, 'safe-to-test')
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-    steps:
-      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            try {
-              await github.rest.issues.removeLabel({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.payload.pull_request.number,
-                name: 'safe-to-test',
-              });
-            } catch (error) {
-              if (error.status !== 404) throw error;
-              core.info('safe-to-test label already absent; nothing to remove.');
-            }
-
-  # -----------------------------------------------------------------------
   # Cleanup (all closed PRs — no allowlist check)
   # The sprite must be destroyed regardless of how the PR was closed or
   # whether a preview was ever successfully deployed. Handles gracefully
@@ -187,6 +153,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:

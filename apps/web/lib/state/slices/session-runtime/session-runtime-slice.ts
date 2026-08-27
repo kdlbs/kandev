@@ -7,6 +7,7 @@ import type {
   FileInfo,
 } from "./types";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
+import { normalizeGitStatusEntry } from "./git-status-normalizer";
 
 const debugGit = createDebugLogger("git-status:store");
 
@@ -93,14 +94,34 @@ function sameFiles(
 
 function hasBranchSummaryChanged(existing: GitStatusEntry, incoming: GitStatusEntry): boolean {
   return (
-    existing.branch !== incoming.branch ||
-    existing.remote_branch !== incoming.remote_branch ||
+    hasBranchReferencesChanged(existing, incoming) ||
+    hasComparisonSummaryChanged(existing, incoming) ||
     existing.ahead !== incoming.ahead ||
     existing.behind !== incoming.behind ||
+    existing.remote_ahead !== incoming.remote_ahead ||
+    existing.remote_behind !== incoming.remote_behind ||
+    existing.remote_head_commit !== incoming.remote_head_commit ||
     (existing.repository_name ?? "") !== (incoming.repository_name ?? "") ||
     existing.is_submodule !== incoming.is_submodule ||
     existing.branch_additions !== incoming.branch_additions ||
     existing.branch_deletions !== incoming.branch_deletions
+  );
+}
+
+function hasBranchReferencesChanged(existing: GitStatusEntry, incoming: GitStatusEntry): boolean {
+  return (
+    existing.branch !== incoming.branch ||
+    existing.remote_branch !== incoming.remote_branch ||
+    existing.head_commit !== incoming.head_commit ||
+    existing.base_commit !== incoming.base_commit
+  );
+}
+
+function hasComparisonSummaryChanged(existing: GitStatusEntry, incoming: GitStatusEntry): boolean {
+  return (
+    existing.comparison_target !== incoming.comparison_target ||
+    existing.comparison_status !== incoming.comparison_status ||
+    existing.comparison_error_code !== incoming.comparison_error_code
   );
 }
 
@@ -247,6 +268,7 @@ function purgeEnvScopedRuntime(state: SessionRuntimeSliceState, envKey: string) 
   delete state.sessionCommits.loading[envKey];
   delete state.sessionCommits.refetchTrigger[envKey];
   delete state.userShells.byEnvironmentId[envKey];
+  delete state.userShells.dismissedByEnvironmentId[envKey];
   delete state.userShells.loading[envKey];
   delete state.userShells.loaded[envKey];
 }
@@ -283,7 +305,7 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
   sessionMcpStatus: { bySessionId: {} },
   promptUsage: { bySessionId: {} },
   sessionTodos: { bySessionId: {} },
-  userShells: { byEnvironmentId: {}, loading: {}, loaded: {} },
+  userShells: { byEnvironmentId: {}, dismissedByEnvironmentId: {}, loading: {}, loaded: {} },
   prepareProgress: { bySessionId: {} },
   sessionPollMode: { bySessionId: {} },
   embeddedVscodeSupport: { bySessionId: {} },
@@ -420,7 +442,10 @@ function buildUserShellActions(set: ImmerSet) {
     ) =>
       set((draft) => {
         if (!environmentId) return;
-        draft.userShells.byEnvironmentId[environmentId] = shells;
+        const dismissed = draft.userShells.dismissedByEnvironmentId[environmentId];
+        draft.userShells.byEnvironmentId[environmentId] = dismissed
+          ? shells.filter((shell) => !dismissed[shell.terminalId])
+          : shells;
         draft.userShells.loaded[environmentId] = true;
         draft.userShells.loading[environmentId] = false;
       }),
@@ -435,6 +460,8 @@ function buildUserShellActions(set: ImmerSet) {
     ) =>
       set((draft) => {
         if (!environmentId) return;
+        const dismissed = draft.userShells.dismissedByEnvironmentId[environmentId];
+        if (dismissed?.[shell.terminalId]) return;
         const existing = draft.userShells.byEnvironmentId[environmentId] || [];
         if (!existing.some((s) => s.terminalId === shell.terminalId)) {
           draft.userShells.byEnvironmentId[environmentId] = [...existing, shell];
@@ -443,6 +470,8 @@ function buildUserShellActions(set: ImmerSet) {
     removeUserShell: (environmentId: string, terminalId: string) =>
       set((draft) => {
         if (!environmentId) return;
+        const dismissed = (draft.userShells.dismissedByEnvironmentId[environmentId] ??= {});
+        dismissed[terminalId] = true;
         const existing = draft.userShells.byEnvironmentId[environmentId] || [];
         draft.userShells.byEnvironmentId[environmentId] = existing.filter(
           (s) => s.terminalId !== terminalId,
@@ -495,6 +524,7 @@ export function migrateEnvKeyedData(
   migrate(draft.shell.outputs);
   migrate(draft.shell.statuses);
   migrate(draft.userShells.byEnvironmentId);
+  migrate(draft.userShells.dismissedByEnvironmentId);
   migrate(draft.userShells.loading);
   migrate(draft.userShells.loaded);
 }
@@ -532,7 +562,7 @@ export const createSessionRuntimeSlice: StateCreator<
   setGitStatus: (sessionId, gitStatus) => {
     let changed = false;
     set((draft) => {
-      changed = applyGitStatus(draft, sessionId, gitStatus);
+      changed = applyGitStatus(draft, sessionId, normalizeGitStatusEntry(gitStatus));
     });
     return changed;
   },

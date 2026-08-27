@@ -14,6 +14,7 @@ import {
   IconTimeline,
 } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { PageTopbar } from "@/components/page-topbar";
 import { KanbanDisplayDropdown } from "../kanban-display-dropdown";
 import { usePluginTaskFilters } from "@/hooks/use-plugin-task-filters";
@@ -27,6 +28,8 @@ import type { TasksListDisplayOptions } from "./mobile-menu-task-list-options";
 import { linkToTaskOverview, linkToTasks } from "@/lib/links";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
+import { QuickChatActivityIndicator } from "@/components/quick-chat/quick-chat-activity-indicator";
+import { useQuickChatActivity } from "@/components/quick-chat/use-quick-chat-activity";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { useReleaseNotes } from "@/hooks/use-release-notes";
 import { useSystemHealthIndicator } from "@/hooks/use-system-health-indicator";
@@ -38,7 +41,6 @@ import type { ComponentProps, RefObject } from "react";
 type KanbanHeaderProps = {
   workspaceId?: string;
   currentPage?: "kanban" | "tasks";
-  hideTitle?: boolean;
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
   isSearchLoading?: boolean;
@@ -58,19 +60,32 @@ const VIEW_TOGGLE_ITEMS: ViewToggleItem[] = [
   { value: "list", icon: IconList, labelKey: "kanban:list" },
 ];
 
-const WORKBENCH_TOPBAR_CLASSNAME = "h-12 border-b-0 px-3 py-2";
 const DESKTOP_HEADER_NARROW_PX = 800;
 
 function getWorkspaceLabel(
   workspaces: Array<{ id: string; name: string }>,
   activeWorkspaceId: string | null,
+  t: TFunction,
 ): string {
-  if (!activeWorkspaceId) return "All workspaces";
-  return workspaces.find((workspace) => workspace.id === activeWorkspaceId)?.name ?? "Workspace";
+  if (!activeWorkspaceId) return t("kanban:allWorkspaces");
+  return (
+    workspaces.find((workspace) => workspace.id === activeWorkspaceId)?.name ??
+    t("common:workspace")
+  );
 }
 
-function getHeaderTitle(currentPage: string): string {
-  return currentPage === "tasks" ? "Tasks" : "Home";
+/**
+ * The header title is display copy, so it must not double as the "is this the
+ * home page?" flag — `title === "Home"` was true only in English and silently
+ * picked the wrong branch in every other locale. `currentPage` is the
+ * discriminant; the title is derived from it.
+ */
+function isHomePage(currentPage: string): boolean {
+  return currentPage !== "tasks";
+}
+
+function getHeaderTitle(currentPage: string, t: TFunction): string {
+  return isHomePage(currentPage) ? t("sidebar:home") : t("sidebar:tasks");
 }
 
 function toHeaderHealthProps(health: ReturnType<typeof useSystemHealthIndicator>) {
@@ -147,6 +162,7 @@ function useIsHeaderNarrow(ref: RefObject<HTMLElement | null>): boolean {
 function TabletQuickActions({ workspaceId }: { workspaceId?: string }) {
   const { t } = useTranslation();
   const handleOpenQuickChat = useQuickChatLauncher(workspaceId);
+  const { activity: quickChatActivity, label: quickChatLabel } = useQuickChatActivity(workspaceId);
   const handleOpenQuickTerminal = useQuickTerminalLauncher(workspaceId);
   if (!workspaceId) return null;
 
@@ -167,10 +183,13 @@ function TabletQuickActions({ workspaceId }: { workspaceId?: string }) {
         size="icon-lg"
         onClick={handleOpenQuickChat}
         className="!size-11 cursor-pointer"
-        aria-label={t("sidebar:quickChat")}
+        aria-label={quickChatLabel}
         data-testid="tablet-quick-chat-button"
       >
-        <IconMessageCircle className="h-4 w-4" />
+        <span className="relative flex">
+          <IconMessageCircle className="h-4 w-4" />
+          <QuickChatActivityIndicator activity={quickChatActivity} />
+        </span>
       </Button>
     </>
   );
@@ -189,7 +208,6 @@ function TabletHeader({
   setMenuOpen,
   showHealthIndicator,
   onOpenHealthDialog,
-  hideTitle,
 }: {
   title: string;
   workspaceLabel: string;
@@ -203,19 +221,17 @@ function TabletHeader({
   setMenuOpen: (open: boolean) => void;
   showHealthIndicator: boolean;
   onOpenHealthDialog: () => void;
-  hideTitle?: boolean;
 }) {
   const { t } = useTranslation();
-  const isHome = title === "Home";
   const pluginTaskFilters = usePluginTaskFilters();
 
   return (
     <PageTopbar
-      title={hideTitle ? "" : title}
-      subtitle={hideTitle ? undefined : workspaceLabel}
-      backLabel={hideTitle || isHome ? "" : "Kandev"}
-      className={WORKBENCH_TOPBAR_CLASSNAME}
-      variant={hideTitle || isHome ? "root" : "breadcrumb"}
+      title={title}
+      // 44px floor: this bar keeps its icon-lg touch controls above the
+      // token's 40px. The md: variant is required — tablets render at md+
+      // where the token's md:min-h-10 would beat an unprefixed floor.
+      className="md:min-h-11"
       actionsClassName="gap-2"
       actions={
         <>
@@ -277,7 +293,6 @@ function DesktopHeader({
   handleViewChange,
   showHealthIndicator,
   onOpenHealthDialog,
-  hideTitle,
 }: {
   title: string;
   workspaceLabel: string;
@@ -290,7 +305,6 @@ function DesktopHeader({
   handleViewChange: (value: string) => void;
   showHealthIndicator: boolean;
   onOpenHealthDialog: () => void;
-  hideTitle?: boolean;
 }) {
   const { t } = useTranslation();
   const headerRef = useRef<HTMLElement>(null);
@@ -305,7 +319,6 @@ function DesktopHeader({
       className={`${isNarrow ? "w-44" : "w-72 xl:w-80"} [&_input]:h-8`}
     />
   ) : null;
-  const isHome = title === "Home";
   const centerSearch =
     searchInput && !isNarrow ? <div data-testid="kanban-header-search">{searchInput}</div> : null;
   const actionsSearch = isNarrow ? searchInput : null;
@@ -313,12 +326,8 @@ function DesktopHeader({
   return (
     <PageTopbar
       ref={headerRef}
-      title={hideTitle ? "" : title}
-      subtitle={hideTitle ? undefined : workspaceLabel}
-      backLabel={hideTitle || isHome ? "" : "Kandev"}
+      title={title}
       center={centerSearch}
-      className={WORKBENCH_TOPBAR_CLASSNAME}
-      variant={hideTitle || isHome ? "root" : "breadcrumb"}
       actions={
         <>
           {actionsSearch}
@@ -375,12 +384,12 @@ function useHeaderView(
 export function KanbanHeader({
   workspaceId,
   currentPage = "kanban",
-  hideTitle = false,
   searchQuery = "",
   onSearchChange,
   isSearchLoading = false,
   tasksListOptions,
 }: KanbanHeaderProps) {
+  const { t } = useTranslation();
   const { isMobile, isTablet } = useResponsiveBreakpoint();
   const isMenuOpen = useAppStore((state) => state.mobileKanban.isMenuOpen);
   const setMenuOpen = useAppStore((state) => state.setMobileKanbanMenuOpen);
@@ -391,8 +400,8 @@ export function KanbanHeader({
   const healthIndicator = useSystemHealthIndicator();
   const toggleValue = currentPage === "tasks" ? "list" : effectiveTaskListingView;
   const handleViewChange = useHeaderView(currentPage, workspaceId, workflowId, onViewModeChange);
-  const title = getHeaderTitle(currentPage);
-  const workspaceLabel = getWorkspaceLabel(workspaces, activeWorkspaceId);
+  const title = getHeaderTitle(currentPage, t);
+  const workspaceLabel = getWorkspaceLabel(workspaces, activeWorkspaceId, t);
 
   const healthProps = toHeaderHealthProps(healthIndicator);
   const sharedSearch = { searchQuery, onSearchChange, isSearchLoading };
@@ -405,10 +414,8 @@ export function KanbanHeader({
           currentPage={currentPage}
           title={title}
           workspaceLabel={workspaceLabel}
-          hideTitle={hideTitle}
           {...sharedSearch}
           tasksListOptions={tasksListOptions}
-          {...healthProps}
         />
       );
     }
@@ -420,7 +427,6 @@ export function KanbanHeader({
             workspaceLabel={workspaceLabel}
             workspaceId={workspaceId}
             currentPage={currentPage}
-            hideTitle={hideTitle}
             {...sharedSearch}
             toggleValue={toggleValue}
             handleViewChange={handleViewChange}
@@ -434,7 +440,6 @@ export function KanbanHeader({
             currentPage={currentPage}
             {...sharedSearch}
             tasksListOptions={tasksListOptions}
-            {...healthProps}
           />
         </>
       );
@@ -445,7 +450,6 @@ export function KanbanHeader({
         workspaceLabel={workspaceLabel}
         workspaceId={workspaceId}
         currentPage={currentPage}
-        hideTitle={hideTitle}
         {...sharedSearch}
         toggleValue={toggleValue}
         handleViewChange={handleViewChange}

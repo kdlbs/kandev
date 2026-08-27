@@ -26,6 +26,7 @@ const settings: StorageMaintenanceSettings = {
 const capabilities = {
   managed_go_cache_path: "/data/cache/go-build",
   go_cache_adoption_available: true,
+  temporary_artifacts_available: true,
   docker_available: true,
   docker_host: "",
   host_global_docker_cleanup_allowed: true,

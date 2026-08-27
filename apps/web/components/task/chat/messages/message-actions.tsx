@@ -9,11 +9,13 @@ import {
   IconChevronLeft,
   IconChevronRight,
   IconEyeCode,
+  IconHourglass,
   IconInfoCircle,
   IconStar,
 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/utils";
+import { formatPromptDuration, messageTurnDurationSeconds } from "@/lib/prompt-history";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { useAppStore } from "@/components/state-provider";
 import type { Message, Turn } from "@/lib/types/http";
@@ -67,7 +69,7 @@ function FavoriteButton({ isFavorite, onToggle }: { isFavorite: boolean; onToggl
       onClick={onToggle}
       aria-pressed={isFavorite}
       className={cn(
-        "flex min-h-11 min-w-11 items-center justify-center sm:min-h-0 sm:min-w-0 sm:h-5 sm:w-5 sm:p-1",
+        ACTION_BUTTON_SIZE,
         ACTION_BUTTON_HOVER,
         ACTION_BUTTON_TRANSITION,
         "cursor-pointer",
@@ -78,7 +80,7 @@ function FavoriteButton({ isFavorite, onToggle }: { isFavorite: boolean; onToggl
         isFavorite ? t("task:removeMessageFromFavorites") : t("task:markMessageAsFavorite")
       }
     >
-      <IconStar className={cn("h-5 w-5", isFavorite && "fill-yellow-500")} />
+      <IconStar className={cn("h-full w-full", isFavorite && "fill-yellow-500")} />
     </button>
   );
 }
@@ -189,6 +191,11 @@ function MetadataValue({ value }: { value: unknown }) {
   );
 }
 
+/**
+ * Debug dialog exposing a message's persisted and turn-derived metadata. The
+ * entries area is a keyboard-focusable scroll region so long fields (e.g.
+ * `turn_metadata`) stay reachable on every input modality.
+ */
 function MessageDebugDialog({
   message,
   turn,
@@ -214,11 +221,16 @@ function MessageDebugDialog({
           <IconInfoCircle className="h-full w-full" />
         </button>
       </DialogTrigger>
-      <DialogContent className="max-h-[85vh] overflow-hidden sm:max-w-2xl">
-        <DialogHeader>
+      <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-2xl">
+        <DialogHeader className="shrink-0">
           <DialogTitle>{t("task:messageMetadataTitle")}</DialogTitle>
         </DialogHeader>
-        <div className="grid gap-3 overflow-auto pr-1">
+        <div
+          role="region"
+          aria-label={t("task:messageMetadataEntries")}
+          tabIndex={0}
+          className="grid min-h-0 flex-1 gap-3 overflow-auto pr-1 outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+        >
           {Object.entries(entries).map(([key, value]) => (
             <div key={key} className="grid gap-1">
               <div className="font-mono text-[10px] uppercase text-muted-foreground">{key}</div>
@@ -382,15 +394,26 @@ export function MessageActions(props: MessageActionsProps) {
     isFavorite,
     onToggleFavorite,
   } = resolveMessageActionsProps(props);
+  const { t } = useTranslation();
   const { copied, copy } = useCopyToClipboard();
   const { turn, usageMultiplier } = useMessageTurnAndUsage(message);
+  const usesTouchDrawer = useTouchDrawer();
+  const durationSeconds = messageTurnDurationSeconds(message, turn);
   const sessionConfigText = formatMessageSessionConfig(message.metadata, turn?.metadata);
+  const actionRowVisibility = usesTouchDrawer
+    ? "opacity-100"
+    : "opacity-100 sm:opacity-0 sm:group-hover:opacity-100";
   const handleCopy = async () => {
     await copy(message.content);
   };
 
   return (
-    <div className="flex items-center gap-2 mt-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+    <div
+      className={cn(
+        "flex items-center gap-2 mt-2 focus-within:opacity-100 transition-opacity",
+        actionRowVisibility,
+      )}
+    >
       {showCopy && <CopyButton copied={copied} onCopy={handleCopy} />}
       {showRawToggle && onToggleRaw && (
         <RawToggleButton
@@ -415,6 +438,19 @@ export function MessageActions(props: MessageActionsProps) {
         showTimestamp={showTimestamp}
         createdAt={message.created_at}
       />
+      {durationSeconds !== null && (
+        <span
+          data-testid="message-turn-duration"
+          className="inline-flex items-center gap-1 whitespace-nowrap shrink-0 text-[10px] text-muted-foreground/60 font-mono"
+        >
+          <IconHourglass className="h-3 w-3 shrink-0" aria-hidden="true" />
+          {formatPromptDuration(durationSeconds, {
+            s: t("task:durationUnitSeconds"),
+            m: t("task:durationUnitMinutes"),
+            h: t("task:durationUnitHours"),
+          })}
+        </span>
+      )}
     </div>
   );
 }

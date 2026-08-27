@@ -1,12 +1,80 @@
 package statussummary
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/task/models"
 )
+
+func isTaskErrorRefreshEvent(eventType string) bool {
+	return eventType == events.TaskUpdated || eventType == events.TaskStateChanged
+}
+
+func isPendingSensitiveEvent(eventType string, data map[string]interface{}) bool {
+	switch eventType {
+	case events.TaskUpdated,
+		events.TaskSessionStateChanged,
+		events.MessageAdded,
+		events.ClarificationAnswered,
+		events.ClarificationPrimaryAnswered,
+		events.ClarificationCancelled,
+		events.ClarificationStaleDismissed,
+		events.PermissionRequestReceived:
+		return true
+	case events.MessageUpdated, events.MessageDeleted:
+		messageType := strings.ToLower(stringField(data, "type"))
+		return pendingActionForMessage(messageType, boolValue(data["requests_input"])) != ""
+	default:
+		return false
+	}
+}
+
+func (p *Projector) refreshPendingLocked(
+	ctx context.Context,
+	taskID string,
+	state *projectionState,
+) (bool, error) {
+	actions, err := p.loadPendingActions(ctx, taskID)
+	if err != nil {
+		return false, fmt.Errorf("load pending actions for task status summary %q: %w", taskID, err)
+	}
+	next := make(map[string]string, len(actions))
+	for sessionID, action := range actions {
+		sessionID = strings.TrimSpace(sessionID)
+		action = strings.TrimSpace(action)
+		if sessionID == "" || (action != pendingClarification && action != pendingPermission) {
+			continue
+		}
+		next[sessionID] = action
+	}
+	changed := !pendingActionsEqual(state.pending, next)
+	previousTaskPending := state.taskPending
+	state.pendingObserved = true
+	state.pending = next
+	state.pendingRequests = make(map[string]pendingRequestIdentity)
+	recomputeTaskPending(state)
+	return changed || state.taskPending != previousTaskPending, nil
+}
+
+func pendingActionsEqual(left, right map[string]string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for sessionID, action := range left {
+		if right[sessionID] != action {
+			return false
+		}
+	}
+	return true
+}
 
 func (p *Projector) clearPendingLocked(state *projectionState, sessionID string) bool {
 	if sessionID == "" {
@@ -16,6 +84,9 @@ func (p *Projector) clearPendingLocked(state *projectionState, sessionID string)
 	_, existed := state.pending[sessionID]
 	delete(state.pending, sessionID)
 	delete(state.pendingRequests, sessionID)
+	// A restarted projector has only the aggregate taskPending baseline, not
+	// the original per-session entry. Recompute before deciding this is a no-op
+	// so stale-dismissed events still clear and persist that restored value.
 	previousTaskPending := state.taskPending
 	recomputeTaskPending(state)
 	return existed || previousTaskPending != state.taskPending
@@ -104,10 +175,13 @@ func errorFromMap(now time.Time, sessionID string, data map[string]interface{}) 
 		stamp = occurredAt.UTC().Format(time.RFC3339Nano) + ":" + preview
 	}
 	return &ActiveErrorSummary{
-		SessionID:  truncateString(sessionID, maxSessionIDBytes),
-		Stamp:      truncateString(stamp, maxActiveErrorStampBytes),
-		OccurredAt: occurredAt.UTC(),
-		Preview:    preview,
+		SessionID:        truncateString(sessionID, maxSessionIDBytes),
+		TaskRepositoryID: truncateString(stringField(data, "task_repository_id"), maxTaskRepositoryIDBytes),
+		Stamp:            truncateString(stamp, maxActiveErrorStampBytes),
+		OccurredAt:       occurredAt.UTC(),
+		Preview:          preview,
+		Category:         truncateString(firstString(data, "category", "code"), maxActiveErrorCategoryBytes),
+		RecoveryActions:  normalizeRecoveryActions(recoveryActionsValue(data["recovery_actions"])),
 	}, true
 }
 
@@ -115,8 +189,31 @@ func errorEqual(a, b *ActiveErrorSummary) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
-	return a.SessionID == b.SessionID && a.Stamp == b.Stamp &&
-		a.OccurredAt.Equal(b.OccurredAt) && a.Preview == b.Preview
+	return a.SessionID == b.SessionID && a.TaskRepositoryID == b.TaskRepositoryID &&
+		a.Stamp == b.Stamp && a.OccurredAt.Equal(b.OccurredAt) &&
+		a.Preview == b.Preview && a.Category == b.Category &&
+		slices.Equal(a.RecoveryActions, b.RecoveryActions)
+}
+
+func normalizeRecoveryActions(actions []string) []string {
+	return models.NormalizeRecoveryActions(actions)
+}
+
+func recoveryActionsValue(value interface{}) []string {
+	switch actions := value.(type) {
+	case []string:
+		return append([]string(nil), actions...)
+	case []interface{}:
+		out := make([]string, 0, len(actions))
+		for _, action := range actions {
+			if value, ok := action.(string); ok {
+				out = append(out, value)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func eventDataMap(data interface{}) (map[string]interface{}, error) {
@@ -217,6 +314,10 @@ func timeValue(value interface{}) time.Time {
 	switch value := value.(type) {
 	case time.Time:
 		return value
+	case *time.Time:
+		if value != nil {
+			return *value
+		}
 	case string:
 		parsed, err := time.Parse(time.RFC3339Nano, value)
 		if err == nil {
@@ -224,6 +325,26 @@ func timeValue(value interface{}) time.Time {
 		}
 	}
 	return time.Time{}
+}
+
+func cloneTimePtr(value *time.Time) *time.Time {
+	if value == nil || value.IsZero() {
+		return nil
+	}
+	copy := value.UTC()
+	return &copy
+}
+
+func maxTimePtr(left, right *time.Time) *time.Time {
+	left = cloneTimePtr(left)
+	right = cloneTimePtr(right)
+	if left == nil {
+		return right
+	}
+	if right == nil || !right.After(*left) {
+		return left
+	}
+	return right
 }
 
 func maxInt(value, minimum int) int {

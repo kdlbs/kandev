@@ -13,6 +13,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/securityutil"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/watchreset"
 )
@@ -91,30 +92,32 @@ type WatchDependencyValidator interface {
 
 // Service coordinates GitLab integration operations.
 type Service struct {
-	mu                   sync.RWMutex
-	configMutationMu     sync.Mutex
-	host                 string
-	client               Client
-	authMethod           string
-	secrets              SecretProvider
-	secretManager        SecretManager
-	workspaceSecrets     WorkspaceSecretStore
-	workspaceClientFn    WorkspaceClientFactory
-	glabTokenFn          func(context.Context, string) (string, error)
-	workspaceClients     map[string]Client
-	workspaceClientRevs  map[string]int64
-	environmentTokenHost string
-	hostStore            HostStore
-	store                *Store
-	eventBus             bus.EventBus
-	taskDeleter          TaskDeleter
-	cascadeTaskDeleter   watchreset.TaskDeleter
-	taskSessionChecker   TaskSessionChecker
-	repositoryLookup     RepositoryLookup
-	dependencyValidator  WatchDependencyValidator
-	taskAuthorizer       TaskAuthorizer
-	promptResolver       PromptResolver
-	logger               *logger.Logger
+	mu                       sync.RWMutex
+	configMutationMu         sync.Mutex
+	host                     string
+	client                   Client
+	authMethod               string
+	secrets                  SecretProvider
+	secretManager            SecretManager
+	workspaceSecrets         WorkspaceSecretStore
+	workspaceClientFn        WorkspaceClientFactory
+	glabTokenFn              func(context.Context, string) (string, error)
+	workspaceClients         map[string]Client
+	workspaceClientRevs      map[string]int64
+	environmentTokenHost     string
+	hostStore                HostStore
+	store                    *Store
+	eventBus                 bus.EventBus
+	taskEventSubs            []bus.Subscription
+	taskDeleter              TaskDeleter
+	comparisonTargetObserver ComparisonTargetObserver
+	cascadeTaskDeleter       watchreset.TaskDeleter
+	taskSessionChecker       TaskSessionChecker
+	repositoryLookup         RepositoryLookup
+	dependencyValidator      WatchDependencyValidator
+	taskAuthorizer           TaskAuthorizer
+	promptResolver           PromptResolver
+	logger                   *logger.Logger
 }
 
 // PromptResolver resolves editable prompt content by name. Mirrors
@@ -140,8 +143,9 @@ func (s *Service) getPromptResolver() PromptResolver {
 // SetEventBus wires the event bus for publishing review/issue/feedback events.
 func (s *Service) SetEventBus(b bus.EventBus) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.eventBus = b
+	s.mu.Unlock()
+	s.subscribeTaskEvents()
 }
 
 // SetTaskDeleter wires the task-deletion dependency used by cleanup sweepers.
@@ -258,8 +262,44 @@ func (s *Service) resolveWatchRepository(ctx context.Context, workspaceID, repos
 // task-mr endpoints return empty results and SyncTaskMR is a no-op.
 func (s *Service) SetStore(store *Store) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.store = store
+	s.mu.Unlock()
+	s.subscribeTaskEvents()
+}
+
+func (s *Service) subscribeTaskEvents() {
+	s.mu.Lock()
+	busReady := s.eventBus != nil && s.store != nil && len(s.taskEventSubs) == 0
+	eventBus := s.eventBus
+	s.mu.Unlock()
+	if !busReady {
+		return
+	}
+	sub, err := eventBus.Subscribe(events.TaskDeleted, s.handleTaskDeleted)
+	if err != nil {
+		s.logger.Error("failed to subscribe to task.deleted events", zap.Error(err))
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.taskEventSubs) > 0 {
+		// A concurrent call already subscribed while we were outside the lock.
+		_ = sub.Unsubscribe()
+		return
+	}
+	s.taskEventSubs = append(s.taskEventSubs, sub)
+}
+
+func (s *Service) unsubscribeTaskEvents() {
+	s.mu.Lock()
+	subs := s.taskEventSubs
+	s.taskEventSubs = nil
+	s.mu.Unlock()
+	for _, sub := range subs {
+		if err := sub.Unsubscribe(); err != nil {
+			s.logger.Error("failed to unsubscribe from task event", zap.Error(err))
+		}
+	}
 }
 
 // SetWorkspaceSecretStore wires deterministic per-workspace credential storage.
@@ -678,6 +718,7 @@ func (s *Service) syncTaskMRWithClient(
 	if err := store.UpsertTaskMR(ctx, row); err != nil {
 		return nil, fmt.Errorf("upsert task MR: %w", err)
 	}
+	s.reconcileComparisonTargetFromSync(ctx, taskID, host, mr)
 	return &taskMRSyncResult{
 		taskMR:         row,
 		reviewers:      append([]MRReviewer(nil), mr.Reviewers...),

@@ -3,6 +3,7 @@ import { test, type SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { LayoutSettingsPage } from "../../pages/layout-settings-page";
 import { SessionPage } from "../../pages/session-page";
+import { dwell } from "../../helpers/causal-waits";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 const PR_NUMBER = 702;
@@ -141,6 +142,46 @@ async function dockviewSnapshot(page: Page): Promise<DockviewSnapshot> {
       rightGroupOrder: files?.group?.panels.map((panel) => panel.id) ?? [],
     };
   });
+}
+
+/**
+ * Wait until the dockview layout for this session has been persisted with the
+ * given panel in it.
+ *
+ * The layout write is debounced (~350ms) and publishes nothing, so the only
+ * honest anchor is the artifact it produces: `sessionStorage` under
+ * `kandev.dockview.env-layout-v3.<envId>`. Polling the artifact rather than
+ * sleeping past the debounce means a persist that never happens fails here
+ * instead of silently changing what a later step is testing. It cannot be
+ * satisfied by a stale write either: the panel is only in the layout after the
+ * preset that adds it has been applied.
+ */
+async function waitForPersistedLayoutWithPanel(
+  page: Page,
+  sessionId: string,
+  panelId: string,
+): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          ({ sid, pid }) => {
+            type StoreWindow = Window & {
+              __KANDEV_E2E_STORE__?: {
+                getState: () => { environmentIdBySessionId: Record<string, string> };
+              };
+            };
+            const store = (window as StoreWindow).__KANDEV_E2E_STORE__;
+            const envId = store?.getState().environmentIdBySessionId[sid];
+            if (!envId) return false;
+            const raw = window.sessionStorage.getItem(`kandev.dockview.env-layout-v3.${envId}`);
+            return raw !== null && raw.includes(pid);
+          },
+          { sid: sessionId, pid: panelId },
+        ),
+      { timeout: 10_000, message: `layout for session ${sessionId} never persisted ${panelId}` },
+    )
+    .toBe(true);
 }
 
 async function expectNoTerminalDefault(page: Page): Promise<void> {
@@ -283,6 +324,20 @@ test.describe("Task layout profile defaults", () => {
         prDetailsGroupId: "group-right-top",
         rightGroupOrder: ["files", "changes", "pr-detail"],
       });
+
+    const agentGroup = testPage.locator('.dv-groupview:has([data-testid^="session-tab-"])');
+    await agentGroup.getByTestId("dockview-add-panel-btn").click();
+    await expect(
+      testPage.getByTestId(`add-panel-pr-item-testorg-testrepo-${PR_NUMBER}`),
+    ).toHaveCount(0);
+    await expect(testPage.getByTestId("add-panel-pr-submenu")).toHaveCount(0);
+    await testPage.keyboard.press("Escape");
+    await expect
+      .poll(() => dockviewSnapshot(testPage))
+      .toMatchObject({
+        prDetailsGroupId: "group-right-top",
+        rightGroupOrder: ["files", "changes", "pr-detail"],
+      });
   });
 
   test("fresh tasks use the no-terminal default while existing tasks wait for Reset Layout", async ({
@@ -297,7 +352,10 @@ test.describe("Task layout profile defaults", () => {
     await testPage.getByTestId("layout-preset-trigger").click();
     await testPage.locator('[data-testid="layout-preset-item"][data-preset-id="default"]').click();
     await expect(testPage.getByTestId("terminal-panel")).toBeVisible({ timeout: 15_000 });
-    await testPage.waitForTimeout(500);
+    // Task A's layout has to be on disk before the default changes underneath
+    // it, or the later "existing tasks keep their terminal" assertion is
+    // testing the new default rather than A's saved layout.
+    await waitForPersistedLayoutWithPanel(testPage, taskA.session_id!, "terminal-default");
 
     await apiClient.saveUserSettings({
       saved_layouts: [
@@ -314,7 +372,12 @@ test.describe("Task layout profile defaults", () => {
     const taskB = await createTaskWithSession(apiClient, seedData, "Fresh Layout Task");
     await openTask(testPage, taskB.id);
     await expectNoTerminalDefault(testPage);
-    await testPage.waitForTimeout(500);
+    await dwell(
+      testPage,
+      500,
+      "negative-assertion",
+      "asserts that no ordinary shell is ever spawned for a task whose default layout has no terminal; a shell that must not be created publishes nothing, so the check needs real time to have any chance of catching one",
+    );
     expect(await ordinaryShells(apiClient, taskB.id)).toHaveLength(0);
 
     await openTask(testPage, taskA.id);
@@ -329,10 +392,80 @@ test.describe("Task layout profile defaults", () => {
     await testPage
       .locator('[data-testid="layout-saved-delete"][data-layout-id="focused-default"]')
       .click({ force: true });
-    await expect(testPage.getByRole("alertdialog")).toContainText(
+    const confirmation = testPage.getByTestId("layout-saved-delete-confirm-popover");
+    await expect(confirmation).toContainText(
       "The built-in Default layout will become the default.",
     );
-    await testPage.getByRole("button", { name: "Cancel" }).click();
+    await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
+    await confirmation.getByRole("button", { name: "Cancel" }).click();
     expect((await apiClient.getUserSettings()).settings.saved_layouts).toHaveLength(1);
+  });
+
+  test("confirms custom layout-profile deletion at the selected profile action", async ({
+    testPage,
+    apiClient,
+  }) => {
+    await apiClient.saveUserSettings({
+      saved_layouts: [
+        {
+          id: "custom-layout-to-delete",
+          name: "Custom layout to delete",
+          is_default: true,
+          layout: noTerminalLayout(),
+          created_at: new Date().toISOString(),
+        },
+      ],
+    });
+
+    const layouts = new LayoutSettingsPage(testPage);
+    await layouts.open();
+    const deleteButton = testPage.getByTestId("layout-profile-delete");
+    await expect(deleteButton).toBeVisible();
+    await deleteButton.click();
+
+    const confirmation = testPage.getByTestId("layout-profile-delete-confirm-popover");
+    await expect(confirmation).toBeVisible();
+    await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
+    await confirmation.getByRole("button", { name: "Cancel" }).click();
+    expect((await apiClient.getUserSettings()).settings.saved_layouts).toHaveLength(1);
+
+    await deleteButton.click();
+    await testPage
+      .getByTestId("layout-profile-delete-confirm-popover")
+      .getByTestId("layout-profile-delete-confirm")
+      .click();
+    await expect(deleteButton).toHaveCount(0);
+
+    await layouts.save();
+    await expect
+      .poll(async () => (await apiClient.getUserSettings()).settings.saved_layouts)
+      .toEqual([]);
+  });
+
+  test("adds Prompt History through the layout editor and restores it into a task", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(180_000);
+    const layouts = new LayoutSettingsPage(testPage);
+    await layouts.open();
+
+    await expect(layouts.editor.locator(".dv-tab", { hasText: "Prompt History" })).toHaveCount(0);
+    await layouts.addPanel("Prompt History");
+
+    // The added panel survives save and is persisted in the default profile.
+    await layouts.save();
+    const saved = (await apiClient.getUserSettings()).settings.saved_layouts;
+    expect(saved).toHaveLength(1);
+    expect(JSON.stringify(saved[0].layout)).toContain("prompt-history");
+
+    // A new task opens with the edited default layout; the panel restores and renders.
+    const task = await createTaskWithSession(apiClient, seedData, "Prompt History Layout Task");
+    await openTask(testPage, task.id);
+    const tab = testPage.locator(".dv-tab", { hasText: "Prompt History" });
+    await expect(tab).toBeVisible({ timeout: 15_000 });
+    await tab.click();
+    await expect(testPage.getByTestId("prompt-history-panel")).toBeVisible();
   });
 });

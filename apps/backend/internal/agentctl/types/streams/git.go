@@ -65,11 +65,25 @@ type GitStatusUpdate struct {
 	// empty.
 	RemoteBehind int `json:"remote_behind"`
 
+	// RemoteHeadCommit is the locally observed tip of RemoteBranch. It is
+	// captured with RemoteAhead and RemoteBehind so consumers can compare the
+	// checkout with an upstream snapshot without confusing it with the base.
+	RemoteHeadCommit string `json:"remote_head_commit,omitempty"`
+
 	// HeadCommit is the current HEAD commit SHA.
 	HeadCommit string `json:"head_commit,omitempty"`
 
 	// BaseCommit is the base branch HEAD commit SHA (for comparison/diff).
 	BaseCommit string `json:"base_commit,omitempty"`
+
+	// ComparisonTarget is the credential-free provider target display identity
+	// used when an explicit cross-repository comparison is active.
+	ComparisonTarget string `json:"comparison_target,omitempty"`
+	// ComparisonStatus is "ready" or "unavailable" for an explicit target.
+	ComparisonStatus string `json:"comparison_status,omitempty"`
+	// ComparisonErrorCode is a bounded machine-readable failure code. Raw Git
+	// and provider errors never enter the workspace stream.
+	ComparisonErrorCode string `json:"comparison_error_code,omitempty"`
 
 	// Files contains detailed information about each changed file.
 	Files map[string]FileInfo `json:"files,omitempty"`

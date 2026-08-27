@@ -11,9 +11,14 @@ vi.mock("@/lib/api/domains/github-api", () => ({
 
 // Import after mocks so the hook picks up the mocked module.
 import { usePRInfoByURL, parseGitHubIssueUrl, parseGitHubPrUrl } from "./use-pr-info-by-url";
+import { pluginRegistry } from "@/lib/plugins/registry";
+import type { RepositoryInspection } from "@/lib/plugins/types";
 
 afterEach(() => {
   cleanup();
+  pluginRegistry.unregisterPlugin(BITBUCKET_PLUGIN_ID);
+  pluginRegistry.unregisterPlugin("test-coarse-provider");
+  pluginRegistry.unregisterPlugin("test-exact-provider");
   fetchPRInfoMock.mockReset();
   fetchIssueInfoMock.mockReset();
   vi.useRealTimers();
@@ -23,6 +28,8 @@ const PR_URL_A = "https://github.com/acme/site/pull/42";
 const PR_URL_B = "https://github.com/acme/api/pull/7";
 const ISSUE_URL_A = "https://github.com/acme/site/issues/1456";
 const REPO_URL = "https://github.com/acme/site";
+const WORKSPACE_ID = "workspace-1";
+const BITBUCKET_PLUGIN_ID = "test-bitbucket-provider";
 
 function makePR(overrides: { number: number; title?: string; head?: string; base?: string }) {
   return {
@@ -108,6 +115,146 @@ describe("parseGitHubIssueUrl", () => {
 });
 
 describe("usePRInfoByURL", () => {
+  it("inspects every coarse URL match and selects the one exact provider", async () => {
+    const url = "https://code.example.test/projects/PLATFORM/repos/web/pull-requests/42";
+    const coarseInspect = vi.fn().mockResolvedValue(null);
+    const exactInspect = vi.fn().mockResolvedValue({
+      providerId: "exact",
+      providerHost: "https://code.example.test",
+      ownerOrProject: "PLATFORM",
+      repositoryId: "web-42",
+      repositoryName: "web",
+      cloneUrl: "https://code.example.test/scm/PLATFORM/web.git",
+      baseBranch: "main",
+      headBranch: "feature/exact",
+      pullRequest: { number: 42, title: "Exact provider" },
+    });
+    pluginRegistry.forPlugin("test-coarse-provider").registerRepositoryProvider({
+      id: "coarse",
+      label: "Coarse",
+      listRepositories: async () => [],
+      matchesURL: () => true,
+      listBranches: async () => [],
+      inspectURL: coarseInspect,
+    });
+    pluginRegistry.forPlugin("test-exact-provider").registerRepositoryProvider({
+      id: "exact",
+      label: "Exact",
+      listRepositories: async () => [],
+      matchesURL: () => true,
+      listBranches: async () => [],
+      inspectURL: exactInspect,
+    });
+    const { result } = renderHook(() => usePRInfoByURL(WORKSPACE_ID));
+
+    act(() => result.current.ensure(url));
+
+    await waitFor(() => expect(result.current.info(url)?.prHeadBranch).toBe("feature/exact"));
+    expect(coarseInspect).toHaveBeenCalledOnce();
+    expect(exactInspect).toHaveBeenCalledOnce();
+  });
+});
+
+describe("usePRInfoByURL registered provider metadata", () => {
+  it("falls back to the built-in owner after a matcherless provider returns no match", async () => {
+    const inspectURL = vi.fn().mockResolvedValue(null);
+    fetchPRInfoMock.mockResolvedValue(makePR({ number: 42, head: "github-head" }));
+    pluginRegistry.forPlugin(BITBUCKET_PLUGIN_ID).registerRepositoryProvider({
+      id: "bitbucket",
+      label: "Bitbucket",
+      listRepositories: async () => [],
+      listBranches: async () => [],
+      inspectURL,
+    });
+    const { result } = renderHook(() => usePRInfoByURL(WORKSPACE_ID));
+
+    act(() => result.current.ensure(PR_URL_A));
+
+    await waitFor(() => expect(result.current.settled(PR_URL_A)).toBe(true));
+    expect(result.current.info(PR_URL_A)?.prHeadBranch).toBe("github-head");
+    expect(result.current.inspection?.(PR_URL_A)).toBeUndefined();
+    expect(inspectURL).toHaveBeenCalledOnce();
+    expect(fetchPRInfoMock).toHaveBeenCalledOnce();
+  });
+
+  it("imports pull-request metadata from a registered provider inspection", async () => {
+    const url =
+      "https://bitbucket.example.test/bitbucket/projects/PLATFORM/repos/web/pull-requests/42";
+    const inspection: RepositoryInspection = {
+      providerId: "bitbucket",
+      providerHost: "https://bitbucket.example.test/bitbucket",
+      ownerOrProject: "PLATFORM",
+      repositoryId: "web-42",
+      repositoryName: "web",
+      cloneUrl: "https://bitbucket.example.test/bitbucket/scm/PLATFORM/web.git",
+      baseBranch: "main",
+      headBranch: "feature/dc",
+      pullRequest: { number: 42, title: "Data Center pull request" },
+    };
+    const inspectURL = vi.fn().mockResolvedValue(inspection);
+    pluginRegistry.forPlugin(BITBUCKET_PLUGIN_ID).registerRepositoryProvider({
+      id: "bitbucket",
+      label: "Bitbucket",
+      listRepositories: async () => [],
+      matchesURL: (candidate) => candidate.includes("bitbucket.example.test/bitbucket/"),
+      listBranches: async () => [],
+      inspectURL,
+    });
+    const { result } = renderHook(() => usePRInfoByURL(WORKSPACE_ID));
+
+    act(() => result.current.ensure(url));
+
+    await waitFor(() =>
+      expect(result.current.info(url)).toEqual({
+        prHeadBranch: "feature/dc",
+        prBaseBranch: "main",
+        prNumber: 42,
+        suggestedTitle: "PR #42: Data Center pull request",
+      }),
+    );
+    expect(inspectURL).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId: WORKSPACE_ID, url }),
+    );
+    expect(fetchPRInfoMock).not.toHaveBeenCalled();
+  });
+
+  it("retries an unsupported provider URL after its plugin finishes booting", async () => {
+    const url = "https://bitbucket.example.test/projects/PLATFORM/repos/web/pull-requests/42";
+    const { result } = renderHook(() => usePRInfoByURL(WORKSPACE_ID));
+    act(() => result.current.ensure(url));
+    expect(result.current.info(url)).toBeUndefined();
+
+    const inspectURL = vi.fn().mockResolvedValue({
+      providerId: "bitbucket",
+      providerHost: "https://bitbucket.example.test",
+      ownerOrProject: "PLATFORM",
+      repositoryId: "web-42",
+      repositoryName: "web",
+      cloneUrl: "https://bitbucket.example.test/scm/PLATFORM/web.git",
+      baseBranch: "main",
+      headBranch: "feature/plugin-ready",
+      pullRequest: { number: 42, title: "Plugin ready" },
+    });
+    act(() => {
+      pluginRegistry.forPlugin(BITBUCKET_PLUGIN_ID).registerRepositoryProvider({
+        id: "bitbucket",
+        label: "Bitbucket",
+        listRepositories: async () => [],
+        matchesURL: (candidate) => candidate.startsWith("https://bitbucket.example.test/"),
+        listBranches: async () => [],
+        inspectURL,
+      });
+    });
+    act(() => result.current.ensure(url));
+
+    await waitFor(() =>
+      expect(result.current.info(url)?.prHeadBranch).toBe("feature/plugin-ready"),
+    );
+    expect(inspectURL).toHaveBeenCalledOnce();
+  });
+});
+
+describe("usePRInfoByURL — GitHub pull requests", () => {
   it("fetches PR info once per unique PR URL when ensure() is called", async () => {
     fetchPRInfoMock.mockImplementation((_ws: string, _o: string, _r: string, n: number) => {
       return Promise.resolve(makePR({ number: n, head: n === 42 ? "feat-a" : "feat-b" }));
@@ -410,7 +557,7 @@ describe("usePRInfoByURL — workspace scope", () => {
       );
     const { result, rerender } = renderHook(
       ({ workspaceId }: { workspaceId: string }) => usePRInfoByURL(workspaceId),
-      { initialProps: { workspaceId: "workspace-1" } },
+      { initialProps: { workspaceId: WORKSPACE_ID } },
     );
 
     act(() => result.current.ensure(PR_URL_A));
@@ -450,7 +597,7 @@ describe("usePRInfoByURL — workspace scope", () => {
       );
     const { result, rerender } = renderHook(
       ({ workspaceId }: { workspaceId: string }) => usePRInfoByURL(workspaceId),
-      { initialProps: { workspaceId: "workspace-1" } },
+      { initialProps: { workspaceId: WORKSPACE_ID } },
     );
 
     act(() => result.current.ensure(PR_URL_A));

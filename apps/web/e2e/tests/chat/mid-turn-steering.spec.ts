@@ -5,9 +5,12 @@ import type { ApiClient } from "../../helpers/api-client";
 import { waitForActiveSessionForegroundActivity } from "../../helpers/session-store";
 import { typeWhileBusy } from "../../helpers/type-while-busy";
 import { SessionPage } from "../../pages/session-page";
+import { registerSeparateQueueRows } from "../../helpers/message-queue-settings";
+
+registerSeparateQueueRows(test);
 
 // End-to-end coverage for the mid-turn steering composer contract
-// (docs/specs/platform/mid-turn-steering.md). CONTRIBUTING.md requires Playwright
+// (docs/specs/platform/requirements/mid-turn-steering.md). CONTRIBUTING.md requires Playwright
 // coverage for UI changes; this exercises the flag-gated decision and the real
 // steer dispatch path through the mock agent, which advertises promptQueueing.
 //
@@ -150,7 +153,7 @@ test.describe.serial("Claude mid-turn steering experiment", () => {
     });
 
     // The two outcomes below replay the mid-turn steering spec's "folded" vs
-    // "deferred" outcome taxonomy (docs/specs/platform/mid-turn-steering.md)
+    // "deferred" outcome taxonomy (docs/specs/platform/requirements/mid-turn-steering.md)
     // via the dedicated mock-agent setup scenarios: steer-fold-setup never
     // answers on its own (task 08's mock-replay acceptance for "folded" —
     // pinned deterministically at the mock level by

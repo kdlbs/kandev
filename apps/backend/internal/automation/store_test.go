@@ -480,6 +480,37 @@ func TestDeleteRun(t *testing.T) {
 	}
 }
 
+func TestMarkRunFailedByTaskID_PreservesMergedPRDedupKey(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+	a := &Automation{WorkspaceID: "ws-failed", Name: "Merged cleanup", WorkflowID: "wf-1", WorkflowStepID: "s-1", Enabled: true}
+	if err := store.CreateAutomation(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	const dedupKey = "pr_merged:task-1:acme/api#7"
+	run := &AutomationRun{
+		AutomationID: a.ID, TriggerType: TriggerTypeGitHubPRMerged,
+		TaskID: "task-1", Status: RunStatusTaskCreated, DedupKey: dedupKey,
+		TriggerData: json.RawMessage(`{}`),
+	}
+	if err := store.CreateRun(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkRunFailedByTaskID(ctx, "task-1", "agent failed"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != RunStatusFailed {
+		t.Fatalf("status = %q, want failed", got.Status)
+	}
+	if got.DedupKey != dedupKey {
+		t.Fatalf("dedup key = %q, want %q", got.DedupKey, dedupKey)
+	}
+}
+
 func TestDeleteAllRuns(t *testing.T) {
 	store := setupTestStore(t)
 	ctx := context.Background()

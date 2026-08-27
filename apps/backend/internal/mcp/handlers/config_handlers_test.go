@@ -364,11 +364,12 @@ func TestLookupSession_NoPrimarySession_ReturnsNilNil(t *testing.T) {
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Test"}))
 	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Board"}))
 	// Task created without an agent → no primary session row.
-	task, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: "ws-1",
 		WorkflowID:  "wf-1",
 		Title:       "Sessionless task",
 	})
+	task := taskResult.Task
 	require.NoError(t, err)
 
 	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
@@ -383,7 +384,11 @@ type recordingMessageQueuer struct {
 	calls []messagequeue.QueuedMessage
 }
 
-func (r *recordingMessageQueuer) QueueMessage(_ context.Context, sessionID, taskID, content, model, userID string, planMode bool, _ []messagequeue.MessageAttachment) (*messagequeue.QueuedMessage, error) {
+func (r *recordingMessageQueuer) QueueMessage(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []messagequeue.MessageAttachment) (*messagequeue.QueuedMessage, error) {
+	return r.QueueMessageWithMetadata(ctx, sessionID, taskID, content, model, userID, planMode, attachments, nil)
+}
+
+func (r *recordingMessageQueuer) QueueMessageWithMetadata(_ context.Context, sessionID, taskID, content, model, userID string, planMode bool, _ []messagequeue.MessageAttachment, metadata map[string]interface{}) (*messagequeue.QueuedMessage, error) {
 	msg := messagequeue.QueuedMessage{
 		SessionID: sessionID,
 		TaskID:    taskID,
@@ -391,6 +396,7 @@ func (r *recordingMessageQueuer) QueueMessage(_ context.Context, sessionID, task
 		Model:     model,
 		PlanMode:  planMode,
 		QueuedBy:  userID,
+		Metadata:  metadata,
 	}
 	r.calls = append(r.calls, msg)
 	return &msg, nil
@@ -464,7 +470,7 @@ func TestQueueMoveTaskPrompt_QueuesWithExpectedFields(t *testing.T) {
 	assert.Equal(t, "session-99", got.SessionID)
 	assert.Equal(t, "task-1", got.TaskID)
 	assert.Equal(t, "Please fix the failing test in foo_test.go", got.Content)
-	assert.Equal(t, "mcp-move-task", got.QueuedBy)
+	assert.Equal(t, messagequeue.QueuedByMoveTask, got.QueuedBy)
 	assert.False(t, got.PlanMode)
 	assert.Equal(t, "", got.Model)
 }
@@ -515,6 +521,142 @@ func TestHandleArchiveTask_InvalidPayload(t *testing.T) {
 	assertWSError(t, resp, ws.ErrorCodeBadRequest)
 }
 
+func TestHandleArchiveTask_MergedPRRunRejectsDifferentTarget(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-archive", Name: "Archive"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-archive", WorkspaceID: "ws-archive", Name: "Board"}))
+
+	boundTarget := &models.Task{
+		ID: "bound-target", WorkspaceID: "ws-archive", WorkflowID: "wf-archive",
+		Title: "Bound target", State: v1.TaskStateTODO,
+	}
+	require.NoError(t, repo.CreateTask(ctx, boundTarget))
+	wrongTarget := &models.Task{
+		ID: "wrong-target", WorkspaceID: "ws-archive", WorkflowID: "wf-archive",
+		Title: "Wrong target", State: v1.TaskStateTODO,
+	}
+	require.NoError(t, repo.CreateTask(ctx, wrongTarget))
+	caller := &models.Task{
+		ID: "automation-run", WorkspaceID: "ws-archive", WorkflowID: "wf-archive",
+		Title: "Automation run", State: v1.TaskStateTODO,
+		Origin: models.TaskOriginAutomationRun,
+		Metadata: map[string]interface{}{
+			"trigger_type":                       "github_pr_merged",
+			models.MetaKeyAutomationTargetTaskID: boundTarget.ID,
+		},
+	}
+	require.NoError(t, repo.CreateTask(ctx, caller))
+
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+	msg := makeWSMessage(t, ws.ActionMCPArchiveTask, map[string]string{
+		"task_id":        wrongTarget.ID,
+		"caller_task_id": caller.ID,
+	})
+
+	resp, err := h.handleArchiveTask(ctx, msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+
+	unchanged, err := svc.GetTask(ctx, wrongTarget.ID)
+	require.NoError(t, err)
+	assert.Nil(t, unchanged.ArchivedAt, "a mismatched target must not be archived")
+}
+
+func TestHandleArchiveTask_MergedPRRunAcceptsBoundTarget(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-bound", Name: "Bound"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-bound", WorkspaceID: "ws-bound", Name: "Board"}))
+	target := &models.Task{
+		ID: "bound-target", WorkspaceID: "ws-bound", WorkflowID: "wf-bound",
+		Title: "Bound target", State: v1.TaskStateTODO,
+	}
+	require.NoError(t, repo.CreateTask(ctx, target))
+	caller := &models.Task{
+		ID: "automation-run", WorkspaceID: "ws-bound", WorkflowID: "wf-bound",
+		Title: "Automation run", State: v1.TaskStateTODO,
+		Origin: models.TaskOriginAutomationRun,
+		Metadata: map[string]interface{}{
+			"trigger_type":                       "github_pr_merged",
+			models.MetaKeyAutomationTargetTaskID: target.ID,
+		},
+	}
+	require.NoError(t, repo.CreateTask(ctx, caller))
+
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+	msg := makeWSMessage(t, ws.ActionMCPArchiveTask, map[string]string{
+		"task_id": target.ID, "caller_task_id": caller.ID,
+	})
+	resp, err := h.handleArchiveTask(ctx, msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+	archived, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	assert.NotNil(t, archived.ArchivedAt)
+}
+
+func TestHandleArchiveTask_MergedPRRunRejectsMissingBinding(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-missing", Name: "Missing"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-missing", WorkspaceID: "ws-missing", Name: "Board"}))
+	target := &models.Task{
+		ID: "target", WorkspaceID: "ws-missing", WorkflowID: "wf-missing",
+		Title: "Target", State: v1.TaskStateTODO,
+	}
+	require.NoError(t, repo.CreateTask(ctx, target))
+	caller := &models.Task{
+		ID: "automation-run", WorkspaceID: "ws-missing", WorkflowID: "wf-missing",
+		Title: "Automation run", State: v1.TaskStateTODO,
+		Origin:   models.TaskOriginAutomationRun,
+		Metadata: map[string]interface{}{"trigger_type": "github_pr_merged"},
+	}
+	require.NoError(t, repo.CreateTask(ctx, caller))
+
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+	msg := makeWSMessage(t, ws.ActionMCPArchiveTask, map[string]string{
+		"task_id": target.ID, "caller_task_id": caller.ID,
+	})
+	resp, err := h.handleArchiveTask(ctx, msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+	unchanged, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	assert.Nil(t, unchanged.ArchivedAt)
+}
+
+func TestHandleArchiveTask_OtherAutomationKeepsGenericBehavior(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-generic", Name: "Generic"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-generic", WorkspaceID: "ws-generic", Name: "Board"}))
+	target := &models.Task{
+		ID: "target", WorkspaceID: "ws-generic", WorkflowID: "wf-generic",
+		Title: "Target", State: v1.TaskStateTODO,
+	}
+	require.NoError(t, repo.CreateTask(ctx, target))
+	caller := &models.Task{
+		ID: "automation-run", WorkspaceID: "ws-generic", WorkflowID: "wf-generic",
+		Title: "Scheduled run", State: v1.TaskStateTODO,
+		Origin:   models.TaskOriginAutomationRun,
+		Metadata: map[string]interface{}{"trigger_type": "scheduled"},
+	}
+	require.NoError(t, repo.CreateTask(ctx, caller))
+
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+	msg := makeWSMessage(t, ws.ActionMCPArchiveTask, map[string]string{
+		"task_id": target.ID, "caller_task_id": caller.ID,
+	})
+	resp, err := h.handleArchiveTask(ctx, msg)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+	archived, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	assert.NotNil(t, archived.ArchivedAt)
+}
+
 // TestHandleArchiveTask_AlreadyArchived_IsIdempotent pins that re-archiving a
 // task the caller already archived reports success rather than surfacing the
 // ErrTaskAlreadyArchived sentinel as an opaque INTERNAL ERROR. Archiving is a
@@ -525,11 +667,12 @@ func TestHandleArchiveTask_AlreadyArchived_IsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Test"}))
 	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Board"}))
-	task, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: "ws-1",
 		WorkflowID:  "wf-1",
 		Title:       "Archive me",
 	})
+	task := taskResult.Task
 	require.NoError(t, err)
 
 	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
@@ -856,10 +999,12 @@ func TestDeferMoveTask_AcceptsValidStep(t *testing.T) {
 	}
 
 	msg := makeWSMessage(t, ws.ActionMCPMoveTask, map[string]interface{}{
-		"task_id":          "task-defer3",
-		"workflow_id":      "wf-defer3",
-		"workflow_step_id": "dst-step3",
-		"position":         0,
+		"task_id":           "task-defer3",
+		"workflow_id":       "wf-defer3",
+		"workflow_step_id":  "dst-step3",
+		"position":          0,
+		"prompt":            "continue the work",
+		"sender_session_id": "sess-caller3",
 	})
 
 	resp, err := h.handleMoveTask(ctx, msg)
@@ -867,6 +1012,10 @@ func TestDeferMoveTask_AcceptsValidStep(t *testing.T) {
 	assert.NotEqual(t, ws.MessageTypeError, resp.Type, "valid deferred move must succeed")
 	require.Len(t, queue.pendingMoves, 1)
 	assert.Equal(t, "dst-step3", queue.pendingMoves[0].WorkflowStepID)
+	assert.Equal(t, "sess-caller3", queue.pendingMoves[0].SenderSessionID)
+	assert.NotEmpty(t, queue.pendingMoves[0].MoveID)
+	require.Len(t, queue.calls, 1)
+	assert.Equal(t, queue.pendingMoves[0].MoveID, queue.calls[0].Metadata[messagequeue.MetadataDeferredMoveID])
 }
 
 func TestMoveTaskErrorMessage_SanitizesClassifiedErrors(t *testing.T) {

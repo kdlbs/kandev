@@ -286,28 +286,79 @@ var ValidProjectStatuses = map[ProjectStatus]bool{
 	ProjectStatusArchived:  true,
 }
 
+// CostContractVersion is the in-band activation point for the cache-split /
+// cost-provenance / turn-attribution columns (docs/specs/office/requirements/costs.md).
+// The Rill cost extract has no schema versioning of its own, so a row
+// written under a prior contract is distinguished by comparing
+// cost_contract_version, not by a date an analyst has to be told out of
+// band. Both production writers (the prompt-usage subscriber's buildCostEvent
+// and the manual-entry RecordCostEvent) use this value. The test harness uses
+// it too. Thus, the writers cannot disagree about which contract applies to a
+// row. Bump only if the contract's meaning changes again.
+//
+// v1 → v2: on the CostSourceUnpriced path, v1 forced Estimated=true
+// regardless of the caller's own Estimated flag, conflating "we could not
+// resolve a price" with "the token counts themselves were synthesised" —
+// two different signals this same contract introduced CostSource
+// specifically to keep separate. v2 preserves the caller's Estimated value
+// verbatim on every path; cost_source=unpriced alone now carries the
+// pricing-failure signal.
+//
+// v2 → v3: v2 wrote TokensOut = OutputTokens unconditionally, so a
+// synthesised-usage turn (Estimated=true) with no observed output token
+// count stored a plain 0 — indistinguishable from a genuine zero-output
+// turn, and a row with real dollars attached to it. v3 makes TokensOut
+// nullable and uses the normalized output-token presence signal to leave it
+// NULL when no output count was observed, so "never measured" is
+// unrepresentable as a number.
+const CostContractVersion int64 = 3
+
 // CostEvent represents a cost tracking event.
 //
 // CostSubcents is stored as hundredths of a cent (int64) to keep token-rate
 // math integer-only. UI divides by 10000 when rendering dollars. Estimated
-// is true when token counts were synthesised by the adapter (e.g.
-// cumulative-delta inference for codex-acp) rather than reported directly
-// by the agent; the row still counts toward budget totals at face value.
+// is true when token counts are not authoritative for a complete turn, such
+// as adapter synthesis or a provider frame that covers only part of a turn;
+// the row still counts toward budget totals at face value.
+//
+// TokensCachedRead / TokensCachedWrite / TokensOut / TurnID / UsageEventID /
+// CostSource / the Rate*PerMillion columns / PricingCatalogVersion /
+// CostContractVersion are all nullable (pointer fields): NULL means "not
+// recorded" — a legacy row written before the column existed, or (for the
+// cache split specifically) an adapter that did not report cache data.
+// TokensOut is NULL specifically when no output count was observed: a 0
+// would assert a measurement that was never taken, and a downstream
+// per-output-token measure must see "unknown" rather than a fake zero-output
+// turn. The JSON cost-list representation includes this field as null so API
+// consumers can make the same distinction. NULL is never backfilled to 0;
+// TokensCachedIn keeps its original read+write sum semantics on every row so
+// existing consumers of that column are unaffected. See docs/specs/office/requirements/costs.md.
 type CostEvent struct {
-	ID             string    `json:"id" db:"id"`
-	SessionID      string    `json:"session_id" db:"session_id"`
-	TaskID         string    `json:"task_id" db:"task_id"`
-	AgentProfileID string    `json:"agent_profile_id" db:"agent_profile_id"`
-	ProjectID      string    `json:"project_id" db:"project_id"`
-	Model          string    `json:"model" db:"model"`
-	Provider       string    `json:"provider" db:"provider"`
-	TokensIn       int64     `json:"tokens_in" db:"tokens_in"`
-	TokensCachedIn int64     `json:"tokens_cached_in" db:"tokens_cached_in"`
-	TokensOut      int64     `json:"tokens_out" db:"tokens_out"`
-	CostSubcents   int64     `json:"cost_subcents" db:"cost_subcents"`
-	Estimated      bool      `json:"estimated" db:"estimated"`
-	OccurredAt     time.Time `json:"occurred_at" db:"occurred_at"`
-	CreatedAt      time.Time `json:"created_at" db:"created_at"`
+	ID                        string      `json:"id" db:"id"`
+	SessionID                 string      `json:"session_id" db:"session_id"`
+	TaskID                    string      `json:"task_id" db:"task_id"`
+	AgentProfileID            string      `json:"agent_profile_id" db:"agent_profile_id"`
+	ProjectID                 string      `json:"project_id" db:"project_id"`
+	Model                     string      `json:"model" db:"model"`
+	Provider                  string      `json:"provider" db:"provider"`
+	TokensIn                  int64       `json:"tokens_in" db:"tokens_in"`
+	TokensCachedIn            int64       `json:"tokens_cached_in" db:"tokens_cached_in"`
+	TokensCachedRead          *int64      `json:"tokens_cached_read,omitempty" db:"tokens_cached_read"`
+	TokensCachedWrite         *int64      `json:"tokens_cached_write,omitempty" db:"tokens_cached_write"`
+	TokensOut                 *int64      `json:"tokens_out" db:"tokens_out"`
+	CostSubcents              int64       `json:"cost_subcents" db:"cost_subcents"`
+	Estimated                 bool        `json:"estimated" db:"estimated"`
+	TurnID                    *string     `json:"turn_id,omitempty" db:"turn_id"`
+	UsageEventID              *string     `json:"usage_event_id,omitempty" db:"usage_event_id"`
+	CostSource                *CostSource `json:"cost_source,omitempty" db:"cost_source"`
+	RateInputPerMillion       *int64      `json:"rate_input_per_million,omitempty" db:"rate_input_per_million"`
+	RateCachedReadPerMillion  *int64      `json:"rate_cached_read_per_million,omitempty" db:"rate_cached_read_per_million"`
+	RateCachedWritePerMillion *int64      `json:"rate_cached_write_per_million,omitempty" db:"rate_cached_write_per_million"`
+	RateOutputPerMillion      *int64      `json:"rate_output_per_million,omitempty" db:"rate_output_per_million"`
+	PricingCatalogVersion     *string     `json:"pricing_catalog_version,omitempty" db:"pricing_catalog_version"`
+	CostContractVersion       *int64      `json:"cost_contract_version,omitempty" db:"cost_contract_version"`
+	OccurredAt                time.Time   `json:"occurred_at" db:"occurred_at"`
+	CreatedAt                 time.Time   `json:"created_at" db:"created_at"`
 }
 
 // BudgetPolicy represents a budget limit policy. LimitSubcents is
@@ -359,10 +410,20 @@ type Run struct {
 	// SummaryInjected is the continuation-summary content prepended
 	// to the prompt at dispatch time, snapshot for inspection. Empty
 	// when no summary was injected (today: every run, until PR 2).
-	SummaryInjected string     `json:"summary_injected,omitempty" db:"summary_injected"`
-	RequestedAt     time.Time  `json:"requested_at" db:"requested_at"`
-	ClaimedAt       *time.Time `json:"claimed_at" db:"claimed_at"`
-	FinishedAt      *time.Time `json:"finished_at" db:"finished_at"`
+	SummaryInjected string `json:"summary_injected,omitempty" db:"summary_injected"`
+	// ContinuationScope is the continuation-summary scope key
+	// (ContinuationScopeForRun's output) computed once at run creation
+	// and persisted here so every later reader/writer of this run's
+	// continuation summary uses the same value. Computing this at
+	// creation time — before any wakeup can coalesce into this row —
+	// closes a race where a routine wakeup patches context_snapshot
+	// after claim but a re-derivation against the freshly re-fetched
+	// row would disagree with the derivation the claiming scheduler is
+	// still holding in memory.
+	ContinuationScope string     `json:"continuation_scope,omitempty" db:"continuation_scope"`
+	RequestedAt       time.Time  `json:"requested_at" db:"requested_at"`
+	ClaimedAt         *time.Time `json:"claimed_at" db:"claimed_at"`
+	FinishedAt        *time.Time `json:"finished_at" db:"finished_at"`
 
 	// Provider-routing columns (office-provider-routing spec). All
 	// optional and ignored when workspace routing is disabled. The TEXT
@@ -408,22 +469,28 @@ type Run struct {
 // Persisted by the routing scheduler dispatcher in
 // internal/office/scheduler/dispatch_routing.go.
 type RouteAttempt struct {
-	RunID              string              `json:"run_id" db:"run_id"`
-	Seq                int                 `json:"seq" db:"seq"`
-	ExecutionProfileID string              `json:"execution_profile_id" db:"execution_profile_id"`
-	ProviderID         string              `json:"provider_id" db:"provider_id"`
-	Model              string              `json:"model" db:"model"`
-	Tier               string              `json:"tier" db:"tier"`
-	Outcome            RouteAttemptOutcome `json:"outcome" db:"outcome"`
-	ErrorCode          string              `json:"error_code,omitempty" db:"error_code"`
-	ErrorConfidence    ErrorConfidence     `json:"error_confidence,omitempty" db:"error_confidence"`
-	AdapterPhase       AdapterPhase        `json:"adapter_phase,omitempty" db:"adapter_phase"`
-	ClassifierRule     string              `json:"classifier_rule,omitempty" db:"classifier_rule"`
-	ExitCode           *int                `json:"exit_code,omitempty" db:"exit_code"`
-	RawExcerpt         string              `json:"raw_excerpt,omitempty" db:"raw_excerpt"`
-	ResetHint          *time.Time          `json:"reset_hint,omitempty" db:"reset_hint"`
-	StartedAt          time.Time           `json:"started_at" db:"started_at"`
-	FinishedAt         *time.Time          `json:"finished_at,omitempty" db:"finished_at"`
+	RunID              string `json:"run_id" db:"run_id"`
+	Seq                int    `json:"seq" db:"seq"`
+	ExecutionProfileID string `json:"execution_profile_id" db:"execution_profile_id"`
+	ProviderID         string `json:"provider_id" db:"provider_id"`
+	Model              string `json:"model" db:"model"`
+	Tier               string `json:"tier" db:"tier"`
+	// TierSource names the precedence level that supplied Tier: one of
+	// "wake_reason", "override", "role", "workspace". Empty means "not
+	// recorded" — either a pre-migration row (Tier non-empty) or an
+	// attempt that never resolved a tier (both empty, e.g. a
+	// max-attempts-exceeded row) — never interpreted as "workspace".
+	TierSource      string              `json:"tier_source,omitempty" db:"tier_source"`
+	Outcome         RouteAttemptOutcome `json:"outcome" db:"outcome"`
+	ErrorCode       string              `json:"error_code,omitempty" db:"error_code"`
+	ErrorConfidence ErrorConfidence     `json:"error_confidence,omitempty" db:"error_confidence"`
+	AdapterPhase    AdapterPhase        `json:"adapter_phase,omitempty" db:"adapter_phase"`
+	ClassifierRule  string              `json:"classifier_rule,omitempty" db:"classifier_rule"`
+	ExitCode        *int                `json:"exit_code,omitempty" db:"exit_code"`
+	RawExcerpt      string              `json:"raw_excerpt,omitempty" db:"raw_excerpt"`
+	ResetHint       *time.Time          `json:"reset_hint,omitempty" db:"reset_hint"`
+	StartedAt       time.Time           `json:"started_at" db:"started_at"`
+	FinishedAt      *time.Time          `json:"finished_at,omitempty" db:"finished_at"`
 }
 
 // ProviderHealth records the health state of one (workspace, provider,

@@ -12,11 +12,14 @@ import type { WorkflowReplayCycleDiagnostic } from "@/lib/workflows/replay-cycle
 import { useHealthyAgentProfiles } from "@/hooks/domains/settings/use-healthy-agent-profiles";
 import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
-import { WorkflowExportDialog } from "@/components/settings/workflow-export-dialog";
 import { WorkflowPipelineEditor } from "@/components/settings/workflow-pipeline-editor";
 import { listWorkflowStepsAction } from "@/app/actions/workspaces";
 import { HelpTip } from "./workflow-pipeline-editor-helpers";
-import { WorkflowDeleteDialog, StepDeleteDialog } from "./workflow-card-dialogs";
+import {
+  WorkflowCardDialogs,
+  type StepDeleteState,
+  type WorkflowDeleteState,
+} from "./workflow-card-dialogs-content";
 import {
   useWorkflowStepActions,
   useWorkflowDeleteHandlers,
@@ -27,9 +30,10 @@ import { SettingsCard } from "./settings-card";
 import { isWorkflowFieldDirty } from "./workflow-dirty-state";
 import { WorkflowSyncedBadge } from "./workflow-synced-badge";
 import { useWorkflowMutationGuard } from "./workflow-mutation-guard";
-import { WorkflowCycleGuardDialog } from "./workflow-cycle-diagnostic";
 import { useWorkflowDraftContributor } from "./use-workflow-draft-contributor";
 import { WorkflowPromptSection } from "./workflow-prompt-section";
+import { WorkflowDescriptionField } from "./workflow-description-field";
+import { useWorkflowDuplication } from "@/app/settings/workspace/use-workflow-duplication";
 
 const TEMP_WORKFLOW_PREFIX = "temp-workflow-";
 
@@ -49,6 +53,7 @@ type WorkflowCardProps = {
     agent_profile_id?: string;
   }) => void;
   onDeleteWorkflow: () => Promise<unknown>;
+  onDuplicateWorkflow: (steps: WorkflowStep[]) => void;
   onWorkflowSaved: (params: {
     clientWorkflow: Workflow;
     submittedWorkflow: Workflow;
@@ -113,23 +118,6 @@ function useWorkflowSteps(
   };
 }
 
-type WorkflowDeleteState = {
-  deleteOpen: boolean;
-  setDeleteOpen: (v: boolean) => void;
-  workflowTaskCount: number | null;
-  setWorkflowTaskCount: (v: number | null) => void;
-  workflowDeleteLoading: boolean;
-  setWorkflowDeleteLoading: (v: boolean) => void;
-  targetWorkflowId: string;
-  setTargetWorkflowId: (v: string) => void;
-  targetWorkflowSteps: WorkflowStep[];
-  setTargetWorkflowSteps: (v: WorkflowStep[]) => void;
-  targetStepId: string;
-  setTargetStepId: (v: string) => void;
-  migrateLoading: boolean;
-  setMigrateLoading: (v: boolean) => void;
-};
-
 function useWorkflowDeleteState(): WorkflowDeleteState {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [workflowTaskCount, setWorkflowTaskCount] = useState<number | null>(null);
@@ -156,21 +144,6 @@ function useWorkflowDeleteState(): WorkflowDeleteState {
   };
 }
 
-type StepDeleteState = {
-  stepDeleteOpen: boolean;
-  setStepDeleteOpen: (v: boolean) => void;
-  stepToDelete: string | null;
-  setStepToDelete: (v: string | null) => void;
-  stepTaskCount: number | null;
-  setStepTaskCount: (v: number | null) => void;
-  targetStepForMigration: string;
-  setTargetStepForMigration: (v: string) => void;
-  stepMigrateLoading: boolean;
-  setStepMigrateLoading: (v: boolean) => void;
-  stepDeletePending: boolean;
-  setStepDeletePending: (v: boolean) => void;
-};
-
 function useStepDeleteState(): StepDeleteState {
   const [stepDeleteOpen, setStepDeleteOpen] = useState(false);
   const [stepToDelete, setStepToDelete] = useState<string | null>(null);
@@ -193,28 +166,6 @@ function useStepDeleteState(): StepDeleteState {
     setStepDeletePending,
   };
 }
-
-type WorkflowCardDialogsProps = {
-  wfDel: WorkflowDeleteState;
-  otherWorkflows: Workflow[];
-  deleteWorkflowLoading: boolean;
-  wfDeleteHandlers: {
-    handleDeleteWorkflow: () => Promise<void>;
-    handleMigrateAndDeleteWorkflow: () => Promise<void>;
-  };
-  exportOpen: boolean;
-  setExportOpen: (open: boolean) => void;
-  exportYaml: string;
-  stepDel: StepDeleteState;
-  stepToDeleteName: string;
-  stepsForStepMigration: WorkflowStep[];
-  stepDeleteHandlers: {
-    handleMigrateAndDeleteStep: () => Promise<void>;
-    handleDeleteStepAndTasks: () => Promise<void>;
-  };
-  hasUnsavedChanges: boolean;
-  mutationGuard: ReturnType<typeof useWorkflowMutationGuard>;
-};
 
 type WorkflowCardBodyProps = {
   workflow: Workflow;
@@ -298,7 +249,7 @@ function WorkflowCardBody({
   return (
     <>
       <Label>{t("workflows:workflowDetails")}</Label>
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-2">
+      <div className="flex flex-col gap-3 md:flex-row md:items-end md:gap-2">
         <WorkflowNameField
           workflow={workflow}
           savedWorkflow={savedWorkflow}
@@ -306,7 +257,7 @@ function WorkflowCardBody({
           readOnly={readOnly}
           isImproveWorkspace={isImproveWorkspace}
         />
-        <div className="w-full space-y-1.5 sm:w-[240px] sm:shrink-0">
+        <div className="w-full space-y-1.5 md:w-[240px] md:shrink-0">
           <Label className="flex items-center gap-1">
             <span>{t("workflows:agentProfile")}</span>
             <HelpTip text={t("workflows:agentProfileHelp")} />
@@ -342,6 +293,12 @@ function WorkflowCardBody({
           </Select>
         </div>
       </div>
+      <WorkflowDescriptionField
+        workflow={workflow}
+        savedWorkflow={savedWorkflow}
+        readOnly={readOnly}
+        onUpdate={(description) => onUpdateWorkflow({ description })}
+      />
       <WorkflowPromptSection
         workflow={workflow}
         savedWorkflow={savedWorkflow}
@@ -366,69 +323,6 @@ function WorkflowCardBody({
           />
         )}
       </div>
-    </>
-  );
-}
-
-function WorkflowCardDialogs({
-  wfDel,
-  otherWorkflows,
-  deleteWorkflowLoading,
-  wfDeleteHandlers,
-  exportOpen,
-  setExportOpen,
-  exportYaml,
-  stepDel,
-  stepToDeleteName,
-  stepsForStepMigration,
-  stepDeleteHandlers,
-  hasUnsavedChanges,
-  mutationGuard,
-}: WorkflowCardDialogsProps) {
-  const { t } = useTranslation();
-  return (
-    <>
-      <WorkflowDeleteDialog
-        open={wfDel.deleteOpen}
-        onOpenChange={wfDel.setDeleteOpen}
-        workflowTaskCount={wfDel.workflowTaskCount}
-        otherWorkflows={otherWorkflows}
-        targetWorkflowId={wfDel.targetWorkflowId}
-        setTargetWorkflowId={wfDel.setTargetWorkflowId}
-        targetWorkflowSteps={wfDel.targetWorkflowSteps}
-        targetStepId={wfDel.targetStepId}
-        setTargetStepId={wfDel.setTargetStepId}
-        migrateLoading={wfDel.migrateLoading}
-        deleteLoading={deleteWorkflowLoading}
-        onDelete={wfDeleteHandlers.handleDeleteWorkflow}
-        onMigrateAndDelete={wfDeleteHandlers.handleMigrateAndDeleteWorkflow}
-        hasUnsavedChanges={hasUnsavedChanges}
-      />
-      <WorkflowExportDialog
-        open={exportOpen}
-        onOpenChange={setExportOpen}
-        title={t("workflows:exportWorkflowTitle")}
-        content={exportYaml}
-      />
-      <StepDeleteDialog
-        open={stepDel.stepDeleteOpen}
-        onOpenChange={stepDel.setStepDeleteOpen}
-        stepName={stepToDeleteName}
-        stepTaskCount={stepDel.stepTaskCount}
-        stepsForMigration={stepsForStepMigration}
-        targetStep={stepDel.targetStepForMigration}
-        setTargetStep={stepDel.setTargetStepForMigration}
-        loading={stepDel.stepMigrateLoading}
-        pending={stepDel.stepDeletePending}
-        onMigrateAndDelete={stepDeleteHandlers.handleMigrateAndDeleteStep}
-        onDeleteAndTasks={stepDeleteHandlers.handleDeleteStepAndTasks}
-        hasUnsavedChanges={hasUnsavedChanges}
-      />
-      <WorkflowCycleGuardDialog
-        proposal={mutationGuard.proposal}
-        onCancel={mutationGuard.cancelProposal}
-        onConfirm={mutationGuard.confirmProposal}
-      />
     </>
   );
 }
@@ -531,6 +425,14 @@ export function WorkflowCard(props: WorkflowCardProps) {
   const { workflow, savedWorkflow, otherWorkflows = [], onUpdateWorkflow } = props;
   const s = useWorkflowCardState(props);
   const visibleSavedSteps = savedWorkflow ? s.savedWorkflowSteps : [];
+  const duplicate = useWorkflowDuplication({
+    workflow,
+    hasUnsavedChanges: s.hasUnsavedChanges,
+    mutationPending: s.mutationGuard.isMutationPending,
+    isImproveWorkspace: props.isImproveWorkspace,
+    onDuplicateWorkflow: props.onDuplicateWorkflow,
+    toast: s.toast,
+  });
 
   return (
     <SettingsCard
@@ -562,6 +464,7 @@ export function WorkflowCard(props: WorkflowCardProps) {
               if (workflow.id.startsWith(TEMP_WORKFLOW_PREFIX)) await s.removeDraftWorkflow();
               else await s.wfDeleteHandlers.handleDeleteWorkflowClick();
             }}
+            onDuplicateClick={duplicate.handleDuplicateWorkflow}
             deleteDisabled={
               s.mutationGuard.isMutationPending ||
               s.deleteWorkflowRequest.isLoading ||
@@ -571,6 +474,9 @@ export function WorkflowCard(props: WorkflowCardProps) {
             }
             readOnly={s.readOnly}
             exportDisabled={workflow.id.startsWith(TEMP_WORKFLOW_PREFIX)}
+            duplicateDisabled={duplicate.duplicateDisabled}
+            duplicateDisabledReason={duplicate.duplicateDisabledReason}
+            duplicateLoading={duplicate.duplicateLoading}
           />
         </div>
       </CardContent>

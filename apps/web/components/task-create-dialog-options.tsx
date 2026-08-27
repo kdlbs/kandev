@@ -1,9 +1,20 @@
 "use client";
 
-import { useMemo } from "react";
-import { IconGitBranch, IconTerminal2 } from "@tabler/icons-react";
+import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
+import { IconAlertTriangle, IconGitBranch, IconTerminal2 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@kandev/ui/drawer";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import type {
   LocalRepository,
   Repository,
@@ -11,23 +22,70 @@ import type {
   Executor,
   ExecutorProfile,
 } from "@/lib/types/http";
+import type { AvailableAgent } from "@/lib/types/http-agents";
 import type { AgentProfileOption } from "@/lib/state/slices";
+import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
 import { formatUserHomePath, truncateRepoPath } from "@/lib/utils";
 import { getExecutorIcon } from "@/lib/executor-icons";
 import { AgentLogo } from "@/components/agent-logo";
 import { getCapabilityWarning } from "@/lib/capability-warning";
-import { buildBranchKeywords } from "./task-create-dialog-pill";
-import { useTranslation } from "react-i18next";
-import { t } from "@/lib/i18n";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
+import { buildBranchKeywords } from "./task-create-dialog-branch-options";
 
 type OptionItem = {
   value: string;
   label: string;
   renderLabel: () => React.ReactNode;
+  renderTriggerLabel?: () => React.ReactNode;
   disabled?: boolean;
   disabledReason?: string;
 };
+
+function ModelProbeWarning({ note }: { note: string }) {
+  const usesTouchDrawer = useTouchDrawer();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const trigger = (
+    <button
+      type="button"
+      className="inline-flex min-h-11 min-w-8 shrink-0 cursor-help items-center justify-center rounded-sm border-0 bg-transparent p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      aria-label={note}
+      aria-expanded={usesTouchDrawer ? drawerOpen : undefined}
+      aria-haspopup={usesTouchDrawer ? "dialog" : undefined}
+      data-testid="agent-profile-model-probe-warning"
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => event.stopPropagation()}
+    >
+      <IconAlertTriangle className="size-3.5 text-amber-500" aria-hidden />
+    </button>
+  );
+
+  if (usesTouchDrawer) {
+    return (
+      <Drawer open={drawerOpen} onOpenChange={setDrawerOpen}>
+        <DrawerTrigger asChild>{trigger}</DrawerTrigger>
+        <DrawerContent>
+          <DrawerHeader>
+            <DrawerTitle className="sr-only">{note}</DrawerTitle>
+            <DrawerDescription>{note}</DrawerDescription>
+          </DrawerHeader>
+        </DrawerContent>
+      </Drawer>
+    );
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{trigger}</TooltipTrigger>
+      <TooltipContent side="top">{note}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function ModelProbeWarningIndicator({ note }: { note: string }) {
+  return <IconAlertTriangle className="size-3.5 text-amber-500" title={note} aria-hidden />;
+}
 
 export function useRepositoryOptions(
   repositories: Repository[],
@@ -120,29 +178,49 @@ export function useBranchOptions(branchOptionsRaw: Branch[]) {
   }, [branchOptionsRaw]);
 }
 
+// advertisedModelIDs returns the currently advertised model IDs for an agent
+// from the host-utility probe cache (empty when the probe has not landed).
+function advertisedModelIDs(availableAgents: AvailableAgent[], agentName: string): string[] {
+  const agent = availableAgents.find((a) => a.name === agentName);
+  return agent?.model_config?.available_models?.map((m) => m.id) ?? [];
+}
+
 export function useAgentProfileOptions(agentProfiles: AgentProfileOption[]): OptionItem[] {
   const { t } = useTranslation();
+  const { items: availableAgents } = useAvailableAgents();
+  const dynamicRoutingEnabled = useFeature("dynamicAgentRouting");
   return useMemo(() => {
     // Disabled profiles stay in the store (existing sessions keep their
     // labels) but are never offered as a choice for new work.
-    const selectable = agentProfiles.filter(isSelectableAgentProfile);
+    const selectable = agentProfiles.filter((profile) =>
+      isSelectableAgentProfile(profile, dynamicRoutingEnabled),
+    );
     return selectable.map((profile: AgentProfileOption) => {
       const parts = profile.label.split(" \u2022 ");
       const agentLabel = parts[0] ?? profile.label;
       const profileLabel = parts[1] ?? "";
       const isPassthrough = profile.cli_passthrough === true;
       const warning = getCapabilityWarning(profile.capability_status, profile.capability_error);
-      return {
-        value: profile.id,
-        label: profile.label,
-        renderLabel: () => (
-          <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+      // The host-utility probe is an editing hint only. The selected
+      // executor owns the launch-time model catalog, so a host-only mismatch
+      // must never remove a profile from the task selector.
+      const advertised = advertisedModelIDs(availableAgents, profile.agent_name);
+      const startModelGone = Boolean(
+        profile.model && advertised.length > 0 && !advertised.includes(profile.model),
+      );
+      const modelProbeNote = startModelGone
+        ? t("settings:profileStartModelNotAdvertisedOnHost", { model: profile.model })
+        : undefined;
+      const renderProfileLabel = (modelProbeWarning: React.ReactNode) => (
+        <span className="flex min-w-0 flex-1 flex-col gap-1">
+          <span className="flex shrink-0 items-center justify-between gap-2">
             <span className="flex shrink-0 items-center gap-1.5">
               <AgentLogo agentName={profile.agent_name} className="shrink-0" />
               <span>{agentLabel}</span>
               {warning && (
                 <warning.Icon className={`size-3.5 ${warning.color}`} title={warning.title} />
               )}
+              {modelProbeWarning}
             </span>
             <span className="flex shrink-0 items-center gap-1.5">
               {isPassthrough && (
@@ -158,10 +236,22 @@ export function useAgentProfileOptions(agentProfiles: AgentProfileOption[]): Opt
               ) : null}
             </span>
           </span>
-        ),
+        </span>
+      );
+      return {
+        value: profile.id,
+        label: profile.label,
+        disabled: undefined,
+        disabledReason: undefined,
+        renderLabel: () =>
+          renderProfileLabel(modelProbeNote ? <ModelProbeWarning note={modelProbeNote} /> : null),
+        renderTriggerLabel: () =>
+          renderProfileLabel(
+            modelProbeNote ? <ModelProbeWarningIndicator note={modelProbeNote} /> : null,
+          ),
       };
     });
-  }, [agentProfiles]);
+  }, [agentProfiles, availableAgents, dynamicRoutingEnabled, t]);
 }
 
 export function useExecutorOptions(executors: Executor[]): OptionItem[] {

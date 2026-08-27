@@ -31,7 +31,7 @@ const STATUS_VARIANT: Record<
 };
 
 function formatDuration(ms?: number): string {
-  if (!ms || ms <= 0) return "—";
+  if (!ms || ms <= 0) return "-";
   const sec = Math.floor(ms / 1000);
   if (sec < 60) return `${sec}s`;
   const min = Math.floor(sec / 60);
@@ -171,7 +171,7 @@ function StatsGrid({ run }: { run: RunDetail }) {
         <div className="text-xs text-muted-foreground uppercase tracking-wider">
           {t("office:finished")}
         </div>
-        <div data-testid="run-finished-at">{run.finished_at || "—"}</div>
+        <div data-testid="run-finished-at">{run.finished_at || "-"}</div>
       </div>
       <div>
         <div className="text-xs text-muted-foreground uppercase tracking-wider flex items-center gap-1">

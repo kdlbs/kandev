@@ -20,7 +20,7 @@ A workspace has at most one sync configuration, pointed at exactly one provider 
 
 ## Prerequisites and credentials
 
-You need a repository and a branch containing valid portable workflow files. The Kandev backend—not the browser and not a task executor—reads the repository. The repository must be inside the workspace's effective scope.
+You need a repository and a branch containing valid portable workflow files. The Kandev backend, not the browser and not a task executor, reads the repository. The repository must be inside the workspace's effective scope.
 
 ### GitHub
 
@@ -34,7 +34,7 @@ Without a usable workspace automation connection, sync fails. Existing migrated 
 
 ### GitLab
 
-Sync always uses the workspace's already-configured GitLab connection (Settings → Workspaces → select a workspace → Integrations → GitLab) — a personal access token or the `glab` CLI, against whatever host that connection points at, including a self-managed instance. Workflow Sync itself has no separate host or credential field: the project path/link you enter is never used to derive a host, only a repository path. Pasting a full URL for a self-managed instance (any hostname) still works to fill in the project path — the host portion of that link is simply ignored.
+Sync always uses the workspace's already-configured GitLab connection (Settings → Workspaces → select a workspace → Integrations → GitLab), using a personal access token or the `glab` CLI against whatever host that connection points at, including a self-managed instance. Workflow Sync itself has no separate host or credential field: the project path/link you enter is never used to derive a host, only a repository path. Pasting a full URL for a self-managed instance (any hostname) still works to fill in the project path; the host portion of that link is simply ignored.
 
 Grant only the repository access that this operation needs, protect the backend environment and secret store, and do not commit a token into a workflow file.
 
@@ -42,8 +42,8 @@ Grant only the repository access that this operation needs, protect the backend 
 
 Open **Settings → Workspaces → select a workspace → Workflows → Workflow Sync**, then choose **GitHub** or **GitLab**.
 
-1. Enter the repository. For GitHub, paste a repository link — the field accepts an HTTPS URL with or without a scheme, a `www.github.com` URL, a `.git` suffix, or an SSH form such as `git@github.com:OWNER/REPO.git`. For GitLab, enter the project path directly (e.g. `group/project`, or a nested `group/subgroup/project`) or paste a full project link (any host, including self-managed).
-2. Set **Branch** and **Directory** directly — these are their own fields, not just derived text. Pasting a `/tree/BRANCH/DIRECTORY` (GitHub) or `/-/tree/BRANCH/DIRECTORY` (GitLab) link still convenience-fills both from the link, but you can always correct either field afterward. This matters because a branch name can itself contain a slash (a common convention, e.g. `features/TICKET-123`) — no link parser can always tell where the branch ends and the directory begins, so a wrong guess from a pasted link is fixed directly in these fields rather than by reshaping the link.
+1. Enter the repository. For GitHub, paste a repository link; the field accepts an HTTPS URL with or without a scheme, a `www.github.com` URL, a `.git` suffix, or an SSH form such as `git@github.com:OWNER/REPO.git`. For GitLab, enter the project path directly (e.g. `group/project`, or a nested `group/subgroup/project`) or paste a full project link (any host, including self-managed).
+2. Set **Branch** and **Directory** directly; these are their own fields, not just derived text. Pasting a `/tree/BRANCH/DIRECTORY` (GitHub) or `/-/tree/BRANCH/DIRECTORY` (GitLab) link still convenience-fills both from the link, but you can always correct either field afterward. This matters because a branch name can itself contain a slash (a common convention, e.g. `features/TICKET-123`). No link parser can always tell where the branch ends and the directory begins, so a wrong guess from a pasted link is fixed directly in these fields rather than by reshaping the link.
 3. Enable **Auto-sync** if the background poller should run. Set an interval of at least 60 seconds; the default is 300 seconds.
 4. Save the configuration, then select **Sync now** for the first immediate reconciliation. Saving alone does not fetch definitions.
 
@@ -62,7 +62,7 @@ There is at most one sync configuration per workspace.
 | `interval_seconds` | `0` defaults to `300`; valid range is `60` through `2592000` (30 days). |
 | `poll_enabled` | Omitted JSON defaults to `true`; `false` allows only **Sync now**. |
 
-`repo_owner`/`repo_name` and `project_path` are mutually exclusive — the backend rejects a request carrying both, and switching the provider in the dialog clears the other provider's fields automatically.
+`repo_owner`/`repo_name` and `project_path` are mutually exclusive; the backend rejects a request carrying both, and switching the provider in the dialog clears the other provider's fields automatically.
 
 The status also records `last_synced_at`, `last_ok`, `last_error`, and `last_warnings`. Auto-sync checks due configurations on a 60-second outer ticker and waits one full tick after backend startup. A configured interval is therefore a minimum cadence, not an exact schedule; a due sync can start roughly another minute later.
 
@@ -188,8 +188,8 @@ Deleting an individual repository definition has the different reconciliation be
 ## Troubleshooting
 
 - **Authentication error (GitHub):** run `gh auth status --hostname github.com` in the backend environment or configure one of the token sources above. Confirm that identity can read the repository and branch.
-- **Authentication error (GitLab):** check the workspace's GitLab connection status under Integrations — Workflow Sync has no credentials of its own and fails if that connection isn't authenticated.
-- **Directory or branch not found:** verify the resolved owner/repository (or project path), branch, and directory shown in the dialog. A branch name containing `/` (e.g. `features/TICKET-123`) is a common cause — set it directly in the Branch field rather than relying on a pasted link to split it correctly.
+- **Authentication error (GitLab):** check the workspace's GitLab connection status under Integrations; Workflow Sync has no credentials of its own and fails if that connection isn't authenticated.
+- **Directory or branch not found:** verify the resolved owner/repository (or project path), branch, and directory shown in the dialog. A branch name containing `/` (e.g. `features/TICKET-123`) is a common cause; set it directly in the Branch field rather than relying on a pasted link to split it correctly.
 - **GitLab project path looks right but sync still 404s:** confirm the path doesn't have a trailing `.git` and matches the project's exact namespace path (visible in the GitLab UI or via its clone URL).
 - **Nothing happens after Save:** save stores only the configuration. Use **Sync now** or wait until both the configured interval and the poller's next 60-second check have elapsed.
 - **Completed with warnings:** read every warning. Invalid files freeze their previous workflows; tasks in removed steps or workflows block deletion; duplicate step names block safe matching.

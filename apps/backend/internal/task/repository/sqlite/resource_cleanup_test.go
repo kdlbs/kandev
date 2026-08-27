@@ -238,3 +238,46 @@ func TestTaskResourceCleanupFailedUnclaimedCompletionHasTimestamp(t *testing.T) 
 		t.Fatal("unclaimed failed cleanup has no completion timestamp")
 	}
 }
+
+func TestPreparedCleanupSnapshotStartAndRunningReset(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepoForHealTests(t)
+	job := &models.TaskResourceCleanupJob{
+		ID: "job-prepared-lifecycle", OperationID: "delete:prepared-lifecycle", TaskID: "task-prepared-lifecycle",
+		Trigger: models.TaskResourceCleanupTriggerDelete, State: models.TaskResourceCleanupStatePrepared,
+	}
+	if err := repo.CreateTaskResourceCleanupJob(ctx, job); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateTaskResourceCleanupSnapshot(ctx, job.OperationID, `{"worktrees":["one"]}`); err != nil {
+		t.Fatalf("UpdateTaskResourceCleanupSnapshot: %v", err)
+	}
+	if err := repo.UpdateTaskResourceCleanupSnapshot(ctx, "missing", `{}`); err == nil {
+		t.Fatal("missing prepared snapshot update returned nil")
+	}
+	started, err := repo.StartPreparedTaskResourceCleanupJob(ctx, job.ID)
+	if err != nil || !started {
+		t.Fatalf("StartPreparedTaskResourceCleanupJob = %v, %v", started, err)
+	}
+	started, err = repo.StartPreparedTaskResourceCleanupJob(ctx, job.ID)
+	if err != nil || started {
+		t.Fatalf("second StartPreparedTaskResourceCleanupJob = %v, %v", started, err)
+	}
+	claimed, err := repo.MarkTaskResourceCleanupJobRunning(ctx, job.ID)
+	if err != nil || !claimed {
+		t.Fatalf("MarkTaskResourceCleanupJobRunning = %v, %v", claimed, err)
+	}
+	if err := repo.ResetRunningTaskResourceCleanupJobs(ctx); err != nil {
+		t.Fatalf("ResetRunningTaskResourceCleanupJobs: %v", err)
+	}
+	got, err := repo.GetTaskResourceCleanupJobByOperationID(ctx, job.OperationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != models.TaskResourceCleanupStateRetryWait || got.NextAttemptAt == nil || got.ResourceSnapshot != `{"worktrees":["one"]}` {
+		t.Fatalf("reset job = %+v", got)
+	}
+	if _, err := repo.GetTaskResourceCleanupJobByOperationID(ctx, "missing"); err == nil {
+		t.Fatal("missing operation lookup returned nil")
+	}
+}

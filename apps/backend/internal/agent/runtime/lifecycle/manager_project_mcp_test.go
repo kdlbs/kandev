@@ -16,7 +16,7 @@ func TestMaterializeRuntimeProjectMCPForPiWritesProjectFile(t *testing.T) {
 		SessionID:      "session-1",
 		AgentProfileID: "profile-1",
 		WorkspacePath:  t.TempDir(),
-		Metadata:       map[string]interface{}{},
+		metadata:       map[string]interface{}{},
 		standalonePort: 45678,
 	}
 	agentConfig, ok := mgr.registry.Get("pi-acp")
@@ -58,7 +58,7 @@ func TestMaterializeRuntimeProjectMCPForCursorWritesProjectFile(t *testing.T) {
 		SessionID:      "session-1",
 		AgentProfileID: "profile-1",
 		WorkspacePath:  t.TempDir(),
-		Metadata:       map[string]interface{}{},
+		metadata:       map[string]interface{}{},
 		standalonePort: 45678,
 	}
 	agentConfig, ok := mgr.registry.Get("cursor-acp")
@@ -96,7 +96,7 @@ func TestMaterializeRuntimeProjectMCPSkipsWhenPortUnavailable(t *testing.T) {
 		SessionID:      "session-1",
 		AgentProfileID: "profile-1",
 		WorkspacePath:  t.TempDir(),
-		Metadata:       map[string]interface{}{},
+		metadata:       map[string]interface{}{},
 	}
 	agentConfig, ok := mgr.registry.Get("pi-acp")
 	if !ok {
@@ -125,7 +125,7 @@ func TestPromoteWorkspaceExecutionResetsCommandWhenProjectMCPFails(t *testing.T)
 		SessionID:      "session-1",
 		AgentProfileID: "profile-1",
 		WorkspacePath:  workspace,
-		Metadata:       map[string]interface{}{},
+		metadata:       map[string]interface{}{},
 		standalonePort: 45678,
 	}
 	req := &LaunchRequest{

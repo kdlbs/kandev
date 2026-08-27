@@ -42,4 +42,10 @@ export class MobileGitHubPage {
   savedQueryByLabel(label: string): Locator {
     return this.mobileSidebar.getByText(label, { exact: true });
   }
+
+  savedQueryDefaultAction(label: string, action: "Set" | "Clear" = "Set"): Locator {
+    return this.mobileSidebar.getByRole("button", {
+      name: `${action} ${label} as default view`,
+    });
+  }
 }

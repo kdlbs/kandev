@@ -7,7 +7,7 @@ depends_on:
   - "04-toast-reporting"
   - "07-diagnostic-bundle-backend"
 plan: "plan.md"
-spec: "../../specs/platform/diagnostic-logging.md"
+spec: "../../specs/platform/requirements/diagnostic-logging.md"
 ---
 
 # Task 08: Browser logs and bundle UI

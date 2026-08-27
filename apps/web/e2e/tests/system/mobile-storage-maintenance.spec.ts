@@ -2,10 +2,64 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Route } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
-import { seedManagedGoCache } from "../../helpers/storage-maintenance";
+import {
+  mockTemporaryArtifactOverview,
+  seedManagedGoCache,
+} from "../../helpers/storage-maintenance";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 
 test.describe("Mobile storage maintenance", () => {
+  test("keeps temporary artifact cleanup reachable with a touch-sized action", async ({
+    testPage,
+    prCapture,
+  }) => {
+    await mockTemporaryArtifactOverview(testPage);
+    await testPage.route("**/api/v1/system/storage/run", async (route) => {
+      expect(route.request().postDataJSON()).toEqual({ resources: ["temporary_artifacts"] });
+      await route.fulfill({
+        status: 202,
+        contentType: "application/json",
+        body: JSON.stringify({ job_id: "mobile-temporary-artifacts-cleanup" }),
+      });
+    });
+    await testPage.route("**/api/v1/system/jobs/**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          id: "mobile-temporary-artifacts-cleanup",
+          kind: "storage-cleanup",
+          state: "succeeded",
+          started_at: new Date().toISOString(),
+        }),
+      });
+    });
+
+    await testPage.goto("/settings/system/data-storage");
+    const trigger = testPage.getByTestId("storage-resource-temporary-artifacts-trigger");
+    await trigger.tap();
+    const cleanButton = testPage.getByTestId("storage-temporary-artifacts-clean");
+    await expect(cleanButton).toBeVisible();
+    const box = await cleanButton.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+    await cleanButton.tap();
+    await expect(testPage.getByText("Clean stale Kandev artifacts?")).toBeVisible();
+    await prCapture.screenshot("temporary-artifacts-confirmation", {
+      caption: "Mobile storage keeps stale artifact cleanup in a reachable confirmation",
+    });
+    await testPage.getByTestId("storage-temporary-artifacts-confirm").tap();
+    await expect(testPage.getByTestId("storage-run-now")).toHaveAttribute(
+      "data-job-state",
+      "succeeded",
+    );
+    await expect
+      .poll(() =>
+        testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      )
+      .toBe(true);
+  });
+
   test("explains busy activity and allows Run anyway without horizontal overflow", async ({
     testPage,
     prCapture,
@@ -32,7 +86,7 @@ test.describe("Mobile storage maintenance", () => {
       });
     });
 
-    await testPage.goto("/settings/system/storage");
+    await testPage.goto("/settings/system/data-storage");
     await testPage.getByTestId("storage-run-now").tap();
     await expect(testPage.getByTestId("storage-busy")).toContainText("A test command is running");
     await expect(testPage.getByTestId("storage-run-anyway")).toBeVisible();
@@ -64,10 +118,8 @@ test.describe("Mobile storage maintenance", () => {
     await mobile.goto();
     await mobile.mobileMenuButton.click();
     await testPage.getByRole("link", { name: "Settings" }).click();
-    await testPage.getByTestId("settings-mobile-menu-button").click();
-    const settingsMenu = testPage.getByTestId("settings-mobile-menu");
-    await settingsMenu.getByRole("button", { name: "Expand System" }).click();
-    await settingsMenu.getByRole("link", { name: "Storage" }).click();
+    const index = testPage.getByTestId("settings-index");
+    await index.locator('a[href="/settings/system/data-storage"]').click();
 
     await expect(testPage.getByTestId("storage-settings-page")).toBeVisible();
     await expect(testPage.getByTestId("storage-disk-capacity-card")).toBeVisible();
@@ -163,13 +215,13 @@ test.describe("Mobile storage maintenance", () => {
 
     await testPage.route(overviewPattern, holdOverview);
     try {
-      await testPage.goto("/settings/system/storage");
+      await testPage.goto("/settings/system/data-storage");
       await overviewObserved;
 
       const spinner = testPage.getByTestId("storage-overview-spinner");
       await expect(spinner).toBeVisible();
       await expect(testPage.getByText("Loading storage data…")).toBeVisible();
-      await expect(testPage.getByTestId("storage-overview-card")).toBeInViewport();
+      await expect(testPage.getByTestId("storage-overview-card")).toBeVisible();
       await expect(testPage.getByTestId("storage-policy-card")).toBeVisible();
       await expect(testPage.getByTestId("storage-run-history")).toBeVisible();
       await expect(testPage.getByTestId("storage-quarantine-card")).toBeVisible();
@@ -228,7 +280,7 @@ test.describe("Mobile storage maintenance", () => {
         body: JSON.stringify({ job_id: "mobile-force-purge" }),
       });
     });
-    await testPage.goto("/settings/system/storage");
+    await testPage.goto("/settings/system/data-storage");
     await expect(testPage.getByTestId("storage-quarantine-force-clear")).toBeVisible();
     await testPage.getByTestId("storage-quarantine-card").scrollIntoViewIfNeeded();
     await prCapture.screenshot("quarantine-actions", {

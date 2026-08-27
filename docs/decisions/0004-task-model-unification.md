@@ -43,7 +43,7 @@ type Runtime interface {
 
 `LaunchSpec` carries everything the runtime needs to run an agent: profile, executor, workspace, prompt, prior ACP session id (for resume), MCP mode, metadata. The runtime knows nothing about tasks, workflows, or office stages. Both the workflow engine and (separately) cron-driven trigger handlers call `Launch`.
 
-The runtime owns the *execution* tables: `agent_executions` (renamed `executors_running`), the message and turn family that's currently `task_session_messages` / `task_session_turns`, and `task_session_worktrees`. These are generic — they describe an agent conversation, not a task lifecycle.
+The runtime owns the *execution* tables: `agent_executions` (renamed `executors_running`) and the message and turn family that's currently `task_session_messages` / `task_session_turns`. These are generic — they describe an agent conversation, not a task lifecycle. Physical worktrees are task-environment resources under [ADR-2026-08-08-task-owned-worktree-lifetime](2026-08-08-task-owned-worktree-lifetime.md), not session execution records.
 
 The naming "runtime" is concrete: it's the runtime layer for agents, sitting under the workflow engine and atop agentctl + executor backends. Replaces the earlier draft's "kernel" (too generic).
 
@@ -296,11 +296,10 @@ We chose #2 in Wave 8. The deviation from the original ADR is documented inline 
 ## References
 
 - Conversation thread on 2026-05-04/05 working through the design.
-- `docs/specs/task-model-unification/spec.md` — feature spec (the user-visible changes).
-- `docs/specs/task-model-unification/plan.md` — phased implementation plan.
+- `docs/specs/tasks/requirements/model-unification.md` — feature requirements (the user-visible changes).
 - ADR 0003 — `executors_running` as the single source of truth for execution identity. Continues into this ADR's `agent_executions` rename inside the runtime package.
-- `docs/specs/office-overview/spec.md` — original office product framing; this ADR re-expresses its goals in workflow terms.
-- `docs/specs/office-task-session-lifecycle/spec.md` — IDLE-between-turns model that this ADR formalises into `current_execution_id` on `task_sessions`.
-- `docs/specs/office-scheduler/spec.md` — the wakeup queue mechanics this ADR preserves verbatim under the new `runs` name.
-- `docs/specs/office-routines/spec.md` — routines feed the engine via task creation; no behavioural change.
+- `docs/specs/office/requirements/overview.md` — original Office product framing; this ADR re-expresses its goals in workflow terms.
+- `docs/specs/office/system-design/tasks-01.md` — task and agent session lifecycle that this ADR formalises into `current_execution_id` on `task_sessions`.
+- `docs/specs/office/requirements/scheduler.md` — the wakeup queue mechanics this ADR preserves under the new `runs` name.
+- Office automation requirements — routines feed the engine via task creation; no behavioural change.
 - `apps/backend/internal/workflow/engine/` — the engine being generalised.

@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { waitForLatestSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 import { REVIEW_SIDEBAR_LIMITS } from "../../../hooks/use-review-sidebar-resize";
 import type { ApiClient } from "../../helpers/api-client";
@@ -19,9 +20,15 @@ async function seedReviewTask(testPage: Page, apiClient: ApiClient, seedData: Se
       repository_ids: [seedData.repositoryId],
     },
   );
+  await waitForLatestSessionDone(
+    apiClient,
+    task.id,
+    1,
+    "review setup session should finish before opening the transcript",
+  );
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
-  await session.waitForLoad();
+  await session.waitForLoad(45_000);
   await expect(
     session.chat.getByText("review-cumulative-setup complete", { exact: false }),
   ).toBeVisible({ timeout: 45_000 });

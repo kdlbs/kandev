@@ -8,6 +8,15 @@ const (
 
 	messageTypeClarificationRequest = "clarification_request"
 	messageTypePermissionRequest    = "permission_request"
+	messageTypeUser                 = "user"
+	messageTypeError                = "error"
+	messageTypeStatus               = "status"
+	messageTypeAgent                = "agent"
+	messageTypeStatusUpdate         = "status_update"
+
+	sessionStateStarting        = "STARTING"
+	sessionStateRunning         = "RUNNING"
+	sessionStateWaitingForInput = "WAITING_FOR_INPUT"
 
 	activityBackground = "background"
 	activityGenerating = "generating"
@@ -20,6 +29,7 @@ const (
 	prStatePending  = "pending"
 	prStateAwaiting = "awaiting_review"
 	prStateReady    = "ready"
+	prStateQueued   = "queued"
 	prStatePassing  = "passing"
 	prStateNeutral  = "neutral"
 	prStateOpen     = "open"

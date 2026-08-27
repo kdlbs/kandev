@@ -100,6 +100,11 @@ func (a *Actions) CreateTask(ctx context.Context, runCtx RunContext, input Creat
 	if a.deps.Tasks == nil {
 		return "", fmt.Errorf("%w: tasks", ErrRuntimeDependencyMissing)
 	}
+	if input.ParentTaskID == "" {
+		if err := a.resolveRootTaskProject(ctx, runCtx, &input); err != nil {
+			return "", err
+		}
+	}
 	if err := a.validateTaskRelations(ctx, runCtx.WorkspaceID, input); err != nil {
 		return "", err
 	}
@@ -111,6 +116,46 @@ func (a *Actions) CreateTask(ctx context.Context, runCtx RunContext, input Creat
 	return a.deps.Tasks.CreateOfficeTaskAsAgent(
 		ctx, runCtx.AgentID, runCtx.WorkspaceID, input.ProjectID, input.AssigneeAgentID, input.Title, input.Description,
 	)
+}
+
+// resolveRootTaskProject fills input.ProjectID for a root task (no parent)
+// when the caller omitted it: first from the run's current task project,
+// then — only if the workspace has projects to choose from — a
+// caller-correctable ErrProjectRequired naming them, instead of silently
+// creating a task whose office cost events can never roll up to a project
+// budget. A workspace with no projects at all creates as before (nothing to
+// attribute to).
+func (a *Actions) resolveRootTaskProject(ctx context.Context, runCtx RunContext, input *CreateTaskInput) error {
+	if input.ProjectID != "" {
+		return nil
+	}
+	if taskID := strings.TrimSpace(runCtx.TaskID); taskID != "" {
+		projectID, err := a.deps.Tasks.GetTaskProjectID(ctx, taskID)
+		if err != nil {
+			return err
+		}
+		if projectID != "" {
+			input.ProjectID = projectID
+			return nil
+		}
+	}
+	if a.deps.Projects == nil {
+		return nil
+	}
+	projects, err := a.deps.Projects.ListProjects(ctx, runCtx.WorkspaceID)
+	if err != nil {
+		return err
+	}
+	if len(projects) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(projects))
+	for _, project := range projects {
+		if project != nil {
+			ids = append(ids, project.ID)
+		}
+	}
+	return fmt.Errorf("%w: workspace has projects [%s], specify project_id", ErrProjectRequired, strings.Join(ids, ", "))
 }
 
 func (a *Actions) validateTaskRelations(ctx context.Context, workspaceID string, input CreateTaskInput) error {
@@ -125,7 +170,10 @@ func (a *Actions) validateTaskRelations(ctx context.Context, workspaceID string,
 			return ErrWorkspaceOutOfScope
 		}
 		parentProjectID, err := a.deps.Tasks.GetTaskProjectID(ctx, input.ParentTaskID)
-		if err != nil || input.ProjectID != "" && input.ProjectID != parentProjectID {
+		if err != nil {
+			return ErrWorkspaceOutOfScope
+		}
+		if input.ProjectID != "" && input.ProjectID != parentProjectID {
 			return ErrWorkspaceOutOfScope
 		}
 	}
@@ -338,7 +386,7 @@ func (a *Actions) PostComment(ctx context.Context, runCtx RunContext, taskID, bo
 		AuthorID:   runCtx.AgentID,
 		Body:       body,
 		Source:     "agent",
-		CreatedAt:  time.Now(),
+		CreatedAt:  time.Now().UTC(),
 	}
 	return a.deps.Comments.CreateComment(ctx, comment)
 }

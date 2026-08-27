@@ -17,7 +17,7 @@ import (
 type fakeSessionReader struct {
 	mu        sync.Mutex
 	sessions  map[string][]*models.TaskSession         // taskID → sessions
-	worktrees map[string][]*models.TaskSessionWorktree // sessionID → worktrees
+	worktrees map[string][]*models.TaskEnvironmentRepo // sessionID → worktrees
 	tasks     map[string]*models.Task
 	// sessionsWithRunningExecutor records sessions that should be
 	// reported as still bound to an active executor by
@@ -29,7 +29,7 @@ type fakeSessionReader struct {
 func newFakeSessionReader() *fakeSessionReader {
 	return &fakeSessionReader{
 		sessions:                    map[string][]*models.TaskSession{},
-		worktrees:                   map[string][]*models.TaskSessionWorktree{},
+		worktrees:                   map[string][]*models.TaskEnvironmentRepo{},
 		tasks:                       map[string]*models.Task{},
 		sessionsWithRunningExecutor: map[string]bool{},
 	}
@@ -41,7 +41,7 @@ func (f *fakeSessionReader) ListTaskSessions(_ context.Context, taskID string) (
 	return f.sessions[taskID], nil
 }
 
-func (f *fakeSessionReader) ListTaskSessionWorktrees(_ context.Context, sessionID string) ([]*models.TaskSessionWorktree, error) {
+func (f *fakeSessionReader) ListTaskSessionWorktrees(_ context.Context, sessionID string) ([]*models.TaskEnvironmentRepo, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.worktrees[sessionID], nil
@@ -81,7 +81,7 @@ func TestMarkOwnerSessionMaterialized_FlipsOwnership(t *testing.T) {
 
 	sr := newFakeSessionReader()
 	sr.sessions["owner"] = []*models.TaskSession{{ID: "s1", IsPrimary: true, TaskID: "owner"}}
-	sr.worktrees["s1"] = []*models.TaskSessionWorktree{{
+	sr.worktrees["s1"] = []*models.TaskEnvironmentRepo{{
 		WorktreeID: "wt-1", RepositoryID: "repo-1",
 		WorktreePath: "/tmp/wt", WorktreeBranch: "feature/x",
 	}}
@@ -159,7 +159,7 @@ func TestMarkOwnerSessionMaterialized_SharedGroupFirstMemberFlips(t *testing.T) 
 
 	sr := newFakeSessionReader()
 	sr.sessions["first-launcher"] = []*models.TaskSession{{ID: "sFL", IsPrimary: true, TaskID: "first-launcher"}}
-	sr.worktrees["sFL"] = []*models.TaskSessionWorktree{{
+	sr.worktrees["sFL"] = []*models.TaskEnvironmentRepo{{
 		WorktreeID: "wt-fl", RepositoryID: "repo-1",
 		WorktreePath: "/tmp/wt-fl", WorktreeBranch: "feature/x",
 	}}
@@ -189,7 +189,7 @@ func TestMarkOwnerSessionMaterialized_Idempotent(t *testing.T) {
 
 	sr := newFakeSessionReader()
 	sr.sessions["owner"] = []*models.TaskSession{{ID: "s1", IsPrimary: true, TaskID: "owner"}}
-	sr.worktrees["s1"] = []*models.TaskSessionWorktree{{
+	sr.worktrees["s1"] = []*models.TaskEnvironmentRepo{{
 		WorktreePath: "/tmp/wt-changed",
 	}}
 	svc := newMaterializerService(t, tasks, groups, sr)

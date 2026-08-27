@@ -23,6 +23,13 @@ export type SidebarGroup = {
 export type GroupedSidebarList = {
   groups: SidebarGroup[];
   subTasksByParentId: Map<string, TaskSwitcherItem[]>;
+  /**
+   * Which dimension produced `groups`. Rows read it to decide whether their own
+   * repository label is redundant: grouped by repository, the section header
+   * already names it. Optional so a hand-built list (tests, fixtures) keeps
+   * meaning "unknown grouping" and falls back to showing the label.
+   */
+  groupKey?: GroupKey;
 };
 
 export type SidebarTaskPrefs = {
@@ -117,6 +124,10 @@ export function applyFilters(
 
 type SortComparator = (a: TaskSwitcherItem, b: TaskSwitcherItem) => number;
 
+function lastActivitySortValue(task: TaskSwitcherItem): string {
+  return task.lastActivityAt ?? task.updatedAt ?? task.createdAt ?? "";
+}
+
 const SORT_COMPARATORS: Record<Exclude<SortKey, "custom">, SortComparator> = {
   state: (a, b) => {
     const bucket = STATE_BUCKET_ORDER[getStateBucket(a)] - STATE_BUCKET_ORDER[getStateBucket(b)];
@@ -125,6 +136,7 @@ const SORT_COMPARATORS: Record<Exclude<SortKey, "custom">, SortComparator> = {
     return (b.createdAt ?? "").localeCompare(a.createdAt ?? "");
   },
   updatedAt: (a, b) => (a.updatedAt ?? "").localeCompare(b.updatedAt ?? ""),
+  lastActivityAt: (a, b) => lastActivitySortValue(a).localeCompare(lastActivitySortValue(b)),
   createdAt: (a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""),
   title: (a, b) => (a.title ?? "").localeCompare(b.title ?? ""),
 };
@@ -331,6 +343,7 @@ export function applyGroup(
     return {
       groups: [{ key: "__all__", label: t(ALL_GROUP_LABEL_KEY), tasks: rootTasks }],
       subTasksByParentId,
+      groupKey,
     };
   }
 
@@ -355,7 +368,7 @@ export function applyGroup(
     sortRepoGroups(groups);
   }
   if (groupKey === "state") sortStateGroups(groups);
-  return { groups, subTasksByParentId };
+  return { groups, subTasksByParentId, groupKey };
 }
 
 function mergeSingleRepoUnassigned(groups: SidebarGroup[]): void {

@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io/fs"
+	"strings"
 
 	"github.com/kandev/kandev/internal/i18n"
 )
@@ -16,6 +18,14 @@ const maxInt = int(^uint(0) >> 1)
 var headCloseTag = []byte("</head>")
 
 var htmlOpenTag = []byte("<html")
+
+var titleOpenTag = []byte("<title")
+
+var titleCloseTag = []byte("</title>")
+
+// ProductTitle is the browser tab title when no title prefix is configured.
+// It is a product name, not translatable copy.
+const ProductTitle = "Kandev"
 
 // DefaultLocale is the source locale shipped as the message catalog.
 const DefaultLocale = i18n.DefaultLocale
@@ -45,7 +55,62 @@ func RenderShellHTML(indexHTML []byte, payload BootPayload) ([]byte, error) {
 		return nil, err
 	}
 	localized := rewriteHTMLLang(indexHTML, NormalizeLocale(payload.Runtime.Locale))
-	return injectBeforeHeadClose(localized, script), nil
+	titled := rewriteTitle(localized, payload.Runtime.TitlePrefix)
+	return injectBeforeHeadClose(titled, script), nil
+}
+
+// ComposeTitle returns the browser tab title for prefix: a trimmed-empty prefix
+// keeps the plain product name, otherwise "<prefix> Kandev". The SPA repeats
+// this rule in apps/web/lib/browser/document-title.ts for the
+// /api/v1/app-state boot path, which never renders through this shell.
+func ComposeTitle(prefix string) string {
+	prefix = strings.TrimSpace(prefix)
+	if prefix == "" {
+		return ProductTitle
+	}
+	return prefix + " " + ProductTitle
+}
+
+// rewriteTitle replaces the content of the shell's first <title> element so the
+// tab title is correct from first paint, with no JS-driven flash. A blank
+// prefix, or a shell with no <title> element, leaves the input unchanged.
+func rewriteTitle(indexHTML []byte, prefix string) []byte {
+	if strings.TrimSpace(prefix) == "" {
+		return indexHTML
+	}
+	start, end, ok := titleContentBounds(indexHTML)
+	if !ok {
+		return indexHTML
+	}
+	title := html.EscapeString(ComposeTitle(prefix))
+
+	out := make([]byte, 0, bytesCapacity(len(indexHTML), len(title)))
+	out = append(out, indexHTML[:start]...)
+	out = append(out, title...)
+	out = append(out, indexHTML[end:]...)
+	return out
+}
+
+// titleContentBounds locates the text between the first <title ...> and its
+// closing </title>, reporting false when either tag is missing. The byte scan
+// assumes the shell's first "<title" is the head's title element — the same
+// assumption rewriteHTMLLang makes for "<html" — which Vite-generated shells
+// satisfy; a "<title" inside an earlier comment or script would fool it.
+func titleContentBounds(indexHTML []byte) (start, end int, ok bool) {
+	tagStart := bytes.Index(indexHTML, titleOpenTag)
+	if tagStart < 0 {
+		return 0, 0, false
+	}
+	tagEnd := bytes.IndexByte(indexHTML[tagStart:], '>')
+	if tagEnd < 0 {
+		return 0, 0, false
+	}
+	start = tagStart + tagEnd + 1
+	closeIdx := bytes.Index(indexHTML[start:], titleCloseTag)
+	if closeIdx < 0 {
+		return 0, 0, false
+	}
+	return start, start + closeIdx, true
 }
 
 // rewriteHTMLLang sets the lang="" attribute on the shell's opening <html> tag

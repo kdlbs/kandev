@@ -9,6 +9,7 @@ import { Label } from "@kandev/ui/label";
 import { Textarea } from "@kandev/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { useAppStore } from "@/components/state-provider";
+import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { createProject } from "@/lib/api/domains/office-api";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
@@ -207,7 +208,7 @@ function useProjectForm(workspaceId: string, onClose: () => void) {
           ? { type: form.executorType, image: form.dockerImage || undefined }
           : undefined,
       });
-      if (result) addProject(result);
+      if (result) addProject(workspaceId, result);
       onClose();
       setForm(INITIAL_PROJECT_STATE);
       toast.success(t("office:projectCreated"));
@@ -302,7 +303,7 @@ function ProjectFormBody({
 
 export function CreateProjectDialog({ open, onOpenChange, workspaceId }: CreateProjectDialogProps) {
   const { t } = useTranslation();
-  const agents = useAppStore((s) => s.office.agentProfiles);
+  const agents = useAppStore(selectOfficeAgentProfiles);
   const meta = useAppStore((s) => s.office.meta);
   const executorTypes =
     meta?.executorTypes.map((e) => ({ id: e.id, label: e.label })) ??
@@ -310,30 +311,48 @@ export function CreateProjectDialog({ open, onOpenChange, workspaceId }: CreateP
   const { form, update, submitting, handleAddRepo, handleRemoveRepo, handleCreate } =
     useProjectForm(workspaceId, () => onOpenChange(false));
 
+  // ProjectRepositoryPicker renders its popover inline. Paint clipping keeps
+  // that wide popover from creating a horizontal scroll range on the dialog.
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent
+        data-testid="create-project-dialog"
+        data-layout="contained"
+        className="max-h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-clip sm:max-w-lg"
+      >
         <DialogHeader>
           <DialogTitle>{t("office:newProject")}</DialogTitle>
         </DialogHeader>
 
-        <ProjectFormBody
-          form={form}
-          agents={agents}
-          executorTypes={executorTypes}
-          workspaceId={workspaceId}
-          onUpdate={update}
-          onAddRepo={handleAddRepo}
-          onRemoveRepo={handleRemoveRepo}
-        />
-        <div className="flex justify-end gap-2 pt-4 border-t border-border">
-          <Button variant="ghost" onClick={() => onOpenChange(false)} className="cursor-pointer">
+        <div
+          data-testid="create-project-dialog-body"
+          className="min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain"
+        >
+          <ProjectFormBody
+            form={form}
+            agents={agents}
+            executorTypes={executorTypes}
+            workspaceId={workspaceId}
+            onUpdate={update}
+            onAddRepo={handleAddRepo}
+            onRemoveRepo={handleRemoveRepo}
+          />
+        </div>
+        <div
+          data-testid="create-project-dialog-footer"
+          className="flex flex-col justify-end gap-2 border-t border-border pt-4 sm:flex-row"
+        >
+          <Button
+            variant="ghost"
+            onClick={() => onOpenChange(false)}
+            className="min-h-11 w-full cursor-pointer sm:min-h-9 sm:w-auto"
+          >
             {t("common:cancel")}
           </Button>
           <Button
             onClick={handleCreate}
             disabled={!form.name.trim() || submitting}
-            className="cursor-pointer"
+            className="min-h-11 w-full cursor-pointer sm:min-h-9 sm:w-auto"
           >
             {submitting ? t("office:creating") : t("office:createProject")}
           </Button>

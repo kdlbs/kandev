@@ -75,8 +75,9 @@ func TestLaunchPreparedSession_SingleRepoWorktree_PersistsSubdirAsWorkspacePath(
 	for _, e := range repo.taskEnvironments {
 		env = e
 	}
-	if env.WorktreePath != subdir {
-		t.Errorf("worktree_path = %q, want %q", env.WorktreePath, subdir)
+	envRepos := env.Repos
+	if len(envRepos) != 1 || envRepos[0].WorktreePath != subdir {
+		t.Errorf("env repo worktree_path = %+v, want %q", envRepos, subdir)
 	}
 	if env.WorkspacePath != subdir {
 		t.Errorf("workspace_path = %q, want %q (== worktree_path so process cwd matches between hot and cold start)",

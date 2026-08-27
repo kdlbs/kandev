@@ -16,8 +16,61 @@ const OTHER_TAB_SESSION_ID = "session-other-tab";
 const THIS_TAB_SESSION_ID = "session-this-tab";
 const OTHER_TAB_STAMP = "stamp-other";
 const THIS_TAB_STAMP = "stamp-this";
+const MANAGED_RUNTIME_NPM_FAILURE = "managed_runtime_npm_resolution";
+const NPM_ERROR_CODE_ETARGET = "npm error code ETARGET";
 
 describe("readLastAgentError", () => {
+  it("reads structured failure fields in snake_case", () => {
+    expect(
+      readLastAgentError({
+        last_agent_error: {
+          message: AGENT_ERROR_MESSAGE,
+          failure_code: MANAGED_RUNTIME_NPM_FAILURE,
+          failure_details: NPM_ERROR_CODE_ETARGET,
+        },
+      }),
+    ).toMatchObject({
+      code: MANAGED_RUNTIME_NPM_FAILURE,
+      details: NPM_ERROR_CODE_ETARGET,
+    });
+  });
+
+  it("reads structured failure fields in camelCase", () => {
+    expect(
+      readLastAgentError({
+        last_agent_error: {
+          message: AGENT_ERROR_MESSAGE,
+          code: MANAGED_RUNTIME_NPM_FAILURE,
+          details: NPM_ERROR_CODE_ETARGET,
+        },
+      }),
+    ).toMatchObject({
+      code: MANAGED_RUNTIME_NPM_FAILURE,
+      details: NPM_ERROR_CODE_ETARGET,
+    });
+  });
+});
+
+// eslint-disable-next-line max-lines-per-function -- this group preserves the complete metadata compatibility matrix.
+describe("readLastAgentError optional metadata", () => {
+  it("reads typed launch recovery fields and keeps action order bounded", () => {
+    expect(
+      readLastAgentError({
+        last_agent_error: {
+          message: "base branch is missing",
+          code: "base_branch_missing",
+          recovery_actions: ["pick_base_branch", "pick_base_branch", "unknown", "retry_default"],
+          task_repository_id: "task-repo-1",
+          stamp: "launch-stamp-1",
+        },
+      }),
+    ).toMatchObject({
+      recoveryActions: ["pick_base_branch", "retry_default"],
+      taskRepositoryId: "task-repo-1",
+      stamp: "launch-stamp-1",
+    });
+  });
+
   it("reads snake_case metadata and keeps occurredAt optional", () => {
     expect(
       readLastAgentError({

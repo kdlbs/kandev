@@ -9,6 +9,27 @@ type ProfileModelSelection = {
   config_options?: Record<string, string>;
 };
 
+function shouldResolveInitialModelConfig(modelConfig: ModelConfig, selectedModel: string): boolean {
+  if (modelConfig.status && modelConfig.status !== "ok") {
+    return false;
+  }
+
+  const initialOptions = modelConfig.config_options ?? [];
+  if (initialOptions.length === 0) {
+    if (modelConfig.status !== "ok") {
+      return true;
+    }
+
+    return modelConfig.current_model_id !== selectedModel;
+  }
+
+  const modelOption = initialOptions.find(
+    (option) => option.id === "model" || option.category === "model",
+  );
+  const initialModel = modelConfig.current_model_id ?? modelOption?.current_value;
+  return initialModel !== selectedModel;
+}
+
 export function useProfileModelCapabilities(
   agentName: string,
   profile: ProfileModelSelection,
@@ -26,6 +47,7 @@ export function useProfileModelCapabilities(
   const resolvedModelConfig = useResolvedModelConfig(agentName, selectedModel, {
     initialConfigOptions: modelConfig.config_options,
     enabled: modelConfig.supports_dynamic_models,
+    resolveInitial: shouldResolveInitialModelConfig(modelConfig, selectedModel),
   });
 
   useEffect(() => {

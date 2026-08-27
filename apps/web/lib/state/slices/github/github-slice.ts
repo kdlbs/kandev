@@ -1,10 +1,15 @@
 import type { StateCreator } from "zustand";
-import type { GitHubSlice, GitHubSliceState } from "./types";
+import type { GitHubSlice, GitHubSliceState, TaskPRScope } from "./types";
 
 export const defaultGitHubState: GitHubSliceState = {
   githubStatus: { byWorkspaceId: {} },
   githubAppRegistrations: { byWorkspaceId: {} },
-  taskPRs: { byTaskId: {} },
+  taskPRs: {
+    byTaskId: {},
+    workspaceId: null,
+    workspaceContextGeneration: 0,
+    deletedAssociationIdsByTaskId: {},
+  },
   taskIssues: { workspaceId: null, byTaskId: {} },
   pendingPrUrlByTaskId: { byTaskId: {} },
   prWatches: { items: [], loaded: false, loading: false },
@@ -16,6 +21,20 @@ export const defaultGitHubState: GitHubSliceState = {
 };
 
 const PR_FEEDBACK_CACHE_LIMIT = 20;
+
+function shouldApplyTaskCIAutomationOptions(
+  current: GitHubSlice["taskCIAutomation"]["byTaskId"][string] | undefined,
+  incoming: GitHubSlice["taskCIAutomation"]["byTaskId"][string],
+) {
+  if (!current) return true;
+  const currentUpdatedAt = Date.parse(current.updated_at ?? "");
+  const incomingUpdatedAt = Date.parse(incoming.updated_at ?? "");
+  if (!Number.isFinite(incomingUpdatedAt)) return false;
+  if (!Number.isFinite(currentUpdatedAt)) return true;
+  // Equal versions are intentionally first-writer-wins so replay order cannot
+  // make two payloads carrying the same version produce different state.
+  return incomingUpdatedAt > currentUpdatedAt;
+}
 
 type ImmerSet = Parameters<
   StateCreator<GitHubSlice, [["zustand/immer", never]], [], GitHubSlice>
@@ -106,6 +125,30 @@ function clearPendingForTaskPR(
   }
 }
 
+function applyTaskPRScope(draft: GitHubSlice, scope?: TaskPRScope): void {
+  if (!scope) return;
+  const changed =
+    draft.taskPRs.workspaceId !== scope.workspaceId ||
+    draft.taskPRs.workspaceContextGeneration !== scope.workspaceContextGeneration;
+  if (changed) {
+    draft.taskPRs.byTaskId = {};
+    draft.taskPRs.deletedAssociationIdsByTaskId = {};
+  }
+  draft.taskPRs.workspaceId = scope.workspaceId;
+  draft.taskPRs.workspaceContextGeneration = scope.workspaceContextGeneration;
+}
+
+function clearTaskPRDeletionTombstone(draft: GitHubSlice, taskId: string, associationId: string) {
+  const deletedByTask = draft.taskPRs.deletedAssociationIdsByTaskId;
+  if (!deletedByTask) return;
+  const deleted = deletedByTask[taskId];
+  if (!deleted) return;
+  delete deleted[associationId];
+  if (Object.keys(deleted).length === 0) {
+    delete deletedByTask[taskId];
+  }
+}
+
 function createTaskPRActions(
   set: ImmerSet,
 ): Pick<
@@ -118,12 +161,19 @@ function createTaskPRActions(
   | "upsertTaskIssue"
 > {
   return {
-    setTaskPRs: (prs) =>
+    setTaskPRs: (prs, scope) =>
       set((draft) => {
+        applyTaskPRScope(draft, scope);
         draft.taskPRs.byTaskId = prs;
+        draft.taskPRs.deletedAssociationIdsByTaskId = {};
       }),
-    removeTaskPR: (taskId, associationId) =>
+    removeTaskPR: (taskId, associationId, scope) =>
       set((draft) => {
+        applyTaskPRScope(draft, scope);
+        const deletedByTask = (draft.taskPRs.deletedAssociationIdsByTaskId ??= {});
+        const deleted = deletedByTask[taskId] ?? {};
+        deleted[associationId] = true;
+        deletedByTask[taskId] = deleted;
         const current = draft.taskPRs.byTaskId[taskId];
         if (!Array.isArray(current)) return;
         const remaining = current.filter((pr) => pr.id !== associationId);
@@ -141,8 +191,10 @@ function createTaskPRActions(
         draft.taskIssues.workspaceId = workspaceId;
         draft.taskIssues.byTaskId[issue.task_id] = issue;
       }),
-    setTaskPR: (taskId, pr) =>
+    setTaskPR: (taskId, pr, scope) =>
       set((draft) => {
+        applyTaskPRScope(draft, scope);
+        clearTaskPRDeletionTombstone(draft, taskId, pr.id);
         // Upsert by (repository_id, pr_number) so multi-branch tasks can
         // hold N PRs on the same repo as siblings. Keying on
         // repository_id alone collapses every PR for that repo onto one
@@ -319,6 +371,8 @@ function createTaskCIAutomationActions(
   return {
     setTaskCIAutomationOptions: (taskId, options) =>
       set((draft) => {
+        const current = draft.taskCIAutomation.byTaskId[taskId];
+        if (!shouldApplyTaskCIAutomationOptions(current, options)) return;
         draft.taskCIAutomation.byTaskId[taskId] = options;
       }),
     setTaskCIAutomationLoading: (taskId, loading) =>

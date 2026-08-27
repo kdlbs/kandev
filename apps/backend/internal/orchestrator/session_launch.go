@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -12,6 +13,14 @@ import (
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+// sessionTerminalErrText mirrors lifecycle.ErrSessionTerminal's message. It is
+// duplicated as a string rather than imported so this higher-level orchestrator
+// file does not take a direct dependency on internal/agent/runtime/lifecycle
+// (ARCH-RUNTIME-IMPORT): the launch failures reach here only as wrapped-error
+// strings or a stringified persisted session error, so a string match is both
+// sufficient and required (see IsBenignLaunchTeardownErr).
+const sessionTerminalErrText = "session is terminal"
 
 // SessionIntent represents the type of session operation requested.
 type SessionIntent string
@@ -27,19 +36,31 @@ const (
 
 // LaunchSessionRequest is the unified request for session.launch.
 type LaunchSessionRequest struct {
-	TaskID            string        `json:"task_id"`
-	Intent            SessionIntent `json:"intent,omitempty"`
-	SessionID         string        `json:"session_id,omitempty"`
-	AgentProfileID    string        `json:"agent_profile_id,omitempty"`
-	ExecutorID        string        `json:"executor_id,omitempty"`
-	ExecutorProfileID string        `json:"executor_profile_id,omitempty"`
-	Prompt            string        `json:"prompt,omitempty"`
-	PlanMode          bool          `json:"plan_mode,omitempty"`
-	WorkflowStepID    string        `json:"workflow_step_id,omitempty"`
-	Priority          string        `json:"priority,omitempty"`
-	LaunchWorkspace   bool          `json:"launch_workspace,omitempty"`
-	SkipMessageRecord bool          `json:"skip_message_record,omitempty"`
-	AutoStart         bool          `json:"auto_start,omitempty"`
+	TaskID         string        `json:"task_id"`
+	Intent         SessionIntent `json:"intent,omitempty"`
+	SessionID      string        `json:"session_id,omitempty"`
+	AgentProfileID string        `json:"agent_profile_id,omitempty"`
+	// ProfileExplicit marks a non-empty profile selected by the manual New Agent
+	// picker. It bypasses workflow-step profile resolution for IntentStart only;
+	// IntentStartCreated keeps its existing profile resolution behavior.
+	ProfileExplicit   bool   `json:"profile_explicit,omitempty"`
+	ExecutorID        string `json:"executor_id,omitempty"`
+	ExecutorProfileID string `json:"executor_profile_id,omitempty"`
+	Prompt            string `json:"prompt,omitempty"`
+	PlanMode          bool   `json:"plan_mode,omitempty"`
+	WorkflowStepID    string `json:"workflow_step_id,omitempty"`
+	Priority          string `json:"priority,omitempty"`
+	LaunchWorkspace   bool   `json:"launch_workspace,omitempty"`
+	SkipMessageRecord bool   `json:"skip_message_record,omitempty"`
+	AutoStart         bool   `json:"auto_start,omitempty"`
+	// NoAgentLaunch marks a prepare request that must NEVER be upgraded into an
+	// agent launch, even for passthrough profiles (whose prepare would normally
+	// be eagerly upgraded so the PTY exists). It backs the session.ensure
+	// auto_start=false override used by the prevent-auto-start-on-open
+	// preference: the session is created workspace-only (CREATED) and the
+	// Start agent button launches it later. It is an internal server-side flag
+	// set from EnsureSessionOptions, kept off the wire protocol (`json:"-"`).
+	NoAgentLaunch bool `json:"-"`
 	// DeferredStart marks a prepare whose caller will follow up with an explicit
 	// IntentStartCreated that carries the prompt (the two-phase create flow:
 	// cheap sync prepare + async start). It suppresses the passthrough
@@ -74,6 +95,7 @@ type LaunchSessionResponse struct {
 	TaskID           string  `json:"task_id"`
 	SessionID        string  `json:"session_id,omitempty"`
 	AgentExecutionID string  `json:"agent_execution_id,omitempty"`
+	AgentProfileID   string  `json:"agent_profile_id,omitempty"`
 	State            string  `json:"state"`
 	WorktreePath     *string `json:"worktree_path,omitempty"`
 	WorktreeBranch   *string `json:"worktree_branch,omitempty"`
@@ -97,6 +119,33 @@ func ResolveIntent(req *LaunchSessionRequest) SessionIntent {
 		return IntentPrepare
 	}
 	return IntentStart
+}
+
+// IsBenignLaunchTeardownErr reports whether a session-launch failure is an
+// expected graceful-shutdown teardown race rather than a genuine fault. During
+// shutdown the root context is cancelled and terminal sessions reject launches,
+// so an in-flight session.launch fails predictably; those should log WARN
+// without a stack trace, not ERROR.
+//
+// Two shapes reach the launch handler on shutdown:
+//   - restore_workspace wraps lifecycle.ErrSessionTerminal with %w and the
+//     cancelled root context surfaces context.Canceled, so errors.Is matches
+//     the context sentinel.
+//   - resume stringifies a persisted session error (task_operations.go uses %s
+//     on sess.ErrorMessage), destroying any sentinel, so a bounded string
+//     fallback for "context canceled"/"session is terminal" is required. The
+//     terminal-session text is matched as a string (not errors.Is) to avoid a
+//     higher-level import of the runtime/lifecycle seam.
+func IsBenignLaunchTeardownErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, context.Canceled.Error()) ||
+		strings.Contains(msg, sessionTerminalErrText)
 }
 
 // LaunchSession is the unified entry point for all session operations.
@@ -170,9 +219,14 @@ func (s *Service) launchPrepare(ctx context.Context, req *LaunchSessionRequest) 
 // imminent prompt-bearing start) get the eager launch. See launchPrepare for
 // why AutoStart and DeferredStart each suppress it.
 func (s *Service) shouldUpgradePassthroughPrepare(ctx context.Context, req *LaunchSessionRequest) bool {
+	if req.NoAgentLaunch {
+		return false
+	}
 	return !req.AutoStart && !req.DeferredStart && s.isPassthroughProfile(ctx, req.AgentProfileID)
 }
 
+// isPassthroughProfile reports whether the agent profile is a CLI
+// passthrough provider.
 func (s *Service) isPassthroughProfile(ctx context.Context, profileID string) bool {
 	if profileID == "" || s.agentManager == nil {
 		return false
@@ -186,10 +240,12 @@ func (s *Service) isPassthroughProfile(ctx context.Context, profileID string) bo
 
 // launchStart creates a new session and launches the agent.
 // If the request is an auto-start and the task's current workflow step does not
-// have auto_start_agent, the request is downgraded to a prepare (workspace-only,
-// no agent) to prevent unwanted auto-starts from the frontend's useAutoStartSession hook.
+// have auto_start_agent, or the task has unresolved dependencies, the request
+// is downgraded to a prepare (workspace-only, no agent) to prevent unwanted
+// auto-starts from the frontend's useAutoStartSession hook.
 func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
-	if req.AutoStart && s.shouldBlockAutoStart(ctx, req) {
+	if req.AutoStart && (s.shouldBlockAutoStart(ctx, req) ||
+		s.dependencyBlocksAutoStart(ctx, req.TaskID, "session.launch")) {
 		req.LaunchWorkspace = true
 		return s.launchPrepare(ctx, req)
 	}
@@ -198,10 +254,20 @@ func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*
 		ctx, req.TaskID, req.AgentProfileID, req.ExecutorID,
 		req.ExecutorProfileID, req.Priority, req.Prompt,
 		req.WorkflowStepID, req.PlanMode, req.AutoStart, req.Attachments,
-		startTaskOptions{SpawnOrigin: req.SpawnOrigin},
+		startTaskOptions{ProfileExplicit: req.ProfileExplicit, SpawnOrigin: req.SpawnOrigin},
 	)
 	if err != nil {
 		return nil, err
+	}
+	if execution == nil {
+		// The automatic terminal-PR gate intentionally skips session creation.
+		// Return a successful no-op response so session.ensure and WS callers do
+		// not dereference a nil execution while the task-owned error card remains
+		// the recovery surface.
+		return &LaunchSessionResponse{
+			Success: true,
+			TaskID:  req.TaskID,
+		}, nil
 	}
 	return executionToLaunchResponse(req.TaskID, execution), nil
 }
@@ -319,9 +385,18 @@ func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action 
 	if err := s.authorizeTask(ctx, taskID); err != nil {
 		return nil, err
 	}
+	if action == "runtime_retry" {
+		if s.wasResumeAttempt(ctx, sessionID) {
+			action = "resume"
+		} else {
+			action = "fresh_start"
+		}
+	}
 	switch action {
 	case "fresh_start":
-		s.clearResumeToken(ctx, sessionID)
+		if err := s.clearResumeToken(ctx, sessionID); err != nil {
+			return nil, fmt.Errorf("failed to clear resume token for fresh start: %w", err)
+		}
 	case "resume":
 		// no-op — relaunch with existing resume token
 	default:
@@ -339,6 +414,8 @@ func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action 
 	return resp, nil
 }
 
+// normalizeRecoverSessionError maps a missing-profile resume failure to a
+// user-actionable message.
 func normalizeRecoverSessionError(err error) error {
 	if err == nil {
 		return nil
@@ -349,6 +426,8 @@ func normalizeRecoverSessionError(err error) error {
 	return err
 }
 
+// isMissingProfileResumeError reports whether the error indicates the
+// session's agent profile no longer exists.
 func isMissingProfileResumeError(err error) bool {
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "failed to resolve agent profile") ||
@@ -357,11 +436,18 @@ func isMissingProfileResumeError(err error) bool {
 
 // executionToLaunchResponse converts a TaskExecution to a LaunchSessionResponse.
 func executionToLaunchResponse(taskID string, exec *executor.TaskExecution) *LaunchSessionResponse {
+	if exec == nil {
+		return &LaunchSessionResponse{
+			Success: true,
+			TaskID:  taskID,
+		}
+	}
 	resp := &LaunchSessionResponse{
 		Success:          true,
 		TaskID:           taskID,
 		SessionID:        exec.SessionID,
 		AgentExecutionID: exec.AgentExecutionID,
+		AgentProfileID:   exec.AgentProfileID,
 		State:            string(exec.SessionState),
 	}
 	if exec.WorktreePath != "" {

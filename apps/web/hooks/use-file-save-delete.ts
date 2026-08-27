@@ -8,6 +8,7 @@ import { generateUnifiedDiff, calculateHash } from "@/lib/utils/file-diff";
 import type { useToast } from "@/components/toast-provider";
 import { buildRepoScopedItemId, PREVIEW_FILE_EDITOR_ID } from "@/lib/state/dockview-panel-actions";
 import { lspClientManager } from "@/lib/lsp/lsp-client-manager";
+import { t } from "@/lib/i18n";
 
 /** Read openFiles from the store without subscribing to changes. */
 function getOpenFiles() {
@@ -96,23 +97,22 @@ async function performSaveFile(path: string, repo: string | undefined, params: S
       if (stillClean) updatePanelAfterSave(file.path, file.name, file.repo);
       if (response.resolution === "overwritten") {
         params.toast({
-          title: "File saved (overwritten)",
-          description: "The file was modified externally. Your version was saved.",
+          title: t("editors:fileSavedOverwritten"),
+          description: t("editors:fileSavedOverwrittenDescription"),
           variant: "default",
         });
       }
     } else {
       params.toast({
-        title: "Save failed",
-        description: response.error || "Failed to save file",
+        title: t("editors:saveFailed"),
+        description: response.error || t("editors:failedToSaveFile"),
         variant: "error",
       });
     }
   } catch (error) {
     params.toast({
-      title: "Save failed",
-      description:
-        error instanceof Error ? error.message : "An error occurred while saving the file",
+      title: t("editors:saveFailed"),
+      description: error instanceof Error ? error.message : t("editors:errorWhileSavingFile"),
       variant: "error",
     });
   } finally {
@@ -143,17 +143,16 @@ export function useSaveDeleteActions(params: SaveDeleteParams) {
         const response = await deleteFile(client, currentSessionId, path, fileRepo);
         if (!response.success) {
           toast({
-            title: "Delete failed",
-            description: response.error || "Failed to delete file",
+            title: t("editors:deleteFailed"),
+            description: response.error || t("editors:failedToDeleteFile"),
             variant: "error",
           });
           return;
         }
       } catch (error) {
         toast({
-          title: "Delete failed",
-          description:
-            error instanceof Error ? error.message : "An error occurred while deleting the file",
+          title: t("editors:deleteFailed"),
+          description: error instanceof Error ? error.message : t("editors:errorWhileDeletingFile"),
           variant: "error",
         });
         return;

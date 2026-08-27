@@ -23,20 +23,71 @@ func TestParseArgsRejectsInvalidPort(t *testing.T) {
 }
 
 func TestParseArgsRejectsRemovedWebPort(t *testing.T) {
-	_, err := parseArgs([]string{"--web-port", "12345"})
-	if err == nil {
-		t.Fatal("expected error")
-	}
-}
-
-func TestParseArgsRejectsUnsupportedDevMode(t *testing.T) {
-	for _, argv := range [][]string{{"dev"}, {"--dev"}} {
+	for _, argv := range [][]string{
+		{"--web-port", "12345"},
+		{"--web-port=12345"},
+	} {
 		_, err := parseArgs(argv)
 		if err == nil {
 			t.Fatalf("parseArgs(%v) returned nil error", argv)
 		}
-		if _, ok := err.(ParseError); !ok {
-			t.Fatalf("parseArgs(%v) error = %T, want ParseError", argv, err)
+		if err.Error() != "--web-port has been removed; use --web-internal-port for dev mode" {
+			t.Fatalf("parseArgs(%v) error = %q", argv, err)
+		}
+	}
+}
+
+func TestParseArgsAcceptsDevCommand(t *testing.T) {
+	for _, argv := range [][]string{{"dev"}, {"--dev"}} {
+		opts, err := parseArgs(argv)
+		if err != nil {
+			t.Fatalf("parseArgs(%v) = %v", argv, err)
+		}
+		if opts.Command != CommandDev {
+			t.Fatalf("parseArgs(%v) Command = %q, want %q", argv, opts.Command, CommandDev)
+		}
+	}
+}
+
+func TestParseArgsAcceptsWebInternalPort(t *testing.T) {
+	for _, argv := range [][]string{
+		{"dev", "--web-internal-port", "37430"},
+		{"dev", "--web-internal-port=37430"},
+	} {
+		opts, err := parseArgs(argv)
+		if err != nil {
+			t.Fatalf("parseArgs(%v) = %v", argv, err)
+		}
+		if opts.Command != CommandDev || opts.WebPort != 37430 {
+			t.Fatalf("parseArgs(%v) = %+v", argv, opts)
+		}
+	}
+}
+
+func TestParseArgsRejectsWebInternalPortOutsideDevMode(t *testing.T) {
+	for _, argv := range [][]string{
+		{"--web-internal-port", "37430"},
+		{"run", "--web-internal-port=37430"},
+		{"start", "--web-internal-port", "37430"},
+	} {
+		_, err := parseArgs(argv)
+		if err == nil {
+			t.Fatalf("parseArgs(%v) returned nil error", argv)
+		}
+		if err.Error() != "--web-internal-port only applies to dev mode" {
+			t.Fatalf("parseArgs(%v) error = %q", argv, err)
+		}
+	}
+}
+
+func TestParseArgsRejectsInvalidWebPort(t *testing.T) {
+	for _, argv := range [][]string{
+		{"dev", "--web-internal-port", "70000"},
+		{"dev", "--web-internal-port=0"},
+		{"dev", "--web-internal-port"},
+	} {
+		if _, err := parseArgs(argv); err == nil {
+			t.Fatalf("parseArgs(%v) returned nil error", argv)
 		}
 	}
 }

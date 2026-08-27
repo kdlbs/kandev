@@ -2,6 +2,7 @@ package automation
 
 import (
 	"context"
+	"strings"
 
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
@@ -50,15 +51,15 @@ const runWorktreeSweepWindow = 200
 // Excluding the reclaimed ones makes the window slide: each firing sees only
 // runs that still cost disk, so the backlog drains across successive firings
 // and the steady state is a window one deep. The worktree row is reached
-// through task_sessions because that is how a checkout is keyed — a task owns
-// sessions, a session owns worktree rows — and `status <> 'deleted'` is the
-// exact inverse of what worktree.Manager.ReleaseWorktreeReference writes when
-// a checkout goes away.
+// through the task environment because that is how a checkout is keyed — a
+// task owns an environment, an environment owns worktree rows — and
+// `status <> 'deleted'` is the exact inverse of what
+// worktree.Manager.ReleaseWorktreeReference writes when a checkout goes away.
 const runHasLiveWorktreeSQL = `
 			EXISTS (
-				SELECT 1 FROM task_session_worktrees tsw
-				JOIN task_sessions wts ON wts.id = tsw.session_id
-				WHERE wts.task_id = ar.task_id AND tsw.status <> ?
+				SELECT 1 FROM task_environment_repos ter
+				JOIN task_environments wte ON wte.id = ter.task_environment_id
+				WHERE wte.task_id = ar.task_id AND ter.status <> ?
 			)`
 
 // PrunableRunTaskIDs names the tasks whose workspaces may be reclaimed, given a
@@ -109,20 +110,35 @@ func (s *Store) PrunableRunTaskIDs(ctx context.Context, finalizedTaskID string, 
 	args = append(args, worktree.StatusDeleted, runWorktreeSweepWindow, keep)
 
 	var taskIDs []string
+	// A reusable automation can have many terminal run rows for one task. The
+	// retention unit is the distinct task checkout, not each run row. Keep the
+	// newest run ordering for each task, and protect the current continuation
+	// even when it has already parked after a successful turn.
 	err := s.ro.SelectContext(ctx, &taskIDs, `
-		SELECT ar.task_id FROM automation_runs ar
-		WHERE ar.automation_id = (
-				SELECT automation_id FROM automation_runs
-				WHERE task_id = ? ORDER BY created_at DESC, id DESC LIMIT 1
+		WITH terminal_tasks AS (
+			SELECT ar.automation_id, ar.task_id,
+				MAX(ar.created_at) AS latest_created_at,
+				MAX(ar.id) AS latest_id
+			FROM automation_runs ar
+			WHERE ar.automation_id = (
+					SELECT automation_id FROM automation_runs
+					WHERE task_id = ? ORDER BY created_at DESC, id DESC LIMIT 1
+				)
+				AND ar.task_id != ''
+				AND ar.status NOT IN (?, ?)
+			GROUP BY ar.automation_id, ar.task_id
+		)
+		SELECT tt.task_id FROM terminal_tasks tt
+		WHERE NOT EXISTS (
+				SELECT 1 FROM automations a
+				WHERE a.id = tt.automation_id AND a.continuation_task_id = tt.task_id
 			)
-			AND ar.task_id != ''
-			AND ar.status NOT IN (?, ?)
 			AND NOT EXISTS (
 				SELECT 1 FROM task_sessions ts
-				WHERE ts.task_id = ar.task_id AND ts.state IN (?, ?)
+				WHERE ts.task_id = tt.task_id AND ts.state IN (?, ?)
 			)
-			AND`+runHasLiveWorktreeSQL+`
-		ORDER BY `+runOrderSQL("ar")+`
+			AND`+strings.ReplaceAll(runHasLiveWorktreeSQL, "ar.task_id", "tt.task_id")+`
+		ORDER BY tt.latest_created_at DESC, tt.latest_id DESC
 		LIMIT ? OFFSET ?`, args...)
 	return taskIDs, err
 }

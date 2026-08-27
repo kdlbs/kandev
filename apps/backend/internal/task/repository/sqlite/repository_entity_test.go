@@ -31,6 +31,25 @@ func newRepoForEntityTests(t *testing.T) *Repository {
 	return repo
 }
 
+func TestRepositoryCloseHonorsDatabaseOwnership(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "owned-close.db")
+	dbConn, err := db.OpenSQLite(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
+	repo, err := newRepository(sqlxDB, sqlxDB, nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := sqlxDB.Ping(); err == nil {
+		t.Fatal("owned database remains open")
+	}
+}
+
 func seedWorkspace(t *testing.T, repo *Repository, id string) {
 	t.Helper()
 	if err := repo.CreateWorkspace(context.Background(), &models.Workspace{ID: id, Name: id}); err != nil {
@@ -432,6 +451,31 @@ func TestRepositoryProviderHost_RoundTrip(t *testing.T) {
 	updated, err := repo.GetRepository(ctx, in.ID)
 	if err != nil || updated.ProviderHost != "https://gitlab.internal" {
 		t.Fatalf("updated provider_host = %q, err = %v", updated.ProviderHost, err)
+	}
+}
+
+func TestUpdateRepositoryDefaultBranchUsesExpectedValue(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "ws-default-branch-cas")
+	if err := repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-default-branch-cas", WorkspaceID: "ws-default-branch-cas", Name: "default-branch", DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("create repository: %v", err)
+	}
+
+	if err := repo.UpdateRepositoryDefaultBranch(ctx, "repo-default-branch-cas", "main", "trunk"); err != nil {
+		t.Fatalf("update default branch: %v", err)
+	}
+	if err := repo.UpdateRepositoryDefaultBranch(ctx, "repo-default-branch-cas", "main", "develop"); err == nil {
+		t.Fatal("stale expected branch was accepted")
+	}
+	got, err := repo.GetRepository(ctx, "repo-default-branch-cas")
+	if err != nil {
+		t.Fatalf("get repository: %v", err)
+	}
+	if got.DefaultBranch != "trunk" {
+		t.Fatalf("default branch = %q, want trunk", got.DefaultBranch)
 	}
 }
 

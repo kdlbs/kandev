@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	promptcfg "github.com/kandev/kandev/config/prompts"
 	"github.com/kandev/kandev/internal/sysprompt"
@@ -114,9 +115,9 @@ func TestSyspromptToolNames_MatchMCPTaskMode(t *testing.T) {
 }
 
 // TestTaskControlDocs_MatchMessageSchemaAndStopChoice keeps the short injected
-// context aligned with the task-control choices exposed by task-mode MCP. The
-// full tool descriptions remain authoritative for lifecycle detail, but the
-// first-turn context must make the queue/interrupt/stop decision discoverable.
+// context aligned with the task-control choices exposed by task-mode MCP. Tool
+// descriptions carry tool-specific behavior, while the first-turn context makes
+// the queue/interrupt/stop relationship discoverable.
 func TestTaskControlDocs_MatchMessageSchemaAndStopChoice(t *testing.T) {
 	log := newTestLogger(t)
 	backend := NewChannelBackendClient(log)
@@ -172,6 +173,47 @@ func TestTaskControlDocs_OmittedFromRestrictedModes(t *testing.T) {
 	}
 }
 
+func TestRichOutputDocs_MakeExplicitAndCSVUseDiscoverable(t *testing.T) {
+	inlineRecipe := `{"type":"chart","chart_type":"bar","title":"T","summary":"S","labels":["A","B"],"series":[{"label":"Count","values":[42,27]}]}`
+	csvRecipe := `{"type":"chart","chart_type":"line","title":"T","summary":"S","csv":{"path":"reports/latency.csv","x_column":"recorded_at","series":[{"column":"p95_ms","label":"p95 (ms)"}]}}`
+	metricsRecipe := `{"type":"metrics","items":[{"label":"Passed","value":"38"}]}`
+
+	for name, prompt := range map[string]string{
+		"task":   sysprompt.KandevContext(),
+		"office": sysprompt.OfficeContext(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			var richOutputLine string
+			for _, line := range strings.Split(prompt, "\n") {
+				if strings.HasPrefix(line, "- show_rich_output_kandev:") {
+					richOutputLine = line
+					break
+				}
+			}
+			require.NotEmpty(t, richOutputLine)
+			assert.LessOrEqual(t, utf8.RuneCountInString(richOutputLine), 750)
+			for _, phrase := range []string{
+				"When user asks for chart/graph/plot/file preview/KPI/metrics with data: call now",
+				"Do not implement the display as ASCII/SVG/HTML or with another app",
+				"version=1,title,blocks (1-4)",
+				"x_column",
+				"workspace-relative",
+				"Label series with units",
+				"small text table: Markdown",
+				"Inline:",
+				"CSV line:",
+				"Metrics:",
+				"Kandev owns axes/legends/tooltips/layout",
+			} {
+				assert.Contains(t, richOutputLine, phrase)
+			}
+			assert.Equal(t, 1, strings.Count(richOutputLine, inlineRecipe))
+			assert.Equal(t, 1, strings.Count(richOutputLine, csvRecipe))
+			assert.Equal(t, 1, strings.Count(richOutputLine, metricsRecipe))
+		})
+	}
+}
+
 // TestSyspromptToolNames_MatchMCPConfigMode verifies that every `<name>_kandev`
 // tool referenced in ConfigContext is registered by an MCP server in ModeConfig.
 func TestSyspromptToolNames_MatchMCPConfigMode(t *testing.T) {
@@ -214,8 +256,6 @@ func TestSyspromptToolNames_ExactlyMatchMCPOfficeMode(t *testing.T) {
 
 	assert.Equal(t, registered, referenced,
 		"Office first-turn context must advertise exactly the ModeOffice tool inventory")
-	assert.NotContains(t, referenced, "step_complete_kandev")
-	assert.NotContains(t, sysprompt.OfficeContext(), "mcp__kandev__step_complete_kandev")
 }
 
 // TestSyspromptToolNames_NoBareToolReferences catches the opposite drift: a
@@ -310,7 +350,7 @@ func TestFindBareToolReferences_DistinguishesSuffixedFromBare(t *testing.T) {
 }
 
 // askUserQuestionSchemaFacts pulls the load-bearing structural facts from the
-// registered ask_user_question_kandev tool schema: the top-level array param
+// registered ask_user_question_kandev tool schema: the questions array param
 // name, its min/max bounds, and the required sub-fields of each question
 // object. These are the facts the embedded prompt contexts must mirror.
 type askUserQuestionSchemaFacts struct {
@@ -335,28 +375,11 @@ func extractAskUserQuestionFacts(t *testing.T, s *Server) askUserQuestionSchemaF
 	props, ok := parsed["properties"].(map[string]any)
 	require.True(t, ok, "schema must expose 'properties'")
 
-	// Collect all top-level array params and assert exactly one exists.
-	// Using a collect-then-assert pattern (rather than break-on-first) makes
-	// the selection deterministic even if Go's map iteration visits properties
-	// in a different order between runs or Go versions.
-	var arrayParams []string
-	paramSpecs := make(map[string]map[string]any)
-	for name, spec := range props {
-		m, ok := spec.(map[string]any)
-		if !ok {
-			continue
-		}
-		if m["type"] == "array" {
-			arrayParams = append(arrayParams, name)
-			paramSpecs[name] = m
-		}
-	}
-	sort.Strings(arrayParams)
-	require.Len(t, arrayParams, 1,
-		"ask_user_question schema must have exactly one top-level array parameter; got %v", arrayParams)
-
-	arrayParam := arrayParams[0]
-	arraySpec := paramSpecs[arrayParam]
+	arrayParam := questionsArg
+	arraySpec, ok := props[arrayParam].(map[string]any)
+	require.True(t, ok, "ask_user_question schema must expose the %q parameter", arrayParam)
+	require.Equal(t, "array", arraySpec["type"],
+		"ask_user_question %q parameter must be an array", arrayParam)
 
 	minF, _ := arraySpec["minItems"].(float64)
 	maxF, _ := arraySpec["maxItems"].(float64)
@@ -408,9 +431,8 @@ func TestAskUserQuestionDocs_MatchSchema(t *testing.T) {
 	facts := taskFacts
 	bounds := fmt.Sprintf("%d-%d", facts.minItems, facts.maxItems)
 
-	// Each prompt must mention the array param name, the bounds, and every
-	// required sub-field name. We assert phrases (not exact wording) so authors
-	// can rewrite the prose freely as long as the load-bearing facts survive.
+	// The shared contexts advertise the tool and bundle size. The input schema is
+	// authoritative for per-question fields so that prompt text does not repeat it.
 	cases := map[string]string{
 		"KandevContext": sysprompt.KandevContext(),
 		"ConfigContext": sysprompt.ConfigContext(),
@@ -420,10 +442,6 @@ func TestAskUserQuestionDocs_MatchSchema(t *testing.T) {
 			"%s must mention ask_user_question param name %q", name, facts.paramName)
 		assert.Contains(t, prompt, bounds,
 			"%s must mention the question-count bounds %q from the schema", name, bounds)
-		for _, field := range facts.requiredFields {
-			assert.Contains(t, prompt, field,
-				"%s must mention required question sub-field %q", name, field)
-		}
 	}
 }
 
@@ -480,17 +498,13 @@ func TestWalkthroughDocs_MatchSchema(t *testing.T) {
 			"KandevContext must advertise task-mode walkthrough tool %q", toolName)
 	}
 
-	for name, prompt := range map[string]string{
-		"KandevContext":      context,
-		"ChangesWalkthrough": promptcfg.Get("changes-walkthrough"),
-	} {
-		assert.Contains(t, prompt, "`steps`",
-			"%s must identify the walkthrough steps parameter", name)
-		assert.Contains(t, prompt, "ordered array",
-			"%s must say walkthrough steps preserve order", name)
-		for _, field := range requiredFields {
-			assert.Contains(t, prompt, fmt.Sprintf("`%s`", field),
-				"%s must identify required walkthrough step field %q", name, field)
-		}
+	prompt := promptcfg.Get("changes-walkthrough")
+	assert.Contains(t, prompt, "`steps`",
+		"ChangesWalkthrough must identify the walkthrough steps parameter")
+	assert.Contains(t, prompt, "ordered array",
+		"ChangesWalkthrough must say walkthrough steps preserve order")
+	for _, field := range requiredFields {
+		assert.Contains(t, prompt, fmt.Sprintf("`%s`", field),
+			"ChangesWalkthrough must identify required walkthrough step field %q", field)
 	}
 }

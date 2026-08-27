@@ -6,8 +6,11 @@ import {
   type MessageType,
 } from "@/lib/types/http";
 import type { RichMetadata } from "@/components/task/chat/types";
+import { findPendingClarificationGroup } from "@/lib/utils/pending-clarification";
+import { filterVisibleMessages } from "./processed-message-filtering";
 import {
   buildGroupedRenderItems,
+  buildTodoItems,
   collapseTodoSnapshotsPerTurn,
   deduplicateAgentBootResumes,
   insertLastAgentErrorItem,
@@ -18,6 +21,8 @@ import {
   reconcileRenderItems,
   type RenderItem,
 } from "./use-processed-messages";
+
+const CURRENT_TURN_ID = "turn-current";
 
 function makeMessage(
   id: string,
@@ -73,6 +78,139 @@ function bootResumed(id: string): Message {
     status: "exited",
   });
 }
+
+describe("filterVisibleMessages clarification history", () => {
+  it("uses the newest pending clarification as the active fallback when scope is absent", () => {
+    const old = makeMessage("fallback-old-question", "clarification_request", {
+      status: "pending",
+    });
+    const active = makeMessage("fallback-active-question", "clarification_request", {
+      status: "pending",
+    });
+
+    expect(
+      filterVisibleMessages([old, active], new Set<string>(), new Set<string>()).map(
+        (message) => message.id,
+      ),
+    ).toEqual(["fallback-old-question"]);
+  });
+
+  it("keeps a superseded pending clarification as inert transcript history", () => {
+    const superseded = {
+      ...makeMessage("old-question", "clarification_request", {
+        status: "pending",
+        agent_disconnected: true,
+      }),
+      turn_id: "turn-old",
+    };
+    const current = {
+      ...makeMessage("current-question", "clarification_request", { status: "pending" }),
+      turn_id: CURRENT_TURN_ID,
+    };
+
+    expect(
+      filterVisibleMessages([superseded, current], new Set<string>(), new Set<string>(), {
+        currentTurnId: CURRENT_TURN_ID,
+      }).map((message) => message.id),
+    ).toEqual(["old-question"]);
+  });
+});
+
+describe("filterVisibleMessages current-turn clarification bundles", () => {
+  it("hides only the newest pending clarification bundle in the current turn", () => {
+    const superseded = {
+      ...makeMessage("same-turn-old-question", "clarification_request", {
+        status: "pending",
+        pending_id: "pending-old",
+      }),
+      turn_id: CURRENT_TURN_ID,
+    };
+    const active = {
+      ...makeMessage("same-turn-active-question", "clarification_request", {
+        status: "pending",
+        pending_id: "pending-active",
+      }),
+      turn_id: CURRENT_TURN_ID,
+    };
+
+    expect(
+      filterVisibleMessages([superseded, active], new Set<string>(), new Set<string>(), {
+        currentTurnId: CURRENT_TURN_ID,
+      }).map((message) => message.id),
+    ).toEqual(["same-turn-old-question"]);
+  });
+});
+
+describe("filterVisibleMessages clarification history without turn authority", () => {
+  it("keeps malformed pending history visible when durable turn history is empty", () => {
+    const pending = makeMessage("legacy-question", "clarification_request", {
+      status: "pending",
+    });
+
+    expect(
+      filterVisibleMessages([pending], new Set<string>(), new Set<string>(), {
+        currentTurnId: null,
+      }).map((message) => message.id),
+    ).toEqual(["legacy-question"]);
+    expect(
+      findPendingClarificationGroup([pending], { currentTurnId: null }).map(
+        (message) => message.id,
+      ),
+    ).toEqual([]);
+  });
+
+  it.each([null, "permission"] as const)(
+    "keeps pending metadata as inert history when authority is %s",
+    (pendingAction) => {
+      const old = makeMessage("unhydrated-old-question", "clarification_request", {
+        status: "pending",
+        agent_disconnected: true,
+      });
+
+      expect(
+        filterVisibleMessages([old], new Set<string>(), new Set<string>(), {
+          currentTurnId: undefined,
+          pendingAction,
+        }).map((message) => message.id),
+      ).toEqual(["unhydrated-old-question"]);
+    },
+  );
+
+  it("keeps pending clarification as inert history when explicit authority is unavailable", () => {
+    const pending = makeMessage("unloaded-question", "clarification_request", {
+      status: "pending",
+    });
+
+    expect(
+      filterVisibleMessages([pending], new Set<string>(), new Set<string>(), {
+        currentTurnId: undefined,
+        pendingAction: undefined,
+      }).map((message) => message.id),
+    ).toEqual(["unloaded-question"]);
+  });
+
+  it("hides only the active bundle when clarification authority exists before turn hydration", () => {
+    const old = makeMessage("unhydrated-superseded", "clarification_request", {
+      status: "pending",
+      pending_id: "pending-old",
+    });
+    const activeA = makeMessage("unhydrated-active-a", "clarification_request", {
+      status: "pending",
+      pending_id: "pending-active",
+    });
+    const activeB = makeMessage("unhydrated-active-b", "clarification_request", {
+      status: "pending",
+      pending_id: "pending-active",
+    });
+
+    expect(
+      filterVisibleMessages([old, activeA, activeB], new Set<string>(), new Set<string>(), {
+        currentTurnId: undefined,
+        pendingAction: "clarification",
+      }).map((message) => message.id),
+    ).toEqual(["unhydrated-superseded"]);
+  });
+});
 
 describe("isAgentBootResumeMessage", () => {
   it("returns true for script_execution agent_boot with is_resuming=true", () => {
@@ -476,5 +614,76 @@ describe("buildGroupedRenderItems subagent hoisting", () => {
       { canAnchorPrepareProgress: false },
     );
     expect(items.map((i) => i.type)).toEqual(["turn_group", "message", "turn_group"]);
+  });
+});
+
+describe("buildTodoItems", () => {
+  it("returns the latest persisted todo entries, accepting string and object items", () => {
+    const messages = [
+      makeMessage("m1", "message", undefined, "hello"),
+      makeTodo("m2", "turn-1", [
+        { text: "Old task", done: true },
+        { text: "Old task 2", done: false },
+      ]),
+      {
+        ...makeMessage("m3", "todo", {
+          todos: ["Write tests", { text: "Implement", done: true }],
+        }),
+        turn_id: "turn-2",
+      },
+    ];
+
+    expect(buildTodoItems(messages)).toEqual([
+      { text: "Write tests", done: false },
+      { text: "Implement", done: true },
+    ]);
+  });
+
+  it("returns an empty list when no message carries todos", () => {
+    expect(buildTodoItems([makeMessage("m1", "message", undefined, "hello")])).toEqual([]);
+    expect(buildTodoItems([])).toEqual([]);
+  });
+
+  it("drops empty-text entries so they do not count as a non-empty list", () => {
+    const messages = [
+      {
+        ...makeMessage("m1", "todo", { todos: [{ text: "" }, "Valid", { text: "Whitespace " }] }),
+        turn_id: "t",
+      },
+    ];
+
+    expect(buildTodoItems(messages)).toEqual([
+      { text: "Valid", done: false },
+      { text: "Whitespace ", done: undefined },
+    ]);
+  });
+
+  it("is total for malformed todo metadata instead of throwing", () => {
+    const malformed = [
+      // todos is a non-array object
+      { ...makeMessage("m1", "todo", { todos: { text: "x" } }), turn_id: "turn-1" },
+      // todos is a primitive
+      { ...makeMessage("m2", "todo", { todos: "x" }), turn_id: "turn-2" },
+      // todos contains null / non-object entries
+      { ...makeMessage("m3", "todo", { todos: [null, 42, { text: "Valid" }] }), turn_id: "turn-3" },
+      // metadata is a primitive (not an object)
+      {
+        ...makeMessage("m4", "todo", "not-an-object" as unknown as Record<string, unknown>),
+        turn_id: "turn-4",
+      },
+      // todo-type message without metadata
+      { ...makeMessage("m5", "todo", undefined), turn_id: "turn-5" },
+    ];
+
+    // Each shape independently must yield [] (or only the valid entries),
+    // never throw.
+    for (const message of malformed) {
+      expect(() => buildTodoItems([message])).not.toThrow();
+    }
+    expect(buildTodoItems([malformed[0]])).toEqual([]);
+    expect(buildTodoItems([malformed[1]])).toEqual([]);
+    expect(buildTodoItems([malformed[2]])).toEqual([{ text: "Valid", done: undefined }]);
+    expect(buildTodoItems([malformed[3]])).toEqual([]);
+    expect(buildTodoItems([malformed[4]])).toEqual([]);
   });
 });

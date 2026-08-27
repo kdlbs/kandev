@@ -8,7 +8,7 @@ import { Switch } from "@kandev/ui/switch";
 import { StatusIcon } from "./status-icon";
 import { useAdvancedSession } from "./use-advanced-session";
 import { ExecutionIndicator } from "../../components/execution-indicator";
-import { OfficeTopbarPortal } from "../../components/office-topbar-portal";
+import { useOfficeTopbar } from "../../components/office-topbar-context";
 import type { Task } from "./types";
 import { useTranslation } from "react-i18next";
 
@@ -26,14 +26,19 @@ export function TaskAdvancedMode({ task, onToggleSimple }: TaskAdvancedModeProps
   const { t } = useTranslation();
   const { sessionId, isSessionEnded } = useAdvancedSession(task.id);
 
-  return (
-    <div className="flex flex-col h-full">
-      <OfficeTopbarPortal>
-        <StatusIcon status={task.status} className="h-4 w-4" />
+  useOfficeTopbar({
+    title: task.title,
+    icon: <StatusIcon status={task.status} className="h-4 w-4" />,
+    titleSlot: (
+      <>
         <span className="text-xs font-mono text-muted-foreground">{task.identifier}</span>
-        <span className="text-sm font-medium truncate">{task.title}</span>
-        <span className="flex-1" />
-        <ExecutionIndicator status={task.status} />
+        <span className="truncate text-sm font-medium">{task.title}</span>
+      </>
+    ),
+    parents: [{ label: t("office:tasks"), href: "/office/tasks" }],
+    actions: (
+      <>
+        <ExecutionIndicator status={task.rawStatus ?? task.status} />
         <div className="flex items-center gap-2">
           <Label htmlFor="advanced-toggle" className="text-xs text-muted-foreground cursor-pointer">
             {t("office:advanced")}
@@ -47,14 +52,19 @@ export function TaskAdvancedMode({ task, onToggleSimple }: TaskAdvancedModeProps
         >
           {t("office:openInAdvancedView")}
         </Link>
-      </OfficeTopbarPortal>
+      </>
+    ),
+  });
+
+  return (
+    <div className="flex flex-col h-full">
       {isSessionEnded && (
         <div className="flex items-center gap-2 px-4 py-2 bg-muted border-b border-border shrink-0">
           <IconInfoCircle className="h-4 w-4 text-muted-foreground" />
           <span className="text-sm text-muted-foreground">{t("office:agentSessionEnded")}</span>
         </div>
       )}
-      <OfficeDockviewLayout taskId={task.id} sessionId={sessionId} />
+      <OfficeDockviewLayout taskId={task.id} sessionId={sessionId} task={task} />
     </div>
   );
 }

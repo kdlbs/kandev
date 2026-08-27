@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/desktop-tauri-app/spec.md
+spec: docs/specs/desktop/requirements/desktop-tauri-app.md
 created: 2026-07-15
 status: done
 ---
@@ -14,7 +14,7 @@ existing Tauri shell without creating a second product UI or broadening WebView 
 
 ## Architecture
 
-- Product contract: `docs/specs/desktop-tauri-app/spec.md`
+- Product contract: `docs/specs/desktop/requirements/desktop-tauri-app.md`
 - Shell decision: `docs/decisions/0026-tauri-desktop-shell.md`
 - Integration boundary: `docs/decisions/0039-native-desktop-integration-boundary.md`
 - Rust owns OS and lifecycle behavior; the SPA owns navigation and contextual UI semantics.

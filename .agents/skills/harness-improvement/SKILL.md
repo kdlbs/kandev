@@ -61,6 +61,8 @@ mirror unless the user explicitly requests a policy reversal.
      git diff --check -- <changed-files>
      rg -n "old-skill|old-agent|stale-command" .agents AGENTS.md CLAUDE.md
      ```
+   - Load `references/validation.md` for the shared harness test, lint,
+     whitespace, line-budget, and pre-commit commands.
    - For executable script changes, run syntax checks and a focused dry run or mocked command when possible.
 
 6. **Report**

@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
+import { StateProvider } from "@/components/state-provider";
 import { SettingsSaveProvider, useSettingsSaveContributor } from "./settings-save-provider";
 import { resolveAgentModelConfig } from "@/lib/api/domains/settings-api";
 import { __resetModelConfigResolutionCache } from "@/hooks/domains/settings/use-dynamic-models";
@@ -28,7 +29,7 @@ vi.mock("@/lib/api/domains/settings-api", () => ({
       {
         type: "select",
         id: reasoningEffortOptionId,
-        name: "Reasoning effort",
+        name: reasoningEffortName,
         current_value: "max",
         options: [{ value: "max", name: "Max" }],
       },
@@ -46,6 +47,7 @@ const modelConfig: ModelConfig = {
 };
 
 const reasoningEffortOptionId = "reasoning_effort";
+const reasoningEffortName = "Reasoning effort";
 const profileStartModelSettingsLabel = "Profile start model settings";
 
 function formData(overrides: Partial<ProfileFormData> = {}): ProfileFormData {
@@ -108,11 +110,28 @@ function renderStatefulForm(
   );
 }
 
+function expandFallbackSettings() {
+  fireEvent.click(screen.getByTestId("profile-fallback-settings-trigger"));
+}
+
 describe("ProfileFormFields command prefix visibility", () => {
-  it("shows the command prefix field for an ACP (non-passthrough) profile", () => {
+  it("keeps the command prefix behind collapsed advanced options", () => {
     renderForm(formData({ cli_passthrough: false }));
 
-    expect(screen.queryByTestId("command-prefix-input")).not.toBeNull();
+    expect(screen.queryByTestId("command-prefix-input")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("profile-advanced-options-trigger"));
+    expect(screen.getByTestId("command-prefix-input")).not.toBeNull();
+  });
+
+  it("places fallback settings before advanced options at the bottom of the form", () => {
+    renderForm(formData({ cli_passthrough: false }));
+
+    const fallback = screen.getByTestId("profile-fallback-settings");
+    const advanced = screen.getByTestId("profile-advanced-options");
+    expect(
+      fallback.compareDocumentPosition(advanced) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("hides the command prefix field for a TUI-passthrough profile", () => {
@@ -122,12 +141,90 @@ describe("ProfileFormFields command prefix visibility", () => {
   });
 });
 
+describe("ProfileFormFields no-silent-model-fallback rows", () => {
+  it("renders the start model trigger red when the configured model is gone", () => {
+    renderForm(formData({ model: "claude-gone" }));
+
+    const trigger = screen.getByRole("button", { name: profileStartModelSettingsLabel });
+    expect(trigger.className).toContain("text-destructive");
+    expect(trigger.textContent).toContain("claude-gone");
+  });
+
+  it("shows the agent fallback row when auto-fallback is off", () => {
+    renderForm(formData({ auto_fallback: false }));
+    expandFallbackSettings();
+    expect(screen.queryByTestId("profile-fallback-model-field")).not.toBeNull();
+  });
+
+  it("keeps the agent fallback row visible but disabled when auto-fallback is on", () => {
+    renderForm(formData({ auto_fallback: true }));
+    expandFallbackSettings();
+    expect(screen.queryByTestId("profile-fallback-model-field")).not.toBeNull();
+    expect(screen.getByRole("switch", { name: "Agent fallback" })).toHaveProperty("disabled", true);
+    expect(screen.queryByTestId("profile-auto-fallback-field")).not.toBeNull();
+  });
+
+  it("marks a gone fallback model red in its picker", () => {
+    renderForm(formData({ fallback_model: "gpt-gone" }));
+    expandFallbackSettings();
+    const trigger = screen.getByRole("button", { name: "Agent fallback model settings" });
+    expect(trigger.className).toContain("text-destructive");
+    expect(trigger.textContent).toContain("gpt-gone");
+  });
+
+  it("hides the fallback selector until its attached switch is on", () => {
+    renderForm(formData({ auto_fallback: false }));
+    expandFallbackSettings();
+    // The optional fallback row renders its label + switch, but the model
+    // selector only appears once the user opts in via the attached switch.
+    expect(screen.queryByTestId("profile-fallback-model-field")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Agent fallback model settings" })).toBeNull();
+  });
+
+  it("shows the fallback selector when a fallback model is configured", () => {
+    renderForm(formData({ fallback_model: "mock-fast" }));
+    expandFallbackSettings();
+    expect(screen.getByRole("button", { name: "Agent fallback model settings" })).not.toBeNull();
+  });
+
+  it("clears the fallback model when its attached switch is turned off", () => {
+    const onChange = vi.fn();
+    renderForm(formData({ fallback_model: "mock-fast" }), modelConfig, onChange);
+    expandFallbackSettings();
+    const fallbackToggle = screen.getByRole("switch", { name: "Agent fallback" });
+    fallbackToggle.click();
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ fallback_model: "" }));
+  });
+});
+
 describe("ProfileFormFields model options", () => {
+  it("constrains a single start model field on desktop", () => {
+    renderForm(formData());
+
+    const row = screen.getByTestId("profile-capabilities-model-row");
+    expect(row.firstElementChild?.className).toContain("md:max-w-xl");
+  });
+
+  it("keeps the model and mode fields balanced when modes are available", () => {
+    renderForm(formData({ mode: "default" }), {
+      ...modelConfig,
+      available_modes: [{ id: "default", name: "Default" }],
+      current_mode_id: "default",
+    });
+
+    const row = screen.getByTestId("profile-capabilities-model-row");
+    expect(row.firstElementChild?.className).toContain("flex-1");
+    expect(screen.getByTestId("profile-mode-field")).not.toBeNull();
+  });
+
   it("loads model-specific options in the profile model selector", async () => {
     const dynamicModelConfig: ModelConfig = {
       default_model: "model-a",
-      current_model_id: "model-a",
-      available_models: [{ id: "model-a", name: "Model A" }],
+      current_model_id: "model-b",
+      available_models: [
+        { id: "model-a", name: "Model A" },
+        { id: "model-b", name: "Model B" },
+      ],
       config_options: [],
       supports_dynamic_models: true,
     };
@@ -153,7 +250,7 @@ describe("ProfileFormFields model options", () => {
         {
           type: "select",
           id: reasoningEffortOptionId,
-          name: "Reasoning effort",
+          name: reasoningEffortName,
           current_value: "medium",
           options: [{ value: "medium", name: "Medium" }],
         },
@@ -176,6 +273,142 @@ describe("ProfileFormFields model options", () => {
     ).toBeTruthy();
     expect(onChange).not.toHaveBeenCalled();
   });
+});
+
+describe("ProfileFormFields initial model options", () => {
+  it("uses matching initial model options without probing again", async () => {
+    __resetModelConfigResolutionCache();
+    vi.mocked(resolveAgentModelConfig).mockClear();
+    const dynamicModelConfig: ModelConfig = {
+      default_model: "model-a",
+      current_model_id: "model-a",
+      available_models: [{ id: "model-a", name: "Model A" }],
+      config_options: [
+        {
+          type: "select",
+          id: reasoningEffortOptionId,
+          name: reasoningEffortName,
+          current_value: "medium",
+          options: [{ value: "medium", name: "Medium" }],
+        },
+      ],
+      supports_dynamic_models: true,
+    };
+
+    renderForm(formData({ model: "model-a" }), dynamicModelConfig);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: profileStartModelSettingsLabel })).toBeTruthy(),
+    );
+
+    expect(resolveAgentModelConfig).not.toHaveBeenCalled();
+  });
+
+  it("uses a matching initial model snapshot without probing again", async () => {
+    __resetModelConfigResolutionCache();
+    vi.mocked(resolveAgentModelConfig).mockClear();
+    const dynamicModelConfig: ModelConfig = {
+      default_model: "model-a",
+      current_model_id: "model-a",
+      available_models: [{ id: "model-a", name: "Model A" }],
+      config_options: [],
+      supports_dynamic_models: true,
+      status: "ok",
+    };
+
+    renderForm(formData({ model: "model-a" }), dynamicModelConfig);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: profileStartModelSettingsLabel })).toBeTruthy(),
+    );
+
+    expect(resolveAgentModelConfig).not.toHaveBeenCalled();
+  });
+
+  it("does not probe again when the initial capability snapshot failed", async () => {
+    __resetModelConfigResolutionCache();
+    vi.mocked(resolveAgentModelConfig).mockClear();
+    const dynamicModelConfig: ModelConfig = {
+      default_model: "mock-fast",
+      current_model_id: "mock-fast",
+      available_models: [],
+      config_options: [],
+      supports_dynamic_models: true,
+      status: "failed",
+      error: "mock-agent is not available",
+    };
+
+    renderForm(formData({ model: "mock-fast" }), dynamicModelConfig);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: profileStartModelSettingsLabel })).toBeTruthy(),
+    );
+
+    expect(resolveAgentModelConfig).not.toHaveBeenCalled();
+  });
+});
+
+describe("ProfileFormFields model options after selection", () => {
+  it("keeps the model selector open while resolving the selected model options", async () => {
+    __resetModelConfigResolutionCache();
+    let resolveResponse: ((value: unknown) => void) | undefined;
+    const response = new Promise((resolve) => {
+      resolveResponse = resolve;
+    });
+    vi.mocked(resolveAgentModelConfig).mockReturnValueOnce(response as never);
+
+    const dynamicModelConfig: ModelConfig = {
+      default_model: "model-a",
+      current_model_id: "model-a",
+      available_models: [
+        { id: "model-a", name: "Model A" },
+        { id: "model-b", name: "Model B" },
+      ],
+      config_options: [
+        {
+          type: "select",
+          id: reasoningEffortOptionId,
+          name: reasoningEffortName,
+          current_value: "medium",
+          options: [{ value: "medium", name: "Medium" }],
+        },
+      ],
+      supports_dynamic_models: true,
+    };
+
+    renderStatefulForm(
+      formData({ model: "model-a", config_options: { [reasoningEffortOptionId]: "medium" } }),
+      dynamicModelConfig,
+      vi.fn(),
+    );
+
+    const selector = await screen.findByRole("button", { name: profileStartModelSettingsLabel });
+    fireEvent.click(selector);
+    fireEvent.click(screen.getByRole("option", { name: /Model B/ }));
+
+    await waitFor(() => expect(screen.getByTestId("model-config-options-loading")).toBeTruthy());
+    expect(screen.queryByTestId(`config-option-trigger-${reasoningEffortOptionId}`)).toBeNull();
+
+    await act(async () => {
+      resolveResponse?.({
+        agent_name: "mock-agent",
+        model: "model-b",
+        status: "ok",
+        config_options: [
+          {
+            type: "select",
+            id: reasoningEffortOptionId,
+            name: reasoningEffortName,
+            current_value: "max",
+            options: [{ value: "max", name: "Max" }],
+          },
+        ],
+        error: null,
+      });
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("config-option-trigger-reasoning_effort")).toBeTruthy(),
+    );
+    expect(screen.queryByTestId("model-config-options-loading")).toBeNull();
+  });
 
   it("removes a saved option value after the user changes the model", async () => {
     const onChange = vi.fn();
@@ -190,7 +423,7 @@ describe("ProfileFormFields model options", () => {
         {
           type: "select",
           id: reasoningEffortOptionId,
-          name: "Reasoning effort",
+          name: reasoningEffortName,
           current_value: "medium",
           options: [{ value: "medium", name: "Medium" }],
         },
@@ -259,11 +492,13 @@ describe("ProfileFormFields save coordination", () => {
     }
 
     render(
-      <SettingsSaveProvider>
-        <TooltipProvider>
-          <SaveHarness />
-        </TooltipProvider>
-      </SettingsSaveProvider>,
+      <StateProvider>
+        <SettingsSaveProvider>
+          <TooltipProvider>
+            <SaveHarness />
+          </TooltipProvider>
+        </SettingsSaveProvider>
+      </StateProvider>,
     );
 
     const saveButton = await screen.findByRole("button", { name: "Save changes" });

@@ -1,8 +1,13 @@
 import { test, expect } from "../../fixtures/docker-test-base";
-import { E2E_IMAGE_TAG } from "../../fixtures/docker-probe";
+import {
+  buildAlpineE2EImage,
+  E2E_ALPINE_IMAGE_TAG,
+  E2E_IMAGE_TAG,
+} from "../../fixtures/docker-probe";
 import { SessionPage } from "../../pages/session-page";
 import {
   dockerCurrentBranch,
+  dockerFileContent,
   dockerInspectExists,
   dockerRemove,
   dockerState,
@@ -16,6 +21,45 @@ import {
 } from "../../helpers/session";
 
 test.describe("Docker executor — launch + reuse + recovery", () => {
+  test("executes the prepare script on Alpine BusyBox", async ({ apiClient, seedData }) => {
+    test.setTimeout(180_000);
+    buildAlpineE2EImage();
+
+    const { executors } = await apiClient.listExecutors();
+    const dockerExec = executors.find((e) => e.type === "local_docker");
+    expect(dockerExec?.id).toBeTruthy();
+    const profile = await apiClient.createExecutorProfile(dockerExec!.id, {
+      name: "E2E Docker Alpine",
+      config: { image_tag: E2E_ALPINE_IMAGE_TAG },
+      prepare_script: "printf alpine-prepare > /tmp/kandev-alpine-prepare",
+      cleanup_script: "",
+      env_vars: [],
+    });
+
+    try {
+      const task = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        "Docker Alpine Bootstrap",
+        seedData.agentProfileId,
+        {
+          description: "/e2e:simple-message",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          executor_profile_id: profile.id,
+        },
+      );
+      await waitForLatestSessionDone(apiClient, task.id, 1, "Waiting for Alpine Docker session");
+
+      const env = await apiClient.getTaskEnvironment(task.id);
+      expect(env?.container_id).toBeTruthy();
+      expect(dockerFileContent(env!.container_id!, "/tmp/kandev-alpine-prepare")).toBe(
+        "alpine-prepare",
+      );
+    } finally {
+      await apiClient.deleteExecutorProfile(profile.id).catch(() => {});
+    }
+  });
+
   test("launches a session in a real container and exposes container_id", async ({
     apiClient,
     seedData,
@@ -60,7 +104,7 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
       config: { image_tag: E2E_IMAGE_TAG },
       prepare_script: "sleep 20",
       cleanup_script: "",
-      env_vars: [],
+      env_vars: seedData.gitConfigEnvVars,
     });
     const persistedProfile = await apiClient.getExecutorProfile(dockerExec!.id, profile.id);
     expect(persistedProfile.prepare_script).toBe("sleep 20");
@@ -429,7 +473,10 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.dockerExecutorProfileId,
       prompt: "/e2e:simple-message",
-      auto_start: true,
+      // This is a user-initiated New Session launch. `auto_start` is reserved
+      // for workflow on-enter automation and correctly prepares (rather than
+      // starts) a session when this simple workflow does not opt into it.
+      auto_start: false,
     });
 
     await waitForSessionEnvironment(apiClient, {
@@ -438,6 +485,16 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
       expectedEnvironmentId: before!.id,
       message: "Waiting for second Docker session to reuse the task environment",
     });
+    // Binding the row is not enough: a sibling must establish its own
+    // agentctl instance inside the retained container and complete a prompt.
+    // This catches a missing durable Docker control handle, which otherwise
+    // surfaces only after the session has already claimed the environment.
+    await waitForSessionDone(
+      apiClient,
+      task.id,
+      launched.session_id,
+      "Waiting for sibling Docker session to run in the retained container",
+    );
 
     const after = await apiClient.getTaskEnvironment(task.id);
     expect(after?.id).toBe(before!.id);
@@ -493,7 +550,7 @@ git remote set-url origin "$(git remote get-url origin | sed 's|https://[^@]*@gi
       config: { image_tag: E2E_IMAGE_TAG },
       prepare_script: staleScript,
       cleanup_script: "",
-      env_vars: [],
+      env_vars: seedData.gitConfigEnvVars,
     });
 
     try {

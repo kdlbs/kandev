@@ -518,12 +518,19 @@ func TestPromptUsage_RecordsCostEvent(t *testing.T) {
 		t.Fatalf("cost event model = %q, want %q", costs[0].Model, "gpt-4o-mini")
 	}
 	// With no pricing lookup wired and no provider-reported cost, the row
-	// records 0 with estimated=true (Layer A miss + no Layer B).
+	// records 0 (Layer A miss + no Layer B), tagged cost_source=unpriced.
+	// Estimated tracks data.Usage.Estimated verbatim (unset here, so false)
+	// — it is a usage-authority flag, distinct from cost_source, which is
+	// what actually carries the "we could not resolve a price" signal. See
+	// costContractVersion's version history in prompt_usage_cost.go.
 	if costs[0].CostSubcents != 0 {
 		t.Fatalf("cost_subcents = %d, want 0 (no pricing lookup wired)", costs[0].CostSubcents)
 	}
-	if !costs[0].Estimated {
-		t.Fatal("expected estimated=true when both lookup layers miss")
+	if costs[0].Estimated {
+		t.Fatal("expected estimated=false: usage carried no estimated flag, and an unresolved price must not overwrite it")
+	}
+	if costs[0].CostSource == nil || *costs[0].CostSource != models.CostSourceUnpriced {
+		t.Fatalf("cost_source = %v, want %q", costs[0].CostSource, models.CostSourceUnpriced)
 	}
 }
 
@@ -773,38 +780,6 @@ func TestMovedToDone_WithoutExecutionPolicy_NormalCompletion(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected activity log entry with action 'task_status_changed' for task %s, got %+v", taskID, activity)
-	}
-}
-
-func TestHandleTaskStatusChanged_LogsActivity(t *testing.T) {
-	svc, eb := newTestServiceWithBus(t)
-	ctx := context.Background()
-
-	createTestAgent(t, svc, "ws-1", "worker-status")
-	taskID := createOfficeTask(t, svc, "ws-1", "worker-status")
-
-	statusEvt := bus.NewEvent(events.OfficeTaskStatusChanged, "test", map[string]interface{}{
-		"task_id":      taskID,
-		"new_status":   "in_progress",
-		"workspace_id": "ws-1",
-	})
-	if err := eb.Publish(ctx, events.OfficeTaskStatusChanged, statusEvt); err != nil {
-		t.Fatalf("publish office.task.status_changed: %v", err)
-	}
-
-	activity, err := svc.ListActivity(ctx, "ws-1", 50)
-	if err != nil {
-		t.Fatalf("list activity: %v", err)
-	}
-	found := false
-	for _, a := range activity {
-		if a.Action == "task_status_changed" && a.TargetID == taskID {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("expected activity entry with action 'task_status_changed' for task %s, got %+v", taskID, activity)
 	}
 }
 

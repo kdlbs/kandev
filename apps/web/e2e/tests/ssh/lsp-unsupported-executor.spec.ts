@@ -21,6 +21,7 @@ test.describe("SSH LSP boundary", () => {
       repositoryDirectory: "e2e-ssh-repo",
       push: true,
     });
+    const remoteFilePath = `Remote-${task.taskId}.kt`;
 
     // The SSH fixture's file:// origin belongs to the backend host and is not
     // reachable from the remote container. Create the Kotlin file through the
@@ -29,9 +30,9 @@ test.describe("SSH LSP boundary", () => {
     await testPage.getByRole("button", { name: "New file" }).click();
     const fileNameInput = testPage.getByPlaceholder("filename...");
     await expect(fileNameInput).toBeVisible();
-    await fileNameInput.fill(task.filePaths[0]);
+    await fileNameInput.fill(remoteFilePath);
     await fileNameInput.press("Enter");
-    await openDesktopFile(testPage, task.session, task.filePaths[0]);
+    await openDesktopFile(testPage, task.session, remoteFilePath);
 
     const statusButton = testPage.locator('[data-testid="lsp-status-button"]:visible');
     await performLspAction(testPage, "start");

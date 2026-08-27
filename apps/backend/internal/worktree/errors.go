@@ -41,6 +41,14 @@ var (
 	// ErrAuthFailed is returned when git authentication fails (e.g. no credentials in non-interactive mode).
 	ErrAuthFailed = errors.New("git authentication failed")
 
+	// ErrRemoteDefaultNetwork is returned when refreshing origin/HEAD fails
+	// because the remote cannot be reached.
+	ErrRemoteDefaultNetwork = errors.New("remote default branch network failure")
+
+	// ErrRemoteDefaultUnresolved is returned when origin has no usable default
+	// branch after the local ref and refresh paths have both been attempted.
+	ErrRemoteDefaultUnresolved = errors.New("remote default branch unresolved")
+
 	// ErrNonFastForward is returned when a fetch/pull is rejected due to non-fast-forward updates.
 	ErrNonFastForward = errors.New("non-fast-forward update rejected")
 
@@ -68,6 +76,29 @@ var (
 	// usable characters after sanitization. Callers that pass an explicit slug
 	// must populate something the filesystem can accept.
 	ErrInvalidBranchSlug = errors.New("branch slug has no usable characters after sanitization")
+
+	// ErrEnvironmentNotResolved is returned by the store when a worktree
+	// cannot be persisted because the session has no task environment yet
+	// (initial materialization). The manager treats it as a skip, not a
+	// failure — the launch's environment persistence records the worktree.
+	ErrEnvironmentNotResolved = errors.New("session has no task environment")
+
+	// ErrTaskCleanupInProgress is returned by the store when the owning
+	// task has an active lifecycle cleanup barrier. The caller compensates
+	// the just-created physical worktree instead of admitting it after
+	// cleanup inventory was captured.
+	ErrTaskCleanupInProgress = errors.New("task cleanup in progress")
+
+	// ErrReuseWorktreeUnavailable is returned when an attach-only launch cannot
+	// find a valid canonical worktree. Callers must surface this as a workspace
+	// reuse failure; they must never fall through to git worktree add.
+	ErrReuseWorktreeUnavailable = errors.New("required worktree is unavailable for reuse")
+
+	// ErrWorktreePathOwnedByAnotherTask is returned when a persisted worktree
+	// record points at a task root whose ownership marker belongs to a
+	// different task. Reusing or recreating that record could attach to or
+	// delete the other task's live checkout.
+	ErrWorktreePathOwnedByAnotherTask = errors.New("worktree path is owned by another task")
 )
 
 // containsAuthFailure checks if git output indicates an authentication failure.
@@ -106,7 +137,19 @@ func isRemoteRefMissingError(err error) bool {
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "couldn't find remote ref") ||
 		strings.Contains(msg, "does not appear to be a git repository") ||
-		strings.Contains(msg, "no such remote")
+		strings.Contains(msg, "no such remote") ||
+		strings.Contains(msg, "cannot determine remote head") ||
+		strings.Contains(msg, "remote head refers to nonexistent ref")
+}
+
+// isRemoteBranchMissingError reports the Git fetch result for a branch that
+// does not exist on an otherwise usable remote. Transport and authentication
+// failures must remain generic so callers do not mistake an unavailable
+// remote for a deleted branch.
+func isRemoteBranchMissingError(output string) bool {
+	lowerOutput := strings.ToLower(output)
+	return strings.Contains(lowerOutput, "couldn't find remote ref") ||
+		(strings.Contains(lowerOutput, "remote ref") && strings.Contains(lowerOutput, "not found"))
 }
 
 // ClassifyGitError wraps a raw git error with a user-friendly sentinel error

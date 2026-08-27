@@ -77,9 +77,10 @@ func TestOfficeDefaultWorkflow_FullCycleSmoke(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Review.on_enter: %v", err)
 	}
-	if got := countCallsByReason(queue, "review_started"); got != 2 {
-		t.Errorf("review_started fan-out calls = %d, want 2", got)
+	if got := countCallsByReasonAndStep(queue, "task_assigned", steps["review"].ID); got != 2 {
+		t.Errorf("task_assigned fan-out calls for review step = %d, want 2", got)
 	}
+	assertPayloadStageType(t, queue, steps["review"].ID, "review")
 
 	// Reviewers approve.
 	for _, pID := range []string{"reviewer-1", "reviewer-2"} {
@@ -113,9 +114,10 @@ func TestOfficeDefaultWorkflow_FullCycleSmoke(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Approval.on_enter: %v", err)
 	}
-	if got := countCallsByReason(queue, "approval_started"); got != 1 {
-		t.Errorf("approval_started fan-out calls = %d, want 1", got)
+	if got := countCallsByReasonAndStep(queue, "task_assigned", steps["approval"].ID); got != 1 {
+		t.Errorf("task_assigned fan-out calls for approval step = %d, want 1", got)
 	}
+	assertPayloadStageType(t, queue, steps["approval"].ID, "approval")
 
 	// Approver approves.
 	if err := decisions.RecordStepDecision(ctx, DecisionInfo{
@@ -167,10 +169,15 @@ func TestOfficeDefaultWorkflow_RejectRoutesBackToWork(t *testing.T) {
 
 	store.setCurrentStep(steps["review"].ID)
 
-	// One reviewer rejects, one approves — any_reject fires first.
+	// One reviewer rejects, one approves — any_reject fires first. any_reject
+	// is a decider-identity veto (AC-43/58), not a seat-mapped decision, so
+	// the rejection carries the decider's identity and the role the guard
+	// checks against rather than a seat id.
 	if err := decisions.RecordStepDecision(ctx, DecisionInfo{
 		TaskID: "task-1", StepID: steps["review"].ID,
-		ParticipantID: "reviewer-1", Decision: DecisionRejected,
+		ParticipantID: "reviewer-1",
+		DeciderType:   DeciderTypeAgent, DeciderID: "rev-A", Role: "reviewer",
+		Decision: DecisionRejected,
 	}); err != nil {
 		t.Fatalf("record decision: %v", err)
 	}
@@ -283,6 +290,17 @@ func (s *smokeStore) ApplyTransition(_ context.Context, _, _, fromStepID, toStep
 	return nil
 }
 
+func (s *smokeStore) ApplyTransitionIfAtStep(
+	_ context.Context, _, _, expectedStepID, toStepID string, _ Trigger,
+) (bool, error) {
+	if s.currentStepID != expectedStepID {
+		return false, nil
+	}
+	s.transitions = append(s.transitions, expectedStepID+"->"+toStepID)
+	s.currentStepID = toStepID
+	return true, nil
+}
+
 func (s *smokeStore) PersistData(_ context.Context, _ string, _ map[string]any) error { return nil }
 
 func (s *smokeStore) IsOperationApplied(_ context.Context, op string) (bool, error) {
@@ -318,6 +336,10 @@ func (p *smokeParticipants) ListStepParticipants(_ context.Context, stepID, _ st
 	return p.byStep[stepID], nil
 }
 
+func (p *smokeParticipants) ListTaskParticipants(_ context.Context, _ string) ([]ParticipantInfo, error) {
+	return nil, nil
+}
+
 type stubPrimary struct{ id string }
 
 func (s stubPrimary) PrimaryAgentProfileID(_ context.Context, _, _ string) (string, error) {
@@ -339,12 +361,39 @@ func (noOpCallback) Execute(_ context.Context, _ ActionInput) (ActionResult, err
 	return ActionResult{}, nil
 }
 
-func countCallsByReason(q *fakeRunQueue, reason string) int {
+// countCallsByReasonAndStep counts queued runs matching both reason and
+// WorkflowStepID. Needed once review and approval fan-out share the reason
+// "task_assigned" (distinguished only by payload stage_type) — a bare
+// reason count can no longer tell the two fan-outs apart.
+func countCallsByReasonAndStep(q *fakeRunQueue, reason, stepID string) int {
 	count := 0
 	for _, c := range q.calls {
-		if c.Reason == reason {
+		if c.Reason == reason && c.WorkflowStepID == stepID {
 			count++
 		}
 	}
 	return count
+}
+
+// assertPayloadStageType fails the test if any queued call for stepID does
+// not carry the expected Payload["stage_type"]. Deleting the YAML's
+// `payload: {stage_type: ...}` block would still pass countCallsByReasonAndStep
+// (reason + step are unaffected) — this closes that gap by checking the one
+// field BuildPrompt actually branches on to tell review and approval apart.
+func assertPayloadStageType(t *testing.T, q *fakeRunQueue, stepID, wantStageType string) {
+	t.Helper()
+	found := false
+	for _, c := range q.calls {
+		if c.WorkflowStepID != stepID {
+			continue
+		}
+		found = true
+		got, _ := c.Payload["stage_type"].(string)
+		if got != wantStageType {
+			t.Errorf("step %s: Payload[\"stage_type\"] = %q, want %q", stepID, got, wantStageType)
+		}
+	}
+	if !found {
+		t.Fatalf("no queued calls found for step %s", stepID)
+	}
 }

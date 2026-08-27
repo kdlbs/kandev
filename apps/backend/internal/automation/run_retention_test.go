@@ -45,24 +45,22 @@ func seedTerminalRunSeries(t *testing.T, store *Store, automationID, prefix stri
 	return taskIDs
 }
 
-// seedLiveWorktree gives a task the session + worktree rows that say it still
-// holds a checkout on disk. Retention offers only runs that have one, so every
-// series has to carry them or the assertions below would all pass on an empty
-// result. The session is deliberately not primary and not live — it is here to
-// own the worktree row, not to make the task look busy.
+// seedLiveWorktree gives a task the environment + repository rows that say it
+// still holds a checkout on disk. Retention offers only runs that have one, so
+// every series has to carry them or the assertions below would all pass on an
+// empty result.
 func seedLiveWorktree(t *testing.T, store *Store, taskID string) {
 	t.Helper()
-	sessionID := taskID + "-wt-session"
 	if _, err := store.db.Exec(
-		`INSERT INTO task_sessions (id, task_id, is_primary, state) VALUES (?, ?, 0, 'COMPLETED')`,
-		sessionID, taskID,
+		`INSERT INTO task_environments (id, task_id) VALUES (?, ?)`,
+		"env-"+taskID, taskID,
 	); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.db.Exec(
-		`INSERT INTO task_session_worktrees (id, session_id, worktree_id, worktree_path, status)
+		`INSERT INTO task_environment_repos (id, task_environment_id, worktree_id, worktree_path, status)
 		 VALUES (?, ?, ?, ?, 'active')`,
-		taskID+"-tsw", sessionID, "wt-"+taskID, "/workspaces/"+taskID,
+		taskID+"-ter", "env-"+taskID, "wt-"+taskID, "/workspaces/"+taskID,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +71,7 @@ func seedLiveWorktree(t *testing.T, store *Store, taskID string) {
 func reclaimWorktree(t *testing.T, store *Store, taskID string) {
 	t.Helper()
 	if _, err := store.db.Exec(
-		`UPDATE task_session_worktrees SET status = 'deleted', deleted_at = ? WHERE worktree_id = ?`,
+		`UPDATE task_environment_repos SET status = 'deleted', deleted_at = ? WHERE worktree_id = ?`,
 		time.Now().UTC(), "wt-"+taskID,
 	); err != nil {
 		t.Fatal(err)

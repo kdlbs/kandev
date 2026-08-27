@@ -4,9 +4,9 @@ test.describe("System Database page", () => {
   test("renders database stats and exposes maintenance buttons", async ({ testPage }) => {
     test.setTimeout(60_000);
 
-    await testPage.goto("/settings/system/database");
+    await testPage.goto("/settings/system/data-storage");
 
-    await expect(testPage.getByTestId("system-page-title")).toHaveText("Database");
+    await expect(testPage.getByTestId("system-page-title")).toHaveText("Data & Logs");
     await expect(testPage.getByTestId("system-database-card")).toBeVisible();
 
     // Each stat row must render a non-empty value.
@@ -28,7 +28,7 @@ test.describe("System Database page", () => {
   }) => {
     test.setTimeout(60_000);
 
-    await testPage.goto("/settings/system/database");
+    await testPage.goto("/settings/system/data-storage");
     await expect(testPage.getByTestId("system-database-card")).toBeVisible();
 
     const vacuumButton = testPage.getByTestId("system-vacuum-button");
@@ -52,13 +52,13 @@ test.describe("System Database page", () => {
   });
 
   test("WAL row exposes an info tooltip trigger", async ({ testPage }) => {
-    await testPage.goto("/settings/system/database");
+    await testPage.goto("/settings/system/data-storage");
     await expect(testPage.getByTestId("system-database-card")).toBeVisible();
     await expect(testPage.getByTestId("system-db-wal-info")).toBeVisible();
   });
 
   test("clicking Factory Reset opens the confirmation modal", async ({ testPage }) => {
-    await testPage.goto("/settings/system/database");
+    await testPage.goto("/settings/system/data-storage");
     await expect(testPage.getByTestId("system-database-card")).toBeVisible();
 
     await testPage.getByTestId("system-factory-reset-button").click();

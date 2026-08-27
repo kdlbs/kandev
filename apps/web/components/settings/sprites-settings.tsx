@@ -23,7 +23,7 @@ import {
 } from "@/lib/api/domains/sprites-api";
 import type { SpritesInstance, SpritesTestResult, SpritesTestStep } from "@/lib/types/http-sprites";
 import { Trans, useTranslation } from "react-i18next";
-import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/general";
+import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 import { SettingsCard } from "./settings-card";
 
 const SPRITES_TOKEN_ENV_VAR = "SPRITES_API_TOKEN";

@@ -1,9 +1,39 @@
 package statussummary
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 )
+
+func applyPullRequestInputs(state *projectionState, inputs []PullRequestInput) {
+	for index, input := range inputs {
+		key := strings.TrimSpace(input.Key)
+		if key == "" {
+			key = strings.TrimSpace(input.URL)
+		}
+		if key == "" && input.Number > 0 {
+			key = fmt.Sprintf("#%d", input.Number)
+		}
+		if key == "" {
+			key = fmt.Sprintf("index:%d", index)
+		}
+		state.prs[key] = pullRequestObservation{
+			state:                 input.State,
+			number:                maxInt(input.Number, 0),
+			url:                   input.URL,
+			reviewState:           input.ReviewState,
+			checksState:           input.ChecksState,
+			mergeableState:        input.MergeableState,
+			mergeQueueState:       input.MergeQueueState,
+			unresolvedReviewCount: maxInt(input.UnresolvedReviewCount, 0),
+			pendingReviewCount:    maxInt(input.PendingReviewCount, 0),
+			requiredReviews:       maxInt(input.RequiredReviews, 0),
+			checksTotal:           maxInt(input.ChecksTotal, 0),
+			checksPassing:         maxInt(input.ChecksPassing, 0),
+		}
+	}
+}
 
 func derivePullRequestSummary(state *projectionState) *PullRequestSummary {
 	if !state.prObserved && state.prBaseline != nil {
@@ -92,6 +122,12 @@ func pullRequestAggregateState(pr pullRequestObservation) string {
 	mergeable := strings.ToLower(strings.TrimSpace(pr.mergeableState))
 	checks := strings.ToLower(strings.TrimSpace(pr.checksState))
 	review := strings.ToLower(strings.TrimSpace(pr.reviewState))
+	if state == prStateMerged || state == prStateClosed {
+		return pullRequestLifecycleState(state, mergeable)
+	}
+	if strings.TrimSpace(pr.mergeQueueState) != "" {
+		return prStateQueued
+	}
 	if lifecycle := pullRequestLifecycleState(state, mergeable); lifecycle != "" {
 		return lifecycle
 	}
@@ -157,6 +193,8 @@ func pullRequestStateRank(state string) int {
 		return 70
 	case prStateReady:
 		return 60
+	case prStateQueued:
+		return 55
 	case prStatePassing:
 		return 50
 	case prStateDraft:

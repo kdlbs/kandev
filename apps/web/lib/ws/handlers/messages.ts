@@ -42,6 +42,37 @@ function toMessage(payload: MessagePayload): MessageUpdate {
     requests_input: payload.requests_input,
     created_at: payload.created_at,
     updated_at: payload.updated_at,
+    prompt_index: payload.prompt_index,
+  };
+}
+
+function isTerminalToolStatus(status: unknown): boolean {
+  return (
+    status === "complete" ||
+    status === "error" ||
+    status === "failed" ||
+    status === "cancelled" ||
+    status === "success"
+  );
+}
+
+function settleMessageForCompletedTurn(
+  store: StoreApi<AppState>,
+  message: MessageUpdate,
+): MessageUpdate {
+  if (message.type === "permission_request" || !message.turn_id) return message;
+
+  const turn = store
+    .getState()
+    .turns?.bySession[message.session_id]?.find((candidate) => candidate.id === message.turn_id);
+  if (!turn?.completed_at) return message;
+
+  const metadata = message.metadata as Record<string, unknown> | undefined;
+  if (!metadata?.tool_call_id || isTerminalToolStatus(metadata.status)) return message;
+
+  return {
+    ...message,
+    metadata: { ...metadata, status: "complete" },
   };
 }
 
@@ -57,6 +88,17 @@ function isOlderThanCurrentSnapshot(store: StoreApi<AppState>, payload: MessageP
     ]?.find((message) => message.id === payload.message_id);
   if (!current?.updated_at) return false;
   return !payload.updated_at || current.updated_at > payload.updated_at;
+}
+
+function applyPendingActionProjection(store: StoreApi<AppState>, payload: MessagePayload): void {
+  if (!("pending_action" in payload)) return;
+  store
+    .getState()
+    .setTaskSessionPendingAction(
+      payload.session_id,
+      payload.pending_action ?? null,
+      payload.pending_action_revision,
+    );
 }
 
 function defaultSchedule(callback: () => void): number {
@@ -98,7 +140,7 @@ export function createMessageUpdateScheduler(
     for (const payload of updates) {
       if (!payload.session_id || !payload.message_id) continue;
       if (isOlderThanCurrentSnapshot(store, payload)) continue;
-      store.getState().updateMessage(toMessage(payload));
+      store.getState().updateMessage(settleMessageForCompletedTurn(store, toMessage(payload)));
     }
   };
 
@@ -135,10 +177,16 @@ export function createMessagesHandlerRegistration(
       const payload = message.payload;
       if (!payload.session_id) return;
       scheduler.flush();
-      store.getState().addMessage(toMessage(payload));
+      store.getState().addMessage(settleMessageForCompletedTurn(store, toMessage(payload)));
+      applyPendingActionProjection(store, payload);
     },
     "session.message.updated": (message) => {
-      scheduler.enqueue(message.payload);
+      const payload = message.payload;
+      if (!payload.session_id || !payload.message_id) return;
+      if (!isOlderThanCurrentSnapshot(store, payload)) {
+        applyPendingActionProjection(store, payload);
+      }
+      scheduler.enqueue(payload);
     },
     "session.message.deleted": (message) => {
       const payload = message.payload;
@@ -148,6 +196,7 @@ export function createMessagesHandlerRegistration(
       // the deleted row.
       scheduler.flush();
       store.getState().removeMessage(sessionId(payload.session_id), payload.message_id);
+      applyPendingActionProjection(store, payload);
     },
   };
   return { handlers, scheduler, dispose: scheduler.dispose };

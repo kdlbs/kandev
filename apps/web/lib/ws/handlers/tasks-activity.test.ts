@@ -226,3 +226,29 @@ describe("task.updated interrupted marker (live propagation + safe fallback)", (
     expect(interruptedFor(store, "t1")).toEqual({ kanban: true, multi: true });
   });
 });
+
+describe("task.updated autopilot marker", () => {
+  it("preserves the immutable marker when a partial update omits it", () => {
+    const store = storeWithTask({ id: "t1", autopilot: true });
+    const handlers = registerTasksHandlers(store);
+
+    handlers["task.updated"]!(makeMessage({ ...makeTask("t1"), title: "Renamed" }));
+
+    expect(store.getState().kanban.tasks.find((task) => task.id === "t1")?.autopilot).toBe(true);
+    expect(
+      store.getState().kanbanMulti.snapshots.wf1.tasks.find((task) => task.id === "t1")?.autopilot,
+    ).toBe(true);
+  });
+
+  it("preserves the marker when a primary session is explicitly cleared", () => {
+    const store = storeWithTask({ id: "t1", autopilot: true, primarySessionId: "session-1" });
+    const handlers = registerTasksHandlers(store);
+
+    handlers["task.updated"]!(makeMessage({ ...makeTask("t1"), primary_session_id: null }));
+
+    expect(store.getState().kanban.tasks.find((task) => task.id === "t1")?.autopilot).toBe(true);
+    expect(
+      store.getState().kanbanMulti.snapshots.wf1.tasks.find((task) => task.id === "t1")?.autopilot,
+    ).toBe(true);
+  });
+});

@@ -4,6 +4,8 @@ import { useTaskActions } from "@/hooks/use-task-actions";
 import type { Task } from "@/components/kanban-card";
 import type { MoveTaskError } from "@/hooks/use-drag-and-drop";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
+import { t } from "@/lib/i18n";
+import { getTaskMoveErrorMessage } from "@/components/task/task-move-error-message";
 
 export function useSwimlaneMove(
   workflowId: string,
@@ -60,7 +62,7 @@ export function useSwimlaneMove(
             tasks: originalTasks,
           });
         }
-        const message = error instanceof Error ? error.message : "Failed to move task";
+        const message = getTaskMoveErrorMessage(error, t("task:taskMoveErrorGeneric"), t);
         opts.onMoveError?.({
           message,
           taskId: task.id,

@@ -1780,6 +1780,77 @@ The orchestrator coordinates task execution, managing the workflow between tasks
 
 ---
 
+## Session Actions
+
+Session lifecycle is managed idempotently: clients ask the backend to ensure a
+session exists for a task, and the backend resolves the agent profile and
+decides whether to prepare or start the agent.
+
+### `session.ensure`
+
+**Purpose:** Ensure a task has at least one session, creating one if needed.
+Idempotent: returns the task's existing primary (or newest) session when one
+already exists. The backend resolves the agent profile from task metadata,
+workflow step, workflow, or workspace default, and chooses `prepare` vs
+`start` based on the workflow step's `auto_start_agent` action unless the
+client overrides it with `auto_start`.
+
+**Flow Position:** Called when opening a task so the chat has a session to
+attach to.
+
+**Request:**
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "type": "request",
+  "action": "session.ensure",
+  "payload": {
+    "task_id": "task-uuid",
+    "auto_start": false
+  }
+}
+```
+
+| Payload Field | Type | Required | Description |
+|--------------|------|----------|-------------|
+| `task_id` | string | ✅ | Task to ensure a session for |
+| `auto_start` | boolean | ❌ | Optional override of the workflow step's auto-start decision. `false` prepares the session (`created_prepare`) without launching the agent; `true` forces a start (`created_start`). Omitting it defers to the workflow step's `auto_start_agent` action. |
+
+**Response:**
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "type": "response",
+  "action": "session.ensure",
+  "payload": {
+    "success": true,
+    "task_id": "task-uuid",
+    "session_id": "session-uuid",
+    "state": "CREATED",
+    "agent_profile_id": "profile-uuid",
+    "source": "created_prepare",
+    "newly_created": true
+  }
+}
+```
+
+| Response Field | Type | Description |
+|---------------|------|-------------|
+| `success` | boolean | Whether the ensure succeeded |
+| `task_id` | string | The task the session belongs to |
+| `session_id` | string | The ensured session |
+| `state` | string | Session state (`CREATED` for a prepared session, `STARTING`/`RUNNING` when the agent is launching) |
+| `agent_profile_id` | string | Resolved agent profile |
+| `source` | string | Where the session came from: `existing_primary`, `existing_newest`, `created_prepare`, or `created_start` |
+| `newly_created` | boolean | Whether the session was created by this call |
+| `workspace_path` | string | Worktree path (present when a workspace was prepared) |
+
+**Effect:** With `auto_start: false` the agent stays stopped and the client
+shows a manual "Start agent" affordance; with `auto_start: true` (or the
+workflow step's `auto_start_agent` action) the agent launches immediately.
+
+---
+
 ## Permission Actions
 
 Agents may request user permission for certain operations. The permission flow uses notifications and responses.
@@ -1796,9 +1867,10 @@ Agents may request user permission for certain operations. The permission flow u
   "action": "permission.requested",
   "payload": {
     "task_id": "task-uuid",
+    "request_id": "kandev-request-uuid",
     "pending_id": "pending-request-uuid",
     "instance_id": "agent-instance-uuid",
-    "session_id": "acp-session-uuid",
+    "session_id": "task-session-uuid",
     "tool_call_id": "tool-call-uuid",
     "title": "Execute shell command",
     "description": "Agent wants to run: npm install express",
@@ -1828,9 +1900,10 @@ Agents may request user permission for certain operations. The permission flow u
 | Payload Field | Type | Description |
 |--------------|------|-------------|
 | `task_id` | string | Task the agent is working on |
+| `request_id` | string | Kandev request-generation ID; changes when a provider request is replaced |
 | `pending_id` | string | Unique ID for this pending request |
 | `instance_id` | string | Agent instance ID |
-| `session_id` | string | ACP session ID |
+| `session_id` | string | Kandev task session ID |
 | `tool_call_id` | string | Tool call requesting permission |
 | `title` | string | Human-readable title |
 | `description` | string | Additional context |
@@ -1854,6 +1927,8 @@ Agents may request user permission for certain operations. The permission flow u
   "action": "permission.respond",
   "payload": {
     "task_id": "task-uuid",
+    "session_id": "task-session-uuid",
+    "request_id": "kandev-request-uuid",
     "pending_id": "pending-request-uuid",
     "option_id": "allow-once"
   }
@@ -1863,9 +1938,12 @@ Agents may request user permission for certain operations. The permission flow u
 | Payload Field | Type | Required | Description |
 |--------------|------|----------|-------------|
 | `task_id` | string | ✅ | Task ID |
+| `session_id` | string | ✅ | Kandev task session ID belonging to the task |
+| `request_id` | string | ✅ | Exact request-generation ID from the permission message |
 | `pending_id` | string | ✅ | Pending request ID from notification |
 | `option_id` | string | ❌ | Selected option ID (required if not cancelled) |
 | `cancelled` | boolean | ❌ | True to cancel the request |
+| `rejected` | boolean | ❌ | Compatibility status hint; the selected provider option kind remains authoritative |
 
 **Response:**
 ```json
@@ -1874,20 +1952,22 @@ Agents may request user permission for certain operations. The permission flow u
   "type": "response",
   "action": "permission.respond",
   "payload": {
-    "success": true
+    "success": true,
+    "session_id": "task-session-uuid",
+    "pending_id": "pending-request-uuid"
   }
 }
 ```
 
-**Error Response (no pending request):**
+**Error Response (stale or replaced request):**
 ```json
 {
   "id": "uuid",
   "type": "error",
   "action": "permission.respond",
   "payload": {
-    "code": "NOT_FOUND",
-    "message": "No pending permission request for this task"
+    "code": "INTERNAL_ERROR",
+    "message": "Failed to respond to permission: permission_stale"
   }
 }
 ```

@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -35,22 +36,16 @@ func (h *TaskHandlers) doListTaskSessions(ctx context.Context, msg *ws.Message, 
 		h.logger.Error("failed to list task sessions", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list task sessions", nil)
 	}
-	pendingActionsBySession, pendingErr := pendingActionsForInputCapableSessions(
-		ctx,
-		h.service,
-		map[string][]*models.TaskSession{taskID: sessions},
-	)
-	if pendingErr != nil {
-		h.logger.Warn("get task session pending actions failed", zap.Error(pendingErr))
-		pendingActionsBySession = map[string]models.TaskPendingAction{}
-	}
-	sessionDTOs := make([]dto.TaskSessionSummaryDTO, 0, len(sessions))
-	for _, session := range sessions {
-		summary := dto.FromTaskSessionSummary(session)
-		dto.EnrichForegroundActivitySummary(&summary, h.foregroundActivity)
-		dto.EnrichCancellationPendingSummary(&summary, h.cancellationPending)
-		summary.PendingAction = pendingActionPtr(&session.ID, pendingActionsBySession)
-		sessionDTOs = append(sessionDTOs, summary)
+	sessionDTOs, projectionErr := h.taskSessionSummariesWithPendingActions(ctx, sessions)
+	if projectionErr != nil {
+		h.logger.Error("get task session pending actions failed", zap.Error(projectionErr))
+		return ws.NewError(
+			msg.ID,
+			msg.Action,
+			ws.ErrorCodeInternalError,
+			"Failed to load task session pending actions",
+			nil,
+		)
 	}
 	resp := dto.ListTaskSessionSummariesResponse{
 		Sessions: sessionDTOs,
@@ -95,6 +90,7 @@ type wsCreateTaskRequest struct {
 	WorkflowStepID    string                    `json:"workflow_step_id"`
 	Title             string                    `json:"title"`
 	Description       string                    `json:"description,omitempty"`
+	Autopilot         bool                      `json:"autopilot,omitempty"`
 	Priority          string                    `json:"priority,omitempty"`
 	State             *v1.TaskState             `json:"state,omitempty"`
 	Repositories      []httpTaskRepositoryInput `json:"repositories,omitempty"`
@@ -137,6 +133,7 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 			RepositoryID:   r.RepositoryID,
 			BaseBranch:     r.BaseBranch,
 			CheckoutBranch: r.CheckoutBranch,
+			BranchPolicyID: r.BranchPolicyID,
 			PRNumber:       r.PRNumber,
 			LocalPath:      r.LocalPath,
 			Name:           r.Name,
@@ -171,23 +168,26 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		deferredLaunch = map[string]interface{}{
 			"intent": "start", "agent_profile_id": req.AgentProfileID, "executor_id": req.ExecutorID,
 			"executor_profile_id": req.ExecutorProfileID, "prompt": description,
-			"plan_mode": req.PlanMode, "attachments": req.Attachments,
+			"plan_mode":   req.PlanMode,
+			"attachments": req.Attachments,
 		}
 	}
 
-	task, err := h.service.CreateTask(ctx, &service.CreateTaskRequest{
+	result, err := h.service.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID:    req.WorkspaceID,
 		WorkflowID:     req.WorkflowID,
 		WorkflowStepID: req.WorkflowStepID,
 		Title:          title,
 		Description:    description,
+		Autopilot:      req.Autopilot,
 		Priority:       req.Priority,
 		State:          req.State,
 		Repositories:   convertToServiceRepos(repos),
 		Position:       req.Position,
 		Metadata:       req.Metadata,
 		DeferredLaunch: deferredLaunch,
-		PlanMode:       req.PlanMode && !req.StartAgent,
+		PlanMode:       req.PlanMode,
+		StartAgent:     req.StartAgent,
 		ParentID:       req.ParentID,
 	})
 	if err != nil {
@@ -196,13 +196,18 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), nil)
 		}
 		if isTaskCreateValidationError(err) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), taskErrorDetails(err))
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create task", nil)
 	}
 
+	task := result.Task
 	taskDTO := dto.FromTask(task)
-	response := createTaskResponse{TaskDTO: taskDTO}
+	// The WS task.create action does not accept external_id (deferred
+	// surface), so this is always a genuine, complete creation — never
+	// deduplicated, and CreationComplete must be true rather than the zero
+	// value false, which would misleadingly read as "still in progress".
+	response := createTaskResponse{TaskDTO: taskDTO, Deduplicated: false, CreationComplete: true}
 	if req.StartAgent && task.QueuedForStepID == "" && req.AgentProfileID != "" && h.orchestrator != nil {
 		launchResp, err := h.launchAgentForNewTask(ctx, taskDTO, req)
 		if err != nil {
@@ -297,6 +302,7 @@ func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 				RepositoryID:   r.RepositoryID,
 				BaseBranch:     r.BaseBranch,
 				CheckoutBranch: r.CheckoutBranch,
+				BranchPolicyID: r.BranchPolicyID,
 				PRNumber:       r.PRNumber,
 				LocalPath:      r.LocalPath,
 				Name:           r.Name,
@@ -402,7 +408,7 @@ func (h *TaskHandlers) wsMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 		req.WorkflowID,
 		req.WorkflowStepID,
 		req.Position,
-		service.MoveTaskOptions{AllowActivePrimarySession: true},
+		service.MoveTaskOptions{AllowActivePrimarySession: true, StepHistoryActor: wfmodels.StepTransitionActorHuman},
 	)
 	if err != nil {
 		h.logger.Error("failed to move task", zap.Error(err))

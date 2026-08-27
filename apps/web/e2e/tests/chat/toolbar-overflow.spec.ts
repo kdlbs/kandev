@@ -39,17 +39,26 @@ async function seedAndNavigate(
 
 /** Force the toolbar container to a specific max-width via inline style. */
 async function constrainToolbar(page: Page, maxWidth: string | null) {
+  // Wait on the ResizeObserver callback itself rather than a fixed budget:
+  // observe the toolbar first, apply the width, and resolve on the resize the
+  // change produces. The trailing rAF lets the observer's own re-render commit
+  // before the caller asserts against the toolbar.
   await page.evaluate((mw) => {
     const el = document.querySelector('[data-testid="chat-input-toolbar"]') as HTMLElement;
-    if (!el) return;
-    if (mw) {
-      el.style.maxWidth = mw;
-    } else {
-      el.style.removeProperty("max-width");
-    }
+    if (!el) return undefined;
+    return new Promise<void>((resolve) => {
+      const observer = new ResizeObserver(() => {
+        observer.disconnect();
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      });
+      observer.observe(el);
+      if (mw) {
+        el.style.maxWidth = mw;
+      } else {
+        el.style.removeProperty("max-width");
+      }
+    });
   }, maxWidth);
-  // Allow ResizeObserver to fire
-  await page.waitForTimeout(200);
 }
 
 test.describe("Toolbar overflow menu", () => {
@@ -99,7 +108,7 @@ test.describe("Toolbar overflow menu", () => {
     await expect(contextBadge).not.toBeVisible();
 
     // Submit button should remain visible (always-visible item). Target the
-    // submit testid specifically — the voice input button is also round, so a
+    // submit testid specifically — other toolbar buttons are round too, so a
     // bare `button.rounded-full` locator now matches both and fails strict mode.
     const submitBtn = toolbar.getByTestId("submit-message-button");
     await expect(submitBtn).toBeVisible();

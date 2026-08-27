@@ -14,14 +14,9 @@ import { cn } from "@/lib/utils";
 import { ResetContextButton } from "./reset-context-button";
 import { ImplementPlanButton } from "./implement-plan-button";
 import { ChatInputPluginActions } from "./chat-input-plugin-actions";
-import { VoiceInputButton } from "./voice-input-button";
 import { ContextPopover } from "./context-popover";
-import {
-  AttachFilesButton,
-  McpIndicator,
-  PlanToggleButton,
-  SubmitButton,
-} from "./chat-input-toolbar-primitives";
+import { AttachFilesButton, PlanToggleButton, SubmitButton } from "./chat-input-toolbar-primitives";
+import { McpIndicator } from "./mcp-explorer/mcp-indicator";
 import { type ChatInputToolbarProps } from "./chat-input-toolbar";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { SHORTCUTS } from "@/lib/keyboard/constants";
@@ -107,7 +102,7 @@ function buildCollapsibleItems(props: DesktopToolbarProps): ToolbarItemConfig[] 
       id: "reset-context",
       section: "right",
       visible: !!props.sessionId && !props.isAgentBusy,
-      render: () => <ResetContextButton sessionId={props.sessionId!} />,
+      render: () => <ResetContextButton sessionId={props.sessionId!} presentation="desktop" />,
     },
     {
       id: "sessions",
@@ -159,8 +154,8 @@ function DesktopRightSection(props: {
   onCancel: () => void | Promise<void>;
   onSubmit: () => void;
   submitShortcut: (typeof SHORTCUTS)[keyof typeof SHORTCUTS];
-  onVoiceTranscript?: (text: string) => void;
-  onVoiceAutoSend?: () => void;
+  composerCapability?: ChatInputToolbarProps["composerCapability"];
+  composerSurface?: ChatInputToolbarProps["composerSurface"];
 }) {
   return (
     <div className="flex items-center gap-0.5 shrink-0">
@@ -176,16 +171,15 @@ function DesktopRightSection(props: {
           sessionId={props.sessionId}
           taskId={props.taskId}
           taskTitle={props.taskTitle}
+          surface={props.composerSurface ?? (props.taskId ? "task-chat" : "quick-chat")}
+          presentation="desktop"
+          disabled={props.isDisabled}
+          submittable={!props.isDisabled && props.hasContent}
+          disabledReason={props.submitDisabledReason}
+          composer={props.composerCapability}
         />
       )}
       <div className="ml-1 flex items-center gap-1">
-        {props.onVoiceTranscript && (
-          <VoiceInputButton
-            onTranscript={props.onVoiceTranscript}
-            onAutoSend={props.onVoiceAutoSend}
-            disabled={props.isDisabled}
-          />
-        )}
         <SubmitButton
           isAgentBusy={props.isAgentBusy}
           canCancelAgent={props.canCancelAgent}
@@ -283,8 +277,8 @@ export function DesktopChatInputToolbar(props: DesktopToolbarProps) {
         onCancel={props.onCancel}
         onSubmit={props.onSubmit}
         submitShortcut={props.submitShortcut}
-        onVoiceTranscript={props.onVoiceTranscript}
-        onVoiceAutoSend={props.onVoiceAutoSend}
+        composerCapability={props.composerCapability}
+        composerSurface={props.composerSurface}
       />
     </div>
   );

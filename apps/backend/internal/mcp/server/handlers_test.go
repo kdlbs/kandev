@@ -18,6 +18,22 @@ func newTaskModeServer(t *testing.T, backend BackendClient, taskID string) *Serv
 	return New(backend, "test-session", taskID, 10005, log, "", false, ModeTask, []string{"github", "gitlab"})
 }
 
+func TestArchiveTaskHandlerInjectsBoundCallerID(t *testing.T) {
+	backend := &testBackend{}
+	s := newTaskModeServer(t, backend, "automation-run-1")
+
+	result := callTool(t, s, "archive_task_kandev", map[string]interface{}{
+		"task_id": "target-task-1",
+	})
+
+	require.False(t, result.IsError)
+	payload, ok := backend.lastPayload.(map[string]string)
+	require.True(t, ok, "archive payload should use the server-owned string map")
+	assert.Equal(t, "target-task-1", payload["task_id"])
+	assert.Equal(t, "automation-run-1", payload["caller_task_id"])
+	assert.NotContains(t, toolInputProperties(t, s, "archive_task_kandev"), "caller_task_id")
+}
+
 func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 	backend := &testBackend{}
 	s := newTaskModeServer(t, backend, "task-current")
@@ -50,23 +66,29 @@ func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 	assert.Contains(t, props, "prompt")
 	assert.ElementsMatch(t, []string{
 		"parent_id", "workspace_id", "workflow_id", "workflow_step_id", "workspace_mode",
-		"title", "prompt", "agent_profile_id", "executor_profile_id", "start_agent",
-		"repository_id", "local_path", "repository_url", "base_branch",
-	}, propertyNames(props), "remote contribution support must not add tool properties")
+		"title", "prompt", "autopilot", "agent_profile_id", "executor_profile_id", "start_agent",
+		"repository_id", "local_path", "repository_url", "base_branch", "external_id",
+		"blocked_by", "start_when_unblocked",
+	}, propertyNames(props), "unexpected change to the advertised create_task_kandev schema")
 	assert.NotContains(t, props, "description", "legacy alias must not increase the advertised schema")
-	assert.Contains(t, tool.Tool.Description, "'prompt' is the sub-agent's initial prompt")
-	assert.NotContains(t, tool.Tool.Description, "'description' is the sub-agent's initial prompt")
+	assert.Contains(t, tool.Tool.Description, "persistent Kandev task or subtask")
+	assert.Contains(t, tool.Tool.Description, "native subagent mechanism")
+	assert.Contains(t, tool.Tool.Description, `parent_id="self"`)
+	assert.Contains(t, tool.Tool.Description, "external_id")
+	assert.NotContains(t, tool.Tool.Description, "DELEGATION POLICY")
+	parentProperty, ok := props["parent_id"].(map[string]interface{})
+	require.True(t, ok, "parent_id schema should be an object")
+	parentDescription, ok := parentProperty["description"].(string)
+	require.True(t, ok, "parent_id should have a description")
+	assert.NotContains(t, parentDescription, "delegated work")
 	promptProp, ok := props["prompt"].(map[string]interface{})
 	require.True(t, ok, "prompt schema should be an object")
 	promptDesc, ok := promptProp["description"].(string)
 	require.True(t, ok, "prompt should have a description")
+	assert.Contains(t, promptDesc, "task agent")
+	assert.NotContains(t, promptDesc, "sub-agent")
 	assert.Contains(t, promptDesc, "For auto-started subtasks")
 	assert.NotContains(t, promptDesc, "REQUIRED")
-	assert.Contains(t, tool.Tool.Description, "outranks an explicit agent_profile_id")
-	assert.Contains(t, tool.Tool.Description, "current_task")
-	assert.Contains(t, tool.Tool.Description, "workspace_default")
-	assert.Contains(t, tool.Tool.Description, "workflow")
-	assert.Contains(t, tool.Tool.Description, "workspace_mode='new_workspace'")
 	assert.NotContains(t, props, "mcp_task_agent_profile_default", "saved policy must not change the tool input schema")
 
 	agentProfileProp, ok := props["agent_profile_id"].(map[string]interface{})
@@ -76,6 +98,8 @@ func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 	assert.Contains(t, agentProfileDesc, "outranks it")
 	assert.Contains(t, agentProfileDesc, "current_task")
 	assert.Contains(t, agentProfileDesc, "workspace_default")
+	assert.Contains(t, agentProfileDesc, "verified creating session")
+	assert.Contains(t, agentProfileDesc, "effective model, mode, and dynamic options")
 
 	workflowProp, ok := props["workflow_id"].(map[string]interface{})
 	require.True(t, ok, "workflow_id schema should be an object")
@@ -107,6 +131,24 @@ func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 	assert.False(t, requiredSet["parent_id"], "parent_id should not be required")
 	assert.False(t, requiredSet["workspace_id"], "workspace_id should not be required")
 	assert.False(t, requiredSet["workflow_id"], "workflow_id should not be required")
+}
+
+func TestCreateTask_AutopilotPayload(t *testing.T) {
+	backend := &testBackend{
+		response: map[string]interface{}{"id": "subtask-1", "parent_id": "task-current", "autopilot": true},
+	}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "create_task_kandev", map[string]interface{}{
+		"title":     "Run independently",
+		"parent_id": "self",
+		"autopilot": true,
+	})
+
+	assert.False(t, result.IsError)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, true, payload["autopilot"])
 }
 
 func propertyNames(properties map[string]interface{}) []string {
@@ -315,6 +357,45 @@ func TestCreateTask_SourceTaskID_AlwaysSet(t *testing.T) {
 	assert.Equal(t, "my-task-123", payload["source_task_id"])
 }
 
+func TestCreateTask_ForwardsBoundSourceSessionID(t *testing.T) {
+	backend := &testBackend{
+		response: map[string]interface{}{"id": "task-new"},
+	}
+	s := newTaskModeServer(t, backend, "my-task-123")
+
+	result := callTool(t, s, "create_task_kandev", map[string]interface{}{
+		"title":        "New task",
+		"workspace_id": "ws-1",
+		"workflow_id":  "wf-1",
+	})
+
+	require.False(t, result.IsError)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "my-task-123", payload["source_task_id"])
+	assert.Equal(t, "test-session", payload["source_session_id"])
+	assert.NotContains(t, toolInputProperties(t, s, "create_task_kandev"), "source_session_id")
+}
+
+func TestCreateTask_ExternalModeDoesNotInventSourceSessionID(t *testing.T) {
+	backend := &testBackend{
+		response: map[string]interface{}{"id": "task-new"},
+	}
+	s := New(backend, "", "", 10005, newTestLogger(t), "", true, ModeExternal)
+
+	result := callTool(t, s, "create_task_kandev", map[string]interface{}{
+		"title":        "External task",
+		"workspace_id": "ws-1",
+		"workflow_id":  "wf-1",
+	})
+
+	require.False(t, result.IsError)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Empty(t, payload["source_task_id"])
+	assert.NotContains(t, payload, "source_session_id")
+}
+
 func TestCreateTask_SourceTaskID_EmptyWhenNoTaskContext(t *testing.T) {
 	backend := &testBackend{
 		response: map[string]interface{}{"id": "task-new"},
@@ -330,6 +411,7 @@ func TestCreateTask_SourceTaskID_EmptyWhenNoTaskContext(t *testing.T) {
 	payload, ok := backend.lastPayload.(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "", payload["source_task_id"])
+	assert.NotContains(t, payload, "source_session_id")
 }
 
 func TestCreateTask_StartAgentFalse_DoesNotAutoStart(t *testing.T) {
@@ -561,6 +643,9 @@ func TestAddBranchToTask_RejectsAnotherTask(t *testing.T) {
 func TestAddWorkspaceSourcesDefaultsTaskAndForwardsMixedSources(t *testing.T) {
 	backend := &testBackend{response: map[string]interface{}{"task_id": "task-current"}}
 	s := newTaskModeServer(t, backend, "task-current")
+	properties := toolInputProperties(t, s, "add_workspace_sources_kandev")
+	assert.NotContains(t, properties, "caller_task_id")
+	assert.NotContains(t, properties, "caller_session_id")
 
 	result := callTool(t, s, "add_workspace_sources_kandev", map[string]interface{}{
 		"sources": []interface{}{
@@ -574,11 +659,13 @@ func TestAddWorkspaceSourcesDefaultsTaskAndForwardsMixedSources(t *testing.T) {
 	payload, ok := backend.lastPayload.(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "task-current", payload["task_id"])
+	assert.Equal(t, "task-current", payload["caller_task_id"])
+	assert.Equal(t, "test-session", payload["caller_session_id"])
 	assert.Len(t, payload["sources"], 2)
 }
 
-func TestAddWorkspaceSourcesRejectsAnotherTask(t *testing.T) {
-	backend := &testBackend{}
+func TestAddWorkspaceSourcesForwardsDirectChildTargetWithTrustedProvenance(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"task_id": "task-child"}}
 	s := newTaskModeServer(t, backend, "task-current")
 
 	result := callTool(t, s, "add_workspace_sources_kandev", map[string]interface{}{
@@ -586,8 +673,12 @@ func TestAddWorkspaceSourcesRejectsAnotherTask(t *testing.T) {
 		"sources": []interface{}{map[string]interface{}{"kind": "folder", "local_path": "/tmp/docs"}},
 	})
 
-	assert.True(t, result.IsError)
-	assert.Empty(t, backend.lastAction)
+	assert.False(t, result.IsError)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "task-other", payload["task_id"])
+	assert.Equal(t, "task-current", payload["caller_task_id"])
+	assert.Equal(t, "test-session", payload["caller_session_id"])
 }
 
 // TestAddBranchToTask_ForwardsLocalPath verifies local_path is plumbed through
@@ -646,10 +737,11 @@ func TestMessageTask_ForwardsToBackend(t *testing.T) {
 	s := newTaskModeServer(t, backend, "task-current")
 
 	result := callTool(t, s, "message_task_kandev", map[string]interface{}{
-		"task_id":       "task-target",
-		"session_id":    "sess-target",
-		"prompt":        "follow up",
-		"delivery_mode": "interrupt",
+		"task_id":              "task-target",
+		"session_id":           "sess-target",
+		"prompt":               "follow up",
+		"delivery_mode":        "interrupt",
+		"reply_to_question_id": "question-1",
 	})
 
 	assert.False(t, result.IsError)
@@ -661,6 +753,7 @@ func TestMessageTask_ForwardsToBackend(t *testing.T) {
 	assert.Equal(t, "sess-target", payload["session_id"])
 	assert.Equal(t, "follow up", payload["prompt"])
 	assert.Equal(t, "interrupt", payload["delivery_mode"])
+	assert.Equal(t, "question-1", payload["reply_to_question_id"])
 	assert.Equal(t, "task-current", payload["sender_task_id"])
 	assert.Equal(t, "test-session", payload["sender_session_id"])
 }
@@ -677,7 +770,12 @@ func TestMessageTask_DescriptionExplainsQueueInterruptAndStop(t *testing.T) {
 	assert.Contains(t, description, `delivery_mode="queued"`)
 	assert.Contains(t, description, `delivery_mode="interrupt"`)
 	assert.Contains(t, description, "stop_task_kandev")
-	assert.Contains(t, description, `safely falls back to "queued"`)
+	assert.Contains(t, description, "prompt remains queued")
+	assert.Contains(t, description, "reply_to_question_id")
+	// Terminal sessions and the session_id-less defaulting rule are both
+	// documented, so a caller does not have to discover either by trial.
+	assert.Contains(t, description, "spawn_session_kandev")
+	assert.Contains(t, description, "primary session is used")
 }
 
 func TestMessageTask_MissingTaskID_ReturnsError(t *testing.T) {
@@ -739,6 +837,11 @@ func TestStopTask_ToolSchemaIsMinimalAndDescriptionIsAccurate(t *testing.T) {
 		"not_running",
 		"message_task_kandev",
 		`delivery_mode="interrupt"`,
+		// The recovery path. A parent that stops a wedged child then tries to
+		// restart it hits "session is CANCELLED — cannot send message" and has
+		// nowhere to go unless this tool says which tool gives it a new session.
+		"spawn_session_kandev",
+		"cannot be resumed",
 	} {
 		assert.Contains(t, description, phrase)
 	}
@@ -883,6 +986,69 @@ func TestTaskMRAutomationToolsNoTaskIDArgument(t *testing.T) {
 
 	properties := toolInputProperties(t, s, "update_task_mr_automation_kandev")
 	assert.NotContains(t, properties, "task_id")
+}
+
+// TestUpdateTaskMRAutomationToolForwardsMRIdentityAndAutoFixFields covers
+// AC31: repository_id/project_path/mr_iid must reach the backend payload
+// unchanged (including an explicit empty repository_id, R6) so the WS
+// handler can scope the patch to one linked MR, and auto_fix_enabled /
+// auto_merge_enabled / auto_fix_prompt_override must also be forwarded —
+// the tool's input schema declares all six, but until this test regressed
+// them, the handler only ever copied the three lifecycle booleans.
+func TestUpdateTaskMRAutomationToolForwardsMRIdentityAndAutoFixFields(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"task_id": "task-current"}}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "update_task_mr_automation_kandev", map[string]interface{}{
+		"repository_id":            "",
+		"project_path":             "group/project",
+		"mr_iid":                   float64(7),
+		"auto_fix_enabled":         true,
+		"auto_merge_enabled":       false,
+		"auto_fix_prompt_override": "custom prompt",
+	})
+	assert.False(t, result.IsError)
+	assert.Equal(t, ws.ActionMCPUpdateTaskMRAutomation, backend.lastAction)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "", payload["repository_id"])
+	assert.Equal(t, "group/project", payload["project_path"])
+	assert.Equal(t, 7, payload["mr_iid"])
+	assert.Equal(t, true, payload["auto_fix_enabled"])
+	assert.Equal(t, false, payload["auto_merge_enabled"])
+	assert.Equal(t, "custom prompt", payload["auto_fix_prompt_override"])
+}
+
+// TestUpdateTaskMRAutomationToolRejectsIdentityAloneWithNoSwitch ensures MR
+// identity by itself (no actual option change) is still rejected — mirrors
+// TaskMRAutomationPatch.HasAny() treating identity as "which MR", not "a
+// change".
+func TestUpdateTaskMRAutomationToolRejectsIdentityAloneWithNoSwitch(t *testing.T) {
+	backend := &testBackend{}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "update_task_mr_automation_kandev", map[string]interface{}{
+		"repository_id": "",
+		"project_path":  "group/project",
+		"mr_iid":        float64(7),
+	})
+	assert.True(t, result.IsError)
+	assert.Empty(t, backend.lastAction, "identity-only calls must not reach the backend")
+}
+
+func TestUpdateTaskMRAutomationToolRejectsFractionalMRIID(t *testing.T) {
+	backend := &testBackend{}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "update_task_mr_automation_kandev", map[string]interface{}{
+		"repository_id":      "",
+		"project_path":       "group/project",
+		"mr_iid":             float64(7.5),
+		"auto_merge_enabled": true,
+	})
+
+	assert.True(t, result.IsError)
+	assert.Empty(t, backend.lastAction, "invalid MR IID must not reach the backend")
 }
 
 func TestTaskMRAutomationToolsDoNotExposeLifecyclePromptOverrides(t *testing.T) {

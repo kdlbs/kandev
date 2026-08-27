@@ -14,6 +14,8 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/workflow/controller"
 	"github.com/kandev/kandev/internal/workflow/models"
 	"github.com/kandev/kandev/internal/workflow/service"
@@ -115,6 +117,9 @@ func (h *Handlers) httpListStepsByWorkflow(c *gin.Context) {
 	})
 	if err != nil {
 		h.logger.Error("failed to list steps", zap.Error(err))
+		if writeNotVisible(c, err, "Workflow not found") {
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list steps"})
 		return
 	}
@@ -125,6 +130,9 @@ func (h *Handlers) httpListStepsByWorkspace(c *gin.Context) {
 	resp, err := h.controller.ListStepsByWorkspace(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		h.logger.Error("failed to list steps by workspace", zap.Error(err))
+		if writeNotVisible(c, err, "Workspace not found") {
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list steps"})
 		return
 	}
@@ -203,9 +211,24 @@ func (h *Handlers) httpUpdateStep(c *gin.Context) {
 	c.JSON(http.StatusOK, resp.Step)
 }
 
+// writeNotVisible answers 404 for a workflow, workspace or step the caller may
+// not see, and reports whether it handled the error. The same 404 covers a
+// resource that does not exist, so neither response reveals which it was.
+func writeNotVisible(c *gin.Context, err error, message string) bool {
+	if !errors.Is(err, service.ErrNotVisible) {
+		return false
+	}
+	c.JSON(http.StatusNotFound, gin.H{"error": message})
+	return true
+}
+
 func (h *Handlers) writeStepMutationError(c *gin.Context, err error) {
 	if errors.Is(err, service.ErrWorkflowReadOnly) || errors.Is(err, service.ErrWorkflowWorkspaceReadOnly) {
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		return
+	}
+	// A step the caller may not see reads exactly like one that is not there.
+	if writeNotVisible(c, err, "Step not found") {
 		return
 	}
 	msg := strings.ToLower(err.Error())
@@ -230,7 +253,10 @@ func (h *Handlers) httpDeleteStep(c *gin.Context) {
 	ctx := c.Request.Context()
 	stepID := c.Param("id")
 	stepResp, getErr := h.controller.GetStep(ctx, stepID)
-	if getErr != nil {
+	// A step the caller may not see is the ordinary rejection below, not a
+	// failure to read one — warning about it would file every unauthorized
+	// delete under infrastructure trouble.
+	if getErr != nil && !errors.Is(getErr, service.ErrNotVisible) {
 		h.logger.Warn("failed to fetch step before delete; workflow_step.deleted event will not be published",
 			zap.String("step_id", stepID), zap.Error(getErr))
 	}
@@ -283,7 +309,15 @@ func (h *Handlers) httpListHistoryBySession(c *gin.Context) {
 	})
 	if err != nil {
 		h.logger.Error("failed to list history", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list history"})
+		// Session IDs are opaque, so denied/missing access is reported as
+		// not-found rather than leaking whether another workspace owns the
+		// session. Any other error (e.g. a repository read failure) is a
+		// genuine server error and must not be masked as not-found.
+		if errors.Is(err, taskmodels.ErrTaskSessionNotFound) || errors.Is(err, repoerrors.ErrTaskNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list history"})
 		return
 	}
 	c.JSON(http.StatusOK, resp)
@@ -295,6 +329,9 @@ func (h *Handlers) httpExportWorkflow(c *gin.Context) {
 	resp, err := h.controller.ExportWorkflow(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		h.logger.Error("failed to export workflow", zap.Error(err))
+		if writeNotVisible(c, err, "Workflow not found") {
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to export workflow"})
 		return
 	}
@@ -305,6 +342,9 @@ func (h *Handlers) httpExportWorkflows(c *gin.Context) {
 	resp, err := h.controller.ExportWorkflows(c.Request.Context(), c.Param("id"), parseExportIDs(c))
 	if err != nil {
 		h.logger.Error("failed to export workflows", zap.Error(err))
+		if writeNotVisible(c, err, "Workspace not found") {
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to export workflows"})
 		return
 	}
@@ -347,6 +387,9 @@ func (h *Handlers) httpImportWorkflows(c *gin.Context) {
 	resp, err := h.controller.ImportWorkflows(c.Request.Context(), req)
 	if err != nil {
 		h.logger.Error("failed to import workflows", zap.Error(err))
+		if writeNotVisible(c, err, "Workspace not found") {
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -425,6 +468,9 @@ func (h *Handlers) wsCreateStepsFromTemplate(ctx context.Context, msg *ws.Messag
 		TemplateID: req.TemplateID,
 	}); err != nil {
 		h.logger.Error("failed to create steps", zap.Error(err))
+		if errors.Is(err, service.ErrNotVisible) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, notFoundMessage, nil)
+		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create steps", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]bool{"success": true})

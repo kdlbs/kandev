@@ -16,8 +16,9 @@
  * post-settle fresh load only hydrates the durable settled state and would pass
  * against an unfixed parent revision.
  */
-import { expect, test } from "../../fixtures/test-base";
+import { expect } from "@playwright/test";
 import type { ApiClient } from "../../helpers/api-client";
+import { test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 
 /** Hold RUNNING long enough for the sidebar spinner assertion, then finish. */
@@ -63,25 +64,36 @@ test.describe("Sidebar spinner clears when a session settles", () => {
     await session.waitForLoad();
     await expect(session.sidebar).toBeVisible({ timeout: 10_000 });
 
-    const settledTask = await apiClient.createTaskWithAgent(
-      seedData.workspaceId,
-      "Settled Turn",
-      seedData.agentProfileId,
-      {
-        description: SETTLE_SCRIPT,
-        repository_ids: [seedData.repositoryId],
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
-      },
-    );
+    const settledTask = await apiClient.createTask(seedData.workspaceId, "Settled Turn", {
+      description: SETTLE_SCRIPT,
+      agent_profile_id: seedData.agentProfileId,
+      repository_ids: [seedData.repositoryId],
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
 
     const settledRow = session.sidebarTaskItem("Settled Turn");
     await expect(settledRow).toBeVisible({ timeout: 15_000 });
+
+    // Start only after the live sidebar has observed the task row. Creating
+    // and starting in one request can settle the short mock turn before the
+    // client receives the generating task.updated event under CI load.
+    const ensured = await apiClient.ensureTaskSession(settledTask.id);
+    expect(ensured.session_id).toBeTruthy();
 
     // Client must observe generating while the session is still RUNNING.
     await expect(settledRow.getByTestId("task-state-running")).toBeVisible({
       timeout: 30_000,
     });
+    const runningStatus = settledRow.getByTestId("task-state-running");
+    await expect
+      .poll(async () =>
+        runningStatus.evaluate((element) => ({
+          tagName: element.tagName,
+          svgAnimated: element.querySelector("svg")?.classList.contains("animate-spin") ?? false,
+        })),
+      )
+      .toEqual({ tagName: "SPAN", svgAnimated: false });
 
     await waitForSessionWaitingForInput(
       apiClient,

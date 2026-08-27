@@ -23,6 +23,8 @@ import { generateUUID } from "@/lib/utils";
 import { useToast } from "@/components/toast-provider";
 import type { DiffComment } from "@/lib/diff/types";
 import type { FileInfo, GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
+import { normalizeGitStatusFiles } from "@/lib/state/slices/session-runtime/git-status-normalizer";
+import { t } from "@/lib/i18n";
 
 type ReviewGitStatusFiles = {
   files: Record<string, FileInfo> | null;
@@ -35,7 +37,8 @@ function buildMultiRepoReviewFiles(
   const files: Record<string, FileInfo> = {};
   for (const { repository_name, status } of statusByRepo) {
     if (!status?.files) continue;
-    for (const [path, file] of Object.entries(status.files)) {
+    for (const [keyPath, file] of Object.entries(normalizeGitStatusFiles(status.files) ?? {})) {
+      const path = file.path || keyPath;
       const key = reviewFileKey({ path, repository_name });
       files[key] = {
         ...file,
@@ -62,11 +65,12 @@ export function buildReviewGitStatusFiles(
   );
   if (!isMultiRepo) {
     const sourceStatus = reviewGitStatus?.files ? reviewGitStatus : named[0]?.status;
-    const files = sourceStatus?.files
+    const sourceFiles = normalizeGitStatusFiles(sourceStatus?.files);
+    const files = sourceFiles
       ? Object.fromEntries(
-          Object.entries(sourceStatus.files).map(([path, file]) => [
+          Object.entries(sourceFiles).map(([path, file]) => [
             path,
-            { ...file, is_submodule: file.is_submodule ?? sourceStatus.is_submodule },
+            { ...file, is_submodule: file.is_submodule ?? sourceStatus?.is_submodule },
           ]),
         )
       : null;
@@ -77,7 +81,7 @@ export function buildReviewGitStatusFiles(
   }
   if (named.length === 0) {
     return {
-      files: reviewGitStatus?.files ?? null,
+      files: normalizeGitStatusFiles(reviewGitStatus?.files) ?? null,
       isMultiRepo: true,
     };
   }
@@ -172,7 +176,7 @@ export function useReviewDialog(effectiveSessionId: string | null) {
           10000,
         )
         .catch(() => {
-          toast({ title: "Failed to send comments", variant: "error" });
+          toast({ title: t("task:failedToSendComments"), variant: "error" });
         });
       setReviewDialogOpen(false);
     },

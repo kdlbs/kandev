@@ -158,10 +158,10 @@ Kandev Session ID: sess-xyz-789
 e2e:mcp:kandev:create_task_plan_kandev({"task_id":"{task_id}"})`
 
 	t.Run("replaces task_id", func(t *testing.T) {
-		args := map[string]any{"task_id": "{task_id}"}
+		args := map[string]any{toolKeyTaskID: "{task_id}"}
 		substituteContextPlaceholders(args, fullPrompt)
-		if args["task_id"] != "task-abc-123" {
-			t.Errorf("task_id = %q, want %q", args["task_id"], "task-abc-123")
+		if args[toolKeyTaskID] != "task-abc-123" {
+			t.Errorf("task_id = %q, want %q", args[toolKeyTaskID], "task-abc-123")
 		}
 	})
 
@@ -175,13 +175,13 @@ e2e:mcp:kandev:create_task_plan_kandev({"task_id":"{task_id}"})`
 
 	t.Run("replaces both in same map", func(t *testing.T) {
 		args := map[string]any{
-			"task_id":    "{task_id}",
-			"session_id": "{session_id}",
-			"other":      "untouched",
+			toolKeyTaskID: "{task_id}",
+			"session_id":  "{session_id}",
+			"other":       "untouched",
 		}
 		substituteContextPlaceholders(args, fullPrompt)
-		if args["task_id"] != "task-abc-123" {
-			t.Errorf("task_id = %q, want %q", args["task_id"], "task-abc-123")
+		if args[toolKeyTaskID] != "task-abc-123" {
+			t.Errorf("task_id = %q, want %q", args[toolKeyTaskID], "task-abc-123")
 		}
 		if args["session_id"] != "sess-xyz-789" {
 			t.Errorf("session_id = %q, want %q", args["session_id"], "sess-xyz-789")
@@ -192,10 +192,10 @@ e2e:mcp:kandev:create_task_plan_kandev({"task_id":"{task_id}"})`
 	})
 
 	t.Run("no placeholders means empty substitution", func(t *testing.T) {
-		args := map[string]any{"task_id": "{task_id}"}
+		args := map[string]any{toolKeyTaskID: "{task_id}"}
 		substituteContextPlaceholders(args, "no kandev system block")
-		if args["task_id"] != "" {
-			t.Errorf("task_id should be empty when no context, got %q", args["task_id"])
+		if args[toolKeyTaskID] != "" {
+			t.Errorf("task_id should be empty when no context, got %q", args[toolKeyTaskID])
 		}
 	})
 

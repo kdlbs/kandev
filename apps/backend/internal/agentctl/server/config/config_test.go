@@ -8,7 +8,38 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
+
+	commonconfig "github.com/kandev/kandev/internal/common/config"
 )
+
+func TestLoadWithStartupUsesExplicitManagedValues(t *testing.T) {
+	t.Setenv("KANDEV_ACP_IDLE_TIMEOUT", "bad")
+	t.Setenv("KANDEV_ACP_IDLE_REAPER_INTERVAL", "bad")
+	t.Setenv("KANDEV_ACP_NOTIF_QUEUE", "1024")
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://inherited:4318")
+
+	startup := commonconfig.AgentctlStartupConfig{
+		Configured:                true,
+		IdleTimeout:               2 * time.Hour,
+		IdleReaperInterval:        3 * time.Minute,
+		NotificationQueueCapacity: 4096,
+		OTLPEndpoint:              "http://configured:4318",
+	}
+	cfg, err := LoadWithStartup(startup)
+	if err != nil {
+		t.Fatalf("LoadWithStartup: %v", err)
+	}
+	if cfg.IdleTimeout != startup.IdleTimeout || cfg.IdleReaperInterval != startup.IdleReaperInterval {
+		t.Fatalf("managed durations = %s/%s, want %s/%s", cfg.IdleTimeout, cfg.IdleReaperInterval, startup.IdleTimeout, startup.IdleReaperInterval)
+	}
+	if cfg.NotificationQueueCapacity != startup.NotificationQueueCapacity {
+		t.Fatalf("managed queue capacity = %d, want %d", cfg.NotificationQueueCapacity, startup.NotificationQueueCapacity)
+	}
+	if cfg.OTLPEndpoint != startup.OTLPEndpoint {
+		t.Fatalf("managed OTLP endpoint = %q, want %q", cfg.OTLPEndpoint, startup.OTLPEndpoint)
+	}
+}
 
 func TestNewInstanceConfigNormalizesMcpProviders(t *testing.T) {
 	cfg := (&Config{}).NewInstanceConfig(0, &InstanceOverrides{
@@ -28,9 +59,9 @@ func TestCollectAgentEnvKeepsGitHubCLIShimAheadOfProfilePath(t *testing.T) {
 	// literal ":" so SplitList sees two entries on Windows too — hardcoding the
 	// Unix separator made this fail there with the shim ahead of one unsplit entry.
 	profilePath := strings.Join([]string{"/profile/bin", "/usr/bin"}, string(os.PathListSeparator))
-	env := CollectAgentEnv(map[string]string{"PATH": profilePath})
+	env := CollectAgentEnv(map[string]string{pathEnvKey: profilePath})
 	want := strings.Join([]string{"/kandev/shims", "/profile/bin", "/usr/bin"}, string(os.PathListSeparator))
-	if got := envSliceValue(env, "PATH"); got != want {
+	if got := envSliceValue(env, pathEnvKey); got != want {
 		t.Fatalf("PATH = %q, want %q", got, want)
 	}
 }
@@ -45,26 +76,26 @@ func TestSearchPathKey(t *testing.T) {
 	if got := searchPathKey(inherited, true); got != "Path" {
 		t.Fatalf("searchPathKey(case-insensitive) = %q, want the inherited %q", got, "Path")
 	}
-	if got := searchPathKey(inherited, false); got != "PATH" {
-		t.Fatalf("searchPathKey(case-sensitive) = %q, want %q — a Unix \"Path\" is a different variable", got, "PATH")
+	if got := searchPathKey(inherited, false); got != pathEnvKey {
+		t.Fatalf("searchPathKey(case-sensitive) = %q, want %q — a Unix \"Path\" is a different variable", got, pathEnvKey)
 	}
 
-	both := map[string]string{"PATH": "/exact", "Path": "/variant"}
-	if got := searchPathKey(both, true); got != "PATH" {
+	both := map[string]string{pathEnvKey: "/exact", "Path": "/variant"}
+	if got := searchPathKey(both, true); got != pathEnvKey {
 		t.Fatalf("searchPathKey with both keys = %q, want the exact match to win", got)
 	}
 }
 
 func TestPrependPathEntryExtendsTheKeyItFound(t *testing.T) {
 	env := map[string]string{
-		"PATH": strings.Join([]string{"/node/bin", "/usr/bin"}, string(os.PathListSeparator)),
+		pathEnvKey: strings.Join([]string{"/node/bin", "/usr/bin"}, string(os.PathListSeparator)),
 	}
 
 	prependPathEntry(env, "/kandev/shims", false)
 
 	want := strings.Join([]string{"/kandev/shims", "/node/bin", "/usr/bin"}, string(os.PathListSeparator))
-	if env["PATH"] != want {
-		t.Fatalf("PATH = %q, want %q", env["PATH"], want)
+	if env[pathEnvKey] != want {
+		t.Fatalf("PATH = %q, want %q", env[pathEnvKey], want)
 	}
 	if len(env) != 1 {
 		t.Fatalf("prependPathEntry left %d variables, want the one it extended: %v", len(env), env)
@@ -81,7 +112,7 @@ func TestPrependPathEntryExtendsInheritedWindowsPathKey(t *testing.T) {
 
 	prependPathEntry(env, "/kandev/shims", true)
 
-	if _, duplicated := env["PATH"]; duplicated {
+	if _, duplicated := env[pathEnvKey]; duplicated {
 		t.Fatalf("prependPathEntry added a second search-path variable: %v", env)
 	}
 	want := strings.Join([]string{"/kandev/shims", "/node/bin", "/usr/bin"}, string(os.PathListSeparator))
@@ -91,7 +122,7 @@ func TestPrependPathEntryExtendsInheritedWindowsPathKey(t *testing.T) {
 }
 
 func TestCollectAgentEnvGitHubCLIShimSurvivesLoginShell(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == windowsOS {
 		t.Skip("Bash login-shell behavior is Unix-specific")
 	}
 	shimDir := filepath.Join(t.TempDir(), "managed github shim")
@@ -123,7 +154,7 @@ func TestCollectAgentEnvGitHubCLIShimSurvivesLoginShell(t *testing.T) {
 		"KANDEV_GITHUB_CLI_BASH_ENV":          bashEnv,
 		"BASH_ENV":                            parentBashEnv,
 		"KANDEV_BASH_HOOK_MARKER":             marker,
-		"PATH":                                "/usr/bin:/bin",
+		pathEnvKey:                            "/usr/bin:/bin",
 	})
 	if err != nil {
 		t.Fatalf("CollectAgentEnvWithError() error = %v", err)
@@ -151,7 +182,7 @@ func TestCollectAgentEnvGitHubCLIShimSurvivesLoginShell(t *testing.T) {
 }
 
 func TestCollectAgentEnvResolvesParameterizedBashEnv(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == windowsOS {
 		t.Skip("Bash startup behavior is Unix-specific")
 	}
 	shimDir := t.TempDir()
@@ -191,7 +222,7 @@ func TestCollectAgentEnvResolvesParameterizedBashEnv(t *testing.T) {
 }
 
 func TestCollectAgentEnvAvoidsManagedBashEnvSelfSourcing(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == windowsOS {
 		t.Skip("Bash startup behavior is Unix-specific")
 	}
 	startupEnv := filepath.Join(t.TempDir(), "managed-bash-env.sh")
@@ -239,7 +270,7 @@ func TestCollectAgentEnvLeavesGitHubStartupHookUntouchedWithoutBroker(t *testing
 		"KANDEV_GITHUB_CLI_SHIM_DIR": " /managed/shims ",
 		"KANDEV_GITHUB_CLI_BASH_ENV": startupEnv,
 		"BASH_ENV":                   parentBashEnv,
-		"PATH":                       "/usr/bin:/bin",
+		pathEnvKey:                   "/usr/bin:/bin",
 	})
 	if err != nil {
 		t.Fatalf("CollectAgentEnvWithError() error = %v", err)
@@ -250,7 +281,7 @@ func TestCollectAgentEnvLeavesGitHubStartupHookUntouchedWithoutBroker(t *testing
 	if got := envSliceValue(env, "KANDEV_GITHUB_PARENT_BASH_ENV"); got != "" {
 		t.Fatalf("parent Bash environment = %q, want unset without broker", got)
 	}
-	if got := envSliceValue(env, "PATH"); got != "/usr/bin:/bin" {
+	if got := envSliceValue(env, pathEnvKey); got != "/usr/bin:/bin" {
 		t.Fatalf("PATH = %q, want unchanged without broker", got)
 	}
 }
@@ -279,6 +310,40 @@ func TestCollectAgentEnvPreservesParentIndexedGitConfig(t *testing.T) {
 	}
 	if got := envSliceValue(env, "GIT_CONFIG_KEY_2"); got != "credential.https://github.com.helper" {
 		t.Fatalf("GIT_CONFIG_KEY_2 = %q, want managed helper", got)
+	}
+}
+
+func TestCollectAgentEnvIgnoresParentIndexedGitConfigBeyondCount(t *testing.T) {
+	// Hosts inherit indexed entries from a parent that later lowered
+	// GIT_CONFIG_COUNT. Git ignores the leftovers, so instance creation must
+	// too instead of failing every task start.
+	clearParentIndexedGitConfig(t)
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "core.hooksPath")
+	t.Setenv("GIT_CONFIG_VALUE_0", "/opt/locstat/hooks")
+	t.Setenv("GIT_CONFIG_KEY_1", "notes.augment.mergeStrategy")
+	t.Setenv("GIT_CONFIG_VALUE_1", "cat_sort_uniq")
+
+	env, err := CollectAgentEnvWithError(map[string]string{
+		"GIT_CONFIG_COUNT":   "1",
+		"GIT_CONFIG_KEY_0":   "credential.https://github.com.helper",
+		"GIT_CONFIG_VALUE_0": "!agentctl git-credential",
+	})
+	if err != nil {
+		t.Fatalf("CollectAgentEnvWithError() error = %v", err)
+	}
+
+	if got := envSliceValue(env, "GIT_CONFIG_COUNT"); got != "2" {
+		t.Fatalf("GIT_CONFIG_COUNT = %q, want 2", got)
+	}
+	if got := envSliceValue(env, "GIT_CONFIG_KEY_0"); got != "core.hooksPath" {
+		t.Fatalf("GIT_CONFIG_KEY_0 = %q, want core.hooksPath", got)
+	}
+	if got := envSliceValue(env, "GIT_CONFIG_KEY_1"); got != "credential.https://github.com.helper" {
+		t.Fatalf("GIT_CONFIG_KEY_1 = %q, want managed helper", got)
+	}
+	if got := envSliceValue(env, "GIT_CONFIG_KEY_2"); got != "" {
+		t.Fatalf("GIT_CONFIG_KEY_2 = %q, want stray parent entry dropped", got)
 	}
 }
 

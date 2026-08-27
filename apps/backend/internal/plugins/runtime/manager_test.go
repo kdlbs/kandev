@@ -202,6 +202,20 @@ func TestManager_StartDeliverEventWebhookStop(t *testing.T) {
 		}
 	})
 
+	t.Run("HandleAction echoes the verified action payload over the real subprocess", func(t *testing.T) {
+		resp, err := remote.HandleAction(ctx, &pluginsdk.PluginActionRequest{
+			ActionKey: "connection.get",
+			Context:   pluginsdk.VerifiedActionContext{ActorID: "user-1", WorkspaceID: "ws-1"},
+			Body:      []byte(`{"request":"action"}`),
+		})
+		if err != nil {
+			t.Fatalf("HandleAction() unexpected error: %v", err)
+		}
+		if string(resp.Body) != `{"request":"action"}` {
+			t.Fatalf("HandleAction().Body = %q, want echoed action body", resp.Body)
+		}
+	})
+
 	t.Run("DeliverEvent reaches the plugin, which calls back into Host.SetState", func(t *testing.T) {
 		require.Eventually(t, func() bool {
 			if err := remote.DeliverEvent(ctx, &pluginsdk.Event{

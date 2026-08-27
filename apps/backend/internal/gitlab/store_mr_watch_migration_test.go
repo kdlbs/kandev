@@ -28,6 +28,7 @@ func newLegacyMRWatchStore(t *testing.T) *Store {
 	if _, err := sqlxDB.Exec(`
 		CREATE TABLE workspaces (id TEXT PRIMARY KEY, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP);
 		CREATE TABLE tasks (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL DEFAULT '', archived_at DATETIME);
+		INSERT INTO tasks (id) VALUES ('task-1');
 		CREATE TABLE gitlab_mr_watches (
 			id TEXT PRIMARY KEY,
 			session_id TEXT NOT NULL,
@@ -103,7 +104,8 @@ func TestMigrateMRWatchUniqueKey_ReplayIsNoOp(t *testing.T) {
 	t.Cleanup(func() { _ = sqlxDB.Close() })
 	if _, err := sqlxDB.Exec(`
 		CREATE TABLE workspaces (id TEXT PRIMARY KEY, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP);
-		CREATE TABLE tasks (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL DEFAULT '', archived_at DATETIME)`); err != nil {
+		CREATE TABLE tasks (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL DEFAULT '', archived_at DATETIME);
+		INSERT INTO tasks (id) VALUES ('task-1')`); err != nil {
 		t.Fatalf("create base schema: %v", err)
 	}
 	store, err := NewStore(sqlxDB, sqlxDB)

@@ -3,19 +3,12 @@
 import { useEffect, useId } from "react";
 import { useTranslation } from "react-i18next";
 import { IconAlertTriangle } from "@tabler/icons-react";
+import type { SelectConfigOption } from "@/components/model-config-selector";
 import { NoAuthPanel, ProbingPanel } from "@/components/settings/profile-status-panels";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
-import { Label } from "@kandev/ui/label";
 import { Skeleton } from "@kandev/ui/skeleton";
 import { Switch } from "@kandev/ui/switch";
-import { ModeCombobox } from "@/components/settings/mode-combobox";
-import {
-  configOptionToModelOptions,
-  isModelConfigOption,
-  ModelConfigSelector,
-  type SelectConfigOption,
-} from "@/components/model-config-selector";
 import { useProfileModelCapabilities } from "@/hooks/domains/settings/use-profile-model-capabilities";
 import {
   PERMISSION_APPLY_AGENTCTL_AUTO_APPROVE,
@@ -24,7 +17,7 @@ import {
   type PermissionKey,
 } from "@/lib/agent-permissions";
 import { CLIFlagsField } from "@/components/settings/cli-flags-field";
-import { CommandPrefixField } from "@/components/settings/command-prefix-field";
+import { ProfileAdvancedOptions } from "@/components/settings/profile-advanced-options";
 import { ModelConfigResolutionStatus } from "@/components/settings/model-config-resolution-status";
 import {
   CapabilityStatusMessage,
@@ -37,11 +30,19 @@ import {
   profileModelIsDirty,
 } from "@/components/settings/profile-capability-helpers";
 import { modelConfigOptions } from "@/components/settings/profile-model-config";
+import {
+  ModelFallbackSection,
+  ModelPicker,
+  ModePicker,
+} from "@/components/settings/profile-model-fields";
+import {
+  SettingsFieldDescription,
+  SettingsFieldLabel,
+} from "@/components/settings/settings-typography";
 import type {
   CLIFlag,
   CommandEntry,
   ModelConfig,
-  ConfigOptionEntry,
   ModeEntry,
   ModelEntry,
   PermissionSetting,
@@ -51,6 +52,10 @@ import type {
 export type ProfileFormData = {
   name: string;
   model: string;
+  /** Optional single fallback model applied when `model` is unavailable. */
+  fallback_model?: string;
+  /** Legacy automatic-fallback opt-in; hides the fallback_model field. */
+  auto_fallback?: boolean;
   mode: string;
   config_options?: Record<string, string>;
   cli_passthrough: boolean;
@@ -131,19 +136,14 @@ function PermissionToggleRow({
       data-testid={isDanger ? "permission-auto-approve-danger" : `permission-toggle-${settingKey}`}
     >
       <div className={`flex-1 min-w-0 ${compact && !isDanger ? "space-y-0.5" : "space-y-1"}`}>
-        <Label htmlFor={switchId} className={`flex items-center gap-1.5 ${labelCls ?? ""}`}>
+        <SettingsFieldLabel
+          htmlFor={switchId}
+          className={`flex items-center gap-1.5 ${labelCls ?? ""}`}
+        >
           {isDanger && <IconAlertTriangle className="size-4 shrink-0 text-destructive" />}
           {setting.label}
-        </Label>
-        <p
-          className={
-            compact
-              ? "text-[10px] text-muted-foreground leading-tight"
-              : "text-xs text-muted-foreground"
-          }
-        >
-          {setting.description}
-        </p>
+        </SettingsFieldLabel>
+        <SettingsFieldDescription>{setting.description}</SettingsFieldDescription>
       </div>
       <Switch id={switchId} size={switchSize} checked={checked} onCheckedChange={onCheckedChange} />
     </div>
@@ -188,10 +188,8 @@ function PermissionToggles({
         {passthroughConfig?.supported && (
           <div className="flex items-center justify-between gap-2">
             <div className="space-y-0.5">
-              <Label className="text-xs">{passthroughConfig.label}</Label>
-              <p className="text-[10px] text-muted-foreground leading-tight">
-                {passthroughConfig.description}
-              </p>
+              <SettingsFieldLabel className="text-xs">{passthroughConfig.label}</SettingsFieldLabel>
+              <SettingsFieldDescription>{passthroughConfig.description}</SettingsFieldDescription>
             </div>
             <Switch
               size={switchSize}
@@ -234,8 +232,8 @@ function PermissionToggles({
       {passthroughConfig?.supported && (
         <div className="flex items-center justify-between rounded-md border p-3">
           <div className="space-y-1">
-            <Label>{passthroughConfig.label}</Label>
-            <p className="text-xs text-muted-foreground">{passthroughConfig.description}</p>
+            <SettingsFieldLabel>{passthroughConfig.label}</SettingsFieldLabel>
+            <SettingsFieldDescription>{passthroughConfig.description}</SettingsFieldDescription>
           </div>
           <Switch
             checked={profile.cli_passthrough}
@@ -249,74 +247,6 @@ function PermissionToggles({
         </div>
       )}
     </div>
-  );
-}
-
-function ModelPicker({
-  profile,
-  models,
-  currentModelId,
-  configOptions,
-  onChange,
-}: {
-  profile: ProfileFormData;
-  models: ModelEntry[];
-  currentModelId: string | undefined;
-  configOptions: SelectConfigOption[];
-  onChange: (patch: Partial<ProfileFormData>) => void;
-}) {
-  const { t } = useTranslation();
-  const modelConfig = configOptions.find(isModelConfigOption);
-  const modelOptions = modelConfig
-    ? configOptionToModelOptions(modelConfig)
-    : models.map((model) => ({
-        id: model.id,
-        name: model.name,
-        description: model.description || (model.id !== model.name ? model.id : undefined),
-        usageMultiplier:
-          typeof model.meta?.copilotUsage === "string" ? model.meta.copilotUsage : undefined,
-      }));
-  const currentModel = profile.model || modelConfig?.currentValue || currentModelId || null;
-  const selectedConfigOptions = configOptions.map((option) => ({
-    ...option,
-    currentValue: isModelConfigOption(option)
-      ? profile.model || option.currentValue
-      : profile.config_options?.[option.id] || option.currentValue,
-  }));
-
-  return (
-    <ModelConfigSelector
-      modelOptions={modelOptions}
-      currentModel={currentModel}
-      configOptions={selectedConfigOptions}
-      onModelChange={(value) => onChange({ model: value })}
-      onConfigChange={(configId, value) =>
-        onChange({ config_options: { ...(profile.config_options ?? {}), [configId]: value } })
-      }
-      placeholder={t("agents:selectAModel")}
-      ariaLabel={t("agents:profileStartModelSettings")}
-    />
-  );
-}
-
-function ModePicker({
-  profile,
-  modes,
-  currentModeId,
-  onChange,
-}: {
-  profile: ProfileFormData;
-  modes: ModeEntry[];
-  currentModeId: string | undefined;
-  onChange: (patch: Partial<ProfileFormData>) => void;
-}) {
-  return (
-    <ModeCombobox
-      value={profile.mode}
-      onChange={(value) => onChange({ mode: value })}
-      modes={modes}
-      currentModeId={currentModeId}
-    />
   );
 }
 
@@ -334,7 +264,7 @@ type CapabilitiesRowProps = {
   onRefresh: () => Promise<void>;
   error: string | null;
   modelConfig: ModelConfig;
-  resolvedConfigOptions?: ConfigOptionEntry[];
+  configOptions: SelectConfigOption[];
   configStatus: ModelConfig["status"];
   configError: string | null;
   configIsLoading: boolean;
@@ -350,9 +280,9 @@ function CapabilitiesRow(props: CapabilitiesRowProps) {
   if (props.isLoading && props.models.length === 0) {
     return (
       <div className={gapCls}>
-        <Label className={props.isCompact ? "text-xs text-muted-foreground" : undefined}>
+        <SettingsFieldLabel className={props.isCompact ? "text-xs" : undefined}>
           {t("agents:startModel")}
-        </Label>
+        </SettingsFieldLabel>
         <Skeleton className="h-7 w-full" />
       </div>
     );
@@ -391,7 +321,7 @@ function CapabilitiesRowContent({
   onRefresh,
   error,
   modelConfig,
-  resolvedConfigOptions,
+  configOptions,
   configStatus,
   configError,
   configIsLoading,
@@ -400,34 +330,29 @@ function CapabilitiesRowContent({
 }: CapabilitiesRowProps) {
   const { t } = useTranslation();
   const hasModes = modes.length > 0;
-  const configOptions = modelConfigOptions(
-    resolvedConfigOptions ? { ...modelConfig, config_options: resolvedConfigOptions } : modelConfig,
-  );
   const activeMode = findActiveMode(modes, profile.mode, currentModeId);
-  const labelCls = isCompact ? "text-xs text-muted-foreground" : undefined;
+  const labelCls = isCompact ? "text-xs" : undefined;
   const gapCls = isCompact ? "space-y-1.5" : "space-y-2";
 
   return (
     <div className={gapCls}>
-      <div className="flex items-end gap-2">
+      <div className="flex items-end gap-2" data-testid="profile-capabilities-model-row">
         <div
-          className={`flex-1 min-w-0 ${gapCls}`}
+          className={`${hasModes ? "flex-1" : "w-full md:max-w-xl"} min-w-0 ${gapCls}`}
           data-settings-dirty={profileModelIsDirty(profile, baselineProfile)}
           data-settings-dirty-level="container"
         >
-          <Label className={labelCls}>{t("agents:startModel")}</Label>
+          <SettingsFieldLabel className={labelCls}>{t("agents:startModel")}</SettingsFieldLabel>
           <ModelPicker
             profile={profile}
             models={models}
             currentModelId={currentModelId}
             configOptions={configOptions}
             onChange={onChange}
-          />
-          <ModelConfigResolutionStatus
-            status={configStatus}
-            error={configError}
-            isLoading={configIsLoading}
-            onRetry={onRetryConfig}
+            ariaLabel={t("settings:startModelAria")}
+            goneModelLabel={t("settings:startModelUnavailable")}
+            configOptionsLoading={configIsLoading}
+            keepOpenOnModelChange={modelConfig.supports_dynamic_models}
           />
         </div>
         {hasModes && (
@@ -437,7 +362,7 @@ function CapabilitiesRowContent({
             data-settings-dirty={profileModeIsDirty(profile, baselineProfile)}
             data-settings-dirty-level="container"
           >
-            <Label className={labelCls}>{t("agents:startMode")}</Label>
+            <SettingsFieldLabel className={labelCls}>{t("agents:startMode")}</SettingsFieldLabel>
             <ModePicker
               profile={profile}
               modes={modes}
@@ -448,8 +373,14 @@ function CapabilitiesRowContent({
         )}
         <RefreshCapabilitiesButton onRefresh={onRefresh} isLoading={isLoading} error={error} />
       </div>
+      <ModelConfigResolutionStatus
+        status={configStatus}
+        error={configError}
+        isLoading={configIsLoading}
+        onRetry={onRetryConfig}
+      />
       {activeMode?.description && (
-        <p className="text-xs text-muted-foreground">{activeMode.description}</p>
+        <SettingsFieldDescription>{activeMode.description}</SettingsFieldDescription>
       )}
       {commands.length > 0 && <CommandsButton commands={commands} />}
       <CapabilityStatusMessage status={status} />
@@ -473,21 +404,47 @@ function NameField({
   const { t } = useTranslation();
   return (
     <div className="flex items-center justify-between gap-4">
-      <div className="flex-1 space-y-2">
-        <Label>{t("agents:profileName")}</Label>
-        <Input
-          data-testid="profile-name-input"
-          value={profile.name}
-          onChange={(event) => onChange({ name: event.target.value })}
-          placeholder={t("agents:defaultProfile")}
-          data-settings-dirty={baselineName !== undefined && profile.name !== baselineName}
-        />
-      </div>
+      <ProfileNameField
+        value={profile.name}
+        onChange={(value) => onChange({ name: value })}
+        dirty={baselineName !== undefined && profile.name !== baselineName}
+      />
       {canRemove && onRemove && (
         <Button size="sm" variant="ghost" className="cursor-pointer" onClick={onRemove}>
           {t("agents:remove")}
         </Button>
       )}
+    </div>
+  );
+}
+
+export type ProfileNameFieldProps = {
+  value: string;
+  onChange: (value: string) => void;
+  dirty?: boolean;
+  id?: string;
+  testId?: string;
+};
+
+export function ProfileNameField({
+  value,
+  onChange,
+  dirty = false,
+  id,
+  testId = "profile-name-input",
+}: ProfileNameFieldProps) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex-1 space-y-2">
+      <SettingsFieldLabel htmlFor={id}>{t("agents:profileName")}</SettingsFieldLabel>
+      <Input
+        id={id}
+        data-testid={testId}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={t("agents:defaultProfile")}
+        data-settings-dirty={dirty}
+      />
     </div>
   );
 }
@@ -519,6 +476,9 @@ export function ProfileFormFields({
     refreshModelConfig,
     refresh,
   } = useProfileModelCapabilities(agentName, profile, modelConfig, onChange);
+  const configOptions = modelConfigOptions(
+    resolvedConfigOptions ? { ...modelConfig, config_options: resolvedConfigOptions } : modelConfig,
+  );
 
   useEffect(() => {
     onModelConfigResolutionPendingChange?.(isConfigResolutionPending);
@@ -551,7 +511,7 @@ export function ProfileFormFields({
         onRefresh={refresh}
         error={caps.error}
         modelConfig={modelConfig}
-        resolvedConfigOptions={resolvedConfigOptions}
+        configOptions={configOptions}
         configStatus={configStatus}
         configError={configError}
         configIsLoading={configIsLoading}
@@ -569,6 +529,44 @@ export function ProfileFormFields({
         baselineProfile={baselineProfile}
       />
 
+      <ProfileFormFooter
+        profile={profile}
+        baselineProfile={baselineProfile}
+        onChange={onChange}
+        permissionSettings={permissionSettings}
+        variant={variant}
+        hideCustomCLIFlags={hideCustomCLIFlags}
+        models={caps.models}
+        configOptions={configOptions}
+        isCompact={isCompact}
+      />
+    </div>
+  );
+}
+
+function ProfileFormFooter({
+  profile,
+  baselineProfile,
+  onChange,
+  permissionSettings,
+  variant,
+  hideCustomCLIFlags,
+  models,
+  configOptions,
+  isCompact,
+}: {
+  profile: ProfileFormData;
+  baselineProfile?: ProfileFormData;
+  onChange: (patch: Partial<ProfileFormData>) => void;
+  permissionSettings: Record<string, PermissionSetting>;
+  variant: "default" | "compact";
+  hideCustomCLIFlags: boolean;
+  models: ModelEntry[];
+  configOptions: SelectConfigOption[];
+  isCompact: boolean;
+}) {
+  return (
+    <>
       <div
         data-settings-dirty={
           Boolean(baselineProfile) &&
@@ -585,13 +583,25 @@ export function ProfileFormFields({
         />
       </div>
 
-      {!profile.cli_passthrough && (
-        <CommandPrefixField
+      <div className="space-y-1" data-testid="profile-disclosure-stack">
+        <ModelFallbackSection
           profile={profile}
+          models={models}
+          configOptions={configOptions}
           baselineProfile={baselineProfile}
+          labelCls={isCompact ? "text-xs" : undefined}
+          gapCls={isCompact ? "space-y-1.5" : "space-y-2"}
           onChange={onChange}
         />
-      )}
-    </div>
+
+        {!profile.cli_passthrough && (
+          <ProfileAdvancedOptions
+            profile={profile}
+            baselineProfile={baselineProfile}
+            onChange={onChange}
+          />
+        )}
+      </div>
+    </>
   );
 }

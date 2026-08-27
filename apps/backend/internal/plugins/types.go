@@ -15,7 +15,7 @@ import (
 )
 
 // Status is a plugin's lifecycle state, per the state machine in
-// docs/specs/plugins/spec.md ("State machine"):
+// docs/specs/plugins/requirements/plugins.md ("State machine"):
 //
 //	registered -> active -> disabled -> uninstalled
 //	registered|active|disabled --failure--> error
@@ -136,4 +136,11 @@ type Deliverer interface {
 	// error -> active recovery transition driven by the runtime manager's
 	// OnStatusChange callback.
 	Flush(pluginID string)
+}
+
+// AgentToolCatalogListener is notified after plugin lifecycle changes that
+// may alter the set of tools exposed to agent MCP sessions. Implementations
+// must return quickly and perform any rebuild asynchronously.
+type AgentToolCatalogListener interface {
+	NotifyAgentToolCatalogChanged()
 }

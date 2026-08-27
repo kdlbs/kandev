@@ -2,12 +2,12 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"unicode/utf8"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
-	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -16,7 +16,7 @@ import (
 
 // WorkspaceFileHandlers handles workspace file operations
 type WorkspaceFileHandlers struct {
-	lifecycle *lifecycle.Manager
+	lifecycle ExecutionLookup
 	logger    *logger.Logger
 }
 
@@ -27,7 +27,7 @@ type workspaceContentSearchRequest struct {
 }
 
 // NewWorkspaceFileHandlers creates new workspace file handlers
-func NewWorkspaceFileHandlers(lm *lifecycle.Manager, log *logger.Logger) *WorkspaceFileHandlers {
+func NewWorkspaceFileHandlers(lm ExecutionLookup, log *logger.Logger) *WorkspaceFileHandlers {
 	return &WorkspaceFileHandlers{
 		lifecycle: lm,
 		logger:    log.WithFields(zap.String("component", "workspace-file-handlers")),
@@ -118,11 +118,22 @@ func (h *WorkspaceFileHandlers) wsGetFileContent(ctx context.Context, msg *ws.Me
 	// Request file content from agentctl
 	response, err := client.RequestFileContent(ctx, req.Path, req.Repo)
 	if err != nil {
+		if isMissingFileContentError(err) {
+			h.logger.Debug("file not found (expected for deleted or stale files)",
+				zap.String("session_id", req.SessionID),
+				zap.String("path", req.Path))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, err.Error(), nil)
+		}
 		h.logger.Error("failed to get file content", zap.Error(err), zap.String("session_id", req.SessionID), zap.String("path", req.Path))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, fmt.Sprintf("Failed to get file content: %v", err), nil)
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, response)
+}
+
+func isMissingFileContentError(err error) bool {
+	// The client derives this sentinel from the agentctl file-content 404 status.
+	return errors.Is(err, agentctl.ErrFileNotFound)
 }
 
 // wsGetFileContentAtRef handles workspace.file.get_at_ref action

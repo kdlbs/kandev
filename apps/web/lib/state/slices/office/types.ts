@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- this file is the canonical Office entity contract. */
 // --- Office entity types ---
 //
 // Per ADR 0005 Wave E the canonical `AgentProfile`, `AgentRole`, `AgentStatus`,
@@ -19,6 +20,7 @@ export type {
 export type { OfficeAgentProfile as AgentProfile } from "@/lib/types/agent-profile";
 
 import type { OfficeAgentProfile as AgentProfile } from "@/lib/types/agent-profile";
+import type { QuorumResponseDTO, TaskQuorumSliceState } from "./quorum-types";
 
 export type SkillSourceType =
   | "inline"
@@ -254,30 +256,8 @@ export type TaskLabel = {
   color: string;
 };
 
-export type OfficeTask = {
-  id: string;
-  workspaceId: string;
-  identifier: string;
-  title: string;
-  description?: string;
-  status: OfficeTaskStatus;
-  priority: OfficeTaskPriority;
-  parentId?: string;
-  projectId?: string;
-  assigneeAgentProfileId?: string;
-  labels?: TaskLabel[] | string[];
-  blockedBy?: string[];
-  children?: OfficeTask[];
-  executionPolicy?: string;
-  executionState?: string;
-  createdAt: string;
-  updatedAt: string;
-  // True when the task lives in a kandev-managed system workflow
-  // (today: standing coordination; future: routine-fired). The Tasks
-  // UI renders a "System" badge for these when the dev toggle reveals
-  // them.
-  isSystem?: boolean;
-};
+import type { OfficeTask } from "./office-task-type";
+export type { OfficeTask } from "./office-task-type";
 
 export type TaskFilterState = {
   statuses: OfficeTaskStatus[];
@@ -479,232 +459,121 @@ export type OfficeMeta = {
 };
 
 // --- Provider routing types ---
+//
+// Defined in `./routing-types` (kept out of this file to stay under the
+// 600-line cap) and re-exported here so existing
+// `@/lib/state/slices/office/types` imports keep working unchanged.
 
-export type Tier = "frontier" | "balanced" | "economy";
+export type {
+  Tier,
+  RoutingErrorCode,
+  TierMap,
+  ProviderProfile,
+  ExecutionProfileSummary,
+  WakeReason,
+  TierPerReason,
+  RoleTierMap,
+  TierSource,
+  WorkspaceRouting,
+  AgentRoutingOverrides,
+  ProviderHealthState,
+  ProviderHealthScope,
+  ProviderHealth,
+  RouteAttemptOutcome,
+  RouteAttempt,
+  ProviderModelPair,
+  AgentRoutePreview,
+  AgentRouteData,
+  RoutingState,
+  ProviderHealthSliceState,
+  RunAttemptsState,
+  AgentRoutingSliceState,
+} from "./routing-types";
 
-export type RoutingErrorCode =
-  | "auth_required"
-  | "missing_credentials"
-  | "subscription_required"
-  | "quota_limited"
-  | "rate_limited"
-  | ("network_unavailable" | "provider_unavailable" | "provider_overloaded" | "model_capacity")
-  | "model_unavailable"
-  | "provider_not_configured"
-  | "unknown_provider_error"
-  | "agent_runtime_error"
-  | "task_error"
-  | "repo_error"
-  | "permission_denied_by_user";
-
-export type TierMap = {
-  frontier?: string;
-  balanced?: string;
-  economy?: string;
-};
-
-export type ProviderProfile = {
-  tier_map: TierMap;
-  execution_profile_ids?: Partial<Record<Tier, string>>;
-  /** @deprecated Accepted only while reading pre-migration routing payloads. */
-  tier_profile_ids?: Partial<Record<Tier, string>>;
-  mode?: string;
-  flags?: string[];
-  env?: Record<string, string>;
-};
-
-export type ExecutionProfileSummary = {
-  id: string;
-  name: string;
-  provider_id: string;
-  model: string;
-  mode?: string;
-  workspace_id?: string;
-};
-
-// Wake reasons the workspace can map onto specific tiers. v1 keeps the
-// surface narrow — only the three reasons that historically used the
-// cheap-profile shortcut. Adding more requires both a backend constant
-// and a UI copy update so the user gets context for each row.
-export type WakeReason = "heartbeat" | "routine_trigger" | "budget_alert";
-
-export type TierPerReason = Partial<Record<WakeReason, Tier>>;
-
-export type WorkspaceRouting = {
-  enabled: boolean;
-  provider_order: string[];
-  default_tier: Tier;
-  provider_profiles: Record<string, ProviderProfile>;
-  tier_per_reason?: TierPerReason;
-};
-
-export type AgentRoutingOverrides = {
-  provider_order_source?: "inherit" | "override" | "";
-  provider_order?: string[];
-  tier_source?: "inherit" | "override" | "";
-  tier?: Tier | "";
-  tier_per_reason_source?: "inherit" | "override" | "";
-  tier_per_reason?: TierPerReason;
-};
-
-export type ProviderHealthState = "healthy" | "short_retry" | "degraded" | "user_action_required";
-export type ProviderHealthScope = "provider" | "model" | "tier";
-
-export type ProviderHealth = {
-  workspace_id?: string;
-  provider_id: string;
-  scope: ProviderHealthScope;
-  scope_value: string;
-  state: ProviderHealthState;
-  error_code?: RoutingErrorCode;
-  retry_at?: string;
-  backoff_step: number;
-  last_failure?: string;
-  last_success?: string;
-  raw_excerpt?: string;
-};
-
-export type RouteAttemptOutcome =
-  | "launched"
-  | "retry_scheduled"
-  | "failed_provider_unavailable"
-  | "failed_other"
-  | "skipped_degraded"
-  | "skipped_user_action"
-  | "skipped_missing_mapping"
-  | "skipped_max_attempts";
-
-export type RouteAttempt = {
-  seq: number;
-  execution_profile_id?: string;
-  provider_id: string;
-  model?: string;
-  tier: Tier | "";
-  outcome: RouteAttemptOutcome;
-  error_code?: RoutingErrorCode;
-  error_confidence?: "high" | "medium" | "low";
-  adapter_phase?: string;
-  classifier_rule?: string;
-  exit_code?: number;
-  raw_excerpt?: string;
-  reset_hint?: string;
-  started_at: string;
-  finished_at?: string;
-};
-
-export type ProviderModelPair = {
-  execution_profile_id?: string;
-  provider_id: string;
-  model: string;
-  tier: Tier | "";
-};
-
-export type AgentRoutePreview = {
-  agent_id: string;
-  agent_name: string;
-  tier_source: "inherit" | "override";
-  effective_tier: Tier;
-  // primary_* reflects configured intent — first entry in the
-  // effective provider order, even when that provider is currently
-  // skipped (degraded / missing mapping).
-  primary_provider_id?: string;
-  primary_execution_profile_id?: string;
-  primary_model?: string;
-  // current_* reflects the candidate the next launch would actually
-  // pick; equal to primary when not degraded. Empty when every
-  // candidate is skipped.
-  current_provider_id?: string;
-  current_execution_profile_id?: string;
-  current_model?: string;
-  fallback_chain: ProviderModelPair[];
-  missing: string[];
-  degraded: boolean;
-};
-
-export type AgentRouteData = {
-  preview: AgentRoutePreview;
-  /**
-   * Raw routing override blob persisted on the agent's settings. The
-   * agent routing UI hydrates from this so toggles + tier override +
-   * provider-order override reflect persisted values on first paint.
-   */
-  overrides: AgentRoutingOverrides;
-  last_failure_code?: RoutingErrorCode;
-  last_failure_run?: string;
-};
-
-export type RoutingState = {
-  byWorkspace: Record<string, WorkspaceRouting | undefined>;
-  knownProviders: string[];
-  preview: { byWorkspace: Record<string, AgentRoutePreview[] | undefined> };
-};
-
-export type ProviderHealthSliceState = {
-  byWorkspace: Record<string, ProviderHealth[]>;
-};
-
-export type RunAttemptsState = {
-  byRunId: Record<string, RouteAttempt[]>;
-};
-
-export type AgentRoutingSliceState = {
-  byAgentId: Record<string, AgentRouteData | undefined>;
-};
+import type {
+  AgentRouteData,
+  AgentRoutePreview,
+  AgentRoutingSliceState,
+  ProviderHealth,
+  ProviderHealthSliceState,
+  RouteAttempt,
+  RoutingState,
+  RunAttemptsState,
+  WorkspaceRouting,
+} from "./routing-types";
 
 // --- Slice state & actions ---
 
-export type OfficeRefetchTrigger = {
-  type: string;
-  timestamp: number;
-};
-
+/**
+ * Office collections that belong to one workspace, stored per workspace id
+ * rather than as a single current value.
+ *
+ * These used to be flat, which was safe only while the office route was the
+ * one thing that loaded them: entering the route overwrote whatever the
+ * previous workspace had left behind. Now that the data is loaded wherever
+ * an office workspace is active, two workspaces' worth of it can be in flight
+ * across a switch, and a flat field renders the wrong one in between.
+ * `routing` and `providerHealth` in this same slice were already keyed for
+ * the same reason.
+ *
+ * Read these through `selectors.ts` rather than indexing directly — the
+ * selectors resolve the active workspace and return stable empty values, so a
+ * component subscribing to a workspace with no entry does not re-render on
+ * every unrelated store write.
+ */
 export type OfficeSliceState = {
   office: {
-    agentProfiles: AgentProfile[];
+    agentProfilesByWorkspaceId: Record<string, AgentProfile[]>;
     skills: Skill[];
-    projects: Project[];
+    projectsByWorkspaceId: Record<string, Project[]>;
     approvals: Approval[];
     activity: ActivityEntry[];
     costSummary: CostSummary | null;
     budgetPolicies: BudgetPolicy[];
     routines: Routine[];
-    inboxItems: InboxItem[];
-    inboxCount: number;
+    inboxItemsByWorkspaceId: Record<string, InboxItem[]>;
+    inboxCountByWorkspaceId: Record<string, number>;
     runs: Run[];
-    dashboard: DashboardData | null;
+    dashboardByWorkspaceId: Record<string, DashboardData | null>;
     tasks: TasksState;
     meta: OfficeMeta | null;
     isLoading: boolean;
-    refetchTrigger: OfficeRefetchTrigger | null;
+    // Per-type counters rather than one "last trigger" value: a single WS
+    // handler often fires several distinct types in the same synchronous
+    // call (e.g. `task:${id}` then `dashboard`), and React/Zustand coalesce
+    // those into one render, so a shared last-value field would only ever
+    // let the final type's subscribers see a change. See useOfficeRefetch.
+    refetchTriggers: Record<string, number>;
     routing: RoutingState;
     providerHealth: ProviderHealthSliceState;
     runAttempts: RunAttemptsState;
     agentRouting: AgentRoutingSliceState;
+    taskQuorum: TaskQuorumSliceState;
   };
 };
 
 export type OfficeSliceActions = {
-  setOfficeAgentProfiles: (agents: AgentProfile[]) => void;
-  addOfficeAgentProfile: (agent: AgentProfile) => void;
-  updateOfficeAgentProfile: (id: string, patch: Partial<AgentProfile>) => void;
-  removeOfficeAgentProfile: (id: string) => void;
+  setOfficeAgentProfiles: (workspaceId: string, agents: AgentProfile[]) => void;
+  addOfficeAgentProfile: (workspaceId: string, agent: AgentProfile) => void;
+  updateOfficeAgentProfile: (workspaceId: string, id: string, patch: Partial<AgentProfile>) => void;
+  removeOfficeAgentProfile: (workspaceId: string, id: string) => void;
   setSkills: (skills: Skill[]) => void;
   addSkill: (skill: Skill) => void;
   updateSkill: (id: string, patch: Partial<Skill>) => void;
   removeSkill: (id: string) => void;
-  setProjects: (projects: Project[]) => void;
-  addProject: (project: Project) => void;
-  updateProject: (id: string, patch: Partial<Project>) => void;
-  removeProject: (id: string) => void;
+  setProjects: (workspaceId: string, projects: Project[]) => void;
+  addProject: (workspaceId: string, project: Project) => void;
+  updateProject: (workspaceId: string, id: string, patch: Partial<Project>) => void;
+  removeProject: (workspaceId: string, id: string) => void;
   setApprovals: (approvals: Approval[]) => void;
   setActivity: (entries: ActivityEntry[]) => void;
   setCostSummary: (summary: CostSummary | null) => void;
   setBudgetPolicies: (policies: BudgetPolicy[]) => void;
   setRoutines: (routines: Routine[]) => void;
-  setInboxItems: (items: InboxItem[]) => void;
-  setInboxCount: (count: number) => void;
+  setInboxItems: (workspaceId: string, items: InboxItem[]) => void;
+  setInboxCount: (workspaceId: string, count: number) => void;
   setRuns: (runs: Run[]) => void;
-  setDashboard: (data: DashboardData | null) => void;
+  setDashboard: (workspaceId: string, data: DashboardData | null) => void;
   setTasks: (tasks: OfficeTask[]) => void;
   appendTasks: (tasks: OfficeTask[]) => void;
   patchTaskInStore: (taskId: string, patch: Partial<OfficeTask>) => void;
@@ -726,6 +595,7 @@ export type OfficeSliceActions = {
   setRunAttempts: (runId: string, attempts: RouteAttempt[]) => void;
   appendRunAttempt: (runId: string, attempt: RouteAttempt) => void;
   setAgentRouting: (agentId: string, data: AgentRouteData | undefined) => void;
+  setTaskQuorum: (taskId: string, quorum: QuorumResponseDTO) => void;
 };
 
 export type OfficeSlice = OfficeSliceState & OfficeSliceActions;

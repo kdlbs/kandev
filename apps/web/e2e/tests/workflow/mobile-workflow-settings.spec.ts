@@ -2,6 +2,69 @@ import { test, expect } from "../../fixtures/test-base";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
 
 test.describe("Workflow settings on mobile", () => {
+  test("remove sync confirmation keeps 44px inline actions", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.configureGitLab(seedData.workspaceId);
+    const configResponse = await apiClient.rawRequest(
+      "POST",
+      `/api/v1/workflow-sync/config?workspace_id=${encodeURIComponent(seedData.workspaceId)}`,
+      {
+        provider: "gitlab",
+        project_path: "platform/kandev",
+        branch: "main",
+        path: ".kandev/workflows",
+        interval_seconds: 300,
+        poll_enabled: true,
+      },
+    );
+    expect(configResponse.ok).toBe(true);
+
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId);
+
+    const dialog = testPage.getByTestId("workflow-sync-dialog");
+    await testPage.getByTestId("workflow-sync-open").tap();
+    await expect(dialog).toBeVisible();
+    await dialog.getByTestId("workflow-sync-remove").tap();
+    const confirmation = dialog.getByTestId("workflow-sync-remove-confirmation");
+    await expect(confirmation).toBeVisible();
+
+    for (const control of [
+      confirmation.getByRole("button", { name: "Cancel" }),
+      confirmation.getByTestId("workflow-sync-remove-confirm"),
+    ]) {
+      const box = await control.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.height).toBeGreaterThanOrEqual(44);
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(
+        await testPage.evaluate(() => window.innerWidth),
+      );
+    }
+    expect(
+      await testPage.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
+    ).toBe(false);
+
+    await testPage.keyboard.press("Escape");
+    await expect(confirmation).not.toBeVisible();
+    await expect(dialog.getByTestId("workflow-sync-remove")).toBeVisible();
+
+    await dialog.getByTestId("workflow-sync-remove").tap();
+    await dialog.getByTestId("workflow-sync-remove-confirm").tap();
+    await expect(dialog).not.toBeVisible();
+    expect(
+      (
+        await apiClient.rawRequest(
+          "GET",
+          `/api/v1/workflow-sync/config?workspace_id=${encodeURIComponent(seedData.workspaceId)}`,
+        )
+      ).status,
+    ).toBe(204);
+  });
+
   test("configures original-session rules with touch-sized controls", async ({
     testPage,
     apiClient,
@@ -162,5 +225,42 @@ test.describe("Workflow settings on mobile", () => {
       () => document.documentElement.scrollWidth > window.innerWidth,
     );
     expect(hasDocumentOverflow).toBe(false);
+  });
+
+  test("shows optional feeder guidance from the WIP info tooltip", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Mobile WIP Guidance");
+    await apiClient.createWorkflowStep(workflow.id, "Backlog", 0, { is_start_step: true });
+    const reviewStep = await apiClient.createWorkflowStep(workflow.id, "Review", 1);
+
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId);
+    const card = await page.findWorkflowCard("Mobile WIP Guidance");
+    await page.selectStep(card, "Review", true);
+
+    const guidanceHelp = card.getByTestId(`${reviewStep.id}-pull-from-guidance-help`);
+    await expect(guidanceHelp).toBeVisible();
+    await guidanceHelp.tap();
+    const guidanceTooltip = testPage.getByRole("tooltip");
+    await expect(guidanceTooltip).toContainText(
+      "No feeder is selected. Direct moves and automatic transitions queue in this destination",
+    );
+    await expect(guidanceTooltip).toContainText(
+      "WIP limits active work, not visibility. Overflow remains on the board until capacity opens",
+    );
+    await testPage.keyboard.press("Escape");
+
+    await card.getByTestId(`${reviewStep.id}-pull-from-step-select`).tap();
+    await testPage.getByRole("option", { name: "Backlog" }).tap();
+    await guidanceHelp.tap();
+    await expect(guidanceTooltip).toContainText(
+      "Optional automatic feeder intake. Destination-queued tasks are admitted first",
+    );
+    await expect(guidanceTooltip).toContainText(
+      "Direct moves and automatic transitions queue in the destination",
+    );
   });
 });

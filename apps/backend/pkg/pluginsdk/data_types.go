@@ -61,18 +61,20 @@ func pageInfoFromProto(p *pluginv1.PageInfo) *PageInfo {
 
 // TaskRepository is the Go-native mirror of kandev.plugin.v1.TaskRepository.
 type TaskRepository struct {
-	ID           string
-	RepositoryID string
-	BaseBranch   string
-	Position     int32
+	ID             string
+	RepositoryID   string
+	BaseBranch     string
+	Position       int32
+	CheckoutBranch string
 }
 
 func (r TaskRepository) toProto() *pluginv1.TaskRepository {
 	return &pluginv1.TaskRepository{
-		Id:           r.ID,
-		RepositoryId: r.RepositoryID,
-		BaseBranch:   r.BaseBranch,
-		Position:     r.Position,
+		Id:             r.ID,
+		RepositoryId:   r.RepositoryID,
+		BaseBranch:     r.BaseBranch,
+		Position:       r.Position,
+		CheckoutBranch: r.CheckoutBranch,
 	}
 }
 
@@ -81,10 +83,11 @@ func taskRepositoryFromProto(p *pluginv1.TaskRepository) TaskRepository {
 		return TaskRepository{}
 	}
 	return TaskRepository{
-		ID:           p.GetId(),
-		RepositoryID: p.GetRepositoryId(),
-		BaseBranch:   p.GetBaseBranch(),
-		Position:     p.GetPosition(),
+		ID:             p.GetId(),
+		RepositoryID:   p.GetRepositoryId(),
+		BaseBranch:     p.GetBaseBranch(),
+		Position:       p.GetPosition(),
+		CheckoutBranch: p.GetCheckoutBranch(),
 	}
 }
 
@@ -107,6 +110,78 @@ type Task struct {
 	IsEphemeral  bool
 	Repositories []TaskRepository
 	Metadata     map[string]any
+	// ArchivedAt is nil for a live task. Only ever populated when the read asked
+	// for archived tasks (TaskFilter.IncludeArchived).
+	ArchivedAt *string
+	// PullRequests are the changes opened for this task, newest first. The link
+	// is not derivable from any other field on Task: CheckoutBranch is the BASE
+	// branch, and a PR title is rewritten to conventional-commit form.
+	PullRequests []TaskPullRequest
+	// WorkflowStepID is where on the board the task stands. State says how it is
+	// going; this says where it is.
+	WorkflowStepID         string
+	Position               int32
+	AssigneeAgentProfileID string
+	Labels                 []string
+	Autopilot              bool
+	WIPAdmitted            bool
+	QueuedForStepID        string
+	QueuedAt               *string
+	ProjectID              string
+	ExternalID             string
+}
+
+// TaskPullRequest is one change opened for a task. Provider-neutral by design:
+// review metadata specific to one forge stays out of the plugin contract.
+type TaskPullRequest struct {
+	Number     int64
+	URL        string
+	Title      string
+	State      string // "open" | "closed" | "merged"
+	HeadBranch string
+	BaseBranch string
+	IsDraft    bool
+	Provider   string // "github" | "gitlab"
+	MergedAt   *string
+	ClosedAt   *string
+	// Readiness, already synced by kandev's PR watcher. Carried so a plugin
+	// asking "what can merge" does not re-fetch all of it from the forge.
+	ReviewState             string
+	ChecksState             string
+	MergeableState          string
+	UnresolvedReviewThreads int32
+	ChecksTotal             int32
+	ChecksPassing           int32
+	Additions               int32
+	Deletions               int32
+	AuthorLogin             string
+}
+
+func (r TaskPullRequest) toProto() *pluginv1.TaskPullRequest {
+	return &pluginv1.TaskPullRequest{
+		Number: r.Number, Url: r.URL, Title: r.Title, State: r.State,
+		HeadBranch: r.HeadBranch, BaseBranch: r.BaseBranch, IsDraft: r.IsDraft,
+		Provider: r.Provider, MergedAt: r.MergedAt, ClosedAt: r.ClosedAt,
+		ReviewState: r.ReviewState, ChecksState: r.ChecksState,
+		MergeableState: r.MergeableState, UnresolvedReviewThreads: r.UnresolvedReviewThreads,
+		ChecksTotal: r.ChecksTotal, ChecksPassing: r.ChecksPassing,
+		Additions: r.Additions, Deletions: r.Deletions, AuthorLogin: r.AuthorLogin,
+	}
+}
+
+func taskPullRequestFromProto(p *pluginv1.TaskPullRequest) TaskPullRequest {
+	if p == nil {
+		return TaskPullRequest{}
+	}
+	return TaskPullRequest{
+		Number: p.GetNumber(), URL: p.GetUrl(), Title: p.GetTitle(), State: p.GetState(),
+		HeadBranch: p.GetHeadBranch(), BaseBranch: p.GetBaseBranch(), IsDraft: p.GetIsDraft(),
+		Provider: p.GetProvider(), MergedAt: p.MergedAt, ClosedAt: p.ClosedAt,
+		ReviewState: p.GetReviewState(), ChecksState: p.GetChecksState(),
+		MergeableState: p.GetMergeableState(), UnresolvedReviewThreads: p.GetUnresolvedReviewThreads(),
+		ChecksTotal: p.GetChecksTotal(), ChecksPassing: p.GetChecksPassing(),
+		Additions: p.GetAdditions(), Deletions: p.GetDeletions(), AuthorLogin: p.GetAuthorLogin(),
+	}
 }
 
 func (t Task) toProto() (*pluginv1.Task, error) {
@@ -139,7 +214,42 @@ func (t Task) toProto() (*pluginv1.Task, error) {
 		IsEphemeral:  t.IsEphemeral,
 		Repositories: repos,
 		Metadata:     metadata,
+
+		ArchivedAt:             t.ArchivedAt,
+		PullRequests:           taskPullRequestsToProto(t.PullRequests),
+		WorkflowStepId:         t.WorkflowStepID,
+		Position:               t.Position,
+		AssigneeAgentProfileId: t.AssigneeAgentProfileID,
+		Labels:                 t.Labels,
+		Autopilot:              t.Autopilot,
+		WipAdmitted:            t.WIPAdmitted,
+		QueuedForStepId:        t.QueuedForStepID,
+		QueuedAt:               t.QueuedAt,
+		ProjectId:              t.ProjectID,
+		ExternalId:             t.ExternalID,
 	}, nil
+}
+
+func taskPullRequestsToProto(in []TaskPullRequest) []*pluginv1.TaskPullRequest {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]*pluginv1.TaskPullRequest, len(in))
+	for i := range in {
+		out[i] = in[i].toProto()
+	}
+	return out
+}
+
+func taskPullRequestsFromProto(in []*pluginv1.TaskPullRequest) []TaskPullRequest {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]TaskPullRequest, len(in))
+	for i, r := range in {
+		out[i] = taskPullRequestFromProto(r)
+	}
+	return out
 }
 
 func taskFromProto(p *pluginv1.Task) (Task, error) {
@@ -175,6 +285,19 @@ func taskFromProto(p *pluginv1.Task) (Task, error) {
 		IsEphemeral:  p.GetIsEphemeral(),
 		Repositories: repos,
 		Metadata:     metadata,
+
+		ArchivedAt:             p.ArchivedAt,
+		PullRequests:           taskPullRequestsFromProto(p.GetPullRequests()),
+		WorkflowStepID:         p.GetWorkflowStepId(),
+		Position:               p.GetPosition(),
+		AssigneeAgentProfileID: p.GetAssigneeAgentProfileId(),
+		Labels:                 p.GetLabels(),
+		Autopilot:              p.GetAutopilot(),
+		WIPAdmitted:            p.GetWipAdmitted(),
+		QueuedForStepID:        p.GetQueuedForStepId(),
+		QueuedAt:               p.QueuedAt,
+		ProjectID:              p.GetProjectId(),
+		ExternalID:             p.GetExternalId(),
 	}, nil
 }
 
@@ -215,6 +338,12 @@ type TaskFilter struct {
 	States           []string
 	ParentID         *string
 	IncludeEphemeral bool
+	// IncludeArchived defaults false, matching the behaviour before this field
+	// existed: a plugin that does not ask still sees only live tasks. A plugin
+	// reporting on delivery needs true — an archived task is usually a
+	// delivered one, and omitting it makes finished work look like it never
+	// happened.
+	IncludeArchived bool
 }
 
 func (f TaskFilter) toProto() *pluginv1.TaskFilter {
@@ -224,6 +353,7 @@ func (f TaskFilter) toProto() *pluginv1.TaskFilter {
 		States:           f.States,
 		ParentId:         f.ParentID,
 		IncludeEphemeral: f.IncludeEphemeral,
+		IncludeArchived:  f.IncludeArchived,
 	}
 }
 
@@ -237,6 +367,7 @@ func taskFilterFromProto(p *pluginv1.TaskFilter) TaskFilter {
 		States:           p.GetStates(),
 		ParentID:         p.ParentId,
 		IncludeEphemeral: p.GetIncludeEphemeral(),
+		IncludeArchived:  p.GetIncludeArchived(),
 	}
 }
 
@@ -370,15 +501,36 @@ type WorkflowStep struct {
 	Name       string
 	Position   int32
 	StageType  string
+	// Color is the step's own presentation colour. A plugin rendering a board
+	// reads it rather than inventing a palette, so its columns match the ones
+	// the operator already sees in kandev.
+	Color          string
+	IsStartStep    bool
+	WIPLimit       int32 // 0 means unlimited
+	AgentProfileID string
+	// OnEnterActionTypes lists the on_enter action types configured on this
+	// step, as authored. This lists what is configured, not a guarantee that
+	// every listed type executes on every transition path. The ordinary move
+	// path handles auto_start_agent, configure_session, enable_plan_mode,
+	// set_session_mode and reset_agent_context. Other action types can run only
+	// on applicable workflow-engine paths. Config maps are deliberately not
+	// exposed. Nil when the step has no on_enter actions, never an empty
+	// non-nil slice. Callers must ignore action types they do not recognize.
+	OnEnterActionTypes []string
 }
 
 func (s WorkflowStep) toProto() *pluginv1.WorkflowStep {
 	return &pluginv1.WorkflowStep{
-		Id:         s.ID,
-		WorkflowId: s.WorkflowID,
-		Name:       s.Name,
-		Position:   s.Position,
-		StageType:  s.StageType,
+		Id:                 s.ID,
+		WorkflowId:         s.WorkflowID,
+		Name:               s.Name,
+		Position:           s.Position,
+		StageType:          s.StageType,
+		Color:              s.Color,
+		IsStartStep:        s.IsStartStep,
+		WipLimit:           s.WIPLimit,
+		AgentProfileId:     s.AgentProfileID,
+		OnEnterActionTypes: s.OnEnterActionTypes,
 	}
 }
 
@@ -387,12 +539,27 @@ func workflowStepFromProto(p *pluginv1.WorkflowStep) WorkflowStep {
 		return WorkflowStep{}
 	}
 	return WorkflowStep{
-		ID:         p.GetId(),
-		WorkflowID: p.GetWorkflowId(),
-		Name:       p.GetName(),
-		Position:   p.GetPosition(),
-		StageType:  p.GetStageType(),
+		ID:                 p.GetId(),
+		WorkflowID:         p.GetWorkflowId(),
+		Name:               p.GetName(),
+		Position:           p.GetPosition(),
+		StageType:          p.GetStageType(),
+		OnEnterActionTypes: nonEmptyStrings(p.GetOnEnterActionTypes()),
+		Color:              p.GetColor(),
+		IsStartStep:        p.GetIsStartStep(),
+		WIPLimit:           p.GetWipLimit(),
+		AgentProfileID:     p.GetAgentProfileId(),
 	}
+}
+
+// nonEmptyStrings enforces the documented nil-not-empty invariant at the SDK
+// decode boundary, independent of what a caller happened to serialize onto
+// the wire.
+func nonEmptyStrings(s []string) []string {
+	if len(s) == 0 {
+		return nil
+	}
+	return s
 }
 
 func workflowStepsFromProto(items []*pluginv1.WorkflowStep) []WorkflowStep {
@@ -425,6 +592,46 @@ type AgentProfile struct {
 	Name        string
 	Model       string
 	Mode        string
+}
+
+// ExecutorProfile is the Go-native mirror of kandev.plugin.v1.ExecutorProfile.
+type ExecutorProfile struct {
+	ID           string
+	DisplayName  string
+	ExecutorType string
+}
+
+func (e ExecutorProfile) toProto() *pluginv1.ExecutorProfile {
+	return &pluginv1.ExecutorProfile{Id: e.ID, DisplayName: e.DisplayName, ExecutorType: e.ExecutorType}
+}
+
+func executorProfileFromProto(p *pluginv1.ExecutorProfile) ExecutorProfile {
+	if p == nil {
+		return ExecutorProfile{}
+	}
+	return ExecutorProfile{ID: p.GetId(), DisplayName: p.GetDisplayName(), ExecutorType: p.GetExecutorType()}
+}
+
+func executorProfilesFromProto(profiles []*pluginv1.ExecutorProfile) []ExecutorProfile {
+	if profiles == nil {
+		return nil
+	}
+	out := make([]ExecutorProfile, len(profiles))
+	for i, profile := range profiles {
+		out[i] = executorProfileFromProto(profile)
+	}
+	return out
+}
+
+func executorProfilesToProto(profiles []ExecutorProfile) []*pluginv1.ExecutorProfile {
+	if profiles == nil {
+		return nil
+	}
+	out := make([]*pluginv1.ExecutorProfile, len(profiles))
+	for i, profile := range profiles {
+		out[i] = profile.toProto()
+	}
+	return out
 }
 
 func (a AgentProfile) toProto() *pluginv1.AgentProfile {
@@ -476,18 +683,34 @@ func agentProfilesToProto(items []AgentProfile) []*pluginv1.AgentProfile {
 
 // Repository is the Go-native mirror of kandev.plugin.v1.Repository.
 type Repository struct {
-	ID            string
-	WorkspaceID   string
-	Name          string
-	DefaultBranch *string
+	ID                   string
+	WorkspaceID          string
+	Name                 string
+	DefaultBranch        *string
+	SourceType           string
+	ProviderID           string
+	ProviderRepositoryID string
+	ProviderHost         string
+	ProviderScope        string
+	OwnerOrProject       string
+	ProviderName         string
+	RemoteURL            string
 }
 
 func (r Repository) toProto() *pluginv1.Repository {
 	return &pluginv1.Repository{
-		Id:            r.ID,
-		WorkspaceId:   r.WorkspaceID,
-		Name:          r.Name,
-		DefaultBranch: r.DefaultBranch,
+		Id:                   r.ID,
+		WorkspaceId:          r.WorkspaceID,
+		Name:                 r.Name,
+		DefaultBranch:        r.DefaultBranch,
+		SourceType:           r.SourceType,
+		ProviderId:           r.ProviderID,
+		ProviderRepositoryId: r.ProviderRepositoryID,
+		ProviderHost:         r.ProviderHost,
+		ProviderScope:        r.ProviderScope,
+		OwnerOrProject:       r.OwnerOrProject,
+		ProviderName:         r.ProviderName,
+		RemoteUrl:            r.RemoteURL,
 	}
 }
 
@@ -496,10 +719,18 @@ func repositoryFromProto(p *pluginv1.Repository) Repository {
 		return Repository{}
 	}
 	return Repository{
-		ID:            p.GetId(),
-		WorkspaceID:   p.GetWorkspaceId(),
-		Name:          p.GetName(),
-		DefaultBranch: p.DefaultBranch,
+		ID:                   p.GetId(),
+		WorkspaceID:          p.GetWorkspaceId(),
+		Name:                 p.GetName(),
+		DefaultBranch:        p.DefaultBranch,
+		SourceType:           p.GetSourceType(),
+		ProviderID:           p.GetProviderId(),
+		ProviderRepositoryID: p.GetProviderRepositoryId(),
+		ProviderHost:         p.GetProviderHost(),
+		ProviderScope:        p.GetProviderScope(),
+		OwnerOrProject:       p.GetOwnerOrProject(),
+		ProviderName:         p.GetProviderName(),
+		RemoteURL:            p.GetRemoteUrl(),
 	}
 }
 
@@ -623,12 +854,25 @@ func sessionFilterFromProto(p *pluginv1.SessionFilter) SessionFilter {
 // SessionCodeStats is the Go-native mirror of
 // kandev.plugin.v1.SessionCodeStats — a computed per-session code-change
 // summary, never the raw commit/snapshot rows.
+//
+// CommittedLinesAvailable is false (with LinesAddedCommitted/
+// LinesDeletedCommitted reading 0) for a session that predates
+// commit-capture activation and has no observed commits — capture wasn't
+// running yet, so that zero cannot be told apart from a real zero-change
+// session. This is a separate bool rather than making the existing fields
+// pointers: they are already-shipped public SDK fields (ADR 0043's
+// additive-only DTO contract), and changing their Go type from int64 to
+// *int64 would be a source-compatibility break for any plugin rebuilding
+// against a new SDK version. See internal/analytics/models.SessionCodeStats
+// for the full contract (that internal type is not part of the public
+// plugin surface and keeps its own *int64 representation).
 type SessionCodeStats struct {
 	SessionID               string
 	LinesAddedCommitted     int64
 	LinesDeletedCommitted   int64
 	LinesAddedPeakPending   int64
 	LinesDeletedPeakPending int64
+	CommittedLinesAvailable bool
 }
 
 func (s SessionCodeStats) toProto() *pluginv1.SessionCodeStats {
@@ -638,6 +882,7 @@ func (s SessionCodeStats) toProto() *pluginv1.SessionCodeStats {
 		LinesDeletedCommitted:   s.LinesDeletedCommitted,
 		LinesAddedPeakPending:   s.LinesAddedPeakPending,
 		LinesDeletedPeakPending: s.LinesDeletedPeakPending,
+		CommittedLinesAvailable: s.CommittedLinesAvailable,
 	}
 }
 
@@ -651,6 +896,7 @@ func sessionCodeStatsFromProto(p *pluginv1.SessionCodeStats) SessionCodeStats {
 		LinesDeletedCommitted:   p.GetLinesDeletedCommitted(),
 		LinesAddedPeakPending:   p.GetLinesAddedPeakPending(),
 		LinesDeletedPeakPending: p.GetLinesDeletedPeakPending(),
+		CommittedLinesAvailable: p.GetCommittedLinesAvailable(),
 	}
 }
 
@@ -798,10 +1044,17 @@ type CreateTaskInput struct {
 	// StartAgent asks the host to auto-launch an agent on the created task,
 	// mirroring the REST/MCP create_task start_agent flag. Best-effort: a
 	// launch failure does not fail task creation.
-	StartAgent bool
+	StartAgent   bool
+	Repositories []PluginTaskRepository
+	Launch       *PluginTaskLaunchOptions
+	Metadata     map[string]any
 }
 
-func (in CreateTaskInput) toProto() *pluginv1.CreateTaskRequest {
+func (in CreateTaskInput) toProto() (*pluginv1.CreateTaskRequest, error) {
+	metadata, err := mapToStruct(in.Metadata)
+	if err != nil {
+		return nil, fmt.Errorf("pluginsdk: task metadata: %w", err)
+	}
 	return &pluginv1.CreateTaskRequest{
 		WorkspaceId:    in.WorkspaceID,
 		WorkflowId:     in.WorkflowID,
@@ -810,12 +1063,19 @@ func (in CreateTaskInput) toProto() *pluginv1.CreateTaskRequest {
 		Description:    in.Description,
 		ParentId:       in.ParentID,
 		StartAgent:     in.StartAgent,
-	}
+		Repositories:   pluginTaskRepositoriesToProto(in.Repositories),
+		Launch:         in.Launch.toProto(),
+		Metadata:       metadata,
+	}, nil
 }
 
-func createTaskInputFromProto(p *pluginv1.CreateTaskRequest) CreateTaskInput {
+func createTaskInputFromProto(p *pluginv1.CreateTaskRequest) (CreateTaskInput, error) {
 	if p == nil {
-		return CreateTaskInput{}
+		return CreateTaskInput{}, nil
+	}
+	metadata, err := structToMap(p.GetMetadata())
+	if err != nil {
+		return CreateTaskInput{}, fmt.Errorf("pluginsdk: task metadata: %w", err)
 	}
 	return CreateTaskInput{
 		WorkspaceID:    p.GetWorkspaceId(),
@@ -825,7 +1085,114 @@ func createTaskInputFromProto(p *pluginv1.CreateTaskRequest) CreateTaskInput {
 		Description:    p.GetDescription(),
 		ParentID:       p.ParentId,
 		StartAgent:     p.GetStartAgent(),
+		Repositories:   pluginTaskRepositoriesFromProto(p.GetRepositories()),
+		Launch:         pluginTaskLaunchOptionsFromProto(p.GetLaunch()),
+		Metadata:       metadata,
+	}, nil
+}
+
+// RemoteRepositoryDescriptor is a fully resolved plugin-provider repository
+// identity. CloneURL is exact and credential-free; the host must not rebuild it.
+type RemoteRepositoryDescriptor struct {
+	ProviderID           string
+	ProviderHost         string
+	ProviderScope        string
+	OwnerOrProject       string
+	ProviderRepositoryID string
+	Name                 string
+	CloneURL             string
+	DefaultBranch        *string
+	BaseBranch           *string
+	HeadBranch           *string
+	PullRequestNumber    *int64
+}
+
+func (d *RemoteRepositoryDescriptor) toProto() *pluginv1.RemoteRepositoryDescriptor {
+	if d == nil {
+		return nil
 	}
+	return &pluginv1.RemoteRepositoryDescriptor{
+		ProviderId: d.ProviderID, ProviderHost: d.ProviderHost, ProviderScope: d.ProviderScope, OwnerOrProject: d.OwnerOrProject,
+		ProviderRepositoryId: d.ProviderRepositoryID, Name: d.Name, CloneUrl: d.CloneURL,
+		DefaultBranch: d.DefaultBranch, BaseBranch: d.BaseBranch, HeadBranch: d.HeadBranch, PullRequestNumber: d.PullRequestNumber,
+	}
+}
+
+func remoteRepositoryDescriptorFromProto(p *pluginv1.RemoteRepositoryDescriptor) *RemoteRepositoryDescriptor {
+	if p == nil {
+		return nil
+	}
+	return &RemoteRepositoryDescriptor{
+		ProviderID: p.GetProviderId(), ProviderHost: p.GetProviderHost(), ProviderScope: p.GetProviderScope(), OwnerOrProject: p.GetOwnerOrProject(),
+		ProviderRepositoryID: p.GetProviderRepositoryId(), Name: p.GetName(), CloneURL: p.GetCloneUrl(),
+		DefaultBranch: p.DefaultBranch, BaseBranch: p.BaseBranch, HeadBranch: p.HeadBranch, PullRequestNumber: p.PullRequestNumber,
+	}
+}
+
+// PluginTaskRepository selects an existing repository or a complete remote
+// descriptor to attach when a plugin creates a task.
+type PluginTaskRepository struct {
+	RepositoryID      string
+	Remote            *RemoteRepositoryDescriptor
+	BaseBranch        *string
+	CheckoutBranch    *string
+	PullRequestNumber *int64
+}
+
+func (r PluginTaskRepository) toProto() *pluginv1.PluginTaskRepository {
+	return &pluginv1.PluginTaskRepository{RepositoryId: r.RepositoryID, Remote: r.Remote.toProto(), BaseBranch: r.BaseBranch, CheckoutBranch: r.CheckoutBranch, PullRequestNumber: r.PullRequestNumber}
+}
+
+func pluginTaskRepositoryFromProto(p *pluginv1.PluginTaskRepository) PluginTaskRepository {
+	if p == nil {
+		return PluginTaskRepository{}
+	}
+	return PluginTaskRepository{RepositoryID: p.GetRepositoryId(), Remote: remoteRepositoryDescriptorFromProto(p.GetRemote()), BaseBranch: p.BaseBranch, CheckoutBranch: p.CheckoutBranch, PullRequestNumber: p.PullRequestNumber}
+}
+
+func pluginTaskRepositoriesToProto(repositories []PluginTaskRepository) []*pluginv1.PluginTaskRepository {
+	if repositories == nil {
+		return nil
+	}
+	out := make([]*pluginv1.PluginTaskRepository, len(repositories))
+	for i, repository := range repositories {
+		out[i] = repository.toProto()
+	}
+	return out
+}
+
+func pluginTaskRepositoriesFromProto(repositories []*pluginv1.PluginTaskRepository) []PluginTaskRepository {
+	if repositories == nil {
+		return nil
+	}
+	out := make([]PluginTaskRepository, len(repositories))
+	for i, repository := range repositories {
+		out[i] = pluginTaskRepositoryFromProto(repository)
+	}
+	return out
+}
+
+// PluginTaskLaunchOptions declares the optional launch context for a plugin-
+// created task. Host implementation validates each value before use.
+type PluginTaskLaunchOptions struct {
+	AgentProfileID    *string
+	ExecutorProfileID *string
+	Prompt            *string
+	PlanMode          *string
+}
+
+func (o *PluginTaskLaunchOptions) toProto() *pluginv1.PluginTaskLaunchOptions {
+	if o == nil {
+		return nil
+	}
+	return &pluginv1.PluginTaskLaunchOptions{AgentProfileId: o.AgentProfileID, ExecutorProfileId: o.ExecutorProfileID, Prompt: o.Prompt, PlanMode: o.PlanMode}
+}
+
+func pluginTaskLaunchOptionsFromProto(p *pluginv1.PluginTaskLaunchOptions) *PluginTaskLaunchOptions {
+	if p == nil {
+		return nil
+	}
+	return &PluginTaskLaunchOptions{AgentProfileID: p.AgentProfileId, ExecutorProfileID: p.ExecutorProfileId, Prompt: p.Prompt, PlanMode: p.PlanMode}
 }
 
 // UpdateTaskInput is the Go-native mirror of

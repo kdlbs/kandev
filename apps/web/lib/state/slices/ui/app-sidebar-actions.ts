@@ -30,10 +30,21 @@ export function loadAppSidebarState(): AppSidebarState {
     // Transient — always starts off, never read from / written to storage.
     settingsMode: false,
     improveDialogOpen: false,
+    workspacePickerOpen: false,
   };
 }
 
 type ImmerSet = Parameters<StateCreator<UISlice, [["zustand/immer", never]], [], UISlice>>[0];
+
+/**
+ * Force-expand the rail and persist it — surfaces that render only in the
+ * expanded header (settings tree, workspace picker) need this before opening.
+ */
+function expandAppSidebar(draft: { appSidebar: AppSidebarState }) {
+  if (!draft.appSidebar.collapsed) return;
+  draft.appSidebar.collapsed = false;
+  setStoredAppSidebarCollapsed(false);
+}
 
 export function buildAppSidebarActions(set: ImmerSet) {
   return {
@@ -64,14 +75,18 @@ export function buildAppSidebarActions(set: ImmerSet) {
     setAppSidebarSettingsMode: (settingsMode: boolean) =>
       set((draft) => {
         draft.appSidebar.settingsMode = settingsMode;
-        if (settingsMode && draft.appSidebar.collapsed) {
-          draft.appSidebar.collapsed = false;
-          setStoredAppSidebarCollapsed(false);
-        }
+        if (settingsMode) expandAppSidebar(draft);
       }),
     setImproveDialogOpen: (open: boolean) =>
       set((draft) => {
         draft.appSidebar.improveDialogOpen = open;
+      }),
+    setWorkspacePickerOpen: (open: boolean) =>
+      set((draft) => {
+        draft.appSidebar.workspacePickerOpen = open;
+        // The picker trigger renders only in the expanded header, so a
+        // collapsed rail has nothing to anchor the menu to — expand first.
+        if (open) expandAppSidebar(draft);
       }),
     toggleAppSidebarSettingsMode: () =>
       set((draft) => {
@@ -79,10 +94,7 @@ export function buildAppSidebarActions(set: ImmerSet) {
         draft.appSidebar.settingsMode = next;
         // Entering settings mode while collapsed would render an empty rail —
         // the tree needs the expanded width — so force-expand on the way in.
-        if (next && draft.appSidebar.collapsed) {
-          draft.appSidebar.collapsed = false;
-          setStoredAppSidebarCollapsed(false);
-        }
+        if (next) expandAppSidebar(draft);
       }),
   };
 }

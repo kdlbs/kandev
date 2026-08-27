@@ -23,7 +23,7 @@ describe("describeEnsureError", () => {
     expect(info?.isAgentProfileMissing).toBe(true);
     expect(info?.action).toEqual({
       label: "Open workspace settings",
-      href: "/settings/workspace/ws-1",
+      href: "/settings/workspaces/ws-1",
     });
   });
 
@@ -71,7 +71,7 @@ describe("EnsureSessionErrorBanner", () => {
     );
     expect(screen.getByText("No agent profile configured")).toBeTruthy();
     const link = screen.getByTestId("ensure-session-error-action") as HTMLAnchorElement;
-    expect(link.getAttribute("href")).toBe("/settings/workspace/ws-1");
+    expect(link.getAttribute("href")).toBe("/settings/workspaces/ws-1");
   });
 
   it("invokes onRetry when the retry button is clicked", () => {

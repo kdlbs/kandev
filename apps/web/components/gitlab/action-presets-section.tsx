@@ -6,20 +6,39 @@ import { Button } from "@kandev/ui/button";
 import { CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@kandev/ui/tabs";
-import { Textarea } from "@kandev/ui/textarea";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { SettingsSection } from "@/components/settings/settings-section";
+import { SettingsPromptEditor } from "@/components/settings/settings-prompt-editor";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { useToast } from "@/components/toast-provider";
 import { useGitLabActionPresets } from "@/hooks/domains/gitlab/use-gitlab-action-presets";
 import type { GitLabActionPreset, GitLabActionPresets } from "@/lib/types/gitlab";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
+
+function actionPromptPlaceholders(t: TFunction) {
+  return [
+    {
+      key: "url",
+      description: t("gitlab:placeholderActionUrl"),
+      example: "https://gitlab.com/org/repo/-/merge_requests/42",
+      executor_types: [],
+    },
+    {
+      key: "title",
+      description: t("gitlab:placeholderActionTitle"),
+      example: "Fix login page crash",
+      executor_types: [],
+    },
+  ];
+}
 
 // `label` is PERSISTED to workspace settings as part of `GitLabActionPreset`, and
 // the row below is immediately editable, so it must stay locale-neutral: a preset
 // seeded in one locale and saved unedited would keep that locale's text forever.
 // Same contract as `newPreset` in components/github/action-presets-section.tsx.
 function newPreset(): GitLabActionPreset {
+  // i18n-exempt: persisted, editable preset label. See the comment above.
   return {
     id: `preset_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
     label: "New action",
@@ -39,6 +58,7 @@ function PresetList({
   addLabel: string;
 }) {
   const { t } = useTranslation();
+  const placeholders = useMemo(() => actionPromptPlaceholders(t), [t]);
   const patch = (index: number, change: Partial<GitLabActionPreset>) =>
     onChange(
       presets.map((preset, current) => (current === index ? { ...preset, ...change } : preset)),
@@ -71,17 +91,13 @@ function PresetList({
               <IconTrash className="h-4 w-4" />
             </Button>
           </div>
-          <Textarea
-            aria-label={t("gitlab:actionPrompt", { index: index + 1 })}
+          <SettingsPromptEditor
+            ariaLabel={t("gitlab:actionPrompt", { index: index + 1 })}
             value={preset.prompt_template}
-            // The two `{{…}}` tokens are passed as values so they never reach the
-            // catalog, where i18next would interpolate them away.
-            placeholder={t("gitlab:promptUsingUrlAndTitle", {
-              url: "{{url}}",
-              title: "{{title}}",
-            })}
-            className="min-h-24 font-mono text-xs"
-            onChange={(event) => patch(index, { prompt_template: event.target.value })}
+            onChange={(value) => patch(index, { prompt_template: value })}
+            placeholders={placeholders}
+            promptReferences
+            testId={`gitlab-action-prompt-editor-${preset.id}`}
           />
         </div>
       ))}

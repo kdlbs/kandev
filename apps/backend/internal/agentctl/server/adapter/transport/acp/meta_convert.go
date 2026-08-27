@@ -225,9 +225,10 @@ func fromTypedUsage(u *acp.Usage) *streams.PromptUsage {
 		return nil
 	}
 	usage := &streams.PromptUsage{
-		InputTokens:  int64(u.InputTokens),
-		OutputTokens: int64(u.OutputTokens),
-		TotalTokens:  int64(u.TotalTokens),
+		InputTokens:         int64(u.InputTokens),
+		OutputTokens:        int64(u.OutputTokens),
+		OutputTokensPresent: true,
+		TotalTokens:         int64(u.TotalTokens),
 	}
 	if u.CachedReadTokens != nil {
 		usage.CachedReadTokens = int64(*u.CachedReadTokens)
@@ -286,9 +287,11 @@ func geminiTokenCount(raw any) *streams.PromptUsage {
 	if !ok {
 		return nil
 	}
+	outputTokens, outputTokensPresent := getInt64WithPresence(tc, "output_tokens")
 	usage := &streams.PromptUsage{
-		InputTokens:  getInt64(tc, "input_tokens"),
-		OutputTokens: getInt64(tc, "output_tokens"),
+		InputTokens:         getInt64(tc, "input_tokens"),
+		OutputTokens:        outputTokens,
+		OutputTokensPresent: outputTokensPresent,
 	}
 	if usage.InputTokens == 0 && usage.OutputTokens == 0 {
 		return nil
@@ -314,19 +317,21 @@ func extractPromptUsage(meta any) *streams.PromptUsage {
 	if !ok {
 		return nil
 	}
+	outputTokens, outputTokensPresent := getInt64WithPresence(u, "output_tokens")
+	if !outputTokensPresent {
+		outputTokens, outputTokensPresent = getInt64WithPresence(u, "outputTokens")
+	}
 	usage := &streams.PromptUsage{
-		InputTokens:       getInt64(u, "input_tokens"),
-		OutputTokens:      getInt64(u, "output_tokens"),
-		CachedReadTokens:  getInt64(u, "cached_read_tokens"),
-		CachedWriteTokens: getInt64(u, "cached_write_tokens"),
-		TotalTokens:       getInt64(u, "total_tokens"),
+		InputTokens:         getInt64(u, "input_tokens"),
+		OutputTokens:        outputTokens,
+		OutputTokensPresent: outputTokensPresent,
+		CachedReadTokens:    getInt64(u, "cached_read_tokens"),
+		CachedWriteTokens:   getInt64(u, "cached_write_tokens"),
+		TotalTokens:         getInt64(u, "total_tokens"),
 	}
 	// Also check camelCase variants.
 	if usage.InputTokens == 0 {
 		usage.InputTokens = getInt64(u, "inputTokens")
-	}
-	if usage.OutputTokens == 0 {
-		usage.OutputTokens = getInt64(u, "outputTokens")
 	}
 	if usage.TotalTokens == 0 {
 		usage.TotalTokens = getInt64(u, "totalTokens")
@@ -369,14 +374,21 @@ func getString(m map[string]any, key string) string {
 
 // getInt64 safely extracts an int64 from a map (JSON numbers are float64).
 func getInt64(m map[string]any, key string) int64 {
+	v, _ := getInt64WithPresence(m, key)
+	return v
+}
+
+// getInt64WithPresence distinguishes an explicit numeric zero from a missing
+// or non-numeric field.
+func getInt64WithPresence(m map[string]any, key string) (int64, bool) {
 	switch v := m[key].(type) {
 	case float64:
-		return int64(v)
+		return int64(v), true
 	case int64:
-		return v
+		return v, true
 	case int:
-		return int64(v)
+		return int64(v), true
 	default:
-		return 0
+		return 0, false
 	}
 }

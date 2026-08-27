@@ -301,7 +301,7 @@ func (s *Service) ResetTaskEnvironment(ctx context.Context, taskID string, opts 
 		zap.String("executor_type", env.ExecutorType),
 		zap.String("container_id", env.ContainerID),
 		zap.String("sandbox_id", env.SandboxID),
-		zap.String("worktree_id", env.WorktreeID),
+		zap.Int("worktree_count", len(environmentWorktreeIDs(env))),
 		zap.Bool("push_branch", opts.PushBranch))
 
 	if opts.PushBranch {
@@ -336,7 +336,8 @@ func (s *Service) teardownEnvironmentResources(ctx context.Context, env *models.
 	if cause := context.Cause(ctx); cause != nil {
 		return cause
 	}
-	if env.ContainerID == "" && env.SandboxID == "" && env.WorktreeID == "" {
+	worktreeIDs := environmentWorktreeIDs(env)
+	if env.ContainerID == "" && env.SandboxID == "" && len(worktreeIDs) == 0 {
 		return nil
 	}
 	if s.envDestroyer == nil {
@@ -366,13 +367,13 @@ func (s *Service) teardownEnvironmentResources(ctx context.Context, env *models.
 			errs = append(errs, fmt.Errorf("destroy sandbox %s: %w", env.SandboxID, err))
 		}
 	}
-	if env.WorktreeID != "" {
+	for _, worktreeID := range worktreeIDs {
 		if err := contextError(); err != nil {
 			return err
 		}
-		if err := s.envDestroyer.DestroyWorktree(ctx, env.WorktreeID); err != nil {
+		if err := s.envDestroyer.DestroyWorktree(ctx, worktreeID); err != nil {
 			if !errors.Is(err, worktree.ErrWorktreeNotFound) {
-				errs = append(errs, fmt.Errorf("destroy worktree %s: %w", env.WorktreeID, err))
+				errs = append(errs, fmt.Errorf("destroy worktree %s: %w", worktreeID, err))
 			}
 		}
 	}
@@ -380,4 +381,19 @@ func (s *Service) teardownEnvironmentResources(ctx context.Context, env *models.
 		return err
 	}
 	return errors.Join(errs...)
+}
+
+// environmentWorktreeIDs returns the physical worktree identities recorded on
+// the environment's repository rows.
+func environmentWorktreeIDs(env *models.TaskEnvironment) []string {
+	if env == nil {
+		return nil
+	}
+	var ids []string
+	for _, repo := range env.Repos {
+		if repo != nil && repo.WorktreeID != "" {
+			ids = append(ids, repo.WorktreeID)
+		}
+	}
+	return ids
 }

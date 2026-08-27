@@ -255,9 +255,19 @@ func (r *Repository) createAgentRuntimeTable() error {
 
 func (r *Repository) createCostTables() error {
 	// cost_subcents stores hundredths of a cent (int64). UI divides by
-	// 10000 when rendering dollars. The estimated flag is set when
-	// token counts were synthesised (e.g. cumulative-delta inference for
-	// codex-acp) rather than reported directly by the agent.
+	// 10000 when rendering dollars. The estimated flag is set when token
+	// counts are not authoritative for a complete turn, such as adapter
+	// synthesis or a provider frame that covers only part of a turn.
+	//
+	// tokens_cached_read / tokens_cached_write / turn_id / usage_event_id /
+	// cost_source / rate_*_per_million / pricing_catalog_version /
+	// cost_contract_version have deliberately NO DEFAULT: an absent default
+	// is what makes a fresh row's un-set columns NULL rather than 0, matching
+	// the ALTER-based migration in migrateCostEventContract (which the same
+	// columns must stay byte-identical to — see base_migrations.go). NULL
+	// means "not recorded" (legacy row, or an adapter that did not report
+	// cache data); 0 would silently claim zero cache activity. See
+	// docs/specs/office/requirements/costs.md.
 	_, err := r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS office_cost_events (
 		id TEXT PRIMARY KEY,
@@ -269,9 +279,20 @@ func (r *Repository) createCostTables() error {
 		provider TEXT DEFAULT '',
 		tokens_in INTEGER DEFAULT 0,
 		tokens_cached_in INTEGER DEFAULT 0,
+		tokens_cached_read INTEGER,
+		tokens_cached_write INTEGER,
 		tokens_out INTEGER DEFAULT 0,
 		cost_subcents INTEGER NOT NULL DEFAULT 0,
 		estimated INTEGER NOT NULL DEFAULT 0,
+		turn_id TEXT,
+		usage_event_id TEXT,
+		cost_source TEXT,
+		rate_input_per_million INTEGER,
+		rate_cached_read_per_million INTEGER,
+		rate_cached_write_per_million INTEGER,
+		rate_output_per_million INTEGER,
+		pricing_catalog_version TEXT,
+		cost_contract_version INTEGER,
 		occurred_at TIMESTAMP NOT NULL,
 		created_at TIMESTAMP NOT NULL
 	);
@@ -279,6 +300,11 @@ func (r *Repository) createCostTables() error {
 	CREATE INDEX IF NOT EXISTS idx_office_cost_agent ON office_cost_events(agent_profile_id);
 	CREATE INDEX IF NOT EXISTS idx_office_cost_occurred ON office_cost_events(occurred_at DESC);
 	CREATE INDEX IF NOT EXISTS idx_office_cost_task ON office_cost_events(task_id);
+	DROP INDEX IF EXISTS idx_office_cost_events_session_id;
+	-- uniq_office_cost_usage_event is created by migrateCostEventContract
+	-- (base_migrations.go), not here: schema init runs before migrations,
+	-- so indexing usage_event_id inline would crash a pre-migration
+	-- database that doesn't have the column yet.
 
 	CREATE TABLE IF NOT EXISTS office_budget_policies (
 		id TEXT PRIMARY KEY,
@@ -337,6 +363,13 @@ func (r *Repository) createRunTables() error {
 		result_json TEXT NOT NULL DEFAULT '{}',
 		assembled_prompt TEXT NOT NULL DEFAULT '',
 		summary_injected TEXT NOT NULL DEFAULT '',
+		-- continuation_scope is the continuation-summary scope key
+		-- (models.ContinuationScopeForRun) decided once at run creation
+		-- and persisted so every later reader/writer of this run's
+		-- continuation summary uses the same value instead of
+		-- re-deriving it against a context_snapshot a coalesced wakeup
+		-- may have since patched.
+		continuation_scope TEXT NOT NULL DEFAULT '',
 		requested_at TIMESTAMP NOT NULL,
 		claimed_at TIMESTAMP,
 		finished_at TIMESTAMP

@@ -108,7 +108,7 @@ export async function createWorkflowStep(
 // Session Step History operations
 export async function listSessionStepHistory(sessionId: string, options?: ApiRequestOptions) {
   return fetchJson<ListSessionStepHistoryResponse>(
-    `/api/v1/workflow/history?session_id=${sessionId}`,
+    `/api/v1/sessions/${encodeURIComponent(sessionId)}/workflow/history`,
     options,
   );
 }

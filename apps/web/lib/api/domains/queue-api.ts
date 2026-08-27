@@ -2,6 +2,8 @@ import type { QueueStatus, QueuedMessage } from "@/lib/state/slices/session/type
 import type { EntityReference } from "@/lib/types/entity-reference";
 import { getWebSocketClient } from "@/lib/ws/connection";
 
+// i18n-exempt: precondition diagnostic for a programmer error; callers branch
+// on the error type, never render this message.
 const WS_CLIENT_UNAVAILABLE = "WebSocket client not available";
 
 /** Error thrown when the queue would exceed its per-session cap. */
@@ -56,6 +58,9 @@ const QUEUE_SEND_NOW_ERROR_CODES: ReadonlySet<QueueSendNowErrorCode> = new Set([
 ]);
 
 /** Error returned when Send Now cannot safely claim its click-time selection. */
+// i18n-exempt: transport/API diagnostic. Callers branch on the error code and
+// render translated copy; this text only ever appears in a console or as an
+// interpolated English diagnostic (see docs/i18n.md on interpolated values).
 export class QueueSendNowError extends Error {
   readonly code: QueueSendNowErrorCode;
 
@@ -63,6 +68,22 @@ export class QueueSendNowError extends Error {
     super(message ?? "Queued messages could not be sent now.");
     this.name = "QueueSendNowError";
     this.code = code;
+  }
+}
+
+/** Error thrown when a reorder's submitted id set no longer matches the
+ * visible pending queue (an entry was drained, removed, merged, or newly
+ * queued since the client's snapshot). The reorder was rejected atomically;
+ * callers refetch the authoritative queue. */
+// i18n-exempt: transport/API diagnostic. Callers branch on the error code and
+// render translated copy; this text only ever appears in a console or as an
+// interpolated English diagnostic (see docs/i18n.md on interpolated values).
+export class QueueReorderError extends Error {
+  readonly code = "queue_changed" as const;
+
+  constructor(message?: string) {
+    super(message ?? "The queue changed before the reorder could be applied.");
+    this.name = "QueueReorderError";
   }
 }
 
@@ -191,6 +212,21 @@ export async function sendQueuedNow(
   }
 }
 
+/** Persist the per-session queue Auto-run policy and start the queue when enabling it. */
+export async function setQueueAutoRun(
+  sessionId: string,
+  enabled: boolean,
+): Promise<{ session_id: string; auto_run: boolean; dispatched: boolean }> {
+  const client = getWebSocketClient();
+  if (!client) {
+    throw new Error(WS_CLIENT_UNAVAILABLE);
+  }
+  return client.request<{ session_id: string; auto_run: boolean; dispatched: boolean }>(
+    "message.queue.auto_run.set",
+    { session_id: sessionId, enabled },
+  );
+}
+
 /** Fetch the full queue snapshot (entries + capacity). */
 export async function getQueueStatus(sessionId: string): Promise<QueueStatus> {
   const client = getWebSocketClient();
@@ -283,6 +319,32 @@ export async function mergeQueuedEntry(params: {
   try {
     return await client.request<{ entry_id: string }>("message.queue.merge", params);
   } catch (err) {
+    rethrowQueueError(err);
+  }
+}
+
+/** Rewrite the visible pending order of a session's queue. Throws
+ * QueueReorderError when the queue changed since the client's snapshot; the
+ * reorder was rejected atomically and the caller should refetch. */
+export async function reorderQueuedEntries(params: {
+  session_id: string;
+  ordered_ids: string[];
+}): Promise<{ session_id: string; reordered: number }> {
+  const client = getWebSocketClient();
+  if (!client) {
+    throw new Error(WS_CLIENT_UNAVAILABLE);
+  }
+  try {
+    return await client.request<{ session_id: string; reordered: number }>(
+      "message.queue.reorder",
+      params,
+    );
+  } catch (err) {
+    // The shared queue_changed mapping targets Send Now; reorder drift needs
+    // its own error class so callers reconcile silently instead of toasting.
+    if (asWSError(err)?.code === "queue_changed") {
+      throw new QueueReorderError();
+    }
     rethrowQueueError(err);
   }
 }

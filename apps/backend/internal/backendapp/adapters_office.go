@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/office/configloader"
 	officedashboard "github.com/kandev/kandev/internal/office/dashboard"
 	officeengineadapters "github.com/kandev/kandev/internal/office/engine_adapters"
+	officemodels "github.com/kandev/kandev/internal/office/models"
 	officeonboarding "github.com/kandev/kandev/internal/office/onboarding"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	officeroutines "github.com/kandev/kandev/internal/office/routines"
@@ -19,6 +20,43 @@ import (
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
+
+type officeCommentWindowReader interface {
+	ListTaskCommentsWindow(ctx context.Context, taskID string, limit int) ([]*officemodels.TaskComment, int, error)
+}
+
+// officeCommentReaderAdapter keeps Office persistence models at the backend
+// composition boundary. The task service receives its own neutral records.
+type officeCommentReaderAdapter struct {
+	reader officeCommentWindowReader
+}
+
+func (a *officeCommentReaderAdapter) ListTaskCommentsWindow(
+	ctx context.Context, taskID string, limit int,
+) ([]taskservice.CommentRecord, int, error) {
+	rows, total, err := a.reader.ListTaskCommentsWindow(ctx, taskID, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	records := make([]taskservice.CommentRecord, 0, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		records = append(records, taskservice.CommentRecord{
+			ID:         row.ID,
+			TaskID:     row.TaskID,
+			AuthorType: row.AuthorType,
+			AuthorID:   row.AuthorID,
+			Source:     row.Source,
+			Body:       row.Body,
+			CreatedAt:  row.CreatedAt,
+		})
+	}
+	return records, total, nil
+}
+
+var _ taskservice.CommentReader = (*officeCommentReaderAdapter)(nil)
 
 // taskWorkspaceCreatorAdapter adapts the task service to the office
 // WorkspaceCreator interface for dual workspace creation.
@@ -133,7 +171,7 @@ func (a *taskCreatorAdapter) CreateOfficeTaskAsAgent(ctx context.Context, worksp
 func (a *taskCreatorAdapter) createOfficeTask(
 	ctx context.Context, workspaceID, projectID, assigneeAgentID, title, description, origin string,
 ) (string, error) {
-	task, err := a.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{ //nolint:exhaustruct
+	result, err := a.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{ //nolint:exhaustruct
 		WorkspaceID:            workspaceID,
 		Title:                  title,
 		Description:            description,
@@ -144,7 +182,7 @@ func (a *taskCreatorAdapter) createOfficeTask(
 	if err != nil {
 		return "", err
 	}
-	return task.ID, nil
+	return result.Task.ID, nil
 }
 
 // CreateOfficeTaskInWorkflow creates an office task pinned to a specific
@@ -154,7 +192,7 @@ func (a *taskCreatorAdapter) createOfficeTask(
 func (a *taskCreatorAdapter) CreateOfficeTaskInWorkflow(
 	ctx context.Context, workspaceID, projectID, assigneeAgentID, workflowID, title, description string,
 ) (string, error) {
-	task, err := a.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{ //nolint:exhaustruct
+	result, err := a.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{ //nolint:exhaustruct
 		WorkspaceID:            workspaceID,
 		WorkflowID:             workflowID,
 		Title:                  title,
@@ -166,7 +204,7 @@ func (a *taskCreatorAdapter) CreateOfficeTaskInWorkflow(
 	if err != nil {
 		return "", err
 	}
-	return task.ID, nil
+	return result.Task.ID, nil
 }
 
 func (a *taskCreatorAdapter) CreateOfficeSubtask(
@@ -230,6 +268,7 @@ func (a *configSyncerAdapter) ApplyIncoming(ctx context.Context, workspaceID str
 	return &officeonboarding.ApplyResult{
 		CreatedCount: result.CreatedCount,
 		UpdatedCount: result.UpdatedCount,
+		Warnings:     result.Warnings,
 	}, nil
 }
 

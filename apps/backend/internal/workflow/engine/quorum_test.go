@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"expvar"
 	"testing"
 )
 
@@ -72,6 +73,15 @@ func (s *stepStoreForQuorum) LoadPreviousStep(_ context.Context, _ string, _ int
 func (s *stepStoreForQuorum) ApplyTransition(_ context.Context, _, _, _, _ string, _ Trigger) error {
 	return nil
 }
+func (s *stepStoreForQuorum) ApplyTransitionIfAtStep(
+	_ context.Context, _, _, expectedStepID, toStepID string, _ Trigger,
+) (bool, error) {
+	if s.state.CurrentStepID != expectedStepID {
+		return false, nil
+	}
+	s.state.CurrentStepID = toStepID
+	return true, nil
+}
 func (s *stepStoreForQuorum) PersistData(_ context.Context, _ string, _ map[string]any) error {
 	return nil
 }
@@ -99,10 +109,53 @@ func quorumStore(guard *TransitionGuard) *stepStoreForQuorum {
 	}
 }
 
-func TestApplyThreshold_AllApprove(t *testing.T) {
-	required := []ParticipantInfo{
-		{ID: "p1"}, {ID: "p2"},
+// scopedParticipants distinguishes per-task rows from step-template rows,
+// unlike the shared fakeParticipants (which returns the same static list
+// for both). Required for tests that exercise AC-50's gather/canonicalize/
+// collapse distinctions.
+type scopedParticipants struct {
+	perTask  []ParticipantInfo
+	template []ParticipantInfo
+	err      error
+}
+
+func (s scopedParticipants) ListTaskParticipants(_ context.Context, taskID string) ([]ParticipantInfo, error) {
+	if s.err != nil {
+		return nil, s.err
 	}
+	out := make([]ParticipantInfo, 0, len(s.perTask))
+	for _, p := range s.perTask {
+		if p.TaskID == taskID {
+			out = append(out, p)
+		}
+	}
+	return out, nil
+}
+
+func (s scopedParticipants) ListStepParticipants(_ context.Context, stepID, taskID string) ([]ParticipantInfo, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	if taskID != "" {
+		return nil, nil
+	}
+	out := make([]ParticipantInfo, 0, len(s.template))
+	for _, p := range s.template {
+		if p.StepID == stepID {
+			out = append(out, p)
+		}
+	}
+	return out, nil
+}
+
+func quorumEngine(decisions DecisionStore, participants ParticipantStore) *Engine {
+	return New(quorumStore(nil), MapRegistry{}, WithDecisionStore(decisions), WithParticipantStore(participants))
+}
+
+// --- evaluateApproveStyle (AC-21/39/40/41/43a/53) ---
+
+func TestEvaluateApproveStyle_AllApprove(t *testing.T) {
+	seats := []ParticipantInfo{{ID: "p1"}, {ID: "p2"}}
 	cases := []struct {
 		name      string
 		decisions []DecisionInfo
@@ -115,102 +168,417 @@ func TestApplyThreshold_AllApprove(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := applyThreshold(QuorumAllApprove, required, tc.decisions); got != tc.want {
-				t.Fatalf("applyThreshold all_approve = %v, want %v", got, tc.want)
+			got := evaluateApproveStyle(QuorumAllApprove, seats, tc.decisions)
+			if got.Satisfied != tc.want {
+				t.Fatalf("all_approve satisfied = %v, want %v (reason=%s)", got.Satisfied, tc.want, got.Reason)
+			}
+			if !got.Satisfied && got.Reason != ReasonThresholdNotMet {
+				t.Fatalf("expected reason %s, got %s", ReasonThresholdNotMet, got.Reason)
 			}
 		})
 	}
 }
 
-func TestApplyThreshold_AllDecide(t *testing.T) {
-	required := []ParticipantInfo{{ID: "p1"}, {ID: "p2"}}
+func TestEvaluateApproveStyle_AllDecide(t *testing.T) {
+	seats := []ParticipantInfo{{ID: "p1"}, {ID: "p2"}}
 	d1 := []DecisionInfo{{ParticipantID: "p1", Decision: "approved"}, {ParticipantID: "p2", Decision: "rejected"}}
-	if !applyThreshold(QuorumAllDecide, required, d1) {
+	if !evaluateApproveStyle(QuorumAllDecide, seats, d1).Satisfied {
 		t.Fatalf("all_decide should be true when both decided")
 	}
 	d2 := []DecisionInfo{{ParticipantID: "p1", Decision: "approved"}}
-	if applyThreshold(QuorumAllDecide, required, d2) {
+	if evaluateApproveStyle(QuorumAllDecide, seats, d2).Satisfied {
 		t.Fatalf("all_decide should be false when only one decided")
 	}
 }
 
-func TestApplyThreshold_AnyReject(t *testing.T) {
-	required := []ParticipantInfo{{ID: "p1"}, {ID: "p2"}}
-	d := []DecisionInfo{{ParticipantID: "p1", Decision: DecisionApproved}, {ParticipantID: "p2", Decision: DecisionRejected}}
-	if !applyThreshold(QuorumAnyReject, required, d) {
-		t.Fatalf("any_reject should be true when one rejected")
-	}
-	if applyThreshold(QuorumAnyReject, required, []DecisionInfo{{ParticipantID: "p1", Decision: DecisionApproved}}) {
-		t.Fatalf("any_reject should be false when no rejection")
-	}
-}
-
-func TestApplyThreshold_MajorityApprove(t *testing.T) {
-	required := []ParticipantInfo{{ID: "p1"}, {ID: "p2"}, {ID: "p3"}}
+func TestEvaluateApproveStyle_MajorityApprove(t *testing.T) {
+	seats := []ParticipantInfo{{ID: "p1"}, {ID: "p2"}, {ID: "p3"}}
 	// 2/3 approve => majority
 	d := []DecisionInfo{{ParticipantID: "p1", Decision: DecisionApproved}, {ParticipantID: "p2", Decision: DecisionApproved}}
-	if !applyThreshold(QuorumMajorityApprove, required, d) {
+	if !evaluateApproveStyle(QuorumMajorityApprove, seats, d).Satisfied {
 		t.Fatalf("majority_approve true expected for 2/3 approves")
 	}
 	// 1/3 approve, 1 reject => not majority
 	d2 := []DecisionInfo{{ParticipantID: "p1", Decision: DecisionApproved}, {ParticipantID: "p2", Decision: DecisionRejected}}
-	if applyThreshold(QuorumMajorityApprove, required, d2) {
+	if evaluateApproveStyle(QuorumMajorityApprove, seats, d2).Satisfied {
 		t.Fatalf("majority_approve false expected when not strictly more than half")
 	}
 }
 
-func TestApplyThreshold_NApprove(t *testing.T) {
-	required := []ParticipantInfo{{ID: "p1"}, {ID: "p2"}, {ID: "p3"}}
+func TestEvaluateApproveStyle_NApprove(t *testing.T) {
+	seats := []ParticipantInfo{{ID: "p1"}, {ID: "p2"}, {ID: "p3"}}
 	d := []DecisionInfo{{ParticipantID: "p1", Decision: DecisionApproved}, {ParticipantID: "p2", Decision: DecisionApproved}}
-	if !applyThreshold("n_approve:2", required, d) {
+	if !evaluateApproveStyle("n_approve:2", seats, d).Satisfied {
 		t.Fatalf("n_approve:2 expected true")
 	}
-	if applyThreshold("n_approve:3", required, d) {
+	if evaluateApproveStyle("n_approve:3", seats, d).Satisfied {
 		t.Fatalf("n_approve:3 expected false")
 	}
-	if applyThreshold("n_approve:notanint", required, d) {
-		t.Fatalf("malformed n_approve threshold should fail closed")
+	if got := evaluateApproveStyle("n_approve:notanint", seats, d); got.Satisfied || got.Reason != ReasonThresholdUnrecognized {
+		t.Fatalf("malformed n_approve threshold should be threshold_unrecognized, got %+v", got)
 	}
-	if applyThreshold("n_approve:0", required, d) {
-		t.Fatalf("n_approve:0 should fail closed")
+	if got := evaluateApproveStyle("n_approve:0", seats, d); got.Satisfied || got.Reason != ReasonThresholdUnrecognized {
+		t.Fatalf("n_approve:0 should be threshold_unrecognized, got %+v", got)
 	}
 }
 
-func TestApplyThreshold_RemovedParticipantDropped(t *testing.T) {
-	// p1 was required and approved, then removed. p2 still required and approved.
-	required := []ParticipantInfo{{ID: "p2"}}
+func TestEvaluateApproveStyle_NApprove_ExceedsSlate_Unsatisfiable(t *testing.T) {
+	seats := []ParticipantInfo{{ID: "p1"}, {ID: "p2"}}
+	got := evaluateApproveStyle("n_approve:5", seats, nil)
+	if got.Satisfied || got.Reason != ReasonThresholdUnsatisfiable {
+		t.Fatalf("n_approve:5 over a 2-seat slate should be threshold_unsatisfiable, got %+v", got)
+	}
+	if got.RequiredCount != 5 {
+		t.Fatalf("expected RequiredCount=5, got %d", got.RequiredCount)
+	}
+}
+
+func TestEvaluateApproveStyle_UnrecognizedThreshold(t *testing.T) {
+	got := evaluateApproveStyle("quorum_of_the_moon", []ParticipantInfo{{ID: "p1"}}, nil)
+	if got.Satisfied || got.Reason != ReasonThresholdUnrecognized {
+		t.Fatalf("expected threshold_unrecognized, got %+v", got)
+	}
+}
+
+func TestEvaluateApproveStyle_UnmappedDecisionDropped(t *testing.T) {
+	// p1 is not (or no longer) a seat; its decision does not count.
+	seats := []ParticipantInfo{{ID: "p2"}}
 	decisions := []DecisionInfo{
 		{ParticipantID: "p1", Decision: DecisionApproved},
 		{ParticipantID: "p2", Decision: DecisionApproved},
 	}
-	if !applyThreshold(QuorumAllApprove, required, decisions) {
-		t.Fatalf("all_approve should be true when removed participant's decision is ignored")
+	if !evaluateApproveStyle(QuorumAllApprove, seats, decisions).Satisfied {
+		t.Fatalf("all_approve should be true when the unmapped decision is ignored")
 	}
 }
 
-func TestApplyThreshold_LatestDecisionPerParticipant(t *testing.T) {
-	required := []ParticipantInfo{{ID: "p1"}}
-	// p1 approved then rejected
+func TestEvaluateApproveStyle_LatestDecisionPerSeat(t *testing.T) {
+	seats := []ParticipantInfo{{ID: "p1"}}
+	// p1 approved then rejected — AC-26 ordering means the later row wins.
 	decisions := []DecisionInfo{
 		{ParticipantID: "p1", Decision: DecisionApproved},
 		{ParticipantID: "p1", Decision: DecisionRejected},
 	}
-	if applyThreshold(QuorumAllApprove, required, decisions) {
+	if evaluateApproveStyle(QuorumAllApprove, seats, decisions).Satisfied {
 		t.Fatalf("expected latest reject to override earlier approve")
-	}
-	if !applyThreshold(QuorumAnyReject, required, decisions) {
-		t.Fatalf("any_reject should be true given latest rejection")
 	}
 }
 
-func TestApplyThreshold_NoRequiredParticipants_FailsClosedHandledByCaller(t *testing.T) {
-	// applyThreshold itself, with empty required and a non-N threshold,
-	// returns true for all_approve (vacuously true). Engine wraps this and
-	// fails closed when len(required) == 0 — pinned in TestWaitForQuorum_*.
-	if !applyThreshold(QuorumAllApprove, nil, nil) {
-		t.Fatalf("documented behavior: applyThreshold returns true for vacuous all_approve")
+func TestEvaluateApproveStyle_MapsByRoleAndAgentWhenParticipantIDUnset(t *testing.T) {
+	// AC-51: an agent decider maps to its seat by (role, decider_id) when the
+	// decision carries no seat id.
+	seats := []ParticipantInfo{{ID: "p1", Role: "reviewer", AgentProfileID: "rev-A"}}
+	decisions := []DecisionInfo{
+		{DeciderType: DeciderTypeAgent, DeciderID: "rev-A", Role: "reviewer", Decision: DecisionApproved},
+	}
+	if !evaluateApproveStyle(QuorumAllApprove, seats, decisions).Satisfied {
+		t.Fatalf("expected decider-identity mapping to satisfy all_approve")
 	}
 }
+
+// --- evaluateAnyReject (AC-43/43a/43b/43c/58/59) ---
+
+func TestEvaluateAnyReject_VetoOnRejection(t *testing.T) {
+	decisions := []DecisionInfo{
+		{DeciderType: DeciderTypeAgent, DeciderID: "rev-A", Role: "reviewer", Decision: DecisionApproved},
+		{DeciderType: DeciderTypeAgent, DeciderID: "rev-B", Role: "reviewer", Decision: DecisionRejected},
+	}
+	satisfied, received := evaluateAnyReject(decisions, "reviewer")
+	if !satisfied || received != 1 {
+		t.Fatalf("expected veto satisfied with 1 rejecter, got satisfied=%v received=%d", satisfied, received)
+	}
+}
+
+func TestEvaluateAnyReject_NoRejection(t *testing.T) {
+	decisions := []DecisionInfo{
+		{DeciderType: DeciderTypeAgent, DeciderID: "rev-A", Role: "reviewer", Decision: DecisionApproved},
+	}
+	if satisfied, _ := evaluateAnyReject(decisions, "reviewer"); satisfied {
+		t.Fatalf("any_reject should be false when no rejection")
+	}
+}
+
+func TestEvaluateAnyReject_LatestDecisionOverrides(t *testing.T) {
+	// Same decider rejects then later approves — AC-26 ordering means the
+	// later row (approve) is the decider's current stance, so no veto.
+	decisions := []DecisionInfo{
+		{DeciderType: DeciderTypeAgent, DeciderID: "rev-A", Role: "reviewer", Decision: DecisionRejected},
+		{DeciderType: DeciderTypeAgent, DeciderID: "rev-A", Role: "reviewer", Decision: DecisionApproved},
+	}
+	if satisfied, _ := evaluateAnyReject(decisions, "reviewer"); satisfied {
+		t.Fatalf("expected latest approve to clear the earlier veto")
+	}
+}
+
+func TestEvaluateAnyReject_RoleScopedForAgent(t *testing.T) {
+	// AC-42: an agent decider's rejection under a different role does not
+	// veto this guard's role.
+	decisions := []DecisionInfo{
+		{DeciderType: DeciderTypeAgent, DeciderID: "rev-A", Role: "qa", Decision: DecisionRejected},
+	}
+	if satisfied, _ := evaluateAnyReject(decisions, "reviewer"); satisfied {
+		t.Fatalf("agent rejection under a different role must not veto")
+	}
+}
+
+func TestEvaluateAnyReject_RoleAgnosticForUser(t *testing.T) {
+	// AC-58: a human decider's rejection vetoes regardless of stored role.
+	decisions := []DecisionInfo{
+		{DeciderType: DeciderTypeUser, DeciderID: "user-1", Role: "qa", Decision: DecisionRejected},
+	}
+	if satisfied, _ := evaluateAnyReject(decisions, "reviewer"); !satisfied {
+		t.Fatalf("user rejection should veto regardless of role")
+	}
+}
+
+func TestEvaluateAnyReject_ChangesRequestedCountsAsRejection(t *testing.T) {
+	decisions := []DecisionInfo{
+		{DeciderType: DeciderTypeUser, DeciderID: "user-1", Role: "reviewer", Decision: DecisionChangesRequested},
+	}
+	if satisfied, _ := evaluateAnyReject(decisions, "reviewer"); !satisfied {
+		t.Fatalf("changes_requested should be treated as a rejection veto")
+	}
+}
+
+func TestEvaluateAnyReject_EmptyDecisions(t *testing.T) {
+	if satisfied, received := evaluateAnyReject(nil, "reviewer"); satisfied || received != 0 {
+		t.Fatalf("expected no veto with no decisions, got satisfied=%v received=%d", satisfied, received)
+	}
+}
+
+// --- requiredSeats / canonicalize / collapse (AC-20/44/49/50) ---
+
+func TestRequiredSeats_FiltersByRoleAndDecisionRequired(t *testing.T) {
+	parts := scopedParticipants{template: []ParticipantInfo{
+		{ID: "p1", StepID: "review", Role: "reviewer", AgentProfileID: "rev-A", DecisionRequired: true},
+		{ID: "p2", StepID: "review", Role: "reviewer", AgentProfileID: "rev-B", DecisionRequired: false},
+		{ID: "p3", StepID: "review", Role: "qa", AgentProfileID: "qa-A", DecisionRequired: true},
+	}}
+	eng := quorumEngine(newFakeDecisionStore(), parts)
+	seats, err := eng.requiredSeats(context.Background(), "review", "task-1", "reviewer")
+	if err != nil {
+		t.Fatalf("requiredSeats: %v", err)
+	}
+	if len(seats) != 1 || seats[0].ID != "p1" {
+		t.Fatalf("expected only p1 to survive role+decision_required filtering, got %+v", seats)
+	}
+}
+
+func TestRequiredSeats_PerTaskWinsOverTemplateOnCollapse(t *testing.T) {
+	// A template seat for rev-A at the evaluating step, and a per-task
+	// override for rev-A recorded at a different step (AC-49: per-task
+	// participation is not step-scoped). Collapse must produce exactly one
+	// seat, carrying the per-task row.
+	parts := scopedParticipants{
+		template: []ParticipantInfo{
+			{ID: "tmpl-1", StepID: "review", Role: "reviewer", AgentProfileID: "rev-A", DecisionRequired: true},
+		},
+		perTask: []ParticipantInfo{
+			{ID: "task-row-1", TaskID: "task-1", StepID: "approval", Role: "reviewer", AgentProfileID: "rev-A", DecisionRequired: true},
+		},
+	}
+	eng := quorumEngine(newFakeDecisionStore(), parts)
+	seats, err := eng.requiredSeats(context.Background(), "review", "task-1", "reviewer")
+	if err != nil {
+		t.Fatalf("requiredSeats: %v", err)
+	}
+	if len(seats) != 1 {
+		t.Fatalf("expected exactly one collapsed seat, got %d: %+v", len(seats), seats)
+	}
+	if seats[0].ID != "task-row-1" {
+		t.Fatalf("expected the per-task row to win collapse, got %+v", seats[0])
+	}
+}
+
+func TestRequiredSeats_CanonicalizePrefersEvaluatingStep(t *testing.T) {
+	// Two per-task rows for the same (task, role, agent) at different steps
+	// — canonicalize must keep the one at the evaluating step.
+	parts := scopedParticipants{perTask: []ParticipantInfo{
+		{ID: "row-other", TaskID: "task-1", StepID: "other", Role: "reviewer", AgentProfileID: "rev-A", DecisionRequired: true},
+		{ID: "row-review", TaskID: "task-1", StepID: "review", Role: "reviewer", AgentProfileID: "rev-A", DecisionRequired: true},
+	}}
+	eng := quorumEngine(newFakeDecisionStore(), parts)
+	seats, err := eng.requiredSeats(context.Background(), "review", "task-1", "reviewer")
+	if err != nil {
+		t.Fatalf("requiredSeats: %v", err)
+	}
+	if len(seats) != 1 || seats[0].ID != "row-review" {
+		t.Fatalf("expected canonicalize to prefer the evaluating-step row, got %+v", seats)
+	}
+}
+
+func TestRequiredSeats_CanonicalizeFallsBackToLowestID(t *testing.T) {
+	// Neither duplicate row is at the evaluating step — fall back to the
+	// lowest id in ASCII order.
+	parts := scopedParticipants{perTask: []ParticipantInfo{
+		{ID: "row-z", TaskID: "task-1", StepID: "other-b", Role: "reviewer", AgentProfileID: "rev-A", DecisionRequired: true},
+		{ID: "row-a", TaskID: "task-1", StepID: "other-a", Role: "reviewer", AgentProfileID: "rev-A", DecisionRequired: true},
+	}}
+	eng := quorumEngine(newFakeDecisionStore(), parts)
+	seats, err := eng.requiredSeats(context.Background(), "review", "task-1", "reviewer")
+	if err != nil {
+		t.Fatalf("requiredSeats: %v", err)
+	}
+	if len(seats) != 1 || seats[0].ID != "row-a" {
+		t.Fatalf("expected canonicalize to fall back to lowest id, got %+v", seats)
+	}
+}
+
+func TestRequiredSeats_EmptyAgentProfileNeverGrouped(t *testing.T) {
+	parts := scopedParticipants{template: []ParticipantInfo{
+		{ID: "p1", StepID: "review", Role: "reviewer", AgentProfileID: "", DecisionRequired: true},
+		{ID: "p2", StepID: "review", Role: "reviewer", AgentProfileID: "", DecisionRequired: true},
+	}}
+	eng := quorumEngine(newFakeDecisionStore(), parts)
+	seats, err := eng.requiredSeats(context.Background(), "review", "task-1", "reviewer")
+	if err != nil {
+		t.Fatalf("requiredSeats: %v", err)
+	}
+	if len(seats) != 2 {
+		t.Fatalf("expected empty-agent_profile_id rows to remain distinct seats, got %d: %+v", len(seats), seats)
+	}
+}
+
+func TestRequiredSeats_EmptySlate(t *testing.T) {
+	parts := scopedParticipants{}
+	eng := quorumEngine(newFakeDecisionStore(), parts)
+	seats, err := eng.requiredSeats(context.Background(), "review", "task-1", "reviewer")
+	if err != nil {
+		t.Fatalf("requiredSeats: %v", err)
+	}
+	if len(seats) != 0 {
+		t.Fatalf("expected empty slate, got %+v", seats)
+	}
+}
+
+// --- computeGuardOutcome / evaluateTransitionGuard precedence (AC-23/52) ---
+
+func TestEvaluateTransitionGuard_NilGuardPermits(t *testing.T) {
+	eng := quorumEngine(newFakeDecisionStore(), scopedParticipants{})
+	got := eng.evaluateTransitionGuard(context.Background(), MachineState{}, Action{Kind: ActionMoveToNext})
+	if !got.Satisfied {
+		t.Fatalf("nil guard should always permit the transition")
+	}
+}
+
+func TestEvaluateTransitionGuard_UnrecognizedGuardVariant(t *testing.T) {
+	eng := quorumEngine(newFakeDecisionStore(), scopedParticipants{})
+	got := eng.evaluateTransitionGuard(context.Background(), MachineState{}, Action{
+		Kind:  ActionMoveToNext,
+		Guard: &TransitionGuard{},
+	})
+	if got.Satisfied || got.Reason != ReasonGuardVariantUnrecognized {
+		t.Fatalf("expected guard_variant_unrecognized, got %+v", got)
+	}
+}
+
+func TestComputeGuardOutcome_DecisionStoreUnwired(t *testing.T) {
+	eng := New(quorumStore(nil), MapRegistry{}, WithParticipantStore(scopedParticipants{}))
+	got := eng.computeGuardOutcome(context.Background(), MachineState{}, &WaitForQuorumGuard{Role: "reviewer", Threshold: QuorumAllApprove})
+	if got.Satisfied || got.Reason != ReasonDecisionStoreUnwired {
+		t.Fatalf("expected decision_store_unwired, got %+v", got)
+	}
+}
+
+func TestComputeGuardOutcome_ParticipantStoreUnwired(t *testing.T) {
+	eng := New(quorumStore(nil), MapRegistry{}, WithDecisionStore(newFakeDecisionStore()))
+	got := eng.computeGuardOutcome(context.Background(), MachineState{}, &WaitForQuorumGuard{Role: "reviewer", Threshold: QuorumAllApprove})
+	if got.Satisfied || got.Reason != ReasonParticipantStoreUnwired {
+		t.Fatalf("expected participant_store_unwired, got %+v", got)
+	}
+}
+
+func TestComputeGuardOutcome_SlateEmpty(t *testing.T) {
+	eng := quorumEngine(newFakeDecisionStore(), scopedParticipants{})
+	state := MachineState{TaskID: "task-1", CurrentStepID: "review"}
+	got := eng.computeGuardOutcome(context.Background(), state, &WaitForQuorumGuard{Role: "reviewer", Threshold: QuorumAllApprove})
+	if got.Satisfied || got.Reason != ReasonSlateEmpty {
+		t.Fatalf("expected slate_empty, got %+v", got)
+	}
+}
+
+func readQuorumSlateEmptyCounter(role string) int64 {
+	m := expvar.Get("workflow_quorum_slate_empty_total")
+	if m == nil {
+		return 0
+	}
+	kv := m.(*expvar.Map).Get(role)
+	if kv == nil {
+		return 0
+	}
+	iv, ok := kv.(*expvar.Int)
+	if !ok {
+		return 0
+	}
+	return iv.Value()
+}
+
+// TestComputeGuardOutcome_MalformedRoleSanitizesSlateEmptyCounterLabel covers
+// AC-OFFICE-REVIEW-SEATS-004.6/.11 on the slate_empty path: guard.Role is
+// operator-editable step config, and a value outside the fixed
+// ParticipantRole set must fold to the SeatRoleLabelInvalid sentinel on the
+// counter rather than growing its label cardinality with an arbitrary
+// string.
+func TestComputeGuardOutcome_MalformedRoleSanitizesSlateEmptyCounterLabel(t *testing.T) {
+	const malformedRole = "not-a-real-role"
+	eng := quorumEngine(newFakeDecisionStore(), scopedParticipants{})
+	state := MachineState{TaskID: "task-1", CurrentStepID: "review"}
+
+	before := readQuorumSlateEmptyCounter(SeatRoleLabelInvalid)
+	got := eng.computeGuardOutcome(context.Background(), state, &WaitForQuorumGuard{Role: malformedRole, Threshold: QuorumAllApprove})
+	if got.Satisfied || got.Reason != ReasonSlateEmpty {
+		t.Fatalf("expected slate_empty, got %+v", got)
+	}
+	after := readQuorumSlateEmptyCounter(SeatRoleLabelInvalid)
+	if after-before != 1 {
+		t.Fatalf("%s counter delta = %d, want 1", SeatRoleLabelInvalid, after-before)
+	}
+	if got := readQuorumSlateEmptyCounter(malformedRole); got != 0 {
+		t.Fatalf("expected no counter entry under the raw operator string %q, got %d", malformedRole, got)
+	}
+}
+
+func TestComputeGuardOutcome_EvaluationError(t *testing.T) {
+	parts := scopedParticipants{err: errors.New("boom")}
+	eng := quorumEngine(newFakeDecisionStore(), parts)
+	state := MachineState{TaskID: "task-1", CurrentStepID: "review"}
+	got := eng.computeGuardOutcome(context.Background(), state, &WaitForQuorumGuard{Role: "reviewer", Threshold: QuorumAllApprove})
+	if got.Satisfied || got.Reason != ReasonEvaluationError || got.Err == nil {
+		t.Fatalf("expected evaluation_error with a wrapped error, got %+v", got)
+	}
+}
+
+func TestComputeGuardOutcome_AnyReject_NoSlateNeeded(t *testing.T) {
+	// AC-59: any_reject must not short-circuit on an empty seat slate.
+	decisions := newFakeDecisionStore()
+	if err := decisions.RecordStepDecision(context.Background(), DecisionInfo{
+		TaskID: "task-1", StepID: "review",
+		DeciderType: DeciderTypeUser, DeciderID: "user-1", Role: "reviewer",
+		Decision: DecisionRejected,
+	}); err != nil {
+		t.Fatalf("record: %v", err)
+	}
+	eng := quorumEngine(decisions, scopedParticipants{}) // no seats configured at all
+	state := MachineState{TaskID: "task-1", CurrentStepID: "review"}
+	got := eng.computeGuardOutcome(context.Background(), state, &WaitForQuorumGuard{Role: "reviewer", Threshold: QuorumAnyReject})
+	if !got.Satisfied {
+		t.Fatalf("expected any_reject veto to fire despite an empty slate, got %+v", got)
+	}
+}
+
+func TestComputeGuardOutcome_ThresholdUnrecognizedTakesPrecedenceOverThresholdNotMet(t *testing.T) {
+	parts := scopedParticipants{template: []ParticipantInfo{
+		{ID: "p1", StepID: "review", Role: "reviewer", AgentProfileID: "rev-A", DecisionRequired: true},
+	}}
+	eng := quorumEngine(newFakeDecisionStore(), parts)
+	state := MachineState{TaskID: "task-1", CurrentStepID: "review"}
+	got := eng.computeGuardOutcome(context.Background(), state, &WaitForQuorumGuard{Role: "reviewer", Threshold: "not_a_real_threshold"})
+	if got.Satisfied || got.Reason != ReasonThresholdUnrecognized {
+		t.Fatalf("expected threshold_unrecognized, got %+v", got)
+	}
+}
+
+// --- Engine-level integration (unchanged from the pre-rewrite suite) ---
 
 func TestEngine_WaitForQuorum_BlocksUntilSatisfied(t *testing.T) {
 	store := quorumStore(&TransitionGuard{
@@ -346,9 +714,31 @@ func TestEngine_RecordParticipantDecision_PersistsAndReevaluates(t *testing.T) {
 	}}
 	eng := New(store, MapRegistry{}, WithDecisionStore(decisions), WithParticipantStore(parts))
 
-	if err := eng.RecordParticipantDecision(context.Background(), "task-1", "sess-1", "review", "p1", DecisionApproved, "lgtm"); err != nil {
+	result, err := eng.RecordParticipantDecision(context.Background(), "sess-1", DecisionInfo{
+		TaskID: "task-1", StepID: "review", ParticipantID: "p1", Decision: DecisionApproved, Note: "lgtm",
+	})
+	if err != nil {
 		t.Fatalf("RecordParticipantDecision: %v", err)
 	}
+	if result.DecisionID == "" {
+		t.Fatalf("expected a generated decision id")
+	}
+	if result.DecidedAt.IsZero() {
+		t.Fatalf("expected DecidedAt to be stamped")
+	}
+	if !result.Transitioned || result.TransitionAbandoned {
+		t.Fatalf("expected the sole reviewer's approval to satisfy all_approve and transition: %#v", result)
+	}
+	if result.FromStepID != "review" || result.ToStepID != "approval" {
+		t.Fatalf("unexpected transition endpoints: %#v", result)
+	}
+	if len(result.Guards) != 1 || !result.Guards[0].Satisfied || result.Guards[0].TargetStepID != "approval" {
+		t.Fatalf("expected the validated guard snapshot on transition, got %#v", result.Guards)
+	}
+	if store.state.CurrentStepID != "approval" {
+		t.Fatalf("expected store to have moved to 'approval', got %q", store.state.CurrentStepID)
+	}
+
 	got, _ := decisions.ListStepDecisions(context.Background(), "task-1", "review")
 	if len(got) != 1 {
 		t.Fatalf("expected 1 recorded decision, got %d", len(got))
@@ -356,12 +746,17 @@ func TestEngine_RecordParticipantDecision_PersistsAndReevaluates(t *testing.T) {
 	if got[0].Decision != DecisionApproved || got[0].Note != "lgtm" {
 		t.Fatalf("unexpected decision shape: %#v", got[0])
 	}
+	if got[0].ID != result.DecisionID || !got[0].DecidedAt.Equal(result.DecidedAt) {
+		t.Fatalf("persisted decision does not carry the id/DecidedAt returned to the caller: %#v", got[0])
+	}
 }
 
 func TestEngine_RecordParticipantDecision_RequiresStore(t *testing.T) {
 	store := quorumStore(nil)
 	eng := New(store, MapRegistry{}) // no DecisionStore wired
-	err := eng.RecordParticipantDecision(context.Background(), "task-1", "sess-1", "review", "p1", DecisionApproved, "")
+	_, err := eng.RecordParticipantDecision(context.Background(), "sess-1", DecisionInfo{
+		TaskID: "task-1", StepID: "review", ParticipantID: "p1", Decision: DecisionApproved,
+	})
 	if err == nil {
 		t.Fatalf("expected error when DecisionStore missing")
 	}
@@ -384,10 +779,17 @@ func TestEngine_RecordParticipantDecision_RequiresIDs(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Signature: (ctx, taskID, sessionID, stepID, participantID, decision, note)
-			err := eng.RecordParticipantDecision(context.Background(), tc.task, "", tc.step, tc.participant, tc.decision, "")
+			result, err := eng.RecordParticipantDecision(context.Background(), "", DecisionInfo{
+				TaskID: tc.task, StepID: tc.step, ParticipantID: tc.participant, Decision: tc.decision,
+			})
 			if (err != nil) != tc.expectErr {
 				t.Fatalf("err=%v, expectErr=%v", err, tc.expectErr)
+			}
+			if err == nil && !result.ReevaluationSkipped {
+				t.Fatalf("expected ReevaluationSkipped with a blank sessionID: %#v", result)
+			}
+			if err == nil && result.SkipReason != ReasonSessionUnresolvable {
+				t.Fatalf("expected SkipReason=%s, got %q", ReasonSessionUnresolvable, result.SkipReason)
 			}
 		})
 	}

@@ -5,6 +5,7 @@ import {
   type ScopeSelection,
 } from "@/components/integrations/presets-scope-bar-base";
 import type { AzureDevOpsSavedView } from "@/lib/types/azure-devops";
+import { useTranslation } from "react-i18next";
 import {
   presetsForKind,
   type AzureDevOpsPresetKind,
@@ -12,11 +13,6 @@ import {
 } from "./azure-devops-presets";
 
 export type AzureDevOpsScopeSelection = ScopeSelection<AzureDevOpsPresetKind>;
-
-const KINDS = [
-  { value: "work_item", label: "Work items" },
-  { value: "pull_request", label: "Pull requests" },
-] as const;
 
 export function AzureDevOpsScopeBar({
   selected,
@@ -35,14 +31,19 @@ export function AzureDevOpsScopeBar({
   onSaveCurrent: () => void;
   queryPresets: AzureDevOpsQueryPresets;
 }) {
+  const { t } = useTranslation();
+  const kinds = [
+    { value: "work_item" as const, label: t("azuredevops:workItems") },
+    { value: "pull_request" as const, label: t("azuredevops:pullRequests") },
+  ];
   return (
     <IntegrationScopeBar
       testId="azure-devops-presets-scope-bar"
       savedMenuTestId="azure-devops-saved-views-menu"
-      kinds={KINDS}
+      kinds={kinds}
       selected={selected}
       onSelect={onSelect}
-      presetsByKind={(kind) => presetsForKind(kind, queryPresets)}
+      presetsByKind={(kind) => presetsForKind(kind, queryPresets, t)}
       savedPresets={savedViews}
       onDeleteSaved={onDeleteSaved}
       canSaveCurrent={canSaveCurrent}

@@ -126,7 +126,7 @@ describe("useManualTrigger retries", () => {
       await result.current.runNow();
     });
 
-    expect(toastInfo).toHaveBeenCalledWith("Skipped — already running");
+    expect(toastInfo).toHaveBeenCalledWith("Skipped; already running");
     expect(toastSuccess).not.toHaveBeenCalled();
     // Nothing started, so there is nothing new to show.
     expect(onFired).not.toHaveBeenCalled();
@@ -140,7 +140,7 @@ describe("useManualTrigger retries", () => {
       await result.current.runNow();
     });
 
-    expect(toastInfo).toHaveBeenCalledWith("Skipped — already running");
+    expect(toastInfo).toHaveBeenCalledWith("Skipped; already running");
   });
 
   it("surfaces a failure instead of leaving the click silent", async () => {

@@ -30,11 +30,11 @@ func (r *Repository) insertRepository(ctx context.Context, exec sqlx.ExtContext,
 
 	_, err := exec.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO repositories (
-			id, workspace_id, name, source_type, local_path, provider, provider_repo_id, provider_host, provider_owner,
+			id, workspace_id, name, source_type, local_path, provider, provider_repo_id, provider_host, provider_scope, provider_owner,
 			provider_name, remote_url, default_branch, worktree_branch_prefix, worktree_branch_template, pull_before_worktree, setup_script, cleanup_script, dev_script, copy_files, created_at, updated_at, deleted_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), repository.ID, repository.WorkspaceID, repository.Name, repository.SourceType, repository.LocalPath, repository.Provider,
-		repository.ProviderRepoID, repository.ProviderHost, repository.ProviderOwner, repository.ProviderName, repository.RemoteURL, repository.DefaultBranch, repository.WorktreeBranchPrefix,
+		repository.ProviderRepoID, repository.ProviderHost, repository.ProviderScope, repository.ProviderOwner, repository.ProviderName, repository.RemoteURL, repository.DefaultBranch, repository.WorktreeBranchPrefix,
 		repository.WorktreeBranchTemplate, dialect.BoolToInt(repository.PullBeforeWorktree), repository.SetupScript, repository.CleanupScript, repository.DevScript, repository.CopyFiles, repository.CreatedAt, repository.UpdatedAt, repository.DeletedAt)
 
 	return err
@@ -64,12 +64,12 @@ func (r *Repository) GetRepository(ctx context.Context, id string) (*models.Repo
 	repository := &models.Repository{}
 
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, workspace_id, name, source_type, local_path, provider, provider_repo_id, provider_host, provider_owner,
+		SELECT id, workspace_id, name, source_type, local_path, provider, provider_repo_id, provider_host, provider_scope, provider_owner,
 		       provider_name, remote_url, default_branch, worktree_branch_prefix, worktree_branch_template, pull_before_worktree, setup_script, cleanup_script, dev_script, copy_files, created_at, updated_at, deleted_at
 		FROM repositories WHERE id = ? AND deleted_at IS NULL
 	`), id).Scan(
 		&repository.ID, &repository.WorkspaceID, &repository.Name, &repository.SourceType, &repository.LocalPath,
-		&repository.Provider, &repository.ProviderRepoID, &repository.ProviderHost, &repository.ProviderOwner, &repository.ProviderName, &repository.RemoteURL,
+		&repository.Provider, &repository.ProviderRepoID, &repository.ProviderHost, &repository.ProviderScope, &repository.ProviderOwner, &repository.ProviderName, &repository.RemoteURL,
 		&repository.DefaultBranch, &repository.WorktreeBranchPrefix, &repository.WorktreeBranchTemplate, &repository.PullBeforeWorktree, &repository.SetupScript, &repository.CleanupScript, &repository.DevScript, &repository.CopyFiles, &repository.CreatedAt, &repository.UpdatedAt, &repository.DeletedAt,
 	)
 
@@ -89,16 +89,39 @@ func (r *Repository) UpdateRepository(ctx context.Context, repository *models.Re
 	return r.updateRepository(ctx, r.db, repository)
 }
 
+// UpdateRepositoryDefaultBranch updates only the default branch while the
+// caller's previously read value is still current. This protects unrelated
+// repository fields from stale recovery writes.
+func (r *Repository) UpdateRepositoryDefaultBranch(ctx context.Context, repositoryID, expectedBranch, branch string) error {
+	updatedAt := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE repositories
+		SET default_branch = ?, updated_at = ?
+		WHERE id = ? AND default_branch = ? AND deleted_at IS NULL
+	`), branch, updatedAt, repositoryID, expectedBranch)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("repository default branch changed or repository not found: %s", repositoryID)
+	}
+	return nil
+}
+
 func (r *Repository) updateRepository(ctx context.Context, exec sqlx.ExtContext, repository *models.Repository) error {
 	repository.UpdatedAt = time.Now().UTC()
 
 	result, err := exec.ExecContext(ctx, r.db.Rebind(`
 		UPDATE repositories SET
-			name = ?, source_type = ?, local_path = ?, provider = ?, provider_repo_id = ?, provider_host = ?, provider_owner = ?,
+			name = ?, source_type = ?, local_path = ?, provider = ?, provider_repo_id = ?, provider_host = ?, provider_scope = ?, provider_owner = ?,
 			provider_name = ?, remote_url = ?, default_branch = ?, worktree_branch_prefix = ?, worktree_branch_template = ?, pull_before_worktree = ?, setup_script = ?, cleanup_script = ?, dev_script = ?, copy_files = ?, updated_at = ?
 		WHERE id = ? AND deleted_at IS NULL
 	`), repository.Name, repository.SourceType, repository.LocalPath, repository.Provider, repository.ProviderRepoID,
-		repository.ProviderHost, repository.ProviderOwner, repository.ProviderName, repository.RemoteURL, repository.DefaultBranch, repository.WorktreeBranchPrefix, repository.WorktreeBranchTemplate, dialect.BoolToInt(repository.PullBeforeWorktree),
+		repository.ProviderHost, repository.ProviderScope, repository.ProviderOwner, repository.ProviderName, repository.RemoteURL, repository.DefaultBranch, repository.WorktreeBranchPrefix, repository.WorktreeBranchTemplate, dialect.BoolToInt(repository.PullBeforeWorktree),
 		repository.SetupScript, repository.CleanupScript, repository.DevScript, repository.CopyFiles, repository.UpdatedAt, repository.ID)
 	if err != nil {
 		return err
@@ -130,6 +153,28 @@ func (r *Repository) UpdateRepositoryWithSecretBindings(
 	return tx.Commit()
 }
 
+// pruneRepositoryDependents removes the rows that must not outlive a deleted
+// repository. Repository deletion is *soft* (deleted_at), so declared foreign
+// key cascades never fire for it and these rows have to go explicitly. All three
+// delete paths call this, so a fourth dependent table cannot be wired into one
+// path and forgotten in the others.
+func (r *Repository) pruneRepositoryDependents(ctx context.Context, tx *sqlx.Tx, id string) error {
+	statements := []string{
+		`DELETE FROM repository_secret_bindings WHERE repository_id = ?`,
+		`DELETE FROM repository_branch_policies WHERE repository_id = ?`,
+		// A membership row pointing at a deleted repository would offer the user
+		// a repository they can no longer select. Repository sets keep existing
+		// with their remaining members.
+		`DELETE FROM repository_set_items WHERE repository_id = ?`,
+	}
+	for _, statement := range statements {
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(statement), id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // DeleteRepository soft-deletes a repository by ID
 func (r *Repository) DeleteRepository(ctx context.Context, id string) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
@@ -149,7 +194,7 @@ func (r *Repository) DeleteRepository(ctx context.Context, id string) error {
 	if rows == 0 {
 		return fmt.Errorf("repository not found: %s", id)
 	}
-	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM repository_secret_bindings WHERE repository_id = ?`), id); err != nil {
+	if err := r.pruneRepositoryDependents(ctx, tx, id); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -182,7 +227,7 @@ func (r *Repository) DeleteRepositoryIfUnreferenced(ctx context.Context, id stri
 		return false, err
 	}
 	if rows > 0 {
-		if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM repository_secret_bindings WHERE repository_id = ?`), id); err != nil {
+		if err := r.pruneRepositoryDependents(ctx, tx, id); err != nil {
 			return false, err
 		}
 		if err := tx.Commit(); err != nil {
@@ -227,7 +272,7 @@ func (r *Repository) DeleteRepositoryIfNoActiveTaskSessions(ctx context.Context,
 		return false, err
 	}
 	if rows > 0 {
-		if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM repository_secret_bindings WHERE repository_id = ?`), id); err != nil {
+		if err := r.pruneRepositoryDependents(ctx, tx, id); err != nil {
 			return false, err
 		}
 		if err := tx.Commit(); err != nil {
@@ -240,7 +285,7 @@ func (r *Repository) DeleteRepositoryIfNoActiveTaskSessions(ctx context.Context,
 // ListRepositories returns all repositories for a workspace
 func (r *Repository) ListRepositories(ctx context.Context, workspaceID string) ([]*models.Repository, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT id, workspace_id, name, source_type, local_path, provider, provider_repo_id, provider_host, provider_owner,
+		SELECT id, workspace_id, name, source_type, local_path, provider, provider_repo_id, provider_host, provider_scope, provider_owner,
 		       provider_name, remote_url, default_branch, worktree_branch_prefix, worktree_branch_template, pull_before_worktree, setup_script, cleanup_script, dev_script, copy_files, created_at, updated_at, deleted_at
 		FROM repositories WHERE workspace_id = ? AND deleted_at IS NULL ORDER BY created_at DESC
 	`), workspaceID)
@@ -254,7 +299,7 @@ func (r *Repository) ListRepositories(ctx context.Context, workspaceID string) (
 		repository := &models.Repository{}
 		err := rows.Scan(
 			&repository.ID, &repository.WorkspaceID, &repository.Name, &repository.SourceType, &repository.LocalPath,
-			&repository.Provider, &repository.ProviderRepoID, &repository.ProviderHost, &repository.ProviderOwner, &repository.ProviderName, &repository.RemoteURL,
+			&repository.Provider, &repository.ProviderRepoID, &repository.ProviderHost, &repository.ProviderScope, &repository.ProviderOwner, &repository.ProviderName, &repository.RemoteURL,
 			&repository.DefaultBranch, &repository.WorktreeBranchPrefix, &repository.WorktreeBranchTemplate, &repository.PullBeforeWorktree, &repository.SetupScript, &repository.CleanupScript, &repository.DevScript, &repository.CopyFiles, &repository.CreatedAt, &repository.UpdatedAt, &repository.DeletedAt,
 		)
 		if err != nil {
@@ -271,7 +316,10 @@ func (r *Repository) ListRepositories(ctx context.Context, workspaceID string) (
 	return result, nil
 }
 
-// GetRepositoryByProviderInfo finds a repository by workspace, provider, owner, and name.
+// GetRepositoryByProviderIdentity finds a repository by its durable provider
+// identity. Scope + RepositoryID are authoritative when both are present;
+// legacy origin/owner/name matching is used only when both are absent. This
+// deliberately refuses to adopt an old unscoped row for a new scoped provider.
 // Returns nil, nil if not found. When duplicate rows share the same provider
 // identity (e.g. left behind by a resolver race that predates
 // Service.repoResolveMu), orders by created_at then id so the row returned
@@ -279,19 +327,30 @@ func (r *Repository) ListRepositories(ctx context.Context, workspaceID string) (
 // dedupeRepositoriesByIdentity keeps as the canonical winner in
 // ListRepositories — otherwise a caller could resolve to, and write
 // backfilled fields onto, a duplicate that ListRepositories hides.
-func (r *Repository) GetRepositoryByProviderInfo(ctx context.Context, workspaceID, provider, host, owner, name string) (*models.Repository, error) {
+func (r *Repository) GetRepositoryByProviderIdentity(
+	ctx context.Context, identity models.ProviderRepositoryIdentity,
+) (*models.Repository, error) {
 	repository := &models.Repository{}
+	where := `workspace_id = ? AND provider = ? AND provider_host = ?
+			AND provider_owner = ? AND provider_name = ?`
+	args := []any{identity.WorkspaceID, identity.Provider, identity.Host, identity.Owner, identity.Name}
+	if identity.Scope != "" {
+		if identity.RepositoryID == "" {
+			return nil, nil
+		}
+		where = `workspace_id = ? AND provider = ? AND provider_scope = ? AND provider_repo_id = ?`
+		args = []any{identity.WorkspaceID, identity.Provider, identity.Scope, identity.RepositoryID}
+	}
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, workspace_id, name, source_type, local_path, provider, provider_repo_id, provider_host, provider_owner,
+		SELECT id, workspace_id, name, source_type, local_path, provider, provider_repo_id, provider_host, provider_scope, provider_owner,
 		       provider_name, remote_url, default_branch, worktree_branch_prefix, worktree_branch_template, pull_before_worktree, setup_script, cleanup_script, dev_script, copy_files, created_at, updated_at, deleted_at
 		FROM repositories
-		WHERE workspace_id = ? AND provider = ? AND provider_host = ?
-			AND provider_owner = ? AND provider_name = ? AND deleted_at IS NULL
+		WHERE `+where+` AND deleted_at IS NULL
 		ORDER BY created_at ASC, id ASC
 		LIMIT 1
-	`), workspaceID, provider, host, owner, name).Scan(
+	`), args...).Scan(
 		&repository.ID, &repository.WorkspaceID, &repository.Name, &repository.SourceType, &repository.LocalPath,
-		&repository.Provider, &repository.ProviderRepoID, &repository.ProviderHost, &repository.ProviderOwner, &repository.ProviderName, &repository.RemoteURL,
+		&repository.Provider, &repository.ProviderRepoID, &repository.ProviderHost, &repository.ProviderScope, &repository.ProviderOwner, &repository.ProviderName, &repository.RemoteURL,
 		&repository.DefaultBranch, &repository.WorktreeBranchPrefix, &repository.WorktreeBranchTemplate, &repository.PullBeforeWorktree, &repository.SetupScript, &repository.CleanupScript, &repository.DevScript, &repository.CopyFiles, &repository.CreatedAt, &repository.UpdatedAt, &repository.DeletedAt,
 	)
 	if err == sql.ErrNoRows {
@@ -305,6 +364,16 @@ func (r *Repository) GetRepositoryByProviderInfo(ctx context.Context, workspaceI
 	return repository, err
 }
 
+// GetRepositoryByProviderInfo keeps the concrete SQLite helper available for
+// legacy callers and tests. Service code uses GetRepositoryByProviderIdentity.
+func (r *Repository) GetRepositoryByProviderInfo(
+	ctx context.Context, workspaceID, provider, host, owner, name string,
+) (*models.Repository, error) {
+	return r.GetRepositoryByProviderIdentity(ctx, models.ProviderRepositoryIdentity{
+		WorkspaceID: workspaceID, Provider: provider, Host: host, Owner: owner, Name: name,
+	})
+}
+
 // GetRepositoryByLocalPath finds a live repository by workspace and canonical
 // local_path. Returns nil, nil if not found. Mirrors GetRepositoryByProviderInfo,
 // including the created_at/id tiebreak, so local-path resolution can do the
@@ -313,7 +382,7 @@ func (r *Repository) GetRepositoryByProviderInfo(ctx context.Context, workspaceI
 func (r *Repository) GetRepositoryByLocalPath(ctx context.Context, workspaceID, localPath string) (*models.Repository, error) {
 	repository := &models.Repository{}
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, workspace_id, name, source_type, local_path, provider, provider_repo_id, provider_host, provider_owner,
+		SELECT id, workspace_id, name, source_type, local_path, provider, provider_repo_id, provider_host, provider_scope, provider_owner,
 		       provider_name, remote_url, default_branch, worktree_branch_prefix, worktree_branch_template, pull_before_worktree, setup_script, cleanup_script, dev_script, copy_files, created_at, updated_at, deleted_at
 		FROM repositories
 		WHERE workspace_id = ? AND local_path = ? AND local_path != '' AND deleted_at IS NULL
@@ -321,7 +390,7 @@ func (r *Repository) GetRepositoryByLocalPath(ctx context.Context, workspaceID, 
 		LIMIT 1
 	`), workspaceID, localPath).Scan(
 		&repository.ID, &repository.WorkspaceID, &repository.Name, &repository.SourceType, &repository.LocalPath,
-		&repository.Provider, &repository.ProviderRepoID, &repository.ProviderHost, &repository.ProviderOwner, &repository.ProviderName, &repository.RemoteURL,
+		&repository.Provider, &repository.ProviderRepoID, &repository.ProviderHost, &repository.ProviderScope, &repository.ProviderOwner, &repository.ProviderName, &repository.RemoteURL,
 		&repository.DefaultBranch, &repository.WorktreeBranchPrefix, &repository.WorktreeBranchTemplate, &repository.PullBeforeWorktree, &repository.SetupScript, &repository.CleanupScript, &repository.DevScript, &repository.CopyFiles, &repository.CreatedAt, &repository.UpdatedAt, &repository.DeletedAt,
 	)
 	if err == sql.ErrNoRows {

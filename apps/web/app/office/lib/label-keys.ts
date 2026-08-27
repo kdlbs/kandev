@@ -3,6 +3,7 @@ import type {
   OfficeTaskStatus,
   ProjectStatus,
   Tier,
+  TierSource,
 } from "@/lib/state/slices/office/types";
 
 /**
@@ -59,6 +60,18 @@ export const TIER_NAME_KEYS: Record<Tier, string> = {
 };
 
 /**
+ * Names the precedence level that supplied an agent's effective tier: a
+ * matching wake-reason policy, a per-agent override, the agent's role entry,
+ * or the workspace default. Wire values are never shown raw (AC-16, AC-16a).
+ */
+export const TIER_SOURCE_LABEL_KEYS: Record<TierSource, string> = {
+  wake_reason: "office:tierSourceWakeReason",
+  override: "office:tierSourceOverride",
+  role: "office:tierSourceRole",
+  workspace: "office:tierSourceWorkspace",
+};
+
+/**
  * Routine concurrency policies. The row and the expanded detail used to render
  * the wire value with `policy.replace(/_/g, " ")`, which showed the identifier
  * as pseudo-English and could never be localized.
@@ -67,4 +80,21 @@ export const CONCURRENCY_POLICY_LABEL_KEYS: Record<string, string> = {
   skip_if_active: "office:skipIfActive",
   coalesce_if_active: "office:coalesceIfActive",
   always_create: "office:alwaysCreate",
+};
+
+/**
+ * Budget overrun actions. The costs card rendered the wire value with
+ * `actionOnExceed.replace(/_/g, " ")`, which is pseudo-English: a translator
+ * with a complete catalog still saw "block new tasks" spelled out of an
+ * identifier.
+ */
+export const BUDGET_PERIOD_LABEL_KEYS: Record<string, string> = {
+  monthly: "office:budgetPeriodMonthly",
+  total: "office:budgetPeriodTotal",
+};
+
+export const BUDGET_ACTION_LABEL_KEYS: Record<string, string> = {
+  notify_only: "office:budgetActionNotifyOnly",
+  pause_agent: "office:budgetActionPauseAgent",
+  block_new_tasks: "office:budgetActionBlockNewTasks",
 };

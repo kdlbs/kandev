@@ -66,6 +66,7 @@ func newTestService(t *testing.T, overrides ...service.ServiceOptions) *service.
 		execution_state TEXT DEFAULT '',
 		checkout_agent_id TEXT,
 		checkout_at DATETIME,
+		checkout_run_id TEXT,
 		archived_at DATETIME,
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -81,7 +82,8 @@ func newTestService(t *testing.T, overrides ...service.ServiceOptions) *service.
 	}
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS workflow_steps (
 		id TEXT PRIMARY KEY,
-		agent_profile_id TEXT NOT NULL DEFAULT ''
+		agent_profile_id TEXT NOT NULL DEFAULT '',
+		stage_type TEXT NOT NULL DEFAULT 'custom'
 	)`); err != nil {
 		t.Fatalf("create workflow_steps: %v", err)
 	}
@@ -92,9 +94,27 @@ func newTestService(t *testing.T, overrides ...service.ServiceOptions) *service.
 		role TEXT NOT NULL DEFAULT '',
 		agent_profile_id TEXT NOT NULL DEFAULT '',
 		decision_required INTEGER NOT NULL DEFAULT 0,
-		position INTEGER NOT NULL DEFAULT 0
+		position INTEGER NOT NULL DEFAULT 0,
+		created_at TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00'
 	)`); err != nil {
 		t.Fatalf("create workflow_step_participants: %v", err)
+	}
+	// Stub of task_sessions, mirroring the columns GetSessionAgentProfileID
+	// (RunnerProjection's fallback source, see prompt_usage_cost.go) reads,
+	// plus the AC-10 rollup columns so tests can assert the Office
+	// subscriber never writes them (AC-21).
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS task_sessions (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		agent_profile_id TEXT,
+		tokens_in INTEGER NOT NULL DEFAULT 0,
+		tokens_cached_in INTEGER NOT NULL DEFAULT 0,
+		tokens_out INTEGER NOT NULL DEFAULT 0,
+		cost_subcents INTEGER NOT NULL DEFAULT 0,
+		started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`); err != nil {
+		t.Fatalf("create task_sessions: %v", err)
 	}
 
 	initSharedAgentProfilesSchema(t, db)
@@ -249,6 +269,18 @@ func setTestTaskAssignee(t *testing.T, svc *service.Service, taskID, agentID str
 			COALESCE((SELECT workflow_step_id FROM tasks WHERE id = ?), ''),
 			?, 'runner', ?, 0, 0
 		)`, taskID, taskID, taskID, taskID, agentID)
+}
+
+// insertTestTaskSession inserts a minimal task_sessions row so tests can
+// exercise the session-level agent_profile_id fallback in buildCostEvent
+// (prompt_usage_cost.go) — distinct from setTestTaskAssignee's
+// workflow_step_participants runner row.
+func insertTestTaskSession(t *testing.T, svc *service.Service, sessionID, taskID, agentProfileID string) {
+	t.Helper()
+	svc.ExecSQL(t,
+		`INSERT INTO task_sessions (id, task_id, agent_profile_id, started_at, updated_at)
+		 VALUES (?, ?, ?, datetime('now'), datetime('now'))`,
+		sessionID, taskID, agentProfileID)
 }
 
 // newTestServiceWithConfig returns a service backed by in-memory SQLite with a

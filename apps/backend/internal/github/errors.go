@@ -51,6 +51,11 @@ var ErrInvalidToken = errors.New("invalid token")
 // transient upstream blip.
 var ErrRepoNotResolvable = errors.New("github: repository not resolvable")
 
+// ErrTaskPRNotLinked is returned by UpdateTaskCIOptions when the patch names
+// a repository_id/pr_number that is not currently linked to the task. HTTP
+// callers translate this into a 400 rather than a generic 500.
+var ErrTaskPRNotLinked = errors.New("PR is not linked to this task")
+
 // errStoreUnavailable is returned from service methods when no Store is
 // wired (Provide can return a Service with store == nil when the SQLite
 // repos aren't configured). Returning a typed error instead of nil-

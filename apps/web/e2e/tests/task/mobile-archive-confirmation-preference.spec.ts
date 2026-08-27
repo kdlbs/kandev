@@ -7,7 +7,7 @@ test.describe("Archive confirmation preference on mobile", () => {
     apiClient,
     seedData,
   }) => {
-    await testPage.goto("/settings/general/task-actions");
+    await testPage.goto("/settings/preferences/task-behavior");
     const toggle = testPage.getByRole("switch", { name: "Confirm before archiving tasks" });
     await expect(toggle).toBeChecked();
     await toggle.click();

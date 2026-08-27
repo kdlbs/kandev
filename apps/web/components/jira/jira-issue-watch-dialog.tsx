@@ -19,19 +19,18 @@ import { IconInfoCircle } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { CliModeIcon } from "@/components/cli-mode-icon";
 import { useAppStore } from "@/components/state-provider";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useWorkflows } from "@/hooks/use-workflows";
 import { useWorkflowSteps, stepPlaceholder } from "@/hooks/use-workflow-steps";
 import { searchJiraTickets } from "@/lib/api/domains/jira-api";
-import {
-  ScriptEditor,
-  computeEditorHeight,
-} from "@/components/settings/profile-edit/script-editor";
+import { SettingsPromptEditor } from "@/components/settings/settings-prompt-editor";
 import {
   jiraIssueWatchPlaceholders,
   DEFAULT_JIRA_ISSUE_WATCH_PROMPT,
 } from "@/components/jira/jira-issue-watch-placeholders";
-import { STEP_DEFAULT, STEP_DEFAULT_LABEL, resolveProfileId } from "@/lib/watcher-profile-default";
+import { STEP_DEFAULT, resolveProfileId } from "@/lib/watcher-profile-default";
+import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
 import { WatcherRepositoryFields } from "@/components/watcher-repository-fields";
 import { clearWorkspaceScopedForm } from "@/lib/watcher-repository-default";
 import type {
@@ -94,6 +93,7 @@ function parseMaxInflightTasks(raw: string): number | null | "invalid" {
 // `status`, `created`), operators and a project key — and the string is
 // persisted on the watch and sent upstream verbatim. Translating any of it would
 // produce a query Jira rejects.
+// i18n-exempt: JQL is Jira's query language, not prose.
 const DEFAULT_JQL = `project = PROJ AND status = "Open" ORDER BY created DESC`;
 
 function makeEmptyForm(workspaceId: string): FormState {
@@ -136,6 +136,12 @@ function useFormData(workspaceId: string) {
   const allWorkflows = useAppStore((s) => s.workflows.items);
   const workflows = useMemo(() => allWorkflows.filter((w) => !w.hidden), [allWorkflows]);
   const agentProfiles = useAppStore((s) => s.agentProfiles.items);
+  const dynamicRoutingEnabled = useFeature("dynamicAgentRouting");
+  const selectableAgentProfiles = useMemo(
+    () =>
+      agentProfiles.filter((profile) => isSelectableAgentProfile(profile, dynamicRoutingEnabled)),
+    [agentProfiles, dynamicRoutingEnabled],
+  );
   const executors = useAppStore((s) => s.executors.items);
   const allExecutorProfiles = useMemo(
     () =>
@@ -144,7 +150,7 @@ function useFormData(workspaceId: string) {
         .flatMap((e) => e.profiles ?? []),
     [executors],
   );
-  return { workflows, agentProfiles, allExecutorProfiles };
+  return { workflows, agentProfiles: selectableAgentProfiles, allExecutorProfiles };
 }
 
 type SelectFieldItem = { id: string; label: string; icon?: React.ReactNode };
@@ -288,21 +294,21 @@ function PromptField({ value, onChange }: { value: string; onChange: (v: string)
         <Label>{t("jira:taskPrompt")}</Label>
         <PlaceholdersHelp />
       </div>
-      <p className="text-xs text-muted-foreground">
-        {/* The `{{` token is passed as a value so it never reaches the catalog,
-            where i18next would interpolate it away. */}
-        {t("jira:promptFieldHelp", { token: "{{" })}
-      </p>
-      <div className="rounded-md border border-border overflow-hidden">
-        <ScriptEditor
-          value={value}
-          onChange={onChange}
-          language="markdown"
-          height={computeEditorHeight(value)}
-          lineNumbers="off"
-          placeholders={placeholders}
-        />
-      </div>
+      <SettingsPromptEditor
+        value={value}
+        onChange={onChange}
+        placeholders={placeholders}
+        promptReferences
+        ariaLabel={t("jira:taskPrompt")}
+        testId="jira-issue-watch-prompt-editor"
+        help={
+          <p className="text-xs text-muted-foreground">
+            {/* The `{{` token is passed as a value so it never reaches the catalog,
+                where i18next would interpolate it away. */}
+            {t("jira:promptFieldHelp", { token: "{{" })}
+          </p>
+        }
+      />
     </div>
   );
 }
@@ -339,6 +345,7 @@ function AutomationFields({
   setForm: React.Dispatch<React.SetStateAction<FormState>>;
 }) {
   const { t } = useTranslation();
+  const stepDefaultLabel = t("common:useStepDefaultOption");
   const { workflows, agentProfiles, allExecutorProfiles } = useFormData(form.workspaceId);
   const { steps, loading: stepsLoading } = useWorkflowSteps(form.workflowId);
   return (
@@ -377,9 +384,9 @@ function AutomationFields({
           description={t("jira:optionalFallsBackToStepDefault")}
           value={form.agentProfileId || STEP_DEFAULT}
           onChange={(v) => setForm((p) => ({ ...p, agentProfileId: resolveProfileId(v) }))}
-          placeholder={STEP_DEFAULT_LABEL}
+          placeholder={stepDefaultLabel}
           items={[
-            { id: STEP_DEFAULT, label: STEP_DEFAULT_LABEL },
+            { id: STEP_DEFAULT, label: stepDefaultLabel },
             ...agentProfiles.map((p) => ({
               id: p.id,
               label: p.label,
@@ -392,9 +399,9 @@ function AutomationFields({
           description={t("jira:optionalFallsBackToStepDefault")}
           value={form.executorProfileId || STEP_DEFAULT}
           onChange={(v) => setForm((p) => ({ ...p, executorProfileId: resolveProfileId(v) }))}
-          placeholder={STEP_DEFAULT_LABEL}
+          placeholder={stepDefaultLabel}
           items={[
-            { id: STEP_DEFAULT, label: STEP_DEFAULT_LABEL },
+            { id: STEP_DEFAULT, label: stepDefaultLabel },
             ...allExecutorProfiles.map((p) => ({ id: p.id, label: p.name })),
           ]}
         />

@@ -11,20 +11,17 @@ import type {
   SavedLayout,
   ToolStatus,
   LspStatusLocation,
+  LastSeenDisplay,
   MCPTaskAgentProfileDefault,
   StartupPage,
 } from "@/lib/types/http";
-import type {
-  VoiceInputActivationMode,
-  VoiceInputEngine,
-  WhisperWebModelSize,
-} from "@/lib/types/http-voice";
 import type { SidebarView, SidebarViewDraft } from "@/lib/state/slices/ui/sidebar-view-types";
 import type { SidebarTaskPrefsState } from "@/lib/state/slices/ui/types";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { SpritesStatus, SpritesInstance } from "@/lib/types/http-sprites";
 import type { TasksListGroup, TasksListSort } from "@/lib/tasks/tasks-list-options";
 import type { SleepInhibitionResponse } from "@/lib/types/system";
+import type { AgentProfileKind } from "@/lib/types/agent-profile";
 
 export type ExecutorsState = {
   items: Executor[];
@@ -52,7 +49,18 @@ export type AgentProfileOption = {
   label: string;
   agent_id: string;
   agent_name: string;
+  kind?: AgentProfileKind;
   cli_passthrough: boolean;
+  /** Configured start model (ACP model ID). Empty = agent default. */
+  model?: string;
+  /** Optional explicit fallback model; ignored when auto_fallback is on. */
+  fallback_model?: string;
+  /** Legacy automatic-fallback opt-in. */
+  auto_fallback?: boolean;
+  workspace_id?: string;
+  /** Persisted profile revision (RFC3339 updated_at), used to prefer newer
+   * WS-delivered options over a stale in-flight response. */
+  updatedAt?: string;
   /**
    * False hides the profile from task/session creation pickers. Existing
    * sessions keep their labels and the profile stays editable in settings.
@@ -68,15 +76,193 @@ export type AgentProfileOption = {
 };
 
 /** Profiles with an omitted enabled field remain selectable for compatibility. */
-export function isSelectableAgentProfile(profile: Pick<AgentProfileOption, "enabled">): boolean {
-  return profile.enabled !== false;
+export function isSelectableAgentProfile(
+  profile: Pick<AgentProfileOption, "enabled" | "kind">,
+  dynamicRoutingEnabled = true,
+): boolean {
+  return profile.enabled !== false && (dynamicRoutingEnabled || profile.kind !== "dynamic");
+}
+
+/**
+ * Compares two RFC3339 timestamps as instants (millisecond precision).
+ * Lexical comparison misorders values with fractional seconds or differing
+ * offsets (e.g. `10:00:00.100Z` is newer than `10:00:00Z` but sorts before
+ * it), so revision precedence must parse the instants. Missing timestamps
+ * sort oldest so a present timestamp always wins.
+ */
+export function compareTimestamps(a: string | undefined, b: string | undefined): number {
+  if (a === b) return 0;
+  if (a === undefined || a === "") return -1;
+  if (b === undefined || b === "") return 1;
+  const aMs = Date.parse(a);
+  const bMs = Date.parse(b);
+  if (Number.isNaN(aMs)) return -1;
+  if (Number.isNaN(bMs)) return 1;
+  return aMs - bMs;
+}
+
+function latestAvailableAgentRevision(agents: AvailableAgent[]): string | undefined {
+  return agents.reduce<string | undefined>(
+    (latest, agent) =>
+      compareTimestamps(agent.updated_at, latest) > 0 ? agent.updated_at : latest,
+    undefined,
+  );
+}
+
+/**
+ * Returns true when an available-agent snapshot is older than the one already
+ * in the store. HTTP polling and WebSocket broadcasts can complete in either
+ * order, so an older response must not replace a newer capability state.
+ * Empty snapshots are treated as stale when a timestamped snapshot is already
+ * present. This protects the store from an error fallback clearing good data.
+ */
+export function isStaleAvailableAgentsSnapshot(
+  current: AvailableAgent[],
+  incoming: AvailableAgent[],
+): boolean {
+  if (current.length === 0) return false;
+  const currentRevision = latestAvailableAgentRevision(current);
+  const incomingRevision = latestAvailableAgentRevision(incoming);
+  if (currentRevision && !incomingRevision) return true;
+  if (!currentRevision || !incomingRevision) return false;
+  return compareTimestamps(incomingRevision, currentRevision) < 0;
+}
+
+/**
+ * Merge two option lists by ID, keeping the NEWER revision per id (missing or
+ * equal updatedAt defers to the rebuilt option). A newer WebSocket-delivered
+ * option must never be regressed by a stale list rebuild — e.g. a disabled
+ * profile whose option was updated by `agent.profile.updated` while its owning
+ * agent was absent must not reappear as selectable.
+ */
+export function mergeOptionsByNewest(
+  previous: AgentProfileOption[],
+  rebuilt: AgentProfileOption[],
+): AgentProfileOption[] {
+  const byId = new Map<string, AgentProfileOption>();
+  for (const option of previous) {
+    byId.set(option.id, option);
+  }
+  for (const option of rebuilt) {
+    const existing = byId.get(option.id);
+    if (!existing || compareTimestamps(option.updatedAt, existing.updatedAt) >= 0) {
+      byId.set(option.id, option);
+    }
+  }
+  return [...byId.values()];
+}
+
+/**
+ * Maps an AvailableAgent's host-utility probe result to AgentProfileOption's
+ * capability fields. `buildModelConfigFromHostUtility` (backend) emits the
+ * literal "not_configured" both on a genuine cache miss (agent not probed
+ * yet, e.g. a non-ACP agent that is actually installed) and, permanently,
+ * for agents the host-utility probe never covers at all (TUI/passthrough
+ * agents are not InferenceAgents, so they never enter the probe cache
+ * regardless of install state). `agent.available` disambiguates the two:
+ * when it is explicitly false the agent's own detection already ran and
+ * failed, so map to "not_installed" instead of collapsing to undefined.
+ * The AgentDTO path used by agent.profile.created/updated leaves the field
+ * empty for the true cache-miss case — map that back to undefined so both
+ * paths agree with isHealthyAgentProfile, which treats undefined as healthy
+ * and "not_configured"/"not_installed" as unhealthy.
+ */
+export function toProfileCapability(agent: AvailableAgent): {
+  capability_status?: CapabilityStatus;
+  capability_error?: string;
+} {
+  if (agent.available === false) {
+    return {
+      capability_status: "not_installed",
+      capability_error: agent.model_config.error,
+    };
+  }
+  if (agent.model_config.status === "not_configured") {
+    return { capability_status: undefined, capability_error: undefined };
+  }
+  return {
+    capability_status: agent.model_config.status,
+    capability_error: agent.model_config.error,
+  };
+}
+
+/**
+ * Refreshes capability_status/capability_error on agent profile options from
+ * a fresh AvailableAgent snapshot (delivered either via the
+ * agent.available.updated WebSocket broadcast or the /agents HTTP poll),
+ * matched by agent name. Without this, a profile hidden from Handoff at boot
+ * stays hidden even after its agent is installed or reconnected, until a full
+ * page reload. Returns the original array/entries when nothing actually
+ * changed so an identical snapshot does not invalidate every
+ * `agentProfiles.items` subscriber.
+ */
+export function refreshProfileCapabilities(
+  profiles: AgentProfileOption[],
+  agents: AvailableAgent[],
+): AgentProfileOption[] {
+  if (agents.length === 0) return profiles;
+  const byName = new Map(agents.map((agent) => [agent.name, agent]));
+  let changed = false;
+  const next = profiles.map((profile) => {
+    const match = byName.get(profile.agent_name);
+    if (!match) return profile;
+    const capability = toProfileCapability(match);
+    if (
+      profile.capability_status === capability.capability_status &&
+      profile.capability_error === capability.capability_error
+    ) {
+      return profile;
+    }
+    changed = true;
+    return { ...profile, ...capability };
+  });
+  return changed ? next : profiles;
+}
+
+/**
+ * Refreshes capability_status/capability_error on `settingsAgents.items` from
+ * a fresh AvailableAgent snapshot (WS or HTTP poll), matched by agent name.
+ * This is the single source `agent.profile.created`/`updated` and
+ * `applyProfileDuplicated` rebuild profile options FROM — without refreshing
+ * it here too, any later profile create/update/duplicate silently reverts a
+ * profile's capability back to its stale boot-time value, in both
+ * directions: an install can make an installed-but-just-edited profile
+ * vanish from Handoff, or a break can bring an uninstalled provider back
+ * into it.
+ */
+export function refreshSettingsAgentsCapabilities(
+  settingsAgents: Agent[],
+  agents: AvailableAgent[],
+): Agent[] {
+  if (agents.length === 0) return settingsAgents;
+  const byName = new Map(agents.map((agent) => [agent.name, agent]));
+  let changed = false;
+  const next = settingsAgents.map((item) => {
+    const match = byName.get(item.name);
+    if (!match) return item;
+    const capability = toProfileCapability(match);
+    if (
+      item.capability_status === capability.capability_status &&
+      item.capability_error === capability.capability_error
+    ) {
+      return item;
+    }
+    changed = true;
+    return { ...item, ...capability };
+  });
+  return changed ? next : settingsAgents;
 }
 
 /** Single source of truth for mapping an API Agent+Profile to a store AgentProfileOption. */
 export function toAgentProfileOption(
   agent: Pick<Agent, "id" | "name" | "capability_status" | "capability_error">,
-  profile: Pick<AgentProfile, "id" | "agentDisplayName" | "name"> & {
+  profile: Pick<AgentProfile, "id" | "agentDisplayName" | "name" | "workspaceId"> & {
+    updatedAt?: string;
+    kind?: AgentProfileKind;
     cliPassthrough?: boolean;
+    model?: string;
+    fallbackModel?: string;
+    autoFallback?: boolean;
     enabled?: boolean;
   },
 ): AgentProfileOption {
@@ -85,7 +271,13 @@ export function toAgentProfileOption(
     label: `${profile.agentDisplayName ?? ""} • ${profile.name}`,
     agent_id: agent.id,
     agent_name: agent.name,
+    kind: profile.kind,
     cli_passthrough: profile.cliPassthrough ?? false,
+    model: profile.model ?? undefined,
+    fallback_model: profile.fallbackModel ?? undefined,
+    auto_fallback: profile.autoFallback ?? undefined,
+    workspace_id: profile.workspaceId,
+    updatedAt: profile.updatedAt,
     enabled: profile.enabled ?? true,
     capability_status: agent.capability_status,
     capability_error: agent.capability_error,
@@ -191,6 +383,7 @@ export type SleepInhibitionStoreState = {
 };
 
 export type UserSettingsState = {
+  revision: number | null;
   workspaceId: string | null;
   kanbanViewMode: string | null;
   startupPage: StartupPage;
@@ -206,6 +399,7 @@ export type UserSettingsState = {
   chatSubmitKey: "enter" | "cmd_enter";
   reviewAutoMarkOnScroll: boolean;
   confirmTaskArchive: boolean;
+  preventAutoStartAgentOnOpen: boolean;
   unreadDivider: boolean;
   agentGeneratedTaskTitles: boolean;
   mcpTaskAgentProfileDefault: MCPTaskAgentProfileDefault;
@@ -214,6 +408,7 @@ export type UserSettingsState = {
   showScrollToStart: boolean;
   showTranscriptAutoScrollControl: boolean;
   showTodoListPanel: boolean;
+  showTodoListPanelOnlyWhenNotEmpty: boolean;
   showReleaseNotification: boolean;
   releaseNotesLastSeenVersion: string | null;
   lspAutoStartLanguages: string[];
@@ -238,9 +433,12 @@ export type UserSettingsState = {
   terminalFontFamily: string | null;
   terminalFontSize: number | null;
   changesPanelLayout: "flat" | "tree";
+  lastSeenDisplay: LastSeenDisplay;
   systemMetricsDisplay: { showInTopbar: boolean; simplified: boolean };
+  appStatusBarEnabled: boolean;
   appStatusBarOrder: AppStatusBarOrderState;
-  voiceMode: VoiceModeState;
+  hiddenWorkflowStepIds: Record<string, string[]>;
+  workflowIdsWithAutoHideEmptySteps: string[];
   loaded: boolean;
 };
 
@@ -256,25 +454,6 @@ export type TaskCreateLastUsedState = {
   executorProfileId: string | null;
   workflowIdsByWorkspace: Record<string, string>;
   synced?: boolean;
-};
-
-export type VoiceModeState = {
-  enabled: boolean;
-  engine: VoiceInputEngine;
-  language: string;
-  mode: VoiceInputActivationMode;
-  autoSend: boolean;
-  whisperWebModel: WhisperWebModelSize;
-};
-
-/** Default values used by the slice init and by SSR hydration fallback. */
-export const DEFAULT_VOICE_MODE_STATE: VoiceModeState = {
-  enabled: true,
-  engine: "auto",
-  language: "auto",
-  mode: "toggle",
-  autoSend: false,
-  whisperWebModel: "base",
 };
 
 export type SettingsSliceState = {

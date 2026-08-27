@@ -13,8 +13,8 @@ import (
 func (r *sqliteRepository) seedBuiltinAgents() error {
 	for _, agent := range getBuiltinAgents() {
 		_, err := r.db.Exec(r.db.Rebind(`
-			INSERT INTO utility_agents (id, name, description, prompt, agent_id, model, builtin, enabled, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?, ?)
+			INSERT INTO utility_agents (id, name, description, prompt, agent_id, model, agent_profile_id, profile_binding_state, builtin, enabled, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, '', 'inherit', 1, 0, ?, ?)
 			ON CONFLICT(id) DO NOTHING
 		`), agent.ID, agent.Name, agent.Description, agent.Prompt, agent.AgentID, agent.Model,
 			agent.CreatedAt, agent.UpdatedAt)

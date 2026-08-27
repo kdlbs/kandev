@@ -3,6 +3,7 @@
 // by an HTML <time title="..."> element (see message-actions.tsx).
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
+import { dwell } from "../../helpers/causal-waits";
 
 const SEEDED_MESSAGE = "Tooltip regression fixture message";
 
@@ -41,7 +42,12 @@ test.describe("Chat message timestamp tooltip", () => {
       .locator("xpath=..");
     const timestamp = messageRow.locator("time[datetime]");
     await timestamp.hover();
-    await testPage.waitForTimeout(1500);
+    await dwell(
+      testPage,
+      1500,
+      "browser-chrome",
+      "Chrome's native title-tooltip delay is browser chrome rather than DOM, so there is nothing in the page to observe; kept so the capture below shows the same hover dwell a real user would see",
+    );
     await prCapture.screenshot("message-relative-timestamp-hover", {
       caption:
         "Chat message footer with the relative timestamp hovered. The native " +

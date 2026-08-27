@@ -10,7 +10,7 @@ import {
   DialogTrigger,
 } from "@kandev/ui/dialog";
 import type { CommandEntry, ModeEntry } from "@/lib/types/http";
-import type { ProfileFormData } from "./profile-form-fields";
+import type { ProfileFormData } from "./profile-model-fields";
 
 // An example slash command the user types verbatim — an identifier, not copy.
 const EXAMPLE_COMMAND = "/init";
@@ -74,6 +74,22 @@ export function profileModelIsDirty(profile: ProfileFormData, baseline?: Profile
   return (
     profile.model !== baseline.model ||
     JSON.stringify(profile.config_options ?? {}) !== JSON.stringify(baseline.config_options ?? {})
+  );
+}
+
+export function profileFallbackModelIsDirty(
+  profile: ProfileFormData,
+  baseline?: ProfileFormData,
+): boolean {
+  return Boolean(baseline && (profile.fallback_model ?? "") !== (baseline.fallback_model ?? ""));
+}
+
+export function profileAutoFallbackIsDirty(
+  profile: ProfileFormData,
+  baseline?: ProfileFormData,
+): boolean {
+  return Boolean(
+    baseline && (profile.auto_fallback ?? false) !== (baseline.auto_fallback ?? false),
   );
 }
 

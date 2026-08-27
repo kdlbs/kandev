@@ -293,4 +293,11 @@ describe("deriveSessionFlags — supportsSteering", () => {
   it("is false for RUNNING + background without the capability", () => {
     expect(deriveSessionFlags(running("background", false)).supportsSteering).toBe(false);
   });
+
+  it("marks completed sessions as terminal without treating them as failed", () => {
+    const flags = deriveSessionFlags(createMockSession("session-1", "task-1", "COMPLETED"));
+
+    expect(flags.isCompleted).toBe(true);
+    expect(flags.isFailed).toBe(false);
+  });
 });

@@ -239,6 +239,235 @@ func createTestClient(t *testing.T, serverURL string) *agentctl.Client {
 
 // --- Tests ---
 
+// TestInitializeAndPromptWithLayers_UnadvertisedModelUsesProviderDefault
+// verifies the executor-authoritative policy for both the profile model and a
+// persisted runtime override.
+func TestInitializeAndPromptWithLayers_UnadvertisedModelUsesProviderDefault(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		profileModel string
+		runtimeModel string
+	}{
+		{name: "profile start model gone", profileModel: "claude-gone", runtimeModel: ""},
+		{name: "runtime override gone", profileModel: "", runtimeModel: "claude-gone"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := newMockAgentServer(t)
+			defer mock.Close()
+
+			log := newSessionTestLogger()
+			stopCh := newTestStopCh(t)
+			sm := NewSessionManager(log, stopCh)
+			streamMgr := NewStreamManager(log, StreamCallbacks{
+				OnAgentEvent: func(execution *AgentExecution, event agentctl.AgentEvent) {},
+			}, nil, stopCh)
+			cleanupStreamManager(t, stopCh, streamMgr)
+			eventBus := &MockEventBusWithTracking{}
+			sm.SetDependencies(NewEventPublisher(eventBus, log), streamMgr, nil, nil)
+
+			client := createTestClient(t, mock.server.URL)
+			defer client.Close()
+			execution := &AgentExecution{
+				ID:            "exec-1",
+				TaskID:        "task-1",
+				SessionID:     "session-1",
+				WorkspacePath: "/workspace",
+				agentctl:      client,
+				promptDoneCh:  make(chan PromptCompletionSignal, 1),
+			}
+			// Advertise only gpt-5; the policy model (claude-gone) is missing.
+			execution.SetModelState(modelState("gpt-5"))
+			agentConfig := &testAgent{
+				id:      "test-agent",
+				enabled: true,
+				runtimeConfig: &agents.RuntimeConfig{
+					Cmd:            agents.NewCommand("test-agent"),
+					Protocol:       agent.ProtocolACP,
+					SessionConfig:  agents.SessionConfig{},
+					ResourceLimits: agents.ResourceLimits{MemoryMB: 512, CPUCores: 0.5, Timeout: time.Hour},
+				},
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			err := sm.InitializeAndPromptWithLayers(
+				ctx, execution, agentConfig, "", nil, nil,
+				func(executionID string) error { return nil },
+				tc.profileModel, "plan", nil,
+				tc.runtimeModel, "", nil,
+				StartModelPolicy{},
+			)
+			if err != nil {
+				t.Fatalf("unadvertised model should not fail launch: %v", err)
+			}
+			if !execution.sessionInitialized {
+				t.Error("provider-default continuation must be marked initialized")
+			}
+			for _, action := range mock.getActionLog() {
+				if action == "agent.session.set_model" {
+					t.Error("unadvertised model must not send a SetModel request")
+				}
+			}
+			var warning *AgentStreamEventPayload
+			for _, event := range eventBus.getStreamEvents() {
+				if event.Data != nil && event.Data.ModelSelectionWarning != nil {
+					warning = &event
+					break
+				}
+			}
+			if warning == nil {
+				t.Fatal("expected a model-selection warning event")
+			}
+			if warning.Data.ModelSelectionWarning.RequestedModel != "claude-gone" {
+				t.Errorf("warning requested model = %q, want claude-gone", warning.Data.ModelSelectionWarning.RequestedModel)
+			}
+		})
+	}
+}
+
+// TestInitializeAndPrompt_AppliesStartModelPolicyExactlyOnce verifies the
+// start-model policy's SetModel is not repeated by the profile layers: the
+// policy applies the model, then the layers must only record it as applied
+// (a second SetModel would be a redundant ACP round-trip whose failure would
+// be silently logged while the session still starts).
+func TestInitializeAndPrompt_AppliesStartModelPolicyExactlyOnce(t *testing.T) {
+	mock := newMockAgentServer(t)
+	defer mock.Close()
+
+	log := newSessionTestLogger()
+	stopCh := newTestStopCh(t)
+	sm := NewSessionManager(log, stopCh)
+	streamMgr := NewStreamManager(log, StreamCallbacks{
+		OnAgentEvent: func(execution *AgentExecution, event agentctl.AgentEvent) {},
+	}, nil, stopCh)
+	cleanupStreamManager(t, stopCh, streamMgr)
+	sm.SetDependencies(NewEventPublisher(&MockEventBusWithTracking{}, log), streamMgr, nil, nil)
+
+	client := createTestClient(t, mock.server.URL)
+	defer client.Close()
+	execution := &AgentExecution{
+		ID:            "exec-1",
+		TaskID:        "task-1",
+		SessionID:     "session-1",
+		WorkspacePath: "/workspace",
+		agentctl:      client,
+		promptDoneCh:  make(chan PromptCompletionSignal, 1),
+	}
+	execution.SetModelState(modelState("gpt-5"))
+	agentConfig := &testAgent{
+		id:      "test-agent",
+		enabled: true,
+		runtimeConfig: &agents.RuntimeConfig{
+			Cmd:            agents.NewCommand("test-agent"),
+			Protocol:       agent.ProtocolACP,
+			SessionConfig:  agents.SessionConfig{},
+			ResourceLimits: agents.ResourceLimits{MemoryMB: 512, CPUCores: 0.5, Timeout: time.Hour},
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, nil,
+		func(executionID string) error { return nil },
+		StartModelPolicy{Model: "gpt-5"}, "plan", nil)
+	if err != nil {
+		t.Fatalf("InitializeAndPrompt failed: %v", err)
+	}
+	setModelCalls := 0
+	for _, action := range mock.getActionLog() {
+		if action == "agent.session.set_model" {
+			setModelCalls++
+		}
+	}
+	if setModelCalls != 1 {
+		t.Fatalf("set_model calls = %d, want exactly 1 (the policy applies the model once)", setModelCalls)
+	}
+}
+
+// TestInitializeAndPrompt_AutoFallbackFailureDoesNotRetryModel verifies that
+// the legacy best-effort policy owns its failed SetModel attempt. The profile
+// layers must not send the same request a second time after the policy has
+// deliberately continued on the provider default.
+func TestInitializeAndPrompt_AutoFallbackFailureDoesNotRetryModel(t *testing.T) {
+	mock := newMockAgentServer(t)
+	defer mock.Close()
+	mock.handler = func(msg ws.Message) *ws.Message {
+		if msg.Action == "agent.session.set_model" {
+			resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "model unavailable", nil)
+			return resp
+		}
+		return mock.defaultHandler(msg)
+	}
+
+	log := newSessionTestLogger()
+	stopCh := newTestStopCh(t)
+	sm := NewSessionManager(log, stopCh)
+	streamMgr := NewStreamManager(log, StreamCallbacks{
+		OnAgentEvent: func(execution *AgentExecution, event agentctl.AgentEvent) {},
+	}, nil, stopCh)
+	cleanupStreamManager(t, stopCh, streamMgr)
+	eventBus := &MockEventBusWithTracking{}
+	sm.SetDependencies(NewEventPublisher(eventBus, log), streamMgr, nil, nil)
+
+	client := createTestClient(t, mock.server.URL)
+	defer client.Close()
+	execution := &AgentExecution{
+		ID:            "exec-1",
+		TaskID:        "task-1",
+		SessionID:     "session-1",
+		WorkspacePath: "/workspace",
+		agentctl:      client,
+		promptDoneCh:  make(chan PromptCompletionSignal, 1),
+	}
+	execution.SetModelState(&CachedModelState{
+		CurrentModelID: "provider-default",
+		Models:         []streams.SessionModelInfo{{ModelID: "gpt-5"}},
+	})
+	agentConfig := &testAgent{
+		id:      "test-agent",
+		enabled: true,
+		runtimeConfig: &agents.RuntimeConfig{
+			Cmd:            agents.NewCommand("test-agent"),
+			Protocol:       agent.ProtocolACP,
+			SessionConfig:  agents.SessionConfig{},
+			ResourceLimits: agents.ResourceLimits{MemoryMB: 512, CPUCores: 0.5, Timeout: time.Hour},
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, nil,
+		func(executionID string) error { return nil },
+		StartModelPolicy{Model: "gpt-5", AutoFallback: true}, "plan", nil)
+	if err != nil {
+		t.Fatalf("InitializeAndPrompt failed: %v", err)
+	}
+
+	setModelCalls := 0
+	for _, action := range mock.getActionLog() {
+		if action == "agent.session.set_model" {
+			setModelCalls++
+		}
+	}
+	if setModelCalls != 1 {
+		t.Fatalf("set_model calls = %d, want exactly 1 policy attempt", setModelCalls)
+	}
+
+	var original *AgentStreamEventPayload
+	for _, event := range eventBus.getStreamEvents() {
+		if event.Data != nil && originalConfigEventData(event.Data.Data) {
+			original = &event
+			break
+		}
+	}
+	if original == nil {
+		t.Fatal("expected original configuration snapshot")
+	}
+	if original.Data.CurrentModelID != "provider-default" {
+		t.Fatalf("original model = %q, want provider-default after failed policy attempt", original.Data.CurrentModelID)
+	}
+}
+
 func TestInitializeAndPrompt_StreamBeforeInitialize(t *testing.T) {
 	// This test verifies the critical ordering: stream connects BEFORE initialize is called.
 	mock := newMockAgentServer(t)
@@ -285,7 +514,7 @@ func TestInitializeAndPrompt_StreamBeforeInitialize(t *testing.T) {
 
 	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, nil, func(executionID string) error {
 		return nil
-	}, "", "", nil)
+	}, StartModelPolicy{}, "", nil)
 	if err != nil {
 		t.Fatalf("InitializeAndPrompt failed: %v", err)
 	}
@@ -366,7 +595,7 @@ func TestInitializeAndPrompt_AppliesProfileConfigOptions(t *testing.T) {
 	defer cancel()
 	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, nil, func(executionID string) error {
 		return nil
-	}, "sonnet", "plan", map[string]string{
+	}, StartModelPolicy{Model: "sonnet"}, "plan", map[string]string{
 		"effort": "high",
 		"model":  "ignored",
 		"mode":   "ignored",
@@ -377,7 +606,6 @@ func TestInitializeAndPrompt_AppliesProfileConfigOptions(t *testing.T) {
 
 	actions := mock.getActionLog()
 	for _, want := range []string{
-		"agent.session.set_model",
 		"agent.session.set_mode",
 		"agent.session.set_config_option",
 	} {
@@ -474,6 +702,32 @@ func TestPublishSettledConfigOptionsAppliesToDelayedModelState(t *testing.T) {
 	}
 	if got := configValueByID(settled.ConfigOptions, "effort"); got != "high" {
 		t.Errorf("settled effort = %q, want high", got)
+	}
+}
+
+func TestPublishSettledConfigOptionsAllowsEmptyProviderSnapshot(t *testing.T) {
+	log := newSessionTestLogger()
+	eventBus := &MockEventBusWithTracking{}
+	publisher := NewEventPublisher(eventBus, log)
+	sm := NewSessionManager(log, nil)
+	sm.SetDependencies(publisher, nil, nil, nil)
+	execution := &AgentExecution{ID: "exec-1", TaskID: "task-1", SessionID: "session-1"}
+	execution.SetModelState(&CachedModelState{
+		CurrentModelID: "claude-opus-4-8",
+		Models:         []streams.SessionModelInfo{{ModelID: "claude-opus-4-8", Name: "Claude Opus 4.8"}},
+	})
+
+	sm.publishSettledConfigOptions(execution, "acp-session-1", "", nil)
+
+	settled := eventBus.getStreamEvents()
+	if len(settled) != 1 {
+		t.Fatalf("settled event count = %d, want one empty-config snapshot", len(settled))
+	}
+	if !settledConfigEventData(settled[0].Data.Data) {
+		t.Fatal("empty-config snapshot must carry the settlement marker")
+	}
+	if len(settled[0].Data.ConfigOptions) != 0 {
+		t.Fatalf("settled config options = %#v, want empty", settled[0].Data.ConfigOptions)
 	}
 }
 
@@ -811,7 +1065,7 @@ func TestInitializeAndPrompt_StreamTimeout(t *testing.T) {
 
 	err = sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, nil, func(executionID string) error {
 		return nil
-	}, "", "", nil)
+	}, StartModelPolicy{}, "", nil)
 
 	// Should fail because stream couldn't connect and Initialize fails
 	if err == nil {
@@ -866,7 +1120,7 @@ func TestInitializeAndPrompt_WithTaskDescription(t *testing.T) {
 
 	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "Build a feature", nil, nil, func(executionID string) error {
 		return nil
-	}, "", "", nil)
+	}, StartModelPolicy{}, "", nil)
 	if err != nil {
 		t.Fatalf("InitializeAndPrompt failed: %v", err)
 	}
@@ -934,7 +1188,7 @@ func TestInitializeAndPrompt_NoStreamManager(t *testing.T) {
 	// But it should NOT panic due to nil streamManager.
 	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, nil, func(executionID string) error {
 		return nil
-	}, "", "", nil)
+	}, StartModelPolicy{}, "", nil)
 
 	// Expect error because Initialize call over WS will fail (stream not connected)
 	if err == nil {
@@ -1875,6 +2129,138 @@ func TestWaitForPromptDone_PublishesSingleStall(t *testing.T) {
 			t.Fatalf("waitForPromptDone error = %v, want context canceled", err)
 		}
 	})
+}
+
+func TestMarkPromptDispatchedArmsActivityAfterDispatch(t *testing.T) {
+	store := NewExecutionStore()
+	execution := &AgentExecution{
+		ID:                         "test-exec",
+		SessionID:                  "test-session",
+		promptGeneration:           3,
+		agentEventSincePrompt:      true,
+		promptActivityEpoch:        2,
+		promptCompletionGeneration: 0,
+	}
+	if err := store.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+	sm := NewSessionManager(newSessionTestLogger(), make(chan struct{}))
+	sm.executionStore = store
+
+	sm.markPromptDispatched(execution, 3)
+
+	_, agentEventSeen, epoch := execution.promptActivitySnapshot()
+	if agentEventSeen {
+		t.Fatal("prompt dispatch left the previous activity marker armed")
+	}
+	if epoch != 3 {
+		t.Fatalf("activity epoch = %d, want 3 after dispatch", epoch)
+	}
+}
+
+// TestWaitForPromptDone_StallPayloadDiscriminatesNeverStarted verifies that
+// agentEventSincePrompt (armed false on dispatch, set true only by a genuine
+// agent event) is threaded into the published stall payload's NeverStarted
+// field: dispatch-only silence reports NeverStarted true, and the same
+// execution reports NeverStarted false once a real agent event has recorded
+// activity for the current prompt.
+func TestWaitForPromptDone_StallPayloadDiscriminatesNeverStarted(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		eventBus := &MockEventBusWithTracking{}
+		sm := NewSessionManager(newSessionTestLogger(), make(chan struct{}))
+		sm.eventPublisher = NewEventPublisher(eventBus, newSessionTestLogger())
+		execution := &AgentExecution{
+			ID:           "test-exec",
+			TaskID:       "test-task",
+			SessionID:    "test-session",
+			promptDoneCh: make(chan PromptCompletionSignal, 1),
+		}
+		// Mirrors sendPrompt's dispatch bump: activity timestamp moves, but the
+		// discriminator is armed false because no agent event has arrived yet.
+		execution.lastActivityAt = time.Now()
+		execution.agentEventSincePrompt = false
+
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+		waitResult := make(chan error, 1)
+		go func() {
+			_, err := sm.waitForPromptDone(ctx, execution, 7)
+			waitResult <- err
+		}()
+
+		time.Sleep(5 * time.Minute)
+		synctest.Wait()
+
+		payload := lastStalledPayload(t, eventBus)
+		if !payload.NeverStarted {
+			t.Fatalf("NeverStarted = false, want true for dispatch-only silence")
+		}
+
+		cancel()
+		if err := <-waitResult; !errors.Is(err, context.Canceled) {
+			t.Fatalf("waitForPromptDone error = %v, want context canceled", err)
+		}
+	})
+}
+
+func TestWaitForPromptDone_StallPayloadReportsRunningAfterAgentEvent(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		eventBus := &MockEventBusWithTracking{}
+		sm := NewSessionManager(newSessionTestLogger(), make(chan struct{}))
+		sm.eventPublisher = NewEventPublisher(eventBus, newSessionTestLogger())
+		execution := &AgentExecution{
+			ID:           "test-exec",
+			TaskID:       "test-task",
+			SessionID:    "test-session",
+			promptDoneCh: make(chan PromptCompletionSignal, 1),
+			Status:       v1.AgentStatusRunning,
+		}
+		execution.lastActivityAt = time.Now()
+		execution.agentEventSincePrompt = false
+
+		mgr := &Manager{eventPublisher: sm.eventPublisher}
+		mgr.recordActivity(execution, agentctl.AgentEvent{Type: "message_chunk"})
+
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+		waitResult := make(chan error, 1)
+		go func() {
+			_, err := sm.waitForPromptDone(ctx, execution, 7)
+			waitResult <- err
+		}()
+
+		time.Sleep(5 * time.Minute)
+		synctest.Wait()
+
+		payload := lastStalledPayload(t, eventBus)
+		if payload.NeverStarted {
+			t.Fatalf("NeverStarted = true, want false once a genuine agent event recorded activity")
+		}
+
+		cancel()
+		if err := <-waitResult; !errors.Is(err, context.Canceled) {
+			t.Fatalf("waitForPromptDone error = %v, want context canceled", err)
+		}
+	})
+}
+
+func lastStalledPayload(t *testing.T, eventBus *MockEventBusWithTracking) AgentStalledPayload {
+	t.Helper()
+	eventBus.mu.Lock()
+	defer eventBus.mu.Unlock()
+	for i := len(eventBus.PublishedEvents) - 1; i >= 0; i-- {
+		te := eventBus.PublishedEvents[i]
+		if te.Subject != "agent.stalled" {
+			continue
+		}
+		payload, ok := te.Event.Data.(AgentStalledPayload)
+		if !ok {
+			t.Fatalf("agent.stalled event data = %#v, want AgentStalledPayload", te.Event.Data)
+		}
+		return payload
+	}
+	t.Fatalf("no agent.stalled event published")
+	return AgentStalledPayload{}
 }
 
 func countPublishedEvents(eventBus *MockEventBusWithTracking, subject string) int {

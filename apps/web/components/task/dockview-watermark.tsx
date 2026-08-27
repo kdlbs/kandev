@@ -155,7 +155,7 @@ function useWatermarkHandlers(
           groupId,
           environmentId,
           undefined,
-          result.label ?? "Script",
+          result.label ?? t("common:script"),
         );
       } catch (error) {
         console.error("Failed to run script:", error);

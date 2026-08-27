@@ -5,23 +5,27 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/kandev/kandev/internal/steptelemetry"
 )
 
 // fakeTaskCreator records every CreateChildTask invocation.
 type fakeTaskCreator struct {
 	calls []struct {
-		ParentID string
-		Spec     ChildTaskSpec
+		ParentID    string
+		Spec        ChildTaskSpec
+		Attribution steptelemetry.Attribution
 	}
 	returnedID string
 	err        error
 }
 
-func (f *fakeTaskCreator) CreateChildTask(_ context.Context, parentID string, spec ChildTaskSpec) (string, error) {
+func (f *fakeTaskCreator) CreateChildTask(ctx context.Context, parentID string, spec ChildTaskSpec) (string, error) {
 	f.calls = append(f.calls, struct {
-		ParentID string
-		Spec     ChildTaskSpec
-	}{ParentID: parentID, Spec: spec})
+		ParentID    string
+		Spec        ChildTaskSpec
+		Attribution steptelemetry.Attribution
+	}{ParentID: parentID, Spec: spec, Attribution: steptelemetry.FromContext(ctx)})
 	if f.err != nil {
 		return "", f.err
 	}
@@ -78,6 +82,63 @@ func TestCreateChildTaskCallback_HappyPath(t *testing.T) {
 	}
 }
 
+// TestCreateChildTaskCallback_AttributesCausalSession proves the fix for
+// Review round 3's must-fix #1: CreateChildTaskCallback is the sibling of
+// SwitchWorkflowCallback in the same file, and had the identical gap round 2
+// fixed for switch_workflow left unfixed here — the bare engine-internal ctx
+// flowed straight to the Creator even though in.State.SessionID was
+// populated, so the new child task's genesis row fell through to the
+// session-less authn seam and recorded actor_kind=system for a session-
+// caused creation. Execute must wrap ctx with the causal session's
+// attribution before calling Creator.CreateChildTask, mirroring
+// SwitchWorkflowCallback.Execute.
+func TestCreateChildTaskCallback_AttributesCausalSession(t *testing.T) {
+	creator := &fakeTaskCreator{returnedID: "child-1"}
+	cb := CreateChildTaskCallback{Creator: creator}
+	spec := &CreateChildTaskAction{Title: "Fix bug", WorkflowID: "wf-kanban"}
+	if _, err := cb.Execute(context.Background(), newCreateChildTaskInput(spec)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(creator.calls) != 1 {
+		t.Fatalf("expected 1 CreateChildTask call, got %d", len(creator.calls))
+	}
+	got := creator.calls[0].Attribution
+	if got.ActorKind != steptelemetry.ActorAgent {
+		t.Errorf("actor_kind = %q, want %q (the trigger's session caused this creation)", got.ActorKind, steptelemetry.ActorAgent)
+	}
+	if got.ActorID != "sess-1" {
+		t.Errorf("actor_id = %q, want sess-1", got.ActorID)
+	}
+	if got.SessionID != "sess-1" {
+		t.Errorf("session_id = %q, want sess-1", got.SessionID)
+	}
+}
+
+// TestCreateChildTaskCallback_NoSessionLeavesCtxUnwrapped covers the no-
+// session case (e.g. a future non-session-originated trigger): Execute must
+// not fabricate a session, and the genesis row falls back to its existing
+// default (the authn seam) rather than a guessed agent identity.
+func TestCreateChildTaskCallback_NoSessionLeavesCtxUnwrapped(t *testing.T) {
+	creator := &fakeTaskCreator{returnedID: "child-1"}
+	cb := CreateChildTaskCallback{Creator: creator}
+	spec := &CreateChildTaskAction{Title: "Fix bug", WorkflowID: "wf-kanban"}
+	in := newCreateChildTaskInput(spec)
+	in.State.SessionID = ""
+	if _, err := cb.Execute(context.Background(), in); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(creator.calls) != 1 {
+		t.Fatalf("expected 1 CreateChildTask call, got %d", len(creator.calls))
+	}
+	got := creator.calls[0].Attribution
+	if got.ActorKind == steptelemetry.ActorAgent {
+		t.Errorf("actor_kind = %q, want anything but agent (no session to attribute to)", got.ActorKind)
+	}
+	if got.ActorID != "" {
+		t.Errorf("actor_id = %q, want empty", got.ActorID)
+	}
+}
+
 func TestCreateChildTaskCallback_RequiresCreator(t *testing.T) {
 	cb := CreateChildTaskCallback{}
 	_, err := cb.Execute(context.Background(), newCreateChildTaskInput(&CreateChildTaskAction{Title: "x"}))
@@ -119,15 +180,17 @@ func TestCreateChildTaskCallback_RequiresTaskID(t *testing.T) {
 type fakeWorkflowSwitcher struct {
 	calls []struct {
 		TaskID, WorkflowID, StepID string
+		Attribution                steptelemetry.Attribution
 	}
 	resolvedStep string
 	err          error
 }
 
-func (f *fakeWorkflowSwitcher) SwitchTaskWorkflow(_ context.Context, taskID, wfID, stepID string) (string, error) {
+func (f *fakeWorkflowSwitcher) SwitchTaskWorkflow(ctx context.Context, taskID, wfID, stepID string) (string, error) {
 	f.calls = append(f.calls, struct {
 		TaskID, WorkflowID, StepID string
-	}{TaskID: taskID, WorkflowID: wfID, StepID: stepID})
+		Attribution                steptelemetry.Attribution
+	}{TaskID: taskID, WorkflowID: wfID, StepID: stepID, Attribution: steptelemetry.FromContext(ctx)})
 	if f.err != nil {
 		return "", f.err
 	}
@@ -202,6 +265,40 @@ func TestSwitchWorkflowCallback_HappyPath(t *testing.T) {
 	// Idempotency keys must be distinct so on_exit and on_enter both apply.
 	if rec.calls[0].OperationID == rec.calls[1].OperationID {
 		t.Errorf("on_exit and on_enter share operation id %q", rec.calls[0].OperationID)
+	}
+}
+
+// TestSwitchWorkflowCallback_AttributesCausalSession proves the fix for
+// Review round 2's must-fix #1: Execute validates in.State.SessionID is
+// non-empty before doing anything, so a switch_workflow action is always
+// genuinely caused by that session's turn. It must wrap ctx with that
+// session as the actor before calling Switcher.SwitchTaskWorkflow, rather
+// than leaving the switcher to fall back to the (session-less) authn seam
+// and silently record actor_kind=system.
+func TestSwitchWorkflowCallback_AttributesCausalSession(t *testing.T) {
+	switcher := &fakeWorkflowSwitcher{resolvedStep: "new-first-step"}
+	cb := SwitchWorkflowCallback{Switcher: switcher}
+	spec := &SwitchWorkflowAction{WorkflowID: "wf-office"}
+	in := newSwitchWorkflowInput(spec)
+	in.State.SessionID = "sess-causal"
+	if _, err := cb.Execute(context.Background(), in); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(switcher.calls) != 1 {
+		t.Fatalf("expected 1 SwitchTaskWorkflow call, got %d", len(switcher.calls))
+	}
+	got := switcher.calls[0].Attribution
+	if got.Trigger != steptelemetry.TriggerWorkflowAttached {
+		t.Errorf("trigger = %q, want %q", got.Trigger, steptelemetry.TriggerWorkflowAttached)
+	}
+	if got.ActorKind != steptelemetry.ActorAgent {
+		t.Errorf("actor_kind = %q, want %q (the trigger's session is causal, not the authn seam)", got.ActorKind, steptelemetry.ActorAgent)
+	}
+	if got.ActorID != "sess-causal" {
+		t.Errorf("actor_id = %q, want sess-causal", got.ActorID)
+	}
+	if got.SessionID != "sess-causal" {
+		t.Errorf("session_id = %q, want sess-causal", got.SessionID)
 	}
 }
 

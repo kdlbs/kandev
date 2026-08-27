@@ -8,9 +8,41 @@ import {
   ReviewProgressBar,
   PRFilesSection,
 } from "./changes-panel-timeline";
-import { mergeCommits, firstVisibleSection } from "./changes-panel-helpers";
+import {
+  firstVisibleSection,
+  mergeCommits,
+  separateCommitHistories,
+} from "./changes-panel-helpers";
 import type { ChangesPanelBodyProps } from "./changes-panel-data";
 import { useTranslation } from "react-i18next";
+import { IconAlertTriangle } from "@tabler/icons-react";
+
+function ComparisonTargetNotice({
+  comparisonTargets,
+  comparisonUnavailable,
+}: Pick<ChangesPanelBodyProps, "comparisonTargets" | "comparisonUnavailable">) {
+  const { t } = useTranslation();
+  if (!comparisonUnavailable) return null;
+
+  const targetLabel = comparisonTargets.join(", ") || t("task:comparisonTargetUnknown");
+  return (
+    <div
+      className="mx-3 mt-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-xs"
+      data-testid="comparison-target-notice"
+      role="alert"
+    >
+      <div className="flex min-w-0 items-start gap-2">
+        <IconAlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
+        <div className="min-w-0">
+          <p className="font-medium text-foreground">{t("task:comparisonTargetUnavailable")}</p>
+          <p className="break-words text-muted-foreground">
+            {t("task:comparisonTargetUnavailableDescription", { target: targetLabel })}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function ChangesPanelDialogsSection({
   dialogs,
@@ -20,9 +52,10 @@ function ChangesPanelDialogsSection({
     <>
       <DiscardDialog
         open={dialogs.showDiscardDialog}
-        onOpenChange={dialogs.setShowDiscardDialog}
+        onOpenChange={dialogs.handleDiscardOpenChange}
         fileToDiscard={dialogs.fileToDiscard}
         filesToDiscard={dialogs.filesToDiscard}
+        anchorRef={dialogs.discardAnchorRef}
         onConfirm={dialogs.handleDiscardConfirm}
       />
       <AmendDialog
@@ -51,6 +84,12 @@ type TimelineProps = Pick<
   | "hasStaged"
   | "hasCommits"
   | "hasPRFiles"
+  | "relation"
+  | "resolution"
+  | "resolutionTarget"
+  | "providerPRNumber"
+  | "pushDisabled"
+  | "pullDisabled"
   | "canPush"
   | "canCreatePR"
   | "existingPrUrl"
@@ -165,18 +204,97 @@ function WorkingTreeSections(props: WorkingTreeProps) {
   );
 }
 
-function ChangesPanelTimeline(props: TimelineProps) {
+function CommitHistorySections({
+  props,
+  isDiverged,
+  defaultCollapsed,
+  mergedCommits,
+  separated,
+}: {
+  props: TimelineProps;
+  isDiverged: boolean;
+  defaultCollapsed: boolean;
+  mergedCommits: ReturnType<typeof mergeCommits>;
+  separated: ReturnType<typeof separateCommitHistories>;
+}) {
   const { t } = useTranslation();
-  if (!props.hasAnything) {
+  if (isDiverged) {
     return (
-      <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
-        {t("task:yourChangedFilesWillAppearHere")}
-      </div>
+      <>
+        {separated.localCommits.length > 0 && (
+          <CommitsSection
+            commits={separated.localCommits}
+            label={t("task:localCheckoutCommits")}
+            testId="local-checkout-commits-section"
+            defaultCollapsed={defaultCollapsed}
+            pushDisabled={props.pushDisabled}
+            onOpenCommitDetail={props.onOpenCommitDetail}
+            onRevertCommit={props.onRevertCommit}
+            onAmendCommit={props.dialogs.handleOpenAmendDialog}
+            onResetToCommit={props.dialogs.handleOpenResetDialog}
+            onRepoPush={props.onRepoPush}
+            onRepoCreatePR={props.onRepoCreatePR}
+            repoDisplayName={props.repoDisplayName}
+            perRepoStatus={props.perRepoStatus}
+            prByRepo={props.prByRepo}
+          />
+        )}
+        {separated.providerCommits.length > 0 && (
+          <CommitsSection
+            commits={separated.providerCommits}
+            label={t("task:prNumberVersion", { number: props.providerPRNumber ?? "" })}
+            testId="current-pr-commits-section"
+            defaultCollapsed
+            showActions={false}
+            onOpenCommitDetail={props.onOpenCommitDetail}
+            repoDisplayName={props.repoDisplayName}
+            perRepoStatus={props.perRepoStatus}
+          />
+        )}
+      </>
     );
   }
 
-  const mergedCommits = mergeCommits(props.commits, props.prCommits);
-  const hasMergedCommits = mergedCommits.length > 0;
+  return (
+    <CommitsSection
+      commits={mergedCommits}
+      defaultCollapsed={defaultCollapsed}
+      onOpenCommitDetail={props.onOpenCommitDetail}
+      onRevertCommit={props.onRevertCommit}
+      onAmendCommit={props.dialogs.handleOpenAmendDialog}
+      onResetToCommit={props.dialogs.handleOpenResetDialog}
+      onRepoPush={props.onRepoPush}
+      onRepoCreatePR={props.onRepoCreatePR}
+      repoDisplayName={props.repoDisplayName}
+      perRepoStatus={props.perRepoStatus}
+      prByRepo={props.prByRepo}
+      pushDisabled={props.pushDisabled}
+    />
+  );
+}
+
+function EmptyChangesPanel() {
+  const { t } = useTranslation();
+  return (
+    <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
+      {t("task:yourChangedFilesWillAppearHere")}
+    </div>
+  );
+}
+
+function ChangesPanelTimeline(props: TimelineProps) {
+  if (!props.hasAnything) {
+    return <EmptyChangesPanel />;
+  }
+
+  const isDiverged = props.relation.presentation === "separate";
+  const separated = isDiverged
+    ? separateCommitHistories(props.commits, props.prCommits)
+    : { providerCommits: [], localCommits: [] };
+  const mergedCommits = isDiverged ? [] : mergeCommits(props.commits, props.prCommits);
+  const hasMergedCommits = isDiverged
+    ? separated.providerCommits.length > 0 || separated.localCommits.length > 0
+    : mergedCommits.length > 0;
   const hasLocalChanges = props.hasUnstaged || props.hasStaged;
   const showCommitsList = props.hasStaged || hasMergedCommits;
   // Auto-expand the first (topmost) visible section so the panel never opens
@@ -217,18 +335,12 @@ function ChangesPanelTimeline(props: TimelineProps) {
       )}
 
       {showCommitsList && (
-        <CommitsSection
-          commits={mergedCommits}
+        <CommitHistorySections
+          props={props}
+          isDiverged={isDiverged}
           defaultCollapsed={firstSection !== "commits"}
-          onOpenCommitDetail={props.onOpenCommitDetail}
-          onRevertCommit={props.onRevertCommit}
-          onAmendCommit={props.dialogs.handleOpenAmendDialog}
-          onResetToCommit={props.dialogs.handleOpenResetDialog}
-          onRepoPush={props.onRepoPush}
-          onRepoCreatePR={props.onRepoCreatePR}
-          repoDisplayName={props.repoDisplayName}
-          perRepoStatus={props.perRepoStatus}
-          prByRepo={props.prByRepo}
+          mergedCommits={mergedCommits}
+          separated={separated}
         />
       )}
     </div>
@@ -238,6 +350,10 @@ function ChangesPanelTimeline(props: TimelineProps) {
 export function ChangesPanelBody(props: ChangesPanelBodyProps) {
   return (
     <PanelBody className="flex flex-col">
+      <ComparisonTargetNotice
+        comparisonTargets={props.comparisonTargets}
+        comparisonUnavailable={props.comparisonUnavailable}
+      />
       <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
         <ChangesPanelTimeline {...props} />
       </div>

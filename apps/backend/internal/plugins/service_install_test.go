@@ -259,19 +259,41 @@ func TestServiceInstall_AllowsPackageAtOrBelowRunningKandevVersion(t *testing.T)
 	}
 }
 
+func TestServiceInstall_NormalizesReleaseTagBeforeEnforcingMinKandevVersion(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	svc.SetKandevVersion("v1.0.0")
+
+	_, err := svc.Install(context.Background(), minKandevVersionPackage(t, "kandev-plugin-slack", "1.0.0", "2.0.0"))
+	if err == nil {
+		t.Fatal("Install() expected a tagged running version below min_kandev_version to be rejected")
+	}
+}
+
+func TestServiceInstall_SkipsMinKandevVersionForNonReleaseBuildVersion(t *testing.T) {
+	for _, version := range []string{"v1.2.3-4-gabcdef"} {
+		t.Run(version, func(t *testing.T) {
+			svc, _, _ := newTestService(t)
+			svc.SetKandevVersion(version)
+
+			rec, err := svc.Install(context.Background(), minKandevVersionPackage(t, "kandev-plugin-slack", "1.0.0", "999.0.0"))
+			if err != nil {
+				t.Fatalf("Install() with non-release build version %q: %v", version, err)
+			}
+			if rec.Status != StatusActive {
+				t.Fatalf("Install() Status = %q, want %q", rec.Status, StatusActive)
+			}
+		})
+	}
+}
+
 // TestServiceInstall_NoEnforcementOnDevBuild pins the dev-build escape
 // hatch. An un-stamped local build reports the "dev" sentinel, and a
 // developer running from source must still be able to install any package —
 // exactly as before this check was wired up in production.
 //
-// The escape hatch has to be explicit rather than left to
-// manifest.CompareVersions, because "dev" is not a version and that function
-// falls back to a plain strings.Compare when a segment won't parse. Which
-// side wins then is an accident of the alphabet: "dev" happens to sort above
-// a bare "999.0.0", but below anything starting past 'd' — and
-// min_kandev_version is a free-form manifest string, so a "v"-prefixed value
-// like "v1.0.0" is a spelling an author can (and does) write. Without the
-// sentinel skip that spelling locks every dev build out of the plugin.
+// The escape hatch is explicit because "dev" is not a release boundary. It
+// must skip enforcement regardless of whether the manifest minimum is bare
+// or carries the leading `v` accepted for release values.
 func TestServiceInstall_NoEnforcementOnDevBuild(t *testing.T) {
 	for _, minVersion := range []string{"999.0.0", "v1.0.0"} {
 		t.Run(minVersion, func(t *testing.T) {

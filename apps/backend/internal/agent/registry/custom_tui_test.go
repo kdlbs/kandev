@@ -8,7 +8,7 @@ func TestRegisterCustomTUIAgent_Success(t *testing.T) {
 	log := newTestLogger()
 	reg := NewRegistry(log)
 
-	err := reg.RegisterCustomTUIAgent("my-agent", "My Agent", "my-agent --verbose", "A test agent", "", nil)
+	err := reg.RegisterCustomTUIAgent(CustomTUIAgentSpec{Slug: "my-agent", DisplayName: "My Agent", Command: "my-agent --verbose", Description: "A test agent", Model: ""})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -41,7 +41,7 @@ func TestRegisterCustomTUIAgent_ModelTemplate(t *testing.T) {
 	log := newTestLogger()
 	reg := NewRegistry(log)
 
-	err := reg.RegisterCustomTUIAgent("tmpl-agent", "Template", "my-cli --model {{model}}", "", "best", nil)
+	err := reg.RegisterCustomTUIAgent(CustomTUIAgentSpec{Slug: "tmpl-agent", DisplayName: "Template", Command: "my-cli --model {{model}}", Description: "", Model: "best"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestRegisterCustomTUIAgent_ModelTemplateNotReplacedWhenEmpty(t *testing.T) 
 	log := newTestLogger()
 	reg := NewRegistry(log)
 
-	err := reg.RegisterCustomTUIAgent("no-model", "No Model", "cli --model {{model}}", "", "", nil)
+	err := reg.RegisterCustomTUIAgent(CustomTUIAgentSpec{Slug: "no-model", DisplayName: "No Model", Command: "cli --model {{model}}", Description: "", Model: ""})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestRegisterCustomTUIAgent_CommandArgs(t *testing.T) {
 	log := newTestLogger()
 	reg := NewRegistry(log)
 
-	err := reg.RegisterCustomTUIAgent("extra-args", "Extra", "my-cli", "", "", []string{"--extra", "--flag"})
+	err := reg.RegisterCustomTUIAgent(CustomTUIAgentSpec{Slug: "extra-args", DisplayName: "Extra", Command: "my-cli", Description: "", Model: "", CommandArgs: []string{"--extra", "--flag"}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestRegisterCustomTUIAgent_EmptyCommand(t *testing.T) {
 	log := newTestLogger()
 	reg := NewRegistry(log)
 
-	err := reg.RegisterCustomTUIAgent("empty-cmd", "Empty", "", "", "", nil)
+	err := reg.RegisterCustomTUIAgent(CustomTUIAgentSpec{Slug: "empty-cmd", DisplayName: "Empty", Command: "", Description: "", Model: ""})
 	if err == nil {
 		t.Error("expected error for empty command")
 	}
@@ -117,8 +117,8 @@ func TestRegisterCustomTUIAgent_DuplicateID(t *testing.T) {
 	log := newTestLogger()
 	reg := NewRegistry(log)
 
-	_ = reg.RegisterCustomTUIAgent("dup-agent", "First", "first-cli", "", "", nil)
-	err := reg.RegisterCustomTUIAgent("dup-agent", "Second", "second-cli", "", "", nil)
+	_ = reg.RegisterCustomTUIAgent(CustomTUIAgentSpec{Slug: "dup-agent", DisplayName: "First", Command: "first-cli", Description: "", Model: ""})
+	err := reg.RegisterCustomTUIAgent(CustomTUIAgentSpec{Slug: "dup-agent", DisplayName: "Second", Command: "second-cli", Description: "", Model: ""})
 	if err == nil {
 		t.Error("expected error for duplicate registration")
 	}

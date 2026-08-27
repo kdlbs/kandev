@@ -54,10 +54,9 @@ describe("normalizeRepositorySelections", () => {
     { kind: "registered", id: "repo-b" },
   ];
 
-  it("keeps every selection when the executor supports multi-repo and it's not a PR trigger", () => {
+  it("keeps every selection when the executor supports multi-repo", () => {
     const result = normalizeRepositorySelections(two, {
       supportsMultiRepo: true,
-      isPRTrigger: false,
     });
     expect(result).toEqual(two);
   });
@@ -65,25 +64,12 @@ describe("normalizeRepositorySelections", () => {
   it("truncates to the first selection when the executor doesn't support multi-repo", () => {
     const result = normalizeRepositorySelections(two, {
       supportsMultiRepo: false,
-      isPRTrigger: false,
-    });
-    expect(result).toEqual([{ kind: "registered", id: "repo-a" }]);
-  });
-
-  it("truncates to the first selection for a github_pr trigger even with a multi-repo-capable executor", () => {
-    const result = normalizeRepositorySelections(two, {
-      supportsMultiRepo: true,
-      isPRTrigger: true,
     });
     expect(result).toEqual([{ kind: "registered", id: "repo-a" }]);
   });
 
   it("leaves an empty or single-entry list untouched", () => {
-    expect(
-      normalizeRepositorySelections([], { supportsMultiRepo: false, isPRTrigger: false }),
-    ).toEqual([]);
-    expect(
-      normalizeRepositorySelections([two[0]], { supportsMultiRepo: false, isPRTrigger: false }),
-    ).toEqual([two[0]]);
+    expect(normalizeRepositorySelections([], { supportsMultiRepo: false })).toEqual([]);
+    expect(normalizeRepositorySelections([two[0]], { supportsMultiRepo: false })).toEqual([two[0]]);
   });
 });

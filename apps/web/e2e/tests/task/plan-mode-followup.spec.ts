@@ -44,7 +44,23 @@ async function seedTaskAndWaitForIdle(
   // waitForChatIdle (not a raw idleInput wait) rides out the WS-subscribe race:
   // the auto-started agent can settle RUNNING->WAITING_FOR_INPUT before the
   // client subscribes, so the idle composer never renders without a reload.
-  await session.waitForChatIdle({ timeout: 30_000 });
+  try {
+    await session.waitForChatIdle({ timeout: 30_000, requireEditable: true });
+  } catch (error) {
+    // A heavily loaded worker can finish workspace preparation with a
+    // transient agent failure. The recovery action is the same bounded retry a
+    // user has in the session UI; use it once before failing the setup.
+    const freshButton = session.recoveryFreshButton();
+    if (!(await freshButton.isVisible().catch(() => false))) throw error;
+    await freshButton.click();
+    await expect(testPage.locator('[data-placeholder="Preparing workspace..."]')).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(testPage.locator('[data-placeholder="Preparing workspace..."]')).toBeHidden({
+      timeout: 60_000,
+    });
+    await session.waitForChatIdle({ timeout: 60_000, requireEditable: true });
+  }
 
   return { session, taskId: task.id, sessionId: task.session_id! };
 }
@@ -61,7 +77,7 @@ test.describe("Plan mode follow-up messages", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(150_000);
 
     const { session, sessionId } = await seedTaskAndWaitForIdle(
       testPage,

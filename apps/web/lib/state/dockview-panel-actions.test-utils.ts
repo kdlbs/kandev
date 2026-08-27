@@ -1,5 +1,6 @@
 import type { AddPanelOptions, DockviewApi } from "dockview-react";
 import { buildPanelActions } from "./dockview-panel-actions";
+import type { ScrollTarget } from "./dockview-panel-actions";
 import { CENTER_GROUP } from "./layout-manager";
 
 export type MockPanel = {
@@ -17,6 +18,11 @@ export type MockPanel = {
   setTitle: (t: string) => void;
 };
 
+/**
+ * Build a minimal `DockviewApi` mock backed by in-memory panel/group arrays,
+ * exposing `getPanel`/`getGroup`/`addPanel`/`removePanel` plus the active
+ * panel and groups/panels getters.
+ */
 export function makeApi(
   options: { centerGroupId?: string; extraGroupIds?: string[] } = {},
 ): DockviewApi {
@@ -24,6 +30,11 @@ export function makeApi(
   const panels: MockPanel[] = [];
   const groups = [{ id: centerId }, ...(options.extraGroupIds ?? []).map((id) => ({ id }))];
 
+  /**
+   * Create a MockPanel from add options, registering the target group and
+   * wiring the panel/API helpers (setTitle, setActive, updateParameters,
+   * moveTo).
+   */
   function makePanel(add: AddPanelOptions & { id: string }): MockPanel {
     const groupId =
       (add.position as { referenceGroup?: string } | undefined)?.referenceGroup ?? centerId;
@@ -34,18 +45,22 @@ export function makeApi(
       params: { ...(add.params ?? {}) },
       group: { id: groupId },
       isActive: false,
+      /** Set the mock panel's title. */
       setTitle(t: string) {
         this.title = t;
       },
       api: {
         component: add.component,
+        /** Deactivate every panel and mark this one active. */
         setActive() {
           for (const p of panels) p.isActive = false;
           panel.isActive = true;
         },
+        /** Merge the given params into the mock panel's params. */
         updateParameters(p: Record<string, unknown>) {
           Object.assign(panel.params, p);
         },
+        /** Move the mock panel into the given group. */
         moveTo({ group }: { group: { id: string } }) {
           panel.group = { id: group.id };
         },
@@ -61,18 +76,22 @@ export function makeApi(
     get panels() {
       return panels;
     },
+    /** Return the mock panel with the given id, if any. */
     getPanel(id: string) {
       return panels.find((p) => p.id === id);
     },
+    /** Return the mock group with the given id, if any. */
     getGroup(id: string) {
       return groups.find((g) => g.id === id);
     },
+    /** Create and register a mock panel, activating it unless `inactive` is set. */
     addPanel(opts: AddPanelOptions & { id: string }) {
       const p = makePanel(opts);
       panels.push(p);
       if (!opts.inactive) p.api.setActive();
       return p;
     },
+    /** Remove the mock panel with the matching id, if present. */
     removePanel(panel: { id: string }) {
       const i = panels.findIndex((p) => p.id === panel.id);
       if (i >= 0) panels.splice(i, 1);
@@ -90,8 +109,14 @@ type StoreShape = {
   rightTopGroupId: string;
   rightBottomGroupId: string;
   selectedDiff: { path: string; content?: string } | null;
+  scrollTarget: ScrollTarget | null;
 };
 
+/**
+ * Build a minimal store-shaped object (get/set/state) seeded with the mock
+ * api and default group ids, mirroring the subset of the dockview store the
+ * panel actions read and write.
+ */
 export function makeStore(api: DockviewApi) {
   const state: StoreShape = {
     api,
@@ -99,6 +124,7 @@ export function makeStore(api: DockviewApi) {
     rightTopGroupId: "group-right-top",
     rightBottomGroupId: "group-right-bottom",
     selectedDiff: null,
+    scrollTarget: null,
   };
   return {
     get: () => state,
@@ -107,6 +133,10 @@ export function makeStore(api: DockviewApi) {
   };
 }
 
+/**
+ * Build the store shape and the panel actions object bound to it, returning
+ * api/actions/store for tests.
+ */
 export function build(api: DockviewApi) {
   const store = makeStore(api);
   const actions = buildPanelActions(store.set, store.get);

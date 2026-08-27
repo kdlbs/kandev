@@ -252,11 +252,8 @@ func seedWorkspaceCascadeRows(t *testing.T, repo *Repository, workspaceID string
 	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
 		ID:            "env-delete",
 		TaskID:        "task-delete",
-		RepositoryID:  "repo-delete",
 		ExecutorType:  string(models.ExecutorTypeWorktree),
 		Status:        models.TaskEnvironmentStatusReady,
-		WorktreeID:    "wt-delete",
-		WorktreePath:  "/tmp/wt-delete",
 		WorkspacePath: "/tmp/wt-delete",
 		Repos: []*models.TaskEnvironmentRepo{{
 			ID:             "env-repo-delete",
@@ -277,16 +274,6 @@ func seedWorkspaceCascadeRows(t *testing.T, repo *Repository, workspaceID string
 	}); err != nil {
 		t.Fatalf("CreateTaskSession: %v", err)
 	}
-	if err := repo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
-		ID:             "session-wt-delete",
-		SessionID:      "session-delete",
-		WorktreeID:     "wt-delete",
-		RepositoryID:   "repo-delete",
-		WorktreePath:   "/tmp/wt-delete",
-		WorktreeBranch: "branch-delete",
-	}); err != nil {
-		t.Fatalf("CreateTaskSessionWorktree: %v", err)
-	}
 	if err := repo.CreateTurn(ctx, &models.Turn{
 		ID:            "turn-delete",
 		TaskSessionID: "session-delete",
@@ -303,6 +290,15 @@ func seedWorkspaceCascadeRows(t *testing.T, repo *Repository, workspaceID string
 		Content:       "hello",
 	}); err != nil {
 		t.Fatalf("CreateMessage: %v", err)
+	}
+	turnDeleteID := "turn-delete"
+	if err := repo.UpsertSubagentContext(ctx, &models.SubagentContext{
+		TaskSessionID: "session-delete",
+		TaskID:        "task-delete",
+		TurnID:        &turnDeleteID,
+		ToolCallID:    "tc-delete",
+	}); err != nil {
+		t.Fatalf("UpsertSubagentContext: %v", err)
 	}
 	if err := repo.CreateTaskPlan(ctx, &models.TaskPlan{
 		ID:        "plan-delete",
@@ -334,9 +330,9 @@ func assertNoWorkspaceCascadeDependents(t *testing.T, repo *Repository) {
 		"task_sessions",
 		"task_environments",
 		"task_environment_repos",
-		"task_session_worktrees",
 		"task_session_turns",
 		"task_session_messages",
+		"task_session_subagents",
 		"task_plans",
 		"task_plan_revisions",
 	} {

@@ -32,6 +32,10 @@ import {
 import { ProfileScriptCards } from "@/components/settings/profile-edit/profile-script-cards";
 import { SSHAgentReadinessCard } from "@/components/settings/ssh-agent-readiness-card";
 import {
+  SSHTaskDirReclamationCard,
+  isSSHReclaimEnabled,
+} from "@/components/settings/ssh-task-dir-reclamation-card";
+import {
   type GitIdentityMode,
   type GitIdentityState,
 } from "@/components/settings/profile-edit/remote-credentials-card";
@@ -54,6 +58,7 @@ import { serializeSettingsRevision } from "@/components/settings/settings-save-r
 import {
   deriveSpritesSecretId,
   getGitIdentityBaseline,
+  parseAgentConfigBundles,
   parseNetworkPolicyRules,
   parseRemoteAuthSecrets,
   parseRemoteCredentials,
@@ -61,6 +66,7 @@ import {
 import type { Executor, ExecutorProfile, ExecutorType, ProfileEnvVar } from "@/lib/types/http";
 import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
 import { executorProfileDiscoveryTarget } from "@/lib/settings-discovery/dynamic-targets";
+import { buildSaveConfig } from "@/components/settings/profile-edit/serialize-executor-config";
 
 const EXECUTORS_ROUTE = "/settings/executors";
 const SPRITES_TOKEN_KEY = "SPRITES_API_TOKEN";
@@ -98,6 +104,9 @@ function useRemoteAuthState(profile: ExecutorProfile) {
   const [remoteCredentials, setRemoteCredentials] = useState<string[]>(() =>
     parseRemoteCredentials(profile.config),
   );
+  const [configBundleIds, setConfigBundleIds] = useState<string[]>(() =>
+    parseAgentConfigBundles(profile.config),
+  );
   const [agentEnvVars, setAgentEnvVars] = useState<Record<string, string | null>>(() =>
     parseRemoteAuthSecrets(profile.config),
   );
@@ -111,6 +120,8 @@ function useRemoteAuthState(profile: ExecutorProfile) {
     setNetworkPolicyRules,
     remoteCredentials,
     setRemoteCredentials,
+    configBundleIds,
+    setConfigBundleIds,
     agentEnvVars,
     handleAgentEnvVarChange,
   };
@@ -273,6 +284,9 @@ function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
   const [dockerfile, setDockerfile] = useState(profile.config?.dockerfile ?? "");
   const [imageTag, setImageTag] = useState(profile.config?.image_tag ?? "");
   const [sshShell, setSshShell] = useState(profile.config?.ssh_shell ?? "");
+  const [sshReclaimTaskDir, setSshReclaimTaskDir] = useState(() =>
+    isSSHReclaimEnabled(profile.config),
+  );
   const { envVarRows, addEnvVar, removeEnvVar, updateEnvVar } = useEnvVarRows(profile.env_vars);
   const [placeholders, setPlaceholders] = useState<ScriptPlaceholder[]>([]);
   const [spritesSecretId, setSpritesSecretId] = useState<string | null>(() =>
@@ -316,6 +330,8 @@ function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
     setImageTag,
     sshShell,
     setSshShell,
+    sshReclaimTaskDir,
+    setSshReclaimTaskDir,
     envVarRows,
     addEnvVar,
     removeEnvVar,
@@ -327,6 +343,8 @@ function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
     setNetworkPolicyRules: remoteAuth.setNetworkPolicyRules,
     remoteCredentials: remoteAuth.remoteCredentials,
     setRemoteCredentials: remoteAuth.setRemoteCredentials,
+    configBundleIds: remoteAuth.configBundleIds,
+    setConfigBundleIds: remoteAuth.setConfigBundleIds,
     agentEnvVars: remoteAuth.agentEnvVars,
     handleAgentEnvVarChange: remoteAuth.handleAgentEnvVarChange,
     localGitIdentity: gitIdentity.localGitIdentity,
@@ -347,70 +365,6 @@ function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
   };
 }
 
-function buildSaveConfig(
-  form: ReturnType<typeof useProfileFormState>,
-  baseConfig?: Record<string, string>,
-): Record<string, string> {
-  const config: Record<string, string> = { ...baseConfig };
-  if (form.isSprites && form.networkPolicyRules.length > 0) {
-    config.sprites_network_policy_rules = JSON.stringify(form.networkPolicyRules);
-  } else {
-    delete config.sprites_network_policy_rules;
-  }
-  if (form.isRemote && form.remoteCredentials.length > 0) {
-    config.remote_credentials = JSON.stringify(form.remoteCredentials);
-  } else {
-    delete config.remote_credentials;
-  }
-  const nonNullEnvVars = Object.fromEntries(
-    Object.entries(form.agentEnvVars).filter(([, v]) => v != null),
-  );
-  if (form.isRemote && Object.keys(nonNullEnvVars).length > 0) {
-    config.remote_auth_secrets = JSON.stringify(nonNullEnvVars);
-  } else {
-    delete config.remote_auth_secrets;
-  }
-  const effectiveName =
-    form.gitIdentityMode === "local"
-      ? form.localGitIdentity.userName.trim()
-      : form.gitUserName.trim();
-  const effectiveEmail =
-    form.gitIdentityMode === "local"
-      ? form.localGitIdentity.userEmail.trim()
-      : form.gitUserEmail.trim();
-  if (form.isRemote && effectiveName) {
-    config.git_user_name = effectiveName;
-  } else {
-    delete config.git_user_name;
-  }
-  if (form.isRemote && effectiveEmail) {
-    config.git_user_email = effectiveEmail;
-  } else {
-    delete config.git_user_email;
-  }
-  applyDockerConfig(config, form);
-  if (form.isSSH && form.sshShell.trim()) config.ssh_shell = form.sshShell.trim();
-  else delete config.ssh_shell;
-  return config;
-}
-
-function applyDockerConfig(
-  config: Record<string, string>,
-  form: ReturnType<typeof useProfileFormState>,
-): void {
-  if (!form.isDocker) return;
-  if (form.dockerfile.trim()) {
-    config.dockerfile = form.dockerfile;
-  } else {
-    delete config.dockerfile;
-  }
-  if (form.imageTag.trim()) {
-    config.image_tag = form.imageTag.trim();
-  } else {
-    delete config.image_tag;
-  }
-}
-
 type ProfileEditSectionsProps = {
   executor: Executor;
   profile: ExecutorProfile;
@@ -428,6 +382,14 @@ function ExecutorSpecificSections({ executor, profile, form, secrets }: ProfileE
           shell={form.sshShell}
           baselineShell={profile.config?.ssh_shell ?? ""}
           onShellChange={form.setSshShell}
+        />
+      )}
+      {executor.type === "ssh" && (
+        <SSHTaskDirReclamationCard
+          executor={executor}
+          profile={profile}
+          enabled={form.sshReclaimTaskDir}
+          onEnabledChange={form.setSshReclaimTaskDir}
         />
       )}
       {form.isSprites && (
@@ -458,6 +420,10 @@ function ExecutorSpecificSections({ executor, profile, form, secrets }: ProfileE
           remoteCredentials={form.remoteCredentials}
           baselineRemoteCredentials={parseRemoteCredentials(profile.config)}
           onRemoteCredentialsChange={form.setRemoteCredentials}
+          configBundleIds={form.configBundleIds}
+          baselineConfigBundleIds={parseAgentConfigBundles(profile.config)}
+          onConfigBundleChange={form.setConfigBundleIds}
+          isSSH={form.isSSH}
           agentEnvVars={form.agentEnvVars}
           baselineAgentEnvVars={parseRemoteAuthSecrets(profile.config)}
           onAgentEnvVarChange={form.handleAgentEnvVarChange}

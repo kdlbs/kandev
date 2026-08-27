@@ -3,6 +3,11 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { QueuedGhostMessage, canMergeEntry, canMergeWithAbove } from "./queued-ghost-message";
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
+import {
+  ClarificationEscapeGuardProvider,
+  type ClarificationEscapeGuardEntry,
+  type ClarificationEscapeGuardRegistry,
+} from "@/hooks/use-clarification-escape-guard";
 import { entityReferenceMarkdown } from "@/lib/entity-references/message-references";
 import type { EntityReference } from "@/lib/types/entity-reference";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
@@ -81,6 +86,130 @@ function renderWithProviders(node: React.ReactNode) {
   );
 }
 
+function withEscapeGuardRegistry(node: React.ReactNode) {
+  const holder: { entry: ClarificationEscapeGuardEntry } = { entry: null };
+  const registry: ClarificationEscapeGuardRegistry = {
+    register: (_id, predicate) => {
+      holder.entry = { test: predicate };
+    },
+    unregister: () => {
+      holder.entry = null;
+    },
+  };
+  render(
+    <ClarificationEscapeGuardProvider value={registry}>{node}</ClarificationEscapeGuardProvider>,
+  );
+  return holder;
+}
+
+describe("QueuedGhostMessage reorder handle", () => {
+  const HANDLE_TESTID = "queue-grab-handle";
+
+  function renderRow(
+    overrides: Partial<QueuedMessage> = {},
+    props: Partial<React.ComponentProps<typeof QueuedGhostMessage>> = {},
+  ) {
+    return render(
+      <QueuedGhostMessage
+        entry={entry(overrides)}
+        canEdit={false}
+        onSave={vi.fn()}
+        onRemove={vi.fn()}
+        {...props}
+      />,
+    );
+  }
+
+  it("renders a dotted grab handle with localized labels", () => {
+    renderRow();
+    const handle = screen.getByTestId(HANDLE_TESTID);
+    expect(handle.getAttribute("aria-label")).toBe("Reorder queued message");
+    expect(handle.getAttribute("aria-roledescription")).toBe("sortable");
+    // 2x3 dot grid reads as a dotted grip.
+    expect(handle.querySelectorAll('[aria-hidden="true"] span').length).toBe(6);
+  });
+
+  it("shows the handle without hovering on a fine pointer", () => {
+    renderRow();
+    const handle = screen.getByTestId(HANDLE_TESTID);
+    // A mounted handle is an always-visible drag affordance on every pointer.
+    expect(handle.className).toContain("opacity-100");
+    expect(handle.className).not.toContain("opacity-0");
+    expect(handle.className).not.toContain("group-hover:opacity-100");
+  });
+
+  it("keeps the fine-pointer grip small and unobtrusive", () => {
+    renderRow();
+    const handle = screen.getByTestId(HANDLE_TESTID);
+    expect(handle.className).toContain("left-1");
+    expect(handle.className).toContain("h-3 w-3");
+    expect(handle.className).toContain("border-0");
+    expect(handle.className).toContain("bg-transparent");
+    expect(handle.className).toContain("shadow-none");
+    const grip = handle.querySelector('[aria-hidden="true"]')!;
+    expect(grip.className).toContain("gap-0.5");
+    const dot = handle.querySelector('[aria-hidden="true"] span')!;
+    expect(dot.className).toContain("h-px w-px");
+  });
+
+  it("attaches the coarse-pointer handle to the box edge in the background", () => {
+    renderRow();
+    const handle = screen.getByTestId(HANDLE_TESTID);
+    // Coarse pointers: flush at the left edge, behind the content (z-0, no
+    // chip surface) so the dots read as part of the box edge.
+    expect(handle.className).toContain("[@media(pointer:coarse)]:left-0");
+    expect(handle.className).toContain("[@media(pointer:coarse)]:z-0");
+    expect(handle.className).toContain("[@media(pointer:coarse)]:bg-transparent");
+    expect(handle.className).toContain("[@media(pointer:coarse)]:shadow-none");
+    expect(handle.className).toContain("[@media(pointer:coarse)]:h-11");
+    expect(handle.className).toContain("[@media(pointer:coarse)]:w-11");
+  });
+
+  it("keeps the position label painted above the handle and pointer-transparent", () => {
+    renderRow();
+    // The label/icon cluster sits above the background handle (relative) and
+    // passes touches through to it (pointer-events-none).
+    const label = screen.getByLabelText("Position #1");
+    const cluster = label.parentElement!;
+    expect(cluster.className).toContain("relative");
+    expect(cluster.className).toContain("pointer-events-none");
+  });
+
+  it("centers the position, sender icon, and message content", () => {
+    renderRow();
+    const row = screen.getByTestId("queue-entry");
+    expect(row.className).toContain("items-center");
+    expect(row.className).not.toContain("items-start");
+    const label = screen.getByLabelText("Position #1");
+    expect(label.parentElement!.className).not.toContain("mt-0.5");
+  });
+
+  it("disables the handle while reordering is unavailable", () => {
+    renderRow({}, { canDrag: false });
+    const handle = screen.getByTestId(HANDLE_TESTID) as HTMLButtonElement;
+    expect(handle.disabled).toBe(true);
+    expect(handle.className).toContain("cursor-not-allowed");
+  });
+
+  it("hides the handle while the row is being edited", () => {
+    renderRow({ queued_by: "user-1" }, { canEdit: true });
+    fireEvent.click(screen.getByTestId(EDIT_TESTID));
+    expect(screen.queryByTestId(HANDLE_TESTID)).toBeNull();
+  });
+});
+
+describe("QueuedGhostMessage Escape handling", () => {
+  it("claims Escape at dialog capture time while editing", () => {
+    const holder = withEscapeGuardRegistry(
+      <QueuedGhostMessage entry={entry()} canEdit onSave={async () => {}} onRemove={() => {}} />,
+    );
+
+    fireEvent.click(screen.getByTestId(EDIT_TESTID));
+
+    expect(holder.entry?.test(new KeyboardEvent("keydown", { key: "Escape" }))).toBe(true);
+  });
+});
+
 describe("QueuedGhostMessage workflow badge", () => {
   it("renders workflow metadata as a workflow step badge", () => {
     render(
@@ -122,7 +251,60 @@ describe("QueuedGhostMessage attachment thumbnails", () => {
     expect(img.src).toBe(`data:image/png;base64,${PNG_BASE64}`);
     expect(trigger.className).toContain("cursor-pointer");
   });
+});
 
+describe("QueuedGhostMessage queued attachment sources", () => {
+  it("renders staged image descriptors through the authenticated content URL", () => {
+    render(
+      <QueuedGhostMessage
+        entry={entry({
+          attachments: [
+            {
+              type: "image",
+              attachment_id: "attachment-staged-1",
+              mime_type: "image/png",
+              name: "diagram.png",
+            },
+          ],
+        })}
+        canEdit
+        onSave={async () => {}}
+        onRemove={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: OPEN_ATTACHMENT_1_LABEL }));
+
+    expect(screen.getByAltText(FULL_SIZE_ATTACHMENT_1_ALT).getAttribute("src")).toContain(
+      "/api/v1/attachments/attachment-staged-1/content",
+    );
+  });
+
+  it("does not render a broken image when an image has no source", () => {
+    render(
+      <QueuedGhostMessage
+        entry={entry({
+          content: "",
+          attachments: [
+            {
+              type: "image",
+              mime_type: "image/png",
+              name: "missing.png",
+            },
+          ],
+        })}
+        canEdit
+        onSave={async () => {}}
+        onRemove={() => {}}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: OPEN_ATTACHMENT_1_LABEL })).toBeNull();
+    expect(screen.getByText("missing.png")).toBeTruthy();
+  });
+});
+
+describe("QueuedGhostMessage attachment thumbnails", () => {
   it("renders a file chip for non-image (resource) attachments", () => {
     render(
       <QueuedGhostMessage

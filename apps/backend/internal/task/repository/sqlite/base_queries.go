@@ -13,6 +13,14 @@ const sqlLimitClause = " LIMIT ?"
 // lower bound so batched IN-clause queries stay portable across builds.
 const sqliteMaxHostParams = 500
 
+// worktree repo status values on task_environment_repos. Mirrors the worktree
+// package's StatusActive/StatusMerged/StatusDeleted lifecycle.
+const (
+	worktreeRepoStatusActive  = "active"
+	worktreeRepoStatusMerged  = "merged"
+	worktreeRepoStatusDeleted = "deleted"
+)
+
 // buildInPlaceholders returns a comma-separated "?,?,?" placeholder string and
 // the matching args slice for an IN (...) clause over the given string IDs.
 // Caller is responsible for splitting overly large input via chunkIDs.

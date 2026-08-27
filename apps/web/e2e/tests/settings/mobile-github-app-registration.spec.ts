@@ -86,7 +86,12 @@ test.describe("Mobile workspace GitHub App onboarding", () => {
     await drawer.getByLabel("Public Kandev URL").fill("https://1.1.1.1");
     await drawer.getByRole("button", { name: "Generate setup instructions" }).click();
     await expect(drawer.getByText("Configure the existing App on GitHub")).toBeVisible();
-    await expect(drawer.getByText("User authorization callback URL")).toBeVisible();
+    await expect(
+      drawer.getByText("User authorization callback URL 1", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      drawer.getByText("User authorization callback URL 2", { exact: true }),
+    ).toBeVisible();
     await expect(drawer.getByText("Webhook URL", { exact: true })).toBeVisible();
     await expectTouchTarget(drawer.getByRole("button", { name: "Copy Webhook URL" }));
     await expectTouchTarget(drawer.getByRole("button", { name: "Verify and import App" }));

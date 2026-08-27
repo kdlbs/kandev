@@ -36,6 +36,31 @@ func TestDefinitionsIncludeOfficeExperimentalMetadata(t *testing.T) {
 	}
 }
 
+func TestDefinitionsIncludeDynamicAgentRoutingMetadata(t *testing.T) {
+	def, ok := DefinitionByKey("features.dynamicAgentRouting")
+	if !ok {
+		t.Fatal("features.dynamicAgentRouting definition missing")
+	}
+	if def.EnvVar != "KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING" {
+		t.Fatalf("EnvVar = %q, want KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING", def.EnvVar)
+	}
+	if def.Stability != StabilityExperimental {
+		t.Fatalf("Stability = %q, want %q", def.Stability, StabilityExperimental)
+	}
+	if def.RiskLevel != RiskHigh {
+		t.Fatalf("RiskLevel = %q, want %q", def.RiskLevel, RiskHigh)
+	}
+	if def.RiskDescription == "" {
+		t.Fatal("RiskDescription empty")
+	}
+	if !def.RestartRequired {
+		t.Fatal("RestartRequired = false, want true")
+	}
+	if !def.Mutable {
+		t.Fatal("Mutable = false, want true")
+	}
+}
+
 // TestDefinitionsExcludePlugins pins the graduation of the plugin system out
 // of the feature-flag tier: plugins ship in the base product, so no toggle may
 // reappear in Settings > System > Feature Toggles.
@@ -59,17 +84,24 @@ func TestRetiredRuntimeFlagIdentitiesIncludePlugins(t *testing.T) {
 	t.Fatal("graduated plugins flag identity is missing from the retired identity set")
 }
 
-func TestDefinitionsIncludeAppStatusBarMetadata(t *testing.T) {
-	def, ok := DefinitionByKey("features.appStatusBar")
-	if !ok {
-		t.Fatal("features.appStatusBar definition missing")
+func TestDefinitionsExcludeAppStatusBar(t *testing.T) {
+	if _, ok := DefinitionByKey(retiredAppStatusBarKey); ok {
+		t.Fatal("features.appStatusBar definition present; visibility is a user setting")
 	}
-	if def.EnvVar != "KANDEV_FEATURES_APP_STATUS_BAR" {
-		t.Fatalf("EnvVar = %q, want KANDEV_FEATURES_APP_STATUS_BAR", def.EnvVar)
+	for _, def := range Definitions() {
+		if def.EnvVar == retiredAppStatusBarEnvVar {
+			t.Fatalf("definition %q still binds KANDEV_FEATURES_APP_STATUS_BAR", def.Key)
+		}
 	}
-	if !def.RestartRequired {
-		t.Fatal("RestartRequired = false, want true")
+}
+
+func TestRetiredRuntimeFlagIdentitiesIncludeAppStatusBar(t *testing.T) {
+	for _, identity := range retiredRuntimeFlagIdentities {
+		if identity.key == retiredAppStatusBarKey && identity.envVar == retiredAppStatusBarEnvVar {
+			return
+		}
 	}
+	t.Fatal("graduated App status bar identity is missing from the retired identity set")
 }
 
 func TestDefinitionsIncludeClaudeBackgroundPromptHandoffMetadata(t *testing.T) {

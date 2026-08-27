@@ -1,15 +1,14 @@
 "use client";
 
-import { use, useCallback, useEffect, type ReactNode } from "react";
+import { use, type ReactNode } from "react";
 import Link from "@/components/routing/app-link";
 import { usePathname } from "@/lib/routing/client-router";
 import { IconInfoCircle } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
-import { useOfficeRefetch } from "@/hooks/use-office-refetch";
-import { listAgentProfiles } from "@/lib/api/domains/office-api";
+import { selectOfficeAgentProfile } from "@/lib/state/slices/office/selectors";
 import { cn } from "@/lib/utils";
-import { OfficeTopbarPortal } from "../../components/office-topbar-portal";
+import { useOfficeTopbar } from "../../components/office-topbar-context";
 import { AgentAvatar } from "../../components/agent-avatar";
 import { AgentStatusDot } from "../components/agent-status-dot";
 import { AgentRoleBadge } from "../components/agent-role-badge";
@@ -46,27 +45,24 @@ export default function AgentDetailLayout({ children, params }: AgentDetailLayou
   const { t } = useTranslation();
   const { id } = use(params);
   const pathname = usePathname();
-  const agent = useAppStore((s) => s.office.agentProfiles.find((a) => a.id === id));
-  const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const setOfficeAgentProfiles = useAppStore((s) => s.setOfficeAgentProfiles);
-
-  // Refetch the agents list on mount and on WS "agents" events so this
-  // layout recovers when SSR hydrated the store with a stale agent set
-  // (e.g. the agent was created after the SSR fetch fired).
-  const refetchAgents = useCallback(async () => {
-    if (!workspaceId) return;
-    const res = await listAgentProfiles(workspaceId).catch(() => ({ agents: [] }));
-    setOfficeAgentProfiles(res.agents ?? []);
-  }, [workspaceId, setOfficeAgentProfiles]);
-
-  // Fire once on mount to recover from stale SSR hydration.
-  useEffect(() => {
-    refetchAgents();
-  }, [refetchAgents]);
-
-  useOfficeRefetch("agents", refetchAgents);
+  const agent = useAppStore((s) => selectOfficeAgentProfile(s, id));
 
   const activeSlug = activeSlugFromPath(pathname, id);
+
+  useOfficeTopbar(
+    agent
+      ? {
+          title: agent.name,
+          icon: <AgentAvatar role={agent.role} name={agent.name} size="sm" />,
+          titleSlot: (
+            <span data-testid="agent-topbar-name" className="truncate text-sm font-semibold">
+              {agent.name}
+            </span>
+          ),
+          parents: [{ label: t("office:agents"), href: "/office/agents" }],
+        }
+      : null,
+  );
 
   if (!agent) {
     return (
@@ -77,53 +73,44 @@ export default function AgentDetailLayout({ children, params }: AgentDetailLayou
   }
 
   return (
-    <>
-      <OfficeTopbarPortal>
-        <AgentAvatar role={agent.role} name={agent.name} size="sm" />
-        <h1 data-testid="agent-topbar-name" className="text-sm font-semibold truncate">
-          {agent.name}
-        </h1>
-      </OfficeTopbarPortal>
-
-      <div className="p-6 space-y-4">
-        <div
-          className="flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-2.5"
-          data-testid="agent-identity-strip"
-        >
-          <AgentRoleBadge role={agent.role} />
-          <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
-            <AgentStatusDot status={agent.status} />
-            {agent.status}
-          </span>
-          <CoordinatorRoutineHint agentId={id} agentRole={agent.role} />
-          <div className="ml-auto">
-            <BudgetGauge budgetCents={agent.budgetMonthlyCents} />
-          </div>
+    <div className="p-6 space-y-4">
+      <div
+        className="flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-2.5"
+        data-testid="agent-identity-strip"
+      >
+        <AgentRoleBadge role={agent.role} />
+        <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+          <AgentStatusDot status={agent.status} />
+          {agent.status}
+        </span>
+        <CoordinatorRoutineHint agentId={id} agentRole={agent.role} />
+        <div className="ml-auto">
+          <BudgetGauge budgetCents={agent.budgetMonthlyCents} />
         </div>
-
-        <AgentRouteStrip agentId={id} />
-
-        <nav className="flex border-b border-border gap-1" aria-label={t("office:agentSections")}>
-          {TABS.map((tab) => (
-            <Link
-              key={tab.slug}
-              href={`/office/agents/${id}/${tab.slug}`}
-              data-testid={`agent-tab-${tab.slug}`}
-              className={cn(
-                "px-3 py-2 text-sm cursor-pointer border-b-2 -mb-px transition-colors",
-                activeSlug === tab.slug
-                  ? "border-foreground text-foreground"
-                  : "border-transparent text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {t(tab.labelKey)}
-            </Link>
-          ))}
-        </nav>
-
-        <div data-testid="agent-detail-section">{children}</div>
       </div>
-    </>
+
+      <AgentRouteStrip agentId={id} />
+
+      <nav className="flex border-b border-border gap-1" aria-label={t("office:agentSections")}>
+        {TABS.map((tab) => (
+          <Link
+            key={tab.slug}
+            href={`/office/agents/${id}/${tab.slug}`}
+            data-testid={`agent-tab-${tab.slug}`}
+            className={cn(
+              "px-3 py-2 text-sm cursor-pointer border-b-2 -mb-px transition-colors",
+              activeSlug === tab.slug
+                ? "border-foreground text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {t(tab.labelKey)}
+          </Link>
+        ))}
+      </nav>
+
+      <div data-testid="agent-detail-section">{children}</div>
+    </div>
   );
 }
 

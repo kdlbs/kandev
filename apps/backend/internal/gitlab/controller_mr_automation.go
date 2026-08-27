@@ -39,6 +39,8 @@ var errUnknownMRAutomationField = errors.New("unknown MR automation field")
 // as a bad request.
 var errNullMRAutomationSwitch = errors.New("MR automation switch must be a boolean, not null")
 
+var errNullMRAutomationIdentity = errors.New("MR automation identity fields must not be null")
+
 // RegisterMRAutomationHTTPRoutes registers the GET/PATCH MR automation
 // endpoints on an existing /api/v1/gitlab router group.
 func (c *Controller) RegisterMRAutomationHTTPRoutes(api *gin.RouterGroup) {
@@ -72,6 +74,12 @@ func (c *Controller) httpPatchTaskMRAutomation(ctx *gin.Context) {
 	resp, err := c.service.UpdateTaskMRAutomationOptions(ctx.Request.Context(), ctx.Param("taskID"), patch)
 	if err != nil {
 		if writeMRAutomationTaskNotFound(ctx, err) {
+			return
+		}
+		// A patch naming an MR that isn't linked (or naming one only
+		// partially) is a caller mistake, not a server fault.
+		if errors.Is(err, ErrTaskMRNotLinked) {
+			ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: err.Error()})
 			return
 		}
 		c.logger.Error("update task MR automation failed", zap.String("task_id", ctx.Param("taskID")), zap.Error(err))
@@ -150,6 +158,12 @@ func applyMRAutomationPatchField(patch *TaskMRAutomationPatch, key string, value
 		return decodeMRAutomationSwitch(value, &patch.PromptOnMerged)
 	case "prompt_on_closed":
 		return decodeMRAutomationSwitch(value, &patch.PromptOnClosed)
+	case "repository_id":
+		return decodeMRAutomationIdentityString(value, &patch.RepositoryID)
+	case "project_path":
+		return decodeMRAutomationIdentityString(value, &patch.ProjectPath)
+	case "mr_iid":
+		return decodeMRAutomationIdentityInteger(value, &patch.MRIID)
 	case "review_prompt_override", "merged_prompt_override", "closed_prompt_override":
 		return errLifecyclePromptOverridesUnsupported
 	default:
@@ -183,6 +197,20 @@ func decodeMRAutoFixPromptOverride(value json.RawMessage, dst **string) error {
 func decodeMRAutomationSwitch(value json.RawMessage, dst **bool) error {
 	if string(value) == "null" {
 		return errNullMRAutomationSwitch
+	}
+	return json.Unmarshal(value, dst)
+}
+
+func decodeMRAutomationIdentityString(value json.RawMessage, dst **string) error {
+	if string(value) == "null" {
+		return errNullMRAutomationIdentity
+	}
+	return json.Unmarshal(value, dst)
+}
+
+func decodeMRAutomationIdentityInteger(value json.RawMessage, dst **int) error {
+	if string(value) == "null" {
+		return errNullMRAutomationIdentity
 	}
 	return json.Unmarshal(value, dst)
 }

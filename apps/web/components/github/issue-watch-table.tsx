@@ -182,7 +182,7 @@ export function IssueWatchTable({
             )}
             <TableCell className="font-medium">{formatRepoNames(t, watch)}</TableCell>
             <TableCell className="text-xs text-muted-foreground">
-              {formatLabels(watch) || "—"}
+              {formatLabels(watch) || "-"}
             </TableCell>
             <TableCell className="text-xs text-muted-foreground">
               {Math.round(watch.poll_interval_seconds / 60)}m

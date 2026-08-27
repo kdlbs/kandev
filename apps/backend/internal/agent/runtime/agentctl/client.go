@@ -14,7 +14,9 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/mcp/plugintools"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -55,8 +57,52 @@ type Client struct {
 	streamWriteMu sync.Mutex
 
 	// Pending request/response tracking for agent stream
-	pendingRequests map[string]chan *ws.Message
-	pendingMu       sync.Mutex
+	pendingRequests     map[string]chan *ws.Message
+	pendingRequestConns map[string]*websocket.Conn
+	pendingMu           sync.Mutex
+
+	// lastSessionModelState is populated synchronously by session/new,
+	// session/reset, or session/load responses. Lifecycle policy evaluation can
+	// use it before the corresponding session_models event reaches its handler.
+	lastSessionModelState *streams.SessionModelState
+}
+
+func (c *Client) setLastSessionModelState(state *streams.SessionModelState) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lastSessionModelState = cloneSessionModelState(state)
+}
+
+// GetLastSessionModelState returns the model catalog included in the most
+// recent session creation or load response.
+func (c *Client) GetLastSessionModelState() *streams.SessionModelState {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return cloneSessionModelState(c.lastSessionModelState)
+}
+
+func cloneSessionModelState(state *streams.SessionModelState) *streams.SessionModelState {
+	if state == nil {
+		return nil
+	}
+	cloned := &streams.SessionModelState{
+		CurrentModelID: state.CurrentModelID,
+		Models:         append([]streams.SessionModelInfo(nil), state.Models...),
+		ConfigOptions:  append([]streams.ConfigOption(nil), state.ConfigOptions...),
+	}
+	for i, model := range cloned.Models {
+		if model.Meta == nil {
+			continue
+		}
+		cloned.Models[i].Meta = make(map[string]any, len(model.Meta))
+		for key, value := range model.Meta {
+			cloned.Models[i].Meta[key] = value
+		}
+	}
+	for i, option := range cloned.ConfigOptions {
+		cloned.ConfigOptions[i].Options = append([]streams.ConfigOptionValue(nil), option.Options...)
+	}
+	return cloned
 }
 
 // ClientOption configures optional Client settings.
@@ -126,8 +172,9 @@ func NewClient(host string, port int, log *logger.Logger, opts ...ClientOption) 
 		longRunningHTTPClient: &http.Client{
 			Timeout: 5 * time.Minute,
 		},
-		logger:          log.WithFields(zap.String("component", "agentctl-client")),
-		pendingRequests: make(map[string]chan *ws.Message),
+		logger:              log.WithFields(zap.String("component", "agentctl-client")),
+		pendingRequests:     make(map[string]chan *ws.Message),
+		pendingRequestConns: make(map[string]*websocket.Conn),
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -407,6 +454,31 @@ func (c *Client) SetMcpProviders(ctx context.Context, providers []string) error 
 	}
 
 	tracing.TraceHTTPResponse(span, resp.StatusCode, nil)
+	return nil
+}
+
+// SetPluginTools replaces the plugin-contributed MCP catalog on agentctl.
+func (c *Client) SetPluginTools(ctx context.Context, snapshot plugintools.Snapshot) error {
+	ctx, span := tracing.TraceHTTPRequest(ctx, "PUT", "/api/v1/mcp/plugin-tools", c.executionID)
+	defer span.End()
+	body, err := json.Marshal(snapshot)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, "PUT", c.baseURL+"/api/v1/mcp/plugin-tools", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := readResponseBody(resp)
+		return fmt.Errorf("set plugin tools failed with status %d: %s", resp.StatusCode, string(respBody))
+	}
 	return nil
 }
 

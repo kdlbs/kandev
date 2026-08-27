@@ -2,8 +2,11 @@ package runtimeflags
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
+
+	"github.com/kandev/kandev/internal/common/config"
 )
 
 type memoryStore struct {
@@ -99,6 +102,38 @@ func TestServiceExplicitImpliedEnvLocksDebugMode(t *testing.T) {
 	}
 	if !debug.EnvLocked {
 		t.Fatal("EnvLocked = false, want true")
+	}
+}
+
+func TestServiceIgnoresRetiredAppStatusBarOverrideAndEnv(t *testing.T) {
+	svc := NewService(&memoryStore{values: map[string]bool{retiredAppStatusBarKey: false}}, Options{
+		DefaultValues: map[string]bool{retiredAppStatusBarKey: true},
+		RuntimeValues: map[string]bool{retiredAppStatusBarKey: true},
+		EnvValues:     map[string]bool{retiredAppStatusBarEnvVar: true},
+		IsExplicitEnv: func(name string) bool { return name == retiredAppStatusBarEnvVar },
+	})
+	states, err := svc.ListStates(context.Background())
+	if err != nil {
+		t.Fatalf("ListStates: %v", err)
+	}
+	for _, state := range states {
+		if state.Key == retiredAppStatusBarKey {
+			t.Fatal("retired features.appStatusBar remains in active runtime states")
+		}
+	}
+
+	cfg := &config.Config{}
+	ApplyStatesToConfig(cfg, states)
+	raw, err := json.Marshal(cfg.Features)
+	if err != nil {
+		t.Fatalf("marshal feature response: %v", err)
+	}
+	var response map[string]bool
+	if err := json.Unmarshal(raw, &response); err != nil {
+		t.Fatalf("decode feature response: %v", err)
+	}
+	if _, ok := response["appStatusBar"]; ok {
+		t.Fatal("retired appStatusBar remains in the serialized feature response")
 	}
 }
 

@@ -54,7 +54,7 @@ func (m *Manager) pollOneRemoteStatus(ctx context.Context, execution *AgentExecu
 		WorkspacePath:        execution.WorkspacePath,
 		StandaloneInstanceID: execution.standaloneInstanceID,
 		StandalonePort:       execution.standalonePort,
-		Metadata:             execution.Metadata,
+		Metadata:             execution.MetadataSnapshot(),
 	}
 	status, statusErr := provider.GetRemoteStatus(ctx, instance)
 	if statusErr != nil {

@@ -303,8 +303,8 @@ func TestRuntime_GetExecution_ReturnsSnapshot(t *testing.T) {
 		FinishedAt:     &finishedAt,
 		ExitCode:       &exit,
 		ACPSessionID:   "acp-1",
-		Metadata:       map[string]interface{}{"k": "v"},
 	}
+	backend.executions["exec-1"].SetMetadataForTesting(map[string]interface{}{"k": "v"})
 	rt := agentruntime.New(backend)
 	got, err := rt.GetExecution(context.Background(), "exec-1")
 	if err != nil {

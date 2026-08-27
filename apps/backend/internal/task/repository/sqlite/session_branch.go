@@ -7,18 +7,20 @@ import (
 )
 
 // ListSessionsWithBranches returns sessions that have worktree branches
-// on non-archived tasks. Used by the PR watch reconciler.
+// on non-archived tasks. Used by the PR watch reconciler. Branches live on
+// task_environment_repos; sessions reach them through
+// task_sessions.task_environment_id.
 func (r *Repository) ListSessionsWithBranches(ctx context.Context) ([]models.SessionBranchInfo, error) {
 	rows, err := r.ro.QueryContext(ctx, `
-		SELECT ts.id, ts.task_id, t.workspace_id, tsw.worktree_branch
+		SELECT ts.id, ts.task_id, t.workspace_id, ter.worktree_branch
 		FROM task_sessions ts
 		INNER JOIN tasks t ON t.id = ts.task_id
-		INNER JOIN task_session_worktrees tsw ON tsw.session_id = ts.id
+		INNER JOIN task_environment_repos ter ON ter.task_environment_id = ts.task_environment_id
 		WHERE t.archived_at IS NULL
-		  AND tsw.worktree_branch != ''
-		  AND tsw.deleted_at IS NULL
-		  AND tsw.status = 'active'
-		GROUP BY ts.id
+		  AND ter.worktree_branch != ''
+		  AND ter.deleted_at IS NULL
+		  AND ter.status = 'active'
+		GROUP BY ts.id, ts.task_id, t.workspace_id, ter.worktree_branch
 		ORDER BY ts.started_at DESC
 	`)
 	if err != nil {

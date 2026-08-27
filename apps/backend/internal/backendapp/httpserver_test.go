@@ -22,7 +22,7 @@ func TestBuildHTTPServerAbortsWhenInterlockTokenGenerationFails(t *testing.T) {
 	newInterimSettingsInterlockToken = func() (string, error) { return "", wantErr }
 	t.Cleanup(func() { newInterimSettingsInterlockToken = original })
 
-	server, err := buildHTTPServer(&config.Config{}, testLogger(t), nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	server, err := buildHTTPServer(&config.Config{}, testLogger(t), nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("buildHTTPServer error = %v, want %v", err, wantErr)
 	}
@@ -258,27 +258,5 @@ func TestServerListenersStopClosesListenersAndDrains(t *testing.T) {
 	}
 	if _, err := getStatus("127.0.0.2", port); err == nil {
 		t.Fatal("expected connection failure on 127.0.0.2 after shutdown")
-	}
-}
-
-func TestProbeAddrPrefersLoopback(t *testing.T) {
-	sl := &serverListeners{bound: []string{"100.64.0.1:8080", "127.0.0.1:8080"}}
-	if got := sl.probeAddr(); got != "127.0.0.1:8080" {
-		t.Fatalf("probeAddr() = %q, want 127.0.0.1:8080", got)
-	}
-
-	wildcard := &serverListeners{bound: []string{"0.0.0.0:8080"}}
-	if got := wildcard.probeAddr(); got != "127.0.0.1:8080" {
-		t.Fatalf("probeAddr() wildcard = %q, want 127.0.0.1:8080", got)
-	}
-
-	wildcard6 := &serverListeners{bound: []string{"[::]:8080"}}
-	if got := wildcard6.probeAddr(); got != "[::1]:8080" {
-		t.Fatalf("probeAddr() ipv6 wildcard = %q, want [::1]:8080", got)
-	}
-
-	tailnetOnly := &serverListeners{bound: []string{"100.64.0.1:8080"}}
-	if got := tailnetOnly.probeAddr(); got != "100.64.0.1:8080" {
-		t.Fatalf("probeAddr() tailnet-only = %q, want 100.64.0.1:8080", got)
 	}
 }

@@ -2,8 +2,10 @@
 
 import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
 import { IconChevronDown, IconLoader2 } from "@tabler/icons-react";
+import { CompositorSpin } from "@kandev/ui/compositor-spin";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
 import { useAppStore } from "@/components/state-provider";
+import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
 import { selectCommandCount } from "@/lib/state/slices/session/selectors";
 import { AdvancedChatPanel } from "@/app/office/tasks/[id]/advanced-panels/chat-panel";
 import { useActiveSessionRef } from "./active-session-ref-context";
@@ -105,10 +107,9 @@ function writePersistedCollapsed(sessionId: string, collapsed: boolean): void {
 function StateGlyph({ isLive, isTerminal }: { isLive: boolean; isTerminal: boolean }) {
   if (isLive) {
     return (
-      <IconLoader2
-        className="h-3 w-3 animate-spin text-primary shrink-0"
-        data-testid="session-state-running"
-      />
+      <CompositorSpin className="h-3 w-3 text-primary shrink-0" data-testid="session-state-running">
+        <IconLoader2 className="size-full" />
+      </CompositorSpin>
     );
   }
   return (
@@ -259,7 +260,7 @@ export const SessionTimelineEntry = forwardRef<HTMLDivElement, SessionTimelineEn
     const agentProfileId = session.agentProfileId;
     const resolvedAgentName = useAppStore((s) =>
       agentProfileId
-        ? s.office.agentProfiles.find((a) => a.id === agentProfileId)?.name
+        ? selectOfficeAgentProfiles(s).find((a) => a.id === agentProfileId)?.name
         : undefined,
     );
     const displayAgentName =

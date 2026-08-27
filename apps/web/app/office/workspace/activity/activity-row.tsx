@@ -80,7 +80,7 @@ function renderAction(entry: ActivityEntry): React.ReactNode {
       <>
         <span className="text-muted-foreground"> {t("office:staleRunCancelled")}</span>
         {taskRefNode(d)}
-        {label && <span className="text-muted-foreground"> — {truncate(label)}</span>}
+        {label && <span className="text-muted-foreground"> - {truncate(label)}</span>}
       </>
     );
   }

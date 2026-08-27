@@ -83,7 +83,7 @@ function RouteAttemptRow({ attempt }: { attempt: RouteAttempt }) {
           {providerLabel(attempt.provider_id)}/{attempt.model || "?"}
         </span>
         <Badge variant="secondary" className="capitalize text-[10px]">
-          {attempt.tier || "—"}
+          {attempt.tier || "-"}
         </Badge>
         <Badge variant={OUTCOME_VARIANT[attempt.outcome] ?? "outline"} className="text-[10px]">
           {t(OUTCOME_LABEL[attempt.outcome] ?? "office:routeOutcomeFailedOther")}
@@ -124,7 +124,7 @@ function OutcomeIcon({ outcome }: { outcome: RouteAttemptOutcome }) {
 function durationLabel(t: TFunction, start: string, end?: string): string {
   if (!end) return t("office:inFlight");
   const ms = Date.parse(end) - Date.parse(start);
-  if (Number.isNaN(ms) || ms < 0) return "—";
+  if (Number.isNaN(ms) || ms < 0) return "-";
   if (ms < 1000) return `${ms}ms`;
   return `${(ms / 1000).toFixed(1)}s`;
 }

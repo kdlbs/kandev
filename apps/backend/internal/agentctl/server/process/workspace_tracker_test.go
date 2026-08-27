@@ -3,6 +3,7 @@ package process
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -277,6 +278,94 @@ func TestGetGitStatus_AheadBehindWithoutUpstream(t *testing.T) {
 	if status.Branch != "feature-branch" {
 		t.Errorf("expected branch=feature-branch, got %s", status.Branch)
 	}
+}
+
+func TestGetGitStatus_ReportsUpstreamHeadForHistoryStates(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	log := newTestLogger(t)
+	wt := NewWorkspaceTracker(repoDir, log)
+	ctx := context.Background()
+
+	runGit(t, repoDir, "checkout", "-b", "feature/pr")
+	runGit(t, repoDir, "push", "-u", "origin", "feature/pr")
+	pushedHead := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
+
+	status, err := wt.getGitStatus(ctx)
+	if err != nil {
+		t.Fatalf("getGitStatus (aligned): %v", err)
+	}
+	if got := remoteHeadFromWire(t, status); got != pushedHead {
+		t.Fatalf("remote_head_commit (aligned) = %q, want %q", got, pushedHead)
+	}
+
+	writeFile(t, repoDir, "local.txt", "local")
+	runGit(t, repoDir, "add", ".")
+	runGit(t, repoDir, "commit", "-m", "local contribution")
+	status, err = wt.getGitStatus(ctx)
+	if err != nil {
+		t.Fatalf("getGitStatus (local ahead): %v", err)
+	}
+	if got := remoteHeadFromWire(t, status); got != pushedHead {
+		t.Fatalf("remote_head_commit (local ahead) = %q, want %q", got, pushedHead)
+	}
+
+	remoteURL := strings.TrimSpace(runGit(t, repoDir, "remote", "get-url", "origin"))
+	providerRoot := t.TempDir()
+	runGit(t, providerRoot, "clone", remoteURL, "provider")
+	providerDir := filepath.Join(providerRoot, "provider")
+	runGit(t, providerDir, "config", "user.email", "provider@test.com")
+	runGit(t, providerDir, "config", "user.name", "Provider User")
+	runGit(t, providerDir, "checkout", "-b", "feature/pr", "origin/feature/pr")
+	writeFile(t, providerDir, "provider.txt", "provider")
+	runGit(t, providerDir, "add", ".")
+	runGit(t, providerDir, "commit", "-m", "provider contribution")
+	providerHead := strings.TrimSpace(runGit(t, providerDir, "rev-parse", "HEAD"))
+	runGit(t, providerDir, "push", "origin", "HEAD:feature/pr")
+	runGit(t, repoDir, "fetch", "origin")
+
+	status, err = wt.getGitStatus(ctx)
+	if err != nil {
+		t.Fatalf("getGitStatus (provider ahead): %v", err)
+	}
+	if got := remoteHeadFromWire(t, status); got != providerHead {
+		t.Fatalf("remote_head_commit (provider ahead) = %q, want %q", got, providerHead)
+	}
+
+	runGit(t, providerDir, "checkout", "--orphan", "rewritten")
+	runGit(t, providerDir, "rm", "-rf", ".")
+	writeFile(t, providerDir, "rewritten.txt", "rewritten")
+	runGit(t, providerDir, "add", ".")
+	runGit(t, providerDir, "commit", "-m", "rewritten contribution")
+	rewrittenHead := strings.TrimSpace(runGit(t, providerDir, "rev-parse", "HEAD"))
+	runGit(t, providerDir, "push", "--force", "origin", "HEAD:feature/pr")
+	runGit(t, repoDir, "fetch", "origin")
+
+	status, err = wt.getGitStatus(ctx)
+	if err != nil {
+		t.Fatalf("getGitStatus (diverged): %v", err)
+	}
+	if got := remoteHeadFromWire(t, status); got != rewrittenHead {
+		t.Fatalf("remote_head_commit (diverged) = %q, want %q", got, rewrittenHead)
+	}
+}
+
+func remoteHeadFromWire(t *testing.T, status types.GitStatusUpdate) string {
+	t.Helper()
+	wire, err := json.Marshal(status)
+	if err != nil {
+		t.Fatalf("marshal git status: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(wire, &payload); err != nil {
+		t.Fatalf("unmarshal git status: %v", err)
+	}
+	value, ok := payload["remote_head_commit"].(string)
+	if !ok {
+		t.Fatalf("remote_head_commit missing from git status: %s", wire)
+	}
+	return value
 }
 
 // TestGetGitStatus_AheadBehindAfterRebase verifies that ahead/behind counts

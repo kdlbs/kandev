@@ -6,16 +6,19 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/utility/controller"
 	"github.com/kandev/kandev/internal/utility/dto"
+	"github.com/kandev/kandev/internal/utility/profilebinding"
 	"github.com/kandev/kandev/internal/utility/service"
 )
 
@@ -27,6 +30,10 @@ type InferenceExecutor interface {
 	ListInferenceAgentsWithContext(ctx context.Context) []lifecycle.InferenceAgentInfo
 }
 
+type profileInferenceExecutor interface {
+	ExecuteInferenceProfilePrompt(ctx context.Context, sessionID, profileID, prompt string) (*agentctlutil.PromptResponse, error)
+}
+
 // HostUtilityExecutor runs sessionless utility prompts via the long-lived
 // per-agent-type host agentctl instances and exposes the cached per-agent
 // capabilities (models, modes) populated by the boot-time ACP probe.
@@ -36,10 +43,18 @@ type HostUtilityExecutor interface {
 	Refresh(ctx context.Context, agentType string) (hostutility.AgentCapabilities, error)
 }
 
+type profileHostUtilityExecutor interface {
+	ExecuteProfilePrompt(ctx context.Context, profileID, prompt string) (*hostutility.PromptResult, error)
+}
+
 // UserSettingsProvider provides user settings for default utility agent/model.
 type UserSettingsProvider interface {
 	// GetDefaultUtilitySettings returns the user's default utility agent/model settings.
 	GetDefaultUtilitySettings(ctx context.Context) (agentID, model string, err error)
+}
+
+type userUtilityProfileSettingsProvider interface {
+	GetDefaultUtilityAgentProfileID(ctx context.Context) (string, error)
 }
 
 // Handlers provides HTTP handlers for utility agents.
@@ -50,6 +65,8 @@ type Handlers struct {
 	userSettings UserSettingsProvider
 	logger       *logger.Logger
 }
+
+const maxUtilityRouteAttempts = 8
 
 // NewHandlers creates new utility agent handlers.
 func NewHandlers(ctrl *controller.Controller, executor InferenceExecutor, hostExecutor HostUtilityExecutor, userSettings UserSettingsProvider, log *logger.Logger) *Handlers {
@@ -94,6 +111,8 @@ func (h *Handlers) httpGetAgent(c *gin.Context) {
 		status := http.StatusInternalServerError
 		if errors.Is(err, service.ErrAgentNotFound) {
 			status = http.StatusNotFound
+		} else if errors.Is(err, service.ErrProfileRequired) || errors.Is(err, service.ErrProfileUnconfigured) || errors.Is(err, profilebinding.ErrProfileNotFound) || errors.Is(err, profilebinding.ErrProfileIneligible) {
+			status = http.StatusPreconditionFailed
 		}
 		h.logger.Error("failed to get utility agent", zap.Error(err))
 		c.JSON(status, gin.H{"error": "failed to get utility agent"})
@@ -182,6 +201,14 @@ func (h *Handlers) httpExecutePrompt(c *gin.Context) {
 		if err == nil && (agentID != "" || model != "") {
 			defaults = &service.DefaultUtilitySettings{AgentID: agentID, Model: model}
 		}
+		if profileProvider, ok := h.userSettings.(userUtilityProfileSettingsProvider); ok {
+			if profileID, profileErr := profileProvider.GetDefaultUtilityAgentProfileID(ctx); profileErr == nil {
+				if defaults == nil {
+					defaults = &service.DefaultUtilitySettings{}
+				}
+				defaults.ProfileID = profileID
+			}
+		}
 	}
 
 	sessionless := req.SessionID == ""
@@ -209,7 +236,7 @@ func (h *Handlers) httpExecutePrompt(c *gin.Context) {
 	}
 
 	// Create call record for tracking
-	callID, err := h.controller.CreateCall(ctx, req.UtilityAgentID, req.SessionID, prepared.ResolvedPrompt, prepared.Model)
+	callID, err := h.controller.CreateCall(ctx, req.UtilityAgentID, req.SessionID, prepared.ResolvedPrompt, prepared.Model, prepared.AgentProfileID, prepared.ExecutionProfileID)
 	if err != nil {
 		h.logger.Error("failed to create call record", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, dto.ExecutePromptResponse{Error: "failed to create call record"})
@@ -222,7 +249,18 @@ func (h *Handlers) httpExecutePrompt(c *gin.Context) {
 	}
 
 	// Execute via agentctl using an existing task session's agentctl
-	resp, err := h.executor.ExecuteInferencePrompt(ctx, req.SessionID, prepared.AgentCLI, prepared.Model, prepared.ResolvedPrompt)
+	var resp *agentctlutil.PromptResponse
+	if prepared.AgentProfileID != "" {
+		profileExecutor, ok := h.executor.(profileInferenceExecutor)
+		if !ok {
+			_ = h.controller.FailCall(ctx, callID, "profile-aware inference executor is unavailable", 0)
+			c.JSON(http.StatusServiceUnavailable, dto.ExecutePromptResponse{CallID: callID, Error: "profile-aware inference executor is unavailable"})
+			return
+		}
+		resp, err = h.executeSessionProfilePrompt(ctx, profileExecutor, req.SessionID, prepared, callID)
+	} else {
+		resp, err = h.executor.ExecuteInferencePrompt(ctx, req.SessionID, prepared.AgentCLI, prepared.Model, prepared.ResolvedPrompt)
+	}
 	if err != nil {
 		h.logger.Error("failed to execute prompt", zap.Error(err), zap.String("call_id", callID))
 		_ = h.controller.FailCall(ctx, callID, err.Error(), 0)
@@ -230,6 +268,12 @@ func (h *Handlers) httpExecutePrompt(c *gin.Context) {
 			CallID: callID,
 			Error:  "failed to execute prompt: " + err.Error(),
 		})
+		return
+	}
+	if resp == nil {
+		const message = "utility executor returned no response"
+		_ = h.controller.FailCall(ctx, callID, message, 0)
+		c.JSON(http.StatusInternalServerError, dto.ExecutePromptResponse{CallID: callID, Error: message})
 		return
 	}
 
@@ -270,7 +314,19 @@ func (h *Handlers) executeSessionless(c *gin.Context, ctx context.Context, prepa
 		})
 		return
 	}
-	result, err := h.hostExecutor.ExecutePrompt(ctx, prepared.AgentCLI, prepared.Model, "", prepared.ResolvedPrompt)
+	var result *hostutility.PromptResult
+	var err error
+	if prepared.AgentProfileID != "" {
+		profileExecutor, ok := h.hostExecutor.(profileHostUtilityExecutor)
+		if !ok {
+			_ = h.controller.FailCall(ctx, callID, "profile-aware host utility executor is unavailable", 0)
+			c.JSON(http.StatusServiceUnavailable, dto.ExecutePromptResponse{CallID: callID, Error: "profile-aware host utility executor is unavailable"})
+			return
+		}
+		result, err = h.executeSessionlessProfilePrompt(ctx, profileExecutor, prepared, callID)
+	} else {
+		result, err = h.hostExecutor.ExecutePrompt(ctx, prepared.AgentCLI, prepared.Model, "", prepared.ResolvedPrompt)
+	}
 	if err != nil {
 		h.logger.Error("failed to execute sessionless prompt", zap.Error(err), zap.String("call_id", callID))
 		_ = h.controller.FailCall(ctx, callID, err.Error(), 0)
@@ -278,6 +334,12 @@ func (h *Handlers) executeSessionless(c *gin.Context, ctx context.Context, prepa
 			CallID: callID,
 			Error:  "failed to execute prompt: " + err.Error(),
 		})
+		return
+	}
+	if result == nil {
+		const message = "host utility returned no response"
+		_ = h.controller.FailCall(ctx, callID, message, 0)
+		c.JSON(http.StatusInternalServerError, dto.ExecutePromptResponse{CallID: callID, Error: message})
 		return
 	}
 	if err := h.controller.CompleteCall(ctx, callID, result.Response, result.PromptTokens, result.ResponseTokens, result.DurationMs); err != nil {
@@ -292,6 +354,141 @@ func (h *Handlers) executeSessionless(c *gin.Context, ctx context.Context, prepa
 		ResponseTokens: result.ResponseTokens,
 		DurationMs:     result.DurationMs,
 	})
+}
+
+func utilityFailure(storedErr error, response string, providerID string) *routingerr.Error {
+	message := response
+	if storedErr != nil {
+		message = storedErr.Error()
+	}
+	return routingerr.Classify(routingerr.Input{
+		Phase:      routingerr.PhasePromptSend,
+		ProviderID: providerID,
+		Stderr:     message,
+	})
+}
+
+func (h *Handlers) executeSessionProfilePrompt(
+	ctx context.Context,
+	executor profileInferenceExecutor,
+	sessionID string,
+	prepared *service.PromptRequest,
+	callID string,
+) (*agentctlutil.PromptResponse, error) {
+	currentExecutionProfileID := prepared.ExecutionProfileID
+	if currentExecutionProfileID == "" {
+		currentExecutionProfileID = prepared.AgentProfileID
+	}
+	initialExecutionProfileID := currentExecutionProfileID
+	var response *agentctlutil.PromptResponse
+	var executeErr error
+
+	for attempt := 0; attempt < maxUtilityRouteAttempts; attempt++ {
+		response, executeErr = executor.ExecuteInferenceProfilePrompt(ctx, sessionID, currentExecutionProfileID, prepared.ResolvedPrompt)
+		if executeErr == nil && response != nil && response.Success {
+			if currentExecutionProfileID != initialExecutionProfileID {
+				if err := h.controller.SetCallExecutionProfile(ctx, callID, currentExecutionProfileID); err != nil {
+					h.logger.Warn("failed to update utility route attribution", zap.Error(err), zap.String("call_id", callID))
+				}
+			}
+			return response, nil
+		}
+		// A provider response with any user-visible content is already a
+		// result. Retrying it through another profile could repeat tool calls
+		// or make the caller see two incompatible answers.
+		if response != nil && strings.TrimSpace(response.Response) != "" {
+			return response, executeErr
+		}
+
+		nextProfileID, advanced := h.advanceSessionProfileRoute(
+			ctx, prepared, currentExecutionProfileID, response, executeErr,
+		)
+		if !advanced {
+			return response, executeErr
+		}
+		currentExecutionProfileID = nextProfileID
+	}
+	return response, executeErr
+}
+
+func (h *Handlers) advanceSessionProfileRoute(
+	ctx context.Context,
+	prepared *service.PromptRequest,
+	currentExecutionProfileID string,
+	response *agentctlutil.PromptResponse,
+	executeErr error,
+) (string, bool) {
+	responseError := ""
+	if response != nil {
+		responseError = response.Error
+	}
+	classified := utilityFailure(executeErr, responseError, prepared.AgentCLI)
+	if prepared.RouteSessionID == "" ||
+		prepared.AgentProfileID == currentExecutionProfileID ||
+		!classified.FallbackAllowed {
+		return "", false
+	}
+	next, err := h.controller.ResolveExecutionAfterFailure(
+		ctx, prepared.RouteSessionID, prepared.AgentProfileID,
+		currentExecutionProfileID, prepared.RouteGeneration, classified,
+	)
+	if err != nil || next.ExecutionProfileID == "" {
+		return "", false
+	}
+	prepared.ExecutionProfileID = next.ExecutionProfileID
+	prepared.RouteGeneration = next.Generation
+	if next.Profile != nil {
+		prepared.AgentCLI = next.Profile.AgentID
+		prepared.Model = next.Profile.Model
+	}
+	return next.ExecutionProfileID, true
+}
+
+func (h *Handlers) executeSessionlessProfilePrompt(
+	ctx context.Context,
+	executor profileHostUtilityExecutor,
+	prepared *service.PromptRequest,
+	callID string,
+) (*hostutility.PromptResult, error) {
+	currentExecutionProfileID := prepared.ExecutionProfileID
+	if currentExecutionProfileID == "" {
+		currentExecutionProfileID = prepared.AgentProfileID
+	}
+	initialExecutionProfileID := currentExecutionProfileID
+	var result *hostutility.PromptResult
+	var executeErr error
+
+	for attempt := 0; attempt < maxUtilityRouteAttempts; attempt++ {
+		result, executeErr = executor.ExecuteProfilePrompt(ctx, currentExecutionProfileID, prepared.ResolvedPrompt)
+		if executeErr == nil && result != nil {
+			if currentExecutionProfileID != initialExecutionProfileID {
+				if err := h.controller.SetCallExecutionProfile(ctx, callID, currentExecutionProfileID); err != nil {
+					h.logger.Warn("failed to update sessionless utility route attribution", zap.Error(err), zap.String("call_id", callID))
+				}
+			}
+			return result, nil
+		}
+
+		classified := utilityFailure(executeErr, "", prepared.AgentCLI)
+		if prepared.RouteSessionID == "" || !classified.FallbackAllowed {
+			return result, executeErr
+		}
+		next, resolveErr := h.controller.ResolveExecutionAfterFailure(
+			ctx, prepared.RouteSessionID, prepared.AgentProfileID,
+			currentExecutionProfileID, prepared.RouteGeneration, classified,
+		)
+		if resolveErr != nil || next.ExecutionProfileID == "" {
+			return result, executeErr
+		}
+		currentExecutionProfileID = next.ExecutionProfileID
+		prepared.ExecutionProfileID = next.ExecutionProfileID
+		prepared.RouteGeneration = next.Generation
+		if next.Profile != nil {
+			prepared.AgentCLI = next.Profile.AgentID
+			prepared.Model = next.Profile.Model
+		}
+	}
+	return result, executeErr
 }
 
 func (h *Handlers) httpListCalls(c *gin.Context) {

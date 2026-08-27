@@ -1,31 +1,14 @@
 "use client";
 
 import { useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { bulkMoveSelectedTasks } from "@/lib/api";
 import { useToast } from "@/components/toast-provider";
-
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Failed to move task";
-}
-
-function movedTitle(movedCount: number, destination: "step" | "workflow") {
-  if (movedCount === 1) return `Moved task to ${destination}`;
-  return `Moved ${movedCount} tasks to ${destination}`;
-}
-
-function movedDescription(movedCount: number, destination: "step" | "workflow") {
-  if (destination === "step") {
-    return movedCount === 1
-      ? "The task is now in the selected step."
-      : "The tasks are now in the selected step.";
-  }
-  return movedCount === 1
-    ? "Switch to the destination workflow to see it."
-    : "Switch to the destination workflow to see them.";
-}
+import { getTaskMoveErrorMessage } from "@/components/task/task-move-error-message";
 
 export function useTaskWorkflowMove() {
   const { toast } = useToast();
+  const { t } = useTranslation("task");
 
   return useCallback(
     async (
@@ -43,19 +26,27 @@ export function useTaskWorkflowMove() {
           target_step_id: targetStepId,
         });
         toast({
-          title: movedTitle(result.moved_count, destination),
-          description: movedDescription(result.moved_count, destination),
+          title: t(destination === "step" ? "task:movedTasksToStep" : "task:movedTasksToWorkflow", {
+            count: result.moved_count,
+          }),
+          description: t(
+            destination === "step"
+              ? "task:movedTasksStepDescription"
+              : "task:movedTasksWorkflowDescription",
+            { count: result.moved_count },
+          ),
           variant: "success",
         });
       } catch (error) {
+        const fallback = t("task:taskMoveErrorGeneric");
         toast({
-          title: "Failed to move task",
-          description: errorMessage(error),
+          title: t("task:failedToMoveTask"),
+          description: getTaskMoveErrorMessage(error, fallback, t),
           variant: "error",
         });
         throw error;
       }
     },
-    [toast],
+    [t, toast],
   );
 }

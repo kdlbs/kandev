@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
-import type { DailyActivityDTO, AgentUsageDTO, CompletedTaskActivityDTO } from "@/lib/types/http";
+import type { DailyActivityDTO, ModelUsageDTO, CompletedTaskActivityDTO } from "@/lib/types/http";
 import { useTranslation } from "react-i18next";
 
 function formatMonthLabel(date: Date): string {
@@ -163,37 +163,30 @@ export function ActivityHeatmap({ dailyActivity }: { dailyActivity: DailyActivit
   );
 }
 
-export function AgentUsageList({ agentUsage }: { agentUsage: AgentUsageDTO[] }) {
+export function ModelUsageList({ modelUsage }: { modelUsage: ModelUsageDTO[] }) {
   const { t } = useTranslation();
-  if (!agentUsage || agentUsage.length === 0) {
+  if (!modelUsage || modelUsage.length === 0) {
     return (
-      <div className="text-sm text-muted-foreground py-4">{t("stats:noAgentUsageDataYet")}</div>
+      <div className="text-sm text-muted-foreground py-4">{t("stats:noModelUsageDataYet")}</div>
     );
   }
 
-  const maxSessions = Math.max(...agentUsage.map((a) => a.session_count));
+  const maxSessions = Math.max(...modelUsage.map((m) => m.session_count));
 
   return (
     <div className="space-y-3">
-      {agentUsage.map((agent) => (
-        <div key={agent.agent_profile_id}>
+      {modelUsage.map((entry) => (
+        <div key={entry.model}>
           <div className="flex items-center justify-between mb-1">
-            <div className="min-w-0">
-              <div className="text-sm truncate">{agent.agent_profile_name}</div>
-              {agent.agent_model && (
-                <div className="text-[11px] text-muted-foreground font-mono truncate">
-                  {agent.agent_model}
-                </div>
-              )}
-            </div>
+            <div className="text-sm font-mono truncate min-w-0">{entry.model}</div>
             <span className="text-xs text-muted-foreground tabular-nums ml-2">
-              {agent.session_count}
+              {entry.session_count}
             </span>
           </div>
           <div className="h-1.5 bg-muted rounded-full overflow-hidden">
             <div
               className="h-full bg-primary/60 rounded-full"
-              style={{ width: `${(agent.session_count / maxSessions) * 100}%` }}
+              style={{ width: `${(entry.session_count / maxSessions) * 100}%` }}
             />
           </div>
         </div>
@@ -423,7 +416,7 @@ export function MostProductiveSummary({
       <div className="flex items-center justify-between text-sm">
         <span className="text-muted-foreground">{t("stats:bestYear")}</span>
         <span className="font-mono tabular-nums">
-          {stats.maxYear.year || "\u2014"} · {stats.maxYear.value}
+          {stats.maxYear.year || "-"} · {stats.maxYear.value}
         </span>
       </div>
     </div>

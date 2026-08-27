@@ -1,6 +1,6 @@
 # 0018: Runtime settings overrides
 
-**Status:** accepted
+**Status:** accepted (amended 2026-08-11)
 **Date:** 2026-06-14
 **Area:** backend, frontend, cli
 
@@ -28,11 +28,15 @@ descriptions, stability metadata, risk descriptions, env-var names, and restart
 requirements. The Feature Toggles UI renders that registry state rather than
 hardcoding env-var behavior in React.
 
-V1 exposed Office mode and Debug mode. The current registry also includes the
-App Status Bar, opt-in Authentication, and Claude background prompt handoff
-experiment. Office mode and the handoff experiment are marked experimental;
-Debug mode is the user-facing toggle for debug behavior, including agent
-message debug logs. Agent message logs are not a separate top-level toggle.
+V1 exposed Office mode and Debug mode. Later registrations included the App
+Status Bar, opt-in Authentication, and Claude background prompt handoff
+experiment. The App Status Bar subsequently graduated from the registry into a
+portable user Appearance preference; its key and environment variable remain
+retired identities under
+[ADR-2026-08-11-user-owned-status-bar-visibility](2026-08-11-user-owned-status-bar-visibility.md).
+Office mode and the handoff experiment are marked experimental; Debug mode is
+the user-facing toggle for debug behavior, including agent message debug logs.
+Agent message logs are not a separate top-level toggle.
 
 V1 toggle changes require restart. Restart is launcher/supervisor mediated:
 

@@ -4,7 +4,8 @@ import { StateProvider } from "@/components/state-provider";
 import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
 import type { ForegroundActivity, TaskPendingAction } from "@/lib/types/http";
-import { SwimlaneGraphContent } from "./swimlane-graph-content";
+import { i18n, t } from "@/lib/i18n";
+import { SwimlaneGraphContent, moveTaskAcrossSwimlaneSteps } from "./swimlane-graph-content";
 
 afterEach(() => {
   cleanup();
@@ -96,5 +97,65 @@ describe("SwimlaneGraphContent — waiting-for-input variants", () => {
     expect(container.querySelector(".tabler-icon-shield-question")).not.toBeNull();
     expect(container.querySelector(ICON_CHECK)).toBeNull();
     expect(container.querySelector(ICON_LOADER2)).toBeNull();
+  });
+});
+
+describe("moveTaskAcrossSwimlaneSteps — move failure reporting", () => {
+  const WORKFLOW_ID = "wf-1";
+  const TASK_ID = "task-1";
+  const PLAIN_STRING_REJECTION = "plain string rejection";
+  const UNKNOWN_REJECTION = {};
+
+  function harness() {
+    const snapshot = {
+      tasks: [{ id: TASK_ID, workflowStepId: "step-1", position: 0 }],
+    };
+    const snapshots: Record<string, typeof snapshot> = { [WORKFLOW_ID]: snapshot };
+    const state = {
+      kanbanMulti: { snapshots },
+      setWorkflowSnapshot: (id: string, next: typeof snapshot) => {
+        snapshots[id] = next;
+      },
+    };
+    return { getState: () => state } as never;
+  }
+
+  async function move(rejection: unknown) {
+    const errors: { message: string }[] = [];
+    await moveTaskAcrossSwimlaneSteps({
+      task: { id: TASK_ID, primarySessionId: null } as never,
+      taskId: TASK_ID,
+      targetColumnId: "step-2",
+      workflowId: WORKFLOW_ID,
+      store: harness(),
+      moveTaskById: (() => Promise.reject(rejection)) as never,
+      onMoveError: (error) => errors.push(error),
+    });
+    return errors;
+  }
+
+  it("reports the localized fallback for an unknown rejection", async () => {
+    await i18n.changeLanguage("pseudo");
+    try {
+      const [error] = await move(UNKNOWN_REJECTION);
+      expect(error.message).toBe(t("task:taskMoveErrorGeneric"));
+      expect(error.message).toMatch(/[^\x20-\x7E]/);
+    } finally {
+      await i18n.changeLanguage("en");
+    }
+  });
+
+  it("attaches task identity to a string rejection", async () => {
+    expect(await move(PLAIN_STRING_REJECTION)).toEqual([
+      { message: PLAIN_STRING_REJECTION, taskId: TASK_ID, sessionId: null },
+    ]);
+  });
+
+  it("preserves a real Error's message instead of replacing it with copy", async () => {
+    // A server diagnostic is not copy: swallowing it would leave the user with a
+    // generic sentence and no way to tell two failures apart.
+    expect(await move(new Error("step is at its WIP limit"))).toEqual([
+      { message: "step is at its WIP limit", taskId: TASK_ID, sessionId: null },
+    ]);
   });
 });

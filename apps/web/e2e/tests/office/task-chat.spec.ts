@@ -1,6 +1,7 @@
 import { type Page } from "@playwright/test";
 import { test as base, expect } from "../../fixtures/test-base";
 import { OfficeApiClient } from "../../helpers/office-api-client";
+import { waitForOfficeTaskSessionLive } from "../../helpers/office-launch";
 import { AppSidebarPage } from "../../pages/app-sidebar-page";
 
 /**
@@ -30,7 +31,7 @@ const test = base.extend<{ testPage: Page }, IssueChatFixtures>({
   ],
 
   chatSeed: [
-    async ({ officeApi, seedData }, use) => {
+    async ({ officeApi, apiClient, seedData }, use) => {
       const result = (await officeApi.completeOnboarding({
         workspaceName: "Chat Test Workspace",
         taskPrefix: "CT",
@@ -45,28 +46,8 @@ const test = base.extend<{ testPage: Page }, IssueChatFixtures>({
         throw new Error("completeOnboarding did not return a taskId");
       }
 
-      // Wait for the agent to leave the pre-launch states. Task state
-      // surfaces from the API in canonical lowercase form
-      // (`in_progress`, `in_review`, `done`, …); legacy SCREAMING_SNAKE_CASE
-      // values are accepted defensively.
-      const launched = new Set([
-        "in_progress",
-        "in_review",
-        "done",
-        "completed",
-        "waiting_for_input",
-        "review",
-      ]);
-      const deadline = Date.now() + 25_000;
-      while (Date.now() < deadline) {
-        const issue = await officeApi.getTask(result.taskId);
-        const raw = issue as Record<string, unknown>;
-        const inner = (raw.task as Record<string, unknown>) ?? raw;
-        const state = ((inner.state as string) ?? (inner.status as string) ?? "").toLowerCase();
-        if (state === "failed") throw new Error("Task entered FAILED state");
-        if (launched.has(state)) break;
-        await new Promise((r) => setTimeout(r, 500));
-      }
+      // Wait for the agent runtime to come up before any test navigates.
+      await waitForOfficeTaskSessionLive(apiClient, result.taskId);
 
       await use({
         workspaceId: result.workspaceId,
@@ -97,16 +78,21 @@ test.describe("Office issue chat", () => {
     // via maybeAsync (goroutine) and needs the DB fallback for streaming
     // agents where Data.Text is empty.
     let agentComment: Record<string, unknown> | undefined;
-    const deadline = Date.now() + 15_000;
-    while (Date.now() < deadline) {
-      const res = await officeApi.listTaskComments(chatSeed.taskId);
-      const comments = (res as { comments?: Record<string, unknown>[] }).comments ?? [];
-      agentComment = comments.find(
-        (c) => (c.authorType as string) === "agent" || (c.author_type as string) === "agent",
-      );
-      if (agentComment) break;
-      await new Promise((r) => setTimeout(r, 500));
-    }
+    // `agentComment` is captured on each poll so the assertions below read the
+    // last observed value.
+    await expect
+      .poll(
+        async () => {
+          const res = await officeApi.listTaskComments(chatSeed.taskId);
+          const comments = (res as { comments?: Record<string, unknown>[] }).comments ?? [];
+          agentComment = comments.find(
+            (c) => (c.authorType as string) === "agent" || (c.author_type as string) === "agent",
+          );
+          return Boolean(agentComment);
+        },
+        { timeout: 15_000, message: "no agent comment appeared" },
+      )
+      .toBe(true);
 
     expect(agentComment, "agent response must be auto-bridged as a task comment").toBeDefined();
     expect((agentComment!.body as string).length).toBeGreaterThan(0);

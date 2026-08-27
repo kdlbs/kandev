@@ -82,8 +82,20 @@ func bootInitialState(
 	}
 
 	if route.Route == webapp.RouteSettings {
-		builder.addWorkspaceState(ctx, state, nil)
-		builder.addUserSettingsState(ctx, state, "")
+		// Resolve an active workspace rather than emitting null. The SPA derives
+		// Office-vs-kanban chrome from the active workspace record, so a settings
+		// boot that names no workspace leaves the sidebar unable to tell which
+		// mode it is in until the client's own fetch lands.
+		// One workspace snapshot for both selection and serialisation: listing
+		// twice could name an activeId that a concurrent deletion has already
+		// removed from items.
+		workspaces, ok := builder.listBootWorkspaces(ctx)
+		activeID := ""
+		if ok {
+			activeID = builder.settingsWorkspaceID(ctx, req, workspaces)
+			builder.addWorkspaceStateFrom(workspaces, state, &activeID)
+		}
+		builder.addUserSettingsState(ctx, state, activeID)
 		builder.addSettingsRouteState(ctx, state, route.Path)
 	}
 	// Home and unknown SPA routes both render the full app shell (nav,
@@ -152,14 +164,32 @@ type bootStateBuilder struct {
 }
 
 func (b bootStateBuilder) addWorkspaceState(ctx context.Context, state map[string]any, activeID *string) {
-	if b.p.taskSvc == nil {
+	workspaces, ok := b.listBootWorkspaces(ctx)
+	if !ok {
 		return
+	}
+	b.addWorkspaceStateFrom(workspaces, state, activeID)
+}
+
+// listBootWorkspaces returns the workspace snapshot a boot payload is built
+// from; ok is false when the service is unavailable or the listing fails.
+func (b bootStateBuilder) listBootWorkspaces(ctx context.Context) ([]*taskmodels.Workspace, bool) {
+	if b.p.taskSvc == nil {
+		return nil, false
 	}
 	workspaces, err := b.p.taskSvc.ListWorkspaces(ctx)
 	if err != nil {
 		b.logBootError("list workspaces", err)
-		return
+		return nil, false
 	}
+	return workspaces, true
+}
+
+func (b bootStateBuilder) addWorkspaceStateFrom(
+	workspaces []*taskmodels.Workspace,
+	state map[string]any,
+	activeID *string,
+) {
 	items := make([]taskdto.WorkspaceDTO, 0, len(workspaces))
 	for _, workspace := range workspaces {
 		if workspace == nil {
@@ -175,6 +205,30 @@ func (b bootStateBuilder) addWorkspaceState(ctx context.Context, state map[strin
 		"items":    items,
 		"activeId": active,
 	}
+}
+
+// settingsWorkspaceID resolves the active workspace for a /settings boot:
+// whatever the user last had active, then their stored preference, then the
+// first workspace that exists.
+//
+// Deliberately not filtered to kanban workspaces. Settings is shared chrome —
+// reachable from either mode — so preferring a kanban workspace here would
+// silently switch an Office user's active workspace just by opening Settings.
+func (b bootStateBuilder) settingsWorkspaceID(
+	ctx context.Context,
+	req *http.Request,
+	workspaces []*taskmodels.Workspace,
+) string {
+	settingsWorkspaceID := ""
+	if settings, ok := b.userSettings(ctx); ok {
+		settingsWorkspaceID = settings.Settings.WorkspaceID
+	}
+	return firstValidID(
+		workspaceIDSet(workspaces),
+		readActiveWorkspaceCookie(req),
+		settingsWorkspaceID,
+		firstWorkspaceID(workspaces),
+	)
 }
 
 func (b bootStateBuilder) addUserSettingsState(ctx context.Context, state map[string]any, workspaceID string) {
@@ -263,6 +317,8 @@ func (b bootStateBuilder) addHomeKanbanRouteState(ctx context.Context, req *http
 		state["userSettings"] = mapUserSettingsStateWithWorkflow(settings, activeWorkspaceID, activeWorkflowID)
 	}
 	b.addRepositoriesState(ctx, state, activeWorkspaceID)
+	b.addRepositorySetsState(ctx, state, activeWorkspaceID)
+	b.addRepositoryBranchPoliciesState(ctx, state, activeWorkspaceID)
 	b.addKanbanSnapshotsState(ctx, state, workflows, activeWorkflowID)
 }
 
@@ -319,6 +375,27 @@ func (b bootStateBuilder) addRepositoriesState(ctx context.Context, state map[st
 			workspaceID: true,
 		},
 	}
+}
+
+// addRepositorySetsState hydrates the home/kanban route with the workspace's
+// repository sets, so the create dialog can offer them without a fetch.
+func (b bootStateBuilder) addRepositorySetsState(ctx context.Context, state map[string]any, workspaceID string) {
+	items := repositorySetsToDTOs(nil)
+	loaded := false
+	sets, err := b.p.taskSvc.ListRepositorySets(ctx, workspaceID)
+	if err != nil {
+		// Not loaded, so the client's hook still fetches; see
+		// repositorySetsForState.
+		b.logBootError("list home repository sets", err)
+	} else {
+		items = repositorySetsToDTOs(sets)
+		loaded = true
+	}
+	state["repositorySets"] = repositorySetsState(workspaceID, items, loaded)
+}
+
+func (b bootStateBuilder) addRepositoryBranchPoliciesState(ctx context.Context, state map[string]any, workspaceID string) {
+	b.repositoryBranchPoliciesForState(ctx, workspaceID, state)
 }
 
 func (b bootStateBuilder) addQuickChatState(
@@ -654,11 +731,12 @@ func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*
 		pendingActionsBySession = map[string]taskmodels.TaskPendingAction{}
 	}
 	if summaryErr == nil && pendingErr == nil {
-		statusSummaries, err = b.p.taskSvc.HydrateMissingTaskStatusSummaries(
+		reconciledSummaries, reconcileErr := b.p.taskSvc.ReconcileTaskStatusSummaries(
 			ctx, tasks, sessionsByTask, pendingActionsBySession, statusSummaries,
 		)
-		if err != nil {
-			b.logBootError("repair missing task status summaries", err)
+		statusSummaries = reconciledSummaries
+		if reconcileErr != nil {
+			b.logBootError("reconcile task status summaries", reconcileErr)
 		}
 	}
 	// Stamp the authoritative per-task queued prompt count onto every summary so
@@ -669,6 +747,9 @@ func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*
 	if queuedErr != nil {
 		b.logBootError("queued prompt counts", queuedErr)
 	}
+	// Dependency state is derived per read (never stored, so the auto-start gate
+	// can never read a stale value). One batched call for the whole boot payload.
+	dependencyViews := b.p.taskSvc.BuildDependencyViews(ctx, tasks)
 	result := make([]taskdto.TaskDTO, 0, len(tasks))
 	for _, task := range tasks {
 		if task == nil {
@@ -710,7 +791,8 @@ func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*
 		if b.p.orchestratorSvc != nil {
 			taskdto.EnrichTaskForegroundActivity(&dto, sessions, b.p.orchestratorSvc)
 		}
-		dto.StatusSummary = statusSummaries[task.ID]
+		taskdto.EnrichTaskDependencies(&dto, bootDependencyProjection(dependencyViews[task.ID]), task)
+		taskdto.EnrichTaskStatusSummary(&dto, task.ID, statusSummaries)
 		if dto.StatusSummary != nil {
 			switch {
 			case queuedErr != nil:
@@ -1030,7 +1112,7 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 				"sessionId":    session.ID,
 				"repositoryId": nullString(dto.RepositoryID),
 				"path":         nullString(dto.WorktreePath),
-				"branch":       nullString(dto.WorktreeBranch),
+				branchFieldKey: nullString(dto.WorktreeBranch),
 			}
 			worktreesBySession[session.ID] = []string{dto.WorktreeID}
 		}
@@ -1120,6 +1202,9 @@ func taskSessionModelsBootState(
 		"models":         models,
 		"configOptions":  options,
 	}
+	if snapshot.ConfigOptionsSettled {
+		state["configOptionsSettled"] = true
+	}
 	if len(baseline) > 0 {
 		state["configBaseline"] = baseline
 	}
@@ -1145,8 +1230,8 @@ func (b bootStateBuilder) addTaskDetailAgentsState(ctx context.Context, state ma
 	state["settingsAgents"] = map[string]any{"items": response.Agents}
 	state["settingsData"] = map[string]any{"agentsLoaded": true, "executorsLoaded": false}
 	state["agentProfiles"] = map[string]any{
-		"items":   agentProfileOptionStates(response.Agents),
-		"version": 0,
+		"items":         agentProfileOptionStates(response.Agents),
+		versionFieldKey: 0,
 	}
 }
 

@@ -41,18 +41,23 @@ type mockGitHubService struct {
 	getPRWatchBySessionRepoAndBranchCalls int
 	exactTaskPRCalls                      int
 	lastExactPRLookup                     github.PRFeedbackEvent
-	prWatch                               *github.PRWatch // returned by GetPRWatchBySession (nil = no watch)
-	ensureWatchCalls                      int
-	createWatchCalls                      int
-	associateCalls                        int
-	updateBranchCalls                     int
-	updatePRNumberCalls                   int
-	resetWatchCalls                       int
-	resetWatchBranch                      string
-	ensureWatchBranch                     string
-	createWatchBranch                     string
-	updatedBranch                         string
-	updatedPRNumber                       int
+	prWatch                               *github.PRWatch // single-watch fixture (nil = no watch)
+	// sessionWatches is the multi-branch fixture: when set, the branch-scoped
+	// lookups honour repository_id + branch instead of returning prWatch for
+	// every query, so tests can assert that a branch switch leaves another
+	// branch's found-PR watch alone.
+	sessionWatches      []*github.PRWatch
+	ensureWatchCalls    int
+	createWatchCalls    int
+	associateCalls      int
+	updateBranchCalls   int
+	updatePRNumberCalls int
+	resetWatchCalls     int
+	resetWatchBranch    string
+	ensureWatchBranch   string
+	createWatchBranch   string
+	updatedBranch       string
+	updatedPRNumber     int
 	// repository_id captured by the most recent CreatePRWatch /
 	// AssociatePRWithTask call. Used by the multi-repo push tests to assert
 	// the per-repo scoping (an empty value indicates the legacy single-repo
@@ -215,6 +220,20 @@ func (m *mockGitHubService) RecordTaskCIMergeAttempt(_ context.Context, attempt 
 	m.mergeAttempts = append(m.mergeAttempts, attempt)
 	return nil
 }
+func (m *mockGitHubService) RecordTaskCIMergeQueueObservation(_ context.Context, observation github.TaskCIMergeQueueObservation) error {
+	if m.ciPRState == nil {
+		m.ciPRState = &github.TaskCIPRAutomationState{
+			TaskID: observation.TaskID, RepositoryID: observation.RepositoryID, PRNumber: observation.PRNumber,
+		}
+	}
+	if observation.ActiveQueueHeadSHA != "" {
+		m.ciPRState.LastQueueAttemptHeadSHA = observation.ActiveQueueHeadSHA
+	}
+	if observation.RemovalCause != "" {
+		m.ciPRState.LastQueueRemovalCause = observation.RemovalCause
+	}
+	return nil
+}
 func (m *mockGitHubService) RecordTaskCIError(_ context.Context, taskID, repositoryID string, prNumber int, message string) error {
 	m.ciErrors = append(m.ciErrors, github.TaskCIPRAutomationState{
 		TaskID:       taskID,
@@ -311,15 +330,35 @@ func (m *mockGitHubService) EnsurePRWatchForWorkspace(
 ) (*github.PRWatch, error) {
 	return m.EnsurePRWatch(ctx, sessionID, taskID, repositoryID, owner, repo, branch)
 }
-func (m *mockGitHubService) GetPRWatchBySession(_ context.Context, _ string) (*github.PRWatch, error) {
-	return m.prWatch, nil
-}
 func (m *mockGitHubService) GetPRWatchBySessionAndRepo(_ context.Context, _, _ string) (*github.PRWatch, error) {
 	return m.prWatch, nil
 }
-func (m *mockGitHubService) GetPRWatchBySessionRepoAndBranch(_ context.Context, _, _, _ string) (*github.PRWatch, error) {
+func (m *mockGitHubService) GetPRWatchBySessionRepoAndBranch(
+	_ context.Context, _, repositoryID, branch string,
+) (*github.PRWatch, error) {
 	m.getPRWatchBySessionRepoAndBranchCalls++
-	return m.prWatch, nil
+	if m.sessionWatches == nil {
+		return m.prWatch, nil
+	}
+	for _, watch := range m.sessionWatches {
+		if watch != nil && watch.RepositoryID == repositoryID && watch.Branch == branch {
+			return watch, nil
+		}
+	}
+	return nil, nil
+}
+
+// ListPRWatchesBySession serves the per-branch watch bookkeeping. Tests that
+// leave sessionWatches nil fall back to the single prWatch field so the
+// existing single-watch fixtures keep working.
+func (m *mockGitHubService) ListPRWatchesBySession(_ context.Context, _ string) ([]*github.PRWatch, error) {
+	if m.sessionWatches != nil {
+		return m.sessionWatches, nil
+	}
+	if m.prWatch == nil {
+		return nil, nil
+	}
+	return []*github.PRWatch{m.prWatch}, nil
 }
 func (m *mockGitHubService) CreatePRWatch(_ context.Context, _, _, repositoryID, _, _ string, _ int, branch string) (*github.PRWatch, error) {
 	m.createWatchCalls++
@@ -358,6 +397,9 @@ func (m *mockGitHubService) UpdatePRWatchBranchIfSearching(_ context.Context, _,
 func (m *mockGitHubService) UpdatePRWatchPRNumber(_ context.Context, _ string, prNumber int) error {
 	m.updatePRNumberCalls++
 	m.updatedPRNumber = prNumber
+	return nil
+}
+func (m *mockGitHubService) UpdatePRWatchRepository(context.Context, string, string, string) error {
 	return nil
 }
 func (m *mockGitHubService) ResetPRWatch(_ context.Context, _, branch string) error {
@@ -514,16 +556,28 @@ func TestCheckSessionPR(t *testing.T) {
 		}
 
 		// Add worktree with branch to the session
-		wt := &models.TaskSessionWorktree{
-			ID:             "wt1",
-			SessionID:      "s1",
-			WorktreeID:     "wtree1",
-			RepositoryID:   "repo1",
-			WorktreeBranch: branch,
-			CreatedAt:      now,
+		if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+			ID: "env1", TaskID: "t1", ExecutorType: "worktree",
+			WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+			Repos: []*models.TaskEnvironmentRepo{
+				{
+					ID:             "wt1",
+					WorktreeID:     "wtree1",
+					RepositoryID:   "repo1",
+					WorktreeBranch: branch,
+					CreatedAt:      now,
+				},
+			},
+		}); err != nil {
+			t.Fatalf("failed to create environment: %v", err)
 		}
-		if err := repo.CreateTaskSessionWorktree(ctx, wt); err != nil {
-			t.Fatalf("failed to create worktree: %v", err)
+		session, err := repo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("load session: %v", err)
+		}
+		session.TaskEnvironmentID = "env1"
+		if err := repo.UpdateTaskSession(ctx, session); err != nil {
+			t.Fatalf("link session to environment: %v", err)
 		}
 
 		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
@@ -966,7 +1020,7 @@ func TestListTasksNeedingPRWatch(t *testing.T) {
 	seedFullSession := func(t *testing.T, repo interface {
 		CreateRepository(ctx context.Context, r *models.Repository) error
 		CreateTaskRepository(ctx context.Context, tr *models.TaskRepository) error
-		CreateTaskSessionWorktree(ctx context.Context, wt *models.TaskSessionWorktree) error
+		CreateTaskEnvironmentRepo(ctx context.Context, wt *models.TaskEnvironmentRepo) error
 	}, taskID, sessionID, branch, repoID string) {
 		t.Helper()
 		rObj := &models.Repository{
@@ -984,13 +1038,33 @@ func TestListTasksNeedingPRWatch(t *testing.T) {
 		}
 		_ = repo.CreateTaskRepository(ctx, tr)
 
-		wt := &models.TaskSessionWorktree{
-			ID: "wt-" + sessionID, SessionID: sessionID,
+		wt := &models.TaskEnvironmentRepo{
+			ID: "wt-" + sessionID, TaskEnvironmentID: "env-" + sessionID,
 			WorktreeID: "wtree-" + sessionID, RepositoryID: repoID,
 			WorktreeBranch: branch, CreatedAt: now,
 		}
-		if err := repo.CreateTaskSessionWorktree(ctx, wt); err != nil {
+		if err := repo.CreateTaskEnvironmentRepo(ctx, wt); err != nil {
 			t.Fatalf("failed to create worktree: %v", err)
+		}
+	}
+
+	// seedEnvironment creates the environment row a seeded worktree references
+	// and links the session to it.
+	seedEnvironment := func(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID string) {
+		t.Helper()
+		if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+			ID: "env-" + sessionID, TaskID: taskID, ExecutorType: "worktree",
+			WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+		}); err != nil {
+			t.Fatalf("failed to create environment: %v", err)
+		}
+		session, err := repo.GetTaskSession(ctx, sessionID)
+		if err != nil {
+			t.Fatalf("load session: %v", err)
+		}
+		session.TaskEnvironmentID = "env-" + sessionID
+		if err := repo.UpdateTaskSession(ctx, session); err != nil {
+			t.Fatalf("link session to environment: %v", err)
 		}
 	}
 
@@ -1018,7 +1092,9 @@ func TestListTasksNeedingPRWatch(t *testing.T) {
 		testRepo := setupTestRepo(t)
 		seedSession(t, testRepo, "t1", "s1", "step1")
 		seedTask(t, testRepo, "t2", "s2")
+		seedEnvironment(t, testRepo, "t1", "s1")
 		seedFullSession(t, testRepo, "t1", "s1", "feature-a", "repo1")
+		seedEnvironment(t, testRepo, "t2", "s2")
 		seedFullSession(t, testRepo, "t2", "s2", "feature-b", "repo1")
 
 		svc := createTestService(testRepo, newMockStepGetter(), newMockTaskRepo())
@@ -1054,6 +1130,7 @@ func TestListTasksNeedingPRWatch(t *testing.T) {
 	t.Run("excludes sessions on archived tasks", func(t *testing.T) {
 		testRepo := setupTestRepo(t)
 		seedSession(t, testRepo, "t1", "s1", "step1")
+		seedEnvironment(t, testRepo, "t1", "s1")
 		seedFullSession(t, testRepo, "t1", "s1", "feature-a", "repo1")
 
 		// Archive the task.
@@ -1123,14 +1200,23 @@ func TestListTasksNeedingPRWatch(t *testing.T) {
 				t.Fatalf("link %s: %v", l.ID, err)
 			}
 		}
-		worktrees := []*models.TaskSessionWorktree{
-			{ID: "wt-1", SessionID: "s1", WorktreeID: "wtree-1", RepositoryID: "repo-front", WorktreeBranch: "feat/frontend", CreatedAt: now},
-			{ID: "wt-2", SessionID: "s1", WorktreeID: "wtree-2", RepositoryID: "repo-back", WorktreeBranch: "feat/backend", CreatedAt: now},
+		if err := testRepo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+			ID: "env-s1", TaskID: "t1", ExecutorType: "worktree",
+			WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+			Repos: []*models.TaskEnvironmentRepo{
+				{ID: "wt-1", WorktreeID: "wtree-1", RepositoryID: "repo-front", WorktreeBranch: "feat/frontend", CreatedAt: now},
+				{ID: "wt-2", WorktreeID: "wtree-2", RepositoryID: "repo-back", WorktreeBranch: "feat/backend", CreatedAt: now},
+			},
+		}); err != nil {
+			t.Fatalf("create environment: %v", err)
 		}
-		for _, wt := range worktrees {
-			if err := testRepo.CreateTaskSessionWorktree(ctx, wt); err != nil {
-				t.Fatalf("worktree %s: %v", wt.ID, err)
-			}
+		session, err := testRepo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("load session: %v", err)
+		}
+		session.TaskEnvironmentID = "env-s1"
+		if err := testRepo.UpdateTaskSession(ctx, session); err != nil {
+			t.Fatalf("link session to environment: %v", err)
 		}
 
 		svc := createTestService(testRepo, newMockStepGetter(), newMockTaskRepo())
@@ -1204,13 +1290,23 @@ func TestEnsureSessionPRWatch_MultiRepo(t *testing.T) {
 			t.Fatalf("link: %v", err)
 		}
 	}
-	for _, wt := range []*models.TaskSessionWorktree{
-		{ID: "wt-1", SessionID: "s1", WorktreeID: "wtree-1", RepositoryID: "repo-front", WorktreeBranch: "feat/frontend", CreatedAt: now},
-		{ID: "wt-2", SessionID: "s1", WorktreeID: "wtree-2", RepositoryID: "repo-back", WorktreeBranch: "feat/backend", CreatedAt: now},
-	} {
-		if err := repo.CreateTaskSessionWorktree(ctx, wt); err != nil {
-			t.Fatalf("worktree: %v", err)
-		}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-s1", TaskID: "t1", ExecutorType: "worktree",
+		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+		Repos: []*models.TaskEnvironmentRepo{
+			{ID: "wt-1", WorktreeID: "wtree-1", RepositoryID: "repo-front", WorktreeBranch: "feat/frontend", CreatedAt: now},
+			{ID: "wt-2", WorktreeID: "wtree-2", RepositoryID: "repo-back", WorktreeBranch: "feat/backend", CreatedAt: now},
+		},
+	}); err != nil {
+		t.Fatalf("create environment: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	session.TaskEnvironmentID = "env-s1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("link session to environment: %v", err)
 	}
 
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())

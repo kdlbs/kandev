@@ -66,7 +66,7 @@ export function AgentSkillsTab({ agent }: AgentSkillsTabProps) {
     setSaving(true);
     try {
       await updateAgentProfile(agent.id, { skillIds });
-      updateStore(agent.id, { skillIds });
+      updateStore(agent.workspaceId, agent.id, { skillIds });
       setDirty(false);
       toast.success(t("office:skillsUpdated"));
     } catch (err) {

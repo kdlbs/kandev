@@ -23,12 +23,14 @@ type StatusSurfaceMetricsProps = {
   presentation: "bar" | "mobile-drawer";
   density: "full" | "compact";
   drawerOpen: boolean;
+  iconSize?: "size-3.5" | "size-4";
 };
 
 export function StatusSurfaceMetrics({
   presentation,
   density,
   drawerOpen,
+  iconSize = "size-3.5",
 }: StatusSurfaceMetricsProps) {
   const { t } = useTranslation();
   // Wire/storage name stays stable for existing user settings and API payloads.
@@ -47,19 +49,20 @@ export function StatusSurfaceMetrics({
     return (
       <section
         data-testid="app-status-metrics"
-        className="space-y-2 py-0.5"
+        className="w-full min-w-0 space-y-2 py-0.5"
         aria-label={t("system:systemMetrics")}
       >
         <h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
           {t("system:systemMetrics")}
         </h3>
         {!host ? (
-          <EmptyMetrics drawer />
+          <EmptyMetrics drawer iconSize={iconSize} />
         ) : (
           <DrawerSourceMetrics
             source={host}
             updatedAt={snapshot?.timestamp}
             simplified={simplified}
+            iconSize={iconSize}
           />
         )}
       </section>
@@ -73,7 +76,7 @@ export function StatusSurfaceMetrics({
       aria-label={t("system:systemMetrics")}
     >
       {!host ? (
-        <EmptyMetrics />
+        <EmptyMetrics iconSize={iconSize} />
       ) : (
         <BarSourceMetrics
           source={host}
@@ -81,13 +84,14 @@ export function StatusSurfaceMetrics({
           showSourceLabel={density === "full"}
           metricLimit={density === "compact" ? 2 : 4}
           simplified={simplified}
+          iconSize={iconSize}
         />
       )}
     </div>
   );
 }
 
-function EmptyMetrics({ drawer = false }: { drawer?: boolean }) {
+function EmptyMetrics({ drawer = false, iconSize }: { drawer?: boolean; iconSize: string }) {
   const { t } = useTranslation();
   return (
     <div
@@ -97,7 +101,7 @@ function EmptyMetrics({ drawer = false }: { drawer?: boolean }) {
           : "flex h-full items-center gap-2 text-[11px] text-current opacity-70"
       }
     >
-      <IconActivity className="h-3.5 w-3.5" />
+      <IconActivity className={iconSize} />
       <span>{t("system:metricsUnavailable")}</span>
     </div>
   );
@@ -109,23 +113,32 @@ function BarSourceMetrics({
   showSourceLabel,
   metricLimit,
   simplified,
+  iconSize,
 }: {
   source: SystemMetricsSource;
   updatedAt?: string;
   showSourceLabel: boolean;
   metricLimit: number;
   simplified: boolean;
+  iconSize: string;
 }) {
   return (
     <div className="flex h-full max-w-[360px] items-center gap-3 overflow-hidden text-[11px]">
       {!simplified ? (
-        <SourceBadge source={source} updatedAt={updatedAt} showLabel={showSourceLabel} />
+        <SourceBadge
+          source={source}
+          updatedAt={updatedAt}
+          showLabel={showSourceLabel}
+          iconSize={iconSize}
+        />
       ) : null}
       <MetricValues
         source={source}
         updatedAt={updatedAt}
         limit={metricLimit}
+        layout="inline"
         simplified={simplified}
+        iconSize={iconSize}
       />
     </div>
   );
@@ -135,17 +148,27 @@ function DrawerSourceMetrics({
   source,
   updatedAt,
   simplified,
+  iconSize,
 }: {
   source: SystemMetricsSource;
   updatedAt?: string;
   simplified: boolean;
+  iconSize: string;
 }) {
   return (
-    <div className="flex min-h-11 w-full min-w-0 items-center gap-2 px-0 text-sm">
-      {!simplified ? <SourceBadge source={source} updatedAt={updatedAt} showLabel /> : null}
-      <div className="flex min-w-0 flex-1 items-center justify-end gap-3 overflow-hidden">
-        <MetricValues source={source} updatedAt={updatedAt} limit={4} simplified={simplified} />
-      </div>
+    <div className="flex min-h-11 w-full min-w-0 flex-col items-stretch gap-1 px-0 text-sm">
+      {!simplified ? (
+        <div className="flex min-h-11 w-full min-w-0 items-center">
+          <SourceBadge source={source} updatedAt={updatedAt} showLabel iconSize={iconSize} />
+        </div>
+      ) : null}
+      <MetricValues
+        source={source}
+        updatedAt={updatedAt}
+        layout="grid"
+        simplified={simplified}
+        iconSize={iconSize}
+      />
     </div>
   );
 }
@@ -154,10 +177,12 @@ function SourceBadge({
   source,
   updatedAt,
   showLabel,
+  iconSize,
 }: {
   source: SystemMetricsSource;
   updatedAt?: string;
   showLabel: boolean;
+  iconSize: string;
 }) {
   const { t } = useTranslation();
   const locale = useDateLocale();
@@ -168,7 +193,7 @@ function SourceBadge({
           className="flex shrink-0 items-center gap-1.5 text-current"
           aria-label={t("system:hostMetrics")}
         >
-          <IconServer className="size-3.5" stroke={1.6} />
+          <IconServer className={iconSize} stroke={1.6} />
           {showLabel ? <span className="max-w-20 truncate">{t("system:host")}</span> : null}
         </span>
       </TooltipTrigger>
@@ -189,40 +214,55 @@ function MetricValues({
   source,
   updatedAt,
   limit,
+  layout,
   simplified,
+  iconSize,
 }: {
   source: SystemMetricsSource;
   updatedAt?: string;
-  limit: number;
+  limit?: number;
+  layout: "inline" | "grid";
   simplified: boolean;
+  iconSize: string;
 }) {
-  const metrics = source.metrics.slice(0, limit);
+  const metrics = limit === undefined ? source.metrics : source.metrics.slice(0, limit);
   if (metrics.length === 0) return <span className="text-muted-foreground">-</span>;
-  return (
-    <span className="flex min-w-0 items-center gap-3 overflow-hidden">
-      {metrics.map((metric) => (
-        <MetricValue
-          key={metric.id}
-          metric={metric}
-          source={source}
-          updatedAt={updatedAt}
-          simplified={simplified}
-        />
-      ))}
-    </span>
-  );
+  const values = metrics.map((metric) => (
+    <MetricValue
+      key={metric.id}
+      metric={metric}
+      source={source}
+      updatedAt={updatedAt}
+      layout={layout}
+      simplified={simplified}
+      iconSize={iconSize}
+    />
+  ));
+  if (layout === "grid") {
+    return (
+      // Keep detailed cells compact enough for two columns in the Pixel 5 drawer.
+      <div className="grid w-full min-w-0 grid-cols-[repeat(auto-fit,minmax(8rem,1fr))] gap-x-3 gap-y-1">
+        {values}
+      </div>
+    );
+  }
+  return <span className="flex min-w-0 items-center gap-3 overflow-hidden">{values}</span>;
 }
 
 function MetricValue({
   metric,
   source,
   updatedAt,
+  layout,
   simplified,
+  iconSize,
 }: {
   metric: SystemMetricSample;
   source: SystemMetricsSource;
   updatedAt?: string;
+  layout: "inline" | "grid";
   simplified: boolean;
+  iconSize: string;
 }) {
   const { t } = useTranslation();
   const locale = useDateLocale();
@@ -231,10 +271,10 @@ function MetricValue({
     <Tooltip>
       <TooltipTrigger asChild>
         <span
-          className={`inline-flex shrink-0 items-center gap-1.5 tabular-nums ${metricColor(metric)}`}
+          className={`${layout === "grid" ? "flex min-h-11 min-w-0 w-full" : "inline-flex shrink-0"} items-center gap-1.5 tabular-nums ${metricColor(metric)}`}
           aria-label={`${metricLabel(t, metric.id)} ${formatMetric(metric)}`}
         >
-          {metricIcon(metric.id)}
+          {metricIcon(metric.id, iconSize)}
           {!simplified ? <MetricMeter metric={metric} /> : null}
           <span className="font-medium tracking-[-0.015em] [font-family:var(--font-geist-mono)]">
             {formatMetric(metric)}
@@ -275,7 +315,7 @@ function metricLabel(t: TFunction, id: string) {
   );
 }
 
-function metricIcon(id: string) {
+function metricIcon(id: string, iconSize: string) {
   const Icon =
     {
       cpu_percent: IconCpu,
@@ -284,7 +324,7 @@ function metricIcon(id: string) {
       cpu_temp: IconFlame,
       io_load: IconGauge,
     }[id] ?? IconActivity;
-  return <Icon className="size-3.5 opacity-80" stroke={1.6} />;
+  return <Icon className={`${iconSize} opacity-80`} stroke={1.6} />;
 }
 
 function MetricMeter({ metric }: { metric: SystemMetricSample }) {

@@ -1,8 +1,24 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { IconLayoutList } from "@tabler/icons-react";
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
 import { toast } from "@/lib/toast/sonner";
 import { useTranslation } from "react-i18next";
 import { Collapsible, CollapsibleContent } from "@kandev/ui/collapsible";
@@ -12,10 +28,13 @@ import { stripSystemTags } from "@/lib/utils/system-tags";
 import {
   MergeReferenceOverflowError,
   QueueEntryNotFoundError,
+  QueueReorderError,
   QueueSendNowError,
 } from "@/lib/api/domains/queue-api";
 import { useQueue } from "@/hooks/domains/session/use-queue";
+import { useQueuePinned } from "@/hooks/use-queue-pinned";
 import { canMergeWithAbove, QueuedGhostMessage } from "./queued-ghost-message";
+import { useQueuePanelOpenState } from "./use-queue-panel-open-state";
 import { QueuePanelHeader } from "./queued-ghost-panel-header";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
 import type { EntityReference } from "@/lib/types/entity-reference";
@@ -66,7 +85,6 @@ function useEscToClose(open: boolean, onClose: () => void): void {
 type QueueAffordanceProps = {
   sessionId: string | null;
   children: ReactNode;
-  canDrain?: boolean;
   /**
    * Optional render slot for placing the chip inside an external row (e.g. the
    * chat status bar). The callback receives the chip node (or `null` when no
@@ -78,7 +96,6 @@ type QueueAffordanceProps = {
 
 type QueuePanelHandlerArgs = {
   clearAll: () => Promise<void>;
-  drainNext: () => Promise<void>;
   editEntry: (
     entryId: string,
     content: string,
@@ -87,14 +104,12 @@ type QueuePanelHandlerArgs = {
   ) => Promise<void>;
   removeEntry: (entryId: string) => Promise<void>;
   mergeEntry: (entryId: string) => Promise<void>;
+  reorderEntries: (orderedIds: string[]) => Promise<void>;
   sendEntryNow: (entryId: string) => Promise<void>;
-  sendAllNow: () => Promise<void>;
+  setAutoRun: (enabled: boolean) => Promise<void>;
 };
 
-function useSendNowPanelHandlers(
-  sendEntryNow: (entryId: string) => Promise<void>,
-  sendAllNow: () => Promise<void>,
-) {
+function useSendNowPanelHandlers(sendEntryNow: (entryId: string) => Promise<void>) {
   const { t } = useTranslation();
   const sendNowErrorMessage = useCallback(
     (err: unknown) => {
@@ -124,23 +139,17 @@ function useSendNowPanelHandlers(
     },
     [sendEntryNow, sendNowErrorMessage],
   );
-  const handleSendAllNow = useCallback(() => {
-    sendAllNow().catch((err) => {
-      console.error("Failed to send queued messages now:", err);
-      toast.error(sendNowErrorMessage(err));
-    });
-  }, [sendAllNow, sendNowErrorMessage]);
-  return { handleSendEntryNow, handleSendAllNow };
+  return { handleSendEntryNow };
 }
 
 function useQueuePanelHandlers({
   clearAll,
-  drainNext,
   editEntry,
   removeEntry,
   mergeEntry,
+  reorderEntries,
   sendEntryNow,
-  sendAllNow,
+  setAutoRun,
 }: QueuePanelHandlerArgs) {
   // Tracks merge requests still in flight so a rapid second click on the same
   // row cannot fire a second request for an entry that is already gone — the
@@ -148,10 +157,7 @@ function useQueuePanelHandlers({
   // a spurious "not found" error.
   const pendingMerges = useRef(new Set<string>());
   const { t } = useTranslation();
-  const { handleSendEntryNow, handleSendAllNow } = useSendNowPanelHandlers(
-    sendEntryNow,
-    sendAllNow,
-  );
+  const { handleSendEntryNow } = useSendNowPanelHandlers(sendEntryNow);
   const handleSave = useCallback(
     async (entryId: string, content: string, entityReferences: EntityReference[]) => {
       await editEntry(entryId, content, undefined, entityReferences);
@@ -198,21 +204,38 @@ function useQueuePanelHandlers({
       toast.error(t("chat:failedToClearQueuedMessages"));
     });
   }, [clearAll, t]);
-  const handleDrain = useCallback(() => {
-    drainNext().catch((err) => {
-      console.error("Failed to run queued message:", err);
-      toast.error(t("chat:failedToRunQueuedMessage"));
-    });
-  }, [drainNext, t]);
+  const handleAutoRunChange = useCallback(
+    (enabled: boolean) => {
+      setAutoRun(enabled).catch((err) => {
+        console.error("Failed to update queue Auto-run:", err);
+        toast.error(t("chat:failedToSetQueueAutoRun"));
+      });
+    },
+    [setAutoRun, t],
+  );
+  const handleReorder = useCallback(
+    async (orderedIds: string[]) => {
+      try {
+        await reorderEntries(orderedIds);
+      } catch (err) {
+        // A queue_changed race already refetched and reconciled to the
+        // authoritative order, so it is a successful UI outcome — no toast.
+        if (err instanceof QueueReorderError) return;
+        console.error("Failed to reorder queued entries:", err);
+        toast.error(t("chat:failedToReorderQueuedMessages"));
+      }
+    },
+    [reorderEntries, t],
+  );
 
   return {
     handleSave,
     handleRemove,
     handleMerge,
     handleClear,
-    handleDrain,
+    handleAutoRunChange,
+    handleReorder,
     handleSendEntryNow,
-    handleSendAllNow,
   };
 }
 
@@ -223,17 +246,19 @@ type QueuePanelDisclosureProps = {
   count: number;
   max: number;
   isFull: boolean;
-  canDrain: boolean;
+  autoRun: boolean;
   isLoading: boolean;
   cancellationPending: boolean;
   mergeEnabled: boolean;
+  pinned: boolean;
   onClose: () => void;
   onClear: () => void;
-  onDrain: () => void;
-  onSendNow: () => void;
+  onAutoRunChange: (enabled: boolean) => void;
+  onTogglePin: () => void;
   onSave: (entryId: string, content: string, refs: EntityReference[]) => Promise<void>;
   onRemove: (entryId: string) => Promise<void>;
   onMerge: (entryId: string) => Promise<void>;
+  onReorder: (orderedIds: string[]) => void;
   onSendEntryNow: (entryId: string) => void;
 };
 
@@ -245,17 +270,19 @@ function QueuePanelDisclosure({
   count,
   max,
   isFull,
-  canDrain,
+  autoRun,
   isLoading,
   cancellationPending,
   mergeEnabled,
+  pinned,
   onClose,
   onClear,
-  onDrain,
-  onSendNow,
+  onAutoRunChange,
+  onTogglePin,
   onSave,
   onRemove,
   onMerge,
+  onReorder,
   onSendEntryNow,
 }: QueuePanelDisclosureProps) {
   return (
@@ -271,37 +298,24 @@ function QueuePanelDisclosure({
           count={count}
           max={max}
           isFull={isFull}
-          canDrain={canDrain}
+          autoRun={autoRun}
           isLoading={isLoading}
           cancellationPending={cancellationPending}
           mergeEnabled={mergeEnabled}
+          pinned={pinned}
           onClose={onClose}
           onClear={onClear}
-          onDrain={onDrain}
-          onSendNow={onSendNow}
+          onAutoRunChange={onAutoRunChange}
+          onTogglePin={onTogglePin}
           onSave={onSave}
           onRemove={onRemove}
           onMerge={onMerge}
+          onReorder={onReorder}
           onSendEntryNow={onSendEntryNow}
         />
       </CollapsibleContent>
     </Collapsible>
   );
-}
-
-function useQueuePanelOpenState(sessionId: string | null, entryCount: number) {
-  const [isOpen, setIsOpen] = useState(false);
-  const [lastSession, setLastSession] = useState(sessionId);
-  const [lastEntryCount, setLastEntryCount] = useState(entryCount);
-  if (sessionId !== lastSession) {
-    setLastSession(sessionId);
-    setIsOpen(false);
-  }
-  if (entryCount !== lastEntryCount) {
-    setLastEntryCount(entryCount);
-    if (entryCount === 0) setIsOpen(false);
-  }
-  return [isOpen, setIsOpen] as const;
 }
 
 /**
@@ -312,46 +326,42 @@ function useQueuePanelOpenState(sessionId: string | null, entryCount: number) {
  *   it expands a panel above the input. Drained or session-switched queues
  *   auto-collapse.
  */
-export function QueueAffordance({
-  sessionId,
-  children,
-  canDrain = false,
-  renderStatusBar,
-}: QueueAffordanceProps) {
+export function QueueAffordance({ sessionId, children, renderStatusBar }: QueueAffordanceProps) {
   const {
     entries,
     count,
     max,
     isFull,
     mergeEnabled,
+    autoRun,
     isLoading,
     clearAll,
-    drainNext,
+    setAutoRun,
     editEntry,
     removeEntry,
     mergeEntry,
+    reorderEntries,
     sendEntryNow,
-    sendAllNow,
     cancellationPending,
   } = useQueue(sessionId);
-  const entryCount = entries.length;
-  const [isOpen, setIsOpen] = useQueuePanelOpenState(sessionId, entryCount);
+  const { value: pinned, toggle: togglePin } = useQueuePinned(sessionId);
+  const [isOpen, setIsOpen] = useQueuePanelOpenState(sessionId, entries.length, pinned);
   const {
     handleSave,
     handleRemove,
     handleMerge,
     handleClear,
-    handleDrain,
+    handleAutoRunChange,
+    handleReorder,
     handleSendEntryNow,
-    handleSendAllNow,
   } = useQueuePanelHandlers({
     clearAll,
-    drainNext,
     editEntry,
     removeEntry,
     mergeEntry,
+    reorderEntries,
     sendEntryNow,
-    sendAllNow,
+    setAutoRun,
   });
 
   // Reset disclosure on session switch or full drain using render-phase state
@@ -360,7 +370,7 @@ export function QueueAffordance({
   const close = useCallback(() => setIsOpen(false), []);
   useEscToClose(isOpen, close);
 
-  const hasEntries = !!sessionId && entryCount > 0;
+  const hasEntries = !!sessionId && entries.length > 0;
   const chipNode =
     hasEntries && !isOpen ? (
       <QueueChip
@@ -391,17 +401,19 @@ export function QueueAffordance({
         count={count}
         max={max}
         isFull={isFull}
-        canDrain={canDrain}
+        autoRun={autoRun}
         isLoading={isLoading}
         cancellationPending={cancellationPending}
         mergeEnabled={mergeEnabled}
+        pinned={pinned}
         onClose={close}
         onClear={handleClear}
-        onDrain={handleDrain}
-        onSendNow={handleSendAllNow}
+        onAutoRunChange={handleAutoRunChange}
+        onTogglePin={togglePin}
         onSave={handleSave}
         onRemove={handleRemove}
         onMerge={handleMerge}
+        onReorder={handleReorder}
         onSendEntryNow={handleSendEntryNow}
       />
       {!renderStatusBar && chipNode && (
@@ -470,41 +482,101 @@ type QueuePanelProps = {
   count: number;
   max: number;
   isFull: boolean;
-  canDrain: boolean;
+  autoRun: boolean;
   isLoading: boolean;
   cancellationPending: boolean;
   mergeEnabled: boolean;
+  pinned: boolean;
   onClose: () => void;
   onClear: () => void;
-  onDrain: () => void;
-  onSendNow: () => void;
+  onAutoRunChange: (enabled: boolean) => void;
+  onTogglePin: () => void;
   onSave: (entryId: string, content: string, entityReferences: EntityReference[]) => Promise<void>;
   onRemove: (entryId: string) => Promise<void>;
   onMerge: (entryId: string) => Promise<void>;
+  onReorder: (orderedIds: string[]) => void;
   onSendEntryNow: (entryId: string) => void;
 };
 
 /** Renders the expanded queue list: header controls plus one QueuedGhostMessage
  * row per pending entry, gating each row's merge control on `mergeEnabled`. */
+type QueueReorderArgs = {
+  entries: QueuedMessage[];
+  canReorder: boolean;
+  onReorder: (orderedIds: string[]) => void;
+};
+
+/** Sortable-list state for the queue panel: sensors, the id list, and the
+ * drag lifecycle handlers that translate a drop into the new ordered ids. */
+function useQueueReorder({ entries, canReorder, onReorder }: QueueReorderArgs) {
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const ids = useMemo(() => entries.map((entry) => entry.id), [entries]);
+
+  const handleDragStart = useCallback((event: DragStartEvent) => {
+    setActiveId(String(event.active.id));
+  }, []);
+
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      setActiveId(null);
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+      const oldIndex = entries.findIndex((entry) => entry.id === active.id);
+      const newIndex = entries.findIndex((entry) => entry.id === over.id);
+      if (oldIndex === -1 || newIndex === -1) return;
+      onReorder(arrayMove(ids, oldIndex, newIndex));
+    },
+    [entries, ids, onReorder],
+  );
+
+  const handleDragCancel = useCallback(() => setActiveId(null), []);
+
+  return {
+    ids,
+    sensors,
+    activeId,
+    canReorder,
+    handleDragStart,
+    handleDragEnd,
+    handleDragCancel,
+  };
+}
+
 function QueuePanel({
   entries,
   count,
   max,
   isFull,
-  canDrain,
+  autoRun,
   isLoading,
   cancellationPending,
   mergeEnabled,
+  pinned,
   onClose,
   onClear,
-  onDrain,
-  onSendNow,
+  onAutoRunChange,
+  onTogglePin,
   onSave,
   onRemove,
   onMerge,
+  onReorder,
   onSendEntryNow,
 }: QueuePanelProps) {
   const { t } = useTranslation();
+  // Reordering is disabled while a queue mutation or backend cancellation is
+  // in flight, matching the Send Now gate; the server stays authoritative, so
+  // the optimistic order is reconciled by the refetch after the drop.
+  const { ids, sensors, activeId, canReorder, handleDragStart, handleDragEnd, handleDragCancel } =
+    useQueueReorder({
+      entries,
+      canReorder: !isLoading && !cancellationPending,
+      onReorder,
+    });
+
   return (
     <div
       id="queue-panel"
@@ -521,33 +593,47 @@ function QueuePanel({
         count={count}
         max={max}
         isFull={isFull}
-        canDrain={canDrain}
+        autoRun={autoRun}
         isLoading={isLoading}
         cancellationPending={cancellationPending}
+        pinned={pinned}
         onClear={onClear}
-        onDrain={onDrain}
-        onSendNow={onSendNow}
+        onAutoRunChange={onAutoRunChange}
+        onTogglePin={onTogglePin}
         onClose={onClose}
       />
       <div
         data-testid="queue-scroll-region"
         className="min-h-0 flex-1 space-y-1.5 overflow-y-auto overscroll-contain pr-1"
       >
-        {entries.map((entry, index) => (
-          <QueuedGhostMessage
-            key={entry.id}
-            entry={entry}
-            index={index}
-            canEdit={canUserEditEntry(entry)}
-            canRemove
-            canMerge={mergeEnabled && canMergeWithAbove(entry, entries[index - 1])}
-            onSave={(content, entityReferences) => onSave(entry.id, content, entityReferences)}
-            onRemove={() => onRemove(entry.id)}
-            onMerge={() => onMerge(entry.id)}
-            onSendNow={() => onSendEntryNow(entry.id)}
-            sendNowDisabled={isLoading || cancellationPending}
-          />
-        ))}
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+          onDragCancel={handleDragCancel}
+        >
+          <SortableContext items={ids} strategy={verticalListSortingStrategy}>
+            {entries.map((entry, index) => (
+              <QueuedGhostMessage
+                key={entry.id}
+                entry={entry}
+                index={index}
+                canEdit={canUserEditEntry(entry)}
+                canRemove
+                canMerge={mergeEnabled && canMergeWithAbove(entry, entries[index - 1])}
+                canDrag={canReorder}
+                showDragHandle={entries.length > 1}
+                isDragging={activeId === entry.id}
+                onSave={(content, entityReferences) => onSave(entry.id, content, entityReferences)}
+                onRemove={() => onRemove(entry.id)}
+                onMerge={() => onMerge(entry.id)}
+                onSendNow={() => onSendEntryNow(entry.id)}
+                sendNowDisabled={isLoading || cancellationPending}
+              />
+            ))}
+          </SortableContext>
+        </DndContext>
       </div>
     </div>
   );

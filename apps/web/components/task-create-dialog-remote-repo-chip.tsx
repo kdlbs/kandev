@@ -2,14 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "@/components/routing/app-link";
-import {
-  IconBrandGithub,
-  IconBrandGitlab,
-  IconCheck,
-  IconGitBranch,
-  IconLink,
-  IconX,
-} from "@tabler/icons-react";
+import { IconCheck, IconGitBranch, IconLink, IconX } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import type { Branch } from "@/lib/types/http";
 import { Badge } from "@kandev/ui/badge";
@@ -17,19 +10,18 @@ import { Button } from "@kandev/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Spinner } from "@kandev/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { Pill } from "@/components/task-create-dialog-pill";
 import {
-  Pill,
   branchToOption,
   computeBranchPlaceholder,
   sortBranches,
-} from "@/components/task-create-dialog-pill";
+} from "@/components/task-create-dialog-branch-options";
 import { scoreBranch } from "@/lib/utils/branch-filter";
 import type {
   RemoteRepository,
   RemoteRepositoryProvider,
   UseRemoteRepositoriesResult,
 } from "@/hooks/domains/integrations/use-remote-repositories";
-import { AzureDevOpsIcon } from "@/components/icons/azure-devops-icon";
 import { parseGitHubAnyUrl, type PRInfo } from "@/hooks/domains/github/use-pr-info-by-url";
 import type { TaskRemoteRepoRow } from "@/components/task-create-dialog-types";
 import { useTaskCreateDialogPopoverContainer } from "@/hooks/use-task-create-dialog-popover-container";
@@ -41,8 +33,8 @@ import { remoteRepositoryMatchesSelection } from "./task-create-dialog-remote-re
 
 export { selectedRemoteRepositoryIdentity } from "./task-create-dialog-remote-repo-identity";
 import {
-  looksLikeSupportedRemoteURL,
   looksLikeURL,
+  looksLikeSupportedRemoteURL,
 } from "@/components/workspace-source-picker/remote-url";
 import { Trans, useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
@@ -62,9 +54,12 @@ export type RemoteRepoChipProps = {
     url: string,
     source: "picker" | "paste",
     metadata?: {
-      provider: "github" | "gitlab" | "azure_devops";
+      provider: RemoteRepositoryProvider;
       fullName: string;
       defaultBranch: string;
+      remoteUrl?: string;
+      providerHost?: string;
+      providerScope?: string;
       providerRepoId?: string;
       providerOwner?: string;
       providerName?: string;
@@ -272,6 +267,9 @@ function RemoteRepoPill({
               provider: repo.provider,
               fullName: repo.fullName,
               defaultBranch: repo.defaultBranch,
+              ...(repo.provider === "github" ? {} : { remoteUrl: repo.url }),
+              ...(repo.providerHost ? { providerHost: repo.providerHost } : {}),
+              ...(repo.providerScope ? { providerScope: repo.providerScope } : {}),
               providerRepoId: repo.id,
               providerOwner: repo.owner,
               providerName: repo.name,
@@ -289,14 +287,8 @@ function RemoteRepoPill({
 }
 
 function RepoTriggerIcon({ row }: { row: TaskRemoteRepoRow }) {
-  if (row.source === "picker" && row.provider === "github") {
-    return <IconBrandGithub className="h-3 w-3 shrink-0 text-muted-foreground" />;
-  }
-  if (row.source === "picker" && row.provider === "gitlab") {
-    return <IconBrandGitlab className="h-3 w-3 shrink-0 text-muted-foreground" />;
-  }
-  if (row.source === "picker" && row.provider === "azure_devops") {
-    return <AzureDevOpsIcon className="h-3 w-3 shrink-0 text-muted-foreground" />;
+  if (row.source === "picker" && row.provider) {
+    return <RemoteRepositoryProviderIcon provider={row.provider} />;
   }
   return <IconLink className="h-3 w-3 shrink-0 text-muted-foreground" />;
 }
@@ -323,7 +315,7 @@ function StagedRemoteUrlHint() {
   return (
     <div className="px-2 pt-1 text-xs text-muted-foreground">
       <Trans i18nKey="task:remoteUrlPressEnter">
-        <span className="font-medium text-foreground">Remote URL</span> — press Enter to submit it.
+        <span className="font-medium text-foreground">Remote URL</span> - press Enter to submit it.
       </Trans>
     </div>
   );
@@ -345,12 +337,13 @@ function RemoteRepoPopoverContent({
   const [urlError, setUrlError] = useState<string | null>(null);
   const [activeProvider, setActiveProvider] = useState<RemoteRepositoryProvider | null>(null);
   const { search: triggerSearch } = accessible;
+  const matchesURL = accessible.matchesURL ?? looksLikeSupportedRemoteURL;
   useEffect(() => {
     triggerSearch(value);
   }, [value, triggerSearch]);
   const commitURL = (candidate: string) => {
     const trimmed = candidate.trim();
-    if (!isSupportedRemoteURL(trimmed)) {
+    if (!isSupportedRemoteURL(trimmed, matchesURL)) {
       if (looksLikeURL(trimmed)) {
         setUrlError(t("task:enterRepositoryUrl"));
       }
@@ -361,7 +354,7 @@ function RemoteRepoPopoverContent({
     return true;
   };
   const visibleUrlError = accessible.unavailable ? null : urlError;
-  const hasStagedURL = isSupportedRemoteURL(value.trim());
+  const hasStagedURL = isSupportedRemoteURL(value.trim(), matchesURL);
   const { showProviderTabs, selectedProvider, visibleRepos } = visibleProviderRepositories(
     accessible,
     activeProvider,
@@ -439,8 +432,8 @@ function visibleProviderRepositories(
     : accessible.repos;
   return { showProviderTabs, selectedProvider, visibleRepos };
 }
-function isSupportedRemoteURL(value: string): boolean {
-  return !!parseGitHubAnyUrl(value) || looksLikeSupportedRemoteURL(value);
+function isSupportedRemoteURL(value: string, matchesURL: (url: string) => boolean): boolean {
+  return !!parseGitHubAnyUrl(value) || matchesURL(value);
 }
 function PickerList({
   accessible,

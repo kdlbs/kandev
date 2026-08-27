@@ -21,15 +21,19 @@ import (
 	storagepkg "github.com/kandev/kandev/internal/system/storage"
 	"github.com/kandev/kandev/internal/system/storage/dockerstore"
 	"github.com/kandev/kandev/internal/system/storage/gocache"
+	"github.com/kandev/kandev/internal/system/storage/tempartifacts"
 	"github.com/kandev/kandev/internal/system/storage/workspaces"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
+const workspaceDependenciesProviderName = "workspace_dependencies"
+
 type storageComposition struct {
 	handler           *storagepkg.Handler
 	runtime           *storagepkg.Runtime
 	workspaceRestorer *workspaceQuarantineController
+	tempArtifacts     *tempartifacts.Registry
 }
 
 func provideStorageComposition(
@@ -50,6 +54,19 @@ func provideStorageComposition(
 	store, err := storagepkg.NewStore(pool)
 	if err != nil {
 		return nil, fmt.Errorf("initialize storage store: %w", err)
+	}
+	tempArtifacts := tempartifacts.NewRegistry(tempartifacts.Config{
+		Store: store, TempRoot: os.TempDir(),
+	})
+	if err := tempArtifacts.Reconcile(context.Background()); err != nil {
+		logError("reconcile temporary artifact registry", err)
+	}
+	tempProvider := tempartifacts.NewProvider(tempartifacts.ProviderConfig{
+		Registry: tempArtifacts, Store: store, HomeDir: cfg.ResolvedHomeDir(),
+		TrashDir: filepath.Join(cfg.ResolvedHomeDir(), "trash"),
+	})
+	if err := tempProvider.Reconcile(context.Background()); err != nil {
+		logError("reconcile temporary artifact quarantine", err)
 	}
 	coordinator := activity.NewCoordinator(activity.Options{})
 	taskSvc.SetTaskResourceCleanupActivityGate(&taskCleanupActivityGate{coordinator: coordinator})
@@ -72,14 +89,14 @@ func provideStorageComposition(
 	overview := &storageOverview{
 		settings: settings, quarantine: store, workspaceFactory: workspaceFactory, goCache: goCache,
 		docker: dockerProvider, dockerClient: dockerClient, dockerHost: cfg.Docker.Host,
-		homeDir: cfg.ResolvedHomeDir(),
+		homeDir: cfg.ResolvedHomeDir(), tempArtifacts: tempProvider,
 	}
 	cachedOverview := storagepkg.NewOverviewCache(overview)
 	quarantine := &workspaceQuarantineController{
 		settings: settings, store: store, factory: workspaceFactory, homeDir: cfg.ResolvedHomeDir(),
-		activity: coordinator,
+		activity: coordinator, temporary: tempProvider,
 	}
-	providers := storageCleanupProviders(settings, workspaceFactory, goCache, dockerProvider, quarantine)
+	providers := storageCleanupProviders(settings, workspaceFactory, goCache, dockerProvider, quarantine, tempProvider)
 	if taskSvc.AttachmentService() == nil && taskSvc.AttachmentRepository() != nil {
 		attachmentSvc, attachmentErr := taskservice.NewAttachmentService(
 			taskSvc.AttachmentRepository(), cfg.ResolvedHomeDir(), taskSvc.AuthorizeWorkspaceAccess, log,
@@ -123,7 +140,7 @@ func provideStorageComposition(
 		Mutations: operations, OnSettingsChanged: runtime.ApplySettings, LogError: logError,
 	})
 	return &storageComposition{
-		handler: handler, runtime: runtime, workspaceRestorer: quarantine,
+		handler: handler, runtime: runtime, workspaceRestorer: quarantine, tempArtifacts: tempArtifacts,
 	}, nil
 }
 
@@ -179,6 +196,7 @@ type storageOverview struct {
 	goCache          *gocache.Provider
 	goCacheAnalyze   func(context.Context) (gocache.Analysis, error)
 	docker           *dockerstore.Provider
+	tempArtifacts    *tempartifacts.Provider
 	dockerClient     *lazyStorageDocker
 	dockerHost       string
 	homeDir          string
@@ -197,6 +215,8 @@ func (o *storageOverview) Summary(ctx context.Context) (storagepkg.Summary, erro
 		quarantineSummary storagepkg.QuarantineSummary
 		quarantineErr     error
 		dockerSummary     dockerstore.Analysis
+		tempSummary       tempartifacts.Analysis
+		tempErr           error
 	)
 	var measurements sync.WaitGroup
 	measurements.Add(4)
@@ -226,11 +246,19 @@ func (o *storageOverview) Summary(ctx context.Context) (storagepkg.Summary, erro
 		defer measurements.Done()
 		dockerSummary = o.docker.Analyze(ctx)
 	}()
+	if o.tempArtifacts != nil {
+		measurements.Add(1)
+		go func() {
+			defer measurements.Done()
+			tempSummary, tempErr = o.tempArtifacts.Analyze(ctx)
+		}()
+	}
 	measurements.Wait()
 	return storagepkg.Summary{
-		Workspaces: summaryValue(workspaceSummary, workspaceErr),
-		GoCache:    summaryValue(goCacheSummary, goCacheErr),
-		Quarantine: summaryValue(quarantineSummary, quarantineErr),
+		Workspaces:         summaryValue(workspaceSummary, workspaceErr),
+		GoCache:            summaryValue(goCacheSummary, goCacheErr),
+		Quarantine:         summaryValue(quarantineSummary, quarantineErr),
+		TemporaryArtifacts: summaryValue(tempSummary, tempErr),
 		Docker: map[string]any{
 			"available": dockerSummary.Available, "build_cache_bytes": dockerSummary.BuildCacheBytes,
 			"image_layer_bytes":  dockerSummary.ImageLayerBytes,
@@ -259,7 +287,8 @@ func (o *storageOverview) SettingsCapabilities(
 	dockerAvailable := o.dockerClient != nil && o.dockerClient.Ping(ctx) == nil
 	return storagepkg.Capabilities{
 		ManagedGoCachePath: goPath, GoCacheAdoptionAvailable: true,
-		DockerAvailable: dockerAvailable, DockerHost: o.dockerHost,
+		TemporaryArtifactsAvailable: o.tempArtifacts != nil,
+		DockerAvailable:             dockerAvailable, DockerHost: o.dockerHost,
 		HostGlobalDockerCleanup: dockerAvailable && settings.Docker.DedicatedDaemonAcknowledged,
 	}
 }
@@ -316,8 +345,9 @@ func storageCleanupProviders(
 	goCache *gocache.Provider,
 	docker *dockerstore.Provider,
 	quarantine quarantinePurger,
+	temporary ...storagepkg.CleanupProvider,
 ) []storagepkg.CleanupProvider {
-	return []storagepkg.CleanupProvider{
+	providers := []storagepkg.CleanupProvider{
 		quarantineCleanupProvider{purger: quarantine},
 		workspaceCleanupAdapter(settings, workspaceFactory),
 		workspaceDependencyCleanupAdapter(settings, workspaceFactory),
@@ -326,13 +356,14 @@ func storageCleanupProviders(
 		dockerBuildCacheCleanupAdapter(settings, docker),
 		dockerImageCleanupAdapter(settings, docker),
 	}
+	return append(providers, temporary...)
 }
 
 func workspaceDependencyCleanupAdapter(
 	settings *storagepkg.SettingsStore,
 	factory workspaceFactory,
 ) storagepkg.CleanupProvider {
-	return namedCleanupProvider{name: "workspace_dependencies", cleanup: func(ctx context.Context) (map[string]any, error) {
+	return namedCleanupProvider{name: workspaceDependenciesProviderName, cleanup: func(ctx context.Context) (map[string]any, error) {
 		current, err := settings.GetSettings(ctx)
 		if err != nil || !current.Workspaces.DependencyCleanupEnabled {
 			return nil, err
@@ -419,12 +450,13 @@ func (r *workspaceReconciler) Reconcile(ctx context.Context) error {
 }
 
 type workspaceQuarantineController struct {
-	settings *storagepkg.SettingsStore
-	store    quarantineEntryStore
-	factory  workspaceFactory
-	homeDir  string
-	activity *activity.Coordinator
-	rename   func(string, string) error
+	settings  *storagepkg.SettingsStore
+	store     quarantineEntryStore
+	factory   workspaceFactory
+	homeDir   string
+	activity  *activity.Coordinator
+	temporary *tempartifacts.Provider
+	rename    func(string, string) error
 }
 
 type quarantineEntryStore interface {
@@ -472,10 +504,11 @@ func (c *workspaceQuarantineController) Purge(
 			continue
 		}
 		var deleted storagepkg.QuarantineEntry
+		var payloadRemoved bool
 		if force {
-			deleted, err = c.PermanentDeleteForce(ctx, entry.ID, confirmation)
+			deleted, payloadRemoved, err = c.permanentDeleteWithPayload(ctx, entry.ID, confirmation, true)
 		} else {
-			deleted, err = c.PermanentDelete(ctx, entry.ID, storagepkg.QuarantineConfirmationDelete)
+			deleted, payloadRemoved, err = c.permanentDeleteWithPayload(ctx, entry.ID, storagepkg.QuarantineConfirmationDelete, false)
 		}
 		if err != nil {
 			result.Failed++
@@ -485,7 +518,9 @@ func (c *workspaceQuarantineController) Purge(
 			continue
 		}
 		result.Deleted++
-		result.DeletedBytes += deleted.SizeBytes
+		if payloadRemoved {
+			result.DeletedBytes += deleted.SizeBytes
+		}
 	}
 	return result, errors.Join(purgeErrs...)
 }
@@ -516,6 +551,12 @@ func (c *workspaceQuarantineController) Restore(
 	}
 	if entry.ResourceType == storagepkg.ResourceTypeGoCache {
 		return c.restoreGoCache(ctx, entry)
+	}
+	if entry.ResourceType == storagepkg.ResourceTypeTemporaryArtifact {
+		if c.temporary == nil {
+			return storagepkg.QuarantineEntry{}, errors.New("temporary artifact provider is unavailable")
+		}
+		return c.temporary.Restore(ctx, id)
 	}
 	if entry.ResourceType != storagepkg.ResourceTypeTaskWorkspace {
 		return storagepkg.QuarantineEntry{}, fmt.Errorf("%w: unsupported quarantine resource %q", storagepkg.ErrValidation, entry.ResourceType)
@@ -553,27 +594,52 @@ func (c *workspaceQuarantineController) permanentDelete(
 	confirmation string,
 	force bool,
 ) (storagepkg.QuarantineEntry, error) {
+	deleted, _, err := c.permanentDeleteWithPayload(ctx, id, confirmation, force)
+	return deleted, err
+}
+
+func (c *workspaceQuarantineController) permanentDeleteWithPayload(
+	ctx context.Context,
+	id string,
+	confirmation string,
+	force bool,
+) (storagepkg.QuarantineEntry, bool, error) {
 	entry, err := c.store.GetQuarantineEntry(ctx, id)
 	if err != nil {
-		return storagepkg.QuarantineEntry{}, err
+		return storagepkg.QuarantineEntry{}, false, err
 	}
 	if entry.ResourceType == storagepkg.ResourceTypeGoCache {
 		if force {
-			return c.deleteGoCacheForce(ctx, entry, confirmation)
+			return c.deleteGoCacheWithRetention(ctx, entry, confirmation, true)
 		}
-		return c.deleteGoCache(ctx, entry, confirmation)
+		return c.deleteGoCacheWithRetention(ctx, entry, confirmation, false)
+	}
+	if entry.ResourceType == storagepkg.ResourceTypeTemporaryArtifact {
+		if c.temporary == nil {
+			return storagepkg.QuarantineEntry{}, false, errors.New("temporary artifact provider is unavailable")
+		}
+		var deleted storagepkg.QuarantineEntry
+		if force {
+			deleted, err = c.temporary.PermanentDeleteForce(ctx, id, confirmation)
+		} else {
+			deleted, err = c.temporary.PermanentDelete(ctx, id, confirmation)
+		}
+		return deleted, true, err
 	}
 	if entry.ResourceType != storagepkg.ResourceTypeTaskWorkspace {
-		return storagepkg.QuarantineEntry{}, fmt.Errorf("%w: unsupported quarantine resource %q", storagepkg.ErrValidation, entry.ResourceType)
+		return storagepkg.QuarantineEntry{}, false, fmt.Errorf("%w: unsupported quarantine resource %q", storagepkg.ErrValidation, entry.ResourceType)
 	}
 	settings, err := c.settings.GetSettings(ctx)
 	if err != nil {
-		return storagepkg.QuarantineEntry{}, err
+		return storagepkg.QuarantineEntry{}, false, err
 	}
+	var deleted storagepkg.QuarantineEntry
 	if force {
-		return c.factory(settings).PermanentDeleteForce(ctx, id, confirmation)
+		deleted, err = c.factory(settings).PermanentDeleteForce(ctx, id, confirmation)
+	} else {
+		deleted, err = c.factory(settings).PermanentDelete(ctx, id, confirmation)
 	}
-	return c.factory(settings).PermanentDelete(ctx, id, confirmation)
+	return deleted, true, err
 }
 
 func (c *workspaceQuarantineController) restoreGoCache(
@@ -673,47 +739,56 @@ func (c *workspaceQuarantineController) acquireGoCacheMaintenance(
 	return lease, err
 }
 
-func (c *workspaceQuarantineController) deleteGoCache(
-	ctx context.Context,
-	entry storagepkg.QuarantineEntry,
-	confirmation string,
-) (storagepkg.QuarantineEntry, error) {
-	return c.deleteGoCacheWithRetention(ctx, entry, confirmation, false)
-}
-
-func (c *workspaceQuarantineController) deleteGoCacheForce(
-	ctx context.Context,
-	entry storagepkg.QuarantineEntry,
-	confirmation string,
-) (storagepkg.QuarantineEntry, error) {
-	return c.deleteGoCacheWithRetention(ctx, entry, confirmation, true)
-}
-
 func (c *workspaceQuarantineController) deleteGoCacheWithRetention(
 	ctx context.Context,
 	entry storagepkg.QuarantineEntry,
 	confirmation string,
 	force bool,
-) (storagepkg.QuarantineEntry, error) {
+) (storagepkg.QuarantineEntry, bool, error) {
 	if force {
 		if confirmation != storagepkg.QuarantineConfirmationForce {
-			return storagepkg.QuarantineEntry{}, storagepkg.ErrForceDeleteConfirmation
+			return storagepkg.QuarantineEntry{}, false, storagepkg.ErrForceDeleteConfirmation
 		}
 	} else if confirmation != storagepkg.QuarantineConfirmationDelete {
-		return storagepkg.QuarantineEntry{}, fmt.Errorf("%w: quarantine deletion requires DELETE confirmation", storagepkg.ErrValidation)
+		return storagepkg.QuarantineEntry{}, false, fmt.Errorf("%w: quarantine deletion requires DELETE confirmation", storagepkg.ErrValidation)
 	}
 	if err := c.validateGoCacheEntry(ctx, entry); err != nil {
-		return storagepkg.QuarantineEntry{}, err
+		return storagepkg.QuarantineEntry{}, false, err
 	}
 	if !force && time.Now().UTC().Before(entry.DeleteAfter) {
-		return storagepkg.QuarantineEntry{}, fmt.Errorf("%w: quarantine retention deadline has not elapsed", storagepkg.ErrConflict)
+		return storagepkg.QuarantineEntry{}, false, fmt.Errorf("%w: quarantine retention deadline has not elapsed", storagepkg.ErrConflict)
+	}
+	payloadPresent, err := goCacheQuarantinePayloadPresent(entry)
+	if err != nil {
+		return storagepkg.QuarantineEntry{}, false, err
+	}
+	if !payloadPresent {
+		deleted, err := c.persistGoCacheDeletion(ctx, entry)
+		return deleted, false, err
 	}
 	if err := c.rejectAmbiguousMissingGoCachePayload(entry); err != nil {
-		return storagepkg.QuarantineEntry{}, err
+		return storagepkg.QuarantineEntry{}, false, err
 	}
 	if err := os.RemoveAll(entry.QuarantinePath); err != nil {
-		return storagepkg.QuarantineEntry{}, fmt.Errorf("delete quarantined Go cache: %w", err)
+		return storagepkg.QuarantineEntry{}, false, fmt.Errorf("delete quarantined Go cache: %w", err)
 	}
+	deleted, err := c.persistGoCacheDeletion(ctx, entry)
+	return deleted, true, err
+}
+
+func goCacheQuarantinePayloadPresent(entry storagepkg.QuarantineEntry) (bool, error) {
+	if _, err := os.Lstat(entry.QuarantinePath); errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	} else if err != nil {
+		return false, fmt.Errorf("inspect Go-cache quarantine payload: %w", err)
+	}
+	return true, nil
+}
+
+func (c *workspaceQuarantineController) persistGoCacheDeletion(
+	ctx context.Context,
+	entry storagepkg.QuarantineEntry,
+) (storagepkg.QuarantineEntry, error) {
 	deleted, err := c.store.TransitionQuarantineEntry(
 		context.WithoutCancel(ctx), entry.ID, storagepkg.QuarantineStateDeleted, "",
 	)

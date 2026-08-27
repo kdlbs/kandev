@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/agent/executor"
+	client "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -57,10 +58,11 @@ func TestRegisterTaskRoutesWiresProductionWorkspaceRestorer(t *testing.T) {
 	if err != nil || len(steps) == 0 {
 		t.Fatalf("ListStepsByWorkflow: steps=%d err=%v", len(steps), err)
 	}
-	task, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	taskResult, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID: workspaces[0].ID, WorkflowID: workflows[0].ID,
 		WorkflowStepID: steps[0].ID, Title: "Production unarchive wiring",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -111,6 +113,39 @@ func decodePayload(t *testing.T, raw json.RawMessage) map[string]interface{} {
 		t.Fatalf("failed to decode payload: %v", err)
 	}
 	return payload
+}
+
+func TestBuildGitStatusNotificationIncludesAncestryEvidence(t *testing.T) {
+	msg := buildGitStatusNotification("session-1", "web", client.GitStatusResult{
+		Branch:           "feature/rewrite",
+		RemoteBranch:     "origin/feature/rewrite",
+		HeadCommit:       "local-head",
+		BaseCommit:       "base-head",
+		Ahead:            5,
+		Behind:           1,
+		RemoteAhead:      2,
+		RemoteBehind:     3,
+		RemoteHeadCommit: "remote-head",
+	})
+	if msg == nil {
+		t.Fatal("buildGitStatusNotification returned nil")
+	}
+	payload := decodePayload(t, msg.Payload)
+	status, ok := payload["status"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("status payload = %#v, want an object", payload["status"])
+	}
+	for key, want := range map[string]interface{}{
+		"head_commit":        "local-head",
+		"base_commit":        "base-head",
+		"remote_ahead":       float64(2),
+		"remote_behind":      float64(3),
+		"remote_head_commit": "remote-head",
+	} {
+		if got := status[key]; got != want {
+			t.Errorf("status[%q] = %#v, want %#v", key, got, want)
+		}
+	}
 }
 
 // TestAppendSessionStateMessage_IncludesTaskEnvironmentID asserts the snapshot
@@ -303,7 +338,7 @@ func TestResolveRepositoryIDForSubpathMatchesSanitizedRepositoryName(t *testing.
 		SourceType:             "remote",
 		Provider:               "github",
 		ProviderOwner:          "kdlbs",
-		ProviderName:           "kandev",
+		ProviderName:           kandevName,
 		DefaultBranch:          "main",
 		WorktreeBranchPrefix:   "feature/",
 		WorktreeBranchTemplate: "feature/{title}-{suffix}",
@@ -316,17 +351,27 @@ func TestResolveRepositoryIDForSubpathMatchesSanitizedRepositoryName(t *testing.
 	}); err != nil {
 		t.Fatalf("CreateTaskRepository: %v", err)
 	}
-	if err := repo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
-		ID:             "session-worktree-1",
-		SessionID:      "session-1",
-		WorktreeID:     "worktree-1",
-		RepositoryID:   "repo-1",
-		WorktreePath:   "/tmp/worktree",
-		WorktreeBranch: "feature/test",
-		BranchSlug:     "test",
-		Position:       0,
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-1", TaskID: "task-1", ExecutorType: "worktree",
+		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+		Repos: []*models.TaskEnvironmentRepo{
+			{
+				ID:             "session-worktree-1",
+				RepositoryID:   "repo-1",
+				WorktreeID:     "worktree-1",
+				WorktreePath:   "/tmp/worktree",
+				WorktreeBranch: "feature/test",
+				BranchSlug:     "test",
+				Position:       0,
+			},
+		},
 	}); err != nil {
-		t.Fatalf("CreateTaskSessionWorktree: %v", err)
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	if _, err := sqlxDB.Exec(sqlxDB.Rebind(
+		`UPDATE task_sessions SET task_environment_id = ? WHERE id = ?`),
+		"env-1", "session-1"); err != nil {
+		t.Fatalf("link session to env: %v", err)
 	}
 
 	got := resolveRepositoryIDForSessionSubpath(ctx, repo, "session-1", "kdlbs-kandev", log)
@@ -460,12 +505,13 @@ func TestBootInitialStateHomeIncludesKanbanFirstPaintState(t *testing.T) {
 	if len(steps) == 0 {
 		t.Fatal("expected seeded default workflow step")
 	}
-	task, err := taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	taskResult, err := taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID:    workspaces[0].ID,
 		WorkflowID:     workflows[0].ID,
 		WorkflowStepID: steps[0].ID,
 		Title:          "Boot home task",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -634,14 +680,14 @@ func TestBootInitialStateHomeIncludesKanbanFirstPaintState(t *testing.T) {
 
 func TestBootTaskPendingActionExcludesStartingAndTerminalSessions(t *testing.T) {
 	sessions := []*models.TaskSession{
-		{ID: "starting", State: models.TaskSessionStateStarting},
+		{ID: startingStatus, State: models.TaskSessionStateStarting},
 		{ID: "completed", State: models.TaskSessionStateCompleted},
 		{ID: "failed", State: models.TaskSessionStateFailed},
 	}
 	actions := map[string]models.TaskPendingAction{
-		"starting":  models.TaskPendingActionPermission,
-		"completed": models.TaskPendingActionPermission,
-		"failed":    models.TaskPendingActionClarification,
+		startingStatus: models.TaskPendingActionPermission,
+		"completed":    models.TaskPendingActionPermission,
+		"failed":       models.TaskPendingActionClarification,
 	}
 
 	if got := bootTaskPendingActionPtr(sessions, actions); got != nil {
@@ -736,13 +782,14 @@ func TestBootRouteDataTaskDetailIncludesTaskPageData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListStepsByWorkflow: %v", err)
 	}
-	task, err := taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	taskResult, err := taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID:    workspaces[0].ID,
 		WorkflowID:     workflows[0].ID,
 		WorkflowStepID: steps[0].ID,
 		Title:          "Boot detail task",
 		Description:    "Should be present before React mounts",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -813,12 +860,13 @@ func TestBootPayloadMissingTaskFallsBackToHomeKanbanState(t *testing.T) {
 	if err != nil || len(steps) == 0 {
 		t.Fatalf("ListStepsByWorkflow: count=%d err=%v", len(steps), err)
 	}
-	task, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	taskResult, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID:    workspaces[0].ID,
 		WorkflowID:     workflows[0].ID,
 		WorkflowStepID: steps[0].ID,
 		Title:          "Visible sibling task",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -916,12 +964,13 @@ func TestBootPayloadValidTaskKeepsRouteSpecificState(t *testing.T) {
 	if err != nil || len(steps) == 0 {
 		t.Fatalf("ListStepsByWorkflow: count=%d err=%v", len(steps), err)
 	}
-	task, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	taskResult, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID:    workspaces[0].ID,
 		WorkflowID:     workflows[0].ID,
 		WorkflowStepID: steps[0].ID,
 		Title:          "Valid detail task",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -960,11 +1009,12 @@ func TestBootTaskDetailMessagesProjectShellOutput(t *testing.T) {
 	if err != nil || len(workspaces) == 0 {
 		t.Fatalf("ListWorkspaces: %v", err)
 	}
-	task, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	taskResult, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID: workspaces[0].ID,
 		Title:       "Shell output projection",
 		IsEphemeral: true,
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -1029,10 +1079,11 @@ func TestBootRouteDataTaskDetailIncludesPersistedSessionModels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListStepsByWorkflow: %v", err)
 	}
-	task, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	taskResult, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID: workspaces[0].ID, WorkflowID: workflows[0].ID,
 		WorkflowStepID: steps[0].ID, Title: "Hydrated model selector",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -1041,8 +1092,9 @@ func TestBootRouteDataTaskDetailIncludesPersistedSessionModels(t *testing.T) {
 		Metadata: map[string]interface{}{
 			models.SessionMetaKeyACPConfigBaseline: map[string]string{"effort": "medium"},
 			models.SessionMetaKeyACPModelState: lifecycle.SessionModelsSnapshot{
-				CurrentModelID: "gpt-5.6-sol",
-				Models:         []streams.SessionModelInfo{{ModelID: "gpt-5.6-sol", Name: "GPT-5.6-Sol"}},
+				CurrentModelID:       "gpt-5.6-sol",
+				Models:               []streams.SessionModelInfo{{ModelID: "gpt-5.6-sol", Name: "GPT-5.6-Sol"}},
+				ConfigOptionsSettled: true,
 				ConfigOptions: []streams.ConfigOption{{
 					Type: "select", ID: "effort", Name: "Reasoning effort",
 					Description: "Provider option help", CurrentValue: "high",
@@ -1078,7 +1130,8 @@ func TestBootRouteDataTaskDetailIncludesPersistedSessionModels(t *testing.T) {
 							CurrentValue string                      `json:"currentValue"`
 							Options      []streams.ConfigOptionValue `json:"options"`
 						} `json:"configOptions"`
-						ConfigBaseline map[string]string `json:"configBaseline"`
+						ConfigOptionsSettled bool              `json:"configOptionsSettled"`
+						ConfigBaseline       map[string]string `json:"configBaseline"`
 					} `json:"bySessionId"`
 				} `json:"sessionModels"`
 			} `json:"initialState"`
@@ -1100,6 +1153,9 @@ func TestBootRouteDataTaskDetailIncludesPersistedSessionModels(t *testing.T) {
 	if got.ConfigBaseline["effort"] != "medium" {
 		t.Fatalf("boot config baseline = %#v, want effort=medium", got.ConfigBaseline)
 	}
+	if !got.ConfigOptionsSettled {
+		t.Fatal("boot config settlement marker = false, want true")
+	}
 }
 
 func TestBootRouteDataTaskDetailIncludesPersistedTurns(t *testing.T) {
@@ -1117,10 +1173,11 @@ func TestBootRouteDataTaskDetailIncludesPersistedTurns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListStepsByWorkflow: %v", err)
 	}
-	task, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	taskResult, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID: workspaces[0].ID, WorkflowID: workflows[0].ID,
 		WorkflowStepID: steps[0].ID, Title: "Hydrated turn snapshot",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -1202,13 +1259,14 @@ func TestBootRouteDataTasksIncludesFirstPageRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListStepsByWorkflow: %v", err)
 	}
-	created, err := taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	createdResult, err := taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID:    workspaces[0].ID,
 		WorkflowID:     workflows[0].ID,
 		WorkflowStepID: steps[0].ID,
 		Title:          "Tasks table row",
 		Description:    "Visible on first paint",
 	})
+	created := createdResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -1339,6 +1397,33 @@ func TestBootPayloadIncludesDebugRuntimeWhenDevMode(t *testing.T) {
 	}
 	if !decoded.Runtime.Debug {
 		t.Fatal("runtime.debug = false, want true when backend devMode is enabled")
+	}
+}
+
+func TestBootPayloadCarriesConfiguredTitlePrefix(t *testing.T) {
+	t.Parallel()
+
+	payload := bootPayload(
+		context.Background(),
+		nil,
+		routeParams{webTitlePrefix: "TEST"},
+		webapp.ClassifyRoute("/"),
+	)
+	if got := payload.Runtime.TitlePrefix; got != "TEST" {
+		t.Fatalf("runtime.titlePrefix = %q, want %q", got, "TEST")
+	}
+}
+
+func TestBootPayloadOmitsUnsetTitlePrefix(t *testing.T) {
+	t.Parallel()
+
+	payload := bootPayload(context.Background(), nil, routeParams{}, webapp.ClassifyRoute("/"))
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("Marshal payload: %v", err)
+	}
+	if strings.Contains(string(raw), "titlePrefix") {
+		t.Fatalf("expected titlePrefix to be omitted, got: %s", raw)
 	}
 }
 
@@ -1882,6 +1967,7 @@ func newBootStateTestHarness(t *testing.T) bootStateTestHarness {
 	eventBus := bus.NewMemoryEventBus(log)
 	userSvc := userservice.NewService(userRepo, eventBus, log)
 	workflowSvc := workflowservice.NewService(workflowRepo, log)
+	t.Cleanup(func() { _ = workflowSvc.Close() })
 	taskSvc := taskservice.NewService(
 		taskservice.Repos{
 			Workspaces:       taskRepo,
@@ -1893,6 +1979,7 @@ func newBootStateTestHarness(t *testing.T) bootStateTestHarness {
 			Sessions:         taskRepo,
 			GitSnapshots:     taskRepo,
 			RepoEntities:     taskRepo,
+			RepositorySets:   taskRepo,
 			Executors:        taskRepo,
 			Environments:     taskRepo,
 			TaskEnvironments: taskRepo,
@@ -1948,9 +2035,25 @@ func TestResolveActiveOfficeWorkspaceIDPrefersCookie(t *testing.T) {
 		{ID: "ws-b", OfficeWorkflowID: "office-b"},
 	}
 
-	got := resolveActiveOfficeWorkspaceID(workspaces, "ws-b")
-	if got != "ws-b" {
-		t.Fatalf("expected cookie workspace to win, got %q", got)
+	// General cookie wins when it names an office workspace.
+	if got := resolveActiveOfficeWorkspaceID(workspaces, "ws-b", "ws-a", ""); got != "ws-b" {
+		t.Fatalf("expected general cookie workspace to win, got %q", got)
+	}
+	// Office cookie wins over settings when the general cookie misses.
+	if got := resolveActiveOfficeWorkspaceID(workspaces, "ws-missing", "ws-a", "ws-b"); got != "ws-a" {
+		t.Fatalf("expected office cookie workspace to win, got %q", got)
+	}
+	// Settings wins when both cookies miss.
+	if got := resolveActiveOfficeWorkspaceID(workspaces, "", "", "ws-b"); got != "ws-b" {
+		t.Fatalf("expected settings workspace to win, got %q", got)
+	}
+	// A kanban general cookie (not in the office set) falls through.
+	if got := resolveActiveOfficeWorkspaceID(workspaces, "ws-kanban", "ws-a", "ws-b"); got != "ws-a" {
+		t.Fatalf("expected kanban general cookie to fall through to the office cookie, got %q", got)
+	}
+	// No candidate matches: first office workspace.
+	if got := resolveActiveOfficeWorkspaceID(workspaces, "", "", ""); got != "ws-a" {
+		t.Fatalf("expected first office workspace, got %q", got)
 	}
 }
 

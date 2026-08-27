@@ -43,7 +43,7 @@ const STATUS_VARIANT: Record<
  * so a generic transformer is enough.
  */
 function formatReason(reason: string): string {
-  if (!reason) return "—";
+  if (!reason) return "-";
   const text = reason.replaceAll("_", " ");
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
@@ -207,7 +207,7 @@ function LinkedEntity({ run }: { run: AgentRunSummary }) {
     );
   }
 
-  return <span className="text-xs text-muted-foreground">—</span>;
+  return <span className="text-xs text-muted-foreground">-</span>;
 }
 
 type LoadMoreFooterProps = {

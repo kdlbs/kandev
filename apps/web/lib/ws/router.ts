@@ -31,6 +31,8 @@ import { registerTurnsHandlers } from "@/lib/ws/handlers/turns";
 import { registerSecretsHandlers } from "@/lib/ws/handlers/secrets";
 import { registerUsersHandlers } from "@/lib/ws/handlers/users";
 import { registerWorkspacesHandlers } from "@/lib/ws/handlers/workspaces";
+import { registerRepositorySetsHandlers } from "@/lib/ws/handlers/repository-sets";
+import { registerRepositoryBranchPoliciesHandlers } from "@/lib/ws/handlers/repository-branch-policies";
 import { registerGitHubHandlers } from "@/lib/ws/handlers/github";
 import { registerGitLabHandlers } from "@/lib/ws/handlers/gitlab";
 import { registerOfficeHandlers } from "@/lib/ws/handlers/office";
@@ -47,6 +49,8 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
     ...registerWorkflowsHandlers(store),
 
     ...registerWorkspacesHandlers(store),
+    ...registerRepositorySetsHandlers(store),
+    ...registerRepositoryBranchPoliciesHandlers(store),
     ...registerExecutorsHandlers(store),
     ...registerExecutorProfileHandlers(store),
     ...registerExecutorPrepareHandlers(store),

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildSubmitMessage, shouldRenderChatStatusBar } from "./chat-input-area";
+import { buildSubmitMessage } from "./chat-input-area";
+import { resolveStatusRowTaskId, shouldRenderChatStatusBar } from "./chat-status-bar";
 import type { AgentMessageComment } from "@/lib/state/slices/comments";
 
 const messageComment: AgentMessageComment = {
@@ -47,5 +48,22 @@ describe("shouldRenderChatStatusBar", () => {
         showProceed: false,
       }),
     ).toBe(false);
+  });
+});
+
+describe("resolveStatusRowTaskId", () => {
+  it("prefers the session-derived task so existing hosts are unchanged", () => {
+    expect(resolveStatusRowTaskId("from-session", "from-host")).toBe("from-session");
+  });
+
+  // The regression: a blocked chain step has no session, so the session-derived
+  // id is null and the status row (and with it the dependency chip) disappeared
+  // on exactly the tasks the chip exists to describe.
+  it("falls back to the host's task when the task has no session yet", () => {
+    expect(resolveStatusRowTaskId(null, "from-host")).toBe("from-host");
+  });
+
+  it("stays null when neither side knows a task", () => {
+    expect(resolveStatusRowTaskId(null, null)).toBeNull();
   });
 });

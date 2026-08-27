@@ -10,6 +10,7 @@ vi.mock("@/lib/api", () => ({
 }));
 
 import { TaskDeleteConfirmDialog } from "./task-delete-confirm-dialog";
+import { expectCompactWarning } from "./task-confirm-dialog.test-helpers";
 
 type SeedTask = { id: string; foregroundActivity?: "generating" | "background" | null };
 
@@ -25,6 +26,7 @@ function renderDialog(ui: ReactNode, tasks: SeedTask[] = []) {
           steps: [],
           tasks: tasks.map((t) => ({
             id: t.id,
+            workflowId: "wf-1",
             workflowStepId: "step-1",
             title: t.id,
             position: 0,
@@ -189,6 +191,23 @@ describe("TaskDeleteConfirmDialog executor cleanup copy", () => {
 });
 
 describe("TaskDeleteConfirmDialog still-working guard", () => {
+  it("keeps the shared in-flight warning visually subordinate", () => {
+    mockGetSubtaskCount.mockResolvedValue({ count: 0 });
+    renderDialog(
+      <TaskDeleteConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="My task"
+        taskId="task-1"
+        executorType="worktree"
+        onConfirm={() => {}}
+      />,
+      [{ id: "task-1", foregroundActivity: "generating" }],
+    );
+
+    expectCompactWarning(screen.getByTestId(WARNING_TESTID));
+  });
+
   it("warns when the task is generating", () => {
     mockGetSubtaskCount.mockResolvedValue({ count: 0 });
     renderDialog(

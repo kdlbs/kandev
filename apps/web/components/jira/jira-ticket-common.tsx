@@ -54,7 +54,7 @@ export function PersonCell({ name, avatar }: { name?: string; avatar?: string })
 }
 
 export function IconLabel({ icon, label }: { icon?: string; label?: string }) {
-  if (!label) return <span className="text-muted-foreground">—</span>;
+  if (!label) return <span className="text-muted-foreground">-</span>;
   return (
     <>
       {icon && (

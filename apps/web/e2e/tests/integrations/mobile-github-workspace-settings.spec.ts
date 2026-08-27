@@ -17,7 +17,13 @@ test.describe("GitHub workspace settings on mobile", () => {
       { host: "github.com", login: "mobile-cli", active: true, state: "active" },
     ]);
     await stubGitHubRateLimits(testPage, workspaceId);
-    await testPage.goto(`/settings/workspace/${workspaceId}/integrations/github`);
+    await testPage.goto(`/settings/workspaces/${workspaceId}/integrations/github`);
+    const accessCard = testPage.getByTestId("github-workspace-access-card");
+    const accessContent = accessCard.locator('[data-slot="card-content"]');
+    const accessContentPaddingTop = await accessContent.evaluate(
+      (element) => getComputedStyle(element).paddingTop,
+    );
+    expect(Number.parseFloat(accessContentPaddingTop)).toBeLessThan(24);
     const automation = testPage.getByTestId("github-workspace-automation");
     await expect(automation.getByTestId("github-task-access-summary")).toContainText(
       "Inherit executor Git credentials",
@@ -50,16 +56,22 @@ test.describe("GitHub workspace settings on mobile", () => {
     await testPage.keyboard.press("Escape");
     const rateLimitHelp = automation.getByRole("button", { name: "Show GitHub API limits" });
     await expect(rateLimitHelp).toBeVisible();
+    await expect(rateLimitHelp.getByTestId("github-rate-limit-icon")).toHaveClass(
+      /tabler-icon-gauge/,
+    );
     const rateLimitHelpBox = await rateLimitHelp.boundingBox();
     expect(rateLimitHelpBox?.height).toBeGreaterThanOrEqual(44);
     await rateLimitHelp.tap();
     const rateLimitDrawer = testPage.getByRole("dialog", { name: "GitHub API limits" });
     await expect(rateLimitDrawer).toContainText(
-      "API rate limit: 4,321 of 5,000 requests remaining",
+      "API rate limit: 3,210 of 5,000 requests remaining",
     );
     await expect(rateLimitDrawer).toContainText(
-      "GraphQL query limit: 4,900 of 5,000 points remaining",
+      "GraphQL query limit: 4,789 of 5,000 points remaining",
     );
+    await prCapture.screenshot("mobile-github-rate-limit-drawer", {
+      caption: "GitHub API rate limits refresh in the mobile drawer",
+    });
     await testPage.keyboard.press("Escape");
 
     await automation.getByRole("button", { name: "Change connection" }).tap();
@@ -70,20 +82,35 @@ test.describe("GitHub workspace settings on mobile", () => {
     const footer = drawer.getByTestId("github-connection-footer");
     const fixedSaveButton = footer.getByRole("button", { name: "Save changes" });
     await expect(fixedSaveButton).toBeVisible();
+    expect(drawerBox).not.toBeNull();
+    await expect
+      .poll(
+        () =>
+          testPage.evaluate(() => {
+            const scrollElement = document.querySelector<HTMLElement>(
+              '[data-testid="github-connection-scroll"]',
+            );
+            const fadeElement = document.querySelector<HTMLElement>(
+              '[data-testid="github-connection-scroll-fade"]',
+            );
+            if (!scrollElement || !fadeElement) return Number.POSITIVE_INFINITY;
+            const scrollBox = scrollElement.getBoundingClientRect();
+            const fadeBox = fadeElement.getBoundingClientRect();
+            return Math.abs(fadeBox.bottom - scrollBox.bottom);
+          }),
+        { timeout: 10_000 },
+      )
+      .toBeLessThanOrEqual(2);
     const [scrollBox, fadeBox, footerBox, initialSaveBox] = await Promise.all([
       scrollBody.boundingBox(),
       scrollFade.boundingBox(),
       footer.boundingBox(),
       fixedSaveButton.boundingBox(),
     ]);
-    expect(drawerBox).not.toBeNull();
     expect(scrollBox).not.toBeNull();
     expect(fadeBox).not.toBeNull();
     expect(footerBox).not.toBeNull();
     expect(initialSaveBox).not.toBeNull();
-    expect(
-      Math.abs(fadeBox!.y + fadeBox!.height - (scrollBox!.y + scrollBox!.height)),
-    ).toBeLessThanOrEqual(2);
     expect(footerBox!.y + footerBox!.height).toBeLessThanOrEqual(drawerBox!.y + drawerBox!.height);
     const methodGroup = drawer.getByRole("radiogroup", { name: "Connection method" });
     await expect(methodGroup.getByRole("radio").first()).toHaveAttribute("id", "github-method-cli");
@@ -162,7 +189,7 @@ test.describe("GitHub workspace settings on mobile", () => {
     testPage,
     seedData,
   }) => {
-    await testPage.goto(`/settings/workspace/${seedData.workspaceId}/integrations/github`);
+    await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/integrations/github`);
 
     const issueWatchesHeading = testPage.getByRole("heading", { name: "Issue Watches" });
     const repositoryScopeHeading = testPage.getByRole("heading", {

@@ -27,6 +27,7 @@ const degradedOverview = {
   capabilities: {
     managed_go_cache_path: "/data/cache/go-build",
     go_cache_adoption_available: true,
+    temporary_artifacts_available: false,
     docker_available: false,
     docker_host: "",
     host_global_docker_cleanup_allowed: false,
@@ -35,6 +36,7 @@ const degradedOverview = {
     workspaces: { active_bytes: 0, candidate_bytes: 0 },
     go_cache: { path: "/data/cache/go-build", size_bytes: 0, owned: true, enabled: false },
     quarantine: { available: false, warning: "quarantine database unavailable" },
+    temporary_artifacts: { available: false, warning: "temporary artifact registry unavailable" },
     docker: {
       available: false,
       build_cache_bytes: 0,
@@ -81,7 +83,9 @@ describe("StorageOverviewCard", () => {
   });
 
   it("renders a degraded quarantine warning without inventing zero usage", () => {
-    render(<StorageOverviewCard overview={degradedOverview} onRunGoCache={vi.fn()} />);
+    render(<StorageOverviewCard overview={degradedOverview} onRunGoCache={vi.fn()} />, {
+      wrapper: TooltipProvider,
+    });
 
     const trigger = screen.getByTestId("storage-resource-quarantine-trigger");
     expect(trigger.textContent).toContain("Unavailable");
@@ -142,6 +146,61 @@ describe("StorageOverviewCard", () => {
       "Total counted: 47 GB",
     );
     expect(screen.getByTestId("storage-analysis-total-partial")).toBeTruthy();
+  });
+});
+
+describe("StorageOverviewCard temporary artifacts", () => {
+  it("renders unavailable temporary artifacts without inventing zero usage", () => {
+    render(<StorageOverviewCard overview={degradedOverview} onRunGoCache={vi.fn()} />, {
+      wrapper: TooltipProvider,
+    });
+
+    const trigger = screen.getByTestId("storage-resource-temporary-artifacts-trigger");
+    expect(trigger.textContent).toContain("Unavailable");
+    expect(trigger.textContent).not.toContain("0 B");
+    fireEvent.click(trigger);
+    expect(screen.getByText("temporary artifact registry unavailable")).toBeTruthy();
+  });
+
+  it("offers an explicit quarantine action for stale registered artifacts", () => {
+    const onRunTemporaryArtifacts = vi.fn();
+    const overview = {
+      ...degradedOverview,
+      capabilities: { ...degradedOverview.capabilities, temporary_artifacts_available: true },
+      summary: {
+        ...degradedOverview.summary,
+        temporary_artifacts: {
+          available: true,
+          total_count: 2,
+          total_bytes: 12 * 1024 ** 2,
+          active_count: 1,
+          active_bytes: 4 * 1024 ** 2,
+          protected_count: 1,
+          protected_bytes: 4 * 1024 ** 2,
+          stale_count: 1,
+          stale_bytes: 4 * 1024 ** 2,
+          skipped_count: 0,
+        },
+      },
+    } satisfies StorageOverviewResponse;
+
+    render(
+      <StorageOverviewCard
+        overview={overview}
+        onRunGoCache={vi.fn()}
+        onRunTemporaryArtifacts={onRunTemporaryArtifacts}
+      />,
+      { wrapper: TooltipProvider },
+    );
+
+    fireEvent.click(screen.getByTestId("storage-resource-temporary-artifacts-trigger"));
+    expect(screen.getByTestId("storage-resource-temporary-artifacts").textContent).toContain(
+      "<0.01 GB eligible",
+    );
+    const cleanButton = screen.getByTestId("storage-temporary-artifacts-clean");
+    expect((cleanButton as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(cleanButton);
+    expect(onRunTemporaryArtifacts).toHaveBeenCalledTimes(1);
   });
 });
 

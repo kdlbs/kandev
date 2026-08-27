@@ -19,6 +19,7 @@ name: release
 #   9. publish-release   — create GH release with runtime + desktop assets and release notes
 #  10. publish-npm       — publish kandev@X.Y.Z + @kdlbs/runtime-*@X.Y.Z to npmjs
 #  11. update-homebrew-tap — push updated Formula/kandev.rb to kdlbs/homebrew-kandev
+#  12. update-scoop-bucket — push updated bucket/kandev.json to kdlbs/scoop-kandev
 #
 # npm publishing uses Trusted Publishers (OIDC) — no NPM_TOKEN required.
 # Each package (kandev + 5 @kdlbs/runtime-* packages) must have this workflow
@@ -26,6 +27,7 @@ name: release
 #
 # Required repository secret for public releases:
 #   HOMEBREW_TAP_DEPLOY_KEY — SSH private key for kdlbs/homebrew-kandev deploy key
+#   SCOOP_BUCKET_DEPLOY_KEY — SSH private key for kdlbs/scoop-kandev deploy key
 # Required configuration in the `release` environment:
 #   RELEASE_GPG_PRIVATE_KEY — secret containing the ASCII-armored release tag signing key
 #   RELEASE_GPG_FINGERPRINT — variable containing the key's full fingerprint
@@ -404,7 +406,8 @@ jobs:
           pnpm -C apps install --no-frozen-lockfile
           git-cliff --tag "$TAG" -o CHANGELOG.md
 
-      - name: Create release PR + squash-merge
+      - name: Create release PR
+        id: release_pr
         if: ${{ !inputs.dry_run && !inputs.desktop_validation_only && inputs.backfill_tag == '' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -413,9 +416,9 @@ jobs:
         run: |
           set -euo pipefail
           # main is protected by a ruleset that requires PRs, so we go through
-          # a release branch + auto-merged PR rather than pushing directly.
+          # a release branch and administrator-merged PR instead of pushing directly.
           BRANCH="release/$TAG"
-          MSG="release: $NEXT"
+          MSG="release: publish $NEXT"
 
           git checkout -b "$BRANCH"
           git add apps/cli/package.json apps/desktop/package.json apps/desktop/src-tauri/Cargo.lock apps/desktop/src-tauri/Cargo.toml apps/desktop/src-tauri/tauri.conf.json CHANGELOG.md apps/pnpm-lock.yaml
@@ -428,22 +431,70 @@ jobs:
           git push origin --delete "$BRANCH" 2>/dev/null || true
           git push -u origin "$BRANCH"
 
-          gh pr create \
+          HEAD_SHA="$(git rev-parse HEAD)"
+          PR_URL="$(gh pr create \
             --title "$MSG" \
             --body "Automated release: \`$NEXT\`" \
             --head "$BRANCH" \
-            --base main
-          # Immediate squash-merge. This relies on main's ruleset requiring
-          # only "PR required" with no status checks. If status checks are
-          # added to the ruleset later, this needs to switch to `--auto` +
-          # polling for merge completion before the tag steps below.
-          gh pr merge "$BRANCH" --squash --delete-branch --subject "$MSG" --body ""
+            --base main)"
+          echo "url=$PR_URL" >> "$GITHUB_OUTPUT"
+          echo "head=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Merge release PR with administrator token
+        if: ${{ !inputs.dry_run && !inputs.desktop_validation_only && inputs.backfill_tag == '' }}
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PR_BYPASS_TOKEN }}
+          PR_URL: ${{ steps.release_pr.outputs.url }}
+          EXPECTED_HEAD: ${{ steps.release_pr.outputs.head }}
+          MSG: "release: publish ${{ steps.compute.outputs.version }}"
+        run: |
+          set -euo pipefail
+          if [ -z "$GH_TOKEN" ]; then
+            echo "RELEASE_PR_BYPASS_TOKEN is required in the release environment." >&2
+            exit 1
+          fi
+          gh pr merge "$PR_URL" \
+            --admin \
+            --squash \
+            --match-head-commit "$EXPECTED_HEAD" \
+            --subject "$MSG" \
+            --body ""
+
+      - name: Select merged release commit
+        if: ${{ !inputs.dry_run && !inputs.desktop_validation_only && inputs.backfill_tag == '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ steps.release_pr.outputs.url }}
+          EXPECTED_HEAD: ${{ steps.release_pr.outputs.head }}
+        run: |
+          set -euo pipefail
+          PR_JSON="$(gh pr view "$PR_URL" --json state,mergedAt,mergeCommit,headRefOid)"
+          PR_STATE="$(jq -r '.state' <<<"$PR_JSON")"
+          MERGED_AT="$(jq -r '.mergedAt // empty' <<<"$PR_JSON")"
+          PR_HEAD="$(jq -r '.headRefOid' <<<"$PR_JSON")"
+          MERGE_COMMIT="$(jq -r '.mergeCommit.oid // empty' <<<"$PR_JSON")"
+
+          if [ "$PR_STATE" != "MERGED" ] || [ -z "$MERGED_AT" ]; then
+            echo "The release pull request did not merge." >&2
+            exit 1
+          fi
+          if [ "$PR_HEAD" != "$EXPECTED_HEAD" ]; then
+            echo "The merged release pull request head does not match the expected commit." >&2
+            exit 1
+          fi
+          if ! [[ "$MERGE_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "The release pull request did not report a valid merge commit." >&2
+            exit 1
+          fi
 
           # Pull the squashed commit into local main. The signing key is not
           # imported until all repository-controlled release work is complete.
           git fetch origin main
-          git checkout main
-          git reset --hard origin/main
+          if ! git merge-base --is-ancestor "$MERGE_COMMIT" origin/main; then
+            echo "The reported release merge commit is not on origin/main." >&2
+            exit 1
+          fi
+          git checkout --detach "$MERGE_COMMIT"
 
       - name: Validate merged release signing public key
         id: merged_release_gpg
@@ -1447,29 +1498,44 @@ jobs:
         with:
           images: ghcr.io/kdlbs/kandev
 
+      # The inline Buildx command uses the GHA cache backend directly. This
+      # helper exposes ACTIONS_RUNTIME_TOKEN and ACTIONS_CACHE_URL, which
+      # docker/build-push-action normally prepares for its own invocation.
+      - uses: crazy-max/ghaction-github-runtime@04d248b84655b509d8c44dc1d6f990c879747487 # v4.0.0
+
       - name: Build and push (amd64 staging tag)
         id: build
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
-          context: ./ctx
-          file: ./Dockerfile
-          push: true
-          platforms: linux/amd64
-          tags: ${{ env.STAGING_IMAGE }}
-          labels: ${{ steps.meta.outputs.labels }}
-          # provenance/sbom would attach an extra attestation manifest, which
-          # turns `imagetools inspect --raw` into an OCI index and breaks the
-          # size gate's `.layers[].size` query. The final multi-arch tags
-          # don't preserve attestations through `imagetools create` anyway,
-          # so disabling here doesn't change user-facing image content.
-          provenance: false
-          sbom: false
-          cache-from: type=gha,scope=base-amd64
-          cache-to: type=gha,mode=max,scope=base-amd64
+        env:
+          DOCKER_LABELS: ${{ steps.meta.outputs.labels }}
+        run: |
+          set -euo pipefail
+          metadata_file="$RUNNER_TEMP/docker-metadata.json"
+          label_args=()
+          while IFS= read -r label; do
+            [ -z "$label" ] && continue
+            label_args+=(--label "$label")
+          done <<<"$DOCKER_LABELS"
+
+          bash scripts/release/retry-ghcr-command.sh \
+            docker buildx build \
+            --file ./Dockerfile \
+            --platform linux/amd64 \
+            --push \
+            --tag "$STAGING_IMAGE" \
+            "${label_args[@]}" \
+            --provenance=false \
+            --sbom=false \
+            --cache-from type=gha,scope=base-amd64 \
+            --cache-to type=gha,mode=max,scope=base-amd64 \
+            --metadata-file "$metadata_file" \
+            ./ctx
+
+          digest="$(jq -er '."containerimage.digest"' "$metadata_file")"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
   docker-arm64:
     name: Build & push container image (arm64)
-    needs: [prepare, build-bundles]
+    needs: [prepare, build-bundles, docker-amd64]
     if: >-
       ${{ !cancelled() &&
         github.event_name == 'workflow_dispatch' &&
@@ -1477,7 +1543,8 @@ jobs:
         !inputs.dry_run &&
         !inputs.desktop_validation_only &&
         needs.prepare.result == 'success' &&
-        needs.build-bundles.result == 'success'
+        needs.build-bundles.result == 'success' &&
+        needs.docker-amd64.result == 'success'
       }}
     runs-on: ubuntu-24.04-arm
     permissions:
@@ -1520,20 +1587,37 @@ jobs:
         with:
           images: ghcr.io/kdlbs/kandev
 
+      - uses: crazy-max/ghaction-github-runtime@04d248b84655b509d8c44dc1d6f990c879747487 # v4.0.0
+
       - name: Build and push (arm64 staging tag)
         id: build
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
-          context: ./ctx
-          file: ./Dockerfile
-          push: true
-          platforms: linux/arm64
-          tags: ${{ env.STAGING_IMAGE }}
-          labels: ${{ steps.meta.outputs.labels }}
-          provenance: false
-          sbom: false
-          cache-from: type=gha,scope=base-arm64
-          cache-to: type=gha,mode=max,scope=base-arm64
+        env:
+          DOCKER_LABELS: ${{ steps.meta.outputs.labels }}
+        run: |
+          set -euo pipefail
+          metadata_file="$RUNNER_TEMP/docker-metadata.json"
+          label_args=()
+          while IFS= read -r label; do
+            [ -z "$label" ] && continue
+            label_args+=(--label "$label")
+          done <<<"$DOCKER_LABELS"
+
+          bash scripts/release/retry-ghcr-command.sh \
+            docker buildx build \
+            --file ./Dockerfile \
+            --platform linux/arm64 \
+            --push \
+            --tag "$STAGING_IMAGE" \
+            "${label_args[@]}" \
+            --provenance=false \
+            --sbom=false \
+            --cache-from type=gha,scope=base-arm64 \
+            --cache-to type=gha,mode=max,scope=base-arm64 \
+            --metadata-file "$metadata_file" \
+            ./ctx
+
+          digest="$(jq -er '."containerimage.digest"' "$metadata_file")"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
   docker-manifest:
     name: Assemble multi-arch base manifest
@@ -1553,6 +1637,11 @@ jobs:
       contents: read
       packages: write
     steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+          persist-credentials: false
+
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
@@ -1591,7 +1680,9 @@ jobs:
             [ -z "$tag" ] && continue
             tag_args+=(--tag "$tag")
           done <<<"$TAGS"
-          docker buildx imagetools create "${tag_args[@]}" "$AMD64_REF" "$ARM64_REF"
+          bash scripts/release/retry-ghcr-command.sh \
+            docker buildx imagetools create \
+            "${tag_args[@]}" "$AMD64_REF" "$ARM64_REF"
 
   # ---------------------------------------------------------------------------
   # Universal image — same per-arch native split, on top of the base image
@@ -1638,29 +1729,42 @@ jobs:
         with:
           images: ghcr.io/kdlbs/kandev
 
+      - uses: crazy-max/ghaction-github-runtime@04d248b84655b509d8c44dc1d6f990c879747487 # v4.0.0
+
       - name: Build and push (universal amd64 staging tag)
         id: build
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
-          context: .
-          file: Dockerfile.universal
-          push: true
-          platforms: linux/amd64
-          build-args: |
-            BASE_IMAGE=ghcr.io/kdlbs/kandev:${{ needs.prepare.outputs.tag }}
-          tags: ${{ env.STAGING_IMAGE }}
-          labels: ${{ steps.meta.outputs.labels }}
-          # provenance/sbom off so `imagetools inspect --raw` on the staging
-          # tag returns the plain image manifest, not an OCI index — required
-          # by the size gate in docker-universal-manifest.
-          provenance: false
-          sbom: false
-          cache-from: type=gha,scope=universal-amd64
-          cache-to: type=gha,mode=max,scope=universal-amd64
+        env:
+          DOCKER_LABELS: ${{ steps.meta.outputs.labels }}
+        run: |
+          set -euo pipefail
+          metadata_file="$RUNNER_TEMP/docker-metadata.json"
+          label_args=()
+          while IFS= read -r label; do
+            [ -z "$label" ] && continue
+            label_args+=(--label "$label")
+          done <<<"$DOCKER_LABELS"
+
+          bash scripts/release/retry-ghcr-command.sh \
+            docker buildx build \
+            --file Dockerfile.universal \
+            --platform linux/amd64 \
+            --push \
+            --build-arg BASE_IMAGE="ghcr.io/kdlbs/kandev:${{ needs.prepare.outputs.tag }}" \
+            --tag "$STAGING_IMAGE" \
+            "${label_args[@]}" \
+            --provenance=false \
+            --sbom=false \
+            --cache-from type=gha,scope=universal-amd64 \
+            --cache-to type=gha,mode=max,scope=universal-amd64 \
+            --metadata-file "$metadata_file" \
+            .
+
+          digest="$(jq -er '."containerimage.digest"' "$metadata_file")"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
   docker-universal-arm64:
     name: Build & push universal image (arm64)
-    needs: [prepare, docker-manifest]
+    needs: [prepare, docker-manifest, docker-universal-amd64]
     if: >-
       ${{ !cancelled() &&
         github.event_name == 'workflow_dispatch' &&
@@ -1668,7 +1772,8 @@ jobs:
         !inputs.dry_run &&
         !inputs.desktop_validation_only &&
         needs.prepare.result == 'success' &&
-        needs.docker-manifest.result == 'success'
+        needs.docker-manifest.result == 'success' &&
+        needs.docker-universal-amd64.result == 'success'
       }}
     runs-on: ubuntu-24.04-arm
     permissions:
@@ -1699,22 +1804,38 @@ jobs:
         with:
           images: ghcr.io/kdlbs/kandev
 
+      - uses: crazy-max/ghaction-github-runtime@04d248b84655b509d8c44dc1d6f990c879747487 # v4.0.0
+
       - name: Build and push (universal arm64 staging tag)
         id: build
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
-          context: .
-          file: Dockerfile.universal
-          push: true
-          platforms: linux/arm64
-          build-args: |
-            BASE_IMAGE=ghcr.io/kdlbs/kandev:${{ needs.prepare.outputs.tag }}
-          tags: ${{ env.STAGING_IMAGE }}
-          labels: ${{ steps.meta.outputs.labels }}
-          provenance: false
-          sbom: false
-          cache-from: type=gha,scope=universal-arm64
-          cache-to: type=gha,mode=max,scope=universal-arm64
+        env:
+          DOCKER_LABELS: ${{ steps.meta.outputs.labels }}
+        run: |
+          set -euo pipefail
+          metadata_file="$RUNNER_TEMP/docker-metadata.json"
+          label_args=()
+          while IFS= read -r label; do
+            [ -z "$label" ] && continue
+            label_args+=(--label "$label")
+          done <<<"$DOCKER_LABELS"
+
+          bash scripts/release/retry-ghcr-command.sh \
+            docker buildx build \
+            --file Dockerfile.universal \
+            --platform linux/arm64 \
+            --push \
+            --build-arg BASE_IMAGE="ghcr.io/kdlbs/kandev:${{ needs.prepare.outputs.tag }}" \
+            --tag "$STAGING_IMAGE" \
+            "${label_args[@]}" \
+            --provenance=false \
+            --sbom=false \
+            --cache-from type=gha,scope=universal-arm64 \
+            --cache-to type=gha,mode=max,scope=universal-arm64 \
+            --metadata-file "$metadata_file" \
+            .
+
+          digest="$(jq -er '."containerimage.digest"' "$metadata_file")"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
   docker-universal-manifest:
     name: Gate size + promote universal manifest
@@ -1739,6 +1860,11 @@ jobs:
       AMD64_REF: ghcr.io/kdlbs/kandev@${{ needs.docker-universal-amd64.outputs.digest }}
       ARM64_REF: ghcr.io/kdlbs/kandev@${{ needs.docker-universal-arm64.outputs.digest }}
     steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+          persist-credentials: false
+
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
       - name: Login to GHCR
@@ -1778,7 +1904,8 @@ jobs:
       - name: Promote staging to final tags
         run: |
           set -euo pipefail
-          docker buildx imagetools create \
+          bash scripts/release/retry-ghcr-command.sh \
+            docker buildx imagetools create \
             --tag "ghcr.io/kdlbs/kandev:${{ needs.prepare.outputs.version }}-universal" \
             --tag "ghcr.io/kdlbs/kandev:${{ needs.prepare.outputs.tag }}-universal" \
             --tag "ghcr.io/kdlbs/kandev:universal" \
@@ -1848,8 +1975,10 @@ jobs:
           set -euo pipefail
 
           unsigned=()
+          macos_unsigned=false
           if ! bash scripts/release/desktop-signing-ready.sh macos >/dev/null 2>&1; then
             unsigned+=("macOS")
+            macos_unsigned=true
           fi
           if ! bash scripts/release/desktop-signing-ready.sh windows >/dev/null 2>&1; then
             unsigned+=("Windows")
@@ -1867,6 +1996,14 @@ jobs:
             echo "> [!WARNING]"
             echo "> $platforms desktop installers in this release are unsigned development builds."
             echo "> They may require manual OS security bypasses and are not trusted downloads."
+            if [ "$macos_unsigned" = "true" ]; then
+              echo ">"
+              echo "> If macOS blocks Kandev after you verify the checksum, run:"
+              echo ">"
+              echo '> ```bash'
+              echo "> xattr -d com.apple.quarantine /Applications/Kandev.app"
+              echo '> ```'
+            fi
             echo
             cat RELEASE_NOTES.md
           } > "$tmp"
@@ -2079,5 +2216,47 @@ jobs:
           HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
         run: |
           bash scripts/release/update-homebrew-tap.sh \
+            "${{ needs.prepare.outputs.version }}" \
+            "${{ needs.prepare.outputs.tag }}"
+
+  update-scoop-bucket:
+    name: Update Scoop bucket
+    needs: [prepare, publish-release]
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' &&
+        needs.publish-release.result == 'success'
+      }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          # Backfill application artifacts come from the selected tag, but the
+          # publication helper must come from the current workflow revision.
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+
+      - name: Require Scoop bucket deploy key
+        env:
+          SCOOP_BUCKET_DEPLOY_KEY: ${{ secrets.SCOOP_BUCKET_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$SCOOP_BUCKET_DEPLOY_KEY" ]; then
+            echo "::error::SCOOP_BUCKET_DEPLOY_KEY is required to publish the Scoop bucket." >&2
+            exit 1
+          fi
+
+      - name: Update Scoop bucket
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SCOOP_BUCKET_DEPLOY_KEY: ${{ secrets.SCOOP_BUCKET_DEPLOY_KEY }}
+        run: |
+          bash scripts/release/update-scoop-bucket.sh \
             "${{ needs.prepare.outputs.version }}" \
             "${{ needs.prepare.outputs.tag }}"

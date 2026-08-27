@@ -46,6 +46,9 @@ func TestWorktreePreparer_ValidateRepository_FailsOnNonGitPath(t *testing.T) {
 	if res.Success {
 		t.Fatal("expected prepare to fail for a repository path with no .git directory")
 	}
+	if res.Error == nil {
+		t.Fatal("expected failed prepare result to retain its error cause")
+	}
 	if !strings.Contains(res.ErrorMessage, "not a git repository") {
 		t.Errorf("ErrorMessage = %q, want it to mention the path is not a git repository", res.ErrorMessage)
 	}
@@ -87,10 +90,16 @@ func TestWorktreePreparer_MultiRepo_ValidateRepository_FailsOnNonGitPath(t *test
 	if res.Success {
 		t.Fatal("expected prepare to fail when the secondary repo path has no .git directory")
 	}
+	if res.Error == nil {
+		t.Fatal("expected failed multi-repo result to retain its error cause")
+	}
 	if !strings.Contains(res.ErrorMessage, "not a git repository") {
 		t.Errorf("ErrorMessage = %q, want it to mention the path is not a git repository", res.ErrorMessage)
 	}
-	if !strings.Contains(res.ErrorMessage, staleSecondary) {
-		t.Errorf("ErrorMessage = %q, want it to name the offending path %q", res.ErrorMessage, staleSecondary)
+	if strings.Contains(res.ErrorMessage, staleSecondary) {
+		t.Errorf("ErrorMessage = %q, must not expose the offending absolute path %q", res.ErrorMessage, staleSecondary)
+	}
+	if !strings.Contains(res.ErrorMessage, "***") {
+		t.Errorf("ErrorMessage = %q, want credential-safe sanitization marker", res.ErrorMessage)
 	}
 }

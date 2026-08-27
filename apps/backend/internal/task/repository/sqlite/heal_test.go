@@ -49,14 +49,12 @@ func insertEnv(t *testing.T, db *sqlx.DB, env *models.TaskEnvironment) {
 	}
 	_, err := db.Exec(`
 		INSERT INTO task_environments (
-			id, task_id, repository_id, executor_type, executor_id, executor_profile_id,
-			control_port, status,
-			worktree_id, worktree_path, worktree_branch, workspace_path,
-			container_id, sandbox_id,
-			created_at, updated_at
-		) VALUES (?, ?, '', ?, '', '', 0, ?, '', ?, '', ?, '', '', ?, ?)
+			id, task_id, executor_type, executor_id, executor_profile_id,
+			control_port, status, workspace_path,
+			container_id, sandbox_id, created_at, updated_at
+		) VALUES (?, ?, '', ?, '', 0, ?, ?, '', '', ?, ?)
 	`, env.ID, env.TaskID, env.ExecutorType, string(env.Status),
-		env.WorktreePath, env.WorkspacePath, env.CreatedAt, env.UpdatedAt)
+		env.WorkspacePath, env.CreatedAt, env.UpdatedAt)
 	if err != nil {
 		t.Fatalf("insert env: %v", err)
 	}
@@ -71,143 +69,6 @@ func insertTask(t *testing.T, db *sqlx.DB, taskID string) {
 	`, taskID, now, now)
 	if err != nil {
 		t.Fatalf("insert task: %v", err)
-	}
-}
-
-// TestHealTaskEnvironmentWorkspacePaths_BackfillsEmpty seeds a worktree-mode
-// env with worktree_path set but workspace_path empty (the corrupt state seen
-// in the live DB) and asserts the heal step backfills workspace_path from
-// worktree_path.
-func TestHealTaskEnvironmentWorkspacePaths_BackfillsEmpty(t *testing.T) {
-	repo := newRepoForHealTests(t)
-	insertTask(t, repo.db, "task-A")
-	insertEnv(t, repo.db, &models.TaskEnvironment{
-		ID:           "env-A",
-		TaskID:       "task-A",
-		ExecutorType: "worktree",
-		WorktreePath: "/home/user/.kandev/worktrees/foo",
-		// WorkspacePath intentionally empty.
-	})
-
-	if err := repo.healTaskEnvironmentWorkspacePaths(); err != nil {
-		t.Fatalf("heal: %v", err)
-	}
-
-	got, err := repo.GetTaskEnvironment(context.Background(), "env-A")
-	if err != nil {
-		t.Fatalf("get env: %v", err)
-	}
-	if got.WorkspacePath != "/home/user/.kandev/worktrees/foo" {
-		t.Errorf("workspace_path = %q, want it backfilled from worktree_path", got.WorkspacePath)
-	}
-}
-
-// TestHealTaskEnvironmentWorkspacePaths_RepairsCollapsedParent — a row where
-// workspace_path was the task-root parent of worktree_path (the pre-fix value
-// left by legacy computeWorkspacePath's filepath.Dir) must be repaired:
-// workspace_path becomes worktree_path so ACP session/load finds the agent's
-// saved jsonl on cold start.
-func TestHealTaskEnvironmentWorkspacePaths_RepairsCollapsedParent(t *testing.T) {
-	repo := newRepoForHealTests(t)
-	insertTask(t, repo.db, "task-B")
-	insertEnv(t, repo.db, &models.TaskEnvironment{
-		ID:            "env-B",
-		TaskID:        "task-B",
-		ExecutorType:  "worktree",
-		WorktreePath:  "/home/user/.kandev/tasks/foo_abc/repo",
-		WorkspacePath: "/home/user/.kandev/tasks/foo_abc", // legacy collapsed parent
-	})
-
-	if err := repo.healTaskEnvironmentWorkspacePaths(); err != nil {
-		t.Fatalf("heal: %v", err)
-	}
-
-	got, err := repo.GetTaskEnvironment(context.Background(), "env-B")
-	if err != nil {
-		t.Fatalf("get env: %v", err)
-	}
-	if got.WorkspacePath != "/home/user/.kandev/tasks/foo_abc/repo" {
-		t.Errorf("workspace_path = %q, want repaired to worktree_path subdir", got.WorkspacePath)
-	}
-}
-
-// TestHealTaskEnvironmentWorkspacePaths_LeavesAlreadyCorrectAlone — a row that
-// already has workspace_path == worktree_path must not be touched.
-func TestHealTaskEnvironmentWorkspacePaths_LeavesAlreadyCorrectAlone(t *testing.T) {
-	repo := newRepoForHealTests(t)
-	insertTask(t, repo.db, "task-B2")
-	insertEnv(t, repo.db, &models.TaskEnvironment{
-		ID:            "env-B2",
-		TaskID:        "task-B2",
-		ExecutorType:  "worktree",
-		WorktreePath:  "/home/user/.kandev/tasks/foo_abc/repo",
-		WorkspacePath: "/home/user/.kandev/tasks/foo_abc/repo",
-	})
-
-	if err := repo.healTaskEnvironmentWorkspacePaths(); err != nil {
-		t.Fatalf("heal: %v", err)
-	}
-
-	got, err := repo.GetTaskEnvironment(context.Background(), "env-B2")
-	if err != nil {
-		t.Fatalf("get env: %v", err)
-	}
-	if got.WorkspacePath != "/home/user/.kandev/tasks/foo_abc/repo" {
-		t.Errorf("workspace_path = %q, must not be overwritten", got.WorkspacePath)
-	}
-}
-
-// TestHealTaskEnvironmentWorkspacePaths_TaskDirMode — task-dir-mode envs
-// place the worktree at <root>/.kandev/tasks/<name>/<repo>; workspace_path
-// must equal worktree_path (the repo subdir), matching the agent process cwd
-// so ACP session/load on cold start hits the same sanitised-cwd folder.
-func TestHealTaskEnvironmentWorkspacePaths_TaskDirMode(t *testing.T) {
-	repo := newRepoForHealTests(t)
-	insertTask(t, repo.db, "task-T")
-	insertEnv(t, repo.db, &models.TaskEnvironment{
-		ID:           "env-T",
-		TaskID:       "task-T",
-		ExecutorType: "worktree",
-		WorktreePath: "/home/u/.kandev/tasks/fix-something_abc/kandev",
-	})
-
-	if err := repo.healTaskEnvironmentWorkspacePaths(); err != nil {
-		t.Fatalf("heal: %v", err)
-	}
-
-	got, err := repo.GetTaskEnvironment(context.Background(), "env-T")
-	if err != nil {
-		t.Fatalf("get env: %v", err)
-	}
-	if got.WorkspacePath != "/home/u/.kandev/tasks/fix-something_abc/kandev" {
-		t.Errorf("workspace_path = %q, want worktree_path (subdir) — process cwd parity", got.WorkspacePath)
-	}
-}
-
-// TestHealTaskEnvironmentWorkspacePaths_Idempotent — running the heal twice
-// must not change anything on the second run.
-func TestHealTaskEnvironmentWorkspacePaths_Idempotent(t *testing.T) {
-	repo := newRepoForHealTests(t)
-	insertTask(t, repo.db, "task-C")
-	insertEnv(t, repo.db, &models.TaskEnvironment{
-		ID:           "env-C",
-		TaskID:       "task-C",
-		ExecutorType: "worktree",
-		WorktreePath: "/x",
-	})
-
-	for i := 0; i < 2; i++ {
-		if err := repo.healTaskEnvironmentWorkspacePaths(); err != nil {
-			t.Fatalf("heal pass %d: %v", i, err)
-		}
-	}
-
-	got, err := repo.GetTaskEnvironment(context.Background(), "env-C")
-	if err != nil {
-		t.Fatalf("get env: %v", err)
-	}
-	if got.WorkspacePath != "/x" {
-		t.Errorf("workspace_path = %q, want /x after idempotent run", got.WorkspacePath)
 	}
 }
 
@@ -231,13 +92,13 @@ func TestHealDuplicateTaskEnvironments_KeepsMostRecent(t *testing.T) {
 	newer := older.Add(5 * time.Second)
 	insertEnv(t, repo.db, &models.TaskEnvironment{
 		ID: "env-old", TaskID: "task-D", ExecutorType: "worktree",
-		WorktreePath: "/old", WorkspacePath: "/old",
-		CreatedAt: older, UpdatedAt: older,
+		WorkspacePath: "/old",
+		CreatedAt:     older, UpdatedAt: older,
 	})
 	insertEnv(t, repo.db, &models.TaskEnvironment{
 		ID: "env-new", TaskID: "task-D", ExecutorType: "worktree",
-		WorktreePath: "/new", WorkspacePath: "/new",
-		CreatedAt: newer, UpdatedAt: newer,
+		WorkspacePath: "/new",
+		CreatedAt:     newer, UpdatedAt: newer,
 	})
 	// A session created against the loser env — must be re-linked.
 	if err := repo.CreateTaskSession(context.Background(), &models.TaskSession{
@@ -283,7 +144,7 @@ func TestHealDuplicateTaskEnvironments_NoOpWhenSingle(t *testing.T) {
 	insertTask(t, repo.db, "task-E")
 	insertEnv(t, repo.db, &models.TaskEnvironment{
 		ID: "env-E", TaskID: "task-E", ExecutorType: "worktree",
-		WorktreePath: "/e", WorkspacePath: "/e",
+		WorkspacePath: "/e",
 	})
 
 	if err := repo.healDuplicateTaskEnvironments(); err != nil {
@@ -307,20 +168,19 @@ func TestEnsureTaskEnvironmentTaskUniqueIndex_BlocksFutureDuplicates(t *testing.
 	insertTask(t, repo.db, "task-F")
 	insertEnv(t, repo.db, &models.TaskEnvironment{
 		ID: "env-F1", TaskID: "task-F", ExecutorType: "worktree",
-		WorktreePath: "/f", WorkspacePath: "/f",
+		WorkspacePath: "/f",
 	})
 
 	// initSchema already added the unique index; a second insert for the same
-	// task must fail with a constraint error. (agent_execution_id was dropped
-	// from task_environments — the column reference is gone here too.)
+	// task must fail with a constraint error. The flat worktree columns are
+	// gone; only the final columns remain.
 	_, err := repo.db.Exec(`
 		INSERT INTO task_environments (
-			id, task_id, repository_id, executor_type, executor_id, executor_profile_id,
-			control_port, status,
-			worktree_id, worktree_path, worktree_branch, workspace_path,
+			id, task_id, executor_type, executor_id, executor_profile_id,
+			control_port, status, workspace_path,
 			container_id, sandbox_id, created_at, updated_at
-		) VALUES (?, 'task-F', '', 'worktree', '', '', 0, 'ready',
-		          '', '/f2', '', '/f2', '', '', datetime('now'), datetime('now'))
+		) VALUES (?, 'task-F', 'worktree', '', '', 0, 'ready', '/f2',
+		          '', '', datetime('now'), datetime('now'))
 	`, "env-F2")
 	if err == nil {
 		t.Fatal("expected unique-constraint error inserting second env for same task_id")
@@ -350,7 +210,6 @@ func TestCreateTaskEnvironment_RejectsEmptyWorkspaceForWorktree(t *testing.T) {
 	err := repo.CreateTaskEnvironment(context.Background(), &models.TaskEnvironment{
 		TaskID:       "task-G",
 		ExecutorType: "worktree",
-		WorktreePath: "/g",
 		// WorkspacePath intentionally empty.
 	})
 	if err == nil {
@@ -382,7 +241,6 @@ func TestCreateTaskEnvironment_AllowsSameRepoMultiBranchRows(t *testing.T) {
 		ID:            "env-H2",
 		TaskID:        "task-H2",
 		ExecutorType:  string(models.ExecutorTypeWorktree),
-		WorktreePath:  "/workspace/main",
 		WorkspacePath: "/workspace",
 		Repos: []*models.TaskEnvironmentRepo{
 			{
@@ -426,14 +284,14 @@ func TestUpdateTaskEnvironment_RejectsClearingWorkspaceForWorktree(t *testing.T)
 	insertTask(t, repo.db, "task-I")
 	if err := repo.CreateTaskEnvironment(context.Background(), &models.TaskEnvironment{
 		ID: "env-I", TaskID: "task-I", ExecutorType: "worktree",
-		WorktreePath: "/i", WorkspacePath: "/i",
+		WorkspacePath: "/i",
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 
 	err := repo.UpdateTaskEnvironment(context.Background(), &models.TaskEnvironment{
 		ID: "env-I", TaskID: "task-I", ExecutorType: "worktree",
-		WorktreePath: "/i", WorkspacePath: "",
+		WorkspacePath: "",
 	})
 	if err == nil {
 		t.Fatal("expected update to fail when clearing workspace_path on worktree env")
@@ -495,7 +353,7 @@ func TestHealSessionTaskEnvironmentIDs_LinksOrphans(t *testing.T) {
 	insertTask(t, repo.db, "task-J")
 	insertEnv(t, repo.db, &models.TaskEnvironment{
 		ID: "env-J", TaskID: "task-J", ExecutorType: "worktree",
-		WorktreePath: "/j", WorkspacePath: "/j",
+		WorkspacePath: "/j",
 	})
 	insertSessionWithEnvID(t, repo.db, "sess-J-orphan", "task-J", "")
 
@@ -519,7 +377,7 @@ func TestHealSessionTaskEnvironmentIDs_LeavesLinkedAlone(t *testing.T) {
 	insertTask(t, repo.db, "task-K")
 	insertEnv(t, repo.db, &models.TaskEnvironment{
 		ID: "env-K", TaskID: "task-K", ExecutorType: "worktree",
-		WorktreePath: "/k", WorkspacePath: "/k",
+		WorkspacePath: "/k",
 	})
 	insertSessionWithEnvID(t, repo.db, "sess-K-linked", "task-K", "env-K")
 
@@ -565,7 +423,7 @@ func TestHealSessionTaskEnvironmentIDs_LinksNullOrphans(t *testing.T) {
 	insertTask(t, repo.db, "task-N")
 	insertEnv(t, repo.db, &models.TaskEnvironment{
 		ID: "env-N", TaskID: "task-N", ExecutorType: "worktree",
-		WorktreePath: "/n", WorkspacePath: "/n",
+		WorkspacePath: "/n",
 	})
 	insertSessionWithNullEnvID(t, repo.db, "sess-N-null", "task-N")
 
@@ -589,7 +447,7 @@ func TestHealSessionTaskEnvironmentIDs_Idempotent(t *testing.T) {
 	insertTask(t, repo.db, "task-M")
 	insertEnv(t, repo.db, &models.TaskEnvironment{
 		ID: "env-M", TaskID: "task-M", ExecutorType: "worktree",
-		WorktreePath: "/m", WorkspacePath: "/m",
+		WorkspacePath: "/m",
 	})
 	insertSessionWithEnvID(t, repo.db, "sess-M", "task-M", "")
 
@@ -610,40 +468,3 @@ func TestHealSessionTaskEnvironmentIDs_Idempotent(t *testing.T) {
 
 // silences "imported and not used" if some future refactor drops a use.
 var _ = sql.ErrNoRows
-
-// TestBackfillSingleTask_DefaultsExecutorTypeOnMissingRow — when the
-// referenced executor row is genuinely absent (legacy session whose executor
-// was deleted), backfillSingleTask must default executor_type to "local_pc"
-// and continue. Locks in the narrowed error-handling: only sql.ErrNoRows
-// triggers the default; any other scan error must propagate so operators see
-// the real cause instead of every backfilled env silently getting the wrong
-// type.
-func TestBackfillSingleTask_DefaultsExecutorTypeOnMissingRow(t *testing.T) {
-	repo := newRepoForHealTests(t)
-	insertTask(t, repo.db, "task-bf")
-	// Session references an executor id that does NOT exist in `executors`.
-	// backfillTaskEnvironments queries task_sessions for orphans (no env)
-	// and calls backfillSingleTask for each — exercising the executor
-	// lookup path with sql.ErrNoRows.
-	insertSessionWithEnvID(t, repo.db, "sess-bf", "task-bf", "")
-	if _, err := repo.db.Exec(
-		`UPDATE task_sessions SET executor_id = 'exec-deleted', started_at = ? WHERE id = 'sess-bf'`,
-		time.Now().UTC(),
-	); err != nil {
-		t.Fatalf("seed executor_id: %v", err)
-	}
-
-	if err := repo.backfillTaskEnvironments(); err != nil {
-		t.Fatalf("backfillTaskEnvironments: %v", err)
-	}
-
-	var executorType string
-	if err := repo.db.QueryRow(
-		`SELECT executor_type FROM task_environments WHERE task_id = 'task-bf'`,
-	).Scan(&executorType); err != nil {
-		t.Fatalf("scan: %v", err)
-	}
-	if executorType != "local_pc" {
-		t.Errorf("executor_type = %q, want default 'local_pc' when executor row absent", executorType)
-	}
-}

@@ -7,6 +7,7 @@ import type {
   UserShellState,
   UserShellPTYStatus,
 } from "@/lib/state/slices";
+import { t } from "@/lib/i18n";
 
 interface UseUserShellsReturn {
   shells: UserShellInfo[];
@@ -179,7 +180,7 @@ function mapListItemToShell(s: ListResponseItem): UserShellInfo {
     ptyStatus: s.pty_status,
     processId: s.process_id,
     running: s.running ?? s.pty_status === "running",
-    label: s.label || s.display_name || "Terminal",
+    label: s.label || s.display_name || t("common:terminal"),
     closable: s.closable ?? true,
     initialCommand: s.initial_command,
   };

@@ -1,7 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 
-const APPEARANCE_PATH = "/settings/general/appearance";
+const APPEARANCE_PATH = "/settings/preferences/appearance";
 
 test.describe("Mobile startup page", () => {
   test("uses a touch-friendly saved preference, resumes the task, and returns to overview", async ({

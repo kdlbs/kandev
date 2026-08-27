@@ -480,3 +480,71 @@ func TestCarryRemoteAheadBehind(t *testing.T) {
 		})
 	}
 }
+
+func TestCarryRemoteSnapshot(t *testing.T) {
+	const (
+		localHead    = "local-head"
+		remoteBranch = "origin/feature"
+		remoteHead   = "remote-head"
+	)
+	tests := []struct {
+		name             string
+		prior            types.GitStatusUpdate
+		update           types.GitStatusUpdate
+		wantRemoteHead   string
+		wantRemoteAhead  int
+		wantRemoteBehind int
+	}{
+		{
+			name: "same local and upstream identity preserves complete snapshot",
+			prior: types.GitStatusUpdate{
+				HeadCommit:       localHead,
+				RemoteBranch:     remoteBranch,
+				RemoteHeadCommit: remoteHead,
+				RemoteAhead:      2,
+				RemoteBehind:     1,
+			},
+			update:           types.GitStatusUpdate{HeadCommit: localHead, RemoteBranch: remoteBranch},
+			wantRemoteHead:   remoteHead,
+			wantRemoteAhead:  2,
+			wantRemoteBehind: 1,
+		},
+		{
+			name: "changed local head drops snapshot",
+			prior: types.GitStatusUpdate{
+				HeadCommit:       localHead,
+				RemoteBranch:     remoteBranch,
+				RemoteHeadCommit: remoteHead,
+				RemoteAhead:      2,
+				RemoteBehind:     1,
+			},
+			update: types.GitStatusUpdate{
+				HeadCommit:   "new-local-head",
+				RemoteBranch: remoteBranch,
+			},
+		},
+		{
+			name: "changed upstream identity drops snapshot",
+			prior: types.GitStatusUpdate{
+				HeadCommit:       localHead,
+				RemoteBranch:     remoteBranch,
+				RemoteHeadCommit: remoteHead,
+				RemoteAhead:      2,
+				RemoteBehind:     1,
+			},
+			update: types.GitStatusUpdate{
+				HeadCommit:   localHead,
+				RemoteBranch: "origin/other",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			update := tt.update
+			carryRemoteSnapshot(&update, tt.prior)
+			if update.RemoteHeadCommit != tt.wantRemoteHead || update.RemoteAhead != tt.wantRemoteAhead || update.RemoteBehind != tt.wantRemoteBehind {
+				t.Fatalf("remote snapshot = %q/%d/%d, want %q/%d/%d", update.RemoteHeadCommit, update.RemoteAhead, update.RemoteBehind, tt.wantRemoteHead, tt.wantRemoteAhead, tt.wantRemoteBehind)
+			}
+		})
+	}
+}

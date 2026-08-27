@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- session WebSocket handlers share one event registry. */
 import type { StoreApi } from "zustand";
 import { createDebugLogger } from "@/lib/debug/log";
 import type { AppState } from "@/lib/state/store";
@@ -13,6 +14,10 @@ import {
 import type { QueueStatusChangedPayload } from "@/lib/types/backend";
 import { syncKanbanPrimarySessionState } from "@/lib/ws/handlers/agent-session-kanban-sync";
 import { parseContextWindowEntry } from "@/lib/state/slices/session-runtime/context-window";
+import { ROUTE_SESSION_FIELDS } from "@/lib/ws/handlers/agent-session-route-fields";
+import { t } from "@/lib/i18n";
+import { maybeMarkQuickChatUnseenIdle } from "@/lib/ws/handlers/quick-chat-unseen";
+import { readLastAgentError } from "@/lib/session-last-agent-error";
 
 const debug = createDebugLogger("session:state");
 
@@ -230,6 +235,12 @@ const CARRIED_WHEN_DEFINED = [
   "supports_steering",
   "cancellation_pending",
   "cancellation_revision",
+  "execution_profile_id",
+  "route_generation",
+  "route_state",
+  "route_reason",
+  ...ROUTE_SESSION_FIELDS,
+  "downstream_acp_session_id",
 ] as const;
 
 /** Copy each CARRIED_WHEN_DEFINED field onto `update` only when the payload defines it. */
@@ -550,10 +561,24 @@ function maybeNotifySessionFailure(store: StoreApi<AppState>, ctx: SessionFailur
     return;
   }
 
+  const metadata =
+    payload.session_metadata && typeof payload.session_metadata === "object"
+      ? (payload.session_metadata as Record<string, unknown>)
+      : null;
+  const launchError = readLastAgentError(metadata);
+  const isLaunchFailure = Boolean(launchError?.stamp && launchError.code);
+  let message = t("task:sessionFailedUnexpectedly");
+  if (isLaunchFailure) {
+    message = t("task:launchFailedSeeDetails");
+  } else if (payload.error_message) {
+    message = String(payload.error_message);
+  }
+
   store.getState().setSessionFailureNotification({
     sessionId,
     taskId,
-    message: payload.error_message ? String(payload.error_message) : "Session failed unexpectedly",
+    message,
+    ...(isLaunchFailure ? { isLaunchFailure: true } : {}),
   });
 }
 
@@ -615,6 +640,7 @@ function applyCancellationPending(
   });
 }
 
+/** Prefers the event's active-subagent count, falling back to the existing session value. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function pickActiveSubagentCount(payload: any, existing: TaskSession): number {
   return payload.active_subagent_count !== undefined
@@ -622,6 +648,7 @@ function pickActiveSubagentCount(payload: any, existing: TaskSession): number {
     : (existing.active_subagent_count ?? 0);
 }
 
+/** Prefers the event's steering-support flag, falling back to the existing session value. */
 function pickSupportsSteering(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   payload: any,
@@ -632,10 +659,16 @@ function pickSupportsSteering(
     : existing.supports_steering;
 }
 
+/**
+ * Applies a workspace-sources adoption event: updates the session's
+ * workspace path and records the server-issued adoption boundary (WS envelope
+ * timestamp) so pre-adoption turns can never become active again.
+ */
 function handleWorkspaceSourcesUpdated(
   store: StoreApi<AppState>,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   payload: any,
+  boundaryTimestamp?: string,
 ): void {
   const {
     session_id: sessionId,
@@ -646,7 +679,13 @@ function handleWorkspaceSourcesUpdated(
   if (existing && workspacePath) {
     store.getState().setTaskSession({ ...existing, workspace_path: workspacePath });
   }
-  store.getState().reconcileWorkspaceSourcesAdopted(adoptedSessionIds ?? [sessionId]);
+  // The adoption boundary must be SERVER time, so forward the WS envelope's
+  // server-issued timestamp — never a client-clock value (a browser clock
+  // ahead of the backend would reject legitimate new turn.started events
+  // until server time caught up).
+  store
+    .getState()
+    .reconcileWorkspaceSourcesAdopted(adoptedSessionIds ?? [sessionId], boundaryTimestamp);
   store.getState().bumpWorkspaceFilesRefresh(sessionId);
   store.getState().clearLegacyGitStatusEntry(sessionId);
   store.getState().bumpSessionCommitsRefetch(sessionId);
@@ -669,7 +708,7 @@ function handleCancellationPendingMessage(
 }
 
 /** Writes a message.queue.status_changed broadcast into the queue slice,
- * defaulting count/max/mergeEnabled when the backend omits them. */
+ * preserving known policy values when an older publisher omits them. */
 function handleQueueStatusChangedMessage(
   store: StoreApi<AppState>,
   payload: QueueStatusChangedPayload,
@@ -681,10 +720,19 @@ function handleQueueStatusChangedMessage(
   const entries = payload.entries ?? [];
   const count = typeof payload.count === "number" ? payload.count : entries.length;
   const max = typeof payload.max === "number" ? payload.max : 0;
-  const mergeEnabled = typeof payload.merge_enabled === "boolean" ? payload.merge_enabled : true;
-  store.getState().setQueueEntries(payload.session_id, entries, { count, max, mergeEnabled });
+  const previousMeta = store.getState().queue.metaBySessionId[payload.session_id];
+  const mergeEnabled =
+    typeof payload.merge_enabled === "boolean"
+      ? payload.merge_enabled
+      : (previousMeta?.mergeEnabled ?? true);
+  const autoRun =
+    typeof payload.auto_run === "boolean" ? payload.auto_run : (previousMeta?.autoRun ?? true);
+  store
+    .getState()
+    .setQueueEntries(payload.session_id, entries, { count, max, mergeEnabled, autoRun });
 }
 
+/** Registers the task-session WebSocket handlers (state, messages, workspace sources, queue). */
 export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     "message.queue.status_changed": (message) =>
@@ -724,10 +772,24 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
         newState: newState ?? "-",
       });
 
+      maybeMarkQuickChatUnseenIdle(store, sessionId, {
+        previousState: existingSession?.state,
+        fallbackPreviousState: payload.old_state as TaskSessionState | undefined,
+        newState,
+        updatedAt: payload.updated_at,
+      });
       upsertTaskSessionList(store, taskId, sessionId, payload, sessionUpdate);
       syncKanbanPrimarySessionState(store, taskId, sessionId, newState);
       extractContextWindow(store, sessionId, payload);
       maybePromoteAgentctlReady(store, sessionId, newState, message.timestamp);
+
+      // A confirmed RUNNING transition clears the resume-skipped marker
+      // (prevent-auto-start-on-open). STARTING deliberately does NOT clear
+      // it: a failed manual resume emits STARTING before the launch fails,
+      // and clearing there would drop the Start agent retry affordance.
+      if (newState === "RUNNING") {
+        store.getState().setResumeSkipped(sessionId, false);
+      }
 
       maybeAdoptSessionOnTransition(
         store,
@@ -784,6 +846,6 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
       });
     },
     "session.workspace_sources.updated": (message) =>
-      handleWorkspaceSourcesUpdated(store, message.payload),
+      handleWorkspaceSourcesUpdated(store, message.payload, message.timestamp),
   };
 }

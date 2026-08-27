@@ -154,6 +154,9 @@ func TestBuildExtractScript(t *testing.T) {
 	if !strings.Contains(script, "KANDEV_WEB_DIST_DIR=/app/apps/web/dist") {
 		t.Errorf("expected KANDEV_WEB_DIST_DIR to point at packaged Vite dist")
 	}
+	if !strings.Contains(script, "KANDEV_WEB_TITLE_PREFIX=Preview") {
+		t.Errorf("expected preview title prefix in script")
+	}
 	if !strings.Contains(script, "ln -sf /app/apps/backend/bin/kandev      /usr/local/bin/kandev") {
 		t.Errorf("expected native kandev symlink in script")
 	}
@@ -171,5 +174,30 @@ func TestBuildExtractScript(t *testing.T) {
 	}
 	if strings.Contains(script, "/app/apps/backend/bin/kandev >") {
 		t.Errorf("script should not launch the backend binary directly")
+	}
+}
+
+// TestKandevReadyURLPollsReadyNotHealth is the regression test for Review
+// round 3 finding R3-1: waitForKandev used to poll /health, which this
+// branch redefined as an unconditional-200 liveness probe served by the
+// bootstrap handler the instant the socket binds. That made preview-env CI
+// (.github/workflows/preview-env.yml) declare the deploy ready — and post
+// the PR comment with the URL — while every non-/health path, including the
+// whole app, was still returning the bootstrap handler's 503 "starting".
+//
+// Expected pre-fix failure: kandevReadyURL did not exist (waitForKandev
+// built the URL inline as ".../health"), so this fails to compile against
+// the pre-fix code, and once inlined the URL would end in /health, not
+// /ready.
+func TestKandevReadyURLPollsReadyNotHealth(t *testing.T) {
+	got := kandevReadyURL(4173)
+	want := "http://localhost:4173/ready"
+	if got != want {
+		t.Fatalf("kandevReadyURL(4173) = %q, want %q", got, want)
+	}
+	if strings.Contains(got, "/health") {
+		t.Fatalf("kandevReadyURL must not poll /health — the bootstrap handler answers "+
+			"200 there before the real router exists, so preview-env would declare "+
+			"success while every other path still 503s: %q", got)
 	}
 }

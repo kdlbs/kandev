@@ -64,6 +64,24 @@ type mergedPR struct {
 	MergeMethod string `json:"merge_method"`
 }
 
+// mockPRMergeQueueState is the provider-side queue snapshot used by the E2E
+// controller. The in-memory client exposes it through GetPRStatus so the
+// normal TaskPR sync and automation event flow remains under test.
+type mockPRMergeQueueState struct {
+	HeadSHA                     string
+	State                       string
+	Position                    *int
+	EntryID                     string
+	EntryHeadSHA                string
+	EstimatedTimeToMergeSeconds *int
+	LastRemovalID               string
+	LastRemovedAt               *time.Time
+	LastRemovalReason           string
+	LastRemovalBeforeSHA        string
+	QueueObserved               bool
+	RecoveryObserved            bool
+}
+
 // repoKey is a composite key for per-repo lookups by owner/repo.
 type repoKey struct {
 	Owner string
@@ -98,32 +116,39 @@ type MockClient struct {
 	// `github_not_configured`. Used by e2e tests that need to verify the
 	// "Connect GitHub" banner in the Remote-tab chip popover without ripping
 	// the whole mock client out of the wiring.
-	reposUnavailable bool
-	prs              map[prKey]*PR
-	issues           map[issueKey]*Issue
-	prsByBranch      map[branchKey]*PR
-	orgs             []GitHubOrg
-	repos            map[string][]GitHubRepo
-	branches         map[repoKey][]RepoBranch
-	reviews          map[prKey][]PRReview
-	comments         map[prKey][]PRComment
-	checks           map[checkKey][]CheckRun
-	files            map[prKey][]PRFile
-	commits          map[prKey][]PRCommitInfo
-	commitDetails    map[commitDetailKey]PRCommitDetail
-	submittedReviews []submittedReview
-	requestedReviews []requestedReviewers
-	mergedPRs        []mergedPR
-	mergeMethods     map[repoKey]RepoMergeMethods
-	gists            map[string]mockGist
-	deletedGists     []string
-	nextGistID       int
-	repoFiles        map[repoKey][]repoFileEntry
+	reposUnavailable  bool
+	prs               map[prKey]*PR
+	issues            map[issueKey]*Issue
+	prsByBranch       map[branchKey]*PR
+	orgs              []GitHubOrg
+	repos             map[string][]GitHubRepo
+	branches          map[repoKey][]RepoBranch
+	reviews           map[prKey][]PRReview
+	comments          map[prKey][]PRComment
+	checks            map[checkKey][]CheckRun
+	files             map[prKey][]PRFile
+	commits           map[prKey][]PRCommitInfo
+	prCommitsFailures map[prKey]int
+	commitDetails     map[commitDetailKey]PRCommitDetail
+	submittedReviews  []submittedReview
+	requestedReviews  []requestedReviewers
+	mergedPRs         []mergedPR
+	mergeOutcomes     map[prKey]MergeOutcome
+	mergeMethods      map[repoKey]RepoMergeMethods
+	repositoryDetails map[repoKey]*GitHubRepository
+	gists             map[string]mockGist
+	deletedGists      []string
+	nextGistID        int
+	repoFiles         map[repoKey][]repoFileEntry
 
 	// findPRByBranchCalls counts FindPRByBranch invocations so tests can
 	// assert that branch-detection probes are throttled. Atomic because
 	// FindPRByBranch otherwise only takes a read lock.
 	findPRByBranchCalls atomic.Int64
+
+	// getRepositoryCalls counts GetRepository invocations so tests can assert
+	// that fork-parent resolution is cached rather than re-fetched per watch.
+	getRepositoryCalls atomic.Int64
 
 	// probeEntered/probeRelease let a test gate FindPRByBranch: when set, each
 	// invocation signals on probeEntered and then blocks until probeRelease is
@@ -146,22 +171,25 @@ type mockGist struct {
 // NewMockClient creates a new MockClient with default values.
 func NewMockClient() *MockClient {
 	return &MockClient{
-		user:          mockDefaultUser,
-		authenticated: true,
-		prs:           make(map[prKey]*PR),
-		issues:        make(map[issueKey]*Issue),
-		prsByBranch:   make(map[branchKey]*PR),
-		repos:         make(map[string][]GitHubRepo),
-		branches:      make(map[repoKey][]RepoBranch),
-		reviews:       make(map[prKey][]PRReview),
-		comments:      make(map[prKey][]PRComment),
-		checks:        make(map[checkKey][]CheckRun),
-		files:         make(map[prKey][]PRFile),
-		commits:       make(map[prKey][]PRCommitInfo),
-		commitDetails: make(map[commitDetailKey]PRCommitDetail),
-		mergeMethods:  make(map[repoKey]RepoMergeMethods),
-		gists:         make(map[string]mockGist),
-		repoFiles:     make(map[repoKey][]repoFileEntry),
+		user:              mockDefaultUser,
+		authenticated:     true,
+		prs:               make(map[prKey]*PR),
+		issues:            make(map[issueKey]*Issue),
+		prsByBranch:       make(map[branchKey]*PR),
+		repos:             make(map[string][]GitHubRepo),
+		branches:          make(map[repoKey][]RepoBranch),
+		reviews:           make(map[prKey][]PRReview),
+		comments:          make(map[prKey][]PRComment),
+		checks:            make(map[checkKey][]CheckRun),
+		files:             make(map[prKey][]PRFile),
+		commits:           make(map[prKey][]PRCommitInfo),
+		prCommitsFailures: make(map[prKey]int),
+		commitDetails:     make(map[commitDetailKey]PRCommitDetail),
+		mergeMethods:      make(map[repoKey]RepoMergeMethods),
+		mergeOutcomes:     make(map[prKey]MergeOutcome),
+		repositoryDetails: make(map[repoKey]*GitHubRepository),
+		gists:             make(map[string]mockGist),
+		repoFiles:         make(map[repoKey][]repoFileEntry),
 	}
 }
 
@@ -216,10 +244,33 @@ func (m *MockClient) FindPRByBranch(_ context.Context, owner, repo, branch strin
 	return pr, nil
 }
 
+func (m *MockClient) FindPRByHead(ctx context.Context, owner, repo, headOwner, headRepo, branch string) (*PR, error) {
+	pr, err := m.FindPRByBranch(ctx, owner, repo, branch)
+	if err != nil || pr == nil {
+		return pr, err
+	}
+	if !sameRepositoryIdentity(pr.HeadRepoOwner, pr.HeadRepoName, headOwner, headRepo) {
+		return nil, nil
+	}
+	return pr, nil
+}
+
 // FindPRByBranchCallCount returns how many times FindPRByBranch has been
 // called. Used by tests asserting detection-probe throttling.
+//
+// This also counts FindPRByHead: the mock implements it by delegating to
+// FindPRByBranch (it reuses the same branch index), so a fork-parent probe
+// increments this counter too. Tests asserting on fork-parent lookups are
+// reading it through that delegation — do not split the counters without
+// re-reading every assertion that uses it.
 func (m *MockClient) FindPRByBranchCallCount() int {
 	return int(m.findPRByBranchCalls.Load())
+}
+
+// GetRepositoryCallCount returns how many times GetRepository has been called.
+// Used by tests asserting that fork-parent resolution is cached.
+func (m *MockClient) GetRepositoryCallCount() int {
+	return int(m.getRepositoryCalls.Load())
 }
 
 // GateFindPRByBranch installs a gate around FindPRByBranch: each invocation
@@ -409,6 +460,74 @@ func (m *MockClient) HasRepositoryAccess(_ context.Context, owner, repo string) 
 	return false, nil
 }
 
+// GetRepository returns an explicitly seeded repository identity. The
+// lightweight repo-search fixture remains separate so existing autocomplete
+// tests do not accidentally grant write access.
+func (m *MockClient) GetRepository(_ context.Context, owner, repo string) (*GitHubRepository, error) {
+	m.getRepositoryCalls.Add(1)
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.reposUnavailable {
+		return nil, ErrNoClient
+	}
+	repository, ok := m.repositoryDetails[repoKey{owner, repo}]
+	if !ok {
+		return nil, &GitHubAPIError{StatusCode: 404, Endpoint: "/repos/" + owner + "/" + repo}
+	}
+	copy := *repository
+	return &copy, nil
+}
+
+func (m *MockClient) ListRepositoryForks(_ context.Context, owner, repo string) ([]*GitHubRepository, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.reposUnavailable {
+		return nil, ErrNoClient
+	}
+	parent, ok := m.repositoryDetails[repoKey{owner, repo}]
+	if !ok {
+		return nil, &GitHubAPIError{StatusCode: 404, Endpoint: "/repos/" + owner + "/" + repo}
+	}
+	forks := make([]*GitHubRepository, 0)
+	for _, repository := range m.repositoryDetails {
+		if repository == nil || !repository.Fork || repository.ParentID != parent.ID {
+			continue
+		}
+		forks = append(forks, copyGitHubRepository(repository))
+	}
+	return forks, nil
+}
+
+// CreateFork creates a deterministic in-memory fork for mock Improve Kandev
+// flows. Production clients still use the provider API and bounded polling.
+func (m *MockClient) CreateFork(_ context.Context, owner, repo string) (*GitHubRepository, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.reposUnavailable {
+		return nil, ErrNoClient
+	}
+	parent, ok := m.repositoryDetails[repoKey{owner, repo}]
+	if !ok {
+		return nil, &GitHubAPIError{StatusCode: 404, Endpoint: "/repos/" + owner + "/" + repo}
+	}
+	login := m.user
+	fullName := login + "/" + repo
+	fork := &GitHubRepository{
+		ID:             parent.ID + 1,
+		FullName:       fullName,
+		Owner:          login,
+		Name:           repo,
+		CloneURL:       "https://github.com/" + fullName + ".git",
+		Fork:           true,
+		ParentID:       parent.ID,
+		ParentFullName: parent.FullName,
+		PushAccess:     true,
+		AdminAccess:    true,
+	}
+	m.repositoryDetails[repoKey{login, repo}] = fork
+	return copyGitHubRepository(fork), nil
+}
+
 func (m *MockClient) ListPRReviews(_ context.Context, owner, repo string, number int) ([]PRReview, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -452,9 +571,14 @@ func (m *MockClient) ListPRFiles(_ context.Context, owner, repo string, number i
 }
 
 func (m *MockClient) ListPRCommits(_ context.Context, owner, repo string, number int) ([]PRCommitInfo, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.commits[prKey{owner, repo, number}], nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	k := prKey{owner, repo, number}
+	if remaining := m.prCommitsFailures[k]; remaining > 0 {
+		m.prCommitsFailures[k] = remaining - 1
+		return nil, fmt.Errorf("mock: PR commits unavailable for %s/%s#%d", owner, repo, number)
+	}
+	return m.commits[k], nil
 }
 
 func (m *MockClient) GetPRCommitDetail(_ context.Context, owner, repo, sha string) (PRCommitDetail, error) {
@@ -644,19 +768,32 @@ func (m *MockClient) SetRepoMergeMethods(owner, repo string, methods RepoMergeMe
 	m.mergeMethods[repoKey{owner, repo}] = methods
 }
 
-func (m *MockClient) MergePR(_ context.Context, owner, repo string, number int, mergeMethod string) error {
+func (m *MockClient) MergePR(_ context.Context, owner, repo string, number int, mergeMethod string) (MergeOutcome, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.mergedPRs = append(m.mergedPRs, mergedPR{
 		Owner: owner, Repo: repo, Number: number, MergeMethod: mergeMethod,
 	})
+	outcome := m.mergeOutcomes[prKey{owner, repo, number}]
+	if outcome == "" {
+		outcome = MergeOutcomeMerged
+	}
+	if outcome == MergeOutcomeQueued {
+		return outcome, nil
+	}
 	now := time.Now().UTC()
 	if pr, ok := m.prs[prKey{owner, repo, number}]; ok {
 		pr.State = "merged"
 		pr.MergedAt = &now
 		pr.Mergeable = false
 	}
-	return nil
+	return outcome, nil
+}
+
+func (m *MockClient) SetMergeOutcome(owner, repo string, number int, outcome MergeOutcome) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.mergeOutcomes[prKey{owner, repo, number}] = outcome
 }
 
 func (m *MockClient) CreateGist(_ context.Context, in CreateGistInput) (*GistResponse, error) {
@@ -751,10 +888,46 @@ func (m *MockClient) SetReposUnavailable(unavailable bool) {
 func (m *MockClient) AddPR(pr *PR) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if pr.MergeQueueState != "" || pr.MergeQueuePosition != nil ||
+		pr.MergeQueueEntryID != "" || pr.MergeQueueEntryHeadSHA != "" {
+		pr.mergeQueuePopulated = true
+	}
+	if pr.MergeQueueLastRemovalID != "" || pr.MergeQueueLastRemovedAt != nil ||
+		pr.MergeQueueLastRemovalReason != "" || pr.MergeQueueLastRemovalBeforeSHA != "" {
+		pr.mergeQueueRecoveryPopulated = true
+	}
 	m.prs[prKey{pr.RepoOwner, pr.RepoName, pr.Number}] = pr
 	if pr.HeadBranch != "" {
 		m.prsByBranch[branchKey{pr.RepoOwner, pr.RepoName, pr.HeadBranch}] = pr
 	}
+}
+
+// SetPRMergeQueue replaces the provider-side queue snapshot for a PR and can
+// advance its head. It is intentionally separate from AddPR so E2E tests can
+// drive removal and requeue transitions without replacing the whole fixture.
+func (m *MockClient) SetPRMergeQueue(owner, repo string, number int, state mockPRMergeQueueState) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	pr, ok := m.prs[prKey{owner, repo, number}]
+	if !ok {
+		return fmt.Errorf("mock: PR %s/%s#%d not found", owner, repo, number)
+	}
+	if state.HeadSHA != "" {
+		pr.HeadSHA = state.HeadSHA
+	}
+	pr.MergeQueueState = state.State
+	pr.MergeQueuePosition = state.Position
+	pr.MergeQueueEntryID = state.EntryID
+	pr.MergeQueueEntryHeadSHA = state.EntryHeadSHA
+	pr.MergeQueueEstimatedTimeToMergeSeconds = state.EstimatedTimeToMergeSeconds
+	pr.MergeQueueLastRemovalID = state.LastRemovalID
+	pr.MergeQueueLastRemovedAt = state.LastRemovedAt
+	pr.MergeQueueLastRemovalReason = state.LastRemovalReason
+	pr.MergeQueueLastRemovalBeforeSHA = state.LastRemovalBeforeSHA
+	pr.mergeQueuePopulated = state.QueueObserved
+	pr.mergeQueueRecoveryPopulated = state.RecoveryObserved
+	pr.UpdatedAt = time.Now().UTC()
+	return nil
 }
 
 func (m *MockClient) AddIssue(issue *Issue) {
@@ -804,6 +977,15 @@ func (m *MockClient) AddRepos(org string, repos []GitHubRepo) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.repos[org] = append(m.repos[org], repos...)
+}
+
+// SetRepositoryDetails seeds the provider-authoritative repository response
+// used by managed fork preparation tests.
+func (m *MockClient) SetRepositoryDetails(repository GitHubRepository) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := repositoryKeyFromFullName(repository.FullName)
+	m.repositoryDetails[key] = copyGitHubRepository(&repository)
 }
 
 // AddReviews appends reviews for a PR.
@@ -874,6 +1056,18 @@ func (m *MockClient) AddPRCommits(owner, repo string, number int, commits []PRCo
 	m.commits[k] = append(m.commits[k], commits...)
 }
 
+// SetPRCommitsFailures queues a number of failed ListPRCommits responses for a PR.
+func (m *MockClient) SetPRCommitsFailures(owner, repo string, number, failures int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	k := prKey{owner, repo, number}
+	if failures <= 0 {
+		delete(m.prCommitsFailures, k)
+		return
+	}
+	m.prCommitsFailures[k] = failures
+}
+
 // AddPRCommitDetail seeds an individual GitHub commit response.
 func (m *MockClient) AddPRCommitDetail(owner, repo, sha string, detail PRCommitDetail) {
 	m.mu.Lock()
@@ -904,16 +1098,19 @@ func (m *MockClient) Reset() {
 	m.checks = make(map[checkKey][]CheckRun)
 	m.files = make(map[prKey][]PRFile)
 	m.commits = make(map[prKey][]PRCommitInfo)
+	m.prCommitsFailures = make(map[prKey]int)
 	m.commitDetails = make(map[commitDetailKey]PRCommitDetail)
 	m.submittedReviews = nil
 	m.requestedReviews = nil
 	m.mergedPRs = nil
+	m.mergeOutcomes = make(map[prKey]MergeOutcome)
 	m.mergeMethods = make(map[repoKey]RepoMergeMethods)
 	m.gists = make(map[string]mockGist)
 	m.deletedGists = nil
 	m.nextGistID = 0
 	m.repoFiles = make(map[repoKey][]repoFileEntry)
 	m.findPRByBranchCalls.Store(0)
+	m.getRepositoryCalls.Store(0)
 	m.probeEntered = nil
 	m.probeRelease = nil
 }

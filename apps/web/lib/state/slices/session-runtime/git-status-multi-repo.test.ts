@@ -31,6 +31,16 @@ function entry(overrides: { modified: string[]; repository_name?: string }): Git
   };
 }
 
+function ancestryEntry(remoteHeadCommit?: string): GitStatusEntry {
+  const status = entry({ modified: [FRONTEND_FILE] });
+  status.remote_branch = "origin/main";
+  status.head_commit = "local-head";
+  status.remote_head_commit = remoteHeadCommit;
+  status.remote_ahead = 6;
+  status.remote_behind = 0;
+  return status;
+}
+
 const REPO_FRONTEND = "frontend";
 const REPO_BACKEND = "backend";
 const SESSION = "sess";
@@ -41,6 +51,10 @@ function makeStore() {
   return create<SessionRuntimeSlice>()(
     immer((set, get, store) => createSessionRuntimeSlice(set, get, store)),
   );
+}
+
+function setStatus(store: ReturnType<typeof makeStore>, status: GitStatusEntry): void {
+  store.getState().setGitStatus(SESSION, status);
 }
 
 describe("session-runtime gitStatus multi-repo routing", () => {
@@ -60,12 +74,8 @@ describe("session-runtime gitStatus multi-repo routing", () => {
   });
 
   it("routes per-repo statuses into byEnvironmentRepo keyed by repository_name", () => {
-    useStore
-      .getState()
-      .setGitStatus(SESSION, entry({ modified: [FRONTEND_FILE], repository_name: REPO_FRONTEND }));
-    useStore
-      .getState()
-      .setGitStatus(SESSION, entry({ modified: [BACKEND_FILE], repository_name: REPO_BACKEND }));
+    setStatus(useStore, entry({ modified: [FRONTEND_FILE], repository_name: REPO_FRONTEND }));
+    setStatus(useStore, entry({ modified: [BACKEND_FILE], repository_name: REPO_BACKEND }));
 
     const repoMap = useStore.getState().gitStatus.byEnvironmentRepo[SESSION];
     expect(Object.keys(repoMap).sort()).toEqual([REPO_BACKEND, REPO_FRONTEND]);
@@ -74,28 +84,17 @@ describe("session-runtime gitStatus multi-repo routing", () => {
   });
 
   it("does NOT overwrite the per-repo map when a sibling repo updates", () => {
-    useStore
-      .getState()
-      .setGitStatus(SESSION, entry({ modified: [FRONTEND_FILE], repository_name: REPO_FRONTEND }));
-    useStore
-      .getState()
-      .setGitStatus(SESSION, entry({ modified: [BACKEND_FILE], repository_name: REPO_BACKEND }));
+    setStatus(useStore, entry({ modified: [FRONTEND_FILE], repository_name: REPO_FRONTEND }));
+    setStatus(useStore, entry({ modified: [BACKEND_FILE], repository_name: REPO_BACKEND }));
     // Update frontend again — backend must still be there.
-    useStore
-      .getState()
-      .setGitStatus(
-        SESSION,
-        entry({ modified: ["frontend2.tsx"], repository_name: REPO_FRONTEND }),
-      );
+    setStatus(useStore, entry({ modified: ["frontend2.tsx"], repository_name: REPO_FRONTEND }));
     const repoMap = useStore.getState().gitStatus.byEnvironmentRepo[SESSION];
     expect(repoMap[REPO_FRONTEND].modified).toEqual(["frontend2.tsx"]);
     expect(repoMap[REPO_BACKEND].modified).toEqual([BACKEND_FILE]);
   });
 
   it("clearGitStatus drops both maps", () => {
-    useStore
-      .getState()
-      .setGitStatus(SESSION, entry({ modified: ["x.ts"], repository_name: REPO_FRONTEND }));
+    setStatus(useStore, entry({ modified: ["x.ts"], repository_name: REPO_FRONTEND }));
     useStore.getState().clearGitStatus(SESSION);
     const state = useStore.getState();
     expect(state.gitStatus.byEnvironmentId[SESSION]).toBeUndefined();
@@ -113,6 +112,21 @@ describe("session-runtime gitStatus multi-repo routing", () => {
     const stateAfterSecond = useStore.getState();
     expect(stateAfterSecond.gitStatus.byEnvironmentId[SESSION]).toBe(firstStatus);
     expect(stateAfterSecond.gitStatus.byEnvironmentRepo[SESSION][""]).toBe(firstRepoStatus);
+  });
+
+  it("updates when commit ancestry evidence changes without file changes", () => {
+    const first = ancestryEntry();
+    const second = ancestryEntry("upstream-head");
+
+    useStore.getState().setGitStatus(SESSION, first);
+    useStore.getState().setGitStatus(SESSION, second);
+
+    expect(useStore.getState().gitStatus.byEnvironmentId[SESSION]).toMatchObject({
+      head_commit: "local-head",
+      remote_head_commit: "upstream-head",
+      remote_ahead: 6,
+      remote_behind: 0,
+    });
   });
 
   it("updates when file diff content changes with the same file stats", () => {
@@ -135,17 +149,11 @@ describe("session-runtime gitStatus multi-repo routing", () => {
   });
 
   it("does not overwrite byEnvironmentId for duplicate sibling-repo snapshots", () => {
-    useStore
-      .getState()
-      .setGitStatus(SESSION, entry({ modified: [FRONTEND_FILE], repository_name: REPO_FRONTEND }));
-    useStore
-      .getState()
-      .setGitStatus(SESSION, entry({ modified: [BACKEND_FILE], repository_name: REPO_BACKEND }));
+    setStatus(useStore, entry({ modified: [FRONTEND_FILE], repository_name: REPO_FRONTEND }));
+    setStatus(useStore, entry({ modified: [BACKEND_FILE], repository_name: REPO_BACKEND }));
     const envAfterBackend = useStore.getState().gitStatus.byEnvironmentId[SESSION];
 
-    useStore
-      .getState()
-      .setGitStatus(SESSION, entry({ modified: [BACKEND_FILE], repository_name: REPO_BACKEND }));
+    setStatus(useStore, entry({ modified: [BACKEND_FILE], repository_name: REPO_BACKEND }));
 
     const state = useStore.getState();
     expect(state.gitStatus.byEnvironmentId[SESSION]).toBe(envAfterBackend);

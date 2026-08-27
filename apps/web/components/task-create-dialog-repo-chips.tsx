@@ -4,13 +4,16 @@ import { useRef, useState } from "react";
 import { IconGitFork } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import type { Repository } from "@/lib/types/http";
-import type { DialogFormState } from "@/components/task-create-dialog-types";
+import type { Repository, RepositorySet } from "@/lib/types/http";
+import type { DialogFormState, TaskRepoRow } from "@/components/task-create-dialog-types";
 import { RemoteRepoChipsRow } from "@/components/task-create-dialog-remote-repo-chips";
 import { FolderPicker } from "@/components/folder-picker";
 import { SourceModeSwitch } from "@/components/task-create-dialog-source-mode";
 import { WorkspaceRepoChips } from "@/components/task-create-dialog-workspace-repo-chips";
 import { CreateLocalRepositorySurface } from "@/components/create-local-repository-surface";
+import { RepositorySetsControl } from "@/components/task-create-dialog-repository-sets-control";
+import { SaveRepositorySetDialog } from "@/components/task-create-dialog-repository-sets-save";
+import { SaveRepositorySetMenuAction } from "@/components/task-create-dialog-repository-sets-save-action";
 import type { DirectLocalExecutorSelection } from "@/components/task-create-dialog-handlers";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
@@ -29,6 +32,8 @@ type RepoChipsRowProps = {
    */
   onRowRepositoryChange: (key: string, value: string) => void;
   onRowBranchChange: (key: string, value: string) => void;
+  onRowPolicyChange?: (key: string, policyId: string, baseBranch: string) => void;
+  onPolicySelected?: () => void;
   /** Toggles the Remote tab on/off. Remote-mode rows live in `fs.remoteRepos`. */
   onToggleRemote?: () => void;
   /**
@@ -60,6 +65,23 @@ type RepoChipsRowProps = {
   };
   onRefreshRepositories?: () => void;
   repositoriesRefreshing?: boolean;
+  /**
+   * The workspace's repository sets, plus how to apply one. Grouped into a single
+   * prop so both surfaces that render this row (task create, new subtask) opt in
+   * with one line, and Quick Chat - which renders WorkspaceRepoChips directly -
+   * is untouched.
+   */
+  repositorySets?: {
+    sets: RepositorySet[];
+    onApply: (set: RepositorySet) => void;
+    /** Present when the current selection can be saved as a new set. */
+    save?: {
+      workspaceId: string;
+      rows: TaskRepoRow[];
+      open: boolean;
+      setOpen: (open: boolean) => void;
+    } | null;
+  };
 };
 
 export function RepoChipsRow({
@@ -69,6 +91,8 @@ export function RepoChipsRow({
   workspaceId,
   onRowRepositoryChange,
   onRowBranchChange,
+  onRowPolicyChange,
+  onPolicySelected,
   onToggleRemote,
   freshBranchAvailable,
   freshBranchEnabled,
@@ -81,6 +105,7 @@ export function RepoChipsRow({
   localRepositoryCreation,
   onRefreshRepositories,
   repositoriesRefreshing,
+  repositorySets,
 }: RepoChipsRowProps) {
   const chipRowRef = useRef<HTMLDivElement>(null);
   const [creatingForRowKey, setCreatingForRowKey] = useState<string | null>(null);
@@ -116,6 +141,7 @@ export function RepoChipsRow({
   const hasDiscovered = fs.discoveredRepositories.length > 0;
   const canAddMore = repositories.length > 0 || hasDiscovered;
   const addHint = computeAddHint(canAddMore, repositories.length);
+  const branchPolicyDisabledReason = policyDisabled(isLocalExecutor, freshBranchAvailable);
 
   return (
     // min-h-9 reserves enough vertical space for the tallest mode body so the
@@ -137,8 +163,11 @@ export function RepoChipsRow({
         addHint={addHint}
         freshBranchAvailable={freshBranchAvailable}
         freshBranchEnabled={freshBranchEnabled}
+        branchPolicyDisabledReason={branchPolicyDisabledReason}
         onRowRepositoryChange={onRowRepositoryChange}
         onRowBranchChange={onRowBranchChange}
+        onRowPolicyChange={onRowPolicyChange}
+        onPolicySelected={onPolicySelected}
         onToggleFreshBranch={onToggleFreshBranch}
         onWorkspacePathChange={onWorkspacePathChange}
         lastUsedBranch={lastUsedBranch}
@@ -147,6 +176,15 @@ export function RepoChipsRow({
         onRefreshRepositories={onRefreshRepositories}
         repositoriesRefreshing={repositoriesRefreshing}
       />
+      {/* Sets select workspace repositories, so they are offered only in the mode
+          that selects those: not in Remote URL or No repository. */}
+      {repositorySets && !fs.useRemote && !fs.noRepository ? (
+        <RepositorySetsSurface
+          repositorySets={repositorySets}
+          repositories={repositories}
+          rows={fs.repositories}
+        />
+      ) : null}
       <SourceModeSwitch
         useRemote={fs.useRemote}
         noRepository={fs.noRepository}
@@ -168,6 +206,43 @@ export function RepoChipsRow({
   );
 }
 
+/**
+ * The Sets control plus its save dialog. Extracted so RepoChipsRow stays under
+ * the function-length cap.
+ */
+function RepositorySetsSurface({
+  repositorySets,
+  repositories,
+  rows,
+}: {
+  repositorySets: NonNullable<RepoChipsRowProps["repositorySets"]>;
+  repositories: Repository[];
+  rows: TaskRepoRow[];
+}) {
+  const save = repositorySets.save;
+  return (
+    <>
+      <RepositorySetsControl
+        sets={repositorySets.sets}
+        repositories={repositories}
+        rows={rows}
+        onApply={repositorySets.onApply}
+        footerActions={
+          save ? <SaveRepositorySetMenuAction onSelect={() => save.setOpen(true)} /> : null
+        }
+      />
+      {save ? (
+        <SaveRepositorySetDialog
+          open={save.open}
+          onOpenChange={save.setOpen}
+          workspaceId={save.workspaceId}
+          rows={save.rows}
+        />
+      ) : null}
+    </>
+  );
+}
+
 function ModeBody({
   fs,
   repositories,
@@ -178,8 +253,11 @@ function ModeBody({
   addHint,
   freshBranchAvailable,
   freshBranchEnabled,
+  branchPolicyDisabledReason,
   onRowRepositoryChange,
   onRowBranchChange,
+  onRowPolicyChange,
+  onPolicySelected,
   onToggleFreshBranch,
   onWorkspacePathChange,
   lastUsedBranch,
@@ -197,8 +275,11 @@ function ModeBody({
   addHint: string | undefined;
   freshBranchAvailable?: boolean;
   freshBranchEnabled?: boolean;
+  branchPolicyDisabledReason?: string;
   onRowRepositoryChange: (key: string, value: string) => void;
   onRowBranchChange: (key: string, value: string) => void;
+  onRowPolicyChange?: (key: string, policyId: string, baseBranch: string) => void;
+  onPolicySelected?: () => void;
   onToggleFreshBranch?: (enabled: boolean) => void;
   onWorkspacePathChange?: (value: string) => void;
   lastUsedBranch?: string | null;
@@ -239,12 +320,16 @@ function ModeBody({
       currentLocalBranch={fs.currentLocalBranch}
       currentLocalBranchLoading={fs.currentLocalBranchLoading}
       freshBranchEnabled={fs.freshBranchEnabled}
+      branchPolicyDisabledReason={branchPolicyDisabledReason}
       canAddMore={canAddMore}
       addHint={addHint}
       onAdd={fs.addRepository}
       onRemove={fs.removeRepository}
       onRowRepositoryChange={onRowRepositoryChange}
       onRowBranchChange={onRowBranchChange}
+      onRowPolicyChange={onRowPolicyChange}
+      onPolicySelected={onPolicySelected}
+      showBranchPolicies
       lastUsedBranch={lastUsedBranch}
       userSettingsLoaded={userSettingsLoaded}
       onCreateRepository={onCreateRepository}
@@ -299,4 +384,13 @@ function computeAddHint(canAddMore: boolean, workspaceRepoCount: number): string
   if (canAddMore) return undefined;
   if (workspaceRepoCount === 0) return t("task:noRepositoriesAvailableInWorkspace");
   return t("task:allWorkspaceRepositoriesAdded");
+}
+
+function policyDisabled(
+  isLocalExecutor: boolean | undefined,
+  freshBranchAvailable: boolean | undefined,
+): string | undefined {
+  return isLocalExecutor && !freshBranchAvailable
+    ? t("task:branchPolicyRequiresSingleRepository")
+    : undefined;
 }

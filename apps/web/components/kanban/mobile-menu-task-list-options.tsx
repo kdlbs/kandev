@@ -3,20 +3,21 @@
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import {
+  GROUP_OPTION_LABEL_KEYS,
+  SORT_OPTION_LABEL_KEYS,
   TASKS_LIST_GROUP_OPTIONS,
   TASKS_LIST_SORT_OPTIONS,
-  type TasksListGroup,
-  type TasksListSort,
 } from "@/lib/tasks/tasks-list-options";
 import { useTranslation } from "react-i18next";
 
 export type TasksListDisplayOptions = {
   showArchived: boolean;
   onShowArchivedChange: (show: boolean) => void;
-  sort: TasksListSort;
-  onSortChange: (sort: TasksListSort) => void;
-  group: TasksListGroup;
-  onGroupChange: (group: TasksListGroup) => void;
+  sort: string;
+  onSortChange: (sort: string) => void;
+  group: string;
+  onGroupChange: (group: string) => void;
+  facetOptions?: ReadonlyArray<{ value: string; label: string }>;
 };
 
 const fieldClass = "space-y-1.5";
@@ -33,10 +34,7 @@ export function MobileTasksListOptions({ options }: { options: TasksListDisplayO
           <label id="mobile-tasks-list-sort-label" className={fieldLabelClass}>
             {t("kanban:sort")}
           </label>
-          <Select
-            value={options.sort}
-            onValueChange={(value) => options.onSortChange(value as TasksListSort)}
-          >
+          <Select value={options.sort} onValueChange={options.onSortChange}>
             <SelectTrigger
               id="mobile-tasks-list-sort-select"
               aria-labelledby="mobile-tasks-list-sort-label"
@@ -46,7 +44,13 @@ export function MobileTasksListOptions({ options }: { options: TasksListDisplayO
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {TASKS_LIST_SORT_OPTIONS.map((option) => (
+              {[
+                ...TASKS_LIST_SORT_OPTIONS.map((option) => ({
+                  value: option.value,
+                  label: t(SORT_OPTION_LABEL_KEYS[option.value]),
+                })),
+                ...(options.facetOptions ?? []),
+              ].map((option) => (
                 <SelectItem key={option.value} value={option.value} className="cursor-pointer">
                   {option.label}
                 </SelectItem>
@@ -59,10 +63,7 @@ export function MobileTasksListOptions({ options }: { options: TasksListDisplayO
           <label id="mobile-tasks-list-group-label" className={fieldLabelClass}>
             {t("kanban:group")}
           </label>
-          <Select
-            value={options.group}
-            onValueChange={(value) => options.onGroupChange(value as TasksListGroup)}
-          >
+          <Select value={options.group} onValueChange={options.onGroupChange}>
             <SelectTrigger
               id="mobile-tasks-list-group-select"
               aria-labelledby="mobile-tasks-list-group-label"
@@ -72,7 +73,13 @@ export function MobileTasksListOptions({ options }: { options: TasksListDisplayO
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {TASKS_LIST_GROUP_OPTIONS.map((option) => (
+              {[
+                ...TASKS_LIST_GROUP_OPTIONS.map((option) => ({
+                  value: option.value,
+                  label: t(GROUP_OPTION_LABEL_KEYS[option.value]),
+                })),
+                ...(options.facetOptions ?? []),
+              ].map((option) => (
                 <SelectItem key={option.value} value={option.value} className="cursor-pointer">
                   {option.label}
                 </SelectItem>

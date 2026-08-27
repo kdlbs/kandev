@@ -51,11 +51,15 @@ type BuildInfo struct {
 
 // Wiring supplies the runtime hooks and repositories owned by the wider
 // application. OrchestratorShutdown stops in-flight agent executions before
-// destructive resets; TaskSessions is the authoritative session reader used
-// by the install-wide sleep-inhibition service.
+// destructive resets. RestoreQuiesce stops the complete database-backed
+// runtime before a SQLite restore closes the shared pool. TaskSessions is the
+// authoritative session reader used by the install-wide sleep-inhibition
+// service.
 type Wiring struct {
 	OrchestratorShutdown func()
+	RestoreQuiesce       func() error
 	MessageQueue         queuesettings.Target
+	MessageQueueConfig   queuesettings.Configuration
 	TaskSessions         sleepinhibition.SessionReader
 }
 
@@ -89,6 +93,10 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 	tracker := jobs.NewTracker(eventBus, log)
 	dataDir := cfg.ResolvedDataDir()
 	homeDir := cfg.ResolvedHomeDir()
+	databasePath := cfg.Database.Path
+	if databasePath == "" {
+		databasePath = filepath.Join(dataDir, "kandev.db")
+	}
 
 	resetDirs := database.ResetDirs{
 		Worktrees: filepath.Join(homeDir, "worktrees"),
@@ -97,10 +105,12 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 		Tasks:     filepath.Join(homeDir, "tasks"),
 		QuickChat: filepath.Join(homeDir, "quick-chat"),
 	}
-	dbSvc := database.NewService(pool, dataDir, resetDirs, tracker, log)
+	dbSvc := database.NewService(pool, databasePath, resetDirs, tracker, log)
 	dbSvc.OrchestratorShutdown = wiring.OrchestratorShutdown
 
-	backupsSvc := backups.NewService(dataDir, pool, tracker, log)
+	backupsSvc := backups.NewService(databasePath, pool, tracker, log)
+	backupsSvc.OrchestratorShutdown = wiring.OrchestratorShutdown
+	backupsSvc.RestoreQuiesce = wiring.RestoreQuiesce
 
 	settingsStore, err := systemsettings.NewStore(pool)
 	if err != nil {
@@ -116,6 +126,7 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 		if wiring.MessageQueue != nil {
 			queueSettingsSvc = queuesettings.NewService(
 				queuesettings.NewStore(settingsStore), wiring.MessageQueue, nil, log,
+				wiring.MessageQueueConfig,
 			)
 		}
 		if wiring.TaskSessions != nil {
@@ -174,7 +185,7 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 
 	g.GET("/info", info.Handler(s.Info))
 	if s.Storage != nil {
-		storage.RegisterRoutes(g, s.Storage)
+		storage.RegisterRoutes(g, admin, s.Storage)
 	}
 
 	g.GET("/disk-usage", disk.HandleGet(s.Disk))
@@ -186,7 +197,7 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 	admin.POST("/database/optimize", database.HandleOptimize(s.Database))
 	admin.POST("/database/reset", database.HandleReset(s.Database))
 
-	backups.RegisterRoutes(g, s.Backups)
+	backups.RegisterRoutes(g, admin, s.Backups)
 
 	if s.FrontendErrors != nil {
 		g.POST("/logs/frontend-errors", frontenderrors.Handle(s.FrontendErrors))

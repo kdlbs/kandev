@@ -86,7 +86,7 @@ func TestManagerReadStderrDeliversCleanedLinesToOptionalConsumer(t *testing.T) {
 		logger:         newTestLogger(t),
 	}
 	m.wg.Add(1)
-	m.readStderr()
+	m.readStderr(make(chan struct{}))
 
 	got := []string{<-consumer.lines, <-consumer.lines}
 	want := []string{"quota", "plain"}
@@ -116,10 +116,11 @@ func TestManagerProcessExitUsesSanitizedStderr(t *testing.T) {
 	log, observed := newObservedTestLogger(t)
 	cmd := exec.Command(os.Args[0], "-test.run=TestManagerProcessExitHelper")
 	cmd.Env = append(os.Environ(), "KANDEV_MANAGER_PROCESS_EXIT_HELPER=1")
-	stderr, err := cmd.StderrPipe()
+	stderr, stderrWriter, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("stderr pipe: %v", err)
 	}
+	cmd.Stderr = stderrWriter
 	m := &Manager{
 		cmd:       cmd,
 		stderr:    stderr,
@@ -132,12 +133,24 @@ func TestManagerProcessExitUsesSanitizedStderr(t *testing.T) {
 		groupAliveFn: func(int) bool { return false },
 	}
 	m.status.Store(StatusRunning)
+	t.Cleanup(func() {
+		if cmd.ProcessState == nil && cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		_ = stderrWriter.Close()
+		_ = stderr.Close()
+		m.wg.Wait()
+	})
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start process: %v", err)
 	}
+	if err := stderrWriter.Close(); err != nil {
+		t.Fatalf("close parent stderr pipe: %v", err)
+	}
+	stderrDone := make(chan struct{})
 	m.wg.Add(2)
-	go m.readStderr()
-	m.waitForExit()
+	go m.readStderr(stderrDone)
+	m.waitForExit(stderrDone)
 	m.wg.Wait()
 
 	event := <-m.updatesCh
@@ -272,8 +285,11 @@ func TestStartProcessPipes_CreatesAllPipes(t *testing.T) {
 	assert.NotNil(t, m.stdout, "stdout pipe should be created")
 	assert.NotNil(t, m.stderr, "stderr pipe should be created")
 
-	// Clean up
-	_ = m.stdin.Close()
+	t.Cleanup(func() {
+		_ = m.stdin.Close()
+		_ = m.stdout.Close()
+		_ = m.closeStderrPipe()
+	})
 }
 
 func TestStartProcessPipes_FailsAfterProcessStarted(t *testing.T) {
@@ -422,6 +438,28 @@ func TestBuildAdapterConfig_StripEnvRemovesDeclaredVars(t *testing.T) {
 	}
 	if !slices.Contains(m.cfg.AgentEnv, "HOME=/root") {
 		t.Errorf("HOME was stripped but should have been kept")
+	}
+}
+
+func TestBuildAdapterConfigForwardsNotificationQueueCapacity(t *testing.T) {
+	m := &Manager{
+		cfg: &config.InstanceConfig{
+			AgentArgs:                 []string{"cat"},
+			WorkDir:                   t.TempDir(),
+			AgentEnv:                  []string{"PATH=/usr/bin"},
+			Protocol:                  agent.ProtocolACP,
+			NotificationQueueCapacity: 4096,
+		},
+		logger: newTestLogger(t),
+	}
+
+	if err := m.buildAdapterConfig(); err != nil {
+		t.Fatalf("buildAdapterConfig: %v", err)
+	}
+	t.Cleanup(func() { _ = m.adapter.Close() })
+
+	if got := m.adapterCfg.NotificationQueueCapacity; got != 4096 {
+		t.Fatalf("adapter notification queue capacity = %d, want 4096", got)
 	}
 }
 

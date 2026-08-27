@@ -26,6 +26,7 @@ type ReviewDiffHeaderProps = ReviewExternalLinkContext & {
   collapsed: boolean;
   wordWrap: boolean;
   expandUnchanged: boolean;
+  hasStickyRepoHeader?: boolean;
   onCheckboxChange: (checked: boolean | "indeterminate") => void;
   onDiscard: () => void;
   onOpenFile?: (filePath: string, repo?: string) => void;
@@ -75,6 +76,14 @@ function StaleIndicator({ compact = false }: { compact?: boolean }) {
   );
 }
 
+function ReviewFileDirectory({ directory, className }: { directory: string; className: string }) {
+  return (
+    <span aria-hidden="true" data-review-file-directory className={className}>
+      <bdi dir="ltr">{directory}</bdi>
+    </span>
+  );
+}
+
 function DesktopReviewFilePath({ path }: { path: string }) {
   const { directory, name } = splitFilePath(path);
   return (
@@ -84,12 +93,10 @@ function DesktopReviewFilePath({ path }: { path: string }) {
     >
       {directory && (
         <>
-          <span
-            aria-hidden="true"
+          <ReviewFileDirectory
+            directory={directory}
             className="min-w-0 truncate text-muted-foreground [direction:rtl] [unicode-bidi:isolate]"
-          >
-            {directory}
-          </span>
+          />
           <span aria-hidden="true" className="shrink-0 text-muted-foreground">
             /
           </span>
@@ -122,13 +129,10 @@ function MobileReviewFileDetails({ file, isStale }: { file: ReviewFile; isStale:
       </span>
       <span className="flex min-w-0 items-center gap-1 leading-4">
         {directory && (
-          <span
-            aria-hidden="true"
-            data-review-file-directory
+          <ReviewFileDirectory
+            directory={directory}
             className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground [direction:rtl] [unicode-bidi:isolate]"
-          >
-            {directory}
-          </span>
+          />
         )}
         <FileStatusIcon
           status={file.status}
@@ -259,6 +263,7 @@ export function ReviewDiffHeader({
   collapsed,
   wordWrap,
   expandUnchanged,
+  hasStickyRepoHeader = false,
   sessionId,
   onCheckboxChange,
   onDiscard,
@@ -310,7 +315,8 @@ export function ReviewDiffHeader({
       data-testid="review-file-header"
       data-file-path={file.path}
       className={cn(
-        "sticky top-0 z-10 border-b border-border/50 bg-card/95 backdrop-blur-sm",
+        "sticky z-10 border-b border-border/50 bg-card/95 backdrop-blur-sm",
+        hasStickyRepoHeader ? "top-8" : "top-0",
         !isMobile && "flex items-center gap-2 px-4 py-2",
       )}
     >

@@ -10,7 +10,7 @@
 // across CLIs, and don't depend on prompt instructions the agent
 // may rotate.
 //
-// See docs/specs/office-heartbeat-rework/spec.md §"Continuation
+// See docs/specs/office/requirements/scheduler.md §"Continuation
 // summary contract" for the section schema.
 package summary
 
@@ -19,6 +19,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/kandev/kandev/internal/office/truncate"
 )
 
 // maxSummaryBytes mirrors the storage cap in the continuation
@@ -100,7 +102,7 @@ func BuildSummary(in BuildInputs) string {
 
 	out := strings.TrimRight(b.String(), "\n") + "\n"
 	if len(out) > maxSummaryBytes {
-		return truncateUTF8(out, maxSummaryBytes)
+		return truncate.UTF8(out, maxSummaryBytes)
 	}
 	return out
 }
@@ -237,18 +239,4 @@ func firstNonEmptyLine(s, skipPrefix string) string {
 		return line
 	}
 	return ""
-}
-
-// truncateUTF8 cuts s to at most maxBytes at a UTF-8 rune boundary.
-// Mirrors the helper in the repo so the summary package is self-
-// contained and doesn't import sqlite.
-func truncateUTF8(s string, maxBytes int) string {
-	if len(s) <= maxBytes {
-		return s
-	}
-	cut := maxBytes
-	for cut > 0 && (s[cut]&0xC0) == 0x80 {
-		cut--
-	}
-	return s[:cut]
 }

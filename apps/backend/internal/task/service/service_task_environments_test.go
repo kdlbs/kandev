@@ -53,15 +53,16 @@ func (s *stubEnvRepo) DeleteTaskEnvironment(context.Context, string) error {
 func (s *stubEnvRepo) DeleteTaskEnvironmentsByTask(context.Context, string) error { return nil }
 
 type stubDestroyer struct {
-	containerCalls       []string
-	sandboxCalls         []string
-	worktreeCalls        []string
-	cancelAfterContainer context.CancelFunc
-	pushCalls            int
-	containerErr         error
-	sandboxErr           error
-	worktreeErr          error
-	pushErr              error
+	containerCalls           []string
+	sandboxCalls             []string
+	worktreeCalls            []string
+	cancelAfterContainer     context.CancelFunc
+	cancelAfterFirstWorktree context.CancelFunc
+	pushCalls                int
+	containerErr             error
+	sandboxErr               error
+	worktreeErr              error
+	pushErr                  error
 }
 
 func (s *stubDestroyer) DestroyContainer(_ context.Context, id string) error {
@@ -77,6 +78,9 @@ func (s *stubDestroyer) DestroySandbox(_ context.Context, id, _ string) error {
 }
 func (s *stubDestroyer) DestroyWorktree(_ context.Context, id string) error {
 	s.worktreeCalls = append(s.worktreeCalls, id)
+	if s.cancelAfterFirstWorktree != nil && len(s.worktreeCalls) == 1 {
+		s.cancelAfterFirstWorktree()
+	}
 	return s.worktreeErr
 }
 func (s *stubDestroyer) PushEnvironmentBranch(context.Context, *models.TaskEnvironment) error {
@@ -158,7 +162,7 @@ func TestResetTaskEnvironment_DestroysEachResourceTypeAndDeletesRow(t *testing.T
 		TaskID:      "task-1",
 		ContainerID: "container-abc",
 		SandboxID:   "sandbox-xyz",
-		WorktreeID:  "wt-1",
+		Repos:       []*models.TaskEnvironmentRepo{{WorktreeID: "wt-1"}},
 	}}
 	destroyer := &stubDestroyer{}
 	svc := newResetTestService(t, repo)
@@ -189,7 +193,8 @@ func TestTeardownEnvironmentResources_CancellationStopsBeforeNextResource(t *tes
 	svc.SetEnvironmentDestroyer(destroyer)
 
 	err := svc.teardownEnvironmentResources(ctx, &models.TaskEnvironment{
-		ContainerID: "container-1", SandboxID: "sandbox-1", WorktreeID: "worktree-1",
+		ContainerID: "container-1", SandboxID: "sandbox-1",
+		Repos: []*models.TaskEnvironmentRepo{{WorktreeID: "worktree-1"}},
 	})
 
 	if !errors.Is(err, context.Canceled) {
@@ -201,13 +206,81 @@ func TestTeardownEnvironmentResources_CancellationStopsBeforeNextResource(t *tes
 	}
 }
 
+func TestTeardownEnvironmentResources_MultiRepoCancellationStopsBeforeNextWorktree(t *testing.T) {
+	svc := newResetTestService(t, &stubEnvRepo{})
+	ctx, cancel := context.WithCancel(context.Background())
+	destroyer := &stubDestroyer{cancelAfterFirstWorktree: cancel}
+	svc.SetEnvironmentDestroyer(destroyer)
+
+	err := svc.teardownEnvironmentResources(ctx, &models.TaskEnvironment{
+		Repos: []*models.TaskEnvironmentRepo{
+			{RepositoryID: "repo-a", WorktreeID: "wt-first"},
+			{RepositoryID: "repo-b", WorktreeID: "wt-second"},
+		},
+	})
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("teardown error = %v, want context cancellation", err)
+	}
+	if len(destroyer.worktreeCalls) != 1 || destroyer.worktreeCalls[0] != "wt-first" {
+		t.Fatalf("expected only the first worktree destroyed before cancellation, got %v", destroyer.worktreeCalls)
+	}
+}
+
+func TestTeardownEnvironmentResources_MultiRepoDestroysEveryWorktree(t *testing.T) {
+	svc := newResetTestService(t, &stubEnvRepo{})
+	destroyer := &stubDestroyer{}
+	svc.SetEnvironmentDestroyer(destroyer)
+
+	err := svc.teardownEnvironmentResources(context.Background(), &models.TaskEnvironment{
+		Repos: []*models.TaskEnvironmentRepo{
+			{RepositoryID: "repo-a", WorktreeID: "wt-primary"},
+			{RepositoryID: "repo-b", WorktreeID: "wt-secondary"},
+			{RepositoryID: "repo-c", WorktreeID: "wt-tertiary"},
+		},
+	})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{"wt-primary", "wt-secondary", "wt-tertiary"}
+	if len(destroyer.worktreeCalls) != len(want) {
+		t.Fatalf("worktree destroy calls = %v, want %v", destroyer.worktreeCalls, want)
+	}
+	for i, id := range want {
+		if destroyer.worktreeCalls[i] != id {
+			t.Errorf("worktree destroy call[%d] = %q, want %q", i, destroyer.worktreeCalls[i], id)
+		}
+	}
+}
+
+func TestTeardownEnvironmentResources_ReposOnlyEnvironmentIsNotEmpty(t *testing.T) {
+	svc := newResetTestService(t, &stubEnvRepo{})
+	destroyer := &stubDestroyer{}
+	svc.SetEnvironmentDestroyer(destroyer)
+
+	err := svc.teardownEnvironmentResources(context.Background(), &models.TaskEnvironment{
+		Repos: []*models.TaskEnvironmentRepo{
+			{RepositoryID: "repo-a", WorktreeID: "wt-a"},
+			{RepositoryID: "repo-b", WorktreeID: "wt-b"},
+		},
+	})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(destroyer.worktreeCalls) != 2 {
+		t.Fatalf("worktree destroy calls = %v, want 2", destroyer.worktreeCalls)
+	}
+}
+
 func TestTeardownEnvironmentResources_GenericWorktreeFailureRemainsError(t *testing.T) {
 	worktreeErr := errors.New("worktree backend unavailable")
 	svc := newResetTestService(t, &stubEnvRepo{})
 	svc.SetEnvironmentDestroyer(&stubDestroyer{worktreeErr: worktreeErr})
 
 	err := svc.teardownEnvironmentResources(context.Background(), &models.TaskEnvironment{
-		WorktreeID: "worktree-1",
+		Repos: []*models.TaskEnvironmentRepo{{WorktreeID: "worktree-1"}},
 	})
 
 	if !errors.Is(err, worktreeErr) {
@@ -281,7 +354,7 @@ func TestResetTaskEnvironment_TeardownIsBestEffortAcrossResources(t *testing.T) 
 		ID:          "env-1",
 		TaskID:      "task-1",
 		ContainerID: "container-abc",
-		WorktreeID:  "wt-1",
+		Repos:       []*models.TaskEnvironmentRepo{{WorktreeID: "wt-1"}},
 	}}
 	destroyer := &stubDestroyer{containerErr: errors.New("docker unreachable")}
 	svc := newResetTestService(t, repo)
@@ -305,10 +378,9 @@ func TestResetTaskEnvironment_TeardownIsBestEffortAcrossResources(t *testing.T) 
 
 func TestResetTaskEnvironment_PushBranchFailureAbortsResetBeforeTeardown(t *testing.T) {
 	repo := &stubEnvRepo{env: &models.TaskEnvironment{
-		ID:           "env-1",
-		TaskID:       "task-1",
-		WorktreeID:   "wt-1",
-		WorktreePath: "/tmp/worktree",
+		ID:     "env-1",
+		TaskID: "task-1",
+		Repos:  []*models.TaskEnvironmentRepo{{WorktreeID: "wt-1", WorktreePath: "/tmp/worktree"}},
 	}}
 	destroyer := &stubDestroyer{pushErr: errors.New("remote rejected")}
 	svc := newResetTestService(t, repo)

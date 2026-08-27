@@ -1,6 +1,7 @@
 import { createTwoFilesPatch } from "diff";
 
 import { djb2Hash } from "./hash";
+import { t } from "@/lib/i18n";
 
 /**
  * Generate a unified diff between original and modified content
@@ -65,5 +66,5 @@ export function formatDiffStats(additions: number, deletions: number): string {
   if (deletions > 0) {
     parts.push(`-${deletions}`);
   }
-  return parts.join(" ") || "No changes";
+  return parts.join(" ") || t("task:noChanges");
 }

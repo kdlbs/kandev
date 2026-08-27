@@ -150,9 +150,35 @@ type PricingLookup interface {
 	LookupForModel(ctx context.Context, modelID string) (ModelPricing, bool)
 }
 
-// SessionUsageWriter increments the cumulative tokens/cost columns on
-// task_sessions when a cost event lands. Implemented by the task repo.
-type SessionUsageWriter interface {
-	IncrementTaskSessionUsage(ctx context.Context, sessionID string,
-		tokensIn, tokensOut, costSubcents int64) error
+// PricingCatalogVersioner is an optional capability a PricingLookup
+// implementation may satisfy to report an "as-of" identifier for the
+// pricing data it served — recorded on CostEvent.PricingCatalogVersion so a
+// models.dev-list-priced row can be traced back to the catalogue state that
+// produced it. Deliberately separate from PricingLookup (rather than
+// widening it) so existing implementers and test fakes are unaffected;
+// callers type-assert and treat a missing implementation as "no version
+// available" (NULL column), not an error.
+type PricingCatalogVersioner interface {
+	// CatalogVersion returns an identifier for the currently-served
+	// pricing data, or "" when none is available yet (e.g. cold cache,
+	// nothing loaded). models.dev's dataset carries no version field of
+	// its own, so implementations report the load/fetch time instead.
+	CatalogVersion() string
+}
+
+// PricingLookupWithVersion is an optional capability a PricingLookup
+// implementation may satisfy to return pricing and its catalogue version
+// from one atomic snapshot. Calling LookupForModel and CatalogVersion
+// separately takes two independent lock acquisitions; a background refresh
+// can install a new catalogue in between and pair one catalogue's rates
+// with a different catalogue's version identifier on the stored row — a
+// provenance column that lies, which is the exact failure class
+// CostEvent.CostSource exists to eliminate. Callers type-assert and prefer
+// this over the separate calls whenever both values are needed together.
+type PricingLookupWithVersion interface {
+	// LookupForModelWithVersion behaves like PricingLookup.LookupForModel
+	// but also returns the catalogue version that produced the pricing,
+	// read from the same snapshot so the two can never describe different
+	// catalogue states.
+	LookupForModelWithVersion(ctx context.Context, modelID string) (pricing ModelPricing, version string, ok bool)
 }

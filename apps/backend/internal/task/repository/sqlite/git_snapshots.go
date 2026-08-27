@@ -17,6 +17,52 @@ import (
 // UpsertLatestLiveGitSnapshot so we don't disturb archive/completion snapshots.
 const TriggeredByLiveMonitor = "live_monitor"
 
+// snapshotRankExpr is the ORDER BY ranking shared by GetLatestGitSnapshot and
+// GetLatestGitSnapshotsBySessionIDs. Both selectors must pick the same row for
+// a session, so the expression lives in one place:
+//
+//   - rank 0: an archive snapshot that is still authoritative — either its
+//     owning task is still archived (terminal cumulative diff), or the task
+//     was unarchived but not yet resumed and no non-archive snapshot newer
+//     than this archive row exists yet (a reload in that window must not
+//     regress to pre-archive state).
+//   - rank 1: agent_completed snapshots from the current execution generation.
+//   - rank 2: live_monitor snapshots (periodic polls; may race completion).
+//   - rank 3: pre-archive completions and archive snapshots that are stale
+//     (task unarchived AND a newer non-archive snapshot exists).
+//
+// Ties within a rank break by created_at DESC, then id DESC so the selection
+// is deterministic even when Postgres stores multiple writes at the same
+// microsecond timestamp.
+const snapshotRankExpr = `
+			CASE
+				WHEN snapshot_type = 'archive' AND (
+					EXISTS (
+						SELECT 1 FROM task_sessions ts
+						JOIN tasks t ON t.id = ts.task_id
+						WHERE ts.id = task_session_git_snapshots.session_id
+						  AND t.archived_at IS NOT NULL
+					)
+					OR NOT EXISTS (
+						SELECT 1 FROM task_session_git_snapshots newer
+						WHERE newer.session_id = task_session_git_snapshots.session_id
+						  AND newer.snapshot_type <> 'archive'
+						  AND newer.created_at > task_session_git_snapshots.created_at
+					)
+				) THEN 0
+				WHEN triggered_by = 'agent_completed' AND EXISTS (
+					SELECT 1 FROM task_session_git_snapshots archive
+					WHERE archive.session_id = task_session_git_snapshots.session_id
+					  AND archive.snapshot_type = 'archive'
+					  AND archive.created_at > task_session_git_snapshots.created_at
+				) THEN 3
+				WHEN triggered_by = 'agent_completed' THEN 1
+				WHEN snapshot_type = 'archive' THEN 3
+				ELSE 2
+			END,
+			created_at DESC,
+			id DESC`
+
 // UpsertLatestLiveGitSnapshot keeps at most one cached "live monitor" snapshot
 // per session by deleting any previous live row and inserting the new one in a
 // single transaction. This is the cache that backs the sidebar diff badge for
@@ -66,6 +112,10 @@ func (r *Repository) UpsertLatestLiveGitSnapshot(ctx context.Context, snapshot *
 	return tx.Commit()
 }
 
+// serializeSnapshotJSON marshals a snapshot's Files and Metadata maps into
+// their JSON-text column forms. Nil maps serialize to "{}" (the sentinel
+// that scans back to a nil map), preserving the row shape for both SQLite
+// and Postgres.
 func serializeSnapshotJSON(snapshot *models.GitSnapshot) (string, string, error) {
 	filesJSON := "{}"
 	if snapshot.Files != nil {
@@ -162,10 +212,11 @@ func (r *Repository) getGitSnapshotByOrder(ctx context.Context, sessionID, order
 }
 
 // GetLatestGitSnapshot retrieves the best git snapshot for a session.
-// Prefers agent_completed snapshots (captured at exact completion time) over
-// live_monitor snapshots (periodic polls that may contain stale data if the
-// poll raced with agent completion). Falls back to most-recent-by-time when
-// no agent_completed snapshot exists.
+// An archive snapshot (terminal cumulative diff captured at archive time) is
+// authoritative while its owning task is still archived, and also while the
+// task is unarchived but not yet resumed (no newer non-archive snapshot
+// exists yet); once a newer agent_completed / live_monitor row describes the
+// current execution, it wins over the stale archive row.
 // Returns sql.ErrNoRows if no snapshot is found.
 func (r *Repository) GetLatestGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error) {
 	query := `
@@ -173,9 +224,7 @@ func (r *Repository) GetLatestGitSnapshot(ctx context.Context, sessionID string)
 		       ahead, behind, files, triggered_by, metadata, created_at
 		FROM task_session_git_snapshots
 		WHERE session_id = ?
-		ORDER BY
-			CASE WHEN triggered_by = 'agent_completed' THEN 0 ELSE 1 END,
-			created_at DESC
+		ORDER BY` + snapshotRankExpr + `
 		LIMIT 1
 	`
 	return scanGitSnapshot(r.ro.QueryRowContext(ctx, r.ro.Rebind(query), sessionID))
@@ -183,7 +232,7 @@ func (r *Repository) GetLatestGitSnapshot(ctx context.Context, sessionID string)
 
 // GetLatestGitSnapshotsBySessionIDs loads one authoritative snapshot per
 // session in one query per placeholder-sized chunk. It mirrors
-// GetLatestGitSnapshot's agent_completed preference without introducing an
+// GetLatestGitSnapshot's ranking (snapshotRankExpr) without introducing an
 // N+1 read when task-list summaries repair historical rows.
 func (r *Repository) GetLatestGitSnapshotsBySessionIDs(
 	ctx context.Context,
@@ -203,8 +252,7 @@ func (r *Repository) GetLatestGitSnapshotsBySessionIDs(
 				       ahead, behind, files, triggered_by, metadata, created_at,
 				       ROW_NUMBER() OVER (
 					       PARTITION BY session_id
-					       ORDER BY CASE WHEN triggered_by = 'agent_completed' THEN 0 ELSE 1 END,
-					                created_at DESC
+					       ORDER BY` + snapshotRankExpr + `
 				       ) AS row_number
 				FROM task_session_git_snapshots
 				WHERE session_id IN (` + placeholders + `)
@@ -239,6 +287,9 @@ type gitSnapshotScanner interface {
 	Scan(dest ...interface{}) error
 }
 
+// scanGitSnapshot scans one task_session_git_snapshots row (all 13 columns)
+// into a GitSnapshot, decoding the JSON-text files/metadata columns. The "{}"
+// sentinel scans back to nil maps so empty rows round-trip cleanly.
 func scanGitSnapshot(scanner gitSnapshotScanner) (*models.GitSnapshot, error) {
 	snapshot := &models.GitSnapshot{}
 	var snapshotType string
@@ -332,7 +383,20 @@ func (r *Repository) GetGitSnapshotsBySession(ctx context.Context, sessionID str
 }
 
 // CreateSessionCommit inserts a new commit record into the database.
-func (r *Repository) CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) error {
+// Idempotent on (session_id, commit_sha): a commit already observed for this
+// session is silently skipped rather than duplicated, since it can now be
+// reported from more than one trigger (live commit events, the per-turn
+// reconcile sweep, and archive capture) for the same underlying git commit.
+// The returned bool reports whether a new row was actually inserted, so
+// callers can distinguish a fresh observation from a re-observed duplicate
+// for writer-health counters.
+//
+// pre_commit_snapshot_id / post_commit_snapshot_id are always written empty
+// (commit.PreCommitSnapshotID / PostCommitSnapshotID are never populated by
+// any caller). No writer for either column exists anywhere in this codebase;
+// they do not link a commit row to the task_session_git_snapshots chain.
+// Treat them as reserved/unpopulated, not as live data.
+func (r *Repository) CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) (bool, error) {
 	if commit.ID == "" {
 		commit.ID = uuid.New().String()
 	}
@@ -340,18 +404,27 @@ func (r *Repository) CreateSessionCommit(ctx context.Context, commit *models.Ses
 		commit.CreatedAt = time.Now().UTC()
 	}
 
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_session_commits (
 			id, session_id, commit_sha, parent_sha, author_name, author_email,
 			commit_message, committed_at, pre_commit_snapshot_id, post_commit_snapshot_id,
 			files_changed, insertions, deletions, created_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (session_id, commit_sha) DO NOTHING
 	`), commit.ID, commit.SessionID, commit.CommitSHA, commit.ParentSHA,
 		commit.AuthorName, commit.AuthorEmail, commit.CommitMessage, commit.CommittedAt,
 		commit.PreCommitSnapshotID, commit.PostCommitSnapshotID, commit.FilesChanged,
 		commit.Insertions, commit.Deletions, commit.CreatedAt)
+	if err != nil {
+		return false, err
+	}
 
-	return err
+	// RowsAffected returns 0 on a conflict-skipped row in both SQLite and Postgres.
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
 }
 
 // GetSessionCommits retrieves all commits for a session, ordered by committed_at descending.

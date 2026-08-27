@@ -8,7 +8,7 @@ test.describe("Execution indicator", () => {
     await testPage.goto("/office/tasks");
     // Post-overhaul: the unified AppSidebar's Tasks section also lists tasks, so
     // the title text appears in BOTH the global rail and the page table. Scope
-    // to `<main>` (the office layout's page content, which excludes the
+    // to `<main>` (the office shell's page content, which excludes the
     // `<aside data-testid="app-sidebar">`) to avoid a strict-mode duplicate.
     await expect(testPage.locator("main").getByText("Indicator Test Task")).toBeVisible({
       timeout: 10_000,

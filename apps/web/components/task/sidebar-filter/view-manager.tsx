@@ -1,10 +1,11 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Input } from "@kandev/ui/input";
 import { Button } from "@kandev/ui/button";
 import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
 import { useTranslation } from "react-i18next";
+import { sidebarViewName } from "@/lib/state/slices/ui/sidebar-view-builtins";
 
 type HeaderMode = "view" | "rename" | "saveAs";
 
@@ -115,7 +116,7 @@ function NameDisplay({
   return (
     <>
       <span className="font-medium" data-testid="sidebar-filter-active-view-name">
-        {activeView?.name ?? "—"}
+        {activeView ? sidebarViewName(activeView, t) : t("task:none")}
       </span>
       {hasDraft && (
         <span
@@ -149,9 +150,18 @@ function NameInput({
     inputRef.current?.select();
   }, []);
 
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
   return (
     <Input
       ref={inputRef}
+      autoFocus
       aria-label={mode === "rename" ? t("task:viewName") : t("task:newViewName")}
       value={value}
       onChange={(e) => onChange(e.target.value)}

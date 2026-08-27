@@ -81,6 +81,7 @@ func newTestGC(
 		execution_state TEXT DEFAULT '',
 		checkout_agent_id TEXT,
 		checkout_at DATETIME,
+		checkout_run_id TEXT,
 		archived_at DATETIME,
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -113,7 +114,8 @@ func newTestGC(
 		role TEXT NOT NULL DEFAULT '',
 		agent_profile_id TEXT NOT NULL DEFAULT '',
 		decision_required INTEGER NOT NULL DEFAULT 0,
-		position INTEGER NOT NULL DEFAULT 0
+		position INTEGER NOT NULL DEFAULT 0,
+		created_at TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00'
 	)`); err != nil {
 		t.Fatalf("create workflow_step_participants: %v", err)
 	}

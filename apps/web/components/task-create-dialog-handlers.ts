@@ -265,8 +265,8 @@ function useRepositoryHandlers(fs: DialogFormState, repositories: Repository[]) 
       const wasLocalPath = Boolean(fs.repositories.find((row) => row.key === key)?.localPath);
       const isLocalPath = !isWorkspaceRepo && Boolean(value);
       const patch: Partial<TaskRepoRow> = isWorkspaceRepo
-        ? { repositoryId: value, localPath: undefined, branch: "" }
-        : { repositoryId: undefined, localPath: value, branch: "" };
+        ? { repositoryId: value, localPath: undefined, branch: "", branchPolicyId: undefined }
+        : { repositoryId: undefined, localPath: value, branch: "", branchPolicyId: undefined };
       fs.updateRepository(key, patch);
       if (wasLocalPath !== isLocalPath) {
         fs.setExecutorId("");
@@ -286,13 +286,21 @@ function useRepositoryHandlers(fs: DialogFormState, repositories: Repository[]) 
 
   const handleRowBranchChange = useCallback(
     (key: string, value: string) => {
-      fs.updateRepository(key, { branch: value });
+      fs.updateRepository(key, { branch: value, branchPolicyId: undefined });
       syncTaskCreateLastUsed({ branch: value });
     },
     [fs],
   );
 
-  return { handleRowRepositoryChange, handleRowBranchChange };
+  const handleRowPolicyChange = useCallback(
+    (key: string, policyId: string, baseBranch: string) => {
+      fs.updateRepository(key, { branch: baseBranch, branchPolicyId: policyId });
+      syncTaskCreateLastUsed({ branch: baseBranch });
+    },
+    [fs],
+  );
+
+  return { handleRowRepositoryChange, handleRowBranchChange, handleRowPolicyChange };
 }
 
 function useProfileAndNameHandlers(fs: DialogFormState) {
@@ -372,12 +380,15 @@ function useGitHubAndFreshBranchHandlers(fs: DialogFormState) {
   const handleToggleNoRepository = useCallback(() => {
     const next = !fs.noRepository;
     fs.setNoRepository(next);
+    // Clear the executor selection in both directions so the destination
+    // source mode can resolve its own policy. None mode will re-pick Local;
+    // Repo mode will re-pick the workspace default or Worktree fallback.
+    fs.setExecutorId("");
+    fs.setExecutorProfileId("");
     if (next) {
       fs.setUseRemote(false);
-      // Clear the executor selection so the auto-fill effect re-picks a
-      // non-worktree default (worktree is unworkable in no-repo mode).
-      fs.setExecutorId("");
-      fs.setExecutorProfileId("");
+      // None mode excludes Worktree, so its auto-fill effect picks a
+      // non-worktree default.
       syncTaskCreateLastUsed({
         repository_id: null,
         branch: null,

@@ -13,12 +13,31 @@
 // usually an array of `{type, text}` content blocks where `text` is itself a
 // JSON-encoded string; we parse that inner JSON so the renderers see plain JS.
 
-const NAMESPACE_SEP = /\/|__/;
+const NAMESPACE_SEP = /\/|__|\./;
+const KANDEV_NAMESPACES = ["mcp__kandev__", "mcp.kandev.", "kandev/"] as const;
 const KANDEV_SUFFIX = "_kandev";
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return value as Record<string, unknown>;
+}
+
+// ACP stores generic tool arguments below `input.raw_input`; older/direct
+// transports store the arguments at `input`. Normalize both at the renderer
+// boundary so every Kandev tool sees its actual call arguments.
+export function extractKandevArgs(value: unknown): Record<string, unknown> | undefined {
+  const input = asRecord(value);
+  if (!input) return undefined;
+  const rawInput = asRecord(input.raw_input);
+  return asRecord(rawInput?.arguments) ?? rawInput ?? input;
+}
 
 export function extractKandevStem(toolName: string | undefined): string | null {
   if (!toolName) return null;
-  const tail = toolName.trim().split(NAMESPACE_SEP).pop() ?? "";
+  const normalized = toolName.trim();
+  const namespace = KANDEV_NAMESPACES.find((prefix) => normalized.startsWith(prefix));
+  const tail = namespace ? normalized.slice(namespace.length) : normalized;
+  if ((!namespace && NAMESPACE_SEP.test(normalized)) || NAMESPACE_SEP.test(tail)) return null;
   if (!tail.endsWith(KANDEV_SUFFIX)) return null;
   const stem = tail.slice(0, -KANDEV_SUFFIX.length);
   return stem.length > 0 ? stem : null;
@@ -50,6 +69,10 @@ function unwrapContentBlocks(blocks: unknown[]): unknown {
   return tryParseJson(joined);
 }
 
+function hasValue(value: unknown): boolean {
+  return value !== undefined && value !== null;
+}
+
 // extractMcpResult walks the various shapes the ACP/MCP transport can emit and
 // returns the structured payload. Returns null if the value is empty/missing.
 export function extractMcpResult(value: unknown): unknown {
@@ -63,9 +86,27 @@ export function extractMcpResult(value: unknown): unknown {
     return unwrapContentBlocks(value);
   }
   if (typeof value === "object") {
-    const obj = value as { content?: unknown; output?: unknown };
+    const obj = value as {
+      content?: unknown;
+      output?: unknown;
+      result?: unknown;
+      structuredContent?: unknown;
+      structured_content?: unknown;
+    };
+    if (hasValue(obj.structuredContent)) {
+      return obj.structuredContent;
+    }
+    if (hasValue(obj.structured_content)) {
+      return obj.structured_content;
+    }
     if (Array.isArray(obj.content)) return unwrapContentBlocks(obj.content);
     if (typeof obj.output === "string") return tryParseJson(obj.output);
+    if (
+      obj.result !== undefined &&
+      (Object.hasOwn(obj, "error") || Object.keys(obj).length === 1)
+    ) {
+      return extractMcpResult(obj.result);
+    }
     return value;
   }
   return value;
@@ -90,10 +131,9 @@ export function pickArray<T = unknown>(obj: unknown, key: string): T[] | undefin
 }
 
 export function pickObject(obj: unknown, key: string): Record<string, unknown> | undefined {
-  if (!obj || typeof obj !== "object") return undefined;
-  const v = (obj as Record<string, unknown>)[key];
-  if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
-  return v as Record<string, unknown>;
+  const record = asRecord(obj);
+  if (!record) return undefined;
+  return asRecord(record[key]);
 }
 
 // Shorten a UUID-like identifier for inline display (e.g. "abc12345…").

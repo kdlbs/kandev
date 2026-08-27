@@ -77,7 +77,7 @@ func newBranchMaterializer(repo branchMaterializerRepo, mgr *worktree.Manager, l
 }
 
 // MaterializeBranch creates the worktree dir + persists the
-// task_session_worktrees row for the just-inserted task_repositories row.
+// task_environment_repos row for the just-inserted task_repositories row.
 // Designed to be idempotent: the worktree manager's reuse path catches a
 // rerun for the same (session, repo, branch_slug) triple and returns the
 // existing worktree.
@@ -114,7 +114,7 @@ func (b *branchMaterializer) materializeUnfinalized(ctx context.Context, taskID,
 		zap.String("task_repository_id", taskRepositoryID),
 		zap.String("worktree_id", wt.ID),
 		zap.String("path", wt.Path),
-		zap.String("branch", wt.Branch))
+		zap.String(branchFieldKey, wt.Branch))
 	return &branchMaterialization{environment: env, session: session, worktree: wt, repositoryID: req.RepositoryID, slug: slug, taskID: taskID}, nil
 }
 
@@ -169,7 +169,7 @@ func (b *branchMaterializer) prepareMaterializeRequest(
 		FallbackBaseBranch:     repo.DefaultBranch,
 		CheckoutBranch:         tr.CheckoutBranch,
 		WorktreeBranchPrefix:   repo.WorktreeBranchPrefix,
-		WorktreeBranchTemplate: repo.WorktreeBranchTemplate,
+		WorktreeBranchTemplate: taskRepositoryBranchTemplate(repo, tr),
 		WorktreeBranchTicket:   worktree.TicketForBranchName(task.Identifier, task.Metadata),
 		PullBeforeWorktree:     repo.PullBeforeWorktree,
 		TaskDirName:            env.TaskDirName,
@@ -177,6 +177,16 @@ func (b *branchMaterializer) prepareMaterializeRequest(
 		BranchSlug:             slug,
 	}
 	return req, env, session, slug, true, nil
+}
+
+func taskRepositoryBranchTemplate(repo *models.Repository, taskRepo *models.TaskRepository) string {
+	if taskRepo != nil && taskRepo.BranchPolicyBranchTemplate != "" {
+		return taskRepo.BranchPolicyBranchTemplate
+	}
+	if repo == nil {
+		return ""
+	}
+	return repo.WorktreeBranchTemplate
 }
 
 // finalizeMaterialize handles the post-Create plumbing: promote the task

@@ -1,7 +1,26 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import * as React from "react";
+import { render } from "@testing-library/react";
 import { createAppStore } from "@/lib/state/store";
+import { useDockviewStore } from "@/lib/state/dockview-store";
+import { reviewItemId } from "@/components/task/review-selection";
 import { buildHostApi } from "./host-api";
+import { registerPluginTranslations, unregisterPluginTranslations } from "./plugin-translations";
+
+const { changeRequestDetailModuleLoaded, translate } = vi.hoisted(() => ({
+  changeRequestDetailModuleLoaded: vi.fn(),
+  translate: vi.fn((key: string) => `translated:${key}`),
+}));
+
+vi.mock("@/lib/i18n", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/i18n")>()),
+  t: translate,
+}));
+
+vi.mock("@/components/integrations/change-request-detail", () => {
+  changeRequestDetailModuleLoaded();
+  return { ChangeRequestDetail: () => null };
+});
 
 /** Curated primitives a plugin needs to build a full native-feeling page. */
 const EXPECTED_UI_PRIMITIVES = [
@@ -24,6 +43,16 @@ const EXPECTED_UI_PRIMITIVES = [
   "CollapsibleContent",
   "CollapsibleTrigger",
   "Dialog",
+  "Drawer",
+  "DrawerClose",
+  "DrawerContent",
+  "DrawerDescription",
+  "DrawerFooter",
+  "DrawerHeader",
+  "DrawerOverlay",
+  "DrawerPortal",
+  "DrawerTitle",
+  "DrawerTrigger",
   "DropdownMenu",
   "Empty",
   "EmptyContent",
@@ -63,13 +92,17 @@ const EXPECTED_UI_PRIMITIVES = [
   "TooltipProvider",
 ];
 
-describe("buildHostApi — api.fetch", () => {
-  const originalFetch = global.fetch;
+const originalFetch = global.fetch;
+const I18N_PLUGIN_ID = "translation-host-test";
 
-  afterEach(() => {
-    global.fetch = originalFetch;
-  });
+afterEach(() => {
+  global.fetch = originalFetch;
+  unregisterPluginTranslations(I18N_PLUGIN_ID);
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
+});
 
+describe("buildHostApi — API", () => {
   it("scopes api.fetch to /api/plugins/{pluginId}/... and forwards init", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
     global.fetch = fetchMock as unknown as typeof fetch;
@@ -111,6 +144,76 @@ describe("buildHostApi", () => {
     vi.unstubAllEnvs();
   });
 
+  it("invokes declared authenticated actions with scoped resources and parses their response", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ connected: true }), { status: 200 }));
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const host = buildHostApi("jira", createAppStore());
+    const controller = new AbortController();
+    await expect(
+      host.api.invokeAction<{ connected: boolean }>(
+        "connection.save",
+        {
+          workspaceId: "workspace-a",
+          taskId: "task-a",
+          sessionId: "session-a",
+          repositoryId: "repository-a",
+          body: { token: "redacted" },
+        },
+        { signal: controller.signal },
+      ),
+    ).resolves.toEqual({ connected: true });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toContain("/api/plugins/jira/actions/connection.save");
+    expect(init).toMatchObject({
+      method: "POST",
+      credentials: "include",
+      signal: controller.signal,
+    });
+    expect(JSON.parse(init.body)).toEqual({
+      workspaceId: "workspace-a",
+      taskId: "task-a",
+      sessionId: "session-a",
+      repositoryId: "repository-a",
+      body: { token: "redacted" },
+    });
+  });
+});
+
+describe("buildHostApi — host contract", () => {
+  it("exposes a plugin-scoped localization API", () => {
+    const host = buildHostApi("jira", createAppStore());
+
+    expect(host.i18n).toBeDefined();
+  });
+
+  it("translates plugin messages through both imperative and reactive APIs", () => {
+    const greeting = "Hello {{name}}";
+    registerPluginTranslations(I18N_PLUGIN_ID, {
+      en: { greeting },
+      "pt-pt": { greeting },
+      "zh-cn": { greeting },
+      pseudo: { greeting },
+    });
+    const host = buildHostApi(I18N_PLUGIN_ID, createAppStore());
+    function Greeting() {
+      const translation = host.i18n.useTranslation();
+      return React.createElement(
+        "span",
+        { "data-testid": "plugin-greeting" },
+        `${translation.locale}:${translation.t("greeting", { values: { name: "Ada" } })}`,
+      );
+    }
+
+    const view = render(React.createElement(Greeting));
+
+    expect(host.i18n.t("greeting", { values: { name: "Ada" } })).toBe("Hello Ada");
+    expect(view.getByTestId("plugin-greeting").textContent).toBe(`${host.i18n.locale}:Hello Ada`);
+  });
+
   it("exposes the host React instance and a jsx alias for React.createElement", () => {
     const host = buildHostApi("jira", createAppStore());
 
@@ -146,13 +249,48 @@ describe("buildHostApi", () => {
     }
   });
 
+  it("exports the supported responsive breakpoint hook", () => {
+    const host = buildHostApi("jira", createAppStore());
+
+    expect(host.useResponsiveBreakpoint).toBeTypeOf("function");
+  });
+
   it("exposes first-party app components for native flows and page chrome", () => {
     const host = buildHostApi("jira", createAppStore());
     expect(host.ui.PageTopbar).toBeDefined();
     expect(host.ui.TaskCreateDialog).toBeDefined();
     expect(host.ui.Combobox).toBeDefined();
+    expect(host.ui.ChangeRequestList).toBeDefined();
+    expect(host.ui.ChangeRequestRow).toBeDefined();
+    expect(host.ui.IntegrationStartTaskMenu).toBeDefined();
+    expect(host.ui.IntegrationListToolbar).toBeDefined();
+    expect(host.ui.IntegrationChangeRequestStatus).toBeDefined();
+    expect(host.ui.ChangeRequestDetail).toBeTypeOf("function");
+    expect(changeRequestDetailModuleLoaded).not.toHaveBeenCalled();
+    expect(host.ui.IntegrationScopeBar).toBeDefined();
+    expect(host.ui.IntegrationSaveQueryDialog).toBeDefined();
+    expect(host.ui.IntegrationRepositoryFilter).toBeDefined();
+    expect(host.ui.IntegrationCursorPagination).toBeDefined();
+    const IntegrationIcon = host.ui.IntegrationIcon as React.ComponentType<{
+      name: string;
+    }>;
+    expect(IntegrationIcon).toBeTypeOf("function");
+    const rendered = render(React.createElement(IntegrationIcon, { name: "merged" }));
+    expect(rendered.container.querySelector('[data-integration-icon="merged"]')).not.toBeNull();
+    expect(host.ui.TaskRowIndicator).toBeDefined();
   });
 
+  it("localizes the lazy change-request loading state", () => {
+    const host = buildHostApi("jira", createAppStore());
+    const ChangeRequestDetail = host.ui.ChangeRequestDetail as React.ComponentType<object>;
+
+    const rendered = render(React.createElement(ChangeRequestDetail, {}));
+
+    expect(rendered.getByLabelText("translated:integrations:loadingChangeRequest")).toBeTruthy();
+  });
+});
+
+describe("buildHostApi — navigation and modal contract", () => {
   it("exposes navigate() that soft-navigates via history push/replace", () => {
     const host = buildHostApi("jira", createAppStore());
     const pushSpy = vi.spyOn(window.history, "pushState");
@@ -202,6 +340,67 @@ describe("buildHostApi", () => {
 
     handle.close();
     expect(pluginModalManager.getSnapshot()).toHaveLength(before);
+  });
+
+  it("opens a host-owned task link dialog instead of requiring plugin form markup", async () => {
+    const { pluginModalManager } = await import("./modal-manager");
+    const host = buildHostApi("jira", createAppStore());
+    const before = pluginModalManager.getSnapshot().length;
+
+    const handle = host.openTaskLinkDialog({
+      title: "Link Acme pull request",
+      description: "Use an Acme pull request URL for this task.",
+      inputLabel: "Pull request",
+      emptyError: "Enter a pull request.",
+      failureMessage: "Failed to link pull request.",
+      successMessage: "Pull request linked",
+      onSubmit: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(pluginModalManager.getSnapshot().at(-1)).toMatchObject({
+      pluginId: "jira",
+      layout: "task-link",
+      options: {
+        title: "Link Acme pull request",
+        description: "Use an Acme pull request URL for this task.",
+        presentation: "dialog",
+      },
+    });
+    handle.close();
+    expect(pluginModalManager.getSnapshot()).toHaveLength(before);
+  });
+
+  it("opens provider-neutral desktop and mobile task review surfaces", () => {
+    const reviewKey = "cloud|workspace/repo|42";
+    const repositoryId = "repository-uuid";
+    const connectionScope = "https://bitbucket.example.test";
+    const changeRequestNumber = 42;
+    const reviewTitle = "Review #42";
+    const review = {
+      providerId: "bitbucket",
+      reviewKey,
+      connectionScope,
+      repositoryId,
+      changeRequestNumber,
+      title: reviewTitle,
+    };
+    const store = createAppStore();
+    const addReviewPanel = vi.spyOn(useDockviewStore.getState(), "addReviewPanel");
+    const setMobileSessionReview = vi.spyOn(store.getState(), "setMobileSessionReview");
+    const host = buildHostApi("bitbucket", store);
+
+    host.openTaskReview({
+      ...review,
+      presentation: "desktop",
+    });
+    expect(addReviewPanel).toHaveBeenCalledWith(expect.objectContaining(review));
+
+    host.openTaskReview({
+      ...review,
+      presentation: "mobile",
+      sessionId: "session-1",
+    });
+    expect(setMobileSessionReview).toHaveBeenCalledWith("session-1", reviewItemId(review));
   });
 });
 
@@ -344,6 +543,13 @@ describe("buildHostApi — host.toast / host.utils", () => {
     const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000);
     expect(host.utils.formatRelativeTime(threeHoursAgo)).toContain("3");
   });
+
+  it("exposes the host UUID fallback for plugins on insecure origins", () => {
+    const host = buildHostApi("jira", createAppStore());
+    const utils = host.utils as unknown as Record<string, unknown>;
+
+    expect(utils.generateUUID).toBeTypeOf("function");
+  });
 });
 
 describe("buildHostApi — ui", () => {
@@ -353,7 +559,6 @@ describe("buildHostApi — ui", () => {
     expect(host.ui.RichTextReadOnly).toBeDefined();
   });
 });
-
 const NOTES_PLUGIN_ID = "kandev-plugin-notes";
 const TEST_UPDATED_AT = "2026-01-01T00:00:00Z";
 

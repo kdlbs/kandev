@@ -31,7 +31,8 @@ type OrchestratorService interface {
 	PromptTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool) (*orchestrator.PromptResult, error)
 	ResumeTaskSession(ctx context.Context, taskID, taskSessionID string) error
 	StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode, autoStart bool, attachments []v1.MessageAttachment, references []v1.EntityReference) error
-	ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) error
+	ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) (orchestrator.ProcessOnTurnStartResult, error)
+	QueueUserPrompt(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, metadata map[string]interface{}, userMessageRecorded bool) error
 	StepRequiresCompletionSignal(ctx context.Context, taskID string) bool
 	// ForegroundActivity is already filtered by the orchestrator's runtime flag
 	// and persisted provider identity. Background therefore means this exact
@@ -289,6 +290,7 @@ type wsAddMessageRequest struct {
 	EntityReferences  []v1.EntityReference   `json:"entity_references,omitempty"`
 }
 
+// wsAddMessage handles an incoming add-message WebSocket action, persisting the user message and dispatching the turn and orchestrator flow.
 func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req wsAddMessageRequest
 	if err := msg.ParsePayload(&req); err != nil {
@@ -311,7 +313,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// before checking the live session state or running turn-start hooks so a
 	// retry is a read, not a second prompt.
 	if req.ClientMessageID != "" {
-		existing, err := h.service.GetMessage(ctx, req.ClientMessageID)
+		existing, err := h.service.GetMessageWithPromptIndex(ctx, req.ClientMessageID)
 		switch {
 		case err == nil && existing != nil:
 			// The turn-start hook may switch the task's primary session before
@@ -362,6 +364,8 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task", nil)
 	}
 
+	var turnStartResult orchestrator.ProcessOnTurnStartResult
+
 	// Run on_turn_start synchronously BEFORE wrapping the prompt with the
 	// Kandev MCP system block. A workflow step transition fired by
 	// on_turn_start changes which step's `auto_advance_requires_signal`
@@ -370,11 +374,13 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// first turn. dispatchPromptAsync no longer calls ProcessOnTurnStart;
 	// it forwards the (now correctly-wrapped) prompt to the agent.
 	if h.orchestrator != nil {
-		if err := h.orchestrator.ProcessOnTurnStart(ctx, req.TaskID, req.TaskSessionID); err != nil {
+		var turnStartErr error
+		turnStartResult, turnStartErr = h.orchestrator.ProcessOnTurnStart(ctx, req.TaskID, req.TaskSessionID)
+		if turnStartErr != nil {
 			h.logger.Warn("failed to process on_turn_start",
 				zap.String("task_id", req.TaskID),
 				zap.String("session_id", req.TaskSessionID),
-				zap.Error(err))
+				zap.Error(turnStartErr))
 		}
 		var err error
 		sessionResp, err = h.resolveSessionAfterTurnStart(ctx, req.TaskID, req.TaskSessionID, sessionResp)
@@ -439,14 +445,24 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		}
 		requiresSignal := h.orchestrator != nil && h.orchestrator.StepRequiresCompletionSignal(ctx, req.TaskID)
 		referenceContext := orchestrator.EntityReferenceContext(req.EntityReferences)
+		var pullRequestTargetContext string
+		storedContent, pullRequestTargetContext = sysprompt.InjectPullRequestTargetContext(
+			storedContent, h.taskPullRequestTargets(ctx, task),
+		)
 		if task.IsFromOffice {
-			storedContent = sysprompt.InjectOfficeContext(req.TaskID, req.TaskSessionID, storedContent, referenceContext)
+			storedContent = sysprompt.InjectOfficeContextWithOptions(
+				req.TaskID, req.TaskSessionID, storedContent, requiresSignal,
+				referenceContext, pullRequestTargetContext,
+			)
 		} else {
 			storedContent = sysprompt.InjectKandevContextWithOptions(req.TaskID, req.TaskSessionID, storedContent, sysprompt.KandevContextOptions{
 				RequiresCompletionSignal:       requiresSignal,
 				IncludeCoordinatorTaskControls: !configMode,
 				IncludeTaskTitleTool:           !configMode && titleOwner,
-			}, referenceContext)
+				Autopilot:                      task.Autopilot,
+				IncludeUserQuestionTool:        !task.Autopilot && !sessionResp.Session.IsPassthrough,
+				IncludeParentQuestionTool:      task.Autopilot && task.ParentID != "",
+			}, referenceContext, pullRequestTargetContext)
 		}
 	}
 	req.Content = storedContent
@@ -473,6 +489,25 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		h.logger.Error("failed to create message", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create message", nil)
 	}
+	if turnStartResult.Queued {
+		if err := h.orchestrator.QueueUserPrompt(
+			ctx,
+			req.TaskID,
+			req.TaskSessionID,
+			req.Content,
+			req.Model,
+			req.PlanMode,
+			req.Attachments,
+			meta.ToMap(),
+			true,
+		); err != nil {
+			h.logger.Warn("failed to queue prompt until workflow promotion",
+				zap.String("task_id", req.TaskID),
+				zap.String("session_id", req.TaskSessionID),
+				zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to queue prompt", nil)
+		}
+	}
 
 	apiMsg := message.ToAPI()
 	response, err := ws.NewResponse(msg.ID, msg.Action, apiMsg)
@@ -480,10 +515,11 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to encode response", nil)
 	}
 
-	// Auto-forward message as prompt to running agent if orchestrator is available.
-	// This runs async so the WS request can respond immediately.
-	// Use context.WithoutCancel so the prompt continues even if the WebSocket client disconnects.
-	if h.orchestrator != nil {
+	// Auto-forward every accepted message as a prompt to the running agent when
+	// an orchestrator is available. This runs async so the WS request can
+	// respond immediately. Plan mode changes the execution prompt and agent
+	// behavior; it does not make message.add a record-only operation.
+	if h.orchestrator != nil && !turnStartResult.Queued {
 		h.dispatchPromptAsync(ctx, req, sessionResp.Session.AgentProfileID, startCreatedSession, steer)
 	}
 

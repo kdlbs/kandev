@@ -6,7 +6,7 @@ import { IconBrandGitlab, IconMenu2 } from "@tabler/icons-react";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { Button } from "@kandev/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
-import { PageTopbar } from "@/components/page-topbar";
+import { PageShell } from "@/components/page-shell";
 import { fetchGitLabStatus } from "@/lib/api/domains/gitlab-api";
 import type { GitLabStatus, Issue, MR } from "@/lib/types/gitlab";
 import { MRList } from "@/components/gitlab/my-gitlab/mr-list";
@@ -16,7 +16,7 @@ import {
   type SidebarSelection,
 } from "@/components/gitlab/my-gitlab/presets-sidebar";
 import { PresetsScopeBar } from "@/components/gitlab/my-gitlab/presets-scope-bar";
-import { MR_PRESETS, ISSUE_PRESETS } from "@/components/gitlab/my-gitlab/presets";
+import { MR_PRESETS, ISSUE_PRESETS, presetLabel } from "@/components/gitlab/my-gitlab/presets";
 import { useGitLabSearch } from "@/components/gitlab/my-gitlab/use-gitlab-search";
 import { useSavedPresets, type SavedPreset } from "@/components/gitlab/my-gitlab/use-saved-presets";
 import {
@@ -46,37 +46,6 @@ type GitLabPageClientProps = {
   steps?: WorkflowStep[];
   repositories?: Repository[];
 };
-
-function PageHeader({
-  host,
-  onOpenMobileSidebar,
-}: {
-  host: string;
-  onOpenMobileSidebar?: () => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <PageTopbar
-      title="GitLab"
-      subtitle={t("gitlab:mergeRequestsAndIssues", { host })}
-      icon={<IconBrandGitlab className="h-4 w-4" />}
-      actions={
-        onOpenMobileSidebar && (
-          <Button
-            variant="outline"
-            size="icon-lg"
-            onClick={onOpenMobileSidebar}
-            className="h-11 w-11 md:hidden cursor-pointer"
-            data-testid="gitlab-mobile-menu-button"
-            aria-label={t("gitlab:openGitlabFilters")}
-          >
-            <IconMenu2 className="h-4 w-4" />
-          </Button>
-        )
-      }
-    />
-  );
-}
 
 function NotConnectedNotice({ reconnect }: { reconnect?: boolean }) {
   const { t } = useTranslation();
@@ -108,8 +77,10 @@ function resolveTitle(
   }
   const presets = selection.kind === "mr" ? MR_PRESETS : ISSUE_PRESETS;
   return (
-    presets.find((p) => p.value === selection.id)?.label ??
-    (selection.kind === "mr" ? t("gitlab:titleMergeRequests") : t("gitlab:titleIssues"))
+    presetLabel(
+      t,
+      presets.find((p) => p.value === selection.id),
+    ) ?? (selection.kind === "mr" ? t("gitlab:titleMergeRequests") : t("gitlab:titleIssues"))
   );
 }
 
@@ -244,6 +215,7 @@ function useGitLabPageState(searchEnabled: boolean, workspaceId?: string) {
   // Use committedQuery (not the unflushed draft) so the saved preset always
   // matches what is currently displayed in the list.
   const canSaveCurrent = committedQuery.trim().length > 0 || projectFilter.length > 0;
+  // i18n-exempt: persisted as the saved query's name, so it must not depend on the creating locale.
   const suggestedLabel =
     committedQuery.trim() || (projectFilter ? `In ${projectFilter}` : "Saved query");
   const onOpenSaveDialog = () => {
@@ -315,7 +287,8 @@ function AuthenticatedLayout({
   // later pages that may contain more matches.
   const displayedCount = state.projectFilter ? search.items.length : search.total;
   return (
-    <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
+    // Not a <main>: AppShell owns that landmark, one per page.
+    <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
       <PresetsScopeBar
         className="hidden md:flex"
         selected={selection}
@@ -359,7 +332,7 @@ function AuthenticatedLayout({
         total={search.total}
         onPageChange={search.setPage}
       />
-    </main>
+    </div>
   );
 }
 
@@ -551,6 +524,7 @@ export function GitLabPageClient({
   steps = [],
   repositories = [],
 }: GitLabPageClientProps = {}) {
+  const { t } = useTranslation();
   const scope = useGitLabWorkspaceScope(workspaceId);
   const { status, statusLoading, connected, reconnect } = scope;
   const host = status?.host ?? "https://gitlab.com";
@@ -564,22 +538,40 @@ export function GitLabPageClient({
   const onOpenMobileSidebar = useCallback(() => setMobileSidebarOpen(true), []);
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col bg-background">
-      <PageHeader
-        host={host}
-        onOpenMobileSidebar={!statusLoading && connected ? onOpenMobileSidebar : undefined}
-      />
-      <GitLabPageBody
-        statusLoading={statusLoading}
-        connected={connected}
-        reconnect={reconnect}
-        workspaceId={scope.workspaceId}
-        state={state}
-        mrPresets={mrPresets}
-        issuePresets={issuePresets}
-        onStartTask={setLaunchPayload}
-        host={host}
-      />
+    <PageShell
+      title="GitLab"
+      subtitle={t("gitlab:mergeRequestsAndIssues", { host })}
+      icon={<IconBrandGitlab className="h-4 w-4" />}
+      scroll="none"
+      actions={
+        !statusLoading &&
+        connected && (
+          <Button
+            variant="outline"
+            size="icon-lg"
+            onClick={onOpenMobileSidebar}
+            className="h-11 w-11 md:hidden cursor-pointer"
+            data-testid="gitlab-mobile-menu-button"
+            aria-label={t("gitlab:openGitlabFilters")}
+          >
+            <IconMenu2 className="h-4 w-4" />
+          </Button>
+        )
+      }
+    >
+      <div className="flex min-h-0 w-full flex-1 flex-col bg-background">
+        <GitLabPageBody
+          statusLoading={statusLoading}
+          connected={connected}
+          reconnect={reconnect}
+          workspaceId={scope.workspaceId}
+          state={state}
+          mrPresets={mrPresets}
+          issuePresets={issuePresets}
+          onStartTask={setLaunchPayload}
+          host={host}
+        />
+      </div>
       <GitLabPageOverlays
         state={state}
         mobileSidebarOpen={mobileSidebarOpen}
@@ -592,6 +584,6 @@ export function GitLabPageClient({
         launchPayload={launchPayload}
         setLaunchPayload={setLaunchPayload}
       />
-    </div>
+    </PageShell>
   );
 }

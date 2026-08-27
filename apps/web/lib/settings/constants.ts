@@ -1,6 +1,14 @@
 export const STORAGE_KEYS = {
   BACKEND_URL: "kandev.settings.backendUrl",
   ONBOARDING_COMPLETED: "kandev.onboarding.completed",
+  /** Last settings page opened on this device; where bare `/settings` resolves. */
+  LAST_SETTINGS_PATH: "kandev.settings.lastPath",
+  /** How the settings menu renders on this device: flat, accordion, persistent. */
+  SETTINGS_MENU_MODE: "kandev.settings.menuMode",
+  /** Branch keys left open in the persistent tree on this device. */
+  SETTINGS_MENU_EXPANDED: "kandev.settings.menuExpanded",
+  /** Whether agent rich-output line and bar charts animate on this device. */
+  RICH_OUTPUT_ANIMATIONS: "kandev.settings.richOutputAnimations",
 } as const;
 
 export const DEFAULT_BACKEND_URL = "http://localhost:38429";

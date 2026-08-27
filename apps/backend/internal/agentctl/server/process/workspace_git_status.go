@@ -231,6 +231,12 @@ func (wt *WorkspaceTracker) computeGitStatus(ctx context.Context) (types.GitStat
 		Renamed:        []string{},
 		Files:          make(map[string]types.FileInfo),
 	}
+	comparison := wt.ComparisonResolution()
+	if comparison.Explicit {
+		update.ComparisonTarget = comparison.Display
+		update.ComparisonStatus = comparison.Status
+		update.ComparisonErrorCode = comparison.ErrorCode
+	}
 
 	// Bare trackers (multi-repo task roots) sit on a directory that isn't
 	// itself a git repo. Without this guard, `git status` would ascend the
@@ -251,6 +257,10 @@ func (wt *WorkspaceTracker) computeGitStatus(ctx context.Context) (types.GitStat
 
 	if err := wt.getGitBranchInfo(ctx, &update); err != nil {
 		return update, err
+	}
+	if comparison.Explicit && comparison.Status == comparisonTargetStatusReady && update.BaseCommit == "" {
+		update.ComparisonStatus = comparisonTargetStatusUnavailable
+		update.ComparisonErrorCode = comparisonTargetErrorMergeBase
 	}
 	if err := ctx.Err(); err != nil {
 		return update, err
@@ -421,6 +431,10 @@ func (wt *WorkspaceTracker) ResolveBaseAnchor(ctx context.Context) (sha, baseBra
 // would silently overwrite the cached counts with 0/0 and hide a legitimate
 // "Pull N" / "Push N" indicator in the UI.
 func (wt *WorkspaceTracker) getAheadBehindCounts(ctx context.Context, update *types.GitStatusUpdate, prior types.GitStatusUpdate) {
+	comparison := wt.ComparisonResolution()
+	if comparison.Explicit && comparison.Status != comparisonTargetStatusReady {
+		return
+	}
 	// Always compare against the base branch (task-stored value if set,
 	// otherwise origin/main / origin/master). Using the remote tracking
 	// branch (origin/<feature-branch>) gives wrong counts after rebase
@@ -437,22 +451,48 @@ func (wt *WorkspaceTracker) getAheadBehindCounts(ctx context.Context, update *ty
 		compareRef = ""
 	}
 	if compareRef == "" {
+		if comparison.Explicit {
+			update.ComparisonStatus = comparisonTargetStatusUnavailable
+			update.ComparisonErrorCode = comparisonTargetErrorRefUnavailable
+			return
+		}
 		carryAheadBehind(update, prior)
 		return
 	}
 	countOut, err := wt.runGitOutput(ctx, "rev-list", "--left-right", "--count", update.Branch+"..."+compareRef)
 	if err != nil {
+		if comparison.Explicit {
+			update.ComparisonStatus = comparisonTargetStatusUnavailable
+			update.ComparisonErrorCode = comparisonTargetErrorRefUnavailable
+			return
+		}
 		wt.logger.Debug("getAheadBehindCounts: rev-list failed, carrying forward", zap.Error(err))
 		carryAheadBehind(update, prior)
 		return
 	}
 	parts := strings.Fields(string(countOut))
 	if len(parts) != 2 {
+		if comparison.Explicit {
+			update.ComparisonStatus = comparisonTargetStatusUnavailable
+			update.ComparisonErrorCode = comparisonTargetErrorRefUnavailable
+			return
+		}
 		carryAheadBehind(update, prior)
 		return
 	}
-	update.Ahead, _ = strconv.Atoi(parts[0])
-	update.Behind, _ = strconv.Atoi(parts[1])
+	ahead, aheadErr := strconv.Atoi(parts[0])
+	behind, behindErr := strconv.Atoi(parts[1])
+	if aheadErr != nil || behindErr != nil || ahead < 0 || behind < 0 {
+		if comparison.Explicit {
+			update.ComparisonStatus = comparisonTargetStatusUnavailable
+			update.ComparisonErrorCode = comparisonTargetErrorRefUnavailable
+			return
+		}
+		carryAheadBehind(update, prior)
+		return
+	}
+	update.Ahead = ahead
+	update.Behind = behind
 }
 
 // getRemoteAheadBehindCounts populates RemoteAhead/RemoteBehind relative to
@@ -467,21 +507,41 @@ func (wt *WorkspaceTracker) getAheadBehindCounts(ctx context.Context, update *ty
 // (which would look like "just pushed" to a push-detection consumer).
 func (wt *WorkspaceTracker) getRemoteAheadBehindCounts(ctx context.Context, update *types.GitStatusUpdate, prior types.GitStatusUpdate) {
 	if update.RemoteBranch == "" {
+		update.RemoteHeadCommit = ""
 		update.RemoteAhead = 0
 		update.RemoteBehind = 0
 		return
 	}
-	countOut, err := wt.runGitOutput(ctx, "rev-list", "--left-right", "--count", "HEAD..."+update.RemoteBranch)
+	// RemoteBranch came from Git, but keep the same inline ref boundary as the
+	// other status comparisons before using it in a command argument.
+	rest, hasOriginPrefix := strings.CutPrefix(update.RemoteBranch, "origin/")
+	check := update.RemoteBranch
+	if hasOriginPrefix {
+		check = rest
+	}
+	if !safeBranchRefPattern.MatchString(check) || strings.Contains(check, "..") || strings.HasSuffix(check, ".lock") {
+		carryRemoteSnapshot(update, prior)
+		return
+	}
+	remoteHeadOut, err := wt.runGitOutput(ctx, "rev-parse", "--verify", update.RemoteBranch+"^{commit}")
+	if err != nil {
+		wt.logger.Debug("getRemoteAheadBehindCounts: rev-parse failed, carrying forward", zap.Error(err))
+		carryRemoteSnapshot(update, prior)
+		return
+	}
+	remoteHead := strings.TrimSpace(string(remoteHeadOut))
+	countOut, err := wt.runGitOutput(ctx, "rev-list", "--left-right", "--count", "HEAD..."+remoteHead)
 	if err != nil {
 		wt.logger.Debug("getRemoteAheadBehindCounts: rev-list failed, carrying forward", zap.Error(err))
-		carryRemoteAheadBehind(update, prior)
+		carryRemoteSnapshot(update, prior)
 		return
 	}
 	parts := strings.Fields(string(countOut))
 	if len(parts) != 2 {
-		carryRemoteAheadBehind(update, prior)
+		carryRemoteSnapshot(update, prior)
 		return
 	}
+	update.RemoteHeadCommit = remoteHead
 	update.RemoteAhead, _ = strconv.Atoi(parts[0])
 	update.RemoteBehind, _ = strconv.Atoi(parts[1])
 }
@@ -583,6 +643,13 @@ func (r baseBranchResolution) log(wt *WorkspaceTracker) {
 // resolveBaseBranchWithReason is resolveBaseBranch's decision, separated so the
 // outcome is assertable in tests rather than only observable through logs.
 func (wt *WorkspaceTracker) resolveBaseBranchWithReason(ctx context.Context) baseBranchResolution {
+	comparison := wt.ComparisonResolution()
+	if comparison.Explicit {
+		if comparison.Status == comparisonTargetStatusReady && comparison.Ref != "" {
+			return baseBranchResolution{ref: comparison.Ref, stored: comparison.Display, reason: baseBranchStored}
+		}
+		return baseBranchResolution{stored: comparison.Display, reason: baseBranchUnresolved}
+	}
 	stored := wt.BaseBranch()
 	if wt.IsSubmodule() {
 		anchor := wt.ComparisonAnchor()
@@ -615,6 +682,13 @@ func (wt *WorkspaceTracker) resolveBaseBranchWithReason(ctx context.Context) bas
 // aheadBehindFallbackCandidates list — local main/master are excluded
 // because they can show stale, in-progress work for divergence counts.
 func (wt *WorkspaceTracker) resolveAheadBehindRef(ctx context.Context) string {
+	comparison := wt.ComparisonResolution()
+	if comparison.Explicit {
+		if comparison.Status == comparisonTargetStatusReady {
+			return comparison.Ref
+		}
+		return ""
+	}
 	if wt.IsSubmodule() {
 		return wt.resolveBaseBranch(ctx)
 	}
@@ -689,6 +763,25 @@ func carryRemoteAheadBehind(update *types.GitStatusUpdate, prior types.GitStatus
 	if prior.HeadCommit == "" || prior.HeadCommit != update.HeadCommit {
 		return
 	}
+	update.RemoteAhead = prior.RemoteAhead
+	update.RemoteBehind = prior.RemoteBehind
+}
+
+// carryRemoteSnapshot keeps the upstream tip and divergence counts coherent
+// when one of the secondary upstream observations fails. A changed local HEAD
+// or tracking ref makes the previous snapshot unsafe, so the caller keeps the
+// zero-value unknown state instead.
+func carryRemoteSnapshot(update *types.GitStatusUpdate, prior types.GitStatusUpdate) {
+	update.RemoteHeadCommit = ""
+	update.RemoteAhead = 0
+	update.RemoteBehind = 0
+	if prior.HeadCommit == "" || prior.HeadCommit != update.HeadCommit {
+		return
+	}
+	if prior.RemoteBranch == "" || prior.RemoteBranch != update.RemoteBranch || prior.RemoteHeadCommit == "" {
+		return
+	}
+	update.RemoteHeadCommit = prior.RemoteHeadCommit
 	update.RemoteAhead = prior.RemoteAhead
 	update.RemoteBehind = prior.RemoteBehind
 }

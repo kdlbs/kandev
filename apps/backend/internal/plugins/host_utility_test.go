@@ -32,17 +32,15 @@ func (f *fakeConfigReader) GetConfig(string) (map[string]any, error) { return f.
 
 type fakeUtilityRunner struct {
 	calls        int
-	gotAgentType string
-	gotModel     string
-	gotMode      string
+	gotProfileID string
 	gotPrompt    string
 	text         string
 	err          error
 }
 
-func (f *fakeUtilityRunner) ExecutePrompt(_ context.Context, agentType, model, mode, prompt string) (string, error) {
+func (f *fakeUtilityRunner) ExecuteProfilePrompt(_ context.Context, profileID, prompt string) (string, error) {
 	f.calls++
-	f.gotAgentType, f.gotModel, f.gotMode, f.gotPrompt = agentType, model, mode, prompt
+	f.gotProfileID, f.gotPrompt = profileID, prompt
 	return f.text, f.err
 }
 
@@ -50,7 +48,7 @@ func configuredUtilityHost(t *testing.T) *testDataHost {
 	t.Helper()
 	d := newTestDataHost(manifest.Capabilities{AgentInvoke: true})
 	d.host.configs = &fakeConfigReader{configs: map[string]any{utilityAgentConfigKey: "utility-agent-42"}}
-	d.utilAgents.agent = &UtilityAgent{Name: "summarizer", AgentID: "claude-acp", Model: "claude-opus-4-8", Enabled: true}
+	d.utilAgents.agent = &UtilityAgent{Name: "summarizer", AgentID: "claude-acp", Model: "claude-opus-4-8", AgentProfileID: "profile-42", ProfileBindingState: "explicit", Enabled: true}
 	d.utilRun.text = "the summary"
 	return d
 }
@@ -70,8 +68,8 @@ func TestPluginHost_InvokeUtilityAgent_UsesPluginConfiguredUtilityAgent(t *testi
 	if err != nil || got != "the summary" {
 		t.Fatalf("InvokeUtilityAgent() = (%q, %v)", got, err)
 	}
-	if d.utilRun.gotAgentType != "claude-acp" || d.utilRun.gotModel != "claude-opus-4-8" {
-		t.Fatalf("runner got (%q, %q)", d.utilRun.gotAgentType, d.utilRun.gotModel)
+	if d.utilRun.gotProfileID != "profile-42" {
+		t.Fatalf("runner got profile %q", d.utilRun.gotProfileID)
 	}
 	if d.utilAgents.gotSelector != "utility-agent-42" {
 		t.Fatalf("looked up utility agent %q", d.utilAgents.gotSelector)

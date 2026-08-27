@@ -1,3 +1,8 @@
+/* eslint-disable max-lines -- `i18nGuardFiles` below is a 638-entry data list,
+   not logic. Splitting it into another module would break
+   `check-guard-allowlist.mjs`, which imports the BASE revision of this single
+   file from a temp directory to diff the array; a relative import of a sibling
+   would not resolve there. */
 /**
  * Options for `i18next/no-literal-string`, the guard against hardcoded
  * user-facing strings. Kept in its own module because the list is long enough to
@@ -221,22 +226,17 @@ export const noLiteralStringOptions = {
  * the completeness check. See docs/i18n.md.
  */
 export const i18nGuardFiles = [
+  // Dev-server preview control (added with the feature, per the same-PR rule).
+  "components/task/dev-server-preview-button.tsx",
+  // Task dependencies (added with the feature, per the same-PR rule).
+  "components/task/task-dependency-chip.tsx",
+  "components/task-create-dialog-dependencies.tsx",
   // The i18n runtime itself.
   "lib/i18n/**/*.{ts,tsx}",
-  // Settings → General → Appearance, migrated end-to-end as the worked example:
-  // the page, the two sections it owns, and the settings chrome around them.
-  "app/settings/general/appearance/**/*.{ts,tsx}",
-  // Settings → General → Notifications; the shared settings chrome it renders
-  // is migrated with the page that owns it, not here.
-  "app/settings/general/notifications/**/*.{ts,tsx}",
-  // Settings → General → Secrets.
-  "app/settings/general/secrets/**/*.{ts,tsx}",
-  // Settings → General → Terminal; the shared settings chrome is migrated with
-  // the page that owns it, not here.
-  "app/settings/general/terminal/**/*.{ts,tsx}",
-  "components/app-sidebar/sections/settings/general-group.tsx",
+  // Settings → Preferences — Appearance, Notifications, Terminal & Editors and
+  // friends render straight from components/settings via the SPA route table.
+  "components/settings/app-status-bar-settings-card.tsx",
   "components/settings/general-settings.tsx",
-  "components/settings/general-nav.ts",
   "components/settings/language-settings.tsx",
   "components/settings/notification-events-table.tsx",
   "components/settings/notification-permission-section.tsx",
@@ -254,39 +254,36 @@ export const i18nGuardFiles = [
   "components/settings/startup-page-settings-card.tsx",
   "components/settings/system-metrics-settings-card.tsx",
   "components/settings/terminal-settings.tsx",
-  // Settings → General → Editors: the page, its state/section components, the
-  // custom-editor form, and the editable-card shell that form renders inside.
-  // `editable-card.tsx` is shared with repository-card.tsx, which is not
-  // migrated — the guard is per-file, so that stays unaffected.
-  "app/settings/general/editors/**/*.{ts,tsx}",
+  // Settings → Preferences → Terminal & Editors: the merged page, its
+  // state/section components, the custom-editor form, and the editable-card
+  // shell that form renders inside. `editable-card.tsx` is shared with
+  // repository-card.tsx, which is not migrated — the guard is per-file, so
+  // that stays unaffected.
   "components/settings/editable-card.tsx",
   "components/settings/editor-form.tsx",
   "components/settings/editors-settings-state.tsx",
   "components/settings/editors-settings.tsx",
   "components/settings/lsp-status-location-setting.tsx",
   "components/settings/lsp-language-options.ts",
-  // Settings → General → Sprites.
-  "app/settings/general/sprites/**/*.{ts,tsx}",
+  // Sprites.dev config, now a section on the Executors page.
   "components/settings/sprites-settings.tsx",
-  // Settings → General → Layouts: the page and the whole layouts component
-  // directory. `layout-editor-actions.ts` and `use-layout-settings.ts` hold no
+  // Settings → Preferences → Layouts: the whole layouts component directory.
+  // `layout-editor-actions.ts` and `use-layout-settings.ts` hold no
   // JSX, so `mode: "jsx-only"` never inspects them — the entries record that
   // they are migrated, but only the pseudo-locale can prove it stays that way.
-  "app/settings/general/layouts/**/*.{ts,tsx}",
   "components/settings/layouts/**/*.{ts,tsx}",
-  // Settings → General → Resource Metrics, Keyboard Shortcuts and Task Actions.
+  // Settings → Preferences → Appearance, Keyboard Shortcuts and Task behavior.
   // The pages render from general-settings.tsx (already listed above); these
-  // entries add the routes plus the per-setting cards those two pages own.
-  // Shortcut *names* still come from `lib/keyboard/shortcut-overrides.ts`, a
-  // registry shared with the un-migrated voice-mode page — deliberately not
-  // migrated here.
-  "app/settings/general/resource-metrics/**/*.{ts,tsx}",
-  "app/settings/general/keyboard-shortcuts/**/*.{ts,tsx}",
-  "app/settings/general/task-actions/**/*.{ts,tsx}",
+  // entries add the merged pages plus the per-setting cards those pages own.
+  // Shortcut *names* still come from `lib/keyboard/shortcut-overrides.ts`,
+  // which is deliberately not migrated here.
+  "components/settings/task-behavior-settings.tsx",
+  "components/settings/terminal-editors-settings.tsx",
   "components/settings/anchored-prompt-bar-settings.tsx",
   "components/settings/archive-confirmation-settings.tsx",
   "components/settings/keyboard-shortcuts-card.tsx",
   "components/settings/mcp-task-agent-profile-default-settings.tsx",
+  "components/settings/settings-menu-mode-card.tsx",
   "components/settings/unread-divider-settings.tsx",
   // Settings → Integrations → GitHub, connection and authentication half: the
   // page, the settings shell, the status/identity panels, the connection dialog
@@ -535,9 +532,8 @@ export const i18nGuardFiles = [
   // `status`, the routing `tier`, the permission `apply_method`, the watcher
   // `kind`, and every model/mode `id` — only their labels are copy, and those
   // travel as catalog keys and resolve at render.
-  "app/settings/agent/**/*.{ts,tsx}",
   "app/settings/agents/**/*.{ts,tsx}",
-  "components/app-sidebar/sections/settings/agents-group.tsx",
+  "components/settings/agents/**/*.{ts,tsx}",
   "components/settings/add-tui-agent-dialog.tsx",
   "components/settings/agent-login-dialog.tsx",
   "components/settings/agent-profile-delete-dialog.tsx",
@@ -548,6 +544,7 @@ export const i18nGuardFiles = [
   "components/settings/command-prefix-field.tsx",
   "components/settings/install-agent-card.tsx",
   "components/settings/installed-agent-card.tsx",
+  "components/settings/mcp-strategy-select.tsx",
   "components/settings/mode-combobox.tsx",
   "components/settings/profile-capability-helpers.tsx",
   "components/settings/profile-form-fields.tsx",
@@ -595,7 +592,6 @@ export const i18nGuardFiles = [
   //     `/root/.cache/go-build` placeholder. All are interpolated as values so
   //     the pseudo-locale cannot turn them into dead pointers.
   //   - `StorageBusyResource.label`, which the backend renders.
-  "app/settings/system/storage/**/*.{ts,tsx}",
   "components/settings/system/storage/**/*.{ts,tsx}",
   "hooks/domains/system/use-storage-maintenance.ts",
   // The shell every System route renders. It takes title/description/actions as
@@ -726,7 +722,6 @@ export const i18nGuardFiles = [
   // same trap on its own dynamic route. `pnpm lint` is unchanged by the repair,
   // so these directories were always clean — just unguarded. See docs/i18n.md
   // ("An entry can be born dead").
-  "app/settings/workspace/[[]id[]]/workflows/**/*.{ts,tsx}",
   "app/settings/workspace/use-workflow-creation.ts",
   "app/settings/workspace/workspace-workflows-client.tsx",
   "app/settings/workspace/workspace-workflows-dialogs.tsx",
@@ -851,10 +846,9 @@ export const i18nGuardFiles = [
   //     backup filenames, and the `<data-dir>/backups/` placeholder — all
   //     interpolated as values so the pseudo-locale cannot turn them into dead
   //     pointers.
-  "app/settings/system/**/*.{ts,tsx}",
-  "components/app-sidebar/sections/settings/system-group.tsx",
   "components/settings/changelog-list.tsx",
   "components/settings/system/*.{ts,tsx}",
+  "components/settings/system/**/*.{ts,tsx}",
   "hooks/domains/system/use-desktop-updater.ts",
   "hooks/domains/system/use-kandev-restart.ts",
   "hooks/domains/system/use-self-update.ts",
@@ -885,11 +879,17 @@ export const i18nGuardFiles = [
   // can keep them that way.
   "components/app-sidebar/*.{ts,tsx}",
   "components/app-sidebar/sections/*.tsx",
-  "components/app-sidebar/sections/settings/account-group.tsx",
-  "components/app-sidebar/sections/settings/executors-group.tsx",
   "components/app-sidebar/sections/settings/settings-nav-primitives.tsx",
   "components/app-sidebar/sections/settings/settings-tree.tsx",
-  "components/app-sidebar/sections/settings/workspaces-group.tsx",
+  // The optional tree modes the menu grows under Workspaces, Agents and
+  // Executors. `settings-menu-node.tsx` is the only one with JSX; the three
+  // `.ts` entries hold branch data, expansion state and the store read, and
+  // carry catalog *keys* rather than copy — `mode: "jsx-only"` never inspects
+  // them, so the entries record that they were read, not that lint guards them.
+  "components/app-sidebar/sections/settings/settings-menu-branches.ts",
+  "components/app-sidebar/sections/settings/settings-menu-node.tsx",
+  "components/app-sidebar/sections/settings/use-settings-menu-branches.ts",
+  "components/app-sidebar/sections/settings/use-settings-menu-expansion.ts",
   "components/app-status-bar/**/*.{ts,tsx}",
   "components/theme-toggle.tsx",
   // The command palette's own copy. `group` doubles as the palette's Map key and
@@ -966,23 +966,23 @@ export const i18nGuardFiles = [
   // here to break; the name travels into the sentence as an interpolated value.
   "app/settings/workspace/page.tsx",
   "app/settings/workspace/[[]id[]]/page.tsx",
-  "app/settings/workspace/[[]id[]]/repositories/page.tsx",
   "app/settings/workspace/workspace-edit-client.tsx",
   "app/settings/workspace/workspace-not-found-card.tsx",
   "app/settings/workspace/workspace-repositories-client.tsx",
   "app/settings/workspace/workspace-repositories-dialog.tsx",
   "app/settings/workspace/workspaces-page-client.tsx",
+  "components/settings/workspaces/**/*.{ts,tsx}",
   "components/settings/repository-branch-template-help.tsx",
   "components/settings/repository-card.tsx",
   "components/settings/repository-copy-files-help.tsx",
   "components/settings/repository-custom-scripts.tsx",
   "components/settings/repository-delete-dialog.tsx",
   "components/settings/unsaved-indicator.tsx",
-  // Settings → External MCP, Prompts, Voice Mode and Utility Agents, plus the
-  // two Changelog cards. Four small routes in one entry group because none of
-  // them owns enough copy to be worth its own migration, and they share the
-  // `settings` namespace: two of the four already had their page title there
-  // (`settings:voiceMode`, `settings:utilityAgents`) and the other two in
+  // Settings → External MCP, Prompts and Utility Agents, plus the two
+  // Changelog cards. Small routes in one entry group because none of them owns
+  // enough copy to be worth its own migration, and they share the `settings`
+  // namespace: one already had its page title there
+  // (`settings:utilityAgents`) and the others in
   // `common` (`common:externalMcp`, `common:prompts`), all of which are reused
   // rather than twinned — `SEGMENT_LABEL_KEYS` in `settings-layout-client.tsx`
   // renders the same words as the breadcrumb on these very routes.
@@ -995,9 +995,8 @@ export const i18nGuardFiles = [
   // identifiers an external agent calls. Two unit tests pin the keys to the
   // catalog, because nothing else can.
   //
-  // Three more shapes here held copy no lint rule could see, all now migrated:
-  // `buildEngineOptions` in `voice-mode-settings.tsx` (a plain builder
-  // returning label/description object literals), `noteForStatus` in
+  // Two more shapes here held copy no lint rule could see, both now migrated:
+  // `noteForStatus` in
   // `inference-agent-status.tsx` (a non-JSX switch over the probe status), and
   // the `placeholder = "Select a model"` parameter default in
   // `model-combobox.tsx`, which had to move into the component body — a
@@ -1018,10 +1017,10 @@ export const i18nGuardFiles = [
   // of them holds any copy at all, but the next migration should not have to
   // rediscover which ones are live:
   //
-  //   - `app/settings/prompts/page.tsx` and `app/settings/voice-mode/page.tsx`
+  //   - `app/settings/prompts/page.tsx`
   //     are unreferenced. `SETTINGS_ROUTES` in `src/settings-routes.tsx` renders
-  //     `<PromptsSettings />` and `<VoiceModeSettings />` directly, so the SSR
-  //     prefetch in those pages never runs. `external-mcp` and `utility-agents`
+  //     `<PromptsSettings />` directly, so the SSR prefetch in that page never
+  //     runs. `external-mcp` and `utility-agents`
   //     go through their page, and are live.
   //   - `app/settings/changelog/page.tsx` is likewise unreferenced; the route
   //     table has its own `SettingsRedirect` to `/settings/system/updates`.
@@ -1059,17 +1058,12 @@ export const i18nGuardFiles = [
   //     whole of every generated snippet. All interpolated as values.
   //   - The `{{` prompt-template sigil and the `@name` chat mention token —
   //     both typed verbatim by the user, both interpolated.
-  //   - Wire values: the voice `engine` / `mode` / `whisper_web_model` unions
-  //     and the BCP-47 `language` tags, the `InferenceAgentStatus` probe
-  //     states, the `USE_DEFAULT` sentinel, and every agent/model id. Only
-  //     their labels are copy, and those travel as catalog keys.
-  //   - `~40 MB` / `~75 MB` / `~240 MB` in `WHISPER_MODELS`: download sizes in
-  //     binary units, not prose — the same call `storage-units.ts` made.
+  //   - Wire values: the `InferenceAgentStatus` probe states, the
+  //     `USE_DEFAULT` sentinel, and every agent/model id. Only their labels
+  //     are copy, and those travel as catalog keys.
   //   - Utility agent `name`, `description` and `prompt`, and custom prompt
   //     `name` / `content`. The builtins' text is authored by the backend and
   //     the rest is user data; a prompt body is also sent to the agent verbatim.
-  //   - `new Error("Voice settings require VoiceDraftProvider")`, a programming
-  //     error that can only fire in a broken render tree.
   //
   // Every key added here was audited against all 15 en catalogs for English that
   // already exists under another key. Twelve matched. Ten are the established
@@ -1098,17 +1092,15 @@ export const i18nGuardFiles = [
   // that key is named for the secrets dialog it belongs to; folding the prompts
   // dialog into it would leave a key whose name contradicts half its callers.
   //
-  // Still English and NOT ours: `CONFIGURABLE_SHORTCUTS.VOICE_INPUT_TOGGLE.label`
-  // ("Voice Input") from `lib/keyboard/shortcut-overrides.ts`, interpolated into
-  // the migrated `settings:voiceShortcutTitle` frame. It is the shared keyboard
-  // registry, owned by whoever migrates `lib/keyboard`; under the pseudo-locale
-  // it reads as an English word inside accented copy, which is the oracle's
-  // known weak spot rather than a miss here.
-  "app/settings/changelog/**/*.{ts,tsx}",
+  // Shortcut labels in `CONFIGURABLE_SHORTCUTS`
+  // (`lib/keyboard/shortcut-overrides.ts`) are still English and NOT ours:
+  // that is the shared keyboard registry, owned by whoever migrates
+  // `lib/keyboard`. Under the pseudo-locale they read as English words inside
+  // accented copy, which is the oracle's known weak spot rather than a miss
+  // here.
   "app/settings/external-mcp/**/*.{ts,tsx}",
   "app/settings/prompts/**/*.{ts,tsx}",
   "app/settings/utility-agents/**/*.{ts,tsx}",
-  "app/settings/voice-mode/**/*.{ts,tsx}",
   "components/settings/changelog-notification-card.tsx",
   "components/settings/changelog-settings.tsx",
   "components/settings/config-chat-agent-section.tsx",
@@ -1121,7 +1113,6 @@ export const i18nGuardFiles = [
   "components/settings/utility-agents-section.tsx",
   "components/settings/utility-dirty.ts",
   "components/settings/utility-sections.tsx",
-  "components/settings/voice-mode-settings.tsx",
   "lib/settings/external-mcp-tools.ts",
   // Configuration Chat. `ConfigChatProvider` mounts the FAB on EVERY /settings
   // route, so its `aria-label="Configuration Chat"` was the last text finding
@@ -1224,7 +1215,6 @@ export const i18nGuardFiles = [
   // escaped form is what proves an entry is live.
   "components/automations/*.{ts,tsx}",
   "components/automations/trigger-configs/*.tsx",
-  "app/settings/automations/page.tsx",
   "app/settings/workspace/[[]id[]]/automations/**/*.tsx",
   "hooks/domains/settings/use-automation-runs.ts",
   // Settings → Plugins, Settings → Account, and the plural
@@ -1419,6 +1409,8 @@ export const i18nGuardFiles = [
   "components/github/my-github/use-pr-statuses.ts",
   "components/github/pr-checks-section.tsx",
   "components/github/pr-ci-automation-controls.tsx",
+  "components/github/pr-ci-automation-prompt-dialog.tsx",
+  "components/github/pr-ci-automation-rows.tsx",
   "components/github/pr-ci-popover.tsx",
   "components/github/pr-comments-section.tsx",
   "components/github/pr-detail-panel.tsx",
@@ -1429,12 +1421,21 @@ export const i18nGuardFiles = [
   "components/github/pr-shared.tsx",
   "components/github/pr-status-chip.tsx",
   "components/github/pr-topbar-button.tsx",
+  "components/gitlab/mr-auto-fix-prompt-dialog.tsx",
+  "components/gitlab/mr-automation-controls.tsx",
+  "components/gitlab/mr-automation-rows.tsx",
   "components/gitlab/mr-commits-section.tsx",
+  "components/gitlab/mr-task-status-summary.tsx",
   "components/gitlab/mr-detail-panel.tsx",
   "components/gitlab/mr-discussions-section.tsx",
   "components/gitlab/mr-files-section.tsx",
   "components/gitlab/mr-overview-section.tsx",
   "components/gitlab/mr-reviewer-control.tsx",
+  "components/gitlab/mr-status-chip.tsx",
+  "components/gitlab/mr-status-chip-drawer.tsx",
+  "components/gitlab/mr-status-chip-popover.tsx",
+  "components/gitlab/mr-status-chip-selection.ts",
+  "components/gitlab/mr-status-chip-trigger.tsx",
   "components/gitlab/mr-topbar-button.tsx",
   "components/gitlab/my-gitlab/issue-list.tsx",
   "components/gitlab/my-gitlab/list-toolbar.tsx",
@@ -1581,11 +1582,15 @@ export const i18nGuardFiles = [
   "components/kanban/swimlane-graph2-content.tsx",
   "components/kanban/swimlane-header.tsx",
   "components/kanban/swimlane-kanban-content.tsx",
+  "components/kanban/columns-menu.tsx",
   "components/kanban/task-multi-select-toolbar.tsx",
   // Kanban board: loose card/column/dropdown components on the same namespace.
   "components/kanban-board.tsx",
   "components/kanban-card-content.tsx",
   "components/kanban-card-menu-items.tsx",
+  // Extracted out of kanban-card-content.tsx, which is guarded: without its own
+  // entry the card title markup would silently leave whole-file guard coverage.
+  "components/kanban-card-title.tsx",
   "components/kanban-column.tsx",
   "components/kanban-display-dropdown.tsx",
   "components/kanban-with-preview.tsx",
@@ -1657,9 +1662,8 @@ export const i18nGuardFiles = [
   //
   // Deliberately left in English inside these trees, because they are data or
   // protocol rather than copy: sidebar-filter *values* (`state`, `in_progress`,
-  // …) and sort/group keys, which are persisted in a saved view; the `"main"`
-  // default base-branch name in `session-mobile-top-bar-git-controls.tsx`; the
-  // share API's `applied_rules` redaction ids and share URLs/tokens; terminal
+  // …) and sort/group keys, which are persisted in a saved view; the share
+  // API's `applied_rules` redaction ids and share URLs/tokens; terminal
   // key sequences and key-cap glyphs in `mobile-terminal-keybar-helpers.tsx`
   // (only their spoken aria-labels are translated); and the `group:` bucket on
   // the command-palette entry in `sidebar-filter-bar.tsx`, which is shared
@@ -1824,4 +1828,257 @@ export const i18nGuardFiles = [
   // chips, routing cards and activity rows all resolve through, so the same
   // vocabulary cannot drift apart across surfaces.
   "app/office/**/*.{ts,tsx}",
+  // The command palette's two un-migrated producers. `global-commands.tsx` was
+  // already listed and already resolved everything through the catalog, so ⌘K
+  // rendered a translated Navigation group above English Git/Panels rows; these
+  // two are what made the same list half-English. Their labels are `label:`
+  // object properties rather than JSX, which is why the guard reported them
+  // clean the whole time — see the note on `mode: "jsx-only"` above.
+  "components/homepage-commands.tsx",
+  "components/session-commands.tsx",
+  // `use-git-with-feedback.ts` composed its own English around the operation
+  // name ("Push failed"), which is why `vcs-split-button.tsx`, `vcs-dialogs.tsx`
+  // and the palette all passed it a deliberately English label. It interpolates
+  // catalog messages now, so those three no longer have to.
+  "hooks/use-git-with-feedback.ts",
+  // Toast and feedback copy. None of it is JSX — it is `title:`/`description:`
+  // object properties and `toast.error("…")` arguments — so `mode: "jsx-only"`
+  // never inspected any of these files and they read as clean for the whole
+  // migration. Listing them records that they are done; only the pseudo-locale
+  // can prove they stay that way.
+  //
+  // `changes-panel-hooks.ts` carried the multi-repo half of the same
+  // concatenated-English problem as `use-git-with-feedback.ts`
+  // (`${operationName} partially succeeded`), including two per-repo counts that
+  // now use `count` with `_one`/`_other` instead of a bare "repos".
+  //
+  // `unarchive-feedback.ts` inflected its own sentence
+  // (`${plural ? "Branches" : "Branch"} … no longer ${plural ? "exist" : "exists"}`),
+  // which is the inline-plural shape docs/i18n.md rules out; the plural rule
+  // lives in the catalog now. `check-inline-plurals.mjs` does not see this
+  // form — it is two independent ternaries, not a `+ "s"`.
+  "app/tasks/tasks-page-client.tsx",
+  "components/azure-devops/azure-devops-task-launcher.tsx",
+  "components/github/use-pr-scoped-review-request.ts",
+  "components/task/changes-panel-hooks.ts",
+  "components/task/task-center-panel-restoration.ts",
+  "components/task/use-tunnel-actions.ts",
+  "hooks/domains/comments/use-markdown-preview-comments.ts",
+  "hooks/domains/session/use-task-environment.ts",
+  "hooks/use-file-save-delete.ts",
+  "hooks/use-utility-agent-generator.ts",
+  "lib/tasks/unarchive-feedback.ts",
+  // Dockview panel titles. These are display copy that is ALSO persisted —
+  // `toSerializedDockview` writes the title into the stored layout JSON — so
+  // they now carry a `titleKey` beside a canonical English `title`, the split
+  // the note on the layouts screen in `e2e/tests/i18n/pseudo-coverage.spec.ts`
+  // said they needed. `constants.ts` deliberately still holds English `title:`
+  // values; they are storage, not copy, and `panel-titles.test.ts` asserts the
+  // two stay apart.
+  "lib/state/dockview-panel-actions.ts",
+  "lib/state/layout-manager/constants.ts",
+  "lib/state/layout-manager/serializer.ts",
+  // Built-in layout profile names and descriptions, the other half of the same
+  // problem: `upsertBuiltInLayoutOverride` copies `name` into a saved override,
+  // so `name`/`description` stay canonical English and the settings list renders
+  // `nameKey`/`descriptionKey`.
+  "lib/layout/layout-profiles.ts",
+  // English `??` / `||` fallbacks — "Agent", "Terminal", "Repository",
+  // "Untitled task", "An error occurred". They render whenever the real value
+  // is absent, which is a normal path rather than an edge case, and none of
+  // them is a JSX literal, so the guard never saw them. Values that are
+  // PERSISTED or sent to an agent verbatim ("New Repository", the quick-chat
+  // session name, `use-plan-actions`' default prompt) are deliberately still
+  // English and stay off this list.
+  "components/review/review-diff-list-groups.tsx",
+  "components/review/review-dialog.tsx",
+  "components/task/changes-git-credential-display.ts",
+  "components/task/task-session-sidebar-archived-item.ts",
+  "hooks/domains/session/use-session-resumption.ts",
+  "hooks/domains/session/use-terminals.ts",
+  "hooks/domains/session/use-user-shells.ts",
+  "hooks/use-editor-keybinds.ts",
+  "hooks/use-summarize-session.ts",
+  "hooks/use-update-available-toast.ts",
+  "lib/agent-runtime-update.ts",
+  "lib/api/domains/plan-api.ts",
+  "lib/capability-warning.ts",
+  "lib/github-auth.ts",
+  "lib/recent-tasks.ts",
+  "lib/state/slices/comments/format.ts",
+  "lib/utils/file-diff.ts",
+  // The built-in sidebar view's name, the third persisted-and-displayed string
+  // in this change. `SidebarView.name` is user-editable and synced, so the
+  // built-in keeps a canonical English `name` and every surface resolves
+  // `sidebarViewName()` instead. Found by the pseudo oracle, not by lint: it is
+  // a `.ts` constant, which `mode: "jsx-only"` never inspects.
+  "lib/state/slices/ui/sidebar-view-builtins.ts",
+  // The last English row in the palette. Its `group` was already translated —
+  // it has to be, since the palette groups by the resolved value — and a
+  // comment deferred the `label`/`keywords` to "the components/task migration".
+  // Both are palette copy and belong with the rest of it.
+  "components/task/recent-task-switcher-hooks.ts",
+  // Second-audit gaps hidden in hook toasts, configuration objects, synthetic
+  // display records, and developer QA page chrome rather than JSX text.
+  "app/demo/agent-messages/page.tsx",
+  "app/demo/messages/page.tsx",
+  "components/azure-devops/azure-devops-mode-tabs.tsx",
+  "components/azure-devops/azure-devops-scope-bar.tsx",
+  "components/azure-devops/azure-devops-task-pull-request-chip.tsx",
+  "components/gitlab/my-gitlab/quick-task-launcher.tsx",
+  "components/shared/mermaid-error-toast.tsx",
+  "components/task/task-pr-shortcut.tsx",
+  "components/task-create-dialog-effects.ts",
+  "components/task-create-dialog-fresh-branch-consent.ts",
+  "components/task-create-dialog-submit.tsx",
+  "hooks/domains/kanban/use-implement-fresh.ts",
+  "hooks/domains/kanban/use-plan-actions.ts",
+  "hooks/domains/review/use-finding-actions.ts",
+  "hooks/domains/review/use-send-finding-to-agent.ts",
+  "hooks/domains/session/use-commit-diff.ts",
+  "hooks/domains/session/use-request-changes-walkthrough.ts",
+  "hooks/domains/session/use-session-actions.ts",
+  "hooks/domains/session/use-task-plan.ts",
+  "hooks/use-file-editors.ts",
+  "hooks/use-file-operations.ts",
+  "hooks/use-nest-task.ts",
+  "hooks/use-open-session-in-editor.ts",
+  "hooks/use-sidebar-views-sync.ts",
+  "hooks/use-task-workflow-move.ts",
+  "lib/keyboard/shortcut-overrides.ts",
+  // Third audit: the non-JSX sweep. `check-nonjsx-copy.mjs` used to default its
+  // scope to THIS list, so 1141 of 2564 source files were judged by neither gate
+  // — and the positions eslint structurally cannot see (config tables, helper
+  // returns, parameter defaults, toast arguments) are exactly what lives in the
+  // plain `.ts` modules that never appear here. These are the files that sweep
+  // externalized or marked `i18n-exempt`. The scanner now defaults to the whole
+  // tree and `i18next/no-literal-string` is repo-wide, so this list is the
+  // migration record and the `lint:i18n` preview scope, no longer the bound.
+  "app/actions/agents.ts",
+  "app/demo/messages/demo-messages-data.ts",
+  "app/layout.tsx",
+  "app/stats/stats-data.tsx",
+  "app/stats/stats-utils.ts",
+  "app/tasks/rich-task-row-details.ts",
+  "components/combobox.tsx",
+  "components/debug-overlay.tsx",
+  "components/github/my-github/use-github-search.ts",
+  "components/gitlab/my-gitlab/presets.ts",
+  "components/gitlab/my-gitlab/use-gitlab-search.ts",
+  "components/improve-kandev-dialog-model.ts",
+  "components/jira/my-jira/filter-model.ts",
+  "components/jira/my-jira/use-saved-views.ts",
+  "components/kanban-card-edit-submenu.tsx",
+  "components/kanban/swimlane-container.tsx",
+  "components/kanban/task-search-input.tsx",
+  "components/mobile/pull-to-refresh.tsx",
+  "components/runs/automation-rows.ts",
+  "components/runs/run-feed-item.tsx",
+  "components/runs/use-automation-activity.ts",
+  "components/runs/use-automation-summaries.ts",
+  "components/runs/use-workspace-automations.ts",
+  "components/runs/use-workspace-runs.ts",
+  "components/settings/key-value-input.tsx",
+  "components/settings/lsp-language-cards.tsx",
+  "components/settings/settings-breadcrumb-labels.ts",
+  "components/settings/settings-save-provider.tsx",
+  "components/settings/sleep-inhibition-settings.tsx",
+  "components/shared/mermaid-utils.ts",
+  "components/task-create-dialog-branch-utils.ts",
+  "components/task-create-dialog-computed.ts",
+  "components/task-create-dialog-pill.tsx",
+  "components/task-create-dialog-setup.ts",
+  "components/task/dockview-session-handoff.ts",
+  "components/task/dockview-session-tabs.ts",
+  "components/task/editor-worktree-options.ts",
+  "components/task/executor-environment-status.ts",
+  "components/task/file-browser-actions.ts",
+  "components/task/file-browser-path.ts",
+  "components/task/file-browser-tree-loader.ts",
+  "components/task/new-session-form-actions.ts",
+  "components/task/recent-task-switcher-model.ts",
+  "components/task/review-panel-provider.ts",
+  "components/task/session-context-summary.ts",
+  "components/task/session-sort.ts",
+  "components/task/sidebar-mock-data.ts",
+  "components/task/task-cleanup-summary.ts",
+  "components/task/task-session-sidebar-link-actions.ts",
+  "components/task/use-passthrough-terminal.ts",
+  "components/task/use-review-dialog.ts",
+  "components/task/use-subtask-submit.ts",
+  "components/task/use-terminal-search.ts",
+  "components/workspace-source-picker/workspace-source-state.ts",
+  "hooks/domains/azure-devops/use-azure-devops-watches.ts",
+  "hooks/domains/github/pr-commits-resource.ts",
+  "hooks/domains/github/use-github-app-registrations.ts",
+  "hooks/domains/github/use-pr-diff.ts",
+  "hooks/domains/github/use-pr-feedback.ts",
+  "hooks/domains/github/use-task-ci-options.ts",
+  "hooks/domains/gitlab/use-gitlab-issue-watches.ts",
+  "hooks/domains/gitlab/use-gitlab-review-watches.ts",
+  "hooks/domains/gitlab/use-mr-feedback.ts",
+  "hooks/domains/gitlab/use-task-mr-automation.ts",
+  "hooks/domains/jira/use-jira-issue-watches.ts",
+  "hooks/domains/kanban/use-sidebar-archived-tasks.ts",
+  "hooks/domains/kanban/use-swimlane-move.ts",
+  "hooks/domains/linear/use-linear-issue-watches.ts",
+  "hooks/domains/office/use-agent-route.ts",
+  "hooks/domains/office/use-provider-health.ts",
+  "hooks/domains/office/use-routing-preview.ts",
+  "hooks/domains/office/use-run-attempts.ts",
+  "hooks/domains/office/use-workspace-routing.ts",
+  "hooks/domains/session/use-clarification-group.ts",
+  "hooks/domains/session/use-cumulative-diff.ts",
+  "hooks/domains/session/use-session-launch.ts",
+  "hooks/domains/session/use-session-messages.ts",
+  "hooks/domains/session/use-terminals-build.ts",
+  "hooks/use-detach-task.ts",
+  "hooks/use-drag-and-drop.ts",
+  "hooks/use-entity-reference-search.ts",
+  "hooks/use-git-operations.ts",
+  "hooks/use-inline-mention.ts",
+  "hooks/use-message-handler.ts",
+  "hooks/use-nav-availability.ts",
+  "hooks/use-optimistic-task-mutation.ts",
+  "hooks/use-prompt-result-delivery.ts",
+  "hooks/use-session-failure-toast.ts",
+  "hooks/use-task-deleted-toast.ts",
+  "hooks/use-terminal-link-handler.ts",
+  "hooks/use-workflow-steps.ts",
+  "lib/api/domains/attachment-api.ts",
+  "lib/api/domains/automation-api.ts",
+  "lib/api/domains/frontend-error-log-api.ts",
+  "lib/api/domains/github-api.ts",
+  "lib/api/domains/queue-api.ts",
+  "lib/api/domains/review-api.ts",
+  "lib/api/domains/user-shell-api.ts",
+  "lib/api/domains/walkthrough-api.ts",
+  "lib/kanban/view-registry.ts",
+  "lib/keyboard/constants.ts",
+  "lib/logger/intercept.ts",
+  "lib/lsp/lsp-progress-view.ts",
+  "lib/notifications/sound.ts",
+  "lib/plugins/change-request-creation.ts",
+  "lib/review/format.ts",
+  "lib/routing/client-route-helpers.ts",
+  "lib/settings-discovery/catalog/index.ts",
+  "lib/settings/external-mcp-snippets.ts",
+  "lib/ssr/session-page-state.ts",
+  "lib/state/dockview-env-switch.ts",
+  "lib/state/dockview-layout-builders.ts",
+  "lib/state/layout-manager/session-panels.ts",
+  "lib/state/slices/ui/sidebar-task-prefs-actions.ts",
+  "lib/state/slices/ui/sidebar-view-actions.ts",
+  "lib/tasks/tasks-list-options.ts",
+  "lib/terminal/terminal-font.ts",
+  "lib/theme/colors.ts",
+  "lib/utils/file-change-status.ts",
+  "lib/utils.ts",
+  "lib/walkthrough-request.ts",
+  "lib/ws/client.ts",
+  "lib/ws/handlers/agent-session.ts",
+  "lib/ws/handlers/empty-turn-notice.ts",
+  "lib/ws/handlers/notifications.ts",
+  "lib/ws/handlers/quick-chat.ts",
+  "lib/ws/use-websocket.tsx",
 ];

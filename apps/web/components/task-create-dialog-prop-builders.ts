@@ -40,6 +40,7 @@ export function buildDialogFormBodyProps(
     onTaskNameChange: handlers.handleTaskNameChange,
     onRowRepositoryChange: handlers.handleRowRepositoryChange,
     onRowBranchChange: handlers.handleRowBranchChange,
+    onRowPolicyChange: handlers.handleRowPolicyChange,
     initialDescription: fs.currentDefaults.description,
     workspaceId: props.workspaceId,
     onJiraImport: setup.handleJiraImport,
@@ -76,6 +77,9 @@ export function buildDialogFormBodyProps(
     lastUsedBranch: setup.taskCreateLastUsed.branch,
     userSettingsLoaded: setup.userSettingsLoaded,
     freshBranchAvailable: setup.freshBranchAvailable,
+    // The same lock disables the source-mode and local-repository controls, and
+    // applying a set writes fs.repositories just as they would.
+    repositorySets: repoLocked ? undefined : setup.repositorySets,
     isLocalExecutor: computed.isLocalExecutor,
     noCompatibleAgent: computed.noCompatibleAgent,
     executorProfileName: computed.selectedExecutorProfileName,

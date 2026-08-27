@@ -24,9 +24,50 @@ type TaskWithRepos = {
 type SessionInfo = {
   id: string;
   agent_profile_id: string;
+  executor_id?: string;
   executor_profile_id: string;
   state: string;
+  metadata?: Record<string, unknown>;
 };
+
+type RuntimeConfig = {
+  model?: string;
+  mode?: string;
+  config_options?: Record<string, string>;
+};
+
+function runtimeConfigFromMetadata(
+  metadata: Record<string, unknown> | undefined,
+  key: string,
+): RuntimeConfig {
+  return (metadata?.[key] as RuntimeConfig | undefined) ?? {};
+}
+
+function firstRuntimeValue(...values: Array<string | undefined>): string | undefined {
+  return values.find((value) => value);
+}
+
+function effectiveRuntimeConfig(session: SessionInfo): RuntimeConfig {
+  const snapshot = runtimeConfigFromMetadata(session.metadata, "agent_profile_snapshot");
+  const runtime = runtimeConfigFromMetadata(session.metadata, "runtime_config");
+  const overrides = runtimeConfigFromMetadata(session.metadata, "runtime_config_overrides");
+  const configOptions = {
+    ...(runtime.config_options ?? snapshot.config_options ?? {}),
+    ...(overrides.config_options ?? {}),
+  };
+  delete configOptions.model;
+  delete configOptions.mode;
+  return {
+    model: firstRuntimeValue(overrides.model, runtime.model, snapshot.model),
+    mode: firstRuntimeValue(
+      session.metadata?.session_mode as string | undefined,
+      overrides.mode,
+      runtime.mode,
+      snapshot.mode,
+    ),
+    config_options: configOptions,
+  };
+}
 
 async function selectRepositoryFromChip(repoChip: Locator, option: Locator, name: string) {
   await expect(async () => {
@@ -73,6 +114,7 @@ test.describe("Subtask basics", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     // Create a task with an agent so we have a session to navigate to
     const task = await apiClient.createTaskWithAgent(
@@ -83,6 +125,7 @@ test.describe("Subtask basics", () => {
         description: "/e2e:simple-message",
         workflow_id: seedData.workflowId,
         repository_ids: [seedData.repositoryId],
+        executor_profile_id: seedData.worktreeExecutorProfileId,
       },
     );
 
@@ -97,9 +140,41 @@ test.describe("Subtask basics", () => {
     await session.openCreateSubtaskForSidebarTask("Subtask Parent");
 
     // The compact NewSubtaskDialog should open with pre-filled title containing numeric suffix
+    const dialog = testPage.getByTestId("new-subtask-dialog");
+    await expect(dialog.getByTestId("autopilot-toggle-row")).toBeVisible();
+    await expect(testPage.locator('[data-slot="tooltip-content"][data-state="open"]')).toHaveCount(
+      0,
+    );
+    await expect(dialog.getByTestId("autopilot-info")).not.toBeFocused();
+    await expect(dialog.getByRole("switch", { name: "Autopilot" })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+    await dialog.getByTestId("autopilot-info").hover();
+    await expect(testPage.getByRole("tooltip")).toContainText(
+      "The agent works independently and asks the parent task only when a critical decision blocks progress.",
+    );
+
     const titleInput = testPage.getByTestId("subtask-title-input");
     await expect(titleInput).toBeVisible({ timeout: 5_000 });
     await expect(titleInput).toHaveValue(/Subtask Parent \/ Subtask \d+/);
+
+    const parentBranchBadge = dialog.getByText("Same branch as current session", { exact: true });
+    await expect(parentBranchBadge).toBeVisible();
+    await expect(dialog.getByTestId("subtask-workspace-mode-inherit")).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    await dialog.getByTestId("subtask-workspace-mode-new").click();
+    await expect(parentBranchBadge).toHaveCount(0);
+    await expect(dialog.getByTestId("repo-chip-trigger")).toBeVisible();
+    await expect(dialog.getByTestId("branch-chip-trigger")).toBeVisible();
+    await testPage.mouse.move(0, 0);
+    await dialog.getByTestId("subtask-title-input").click();
+    await expect(testPage.getByRole("tooltip")).toHaveCount(0);
+    await prCapture.screenshot("desktop-subtask-isolated-workspace", {
+      caption: "Desktop New Subtask dialog with isolated workspace controls",
+    });
 
     // Fill prompt and submit
     const promptInput = testPage.getByTestId("subtask-prompt-input");
@@ -118,6 +193,190 @@ test.describe("Subtask basics", () => {
     await kanban.goto();
     const subtaskCard = kanban.taskCardByTitle(/Subtask Parent \/ Subtask \d+/);
     await expect(subtaskCard).toBeVisible({ timeout: 10_000 });
+  });
+
+  test("does not focus autopilot help when subtask titles are generated", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const initialSettings = await apiClient.getUserSettings();
+    try {
+      await apiClient.saveUserSettings({ agent_generated_task_titles: true });
+
+      const task = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        "Generated-title subtask parent",
+        seedData.agentProfileId,
+        {
+          description: "/e2e:simple-message",
+          workflow_id: seedData.workflowId,
+          repository_ids: [seedData.repositoryId],
+        },
+      );
+
+      await testPage.goto(`/t/${task.id}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await session.waitForChatIdle({ timeout: 30_000 });
+      await session.openCreateSubtaskForSidebarTask("Generated-title subtask parent");
+
+      const dialog = testPage.getByTestId("new-subtask-dialog");
+      await expect(dialog.getByTestId("subtask-title-input")).toHaveCount(0);
+      await expect(dialog.getByTestId("subtask-context-autopilot-row")).toBeVisible();
+      const contextTrigger = dialog
+        .getByTestId("subtask-context-autopilot-row")
+        .locator('[data-slot="select-trigger"]');
+      const contextHeight = await contextTrigger.evaluate((element) =>
+        Math.round(element.getBoundingClientRect().height),
+      );
+      const autopilotHeight = await dialog
+        .getByTestId("autopilot-toggle-row")
+        .evaluate((element) => Math.round(element.getBoundingClientRect().height));
+      // Bounding boxes are rounded to CSS pixels. Allow the one-pixel
+      // difference produced by fractional layout at different viewport
+      // scales while still checking that the rows remain aligned.
+      expect(Math.abs(autopilotHeight - contextHeight)).toBeLessThanOrEqual(1);
+      await expect(dialog.getByTestId("autopilot-info")).not.toBeFocused();
+      await expect(dialog.getByTestId("subtask-prompt-input")).toBeFocused();
+      await expect(
+        testPage.locator('[data-slot="tooltip-content"][data-state="open"]'),
+      ).toHaveCount(0);
+    } finally {
+      await apiClient.saveUserSettings({
+        agent_generated_task_titles: Boolean(initialSettings.settings.agent_generated_task_titles),
+      });
+    }
+  });
+
+  test("creates a policy branch for a local-executor subtask", async ({
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    execSync("git branch -f develop", {
+      cwd: seedData.repositoryPath,
+      env: makeGitEnv(backend.tmpDir),
+    });
+    const policy = await apiClient.createRepositoryBranchPolicy(seedData.repositoryId, {
+      name: `Subtask policy ${Date.now()}`,
+      base_branch: "main",
+      branch_template: "feature/{title}-{suffix}",
+      pull_request_target: "develop",
+    });
+    const { executors } = await apiClient.listExecutors();
+    const localExecutor = executors.find((executor) =>
+      ["local", "local_pc"].includes(executor.type),
+    );
+    if (!localExecutor) {
+      test.skip(true, "No local executor available");
+      return;
+    }
+    const localProfile = await apiClient.createExecutorProfile(
+      localExecutor.id,
+      `E2E Subtask Local ${Date.now()}`,
+    );
+    const parentTitle = `Policy subtask parent ${Date.now()}`;
+    const childTitle = `Policy subtask child ${Date.now()}`;
+
+    try {
+      const parent = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        parentTitle,
+        seedData.agentProfileId,
+        {
+          description: "/e2e:simple-message",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+          executor_profile_id: seedData.worktreeExecutorProfileId,
+        },
+      );
+      await testPage.goto(`/t/${parent.id}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await session.waitForChatIdle({ timeout: 30_000 });
+      await session.openCreateSubtaskForSidebarTask(parentTitle);
+
+      const dialog = testPage.getByTestId("new-subtask-dialog");
+      await dialog.getByTestId("subtask-workspace-mode-new").click();
+      await dialog.getByTestId("executor-profile-selector").click();
+      await testPage.getByRole("option", { name: new RegExp(localProfile.name) }).click();
+      await expect(dialog.getByTestId("executor-profile-selector")).toContainText(
+        localProfile.name,
+      );
+      await dialog.getByTestId("branch-chip-trigger").click();
+      await testPage.getByRole("option", { name: new RegExp(policy.name) }).click();
+      await expect(dialog.getByTestId("branch-chip-trigger")).toContainText(policy.name);
+      await expect(dialog.getByTestId("fresh-branch-toggle")).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      let submittedRepositories: Array<Record<string, unknown>> | undefined;
+      testPage.on("request", (request) => {
+        if (request.method() !== "POST" || !request.url().endsWith("/api/v1/tasks")) return;
+        submittedRepositories = (JSON.parse(request.postData() ?? "{}").repositories ??
+          []) as Array<Record<string, unknown>>;
+      });
+      await dialog.getByTestId("subtask-title-input").fill(childTitle);
+      await dialog.getByTestId("subtask-prompt-input").fill("/e2e:simple-message");
+      await dialog.getByRole("button", { name: "Create Subtask", exact: true }).click();
+      await expect.poll(() => submittedRepositories).toBeDefined();
+      expect(submittedRepositories?.[0]).toEqual(
+        expect.objectContaining({ branch_policy_id: policy.id, fresh_branch: true }),
+      );
+      await expect(dialog).toBeHidden({ timeout: 30_000 });
+      let childId: string | undefined;
+      await expect
+        .poll(async () => {
+          const response = await apiClient.listTasks(seedData.workspaceId);
+          childId = response.tasks.find((task) => task.title === childTitle)?.id;
+          return childId;
+        })
+        .toBeTruthy();
+      expect(childId).toBeTruthy();
+      type PolicyRepositorySnapshot = {
+        base_branch?: string;
+        branch_policy_id?: string;
+        branch_policy_name?: string;
+        branch_policy_branch_template?: string;
+        branch_policy_pull_request_target?: string;
+        checkout_branch?: string;
+      };
+      let repository: PolicyRepositorySnapshot | undefined;
+      await expect
+        .poll(async () => {
+          const response = await apiClient.rawRequest("GET", `/api/v1/tasks/${childId}`);
+          if (!response.ok) return undefined;
+          const task = (await response.json()) as { repositories?: PolicyRepositorySnapshot[] };
+          repository = task.repositories?.[0];
+          return repository;
+        })
+        .toEqual(
+          expect.objectContaining({
+            branch_policy_id: policy.id,
+            branch_policy_name: policy.name,
+            branch_policy_branch_template: "feature/{title}-{suffix}",
+            branch_policy_pull_request_target: "develop",
+          }),
+        );
+
+      expect(repository!.base_branch).toMatch(/^feature\/policy-subtask-child-/);
+      await expect
+        .poll(async () =>
+          execSync("git branch --show-current", {
+            cwd: seedData.repositoryPath,
+            env: makeGitEnv(backend.tmpDir),
+          })
+            .toString()
+            .trim(),
+        )
+        .toBe(repository!.base_branch);
+    } finally {
+      await apiClient.deleteExecutorProfile(localProfile.id).catch(() => {});
+      await apiClient.deleteRepositoryBranchPolicy(policy.id).catch(() => {});
+    }
   });
 });
 
@@ -886,6 +1145,134 @@ test.describe("Subtask dialog feature parity", () => {
  * agent_profile_id AND executor_profile_id.
  */
 test.describe("Subtask inheritance", () => {
+  test("a changed second session creates top-level and subtask tasks with its runtime", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(150_000);
+
+    const { agents } = await apiClient.listAgents();
+    const agent = agents.find((item) => item.name === "mock-agent") ?? agents[0];
+    expect(agent).toBeTruthy();
+    const creatorProfile = await apiClient.createAgentProfile(
+      agent!.id,
+      "Creator Session Runtime E2E",
+      {
+        model: "mock-fast",
+        mode: "default",
+        config_options: { effort: "medium", profile_only: "stale" },
+      },
+    );
+    const executor = await apiClient.createExecutor("Creator Runtime Executor E2E", "local_pc");
+    const executorProfile = await apiClient.createExecutorProfile(
+      executor.id,
+      "Creator Runtime Executor Profile E2E",
+    );
+    const subtaskTitle = `Creator runtime subtask ${Date.now()}`;
+    const topLevelTitle = `Creator runtime top-level ${Date.now()}`;
+
+    try {
+      const parentTask = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        "Creator Runtime Parent E2E",
+        seedData.agentProfileId,
+        {
+          description: "/e2e:simple-message",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          executor_profile_id: executorProfile.id,
+          repository_ids: [seedData.repositoryId],
+        },
+      );
+      await testPage.goto(`/t/${parentTask.id}`);
+      await new SessionPage(testPage).waitForLoad();
+
+      await expect
+        .poll(
+          async () => {
+            const { sessions } = await apiClient.listTaskSessions(parentTask.id);
+            return DONE_STATES.includes(sessions[0]?.state ?? "");
+          },
+          {
+            timeout: 30_000,
+            message: "Parent session should finish before the second session starts",
+          },
+        )
+        .toBe(true);
+
+      const firstSession = (await apiClient.listTaskSessions(parentTask.id)).sessions[0];
+      expect(firstSession?.agent_profile_id).toBe(seedData.agentProfileId);
+      const second = await apiClient.launchSession({
+        task_id: parentTask.id,
+        agent_profile_id: creatorProfile.id,
+        executor_id: firstSession?.executor_id,
+        executor_profile_id: firstSession?.executor_profile_id,
+        prompt: "/e2e:simple-message",
+      });
+
+      await expect
+        .poll(
+          async () => {
+            const { sessions } = await apiClient.listTaskSessions(parentTask.id);
+            return sessions.find((session) => session.id === second.session_id)?.state ?? "";
+          },
+          { timeout: 45_000, message: "Creator session should finish before runtime changes" },
+        )
+        .toBe("WAITING_FOR_INPUT");
+
+      await apiClient.setSessionModel(second.session_id, "mock-smart");
+      await apiClient.setSessionMode(second.session_id, "plan-mock");
+      await apiClient.setSessionConfigOption(second.session_id, "effort", "max");
+
+      const script = [
+        `e2e:mcp:kandev:create_task_kandev({"parent_id":"self","title":"${subtaskTitle}","description":"creator runtime subtask"})`,
+        `e2e:mcp:kandev:create_task_kandev({"workspace_id":"${seedData.workspaceId}","workflow_id":"${seedData.workflowId}","title":"${topLevelTitle}","description":"creator runtime top-level","repository_id":"${seedData.repositoryId}"})`,
+        'e2e:message("Done.")',
+      ].join("\n");
+      await apiClient.addUserMessage(parentTask.id, second.session_id, script);
+
+      let subtask: { id: string } | undefined;
+      let topLevel: { id: string } | undefined;
+      await expect
+        .poll(
+          async () => {
+            const { tasks } = await apiClient.listTasks(seedData.workspaceId);
+            subtask = tasks.find((task) => task.title === subtaskTitle);
+            topLevel = tasks.find((task) => task.title === topLevelTitle);
+            return Boolean(subtask && topLevel);
+          },
+          { timeout: 60_000, message: "Both MCP-created task shapes should exist" },
+        )
+        .toBe(true);
+
+      for (const task of [subtask!, topLevel!]) {
+        await expect
+          .poll(
+            async () => {
+              const { sessions } = await apiClient.listTaskSessions(task.id);
+              return sessions[0]?.agent_profile_id ?? "";
+            },
+            { timeout: 45_000, message: `Task ${task.id} should start with the creator profile` },
+          )
+          .toBe(creatorProfile.id);
+
+        const { sessions } = await apiClient.listTaskSessions(task.id);
+        const createdSession = sessions[0] as SessionInfo;
+        expect(effectiveRuntimeConfig(createdSession)).toEqual({
+          model: "mock-smart",
+          mode: "plan-mock",
+          config_options: { effort: "max" },
+        });
+      }
+
+      const { sessions: subtaskSessions } = await apiClient.listTaskSessions(subtask!.id);
+      expect(subtaskSessions[0]?.executor_profile_id).toBe(executorProfile.id);
+    } finally {
+      await apiClient.deleteAgentProfile(creatorProfile.id, true);
+    }
+  });
+
   test("MCP-created subtask inherits agent profile and executor profile", async ({
     testPage,
     apiClient,

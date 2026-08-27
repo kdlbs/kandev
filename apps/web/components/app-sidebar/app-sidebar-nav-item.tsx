@@ -6,6 +6,8 @@ import type { DestinationIcon } from "@/lib/navigation/types";
 import { Badge } from "@kandev/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { QuickChatActivityIndicator } from "@/components/quick-chat/quick-chat-activity-indicator";
+import type { QuickChatActivityState } from "@/lib/state/slices/ui/quick-chat-activity-selectors";
 import { SIDEBAR_ITEM_ACTIVE, SIDEBAR_ITEM_INACTIVE } from "./app-sidebar-constants";
 
 type AppSidebarNavItemProps = {
@@ -14,6 +16,7 @@ type AppSidebarNavItemProps = {
   href?: string;
   badge?: number;
   badgeVariant?: "primary" | "muted";
+  activity?: QuickChatActivityState;
   onClick?: () => void;
   collapsed: boolean;
   /** Override the auto-derived active-state from pathname. */
@@ -76,6 +79,13 @@ function isPathActive(pathname: string, href: string | undefined, exactMatch: bo
   return hrefPathname !== "/" && pathname.startsWith(`${hrefPathname}/`);
 }
 
+function sidebarBadgeClass(variant: NonNullable<AppSidebarNavItemProps["badgeVariant"]>) {
+  return cn(
+    "rounded-full px-1.5 py-0.5 text-xs",
+    variant === "primary" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground",
+  );
+}
+
 export function AppSidebarNavItem({
   icon: Icon,
   label,
@@ -89,6 +99,7 @@ export function AppSidebarNavItem({
   disabled = false,
   testId,
   className,
+  activity = null,
 }: AppSidebarNavItemProps) {
   const pathname = usePathname();
   const active = isActive ?? isPathActive(pathname, href, exactMatch);
@@ -104,21 +115,15 @@ export function AppSidebarNavItem({
 
   const inner = (
     <>
-      <Icon className="h-4 w-4 shrink-0" />
+      <span className="relative flex">
+        <Icon className="h-4 w-4 shrink-0" />
+        <QuickChatActivityIndicator activity={activity} />
+      </span>
       {!collapsed && (
         <>
           <span className="flex-1 truncate sidebar-fade-in">{label}</span>
           {typeof badge === "number" && badge > 0 && (
-            <Badge
-              className={cn(
-                "rounded-full px-1.5 py-0.5 text-xs",
-                badgeVariant === "primary"
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted text-muted-foreground",
-              )}
-            >
-              {badge}
-            </Badge>
+            <Badge className={sidebarBadgeClass(badgeVariant)}>{badge}</Badge>
           )}
         </>
       )}

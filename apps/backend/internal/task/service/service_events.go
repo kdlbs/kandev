@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"time"
 
@@ -367,26 +368,34 @@ func snapshotTaskForPublication(task *models.Task) *models.Task {
 func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, task *models.Task, oldState *v1.TaskState, extra map[string]interface{}, oldWorkflowIDs []string, activity *taskActivitySnapshot) {
 
 	data := map[string]interface{}{
-		"task_id":          task.ID,
-		"workspace_id":     task.WorkspaceID,
-		"workflow_id":      task.WorkflowID,
-		"workflow_step_id": task.WorkflowStepID,
-		"title":            task.Title,
-		"description":      task.Description,
-		"state":            string(task.State),
-		"priority":         task.Priority,
-		"position":         task.Position,
-		"wip_admitted":     task.WIPAdmitted,
-		"created_at":       task.CreatedAt.Format(time.RFC3339),
-		"updated_at":       task.UpdatedAt.Format(time.RFC3339),
-		"is_ephemeral":     task.IsEphemeral,
+		"task_id":            task.ID,
+		"step_transition_id": task.WorkflowStepTransitionID,
+		"workspace_id":       task.WorkspaceID,
+		"workflow_id":        task.WorkflowID,
+		"workflow_step_id":   task.WorkflowStepID,
+		"title":              task.Title,
+		"description":        task.Description,
+		"state":              string(task.State),
+		"priority":           task.Priority,
+		"position":           task.Position,
+		"wip_admitted":       task.WIPAdmitted,
+		"created_at":         task.CreatedAt.Format(time.RFC3339Nano),
+		"updated_at":         task.UpdatedAt.Format(time.RFC3339Nano),
+		"is_ephemeral":       task.IsEphemeral,
+		"autopilot":          task.Autopilot,
 		// Consumers that restore quick-chat tabs filter on origin, so it has to
 		// travel with the event and not just the HTTP DTO.
 		"origin": task.Origin,
+		// Sent as an explicit true/false (never omitted) so a clear reaches
+		// open clients too: preserveOmittedField on the frontend only pins the
+		// previous value when the key is absent from the payload, and an
+		// omitted key here would make clearTaskAutoStartFailedMarker's publish
+		// as invisible as the set it is meant to undo.
+		"auto_start_failed": task.Metadata[models.MetaKeyAutoStartFailed] != nil,
 	}
 	data["queued_for_step_id"] = task.QueuedForStepID
 	if task.QueuedAt != nil {
-		data["queued_at"] = task.QueuedAt.Format(time.RFC3339)
+		data["queued_at"] = task.QueuedAt.Format(time.RFC3339Nano)
 	} else {
 		data["queued_at"] = nil
 	}
@@ -396,9 +405,16 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 	if task.ParentID != "" {
 		data["parent_id"] = task.ParentID
 	}
+	// external_id (docs/specs/tasks/requirements/external-id-idempotency.md): omitted rather
+	// than sent as null/"" when the task holds none, matching the REST DTO's
+	// omitempty and parent_id's convention above. This map is hand-built, not
+	// derived from TaskDTO, so it needs its own explicit field.
+	if task.ExternalID != "" {
+		data["external_id"] = task.ExternalID
+	}
 	data["archived_at"] = nil
 	if task.ArchivedAt != nil {
-		data["archived_at"] = task.ArchivedAt.Format(time.RFC3339)
+		data["archived_at"] = task.ArchivedAt.Format(time.RFC3339Nano)
 	}
 	// Orchestrator-originated events fetch the task via the raw repo.GetTask,
 	// which does not populate Repositories. Load on demand so the payload
@@ -424,6 +440,12 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 	}
 	for k, v := range extra {
 		data[k] = v
+	}
+	if eventType == events.TaskStateChanged && oldState != nil && s.taskStateActivity != nil {
+		// Write the Office read-model row before publishing the event. The
+		// WebSocket broadcaster can then trigger a detail GET without racing
+		// the activity projection that supplies Started and Completed.
+		s.taskStateActivity.LogTaskStateChange(ctx, task, *oldState)
 	}
 
 	event := bus.NewEvent(eventType, "task-service", data)
@@ -653,14 +675,37 @@ func taskRepositoriesForEvent(ctx context.Context, s *Service, task *models.Task
 func serializeTaskRepositories(repos []*models.TaskRepository) []map[string]interface{} {
 	out := make([]map[string]interface{}, 0, len(repos))
 	for _, r := range repos {
-		out = append(out, map[string]interface{}{
-			"id":              r.ID,
-			"task_id":         r.TaskID,
-			"repository_id":   r.RepositoryID,
-			"base_branch":     r.BaseBranch,
-			"checkout_branch": r.CheckoutBranch,
-			"position":        r.Position,
-		})
+		serialized := map[string]interface{}{
+			"id":            r.ID,
+			"task_id":       r.TaskID,
+			"repository_id": r.RepositoryID,
+			"base_branch":   r.BaseBranch,
+			"position":      r.Position,
+			"created_at":    r.CreatedAt.Format(time.RFC3339Nano),
+			"updated_at":    r.UpdatedAt.Format(time.RFC3339Nano),
+		}
+		if r.CheckoutBranch != "" {
+			serialized["checkout_branch"] = r.CheckoutBranch
+		}
+		if r.BranchPolicyID != "" {
+			serialized["branch_policy_id"] = r.BranchPolicyID
+		}
+		if r.BranchPolicyName != "" {
+			serialized["branch_policy_name"] = r.BranchPolicyName
+		}
+		if r.BranchPolicyBaseBranch != "" {
+			serialized["branch_policy_base_branch"] = r.BranchPolicyBaseBranch
+		}
+		if r.BranchPolicyBranchTemplate != "" {
+			serialized["branch_policy_branch_template"] = r.BranchPolicyBranchTemplate
+		}
+		if r.BranchPolicyPullRequestTarget != "" {
+			serialized["branch_policy_pull_request_target"] = r.BranchPolicyPullRequestTarget
+		}
+		if len(r.Metadata) > 0 {
+			serialized["metadata"] = r.Metadata
+		}
+		out = append(out, serialized)
 	}
 	return out
 }
@@ -701,8 +746,13 @@ func (s *Service) publishTaskMovedEvent(ctx context.Context, task *models.Task, 
 	if s.eventBus == nil {
 		return
 	}
+	queuePromotion := false
+	if task.Metadata != nil {
+		_, queuePromotion = task.Metadata[models.MetaKeyQueuePromotionPending]
+	}
 	data := map[string]interface{}{
 		"task_id":                   task.ID,
+		"step_transition_id":        task.WorkflowStepTransitionID,
 		"from_workflow_id":          fromWorkflowID,
 		"to_workflow_id":            task.WorkflowID,
 		"from_step_id":              fromStepID,
@@ -712,6 +762,14 @@ func (s *Service) publishTaskMovedEvent(ctx context.Context, task *models.Task, 
 		"task_description":          task.Description,
 		"parent_id":                 task.ParentID,
 		"assignee_agent_profile_id": task.AssigneeAgentProfileID,
+		"wip_admitted":              task.WIPAdmitted,
+		"queued_for_step_id":        task.QueuedForStepID,
+		"queue_promotion":           queuePromotion,
+	}
+	if task.QueuedAt != nil {
+		data["queued_at"] = task.QueuedAt.Format(time.RFC3339)
+	} else {
+		data["queued_at"] = nil
 	}
 	event := bus.NewEvent(events.TaskMoved, "task-service", data)
 	if err := s.eventBus.Publish(ctx, events.TaskMoved, event); err != nil {
@@ -762,6 +820,7 @@ func (s *Service) publishWorkflowEvent(ctx context.Context, eventType string, wo
 		"workspace_id":     workflow.WorkspaceID,
 		"name":             workflow.Name,
 		"description":      workflow.Description,
+		"prompt":           workflow.Prompt,
 		"agent_profile_id": workflow.AgentProfileID,
 		"hidden":           workflow.Hidden,
 		"source":           workflow.Source,
@@ -835,11 +894,76 @@ func (s *Service) publishEnvironmentEvent(ctx context.Context, eventType string,
 // publishMessageEvent publishes message events to the event bus.
 // Only true system-injected content (wrapped in <kandev-system> tags) is stripped
 // from the visible message content delivered to clients.
-func (s *Service) publishMessageEvent(ctx context.Context, eventType string, message *models.Message) {
+// Ordinary persistence callers intentionally treat delivery as best effort
+// after their durable write succeeds. Synchronization-sensitive callers, such
+// as clarification bundle convergence, check and propagate the returned error.
+func (s *Service) publishMessageEvent(ctx context.Context, eventType string, message *models.Message) error {
 	if s.eventBus == nil {
 		s.logger.Warn("publishMessageEvent: eventBus is nil, skipping")
+		return errors.New("event bus is unavailable")
+	}
+	event := newMessageEvent(eventType, message)
+	s.addMessagePendingAction(ctx, eventType, message, event)
+	if err := s.eventBus.Publish(ctx, eventType, event); err != nil {
+		s.logger.Error("failed to publish message event",
+			zap.String("event_type", eventType),
+			zap.String("message_id", message.ID),
+			zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+func (s *Service) addMessagePendingAction(
+	ctx context.Context,
+	eventType string,
+	message *models.Message,
+	event *bus.Event,
+) {
+	if s.messages == nil ||
+		!messageEventChangesPendingAction(eventType, message) ||
+		message.TaskSessionID == "" {
 		return
 	}
+	actions, revisions, err := s.GetPendingActionProjectionsForSessions(
+		ctx,
+		[]string{message.TaskSessionID},
+	)
+	if err != nil {
+		s.logger.Warn("failed to project pending action for message event",
+			zap.String("event_type", eventType),
+			zap.String("message_id", message.ID),
+			zap.Error(err))
+		return
+	}
+	data, ok := event.Data.(map[string]interface{})
+	if !ok {
+		return
+	}
+	if action, ok := actions[message.TaskSessionID]; ok {
+		data["pending_action"] = string(action)
+	} else {
+		data["pending_action"] = nil
+	}
+	data["pending_action_revision"] = revisions[message.TaskSessionID]
+}
+
+func messageEventChangesPendingAction(eventType string, message *models.Message) bool {
+	switch eventType {
+	case events.MessageAdded, events.MessageDeleted:
+		// Adding or deleting any message can establish or remove the message
+		// evidence that makes an unpublished successor turn authoritative.
+		return true
+	case events.MessageUpdated:
+		return message.Type == models.MessageTypeClarificationRequest ||
+			message.Type == models.MessageTypePermissionRequest
+	default:
+		return false
+	}
+}
+
+// newMessageEvent builds a bus event for a message lifecycle change, embedding the message's prompt index when present.
+func newMessageEvent(eventType string, message *models.Message) *bus.Event {
 
 	messageType := string(message.Type)
 	if messageType == "" {
@@ -864,6 +988,12 @@ func (s *Service) publishMessageEvent(ctx context.Context, eventType string, mes
 		"updated_at": message.UpdatedAt.Format(time.RFC3339Nano),
 	}
 
+	// User messages carry their stable prompt ordinal so WS consumers can
+	// render the panel label without an extra fetch; agent rows omit it.
+	if message.PromptIndex > 0 {
+		data["prompt_index"] = message.PromptIndex
+	}
+
 	if hasHidden {
 		data["raw_content"] = message.Content
 	}
@@ -885,14 +1015,7 @@ func (s *Service) publishMessageEvent(ctx context.Context, eventType string, mes
 		data["metadata"] = meta
 	}
 
-	event := bus.NewEvent(eventType, "task-service", data)
-
-	if err := s.eventBus.Publish(ctx, eventType, event); err != nil {
-		s.logger.Error("failed to publish message event",
-			zap.String("event_type", eventType),
-			zap.String("message_id", message.ID),
-			zap.Error(err))
-	}
+	return bus.NewEvent(eventType, "task-service", data)
 }
 
 func (s *Service) publishRepositoryEvent(ctx context.Context, eventType string, repository *models.Repository) {
@@ -912,6 +1035,7 @@ func (s *Service) publishRepositoryEvent(ctx context.Context, eventType string, 
 		"provider":               repository.Provider,
 		"provider_repo_id":       repository.ProviderRepoID,
 		"provider_host":          repository.ProviderHost,
+		"provider_scope":         repository.ProviderScope,
 		"provider_owner":         repository.ProviderOwner,
 		"provider_name":          repository.ProviderName,
 		"default_branch":         repository.DefaultBranch,

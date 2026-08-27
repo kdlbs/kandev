@@ -83,11 +83,11 @@ Chat, plan, changes, files, terminal, editor/diff, preview, commit, and pull-req
 
 ## Localize user-facing copy
 
-Every new user-facing string must go through i18next — `t("namespace:key")` or `<Trans>` — never an inline literal. That covers visible copy, `placeholder`, `aria-label`, `title`, `alt`, toasts, validation and empty-state text, and dialog copy. Externalization of the existing UI is complete, so a hardcoded literal is now a regression rather than unfinished migration.
+Every new user-facing string must go through i18next: `t("namespace:key")` or `<Trans>`, never an inline literal. That covers visible copy, `placeholder`, `aria-label`, `title`, `alt`, toasts, validation and empty-state text, and dialog copy. Externalization of the existing UI is complete, so a hardcoded literal is now a regression rather than unfinished migration.
 
 Catalogs live in `apps/web/src/locales/<locale>/<namespace>.json`. English is the source locale and the only hand-authored catalog; it is bundled into the entry chunk, while each other locale is a lazily fetched chunk loaded before that locale activates. Shipped locales are English, European Portuguese, and Simplified Chinese, plus a generated `pseudo` catalog that only development and E2E builds contain. A missing key falls back to English at runtime.
 
-Three mistakes cause silent bugs: never translate a string compared with `===`, never call `t()` at module scope, and never pass an English plural ending as a value — use `count` with `_one`/`_other` keys.
+Three mistakes cause silent bugs: never translate a string compared with `===`, never call `t()` at module scope, and never pass an English plural ending as a value; use `count` with `_one`/`_other` keys.
 
 ```bash
 pnpm run i18n:check     # gate: plurals, module-scope t(), Trans indices

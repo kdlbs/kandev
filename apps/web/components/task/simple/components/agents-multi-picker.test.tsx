@@ -15,14 +15,14 @@ afterEach(() => cleanup());
 
 const TS = "2026-05-01T00:00:00Z";
 
-function makeAgent(id: string, name: string): AgentProfile {
+function makeAgent(id: string, name: string, icon = "🤖"): AgentProfile {
   return {
     id: toAgentProfileId(id),
     workspaceId: toWorkspaceId("ws-1"),
     name,
     agentProfileId: toAgentProfileId("p1"),
     role: "worker",
-    icon: "🤖",
+    icon,
     status: "idle",
     reportsTo: "",
     permissions: {},
@@ -45,9 +45,11 @@ function makeAgent(id: string, name: string): AgentProfile {
   };
 }
 
+const SEED_WORKSPACE_ID = "ws-1";
+
 function SeedAgents({ agents }: { agents: AgentProfile[] }) {
   const setAgents = useAppStore((s) => s.setOfficeAgentProfiles);
-  useEffect(() => setAgents(agents), [setAgents, agents]);
+  useEffect(() => setAgents(SEED_WORKSPACE_ID, agents), [setAgents, agents]);
   return null;
 }
 
@@ -62,7 +64,9 @@ function Wrapper({
 }) {
   const ctx = { task, applyPatch: () => {}, restore: () => {} };
   return (
-    <StateProvider>
+    // The office collections are workspace-keyed, so the picker only sees the
+    // seeded agents when that workspace is the active one.
+    <StateProvider initialState={{ workspaces: { items: [], activeId: SEED_WORKSPACE_ID } }}>
       <TooltipProvider>
         <SeedAgents agents={agents} />
         <TaskOptimisticContextProvider value={ctx}>{children}</TaskOptimisticContextProvider>
@@ -165,20 +169,46 @@ describe("buildDecisionLookup", () => {
   });
 });
 
+const approvalAgents = [
+  makeAgent("a-approved", "Alice"),
+  makeAgent("a-changes", "Bob"),
+  makeAgent("a-pending", "Carol"),
+];
+
 describe("ApproversPicker chip decoration", () => {
   it("renders a status icon per chip matching the most recent decision", () => {
-    const agents = [
-      makeAgent("a-approved", "Alice"),
-      makeAgent("a-changes", "Bob"),
-      makeAgent("a-pending", "Carol"),
-    ];
     render(
-      <Wrapper task={baseTask} agents={agents}>
+      <Wrapper task={baseTask} agents={approvalAgents}>
         <ApproversPicker task={baseTask} />
       </Wrapper>,
     );
     expect(screen.getAllByTestId("decision-icon-approved")).toHaveLength(1);
     expect(screen.getAllByTestId("decision-icon-changes_requested")).toHaveLength(1);
     expect(screen.getAllByTestId("decision-icon-pending")).toHaveLength(1);
+  });
+});
+
+describe("ApproversPicker chip avatars", () => {
+  it("renders per-agent initials instead of the generic robot glyph", () => {
+    render(
+      <Wrapper task={baseTask} agents={approvalAgents}>
+        <ApproversPicker task={baseTask} />
+      </Wrapper>,
+    );
+    expect(screen.getByText("AL")).toBeTruthy();
+    expect(screen.getByText("BO")).toBeTruthy();
+    expect(screen.getByText("CA")).toBeTruthy();
+    expect(screen.queryByText("🤖")).toBeNull();
+  });
+
+  it("preserves a configured custom icon", () => {
+    const customTask = { ...baseTask, approvers: ["a-custom"], decisions: [] };
+    render(
+      <Wrapper task={customTask} agents={[makeAgent("a-custom", "Custom Agent", "🦾")]}>
+        <ApproversPicker task={customTask} />
+      </Wrapper>,
+    );
+    expect(screen.getByText("🦾")).toBeTruthy();
+    expect(screen.queryByText("CU")).toBeNull();
   });
 });

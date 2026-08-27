@@ -57,7 +57,8 @@ export function useSelectableProfileOptions(agentProfiles: AgentProfileOption[])
           !!getCapabilityWarning(
             sortedProfiles[i]?.capability_status,
             sortedProfiles[i]?.capability_error,
-          ),
+          ) ||
+          !!opt.disabled,
       })),
     [baseOptions, sortedProfiles],
   );

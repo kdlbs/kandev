@@ -3,9 +3,9 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"errors"
 
 	"github.com/kandev/kandev/internal/task/dto"
+	"github.com/kandev/kandev/internal/task/planws"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -40,10 +40,7 @@ func (h *TaskHandlers) wsCreateTaskPlan(ctx context.Context, msg *ws.Message) (*
 		AuthorName: req.AuthorName,
 	})
 	if err != nil {
-		if errors.Is(err, service.ErrTaskIDRequired) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
-		}
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create task plan: "+err.Error(), nil)
+		return planws.CreateError(msg, err)
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, dto.TaskPlanFromModel(plan))
@@ -51,19 +48,14 @@ func (h *TaskHandlers) wsCreateTaskPlan(ctx context.Context, msg *ws.Message) (*
 
 // wsGetTaskPlan retrieves a task plan
 func (h *TaskHandlers) wsGetTaskPlan(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req struct {
-		TaskID string `json:"task_id"`
-	}
+	var req planws.TaskIDRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
 
 	plan, err := h.planService.GetPlan(ctx, req.TaskID)
 	if err != nil {
-		if errors.Is(err, service.ErrTaskIDRequired) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
-		}
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task plan", nil)
+		return planws.GetError(msg, err)
 	}
 	if plan == nil {
 		return ws.NewResponse(msg.ID, msg.Action, nil)
@@ -100,13 +92,7 @@ func (h *TaskHandlers) wsUpdateTaskPlan(ctx context.Context, msg *ws.Message) (*
 		AuthorName: req.AuthorName,
 	})
 	if err != nil {
-		if errors.Is(err, service.ErrTaskIDRequired) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
-		}
-		if errors.Is(err, service.ErrTaskPlanNotFound) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Task plan not found", nil)
-		}
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update task plan: "+err.Error(), nil)
+		return planws.UpdateError(msg, err)
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, dto.TaskPlanFromModel(plan))
@@ -114,22 +100,14 @@ func (h *TaskHandlers) wsUpdateTaskPlan(ctx context.Context, msg *ws.Message) (*
 
 // wsDeleteTaskPlan deletes a task plan
 func (h *TaskHandlers) wsDeleteTaskPlan(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req struct {
-		TaskID string `json:"task_id"`
-	}
+	var req planws.TaskIDRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
 
 	err := h.planService.DeletePlan(ctx, req.TaskID)
 	if err != nil {
-		if errors.Is(err, service.ErrTaskIDRequired) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
-		}
-		if errors.Is(err, service.ErrTaskPlanNotFound) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Task plan not found", nil)
-		}
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete task plan: "+err.Error(), nil)
+		return planws.DeleteError(msg, err)
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{responseKeySuccess: true})
@@ -151,7 +129,7 @@ func (h *TaskHandlers) wsMarkTaskPlanImplementationStarted(ctx context.Context, 
 		Actor:     req.Actor,
 	})
 	if err != nil {
-		return taskPlanServiceError(msg, err, "Failed to mark task plan implementation started")
+		return planws.Error(msg, err, "Failed to mark task plan implementation started")
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, dto.TaskPlanFromModel(plan))
@@ -159,19 +137,14 @@ func (h *TaskHandlers) wsMarkTaskPlanImplementationStarted(ctx context.Context, 
 
 // wsListTaskPlanRevisions returns revision metadata newest-first (no content).
 func (h *TaskHandlers) wsListTaskPlanRevisions(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req struct {
-		TaskID string `json:"task_id"`
-	}
+	var req planws.TaskIDRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
 
 	revs, err := h.planService.ListRevisions(ctx, req.TaskID)
 	if err != nil {
-		if errors.Is(err, service.ErrTaskIDRequired) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
-		}
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list revisions: "+err.Error(), nil)
+		return planws.Error(msg, err, "Failed to list revisions")
 	}
 
 	out := make([]*dto.TaskPlanRevisionDTO, 0, len(revs))
@@ -200,10 +173,7 @@ func (h *TaskHandlers) wsGetTaskPlanRevision(ctx context.Context, msg *ws.Messag
 
 	rev, err := h.planService.GetRevision(ctx, req.RevisionID)
 	if err != nil {
-		if errors.Is(err, service.ErrRevisionNotFound) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Revision not found", nil)
-		}
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get revision: "+err.Error(), nil)
+		return planws.Error(msg, err, "Failed to get revision")
 	}
 	// Match wsRevertTaskPlan's ownership check so a caller can only read
 	// content for revisions belonging to the task they hold a reference to.
@@ -232,27 +202,7 @@ func (h *TaskHandlers) wsRevertTaskPlan(ctx context.Context, msg *ws.Message) (*
 		AuthorName:       req.AuthorName,
 	})
 	if err != nil {
-		return taskPlanServiceError(msg, err, "Failed to revert plan")
+		return planws.Error(msg, err, "Failed to revert plan")
 	}
 	return ws.NewResponse(msg.ID, msg.Action, dto.TaskPlanRevisionFromModel(rev))
-}
-
-func taskPlanServiceError(msg *ws.Message, err error, fallback string) (*ws.Message, error) {
-	switch {
-	case errors.Is(err, service.ErrTaskIDRequired):
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
-	case errors.Is(err, service.ErrSessionIDRequired):
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
-	case errors.Is(err, service.ErrSessionTaskMismatch):
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Session does not belong to task", nil)
-	case errors.Is(err, service.ErrTaskPlanNotFound):
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Task plan not found", nil)
-	case errors.Is(err, service.ErrRevisionIDRequired):
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "revision_id is required", nil)
-	case errors.Is(err, service.ErrRevisionNotFound):
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Revision not found", nil)
-	case errors.Is(err, service.ErrRevisionTaskMismatch):
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Revision does not belong to task", nil)
-	}
-	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, fallback+": "+err.Error(), nil)
 }

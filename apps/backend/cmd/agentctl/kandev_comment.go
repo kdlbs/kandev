@@ -25,7 +25,8 @@ func runCommentCmd(args []string) int {
 	}
 }
 
-// commentAdd posts a comment on a task. If --body is "-", reads from stdin.
+// commentAdd posts a comment through the signed runtime scope. If --body is
+// "-", reads from stdin.
 func commentAdd(args []string) int {
 	fs := flag.NewFlagSet("comment add", flag.ContinueOnError)
 	taskFlag := fs.String("task", "", "Task ID (defaults to $KANDEV_TASK_ID)")
@@ -58,13 +59,11 @@ func commentAdd(args []string) int {
 	}
 
 	payload := map[string]string{
-		"body":        body,
-		"author_type": "agent",
-		"author_id":   client.agentID,
+		"task_id": taskID,
+		"body":    body,
 	}
 
-	respBody, status, doErr := client.do(http.MethodPost,
-		fmt.Sprintf("/api/v1/office/tasks/%s/comments", taskID), payload)
+	respBody, status, doErr := client.do(http.MethodPost, "/api/v1/office/runtime/comments", payload)
 	return handleResponse(respBody, status, doErr)
 }
 
@@ -72,7 +71,7 @@ func commentAdd(args []string) int {
 func commentList(args []string) int {
 	fs := flag.NewFlagSet("comment list", flag.ContinueOnError)
 	taskFlag := fs.String("task", "", "Task ID (defaults to $KANDEV_TASK_ID)")
-	limitFlag := fs.Int("limit", 0, "Max number of comments (0 = all)")
+	limitFlag := fs.Int("limit", 0, "Max number of comments (0 = server default)")
 	if err := fs.Parse(args); err != nil {
 		cliError("parse flags: %v", err)
 		return 1

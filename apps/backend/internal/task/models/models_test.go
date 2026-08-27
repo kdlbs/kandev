@@ -54,6 +54,22 @@ func TestLoadSessionRuntimeConfigOverridesUsesDedicatedKey(t *testing.T) {
 	}
 }
 
+func TestLoadSessionRuntimeConfigTypedValueClonesOptions(t *testing.T) {
+	metadata := map[string]interface{}{
+		SessionMetaKeyRuntimeConfig: SessionRuntimeConfig{
+			Model:         "gpt-5.6-sol",
+			ConfigOptions: map[string]string{"reasoning_effort": "high"},
+		},
+	}
+
+	config, ok := LoadSessionRuntimeConfig(metadata)
+	require.True(t, ok)
+	config.ConfigOptions["reasoning_effort"] = "low"
+
+	stored := metadata[SessionMetaKeyRuntimeConfig].(SessionRuntimeConfig)
+	require.Equal(t, "high", stored.ConfigOptions["reasoning_effort"])
+}
+
 func TestLoadOriginalSessionEffectiveConfiguration(t *testing.T) {
 	metadata := map[string]interface{}{
 		SessionMetaKeyOriginalEffectiveConfig: map[string]interface{}{

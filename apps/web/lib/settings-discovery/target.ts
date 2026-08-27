@@ -13,9 +13,11 @@ export type SettingsTargetRegistry = {
 type RevealOptions = {
   highlightDurationMs?: number;
   reducedMotion?: boolean;
+  settleDurationMs?: number;
 };
 
 const DEFAULT_HIGHLIGHT_DURATION_MS = 1400;
+const DEFAULT_SETTLE_DURATION_MS = 2500;
 const highlightTimers = new WeakMap<HTMLElement, number>();
 
 export function settingsTargetFromHash(hash: string): string | null {
@@ -83,6 +85,51 @@ export function revealSettingsTarget(element: HTMLElement, options: RevealOption
 
   focusTargetWithin(element);
   restartTargetHighlight(element, options.highlightDurationMs ?? DEFAULT_HIGHLIGHT_DURATION_MS);
+  keepTargetCentered(element, options.settleDurationMs ?? DEFAULT_SETTLE_DURATION_MS);
+}
+
+let cancelActiveSettle: (() => void) | null = null;
+
+/**
+ * Content around the target often loads asynchronously after the initial
+ * scroll (e.g. sections above it fetch data and grow), pushing the target out
+ * of view. Re-center it whenever an ancestor resizes during a short settle
+ * window, backing off as soon as the user scrolls or interacts.
+ */
+function keepTargetCentered(element: HTMLElement, durationMs: number): void {
+  cancelActiveSettle?.();
+  if (typeof ResizeObserver === "undefined" || durationMs <= 0) return;
+
+  const baselines = new Map<Element, string>();
+  const observer = new ResizeObserver((entries) => {
+    let shifted = false;
+    for (const entry of entries) {
+      const size = `${entry.contentRect.width}x${entry.contentRect.height}`;
+      if (baselines.has(entry.target) && baselines.get(entry.target) !== size) shifted = true;
+      baselines.set(entry.target, size);
+    }
+    if (shifted && element.isConnected) {
+      element.scrollIntoView?.({ behavior: "auto", block: "center" });
+    }
+  });
+  for (let node: HTMLElement | null = element; node; node = node.parentElement) {
+    observer.observe(node);
+  }
+
+  const interactionEvents = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
+  const cancel = () => {
+    observer.disconnect();
+    window.clearTimeout(timer);
+    for (const type of interactionEvents) {
+      window.removeEventListener(type, cancel, { capture: true });
+    }
+    if (cancelActiveSettle === cancel) cancelActiveSettle = null;
+  };
+  for (const type of interactionEvents) {
+    window.addEventListener(type, cancel, { capture: true, passive: true });
+  }
+  const timer = window.setTimeout(cancel, durationMs);
+  cancelActiveSettle = cancel;
 }
 
 function focusTargetWithin(element: HTMLElement): void {

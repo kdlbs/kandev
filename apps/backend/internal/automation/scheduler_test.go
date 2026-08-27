@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 )
 
 // TestFireTrigger_SkippedForConcurrencyCap_UpdatesLastEvaluatedAt guards
@@ -73,6 +75,9 @@ func TestFireTrigger_SkippedForConcurrencyCap_UpdatesLastEvaluatedAt(t *testing.
 	for _, r := range runs {
 		if r.Status == RunStatusSkipped {
 			skipped++
+			if r.DedupKey != "scheduled:trig:1" {
+				t.Errorf("scheduled cap skip dedup key = %q, want original key", r.DedupKey)
+			}
 		}
 	}
 	if skipped != 1 {
@@ -88,6 +93,115 @@ func TestFireTrigger_SkippedForConcurrencyCap_UpdatesLastEvaluatedAt(t *testing.
 	}
 	if triggers[0].LastEvaluatedAt == nil {
 		t.Fatal("expected LastEvaluatedAt to be set after a concurrency-cap skip, got nil")
+	}
+}
+
+func TestFireTriggerAdmitsRunBeforePublishing(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	a := &Automation{
+		WorkspaceID:       "ws-1",
+		Name:              "Daily report",
+		TaskTitleTemplate: "Report: {{trigger.type}}",
+		WorkflowID:        "wf-1",
+		WorkflowStepID:    "s-1",
+		Enabled:           true,
+		MaxConcurrentRuns: 1,
+	}
+	if err := svc.store.CreateAutomation(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	trig := &AutomationTrigger{AutomationID: a.ID, Type: TriggerTypeScheduled, Config: json.RawMessage(`{}`), Enabled: true}
+	if err := svc.store.CreateTrigger(ctx, trig); err != nil {
+		t.Fatal(err)
+	}
+
+	var publishedRun *AutomationRun
+	if _, err := svc.eventBus.Subscribe(events.AutomationTriggered, func(ctx context.Context, event *bus.Event) error {
+		evt, ok := event.Data.(*AutomationTriggeredEvent)
+		if !ok {
+			t.Fatalf("event data = %T, want *AutomationTriggeredEvent", event.Data)
+		}
+		if evt.RunID == "" {
+			t.Fatal("published automation event has no admitted run ID")
+		}
+		var err error
+		publishedRun, err = svc.store.GetRun(ctx, evt.RunID)
+		if err != nil {
+			t.Fatalf("load admitted run during publish: %v", err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeScheduled, json.RawMessage(`{}`), "scheduled:1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Skipped || result.RunID == "" {
+		t.Fatalf("FireTrigger result = %+v, want an admitted run", result)
+	}
+	if publishedRun == nil {
+		t.Fatal("event was not observed")
+	}
+	if publishedRun.Status != RunStatusTriggered {
+		t.Fatalf("published run status = %q, want triggered", publishedRun.Status)
+	}
+	if publishedRun.DisplayTitle != "Report: scheduled" {
+		t.Fatalf("display title = %q, want rendered trigger title", publishedRun.DisplayTitle)
+	}
+}
+
+func TestFireTrigger_MergedPRConcurrencySkipLeavesDedupKeyEmpty(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	a := &Automation{
+		WorkspaceID: "ws-merged-cap", Name: "Merged cleanup", WorkflowID: "wf-1", WorkflowStepID: "s-1",
+		Enabled: true, MaxConcurrentRuns: 1,
+	}
+	if err := svc.store.CreateAutomation(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	trig := &AutomationTrigger{
+		AutomationID: a.ID, Type: TriggerTypeGitHubPRMerged,
+		Config: json.RawMessage(`{"all_repos":true}`), Enabled: true,
+	}
+	if err := svc.store.CreateTrigger(ctx, trig); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.store.CreateRun(ctx, &AutomationRun{
+		AutomationID: a.ID, TriggerID: trig.ID, TriggerType: TriggerTypeGitHubPRMerged,
+		Status: RunStatusTaskCreated, DedupKey: "active", TriggerData: json.RawMessage(`{}`),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	const dedupKey = "pr_merged:task-1:acme/api#7"
+	result, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeGitHubPRMerged, json.RawMessage(`{}`), dedupKey)
+	if err != nil {
+		t.Fatalf("FireTrigger returned error: %v", err)
+	}
+	if !result.Skipped {
+		t.Fatal("expected merged-PR trigger to be skipped at the cap")
+	}
+
+	runs, err := svc.store.ListRuns(ctx, a.ID, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var skipped *AutomationRun
+	for _, run := range runs {
+		if run.Status == RunStatusSkipped {
+			skipped = run
+			break
+		}
+	}
+	if skipped == nil {
+		t.Fatalf("expected a skipped run, got %+v", runs)
+	}
+	if skipped.DedupKey != "" {
+		t.Fatalf("merged-PR cap skip dedup key = %q, want empty", skipped.DedupKey)
 	}
 }
 

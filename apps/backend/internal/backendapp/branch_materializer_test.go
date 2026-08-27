@@ -202,6 +202,18 @@ func TestBranchMaterializer_SecondBranchKeepsTaskRootPromoted(t *testing.T) {
 	}
 }
 
+func TestTaskRepositoryBranchTemplatePrefersPolicySnapshot(t *testing.T) {
+	repo := &models.Repository{WorktreeBranchTemplate: "feature/{title}"}
+	legacy := &models.TaskRepository{}
+	if got := taskRepositoryBranchTemplate(repo, legacy); got != "feature/{title}" {
+		t.Fatalf("legacy template = %q, want repository fallback", got)
+	}
+	policy := &models.TaskRepository{BranchPolicyBranchTemplate: "bugfix/{title}-{suffix}"}
+	if got := taskRepositoryBranchTemplate(repo, policy); got != "bugfix/{title}-{suffix}" {
+		t.Fatalf("policy template = %q, want snapshot template", got)
+	}
+}
+
 // setupMaterializerScenario creates a bare origin repo + a clone that
 // serves as the "primary" worktree at <task-root>/kandev/. Returns the
 // repository path, the task root, and the primary worktree path.
@@ -231,7 +243,7 @@ func setupMaterializerScenario(t *testing.T) (repoPath, taskRoot, primaryPath st
 	if err := os.MkdirAll(taskRoot, 0o755); err != nil {
 		t.Fatalf("mkdir taskRoot: %v", err)
 	}
-	primaryPath = filepath.Join(taskRoot, "kandev")
+	primaryPath = filepath.Join(taskRoot, kandevName)
 	// Simulate the existing primary worktree by adding it as a git worktree
 	// off the repo. The materializer doesn't depend on this being a real
 	// worktree (it only looks at task_environments.workspace_path), but
@@ -293,7 +305,7 @@ func seedMaterializerTask(t *testing.T, ctx context.Context, repo *sqliterepo.Re
 		t.Fatalf("CreateWorkflow: %v", err)
 	}
 	if err := repo.CreateRepository(ctx, &models.Repository{
-		ID: "repo-1", WorkspaceID: "ws-1", Name: "kandev",
+		ID: "repo-1", WorkspaceID: "ws-1", Name: kandevName,
 		LocalPath: repoPath, DefaultBranch: "main", WorktreeBranchPrefix: "feature/",
 	}); err != nil {
 		t.Fatalf("CreateRepository: %v", err)
@@ -322,9 +334,11 @@ func seedMaterializerTask(t *testing.T, ctx context.Context, repo *sqliterepo.Re
 		ID: "env-1", TaskID: "task-1",
 		TaskDirName:   filepath.Base(taskRoot),
 		WorkspacePath: primaryPath,
-		WorktreePath:  primaryPath,
 		ExecutorType:  "worktree", Status: "ready",
 		CreatedAt: now, UpdatedAt: now,
+		Repos: []*models.TaskEnvironmentRepo{
+			{ID: "env-1-repo-primary", RepositoryID: "repo-1", WorktreePath: primaryPath, CreatedAt: now},
+		},
 	}); err != nil {
 		t.Fatalf("CreateTaskEnvironment: %v", err)
 	}

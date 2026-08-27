@@ -4,7 +4,6 @@ import { GitLabPageClient } from "@/app/gitlab/gitlab-page-client";
 import { AzureDevOpsPageClient } from "@/app/azure-devops/azure-devops-page-client";
 import { JiraPageClient } from "@/app/jira/jira-page-client";
 import { LinearPageClient } from "@/app/linear/linear-page-client";
-import { PageClient } from "@/app/page-client";
 import { StatsPageClient } from "@/app/stats/stats-page-client";
 import { isRangeKey } from "@/app/stats/stats-utils";
 import type { RangeKey } from "@/app/stats/stats-utils";
@@ -30,7 +29,6 @@ import { listWorkflows } from "@/lib/api/domains/kanban-api";
 import { fetchUserSettings } from "@/lib/api/domains/settings-api";
 import { listRepositories, listWorkspaces } from "@/lib/api/domains/workspace-api";
 import { resolveDesiredWorkflowId } from "@/lib/kanban/resolve-workflow";
-import { hasHydratedKanbanRouteState } from "@/lib/routing/kanban-route-hydration";
 import { useRouter, usePathname, useSearchParams } from "@/lib/routing/client-router";
 import { pluginRegistry, usePluginRegistry } from "@/lib/plugins/registry";
 import {
@@ -39,8 +37,13 @@ import {
 } from "@/components/plugins/plugin-error-boundary";
 import { PluginPageFrame } from "@/components/plugins/plugin-page";
 import { safeDecodePathSegment } from "@/lib/routing/path";
-import { mapWorkspaceItem, readActiveWorkspaceCookie } from "@/lib/routing/route-bootstrap";
+import {
+  mapWorkspaceItem,
+  promoteLegacyWorkspaceSelection,
+  readActiveWorkspaceCookie,
+} from "@/lib/routing/route-bootstrap";
 import { resolveActiveId } from "@/lib/ssr/resolve-active-id";
+import { KanbanRoute } from "./kanban-route";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import type {
   ListWorkflowStepsResponse,
@@ -240,7 +243,7 @@ export function SpaRoutes({ routeData }: { routeData?: BootRouteData }) {
     return <PluginRoute path={route.path} />;
   }
   if (route.kind === "kanban") {
-    return <KanbanRoute route={route} />;
+    return <KanbanRoute route={route} fallback={<RouteLoading routeNameKey="sidebar:office" />} />;
   }
   if (route.kind === "taskDetail") {
     return (
@@ -311,93 +314,6 @@ function PluginRoute({ path }: { path: string }) {
       </PluginPageFrame>
     </PluginErrorBoundary>
   );
-}
-
-function KanbanRoute({ route }: { route: Extract<SpaRoute, { kind: "kanban" }> }) {
-  useKanbanRouteBootstrap(route);
-  const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
-  return (
-    <PageClient
-      workspaceId={route.workspaceId ?? activeWorkspaceId ?? undefined}
-      initialTaskId={route.taskId}
-      initialSessionId={route.sessionId}
-    />
-  );
-}
-
-function useKanbanRouteBootstrap(route: Extract<SpaRoute, { kind: "kanban" }>) {
-  const store = useAppStoreApi();
-
-  useEffect(() => {
-    if (hasHydratedKanbanRouteState(store.getState(), route)) return;
-
-    let cancelled = false;
-
-    async function bootstrap() {
-      const [workspacesResponse, settingsResponse] = await Promise.all([
-        listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [], total: 0 })),
-        fetchUserSettings({ cache: "no-store" }).catch(() => null),
-      ]);
-      if (cancelled) return;
-
-      const settingsWorkspaceId = settingsResponse?.settings?.workspace_id || null;
-      const settingsWorkflowId = settingsResponse?.settings?.workflow_filter_id || null;
-      const workspaceItems = workspacesResponse.workspaces.map(mapWorkspaceItem);
-      const kanbanWorkspaceItems = workspaceItems.filter(
-        (workspace) => !workspace.office_workflow_id,
-      );
-      const activeWorkspaceId = resolveActiveId(
-        kanbanWorkspaceItems,
-        route.workspaceId,
-        readActiveWorkspaceCookie(),
-        settingsWorkspaceId,
-      );
-
-      store.getState().hydrate({
-        workspaces: { items: workspaceItems, activeId: activeWorkspaceId },
-        userSettings: {
-          ...mapUserSettingsResponse(settingsResponse),
-          workspaceId: activeWorkspaceId,
-        },
-      });
-
-      if (!activeWorkspaceId) return;
-
-      const [workflowsResponse, repositoriesResponse] = await Promise.all([
-        listWorkflows(activeWorkspaceId, { cache: "no-store", includeHidden: true }).catch(() => ({
-          workflows: [],
-        })),
-        listRepositories(activeWorkspaceId, undefined, { cache: "no-store" }).catch(() => ({
-          repositories: [],
-        })),
-      ]);
-      if (cancelled) return;
-
-      const workflowId = resolveDesiredWorkflowId({
-        activeWorkflowId: route.workflowId ?? null,
-        settingsWorkflowId,
-        workspaceWorkflows: workflowsResponse.workflows,
-      });
-
-      store.getState().hydrate({
-        userSettings: {
-          ...mapUserSettingsResponse(settingsResponse),
-          workspaceId: activeWorkspaceId,
-          workflowId,
-        },
-        workflows: {
-          items: workflowsResponse.workflows.map(mapWorkflowItem),
-          activeId: workflowId,
-        },
-      });
-      store.getState().setRepositories(activeWorkspaceId, repositoriesResponse.repositories);
-    }
-
-    void bootstrap();
-    return () => {
-      cancelled = true;
-    };
-  }, [route.workspaceId, route.workflowId, store]);
 }
 
 function DataBackedRoute({
@@ -573,6 +489,7 @@ function useRouteData({
 
   useEffect(() => {
     if (bootstrappedRef.current) return;
+    promoteLegacyWorkspaceSelection(store.getState().workspaces.items);
     if (skipBootstrap) return;
     bootstrappedRef.current = true;
     let cancelled = false;
@@ -590,6 +507,11 @@ function useRouteData({
       const cookieWorkspaceId = readActiveWorkspaceCookie();
       const workspaceItems =
         workspacesResponse?.workspaces.map(mapWorkspaceItem) ?? store.getState().workspaces.items;
+      // One-time migration: a ported instance that has no scoped cookie yet
+      // (fresh upgrade) falls back to the legacy name on every boot; once the
+      // boot validates a legacy value, copy it into the scoped cookie so
+      // later boots are decoupled (legacy name itself stays untouched).
+      promoteLegacyWorkspaceSelection(workspaceItems);
       const workspaceId =
         workspaceItems.length > 0
           ? resolveActiveId(

@@ -163,7 +163,7 @@ test("connects and browses Azure work items, PRs, and feedback", async ({
 }) => {
   await apiClient.mockAzureDevOpsSeed(MOCK_STATE);
   await testPage.goto(
-    `/settings/workspace/${encodeURIComponent(seedData.workspaceId)}/integrations/azure-devops`,
+    `/settings/workspaces/${encodeURIComponent(seedData.workspaceId)}/integrations/azure-devops`,
   );
 
   const projectInput = testPage.locator("#azure-devops-project");
@@ -277,7 +277,7 @@ test("connects and browses Azure work items, PRs, and feedback", async ({
   await expect(testPage.getByTestId("azure-devops-feedback-detail")).toContainText("Build");
 
   await testPage.goto(
-    `/settings/workspace/${encodeURIComponent(seedData.workspaceId)}/integrations/azure-devops`,
+    `/settings/workspaces/${encodeURIComponent(seedData.workspaceId)}/integrations/azure-devops`,
   );
   await expect(testPage.getByTestId("azure-devops-watch-settings")).toBeVisible();
   await testPage.getByTestId("azure-add-work-item-watch").click();
@@ -301,11 +301,16 @@ test("connects and browses Azure work items, PRs, and feedback", async ({
   await expect(workItemWatch.getByText("Disabled")).toBeVisible();
   await workItemWatch.getByRole("button", { name: "Enable" }).click();
   await expect(workItemWatch.getByText("Enabled")).toBeVisible();
-  await testPage.once("dialog", (dialog) => dialog.accept());
   await workItemWatch.getByRole("button", { name: "Reset" }).click();
+  const resetDialog = testPage.getByTestId("reset-watch-dialog");
+  await expect(resetDialog).toBeVisible();
+  await resetDialog.getByTestId("reset-watch-dialog-confirm").click();
   await expect(testPage.getByText("Watch reset.")).toBeVisible();
-  await testPage.once("dialog", (dialog) => dialog.accept());
-  await workItemWatch.getByRole("button", { name: "Delete" }).click();
+  await workItemWatch.getByRole("button", { name: "Delete this watch?" }).click();
+  await testPage
+    .getByTestId("watcher-delete-confirmation")
+    .getByRole("button", { name: "Delete" })
+    .click();
   await expect(workItemWatch).toHaveCount(0);
 
   await testPage.getByTestId("azure-add-pull-request-watch").click();

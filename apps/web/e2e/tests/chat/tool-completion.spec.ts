@@ -32,8 +32,9 @@ test.describe("Tool completion on turn end", () => {
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
 
-    // After turn completes, no grid spinners should remain in the chat
+    // The composer can become idle before the final tool-state reconciliation
+    // reaches the rendered message. Give that bounded update its own wait.
     const spinners = session.chat.locator('[role="status"][aria-label="Loading"]');
-    await expect(spinners).toHaveCount(0);
+    await expect(spinners).toHaveCount(0, { timeout: 30_000 });
   });
 });

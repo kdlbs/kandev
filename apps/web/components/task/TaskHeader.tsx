@@ -13,6 +13,7 @@
 
 import { Badge } from "@kandev/ui/badge";
 import type { ForegroundActivity } from "@/lib/types/http";
+import { useTranslation } from "react-i18next";
 
 export type TaskHeaderProps = {
   identifier?: string | null;
@@ -51,12 +52,12 @@ function resolveBadgeLabel(
   hasPendingClarification: boolean,
   hasPendingPermission: boolean,
 ): string | null {
-  if (hasPendingPermission) return "Permission requested";
-  if (hasPendingClarification) return "Waiting for input";
-  if (foregroundActivity === "generating") return "Generating";
-  if (foregroundActivity === "background") return "Background running";
-  if (state === "WAITING_FOR_INPUT") return "Waiting for input";
-  return state ?? null;
+  if (hasPendingPermission) return "task:sessionStatusPermissionRequested";
+  if (hasPendingClarification) return "task:sessionStatusWaitingForInput";
+  if (foregroundActivity === "generating") return "task:sessionStatusGenerating";
+  if (foregroundActivity === "background") return "task:sessionStatusBackgroundRunning";
+  if (state === "WAITING_FOR_INPUT") return "task:sessionStatusWaitingForInput";
+  return null;
 }
 
 export function TaskHeader({
@@ -69,12 +70,16 @@ export function TaskHeader({
   hasPendingClarification = false,
   hasPendingPermission = false,
 }: TaskHeaderProps) {
-  const badgeLabel = resolveBadgeLabel(
+  const { t } = useTranslation();
+  const badgeKey = resolveBadgeLabel(
     state,
     foregroundActivity,
     hasPendingClarification,
     hasPendingPermission,
   );
+  // `state` is a workflow-step name the user chose, so it is data and is
+  // rendered verbatim; only the derived activity badges are copy.
+  const badgeLabel = badgeKey ? t(badgeKey) : (state ?? null);
   return (
     <div className="flex items-center gap-3 min-w-0">
       {identifier && (

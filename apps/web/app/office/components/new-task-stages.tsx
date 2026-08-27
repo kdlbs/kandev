@@ -4,6 +4,7 @@ import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { useAppStore } from "@/components/state-provider";
+import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
 import { useTranslation } from "react-i18next";
 
@@ -147,7 +148,7 @@ type Props = {
 
 export function NewTaskStages({ stages, onUpdate }: Props) {
   const { t } = useTranslation();
-  const agents = useAppStore((s) => s.office.agentProfiles);
+  const agents = useAppStore(selectOfficeAgentProfiles);
 
   return (
     <div className="border border-border rounded-lg overflow-hidden">

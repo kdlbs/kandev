@@ -12,6 +12,7 @@ afterEach(() => {
   document.body.innerHTML = "";
   vi.useRealTimers();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("settings target identity", () => {
@@ -100,5 +101,83 @@ describe("revealSettingsTarget", () => {
 
     expect(target.scrollIntoView).toHaveBeenCalledWith({ behavior: "auto", block: "center" });
     expect(document.activeElement).toBe(marked);
+  });
+
+  it("re-centers the target when surrounding content grows while settling", () => {
+    vi.useFakeTimers();
+    let callback: ResizeObserverCallback | undefined;
+    const observed: Element[] = [];
+    const disconnect = vi.fn(() => {
+      callback = undefined;
+    });
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(cb: ResizeObserverCallback) {
+          callback = cb;
+        }
+        observe = (el: Element) => void observed.push(el);
+        unobserve = vi.fn();
+        disconnect = disconnect;
+      },
+    );
+
+    const parent = document.createElement("div");
+    const target = document.createElement("div");
+    parent.appendChild(target);
+    document.body.appendChild(parent);
+    target.scrollIntoView = vi.fn();
+
+    revealSettingsTarget(target, { reducedMotion: true });
+    expect(observed).toContain(parent);
+
+    const resize = (el: Element, height: number) =>
+      callback?.([{ target: el, contentRect: { width: 100, height } }] as never, {} as never);
+
+    resize(parent, 100); // baseline notification — no shift yet
+    expect(target.scrollIntoView).toHaveBeenCalledTimes(1);
+
+    resize(parent, 400); // async content grew above the target
+    expect(target.scrollIntoView).toHaveBeenCalledTimes(2);
+    expect(target.scrollIntoView).toHaveBeenLastCalledWith({ behavior: "auto", block: "center" });
+
+    vi.advanceTimersByTime(3000); // settle window elapsed
+    resize(parent, 800);
+    expect(target.scrollIntoView).toHaveBeenCalledTimes(2);
+    expect(disconnect).toHaveBeenCalled();
+  });
+
+  it("stops re-centering as soon as the user interacts", () => {
+    vi.useFakeTimers();
+    let callback: ResizeObserverCallback | undefined;
+    const disconnect = vi.fn(() => {
+      callback = undefined;
+    });
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(cb: ResizeObserverCallback) {
+          callback = cb;
+        }
+        observe = vi.fn();
+        unobserve = vi.fn();
+        disconnect = disconnect;
+      },
+    );
+
+    const target = document.createElement("div");
+    document.body.appendChild(target);
+    target.scrollIntoView = vi.fn();
+
+    revealSettingsTarget(target, { reducedMotion: true });
+    const resize = (height: number) =>
+      callback?.([{ target, contentRect: { width: 100, height } }] as never, {} as never);
+    resize(100);
+
+    window.dispatchEvent(new Event("wheel"));
+    expect(disconnect).toHaveBeenCalled();
+
+    resize(400);
+    expect(target.scrollIntoView).toHaveBeenCalledTimes(1);
   });
 });

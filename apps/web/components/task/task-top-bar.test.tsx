@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StateProvider } from "@/components/state-provider";
 import { TaskTopBar } from "./task-top-bar";
@@ -43,6 +43,22 @@ vi.mock("@/components/github/pr-topbar-button", () => ({
 
 vi.mock("@/components/gitlab/mr-topbar-button", () => ({
   MRTopbarButton: () => null,
+}));
+
+vi.mock("@/components/integrations/registered-change-request-status", () => ({
+  RegisteredChangeRequestStatus: ({
+    taskId,
+    sessionId,
+    surface,
+  }: {
+    taskId: string | null;
+    sessionId?: string | null;
+    surface: string;
+  }) => (
+    <span data-testid={`registered-change-request-${surface}`}>
+      {taskId}:{sessionId}
+    </span>
+  ),
 }));
 
 vi.mock("@/components/jira/jira-ticket-button", () => ({
@@ -120,6 +136,47 @@ describe("TaskTopBar GitHub issue link", () => {
     );
     expect(screen.getByLabelText("Task status and attention").className).not.toContain("[&_a]");
     expect(issue.compareDocumentPosition(pr) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
+describe("TaskTopBar registered change requests", () => {
+  it("mounts plugin status beside native review controls", () => {
+    renderTopBar(<TaskTopBar taskId="task-1" activeSessionId="session-1" />);
+
+    const native = screen.getByTestId("pr-topbar-button");
+    const plugin = screen.getByTestId("registered-change-request-topbar");
+
+    expect(plugin.textContent).toBe("task-1:session-1");
+    expect(native.compareDocumentPosition(plugin) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
+describe("TaskTopBar repository crumb", () => {
+  function repositoryCrumb(label: string) {
+    return within(screen.getByRole("navigation", { name: "breadcrumb" })).queryByText(label);
+  }
+
+  it("names the task's repository so an open task says which project it belongs to", () => {
+    renderTopBar(
+      <TaskTopBar taskId="task-1" taskTitle="Fix the sidebar" repositoryLabel="kdlbs/kandev" />,
+    );
+
+    const crumb = repositoryCrumb("kdlbs/kandev");
+    expect(crumb).toBeTruthy();
+    // Orientation, not navigation: there is no repository route to land on.
+    expect(crumb!.closest("a")).toBeNull();
+    // Truncation is what protects the title, so the full name lives in `title`.
+    expect(crumb!.getAttribute("title")).toBe("kdlbs/kandev");
+  });
+
+  it("renders no repository crumb for a task with no repository", () => {
+    renderTopBar(<TaskTopBar taskId="task-1" taskTitle="Fix the sidebar" />);
+
+    // Any static crumb, not just a slug-shaped one: a repository with no
+    // provider falls back to a bare name like "scratchpad", which a
+    // slash-matching query would happily miss.
+    const breadcrumb = screen.getByRole("navigation", { name: "breadcrumb" });
+    expect(breadcrumb.querySelector("[title]")).toBeNull();
   });
 });
 

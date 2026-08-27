@@ -135,7 +135,7 @@ export function ContextSelect({
       <label className="text-xs font-medium text-muted-foreground">{t("task:context")}</label>
       <div className="flex min-w-0 items-center gap-2">
         <Select value={value} onValueChange={onValueChange} disabled={isSummarizing}>
-          <SelectTrigger className="w-full min-w-0 text-xs">
+          <SelectTrigger className="!h-11 w-full min-w-0 text-xs sm:!h-7">
             <SelectValue>{isSummarizing ? t("task:summarizing") : displayLabel}</SelectValue>
           </SelectTrigger>
           <SelectContent>

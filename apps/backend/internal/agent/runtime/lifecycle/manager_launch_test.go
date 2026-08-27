@@ -95,7 +95,7 @@ func TestBuildAgentCommand_ResumeFlag(t *testing.T) {
 	t.Run("CanRecover=true with ACPSessionID includes --resume", func(t *testing.T) {
 		ag := &resumeTestAgent{canRecover: &canRecoverTrue}
 		req := &LaunchRequest{ACPSessionID: "sess-123"}
-		cmds, err := mgr.buildAgentCommand(req, nil, ag, false)
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), req, nil, ag, false)
 		require.NoError(t, err)
 		require.Contains(t, cmds.initial, "--resume")
 		require.Contains(t, cmds.initial, "sess-123")
@@ -104,7 +104,7 @@ func TestBuildAgentCommand_ResumeFlag(t *testing.T) {
 	t.Run("CanRecover=false with ACPSessionID omits --resume", func(t *testing.T) {
 		ag := &resumeTestAgent{canRecover: &canRecoverFalse}
 		req := &LaunchRequest{ACPSessionID: "sess-123"}
-		cmds, err := mgr.buildAgentCommand(req, nil, ag, false)
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), req, nil, ag, false)
 		require.NoError(t, err)
 		require.False(t, strings.Contains(cmds.initial, "--resume"),
 			"expected no --resume flag, got: %s", cmds.initial)
@@ -115,7 +115,7 @@ func TestBuildAgentCommand_ResumeFlag(t *testing.T) {
 	t.Run("CanRecover=true with empty ACPSessionID omits --resume", func(t *testing.T) {
 		ag := &resumeTestAgent{canRecover: &canRecoverTrue}
 		req := &LaunchRequest{ACPSessionID: ""}
-		cmds, err := mgr.buildAgentCommand(req, nil, ag, false)
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), req, nil, ag, false)
 		require.NoError(t, err)
 		require.False(t, strings.Contains(cmds.initial, "--resume"),
 			"expected no --resume flag when ACPSessionID is empty, got: %s", cmds.initial)
@@ -124,7 +124,7 @@ func TestBuildAgentCommand_ResumeFlag(t *testing.T) {
 	t.Run("CanRecover=nil (default true) with ACPSessionID includes --resume", func(t *testing.T) {
 		ag := &resumeTestAgent{canRecover: nil}
 		req := &LaunchRequest{ACPSessionID: "sess-456"}
-		cmds, err := mgr.buildAgentCommand(req, nil, ag, false)
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), req, nil, ag, false)
 		require.NoError(t, err)
 		require.Contains(t, cmds.initial, "--resume")
 		require.Contains(t, cmds.initial, "sess-456")
@@ -136,40 +136,35 @@ func TestBuildAgentCommand_UsesManagedNPMRuntimes(t *testing.T) {
 	tests := []struct {
 		name  string
 		agent agents.Agent
-		want  string
 	}{
 		{
 			name:  "claude",
 			agent: agents.NewClaudeACP(),
-			want:  "npx --yes --prefer-offline @agentclientprotocol/claude-agent-acp",
 		},
 		{
 			name:  "codex",
 			agent: agents.NewCodexACP(),
-			want:  "npx --yes --prefer-offline @agentclientprotocol/codex-acp",
 		},
 		{
 			name:  "opencode",
 			agent: agents.NewOpenCodeACP(),
-			want:  "npx --yes --prefer-offline opencode-ai acp --print-logs --log-level ERROR",
 		},
 		{
 			name:  "copilot",
 			agent: agents.NewCopilotACP(),
-			want:  "npx --yes --prefer-offline @github/copilot --acp",
 		},
 		{
 			name:  "gemini",
 			agent: agents.NewGemini(),
-			want:  "npx --yes --prefer-offline @google/gemini-cli --acp",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmds, err := mgr.buildAgentCommand(&LaunchRequest{}, nil, tt.agent, true)
+			want := strings.Join(tt.agent.(agents.ManagedNPMRuntimeAgent).ManagedNPMRuntime().CachedACPCommand().Args(), " ")
+			cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, nil, tt.agent, true)
 			require.NoError(t, err)
-			require.Equal(t, tt.want, cmds.initial)
+			require.Equal(t, want, cmds.initial)
 		})
 	}
 }
@@ -205,7 +200,7 @@ func TestBuildAgentCommand_CLIFlagsAppended(t *testing.T) {
 				{Flag: "--add-dir /shared", Enabled: true},  // must be split
 			},
 		}
-		cmds, err := mgr.buildAgentCommand(&LaunchRequest{}, profile, ag, false)
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, profile, ag, false)
 		require.NoError(t, err)
 
 		require.Contains(t, cmds.initial, "--allow-all-tools")
@@ -223,7 +218,7 @@ func TestBuildAgentCommand_CLIFlagsAppended(t *testing.T) {
 				{Flag: `--broken "unterminated`, Enabled: true},
 			},
 		}
-		cmds, err := mgr.buildAgentCommand(&LaunchRequest{}, profile, ag, false)
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, profile, ag, false)
 		require.NoError(t, err)
 		// The bad flag is dropped entirely; the launch still produces the
 		// agent's base command so a user with a typo still gets their task
@@ -232,7 +227,7 @@ func TestBuildAgentCommand_CLIFlagsAppended(t *testing.T) {
 	})
 
 	t.Run("nil profile produces bare command", func(t *testing.T) {
-		cmds, err := mgr.buildAgentCommand(&LaunchRequest{}, nil, ag, false)
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, nil, ag, false)
 		require.NoError(t, err)
 		require.Equal(t, "copilot --acp", cmds.initial)
 	})
@@ -247,7 +242,7 @@ func TestBuildAgentCommand_CommandPrefix(t *testing.T) {
 			ProfileID:     "p1",
 			CommandPrefix: "greywall --",
 		}
-		cmds, err := mgr.buildAgentCommand(&LaunchRequest{}, profile, ag, false)
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, profile, ag, false)
 		require.NoError(t, err)
 		require.Equal(t, "greywall -- copilot --acp", cmds.initial)
 	})
@@ -258,14 +253,14 @@ func TestBuildAgentCommand_CommandPrefix(t *testing.T) {
 			CommandPrefix: "greywall --",
 			CLIFlags:      []settingsmodels.CLIFlag{{Flag: "--allow-all-tools", Enabled: true}},
 		}
-		cmds, err := mgr.buildAgentCommand(&LaunchRequest{}, profile, ag, false)
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, profile, ag, false)
 		require.NoError(t, err)
 		require.Equal(t, "greywall -- copilot --acp --allow-all-tools", cmds.initial)
 	})
 
 	t.Run("empty prefix leaves the command unwrapped", func(t *testing.T) {
 		profile := &AgentProfileInfo{ProfileID: "p3"}
-		cmds, err := mgr.buildAgentCommand(&LaunchRequest{}, profile, ag, false)
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, profile, ag, false)
 		require.NoError(t, err)
 		require.Equal(t, "copilot --acp", cmds.initial)
 	})
@@ -275,7 +270,7 @@ func TestBuildAgentCommand_CommandPrefix(t *testing.T) {
 			ProfileID:     "p4",
 			CommandPrefix: `greywall "unterminated`,
 		}
-		_, err := mgr.buildAgentCommand(&LaunchRequest{}, profile, ag, false)
+		_, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, profile, ag, false)
 		require.Error(t, err, "a configured prefix that cannot be resolved must abort the launch")
 	})
 
@@ -292,10 +287,38 @@ func TestBuildAgentCommand_CommandPrefix(t *testing.T) {
 			CommandPrefix: "greywall --",
 			CLIFlags:      []settingsmodels.CLIFlag{{Flag: "--allow-all-tools", Enabled: true}},
 		}
-		cmds, err := mgr.buildAgentCommand(&LaunchRequest{}, profile, continueAgent, false)
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, profile, continueAgent, false)
 		require.NoError(t, err)
 		require.Equal(t, "greywall -- amp threads continue --allow-all-tools", cmds.continue_)
 	})
+}
+
+func TestCollectContributionDestinationsRejectsDistinctIdentitiesWithSamePath(t *testing.T) {
+	first := lifecycleTestContributionDestination("200")
+	second := lifecycleTestContributionDestination("201")
+	req := &LaunchRequest{Repositories: []RepoLaunchSpec{
+		{RepoName: "primary"},
+		{RepoName: "shared", BaseBranch: "main", ContributionDestination: &first},
+		{RepoName: "shared", BaseBranch: "main", ContributionDestination: &second},
+	}}
+
+	_, err := collectContributionDestinations(req)
+	if err == nil {
+		t.Fatal("collectContributionDestinations accepted distinct target identities with the same path")
+	}
+}
+
+func lifecycleTestContributionDestination(providerID string) models.ContributionDestination {
+	return models.ContributionDestination{
+		Version:  models.ContributionDestinationVersion,
+		Provider: models.ContributionDestinationProviderGitHub,
+		SourceRepository: models.ContributionDestinationRepository{
+			Host: "github.com", Path: "kdlbs/kandev", ProviderID: "100", RemoteURL: "https://github.com/kdlbs/kandev.git",
+		},
+		TargetRepository: models.ContributionDestinationRepository{
+			Host: "github.com", Path: "alice/kandev", ProviderID: providerID, RemoteURL: "https://github.com/alice/kandev.git",
+		},
+	}
 }
 
 func TestBuildAgentCommand_RejectsInvalidBuiltArgv(t *testing.T) {
@@ -320,7 +343,7 @@ func TestBuildAgentCommand_RejectsInvalidBuiltArgv(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := mgr.buildAgentCommand(&LaunchRequest{}, nil, tt.agent, false)
+			_, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, nil, tt.agent, false)
 			require.Error(t, err)
 		})
 	}
@@ -460,6 +483,25 @@ func TestBuildEnvForExecution_ResolvesSecretBackedProfileEnv(t *testing.T) {
 	}
 	if env["FROM_SECRET"] != "revealed" {
 		t.Fatalf("FROM_SECRET: got %q want revealed", env["FROM_SECRET"])
+	}
+}
+
+func TestBuildEnvForExecution_FailsClosedWhenProfileSecretIsUnavailable(t *testing.T) {
+	mgr := newTestManager(t)
+	mgr.secretStore = newInMemorySecretStore()
+
+	_, err := mgr.buildEnvForExecution(
+		context.Background(),
+		"exec-1",
+		&LaunchRequest{AgentProfileID: "profile-1"},
+		nil,
+		&AgentProfileInfo{EnvVars: []settingsmodels.ProfileEnvVar{{
+			Key:      "PROFILE_TOKEN",
+			SecretID: "missing-secret",
+		}}},
+	)
+	if err == nil {
+		t.Fatal("buildEnvForExecution succeeded with an unavailable profile secret")
 	}
 }
 
@@ -768,7 +810,7 @@ func TestConfigureAndStartAgent_DoesNotSendTaskDescriptionEnv(t *testing.T) {
 		AgentProfileID: "profile-1",
 		AgentCommand:   "npx -y @agentclientprotocol/codex-acp",
 		WorkspacePath:  t.TempDir(),
-		Metadata: map[string]interface{}{
+		metadata: map[string]interface{}{
 			"runtime_env":      map[string]string{"KEEP_ME": "yes"},
 			"task_description": strings.Repeat("large prompt\n", 1000),
 		},
@@ -787,6 +829,32 @@ func TestConfigureAndStartAgent_DoesNotSendTaskDescriptionEnv(t *testing.T) {
 	}
 	if _, exists := configuredEnv["TASK_DESCRIPTION"]; exists {
 		t.Fatalf("TASK_DESCRIPTION must not be sent to agentctl configure env")
+	}
+}
+
+func TestConfigureAndStartAgentUsesRuntimeSnapshotWhenProfileSecretIsUnavailable(t *testing.T) {
+	mgr := newTestManager(t)
+	mgr.profileResolver = &mockPassthroughProfileResolver{
+		envVars: []settingsmodels.ProfileEnvVar{{Key: "PROFILE_ONLY", SecretID: "deleted-secret"}},
+	}
+	var configuredEnv map[string]string
+	client := newConfigureCaptureAgentctlClient(t, newTestLogger(), &configuredEnv)
+	execution := &AgentExecution{
+		ID:             "exec-1",
+		TaskID:         "task-1",
+		SessionID:      "session-1",
+		AgentProfileID: "profile-1",
+		AgentCommand:   "npx -y @agentclientprotocol/codex-acp",
+		WorkspacePath:  t.TempDir(),
+		agentctl:       client,
+	}
+	execution.setRuntimeEnvironment(map[string]string{"PROFILE_ONLY": "captured-value"})
+
+	if _, err := mgr.configureAndStartAgent(context.Background(), execution, "never"); err != nil {
+		t.Fatalf("configureAndStartAgent() error = %v", err)
+	}
+	if configuredEnv["PROFILE_ONLY"] != "captured-value" {
+		t.Fatalf("configured profile env = %q, want captured runtime value", configuredEnv["PROFILE_ONLY"])
 	}
 }
 
@@ -827,7 +895,7 @@ func TestConfigureAndStartAgent_SpillsLargeWakePayloadEnv(t *testing.T) {
 		AgentProfileID: "profile-1",
 		AgentCommand:   "npx -y @agentclientprotocol/codex-acp",
 		WorkspacePath:  workspace,
-		Metadata: map[string]interface{}{
+		metadata: map[string]interface{}{
 			"runtime_env": map[string]string{
 				"KANDEV_RUN_ID":            "run-2",
 				"KANDEV_WAKE_PAYLOAD_JSON": payload,
@@ -864,7 +932,7 @@ func TestSetExecutionEnv_DoesNotSnapshotProfileEnvVars(t *testing.T) {
 		ID:             "exec-1",
 		SessionID:      "session-1",
 		AgentProfileID: "profile-1",
-		Metadata:       map[string]interface{}{},
+		metadata:       map[string]interface{}{},
 	}
 	if err := mgr.executionStore.Add(execution); err != nil {
 		t.Fatalf("seed execution: %v", err)
@@ -874,9 +942,10 @@ func TestSetExecutionEnv_DoesNotSnapshotProfileEnvVars(t *testing.T) {
 		t.Fatalf("SetExecutionEnv: %v", err)
 	}
 
-	runtimeEnv, ok := execution.Metadata["runtime_env"].(map[string]string)
+	rawEnv, _ := execution.metadataValue("runtime_env")
+	runtimeEnv, ok := rawEnv.(map[string]string)
 	if !ok {
-		t.Fatalf("runtime_env missing or wrong type: %#v", execution.Metadata["runtime_env"])
+		t.Fatalf("runtime_env missing or wrong type: %#v", rawEnv)
 	}
 	if runtimeEnv["EXECUTOR_ONLY"] != "executor" {
 		t.Fatalf("executor env missing: %+v", runtimeEnv)
@@ -2235,10 +2304,10 @@ func TestLaunch_PersistsDockerRuntimeSecrets(t *testing.T) {
 		t.Fatalf("Launch returned error: %v", err)
 	}
 
-	if got := mgr.revealRuntimeSecret(context.Background(), execution.Metadata, MetadataKeyAuthTokenSecret); got != "agentctl-token" {
+	if got := mgr.revealRuntimeSecret(context.Background(), execution.MetadataSnapshot(), MetadataKeyAuthTokenSecret); got != "agentctl-token" {
 		t.Fatalf("revealed auth token = %q, want agentctl-token", got)
 	}
-	if got := mgr.revealRuntimeSecret(context.Background(), execution.Metadata, MetadataKeyBootstrapNonceSecret); got != "bootstrap-nonce" {
+	if got := mgr.revealRuntimeSecret(context.Background(), execution.MetadataSnapshot(), MetadataKeyBootstrapNonceSecret); got != "bootstrap-nonce" {
 		t.Fatalf("revealed bootstrap nonce = %q, want bootstrap-nonce", got)
 	}
 }

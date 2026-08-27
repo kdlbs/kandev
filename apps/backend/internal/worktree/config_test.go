@@ -2,6 +2,54 @@ package worktree
 
 import "testing"
 
+// TestConfigValidateBranchPrefix pins both halves of the default-application
+// branch in Config.Validate: an empty prefix picks up DefaultBranchPrefix, and
+// an explicitly configured prefix survives untouched. Inverting the condition
+// (`!= ""`) breaks both and must fail here.
+func TestConfigValidateBranchPrefix(t *testing.T) {
+	cases := []struct {
+		name  string
+		given string
+		want  string
+	}{
+		{name: "empty prefix falls back to the default", given: "", want: DefaultBranchPrefix},
+		{name: "explicit prefix is preserved", given: "kandev/", want: "kandev/"},
+		{name: "explicit prefix without separator is preserved", given: "wip", want: "wip"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &Config{BranchPrefix: tc.given}
+			if err := cfg.Validate(); err != nil {
+				t.Fatalf("Validate() error = %v, want nil", err)
+			}
+			if cfg.BranchPrefix != tc.want {
+				t.Errorf("BranchPrefix = %q, want %q", cfg.BranchPrefix, tc.want)
+			}
+		})
+	}
+}
+
+// TestConfigValidateLeavesOtherFieldsAlone guards against Validate growing a
+// side effect on fields it has no business defaulting.
+func TestConfigValidateLeavesOtherFieldsAlone(t *testing.T) {
+	cfg := &Config{
+		Enabled:             true,
+		TasksBasePath:       "/tmp/kandev-tasks",
+		BranchPrefix:        "feat/",
+		FetchTimeoutSeconds: 11,
+		PullTimeoutSeconds:  22,
+	}
+	want := *cfg
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v, want nil", err)
+	}
+	if *cfg != want {
+		t.Errorf("Validate() mutated the config: got %+v, want %+v", *cfg, want)
+	}
+}
+
 func TestTaskDirSuffix(t *testing.T) {
 	const id = "61ccfd2c-1121-4226-99ab-8d9a60a57e6e"
 

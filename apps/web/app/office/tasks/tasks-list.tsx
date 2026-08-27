@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
+import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
 import { useOfficeRefetch } from "@/hooks/use-office-refetch";
 import type { OfficeTask } from "@/lib/state/slices/office/types";
 import { NewTaskDialog } from "../components/new-task-dialog";
@@ -112,7 +113,7 @@ export function TasksList() {
   const groupBy = useAppStore((s) => s.office.tasks.groupBy);
   const nestingEnabled = useAppStore((s) => s.office.tasks.nestingEnabled);
   const isLoading = useAppStore((s) => s.office.tasks.isLoading);
-  const agents = useAppStore((s) => s.office.agentProfiles);
+  const agents = useAppStore(selectOfficeAgentProfiles);
 
   const setTaskFilters = useAppStore((s) => s.setTaskFilters);
   const setTaskViewMode = useAppStore((s) => s.setTaskViewMode);
@@ -124,7 +125,7 @@ export function TasksList() {
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [showSystem, setShowSystem] = useShowSystemPref();
-  const { searchResults, triggerSearch } = useServerSearch(workspaceId);
+  const { searchResults, triggerSearch, patchSearchResult } = useServerSearch(workspaceId);
 
   const agentMap = new Map(agents.map((a) => [a.id, a.name]));
 
@@ -203,6 +204,7 @@ export function TasksList() {
         expandedIds={expandedIds}
         onToggleExpand={handleToggleExpand}
         agentMap={agentMap}
+        onTaskPatch={searchResults ? patchSearchResult : undefined}
       />
 
       <LoadMoreButton

@@ -21,6 +21,16 @@ type MobileChangesPanelProps = {
   onOpenFile?: (filePath: string, repo?: string) => void;
 };
 
+function buildContributionHeaderProps(data: ReturnType<typeof useChangesPanelData>) {
+  return {
+    relation: data.relation,
+    resolution: data.resolution,
+    resolutionTarget: data.resolutionTarget,
+    remoteContributionUrl: data.selectedPR?.pr_url ?? data.existingPrUrl,
+    remoteContributionNumber: data.selectedPR?.pr_number,
+  };
+}
+
 /**
  * Mobile Changes panel — renders the same timeline summary surface as desktop.
  * Reuses ChangesPanelBody + ChangesPanelHeader from desktop.
@@ -102,7 +112,9 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
           displayBranch={data.git.branch}
           baseBranchDisplay={data.baseBranchDisplay}
           baseBranchByRepo={data.baseBranchByRepo}
-          behindCount={data.git.behind}
+          behindCount={data.git.pullBehind}
+          pullDisabled={data.pullDisabled}
+          pullDisabledReason={data.pullDisabledReason}
           isLoading={data.git.isLoading}
           loadingOperation={data.git.loadingOperation}
           onOpenDiffAll={handleOpenDiffAll}
@@ -118,6 +130,8 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
           repoDisplayName={data.repoDisplayName}
           taskId={data.activeTaskId}
           credentialDisplay={data.gitCredentialDisplay}
+          comparisonTargets={data.git.comparisonTargets}
+          {...buildContributionHeaderProps(data)}
         />
         <ChangesPanelBody {...bodyProps} />
       </PanelRoot>

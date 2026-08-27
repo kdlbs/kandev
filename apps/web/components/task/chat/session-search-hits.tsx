@@ -89,7 +89,7 @@ function HitAuthor({
       </span>
     );
   }
-  const label = agentLabel?.trim() || "Agent";
+  const label = agentLabel?.trim() || t("common:agent");
   return (
     <span className="text-[0.6875rem] uppercase tracking-wide font-medium text-muted-foreground inline-flex items-center gap-1.5 min-w-0">
       {agentName && <AgentLogo agentName={agentName} size={12} className="shrink-0" />}

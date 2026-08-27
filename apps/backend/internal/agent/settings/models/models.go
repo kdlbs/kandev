@@ -29,6 +29,13 @@ type TUIConfigJSON struct {
 	Description     string   `json:"description,omitempty"`
 	CommandArgs     []string `json:"command_args,omitempty"`
 	WaitForTerminal bool     `json:"wait_for_terminal"`
+	// MCPStrategy selects how kandev injects its per-session MCP server into
+	// the wrapped CLI (mcpconfig.StrategyKey*). Empty — the value every row
+	// written before this field existed decodes to — means no injection.
+	// Stored here rather than as an agent column because it is part of the
+	// user's CLI definition, and because tui_config is JSON: adding the field
+	// needs no migration.
+	MCPStrategy string `json:"mcp_strategy,omitempty"`
 }
 
 type AgentProfile struct {
@@ -44,6 +51,17 @@ type AgentProfile struct {
 	// Model is the ACP model ID applied through session model selection at session start.
 	// Validated against the host utility capability cache by the reconciler.
 	Model string `json:"model" db:"model"`
+
+	// FallbackModel is the optional ACP model ID the runtime switches to when
+	// the start model (Model) becomes unavailable. Empty means "no explicit
+	// fallback". Ignored at runtime when AutoFallback is enabled.
+	FallbackModel string `json:"fallback_model,omitempty" db:"fallback_model"`
+
+	// AutoFallback opts the profile into the legacy automatic-fallback
+	// behavior: session-start model application is best-effort and office
+	// post-start failures re-dispatch to the next provider candidate. When
+	// enabled, FallbackModel is ignored and the UI hides its field.
+	AutoFallback bool `json:"auto_fallback" db:"auto_fallback"`
 
 	// Mode is the optional ACP session mode applied via session/set_mode at
 	// session start. Empty when the agent does not advertise modes.

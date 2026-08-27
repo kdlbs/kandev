@@ -1,6 +1,8 @@
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { waitForSessionState } from "../../helpers/session";
+import { waitForSessionAgentctlReady } from "../../helpers/session-store";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import { errors, type Page } from "@playwright/test";
@@ -34,6 +36,20 @@ async function openTaskSession(page: Page, title: string): Promise<SessionPage> 
   return session;
 }
 
+async function waitForWorkflowStep(
+  apiClient: ApiClient,
+  taskId: string,
+  workflowStepId: string,
+  message: string,
+): Promise<void> {
+  await expect
+    .poll(async () => (await apiClient.getTask(taskId)).workflow_step_id ?? "", {
+      timeout: 60_000,
+      message,
+    })
+    .toBe(workflowStepId);
+}
+
 /** Seed a 4-step workflow (Backlog → Analyze → Implement → Review) with configurable step events. */
 async function seedCascadeWorkflow(
   apiClient: ApiClient,
@@ -46,7 +62,7 @@ async function seedCascadeWorkflow(
   const backlogStep = await apiClient.createWorkflowStep(workflow.id, "Backlog", 0);
   const analyzeStep = await apiClient.createWorkflowStep(workflow.id, "Analyze", 1);
   const implementStep = await apiClient.createWorkflowStep(workflow.id, "Implement", 2);
-  await apiClient.createWorkflowStep(workflow.id, "Review", 3);
+  const reviewStep = await apiClient.createWorkflowStep(workflow.id, "Review", 3);
 
   await apiClient.updateWorkflowStep(analyzeStep.id, {
     prompt: "Analyze: {{task_prompt}}",
@@ -69,7 +85,7 @@ async function seedCascadeWorkflow(
     enable_preview_on_click: false,
   });
 
-  return { workflow, backlogStep, analyzeStep, implementStep };
+  return { workflow, backlogStep, analyzeStep, implementStep, reviewStep };
 }
 
 // ---------------------------------------------------------------------------
@@ -159,7 +175,8 @@ test.describe("Terminal agent (TUI passthrough)", () => {
     apiClient,
     seedData,
   }) => {
-    const { workflow, backlogStep, analyzeStep } = await seedCascadeWorkflow(
+    test.setTimeout(120_000);
+    const { workflow, backlogStep, analyzeStep, reviewStep } = await seedCascadeWorkflow(
       apiClient,
       seedData,
       "TUI Cascade Workflow",
@@ -195,10 +212,16 @@ test.describe("Terminal agent (TUI passthrough)", () => {
     // The mock TUI prints "Processed: <prompt>" for each stdin line it receives.
     await session.expectPassthroughHasText("Analyze", 30_000);
     await session.expectPassthroughHasText("Processed: Implement", 30_000);
+    await waitForWorkflowStep(
+      apiClient,
+      task.id,
+      reviewStep.id,
+      "the cascade should reach the Review step",
+    );
 
     // Stepper shows Review as current step after the full cascade
     await expect(session.stepperStep("Review")).toHaveAttribute("aria-current", "step", {
-      timeout: 30_000,
+      timeout: 60_000,
     });
   });
 
@@ -222,7 +245,8 @@ test.describe("Terminal agent (TUI passthrough)", () => {
     apiClient,
     seedData,
   }) => {
-    const { workflow, backlogStep, analyzeStep } = await seedCascadeWorkflow(
+    test.setTimeout(120_000);
+    const { workflow, backlogStep, analyzeStep, reviewStep } = await seedCascadeWorkflow(
       apiClient,
       seedData,
       "TUI Reset Workflow",
@@ -246,6 +270,22 @@ test.describe("Terminal agent (TUI passthrough)", () => {
     const session = await openTaskSession(testPage, "TUI Reset Task");
     await session.expectPassthroughHasText("Mock Agent");
 
+    // The terminal header can render before the auto-started boot turn ends.
+    // Wait for the backend lifecycle state before moving the task. Otherwise
+    // the workflow reset can race with that first PTY turn under CI load.
+    expect(task.session_id, "task must have a session to await").toBeTruthy();
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId: task.session_id as string,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "the initial passthrough turn did not settle before the cascade",
+      timeout: 30_000,
+    });
+    // The API state can settle before the page has subscribed to the session's
+    // agentctl lifecycle. Establish that subscription before moving the task,
+    // so reset/relaunch events cannot race the terminal's initial handshake.
+    await waitForSessionAgentctlReady(testPage, task.session_id as string);
+
     // Trigger cascade: Analyze → (turn complete) → Implement (reset + auto_start) → Review
     await apiClient.moveTask(task.id, workflow.id, analyzeStep.id);
 
@@ -254,10 +294,16 @@ test.describe("Terminal agent (TUI passthrough)", () => {
 
     // After context reset, the fresh process completes the Implement step prompt.
     await session.expectPassthroughHasText("Processed: Implement", 30_000);
+    await waitForWorkflowStep(
+      apiClient,
+      task.id,
+      reviewStep.id,
+      "the reset cascade should reach the Review step",
+    );
 
     // Stepper shows Review as current step after the full cascade
     await expect(session.stepperStep("Review")).toHaveAttribute("aria-current", "step", {
-      timeout: 30_000,
+      timeout: 60_000,
     });
   });
 

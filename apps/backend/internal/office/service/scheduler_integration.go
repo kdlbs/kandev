@@ -3,8 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"os"
-	"strconv"
+	"fmt"
 	"time"
 
 	"go.uber.org/zap"
@@ -12,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/models"
 	officeruntime "github.com/kandev/kandev/internal/office/runtime"
+	"github.com/kandev/kandev/internal/office/shared"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -22,19 +22,20 @@ const DefaultTickInterval = 5 * time.Second
 // if no agent lifecycle event returned it to a terminal queue state.
 const staleClaimedRunAge = 30 * time.Minute
 
-// TickIntervalFromEnv reads KANDEV_OFFICE_SCHEDULER_TICK_MS and returns the
-// corresponding duration. Falls back to DefaultTickInterval when the variable
-// is unset or invalid.
+// TickIntervalFromConfig converts the resolved typed millisecond setting into
+// the office scheduler duration. Invalid values retain the safe default.
+func TickIntervalFromConfig(milliseconds int) time.Duration {
+	if milliseconds <= 0 {
+		return DefaultTickInterval
+	}
+	return time.Duration(milliseconds) * time.Millisecond
+}
+
+// TickIntervalFromEnv remains as a compatibility helper for package callers.
+// Backend startup resolves the setting through common/config and passes the
+// result to NewSchedulerIntegration.
 func TickIntervalFromEnv() time.Duration {
-	raw := os.Getenv("KANDEV_OFFICE_SCHEDULER_TICK_MS")
-	if raw == "" {
-		return DefaultTickInterval
-	}
-	ms, err := strconv.Atoi(raw)
-	if err != nil || ms <= 0 {
-		return DefaultTickInterval
-	}
-	return time.Duration(ms) * time.Millisecond
+	return DefaultTickInterval
 }
 
 // SchedulerIntegration runs the run processing tick loop.
@@ -127,6 +128,7 @@ func (si *SchedulerIntegration) tick(ctx context.Context) {
 		si.processRun(ctx, run)
 	}
 	si.recoverStaleClaimedRuns(ctx)
+	si.reapStaleCheckouts(ctx)
 }
 
 // liftParkedRoutingRuns clears routing-block status on runs whose
@@ -167,6 +169,26 @@ func (si *SchedulerIntegration) recoverStaleClaimedRuns(ctx context.Context) {
 	}
 }
 
+// reapStaleCheckouts is the backstop for task checkouts that never got
+// released on a run's terminal transition (see releaseTaskCheckoutForRun
+// in scheduler_runs.go for the primary release path). Reuses
+// staleClaimedRunAge as the staleness threshold — the same age already
+// used to decide a claimed run has gone unanswered, so a checkout held
+// past that point with no in-flight run behind it is equally stuck.
+func (si *SchedulerIntegration) reapStaleCheckouts(ctx context.Context) {
+	count, err := si.svc.repo.ReapStaleCheckouts(ctx, time.Now().UTC().Add(-staleClaimedRunAge))
+	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		si.logger.Error("failed to reap stale task checkouts", zap.Error(err))
+		return
+	}
+	if count > 0 {
+		si.logger.Info("reaped stale task checkouts", zap.Int64("count", count))
+	}
+}
+
 // processRun runs guard checks, checkout, budget check, resolves executor,
 // builds prompt, logs the result, and marks the run finished.
 func (si *SchedulerIntegration) processRun(ctx context.Context, run *models.Run) {
@@ -198,7 +220,14 @@ func (si *SchedulerIntegration) processRun(ctx context.Context, run *models.Run)
 	}
 
 	// Staleness check.
-	if cancel, reason := si.evaluateRunStaleness(ctx, run); cancel {
+	cancel, reason, staleErr := si.evaluateRunStaleness(ctx, run)
+	if staleErr != nil {
+		si.logger.Warn("run staleness check failed; retrying run",
+			zap.String("run_id", runID), zap.Error(staleErr))
+		_ = si.svc.HandleRunFailure(ctx, run, staleErr)
+		return
+	}
+	if cancel {
 		si.cancelStaleRun(ctx, run, agent, reason)
 		return
 	}
@@ -221,7 +250,7 @@ func (si *SchedulerIntegration) processRun(ctx context.Context, run *models.Run)
 
 	// Atomic task checkout.
 	taskID := si.extractTaskID(run.Payload)
-	if !si.checkoutTask(ctx, runID, taskID, agentInstanceID) {
+	if !si.checkoutTask(ctx, run, taskID, agentInstanceID) {
 		return
 	}
 
@@ -235,7 +264,7 @@ func (si *SchedulerIntegration) processRun(ctx context.Context, run *models.Run)
 	if err != nil {
 		si.logger.Warn("executor resolution failed; retrying run",
 			zap.String("run_id", runID), zap.Error(err))
-		si.releaseCheckoutIfNeeded(ctx, taskID)
+		si.releaseCheckoutIfNeeded(ctx, run)
 		_ = si.svc.HandleRunFailure(ctx, run, err)
 		return
 	}
@@ -265,7 +294,7 @@ func (si *SchedulerIntegration) prepareAndLaunch(
 	if err != nil {
 		si.logger.Warn("runtime context build failed; retrying run",
 			zap.String("run_id", run.ID), zap.Error(err))
-		si.releaseCheckoutIfNeeded(ctx, taskID)
+		si.releaseCheckoutIfNeeded(ctx, run)
 		_ = si.svc.HandleRunFailure(ctx, run, err)
 		return
 	}
@@ -282,7 +311,7 @@ func (si *SchedulerIntegration) prepareAndLaunch(
 	if err != nil {
 		si.logger.Warn("runtime token mint failed; retrying run",
 			zap.String("run_id", run.ID), zap.Error(err))
-		si.releaseCheckoutIfNeeded(ctx, taskID)
+		si.releaseCheckoutIfNeeded(ctx, run)
 		_ = si.svc.HandleRunFailure(ctx, run, err)
 		return
 	}
@@ -353,7 +382,7 @@ func (si *SchedulerIntegration) assembleAgentPrompt(
 		}
 	}
 
-	continuationSummary := si.loadContinuationSummary(ctx, agent.ID, taskID)
+	continuationSummary := si.loadContinuationSummary(ctx, run, agent.ID, taskID)
 	promptResult := si.svc.BuildAgentPrompt(
 		run, agent, instructionsDir, agentsMD, isResume, wakeContext,
 		taskID, continuationSummary,
@@ -365,18 +394,26 @@ func (si *SchedulerIntegration) assembleAgentPrompt(
 // loadContinuationSummary fetches the per-(agent, scope) continuation
 // summary for a taskless run. Returns "" when:
 // - taskID is non-empty (task-bound runs don't use the summary doc)
-// - the summary table has no row yet (first heartbeat ever for the agent)
+// - the summary table has no row yet (first wake ever for the scope)
 // - the lookup errors out (best-effort, fall back to no-summary)
 //
-// Today no caller passes taskID==""; this branch is a no-op until
-// PR 2 lands the agent_heartbeat cron handler.
+// The scope read here is run.ContinuationScope — the same key
+// models.ContinuationScopeForRun computed once, at run-creation time, and
+// that refreshContinuationSummary (event_subscribers.go) later writes
+// under. This deliberately does NOT recompute the scope from run's
+// ContextSnapshot: a routine wakeup that coalesces into this run after
+// claim (MarkWakeupRequestCoalesced) patches only context_snapshot, so a
+// second derivation here — against a run object that may itself predate
+// that patch — could disagree with what the writer used at completion.
+// Reading the persisted field closes that race for every caller instead
+// of relying on ordering between two independent derivations.
 func (si *SchedulerIntegration) loadContinuationSummary(
-	ctx context.Context, agentID, taskID string,
+	ctx context.Context, run *models.Run, agentID, taskID string,
 ) string {
-	if taskID != "" || agentID == "" {
+	if run == nil || taskID != "" || agentID == "" {
 		return ""
 	}
-	prior, err := si.svc.repo.GetContinuationSummary(ctx, agentID, "heartbeat")
+	prior, err := si.svc.repo.GetContinuationSummary(ctx, agentID, run.ContinuationScope)
 	if err != nil || prior == nil {
 		return ""
 	}
@@ -450,14 +487,14 @@ func (si *SchedulerIntegration) mintRuntimeToken(
 
 // checkoutTask performs the atomic task checkout guard. Returns false if the
 // caller should abort processing (tree-gated or checkout failed).
-func (si *SchedulerIntegration) checkoutTask(ctx context.Context, runID, taskID, agentInstanceID string) bool {
+func (si *SchedulerIntegration) checkoutTask(ctx context.Context, run *models.Run, taskID, agentInstanceID string) bool {
 	if taskID == "" {
 		return true
 	}
-	if si.isTaskTreeGated(ctx, runID, taskID) {
+	if si.isTaskTreeGated(ctx, run.ID, taskID) {
 		return false
 	}
-	return si.tryCheckout(ctx, runID, taskID, agentInstanceID)
+	return si.tryCheckout(ctx, run, taskID, agentInstanceID)
 }
 
 func (si *SchedulerIntegration) isTaskTreeGated(ctx context.Context, runID, taskID string) bool {
@@ -536,7 +573,7 @@ func (si *SchedulerIntegration) launchOrLog(
 			"phase":         "adapter.invoke",
 			"error_message": err.Error(),
 		})
-		si.releaseCheckoutIfNeeded(ctx, taskID)
+		si.releaseCheckoutIfNeeded(ctx, run)
 		_ = si.svc.HandleRunFailure(ctx, run, err)
 		return false
 	}
@@ -563,7 +600,7 @@ func (si *SchedulerIntegration) tryRoutingDispatch(
 			"phase":         "routing.dispatch",
 			"error_message": err.Error(),
 		})
-		si.releaseCheckoutIfNeeded(ctx, taskID)
+		si.releaseCheckoutIfNeeded(ctx, run)
 		_ = si.svc.HandleRunFailure(ctx, run, err)
 		return true
 	}
@@ -571,32 +608,80 @@ func (si *SchedulerIntegration) tryRoutingDispatch(
 		return true
 	}
 	if parked {
-		si.releaseCheckoutIfNeeded(ctx, taskID)
+		si.releaseCheckoutIfNeeded(ctx, run)
 		return true
 	}
 	return false
 }
 
+// checkoutContendedRetryDelay is the backoff before a run that lost the
+// atomic task checkout is retried. Deliberately much shorter than
+// HandleRunFailure's exponential schedule (2m-2h): losing a checkout race
+// isn't a failure, the task is just busy, so a short delay is enough for
+// the current holder to finish and release it.
+//
+// Set to 60s (not the original 30s) so the full MaxRetryCount(4) budget
+// covers 4 minutes of contention before escalating to a permanent failure.
+// The defect this fix accompanies was itself observed with a ~3-minute
+// holder-release delay; the previous 30s x 4 = 2-minute budget would have
+// escalated (and permanently failed the reviewer's run) before the holder
+// ever released the lock. Retried at a flat delay rather than exponential
+// backoff, on purpose: unlike a real failure, a wait here is bounded by how
+// long the current holder takes, not by how many times we've already tried.
+const checkoutContendedRetryDelay = 60 * time.Second
+
 // tryCheckout attempts to acquire an exclusive lock on the task. Returns true
 // if the checkout succeeded or was not needed, false if blocked.
 func (si *SchedulerIntegration) tryCheckout(
-	ctx context.Context, runID, taskID, agentID string,
+	ctx context.Context, run *models.Run, taskID, agentID string,
 ) bool {
-	acquired, err := si.svc.repo.CheckoutTask(ctx, taskID, agentID)
+	acquired, err := si.svc.repo.CheckoutTaskForRun(ctx, taskID, agentID, run.ID)
 	if err != nil {
 		si.logger.Error("task checkout error",
-			zap.String("run_id", runID), zap.Error(err))
-		_ = si.svc.FinishRun(ctx, runID)
+			zap.String("run_id", run.ID), zap.Error(err))
+		// A transient CheckoutTask error (e.g. SQLITE_BUSY) is not a
+		// successful completion: route it through the same
+		// retry-then-escalate path as every other run failure in this
+		// file, rather than FinishRun, which would silently mark a run
+		// that never executed as finished.
+		_ = si.svc.HandleRunFailure(ctx, run, err)
 		return false
 	}
 	if !acquired {
 		si.logger.Info("run skipped (task checked out by another agent)",
-			zap.String("run_id", runID),
+			zap.String("run_id", run.ID),
 			zap.String("task_id", taskID))
-		_ = si.svc.FinishRun(ctx, runID)
+		si.requeueContendedCheckout(ctx, run, taskID)
 		return false
 	}
 	return true
+}
+
+// requeueContendedCheckout re-queues a run that lost the atomic task
+// checkout instead of finishing it as though it had completed
+// successfully. RunStatus has no dedicated "skipped" state, so finishing
+// it here was indistinguishable from a real completion, and nothing else
+// re-queued the loser once the holder released the task — the run was
+// silently dropped. Bounded by MaxRetryCount so a stuck holder can't
+// spin this forever; past that it escalates exactly like any other
+// exhausted retry.
+func (si *SchedulerIntegration) requeueContendedCheckout(ctx context.Context, run *models.Run, taskID string) {
+	si.svc.AppendRunEvent(ctx, run.ID, "checkout.contended", "info", map[string]interface{}{
+		"task_id":     taskID,
+		"retry_count": run.RetryCount,
+	})
+	if run.RetryCount >= MaxRetryCount {
+		if err := si.svc.escalateFailure(ctx, run, fmt.Errorf("task checkout contended past max retries")); err != nil {
+			si.logger.Error("failed to escalate contended checkout",
+				zap.String("run_id", run.ID), zap.Error(err))
+		}
+		return
+	}
+	retryAt := time.Now().UTC().Add(checkoutContendedRetryDelay)
+	if err := si.svc.repo.ScheduleRetry(ctx, run.ID, retryAt, run.RetryCount+1); err != nil {
+		si.logger.Error("failed to requeue contended checkout",
+			zap.String("run_id", run.ID), zap.Error(err))
+	}
 }
 
 // checkBudget runs pre-execution budget checks. Returns true if allowed.
@@ -615,7 +700,7 @@ func (si *SchedulerIntegration) checkBudget(
 	if !allowed {
 		si.logger.Info("run skipped (budget exceeded)",
 			zap.String("run_id", run.ID), zap.String("reason", reason))
-		si.releaseCheckoutIfNeeded(ctx, taskID)
+		si.releaseCheckoutIfNeeded(ctx, run)
 		_ = si.svc.FinishRun(ctx, run.ID)
 		si.svc.LogActivityWithRun(ctx, agent.WorkspaceID,
 			"scheduler", "office-scheduler",
@@ -642,12 +727,8 @@ func (si *SchedulerIntegration) finishRun(
 		return
 	}
 
-	si.releaseCheckoutIfNeeded(ctx, taskID)
-
-	// Record cooldown timestamp in-memory and DB.
-	now := time.Now().UTC()
-	agent.LastRunFinishedAt = &now
-	_ = si.svc.repo.UpdateRuntimeLastRunFinished(ctx, agent.ID, now)
+	si.releaseCheckoutIfNeeded(ctx, run)
+	si.svc.stampRunFinished(ctx, run)
 
 	si.svc.LogActivityWithRun(ctx, agent.WorkspaceID,
 		"scheduler", "office-scheduler",
@@ -659,15 +740,15 @@ func (si *SchedulerIntegration) finishRun(
 		}), run.ID, "")
 }
 
-// releaseCheckoutIfNeeded releases the task checkout if a task ID is present.
-func (si *SchedulerIntegration) releaseCheckoutIfNeeded(ctx context.Context, taskID string) {
-	if taskID == "" {
-		return
-	}
-	if err := si.svc.repo.ReleaseTaskCheckout(ctx, taskID); err != nil {
-		si.logger.Error("failed to release task checkout",
-			zap.String("task_id", taskID), zap.Error(err))
-	}
+// releaseCheckoutIfNeeded releases the task checkout the given run may hold.
+// Delegates to the owner-scoped releaseTaskCheckoutForRun (Review round 3)
+// rather than the unscoped repo.ReleaseTaskCheckout: every call site here
+// runs before or in place of a run's own terminal transition, so a run that
+// never actually held the checkout (an escalated contention loser, a
+// stale/inactive-agent cancel) must not clear a different, currently-active
+// agent's live lock out from under it (Review round 4, BLOCKING FINDING 1).
+func (si *SchedulerIntegration) releaseCheckoutIfNeeded(ctx context.Context, run *models.Run) {
+	si.svc.releaseTaskCheckoutForRun(ctx, run)
 }
 
 // extractTaskID parses the task_id from a run payload.
@@ -694,12 +775,12 @@ func isAgentActive(status models.AgentStatus) bool {
 }
 
 // checkIdleSkip returns true if the run should be skipped because the agent
-// is configured to skip idle heartbeats and has no actionable tasks assigned.
-// Returns false (do not skip) on any DB error to fail open.
+// is configured to skip idle periodic wakes and has no actionable tasks
+// assigned. Returns false (do not skip) on any DB error to fail open.
 func (si *SchedulerIntegration) checkIdleSkip(
 	ctx context.Context, run *models.Run, agent *models.AgentInstance,
 ) bool {
-	if run.Reason != RunReasonHeartbeat {
+	if !shared.IsPeriodicTasklessWake(run.Reason) {
 		return false
 	}
 	if !agent.SkipIdleRuns {
@@ -742,16 +823,16 @@ func (si *SchedulerIntegration) buildPromptContext(
 		pc.ApprovalNote = parsed["decision_note"]
 	}
 
-	if reason == RunReasonTaskChildrenCompleted {
+	if reason == RunReasonTaskChildrenCompleted || reason == legacyRunReasonChildrenCompleted {
 		si.enrichChildrenContext(pc, payload)
 	}
 
-	if reason == RunReasonTaskAssigned {
-		pc.StageID = parsed["stage_id"]
-		pc.StageType = parsed["stage_type"]
+	if reason == RunReasonTaskAssigned || reason == RunReasonTaskReviewRequested ||
+		reason == legacyRunReasonReviewStarted || reason == legacyRunReasonApprovalStarted {
+		_, pc.StageID, pc.StageType = si.svc.resolveReviewStage(ctx, reason, parsed)
 		pc.ReviewFeedback = parsed["feedback"]
 
-		if pc.StageType == "review" && pc.TaskID != "" {
+		if (pc.StageType == stageTypeReview || pc.StageType == stageTypeApproval) && pc.TaskID != "" {
 			si.enrichBuilderComments(ctx, pc)
 		}
 	}
@@ -819,8 +900,8 @@ func (si *SchedulerIntegration) resolveCommentAuthor(
 	return "User"
 }
 
-// enrichBuilderComments fetches the most recent comments left by the task
-// assignee (builder) and appends them to pc.BuilderComments.
+// enrichBuilderComments fetches the most recent task comments and appends them
+// to pc.BuilderComments for review and approval prompts.
 func (si *SchedulerIntegration) enrichBuilderComments(ctx context.Context, pc *PromptContext) {
 	comments, err := si.svc.repo.ListRecentTaskComments(ctx, pc.TaskID, 5)
 	if err != nil {

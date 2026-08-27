@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useSessionContextWindow } from "@/hooks/domains/session/use-session-context-window";
+import {
+  ClarificationEscapeGuardProvider,
+  type ClarificationEscapeGuardEntry,
+  type ClarificationEscapeGuardRegistry,
+} from "@/hooks/use-clarification-escape-guard";
 import { isContextWindowReliable, TokenUsageDisplay } from "./token-usage-display";
 
 const TOOLTIP_ROOT_TESTID = "tooltip-root";
@@ -24,6 +29,22 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
 });
+
+function withEscapeGuardRegistry(node: React.ReactNode) {
+  const holder: { entry: ClarificationEscapeGuardEntry } = { entry: null };
+  const registry: ClarificationEscapeGuardRegistry = {
+    register: (_id, predicate) => {
+      holder.entry = { test: predicate };
+    },
+    unregister: () => {
+      holder.entry = null;
+    },
+  };
+  render(
+    <ClarificationEscapeGuardProvider value={registry}>{node}</ClarificationEscapeGuardProvider>,
+  );
+  return holder;
+}
 
 describe("isContextWindowReliable", () => {
   it("accepts normal usage under the window", () => {
@@ -98,8 +119,8 @@ describe("TokenUsageDisplay", () => {
 
     expect(getByTestId(TOOLTIP_ROOT_TESTID).getAttribute("data-open")).toBe("true");
     const usage = getByTestId("context-window-usage");
-    expect(usage.textContent).toContain("—%");
-    expect(usage.textContent).toContain("— of 200.0K tokens");
+    expect(usage.textContent).toContain("N/A%");
+    expect(usage.textContent).toContain("N/A of 200.0K tokens");
     expect(usage.textContent).toContain("Usage data appears after the first completed turn.");
     expect(usage.textContent).not.toContain("0%");
     expect(usage.textContent).not.toContain("0 of");
@@ -122,6 +143,23 @@ describe("TokenUsageDisplay", () => {
     fireEvent.keyDown(document, { key: "Escape" });
 
     expect(getByTestId(TOOLTIP_ROOT_TESTID).getAttribute("data-open")).toBe("false");
+  });
+
+  it("claims Escape at dialog capture time while the tooltip is pinned", () => {
+    vi.mocked(useSessionContextWindow).mockReturnValue({
+      size: 200_000,
+      used: 56_047,
+      remaining: 143_953,
+      efficiency: 28,
+      compactionCount: 0,
+    });
+
+    const holder = withEscapeGuardRegistry(<TokenUsageDisplay sessionId="sess-1" />);
+    const trigger = screen.getByRole("button", { name: "Context window: 28% used" });
+
+    fireEvent.click(trigger);
+
+    expect(holder.entry?.test(new KeyboardEvent("keydown", { key: "Escape" }))).toBe(true);
   });
 });
 

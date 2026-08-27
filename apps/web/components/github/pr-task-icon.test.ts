@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
+  canAttemptPRMerge,
   aggregatePRStatusColor,
   getPRAggregateStatusColor,
   areAllOpenPRsReadyToMerge,
   getPRStatusColor,
-  getPRTooltip,
   isPRAwaitingReview,
   isPRReadyToMerge,
   isPRWaitingOnBranchProtection,
@@ -13,11 +13,12 @@ import {
 } from "./pr-task-icon";
 import type { TaskPR } from "@/lib/types/github";
 
-const SKY_400 = "text-sky-400";
-const RED_500 = "text-red-500";
+const SKY_400 = "text-sky-400",
+  RED_500 = "text-red-500";
 const YELLOW_500 = "text-yellow-500";
 const EMERALD_400 = "text-emerald-400";
 const GREEN_500 = "text-green-500";
+const QUEUED = "text-[#966600]";
 const PURPLE_500 = "text-purple-500";
 const MUTED_FOREGROUND = "text-muted-foreground";
 
@@ -50,7 +51,7 @@ function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
     closed_at: null,
     last_synced_at: null,
     updated_at: "",
-    ...overrides,
+    ...{ workspace_id: "workspace-1", ...overrides },
   };
 }
 
@@ -60,11 +61,24 @@ describe("getPRAggregateStatusColor", () => {
     ["pending", YELLOW_500],
     ["awaiting_review", SKY_400],
     ["ready", EMERALD_400],
+    ["queued", QUEUED],
     ["passing", GREEN_500],
     ["merged", PURPLE_500],
     ["open", MUTED_FOREGROUND],
   ])("maps %s to %s", (state, color) => {
     expect(getPRAggregateStatusColor(state)).toBe(color);
+  });
+
+  it("uses the dedicated merge-queue color for an open queued PR", () => {
+    expect(
+      getPRStatusColor(
+        makePR({
+          merge_queue_state: "queued",
+          checks_state: "success",
+          mergeable_state: "blocked",
+        }),
+      ),
+    ).toBe(QUEUED);
   });
 });
 
@@ -124,7 +138,7 @@ describe("isPRReadyToMerge", () => {
     ).toBe(false);
   });
 
-  it("is false when mergeable_state is blocked", () => {
+  it("does not claim readiness for GitHub's overloaded blocked state", () => {
     expect(
       isPRReadyToMerge(
         makePR({
@@ -165,6 +179,21 @@ describe("isPRReadyToMerge", () => {
       ).toBe(false);
     },
   );
+});
+
+describe("canAttemptPRMerge", () => {
+  it("allows GitHub to decide whether a locally green blocked PR enters a queue", () => {
+    expect(
+      canAttemptPRMerge(
+        makePR({
+          state: "open",
+          review_state: "approved",
+          checks_state: "success",
+          mergeable_state: "blocked",
+        }),
+      ),
+    ).toBe(true);
+  });
 });
 
 describe("isPRReadyToMerge — aggregate counts", () => {
@@ -262,9 +291,7 @@ describe("getPRStatusColor", () => {
     expect(getPRStatusColor(pr)).toBe(EMERALD_400);
   });
 
-  it("returns muted for approved+success but mergeable_state blocked (branch protection)", () => {
-    // Branch protection is a normal repository-rule wait after CI passes, not
-    // a warning state.
+  it("keeps an approved blocked PR neutral until GitHub accepts it", () => {
     const pr = makePR({
       state: "open",
       review_state: "approved",
@@ -655,35 +682,5 @@ describe("pickDefaultPR", () => {
     const merged = makePR({ id: "merged", state: "merged" });
     const closed = makePR({ id: "closed", state: "closed" });
     expect(pickDefaultPR([merged, closed])?.id).toBe("merged");
-  });
-});
-
-describe("getPRTooltip", () => {
-  it("includes 'Ready to merge' when ready", () => {
-    const pr = makePR({
-      state: "open",
-      review_state: "approved",
-      checks_state: "success",
-      mergeable_state: "clean",
-    });
-    expect(getPRTooltip(pr)).toContain("Ready to merge");
-  });
-
-  it("includes 'Mergeable: blocked' when blocked", () => {
-    const pr = makePR({
-      state: "open",
-      review_state: "approved",
-      checks_state: "success",
-      mergeable_state: "blocked",
-    });
-    expect(getPRTooltip(pr)).toContain("Mergeable: blocked");
-    expect(getPRTooltip(pr)).not.toContain("Ready to merge");
-  });
-
-  it("omits mergeable when state is empty or unknown", () => {
-    const empty = makePR({ state: "open", mergeable_state: "" });
-    const unknown = makePR({ state: "open", mergeable_state: "unknown" });
-    expect(getPRTooltip(empty)).not.toContain("Mergeable:");
-    expect(getPRTooltip(unknown)).not.toContain("Mergeable:");
   });
 });

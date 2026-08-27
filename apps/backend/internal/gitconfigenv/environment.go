@@ -123,9 +123,9 @@ func entriesFrom(env map[string]string) ([]Entry, error) {
 	}
 	countValue, hasCount := env[countKey]
 	if !hasCount {
-		if hasIndexedEntry(env) {
-			return nil, fmt.Errorf("%s is required when indexed entries are set", countKey)
-		}
+		// Git reads indexed entries only when GIT_CONFIG_COUNT is set, so any
+		// leftover key/value pair configures nothing. Ignore them the way Git
+		// does rather than rejecting an inherited environment we do not own.
 		return nil, nil
 	}
 	count, err := strconv.Atoi(countValue)
@@ -141,40 +141,10 @@ func entriesFrom(env map[string]string) ([]Entry, error) {
 		}
 		entries = append(entries, Entry{Key: key, Value: value})
 	}
-	if hasOutOfRangeIndexedEntry(env, count) {
-		return nil, fmt.Errorf("indexed entry exceeds %s", countKey)
-	}
+	// Entries at or past the count are invisible to Git — a parent process that
+	// lowered GIT_CONFIG_COUNT leaves its higher indexes behind — so they are
+	// dropped here instead of failing the whole block.
 	return entries, nil
-}
-
-func hasIndexedEntry(env map[string]string) bool {
-	for key := range env {
-		if strings.HasPrefix(key, keyPrefix) || strings.HasPrefix(key, valuePrefix) {
-			return true
-		}
-	}
-	return false
-}
-
-func hasOutOfRangeIndexedEntry(env map[string]string, count int) bool {
-	for key := range env {
-		index, ok := indexedEntryIndex(key)
-		if ok && index >= count {
-			return true
-		}
-	}
-	return false
-}
-
-func indexedEntryIndex(key string) (int, bool) {
-	prefix := keyPrefix
-	if strings.HasPrefix(key, valuePrefix) {
-		prefix = valuePrefix
-	} else if !strings.HasPrefix(key, keyPrefix) {
-		return 0, false
-	}
-	index, err := strconv.Atoi(strings.TrimPrefix(key, prefix))
-	return index, err == nil && index >= 0
 }
 
 func removeBoundaryOverlap(base, overlay []Entry) []Entry {

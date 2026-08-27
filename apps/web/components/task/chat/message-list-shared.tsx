@@ -5,7 +5,7 @@ import { Button } from "@kandev/ui/button";
 import { IconAlertCircle, IconX } from "@tabler/icons-react";
 import { GridSpinner } from "@/components/grid-spinner";
 import type { Message, TaskSessionState } from "@/lib/types/http";
-import type { RenderItem } from "@/hooks/use-processed-messages";
+import { TASK_DESCRIPTION_SYNTHETIC_ID, type RenderItem } from "@/hooks/use-processed-messages";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
 import { TurnGroupMessage } from "@/components/task/chat/messages/turn-group-message";
 import { PrepareProgress } from "@/components/session/prepare-progress";
@@ -32,7 +32,7 @@ export type MessageListProps = {
   isWorking: boolean;
   sessionState?: TaskSessionState;
   worktreePath?: string;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, repo?: string) => void;
   /** Render item key (see getItemKey) the unread "New" divider should
    *  appear immediately before; null/undefined renders no divider. */
   dividerBeforeItemKey?: string | null;
@@ -66,9 +66,14 @@ export type MessageListProps = {
  * to an arbitrary message (e.g. the last
  * prompt) from outside the list — from the composer's scroll-up button. */
 export type MessageListHandle = {
-  scrollToMessage: (messageId: string, options?: { align?: "start" | "center" }) => void;
+  scrollToMessage: (
+    messageId: string,
+    options?: { align?: "start" | "center"; behavior?: "smooth" | "auto" },
+  ) => boolean;
 };
 
+/** Render key for a transcript item: `item.id` for turn-group, prepare-
+ * progress, and agent-error-notice items; the message id for message rows. */
 export function getItemKey(item: RenderItem): string {
   if (
     item.type === "turn_group" ||
@@ -79,6 +84,8 @@ export function getItemKey(item: RenderItem): string {
   return item.message.id;
 }
 
+/** The active turn id, but only while the agent is working — turns no longer
+ * in progress aren't treated as active. */
 export function getEffectiveActiveTurnId(
   activeTurnId: string | null,
   isWorking: boolean,
@@ -87,9 +94,13 @@ export function getEffectiveActiveTurnId(
 }
 
 /** Index of the most recent user-authored message, or -1 when there is none. */
+function isStoredUserMessage(message: Message): boolean {
+  return message.author_type === "user" && message.id !== TASK_DESCRIPTION_SYNTHETIC_ID;
+}
+
 function findLastUserMessageIndex(messages: Message[]): number {
   for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].author_type === "user") return i;
+    if (isStoredUserMessage(messages[i])) return i;
   }
   return -1;
 }
@@ -105,24 +116,8 @@ export function getLastUserMessageId(messages: Message[]): string | null {
  * the task description). Used to power the transcript's scroll-to-start
  * affordance. */
 export function getFirstUserMessageId(messages: Message[]): string | null {
-  const first = messages.find((message) => message.author_type === "user");
+  const first = messages.find(isStoredUserMessage);
   return first ? first.id : null;
-}
-
-export type TranscriptNavigationTarget = "last_prompt" | "start";
-
-/**
- * Whether resolving a transcript-navigation target needs another older page.
- * The latest prompt may sit before a long agent response; the true start can
- * only be known after the pagination cursor is exhausted.
- */
-export function shouldLoadMoreForTranscriptTarget(
-  target: TranscriptNavigationTarget,
-  messages: Message[],
-  hasMore: boolean,
-): boolean {
-  if (!hasMore) return false;
-  return target === "start" || getLastUserMessageId(messages) === null;
 }
 
 /**
@@ -150,6 +145,9 @@ export function shouldAutoScrollToBottom(params: {
  * fractional layout boundaries while scrolling settles. */
 export type LastPromptEdge = "above" | "below" | "visible";
 
+/** Classifies the last prompt's position relative to the transcript viewport:
+ * fully `"above"` it (scrolled past), fully `"below"` it (not yet reached),
+ * or `"visible"` — with a two-pixel tolerance against flicker. */
 export function resolveLastPromptEdge(container: HTMLElement, target: HTMLElement): LastPromptEdge {
   const containerRect = container.getBoundingClientRect();
   const targetRect = target.getBoundingClientRect();
@@ -213,6 +211,7 @@ export function getStreamingAgentMessageId(messages: Message[]): string | null {
   return null;
 }
 
+/** Id of the final turn-group item in the list, or null when there is none. */
 export function getLastTurnGroupId(items: RenderItem[]) {
   for (let i = items.length - 1; i >= 0; i--) {
     const item = items[i];
@@ -221,6 +220,9 @@ export function getLastTurnGroupId(items: RenderItem[]) {
   return null;
 }
 
+/** Derives the transcript's loading presentation: whether this is the initial
+ * load and whether the loading spinner should show (suppressed for CREATED
+ * sessions, which are prepare-only, and while the agent is working). */
 export function getConversationLoadingState(params: {
   messagesLoading: boolean;
   messagesCount: number;
@@ -283,6 +285,9 @@ export function canReassertDividerScroll(params: {
 // after the agent resumes — so the user can read the full error message at
 // their own pace. The sidebar icon, by contrast, also auto-hides once the
 // agent posts a new message (see agentErrorMessageForTask).
+/** Banner showing the session's last agent error, with a dismiss button that
+ * persists until the user explicitly dismisses it. Renders nothing when
+ * there's no error or it was already dismissed. */
 export function LastAgentErrorNotice({
   sessionId,
   error,
@@ -371,6 +376,9 @@ export function UnreadDivider() {
   );
 }
 
+/** Transcript status footer: the loading-older indicator, an explicit
+ * load-older button, the conversation loading spinner, and the empty-state
+ * message when there are no messages. */
 export function MessageListStatus({
   isLoadingMore,
   hasMore,
@@ -452,7 +460,7 @@ export const MessageItem = memo(function MessageItem({
   childrenByParentToolCallId: Map<string, Message[]>;
   taskId?: string;
   worktreePath?: string;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, repo?: string) => void;
   isLastGroup: boolean;
   activeTurnId?: string | null;
   streamingMessageId?: string | null;

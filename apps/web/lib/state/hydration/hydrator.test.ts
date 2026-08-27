@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- hydration paths share one complete-state fixture. */
 import { beforeEach, describe, expect, it } from "vitest";
 import { produce } from "immer";
 import type { Draft } from "immer";
@@ -8,13 +9,21 @@ import type { AppState } from "@/lib/state/store";
 import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/types";
 
 const TERMINAL_TAB_ID = "terminal-1";
+const DEFAULT_TASK_ROW = {
+  detailsEnabled: true,
+  detailOrder: ["relative_time", "repository", "pull_request_number"],
+  visibleDetails: ["relative_time", "repository", "pull_request_number"],
+  trailing: "git_changes",
+};
 
+/** Builds an AppState draft carrying only the default UI slice for hydrateUI tests. */
 function makeDraft(): AppState {
   // hydrateUI only touches UI-slice fields; an empty object cast satisfies
   // the rest without dragging the full AppState shape into this test.
   return { ...defaultUIState } as unknown as AppState;
 }
 
+/** Builds a deep-cloned AppState from the default state for full-state hydration tests. */
 function makeAppDraft(): AppState {
   return structuredClone(defaultState) as AppState;
 }
@@ -160,18 +169,13 @@ describe("hydrateUI — quick chat lifecycle", () => {
     expect(result.quickChat.activeTerminalTabId).toBe(TERMINAL_TAB_ID);
   });
 
-  it("clears stale quick chat sessions when the backend returns none", () => {
+  it("preserves live quick chat sessions omitted by stale hydration", () => {
     const result = produce(makeDraft(), (draft: Draft<AppState>) => {
       draft.quickChat = {
+        ...draft.quickChat,
         isOpen: true,
         activeSessionId: "stale-session",
-        sessions: [
-          { sessionId: "stale-session", workspaceId: "ws-1", name: "Stale", kind: "chat" },
-        ],
-        terminalTabs: [],
-        activeKind: "conversation",
-        activeTerminalTabId: null,
-        lastTerminalTabIdByWorkspace: {},
+        sessions: [{ sessionId: "stale-session", workspaceId: "ws-1", name: "Live", kind: "chat" }],
       };
       hydrateUI(draft, {
         quickChat: {
@@ -182,14 +186,15 @@ describe("hydrateUI — quick chat lifecycle", () => {
       });
     });
 
-    expect(result.quickChat.sessions).toEqual([]);
-    expect(result.quickChat.isOpen).toBe(false);
-    expect(result.quickChat.activeSessionId).toBeNull();
+    expect(result.quickChat.sessions).toHaveLength(1);
+    expect(result.quickChat.sessions[0].sessionId).toBe("stale-session");
+    expect(result.quickChat.isOpen).toBe(true);
   });
 
   it("preserves browser-local terminal tabs when server conversations resync", () => {
     const result = produce(makeDraft(), (draft: Draft<AppState>) => {
       draft.quickChat = {
+        ...draft.quickChat,
         isOpen: true,
         activeSessionId: "chat-1",
         sessions: [{ sessionId: "chat-1", workspaceId: "ws-1", kind: "chat" }],
@@ -215,7 +220,7 @@ describe("hydrateUI — quick chat lifecycle", () => {
       });
     });
 
-    expect(result.quickChat.sessions).toEqual([]);
+    expect(result.quickChat.sessions).toHaveLength(1);
     expect(result.quickChat.terminalTabs).toHaveLength(1);
     expect(result.quickChat.activeKind).toBe("terminal");
     expect(result.quickChat.activeTerminalTabId).toBe(TERMINAL_TAB_ID);
@@ -227,6 +232,7 @@ describe("hydrateUI — terminal descriptor reconciliation", () => {
   it("treats an empty server terminal list as authoritative during hydration", () => {
     const result = produce(makeDraft(), (draft: Draft<AppState>) => {
       draft.quickChat = {
+        ...draft.quickChat,
         isOpen: true,
         activeSessionId: null,
         sessions: [],
@@ -373,6 +379,49 @@ describe("mergeInitialState — sidebar views from boot settings", () => {
   });
 });
 
+describe("hydrateState — user settings revisions", () => {
+  it("applies a newer boot snapshot after an earlier websocket update", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      draft.userSettings.loaded = true;
+      draft.userSettings.revision = 1;
+      draft.userSettings.appStatusBarEnabled = false;
+      hydrateState(draft, {
+        userSettings: {
+          loaded: true,
+          revision: 2,
+          appStatusBarEnabled: true,
+        },
+      } as unknown as Partial<AppState>);
+    });
+
+    expect(result.userSettings).toMatchObject({
+      loaded: true,
+      revision: 2,
+      appStatusBarEnabled: true,
+    });
+  });
+
+  it("keeps a newer websocket snapshot when boot hydration is older", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      draft.userSettings.loaded = true;
+      draft.userSettings.revision = 3;
+      draft.userSettings.appStatusBarEnabled = true;
+      hydrateState(draft, {
+        userSettings: {
+          loaded: true,
+          revision: 2,
+          appStatusBarEnabled: false,
+        },
+      } as unknown as Partial<AppState>);
+    });
+
+    expect(result.userSettings).toMatchObject({
+      revision: 3,
+      appStatusBarEnabled: true,
+    });
+  });
+});
+
 describe("hydrateState — sidebar views from user settings", () => {
   it("hydrates active view and draft from backend user settings", () => {
     const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
@@ -406,6 +455,7 @@ describe("hydrateState — sidebar views from user settings", () => {
       filters: [],
       sort: { key: "updatedAt", direction: "desc" },
       group: "workflow",
+      taskRow: DEFAULT_TASK_ROW,
     });
   });
 
@@ -592,15 +642,37 @@ describe("hydrateState — session runtime model state", () => {
     });
 
     expect(result.sessionModels.bySessionId["active-session"].currentModelId).toBe(liveModelId);
-  });
-});
 
-describe("hydrateState — system slice", () => {
-  it("leaves the system slice untouched when the caller supplies no system fields", () => {
-    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+    const systemResult = produce(makeAppDraft(), (draft: Draft<AppState>) => {
       hydrateState(draft, {});
     });
-
-    expect(result.system).toEqual(defaultState.system);
+    expect(systemResult.system).toEqual(defaultState.system);
   });
+});
+it.each([true, false])(
+  "turn hydration marks a session only when it is force-merged",
+  (forceMerge) => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      if (!forceMerge) draft.turns.bySession["session-1"] = [];
+      hydrateState(
+        draft,
+        { turns: { bySession: { "session-1": [] } } } as unknown as Partial<AppState>,
+        { activeSessionId: "session-1", forceMergeSessionId: forceMerge ? "session-1" : null },
+      );
+    });
+
+    expect(result.turns.loadedBySession).toEqual(forceMerge ? { "session-1": true } : {});
+  },
+);
+
+it("marks an absent inactive session after ordinary turn hydration", () => {
+  const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+    hydrateState(
+      draft,
+      { turns: { bySession: { "session-1": [] } } } as unknown as Partial<AppState>,
+      { activeSessionId: "other-session", forceMergeSessionId: null },
+    );
+  });
+
+  expect(result.turns.loadedBySession["session-1"]).toBe(true);
 });

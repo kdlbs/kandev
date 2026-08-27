@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import {
   IconBrandGitlab,
   IconBrandSentry,
@@ -7,36 +8,10 @@ import {
   IconTicket,
 } from "@tabler/icons-react";
 import { t } from "@/lib/i18n";
-import type { KanbanCardMenuEntry } from "./kanban-card-menu-items";
+import { resolvePluginIcon } from "@/lib/plugins/icons";
+import type { KanbanCardMenuEntry, KanbanPluginLinkAction } from "./kanban-card-menu-items";
 
-function buildGitLabMergeRequestLinkEntry({
-  disabled,
-  onLinkMergeRequest,
-}: {
-  disabled?: boolean;
-  onLinkMergeRequest?: () => void;
-}): KanbanCardMenuEntry | null {
-  if (!onLinkMergeRequest) return null;
-  return {
-    kind: "item",
-    key: "link-gitlab-merge-request",
-    testId: "task-context-link-gitlab-merge-request",
-    icon: <IconBrandGitlab className="mr-2 h-4 w-4" />,
-    label: t("kanban:gitlabMergeRequest"),
-    disabled,
-    onSelect: onLinkMergeRequest,
-  };
-}
-
-export function buildLinkSubmenu({
-  disabled,
-  onLinkPullRequest,
-  onLinkIssue,
-  onLinkMergeRequest,
-  onLinkJiraTicket,
-  onLinkLinearIssue,
-  onLinkSentryIssue,
-}: {
+type LinkSubmenuArgs = {
   disabled?: boolean;
   onLinkPullRequest?: () => void;
   onLinkIssue?: () => void;
@@ -44,82 +19,115 @@ export function buildLinkSubmenu({
   onLinkJiraTicket?: () => void;
   onLinkLinearIssue?: () => void;
   onLinkSentryIssue?: () => void;
-}): KanbanCardMenuEntry | null {
-  if (
-    !onLinkPullRequest &&
-    !onLinkIssue &&
-    !onLinkMergeRequest &&
-    !onLinkJiraTicket &&
-    !onLinkLinearIssue &&
-    !onLinkSentryIssue
-  ) {
-    return null;
-  }
-  const children: KanbanCardMenuEntry[] = [];
-  if (onLinkPullRequest) {
-    children.push({
-      kind: "item",
+  pluginLinkActions?: KanbanPluginLinkAction[];
+};
+
+type LinkItem = Pick<LinkSubmenuArgs, "disabled"> & {
+  key: string;
+  testId: string;
+  icon: ReactNode;
+  label: string;
+  onSelect?: () => void;
+};
+
+type LinkMenuItem = Extract<KanbanCardMenuEntry, { kind: "item" }>;
+
+function buildLinkItem({
+  disabled,
+  key,
+  testId,
+  icon,
+  label,
+  onSelect,
+}: LinkItem): LinkMenuItem | null {
+  if (!onSelect) return null;
+  return { kind: "item", key, testId, icon, label, disabled, onSelect };
+}
+
+function builtInLinkItems(args: LinkSubmenuArgs): KanbanCardMenuEntry[] {
+  const { disabled } = args;
+  return [
+    buildLinkItem({
+      disabled,
       key: "link-github-pull-request",
       testId: "task-context-link-github-pull-request",
       icon: <IconGitPullRequest className="mr-2 h-4 w-4" />,
       label: t("kanban:githubPullRequest"),
+      onSelect: args.onLinkPullRequest,
+    }),
+    buildLinkItem({
       disabled,
-      onSelect: onLinkPullRequest,
-    });
-  }
-  if (onLinkIssue) {
-    children.push({
-      kind: "item",
       key: "link-github-issue",
       testId: "task-context-link-github-issue",
       icon: <IconCircleDot className="mr-2 h-4 w-4" />,
       label: t("kanban:githubIssue"),
+      onSelect: args.onLinkIssue,
+    }),
+    buildLinkItem({
       disabled,
-      onSelect: onLinkIssue,
-    });
-  }
-  const gitLabEntry = buildGitLabMergeRequestLinkEntry({ disabled, onLinkMergeRequest });
-  if (gitLabEntry) children.push(gitLabEntry);
-  if (onLinkJiraTicket) {
-    children.push({
-      kind: "item",
+      key: "link-gitlab-merge-request",
+      testId: "task-context-link-gitlab-merge-request",
+      icon: <IconBrandGitlab className="mr-2 h-4 w-4" />,
+      label: t("kanban:gitlabMergeRequest"),
+      onSelect: args.onLinkMergeRequest,
+    }),
+    buildLinkItem({
+      disabled,
       key: "link-jira-ticket",
       testId: "task-context-link-jira-ticket",
       icon: <IconTicket className="mr-2 h-4 w-4" />,
       label: t("kanban:jiraTicket"),
+      onSelect: args.onLinkJiraTicket,
+    }),
+    buildLinkItem({
       disabled,
-      onSelect: onLinkJiraTicket,
-    });
-  }
-  if (onLinkLinearIssue) {
-    children.push({
-      kind: "item",
       key: "link-linear-issue",
       testId: "task-context-link-linear-issue",
       icon: <IconCircleDot className="mr-2 h-4 w-4" />,
       label: t("kanban:linearIssue"),
+      onSelect: args.onLinkLinearIssue,
+    }),
+    buildLinkItem({
       disabled,
-      onSelect: onLinkLinearIssue,
-    });
-  }
-  if (onLinkSentryIssue) {
-    children.push({
-      kind: "item",
       key: "link-sentry-issue",
       testId: "task-context-link-sentry-issue",
       icon: <IconBrandSentry className="mr-2 h-4 w-4" />,
       label: t("kanban:sentryIssue"),
-      disabled,
-      onSelect: onLinkSentryIssue,
-    });
-  }
+      onSelect: args.onLinkSentryIssue,
+    }),
+  ].filter((item): item is LinkMenuItem => item !== null);
+}
+
+function pluginLinkItems(actions: KanbanPluginLinkAction[], disabled: boolean | undefined) {
+  return actions.map((action) => {
+    const Icon = resolvePluginIcon(action.icon);
+    return {
+      kind: "item" as const,
+      key: `link-plugin-${action.id}`,
+      testId: `task-context-link-plugin-${action.id}`,
+      icon: <Icon className="mr-2 h-4 w-4" />,
+      label: action.label,
+      disabled: disabled || action.disabled,
+      // Radix closes the current menu during this event. Defer plugin work one
+      // microtask so a modal/panel never mounts beneath an open menu surface.
+      onSelect: () => queueMicrotask(action.onSelect),
+    };
+  });
+}
+
+export function buildLinkSubmenu(args: LinkSubmenuArgs): KanbanCardMenuEntry | null {
+  const children = [
+    ...builtInLinkItems(args),
+    ...pluginLinkItems(args.pluginLinkActions ?? [], args.disabled),
+  ];
+  if (children.length === 0) return null;
   return {
     kind: "submenu",
     key: "link",
     testId: "task-context-link",
     icon: <IconLink className="mr-2 h-4 w-4" />,
     label: t("kanban:link"),
-    disabled,
+    disabled: args.disabled,
     className: "w-56",
     children,
   };

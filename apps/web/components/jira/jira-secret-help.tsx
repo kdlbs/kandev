@@ -21,6 +21,7 @@ import type { JiraAuthMethod } from "@/lib/types/jira";
 const SESSION_COOKIE_NAME = "cloud.session.token";
 const SSO_SESSION_COOKIE_NAME = "tenant.session.token";
 const ATLASSIAN_COOKIE_HOST = "https://*.atlassian.net";
+// i18n-exempt: keyboard shortcut, interpolated so no locale rewrites it. See the comment above.
 const DEVTOOLS_SHORTCUT = "Cmd+Opt+I / Ctrl+Shift+I";
 // Atlassian's API-token page. The visible link text is the URL itself, so it is
 // an identifier in both roles and never reaches the catalog.
@@ -51,6 +52,9 @@ export function secretCopy(
       label: t("jira:sessionTokenValue"),
       placeholder: t("jira:pasteSessionTokenValue", { cookieName: SESSION_COOKIE_NAME }),
     },
+    // OAuth has no paste field (OAuthFields renders the connect button instead);
+    // this entry only satisfies the exhaustive Record<JiraAuthMethod, ...> type.
+    oauth: { label: t("jira:oauth2"), placeholder: "" },
   };
 }
 

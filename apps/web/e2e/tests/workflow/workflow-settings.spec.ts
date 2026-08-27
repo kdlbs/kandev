@@ -1,6 +1,8 @@
 import type { Locator } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
+import { promptEditorText } from "../../helpers/settings-prompt-editor";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
+import { dwell } from "../../helpers/causal-waits";
 
 async function maxRingSpread(locator: Locator): Promise<number> {
   const boxShadow = await locator.evaluate((element) => getComputedStyle(element).boxShadow);
@@ -34,7 +36,10 @@ test.describe("Workflow settings", () => {
 
     // Should display workflow steps from the "simple" template
     for (const step of seedData.steps) {
-      await expect(card.getByText(step.name)).toBeVisible();
+      // Template data can contain the same step name more than once. The
+      // workflow card is the scope under test; any matching rendered step is
+      // sufficient and avoids a strict-mode race while the card hydrates.
+      await expect(card.getByText(step.name, { exact: true }).first()).toBeVisible();
     }
   });
 
@@ -320,9 +325,25 @@ test.describe("Workflow settings", () => {
     await expect(card).toBeVisible();
     await page.stepNodeByName(card, "Review").click();
 
+    const guidanceHelp = card.getByTestId(`${reviewStep.id}-pull-from-guidance-help`);
+    await expect(guidanceHelp).toBeVisible();
+    await guidanceHelp.hover();
+    const guidanceTooltip = testPage.getByRole("tooltip");
+    await expect(guidanceTooltip).toContainText(
+      "No feeder is selected. Direct moves and automatic transitions queue in this destination",
+    );
+    await expect(guidanceTooltip).toContainText(
+      "WIP limits active work, not visibility. Overflow remains on the board until capacity opens",
+    );
+    await testPage.keyboard.press("Escape");
+
     await card.getByTestId(`${reviewStep.id}-wip-limit-input`).fill("2");
     await card.getByTestId(`${reviewStep.id}-pull-from-step-select`).click();
     await testPage.getByRole("option", { name: "Backlog" }).click();
+    await guidanceHelp.hover();
+    await expect(guidanceTooltip).toContainText(
+      "Optional automatic feeder intake. Destination-queued tasks are admitted first",
+    );
 
     expect(
       (await apiClient.listWorkflowSteps(workflow.id)).steps.find(
@@ -479,6 +500,92 @@ test.describe("Workflow settings", () => {
     await page.goto(seedData.workspaceId);
     await expect(await page.findWorkflowCard("Manually Saved Workflow Name")).toBeVisible();
   });
+
+  test("edits and persists a workflow description", async ({ testPage, apiClient, seedData }) => {
+    const workflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Workflow Description Save",
+    );
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId);
+
+    const card = await page.findWorkflowCard(workflow.name);
+    const descriptionInput = card.getByLabel("Description", { exact: true });
+    await expect(descriptionInput).toBeVisible();
+    await expect(descriptionInput).toBeEnabled();
+    await descriptionInput.fill("rev 1 (2026-08-08) — test description");
+
+    await expect(descriptionInput).toHaveAttribute("data-settings-dirty", "true");
+
+    expect(
+      (await apiClient.listWorkflows(seedData.workspaceId)).workflows.find(
+        (candidate) => candidate.id === workflow.id,
+      )?.description,
+    ).toBeFalsy();
+    await page.saveChanges();
+
+    await expect(descriptionInput).toHaveAttribute("data-settings-dirty", "false");
+
+    await page.goto(seedData.workspaceId);
+    const reloadedCard = await page.findWorkflowCard(workflow.name);
+    await expect(reloadedCard.getByTestId("workflow-description-input")).toHaveValue(
+      "rev 1 (2026-08-08) — test description",
+    );
+  });
+
+  test("syncs a cross-tab description/prompt update live without clobbering an unsaved edit", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    // Regression coverage for the WS store-sync effect in use-workflow-settings.ts:
+    // it used to only propagate `name` from workflow.updated events, leaving
+    // description/prompt/agent_profile_id stale on an open settings page until a
+    // full reload. Simulates "another tab" by mutating via the API (which fires the
+    // real workflow.updated WS event) while this page stays open — no page.goto.
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Cross-Tab Sync Test");
+    await apiClient.updateWorkflow(workflow.id, { description: "Old description" });
+
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId);
+    const card = await page.findWorkflowCard(workflow.name);
+    const descriptionInput = card.getByLabel("Description", { exact: true });
+    await expect(descriptionInput).toHaveValue("Old description");
+
+    // Local, unsaved edit to a different field (name) — must survive the cross-tab sync below.
+    const nameInput = card.locator("input").first();
+    await nameInput.fill("Unsaved local name");
+    await expect(nameInput).toHaveAttribute("data-settings-dirty", "true");
+
+    // "Another tab" edits description and prompt via the API.
+    await apiClient.updateWorkflow(workflow.id, {
+      description: "New description from another tab",
+      prompt: "New prompt from another tab",
+    });
+
+    // Description and prompt update live via WS, with no local draft on either field.
+    await expect(descriptionInput).toHaveValue("New description from another tab");
+    await expect(descriptionInput).toHaveAttribute("data-settings-dirty", "false");
+    const promptInput = card.getByTestId("workflow-prompt-input");
+    const promptEditor = promptInput.locator("..");
+    await expect(promptInput).toBeVisible();
+    await expect(promptEditorText(promptInput)).toContainText("New prompt from another tab");
+    await expect(promptEditor).toHaveAttribute("data-settings-dirty", "false");
+
+    // The unsaved local name edit was not clobbered by the cross-tab sync.
+    await expect(nameInput).toHaveValue("Unsaved local name");
+    await expect(nameInput).toHaveAttribute("data-settings-dirty", "true");
+
+    // The saved-baseline is what future dirty checks compare against, so saving now
+    // must persist the local name edit alongside the already-synced description/prompt.
+    await page.saveChanges();
+    const persisted = (await apiClient.listWorkflows(seedData.workspaceId)).workflows.find(
+      (candidate) => candidate.id === workflow.id,
+    );
+    expect(persisted?.name).toBe("Unsaved local name");
+    expect(persisted?.description).toBe("New description from another tab");
+    expect(persisted?.prompt).toBe("New prompt from another tab");
+  });
 });
 
 test.describe("Seed protection", () => {
@@ -581,9 +688,12 @@ test.describe("Seed protection", () => {
     // `workflow.created` WS event arrives at the open settings page.
     await apiClient.e2eCreateHiddenWorkflow(seedData.workspaceId, hiddenName);
 
-    // Allow the WS event to propagate and the React effect in
-    // useWorkflowSettings a chance to (incorrectly) add a card.
-    await testPage.waitForTimeout(500);
+    await dwell(
+      testPage,
+      500,
+      "negative-assertion",
+      "gives the workflow.created frame and the useWorkflowSettings effect a chance to incorrectly add a card; the assertion is that no card appears, which publishes nothing to wait on",
+    );
 
     // No new card appeared and the hidden entry is not in the list.
     const allCards = testPage.locator('[data-testid^="workflow-card-"]');

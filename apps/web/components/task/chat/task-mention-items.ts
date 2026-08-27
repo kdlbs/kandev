@@ -1,5 +1,6 @@
 import type { MentionItem } from "@/hooks/use-inline-mention";
 import type { AppState } from "@/lib/state/store";
+import { t } from "@/lib/i18n";
 
 type TaskLike = AppState["kanban"]["tasks"][number];
 
@@ -57,8 +58,8 @@ export function buildTaskMentionItems(
   const addTask = (task: TaskLike, workflowId: string) => {
     if (task.id === currentTaskId || seen.has(task.id)) return;
     seen.add(task.id);
-    const workflowName = workflowNameById.get(workflowId) ?? "Workflow";
-    const stepTitle = stepTitleById.get(task.workflowStepId) ?? "Step";
+    const workflowName = workflowNameById.get(workflowId) ?? t("common:workflow");
+    const stepTitle = stepTitleById.get(task.workflowStepId) ?? t("common:step");
     items.push(toMentionItem(task, workflowId, workflowName, stepTitle));
   };
 

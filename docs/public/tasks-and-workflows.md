@@ -34,7 +34,7 @@ with the built-in Kanban steps, so it can accept tasks immediately.
 
 1. Open **Settings → Workspaces** and select **Add Workspace**.
 2. Enter the required workspace name.
-3. Open the workspace's **Repositories** page and add existing local repositories the workspace needs. You can also initialize a new empty repository while creating a task. Remote URLs are not registered on this page; enter them through **New Task → Remote**.
+3. Open the workspace's **Repositories** page and add existing local repositories the workspace needs. You can also initialize a new empty repository while creating a task. Remote URLs are not registered on this page; enter them through **New Task → Remote**. The same page's **Repository sets** section groups repositories you routinely use together, so one action fills the task form with all of them; see [Repository sets](#repository-sets).
 4. Open its **Workflows** page to review the default **Kanban** workflow. Create, import, or synchronize another workflow when the workspace needs a different process.
 5. On **Workspace Settings**, optionally choose a **Default Executor** and **Default Agent Profile**. Both default to **No default** unless configured.
 
@@ -65,7 +65,7 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
 
    | Source     | Use it for                                        | Important behavior                                                                                                                                                                                                                                                                                                                                                                                                   |
    | ---------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-   | **Repo**   | A configured, discovered, or new local repository | Select a base branch for each repository row. For a single-row new task, **Create new repository** initializes an empty `main` repository in a parent folder you choose. Add more rows for a multi-repository task.                                                                                                                                                                                                  |
+   | **Repo**   | A configured, discovered, or new local repository | Select a named branch policy or a raw base branch for each repository row. A policy creates a fresh branch from its saved base and uses its branch template. For a single-row new task, **Create new repository** initializes an empty `main` repository in a parent folder you choose. Add more rows for a multi-repository task.                                                                                                                                                                                                  |
    | **Remote** | A remote repository                               | Search configured GitHub, GitLab, or Azure DevOps repositories, or paste a supported URL. A pasted URL stays editable until you press Enter; then select the branch. Anonymous, credential-free reads include public GitHub repository branches, pull requests, and issues, plus public `gitlab.com` branch discovery. Private resources and authenticated browse/write features require valid provider credentials. |
    | **None**   | Planning, research, or work outside Git           | Use a scratch workspace or an optional folder on the Kandev host. Git worktree execution and repository-aware Changes, branch, and pull-request features are unavailable.                                                                                                                                                                                                                                            |
 
@@ -73,13 +73,34 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
 5. Enter the initial description. In the **New Task** dialog, an empty description changes the primary action to **Start Plan Mode**; the other dialog actions require a description. Agent-facing task MCP has different empty-description rules. When agent-generated task titles are enabled, every task and subtask action requires a nonempty prompt; the empty-description Plan Mode exception is disabled. A nonempty description exposes the standard split actions.
 6. Choose the applicable action:
    - **Start Plan Mode** is the primary empty-description action and creates the task through the plan-mode path.
-   - **Start task** requires a nonempty description, creates the task, and starts its agent.
+   - **Start task** requires a nonempty description, creates the task, and starts its agent. This path starts in the first positional step whose entry actions include **Auto-start agent**, falling back to **Start step** when the workflow automates no step.
    - **Start task in plan mode** requires a nonempty description and starts the agent with plan mode enabled. This path starts in the first positional workflow step, even if another step is marked **Start step**.
-   - **Create without starting agent** requires a nonempty description. A structured ACP profile prepares the session/workspace without starting an agent turn. Passthrough/TUI is an exception: the backend launches it immediately so its native PTY exists.
+   - **Create without starting agent** requires a nonempty description and starts in **Start step**. A structured ACP profile prepares the session/workspace without starting an agent turn. Passthrough/TUI is an exception: the backend launches it immediately so its native PTY exists.
 
    On mobile, the two non-primary actions are separate buttons labeled **Plan mode** and **Create only**; they have the same plan-mode and create-without-agent behavior.
 
+### Branch policies
+
+Manage named branch policies in **Settings → Workspaces → _workspace_ → Repositories**. A policy
+stores a base branch, a branch-name template, and a pull-request target for one repository. The
+task picker shows policies before raw branches. A selected policy starts a fresh branch. A raw branch
+continues to open the existing branch. Each policy row has an information icon for its saved values.
+The base branch is the starting point. The pull-request target is the merge destination.
+
+When you create a task, Kandev saves the selected policy values on the task repository. Later edits
+or deletion of the policy do not change the task. Kandev's pull-request dialog uses the saved target
+by default. You can change it before creation. Kandev also adds the saved target to the agent's task
+context. The instruction tells the agent to pass the target explicitly to its provider CLI.
+Policies are not offered in **Quick Chat**, **Remote**, **Add Sources**, or **Add Branch** flows.
+
 Kandev remembers draft or recently used repository, branch, executor, and profile choices. Review the restored values before submitting, especially after changing workspace.
+
+When the selected profile is dynamic, the task keeps one logical profile and one
+session tab while Kandev chooses a concrete candidate in the configured order.
+Provider errors before a result may move execution to the next configured
+candidate. Kandev does not switch candidates after an ambiguous started turn.
+If the route has no eligible candidate, wait for the current turn to settle and
+use the session's **Retry current agent** or **Try next agent** recovery action.
 
 Creating a repository is available only in an unlocked, single-repository **New Task** form. Kandev rejects an existing target path, creates no initial files or commit, registers the repository in the workspace, and switches the task to a direct **Local** executor profile. If no direct Local profile is available, repository creation stays disabled. Add more repository rows only after selecting existing repositories; empty multi-repository worktrees are not supported.
 
@@ -106,12 +127,14 @@ tool. Config and Office sessions never receive the title tool.
 
 ### Choose the profile for tasks created by agents
 
-Open **Settings → General → Task Actions → Profile for Tasks Created by Agents** to choose which agent profile Kandev assigns when an agent calls a Kandev MCP tool that creates a task without choosing `agent_profile_id`. The profile determines the agent, model, and setup used when the new task starts:
+Open **Settings → General → Task Actions → Profile for Tasks Created by Agents** to choose which agent profile Kandev assigns when an agent calls `create_task_kandev` without choosing `agent_profile_id`. The preference covers new tasks and subtasks, and it also controls the effective model, mode, and dynamic options used by the first session:
 
-- **Current task profile** is useful when follow-up work needs the same model and agent setup as the task creating it. It preserves compatibility with existing behavior and is selected by default. Kandev first inherits the parent or calling task profile, then checks the workflow step or workflow default, and finally checks the target workspace's **Default Agent Profile**. This option can unintentionally reuse a more expensive profile.
-- **Workspace default profile** is useful when you want agent-created tasks to use your standard workspace model and cost policy. It skips the parent and calling task profiles. Kandev still uses the workflow step or workflow default first, then the **Default Agent Profile** from the workspace that will own the new task.
+- **Creating session profile** is useful when follow-up work needs the same live setup. For a session-bound task-mode call, Kandev uses the verified creating session's profile and its effective model, mode, and dynamic options, including changes made during that session. A workflow launch profile wins first. When no workflow profile wins, the creating session profile is used. This option can reuse a more expensive setup.
+- **Workspace default profile** is useful when you want agent-created tasks to follow a consistent workspace cost policy. It skips the creating session and source, parent, or current task profiles. Kandev uses the workflow launch profile first, then the **Default Agent Profile** from the workspace that will own the new task. It does not copy the creating session's model, mode, or dynamic options. If neither source supplies a profile, task creation fails.
 
-Select an option, then choose **Save changes**. The only affected Kandev MCP tool is `create_task_kandev`; the preference covers both new tasks and subtasks when the call omits `agent_profile_id`. It does not affect `spawn_session_kandev`, because that tool adds a session to the current task instead of creating a task. It also does not affect tasks you create in the UI. The preference applies across workspaces, but **Workspace default profile** resolves the default from each new task's target workspace. An explicit `agent_profile_id` in the tool call always overrides the saved preference. The one case where an explicit `agent_profile_id` does not run is a task that lands on a workflow step: the step's launch profile (its pinned profile, or the workflow default when unpinned) is what the agent starts with, and the created task records that profile. A task lands on a step whenever its workflow has steps, using the start step when `workflow_step_id` is omitted. If **Workspace default profile** is selected and neither the workflow nor the target workspace supplies a profile, task creation fails without creating the task, including when `start_agent=false`.
+Select an option, then choose **Save changes**. Workflow-selected profiles always win when the new task lands on a workflow step. Away from a workflow step, an explicit `agent_profile_id` wins and prevents creator-session runtime inheritance. The only affected Kandev MCP tool is `create_task_kandev`. `spawn_session_kandev` adds a session to the current task, so it does not use this preference. Tasks you create in the UI are not affected.
+
+External MCP calls have no verified creating session. With **Creating session profile**, those calls keep the compatibility fallback to the parent task when one exists, then workflow and target-workspace defaults. The preference applies across workspaces, but **Workspace default profile** resolves the default from each new task's target workspace. A resolved profile and runtime seed are stored even when `start_agent=false`, so a later manual start uses the same decision.
 
 ### Navigate long chat transcripts
 
@@ -129,7 +152,7 @@ For a compact reminder while you read later replies, enable **Show anchored
 prompt bar** in the same settings section. On desktop, it pins a shortened
 copy of your latest prompt below the session tabs once you've scrolled past
 it further down the transcript. It stays hidden while you're browsing earlier
-history above your prompt, even though the prompt itself is out of view —
+  history above your prompt, even though the prompt itself is out of view.
 use **Scroll to last prompt** to jump back to it instead. Expand the bar for
 longer prompts, or use its scroll action to return to the full prompt; the
 expanded view is capped at 40% of the transcript panel's height so it stays
@@ -146,6 +169,63 @@ A task can include several local or remote repository rows. Multi-repository cre
 If Kandev cannot resolve a pasted remote URL or its branch, the repository row keeps the URL and shows the provider error. Use **Retry** after correcting the URL or when a transient provider failure has cleared.
 
 Changes and review are scoped by repository. State the expected deliverable, base branch, and pull-request target for every attachment. See [Coordinate work](coordination.md) for adding branches after creation and splitting multi-repository work.
+
+</details>
+
+### Repository sets
+
+<details>
+<summary>Repository set details</summary>
+
+A **repository set** is a named, reusable group of a workspace's repositories: define **full-stack**
+once, then fill the repository picker with all of its repositories in a single action every time that
+combination of repositories is the one you need.
+
+A set holds repositories only. Branches stay a per-task decision, so applying a set leaves each row's
+branch to the picker's normal defaulting, and you review and adjust branches exactly as when adding
+rows by hand.
+
+Define a set in either place:
+
+- **Settings → Workspaces → _workspace_ → Repositories**, in the **Repository sets** section: create,
+  rename, edit which repositories belong, reorder them, and delete.
+- **New Task → Sets → Save as set**, which captures the repositories currently selected in the form
+  without disturbing the task you are creating.
+
+Apply one from the **Sets** control beside **add repository** in **New Task** and **New subtask**.
+Applying a set adds one row per repository, in the set's order. It is additive and repeatable:
+
+- a repository already in the form is skipped, so applying the same set twice changes nothing and two
+  overlapping sets give you the union;
+- rows you already configured are never discarded or reordered;
+- a repository that has since been removed from the workspace is skipped, and the dialog says how
+  many were skipped.
+
+Applying a set only fills the form. Nothing is saved until you create the task, so the repositories
+the task ends up with are whatever the form holds when you submit.
+
+Sets are also available over the API for scripted setup:
+
+```text
+GET    /api/v1/workspaces/:id/repository-sets
+POST   /api/v1/workspaces/:id/repository-sets   {"name","description","repository_ids"}
+GET    /api/v1/repository-sets/:id
+PATCH  /api/v1/repository-sets/:id              any of name, description, repository_ids
+DELETE /api/v1/repository-sets/:id
+```
+
+`repository_ids` is ordered and is the order a set fills the picker. A supplied `repository_ids`
+replaces the whole membership list, which is also how you reorder one; omit the field to leave
+membership untouched. The same five operations exist as `repository_set.list|create|get|update|delete`
+WebSocket actions, and `repository_set.created|updated|deleted` notifications keep every open client
+current. See [WebSocket API](websocket-api.md).
+
+Sets are workspace-scoped and shared: everyone who can see the workspace sees and can apply its sets.
+A set name is unique within its workspace, compared case-insensitively. Deleting a set removes the
+grouping only, never a repository; deleting a repository removes it from every set and leaves the sets
+themselves in place. Sets are not offered in **Remote** or **None** source mode. On an executor that
+cannot run a multi-repository task the control still works; the executor picker marks that profile
+unavailable once several repositories are selected, exactly as when you add the rows by hand.
 
 </details>
 
@@ -207,14 +287,111 @@ background** after its foreground yields while a recognized async subagent,
 immediately and the child may continue streaming. Other providers and
 foreground-generating Claude turns retain the coarse queueing behavior.
 
+### Prevent auto-start on open
+
+Under **Settings → General → Task actions**, the **Prevent auto-start on open**
+preference is off by default. When enabled, opening a task never launches or
+resumes its agent on its own; it shows the **Start agent** button instead. The
+preference applies in two situations:
+
+- **Opening a task in the final step of its workflow.** The task opens with a
+  prepared session and the agent stays stopped until you select **Start agent**.
+  Opening the same task with the preference off keeps the workflow step's
+  normal auto-start behavior.
+- **Opening a task whose agent was stopped by a Kandev restart.** The session
+  is recovered and shown stopped instead of being resumed automatically. Select
+  **Start agent** to resume it.
+
+The preference only gates opening a task. Choosing **Start agent** (or a
+workflow step transition) always starts the agent as usual, and a failed or
+interrupted session still shows its recovery actions.
+
+## Task dependencies
+
+A task can declare that it **depends on** one or more other tasks. This is a
+peer relationship and is separate from the parent/child subtask hierarchy: a
+subtask says "B is part of A", a dependency says "B cannot start until A
+finishes". The two can be combined freely, including a dependency between a
+task and its own child.
+
+Dependencies form a graph, not just a line. A task can wait on several
+predecessors and can itself block several dependents. A link that would close a
+cycle is rejected when you try to create it, and the offending path is shown so
+you can see which link to drop.
+
+### Declare dependencies
+
+Dependencies are declared in the **New Task** dialog under **Depends on**, or
+by an agent over MCP. There is deliberately no editor in the open task: a
+dependency records how the work was planned, so the surfaces that display it
+stay read-only. To change one after the fact, use the MCP tools or delete and
+recreate the task.
+
+### What blocked means
+
+A task with at least one unfinished predecessor is **blocked**. Blocked tasks
+show a badge on their Kanban card and a dependency chip in the status row above
+the chat box, next to the pull request chip. The chip reports both directions,
+the tasks this one waits on and the tasks waiting on it, and each entry links
+to that task.
+
+While a task is blocked, no automated path starts it. That covers workflow
+**On Enter** auto-start, promotion out of a WIP queue, integration watchers,
+and dependency resolution itself. You can still press **Start agent**
+yourself; a manual start is an explicit override, not an error.
+
+### Chains that run themselves
+
+A task created with dependencies and an agent start request does not launch
+immediately. It records the start as an intent, and Kandev launches it once
+every predecessor has completed successfully. Setting that up along a path
+produces a chain:
+
+1. Create task A normally.
+2. Create task B with **Depends on** set to A.
+3. Create task C with **Depends on** set to B.
+
+Starting A is the only manual step. When A completes, B starts. When B
+completes, C starts. A is never restarted.
+
+Auto-start grants eligibility, never a bypass. If a task's dependencies have
+resolved but the target step is at its WIP limit, the task stays queued and
+launches when the queue promotes it, exactly as any other queued task would.
+
+### When a predecessor does not succeed
+
+Only successful completion resolves a dependency. A predecessor that ends in
+**Failed** or **Cancelled** leaves its dependents blocked, and the blocked
+reason names the failed task rather than reporting a generic wait. The chain
+stops there and waits for you. Kandev never retries a failed predecessor on its
+own and never quietly drops the link.
+
+Three things clear it, all of them deliberate: retry the predecessor until it
+succeeds, remove the link over MCP, or start the dependent manually.
+
+An **archived** predecessor is treated as unfinished, not as failed and not as
+resolved, so archiving a task does not release the work waiting on it.
+**Deleting** a task does remove its links in both directions, and any dependent
+that was waiting only on it becomes unblocked. That dependent is not started:
+deletion is not success.
+
 ## Find and organize tasks
 
 On desktop and tablet, the header switches between **Kanban**, **Pipeline**, and **List**. Kanban and Pipeline show the same workflow steps in different layouts. Kandev remembers the last selected view in that browser on the current device. Phones offer **Kanban** and **List** only; a saved desktop Pipeline preference is kept but shown as Kanban on the phone.
 
 Under **Settings → General → Appearance → Startup Page**, choose **Task overview** (the default) or **Last visited task**. The latter resumes the most recently opened task in the current workspace on that device when Kandev starts or you open bare Home. It does not change an explicit task or workflow link. Home navigation and a task's Back action always return to the task overview; when there is no matching local recent task, Kandev opens the overview instead.
 
+The **TASKS** list in the left sidebar has two time-based sort choices. These choices are separate from the sort choices in the task **List** view.
+
+| Sort choice | Meaning |
+| --- | --- |
+| **Updated** | The last task summary refresh. Background events, such as pull-request status changes, can change this time. |
+| **Last activity** | The last real user or agent action. Opening or focusing a task and background provider polling do not change this time. |
+
+Choose **Last activity** when you want to review tasks by the least recent user or agent interaction.
+
 - Search matches tasks without changing their state.
-- The display menu filters by **Workflow** and **Repository** and can enable **Open preview on click**.
+- The display menu filters by **Workflow** and **Repository** and can enable **Open preview on click**. In Kanban/Pipeline, each workflow lane has a **Columns** menu to hide individual steps. Unticking a step hides its column and tasks on that board, scoped to its own workflow, until you re-tick it. The optional **Auto-hide empty columns** setting collapses unoccupied steps without changing those manual choices; auto-hidden empty steps return as move destinations while a task is being moved, while manually hidden steps remain unavailable for pointer and bulk moves. On phones, open the menu drawer to change columns for the focused workflow.
 - In **List**, the display menu can enable **Show task details** to include available repository, description, pull-request, session, parent, review, and archive context in each row. This option is off by default and follows the user across devices.
 - **List** can group by **State**, **Workflow**, **Repository**, or **None**.
 - **List** can sort by updated time, created time, or title in either direction.
@@ -242,7 +419,7 @@ New steps allow manual moves by default. **Show in command panel** also defaults
 
 | Setting                   | Effect                                                                                                                                                                                           |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Start step**            | Makes this the normal starting step. Only one step per workflow should be selected. If none is selected, Kandev falls back to the first positional step.                                         |
+| **Start step**            | Where a task is created when no agent starts with it. Only one step per workflow should be selected. If none is selected, Kandev falls back to the first positional step. This setting places tasks; it never starts agents, which is **Auto-start agent** below. |
 | Agent profile             | Overrides the workflow/task profile when entering this step. A different profile creates a new session with fresh conversation context. The fixed profile override and original-session options are mutually exclusive. |
 | **Override original session options** | Keeps the original conversation tab while applying model and ACP configuration rules for the task's starting agent family. The options editor appears below WIP settings only when this is checked. |
 | **Auto-start agent**      | Starts an agent whenever a task enters the step.                                                                                                                                                 |
@@ -251,17 +428,28 @@ New steps allow manual moves by default. **Show in command panel** also defaults
 | **Allow manual move**     | Allows dragging a task into this step. Treat it as workflow UX, not as a security or approval boundary.                                                                                          |
 | **Show in command panel** | Includes tasks in this step in the default, empty-search **Cmd+K** task list. Typed task search currently searches every step and can also return archived tasks, regardless of this setting.    |
 | **Auto-archive**          | Archives inactive tasks after the configured number of hours. Enabling it starts at 24 hours; the minimum is 1.                                                                                  |
-| **WIP limit**             | Maximum admitted active, non-archived, non-ephemeral tasks in the step. `0` means unlimited. Overflow remains visible as queued cards; manual moves into a full step are still rejected. |
-| **Pull from**             | Optional one-hop feeder step. When capacity opens or eligible work arrives in the feeder, Kandev promotes queued work from the destination first, then the feeder. A full feeder rejects new overflow creation. |
+| **WIP limit**             | Maximum admitted active, non-archived, non-ephemeral tasks in the step. `0` means unlimited. Overflow remains visible as queued cards; manual moves into a full step succeed and queue there. |
+| **Pull from**             | Optional one-hop feeder step. When capacity opens or eligible work arrives in the feeder, Kandev promotes queued work from the destination first, then the feeder. Direct moves and automatic transitions queue in the destination without using the feeder. A full feeder rejects new overflow creation. |
+
+When **Reset agent context** creates a fresh ACP session, Kandev preserves the
+selected ACP model, permission mode, and provider options. It restores these
+settings before the next automatic prompt. If the provider rejects a setting,
+the restoration fails and Kandev does not send the destination step's automatic
+prompt.
 
 The WIP check also applies when a task is created. It runs for an explicit
 `workflow_step_id` and for the workflow's resolved start step, and the
 admission check is atomic. When a limited step is full, the task is still
 created and visible: it is queued in that step when no feeder is configured,
 or placed in the configured feeder and tagged for the destination. Queued
-tasks do not start sessions or consume destination WIP until promoted. If the
-configured feeder is also full, creation returns a conflict. Ephemeral tasks
-are not counted.
+tasks do not start sessions or consume destination WIP until promoted. If you
+manually move a task, or an automatic transition sends it to a full limited
+step, it queues in that destination instead of using the feeder. The Kanban
+column shows the admitted count and limit, then a **Queued** section. The task
+sidebar shows a queue icon whose tooltip gives the task's position in that
+destination queue. If the configured
+feeder is also full, creation returns a conflict. Ephemeral tasks are not
+counted.
 
 Integration watchers use the same admission rule. For example, a GitHub review
 watch targeting a `Review` step with a limit of two admits at most two newly
@@ -271,7 +459,7 @@ reservation and does not start an agent for them.
 
 Auto-archive is checked on a five-minute background interval and uses the task's last update time. Any task update postpones eligibility, so the archive is not guaranteed at the exact configured minute. Archiving, deleting, or moving an admitted task opens capacity and promotes the oldest queued card. Auto-archive affects the task itself, not its children.
 
-Pull configuration rejects self-references, cycles, and cross-workflow feeders. Pulling runs when a task vacates the limited step and when eligible work is created in its feeder, filling each available slot. Candidates are ordered by board position, then priority (`critical`, `high`, `medium`, `low`, `none`), queue time, creation time, and ID. A candidate whose move fails—for example because its session is running or starting—is skipped for that pull pass.
+Pull configuration rejects self-references, cycles, and cross-workflow feeders. Pulling runs when a task vacates the limited step and when eligible work is created in its feeder, filling each available slot. Destination-queued tasks are promoted before feeder candidates. Candidates are ordered by board position, then priority (`critical`, `high`, `medium`, `low`, `none`), queue time, creation time, and ID. A candidate whose move fails, for example because its session is running or starting, is skipped for that pull pass.
 
 ### Configure events and transitions
 
@@ -388,9 +576,9 @@ Revision history is not an immutable record of every autosave. Consecutive write
 | One versioned task plan               | Available      | Available in Office-specific surfaces where enabled |
 | Multiple named task documents         | Not exposed    | In-progress Office capability                       |
 | Task label editor and label filters   | Not exposed    | In-progress Office capability                       |
-| Blocked-by / blocking property editor | Not exposed    | In-progress Office capability                       |
+| Blocked-by / blocking property editor | Set at task creation or over MCP; read-only afterwards | In-progress Office capability |
 
-Stored related-task data can include blocker relationships, but regular Kanban has no blocker editor or blocker filter. Use workflow gates, direct-child completion, and explicit messages for supported Kanban coordination. Do not treat Office's named documents, labels, or blocker UI as a stable public contract yet.
+Regular Kanban reads and enforces blocker relationships (see [Task dependencies](#task-dependencies)) but has no blocker filter and no in-place editor: dependencies are declared when the task is created or over MCP. Office additionally exposes named documents, labels, and its own blocker property editor. Do not treat those Office surfaces as a stable public contract yet.
 
 ## Archive, unarchive, and delete
 
@@ -421,7 +609,7 @@ settled task in the still-working state.
 
 - **No workflow is available:** open the workspace's **Workflows** page. Newly added workspaces have none by default.
 - **No agent starts:** the empty-description **Start Plan Mode** path does not use the normal start-agent submission. To begin an agent immediately, enter a description and use **Start task** or **Start task in plan mode**; also confirm the selected profiles are healthy and compatible.
-- **Task starts in the wrong step:** normal creation uses **Start step** with first-step fallback; **Start task in plan mode** deliberately uses the first positional step.
+- **Task starts in the wrong step:** the destination depends on the action. **Create without starting agent** uses **Start step** with first-step fallback; **Start task** uses the first **Auto-start agent** step and falls back to **Start step**; **Start task in plan mode** deliberately uses the first positional step. An explicit `workflow_step_id` from the creator outranks all three.
 - **A task moves unexpectedly:** inspect **On Turn Start**, **On Turn Complete**, child completion, entry actions, and the destination step's entry actions.
 - **A task stays after a cancel:** check for a pending clarification, the cancelled-turn completion policy, an absent or blocked transition, a queued WIP card, or an invalid target left by an older definition.
 - **Move rejected:** check the target WIP limit and whether the task is already counted there.

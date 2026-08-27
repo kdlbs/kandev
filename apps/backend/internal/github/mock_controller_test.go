@@ -35,6 +35,27 @@ func serveMockJSON(t *testing.T, router *gin.Engine, method, path, body string) 
 	return response
 }
 
+func TestMockControllerSequencesPRCommitFailureThenSuccess(t *testing.T) {
+	router, svc, _ := setupWorkspaceAuthMockController(t)
+	response := serveMockJSON(t, router, http.MethodPut,
+		"/api/v1/github/mock/pr-commits-failures",
+		`{"owner":"owner","repo":"repo","number":7,"failures":1}`)
+	if response.Code != http.StatusOK {
+		t.Fatalf("configure PR commit failure: %d %s", response.Code, response.Body.String())
+	}
+
+	mock, ok := svc.client.(*MockClient)
+	if !ok {
+		t.Fatalf("service client has type %T, want *MockClient", svc.client)
+	}
+	if _, err := mock.ListPRCommits(context.Background(), "owner", "repo", 7); err == nil {
+		t.Fatal("expected the configured request to fail")
+	}
+	if _, err := mock.ListPRCommits(context.Background(), "owner", "repo", 7); err != nil {
+		t.Fatalf("expected the next request to succeed: %v", err)
+	}
+}
+
 func TestMockControllerWorkspaceConnectionsResolveIsolatedPrincipals(t *testing.T) {
 	router, svc, _ := setupWorkspaceAuthMockController(t)
 	registration := serveMockJSON(t, router, http.MethodPut,
@@ -311,17 +332,21 @@ func TestMockControllerAddRepoFilesRequiresOwnerAndRepo(t *testing.T) {
 
 func TestBuildTaskPRFromRequestCopiesWorkspaceID(t *testing.T) {
 	req := &associateTaskPRRequest{
-		TaskID:      "task-1",
-		WorkspaceID: "ws-1",
-		Owner:       "testorg",
-		Repo:        "testrepo",
-		PRNumber:    103,
+		TaskID:       "task-1",
+		WorkspaceID:  "ws-1",
+		RepositoryID: "repo-1",
+		Owner:        "testorg",
+		Repo:         "testrepo",
+		PRNumber:     103,
 	}
 
 	tp := buildTaskPRFromRequest(req, time.Now().UTC())
 
 	if tp.WorkspaceID != "ws-1" {
 		t.Fatalf("WorkspaceID = %q, want ws-1", tp.WorkspaceID)
+	}
+	if tp.RepositoryID != "repo-1" {
+		t.Fatalf("RepositoryID = %q, want repo-1", tp.RepositoryID)
 	}
 }
 

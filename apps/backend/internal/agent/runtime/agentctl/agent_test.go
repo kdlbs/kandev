@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -264,7 +265,7 @@ func TestCleanupPendingRequests(t *testing.T) {
 	c.pendingRequests["req-2"] = ch2
 	c.pendingMu.Unlock()
 
-	c.cleanupPendingRequests()
+	c.cleanupPendingRequests(nil)
 
 	c.pendingMu.Lock()
 	count := len(c.pendingRequests)
@@ -305,7 +306,7 @@ func TestCleanupPendingRequests_ConcurrentSafe(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		c.cleanupPendingRequests()
+		c.cleanupPendingRequests(nil)
 	}()
 	wg.Wait()
 
@@ -315,6 +316,42 @@ func TestCleanupPendingRequests_ConcurrentSafe(t *testing.T) {
 
 	if count != 0 {
 		t.Fatalf("expected 0 pending requests, got %d", count)
+	}
+}
+
+func TestCleanupPendingRequests_ScopesToRetiredStream(t *testing.T) {
+	c := &Client{
+		pendingRequests:     make(map[string]chan *ws.Message),
+		pendingRequestConns: make(map[string]*websocket.Conn),
+	}
+	oldConn := &websocket.Conn{}
+	newConn := &websocket.Conn{}
+	oldCh := make(chan *ws.Message, 1)
+	newCh := make(chan *ws.Message, 1)
+	c.pendingMu.Lock()
+	c.pendingRequests["old"] = oldCh
+	c.pendingRequests["new"] = newCh
+	c.pendingRequestConns["old"] = oldConn
+	c.pendingRequestConns["new"] = newConn
+	c.pendingMu.Unlock()
+
+	c.cleanupPendingRequests(oldConn)
+
+	if _, ok := <-oldCh; ok {
+		t.Fatal("expected retired stream request channel to be closed")
+	}
+	select {
+	case _, ok := <-newCh:
+		if !ok {
+			t.Fatal("replacement stream request channel was closed")
+		}
+		t.Fatal("replacement stream request channel received an unexpected response")
+	default:
+	}
+	c.pendingMu.Lock()
+	defer c.pendingMu.Unlock()
+	if _, ok := c.pendingRequests["new"]; !ok {
+		t.Fatal("replacement stream request was removed")
 	}
 }
 
@@ -689,6 +726,89 @@ func TestRespondToPermission_NotFound(t *testing.T) {
 	}
 }
 
+func TestListPendingPermissions(t *testing.T) {
+	c, ts := newTestClientWithStream(t, func(msg ws.Message) *ws.Message {
+		if msg.Action != "agent.permissions.list" {
+			t.Errorf("action = %q, want agent.permissions.list", msg.Action)
+		}
+		resp, _ := ws.NewResponse(msg.ID, msg.Action, streams.PermissionListResponse{
+			Permissions: []streams.PendingAgentPermission{{
+				RequestID: "request-1",
+				PendingID: "pending-1",
+				Status:    streams.PermissionStatusPending,
+			}},
+			Total: 1,
+		})
+		return resp
+	})
+	defer ts.Close()
+	defer c.Close()
+
+	permissions, err := c.ListPendingPermissions(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(permissions) != 1 || permissions[0].RequestID != "request-1" {
+		t.Fatalf("unexpected permissions: %+v", permissions)
+	}
+}
+
+func TestResolvePermissionPreservesStableErrorCode(t *testing.T) {
+	c, ts := newTestClientWithStream(t, func(msg ws.Message) *ws.Message {
+		if msg.Action != "agent.permissions.resolve" {
+			t.Errorf("action = %q, want agent.permissions.resolve", msg.Action)
+		}
+		var request streams.PermissionResolveRequest
+		if err := msg.ParsePayload(&request); err != nil {
+			t.Error(err)
+		}
+		if request.RequestID != "request-1" || request.PendingID != "pending-1" || request.OptionID != "unknown" {
+			t.Errorf("unexpected request: %+v", request)
+		}
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, streams.PermissionErrorOptionNotOffered, map[string]any{
+			"permission_code": streams.PermissionErrorOptionNotOffered,
+		})
+		return resp
+	})
+	defer ts.Close()
+	defer c.Close()
+
+	_, err := c.ResolvePermission(t.Context(), "request-1", "pending-1", "unknown")
+	var operationErr *PermissionOperationError
+	if !errors.As(err, &operationErr) {
+		t.Fatalf("error = %v, want PermissionOperationError", err)
+	}
+	if operationErr.Code != streams.PermissionErrorOptionNotOffered {
+		t.Fatalf("code = %q, want %q", operationErr.Code, streams.PermissionErrorOptionNotOffered)
+	}
+}
+
+func TestCancelPermissionSendsExactGeneration(t *testing.T) {
+	c, ts := newTestClientWithStream(t, func(msg ws.Message) *ws.Message {
+		if msg.Action != "agent.permissions.cancel" {
+			t.Errorf("action = %q, want agent.permissions.cancel", msg.Action)
+		}
+		var request streams.PermissionCancelRequest
+		if err := msg.ParsePayload(&request); err != nil {
+			t.Error(err)
+		}
+		if request.RequestID != "request-1" || request.PendingID != "pending-1" {
+			t.Errorf("unexpected cancellation tuple: %+v", request)
+		}
+		resp, _ := ws.NewResponse(msg.ID, msg.Action, streams.PermissionCancelResponse{
+			RequestID: request.RequestID, PendingID: request.PendingID, Status: "cancelled",
+		})
+		return resp
+	})
+	defer ts.Close()
+	defer c.Close()
+
+	result, err := c.CancelPermission(t.Context(), "request-1", "pending-1")
+	if err != nil || result.Status != "cancelled" {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
+
 // --- Tests for StreamUpdates response routing ---
 
 func TestStreamUpdates_RoutesResponsesToPending(t *testing.T) {
@@ -819,6 +939,8 @@ func TestStreamUpdates_DisconnectCleansPending(t *testing.T) {
 	ch := make(chan *ws.Message, 1)
 	c.pendingMu.Lock()
 	c.pendingRequests["pending-test"] = ch
+	c.pendingRequestConns = make(map[string]*websocket.Conn)
+	c.pendingRequestConns["pending-test"] = c.agentStreamConn
 	c.pendingMu.Unlock()
 
 	// Wait for disconnect

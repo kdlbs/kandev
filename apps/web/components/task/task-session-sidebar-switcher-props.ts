@@ -17,7 +17,11 @@ export function buildTaskSwitcherProps(args: {
   stepsByWorkflowId: TaskSwitcherComponentProps["stepsByWorkflowId"];
   highlightedTaskId: string | null;
   highlightedSelectedTaskId: string | null;
-  effectiveView: { collapsedGroups: TaskSwitcherComponentProps["collapsedGroupKeys"] };
+  effectiveView: {
+    collapsedGroups: TaskSwitcherComponentProps["collapsedGroupKeys"];
+    sort: { key: string };
+    taskRow?: TaskSwitcherComponentProps["taskRowPresentation"];
+  };
   handleToggleGroup: TaskSwitcherComponentProps["onToggleGroup"];
   collapsedSubtaskParents: TaskSwitcherComponentProps["collapsedSubtaskParentIds"];
   toggleSubtaskCollapsed: TaskSwitcherComponentProps["onToggleSubtasks"];
@@ -43,6 +47,8 @@ export function buildTaskSwitcherProps(args: {
     activeTaskId: args.highlightedTaskId,
     selectedTaskId: args.highlightedSelectedTaskId,
     collapsedGroupKeys: args.effectiveView.collapsedGroups,
+    showActivityTime: args.effectiveView.sort.key === "lastActivityAt",
+    taskRowPresentation: args.effectiveView.taskRow,
     onToggleGroup: args.handleToggleGroup,
     collapsedSubtaskParentIds: args.collapsedSubtaskParents,
     onToggleSubtasks: args.toggleSubtaskCollapsed,
@@ -61,6 +67,8 @@ export function buildTaskSwitcherProps(args: {
     onNestTask: args.handleNestTask,
     pinnedTaskIds: args.pinnedTaskIds,
     deletingTaskId: args.sidebarActions.deletingTaskId,
+    archivingTaskId: args.sidebarActions.archivingTaskId,
+    isArchiving: args.sidebarActions.isArchiving,
     isLoading: args.isLoadingWorkflow,
     loadError: args.archivedError ? args.archivedLoadErrorLabel : null,
     onRetryLoad: args.retryArchivedTasks,

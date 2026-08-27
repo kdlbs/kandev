@@ -231,7 +231,7 @@ function ProjectProgress({
           <p className="font-medium">{view.title}</p>
           <p className="text-pretty text-muted-foreground">
             {view.workTitle}
-            {view.message ? ` — ${view.message}` : ""}
+            {view.message ? ` - ${view.message}` : ""}
           </p>
           <p className="text-pretty text-muted-foreground">{t("lsp:reportedWorkDisclaimer")}</p>
         </>

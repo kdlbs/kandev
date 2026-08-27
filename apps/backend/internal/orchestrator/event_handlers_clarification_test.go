@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
@@ -22,9 +23,71 @@ type zeroClarificationCanceller struct {
 	sessions []string
 }
 
-func (c *zeroClarificationCanceller) DetachSessionAndNotify(_ context.Context, sessionID string) int {
+func (c *zeroClarificationCanceller) DetachSessionAndNotify(_ context.Context, sessionID string) (int, error) {
 	c.sessions = append(c.sessions, sessionID)
-	return 0
+	return 0, nil
+}
+
+func (c *zeroClarificationCanceller) ExpireSessionAndNotify(context.Context, string) (int, error) {
+	return 0, nil
+}
+
+type failingDetachClarificationCanceller struct {
+	err error
+}
+
+func (c *failingDetachClarificationCanceller) DetachSessionAndNotify(context.Context, string) (int, error) {
+	return 0, c.err
+}
+
+func (c *failingDetachClarificationCanceller) ExpireSessionAndNotify(context.Context, string) (int, error) {
+	return 0, nil
+}
+
+func TestClarificationInputPhaseContextStartsFreshAfterPriorCancellation(t *testing.T) {
+	prior, cancelPrior := context.WithCancel(context.Background())
+	cancelPrior()
+
+	phase, cancelPhase := clarificationInputPhaseContext(prior)
+	defer cancelPhase()
+	if err := phase.Err(); err != nil {
+		t.Fatalf("fresh clarification phase inherited prior cancellation: %v", err)
+	}
+	if _, ok := phase.Deadline(); !ok {
+		t.Fatal("fresh clarification phase has no bounded deadline")
+	}
+}
+
+type failingStartTurnService struct {
+	TurnService
+	err error
+}
+
+func (s *failingStartTurnService) StartTurn(context.Context, string) (*models.Turn, error) {
+	return nil, s.err
+}
+
+func (s *failingStartTurnService) ReserveTurn(
+	context.Context,
+	string,
+	*models.PromptDispatchRecovery,
+) (*models.Turn, error) {
+	return nil, s.err
+}
+
+type blockingClarificationCanceller struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (c *blockingClarificationCanceller) DetachSessionAndNotify(context.Context, string) (int, error) {
+	close(c.entered)
+	<-c.release
+	return 1, nil
+}
+
+func (c *blockingClarificationCanceller) ExpireSessionAndNotify(context.Context, string) (int, error) {
+	return 0, nil
 }
 
 func TestHandleClarificationAnswered(t *testing.T) {
@@ -91,6 +154,457 @@ func TestHandleClarificationAnswered(t *testing.T) {
 			t.Fatalf("expected nil error, got: %v", err)
 		}
 	})
+}
+
+func TestResumeDetachedClarificationReportsPromptFailure(t *testing.T) {
+	repo := setupTestRepo(t)
+	agentMgr := &mockAgentManager{isAgentRunning: true}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.eventBus = &recordingEventBus{}
+	seedTaskAndSession(t, repo, "t1", "s1", models.TaskSessionStateCompleted)
+
+	err := svc.ResumeDetachedClarification(context.Background(), clarification.DetachedClarificationResume{
+		TaskID:     "t1",
+		SessionID:  "s1",
+		PendingID:  "pending-1",
+		Question:   "Which database?",
+		AnswerText: "User selected: PostgreSQL",
+	})
+	if err == nil {
+		t.Fatal("detached resume reported success after PromptTask failed")
+	}
+}
+
+func TestResumeDetachedClarificationDispatchFailureLeavesBundleRestorable(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-retry", "session-retry", "step-1")
+	seedExecutorRunning(t, repo, "session-retry", "task-retry", "exec-retry")
+	if err := repo.UpdateTaskSessionState(
+		ctx,
+		"session-retry",
+		models.TaskSessionStateWaitingForInput,
+		"",
+	); err != nil {
+		t.Fatalf("set session waiting: %v", err)
+	}
+
+	startedAt := time.Now().UTC().Add(-time.Minute)
+	completedAt := startedAt.Add(time.Second)
+	if err := repo.CreateTurn(ctx, &models.Turn{
+		ID:            "turn-clarification",
+		TaskSessionID: "session-retry",
+		TaskID:        "task-retry",
+		StartedAt:     startedAt,
+		CompletedAt:   &completedAt,
+	}); err != nil {
+		t.Fatalf("create clarification turn: %v", err)
+	}
+	if err := repo.CreateMessage(ctx, &models.Message{
+		ID:            "message-clarification",
+		TaskSessionID: "session-retry",
+		TaskID:        "task-retry",
+		TurnID:        "turn-clarification",
+		AuthorType:    models.MessageAuthorAgent,
+		Type:          models.MessageTypeClarificationRequest,
+		Metadata: map[string]interface{}{
+			"pending_id":  "pending-retry",
+			"question_id": "q1",
+			"status":      "pending",
+		},
+		CreatedAt: startedAt,
+	}); err != nil {
+		t.Fatalf("create clarification message: %v", err)
+	}
+	claimedMessages, claimed, err := repo.CompleteActiveClarificationBundle(
+		ctx,
+		"pending-retry",
+		"answered",
+		map[string]interface{}{"q1": map[string]interface{}{"question_id": "q1"}},
+	)
+	if err != nil || !claimed {
+		t.Fatalf("claim clarification bundle: claimed=%v err=%v", claimed, err)
+	}
+
+	dispatchErr := errors.New("prompt dispatch failed")
+	agentMgr := &mockAgentManager{
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+		promptErr:              dispatchErr,
+	}
+	svc := createEngineService(t, repo, newMockStepGetter(), agentMgr)
+	svc.turnService = &repoBackedTurnService{repo: repo}
+
+	err = svc.ResumeDetachedClarification(ctx, clarification.DetachedClarificationResume{
+		TaskID:     "task-retry",
+		SessionID:  "session-retry",
+		PendingID:  "pending-retry",
+		Question:   "Continue?",
+		AnswerText: "Continue",
+	})
+	if !errors.Is(err, dispatchErr) {
+		t.Fatalf("resume error = %v, want %v", err, dispatchErr)
+	}
+
+	_, restored, err := repo.RestoreActiveClarificationBundle(
+		ctx,
+		"pending-retry",
+		"answered",
+		claimedMessages,
+	)
+	if err != nil || !restored {
+		t.Fatalf("restore after failed dispatch: restored=%v err=%v", restored, err)
+	}
+	turns, err := repo.ListTurnsBySession(ctx, "session-retry")
+	if err != nil {
+		t.Fatalf("list turns: %v", err)
+	}
+	if len(turns) != 1 || turns[0].ID != "turn-clarification" {
+		t.Fatalf("turns after failed dispatch = %#v, want only original clarification turn", turns)
+	}
+
+	_, claimed, err = repo.CompleteActiveClarificationBundle(
+		ctx,
+		"pending-retry",
+		"answered",
+		map[string]interface{}{"q1": map[string]interface{}{"question_id": "q1"}},
+	)
+	if err != nil || !claimed {
+		t.Fatalf("reclaim clarification bundle: claimed=%v err=%v", claimed, err)
+	}
+	agentMgr.mu.Lock()
+	agentMgr.promptErr = nil
+	agentMgr.mu.Unlock()
+	if err := svc.ResumeDetachedClarification(ctx, clarification.DetachedClarificationResume{
+		TaskID:     "task-retry",
+		SessionID:  "session-retry",
+		PendingID:  "pending-retry",
+		Question:   "Continue?",
+		AnswerText: "Continue",
+	}); err != nil {
+		t.Fatalf("retry detached resume: %v", err)
+	}
+	turns, err = repo.ListTurnsBySession(ctx, "session-retry")
+	if err != nil {
+		t.Fatalf("list turns after retry: %v", err)
+	}
+	if len(turns) != 2 || turns[1].ID != "turn-session-retry" {
+		t.Fatalf("turns after accepted retry = %#v, want one successor turn", turns)
+	}
+}
+
+func TestResumeDetachedClarificationReportsAcceptedPublicationFailure(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-publish-failure", "session-publish-failure", "step-1")
+	seedExecutorRunning(t, repo, "session-publish-failure", "task-publish-failure", "exec-publish-failure")
+	if err := repo.UpdateTaskSessionState(
+		ctx,
+		"session-publish-failure",
+		models.TaskSessionStateWaitingForInput,
+		"",
+	); err != nil {
+		t.Fatalf("set session waiting: %v", err)
+	}
+
+	publicationErr := errors.New("publish accepted turn")
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	svc := createEngineService(t, repo, newMockStepGetter(), agentMgr)
+	svc.turnService = failingReservedTurnPublisher{
+		TurnService: &repoBackedTurnService{repo: repo},
+		err:         publicationErr,
+	}
+
+	err := svc.ResumeDetachedClarification(ctx, clarification.DetachedClarificationResume{
+		TaskID:     "task-publish-failure",
+		SessionID:  "session-publish-failure",
+		PendingID:  "pending-publish-failure",
+		Question:   "Continue?",
+		AnswerText: "Continue",
+	})
+	if err == nil {
+		t.Fatal("resume reported success without durable dispatch publication")
+	}
+	var accepted interface{ DetachedResumeAccepted() bool }
+	if !errors.As(err, &accepted) || !accepted.DetachedResumeAccepted() {
+		t.Fatalf("resume error = %v, want accepted-dispatch marker", err)
+	}
+	if !errors.Is(err, publicationErr) {
+		t.Fatalf("resume error = %v, want publication error %v", err, publicationErr)
+	}
+	if pending := svc.reservedPromptTurnID("session-publish-failure"); pending != "" {
+		t.Fatalf("accepted turn remained rollback-eligible: %q", pending)
+	}
+	active, ok := svc.activeTurns.Load("session-publish-failure")
+	if !ok || active == "" {
+		t.Fatalf("accepted turn active ownership = %v, %v", active, ok)
+	}
+}
+
+func TestResumeDetachedClarificationCleansUpAcceptedDispatchFailure(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-accepted-failure", "session-accepted-failure", "step-1")
+	seedExecutorRunning(t, repo, "session-accepted-failure", "task-accepted-failure", "exec-accepted-failure")
+	if err := repo.UpdateTaskSessionState(
+		ctx,
+		"session-accepted-failure",
+		models.TaskSessionStateWaitingForInput,
+		"",
+	); err != nil {
+		t.Fatalf("set session waiting: %v", err)
+	}
+
+	dispatchErr := errors.New("stream failed after prompt acceptance")
+	publicationErr := errors.New("publish accepted turn")
+	agentMgr := &mockAgentManager{
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+		promptErr:              dispatchErr,
+		promptAcceptedOnError:  true,
+	}
+	svc := createEngineService(t, repo, newMockStepGetter(), agentMgr)
+	svc.turnService = failingReservedTurnPublisher{
+		TurnService: &repoBackedTurnService{repo: repo},
+		err:         publicationErr,
+	}
+
+	err := svc.ResumeDetachedClarification(ctx, clarification.DetachedClarificationResume{
+		TaskID:     "task-accepted-failure",
+		SessionID:  "session-accepted-failure",
+		PendingID:  "pending-accepted-failure",
+		Question:   "Continue?",
+		AnswerText: "Continue",
+	})
+	if !errors.Is(err, dispatchErr) || !errors.Is(err, publicationErr) {
+		t.Fatalf("resume error = %v, want dispatch %v and publication %v", err, dispatchErr, publicationErr)
+	}
+	var accepted interface{ DetachedResumeAccepted() bool }
+	if !errors.As(err, &accepted) || !accepted.DetachedResumeAccepted() {
+		t.Fatalf("resume error = %v, want accepted-dispatch marker", err)
+	}
+	session, getErr := repo.GetTaskSession(ctx, "session-accepted-failure")
+	if getErr != nil {
+		t.Fatalf("load session after failure: %v", getErr)
+	}
+	if session.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("session state after accepted failure = %q, want %q", session.State, models.TaskSessionStateWaitingForInput)
+	}
+}
+
+func TestResumeDetachedClarificationRejectsBeforeDispatchWhenTurnPersistenceFails(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-turn-failure", "session-turn-failure", "step-1")
+	seedExecutorRunning(t, repo, "session-turn-failure", "task-turn-failure", "exec-turn-failure")
+	if err := repo.UpdateTaskSessionState(
+		ctx,
+		"session-turn-failure",
+		models.TaskSessionStateWaitingForInput,
+		"",
+	); err != nil {
+		t.Fatalf("set session waiting: %v", err)
+	}
+
+	persistenceErr := errors.New("persist successor turn")
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	svc := createEngineService(t, repo, newMockStepGetter(), agentMgr)
+	svc.turnService = &failingStartTurnService{
+		TurnService: &repoBackedTurnService{repo: repo},
+		err:         persistenceErr,
+	}
+
+	err := svc.ResumeDetachedClarification(ctx, clarification.DetachedClarificationResume{
+		TaskID:     "task-turn-failure",
+		SessionID:  "session-turn-failure",
+		PendingID:  "pending-turn-failure",
+		Question:   "Continue?",
+		AnswerText: "Continue",
+	})
+	if !errors.Is(err, persistenceErr) {
+		t.Fatalf("resume error = %v, want %v", err, persistenceErr)
+	}
+	agentMgr.mu.Lock()
+	promptCalls := len(agentMgr.capturedPromptCalls)
+	agentMgr.mu.Unlock()
+	if promptCalls != 0 {
+		t.Fatalf("prompt dispatch calls = %d, want none before successor persistence", promptCalls)
+	}
+	session, err := repo.GetTaskSession(ctx, "session-turn-failure")
+	if err != nil {
+		t.Fatalf("load session after persistence failure: %v", err)
+	}
+	if session.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("session state after persistence failure = %q, want waiting", session.State)
+	}
+}
+
+func TestResumeDetachedClarificationRejectsBeforeDispatchWhenAttemptMarkerFails(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-marker-failure", "session-marker-failure", "step-1")
+	seedExecutorRunning(t, repo, "session-marker-failure", "task-marker-failure", "exec-marker-failure")
+	if err := repo.UpdateTaskSessionState(
+		ctx,
+		"session-marker-failure",
+		models.TaskSessionStateWaitingForInput,
+		"",
+	); err != nil {
+		t.Fatalf("set session waiting: %v", err)
+	}
+
+	persistenceErr := errors.New("persist dispatch attempt marker")
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	svc := createEngineService(t, repo, newMockStepGetter(), agentMgr)
+	svc.turnService = failingReservedTurnAttemptMarker{
+		TurnService: &repoBackedTurnService{repo: repo},
+		err:         persistenceErr,
+	}
+
+	err := svc.ResumeDetachedClarification(ctx, clarification.DetachedClarificationResume{
+		TaskID:     "task-marker-failure",
+		SessionID:  "session-marker-failure",
+		PendingID:  "pending-marker-failure",
+		Question:   "Continue?",
+		AnswerText: "Continue",
+	})
+	if !errors.Is(err, persistenceErr) {
+		t.Fatalf("resume error = %v, want %v", err, persistenceErr)
+	}
+	agentMgr.mu.Lock()
+	promptCalls := len(agentMgr.capturedPromptCalls)
+	agentMgr.mu.Unlock()
+	if promptCalls != 0 {
+		t.Fatalf("prompt dispatch calls = %d, want none before attempt marker persistence", promptCalls)
+	}
+	if pending := svc.reservedPromptTurnID("session-marker-failure"); pending != "" {
+		t.Fatalf("private reservation = %q, want rollback after marker failure", pending)
+	}
+	turns, err := repo.ListTurnsBySession(ctx, "session-marker-failure")
+	if err != nil {
+		t.Fatalf("list turns after marker failure: %v", err)
+	}
+	if len(turns) != 0 {
+		t.Fatalf("turns after marker failure = %#v, want rolled-back reservation", turns)
+	}
+	session, err := repo.GetTaskSession(ctx, "session-marker-failure")
+	if err != nil {
+		t.Fatalf("load session after marker failure: %v", err)
+	}
+	if session.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("session state after marker failure = %q, want waiting", session.State)
+	}
+}
+
+func TestResumeDetachedClarificationUsesBoundedDispatchOnlyPrompt(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-bounded", "session-bounded", "step-1")
+	seedExecutorRunning(t, repo, "session-bounded", "task-bounded", "exec-bounded")
+	if err := repo.UpdateTaskSessionState(
+		context.Background(),
+		"session-bounded",
+		models.TaskSessionStateWaitingForInput,
+		"",
+	); err != nil {
+		t.Fatalf("set session waiting: %v", err)
+	}
+	type promptObservation struct {
+		dispatchOnly bool
+		hasDeadline  bool
+	}
+	observed := make(chan promptObservation, 1)
+	release := make(chan struct{})
+	defer close(release)
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	agentMgr.promptAgentFunc = func(
+		ctx context.Context,
+		_ string,
+		_ string,
+		_ []v1.MessageAttachment,
+		dispatchOnly bool,
+	) (*executor.PromptResult, error) {
+		_, hasDeadline := ctx.Deadline()
+		observed <- promptObservation{dispatchOnly: dispatchOnly, hasDeadline: hasDeadline}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-release:
+			return &executor.PromptResult{}, nil
+		}
+	}
+	svc := createEngineService(t, repo, newMockStepGetter(), agentMgr)
+	resumeCtx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	done := make(chan error, 1)
+	go func() {
+		done <- svc.ResumeDetachedClarification(resumeCtx, clarification.DetachedClarificationResume{
+			TaskID:     "task-bounded",
+			SessionID:  "session-bounded",
+			PendingID:  "pending-bounded",
+			Question:   "Continue?",
+			AnswerText: "Continue",
+		})
+	}()
+
+	var observation promptObservation
+	select {
+	case observation = <-observed:
+	case err := <-done:
+		t.Fatalf("resume returned before prompt dispatch: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for prompt dispatch")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("resume error = %v, want context cancellation", err)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("detached resume ignored cancellation before prompt acknowledgment")
+	}
+	if !observation.dispatchOnly || !observation.hasDeadline {
+		t.Fatalf("prompt observation = %+v, want dispatch-only with deadline", observation)
+	}
+}
+
+func TestResumeDetachedClarificationDoesNotTreatAsyncRecoveryAsAcknowledgment(t *testing.T) {
+	repo := setupTestRepo(t)
+	promptEntered := make(chan struct{}, 1)
+	promptRelease := make(chan struct{})
+	t.Cleanup(func() { close(promptRelease) })
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	agentMgr.promptAgentFunc = func(
+		context.Context,
+		string,
+		string,
+		[]v1.MessageAttachment,
+		bool,
+	) (*executor.PromptResult, error) {
+		promptEntered <- struct{}{}
+		<-promptRelease
+		return &executor.PromptResult{}, nil
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	seedTaskAndSession(t, repo, "task-busy", "session-busy", models.TaskSessionStateRunning)
+	seedExecutorRunning(t, repo, "session-busy", "task-busy", "exec-busy")
+
+	err := svc.ResumeDetachedClarification(context.Background(), clarification.DetachedClarificationResume{
+		TaskID:     "task-busy",
+		SessionID:  "session-busy",
+		PendingID:  "pending-busy",
+		Question:   "Continue?",
+		AnswerText: "Continue",
+	})
+	if err == nil {
+		t.Fatal("detached resume reported acknowledgment after only an asynchronous retry handoff")
+	}
+	select {
+	case <-promptEntered:
+		t.Fatal("bounded detached resume must not hand an unacknowledged retry to the async queue")
+	default:
+	}
 }
 
 func TestHandleClarificationStaleDismissed(t *testing.T) {
@@ -404,6 +918,98 @@ func TestPauseForClarificationInput_SilentlyCancelsTurnWithoutWorkflowTransition
 	}
 }
 
+func TestPauseForClarificationInput_ContinuesHardPauseAfterDetachFailure(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
+	seedPendingClarificationMessage(t, repo, "t1", "s1")
+
+	wantErr := errors.New("detach failed")
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createEngineService(t, repo, newMockStepGetter(), agentMgr)
+	svc.SetClarificationCanceller(&failingDetachClarificationCanceller{err: wantErr})
+	svc.turnService = &repoBackedTurnService{repo: repo}
+	if _, err := svc.messageQueue.QueueMessageWithMetadata(
+		ctx, "s1", "t1", "peer-during-detach-failure", "user-1", "user-1", false, nil, map[string]interface{}{},
+	); err != nil {
+		t.Fatalf("queue peer: %v", err)
+	}
+
+	detached, err := svc.PauseForClarificationInput(ctx, "s1")
+	if detached != 0 || !errors.Is(err, wantErr) {
+		t.Fatalf("PauseForClarificationInput = %d, %v; want 0 and detach error", detached, err)
+	}
+	if got := agentMgr.cancelAgentCalls.Load(); got != 1 {
+		t.Fatalf("detach failure must still hard-pause the active turn, got %d cancel calls", got)
+	}
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if session.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("expected session waiting for input after detach failure, got %q", session.State)
+	}
+	if got := svc.messageQueue.GetStatus(ctx, "s1").Count; got != 1 {
+		t.Fatalf("detach failure drained queued peer message: count=%d, want 1", got)
+	}
+}
+
+func TestPauseForClarificationInput_RetriesHardPauseAfterSuccessfulDetach(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
+	seedPendingClarificationMessage(t, repo, "t1", "s1")
+	requireNoError(t, repo.UpdateTaskSessionState(
+		ctx,
+		"s1",
+		models.TaskSessionStateWaitingForInput,
+		"",
+	))
+
+	wantErr := errors.New("cancel temporarily unavailable")
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	agentMgr.cancelAgentFunc = func(context.Context, string) error {
+		if agentMgr.cancelAgentCalls.Load() == 1 {
+			return wantErr
+		}
+		return nil
+	}
+	store := clarification.NewStore(time.Minute)
+	store.CreateRequest(&clarification.Request{
+		PendingID: "pending-s1",
+		SessionID: "s1",
+	})
+	svc := createEngineService(t, repo, newMockStepGetter(), agentMgr)
+	svc.SetClarificationCanceller(clarification.NewCanceller(store, repo, nil, testLogger()))
+	svc.turnService = &repoBackedTurnService{repo: repo}
+
+	detached, err := svc.PauseForClarificationInput(ctx, "s1")
+	if detached != 1 || !errors.Is(err, wantErr) {
+		t.Fatalf("first PauseForClarificationInput = %d, %v; want 1 and cancel error", detached, err)
+	}
+	pending, err := repo.FindActiveClarificationMessagesBySessionID(ctx, "s1")
+	if err != nil || len(pending) != 1 || pending[0].Metadata["agent_disconnected"] != true {
+		t.Fatalf("detached clarification authority = %#v, %v; want one pending detached row", pending, err)
+	}
+	detached, err = svc.PauseForClarificationInput(ctx, "s1")
+	if err != nil {
+		t.Fatalf("retry PauseForClarificationInput: %v", err)
+	}
+	if detached != 0 {
+		t.Fatalf("retry detached bundles = %d, want 0 for already-detached row", detached)
+	}
+	if got := agentMgr.cancelAgentCalls.Load(); got != 2 {
+		t.Fatalf("hard-pause cancel calls = %d, want retry after successful detach", got)
+	}
+	if turn, turnErr := repo.GetActiveTurnBySessionID(ctx, "s1"); turnErr != nil && !errors.Is(turnErr, sql.ErrNoRows) {
+		t.Fatalf("get active turn: %v", turnErr)
+	} else if turn != nil {
+		t.Fatalf("retry left clarification turn active: %#v", turn)
+	}
+}
+
 func TestPauseForClarificationInput_CancelsWhileSessionAlreadyWaiting(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -432,6 +1038,97 @@ func TestPauseForClarificationInput_CancelsWhileSessionAlreadyWaiting(t *testing
 	}
 	if got := agentMgr.cancelAgentCalls.Load(); got != 1 {
 		t.Fatalf("waiting ask session must still cancel active agent, got %d calls", got)
+	}
+}
+
+func TestPauseForClarificationInput_DoesNotCancelSuccessorCreatedDuringDetach(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
+	seedPendingClarificationMessage(t, repo, "t1", "s1")
+
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	canceller := &blockingClarificationCanceller{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	var releaseOnce sync.Once
+	releaseDetach := func() { releaseOnce.Do(func() { close(canceller.release) }) }
+	t.Cleanup(releaseDetach)
+	svc := createEngineService(t, repo, newMockStepGetter(), agentMgr)
+	svc.SetClarificationCanceller(canceller)
+	svc.turnService = &repoBackedTurnService{repo: repo}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := svc.PauseForClarificationInput(ctx, "s1")
+		done <- err
+	}()
+	select {
+	case <-canceller.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for clarification detach")
+	}
+	if _, err := svc.turnService.StartTurn(ctx, "s1"); err != nil {
+		t.Fatalf("start successor turn: %v", err)
+	}
+	releaseDetach()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("pause after successor turn: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for clarification pause")
+	}
+	if got := agentMgr.cancelAgentCalls.Load(); got != 0 {
+		t.Fatalf("stale clarification pause cancelled successor: %d calls", got)
+	}
+}
+
+func TestPauseForClarificationInput_DoesNotCancelFirstTurnCreatedDuringDetach(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
+
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	canceller := &blockingClarificationCanceller{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	var releaseOnce sync.Once
+	releaseDetach := func() { releaseOnce.Do(func() { close(canceller.release) }) }
+	t.Cleanup(releaseDetach)
+	svc := createEngineService(t, repo, newMockStepGetter(), agentMgr)
+	svc.SetClarificationCanceller(canceller)
+	svc.turnService = &repoBackedTurnService{repo: repo}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := svc.PauseForClarificationInput(ctx, "s1")
+		done <- err
+	}()
+	select {
+	case <-canceller.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for clarification detach")
+	}
+	if _, err := svc.turnService.StartTurn(ctx, "s1"); err != nil {
+		t.Fatalf("start first turn during detach: %v", err)
+	}
+	releaseDetach()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("pause after first turn: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for clarification pause")
+	}
+	if got := agentMgr.cancelAgentCalls.Load(); got != 0 {
+		t.Fatalf("stale clarification pause cancelled first turn: %d calls", got)
 	}
 }
 
@@ -653,30 +1350,397 @@ func TestHandleAgentStreamEvent_CancelsClarificationWatchdogs(t *testing.T) {
 	}
 }
 
-func TestClarificationWatchdog_ExpiresAndClearsEntry(t *testing.T) {
+func TestClarificationWatchdog_MatchingTurnDispatchesAndClearsEntry(t *testing.T) {
 	repo := setupTestRepo(t)
-	agentMgr := &mockAgentManager{isAgentRunning: true}
+	promptDone := make(chan struct{})
+	agentMgr := &mockAgentManager{
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+		promptDone:             promptDone,
+	}
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 	svc.clarificationWatchdogTimeout = 20 * time.Millisecond
 	t.Cleanup(func() { svc.cancelAllClarificationWatchdogs() })
 
-	seedTaskAndSession(t, repo, "t1", "s1", models.TaskSessionStateCompleted)
+	seedTaskAndSession(t, repo, "t1", "s1", models.TaskSessionStateWaitingForInput)
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-watchdog-positive")
+	turnService := &repoTurnService{repo: repo}
+	svc.turnService = turnService
+	clarificationTurn, err := turnService.StartTurn(context.Background(), "s1")
+	if err != nil {
+		t.Fatalf("start clarification turn: %v", err)
+	}
 
 	event := bus.NewEvent("clarification.primary_answered", "test", map[string]any{
-		"session_id":  "s1",
-		"task_id":     "t1",
-		"pending_id":  "p1",
-		"question":    "Which approach?",
-		"answer_text": "User selected: Option A",
+		"session_id":            "s1",
+		"task_id":               "t1",
+		"pending_id":            "p1",
+		"clarification_turn_id": clarificationTurn.ID,
+		"question":              "Which approach?",
+		"answer_text":           "User selected: Option A",
 	})
 	if err := svc.handleClarificationPrimaryAnswered(context.Background(), event); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	time.Sleep(100 * time.Millisecond)
+	select {
+	case <-promptDone:
+	case <-time.After(time.Second):
+		t.Fatal("matching clarification watchdog did not dispatch a prompt")
+	}
 
+	deadline := time.Now().Add(time.Second)
+	for countClarificationWatchdogs(svc) != 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
 	if got := countClarificationWatchdogs(svc); got != 0 {
 		t.Fatalf("expected watchdog map to be empty after timeout, got %d", got)
+	}
+}
+
+func TestClarificationWatchdogExpirationPreservesSuccessorEntry(t *testing.T) {
+	svc := &Service{}
+	key := svc.clarificationWatchdogKey("session-1", "pending-1")
+	expired := &clarificationWatchdogEntry{}
+	successor := &clarificationWatchdogEntry{}
+	svc.clarificationWatchdogs.Store(key, successor)
+	t.Cleanup(func() { svc.clarificationWatchdogs.Delete(key) })
+
+	svc.runClarificationWatchdog(
+		context.Background(), key, expired, clarificationAnsweredData{}, 0,
+	)
+
+	current, ok := svc.clarificationWatchdogs.Load(key)
+	if !ok || current != successor {
+		t.Fatalf("successor watchdog = %v, %v; want preserved successor %p", current, ok, successor)
+	}
+}
+
+type blockingClarificationTurnLookup struct {
+	*repoTurnService
+	entered chan context.Context
+	release chan struct{}
+}
+
+func (s *blockingClarificationTurnLookup) GetActiveTurn(
+	ctx context.Context,
+	_ string,
+) (*models.Turn, error) {
+	s.entered <- ctx
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-s.release:
+		return nil, nil
+	}
+}
+
+func TestClarificationWatchdogCancellationInterruptsFallbackLookup(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestServiceWithScheduler(
+		repo,
+		newMockStepGetter(),
+		newMockTaskRepo(),
+		&mockAgentManager{isAgentRunning: true},
+	)
+	lookup := &blockingClarificationTurnLookup{
+		repoTurnService: &repoTurnService{repo: repo},
+		entered:         make(chan context.Context, 1),
+		release:         make(chan struct{}),
+	}
+	svc.turnService = lookup
+	svc.clarificationWatchdogTimeout = time.Millisecond
+	defer close(lookup.release)
+
+	svc.scheduleClarificationWatchdog(clarificationAnsweredData{
+		TaskID: "task-watchdog-shutdown", SessionID: "session-watchdog-shutdown",
+		PendingID: "pending-watchdog-shutdown", ClarificationTurnID: "turn-watchdog-shutdown",
+	})
+
+	var lookupCtx context.Context
+	select {
+	case lookupCtx = <-lookup.entered:
+	case <-time.After(time.Second):
+		t.Fatal("watchdog fallback did not enter turn lookup")
+	}
+	svc.cancelAllClarificationWatchdogs()
+	select {
+	case <-lookupCtx.Done():
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("watchdog cancellation did not interrupt fallback turn lookup")
+	}
+}
+
+func TestClarificationWatchdogRecoveryIgnoresOwnCancelActivity(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID    = "task-watchdog-own-cancel"
+		sessionID = "session-watchdog-own-cancel"
+		execution = "exec-watchdog-own-cancel"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+	seedExecutorRunning(t, repo, sessionID, taskID, execution)
+
+	promptDone := make(chan struct{})
+	var svc *Service
+	agentMgr := &mockAgentManager{
+		isAgentRunning: true,
+		promptDone:     promptDone,
+	}
+	agentMgr.cancelAgentFunc = func(cancelCtx context.Context, _ string) error {
+		svc.handleAgentStreamEvent(cancelCtx, &lifecycle.AgentStreamEventPayload{
+			TaskID:      taskID,
+			SessionID:   sessionID,
+			ExecutionID: execution,
+			Data: &lifecycle.AgentStreamEventData{
+				Type:             "session_info",
+				PromptGeneration: 1,
+			},
+		})
+		return nil
+	}
+	agentMgr.currentPromptExecutionID = execution
+	agentMgr.currentPromptGeneration.Store(1)
+	svc = createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.turnService = &repoTurnService{repo: repo}
+	clarificationTurn, err := svc.turnService.StartTurn(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("start clarification turn: %v", err)
+	}
+
+	watchCtx, cancelWatchdog := context.WithCancel(context.Background())
+	defer cancelWatchdog()
+	pendingID := "pending-watchdog-own-cancel"
+	entry := &clarificationWatchdogEntry{cancel: cancelWatchdog}
+	key := svc.clarificationWatchdogKey(sessionID, pendingID)
+	svc.clarificationWatchdogs.Store(key, entry)
+	t.Cleanup(func() { svc.cancelAllClarificationWatchdogs() })
+
+	recovered := svc.retryClarificationAfterCancel(
+		watchCtx,
+		clarificationAnsweredData{
+			TaskID: taskID, SessionID: sessionID, PendingID: pendingID,
+			ClarificationTurnID: clarificationTurn.ID,
+		},
+		"the clarification answer",
+		fmt.Errorf("wrapped: %w", ErrAgentPromptInProgress),
+	)
+	if !recovered {
+		t.Fatal("clarification watchdog recovery did not complete after its own cancellation activity")
+	}
+	select {
+	case <-promptDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("clarification answer was not handed off after recovery")
+	}
+	if err := watchCtx.Err(); err != nil {
+		t.Fatalf("watchdog recovery context was cancelled by its own stream activity: %v", err)
+	}
+	if got := len(agentMgr.capturedPrompts); got != 1 {
+		t.Fatalf("clarification replacement prompts = %d, want exactly 1", got)
+	}
+}
+
+func TestClarificationWatchdogRecoveryCancelsOnIndependentActivity(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID    = "task-watchdog-independent-activity"
+		sessionID = "session-watchdog-independent-activity"
+		execution = "exec-watchdog-independent-activity"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+	seedExecutorRunning(t, repo, sessionID, taskID, execution)
+
+	cancelEntered := make(chan struct{}, 1)
+	releaseCancel := make(chan struct{})
+	var releaseCancelOnce sync.Once
+	release := func() {
+		releaseCancelOnce.Do(func() { close(releaseCancel) })
+	}
+	promptDone := make(chan struct{})
+	agentMgr := &mockAgentManager{
+		isAgentRunning:           true,
+		promptDone:               promptDone,
+		cancelAgentBlock:         releaseCancel,
+		cancelAgentEntered:       cancelEntered,
+		currentPromptExecutionID: execution,
+	}
+	agentMgr.currentPromptGeneration.Store(1)
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.messageCreator = &mockMessageCreator{}
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.turnService = &repoTurnService{repo: repo}
+	clarificationTurn, err := svc.turnService.StartTurn(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("start clarification turn: %v", err)
+	}
+
+	watchCtx, cancelWatchdog := context.WithCancel(context.Background())
+	defer cancelWatchdog()
+	pendingID := "pending-watchdog-independent-activity"
+	entry := &clarificationWatchdogEntry{cancel: cancelWatchdog}
+	key := svc.clarificationWatchdogKey(sessionID, pendingID)
+	svc.clarificationWatchdogs.Store(key, entry)
+	t.Cleanup(func() {
+		release()
+		svc.cancelAllClarificationWatchdogs()
+	})
+
+	recoveryDone := make(chan bool, 1)
+	go func() {
+		recoveryDone <- svc.retryClarificationAfterCancel(
+			watchCtx,
+			clarificationAnsweredData{
+				TaskID: taskID, SessionID: sessionID, PendingID: pendingID,
+				ClarificationTurnID: clarificationTurn.ID,
+			},
+			"the clarification answer",
+			fmt.Errorf("wrapped: %w", ErrAgentPromptInProgress),
+		)
+	}()
+
+	select {
+	case <-cancelEntered:
+	case <-time.After(time.Second):
+		t.Fatal("silent cancellation did not reach the agent")
+	}
+
+	// This frame is from a newer prompt generation on the same execution. It
+	// must remain authoritative even while the fallback cancellation is blocked.
+	svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:      taskID,
+		SessionID:   sessionID,
+		ExecutionID: execution,
+		Data: &lifecycle.AgentStreamEventData{
+			Type:             "session_info",
+			PromptGeneration: 2,
+		},
+	})
+	if watchCtx.Err() == nil {
+		t.Fatal("independent stream activity did not cancel the watchdog")
+	}
+
+	release()
+	select {
+	case <-recoveryDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("silent cancellation did not settle")
+	}
+}
+
+func TestClarificationWatchdogRecoveryCancelsOnSameExecutionMessageActivity(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID    = "task-watchdog-same-execution-message"
+		sessionID = "session-watchdog-same-execution-message"
+		execution = "exec-watchdog-same-execution-message"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+	seedExecutorRunning(t, repo, sessionID, taskID, execution)
+
+	cancelEntered := make(chan struct{}, 1)
+	releaseCancel := make(chan struct{})
+	var releaseCancelOnce sync.Once
+	release := func() {
+		releaseCancelOnce.Do(func() { close(releaseCancel) })
+	}
+	agentMgr := &mockAgentManager{
+		isAgentRunning:           true,
+		cancelAgentBlock:         releaseCancel,
+		cancelAgentEntered:       cancelEntered,
+		currentPromptExecutionID: execution,
+	}
+	agentMgr.currentPromptGeneration.Store(1)
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.messageCreator = &mockMessageCreator{}
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.turnService = &repoTurnService{repo: repo}
+	clarificationTurn, err := svc.turnService.StartTurn(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("start clarification turn: %v", err)
+	}
+
+	watchCtx, cancelWatchdog := context.WithCancel(context.Background())
+	defer cancelWatchdog()
+	pendingID := "pending-watchdog-same-execution-message"
+	entry := &clarificationWatchdogEntry{cancel: cancelWatchdog}
+	key := svc.clarificationWatchdogKey(sessionID, pendingID)
+	svc.clarificationWatchdogs.Store(key, entry)
+	t.Cleanup(func() {
+		release()
+		svc.cancelAllClarificationWatchdogs()
+	})
+
+	recoveryDone := make(chan bool, 1)
+	go func() {
+		recoveryDone <- svc.retryClarificationAfterCancel(
+			watchCtx,
+			clarificationAnsweredData{
+				TaskID: taskID, SessionID: sessionID, PendingID: pendingID,
+				ClarificationTurnID: clarificationTurn.ID,
+			},
+			"the clarification answer",
+			fmt.Errorf("wrapped: %w", ErrAgentPromptInProgress),
+		)
+	}()
+
+	select {
+	case <-cancelEntered:
+	case <-time.After(time.Second):
+		t.Fatal("silent cancellation did not reach the agent")
+	}
+
+	// A same-execution message frame is still independent activity. Matching the
+	// cancellation's execution and prompt generation does not prove that a
+	// message frame came from the cancellation, so it must cancel recovery.
+	svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:      taskID,
+		SessionID:   sessionID,
+		ExecutionID: execution,
+		Data: &lifecycle.AgentStreamEventData{
+			Type:             "message_streaming",
+			PromptGeneration: 1,
+		},
+	})
+	if watchCtx.Err() == nil {
+		t.Fatal("same-execution message activity did not cancel the watchdog")
+	}
+
+	release()
+	select {
+	case <-recoveryDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("silent cancellation did not settle")
+	}
+}
+
+func TestClarificationRecoveryCancellationFrameRejectsNormalAgentActivity(t *testing.T) {
+	for _, eventType := range []string{"message_streaming", "thinking_streaming", agentEventToolCall, agentEventToolUpdate} {
+		t.Run(eventType, func(t *testing.T) {
+			if clarificationRecoveryCancellationFrame(&lifecycle.AgentStreamEventPayload{
+				Data: &lifecycle.AgentStreamEventData{Type: eventType},
+			}) {
+				t.Fatalf("%q was classified as recovery cancellation activity", eventType)
+			}
+		})
+	}
+
+	if !clarificationRecoveryCancellationFrame(&lifecycle.AgentStreamEventPayload{
+		Data: &lifecycle.AgentStreamEventData{Type: "session_info"},
+	}) {
+		t.Fatal("session_info was not classified as recovery cancellation activity")
+	}
+	if !clarificationRecoveryCancellationFrame(&lifecycle.AgentStreamEventPayload{
+		Data: &lifecycle.AgentStreamEventData{
+			Type: agentEventComplete,
+			Data: map[string]interface{}{"stop_reason": "cancelled"},
+		},
+	}) {
+		t.Fatal("cancelled complete was not classified as recovery cancellation activity")
 	}
 }
 
@@ -718,6 +1782,12 @@ func TestRetryClarificationAfterCancel_DoesNotStarveUserCancel(t *testing.T) {
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
 	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+	turnService := &repoTurnService{repo: repo}
+	svc.turnService = turnService
+	clarificationTurn, err := turnService.StartTurn(ctx, "session1")
+	if err != nil {
+		t.Fatalf("start clarification turn: %v", err)
+	}
 
 	// Kick off the clarification-timeout recovery. Its silent cancel succeeds
 	// (mock CancelAgent returns nil), then it hands the retry prompt to the
@@ -726,7 +1796,7 @@ func TestRetryClarificationAfterCancel_DoesNotStarveUserCancel(t *testing.T) {
 	recoveryDone := make(chan struct{})
 	go func() {
 		svc.retryClarificationAfterCancel(ctx, clarificationAnsweredData{
-			TaskID: "task1", SessionID: "session1",
+			TaskID: "task1", SessionID: "session1", ClarificationTurnID: clarificationTurn.ID,
 		}, "the clarification answer", fmt.Errorf("wrap: %w", ErrAgentPromptInProgress))
 		close(recoveryDone)
 	}()

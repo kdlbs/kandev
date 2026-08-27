@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { toKanbanTask, type TaskLike } from "./map-task";
+import { toKanbanTask, preserveOmittedExecutorFields, type TaskLike } from "./map-task";
 
 /**
  * Parity matrix: the HTTP DTO and the WS payload describe the same task from
@@ -15,7 +15,7 @@ const BASE_SCALARS = {
   description: "Do it well",
   position: 3,
   state: "TODO" as const,
-  priority: 0,
+  priority: "critical",
   is_ephemeral: false,
   created_at: "2026-04-22T10:00:00Z",
   updated_at: "2026-04-22T10:05:00Z",
@@ -117,6 +117,34 @@ describe("toKanbanTask — HTTP DTO / WS payload parity", () => {
     expect(toKanbanTask(wsPayload()).repositoryId).toBe("repo-a");
   });
 
+  it("preserves branch policy snapshot fields through HTTP and WS mapping", () => {
+    const repositories = [
+      {
+        repository_id: "repo-a",
+        base_branch: "main",
+        checkout_branch: "feature/ship-it",
+        branch_policy_id: "policy-a",
+        branch_policy_name: "Feature branches",
+        branch_policy_base_branch: "main",
+        branch_policy_branch_template: "feature/{title}-{suffix}",
+        branch_policy_pull_request_target: "develop",
+      },
+    ];
+    const http = toKanbanTask(httpDTO({ repositories }));
+    const ws = toKanbanTask(wsPayload({ repositories }));
+
+    expect(http.repositories?.[0]).toMatchObject({
+      branch_policy_id: "policy-a",
+      branch_policy_name: "Feature branches",
+      branch_policy_base_branch: "main",
+      branch_policy_branch_template: "feature/{title}-{suffix}",
+      branch_policy_pull_request_target: "develop",
+    });
+    expect(ws.repositories).toEqual(http.repositories);
+  });
+});
+
+describe("toKanbanTask — pending and status fields", () => {
   it("maps primary session pending action from HTTP and WS shapes", () => {
     const pendingAction = {
       primary_session_pending_action: "clarification",
@@ -179,6 +207,14 @@ describe("toKanbanTask — HTTP DTO / WS payload parity", () => {
     expect(http.statusSummary).toEqual(statusSummary);
     expect(ws.statusSummary).toEqual(statusSummary);
     expect(http).toEqual(ws);
+  });
+});
+
+describe("toKanbanTask — autopilot", () => {
+  it("preserves the immutable task creation mode for HTTP and websocket payloads", () => {
+    expect(toKanbanTask(httpDTO({ autopilot: true }))).toMatchObject({ autopilot: true });
+    expect(toKanbanTask(wsPayload({ autopilot: true }))).toMatchObject({ autopilot: true });
+    expect(toKanbanTask(httpDTO()).autopilot).toBeUndefined();
   });
 });
 
@@ -256,5 +292,59 @@ describe("toKanbanTask — state normalization", () => {
 
     expect(detached.parentTaskId).toBeUndefined();
     expect(detached.workspaceMode).toBe("shared_group");
+  });
+});
+
+describe("toKanbanTask priority", () => {
+  it("preserves the canonical priority from HTTP and WebSocket payloads", () => {
+    expect(toKanbanTask(httpDTO()).priority).toBe("critical");
+    expect(toKanbanTask(wsPayload()).priority).toBe("critical");
+  });
+});
+
+describe("preserveOmittedExecutorFields", () => {
+  const existing = toKanbanTask(
+    httpDTO({
+      primary_executor_id: "exec-1",
+      primary_executor_type: "worktree",
+      primary_executor_name: "Worktree",
+      is_remote_executor: false,
+    }),
+  );
+
+  it("backfills all four executor fields when the incoming task omits them", () => {
+    const incoming = toKanbanTask(
+      httpDTO({
+        primary_executor_id: undefined,
+        primary_executor_type: undefined,
+        primary_executor_name: undefined,
+        is_remote_executor: undefined,
+      }),
+    );
+
+    preserveOmittedExecutorFields(incoming, existing);
+
+    expect(incoming.primaryExecutorId).toBe("exec-1");
+    expect(incoming.primaryExecutorType).toBe("worktree");
+    expect(incoming.primaryExecutorName).toBe("Worktree");
+    expect(incoming.isRemoteExecutor).toBe(false);
+  });
+
+  it("leaves a real incoming executor value untouched", () => {
+    const incoming = toKanbanTask(
+      httpDTO({
+        primary_executor_id: "exec-2",
+        primary_executor_type: "ssh",
+        primary_executor_name: "Remote box",
+        is_remote_executor: true,
+      }),
+    );
+
+    preserveOmittedExecutorFields(incoming, existing);
+
+    expect(incoming.primaryExecutorId).toBe("exec-2");
+    expect(incoming.primaryExecutorType).toBe("ssh");
+    expect(incoming.primaryExecutorName).toBe("Remote box");
+    expect(incoming.isRemoteExecutor).toBe(true);
   });
 });

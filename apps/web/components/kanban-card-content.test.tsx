@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mockAppState = {
   workspaces: { activeId: "ws-1" },
-  kanban: { tasks: [] as Array<{ id: string; title: string }> },
+  kanban: { tasks: [] as Array<{ id: string; title: string; parentTaskId?: string }> },
+  kanbanMulti: { snapshots: {} as Record<string, { tasks: Array<{ id: string }> }> },
   taskPRs: { byTaskId: {} as Record<string, unknown> },
 };
 
@@ -20,7 +21,7 @@ vi.mock("@/components/gitlab/mr-task-icon", () => ({
 }));
 
 import { pluginRegistry } from "@/lib/plugins/registry";
-import { KanbanCardBody } from "./kanban-card-content";
+import { KanbanCardBody, renderTaskStatusIcon } from "./kanban-card-content";
 import type { Task } from "./kanban-card";
 
 const TASK: Task = {
@@ -34,6 +35,7 @@ const SECOND_PLUGIN_ID = "kandev-plugin-second";
 const TAGS_TEST_ID = "plugin-tags";
 const TAGS_SLOT = "task-card-tags";
 const INDICATOR_TEST_ID = "plugin-indicator";
+const TITLE_TEST_ID = "task-card-title";
 const SLOT_PROPS_TEXT = "task-1|ws-1|step-1";
 
 function SlotPropsProbe({ testId, slotProps }: { testId: string; slotProps?: unknown }) {
@@ -47,6 +49,7 @@ function SlotPropsProbe({ testId, slotProps }: { testId: string; slotProps?: unk
 
 afterEach(() => {
   cleanup();
+  mockAppState.kanban.tasks = [];
   pluginRegistry.unregisterPlugin(NOTES_PLUGIN_ID);
   pluginRegistry.unregisterPlugin(SECOND_PLUGIN_ID);
 });
@@ -66,6 +69,18 @@ describe("KanbanCardBody — task-card-indicators slot", () => {
     render(<KanbanCardBody task={TASK} repositoryChips={[]} />);
 
     expect(screen.getByTestId(INDICATOR_TEST_ID).textContent).toBe(SLOT_PROPS_TEXT);
+  });
+});
+
+describe("Kanban task status motion", () => {
+  it("animates the fallback running status on an HTML wrapper", () => {
+    const { container } = render(<>{renderTaskStatusIcon(TASK, true, false, false)}</>);
+    const animated = container.querySelector(".animate-spin");
+
+    expect(animated?.tagName).toBe("SPAN");
+    const svg = animated?.querySelector("svg");
+    expect(svg).not.toBeNull();
+    expect(svg?.classList.contains("animate-spin")).toBe(false);
   });
 });
 
@@ -139,7 +154,7 @@ describe("KanbanCardBody — task-card-tags slot", () => {
 
       render(<KanbanCardBody task={TASK} repositoryChips={[]} />);
 
-      expect(screen.getByTestId("task-card-title").textContent).toBe(TASK.title);
+      expect(screen.getByTestId(TITLE_TEST_ID).textContent).toBe(TASK.title);
       expect(screen.getByTestId(INDICATOR_TEST_ID)).toBeTruthy();
     } finally {
       consoleError.mockRestore();
@@ -150,7 +165,7 @@ describe("KanbanCardBody — task-card-tags slot", () => {
 describe("KanbanCardBody — linked PR/MR badges (AC30)", () => {
   it("renders both the PR badge and the MR badge, PR first", () => {
     const { container } = render(<KanbanCardBody task={TASK} repositoryChips={[]} />);
-    const title = screen.getByTestId("task-card-title");
+    const title = screen.getByTestId(TITLE_TEST_ID);
     const row = title.parentElement;
     expect(row).not.toBeNull();
     const prIcon = screen.getByTestId("pr-task-icon");
@@ -159,5 +174,26 @@ describe("KanbanCardBody — linked PR/MR badges (AC30)", () => {
     expect(container.contains(mrIcon)).toBe(true);
     // AC30: PR badge before MR badge in document order.
     expect(prIcon.compareDocumentPosition(mrIcon) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
+describe("KanbanCardBody — title hover card gating", () => {
+  it("does not mount a hover card trigger when enableTitleHover is unset (drag preview)", () => {
+    render(<KanbanCardBody task={TASK} repositoryChips={[]} />);
+    const title = screen.getByTestId(TITLE_TEST_ID);
+    expect(title.getAttribute("data-slot")).not.toBe("hover-card-trigger");
+  });
+
+  it("does not mount a hover card trigger for a childless task", () => {
+    render(<KanbanCardBody task={TASK} repositoryChips={[]} enableTitleHover />);
+    const title = screen.getByTestId(TITLE_TEST_ID);
+    expect(title.closest('[data-testid="task-title-preview-trigger"]')).toBeNull();
+  });
+
+  it("mounts the hover card trigger when an active direct subtask exists", () => {
+    mockAppState.kanban.tasks = [{ id: "child-1", title: "Child", parentTaskId: TASK.id }];
+    render(<KanbanCardBody task={TASK} repositoryChips={[]} enableTitleHover />);
+    const title = screen.getByTestId(TITLE_TEST_ID);
+    expect(title.closest('[data-testid="task-title-preview-trigger"]')).not.toBeNull();
   });
 });

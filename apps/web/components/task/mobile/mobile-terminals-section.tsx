@@ -1,131 +1,74 @@
 "use client";
 
 import { memo, useCallback, useState } from "react";
-import { IconPlus, IconTerminal2, IconX } from "@tabler/icons-react";
+import { IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
-import { stopUserShell } from "@/lib/api/domains/user-shell-api";
-import { shouldConfirmTerminalClose } from "@/lib/terminal/terminal-busy-registry";
 import { useUserShells } from "@/hooks/domains/session/use-user-shells";
 import { releaseAutoCreatedEnvironment } from "@/hooks/domains/session/use-mobile-terminals";
-import { CloseTerminalConfirmDialog } from "../close-terminal-confirm-dialog";
 import { MobilePillButton } from "./mobile-pill-button";
 import { MobilePickerSheet } from "./mobile-picker-sheet";
+import { MobileTerminalRow } from "./mobile-terminal-row";
 import { useMobileTerminalsContext } from "./mobile-terminals-context";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 import { useTranslation } from "react-i18next";
 
-function TerminalRow({
-  terminal,
-  isActive,
-  isRunning,
-  onSelect,
-  onAskClose,
-}: {
-  terminal: Terminal;
-  isActive: boolean;
-  isRunning: boolean;
-  onSelect: (id: string) => void;
-  onAskClose: (terminal: Terminal) => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={() => onSelect(terminal.id)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onSelect(terminal.id);
-        }
-      }}
-      data-testid={`mobile-terminal-row-${terminal.id}`}
-      className={`flex items-center gap-2 border px-2 py-2 rounded-md cursor-pointer select-none ${
-        isActive ? "border-primary/50 bg-card" : "border-transparent hover:bg-muted"
-      }`}
-    >
-      <IconTerminal2 className="h-4 w-4 text-muted-foreground shrink-0" />
-      <span className="text-sm truncate flex-1">{terminal.label}</span>
-      {isRunning && (
-        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 leading-none">
-          {t("task:running")}
-        </span>
-      )}
-      {terminal.closable && (
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label={t("task:close2", { label: terminal.label })}
-          className="cursor-pointer h-7 w-7"
-          onClick={(e) => {
-            e.stopPropagation();
-            onAskClose(terminal);
-          }}
-        >
-          <IconX className="h-4 w-4" />
-        </Button>
-      )}
-    </div>
-  );
-}
-
 type CloseHandlerArgs = {
-  sessionId: string | null;
   environmentId: string | null;
-  taskId: string | null;
   terminals: Terminal[];
-  terminalTabValue: string;
-  removeTerminal: (id: string) => void;
-  setRightPanelActiveTab: (sessionId: string, tab: string) => void;
+  destroyTerminal: (id: string) => Promise<boolean>;
+  addTerminal: () => void;
 };
 
 function useTerminalCloseHandler({
-  sessionId,
   environmentId,
-  taskId,
   terminals,
-  terminalTabValue,
-  removeTerminal,
-  setRightPanelActiveTab,
+  destroyTerminal,
+  addTerminal,
 }: CloseHandlerArgs) {
   const [pendingClose, setPendingClose] = useState<Terminal | null>(null);
 
   const closeTerminal = useCallback(
-    async (t: Terminal) => {
-      if (!sessionId) return;
-      try {
-        if (environmentId) await stopUserShell(environmentId, t.id, taskId ?? undefined);
-        if (terminalTabValue === t.id) {
-          const next = terminals.find((row) => row.id !== t.id);
-          if (next) setRightPanelActiveTab(sessionId, next.id);
-        }
-        removeTerminal(t.id);
-        if (environmentId && terminals.length <= 1) {
-          releaseAutoCreatedEnvironment(environmentId);
-        }
-        setPendingClose(null);
-      } catch (err) {
-        console.error("Failed to stop terminal:", err);
+    async (terminal: Terminal) => {
+      const succeeded = await destroyTerminal(terminal.id);
+      if (succeeded && environmentId && terminals.length <= 1) {
+        releaseAutoCreatedEnvironment(environmentId);
+        addTerminal();
       }
+      return succeeded;
     },
-    [
-      sessionId,
-      environmentId,
-      taskId,
-      terminals,
-      terminalTabValue,
-      removeTerminal,
-      setRightPanelActiveTab,
-    ],
+    [destroyTerminal, environmentId, terminals.length, addTerminal],
   );
 
   const handleConfirmClose = useCallback(async () => {
     if (!pendingClose) return;
-    await closeTerminal(pendingClose);
+    const terminal = pendingClose;
+    setPendingClose(null);
+    await closeTerminal(terminal);
   }, [pendingClose, closeTerminal]);
 
-  return { pendingClose, setPendingClose, handleConfirmClose, closeTerminal };
+  return { pendingClose, setPendingClose, handleConfirmClose };
+}
+
+function MobileTerminalsHeader({ count, onAdd }: { count: number; onAdd: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex items-center justify-between px-1">
+      <span className="text-xs font-medium text-muted-foreground">
+        {t("task:terminalCount", { count })}
+      </span>
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-7 gap-1 cursor-pointer"
+        onClick={onAdd}
+        data-testid="mobile-add-terminal"
+      >
+        <IconPlus className="h-4 w-4" />
+        {t("task:newTerminal")}
+      </Button>
+    </div>
+  );
 }
 
 const MobileTerminalsList = memo(function MobileTerminalsList({
@@ -136,21 +79,17 @@ const MobileTerminalsList = memo(function MobileTerminalsList({
   onClose: () => void;
 }) {
   const { t } = useTranslation();
-  const { terminals, terminalTabValue, addTerminal, removeTerminal, environmentId } =
+  const { terminals, terminalTabValue, addTerminal, destroyTerminal, environmentId } =
     useMobileTerminalsContext();
   const setRightPanelActiveTab = useAppStore((s) => s.setRightPanelActiveTab);
   const taskId = useAppStore((s) => s.tasks?.activeTaskId ?? null);
   const { shells } = useUserShells(environmentId, taskId);
-  const { pendingClose, setPendingClose, handleConfirmClose, closeTerminal } =
-    useTerminalCloseHandler({
-      sessionId,
-      environmentId,
-      taskId,
-      terminals,
-      terminalTabValue,
-      removeTerminal,
-      setRightPanelActiveTab,
-    });
+  const { pendingClose, setPendingClose, handleConfirmClose } = useTerminalCloseHandler({
+    environmentId,
+    terminals,
+    destroyTerminal,
+    addTerminal,
+  });
 
   const isShellRunning = useCallback(
     (id: string) => shells.find((s) => s.terminalId === id)?.running ?? false,
@@ -167,17 +106,9 @@ const MobileTerminalsList = memo(function MobileTerminalsList({
 
   const handleAskClose = useCallback(
     (terminal: Terminal) => {
-      const needsConfirm = shouldConfirmTerminalClose(terminal.id, {
-        type: terminal.type,
-        kind: terminal.kind,
-      });
-      if (needsConfirm) {
-        setPendingClose(terminal);
-        return;
-      }
-      void closeTerminal(terminal);
+      setPendingClose(terminal);
     },
-    [closeTerminal, setPendingClose],
+    [setPendingClose],
   );
 
   if (!sessionId) {
@@ -190,21 +121,7 @@ const MobileTerminalsList = memo(function MobileTerminalsList({
 
   return (
     <div className="flex flex-col gap-2 px-1">
-      <div className="flex items-center justify-between px-1">
-        <span className="text-xs font-medium text-muted-foreground">
-          {t("task:terminalCount", { count: terminals.length })}
-        </span>
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-7 gap-1 cursor-pointer"
-          onClick={() => addTerminal()}
-          data-testid="mobile-add-terminal"
-        >
-          <IconPlus className="h-4 w-4" />
-          {t("task:newTerminal")}
-        </Button>
-      </div>
+      <MobileTerminalsHeader count={terminals.length} onAdd={addTerminal} />
       <div className="flex flex-col gap-0.5">
         {terminals.length === 0 && (
           <div className="text-xs text-muted-foreground px-2 py-4 text-center">
@@ -212,24 +129,20 @@ const MobileTerminalsList = memo(function MobileTerminalsList({
           </div>
         )}
         {terminals.map((t) => (
-          <TerminalRow
+          <MobileTerminalRow
             key={t.id}
             terminal={t}
             isActive={t.id === terminalTabValue}
             isRunning={isShellRunning(t.id)}
+            isConfirming={pendingClose?.id === t.id}
             onSelect={handleSelect}
             onAskClose={handleAskClose}
+            onCancelClose={() => setPendingClose(null)}
+            onClose={() => setPendingClose(null)}
+            onConfirmClose={handleConfirmClose}
           />
         ))}
       </div>
-      <CloseTerminalConfirmDialog
-        open={pendingClose !== null}
-        terminalName={pendingClose?.label || t("task:terminal")}
-        onOpenChange={(open) => {
-          if (!open) setPendingClose(null);
-        }}
-        onConfirm={handleConfirmClose}
-      />
     </div>
   );
 });

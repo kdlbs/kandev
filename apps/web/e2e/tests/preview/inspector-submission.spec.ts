@@ -46,9 +46,9 @@ async function openPreview(
 
   const session = await openTaskSession(testPage, title);
   await session.waitForChatIdle({ timeout: 30_000 });
-  const openBrowserPreview = testPage.getByRole("button", { name: /open browser preview/i });
-  await expect(openBrowserPreview).toBeVisible();
-  await openBrowserPreview.click();
+  const startDevPreview = testPage.getByTestId("dev-server-preview-toggle-center");
+  await expect(startDevPreview).toBeVisible();
+  await startDevPreview.click();
 
   const urlInput = testPage.locator('[placeholder*="localhost"], [placeholder*="3000"]').first();
   await expect(urlInput).toBeVisible();

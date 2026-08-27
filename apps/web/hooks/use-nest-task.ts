@@ -5,6 +5,7 @@ import { toast } from "@/lib/toast/sonner";
 import { detachTask, updateTask } from "@/lib/api";
 import { useAppStoreApi } from "@/components/state-provider";
 import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
+import { t } from "@/lib/i18n";
 
 type StoreApi = ReturnType<typeof useAppStoreApi>;
 type SnapshotTask = WorkflowSnapshotData["tasks"][number];
@@ -127,7 +128,7 @@ export function useNestTask() {
         }
       } catch (error) {
         rollbackParent(op);
-        toast.error(error instanceof Error ? error.message : "Failed to nest task");
+        toast.error(error instanceof Error ? error.message : t("task:failedToNestTask"));
       }
     },
     [store],

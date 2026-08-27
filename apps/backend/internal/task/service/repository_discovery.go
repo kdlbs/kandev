@@ -349,9 +349,17 @@ func (s *Service) listRemoteBranchesIfApplicable(ctx context.Context, repoID str
 	if repo.SourceType == sourceTypeLocal || repo.ProviderOwner == "" || repo.ProviderName == "" {
 		return nil, false, nil
 	}
-	branches, err := s.remoteBranchLister.ListRepoBranches(
-		ctx, repo.WorkspaceID, repo.ProviderOwner, repo.ProviderName,
-	)
+	branches, err := s.remoteBranchLister.ListRepoBranches(ctx, RemoteBranchSource{
+		WorkspaceID:          repo.WorkspaceID,
+		Provider:             repo.Provider,
+		ProviderHost:         repo.ProviderHost,
+		ProviderScope:        repo.ProviderScope,
+		ProviderRepositoryID: repo.ProviderRepoID,
+		Owner:                repo.ProviderOwner,
+		Name:                 repo.ProviderName,
+		RemoteURL:            repo.RemoteURL,
+		DefaultBranch:        repo.DefaultBranch,
+	})
 	return branches, true, err
 }
 

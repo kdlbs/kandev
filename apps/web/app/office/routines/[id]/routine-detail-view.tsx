@@ -1,9 +1,8 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import Link from "@/components/routing/app-link";
 import { useRouter } from "@/lib/routing/client-router";
-import { IconChevronRight, IconPlayerPlay, IconDeviceFloppy } from "@tabler/icons-react";
+import { IconPlayerPlay, IconDeviceFloppy } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
@@ -12,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { toast } from "@/lib/toast/sonner";
 import { useAppStore } from "@/components/state-provider";
+import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
 import {
   updateRoutine,
   runRoutine,
@@ -20,7 +20,7 @@ import {
 } from "@/lib/api/domains/office-api";
 import type { Routine, RoutineTrigger } from "@/lib/state/slices/office/types";
 import { timeAgo } from "@/lib/utils/time";
-import { OfficeTopbarPortal } from "../../components/office-topbar-portal";
+import { useOfficeTopbar } from "../../components/office-topbar-context";
 import { useTranslation } from "react-i18next";
 
 // Lift the form state out of the component so the file stays under the
@@ -72,7 +72,7 @@ type RoutineDetailViewProps = {
 export function RoutineDetailView({ initialRoutine, initialTriggers }: RoutineDetailViewProps) {
   const { t } = useTranslation();
   const router = useRouter();
-  const agents = useAppStore((s) => s.office.agentProfiles);
+  const agents = useAppStore(selectOfficeAgentProfiles);
   const [routine] = useState(initialRoutine);
   const [triggers, setTriggers] = useState(initialTriggers);
   const [draft, setDraft] = useState<DraftState>(buildDraft(initialRoutine, initialTriggers));
@@ -117,34 +117,30 @@ export function RoutineDetailView({ initialRoutine, initialTriggers }: RoutineDe
     }
   }, [routine.id]);
 
-  return (
-    <>
-      <OfficeTopbarPortal>
-        <Link
-          href="/office/routines"
-          className="text-sm text-muted-foreground hover:text-foreground cursor-pointer"
-        >
-          {t("office:routines")}
-        </Link>
-        <IconChevronRight className="h-3.5 w-3.5 text-muted-foreground/60" />
-        <span className="text-sm font-medium truncate">{routine.name}</span>
-        <div className="ml-auto flex gap-2">
-          <Button size="sm" variant="outline" onClick={handleRunNow} className="cursor-pointer">
-            <IconPlayerPlay className="h-4 w-4 mr-1" /> {t("office:runNow")}
-          </Button>
-          <Button size="sm" onClick={handleSave} disabled={saving} className="cursor-pointer">
-            <IconDeviceFloppy className="h-4 w-4 mr-1" />{" "}
-            {saving ? t("office:savingEllipsis") : t("common:save")}
-          </Button>
-        </div>
-      </OfficeTopbarPortal>
+  useOfficeTopbar({
+    // The draft is the live name; `routine` is frozen at mount, so a saved
+    // rename would otherwise keep the old title until a reload.
+    title: draft.name,
+    parents: [{ label: t("office:routines"), href: "/office/routines" }],
+    actions: (
+      <>
+        <Button size="sm" variant="outline" onClick={handleRunNow} className="cursor-pointer">
+          <IconPlayerPlay className="h-4 w-4 mr-1" /> {t("office:runNow")}
+        </Button>
+        <Button size="sm" onClick={handleSave} disabled={saving} className="cursor-pointer">
+          <IconDeviceFloppy className="h-4 w-4 mr-1" />{" "}
+          {saving ? t("office:savingEllipsis") : t("common:save")}
+        </Button>
+      </>
+    ),
+  });
 
-      <div className="p-6 space-y-6 max-w-3xl">
-        <DetailGeneralCard draft={draft} update={update} agents={agents} />
-        <DetailTriggerCard draft={draft} update={update} />
-        <DetailReadOnlyCard lastFiredAt={lastFired} nextRunAt={cronTrigger?.nextRunAt ?? null} />
-      </div>
-    </>
+  return (
+    <div className="p-6 space-y-6 max-w-3xl">
+      <DetailGeneralCard draft={draft} update={update} agents={agents} />
+      <DetailTriggerCard draft={draft} update={update} />
+      <DetailReadOnlyCard lastFiredAt={lastFired} nextRunAt={cronTrigger?.nextRunAt ?? null} />
+    </div>
   );
 }
 
@@ -387,7 +383,7 @@ function DetailReadOnlyCard({
         </div>
         <div>
           {t("office:nextFire", {
-            when: nextRunAt ? new Date(nextRunAt).toLocaleString() : "—",
+            when: nextRunAt ? new Date(nextRunAt).toLocaleString() : "-",
           })}
         </div>
       </CardContent>

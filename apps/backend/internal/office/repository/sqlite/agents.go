@@ -269,6 +269,55 @@ func (r *Repository) UpdateAgentInstance(ctx context.Context, agent *models.Agen
 	return err
 }
 
+// AgentInstanceConfigFields is the subset of agent_profiles columns a
+// config import owns (see UpdateAgentInstanceConfigFields).
+type AgentInstanceConfigFields struct {
+	Role                  string
+	Icon                  string
+	BudgetMonthlyCents    int
+	MaxConcurrentSessions int
+	DesiredSkills         string
+	ExecutorPreference    string
+}
+
+// UpdateAgentInstanceConfigFields updates only the columns a config import
+// owns (role, icon, budget, max concurrent sessions, desired skills,
+// executor preference). Unlike UpdateAgentInstance, it leaves status,
+// pause_reason, settings, last_run_finished_at, and every other column at
+// whatever a concurrent writer (UpdateAgentStatusFields, UpdateAgentSettings,
+// the agent runtime, direct API edits) set them to, instead of reverting
+// them to a stale read-then-write snapshot.
+func (r *Repository) UpdateAgentInstanceConfigFields(
+	ctx context.Context, id string, fields AgentInstanceConfigFields,
+) error {
+	desiredSkills := normalizeAgentJSONArray(fields.DesiredSkills)
+	now := time.Now().UTC()
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE agent_profiles SET
+			role = ?, icon = ?, budget_monthly_cents = ?,
+			max_concurrent_sessions = ?, desired_skills = ?,
+			executor_preference = ?, updated_at = ?
+		WHERE id = ? AND `+agentInstanceFilter+`
+	`), fields.Role, fields.Icon, fields.BudgetMonthlyCents,
+		fields.MaxConcurrentSessions, desiredSkills,
+		fields.ExecutorPreference, now, id)
+	return err
+}
+
+// UpdateAgentReportsTo updates only an agent's reporting relationship. Config
+// import resolves this field in a second pass, after all agent IDs are known.
+// A narrow update prevents that pass from reverting runtime-owned fields from
+// the stale agent snapshot used for name resolution.
+func (r *Repository) UpdateAgentReportsTo(ctx context.Context, id, reportsTo string) error {
+	now := time.Now().UTC()
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE agent_profiles
+		SET reports_to = ?, updated_at = ?
+		WHERE id = ? AND `+agentInstanceFilter+`
+	`), reportsTo, now, id)
+	return err
+}
+
 // UpdateAgentSettings persists the agent_profiles.settings JSON blob for
 // an agent. Used by onboarding to seed routing.tier_source / .provider_
 // order_source markers on the freshly created CEO agent so the routing
@@ -354,6 +403,25 @@ func (r *Repository) AgentInstanceExistsByName(
 	query := `SELECT EXISTS(SELECT 1 FROM agent_profiles WHERE ` + strings.Join(conds, " AND ") + `)`
 	var exists bool
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(query), args...).Scan(&exists)
+	return exists, err
+}
+
+// AgentProfileExists reports whether an agent_profiles row with id exists
+// and is not soft-deleted, regardless of whether it is an Office agent
+// (workspace_id != ”) or a shallow Kanban profile (workspace_id = ”).
+// The workflow engine's quorum guard uses this to detect a seat whose agent
+// profile has been deleted since the seat was cast (REQ-OFFICE-REVIEW-SEATS-004.3).
+//
+// Deliberately does NOT use agentInstanceFilter: a seat's agent_profile_id
+// can come from the casting resolution's runner fallback
+// (REQ-OFFICE-REVIEW-SEATS-002's "empty candidate list" path), and a task's
+// runner is not guaranteed to be an Office agent. Scoping this check to
+// workspace_id != ” would make the quorum guard treat a live Kanban runner
+// as a deleted agent, dropping the seat it was written to protect.
+func (r *Repository) AgentProfileExists(ctx context.Context, id string) (bool, error) {
+	query := `SELECT EXISTS(SELECT 1 FROM agent_profiles WHERE id = ? AND deleted_at IS NULL)`
+	var exists bool
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(query), id).Scan(&exists)
 	return exists, err
 }
 

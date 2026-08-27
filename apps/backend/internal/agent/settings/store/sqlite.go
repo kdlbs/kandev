@@ -119,9 +119,30 @@ func (r *sqliteRepository) initSchema() error {
 		FOREIGN KEY (profile_id) REFERENCES agent_profiles(id) ON DELETE CASCADE
 	);
 
+	CREATE TABLE IF NOT EXISTS dynamic_agent_profiles (
+		profile_id TEXT PRIMARY KEY,
+		version INTEGER NOT NULL DEFAULT 1,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (profile_id) REFERENCES agent_profiles(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS dynamic_agent_routes (
+		dynamic_profile_id TEXT NOT NULL,
+		position INTEGER NOT NULL,
+		execution_profile_id TEXT NOT NULL,
+		enabled INTEGER NOT NULL DEFAULT 1,
+		rules_json TEXT NOT NULL DEFAULT '{}',
+		PRIMARY KEY (dynamic_profile_id, position),
+		FOREIGN KEY (dynamic_profile_id) REFERENCES dynamic_agent_profiles(profile_id) ON DELETE CASCADE,
+		FOREIGN KEY (execution_profile_id) REFERENCES agent_profiles(id) ON DELETE RESTRICT
+	);
+
 	DROP INDEX IF EXISTS idx_agents_name;
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_name ON agents(name);
 	CREATE INDEX IF NOT EXISTS idx_agent_profiles_agent_id ON agent_profiles(agent_id);
+	CREATE INDEX IF NOT EXISTS idx_dynamic_agent_routes_execution_profile
+		ON dynamic_agent_routes(execution_profile_id);
 	`
 	// Note: indexes on new office-enrichment columns (workspace_id, role,
 	// reports_to) are created later in migrateOfficeEnrichmentColumns —
@@ -162,6 +183,12 @@ func (r *sqliteRepository) initSchema() error {
 	// ends up with the column — the recreation copies only pre-existing
 	// columns, so an ADD COLUMN that ran before it would be lost.
 	r.migrate.Apply("agent_profiles.command_prefix", `ALTER TABLE agent_profiles ADD COLUMN command_prefix TEXT NOT NULL DEFAULT ''`)
+
+	// No-silent-model-fallback: added after the table-recreation migration
+	// above for the same reason as command_prefix — a legacy DB that
+	// recreates agent_profiles would otherwise lose columns added before it.
+	r.migrate.Apply("agent_profiles.fallback_model", `ALTER TABLE agent_profiles ADD COLUMN fallback_model TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("agent_profiles.auto_fallback", `ALTER TABLE agent_profiles ADD COLUMN auto_fallback INTEGER NOT NULL DEFAULT 0`)
 
 	return nil
 }
@@ -345,6 +372,22 @@ func (r *sqliteRepository) Close() error {
 	return r.db.Close()
 }
 
+// marshalTUIConfig renders a TUI config for the nullable tui_config column.
+// Shared by CreateAgent and UpdateAgent so the two writers cannot drift — the
+// column being absent from one of them is exactly how an editable field was
+// lost on save.
+func marshalTUIConfig(cfg *models.TUIConfigJSON) (*string, error) {
+	if cfg == nil {
+		return nil, nil
+	}
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal tui_config: %w", err)
+	}
+	s := string(data)
+	return &s, nil
+}
+
 func (r *sqliteRepository) CreateAgent(ctx context.Context, agent *models.Agent) error {
 	if agent.ID == "" {
 		agent.ID = uuid.New().String()
@@ -352,16 +395,11 @@ func (r *sqliteRepository) CreateAgent(ctx context.Context, agent *models.Agent)
 	now := time.Now().UTC()
 	agent.CreatedAt = now
 	agent.UpdatedAt = now
-	var tuiConfigJSON *string
-	if agent.TUIConfig != nil {
-		data, err := json.Marshal(agent.TUIConfig)
-		if err != nil {
-			return fmt.Errorf("failed to marshal tui_config: %w", err)
-		}
-		s := string(data)
-		tuiConfigJSON = &s
+	tuiConfigJSON, err := marshalTUIConfig(agent.TUIConfig)
+	if err != nil {
+		return err
 	}
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO agents (id, name, workspace_id, supports_mcp, mcp_config_path, tui_config, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`), agent.ID, agent.Name, agent.WorkspaceID, dialect.BoolToInt(agent.SupportsMCP), agent.MCPConfigPath, tuiConfigJSON, agent.CreatedAt, agent.UpdatedAt)
@@ -386,10 +424,18 @@ func (r *sqliteRepository) GetAgentByName(ctx context.Context, name string) (*mo
 
 func (r *sqliteRepository) UpdateAgent(ctx context.Context, agent *models.Agent) error {
 	agent.UpdatedAt = time.Now().UTC()
+	// tui_config is written here as well as in CreateAgent: a custom TUI agent's
+	// MCP strategy is editable after creation, and omitting the column silently
+	// discarded that edit — the row kept supports_mcp while the strategy it was
+	// derived from reverted on the next boot.
+	tuiConfigJSON, err := marshalTUIConfig(agent.TUIConfig)
+	if err != nil {
+		return err
+	}
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE agents SET workspace_id = ?, supports_mcp = ?, mcp_config_path = ?, updated_at = ?
+		UPDATE agents SET workspace_id = ?, supports_mcp = ?, mcp_config_path = ?, tui_config = ?, updated_at = ?
 		WHERE id = ?
-	`), agent.WorkspaceID, dialect.BoolToInt(agent.SupportsMCP), agent.MCPConfigPath, agent.UpdatedAt, agent.ID)
+	`), agent.WorkspaceID, dialect.BoolToInt(agent.SupportsMCP), agent.MCPConfigPath, tuiConfigJSON, agent.UpdatedAt, agent.ID)
 	if err != nil {
 		return err
 	}
@@ -444,6 +490,14 @@ func (r *sqliteRepository) UpsertAgentProfileMcpConfig(ctx context.Context, conf
 	if config.ProfileID == "" {
 		return fmt.Errorf("profile ID is required")
 	}
+	return r.upsertAgentProfileMcpConfig(ctx, r.db, config)
+}
+
+// upsertAgentProfileMcpConfig inserts or replaces the MCP config row for a
+// profile, running against the caller-supplied execer so the duplicate can
+// commit it in the same transaction as the profile row. Defaults nil maps and
+// fills timestamps on the passed config in place.
+func (r *sqliteRepository) upsertAgentProfileMcpConfig(ctx context.Context, execer profileExecer, config *models.AgentProfileMcpConfig) error {
 	if config.Servers == nil {
 		config.Servers = map[string]interface{}{}
 	}
@@ -465,7 +519,7 @@ func (r *sqliteRepository) UpsertAgentProfileMcpConfig(ctx context.Context, conf
 		return fmt.Errorf("failed to serialize MCP meta: %w", err)
 	}
 
-	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
+	_, err = execer.ExecContext(ctx, execer.Rebind(`
 		INSERT INTO agent_profile_mcp_configs (profile_id, enabled, servers_json, meta_json, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(profile_id) DO UPDATE SET
@@ -484,6 +538,323 @@ func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 	now := time.Now().UTC()
 	profile.CreatedAt = now
 	profile.UpdatedAt = now
+	// New profiles are created enabled — the DB column default is 1 and
+	// nothing creates a profile pre-disabled. Setting the field here keeps
+	// callers' in-memory copy consistent with the row.
+	profile.Enabled = true
+	return r.insertAgentProfile(ctx, r.db, profile)
+}
+
+var _ DynamicProfileRepository = (*sqliteRepository)(nil)
+
+// CreateDynamicAgentProfile writes the dynamic document and its ordered route
+// rows in one transaction. The parent agent_profiles row is created by the
+// controller first; this transaction is the optimistic-routing document's
+// atomic unit.
+func (r *sqliteRepository) CreateDynamicAgentProfile(
+	ctx context.Context,
+	profile *models.DynamicAgentProfile,
+	routes []models.DynamicAgentRoute,
+) error {
+	if profile == nil || profile.ProfileID == "" {
+		return fmt.Errorf("dynamic profile ID is required")
+	}
+	if profile.Version <= 0 {
+		profile.Version = 1
+	}
+	now := time.Now().UTC()
+	if profile.CreatedAt.IsZero() {
+		profile.CreatedAt = now
+	}
+	profile.UpdatedAt = now
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
+		INSERT INTO dynamic_agent_profiles (profile_id, version, created_at, updated_at)
+		VALUES (?, ?, ?, ?)
+	`), profile.ProfileID, profile.Version, profile.CreatedAt, profile.UpdatedAt); err != nil {
+		return err
+	}
+	if err := insertDynamicRoutes(ctx, tx, profile.ProfileID, routes); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func insertDynamicRoutes(ctx context.Context, execer profileExecer, profileID string, routes []models.DynamicAgentRoute) error {
+	for _, route := range routes {
+		if _, err := execer.ExecContext(ctx, execer.Rebind(`
+			INSERT INTO dynamic_agent_routes
+				(dynamic_profile_id, position, execution_profile_id, enabled, rules_json)
+			VALUES (?, ?, ?, ?, ?)
+		`), profileID, route.Position, route.ExecutionProfileID,
+			dialect.BoolToInt(route.Enabled), route.RulesJSON); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *sqliteRepository) GetDynamicAgentProfile(
+	ctx context.Context,
+	profileID string,
+) (*models.DynamicAgentProfile, []models.DynamicAgentRoute, error) {
+	profile := &models.DynamicAgentProfile{}
+	if err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT profile_id, version, created_at, updated_at
+		FROM dynamic_agent_profiles WHERE profile_id = ?
+	`), profileID).Scan(&profile.ProfileID, &profile.Version, &profile.CreatedAt, &profile.UpdatedAt); err != nil {
+		return nil, nil, err
+	}
+	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
+		SELECT dynamic_profile_id, position, execution_profile_id, enabled, rules_json
+		FROM dynamic_agent_routes WHERE dynamic_profile_id = ? ORDER BY position ASC
+	`), profileID)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	routes := make([]models.DynamicAgentRoute, 0)
+	for rows.Next() {
+		var route models.DynamicAgentRoute
+		var enabled int
+		if err := rows.Scan(&route.DynamicProfileID, &route.Position, &route.ExecutionProfileID, &enabled, &route.RulesJSON); err != nil {
+			return nil, nil, err
+		}
+		route.Enabled = enabled != 0
+		routes = append(routes, route)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	return profile, routes, nil
+}
+
+// UpdateDynamicAgentProfile replaces the complete route document only when
+// expectedVersion still owns the row. The new version and route replacement
+// commit together, so readers never observe a partially edited candidate list.
+func (r *sqliteRepository) UpdateDynamicAgentProfile(
+	ctx context.Context,
+	profile *models.DynamicAgentProfile,
+	expectedVersion int64,
+	routes []models.DynamicAgentRoute,
+) error {
+	if profile == nil || profile.ProfileID == "" {
+		return fmt.Errorf("dynamic profile ID is required")
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.updateDynamicAgentProfileTx(ctx, tx, profile, expectedVersion, routes); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *sqliteRepository) updateDynamicAgentProfileTx(
+	ctx context.Context,
+	execer profileExecer,
+	profile *models.DynamicAgentProfile,
+	expectedVersion int64,
+	routes []models.DynamicAgentRoute,
+) error {
+	now := time.Now().UTC()
+	result, err := execer.ExecContext(ctx, execer.Rebind(`
+		UPDATE dynamic_agent_profiles
+		SET version = version + 1, updated_at = ?
+		WHERE profile_id = ? AND version = ?
+	`), now, profile.ProfileID, expectedVersion)
+	if err != nil {
+		return err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return ErrDynamicProfileVersionConflict
+	}
+	if _, err := execer.ExecContext(ctx, execer.Rebind(
+		`DELETE FROM dynamic_agent_routes WHERE dynamic_profile_id = ?`), profile.ProfileID); err != nil {
+		return err
+	}
+	if err := insertDynamicRoutes(ctx, execer, profile.ProfileID, routes); err != nil {
+		return err
+	}
+	profile.Version = expectedVersion + 1
+	profile.UpdatedAt = now
+	return nil
+}
+
+// UpdateAgentProfileWithDynamic commits the ordinary profile fields and the
+// versioned dynamic route document together. A version conflict rolls back
+// both writes, so a stale editor cannot persist a partial base-profile change.
+func (r *sqliteRepository) UpdateAgentProfileWithDynamic(
+	ctx context.Context,
+	profile *models.AgentProfile,
+	dynamic *models.DynamicAgentProfile,
+	expectedVersion int64,
+	routes []models.DynamicAgentRoute,
+) error {
+	if profile == nil || dynamic == nil || profile.ID == "" || dynamic.ProfileID != profile.ID {
+		return fmt.Errorf("profile and dynamic profile IDs are required")
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.updateAgentProfile(ctx, tx, profile); err != nil {
+		return err
+	}
+	if err := r.updateDynamicAgentProfileTx(ctx, tx, dynamic, expectedVersion, routes); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (r *sqliteRepository) ListDynamicProfileReferencesByExecutionProfile(
+	ctx context.Context,
+	profileID string,
+) ([]models.DynamicProfileReference, error) {
+	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
+		SELECT p.id, p.name, p.deleted_at
+		FROM dynamic_agent_routes r
+		JOIN agent_profiles p ON p.id = r.dynamic_profile_id
+		WHERE r.execution_profile_id = ?
+		ORDER BY p.name, p.id
+	`), profileID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	refs := make([]models.DynamicProfileReference, 0)
+	seen := make(map[string]struct{})
+	for rows.Next() {
+		var ref models.DynamicProfileReference
+		if err := rows.Scan(&ref.ProfileID, &ref.Name, &ref.DeletedAt); err != nil {
+			return nil, err
+		}
+		if _, ok := seen[ref.ProfileID]; ok {
+			continue
+		}
+		seen[ref.ProfileID] = struct{}{}
+		refs = append(refs, ref)
+	}
+	return refs, rows.Err()
+}
+
+// DuplicateAgentProfile creates an independent copy of a profile in a single
+// transaction: the row is inserted with the caller-provided Enabled state (a
+// duplicate of a disabled profile must not become briefly selectable) and the
+// MCP config row is upserted when non-nil. A failure rolls back and leaves no
+// partial copy, so retrying after an error cannot create a duplicate row.
+//
+// The source rows are re-read inside the transaction and must still carry the
+// revisions the copy was built from; otherwise ErrProfileChanged is returned
+// and nothing is created. Combined with WAL snapshot isolation (a concurrent
+// commit after this transaction's first read aborts its write with a busy
+// error), the copy always reflects one consistent snapshot of the source.
+func (r *sqliteRepository) DuplicateAgentProfile(ctx context.Context, input DuplicateAgentProfileInput) error {
+	if input.Profile.ID == "" {
+		input.Profile.ID = uuid.New().String()
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := r.verifySourceSnapshot(ctx, tx, input); err != nil {
+		return err
+	}
+
+	now := time.Now().UTC()
+	input.Profile.CreatedAt = now
+	input.Profile.UpdatedAt = now
+	if err := r.insertAgentProfile(ctx, tx, input.Profile); err != nil {
+		return err
+	}
+	if input.McpConfig != nil {
+		input.McpConfig.ProfileID = input.Profile.ID
+		if err := r.upsertAgentProfileMcpConfig(ctx, tx, input.McpConfig); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// verifySourceSnapshot checks, inside the duplicate transaction, that the
+// source rows still match the revisions the caller built the copy from. A
+// mismatch means a concurrent writer changed the source between the caller's
+// read and this transaction — duplicating anyway would produce a copy mixing
+// two points in time.
+func (r *sqliteRepository) verifySourceSnapshot(ctx context.Context, tx *sqlx.Tx, input DuplicateAgentProfileInput) error {
+	var sourceUpdated time.Time
+	err := tx.QueryRowContext(ctx, tx.Rebind(
+		`SELECT updated_at FROM agent_profiles WHERE id = ? AND deleted_at IS NULL`),
+		input.Source.ID).Scan(&sourceUpdated)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrSourceProfileNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if !sourceUpdated.Equal(input.Source.UpdatedAt) {
+		return ErrProfileChanged
+	}
+	if input.SourceMcp == nil {
+		// The caller's snapshot had no MCP row: verify one was not created in
+		// the meantime, otherwise the copy would silently drop it. Missing is
+		// the unchanged case; an existing row means the snapshot is stale.
+		var exists int
+		err = tx.QueryRowContext(ctx, tx.Rebind(
+			`SELECT 1 FROM agent_profile_mcp_configs WHERE profile_id = ?`),
+			input.Source.ID).Scan(&exists)
+		if err == nil {
+			return ErrProfileChanged
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		return nil
+	}
+	var mcpUpdated time.Time
+	err = tx.QueryRowContext(ctx, tx.Rebind(
+		`SELECT updated_at FROM agent_profile_mcp_configs WHERE profile_id = ?`),
+		input.Source.ID).Scan(&mcpUpdated)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrProfileChanged
+	}
+	if err != nil {
+		return err
+	}
+	if !mcpUpdated.Equal(input.SourceMcp.UpdatedAt) {
+		return ErrProfileChanged
+	}
+	return nil
+}
+
+// profileExecer is the subset of *sqlx.DB / *sqlx.Tx the shared insert and
+// upsert helpers need, so one code path serves both single-statement and
+// transactional writes.
+type profileExecer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	Rebind(query string) string
+}
+
+// insertAgentProfile writes the profile row through the caller-supplied
+// execer, sharing one SQL statement between CreateAgentProfile and the
+// transactional duplicate path. The profile's Enabled value is written as-is.
+func (r *sqliteRepository) insertAgentProfile(ctx context.Context, execer profileExecer, profile *models.AgentProfile) error {
 	cliFlagsJSON, err := cliFlagsToJSON(profile.CLIFlags)
 	if err != nil {
 		return err
@@ -496,11 +867,7 @@ func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 	if err != nil {
 		return err
 	}
-	// New profiles are created enabled — the DB column default is 1 and
-	// nothing creates a profile pre-disabled. Setting the field here keeps
-	// callers' in-memory copy consistent with the row.
-	profile.Enabled = true
-	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
+	_, err = execer.ExecContext(ctx, execer.Rebind(`
 		INSERT INTO agent_profiles (
 			id, agent_id, name, agent_display_name, model, mode, migrated_from,
 			auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough,
@@ -511,7 +878,7 @@ func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 			max_concurrent_sessions, cooldown_sec, skip_idle_runs,
 			consecutive_failures, failure_threshold,
 			executor_preference, budget_monthly_cents, settings, permissions,
-			command_prefix
+			command_prefix, fallback_model, auto_fallback
 		) VALUES (
 			?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?,
@@ -522,7 +889,7 @@ func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 			?, ?, ?,
 			?, ?,
 			?, ?, ?, ?,
-			?
+			?, ?, ?
 		)
 	`),
 		profile.ID, profile.AgentID, profile.Name, profile.AgentDisplayName, profile.Model,
@@ -537,6 +904,8 @@ func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 		profile.ConsecutiveFailures, enrich.failureThreshold,
 		enrich.executorPreference, profile.BudgetMonthlyCents, enrich.settings, enrich.permissions,
 		profile.CommandPrefix,
+		profile.FallbackModel,
+		dialect.BoolToInt(profile.AutoFallback),
 	)
 	return err
 }
@@ -743,6 +1112,10 @@ func envVarsToJSON(envVars []models.ProfileEnvVar) (string, error) {
 }
 
 func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *models.AgentProfile) error {
+	return r.updateAgentProfile(ctx, r.db, profile)
+}
+
+func (r *sqliteRepository) updateAgentProfile(ctx context.Context, execer profileExecer, profile *models.AgentProfile) error {
 	profile.UpdatedAt = time.Now().UTC()
 	cliFlagsJSON, err := cliFlagsToJSON(profile.CLIFlags)
 	if err != nil {
@@ -756,7 +1129,7 @@ func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *mode
 	if err != nil {
 		return err
 	}
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	result, err := execer.ExecContext(ctx, execer.Rebind(`
 		UPDATE agent_profiles
 		SET agent_id = ?, name = ?, agent_display_name = ?, model = ?, mode = ?, migrated_from = ?,
 			auto_approve = ?, dangerously_skip_permissions = ?, allow_indexing = ?,
@@ -768,7 +1141,7 @@ func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *mode
 			consecutive_failures = ?, failure_threshold = ?,
 			executor_preference = ?,
 			budget_monthly_cents = ?, settings = ?, permissions = ?,
-			command_prefix = ?
+			command_prefix = ?, fallback_model = ?, auto_fallback = ?
 		WHERE id = ? AND deleted_at IS NULL
 	`), profile.AgentID, profile.Name, profile.AgentDisplayName, profile.Model,
 		nullableString(profile.Mode), nullableString(profile.MigratedFrom),
@@ -783,6 +1156,8 @@ func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *mode
 		enrich.executorPreference,
 		profile.BudgetMonthlyCents, enrich.settings, enrich.permissions,
 		profile.CommandPrefix,
+		profile.FallbackModel,
+		dialect.BoolToInt(profile.AutoFallback),
 		profile.ID)
 	if err != nil {
 		return err
@@ -852,7 +1227,8 @@ const agentProfileSelectColumns = `
 		COALESCE(failure_threshold, 3), COALESCE(executor_preference, ''),
 		COALESCE(budget_monthly_cents, 0),
 		COALESCE(settings, '{}'), COALESCE(permissions, '{}'),
-		COALESCE(command_prefix, '')
+		COALESCE(command_prefix, ''),
+		COALESCE(fallback_model, ''), COALESCE(auto_fallback, 0)
 	FROM agent_profiles`
 
 func (r *sqliteRepository) GetAgentProfile(ctx context.Context, id string) (*models.AgentProfile, error) {
@@ -935,16 +1311,23 @@ func (r *sqliteRepository) applyLegacyBackfill(ctx context.Context, profile *mod
 		return profile
 	}
 	agent, err := r.GetAgent(ctx, profile.AgentID)
+	profile.CLIFlags = legacyCLIFlagsForAgent(agent, err)
+	return profile
+}
+
+// legacyCLIFlagsForAgent is applyLegacyBackfill/applyLegacyBackfillTx's
+// shared decision: only a resolved "auggie" agent backfills the
+// --allow-indexing flag; a lookup failure, a missing agent, or any other
+// agent name backfills an empty list instead.
+func legacyCLIFlagsForAgent(agent *models.Agent, err error) []models.CLIFlag {
 	if err != nil || agent == nil || agent.Name != "auggie" {
-		profile.CLIFlags = []models.CLIFlag{}
-		return profile
+		return []models.CLIFlag{}
 	}
-	profile.CLIFlags = []models.CLIFlag{{
+	return []models.CLIFlag{{
 		Description: "Allow workspace indexing without confirmation",
 		Flag:        "--allow-indexing",
 		Enabled:     true,
 	}}
-	return profile
 }
 
 func (r *sqliteRepository) ListTUIAgents(ctx context.Context) ([]*models.Agent, error) {
@@ -1025,6 +1408,7 @@ func scanAgentProfile(scanner interface {
 	var role, status string
 	var skipIdleRuns int
 	var failureThreshold int
+	var autoFallback int
 	if err := scanner.Scan(
 		&profile.ID,
 		&profile.AgentID,
@@ -1065,6 +1449,8 @@ func scanAgentProfile(scanner interface {
 		&profile.Settings,
 		&profile.Permissions,
 		&profile.CommandPrefix,
+		&profile.FallbackModel,
+		&autoFallback,
 	); err != nil {
 		return nil, err
 	}
@@ -1081,6 +1467,7 @@ func scanAgentProfile(scanner interface {
 	profile.Enabled = enabled == 1
 	profile.UserModified = userModified == 1
 	profile.SkipIdleRuns = skipIdleRuns == 1
+	profile.AutoFallback = autoFallback == 1
 	profile.Role = models.AgentRole(role)
 	profile.Status = models.AgentStatus(status)
 	profile.ConfigOptions = configOptionsFromSettings(profile.Settings)

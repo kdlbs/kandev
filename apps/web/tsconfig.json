@@ -19,6 +19,7 @@
       "@kandev/ui": ["../packages/ui/src"],
       "@kandev/ui/*": ["../packages/ui/src/*"],
       "@kandev/theme": ["../packages/theme/src"],
+      "@kandev/plugin-sdk": ["../packages/plugin-sdk/src"],
       "@kandev/types": ["../packages/types/src"]
     }
   },

@@ -60,6 +60,12 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.RepositoryCreated, ws.ActionRepositoryCreated)
 	b.subscribe(eventBus, events.RepositoryUpdated, ws.ActionRepositoryUpdated)
 	b.subscribe(eventBus, events.RepositoryDeleted, ws.ActionRepositoryDeleted)
+	b.subscribe(eventBus, events.RepositorySetCreated, ws.ActionRepositorySetCreated)
+	b.subscribe(eventBus, events.RepositorySetUpdated, ws.ActionRepositorySetUpdated)
+	b.subscribe(eventBus, events.RepositorySetDeleted, ws.ActionRepositorySetDeleted)
+	b.subscribe(eventBus, events.RepositoryBranchPolicyCreated, ws.ActionRepositoryBranchPolicyCreated)
+	b.subscribe(eventBus, events.RepositoryBranchPolicyUpdated, ws.ActionRepositoryBranchPolicyUpdated)
+	b.subscribe(eventBus, events.RepositoryBranchPolicyDeleted, ws.ActionRepositoryBranchPolicyDeleted)
 	b.subscribe(eventBus, events.RepositoryScriptCreated, ws.ActionRepositoryScriptCreated)
 	b.subscribe(eventBus, events.RepositoryScriptUpdated, ws.ActionRepositoryScriptUpdated)
 	b.subscribe(eventBus, events.RepositoryScriptDeleted, ws.ActionRepositoryScriptDeleted)
@@ -282,13 +288,23 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 		// session page after task creation.
 		b.hub.BroadcastToWorkspace(workspaceID, msg)
 		return nil
-	case ws.ActionGitLabTaskMRUpdated, ws.ActionGitLabTaskMRAutomationUpdated:
-		// These payloads carry per-task MR link/lifecycle state. Fail closed
+	case ws.ActionGitHubTaskPRUpdated, ws.ActionGitHubTaskPRDeleted,
+		ws.ActionGitHubTaskCIOptionsUpdated, ws.ActionGitLabTaskMRUpdated, ws.ActionGitLabTaskMRAutomationUpdated:
+		// These payloads carry per-task PR/MR automation and lifecycle state. Fail closed
 		// (drop, don't fall back to a global broadcast) when workspace
 		// resolution came back empty and auth is enforced — an unattributed
-		// GitLab MR update must never cross workspace boundaries.
+		// GitHub PR or GitLab MR update must never cross workspace boundaries.
 		b.hub.BroadcastToWorkspaceOrDrop(workspaceID, msg)
 		return nil
+	case ws.ActionAgentProfileCreated, ws.ActionAgentProfileUpdated, ws.ActionAgentProfileDeleted:
+		// Profile payloads wrap the profile DTO under "profile"; office-scoped
+		// profiles (nested workspace_id) must never cross workspace
+		// boundaries — route them fail-closed. Kanban profiles (empty
+		// workspace) are instance-wide and fall through to the global path.
+		if workspaceID != "" {
+			b.hub.BroadcastToWorkspaceOrDrop(workspaceID, msg)
+			return nil
+		}
 	}
 	// Workspace-carrying events (task/workflow/repository/…) route to the
 	// owner's clients; events without workspace context (executors,
@@ -298,11 +314,20 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 }
 
 // extractWorkspaceID pulls a workspace ID from event payloads (map- or
-// struct-shaped). Empty means "no workspace context" — the event is treated
-// as instance-wide and broadcast to everyone.
+// struct-shaped, nested included). Profile events wrap the profile DTO under
+// "profile": the wrapper may be a map (JSON round-tripped bus) or a struct
+// (in-process bus, e.g. *dto.AgentProfileDTO from the MCP publisher), so the
+// nested value is inspected recursively and structs expose their ID via the
+// GetWorkspaceID interface. Empty means "no workspace context" — the event is
+// treated as instance-wide and broadcast to everyone.
 func extractWorkspaceID(data interface{}) string {
 	if id := extractStringField(data, "workspace_id"); id != "" {
 		return id
+	}
+	if profile, ok := data.(map[string]interface{}); ok {
+		if id := extractWorkspaceID(profile["profile"]); id != "" {
+			return id
+		}
 	}
 	if provider, ok := data.(interface{ GetWorkspaceID() string }); ok {
 		return provider.GetWorkspaceID()

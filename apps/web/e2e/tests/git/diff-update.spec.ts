@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { dwell } from "../../helpers/causal-waits";
 import {
   fileDiffTab,
   getDiffsContainer,
@@ -169,7 +170,9 @@ test.describe("File editor auto-update on file change", () => {
     await openChangesTab(testPage);
     await openFileDiff(testPage, "diff_update_test.txt");
     await waitForDiffText(testPage, "FIRST_MODIFICATION", 15_000);
-    const editFile = testPage.getByRole("button", { name: "Edit", exact: true });
+    const editFile = testPage
+      .getByTestId("review-file-actions")
+      .getByRole("button", { name: "Edit", exact: true });
     await expect(editFile).toBeVisible();
     await editFile.click();
 
@@ -225,7 +228,9 @@ test.describe("File editor auto-update on file change", () => {
     // Open the editor from the already-loaded diff. A late git-status update is
     // allowed to focus Changes, so routing through the Files tab would race that
     // intentional focus transition instead of testing editor refresh behavior.
-    const editFile = testPage.getByRole("button", { name: "Edit", exact: true });
+    const editFile = testPage
+      .getByTestId("review-file-actions")
+      .getByRole("button", { name: "Edit", exact: true });
     await expect(editFile).toBeVisible();
     await editFile.click();
     const editorTab = testPage.locator(".dv-default-tab[type='file-editor']", {
@@ -425,8 +430,12 @@ test.describe("Untracked file diff update", () => {
       session.chat.getByText("untracked-file-modify complete", { exact: false }),
     ).toBeVisible({ timeout: 45_000 });
 
-    // Wait for git polling to detect the file change (polling interval is ~1-2s)
-    await testPage.waitForTimeout(3_000);
+    await dwell(
+      testPage,
+      3_000,
+      "poll-interval",
+      "git status is discovered by a ~1-2s backend poll rather than pushed, so the file change becomes visible on the poll's schedule and there is no event marking the sweep that will find it",
+    );
 
     // Switch back to Changes tab and click on the diff file again
     await openChangesTab(testPage);

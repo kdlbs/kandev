@@ -11,11 +11,13 @@ type Command string
 const (
 	CommandRun   Command = "run"
 	CommandStart Command = "start"
+	CommandDev   Command = "dev"
 )
 
 type Options struct {
 	Command     Command
 	BackendPort int
+	WebPort     int
 	Verbose     bool
 	Debug       bool
 	ShowVersion bool
@@ -39,6 +41,9 @@ func parseArgs(argv []string) (Options, error) {
 			return opts, err
 		}
 		i = next
+	}
+	if opts.WebPort != 0 && opts.Command != CommandDev {
+		return opts, ParseError{Message: "--web-internal-port only applies to dev mode"}
 	}
 	return opts, nil
 }
@@ -67,6 +72,8 @@ func parseCommandArg(arg string, opts *Options) bool {
 		opts.Command = CommandRun
 	case string(CommandStart):
 		opts.Command = CommandStart
+	case string(CommandDev):
+		opts.Command = CommandDev
 	default:
 		return false
 	}
@@ -85,6 +92,8 @@ func parseBooleanFlag(arg string, opts *Options) bool {
 		opts.Debug = true
 	case "--headless", "--no-browser":
 		opts.Headless = true
+	case "--dev":
+		opts.Command = CommandDev
 	default:
 		return false
 	}
@@ -105,9 +114,36 @@ func parsePortArg(argv []string, i int, opts *Options) (int, bool, error) {
 		return i, true, parseBackendPortValue("--port", strings.TrimPrefix(arg, "--port="), opts)
 	case strings.HasPrefix(arg, "--backend-port="):
 		return i, true, parseBackendPortValue("--backend-port", strings.TrimPrefix(arg, "--backend-port="), opts)
+	case arg == "--web-internal-port":
+		next, err := parseWebPort(argv, i, opts)
+		return next, true, err
+	case strings.HasPrefix(arg, "--web-internal-port="):
+		return i, true, parseWebPortValue("--web-internal-port", strings.TrimPrefix(arg, "--web-internal-port="), opts)
+	case arg == "--web-port" || strings.HasPrefix(arg, "--web-port="):
+		return i, true, ParseError{Message: "--web-port has been removed; use --web-internal-port for dev mode"}
 	default:
 		return i, false, nil
 	}
+}
+
+func parseWebPort(argv []string, i int, opts *Options) (int, error) {
+	v, err := takeValue(argv, i, argv[i])
+	if err != nil {
+		return i, err
+	}
+	if err := parseWebPortValue(argv[i], v, opts); err != nil {
+		return i, err
+	}
+	return i + 1, nil
+}
+
+func parseWebPortValue(flag, value string, opts *Options) error {
+	port, err := parsePort(value, flag)
+	if err != nil {
+		return err
+	}
+	opts.WebPort = port
+	return nil
 }
 
 func parseBackendPort(argv []string, i int, opts *Options) (int, error) {

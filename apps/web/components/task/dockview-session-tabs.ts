@@ -20,6 +20,7 @@ import {
   shouldPreserveActivePanel,
 } from "./dockview-session-tab-activation";
 import { anchorIncomingSessionPanel, ensureSessionPanel } from "./dockview-session-handoff";
+import { t } from "@/lib/i18n";
 
 const debug = createDebugLogger("dockview:session-tabs");
 
@@ -128,7 +129,7 @@ export function setupChatPanelSafetyNet(
           id: `session:${activeSessionId}`,
           component: "chat",
           tabComponent: "sessionTab",
-          title: "Agent",
+          title: t("common:agent"),
           params: { sessionId: activeSessionId },
           position,
         });
@@ -610,6 +611,7 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
   const prevTaskIdRef = useRef<string | null>(null);
   const prevSessionIdRef = useRef<string | null>(null);
   const appStore = useAppStoreApi();
+  const dockviewApi = useDockviewStore((state) => state.api);
 
   // Key-based dependency so the effect re-runs when the task's session list
   // changes (add/remove). Inside the effect we re-read the real array from
@@ -628,5 +630,5 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
       prevTaskIdRef,
       prevSessionIdRef,
     });
-  }, [effectiveSessionId, sessionIdsKey, appStore]);
+  }, [appStore, dockviewApi, effectiveSessionId, sessionIdsKey]);
 }

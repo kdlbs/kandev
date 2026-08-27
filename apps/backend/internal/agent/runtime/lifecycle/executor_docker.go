@@ -20,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/scriptengine"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 const dockerWorkspacePath = "/workspace"
@@ -162,7 +163,17 @@ func (r *DockerExecutor) HealthCheck(_ context.Context) error {
 }
 
 func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (instance *ExecutorInstance, err error) {
+	baseCtx := preparationContext(ctx)
+	if err := validateAgentctlStartupConfig(req.AgentctlStartupConfig); err != nil {
+		return nil, fmt.Errorf("invalid agentctl startup configuration: %w", err)
+	}
 	if _, err := validateRemoteContributions(req.RemoteContributions); err != nil {
+		return nil, err
+	}
+	if _, err := validateContributionDestinations(req.ContributionDestinations); err != nil {
+		return nil, err
+	}
+	if _, err := validateComparisonTargets(req.ComparisonTargets); err != nil {
 		return nil, err
 	}
 	dockerClient, containerMgr, err := r.ensureClient()
@@ -174,11 +185,14 @@ func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreate
 		defer reportCreateInstanceProgress(req, &err)()
 	}
 
-	if reconnected, ok := r.tryReconnect(ctx, dockerClient, req); ok {
+	if reconnected, ok := r.tryReconnect(baseCtx, dockerClient, req); ok {
 		return reconnected, nil
 	}
+	if req.WorkspaceReuseRequired {
+		return nil, fmt.Errorf("%w: existing Docker workspace could not be attached", models.ErrWorkspaceReuseUnsafe)
+	}
 
-	r.seedSessionDir(ctx, req)
+	r.seedSessionDir(baseCtx, req)
 
 	containerCfg, err := r.buildContainerLaunchConfig(req)
 	if err != nil {
@@ -189,7 +203,7 @@ func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreate
 		return nil, fmt.Errorf("failed to launch container: %w", err)
 	}
 
-	containerIP, _ := dockerClient.GetContainerIP(ctx, result.ContainerID)
+	containerIP, _ := dockerClient.GetContainerIP(baseCtx, result.ContainerID)
 	r.logger.Info("docker instance created",
 		zap.String("instance_id", req.InstanceID),
 		zap.String("container_id", result.ContainerID),
@@ -218,21 +232,21 @@ func reportCreateInstanceProgress(req *ExecutorCreateRequest, errPtr *error) fun
 // container that's healthy enough to resume; otherwise (nil, false) and the
 // caller falls back to provisioning a fresh container.
 func (r *DockerExecutor) tryReconnect(ctx context.Context, dockerClient *docker.Client, req *ExecutorCreateRequest) (*ExecutorInstance, bool) {
-	if req.PreviousExecutionID == "" {
+	if req.PreviousExecutionID == "" && strings.TrimSpace(getMetadataString(req.Metadata, MetadataKeyContainerID)) == "" {
 		return nil, false
 	}
 	reconnected, reconnectErr := r.reconnectToContainer(ctx, dockerClient, req)
 	if reconnectErr == nil {
 		return reconnected, true
 	}
-	r.logger.Info("could not reconnect to previous container, creating new one",
+	r.logger.Info("could not reconnect to existing container",
 		zap.String("previous_execution_id", req.PreviousExecutionID),
 		zap.Error(reconnectErr))
 	return nil, false
 }
 
-// seedSessionDir copies the agent's auth files (auth.json / config.toml /
-// etc.) into the per-container session dir. Replaces the older pattern of
+// seedSessionDir copies the agent's auth files and selected configuration
+// bundles into the per-container session dir. Replaces the older pattern of
 // bind-mounting the host's whole ~/.<agent>, which leaked absolute host
 // paths into agent state DBs and broke resume on codex.
 func (r *DockerExecutor) seedSessionDir(ctx context.Context, req *ExecutorCreateRequest) {
@@ -240,7 +254,17 @@ func (r *DockerExecutor) seedSessionDir(ctx context.Context, req *ExecutorCreate
 		return
 	}
 	instanceRoot := InstanceSessionRoot(r.kandevHomeDir, req.InstanceID)
-	if err := SeedAgentSessionDir(ctx, req.AgentConfig, instanceRoot, r.logger); err != nil {
+	selectedBundles := selectedPortableConfigBundleIDs(req.Metadata)
+	if err := seedAgentSessionDir(
+		ctx,
+		req.AgentConfig,
+		instanceRoot,
+		r.logger,
+		selectedBundles,
+		func(warnings []PortableConfigWarning) {
+			reportPortableConfigWarnings(req.OnProgress, warnings)
+		},
+	); err != nil {
 		r.logger.Warn("failed to seed agent session dir (continuing)",
 			zap.String("instance_id", req.InstanceID),
 			zap.String("agent_id", req.AgentConfig.ID()),
@@ -267,11 +291,15 @@ func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) 
 		AutoApprovePermissionsOverride: req.AutoApprovePermissionsOverride,
 		McpServers:                     req.McpServers,
 		McpProviders:                   req.McpProviders,
+		McpProfile:                     req.McpProfile,
 		PrepareScript:                  prepareScript,
 		ImageTagOverride:               getMetadataString(req.Metadata, MetadataKeyImageTagOverride),
 		LocalClonePath:                 localCloneMountPath(req.Metadata),
 		BaseBranches:                   getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 		RemoteContributions:            req.RemoteContributions,
+		ContributionDestinations:       req.ContributionDestinations,
+		ComparisonTargets:              req.ComparisonTargets,
+		AgentctlStartupConfig:          req.AgentctlStartupConfig,
 	}, nil
 }
 
@@ -541,7 +569,7 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 	var stripEnv []string
 	if req.AgentConfig != nil {
 		agentType = req.AgentConfig.ID()
-		disableAskQuestion = agents.IsPassthroughOnly(req.AgentConfig)
+		disableAskQuestion = !agents.SupportsInteractiveMCPTools(req.AgentConfig)
 		if rt := req.AgentConfig.Runtime(); rt != nil {
 			assumeMcpSse = rt.AssumeMcpSse
 			assumeMcpHttp = rt.AssumeMcpHttp
@@ -558,19 +586,22 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 			req.AutoApprovePermissions,
 			req.AutoApprovePermissionsOverride,
 		),
-		AutoStart:           false,
-		McpServers:          req.McpServers,
-		McpProviders:        req.McpProviders,
-		SessionID:           req.SessionID,
-		TaskID:              req.TaskID,
-		DisableAskQuestion:  disableAskQuestion,
-		AssumeMcpSse:        assumeMcpSse,
-		AssumeMcpHttp:       assumeMcpHttp,
-		McpMode:             req.McpMode,
-		RequiresProcessKill: requiresProcessKill,
-		StripEnv:            stripEnv,
-		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
-		RemoteContributions: req.RemoteContributions,
+		AutoStart:                false,
+		McpServers:               req.McpServers,
+		McpProviders:             req.McpProviders,
+		McpProfile:               req.McpProfile,
+		SessionID:                req.SessionID,
+		TaskID:                   req.TaskID,
+		DisableAskQuestion:       disableAskQuestion,
+		AssumeMcpSse:             assumeMcpSse,
+		AssumeMcpHttp:            assumeMcpHttp,
+		McpMode:                  req.McpMode,
+		RequiresProcessKill:      requiresProcessKill,
+		StripEnv:                 stripEnv,
+		BaseBranches:             getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
+		RemoteContributions:      req.RemoteContributions,
+		ContributionDestinations: req.ContributionDestinations,
+		ComparisonTargets:        req.ComparisonTargets,
 	}
 }
 
@@ -655,10 +686,11 @@ func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorIns
 
 	// On destructive stop reasons (task/session deleted/archived), clean up
 	// the kandev-managed per-container session dir so we don't leak GBs of
-	// agent state on disk. Plain stops preserve the dir so resume re-attaches
-	// to the same agent state, mirroring the Sprites preserve-on-stop rule.
+	// agent state on disk. Plain stops and stale execution cleanup preserve the
+	// dir because a resume may re-attach to the same container and its bind
+	// mounts.
 	teardownContainer := shouldTeardownDockerContainer(instance.StopReason)
-	if teardownContainer && r.kandevHomeDir != "" && instance.InstanceID != "" {
+	if shouldRunExecutorCleanup(instance.StopReason) && r.kandevHomeDir != "" && instance.InstanceID != "" {
 		CleanupAgentSessionDir(InstanceSessionRoot(r.kandevHomeDir, instance.InstanceID), r.logger)
 	}
 
@@ -718,10 +750,10 @@ func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorIns
 }
 
 // shouldTeardownDockerContainer extends terminal cleanup with stale execution
-// cleanup for Docker only. A stale Docker execution owns a local container and
-// per-instance session dir that become untracked before retry/resume launches a
-// replacement. Sprites intentionally keep stale sandboxes; see
-// shouldRunExecutorCleanup for that shared runtime policy.
+// cleanup for Docker only. Stale cleanup must stop the old container before a
+// retry/resume launch, but its per-instance session dir must remain available
+// because the stopped container still references its bind mounts. Destructive
+// task/session lifecycle reasons own removal; see shouldRunExecutorCleanup.
 func shouldTeardownDockerContainer(reason string) bool {
 	if shouldRunExecutorCleanup(reason) {
 		return true
@@ -792,6 +824,13 @@ func (r *DockerExecutor) resolvePrepareScript(req *ExecutorCreateRequest) (strin
 			return "", err
 		}
 		script += contributionScript
+	}
+	if destination, ok := req.ContributionDestinations[""]; ok {
+		destinationScript, err := scriptengine.ContributionDestinationSetupScript(&destination)
+		if err != nil {
+			return "", err
+		}
+		script += destinationScript
 	}
 
 	resolver := scriptengine.NewResolver().

@@ -16,6 +16,7 @@ import type {
 } from "@/lib/state/slices/office/types";
 import type { CLIFlag, AgentRole, AgentStatus } from "@/lib/types/agent-profile";
 import { agentProfileId, workspaceId } from "@/lib/types/ids";
+import { normalizeProject } from "./office-project-normalize";
 
 // Re-export extended API so existing imports continue to work.
 export {
@@ -300,10 +301,10 @@ export {
 // --- Projects ---
 
 export function listProjects(workspaceId: string, options?: ApiRequestOptions) {
-  return fetchJsonWithRetry<{ projects: Project[] }>(
+  return fetchJsonWithRetry<{ projects: unknown[] }>(
     `${BASE}/workspaces/${workspaceId}/projects`,
     options,
-  );
+  ).then((res) => ({ projects: (res.projects ?? []).map((project) => normalizeProject(project)) }));
 }
 
 // Backend single-project endpoints wrap the row as `{ project: ... }`.
@@ -315,16 +316,16 @@ export async function createProject(
   data: Partial<Project>,
   options?: ApiRequestOptions,
 ) {
-  const res = await fetchJson<{ project: Project }>(`${BASE}/workspaces/${workspaceId}/projects`, {
+  const res = await fetchJson<{ project: unknown }>(`${BASE}/workspaces/${workspaceId}/projects`, {
     ...options,
     init: { method: "POST", body: JSON.stringify(data), ...options?.init },
   });
-  return res.project;
+  return normalizeProject(res.project);
 }
 
 export async function getProject(id: string, options?: ApiRequestOptions) {
-  const res = await fetchJson<{ project: Project }>(`${BASE}/projects/${id}`, options);
-  return res.project;
+  const res = await fetchJson<{ project: unknown }>(`${BASE}/projects/${id}`, options);
+  return normalizeProject(res.project);
 }
 
 export async function updateProject(
@@ -332,11 +333,11 @@ export async function updateProject(
   data: Partial<Project>,
   options?: ApiRequestOptions,
 ) {
-  const res = await fetchJson<{ project: Project }>(`${BASE}/projects/${id}`, {
+  const res = await fetchJson<{ project: unknown }>(`${BASE}/projects/${id}`, {
     ...options,
     init: { method: "PATCH", body: JSON.stringify(data), ...options?.init },
   });
-  return res.project;
+  return normalizeProject(res.project);
 }
 
 export function deleteProject(id: string, options?: ApiRequestOptions) {

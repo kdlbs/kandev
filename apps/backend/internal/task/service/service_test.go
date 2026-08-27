@@ -34,6 +34,24 @@ type MockEventBus struct {
 	closed          bool
 }
 
+type recordingTaskClarificationCanceller struct {
+	sessions    []string
+	hasDeadline []bool
+	contextErrs []error
+	err         error
+}
+
+func (c *recordingTaskClarificationCanceller) ExpireSessionAndNotify(
+	ctx context.Context,
+	sessionID string,
+) (int, error) {
+	c.sessions = append(c.sessions, sessionID)
+	_, hasDeadline := ctx.Deadline()
+	c.hasDeadline = append(c.hasDeadline, hasDeadline)
+	c.contextErrs = append(c.contextErrs, ctx.Err())
+	return 1, c.err
+}
+
 func NewMockEventBus() *MockEventBus {
 	return &MockEventBus{
 		publishedEvents: make([]*bus.Event, 0),
@@ -180,12 +198,15 @@ func createTestServiceWithSessionsRepo(
 		Sessions:          wrapSessions(repo),
 		GitSnapshots:      repo,
 		RepoEntities:      repo,
+		RepositorySets:    repo,
+		BranchPolicies:    repo,
 		RepositoryCleanup: repo,
 		Executors:         repo,
 		Environments:      repo,
 		TaskEnvironments:  repo,
 		Reviews:           repo,
 		ResourceCleanups:  repo,
+		Usage:             repo,
 	}, eventBus, log, RepositoryDiscoveryConfig{})
 	svc.SetWorkspaceBootstrapper(repo)
 	svc.SetWorkflowStepGetter(&testWorkflowStepGetter{repo: repo})
@@ -452,7 +473,8 @@ func TestService_CreateTask(t *testing.T) {
 		},
 	}
 
-	task, err := svc.CreateTask(ctx, req)
+	taskResult, err := svc.CreateTask(ctx, req)
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("failed to create task: %v", err)
 	}
@@ -507,7 +529,7 @@ func TestService_CreateTaskProbesDefaultBranchForExplicitRepositoryOutsideDiscov
 	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: workflowID, WorkspaceID: workspaceID, Name: "Workflow"}); err != nil {
 		t.Fatalf("CreateWorkflow: %v", err)
 	}
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID:    workspaceID,
 		WorkflowID:     workflowID,
 		WorkflowStepID: "step-1",
@@ -516,6 +538,7 @@ func TestService_CreateTaskProbesDefaultBranchForExplicitRepositoryOutsideDiscov
 			LocalPath: repoPath, BaseBranch: "feature/current", Name: "explicit-repo",
 		}},
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -605,7 +628,8 @@ func TestService_CreateTask_DefaultsPriorityWhenEmpty(t *testing.T) {
 		Title:          "Onboarding-style task with no priority",
 		// Priority intentionally omitted — caller didn't set it.
 	}
-	task, err := svc.CreateTask(ctx, req)
+	taskResult, err := svc.CreateTask(ctx, req)
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask with empty priority should succeed, got %v", err)
 	}
@@ -694,7 +718,8 @@ func TestService_CreateTask_AcceptsMultipleDistinctRepositories(t *testing.T) {
 			{RepositoryID: "repo-back", BaseBranch: "main"},
 		},
 	}
-	task, err := svc.CreateTask(ctx, req)
+	taskResult, err := svc.CreateTask(ctx, req)
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -767,7 +792,7 @@ func TestService_CreateTask_RewritesTaskWorktreeRepositoryIDToProviderRepository
 		DefaultBranch: "main",
 	})
 
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID:    workspaceID,
 		WorkflowID:     workflowID,
 		WorkflowStepID: "step-1",
@@ -776,6 +801,7 @@ func TestService_CreateTask_RewritesTaskWorktreeRepositoryIDToProviderRepository
 			{RepositoryID: badRepoID, BaseBranch: prHeadBranch},
 		},
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -839,7 +865,7 @@ func TestService_CreateTask_RewritesTaskWorktreeRepositoryIDToSafeLocalRepositor
 		DefaultBranch: "main",
 	})
 
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID:    workspaceID,
 		WorkflowID:     workflowID,
 		WorkflowStepID: "step-1",
@@ -848,6 +874,7 @@ func TestService_CreateTask_RewritesTaskWorktreeRepositoryIDToSafeLocalRepositor
 			{RepositoryID: badRepoID, BaseBranch: prHeadBranch},
 		},
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -907,7 +934,7 @@ func TestService_CreateTask_RewritesTaskWorktreeLocalPathToSafeLocalRepository(t
 		DefaultBranch: "main",
 	})
 
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID:    workspaceID,
 		WorkflowID:     workflowID,
 		WorkflowStepID: "step-1",
@@ -916,6 +943,7 @@ func TestService_CreateTask_RewritesTaskWorktreeLocalPathToSafeLocalRepository(t
 			{LocalPath: taskPath, BaseBranch: prHeadBranch},
 		},
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -992,7 +1020,7 @@ func TestService_CreateTask_CreatesProviderRepositoryForTaskWorktreeRepositoryID
 		DefaultBranch: "main",
 	})
 
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID:    workspaceID,
 		WorkflowID:     workflowID,
 		WorkflowStepID: "step-1",
@@ -1001,6 +1029,7 @@ func TestService_CreateTask_CreatesProviderRepositoryForTaskWorktreeRepositoryID
 			{RepositoryID: badRepoID, BaseBranch: "feature/pr-head"},
 		},
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -1097,7 +1126,7 @@ func TestService_CreateTask_GitHubURLIgnoresTaskWorktreeProviderMatch(t *testing
 		DefaultBranch: "main",
 	})
 
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID:    workspaceID,
 		WorkflowID:     workflowID,
 		WorkflowStepID: "step-1",
@@ -1106,6 +1135,7 @@ func TestService_CreateTask_GitHubURLIgnoresTaskWorktreeProviderMatch(t *testing
 			{GitHubURL: "https://github.com/kdlbs/kandev/pull/1567"},
 		},
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -1960,6 +1990,8 @@ func TestService_ArchiveTaskPublishesSessionStateChangedForActiveSessions(t *tes
 		t.Fatalf("CreateTaskSession: %v", err)
 	}
 
+	clarifications := &recordingTaskClarificationCanceller{}
+	svc.SetClarificationCanceller(clarifications)
 	if err := svc.ArchiveTask(ctx, "task-1"); err != nil {
 		t.Fatalf("ArchiveTask: %v", err)
 	}
@@ -2002,6 +2034,15 @@ func TestService_ArchiveTaskPublishesSessionStateChangedForActiveSessions(t *tes
 	}
 	if session.State != models.TaskSessionStateCancelled {
 		t.Errorf("session state = %q, want CANCELLED", session.State)
+	}
+	if len(clarifications.sessions) != 1 || clarifications.sessions[0] != "session-running" {
+		t.Fatalf("expired clarification sessions = %v, want [session-running]", clarifications.sessions)
+	}
+	if len(clarifications.hasDeadline) != 1 || !clarifications.hasDeadline[0] {
+		t.Fatalf("clarification expiry deadlines = %v, want one bounded context", clarifications.hasDeadline)
+	}
+	if len(clarifications.contextErrs) != 1 || clarifications.contextErrs[0] != nil {
+		t.Fatalf("clarification expiry context errors = %v, want active context", clarifications.contextErrs)
 	}
 }
 
@@ -2698,8 +2739,9 @@ func TestService_CleanupDestructiveTaskResourcesPreservesSharedWorktree(t *testi
 	if got := cleanup.cleanedIDs(); len(got) != 0 {
 		t.Fatalf("physically cleaned worktrees = %v, want none", got)
 	}
-	if got := cleanup.releasedIDs(); len(got) != 1 || got[0] != wt.ID {
-		t.Fatalf("released worktrees = %v, want [%s]", got, wt.ID)
+	// The single environment-repository row is shared; nothing is released.
+	if got := cleanup.releasedIDs(); len(got) != 0 {
+		t.Fatalf("released worktrees = %v, want none (shared row is preserved)", got)
 	}
 	if got := cleanup.excludedSessions; len(got) != 1 || got[0] != session.ID {
 		t.Fatalf("excluded sessions = %v, want [%s]", got, session.ID)
@@ -2822,6 +2864,37 @@ func TestService_UpdateWorkflow(t *testing.T) {
 	}
 	if updated.Name != "Updated" {
 		t.Errorf("expected name 'Updated', got %s", updated.Name)
+	}
+}
+
+func TestService_UpdateWorkflow_PublishesPromptOnWorkflowEvent(t *testing.T) {
+	// Cross-tab WS sync (use-workflow-settings.ts) relies on workflow.updated
+	// carrying the current prompt, the same way it already carries
+	// description and agent_profile_id.
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	workflow := &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Original"}
+	_ = repo.CreateWorkflow(ctx, workflow)
+
+	newPrompt := "Updated prompt"
+	req := &UpdateWorkflowRequest{Prompt: &newPrompt}
+
+	if _, err := svc.UpdateWorkflow(ctx, "wf-123", req); err != nil {
+		t.Fatalf("failed to update workflow: %v", err)
+	}
+
+	if len(eventBus.publishedEvents) == 0 {
+		t.Fatal("expected a workflow.updated event to be published")
+	}
+	last := eventBus.publishedEvents[len(eventBus.publishedEvents)-1]
+	data, ok := last.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected event data to be a map, got %T", last.Data)
+	}
+	if data["prompt"] != newPrompt {
+		t.Errorf("expected published prompt %q, got %v", newPrompt, data["prompt"])
 	}
 }
 func TestService_DeleteWorkflow(t *testing.T) {
@@ -3151,6 +3224,116 @@ func TestService_CreateMessage(t *testing.T) {
 	}
 }
 
+func TestService_ClarificationMessageEventsCarryPendingActionProjection(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+	turnID := setupTestTurn(t, repo, sessionID, "task-123", "turn-clarification")
+	if err := repo.UpdateTaskSessionState(
+		ctx,
+		sessionID,
+		models.TaskSessionStateWaitingForInput,
+		"",
+	); err != nil {
+		t.Fatalf("set session waiting: %v", err)
+	}
+	eventBus.ClearEvents()
+
+	message, err := svc.CreateMessage(ctx, &CreateMessageRequest{
+		TaskSessionID: sessionID,
+		TaskID:        "task-123",
+		TurnID:        turnID,
+		Content:       "Choose",
+		AuthorType:    "agent",
+		Type:          string(models.MessageTypeClarificationRequest),
+		Metadata:      map[string]interface{}{"pending_id": "pending-1", "status": "pending"},
+	})
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	addedData := singlePublishedEventData(t, eventBus)
+	if got := addedData["pending_action"]; got != "clarification" {
+		t.Fatalf("message.added pending_action = %#v, want clarification", got)
+	}
+	addedRevision, ok := addedData["pending_action_revision"].(models.PendingActionRevision)
+	if !ok || addedRevision.Epoch == "" || addedRevision.Sequence == 0 {
+		t.Fatalf("message.added pending_action_revision = %#v", addedData["pending_action_revision"])
+	}
+
+	eventBus.ClearEvents()
+	message.Metadata["status"] = "answered"
+	if err := svc.UpdateMessage(ctx, message); err != nil {
+		t.Fatalf("UpdateMessage: %v", err)
+	}
+	data := singlePublishedEventData(t, eventBus)
+	if got, ok := data["pending_action"]; !ok || got != nil {
+		t.Fatalf("message.updated pending_action = %#v, want explicit nil", got)
+	}
+	updatedRevision, ok := data["pending_action_revision"].(models.PendingActionRevision)
+	if !ok || updatedRevision.Epoch != addedRevision.Epoch || updatedRevision.Sequence <= addedRevision.Sequence {
+		t.Fatalf("message.updated pending_action_revision = %#v, want after %#v", updatedRevision, addedRevision)
+	}
+}
+
+func TestService_OrdinaryMessageAuthorityEventsRefreshPendingAction(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+	sourceTurnID := "turn-pending-source"
+	sourceTime := time.Now().UTC().Add(-time.Minute)
+	if err := repo.CreateTurn(ctx, &models.Turn{
+		ID:            sourceTurnID,
+		TaskSessionID: sessionID,
+		TaskID:        "task-123",
+		StartedAt:     sourceTime,
+		CreatedAt:     sourceTime,
+	}); err != nil {
+		t.Fatalf("create source turn: %v", err)
+	}
+	if _, err := svc.CreateMessage(ctx, &CreateMessageRequest{
+		TaskSessionID: sessionID,
+		TaskID:        "task-123",
+		TurnID:        sourceTurnID,
+		Content:       "Choose",
+		AuthorType:    "agent",
+		Type:          string(models.MessageTypeClarificationRequest),
+		Metadata:      map[string]interface{}{"pending_id": "pending-source", "status": "pending"},
+	}); err != nil {
+		t.Fatalf("create source clarification: %v", err)
+	}
+
+	successor, err := svc.ReserveTurn(ctx, sessionID, &models.PromptDispatchRecovery{})
+	if err != nil {
+		t.Fatalf("ReserveTurn: %v", err)
+	}
+	eventBus.ClearEvents()
+	ordinary, err := svc.CreateMessage(ctx, &CreateMessageRequest{
+		TaskSessionID: sessionID,
+		TaskID:        "task-123",
+		TurnID:        successor.ID,
+		Content:       "Successor output",
+		AuthorType:    "agent",
+	})
+	if err != nil {
+		t.Fatalf("create successor message: %v", err)
+	}
+	added := singlePublishedEventData(t, eventBus)
+	if got, exists := added["pending_action"]; !exists || got != nil {
+		t.Fatalf("ordinary message.added pending_action = %#v, want explicit nil", got)
+	}
+
+	eventBus.ClearEvents()
+	if err := svc.DeleteMessage(ctx, ordinary.ID); err != nil {
+		t.Fatalf("DeleteMessage: %v", err)
+	}
+	deleted := singlePublishedEventData(t, eventBus)
+	if got := deleted["pending_action"]; got != "clarification" {
+		t.Fatalf("ordinary message.deleted pending_action = %#v, want clarification", got)
+	}
+}
+
 func TestService_CreateMessageIdempotentReturnsCommittedMessage(t *testing.T) {
 	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()
@@ -3228,8 +3411,8 @@ type failingTurnCreator struct {
 	err error
 }
 
-func (f failingTurnCreator) CreateTurn(context.Context, *models.Turn) error {
-	return f.err
+func (f failingTurnCreator) CreateTurnWithStepStamp(context.Context, *models.Turn) (bool, error) {
+	return false, f.err
 }
 
 func TestService_CreateMessageReturnsTurnStartError(t *testing.T) {

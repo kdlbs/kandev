@@ -10,6 +10,13 @@ const (
 	TaskMoved                      = "task.moved" // Manual step change via MoveTask
 	TaskQueuePromoted              = "task.queue_promoted"
 	SessionWorkspaceSourcesUpdated = "session.workspace_sources.updated"
+	// TaskDependenciesResolved fires when a task's last unresolved dependency
+	// completes successfully. Payload: {task_id, resolved_by_task_id}.
+	TaskDependenciesResolved = "task.dependencies_resolved"
+	// TaskDependencyFailed fires when a blocked task's chain halts because a
+	// predecessor failed or was cancelled. Payload:
+	// {task_id, failed_task_id, failed_state}.
+	TaskDependencyFailed = "task.dependency_failed"
 )
 
 // Event types for office task tree controls.
@@ -124,6 +131,20 @@ const (
 const (
 	AzureDevOpsWorkItemWatchMatch    = "azure_devops.work_item_watch.match"
 	AzureDevOpsPullRequestWatchMatch = "azure_devops.pull_request_watch.match"
+)
+
+// Event types for repository sets
+const (
+	RepositorySetCreated = "repository_set.created"
+	RepositorySetUpdated = "repository_set.updated"
+	RepositorySetDeleted = "repository_set.deleted"
+)
+
+// Event types for repository branch policies.
+const (
+	RepositoryBranchPolicyCreated = "repository_branch_policy.created"
+	RepositoryBranchPolicyUpdated = "repository_branch_policy.updated"
+	RepositoryBranchPolicyDeleted = "repository_branch_policy.deleted"
 )
 
 // Event types for repository scripts
@@ -260,10 +281,12 @@ const (
 
 // Event types for ACP capabilities and models
 const (
-	AgentCapabilitiesUpdated = "agent_capabilities.updated" // Agent capabilities received
-	SessionModelsUpdated     = "session_models.updated"     // Session models received
-	SessionInfoUpdated       = "session_info.updated"       // ACP session info received
-	SessionMCPStatusUpdated  = "session_mcp_status.updated" // MCP attachment evidence changed
+	AgentCapabilitiesUpdated            = "agent_capabilities.updated"              // Agent capabilities received
+	SessionModelsUpdated                = "session_models.updated"                  // Session models received
+	SessionModelFallbackUpdated         = "session_model_fallback.updated"          // Session started on the profile's fallback model
+	SessionModelSelectionWarningUpdated = "session_model_selection_warning.updated" // Executor-authoritative model decision warning
+	SessionInfoUpdated                  = "session_info.updated"                    // ACP session info received
+	SessionMCPStatusUpdated             = "session_mcp_status.updated"              // MCP attachment evidence changed
 )
 
 // Event types for session todos (ACP plan entries)
@@ -464,6 +487,30 @@ func BuildSessionModelsSubject(sessionID string) string {
 // BuildSessionModelsWildcardSubject creates a wildcard subscription for all session models events
 func BuildSessionModelsWildcardSubject() string {
 	return SessionModelsUpdated + ".*"
+}
+
+// BuildSessionModelFallbackSubject creates a session-specific fallback-model
+// subject.
+func BuildSessionModelFallbackSubject(sessionID string) string {
+	return SessionModelFallbackUpdated + "." + sessionID
+}
+
+// BuildSessionModelFallbackWildcardSubject creates a wildcard subscription
+// for all session fallback-model events.
+func BuildSessionModelFallbackWildcardSubject() string {
+	return SessionModelFallbackUpdated + ".*"
+}
+
+// BuildSessionModelSelectionWarningSubject creates a session-specific model
+// selection warning subject.
+func BuildSessionModelSelectionWarningSubject(sessionID string) string {
+	return SessionModelSelectionWarningUpdated + "." + sessionID
+}
+
+// BuildSessionModelSelectionWarningWildcardSubject creates a wildcard
+// subscription for model selection warnings.
+func BuildSessionModelSelectionWarningWildcardSubject() string {
+	return SessionModelSelectionWarningUpdated + ".*"
 }
 
 // BuildSessionMCPStatusSubject creates a session-specific MCP status subject.

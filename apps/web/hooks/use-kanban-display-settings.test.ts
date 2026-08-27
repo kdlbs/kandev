@@ -16,7 +16,10 @@ const mocks = vi.hoisted(() => {
     workflows: [
       { id: workflowId, workspaceId },
       { id: "workflow-2", workspaceId: "workspace-2" },
-    ],
+    ] as { id: string; workspaceId: string; hidden?: boolean }[],
+    snapshots: {} as Record<string, unknown>,
+    repositoryIds: [] as string[],
+    hiddenWorkflowStepIds: {} as Record<string, string[]>,
   };
 });
 
@@ -25,6 +28,7 @@ vi.mock("@/components/state-provider", () => ({
     selector({
       workspaces: { items: [], activeId: mocks.activeWorkspaceId },
       workflows: { items: mocks.workflows, activeId: mocks.activeWorkflowId },
+      kanbanMulti: { snapshots: mocks.snapshots },
       setActiveWorkspace: mocks.setActiveWorkspace,
       setActiveWorkflow: mocks.setActiveWorkflow,
       userSettings: { enablePreviewOnClick: false },
@@ -38,8 +42,9 @@ vi.mock("@/hooks/use-user-display-settings", () => ({
     settings: {
       workspaceId: mocks.workspaceId,
       workflowId: mocks.workflowId,
-      repositoryIds: [],
+      repositoryIds: mocks.repositoryIds,
       tasksListShowDetails: false,
+      hiddenWorkflowStepIds: mocks.hiddenWorkflowStepIds,
     },
     commitSettings: mocks.commitSettings,
     repositories: [],
@@ -63,6 +68,9 @@ function resetMocks() {
   });
   mocks.commitSettings.mockReset();
   mocks.setView.mockReset();
+  mocks.snapshots = {};
+  mocks.repositoryIds = [];
+  mocks.hiddenWorkflowStepIds = {};
   window.history.replaceState({}, "", "/");
 }
 
@@ -85,5 +93,58 @@ describe("useKanbanDisplaySettings", () => {
 
     act(() => result.current.onWorkflowChange(null));
     expect(window.location.search).toBe("?home=overview&workspaceId=workspace-2");
+  });
+});
+
+describe("useKanbanDisplaySettings — step visibility", () => {
+  it("derives eligibleWorkflows from selectWorkflowSwimlanes' eligible set, not the post-filter board", () => {
+    mocks.snapshots = { [mocks.workflowId]: { steps: [], tasks: [] } };
+    mocks.activeWorkflowId = null; // "All Workflows"
+
+    const { result } = renderHook(() => useKanbanDisplaySettings());
+
+    // workflow-2 has no loaded snapshot, so it is correctly excluded; only the
+    // workflow with a snapshot is eligible — same source the board renders from.
+    expect(result.current.eligibleWorkflows.map((wf) => wf.id)).toEqual([mocks.workflowId]);
+  });
+
+  it("unticking a shown step adds it to that workflow's hidden set and preserves other settings", () => {
+    mocks.repositoryIds = ["repo-1"];
+    const { result } = renderHook(() => useKanbanDisplaySettings());
+
+    act(() => result.current.onToggleStepVisibility(mocks.workflowId, "step-a"));
+
+    expect(mocks.commitSettings).toHaveBeenCalledWith({
+      workspaceId: mocks.workspaceId,
+      workflowId: mocks.workflowId,
+      repositoryIds: ["repo-1"],
+      hiddenWorkflowStepIds: { [mocks.workflowId]: ["step-a"] },
+    });
+  });
+
+  it("re-ticking a hidden step removes only that id, idempotently", () => {
+    mocks.hiddenWorkflowStepIds = { [mocks.workflowId]: ["step-a", "step-b"] };
+    const { result } = renderHook(() => useKanbanDisplaySettings());
+
+    act(() => result.current.onToggleStepVisibility(mocks.workflowId, "step-a"));
+
+    expect(mocks.commitSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hiddenWorkflowStepIds: { [mocks.workflowId]: ["step-b"] },
+      }),
+    );
+  });
+
+  it("scopes the toggle to the given workflow, leaving other workflows' hidden sets untouched", () => {
+    mocks.hiddenWorkflowStepIds = { "workflow-2": ["step-z"] };
+    const { result } = renderHook(() => useKanbanDisplaySettings());
+
+    act(() => result.current.onToggleStepVisibility(mocks.workflowId, "step-a"));
+
+    expect(mocks.commitSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hiddenWorkflowStepIds: { "workflow-2": ["step-z"], [mocks.workflowId]: ["step-a"] },
+      }),
+    );
   });
 });

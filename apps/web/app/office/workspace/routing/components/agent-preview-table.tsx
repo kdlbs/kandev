@@ -5,6 +5,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
 import type { AgentRoutePreview } from "@/lib/state/slices/office/types";
 import { providerLabel } from "./provider-order-editor";
+import { TIER_SOURCE_LABEL_KEYS } from "../../../lib/label-keys";
 import { useTranslation } from "react-i18next";
 
 type Props = {
@@ -67,14 +68,14 @@ function PreviewRow({ a }: { a: AgentRoutePreview }) {
             {a.effective_tier}
           </Badge>
           <span className="text-[10px] text-muted-foreground uppercase tracking-wide">
-            {a.tier_source}
+            {t(TIER_SOURCE_LABEL_KEYS[a.tier_source])}
           </span>
         </div>
       </TableCell>
       <TableCell>
         {a.primary_provider_id ? (
           <span className="text-xs font-mono">
-            {providerLabel(a.primary_provider_id)} / {a.primary_model || "—"}
+            {providerLabel(a.primary_provider_id)} / {a.primary_model || "-"}
           </span>
         ) : (
           <span className="text-xs text-muted-foreground italic">{t("office:noneLower")}</span>
@@ -92,7 +93,7 @@ function PreviewRow({ a }: { a: AgentRoutePreview }) {
 
 function FallbackChain({ chain }: { chain: AgentRoutePreview["fallback_chain"] }) {
   if (!chain || chain.length === 0) {
-    return <span className="text-xs text-muted-foreground">—</span>;
+    return <span className="text-xs text-muted-foreground">-</span>;
   }
   return (
     <div className="flex flex-wrap gap-1 text-[11px] font-mono">

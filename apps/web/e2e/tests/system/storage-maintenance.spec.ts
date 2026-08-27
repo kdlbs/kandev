@@ -2,7 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Route } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
-import { seedManagedGoCache } from "../../helpers/storage-maintenance";
+import {
+  mockTemporaryArtifactOverview,
+  seedManagedGoCache,
+} from "../../helpers/storage-maintenance";
 
 function seedOrphanWorkspace(tmpDir: string): { root: string; artifact: string } {
   const root = path.join(tmpDir, ".kandev", "tasks", "e2e-storage-orphan_abc");
@@ -25,6 +28,55 @@ function seedOrphanWorkspace(tmpDir: string): { root: string; artifact: string }
 }
 
 test.describe("System storage maintenance", () => {
+  test("shows registered temporary artifacts and cleans them only through quarantine", async ({
+    testPage,
+    prCapture,
+  }) => {
+    await mockTemporaryArtifactOverview(testPage);
+    await testPage.route("**/api/v1/system/storage/run", async (route) => {
+      expect(route.request().method()).toBe("POST");
+      expect(route.request().postDataJSON()).toEqual({ resources: ["temporary_artifacts"] });
+      await route.fulfill({
+        status: 202,
+        contentType: "application/json",
+        body: JSON.stringify({ job_id: "temporary-artifacts-cleanup" }),
+      });
+    });
+    await testPage.route("**/api/v1/system/jobs/**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          id: "temporary-artifacts-cleanup",
+          kind: "storage-cleanup",
+          state: "succeeded",
+          started_at: new Date().toISOString(),
+        }),
+      });
+    });
+
+    await testPage.goto("/settings/system/data-storage");
+    const trigger = testPage.getByTestId("storage-resource-temporary-artifacts-trigger");
+    await expect(trigger).toContainText("0.05 GB");
+    await trigger.click();
+    await expect(testPage.getByTestId("storage-resource-temporary-artifacts")).toContainText(
+      "1 stale eligible",
+    );
+    const cleanButton = testPage.getByTestId("storage-temporary-artifacts-clean");
+    await expect(cleanButton).toBeEnabled();
+    await cleanButton.click();
+    await expect(testPage.getByText("Clean stale Kandev artifacts?")).toBeVisible();
+    await prCapture.screenshot("temporary-artifacts-confirmation", {
+      caption: "Desktop storage confirms stale registered artifacts before quarantine",
+    });
+    await testPage.getByTestId("storage-temporary-artifacts-confirm").click();
+    await expect(testPage.getByTestId("storage-run-now")).toHaveAttribute(
+      "data-job-state",
+      "succeeded",
+      { timeout: 30_000 },
+    );
+  });
+
   test("cleans a disabled managed Go cache only through its explicit action", async ({
     testPage,
     backend,
@@ -34,8 +86,20 @@ test.describe("System storage maintenance", () => {
     const overviewResponse = testPage.waitForResponse(
       (response) => new URL(response.url()).pathname === "/api/v1/system/storage",
     );
-    await testPage.goto("/settings/system/storage");
-    const overview = await (await overviewResponse).json();
+    await testPage.goto("/settings/system/data-storage");
+    await overviewResponse;
+    // The preceding temporary-artifact scenario loads and caches a Storage
+    // snapshot. Force a fresh read after seeding this test's cache so this
+    // assertion exercises the filesystem fixture rather than the prior page.
+    await testPage.getByTestId("storage-analyze").click();
+    await expect(testPage.getByTestId("storage-analyze")).toHaveAttribute(
+      "data-job-state",
+      "succeeded",
+    );
+    const overview = await testPage.evaluate(async () => {
+      const response = await fetch("/api/v1/system/storage");
+      return response.json();
+    });
     expect(overview.summary.go_cache).toMatchObject({ owned: true });
     expect(overview.summary.go_cache.size_bytes).toBeGreaterThan(15 * 1024 * 1024 * 1024);
     await testPage.getByTestId("storage-resource-go-cache-trigger").click();
@@ -66,7 +130,7 @@ test.describe("System storage maintenance", () => {
   });
 
   test("reuses the cached snapshot until Analyze refreshes it", async ({ testPage }) => {
-    await testPage.goto("/settings/system/storage");
+    await testPage.goto("/settings/system/data-storage");
     const analyzedTime = testPage.locator("time[datetime]").filter({ hasText: "Last analyzed" });
     await expect(analyzedTime).toHaveText(/^Last analyzed .+/);
     const initialAnalyzedAt = await analyzedTime.getAttribute("datetime");
@@ -135,7 +199,7 @@ test.describe("System storage maintenance", () => {
 
     await testPage.route(overviewPattern, holdOverview);
     try {
-      await testPage.goto("/settings/system/storage");
+      await testPage.goto("/settings/system/data-storage");
       await overviewObserved;
 
       await expect(testPage.getByTestId("storage-policy-card")).toBeVisible();
@@ -170,7 +234,7 @@ test.describe("System storage maintenance", () => {
     backend,
   }) => {
     const orphan = seedOrphanWorkspace(backend.tmpDir);
-    await testPage.goto("/settings/system/storage");
+    await testPage.goto("/settings/system/data-storage");
     const overviewBox = await testPage.getByTestId("storage-overview-card").boundingBox();
     const policyBox = await testPage.getByTestId("storage-policy-card").boundingBox();
     expect(overviewBox).not.toBeNull();
@@ -280,7 +344,7 @@ test.describe("System storage maintenance", () => {
       )
       .toBe("RUNNING");
 
-    await testPage.goto("/settings/system/storage");
+    await testPage.goto("/settings/system/data-storage");
     const responsePromise = testPage.waitForResponse(
       (response) =>
         response.request().method() === "POST" &&
@@ -371,7 +435,7 @@ test.describe("System storage maintenance", () => {
         body: JSON.stringify({ job_id: "eligible-purge" }),
       });
     });
-    await testPage.goto("/settings/system/storage");
+    await testPage.goto("/settings/system/data-storage");
     await expect(
       testPage.getByTestId("storage-quarantine-eligible-entry").getByText("Eligible now"),
     ).toBeVisible();

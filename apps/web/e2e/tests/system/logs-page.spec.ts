@@ -8,9 +8,9 @@ test.describe("System Logs page", () => {
     prCapture,
   }) => {
     test.setTimeout(45_000);
-    await testPage.goto("/settings/system/logs");
+    await testPage.goto("/settings/system/data-storage");
 
-    await expect(testPage.getByTestId("system-page-title")).toHaveText("Logs");
+    await expect(testPage.getByTestId("system-page-title")).toHaveText("Data & Logs");
     await expect(
       testPage.getByText("Create a diagnostic ZIP with frontend and backend logs."),
     ).toBeVisible();
@@ -45,7 +45,7 @@ test.describe("System Logs page", () => {
     prCapture,
   }) => {
     await testPage.setViewportSize({ width: 1440, height: 900 });
-    await testPage.goto("/settings/system/logs");
+    await testPage.goto("/settings/system/data-storage");
     await testPage.getByTestId("customize-diagnostic-bundle").click();
     const dialog = testPage.getByTestId("diagnostic-bundle-dialog");
     await expect(dialog).toBeVisible();
@@ -63,7 +63,7 @@ test.describe("System Logs page", () => {
     testPage,
   }) => {
     await testPage.setViewportSize({ width: 1440, height: 900 });
-    await testPage.goto("/settings/system/logs");
+    await testPage.goto("/settings/system/data-storage");
 
     const noMessages = testPage.getByText(
       "Standard bundles do not include chat transcripts, session messages, or agent messages.",

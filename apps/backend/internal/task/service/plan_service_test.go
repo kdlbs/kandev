@@ -51,6 +51,12 @@ func createTestPlanService(t *testing.T) (*PlanService, *MockEventBus, *sqlitere
 	return svc, eventBus, repo
 }
 
+func TestResolveCoalesceWindowUsesTypedStartupValue(t *testing.T) {
+	if got := resolveCoalesceWindow(2400 * time.Millisecond); got != 2400*time.Millisecond {
+		t.Fatalf("coalesce window = %s, want 2.4s", got)
+	}
+}
+
 type nilMarkPlanRepo struct {
 	*sqliterepo.Repository
 }
@@ -430,6 +436,40 @@ func TestPlanService_AppendsWhenWindowExpired(t *testing.T) {
 	list, _ := svc.ListRevisions(ctx, "task-win")
 	if len(list) != 2 {
 		t.Fatalf("expected 2 separate revisions, got %d", len(list))
+	}
+}
+
+func TestPlanService_ForceNewRevisionPreventsCoalesce(t *testing.T) {
+	svc, _, repo := createTestPlanService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-force")
+	svc.coalesceWindow = 10 * time.Minute // same generous window as the coalesce test
+
+	_, err := svc.CreatePlan(ctx, CreatePlanRequest{
+		TaskID: "task-force", Content: "v1",
+		AuthorKind: "agent", AuthorName: "Claude",
+	})
+	if err != nil {
+		t.Fatalf("initial create: %v", err)
+	}
+	// Same author, same window — would coalesce by default (see
+	// TestPlanService_CoalescesWithinWindow) but must not when a truncating
+	// write forces a new revision so the pre-write content survives.
+	_, err = svc.UpdatePlan(ctx, UpdatePlanRequest{
+		TaskID: "task-force", Content: "v2",
+		AuthorKind: "agent", AuthorName: "Claude",
+		ForceNewRevision: true,
+	})
+	if err != nil {
+		t.Fatalf("forced update: %v", err)
+	}
+
+	list, err := svc.ListRevisions(ctx, "task-force")
+	if err != nil {
+		t.Fatalf("ListRevisions: %v", err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("expected 2 separate revisions (forced), got %d", len(list))
 	}
 }
 

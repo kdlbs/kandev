@@ -15,11 +15,22 @@ import type {
 } from "@/lib/types/http";
 import type { PermissionKey } from "@/lib/agent-permissions";
 import { normalizeAgentProfile } from "@/lib/api/domains/agent-profile-normalize";
+import type { AgentProfileKind } from "@/lib/types/agent-profile";
 
 type ProfilePermissions = Record<PermissionKey, boolean>;
 
 const { apiBaseUrl } = getBackendConfig();
 const interimSettingsInterlockHeader = "X-Kandev-Interim-Settings-Interlock";
+
+type DynamicProfilePayload = {
+  version: number;
+  candidates: Array<{
+    position: number;
+    execution_profile_id: string;
+    enabled: boolean;
+    rules?: Record<string, string>;
+  }>;
+};
 
 function normalizeAgentInPlace(agent: Agent): Agent {
   return {
@@ -56,11 +67,13 @@ export async function createAgentAction(payload: {
     {
       name: string;
       model: string;
+      kind?: AgentProfileKind;
       mode?: string;
       cli_passthrough: boolean;
       cli_flags?: CLIFlag[];
       command_prefix?: string;
       env_vars?: ProfileEnvVar[];
+      dynamic?: DynamicProfilePayload;
     } & ProfilePermissions
   >;
 }): Promise<Agent> {
@@ -95,12 +108,16 @@ export async function createAgentProfileAction(
   payload: {
     name: string;
     model: string;
+    kind?: AgentProfileKind;
+    fallback_model?: string;
+    auto_fallback?: boolean;
     mode?: string;
     config_options?: Record<string, string>;
     cli_passthrough: boolean;
     cli_flags?: CLIFlag[];
     command_prefix?: string;
     env_vars?: ProfileEnvVar[];
+    dynamic?: DynamicProfilePayload;
   } & ProfilePermissions,
 ): Promise<AgentProfile> {
   const raw = await agentSettingsRequest<unknown>(
@@ -118,6 +135,9 @@ export async function updateAgentProfileAction(
   payload: {
     name?: string;
     model?: string;
+    kind?: AgentProfileKind;
+    fallback_model?: string;
+    auto_fallback?: boolean;
     mode?: string;
     config_options?: Record<string, string>;
     allow_indexing?: boolean;
@@ -127,12 +147,31 @@ export async function updateAgentProfileAction(
     cli_flags?: CLIFlag[];
     command_prefix?: string;
     env_vars?: ProfileEnvVar[];
+    dynamic?: DynamicProfilePayload;
   },
+  force = false,
 ): Promise<AgentProfile> {
-  const raw = await agentSettingsRequest<unknown>(`${apiBaseUrl}/api/v1/agent-profiles/${id}`, {
-    method: "PATCH",
-    body: JSON.stringify(payload),
-  });
+  const raw = await agentSettingsRequest<unknown>(
+    `${apiBaseUrl}/api/v1/agent-profiles/${id}${force ? "?force=true" : ""}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    },
+  );
+  return normalizeAgentProfile(raw);
+}
+
+/**
+ * Duplicate a profile: the backend copies the source's full configuration
+ * into a new row named "<source> copy" and returns the new profile. The
+ * existing `agent.profile.created` WS notification also picks the copy up in
+ * every open settings surface.
+ */
+export async function duplicateAgentProfileAction(id: string): Promise<AgentProfile> {
+  const raw = await agentSettingsRequest<unknown>(
+    `${apiBaseUrl}/api/v1/agent-profiles/${id}/duplicate`,
+    { method: "POST" },
+  );
   return normalizeAgentProfile(raw);
 }
 
@@ -141,6 +180,7 @@ import type {
   AutomationReference,
   RoutingTierReference,
   WatcherReference,
+  UtilityAgentReference,
 } from "@/lib/types/agent-profile-errors";
 
 export type DeleteProfileResult =
@@ -151,9 +191,11 @@ export type DeleteProfileResult =
       watchers: WatcherReference[];
       routingTiers: RoutingTierReference[];
       automations: AutomationReference[];
+      utilityAgents: UtilityAgentReference[];
     }
   | { status: "error"; message: string };
 
+// eslint-disable-next-line complexity
 export async function deleteAgentProfileAction(
   id: string,
   force?: boolean,
@@ -175,7 +217,11 @@ export async function deleteAgentProfileAction(
     // conflict (the new self-heal path) must still pop the dialog.
     if (
       response.status === 409 &&
-      (body.active_sessions || body.watchers || body.routing_tiers || body.automations)
+      (body.active_sessions ||
+        body.watchers ||
+        body.routing_tiers ||
+        body.automations ||
+        body.utility_agents)
     ) {
       return {
         status: "conflict",
@@ -183,8 +229,11 @@ export async function deleteAgentProfileAction(
         watchers: body.watchers ?? [],
         routingTiers: body.routing_tiers ?? [],
         automations: body.automations ?? [],
+        utilityAgents: body.utility_agents ?? [],
       };
     }
+    // i18n-exempt: server-provided error text, or an HTTP status diagnostic when
+    // the server sent none. The toast title around it is translated.
     return {
       status: "error",
       message: body?.error || `Request failed: ${response.status} ${response.statusText}`,

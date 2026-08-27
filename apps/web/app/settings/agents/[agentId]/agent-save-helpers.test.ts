@@ -105,6 +105,13 @@ describe("toAgentProfilePatch", () => {
     });
   });
 
+  it("maps fallback_model and auto_fallback to camelCase fields", () => {
+    expect(toAgentProfilePatch({ fallback_model: "gpt-5", auto_fallback: true })).toEqual({
+      fallbackModel: "gpt-5",
+      autoFallback: true,
+    });
+  });
+
   it("omits undefined keys so partial patches do not clobber unrelated fields", () => {
     expect(toAgentProfilePatch({ cli_passthrough: false })).toEqual({ cliPassthrough: false });
     expect(toAgentProfilePatch({})).toEqual({});
@@ -147,6 +154,15 @@ describe("isProfileDirty", () => {
     const saved: AgentProfile = { ...baseProfile, mode: "plan-mock" };
     const draft = draftFrom(saved, { mode: "" });
     expect(isProfileDirty(draft, saved)).toBe(true);
+  });
+
+  it("returns true when fallbackModel or autoFallback changes", () => {
+    expect(isProfileDirty(draftFrom(baseProfile, { fallbackModel: "gpt-5" }), baseProfile)).toBe(
+      true,
+    );
+    expect(isProfileDirty(draftFrom(baseProfile, { autoFallback: true }), baseProfile)).toBe(true);
+    const saved: AgentProfile = { ...baseProfile, fallbackModel: "gpt-5", autoFallback: true };
+    expect(isProfileDirty(draftFrom(saved), saved)).toBe(false);
   });
 
   it("returns true when there is no saved profile", () => {
@@ -435,6 +451,74 @@ describe("command prefix save payloads", () => {
     expect(createAgentProfileAction).toHaveBeenCalledWith(
       savedAgent.id,
       expect.objectContaining({ command_prefix: COMMAND_PREFIX }),
+    );
+  });
+});
+
+describe("fallback model save payloads", () => {
+  it("includes fallback_model and auto_fallback when saving a dirty existing profile", async () => {
+    const savedAgent = agentWithProfiles([baseProfile]);
+    const draftProfile = draftFrom(baseProfile, {
+      fallbackModel: "gpt-5",
+      autoFallback: true,
+    });
+    const draftAgent = agentWithProfiles([draftProfile]);
+    const { callbacks } = createTestCallbacks(draftAgent);
+    vi.mocked(updateAgentProfileAction).mockResolvedValue({
+      ...baseProfile,
+      fallbackModel: "gpt-5",
+      autoFallback: true,
+    });
+
+    await saveExistingAgent(draftAgent, savedAgent, false, callbacks);
+
+    expect(updateAgentProfileAction).toHaveBeenCalledWith(
+      baseProfile.id,
+      expect.objectContaining({ fallback_model: "gpt-5", auto_fallback: true }),
+    );
+  });
+
+  it("includes the fallback fields when creating a new agent's profile", async () => {
+    const draftProfile = draftFrom(baseProfile, {
+      id: DRAFT_PROFILE_ID,
+      fallbackModel: "gpt-5",
+      autoFallback: true,
+    });
+    const draftAgent = agentWithProfiles([draftProfile]);
+    const { callbacks } = createTestCallbacks(draftAgent);
+    vi.mocked(createAgentAction).mockResolvedValue(
+      agentWithProfiles([{ ...draftProfile, id: PERSISTED_PROFILE_ID }]),
+    );
+
+    await saveNewAgent(draftAgent, callbacks);
+
+    expect(createAgentAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        profiles: [expect.objectContaining({ fallback_model: "gpt-5", auto_fallback: true })],
+      }),
+    );
+  });
+
+  it("includes the fallback fields when adding a new profile to an existing agent", async () => {
+    const savedAgent = agentWithProfiles([baseProfile]);
+    const newProfile = draftFrom(baseProfile, {
+      id: toAgentProfileId("draft-new-profile"),
+      name: "New profile",
+      fallbackModel: "gpt-5",
+      autoFallback: true,
+    });
+    const draftAgent = agentWithProfiles([baseProfile, newProfile]);
+    const { callbacks } = createTestCallbacks(draftAgent);
+    vi.mocked(createAgentProfileAction).mockResolvedValue({
+      ...newProfile,
+      id: PERSISTED_PROFILE_ID,
+    });
+
+    await saveExistingAgent(draftAgent, savedAgent, false, callbacks);
+
+    expect(createAgentProfileAction).toHaveBeenCalledWith(
+      savedAgent.id,
+      expect.objectContaining({ fallback_model: "gpt-5", auto_fallback: true }),
     );
   });
 });

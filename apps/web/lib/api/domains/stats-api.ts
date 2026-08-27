@@ -1,6 +1,6 @@
 import { fetchJson, type ApiRequestOptions } from "../client";
 import type {
-  AgentUsageDTO,
+  ModelUsageDTO,
   CompletedTaskActivityDTO,
   DailyActivityDTO,
   GitStatsDTO,
@@ -59,12 +59,12 @@ export function fetchCompletedActivity(
   );
 }
 
-export function fetchAgentUsage(
+export function fetchModelUsage(
   workspaceId: string,
   options?: ApiRequestOptions,
   range?: StatsRange,
 ) {
-  return fetchJson<AgentUsageDTO[]>(statsUrl(workspaceId, "agent-usage", range), options);
+  return fetchJson<ModelUsageDTO[]>(statsUrl(workspaceId, "model-usage", range), options);
 }
 
 export function fetchRepositoryStats(

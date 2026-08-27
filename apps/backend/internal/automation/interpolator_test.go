@@ -20,13 +20,13 @@ func TestInterpolatePrompt_Scheduled(t *testing.T) {
 
 func TestInterpolatePrompt_PR(t *testing.T) {
 	data, _ := json.Marshal(map[string]any{
-		"number":       42,
-		"title":        "Fix the bug",
-		"html_url":     "https://github.com/org/repo/pull/42",
-		"author_login": "alice",
-		"repo":         "org/repo",
-		"head_branch":  "fix-bug",
-		"base_branch":  "main",
+		"number":                42,
+		"title":                 "Fix the bug",
+		"html_url":              "https://github.com/org/repo/pull/42",
+		"author_login":          "alice",
+		automationRepoKey:       "org/repo",
+		"head_branch":           "fix-bug",
+		automationBaseBranchKey: defaultBranchMain,
 	})
 	prompt := "Review PR #{{pr.number}} '{{pr.title}}' by {{pr.author}} in {{pr.repo}}"
 	result := InterpolatePrompt(prompt, TriggerTypeGitHubPR, data)

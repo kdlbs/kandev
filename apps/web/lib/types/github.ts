@@ -217,8 +217,19 @@ export type MergeableState =
   | "unknown"
   | "";
 
+/** Normalized GitHub merge-queue entry states. Future provider values are
+ * retained as strings so the UI can use a generic queued presentation. */
+export type MergeQueueState =
+  | "queued"
+  | "awaiting_checks"
+  | "mergeable"
+  | "unmergeable"
+  | "locked"
+  | (string & {});
+
 export type TaskPR = {
   id: string;
+  workspace_id: string;
   task_id: string;
   /** ID of the task repository this PR belongs to. Empty for legacy single-repo
    *  tasks persisted before multi-repo support. */
@@ -254,6 +265,42 @@ export type TaskPR = {
   closed_at: string | null;
   last_synced_at: string | null;
   updated_at: string;
+  /** Current pull-request head used to explain safe queue recovery. */
+  head_sha?: string;
+  /** Empty when GitHub did not return an active merge-queue entry. */
+  merge_queue_state?: MergeQueueState;
+  merge_queue_entry_id?: string;
+  merge_queue_entry_head_sha?: string;
+  /** GitHub's one-based queue position, when available. */
+  merge_queue_position?: number | null;
+  /** GitHub's estimated time to merge in seconds, when available. */
+  merge_queue_estimated_time_to_merge_seconds?: number | null;
+  merge_queue_last_removal_id?: string;
+  merge_queue_last_removed_at?: string | null;
+  merge_queue_last_removal_reason?: string;
+  merge_queue_last_removal_before_sha?: string;
+  // The five PR-outcome-attribution fields below are always present on a
+  // real API/WS payload (the backend sends every key, never omits one) — the
+  // `?:` here follows this file's existing convention for nullable fields
+  // added after the type's original shape (e.g. required_reviews?) so
+  // hand-written test fixtures aren't forced to enumerate all five. Treat
+  // `undefined` the same as `null` ("nobody looked" / "never observed");
+  // never treat `null` as "unknown" or vice versa.
+  /** Never observed by a populating sync when null. */
+  is_draft?: boolean | null;
+  /** Never observed when null, distinct from 0 (a real "no files changed" observation). */
+  changed_files?: number | null;
+  /** Not merged, or merged but never observed by a populating sync, when null. */
+  merged_by_login?: string | null;
+  /** Not closed, or closure never observed by the GraphQL path specifically
+   *  (closed_by is absent from the REST pulls endpoint and the gh CLI's PR
+   *  field set), when null. A PR closed only through those paths keeps this
+   *  null permanently. */
+  closed_by_login?: string | null;
+  /** A latched observation, never a merge cause: GitHub clears auto_merge
+   *  once it fires, so this can only mean "armed at some instant while
+   *  Kandev was watching." */
+  auto_merge_observed_at?: string | null;
 };
 
 /** Workspace-scoped websocket payload emitted when a task PR association is detached. */
@@ -262,6 +309,14 @@ export type TaskPRDeletedEvent = {
   task_id: string;
   association_id: string;
 };
+
+export type CIAutomationQueueRemovalCause =
+  | "checks_failed"
+  | "checks_timed_out"
+  | "conflict"
+  | "manual"
+  | "branch_protection"
+  | "unknown";
 
 export type TaskCIPRAutomationState = {
   task_id: string;
@@ -275,6 +330,9 @@ export type TaskCIPRAutomationState = {
   auto_fix_exhausted_at: string | null;
   last_merge_signature: string;
   last_merge_attempt_at: string | null;
+  last_queue_attempt_head_sha?: string;
+  last_queue_fix_event_id?: string;
+  last_queue_removal_cause?: CIAutomationQueueRemovalCause | string;
   review_request_initialized?: boolean;
   last_review_requested?: boolean;
   last_observed_pr_state?: string;
@@ -286,8 +344,25 @@ export type TaskCIPRAutomationState = {
   updated_at: string;
 };
 
+// TaskPRAutomationOptions holds the five automation switches for one linked
+// PR. This is the per-PR source of truth; the aggregated booleans on
+// TaskCIAutomationOptions only report "every linked PR has this on".
+export type TaskPRAutomationOptions = {
+  task_id: string;
+  repository_id: string;
+  pr_number: number;
+  auto_fix_enabled: boolean;
+  auto_merge_enabled: boolean;
+  prompt_on_review_requested: boolean;
+  prompt_on_merged: boolean;
+  prompt_on_closed: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
 export type TaskCIAutomationOptions = {
   task_id: string;
+  workspace_id?: string;
   auto_fix_enabled: boolean;
   auto_merge_enabled: boolean;
   auto_fix_prompt_override: string | null;
@@ -300,9 +375,14 @@ export type TaskCIAutomationOptions = {
   review_reviewer_login?: string;
   updated_at: string;
   pr_states: TaskCIPRAutomationState[];
+  pr_options: TaskPRAutomationOptions[];
 };
 
 export type TaskCIAutomationPatch = {
+  // Target one linked PR's automation switches; omit both to apply the
+  // switches to every PR currently linked to the task.
+  repository_id?: string;
+  pr_number?: number;
   auto_fix_enabled?: boolean;
   auto_merge_enabled?: boolean;
   auto_fix_prompt_override?: string | null;

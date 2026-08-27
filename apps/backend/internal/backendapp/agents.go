@@ -2,11 +2,14 @@ package backendapp
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"strings"
 
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/credentials"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
@@ -29,6 +32,10 @@ func provideLifecycleManager(
 	agentRegistry *registry.Registry,
 	secretStore secrets.SecretStore,
 	baseBranchProvider lifecycle.BaseBranchProvider,
+	comparisonTargetProvider lifecycle.ComparisonTargetProvider,
+	managedRuntimeSelections managedruntime.SelectionReader,
+	mcpIdentityScoper lifecycle.MCPIdentityScoper,
+	mcpPrincipalScoper lifecycle.MCPPrincipalScoper,
 ) (*lifecycle.Manager, error) {
 	log.Info("Initializing Agent Manager...")
 
@@ -88,7 +95,7 @@ func provideLifecycleManager(
 	}
 	credsMgr.AddProvider(credentials.NewEnvProvider("KANDEV_"))
 	credsMgr.AddProvider(credentials.NewAugmentSessionProvider())
-	if credsFile := os.Getenv("KANDEV_CREDENTIALS_FILE"); credsFile != "" {
+	if credsFile := credentialFilePath(cfg); credsFile != "" {
 		credsMgr.AddProvider(credentials.NewFileProvider(credsFile))
 	}
 
@@ -120,6 +127,9 @@ func provideLifecycleManager(
 	preparerRegistry.Register(models.ExecutorTypeSSH, lifecycle.NewSSHPreparer(log))
 	lifecycleMgr.SetPreparerRegistry(preparerRegistry)
 	lifecycleMgr.SetSecretStore(secretStore)
+	if err := lifecycleMgr.SetAgentctlStartupConfig(cfg.ManagedAgentctlStartupConfig()); err != nil {
+		return nil, fmt.Errorf("configure managed agentctl startup: %w", err)
+	}
 	// Record the standalone agentctl control-server PID (populated by
 	// provideAgentctlLauncher, which runs before this) so local/standalone
 	// executor rows carry a real host-local liveness handle.
@@ -129,12 +139,26 @@ func provideLifecycleManager(
 	// enrichment fields. Without a wired SkillDeployer this is a no-op,
 	// but the reader still lets future Wave-B/C consumers light up.
 	lifecycleMgr.SetAgentProfileReader(agentSettingsRepo)
+	lifecycleMgr.SetManagedRuntimeSelectionStore(managedRuntimeSelections)
 
 	// MCP handler is set later in main.go after MCP handlers are registered
 	// via lifecycleMgr.SetMCPHandler(gateway.Dispatcher)
 	// Wire the base-branch provider before Start so recovered executions are
 	// seeded during startup as well as newly-created executions.
 	lifecycleMgr.SetBaseBranchProvider(baseBranchProvider)
+	// Wire the comparison-target provider before Start so recovered executions
+	// hydrate the exact provider-qualified ref before their first status poll.
+	lifecycleMgr.SetComparisonTargetProvider(comparisonTargetProvider)
+	// Recovered executions can dispatch MCP calls as soon as Start resumes
+	// their streams. Install both trusted scopes before Start, not after route
+	// registration, so the first recovered call has the same authority boundary
+	// as every later call.
+	if mcpIdentityScoper != nil {
+		lifecycleMgr.SetMCPIdentityScoper(mcpIdentityScoper)
+	}
+	if mcpPrincipalScoper != nil {
+		lifecycleMgr.SetMCPPrincipalScoper(mcpPrincipalScoper)
+	}
 
 	if err := lifecycleMgr.Start(ctx); err != nil {
 		return nil, err
@@ -144,4 +168,11 @@ func provideLifecycleManager(
 		zap.Int("runtimes", len(executorRegistry.List())),
 		zap.Int("agent_types", len(agentRegistry.List())))
 	return lifecycleMgr, nil
+}
+
+func credentialFilePath(cfg *config.Config) string {
+	if cfg != nil {
+		return strings.TrimSpace(cfg.Credentials.File)
+	}
+	return strings.TrimSpace(os.Getenv("KANDEV_CREDENTIALS_FILE"))
 }

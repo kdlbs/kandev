@@ -9,7 +9,7 @@ import path from "node:path";
  *
  * The image carries:
  *   - openssh-server + openssh-sftp-server (the remote target)
- *   - git + bash + sudo + coreutils (for the SSH executor's prepare scripts)
+ *   - git + bash + curl + sudo + coreutils (for prepare scripts and broker health checks)
  *   - iproute2 + iptables (for fault-injection: drop traffic mid-session)
  *   - a pre-baked `mock-agent` binary at /usr/local/bin/mock-agent so the
  *     agentctl process the SSH executor uploads has something to spawn when
@@ -72,8 +72,11 @@ RUN apk add --no-cache \\
     openssh-sftp-server \\
     git \\
     bash \\
+    curl \\
     sudo \\
     shadow \\
+    nodejs \\
+    npm \\
     coreutils \\
     ca-certificates \\
     iproute2 \\
@@ -108,7 +111,10 @@ RUN apk add --no-cache \\
 # Go suite already produces). Without it agentctl can't spawn an agent
 # subprocess; with it, the SSH executor can drive a full task end-to-end.
 COPY mock-agent-linux-amd64 /usr/local/bin/mock-agent
+RUN rm -f /usr/local/bin/npx
+COPY managed-runtime-npx.sh /usr/local/bin/npx
 RUN chmod +x /usr/local/bin/mock-agent
+RUN chmod +x /usr/local/bin/npx
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
@@ -150,6 +156,10 @@ export function buildE2ESSHImage(): void {
     fs.writeFileSync(path.join(ctxDir, "Dockerfile"), DOCKERFILE);
     fs.writeFileSync(path.join(ctxDir, "entrypoint.sh"), ENTRYPOINT);
     fs.copyFileSync(mockAgentPath, path.join(ctxDir, "mock-agent-linux-amd64"));
+    fs.copyFileSync(
+      path.resolve(__dirname, "managed-runtime-npx.sh"),
+      path.join(ctxDir, "managed-runtime-npx.sh"),
+    );
     execFileSync("docker", ["build", "-t", SSH_E2E_IMAGE_TAG, ctxDir], {
       stdio: process.env.E2E_DEBUG ? "inherit" : "ignore",
       // 15-minute ceiling — even cold-cache builds (apk add openssh-server

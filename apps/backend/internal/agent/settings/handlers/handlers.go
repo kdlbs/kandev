@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,6 +19,8 @@ import (
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
+
+const queryTrue = "true"
 
 var availableAgentsBroadcastTimeout = 10 * time.Second
 
@@ -56,6 +59,8 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.GET("/agents", h.httpListAgents)
 	api.POST("/agents", h.interlock, h.httpCreateAgent)
 	api.POST("/agents/tui", h.interlock, h.httpCreateCustomTUIAgent)
+	api.GET("/agents/tui/mcp-strategies", h.httpListMCPStrategies)
+	api.PATCH("/agents/tui/:id/mcp", h.interlock, h.httpUpdateCustomTUIAgentMCP)
 	api.GET("/agents/:id", h.httpGetAgent)
 	api.PATCH("/agents/:id", h.interlock, h.httpUpdateAgent)
 	api.DELETE("/agents/:id", h.interlock, h.httpDeleteAgent)
@@ -65,6 +70,7 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.POST("/agent-models/:agentName/resolve", h.httpResolveAgentModelConfig)
 	api.POST("/agent-command-preview/:agentName", h.httpPreviewAgentCommand)
 	api.POST("/agent-install/:agentName", h.interlock, h.httpInstallAgent)
+	api.GET("/agent-update/status", h.httpListAgentUpdateStatuses)
 	api.GET("/agent-update/:agentName/preview", h.httpPreviewAgentUpdate)
 	api.GET("/agent-install/jobs", h.httpListInstallJobs)
 	api.GET("/agent-install/jobs/:id", h.httpGetInstallJob)
@@ -73,6 +79,7 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.GET("/agent-update/jobs/:id", h.httpGetAgentUpdateJob)
 	api.PATCH("/agent-profiles/:id", h.interlock, h.httpUpdateProfile)
 	api.DELETE("/agent-profiles/:id", h.interlock, h.httpDeleteProfile)
+	api.POST("/agent-profiles/:id/duplicate", h.interlock, h.httpDuplicateProfile)
 	api.GET("/agent-profiles/:id/mcp-config", h.httpGetProfileMcpConfig)
 	api.POST("/agent-profiles/:id/mcp-config", h.interlock, h.httpUpdateProfileMcpConfig)
 }
@@ -120,8 +127,25 @@ func (h *Handlers) httpUpdateAgentRuntime(c *gin.Context) {
 	if !ok {
 		return
 	}
+	var request dto.AgentUpdateRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "target version is required"})
+		return
+	}
+	request.TargetVersion = strings.TrimSpace(request.TargetVersion)
+	if request.UseDefault && request.TargetVersion != "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "target version and use_default cannot be combined"})
+		return
+	}
+	if !request.UseDefault && request.TargetVersion == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "target version is required"})
+		return
+	}
 	h.enqueueMaintenance(c, name, "update", func() (any, error) {
-		return h.controller.EnqueueAgentUpdate(name)
+		if request.UseDefault {
+			return h.controller.EnqueueAgentUpdateUseDefault(c.Request.Context(), name)
+		}
+		return h.controller.EnqueueAgentUpdate(c.Request.Context(), name, request.TargetVersion)
 	}, classifyUpdateError)
 }
 
@@ -130,7 +154,27 @@ func (h *Handlers) httpPreviewAgentUpdate(c *gin.Context) {
 	if !ok {
 		return
 	}
-	preview, err := h.controller.PreviewAgentUpdate(c.Request.Context(), name)
+	targetVersion := strings.TrimSpace(c.Query("target_version"))
+	useDefault := false
+	if raw := strings.TrimSpace(c.Query("use_default")); raw != "" {
+		parsed, err := strconv.ParseBool(raw)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "use_default must be a boolean"})
+			return
+		}
+		useDefault = parsed
+	}
+	if useDefault && targetVersion != "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "target version and use_default cannot be combined"})
+		return
+	}
+	var preview *dto.AgentUpdatePreviewDTO
+	var err error
+	if useDefault {
+		preview, err = h.controller.PreviewAgentUpdateUseDefault(c.Request.Context(), name)
+	} else {
+		preview, err = h.controller.PreviewAgentUpdate(c.Request.Context(), name, targetVersion)
+	}
 	if err == nil {
 		c.JSON(http.StatusOK, preview)
 		return
@@ -141,6 +185,16 @@ func (h *Handlers) httpPreviewAgentUpdate(c *gin.Context) {
 	}
 	h.logger.Error("failed to preview agent runtime update", zap.String("agent", name), zap.Error(err))
 	c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to preview agent update"})
+}
+
+func (h *Handlers) httpListAgentUpdateStatuses(c *gin.Context) {
+	resp, err := h.controller.ListAgentUpdateStatuses(c.Request.Context())
+	if err != nil {
+		h.logger.Error("failed to list agent runtime update statuses", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list agent update statuses"})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 func requireAgentName(c *gin.Context) (string, bool) {
@@ -208,6 +262,12 @@ func classifyUpdateError(err error) (int, string, bool) {
 		return http.StatusBadRequest, "agent runtime update unsupported", true
 	case errors.Is(err, controller.ErrRuntimeUpdaterUnavailable):
 		return http.StatusServiceUnavailable, "agent update service not ready", true
+	case errors.Is(err, controller.ErrRuntimeUpdateTargetRequired):
+		return http.StatusBadRequest, "target version is required", true
+	case errors.Is(err, controller.ErrRuntimeUpdateTargetInvalid):
+		return http.StatusBadRequest, "target version is invalid", true
+	case errors.Is(err, controller.ErrRuntimeUpdateTargetMissing):
+		return http.StatusBadRequest, "target version is not published", true
 	default:
 		return 0, "", false
 	}
@@ -218,7 +278,13 @@ func classifyUpdatePreviewError(err error) (int, string, bool) {
 		return status, message, true
 	}
 	if errors.Is(err, controller.ErrRuntimeUpdatePreviewFailed) {
-		return http.StatusBadGateway, "unable to resolve latest runtime version", true
+		return http.StatusBadGateway, "unable to resolve runtime versions", true
+	}
+	if errors.Is(err, controller.ErrRuntimeUpdateTargetInvalid) {
+		return http.StatusBadRequest, "target version is invalid", true
+	}
+	if errors.Is(err, controller.ErrRuntimeUpdateTargetMissing) {
+		return http.StatusBadRequest, "target version is not published", true
 	}
 	return 0, "", false
 }
@@ -306,6 +372,8 @@ type createAgentRequest struct {
 type createAgentProfileRequest struct {
 	Name          string                 `json:"name"`
 	Model         string                 `json:"model"`
+	FallbackModel string                 `json:"fallback_model,omitempty"`
+	AutoFallback  bool                   `json:"auto_fallback"`
 	Mode          string                 `json:"mode,omitempty"`
 	CLIFlags      []dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
 	EnvVars       []dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
@@ -331,6 +399,8 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 		profiles = append(profiles, controller.CreateAgentProfileRequest{
 			Name:          profile.Name,
 			Model:         profile.Model,
+			FallbackModel: profile.FallbackModel,
+			AutoFallback:  profile.AutoFallback,
 			Mode:          profile.Mode,
 			CLIFlags:      profile.CLIFlags,
 			EnvVars:       profile.EnvVars,
@@ -490,16 +560,19 @@ func (h *Handlers) httpUpdateProfileMcpConfig(c *gin.Context) {
 }
 
 type createProfileRequest struct {
-	Name           string                 `json:"name"`
-	Model          string                 `json:"model"`
-	Mode           string                 `json:"mode,omitempty"`
-	ConfigOptions  map[string]string      `json:"config_options,omitempty"`
-	AllowIndexing  bool                   `json:"allow_indexing"`
-	AutoApprove    bool                   `json:"auto_approve"`
-	CLIPassthrough bool                   `json:"cli_passthrough"`
-	CLIFlags       []dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
-	EnvVars        []dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
-	CommandPrefix  string                 `json:"command_prefix,omitempty"`
+	Name           string                      `json:"name"`
+	Model          string                      `json:"model"`
+	FallbackModel  string                      `json:"fallback_model,omitempty"`
+	AutoFallback   bool                        `json:"auto_fallback"`
+	Mode           string                      `json:"mode,omitempty"`
+	ConfigOptions  map[string]string           `json:"config_options,omitempty"`
+	AllowIndexing  bool                        `json:"allow_indexing"`
+	AutoApprove    bool                        `json:"auto_approve"`
+	CLIPassthrough bool                        `json:"cli_passthrough"`
+	CLIFlags       []dto.CLIFlagDTO            `json:"cli_flags,omitempty"`
+	EnvVars        []dto.ProfileEnvVarDTO      `json:"env_vars,omitempty"`
+	CommandPrefix  string                      `json:"command_prefix,omitempty"`
+	Dynamic        *dto.DynamicAgentProfileDTO `json:"dynamic,omitempty"`
 }
 
 func (h *Handlers) httpCreateProfile(c *gin.Context) {
@@ -516,6 +589,8 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 		AgentID:        c.Param("id"),
 		Name:           body.Name,
 		Model:          body.Model,
+		FallbackModel:  body.FallbackModel,
+		AutoFallback:   body.AutoFallback,
 		Mode:           body.Mode,
 		ConfigOptions:  body.ConfigOptions,
 		AllowIndexing:  body.AllowIndexing,
@@ -524,8 +599,20 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 		CLIFlags:       body.CLIFlags,
 		EnvVars:        body.EnvVars,
 		CommandPrefix:  body.CommandPrefix,
+		Dynamic:        body.Dynamic,
 	})
 	if err != nil {
+		if errors.Is(err, controller.ErrDynamicAgentRoutingDisabled) {
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
+		if errors.Is(err, controller.ErrDynamicProfileCandidatesRequired) ||
+			errors.Is(err, controller.ErrDynamicProfilePositions) ||
+			errors.Is(err, controller.ErrDynamicProfileRule) ||
+			errors.Is(err, controller.ErrDynamicProfileCandidate) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -534,27 +621,25 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create profile"})
 		return
 	}
-	if h.hub != nil {
-		notification, _ := ws.NewNotification(ws.ActionAgentProfileCreated, gin.H{
-			"profile": resp,
-		})
-		h.hub.Broadcast(notification)
-	}
+	h.broadcastProfileEvent(ws.ActionAgentProfileCreated, resp)
 	c.JSON(http.StatusOK, resp)
 }
 
 type updateProfileRequest struct {
-	Name           *string                 `json:"name,omitempty"`
-	Model          *string                 `json:"model,omitempty"`
-	Mode           *string                 `json:"mode,omitempty"`
-	ConfigOptions  *map[string]string      `json:"config_options,omitempty"`
-	AllowIndexing  *bool                   `json:"allow_indexing,omitempty"`
-	AutoApprove    *bool                   `json:"auto_approve,omitempty"`
-	CLIPassthrough *bool                   `json:"cli_passthrough,omitempty"`
-	Enabled        *bool                   `json:"enabled,omitempty"`
-	CLIFlags       *[]dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
-	EnvVars        *[]dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
-	CommandPrefix  *string                 `json:"command_prefix,omitempty"`
+	Name           *string                     `json:"name,omitempty"`
+	Model          *string                     `json:"model,omitempty"`
+	FallbackModel  *string                     `json:"fallback_model,omitempty"`
+	AutoFallback   *bool                       `json:"auto_fallback,omitempty"`
+	Mode           *string                     `json:"mode,omitempty"`
+	ConfigOptions  *map[string]string          `json:"config_options,omitempty"`
+	AllowIndexing  *bool                       `json:"allow_indexing,omitempty"`
+	AutoApprove    *bool                       `json:"auto_approve,omitempty"`
+	CLIPassthrough *bool                       `json:"cli_passthrough,omitempty"`
+	Enabled        *bool                       `json:"enabled,omitempty"`
+	CLIFlags       *[]dto.CLIFlagDTO           `json:"cli_flags,omitempty"`
+	EnvVars        *[]dto.ProfileEnvVarDTO     `json:"env_vars,omitempty"`
+	CommandPrefix  *string                     `json:"command_prefix,omitempty"`
+	Dynamic        *dto.DynamicAgentProfileDTO `json:"dynamic,omitempty"`
 }
 
 func (h *Handlers) httpUpdateProfile(c *gin.Context) {
@@ -571,6 +656,8 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 		ID:             c.Param("id"),
 		Name:           body.Name,
 		Model:          body.Model,
+		FallbackModel:  body.FallbackModel,
+		AutoFallback:   body.AutoFallback,
 		Mode:           body.Mode,
 		ConfigOptions:  body.ConfigOptions,
 		AllowIndexing:  body.AllowIndexing,
@@ -580,6 +667,8 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 		CLIFlags:       body.CLIFlags,
 		EnvVars:        body.EnvVars,
 		CommandPrefix:  body.CommandPrefix,
+		Dynamic:        body.Dynamic,
+		Force:          c.Query("force") == queryTrue,
 	})
 	if err != nil {
 		if err == controller.ErrAgentProfileNotFound {
@@ -590,17 +679,89 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		if errors.Is(err, controller.ErrDynamicAgentRoutingDisabled) ||
+			errors.Is(err, controller.ErrDynamicProfileVersionConflict) {
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
+		if errors.Is(err, controller.ErrDynamicProfileCandidatesRequired) ||
+			errors.Is(err, controller.ErrDynamicProfilePositions) ||
+			errors.Is(err, controller.ErrDynamicProfileRule) ||
+			errors.Is(err, controller.ErrDynamicProfileCandidate) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		var inUseErr *controller.ErrProfileInUseDetail
+		if errors.As(err, &inUseErr) {
+			c.JSON(http.StatusConflict, gin.H{
+				"error":            "agent profile is in use",
+				"utility_agents":   inUseErr.UtilityAgents,
+				"dynamic_profiles": inUseErr.DynamicProfiles,
+			})
+			return
+		}
 		h.logger.Error("failed to update profile", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update profile"})
 		return
 	}
-	if h.hub != nil {
-		notification, _ := ws.NewNotification(ws.ActionAgentProfileUpdated, gin.H{
-			"profile": resp,
-		})
-		h.hub.Broadcast(notification)
-	}
+	h.broadcastProfileEvent(ws.ActionAgentProfileUpdated, resp)
 	c.JSON(http.StatusOK, resp)
+}
+
+// httpDuplicateProfile copies a profile's full configuration into a new row
+// named "<source> copy" and returns the new profile. No request body: the
+// copy name is derived server-side. The existing agent.profile.created
+// notification lets every open settings surface pick the copy up live.
+func (h *Handlers) httpDuplicateProfile(c *gin.Context) {
+	profileID := c.Param("id")
+	if profileID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "profile id is required"})
+		return
+	}
+	resp, err := h.controller.DuplicateProfile(c.Request.Context(), controller.DuplicateProfileRequest{
+		ID: profileID,
+	})
+	if err != nil {
+		if err == controller.ErrAgentProfileNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "agent profile not found"})
+			return
+		}
+		if errors.Is(err, controller.ErrDynamicProfileDuplicationUnsupported) {
+			c.JSON(http.StatusConflict, gin.H{"error": "dynamic profiles cannot be duplicated"})
+			return
+		}
+		h.logger.Error("failed to duplicate profile", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to duplicate profile"})
+		return
+	}
+	h.broadcastProfileEvent(ws.ActionAgentProfileCreated, resp)
+	c.JSON(http.StatusOK, resp)
+}
+
+// broadcastProfileEvent fans a profile create/update/delete event out.
+// Kanban profiles (empty WorkspaceID) go to every settings client.
+// Office-scoped profiles are routed through the workspace-scoped broadcaster
+// so their configuration (env vars, servers, ...) never leaks across
+// workspace/user boundaries — the HTTP agent list hides them via
+// filterGlobalProfiles, and the WS path must not contradict that. When the
+// hub does not support workspace routing (test fakes), the office event is
+// dropped fail-closed.
+func (h *Handlers) broadcastProfileEvent(action string, profile *dto.AgentProfileDTO) {
+	if h.hub == nil {
+		return
+	}
+	notification, _ := ws.NewNotification(action, gin.H{
+		"profile": profile,
+	})
+	if profile.WorkspaceID != "" {
+		if workspaceHub, ok := h.hub.(interface {
+			BroadcastToWorkspaceOrDrop(string, *ws.Message)
+		}); ok {
+			workspaceHub.BroadcastToWorkspaceOrDrop(profile.WorkspaceID, notification)
+		}
+		return
+	}
+	h.hub.Broadcast(notification)
 }
 
 func (h *Handlers) httpDeleteProfile(c *gin.Context) {
@@ -614,11 +775,13 @@ func (h *Handlers) httpDeleteProfile(c *gin.Context) {
 		var inUseErr *controller.ErrProfileInUseDetail
 		if errors.As(err, &inUseErr) {
 			c.JSON(http.StatusConflict, gin.H{
-				"error":           "agent profile is in use",
-				"active_sessions": inUseErr.ActiveSessions,
-				"watchers":        inUseErr.Watchers,
-				"routing_tiers":   inUseErr.RoutingTiers,
-				"automations":     inUseErr.Automations,
+				"error":            "agent profile is in use",
+				"active_sessions":  inUseErr.ActiveSessions,
+				"watchers":         inUseErr.Watchers,
+				"routing_tiers":    inUseErr.RoutingTiers,
+				"automations":      inUseErr.Automations,
+				"utility_agents":   inUseErr.UtilityAgents,
+				"dynamic_profiles": inUseErr.DynamicProfiles,
 			})
 			return
 		}
@@ -626,12 +789,7 @@ func (h *Handlers) httpDeleteProfile(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete profile"})
 		return
 	}
-	if h.hub != nil {
-		notification, _ := ws.NewNotification(ws.ActionAgentProfileDeleted, gin.H{
-			"profile": profile,
-		})
-		h.hub.Broadcast(notification)
-	}
+	h.broadcastProfileEvent(ws.ActionAgentProfileDeleted, profile)
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 

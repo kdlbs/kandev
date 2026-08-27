@@ -76,7 +76,7 @@ test.describe("@chat last prompt scroll affordance", () => {
     await expect(chat.getByTestId("scroll-to-start-button")).toHaveCount(0);
   });
 
-  test("loads older pages only until it finds the latest prompt", async ({
+  test("keeps task opening bounded before last-prompt navigation", async ({
     testPage,
     apiClient,
     seedData,
@@ -110,7 +110,8 @@ test.describe("@chat last prompt scroll affordance", () => {
     await expect(marker).not.toBeInViewport();
     const button = chat.getByTestId("scroll-to-last-prompt-button");
     await expect(button).toBeVisible({ timeout: 15_000 });
-    expect(olderPageRequests.length).toBeGreaterThan(0);
+    // Opening the task must not fetch older pages just to locate the prompt.
+    expect(olderPageRequests).toHaveLength(0);
     await expect(chat.getByText(FIRST_PROMPT_MARKER, { exact: false })).toHaveCount(0);
     await button.click();
     await expect(marker).toBeInViewport({ timeout: 10_000 });
@@ -285,7 +286,24 @@ test.describe("@chat last prompt scroll affordance", () => {
       .getByTestId("scroll-to-last-prompt-button");
     await scrollButton.click();
     await expect(marker).toBeInViewport({ timeout: 10_000 });
-    await testPage.waitForTimeout(500);
+    // The scroll is animated, so `toBeInViewport` can pass mid-flight. Wait
+    // for the container's scrollTop to stop changing before sampling geometry
+    // from it, rather than assuming the animation fits in a fixed budget.
+    let previousScrollTop = Number.NaN;
+    await expect
+      .poll(
+        async () => {
+          const current = await chat.evaluate(
+            (root) =>
+              root.querySelector<HTMLElement>(".chat-message-list")?.scrollTop ?? Number.NaN,
+          );
+          const settled = current === previousScrollTop;
+          previousScrollTop = current;
+          return settled;
+        },
+        { timeout: 10_000, message: "scroll animation did not settle" },
+      )
+      .toBe(true);
 
     const partialGeometry = await chat.evaluate((root, markerText) => {
       const scrollContainer = root.querySelector<HTMLElement>(".chat-message-list");

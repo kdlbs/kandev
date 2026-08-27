@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/gitcredentials"
 	githubpkg "github.com/kandev/kandev/internal/github"
 	jirapkg "github.com/kandev/kandev/internal/jira"
 	linearpkg "github.com/kandev/kandev/internal/linear"
@@ -38,6 +39,8 @@ import (
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	userservice "github.com/kandev/kandev/internal/user/service"
+	utilitymodels "github.com/kandev/kandev/internal/utility/models"
+	utilityservice "github.com/kandev/kandev/internal/utility/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 )
@@ -64,6 +67,7 @@ func provideOrchestrator(
 	repoCloner *repoclone.Cloner,
 	promptSvc *promptservice.Service,
 	githubSvc *githubpkg.Service,
+	gitCredentialBroker *gitcredentials.Broker,
 ) (*orchestrator.Service, *messageCreatorAdapter, error) {
 	if lifecycleMgr == nil {
 		return nil, nil, errors.New("lifecycle manager is required: configure agent runtime (docker or standalone)")
@@ -93,13 +97,17 @@ func provideOrchestrator(
 	if err != nil {
 		return nil, nil, fmt.Errorf("init message queue repo: %w", err)
 	}
-	maxPerSession := resolveQueueMaxPerSession(pool, log)
-	mergeEnabled := resolveQueueMergeEnabled(pool, log)
+	queueSettings := resolveQueueSettings(pool, log, queueConfiguration(cfg)).Effective
+	maxPerSession := queueSettings.MaxPerSession
+	mergeEnabled := queueSettings.MergeEnabled
+	autoMergeEnabled := queueSettings.AutoMergeEnabled
 	msgQueue := messagequeue.NewService(queueRepo, maxPerSession, log)
 	msgQueue.SetMergeEnabled(mergeEnabled)
+	msgQueue.SetAutoMergeEnabled(autoMergeEnabled)
 	log.Info("Message queue initialized",
 		zap.Int("max_per_session", maxPerSession),
-		zap.Bool("merge_enabled", mergeEnabled))
+		zap.Bool("merge_enabled", mergeEnabled),
+		zap.Bool("auto_merge_enabled", autoMergeEnabled))
 	if taskSvc.AttachmentService() == nil && taskSvc.AttachmentRepository() != nil {
 		attachmentSvc, attachmentErr := taskservice.NewAttachmentService(
 			taskSvc.AttachmentRepository(), cfg.ResolvedHomeDir(), taskSvc.AuthorizeWorkspaceAccess, log,
@@ -109,15 +117,17 @@ func provideOrchestrator(
 		}
 		taskSvc.SetAttachmentService(attachmentSvc)
 	}
+	if attachmentSvc := taskSvc.AttachmentService(); attachmentSvc != nil {
+		attachmentSvc.SetTaskAuthorizer(taskSvc.AuthorizeTaskAccess)
+	}
 
 	orchestratorSvc := orchestrator.NewService(serviceCfg, eventBus, agentManagerClient, taskRepoAdapter, taskRepo, userSvc, secretStore, msgQueue, log)
+	if gitCredentialBroker != nil {
+		orchestratorSvc.SetGitHubCredentialBroker(gitCredentialBroker, githubCredentialBrokerEndpoint(cfg))
+	}
 	orchestratorSvc.SetAttachmentReader(taskSvc.AttachmentService())
 	orchestratorSvc.SetTitleBranchRuntime(lifecycleMgr)
 	if githubSvc != nil {
-		orchestratorSvc.SetGitHubCredentialBroker(
-			githubExecutorCredentialLeaseAdapter{service: githubSvc},
-			githubCredentialBrokerEndpoint(cfg),
-		)
 		orchestratorSvc.SetTaskGitCredentialPolicyResolver(githubExecutorCredentialPolicyAdapter{service: githubSvc})
 	}
 	taskSvc.SetExecutionStopper(orchestratorSvc)
@@ -130,9 +140,11 @@ func provideOrchestrator(
 	// them the one task kind nothing else ever cleans up; the orchestrator needs
 	// the manager to enforce the per-automation retention window.
 	orchestratorSvc.SetWorktreeManager(lifecycleMgr.WorktreeManager())
+	orchestratorSvc.SetTaskLaunchRecoveryService(taskSvc)
 
 	msgCreator := &messageCreatorAdapter{svc: taskSvc, logger: log}
 	orchestratorSvc.SetMessageCreator(msgCreator)
+	orchestratorSvc.SetSubagentContextRecorder(&subagentContextAdapter{svc: taskSvc})
 
 	orchestratorSvc.SetTurnService(newTurnServiceAdapter(taskSvc))
 
@@ -140,11 +152,20 @@ func provideOrchestrator(
 	// owns the canonical rich payload. Covers workflow transitions, workflow
 	// step moves, and the primary-session-set callback below.
 	orchestratorSvc.SetTaskEventPublisher(taskSvc)
+	// Feeder promotion after an admitted manual move must wait for the
+	// orchestrator's task lifecycle. The task service keeps ownership of the
+	// candidate filter and promotion rules.
+	orchestratorSvc.SetFeederPullReconciler(taskSvc)
 
 	// Let the task service read the live per-session busy substate so it can
 	// compute the task-level MOST-ACTIVE-WINS activity aggregate carried on the
 	// boot payload and task.updated events.
 	taskSvc.SetForegroundActivityProvider(orchestratorSvc)
+
+	// Task dependencies gate every automated launch and drive chain advancement.
+	// Wired unconditionally: dependencies are a core Kanban relationship, not an
+	// Office feature.
+	orchestratorSvc.SetTaskDependencyReader(taskSvc)
 
 	// Let the task service stamp status_summary.queued_prompt_count on task
 	// list/snapshot payloads (initial-load backstop for the sidebar badge; the
@@ -170,8 +191,16 @@ func provideOrchestrator(
 		taskSvc.PublishTaskUpdated(ctx, task)
 	})
 
-	// Wire workflow step getter for prompt building
+	// Wire workflow step getter for prompt building. The recorder is wired
+	// first: SetStepHistoryRecorder's own initWorkflowEngine() call is a
+	// no-op while workflowStepGetter is still nil, so the store/engine only
+	// get built once, by SetWorkflowStepGetter below, instead of twice.
 	if workflowSvc != nil {
+		// Wire the ADR 0015 audit-trail writer for auto-advance step
+		// transitions. workflowSvc.CreateStepTransition already matches
+		// orchestrator.StepHistoryRecorder structurally, so no adapter is
+		// needed.
+		orchestratorSvc.SetStepHistoryRecorder(workflowSvc)
 		orchestratorSvc.SetWorkflowStepGetter(&orchestratorWorkflowStepGetterAdapter{svc: workflowSvc})
 	}
 
@@ -211,17 +240,20 @@ func provideOrchestrator(
 		// Wire repo cloner into executor for provider-backed repos with no local path
 		orchestratorSvc.SetRepoCloner(repoCloner, &repoLocalPathUpdater{svc: taskSvc})
 	}
+	// Worktree fallback self-healing updates the exact task repository row
+	// after a successful launch. Keep this seam on the task service so the
+	// lifecycle and worktree packages remain task-agnostic.
+	orchestratorSvc.SetTaskRepositoryBaseBranchUpdater(&repoLocalPathUpdater{svc: taskSvc})
 
 	return orchestratorSvc, msgCreator, nil
 }
 
-type githubCredentialLeaseService interface {
-	IssueGitHubCredentialLease(context.Context, githubpkg.CredentialLeaseRequest) (*githubpkg.CredentialLease, error)
+type githubCredentialPolicyService interface {
 	DescribeTaskGitCredentialPolicy(context.Context, string) (githubpkg.TaskGitCredentialPolicy, error)
 }
 
 type githubExecutorCredentialPolicyAdapter struct {
-	service githubCredentialLeaseService
+	service githubCredentialPolicyService
 }
 
 func (a githubExecutorCredentialPolicyAdapter) ResolveTaskGitCredentialPolicy(
@@ -239,45 +271,24 @@ func (a githubExecutorCredentialPolicyAdapter) ResolveTaskGitCredentialPolicy(
 	}, nil
 }
 
-type githubExecutorCredentialLeaseAdapter struct {
-	service githubCredentialLeaseService
-}
-
-func (a githubExecutorCredentialLeaseAdapter) IssueGitHubCredentialLease(
-	ctx context.Context,
-	request executorpkg.GitHubCredentialLeaseRequest,
-) (executorpkg.GitHubCredentialLease, error) {
-	lease, err := a.service.IssueGitHubCredentialLease(ctx, githubpkg.CredentialLeaseRequest{
-		WorkspaceID: request.WorkspaceID, TaskID: request.TaskID, SessionID: request.SessionID,
-		RepositoryID: request.RepositoryID, Owner: request.Owner, Repo: request.Repo, Host: request.Host,
-	})
-	if err != nil {
-		return executorpkg.GitHubCredentialLease{}, err
-	}
-	if lease == nil {
-		return executorpkg.GitHubCredentialLease{}, errors.New("GitHub credential broker returned no lease")
-	}
-	return executorpkg.GitHubCredentialLease{Token: lease.Token}, nil
-}
-
 func githubCredentialBrokerEndpoint(cfg *config.Config) string {
 	if cfg != nil {
 		if publicBaseURL := strings.TrimRight(strings.TrimSpace(cfg.GitHubCredentialBroker.PublicBaseURL), "/"); publicBaseURL != "" {
-			return publicBaseURL + "/api/v1/github/credentials/resolve"
+			return publicBaseURL + "/api/v1/git/credentials/resolve"
 		}
 		if cfg.Server.Port != 0 {
-			return fmt.Sprintf("http://localhost:%d/api/v1/github/credentials/resolve", cfg.Server.Port)
+			return fmt.Sprintf("http://localhost:%d/api/v1/git/credentials/resolve", cfg.Server.Port)
 		}
 	}
-	return fmt.Sprintf("http://localhost:%d/api/v1/github/credentials/resolve", portsBackendDefault)
+	return fmt.Sprintf("http://localhost:%d/api/v1/git/credentials/resolve", portsBackendDefault)
 }
 
 // resolveQueueMaxPerSession honors the KANDEV_QUEUE_MAX_PER_SESSION env var,
 // falling back to messagequeue.DefaultMaxPerSession (10) when unset or invalid.
 // Values <= 0 disable the cap entirely (callers can still flood queues — only
 // useful in tests / specialized deployments).
-func resolveQueueMaxPerSession(pool *db.Pool, log *logger.Logger) int {
-	return resolveQueueSettings(pool, log).Effective.MaxPerSession
+func resolveQueueMaxPerSession(pool *db.Pool, log *logger.Logger, startup ...queuesettings.Configuration) int {
+	return resolveQueueSettings(pool, log, startup...).Effective.MaxPerSession
 }
 
 // resolveQueueMergeEnabled honors the persisted message queue setting,
@@ -287,11 +298,21 @@ func resolveQueueMergeEnabled(pool *db.Pool, log *logger.Logger) bool {
 	return resolveQueueSettings(pool, log).Effective.MergeEnabled
 }
 
+// resolveQueueAutoMergeEnabled honors the persisted automatic merge setting,
+// defaulting to enabled when unset or invalid.
+func resolveQueueAutoMergeEnabled(pool *db.Pool, log *logger.Logger) bool {
+	return resolveQueueSettings(pool, log).Effective.AutoMergeEnabled
+}
+
 // resolveQueueSettings loads the persisted message queue settings — falling
 // back to defaults when unset, invalid, or the store is unavailable — and
 // resolves them against the KANDEV_QUEUE_MAX_PER_SESSION environment
 // override.
-func resolveQueueSettings(pool *db.Pool, log *logger.Logger) queuesettings.Resolution {
+func resolveQueueSettings(
+	pool *db.Pool,
+	log *logger.Logger,
+	startup ...queuesettings.Configuration,
+) queuesettings.Resolution {
 	var configured *queuesettings.Settings
 	if pool != nil {
 		rawStore, err := systemsettings.NewStore(pool)
@@ -305,14 +326,15 @@ func resolveQueueSettings(pool *db.Pool, log *logger.Logger) queuesettings.Resol
 			}
 		}
 	}
-	resolution, err := queuesettings.Resolve(configured, queuesettings.ReadEnvironment())
+	resolution, err := queuesettings.Resolve(configured, queuesettings.ReadEnvironment(), startup...)
 	if err != nil {
 		log.Warn("Failed to resolve message queue settings, using defaults", zap.Error(err))
 		return queuesettings.Resolution{Response: queuesettings.Response{
 			Settings: queuesettings.DefaultSettings(),
 			Effective: queuesettings.Effective{
-				MaxPerSession: messagequeue.DefaultMaxPerSession,
-				MergeEnabled:  true,
+				MaxPerSession:    messagequeue.DefaultMaxPerSession,
+				MergeEnabled:     true,
+				AutoMergeEnabled: true,
 			},
 		}}
 	}
@@ -321,6 +343,13 @@ func resolveQueueSettings(pool *db.Pool, log *logger.Logger) queuesettings.Resol
 			zap.String("environment_variable", queuesettings.EnvironmentVariable))
 	}
 	return resolution
+}
+
+func queueConfiguration(cfg *config.Config) queuesettings.Configuration {
+	if cfg == nil || cfg.SourceFor("messageQueue.maxPerSession") != config.SourceConfiguration {
+		return queuesettings.Configuration{}
+	}
+	return queuesettings.Configuration{Value: cfg.MessageQueue.MaxPerSession, Present: true}
 }
 
 func resolveEventNamespace(cfg *config.Config) string {
@@ -428,7 +457,7 @@ func (a *reviewTaskCreatorAdapter) CreateReviewTask(ctx context.Context, req *or
 			PRNumber:       r.PRNumber,
 		})
 	}
-	return a.svc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	result, err := a.svc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID:    req.WorkspaceID,
 		WorkflowID:     req.WorkflowID,
 		WorkflowStepID: req.WorkflowStepID,
@@ -439,6 +468,10 @@ func (a *reviewTaskCreatorAdapter) CreateReviewTask(ctx context.Context, req *or
 		IsEphemeral:    req.IsEphemeral,
 		Origin:         req.Origin,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return result.Task, nil
 }
 
 // issueTaskCreatorAdapter adapts the task service to the orchestrator's IssueTaskCreator interface.
@@ -455,7 +488,7 @@ func (a *issueTaskCreatorAdapter) CreateIssueTask(ctx context.Context, req *orch
 			BaseBranch:   r.BaseBranch,
 		})
 	}
-	return a.svc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	result, err := a.svc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID:    req.WorkspaceID,
 		WorkflowID:     req.WorkflowID,
 		WorkflowStepID: req.WorkflowStepID,
@@ -464,6 +497,10 @@ func (a *issueTaskCreatorAdapter) CreateIssueTask(ctx context.Context, req *orch
 		Metadata:       req.Metadata,
 		Repositories:   repos,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return result.Task, nil
 }
 
 // jiraServiceAdapter exposes the JIRA service's issue-watch dedup methods to
@@ -567,6 +604,46 @@ func (a *profileLookupAdapter) LookupProfile(ctx context.Context, profileID stri
 // types into it.
 type automationDepsAdapter struct {
 	store *automationpkg.Store
+}
+
+type utilityDepsAdapter struct {
+	svc     *utilityservice.Service
+	userSvc *userservice.Service
+}
+
+func (a *utilityDepsAdapter) ListUtilityAgentsByAgentProfile(ctx context.Context, profileID string) ([]agentsettingscontroller.UtilityAgentReference, error) {
+	if a == nil || a.svc == nil {
+		return nil, nil
+	}
+	agents, err := a.svc.ListAgents(ctx)
+	if err != nil {
+		return nil, err
+	}
+	refs := make([]agentsettingscontroller.UtilityAgentReference, 0)
+	defaultProfileID := ""
+	if a.userSvc != nil {
+		defaultProfileID, err = a.userSvc.GetDefaultUtilityAgentProfileID(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+	for _, agent := range agents {
+		if agent != nil && (agent.AgentProfileID == profileID ||
+			(utilitymodels.UsesDefaultProfile(agent) && defaultProfileID == profileID)) {
+			refs = append(refs, agentsettingscontroller.UtilityAgentReference{ID: agent.ID, Name: agent.Name})
+		}
+	}
+	return refs, nil
+}
+
+func (a *utilityDepsAdapter) ClearUtilityAgentProfileBindings(ctx context.Context, profileID string) error {
+	if a == nil || a.svc == nil {
+		return nil
+	}
+	if err := a.svc.ClearAgentProfileBindings(ctx, profileID); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (a *automationDepsAdapter) ListEnabledAutomationsByAgentProfile(
@@ -883,6 +960,15 @@ func (u *repoLocalPathUpdater) UpdateRepositoryDefaultBranch(ctx context.Context
 	return err
 }
 
+func (u *repoLocalPathUpdater) UpdateTaskRepositoryBaseBranch(ctx context.Context, taskID, taskRepositoryID, baseBranch string) error {
+	_, err := u.svc.UpdateRepositoryBaseBranch(ctx, taskservice.UpdateRepositoryBaseBranchRequest{
+		TaskID:           taskID,
+		TaskRepositoryID: taskRepositoryID,
+		BaseBranch:       baseBranch,
+	})
+	return err
+}
+
 // repositoryResolverAdapter resolves GitHub repos by cloning + finding/creating DB records.
 type repositoryResolverAdapter struct {
 	cloner   *repoclone.Cloner
@@ -900,7 +986,11 @@ type repositoryResolverAdapter struct {
 func (a *repositoryResolverAdapter) ResolveForReview(
 	ctx context.Context, workspaceID, provider, owner, name, defaultBranch string,
 ) (string, string, error) {
-	providerHost := "https://" + defaultProviderHostname(provider)
+	hostname, err := defaultProviderHostname(provider)
+	if err != nil {
+		return "", "", err
+	}
+	providerHost := "https://" + hostname
 	existing, err := a.taskSvc.GetRepositoryByProviderInfo(ctx, workspaceID, provider, providerHost, owner, name)
 	if err != nil {
 		return "", "", fmt.Errorf("lookup repository by provider info: %w", err)
@@ -937,14 +1027,14 @@ func (a *repositoryResolverAdapter) ResolveForReview(
 	return repo.ID, baseBranch, nil
 }
 
-func defaultProviderHostname(provider string) string {
+func defaultProviderHostname(provider string) (string, error) {
 	switch strings.ToLower(provider) {
 	case "gitlab":
-		return "gitlab.com"
-	case "bitbucket":
-		return "bitbucket.org"
+		return "gitlab.com", nil
+	case gitCredentialGitHubProviderID, "":
+		return gitCredentialGitHubHost, nil
 	default:
-		return "github.com"
+		return "", fmt.Errorf("unsupported review repository provider %q", provider)
 	}
 }
 
@@ -994,7 +1084,7 @@ func (a *repositoryResolverAdapter) persistDetectedDefaultBranch(
 	}); err != nil {
 		a.logger.Warn("failed to persist detected default branch",
 			zap.String("repository_id", repo.ID),
-			zap.String("branch", detected),
+			zap.String(branchFieldKey, detected),
 			zap.Error(err))
 	}
 	return detected

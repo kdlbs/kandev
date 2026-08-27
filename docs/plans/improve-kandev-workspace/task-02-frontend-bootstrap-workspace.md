@@ -5,7 +5,7 @@ status: completed
 wave: 2
 depends_on: ["01-backend-dedicated-workspace"]
 plan: "plan.md"
-spec: "../../specs/improve-kandev/spec.md"
+spec: "../../specs/workspaces/requirements/improve-kandev.md"
 ---
 
 # Task 02: Frontend — create tasks in the bootstrap workspace

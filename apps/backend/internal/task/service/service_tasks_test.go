@@ -58,12 +58,13 @@ func TestCreateTaskAutoTitlePersistsPendingMarker(t *testing.T) {
 		t.Fatalf("create workflow: %v", err)
 	}
 
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "ws-auto-title",
 		WorkflowID:  "wf-auto-title",
 		Description: "  Add\n a better   task title for this request  ",
 		AutoTitle:   true,
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("create auto-titled task: %v", err)
 	}
@@ -85,6 +86,38 @@ func TestCreateTaskAutoTitlePersistsPendingMarker(t *testing.T) {
 	}
 }
 
+func TestCreateTaskPersistsAutopilot(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-autopilot-service", Name: "Workspace"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-autopilot-service", WorkspaceID: "ws-autopilot-service", Name: "Workflow"}); err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-autopilot-service",
+		WorkflowID:  "wf-autopilot-service",
+		Title:       "Autopilot service task",
+		Autopilot:   true,
+	})
+	if err != nil {
+		t.Fatalf("create autopilot task: %v", err)
+	}
+	task := taskResult.Task
+	if !task.Autopilot {
+		t.Fatal("created autopilot = false, want true")
+	}
+	reloaded, err := svc.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("reload autopilot task: %v", err)
+	}
+	if !reloaded.Autopilot {
+		t.Fatal("reloaded autopilot = false, want true")
+	}
+}
+
 func TestCreateTaskAutoTitleSupportsSubtasks(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
@@ -94,21 +127,23 @@ func TestCreateTaskAutoTitleSupportsSubtasks(t *testing.T) {
 	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-auto-subtask", WorkspaceID: "ws-auto-subtask", Name: "Workflow"}); err != nil {
 		t.Fatalf("create workflow: %v", err)
 	}
-	parent, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	parentResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "ws-auto-subtask",
 		WorkflowID:  "wf-auto-subtask",
 		Title:       "Parent task",
 	})
+	parent := parentResult.Task
 	if err != nil {
 		t.Fatalf("create parent task: %v", err)
 	}
-	child, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	childResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "ws-auto-subtask",
 		WorkflowID:  "wf-auto-subtask",
 		ParentID:    parent.ID,
 		Description: "Investigate child behavior",
 		AutoTitle:   true,
 	})
+	child := childResult.Task
 	if err != nil {
 		t.Fatalf("create auto-titled subtask: %v", err)
 	}
@@ -126,13 +161,14 @@ func TestSetPendingAgentTitleIsOneShotAndHumanRenameWins(t *testing.T) {
 	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-agent-title", WorkspaceID: "ws-agent-title", Name: "Workflow"}); err != nil {
 		t.Fatalf("create workflow: %v", err)
 	}
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "ws-agent-title",
 		WorkflowID:  "wf-agent-title",
 		Title:       "Temporary prompt title",
 		Description: "Do the work",
 		Metadata:    map[string]interface{}{models.MetaKeyAgentTitlePending: true, models.MetaKeyAgentTitleOwnerSessionID: "session-owner"},
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("create pending task: %v", err)
 	}
@@ -153,13 +189,14 @@ func TestSetPendingAgentTitleIsOneShotAndHumanRenameWins(t *testing.T) {
 		t.Fatalf("second set = (accepted=%v, reason=%q, err=%v), want idempotent rejection", accepted, reason, err)
 	}
 
-	pendingTask, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	pendingTaskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "ws-agent-title",
 		WorkflowID:  "wf-agent-title",
 		Title:       "Temporary again",
 		Description: "Do more work",
 		Metadata:    map[string]interface{}{models.MetaKeyAgentTitlePending: true, models.MetaKeyAgentTitleOwnerSessionID: "session-owner"},
 	})
+	pendingTask := pendingTaskResult.Task
 	if err != nil {
 		t.Fatalf("create second pending task: %v", err)
 	}

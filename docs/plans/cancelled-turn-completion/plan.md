@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/workflow/cancelled-turn-completion/spec.md
+spec: docs/specs/tasks/requirements/workflow-cancelled-turn-completion.md
 created: 2026-08-02
 status: implemented
 ---

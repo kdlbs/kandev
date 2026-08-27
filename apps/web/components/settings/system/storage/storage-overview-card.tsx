@@ -9,6 +9,7 @@ import type {
   StorageMaintenanceSettings,
   StorageOverviewResponse,
   StorageQuarantineSummary,
+  StorageTemporaryArtifactsSummary,
 } from "@/lib/types/system";
 import { StorageActionButton } from "./storage-action-button";
 import { formatGigabytes } from "./storage-units";
@@ -21,6 +22,8 @@ import { storageAnalysisTotal } from "./storage-totals";
  * module-level one, so the rows re-render on a locale switch.
  */
 type Translate = (key: string, options?: Record<string, unknown>) => string;
+const STORAGE_UNAVAILABLE_VALUE_KEY = "system:storageUnavailableValue";
+const TEMPORARY_ARTIFACTS_RESOURCE_ID = "temporary-artifacts";
 
 interface Props {
   overview: StorageOverviewResponse | null;
@@ -29,6 +32,7 @@ interface Props {
   error?: string | null;
   disabledReason?: string;
   onRunGoCache: () => void;
+  onRunTemporaryArtifacts?: () => void;
 }
 
 interface StorageResource {
@@ -63,7 +67,7 @@ function quarantineResource(t: Translate, summary: StorageQuarantineSummary): St
     return {
       id: "quarantine",
       label: t("system:storageQuarantinedResources"),
-      value: t("system:storageUnavailableValue"),
+      value: t(STORAGE_UNAVAILABLE_VALUE_KEY),
       detail: t("system:storageQuarantineUnmeasured"),
       warning: summary.warning,
     };
@@ -84,11 +88,69 @@ function dockerMeasurement(
 ): Pick<StorageResource, "value" | "detail"> {
   if (!available) {
     return {
-      value: t("system:storageUnavailableValue"),
+      value: t(STORAGE_UNAVAILABLE_VALUE_KEY),
       detail: t("system:storageDockerUnmeasured"),
     };
   }
   return { value, detail };
+}
+
+function temporaryArtifactsResource(
+  t: Translate,
+  summary: StorageTemporaryArtifactsSummary,
+): StorageResource {
+  const warnings = [summary.warning, ...(summary.warnings ?? [])].filter(Boolean).join(" · ");
+  if (summary.available === false) {
+    return {
+      id: TEMPORARY_ARTIFACTS_RESOURCE_ID,
+      label: t("system:storageTemporaryArtifacts"),
+      value: t(STORAGE_UNAVAILABLE_VALUE_KEY),
+      detail: t("system:storageTemporaryArtifactsUnavailable"),
+      warning: warnings || undefined,
+    };
+  }
+  const stale = summary.stale_count ?? 0;
+  const active = summary.active_count ?? 0;
+  const protectedCount = summary.protected_count ?? 0;
+  const staleBytes =
+    summary.stale_bytes === undefined
+      ? undefined
+      : t("system:storageTemporaryArtifactsStaleBytes", {
+          value: formatGigabytes(summary.stale_bytes),
+        });
+  return {
+    id: TEMPORARY_ARTIFACTS_RESOURCE_ID,
+    label: t("system:storageTemporaryArtifacts"),
+    value:
+      summary.total_bytes === undefined
+        ? t(STORAGE_UNAVAILABLE_VALUE_KEY)
+        : formatGigabytes(summary.total_bytes),
+    detail: [
+      t("system:storageTemporaryArtifactsStaleCount", { count: stale }),
+      staleBytes,
+      t("system:storageTemporaryArtifactsActiveCount", { count: active }),
+      t("system:storageTemporaryArtifactsProtectedCount", { count: protectedCount }),
+    ]
+      .filter(Boolean)
+      .join(" · "),
+    warning: warnings || undefined,
+  };
+}
+
+function temporaryArtifactsDisabledReason(
+  t: Translate,
+  overview: StorageOverviewResponse,
+  pendingReason?: string,
+) {
+  if (pendingReason) return pendingReason;
+  const summary = overview.summary.temporary_artifacts;
+  if (overview.capabilities.temporary_artifacts_available !== true || summary.available === false) {
+    return t("system:storageTemporaryArtifactsUnavailable");
+  }
+  if ((summary.stale_count ?? 0) === 0) {
+    return t("system:storageTemporaryArtifactsNoStale");
+  }
+  return undefined;
 }
 
 function storageResources(t: Translate, overview: StorageOverviewResponse): StorageResource[] {
@@ -139,6 +201,7 @@ function storageResources(t: Translate, overview: StorageOverviewResponse): Stor
           },
         ]
       : []),
+    temporaryArtifactsResource(t, summary.temporary_artifacts),
     {
       id: "docker-image-layers",
       label: t("system:storageDockerImageLayers"),
@@ -179,9 +242,17 @@ interface ResourceRowProps {
   resource: StorageResource;
   goCacheCleanupDisabledReason?: string;
   onRunGoCache: () => void;
+  temporaryArtifactsCleanupDisabledReason?: string;
+  onRunTemporaryArtifacts: () => void;
 }
 
-function ResourceRow({ resource, goCacheCleanupDisabledReason, onRunGoCache }: ResourceRowProps) {
+function ResourceRow({
+  resource,
+  goCacheCleanupDisabledReason,
+  onRunGoCache,
+  temporaryArtifactsCleanupDisabledReason,
+  onRunTemporaryArtifacts,
+}: ResourceRowProps) {
   const { t } = useTranslation();
   return (
     <AccordionItem value={resource.id} data-testid={`storage-resource-${resource.id}`}>
@@ -208,6 +279,17 @@ function ResourceRow({ resource, goCacheCleanupDisabledReason, onRunGoCache }: R
             <IconTrash className="size-4" /> {t("system:storageCleanGoCache")}
           </StorageActionButton>
         )}
+        {resource.id === TEMPORARY_ARTIFACTS_RESOURCE_ID && (
+          <StorageActionButton
+            variant="outline"
+            className="mt-3 w-full sm:w-auto"
+            disabledReason={temporaryArtifactsCleanupDisabledReason}
+            onClick={onRunTemporaryArtifacts}
+            data-testid="storage-temporary-artifacts-clean"
+          >
+            <IconTrash className="size-4" /> {t("system:storageCleanTemporaryArtifacts")}
+          </StorageActionButton>
+        )}
       </AccordionContent>
     </AccordionItem>
   );
@@ -220,6 +302,7 @@ export function StorageOverviewCard({
   error,
   disabledReason,
   onRunGoCache,
+  onRunTemporaryArtifacts = () => {},
 }: Props) {
   const { t } = useTranslation();
   const isLoading = loading ?? overview === null;
@@ -239,6 +322,11 @@ export function StorageOverviewCard({
   const { summary } = overview;
   const analyzedAt = formatDateTime(overview.analyzed_at);
   const cleanupDisabledReason = goCacheDisabledReason(t, overview, disabledReason, settings);
+  const temporaryArtifactsCleanupDisabledReason = temporaryArtifactsDisabledReason(
+    t,
+    overview,
+    disabledReason,
+  );
   const resources = storageResources(t, overview);
   const total = storageAnalysisTotal(summary);
   return (
@@ -287,6 +375,8 @@ export function StorageOverviewCard({
               resource={resource}
               goCacheCleanupDisabledReason={cleanupDisabledReason}
               onRunGoCache={onRunGoCache}
+              temporaryArtifactsCleanupDisabledReason={temporaryArtifactsCleanupDisabledReason}
+              onRunTemporaryArtifacts={onRunTemporaryArtifacts}
             />
           ))}
         </Accordion>

@@ -20,9 +20,12 @@ import { buildDefaultPermissions } from "@/lib/agent-permissions";
 import { seedDefaultCLIFlags } from "@/lib/cli-flags";
 import { generateUUID } from "@/lib/utils";
 import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
+import type { AgentProfileKind } from "@/lib/types/agent-profile";
 import { useAppStore } from "@/components/state-provider";
+import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { deleteAgentAction } from "@/app/actions/agents";
+import { SettingsRedirect } from "@/src/settings-route-helpers";
 import { saveNewAgent, saveExistingAgent, isProfileDirty } from "./agent-save-helpers";
 import type { DraftProfile, DraftAgent } from "./agent-save-helpers";
 import { AgentHeader, ProfilesCard } from "./agent-setup-parts";
@@ -47,8 +50,11 @@ const createDraftProfile = (
   agentDisplayName: string,
   defaultModel: string,
   permissionSettings?: Record<string, PermissionSetting>,
+  kind: AgentProfileKind = "concrete",
 ): DraftProfile => ({
   id: toAgentProfileId(`draft-${generateUUID()}`),
+  kind,
+  dynamic: kind === "dynamic" ? { version: 1, candidates: [] } : undefined,
   agentId,
   name: "",
   agentDisplayName,
@@ -78,7 +84,15 @@ const ensureProfiles = (
   if (agent.profiles.length > 0) return agent;
   return {
     ...agent,
-    profiles: [createDraftProfile(agent.id, agentDisplayName, defaultModel, permissionSettings)],
+    profiles: [
+      createDraftProfile(
+        agent.id,
+        agentDisplayName,
+        defaultModel,
+        permissionSettings,
+        agent.name === "dynamic" ? "dynamic" : "concrete",
+      ),
+    ],
   };
 };
 
@@ -156,13 +170,7 @@ function useAgentStoreSync() {
     setSettingsAgents(nextAgents);
     setAgentProfiles(
       nextAgents.flatMap((agent) =>
-        agent.profiles.map((profile) => ({
-          id: profile.id,
-          label: `${profile.agentDisplayName ?? ""} • ${profile.name}`,
-          agent_id: agent.id,
-          agent_name: agent.name,
-          cli_passthrough: profile.cliPassthrough ?? false,
-        })),
+        agent.profiles.map((profile) => toAgentProfileOption(agent, profile)),
       ),
     );
   };
@@ -214,7 +222,7 @@ function useAgentSaveHandlers({
       onToastError(new Error(t("agents:profileNameRequired")));
       return;
     }
-    if (draftAgent.profiles.some((p) => !p.model.trim())) {
+    if (draftAgent.profiles.some((p) => p.kind !== "dynamic" && !p.model.trim())) {
       onToastError(new Error(t("agents:modelRequiredForAllProfiles")));
       return;
     }
@@ -283,6 +291,7 @@ function useProfileHandlers(
             resolveDisplayName(current.name),
             defaultModel,
             permissionSettings,
+            current.name === "dynamic" ? "dynamic" : "concrete",
           ),
           id: draftId,
         },
@@ -305,6 +314,7 @@ function useProfileHandlers(
                   resolveDisplayName(current.name),
                   defaultModel,
                   permissionSettings,
+                  current.name === "dynamic" ? "dynamic" : "concrete",
                 ),
               ],
       };
@@ -352,7 +362,11 @@ function useProfileHandlers(
 }
 
 function areAgentProfilesValid(agent: DraftAgent): boolean {
-  return agent.profiles.every((profile) => profile.name.trim() && profile.model.trim());
+  return agent.profiles.every((profile) => {
+    if (!profile.name.trim()) return false;
+    if (profile.kind === "dynamic") return (profile.dynamic?.candidates.length ?? 0) > 0;
+    return profile.model.trim().length > 0;
+  });
 }
 
 function useAgentSaveRevision(agent: DraftAgent) {
@@ -360,6 +374,23 @@ function useAgentSaveRevision(agent: DraftAgent) {
   const initial = agent.profiles.some((profile) => profile.mcp_config?.dirty) ? "" : revision;
   const [saved, setSaved] = useState(initial);
   return { revision, saved, setSaved };
+}
+
+/**
+ * Explains why the shared Save control is blocked, or undefined when it is not.
+ * Extracted so AgentSetupForm stays within the file's function-length limit.
+ */
+function resolveSaveInvalidReason(
+  t: (key: string) => string,
+  profilesValid: boolean,
+  hasInvalidMcpConfig: boolean,
+  dynamic: boolean,
+): string | undefined {
+  if (!profilesValid) {
+    return t(dynamic ? "agents:noDynamicCandidates" : "agents:everyProfileNeedsNameAndModel");
+  }
+  if (hasInvalidMcpConfig) return t("agents:fixInvalidMcpConfig");
+  return undefined;
 }
 
 function AgentSetupForm({
@@ -419,9 +450,12 @@ function AgentSetupForm({
     if (savedDraft) saveRevision.setSaved(JSON.stringify(savedDraft));
   };
   const profilesValid = areAgentProfilesValid(draftAgent);
-  let saveInvalidReason: string | undefined;
-  if (!profilesValid) saveInvalidReason = t("agents:everyProfileNeedsNameAndModel");
-  else if (hasInvalidMcpConfig) saveInvalidReason = t("agents:fixInvalidMcpConfig");
+  const saveInvalidReason = resolveSaveInvalidReason(
+    t,
+    profilesValid,
+    hasInvalidMcpConfig,
+    draftAgent.name === "dynamic",
+  );
   useSettingsSaveContributor({
     id: `agent:${draftAgent.id}`,
     revision: saveRevision.revision,
@@ -441,6 +475,7 @@ function AgentSetupForm({
         matchedPath={discoveryAgent?.matched_path}
         isCreateMode={isCreateMode}
         savedAgent={savedAgent}
+        showInstallationStatus={draftAgent.name !== "dynamic"}
         onDelete={handleDeleteAgent}
       />
       <Separator />
@@ -553,6 +588,13 @@ export default function AgentSetupPage() {
       variant: "error",
     });
   };
+
+  // Saved agents have no page of their own — the Agents index shows each
+  // agent with its profiles inline. The route only serves creation (new agent
+  // from browse, or ?mode=create for a new profile).
+  if (savedAgent && !isCreateMode) {
+    return <SettingsRedirect to="/settings/agents" />;
+  }
 
   return (
     <AgentSetupForm

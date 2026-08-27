@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/shared"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -31,6 +32,7 @@ type Handler struct {
 	gitMgr       *configloader.GitManager
 	runDetail    RunDetailRepo
 	agentSummary AgentSummaryRepository
+	handoff      *taskservice.HandoffService
 	logger       *logger.Logger
 }
 
@@ -41,12 +43,16 @@ type Handler struct {
 // when it satisfies those interfaces (the production *sqlite.Repository
 // does); a fake repo that does not implement them causes the
 // corresponding endpoints to respond 503.
-func NewHandler(svc *DashboardService, labelRepo labelFetcher, gitMgr *configloader.GitManager, log *logger.Logger) *Handler {
+// handoff may be nil in tests that never exercise the agent-caller comment
+// read branch; an agent request against a nil handoff responds 503 rather
+// than panicking (mirrors the runDetail/agentSummary nil-dependency pattern).
+func NewHandler(svc *DashboardService, labelRepo labelFetcher, gitMgr *configloader.GitManager, handoff *taskservice.HandoffService, log *logger.Logger) *Handler {
 	h := &Handler{
-		svc:    svc,
-		labels: labelRepo,
-		gitMgr: gitMgr,
-		logger: log.WithFields(zap.String("component", "office-dashboard-handler")),
+		svc:     svc,
+		labels:  labelRepo,
+		gitMgr:  gitMgr,
+		handoff: handoff,
+		logger:  log.WithFields(zap.String("component", "office-dashboard-handler")),
 	}
 	if r, ok := labelRepo.(RunDetailRepo); ok {
 		h.runDetail = r
@@ -58,8 +64,8 @@ func NewHandler(svc *DashboardService, labelRepo labelFetcher, gitMgr *configloa
 }
 
 // RegisterRoutes registers all dashboard-related routes on the given router group.
-func RegisterRoutes(api *gin.RouterGroup, svc *DashboardService, labelRepo labelFetcher, gitMgr *configloader.GitManager, log *logger.Logger) {
-	h := NewHandler(svc, labelRepo, gitMgr, log)
+func RegisterRoutes(api *gin.RouterGroup, svc *DashboardService, labelRepo labelFetcher, gitMgr *configloader.GitManager, handoff *taskservice.HandoffService, log *logger.Logger) {
+	h := NewHandler(svc, labelRepo, gitMgr, handoff, log)
 
 	api.GET("/meta", h.getMeta)
 	api.GET("/workspaces/:wsId/dashboard", h.getDashboard)
@@ -91,6 +97,7 @@ func RegisterRoutes(api *gin.RouterGroup, svc *DashboardService, labelRepo label
 	api.POST("/tasks/:id/approve", h.approveTask)
 	api.POST("/tasks/:id/request-changes", h.requestTaskChanges)
 	api.GET("/tasks/:id/decisions", h.listTaskDecisions)
+	api.GET("/workspaces/:wsId/tasks/:taskId/quorum", h.getTaskQuorum)
 	api.POST("/workspaces/:wsId/git/clone", h.gitClone)
 	api.POST("/workspaces/:wsId/git/pull", h.gitPull)
 	api.POST("/workspaces/:wsId/git/push", h.gitPush)
@@ -462,6 +469,10 @@ func (h *Handler) getTask(c *gin.Context) {
 	h.attachDecisions(ctx, c, task.ID, dto)
 
 	statusChanges, _ := h.svc.ListStatusChanges(ctx, task.WorkspaceID, task.ID)
+	dto.StartedAt, dto.CompletedAt = deriveTaskTimestamps(statusChanges)
+	if !timelineStatusIsDone(dto.Status) {
+		dto.CompletedAt = ""
+	}
 	c.JSON(http.StatusOK, TaskResponse{Task: dto, Timeline: buildStatusTimeline(statusChanges)})
 }
 
@@ -494,19 +505,6 @@ func (h *Handler) attachDecisions(ctx context.Context, c *gin.Context, taskID st
 	for i := range decisions {
 		dto.Decisions[i] = h.decisionToDTO(c, &decisions[i])
 	}
-}
-
-func buildStatusTimeline(changes []TimelineEvent) []TimelineEventDTO {
-	timeline := make([]TimelineEventDTO, len(changes))
-	for i, ev := range changes {
-		timeline[i] = TimelineEventDTO{
-			Type: "status_change",
-			From: ev.From,
-			To:   ev.To,
-			At:   ev.At,
-		}
-	}
-	return timeline
 }
 
 func taskRowToDTO(r *sqlite.TaskRow, lbls []*sqlite.Label) *TaskDTO {

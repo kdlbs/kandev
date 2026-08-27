@@ -21,6 +21,7 @@ describe("registerSystemEventsHandlers", () => {
         activeSessionId: null,
         pinnedSessionId: null,
         lastSessionByTaskId: {},
+        resumeSkippedSessionIds: {},
       },
     });
     const handlers = registerSystemEventsHandlers(store);

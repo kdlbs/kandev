@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Switch } from "@kandev/ui/switch";
 import { useTranslation } from "react-i18next";
+import { SETTINGS_TYPOGRAPHY } from "@/components/settings/settings-typography";
 import { settingsWithDockerAcknowledgement } from "@/hooks/domains/system/use-storage-maintenance";
 import type { StorageCapabilities, StorageMaintenanceSettings } from "@/lib/types/system";
 import { DedicatedDockerDialog, ExternalGoCacheDialog } from "./storage-confirmation-dialogs";
@@ -16,6 +17,11 @@ type Props = {
   savedSettings: StorageMaintenanceSettings;
   capabilities: StorageCapabilities;
   pending: boolean;
+  /**
+   * Why the controls are disabled, when it is not the default "an action is
+   * already running". The admin gate uses it so a member sees the real reason.
+   */
+  pendingReason?: string;
   onChange: (settings: StorageMaintenanceSettings) => void;
   onAdopt: (path: string) => Promise<void>;
   onCleanDependencies?: () => void;
@@ -23,7 +29,7 @@ type Props = {
 
 type PolicySectionProps = Pick<
   Props,
-  "settings" | "savedSettings" | "capabilities" | "onChange" | "pending"
+  "settings" | "savedSettings" | "capabilities" | "onChange" | "pending" | "pendingReason"
 >;
 
 function settingIsDirty<T>(
@@ -97,6 +103,7 @@ function WorkspaceSection({
   settings,
   savedSettings,
   pending,
+  pendingReason,
   onChange,
   onCleanDependencies,
 }: PolicySectionProps & Pick<Props, "onCleanDependencies">) {
@@ -157,6 +164,7 @@ function WorkspaceSection({
         settings={settings}
         savedSettings={savedSettings}
         pending={pending}
+        pendingReason={pendingReason}
         onChange={onChange}
         onCleanDependencies={onCleanDependencies}
       />
@@ -183,6 +191,7 @@ function GoCacheSection({
   savedSettings,
   capabilities,
   pending,
+  pendingReason,
   onChange,
   adoptionPath,
   setAdoptionPath,
@@ -247,6 +256,7 @@ function GoCacheSection({
           path={adoptionPath}
           setPath={setAdoptionPath}
           pending={pending}
+          pendingReason={pendingReason}
           enabled={settings.go_cache.enabled}
           onOpen={onOpenAdoption}
         />
@@ -380,6 +390,7 @@ function DockerSection({
   savedSettings,
   capabilities,
   pending,
+  pendingReason,
   onChange,
   onOpenDedicated,
 }: PolicySectionProps & { onOpenDedicated: () => void }) {
@@ -392,7 +403,7 @@ function DockerSection({
     ? undefined
     : t("system:storageDockerUnavailable");
   const disabledReason =
-    (pending ? t("system:storageActionPending") : undefined) ??
+    (pending ? (pendingReason ?? t("system:storageActionPending")) : undefined) ??
     unavailable ??
     (!settings.docker.dedicated_daemon_acknowledged
       ? t("system:storageAcknowledgeDedicatedFirst")
@@ -482,6 +493,7 @@ export function StoragePolicyCard({
   savedSettings,
   capabilities,
   pending,
+  pendingReason,
   onChange,
   onAdopt,
   onCleanDependencies,
@@ -504,8 +516,10 @@ export function StoragePolicyCard({
   return (
     <section className="min-w-0 space-y-4" data-testid="storage-policy-card">
       <div>
-        <h2 className="text-base font-medium">{t("system:storagePolicyTitle")}</h2>
-        <p className="text-xs text-muted-foreground">{t("system:storagePolicyDescription")}</p>
+        <h2 className={SETTINGS_TYPOGRAPHY.sectionTitle}>{t("system:storagePolicyTitle")}</h2>
+        <p className={SETTINGS_TYPOGRAPHY.sectionDescription}>
+          {t("system:storagePolicyDescription")}
+        </p>
       </div>
       <div className="space-y-3">
         <ScheduleSection
@@ -513,6 +527,7 @@ export function StoragePolicyCard({
           savedSettings={savedSettings}
           capabilities={capabilities}
           pending={pending}
+          pendingReason={pendingReason}
           onChange={onChange}
         />
         <WorkspaceSection
@@ -520,6 +535,7 @@ export function StoragePolicyCard({
           savedSettings={savedSettings}
           capabilities={capabilities}
           pending={pending}
+          pendingReason={pendingReason}
           onChange={onChange}
           onCleanDependencies={onCleanDependencies}
         />
@@ -528,6 +544,7 @@ export function StoragePolicyCard({
           savedSettings={savedSettings}
           capabilities={capabilities}
           pending={pending}
+          pendingReason={pendingReason}
           onChange={onChange}
           adoptionPath={adoptionPath}
           setAdoptionPath={setAdoptionPath}
@@ -538,6 +555,7 @@ export function StoragePolicyCard({
           savedSettings={savedSettings}
           capabilities={capabilities}
           pending={pending}
+          pendingReason={pendingReason}
           onChange={onChange}
           onOpenDedicated={() => setDockerDialogOpen(true)}
         />
@@ -546,6 +564,7 @@ export function StoragePolicyCard({
           savedSettings={savedSettings}
           capabilities={capabilities}
           pending={pending}
+          pendingReason={pendingReason}
           onChange={onChange}
         />
       </div>

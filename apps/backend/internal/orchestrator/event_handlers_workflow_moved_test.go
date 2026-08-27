@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -10,9 +11,81 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+// fakeRunQueueAdapter is a minimal engine.RunQueueAdapter test double that
+// captures QueueRun calls on a channel so tests can assert both that a call
+// happened and what it carried, without a sleep-based race. outcome
+// defaults to QueueOutcomeQueued when unset and err is nil.
+type fakeRunQueueAdapter struct {
+	calls   chan engine.QueueRunRequest
+	err     error
+	outcome engine.QueueOutcome
+}
+
+func (f *fakeRunQueueAdapter) QueueRun(_ context.Context, req engine.QueueRunRequest) (engine.QueueOutcome, error) {
+	if f.calls != nil {
+		f.calls <- req
+	}
+	if f.err != nil {
+		return "", f.err
+	}
+	if f.outcome == "" {
+		return engine.QueueOutcomeQueued, nil
+	}
+	return f.outcome, nil
+}
+
+// fakePrimaryAgentResolver is a minimal engine.PrimaryAgentResolver test
+// double returning a fixed agent profile id (or error).
+type fakePrimaryAgentResolver struct {
+	agentProfileID string
+	err            error
+}
+
+func (f *fakePrimaryAgentResolver) PrimaryAgentProfileID(_ context.Context, _, _ string) (string, error) {
+	return f.agentProfileID, f.err
+}
+
+// failIfLaunched builds a mockAgentManager whose LaunchAgent fails the test
+// if invoked — used by the Office auto-start tests below to prove the
+// kanban StartTask path is never reached for an Office task.
+func failIfLaunched(t *testing.T) *mockAgentManager {
+	t.Helper()
+	return &mockAgentManager{
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			t.Error("LaunchAgent must not be called for an office task auto-start")
+			return nil, nil
+		},
+	}
+}
+
+// waitForAutoStartFailedMarker polls the task until MetaKeyAutoStartFailed is
+// set, or fails the test after a timeout. Auto-start failure handling runs in
+// a detached goroutine (see autoStartOfficeTaskForLoadedStep), so tests must
+// observe it via the persisted side effect rather than a direct return value.
+func waitForAutoStartFailedMarker(t *testing.T, repo *sqliterepo.Repository, ctx context.Context, taskID string) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		task, err := repo.GetTask(ctx, taskID)
+		if err != nil {
+			t.Fatalf("GetTask: %v", err)
+		}
+		if task.Metadata[models.MetaKeyAutoStartFailed] != nil {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for auto_start_failed marker to be set")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
 
 func TestHandleTaskMoved(t *testing.T) {
 	ctx := context.Background()
@@ -224,6 +297,217 @@ func TestHandleTaskMovedNoSession(t *testing.T) {
 			}
 		case <-time.After(2 * time.Second):
 			t.Fatal("timed out waiting for auto-start launch")
+		}
+	})
+
+	t.Run("office task queues a run instead of starting a session", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		now := time.Now().UTC()
+		requireNoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}))
+		requireNoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}))
+		// ProjectID non-empty is what makes IsFromOffice (a read-time SQL
+		// projection) evaluate true for this task.
+		requireNoError(t, repo.CreateTask(ctx, &models.Task{
+			ID:                     "t-office",
+			WorkspaceID:            "ws1",
+			WorkflowID:             "wf1",
+			WorkflowStepID:         "step1",
+			ProjectID:              "proj1",
+			Title:                  "Office Task",
+			Description:            "prompt",
+			State:                  v1.TaskStateCreated,
+			AssigneeAgentProfileID: "assignee-profile",
+			CreatedAt:              now,
+			UpdatedAt:              now,
+		}))
+
+		stepGetter := newMockStepGetter()
+		stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+			ID: "step2", WorkflowID: "wf1", Name: "Work", Position: 1,
+			Events: wfmodels.StepEvents{
+				OnEnter: []wfmodels.OnEnterAction{
+					{Type: wfmodels.OnEnterAutoStartAgent},
+				},
+			},
+		}
+
+		svc := createTestServiceWithAgent(repo, stepGetter, newMockTaskRepo(), failIfLaunched(t))
+		queued := &fakeRunQueueAdapter{calls: make(chan engine.QueueRunRequest, 1)}
+		svc.engineRunQueue = queued
+		svc.enginePrimary = &fakePrimaryAgentResolver{agentProfileID: "resolved-primary"}
+
+		// A real task.moved publication always carries the persisted
+		// step-transition row ID (see publishTaskMovedEvent), so the
+		// fixture sets one here too rather than exercising
+		// officeAutoStartIdempotencyKey's legacy (StepTransitionID==0)
+		// fallback for pre-rollout events, which is covered separately by
+		// TestOfficeAutoStartIdempotencyKeyAcrossRealDeliveries.
+		svc.handleTaskMovedNoSession(ctx, watcher.TaskMovedEventData{
+			TaskID:           "t-office",
+			ToStepID:         "step2",
+			StepTransitionID: 42,
+		})
+
+		select {
+		case req := <-queued.calls:
+			if req.AgentProfileID != "resolved-primary" {
+				t.Errorf("AgentProfileID = %q, want %q (from PrimaryAgentResolver, not task assignee)", req.AgentProfileID, "resolved-primary")
+			}
+			if req.TaskID != "t-office" {
+				t.Errorf("TaskID = %q, want t-office", req.TaskID)
+			}
+			if req.WorkflowStepID != "step2" {
+				t.Errorf("WorkflowStepID = %q, want step2", req.WorkflowStepID)
+			}
+			if req.Reason != officeAutoStartRunReason {
+				t.Errorf("Reason = %q, want %q", req.Reason, officeAutoStartRunReason)
+			}
+			wantKey := "task_assigned:t-office:resolved-primary:step2:42"
+			if req.IdempotencyKey != wantKey {
+				t.Errorf("IdempotencyKey = %q, want %q", req.IdempotencyKey, wantKey)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for QueueRun call")
+		}
+	})
+
+	t.Run("office task with unwired run queue sets auto_start_failed and does not panic", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		now := time.Now().UTC()
+		requireNoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}))
+		requireNoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}))
+		requireNoError(t, repo.CreateTask(ctx, &models.Task{
+			ID:                     "t-office-nil-adapter",
+			WorkspaceID:            "ws1",
+			WorkflowID:             "wf1",
+			WorkflowStepID:         "step1",
+			ProjectID:              "proj1",
+			Title:                  "Office Task",
+			Description:            "prompt",
+			State:                  v1.TaskStateCreated,
+			AssigneeAgentProfileID: "assignee-profile",
+			CreatedAt:              now,
+			UpdatedAt:              now,
+		}))
+
+		stepGetter := newMockStepGetter()
+		stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+			ID: "step2", WorkflowID: "wf1", Name: "Work", Position: 1,
+			Events: wfmodels.StepEvents{
+				OnEnter: []wfmodels.OnEnterAction{
+					{Type: wfmodels.OnEnterAutoStartAgent},
+				},
+			},
+		}
+
+		// engineRunQueue is left nil (never wired) — this is the exact defect
+		// scenario: no Office adapters wired, no way to launch, must fail
+		// visibly rather than silently.
+		svc := createTestServiceWithAgent(repo, stepGetter, newMockTaskRepo(), failIfLaunched(t))
+
+		svc.handleTaskMovedNoSession(ctx, watcher.TaskMovedEventData{
+			TaskID:   "t-office-nil-adapter",
+			ToStepID: "step2",
+		})
+
+		waitForAutoStartFailedMarker(t, repo, ctx, "t-office-nil-adapter")
+
+		task, err := repo.GetTask(ctx, "t-office-nil-adapter")
+		if err != nil {
+			t.Fatalf("GetTask: %v", err)
+		}
+		if task.Metadata[models.MetaKeyAutoStartClaimed] != nil {
+			t.Error("a task without the guard must not gain auto_start_claimed from a failed office queue attempt")
+		}
+	})
+
+	t.Run("office task with no resolvable agent sets auto_start_failed and does not panic", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		now := time.Now().UTC()
+		requireNoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}))
+		requireNoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}))
+		// No AssigneeAgentProfileID and no PrimaryAgentResolver result: the
+		// office branch has an adapter to call but nothing to call it with.
+		requireNoError(t, repo.CreateTask(ctx, &models.Task{
+			ID:             "t-office-no-agent",
+			WorkspaceID:    "ws1",
+			WorkflowID:     "wf1",
+			WorkflowStepID: "step1",
+			ProjectID:      "proj1",
+			Title:          "Office Task",
+			Description:    "prompt",
+			State:          v1.TaskStateCreated,
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		}))
+
+		stepGetter := newMockStepGetter()
+		stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+			ID: "step2", WorkflowID: "wf1", Name: "Work", Position: 1,
+			Events: wfmodels.StepEvents{
+				OnEnter: []wfmodels.OnEnterAction{
+					{Type: wfmodels.OnEnterAutoStartAgent},
+				},
+			},
+		}
+
+		svc := createTestServiceWithAgent(repo, stepGetter, newMockTaskRepo(), failIfLaunched(t))
+		queued := &fakeRunQueueAdapter{calls: make(chan engine.QueueRunRequest, 1)}
+		svc.engineRunQueue = queued
+		svc.enginePrimary = &fakePrimaryAgentResolver{agentProfileID: ""}
+
+		svc.handleTaskMovedNoSession(ctx, watcher.TaskMovedEventData{
+			TaskID:   "t-office-no-agent",
+			ToStepID: "step2",
+		})
+
+		waitForAutoStartFailedMarker(t, repo, ctx, "t-office-no-agent")
+
+		select {
+		case <-queued.calls:
+			t.Error("QueueRun must not be called when no agent profile could be resolved")
+		default:
+		}
+	})
+
+	t.Run("office task does not fall back after primary resolver failure", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		now := time.Now().UTC()
+		requireNoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}))
+		requireNoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}))
+		requireNoError(t, repo.CreateTask(ctx, &models.Task{
+			ID:                     "t-office-primary-error",
+			WorkspaceID:            "ws1",
+			WorkflowID:             "wf1",
+			WorkflowStepID:         "step1",
+			ProjectID:              "proj1",
+			Title:                  "Office Task",
+			Description:            "prompt",
+			State:                  v1.TaskStateCreated,
+			AssigneeAgentProfileID: "stale-assignee",
+			CreatedAt:              now,
+			UpdatedAt:              now,
+		}))
+
+		stepGetter := newMockStepGetter()
+		stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+			ID: "step2", WorkflowID: "wf1", Name: "Work", Position: 1,
+			Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterAutoStartAgent}}},
+		}
+		svc := createTestServiceWithAgent(repo, stepGetter, newMockTaskRepo(), failIfLaunched(t))
+		queued := &fakeRunQueueAdapter{calls: make(chan engine.QueueRunRequest, 1)}
+		svc.engineRunQueue = queued
+		svc.enginePrimary = &fakePrimaryAgentResolver{err: errors.New("runner lookup failed")}
+
+		svc.handleTaskMovedNoSession(ctx, watcher.TaskMovedEventData{
+			TaskID: "t-office-primary-error", ToStepID: "step2",
+		})
+
+		waitForAutoStartFailedMarker(t, repo, ctx, "t-office-primary-error")
+		select {
+		case req := <-queued.calls:
+			t.Fatalf("QueueRun called with %q after primary resolver failure", req.AgentProfileID)
+		default:
 		}
 	})
 }

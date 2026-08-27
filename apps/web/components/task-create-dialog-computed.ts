@@ -21,11 +21,13 @@ import {
   resolveEffectiveTaskCreateWorkflowId,
 } from "@/components/task-create-dialog-defaults";
 import { useRemoteAuthSpecs } from "@/hooks/domains/settings/use-remote-auth-specs";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { isAgentConfiguredOnExecutor } from "@/lib/agent-executor-compat";
 import type { RemoteAuthSpec } from "@/lib/api/domains/settings-api";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
 import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
 import { getMultiRepoExecutorDisabledReason } from "@/components/task-create-dialog-multi-repo-guard";
+import { t } from "@/lib/i18n";
 
 /**
  * Worktree executor needs a repository to create the worktree from. Disable
@@ -34,7 +36,7 @@ import { getMultiRepoExecutorDisabledReason } from "@/components/task-create-dia
  */
 function worktreeDisabledReason(profile: ExecutorProfile): string | null {
   if ((profile.executor_type ?? "") !== "worktree") return null;
-  return "Worktree executor requires a repository.";
+  return t("task:worktreeExecutorRequiresRepository");
 }
 
 /**
@@ -129,8 +131,11 @@ export function filterCompatibleAgentProfiles(
   selectedExecutorProfile: ExecutorProfile | null,
   authLoaded: boolean,
   authSpecs: RemoteAuthSpec[],
+  dynamicRoutingEnabled = true,
 ): AgentProfileOption[] {
-  const selectable = agentProfiles.filter(isSelectableAgentProfile);
+  const selectable = agentProfiles.filter((profile) =>
+    isSelectableAgentProfile(profile, dynamicRoutingEnabled),
+  );
   if (!selectedExecutorProfile || !authLoaded) return selectable;
   return selectable.filter((profile) =>
     isAgentConfiguredOnExecutor(profile, selectedExecutorProfile, authSpecs),
@@ -152,14 +157,16 @@ function useExecutorProfileCompat(
     [allExecutorProfiles, selectedProfileId],
   );
   const { specs: authSpecs, loaded: authLoaded } = useRemoteAuthSpecs();
+  const dynamicRoutingEnabled = useFeature("dynamicAgentRouting");
   const compatibleAgentProfiles = useMemo(() => {
     return filterCompatibleAgentProfiles(
       agentProfiles,
       selectedExecutorProfile,
       authLoaded,
       authSpecs,
+      dynamicRoutingEnabled,
     );
-  }, [agentProfiles, selectedExecutorProfile, authSpecs, authLoaded]);
+  }, [agentProfiles, selectedExecutorProfile, authSpecs, authLoaded, dynamicRoutingEnabled]);
   // `noCompatibleAgent` gates the submit button. It must catch BOTH cases:
   //   1. The selected executor has no compatible agents at all.
   //   2. The user picked an agent that isn't compatible with the executor

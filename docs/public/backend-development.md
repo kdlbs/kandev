@@ -18,6 +18,8 @@ The Go module in `apps/backend/` builds both the unified `kandev` binary and the
 
 Use `make dev` for normal full-stack work: it isolates state, starts Vite, and configures the backend proxy. A raw `make dev-backend` uses the normal application home unless you set an isolated `KANDEV_HOME_DIR`; see [Contributing](contributing.md).
 
+Only one backend can own a Kandev home at a time. A second raw backend using that home exits before it opens the database, writes logs, or performs startup recovery. For an intentional second backend, set `KANDEV_HOME_DIR` to a different directory and use a different port and database. The operating system releases ownership when the backend exits; no manual lock-file cleanup is required.
+
 From the repository root:
 
 ```bash

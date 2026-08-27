@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { injectLatency } from "../../helpers/causal-waits";
 
 test.describe("Mobile agent profile config selector", () => {
   test("changes a dynamic profile config option", async ({ testPage, apiClient, backend }) => {
@@ -32,6 +33,16 @@ test.describe("Mobile agent profile config selector", () => {
     });
 
     try {
+      await testPage.route("**/api/v1/agent-models/mock-agent/resolve", async (route) => {
+        const request = route.request().postDataJSON() as { model?: string };
+        if (request.model === "mock-smart") {
+          await injectLatency(
+            750,
+            "keeps the mobile profile model-option loading state visible during resolution",
+          );
+        }
+        await route.fallback();
+      });
       await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
       const selector = testPage.getByRole("button", { name: "Profile start model settings" });
       await expect(selector).toBeVisible({ timeout: 15_000 });
@@ -41,15 +52,29 @@ test.describe("Mobile agent profile config selector", () => {
       await expect(testPage.getByTestId("profile-refresh-capabilities")).toBeEnabled({
         timeout: 15_000,
       });
-      await selector.click();
+      await selector.tap();
       await testPage.getByRole("option", { name: /Mock Smart/ }).tap();
+      await expect(testPage.getByTestId("model-config-options-loading")).toBeVisible();
+      const selectedModelRow = testPage.getByTestId("model-config-selected-row");
+      await expect(selectedModelRow.locator("svg.tabler-icon-loader")).toBeVisible();
+      await expect(selectedModelRow.locator("svg.tabler-icon-check.absolute")).toHaveCount(0);
+      await expect(testPage.getByTestId("config-option-trigger-effort")).toHaveCount(0);
+      await expect(selector).toHaveAttribute("aria-expanded", "true");
+      expect(
+        await testPage.evaluate(
+          () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        ),
+      ).toBe(true);
       await expect(testPage.getByTestId("model-config-resolution-loading")).toBeHidden({
         timeout: 15_000,
       });
+      await expect(testPage.getByTestId("model-config-options-loading")).toHaveCount(0);
+      await expect(selectedModelRow.locator("svg.tabler-icon-loader")).toHaveCount(0);
+      await expect(selectedModelRow.locator("svg.tabler-icon-check.absolute")).toBeVisible();
       await expect(selector).toContainText("Mock Smart", { timeout: 10_000 });
       const effortTrigger = testPage.getByTestId("config-option-trigger-effort");
       await expect(effortTrigger).toBeVisible();
-      await effortTrigger.click();
+      await effortTrigger.tap();
       await expect(testPage.getByRole("button", { name: "Max", exact: true })).toBeVisible({
         timeout: 10_000,
       });
@@ -76,6 +101,10 @@ test.describe("Mobile agent profile config selector", () => {
       await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
 
       const prefixInput = testPage.getByTestId("command-prefix-input");
+      const advancedTrigger = testPage.getByTestId("profile-advanced-options-trigger");
+      await expect(advancedTrigger).toBeVisible({ timeout: 15_000 });
+      await expect(prefixInput).toBeHidden();
+      await advancedTrigger.tap();
       await expect(prefixInput).toBeVisible({ timeout: 15_000 });
       await prefixInput.fill("greywall --");
 
@@ -86,7 +115,13 @@ test.describe("Mobile agent profile config selector", () => {
 
       // Reload — the saved prefix must still be there.
       await testPage.reload();
-      await expect(testPage.getByTestId("command-prefix-input")).toHaveValue("greywall --", {
+      const prefixInputAfterReload = testPage.getByTestId("command-prefix-input");
+      await expect(testPage.getByTestId("profile-advanced-options-trigger")).toBeVisible({
+        timeout: 15_000,
+      });
+      await expect(prefixInputAfterReload).toBeHidden();
+      await testPage.getByTestId("profile-advanced-options-trigger").tap();
+      await expect(prefixInputAfterReload).toHaveValue("greywall --", {
         timeout: 15_000,
       });
 
@@ -95,7 +130,7 @@ test.describe("Mobile agent profile config selector", () => {
       expect(stored.commandPrefix).toBe("greywall --");
 
       // Clearing a previously-saved prefix must persist an empty value.
-      await testPage.getByTestId("command-prefix-input").fill("");
+      await prefixInputAfterReload.fill("");
       const saveButtonAfterClear = testPage
         .getByRole("button", { name: /^Save( changes)?$/i })
         .first();
@@ -104,7 +139,12 @@ test.describe("Mobile agent profile config selector", () => {
       await expect(testPage.getByText(/unsaved changes/i)).toBeHidden({ timeout: 15_000 });
 
       await testPage.reload();
-      await expect(testPage.getByTestId("command-prefix-input")).toHaveValue("", {
+      const prefixInputAfterClear = testPage.getByTestId("command-prefix-input");
+      await expect(testPage.getByTestId("profile-advanced-options-trigger")).toBeVisible({
+        timeout: 15_000,
+      });
+      await testPage.getByTestId("profile-advanced-options-trigger").tap();
+      await expect(prefixInputAfterClear).toHaveValue("", {
         timeout: 15_000,
       });
       const storedAfterClear = await apiClient.getAgentProfile(profile.id);

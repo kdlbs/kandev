@@ -1,3 +1,9 @@
+import type { TaskPriority } from "@/lib/types/http";
+import type { TaskRepository } from "@/lib/types/http";
+import type { TaskLaunchRecoveryAction } from "@/lib/types/task-launch-error";
+import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
+export type { TaskPriority } from "@/lib/types/http";
+
 /**
  * Local task types for office task detail.
  * These will be replaced by backend-generated types once Wave 3A lands.
@@ -11,8 +17,6 @@ export type TaskStatus =
   | "done"
   | "cancelled"
   | "blocked";
-
-export type TaskPriority = "critical" | "high" | "medium" | "low";
 
 export type TaskRunStatus = "queued" | "claimed" | "finished" | "failed" | "cancelled";
 
@@ -103,6 +107,12 @@ export type RunError = {
   failedAt: string;
   /** Adapter-validated provider remediation URL from last_agent_error metadata. */
   remediationUrl?: string;
+  failureCode?: string;
+  failureDetails?: string;
+  message?: string;
+  recoveryActions?: TaskLaunchRecoveryAction[];
+  taskRepositoryId?: string;
+  errorStamp?: string;
 };
 
 export type TaskLabelLocal = {
@@ -132,6 +142,10 @@ export type Task = {
   title: string;
   description?: string;
   status: TaskStatus;
+  // Pre-normalization backend value (e.g. "SCHEDULING", "WAITING_FOR_INPUT"),
+  // preserved so ExecutionIndicator can distinguish sub-states that `status`
+  // collapses to the same canonical bucket. See OfficeTask.rawStatus.
+  rawStatus?: string;
   priority: TaskPriority;
   labels: TaskLabelLocal[];
   assigneeAgentProfileId?: string;
@@ -163,4 +177,6 @@ export type Task = {
   updatedAt: string;
   executionPolicy?: string;
   executionState?: string;
+  statusSummary?: TaskStatusSummary | null;
+  repositories?: TaskRepository[];
 };

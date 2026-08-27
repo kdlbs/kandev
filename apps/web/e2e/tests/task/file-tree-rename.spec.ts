@@ -9,12 +9,13 @@ import {
   openTaskSession,
   createStandardProfile,
 } from "../../helpers/git-helper";
+import { dwell } from "../../helpers/causal-waits";
 
 // Inline rename lives in file-context-menu.tsx (useFileRename + TreeNodeName).
 // Entry points (today, in product code):
 //   - Right-click -> "Rename" menu item
-//   - The input is given focus 150ms after isRenaming=true and blur-commit is
-//     gated by a 400ms ref so the initial focus race doesn't fire onBlur.
+//   - The input is focused immediately after isRenaming=true, while blur-commit is
+//     gated by a 400ms ref so the initial focus handoff does not fire onBlur.
 // Commit on Enter, cancel on Escape, commit on blur.
 // We test the user-visible flow only (no direct DOM hacks), so the 400ms
 // blur gate is exercised implicitly.
@@ -47,9 +48,7 @@ async function startRenameViaContextMenu(testPage: Page, node: ReturnType<Page["
   // the row is the only one with this className combo; locate via role.
   const input = node.getByRole("textbox");
   await expect(input).toBeVisible({ timeout: 2_000 });
-  // The rename input is focused in an effect after the row switches into
-  // edit mode; allow a little extra time when the browser is under CI load.
-  await expect(input).toBeFocused({ timeout: 5_000 });
+  await expect(input).toBeFocused();
   return input;
 }
 
@@ -151,9 +150,12 @@ test.describe("File tree inline rename", () => {
     const input = await startRenameViaContextMenu(testPage, node);
     await input.press("ControlOrMeta+A");
     await input.fill("blur-final.ts");
-    // The blur gate is ~400ms after isRenaming flips. Wait that out before
-    // moving focus elsewhere so the blur handler actually fires the commit.
-    await testPage.waitForTimeout(500);
+    await dwell(
+      testPage,
+      500,
+      "product-timer",
+      "the product gates blur-commit on a ~400ms timer after isRenaming flips; that timer publishes nothing to observe, so the wait has to outlast it",
+    );
     // Click another file to blur the input. The other node also belongs to
     // the tree, so we don't lose tree-container focus state.
     await session.fileTreeNode("other.ts").click();

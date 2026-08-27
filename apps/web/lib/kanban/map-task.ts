@@ -3,10 +3,11 @@ import {
   isIssueWatchFromMetadata,
   issueFieldsFromMetadata,
 } from "@/lib/metadata-utils";
-import type { KanbanState } from "@/lib/state/slices/kanban/types";
+import type { KanbanState, TaskDependencyRef } from "@/lib/state/slices/kanban/types";
 import type {
   ForegroundActivity,
   TaskPendingAction,
+  TaskPriority,
   TaskState,
   TaskSessionState,
 } from "@/lib/types/http";
@@ -31,13 +32,20 @@ export type TaskLike = {
   workflow_step_id?: string;
   title?: string;
   description?: string | null;
+  autopilot?: boolean;
   position?: number;
   state?: TaskState;
+  priority?: TaskPriority;
   repositories?: Array<{
     id?: string;
     repository_id: string;
     base_branch?: string;
     checkout_branch?: string;
+    branch_policy_id?: string;
+    branch_policy_name?: string;
+    branch_policy_base_branch?: string;
+    branch_policy_branch_template?: string;
+    branch_policy_pull_request_target?: string;
     position?: number;
   }>;
   workspace_folders?: Array<{
@@ -53,6 +61,9 @@ export type TaskLike = {
   task_pending_action?: TaskPendingAction | null;
   /** True when the task's session was mid-turn when the backend died. */
   interrupted?: boolean;
+  /** True when a workflow step's auto_start_agent on_enter action failed to
+   *  launch a run for this task. */
+  auto_start_failed?: boolean;
   foreground_activity?: ForegroundActivity | null;
   active_subagent_count?: number;
   session_count?: number | null;
@@ -67,9 +78,15 @@ export type TaskLike = {
   wip_admitted?: boolean;
   queued_for_step_id?: string | null;
   queued_at?: string | null;
+  blocked?: boolean;
+  blocked_reason?: string | null;
+  depends_on?: TaskDependencyRef[] | null;
+  blocks?: TaskDependencyRef[] | null;
+  start_when_unblocked?: boolean;
   metadata?: Record<string, unknown> | null;
   archived_at?: string | null;
   status_summary?: TaskStatusSummary | null;
+  status_summary_invalidated?: boolean;
 };
 
 export type WorkspaceMode = "inherit_parent" | "new_workspace" | "shared_group";
@@ -117,6 +134,11 @@ function pickRepositories(source: TaskLike): KanbanTaskRepository[] | undefined 
     repository_id: r.repository_id,
     base_branch: r.base_branch ?? "",
     checkout_branch: r.checkout_branch,
+    branch_policy_id: r.branch_policy_id,
+    branch_policy_name: r.branch_policy_name,
+    branch_policy_base_branch: r.branch_policy_base_branch,
+    branch_policy_branch_template: r.branch_policy_branch_template,
+    branch_policy_pull_request_target: r.branch_policy_pull_request_target,
     position: r.position ?? idx,
   }));
 }
@@ -131,6 +153,57 @@ function pickWorkspaceFolders(source: TaskLike): KanbanTask["workspaceFolders"] 
  * leave them out of sync again (cf. sidebar filter regressions where the HTTP
  * snapshot derived `isPRReview` but the WS handler didn't).
  */
+/**
+ * dependencyProjection normalizes the derived dependency fields.
+ *
+ * A payload that carries NO dependency key at all leaves them undefined rather
+ * than defaulting to "no edges". Most `task.updated` publishers are lightweight
+ * and omit them, and inventing empty arrays here is destructive twice over: the
+ * event can insert the task into the board store before boot hydration runs, and
+ * hydration then keeps the "fresher" WS copy — permanently erasing the edges and
+ * blanking the dependency chip. When the keys ARE present (every boot payload and
+ * list read computes them), an empty list is a real "no edges".
+ */
+function dependencyProjection(
+  source: TaskLike,
+): Partial<
+  Pick<KanbanTask, "blocked" | "blockedReason" | "dependsOn" | "blocks" | "startWhenUnblocked">
+> {
+  const mentionsDependencies =
+    source.blocked !== undefined ||
+    source.depends_on !== undefined ||
+    source.blocks !== undefined ||
+    source.start_when_unblocked !== undefined;
+  if (!mentionsDependencies) return {};
+  return {
+    blocked: source.blocked ?? false,
+    blockedReason: source.blocked_reason ?? undefined,
+    dependsOn: source.depends_on ?? [],
+    blocks: source.blocks ?? [],
+    startWhenUnblocked: source.start_when_unblocked ?? false,
+  };
+}
+
+/**
+ * `primaryExecutorId`/`Name` map with `?? undefined`, so an omitted wire field
+ * survives mapping as `undefined`. `isRemoteExecutor` maps with `?? false`
+ * instead, so it can never signal omission on its own — but the backend only
+ * ever emits `is_remote_executor` alongside `primary_executor_type` (both are
+ * derived from the same executor snapshot), so gating the whole bundle on
+ * `primaryExecutorType`'s own `undefined`-ness is the reliable signal.
+ */
+export function preserveOmittedExecutorFields(merged: KanbanTask, existing: KanbanTask): void {
+  if (merged.primaryExecutorType !== undefined) return;
+  copyPrimaryExecutorFields(merged, existing);
+}
+
+export function copyPrimaryExecutorFields(merged: KanbanTask, existing: KanbanTask): void {
+  merged.primaryExecutorId = existing.primaryExecutorId;
+  merged.primaryExecutorType = existing.primaryExecutorType;
+  merged.primaryExecutorName = existing.primaryExecutorName;
+  merged.isRemoteExecutor = existing.isRemoteExecutor;
+}
+
 export function toKanbanTask(source: TaskLike): KanbanTask {
   return {
     id: pickId(source),
@@ -139,6 +212,8 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     workflowStepId: source.workflow_step_id ?? "",
     title: source.title ?? "",
     description: source.description ?? undefined,
+    autopilot: source.autopilot,
+    priority: source.priority,
     position: source.position ?? 0,
     state: source.state,
     repositoryId: pickRepositoryId(source),
@@ -149,6 +224,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     primarySessionPendingAction: pickPendingAction(source.primary_session_pending_action),
     taskPendingAction: pickPendingAction(source.task_pending_action),
     interrupted: source.interrupted,
+    autoStartFailed: source.auto_start_failed,
     foregroundActivity: pickForegroundActivity(source.foreground_activity),
     activeSubagentCount: source.active_subagent_count ?? undefined,
     sessionCount: source.session_count ?? undefined,
@@ -164,6 +240,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     wipAdmitted: source.wip_admitted,
     queuedForStepId: source.queued_for_step_id,
     queuedAt: source.queued_at,
+    ...dependencyProjection(source),
     statusSummary: source.status_summary,
     metadata: source.metadata,
     isArchived: source.archived_at != null,

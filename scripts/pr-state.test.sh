@@ -79,6 +79,20 @@ if [[ "$1" == "repo" && "$2" == "view" ]]; then
   exit 0
 fi
 
+if [[ "$1" == "api" && "$2" == repos/kdlbs/kandev/compare/* ]]; then
+  merge_base="${GH_MERGE_BASE:-base-branch-sha}"
+  if [[ "${GH_BASE_SEQUENCE:-stable}" == "race" && "$2" == *"late-base-head-sha..."* ]]; then
+    merge_base="late-merge-base-sha"
+  fi
+  cat <<JSON
+{
+  "base_commit": { "sha": "${GH_BASE_HEAD:-base-head-sha}" },
+  "merge_base_commit": { "sha": "$merge_base" }
+}
+JSON
+  exit 0
+fi
+
 if [[ "$1" == "api" && "$2" == "repos/kdlbs/kandev/pulls/comments/111" ]]; then
   cat <<'JSON'
 {
@@ -170,6 +184,7 @@ if [[ "$1" == "pr" && "$2" == "view" && "$4" == "--json" ]]; then
   cat <<JSON
 {
   "number": 123,
+  "baseRefName": "${GH_BASE_REF_NAME:-main}",
   "headRefName": "feat/pr-state",
   "headRefOid": "${GH_CHECKS_HEAD:-abc123}",
   "headRepositoryOwner": { "login": "${GH_HEAD_REPOSITORY_OWNER:-kdlbs}" },
@@ -524,7 +539,29 @@ if [[ "$1" == "api" && "$2" == "--paginate" && "$3" == "-X" && "$4" == "GET" && 
   exit 0
 fi
 
-  if [[ "$1" == "api" && "$2" == "graphql" ]]; then
+if [[ "$1" == "api" && "$2" == "graphql" ]]; then
+  if [[ "$*" == *"baseRefOid"* && "$*" != *"headRefOid"* ]]; then
+    base_head="${GH_BASE_HEAD:-base-head-sha}"
+    if [[ "${GH_BASE_SEQUENCE:-stable}" == "race" ]]; then
+      if [[ -f "${GH_BASE_COUNTER_FILE:?}" ]]; then
+        base_head="late-base-head-sha"
+      else
+        : >"$GH_BASE_COUNTER_FILE"
+      fi
+    fi
+    printf '%s\n' '{
+      "data": {
+        "repository": {
+          "pullRequest": {
+            "baseRefName": "main",
+            "baseRefOid": "'"$base_head"'"
+          }
+        }
+      }
+    }'
+    exit 0
+  fi
+
   if [[ "$*" == *"headRefOid"* ]]; then
     head_oid="abc123"
     if [[ "${GH_HEAD_SEQUENCE:-stable}" == "race" ]]; then
@@ -701,6 +738,7 @@ test_snapshot_happy_path() {
   assert_jq "pr number" '.pr.number == 123' "$json"
   assert_jq "branch" '.pr.branch == "feat/pr-state"' "$json"
   assert_jq "head delivery target" '.pr.head_repository_owner == "kdlbs" and .pr.head_repository_name == "kandev" and .pr.head_ref_name == "feat/pr-state" and .pr.head_ref_oid == "abc123" and .pr.maintainer_can_modify == true' "$json"
+  assert_jq "base divergence fields" '.pr.base_ref_name == "main" and .pr.base_head_oid == "base-head-sha" and .pr.merge_base_oid == "base-branch-sha" and .pr.base_advanced_since_head == true' "$json"
   assert_jq "since timestamp" '.since.committed_at == "2026-06-01T12:00:00Z"' "$json"
   assert_jq "checks collapse duplicate workflow attempts" '.checks | length < 10' "$json"
   assert_jq "latest duplicate check uses newest attempt" '[.checks[] | select(.name == "web lint")][0] | .conclusion == "success" and .run_id == "27340000001"' "$json"
@@ -1142,10 +1180,12 @@ test_graphql_failure_records_error_but_keeps_other_data() {
   assert_jq "reviews still present on graphql failure" '.reviews | length == 2' "$json"
   assert_jq "review threads empty on graphql failure" '.review_threads == []' "$json"
   assert_jq "unresolved count unknown on graphql failure" '.unresolved_review_thread_count == null' "$json"
-  assert_jq "graphql failure records opening and closing head errors" '.errors | length == 3' "$json"
+  assert_jq "graphql failure records base, opening, and closing errors" '.errors | length == 5' "$json"
+  assert_jq "graphql failure records base lookup error" '.errors[] | select(.source == "base") | .message == "gh api graphql base ref lookup failed"' "$json"
   assert_jq "graphql failure records since error" '.errors[] | select(.source == "since") | .message == "gh api graphql head commit failed; including historical comments"' "$json"
   assert_jq "graphql failure records review_threads error" '.errors[] | select(.source == "review_threads") | .message == "gh api graphql reviewThreads failed"' "$json"
   assert_jq "graphql failure records closing head error" '.errors[] | select(.source == "closing_head") | .message == "gh api graphql closing head commit failed"' "$json"
+  assert_jq "graphql failure records closing base error" '.errors[] | select(.source == "closing_base") | .message == "gh api graphql base ref lookup failed after evidence collection"' "$json"
   assert_jq "since fallback includes all historical comments" '.issue_comments | length == 8' "$json"
   pass "graphql failure records error but keeps other data"
 }
@@ -1196,6 +1236,7 @@ test_summary_mode_returns_compact_fixup_state() {
 
   assert_jq "summary keeps pr" '.pr.number == 123' "$json"
   assert_jq "summary keeps authoritative head delivery target" '.pr.head_repository_owner == "kdlbs" and .pr.head_repository_name == "kandev" and .pr.head_ref_name == "feat/pr-state" and .pr.head_ref_oid == "abc123" and .pr.maintainer_can_modify == true' "$json"
+  assert_jq "summary keeps base divergence fields" '.pr.base_ref_name == "main" and .pr.base_head_oid == "base-head-sha" and .pr.merge_base_oid == "base-branch-sha" and .pr.base_advanced_since_head == true' "$json"
   assert_jq "summary keeps since" '.since.committed_at == "2026-06-01T12:00:00Z"' "$json"
   assert_jq "summary has no approval-required runs by default" '.approval_required_runs == []' "$json"
   assert_jq "summary failed check count" '.failed_checks | length == 3' "$json"
@@ -1207,6 +1248,7 @@ test_summary_mode_returns_compact_fixup_state() {
   assert_jq "summary pending check count" '.pending_checks | length == 2' "$json"
   assert_jq "summary pending check" '.pending_checks[0] | .name == "claude-review" and .status == "in_progress" and .run_id == "27340000003"' "$json"
   assert_jq "summary pending status context keeps target url" '.pending_checks[] | select(.name == "external pending") | .status == "pending" and .details_url == null and .target_url == "https://ci.example.test/build/1"' "$json"
+  assert_jq "summary counts every effective check" '.check_count == 7' "$json"
   assert_jq "summary exposes normalized passing checks" '(.passed_check_count == (.successful_checks | length)) and any(.successful_checks[]; .name == "web lint" and .conclusion == "success") and any(.successful_checks[]; .name == "opencode-review-same-repo" and .conclusion == "success")' "$json"
   assert_jq "summary unresolved count" '.unresolved_review_thread_count == 2' "$json"
   assert_jq "summary filtered thread count" '.filtered_review_thread_count == 1' "$json"
@@ -1232,6 +1274,32 @@ test_summary_reports_current_head_fork_approval_runs() {
     '.approval_required_runs | length == 1 and .[0].run_id == "444" and .[0].head_sha == "abc123" and .[0].conclusion == "action_required"' \
     "$json"
   pass "--summary reports current-head fork approval runs"
+}
+
+test_summary_reports_base_not_advanced_when_head_matches_merge_base() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  local json
+  GH_BASE_HEAD=base-branch-sha GH_MERGE_BASE=base-branch-sha PATH="$tmp/bin:$PATH" "$SCRIPT" --summary 123 >"$tmp/out.json"
+  json="$(<"$tmp/out.json")"
+
+  assert_jq "summary reports base not advanced" '.pr.base_advanced_since_head == false' "$json"
+  pass "summary reports base not advanced when head matches merge base"
+}
+
+test_summary_revalidates_base_at_closing_head() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  local json
+  GH_BASE_SEQUENCE=race GH_BASE_COUNTER_FILE="$tmp/base-calls" GH_MERGE_BASE=base-head-sha PATH="$tmp/bin:$PATH" "$SCRIPT" --summary 123 >"$tmp/out.json"
+  json="$(<"$tmp/out.json")"
+
+  assert_jq "summary uses closing base ref" '.pr.base_head_oid == "late-base-head-sha" and .pr.merge_base_oid == "late-merge-base-sha" and .pr.base_advanced_since_head == true' "$json"
+  pass "summary revalidates base at closing head"
 }
 
 test_summary_reports_approval_run_fetch_failure() {
@@ -1417,6 +1485,85 @@ test_jq_file_args_avoid_process_substitution() {
 }
 
 test_jq_file_args_avoid_process_substitution
+# Both of these guard against host-toolchain failures that CI cannot reproduce:
+# the runners ship bash 5 and jq 1.7, while macOS ships bash 3.2 as /bin/bash and
+# jq 1.6 is still widely installed. Each bug made pr-state report a dirty PR as
+# clean, so the invariant is asserted structurally rather than left untested.
+test_array_expansions_are_safe_under_set_u() {
+  local offenders
+  # The guarded form contains "${arr[@]}" inside it, so lines carrying the
+  # [@]+ guard are not offenders.
+  offenders="$(grep -n '"\${[A-Za-z_][A-Za-z0-9_]*\[@\]}"' "$SCRIPT" | grep -v '\[@\]+' || true)"
+  if [ -n "$offenders" ]; then
+    printf '%s\n' "$offenders" >&2
+    fail "array expansions use \${arr[@]+\"\${arr[@]}\"} (bash 3.2 errors on an empty array under set -u)"
+  fi
+
+  # And the guarded form itself must be safe both empty and populated.
+  if ! bash -c 'set -u; a=(); : ${a[@]+"${a[@]}"}' 2>/dev/null; then
+    fail "the guarded expansion is safe for an empty array"
+  fi
+  if [ "$(bash -c 'set -u; a=(one two); printf "%s," ${a[@]+"${a[@]}"}')" != "one,two," ]; then
+    fail "the guarded expansion preserves array elements"
+  fi
+
+  pass "array expansions survive bash 3.2 under set -u"
+}
+
+test_anchored_prefix_strip_cannot_loop() {
+  # A gsub whose pattern is entirely optional matches the empty string at every
+  # position, which never terminates on jq 1.6. The strips here are ^-anchored,
+  # so sub() is both the terminating and the semantically correct operator.
+  # The hazard is a pattern that can match the empty string. A trailing optional
+  # group is the realistic shape of that: gsub("...(?:x)?"; ...) matches nothing
+  # at every position. This source guard is conservative. It flags any gsub
+  # pattern that contains `?`, including safe patterns that contain required atoms.
+  local offenders
+  offenders="$(grep -n 'gsub("[^"]*?";' "$SCRIPT" || true)"
+  if [ -n "$offenders" ]; then
+    printf '%s\n' "$offenders" >&2
+    fail "a gsub pattern ending in an optional group can match empty and loops on jq 1.6; use sub()"
+  fi
+
+  # The filter must terminate quickly whatever jq is installed. Use a background
+  # watchdog because macOS does not provide the GNU `timeout` command by default.
+  local start elapsed tmp timeout_file jq_pid watchdog_pid jq_status
+  make_tmp_dir tmp
+  timeout_file="$tmp/jq-timeout"
+  start=$(date +%s)
+  jq -n '"- **blocked** on review" | sub("^[[:space:]]*(?:(?:[-*+]\\s+)|(?:[0-9]+\\.\\s+))?(?:\\*\\*|__|_|\\*)?"; "")' >/dev/null 2>&1 &
+  jq_pid=$!
+  (
+    sleep 5
+    if kill -0 "$jq_pid" 2>/dev/null; then
+      : >"$timeout_file"
+      kill "$jq_pid" 2>/dev/null || true
+    fi
+  ) &
+  watchdog_pid=$!
+
+  if wait "$jq_pid"; then
+    jq_status=0
+  else
+    jq_status=$?
+  fi
+  kill "$watchdog_pid" 2>/dev/null || true
+  wait "$watchdog_pid" 2>/dev/null || true
+
+  if [ -e "$timeout_file" ]; then
+    fail "the prefix strip terminates promptly (timed out after 5s)"
+  fi
+  if [ "$jq_status" -ne 0 ]; then
+    fail "the prefix strip evaluates successfully"
+  fi
+  elapsed=$(( $(date +%s) - start ))
+  if [ "$elapsed" -gt 5 ]; then
+    fail "the prefix strip terminates promptly (took ${elapsed}s)"
+  fi
+
+  pass "anchored prefix strips terminate on jq 1.6"
+}
+
 test_snapshot_happy_path
 test_old_head_review_does_not_qualify
 test_exact_head_selected_review_qualifies
@@ -1448,6 +1595,8 @@ test_graphql_pagination_collects_all_threads
 test_all_flag_includes_historical_comments_and_reviews
 test_summary_mode_returns_compact_fixup_state
 test_summary_reports_current_head_fork_approval_runs
+test_summary_reports_base_not_advanced_when_head_matches_merge_base
+test_summary_revalidates_base_at_closing_head
 test_summary_reports_approval_run_fetch_failure
 test_summary_all_flag_includes_historical_unresolved_threads
 test_job_log_mode_emits_bounded_failure_context
@@ -1455,3 +1604,5 @@ test_job_log_mode_unpacks_zip_responses
 test_comment_mode_returns_full_review_comment
 test_comment_mode_reports_fetch_failure
 test_comment_mode_rejects_incompatible_flags
+test_array_expansions_are_safe_under_set_u
+test_anchored_prefix_strip_cannot_loop

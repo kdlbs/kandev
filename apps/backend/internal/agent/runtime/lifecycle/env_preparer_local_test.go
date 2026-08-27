@@ -2,6 +2,9 @@ package lifecycle
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 func newTestLocalLogger() *logger.Logger {
@@ -17,6 +21,28 @@ func newTestLocalLogger() *logger.Logger {
 		Format: "json",
 	})
 	return log
+}
+
+func TestLocalPreparer_ReuseRequiredSkipsCheckoutAndSetup(t *testing.T) {
+	workspacePath := t.TempDir()
+	marker := filepath.Join(workspacePath, "setup-ran")
+	preparer := NewLocalPreparer(newTestLocalLogger())
+
+	result, err := preparer.Prepare(context.Background(), &EnvPrepareRequest{
+		WorkspacePath:          workspacePath,
+		CheckoutBranch:         "must-not-be-checked-out",
+		SetupScript:            "touch " + marker,
+		WorkspaceReuseRequired: true,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Prepare() error = %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("Prepare() result = %#v, want success", result)
+	}
+	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("reuse-required preparation ran setup script: stat error = %v", err)
+	}
 }
 
 // initGitRepo creates a minimal git repo with an initial commit and returns the path.
@@ -294,6 +320,54 @@ func TestLocalPreparer_CheckoutBranchPriorityOverBaseBranch(t *testing.T) {
 	}
 }
 
+func TestLocalPreparer_UsesAuthenticatedRefreshWithoutSecondFetch(t *testing.T) {
+	isolateGitEnv(t)
+	repoDir := initGitRepo(t)
+	env := newIsolatedGitEnv()
+	for _, args := range [][]string{
+		{"checkout", "-b", "feature/refreshed"},
+		{"commit", "--allow-empty", "-m", "refreshed branch"},
+		{"checkout", "main"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		cmd.Env = env
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %s", args, out)
+		}
+	}
+
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fakeBin := t.TempDir()
+	fetchMarker := filepath.Join(t.TempDir(), "unexpected-fetch")
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = fetch ]; then : > \"$FETCH_MARKER\"; exit 99; fi\n" +
+		"exec \"$REAL_GIT\" \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(fakeBin, "git"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("REAL_GIT", realGit)
+	t.Setenv("FETCH_MARKER", fetchMarker)
+
+	result, err := NewLocalPreparer(newTestLocalLogger()).Prepare(context.Background(), &EnvPrepareRequest{
+		TaskID: "task-1", RepositoryPath: repoDir, CheckoutBranch: "feature/refreshed",
+		RemoteSyncHandled: true,
+	}, nil)
+	if err != nil || !result.Success {
+		t.Fatalf("Prepare() = success %v, error %v", result.Success, err)
+	}
+	if _, err := os.Stat(fetchMarker); !os.IsNotExist(err) {
+		t.Fatal("local preparer performed a second unauthenticated fetch")
+	}
+	if got := currentBranch(t, repoDir); got != "feature/refreshed" {
+		t.Fatalf("branch = %q, want feature/refreshed", got)
+	}
+}
+
 // TestLocalPreparer_CheckoutFailureSurfaces ensures actual checkout failures
 // (e.g. trying to switch branches with a dirty workdir) bubble up as a
 // failed step + non-nil error so the orchestrator marks the task FAILED.
@@ -407,4 +481,151 @@ func TestLocalPreparer_RunsSetupScriptWithoutCheckout(t *testing.T) {
 	if got := currentBranch(t, repoDir); got != startBranch {
 		t.Fatalf("local preparer modified branch: was %q, now %q", startBranch, got)
 	}
+}
+
+// TestLocalPreparer_BranchCheckedOutElsewhereFailsClosed is the regression for
+// the bug where a second task's environment creation fails when its target
+// branch is already checked out in another worktree AND the remote no longer
+// carries that ref. The local preparer must fail closed with a typed
+// ErrBranchCheckedOut error so the orchestrator does not misclassify the
+// failure as a missing-branch fetch failure and post PR-recovery guidance for
+// a branch that is, in fact, present locally.
+//
+// Before the fix, checkoutBranch concatenated the fetch stderr ("couldn't find
+// remote ref") with the checkout stderr ("is already checked out at ..."); the
+// combined message made the orchestrator's substring-based
+// isMissingBranchError match the "couldn't find remote ref" fragment and emit
+// branch_fetch_failed guidance — wrong because the local branch exists, just
+// not in this working tree.
+//
+// The shared checkout's HEAD and index must also be untouched: switching to
+// the target branch was never possible here, and partial state changes (e.g.
+// the fetch updating FETCH_HEAD or the index) would corrupt another task's
+// workspace.
+func TestLocalPreparer_BranchCheckedOutElsewhereFailsClosed(t *testing.T) {
+	isolateGitEnv(t)
+	repoDir := initGitRepo(t)
+	env := newIsolatedGitEnv()
+
+	for _, args := range [][]string{
+		{"checkout", "-b", "feature/shared"},
+		{"commit", "--allow-empty", "-m", "shared work"},
+		{"checkout", "main"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		cmd.Env = env
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %s", args, out)
+		}
+	}
+
+	// Use a sibling git worktree so the real git binary (used for setup)
+	// knows the branch is checked out elsewhere. This mirrors what the user
+	// hit: another task's worktree holds the branch.
+	sibling := filepath.Join(t.TempDir(), "sibling")
+	siblingCmd := exec.Command("git", "worktree", "add", sibling, "feature/shared")
+	siblingCmd.Dir = repoDir
+	siblingCmd.Env = env
+	if out, err := siblingCmd.CombinedOutput(); err != nil {
+		t.Fatalf("git worktree add failed: %s", out)
+	}
+	t.Cleanup(func() {
+		cleanupCmd := exec.Command("git", "worktree", "remove", "--force", sibling)
+		cleanupCmd.Dir = repoDir
+		cleanupCmd.Env = env
+		_ = cleanupCmd.Run()
+	})
+
+	// Snapshot HEAD + index before the failing prepare so we can prove the
+	// shared checkout was untouched.
+	headBefore := readHeadSHA(t, repoDir)
+	indexBefore := readIndexSHA(t, repoDir)
+	branchBefore := currentBranch(t, repoDir)
+
+	// Fake only fetch: it supplies the missing-remote-ref text that triggers
+	// the substring match, then lets the real checkout detect the sibling
+	// worktree and emit its "already checked out at" diagnostic. Pass through
+	// everything else (symbolic-ref, rev-parse, ls-files, worktree, etc.) by
+	// exec'ing the real git at its absolute path — re-resolving via PATH would
+	// loop back to this fake.
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatalf("locate real git: %v", err)
+	}
+	fakeBin := t.TempDir()
+	fakeGit := filepath.Join(fakeBin, "git")
+	script := `#!/bin/sh
+case "$1" in
+fetch)
+  echo "fatal: couldn't find remote ref feature/shared" >&2
+  exit 128
+  ;;
+esac
+exec "` + realGit + `" "$@"
+`
+	if err := os.WriteFile(fakeGit, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake git: %v", err)
+	}
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	result, err := NewLocalPreparer(newTestLocalLogger()).Prepare(context.Background(), &EnvPrepareRequest{
+		TaskID:         "task-2",
+		RepositoryPath: repoDir,
+		BaseBranch:     "feature/shared",
+	}, nil)
+	if err == nil {
+		t.Fatal("expected Prepare() to fail when branch is checked out elsewhere")
+	}
+	if result.Success {
+		t.Fatalf("expected result.Success = false; error=%v", err)
+	}
+	if !errors.Is(err, worktree.ErrBranchCheckedOut) {
+		t.Fatalf("expected error to wrap worktree.ErrBranchCheckedOut, got %v", err)
+	}
+	// Combined fetch+checkout stderr must remain visible (the operator still
+	// needs to see what happened) — this is the same string content that
+	// previously fooled isMissingBranchError into a false match. The typed
+	// sentinel is what prevents the misclassification.
+	if !strings.Contains(err.Error(), "couldn't find remote ref") {
+		t.Fatalf("expected fetch stderr to be preserved in error chain, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "already checked out at") &&
+		!strings.Contains(err.Error(), "already used by worktree at") {
+		t.Fatalf("expected real checkout stderr to be preserved in error chain, got %v", err)
+	}
+
+	if got := currentBranch(t, repoDir); got != branchBefore {
+		t.Fatalf("local preparer changed branch: was %q, now %q", branchBefore, got)
+	}
+	if got := readHeadSHA(t, repoDir); got != headBefore {
+		t.Fatalf("local preparer changed HEAD: was %s, now %s", headBefore, got)
+	}
+	if got := readIndexSHA(t, repoDir); got != indexBefore {
+		t.Fatalf("local preparer changed index: was %s, now %s", indexBefore, got)
+	}
+}
+
+func readHeadSHA(t *testing.T, repoDir string) string {
+	t.Helper()
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = repoDir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git rev-parse HEAD failed: %v", err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func readIndexSHA(t *testing.T, repoDir string) string {
+	t.Helper()
+	cmd := exec.Command("git", "ls-files", "--stage")
+	cmd.Dir = repoDir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git ls-files failed: %v", err)
+	}
+	hash := sha1.New()
+	hash.Write(out)
+	return hex.EncodeToString(hash.Sum(nil))
 }

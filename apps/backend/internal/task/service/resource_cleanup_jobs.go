@@ -46,6 +46,10 @@ type taskResourceCleanupSnapshot struct {
 	TaskEnvironment       *models.TaskEnvironment   `json:"task_environment,omitempty"`
 	DeleteEnvironmentRow  bool                      `json:"delete_environment_row,omitempty"`
 	LegacyWorktreeCleanup bool                      `json:"legacy_worktree_cleanup,omitempty"`
+	// SSHTaskDirs records the remote task directories this task launched into.
+	// Additive and absent-tolerant: a job row written by an older backend
+	// decodes with an empty list and reclaims nothing.
+	SSHTaskDirs []sshReclaimTarget `json:"ssh_task_dirs,omitempty"`
 }
 
 type taskResourceCleanupRun struct {
@@ -81,6 +85,16 @@ func (s *Service) persistTaskResourceCleanup(
 		TaskEnvironment:       envCleanup.env,
 		DeleteEnvironmentRow:  envCleanup.deleteRow,
 		LegacyWorktreeCleanup: s.hasLegacyWorktreeCleanup(),
+	}
+	if !prepared {
+		// A prepared job stores a deliberately empty placeholder snapshot that
+		// PrepareTaskResourceCleanup replaces once the barrier is reserved;
+		// gathering here would be discarded by that replacement.
+		sshTaskDirs, err := s.gatherSSHReclaimTargets(ctx, taskID)
+		if err != nil {
+			return nil, fmt.Errorf("list remote task directories for cleanup snapshot: %w", err)
+		}
+		snapshot.SSHTaskDirs = sshTaskDirs
 	}
 	encoded, err := json.Marshal(snapshot)
 	if err != nil {
@@ -332,9 +346,22 @@ func (s *Service) processTaskResourceCleanupJob(ctx context.Context, id string) 
 		return s.retryTaskResourceCleanupJob(runCtx, job, fmt.Errorf("decode resource snapshot: %w", err))
 	}
 	defer s.signalCleanupDoneForTest()
-	cleanupErr := s.executeTaskResourceCleanupJob(runCtx, job, snapshot)
+	cleanupErr := s.executeTaskResourceCleanupJob(runCtx, job, &snapshot)
 	if cleanupErr != nil {
 		return s.retryTaskResourceCleanupJob(runCtx, job, cleanupErr)
+	}
+	encoded, err := json.Marshal(snapshot)
+	if err != nil {
+		return s.retryTaskResourceCleanupJob(runCtx, job, fmt.Errorf("encode resource snapshot outcomes: %w", err))
+	}
+	updated, err := s.resourceCleanups.UpdateClaimedTaskResourceCleanupSnapshot(
+		runCtx, job.ID, job.Attempts, string(encoded),
+	)
+	if err != nil {
+		return s.retryTaskResourceCleanupJob(runCtx, job, fmt.Errorf("persist resource snapshot outcomes: %w", err))
+	}
+	if !updated {
+		return nil
 	}
 	_, err = s.resourceCleanups.CompleteClaimedTaskResourceCleanupJob(
 		runCtx, job.ID, job.Attempts, models.TaskResourceCleanupStateSucceeded, "", nil,
@@ -388,8 +415,11 @@ func (s *Service) cancelAndJoinArchiveTaskResourceCleanupRuns(ctx context.Contex
 func (s *Service) executeTaskResourceCleanupJob(
 	ctx context.Context,
 	job *models.TaskResourceCleanupJob,
-	snapshot taskResourceCleanupSnapshot,
+	snapshot *taskResourceCleanupSnapshot,
 ) error {
+	if snapshot == nil {
+		return errors.New("resource cleanup snapshot is nil")
+	}
 	targets, err := s.refreshTaskRuntimeStopTargets(
 		ctx,
 		job.TaskID,
@@ -414,6 +444,9 @@ func (s *Service) executeTaskResourceCleanupJob(
 		if err := s.worktreeCleanup.OnTaskDeleted(ctx, job.TaskID); err != nil {
 			errs = append(errs, fmt.Errorf("legacy worktree cleanup: %w", err))
 		}
+	}
+	if len(failedStops) == 0 {
+		errs = append(errs, s.reclaimSSHTaskDirs(ctx, job, snapshot)...)
 	}
 	if cause := context.Cause(ctx); cause != nil {
 		return errors.Join(append(errs, cause)...)
@@ -562,6 +595,19 @@ func (s *Service) PrepareTaskResourceCleanup(
 	operationID string,
 	deleteEnvironmentRow bool,
 ) error {
+	// Reserve the durable lifecycle barrier BEFORE capturing the inventory.
+	// Session and worktree creation serialize against the owning task row and
+	// reject new ownership while this prepared barrier is active, so the
+	// snapshot below cannot miss a resource admitted mid-preparation.
+	job, err := s.persistTaskResourceCleanup(ctx, taskID, trigger, operationID,
+		nil, nil, nil, taskEnvironmentCleanup{}, true)
+	if err != nil {
+		return err
+	}
+	if s.resourceCleanups == nil {
+		return nil
+	}
+	barrierOperationID := job.OperationID
 	sessions, err := s.sessions.ListTaskSessions(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("list task sessions for cleanup snapshot: %w", err)
@@ -578,10 +624,23 @@ func (s *Service) PrepareTaskResourceCleanup(
 	if err != nil {
 		return fmt.Errorf("lookup task environment for cleanup snapshot: %w", err)
 	}
-	_, err = s.persistTaskResourceCleanup(ctx, taskID, trigger, operationID,
-		sessions, worktrees, stopTargets,
-		taskEnvironmentCleanup{env: taskEnv, deleteRow: deleteEnvironmentRow}, true)
-	return err
+	sshTaskDirs, err := s.gatherSSHReclaimTargets(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("list remote task directories for cleanup snapshot: %w", err)
+	}
+	snapshot := taskResourceCleanupSnapshot{
+		Sessions: sessions, Worktrees: worktrees,
+		StopTargets:           persistStopTargets(stopTargets),
+		TaskEnvironment:       taskEnv,
+		DeleteEnvironmentRow:  deleteEnvironmentRow,
+		LegacyWorktreeCleanup: s.hasLegacyWorktreeCleanup(),
+		SSHTaskDirs:           sshTaskDirs,
+	}
+	encoded, err := json.Marshal(snapshot)
+	if err != nil {
+		return fmt.Errorf("encode task resource cleanup snapshot: %w", err)
+	}
+	return s.resourceCleanups.UpdateTaskResourceCleanupSnapshot(ctx, barrierOperationID, string(encoded))
 }
 
 func (s *Service) StartPreparedTaskResourceCleanup(ctx context.Context, operationID string) error {

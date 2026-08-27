@@ -16,10 +16,15 @@ import (
 func (r *Repository) initSchema() error {
 	steps := []func() error{
 		r.initCoreSchema,
+		r.initRepositorySetsSchema,
+		r.initRepositoryBranchPoliciesSchema,
 		r.initPlansSchema,
 		r.initWalkthroughsSchema,
 		r.initDocumentsSchema,
 		r.initSessionSchema,
+		r.initDynamicRoutingSchema,
+		r.initStepTransitionsSchema,
+		r.initTaskUsageEventsSchema,
 		r.initAttachmentsSchema,
 		r.initTaskResourceCleanupSchema,
 		r.initGitSchema,
@@ -31,14 +36,15 @@ func (r *Repository) initSchema() error {
 		r.ensureDefaultExecutorsAndEnvironments,
 		r.runMigrations,
 		r.hideBuiltinWorkflows,
-		r.backfillTaskEnvironments,
-		r.backfillTaskEnvironmentRepos,
-		r.healTaskEnvironmentWorkspacePaths,
+		r.healBuiltinWorkflowStepFlags,
+		r.healBuiltinWorkflowStepParticipantSeats,
+		r.normalizeTaskWorktreeOwnership,
 		r.healDuplicateTaskEnvironments,
 		r.ensureTaskEnvironmentTaskUniqueIndex,
 		r.healSessionTaskEnvironmentIDs,
 		r.ensureWorkspaceIndexes,
 		r.ensureMessageMetadataIndexes,
+		r.ensurePromptOrderIndex,
 	}
 	for _, step := range steps {
 		if err := step(); err != nil {
@@ -46,6 +52,55 @@ func (r *Repository) initSchema() error {
 		}
 	}
 	return nil
+}
+
+func (r *Repository) initDynamicRoutingSchema() error {
+	_, err := r.db.Exec(fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS dynamic_route_states (
+			session_id TEXT PRIMARY KEY,
+			logical_profile_id TEXT NOT NULL,
+			execution_profile_id TEXT NOT NULL DEFAULT '',
+			route_generation BIGINT NOT NULL DEFAULT 0,
+			profile_version BIGINT NOT NULL DEFAULT 0,
+			state TEXT NOT NULL DEFAULT 'selecting',
+			continuation_json TEXT NOT NULL DEFAULT '',
+			policy_state_json TEXT NOT NULL DEFAULT '',
+			updated_at TIMESTAMP NOT NULL,
+			FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
+		);
+
+		CREATE TABLE IF NOT EXISTS dynamic_route_attempts (
+			id TEXT PRIMARY KEY,
+			session_id TEXT NOT NULL,
+			logical_profile_id TEXT NOT NULL,
+			execution_profile_id TEXT NOT NULL DEFAULT '',
+			route_generation BIGINT NOT NULL,
+			profile_version BIGINT NOT NULL,
+			reason TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMP NOT NULL,
+			UNIQUE (session_id, route_generation),
+			FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
+		);
+
+		CREATE INDEX IF NOT EXISTS idx_dynamic_route_attempts_session
+			ON dynamic_route_attempts(session_id, route_generation);
+
+		CREATE TABLE IF NOT EXISTS dynamic_resource_circuits (
+			resource_key TEXT PRIMARY KEY,
+			state TEXT NOT NULL,
+			until_at TIMESTAMP,
+			code TEXT NOT NULL DEFAULT '',
+			probe_until TIMESTAMP,
+			updated_at TIMESTAMP NOT NULL
+		);
+
+		CREATE TABLE IF NOT EXISTS dynamic_installation_keys (
+			id INTEGER PRIMARY KEY CHECK (id = 1),
+			key_bytes %s NOT NULL,
+			created_at TIMESTAMP NOT NULL
+		);
+	`, dialect.BlobType(r.db.DriverName())))
+	return err
 }
 
 const taskResourceCleanupSchemaDDL = `
@@ -105,6 +160,19 @@ func (r *Repository) ensureMessageMetadataIndexes() error {
 	)
 	if _, err := r.db.Exec(pendingIndex); err != nil {
 		return err
+	}
+	return nil
+}
+
+// ensurePromptOrderIndex creates the additive expression index
+// (task_session_id, normalized_microsecond(created_at), id) that makes the
+// prompt-ordering window pass index-only. Read-time derived prompt ordinals
+// need no data-column or table-shape migration; this one additive index is
+// the only schema change.
+func (r *Repository) ensurePromptOrderIndex() error {
+	ddl := dialect.PromptOrderIndexDDL(r.db.DriverName(), "idx_messages_prompt_order", "task_session_messages")
+	if _, err := r.db.Exec(ddl); err != nil {
+		return fmt.Errorf("create prompt-order index: %w", err)
 	}
 	return nil
 }
@@ -306,6 +374,7 @@ func (r *Repository) initTaskSchema() error {
 		queued_for_step_id TEXT NOT NULL DEFAULT '',
 		queued_at TIMESTAMP,
 		metadata TEXT DEFAULT '{}',
+		autopilot_enabled INTEGER NOT NULL DEFAULT 0,
 		archived_at TIMESTAMP,
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
@@ -320,6 +389,7 @@ func (r *Repository) initTaskSchema() error {
 		provider TEXT DEFAULT '',
 		provider_repo_id TEXT DEFAULT '',
 		provider_host TEXT DEFAULT '',
+		provider_scope TEXT DEFAULT '',
 		provider_owner TEXT DEFAULT '',
 		provider_name TEXT DEFAULT '',
 		remote_url TEXT DEFAULT '',
@@ -356,6 +426,11 @@ func (r *Repository) initTaskSchema() error {
 		repository_id TEXT NOT NULL,
 		base_branch TEXT DEFAULT '',
 		checkout_branch TEXT DEFAULT '',
+		branch_policy_id TEXT DEFAULT '',
+		branch_policy_name TEXT DEFAULT '',
+		branch_policy_base_branch TEXT DEFAULT '',
+		branch_policy_branch_template TEXT DEFAULT '',
+		branch_policy_pull_request_target TEXT DEFAULT '',
 		position INTEGER DEFAULT 0,
 		metadata TEXT DEFAULT '{}',
 		created_at TIMESTAMP NOT NULL,
@@ -389,6 +464,80 @@ func (r *Repository) initTaskSchema() error {
 		FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE
 	);
 	`)
+	return err
+}
+
+// repositorySetsSchemaDDL declares the repository-set tables. It runs after
+// initCoreSchema so `workspaces` and `repositories` exist for the foreign keys.
+//
+// Membership positions are contiguous from zero and carry no branch: branch
+// choice belongs to a task (task_repositories), which is exactly what the user
+// still decides after applying a set.
+const repositorySetsSchemaDDL = `
+	CREATE TABLE IF NOT EXISTS repository_sets (
+		id TEXT PRIMARY KEY,
+		workspace_id TEXT NOT NULL,
+		name TEXT NOT NULL,
+		description TEXT NOT NULL DEFAULT '',
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+		UNIQUE(workspace_id, name)
+	);
+
+	CREATE TABLE IF NOT EXISTS repository_set_items (
+		id TEXT PRIMARY KEY,
+		repository_set_id TEXT NOT NULL,
+		repository_id TEXT NOT NULL,
+		position INTEGER NOT NULL DEFAULT 0,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (repository_set_id) REFERENCES repository_sets(id) ON DELETE CASCADE,
+		FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE,
+		UNIQUE(repository_set_id, repository_id)
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_repository_sets_workspace_id
+		ON repository_sets(workspace_id);
+	-- Names are compared case-insensitively, so the plain UNIQUE(workspace_id,
+	-- name) above is not the concurrency backstop the service assumes: two
+	-- concurrent creates of "Full-stack" and "full-stack" would both pass the
+	-- service's lookup and both insert. An expression index closes that, and
+	-- LOWER() is available on both SQLite and Postgres.
+	CREATE UNIQUE INDEX IF NOT EXISTS uniq_repository_sets_workspace_lower_name
+		ON repository_sets(workspace_id, LOWER(name));
+	CREATE INDEX IF NOT EXISTS idx_repository_set_items_set_position
+		ON repository_set_items(repository_set_id, position);
+	CREATE INDEX IF NOT EXISTS idx_repository_set_items_repository_id
+		ON repository_set_items(repository_id);
+	`
+
+func (r *Repository) initRepositorySetsSchema() error {
+	_, err := r.db.Exec(repositorySetsSchemaDDL)
+	return err
+}
+
+const repositoryBranchPoliciesSchemaDDL = `
+	CREATE TABLE IF NOT EXISTS repository_branch_policies (
+		id TEXT PRIMARY KEY,
+		repository_id TEXT NOT NULL,
+		name TEXT NOT NULL,
+		description TEXT NOT NULL DEFAULT '',
+		base_branch TEXT NOT NULL,
+		branch_template TEXT NOT NULL,
+		pull_request_target TEXT NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_repository_branch_policies_repository_id
+		ON repository_branch_policies(repository_id);
+	CREATE UNIQUE INDEX IF NOT EXISTS uniq_repository_branch_policies_repository_lower_name
+		ON repository_branch_policies(repository_id, LOWER(name));
+`
+
+func (r *Repository) initRepositoryBranchPoliciesSchema() error {
+	_, err := r.db.Exec(repositoryBranchPoliciesSchemaDDL)
 	return err
 }
 
@@ -610,7 +759,100 @@ func (r *Repository) initSessionSchema() error {
 	if err := r.initSessionWorktreeSchema(); err != nil {
 		return err
 	}
-	return r.initMessageTurnSchema()
+	if err := r.initMessageTurnSchema(); err != nil {
+		return err
+	}
+	return r.initSubagentContextSchema()
+}
+
+// initSubagentContextSchema creates task_session_subagents, the durable
+// relational record of a subagent (Task tool) invocation. See
+// docs/specs/agents/requirements/subagent-context-persistence.md. The three measurement
+// columns (total_tokens, tool_use_count, duration_ms) deliberately carry no
+// DEFAULT: an unreported value must store NULL, never 0 (75% of observed
+// invocations report none of them). turn_id carries no FOREIGN KEY so a turn
+// deletion never silently deletes the fan-out record it measured.
+//
+// agent_execution_id carries DEFAULT 'unknown' (AC-31's reserved sentinel for
+// "no execution identity available") so every row has one, and is part of the
+// UNIQUE key (task_session_id, agent_execution_id, tool_call_id) — a late
+// frame from an earlier, already-completed execution creates/updates its own
+// row instead of clobbering a later execution's (AC-32). Historical message
+// rows are handled separately by the one-time backfill migration.
+func (r *Repository) initSubagentContextSchema() error {
+	_, err := r.db.Exec(`
+	CREATE TABLE IF NOT EXISTS task_session_subagents (
+		id                  TEXT PRIMARY KEY,
+		task_session_id     TEXT NOT NULL,
+		task_id             TEXT NOT NULL,
+		turn_id             TEXT,
+		tool_call_id        TEXT NOT NULL,
+		agent_execution_id  TEXT NOT NULL DEFAULT 'unknown',
+		parent_tool_call_id TEXT,
+		subagent_type       TEXT,
+		description         TEXT,
+		agent_id            TEXT,
+		child_session_id    TEXT,
+		model               TEXT,
+		agent_status        TEXT,
+		tool_status         TEXT,
+		is_async            INTEGER NOT NULL DEFAULT 0,
+		total_tokens        INTEGER,
+		tool_use_count      INTEGER,
+		duration_ms         INTEGER,
+		source              TEXT NOT NULL DEFAULT 'live',
+		observed_at         TIMESTAMP NOT NULL,
+		settled_at          TIMESTAMP,
+		updated_at          TIMESTAMP NOT NULL,
+		UNIQUE (task_session_id, agent_execution_id, tool_call_id),
+		FOREIGN KEY (task_session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_subagents_session_id ON task_session_subagents(task_session_id);
+	CREATE INDEX IF NOT EXISTS idx_subagents_task_id    ON task_session_subagents(task_id);
+	CREATE INDEX IF NOT EXISTS idx_subagents_turn_id    ON task_session_subagents(turn_id);
+	`)
+	return err
+}
+
+// initStepTransitionsSchema creates task_step_transitions: one row per
+// committed change to tasks.workflow_step_id. This is a new table, not a
+// column added to an existing one, so CREATE TABLE IF NOT EXISTS in the init
+// block is correct and complete — the "columns only via runMigrations" rule
+// governs ALTER TABLE, not table creation.
+//
+// Deliberately no foreign key to workflow_steps or workflows: steps and
+// workflows get deleted, and the historical fact that a card was in a
+// now-deleted step must survive that deletion.
+func (r *Repository) initStepTransitionsSchema() error {
+	idCol := "id INTEGER PRIMARY KEY AUTOINCREMENT"
+	if dialect.IsPostgres(r.db.DriverName()) {
+		idCol = "id BIGSERIAL PRIMARY KEY"
+	}
+	_, err := r.db.Exec(`
+	CREATE TABLE IF NOT EXISTS task_step_transitions (
+		` + idCol + `,
+		task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+		session_id TEXT REFERENCES task_sessions(id) ON DELETE SET NULL,
+		from_workflow_id TEXT,
+		from_workflow_step_id TEXT,
+		to_workflow_id TEXT,
+		to_workflow_step_id TEXT,
+		trigger TEXT NOT NULL,
+		actor_kind TEXT NOT NULL,
+		actor_id TEXT,
+		contract_version INTEGER NOT NULL,
+		occurred_at TIMESTAMP NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_task_step_transitions_task
+		ON task_step_transitions(task_id, occurred_at, id);
+	CREATE INDEX IF NOT EXISTS idx_task_step_transitions_occurred
+		ON task_step_transitions(occurred_at);
+	`)
+	if err != nil {
+		return fmt.Errorf("init step transitions schema: %w", err)
+	}
+	return nil
 }
 
 func (r *Repository) initMessageTurnSchema() error {
@@ -621,6 +863,8 @@ func (r *Repository) initMessageTurnSchema() error {
 		task_id TEXT NOT NULL,
 		started_at TIMESTAMP NOT NULL,
 		completed_at TIMESTAMP,
+		execution_profile_id TEXT NOT NULL DEFAULT '',
+		route_generation BIGINT NOT NULL DEFAULT 0,
 		metadata TEXT DEFAULT '{}',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
@@ -666,9 +910,12 @@ func (r *Repository) initMessageTurnSchema() error {
 	return err
 }
 
-// sessionWorktreeSchemaDDL groups task_sessions, task_environments,
-// task_environment_repos, and task_session_worktrees DDL so the owning
-// function stays within the funlen limit.
+// sessionWorktreeSchemaDDL groups task_sessions, task_environments, and
+// task_environment_repos DDL so the owning function stays within the funlen
+// limit. task_environment_repos is the only physical-worktree record; the
+// legacy task_session_worktrees table and the flat worktree columns on
+// task_environments were removed by the one-time cutover migration
+// (normalizeTaskWorktreeOwnership).
 const sessionWorktreeSchemaDDL = `
 	CREATE TABLE IF NOT EXISTS task_sessions (
 		id TEXT PRIMARY KEY,
@@ -677,6 +924,10 @@ const sessionWorktreeSchemaDDL = `
 		container_id TEXT NOT NULL DEFAULT '',
 		agent_profile_id TEXT,
 		execution_profile_id TEXT NOT NULL DEFAULT '',
+		route_generation INTEGER NOT NULL DEFAULT 0,
+		route_state TEXT NOT NULL DEFAULT '',
+		route_reason TEXT NOT NULL DEFAULT '',
+		downstream_acp_session_id TEXT NOT NULL DEFAULT '',
 		executor_id TEXT DEFAULT '',
 		executor_profile_id TEXT DEFAULT '',
 		environment_id TEXT DEFAULT '',
@@ -699,6 +950,7 @@ const sessionWorktreeSchemaDDL = `
 		task_environment_id TEXT DEFAULT '',
 		cost_subcents INTEGER NOT NULL DEFAULT 0,
 		tokens_in INTEGER NOT NULL DEFAULT 0,
+		tokens_cached_in BIGINT NOT NULL DEFAULT 0,
 		tokens_out INTEGER NOT NULL DEFAULT 0,
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 	);
@@ -710,18 +962,16 @@ const sessionWorktreeSchemaDDL = `
 	CREATE TABLE IF NOT EXISTS task_environments (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL,
-		repository_id TEXT DEFAULT '',
 		executor_type TEXT NOT NULL DEFAULT '',
 		executor_id TEXT DEFAULT '',
 		executor_profile_id TEXT DEFAULT '',
-		agent_execution_id TEXT DEFAULT '',
 		control_port INTEGER DEFAULT 0,
 		status TEXT NOT NULL DEFAULT 'creating',
-		worktree_id TEXT DEFAULT '',
-		worktree_path TEXT DEFAULT '',
-		worktree_branch TEXT DEFAULT '',
+		materialization_session_id TEXT DEFAULT '',
 		workspace_path TEXT DEFAULT '',
 		container_id TEXT DEFAULT '',
+		container_bootstrap_nonce_secret_id TEXT DEFAULT '',
+		container_control_auth_token_secret_id TEXT DEFAULT '',
 		sandbox_id TEXT DEFAULT '',
 		task_dir_name TEXT DEFAULT '',
 		created_at TIMESTAMP NOT NULL,
@@ -742,37 +992,17 @@ const sessionWorktreeSchemaDDL = `
 		worktree_branch TEXT DEFAULT '',
 		position INTEGER DEFAULT 0,
 		error_message TEXT DEFAULT '',
+		status TEXT NOT NULL DEFAULT 'active',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
+		merged_at TIMESTAMP,
+		deleted_at TIMESTAMP,
 		FOREIGN KEY (task_environment_id) REFERENCES task_environments(id) ON DELETE CASCADE,
 		UNIQUE(task_environment_id, repository_id, branch_slug)
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_task_environment_repos_env_id ON task_environment_repos(task_environment_id);
 	CREATE INDEX IF NOT EXISTS idx_task_environment_repos_repository_id ON task_environment_repos(repository_id);
-
-	CREATE TABLE IF NOT EXISTS task_session_worktrees (
-		id TEXT PRIMARY KEY,
-		session_id TEXT NOT NULL,
-		worktree_id TEXT NOT NULL,
-		repository_id TEXT NOT NULL,
-		branch_slug TEXT NOT NULL DEFAULT '',
-		position INTEGER DEFAULT 0,
-		worktree_path TEXT DEFAULT '',
-		worktree_branch TEXT DEFAULT '',
-		status TEXT NOT NULL DEFAULT 'active',
-		created_at TIMESTAMP NOT NULL,
-		updated_at TIMESTAMP NOT NULL,
-		merged_at TIMESTAMP,
-		deleted_at TIMESTAMP,
-		FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE,
-		UNIQUE(session_id, worktree_id)
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_task_session_worktrees_session_id ON task_session_worktrees(session_id);
-	CREATE INDEX IF NOT EXISTS idx_task_session_worktrees_worktree_id ON task_session_worktrees(worktree_id);
-	CREATE INDEX IF NOT EXISTS idx_task_session_worktrees_repository_id ON task_session_worktrees(repository_id);
-	CREATE INDEX IF NOT EXISTS idx_task_session_worktrees_status ON task_session_worktrees(status);
 `
 
 func (r *Repository) initSessionWorktreeSchema() error {
@@ -868,6 +1098,7 @@ const taskReviewSchemaDDL = `
 		prompt_tokens INTEGER NOT NULL DEFAULT 0,
 		response_tokens INTEGER NOT NULL DEFAULT 0,
 		duration_ms INTEGER NOT NULL DEFAULT 0,
+		entry_id TEXT NOT NULL DEFAULT '',
 		created_at TIMESTAMP NOT NULL,
 		completed_at TIMESTAMP,
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE

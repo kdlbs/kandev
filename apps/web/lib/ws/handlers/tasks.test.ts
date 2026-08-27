@@ -30,6 +30,7 @@ function makeStore(initial: Partial<AppState> = {}) {
       state = {
         ...state,
         tasks: {
+          ...state.tasks,
           activeTaskId: taskId,
           activeSessionId: sessionId,
           pinnedSessionId: sessionId,
@@ -123,6 +124,7 @@ function makeFollowStore(opts: {
       activeSessionId: opts.activeSessionId,
       pinnedSessionId: opts.pinnedSessionId,
       lastSessionByTaskId: {},
+      resumeSkippedSessionIds: {},
     },
     setActiveSessionAuto: opts.setActiveSessionAuto,
   });
@@ -178,6 +180,7 @@ describe("task.updated primary-session focus follow", () => {
         activeSessionId: "sess-old",
         pinnedSessionId: null,
         lastSessionByTaskId: {},
+        resumeSkippedSessionIds: {},
       },
       setActiveSessionAuto,
     });
@@ -281,6 +284,7 @@ describe("task.updated primary-session focus follow (pinning)", () => {
         activeSessionId: SESS_DRIFTED,
         pinnedSessionId: SESS_PINNED,
         lastSessionByTaskId: {},
+        resumeSkippedSessionIds: {},
       },
       taskSessions: {
         items: {
@@ -318,6 +322,7 @@ describe("task.updated primary-session focus follow (stale pin cleanup)", () => 
         activeSessionId: SESS_DRIFTED,
         pinnedSessionId: SESS_PINNED,
         lastSessionByTaskId: {},
+        resumeSkippedSessionIds: {},
       },
       taskSessions: {
         items: {
@@ -347,6 +352,7 @@ describe("task.updated primary-session focus follow (stale pin cleanup)", () => 
         activeSessionId: SESS_DRIFTED,
         pinnedSessionId: SESS_PINNED,
         lastSessionByTaskId: {},
+        resumeSkippedSessionIds: {},
       },
       taskSessions: {
         items: {

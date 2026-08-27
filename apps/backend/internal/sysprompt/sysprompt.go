@@ -68,6 +68,70 @@ const kandevContextMarker = "KANDEV MCP TOOLS"
 
 const officeContextMarker = "KANDEV OFFICE MCP TOOLS"
 
+const pullRequestTargetContextMarker = "BRANCH POLICY PULL REQUEST TARGETS"
+
+// PullRequestTarget is immutable task context that tells an agent where a
+// branch-policy-backed pull request must merge.
+type PullRequestTarget struct {
+	RepositoryName string
+	WorkingBranch  string
+	TargetBranch   string
+}
+
+// FormatPullRequestTargetContext formats branch-policy targets as trusted
+// agent instructions. Values are quoted so repository configuration remains
+// data even when it contains punctuation.
+func FormatPullRequestTargetContext(targets []PullRequestTarget) string {
+	if len(targets) == 0 {
+		return ""
+	}
+	lines := []string{
+		pullRequestTargetContextMarker + ":",
+		"This task uses immutable branch-policy targets.",
+		"When you create a pull request, use the matching target explicitly.",
+		"Do not infer the target from the task base or working branch.",
+	}
+	for _, target := range targets {
+		lines = append(lines, fmt.Sprintf(
+			"- Repository %s, working branch %s: target branch %s. For GitHub, use gh pr create --base %s.",
+			strconv.Quote(StripTags(target.RepositoryName)),
+			strconv.Quote(StripTags(target.WorkingBranch)),
+			strconv.Quote(StripTags(target.TargetBranch)),
+			strconv.Quote(StripTags(target.TargetBranch)),
+		))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// InjectPullRequestTargetContext prepends one canonical hidden target block.
+// It removes a stale or upstream copy before inserting the current snapshot.
+func InjectPullRequestTargetContext(prompt string, targets []PullRequestTarget) (string, string) {
+	prompt = systemTagRegex.ReplaceAllStringFunc(prompt, func(block string) string {
+		if strings.Contains(block, pullRequestTargetContextMarker) {
+			return ""
+		}
+		return block
+	})
+	content := FormatPullRequestTargetContext(targets)
+	if content == "" {
+		return prompt, ""
+	}
+	return Wrap(content) + "\n\n" + prompt, content
+}
+
+// PrependPullRequestTargetInstruction adds the compact plain-text equivalent
+// for passthrough sessions, which intentionally do not receive hidden blocks.
+func PrependPullRequestTargetInstruction(prompt string, targets []PullRequestTarget) string {
+	content := FormatPullRequestTargetContext(targets)
+	if content == "" {
+		return prompt
+	}
+	if strings.HasPrefix(prompt, content+"\n\n") {
+		return prompt
+	}
+	return content + "\n\n" + prompt
+}
+
 type contextKind uint8
 
 const (
@@ -99,17 +163,44 @@ func OfficeContext() string { return prompts.Get("office-context") }
 
 // FormatOfficeContext injects the active task and session IDs into the Office context.
 func FormatOfficeContext(taskID, sessionID string) string {
+	return FormatOfficeContextWithOptions(taskID, sessionID, false)
+}
+
+const officeStepCompleteInstruction = "This workflow step requires an explicit completion signal. " +
+	"Call step_complete_kandev as the LAST action after every requirement is satisfied. " +
+	"Do not call it before a question or during partial progress. " +
+	"If the tool is not visible, use the client's tool search or discovery with the canonical name.\n"
+
+// FormatOfficeContextWithOptions formats the Office context for the current
+// workflow step. The imperative completion instruction is present only when
+// the step's auto-advance policy requires the signal.
+func FormatOfficeContextWithOptions(taskID, sessionID string, requiresSignal bool) string {
+	instruction := ""
+	if requiresSignal {
+		instruction = officeStepCompleteInstruction
+	}
 	return Resolve("office-context", map[string]string{
-		"task_id":    taskID,
-		"session_id": sessionID,
+		"task_id":                   taskID,
+		"session_id":                sessionID,
+		"step_complete_instruction": instruction,
 	})
 }
 
 // InjectOfficeContext ensures a first-turn prompt has the restricted Office context.
 // trustedContents must contain only exact server-generated system block contents.
 func InjectOfficeContext(taskID, sessionID, prompt string, trustedContents ...string) string {
+	return InjectOfficeContextWithOptions(taskID, sessionID, prompt, false, trustedContents...)
+}
+
+// InjectOfficeContextWithOptions injects the restricted Office context and
+// adds the completion instruction only for a signal-gated workflow step.
+func InjectOfficeContextWithOptions(
+	taskID, sessionID, prompt string,
+	requiresSignal bool,
+	trustedContents ...string,
+) string {
 	return canonicalizeKandevContext(
-		FormatOfficeContext(taskID, sessionID),
+		FormatOfficeContextWithOptions(taskID, sessionID, requiresSignal),
 		prompt,
 		trustedContextContents(sessionID, trustedContents...),
 	)
@@ -121,15 +212,26 @@ func PlanMode() string { return prompts.Get("plan-mode") }
 
 // KandevContext returns the task-mode system prompt template that provides
 // Kandev-specific instructions and session context to agents. Contains
-// {task_id}, {session_id}, {step_complete_section}, and {task_title_section}
-// placeholders — use
+// task, session, capability, and question placeholders — use
 // [FormatKandevContext] to inject values.
 func KandevContext() string {
 	return Resolve("kandev-context", map[string]string{
 		"coordinator_task_control_section": coordinatorTaskControlSection,
 		"task_title_section":               "",
+		"autopilot_section":                "",
+		"question_tool_section":            userQuestionSection,
 	})
 }
+
+const userQuestionSection = `- ask_user_question_kandev: Ask the user 1-4 related questions and wait for all answers. Use this whenever you need user input to proceed. Treat this call as a hard user-input barrier: do not call another tool, do not continue working, and do not provide a final response until the tool returns completed user answers or a structured rejection. If the tool reports a validation error before creating a question, correct the request and retry. If an accepted question returns without completed answers or a structured rejection, end your turn immediately. This includes a timeout, disconnect, or pending wait. For an incomplete result, do not infer an answer or continue the task.
+`
+
+const parentQuestionSection = `- ask_parent_question_kandev: Ask the direct parent task one or more critical questions. Use this only when you cannot continue safely without a parent decision. The question is sent to the parent task, and this call MUST end your turn; do not use an operator-question tool.
+`
+
+const autopilotSection = `AUTOPILOT MODE:
+This task runs in autopilot mode. Continue independently and make reasonable decisions without asking the operator. Ask for help only when a decision is critical, unsafe, or cannot be inferred from the task context. If a direct parent exists, use the available parent-question tool for that critical question. The question tool ends the current turn, so do not make another tool call or continue working after you ask it. If there is no parent, do not ask a question; choose the safest reversible path and report the limitation in your final response.
+`
 
 // stepCompleteSection is the description + instruction block for the
 // step_complete_kandev MCP tool. Only injected when the current workflow step
@@ -142,13 +244,10 @@ func KandevContext() string {
 // without forcing the template to add its own. Dropping the "\n" silently
 // merges the two bullets onto one line; the omit path (empty string) is
 // unaffected since the next line in the template already starts the bullet.
-const stepCompleteSection = "- step_complete_kandev: Signal that every user-stated requirement for the CURRENT workflow step is satisfied. " +
-	"This is the canonical MCP protocol name; a client registry may display the client-specific alias mcp__kandev__step_complete_kandev for the same tool. " +
-	"If the tool is not already visible, use the client's tool search/discovery with the canonical name. " +
-	"Call this as the LAST action of the step (after the final tool call / commit / answer). " +
-	"Idempotent — a second call within the same step is a no-op. " +
-	"Do NOT call when asking a question, mid-conversation, or on partial progress. " +
-	"Required params: summary (one-paragraph plain text). Optional: handoff, blockers.\n"
+const stepCompleteSection = "- step_complete_kandev: Signal that every requirement for the CURRENT workflow step is satisfied. " +
+	"Call it as the LAST action, never before a question or during partial progress. " +
+	"If it is not visible, use the client's tool search/discovery with the canonical name; some clients display mcp__kandev__step_complete_kandev. " +
+	"Required param: summary.\n"
 
 // coordinatorTaskControlSection documents task-mode-only parent/child controls.
 // Restricted MCP modes omit the section because neither message_task_kandev nor
@@ -156,12 +255,15 @@ const stepCompleteSection = "- step_complete_kandev: Signal that every user-stat
 // in the template to avoid broadening this feature into a cleanup of older mode
 // mismatches.
 const coordinatorTaskControlSection = " Optional: session_id, delivery_mode. " +
+	"For an autopilot child question, also pass reply_to_question_id with the question ID from the child message. " +
 	"Use delivery_mode=\"queued\" or omit it for information that can wait. " +
 	"Use delivery_mode=\"interrupt\" for urgent replacement work on a running direct child; " +
 	"if immediate cancel-and-dispatch cannot be confirmed safely, the message remains queued. " +
 	"For halt-only work, use stop_task_kandev.\n" +
 	"- stop_task_kandev: Halt all live sessions observed for a direct child, with no prompt and no replacement turn. " +
-	"Only the target task's direct parent may call it. Required params: task_id."
+	"Only the target task's direct parent may call it. Required params: task_id. " +
+	"A stopped session is CANCELLED and cannot be resumed, so message_task_kandev will not restart it: " +
+	"use spawn_session_kandev to put the task back to work."
 
 // taskTitleSection is included only for task sessions whose task metadata says
 // the provisional title still needs an agent-generated replacement. It ends in
@@ -190,6 +292,9 @@ type KandevContextOptions struct {
 	RequiresCompletionSignal       bool
 	IncludeCoordinatorTaskControls bool
 	IncludeTaskTitleTool           bool
+	Autopilot                      bool
+	IncludeUserQuestionTool        bool
+	IncludeParentQuestionTool      bool
 }
 
 // FormatKandevContext returns the Kandev context prompt with task and session IDs injected.
@@ -219,12 +324,25 @@ func FormatKandevContextWithOptions(taskID, sessionID string, options KandevCont
 	if options.IncludeTaskTitleTool {
 		taskTitle = taskTitleSection
 	}
+	questionTool := ""
+	switch {
+	case options.IncludeParentQuestionTool:
+		questionTool = parentQuestionSection
+	case options.IncludeUserQuestionTool || !options.Autopilot:
+		questionTool = userQuestionSection
+	}
+	autopilot := ""
+	if options.Autopilot {
+		autopilot = autopilotSection
+	}
 	return Resolve("kandev-context", map[string]string{
 		"task_id":                          taskID,
 		"session_id":                       sessionID,
 		"step_complete_section":            section,
 		"task_title_section":               taskTitle,
 		"coordinator_task_control_section": coordinatorControls,
+		"autopilot_section":                autopilot,
+		"question_tool_section":            questionTool,
 	})
 }
 

@@ -4,13 +4,14 @@ import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 import {
   queueMessage,
   clearQueue,
-  drainQueuedMessage,
   getQueueStatus,
   updateQueuedMessage,
   removeQueuedEntry,
   mergeQueuedEntry,
+  reorderQueuedEntries,
   QueueEntryNotFoundError,
   sendQueuedNow,
+  setQueueAutoRun,
 } from "@/lib/api/domains/queue-api";
 import type { QueueMessageParams } from "@/lib/api/domains/queue-api";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
@@ -69,29 +70,14 @@ function useQueueState(sessionId: string | null) {
 
 type QueueActionsArgs = {
   sessionId: string | null;
+  entries: QueuedMessage[];
   setQueueEntries: ReturnType<typeof useQueueState>["setQueueEntries"];
   removeQueueEntry: ReturnType<typeof useQueueState>["removeQueueEntry"];
   setQueueLoading: ReturnType<typeof useQueueState>["setQueueLoading"];
   metaMax: number | undefined;
   metaMergeEnabled: boolean | undefined;
+  metaAutoRun: boolean | undefined;
 };
-
-function useDrainNextAction(
-  sessionId: string | null,
-  setQueueLoading: ReturnType<typeof useQueueState>["setQueueLoading"],
-  refetch: (sid: string) => Promise<void>,
-) {
-  return useCallback(async () => {
-    if (!sessionId) return;
-    setQueueLoading(sessionId, true);
-    try {
-      await drainQueuedMessage(sessionId);
-      await refetch(sessionId);
-    } finally {
-      setQueueLoading(sessionId, false);
-    }
-  }, [sessionId, refetch, setQueueLoading]);
-}
 
 function useSendNowAction(
   sessionId: string | null,
@@ -99,7 +85,7 @@ function useSendNowAction(
   refetch: (sid: string) => Promise<void>,
 ) {
   return useCallback(
-    async (scope: "entry" | "all", entryId?: string) => {
+    async (entryId: string) => {
       if (!sessionId) return;
       setQueueLoading(sessionId, true);
       let mutationFailed = false;
@@ -108,9 +94,43 @@ function useSendNowAction(
         try {
           await sendQueuedNow({
             session_id: sessionId,
-            scope,
-            ...(scope === "entry" ? { entry_id: entryId } : {}),
+            scope: "entry",
+            entry_id: entryId,
           });
+        } catch (err) {
+          mutationFailed = true;
+          mutationError = err;
+        }
+
+        try {
+          await refetch(sessionId);
+        } catch (reconcileError) {
+          if (mutationFailed) throw mutationError;
+          throw reconcileError;
+        }
+        if (mutationFailed) throw mutationError;
+      } finally {
+        setQueueLoading(sessionId, false);
+      }
+    },
+    [sessionId, refetch, setQueueLoading],
+  );
+}
+
+function useSetAutoRunAction(
+  sessionId: string | null,
+  setQueueLoading: ReturnType<typeof useQueueState>["setQueueLoading"],
+  refetch: (sid: string) => Promise<void>,
+) {
+  return useCallback(
+    async (enabled: boolean) => {
+      if (!sessionId) return;
+      setQueueLoading(sessionId, true);
+      let mutationFailed = false;
+      let mutationError: unknown;
+      try {
+        try {
+          await setQueueAutoRun(sessionId, enabled);
         } catch (err) {
           mutationFailed = true;
           mutationError = err;
@@ -153,7 +173,8 @@ function useQueueRefetch(
         setQueueEntries(sid, status.entries ?? [], {
           count: status.count,
           max: status.max,
-          mergeEnabled: status.merge_enabled,
+          mergeEnabled: status.merge_enabled ?? true,
+          autoRun: status.auto_run ?? true,
         });
       } finally {
         if (refetchVersion.current[sid] === version) setQueueLoading(sid, false);
@@ -167,11 +188,13 @@ function useQueueRefetch(
 /** Build an action set bound to the supplied session + slice setters. */
 function useQueueActions({
   sessionId,
+  entries,
   setQueueEntries,
   removeQueueEntry,
   setQueueLoading,
   metaMax,
   metaMergeEnabled,
+  metaAutoRun,
 }: QueueActionsArgs) {
   const { refetch, invalidate: invalidateRefetch } = useQueueRefetch(
     setQueueEntries,
@@ -209,7 +232,85 @@ function useQueueActions({
     [sessionId, refetch, setQueueLoading],
   );
 
-  const clearAll = useCallback(async () => {
+  const clearAll = useClearAllAction({
+    sessionId,
+    setQueueEntries,
+    setQueueLoading,
+    metaMax,
+    metaMergeEnabled,
+    metaAutoRun,
+    refetch,
+    invalidateRefetch,
+  });
+
+  const sendEntryNow = useSendNowAction(sessionId, setQueueLoading, refetch);
+  const setAutoRun = useSetAutoRunAction(sessionId, setQueueLoading, refetch);
+
+  const { editEntry, removeEntry, mergeEntry } = useEntryMutations({
+    sessionId,
+    removeQueueEntry,
+    refetch,
+  });
+
+  const reorderEntries = useReorderEntriesAction({
+    sessionId,
+    entries,
+    setQueueEntries,
+    setQueueLoading,
+    metaMax,
+    metaMergeEnabled,
+    metaAutoRun,
+    refetch,
+  });
+
+  return {
+    refetch,
+    queue,
+    clearAll,
+    sendEntryNow,
+    setAutoRun,
+    editEntry,
+    removeEntry,
+    mergeEntry,
+    reorderEntries,
+  };
+}
+
+type ReorderEntriesArgs = {
+  sessionId: string | null;
+  entries: QueuedMessage[];
+  setQueueEntries: ReturnType<typeof useQueueState>["setQueueEntries"];
+  setQueueLoading: ReturnType<typeof useQueueState>["setQueueLoading"];
+  metaMax: number | undefined;
+  metaMergeEnabled: boolean | undefined;
+  metaAutoRun: boolean | undefined;
+  refetch: (sid: string) => Promise<void>;
+};
+
+type ClearAllArgs = {
+  sessionId: string | null;
+  setQueueEntries: ReturnType<typeof useQueueState>["setQueueEntries"];
+  setQueueLoading: ReturnType<typeof useQueueState>["setQueueLoading"];
+  metaMax: number | undefined;
+  metaMergeEnabled: boolean | undefined;
+  metaAutoRun: boolean | undefined;
+  refetch: (sid: string) => Promise<void>;
+  invalidateRefetch: (sid: string) => void;
+};
+
+/** Clears every pending entry: optimistic empty state, then the backend's
+ * authoritative result. Reconcile errors preserve the mutation error. */
+function useClearAllAction({
+  sessionId,
+  setQueueEntries,
+  setQueueLoading,
+  metaMax,
+  metaMergeEnabled,
+  metaAutoRun,
+  refetch,
+  invalidateRefetch,
+}: ClearAllArgs) {
+  return useCallback(async () => {
     if (!sessionId) return;
     setQueueLoading(sessionId, true);
     let mutationFailed = false;
@@ -225,6 +326,7 @@ function useQueueActions({
           count: 0,
           max: metaMax ?? 0,
           mergeEnabled: metaMergeEnabled ?? true,
+          autoRun: metaAutoRun ?? true,
         });
       } catch (err) {
         mutationFailed = true;
@@ -249,34 +351,78 @@ function useQueueActions({
     setQueueLoading,
     metaMax,
     metaMergeEnabled,
+    metaAutoRun,
     refetch,
     invalidateRefetch,
   ]);
+}
 
-  const drainNext = useDrainNextAction(sessionId, setQueueLoading, refetch);
+/** Rewrites the visible pending order, optimistically at first, then
+ * reconciles to the backend's authoritative order. A queue_changed drift
+ * (drain/remove/merge raced the drag) is refetched and rethrown as
+ * QueueReorderError so the panel can swallow it without a toast. */
+function useReorderEntriesAction({
+  sessionId,
+  entries,
+  setQueueEntries,
+  setQueueLoading,
+  metaMax,
+  metaMergeEnabled,
+  metaAutoRun,
+  refetch,
+}: ReorderEntriesArgs) {
+  return useCallback(
+    async (orderedIds: string[]) => {
+      if (!sessionId) return;
+      // Optimistic: reflect the drop immediately; the refetch below reconciles
+      // to the backend's authoritative order and positions.
+      const byId = new Map(entries.map((entry) => [entry.id, entry]));
+      const reordered = orderedIds
+        .map((id) => byId.get(id))
+        .filter((entry): entry is QueuedMessage => entry !== undefined);
+      if (reordered.length === entries.length) {
+        setQueueEntries(sessionId, reordered, {
+          count: reordered.length,
+          max: metaMax ?? 0,
+          mergeEnabled: metaMergeEnabled ?? true,
+          autoRun: metaAutoRun ?? true,
+        });
+      }
+      setQueueLoading(sessionId, true);
+      let mutationFailed = false;
+      let mutationError: unknown;
+      try {
+        try {
+          await reorderQueuedEntries({ session_id: sessionId, ordered_ids: orderedIds });
+        } catch (err) {
+          mutationFailed = true;
+          mutationError = err;
+        }
 
-  const sendNow = useSendNowAction(sessionId, setQueueLoading, refetch);
-
-  const sendEntryNow = useCallback((entryId: string) => sendNow("entry", entryId), [sendNow]);
-  const sendAllNow = useCallback(() => sendNow("all"), [sendNow]);
-
-  const { editEntry, removeEntry, mergeEntry } = useEntryMutations({
-    sessionId,
-    removeQueueEntry,
-    refetch,
-  });
-
-  return {
-    refetch,
-    queue,
-    clearAll,
-    drainNext,
-    sendEntryNow,
-    sendAllNow,
-    editEntry,
-    removeEntry,
-    mergeEntry,
-  };
+        try {
+          await refetch(sessionId);
+        } catch (reconcileError) {
+          // Preserve the mutation error when both operations fail; it best
+          // explains why the requested order did not land.
+          if (mutationFailed) throw mutationError;
+          throw reconcileError;
+        }
+        if (mutationFailed) throw mutationError;
+      } finally {
+        setQueueLoading(sessionId, false);
+      }
+    },
+    [
+      sessionId,
+      entries,
+      setQueueEntries,
+      setQueueLoading,
+      metaMax,
+      metaMergeEnabled,
+      metaAutoRun,
+      refetch,
+    ],
+  );
 }
 
 type EntryMutationsArgs = {
@@ -382,19 +528,21 @@ export function useQueue(sessionId: string | null) {
     refetch,
     queue,
     clearAll,
-    drainNext,
     sendEntryNow,
-    sendAllNow,
+    setAutoRun,
     editEntry,
     removeEntry,
     mergeEntry,
+    reorderEntries,
   } = useQueueActions({
     sessionId,
+    entries,
     setQueueEntries: state.setQueueEntries,
     removeQueueEntry: state.removeQueueEntry,
     setQueueLoading: state.setQueueLoading,
     metaMax: meta?.max,
     metaMergeEnabled: meta?.mergeEnabled,
+    metaAutoRun: meta?.autoRun,
   });
 
   useEffect(() => {
@@ -428,16 +576,17 @@ export function useQueue(sessionId: string | null) {
     max: meta?.max ?? 0,
     isFull: meta ? meta.count >= meta.max && meta.max > 0 : false,
     mergeEnabled: meta?.mergeEnabled ?? true,
+    autoRun: meta?.autoRun ?? true,
     isLoading,
     cancellationPending,
     queue,
     clearAll,
-    drainNext,
     sendEntryNow,
-    sendAllNow,
+    setAutoRun,
     editEntry,
     removeEntry,
     mergeEntry,
+    reorderEntries,
     refetch: refetchBound,
   };
 }

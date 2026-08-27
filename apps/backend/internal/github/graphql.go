@@ -161,22 +161,75 @@ func chunkRefs[T any](refs []T, chunkSize int) [][]T {
 	return out
 }
 
+// timelineActor is a GraphQL Actor's login, used by the closed-event
+// timeline selection to attribute who closed a PR.
+type timelineActor struct {
+	Login string `json:"login"`
+}
+
+// timelineClosedEventNode is one node of the `timelineItems(itemTypes:
+// CLOSED_EVENT)` selection. Actor is a pointer because GitHub can return a
+// null actor (e.g. a bot-deleted account), which must leave closure
+// attribution unpopulated rather than writing an empty login.
+type timelineClosedEventNode struct {
+	Actor *timelineActor `json:"actor"`
+}
+
+type mergeQueueRemovalEventNode struct {
+	ID           string    `json:"id"`
+	CreatedAt    time.Time `json:"createdAt"`
+	Reason       string    `json:"reason"`
+	BeforeCommit *struct {
+		OID string `json:"oid"`
+	} `json:"beforeCommit"`
+}
+
+type batchedMergeQueueEntry struct {
+	ID                   string `json:"id"`
+	State                string `json:"state"`
+	Position             *int   `json:"position"`
+	EstimatedTimeToMerge *int   `json:"estimatedTimeToMerge"`
+	HeadCommit           *struct {
+		OID string `json:"oid"`
+	} `json:"headCommit"`
+}
+
 // batchedPRResult is the decoded shape of one aliased pullRequest block.
 type batchedPRResult struct {
-	State       string `json:"state"`
-	Title       string `json:"title"`
-	URL         string `json:"url"`
-	IsDraft     bool   `json:"isDraft"`
-	Mergeable   string `json:"mergeable"`
-	MergeStatus string `json:"mergeStateStatus"`
-	HeadRefName string `json:"headRefName"`
-	BaseRefName string `json:"baseRefName"`
-	HeadRefOid  string `json:"headRefOid"`
-	Additions   int    `json:"additions"`
-	Deletions   int    `json:"deletions"`
-	Author      struct {
+	State string `json:"state"`
+	Title string `json:"title"`
+	URL   string `json:"url"`
+	// IsDraft is a pointer: AC-12a requires distinguishing an upstream
+	// response that omits or nulls isDraft from one that genuinely reports
+	// false, and a plain bool can't tell the two apart after decode.
+	IsDraft         *bool                   `json:"isDraft"`
+	Mergeable       string                  `json:"mergeable"`
+	MergeStatus     string                  `json:"mergeStateStatus"`
+	MergeQueueEntry *batchedMergeQueueEntry `json:"mergeQueueEntry"`
+	HeadRefName     string                  `json:"headRefName"`
+	BaseRefName     string                  `json:"baseRefName"`
+	HeadRefOid      string                  `json:"headRefOid"`
+	Additions       int                     `json:"additions"`
+	Deletions       int                     `json:"deletions"`
+	// ChangedFiles is a pointer for the same reason as IsDraft (AC-12a): 0 is
+	// a legitimate observation and must stay distinguishable from absent/null.
+	ChangedFiles *int `json:"changedFiles"`
+	Author       struct {
 		Login string `json:"login"`
 	} `json:"author"`
+	// MergedBy is a value (not a pointer) because GitHub always serializes
+	// the field for a PullRequest, using a zero-value login when there is no
+	// merger; the empty-login case is handled explicitly in
+	// convertBatchedPRResult rather than relying on a nil check.
+	MergedBy struct {
+		Login string `json:"login"`
+	} `json:"mergedBy"`
+	// AutoMergeRequest is a pointer: GitHub returns null when auto-merge was
+	// never armed. Any non-nil value means "armed at fetch time" — never
+	// "merged by auto-merge" (auto_merge is cleared once it fires).
+	AutoMergeRequest *struct {
+		EnabledAt string `json:"enabledAt"`
+	} `json:"autoMergeRequest"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 	MergedAt  string    `json:"mergedAt"`
@@ -197,6 +250,17 @@ type batchedPRResult struct {
 			} `json:"commit"`
 		} `json:"nodes"`
 	} `json:"commits"`
+	// TimelineItems carries at most the single most-recent CLOSED_EVENT, so
+	// closed-by attribution reflects the latest closure even across a
+	// reopen-then-close cycle. closedBy has no equivalent on the REST pulls
+	// endpoint or the gh CLI's PR field set (AC-09, AC-15) — this GraphQL
+	// selection is the only source.
+	TimelineItems struct {
+		Nodes []timelineClosedEventNode `json:"nodes"`
+	} `json:"timelineItems"`
+	MergeQueueRemovalEvents struct {
+		Nodes []mergeQueueRemovalEventNode `json:"nodes"`
+	} `json:"mergeQueueRemovalEvents"`
 }
 
 type batchedBranchPRNode struct {
@@ -370,13 +434,17 @@ func buildBatchedPRQuery(refs []graphQLPRRef) (string, map[string]any) {
 // the batched and single-PR paths returning the same data.
 func prFieldsBlock() string {
 	return `state title url isDraft mergeable mergeStateStatus ` +
-		`headRefName baseRefName headRefOid additions deletions ` +
-		`author { login } createdAt updatedAt mergedAt closedAt ` +
+		`headRefName baseRefName headRefOid additions deletions changedFiles ` +
+		`author { login } mergedBy { login } autoMergeRequest { enabledAt } ` +
+		`mergeQueueEntry { id state position estimatedTimeToMerge headCommit { oid } } ` +
+		`createdAt updatedAt mergedAt closedAt ` +
 		`reviews(last: 100) { nodes { state author { login } submittedAt } } ` +
 		`reviewRequests(first: 0) { totalCount } ` +
 		fmt.Sprintf(`reviewThreads(first: %d) { totalCount nodes { isResolved } pageInfo { hasNextPage endCursor } } `,
 			graphQLReviewThreadPageSize) +
-		`commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }`
+		`commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } ` +
+		`timelineItems(last: 1, itemTypes: CLOSED_EVENT) { nodes { ... on ClosedEvent { actor { login } } } } ` +
+		`mergeQueueRemovalEvents: timelineItems(last: 1, itemTypes: REMOVED_FROM_MERGE_QUEUE_EVENT) { nodes { ... on RemovedFromMergeQueueEvent { id createdAt reason beforeCommit { oid } } } }`
 }
 
 // buildBatchedBranchQuery emits one aliased pullRequests(headRefName:) block
@@ -400,33 +468,45 @@ func convertBatchedPRResult(raw *batchedPRResult, owner, repo string, number int
 	if raw.MergedAt != "" {
 		state = prStateMerged
 	}
+	draft, changedFiles := false, 0
+	if raw.IsDraft != nil {
+		draft = *raw.IsDraft
+	}
+	if raw.ChangedFiles != nil {
+		changedFiles = *raw.ChangedFiles
+	}
 	pr := &PR{
-		Number:         number,
-		Title:          raw.Title,
-		URL:            raw.URL,
-		HTMLURL:        raw.URL,
-		State:          state,
-		HeadBranch:     raw.HeadRefName,
-		HeadSHA:        raw.HeadRefOid,
-		BaseBranch:     raw.BaseRefName,
-		AuthorLogin:    raw.Author.Login,
-		RepoOwner:      owner,
-		RepoName:       repo,
-		Draft:          raw.IsDraft,
-		Mergeable:      raw.Mergeable == "MERGEABLE",
-		MergeableState: strings.ToLower(raw.MergeStatus),
-		Additions:      raw.Additions,
-		Deletions:      raw.Deletions,
-		CreatedAt:      raw.CreatedAt,
-		UpdatedAt:      raw.UpdatedAt,
-		MergedAt:       parseTimePtr(raw.MergedAt),
-		ClosedAt:       parseTimePtr(raw.ClosedAt),
+		Number:               number,
+		Title:                raw.Title,
+		URL:                  raw.URL,
+		HTMLURL:              raw.URL,
+		State:                state,
+		HeadBranch:           raw.HeadRefName,
+		HeadSHA:              raw.HeadRefOid,
+		BaseBranch:           raw.BaseRefName,
+		AuthorLogin:          raw.Author.Login,
+		RepoOwner:            owner,
+		RepoName:             repo,
+		Draft:                draft,
+		IsDraftObserved:      raw.IsDraft != nil,
+		Mergeable:            raw.Mergeable == ghMergeableState,
+		MergeableState:       strings.ToLower(raw.MergeStatus),
+		Additions:            raw.Additions,
+		Deletions:            raw.Deletions,
+		ChangedFiles:         changedFiles,
+		ChangedFilesObserved: raw.ChangedFiles != nil,
+		MergedByLogin:        raw.MergedBy.Login,
+		AutoMergeEnabled:     raw.AutoMergeRequest != nil,
+		CreatedAt:            raw.CreatedAt,
+		UpdatedAt:            raw.UpdatedAt,
+		MergedAt:             parseTimePtr(raw.MergedAt),
+		ClosedAt:             parseTimePtr(raw.ClosedAt),
 	}
 
 	reviewState := summarizeReviewState(raw.Reviews.Nodes)
 	checksState := ""
 	if len(raw.Commits.Nodes) > 0 && raw.Commits.Nodes[0].Commit.StatusCheckRollup != nil {
-		checksState = strings.ToLower(raw.Commits.Nodes[0].Commit.StatusCheckRollup.State)
+		checksState = normalizeGraphQLCheckRollupState(raw.Commits.Nodes[0].Commit.StatusCheckRollup.State)
 	}
 	unresolved := 0
 	for _, t := range raw.ReviewThreads.Nodes {
@@ -434,16 +514,106 @@ func convertBatchedPRResult(raw *batchedPRResult, owner, repo string, number int
 			unresolved++
 		}
 	}
+	closedByLogin, closureAttributionPopulated := closedEventActor(raw.TimelineItems.Nodes)
+	mergeQueueState, mergeQueuePosition, mergeQueueEstimate, mergeQueueEntryID, mergeQueueEntryHeadSHA := convertMergeQueueEntry(raw.MergeQueueEntry)
+	removalID, removalAt, removalReason, removalBeforeSHA := convertMergeQueueRemoval(raw.MergeQueueRemovalEvents.Nodes)
 	return &PRStatus{
-		PR:                               pr,
-		ReviewState:                      reviewState,
-		ChecksState:                      checksState,
-		MergeableState:                   pr.MergeableState,
-		ReviewCount:                      countApprovedReviewerNodes(raw.Reviews.Nodes),
-		PendingReviewCount:               raw.ReviewRequests.TotalCount,
-		ReviewCountsPopulated:            true,
-		UnresolvedReviewThreads:          unresolved,
-		UnresolvedReviewThreadsPopulated: true,
+		PR:                                    pr,
+		ReviewState:                           reviewState,
+		ChecksState:                           checksState,
+		MergeableState:                        pr.MergeableState,
+		ReviewCount:                           countApprovedReviewerNodes(raw.Reviews.Nodes),
+		PendingReviewCount:                    raw.ReviewRequests.TotalCount,
+		ReviewCountsPopulated:                 true,
+		UnresolvedReviewThreads:               unresolved,
+		UnresolvedReviewThreadsPopulated:      true,
+		OutcomeFieldsPopulated:                true,
+		ClosedByLogin:                         closedByLogin,
+		ClosureAttributionPopulated:           closureAttributionPopulated,
+		MergeQueueState:                       mergeQueueState,
+		MergeQueuePosition:                    mergeQueuePosition,
+		MergeQueueEntryID:                     mergeQueueEntryID,
+		MergeQueueEntryHeadSHA:                mergeQueueEntryHeadSHA,
+		MergeQueueEstimatedTimeToMergeSeconds: mergeQueueEstimate,
+		MergeQueueLastRemovalID:               removalID,
+		MergeQueueLastRemovedAt:               removalAt,
+		MergeQueueLastRemovalReason:           removalReason,
+		MergeQueueLastRemovalBeforeSHA:        removalBeforeSHA,
+		mergeQueuePopulated:                   true,
+		mergeQueueRecoveryPopulated:           true,
+	}
+}
+
+func convertMergeQueueEntry(entry *batchedMergeQueueEntry) (string, *int, *int, string, string) {
+	if entry == nil {
+		return "", nil, nil, "", ""
+	}
+	headSHA := ""
+	if entry.HeadCommit != nil {
+		headSHA = entry.HeadCommit.OID
+	}
+	return normalizeMergeQueueState(entry.State), positiveIntPtr(entry.Position), nonNegativeIntPtr(entry.EstimatedTimeToMerge), entry.ID, headSHA
+}
+
+func convertMergeQueueRemoval(nodes []mergeQueueRemovalEventNode) (string, *time.Time, string, string) {
+	if len(nodes) == 0 {
+		return "", nil, "", ""
+	}
+	node := nodes[0]
+	var beforeSHA string
+	if node.BeforeCommit != nil {
+		beforeSHA = node.BeforeCommit.OID
+	}
+	removedAt := node.CreatedAt
+	return node.ID, &removedAt, node.Reason, beforeSHA
+}
+
+func normalizeMergeQueueState(raw string) string {
+	return strings.ToLower(strings.TrimSpace(raw))
+}
+
+func positiveIntPtr(value *int) *int {
+	if value == nil || *value <= 0 {
+		return nil
+	}
+	copy := *value
+	return &copy
+}
+
+func nonNegativeIntPtr(value *int) *int {
+	if value == nil || *value < 0 {
+		return nil
+	}
+	copy := *value
+	return &copy
+}
+
+// closedEventActor extracts the closed-event actor's login from a
+// `timelineItems(itemTypes: CLOSED_EVENT)` node list. Returns
+// populated=false when there is no node or the node's actor is null (e.g. a
+// bot-deleted account) — the caller must not write an empty login as if it
+// were an observation (AC-15).
+func closedEventActor(nodes []timelineClosedEventNode) (login string, populated bool) {
+	if len(nodes) == 0 || nodes[0].Actor == nil || nodes[0].Actor.Login == "" {
+		return "", false
+	}
+	return nodes[0].Actor.Login, true
+}
+
+// normalizeGraphQLCheckRollupState converts GitHub's GraphQL status-rollup
+// enum to the smaller contract shared by REST and TaskPR persistence.
+func normalizeGraphQLCheckRollupState(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "":
+		return ""
+	case checkStatusSuccess:
+		return checkStatusSuccess
+	case checkConclusionFail, "error":
+		return checkConclusionFail
+	case "expected", checkStatusPending:
+		return checkStatusPending
+	default:
+		return ""
 	}
 }
 
@@ -830,14 +1000,35 @@ func decodeBatchedPRChunk(
 	return continuations, nil
 }
 
+// branchBatchResult is the outcome of one batched branch lookup.
+//
+// Statuses holds the branches that resolved to exactly one OPEN PR, keyed by
+// graphqlBranchKey. ResolvedEmpty holds the branch keys whose repository alias
+// resolved and reported ZERO open PRs — a definitive "no PR on this branch"
+// that callers must NOT re-ask one watch at a time. A branch in neither set is
+// unknown: its alias did not resolve, or it carried several open PRs and
+// selectBatchedBranchPRNode deliberately refused to guess.
+//
+// Both maps are read-only at the call sites (they are shared through the
+// service singleflight).
+type branchBatchResult struct {
+	Statuses      map[string]*PRStatus
+	ResolvedEmpty map[string]struct{}
+}
+
 // runBatchedBranchQuery executes the branch-lookup query in chunks and maps
 // each branch name to its unambiguous OPEN PR (if any). Result keys are
 // "owner/repo/branch" so callers can index by their input refs.
-func runBatchedBranchQuery(ctx context.Context, exec GraphQLExecutor, refs []graphQLBranchRef) (map[string]*PRStatus, error) {
+func runBatchedBranchQuery(
+	ctx context.Context, exec GraphQLExecutor, refs []graphQLBranchRef,
+) (branchBatchResult, error) {
 	if exec == nil || len(refs) == 0 {
-		return nil, nil
+		return branchBatchResult{}, nil
 	}
-	result := make(map[string]*PRStatus, len(refs))
+	out := branchBatchResult{
+		Statuses:      make(map[string]*PRStatus, len(refs)),
+		ResolvedEmpty: make(map[string]struct{}, len(refs)),
+	}
 	// Same accumulation pattern as runBatchedPRQuery — see that function
 	// for the rationale (one dead-repo chunk must not drop later chunks).
 	var allMissing []repoRef
@@ -849,22 +1040,31 @@ func runBatchedBranchQuery(ctx context.Context, exec GraphQLExecutor, refs []gra
 			Errors []graphQLError             `json:"errors"`
 		}
 		if err := exec.ExecuteGraphQL(ctx, query, vars, &resp); err != nil {
-			return nil, err
+			return branchBatchResult{}, err
 		}
 		missing, residual := classifyBatchedErrors(resp.Errors, aliasMapForBranchRefs(chunk))
-		if err := decodeBatchedBranchChunk(chunk, resp.Data, result); err != nil {
-			return nil, err
+		if err := decodeBatchedBranchChunk(chunk, resp.Data, &out); err != nil {
+			return branchBatchResult{}, err
 		}
 		allMissing = append(allMissing, missing...)
 		allResidual = append(allResidual, residual...)
 	}
-	return finishBatchedQuery(ctx, exec, result, allMissing, allResidual, nil)
+	statuses, err := finishBatchedQuery(ctx, exec, out.Statuses, allMissing, allResidual, nil)
+	if statuses == nil {
+		// finishBatchedQuery dropped the partial decode (residual errors, or a
+		// failed review-thread continuation). The negatives decoded alongside
+		// it are no longer trustworthy as a whole-response answer, so surface
+		// nothing rather than let a caller skip a fallback on their strength.
+		return branchBatchResult{}, err
+	}
+	out.Statuses = statuses
+	return out, err
 }
 
 func decodeBatchedBranchChunk(
 	refs []graphQLBranchRef,
 	data map[string]json.RawMessage,
-	result map[string]*PRStatus,
+	out *branchBatchResult,
 ) error {
 	for i, ref := range refs {
 		alias := fmt.Sprintf("b%d", i)
@@ -882,10 +1082,16 @@ func decodeBatchedBranchChunk(
 		}
 		node, ok := selectBatchedBranchPRNode(inner.PullRequests.Nodes)
 		if !ok {
+			// Zero nodes is a definitive answer: the repository resolved and
+			// has no open PR on this branch. Two or more is ambiguous and
+			// stays unknown so the caller keeps its per-watch fallback.
+			if len(inner.PullRequests.Nodes) == 0 {
+				out.ResolvedEmpty[graphqlBranchKey(ref.Owner, ref.Repo, ref.Branch)] = struct{}{}
+			}
 			continue
 		}
 		status := convertBatchedPRResult(&node.batchedPRResult, ref.Owner, ref.Repo, node.Number)
-		result[graphqlBranchKey(ref.Owner, ref.Repo, ref.Branch)] = status
+		out.Statuses[graphqlBranchKey(ref.Owner, ref.Repo, ref.Branch)] = status
 	}
 	return nil
 }

@@ -3,6 +3,9 @@
 import { IconAlertCircle, IconSubtask } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { PRTaskIcon } from "@/components/github/pr-task-icon";
+import { RegisteredChangeRequestTaskIcon } from "@/components/integrations/registered-change-request-task-icon";
+import { TaskRowMetadata } from "@/components/task/task-row-plugin-slots";
+import { MRTaskIcon } from "@/components/gitlab/mr-task-icon";
 import { useTaskPendingInput, type PendingInput } from "@/hooks/use-task-pending-input";
 import { getTaskStateIcon } from "@/lib/ui/state-icons";
 import type { Repository, Task } from "@/lib/types/http";
@@ -27,11 +30,11 @@ function ArchivedBadge({ task }: { task: Task }) {
 function PrimaryTaskLine({
   task,
   pendingInput,
-  showPullRequest,
+  showContributions,
 }: {
   task: Task;
   pendingInput: PendingInput;
-  showPullRequest: boolean;
+  showContributions: boolean;
 }) {
   return (
     <>
@@ -44,14 +47,17 @@ function PrimaryTaskLine({
       <span className="min-w-0 truncate font-medium" data-testid="tasks-list-row-title">
         {task.title}
       </span>
-      {showPullRequest && (
+      {showContributions && (
         <span
+          className="inline-flex items-center gap-1"
           onClick={(event) => event.stopPropagation()}
           onPointerDown={(event) => event.stopPropagation()}
         >
           <PRTaskIcon taskId={task.id} />
+          <MRTaskIcon taskId={task.id} />
         </span>
       )}
+      <RegisteredChangeRequestTaskIcon taskId={task.id} />
       <ArchivedBadge task={task} />
     </>
   );
@@ -126,9 +132,15 @@ function RichTaskContent({
       style={{ paddingLeft: `${level * 28}px` }}
     >
       <div className="flex min-w-0 items-center gap-2">
-        <PrimaryTaskLine task={task} pendingInput={pendingInput} showPullRequest />
+        <PrimaryTaskLine task={task} pendingInput={pendingInput} showContributions />
       </div>
       <RichMetadataBadges details={details} />
+      <TaskRowMetadata
+        taskId={task.id}
+        workflowStepId={task.workflow_step_id}
+        surface="task-list"
+        className="mt-1 pl-6"
+      />
       {details.description && (
         <p className="mt-1 line-clamp-2 pl-6 text-xs leading-tight text-muted-foreground">
           {details.description}
@@ -171,7 +183,13 @@ export function TaskListRowPrimaryContent({
       data-testid="tasks-list-row-content"
       style={{ paddingLeft: `${level * 28}px` }}
     >
-      <PrimaryTaskLine task={task} pendingInput={pendingInput} showPullRequest={false} />
+      <PrimaryTaskLine task={task} pendingInput={pendingInput} showContributions={false} />
+      <TaskRowMetadata
+        taskId={task.id}
+        workflowStepId={task.workflow_step_id}
+        surface="task-list"
+        className="flex min-w-0 shrink items-center gap-1 overflow-hidden"
+      />
     </div>
   );
 }

@@ -1,5 +1,11 @@
 import { expect, test } from "../../fixtures/test-base";
 import {
+  captureAppStatusBarSettings,
+  restoreAppStatusBarSettings,
+  setAppStatusBarEnabled,
+  type AppStatusBarSettingsBaseline,
+} from "../../helpers/app-status-bar-settings";
+import {
   metricsUnavailableWasRendered,
   observeMetricsUnavailable,
 } from "./metrics-loading-observer";
@@ -11,20 +17,24 @@ type SystemMetricsDisplay = {
 
 test.describe("Resource metrics display", () => {
   let baseline: SystemMetricsDisplay;
+  let statusBarBaseline: AppStatusBarSettingsBaseline;
 
   test.beforeEach(async ({ apiClient }) => {
     const settings = await apiClient.getUserSettings();
     baseline = settings.settings.system_metrics_display as SystemMetricsDisplay;
+    statusBarBaseline = await captureAppStatusBarSettings(apiClient);
+    await setAppStatusBarEnabled(apiClient, true);
   });
 
   test.afterEach(async ({ apiClient }) => {
     await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
       system_metrics_display: baseline,
     });
+    await restoreAppStatusBarSettings(apiClient, statusBarBaseline);
   });
 
   test("renders simplified metrics in the status bar", async ({ testPage }) => {
-    await testPage.goto("/settings/general/appearance");
+    await testPage.goto("/settings/preferences/appearance");
     const showMetrics = testPage.getByRole("switch", { name: "Show host metrics in status bar" });
     const simplified = testPage.getByRole("switch", { name: "Simplified metrics" });
     if ((await showMetrics.getAttribute("aria-checked")) !== "true") await showMetrics.click();

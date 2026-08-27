@@ -19,7 +19,7 @@ import (
 // orchestrator's routingerr classifier matches the "529 ... Overloaded"
 // signature in this string and routes it to the retry-with-backoff path.
 const overloaded529Message = "Internal error: API Error: 529 Overloaded. This is a server-side issue, " +
-	"usually temporary — try again in a moment. If it persists, check https://status.claude.com."
+	"usually temporary. Try again in a moment. If it persists, check https://status.claude.com."
 
 // overloadedCmdRe matches `/overloaded` or `/e2e:overloaded`, optionally
 // followed by `:N` — the number of consecutive prompts to fail with a 529
@@ -90,7 +90,7 @@ func (a *mockAgent) handleOverloaded(ctx context.Context, sid acp.SessionId, pro
 	// turn completes (and the orchestrator clears the retry budget).
 	_ = os.Remove(overloadedCounterPath(sid))
 	e := &emitter{ctx: ctx, conn: a.conn, sid: sid}
-	e.text(fmt.Sprintf("Provider recovered after %d transient failure(s) — here is your response.", failTimes))
+	e.text(fmt.Sprintf("Provider recovered after %d transient failure(s). Here is your response.", failTimes))
 	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil, true
 }
 
@@ -116,6 +116,94 @@ func nextOverloadedAttempt(sid acp.SessionId) int {
 	return next
 }
 
+// transportLostErrorData is the exact data payload the acp-go-sdk emits when
+// the peer disconnects before a response (see acp.ErrPeerDisconnected /
+// newInternalErrorWithCause in connection.go) — the production signature the
+// orchestrator's routingerr classifier matches on ("peer disconnected").
+var transportLostErrorData = map[string]any{"error": "peer disconnected before response"}
+
+// transportLostCmdRe matches `/transport-lost` or `/e2e:transport-lost`,
+// optionally followed by `:N` — the number of consecutive prompts to fail
+// with the ACP peer-disconnected signature before recovering (default 1).
+// Use a large N (e.g. `/transport-lost:9`) to exhaust the retry budget and
+// fall through to the red recovery banner.
+var transportLostCmdRe = regexp.MustCompile(`(?i)^/(?:e2e:)?transport-lost(?::(\d+))?$`)
+
+// parseTransportLostCmd reports whether the prompt is the /transport-lost
+// command and, if so, how many consecutive prompts it should fail before
+// recovering (default 1). Returns ok=false for any other prompt.
+func parseTransportLostCmd(prompt string) (failTimes int, ok bool) {
+	cmd := stripKandevSystem(strings.TrimSpace(prompt))
+	m := transportLostCmdRe.FindStringSubmatch(cmd)
+	if m == nil {
+		return 0, false
+	}
+	failTimes = 1
+	if m[1] != "" {
+		if n, err := strconv.Atoi(m[1]); err == nil && n >= 0 {
+			failTimes = n
+		}
+	}
+	return failTimes, true
+}
+
+// handleTransportLost implements the /transport-lost scenario: it returns a
+// real prompt-time ACP error carrying the production "peer disconnected
+// before response" signature for the first N prompts of a session, then
+// recovers with a normal text response. Returns handled=false when the
+// prompt is not the transport-lost command.
+func (a *mockAgent) handleTransportLost(ctx context.Context, sid acp.SessionId, prompt string) (acp.PromptResponse, error, bool) {
+	failTimes, ok := parseTransportLostCmd(prompt)
+	if !ok {
+		return acp.PromptResponse{}, nil, false
+	}
+
+	// Same rationale as handleOverloaded: persist the attempt count in a temp
+	// file keyed by the resume-stable session id so fail-then-recover
+	// survives the orchestrator's tear-down/relaunch between retries.
+	attempt := nextTransportLostAttempt(sid)
+
+	if attempt <= failTimes {
+		_, _ = fmt.Fprintf(logOutput, "mock-agent[%d]: emitting peer-disconnected error for session %s (failure %d/%d)\n",
+			os.Getpid(), sid, attempt, failTimes)
+		return acp.PromptResponse{}, &acp.RequestError{
+			Code:    -32603,
+			Message: "Internal error",
+			Data:    transportLostErrorData,
+		}, true
+	}
+
+	// Recovered: clear the counter and emit a normal success response so the
+	// turn completes (and the orchestrator clears the retry budget).
+	_ = os.Remove(transportLostCounterPath(sid))
+	e := &emitter{ctx: ctx, conn: a.conn, sid: sid}
+	e.text(fmt.Sprintf("Agent connection recovered after %d transient failure(s). Here is your response.", failTimes))
+	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil, true
+}
+
+// transportLostCounterPath returns the temp-file path tracking how many times
+// the /transport-lost scenario has fired for a session. Keyed by the
+// resume-stable ACP session id so the count survives process relaunch across
+// backoff retries.
+func transportLostCounterPath(sid acp.SessionId) string {
+	safe := strings.NewReplacer("/", "_", "\\", "_", "..", "_").Replace(string(sid))
+	return filepath.Join(os.TempDir(), "kandev-mock-transport-lost-"+safe+".count")
+}
+
+// nextTransportLostAttempt increments and returns the persisted attempt count.
+func nextTransportLostAttempt(sid acp.SessionId) int {
+	path := transportLostCounterPath(sid)
+	prev := 0
+	if raw, err := os.ReadFile(path); err == nil {
+		if n, convErr := strconv.Atoi(strings.TrimSpace(string(raw))); convErr == nil {
+			prev = n
+		}
+	}
+	next := prev + 1
+	_ = os.WriteFile(path, []byte(strconv.Itoa(next)), 0o600)
+	return next
+}
+
 // bulkCmdRe matches `/bulk` or `/e2e:bulk`, optionally followed by `:N` or ` N`
 // — the number of agent messages to emit (default 120, capped at 1000). Used to
 // populate a long chat history for manually testing scrollback and the "Load
@@ -128,6 +216,9 @@ const (
 	// Tool-input/output map keys, shared to avoid repeating the literals.
 	toolKeyFilePath = "file_path"
 	toolKeyContent  = "content"
+	toolKeyTaskID   = "task_id"
+	toolKeyError    = "error"
+	toolKeyResult   = "result"
 )
 
 // parseBulkCmd reports whether the prompt is the /bulk command and, if so, how
@@ -161,7 +252,7 @@ func emitBulk(e *emitter, count int) {
 	e.text(fmt.Sprintf("Generating %d messages to populate the chat history…", count))
 	for i := 1; i <= count; i++ {
 		e.text(fmt.Sprintf(
-			"Bulk message %d of %d — filler content for testing chat pagination and the load-older button.",
+			"Bulk message %d of %d: filler content for testing chat pagination and the load-older button.",
 			i, count))
 		// The tool-call start flushes the text above into its own message row.
 		toolID := nextToolID()
@@ -171,16 +262,16 @@ func emitBulk(e *emitter, count int) {
 		fixedDelay(8)
 	}
 	e.text(fmt.Sprintf(
-		"Done — emitted %d messages. Scroll up and use “Load older messages” to page through them.",
+		"Done. Emitted %d messages. Scroll up and use “Load older messages” to page through them.",
 		count))
 }
 
 // delayRange returns min/max delay in milliseconds based on model name.
 func delayRange(model string) (int, int) {
 	switch model {
-	case "mock-fast":
+	case modelFast:
 		return 10, 50
-	case "mock-slow":
+	case modelSlow:
 		return 500, 3000
 	default:
 		return 100, 500
@@ -227,12 +318,56 @@ func stripKandevSystem(prompt string) string {
 
 var kandevSystemRegex = regexp.MustCompile(`<kandev-system>[\s\S]*?</kandev-system>`)
 
+var autopilotParentReplyRegex = regexp.MustCompile(`task_id=([0-9a-fA-F-]+), reply_to_question_id=([0-9a-fA-F-]+)`)
+
+const autopilotParentReplyDelayMillis = 15_000
+
+// handleAutopilotParentQuestion makes the mock parent follow the production
+// parent-question protocol. The prompt is generated by Kandev, so this keeps
+// the E2E path deterministic without adding a second test-only API.
+func handleAutopilotParentQuestion(e *emitter, prompt string) bool {
+	if !strings.Contains(prompt, "AUTOPILOT CHILD QUESTION") {
+		return false
+	}
+	matches := autopilotParentReplyRegex.FindStringSubmatch(prompt)
+	if len(matches) != 3 {
+		e.text("Mock parent could not parse the autopilot question reply route.")
+		return true
+	}
+	childTaskID, questionID := matches[1], matches[2]
+	// The child pause cancels its active turn asynchronously. Keep the pending
+	// state visible long enough for that lifecycle transition and for the
+	// desktop and mobile specs to observe the question icon before answering.
+	waitForDelay(e.ctx, autopilotParentReplyDelayMillis)
+	toolID := nextToolID()
+	e.startTool(toolID, "message_task_kandev", acp.ToolKindOther, map[string]any{
+		toolKeyTaskID:          childTaskID,
+		"reply_to_question_id": questionID,
+	})
+	result, err := callMCPTool("kandev", "message_task_kandev", map[string]any{
+		toolKeyTaskID:          childTaskID,
+		clarificationPromptKey: "Use the first safe option and continue.",
+		"reply_to_question_id": questionID,
+	})
+	if err != nil {
+		e.completeTool(toolID, map[string]any{toolKeyError: err.Error()})
+		e.text("Mock parent could not answer the autopilot question.")
+		return true
+	}
+	e.completeTool(toolID, map[string]any{toolKeyResult: result})
+	e.text("Answered the autopilot child question.")
+	return true
+}
+
 // handlePrompt routes a user prompt to the appropriate sequence generator.
 func handlePrompt(e *emitter, prompt, model string) {
 	prompt = strings.TrimSpace(prompt)
 
 	// Extract the user-facing content for command routing.
 	cmd := stripKandevSystem(prompt)
+	if handleAutopilotParentQuestion(e, cmd) {
+		return
+	}
 
 	// Script mode: each line is a command (e2e:message, e2e:mcp:*, etc.)
 	if isScriptMode(cmd) {
@@ -322,7 +457,7 @@ const asyncSubagentAgentID = "agent_e2e_async_lifecycle"
 // The teardown variant intentionally omits step 5 so execution termination is
 // the only evidence available to reconcile the registration.
 func emitAsyncSubagentLifecycle(e *emitter, cmd string, emitCompletion bool) {
-	d := parseBackgroundDuration(cmd, 20*time.Second)
+	d := parseCommandDuration(cmd, 20*time.Second)
 	toolCallID := nextToolID()
 	e.launchAsyncSubagentTool(
 		toolCallID,
@@ -350,7 +485,7 @@ func emitAsyncSubagentLifecycle(e *emitter, cmd string, emitCompletion bool) {
 // It is intentionally different from /background, whose foreground prompt stays
 // open for the entire delay, so E2E can cover settled+background explicitly.
 func emitDetachedBackgroundWork(e *emitter, cmd string) {
-	d := parseBackgroundDuration(cmd, 8*time.Second)
+	d := parseCommandDuration(cmd, 8*time.Second)
 	e.text("Launching detached background work; this foreground turn is complete.")
 
 	taskToolID := nextToolID()
@@ -390,7 +525,7 @@ func emitSleep(e *emitter, cmd string) {
 // while the session still reads RUNNING. When the hold elapses the subagent
 // completes, the foreground resumes, and the turn ends (→ done).
 func emitBackgroundWork(e *emitter, cmd string) {
-	d := parseBackgroundDuration(cmd, 8*time.Second)
+	d := parseCommandDuration(cmd, 8*time.Second)
 
 	e.text("Kicking off background work; I'll keep going in the background.")
 
@@ -416,13 +551,11 @@ func emitBackgroundWork(e *emitter, cmd string) {
 	e.text("Background work complete.")
 }
 
-// parseBackgroundDuration reads the optional duration argument of a /background
-// command, returning def when it is absent or unparseable. A value carrying an
-// explicit unit is honored as-is (`1m`, `500ms`, `2h`); a bare number is treated
-// as seconds (`8` → 8s). The explicit-unit parse is tried FIRST: appending "s"
-// to a unit-bearing value like `1m` would otherwise parse as the valid-but-wrong
-// "1ms" (1 millisecond) and never reach the correct interpretation.
-func parseBackgroundDuration(cmd string, def time.Duration) time.Duration {
+// parseCommandDuration reads an optional command duration, returning def when
+// it is absent or unparseable. Explicit units are honored as-is; bare numbers
+// are treated as seconds. The explicit-unit parse is tried first so a value
+// like `1m` is not misread as the valid-but-wrong `1ms`.
+func parseCommandDuration(cmd string, def time.Duration) time.Duration {
 	parts := strings.Fields(cmd)
 	if len(parts) < 2 {
 		return def
@@ -456,13 +589,7 @@ func emitCrash(e *emitter, model string) {
 
 // emitSlowResponse generates a response with configurable total duration.
 func emitSlowResponse(e *emitter, prompt, model string) {
-	totalDuration := 5 * time.Second
-	parts := strings.Fields(prompt)
-	if len(parts) >= 2 {
-		if d, err := time.ParseDuration(parts[1]); err == nil && d > 0 {
-			totalDuration = d
-		}
-	}
+	totalDuration := parseCommandDuration(prompt, 5*time.Second)
 
 	steps := 5
 	stepDelay := totalDuration / time.Duration(steps)
@@ -610,11 +737,11 @@ func emitCreateSubtask(e *emitter, cmd, model string) {
 
 	result, err := callMCPTool("kandev", "create_task_kandev", args)
 	if err != nil {
-		e.completeTool(toolID, map[string]any{"error": "MCP error: " + err.Error()})
+		e.completeTool(toolID, map[string]any{toolKeyError: "MCP error: " + err.Error()})
 		e.text(fmt.Sprintf("Failed to create subtask: %v", err))
 		return
 	}
-	e.completeTool(toolID, map[string]any{"result": result})
+	e.completeTool(toolID, map[string]any{toolKeyResult: result})
 	e.text(fmt.Sprintf("Created subtask %q under the current task.", title))
 }
 

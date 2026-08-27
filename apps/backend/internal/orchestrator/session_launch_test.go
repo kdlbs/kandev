@@ -3,14 +3,49 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+func TestExecutionToLaunchResponseReportsAgentProfile(t *testing.T) {
+	response := executionToLaunchResponse("task-1", &executor.TaskExecution{
+		SessionID:        "session-1",
+		AgentExecutionID: "execution-1",
+		AgentProfileID:   "effective-profile",
+		SessionState:     v1.TaskSessionStateRunning,
+	})
+	if got, want := response.AgentProfileID, "effective-profile"; got != want {
+		t.Fatalf("agent_profile_id = %v, want %v", got, want)
+	}
+}
+
+func TestExecutionToLaunchResponseHandlesNilExecution(t *testing.T) {
+	// A guarded automatic launch can return a successful no-op without an
+	// execution. The response helper is defensive for callers that use it
+	// directly or through another launch path.
+	response := executionToLaunchResponse("task-1", nil)
+	if response == nil {
+		t.Fatal("expected a response")
+		return
+	}
+	if !response.Success {
+		t.Fatal("expected a successful no-op response")
+	}
+	if response.TaskID != "task-1" {
+		t.Fatalf("task_id = %q, want task-1", response.TaskID)
+	}
+	if response.SessionID != "" {
+		t.Fatalf("session_id = %q, want empty", response.SessionID)
+	}
+}
 
 func TestResolveIntent(t *testing.T) {
 	tests := []struct {
@@ -451,14 +486,28 @@ func TestLaunchRestoreWorkspace_IncludesWorktreeInfo(t *testing.T) {
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
 
-	// Add worktree to the session
-	if err := repo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
-		ID:             "wt1",
-		SessionID:      "session1",
-		WorktreeID:     "wid1",
-		RepositoryID:   "repo1",
-		WorktreePath:   "/tmp/worktrees/session1",
-		WorktreeBranch: "feature/test",
+	// Add worktree to the session's environment
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env1", TaskID: "task1", ExecutorType: "worktree",
+		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	session.TaskEnvironmentID = "env1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("link session to environment: %v", err)
+	}
+	if err := repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+		ID:                "wt1",
+		TaskEnvironmentID: "env1",
+		WorktreeID:        "wid1",
+		RepositoryID:      "repo1",
+		WorktreePath:      "/tmp/worktrees/session1",
+		WorktreeBranch:    "feature/test",
 	}); err != nil {
 		t.Fatalf("failed to create worktree: %v", err)
 	}
@@ -476,5 +525,54 @@ func TestLaunchRestoreWorkspace_IncludesWorktreeInfo(t *testing.T) {
 	}
 	if resp.WorktreeBranch == nil || *resp.WorktreeBranch != "feature/test" {
 		t.Errorf("expected worktree_branch 'feature/test', got %v", resp.WorktreeBranch)
+	}
+}
+
+func TestIsBenignLaunchTeardownErr(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil", err: nil, want: false},
+		{
+			name: "wrapped context.Canceled",
+			err:  fmt.Errorf("launch failed: %w", context.Canceled),
+			want: true,
+		},
+		{
+			name: "wrapped ErrSessionTerminal",
+			err:  fmt.Errorf("restore workspace: %w", lifecycle.ErrSessionTerminal),
+			want: true,
+		},
+		{
+			// resume path stringifies a persisted session error, destroying the
+			// sentinel (task_operations.go uses %s): the string fallback catches it.
+			name: "stringified context canceled (resume)",
+			err:  fmt.Errorf("session failed: %s", "context canceled"),
+			want: true,
+		},
+		{
+			name: "stringified session is terminal",
+			err:  errors.New("session failed: session is terminal"),
+			want: true,
+		},
+		{
+			name: "unknown task is not benign",
+			err:  errors.New("task not found"),
+			want: false,
+		},
+		{
+			name: "validation error is not benign",
+			err:  errors.New("task_id is required"),
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsBenignLaunchTeardownErr(tt.err); got != tt.want {
+				t.Fatalf("IsBenignLaunchTeardownErr(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
 	}
 }

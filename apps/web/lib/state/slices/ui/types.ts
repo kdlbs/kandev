@@ -1,9 +1,11 @@
 import type { ConnectionIssueSeverity, ConnectionStatus } from "@/lib/types/connection";
 import type { HealthCheckSummary, HealthIssue, SystemHealthResponse } from "@/lib/types/health";
+import type { SettingsMenuMode } from "@/lib/settings/settings-menu-mode";
 import type {
   FilterClause,
   GroupKey,
   SidebarSliceState,
+  SidebarTaskRowPresentation,
   SidebarView,
   SidebarViewDraft,
   SortSpec,
@@ -39,6 +41,13 @@ export type ConnectionState = {
 export type MobileKanbanState = {
   /** Last selected workflow step id, keyed by workflow id (phone board). */
   activeStepIdByWorkflowId: Record<string, string>;
+  /**
+   * The workflow the phone board is currently showing, published by
+   * `SwimlaneContainer` so the menu drawer configures the same board the user
+   * is looking at rather than deriving a second notion of focus. Null off the
+   * phone kanban.
+   */
+  focusedWorkflowId: string | null;
   isMenuOpen: boolean;
   isSearchOpen: boolean;
 };
@@ -46,7 +55,14 @@ export type MobileKanbanState = {
 /** Core, host-defined mobile panels. Kept as a named union (rather than
  *  inlined into MobileSessionPanel) so existing `=== "chat"`-style narrowing
  *  still works unchanged after MobileSessionPanel grew a plugin variant. */
-export type MobileSessionCorePanel = "chat" | "plan" | "changes" | "files" | "terminal" | "review";
+export type MobileSessionCorePanel =
+  | "chat"
+  | "plan"
+  | "changes"
+  | "files"
+  | "terminal"
+  | "review"
+  | "prompt-history";
 
 /** A plugin task panel id on mobile, `plugin:<pluginId>:<panelKey>` — see
  *  lib/state/layout-manager/plugin-panels.ts's pluginPanelId. */
@@ -56,7 +72,7 @@ export type MobileSessionPanel = MobileSessionCorePanel | MobileSessionPluginPan
 
 export type MobileSessionState = {
   activePanelBySessionId: Record<string, MobileSessionPanel>;
-  reviewMRKeyBySessionId: Record<string, string>;
+  reviewItemIdBySessionId: Record<string, string>;
   isTaskSwitcherOpen: boolean;
 };
 
@@ -129,6 +145,16 @@ export type QuickChatSession = {
 
 export type QuickChatActiveKind = "conversation" | "terminal";
 
+export type QuickChatSessionOwnership = {
+  taskId?: string;
+  workspaceId: string;
+};
+
+export type QuickChatSessionTombstone = {
+  workspaceId: string;
+  tombstonedAt: string;
+};
+
 export type QuickChatState = {
   isOpen: boolean;
   sessions: QuickChatSession[];
@@ -137,12 +163,19 @@ export type QuickChatState = {
   activeKind: QuickChatActiveKind;
   activeTerminalTabId: string | null;
   lastTerminalTabIdByWorkspace: Record<string, string>;
+  unseenIdleByWorkspace: Record<string, Record<string, true>>;
+  lastSettledAtBySession: Record<string, string>;
+  sessionOwnership: Record<string, QuickChatSessionOwnership>;
+  syncRevisionByWorkspace: Record<string, number>;
+  tombstonedSessions: Record<string, QuickChatSessionTombstone>;
 };
 
 export type SessionFailureNotification = {
   sessionId: string;
   taskId: string;
   message: string;
+  /** Typed launch failures point users to the persistent task card. */
+  isLaunchFailure?: boolean;
 };
 
 export type TaskDeletedNotification = {
@@ -181,6 +214,30 @@ export type SidebarTaskPrefsState = {
   syncPending?: boolean;
 };
 
+/** Settings menu shape + open branches, per device (localStorage). */
+export type SettingsMenuState = {
+  /**
+   * What the menu renders right now: the saved mode, or the unsaved one the
+   * Appearance page is previewing. Read this everywhere the menu is drawn.
+   */
+  mode: SettingsMenuMode;
+  /** The persisted value. `restoreSettingsMenuMode` reverts `mode` to this. */
+  savedMode: SettingsMenuMode;
+  /**
+   * Branch keys open in `persistent` mode. Accordion mode derives its single
+   * open path from the route instead, so it never reads or writes this.
+   */
+  expandedKeys: string[];
+};
+
+/** Agent rich-output chart motion preference, per device (localStorage). */
+export type RichOutputMotionState = {
+  /** The value rendered now, including an unsaved Appearance preview. */
+  enabled: boolean;
+  /** The persisted value restored when the Appearance draft is discarded. */
+  savedEnabled: boolean;
+};
+
 /** Unified AppSidebar collapse + per-section expand state (localStorage). */
 export type AppSidebarState = {
   collapsed: boolean;
@@ -200,6 +257,13 @@ export type AppSidebarState = {
    * the same dialog instance. Transient, never persisted.
    */
   improveDialogOpen: boolean;
+  /**
+   * Open state of the workspace picker in the expanded sidebar header. Owned by
+   * the store so the global WORKSPACE_PICKER shortcut can open the menu without
+   * reaching into the DOM. Transient, never persisted. Only the sidebar-header
+   * picker instance binds to it — the mobile sheet keeps its own local state.
+   */
+  workspacePickerOpen: boolean;
 };
 
 export type UISliceState = {
@@ -230,6 +294,10 @@ export type UISliceState = {
   sidebarTaskPrefs: SidebarTaskPrefsState;
   /** Unified AppSidebar collapse + section expand state (localStorage). */
   appSidebar: AppSidebarState;
+  /** Settings menu shape + open branches (localStorage). */
+  settingsMenu: SettingsMenuState;
+  /** Agent rich-output chart animation preference (localStorage). */
+  richOutputMotion: RichOutputMotionState;
   /**
    * Most recently dismissed `last_agent_error` stamp per sessionId. Shared by
    * the chat banner and the sidebar error icon so dismissing the banner also
@@ -258,8 +326,9 @@ export type UISliceActions = {
   setMobileKanbanActiveStep: (workflowId: string, stepId: string) => void;
   setMobileKanbanMenuOpen: (open: boolean) => void;
   setMobileKanbanSearchOpen: (open: boolean) => void;
+  setMobileKanbanFocusedWorkflow: (workflowId: string | null) => void;
   setMobileSessionPanel: (sessionId: string, panel: MobileSessionPanel) => void;
-  setMobileSessionReview: (sessionId: string, mrKey: string | null) => void;
+  setMobileSessionReview: (sessionId: string, reviewItemId: string | null) => void;
   setMobileSessionTaskSwitcherOpen: (open: boolean) => void;
   setPlanMode: (sessionId: string, enabled: boolean) => void;
   setCancelTurnPending: (sessionId: string, pending: boolean) => void;
@@ -301,6 +370,12 @@ export type UISliceActions = {
   upsertQuickChatSessionFromEvent: (session: QuickChatSession) => void;
   /** Drops tabs whose backing task was deleted (possibly on another device). */
   removeQuickChatSessionsForTask: (taskId: string) => void;
+  markQuickChatUnseenIdle: (sessionId: string, workspaceId: string) => void;
+  clearQuickChatUnseenIdle: (sessionId?: string, workspaceId?: string) => void;
+  /** Records a settle generation and returns whether it was not previously observed. */
+  recordQuickChatSettled: (sessionId: string, updatedAt: string) => boolean;
+  /** Removes a server-backed quick-chat session and suppresses late task events. */
+  removeQuickChatSession: (sessionId: string) => void;
   setQuickChatInitialPrompt: (sessionId: string, prompt?: string) => void;
   setSessionFailureNotification: (n: SessionFailureNotification | null) => void;
   setTaskDeletedNotification: (n: TaskDeletedNotification | null) => void;
@@ -311,7 +386,12 @@ export type UISliceActions = {
   setSidebarActiveView: (viewId: string) => void;
   createSidebarView: () => string | null;
   updateSidebarDraft: (
-    patch: Partial<{ filters: FilterClause[]; sort: SortSpec; group: GroupKey }>,
+    patch: Partial<{
+      filters: FilterClause[];
+      sort: SortSpec;
+      group: GroupKey;
+      taskRow: SidebarTaskRowPresentation;
+    }>,
   ) => void;
   saveSidebarDraftAs: (name: string) => void;
   saveSidebarDraftOverwrite: () => void;
@@ -348,6 +428,24 @@ export type UISliceActions = {
   toggleAppSidebarSettingsMode: () => void;
   /** Open/close the shared Improve Kandev dialog (footer + New Task routing). */
   setImproveDialogOpen: (open: boolean) => void;
+  /**
+   * Open/close the sidebar-header workspace picker. Opening force-expands the
+   * sidebar, since the trigger renders only in the expanded header.
+   */
+  setWorkspacePickerOpen: (open: boolean) => void;
+  /** Render `mode` without persisting it — the Appearance page's live preview. */
+  previewSettingsMenuMode: (mode: SettingsMenuMode) => void;
+  /** Persist `mode` for this device. Called by the settings save coordinator. */
+  commitSettingsMenuMode: (mode: SettingsMenuMode) => void;
+  /** Drop an unsaved preview and render the persisted mode again. */
+  restoreSettingsMenuMode: () => void;
+  setSettingsMenuExpandedKeys: (keys: string[]) => void;
+  /** Preview rich-output chart motion without persisting it. */
+  previewRichOutputAnimations: (enabled: boolean) => void;
+  /** Persist rich-output chart motion for this device. */
+  commitRichOutputAnimations: (enabled: boolean) => void;
+  /** Restore the persisted rich-output chart motion preference. */
+  restoreRichOutputAnimations: () => void;
   /** Record multiple sidebar badge acknowledgements with one localStorage merge. */
   acknowledgeAgentErrors: (stamps: Record<string, string>) => void;
   /** Record that `stamp` has been dismissed for `sessionId`. */

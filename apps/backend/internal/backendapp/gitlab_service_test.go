@@ -45,18 +45,26 @@ func TestInitGitLabServiceLoadsConfiguredHostAfterRestart(t *testing.T) {
 	log := newTestLogger()
 	secretsStore := emptySecretStore{}
 
-	first := initGitLabService(pool, nil, secretsStore, log)
+	first, firstCleanup := initGitLabService(pool, nil, secretsStore, log)
 	if first == nil {
 		t.Fatal("first GitLab service is nil")
 	}
+	if firstCleanup == nil {
+		t.Fatal("first GitLab cleanup is nil")
+	}
+	t.Cleanup(func() { _ = firstCleanup() })
 	if err := first.ConfigureHost(context.Background(), gitlabServer.URL+"/"); err != nil {
 		t.Fatalf("ConfigureHost: %v", err)
 	}
 
-	second := initGitLabService(pool, nil, secretsStore, log)
+	second, secondCleanup := initGitLabService(pool, nil, secretsStore, log)
 	if second == nil {
 		t.Fatal("second GitLab service is nil")
 	}
+	if secondCleanup == nil {
+		t.Fatal("second GitLab cleanup is nil")
+	}
+	t.Cleanup(func() { _ = secondCleanup() })
 	if got := second.Host(); got != gitlabServer.URL {
 		t.Fatalf("Host after restart = %q, want %q", got, gitlabServer.URL)
 	}

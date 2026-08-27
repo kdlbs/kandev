@@ -461,7 +461,7 @@ func wsGetPRCommits(svc *Service, _ *logger.Logger) func(ctx context.Context, ms
 		if err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
-		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"commits": commits})
+		return ws.NewResponse(msg.ID, msg.Action, commits)
 	}
 }
 

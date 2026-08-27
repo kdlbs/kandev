@@ -19,25 +19,28 @@ func NewStore(raw RawStore) *Store {
 	return &Store{raw: raw}
 }
 
-// storedSettings mirrors Settings for JSON decoding but keeps MergeEnabled as
-// a pointer so a missing key ("unset" — a record saved before this field
-// existed) can be told apart from an explicit `false`. Without this, an
-// installation that persisted max_per_session before merge_enabled shipped
-// would decode its stale record as merge_enabled=false and silently disable
-// merging on upgrade instead of leaving it enabled by default.
+// storedSettings mirrors Settings for JSON decoding but keeps both merge
+// settings as pointers. Missing keys in records written by older versions
+// therefore default on, while explicit false values remain false.
 type storedSettings struct {
-	MaxPerSession int   `json:"max_per_session"`
-	MergeEnabled  *bool `json:"merge_enabled"`
+	MaxPerSession    int   `json:"max_per_session"`
+	MergeEnabled     *bool `json:"merge_enabled"`
+	AutoMergeEnabled *bool `json:"auto_merge_enabled"`
 }
 
-// toSettings normalizes a decoded record into Settings, defaulting
-// MergeEnabled to true when the persisted JSON has no merge_enabled key.
+// toSettings normalizes a decoded record, defaulting omitted merge settings on.
 func (s storedSettings) toSettings() Settings {
 	mergeEnabled := true
 	if s.MergeEnabled != nil {
 		mergeEnabled = *s.MergeEnabled
 	}
-	return Settings{MaxPerSession: s.MaxPerSession, MergeEnabled: mergeEnabled}
+	autoMergeEnabled := true
+	if s.AutoMergeEnabled != nil {
+		autoMergeEnabled = *s.AutoMergeEnabled
+	}
+	return Settings{
+		MaxPerSession: s.MaxPerSession, MergeEnabled: mergeEnabled, AutoMergeEnabled: autoMergeEnabled,
+	}
 }
 
 func (s *Store) Load(ctx context.Context) (*Settings, error) {

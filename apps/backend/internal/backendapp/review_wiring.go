@@ -146,6 +146,17 @@ func (l reviewUtilityLookup) CodeReviewAgent(ctx context.Context) (string, strin
 	return agent.AgentID, agent.Model, agent.Enabled, true, nil
 }
 
+func (l reviewUtilityLookup) CodeReviewAgentProfile(ctx context.Context) (string, bool, bool, error) {
+	if l.agents == nil {
+		return "", false, false, nil
+	}
+	agent, err := l.agents.GetAgentByID(ctx, utilitystore.CodeReviewAgentID)
+	if err != nil || agent == nil {
+		return "", false, false, err
+	}
+	return agent.AgentProfileID, agent.Enabled, true, nil
+}
+
 // reviewDefaultsLookup resolves the user's default utility agent/model pair.
 type reviewDefaultsLookup struct {
 	settings defaultUtilitySettingsGetter
@@ -160,6 +171,19 @@ func (l reviewDefaultsLookup) DefaultUtilitySettings(ctx context.Context) (strin
 		return "", "", nil
 	}
 	return l.settings.GetDefaultUtilitySettings(ctx)
+}
+
+func (l reviewDefaultsLookup) DefaultUtilityProfileID(ctx context.Context) (string, error) {
+	if l.settings == nil {
+		return "", nil
+	}
+	provider, ok := l.settings.(interface {
+		GetDefaultUtilityAgentProfileID(context.Context) (string, error)
+	})
+	if !ok {
+		return "", nil
+	}
+	return provider.GetDefaultUtilityAgentProfileID(ctx)
 }
 
 // reviewTemplateSource serves the code-review utility agent's stored prompt, so
@@ -206,9 +230,23 @@ type sessionInferenceRunner interface {
 	ExecuteInferencePrompt(ctx context.Context, sessionID, agentID, model, prompt string) (*agentctlutil.PromptResponse, error)
 }
 
+type sessionProfileInferenceRunner interface {
+	ExecuteInferenceProfilePrompt(ctx context.Context, sessionID, profileID, prompt string) (*agentctlutil.PromptResponse, error)
+}
+
 func (r reviewInference) Run(ctx context.Context, identity review.ReviewerIdentity, sessionID, prompt string) (*review.PromptResult, error) {
 	if r.session != nil && sessionID != "" {
-		resp, err := r.session.ExecuteInferencePrompt(ctx, sessionID, identity.AgentID, identity.Model, prompt)
+		var resp *agentctlutil.PromptResponse
+		var err error
+		if identity.ProfileID != "" {
+			if profileRunner, ok := r.session.(sessionProfileInferenceRunner); ok {
+				resp, err = profileRunner.ExecuteInferenceProfilePrompt(ctx, sessionID, identity.ProfileID, prompt)
+			} else {
+				err = fmt.Errorf("profile-aware review executor is unavailable")
+			}
+		} else {
+			resp, err = r.session.ExecuteInferencePrompt(ctx, sessionID, identity.AgentID, identity.Model, prompt)
+		}
 		if err == nil && resp != nil && resp.Success {
 			return &review.PromptResult{
 				Response:       resp.Response,
@@ -228,7 +266,13 @@ func (r reviewInference) Run(ctx context.Context, identity review.ReviewerIdenti
 	if r.host == nil {
 		return nil, fmt.Errorf("no inference executor is configured")
 	}
-	result, err := r.host.ExecutePrompt(ctx, identity.AgentID, identity.Model, identity.Mode, prompt)
+	var result *hostutility.PromptResult
+	var err error
+	if identity.ProfileID != "" {
+		result, err = r.host.ExecuteProfilePrompt(ctx, identity.ProfileID, prompt)
+	} else {
+		result, err = r.host.ExecutePrompt(ctx, identity.AgentID, identity.Model, identity.Mode, prompt)
+	}
 	if err != nil {
 		return nil, err
 	}

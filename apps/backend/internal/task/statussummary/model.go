@@ -7,19 +7,24 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"time"
 	"unicode/utf8"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 const (
 	// MaxActiveErrorPreviewBytes keeps an error decoration safe to send with
 	// every task row without turning it into a message-stream transport.
-	MaxActiveErrorPreviewBytes = 512
-	maxSessionIDBytes          = 256
-	maxPendingActionBytes      = 128
-	maxActiveErrorStampBytes   = 64
-	maxPullRequestStateBytes   = 64
-	maxPullRequestURLBytes     = 2048
+	MaxActiveErrorPreviewBytes  = 512
+	maxSessionIDBytes           = 256
+	maxTaskRepositoryIDBytes    = 256
+	maxPendingActionBytes       = 128
+	maxActiveErrorStampBytes    = 64
+	maxActiveErrorCategoryBytes = 64
+	maxPullRequestStateBytes    = 64
+	maxPullRequestURLBytes      = 2048
 )
 
 // TaskStatusSummary is the complete replacement value delivered to task-list
@@ -28,6 +33,7 @@ const (
 type TaskStatusSummary struct {
 	Revision            uint64                 `json:"revision"`
 	UpdatedAt           time.Time              `json:"updated_at"`
+	LastActivityAt      *time.Time             `json:"last_activity_at,omitempty"`
 	PrimarySession      *PrimarySessionSummary `json:"primary_session,omitempty"`
 	ForegroundActivity  string                 `json:"foreground_activity,omitempty"`
 	ActiveSubagentCount int                    `json:"active_subagent_count,omitempty"`
@@ -48,10 +54,13 @@ type PrimarySessionSummary struct {
 }
 
 type ActiveErrorSummary struct {
-	SessionID  string    `json:"session_id"`
-	Stamp      string    `json:"stamp"`
-	OccurredAt time.Time `json:"occurred_at"`
-	Preview    string    `json:"preview"`
+	SessionID        string    `json:"session_id,omitempty"`
+	TaskRepositoryID string    `json:"task_repository_id,omitempty"`
+	Stamp            string    `json:"stamp"`
+	OccurredAt       time.Time `json:"occurred_at"`
+	Preview          string    `json:"preview"`
+	Category         string    `json:"category,omitempty"`
+	RecoveryActions  []string  `json:"recovery_actions,omitempty"`
 }
 
 type GitSummary struct {
@@ -60,6 +69,10 @@ type GitSummary struct {
 	ChangedFiles int `json:"changed_files,omitempty"`
 	Ahead        int `json:"ahead,omitempty"`
 	Behind       int `json:"behind,omitempty"`
+	// ComparisonUnavailable means at least one repository had an explicit
+	// provider-qualified target that could not be materialized or compared.
+	// Numeric comparison totals are suppressed while this is true.
+	ComparisonUnavailable bool `json:"comparison_unavailable,omitempty"`
 }
 
 // PullRequestSummary is intentionally an aggregate plus one representative
@@ -133,13 +146,21 @@ func validateActiveError(activeError *ActiveErrorSummary) error {
 		limit int
 	}{
 		{"active error session id", activeError.SessionID, maxSessionIDBytes},
-		{"active error stamp", activeError.Stamp, maxSessionIDBytes},
+		{"active error task repository id", activeError.TaskRepositoryID, maxTaskRepositoryIDBytes},
+		{"active error stamp", activeError.Stamp, maxActiveErrorStampBytes},
 		{"active error preview", activeError.Preview, MaxActiveErrorPreviewBytes},
+		{"active error category", activeError.Category, maxActiveErrorCategoryBytes},
 	}
 	for _, field := range fields {
 		if err := validateUTF8Bytes(field.name, field.value, field.limit); err != nil {
 			return err
 		}
+	}
+	if len(activeError.RecoveryActions) > 3 {
+		return fmt.Errorf("active error has more than three recovery actions")
+	}
+	if !slices.Equal(activeError.RecoveryActions, models.NormalizeRecoveryActions(activeError.RecoveryActions)) {
+		return fmt.Errorf("active error has unknown or duplicate recovery actions")
 	}
 	return nil
 }
@@ -186,6 +207,7 @@ func (s TaskStatusSummary) SemanticJSON() ([]byte, error) {
 		return nil, err
 	}
 	return json.Marshal(semanticPayload{
+		LastActivityAt:      s.LastActivityAt,
 		PrimarySession:      s.PrimarySession,
 		ForegroundActivity:  s.ForegroundActivity,
 		ActiveSubagentCount: s.ActiveSubagentCount,
@@ -198,6 +220,7 @@ func (s TaskStatusSummary) SemanticJSON() ([]byte, error) {
 }
 
 type semanticPayload struct {
+	LastActivityAt      *time.Time             `json:"last_activity_at,omitempty"`
 	PrimarySession      *PrimarySessionSummary `json:"primary_session,omitempty"`
 	ForegroundActivity  string                 `json:"foreground_activity,omitempty"`
 	ActiveSubagentCount int                    `json:"active_subagent_count,omitempty"`

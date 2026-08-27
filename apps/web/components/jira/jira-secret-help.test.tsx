@@ -25,7 +25,7 @@ describe("formatExpiry", () => {
 
   it("reports an expired cookie once the timestamp is in the past", () => {
     expect(formatExpiry(t, IN(-HOUR))).toEqual({
-      label: "Cookie expired — paste a fresh one",
+      label: "Cookie expired; paste a fresh one",
       tone: "danger",
     });
   });

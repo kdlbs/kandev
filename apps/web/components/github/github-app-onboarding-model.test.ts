@@ -8,6 +8,7 @@ import {
   validateImportSecrets,
   validateRegistrationBasics,
 } from "./github-app-onboarding-model";
+import { githubAppEvents } from "./github-app-policy-dialog";
 
 describe("GitHub App onboarding model", () => {
   it("requires a public HTTPS origin", () => {
@@ -63,5 +64,9 @@ describe("GitHub App onboarding model", () => {
     expect(form?.querySelector("input")?.value).toBe('{"name":"Kandev"}');
     submit.mockRestore();
     form?.remove();
+  });
+
+  it("lists only configurable GitHub App webhook subscriptions", () => {
+    expect(githubAppEvents).toEqual(["push", "check_run"]);
   });
 });

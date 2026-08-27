@@ -1,10 +1,35 @@
+import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
-import path from "node:path";
-import { createSubmoduleReviewFixture, readGitValue } from "./submodule-review-helpers";
+import {
+  createSubmoduleReviewFixture,
+  expectStickyReviewHeaderClearance,
+  readGitValue,
+} from "./submodule-review-helpers";
+
+test.describe("Submodule review fixture", () => {
+  test("cleans source repositories when setup fails", async ({ apiClient, seedData, backend }) => {
+    const tempRoot = fs.mkdtempSync(path.join(backend.tmpDir, "submodule-review-failure-"));
+    try {
+      await expect(
+        createSubmoduleReviewFixture(
+          apiClient,
+          { ...seedData, workspaceId: crypto.randomUUID() },
+          tempRoot,
+          "Failing submodule fixture E2E",
+        ),
+      ).rejects.toThrow();
+      expect(fs.readdirSync(tempRoot)).toEqual([]);
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+});
 
 test.describe("Nested submodule Review", () => {
-  test.describe.configure({ retries: 1, timeout: 180_000 });
+  test.describe.configure({ timeout: 180_000 });
 
   test("shows nested scopes and commits child gitlinks through the UI", async ({
     testPage,
@@ -26,7 +51,7 @@ test.describe("Nested submodule Review", () => {
       await session.waitForChatIdle({ timeout: 45_000 });
 
       const worktreePath = await fixture.waitForWorktree(apiClient);
-      fixture.applyNestedChanges(worktreePath);
+      await fixture.applyNestedChanges(worktreePath);
       const parentBaseSha = readGitValue(worktreePath, ["rev-parse", "HEAD"], backend.tmpDir);
 
       await session.clickTab("Changes");
@@ -65,6 +90,7 @@ test.describe("Nested submodule Review", () => {
       for (const expected of ["outer committed change", "inner committed change"]) {
         await expect.poll(() => session.reviewDiffText(), { timeout: 45_000 }).toContain(expected);
       }
+      await expectStickyReviewHeaderClearance(review, "mouse");
 
       await expect(
         review.locator('[data-testid="review-file-row"][data-file-path="vendor/outer"]'),

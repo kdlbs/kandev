@@ -126,11 +126,11 @@ frontend contract pair is `docs/plans/plugins/PLUGIN-API.md` plus
 Read `docs/plans/plugins/GRPC-CONTRACT.md` when changing the wire contract or
 when the public docs do not answer a low-level compatibility question.
 
-The current frontend branch does not expose `registerTaskPanel`,
-`registerTaskMenuAction`, `host.storage`, `RichTextEditor`,
-`RichTextReadOnly`, or a Kanban-card injection hook. Use the supported slots,
-routes, Host state, and shared store documented in the guide; do not invent
-future signatures.
+The frontend and backend matrices in `docs/public/plugins-authoring.md`,
+together with `apps/web/lib/plugins/types.ts` and `apps/backend/pkg/pluginsdk`,
+are the authoritative record of what exists today. Read them rather than
+asserting from memory that a hook is missing, and do not publish a signature
+they do not declare.
 
 When debugging a contract discrepancy, verify it at the implementation
 boundary: manifest and package rules live under
@@ -156,7 +156,8 @@ for later. In the same change:
 3. Update `docs/public/plugins-authoring.md` in the same change: add the hook to
    the frontend or backend matrix, document inputs/props, capability and
    lifecycle/cleanup behavior, and add a copy-pasteable recipe or maintained
-   fixture link. Remove it from the unavailable-API list when it becomes real.
+   fixture link. Adding the row to the matrix is the update — do not introduce
+   a separate "unavailable" list anywhere.
 4. Update `docs/public/plugins-manifest.md` for capability/manifest changes and
    update `docs/public/plugins.md`, `docs/plugins-example.md`, or the relevant
    ADR when their claims or links change. Keep the public guide as a summary;
@@ -168,11 +169,14 @@ for later. In the same change:
    `node scripts/validate-public-docs.mjs`, and a stale-reference search. Report
    the exact commands and results.
 
-If a proposed hook is not implemented on the current branch, document it as
-unavailable with the nearest supported recipe; do not publish a speculative
-signature. If the hook is implemented but the matrix, recipe, fixture, or
-authoritative contract is missing, the plugin change is not documentation
-complete.
+A hook absent from the relevant frontend/backend matrix and its corresponding
+authoritative contract source does not exist yet; point the author at the
+nearest supported recipe instead of publishing a speculative signature, and
+do not record the gap as a durable list entry in this skill or an
+`AGENTS.md` — the matrix and the contract sources are the only place
+absence or presence is tracked. If the hook is implemented but the
+matrix, recipe, fixture, or authoritative contract is missing, the plugin
+change is not documentation complete.
 
 ## Create A New Repository
 
@@ -225,12 +229,18 @@ request. Do not silently substitute a directory in the Kandev monorepo.
    subscriptions, and side effects; Kandev revokes registered routes, slots,
    handlers, styles, and navigation separately. Use `/mobile-parity` for
    interaction design and `/e2e` for user-visible flows.
-7. Treat webhook routes as public ingress. Follow
+7. API v2 webhook routes require a real Kandev caller identity by default. API
+   v1 keeps omitted access public for compatibility, so new plugins must use
+   API v2. Follow
    `docs/public/plugins-authoring.md` for the current body-size and route
-   limits. Kandev rejects undeclared keys, but it does not authenticate callers
-   or enforce the manifest's informational `method` field. Validate both before
-   side effects, return status codes from 100 through 599, and avoid reflecting
-   unsafe headers or bodies.
+   limits. Kandev rejects undeclared keys and, unless the manifest declares
+   `webhooks[].public: true`, rejects anonymous callers with 401 before your
+   handler runs. Only mark a webhook `public` when it is genuinely third-party
+   ingress (a provider callback, an SSO initiate/callback pair) that your own
+   handler authenticates — Kandev does not enforce the manifest's informational
+   `method` field or verify that a public webhook's own auth is correct.
+   Validate method and signature before side effects, return status codes from
+   100 through 599, and avoid reflecting unsafe headers or bodies.
 8. Keep package paths and platform declarations synchronized. Build every
    executable declared in `runtime.executables`; include `.exe` for Windows.
 

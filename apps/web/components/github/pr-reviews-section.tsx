@@ -52,7 +52,7 @@ function buildReviewMessage(review: PRReview, prUrl: string): string {
 function buildAllReviewsMessage(reviews: PRReview[], prUrl: string): string {
   const parts = ["### All PR Reviews", ""];
   for (const r of reviews) {
-    parts.push(`**${r.author}** — ${reviewStateLabel(r.state)}`);
+    parts.push(`**${r.author}** - ${reviewStateLabel(r.state)}`);
     if (r.body) parts.push(r.body);
     parts.push("");
   }
@@ -114,7 +114,7 @@ function computeSectionSummary(
   const summaryParts: string[] = [];
   if (submittedSummary) summaryParts.push(submittedSummary);
   if (pendingCount > 0) summaryParts.push(`${pendingCount} pending`);
-  const summary = summaryParts.length > 0 ? ` \u2014 ${summaryParts.join(", ")}` : "";
+  const summary = summaryParts.length > 0 ? ` - ${summaryParts.join(", ")}` : "";
   return { pendingCount, summary, totalCount: reviews.length + pendingCount };
 }
 

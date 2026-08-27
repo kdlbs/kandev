@@ -47,6 +47,26 @@ func TestJSONExtract(t *testing.T) {
 	}
 }
 
+func TestJSONExtractPath(t *testing.T) {
+	got := JSONExtractPath(SQLite3, "m.metadata", "question_id")
+	if got != "json_extract(m.metadata, '$.question_id')" {
+		t.Errorf("sqlite single segment: got %q", got)
+	}
+	got = JSONExtractPath(PGX, "m.metadata", "question_id")
+	if got != "m.metadata::jsonb->>'question_id'" {
+		t.Errorf("pgx single segment: got %q", got)
+	}
+
+	got = JSONExtractPath(SQLite3, "m.metadata", "question", "id")
+	if got != "json_extract(m.metadata, '$.question.id')" {
+		t.Errorf("sqlite nested: got %q", got)
+	}
+	got = JSONExtractPath(PGX, "m.metadata", "question", "id")
+	if got != "m.metadata::jsonb->'question'->>'id'" {
+		t.Errorf("pgx nested: got %q", got)
+	}
+}
+
 func TestJSONExtractIsNotNull(t *testing.T) {
 	got := JSONExtractIsNotNull(SQLite3, "m", "id")
 	if got != "json_extract(m, '$.id') IS NOT NULL" {
@@ -80,6 +100,17 @@ func TestExcludeConfigModePredicate(t *testing.T) {
 	}
 }
 
+func TestExcludeTruthyMetadataPredicate(t *testing.T) {
+	got := ExcludeTruthyMetadataPredicate(SQLite3, "m.metadata", "parent_question")
+	if got != "json_extract(m.metadata, '$.parent_question') IS NOT 1" {
+		t.Errorf("sqlite: got %q", got)
+	}
+	got = ExcludeTruthyMetadataPredicate(PGX, "m.metadata", "parent_question")
+	if got != "COALESCE(m.metadata::jsonb->>'parent_question', '') NOT IN ('true', '1')" {
+		t.Errorf("pgx: got %q", got)
+	}
+}
+
 func TestDurationMs(t *testing.T) {
 	got := DurationMs(SQLite3, "completed_at", "started_at")
 	if got != "(julianday(completed_at) - julianday(started_at)) * 86400000" {
@@ -98,6 +129,28 @@ func TestDateOf(t *testing.T) {
 	}
 	got = DateOf(PGX, "created_at")
 	if got != "(created_at)::date" {
+		t.Errorf("pgx: got %q", got)
+	}
+}
+
+func TestDateTimeOf(t *testing.T) {
+	got := DateTimeOf(SQLite3, "activation.value")
+	if got != "datetime(activation.value)" {
+		t.Errorf("sqlite: got %q", got)
+	}
+	got = DateTimeOf(PGX, "activation.value")
+	if got != "(activation.value)::timestamptz" {
+		t.Errorf("pgx: got %q", got)
+	}
+}
+
+func TestNaiveUTCTimestampOf(t *testing.T) {
+	got := NaiveUTCTimestampOf(SQLite3, "ts.started_at")
+	if got != "datetime(ts.started_at)" {
+		t.Errorf("sqlite: got %q", got)
+	}
+	got = NaiveUTCTimestampOf(PGX, "ts.started_at")
+	if got != "(ts.started_at AT TIME ZONE 'UTC')" {
 		t.Errorf("pgx: got %q", got)
 	}
 }

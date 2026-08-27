@@ -50,6 +50,11 @@ export const sshTest = backendFixture.extend<
 >({
   apiClient: [
     async ({ backend }, use) => {
+      if (!hasSSHContainerSupport()) {
+        test.skip(true, "Docker daemon not reachable; skipping SSH E2E worker");
+        return;
+      }
+      buildE2ESSHImage();
       const client = new ApiClient(backend.baseUrl);
       await use(client);
     },
@@ -58,12 +63,6 @@ export const sshTest = backendFixture.extend<
 
   seedData: [
     async ({ apiClient, backend }, use, workerInfo) => {
-      if (!hasSSHContainerSupport()) {
-        test.skip(true, "Docker daemon not reachable; skipping SSH E2E worker");
-        return;
-      }
-      buildE2ESSHImage();
-
       // Per-worker sshd container.
       const sshWorkDir = path.join(backend.tmpDir, "ssh");
       const sshTarget = startSSHServer(workerInfo.workerIndex, SSH_E2E_IMAGE_TAG, sshWorkDir);
@@ -106,6 +105,7 @@ export const sshTest = backendFixture.extend<
   ],
 
   testPage: async ({ browser, backend, apiClient, seedData }, use) => {
+    await backend.ensureReady();
     await apiClient.saveUserSettings({
       workspace_id: seedData.workspaceId,
       workflow_filter_id: seedData.workflowId,

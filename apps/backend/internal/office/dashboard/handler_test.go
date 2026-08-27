@@ -93,6 +93,12 @@ type testDeps struct {
 	svc    *dashboard.DashboardService
 	router *gin.Engine
 	agents *stubAgentReader
+	// wfRepo is the same workflow repository newTestDeps wires via
+	// svc.SetDecisionStore, exposed so tests that need to build their own
+	// engine (e.g. the AC-63/10 re-evaluation test) reuse the identical
+	// participant/decision adapters rather than opening a second, divergent
+	// repository instance against the same tables.
+	wfRepo *workflowrepo.Repository
 }
 
 func newTestDeps(t *testing.T) *testDeps {
@@ -228,12 +234,13 @@ func newTestDeps(t *testing.T) *testDeps {
 	costSvc := &stubCostChecker{}
 	svc := dashboard.NewDashboardService(repo, log, activity, agentSvc, costSvc)
 	svc.SetDecisionStore(wfRepo)
+	svc.SetWorkflowEngineDispatcher(newTestEngineDispatcher(wfRepo, log))
 
 	router := gin.New()
 	group := router.Group("/api/v1/office")
-	dashboard.RegisterRoutes(group, svc, repo, nil, log)
+	dashboard.RegisterRoutes(group, svc, repo, nil, nil, log)
 
-	return &testDeps{db: db, repo: repo, svc: svc, router: router, agents: agentSvc}
+	return &testDeps{db: db, repo: repo, svc: svc, router: router, agents: agentSvc, wfRepo: wfRepo}
 }
 
 // stubAgentReader returns nil/nil by default; tests that need agent
@@ -648,6 +655,38 @@ func TestCreateComment_RequiresBody(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestCreateComment_UserAuthorUnchanged locks in that the UI comment path
+// (author_type unset or "user") still persists the user sentinel — the
+// fix must not touch this path.
+func TestCreateComment_UserAuthorUnchanged(t *testing.T) {
+	deps := newTestDeps(t)
+
+	body := `{"body":"hello from the UI","author_type":"user"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/office/tasks/taskUser/comments",
+		strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	deps.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp dashboard.CommentResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Comment == nil {
+		t.Fatal("expected comment in response")
+	}
+	if resp.Comment.AuthorID != "user" {
+		t.Errorf("expected authorId 'user', got %q", resp.Comment.AuthorID)
+	}
+	if resp.Comment.Source != "user" {
+		t.Errorf("expected source 'user', got %q", resp.Comment.Source)
 	}
 }
 

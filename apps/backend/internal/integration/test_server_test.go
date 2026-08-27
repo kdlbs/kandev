@@ -158,8 +158,9 @@ func (a *testMessageCreatorAdapter) CreateSessionMessage(ctx context.Context, ta
 	return err
 }
 
-func (a *testMessageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error) {
+func (a *testMessageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error) {
 	metadata := map[string]interface{}{
+		"request_id":     requestID,
 		"pending_id":     pendingID,
 		"tool_call_id":   toolCallID,
 		"options":        options,
@@ -181,8 +182,20 @@ func (a *testMessageCreatorAdapter) CreatePermissionRequestMessage(ctx context.C
 	return msg.ID, nil
 }
 
-func (a *testMessageCreatorAdapter) UpdatePermissionMessage(ctx context.Context, sessionID, pendingID string, status models.PermissionStatus) error {
-	return a.svc.UpdatePermissionMessage(ctx, sessionID, pendingID, status)
+func (a *testMessageCreatorAdapter) UpdatePermissionMessage(ctx context.Context, taskID, sessionID, requestID, pendingID string, status models.PermissionStatus) error {
+	return a.svc.UpdatePermissionMessage(ctx, taskID, sessionID, requestID, pendingID, status)
+}
+
+func (a *testMessageCreatorAdapter) ClaimPermissionResolution(ctx context.Context, request models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error) {
+	return a.svc.ClaimPermissionResolution(ctx, request)
+}
+
+func (a *testMessageCreatorAdapter) FinalizePermissionResolution(ctx context.Context, request models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error) {
+	return a.svc.FinalizePermissionResolution(ctx, request)
+}
+
+func (a *testMessageCreatorAdapter) GetPermissionResolutionAudit(ctx context.Context, taskID, sessionID, requestID, pendingID string) (*models.PermissionResolutionAudit, error) {
+	return a.svc.GetPermissionResolutionAudit(ctx, taskID, sessionID, requestID, pendingID)
 }
 
 func (a *testMessageCreatorAdapter) CreateAgentMessageStreaming(ctx context.Context, messageID, taskID, content, agentSessionID, turnID string) error {
@@ -230,6 +243,33 @@ func (a *testTurnServiceAdapter) StartTurn(ctx context.Context, sessionID string
 	return a.svc.StartTurn(ctx, sessionID)
 }
 
+func (a *testTurnServiceAdapter) ReserveTurn(
+	ctx context.Context,
+	sessionID string,
+	recovery *models.PromptDispatchRecovery,
+) (*models.Turn, error) {
+	return a.svc.ReserveTurn(ctx, sessionID, recovery)
+}
+
+func (a *testTurnServiceAdapter) PublishReservedTurn(ctx context.Context, turn *models.Turn) error {
+	return a.svc.PublishReservedTurn(ctx, turn)
+}
+
+func (a *testTurnServiceAdapter) MarkReservedTurnDispatchAttempted(ctx context.Context, turn *models.Turn) error {
+	return a.svc.MarkReservedTurnDispatchAttempted(ctx, turn)
+}
+
+func (a *testTurnServiceAdapter) RollbackReservedTurn(
+	ctx context.Context,
+	sessionID, turnID string,
+) (bool, error) {
+	return a.svc.RollbackReservedTurn(ctx, sessionID, turnID)
+}
+
+func (a *testTurnServiceAdapter) ReconcileUnpublishedPromptTurns(ctx context.Context) (int, error) {
+	return a.svc.ReconcileUnpublishedPromptTurns(ctx)
+}
+
 func (a *testTurnServiceAdapter) CompleteTurn(ctx context.Context, turnID string) error {
 	return a.svc.CompleteTurn(ctx, turnID)
 }
@@ -244,6 +284,14 @@ func (a *testTurnServiceAdapter) GetActiveTurn(ctx context.Context, sessionID st
 
 func (a *testTurnServiceAdapter) UpdateTurn(ctx context.Context, turn *models.Turn) error {
 	return a.svc.UpdateTurn(ctx, turn)
+}
+
+func (a *testTurnServiceAdapter) PatchTurnMetadata(
+	ctx context.Context,
+	sessionID, turnID string,
+	updates map[string]interface{},
+) error {
+	return a.svc.PatchTurnMetadata(ctx, sessionID, turnID, updates)
 }
 
 func (a *testTurnServiceAdapter) AbandonOpenTurns(ctx context.Context, sessionID string) error {
@@ -417,7 +465,7 @@ func (ts *OrchestratorTestServer) CreateTestTask(t *testing.T, agentProfileID st
 	})
 	require.NoError(t, err)
 
-	task, err := ts.TaskSvc.CreateTask(context.Background(), &taskservice.CreateTaskRequest{
+	taskResult, err := ts.TaskSvc.CreateTask(context.Background(), &taskservice.CreateTaskRequest{
 		WorkspaceID:    workspace.ID,
 		WorkflowID:     wf.ID,
 		WorkflowStepID: workflowStepID,
@@ -431,6 +479,7 @@ func (ts *OrchestratorTestServer) CreateTestTask(t *testing.T, agentProfileID st
 			},
 		},
 	})
+	task := taskResult.Task
 	require.NoError(t, err)
 
 	return task.ID

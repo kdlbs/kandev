@@ -20,11 +20,14 @@ type AutomationsTableProps = {
   onDelete: (id: string) => void;
 };
 
+const GITHUB_BADGE_VARIANT = "bg-purple-500/15 text-purple-400 border-purple-500/20";
+
 const TRIGGER_BADGE_VARIANT: Record<TriggerType, string> = {
   scheduled: "bg-blue-500/15 text-blue-400 border-blue-500/20",
-  github_pr: "bg-purple-500/15 text-purple-400 border-purple-500/20",
-  github_push: "bg-purple-500/15 text-purple-400 border-purple-500/20",
-  github_ci: "bg-purple-500/15 text-purple-400 border-purple-500/20",
+  github_pr: GITHUB_BADGE_VARIANT,
+  github_pr_merged: GITHUB_BADGE_VARIANT,
+  github_push: GITHUB_BADGE_VARIANT,
+  github_ci: GITHUB_BADGE_VARIANT,
   webhook: "bg-orange-500/15 text-orange-400 border-orange-500/20",
 };
 
@@ -34,6 +37,7 @@ const TRIGGER_BADGE_VARIANT: Record<TriggerType, string> = {
 const TRIGGER_LABEL_KEYS: Record<TriggerType, string> = {
   scheduled: "automations:triggerLabelScheduled",
   github_pr: "automations:triggerLabelGithubPr",
+  github_pr_merged: "automations:triggerLabelGithubPrMerged",
   github_push: "automations:triggerLabelGithubPush",
   github_ci: "automations:triggerLabelGithubCi",
   webhook: "automations:triggerLabelWebhook",
@@ -146,7 +150,7 @@ export function AutomationsTable({
                 data-settings-dirty-level="container"
                 className="cursor-pointer hover:bg-muted/50"
                 onClick={() =>
-                  router.push(`/settings/workspace/${workspaceId}/automations/${a.id}`)
+                  router.push(`/settings/workspaces/${workspaceId}/automations/${a.id}`)
                 }
               >
                 <TableCell className="font-medium">{a.name}</TableCell>

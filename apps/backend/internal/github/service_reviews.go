@@ -86,8 +86,13 @@ func (s *Service) createReviewWatch(
 		return nil, fmt.Errorf("create review watch: %w", err)
 	}
 
-	// Trigger initial poll in background so the watch starts working immediately
-	go s.initialReviewCheck(context.Background(), rw)
+	// Trigger initial poll in background so the watch starts working
+	// immediately. It runs off a *copy*: the watch we return is JSON-encoded by
+	// the caller while the check writes LastPolledAt, and sharing the pointer
+	// races on that field. The goroutine persists its own timestamp, and the
+	// returned watch has legitimately not been polled yet.
+	initial := *rw
+	go s.initialReviewCheck(context.Background(), &initial)
 
 	return rw, nil
 }

@@ -601,6 +601,34 @@ func TestService_FindOrCreateRepositoryMatchesGitHubRepositoryWithoutExplicitHos
 	}
 }
 
+func TestService_FindOrCreateRepositoryNormalizesProviderIdentityWhitespace(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	created, wasCreated, err := svc.FindOrCreateRepository(ctx, &FindOrCreateRepositoryRequest{
+		WorkspaceID: "ws-1", Provider: "custom-provider", ProviderHost: "https://forge.example.test",
+		ProviderRepoID: "repo-99", ProviderOwner: "TEAM", ProviderName: "widgets",
+		RemoteURL: "https://forge.example.test/scm/TEAM/widgets.git",
+	})
+	if err != nil || !wasCreated {
+		t.Fatalf("initial FindOrCreateRepository() = %+v, %t, %v", created, wasCreated, err)
+	}
+
+	resolved, duplicateCreated, err := svc.FindOrCreateRepository(ctx, &FindOrCreateRepositoryRequest{
+		WorkspaceID: " ws-1 ", Provider: " custom-provider ", ProviderHost: " https://forge.example.test/context ",
+		ProviderRepoID: " repo-99 ", ProviderOwner: " TEAM ", ProviderName: " widgets ",
+		RemoteURL: " https://forge.example.test/scm/TEAM/widgets.git ",
+	})
+	if err != nil {
+		t.Fatalf("second FindOrCreateRepository() error = %v", err)
+	}
+	if duplicateCreated || resolved.ID != created.ID {
+		t.Fatalf("second repository = %q (created=%t), want existing %q", resolved.ID, duplicateCreated, created.ID)
+	}
+}
+
 func TestService_FindOrCreateRepositoryRejectsInvalidLocalPathBackfill(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()

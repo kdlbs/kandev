@@ -8,7 +8,9 @@ import {
   IconShieldQuestion,
 } from "@tabler/icons-react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { CompositorSpin } from "@kandev/ui/compositor-spin";
 import { renderSubagentCountChip, renderTaskStatusIcon } from "./kanban-card-content";
+import { AutoStartFailedTaskIcon } from "@/lib/ui/state-icons";
 import type { Task } from "./kanban-card";
 
 function task(overrides: Partial<Task>): Task {
@@ -22,6 +24,9 @@ function task(overrides: Partial<Task>): Task {
 
 function iconType(node: ReactNode) {
   if (!isValidElement(node)) throw new Error("Expected React element");
+  if (node.type === CompositorSpin) {
+    return iconType((node.props as { children: ReactNode }).children);
+  }
   return node.type;
 }
 
@@ -89,6 +94,60 @@ describe("renderTaskStatusIcon — waiting-for-input variants", () => {
       true,
     );
     expect(iconType(node)).toBe(IconShieldQuestion);
+  });
+});
+
+describe("renderTaskStatusIcon — auto-start failed", () => {
+  it("shows the auto-start-failed triangle for a task whose on_enter launch failed", () => {
+    const node = renderTaskStatusIcon(
+      task({ state: "IN_PROGRESS", autoStartFailed: true }),
+      false,
+      false,
+      false,
+    );
+    expect(iconType(node)).toBe(AutoStartFailedTaskIcon);
+  });
+
+  // The real shape a failed kanban auto-start leaves behind: startTask sets the
+  // task to SCHEDULING before the launch, so a failure before session creation
+  // produces a session-less SCHEDULING/IN_PROGRESS task, which is exactly what
+  // shouldShowTaskRunningSpinner reads as "still launching" (showRunningSpinner
+  // true). The triangle must not be masked by the launch-spinner short-circuit
+  // the way needsMe already isn't.
+  it("shows the triangle over the launch spinner for a session-less SCHEDULING task", () => {
+    const node = renderTaskStatusIcon(
+      task({ state: "SCHEDULING", autoStartFailed: true }),
+      true,
+      false,
+      false,
+    );
+    expect(iconType(node)).toBe(AutoStartFailedTaskIcon);
+    expect(iconType(node)).not.toBe(IconLoader2);
+  });
+
+  it("shows the triangle over the launch spinner for a session-less IN_PROGRESS task", () => {
+    const node = renderTaskStatusIcon(
+      task({ state: "IN_PROGRESS", autoStartFailed: true }),
+      true,
+      false,
+      false,
+    );
+    expect(iconType(node)).toBe(AutoStartFailedTaskIcon);
+    expect(iconType(node)).not.toBe(IconLoader2);
+  });
+
+  it("keeps the terminal done check over a lingering auto-start-failed marker", () => {
+    const node = renderTaskStatusIcon(
+      task({ state: "COMPLETED", autoStartFailed: true }),
+      false,
+      false,
+      false,
+    );
+    expect(iconType(node)).toBe(IconCheck);
+  });
+
+  it("renders nothing for a resting task with the marker absent", () => {
+    expect(renderTaskStatusIcon(task({ state: "IN_PROGRESS" }), false, false, false)).toBeNull();
   });
 });
 

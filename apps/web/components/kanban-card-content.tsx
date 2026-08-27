@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { CSS, type Transform } from "@dnd-kit/utilities";
 import type { DraggableAttributes, DraggableSyntheticListeners } from "@dnd-kit/core";
@@ -8,7 +8,7 @@ import {
   IconAlertCircle,
   IconArrowsMaximize,
   IconDots,
-  IconLoader2,
+  IconLock,
   IconSubtask,
   IconUsersGroup,
 } from "@tabler/icons-react";
@@ -19,11 +19,13 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@kandev/
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { PRTaskIcon } from "@/components/github/pr-task-icon";
 import { MRTaskIcon } from "@/components/gitlab/mr-task-icon";
+import { RegisteredChangeRequestTaskIcon } from "@/components/integrations/registered-change-request-task-icon";
 import {
   KanbanCardDropdownMenuItems,
   type KanbanCardMenuEntry,
 } from "@/components/kanban-card-menu-items";
 import { TaskCardIndicators, TaskCardTags } from "@/components/kanban-card-plugin-slots";
+import { CardTitle } from "@/components/kanban-card-title";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
 import { useTaskPendingInput } from "@/hooks/use-task-pending-input";
@@ -47,6 +49,7 @@ type KanbanCardActionProps = {
   menuEntries: KanbanCardMenuEntry[];
   isDeleting?: boolean;
   isArchiving?: boolean;
+  menuTriggerRef?: RefObject<HTMLButtonElement | null>;
 };
 
 type DraggableCardState = {
@@ -131,10 +134,12 @@ export function KanbanCardBody({
   task,
   repositoryChips,
   actions,
+  enableTitleHover,
 }: {
   task: Task;
   repositoryChips: RepositoryChip[];
   actions?: React.ReactNode;
+  enableTitleHover?: boolean;
 }) {
   return (
     <>
@@ -142,14 +147,10 @@ export function KanbanCardBody({
         <div className="min-w-0 flex-1">
           <RepoChipRow chips={repositoryChips} />
           <div className="flex items-center gap-1 min-w-0" data-testid="kanban-card-title-row">
-            <p
-              data-testid="task-card-title"
-              className="text-sm font-medium leading-tight line-clamp-1 min-w-0"
-            >
-              {task.title}
-            </p>
+            <CardTitle task={task} enableTitleHover={enableTitleHover} />
             <PRTaskIcon taskId={task.id} />
             <MRTaskIcon taskId={task.id} />
+            <RegisteredChangeRequestTaskIcon taskId={task.id} />
             <TaskCardIndicators task={task} />
           </div>
         </div>
@@ -206,6 +207,7 @@ function KanbanCardBadges({ task }: { task: Task }) {
 
   return (
     <div className="flex flex-wrap items-center justify-end gap-2 mt-1 min-w-0">
+      {task.blocked && <BlockedBadge task={task} />}
       {task.queuedForStepId && (
         <Badge
           variant="secondary"
@@ -244,12 +246,52 @@ function KanbanCardBadges({ task }: { task: Task }) {
   );
 }
 
+/**
+ * Blocked badge — the card-level signal that this task will not start on its
+ * own. Distinguishes a failed predecessor (chain halted, needs a human) from
+ * merely pending ones, because those need different actions from the user.
+ *
+ * The predecessor list is on the payload already, so the title needs no fetch.
+ * The count is rendered as text rather than hover-only so the state is readable
+ * on a touch device.
+ */
+function BlockedBadge({ task }: { task: Task }) {
+  const { t } = useTranslation();
+  const count = task.dependsOn?.length ?? 0;
+  const failed = task.blockedReason === "failed";
+  const names = (task.dependsOn ?? []).map((ref) => ref.title || ref.id).join(", ");
+  return (
+    <Badge
+      variant="outline"
+      className={cn(
+        // Same pill formula as the dependency chip above the composer: rounded
+        // outline, 10% tint, 35% border, colour as the text. Keeps the two
+        // surfaces for one concept looking like one thing.
+        "h-5 gap-1 rounded-full px-2 text-xs font-medium leading-none",
+        failed
+          ? "border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-400"
+          : "border-primary/35 bg-primary/10 text-primary",
+      )}
+      title={
+        failed
+          ? t("kanban:blockedPredecessorFailed", { tasks: names })
+          : t("kanban:blockedByTasksTitle", { tasks: names })
+      }
+      data-testid="kanban-card-blocked-badge"
+    >
+      <IconLock className="h-3 w-3" />
+      {failed ? t("kanban:blockedFailed") : t("kanban:blockedByCount", { count })}
+    </Badge>
+  );
+}
+
 function hasCardBadges(task: Task): boolean {
   return Boolean(
     (task.sessionCount && task.sessionCount > 1) ||
     task.reviewStatus === "changes_requested" ||
     task.reviewStatus === "pending" ||
-    task.queuedForStepId,
+    task.queuedForStepId ||
+    task.blocked,
   );
 }
 
@@ -272,23 +314,33 @@ export function renderTaskStatusIcon(
   const showPermissionIcon = shouldUsePermissionTaskIcon(hasPendingPermission);
   const needsMe = showQuestionIcon || showPermissionIcon;
   const showInterrupted = !!task.interrupted;
+  const showAutoStartFailed = !!task.autoStartFailed;
   const hasActivity =
     task.foregroundActivity === "generating" || task.foregroundActivity === "background";
-  if (!showRunningSpinner && !needsMe && !hasActivity && !showInterrupted) {
+  if (!showRunningSpinner && !needsMe && !hasActivity && !showInterrupted && !showAutoStartFailed) {
     return null;
   }
   // A "needs me" prompt (pending clarification / permission) must not be masked
   // by the launch-spinner short-circuit — a mid-turn prompt can coincide with a
   // coarse running state. Live foreground activity still wins, handled inside
-  // getTaskStateIcon.
-  if (showRunningSpinner && !needsMe && task.foregroundActivity !== "background") {
-    return <IconLoader2 className="h-4 w-4 text-blue-500 animate-spin" />;
-  }
+  // getTaskStateIcon. A failed auto-start must not be masked either: startTask
+  // sets the task to SCHEDULING before the launch, so a launch failure before
+  // session creation leaves a session-less SCHEDULING/IN_PROGRESS task, which
+  // reads as showRunningSpinner=true — the exact shape the failure marker exists
+  // to surface.
+  const foregroundActivity =
+    showRunningSpinner &&
+    !needsMe &&
+    !showAutoStartFailed &&
+    task.foregroundActivity !== "background"
+      ? "generating"
+      : task.foregroundActivity;
   return getTaskStateIcon(task.state, "h-4 w-4", {
     hasPendingClarification,
-    foregroundActivity: task.foregroundActivity,
+    foregroundActivity,
     hasPendingPermission,
     interrupted: showInterrupted,
+    autoStartFailed: showAutoStartFailed,
   });
 }
 
@@ -345,6 +397,7 @@ function KanbanCardActions({
   menuEntries,
   isDeleting,
   isArchiving,
+  menuTriggerRef,
 }: KanbanCardActionProps) {
   const { t } = useTranslation("common");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -432,6 +485,7 @@ function KanbanCardActions({
         isDeleting={isDeleting}
         isArchiving={isArchiving}
         menuEntries={menuEntries}
+        menuTriggerRef={menuTriggerRef}
       />
     </div>
   );
@@ -444,7 +498,7 @@ type KanbanCardMenuProps = KanbanCardActionProps & {
 
 function KanbanCardMenu(props: KanbanCardMenuProps) {
   const { t } = useTranslation();
-  const { effectiveMenuOpen, setMenuOpen, isDeleting, isArchiving } = props;
+  const { effectiveMenuOpen, setMenuOpen, isDeleting, isArchiving, menuTriggerRef } = props;
   const { menuEntries } = props;
   const isProcessing = isDeleting || isArchiving;
 
@@ -458,6 +512,7 @@ function KanbanCardMenu(props: KanbanCardMenuProps) {
     >
       <DropdownMenuTrigger asChild>
         <button
+          ref={menuTriggerRef}
           type="button"
           className="text-muted-foreground hover:text-foreground hover:bg-muted rounded-sm p-1 -m-1 transition-colors cursor-pointer"
           onClick={(e) => e.stopPropagation()}
@@ -510,6 +565,7 @@ function KanbanCardActionSlot({
   menuEntries,
   isDeleting,
   isArchiving,
+  menuTriggerRef,
 }: KanbanCardActionProps & { isMultiSelectMode?: boolean }) {
   if (isMultiSelectMode) return null;
   return (
@@ -520,6 +576,7 @@ function KanbanCardActionSlot({
       menuEntries={menuEntries}
       isDeleting={isDeleting}
       isArchiving={isArchiving}
+      menuTriggerRef={menuTriggerRef}
     />
   );
 }
@@ -542,6 +599,7 @@ export function KanbanCardShell({
   onCheckboxClick,
   onOpenFullPage,
   menuEntries,
+  menuTriggerRef,
 }: KanbanCardShellProps) {
   const showCheckbox = isMultiSelectMode || !!isSelected;
   const style = {
@@ -558,6 +616,7 @@ export function KanbanCardShell({
       data-testid={`task-card-${task.id}`}
       className={cn(
         "group max-h-48 bg-card rounded-sm data-[size=sm]:py-1 cursor-pointer mb-2 w-full py-0 relative border border-border overflow-visible shadow-none ring-0",
+        "touch-none md:touch-auto",
         needsAction(task) && !isSelected && "border-l-2 border-l-amber-500",
         isDragging && "opacity-50 z-50",
         isSelected && "ring-1 ring-primary/60 border-primary/60",
@@ -581,6 +640,7 @@ export function KanbanCardShell({
             <KanbanCardBody
               task={task}
               repositoryChips={repositoryChips ?? []}
+              enableTitleHover
               actions={
                 <KanbanCardActionSlot
                   isMultiSelectMode={isMultiSelectMode}
@@ -590,6 +650,7 @@ export function KanbanCardShell({
                   menuEntries={menuEntries}
                   isDeleting={isDeleting}
                   isArchiving={isArchiving}
+                  menuTriggerRef={menuTriggerRef}
                 />
               }
             />

@@ -95,6 +95,11 @@ export async function createKotlinTask(
     path.join(backend.tmpDir, "repos", options.repositoryDirectory ?? "e2e-repo"),
     makeGitEnv(backend.tmpDir),
   );
+  // Task repositories use main unless a test explicitly supplies another
+  // branch. A preceding Git test can leave the shared seed repository checked
+  // out on a feature branch; committing the LSP fixture there makes the task's
+  // main checkout legitimately omit the file.
+  git.exec("git checkout -f main");
   for (const [index, filePath] of filePaths.entries()) {
     const isTypeScript = filePath.endsWith(".ts");
     const defaultContent = isTypeScript
@@ -131,6 +136,13 @@ export async function createKotlinTask(
     },
   );
   if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+
+  await expect
+    .poll(async () => (await apiClient.getTaskEnvironment(task.id))?.status ?? null, {
+      timeout: 45_000,
+      message: "Kotlin task environment did not become ready",
+    })
+    .toBe("ready");
 
   const session = new SessionPage(page);
   if (options.navigate !== false) {
@@ -259,19 +271,37 @@ export async function openDesktopFile(
   session: SessionPage,
   filePath: string,
 ): Promise<void> {
-  await session.clickTab("Files");
-  await expect(session.files).toBeVisible({ timeout: 10_000 });
   const pathSegments = filePath.split("/");
-  for (let index = 1; index < pathSegments.length; index++) {
-    const ancestor = session.fileTreeNode(pathSegments.slice(0, index).join("/"));
-    await expect(ancestor).toBeVisible({ timeout: 15_000 });
-    if ((await ancestor.locator(".tabler-icon-chevron-right").count()) > 0) {
-      await ancestor.click();
-    }
-  }
   const fileNode = session.fileTreeNode(filePath);
-  await expect(fileNode).toBeVisible({ timeout: 15_000 });
-  await fileNode.click();
+  // Git status updates can auto-activate the Changes panel just after the
+  // file tree renders. Re-select Files and click only while the row is still
+  // visible so a late panel switch cannot turn a successful visibility check
+  // into a 180-second click timeout. Executor startup toasts can cover the
+  // dockview tab, so force that tab activation and keep the file-row click
+  // user-facing and actionability checked.
+  await expect
+    .poll(
+      async () => {
+        try {
+          await session.clickTab("Files", { force: true });
+          if (!(await session.files.isVisible())) return false;
+          for (let index = 1; index < pathSegments.length; index++) {
+            const ancestor = session.fileTreeNode(pathSegments.slice(0, index).join("/"));
+            if (!(await ancestor.isVisible())) return false;
+            if ((await ancestor.locator(".tabler-icon-chevron-right").count()) > 0) {
+              await ancestor.click();
+            }
+          }
+          if (!(await fileNode.isVisible())) return false;
+          await fileNode.click({ timeout: 2_000 });
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      { timeout: 30_000, intervals: [500, 1000, 2000] },
+    )
+    .toBe(true);
   await expect(page.locator(".dv-default-tab", { hasText: path.basename(filePath) })).toBeVisible({
     timeout: 10_000,
   });

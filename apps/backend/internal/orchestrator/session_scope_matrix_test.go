@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -65,7 +66,7 @@ func sessionScopeCases() []deniedCase {
 			return s.CancelAgent(context.Background(), sessionID)
 		}},
 		{"RespondToPermission", func(s *Service) error {
-			return s.RespondToPermission(context.Background(), sessionID, "pending-1", "allow", false, false)
+			return s.RespondToPermission(context.Background(), "task-1", sessionID, "request-1", "pending-1", "allow", false, false)
 		}},
 		{"SetSessionPlanModeByID", func(s *Service) error {
 			return s.SetSessionPlanModeByID(context.Background(), sessionID, true)
@@ -92,6 +93,12 @@ func sessionScopeCases() []deniedCase {
 		{"SteerTask", func(s *Service) error {
 			_, err := s.SteerTask(context.Background(), taskID, sessionID, "steer", "", false, nil)
 			return err
+		}},
+		{"ResumeDetachedClarification", func(s *Service) error {
+			return s.ResumeDetachedClarification(
+				context.Background(),
+				clarification.DetachedClarificationResume{TaskID: taskID, SessionID: sessionID},
+			)
 		}},
 	}
 }

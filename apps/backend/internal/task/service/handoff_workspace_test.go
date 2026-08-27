@@ -207,6 +207,38 @@ func (f *fakeBlockerRepo) ListTasksBlockedBy(_ context.Context, blockerTaskID st
 	return ids, nil
 }
 
+func (f *fakeBlockerRepo) ListBlockersForTasks(_ context.Context, taskIDs []string) (map[string][]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	want := make(map[string]struct{}, len(taskIDs))
+	for _, id := range taskIDs {
+		want[id] = struct{}{}
+	}
+	out := map[string][]string{}
+	for _, b := range f.blockers {
+		if _, ok := want[b.TaskID]; ok {
+			out[b.TaskID] = append(out[b.TaskID], b.BlockerTaskID)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeBlockerRepo) ListDependentsForTasks(_ context.Context, blockerTaskIDs []string) (map[string][]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	want := make(map[string]struct{}, len(blockerTaskIDs))
+	for _, id := range blockerTaskIDs {
+		want[id] = struct{}{}
+	}
+	out := map[string][]string{}
+	for _, b := range f.blockers {
+		if _, ok := want[b.BlockerTaskID]; ok {
+			out[b.BlockerTaskID] = append(out[b.BlockerTaskID], b.TaskID)
+		}
+	}
+	return out, nil
+}
+
 // fakeTaskRepo provides the minimal TaskRepository surface AttachWorkspacePolicy
 // uses. It supports GetTask + ListChildren so sibling lookup works.
 type fakeTaskRepo struct {
@@ -462,6 +494,10 @@ func (r *phase4TaskRepo) ListSiblings(ctx context.Context, taskID string) ([]*mo
 	}
 	return out, nil
 }
+func (r *phase4TaskRepo) SetTaskMetadataKeyIfPresent(context.Context, string, string, interface{}) (bool, error) {
+	return false, nil
+}
+
 func (r *phase4TaskRepo) IncrementTaskSequence(context.Context, string) (int, error) {
 	r.panicNotUsed("IncrementTaskSequence")
 	return 0, nil
@@ -469,6 +505,18 @@ func (r *phase4TaskRepo) IncrementTaskSequence(context.Context, string) (int, er
 func (r *phase4TaskRepo) GetWorkspaceTaskPrefix(context.Context, string) (string, string, error) {
 	r.panicNotUsed("GetWorkspaceTaskPrefix")
 	return "", "", nil
+}
+func (r *phase4TaskRepo) GetTaskByExternalID(context.Context, string, string) (*models.Task, error) {
+	r.panicNotUsed("GetTaskByExternalID")
+	return nil, nil
+}
+func (r *phase4TaskRepo) SettleTaskExternalID(context.Context, string, string, time.Time) (bool, error) {
+	r.panicNotUsed("SettleTaskExternalID")
+	return false, nil
+}
+func (r *phase4TaskRepo) ReleaseTaskExternalID(context.Context, string, string) (*models.Task, error) {
+	r.panicNotUsed("ReleaseTaskExternalID")
+	return nil, nil
 }
 
 func TestWorkspacePolicy_MetadataBlock(t *testing.T) {
@@ -501,6 +549,48 @@ func TestWorkspacePolicy_MetadataBlock(t *testing.T) {
 	if got := none.MetadataBlock(); got != nil {
 		t.Fatalf("empty policy should return nil, got %v", got)
 	}
+}
+
+// TestWorkspacePolicy_MergeMetadataBlock pins the merge both task-create
+// surfaces (HTTP in internal/task/handlers, MCP in internal/mcp/handlers) now
+// share, so their metadata precedence cannot diverge again.
+func TestWorkspacePolicy_MergeMetadataBlock(t *testing.T) {
+	pol := WorkspacePolicy{Mode: "new_workspace"}
+
+	t.Run("policy wins over caller metadata", func(t *testing.T) {
+		got := pol.MergeMetadataBlock(map[string]interface{}{
+			"workspace": map[string]interface{}{"mode": "smuggled"},
+			"other":     "kept",
+		})
+		wsBlock, ok := got["workspace"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("workspace map missing: %#v", got)
+		}
+		if wsBlock["mode"] != "new_workspace" {
+			t.Errorf("mode = %v, want new_workspace", wsBlock["mode"])
+		}
+		if got["other"] != "kept" {
+			t.Errorf("unrelated key dropped: %#v", got)
+		}
+	})
+
+	t.Run("nil metadata is allocated", func(t *testing.T) {
+		got := pol.MergeMetadataBlock(nil)
+		if _, ok := got["workspace"]; !ok {
+			t.Fatalf("workspace block missing: %#v", got)
+		}
+	})
+
+	t.Run("empty policy leaves metadata untouched", func(t *testing.T) {
+		if got := (WorkspacePolicy{}).MergeMetadataBlock(nil); got != nil {
+			t.Errorf("got %#v, want nil", got)
+		}
+		base := map[string]interface{}{"other": "kept"}
+		got := (WorkspacePolicy{}).MergeMetadataBlock(base)
+		if len(got) != 1 || got["other"] != "kept" {
+			t.Errorf("got %#v, want the caller's map unchanged", got)
+		}
+	})
 }
 
 func TestWorkspacePolicy_NeedsAttachment(t *testing.T) {

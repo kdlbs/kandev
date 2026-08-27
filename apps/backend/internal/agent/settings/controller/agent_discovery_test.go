@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/discovery"
 	"github.com/kandev/kandev/internal/agent/hostutility"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 )
 
 type managedTestAgent struct {
@@ -84,6 +85,39 @@ func TestUnavailableManagedAgentOmitsRuntimeMetadata(t *testing.T) {
 	}
 }
 
+func TestAvailableAgentIgnoresMismatchedManagedRuntimeSelection(t *testing.T) {
+	ag := &managedTestAgent{
+		testAgent: testAgent{id: "managed-acp", name: "Managed", enabled: true},
+		spec: agents.ManagedNPMRuntimeSpec{
+			Package:        "@example/managed-acp",
+			DefaultVersion: "1.2.3",
+		},
+	}
+	selectionStore := newRecoverySelectionStore()
+	selectionStore.values["managed-acp\x00@example/managed-acp"] = managedruntime.Selection{
+		Package: "@other/managed-acp",
+		Version: "9.9.9",
+	}
+	ctrl := newTestController(map[string]agents.Agent{ag.ID(): ag})
+	ctrl.SetManagedRuntimeSelectionStore(selectionStore)
+
+	item := ctrl.buildAvailableAgentDTO(
+		context.Background(),
+		ag,
+		discovery.Availability{Name: ag.ID(), Available: true},
+		time.Now(),
+	)
+	if item.RuntimeUpdate == nil {
+		t.Fatal("runtime_update missing")
+	}
+	if item.RuntimeUpdate.ActiveVersion != "" {
+		t.Fatalf("active_version = %q, want empty for mismatched selection", item.RuntimeUpdate.ActiveVersion)
+	}
+	if item.RuntimeUpdate.EffectiveVersion != "1.2.3" {
+		t.Fatalf("effective_version = %q, want default 1.2.3", item.RuntimeUpdate.EffectiveVersion)
+	}
+}
+
 func TestAvailableACPInferenceAgentIsDynamicBeforeProbeSnapshot(t *testing.T) {
 	ag := agents.NewMockAgent()
 	ag.SetEnabled(true)
@@ -132,5 +166,24 @@ func TestConfigOptionDTOsPreserveDescriptions(t *testing.T) {
 	values := payload[0]["options"].([]any)
 	if got := values[0].(map[string]any)["description"]; got != "More thorough reasoning." {
 		t.Errorf("value description = %#v, want provider description", got)
+	}
+}
+
+// TestResolveDefaultModel_MockAgentSeedsAdvertisedModel pins the mock agent's
+// seeded default profile model to one the mock agent actually advertises
+// (mock-fast). The no-silent-model-fallback policy fails session start
+// explicitly when the profile model is absent from the advertised list, so a
+// sentinel like "mock-default" would break every default-profile session in
+// the E2E environment.
+func TestResolveDefaultModel_MockAgentSeedsAdvertisedModel(t *testing.T) {
+	model, isPassthroughOnly, err := resolveDefaultModel(agents.NewMockAgent(), "")
+	if err != nil {
+		t.Fatalf("resolveDefaultModel: %v", err)
+	}
+	if isPassthroughOnly {
+		t.Fatal("mock agent must not be seeded as passthrough-only")
+	}
+	if model != "mock-fast" {
+		t.Fatalf("mock default profile model = %q, want %q (an advertised model)", model, "mock-fast")
 	}
 }

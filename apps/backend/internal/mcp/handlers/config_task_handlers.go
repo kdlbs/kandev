@@ -7,11 +7,16 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
+
+	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -19,11 +24,12 @@ import (
 
 func (h *Handlers) handleMoveTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		TaskID         string `json:"task_id"`
-		WorkflowID     string `json:"workflow_id"`
-		WorkflowStepID string `json:"workflow_step_id"`
-		Position       int    `json:"position"`
-		Prompt         string `json:"prompt"`
+		TaskID          string `json:"task_id"`
+		WorkflowID      string `json:"workflow_id"`
+		WorkflowStepID  string `json:"workflow_step_id"`
+		Position        int    `json:"position"`
+		Prompt          string `json:"prompt"`
+		SenderSessionID string `json:"sender_session_id"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -76,11 +82,12 @@ func (h *Handlers) deferMoveTask(
 	ctx context.Context,
 	msg *ws.Message,
 	req struct {
-		TaskID         string `json:"task_id"`
-		WorkflowID     string `json:"workflow_id"`
-		WorkflowStepID string `json:"workflow_step_id"`
-		Position       int    `json:"position"`
-		Prompt         string `json:"prompt"`
+		TaskID          string `json:"task_id"`
+		WorkflowID      string `json:"workflow_id"`
+		WorkflowStepID  string `json:"workflow_step_id"`
+		Position        int    `json:"position"`
+		Prompt          string `json:"prompt"`
+		SenderSessionID string `json:"sender_session_id"`
 	},
 	session *models.TaskSession,
 ) (*ws.Message, error) {
@@ -149,9 +156,10 @@ func (h *Handlers) deferMoveTask(
 		}
 	}
 
+	moveID := uuid.NewString()
 	if req.Prompt != "" {
 		wrapped := "You were moved to this step with the following message: " + req.Prompt
-		if err := h.queueMoveTaskPrompt(ctx, req.TaskID, session.ID, wrapped); err != nil {
+		if err := h.queueMoveTaskPromptWithMoveID(ctx, req.TaskID, session.ID, wrapped, moveID); err != nil {
 			h.logger.Error("move_task: failed to queue hand-off prompt",
 				zap.String("task_id", req.TaskID), zap.String("session_id", session.ID), zap.Error(err))
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
@@ -159,10 +167,13 @@ func (h *Handlers) deferMoveTask(
 		}
 	}
 	h.messageQueue.SetPendingMove(ctx, session.ID, &messagequeue.PendingMove{
-		TaskID:         req.TaskID,
-		WorkflowID:     req.WorkflowID,
-		WorkflowStepID: req.WorkflowStepID,
-		Position:       req.Position,
+		MoveID:          moveID,
+		TaskID:          req.TaskID,
+		WorkflowID:      req.WorkflowID,
+		WorkflowStepID:  req.WorkflowStepID,
+		Position:        req.Position,
+		Actor:           string(wfmodels.StepTransitionActorAgent),
+		SenderSessionID: req.SenderSessionID,
 	})
 	return ws.NewResponse(msg.ID, msg.Action,
 		h.synthesizeMovedTaskDTO(ctx, req.TaskID, req.WorkflowID, req.WorkflowStepID, req.Position))
@@ -176,11 +187,12 @@ func (h *Handlers) applyMoveTaskImmediate(
 	ctx context.Context,
 	msg *ws.Message,
 	req struct {
-		TaskID         string `json:"task_id"`
-		WorkflowID     string `json:"workflow_id"`
-		WorkflowStepID string `json:"workflow_step_id"`
-		Position       int    `json:"position"`
-		Prompt         string `json:"prompt"`
+		TaskID          string `json:"task_id"`
+		WorkflowID      string `json:"workflow_id"`
+		WorkflowStepID  string `json:"workflow_step_id"`
+		Position        int    `json:"position"`
+		Prompt          string `json:"prompt"`
+		SenderSessionID string `json:"sender_session_id"`
 	},
 	session *models.TaskSession,
 ) (*ws.Message, error) {
@@ -196,7 +208,22 @@ func (h *Handlers) applyMoveTaskImmediate(
 		queuedSessionID = session.ID
 	}
 
-	result, err := h.taskSvc.MoveTask(ctx, req.TaskID, req.WorkflowID, req.WorkflowStepID, req.Position)
+	// Attribution uses the CALLING session (req.SenderSessionID, injected
+	// server-side by the MCP server from its own bound session — see
+	// moveTaskHandler), never the target task's session captured above:
+	// move_task_kandev routinely moves a task the caller doesn't run a
+	// session on, so the target's session is not who caused this move.
+	// SenderSessionID is empty for a config-mode/admin MCP server with no
+	// bound session, which correctly falls back to ActorSystem.
+	attribution := steptelemetry.Attribution{Trigger: steptelemetry.TriggerMCPMove, ActorKind: steptelemetry.ActorSystem}
+	if req.SenderSessionID != "" {
+		attribution.ActorKind = steptelemetry.ActorAgent
+		attribution.ActorID = req.SenderSessionID
+		attribution.SessionID = req.SenderSessionID
+	}
+	moveCtx := steptelemetry.WithAttribution(ctx, attribution)
+	result, err := h.taskSvc.MoveTaskWithOptions(moveCtx, req.TaskID, req.WorkflowID, req.WorkflowStepID, req.Position,
+		service.MoveTaskOptions{StepHistoryActor: wfmodels.StepTransitionActorAgent})
 	if err != nil {
 		// Roll back the queued prompt — without this, the next turn would
 		// deliver a "You were moved to this step…" message for a transition
@@ -298,13 +325,27 @@ func (h *Handlers) lookupSession(ctx context.Context, taskID string) (*models.Ta
 // or proceed (idle path), since a queue failure makes the deferred contract
 // impossible to honor.
 func (h *Handlers) queueMoveTaskPrompt(ctx context.Context, taskID, sessionID, prompt string) error {
+	return h.queueMoveTaskPromptWithMoveID(ctx, taskID, sessionID, prompt, "")
+}
+
+func (h *Handlers) queueMoveTaskPromptWithMoveID(ctx context.Context, taskID, sessionID, prompt, moveID string) error {
 	if h.messageQueue == nil {
 		return fmt.Errorf("message queue is unavailable")
 	}
 	if sessionID == "" {
 		return fmt.Errorf("task has no primary session")
 	}
-	if _, err := h.messageQueue.QueueMessage(ctx, sessionID, taskID, prompt, "", "mcp-move-task", false, nil); err != nil {
+	metadata := map[string]interface{}(nil)
+	if moveID != "" {
+		metadata = map[string]interface{}{messagequeue.MetadataDeferredMoveID: moveID}
+	}
+	if queueWithMetadata, ok := h.messageQueue.(messageMetadataQueuer); ok {
+		if _, err := queueWithMetadata.QueueMessageWithMetadata(ctx, sessionID, taskID, prompt, "", messagequeue.QueuedByMoveTask, false, nil, metadata); err != nil {
+			return fmt.Errorf("queue message: %w", err)
+		}
+		return nil
+	}
+	if _, err := h.messageQueue.QueueMessage(ctx, sessionID, taskID, prompt, "", messagequeue.QueuedByMoveTask, false, nil); err != nil {
 		return fmt.Errorf("queue message: %w", err)
 	}
 	return nil
@@ -334,6 +375,14 @@ func (h *Handlers) handleArchiveTask(ctx context.Context, msg *ws.Message) (*ws.
 	if taskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
+	callerTaskID, err := unmarshalStringField(msg.Payload, "caller_task_id")
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if err := h.validateAutomationArchiveTarget(ctx, callerTaskID, taskID); err != nil {
+		h.logger.Warn("rejected archive target", zap.String("task_id", taskID), zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
 
 	if err := h.taskSvc.ArchiveTask(ctx, taskID); err != nil {
 		// Archiving is a goal-state operation: a task that is already archived
@@ -350,6 +399,31 @@ func (h *Handlers) handleArchiveTask(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to archive task", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"success": true})
+}
+
+func (h *Handlers) validateAutomationArchiveTarget(ctx context.Context, callerTaskID, targetTaskID string) error {
+	if callerTaskID == "" {
+		return nil
+	}
+	if h.taskSvc == nil {
+		return errors.New("archive caller task is unavailable")
+	}
+	caller, err := h.taskSvc.GetTask(ctx, callerTaskID)
+	if err != nil || caller == nil {
+		if err != nil {
+			return fmt.Errorf("archive caller task cannot be resolved: %w", err)
+		}
+		return errors.New("archive caller task cannot be resolved")
+	}
+	if caller.Origin != models.TaskOriginAutomationRun ||
+		models.StringFromAny(caller.Metadata["trigger_type"]) != string(automation.TriggerTypeGitHubPRMerged) {
+		return nil
+	}
+	expectedTarget := models.StringFromAny(caller.Metadata[models.MetaKeyAutomationTargetTaskID])
+	if expectedTarget == "" || expectedTarget != targetTaskID {
+		return errors.New("archive target is not bound to this automation run")
+	}
+	return nil
 }
 
 func (h *Handlers) handleUpdateTaskState(ctx context.Context, msg *ws.Message) (*ws.Message, error) {

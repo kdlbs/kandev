@@ -14,13 +14,14 @@ vi.mock("@/components/task/chat/message-renderer", () => ({
 
 import { MessageListFooter } from "./message-list-footer";
 
-afterEach(cleanup);
-
 const AGENT_STATUS_TEST_ID = "agent-status";
+const SESSION_ID = "session-1";
+
+afterEach(cleanup);
 
 const actionableFailure = {
   id: "failure-1",
-  session_id: toSessionId("session-1"),
+  session_id: toSessionId(SESSION_ID),
   task_id: toTaskId("task-1"),
   author_type: "agent",
   type: "status",
@@ -49,7 +50,7 @@ describe("MessageListFooter", () => {
     render(
       <MessageListFooter
         sessionState="FAILED"
-        sessionId="session-1"
+        sessionId={SESSION_ID}
         messages={[]}
         footerActionMessages={[actionableFailure]}
       />,
@@ -60,7 +61,7 @@ describe("MessageListFooter", () => {
   });
 
   it("keeps the generic status for a failed session without an actionable footer", () => {
-    render(<MessageListFooter sessionState="FAILED" sessionId="session-1" messages={[]} />);
+    render(<MessageListFooter sessionState="FAILED" sessionId={SESSION_ID} messages={[]} />);
 
     expect(screen.getByTestId(AGENT_STATUS_TEST_ID)).toBeTruthy();
   });
@@ -69,7 +70,7 @@ describe("MessageListFooter", () => {
     render(
       <MessageListFooter
         sessionState="STARTING"
-        sessionId="session-1"
+        sessionId={SESSION_ID}
         messages={[]}
         footerActionMessages={[actionableFailure]}
       />,
@@ -80,14 +81,14 @@ describe("MessageListFooter", () => {
 
   it("switches ownership when missing-branch recovery arrives after failure", () => {
     const { rerender } = render(
-      <MessageListFooter sessionState="FAILED" sessionId="session-1" messages={[]} />,
+      <MessageListFooter sessionState="FAILED" sessionId={SESSION_ID} messages={[]} />,
     );
     expect(screen.getByTestId(AGENT_STATUS_TEST_ID)).toBeTruthy();
 
     rerender(
       <MessageListFooter
         sessionState="FAILED"
-        sessionId="session-1"
+        sessionId={SESSION_ID}
         messages={[]}
         footerActionMessages={[actionableFailure]}
       />,
@@ -101,7 +102,7 @@ describe("MessageListFooter", () => {
     render(
       <MessageListFooter
         sessionState="FAILED"
-        sessionId="session-1"
+        sessionId={SESSION_ID}
         messages={[actionableFailure, laterFailure]}
         footerActionMessages={[actionableFailure]}
       />,

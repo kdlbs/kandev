@@ -51,6 +51,8 @@ function applyWorkflowUpdated(state: AppState, payload: WorkflowPayload): AppSta
       ? {
           ...item,
           name: payload.name,
+          description: payload.description,
+          prompt: payload.prompt,
           agent_profile_id: payload.agent_profile_id,
           hidden: payload.hidden !== undefined ? Boolean(payload.hidden) : item.hidden,
           style: payload.style ?? item.style,

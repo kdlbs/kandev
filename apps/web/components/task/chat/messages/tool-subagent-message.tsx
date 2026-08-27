@@ -277,13 +277,14 @@ export const ToolSubagentMessage = memo(function ToolSubagentMessage({
   onOpenFile,
   renderChild,
 }: ToolSubagentMessageProps) {
+  const { t } = useTranslation();
   const metadata = comment.metadata as ToolCallMetadata | undefined;
   const childCount = childMessages.length;
   const { subagentTask, isActive, resultText, prompt, hasExpandableContent } =
     deriveSubagentDisplay(metadata, childCount, isContainingTurnActive);
   const resultSummary = firstResultLine(resultText);
-  const description = subagentTask?.description || comment.content || "Subagent";
-  const subagentType = subagentTask?.subagent_type || "Task";
+  const description = subagentTask?.description || comment.content || t("task:subagent");
+  const subagentType = subagentTask?.subagent_type || t("common:task");
 
   // Track manual override state - null means "use auto behavior"
   const [manualExpandState, setManualExpandState] = useState<boolean | null>(null);

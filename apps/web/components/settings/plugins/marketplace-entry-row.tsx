@@ -7,6 +7,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { formatNumber } from "@/lib/i18n/formats";
 import type { MarketplaceEntry } from "@/lib/types/plugins";
+import { SETTINGS_TYPOGRAPHY } from "@/components/settings/settings-typography";
 import { PluginRepoLink } from "./plugin-repo-link";
 
 // Id of the built-in official source (marketplace.officialSourceID). Entries
@@ -17,10 +18,16 @@ type MarketplaceEntryRowProps = {
   entry: MarketplaceEntry;
   busy: boolean;
   onInstall: (entry: MarketplaceEntry) => void;
+  canManage?: boolean;
 };
 
 /** One catalog card: a neutral tile, metadata, stars, and an install-state action. */
-export function MarketplaceEntryRow({ entry, busy, onInstall }: MarketplaceEntryRowProps) {
+export function MarketplaceEntryRow({
+  entry,
+  busy,
+  onInstall,
+  canManage = true,
+}: MarketplaceEntryRowProps) {
   return (
     <div
       data-testid={`marketplace-entry-${entry.id}`}
@@ -31,7 +38,7 @@ export function MarketplaceEntryRow({ entry, busy, onInstall }: MarketplaceEntry
 
         <div className="min-w-0 flex-1 space-y-0.5">
           <div className="flex items-center gap-2">
-            <span className="truncate font-medium text-foreground">{entry.name}</span>
+            <span className="truncate text-sm font-medium text-foreground">{entry.name}</span>
             <span className="text-xs text-muted-foreground">v{entry.version}</span>
             {entry.source_id !== OFFICIAL_SOURCE_ID && (
               <Badge variant="outline" className="text-[10px]">
@@ -40,17 +47,24 @@ export function MarketplaceEntryRow({ entry, busy, onInstall }: MarketplaceEntry
             )}
           </div>
           {entry.description && (
-            <p className="line-clamp-2 text-sm text-muted-foreground">{entry.description}</p>
+            <p className="line-clamp-2 text-xs/relaxed text-muted-foreground">
+              {entry.description}
+            </p>
           )}
         </div>
 
-        <MarketplaceEntryAction entry={entry} busy={busy} onInstall={onInstall} />
+        <MarketplaceEntryAction
+          entry={entry}
+          busy={busy}
+          onInstall={onInstall}
+          canManage={canManage}
+        />
       </div>
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <span className="inline-flex items-center gap-1">
           <IconStar className="h-3.5 w-3.5" />
-          {entry.stars === null ? "—" : formatNumber(entry.stars)}
+          {entry.stars === null ? "-" : formatNumber(entry.stars)}
         </span>
         {/* The name, description, author and categories all come from the
             catalog's index.json — third-party data, not our copy. */}
@@ -62,7 +76,7 @@ export function MarketplaceEntryRow({ entry, busy, onInstall }: MarketplaceEntry
           </span>
         )}
         {entry.categories.map((cat) => (
-          <Badge key={cat} variant="secondary" className="text-[10px] font-normal">
+          <Badge key={cat} variant="secondary" className={SETTINGS_TYPOGRAPHY.meta}>
             {cat}
           </Badge>
         ))}
@@ -101,7 +115,7 @@ function PluginTile({ entry }: { entry: MarketplaceEntry }) {
   );
 }
 
-function MarketplaceEntryAction({ entry, busy, onInstall }: MarketplaceEntryRowProps) {
+function MarketplaceEntryAction({ entry, busy, onInstall, canManage }: MarketplaceEntryRowProps) {
   const { t } = useTranslation();
   if (entry.install_state === "installed") {
     return (
@@ -115,6 +129,7 @@ function MarketplaceEntryAction({ entry, busy, onInstall }: MarketplaceEntryRowP
       </Badge>
     );
   }
+  if (!canManage) return null;
   if (entry.install_state === "update_available") {
     return (
       <Button

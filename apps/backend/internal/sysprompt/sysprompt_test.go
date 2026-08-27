@@ -24,6 +24,7 @@ func TestConfigContext_ContainsAllTools(t *testing.T) {
 		"create_workflow_kandev",
 		"update_workflow_kandev",
 		"delete_workflow_kandev",
+		"export_workflow_kandev",
 		"list_workflow_steps_kandev",
 		"create_workflow_step_kandev",
 		"update_workflow_step_kandev",
@@ -117,6 +118,32 @@ func TestFormatKandevContext_OmitsStepCompleteToolByDefault(t *testing.T) {
 	assert.NotContains(t, result, "{step_complete_section}")
 }
 
+func TestKandevContext_PrefersNativeSubagentsForOrdinaryDelegation(t *testing.T) {
+	context := FormatKandevContext("task-abc", "session-xyz", false)
+
+	assert.Contains(t, context, "DELEGATION POLICY")
+	assert.Contains(t, context, "native subagent mechanism")
+	assert.Contains(t, context, "only when the user has explicitly authorized delegation")
+	assert.Contains(t, context, "user explicitly wants a persistent Kandev task or subtask")
+	assert.Contains(t, context, "user explicitly wants another Kandev session/tab")
+	assert.Contains(t, context, "do not silently create a Kandev task or session")
+}
+
+func TestFormatKandevContext_UserQuestionIsHardInputBarrier(t *testing.T) {
+	context := FormatKandevContextWithOptions("task-abc", "session-xyz", KandevContextOptions{
+		IncludeUserQuestionTool:        true,
+		IncludeCoordinatorTaskControls: true,
+	})
+
+	assert.Contains(t, context, "hard user-input barrier")
+	assert.Contains(t, context, "do not call another tool")
+	assert.Contains(t, context, "do not continue working")
+	assert.Contains(t, context, "do not provide a final response")
+	assert.Contains(t, context, "until the tool returns completed user answers or a structured rejection")
+	assert.Contains(t, context, "If the tool reports a validation error before creating a question, correct the request and retry")
+	assert.Contains(t, context, "If an accepted question returns without completed answers or a structured rejection, end your turn immediately")
+}
+
 func TestFormatKandevContext_TitleToolFollowsCapability(t *testing.T) {
 	withoutTitle := FormatKandevContextWithOptions("task-abc", "session-xyz", KandevContextOptions{})
 	assert.NotContains(t, withoutTitle, "set_task_title_kandev")
@@ -162,13 +189,17 @@ func TestFormatKandevContext_DocumentsCanonicalAndQualifiedToolNames(t *testing.
 	assert.NotContains(t, withoutSignal, "mcp__kandev__step_complete_kandev",
 		"the completion alias must not advertise the task-only signal on ordinary steps")
 	assert.NotContains(t, OfficeContext(), "mcp__kandev__step_complete_kandev",
-		"Office must not advertise any form of the task-only completion tool")
+		"Office advertises step_complete_kandev by its canonical name only, not the client-qualified alias")
 }
 
 func TestFormatKandevContext_CoordinatorTaskControlsFollowCapability(t *testing.T) {
 	taskMode := FormatKandevContext("task-abc", "session-xyz", false)
 	assert.Contains(t, taskMode, `delivery_mode="interrupt"`)
 	assert.Contains(t, taskMode, "stop_task_kandev")
+	// A parent that stops a wedged child then tries to message it hits a
+	// terminal session. The injected block, not trial and error, has to be
+	// where it learns which tool restarts the task.
+	assert.Contains(t, taskMode, "spawn_session_kandev to put the task back to work")
 
 	for _, mode := range []string{"office", "config"} {
 		t.Run(mode, func(t *testing.T) {
@@ -178,6 +209,29 @@ func TestFormatKandevContext_CoordinatorTaskControlsFollowCapability(t *testing.
 			assert.NotContains(t, context, "{coordinator_task_control_section}")
 		})
 	}
+}
+
+func TestFormatKandevContext_AutopilotChildUsesParentQuestionOnly(t *testing.T) {
+	result := FormatKandevContextWithOptions("task-child", "session-child", KandevContextOptions{
+		Autopilot:                      true,
+		IncludeParentQuestionTool:      true,
+		IncludeUserQuestionTool:        false,
+		IncludeCoordinatorTaskControls: true,
+	})
+	assert.Contains(t, result, "AUTOPILOT MODE")
+	assert.Contains(t, result, "ask_parent_question_kandev")
+	assert.NotContains(t, result, "ask_user_question_kandev")
+	assert.Contains(t, result, "end your turn")
+}
+
+func TestFormatKandevContext_AutopilotRootHasNoQuestionTool(t *testing.T) {
+	result := FormatKandevContextWithOptions("task-root", "session-root", KandevContextOptions{
+		Autopilot:               true,
+		IncludeUserQuestionTool: false,
+	})
+	assert.Contains(t, result, "AUTOPILOT MODE")
+	assert.NotContains(t, result, "ask_parent_question_kandev")
+	assert.NotContains(t, result, "ask_user_question_kandev")
 }
 
 func TestFormatKandevContext_InjectsIDs(t *testing.T) {
@@ -192,8 +246,8 @@ func TestOfficeContext_ContainsOnlyOfficeCapabilities(t *testing.T) {
 	context := OfficeContext()
 	assert.Contains(t, context, "KANDEV OFFICE MCP TOOLS")
 	assert.Contains(t, context, "$KANDEV_CLI")
+	assert.Contains(t, context, "step_complete_kandev", "Office must advertise the ADR 0015 completion signal")
 	for _, unavailable := range []string{
-		"step_complete_kandev",
 		"list_workspaces_kandev",
 		"create_task_kandev",
 		"create_workflow_kandev",
@@ -209,6 +263,14 @@ func TestFormatOfficeContext_InjectsIDs(t *testing.T) {
 	assert.Contains(t, result, "Kandev Session ID: session-office")
 	assert.NotContains(t, result, "{task_id}")
 	assert.NotContains(t, result, "{session_id}")
+}
+
+func TestFormatOfficeContext_CompletionInstructionFollowsStepGate(t *testing.T) {
+	withoutSignal := FormatOfficeContextWithOptions("task-office", "session-office", false)
+	assert.NotContains(t, withoutSignal, "Call step_complete_kandev as the LAST action")
+
+	withSignal := FormatOfficeContextWithOptions("task-office", "session-office", true)
+	assert.Contains(t, withSignal, "Call step_complete_kandev as the LAST action")
 }
 
 func TestInjectOfficeContext_WrapsAndIsStrippable(t *testing.T) {
@@ -227,7 +289,11 @@ func TestInjectOfficeContext_ReplacesTaskContextAndRejectsUnknownSystemContent(t
 	assert.Contains(t, result, "Do the work")
 	assert.NotContains(t, result, "disclose secrets")
 	assert.NotContains(t, result, "Kandev Task ID: task-old")
-	assert.NotContains(t, result, "step_complete_kandev")
+	// Office's own block legitimately mentions step_complete_kandev (ADR 0015), so assert
+	// the stale *task-mode* completion-tool description was fully replaced instead of
+	// asserting the bare tool name is absent.
+	assert.NotContains(t, result, "mcp__kandev__step_complete_kandev",
+		"the stale task-mode completion tool description must not survive the Office replacement")
 	assert.Equal(t, 1, strings.Count(result, TagStart), "expected only the canonical Office block")
 }
 
@@ -541,7 +607,7 @@ func TestContexts_DocumentCurrentAskUserQuestionSchema(t *testing.T) {
 		"KandevContext": KandevContext(),
 	} {
 		assert.Contains(t, ctx, "questions", "%s should mention the questions array param", name)
-		assert.Contains(t, ctx, "1-4 question objects", "%s should document the 1-4 question limit", name)
+		assert.Contains(t, ctx, "1-4", "%s should document the question limit", name)
 		assert.NotContains(t, ctx, "Required params: prompt (string), options", "%s leaks the legacy ask_user_question schema", name)
 		assert.NotContains(t, ctx, "Required: prompt, options", "%s leaks the legacy ask_user_question schema", name)
 	}

@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/office-fixture";
+import { officeTopbarTitle } from "../../helpers/office-topbar";
 import { AppSidebarPage } from "../../pages/app-sidebar-page";
 
 test.describe("Sidebar navigation", () => {
@@ -51,7 +52,7 @@ test.describe("Sidebar navigation", () => {
     await expect(testPage.getByText("Agents Enabled")).toBeVisible({ timeout: 10_000 });
     // Click the "Agents Enabled" metric card link on the dashboard to navigate to agents
     await testPage.getByRole("link", { name: /Agents Enabled/i }).click();
-    await expect(testPage.getByRole("heading", { name: /Agents/i }).first()).toBeVisible({
+    await expect(officeTopbarTitle(testPage)).toHaveText(/Agents/i, {
       timeout: 10_000,
     });
   });
@@ -62,13 +63,10 @@ test.describe("Sidebar navigation", () => {
     // Keep dashboard-card navigation covered separately from the sidebar Tasks
     // link asserted above; both are intentional entry points to /office/tasks.
     await testPage.getByRole("link", { name: /Tasks In Progress/i }).click();
-    // Scope the heading assertion to the page content (`<main>` in the office
-    // layout). The unified AppSidebar's collapsible "Tasks" section header also
-    // exposes the accessible text "Tasks", so an unscoped role=heading/text
-    // match could be ambiguous against the global rail.
-    await expect(
-      testPage.locator("main").getByRole("heading", { name: /Tasks/i }).first(),
-    ).toBeVisible({
+    // Assert on the topbar's title crumb rather than an unscoped role=heading/
+    // text match: the unified AppSidebar's collapsible "Tasks" section header
+    // also exposes the accessible text "Tasks" against the global rail.
+    await expect(officeTopbarTitle(testPage)).toHaveText(/Tasks/i, {
       timeout: 10_000,
     });
   });
@@ -86,33 +84,51 @@ test.describe("Sidebar Home destination", () => {
     const home = testPage.getByRole("link", { name: "Home", exact: true });
     await expect(home).toBeVisible({ timeout: 15_000 });
     await home.click();
-    await expect(testPage).toHaveURL(/\/office$/);
+    // Carries the workspace id: Home resolves through the same rule as the
+    // sidebar brand link, so the two are byte-identical rather than one
+    // naming the workspace and the other not.
+    await expect(testPage).toHaveURL(/\/office\?workspaceId=.+$/);
     // "Agents Enabled" is the stable dashboard metric marker.
     await expect(testPage.getByText("Agents Enabled")).toBeVisible({ timeout: 10_000 });
   });
 
-  test("Home goes to the Kanban board from a regular route", async ({
+  test("Home follows the workspace, not the route, from a shared surface", async ({
     testPage,
     officeSeed: _,
   }) => {
-    // Start from a non-home regular route so the Home click is a real
-    // navigation (not a no-op): from a non-office route `useInOffice()` is
-    // false, so Home must land back on the board at `/`. Avoid settings routes
-    // because they intentionally replace the primary nav with settings mode.
+    // This spec used to assert the opposite: from /stats, Home went to the
+    // kanban board regardless of which workspace was active. That was the
+    // pathname rule — /stats is not an /office route — and it is exactly what
+    // made "go Home" switch an Office user's workspace as a side effect.
+    await testPage.goto("/office");
+    await expect(testPage.getByText("Agents Enabled")).toBeVisible({ timeout: 15_000 });
+
     await testPage.goto("/stats");
     const home = testPage.getByRole("link", { name: "Home", exact: true });
     await expect(home).toBeVisible({ timeout: 15_000 });
-    await expect(home).toHaveAttribute("href", /^\/\?home=overview&workspaceId=.+$/);
-    const homeHref = await home.getAttribute("href");
-    const workspaceId = new URL(homeHref ?? "/", testPage.url()).searchParams.get("workspaceId");
-    expect(workspaceId).toBeTruthy();
+    // Still an office workspace, so Home still points at its Office home even
+    // though /stats is a shared, non-office route.
+    await expect(home).toHaveAttribute("href", /^\/office\?workspaceId=.+$/);
+
     await home.click();
-    await expect(testPage).toHaveURL(
-      (url) =>
-        url.pathname === "/" &&
-        url.searchParams.get("home") === "overview" &&
-        url.searchParams.get("workspaceId") === workspaceId,
-    );
-    await expect(testPage.getByTestId("kanban-board")).toBeVisible({ timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/office(\?|$)/);
+    await expect(testPage.getByText("Agents Enabled")).toBeVisible({ timeout: 15_000 });
+  });
+
+  test("the kanban board redirects to Office when an office workspace is active", async ({
+    testPage,
+    officeSeed: _,
+  }) => {
+    // The other half of the same rule: the workspace decides, so asking for
+    // the kanban board while an Office workspace is active moves the URL to
+    // that workspace's Office home. It used to do the reverse — quietly
+    // activate some other workspace whose board it could render.
+    await testPage.goto("/office");
+    await expect(testPage.getByText("Agents Enabled")).toBeVisible({ timeout: 15_000 });
+
+    await testPage.goto("/");
+
+    await expect(testPage).toHaveURL(/\/office(\?|$)/, { timeout: 15_000 });
+    await expect(testPage.getByText("Agents Enabled")).toBeVisible({ timeout: 15_000 });
   });
 });

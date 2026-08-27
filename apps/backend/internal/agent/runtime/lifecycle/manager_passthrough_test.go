@@ -92,7 +92,7 @@ func newPassthroughMCPTestManager(t *testing.T, agentName string) (*Manager, *Ag
 		SessionID:      "session-1",
 		AgentProfileID: "profile-1",
 		WorkspacePath:  t.TempDir(),
-		Metadata: map[string]interface{}{
+		metadata: map[string]interface{}{
 			"standalone_port": 45678,
 		},
 		standalonePort: 45678,
@@ -462,7 +462,10 @@ func TestPassthroughOpenCodeInjectsConfigEnv(t *testing.T) {
 		t.Fatalf("opencode config not written: %v", err)
 	}
 	// OPENCODE_CONFIG must be merged into the passthrough environment.
-	env := mgr.buildPassthroughEnv(context.Background(), execution, nil)
+	env, err := mgr.buildPassthroughEnv(context.Background(), execution, nil)
+	if err != nil {
+		t.Fatalf("buildPassthroughEnv: %v", err)
+	}
 	if env["OPENCODE_CONFIG"] != files[0] {
 		t.Fatalf("OPENCODE_CONFIG = %q, want %q", env["OPENCODE_CONFIG"], files[0])
 	}
@@ -536,8 +539,12 @@ func TestPassthroughPiWritesProjectFile(t *testing.T) {
 	mgr, execution, profile := newPassthroughMCPTestManager(t, "pi-acp")
 	piPath := filepath.Join(execution.WorkspacePath, ".pi", "mcp.json")
 
-	if _, _, _, _, err := mgr.passthroughAgentCommand(context.Background(), execution, profile); err != nil {
+	_, _, _, cmd, err := mgr.passthroughAgentCommand(context.Background(), execution, profile)
+	if err != nil {
 		t.Fatalf("passthroughAgentCommand returned error: %v", err)
+	}
+	if got, want := cmd.Args(), []string{"pi", "--model", "default"}; !slices.Equal(got, want) {
+		t.Fatalf("passthrough command = %v, want %v", got, want)
 	}
 
 	data, err := os.ReadFile(piPath)
@@ -607,7 +614,7 @@ func TestGetPassthroughMCPFilesDecodesRestartShapes(t *testing.T) {
 	// After a backend restart, Metadata is rehydrated from JSON, so a []string
 	// becomes []interface{} of strings. The reader must tolerate both shapes.
 	t.Run("in-memory []string", func(t *testing.T) {
-		exec := &AgentExecution{Metadata: map[string]interface{}{
+		exec := &AgentExecution{metadata: map[string]interface{}{
 			metadataKeyPassthroughMCPFiles: []string{"/a.json", "/b.json"},
 		}}
 		got := getPassthroughMCPFiles(exec)
@@ -616,7 +623,7 @@ func TestGetPassthroughMCPFilesDecodesRestartShapes(t *testing.T) {
 		}
 	})
 	t.Run("JSON-decoded []interface{}", func(t *testing.T) {
-		exec := &AgentExecution{Metadata: map[string]interface{}{
+		exec := &AgentExecution{metadata: map[string]interface{}{
 			metadataKeyPassthroughMCPFiles: []interface{}{"/a.json", 42, "/b.json"},
 		}}
 		got := getPassthroughMCPFiles(exec)
@@ -634,7 +641,7 @@ func TestGetPassthroughMCPFilesDecodesRestartShapes(t *testing.T) {
 
 func TestGetPassthroughMCPEnvDecodesRestartShapes(t *testing.T) {
 	t.Run("in-memory map[string]string", func(t *testing.T) {
-		exec := &AgentExecution{Metadata: map[string]interface{}{
+		exec := &AgentExecution{metadata: map[string]interface{}{
 			metadataKeyPassthroughMCPEnv: map[string]string{"OPENCODE_CONFIG": "/oc.json"},
 		}}
 		if got := getPassthroughMCPEnv(exec); got["OPENCODE_CONFIG"] != "/oc.json" {
@@ -642,7 +649,7 @@ func TestGetPassthroughMCPEnvDecodesRestartShapes(t *testing.T) {
 		}
 	})
 	t.Run("JSON-decoded map[string]interface{}", func(t *testing.T) {
-		exec := &AgentExecution{Metadata: map[string]interface{}{
+		exec := &AgentExecution{metadata: map[string]interface{}{
 			metadataKeyPassthroughMCPEnv: map[string]interface{}{"OPENCODE_CONFIG": "/oc.json", "BAD": 1},
 		}}
 		got := getPassthroughMCPEnv(exec)
@@ -657,7 +664,7 @@ func TestGetPassthroughMCPEnvDecodesRestartShapes(t *testing.T) {
 
 func TestWritePassthroughMCPFilesUnionTrackingOnRelaunch(t *testing.T) {
 	mgr := newTestManager(t)
-	exec := &AgentExecution{Metadata: map[string]interface{}{}}
+	exec := &AgentExecution{metadata: map[string]interface{}{}}
 	path := filepath.Join(t.TempDir(), "cfg.json")
 	file := mcpconfig.PassthroughConfigFile{Path: path, Content: []byte("{}\n")}
 
@@ -696,7 +703,7 @@ func TestPassthroughMCPServersMergesProfileAndDropsKandevCollision(t *testing.T)
 	}}
 	// The default policy for an unknown runtime denies all transports; allow
 	// stdio so the profile servers survive resolution.
-	execution.Metadata["executor_mcp_policy"] = `{"allow_stdio":true}`
+	execution.setMetadataValue("executor_mcp_policy", `{"allow_stdio":true}`)
 
 	if _, _, _, _, err := mgr.passthroughAgentCommand(context.Background(), execution, profile); err != nil {
 		t.Fatalf("passthroughAgentCommand returned error: %v", err)
@@ -796,7 +803,7 @@ func TestWritePassthroughMCPFilesSkipsDanglingLeafSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	execution := &AgentExecution{WorkspacePath: ws, Metadata: map[string]interface{}{}}
+	execution := &AgentExecution{WorkspacePath: ws, metadata: map[string]interface{}{}}
 	if err := mgr.writePassthroughMCPFiles(execution, []mcpconfig.PassthroughConfigFile{
 		{Path: leaf, Content: []byte(`{"mcpServers":{}}`), MergeKey: "mcpServers"},
 	}); err != nil {
@@ -833,7 +840,7 @@ func TestResumePassthroughSessionWithoutRunnerDoesNotWriteMCPConfig(t *testing.T
 func TestPassthroughAgentCommandErrorsWhenMCPPortMissing(t *testing.T) {
 	mgr, execution, profile := newClaudePassthroughMCPTestManager(t)
 	execution.standalonePort = 0
-	delete(execution.Metadata, "standalone_port")
+	execution.deleteMetadataValues("standalone_port")
 
 	_, _, _, _, err := mgr.passthroughAgentCommand(context.Background(), execution, profile)
 	if err == nil {
@@ -847,7 +854,7 @@ func TestPassthroughAgentCommandErrorsWhenMCPPortMissing(t *testing.T) {
 func TestFreshPassthroughCommandErrorsWhenMCPPortMissing(t *testing.T) {
 	mgr, execution, _ := newClaudePassthroughMCPTestManager(t)
 	execution.standalonePort = 0
-	delete(execution.Metadata, "standalone_port")
+	execution.deleteMetadataValues("standalone_port")
 
 	if _, _, _, err := mgr.freshPassthroughCommand(context.Background(), execution); err == nil {
 		t.Fatal("freshPassthroughCommand returned nil, want missing MCP port error")
@@ -859,7 +866,7 @@ func TestFreshPassthroughCommandErrorsWhenMCPPortMissing(t *testing.T) {
 func TestResumePassthroughCommandErrorsWhenMCPPortMissing(t *testing.T) {
 	mgr, execution, _ := newClaudePassthroughMCPTestManager(t)
 	execution.standalonePort = 0
-	delete(execution.Metadata, "standalone_port")
+	execution.deleteMetadataValues("standalone_port")
 
 	resolved, err := mgr.resolvePassthroughAgent(context.Background(), execution)
 	if err != nil {
@@ -874,7 +881,7 @@ func TestResumePassthroughCommandErrorsWhenMCPPortMissing(t *testing.T) {
 
 func TestRemoveExecutionCleansPassthroughMCPConfig(t *testing.T) {
 	mgr, execution, profile := newClaudePassthroughMCPTestManager(t)
-	execution.Metadata = nil
+	execution.metadata = nil
 	if err := mgr.executionStore.Add(execution); err != nil {
 		t.Fatalf("add execution: %v", err)
 	}
@@ -1100,12 +1107,15 @@ func TestBuildPassthroughEnv_MergesProfileEnvVars(t *testing.T) {
 		},
 	}
 
-	env := mgr.buildPassthroughEnv(context.Background(), &AgentExecution{
+	env, err := mgr.buildPassthroughEnv(context.Background(), &AgentExecution{
 		TaskID:               "task-1",
 		SessionID:            "session-1",
 		AgentProfileID:       "profile-1",
 		OfficeAgentProfileID: "office-cto",
 	}, nil)
+	if err != nil {
+		t.Fatalf("buildPassthroughEnv: %v", err)
+	}
 
 	if env["PLAIN"] != "plain-value" {
 		t.Fatalf("profile env var missing: %+v", env)
@@ -1136,7 +1146,10 @@ func TestBuildPassthroughEnvIncludesEffectiveRuntimeEnv(t *testing.T) {
 		"PATH":                                "/tmp/kandev-shim:/usr/bin",
 	})
 
-	env := mgr.buildPassthroughEnv(context.Background(), execution, nil)
+	env, err := mgr.buildPassthroughEnv(context.Background(), execution, nil)
+	if err != nil {
+		t.Fatalf("buildPassthroughEnv: %v", err)
+	}
 	for key, want := range map[string]string{
 		"KANDEV_GITHUB_CREDENTIAL_BROKER_URL": "http://127.0.0.1:9876",
 		"GIT_CONFIG_COUNT":                    "1",

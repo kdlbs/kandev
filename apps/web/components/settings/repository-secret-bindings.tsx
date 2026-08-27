@@ -47,7 +47,7 @@ function secretScopeLabel(t: TFunction, secret: SecretListItem) {
 }
 
 function secretLabel(t: TFunction, secret: SecretListItem) {
-  return `${secret.name} — ${secretScopeLabel(t, secret)}`;
+  return `${secret.name} - ${secretScopeLabel(t, secret)}`;
 }
 
 type BindingRowProps = {

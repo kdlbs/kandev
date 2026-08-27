@@ -10,10 +10,20 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/worktree"
 )
+
+func TestRepositoryHostClonerRequiresExactSessionScope(t *testing.T) {
+	t.Parallel()
+
+	contract := reflect.TypeOf((*orchestrator.RepositoryHostCloner)(nil)).Elem()
+	if _, found := contract.MethodByName("EnsureRepositoryClonedForSession"); !found {
+		t.Fatal("RepositoryHostCloner does not require exact task/session clone scope")
+	}
+}
 
 type remoteWorkspaceMaterializerStub struct {
 	calls [][]lifecycle.WorkspaceRepositoryMaterialization
@@ -22,13 +32,19 @@ type remoteWorkspaceMaterializerStub struct {
 }
 
 type hostRepositoryClonerStub struct {
-	path  string
-	calls []*models.Repository
-	err   error
+	path      string
+	calls     []*models.Repository
+	taskID    string
+	sessionID string
+	err       error
 }
 
-func (s *hostRepositoryClonerStub) EnsureRepositoryCloned(_ context.Context, repository *models.Repository) (string, error) {
+func (s *hostRepositoryClonerStub) EnsureRepositoryClonedForSession(
+	_ context.Context, taskID, sessionID string, repository *models.Repository,
+) (string, error) {
 	s.calls = append(s.calls, repository)
+	s.taskID = taskID
+	s.sessionID = sessionID
 	return s.path, s.err
 }
 
@@ -157,6 +173,20 @@ func TestWorkspaceSourceMaterializer_RemoteMaterializesAdditionalRepositories(t 
 			}
 			if len(remote.calls) != 1 || len(remote.calls[0]) != 1 || remote.calls[0][0].Destination != "added-main" {
 				t.Fatalf("remote projection=%+v; want only additional repository", remote.calls)
+			}
+			inventory, err := repo.ListTaskEnvironmentRepos(ctx, env.ID)
+			if err != nil {
+				t.Fatalf("ListTaskEnvironmentRepos: %v", err)
+			}
+			found := false
+			for _, row := range inventory {
+				if row.RepositoryID == "repo-added" && row.BranchSlug == "main" {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("environment inventory = %+v; want repo-added/main", inventory)
 			}
 		})
 	}
@@ -423,6 +453,9 @@ func TestWorkspaceSourceMaterializer_LocalClonesProviderRepositoryBeforeLinking(
 	}
 	if len(cloner.calls) != 1 || cloner.calls[0].ID != "repo-remote" {
 		t.Fatalf("clone calls = %+v", cloner.calls)
+	}
+	if cloner.taskID != "task-1" || cloner.sessionID != "session-1" {
+		t.Fatalf("clone scope = task %q session %q", cloner.taskID, cloner.sessionID)
 	}
 	if got, err := os.Readlink(filepath.Join(tasksBase, "task-1", "remote")); err != nil || got != clonePath {
 		t.Fatalf("repository link = %q, %v; want %q", got, err, clonePath)

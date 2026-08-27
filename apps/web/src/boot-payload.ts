@@ -1,7 +1,14 @@
 import type { AppState } from "@/lib/state/store";
 import { getBackendConfig } from "@/lib/config";
 import type { FetchedSessionData } from "@/lib/ssr/session-page-state";
-import type { Repository, Task, Workflow, WorkflowStep } from "@/lib/types/http";
+import type {
+  Repository,
+  RepositoryBranchPolicy,
+  RepositorySet,
+  Task,
+  Workflow,
+  WorkflowStep,
+} from "@/lib/types/http";
 import type { ActivePlugin } from "@/lib/plugins/types";
 
 export type { ActivePlugin };
@@ -26,6 +33,13 @@ export type BootRuntime = {
   nonProduction?: boolean;
   /** Active UI locale from the kandev_locale cookie; drives first-paint i18n. */
   locale?: string;
+  /**
+   * Operator-configured browser tab title prefix (KANDEV_WEB_TITLE_PREFIX), so
+   * several Kandev instances are distinguishable in adjacent tabs. The Go shell
+   * already rewrites `<title>`; this covers the /api/v1/app-state boot path,
+   * which never renders through the shell.
+   */
+  titlePrefix?: string;
 };
 
 export type BootRouteData = {
@@ -35,12 +49,16 @@ export type BootRouteData = {
     workflows?: Workflow[];
     steps?: WorkflowStep[];
     repositories?: Repository[];
+    repositorySets?: RepositorySet[];
+    repositoryBranchPolicies?: RepositoryBranchPolicy[];
   };
   tasksPage?: {
     activeWorkspaceId?: string | null;
     workflows?: Workflow[];
     steps?: WorkflowStep[];
     repositories?: Repository[];
+    repositorySets?: RepositorySet[];
+    repositoryBranchPolicies?: RepositoryBranchPolicy[];
     tasks?: Task[];
     total?: number;
     tasksListSort?: string;
@@ -103,7 +121,16 @@ function readPlugin(value: Record<string, unknown>): ActivePlugin | undefined {
   const styleUrls = Array.isArray(value.styleUrls)
     ? value.styleUrls.filter((entry): entry is string => typeof entry === "string")
     : undefined;
-  return { id, name, bundleUrl, styleUrls };
+  const repositoryProviderIds = Array.isArray(value.repositoryProviderIds)
+    ? value.repositoryProviderIds.filter((entry): entry is string => typeof entry === "string")
+    : undefined;
+  return {
+    id,
+    name,
+    bundleUrl,
+    styleUrls,
+    ...(repositoryProviderIds ? { repositoryProviderIds } : {}),
+  };
 }
 
 export async function loadBootPayload(
@@ -146,6 +173,7 @@ function readRuntime(value: Record<string, unknown>): BootRuntime {
     debug: value.debug === true ? true : undefined,
     nonProduction: value.nonProduction === true ? true : undefined,
     locale: readString(value.locale),
+    titlePrefix: readString(value.titlePrefix),
   };
 }
 

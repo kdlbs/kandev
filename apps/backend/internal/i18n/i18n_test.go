@@ -17,6 +17,10 @@ func TestNormalize(t *testing.T) {
 		{"en", "en"},
 		{"zh-cn", "zh-cn"},
 		{"zh-CN", "zh-cn"},
+		{"zh-tw", "zh-tw"},
+		{"zh-TW", "zh-tw"},
+		{"zh-hk", "zh-hk"},
+		{"zh-HK", "zh-hk"},
 		{localePtPT, localePtPT},
 		{"pt-PT", localePtPT},
 		{"pseudo", "pseudo"},
@@ -44,6 +48,12 @@ func TestTranslatesAndFallsBack(t *testing.T) {
 	if chinese := T("zh-cn", "webapp.shellUnavailable"); chinese == en {
 		t.Fatalf("zh-cn message should differ from en, both %q", en)
 	}
+	if taiwan := T("zh-tw", "webapp.shellUnavailable"); taiwan == en {
+		t.Fatalf("zh-tw message should differ from en, both %q", en)
+	}
+	if hongKong := T("zh-hk", "webapp.shellUnavailable"); hongKong == en {
+		t.Fatalf("zh-hk message should differ from en, both %q", en)
+	}
 	if portuguese := T(localePtPT, "webapp.shellUnavailable"); portuguese == en {
 		t.Fatalf("pt-pt message should differ from en, both %q", en)
 	}
@@ -67,7 +77,7 @@ func TestTf(t *testing.T) {
 		want   string
 	}{
 		{"interpolates a placeholder", "en", "share.pageTitle",
-			map[string]any{"title": "Fix the flake"}, "Fix the flake — kandev share"},
+			map[string]any{"title": "Fix the flake"}, "Fix the flake; kandev share"},
 		{"count of one selects the singular", "en", "share.messageCount",
 			map[string]any{"count": 1}, "1 message"},
 		{"count of zero selects the plural", "en", "share.messageCount",
@@ -94,7 +104,7 @@ func TestTf(t *testing.T) {
 		// A placeholder with no value stays visible; a silent hole in a
 		// sentence is much harder to notice in review than "{{title}}".
 		{"missing var leaves the placeholder", "en", "share.pageTitle",
-			nil, "{{title}} — kandev share"},
+			nil, "{{title}}; kandev share"},
 		{"unsupported locale falls back to en", "klingon", "share.messageCount",
 			map[string]any{"count": 2}, "2 messages"},
 		{"non-numeric count is ignored", "en", "share.untitledTask",
@@ -127,7 +137,7 @@ func TestCatalogsHaveMatchingKeys(t *testing.T) {
 	t.Parallel()
 	load()
 	source := catalogs[DefaultLocale]
-	for _, locale := range []string{"pseudo", "zh-cn", localePtPT} {
+	for _, locale := range []string{"pseudo", "zh-cn", "zh-tw", "zh-hk", localePtPT} {
 		translated := catalogs[locale]
 		if len(translated) != len(source) {
 			t.Fatalf("%s catalog has %d keys, want %d", locale, len(translated), len(source))
@@ -192,6 +202,34 @@ func TestFromRequest(t *testing.T) {
 		r.Header.Set("Accept-Language", "en;q=0.4, zh-CN;q=0.9")
 		if got := FromRequest(r); got != "zh-cn" {
 			t.Fatalf("got %q, want zh-cn", got)
+		}
+	})
+
+	t.Run("accept-language selects zh-TW", func(t *testing.T) {
+		t.Parallel()
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.Header.Set("Accept-Language", "zh-TW,zh;q=0.9,en;q=0.8")
+		if got := FromRequest(r); got != "zh-tw" {
+			t.Fatalf("got %q, want zh-tw", got)
+		}
+	})
+
+	t.Run("accept-language selects zh-HK", func(t *testing.T) {
+		t.Parallel()
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.Header.Set("Accept-Language", "zh-HK;q=1.0, en;q=0.5")
+		if got := FromRequest(r); got != "zh-hk" {
+			t.Fatalf("got %q, want zh-hk", got)
+		}
+	})
+
+	t.Run("zh-tw cookie wins over accept-language", func(t *testing.T) {
+		t.Parallel()
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.AddCookie(&http.Cookie{Name: LocaleCookie, Value: "zh-tw"})
+		r.Header.Set("Accept-Language", "en")
+		if got := FromRequest(r); got != "zh-tw" {
+			t.Fatalf("got %q, want zh-tw", got)
 		}
 	})
 

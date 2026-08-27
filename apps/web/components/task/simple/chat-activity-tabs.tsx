@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@kandev/ui/tabs";
 import { useAppStore } from "@/components/state-provider";
+import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
 import { agentTint } from "@/app/office/components/agent-avatar";
 import { TaskChat } from "./task-chat";
 import { TaskActivity } from "./task-activity";
@@ -39,7 +40,7 @@ function AgentTabTrigger({ group }: { group: SessionGroup }) {
   // UUID that lands in `session.agentName` when the session's profile
   // snapshot is empty.
   const resolved = useAppStore((s) =>
-    agentProfileId ? s.office.agentProfiles.find((a) => a.id === agentProfileId) : undefined,
+    agentProfileId ? selectOfficeAgentProfiles(s).find((a) => a.id === agentProfileId) : undefined,
   );
   const label = resolved?.name || group.representative.agentName || t("task:agent");
   // Apply the per-agent tint only when the tab is active, so the
@@ -151,6 +152,9 @@ export function ChatActivityTabs({
         <ApprovalActionBar task={task} />
         <TaskChat
           taskId={task.id}
+          workspaceId={task.workspaceId}
+          statusSummary={task.statusSummary}
+          repositories={task.repositories}
           comments={comments}
           timeline={timeline}
           sessions={sessions}

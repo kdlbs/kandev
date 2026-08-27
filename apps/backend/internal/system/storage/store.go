@@ -55,9 +55,44 @@ type MaintenanceRun struct {
 type ResourceType string
 
 const (
-	ResourceTypeTaskWorkspace ResourceType = "task_workspace"
-	ResourceTypeGoCache       ResourceType = "go_cache"
+	ResourceTypeTaskWorkspace     ResourceType = "task_workspace"
+	ResourceTypeGoCache           ResourceType = "go_cache"
+	ResourceTypeTemporaryArtifact ResourceType = "temporary_artifact"
 )
+
+type TemporaryArtifactKind string
+
+const (
+	TemporaryArtifactKindImproveBundle TemporaryArtifactKind = "improve_bundle"
+	TemporaryArtifactKindHostUtility   TemporaryArtifactKind = "host_utility"
+)
+
+type TemporaryArtifactState string
+
+const (
+	TemporaryArtifactStateActive      TemporaryArtifactState = "active"
+	TemporaryArtifactStateClosed      TemporaryArtifactState = "closed"
+	TemporaryArtifactStateAbandoned   TemporaryArtifactState = "abandoned"
+	TemporaryArtifactStateQuarantined TemporaryArtifactState = "quarantined"
+	TemporaryArtifactStateDeleted     TemporaryArtifactState = "deleted"
+	TemporaryArtifactStateFailed      TemporaryArtifactState = "failed"
+)
+
+type TemporaryArtifact struct {
+	ID              string                 `json:"id"`
+	Kind            TemporaryArtifactKind  `json:"kind"`
+	Path            string                 `json:"path"`
+	MarkerToken     string                 `json:"marker_token"`
+	State           TemporaryArtifactState `json:"state"`
+	OwnerPID        int64                  `json:"owner_pid"`
+	CreatedAt       time.Time              `json:"created_at"`
+	LastHeartbeatAt *time.Time             `json:"last_heartbeat_at,omitempty"`
+	ClosedAt        *time.Time             `json:"closed_at,omitempty"`
+	QuarantinedAt   *time.Time             `json:"quarantined_at,omitempty"`
+	DeletedAt       *time.Time             `json:"deleted_at,omitempty"`
+	LastError       string                 `json:"last_error"`
+	Metadata        json.RawMessage        `json:"metadata"`
+}
 
 type QuarantineState string
 
@@ -288,6 +323,122 @@ func (s *Store) SummarizeQuarantine(ctx context.Context) (QuarantineSummary, err
 	return summary, nil
 }
 
+func (s *Store) CreateTemporaryArtifact(ctx context.Context, artifact *TemporaryArtifact) error {
+	if err := normalizeNewTemporaryArtifact(artifact); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		INSERT INTO storage_temp_artifacts
+			(id, kind, path, marker_token, state, owner_pid, created_at, last_heartbeat_at,
+			 closed_at, quarantined_at, deleted_at, last_error, metadata)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), artifact.ID, artifact.Kind, artifact.Path, artifact.MarkerToken, artifact.State,
+		artifact.OwnerPID, artifact.CreatedAt, artifact.LastHeartbeatAt, artifact.ClosedAt,
+		artifact.QuarantinedAt, artifact.DeletedAt, artifact.LastError, string(artifact.Metadata))
+	if err != nil {
+		return fmt.Errorf("create temporary artifact: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) GetTemporaryArtifact(ctx context.Context, id string) (TemporaryArtifact, error) {
+	row, err := getTemporaryArtifactRow(ctx, s.ro, id)
+	if err != nil {
+		return TemporaryArtifact{}, err
+	}
+	return row.artifact(), nil
+}
+
+func (s *Store) ListTemporaryArtifacts(ctx context.Context) ([]TemporaryArtifact, error) {
+	rows := make([]temporaryArtifactRow, 0)
+	err := s.ro.SelectContext(ctx, &rows, `
+		SELECT id, kind, path, marker_token, state, owner_pid, created_at, last_heartbeat_at,
+			closed_at, quarantined_at, deleted_at, last_error, metadata
+		FROM storage_temp_artifacts
+		ORDER BY created_at ASC, id ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list temporary artifacts: %w", err)
+	}
+	artifacts := make([]TemporaryArtifact, 0, len(rows))
+	for _, row := range rows {
+		artifacts = append(artifacts, row.artifact())
+	}
+	return artifacts, nil
+}
+
+func (s *Store) HeartbeatTemporaryArtifact(ctx context.Context, id string, at time.Time) error {
+	at = at.UTC()
+	result, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		UPDATE storage_temp_artifacts
+		SET last_heartbeat_at = ?, last_error = ''
+		WHERE id = ? AND state = ?
+	`), at, id, TemporaryArtifactStateActive)
+	if err != nil {
+		return fmt.Errorf("heartbeat temporary artifact: %w", err)
+	}
+	if err := requireOneRow(result); err != nil {
+		return fmt.Errorf("heartbeat temporary artifact %s: %w", id, err)
+	}
+	return nil
+}
+
+func (s *Store) TransitionTemporaryArtifact(
+	ctx context.Context,
+	id string,
+	next TemporaryArtifactState,
+	lastError string,
+	at time.Time,
+) error {
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin temporary artifact transition: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	current, err := getTemporaryArtifactRow(ctx, tx, id)
+	if err != nil {
+		return err
+	}
+	if !validTemporaryArtifactTransition(TemporaryArtifactState(current.State), next) {
+		return transitionError("temporary artifact", current.State, string(next))
+	}
+	at = at.UTC()
+	lastHeartbeat := current.LastHeartbeatAt
+	closedAt := current.ClosedAt
+	quarantinedAt := current.QuarantinedAt
+	deletedAt := current.DeletedAt
+	switch next {
+	case TemporaryArtifactStateClosed:
+		closedAt = &at
+	case TemporaryArtifactStateQuarantined:
+		quarantinedAt = &at
+	case TemporaryArtifactStateDeleted:
+		deletedAt = &at
+	}
+	if next != TemporaryArtifactStateActive {
+		lastHeartbeat = current.LastHeartbeatAt
+	}
+	if next != TemporaryArtifactStateFailed {
+		lastError = ""
+	}
+	result, err := tx.ExecContext(ctx, tx.Rebind(`
+		UPDATE storage_temp_artifacts
+		SET state = ?, last_heartbeat_at = ?, closed_at = ?, quarantined_at = ?,
+			deleted_at = ?, last_error = ?
+		WHERE id = ? AND state = ?
+	`), next, lastHeartbeat, closedAt, quarantinedAt, deletedAt, lastError, id, current.State)
+	if err != nil {
+		return fmt.Errorf("transition temporary artifact: %w", err)
+	}
+	if err := requireOneRow(result); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit temporary artifact transition: %w", err)
+	}
+	return nil
+}
+
 type queryer interface {
 	GetContext(context.Context, any, string, ...any) error
 	Rebind(string) string
@@ -370,6 +521,47 @@ func (r quarantineRow) entry() QuarantineEntry {
 	}
 }
 
+type temporaryArtifactRow struct {
+	ID              string     `db:"id"`
+	Kind            string     `db:"kind"`
+	Path            string     `db:"path"`
+	MarkerToken     string     `db:"marker_token"`
+	State           string     `db:"state"`
+	OwnerPID        int64      `db:"owner_pid"`
+	CreatedAt       time.Time  `db:"created_at"`
+	LastHeartbeatAt *time.Time `db:"last_heartbeat_at"`
+	ClosedAt        *time.Time `db:"closed_at"`
+	QuarantinedAt   *time.Time `db:"quarantined_at"`
+	DeletedAt       *time.Time `db:"deleted_at"`
+	LastError       string     `db:"last_error"`
+	Metadata        string     `db:"metadata"`
+}
+
+func getTemporaryArtifactRow(ctx context.Context, conn queryer, id string) (temporaryArtifactRow, error) {
+	var row temporaryArtifactRow
+	err := conn.GetContext(ctx, &row, conn.Rebind(`
+		SELECT id, kind, path, marker_token, state, owner_pid, created_at, last_heartbeat_at,
+			closed_at, quarantined_at, deleted_at, last_error, metadata
+		FROM storage_temp_artifacts WHERE id = ?
+	`), id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return temporaryArtifactRow{}, ErrNotFound
+	}
+	if err != nil {
+		return temporaryArtifactRow{}, fmt.Errorf("get temporary artifact: %w", err)
+	}
+	return row, nil
+}
+
+func (r temporaryArtifactRow) artifact() TemporaryArtifact {
+	return TemporaryArtifact{
+		ID: r.ID, Kind: TemporaryArtifactKind(r.Kind), Path: r.Path, MarkerToken: r.MarkerToken,
+		State: TemporaryArtifactState(r.State), OwnerPID: r.OwnerPID, CreatedAt: r.CreatedAt,
+		LastHeartbeatAt: r.LastHeartbeatAt, ClosedAt: r.ClosedAt, QuarantinedAt: r.QuarantinedAt,
+		DeletedAt: r.DeletedAt, LastError: r.LastError, Metadata: json.RawMessage(r.Metadata),
+	}
+}
+
 func normalizeNewRun(run *MaintenanceRun) error {
 	if run == nil || run.ID == "" {
 		return validationError("run id is required")
@@ -393,7 +585,8 @@ func normalizeNewQuarantineEntry(entry *QuarantineEntry) error {
 	if entry == nil || entry.ID == "" {
 		return validationError("quarantine entry id is required")
 	}
-	if entry.ResourceType != ResourceTypeTaskWorkspace && entry.ResourceType != ResourceTypeGoCache {
+	if entry.ResourceType != ResourceTypeTaskWorkspace && entry.ResourceType != ResourceTypeGoCache &&
+		entry.ResourceType != ResourceTypeTemporaryArtifact {
 		return validationError("unknown quarantine resource type %q", entry.ResourceType)
 	}
 	if entry.State != QuarantineStateQuarantined {
@@ -423,6 +616,47 @@ func normalizeNewQuarantineEntry(entry *QuarantineEntry) error {
 	return nil
 }
 
+func normalizeNewTemporaryArtifact(artifact *TemporaryArtifact) error {
+	if artifact == nil || artifact.ID == "" {
+		return validationError("temporary artifact id is required")
+	}
+	if artifact.Kind != TemporaryArtifactKindImproveBundle && artifact.Kind != TemporaryArtifactKindHostUtility {
+		return validationError("unknown temporary artifact kind %q", artifact.Kind)
+	}
+	if artifact.State != TemporaryArtifactStateActive {
+		return validationError("new temporary artifact state must be active")
+	}
+	if artifact.MarkerToken == "" {
+		return validationError("temporary artifact marker token is required")
+	}
+	if artifact.OwnerPID <= 0 {
+		return validationError("temporary artifact owner pid must be positive")
+	}
+	var err error
+	artifact.Path, err = normalizeAbsolutePath("temporary artifact path", artifact.Path)
+	if err != nil {
+		return err
+	}
+	if artifact.CreatedAt.IsZero() {
+		artifact.CreatedAt = time.Now().UTC()
+	}
+	artifact.CreatedAt = artifact.CreatedAt.UTC()
+	artifact.LastHeartbeatAt = normalizeTimePointer(artifact.LastHeartbeatAt)
+	artifact.ClosedAt = normalizeTimePointer(artifact.ClosedAt)
+	artifact.QuarantinedAt = normalizeTimePointer(artifact.QuarantinedAt)
+	artifact.DeletedAt = normalizeTimePointer(artifact.DeletedAt)
+	artifact.Metadata = normalizeJSON(artifact.Metadata)
+	return nil
+}
+
+func normalizeTimePointer(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	normalized := value.UTC()
+	return &normalized
+}
+
 func normalizeAbsolutePath(field, path string) (string, error) {
 	if path == "" || !filepath.IsAbs(path) {
 		return "", validationError("%s must be an absolute path", field)
@@ -446,9 +680,28 @@ func validQuarantineTransition(current, next QuarantineState) bool {
 		return next == QuarantineStateRestored || next == QuarantineStateDeleted || next == QuarantineStateFailed
 	}
 	if current == QuarantineStateFailed {
-		return next == QuarantineStateRestored || next == QuarantineStateDeleted
+		return next == QuarantineStateQuarantined || next == QuarantineStateRestored || next == QuarantineStateDeleted
 	}
 	return false
+}
+
+func validTemporaryArtifactTransition(current, next TemporaryArtifactState) bool {
+	switch current {
+	case TemporaryArtifactStateActive:
+		return next == TemporaryArtifactStateClosed || next == TemporaryArtifactStateAbandoned ||
+			next == TemporaryArtifactStateFailed || next == TemporaryArtifactStateDeleted
+	case TemporaryArtifactStateClosed, TemporaryArtifactStateAbandoned:
+		return next == TemporaryArtifactStateQuarantined || next == TemporaryArtifactStateFailed ||
+			next == TemporaryArtifactStateDeleted
+	case TemporaryArtifactStateFailed:
+		return next == TemporaryArtifactStateClosed || next == TemporaryArtifactStateQuarantined ||
+			next == TemporaryArtifactStateDeleted
+	case TemporaryArtifactStateQuarantined:
+		return next == TemporaryArtifactStateClosed || next == TemporaryArtifactStateDeleted ||
+			next == TemporaryArtifactStateFailed
+	default:
+		return false
+	}
 }
 
 func isTerminalRunState(state RunState) bool {

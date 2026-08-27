@@ -30,21 +30,17 @@ func (r *SpritesExecutor) uploadCredentials(
 	// Run auth setup scripts for env-type methods (e.g., Claude Code credential files)
 	r.runAuthSetupScripts(ctx, sprite, req, catalog, onOutput)
 
-	credsJSON, _ := req.Metadata["remote_credentials"].(string)
-	if credsJSON == "" {
-		return nil
-	}
-
 	var selectedMethodIDs []string
-	if err := json.Unmarshal([]byte(credsJSON), &selectedMethodIDs); err != nil {
-		return fmt.Errorf("failed to parse remote_credentials: %w", err)
+	if credsJSON, _ := req.Metadata["remote_credentials"].(string); credsJSON != "" {
+		if err := json.Unmarshal([]byte(credsJSON), &selectedMethodIDs); err != nil {
+			return fmt.Errorf("failed to parse remote_credentials: %w", err)
+		}
+		// Ignore the retired host-global gh token method in stale profiles. GitHub
+		// automation credentials are supplied by the workspace credential broker.
+		selectedMethodIDs = r.resolveGHToken(selectedMethodIDs)
 	}
-
-	// Ignore the retired host-global gh token method in stale profiles. GitHub
-	// automation credentials are supplied by the workspace credential broker.
-	selectedMethodIDs = r.resolveGHToken(selectedMethodIDs)
-
-	if len(selectedMethodIDs) == 0 {
+	selectedBundles := selectedPortableConfigBundleIDs(req.Metadata)
+	if len(selectedMethodIDs) == 0 && len(selectedBundles) == 0 {
 		return nil
 	}
 
@@ -60,10 +56,6 @@ func (r *SpritesExecutor) uploadCredentials(
 		}
 		fileMethods = append(fileMethods, method)
 	}
-	if len(fileMethods) == 0 {
-		return nil
-	}
-
 	stepCtx, cancel := context.WithTimeout(ctx, spriteUploadTimeout)
 	defer cancel()
 
@@ -72,7 +64,18 @@ func (r *SpritesExecutor) uploadCredentials(
 	if err != nil {
 		return err
 	}
-	return UploadCredentialFiles(stepCtx, uploader, fileMethods, targetHomeDir, r.logger)
+	var uploadErr error
+	if len(fileMethods) > 0 {
+		uploadErr = UploadCredentialFiles(stepCtx, uploader, fileMethods, targetHomeDir, r.logger)
+		if uploadErr != nil {
+			r.logger.Warn("sprites executor: credential files failed; continuing with configuration bundles", zap.Error(uploadErr))
+		}
+	}
+	if len(selectedBundles) > 0 && req.AgentConfig != nil {
+		warnings := UploadPortableConfigBundles(stepCtx, uploader, req.AgentConfig, selectedBundles, targetHomeDir, r.logger)
+		reportPortableConfigWarnings(req.OnProgress, warnings)
+	}
+	return uploadErr
 }
 
 // runAuthSetupScripts executes setup scripts for env-type auth methods whose env var
@@ -100,7 +103,7 @@ func (r *SpritesExecutor) runAuthSetupScripts(
 
 			stepCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			cmd := sprite.CommandContext(stepCtx, "sh", "-c", method.SetupScript)
-			cmd.Env = r.buildSpriteEnv(req.Env)
+			cmd.Env = r.buildSpriteEnv(req.Env, req.AgentctlStartupConfig)
 			out, err := cmd.CombinedOutput()
 			cancel()
 

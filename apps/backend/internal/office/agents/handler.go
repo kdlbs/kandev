@@ -1,7 +1,9 @@
 package agents
 
 import (
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 
@@ -18,6 +20,12 @@ const (
 	ctxKeyAgentClaims = "agent_claims"
 	ctxKeyAgentCaller = "agent_caller"
 )
+
+// maxUpdateAgentBodyBytes bounds the update-agent request body via
+// http.MaxBytesReader, writing the 413 response below when exceeded.
+// UpdateAgentRequest carries only short scalar fields plus a routing
+// override blob, so this is generous relative to any legitimate payload.
+const maxUpdateAgentBodyBytes = 64 * 1024
 
 // Handler provides HTTP handlers for agent routes.
 type Handler struct {
@@ -99,6 +107,23 @@ func CallerFromContext(c *gin.Context) *models.AgentInstance {
 	return agentCallerFromCtx(c)
 }
 
+// ClaimsFromContext exposes the validated agent JWT claims (or nil for UI
+// requests) to other office packages, without depending on the agents
+// package's internal context-key constants. The workspace claim is what
+// AgentAuthMiddleware compares against `:wsId`; the HTTP scope guard needs
+// the same value to confine a token to its own workspace on by-ID routes,
+// where there is no `:wsId` to compare. The task claim is the only source
+// of caller task identity, used by callers such as the dashboard comment
+// read guard to authorize an agent against the target task.
+func ClaimsFromContext(c *gin.Context) *AgentClaims {
+	val, ok := c.Get(ctxKeyAgentClaims)
+	if !ok {
+		return nil
+	}
+	claims, _ := val.(*AgentClaims)
+	return claims
+}
+
 // -- Agent handlers --
 
 func (h *Handler) listAgents(c *gin.Context) {
@@ -120,7 +145,7 @@ func (h *Handler) listAgents(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, AgentListResponse{Agents: agents})
+	c.JSON(http.StatusOK, AgentListResponse{Agents: newAgentResponseBodies(agents)})
 }
 
 func (h *Handler) createAgent(c *gin.Context) {
@@ -158,10 +183,14 @@ func (h *Handler) createAgent(c *gin.Context) {
 		}
 	}
 	if err := h.svc.CreateAgentInstanceWithCaller(c.Request.Context(), agent, agentCallerFromCtx(c), req.Reason); err != nil {
+		if code := agentValidationErrorCode(err); code != "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "code": code})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusCreated, AgentResponse{Agent: agent})
+	c.JSON(http.StatusCreated, AgentResponse{Agent: newAgentResponseBody(agent)})
 }
 
 func (h *Handler) getAgent(c *gin.Context) {
@@ -170,7 +199,7 @@ func (h *Handler) getAgent(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, AgentResponse{Agent: agent})
+	c.JSON(http.StatusOK, AgentResponse{Agent: newAgentResponseBody(agent)})
 }
 
 func (h *Handler) updateAgent(c *gin.Context) {
@@ -187,9 +216,8 @@ func (h *Handler) updateAgent(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
-	var req UpdateAgentRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	req, ok := decodeUpdateAgentRequest(c, agent.Role != "")
+	if !ok {
 		return
 	}
 	if req.Permissions != nil {
@@ -208,12 +236,66 @@ func (h *Handler) updateAgent(c *gin.Context) {
 		})
 		return
 	}
-	applyAgentUpdates(agent, &req)
+	applyAgentUpdates(agent, req)
 	if err := h.svc.UpdateAgentInstance(ctx, agent); err != nil {
+		if code := agentValidationErrorCode(err); code != "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "code": code})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, AgentResponse{Agent: agent})
+	c.JSON(http.StatusOK, AgentResponse{Agent: newAgentResponseBody(agent)})
+}
+
+// decodeUpdateAgentRequest buffers the body once so the handler can inspect
+// raw keys and then decode the typed request. Office identities reject the
+// ignored model key before the request reaches the normal update path.
+func decodeUpdateAgentRequest(c *gin.Context, officeAgent bool) (*UpdateAgentRequest, bool) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxUpdateAgentBodyBytes)
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		var maxBytesError *http.MaxBytesError
+		if errors.As(err, &maxBytesError) {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
+			return nil, false
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return nil, false
+	}
+	if officeAgent {
+		hasModel, err := requestBodyHasKey(body, "model")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return nil, false
+		}
+		if hasModel {
+			respondRoutingValidation(c, &routing.ValidationError{
+				Field: "model",
+				Message: "model no longer selects a launched model for an Office agent; " +
+					"update the agent routing override or workspace tier profiles",
+			})
+			return nil, false
+		}
+	}
+	var req UpdateAgentRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return nil, false
+	}
+	return &req, true
+}
+
+// requestBodyHasKey reports whether the top-level JSON object in body
+// carries key, without caring about its value — {"model":"x"},
+// {"model":""}, and {"model":null} must all be detected identically.
+func requestBodyHasKey(body []byte, key string) (bool, error) {
+	raw := map[string]json.RawMessage{}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return false, err
+	}
+	_, ok := raw[key]
+	return ok, nil
 }
 
 // applyRoutingOverride validates the override blob and writes it onto
@@ -263,6 +345,23 @@ func respondRoutingValidation(c *gin.Context, err error) {
 	c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 }
 
+// agentValidationErrorCode maps validation sentinels to stable API codes.
+// Clients can translate or handle these codes without matching backend text.
+func agentValidationErrorCode(err error) string {
+	switch {
+	case errors.Is(err, ErrAgentCEOReportsTo):
+		return "agent_ceo_reports_to"
+	case errors.Is(err, ErrAgentReportsToInvalid):
+		return "agent_reports_to_invalid"
+	case errors.Is(err, ErrAgentReportsToSelf):
+		return "agent_reports_to_self"
+	case errors.Is(err, ErrAgentReportsToCycle):
+		return "agent_reports_to_cycle"
+	default:
+		return ""
+	}
+}
+
 func (h *Handler) deleteAgent(c *gin.Context) {
 	if caller := agentCallerFromCtx(c); caller != nil {
 		if !isAdminRole(caller.Role) {
@@ -297,7 +396,7 @@ func (h *Handler) updateAgentStatus(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, AgentResponse{Agent: agent})
+	c.JSON(http.StatusOK, AgentResponse{Agent: newAgentResponseBody(agent)})
 }
 
 // -- Instruction handlers --

@@ -73,6 +73,23 @@ describe("resolvePRReviewRepositoryIdentity", () => {
     ).toBe(REPOSITORY_NAME);
   });
 
+  it("does not replace the primary repository with the task workspace slug", () => {
+    expect(
+      resolvePRReviewRepositoryIdentity({
+        pr: primaryPR,
+        workspaceRepositoryName: REPOSITORY_NAME,
+        taskRepositories,
+        worktrees: [
+          {
+            ...worktrees[0],
+            path: "/tasks/example/multi-pr-review-e2e_abcd1234",
+          },
+          worktrees[1],
+        ],
+      }),
+    ).toBe(REPOSITORY_NAME);
+  });
+
   it("derives the sibling identity while live worktree metadata is still hydrating", () => {
     expect(
       resolvePRReviewRepositoryIdentity({

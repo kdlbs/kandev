@@ -1,16 +1,16 @@
 "use client";
 
 import { useEffect, useState, use } from "react";
-import Link from "@/components/routing/app-link";
 import { useRouter } from "@/lib/routing/client-router";
-import { IconChevronRight, IconTrash } from "@tabler/icons-react";
+import { IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
 import { toast } from "@/lib/toast/sonner";
 import { useAppStore } from "@/components/state-provider";
+import { selectOfficeProjects } from "@/lib/state/slices/office/selectors";
 import { getProject, deleteProject } from "@/lib/api/domains/office-api";
 import type { Project } from "@/lib/state/slices/office/types";
-import { OfficeTopbarPortal } from "../../components/office-topbar-portal";
+import { useOfficeTopbar } from "../../components/office-topbar-context";
 import { ProjectHeader } from "./project-header";
 import { ProjectReposSection } from "./project-repos-section";
 import { ProjectExecutorSection } from "./project-executor-section";
@@ -26,16 +26,22 @@ export default function ProjectDetailPage({ params }: PageProps) {
   const { id } = use(params);
   const router = useRouter();
   const removeProject = useAppStore((s) => s.removeProject);
-  const storeProject = useAppStore((s) => s.office.projects.find((p) => p.id === id));
+  const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
+  const storeProject = useAppStore((s) => selectOfficeProjects(s).find((p) => p.id === id));
   const [fetchedProject, setFetchedProject] = useState<Project | null>(null);
-  const project = storeProject ?? fetchedProject;
+  const project =
+    storeProject ?? (fetchedProject?.workspaceId === activeWorkspaceId ? fetchedProject : null);
 
   useEffect(() => {
-    if (storeProject) return;
+    setFetchedProject(null);
+  }, [activeWorkspaceId, id]);
+
+  useEffect(() => {
+    if (!activeWorkspaceId || storeProject) return;
     let cancelled = false;
     getProject(id)
       .then((res) => {
-        if (!cancelled && res) setFetchedProject(res as unknown as Project);
+        if (!cancelled && res.workspaceId === activeWorkspaceId) setFetchedProject(res);
       })
       .catch((err) => {
         if (!cancelled) {
@@ -45,13 +51,22 @@ export default function ProjectDetailPage({ params }: PageProps) {
     return () => {
       cancelled = true;
     };
-  }, [id, storeProject]);
+  }, [activeWorkspaceId, id, storeProject, t]);
+
+  useOfficeTopbar(
+    project
+      ? {
+          title: project.name,
+          parents: [{ label: t("office:projects"), href: "/office/projects" }],
+        }
+      : null,
+  );
 
   const handleDelete = async () => {
     if (!project) return;
     try {
       await deleteProject(project.id);
-      removeProject(project.id);
+      removeProject(project.workspaceId, project.id);
       toast.success(t("office:projectDeleted"));
       router.push("/office/projects");
     } catch (err) {
@@ -68,42 +83,29 @@ export default function ProjectDetailPage({ params }: PageProps) {
   }
 
   return (
-    <>
-      <OfficeTopbarPortal>
-        <Link
-          href="/office/projects"
-          className="text-sm text-muted-foreground hover:text-foreground cursor-pointer"
-        >
-          {t("office:projects")}
-        </Link>
-        <IconChevronRight className="h-3.5 w-3.5 text-muted-foreground/60" />
-        <span className="text-sm font-medium truncate">{project.name}</span>
-      </OfficeTopbarPortal>
+    <div className="p-6 max-w-3xl space-y-6">
+      <ProjectHeader project={project} />
 
-      <div className="p-6 max-w-3xl space-y-6">
-        <ProjectHeader project={project} />
+      <Separator />
 
-        <Separator />
+      <ProjectReposSection project={project} />
 
-        <ProjectReposSection project={project} />
+      <Separator />
 
-        <Separator />
+      <ProjectExecutorSection project={project} />
 
-        <ProjectExecutorSection project={project} />
+      <Separator />
 
-        <Separator />
+      <ProjectTasksSection projectId={project.id} workspaceId={project.workspaceId} />
 
-        <ProjectTasksSection projectId={project.id} />
+      <Separator />
 
-        <Separator />
-
-        <div className="flex justify-end">
-          <Button variant="destructive" size="sm" onClick={handleDelete} className="cursor-pointer">
-            <IconTrash className="h-4 w-4 mr-1" />
-            {t("office:deleteProject")}
-          </Button>
-        </div>
+      <div className="flex justify-end">
+        <Button variant="destructive" size="sm" onClick={handleDelete} className="cursor-pointer">
+          <IconTrash className="h-4 w-4 mr-1" />
+          {t("office:deleteProject")}
+        </Button>
       </div>
-    </>
+    </div>
   );
 }

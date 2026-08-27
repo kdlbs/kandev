@@ -1,6 +1,7 @@
 package worktree
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -13,6 +14,7 @@ type SyncProgressStatus string
 const (
 	SyncProgressRunning   SyncProgressStatus = "running"
 	SyncProgressCompleted SyncProgressStatus = "completed"
+	SyncProgressFailed    SyncProgressStatus = "failed"
 )
 
 // SyncProgressEvent reports pre-worktree base-branch synchronization progress.
@@ -38,12 +40,22 @@ type Worktree struct {
 	// Multiple worktrees can exist for the same task (one per agent session).
 	TaskID string `json:"task_id"`
 
+	// TaskDirName is the stable task-root identity used by filesystem
+	// ownership checks. It remains unchanged when a task environment changes
+	// owners, so it is intentionally not part of the public JSON contract.
+	TaskDirName string `json:"-"`
+
+	// TaskEnvironmentID is the task environment that owns this worktree.
+	// Physical worktree records live on task_environment_repos; sessions
+	// reference the environment through task_sessions.task_environment_id.
+	TaskEnvironmentID string `json:"task_environment_id,omitempty"`
+
 	// RepositoryID is the ID of the repository this worktree belongs to.
 	RepositoryID string `json:"repository_id"`
 
 	// BranchSlug, when set, disambiguates two worktrees that share a
 	// (SessionID, RepositoryID) pair on different branches. Stored on
-	// task_session_worktrees so reuse lookups can scope by branch and not
+	// task_environment_repos so reuse lookups can scope by branch and not
 	// collapse multi-branch tasks down to a single worktree.
 	BranchSlug string `json:"branch_slug,omitempty"`
 
@@ -127,6 +139,19 @@ type CreateRequest struct {
 	// SessionID is the task session identifier (required for persistence).
 	SessionID string
 
+	// TaskEnvironmentID, when known, is the environment that owns the
+	// worktree. The store falls back to resolving it from SessionID. During
+	// initial launch materialization the environment does not exist yet and
+	// persistence is deferred to the executor's environment transaction.
+	TaskEnvironmentID string
+
+	// ReuseRequired makes this an attach-only request. The supplied WorktreeID
+	// must identify an active, valid worktree owned by this task/environment.
+	// It is deliberately distinct from ordinary resume/recovery: no lookup
+	// miss, invalid directory, or mismatched canonical record may create or
+	// recreate a worktree in this mode.
+	ReuseRequired bool
+
 	// TaskTitle is the human-readable task title (optional).
 	// If provided, it will be used to generate semantic worktree/branch names.
 	// The title is sanitized and truncated to 20 characters.
@@ -164,7 +189,8 @@ type CreateRequest struct {
 
 	// RemoteContribution identifies an existing provider contribution whose
 	// source branch must be fetched from its own remote and verified by SHA.
-	RemoteContribution *models.RemoteContribution
+	RemoteContribution      *models.RemoteContribution
+	ContributionDestination *models.ContributionDestination
 
 	// WorktreeBranchPrefix is the prefix to use for the worktree branch name.
 	// If empty, the default prefix is used.
@@ -179,6 +205,17 @@ type CreateRequest struct {
 
 	// PullBeforeWorktree indicates whether to pull from remote before creating the worktree.
 	PullBeforeWorktree bool
+
+	// RemoteSyncHandled means the caller already refreshed origin through an
+	// authenticated provider seam. Worktree creation must use local/remote-
+	// tracking refs only and must not perform another network operation.
+	RemoteSyncHandled bool
+
+	// RefreshRepository is an optional provider-authenticated refresh deferred
+	// until this request needs to materialize or recreate a worktree. A valid
+	// reusable worktree must bypass it. On success, Create marks the refresh as
+	// handled before selecting local refs.
+	RefreshRepository func(context.Context) error
 
 	// WorktreeID is the ID of an existing worktree to reuse (optional).
 	// If provided and valid, the existing worktree is returned instead of creating a new one.
@@ -206,7 +243,7 @@ type CreateRequest struct {
 	BranchSlug string
 
 	// BranchIdentitySlug, when non-empty, is the stable branch key used for
-	// reuse lookup, cache keys, and persisted task_session_worktrees rows. It
+	// reuse lookup, cache keys, and persisted task_environment_repos rows. It
 	// may differ from BranchSlug when the primary branch keeps the flat path.
 	BranchIdentitySlug string
 
@@ -242,6 +279,11 @@ func (r *CreateRequest) Validate() error {
 	}
 	if err := r.validateRemoteContribution(); err != nil {
 		return err
+	}
+	if r.ContributionDestination != nil {
+		if err := r.ContributionDestination.Validate(); err != nil {
+			return fmt.Errorf("invalid contribution destination: %w", err)
+		}
 	}
 	if r.BaseBranch == "" {
 		// Defence-in-depth: prefer the explicit FallbackBaseBranch (typically

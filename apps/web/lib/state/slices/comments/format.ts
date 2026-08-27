@@ -13,6 +13,7 @@ import {
   isPRFeedbackComment,
   isWalkthroughComment,
 } from "./types";
+import { t } from "@/lib/i18n";
 
 /**
  * Format diff review comments as human-readable markdown for sending to agent.
@@ -109,7 +110,7 @@ export function formatWalkthroughCommentsAsMarkdown(comments: WalkthroughComment
   for (const c of comments) {
     const lineRange = c.startLine === c.endLine ? `${c.startLine}` : `${c.startLine}-${c.endLine}`;
     const repoPrefix = c.repo ? `${c.repo}/` : "";
-    const title = c.walkthroughTitle || "Walkthrough";
+    const title = c.walkthroughTitle || t("common:walkthrough");
 
     lines.push(`**${title} · Step ${c.stepIndex + 1} / ${c.stepCount}**`);
     lines.push(`**${repoPrefix}${c.filePath}:${lineRange}**`);

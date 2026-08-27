@@ -29,3 +29,5 @@ export type AutomationReference = {
   name: string;
   workspace_id: string;
 };
+
+export type UtilityAgentReference = { id: string; name: string };

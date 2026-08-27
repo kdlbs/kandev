@@ -60,18 +60,17 @@ test.describe("Office provider routing — blocked", () => {
     // 40s tolerates heavy parallel-suite load — the dispatcher walks
     // each provider in turn and only flips the blocked_status after
     // every routable provider has parked.
-    const deadline = Date.now() + 40_000;
-    let blockedStatus = "";
-    while (Date.now() < deadline) {
-      const runs = (await officeApi.listRuns(officeSeed.workspaceId)) as {
-        runs?: Array<{ id: string; task_id?: string; routing_blocked_status?: string }>;
-      };
-      const run = (runs.runs ?? []).find((r) => r.task_id === task.id);
-      blockedStatus = run?.routing_blocked_status ?? "";
-      if (blockedStatus === "blocked_provider_action_required") break;
-      await new Promise((r) => setTimeout(r, 500));
-    }
-    expect(blockedStatus).toBe("blocked_provider_action_required");
+    await expect
+      .poll(
+        async () => {
+          const runs = (await officeApi.listRuns(officeSeed.workspaceId)) as {
+            runs?: Array<{ id: string; task_id?: string; routing_blocked_status?: string }>;
+          };
+          return (runs.runs ?? []).find((r) => r.task_id === task.id)?.routing_blocked_status ?? "";
+        },
+        { timeout: 40_000, message: "run never reached blocked_provider_action_required" },
+      )
+      .toBe("blocked_provider_action_required");
 
     const inbox = (await officeApi.getInbox(officeSeed.workspaceId)) as {
       items?: Array<{ type?: string; provider_id?: string }>;

@@ -168,7 +168,7 @@ func executionFromAgentExecution(exec *lifecycle.AgentExecution) *Execution {
 		ExitCode:       exec.ExitCode,
 		ErrorMessage:   exec.ErrorMessage,
 		ACPSessionID:   exec.ACPSessionID,
-		Metadata:       exec.Metadata,
+		Metadata:       exec.MetadataSnapshot(),
 	}
 	return out
 }

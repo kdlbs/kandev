@@ -35,7 +35,11 @@ const (
 
 const maxFileSize = 10 * 1024 * 1024 // 10MB
 
-var errPathTraversal = errors.New("path traversal detected")
+var (
+	// ErrFileNotFound identifies a workspace file that does not exist.
+	ErrFileNotFound  = errors.New("file not found")
+	errPathTraversal = errors.New("path traversal detected")
+)
 
 // workspaceMutationBarrier provides a deterministic synchronization point for
 // filesystem-race regression tests. It is unset in production.
@@ -81,8 +85,9 @@ func (wt *WorkspaceTracker) getFileListClass(ctx context.Context, class subproc.
 	// --cached: include tracked files
 	// --others: include untracked files
 	// --exclude-standard: respect .gitignore
+	// --stage: expose tracked file modes so submodule Gitlinks can be excluded
 	out, runErr, execCtxErr := subproc.RunGitOutputAfterAcquire(ctx, class, gitCommandTimeout, func(execCtx context.Context) *exec.Cmd {
-		cmd := subproc.NewGitCommand(execCtx, "ls-files", "--cached", "--others", "--exclude-standard")
+		cmd := subproc.NewGitCommand(execCtx, "ls-files", "--cached", "--others", "--exclude-standard", "--stage")
 		cmd.Dir = wt.workDir
 		return cmd
 	})
@@ -94,6 +99,12 @@ func (wt *WorkspaceTracker) getFileListClass(ctx context.Context, class subproc.
 	lines := strings.Split(string(out), "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
+		if metadata, path, tracked := strings.Cut(line, "\t"); tracked {
+			if strings.HasPrefix(metadata, "160000 ") {
+				continue
+			}
+			line = strings.TrimSpace(path)
+		}
 		if line == "" || isRootOwnershipMarkerPath(line) {
 			continue
 		}
@@ -406,7 +417,7 @@ func (wt *WorkspaceTracker) readResolvedPath(reqPath string) (string, int64, boo
 			// original error so they aren't mislabeled as missing.
 			if cleaned := filepath.Clean(reqPath); filepath.IsAbs(cleaned) {
 				if _, statErr := os.Stat(cleaned); errors.Is(statErr, fs.ErrNotExist) {
-					return "", 0, false, "", fmt.Errorf("file not found: %w", statErr)
+					return "", 0, false, "", fmt.Errorf("%w: %w", ErrFileNotFound, statErr)
 				}
 			}
 			return "", 0, false, "", err
@@ -450,7 +461,10 @@ func readFileContent(safePath string) (string, int64, bool, error) {
 	// codeql[go/path-injection] safePath is canonical containment-validated by resolveSafePath; read-only external paths reach here only through absoluteReadPath validation.
 	info, err := os.Stat(safePath)
 	if err != nil {
-		return "", 0, false, fmt.Errorf("file not found: %w", err)
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", 0, false, fmt.Errorf("%w: %w", ErrFileNotFound, err)
+		}
+		return "", 0, false, fmt.Errorf("failed to stat file: %w", err)
 	}
 
 	if !info.Mode().IsRegular() {
@@ -1010,7 +1024,7 @@ func (m *Manager) SearchWorkspaceFileResults(query string, limit int) []types.Fi
 	}
 
 	candidates := make([]fileSearchCandidate, 0)
-	if root != nil && root.RepositoryName() != "" {
+	if root != nil && root.gitIndexPath != "" {
 		candidates = appendTrackerFileSearchCandidates(candidates, root)
 	}
 	for _, tracker := range repositories {

@@ -145,7 +145,7 @@ func TestResolveSessionPath_WithWorktree(t *testing.T) {
 	svc := &Service{}
 	session := &taskmodels.TaskSession{
 		ID: "session-1",
-		Worktrees: []*taskmodels.TaskSessionWorktree{
+		Worktrees: []*taskmodels.TaskEnvironmentRepo{
 			{WorktreePath: "/path/to/worktree"},
 		},
 	}
@@ -162,7 +162,7 @@ func TestResolveSessionPath_EmptyWorktreePath(t *testing.T) {
 	svc := &Service{}
 	session := &taskmodels.TaskSession{
 		ID: "session-1",
-		Worktrees: []*taskmodels.TaskSessionWorktree{
+		Worktrees: []*taskmodels.TaskEnvironmentRepo{
 			{WorktreePath: ""},
 		},
 	}
@@ -176,7 +176,7 @@ func TestResolveSessionPath_SelectsWorktreeByID(t *testing.T) {
 	svc := &Service{}
 	session := &taskmodels.TaskSession{
 		ID: "session-1",
-		Worktrees: []*taskmodels.TaskSessionWorktree{
+		Worktrees: []*taskmodels.TaskEnvironmentRepo{
 			{ID: "assoc-1", WorktreeID: "wt-1", WorktreePath: "/path/to/repo-a"},
 			{ID: "assoc-2", WorktreeID: "wt-2", WorktreePath: "/path/to/repo-b"},
 		},
@@ -211,7 +211,7 @@ func TestResolveSessionPath_SelectedWorktreeEmptyPath(t *testing.T) {
 	svc := &Service{}
 	session := &taskmodels.TaskSession{
 		ID: "session-1",
-		Worktrees: []*taskmodels.TaskSessionWorktree{
+		Worktrees: []*taskmodels.TaskEnvironmentRepo{
 			{ID: "assoc-1", WorktreeID: "wt-1", WorktreePath: "/path/to/repo-a"},
 			{ID: "assoc-2", WorktreeID: "wt-2", WorktreePath: ""},
 		},

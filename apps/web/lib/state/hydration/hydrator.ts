@@ -1,10 +1,19 @@
 import type { Draft } from "immer";
 import type { AppState, HydrationState } from "../store";
+import type { KanbanState } from "../slices/kanban/types";
 import { migrateSidebarViewDraft, migrateView } from "../slices/ui/ui-slice";
 import {
-  applyStoredQuickChatNames,
+  mergeHydratedQuickChatSessions,
   reconcileQuickTerminalTabs,
 } from "@/lib/state/slices/ui/quick-chat-sync";
+import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
+import {
+  mergeTurnRows,
+  parseTurnTimestamp,
+  reconcileActiveTurnAfterHydrationDraft,
+  seedSettledSessionBoundaries,
+} from "@/lib/state/slices/session/turn-actions";
+import { preserveOmittedExecutorFields } from "@/lib/kanban/map-task";
 import { deepMerge, mergeSessionMap, mergeLoadingState } from "./merge-strategies";
 
 /**
@@ -28,6 +37,8 @@ function mergeWithLoading(draft: any, source: any | undefined): void {
 }
 
 /** Merge kanban tasks by ID, keeping the version with the newer updatedAt timestamp. */
+type KanbanTask = KanbanState["tasks"][number];
+
 function mergeKanbanTasks(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   draft: Draft<any>,
@@ -35,20 +46,60 @@ function mergeKanbanTasks(
   source: any[] | undefined,
 ): void {
   if (!source || source.length === 0) return;
-  const draftTasks = draft.tasks as Array<{ id: string; updatedAt?: string }>;
-  const existingById = new Map(draftTasks.map((t) => [t.id, t]));
+  const draftTasks = draft.tasks as Draft<KanbanTask>[];
+  const existingById = new Map<string, Draft<KanbanTask>>(
+    draftTasks.map((task) => [task.id, task]),
+  );
 
   for (const incoming of source) {
     const existing = existingById.get(incoming.id);
     if (!existing) {
-      draftTasks.push(incoming);
+      draftTasks.push({ ...incoming });
     } else {
       const existingTime = existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
       const incomingTime = incoming.updatedAt ? new Date(incoming.updatedAt).getTime() : 0;
+      const idx = draftTasks.findIndex((t) => t.id === incoming.id);
       if (incomingTime >= existingTime) {
-        const idx = draftTasks.findIndex((t) => t.id === incoming.id);
-        if (idx >= 0) draftTasks[idx] = incoming;
+        if (idx >= 0) {
+          const mergedIncoming = { ...incoming } as KanbanTask;
+          preserveOmittedExecutorFields(mergedIncoming, existing);
+          draftTasks[idx] = mergedIncoming;
+        }
+      } else if (idx >= 0) {
+        backfillServerDerivedFields(draftTasks[idx], incoming);
       }
+    }
+  }
+}
+
+/**
+ * Fields the server derives per read and lightweight WS events omit.
+ *
+ * A task.updated that arrives before hydration inserts a copy with a newer
+ * `updatedAt` and no dependency projection, so the timestamp rule above would
+ * keep that copy and the boot payload's edges would be lost for the rest of the
+ * session — which is exactly how the dependency chip silently vanished on any
+ * task whose agent had produced activity. Backfilling only fills gaps, so a real
+ * WS-side value (including an explicit "no edges") still wins.
+ */
+const SERVER_DERIVED_TASK_FIELDS = [
+  "blocked",
+  "blockedReason",
+  "dependsOn",
+  "blocks",
+  "startWhenUnblocked",
+] as const;
+
+/** Copy server-derived task fields (blocked and dependency edges) from source into target only where target lacks a value, so real WS values still win. */
+function backfillServerDerivedFields(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  target: any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  source: any,
+): void {
+  for (const field of SERVER_DERIVED_TASK_FIELDS) {
+    if (target[field] === undefined && source[field] !== undefined) {
+      target[field] = source[field];
     }
   }
 }
@@ -66,6 +117,8 @@ function hydrateKanbanAndWorkspace(draft: Draft<AppState>, state: HydrationState
   if (state.tasks) deepMerge(draft.tasks, state.tasks);
   if (state.workspaces) deepMerge(draft.workspaces, state.workspaces);
   if (state.repositories) deepMerge(draft.repositories, state.repositories);
+  if (state.repositoryBranchPolicies)
+    deepMerge(draft.repositoryBranchPolicies, state.repositoryBranchPolicies);
   if (state.repositoryBranches) deepMerge(draft.repositoryBranches, state.repositoryBranches);
 }
 
@@ -81,12 +134,22 @@ function hydrateSettings(draft: Draft<AppState>, state: HydrationState): void {
   mergeWithLoading(draft.notificationProviders, state.notificationProviders);
   if (state.settingsData) deepMerge(draft.settingsData, state.settingsData);
   if (state.sleepInhibition) deepMerge(draft.sleepInhibition, state.sleepInhibition);
-  if (state.userSettings && !draft.userSettings.loaded) {
+  if (state.userSettings && shouldHydrateUserSettings(draft.userSettings, state.userSettings)) {
     deepMerge(draft.userSettings, state.userSettings);
     bridgeSidebarViewsFromUserSettings(draft, state.userSettings);
   }
 }
 
+/** Whether the incoming user-settings revision should win over the current draft. */
+function shouldHydrateUserSettings(
+  current: Draft<AppState["userSettings"]>,
+  incoming: Partial<AppState["userSettings"]>,
+): boolean {
+  const order = compareUserSettingsRevisions(incoming.revision, current.revision);
+  return order === null ? !current.loaded : order >= 0;
+}
+
+/** Applies the server-side sidebar view preferences onto the draft (normalizing legacy view shapes). */
 function bridgeSidebarViewsFromUserSettings(
   draft: Draft<AppState>,
   userSettings: Partial<AppState["userSettings"]>,
@@ -120,6 +183,175 @@ function bridgeSidebarViewsFromUserSettings(
   }
 }
 
+type HydratedTurnMarkerContext = {
+  draft: Draft<AppState>;
+  turns: NonNullable<HydrationState["turns"]>;
+  activeSessionId: string | null;
+  forceMergeSessionId: string | null;
+  preMergeActiveSessions: Set<string>;
+  reconciledTurnSessions: Set<string>;
+};
+
+/**
+ * A server snapshot may still name a turn that an authoritative boundary
+ * (source adoption / settled-session clear) retired client-side. Never let a
+ * force-merge resurrect its marker. Only sweeps markers this merge actually
+ * INSTALLED (mirroring mergeSessionMap's write predicate): the protected
+ * active session's entries are skipped by the merge, so its live marker must
+ * not be cleared, pre-existing non-force-merged markers are the client's
+ * live state (not the snapshot's), and sessions whose markers were already
+ * derived from merged rows are skipped.
+ */
+function clearHydratedRetiredActiveMarkers({
+  draft,
+  turns,
+  activeSessionId,
+  forceMergeSessionId,
+  preMergeActiveSessions,
+  reconciledTurnSessions,
+}: HydratedTurnMarkerContext): void {
+  for (const sessionId in turns.activeBySession) {
+    const shouldForceMerge = forceMergeSessionId && sessionId === forceMergeSessionId;
+    const skippedAsActive = !shouldForceMerge && sessionId === activeSessionId;
+    if (skippedAsActive) continue;
+    if (reconciledTurnSessions.has(sessionId)) continue;
+    if (!shouldForceMerge && preMergeActiveSessions.has(sessionId)) continue;
+    const hydrated = draft.turns.activeBySession[sessionId];
+    if (!hydrated) continue;
+    const boundary = parseTurnTimestamp(draft.turns.settledBoundaryBySession[sessionId]);
+    if (boundary === null) continue;
+    const hydratedTurn = turns.bySession?.[sessionId]?.find((turn) => turn.id === hydrated);
+    const started = parseTurnTimestamp(hydratedTurn?.started_at);
+    if (started !== null && started <= boundary) {
+      draft.turns.activeBySession[sessionId] = null;
+    }
+  }
+}
+
+/**
+ * Marks the sessions whose turn lists this merge actually installed as fully
+ * loaded. The hydrated lists are complete server-side snapshots; the marker
+ * keeps turn-derived UI from re-fetching or mistaking WS-seeded live turns
+ * for the full history. Membership must be captured BEFORE the merge (the
+ * merge writes the key, which would otherwise make every session look
+ * pre-existing), and the merge's skip-as-active predicate must be mirrored
+ * (active sessions keep their live state and marker).
+ */
+function mergeHydratedTurns(
+  draft: Draft<AppState>,
+  turns: NonNullable<HydrationState["turns"]>,
+  activeSessionId: string | null,
+  forceMergeSessionId: string | null,
+): Set<string> {
+  const reconciledTurnSessions = new Set<string>();
+  const preMergeActiveSessions = new Set(Object.keys(draft.turns.activeBySession));
+  for (const [sessionId, incoming] of Object.entries(turns.bySession ?? {})) {
+    const shouldForceMerge = forceMergeSessionId && sessionId === forceMergeSessionId;
+    const skippedAsActive = !shouldForceMerge && sessionId === activeSessionId;
+    if (skippedAsActive) continue;
+
+    const target = draft.turns.bySession[sessionId];
+    // Preserve an existing non-active session's live list. Navigation uses the
+    // force flag when it owns the refresh; background hydration must not
+    // introduce a second merge policy for sessions already being edited.
+    if (target && !shouldForceMerge) continue;
+    if (target) {
+      mergeTurnRows(target, incoming);
+    } else {
+      draft.turns.bySession[sessionId] = [...incoming];
+    }
+    reconciledTurnSessions.add(sessionId);
+    draft.turns.loadedBySession[sessionId] = true;
+
+    // A pre-existing marker is live client state unless this is an explicit
+    // route refresh. New installs and forced refreshes derive the marker from
+    // the merged rows instead of trusting the snapshot's stale marker field.
+    if (shouldForceMerge || !preMergeActiveSessions.has(sessionId)) {
+      const hydrationEpoch = draft.turns.reconcileEpochBySession[sessionId] ?? 0;
+      reconcileActiveTurnAfterHydrationDraft(draft, sessionId, hydrationEpoch);
+    }
+  }
+  return reconciledTurnSessions;
+}
+
+/**
+ * Merges the hydrated active-turn marker map for sessions whose turn lists
+ * were NOT reconciled by mergeHydratedTurns (their markers were derived from
+ * merged rows), then sweeps retired markers. Mirrors the merge write
+ * predicate: the protected active session and pre-existing non-force markers
+ * are client live state and are kept.
+ */
+function mergeHydratedActiveTurnMarkers(
+  draft: Draft<AppState>,
+  turns: NonNullable<HydrationState["turns"]>,
+  activeSessionId: string | null,
+  forceMergeSessionId: string | null,
+  reconciledTurnSessions: Set<string>,
+): void {
+  if (!turns.activeBySession) return;
+  const preMergeActiveSessions = new Set(Object.keys(draft.turns.activeBySession));
+  for (const [sessionId, activeTurnId] of Object.entries(turns.activeBySession)) {
+    const shouldForceMerge = forceMergeSessionId && sessionId === forceMergeSessionId;
+    const skippedAsActive = !shouldForceMerge && sessionId === activeSessionId;
+    if (skippedAsActive || reconciledTurnSessions.has(sessionId)) continue;
+    if (shouldForceMerge || !(sessionId in draft.turns.activeBySession)) {
+      draft.turns.activeBySession[sessionId] = activeTurnId;
+    }
+  }
+  clearHydratedRetiredActiveMarkers({
+    draft,
+    turns,
+    activeSessionId,
+    forceMergeSessionId,
+    preMergeActiveSessions,
+    reconciledTurnSessions,
+  });
+}
+
+/**
+ * Hydrates the turns slice from the SSR payload: merges turn lists
+ * freshness-guarded (protecting live WS data), derives active markers from
+ * the merged rows, merges any remaining marker map entries, and sweeps
+ * retired markers.
+ */
+function hydrateTurnState(
+  draft: Draft<AppState>,
+  turns: NonNullable<HydrationState["turns"]>,
+  activeSessionId: string | null,
+  forceMergeSessionId: string | null,
+): void {
+  const reconciledTurnSessions = turns.bySession
+    ? mergeHydratedTurns(draft, turns, activeSessionId, forceMergeSessionId)
+    : new Set<string>();
+  mergeHydratedActiveTurnMarkers(
+    draft,
+    turns,
+    activeSessionId,
+    forceMergeSessionId,
+    reconciledTurnSessions,
+  );
+}
+
+/**
+ * Seeds settled boundaries for the hydrated task sessions (monotonically: a
+ * valid, strictly-newer candidate wins; existing boundaries and their
+ * precision are preserved otherwise). This is the production SSR path —
+ * StateHydrator hydrates the root store through hydrateState, so settled
+ * boundaries must be established here, not only in mergeInitialState, or an
+ * old/unknown delayed WS start would pass the guard before any later
+ * session-list refresh. Delegates to the shared turn-actions invariant used
+ * by the SSR/boot merge path, so the two can never drift.
+ */
+function seedHydrationSettledBoundaries(
+  draft: Draft<AppState>,
+  taskSessions: HydrationState["taskSessions"],
+): void {
+  seedSettledSessionBoundaries(
+    draft.turns.settledBoundaryBySession,
+    Object.values(taskSessions?.items ?? {}),
+  );
+}
+
 /** Hydrate session slices, protecting active sessions. */
 function hydrateSession(
   draft: Draft<AppState>,
@@ -143,23 +375,17 @@ function hydrateSession(
         forceMergeSessionId,
       );
   }
-  if (state.turns) {
-    if (state.turns.bySession)
-      mergeSessionMap(
-        draft.turns.bySession,
-        state.turns.bySession,
-        activeSessionId,
-        forceMergeSessionId,
-      );
-    if (state.turns.activeBySession)
-      mergeSessionMap(
-        draft.turns.activeBySession,
-        state.turns.activeBySession,
-        activeSessionId,
-        forceMergeSessionId,
-      );
+  // Seed settled boundaries BEFORE the marker merge/clear: the stale-marker
+  // sweep reads the boundary, so a settled SSR session must have it installed
+  // first or a pre-boundary active marker survives (see
+  // clearHydratedRetiredActiveMarkers).
+  if (state.taskSessions) {
+    deepMerge(draft.taskSessions, state.taskSessions);
+    seedHydrationSettledBoundaries(draft, state.taskSessions);
   }
-  if (state.taskSessions) deepMerge(draft.taskSessions, state.taskSessions);
+  if (state.turns) {
+    hydrateTurnState(draft, state.turns, activeSessionId, forceMergeSessionId);
+  }
   if (state.taskSessionsByTask) deepMerge(draft.taskSessionsByTask, state.taskSessionsByTask);
   if (state.sessionAgentctl) {
     mergeSessionMap(
@@ -183,7 +409,7 @@ function hydrateSessionRuntime(
   activeSessionId: string | null,
   forceMergeSessionId: string | null,
 ): void {
-  // Merge a `{ bySessionId }`-shaped slice, protecting the active session.
+  /** Merge a `{ bySessionId }`-shaped slice from hydration state into the draft, protecting the active session. */
   const mergeBySession = (key: keyof AppState & keyof HydrationState): void => {
     const source = state[key] as { bySessionId?: Record<string, unknown> } | undefined;
     if (!source) return;
@@ -232,15 +458,11 @@ export function hydrateUI(draft: Draft<AppState>, state: HydrationState): void {
   if (state.rightPanel) deepMerge(draft.rightPanel, state.rightPanel);
   if (state.diffs) deepMerge(draft.diffs, state.diffs);
   if (state.quickChat) {
-    // Merge quick chat sessions, preserving isOpen from client
+    // SSR snapshots may arrive after live WebSocket updates. Hydration only
+    // adopts previously unseen sessions and never removes or regresses tabs.
     if (state.quickChat.sessions) {
-      const previousSessions = draft.quickChat.sessions;
-      const previousActiveSessionId = draft.quickChat.activeSessionId;
-      // Local renames live in localStorage and override the SSR-provided name
-      // (which derives from the backend task title). Apply on every hydration
-      // so a renamed chat keeps its local name across reloads and tab switches.
-      draft.quickChat.sessions = applyStoredQuickChatNames(state.quickChat.sessions);
-      restoreQuickChatSelection(draft, previousSessions, previousActiveSessionId);
+      draft.quickChat = mergeHydratedQuickChatSessions(draft.quickChat, state.quickChat.sessions);
+      restoreQuickChatSelection(draft, draft.quickChat.sessions, draft.quickChat.activeSessionId);
     }
     if (state.quickChat.terminalTabs) hydrateQuickTerminalState(draft, state.quickChat);
   }
@@ -252,6 +474,7 @@ export function hydrateUI(draft: Draft<AppState>, state: HydrationState): void {
   }
 }
 
+/** Merge SSR quick-chat terminal tabs per workspace, restoring the active and last-used terminal tab when they still exist. */
 function hydrateQuickTerminalState(
   draft: Draft<AppState>,
   quickChat: NonNullable<HydrationState["quickChat"]>,
@@ -282,6 +505,7 @@ function hydrateQuickTerminalState(
   }
 }
 
+/** After merging quick-chat sessions, keep the client's active chat/terminal selection, falling back to the previous workspace's session or terminal tab when the selection no longer exists. */
 function restoreQuickChatSelection(
   draft: Draft<AppState>,
   previousSessions: AppState["quickChat"]["sessions"],
@@ -388,7 +612,15 @@ function hydrateGitHub(draft: Draft<AppState>, state: HydrationState): void {
   if (state.githubAppRegistrations) {
     mergeWithLoading(draft.githubAppRegistrations, state.githubAppRegistrations);
   }
-  if (state.taskPRs) deepMerge(draft.taskPRs, state.taskPRs);
+  if (state.taskPRs) {
+    deepMerge(draft.taskPRs, state.taskPRs);
+    // Older boot payloads contain only byTaskId. Stamp those records with the
+    // workspace context that was hydrated alongside them so a later workspace
+    // switch cannot treat them as current data.
+    draft.taskPRs.workspaceId = state.taskPRs.workspaceId ?? draft.workspaces.activeId;
+    draft.taskPRs.workspaceContextGeneration =
+      state.taskPRs.workspaceContextGeneration ?? draft.workspaceContextGeneration;
+  }
   if (state.azureDevOpsTaskPullRequests) {
     deepMerge(draft.azureDevOpsTaskPullRequests, state.azureDevOpsTaskPullRequests);
   }

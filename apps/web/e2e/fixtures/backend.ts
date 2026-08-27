@@ -4,6 +4,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { BackendFixtureEnvOverrides, createScopedEnvUse } from "./backend-env";
+import { E2E_DOCKER_SCOPE } from "./docker-probe";
+import { dwell } from "../helpers/causal-waits";
 
 const BACKEND_DIR = path.resolve(__dirname, "../../../../apps/backend");
 const WEB_DIR = path.resolve(__dirname, "../..");
@@ -51,6 +53,11 @@ export type BackendContext = {
    * agents, WS connections) is lost.
    */
   restart: (envOverrides?: Record<string, string>) => Promise<void>;
+  /**
+   * Verify the worker backend is serving requests and recover it when a
+   * previous test left the process unavailable.
+   */
+  ensureReady: () => Promise<void>;
   /**
    * Applies test-owned process environment values to the current backend and
    * every later restart until the returned release callback is awaited.
@@ -117,7 +124,11 @@ export async function waitForHealth(
       } catch {
         // not ready yet
       }
-      await new Promise((r) => setTimeout(r, HEALTH_POLL_MS));
+      await dwell(
+        HEALTH_POLL_MS,
+        "poll-interval",
+        "sampling interval for the backend health probe; the process is still starting, so there is nothing to subscribe to and the only signal is the port answering",
+      );
     }
     throw new Error(`Service did not become healthy at ${url} within ${timeoutMs}ms`);
   } finally {
@@ -144,7 +155,11 @@ async function waitForPortFree(port: number, timeoutMs = 10_000): Promise<void> 
       sock.once("error", () => resolve(true)); // ECONNREFUSED → port is free
     });
     if (free) return;
-    await new Promise((r) => setTimeout(r, 100));
+    await dwell(
+      100,
+      "poll-interval",
+      "sampling interval while waiting for the previous backend to release its port; the OS publishes nothing when a socket is finally freed",
+    );
   }
   // Timeout expired — proceed anyway; the new process will fail-fast if the
   // port is still held and waitForHealth will surface the error.
@@ -420,6 +435,7 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           // binaries the test runner pre-built, so containers can bind-mount them.
           ...(dockerEnabled
             ? {
+                KANDEV_E2E_DOCKER_SCOPE: E2E_DOCKER_SCOPE,
                 KANDEV_AGENTCTL_LINUX_BINARY: agentctlLinuxBinary,
                 KANDEV_MOCK_AGENT_LINUX_BINARY: mockAgentLinuxBinary,
               }
@@ -438,8 +454,9 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           // process.env.X before spawn — that already flows through the
           // `...sanitizeInheritedEnv(process.env)` spread above, and the
           // backend's ApplyProfile leaves already-set vars alone. (Note:
-          // KANDEV_FEATURES_* is the exception — it's stripped from the
-          // inherited env so the profile always governs feature flags.)
+          // KANDEV_FEATURES_* and KANDEV_WEB_TITLE_PREFIX are exceptions —
+          // they are stripped from the inherited env so the e2e profile
+          // always controls the baseline.)
           GIT_AUTHOR_NAME: "E2E Test",
           GIT_AUTHOR_EMAIL: "e2e@test.local",
           GIT_COMMITTER_NAME: "E2E Test",
@@ -458,7 +475,10 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
         // --- Spawn backend ---
         backendProc = spawnBackendProcess(scopedEnv.apply(baselineEnv), debug, backendPort);
         registerProcess(backendProc);
-        await waitForHealth(`${baseUrl}/health`, HEALTH_TIMEOUT_MS, backendProc);
+        // /ready (not /health) — /health flips green as soon as the listener
+        // is bound, before routes are wired; tests that immediately issue API
+        // requests need the readiness contract instead.
+        await waitForHealth(`${baseUrl}/ready`, HEALTH_TIMEOUT_MS, backendProc);
         const frontendUrl = baseUrl;
 
         /**
@@ -482,8 +502,25 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           await waitForPortFree(backendPort);
           backendProc = spawnBackendProcess(nextEnv, debug, backendPort);
           registerProcess(backendProc);
-          // Pass the process so waitForHealth fails fast if it exits (e.g. port still in use)
-          await waitForHealth(`${baseUrl}/health`, HEALTH_TIMEOUT_MS, backendProc);
+          // Pass the process so waitForHealth fails fast if it exits (e.g. port still in use).
+          // /ready, not /health — see the comment on the initial spawn above.
+          await waitForHealth(`${baseUrl}/ready`, HEALTH_TIMEOUT_MS, backendProc);
+        };
+
+        let recovery: Promise<void> | null = null;
+        const ensureReady = async () => {
+          try {
+            await waitForHealth(`${baseUrl}/ready`, 5_000);
+            return;
+          } catch {
+            // A worker can outlive a backend process that a prior test left
+            // stopped. Restart the isolated fixture before the next page is
+            // created so its setup requests do not hit a refused port.
+            recovery ??= restart().finally(() => {
+              recovery = null;
+            });
+            await recovery;
+          }
         };
 
         const useEnv = createScopedEnvUse(scopedEnv, restart);
@@ -495,6 +532,7 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           frontendUrl,
           tmpDir,
           restart,
+          ensureReady,
           useEnv,
         });
       });
@@ -539,6 +577,9 @@ function writeGitShimLauncher(shimDir: string, shimScript: string): void {
 //     in the test backend → /api/v1/office/* 404s. Dropping the whole
 //     KANDEV_FEATURES_* namespace lets the e2e profile govern feature flags so
 //     the suite always exercises them, regardless of where it's launched.
+//   - KANDEV_WEB_TITLE_PREFIX — the browser identity is profile-managed in
+//     this suite. Explicit per-test values are applied after this baseline is
+//     sanitized through `backend.restart(overrides)`.
 //   - PATH casing aliases — Windows commonly inherits `Path`; retaining it
 //     beside the fixture's new `PATH` makes child-process lookup order
 //     ambiguous. The caller restores one canonical PATH after sanitizing.
@@ -547,7 +588,9 @@ function sanitizeInheritedEnv(env: Record<string, string>): Record<string, strin
   delete cleaned.GH_TOKEN;
   delete cleaned.GITHUB_TOKEN;
   for (const key of Object.keys(cleaned)) {
-    if (key.startsWith("KANDEV_FEATURES_")) delete cleaned[key];
+    if (key === "KANDEV_WEB_TITLE_PREFIX" || key.startsWith("KANDEV_FEATURES_")) {
+      delete cleaned[key];
+    }
     if (key.toUpperCase() === "PATH") delete cleaned[key];
   }
   return cleaned;

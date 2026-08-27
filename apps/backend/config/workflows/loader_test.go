@@ -270,6 +270,45 @@ func TestLoadTemplates_HiddenFlag(t *testing.T) {
 	}
 }
 
+// TestLoadTemplates_OfficeDefaultWorkStepRequiresSignal verifies that the
+// office-default template's `work` step gates its turn-end auto-advance
+// (Work -> Review) on the ADR 0015 declarative completion signal, now that
+// step_complete_kandev is registered for the Office MCP surface. Without
+// this flag the new signal would be decorative: the step would still
+// advance on bare turn-end regardless of whether the agent called the tool.
+func TestLoadTemplates_OfficeDefaultWorkStepRequiresSignal(t *testing.T) {
+	templates, err := LoadTemplates()
+	if err != nil {
+		t.Fatalf("LoadTemplates() returned error: %v", err)
+	}
+
+	var officeDefault *models.WorkflowTemplate
+	for _, tmpl := range templates {
+		if tmpl.ID == "office-default" {
+			officeDefault = tmpl
+			break
+		}
+	}
+	if officeDefault == nil {
+		t.Fatal("office-default template not found")
+	}
+
+	var work *models.StepDefinition
+	for i := range officeDefault.Steps {
+		if officeDefault.Steps[i].ID == "work" {
+			work = &officeDefault.Steps[i]
+			break
+		}
+	}
+	if work == nil {
+		t.Fatal("office-default template step \"work\" not found")
+	}
+
+	if got := boolFieldForTest(t, work, "AutoAdvanceRequiresSignal"); !got {
+		t.Error("office-default template step \"work\" must set auto_advance_requires_signal: true")
+	}
+}
+
 func TestLoadTemplates_ReportKandevIssuePromptContract(t *testing.T) {
 	templates, err := LoadTemplates()
 	if err != nil {
@@ -312,6 +351,59 @@ func TestLoadTemplates_ReportKandevIssuePromptContract(t *testing.T) {
 	} {
 		if !strings.Contains(step.Prompt, required) {
 			t.Errorf("issue prompt must contain %q", required)
+		}
+	}
+}
+
+func TestLoadTemplates_ImproveKandevManagedPublicationPromptContract(t *testing.T) {
+	templates, err := LoadTemplates()
+	if err != nil {
+		t.Fatalf("LoadTemplates() returned error: %v", err)
+	}
+
+	var improve *models.WorkflowTemplate
+	for _, tmpl := range templates {
+		if tmpl.ID == "improve-kandev" {
+			improve = tmpl
+			break
+		}
+	}
+	if improve == nil {
+		t.Fatal("improve-kandev template not found")
+	}
+	if len(improve.Steps) != 3 {
+		t.Fatalf("improve-kandev steps = %d, want 3", len(improve.Steps))
+	}
+
+	prStep := improve.Steps[2]
+	normalizedPrompt := strings.Join(strings.Fields(prStep.Prompt), " ")
+	for _, required := range []string{
+		"Managed workspace credentials",
+		"origin` remains the canonical `kdlbs/kandev`",
+		"ordinary `git push`",
+		"gh pr create --repo kdlbs/kandev --base main",
+		"<fork-owner>:<branch>",
+		"Executor-owned credentials are a separate compatibility path",
+		"Never select this path to recover from a managed preparation failure",
+		"gh repo fork kdlbs/kandev",
+		"executor-owned credentials",
+		"--remote-name=origin",
+	} {
+		if !strings.Contains(normalizedPrompt, required) {
+			t.Errorf("managed publication prompt must contain %q", required)
+		}
+	}
+	managedPrompt := normalizedPrompt
+	if executorSection := strings.Index(managedPrompt, "Executor-owned credentials"); executorSection >= 0 {
+		managedPrompt = managedPrompt[:executorSection]
+	}
+	for _, forbidden := range []string{
+		"gh repo fork",
+		"remote-name=origin",
+		"rename the existing `origin`",
+	} {
+		if strings.Contains(managedPrompt, forbidden) {
+			t.Errorf("managed publication prompt must not contain %q", forbidden)
 		}
 	}
 }

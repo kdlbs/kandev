@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	agentdto "github.com/kandev/kandev/internal/agent/dto"
@@ -119,6 +120,18 @@ func (m *mockAgentManager) CancelAgent(ctx context.Context, sessionID string) er
 
 func (m *mockAgentManager) RespondToPermissionBySessionID(ctx context.Context, sessionID, pendingID, optionID string, cancelled bool) error {
 	return nil
+}
+
+func (m *mockAgentManager) ListPendingPermissionsBySessionID(context.Context, string) ([]streams.PendingAgentPermission, error) {
+	return nil, nil
+}
+
+func (m *mockAgentManager) ResolvePermissionBySessionID(context.Context, string, string, string, string) (*streams.PermissionResolveResponse, error) {
+	return nil, nil
+}
+
+func (m *mockAgentManager) CancelPermissionBySessionID(context.Context, string, string, string) (*streams.PermissionCancelResponse, error) {
+	return nil, nil
 }
 
 func (m *mockAgentManager) RestartAgentProcess(ctx context.Context, agentExecutionID string) error {
@@ -260,12 +273,14 @@ type mockRepository struct {
 	executorsRunning     map[string]*models.ExecutorRunning
 	taskEnvironments     map[string]*models.TaskEnvironment
 	taskEnvironmentRepos map[string][]*models.TaskEnvironmentRepo // env_id → rows
-	sessionWorktrees     []*models.TaskSessionWorktree
 
 	// Optional hook to inject behavior into GetTaskSession (e.g. simulate a
 	// transient DB error); if nil, the default map lookup is used.
 	getTaskSessionFunc                 func(ctx context.Context, id string) (*models.TaskSession, error)
+	getTaskEnvironmentFunc             func(ctx context.Context, id string) (*models.TaskEnvironment, error)
 	getTaskEnvironmentByTaskIDFunc     func(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
+	createTaskEnvironmentRepoErr       error
+	finalizeTaskEnvironmentErr         error
 	createTaskSessionFunc              func(ctx context.Context, session *models.TaskSession) error
 	updateTaskSessionStateFunc         func(ctx context.Context, sessionID string, state models.TaskSessionState, errorMessage string) error
 	listActiveTaskSessionsByTaskIDFunc func(ctx context.Context, taskID string) ([]*models.TaskSession, error)
@@ -293,9 +308,22 @@ type mockRepository struct {
 	setSessionMetadataKeyCalls        []setSessionMetadataKeyCall
 	setSessionPrimaryCalls            []string
 	createTaskEnvironmentCalls        []*models.TaskEnvironment
+	sharedWorkspaceBindingCalls       []sharedWorkspaceBindingCall
 	updateTaskEnvironmentCalls        []*models.TaskEnvironment
+	finalizeTaskEnvironmentCalls      []*models.TaskEnvironment
 	updateTaskStateIfCurrentInCalls   []updateTaskStateIfCurrentInCall
 	updateTaskStateIfNotArchivedCalls []updateTaskStateIfNotArchivedCall
+
+	// writeCallLog records the relative order of environment-row and
+	// environment-status writes (e.g. "create_repo", "update_env") so tests
+	// can pin ordering invariants that a call-count assertion alone cannot
+	// catch — see TestPersistTaskEnvironment_NonMaterializerSiblingPersistsReposBeforeReady.
+	writeCallLog []string
+}
+
+type sharedWorkspaceBindingCall struct {
+	Session *models.TaskSession
+	GroupID string
 }
 
 // updateTaskStateIfCurrentInCall records one UpdateTaskStateIfCurrentIn
@@ -368,6 +396,18 @@ func (m *mockRepository) CreateTaskSession(ctx context.Context, session *models.
 	}
 	m.mu.Unlock()
 	return fn(ctx, session)
+}
+
+func (m *mockRepository) CreateTaskSessionWithSharedGroupWorkspaceBinding(ctx context.Context, session *models.TaskSession, environment *models.TaskEnvironment, groupID string) error {
+	m.mu.Lock()
+	m.sharedWorkspaceBindingCalls = append(m.sharedWorkspaceBindingCalls, sharedWorkspaceBindingCall{Session: session, GroupID: groupID})
+	if environment.ID == "" {
+		environment.ID = "environment-" + session.ID
+	}
+	session.TaskEnvironmentID = environment.ID
+	m.taskEnvironments[environment.ID] = environment
+	m.mu.Unlock()
+	return m.CreateTaskSession(ctx, session)
 }
 
 func (m *mockRepository) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
@@ -444,7 +484,7 @@ func cloneMockTaskSession(session *models.TaskSession) *models.TaskSession {
 	clone.EnvironmentSnapshot = cloneMockSessionMap(session.EnvironmentSnapshot)
 	clone.RepositorySnapshot = cloneMockSessionMap(session.RepositorySnapshot)
 	if session.Worktrees != nil {
-		clone.Worktrees = make([]*models.TaskSessionWorktree, len(session.Worktrees))
+		clone.Worktrees = make([]*models.TaskEnvironmentRepo, len(session.Worktrees))
 		for i, worktree := range session.Worktrees {
 			if worktree == nil {
 				continue
@@ -555,11 +595,6 @@ func (m *mockRepository) GetExecutor(ctx context.Context, id string) (*models.Ex
 }
 
 func (m *mockRepository) UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error {
-	return nil
-}
-
-func (m *mockRepository) CreateTaskSessionWorktree(_ context.Context, worktree *models.TaskSessionWorktree) error {
-	m.sessionWorktrees = append(m.sessionWorktrees, worktree)
 	return nil
 }
 
@@ -765,6 +800,11 @@ func (m *mockRepository) CreateMessage(ctx context.Context, message *models.Mess
 func (m *mockRepository) GetMessage(ctx context.Context, id string) (*models.Message, error) {
 	return nil, nil
 }
+
+// GetMessageWithPromptIndex returns the message for id with its derived prompt index, mirroring the repository contract.
+func (m *mockRepository) GetMessageWithPromptIndex(ctx context.Context, id string) (*models.Message, error) {
+	return nil, nil
+}
 func (m *mockRepository) GetMessageByToolCallID(ctx context.Context, sessionID, toolCallID string) (*models.Message, error) {
 	return nil, nil
 }
@@ -806,7 +846,15 @@ func (m *mockRepository) GetActiveTurnBySessionID(ctx context.Context, sessionID
 	return nil, nil
 }
 func (m *mockRepository) UpdateTurn(ctx context.Context, turn *models.Turn) error { return nil }
-func (m *mockRepository) CompleteTurn(ctx context.Context, id string) error       { return nil }
+func (m *mockRepository) PatchTurnMetadata(
+	context.Context,
+	string,
+	string,
+	map[string]interface{},
+) (bool, time.Time, error) {
+	return false, time.Time{}, nil
+}
+func (m *mockRepository) CompleteTurn(ctx context.Context, id string) error { return nil }
 func (m *mockRepository) CompletePendingToolCallsForTurn(ctx context.Context, turnID string) (int64, error) {
 	return 0, nil
 }
@@ -925,21 +973,21 @@ func (m *mockRepository) GetLastAgentMessage(_ context.Context, _ string) (strin
 }
 
 // Task Session Worktree operations
-func (m *mockRepository) ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error) {
-	var out []*models.TaskSessionWorktree
-	for _, wt := range m.sessionWorktrees {
-		if wt.SessionID == sessionID {
-			out = append(out, wt)
-		}
+func (m *mockRepository) ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskEnvironmentRepo, error) {
+	if m.taskEnvironmentRepos == nil {
+		return nil, nil
 	}
-	return out, nil
+	// Resolve session → environment, then return that environment's repos.
+	for _, session := range m.sessions {
+		if session == nil || session.ID != sessionID {
+			continue
+		}
+		return m.taskEnvironmentRepos[session.TaskEnvironmentID], nil
+	}
+	return nil, nil
 }
-func (m *mockRepository) ListWorktreesBySessionIDs(_ context.Context, _ []string) (map[string][]*models.TaskSessionWorktree, error) {
-	return make(map[string][]*models.TaskSessionWorktree), nil
-}
-func (m *mockRepository) DeleteTaskSessionWorktree(ctx context.Context, id string) error { return nil }
-func (m *mockRepository) DeleteTaskSessionWorktreesBySession(ctx context.Context, sessionID string) error {
-	return nil
+func (m *mockRepository) ListWorktreesBySessionIDs(_ context.Context, _ []string) (map[string][]*models.TaskEnvironmentRepo, error) {
+	return make(map[string][]*models.TaskEnvironmentRepo), nil
 }
 
 // Git Snapshot operations
@@ -960,8 +1008,8 @@ func (m *mockRepository) GetGitSnapshotsBySession(ctx context.Context, sessionID
 }
 
 // Session Commit operations
-func (m *mockRepository) CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) error {
-	return nil
+func (m *mockRepository) CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) (bool, error) {
+	return true, nil
 }
 func (m *mockRepository) GetSessionCommits(ctx context.Context, sessionID string) ([]*models.SessionCommit, error) {
 	return nil, nil
@@ -1000,7 +1048,7 @@ func (m *mockRepository) ListRepositoryScripts(ctx context.Context, repositoryID
 func (m *mockRepository) ListScriptsByRepositoryIDs(_ context.Context, _ []string) (map[string][]*models.RepositoryScript, error) {
 	return make(map[string][]*models.RepositoryScript), nil
 }
-func (m *mockRepository) GetRepositoryByProviderInfo(_ context.Context, _, _, _, _, _ string) (*models.Repository, error) {
+func (m *mockRepository) GetRepositoryByProviderIdentity(_ context.Context, _ models.ProviderRepositoryIdentity) (*models.Repository, error) {
 	return nil, nil
 }
 func (m *mockRepository) GetRepositoryByLocalPath(_ context.Context, _, _ string) (*models.Repository, error) {
@@ -1072,7 +1120,10 @@ func (m *mockRepository) ListEnvironments(ctx context.Context) ([]*models.Enviro
 }
 
 // Task environment operations
-func (m *mockRepository) GetTaskEnvironment(_ context.Context, id string) (*models.TaskEnvironment, error) {
+func (m *mockRepository) GetTaskEnvironment(ctx context.Context, id string) (*models.TaskEnvironment, error) {
+	if m.getTaskEnvironmentFunc != nil {
+		return m.getTaskEnvironmentFunc(ctx, id)
+	}
 	if env, ok := m.taskEnvironments[id]; ok {
 		return env, nil
 	}
@@ -1110,17 +1161,31 @@ func (m *mockRepository) UpdateTaskEnvironment(_ context.Context, env *models.Ta
 	if env.ID == "" {
 		return nil
 	}
+	m.writeCallLog = append(m.writeCallLog, "update_env")
 	m.updateTaskEnvironmentCalls = append(m.updateTaskEnvironmentCalls, env)
 	m.taskEnvironments[env.ID] = env
 	return nil
 }
+func (m *mockRepository) FinalizeTaskEnvironmentMaterialization(_ context.Context, env *models.TaskEnvironment, repos []*models.TaskEnvironmentRepo, _ string) error {
+	if m.finalizeTaskEnvironmentErr != nil {
+		return m.finalizeTaskEnvironmentErr
+	}
+	m.finalizeTaskEnvironmentCalls = append(m.finalizeTaskEnvironmentCalls, env)
+	m.taskEnvironments[env.ID] = env
+	m.taskEnvironmentRepos[env.ID] = repos
+	return nil
+}
 func (m *mockRepository) CreateTaskEnvironmentRepo(_ context.Context, repo *models.TaskEnvironmentRepo) error {
+	if m.createTaskEnvironmentRepoErr != nil {
+		return m.createTaskEnvironmentRepoErr
+	}
 	if repo.ID == "" {
 		repo.ID = repo.TaskEnvironmentID + "-repo-" + repo.RepositoryID
 		if repo.BranchSlug != "" {
 			repo.ID += "-branch-" + repo.BranchSlug
 		}
 	}
+	m.writeCallLog = append(m.writeCallLog, "create_repo")
 	m.taskEnvironmentRepos[repo.TaskEnvironmentID] = append(m.taskEnvironmentRepos[repo.TaskEnvironmentID], repo)
 	return nil
 }

@@ -13,6 +13,7 @@ type TaskRepositoryInput struct {
 	RepositoryID   string `json:"repository_id"`
 	BaseBranch     string `json:"base_branch"`
 	CheckoutBranch string `json:"checkout_branch,omitempty"`
+	BranchPolicyID string `json:"branch_policy_id,omitempty"`
 	PRNumber       int    `json:"pr_number,omitempty"` // GitHub PR number when CheckoutBranch is a PR head; persisted into task_repositories.metadata["pr_number"].
 	LocalPath      string `json:"local_path,omitempty"`
 	Name           string `json:"name,omitempty"`
@@ -20,16 +21,28 @@ type TaskRepositoryInput struct {
 	GitHubURL      string `json:"github_url,omitempty"`
 	RemoteURL      string `json:"remote_url,omitempty"`
 	Provider       string `json:"provider,omitempty"`
+	ProviderHost   string `json:"provider_host,omitempty"`
+	ProviderScope  string `json:"provider_scope,omitempty"`
 	ProviderRepoID string `json:"provider_repo_id,omitempty"`
 	ProviderOwner  string `json:"provider_owner,omitempty"`
 	ProviderName   string `json:"provider_name,omitempty"`
-	ProviderHost   string `json:"provider_host,omitempty"`
+
+	// PreserveBaseBranch keeps an effective branch produced after policy
+	// resolution (for example, the branch created by the local fresh-branch
+	// flow) when task repositories are recreated. It is internal-only: normal
+	// task creation must always anchor a policy-backed repository to the
+	// policy's immutable base branch.
+	PreserveBaseBranch bool `json:"-"`
 
 	// RemoteContribution is server-authored after provider resolution. It is
 	// intentionally excluded from JSON request surfaces; callers must not be
 	// able to forge a writable source binding.
 	RemoteContribution *models.RemoteContribution `json:"-"`
-	TrustedRemote      bool                       `json:"-"`
+	// ContributionDestination is server-authored during managed Improve
+	// Kandev task preparation. It is never accepted from REST, WebSocket, or
+	// MCP JSON request bodies.
+	ContributionDestination *models.ContributionDestination `json:"-"`
+	TrustedRemote           bool                            `json:"-"`
 
 	// ResolveProviderDefaults opts the GitHub-URL resolution path into a
 	// synchronous default-branch probe (git ls-remote --symref) when neither
@@ -39,6 +52,18 @@ type TaskRepositoryInput struct {
 	// backfillRepoDefaultBranch). Left zero by create_task so the pinned
 	// "empty default_branch is filled at clone time" contract stays intact.
 	ResolveProviderDefaults bool `json:"-"`
+
+	// TrustedProviderDescriptor is an internal-only marker for a complete
+	// provider descriptor already authorized by the plugin host. It is never
+	// accepted from REST/MCP JSON; callers must still supply every identity and
+	// exact credential-free clone URL field above.
+	//
+	// A descriptor that arrives without this marker uses the normal built-in
+	// resolver. Plugin descriptors must come through the authenticated plugin
+	// Host Tasks.Create path, which sets this marker only after validating the
+	// active plugin's provider ownership and clone origin.
+	TrustedProviderDescriptor bool                           `json:"-"`
+	BranchPolicySnapshot      *models.RepositoryBranchPolicy `json:"-"`
 }
 
 // CreateTaskRequest contains the data for creating a new task
@@ -56,9 +81,20 @@ type CreateTaskRequest struct {
 	Metadata       map[string]interface{} `json:"metadata,omitempty"`
 	DeferredLaunch map[string]interface{} `json:"deferred_launch,omitempty"`
 	PlanMode       bool                   `json:"plan_mode,omitempty"`
-	IsEphemeral    bool                   `json:"is_ephemeral,omitempty"` // Ephemeral tasks are hidden from kanban, used for quick chat
-	ParentID       string                 `json:"parent_id,omitempty"`
-	WorkspacePath  string                 `json:"workspace_path,omitempty"` // Optional host folder for repo-less tasks
+
+	// StartAgent reports that the caller intends to launch an agent for this
+	// task right away. It only steers step resolution (see resolveWorkflowStep)
+	// — the launch itself is the caller's job, after CreateTask returns.
+	StartAgent    bool   `json:"start_agent,omitempty"`
+	IsEphemeral   bool   `json:"is_ephemeral,omitempty"` // Ephemeral tasks are hidden from kanban, used for quick chat
+	ParentID      string `json:"parent_id,omitempty"`
+	Autopilot     bool   `json:"autopilot,omitempty"`
+	WorkspacePath string `json:"workspace_path,omitempty"` // Optional host folder for repo-less tasks
+
+	// ExternalID is a caller-supplied identity used for create-idempotency
+	// (docs/specs/tasks/requirements/external-id-idempotency.md). Accepted on REST
+	// and MCP; empty means no idempotency key.
+	ExternalID string `json:"external_id,omitempty"`
 
 	// Office extensions
 	AssigneeAgentProfileID string   `json:"assignee_agent_profile_id,omitempty"`
@@ -66,6 +102,16 @@ type CreateTaskRequest struct {
 	ProjectID              string   `json:"project_id,omitempty"`
 	Labels                 string   `json:"labels,omitempty"`
 	BlockedBy              []string `json:"blocked_by,omitempty"`
+
+	// StartWhenUnblocked records the requested agent start as a deferred launch
+	// intent that dependency resolution consumes, instead of launching now.
+	//
+	// nil means "derive from the request's start intent": a create that asked to
+	// start an agent AND declared BlockedBy is describing a chain step, not a
+	// task to run immediately. Automated callers pass start_agent=true by habit,
+	// so deriving is what makes an agent-built chain run in order rather than
+	// launching every step at once.
+	StartWhenUnblocked *bool `json:"start_when_unblocked,omitempty"`
 }
 
 // UpdateTaskRequest contains the data for updating a task
@@ -130,6 +176,7 @@ type FindOrCreateRepositoryRequest struct {
 	WorkspaceID    string `json:"workspace_id"`
 	Provider       string `json:"provider"`
 	ProviderHost   string `json:"provider_host"`
+	ProviderScope  string `json:"provider_scope"`
 	ProviderOwner  string `json:"provider_owner"`
 	ProviderName   string `json:"provider_name"`
 	ProviderRepoID string `json:"provider_repo_id"`
@@ -147,6 +194,7 @@ type CreateRepositoryRequest struct {
 	Provider               string                         `json:"provider"`
 	ProviderRepoID         string                         `json:"provider_repo_id"`
 	ProviderHost           string                         `json:"provider_host"`
+	ProviderScope          string                         `json:"provider_scope"`
 	ProviderOwner          string                         `json:"provider_owner"`
 	ProviderName           string                         `json:"provider_name"`
 	RemoteURL              string                         `json:"remote_url"`
@@ -183,6 +231,7 @@ type UpdateRepositoryRequest struct {
 	Provider               *string `json:"provider,omitempty"`
 	ProviderRepoID         *string `json:"provider_repo_id,omitempty"`
 	ProviderHost           *string `json:"provider_host,omitempty"`
+	ProviderScope          *string `json:"provider_scope,omitempty"`
 	ProviderOwner          *string `json:"provider_owner,omitempty"`
 	ProviderName           *string `json:"provider_name,omitempty"`
 	DefaultBranch          *string `json:"default_branch,omitempty"`

@@ -1,6 +1,19 @@
 import type { Window as HappyDOMWindow } from "happy-dom";
+import * as React from "react";
 
 import { initI18nForTests, loadAllLocalesForTests } from "./lib/i18n";
+
+// Guards against `react` production build or duplicate copy — both make `act` unavailable;
+// vitest.config.ts pins NODE_ENV=test for the common case. Namespace import is deliberate.
+if (typeof React.act !== "function") {
+  throw new Error(
+    `React.act is unavailable, so no test can render. React only exports act() from its ` +
+      `development build, and NODE_ENV is "${process.env.NODE_ENV}" here. ` +
+      `Check the NODE_ENV pin in vitest.config.ts, then that only one copy of react is installed ` +
+      `(pnpm why react). Without it @testing-library/react falls back to react-dom/test-utils and ` +
+      `every render() throws "TypeError: React.act is not a function".`,
+  );
+}
 
 /**
  * i18n test bootstrap.

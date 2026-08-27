@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -51,6 +52,45 @@ func TestSchedulerIntegration_TickProcessesRun(t *testing.T) {
 	next, _ := svc.ClaimNextRun(ctx)
 	if next != nil {
 		t.Error("expected no more runs after processing")
+	}
+}
+
+func TestSchedulerIntegration_CancelsRunForMovedWorkflowStep(t *testing.T) {
+	mock := &mockTaskStarter{}
+	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
+	ctx := context.Background()
+
+	agent := makeAgent("worker-moved-step", models.AgentRoleWorker)
+	agent.ExecutorPreference = `{"type":"local_pc"}`
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	svc.ExecSQL(t, `INSERT INTO tasks
+		(id, workspace_id, workflow_step_id, title, created_at, updated_at)
+		VALUES ('task-moved-step', 'ws-1', 'step-current', 'Moved task',
+		        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+
+	// The run was queued while the task was on step-old. A later workflow
+	// move must prevent the scheduler from launching that stale step.
+	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+		`{"task_id":"task-moved-step","workflow_step_id":"step-old"}`, ""); err != nil {
+		t.Fatalf("queue run: %v", err)
+	}
+
+	service.RunSchedulerTick(svc, ctx)
+
+	if mock.callCount() != 0 {
+		t.Fatalf("StartTask calls = %d, want 0 for stale workflow step", mock.callCount())
+	}
+	runs, err := svc.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("runs = %d, want 1", len(runs))
+	}
+	if runs[0].Status != service.RunStatusCancelled {
+		t.Fatalf("run status = %q, want %q", runs[0].Status, service.RunStatusCancelled)
 	}
 }
 
@@ -306,6 +346,103 @@ func TestSchedulerIntegration_BuildPromptContext_TaskComment(t *testing.T) {
 	prompt := service.BuildPrompt(pc)
 	if !containsIgnoreCase(prompt, "say the current date") {
 		t.Errorf("prompt missing comment body, got: %s", prompt)
+	}
+}
+
+func TestSchedulerIntegration_BuildPromptContext_ApprovalStageIncludesRecentComments(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	insertTaskForPrompt(t, svc, "task-approval", "ws-1", "Approve release", "Confirm the release is safe", 3)
+	svc.ExecSQL(t, `INSERT INTO task_comments (id, task_id, author_type, author_id, body, source, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+		"cmt-approval", "task-approval", "user", "user-1", "Release notes are complete", "user")
+
+	payload := `{"task_id":"task-approval","stage_id":"step-approval","stage_type":"approval"}`
+	pc := service.BuildPromptContextForTest(svc, ctx, service.RunReasonTaskAssigned, payload)
+
+	if pc.StageType != "approval" {
+		t.Fatalf("StageType = %q, want approval", pc.StageType)
+	}
+	if len(pc.BuilderComments) != 1 || pc.BuilderComments[0] != "Release notes are complete" {
+		t.Fatalf("recent task comments = %#v, want the inserted comment", pc.BuilderComments)
+	}
+	prompt := service.BuildPrompt(pc)
+	if !containsIgnoreCase(prompt, "Recent task comments:") {
+		t.Errorf("approval prompt should label comments as recent task comments, got: %s", prompt)
+	}
+}
+
+func TestSchedulerIntegration_BuildPromptContext_UsesAuthoritativeStageType(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	insertTaskForPrompt(t, svc, "task-authoritative-stage", "ws-1", "Approve release", "Confirm the release is safe", 3)
+	svc.ExecSQL(t, `UPDATE tasks SET workflow_step_id = ? WHERE id = ?`, "step-authoritative", "task-authoritative-stage")
+	svc.ExecSQL(t, `INSERT INTO workflow_steps (id, stage_type) VALUES (?, ?)`, "step-authoritative", "approval")
+
+	pc := service.BuildPromptContextForTest(
+		svc,
+		ctx,
+		service.RunReasonTaskAssigned,
+		`{"task_id":"task-authoritative-stage","workflow_step_id":"step-authoritative","stage_type":"work"}`,
+	)
+
+	if pc.StageType != "approval" {
+		t.Fatalf("StageType = %q, want authoritative approval stage", pc.StageType)
+	}
+	if prompt := service.BuildPrompt(pc); !strings.HasPrefix(prompt, "You are approving") {
+		t.Fatalf("prompt = %q, want approver framing", prompt)
+	}
+}
+
+func TestSchedulerIntegration_BuildPromptContext_TaskReviewRequestedUsesRole(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	insertTaskForPrompt(t, svc, "task-review-requested", "ws-1", "Review release", "Check the release", 3)
+	svc.ExecSQL(t, `UPDATE tasks SET workflow_step_id = ? WHERE id = ?`, "step-review-requested", "task-review-requested")
+	svc.ExecSQL(t, `INSERT INTO workflow_steps (id, stage_type) VALUES (?, ?)`, "step-review-requested", "custom")
+
+	pc := service.BuildPromptContextForTest(
+		svc,
+		ctx,
+		service.RunReasonTaskReviewRequested,
+		`{"task_id":"task-review-requested","role":"approver"}`,
+	)
+
+	if pc.StageID != "step-review-requested" {
+		t.Fatalf("StageID = %q, want current task workflow step", pc.StageID)
+	}
+	if pc.StageType != "approval" {
+		t.Fatalf("StageType = %q, want approval from participant role", pc.StageType)
+	}
+	if prompt := service.BuildPrompt(pc); !strings.HasPrefix(prompt, "You are approving") {
+		t.Fatalf("prompt = %q, want approver framing", prompt)
+	}
+}
+
+func TestSchedulerIntegration_BuildPromptContext_LegacyApprovalStageIncludesRecentComments(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	insertTaskForPrompt(t, svc, "task-legacy-approval", "ws-1", "Approve release", "Confirm the release is safe", 3)
+	svc.ExecSQL(t, `INSERT INTO task_comments (id, task_id, author_type, author_id, body, source, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+		"cmt-legacy-approval", "task-legacy-approval", "agent", "builder-1", "Builder finished the release", "agent")
+
+	pc := service.BuildPromptContextForTest(
+		svc,
+		ctx,
+		"approval_started",
+		`{"task_id":"task-legacy-approval","workflow_step_id":"step-approval"}`,
+	)
+
+	if pc.StageType != "approval" {
+		t.Fatalf("legacy StageType = %q, want approval", pc.StageType)
+	}
+	if len(pc.BuilderComments) != 1 || pc.BuilderComments[0] != "Builder finished the release" {
+		t.Fatalf("legacy recent task comments = %#v, want the inserted comment", pc.BuilderComments)
 	}
 }
 

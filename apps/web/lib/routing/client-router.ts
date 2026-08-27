@@ -7,6 +7,13 @@ import { pushNavigationState, replaceNavigationState } from "./navigation-guard"
 
 type NavigateOptions = {
   scroll?: boolean;
+  /**
+   * Runs only once the navigation has actually committed. The unsaved-changes
+   * guard can cancel a `push`, and `push` itself returns void, so a caller that
+   * pairs navigation with local state (the sidebar's settings takeover) has no
+   * other way to tell "we moved" from "the user chose to stay".
+   */
+  onNavigated?: () => void;
 };
 
 export type AppRouter = {
@@ -57,6 +64,7 @@ function navigate(mode: "push" | "replace", href: string, options?: NavigateOpti
 function finishNavigation(options?: NavigateOptions): void {
   if (options?.scroll !== false) window.scrollTo(0, 0);
   dispatchLocationChange();
+  options?.onNavigated?.();
 }
 
 /**

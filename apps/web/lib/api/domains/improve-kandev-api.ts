@@ -2,12 +2,31 @@ import { fetchJson, type ApiRequestOptions } from "../client";
 
 // Result of the bootstrap fork-capability probe; mirrors backend ForkStatus.
 // "writable": user has push access to upstream, no fork needed.
-// "ready":    a fork already exists at github.com/{login}/kandev.
+// "ready":    a verified fork already exists in the canonical repository's
+//             fork network, including forks whose names were changed.
+// "creatable": managed workspace automation can create the exact fork during
+// task creation.
 // "blocked_emu": user looks like an Enterprise Managed User and likely
 //              cannot fork repositories outside their owning enterprise.
+// "blocked_managed": managed workspace automation cannot prepare a verified
+//                     fork; implementation reports must stay blocked.
 // "unknown":  bootstrap could not determine fork eligibility; proceed and
 //             rely on the PR step to surface any errors.
-export type ForkStatus = "writable" | "ready" | "blocked_emu" | "unknown";
+export type ForkStatus =
+  | "writable"
+  | "ready"
+  | "creatable"
+  | "blocked_emu"
+  | "blocked_managed"
+  | "unknown";
+
+export type ImproveKandevForkReasonCode =
+  | "account_cannot_fork"
+  | "app_unsupported"
+  | "fork_conflict"
+  | "fork_not_writable"
+  | "fork_not_ready"
+  | "managed_unavailable";
 
 export type ImproveKandevBootstrapResponse = {
   /** Dedicated Improve Kandev workspace the task must be created in. */
@@ -21,7 +40,7 @@ export type ImproveKandevBootstrapResponse = {
   github_login: string;
   has_write_access: boolean;
   fork_status: ForkStatus;
-  fork_message?: string;
+  fork_reason_code?: ImproveKandevForkReasonCode;
 };
 
 export async function bootstrapImproveKandev(

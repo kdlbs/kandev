@@ -105,7 +105,7 @@ describe("WorkflowSyncStatusCard", () => {
     );
     expect(
       screen.getByText(
-        "Directory (repository root) · auto-sync off · not synced yet — use Sync now",
+        "Directory (repository root) · auto-sync off · not synced yet; use Sync now",
       ),
     ).toBeTruthy();
   });

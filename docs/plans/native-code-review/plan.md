@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/native-code-review/spec.md
+spec: docs/specs/agents/requirements/native-code-review.md
 created: 2026-07-24
 status: building
 ---

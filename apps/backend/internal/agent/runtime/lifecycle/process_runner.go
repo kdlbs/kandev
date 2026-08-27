@@ -96,7 +96,7 @@ func (m *Manager) StopProcess(ctx context.Context, processID string) error {
 }
 
 func processEnvironment(execution *AgentExecution, requested map[string]string) map[string]string {
-	managedPath, _ := execution.Metadata[managedGoCacheMetadataKey].(string)
+	managedPath := execution.metadataString(managedGoCacheMetadataKey)
 	if managedPath == "" {
 		return requested
 	}

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -23,6 +24,9 @@ import (
 // previous fixtures that hardcoded `sleep`, `cat`, `echo`, `printf` which
 // don't exist as standalone executables on Windows.
 const kandevTestFixtureEnv = "KANDEV_TEST_FIXTURE"
+const gitFetchRaceRealGitEnv = "KANDEV_GIT_FETCH_RACE_REAL_GIT"
+const gitFetchRaceWorktreeEnv = "KANDEV_GIT_FETCH_RACE_WORKTREE"
+const legacyGitLabHostEnv = "GITLAB_HOST"
 
 // TestMain branches into fixture-binary mode when the activation env var
 // is set; otherwise it runs the test suite normally — wrapped in goleak so
@@ -33,6 +37,14 @@ func TestMain(m *testing.M) {
 		runFixture(spec)
 		return
 	}
+	// Tests build GitOperator with a nil environment (NewGitOperator(dir, log,
+	// nil)), which falls back to os.Environ() (environmentValues in git.go).
+	// An inherited KANDEV_GITLAB_HOST / GITLAB_HOST / GITLAB_TOKEN then leaks
+	// into GitLab remote-host detection and PR-provider auth, failing tests that
+	// assume these are unset. Scrub them here so the suite is hermetic regardless
+	// of the parent shell's environment; tests that need a specific value set it
+	// explicitly via t.Setenv.
+	clearAmbientGitLabEnv()
 	goleak.VerifyTestMain(m)
 }
 
@@ -46,6 +58,7 @@ func TestMain(m *testing.M) {
 //	echo-then-sleep <msg> <secs>   — print msg, then sleep <secs>
 //	delay-then-child <pidfile> <delay-ms> <secs>
 //	                               — wait, spawn a sleeping child, write its PID, then sleep
+//	git-fetch-race                — delegate to Git and create a worktree change after fetch
 //
 // New commands can be added here as tests need them; the goal is to keep the
 // surface tiny so the helper stays inspectable.
@@ -84,6 +97,7 @@ func runFixture(spec string) {
 			os.Exit(2)
 		}
 		signal.Ignore(os.Interrupt)
+		fmt.Println("fixture ready")
 		time.Sleep(time.Duration(secs) * time.Second)
 	case "echo":
 		fmt.Println(strings.Join(parts[1:], " "))
@@ -114,6 +128,8 @@ func runFixture(spec string) {
 			os.Exit(2)
 		}
 		time.Sleep(time.Duration(secs) * time.Second)
+	case "git-fetch-race":
+		runGitFetchRaceFixture()
 	case "sleep-with-child":
 		// Forks a child copy of this fixture binary (also sleeping <secs>),
 		// writes the child PID to <pidfile>, then sleeps itself. Used by the
@@ -201,6 +217,35 @@ func runFixture(spec string) {
 		os.Exit(2)
 	}
 	os.Exit(0)
+}
+
+func runGitFetchRaceFixture() {
+	realGit := os.Getenv(gitFetchRaceRealGitEnv)
+	worktree := os.Getenv(gitFetchRaceWorktreeEnv)
+	if realGit == "" || worktree == "" {
+		fmt.Fprintln(os.Stderr, "fixture: git-fetch-race requires Git and worktree paths")
+		os.Exit(2)
+	}
+	cmd := exec.Command(realGit, os.Args[1:]...)
+	cmd.Dir = worktree
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	err := cmd.Run()
+	if err == nil && len(os.Args) > 1 && os.Args[1] == "fetch" {
+		if err := os.WriteFile(filepath.Join(worktree, "race-after-fetch.txt"), []byte("created during fetch\n"), 0o600); err != nil {
+			fmt.Fprintf(os.Stderr, "fixture: git-fetch-race: write worktree change: %v\n", err)
+			os.Exit(1)
+		}
+	}
+	if err == nil {
+		os.Exit(0)
+	}
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		os.Exit(exitErr.ExitCode())
+	}
+	fmt.Fprintf(os.Stderr, "fixture: git-fetch-race: run Git: %v\n", err)
+	os.Exit(1)
 }
 
 // fixtureExec returns the (Command argv, Env) pair tests pass to runners that

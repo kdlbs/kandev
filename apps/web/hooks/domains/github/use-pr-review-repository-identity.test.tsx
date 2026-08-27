@@ -24,6 +24,7 @@ const SIBLING_BRANCH = "feat/second";
 const NOW = "2026-07-22T00:00:00Z";
 const selectedPR: TaskPR = {
   id: "pr-2",
+  workspace_id: WORKSPACE_ID,
   task_id: TASK_ID,
   repository_id: REPOSITORY_ID,
   owner: "acme",
@@ -81,6 +82,7 @@ const initialState: Partial<AppState> = {
     tasks: [
       {
         id: TASK_ID,
+        workflowId: "wf-1",
         workflowStepId: "step-1",
         title: "Multi-PR task",
         position: 0,

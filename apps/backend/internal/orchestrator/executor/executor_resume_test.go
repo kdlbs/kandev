@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/gitcredentials"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -48,6 +49,39 @@ func TestResumeSession_RejectsArchivedTask(t *testing.T) {
 	}
 }
 
+func TestResumeSession_PropagatesTaskEnvironmentPersistenceFailure(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	attachManagedGitHubRepositoryForResume(t, repo)
+	persistErr := errors.New("inventory write failed")
+	repo.createTaskEnvironmentRepoErr = persistErr
+	repo.taskEnvironments["env-1"] = &models.TaskEnvironment{
+		ID:           "env-1",
+		TaskID:       "task-1",
+		ExecutorType: string(models.ExecutorTypeLocal),
+		Status:       models.TaskEnvironmentStatusReady,
+	}
+	repo.sessions["sess-1"].TaskEnvironmentID = "env-1"
+
+	agentManager := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, _ *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			return &LaunchAgentResponse{
+				AgentExecutionID: "exec-new",
+				WorktreePath:     "/workspace/task-1",
+				Worktrees: []RepoWorktreeResult{{
+					RepositoryID: "repo-1", WorktreeID: "wt-1", WorktreePath: "/workspace/task-1",
+				}},
+			}, nil
+		},
+	}
+	exec := newTestExecutor(t, agentManager, repo)
+
+	_, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], false)
+	if !errors.Is(err, persistErr) {
+		t.Fatalf("ResumeSession error = %v, want %v", err, persistErr)
+	}
+}
+
 // setupLiveResumeTestFixture seeds a repo + task + session + executor-running
 // record suitable for exercising the ResumeSession launch path.
 func setupLiveResumeTestFixture(repo *mockRepository) {
@@ -79,25 +113,25 @@ type resumeCredentialStateIssuer struct {
 	afterIssue    func()
 }
 
-func (i *resumeCredentialStateIssuer) IssueGitHubCredentialLease(
+func (i *resumeCredentialStateIssuer) Issue(
 	ctx context.Context,
-	req GitHubCredentialLeaseRequest,
-) (GitHubCredentialLease, error) {
+	req gitcredentials.Scope,
+) (gitcredentials.Lease, error) {
 	session, err := i.repo.GetTaskSession(ctx, req.SessionID)
 	if err != nil {
-		return GitHubCredentialLease{}, err
+		return gitcredentials.Lease{}, err
 	}
 	i.observedState = session.State
 	if i.err != nil {
-		return GitHubCredentialLease{}, i.err
+		return gitcredentials.Lease{}, i.err
 	}
 	if session.State != models.TaskSessionStateStarting {
-		return GitHubCredentialLease{}, fmt.Errorf("GitHub credential scope denied: session is terminal")
+		return gitcredentials.Lease{}, fmt.Errorf("Git credential scope denied: session is terminal")
 	}
 	if i.afterIssue != nil {
 		i.afterIssue()
 	}
-	return GitHubCredentialLease{Token: "opaque-lease"}, nil
+	return gitcredentials.Lease{Token: "opaque-lease"}, nil
 }
 
 func attachManagedGitHubRepositoryForResume(t *testing.T, repo *mockRepository) {
@@ -1151,6 +1185,103 @@ func TestApplyResumeRepoConfig_BaseBranchByExecutorType(t *testing.T) {
 	}
 }
 
+func TestResolveResumeBaseBranchPrefersCurrentTaskRepository(t *testing.T) {
+	got := resolveResumeBaseBranch("repo-1", "branch-that-no-longer-exists", []*repoInfo{
+		{RepositoryID: "repo-1", BaseBranch: "main"},
+	})
+	if got != "main" {
+		t.Fatalf("base branch = %q, want main", got)
+	}
+}
+
+func TestResolveResumeBaseBranchKeepsLegacyValueWhenRepositoryRowsAreAmbiguous(t *testing.T) {
+	got := resolveResumeBaseBranch("repo-1", "session-base", []*repoInfo{
+		{RepositoryID: "repo-1", BaseBranch: "main"},
+		{RepositoryID: "repo-1", BaseBranch: "release"},
+	})
+	if got != "session-base" {
+		t.Fatalf("base branch = %q, want session-base", got)
+	}
+}
+
+func TestResumeUsesTaskRepositoryBranchPolicyTemplateSnapshot(t *testing.T) {
+	for _, testCase := range []struct {
+		name     string
+		snapshot string
+		want     string
+	}{
+		{name: "policy snapshot overrides repository template", snapshot: "policy/{title}", want: "policy/{title}"},
+		{name: "empty snapshot falls back to repository template", want: "repository/{title}"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			repo := newMockRepository()
+			repo.repositories["repo-1"] = &models.Repository{
+				ID: "repo-1", WorkspaceID: "workspace-1", Name: "widgets", SourceType: sourceTypeLocal,
+				LocalPath: t.TempDir(), WorktreeBranchTemplate: "repository/{title}",
+			}
+			repo.taskRepositories["task-repo-1"] = &models.TaskRepository{
+				ID: "task-repo-1", TaskID: "task-1", RepositoryID: "repo-1",
+				BranchPolicyBranchTemplate: testCase.snapshot,
+			}
+			exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+			info, err := exec.resolveTaskRepoInfoForSession(context.Background(), "session-1", repo.taskRepositories["task-repo-1"])
+			if err != nil {
+				t.Fatalf("resolveTaskRepoInfoForSession: %v", err)
+			}
+			if info.WorktreeBranchTemplate != testCase.want {
+				t.Fatalf("resolved worktree template = %q, want %q", info.WorktreeBranchTemplate, testCase.want)
+			}
+
+			req := &LaunchAgentRequest{}
+			exec.applyResumeWorktreeConfig(
+				context.Background(), &v1.Task{ID: "task-1", Title: "Resume task"}, req,
+				repo.repositories["repo-1"], "repo-1", repo.repositories["repo-1"].LocalPath, "main", nil,
+			)
+			if req.WorktreeBranchTemplate != testCase.want {
+				t.Fatalf("resume request worktree template = %q, want %q", req.WorktreeBranchTemplate, testCase.want)
+			}
+		})
+	}
+}
+
+func TestApplyResumeWorktreeConfigPreservesSelectedRepositoryDestination(t *testing.T) {
+	primaryDestination := resumeTestContributionDestination("200")
+	selectedDestination := resumeTestContributionDestination("201")
+	primaryMetadata := map[string]interface{}{}
+	if err := models.PutContributionDestination(primaryMetadata, &primaryDestination); err != nil {
+		t.Fatalf("PutContributionDestination() = %v", err)
+	}
+
+	repo := newMockRepository()
+	repo.taskRepositories["primary-link"] = &models.TaskRepository{
+		ID: "primary-link", TaskID: "task-1", RepositoryID: "repo-primary", Metadata: primaryMetadata,
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{ContributionDestination: &selectedDestination}
+	exec.applyResumeWorktreeConfig(
+		context.Background(), &v1.Task{ID: "task-1"}, req,
+		&models.Repository{ID: "repo-selected"}, "repo-selected", "/tmp/repo", "main", nil,
+	)
+
+	if req.ContributionDestination == nil || req.ContributionDestination.TargetRepository.ProviderID != "201" {
+		t.Fatalf("resume destination = %#v, want selected repository destination", req.ContributionDestination)
+	}
+}
+
+func resumeTestContributionDestination(providerID string) models.ContributionDestination {
+	return models.ContributionDestination{
+		Version:  models.ContributionDestinationVersion,
+		Provider: models.ContributionDestinationProviderGitHub,
+		SourceRepository: models.ContributionDestinationRepository{
+			Host: "github.com", Path: "kdlbs/kandev", ProviderID: "100", RemoteURL: "https://github.com/kdlbs/kandev.git",
+		},
+		TargetRepository: models.ContributionDestinationRepository{
+			Host: "github.com", Path: "alice/kandev", ProviderID: providerID, RemoteURL: "https://github.com/alice/kandev.git",
+		},
+	}
+}
+
 // TestApplyResumeRepoConfig_WorktreeStampsTaskDir locks in the fix for
 // resumes of single-repo worktree tasks: the lifecycle preparer hands the
 // request to worktree.Manager.Create, which rejects requests missing
@@ -1304,11 +1435,10 @@ func TestResumeSession_RefreshesStaleEnvironmentRow(t *testing.T) {
 	// LaunchAgent fails before persistTaskEnvironment writes the worktree
 	// fields back.
 	repo.taskEnvironments["env-stale"] = &models.TaskEnvironment{
-		ID:           "env-stale",
-		TaskID:       taskID,
-		Status:       models.TaskEnvironmentStatusStopped,
-		WorktreePath: "",
-		TaskDirName:  "",
+		ID:          "env-stale",
+		TaskID:      taskID,
+		Status:      models.TaskEnvironmentStatusStopped,
+		TaskDirName: "",
 	}
 
 	const newWorktreePath = "/home/u/.kandev/tasks/resume-after-failure_abc/my-repo"
@@ -1334,11 +1464,12 @@ func TestResumeSession_RefreshesStaleEnvironmentRow(t *testing.T) {
 		t.Errorf("env.Status = %q, want %q — without the refresh the frontend keeps showing the executor as unavailable",
 			env.Status, models.TaskEnvironmentStatusReady)
 	}
-	if env.WorktreePath != newWorktreePath {
-		t.Errorf("env.WorktreePath = %q, want %q", env.WorktreePath, newWorktreePath)
+	envRepos := repo.taskEnvironmentRepos["env-stale"]
+	if len(envRepos) != 1 || envRepos[0].WorktreePath != newWorktreePath {
+		t.Errorf("env repos = %+v, want one row with path %q", envRepos, newWorktreePath)
 	}
-	if env.WorktreeID != "wt-new" {
-		t.Errorf("env.WorktreeID = %q, want %q", env.WorktreeID, "wt-new")
+	if len(envRepos) != 1 || envRepos[0].WorktreeID != "wt-new" {
+		t.Errorf("env repos = %+v, want worktree id %q", envRepos, "wt-new")
 	}
 	if env.TaskDirName == "" {
 		t.Error("env.TaskDirName must not be empty after resume; the worktree manager needs it for the on-disk task root")

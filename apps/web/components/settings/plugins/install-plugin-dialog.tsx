@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { IconLoader2 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
   Dialog,
@@ -134,9 +135,11 @@ export function InstallPluginDialog({
             data-testid={install.testId}
             onClick={install.onClick}
             disabled={install.disabled}
+            aria-busy={busy || undefined}
             className="cursor-pointer"
           >
-            {t("plugins:install")}
+            {busy ? <IconLoader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
+            {busy ? t("plugins:installing") : t("plugins:install")}
           </Button>
         </DialogFooter>
       </DialogContent>

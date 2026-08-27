@@ -4,16 +4,23 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/discovery"
 	"github.com/kandev/kandev/internal/agent/hostutility"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/registry"
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
+	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
+	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	analyticsservice "github.com/kandev/kandev/internal/analytics/service"
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/azuredevops"
@@ -27,8 +34,10 @@ import (
 	"github.com/kandev/kandev/internal/integrations/secretadapter"
 	"github.com/kandev/kandev/internal/jira"
 	"github.com/kandev/kandev/internal/linear"
+	"github.com/kandev/kandev/internal/mentions"
 	"github.com/kandev/kandev/internal/plugins"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
+	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/sentry"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
@@ -36,13 +45,21 @@ import (
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/task/share"
 	userservice "github.com/kandev/kandev/internal/user/service"
+	utilitymodels "github.com/kandev/kandev/internal/utility/models"
+	"github.com/kandev/kandev/internal/utility/profilebinding"
 	utilityservice "github.com/kandev/kandev/internal/utility/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 	"github.com/kandev/kandev/internal/workflowsync"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/kandev/kandev/pkg/pluginsdk"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+)
+
+const (
+	canonicalKandevOwner = "kdlbs"
+	canonicalKandevName  = "kandev"
 )
 
 func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories, dbPool *db.Pool, eventBus bus.EventBus, agentRegistry *registry.Registry, version string) (*Services, *agentsettingscontroller.Controller, error) {
@@ -55,13 +72,55 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	}
 	userSecretStore := secrets.NewUserVisibleStore(repos.Secrets)
 	agentSettingsController := agentsettingscontroller.NewController(repos.AgentSettings, discoveryRegistry, agentRegistry, repos.Task, log)
+	agentSettingsController.SetDynamicAgentRoutingEnabled(cfg.Features.DynamicAgentRouting)
 	agentSettingsController.SetSecretStore(userSecretStore)
+	managedRuntimeSettings, err := systemsettings.NewStore(dbPool)
+	if err != nil {
+		return nil, nil, fmt.Errorf("initialize managed runtime settings: %w", err)
+	}
+	managedRuntimeSelections := managedruntime.NewStore(managedRuntimeSettings)
+	agentSettingsController.SetManagedRuntimeSelectionStore(managedRuntimeSelections)
 
 	userSvc := userservice.NewService(repos.User, eventBus, log)
 	editorSvc := editorservice.NewService(repos.Editor, repos.Task, userSvc)
 	promptSvc := promptservice.NewService(repos.Prompts)
 	utilitySvc := utilityservice.NewService(repos.Utility)
+	utilitySvc.SetProfileResolver(profilebinding.New(repos.AgentSettings, func(agentID string) bool {
+		if agentID == agents.DynamicAgentID {
+			return cfg.Features.DynamicAgentRouting
+		}
+		_, ok := agentRegistry.GetInferenceAgent(agentID)
+		return ok
+	}))
+	dynamicCircuits := dynamicruntime.NewCircuitRegistry(
+		dynamicruntime.WithCircuitPersistence(repos.Task),
+	)
+	if err := dynamicCircuits.Restore(context.Background()); err != nil {
+		return nil, nil, fmt.Errorf("restore dynamic routing health: %w", err)
+	}
+	dynamicEngine := dynamicruntime.NewEngine(
+		dynamicruntime.WithPersistence(repos.Task),
+		dynamicruntime.WithStateLoader(repos.Task),
+		dynamicruntime.WithCircuitRegistry(dynamicCircuits),
+	)
+	dynamicBindingResolver, err := dynamicruntime.NewPersistentCredentialBindingResolver(
+		context.Background(), repos.Task,
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("initialize dynamic routing installation key: %w", err)
+	}
+	dynamicResolver := agentruntime.NewProfileExecutionResolver(
+		repos.AgentSettings,
+		dynamicEngine,
+		cfg.Features.DynamicAgentRouting,
+	)
+	dynamicResolver.SetCredentialBindingResolver(dynamicBindingResolver)
+	utilitySvc.SetExecutionProfileResolver(dynamicResolver)
 	workflowSvc := workflowservice.NewService(repos.Workflow, log)
+	pendingActionProjectionEpoch, err := repos.Task.NextPendingActionProjectionEpoch(context.Background())
+	if err != nil {
+		return nil, nil, fmt.Errorf("allocate pending-action projection epoch: %w", err)
+	}
 	taskSvc := taskservice.NewService(
 		taskservice.Repos{
 			Workspaces:        repos.Task,
@@ -75,6 +134,8 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 			Sessions:          repos.Task,
 			GitSnapshots:      repos.Task,
 			RepoEntities:      repos.Task,
+			RepositorySets:    repos.Task,
+			BranchPolicies:    repos.Task,
 			RepositoryCleanup: repos.Task,
 			Executors:         repos.Task,
 			Environments:      repos.Task,
@@ -82,6 +143,9 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 			Reviews:           repos.Task,
 			ResourceCleanups:  repos.Task,
 			StatusSummaries:   repos.Task,
+			TaskActivity:      repos.Task,
+			SubagentContexts:  repos.Task,
+			Usage:             repos.Task,
 		},
 		eventBus,
 		log,
@@ -91,6 +155,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 			TaskWorktreeRoots: []string{filepath.Join(cfg.ResolvedHomeDir(), "tasks")},
 		},
 	)
+	taskSvc.SetPendingActionProjectionEpoch(pendingActionProjectionEpoch)
 	taskSvc.SetSecretStore(userSecretStore)
 	if deleter, ok := userSecretStore.(taskservice.WorkspaceSecretDeleter); ok {
 		taskSvc.SetWorkspaceSecretDeleter(deleter)
@@ -107,6 +172,22 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 
 	// Wire start step resolver to task service for CreateTask
 	taskSvc.SetStartStepResolver(&startStepResolverAdapter{svc: workflowSvc})
+	// Session history is owned by workflow service, but access is owned by the
+	// task service. Keep the authorization check at the service boundary.
+	workflowSvc.SetSessionAccessChecker(taskSvc.AuthorizeSessionAccess)
+	// Same split for the rest of the workflow-step surface: the workflow
+	// package owns steps, templates and export/import, but a workflow's owner
+	// is its workspace's owner, which only the task service can resolve.
+	workflowSvc.SetWorkflowAccessChecker(taskSvc.AuthorizeWorkflowAccess)
+	workflowSvc.SetWorkspaceAccessChecker(taskSvc.AuthorizeWorkspaceAccess)
+	// A step's queue_run action names the task it starts work on, so the
+	// step-write API accepts task IDs as well.
+	workflowSvc.SetTaskAccessChecker(taskSvc.AuthorizeTaskAccess)
+
+	// Wire the ADR 0015 audit-trail writer for manual step transitions.
+	// workflowSvc.CreateStepTransition already matches
+	// taskservice.StepHistoryRecorder structurally, so no adapter is needed.
+	taskSvc.SetStepHistoryRecorder(workflowSvc)
 
 	// Wire workflow provider to workflow service for export/import
 	workflowSvc.SetWorkflowProvider(&workflowProviderAdapter{svc: taskSvc})
@@ -116,20 +197,23 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	// Wire agent profile resolver/matcher for workflow export/import
 	workflowSvc.SetAgentProfileFuncs(
 		buildAgentProfileResolver(repos),
-		buildAgentProfileMatcher(repos),
+		buildAgentProfileMatcher(repos, log),
 	)
 
 	githubSvc := initGitHubService(cfg, dbPool, eventBus, repos.Secrets, log)
 	if githubSvc != nil {
 		taskSvc.SetTaskStatusSummaryPRReader(&githubTaskStatusSummaryPRReader{gh: githubSvc})
+		githubSvc.SetComparisonTargetObserver(taskSvc)
 		githubSvc.SetPromptResolver(promptSvc)
-		if brokerErr := githubSvc.ConfigureCredentialBroker(&githubBrokerScopeAuthorizer{repo: repos.Task}); brokerErr != nil {
+		taskSvc.SetContributionDestinationPreparer(&githubContributionDestinationPreparer{service: githubSvc, taskSvc: taskSvc})
+		if brokerErr := githubSvc.ConfigureCredentialBroker(&githubBrokerScopeAuthorizer{repo: repos.Task, provider: githubSvc}); brokerErr != nil {
 			log.Warn("GitHub credential broker initialization failed", zap.Error(brokerErr))
 		}
 	}
-	gitlabSvc := initGitLabService(dbPool, eventBus, repos.Secrets, log)
+	gitlabSvc, gitlabCleanup := initGitLabService(dbPool, eventBus, repos.Secrets, log)
 	if gitlabSvc != nil {
 		gitlabSvc.SetPromptResolver(promptSvc)
+		gitlabSvc.SetComparisonTargetObserver(taskSvc)
 	}
 	azureDevOpsSvc := initAzureDevOpsService(dbPool, eventBus, repos.Secrets, log)
 	if azureDevOpsSvc != nil {
@@ -147,16 +231,31 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		// caller; without it the check stays a no-op. An un-stamped local
 		// build passes "dev", which the service treats as "don't enforce".
 		pluginsSvc.SetKandevVersion(version)
-		pluginsSvc.SetDataSources(taskSvc, taskSvc, workflowSvc, agentSettingsController, analyticsservice.New(repos.Analytics), taskSvc, pluginsTaskWriterAdapter{svc: taskSvc})
+		pluginsSvc.SetDataSources(taskSvc, taskSvc, workflowSvc, agentSettingsController, analyticsservice.New(repos.Analytics), taskSvc, taskSvc, pluginsTaskWriterAdapter{svc: taskSvc})
+		// Separate from SetDataSources: githubSvc is optional (nil when github
+		// is unconfigured), and a nil source leaves tasks with no PullRequests
+		// rather than failing every task read.
+		if githubSvc != nil {
+			pluginsSvc.SetTaskPRSource(githubSvc)
+		}
 	}
-	shareHTTP := initShareHandlers(dbPool, repos.Task, githubSvc, log, version)
+	gitCredentialBroker := newGitCredentialBroker(githubSvc, pluginsSvc, repos.Task, cfg.GitHubCredentialBroker.ReissueSigningKey)
+	if pluginsSvc != nil {
+		pluginsSvc.SetGitCredentialLeaseRevoker(gitCredentialBroker.RevokeProvider)
+	}
+	if githubSvc != nil {
+		githubSvc.SetCredentialBroker(github.NewCredentialBrokerFromBroker(gitCredentialBroker))
+	}
+	shareHTTP := initShareHandlers(dbPool, repos.Task, taskSvc, githubSvc, log, version)
 
-	// Plumb GitHub branch listing into the task service so provider-backed
-	// ("Remote") repos serve branches from the GitHub API rather than relying
+	// Plumb code-host branch listing into the task service so provider-backed
+	// ("Remote") repos serve branches from their owning provider rather than relying
 	// on a local clone that may not exist yet (or ever - some executors clone
 	// inside their own container).
+	if githubSvc != nil || pluginsSvc != nil {
+		taskSvc.SetRemoteBranchLister(codeHostBranchListerAdapter{github: githubSvc, plugins: pluginsSvc})
+	}
 	if githubSvc != nil {
-		taskSvc.SetRemoteBranchLister(githubBranchListerAdapter{svc: githubSvc})
 		taskSvc.SetPRTaskResolver(githubSvc)
 		githubSvc.SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)
 		taskSvc.SetWorkspaceDefaultsInitializer(githubSvc)
@@ -179,49 +278,211 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		automationComponents.Service.SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)
 		// A UI filter is not an authorization boundary: reject a workflow owned
 		// by another workspace even when a request names it directly.
-		automationComponents.Service.SetWorkflowLocator(&automationWorkflowLocatorAdapter{svc: taskSvc})
+		automationWorkflowLocator := &automationWorkflowLocatorAdapter{svc: taskSvc, workflows: workflowSvc}
+		automationComponents.Service.SetWorkflowLocator(automationWorkflowLocator)
+		automationComponents.Service.SetWorkflowStepLocator(automationWorkflowLocator)
+		automationComponents.Service.SetTaskOriginLookup(&automationTaskOriginLookupAdapter{svc: taskSvc, log: log})
 		// Profile deletion disables the automations bound to a profile before
 		// the row goes, but nothing ever checked that the binding pointed at a
 		// real profile in the first place — so a create or rebind naming an id
 		// that never existed produced the same orphan without any delete
 		// involved.
 		automationComponents.Service.SetAgentProfileLookup(&automationAgentProfileLookupAdapter{store: repos.AgentSettings})
+		// YAML export descriptor resolution (AC-29): each Set* below is
+		// satisfied directly by an existing repository's Tx-accepting method,
+		// so the export's single read transaction can pass straight through
+		// without an adapter shim.
+		automationComponents.Service.SetExportAgentProfileLookup(repos.AgentSettings)
+		automationComponents.Service.SetExportExecutorProfileLookup(repos.Task)
+		automationComponents.Service.SetExportWorkflowLookup(repos.Task)
+		automationComponents.Service.SetExportWorkflowStepLookup(repos.Workflow)
+		automationComponents.Service.SetExportRepositoryLookup(repos.Task)
+		automationComponents.Service.SetExportWorkspaceLookup(&automationExportWorkspaceLookupAdapter{svc: taskSvc})
 	}
 
 	services := &Services{
-		Task:         taskSvc,
-		User:         userSvc,
-		Editor:       editorSvc,
-		Prompts:      promptSvc,
-		Utility:      utilitySvc,
-		Workflow:     workflowSvc,
-		GitHub:       githubSvc,
-		GitLab:       gitlabSvc,
-		AzureDevOps:  azureDevOpsSvc,
-		Jira:         jiraSvc,
-		Linear:       linearSvc,
-		Sentry:       sentrySvc,
-		WorkflowSync: workflowSyncSvc,
-		Share:        shareHTTP,
-		Automation:   automationComponents,
-		Plugins:      pluginsSvc,
+		ManagedRuntimeSelections: managedRuntimeSelections,
+		DynamicProfileResolver:   dynamicResolver,
+		DynamicBindingResolver:   dynamicBindingResolver,
+		Task:                     taskSvc,
+		User:                     userSvc,
+		Editor:                   editorSvc,
+		Prompts:                  promptSvc,
+		Utility:                  utilitySvc,
+		Workflow:                 workflowSvc,
+		GitHub:                   githubSvc,
+		GitLab:                   gitlabSvc,
+		GitLabCleanup:            gitlabCleanup,
+		AzureDevOps:              azureDevOpsSvc,
+		Jira:                     jiraSvc,
+		Linear:                   linearSvc,
+		Sentry:                   sentrySvc,
+		WorkflowSync:             workflowSyncSvc,
+		Share:                    shareHTTP,
+		Automation:               automationComponents,
+		Plugins:                  pluginsSvc,
+		GitCredentials:           gitCredentialBroker,
 		// Office is constructed later in initOfficeServices once all
 		// of its dependencies (config loader, task integrations, etc.) are available.
 		Office: nil,
 		// Notification service is initialized after gateway is available.
 		Notification: nil,
 	}
+	mentionProviders := builtinMentionProviders(services, repos.Task)
+	reserveBuiltinMentionIdentities(pluginsSvc, mentionProviders)
 	mentionComponents, err := newMentionComponents(
 		log,
 		taskSvc,
 		taskSvc,
-		builtinMentionProviders(services, repos.Task)...,
+		mentionProviders...,
 	)
 	if err != nil {
 		return nil, nil, err
 	}
 	services.Mentions = mentionComponents
 	return services, agentSettingsController, nil
+}
+
+func reserveBuiltinMentionIdentities(
+	pluginService *plugins.Service, providers []mentions.MentionProvider,
+) {
+	if pluginService == nil {
+		return
+	}
+	identities := make([]plugins.ReferenceIdentity, 0, len(providers))
+	for _, provider := range providers {
+		if provider == nil {
+			continue
+		}
+		if _, dynamic := provider.(mentions.SourceRegistrar); dynamic {
+			continue
+		}
+		descriptor := provider.Descriptor()
+		identities = append(identities, plugins.ReferenceIdentity{
+			Source: descriptor.Source, Provider: descriptor.Provider, Kind: descriptor.Kind,
+		})
+	}
+	pluginService.SetReservedReferenceIdentities(identities)
+}
+
+type githubContributionDestinationPreparer struct {
+	service *github.Service
+	taskSvc *taskservice.Service
+}
+
+func (p *githubContributionDestinationPreparer) PrepareContributionDestination(
+	ctx context.Context,
+	req *taskservice.CreateTaskRequest,
+	workflow *taskmodels.Workflow,
+	repositories []*taskmodels.Repository,
+) error {
+	if p == nil || p.service == nil || req == nil || workflow == nil ||
+		workflow.WorkflowTemplateID == nil || *workflow.WorkflowTemplateID != "improve-kandev" {
+		return nil
+	}
+	policy, err := p.service.DescribeTaskGitCredentialPolicy(ctx, req.WorkspaceID)
+	if err != nil {
+		return fmt.Errorf("resolve Improve Kandev GitHub credential policy: %w", err)
+	}
+	if policy.Mode != github.TaskGitCredentialsModeManaged {
+		return nil
+	}
+	for index := range req.Repositories {
+		if err := p.prepareRepository(ctx, req, repositories, index); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *githubContributionDestinationPreparer) prepareRepository(
+	ctx context.Context,
+	req *taskservice.CreateTaskRequest,
+	repositories []*taskmodels.Repository,
+	index int,
+) error {
+	input := &req.Repositories[index]
+	if input.RemoteContribution != nil || input.ContributionDestination != nil ||
+		!isCanonicalKandevRepositoryInput(input, repositoryAt(repositories, index)) {
+		return nil
+	}
+	resolution, err := p.service.ResolveContributionForkForWorkspace(
+		ctx, req.WorkspaceID, canonicalKandevOwner, canonicalKandevName, true,
+	)
+	if err != nil {
+		return fmt.Errorf("prepare Improve Kandev contribution destination: %w", err)
+	}
+	if resolution.Repository == nil || resolution.Repository.ID <= 0 {
+		return fmt.Errorf("prepare Improve Kandev contribution destination: canonical provider ID is missing")
+	}
+	providerRepoID := strconv.FormatInt(resolution.Repository.ID, 10)
+	destination := resolution.Destination
+	if destination != nil && strings.TrimSpace(destination.SourceRepository.ProviderID) != providerRepoID {
+		return fmt.Errorf("prepare Improve Kandev contribution destination: canonical provider ID is inconsistent")
+	}
+	if err := p.reconcileProviderRepoID(ctx, repositoryAt(repositories, index), providerRepoID); err != nil {
+		return err
+	}
+	input.ProviderRepoID = providerRepoID
+	input.ContributionDestination = destination
+	return nil
+}
+
+func (p *githubContributionDestinationPreparer) reconcileProviderRepoID(
+	ctx context.Context,
+	repository *taskmodels.Repository,
+	providerRepoID string,
+) error {
+	if repository == nil {
+		return nil
+	}
+	if repository.ProviderRepoID != "" && !strings.EqualFold(repository.ProviderRepoID, providerRepoID) {
+		return fmt.Errorf("prepare Improve Kandev contribution destination: canonical provider ID changed")
+	}
+	if repository.ProviderRepoID == "" && p.taskSvc != nil {
+		if _, err := p.taskSvc.UpdateRepository(ctx, repository.ID, &taskservice.UpdateRepositoryRequest{ProviderRepoID: &providerRepoID}); err != nil {
+			return fmt.Errorf("backfill Improve Kandev canonical provider ID: %w", err)
+		}
+		repository.ProviderRepoID = providerRepoID
+	}
+	return nil
+}
+
+func repositoryAt(repositories []*taskmodels.Repository, index int) *taskmodels.Repository {
+	if index < 0 || index >= len(repositories) {
+		return nil
+	}
+	return repositories[index]
+}
+
+func isCanonicalKandevRepositoryInput(
+	input *taskservice.TaskRepositoryInput,
+	repository *taskmodels.Repository,
+) bool {
+	if repository != nil {
+		return repository.Provider == gitCredentialGitHubProviderID &&
+			isPublicGitHubProviderHost(repository.ProviderHost) &&
+			repository.ProviderOwner == canonicalKandevOwner && repository.ProviderName == canonicalKandevName
+	}
+	return input != nil && input.Provider == gitCredentialGitHubProviderID &&
+		isPublicGitHubProviderHost(input.ProviderHost) &&
+		input.ProviderOwner == canonicalKandevOwner && input.ProviderName == canonicalKandevName
+}
+
+func isPublicGitHubProviderHost(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return false
+	}
+	if !strings.Contains(raw, "://") {
+		raw = "https://" + raw
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.User != nil || parsed.Hostname() == "" {
+		return false
+	}
+	return strings.EqualFold(parsed.Hostname(), "github.com") && parsed.Port() == "" &&
+		(parsed.Path == "" || parsed.Path == "/") && parsed.RawQuery == "" && parsed.Fragment == ""
 }
 
 type githubBrokerScopeAuthorizer struct {
@@ -231,11 +492,33 @@ type githubBrokerScopeAuthorizer struct {
 		GetRepository(context.Context, string) (*taskmodels.Repository, error)
 		ListTaskRepositories(context.Context, string) ([]*taskmodels.TaskRepository, error)
 	}
+	provider interface {
+		VerifyContributionDestinationForWorkspace(
+			context.Context, string, string, string, string, string, string, string,
+		) error
+	}
 }
 
 func (a *githubBrokerScopeAuthorizer) AuthorizeGitHubRepository(
 	ctx context.Context,
 	workspaceID, taskID, sessionID, repositoryID, owner, repoName string,
+) error {
+	return a.authorizeGitHubRepository(ctx, workspaceID, taskID, sessionID, repositoryID, owner, repoName, "", "", false)
+}
+
+func (a *githubBrokerScopeAuthorizer) AuthorizeGitHubRepositoryWithIdentity(
+	ctx context.Context,
+	workspaceID, taskID, sessionID, repositoryID, owner, repoName, providerID, parentProviderID string,
+) error {
+	return a.authorizeGitHubRepository(
+		ctx, workspaceID, taskID, sessionID, repositoryID, owner, repoName, providerID, parentProviderID, true,
+	)
+}
+
+func (a *githubBrokerScopeAuthorizer) authorizeGitHubRepository(
+	ctx context.Context,
+	workspaceID, taskID, sessionID, repositoryID, owner, repoName, providerID, parentProviderID string,
+	strictIdentity bool,
 ) error {
 	if a == nil || a.repo == nil {
 		return fmt.Errorf("task repository is unavailable")
@@ -247,23 +530,128 @@ func (a *githubBrokerScopeAuthorizer) AuthorizeGitHubRepository(
 	if err != nil {
 		return err
 	}
-	if err := a.authorizeRepositoryIdentity(ctx, workspaceID, repositoryID, owner, repoName); err == nil {
-		return nil
-	}
-	if link == nil {
-		return fmt.Errorf("repository identity does not match lease scope")
-	}
 	repository, err := a.repo.GetRepository(ctx, repositoryID)
 	if err != nil {
 		return err
 	}
-	if repository == nil || repository.WorkspaceID != workspaceID || !strings.EqualFold(repository.Provider, "github") {
+	if repository == nil || repository.WorkspaceID != workspaceID ||
+		!strings.EqualFold(repository.Provider, "github") || !isPublicGitHubProviderHost(repository.ProviderHost) {
+		return fmt.Errorf("repository identity does not match lease scope")
+	}
+	if strings.EqualFold(repository.ProviderOwner, owner) && strings.EqualFold(repository.ProviderName, repoName) {
+		return authorizeCanonicalGitHubRepository(repository, providerID, parentProviderID)
+	}
+	if link == nil {
 		return fmt.Errorf("repository identity does not match lease scope")
 	}
 	binding, found, err := taskmodels.LoadRemoteContribution(link.Metadata)
 	if err != nil {
 		return fmt.Errorf("validate remote contribution scope: %w", err)
 	}
+	if handled, destinationErr := a.authorizeContributionDestination(
+		ctx, workspaceID, repository, link, owner, repoName, providerID, parentProviderID, strictIdentity,
+	); handled {
+		return destinationErr
+	}
+	return authorizeRemoteContribution(binding, found, owner, repoName, providerID, strictIdentity)
+}
+
+func authorizeCanonicalGitHubRepository(
+	repository *taskmodels.Repository,
+	providerID, parentProviderID string,
+) error {
+	if providerID != "" && !strings.EqualFold(repository.ProviderRepoID, providerID) {
+		return fmt.Errorf("repository provider identity does not match lease scope")
+	}
+	if parentProviderID != "" {
+		return fmt.Errorf("repository parent identity does not match lease scope")
+	}
+	return nil
+}
+
+func (a *githubBrokerScopeAuthorizer) authorizeContributionDestination(
+	ctx context.Context,
+	workspaceID string,
+	repository *taskmodels.Repository,
+	link *taskmodels.TaskRepository,
+	owner, repoName, providerID, parentProviderID string,
+	strictIdentity bool,
+) (bool, error) {
+	destination, found, err := taskmodels.LoadContributionDestination(link.Metadata)
+	if err != nil {
+		return true, fmt.Errorf("validate contribution destination scope: %w", err)
+	}
+	if !found || destination.Provider != taskmodels.ContributionDestinationProviderGitHub ||
+		!strings.EqualFold(destination.TargetRepository.Host, "github.com") {
+		return false, nil
+	}
+	if !contributionDestinationScopeMatches(
+		destination, repository, owner, repoName, providerID, parentProviderID, strictIdentity,
+	) {
+		return false, nil
+	}
+	if !strictIdentity {
+		return true, nil
+	}
+	return true, a.verifyContributionDestination(
+		ctx, workspaceID, destination, owner, repoName,
+	)
+}
+
+func contributionDestinationScopeMatches(
+	destination taskmodels.ContributionDestination,
+	repository *taskmodels.Repository,
+	owner, repoName, providerID, parentProviderID string,
+	strictIdentity bool,
+) bool {
+	parts := strings.Split(destination.TargetRepository.Path, "/")
+	canonical := strings.TrimSpace(repository.ProviderOwner) + "/" + strings.TrimSpace(repository.ProviderName)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], owner) || !strings.EqualFold(parts[1], repoName) ||
+		!strings.EqualFold(destination.SourceRepository.Path, canonical) {
+		return false
+	}
+	if repository.ProviderRepoID != "" &&
+		!strings.EqualFold(destination.SourceRepository.ProviderID, repository.ProviderRepoID) {
+		return false
+	}
+	if !strictIdentity {
+		return true
+	}
+	return providerID != "" && parentProviderID != "" &&
+		strings.EqualFold(destination.TargetRepository.ProviderID, providerID) &&
+		strings.EqualFold(destination.SourceRepository.ProviderID, parentProviderID) &&
+		strings.TrimSpace(repository.ProviderRepoID) != "" &&
+		strings.EqualFold(destination.SourceRepository.ProviderID, repository.ProviderRepoID)
+}
+
+func (a *githubBrokerScopeAuthorizer) verifyContributionDestination(
+	ctx context.Context,
+	workspaceID string,
+	destination taskmodels.ContributionDestination,
+	owner, repoName string,
+) error {
+	if a.provider == nil {
+		return fmt.Errorf("contribution destination provider verifier is unavailable")
+	}
+	sourceParts := strings.Split(destination.SourceRepository.Path, "/")
+	if len(sourceParts) != 2 {
+		return fmt.Errorf("contribution destination provider identity does not match lease scope")
+	}
+	if err := a.provider.VerifyContributionDestinationForWorkspace(
+		ctx, workspaceID, sourceParts[0], sourceParts[1], destination.SourceRepository.ProviderID,
+		owner, repoName, destination.TargetRepository.ProviderID,
+	); err != nil {
+		return fmt.Errorf("contribution destination provider identity does not match lease scope")
+	}
+	return nil
+}
+
+func authorizeRemoteContribution(
+	binding taskmodels.RemoteContribution,
+	found bool,
+	owner, repoName, providerID string,
+	strictIdentity bool,
+) error {
 	if !found || binding.Provider != taskmodels.RemoteContributionProviderGitHub ||
 		!binding.CollaborationAllowed || !strings.EqualFold(binding.SourceRepository.Host, "github.com") {
 		return fmt.Errorf("repository identity does not match lease scope")
@@ -271,6 +659,10 @@ func (a *githubBrokerScopeAuthorizer) AuthorizeGitHubRepository(
 	parts := strings.Split(binding.SourceRepository.Path, "/")
 	if len(parts) != 2 || !strings.EqualFold(parts[0], owner) || !strings.EqualFold(parts[1], repoName) {
 		return fmt.Errorf("repository identity does not match lease scope")
+	}
+	if strictIdentity && binding.SourceRepository.ProviderID != "" &&
+		!strings.EqualFold(binding.SourceRepository.ProviderID, providerID) {
+		return fmt.Errorf("repository provider identity does not match lease scope")
 	}
 	return nil
 }
@@ -318,23 +710,6 @@ func (a *githubBrokerScopeAuthorizer) authorizeTaskRepository(
 	return nil, fmt.Errorf("repository is not linked to task")
 }
 
-func (a *githubBrokerScopeAuthorizer) authorizeRepositoryIdentity(
-	ctx context.Context,
-	workspaceID, repositoryID, owner, repoName string,
-) error {
-	repository, err := a.repo.GetRepository(ctx, repositoryID)
-	if err != nil {
-		return err
-	}
-	if repository == nil || repository.WorkspaceID != workspaceID ||
-		!strings.EqualFold(repository.Provider, "github") ||
-		!strings.EqualFold(repository.ProviderOwner, owner) ||
-		!strings.EqualFold(repository.ProviderName, repoName) {
-		return fmt.Errorf("repository identity does not match lease scope")
-	}
-	return nil
-}
-
 // loadCustomTUIAgents loads user-defined TUI agents from the database into the registry.
 // Non-fatal: logs warnings but continues if any individual agent fails.
 func loadCustomTUIAgents(ctx context.Context, repos *Repositories, agentRegistry *registry.Registry, log *logger.Logger) {
@@ -348,9 +723,15 @@ func loadCustomTUIAgents(ctx context.Context, repos *Repositories, agentRegistry
 			continue
 		}
 		cfg := agent.TUIConfig
-		if regErr := agentRegistry.RegisterCustomTUIAgent(
-			agent.Name, cfg.DisplayName, cfg.Command, cfg.Description, cfg.Model, cfg.CommandArgs,
-		); regErr != nil {
+		if regErr := agentRegistry.RegisterCustomTUIAgent(registry.CustomTUIAgentSpec{
+			Slug:           agent.Name,
+			DisplayName:    cfg.DisplayName,
+			Command:        cfg.Command,
+			Description:    cfg.Description,
+			Model:          cfg.Model,
+			CommandArgs:    cfg.CommandArgs,
+			MCPStrategyKey: cfg.MCPStrategy,
+		}); regErr != nil {
 			log.Warn("failed to register custom TUI agent",
 				zap.String("name", agent.Name), zap.Error(regErr))
 		}
@@ -396,6 +777,15 @@ func (a *startStepResolverAdapter) ResolveStartStep(ctx context.Context, workflo
 // ResolveFirstStep implements taskservice.StartStepResolver.
 func (a *startStepResolverAdapter) ResolveFirstStep(ctx context.Context, workflowID string) (string, error) {
 	step, err := a.svc.ResolveFirstStep(ctx, workflowID)
+	if err != nil {
+		return "", err
+	}
+	return step.ID, nil
+}
+
+// ResolveAutoStartStep implements taskservice.StartStepResolver.
+func (a *startStepResolverAdapter) ResolveAutoStartStep(ctx context.Context, workflowID string) (string, error) {
+	step, err := a.svc.ResolveAutoStartStep(ctx, workflowID)
 	if err != nil {
 		return "", err
 	}
@@ -553,14 +943,14 @@ func (s *gitlabHostStore) SetHost(ctx context.Context, host string) error {
 
 // initGitLabService wires up the GitLab integration. Failures are non-fatal:
 // the rest of the backend still boots without GitLab configured.
-func initGitLabService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secrets.SecretStore, log *logger.Logger) *gitlab.Service {
+func initGitLabService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secrets.SecretStore, log *logger.Logger) (*gitlab.Service, func() error) {
 	adapter := &gitlabSecretAdapter{store: secretsStore}
 	hostStore, hostStoreErr := newGitLabHostStore(dbPool)
 	if hostStoreErr != nil {
 		log.Warn("GitLab host store unavailable (non-fatal)", zap.Error(hostStoreErr))
-		return nil
+		return nil, nil
 	}
-	svc, _, err := gitlab.Provide(context.Background(), adapter, hostStore, log)
+	svc, cleanup, err := gitlab.Provide(context.Background(), adapter, hostStore, log)
 	if err != nil {
 		log.Warn("GitLab service initialization failed (non-fatal)", zap.Error(err))
 	}
@@ -579,7 +969,7 @@ func initGitLabService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secr
 			log.Warn("GitLab task-mr store unavailable (non-fatal)", zap.Error(storeErr))
 		}
 	}
-	return svc
+	return svc, cleanup
 }
 
 // initJiraService wires up the Jira integration. Failures are non-fatal.
@@ -663,12 +1053,13 @@ func initSentryService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secr
 func initShareHandlers(
 	dbPool *db.Pool,
 	taskRepo share.TaskReader,
+	authorizer share.TaskAccessAuthorizer,
 	githubSvc *github.Service,
 	log *logger.Logger,
 	version string,
 ) *share.HTTPHandlers {
 	h, _, err := share.Provide(
-		dbPool.Writer(), dbPool.Reader(), taskRepo, githubSvc, log,
+		dbPool.Writer(), dbPool.Reader(), taskRepo, authorizer, githubSvc, log,
 		share.Config{KandevVersion: version},
 	)
 	if err != nil {
@@ -693,7 +1084,13 @@ const portsBackendDefault = 38429
 // startPluginsSubsystems (plugins.go), once addCleanup and ctx are
 // available, mirroring how the Jira/Linear/Sentry pollers are started in
 // startAgentInfrastructure rather than inside their init*Service functions.
-func initPluginsService(cfg *config.Config, dbPool *db.Pool, eventBus bus.EventBus, secretsStore secrets.SecretStore, log *logger.Logger) *plugins.Service {
+func initPluginsService(
+	cfg *config.Config,
+	dbPool *db.Pool,
+	eventBus bus.EventBus,
+	secretsStore secrets.SecretStore,
+	log *logger.Logger,
+) *plugins.Service {
 	svc, _, err := plugins.Provide(cfg, dbPool, secretadapter.New(secretsStore), eventBus, log)
 	if err != nil {
 		log.Warn("Plugins service initialization failed (non-fatal)", zap.Error(err))
@@ -702,17 +1099,12 @@ func initPluginsService(cfg *config.Config, dbPool *db.Pool, eventBus bus.EventB
 	return svc
 }
 
-// pluginsHostUtilityAdapter adapts *hostutility.Manager to the plugins
-// package's utilityRunner interface (Host.InvokeUtilityAgent, ADR 0048),
-// returning just the response text. Lives here for the same cycle-avoidance
-// reason as the review adapter — internal/plugins must not import the agent
-// runtime.
 type pluginsHostUtilityAdapter struct {
 	mgr *hostutility.Manager
 }
 
-func (a pluginsHostUtilityAdapter) ExecutePrompt(ctx context.Context, agentType, model, mode, prompt string) (string, error) {
-	res, err := a.mgr.ExecutePrompt(ctx, agentType, model, mode, prompt)
+func (a pluginsHostUtilityAdapter) ExecuteProfilePrompt(ctx context.Context, profileID, prompt string) (string, error) {
+	res, err := a.mgr.ExecuteProfilePrompt(ctx, profileID, prompt)
 	if err != nil {
 		return "", err
 	}
@@ -720,7 +1112,8 @@ func (a pluginsHostUtilityAdapter) ExecutePrompt(ctx context.Context, agentType,
 }
 
 type pluginsUtilityAgentAdapter struct {
-	svc *utilityservice.Service
+	svc     *utilityservice.Service
+	userSvc *userservice.Service
 }
 
 func (a pluginsUtilityAgentAdapter) GetAgentByID(ctx context.Context, id string) (*plugins.UtilityAgent, error) {
@@ -731,7 +1124,18 @@ func (a pluginsUtilityAgentAdapter) GetAgentByID(ctx context.Context, id string)
 		}
 		return nil, err
 	}
-	return &plugins.UtilityAgent{Name: agent.Name, AgentID: agent.AgentID, Model: agent.Model, Enabled: agent.Enabled}, nil
+	profileID := agent.AgentProfileID
+	bindingState := agent.ProfileBindingState
+	if utilitymodels.UsesDefaultProfile(agent) && a.userSvc != nil {
+		profileID, err = a.userSvc.GetDefaultUtilityAgentProfileID(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if profileID != "" {
+			bindingState = utilitymodels.ProfileBindingExplicit
+		}
+	}
+	return &plugins.UtilityAgent{Name: agent.Name, AgentID: agent.AgentID, Model: agent.Model, AgentProfileID: profileID, ProfileBindingState: bindingState, Enabled: agent.Enabled}, nil
 }
 
 // pluginsTaskWriterAdapter adapts the task service to the plugins package's
@@ -746,8 +1150,9 @@ func (a pluginsUtilityAgentAdapter) GetAgentByID(ctx context.Context, id string)
 // adapter needs, so the adapter's field mapping + state validation are
 // unit-testable with a fake. *taskservice.Service satisfies it.
 type pluginTaskWriteService interface {
-	CreateTask(ctx context.Context, req *taskservice.CreateTaskRequest) (*taskmodels.Task, error)
+	CreateTask(ctx context.Context, req *taskservice.CreateTaskRequest) (taskservice.CreateTaskResult, error)
 	UpdateTask(ctx context.Context, id string, req *taskservice.UpdateTaskRequest) (*taskmodels.Task, error)
+	DeleteTask(ctx context.Context, id string) error
 }
 
 type pluginsTaskWriterAdapter struct {
@@ -755,11 +1160,15 @@ type pluginsTaskWriterAdapter struct {
 }
 
 func (a pluginsTaskWriterAdapter) CreateTask(ctx context.Context, in plugins.TaskCreateInput) (*taskmodels.Task, error) {
-	var metadata map[string]interface{}
-	if in.Source != "" {
-		metadata = map[string]interface{}{"source": in.Source}
+	metadata, err := pluginTaskMetadata(in)
+	if err != nil {
+		return nil, err
 	}
-	return a.svc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	repositories, err := pluginTaskRepositoryInputs(in.Repositories)
+	if err != nil {
+		return nil, err
+	}
+	result, err := a.svc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID:    in.WorkspaceID,
 		WorkflowID:     in.WorkflowID,
 		WorkflowStepID: in.WorkflowStepID,
@@ -767,7 +1176,113 @@ func (a pluginsTaskWriterAdapter) CreateTask(ctx context.Context, in plugins.Tas
 		Description:    in.Description,
 		ParentID:       in.ParentID,
 		Metadata:       metadata,
+		Repositories:   repositories,
+		PlanMode:       in.PlanMode,
+		StartAgent:     in.StartAgent,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return result.Task, nil
+}
+
+func (a pluginsTaskWriterAdapter) DeleteTask(ctx context.Context, id string) error {
+	return a.svc.DeleteTask(ctx, id)
+}
+
+func pluginTaskMetadata(in plugins.TaskCreateInput) (map[string]interface{}, error) {
+	if in.Metadata == nil && in.Source == "" {
+		return nil, nil
+	}
+	metadata := make(map[string]interface{}, len(in.Metadata)+1)
+	for key, value := range in.Metadata {
+		metadata[key] = value
+	}
+	if in.Source == "" {
+		return metadata, nil
+	}
+	if source, found := metadata["source"]; found && source != in.Source {
+		return nil, fmt.Errorf("plugin task metadata source does not match host provenance")
+	}
+	metadata["source"] = in.Source
+	return metadata, nil
+}
+
+func pluginTaskRepositoryInputs(repositories []pluginsdk.PluginTaskRepository) ([]taskservice.TaskRepositoryInput, error) {
+	if len(repositories) == 0 {
+		return nil, nil
+	}
+	inputs := make([]taskservice.TaskRepositoryInput, len(repositories))
+	for index, repository := range repositories {
+		input, err := pluginTaskRepositoryInput(repository)
+		if err != nil {
+			return nil, err
+		}
+		inputs[index] = input
+	}
+	return inputs, nil
+}
+
+func pluginTaskRepositoryInput(repository pluginsdk.PluginTaskRepository) (taskservice.TaskRepositoryInput, error) {
+	if repository.Remote == nil {
+		return taskservice.TaskRepositoryInput{
+			RepositoryID:   repository.RepositoryID,
+			BaseBranch:     stringValue(repository.BaseBranch),
+			CheckoutBranch: stringValue(repository.CheckoutBranch),
+			PRNumber:       pluginPRNumber(repository.PullRequestNumber),
+		}, nil
+	}
+	remote := repository.Remote
+	if err := repoclone.ValidateHTTPSCloneOrigin(remote.CloneURL, remote.ProviderHost); err != nil {
+		return taskservice.TaskRepositoryInput{}, fmt.Errorf("plugin repository descriptor: %w", err)
+	}
+	return taskservice.TaskRepositoryInput{
+		RepositoryID:              repository.RepositoryID,
+		BaseBranch:                firstStringValue(repository.BaseBranch, remote.BaseBranch),
+		CheckoutBranch:            firstStringValue(repository.CheckoutBranch, remote.HeadBranch),
+		PRNumber:                  firstPluginPRNumber(repository.PullRequestNumber, remote.PullRequestNumber),
+		RemoteURL:                 remote.CloneURL,
+		Provider:                  remote.ProviderID,
+		ProviderHost:              remote.ProviderHost,
+		ProviderScope:             remote.ProviderScope,
+		ProviderRepoID:            remote.ProviderRepositoryID,
+		ProviderOwner:             remote.OwnerOrProject,
+		ProviderName:              remote.Name,
+		DefaultBranch:             stringValue(remote.DefaultBranch),
+		TrustedProviderDescriptor: true,
+	}, nil
+}
+
+func stringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+func firstStringValue(values ...*string) string {
+	for _, value := range values {
+		if value != nil {
+			return *value
+		}
+	}
+	return ""
+}
+
+func pluginPRNumber(value *int64) int {
+	if value == nil || *value < 1 || *value > int64(^uint(0)>>1) {
+		return 0
+	}
+	return int(*value)
+}
+
+func firstPluginPRNumber(values ...*int64) int {
+	for _, value := range values {
+		if number := pluginPRNumber(value); number > 0 {
+			return number
+		}
+	}
+	return 0
 }
 
 func (a pluginsTaskWriterAdapter) UpdateTask(ctx context.Context, in plugins.TaskUpdateInput) (*taskmodels.Task, error) {
@@ -863,47 +1378,144 @@ func buildAgentProfileResolver(repos *Repositories) wfmodels.AgentProfileResolve
 	}
 }
 
-// buildAgentProfileMatcher creates a matcher that finds profiles by agent name, model, and mode for import.
-func buildAgentProfileMatcher(repos *Repositories) wfmodels.AgentProfileMatcher {
-	return func(agentName, model, mode string) string {
-		agents, err := repos.AgentSettings.ListAgents(context.Background())
-		if err != nil {
-			return ""
+// agentProfileStillMatches reports whether the profile with id still has the
+// exact (agent_display_name, model, mode) triple, ignoring Enabled and
+// WorkspaceID - those only gate candidate *selection*, not a binding that
+// already exists.
+func agentProfileStillMatches(repos *Repositories, id, agentName, model, mode string) bool {
+	p, err := repos.AgentSettings.GetAgentProfile(context.Background(), id)
+	if err != nil || p == nil {
+		return false
+	}
+	return p.AgentDisplayName == agentName && p.Model == model && p.Mode == mode
+}
+
+// buildAgentProfileMatcher creates a matcher that finds profiles by agent
+// name, model, and mode for import.
+//
+// The (agent_display_name, model, mode) triple is not unique: duplicating a
+// profile through the UI produces a byte-identical triple for the copy.
+// Candidates are filtered to enabled, global (non-workspace-scoped) profiles,
+// and ties are broken by oldest CreatedAt (then ID for a total order). Oldest
+// wins so that duplicating a profile can never steal an existing synced
+// workflow step's binding - a copy is always newer than its source.
+//
+// currentID, when non-empty, is checked first: if that profile still has the
+// exact descriptor, it's kept as-is without re-running candidate selection -
+// even when it's disabled or workspace-scoped. Reconciliation must not treat
+// "profile got disabled" as "profile needs a new binding" (profile-disable.md
+// promises existing bindings survive disabling); candidate selection only
+// applies when picking a profile for new work.
+func buildAgentProfileMatcher(repos *Repositories, log *logger.Logger) wfmodels.AgentProfileMatcher {
+	return func(agentName, model, mode, currentID string) string {
+		if currentID != "" && agentProfileStillMatches(repos, currentID, agentName, model, mode) {
+			return currentID
 		}
-		for _, agent := range agents {
-			profiles, pErr := repos.AgentSettings.ListAgentProfiles(context.Background(), agent.ID)
-			if pErr != nil {
-				continue
-			}
-			for _, p := range profiles {
-				if p.AgentDisplayName == agentName && p.Model == model && p.Mode == mode {
-					return p.ID
-				}
-			}
-		}
-		return ""
+		return selectAgentProfileCandidate(repos, log, agentName, model, mode)
 	}
 }
 
-// githubBranchListerAdapter bridges github.Service to the task service's
-// RemoteBranchLister interface. It maps github.RepoBranch into the task
+// selectAgentProfileCandidate scans enabled, global profiles for an exact
+// (agent_display_name, model, mode) match and returns the oldest one (see
+// buildAgentProfileMatcher), logging when the triple was ambiguous.
+func selectAgentProfileCandidate(repos *Repositories, log *logger.Logger, agentName, model, mode string) string {
+	agents, err := repos.AgentSettings.ListAgents(context.Background())
+	if err != nil {
+		return ""
+	}
+	var best *agentsettingsmodels.AgentProfile
+	matches := 0
+	for _, agent := range agents {
+		profiles, pErr := repos.AgentSettings.ListAgentProfiles(context.Background(), agent.ID)
+		if pErr != nil {
+			continue
+		}
+		for _, p := range profiles {
+			if p.AgentDisplayName != agentName || p.Model != model || p.Mode != mode {
+				continue
+			}
+			if !p.Enabled || p.WorkspaceID != "" {
+				continue
+			}
+			matches++
+			if best == nil || isOlderAgentProfileMatch(p, best) {
+				best = p
+			}
+		}
+	}
+	if best == nil {
+		return ""
+	}
+	if matches > 1 {
+		log.Debug("agent profile matcher: multiple candidates for workflow step sync",
+			zap.String("agent_display_name", agentName),
+			zap.String("model", model),
+			zap.String("mode", mode),
+			zap.Int("candidates", matches),
+			zap.String("selected_profile_id", best.ID))
+	}
+	return best.ID
+}
+
+// isOlderAgentProfileMatch reports whether candidate should replace current
+// as the matcher's selection: earlier CreatedAt wins, ties broken by ID so
+// the result is stable across repeated calls.
+func isOlderAgentProfileMatch(candidate, current *agentsettingsmodels.AgentProfile) bool {
+	if !candidate.CreatedAt.Equal(current.CreatedAt) {
+		return candidate.CreatedAt.Before(current.CreatedAt)
+	}
+	return candidate.ID < current.ID
+}
+
+// codeHostBranchListerAdapter routes first-party GitHub repositories directly
+// and manifest-owned providers through their standardized branch action. It maps
+// both responses into the task
 // service's Branch shape with Type="remote" so the dialog renders branches
 // the same way URL-mode does - bare names without an "origin/" prefix, since
 // there is no checked-out clone whose tracking config could disambiguate.
-type githubBranchListerAdapter struct {
-	svc *github.Service
+type codeHostBranchListerAdapter struct {
+	github  *github.Service
+	plugins *plugins.Service
 }
 
-func (a githubBranchListerAdapter) ListRepoBranches(
-	ctx context.Context, workspaceID, owner, repo string,
+const codeHostRemoteBranchType = "remote"
+
+func (a codeHostBranchListerAdapter) ListRepoBranches(
+	ctx context.Context, source taskservice.RemoteBranchSource,
 ) ([]taskservice.Branch, error) {
-	remote, err := a.svc.ListRepoBranchesForWorkspace(ctx, workspaceID, owner, repo)
+	if strings.EqualFold(source.Provider, "github") {
+		if a.github == nil {
+			return nil, fmt.Errorf("GitHub branch provider is unavailable")
+		}
+		remote, err := a.github.ListRepoBranchesForWorkspace(ctx, source.WorkspaceID, source.Owner, source.Name)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]taskservice.Branch, 0, len(remote))
+		for _, branch := range remote {
+			out = append(out, taskservice.Branch{Name: branch.Name, Type: codeHostRemoteBranchType})
+		}
+		return out, nil
+	}
+	if a.plugins == nil {
+		return nil, fmt.Errorf("plugin repository branch provider is unavailable")
+	}
+	remote, err := a.plugins.ListRepositoryProviderBranches(ctx, source.WorkspaceID, plugins.RepositoryProviderSource{
+		Provider:             source.Provider,
+		ProviderHost:         source.ProviderHost,
+		ProviderScope:        source.ProviderScope,
+		ProviderRepositoryID: source.ProviderRepositoryID,
+		OwnerOrProject:       source.Owner,
+		Name:                 source.Name,
+		CloneURL:             source.RemoteURL,
+		DefaultBranch:        source.DefaultBranch,
+	})
 	if err != nil {
 		return nil, err
 	}
 	out := make([]taskservice.Branch, 0, len(remote))
-	for _, b := range remote {
-		out = append(out, taskservice.Branch{Name: b.Name, Type: "remote"})
+	for _, branch := range remote {
+		out = append(out, taskservice.Branch{Name: branch.Name, Type: codeHostRemoteBranchType})
 	}
 	return out, nil
 }

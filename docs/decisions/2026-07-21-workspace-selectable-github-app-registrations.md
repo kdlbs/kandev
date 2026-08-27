@@ -30,9 +30,9 @@ carry registration identity as well as workspace identity.
 Registration management is entered from workspace GitHub settings. A user can:
 
 1. select a known registration and install it for the current workspace;
-2. import an existing App by applying Kandev's documented callback, setup URL, webhook, permission,
-   and event policy, then submitting its App ID, OAuth client material, private key, and webhook
-   secret for verification and encrypted storage; or
+2. import an existing App by applying Kandev's documented callback, OAuth-on-install, webhook,
+   permission, and event policy, then submitting its App ID, OAuth client material, private key,
+   and webhook secret for verification and encrypted storage; or
 3. create a registration through a workspace-bound App Manifest flow.
 
 Catalog scope permits deliberate reuse without duplicating root secrets. Reuse shares the App

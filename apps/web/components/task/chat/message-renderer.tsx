@@ -3,9 +3,11 @@
 import { memo, useState, useCallback, type ReactElement } from "react";
 import { IconPlayerPlay } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { sessionId as toSessionId, taskId as toTaskId } from "@/lib/types/http";
 import type { Message, TaskSessionState } from "@/lib/types/http";
 import type { ToolCallMetadata } from "@/components/task/chat/types";
 import { launchSession } from "@/lib/services/session-launch-service";
+import { isLaunchStateRegression } from "@/lib/session-state";
 import { buildStartCreatedRequest } from "@/lib/services/session-launch-helpers";
 import { useAppStore } from "@/components/state-provider";
 import { useTask } from "@/hooks/use-task";
@@ -39,30 +41,81 @@ type AdapterContext = {
   childrenByParentToolCallId?: Map<string, Message[]>;
   worktreePath?: string;
   sessionId?: string;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, repo?: string) => void;
   onScrollToMessage?: (messageId: string) => void;
   isTurnActive?: boolean;
   isContainingTurnActive?: boolean;
 };
 
+/**
+ * Decides whether the task-description message renders the Start agent
+ * button. Shown only for never-started (CREATED) sessions; resume-skipped
+ * (prevent-auto-start-on-open) sessions get the composer hint affordance
+ * instead (which also covers empty sessions and empty descriptions). Hidden
+ * while the task is SCHEDULING (the launch is in flight) and when no
+ * task/session context is bound.
+ */
+export function shouldShowDescriptionStartButton({
+  sessionState,
+  taskState,
+  taskId,
+  sessionId,
+}: {
+  sessionState: TaskSessionState | undefined;
+  taskState?: string;
+  taskId?: string;
+  sessionId?: string;
+}): boolean {
+  return sessionState === "CREATED" && taskState !== "SCHEDULING" && !!taskId && !!sessionId;
+}
+
+/**
+ * "Start agent" button inside the task-description message, shown only for
+ * never-started (CREATED) sessions. Dispatches the start_created launch and
+ * hides while the workspace environment is being prepared.
+ */
 function TaskDescriptionStartButton({ taskId, sessionId }: { taskId: string; sessionId: string }) {
   const { t } = useTranslation();
   const [isStarting, setIsStarting] = useState(false);
   const prepareStatus = useAppStore(
     (state) => state.prepareProgress.bySessionId[sessionId]?.status ?? null,
   );
+  const session = useAppStore((state) => state.taskSessions.items[sessionId] ?? null);
+  const setTaskSession = useAppStore((state) => state.setTaskSession);
 
   const handleStart = useCallback(async () => {
     setIsStarting(true);
     try {
+      // This button only renders for never-started (CREATED) sessions
+      // (shouldShowDescriptionStartButton); resume-skipped (recovered-idle)
+      // sessions get their affordance from the composer hint instead, so the
+      // launch intent is always start_created.
       const { request } = buildStartCreatedRequest(taskId, sessionId);
-      await launchSession(request);
+      const response = await launchSession(request);
+      if (response.success && response.state) {
+        // Hydrate the launch state (commonly STARTING) so the button hides
+        // immediately and repeated start_created requests cannot fire
+        // against an already-starting session before the WS transition lands.
+        // Never apply it over a newer live state: a WS RUNNING/FAILED
+        // transition can land before the launch response resolves, and the
+        // delayed STARTING must not hide a running agent or a failure's
+        // recovery affordances.
+        if (!isLaunchStateRegression(session?.state, response.state)) {
+          setTaskSession({
+            id: toSessionId(sessionId),
+            task_id: toTaskId(taskId),
+            state: response.state as TaskSessionState,
+            started_at: session?.started_at ?? "",
+            updated_at: session?.updated_at ?? "",
+          });
+        }
+      }
     } catch (error) {
       console.error("Failed to start agent:", error);
     } finally {
       setIsStarting(false);
     }
-  }, [taskId, sessionId]);
+  }, [taskId, sessionId, session, setTaskSession]);
 
   // Hide while environment is being prepared
   if (prepareStatus === "preparing") return null;
@@ -132,8 +185,12 @@ function TaskDescriptionMessage({
       />
     );
   }
-  const showStartButton =
-    sessionState === "CREATED" && task?.state !== "SCHEDULING" && !!taskId && !!sessionId;
+  const showStartButton = shouldShowDescriptionStartButton({
+    sessionState,
+    taskState: task?.state,
+    taskId,
+    sessionId,
+  });
   return (
     <>
       <ChatMessage
@@ -274,7 +331,14 @@ const adapters: MessageAdapter[] = [
       const permissionMessage = toolCallId
         ? ctx.permissionsByToolCallId?.get(toolCallId)
         : undefined;
-      return <KandevToolMessage comment={comment} permissionMessage={permissionMessage} />;
+      return (
+        <KandevToolMessage
+          comment={comment}
+          permissionMessage={permissionMessage}
+          sessionId={ctx.sessionId}
+          onOpenFile={ctx.onOpenFile}
+        />
+      );
     },
   },
   {
@@ -383,7 +447,7 @@ type MessageRendererProps = {
   childrenByParentToolCallId?: Map<string, Message[]>;
   worktreePath?: string;
   sessionId?: string;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, repo?: string) => void;
   onScrollToMessage?: (messageId: string) => void;
   isTurnActive?: boolean;
   isContainingTurnActive?: boolean;

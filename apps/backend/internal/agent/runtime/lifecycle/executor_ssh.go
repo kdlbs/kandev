@@ -17,8 +17,10 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentruntime"
+	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/secrets"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 const (
@@ -57,7 +59,7 @@ type sshSessionState struct {
 // Each session owns its own *ssh.Client (no shared pool). One SSH connection
 // per session keeps teardown simple — closing the executor instance closes
 // the client — at the cost of an extra TCP+handshake per session on the same
-// host. See docs/specs/ssh-executor/spec.md for the full design.
+// host. See docs/specs/executors/requirements/ssh-executor.md for the full design.
 type SSHExecutor struct {
 	agentctlResolver *AgentctlResolver
 	secretStore      secrets.SecretStore
@@ -84,7 +86,7 @@ func NewSSHExecutor(
 		agentctlResolver: resolver,
 		secretStore:      secretStore,
 		agentList:        agentList,
-		logger:           log.WithFields(zap.String("runtime", "ssh")),
+		logger:           log.WithFields(zap.String("runtime", executorTypeSSH)),
 		sessions:         make(map[string]*sshSessionState),
 	}
 	executor.brokerPreflight = executor.preflightGitHubCredentialBroker
@@ -191,6 +193,10 @@ func (r *SSHExecutor) workdirRoot(md map[string]interface{}) string {
 // backend restart), reuse the resumed SSH client + forwarder + remote pid
 // instead of starting a second remote agentctl on top of the live one.
 func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
+	baseCtx := preparationContext(ctx)
+	if err := validateAgentctlStartupConfig(req.AgentctlStartupConfig); err != nil {
+		return nil, fmt.Errorf("invalid agentctl startup configuration: %w", err)
+	}
 	resumed, ok := r.resumedStateForCreate(req)
 	if ok {
 		return r.buildResumedInstance(req, resumed), nil
@@ -198,12 +204,15 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 	if _, err := validateRemoteContributions(req.RemoteContributions); err != nil {
 		return nil, fmt.Errorf("ssh: validate remote contributions: %w", err)
 	}
+	if _, err := validateContributionDestinations(req.ContributionDestinations); err != nil {
+		return nil, fmt.Errorf("ssh: validate contribution destinations: %w", err)
+	}
 
 	target, err := r.targetFromMetadata(req.Metadata)
 	if err != nil {
 		return nil, err
 	}
-	client, err := dialSSH(ctx, target)
+	client, err := dialSSH(baseCtx, target)
 	if err != nil {
 		return nil, fmt.Errorf("ssh: connect to %s@%s: %w", target.User, target.Host, err)
 	}
@@ -214,36 +223,54 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 		}
 	}()
 	r.report(req.OnProgress, "Connecting to SSH host", PrepareStepCompleted, "")
-	if err := r.preflightGitHubCredentialBroker(ctx, client, req, SSHRemotePlatform{}); err != nil {
+	if err := r.preflightGitHubCredentialBroker(baseCtx, client, req, SSHRemotePlatform{}); err != nil {
 		return nil, err
 	}
 
-	agentctlBin, platform, err := r.prepareRemoteHost(ctx, client, req)
+	agentctlBin, platform, err := r.prepareRemoteHost(baseCtx, client, req)
 	if err != nil {
 		return nil, err
 	}
 
 	workdir := r.workdirRoot(req.Metadata)
-	taskDir, err := r.prepareRemoteTaskDir(ctx, client, workdir, req)
+	taskDir := ""
+	if req.WorkspaceReuseRequired {
+		// A sibling SSH execution gets its own agentctl/session directory, but
+		// must use the already materialized task directory verbatim. In
+		// particular it must not run the remote prepare script or checkout
+		// verification, either of which can mutate an active shared checkout.
+		taskDir, err = reuseRequiredRemoteTaskDir(req)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		taskDir, err = r.prepareRemoteTaskDir(baseCtx, client, workdir, req)
+		if err != nil {
+			return nil, err
+		}
+		r.maybeUploadCredentials(baseCtx, client, req, platform)
+		if err := r.runPrepareScript(baseCtx, client, taskDir, req, platform, agentctlBin); err != nil {
+			return nil, err
+		}
+	}
+	launchCtx, launchCancel := withLaunchPhaseTimeout(baseCtx)
+	defer launchCancel()
+	if !req.WorkspaceReuseRequired {
+		if err := r.verifyPrimaryCheckout(launchCtx, client, taskDir, req, platform); err != nil {
+			return nil, err
+		}
+	} else if err := ensureReuseRequiredRemoteTaskDirExists(launchCtx, client, taskDir); err != nil {
+		return nil, err
+	}
+	sessionDir, err := r.prepareRemoteSessionDir(launchCtx, client, taskDir, req)
 	if err != nil {
 		return nil, err
 	}
-	r.maybeUploadCredentials(ctx, client, req, platform)
-	if err := r.runPrepareScript(ctx, client, taskDir, req, platform, agentctlBin); err != nil {
-		return nil, err
-	}
-	if err := r.verifyPrimaryCheckout(ctx, client, taskDir, req, platform); err != nil {
-		return nil, err
-	}
-	sessionDir, err := r.prepareRemoteSessionDir(ctx, client, taskDir, req)
-	if err != nil {
-		return nil, err
-	}
-	if err := r.preflightAgentBinary(ctx, client, req, platform); err != nil {
+	if err := r.preflightAgentBinary(launchCtx, client, req, platform); err != nil {
 		return nil, err
 	}
 
-	port, pid, fwd, authToken, err := r.startAndForwardAgentctl(ctx, client, agentctlBin, taskDir, sessionDir, req, platform)
+	port, pid, fwd, authToken, err := r.startAndForwardAgentctl(launchCtx, client, agentctlBin, taskDir, sessionDir, req, platform)
 	if err != nil {
 		return nil, err
 	}
@@ -265,6 +292,17 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 	released = true // ownership transferred to session state; released on StopInstance
 
 	return r.buildInstance(req, target, fwd, taskDir, sessionDir, port, pid, workdir, authToken), nil
+}
+
+func reuseRequiredRemoteTaskDir(req *ExecutorCreateRequest) (string, error) {
+	if req == nil {
+		return "", fmt.Errorf("%w: missing remote task directory", models.ErrWorkspaceReuseUnsafe)
+	}
+	taskDir := strings.TrimSpace(getMetadataString(req.Metadata, MetadataKeySSHRemoteTaskDir))
+	if taskDir == "" {
+		return "", fmt.Errorf("%w: missing remote task directory", models.ErrWorkspaceReuseUnsafe)
+	}
+	return taskDir, nil
 }
 
 func (r *SSHExecutor) resumedStateForCreate(req *ExecutorCreateRequest) (*sshSessionState, bool) {
@@ -375,7 +413,11 @@ func (r *SSHExecutor) startAndForwardAgentctl(
 	// Keep only the managed broker values in the long-lived remote process.
 	// sshAgentctlLaunchEnv adds the bootstrap credentials required for the
 	// authenticated control handshake without forwarding profile secrets.
-	env := sshAgentctlLaunchEnv(managedGitHubBrokerEnv(req.Env), nonce)
+	env := sshAgentctlLaunchEnv(
+		managedGitCredentialBrokerEnv(sshRemoteContributionEnv(req, agentctlBin)),
+		nonce,
+		req.AgentctlStartupConfig,
+	)
 	shell := sshShellForRemote(req.Metadata, platform)
 	controlPort, pid, err := startRemoteAgentctl(ctx, client, shell, agentctlBin, taskDir, sessionDir, env, r.logger)
 	if err != nil {
@@ -393,7 +435,9 @@ func (r *SSHExecutor) startAndForwardAgentctl(
 		_ = stopRemoteAgentctl(ctx, client, sessionDir, pid)
 		return 0, 0, nil, "", ierr
 	}
-	instancePort, ierr := createRemoteAgentInstance(ctx, client, controlPort, taskDir, req, authToken, r.logger)
+	instancePort, ierr := createRemoteAgentInstance(
+		ctx, client, controlPort, taskDir, agentctlBin, req, authToken, r.logger,
+	)
 	if ierr != nil {
 		_ = stopRemoteAgentctl(ctx, client, sessionDir, pid)
 		r.report(req.OnProgress, "Creating agent instance", PrepareStepFailed, ierr.Error())
@@ -417,7 +461,7 @@ func (r *SSHExecutor) startAndForwardAgentctl(
 	return instancePort, pid, fwd, authToken, nil
 }
 
-func sshAgentctlLaunchEnv(base map[string]string, nonce string) map[string]string {
+func sshAgentctlLaunchEnv(base map[string]string, nonce string, startup ...commonconfig.AgentctlStartupConfig) map[string]string {
 	env := make(map[string]string, len(base))
 	for key, value := range base {
 		env[key] = value
@@ -428,6 +472,11 @@ func sshAgentctlLaunchEnv(base map[string]string, nonce string) map[string]strin
 	delete(env, "AGENTCTL_AUTH_TOKEN")
 	env["AGENTCTL_BOOTSTRAP_NONCE"] = nonce
 	env["AGENTCTL_LISTEN_HOST"] = sshAgentctlLoopbackHost
+	if len(startup) > 0 {
+		for key, value := range agentctlStartupEnvironment(startup[0]) {
+			env[key] = value
+		}
+	}
 	return env
 }
 
@@ -904,7 +953,7 @@ func (r *SSHExecutor) preflightAgentBinary(
 		return nil
 	}
 
-	cmd := req.AgentConfig.BuildCommand(agents.CommandOptions{Runtime: agentruntime.RuntimeSSH})
+	cmd := buildRemotePreflightAgentCommand(req)
 	args := cmd.Args()
 	if len(args) == 0 {
 		return nil
@@ -922,6 +971,16 @@ func (r *SSHExecutor) preflightAgentBinary(
 	}
 	r.report(req.OnProgress, stepName, PrepareStepCompleted, out)
 	return nil
+}
+
+func buildRemotePreflightAgentCommand(req *ExecutorCreateRequest) agents.Command {
+	if req == nil || req.AgentConfig == nil {
+		return agents.Command{}
+	}
+	return req.AgentConfig.BuildCommand(agents.CommandOptions{
+		Runtime:               agentruntime.RuntimeSSH,
+		ManagedRuntimeVersion: req.ManagedRuntimeVersion,
+	})
 }
 
 // probeNativeBinary probes the remote for the agent's standalone CLI (if it

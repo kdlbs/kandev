@@ -22,6 +22,7 @@ import type {
   AgentModelConfigResponse,
   ResolveAgentModelConfigRequest,
 } from "@/lib/types/http";
+import type { MCPStrategyOption } from "@/lib/types/http-agents";
 import type {
   MessageQueueSettingsPatch,
   MessageQueueSettingsResponse,
@@ -332,12 +333,53 @@ export async function getInstallJob(
 }
 
 export async function createCustomTUIAgent(
-  payload: { display_name: string; model?: string; command: string; description?: string },
+  payload: {
+    display_name: string;
+    model?: string;
+    command: string;
+    description?: string;
+    mcp_strategy?: string;
+  },
   options?: ApiRequestOptions,
 ): Promise<Agent> {
   const res = await fetchJson<Agent>("/api/v1/agents/tui", {
     ...options,
     init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+  });
+  return normalizeAgentResponse(res);
+}
+
+/**
+ * Lists the MCP injection mechanisms a custom TUI agent can use. Served by the
+ * backend so the option list cannot drift from the strategies that actually
+ * resolve at launch.
+ */
+export async function listMCPStrategies(options?: ApiRequestOptions): Promise<MCPStrategyOption[]> {
+  const res = await fetchJson<{ strategies?: MCPStrategyOption[] }>(
+    "/api/v1/agents/tui/mcp-strategies",
+    options,
+  );
+  return res.strategies ?? [];
+}
+
+/**
+ * Changes an existing custom TUI agent's MCP injection strategy. Pass an empty
+ * string to turn injection off. This is the only mutable part of a tui_config —
+ * it exists so agents created before the field existed can opt in without being
+ * deleted and rebuilt.
+ */
+export async function updateCustomTUIAgentMCPStrategy(
+  agentId: string,
+  mcpStrategy: string,
+  options?: ApiRequestOptions,
+): Promise<Agent> {
+  const res = await fetchJson<Agent>(`/api/v1/agents/tui/${agentId}/mcp`, {
+    ...options,
+    init: {
+      method: "PATCH",
+      body: JSON.stringify({ mcp_strategy: mcpStrategy }),
+      ...(options?.init ?? {}),
+    },
   });
   return normalizeAgentResponse(res);
 }

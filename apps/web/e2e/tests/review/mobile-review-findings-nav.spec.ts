@@ -7,20 +7,12 @@ import { SessionPage } from "../../pages/session-page";
 
 const REVIEWED_FILE = "review-target.ts";
 
-/** Points the review runner at the mock agent via the user's default pair. */
-async function configureReviewer(apiClient: {
-  listInferenceAgents: () => Promise<{
-    agents: Array<{ id: string; models: Array<{ id: string }> }>;
-  }>;
-  saveUserSettings: (settings: Record<string, unknown>) => Promise<void>;
-}) {
-  const { agents } = await apiClient.listInferenceAgents();
-  const agent = agents.find((candidate) => candidate.models.length > 0) ?? agents[0];
-  if (!agent) throw new Error("mobile review nav e2e: no inference-capable agent was discovered");
-  await apiClient.saveUserSettings({
-    default_utility_agent_id: agent.id,
-    default_utility_model: agent.models[0]?.id ?? "",
-  });
+/** Points the review runner at the seeded agent profile. */
+async function configureReviewer(
+  apiClient: { saveUserSettings: (settings: Record<string, unknown>) => Promise<void> },
+  profileId: string,
+) {
+  await apiClient.saveUserSettings({ default_utility_agent_profile_id: profileId });
 }
 
 test.describe("Review findings navigator on mobile", () => {
@@ -32,7 +24,7 @@ test.describe("Review findings navigator on mobile", () => {
     seedData,
     backend,
   }) => {
-    await configureReviewer(apiClient);
+    await configureReviewer(apiClient, seedData.agentProfileId);
 
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,

@@ -64,6 +64,7 @@ function renderWithStore(initialState: Partial<AppState>, ui: ReactNode) {
 function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
   return {
     id: "pr-id",
+    workspace_id: "workspace-1",
     task_id: "task-1",
     owner: "acme",
     repo: "demo",
@@ -94,8 +95,11 @@ function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
   };
 }
 
+// auto_fix_enabled is per-PR; pr_options defaults to one entry matching
+// makePR()'s identity (task-1 / repository_id "" / #42) so overrides like
+// `makeCIOptions({ auto_fix_enabled: true })` still drive the rendered chip.
 function makeCIOptions(overrides: Partial<TaskCIAutomationOptions> = {}): TaskCIAutomationOptions {
-  return {
+  const base = {
     task_id: "task-1",
     auto_fix_enabled: false,
     auto_merge_enabled: false,
@@ -106,6 +110,23 @@ function makeCIOptions(overrides: Partial<TaskCIAutomationOptions> = {}): TaskCI
     auto_fix_max_rounds: 10,
     pr_states: [],
     ...overrides,
+  };
+  return {
+    ...base,
+    pr_options: overrides.pr_options ?? [
+      {
+        task_id: base.task_id,
+        repository_id: "",
+        pr_number: 42,
+        auto_fix_enabled: base.auto_fix_enabled,
+        auto_merge_enabled: base.auto_merge_enabled,
+        prompt_on_review_requested: false,
+        prompt_on_merged: false,
+        prompt_on_closed: false,
+        created_at: "",
+        updated_at: "",
+      },
+    ],
   };
 }
 
@@ -170,7 +191,7 @@ describe("PRStatusChip auto-fix round display", () => {
     renderWithStore(stateWithAutoFix(10, true), <PRStatusChip taskId="task-1" />);
 
     const chip = screen.getByTestId(AUTO_FIX_BADGE_TESTID);
-    expect(chip.textContent).toBe("Auto-fix 10/10");
+    expect(chip.textContent).toBe("Auto-fix paused 10/10");
     expect(chip.getAttribute("data-auto-fix-exhausted")).toBe("true");
   });
 
