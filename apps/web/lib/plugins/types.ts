@@ -8,7 +8,6 @@ import type { StoreApi } from "zustand";
 import type { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { AppState } from "@/lib/state/store";
 import type * as PluginSDK from "@kandev/plugin-sdk";
-import type { PluginUIApi } from "@kandev/plugin-sdk";
 export type {
   IntegrationSettingsActionProps,
   IntegrationSettingsActionSurface,
