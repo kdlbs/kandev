@@ -33,6 +33,7 @@ export function useWindowControlsOverlay(): WindowControlsOverlayState {
 
     const handleGeometryChange = () => setState(readWindowControlsOverlay());
     overlay.addEventListener("geometrychange", handleGeometryChange);
+    handleGeometryChange();
     return () => overlay.removeEventListener("geometrychange", handleGeometryChange);
   }, []);
 

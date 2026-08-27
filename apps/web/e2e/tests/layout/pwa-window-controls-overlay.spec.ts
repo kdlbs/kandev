@@ -76,11 +76,12 @@ test.describe("desktop PWA window controls overlay", () => {
     const sidebarHeader = testPage.locator('[data-window-controls-overlay-region="sidebar"]');
     const pageHeader = testPage.locator('[data-window-controls-overlay-region="content"]').first();
     await expect(shell).toHaveAttribute("data-window-controls-overlay", "visible");
-    await expect(testPage.locator('meta[name="theme-color"]')).toHaveCount(1);
-    await expect(testPage.locator('meta[name="theme-color"]')).toHaveAttribute(
-      "content",
-      "#181818",
-    );
+    await expect(
+      testPage.locator('meta[data-kandev-window-controls-theme-color="true"]'),
+    ).toHaveCount(1);
+    await expect(
+      testPage.locator('meta[data-kandev-window-controls-theme-color="true"]'),
+    ).toHaveAttribute("content", "#181818");
     await expect(sidebarHeader).toBeVisible();
     await expect(pageHeader).toBeVisible();
 
@@ -125,6 +126,32 @@ test.describe("desktop PWA window controls overlay", () => {
     expect(await testPage.evaluate(() => document.documentElement.scrollWidth)).toBe(
       await testPage.evaluate(() => document.documentElement.clientWidth),
     );
+  });
+
+  test("keeps task topbar controls before the right-side system controls", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await testPage.setViewportSize({ width: 1600, height: 900 });
+    await installWindowControlsOverlay(testPage, { x: 0, y: 0, width: 1510, height: 40 });
+    const task = await apiClient.createTask(seedData.workspaceId, "Overlay Task Topbar", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    await testPage.goto(`/t/${task.id}`);
+
+    const taskHeader = testPage.getByTestId("task-topbar");
+    await expect(taskHeader).toBeVisible();
+    await expect(taskHeader).toHaveAttribute("data-window-controls-overlay-region", "content");
+    await expect
+      .poll(() =>
+        taskHeader.evaluate((element) =>
+          getComputedStyle(element).getPropertyValue("-webkit-app-region"),
+        ),
+      )
+      .toBe("drag");
+    expect((await readInteractiveBounds(taskHeader)).maxRight).toBeLessThanOrEqual(1510);
   });
 
   test("preserves the existing desktop topbar geometry without the overlay API", async ({
