@@ -101,7 +101,8 @@ Implemented the bulk replacement action and scheduler batching. Accepted
 replacement payloads are converted and settled before one `updateMessages`
 transaction, while add, delete, and turn-settle events remain ordered barriers.
 The shared merge helper preserves partial-field behavior and unaffected session
-state remains stable.
+state remains stable. The stale-snapshot regression now asserts that neither the
+legacy single-update action nor the production bulk action is called.
 
 Targeted verification passed:
 

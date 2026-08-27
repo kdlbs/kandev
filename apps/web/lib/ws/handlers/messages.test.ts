@@ -398,7 +398,7 @@ describe("session message pending-action ordering", () => {
 
 describe("session message snapshot ordering", () => {
   it("does not apply a batched update older than a refetched snapshot", () => {
-    const { store, updateMessage } = makeStore({
+    const { store, updateMessage, updateMessages } = makeStore({
       "session-1": [
         {
           id: "message-1",
@@ -415,6 +415,7 @@ describe("session message snapshot ordering", () => {
     frame.runFrame();
 
     expect(updateMessage).not.toHaveBeenCalled();
+    expect(updateMessages).not.toHaveBeenCalled();
     registration.dispose();
   });
 });

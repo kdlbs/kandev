@@ -28,6 +28,113 @@ beforeEach(() => {
   storeMocks.snapshot.mockReset().mockResolvedValue([]);
 });
 
+describe("browser logger scheduling", () => {
+  it("keeps the collection window before scheduling browser-idle persistence", async () => {
+    vi.useFakeTimers();
+    let idleCallback: (() => void) | undefined;
+    const requestIdle = vi.fn((callback: () => void, options: { timeout: number }) => {
+      idleCallback = callback;
+      return options.timeout;
+    });
+    const cancelIdle = vi.fn();
+    vi.stubGlobal("requestIdleCallback", requestIdle);
+    vi.stubGlobal("cancelIdleCallback", cancelIdle);
+
+    try {
+      stageLogEntry({
+        timestamp: new Date().toISOString(),
+        level: "info",
+        source: TEST_SOURCE,
+        message: "idle-after-window",
+      });
+
+      await vi.advanceTimersByTimeAsync(249);
+      expect(requestIdle).not.toHaveBeenCalled();
+      expect(storeMocks.append).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(requestIdle).toHaveBeenCalledTimes(1);
+      expect(requestIdle.mock.calls[0]?.[1]).toEqual({ timeout: 750 });
+      expect(storeMocks.append).not.toHaveBeenCalled();
+
+      idleCallback?.();
+      await vi.waitFor(() => expect(storeMocks.append).toHaveBeenCalledTimes(1));
+    } finally {
+      vi.unstubAllGlobals();
+      vi.runOnlyPendingTimers();
+      vi.useRealTimers();
+    }
+  });
+
+  it("uses the bounded deadline when browser idle time does not arrive", async () => {
+    vi.useFakeTimers();
+    const requestIdle = vi.fn(() => 7);
+    const cancelIdle = vi.fn();
+    vi.stubGlobal("requestIdleCallback", requestIdle);
+    vi.stubGlobal("cancelIdleCallback", cancelIdle);
+
+    try {
+      stageLogEntry({
+        timestamp: new Date().toISOString(),
+        level: "info",
+        source: TEST_SOURCE,
+        message: "idle-deadline",
+      });
+
+      await vi.advanceTimersByTimeAsync(250);
+      expect(storeMocks.append).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(749);
+      expect(storeMocks.append).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      await vi.waitFor(() => expect(storeMocks.append).toHaveBeenCalledTimes(1));
+      expect(cancelIdle).toHaveBeenCalledWith(7);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.runOnlyPendingTimers();
+      vi.useRealTimers();
+    }
+  });
+
+  it("bypasses a pending browser-idle wait when snapshotting", async () => {
+    vi.useFakeTimers();
+    let idleCallback: (() => void) | undefined;
+    const requestIdle = vi.fn((callback: () => void) => {
+      idleCallback = callback;
+      return 7;
+    });
+    const cancelIdle = vi.fn();
+    vi.stubGlobal("requestIdleCallback", requestIdle);
+    vi.stubGlobal("cancelIdleCallback", cancelIdle);
+
+    try {
+      stageLogEntry({
+        timestamp: new Date().toISOString(),
+        level: "info",
+        source: TEST_SOURCE,
+        message: "snapshot-idle-bypass",
+      });
+
+      await vi.advanceTimersByTimeAsync(250);
+      expect(requestIdle).toHaveBeenCalledTimes(1);
+      expect(storeMocks.append).not.toHaveBeenCalled();
+
+      await snapshotBrowserLogs(TEST_SCOPE);
+      expect(storeMocks.append).toHaveBeenCalledTimes(1);
+      expect(cancelIdle).toHaveBeenCalledWith(7);
+
+      idleCallback?.();
+      await vi.advanceTimersByTimeAsync(750);
+      expect(storeMocks.append).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.runOnlyPendingTimers();
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("browser logger collection", () => {
   it("coalesces a log burst in one 250 ms window before one bounded append", async () => {
     vi.useFakeTimers();

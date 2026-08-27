@@ -105,16 +105,19 @@ granularity only.
 
 ### Browser diagnostics
 
-- Replace the idle-first drain trigger with one collection gate. The first
-  staged entry starts a 250 ms timer. The timer then starts the existing
-  serialized drain. Snapshot collection cancels the wait and joins that drain.
+- Replace the idle-first drain trigger with one collection gate followed by
+  bounded idle scheduling. The first staged entry starts a 250 ms timer. When
+  it closes, the runtime requests browser idle time with the remaining
+  one-second deadline and keeps a cancellable timer fallback. Snapshot
+  collection cancels both waits and joins that drain.
 - Prepare an accepted log entry once after adding `identity_scope`. Reuse its
   detached object and exact UTF-8 byte count in the memory buffer, staging
   limits, IndexedDB record, and retention totals.
 - Keep the 50-entry, 256 KiB transaction bounds and the 500-entry, 2 MiB
   staging bounds.
 - Make `useDebugProcessedPipeline` keep the latest inputs in a ref. Compute and
-  emit its growing collection summary at most once per 250 ms.
+  emit its growing collection summary at most once per 250 ms, flushing the
+  pending latest sample on session change and unmount.
 
 ### Message frame transaction
 
@@ -145,7 +148,7 @@ granularity only.
 | `AC-PLATFORM-BROWSER-CONSOLE-RETENTION-001.5`    | Runtime test holds one append and proves maximum append concurrency remains one.                                      |
 | `AC-PLATFORM-BROWSER-CONSOLE-RETENTION-001.8`    | Fake-time runtime test stages a burst and proves idle availability cannot create early one-entry transactions.        |
 | `AC-PLATFORM-BROWSER-CONSOLE-RETENTION-001.9`    | Runtime test proves a snapshot bypasses the collection timer and waits for the shared drain.                          |
-| `AC-PLATFORM-BOUNDED-TASK-STATUS-DELIVERY-001.7` | Existing scheduler tests prove newest-payload replacement, stale rejection, and semantic barriers.                    |
+| `AC-PLATFORM-BOUNDED-TASK-STATUS-DELIVERY-001.7` | Existing scheduler tests prove newest-payload replacement, stale rejection through the bulk path, and semantic barriers. |
 | `AC-PLATFORM-BOUNDED-TASK-STATUS-DELIVERY-001.9` | Scheduler and real-store tests prove that several message keys cause one bulk action and one subscriber notification. |
 | `AC-UI-TRANSCRIPT-AUTO-SCROLL-001.1`             | Existing unit and browser tests prove that disabled auto-scroll keeps its captured position.                          |
 | `AC-UI-TRANSCRIPT-AUTO-SCROLL-001.2`             | Existing unit and browser tests prove catch-up after re-enable.                                                       |

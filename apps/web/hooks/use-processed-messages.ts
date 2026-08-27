@@ -43,49 +43,62 @@ function countByType(messages: Message[]): Record<string, number> {
   return out;
 }
 
-function useDebugProcessedPipeline(args: {
+type ProcessedPipelineDebugArgs = {
   sessionId: string | null;
   messages: Message[];
   visibleMessages: Message[];
   footerActionCount: number;
   groupedItems: RenderItem[];
-}) {
+};
+
+function useDebugProcessedPipeline(args: ProcessedPipelineDebugArgs) {
   const latestArgsRef = useRef(args);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const emitLatestDebugSample = () => {
+    const latest = latestArgsRef.current;
+    debug("pipeline", {
+      sessionId: latest.sessionId,
+      input: { count: latest.messages.length, byType: countByType(latest.messages) },
+      afterFilter: {
+        count: latest.visibleMessages.length,
+        byType: countByType(latest.visibleMessages),
+      },
+      droppedByFilter: latest.messages.length - latest.visibleMessages.length,
+      footerActionCount: latest.footerActionCount,
+      groupedItemKinds: latest.groupedItems.reduce<Record<string, number>>((acc, item) => {
+        acc[item.type] = (acc[item.type] ?? 0) + 1;
+        return acc;
+      }, {}),
+      turnGroupSizes: latest.groupedItems
+        .filter((i): i is TurnGroup => i.type === "turn_group")
+        .map((g) => ({ turnId: g.turnId, size: g.messages.length })),
+    });
+  };
+
+  const flushPendingDebugSample = () => {
+    if (timerRef.current === null) return;
+    clearTimeout(timerRef.current);
+    timerRef.current = null;
+    emitLatestDebugSample();
+  };
+
   useEffect(() => {
+    if (latestArgsRef.current.sessionId !== args.sessionId) {
+      flushPendingDebugSample();
+    }
     latestArgsRef.current = args;
     if (!isDebug()) return;
     if (timerRef.current !== null) return;
     timerRef.current = setTimeout(() => {
       timerRef.current = null;
-      const latest = latestArgsRef.current;
-      debug("pipeline", {
-        sessionId: latest.sessionId,
-        input: { count: latest.messages.length, byType: countByType(latest.messages) },
-        afterFilter: {
-          count: latest.visibleMessages.length,
-          byType: countByType(latest.visibleMessages),
-        },
-        droppedByFilter: latest.messages.length - latest.visibleMessages.length,
-        footerActionCount: latest.footerActionCount,
-        groupedItemKinds: latest.groupedItems.reduce<Record<string, number>>((acc, item) => {
-          acc[item.type] = (acc[item.type] ?? 0) + 1;
-          return acc;
-        }, {}),
-        turnGroupSizes: latest.groupedItems
-          .filter((i): i is TurnGroup => i.type === "turn_group")
-          .map((g) => ({ turnId: g.turnId, size: g.messages.length })),
-      });
+      emitLatestDebugSample();
     }, PROCESSED_PIPELINE_DEBUG_INTERVAL_MS);
   }, [args]);
 
   useEffect(
     () => () => {
-      if (timerRef.current !== null) {
-        clearTimeout(timerRef.current);
-        timerRef.current = null;
-      }
+      flushPendingDebugSample();
     },
     [],
   );

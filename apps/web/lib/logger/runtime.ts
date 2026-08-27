@@ -13,6 +13,8 @@ const DRAIN_BYTE_LIMIT = 256 * 1024;
 const STAGING_ENTRY_LIMIT = 500;
 const STAGING_BYTE_LIMIT = 2 * 1024 * 1024;
 const COLLECTION_WINDOW_MS = 250;
+const IDLE_DEADLINE_MS = 1_000;
+const POST_COLLECTION_IDLE_TIMEOUT_MS = IDLE_DEADLINE_MS - COLLECTION_WINDOW_MS;
 
 type Staged = PreparedLogEntry;
 
@@ -21,6 +23,9 @@ let identityScope: string | null = "default-user";
 let staging: Staged[] = [];
 let stagingBytes = 0;
 let collectionTimer: ReturnType<typeof setTimeout> | null = null;
+let idleCallbackHandle: number | null = null;
+let idleFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+let idleGeneration = 0;
 let drainPromise: Promise<void> | null = null;
 let storageMode: "indexeddb" | "memory" = "indexeddb";
 let persistenceFailures = 0;
@@ -94,11 +99,43 @@ function makeStagingRoom(level: LogLevel, bytes: number): boolean {
 }
 
 function scheduleDrain(): void {
-  if (collectionTimer !== null || drainPromise) return;
+  if (
+    collectionTimer !== null ||
+    idleCallbackHandle !== null ||
+    idleFallbackTimer !== null ||
+    drainPromise
+  ) {
+    return;
+  }
   collectionTimer = setTimeout(() => {
     collectionTimer = null;
-    void requestDrain();
+    schedulePostWindowDrain();
   }, COLLECTION_WINDOW_MS);
+}
+
+function schedulePostWindowDrain(): void {
+  if (drainPromise || storageMode === "memory" || staging.length === 0) return;
+  if (typeof requestIdleCallback !== "function") {
+    void requestDrain();
+    return;
+  }
+
+  const generation = ++idleGeneration;
+  const drain = () => {
+    if (generation !== idleGeneration) return;
+    idleCallbackHandle = null;
+    cancelIdleFallbackTimer();
+    void requestDrain();
+  };
+  idleCallbackHandle = requestIdleCallback(drain, {
+    timeout: POST_COLLECTION_IDLE_TIMEOUT_MS,
+  });
+  idleFallbackTimer = setTimeout(() => {
+    if (generation !== idleGeneration) return;
+    idleFallbackTimer = null;
+    cancelIdleCallback();
+    void requestDrain();
+  }, POST_COLLECTION_IDLE_TIMEOUT_MS);
 }
 
 function requestDrain(): Promise<void> {
@@ -144,6 +181,7 @@ async function drainBatch(): Promise<boolean> {
 
 async function flushStaging(): Promise<void> {
   cancelCollectionTimer();
+  cancelIdleCallback();
   while (drainPromise || (storageMode === "indexeddb" && staging.length > 0)) {
     await requestDrain();
   }
@@ -155,7 +193,26 @@ function cancelCollectionTimer(): void {
   collectionTimer = null;
 }
 
+function cancelIdleFallbackTimer(): void {
+  if (idleFallbackTimer === null) return;
+  clearTimeout(idleFallbackTimer);
+  idleFallbackTimer = null;
+}
+
+function cancelIdleCallback(): void {
+  idleGeneration += 1;
+  if (idleCallbackHandle !== null) {
+    if (typeof globalThis.cancelIdleCallback === "function") {
+      globalThis.cancelIdleCallback(idleCallbackHandle);
+    }
+    idleCallbackHandle = null;
+  }
+  cancelIdleFallbackTimer();
+}
+
 function degradePersistence(): void {
+  cancelCollectionTimer();
+  cancelIdleCallback();
   persistenceFailures += 1;
   storageMode = "memory";
   staging = [];
@@ -172,6 +229,7 @@ function randomID(): string {
 
 export function _resetRuntimeForTesting(): void {
   cancelCollectionTimer();
+  cancelIdleCallback();
   identityScope = "default-user";
   staging = [];
   stagingBytes = 0;

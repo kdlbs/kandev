@@ -80,6 +80,33 @@ describe("useProcessedMessages task description fallback", () => {
       vi.useRealTimers();
     }
   });
+
+  it("flushes pending debug samples on session changes and unmount", () => {
+    vi.useFakeTimers();
+    const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => undefined);
+    const firstMessage = makeMessage("agent-1", "agent", "first");
+    const secondMessage = makeMessage("agent-2", "agent", "second");
+    const { rerender, unmount } = renderHook(
+      ({ sessionId, messages }: { sessionId: string; messages: Message[] }) =>
+        useProcessedMessages(messages, "t1", sessionId, ""),
+      { initialProps: { sessionId: "s1", messages: [firstMessage] } },
+    );
+
+    try {
+      rerender({ sessionId: "s2", messages: [firstMessage, secondMessage] });
+
+      expect(debugSpy).toHaveBeenCalledTimes(1);
+      expect(debugSpy.mock.calls[0]?.[0]).toContain('input={"count":1');
+
+      unmount();
+
+      expect(debugSpy).toHaveBeenCalledTimes(2);
+      expect(debugSpy.mock.calls[1]?.[0]).toContain('input={"count":2');
+    } finally {
+      debugSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
 });
 
 afterEach(() => {
