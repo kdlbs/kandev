@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/repository-sets/spec.md"
+spec: "../../specs/workspaces/requirements/repository-sets.md"
 ---
 
 # Task 01: Repository Set Persistence Contracts

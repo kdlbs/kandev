@@ -45,6 +45,7 @@
   "openTaskSessionBeforeSending": "发送给智能体前请先打开任务会话。",
   "openWith": "打开方式…",
   "pasteLink": "粘贴链接…",
+  "planFormattingToolbar": "计划格式工具栏",
   "pleaseTryAgain": "请重试。",
   "previewMarkdown": "预览 Markdown",
   "queuedForTheAgent": "已排队等待智能体。",

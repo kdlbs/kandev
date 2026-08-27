@@ -88,6 +88,117 @@ func TestAddTaskParticipant_IsIdempotentPerNaturalKey(t *testing.T) {
 	}
 }
 
+// seedAutoSeat inserts an engine auto-cast (provenance="auto") participant
+// row directly, bypassing AddTaskParticipant, to simulate the on_enter
+// ensure_participant_seat action having already run before a manual
+// registration arrives.
+func seedAutoSeat(t *testing.T, repo *sqlite.Repository, id, stepID, taskID, role, agentID string) {
+	t.Helper()
+	if _, err := repo.ExecRaw(context.Background(), `
+		INSERT INTO workflow_step_participants
+			(id, step_id, task_id, role, agent_profile_id, decision_required, position, provenance)
+		VALUES (?, ?, ?, ?, ?, 1, 0, 'auto')
+	`, id, stepID, taskID, role, agentID); err != nil {
+		t.Fatalf("seed auto seat: %v", err)
+	}
+}
+
+// TestAddTaskParticipant_ClaimsUndecidedAutoSeat covers the seat-provenance
+// race: the engine's on_enter ensure_participant_seat action auto-casts a
+// fallback reviewer, then a human manually registers a different reviewer
+// moments later. Without claiming, this produces two seats for one role, so
+// an all_approve quorum guard needing 2 decisions never resolves from a
+// single human decision. The manual call must claim the undecided auto
+// seat in place instead of inserting a second one.
+func TestAddTaskParticipant_ClaimsUndecidedAutoSeat(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	seedParticipantTask(t, repo, "ap-claim", "step-1")
+	seedAutoSeat(t, repo, "auto-seat-1", "step-1", "ap-claim", "reviewer", "agent-auto")
+
+	if err := repo.AddTaskParticipant(ctx, "ap-claim", "agent-human", "reviewer"); err != nil {
+		t.Fatalf("AddTaskParticipant: %v", err)
+	}
+
+	if n := participantRowCount(t, repo, "ap-claim"); n != 1 {
+		t.Fatalf("rows = %d, want 1 (claimed in place, not duplicated)", n)
+	}
+	got, err := repo.ListTaskParticipants(ctx, "ap-claim", "reviewer")
+	if err != nil {
+		t.Fatalf("ListTaskParticipants: %v", err)
+	}
+	if len(got) != 1 || got[0].AgentProfileID != "agent-human" {
+		t.Fatalf("participants = %+v, want single row claimed by agent-human", got)
+	}
+
+	var provenance string
+	if err := repo.ReaderDB().Get(&provenance,
+		`SELECT provenance FROM workflow_step_participants WHERE id = 'auto-seat-1'`); err != nil {
+		t.Fatalf("read provenance: %v", err)
+	}
+	if provenance != "manual" {
+		t.Errorf("provenance = %q, want %q after claim", provenance, "manual")
+	}
+}
+
+// TestAddTaskParticipant_DoesNotClaimADecidedAutoSeat: once the auto-cast
+// seat already has a decision recorded against it, claiming would silently
+// reassign a seat whose vote is already on the record — so a second manual
+// registration must insert a distinct seat instead.
+func TestAddTaskParticipant_DoesNotClaimADecidedAutoSeat(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	seedParticipantTask(t, repo, "ap-decided", "step-1")
+	seedAutoSeat(t, repo, "auto-seat-2", "step-1", "ap-decided", "reviewer", "agent-auto")
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO workflow_step_decisions (id, task_id, step_id, participant_id, decision, decided_at)
+		VALUES ('dec-1', 'ap-decided', 'step-1', 'auto-seat-2', 'approved', datetime('now'))
+	`); err != nil {
+		t.Fatalf("seed decision: %v", err)
+	}
+
+	if err := repo.AddTaskParticipant(ctx, "ap-decided", "agent-human", "reviewer"); err != nil {
+		t.Fatalf("AddTaskParticipant: %v", err)
+	}
+
+	if n := participantRowCount(t, repo, "ap-decided"); n != 2 {
+		t.Fatalf("rows = %d, want 2 (decided auto seat must not be claimed)", n)
+	}
+	var provenance string
+	if err := repo.ReaderDB().Get(&provenance,
+		`SELECT provenance FROM workflow_step_participants WHERE id = 'auto-seat-2'`); err != nil {
+		t.Fatalf("read provenance: %v", err)
+	}
+	if provenance != "auto" {
+		t.Errorf("provenance = %q, want unchanged %q", provenance, "auto")
+	}
+}
+
+// TestAddTaskParticipant_MultiReviewerManualSeatsUntouched preserves the
+// legitimate multi-reviewer scenario TestAddTaskParticipant_IsIdempotentPerNaturalKey
+// already covers for distinct agents: two manually-added seats (both
+// provenance="manual") for the same role are never collapsed by the claim
+// logic, since neither carries provenance="auto".
+func TestAddTaskParticipant_MultiReviewerManualSeatsUntouched(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	seedParticipantTask(t, repo, "ap-multi", "step-1")
+
+	if err := repo.AddTaskParticipant(ctx, "ap-multi", "agent-one", "reviewer"); err != nil {
+		t.Fatalf("AddTaskParticipant (first): %v", err)
+	}
+	if err := repo.AddTaskParticipant(ctx, "ap-multi", "agent-two", "reviewer"); err != nil {
+		t.Fatalf("AddTaskParticipant (second): %v", err)
+	}
+
+	if n := participantRowCount(t, repo, "ap-multi"); n != 2 {
+		t.Fatalf("rows = %d, want 2 distinct manual reviewer seats", n)
+	}
+}
+
 // A task with no workflow step cannot own a participant row, so the write
 // is silently skipped rather than erroring.
 func TestAddTaskParticipant_SkipsTasksWithoutAStep(t *testing.T) {

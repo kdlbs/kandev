@@ -32,6 +32,8 @@ type RepoChipsRowProps = {
    */
   onRowRepositoryChange: (key: string, value: string) => void;
   onRowBranchChange: (key: string, value: string) => void;
+  onRowPolicyChange?: (key: string, policyId: string, baseBranch: string) => void;
+  onPolicySelected?: () => void;
   /** Toggles the Remote tab on/off. Remote-mode rows live in `fs.remoteRepos`. */
   onToggleRemote?: () => void;
   /**
@@ -89,6 +91,8 @@ export function RepoChipsRow({
   workspaceId,
   onRowRepositoryChange,
   onRowBranchChange,
+  onRowPolicyChange,
+  onPolicySelected,
   onToggleRemote,
   freshBranchAvailable,
   freshBranchEnabled,
@@ -137,6 +141,7 @@ export function RepoChipsRow({
   const hasDiscovered = fs.discoveredRepositories.length > 0;
   const canAddMore = repositories.length > 0 || hasDiscovered;
   const addHint = computeAddHint(canAddMore, repositories.length);
+  const branchPolicyDisabledReason = policyDisabled(isLocalExecutor, freshBranchAvailable);
 
   return (
     // min-h-9 reserves enough vertical space for the tallest mode body so the
@@ -158,8 +163,11 @@ export function RepoChipsRow({
         addHint={addHint}
         freshBranchAvailable={freshBranchAvailable}
         freshBranchEnabled={freshBranchEnabled}
+        branchPolicyDisabledReason={branchPolicyDisabledReason}
         onRowRepositoryChange={onRowRepositoryChange}
         onRowBranchChange={onRowBranchChange}
+        onRowPolicyChange={onRowPolicyChange}
+        onPolicySelected={onPolicySelected}
         onToggleFreshBranch={onToggleFreshBranch}
         onWorkspacePathChange={onWorkspacePathChange}
         lastUsedBranch={lastUsedBranch}
@@ -245,8 +253,11 @@ function ModeBody({
   addHint,
   freshBranchAvailable,
   freshBranchEnabled,
+  branchPolicyDisabledReason,
   onRowRepositoryChange,
   onRowBranchChange,
+  onRowPolicyChange,
+  onPolicySelected,
   onToggleFreshBranch,
   onWorkspacePathChange,
   lastUsedBranch,
@@ -264,8 +275,11 @@ function ModeBody({
   addHint: string | undefined;
   freshBranchAvailable?: boolean;
   freshBranchEnabled?: boolean;
+  branchPolicyDisabledReason?: string;
   onRowRepositoryChange: (key: string, value: string) => void;
   onRowBranchChange: (key: string, value: string) => void;
+  onRowPolicyChange?: (key: string, policyId: string, baseBranch: string) => void;
+  onPolicySelected?: () => void;
   onToggleFreshBranch?: (enabled: boolean) => void;
   onWorkspacePathChange?: (value: string) => void;
   lastUsedBranch?: string | null;
@@ -306,12 +320,16 @@ function ModeBody({
       currentLocalBranch={fs.currentLocalBranch}
       currentLocalBranchLoading={fs.currentLocalBranchLoading}
       freshBranchEnabled={fs.freshBranchEnabled}
+      branchPolicyDisabledReason={branchPolicyDisabledReason}
       canAddMore={canAddMore}
       addHint={addHint}
       onAdd={fs.addRepository}
       onRemove={fs.removeRepository}
       onRowRepositoryChange={onRowRepositoryChange}
       onRowBranchChange={onRowBranchChange}
+      onRowPolicyChange={onRowPolicyChange}
+      onPolicySelected={onPolicySelected}
+      showBranchPolicies
       lastUsedBranch={lastUsedBranch}
       userSettingsLoaded={userSettingsLoaded}
       onCreateRepository={onCreateRepository}
@@ -366,4 +384,13 @@ function computeAddHint(canAddMore: boolean, workspaceRepoCount: number): string
   if (canAddMore) return undefined;
   if (workspaceRepoCount === 0) return t("task:noRepositoriesAvailableInWorkspace");
   return t("task:allWorkspaceRepositoriesAdded");
+}
+
+function policyDisabled(
+  isLocalExecutor: boolean | undefined,
+  freshBranchAvailable: boolean | undefined,
+): string | undefined {
+  return isLocalExecutor && !freshBranchAvailable
+    ? t("task:branchPolicyRequiresSingleRepository")
+    : undefined;
 }

@@ -6,7 +6,7 @@ superseded_by: ../pr-walkthrough-portable-runner-fix/task-02-fixed-renderer-cont
 wave: 1
 depends_on: ["01-walkthrough-skill-renderer"]
 plan: "plan.md"
-spec: "../../specs/pr-walkthrough/spec.md"
+spec: "../../specs/ui/requirements/pr-walkthrough.md"
 ---
 
 # Task 02: Provider-neutral agent rendering contract

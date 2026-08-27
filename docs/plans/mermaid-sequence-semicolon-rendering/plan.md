@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/mermaid-rendering.md
+spec: docs/specs/ui/requirements/mermaid-rendering.md
 created: 2026-07-30
 status: complete
 ---

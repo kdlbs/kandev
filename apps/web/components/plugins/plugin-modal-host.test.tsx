@@ -43,6 +43,48 @@ describe("PluginModalHost", () => {
     expect(screen.getByText("Use a Bitbucket pull request URL for this task.")).not.toBeNull();
   });
 
+  it("keeps dialog content in a local scroll body while retaining the close control", () => {
+    pluginModalManager.openModal("plugin-a", {
+      title: "Growing modal",
+      content: () => <div data-testid="modal-content">Long plugin content</div>,
+    });
+
+    render(<PluginModalHost />);
+
+    const dialog = screen.getByTestId(/^plugin-modal-dialog-/);
+    const body = screen.getByTestId(/^plugin-modal-body-/);
+    expect(dialog.getAttribute("data-layout")).toBe("contained");
+    expect(dialog.contains(body)).toBe(true);
+    expect(screen.getByRole("button", { name: "Close" })).not.toBeNull();
+  });
+
+  it("keeps titleless task-link content in the bounded scroll row", () => {
+    pluginModalManager.openTaskLinkDialog("plugin-a", {
+      content: () => <div data-testid="modal-content">Long task-link content</div>,
+    });
+
+    render(<PluginModalHost />);
+
+    const dialog = screen.getByTestId(/^plugin-modal-dialog-/);
+    const body = screen.getByTestId(/^plugin-modal-body-/);
+    expect(dialog.getAttribute("data-layout")).toBe("contained");
+    expect(body.className).toContain("row-start-2");
+    expect(screen.getByRole("dialog", { name: "Plugin dialog" })).toBeTruthy();
+  });
+
+  it("does not add a close control to a nondismissible dialog", () => {
+    pluginModalManager.openModal("plugin-a", {
+      title: "Locked modal",
+      content: () => <div>Content</div>,
+      dismissible: false,
+    });
+
+    render(<PluginModalHost />);
+
+    expect(screen.getByTestId(/^plugin-modal-dialog-/)).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
+  });
+
   it("renders a host-owned drawer when the plugin requests mobile presentation", () => {
     pluginModalManager.openModal("plugin-a", {
       title: "Link pull request",

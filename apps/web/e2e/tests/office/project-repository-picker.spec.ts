@@ -1,8 +1,10 @@
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import type { Locator } from "@playwright/test";
 import { test, expect } from "../../fixtures/office-fixture";
 import { makeGitEnv } from "../../helpers/git-helper";
+import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 
 /**
  * Project page — repository picker (chip-style, popover-driven).
@@ -30,6 +32,18 @@ async function createProject(
   );
   const body = (await res.json()) as { project?: { id?: string }; id?: string };
   return (body.project?.id ?? body.id) as string;
+}
+
+async function addCustomRepository(dialog: Locator, value: string): Promise<void> {
+  await dialog.getByTestId("project-add-repository").click();
+  const searchInput = dialog.getByPlaceholder(/Search or paste a URL/i);
+  await expect(searchInput).toBeVisible();
+  await searchInput.fill(value);
+  const customRow = dialog.getByTestId("project-add-custom");
+  await expect(customRow).toBeVisible({ timeout: 5_000 });
+  const customRowBox = await customRow.boundingBox();
+  if (!customRowBox) throw new Error("custom repository option has no layout box");
+  await customRow.click({ position: { x: 24, y: customRowBox.height / 2 } });
 }
 
 test.describe("Project repository picker", () => {
@@ -176,5 +190,102 @@ test.describe("Project repository picker", () => {
     await testPage.getByText(projectName).first().click();
     const detailChip = testPage.locator('[data-testid="project-repo-chip"]', { hasText: url });
     await expect(detailChip).toBeVisible({ timeout: 10_000 });
+  });
+
+  test("create-project dialog: long repository chips keep the footer reachable", async ({
+    testPage,
+    prCapture,
+    officeSeed: _,
+  }) => {
+    await testPage.goto("/office/projects");
+    await testPage
+      .getByRole("button", { name: /New Project|Create your first project/ })
+      .first()
+      .click();
+
+    const dialog = testPage.getByTestId("create-project-dialog");
+    await expect(dialog).toBeVisible();
+    await dialog.locator("#project-name").fill(`Long Picker Create ${Date.now()}`);
+
+    const repositories = Array.from(
+      { length: 18 },
+      (_, index) => `https://github.com/example/overflow-repository-${index}.git`,
+    );
+    for (const repository of repositories) {
+      await addCustomRepository(dialog, repository);
+    }
+
+    const body = dialog.getByTestId("create-project-dialog-body");
+    const footer = dialog.getByTestId("create-project-dialog-footer");
+    const title = dialog.locator('[data-slot="dialog-title"]');
+    const finalChip = body.locator('[data-testid="project-repo-chip"]', {
+      hasText: repositories.at(-1) ?? "",
+    });
+    const finalRemove = finalChip.getByTestId("project-repo-chip-remove");
+    const cancel = footer.getByRole("button", { name: "Cancel" });
+    const create = footer.getByRole("button", { name: "Create Project" });
+    await expect(body).toHaveCount(1);
+    await expect(footer).toHaveCount(1);
+    await expect(finalChip).toBeVisible();
+
+    const bodyMetrics = await body.evaluate((element) => {
+      const node = element as HTMLElement;
+      return { clientHeight: node.clientHeight, scrollHeight: node.scrollHeight };
+    });
+    expect(bodyMetrics.scrollHeight).toBeGreaterThan(bodyMetrics.clientHeight);
+    const footerOutsideBody = await dialog.evaluate((element) => {
+      const bodyNode = element.querySelector('[data-testid="create-project-dialog-body"]');
+      const footerNode = element.querySelector('[data-testid="create-project-dialog-footer"]');
+      return Boolean(bodyNode && footerNode && !bodyNode.contains(footerNode));
+    });
+    expect(footerOutsideBody).toBe(true);
+
+    const viewport = await testPage.evaluate(() => ({ width: innerWidth, height: innerHeight }));
+    for (const [label, locator] of [
+      ["dialog", dialog],
+      ["title", title],
+      ["footer", footer],
+    ] as const) {
+      const box = await locator.boundingBox();
+      if (!box) throw new Error(`${label} has no layout box`);
+      expect(box.x, `${label} left edge`).toBeGreaterThanOrEqual(0);
+      expect(box.y, `${label} top edge`).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width, `${label} right edge`).toBeLessThanOrEqual(viewport.width);
+      expect(box.y + box.height, `${label} bottom edge`).toBeLessThanOrEqual(viewport.height);
+    }
+
+    await body.evaluate((element) => {
+      const node = element as HTMLElement;
+      node.scrollTop = node.scrollHeight;
+    });
+    await expect
+      .poll(() => body.evaluate((element) => (element as HTMLElement).scrollTop))
+      .toBeGreaterThan(0);
+    await expect(finalChip).toBeInViewport();
+    await expect(cancel).toBeInViewport();
+    await expect(create).toBeInViewport();
+    const footerHitTest = await footer.locator("button").evaluateAll((buttons) =>
+      buttons.every((button) => {
+        const rect = button.getBoundingClientRect();
+        const hit = document.elementFromPoint(
+          rect.left + rect.width / 2,
+          rect.top + rect.height / 2,
+        );
+        return hit === button || button.contains(hit);
+      }),
+    );
+    expect(footerHitTest).toBe(true);
+    if (prCapture.capturing) {
+      await prCapture.screenshot("long-create-project-dialog", {
+        caption:
+          "The Create Project form scrolls repository chips while its title, final chip, and action footer remain visible.",
+      });
+    }
+
+    await finalRemove.click();
+    await expect(finalChip).toHaveCount(0);
+    await cancel.click();
+    await expect(dialog).toHaveCount(0);
+    await assertNoDocumentHorizontalOverflow(testPage, "create-project dialog");
   });
 });

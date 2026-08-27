@@ -5,7 +5,7 @@ status: in-progress
 wave: 2
 depends_on: ["01-typography-primitives-and-shells"]
 plan: "plan.md"
-spec: "../../specs/settings-typography/spec.md"
+spec: "../../specs/ui/requirements/settings-typography.md"
 ---
 
 # Task 03: Workspace provider migration
@@ -62,7 +62,7 @@ Parallel-safe with Tasks 02 and 04 after Task 01; owned files are disjoint.
 
 ## Inputs
 
-- Spec: `docs/specs/settings-typography/spec.md`, provider, technical-value,
+- Spec: `docs/specs/ui/requirements/settings-typography.md`, provider, technical-value,
   and long-string scenarios.
 - Plan: `plan.md`, Workspace, provider, and integration surfaces section.
 - Audit: `docs/audits/settings-typography/009-centralize-settings-font-family-roles.md`,

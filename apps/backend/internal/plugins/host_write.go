@@ -49,6 +49,11 @@ type TaskCreateInput struct {
 	Launch         TaskLaunchInput
 	Metadata       map[string]any
 	PlanMode       bool
+	// StartAgent reports that the caller will launch an agent for this task
+	// right after creation. The adapter maps it onto CreateTaskRequest so step
+	// resolution sends the task to the first step that runs agents rather than
+	// to the workflow's parking start step.
+	StartAgent bool
 }
 
 // TaskLaunchInput contains validated launch fields for a freshly-created
@@ -173,6 +178,7 @@ func (r taskReader) Create(ctx context.Context, in pluginsdk.CreateTaskInput) (*
 		Launch:         launch,
 		Metadata:       metadata,
 		PlanMode:       launch.PlanMode,
+		StartAgent:     in.StartAgent,
 	})
 	if err != nil {
 		return nil, err
@@ -207,8 +213,9 @@ func (r taskReader) Update(ctx context.Context, in pluginsdk.UpdateTaskInput) (*
 		}
 		return nil, err
 	}
-	dto := taskModelToDTO(updated)
-	return &dto, nil
+	items := []pluginsdk.Task{taskModelToDTO(updated)}
+	r.host.attachPullRequests(ctx, items)
+	return &items[0], nil
 }
 
 // resolveCreatePlacement fills the workspace and workflow a created task lands
@@ -440,7 +447,9 @@ func (m pluginOwnedTaskTreeManager) Preview(ctx context.Context, rootTaskID stri
 	if err != nil {
 		return nil, err
 	}
-	return tasksToDTOs(tasks), nil
+	dtos := tasksToDTOs(tasks)
+	m.host.attachPullRequests(ctx, dtos)
+	return dtos, nil
 }
 
 func (m pluginOwnedTaskTreeManager) Delete(ctx context.Context, rootTaskID string) ([]string, error) {

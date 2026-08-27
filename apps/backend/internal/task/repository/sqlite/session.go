@@ -1894,6 +1894,76 @@ func (r *Repository) SetSessionMetadataKeyIfAbsentOrDifferentStep(
 	return rows > 0, nil
 }
 
+// SetSessionMetadataKeyIfAbsentOrDifferentStepIfTaskAtStep claims a pending
+// completion signal only while the session's task remains on the turn's
+// launch step. The task row is locked before the session metadata write so a
+// concurrent workflow move cannot turn a stale signal into a valid successor
+// signal.
+func (r *Repository) SetSessionMetadataKeyIfAbsentOrDifferentStepIfTaskAtStep(
+	ctx context.Context,
+	taskID, sessionID, key, stepID string,
+	value interface{},
+) (bool, error) {
+	valueJSON, err := json.Marshal(value)
+	if err != nil {
+		return false, fmt.Errorf("failed to serialize metadata value: %w", err)
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	_, currentStepID, found, err := r.readTaskStepInTx(ctx, tx, taskID)
+	if err != nil {
+		return false, err
+	}
+	if !found || currentStepID != stepID {
+		return false, nil
+	}
+
+	var sessionTaskID string
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(
+		`SELECT task_id FROM task_sessions WHERE id = ?`,
+	), sessionID).Scan(&sessionTaskID); err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, err
+	}
+	if sessionTaskID != taskID {
+		return false, nil
+	}
+
+	now := time.Now().UTC()
+	driver := r.db.DriverName()
+	path := key
+	stepPath := key
+	if !dialect.IsPostgres(driver) {
+		path = "$." + key
+		stepPath = path + ".step_id"
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(setSessionMetadataKeyIfAbsentOrDifferentStepQuery(driver)),
+		path, string(valueJSON), now, sessionID, stepPath, stepID)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	committed = true
+	return rows > 0, nil
+}
+
 // SetSessionMetadataKeyIfAbsentIfState atomically claims a metadata key only
 // while the session remains in expectedState. It is used when a terminal
 // transition owns a one-time side effect that must not be emitted by a stale
@@ -2445,7 +2515,7 @@ func (r *Repository) GetActiveTaskInfoByAgentProfile(ctx context.Context, agentP
 	// let one nightly report block its profile's deletion forever. Those are
 	// excluded, which makes them non-resumable if the profile goes: replying to
 	// an old run afterwards fails. That is the accepted trade — see
-	// docs/specs/office/automations-settings.md.
+	// docs/specs/office/requirements/automations-settings.md.
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT DISTINCT t.id, t.title, t.is_ephemeral
 		FROM task_sessions ts
@@ -3067,22 +3137,37 @@ func (r *Repository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs
 // (`SELECT ... FOR UPDATE`) before touching its sessions, so a second
 // concurrent promotion for the same task blocks until the first commits.
 func (r *Repository) SetSessionPrimary(ctx context.Context, sessionID string) error {
+	_, err := r.setSessionPrimary(ctx, sessionID, false)
+	return err
+}
+
+// SetSessionPrimaryIfNonterminal marks a session primary only while it remains
+// nonterminal. It is used by workflow profile switching so a completed agent
+// cannot be promoted from a stale lookup and have its ACP conversation resumed.
+func (r *Repository) SetSessionPrimaryIfNonterminal(ctx context.Context, sessionID string) (bool, error) {
+	return r.setSessionPrimary(ctx, sessionID, true)
+}
+
+func (r *Repository) setSessionPrimary(ctx context.Context, sessionID string, requireNonterminal bool) (bool, error) {
 	now := time.Now().UTC()
 
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// First, get the task_id for this session
+	// First, get the task_id for this session. Do not lock the target row here:
+	// every primary promotion must take the owning task lock first so concurrent
+	// promotions keep one lock order.
 	var taskID string
-	err = tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id FROM task_sessions WHERE id = ?`), sessionID).Scan(&taskID)
+	query := `SELECT task_id FROM task_sessions WHERE id = ?`
+	err = tx.QueryRowContext(ctx, r.db.Rebind(query), sessionID).Scan(&taskID)
 	if err == sql.ErrNoRows {
-		return fmt.Errorf("session not found: %s", sessionID)
+		return primarySessionNotPromoted(sessionID, requireNonterminal)
 	}
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	// Serialize concurrent promotions for the same task across Postgres
@@ -3092,7 +3177,20 @@ func (r *Repository) SetSessionPrimary(ctx context.Context, sessionID string) er
 		var lockedTaskID string
 		err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT id FROM tasks WHERE id = ? FOR UPDATE`), taskID).Scan(&lockedTaskID)
 		if err != nil && err != sql.ErrNoRows {
-			return err
+			return false, err
+		}
+	}
+
+	// Once the task lock is held, lock and validate the target row before
+	// promoting it. This serializes the nonterminal check with a concurrent
+	// state transition without reversing the task -> session lock order above.
+	if requireNonterminal {
+		valid, err := r.lockNonterminalPrimarySession(ctx, tx, sessionID)
+		if err != nil {
+			return false, err
+		}
+		if !valid {
+			return false, nil
 		}
 	}
 
@@ -3101,20 +3199,25 @@ func (r *Repository) SetSessionPrimary(ctx context.Context, sessionID string) er
 		UPDATE task_sessions SET is_primary = 0, updated_at = ? WHERE task_id = ?
 	`), now, taskID)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	// Set primary flag on the specified session
-	result, err := tx.ExecContext(ctx, r.db.Rebind(`
-		UPDATE task_sessions SET is_primary = 1, updated_at = ? WHERE id = ?
-	`), now, sessionID)
+	promoteQuery := `UPDATE task_sessions SET is_primary = 1, updated_at = ? WHERE id = ?`
+	if requireNonterminal {
+		promoteQuery += ` AND state IN ('CREATED', 'STARTING', 'RUNNING', 'IDLE', 'WAITING_FOR_INPUT')`
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(promoteQuery), now, sessionID)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("session not found: %s", sessionID)
+		return primarySessionNotPromoted(sessionID, requireNonterminal)
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
 }

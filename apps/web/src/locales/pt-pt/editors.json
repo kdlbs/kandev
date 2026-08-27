@@ -45,6 +45,7 @@
   "openTaskSessionBeforeSending": "Abra uma sessão da tarefa antes de enviar para o agente.",
   "openWith": "Abrir com...",
   "pasteLink": "Colar a ligação...",
+  "planFormattingToolbar": "Barra de formatação do plano",
   "pleaseTryAgain": "Tente novamente.",
   "previewMarkdown": "Pré-visualizar o markdown",
   "queuedForTheAgent": "Em fila para o agente.",

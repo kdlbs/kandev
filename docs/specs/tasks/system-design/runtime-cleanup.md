@@ -4,7 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-RUNTIME-CLEANUP-001
 created: 2026-06-22
-updated: 2026-08-08
+updated: 2026-08-24
 owners:
   - cfl
 ---
@@ -124,6 +124,16 @@ worktrees, or executor rows behind and the machine slowly runs out of memory.
 - Cleanup preserves historical archived-task worktree records and branch metadata
   used by unarchive recovery. Filesystem removal does not imply recovery-history
   removal.
+- A worktree resume uses attach-only preparation only when the requested
+  executor matches the environment owner and the durable environment inventory
+  contains a live physical worktree row. When no live physical repository row
+  exists, normal preparation runs so Git recovery can run.
+- Normal worktree preparation retains the historical worktree ID when one is
+  available. The worktree manager resolves the deleted record, recreates its
+  recoverable branch and directory, then marks the row active and clears
+  `deleted_at`. If no historical ID is available, creation persists the new
+  worktree by updating any soft-deleted row with the same environment,
+  repository, and branch identity.
 
 ## Data Model
 
@@ -316,6 +326,10 @@ The durable cleanup job wraps that resource lifecycle:
 - If an archived task is unarchived before cleanup completes, the worker cancels
   remaining archive cleanup. Already completed resource removal remains valid and
   the unarchive branch-recovery flow recreates the environment when possible.
+- If an unarchived worktree environment has no live physical repository row,
+  resume does not enter attach-only preparation. It enters normal worktree
+  preparation, where unavailable branch recovery remains a typed worktree
+  recovery failure rather than `ErrReuseWorktreeUnavailable`.
 - If deleting a session fails, no physical workspace operation has been attempted;
   the task-owned worktree record remains authoritative regardless of whether the
   session mutation committed.
@@ -476,6 +490,10 @@ The durable cleanup job wraps that resource lifecycle:
 - **GIVEN** archive cleanup removed a local worktree, **WHEN** the task is
   unarchived, **THEN** its historical worktree branch metadata remains available
   for local/remote recovery.
+- **GIVEN** an unarchived task environment whose worktree repository row is
+  deleted, failed, or tombstoned, **WHEN** its session resumes, **THEN** the
+  executor selects normal worktree preparation and recreates or reactivates the
+  recoverable task-owned worktree instead of demanding attach-only reuse.
 
 ## Out of Scope
 
@@ -492,4 +510,5 @@ The durable cleanup job wraps that resource lifecycle:
 
 ## Implementation plan
 
-[Backend failure containment](../../../plans/backend-failure-containment/plan.md)
+- [Backend failure containment](../../../plans/backend-failure-containment/plan.md)
+- [Worktree resume after unarchive](../../../plans/worktree-resume-after-unarchive/plan.md)

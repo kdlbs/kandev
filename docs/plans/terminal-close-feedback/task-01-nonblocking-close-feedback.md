@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/terminal-close-feedback.md"
+spec: "../../specs/ui/requirements/terminal-close-feedback.md"
 ---
 
 # Task 01: Optimistic terminal dismissal

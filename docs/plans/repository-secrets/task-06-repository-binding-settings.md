@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-repository-secret-bindings", "05-scope-aware-secret-settings"]
 plan: "plan.md"
-spec: "../../specs/workspaces/repository-secrets.md"
+spec: "../../specs/workspaces/requirements/repository-secrets.md"
 ---
 
 # Task 06: Add Repository Binding Settings

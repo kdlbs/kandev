@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/platform/expected-runtime-log-severity.md
+spec: docs/specs/platform/requirements/expected-runtime-log-severity.md
 created: 2026-08-23
 status: implemented
 ---

@@ -135,6 +135,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 			GitSnapshots:      repos.Task,
 			RepoEntities:      repos.Task,
 			RepositorySets:    repos.Task,
+			BranchPolicies:    repos.Task,
 			RepositoryCleanup: repos.Task,
 			Executors:         repos.Task,
 			Environments:      repos.Task,
@@ -174,6 +175,14 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	// Session history is owned by workflow service, but access is owned by the
 	// task service. Keep the authorization check at the service boundary.
 	workflowSvc.SetSessionAccessChecker(taskSvc.AuthorizeSessionAccess)
+	// Same split for the rest of the workflow-step surface: the workflow
+	// package owns steps, templates and export/import, but a workflow's owner
+	// is its workspace's owner, which only the task service can resolve.
+	workflowSvc.SetWorkflowAccessChecker(taskSvc.AuthorizeWorkflowAccess)
+	workflowSvc.SetWorkspaceAccessChecker(taskSvc.AuthorizeWorkspaceAccess)
+	// A step's queue_run action names the task it starts work on, so the
+	// step-write API accepts task IDs as well.
+	workflowSvc.SetTaskAccessChecker(taskSvc.AuthorizeTaskAccess)
 
 	// Wire the ADR 0015 audit-trail writer for manual step transitions.
 	// workflowSvc.CreateStepTransition already matches
@@ -222,7 +231,14 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		// caller; without it the check stays a no-op. An un-stamped local
 		// build passes "dev", which the service treats as "don't enforce".
 		pluginsSvc.SetKandevVersion(version)
-		pluginsSvc.SetDataSources(taskSvc, taskSvc, workflowSvc, agentSettingsController, analyticsservice.New(repos.Analytics), taskSvc, pluginsTaskWriterAdapter{svc: taskSvc})
+		pluginsSvc.SetDataSources(taskSvc, taskSvc, workflowSvc, agentSettingsController, analyticsservice.New(repos.Analytics), taskSvc, taskSvc, pluginsTaskWriterAdapter{svc: taskSvc})
+		// Separate from SetDataSources: githubSvc is optional (nil when github
+		// is unconfigured), and a nil source leaves tasks with no PullRequests
+		// rather than failing every task read.
+		if githubSvc != nil {
+			pluginsSvc.SetTaskPRSource(githubSvc)
+		}
+		taskSvc.SetRepositorySelectionResolver(pluginRepositorySelectionResolver{inspector: pluginsSvc})
 	}
 	gitCredentialBroker := newGitCredentialBroker(githubSvc, pluginsSvc, repos.Task, cfg.GitHubCredentialBroker.ReissueSigningKey)
 	if pluginsSvc != nil {
@@ -231,7 +247,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	if githubSvc != nil {
 		githubSvc.SetCredentialBroker(github.NewCredentialBrokerFromBroker(gitCredentialBroker))
 	}
-	shareHTTP := initShareHandlers(dbPool, repos.Task, githubSvc, log, version)
+	shareHTTP := initShareHandlers(dbPool, repos.Task, taskSvc, githubSvc, log, version)
 
 	// Plumb code-host branch listing into the task service so provider-backed
 	// ("Remote") repos serve branches from their owning provider rather than relying
@@ -768,6 +784,15 @@ func (a *startStepResolverAdapter) ResolveFirstStep(ctx context.Context, workflo
 	return step.ID, nil
 }
 
+// ResolveAutoStartStep implements taskservice.StartStepResolver.
+func (a *startStepResolverAdapter) ResolveAutoStartStep(ctx context.Context, workflowID string) (string, error) {
+	step, err := a.svc.ResolveAutoStartStep(ctx, workflowID)
+	if err != nil {
+		return "", err
+	}
+	return step.ID, nil
+}
+
 // githubSecretAdapter adapts secrets.SecretStore to github.SecretProvider and github.SecretManager.
 type githubSecretAdapter struct {
 	store secrets.SecretStore
@@ -1029,12 +1054,13 @@ func initSentryService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secr
 func initShareHandlers(
 	dbPool *db.Pool,
 	taskRepo share.TaskReader,
+	authorizer share.TaskAccessAuthorizer,
 	githubSvc *github.Service,
 	log *logger.Logger,
 	version string,
 ) *share.HTTPHandlers {
 	h, _, err := share.Provide(
-		dbPool.Writer(), dbPool.Reader(), taskRepo, githubSvc, log,
+		dbPool.Writer(), dbPool.Reader(), taskRepo, authorizer, githubSvc, log,
 		share.Config{KandevVersion: version},
 	)
 	if err != nil {
@@ -1153,6 +1179,7 @@ func (a pluginsTaskWriterAdapter) CreateTask(ctx context.Context, in plugins.Tas
 		Metadata:       metadata,
 		Repositories:   repositories,
 		PlanMode:       in.PlanMode,
+		StartAgent:     in.StartAgent,
 	})
 	if err != nil {
 		return nil, err

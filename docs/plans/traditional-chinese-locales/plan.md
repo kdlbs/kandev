@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/platform/traditional-chinese-locales.md
+spec: docs/specs/platform/requirements/traditional-chinese-locales.md
 created: 2026-08-12
 status: done
 ---
@@ -66,7 +66,7 @@ then full catalog materialization, then switcher/docs/E2E polish.
 
 ### Docs
 
-- `docs/i18n.md` and `docs/specs/platform/i18n.md`: shipped locale list includes
+- `docs/i18n.md` and `docs/specs/platform/requirements/i18n.md`: shipped locale list includes
   `zh-tw` / `zh-hk`.
 - Keep this plan's [glossary](glossary.md) as the living term table.
 

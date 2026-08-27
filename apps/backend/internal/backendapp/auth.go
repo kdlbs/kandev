@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
+	notificationservice "github.com/kandev/kandev/internal/notifications/service"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -67,6 +68,12 @@ func provideAuthService(
 		// Pre-auth workspaces (owner_id='') become the admin's at setup.
 		repos.Task.ClaimUnownedWorkspaces,
 	}
+	// Notification providers deliberately have no entry here. Unlike
+	// workspaces and secrets, every provider row has always been written with
+	// a concrete owner (userstore.DefaultUserID) rather than an empty one, and
+	// Setup promotes that very row into the admin account, so pre-auth
+	// providers already belong to the admin and there is nothing to claim.
+	//
 	// Pre-auth secrets (user_id='') are claimed the same way. Interface
 	// assertion keeps SecretStore mocks free of the method.
 	if claimer, ok := repos.Secrets.(interface {
@@ -81,6 +88,16 @@ func provideAuthService(
 		Backfills: backfills,
 		Log:       log,
 	})
+}
+
+// notificationAuthEnforced tells the notification service whether more than
+// one account can exist. It decides what an unresolvable notification owner
+// means: with authentication enforced the notification is dropped, because
+// falling back to the default user would deliver another user's task title and
+// session state to the administrator's webhook. A nil auth service is a build
+// with authentication unavailable, which is the single-user case.
+func notificationAuthEnforced(authSvc *auth.Service) notificationservice.AuthEnforced {
+	return func() bool { return authSvc != nil && authSvc.Mode() != auth.ModeDisabled }
 }
 
 // gatewayAuthPolicy assembles the WS gateway scoping hooks from the auth and

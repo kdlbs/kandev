@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["02-native-launcher-port-preflight"]
 plan: "plan.md"
-spec: "../../specs/port-collision-safety/spec.md"
+spec: "../../specs/executors/requirements/port-collision-safety.md"
 ---
 
 # Task 04: Native health ownership

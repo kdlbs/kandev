@@ -113,11 +113,19 @@ type MessageCreator interface {
 	InvalidateModelCache(sessionID string)
 }
 
+// TransientRetryMessageService is the narrow task-service seam used to retire
+// persisted retry status messages. The task service owns authorization and
+// event-bus publication for both operations.
+type TransientRetryMessageService interface {
+	ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error)
+	DeleteMessage(ctx context.Context, id string) error
+}
+
 // SubagentContextRecorder persists a durable relational record of a subagent
 // (Task tool) invocation observed on a tool-call frame. It returns nothing —
 // a repository failure never fails the enclosing message write, turn, or
 // agent stream (AC-27 in
-// docs/specs/subagent-context-persistence/spec.md). Implemented by
+// docs/specs/agents/requirements/subagent-context-persistence.md). Implemented by
 // taskservice.Service via an adapter; optional, so an installation that
 // never wires it behaves exactly as before.
 type SubagentContextRecorder interface {
@@ -266,6 +274,7 @@ type sessionExecutorStore interface {
 	GetActiveTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error)
 	ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	SetSessionPrimary(ctx context.Context, sessionID string) error
+	SetSessionPrimaryIfNonterminal(ctx context.Context, sessionID string) (bool, error)
 	RenameTaskSession(ctx context.Context, id, name string) error
 	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
 	UpdateTaskSessionIfCurrentState(ctx context.Context, session *models.TaskSession, expected models.TaskSessionState) (bool, error)
@@ -473,12 +482,13 @@ func (o *reservedPromptCallbackOwner) stop() {
 
 // Service is the main orchestrator service
 type Service struct {
-	config       ServiceConfig
-	logger       *logger.Logger
-	eventBus     bus.EventBus
-	taskRepo     scheduler.TaskRepository
-	repo         sessionExecutorStore
-	agentManager executor.AgentManagerClient
+	config        ServiceConfig
+	logger        *logger.Logger
+	eventBus      bus.EventBus
+	taskRepo      scheduler.TaskRepository
+	repo          sessionExecutorStore
+	promptTargets taskPullRequestTargetStore
+	agentManager  executor.AgentManagerClient
 
 	// Components
 	queue     *queue.TaskQueue
@@ -491,6 +501,10 @@ type Service struct {
 
 	// Message creator for saving agent responses
 	messageCreator MessageCreator
+
+	// transientRetryMessages owns durable cleanup of persisted retry notices.
+	// It is optional for focused tests and pre-composition callers.
+	transientRetryMessages TransientRetryMessageService
 
 	// subagentContexts optionally persists a relational record of subagent
 	// (Task tool) invocations recognized on the tool-call frame paths. Nil is
@@ -606,6 +620,22 @@ type Service struct {
 	// Phase 8 dependencies — also nil-safe.
 	engineTaskCreator      engine.TaskCreator
 	engineWorkflowSwitcher engine.WorkflowSwitcher
+
+	// Review participant seats (REQ-OFFICE-REVIEW-SEATS-001) dependencies —
+	// also nil-safe. buildWorkflowCallbacks registers ensure_participant_seat
+	// once engineParticipantSeatWriter is set; engineParticipantSeatCaster
+	// may still be nil at that point (wired separately once the Office seat
+	// caster exists), in which case EnsureParticipantSeatCallback itself
+	// reports ErrActionNotYetWired only for entries that actually need to
+	// cast a new seat.
+	engineParticipantSeatWriter engine.ParticipantSeatWriter
+	engineParticipantSeatCaster engine.ParticipantSeatCaster
+
+	// engineAgentProfiles wires the quorum guard's AgentProfileResolver
+	// (REQ-OFFICE-REVIEW-SEATS-004.3): dropping a required seat whose agent
+	// profile was deleted after the seat was cast. Also nil-safe — an
+	// unwired resolver leaves every seat counted, matching prior behavior.
+	engineAgentProfiles engine.AgentProfileResolver
 
 	// Native code review. When set, buildWorkflowCallbacks registers the
 	// run_code_review on_enter action. Nil-safe: without it the action kind
@@ -1147,6 +1177,7 @@ func NewService(
 		eventBus:                     eventBus,
 		taskRepo:                     taskRepo,
 		repo:                         repo,
+		promptTargets:                repo,
 		agentManager:                 agentManager,
 		queue:                        taskQueue,
 		executor:                     exec,
@@ -1267,6 +1298,12 @@ func NewService(
 // If not set: Agent messages won't be saved to the database (events will still be published).
 func (s *Service) SetMessageCreator(mc MessageCreator) {
 	s.messageCreator = mc
+}
+
+// SetTransientRetryMessageService wires the task service used to retire
+// persisted transient-retry status messages.
+func (s *Service) SetTransientRetryMessageService(service TransientRetryMessageService) {
+	s.transientRetryMessages = service
 }
 
 // SetSubagentContextRecorder wires the optional subagent-context writer.
@@ -1714,6 +1751,31 @@ func (s *Service) SetEngineTaskCreator(creator engine.TaskCreator) {
 func (s *Service) SetEngineWorkflowSwitcher(switcher engine.WorkflowSwitcher) {
 	s.engineWorkflowSwitcher = switcher
 	s.engineOptions = append(s.engineOptions, engine.WithWorkflowSwitcher(switcher))
+	s.reinitWorkflowEngine()
+}
+
+// SetEngineParticipantSeatWriter wires the engine's ParticipantSeatWriter
+// for the ensure_participant_seat action. Unlike ParticipantStore/
+// DecisionStore, this is a pure callback-construction dependency — nothing
+// else in the engine reads it — so it is not also appended as an
+// engine.Option.
+func (s *Service) SetEngineParticipantSeatWriter(writer engine.ParticipantSeatWriter) {
+	s.engineParticipantSeatWriter = writer
+	s.reinitWorkflowEngine()
+}
+
+// SetEngineParticipantSeatCaster wires the engine's ParticipantSeatCaster
+// for the ensure_participant_seat action (REQ-002's casting resolution).
+func (s *Service) SetEngineParticipantSeatCaster(caster engine.ParticipantSeatCaster) {
+	s.engineParticipantSeatCaster = caster
+	s.reinitWorkflowEngine()
+}
+
+// SetEngineAgentProfileResolver wires the engine's AgentProfileResolver for
+// the quorum guard's REQ-OFFICE-REVIEW-SEATS-004.3 skip.
+func (s *Service) SetEngineAgentProfileResolver(resolver engine.AgentProfileResolver) {
+	s.engineAgentProfiles = resolver
+	s.engineOptions = append(s.engineOptions, engine.WithAgentProfileResolver(resolver))
 	s.reinitWorkflowEngine()
 }
 

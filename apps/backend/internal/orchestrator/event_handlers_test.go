@@ -292,8 +292,9 @@ type mockAgentManager struct {
 	// Prompt tracking — capturedPrompts records prompts only (legacy, several
 	// tests assert on it directly). capturedPromptCalls records the same with
 	// the execution ID so callers can filter by the agent that received it.
-	capturedPrompts     []string
-	capturedPromptCalls []promptCall
+	capturedPrompts              []string
+	capturedPromptCalls          []promptCall
+	setExecutionDescriptionCalls []promptCall
 	// Steer tracking. capturedSteerCalls records every SteerAgentWithDispatchCallback
 	// invocation; steerErr, when set, is returned instead of dispatching. Having
 	// this method also makes the mock satisfy the executor's optional
@@ -635,7 +636,13 @@ func (m *mockAgentManager) RestartAgentProcess(_ context.Context, agentExecution
 func (m *mockAgentManager) ResetAgentContext(ctx context.Context, agentExecutionID string) error {
 	return m.RestartAgentProcess(ctx, agentExecutionID)
 }
-func (m *mockAgentManager) SetExecutionDescription(_ context.Context, _, _ string) error {
+func (m *mockAgentManager) SetExecutionDescription(_ context.Context, executionID, description string) error {
+	m.mu.Lock()
+	m.setExecutionDescriptionCalls = append(m.setExecutionDescriptionCalls, promptCall{
+		ExecutionID: executionID,
+		Prompt:      description,
+	})
+	m.mu.Unlock()
 	return nil
 }
 func (m *mockAgentManager) SetExecutionEnv(_ context.Context, _ string, _ map[string]string) error {

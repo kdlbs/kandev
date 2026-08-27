@@ -1419,7 +1419,7 @@ func (s *Service) shouldDropSessionFailure(
 		return dropWhenUnavailable, ""
 	}
 	if isTerminalSessionState(session.State) {
-		s.resetTransientRetry(data.SessionID)
+		s.resetTransientRetryWithContext(ctx, data.SessionID, true)
 		s.logger.Debug("dropping session failure for terminal session",
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID),
@@ -1689,7 +1689,7 @@ func (s *Service) handleRecoverableFailureLocked(ctx context.Context, data watch
 	// working" and the topbar spinner clears. Kanban / quick-chat tasks
 	// keep the legacy WAITING_FOR_INPUT path so the user can resume via
 	// the Resume / Start fresh recovery buttons in the existing chat
-	// surface. (See docs/specs/office-agent-error-handling.)
+	// surface. (See docs/specs/office/requirements/runtime.md.)
 	nextState := models.TaskSessionStateWaitingForInput
 	if s.isOfficeSession(ctx, data.SessionID) {
 		nextState = models.TaskSessionStateFailed

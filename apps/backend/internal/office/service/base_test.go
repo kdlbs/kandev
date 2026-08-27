@@ -82,7 +82,8 @@ func newTestService(t *testing.T, overrides ...service.ServiceOptions) *service.
 	}
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS workflow_steps (
 		id TEXT PRIMARY KEY,
-		agent_profile_id TEXT NOT NULL DEFAULT ''
+		agent_profile_id TEXT NOT NULL DEFAULT '',
+		stage_type TEXT NOT NULL DEFAULT 'custom'
 	)`); err != nil {
 		t.Fatalf("create workflow_steps: %v", err)
 	}
@@ -93,7 +94,8 @@ func newTestService(t *testing.T, overrides ...service.ServiceOptions) *service.
 		role TEXT NOT NULL DEFAULT '',
 		agent_profile_id TEXT NOT NULL DEFAULT '',
 		decision_required INTEGER NOT NULL DEFAULT 0,
-		position INTEGER NOT NULL DEFAULT 0
+		position INTEGER NOT NULL DEFAULT 0,
+		created_at TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00'
 	)`); err != nil {
 		t.Fatalf("create workflow_step_participants: %v", err)
 	}

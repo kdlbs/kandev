@@ -2,11 +2,13 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/secrets"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // inMemorySecretStore implements secrets.SecretStore for testing.
@@ -293,6 +295,119 @@ func TestRevealContainerControlAuthToken(t *testing.T) {
 		}
 		if got != "" {
 			t.Fatalf("revealContainerControlAuthToken() token = %q, want empty", got)
+		}
+	})
+}
+
+// TestResolveLaunchAuthToken is the regression test for the SSH resume
+// preflight failing with "missing agentctl auth token": #2843 made every
+// launch/resume consume the Docker-only container control token, so a
+// non-Docker executor (SSH) with a real session auth secret got "" instead.
+func TestResolveLaunchAuthToken(t *testing.T) {
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+
+	t.Run("ssh with a session auth secret returns that token", func(t *testing.T) {
+		store := newInMemorySecretStore()
+		store.store["session-auth"] = &secrets.SecretWithValue{Value: "the-ssh-token"}
+		m := &Manager{logger: log, secretStore: store}
+
+		req := &LaunchRequest{ExecutorType: string(models.ExecutorTypeSSH)}
+		metadata := map[string]interface{}{MetadataKeyAuthTokenSecret: "session-auth"}
+
+		got, err := m.resolveLaunchAuthToken(context.Background(), req, metadata)
+		if err != nil {
+			t.Fatalf("resolveLaunchAuthToken() error = %v", err)
+		}
+		if got != "the-ssh-token" {
+			t.Fatalf("resolveLaunchAuthToken() = %q, want %q", got, "the-ssh-token")
+		}
+	})
+
+	t.Run("ssh reports a session secret reveal failure", func(t *testing.T) {
+		store := newInMemorySecretStore()
+		revealErr := errors.New("secret backend unavailable")
+		store.revealErr = revealErr
+		store.store["session-auth"] = &secrets.SecretWithValue{Value: "the-ssh-token"}
+		m := &Manager{logger: log, secretStore: store}
+
+		req := &LaunchRequest{ExecutorType: string(models.ExecutorTypeSSH)}
+		metadata := map[string]interface{}{MetadataKeyAuthTokenSecret: "session-auth"}
+
+		got, err := m.resolveLaunchAuthToken(context.Background(), req, metadata)
+		if !errors.Is(err, revealErr) {
+			t.Fatalf("resolveLaunchAuthToken() error = %v, want %v", err, revealErr)
+		}
+		if got != "" {
+			t.Fatalf("resolveLaunchAuthToken() = %q, want empty", got)
+		}
+	})
+
+	t.Run("ssh with no secret anywhere returns empty and resume still rejects it", func(t *testing.T) {
+		store := newInMemorySecretStore()
+		m := &Manager{logger: log, secretStore: store}
+
+		req := &LaunchRequest{ExecutorType: string(models.ExecutorTypeSSH)}
+
+		got, err := m.resolveLaunchAuthToken(context.Background(), req, map[string]interface{}{})
+		if err != nil {
+			t.Fatalf("resolveLaunchAuthToken() error = %v", err)
+		}
+		if got != "" {
+			t.Fatalf("resolveLaunchAuthToken() = %q, want empty", got)
+		}
+		if err := requireSSHAgentctlAuthToken(got); err == nil {
+			t.Fatal("requireSSHAgentctlAuthToken() accepted an empty token")
+		}
+	})
+
+	t.Run("docker with workspace reuse still prefers the container control token", func(t *testing.T) {
+		store := newInMemorySecretStore()
+		store.store["control-secret"] = &secrets.SecretWithValue{Value: "environment-control-token"}
+		m := &Manager{logger: log, secretStore: store}
+
+		req := &LaunchRequest{ExecutorType: string(models.ExecutorTypeLocalDocker), WorkspaceReuseRequired: true}
+		metadata := map[string]interface{}{MetadataKeyContainerControlAuthSecret: "control-secret"}
+
+		got, err := m.resolveLaunchAuthToken(context.Background(), req, metadata)
+		if err != nil {
+			t.Fatalf("resolveLaunchAuthToken() error = %v", err)
+		}
+		if got != "environment-control-token" {
+			t.Fatalf("resolveLaunchAuthToken() = %q, want %q", got, "environment-control-token")
+		}
+	})
+
+	t.Run("docker with workspace reuse falls back to the session token when no control handle exists", func(t *testing.T) {
+		store := newInMemorySecretStore()
+		store.store["session-auth"] = &secrets.SecretWithValue{Value: "legacy-session-token"}
+		m := &Manager{logger: log, secretStore: store}
+
+		req := &LaunchRequest{ExecutorType: string(models.ExecutorTypeRemoteDocker), WorkspaceReuseRequired: true}
+		metadata := map[string]interface{}{MetadataKeyAuthTokenSecret: "session-auth"}
+
+		got, err := m.resolveLaunchAuthToken(context.Background(), req, metadata)
+		if err != nil {
+			t.Fatalf("resolveLaunchAuthToken() error = %v", err)
+		}
+		if got != "legacy-session-token" {
+			t.Fatalf("resolveLaunchAuthToken() = %q, want %q", got, "legacy-session-token")
+		}
+	})
+
+	t.Run("docker without workspace reuse returns empty when no control handle exists", func(t *testing.T) {
+		store := newInMemorySecretStore()
+		store.store["session-auth"] = &secrets.SecretWithValue{Value: "legacy-session-token"}
+		m := &Manager{logger: log, secretStore: store}
+
+		req := &LaunchRequest{ExecutorType: string(models.ExecutorTypeLocalDocker), WorkspaceReuseRequired: false}
+		metadata := map[string]interface{}{MetadataKeyAuthTokenSecret: "session-auth"}
+
+		got, err := m.resolveLaunchAuthToken(context.Background(), req, metadata)
+		if err != nil {
+			t.Fatalf("resolveLaunchAuthToken() error = %v", err)
+		}
+		if got != "" {
+			t.Fatalf("resolveLaunchAuthToken() = %q, want empty", got)
 		}
 	})
 }

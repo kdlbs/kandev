@@ -207,6 +207,7 @@ type PRTaskResolver interface {
 type StartStepResolver interface {
 	ResolveStartStep(ctx context.Context, workflowID string) (string, error)
 	ResolveFirstStep(ctx context.Context, workflowID string) (string, error)
+	ResolveAutoStartStep(ctx context.Context, workflowID string) (string, error)
 }
 
 // StepHistoryRecorder persists an ADR 0015 session-step transition audit
@@ -280,6 +281,7 @@ type Repos struct {
 	GitSnapshots      repository.GitSnapshotRepository
 	RepoEntities      repository.RepositoryEntityRepository
 	RepositorySets    repository.RepositorySetRepository
+	BranchPolicies    repository.RepositoryBranchPolicyRepository
 	RepositoryCleanup repository.RepositoryCleanupRepository
 	Executors         repository.ExecutorRepository
 	Environments      repository.EnvironmentRepository
@@ -306,6 +308,7 @@ type Service struct {
 	gitSnapshots                    repository.GitSnapshotRepository
 	repoEntities                    repository.RepositoryEntityRepository
 	repositorySets                  repository.RepositorySetRepository
+	branchPolicies                  repository.RepositoryBranchPolicyRepository
 	repositoryCleanup               repository.RepositoryCleanupRepository
 	executors                       repository.ExecutorRepository
 	environments                    repository.EnvironmentRepository
@@ -345,8 +348,10 @@ type Service struct {
 	quickChatDir                    string // Directory for quick-chat workspaces (e.g., ~/.kandev/quick-chat)
 	branchFetcher                   *branchFetcher
 	envDestroyer                    EnvironmentDestroyer
+	sshTaskDirReclaimer             SSHTaskDirReclaimer
 	sessionRunningChecker           SessionRunningChecker
 	remoteBranchLister              RemoteBranchLister
+	repositorySelectionResolver     RepositorySelectionResolver
 	repoCloneLocation               RepoCloneLocation
 	blockers                        BlockerRepository
 	// dependencyEdgeMu serializes validate-then-insert for dependency edges so
@@ -450,6 +455,7 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		gitSnapshots:          repos.GitSnapshots,
 		repoEntities:          repos.RepoEntities,
 		repositorySets:        repos.RepositorySets,
+		branchPolicies:        repos.BranchPolicies,
 		repositoryCleanup:     repos.RepositoryCleanup,
 		executors:             repos.Executors,
 		environments:          repos.Environments,
@@ -637,6 +643,13 @@ type RemoteBranchLister interface {
 // SetRemoteBranchLister wires the provider-neutral remote branch source.
 func (s *Service) SetRemoteBranchLister(lister RemoteBranchLister) {
 	s.remoteBranchLister = lister
+}
+
+// SetRepositorySelectionResolver wires server-side inspection for first-use
+// plugin repository selections. The resolver is optional for focused callers;
+// plugin selections fail closed when it is not wired.
+func (s *Service) SetRepositorySelectionResolver(resolver RepositorySelectionResolver) {
+	s.repositorySelectionResolver = resolver
 }
 
 // RepoCloneLocation reports the base path the orchestrator clones repos into

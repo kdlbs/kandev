@@ -120,7 +120,7 @@ func buildShiftAlteredKeySet() map[string]bool {
 }
 
 // Validate checks the manifest against the plugin registration rules
-// described in docs/specs/plugins/spec.md. It returns nil if the manifest
+// described in docs/specs/plugins/requirements/plugins.md. It returns nil if the manifest
 // is well-formed, or a joined error describing every violation found.
 func (m *Manifest) Validate() error {
 	var errs []error
@@ -544,6 +544,9 @@ func (m *Manifest) validateWebhooks() []error {
 }
 
 func (m *Manifest) validateActions() []error {
+	const minimumAdminActionKandevVersion = "0.91.1"
+	minimum, validMinimum := NormalizeReleaseVersion(m.MinKandevVersion)
+	adminAccessSupported := validMinimum && CompareVersions(minimum, minimumAdminActionKandevVersion) >= 0
 	seen := make(map[string]bool, len(m.Actions))
 	var errs []error
 	for _, action := range m.Actions {
@@ -558,6 +561,15 @@ func (m *Manifest) validateActions() []error {
 		if action.ResourceScope != ActionScopeWorkspace && action.ResourceScope != ActionScopeTask &&
 			action.ResourceScope != ActionScopeRepository {
 			errs = append(errs, fmt.Errorf("action %q has invalid scope %q", action.Key, action.ResourceScope))
+		}
+		if access := action.EffectiveAccess(); access != ActionAccessAuthenticated && access != ActionAccessAdmin {
+			errs = append(errs, fmt.Errorf("action %q has invalid access %q", action.Key, action.Access))
+		} else if access == ActionAccessAdmin && !adminAccessSupported {
+			errs = append(errs, fmt.Errorf(
+				"action %q with admin access requires min_kandev_version >= %s",
+				action.Key,
+				minimumAdminActionKandevVersion,
+			))
 		}
 		if action.MaxBodyBytes <= 0 || action.MaxBodyBytes > MaxActionBodyBytes {
 			errs = append(errs, fmt.Errorf("action %q max_body_bytes must be between 1 and %d", action.Key, MaxActionBodyBytes))

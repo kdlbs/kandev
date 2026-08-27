@@ -94,6 +94,54 @@ test.describe("Multi-session UX", () => {
     await expect(tab2).toBeVisible({ timeout: 10_000 });
   });
 
+  test("command panel navigation renders all existing session tabs", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+
+    const title = "Command panel multi-session task";
+    const task = await apiClient.createTask(seedData.workspaceId, title, {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    const primary = await apiClient.seedTaskSession(task.id, {
+      state: "WAITING_FOR_INPUT",
+      sessionId: `command-panel-primary-${task.id}`,
+      agentProfileId: seedData.agentProfileId,
+      startedAt: "2026-08-26T00:00:00Z",
+    });
+    const secondary = await apiClient.seedTaskSession(task.id, {
+      state: "WAITING_FOR_INPUT",
+      sessionId: `command-panel-secondary-${task.id}`,
+      agentProfileId: seedData.agentProfileId,
+      startedAt: "2026-08-26T00:01:00Z",
+    });
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await expect(kanban.taskCardByTitle(title)).toBeVisible({ timeout: 10_000 });
+
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    await testPage.keyboard.press(`${modifier}+k`);
+    const dialog = testPage.getByRole("dialog");
+    await expect(dialog).toBeVisible({ timeout: 5_000 });
+    await dialog.getByRole("combobox").fill(title);
+    const option = dialog.getByRole("option").filter({ hasText: title });
+    await expect(option).toBeVisible({ timeout: 10_000 });
+    await option.click();
+
+    await expect(testPage).toHaveURL(new RegExp(`/t/${task.id}$`));
+    const session = new SessionPage(testPage);
+    await expect(session.sessionTabBySessionId(primary.session_id)).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(session.sessionTabBySessionId(secondary.session_id)).toBeVisible({
+      timeout: 10_000,
+    });
+  });
+
   test("+ dropdown shows sessions with correct numbering", async ({
     testPage,
     apiClient,

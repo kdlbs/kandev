@@ -58,6 +58,12 @@ Architecture notes and per-area conventions live alongside the code they describ
 - Lean on the dependencies already in the project before writing your own implementation or adding packages. Do not assume a library lacks a capability without checking its documentation and types.
 - Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later.
 
+### Engineering language
+
+Use English for all engineering text, including specs, plans, PRs, docs,
+comments, and docstrings. Translate non-English input before recording it.
+Only required product localization and product data can use another language.
+
 ### Commit Conventions (enforced by CI)
 
 Commits to `main` **must** follow [Conventional Commits](https://www.conventionalcommits.org/) (`type: description`). PRs are squash-merged - the PR title becomes the commit, validated by CI. Changelog is auto-generated from these via git-cliff (`cliff.toml`). See `.agents/skills/commit/SKILL.md` for allowed types and examples.
@@ -146,9 +152,11 @@ history and remains immutable.
   live under `docs/specs/**`. New work uses
   `docs/specs/<system>/requirements/` and
   `docs/specs/<system>/system-design/`. Read `docs/specs/README.md` and the
-  relevant file in `docs/specs/guide/`. Use `docs/specs/INDEX.md` only to find
-  unmigrated legacy specifications. Run `python3 scripts/lint-spec-files.py
-  --all` after specification changes.
+  relevant file in `docs/specs/guide/`. Choose the owner from the durable
+  contract, not the affected code layer. Keep one vertical requirement/design
+  pair and include its UI outcomes there. Use `docs/specs/INDEX.md` only to
+  find unmigrated legacy specifications. Run `python3
+  scripts/lint-spec-files.py --all` after specification changes.
 - **Decisions:** Architecture decisions are recorded in `docs/decisions/`. Read `docs/decisions/INDEX.md` for an overview. When making significant architectural choices, create a new ADR via `/record decision`.
 - **Plans:** Implementation plans are generated from requirements and system
   designs through `/plan`. `docs/plans/<initiative>/plan.md` is a work-package
@@ -248,7 +256,7 @@ Contract authority is intentionally split by implementation boundary: frontend a
 
 Runtime feature toggles add a SQLite-backed override tier managed through `Settings > System > Feature Toggles`. Effective values use this precedence: explicit environment variable > SQLite override > profile default. The typed runtime flag registry lives in `apps/backend/internal/runtimeflags/registry.go`; each registration owns the public metadata, environment variable, config reader, and config applier. Do not add parallel per-flag maps or switches.
 
-Profile selection: `KANDEV_E2E_MOCK=true` → `e2e`, `KANDEV_DEBUG_DEV_MODE=true` or `KANDEV_DEBUG_PPROF_ENABLED=true` → `dev`, otherwise `prod`. The Go dev launcher (`apps/backend/internal/launcher/dev.go`) and `apps/web/e2e/fixtures/backend.ts` set only the selector — they no longer hardcode the underlying values.
+Profile selection: `KANDEV_E2E_MOCK=true` → `e2e`, `KANDEV_DEBUG_DEV_MODE=true` → `dev`, otherwise `prod`. `KANDEV_DEBUG_PPROF_ENABLED=true` enables pprof behavior but does not select the `dev` profile on its own. The Go dev launcher (`apps/backend/internal/launcher/dev.go`) and `apps/web/e2e/fixtures/backend.ts` set only the selector — they no longer hardcode the underlying values.
 
 Stable operator startup settings have a separate typed source contract in
 `apps/backend/internal/common/config/catalog.go` and `source.go`. The catalog

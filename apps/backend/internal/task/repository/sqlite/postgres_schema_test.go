@@ -741,6 +741,55 @@ func TestPostgresSetSessionPrimary_ConcurrentPromotionsLeaveExactlyOnePrimary(t 
 	}
 }
 
+func TestPostgresSetSessionPrimaryIfNonterminalRejectsTerminalAndSerializesPromotions(t *testing.T) {
+	const concurrency = 4
+	db := openIsolatedPostgresMultiConn(t, testutil.PostgresDSNFromEnv(t), concurrency)
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if _, err := db.Exec(db.Rebind(`INSERT INTO tasks (id, workspace_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`), "task-primary-nonterminal-pg", "ws-primary-nonterminal-pg", "Task", now, now); err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+	terminal := &models.TaskSession{ID: "terminal-primary-pg", TaskID: "task-primary-nonterminal-pg", State: models.TaskSessionStateCompleted}
+	if err := repo.CreateTaskSession(ctx, terminal); err != nil {
+		t.Fatalf("seed terminal session: %v", err)
+	}
+	promoted, err := repo.SetSessionPrimaryIfNonterminal(ctx, terminal.ID)
+	if err != nil || promoted {
+		t.Fatalf("terminal promotion = (%t, %v), want (false, nil)", promoted, err)
+	}
+
+	ids := make([]string, concurrency)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("active-primary-pg-%d", i)
+		if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: ids[i], TaskID: terminal.TaskID, State: models.TaskSessionStateWaitingForInput}); err != nil {
+			t.Fatalf("seed active session: %v", err)
+		}
+	}
+	var wg sync.WaitGroup
+	for _, id := range ids {
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			ok, promoteErr := repo.SetSessionPrimaryIfNonterminal(ctx, id)
+			if promoteErr != nil || !ok {
+				t.Errorf("promote %s = (%t, %v), want (true, nil)", id, ok, promoteErr)
+			}
+		}(id)
+	}
+	wg.Wait()
+	var count int
+	if err := db.Get(&count, db.Rebind(`SELECT COUNT(*) FROM task_sessions WHERE task_id = ? AND is_primary = 1`), terminal.TaskID); err != nil {
+		t.Fatalf("count primaries: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("primary count = %d, want 1", count)
+	}
+}
+
 // TestPostgresClearRecoveredAgentErrors is the Postgres counterpart to
 // TestClearRecoveredAgentErrorsBackfill. clearRecoveredAgentErrors is built from
 // three dialect-sensitive helpers (jsonColumn, jsonText/timestamp*,

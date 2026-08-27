@@ -67,6 +67,13 @@ func buildWorkflowCallbacks(svc *Service) engine.MapRegistry {
 			Dispatch: switchWorkflowDispatcher(svc),
 		}
 	}
+	if svc.engineParticipantSeatWriter != nil {
+		r[engine.ActionEnsureParticipantSeat] = engine.EnsureParticipantSeatCallback{
+			Writer: svc.engineParticipantSeatWriter,
+			Caster: svc.engineParticipantSeatCaster,
+			Logger: svc.logger,
+		}
+	}
 	return r
 }
 
@@ -119,13 +126,28 @@ func switchWorkflowDispatcher(svc *Service) engine.DispatchTriggerFn {
 				return err
 			}
 		}
-		_, err := eng.HandleTrigger(ctx, engine.HandleInput{
+		input := engine.HandleInput{
 			TaskID:         taskID,
 			SessionID:      sessionID,
 			Trigger:        trigger,
 			OperationID:    operationID,
 			PreloadedState: preloadedState,
-		})
+		}
+		// on_enter: the ledger-driven DispatchStepEntry path (fired by the
+		// step-transition writer this switch's AddTaskToWorkflow call
+		// commits through) now owns the session-independent half of the
+		// entry sequence. Running the full HandleTrigger here would execute
+		// those actions a second time. Session-shaped actions have no other
+		// production path on this route, so they still run through the
+		// engine's callback registry.
+		// on_exit is unaffected — it is a different trigger, entirely out of
+		// this requirement's scope.
+		var err error
+		if trigger == engine.TriggerOnEnter {
+			_, err = eng.HandleTriggerSessionShapedOnly(ctx, input)
+		} else {
+			_, err = eng.HandleTrigger(ctx, input)
+		}
 		return err
 	}
 }
@@ -282,6 +304,7 @@ func (c *runCodeReviewCallback) Execute(ctx context.Context, in engine.ActionInp
 		AgentProfileID: profileID,
 		Trigger:        taskmodels.ReviewTriggerWorkflowStep,
 		WorkflowStepID: in.Step.ID,
+		EntryID:        in.EntryID,
 	})
 	if err != nil {
 		c.svc.logger.Warn("workflow step code review did not start",

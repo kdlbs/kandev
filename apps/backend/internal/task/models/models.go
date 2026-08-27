@@ -94,7 +94,12 @@ const (
 	MetaKeyAgentProfileID    = "agent_profile_id"
 	MetaKeyExecutorID        = "executor_id"
 	MetaKeyExecutorProfileID = "executor_profile_id"
-	MetaKeyDeferredLaunch    = "deferred_launch"
+	// Automation target metadata is written to continuation tasks so a
+	// change from hidden to visible ownership or from repository-backed to
+	// repository-free execution cannot silently reuse the old task.
+	MetaKeyAutomationTaskMode       = "automation_task_mode"
+	MetaKeyAutomationRepositoryMode = "automation_repository_mode"
+	MetaKeyDeferredLaunch           = "deferred_launch"
 	// MetaKeyQueuedMoveExitPending identifies a queued manual move whose
 	// source-step on_exit side effect is not yet complete. Its value records the
 	// source step so recovery can resume the work after a restart.
@@ -154,8 +159,8 @@ const (
 	// key when a session of the task next enters STARTING/RUNNING (mirrors
 	// MetaKeyInterruptedAt).
 	MetaKeyAutoStartFailed = "auto_start_failed"
-	// MetaKeyAgentTitlePending marks tasks created in prompt-first mode whose
-	// provisional title still needs the first eligible agent session to replace it.
+	// MetaKeyAgentTitlePending marks tasks whose provisional title still needs
+	// the first eligible agent session to replace it.
 	MetaKeyAgentTitlePending = "agent_title_pending"
 	// MetaKeyAgentTitleOwnerSessionID records the one session that atomically
 	// claimed the first-turn title handoff for a pending task.
@@ -187,7 +192,7 @@ const (
 )
 
 // IsAgentTitlePending reports whether task metadata contains the durable
-// prompt-first title marker. JSON rehydration produces bool values, while a
+// pending title marker. JSON rehydration produces bool values, while a
 // few in-process callers may provide typed metadata, so only an explicit true
 // value enables the capability.
 func IsAgentTitlePending(metadata map[string]interface{}) bool {
@@ -781,6 +786,9 @@ const (
 	TaskOriginRoutine       = "routine"
 	TaskOriginOnboarding    = "onboarding"
 	TaskOriginAutomationRun = "automation_run"
+	// TaskOriginAutomationTask is a normal, user-visible task created by an
+	// automation. Unlike automation_run, it remains in Kanban/sidebar flows.
+	TaskOriginAutomationTask = "automation_task"
 )
 
 // Task represents a task in the database
@@ -815,6 +823,10 @@ type Task struct {
 	ArchivedByCascadeID string    `json:"archived_by_cascade_id,omitempty"`
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
+	// WorkflowStepTransitionID is the immutable ledger row identifier for the
+	// latest workflow-step write. Repositories populate it after a transition;
+	// it is transient and is not stored in the tasks table.
+	WorkflowStepTransitionID int64 `json:"-"`
 
 	// Office extensions.
 	//
@@ -1008,15 +1020,20 @@ type Workspace struct {
 
 // TaskRepository represents a repository associated with a task
 type TaskRepository struct {
-	ID             string                 `json:"id"`
-	TaskID         string                 `json:"task_id"`
-	RepositoryID   string                 `json:"repository_id"`
-	BaseBranch     string                 `json:"base_branch"`
-	CheckoutBranch string                 `json:"checkout_branch,omitempty"`
-	Position       int                    `json:"position"`
-	Metadata       map[string]interface{} `json:"metadata,omitempty"`
-	CreatedAt      time.Time              `json:"created_at"`
-	UpdatedAt      time.Time              `json:"updated_at"`
+	ID                            string                 `json:"id"`
+	TaskID                        string                 `json:"task_id"`
+	RepositoryID                  string                 `json:"repository_id"`
+	BaseBranch                    string                 `json:"base_branch"`
+	CheckoutBranch                string                 `json:"checkout_branch,omitempty"`
+	BranchPolicyID                string                 `json:"branch_policy_id,omitempty"`
+	BranchPolicyName              string                 `json:"branch_policy_name,omitempty"`
+	BranchPolicyBaseBranch        string                 `json:"branch_policy_base_branch,omitempty"`
+	BranchPolicyBranchTemplate    string                 `json:"branch_policy_branch_template,omitempty"`
+	BranchPolicyPullRequestTarget string                 `json:"branch_policy_pull_request_target,omitempty"`
+	Position                      int                    `json:"position"`
+	Metadata                      map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt                     time.Time              `json:"created_at"`
+	UpdatedAt                     time.Time              `json:"updated_at"`
 }
 
 // TaskWorkspaceFolder is a canonical host-folder attachment owned by a task.
@@ -1148,6 +1165,10 @@ const (
 	PermissionSourceWeb         PermissionResolutionSource = "web"
 	PermissionSourceExternalMCP PermissionResolutionSource = "external_mcp"
 	PermissionSourceAutomation  PermissionResolutionSource = "automation"
+	// PermissionSourceAutomationMCP identifies a resolution made by the
+	// fixed in-session coordinator surface. It is distinct from legacy
+	// backend automation and from the authenticated external MCP bridge.
+	PermissionSourceAutomationMCP PermissionResolutionSource = "automation_mcp"
 )
 
 type PermissionResolutionResult string
@@ -1638,6 +1659,21 @@ type Repository struct {
 	CreatedAt              time.Time                 `json:"created_at"`
 	UpdatedAt              time.Time                 `json:"updated_at"`
 	DeletedAt              *time.Time                `json:"deleted_at,omitempty"`
+}
+
+// RepositoryBranchPolicy is a reusable branch workflow owned by one repository.
+// It is configuration, not task history: task repositories copy these fields
+// into their snapshot columns when a policy is selected.
+type RepositoryBranchPolicy struct {
+	ID                string    `json:"id"`
+	RepositoryID      string    `json:"repository_id"`
+	Name              string    `json:"name"`
+	Description       string    `json:"description,omitempty"`
+	BaseBranch        string    `json:"base_branch"`
+	BranchTemplate    string    `json:"branch_template"`
+	PullRequestTarget string    `json:"pull_request_target"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 // RepositorySet is a named, reusable group of workspace repositories that fills
@@ -2177,31 +2213,37 @@ const (
 // A task keeps a bounded history of runs; findings reference the run that
 // produced them so the UI can attribute and supersede them.
 type TaskReviewRun struct {
-	ID              string           `json:"id"`
-	TaskID          string           `json:"task_id"`
-	SessionID       string           `json:"session_id"`
-	Trigger         ReviewRunTrigger `json:"trigger"`
-	WorkflowStepID  string           `json:"workflow_step_id"`
-	AgentID         string           `json:"agent_id"`
-	Model           string           `json:"model"`
-	Status          ReviewRunStatus  `json:"status"`
-	ErrorCode       string           `json:"error_code"`
-	ErrorMessage    string           `json:"error_message"`
-	Summary         string           `json:"summary"`
-	FindingCount    int              `json:"finding_count"`
-	FileCount       int              `json:"file_count"`
-	RepositoryCount int              `json:"repository_count"`
-	PromptTokens    int              `json:"prompt_tokens"`
-	ResponseTokens  int              `json:"response_tokens"`
-	DurationMs      int              `json:"duration_ms"`
-	CreatedAt       time.Time        `json:"created_at"`
-	CompletedAt     *time.Time       `json:"completed_at,omitempty"`
+	ID             string           `json:"id"`
+	TaskID         string           `json:"task_id"`
+	SessionID      string           `json:"session_id"`
+	Trigger        ReviewRunTrigger `json:"trigger"`
+	WorkflowStepID string           `json:"workflow_step_id"`
+	// EntryID is the step-transition ledger row identifier of the step entry
+	// that requested this run, when the run was requested by the
+	// run_code_review step-entry action. Empty for manual/MCP-triggered runs.
+	// Durable dedup key for AC-OFFICE-STEP-ENTRY-001.10: a redelivery of the
+	// same entry must rejoin this run rather than start a second one.
+	EntryID         string          `json:"entry_id,omitempty"`
+	AgentID         string          `json:"agent_id"`
+	Model           string          `json:"model"`
+	Status          ReviewRunStatus `json:"status"`
+	ErrorCode       string          `json:"error_code"`
+	ErrorMessage    string          `json:"error_message"`
+	Summary         string          `json:"summary"`
+	FindingCount    int             `json:"finding_count"`
+	FileCount       int             `json:"file_count"`
+	RepositoryCount int             `json:"repository_count"`
+	PromptTokens    int             `json:"prompt_tokens"`
+	ResponseTokens  int             `json:"response_tokens"`
+	DurationMs      int             `json:"duration_ms"`
+	CreatedAt       time.Time       `json:"created_at"`
+	CompletedAt     *time.Time      `json:"completed_at,omitempty"`
 }
 
 // TaskReviewFinding is one anchored, advisory review comment produced by a
 // review run. It renders in the Changes/Review diff at File/StartLine..EndLine
 // of Repository, and carries FileDiffHash so a client can tell whether the
-// diff has moved under it (see ../../../../docs/specs/native-code-review/spec.md).
+// diff has moved under it (see ../../../../docs/specs/agents/requirements/native-code-review.md).
 type TaskReviewFinding struct {
 	ID             string              `json:"id"`
 	RunID          string              `json:"run_id"`

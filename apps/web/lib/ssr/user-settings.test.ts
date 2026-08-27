@@ -134,6 +134,23 @@ describe("app status bar visibility hydration", () => {
   });
 });
 
+describe("quick-chat tab order hydration", () => {
+  it("maps the per-workspace mixed-tab order and keeps omitted patches unchanged", () => {
+    const order = {
+      "workspace-a": ["conversation:one", "terminal:one"],
+    };
+    expect(
+      buildCoreFields({ quick_chat_tab_order_by_workspace: order }).quickChatTabOrderByWorkspace,
+    ).toEqual(order);
+
+    const current = {
+      ...mapUserSettingsResponse(null),
+      quickChatTabOrderByWorkspace: order,
+    };
+    expect(buildCoreFields({}, current).quickChatTabOrderByWorkspace).toEqual(order);
+  });
+});
+
 describe("buildCoreFields", () => {
   it("normalizes the simplified metrics preference and defaults old rows to detailed", () => {
     expect(parseSystemMetricsDisplay({ show_in_topbar: true, simplified: true } as never)).toEqual({
@@ -426,6 +443,12 @@ describe("mapUserSettingsResponse", () => {
       filters: [],
       sort: { key: "updatedAt", direction: "desc" },
       group: "workflow",
+      taskRow: {
+        detailsEnabled: true,
+        detailOrder: ["relative_time", "repository", "pull_request_number"],
+        visibleDetails: ["relative_time", "repository", "pull_request_number"],
+        trailing: "git_changes",
+      },
     });
   });
 });

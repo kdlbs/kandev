@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/external-vcs-file-links.md
+spec: docs/specs/ui/requirements/external-vcs-file-links.md
 created: 2026-07-22
 status: complete
 ---

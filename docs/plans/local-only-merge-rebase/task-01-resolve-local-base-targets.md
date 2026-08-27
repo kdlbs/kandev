@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/workspaces/local-repositories.md"
+spec: "../../specs/workspaces/requirements/local-repositories.md"
 ---
 
 # Task 01: Resolve local base targets
@@ -16,7 +16,7 @@ Make Merge and Rebase use a verified local base branch when the repository has n
 
 ## Inputs
 
-- Spec: `docs/specs/workspaces/local-repositories.md`, especially What, Failure Modes, and Scenarios.
+- Spec: `docs/specs/workspaces/requirements/local-repositories.md`, especially What, Failure Modes, and Scenarios.
 - Plan: `docs/plans/local-only-merge-rebase/plan.md`, Backend and Tests.
 - Root cause: `GitOperator.Merge` and `GitOperator.Rebase` always fetch `origin` before they select the base target.
 - Existing remote integration tests: `TestHandleGitRebase_ReplaysOntoBase` and `TestHandleGitMerge_BringsBaseCommitIn`.

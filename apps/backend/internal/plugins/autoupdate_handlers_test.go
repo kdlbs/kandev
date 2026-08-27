@@ -9,11 +9,20 @@ import (
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/plugins/store"
 )
 
 func newTestRouterWithSettings(t *testing.T) (*gin.Engine, *Service) {
+	t.Helper()
+	return newTestRouterWithSettingsIdentity(t, authn.Identity{
+		UserID: "admin-1",
+		Role:   authn.RoleAdmin,
+	})
+}
+
+func newTestRouterWithSettingsIdentity(t *testing.T, identity authn.Identity) (*gin.Engine, *Service) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	svc, _, _ := newTestService(t)
@@ -31,8 +40,7 @@ func newTestRouterWithSettings(t *testing.T) (*gin.Engine, *Service) {
 	}
 	svc.SetSettings(ss)
 
-	router := gin.New()
-	RegisterRoutes(router, svc, nil, testLogger(t))
+	router := registerPluginRoutesWithIdentity(t, svc, identity)
 	return router, svc
 }
 

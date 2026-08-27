@@ -9,6 +9,8 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -100,6 +102,24 @@ func TestHandleResolveAgentPermissionRejectsUntrustedTransport(t *testing.T) {
 	assert.Equal(t, ws.MessageTypeError, resp.Type)
 	assert.Contains(t, string(resp.Payload), ws.ErrorCodeForbidden)
 	assert.Empty(t, stub.resolved.TaskID, "untrusted dispatch must not reach the permission service")
+}
+
+func TestHandleResolveAgentPermissionDoesNotTreatNormalTaskPrincipalAsAutomation(t *testing.T) {
+	stub := &permissionServiceStub{resolve: &orchestrator.ResolveAgentPermissionResult{Status: "resolved"}}
+	h := &Handlers{agentPermissionSvc: stub, logger: testLogger(t).WithFields()}
+	ctx := mcpscope.WithPrincipal(context.Background(), mcpscope.Principal{
+		CallerTaskID: "task-1", CallerSessionID: "session-1", WorkspaceID: "workspace-1",
+		Surface: mcpprofile.SurfaceKanbanTask,
+	})
+
+	resp, err := h.handleResolveAgentPermission(ctx, makeWSMessage(t, ws.ActionMCPResolveAgentPermission, map[string]any{
+		"task_id": "task-1", "session_id": "session-1", "request_id": "request-1",
+		"pending_id": "pending-1", "option_id": "allow-once",
+	}))
+	require.NoError(t, err)
+	assert.Equal(t, ws.MessageTypeError, resp.Type)
+	assert.Contains(t, string(resp.Payload), ws.ErrorCodeForbidden)
+	assert.Empty(t, stub.resolved.TaskID, "a normal task principal must not authorize permission resolution")
 }
 
 func TestAgentPermissionHandlersValidateRequiredIdentity(t *testing.T) {

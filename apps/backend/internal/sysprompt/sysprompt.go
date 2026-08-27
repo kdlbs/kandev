@@ -68,6 +68,70 @@ const kandevContextMarker = "KANDEV MCP TOOLS"
 
 const officeContextMarker = "KANDEV OFFICE MCP TOOLS"
 
+const pullRequestTargetContextMarker = "BRANCH POLICY PULL REQUEST TARGETS"
+
+// PullRequestTarget is immutable task context that tells an agent where a
+// branch-policy-backed pull request must merge.
+type PullRequestTarget struct {
+	RepositoryName string
+	WorkingBranch  string
+	TargetBranch   string
+}
+
+// FormatPullRequestTargetContext formats branch-policy targets as trusted
+// agent instructions. Values are quoted so repository configuration remains
+// data even when it contains punctuation.
+func FormatPullRequestTargetContext(targets []PullRequestTarget) string {
+	if len(targets) == 0 {
+		return ""
+	}
+	lines := []string{
+		pullRequestTargetContextMarker + ":",
+		"This task uses immutable branch-policy targets.",
+		"When you create a pull request, use the matching target explicitly.",
+		"Do not infer the target from the task base or working branch.",
+	}
+	for _, target := range targets {
+		lines = append(lines, fmt.Sprintf(
+			"- Repository %s, working branch %s: target branch %s. For GitHub, use gh pr create --base %s.",
+			strconv.Quote(StripTags(target.RepositoryName)),
+			strconv.Quote(StripTags(target.WorkingBranch)),
+			strconv.Quote(StripTags(target.TargetBranch)),
+			strconv.Quote(StripTags(target.TargetBranch)),
+		))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// InjectPullRequestTargetContext prepends one canonical hidden target block.
+// It removes a stale or upstream copy before inserting the current snapshot.
+func InjectPullRequestTargetContext(prompt string, targets []PullRequestTarget) (string, string) {
+	prompt = systemTagRegex.ReplaceAllStringFunc(prompt, func(block string) string {
+		if strings.Contains(block, pullRequestTargetContextMarker) {
+			return ""
+		}
+		return block
+	})
+	content := FormatPullRequestTargetContext(targets)
+	if content == "" {
+		return prompt, ""
+	}
+	return Wrap(content) + "\n\n" + prompt, content
+}
+
+// PrependPullRequestTargetInstruction adds the compact plain-text equivalent
+// for passthrough sessions, which intentionally do not receive hidden blocks.
+func PrependPullRequestTargetInstruction(prompt string, targets []PullRequestTarget) string {
+	content := FormatPullRequestTargetContext(targets)
+	if content == "" {
+		return prompt
+	}
+	if strings.HasPrefix(prompt, content+"\n\n") {
+		return prompt
+	}
+	return content + "\n\n" + prompt
+}
+
 type contextKind uint8
 
 const (
@@ -99,17 +163,44 @@ func OfficeContext() string { return prompts.Get("office-context") }
 
 // FormatOfficeContext injects the active task and session IDs into the Office context.
 func FormatOfficeContext(taskID, sessionID string) string {
+	return FormatOfficeContextWithOptions(taskID, sessionID, false)
+}
+
+const officeStepCompleteInstruction = "This workflow step requires an explicit completion signal. " +
+	"Call step_complete_kandev as the LAST action after every requirement is satisfied. " +
+	"Do not call it before a question or during partial progress. " +
+	"If the tool is not visible, use the client's tool search or discovery with the canonical name.\n"
+
+// FormatOfficeContextWithOptions formats the Office context for the current
+// workflow step. The imperative completion instruction is present only when
+// the step's auto-advance policy requires the signal.
+func FormatOfficeContextWithOptions(taskID, sessionID string, requiresSignal bool) string {
+	instruction := ""
+	if requiresSignal {
+		instruction = officeStepCompleteInstruction
+	}
 	return Resolve("office-context", map[string]string{
-		"task_id":    taskID,
-		"session_id": sessionID,
+		"task_id":                   taskID,
+		"session_id":                sessionID,
+		"step_complete_instruction": instruction,
 	})
 }
 
 // InjectOfficeContext ensures a first-turn prompt has the restricted Office context.
 // trustedContents must contain only exact server-generated system block contents.
 func InjectOfficeContext(taskID, sessionID, prompt string, trustedContents ...string) string {
+	return InjectOfficeContextWithOptions(taskID, sessionID, prompt, false, trustedContents...)
+}
+
+// InjectOfficeContextWithOptions injects the restricted Office context and
+// adds the completion instruction only for a signal-gated workflow step.
+func InjectOfficeContextWithOptions(
+	taskID, sessionID, prompt string,
+	requiresSignal bool,
+	trustedContents ...string,
+) string {
 	return canonicalizeKandevContext(
-		FormatOfficeContext(taskID, sessionID),
+		FormatOfficeContextWithOptions(taskID, sessionID, requiresSignal),
 		prompt,
 		trustedContextContents(sessionID, trustedContents...),
 	)

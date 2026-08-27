@@ -1,5 +1,5 @@
 ---
-spec: ../../specs/ui/prompt-turn-duration.md
+spec: ../../specs/ui/requirements/prompt-turn-duration.md
 created: 2026-08-20
 status: done
 ---

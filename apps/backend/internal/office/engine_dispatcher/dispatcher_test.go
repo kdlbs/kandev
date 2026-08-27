@@ -111,8 +111,8 @@ type realRunsAdapter struct {
 	svc *runsservice.Service
 }
 
-func (a realRunsAdapter) QueueRun(ctx context.Context, req engine.QueueRunRequest) error {
-	return a.svc.QueueRun(ctx, runsservice.QueueRunRequest{
+func (a realRunsAdapter) QueueRun(ctx context.Context, req engine.QueueRunRequest) (engine.QueueOutcome, error) {
+	outcome, err := a.svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: req.AgentProfileID,
 		TaskID:         req.TaskID,
 		WorkflowStepID: req.WorkflowStepID,
@@ -120,6 +120,7 @@ func (a realRunsAdapter) QueueRun(ctx context.Context, req engine.QueueRunReques
 		IdempotencyKey: req.IdempotencyKey,
 		Payload:        req.Payload,
 	})
+	return engine.QueueOutcome(outcome), err
 }
 
 type stubPrimary struct {

@@ -222,6 +222,10 @@ type MessageRepository interface {
 	FindMessageByPendingIDAndQuestion(ctx context.Context, sessionID, pendingID, questionID string) (*models.Message, error)
 	FindActiveClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*models.Message, error)
 	GetPendingActionsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]models.TaskPendingAction, error)
+	// ListPendingInteractions returns the durable request rows behind the
+	// compact pending-action projection, under the same turn/session authority
+	// (ADR 0052). Clarification bundles come back as one row per question.
+	ListPendingInteractions(ctx context.Context, filter models.PendingInteractionFilter) ([]*models.Message, error)
 	CompleteActiveClarificationBundle(ctx context.Context, pendingID, status string, responses map[string]interface{}) ([]*models.Message, bool, error)
 	FinalizeClarificationResponseDelivery(ctx context.Context, pendingID, terminalStatus string, claimedMessages []*models.Message) ([]*models.Message, bool, error)
 	RestoreActiveClarificationBundle(ctx context.Context, pendingID, terminalStatus string, claimedMessages []*models.Message) ([]*models.Message, bool, error)
@@ -365,6 +369,10 @@ type TaskResourceCleanupRepository interface {
 	CreateTaskResourceCleanupJob(ctx context.Context, job *models.TaskResourceCleanupJob) error
 	HasActiveTaskResourceCleanupJob(ctx context.Context, taskID string) (bool, error)
 	UpdateTaskResourceCleanupSnapshot(ctx context.Context, operationID, snapshot string) error
+	// UpdateClaimedTaskResourceCleanupSnapshot persists outcomes produced by one
+	// exact running cleanup attempt. A newer retry or cancellation wins when
+	// the claim no longer matches.
+	UpdateClaimedTaskResourceCleanupSnapshot(ctx context.Context, id string, attempt int, snapshot string) (bool, error)
 	GetTaskResourceCleanupJob(ctx context.Context, id string) (*models.TaskResourceCleanupJob, error)
 	GetTaskResourceCleanupJobByOperationID(ctx context.Context, operationID string) (*models.TaskResourceCleanupJob, error)
 	ListPreparedTaskResourceCleanupJobs(ctx context.Context) ([]*models.TaskResourceCleanupJob, error)
@@ -436,6 +444,19 @@ type RepositorySetRepository interface {
 	// cannot land apart. A nil repositoryIDs leaves membership untouched.
 	UpdateRepositorySet(ctx context.Context, set *models.RepositorySet, repositoryIDs *[]string) error
 	DeleteRepositorySet(ctx context.Context, id string) (bool, error)
+}
+
+// RepositoryBranchPolicyRepository stores reusable branch workflows owned by
+// a repository. The batch method is an atomic, one-time Gitflow starter.
+type RepositoryBranchPolicyRepository interface {
+	CreateRepositoryBranchPolicy(ctx context.Context, policy *models.RepositoryBranchPolicy) error
+	GetRepositoryBranchPolicy(ctx context.Context, id string) (*models.RepositoryBranchPolicy, error)
+	GetRepositoryBranchPolicyByName(ctx context.Context, repositoryID, name string) (*models.RepositoryBranchPolicy, error)
+	ListRepositoryBranchPolicies(ctx context.Context, repositoryID string) ([]*models.RepositoryBranchPolicy, error)
+	ListRepositoryBranchPoliciesByWorkspace(ctx context.Context, workspaceID string) ([]*models.RepositoryBranchPolicy, error)
+	UpdateRepositoryBranchPolicy(ctx context.Context, policy *models.RepositoryBranchPolicy) error
+	DeleteRepositoryBranchPolicy(ctx context.Context, id string) (bool, error)
+	CreateRepositoryBranchPoliciesIfEmpty(ctx context.Context, repositoryID string, policies []*models.RepositoryBranchPolicy) error
 }
 
 // RepositorySecretBindingRepository stores normalized repository environment
@@ -579,7 +600,7 @@ type PlanRepository interface {
 
 // SubagentContextRepository persists the durable, queryable record of a
 // subagent (Task tool) invocation. See
-// docs/specs/subagent-context-persistence/spec.md.
+// docs/specs/agents/requirements/subagent-context-persistence.md.
 type SubagentContextRepository interface {
 	// UpsertSubagentContext inserts or merges one subagent invocation row,
 	// keyed on (task_session_id, tool_call_id). A single atomic statement —

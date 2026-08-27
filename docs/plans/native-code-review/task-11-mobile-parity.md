@@ -5,7 +5,7 @@ status: pending
 wave: 8
 depends_on: ["10-review-surface-controls"]
 plan: "plan.md"
-spec: "../../specs/native-code-review/spec.md"
+spec: "../../specs/agents/requirements/native-code-review.md"
 ---
 
 # Task 11: Mobile parity for the review findings surface

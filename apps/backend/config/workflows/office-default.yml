@@ -28,6 +28,7 @@ steps:
     is_start_step: true
     show_in_command_panel: true
     allow_manual_move: true
+    auto_advance_requires_signal: true
     events:
       on_enter:
         - type: auto_start_agent
@@ -70,6 +71,9 @@ steps:
     events:
       on_enter:
         - type: clear_decisions
+        - type: ensure_participant_seat
+          config:
+            role: reviewer
         - type: queue_run_for_each_participant
           config:
             role: reviewer
@@ -100,6 +104,9 @@ steps:
     events:
       on_enter:
         - type: clear_decisions
+        - type: ensure_participant_seat
+          config:
+            role: approver
         - type: queue_run_for_each_participant
           config:
             role: approver

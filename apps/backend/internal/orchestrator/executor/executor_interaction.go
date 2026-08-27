@@ -649,9 +649,10 @@ func (e *Executor) prepareModelSwitch(ctx context.Context, taskID, sessionID str
 	e.logger.Info("stopping current agent for model switch",
 		zap.String("agent_execution_id", executionID))
 	if err := e.agentManager.StopAgent(ctx, executionID, false); err != nil {
-		e.logger.Warn("failed to stop agent for model switch, continuing anyway",
+		e.logger.Warn("failed to stop agent for model switch",
 			zap.Error(err),
 			zap.String("agent_execution_id", executionID))
+		return nil, nil, "", nil, fmt.Errorf("failed to stop agent for model switch: %w", err)
 	}
 
 	return session, task, acpSessionID, existingRunning, nil

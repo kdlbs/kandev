@@ -34,7 +34,7 @@ function ClarificationSkipButton({
         type="button"
         onClick={onSkip}
         disabled={isSubmitting}
-        className="text-muted-foreground hover:text-foreground cursor-pointer disabled:opacity-50"
+        className="inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded text-muted-foreground transition-[color,background-color,transform] duration-150 hover:bg-muted hover:text-foreground active:scale-[0.96] disabled:opacity-50 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11 [@media(pointer:coarse)]:rounded-lg [@media(pointer:coarse)]:bg-muted/60"
         data-testid="clarification-skip"
         aria-label={label}
       >
@@ -64,7 +64,12 @@ export function ClarificationHeaderActions({
 }: ClarificationHeaderActionsProps) {
   const { t } = useTranslation();
   return (
-    <div className="flex shrink-0 items-center gap-2">
+    <div
+      className={cn(
+        "flex shrink-0 items-center justify-end gap-2",
+        total > 1 && "w-full md:w-auto",
+      )}
+    >
       {total > 1 && (
         <KeyboardShortcutTooltip
           shortcut={SHORTCUTS.SUBMIT}
@@ -72,7 +77,7 @@ export function ClarificationHeaderActions({
           enabled={!isSubmitting}
         >
           <span
-            className="inline-flex"
+            className="inline-flex min-w-0 flex-1 md:flex-none"
             data-testid="clarification-submit-shortcut"
             tabIndex={!allAnswered && !isSubmitting ? 0 : undefined}
           >
@@ -82,9 +87,9 @@ export function ClarificationHeaderActions({
               disabled={!allAnswered || isSubmitting}
               data-testid="clarification-submit"
               className={cn(
-                "inline-flex items-center gap-1 text-xs px-3 py-1 rounded font-medium transition-colors",
+                "inline-flex w-full items-center justify-center gap-2 rounded-lg px-4 py-1 text-xs font-medium transition-[color,background-color,transform] duration-150 active:scale-[0.96] md:w-auto md:gap-1 md:rounded md:px-3 [@media(pointer:coarse)]:min-h-11",
                 allAnswered && !isSubmitting
-                  ? "bg-blue-500 text-white hover:bg-blue-500/90 cursor-pointer"
+                  ? "cursor-pointer bg-blue-500 text-white shadow-sm hover:bg-blue-500/90"
                   : "bg-muted text-muted-foreground cursor-not-allowed",
               )}
             >
@@ -114,7 +119,7 @@ export function ClarificationHeaderActions({
           title={t("chat:collapseClarification")}
           data-testid="clarification-collapse-toggle"
           onClick={onCollapse}
-          className="h-11 w-11 flex-shrink-0 cursor-pointer rounded-none"
+          className="h-6 w-6 flex-shrink-0 cursor-pointer rounded transition-[color,background-color,transform] duration-150 active:scale-[0.96] [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11 [@media(pointer:coarse)]:rounded-lg [@media(pointer:coarse)]:bg-muted/60"
         >
           <IconChevronDown className="h-4 w-4" />
         </Button>

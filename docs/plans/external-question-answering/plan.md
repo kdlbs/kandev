@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/external-question-answering/spec.md
+spec: docs/specs/integrations/requirements/external-question-answering.md
 created: 2026-08-17
 status: done
 ---
