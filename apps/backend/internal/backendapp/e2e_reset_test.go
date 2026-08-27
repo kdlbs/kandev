@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 
@@ -56,6 +57,38 @@ func TestE2EResetDeletesWorkspaceGitHubAuthentication(t *testing.T) {
 	}
 	if ws1Secrets != 0 || ws2Secrets != 1 {
 		t.Fatalf("secret counts = ws-1:%d ws-2:%d, want 0 and 1", ws1Secrets, ws2Secrets)
+	}
+}
+
+func TestWaitForE2ETaskCleanupWaitsForAsyncJobs(t *testing.T) {
+	raw, err := db.OpenSQLite(filepath.Join(t.TempDir(), "e2e-reset-cleanup.db"))
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	database := sqlx.NewDb(raw, "sqlite3")
+	t.Cleanup(func() { _ = database.Close() })
+	if _, err := database.Exec(`
+		CREATE TABLE task_resource_cleanup_jobs (
+			task_id TEXT NOT NULL,
+			state TEXT NOT NULL,
+			last_error TEXT NOT NULL DEFAULT ''
+		);
+		INSERT INTO task_resource_cleanup_jobs(task_id, state) VALUES ('task-1', 'running');
+	`); err != nil {
+		t.Fatalf("seed cleanup job: %v", err)
+	}
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		_, _ = database.Exec(`UPDATE task_resource_cleanup_jobs SET state = 'succeeded' WHERE task_id = 'task-1'`)
+	}()
+
+	started := time.Now()
+	if err := waitForE2ETaskCleanup(context.Background(), database.DB, []string{"task-1"}); err != nil {
+		t.Fatalf("waitForE2ETaskCleanup: %v", err)
+	}
+	if elapsed := time.Since(started); elapsed < 25*time.Millisecond {
+		t.Fatalf("cleanup wait returned after %s, expected it to observe the running job", elapsed)
 	}
 }
 
