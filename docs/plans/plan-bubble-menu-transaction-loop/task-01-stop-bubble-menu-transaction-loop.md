@@ -91,6 +91,8 @@ None.
   transactions and fails before the fix.
 - Stabilized the desktop BubbleMenu placement options at module scope.
 - Deduplicated all `EditorSnapshot` fields before publishing React state.
+- Extended the fake editor regression to verify active-mark button state and
+  mobile and desktop code-block visibility changes after transactions.
 - Focused Vitest, typecheck, changed-file ESLint, and the existing mobile Plan
   formatting E2E all pass.
 - No mobile E2E change was needed because this internal normalization preserves

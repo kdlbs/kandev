@@ -64,7 +64,7 @@ on the current code because the transaction repeats after each render.
 
 | Acceptance criterion | Evidence |
 | --- | --- |
-| `AC-UI-RESPONSIVE-PLAN-FORMATTING-001.1` | The focused Vitest regression proves that the desktop BubbleMenu settles after one option update. Existing desktop selection and code-block tests remain green. |
+| `AC-UI-RESPONSIVE-PLAN-FORMATTING-001.1` | The focused Vitest regression proves that the desktop BubbleMenu settles after one option update. Focus, selection, active-mark, and desktop/mobile code-block transitions remain reactive. |
 | `AC-UI-RESPONSIVE-PLAN-FORMATTING-001.2` through `.8` | The existing mobile component tests and `mobile-plan-formatting-toolbar.spec.ts` prove that the docked presentation keeps its current behavior. |
 
 ## E2E tests
@@ -84,7 +84,7 @@ parity evidence. Run its `mobile-chrome` scenario after the focused unit test.
 - Red regression: the controlled BubbleMenu fake observed four option-update
   transactions before the fix and failed the settlement assertion.
 - `cd apps/web && pnpm exec vitest run components/editors/tiptap/plan-bubble-menu.test.tsx`
-  passed, 10 tests.
+  passed, 13 tests, including active-mark and code-block transaction changes.
 - `cd apps/web && pnpm run typecheck` passed.
 - `cd apps/web && pnpm exec eslint components/editors/tiptap/plan-bubble-menu.tsx
   components/editors/tiptap/plan-bubble-menu.test.tsx` passed.
