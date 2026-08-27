@@ -29,6 +29,8 @@ red-green-refactor and keep transient errors retryable.
 - Add table-driven service regressions for stop and reconciliation state transitions.
 - Add orchestrator boundary regressions for all required typed gone-execution errors.
 - Correct `Service.StopRun` and `Service.AutomationRunLive` with the minimum behavior change.
+- Make a completion race after the open-row check idempotent.
+- Normalize deleted task/session repository bindings at the orchestrator boundary.
 - Format changed Go files and run the requested backend test and lint gates.
 - Create a verified `fix:` Conventional Commit without bypassing hooks.
 
@@ -43,9 +45,11 @@ red-green-refactor and keep transient errors retryable.
 
 - A `triggered` or `task_created` run owned by the requested automation becomes failed with the
   stop reason. The call returns success when the stopper returns either `true` or `false`. A real
-  miss, mismatch, or non-open run remains not-found. A hard error leaves the row open.
+  miss, mismatch, or non-open run remains not-found. A hard error leaves the row open. If normal
+  completion wins the terminal-write race, the terminal result is returned as success.
 - Wrapped runtime, executor, lifecycle, and SQL not-found sentinels make `AutomationRunLive` return
-  not live without error. Reconciliation then fails the exact run. A transient error preserves it.
+  not live without error. Deleted task and session repository sentinels have the same result.
+  Reconciliation then fails the exact run. A transient error preserves it.
 - A live run remains open, an explicit not-live run settles, and an unbound admitted run settles
   through its existing recovery reason.
 
@@ -108,3 +112,5 @@ None.
 - Both lint commands passed with zero issues.
 - The architecture hook rejected direct lifecycle imports in the orchestrator layers. The runtime
   package now owns lifecycle-sentinel recognition.
+- PR fixup review remediation added a concurrent completion regression and real-repository deleted
+  task/session normalization coverage. Focused tests and formatting passed after the remediation.

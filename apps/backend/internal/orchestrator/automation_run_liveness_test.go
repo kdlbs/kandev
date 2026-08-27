@@ -71,3 +71,57 @@ func TestAutomationRunLiveNormalizesGoneExecutionErrors(t *testing.T) {
 		})
 	}
 }
+
+// @covers AC-OFFICE-AUTOMATION-CONTINUITY-003.4
+func TestAutomationRunLiveNormalizesMissingTaskAndSession(t *testing.T) {
+	tests := []struct {
+		name          string
+		deleteTask    bool
+		deleteSession bool
+	}{
+		{name: "missing task", deleteTask: true},
+		{name: "deleted session", deleteSession: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := setupTestRepo(t)
+			ctx := context.Background()
+			now := time.Now().UTC()
+			task := &models.Task{
+				ID: "task", WorkspaceID: "workspace", Origin: models.TaskOriginAutomationRun,
+				CreatedAt: now, UpdatedAt: now,
+			}
+			if err := repo.CreateTask(ctx, task); err != nil {
+				t.Fatal(err)
+			}
+			session := &models.TaskSession{
+				ID: "session", TaskID: task.ID, State: models.TaskSessionStateWaitingForInput,
+				StartedAt: now, UpdatedAt: now,
+			}
+			if err := repo.CreateTaskSession(ctx, session); err != nil {
+				t.Fatal(err)
+			}
+			if tt.deleteTask {
+				if err := repo.DeleteTask(ctx, task.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tt.deleteSession {
+				if err := repo.DeleteTaskSession(ctx, session.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			svc := &Service{repo: repo}
+			live, err := svc.AutomationRunLive(ctx, task.ID, session.ID, "turn")
+
+			if live {
+				t.Fatal("AutomationRunLive returned live for a missing task or session")
+			}
+			if err != nil {
+				t.Fatalf("AutomationRunLive error = %v, want nil", err)
+			}
+		})
+	}
+}

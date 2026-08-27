@@ -23,8 +23,10 @@ before the `fix:` Conventional Commit.
 ### In scope
 
 - Terminalize a genuinely open run when its exact-turn stopper reports that no active turn remains.
+- Treat a concurrent normal completion after the open-row check as an idempotent stop success.
 - Preserve not-found behavior for a missing, foreign, or already terminal run.
 - Normalize typed gone-execution liveness errors to not live at the orchestrator boundary.
+- Normalize typed task and session repository disappearance at the same boundary.
 - Preserve open runs when liveness inspection fails with a transient error.
 - Cover exact stop and recovery outcomes with table-driven Go tests.
 
@@ -44,7 +46,9 @@ open row as the authority after automation ownership and status validation. If
 `RunStopper.StopAutomationRun` returns either `true` or `false` without an error, settle that exact
 row. Use `Store.MarkRunTerminal(..., RunStatusFailed, "stopped by user")`, and return success. Return
 `ErrAutomationNotFound` only for a missing row, automation mismatch, or non-open status. Propagate a
-stopper error without settling the row.
+stopper error without settling the row. If the terminal write loses a race to normal completion,
+reload the row and return its terminal state as an idempotent success; propagate the write error only
+when the row is still open or cannot be read.
 
 Remove or correct the unused `ErrAutomationRunNotLive` documentation because stale exact-turn state
 no longer maps an already-loaded open run to not-found.
@@ -54,23 +58,26 @@ no longer maps an already-loaded open run to not-found.
 Update `orchestrator.Service.AutomationRunLive` in
 `apps/backend/internal/orchestrator/event_handlers_automation.go` so its public boundary maps a
 wrapped `runtime.ErrNotFound`, `executor.ErrExecutionNotFound`,
-`lifecycle.ErrExecutionNotFound`, or `sql.ErrNoRows` to `(false, nil)` with `errors.Is`. Keep every
-other error unchanged. The runtime package owns lifecycle-sentinel recognition. The orchestrator
-owns runtime, executor, and SQL classification. `automation.Service.ReconcileOpenRuns` keeps its
-conservative rule. `live=false, err=nil` settles the run. A transient error leaves it open for
-retry. Do not add runtime, executor, lifecycle, or SQL imports to `internal/automation`.
+`lifecycle.ErrExecutionNotFound`, `sql.ErrNoRows`, task-repository task-not-found, or task-session
+not-found to `(false, nil)` with `errors.Is`. Keep every other error unchanged. The runtime package
+owns lifecycle-sentinel recognition. The orchestrator owns runtime, executor, repository, and SQL
+classification. `automation.Service.ReconcileOpenRuns` keeps its conservative rule.
+`live=false, err=nil` settles the run. A transient error leaves it open for retry. Do not add
+runtime, executor, lifecycle, repository, or SQL imports to `internal/automation`.
 
 ## Tests
 
 - `AC-OFFICE-AUTOMATION-CONTINUITY-003.3` and
   `AC-OFFICE-AUTOMATION-TARGETS-002.4`: add table-driven `TestStopRun` coverage for a successful
   active stop and a false-on-open stale stop. Cover real miss, mismatch, non-open state, and a hard
-  stopper error. Assert the stored row and returned error, not only fake calls.
+  stopper error, plus a concurrent completion race. Assert the stored row and returned error, not
+  only fake calls.
 - `AC-OFFICE-AUTOMATION-CONTINUITY-003.4`: add table-driven `TestReconcileOpenRuns` coverage for a
   normalized gone execution and a transient liveness error. Cover `live=false`, `live=true`, and an
   unbound admitted run. Assert terminal or preserved store state.
 - Add orchestrator table coverage that injects each required wrapped sentinel through
-  `AutomationRunLive`, proves `(false, nil)`, and proves a transient error still propagates.
+  `AutomationRunLive`, proves `(false, nil)`, proves task/session deletion is normalized with a real
+  repository, and proves a transient error still propagates.
 
 New tests go in new files because the neighboring service and automation-handler test files already
 exceed or approach the backend effective-line limit.
@@ -89,11 +96,14 @@ exceed or approach the backend effective-line limit.
 - `golangci-lint run ./... --new-from-rev=c2e2b3a430d0bd865a3d0bc159e9d8543bc1b02d`
   passed with zero issues.
 - The specification linter and documentation diff validation passed.
+- PR fixup added idempotent concurrent-stop handling and task/session repository not-found
+  normalization, with focused regressions passing.
 
 ## Risks
 
 - Settling before validation of the stored automation ID or open status can hide a real miss or alter
   another automation's run.
 - Broad error normalization can turn a transient database or runtime error into a false stale
-  result. Classification must use only the four typed sentinels.
+  result. Classification must use only the six typed runtime, executor, SQL, task, and session
+  sentinels.
 - A stale binding must never cause cancellation of a newer turn in the shared session.

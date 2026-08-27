@@ -916,6 +916,14 @@ func (s *Service) StopRun(ctx context.Context, automationID, runID string) (*Aut
 		}
 	}
 	if err := s.store.MarkRunTerminal(ctx, run.ID, run.SessionID, run.TurnID, RunStatusFailed, "stopped by user"); err != nil {
+		// The completion path can settle the run after the initial open check but
+		// before this terminal write. Treat that race as an idempotent success.
+		stored, getErr := s.store.GetRun(ctx, run.ID)
+		if getErr == nil && stored != nil && stored.Status != RunStatusTriggered && stored.Status != RunStatusTaskCreated {
+			run.Status = stored.Status
+			run.ErrorMessage = stored.ErrorMessage
+			return run, nil
+		}
 		return nil, err
 	}
 	run.Status = RunStatusFailed

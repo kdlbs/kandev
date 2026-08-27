@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -113,7 +114,9 @@ func (s *Service) automationRunLive(ctx context.Context, taskID, sessionID, turn
 func automationRunExecutionGone(err error) bool {
 	return runtimeapi.IsNotFound(err) ||
 		errors.Is(err, executor.ErrExecutionNotFound) ||
-		errors.Is(err, sql.ErrNoRows)
+		errors.Is(err, sql.ErrNoRows) ||
+		errors.Is(err, taskrepo.ErrTaskNotFound) ||
+		errors.Is(err, models.ErrTaskSessionNotFound)
 }
 
 func (s *Service) automationTurnMatches(ctx context.Context, taskID, sessionID, turnID string, requireStoppable bool) (bool, error) {

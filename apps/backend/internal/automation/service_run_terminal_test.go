@@ -9,9 +9,13 @@ import (
 type runStopperStub struct {
 	stopped bool
 	err     error
+	onStop  func()
 }
 
 func (s runStopperStub) StopAutomationRun(context.Context, string, string, string) (bool, error) {
+	if s.onStop != nil {
+		s.onStop()
+	}
 	return s.stopped, s.err
 }
 
@@ -33,6 +37,8 @@ func TestStopRun(t *testing.T) {
 		status             RunStatus
 		stopped            bool
 		stopErr            error
+		settleStatus       RunStatus
+		settleMessage      string
 		missing            bool
 		automationMismatch bool
 		wantErr            error
@@ -41,6 +47,7 @@ func TestStopRun(t *testing.T) {
 	}{
 		{name: "active turn stopped", status: RunStatusTaskCreated, stopped: true, wantStatus: RunStatusFailed, wantMessage: "stopped by user"},
 		{name: "stale open turn settles", status: RunStatusTaskCreated, stopped: false, wantStatus: RunStatusFailed, wantMessage: "stopped by user"},
+		{name: "completion settles concurrently", status: RunStatusTaskCreated, settleStatus: RunStatusSucceeded, settleMessage: "completed", wantStatus: RunStatusSucceeded, wantMessage: "completed"},
 		{name: "missing run", missing: true, wantErr: ErrAutomationNotFound},
 		{name: "foreign run", status: RunStatusTaskCreated, automationMismatch: true, wantErr: ErrAutomationNotFound, wantStatus: RunStatusTaskCreated},
 		{name: "terminal run", status: RunStatusSucceeded, wantErr: ErrAutomationNotFound, wantStatus: RunStatusSucceeded},
@@ -77,7 +84,15 @@ func TestStopRun(t *testing.T) {
 				}
 				runID = run.ID
 			}
-			svc.SetRunStopper(runStopperStub{stopped: tt.stopped, err: tt.stopErr})
+			stopper := runStopperStub{stopped: tt.stopped, err: tt.stopErr}
+			if tt.settleStatus != "" {
+				stopper.onStop = func() {
+					if err := svc.store.MarkRunTerminal(ctx, runID, "session", "turn", tt.settleStatus, tt.settleMessage); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			svc.SetRunStopper(stopper)
 
 			got, err := svc.StopRun(ctx, requested.ID, runID)
 
@@ -114,7 +129,6 @@ func TestReconcileOpenRuns(t *testing.T) {
 		wantStatus  RunStatus
 		wantMessage string
 	}{
-		{name: "gone execution normalized to not live", bound: true, wantStatus: RunStatusFailed, wantMessage: "automation turn was stale after backend recovery"},
 		{name: "transient liveness error preserves run", bound: true, livenessErr: transientErr, wantStatus: RunStatusTaskCreated},
 		{name: "not live settles run", bound: true, wantStatus: RunStatusFailed, wantMessage: "automation turn was stale after backend recovery"},
 		{name: "live run stays open", bound: true, live: true, wantStatus: RunStatusTaskCreated},
