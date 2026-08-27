@@ -94,7 +94,6 @@ describe("useCoordinatorMonitorContributor: loading", () => {
     expect(view.result.current.draftConfig).toEqual({});
   });
 
-
   it("treats temporary workflows as non-editable and non-savable", async () => {
     const view = renderHook(() =>
       useCoordinatorMonitorContributor({
