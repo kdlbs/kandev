@@ -114,6 +114,7 @@ export const QuickChatPickerDialog = memo(function QuickChatPickerDialog({
   const { toast } = useToast();
   const openQuickChat = useAppStore((s) => s.openQuickChat);
   const applyAgentProfileRecentUse = useAppStore((s) => s.applyAgentProfileRecentUse);
+  const agentGeneratedTaskTitles = useAppStore((s) => s.userSettings.agentGeneratedTaskTitles);
   const [isStarting, setIsStarting] = useState(false);
   const [selectedRepoId, setSelectedRepoId] = useState<string>("");
   const [selectedAgentId, setSelectedAgentId] = useState<string>("");
@@ -130,6 +131,7 @@ export const QuickChatPickerDialog = memo(function QuickChatPickerDialog({
       const response = await startQuickChat(workspaceId, {
         repository_id: selectedRepoId || undefined,
         agent_profile_id: selectedAgentId || undefined,
+        ...(agentGeneratedTaskTitles ? { auto_title: true } : {}),
       });
       const effectiveProfileId = response.agent_profile_id ?? (selectedAgentId || undefined);
       recordQuickChatProfileUse(response.session_id, effectiveProfileId, (record) =>
@@ -151,6 +153,7 @@ export const QuickChatPickerDialog = memo(function QuickChatPickerDialog({
     workspaceId,
     selectedRepoId,
     selectedAgentId,
+    agentGeneratedTaskTitles,
     isStarting,
     onOpenChange,
     openQuickChat,

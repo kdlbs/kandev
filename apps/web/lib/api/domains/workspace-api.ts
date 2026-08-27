@@ -264,6 +264,7 @@ type StartQuickChatCommon = {
   agent_profile_id?: string;
   executor_id?: string;
   prompt?: string;
+  auto_title?: boolean;
 };
 
 type StartQuickChatLegacyRepository = {

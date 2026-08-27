@@ -141,6 +141,7 @@ type UserSettings struct {
 	SystemMetricsDisplay              SystemMetricsDisplaySettings      `json:"system_metrics_display"`
 	AppStatusBarEnabled               bool                              `json:"app_status_bar_enabled"`
 	AppStatusBarOrder                 AppStatusBarOrder                 `json:"app_status_bar_order"`
+	QuickChatTabOrderByWorkspace      map[string][]string               `json:"quick_chat_tab_order_by_workspace"`
 	KanbanHiddenStepIDs               map[string][]string               `json:"kanban_hidden_step_ids"`
 	WorkflowIDsWithAutoHideEmptySteps []string                          `json:"workflow_ids_with_auto_hide_empty_steps"`
 	Revision                          int64                             `json:"revision"`

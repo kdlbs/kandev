@@ -28,6 +28,8 @@ export const MAX_ENTRY_BYTES = 64 * 1024;
 
 type StoredEntry = { entry: LogEntry; bytes: number };
 
+export type PreparedLogEntry = Readonly<StoredEntry>;
+
 export class RingBuffer {
   private entries: StoredEntry[] = [];
   private bytes = 0;
@@ -39,8 +41,11 @@ export class RingBuffer {
   ) {}
 
   push(entry: LogEntry): boolean {
-    const detached = cloneEntry(entry);
-    const bytes = encodedBytes(detached);
+    return this.pushPrepared(prepareLogEntry(entry));
+  }
+
+  pushPrepared(prepared: PreparedLogEntry): boolean {
+    const { entry, bytes } = prepared;
     if (bytes > MAX_ENTRY_BYTES) {
       this.loss.entry_too_large += 1;
       return false;
@@ -58,7 +63,7 @@ export class RingBuffer {
       this.bytes -= removed.bytes;
       this.loss.capacity += 1;
     }
-    this.entries.push({ entry: detached, bytes });
+    this.entries.push(prepared);
     this.bytes += bytes;
     return true;
   }
@@ -112,6 +117,11 @@ export function clearLogs(): void {
 
 export function encodedBytes(entry: LogEntry): number {
   return new TextEncoder().encode(JSON.stringify(entry)).byteLength;
+}
+
+export function prepareLogEntry(entry: LogEntry): PreparedLogEntry {
+  const detached = cloneEntry(entry);
+  return { entry: detached, bytes: encodedBytes(detached) };
 }
 
 function cloneEntry(entry: LogEntry): LogEntry {

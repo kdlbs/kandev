@@ -494,13 +494,17 @@ A task session currently registers these tool groups:
 When **Settings → General → Task Actions → Agent-generated task titles** is enabled (the default; an
 explicitly saved **off** value remains off), a task-mode session for a newly created task or subtask can
 expose `set_task_title_kandev`. The first eligible session to launch atomically claims the handoff and is
-prompted to call it before any other work, even though the task already has a provisional title from the
-prompt. Use a short title phrase targeting about six words in sentence case rather than a sentence or
-progress update.
+prompted to call it before any other work, even though the task already has a provisional title. Use a
+short title phrase targeting about six words in sentence case rather than a sentence or progress update.
 The tool is omitted for ordinary tasks, tasks created while the setting was disabled, config sessions,
 Office sessions, and every later session on the task, even if the owner fails before renaming it. A human
 rename wins if it happens first; a late owner call returns `title_not_pending`, while a non-owner call
 returns `title_not_owner`, without changing the title.
+
+The same setting applies to ordinary Quick Chat. Quick Chat keeps its agent-and-chat-number label until
+the owner receives the first user request, then the owner can set a more useful title. The owner keeps
+the title capability while the title is pending, so a later request can retry after an ignored or failed
+call. Configuration Chat and Quick Terminal do not expose this capability.
 
 When the owner accepts a generated title, Kandev also updates the names of the task's Kandev-managed
 branches from that final title and refreshes the session's branch snapshots. This is evaluated per

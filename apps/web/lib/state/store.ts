@@ -395,6 +395,9 @@ export type AppState = KanbanSlice & {
   clearQuickChatUnseenIdle: UIA["clearQuickChatUnseenIdle"];
   recordQuickChatSettled: UIA["recordQuickChatSettled"];
   removeQuickChatSession: UIA["removeQuickChatSession"];
+  setQuickChatTabOrder: UIA["setQuickChatTabOrder"];
+  clearQuickChatTabOrder: UIA["clearQuickChatTabOrder"];
+  setQuickChatTabOrderSyncState: UIA["setQuickChatTabOrderSyncState"];
   closeQuickChat: () => void;
   closeQuickChatSession: (sessionId: string) => void;
   setActiveQuickChatSession: (sessionId: string, workspaceId: string) => void;
@@ -436,6 +439,7 @@ export type AppState = KanbanSlice & {
   /** Records that the session's full persisted turn history is in the store. */
   markTurnsLoaded: (sessionId: string) => void;
   updateMessage: (message: Message) => void;
+  updateMessages: (messages: Message[]) => void;
   removeMessage: (sessionId: string, messageId: string) => void;
   prependMessages: (
     sessionId: string,

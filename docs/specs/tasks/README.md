@@ -64,6 +64,7 @@ signals, and task-scoped scheduling contracts.
 - [Prevent Agent Auto-Start On Open](requirements/prevent-agent-autostart-on-open.md)
 - [Prompt attachments](requirements/prompt-attachments.md)
 - [Quick Chat Sessions, Persistence, and Expiration](requirements/quick-chat-expiration.md)
+- [Quick Chat Agent Titles](requirements/quick-chat-agent-titles.md)
 - [Quick Chat Repository Context](requirements/quick-chat-repository-context.md)
 - [Remote Contribution Tasks](requirements/remote-contribution-tasks.md)
 - [Rich task title previews](requirements/rich-task-title-previews.md)
@@ -113,6 +114,7 @@ signals, and task-scoped scheduling contracts.
 
 
 - [Attach Workspace Sources](system-design/attach-workspace-sources.md)
+- [Quick Chat Agent Titles](system-design/quick-chat-agent-titles.md)
 - [Active clarification lifecycle](system-design/clarification-active-lifecycle.md)
 - [External task ID idempotency operations](system-design/external-id-idempotency-operations.md)
 - [External task ID idempotency](system-design/external-id-idempotency.md)
