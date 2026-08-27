@@ -5,6 +5,7 @@ import { spawnSync } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
 
 const scriptPath = path.resolve(__dirname, "run-e2e.sh");
+const rawScriptPath = path.resolve(__dirname, "run-raw-e2e.sh");
 const tempDirs: string[] = [];
 const tempFiles: string[] = [];
 
@@ -127,6 +128,47 @@ describe("run-e2e.sh", () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toBe("1");
+  });
+
+  it("accepts the deprecated docker project alias with equals syntax", () => {
+    const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-e2e-runner-"));
+    tempDirs.push(binDir);
+    const pnpmPath = path.join(binDir, "pnpm");
+    fs.writeFileSync(pnpmPath, "#!/usr/bin/env sh\nprintf '%s' \"${KANDEV_E2E_CONTAINERS:-}\"\n");
+    fs.chmodSync(pnpmPath, 0o755);
+
+    const result = spawnSync(
+      "bash",
+      [scriptPath, "--host", "--no-build", "--project=docker", "--", "--help"],
+      {
+        encoding: "utf8",
+        env: runnerEnv(binDir),
+      },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("1");
+  });
+
+  it("normalizes the deprecated docker project alias for raw Playwright runs", () => {
+    const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-e2e-raw-"));
+    tempDirs.push(binDir);
+    const playwrightPath = path.join(binDir, "playwright");
+    fs.writeFileSync(playwrightPath, "#!/usr/bin/env sh\nprintf '%s' \"$*\"\n");
+    fs.chmodSync(playwrightPath, 0o755);
+
+    const result = spawnSync("bash", [rawScriptPath, "--project=docker", "--help"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+      },
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe(
+      "test --config e2e/playwright.config.ts --project=containers --help",
+    );
   });
 
   it("clears inherited container flags before an ordinary managed run", () => {

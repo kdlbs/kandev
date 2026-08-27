@@ -174,6 +174,7 @@ while [[ $# -gt 0 ]]; do
     --no-build) DO_BUILD=0 ;;
     --no-strict) STRICT=0 ;;
     --project) [[ "${2:-}" =~ ^[a-zA-Z0-9_-]+$ ]] || die "invalid --project name: '${2:-}'"; PROJECT="$2"; shift ;;
+    --project=*) PROJECT="${1#--project=}"; [[ "$PROJECT" =~ ^[a-zA-Z0-9_-]+$ ]] || die "invalid --project name: '$PROJECT'" ;;
     --) shift; PW_ARGS+=("$@"); break ;;
     *) PW_ARGS+=("$1") ;;
   esac
