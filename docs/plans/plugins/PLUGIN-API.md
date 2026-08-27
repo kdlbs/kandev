@@ -179,7 +179,7 @@ interface PluginStorageScopeEntry { scopeId: string; value: unknown; updatedAt: 
 interface PluginTaskFilterSelectionApi {
   getSelection(id: string): string[]; // current selection for this plugin's filter id, or [] if unset
   setSelection(id: string, values: string[]): void; // empty values clears (equivalent to "All")
-  subscribe(listener: () => void): () => void; // notified on any change to any of this plugin's filters
+  subscribe(listener: () => void): () => void; // notified when any plugin filter changes; read this plugin's ids for relevant updates
 }
 
 interface PluginModalOptions {

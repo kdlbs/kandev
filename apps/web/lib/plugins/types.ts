@@ -581,7 +581,7 @@ export interface PluginTaskFilterSelectionApi {
   getSelection(id: string): string[];
   /** Empty `values` clears the selection (equivalent to "All"). */
   setSelection(id: string, values: string[]): void;
-  /** Notified on any change to any of this plugin's filter selections. */
+  /** Notified when any plugin task-filter selection changes; read this plugin's ids to detect relevant updates. */
   subscribe(listener: () => void): () => void;
 }
 

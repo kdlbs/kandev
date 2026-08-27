@@ -6,6 +6,7 @@ import { useDockviewStore } from "@/lib/state/dockview-store";
 import { reviewItemId } from "@/components/task/review-selection";
 import { buildHostApi } from "./host-api";
 import { registerPluginTranslations, unregisterPluginTranslations } from "./plugin-translations";
+import { resetPluginTaskFilterSelectionsForTests } from "./task-filter-selections";
 
 const { changeRequestDetailModuleLoaded, translate } = vi.hoisted(() => ({
   changeRequestDetailModuleLoaded: vi.fn(),
@@ -559,6 +560,20 @@ describe("buildHostApi — ui", () => {
     expect(host.ui.RichTextReadOnly).toBeDefined();
   });
 });
+describe("buildHostApi — host.taskFilters", () => {
+  afterEach(() => resetPluginTaskFilterSelectionsForTests());
+
+  it("namespaces selections by plugin id", () => {
+    const hostA = buildHostApi("plugin-a", createAppStore());
+    const hostB = buildHostApi("plugin-b", createAppStore());
+
+    hostA.taskFilters.setSelection("tags", ["x"]);
+
+    expect(hostA.taskFilters.getSelection("tags")).toEqual(["x"]);
+    expect(hostB.taskFilters.getSelection("tags")).toEqual([]);
+  });
+});
+
 const NOTES_PLUGIN_ID = "kandev-plugin-notes";
 const TEST_UPDATED_AT = "2026-01-01T00:00:00Z";
 

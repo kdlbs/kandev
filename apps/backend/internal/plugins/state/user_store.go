@@ -78,6 +78,8 @@ func (s *UserStore) initSchema() error {
 			updated_at TEXT NOT NULL,
 			UNIQUE (plugin_id, user_id, scope, scope_id, state_key)
 		);
+		CREATE INDEX IF NOT EXISTS idx_plugin_user_state_by_key
+			ON plugin_user_state(plugin_id, user_id, scope, state_key, scope_id);
 	`)
 	return err
 }
