@@ -9,8 +9,11 @@ import (
 )
 
 // seedWakeCandidate creates a parent task with one non-archived, terminal
-// (COMPLETED) child, so it satisfies ListStuckParents' predicate on its
-// own. Returns the child_set_key ListStuckParents will compute for it.
+// (COMPLETED) child and a resolvable runner, so it satisfies every one of
+// ListStuckParents' predicates on its own — including the assignee filter
+// (R2-A) — and would actually be woken end-to-end by the full reconciler,
+// not just accepted by this SQL layer in isolation. Returns the
+// child_set_key ListStuckParents will compute for it.
 func seedWakeCandidate(t *testing.T, repo *sqlite.Repository, ctx context.Context, wsID, parentID string) string {
 	t.Helper()
 	insertTask(t, repo, ctx, parentID, wsID, "Parent", "", "")
@@ -20,6 +23,12 @@ func seedWakeCandidate(t *testing.T, repo *sqlite.Repository, ctx context.Contex
 		`UPDATE tasks SET parent_id = ?, state = 'COMPLETED' WHERE id = ?`, parentID, childID,
 	); err != nil {
 		t.Fatalf("set child state: %v", err)
+	}
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO workflow_step_participants (id, step_id, task_id, role, agent_profile_id)
+		VALUES (?, '', ?, 'runner', ?)
+	`, "p-runner-"+parentID, parentID, parentID+"-agent"); err != nil {
+		t.Fatalf("seed runner: %v", err)
 	}
 	return childID + ":COMPLETED"
 }
@@ -167,5 +176,75 @@ func TestListStuckParents_ExcludesArchivedOnlyChildren(t *testing.T) {
 	}
 	if len(candidates) != 1 || candidates[0].ParentTaskID != "parent-normal" {
 		t.Fatalf("candidates = %#v, want exactly [parent-normal]", candidates)
+	}
+}
+
+// TestListStuckParents_ExcludesUnresolvedOrPausedAssignee is R2-A's SQL-layer
+// regression test: a candidate with no resolvable runner, or whose runner is
+// paused/stopped/pending_approval, must never be returned at all — those
+// states are sticky (nothing about the row changes on the next tick), so
+// returning them lets them permanently occupy a LIMIT slot. See
+// TestParentWakeReconciler_UnresolvedAndPausedDoNotStarveHealthyParent
+// (scheduler_wake_reconciler_test.go) for the end-to-end version of this
+// same defect.
+func TestListStuckParents_ExcludesUnresolvedOrPausedAssignee(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	// No runner at all.
+	insertTask(t, repo, ctx, "parent-no-runner", "ws-1", "Parent", "", "")
+	insertTask(t, repo, ctx, "parent-no-runner-child-0", "ws-1", "Child", "", "")
+	if _, err := repo.ExecRaw(ctx,
+		`UPDATE tasks SET parent_id = 'parent-no-runner', state = 'COMPLETED' WHERE id = 'parent-no-runner-child-0'`,
+	); err != nil {
+		t.Fatalf("set child state: %v", err)
+	}
+
+	// Runner resolves, but the agent_profiles row says paused. agent_profiles
+	// is created by settingsstore.Provide (see newTestRepo), so it already
+	// exists here with its full production schema and NOT NULL columns.
+	seedWakeCandidate(t, repo, ctx, "ws-1", "parent-paused")
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, status, created_at, updated_at)
+		VALUES ('parent-paused-agent', '', 'paused-agent', 'paused-agent', 'paused', datetime('now'), datetime('now'))
+	`); err != nil {
+		t.Fatalf("seed paused agent: %v", err)
+	}
+
+	// Control: a normal, healthy candidate.
+	seedWakeCandidate(t, repo, ctx, "ws-1", "parent-normal")
+
+	candidates, err := repo.ListStuckParents(ctx, "task_children_completed", 5)
+	if err != nil {
+		t.Fatalf("ListStuckParents: %v", err)
+	}
+	if len(candidates) != 1 || candidates[0].ParentTaskID != "parent-normal" {
+		t.Fatalf("candidates = %#v, want exactly [parent-normal]", candidates)
+	}
+}
+
+// TestListStuckParents_OrdersDeterministically is R2-C's regression test:
+// the capped query must not depend on incidental scan order.
+func TestListStuckParents_OrdersDeterministically(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	ids := []string{"p-z", "p-a", "p-m"}
+	for _, id := range ids {
+		seedWakeCandidate(t, repo, ctx, "ws-1", id)
+	}
+
+	candidates, err := repo.ListStuckParents(ctx, "task_children_completed", 5)
+	if err != nil {
+		t.Fatalf("ListStuckParents: %v", err)
+	}
+	if len(candidates) != 3 {
+		t.Fatalf("candidates = %d, want 3: %#v", len(candidates), candidates)
+	}
+	want := []string{"p-a", "p-m", "p-z"}
+	for i, c := range candidates {
+		if c.ParentTaskID != want[i] {
+			t.Fatalf("candidates[%d] = %q, want %q (candidates not ordered): %#v", i, c.ParentTaskID, want[i], candidates)
+		}
 	}
 }

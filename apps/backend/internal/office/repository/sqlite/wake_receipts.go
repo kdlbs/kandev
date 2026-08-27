@@ -38,7 +38,7 @@ type StuckParentCandidate struct {
 // child can never wedge the reconciler, and a parent whose only children
 // are archived is never swept with a spurious empty child-set key.
 //
-// Both remaining filters run in SQL, ahead of LIMIT, not in the caller
+// Every remaining filter runs in SQL, ahead of LIMIT, not in the caller
 // afterward:
 //   - the LEFT JOIN against parent_child_wake_receipts drops a candidate
 //     whose stored receipt already matches its current child set — the
@@ -49,11 +49,20 @@ type StuckParentCandidate struct {
 //     (the edge-triggered delivery paths) never write a receipt, so the
 //     receipt alone cannot tell a healthy edge-delivered wake from a lost
 //     one; evidence of delivery has to come from runs itself.
+//   - requiring a non-empty assignee_agent_profile_id drops a candidate
+//     with no resolvable runner, and the LEFT JOIN against agent_profiles
+//     drops one whose runner is paused, stopped, or pending approval.
 //
-// Filtering either of these in Go after the SQL LIMIT would let the same
-// handful of non-actionable candidates (a receipt already up to date, or a
-// wake already in flight) fill every slot a tick examines, starving any
-// genuinely stuck parent past the cap.
+// This is an invariant, not four independent filters: any predicate that
+// can stay true for the same parent across consecutive ticks MUST be
+// applied here, before LIMIT — never in Go after ListStuckParents returns.
+// A parent with no runner, or a paused runner, does not resolve itself on
+// its own; left as a Go-side rejection it would occupy a LIMIT slot on
+// every tick forever, permanently starving any genuinely actionable
+// candidate behind it. Go-side rejection is only admissible for a
+// condition that can change between this SELECT and the write a moment
+// later (guardAgentStatus in the caller is exactly that — a cheap,
+// redundant closing of that race window, not the primary filter).
 func (r *Repository) ListStuckParents(ctx context.Context, reason string, limit int) ([]StuckParentCandidate, error) {
 	var rows []StuckParentCandidate
 	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
@@ -88,13 +97,17 @@ func (r *Repository) ListStuckParents(ctx context.Context, reason string, limit 
 		SELECT s.parent_task_id, s.assignee_agent_profile_id, s.workflow_step_id, s.child_set_key
 		FROM stuck s
 		LEFT JOIN parent_child_wake_receipts r ON r.parent_task_id = s.parent_task_id
-		WHERE r.child_set_key IS NOT s.child_set_key
+		LEFT JOIN agent_profiles ap ON ap.id = s.assignee_agent_profile_id
+		WHERE s.assignee_agent_profile_id != ''
+		  AND COALESCE(ap.status, 'idle') NOT IN ('paused', 'stopped', 'pending_approval')
+		  AND r.child_set_key IS NOT s.child_set_key
 		  AND NOT EXISTS (
 		      SELECT 1 FROM runs w
 		      WHERE json_extract(w.payload, '$.task_id') = s.parent_task_id
 		        AND w.reason = ?
 		        AND w.status IN ('queued', 'claimed', 'finished')
 		  )
+		ORDER BY s.parent_task_id
 		LIMIT ?
 	`), reason, limit)
 	if err != nil {

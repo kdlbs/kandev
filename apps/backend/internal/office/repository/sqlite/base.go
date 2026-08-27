@@ -703,6 +703,13 @@ func (r *Repository) createAgentWakeupRequestTable() error {
 // hashing) a task_children_completed run was last delivered for, so a
 // healthy steady state costs one indexed lookup per tick and emits
 // nothing.
+//
+// The companion tasks(parent_id) index ListStuckParents needs lives in
+// runMigrations (migrateParentWakeIndexes) via r.migrate.Apply, not here:
+// tasks is a table this package doesn't own (see runMigrations' doc
+// comment), so a plain r.db.Exec against it is fatal in the minimal
+// single-domain test repos under internal/office/repository/sqlite,
+// which build a tasks table only after NewWithDB returns.
 func (r *Repository) createParentChildWakeReceiptsTable() error {
 	_, err := r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS parent_child_wake_receipts (

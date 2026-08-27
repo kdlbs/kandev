@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/office/models"
@@ -173,4 +174,70 @@ func TestParentWakeReconciler_SkipsPausedAssigneeWithoutPartialReceipt(t *testin
 	if receipt != nil {
 		t.Fatalf("paused-assignee skip left a partial receipt: %#v", receipt)
 	}
+}
+
+// seedStuckParentNoAssignee is seedStuckParent without the runner
+// participant row, producing a candidate ListStuckParents' SQL still
+// returns (it has terminal children and no receipt) but whose
+// AssigneeAgentProfileID resolves to "".
+func seedStuckParentNoAssignee(t *testing.T, svc *service.Service, wsID, parentID string) {
+	t.Helper()
+	insertTestTask(t, svc, parentID, wsID)
+	states := []string{"COMPLETED", "COMPLETED", "CANCELLED"}
+	for i, state := range states {
+		childID := fmt.Sprintf("%s-child-%d", parentID, i)
+		insertTestTask(t, svc, childID, wsID)
+		svc.ExecSQL(t, `UPDATE tasks SET parent_id = ?, state = ? WHERE id = ?`,
+			parentID, state, childID)
+	}
+}
+
+// TestParentWakeReconciler_UnresolvedAndPausedDoNotStarveHealthyParent is
+// R2-A's regression test. An unresolved-runner or paused-agent candidate is
+// sticky: nothing about it ever changes tick to tick (no receipt or run is
+// ever written for it), so before this fix it permanently occupied one of
+// ListStuckParents' LIMIT slots on every single tick, forever — five such
+// candidates were enough to starve a genuinely healthy stuck parent behind
+// them across every subsequent tick, not just the first.
+func TestParentWakeReconciler_UnresolvedAndPausedDoNotStarveHealthyParent(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	adoptOffice(t, svc, "ws-1")
+
+	// 3 candidates with no resolvable runner at all.
+	for i := 0; i < 3; i++ {
+		seedStuckParentNoAssignee(t, svc, "ws-1", fmt.Sprintf("stuck-unresolved-%d", i))
+	}
+	// 2 candidates with a paused assignee.
+	for i := 0; i < 2; i++ {
+		id := fmt.Sprintf("stuck-paused-%d", i)
+		agentID := fmt.Sprintf("paused-agent-%d", i)
+		seedStuckParent(t, svc, "ws-1", id, agentID)
+		if err := svc.UpdateAgentStatusFields(ctx, agentID, string(models.AgentStatusPaused), "test"); err != nil {
+			t.Fatalf("pause agent %s: %v", agentID, err)
+		}
+	}
+	// The one genuinely healthy stuck parent, seeded last (behind the 5
+	// sticky candidates above) so an unordered LIMIT 5 scan reaches it
+	// last, exactly like TestListStuckParents_LimitDoesNotStarveLaterCandidates.
+	seedStuckParent(t, svc, "ws-1", "healthy-parent", "healthy-worker")
+
+	handler := service.NewParentWakeReconciler(service.NewSchedulerIntegration(svc, 0))
+	for tick := 0; tick < 3; tick++ {
+		if err := handler.Tick(ctx); err != nil {
+			t.Fatalf("tick %d: %v", tick, err)
+		}
+	}
+
+	runs, err := svc.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	for _, run := range runs {
+		if run.Reason == service.RunReasonTaskChildrenCompleted && strings.Contains(run.Payload, "healthy-parent") {
+			return
+		}
+	}
+	t.Fatalf("healthy-parent was never woken across 3 ticks behind 5 sticky candidates: %#v", runs)
 }

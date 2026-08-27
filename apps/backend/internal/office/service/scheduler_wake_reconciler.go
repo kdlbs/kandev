@@ -16,8 +16,10 @@ import (
 
 // maxWakeReconcilePerTick caps the number of stuck parents processed in one
 // tick, mirroring maxRecoveryPerTick (scheduler_recovery.go). ListStuckParents
-// filters out non-actionable candidates in SQL before this cap is applied, so
-// it bounds real work, not resting parents.
+// filters out every sticky non-actionable candidate — stale-or-missing
+// receipt, active/finished run, unresolved or paused/stopped/pending-approval
+// assignee — in SQL before this cap is applied, so it bounds real work, not
+// resting or permanently-blocked parents.
 const maxWakeReconcilePerTick = 5
 
 // ParentWakeReconciler is a level-triggered backstop for the
@@ -94,22 +96,22 @@ func (h *ParentWakeReconciler) reconcile(ctx context.Context) {
 // reconcileOne re-delivers the wake for a single stuck parent, unless its
 // assignee cannot accept a run right now. ListStuckParents' SQL already
 // guarantees every candidate it returns has a stale-or-missing receipt (its
-// LEFT JOIN excludes an exact child-set-key match) and no active/finished
-// wake run covering it (its NOT EXISTS against runs) — a second, Go-side
-// receipt fetch-and-compare here would be structurally unreachable: nothing
-// but this reconciler ever writes parent_child_wake_receipts, and ticks run
-// sequentially, so the receipt cannot change between the SQL SELECT and a
-// Go-side read of it. Do not re-add that check without a reason the SQL
-// guarantee no longer holds; see the doc comment on ListStuckParents.
+// LEFT JOIN excludes an exact child-set-key match), no active/finished wake
+// run covering it (its NOT EXISTS against runs), and a resolvable,
+// non-paused/stopped/pending-approval assignee (its own filters plus a LEFT
+// JOIN against agent_profiles) — a second, Go-side receipt fetch-and-compare,
+// or a check for an empty AssigneeAgentProfileID, would both be structurally
+// unreachable here: nothing but this reconciler ever writes
+// parent_child_wake_receipts, ticks run sequentially, and the assignee ID is
+// computed in the same SELECT that filtered it. Do not re-add either check
+// without a reason the SQL guarantee no longer holds; see the doc comment on
+// ListStuckParents. guardAgentStatus is the one exception, kept deliberately:
+// unlike a receipt, an agent's status can change from any caller at any
+// time, so this closes the narrow race window between that SELECT and this
+// read rather than duplicating a guarantee SQL already gives.
 func (h *ParentWakeReconciler) reconcileOne(
 	ctx context.Context, svc *Service, c sqlite.StuckParentCandidate,
 ) {
-	svc.recordWakeReceiptStale(c.ParentTaskID)
-
-	if c.AssigneeAgentProfileID == "" {
-		svc.recordWakeAssigneeUnresolved(c.ParentTaskID, "no_runner")
-		return
-	}
 	if err := svc.guardAgentStatus(ctx, c.AssigneeAgentProfileID); err != nil {
 		svc.recordWakeAssigneeUnresolved(c.ParentTaskID, err.Error())
 		return
