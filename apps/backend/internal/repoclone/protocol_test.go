@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCloneURL(t *testing.T) {
@@ -159,8 +160,9 @@ func TestDetectGitProtocolPrefersHostConfiguration(t *testing.T) {
 	}
 	t.Setenv("PATH", filepath.Dir(ghPath))
 
-	if got := DetectGitProtocol(); got != ProtocolSSH {
-		t.Fatalf("DetectGitProtocol() = %q, want host-specific %q", got, ProtocolSSH)
+	resolver := NewGitProtocolResolver()
+	if got := resolver.ResolveGitProtocol(context.Background(), "https://github.com/"); got != ProtocolSSH {
+		t.Fatalf("ResolveGitProtocol() = %q, want host-specific %q", got, ProtocolSSH)
 	}
 }
 
@@ -246,5 +248,25 @@ func TestDetectGitProtocolFallbacks(t *testing.T) {
 				t.Fatalf("host-specific gh lookup received URL instead of hostname: %v", calls[0])
 			}
 		})
+	}
+}
+
+func TestDetectGitProtocolStopsFallbackAfterContextDeadline(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	calls := 0
+	runner := func(ctx context.Context, _ ...string) ([]byte, error) {
+		calls++
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	resolver := newGitProtocolResolver(runner)
+
+	if got := resolver.ResolveGitProtocol(ctx, "github.com"); got != ProtocolSSH {
+		t.Fatalf("ResolveGitProtocol() = %q, want SSH default", got)
+	}
+	if calls != 1 {
+		t.Fatalf("gh lookup calls = %d, want one lookup after deadline", calls)
 	}
 }

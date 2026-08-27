@@ -46,30 +46,26 @@ func runGHConfigCommand(ctx context.Context, args ...string) ([]byte, error) {
 	return subproc.RunGHOutput(ctx, exec.CommandContext(ctx, "gh", args...))
 }
 
-// DetectGitProtocol returns the user's preferred git clone protocol.
-// It checks the github.com gh CLI config before the global config.
-func DetectGitProtocol() string {
-	return NewGitProtocolResolver().ResolveGitProtocol(context.Background(), "github.com")
-}
-
 func (r *gitProtocolResolver) ResolveGitProtocol(ctx context.Context, providerHost string) string {
+	lookupCtx, cancel := context.WithTimeout(ctx, gitProtocolLookupTimeout)
+	defer cancel()
 	host, _, err := normalizeGitProviderHost(providerHost)
 	if err == nil && host != "" {
-		if protocol := r.lookup(ctx, "-h", host, "git_protocol"); protocol != "" {
+		if protocol := r.lookup(lookupCtx, "-h", host, "git_protocol"); protocol != "" {
 			return protocol
 		}
 	}
-	if protocol := r.lookup(ctx, "git_protocol"); protocol != "" {
-		return protocol
+	if lookupCtx.Err() == nil {
+		if protocol := r.lookup(lookupCtx, "git_protocol"); protocol != "" {
+			return protocol
+		}
 	}
 	return ProtocolSSH
 }
 
 func (r *gitProtocolResolver) lookup(ctx context.Context, args ...string) string {
-	lookupCtx, cancel := context.WithTimeout(ctx, gitProtocolLookupTimeout)
-	defer cancel()
-	out, err := r.run(lookupCtx, append([]string{"config", "get"}, args...)...)
-	if err != nil {
+	out, err := r.run(ctx, append([]string{"config", "get"}, args...)...)
+	if err != nil || ctx.Err() != nil {
 		return ""
 	}
 	protocol := strings.TrimSpace(string(out))
