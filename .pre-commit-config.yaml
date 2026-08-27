@@ -43,7 +43,7 @@ repos:
 
       - id: go-lint
         name: Go lint (PR changed code)
-        entry: bash -c 'unset GIT_DIR GIT_WORK_TREE; base=$(scripts/resolve-go-lint-base) || exit $?; cd apps/backend && golangci-lint run ./... --new-from-rev="$base" --timeout=5m'
+        entry: bash -c 'unset GIT_DIR GIT_WORK_TREE; base=$(scripts/resolve-go-lint-base --comparison-base) || exit $?; cd apps/backend && golangci-lint run ./... --new-from-rev="$base" --timeout=5m'
         language: system
         files: ^apps/backend/.*\.go$
         pass_filenames: false
