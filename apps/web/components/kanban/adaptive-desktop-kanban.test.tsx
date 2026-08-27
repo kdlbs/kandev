@@ -101,7 +101,7 @@ describe("AdaptiveDesktopKanban mouse panning", () => {
     const window = renderBoard();
     window.scrollLeft = 400;
 
-    fireEvent.mouseDown(screen.getByTestId(blankColumnSpaceTestId), { button: 0, clientX: 200 });
+    fireEvent.mouseDown(screen.getByTestId("blank-list-space"), { button: 0, clientX: 200 });
     fireEvent.mouseMove(window, { buttons: 1, clientX: 100 });
     expect(window.scrollLeft).toBe(500);
 
