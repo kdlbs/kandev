@@ -26,8 +26,11 @@ The database service remains the source for the configured SQLite file path.
 `database.Service` already derives the backup directory from its configured database path.
 For SQLite, `Stats` adds `backup_directory` to `GET /api/v1/system/database`.
 
-The service computes this value with `filepath.Join(filepath.Dir(databasePath), "backups")`.
-PostgreSQL and other drivers return an empty value because they have no local SQLite snapshot directory.
+The service computes the sibling directory with
+`filepath.Join(filepath.Dir(databasePath), "backups")`, then resolves that value
+with `filepath.Abs` before returning it. If the absolute-path resolution fails,
+the database stats request returns the error. PostgreSQL and other drivers
+return an empty value because they have no local SQLite snapshot directory.
 
 The frontend adds `backup_directory` to `DatabaseStats`.
 `DataStorageSettings` reads the shared database state after `DatabaseStatsCard` loads it.

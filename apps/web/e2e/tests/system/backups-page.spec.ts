@@ -1,3 +1,4 @@
+import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 
 async function deleteAllManualBackups(apiClient: {
@@ -29,9 +30,12 @@ test.describe("System Backups page", () => {
     apiClient,
   }) => {
     const response = await apiClient.rawRequest("GET", "/api/v1/system/database");
-    const database = (await response.json()) as { backup_directory?: string };
+    const database = (await response.json()) as { path?: string; backup_directory?: string };
+    expect(database.path).toBeTruthy();
     const backupDirectory = database.backup_directory;
     expect(backupDirectory).toBeTruthy();
+    expect(path.isAbsolute(backupDirectory!)).toBe(true);
+    expect(backupDirectory).toBe(path.resolve(path.dirname(database.path!), "backups"));
 
     await testPage.goto("/settings/system/data-storage");
     await expect(

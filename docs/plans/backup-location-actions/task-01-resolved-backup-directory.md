@@ -93,10 +93,13 @@ None.
 
 Passed.
 
-- `go test ./internal/system/database -run 'TestStats|TestHandleStats' -count=1` passed (5 tests).
-- `pnpm --filter @kandev/web exec vitest run components/settings/system/system-route-copy.test.ts components/settings/system/system-invisible-copy.test.tsx lib/api/domains/system-api.test.ts` passed (51 tests).
+- `go test ./internal/system/database -run 'TestStats|TestHandleStats' -count=1` passed (6 tests, including the relative-path absolute-directory regression).
+- `pnpm --filter @kandev/web exec vitest run components/settings/system/system-route-copy.test.ts components/settings/system/system-invisible-copy.test.tsx lib/api/domains/system-api.test.ts` passed (52 tests, including the empty backup-directory regression).
 - `pnpm --filter @kandev/web e2e:run tests/system/backups-page.spec.ts` passed (3 Chromium tests, including the resolved path and row-action guidance scenarios).
 - `pnpm --filter @kandev/web run i18n:check` passed with the repository's existing advisory orphan-catalog warnings.
 - `python3 scripts/lint-spec-files.py --all` passed.
 - `git diff --check` passed.
 - `pnpm --filter @kandev/web run typecheck` passed as an additional contract check.
+- Review remediation resolves the derived sibling directory with `filepath.Abs`
+  before returning it and propagates resolution errors. The desktop E2E test
+  also asserts the API value is absolute and matches the expected sibling.

@@ -283,6 +283,27 @@ func TestStats_ReturnsConfiguredSQLiteBackupDirectory(t *testing.T) {
 	}
 }
 
+func TestStats_ResolvesRelativeSQLiteBackupDirectory(t *testing.T) {
+	relativeDatabasePath := filepath.Join("state", "kandev.db")
+	want, err := filepath.Abs(filepath.Join(filepath.Dir(relativeDatabasePath), "backups"))
+	if err != nil {
+		t.Fatalf("resolve expected backup directory: %v", err)
+	}
+
+	svc := NewService(nil, relativeDatabasePath, ResetDirs{}, nil, nil)
+	stats, err := svc.Stats()
+	if err != nil {
+		t.Fatalf("Stats: %v", err)
+	}
+
+	if stats.BackupDirectory != want {
+		t.Errorf("BackupDirectory = %q, want %q", stats.BackupDirectory, want)
+	}
+	if !filepath.IsAbs(stats.BackupDirectory) {
+		t.Errorf("BackupDirectory = %q, want an absolute path", stats.BackupDirectory)
+	}
+}
+
 func TestStats_PostgresDoesNotUseSQLitePragmas(t *testing.T) {
 	dataDir := t.TempDir()
 	svc := NewService(newFakePostgresStatsPool(t), filepath.Join(dataDir, "kandev.db"), ResetDirs{}, nil, nil)

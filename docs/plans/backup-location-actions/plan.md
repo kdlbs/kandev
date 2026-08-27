@@ -12,7 +12,7 @@ legacy_specs: []
 
 ## Overview
 
-First, expose the resolved SQLite backup directory through database statistics.
+First, expose the absolute, resolved SQLite backup directory through database statistics.
 Then show that directory and add guidance to each backup row action.
 
 The order establishes one server-owned path before the frontend renders it.
@@ -41,7 +41,8 @@ The order establishes one server-owned path before the frontend renders it.
 ### Resolved directory
 
 Add `BackupDirectory` to `database.Stats` in `apps/backend/internal/system/database/stats.go`.
-Return the `backups` sibling path for SQLite and an empty value for PostgreSQL.
+Return the absolute `backups` sibling path for SQLite, resolving the derived
+path with `filepath.Abs`, and an empty value for PostgreSQL.
 
 Add `backup_directory` to `DatabaseStats` in `apps/web/lib/types/system.ts`.
 Use the shared database state in `data-storage-settings.tsx` for the Backups description.
@@ -78,8 +79,8 @@ Keep the current compact dimensions for fine-pointer desktop use.
 
 Passed.
 
-- `go test ./internal/system/database -run 'TestStats|TestHandleStats' -count=1` passed (5 tests).
-- `pnpm --filter @kandev/web exec vitest run components/settings/system/system-route-copy.test.ts components/settings/system/system-invisible-copy.test.tsx lib/api/domains/system-api.test.ts` passed (51 tests).
+- `go test ./internal/system/database -run 'TestStats|TestHandleStats' -count=1` passed (6 tests, including the relative-path absolute-directory regression).
+- `pnpm --filter @kandev/web exec vitest run components/settings/system/system-route-copy.test.ts components/settings/system/system-invisible-copy.test.tsx lib/api/domains/system-api.test.ts` passed (52 tests, including the empty backup-directory regression).
 - `pnpm --filter @kandev/web exec vitest run components/settings/system/backups-table.test.tsx` passed (4 tests).
 - `pnpm --filter @kandev/web e2e:run tests/system/backups-page.spec.ts` passed (3 Chromium tests).
 - `pnpm --filter @kandev/web e2e:run --project mobile-chrome tests/auth/mobile-system-data-storage-member-gating.spec.ts` passed (2 mobile Chromium tests).
@@ -87,6 +88,10 @@ Passed.
 - `pnpm --filter @kandev/web run i18n:check` passed with the repository's existing advisory orphan-catalog warnings.
 - `python3 scripts/lint-spec-files.py --all` passed.
 - `git diff --check` passed.
+- Review remediation passed: the backend resolves the derived directory with
+  `filepath.Abs` and returns an error if resolution fails; the desktop E2E test
+  independently asserts that the API value is absolute and matches the
+  database-path sibling.
 
 ## Risks
 

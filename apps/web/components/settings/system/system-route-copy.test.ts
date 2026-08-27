@@ -136,6 +136,14 @@ describe("Data & Storage backup location copy", () => {
 
     expect(screen.queryByText(/VACUUM INTO snapshots stored under/)).toBeNull();
   });
+
+  it("omits the location when the backend has no backup directory", () => {
+    databaseState.value = { backup_directory: "" };
+
+    render(createElement(DataStorageSettings));
+
+    expect(screen.queryByText(/VACUUM INTO snapshots stored under/)).toBeNull();
+  });
 });
 
 /** "Feature Toggles" -> "featureToggles", matching the catalog key suffix. */
