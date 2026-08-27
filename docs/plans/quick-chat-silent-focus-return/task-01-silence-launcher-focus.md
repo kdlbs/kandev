@@ -38,14 +38,17 @@ automatic return. Restore the normal appearance after focus leaves.
 
 - Escape closes the dialog and keeps focus on its launcher without visible focus decoration.
 - The marker is removed on blur. Later keyboard focus uses the normal focus decoration.
+- Shortcut and command-palette origins regain focus without the silent marker.
 - Pointer, tooltip, disconnected-launcher, and mobile touch-close behavior do not change.
 
 ## Verification
 
 ```bash
 (cd apps && pnpm --filter @kandev/web exec vitest run components/quick-chat/quick-chat-focus.test.ts components/quick-chat/quick-chat-provider-focus.test.tsx components/app-sidebar/app-sidebar-new-task-item.test.tsx)
+(cd apps && pnpm --filter @kandev/web exec vitest run components/global-commands.test.tsx)
 (cd apps && pnpm --filter @kandev/web exec eslint components/quick-chat/quick-chat-focus.ts components/quick-chat/quick-chat-focus.test.ts components/quick-chat/quick-chat-provider-focus.test.tsx components/app-sidebar/app-sidebar-new-task-item.tsx)
 (cd apps/web && pnpm e2e:run tests/chat/quick-chat.spec.ts -- --grep "returns focus without a visible indicator")
+(cd apps/web && pnpm e2e:run tests/chat/quick-chat.spec.ts -- --grep "returns focus to a shortcut origin without a silent marker")
 (cd apps/web && pnpm e2e:run --project mobile-chrome tests/chat/mobile-quick-chat-entry.spec.ts -- --grep "opens from the home header and closes with the touch control")
 python3 scripts/lint-spec-files.py --all
 git diff --check
@@ -55,6 +58,9 @@ git diff --check
 
 - `apps/web/components/quick-chat/quick-chat-focus.ts`
 - `apps/web/components/quick-chat/quick-chat-focus.test.ts`
+- `apps/web/components/global-commands.tsx`
+- `apps/web/components/global-commands.test.tsx`
+- `apps/web/hooks/use-quick-chat-launcher.ts`
 - `apps/web/components/quick-chat/quick-chat-provider-focus.test.tsx`
 - `apps/web/app/globals.css`
 - `apps/web/e2e/tests/chat/quick-chat.spec.ts`
@@ -87,9 +93,11 @@ None.
 
 - Added a transient `data-quick-chat-silent-focus` marker to automatic launcher focus restoration.
 - Removed the marker on the launcher's first blur and skipped marking disconnected launchers.
+- Added an explicit non-launcher focus option for global keyboard shortcuts and command-palette
+  actions, preserving their focus origin without applying silent styling.
 - Added a scoped focus-visible style that hides only the automatic return indicator.
-- Unit tests: 30 passed across the three targeted Vitest files.
+- Unit tests: 34 passed across the four targeted Vitest files.
 - ESLint: passed for all changed frontend source and test files.
-- Chromium E2E: 1 passed for silent focus return and later normal keyboard focus.
+- Chromium E2E: 2 passed for launcher and shortcut-origin focus return.
 - Pixel 5 E2E: 1 passed for the existing mobile touch-close scenario.
 - Specification lint and `git diff --check`: passed.

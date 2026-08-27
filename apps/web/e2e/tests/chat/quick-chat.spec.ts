@@ -90,6 +90,24 @@ test.describe("Quick Chat", () => {
     expect(normalFocusStyles.borderColor).not.toBe(silentStyles.borderColor);
   });
 
+  test("returns focus to a shortcut origin without a silent marker", async ({ testPage }) => {
+    await testPage.goto("/");
+    await testPage.waitForLoadState("networkidle");
+    const origin = testPage.getByTestId("create-task-button");
+    await origin.focus();
+
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    await testPage.keyboard.press(`${modifier}+Shift+q`);
+    const dialog = testPage.getByRole("dialog", { name: "Quick Chat" });
+    await expect(dialog).toBeVisible();
+
+    await testPage.keyboard.press("Escape");
+
+    await expect(dialog).not.toBeVisible();
+    await expect(origin).toBeFocused();
+    await expect(origin).not.toHaveAttribute("data-quick-chat-silent-focus");
+  });
+
   test("clarification shortcuts work after clicking the message surface", async ({ testPage }) => {
     const dialog = await openQuickChatWithAgent(testPage);
     await sendQuickChatMessage(dialog, testPage, "/e2e:clarification-multi");

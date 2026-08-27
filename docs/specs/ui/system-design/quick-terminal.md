@@ -92,9 +92,11 @@ them without losing work, and return to the most recent terminal without managin
 `captureQuickChatLauncherFocus` records the element that opens the shared dialog.
 `restoreQuickChatLauncherFocus` returns focus to that element after the dialog closes.
 
-Before focus returns, the helper adds a transient silent-focus marker to the launcher. A scoped
-style in `apps/web/app/globals.css` removes the outline, ring, shadow, and focus border while this
-marker is active. The marker does not change the focused element or the tooltip state.
+Launcher activations request a transient silent-focus marker before focus returns. A scoped style in
+`apps/web/app/globals.css` removes the outline, ring, shadow, and focus border while this marker is
+active. The marker does not change the focused element or the tooltip state. Global keyboard
+shortcuts and command-palette actions capture their origin for focus restoration but do not request
+the marker, so unrelated controls keep their normal focus appearance.
 
 The helper removes the marker when the launcher loses focus. Ordinary keyboard navigation can then
 show the normal focus indicator. If the launcher leaves the document before restoration, the helper

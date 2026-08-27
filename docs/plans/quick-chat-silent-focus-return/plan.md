@@ -39,9 +39,10 @@ keeps the transient state and its executable evidence in one change.
 
 ### Transient focus marker
 
-Update `apps/web/components/quick-chat/quick-chat-focus.ts`. Add a transient data marker before the
-saved launcher receives focus. Remove the marker on the first blur event. Do not mark or focus a
-launcher that is no longer in the document.
+Update `apps/web/components/quick-chat/quick-chat-focus.ts`. Launcher activations request a
+transient data marker before the saved launcher receives focus. Remove the marker on the first blur
+event. Global keyboard shortcuts and command-palette actions still restore their origin, but request
+no marker. Do not mark or focus an origin that is no longer in the document.
 
 Keep this state in the shared helper. Do not add state to Zustand or to each launcher component.
 Quick Chat and Quick Terminal already use this helper through their shared provider.
@@ -67,6 +68,8 @@ required because the changed state starts only after desktop keyboard dismissal.
 - `AC-UI-QUICK-TERMINAL-001.9`: Extend
   `apps/web/components/quick-chat/quick-chat-focus.test.ts`. Make sure that restoration adds the
   marker, keeps focus, and removes the marker after blur.
+- Cover a non-launcher origin with silent styling disabled, and verify that global Quick Chat and
+  Configuration Chat commands disable silent styling.
 - Keep the disconnected-launcher regression in the same file. Make sure that no marker remains.
 - Keep `apps/web/components/quick-chat/quick-chat-provider-focus.test.tsx` as provider-level evidence
   that a close transition uses the shared restoration helper.
@@ -78,6 +81,8 @@ required because the changed state starts only after desktop keyboard dismissal.
   Escape. Make sure that the launcher is focused with no outline, shadow, or changed focus border.
 - In the same scenario, move focus away and return with keyboard navigation. Make sure that the
   normal focus indicator is visible again.
+- Cover the global Quick Chat shortcut from an unrelated control. Make sure that focus returns to
+  that origin without the silent marker.
 - Run the existing `mobile-chrome` home-header close scenario in
   `apps/web/e2e/tests/chat/mobile-quick-chat-entry.spec.ts`. It proves that the touch close path and
   mobile layout remain unchanged.
@@ -88,9 +93,9 @@ required because the changed state starts only after desktop keyboard dismissal.
 
 ## Verification results
 
-- Unit tests: 30 passed across the three targeted Vitest files.
+- Unit tests: 34 passed across the four targeted Vitest files.
 - ESLint: passed for all changed frontend source and test files.
-- Chromium E2E: 1 passed for silent focus return and later normal keyboard focus.
+- Chromium E2E: 2 passed for launcher and shortcut-origin focus return.
 - Pixel 5 E2E: 1 passed for the existing mobile touch-close scenario.
 - Specification lint: passed with `python3 scripts/lint-spec-files.py --all`.
 - Diff check: passed with `git diff --check`.
