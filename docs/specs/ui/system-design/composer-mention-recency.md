@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: ui
 created: 2026-08-27
 requirements:
@@ -137,4 +137,3 @@ cover the user-visible desktop and phone flows.
 
 None. The requirement and this design preserve the local ranking choice. The
 feature does not create a cross-system architecture boundary.
-
