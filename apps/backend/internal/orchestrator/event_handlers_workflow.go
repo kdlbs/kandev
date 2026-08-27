@@ -726,6 +726,12 @@ func (s *Service) handleTaskQueuePromoted(ctx context.Context, data watcher.Task
 		return
 	}
 	session, sessionErr := s.repo.GetActiveTaskSessionByTaskID(ctx, task.ID)
+	if errors.Is(sessionErr, models.ErrTaskSessionNotFound) {
+		// Queued tasks deliberately have no session until promotion. Continue
+		// into the no-session destination-entry path so deferred auto-start can run.
+		session = nil
+		sessionErr = nil
+	}
 	if sessionErr != nil {
 		s.logger.Warn("task.queue_promoted: failed to load active session",
 			zap.String("task_id", task.ID), zap.Error(sessionErr))
