@@ -2439,9 +2439,10 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 			// already terminal, create a replacement directly for automatic recovery states instead of attempting
 			// an auto-start that will fail and lose the hand-off. An explicit cancellation remains terminal.
 			go func() {
+				asyncCtx := context.WithoutCancel(ctx)
 				lock, release := s.acquireCancelInFlightGuard(sessionID)
 				lock.Lock()
-				fresh, reloadErr := s.repo.GetTaskSession(ctx, sessionID)
+				fresh, reloadErr := s.repo.GetTaskSession(asyncCtx, sessionID)
 				if reloadErr != nil || fresh == nil || isTerminalSessionState(fresh.State) {
 					lock.Unlock()
 					release()
@@ -2458,7 +2459,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 					s.logger.Info("implicit profile switch: reused session terminalized before dispatch, creating replacement",
 						zap.String("task_id", taskID), zap.String("session_id", sessionID))
 					replacement, replacementErr := s.createNewSessionForStep(
-						ctx, taskID, session, session.AgentProfileID,
+						asyncCtx, taskID, session, session.AgentProfileID,
 					)
 					if replacementErr != nil {
 						s.logger.Error("failed to create replacement after terminalized profile switch",
@@ -2466,22 +2467,22 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 						return
 					}
 					replacementPrompt := s.buildWorkflowPrompt(
-						ctx, taskDescription, step, taskID, replacement.ID, isPassthrough,
+						asyncCtx, taskDescription, step, taskID, replacement.ID, isPassthrough,
 					)
 					if replacementErr = s.autoStartStepPrompt(
-						ctx, taskID, replacement, step, replacementPrompt, planMode, true,
+						asyncCtx, taskID, replacement, step, replacementPrompt, planMode, true,
 					); replacementErr != nil {
 						s.logger.Error("failed to auto-start replacement after terminalized profile switch",
 							zap.String("task_id", taskID), zap.String("session_id", replacement.ID), zap.Error(replacementErr))
-						s.setSessionWaitingForInput(ctx, taskID, replacement.ID, replacement)
-						s.publishSessionWaitingEvent(ctx, taskID, replacement.ID, stepID, replacement)
+						s.setSessionWaitingForInput(asyncCtx, taskID, replacement.ID, replacement)
+						s.publishSessionWaitingEvent(asyncCtx, taskID, replacement.ID, stepID, replacement)
 					}
 					return
 				}
 				lock.Unlock()
 				release()
 
-				err := s.autoStartStepPrompt(ctx, taskID, fresh, step, effectivePrompt, planMode, true)
+				err := s.autoStartStepPrompt(asyncCtx, taskID, fresh, step, effectivePrompt, planMode, true)
 				if err != nil {
 					if errors.Is(err, errWorkflowAutoStartSessionTerminalized) {
 						if workflowAutoStartWasCancelled(err) {
@@ -2492,7 +2493,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 						s.logger.Info("implicit profile switch: reused session terminalized during dispatch, creating replacement",
 							zap.String("task_id", taskID), zap.String("session_id", sessionID))
 						replacement, replacementErr := s.createNewSessionForStep(
-							ctx, taskID, fresh, fresh.AgentProfileID,
+							asyncCtx, taskID, fresh, fresh.AgentProfileID,
 						)
 						if replacementErr != nil {
 							s.logger.Error("failed to create replacement after terminalized dispatch",
@@ -2500,15 +2501,15 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 							return
 						}
 						replacementPrompt := s.buildWorkflowPrompt(
-							ctx, taskDescription, step, taskID, replacement.ID, isPassthrough,
+							asyncCtx, taskDescription, step, taskID, replacement.ID, isPassthrough,
 						)
 						if replacementErr = s.autoStartStepPrompt(
-							ctx, taskID, replacement, step, replacementPrompt, planMode, true,
+							asyncCtx, taskID, replacement, step, replacementPrompt, planMode, true,
 						); replacementErr != nil {
 							s.logger.Error("failed to auto-start replacement after terminalized dispatch",
 								zap.String("task_id", taskID), zap.String("session_id", replacement.ID), zap.Error(replacementErr))
-							s.setSessionWaitingForInput(ctx, taskID, replacement.ID, replacement)
-							s.publishSessionWaitingEvent(ctx, taskID, replacement.ID, stepID, replacement)
+							s.setSessionWaitingForInput(asyncCtx, taskID, replacement.ID, replacement)
+							s.publishSessionWaitingEvent(asyncCtx, taskID, replacement.ID, stepID, replacement)
 						}
 						return
 					}
@@ -2516,9 +2517,9 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 						zap.String("task_id", taskID),
 						zap.String("session_id", sessionID),
 						zap.Error(err))
-					s.setSessionWaitingForInput(ctx, taskID, sessionID, fresh)
-					s.publishSessionWaitingEvent(ctx, taskID, sessionID, stepID, fresh)
-					s.drainQueuedMessageForPromptableSession(ctx, sessionID)
+					s.setSessionWaitingForInput(asyncCtx, taskID, sessionID, fresh)
+					s.publishSessionWaitingEvent(asyncCtx, taskID, sessionID, stepID, fresh)
+					s.drainQueuedMessageForPromptableSession(asyncCtx, sessionID)
 				}
 			}()
 			return

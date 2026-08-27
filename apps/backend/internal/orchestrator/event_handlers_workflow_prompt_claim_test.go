@@ -667,15 +667,26 @@ func (r *terminalizeImplicitSwitchRepo) GetTask(ctx context.Context, taskID stri
 // that a reused session has terminalized before dispatch and creates a
 // replacement session via createNewSessionForStep.
 func TestProcessOnEnterImplicitProfileSwitchTerminalizedGuard(t *testing.T) {
-	testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(t, models.TaskSessionStateCompleted, true)
+	testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(t, models.TaskSessionStateCompleted, true, false)
 }
 
 func TestProcessOnEnterImplicitProfileSwitchPreservesCancellation(t *testing.T) {
-	testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(t, models.TaskSessionStateCancelled, false)
+	testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(t, models.TaskSessionStateCancelled, false, false)
 }
 
-func testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(t *testing.T, terminalState models.TaskSessionState, wantReplacement bool) {
-	ctx := context.Background()
+func TestProcessOnEnterImplicitProfileSwitchSurvivesCallerCancellation(t *testing.T) {
+	testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(t, models.TaskSessionStateCompleted, true, true)
+}
+
+func testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(
+	t *testing.T,
+	terminalState models.TaskSessionState,
+	wantReplacement bool,
+	cancelCaller bool,
+) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	assertCtx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "task-implicit-switch", "session-implicit-switch-source", "step-source")
 
@@ -752,18 +763,21 @@ func testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(t *testing.T, term
 	// Terminalize the reused target session before the goroutine's guarded
 	// reload can detect it.
 	<-barrierRepo.promptCalled
-	requireNoError(t, repo.UpdateTaskSessionState(ctx, target.ID, terminalState, "terminalized concurrently"))
+	if cancelCaller {
+		cancel()
+	}
+	requireNoError(t, repo.UpdateTaskSessionState(context.Background(), target.ID, terminalState, "terminalized concurrently"))
 	close(barrierRepo.allowPrompt)
 
 	<-done
 
 	if !wantReplacement {
 		require.Eventually(t, func() bool {
-			sessions, err := repo.ListTaskSessions(ctx, source.TaskID)
+			sessions, err := repo.ListTaskSessions(assertCtx, source.TaskID)
 			if err != nil || len(sessions) != 2 {
 				return false
 			}
-			stored, err := repo.GetTaskSession(ctx, target.ID)
+			stored, err := repo.GetTaskSession(assertCtx, target.ID)
 			return err == nil && stored.State == models.TaskSessionStateCancelled
 		}, 5*time.Second, 50*time.Millisecond, "expected cancellation to prevent a replacement session")
 		return
@@ -774,7 +788,7 @@ func testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(t *testing.T, term
 	// session appearing as primary in the database.
 	var replacement *models.TaskSession
 	require.Eventually(t, func() bool {
-		sessions, err := repo.ListTaskSessions(ctx, source.TaskID)
+		sessions, err := repo.ListTaskSessions(assertCtx, source.TaskID)
 		if err != nil || len(sessions) != 3 {
 			return false
 		}
@@ -791,13 +805,13 @@ func testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(t *testing.T, term
 		t.Fatalf("replacement state = %s, want nonterminal", replacement.State)
 	}
 	// The terminalized target must remain in its COMPLETED state.
-	finalTarget, err := repo.GetTaskSession(ctx, target.ID)
+	finalTarget, err := repo.GetTaskSession(assertCtx, target.ID)
 	requireNoError(t, err)
 	if finalTarget.State != models.TaskSessionStateCompleted {
 		t.Errorf("terminalized target state = %s, must remain COMPLETED", finalTarget.State)
 	}
 	// The source session (the previous current session) must not be primary.
-	finalSource, err := repo.GetTaskSession(ctx, source.ID)
+	finalSource, err := repo.GetTaskSession(assertCtx, source.ID)
 	requireNoError(t, err)
 	if finalSource.IsPrimary {
 		t.Error("source session must not be primary after the implicit switch")
