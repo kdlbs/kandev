@@ -97,8 +97,7 @@ test.describe("Workflow steps", () => {
     await session.waitForLoad();
     await expect(session.stepper).toBeVisible();
 
-    await session.stepper.getByTestId(`workflow-step-${targetStep.name}`).hover();
-    await testPage.getByRole("button", { name: "Move here" }).click();
+    await session.moveToWorkflowStep(targetStep);
 
     const moveError = testPage.getByTestId("task-move-error-banner");
     await expect(moveError).toBeVisible();

@@ -280,3 +280,41 @@ func TestFromTurnPreservesSubsecondOrderingPrecision(t *testing.T) {
 		t.Fatalf("time.Parse(RFC3339, StartedAt): %v", err)
 	}
 }
+
+// TestFromTurnPreservesLifecycleOnlyMetadata is AC-11's DTO half: the
+// GET .../turns handler (internal/task/handlers/task_http_handlers.go) does
+// nothing but call FromTurn per row and gin.Context.JSON the result, so
+// pinning that FromTurn copies metadata verbatim - and that json.Marshal
+// keeps the lifecycle_only key - proves the response payload carries it,
+// without standing up an HTTP server. turnHistoryPredicate (proven unchanged
+// by TestTurnReadsHideEmptyUnpublishedReservationUntilMessageEvidence and
+// friends in the sqlite package) is what keeps this turn in the result set
+// FromTurn is ever handed.
+func TestFromTurnPreservesLifecycleOnlyMetadata(t *testing.T) {
+	now := time.Date(2026, time.August, 24, 9, 0, 0, 0, time.UTC)
+	got := FromTurn(&models.Turn{
+		ID:        "turn-lifecycle",
+		StartedAt: now,
+		CreatedAt: now,
+		UpdatedAt: now,
+		Metadata:  map[string]interface{}{models.TurnMetaKeyLifecycleOnly: true},
+	})
+
+	if lifecycleOnly, ok := got.Metadata[models.TurnMetaKeyLifecycleOnly]; !ok || lifecycleOnly != true {
+		t.Fatalf("TurnDTO.Metadata[%q] = %v, want true", models.TurnMetaKeyLifecycleOnly, lifecycleOnly)
+	}
+
+	raw, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("json.Marshal(TurnDTO): %v", err)
+	}
+	var decoded struct {
+		Metadata map[string]interface{} `json:"metadata"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal(TurnDTO JSON): %v", err)
+	}
+	if lifecycleOnly, ok := decoded.Metadata[models.TurnMetaKeyLifecycleOnly]; !ok || lifecycleOnly != true {
+		t.Fatalf("decoded metadata.lifecycle_only = %v, want true (raw JSON: %s)", lifecycleOnly, raw)
+	}
+}
