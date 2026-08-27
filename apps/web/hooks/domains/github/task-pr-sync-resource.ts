@@ -38,6 +38,7 @@ type ResourceEntry = {
   loaded: boolean;
   listeners: Set<() => void>;
   promise: Promise<void> | null;
+  requestStartedAt: number | null;
   requestGeneration: number;
   retryCount: number;
   permanent: boolean;
@@ -73,6 +74,7 @@ function createEntry(scope: TaskPRSyncScope): ResourceEntry {
     loaded: false,
     listeners: new Set(),
     promise: null,
+    requestStartedAt: null,
     requestGeneration: 0,
     retryCount: 0,
     permanent: false,
@@ -145,7 +147,11 @@ function canScheduleRetry(store: ResourceStore, entry: ResourceEntry): boolean {
   );
 }
 
-function scheduleRetry(store: ResourceStore, entry: ResourceEntry): void {
+function scheduleRetry(
+  store: ResourceStore,
+  entry: ResourceEntry,
+  delayMs = store.retryDelayMs,
+): void {
   if (!canScheduleRetry(store, entry)) return;
   const timer = setTimeout(() => {
     if (entry.retryTimer !== timer) return;
@@ -155,7 +161,7 @@ function scheduleRetry(store: ResourceStore, entry: ResourceEntry): void {
     }
     entry.retryCount += 1;
     void startRequest(store, entry);
-  }, store.retryDelayMs);
+  }, delayMs);
   entry.retryTimer = timer;
 }
 
@@ -237,7 +243,9 @@ async function runRequest(
 
 function settleRequest(store: ResourceStore, entry: ResourceEntry, promise: Promise<void>): void {
   if (entry.promise !== promise) return;
+  const requestStartedAt = entry.requestStartedAt;
   entry.promise = null;
+  entry.requestStartedAt = null;
   if (!isCurrentEntry(store, entry)) return;
   if (entry.listeners.size === 0) {
     store.entries.delete(entry.key);
@@ -245,12 +253,19 @@ function settleRequest(store: ResourceStore, entry: ResourceEntry, promise: Prom
   }
   const state = storeState(store);
   if (hasTaskPRs(state, entry.scope)) clearRetryTimer(entry);
-  else scheduleRetry(store, entry);
+  else {
+    const retryDelay =
+      requestStartedAt === null
+        ? store.retryDelayMs
+        : Math.max(0, requestStartedAt + store.retryDelayMs - Date.now());
+    scheduleRetry(store, entry, retryDelay);
+  }
 }
 
 function startRequest(store: ResourceStore, entry: ResourceEntry): Promise<void> {
   if (entry.promise) return entry.promise;
   const requestGeneration = ++entry.requestGeneration;
+  entry.requestStartedAt = Date.now();
   const promise = runRequest(store, entry, requestGeneration);
   entry.promise = promise;
   void promise.then(
@@ -270,6 +285,8 @@ function observeStore(store: ResourceStore, entry: ResourceEntry): void {
       entry.retryCount = 0;
       entry.permanent = false;
       clearRetryTimer(entry);
+      entry.promise = null;
+      entry.requestStartedAt = null;
       void startRequest(store, entry);
       return;
     }

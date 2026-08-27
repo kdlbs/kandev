@@ -104,9 +104,9 @@ changes are expected.
 Run from the repository root unless a command changes directory:
 
 ```bash
-cd apps/web && pnpm exec vitest run hooks/domains/github/task-pr-sync-resource.test.ts hooks/domains/github/use-task-pr.test.tsx
-cd apps/web && pnpm run typecheck
-cd apps && pnpm --filter @kandev/web lint
+(cd apps/web && pnpm exec vitest run hooks/domains/github/task-pr-sync-resource.test.ts hooks/domains/github/use-task-pr.test.tsx)
+(cd apps/web && pnpm run typecheck)
+(cd apps && pnpm --filter @kandev/web lint)
 git diff --check
 ```
 

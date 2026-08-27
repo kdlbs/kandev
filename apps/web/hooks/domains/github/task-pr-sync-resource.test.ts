@@ -232,6 +232,30 @@ describe("task PR sync resource lifecycle", () => {
     release();
   });
 
+  it("anchors the retry delay to the start of the previous request", async () => {
+    const store = createStore();
+    const requester = vi.fn<TaskPRSyncRequester>();
+    const first = deferred<{ prs: TaskPR[] }>();
+    const second = deferred<{ prs: TaskPR[] }>();
+    requester.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const resource = createTaskPRSyncResource(store, requester, { retryDelayMs: 10 });
+    const release = resource.subscribe(scope, vi.fn());
+
+    expect(requester).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(8);
+    first.resolve({ prs: [] });
+    await vi.advanceTimersByTimeAsync(0);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(requester).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(requester).toHaveBeenCalledTimes(2);
+
+    second.resolve({ prs: [] });
+    await vi.advanceTimersByTimeAsync(0);
+    release();
+  });
+
   it("stops the retry schedule when another path discovers a pull request", async () => {
     const store = createStore();
     const requester = vi.fn<TaskPRSyncRequester>().mockResolvedValue({ prs: [] });
@@ -275,6 +299,27 @@ describe("task PR sync resource recovery", () => {
 
     await vi.advanceTimersByTimeAsync(10);
     expect(requester.mock.calls.length).toBe(callsAfterExhaustion + 2);
+    release();
+  });
+
+  it("abandons a pending pre-reconnect request and refreshes immediately", async () => {
+    const store = createStore();
+    const requester = vi.fn<TaskPRSyncRequester>();
+    const first = deferred<{ prs: TaskPR[] }>();
+    const second = deferred<{ prs: TaskPR[] }>();
+    requester.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const resource = createTaskPRSyncResource(store, requester);
+    const release = resource.subscribe(scope, vi.fn());
+
+    expect(requester).toHaveBeenCalledTimes(1);
+    store.getState().setConnectionStatus("connected", null);
+    expect(requester).toHaveBeenCalledTimes(2);
+
+    second.resolve({ prs: [] });
+    first.resolve({ prs: [makePR()] });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(store.getState().taskPRs.byTaskId[scope.taskId]).toBeUndefined();
     release();
   });
 
