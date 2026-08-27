@@ -958,6 +958,15 @@ func (s *Service) CountPendingByTaskIDs(ctx context.Context, taskIDs []string) (
 	return counts, nil
 }
 
+// ListPendingByTask returns one fail-closed snapshot of visible queue entries.
+func (s *Service) ListPendingByTask(ctx context.Context, taskID string) (map[string][]QueuedMessage, error) {
+	entries, err := s.repo.ListByTask(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("list pending by task: %w", err)
+	}
+	return entries, nil
+}
+
 // CountPendingByTask returns the pending prompt count for one task.
 func (s *Service) CountPendingByTask(ctx context.Context, taskID string) (int, error) {
 	counts, err := s.CountPendingByTaskIDs(ctx, []string{taskID})

@@ -155,30 +155,32 @@ func (r *Repository) ListTaskInboxMessages(
 	opts models.TaskInboxMessagesOptions,
 ) ([]*models.Message, bool, map[string]int, error) {
 	counts := make(map[string]int)
-	countRows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+	if !opts.SkipCounts {
+		countRows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT task_session_id, COUNT(*)
 		FROM task_session_messages
 		WHERE task_id = ? AND author_type = ?
 		GROUP BY task_session_id
 	`), taskID, string(models.MessageAuthorUser))
-	if err != nil {
-		return nil, false, nil, err
-	}
-	for countRows.Next() {
-		var sessionID string
-		var count int
-		if err := countRows.Scan(&sessionID, &count); err != nil {
+		if err != nil {
+			return nil, false, nil, err
+		}
+		for countRows.Next() {
+			var sessionID string
+			var count int
+			if err := countRows.Scan(&sessionID, &count); err != nil {
+				_ = countRows.Close()
+				return nil, false, nil, err
+			}
+			counts[sessionID] = count
+		}
+		if err := countRows.Err(); err != nil {
 			_ = countRows.Close()
 			return nil, false, nil, err
 		}
-		counts[sessionID] = count
-	}
-	if err := countRows.Err(); err != nil {
-		_ = countRows.Close()
-		return nil, false, nil, err
-	}
-	if err := countRows.Close(); err != nil {
-		return nil, false, nil, err
+		if err := countRows.Close(); err != nil {
+			return nil, false, nil, err
+		}
 	}
 
 	limit := opts.Limit

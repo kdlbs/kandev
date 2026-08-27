@@ -3081,7 +3081,7 @@ func (s *Service) autoStartStepPrompt(
 			}, referenceContext, pullRequestTargetContext)
 		}
 	}
-	userMsgRecorded, inboxTransitionID := s.recordAutoStartMessage(ctx, taskID, sessionID, recordedPrompt, planMode, origin, references)
+	userMsgRecorded, inboxTransitionID := s.recordAutoStartMessage(ctx, taskID, sessionID, recordedPrompt, planMode, origin, references, attachments)
 
 	// If the session is in CREATED state, the agent was never started (e.g. workspace-only
 	// preparation from a blocked auto-start). PromptTask will reject CREATED sessions,
@@ -3323,6 +3323,7 @@ func (s *Service) recordAutoStartMessage(
 	planMode bool,
 	origin workflowMessageOrigin,
 	references []v1.EntityReference,
+	attachments []v1.MessageAttachment,
 ) (bool, string) {
 	if s.messageCreator == nil || prompt == "" {
 		return false, ""
@@ -3340,6 +3341,9 @@ func (s *Service) recordAutoStartMessage(
 	// workflow_auto_start is the original tag this function set; preserved
 	// for any consumer reading it directly.
 	metaMap := workflowMessageMetadata(planMode, origin, references)
+	if len(attachments) > 0 {
+		metaMap["attachments"] = toQueuedAttachments(attachments)
+	}
 	transitionID := uuid.NewString()
 	metaMap[inboxTransitionMetadataKey] = transitionID
 	if err := s.messageCreator.CreateUserMessage(ctx, taskID, prompt, sessionID, turnID, metaMap); err != nil {

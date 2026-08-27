@@ -32,8 +32,9 @@ type taskInboxRequest struct {
 }
 
 type taskInboxCursor struct {
-	Timestamp time.Time `json:"t"`
-	ID        string    `json:"id"`
+	Timestamp time.Time      `json:"t"`
+	ID        string         `json:"id"`
+	Counts    map[string]int `json:"c,omitempty"`
 }
 
 // inboxItem is deliberately a safe projection. In particular it does not
@@ -79,7 +80,7 @@ func (h *Handlers) handleListTaskInbox(ctx context.Context, msg *ws.Message) (*w
 		h.logger.Error("failed to build task inbox", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list task inbox", nil)
 	}
-	page, hasMore, next := paginateTaskInbox(items, cursor, limit, messagesHasMore)
+	page, hasMore, next := paginateTaskInbox(items, cursor, limit, messagesHasMore, perSession)
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 		"task_id": req.TaskID, "items": page, "total": inboxCountTotal(perSession), "returned": len(page),
 		"has_more": hasMore, "cursor": next, "per_session_counts": perSession,
@@ -93,7 +94,7 @@ func (h *Handlers) buildTaskInboxItems(
 	sessions []*models.TaskSession,
 	limit int,
 ) ([]inboxItem, map[string]int, bool, error) {
-	messageOptions := models.TaskInboxMessagesOptions{Limit: limit}
+	messageOptions := models.TaskInboxMessagesOptions{Limit: limit, SkipCounts: cursor != nil}
 	if cursor != nil {
 		messageOptions.AfterCreatedAt = cursor.Timestamp
 		messageOptions.AfterID = cursor.ID
@@ -108,6 +109,11 @@ func (h *Handlers) buildTaskInboxItems(
 	}
 	items := make([]inboxItem, 0)
 	perSession := make(map[string]int, len(messageCounts)+len(sessions))
+	if cursor != nil {
+		for sessionID, count := range cursor.Counts {
+			perSession[sessionID] = count
+		}
+	}
 	for sessionID, count := range messageCounts {
 		perSession[sessionID] = count
 	}
@@ -124,22 +130,25 @@ func (h *Handlers) buildTaskInboxItems(
 			SessionName:  session.Name,
 			IsPrimary:    session.IsPrimary,
 			IsCurrent:    session.ID == req.CurrentSessionID,
-			Sender:       string(message.AuthorType),
+			Sender:       inboxSender(message.Metadata, string(message.AuthorType)),
 			Content:      sysprompt.StripSystemContent(message.Content),
 			Attachments:  safeInboxMessageAttachments(message.Metadata),
 			Timestamp:    message.CreatedAt,
 		})
 	}
-	for _, session := range sessions {
-		items, err = h.appendSessionQueueInbox(ctx, items, perSession, session, req.CurrentSessionID)
+	if h.sessionLauncher != nil && h.sessionLauncher.GetMessageQueue() != nil {
+		queued, err := h.sessionLauncher.GetMessageQueue().ListPendingByTask(ctx, req.TaskID)
 		if err != nil {
 			return nil, nil, false, err
+		}
+		for _, session := range sessions {
+			items = appendQueueInbox(items, perSession, session, req.CurrentSessionID, queued[session.ID], cursor == nil)
 		}
 	}
 	return items, perSession, messagesHasMore, nil
 }
 
-func paginateTaskInbox(items []inboxItem, cursor *taskInboxCursor, limit int, messagesHasMore bool) ([]inboxItem, bool, string) {
+func paginateTaskInbox(items []inboxItem, cursor *taskInboxCursor, limit int, messagesHasMore bool, counts map[string]int) ([]inboxItem, bool, string) {
 	sort.Slice(items, func(i, j int) bool { return inboxBefore(items[i], items[j]) })
 	start := 0
 	if cursor != nil {
@@ -155,7 +164,7 @@ func paginateTaskInbox(items []inboxItem, cursor *taskInboxCursor, limit int, me
 	hasMore := messagesHasMore || end < len(items)
 	next := ""
 	if hasMore && len(page) > 0 {
-		next = encodeInboxCursor(page[len(page)-1])
+		next = encodeInboxCursorWithCounts(page[len(page)-1], counts)
 	}
 	return page, hasMore, next
 }
@@ -187,14 +196,8 @@ func (h *Handlers) parseTaskInboxRequest(ctx context.Context, msg *ws.Message) (
 	return &req, cursor, nil
 }
 
-func (h *Handlers) appendSessionQueueInbox(ctx context.Context, items []inboxItem, counts map[string]int, session *models.TaskSession, currentID string) ([]inboxItem, error) {
-	if h.sessionLauncher == nil || h.sessionLauncher.GetMessageQueue() == nil {
-		return items, nil
-	}
-	for _, entry := range h.sessionLauncher.GetMessageQueue().GetStatus(ctx, session.ID).Entries {
-		if entry.IsReservedInFlight() {
-			continue
-		}
+func appendQueueInbox(items []inboxItem, counts map[string]int, session *models.TaskSession, currentID string, entries []messagequeue.QueuedMessage, countEntries bool) []inboxItem {
+	for _, entry := range entries {
 		items = append(items, inboxItem{
 			ID:           entry.ID,
 			TransitionID: inboxTransitionID(entry.Metadata, entry.ID),
@@ -203,14 +206,23 @@ func (h *Handlers) appendSessionQueueInbox(ctx context.Context, items []inboxIte
 			SessionName:  session.Name,
 			IsPrimary:    session.IsPrimary,
 			IsCurrent:    session.ID == currentID,
-			Sender:       entry.QueuedBy,
-			Content:      entry.Content,
+			Sender:       inboxSender(entry.Metadata, entry.QueuedBy),
+			Content:      sysprompt.StripSystemContent(entry.Content),
 			Attachments:  safeInboxAttachments(entry.Attachments),
 			Timestamp:    entry.QueuedAt,
 		})
-		counts[session.ID]++
+		if countEntries {
+			counts[session.ID]++
+		}
 	}
-	return items, nil
+	return items
+}
+
+func inboxSender(metadata map[string]interface{}, fallback string) string {
+	if sender := inboxMetadataString(metadata, messagequeue.MetadataSenderTaskID); sender != "" {
+		return sender
+	}
+	return fallback
 }
 
 func inboxCountTotal(counts map[string]int) int {
@@ -277,7 +289,10 @@ func inboxAfter(item inboxItem, cursor taskInboxCursor) bool {
 	return itemTimestamp.After(cursorTimestamp) || (itemTimestamp.Equal(cursorTimestamp) && item.ID > cursor.ID)
 }
 func encodeInboxCursor(item inboxItem) string {
-	raw, _ := json.Marshal(taskInboxCursor{Timestamp: inboxOrderTime(item.Timestamp), ID: item.ID})
+	return encodeInboxCursorWithCounts(item, nil)
+}
+func encodeInboxCursorWithCounts(item inboxItem, counts map[string]int) string {
+	raw, _ := json.Marshal(taskInboxCursor{Timestamp: inboxOrderTime(item.Timestamp), ID: item.ID, Counts: counts})
 	return base64.RawURLEncoding.EncodeToString(raw)
 }
 func inboxOrderTime(timestamp time.Time) time.Time {

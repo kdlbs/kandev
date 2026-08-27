@@ -60,6 +60,8 @@ type Repository interface {
 
 	// ListBySession returns all entries for a session ordered by position ascending.
 	ListBySession(ctx context.Context, sessionID string) ([]QueuedMessage, error)
+	// ListByTask returns all queued entries belonging to live sessions of a task.
+	ListByTask(ctx context.Context, taskID string) (map[string][]QueuedMessage, error)
 
 	// CountBySession returns the number of entries for a session.
 	CountBySession(ctx context.Context, sessionID string) (int, error)

@@ -72,6 +72,7 @@ type TaskInboxMessagesOptions struct {
 	Limit          int
 	AfterCreatedAt time.Time
 	AfterID        string
+	SkipCounts     bool
 }
 
 // SearchMessagesOptions defines options for searching a session's messages.
