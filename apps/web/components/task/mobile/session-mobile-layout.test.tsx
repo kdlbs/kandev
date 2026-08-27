@@ -13,6 +13,16 @@ vi.mock("../file-browser-hooks", () => ({
   fetchAndOpenFile: (...args: unknown[]) => fetchAndOpenFileMock(...args),
 }));
 
+vi.mock("../task-plan-panel", () => ({
+  TaskPlanPanel: (props: { taskId: string | null; mobileBottomOffset?: string }) => (
+    <div
+      data-testid="mock-task-plan-panel"
+      data-task-id={props.taskId ?? ""}
+      data-mobile-bottom-offset={props.mobileBottomOffset}
+    />
+  ),
+}));
+
 vi.mock("@/hooks/use-visual-viewport-offset", () => ({
   useVisualViewportOffset: () => ({ keyboardOpen: false, bottomOffset: 0 }),
 }));
@@ -406,6 +416,38 @@ describe("MobilePanelArea Prompt history", () => {
     expect(screen.getByTestId("mobile-prompt-history-content")).toBeTruthy();
     fireEvent.click(screen.getByTestId("mobile-prompt-history-content"));
     expect(handleNavigateToPrompt).toHaveBeenCalledWith("prompt-1");
+  });
+});
+
+describe("MobilePanelArea Plan formatting offset", () => {
+  it("passes the bottom navigation height to the Plan panel", () => {
+    render(
+      <MobilePanelArea
+        currentMobilePanel="plan"
+        activeTaskId="task-1"
+        isPassthroughMode={false}
+        effectiveSessionId="session-1"
+        selectedFile={null}
+        selectedFilePreview={false}
+        selectedDiff={null}
+        handleOpenFileFromChat={vi.fn()}
+        handleClearSelectedDiff={vi.fn()}
+        handleOpenFile={vi.fn()}
+        handlePanelChangeAndClearSheet={vi.fn()}
+        onNavigateToPrompt={vi.fn()}
+        mobileScrollTarget={null}
+        topNavHeight="3.5rem"
+        bottomNavHeight="3.25rem"
+        reviews={[]}
+        selectedReview={null}
+        onSelectReview={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId("mock-task-plan-panel").getAttribute("data-task-id")).toBe("task-1");
+    expect(
+      screen.getByTestId("mock-task-plan-panel").getAttribute("data-mobile-bottom-offset"),
+    ).toBe("3.25rem");
   });
 });
 

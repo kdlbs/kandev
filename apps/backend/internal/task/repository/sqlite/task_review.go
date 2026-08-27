@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -17,7 +18,7 @@ import (
 // constant so every read path scans in the same order as writes.
 const reviewRunColumns = `id, task_id, session_id, trigger, workflow_step_id, agent_id, model,
 	status, error_code, error_message, summary, finding_count, file_count, repository_count,
-	prompt_tokens, response_tokens, duration_ms, created_at, completed_at`
+	prompt_tokens, response_tokens, duration_ms, entry_id, created_at, completed_at`
 
 const reviewFindingColumns = `id, run_id, task_id, repository_id, repository_name, file_path,
 	start_line, end_line, side, severity, category, title, body, suggestion, anchor_text,
@@ -49,15 +50,71 @@ func (r *Repository) CreateTaskReviewRun(ctx context.Context, run *models.TaskRe
 	}
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_review_runs (`+reviewRunColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), run.ID, run.TaskID, run.SessionID, string(run.Trigger), run.WorkflowStepID, run.AgentID,
 		run.Model, string(run.Status), run.ErrorCode, run.ErrorMessage, run.Summary,
 		run.FindingCount, run.FileCount, run.RepositoryCount, run.PromptTokens,
-		run.ResponseTokens, run.DurationMs, run.CreatedAt, run.CompletedAt)
+		run.ResponseTokens, run.DurationMs, run.EntryID, run.CreatedAt, run.CompletedAt)
 	if err != nil {
+		if isTaskReviewRunEntryViolation(err) {
+			return fmt.Errorf("%w: entry %s", ErrTaskReviewRunEntryConflict, run.EntryID)
+		}
 		return fmt.Errorf("failed to create task review run: %w", err)
 	}
 	return nil
+}
+
+// ErrTaskReviewRunEntryConflict is returned by CreateTaskReviewRun when a run
+// with the same non-empty EntryID already exists (idx_task_review_runs_entry_id).
+// The narrow race this guards is two concurrent redeliveries of the same
+// step-entry both passing FindTaskReviewRunByEntryID's pre-check before
+// either has inserted. Neither caller re-fetches the winner's row on this
+// error today: review.Runner.launch (internal/review/runner.go) returns it
+// as-is, and orchestrator's runCodeReviewCallback logs and swallows it by
+// design, matching every other review-launch failure ("a review failure
+// never blocks the transition") — see AC-OFFICE-STEP-ENTRY-001.10. The loser
+// of the race simply does not get a run for that entry; a later redelivery
+// of the same entry (restart, retry) will find the winner's row through the
+// FindTaskReviewRunByEntryID pre-check instead of hitting this conflict
+// again.
+var ErrTaskReviewRunEntryConflict = errors.New("task review run entry conflict")
+
+// sqliteTaskReviewRunEntryViolationMessage is the substring go-sqlite3 puts in
+// a UNIQUE-constraint error for idx_task_review_runs_entry_id.
+const sqliteTaskReviewRunEntryViolationMessage = "UNIQUE constraint failed: task_review_runs.entry_id"
+
+// isTaskReviewRunEntryViolation reports whether err is a violation of
+// idx_task_review_runs_entry_id specifically, not any unique violation. On
+// PostgreSQL it inspects the typed pgconn.PgError's constraint name; on
+// SQLite (no typed access to the constraint name) it matches the message
+// documented above. Mirrors isParticipantsNaturalKeyViolation in
+// internal/workflow/repository/phase2_sqlite.go.
+func isTaskReviewRunEntryViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23505" && pgErr.ConstraintName == "idx_task_review_runs_entry_id"
+	}
+	return strings.Contains(err.Error(), sqliteTaskReviewRunEntryViolationMessage)
+}
+
+// FindTaskReviewRunByEntryID returns the run created for the given step-entry
+// ledger identifier, or nil when no run carries it. entryID must be
+// non-empty; callers should not call this for manual/MCP-triggered runs,
+// which never carry an entry ID.
+func (r *Repository) FindTaskReviewRunByEntryID(ctx context.Context, entryID string) (*models.TaskReviewRun, error) {
+	if entryID == "" {
+		return nil, nil
+	}
+	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(
+		`SELECT `+reviewRunColumns+` FROM task_review_runs WHERE entry_id = ?`), entryID)
+	run, err := scanReviewRun(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return run, err
 }
 
 // UpdateTaskReviewRun persists every mutable field of a run.
@@ -351,7 +408,7 @@ func scanReviewRun(s reviewRowScanner) (*models.TaskReviewRun, error) {
 	err := s.Scan(&run.ID, &run.TaskID, &run.SessionID, &trigger, &run.WorkflowStepID,
 		&run.AgentID, &run.Model, &status, &run.ErrorCode, &run.ErrorMessage, &run.Summary,
 		&run.FindingCount, &run.FileCount, &run.RepositoryCount, &run.PromptTokens,
-		&run.ResponseTokens, &run.DurationMs, &run.CreatedAt, &completedAt)
+		&run.ResponseTokens, &run.DurationMs, &run.EntryID, &run.CreatedAt, &completedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, err

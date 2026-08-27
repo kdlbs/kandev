@@ -318,6 +318,7 @@ func (b bootStateBuilder) addHomeKanbanRouteState(ctx context.Context, req *http
 	}
 	b.addRepositoriesState(ctx, state, activeWorkspaceID)
 	b.addRepositorySetsState(ctx, state, activeWorkspaceID)
+	b.addRepositoryBranchPoliciesState(ctx, state, activeWorkspaceID)
 	b.addKanbanSnapshotsState(ctx, state, workflows, activeWorkflowID)
 }
 
@@ -391,6 +392,10 @@ func (b bootStateBuilder) addRepositorySetsState(ctx context.Context, state map[
 		loaded = true
 	}
 	state["repositorySets"] = repositorySetsState(workspaceID, items, loaded)
+}
+
+func (b bootStateBuilder) addRepositoryBranchPoliciesState(ctx context.Context, state map[string]any, workspaceID string) {
+	b.repositoryBranchPoliciesForState(ctx, workspaceID, state)
 }
 
 func (b bootStateBuilder) addQuickChatState(

@@ -32,6 +32,7 @@ dashboard projections, and Office testing contracts.
 
 
 
+- [Office: Agent Comment Reads](requirements/agent-comment-reads.md)
 - [Office: Agents](requirements/agents.md)
 - [Office: Personal Assistant Agent, Channels & Agent Memory](requirements/assistant.md)
 - [Automation runs — status-scoped delete all](requirements/automation-runs-delete-all-by-status.md)
@@ -48,8 +49,10 @@ dashboard projections, and Office testing contracts.
 - [Office per-agent and per-role tier selection](requirements/office-agent-tier-routing.md)
 - [Office: Overview](requirements/overview.md)
 - [Office Provider Routing](requirements/routing.md)
+- [Office Review Participant Seats](requirements/review-participant-seats.md)
 - [Office Agent Runtime — Error Handling Contract](requirements/runtime.md)
 - [Office Scheduler](requirements/scheduler.md)
+- [Step Entry Sequence Execution](requirements/step-entry-sequence-execution.md)
 - [Office Tasks](requirements/tasks.md)
 - [Office: E2E Mock Harness for Task Sessions and Messages](requirements/testing.md)
 - [Office: Slack-Style Unread Divider](requirements/unread-divider.md)
@@ -58,6 +61,7 @@ dashboard projections, and Office testing contracts.
 
 
 
+- [Office: Agent Comment Reads System Design](system-design/agent-comment-reads-01.md)
 - [Office: Agents System Design Part 1](system-design/agents-01.md)
 - [Office: Agents System Design Part 2](system-design/agents-02.md)
 - [Office: Agents System Design Part 3](system-design/agents-03.md)
@@ -89,11 +93,13 @@ dashboard projections, and Office testing contracts.
 - [Office per-agent and per-role tier selection System Design Part 3](system-design/office-agent-tier-routing-03.md)
 - [Office: Overview System Design Part 1](system-design/overview-01.md)
 - [Office: Overview System Design Part 2](system-design/overview-02.md)
+- [Office Review Participant Seats System Design Part 1](system-design/review-participant-seats-01.md)
 - [Office Provider Routing System Design Part 1](system-design/routing-01.md)
 - [Office Provider Routing System Design Part 2](system-design/routing-02.md)
 - [Office Agent Runtime — Error Handling Contract System Design Part 1](system-design/runtime-01.md)
 - [Office Agent Runtime — Error Handling Contract System Design Part 2](system-design/runtime-02.md)
 - [Office Scheduler System Design Part 1](system-design/scheduler-01.md)
+- [Step Entry Sequence Execution System Design](system-design/step-entry-sequence-execution.md)
 - [Office Scheduler System Design Part 2](system-design/scheduler-02.md)
 - [Office Tasks System Design Part 1](system-design/tasks-01.md)
 - [Office Tasks System Design Part 2](system-design/tasks-02.md)

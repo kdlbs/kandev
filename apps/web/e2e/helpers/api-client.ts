@@ -7,6 +7,7 @@ import type {
   TaskSessionState,
   TaskCreateLastUsedApi,
   MCPTaskAgentProfileDefault,
+  RepositoryBranchPolicy,
 } from "../../lib/types/http";
 import type { Agent, AgentProfile } from "../../lib/types/http-agents";
 import { normalizeAgentProfile } from "../../lib/api/domains/agent-profile-normalize";
@@ -215,6 +216,7 @@ type TaskRepositoryInput = {
   repository_id?: string;
   base_branch?: string;
   checkout_branch?: string;
+  branch_policy_id?: string;
   pr_number?: number;
   remote_url?: string;
   provider?: string;
@@ -781,6 +783,7 @@ export class ApiClient {
       is_start_step?: boolean;
       events?: {
         on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
+        on_turn_start?: Array<{ type: string; config?: Record<string, unknown> }>;
         on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
       };
     },
@@ -804,6 +807,7 @@ export class ApiClient {
       provider_host?: string;
       provider_owner?: string;
       provider_name?: string;
+      pull_before_worktree?: boolean;
     },
   ): Promise<{ id: string }> {
     return this.request("POST", `/api/v1/workspaces/${workspaceId}/repositories`, {
@@ -815,6 +819,9 @@ export class ApiClient {
       ...(opts?.provider_host ? { provider_host: opts.provider_host } : {}),
       ...(opts?.provider_owner ? { provider_owner: opts.provider_owner } : {}),
       ...(opts?.provider_name ? { provider_name: opts.provider_name } : {}),
+      ...(opts?.pull_before_worktree !== undefined
+        ? { pull_before_worktree: opts.pull_before_worktree }
+        : {}),
     });
   }
 
@@ -840,6 +847,49 @@ export class ApiClient {
     total: number;
   }> {
     return this.request("GET", `/api/v1/workspaces/${workspaceId}/repositories`);
+  }
+
+  async listRepositoryBranchPolicies(repositoryId: string): Promise<{
+    repository_branch_policies: RepositoryBranchPolicy[];
+    total: number;
+  }> {
+    return this.request("GET", `/api/v1/repositories/${repositoryId}/branch-policies`);
+  }
+
+  async createRepositoryBranchPolicy(
+    repositoryId: string,
+    policy: {
+      name: string;
+      description?: string;
+      base_branch: string;
+      branch_template: string;
+      pull_request_target: string;
+    },
+  ): Promise<RepositoryBranchPolicy> {
+    return this.request("POST", `/api/v1/repositories/${repositoryId}/branch-policies`, policy);
+  }
+
+  async updateRepositoryBranchPolicy(
+    policyId: string,
+    patch: Partial<{
+      name: string;
+      description: string;
+      base_branch: string;
+      branch_template: string;
+      pull_request_target: string;
+    }>,
+  ): Promise<RepositoryBranchPolicy> {
+    return this.request("PATCH", `/api/v1/repository-branch-policies/${policyId}`, patch);
+  }
+
+  async deleteRepositoryBranchPolicy(policyId: string): Promise<void> {
+    const response = await this.rawRequest(
+      "DELETE",
+      `/api/v1/repository-branch-policies/${policyId}`,
+    );
+    if (!response.ok) {
+      throw new Error(`delete branch policy failed: ${response.status} ${await response.text()}`);
+    }
   }
 
   async listRepositorySets(workspaceId: string): Promise<{
@@ -909,6 +959,7 @@ export class ApiClient {
     repositoryId: string,
     updates: {
       default_branch?: string;
+      pull_before_worktree?: boolean;
       provider?: string;
       provider_repo_id?: string;
       provider_host?: string;
@@ -1493,6 +1544,42 @@ export class ApiClient {
     });
   }
 
+  async mockGitHubTransitionMergeQueue(data: {
+    task_id: string;
+    owner: string;
+    repo: string;
+    pr_number: number;
+    head_sha?: string;
+    merge_queue_state?: string;
+    merge_queue_position?: number | null;
+    merge_queue_entry_id?: string;
+    merge_queue_entry_head_sha?: string;
+    merge_queue_estimated_time_to_merge_seconds?: number | null;
+    merge_queue_last_removal_id?: string;
+    merge_queue_last_removed_at?: string;
+    merge_queue_last_removal_reason?: string;
+    merge_queue_last_removal_before_sha?: string;
+    checks?: Array<{
+      name: string;
+      source?: string;
+      status?: string;
+      conclusion?: string;
+      html_url?: string;
+      output?: string;
+    }>;
+  }): Promise<void> {
+    await this.request("PUT", "/api/v1/github/mock/merge-queue", data);
+  }
+
+  async mockGitHubGetMergeAttempts(): Promise<
+    Array<{ owner: string; repo: string; number: number; merge_method: string }>
+  > {
+    const response = await this.request<{
+      attempts?: Array<{ owner: string; repo: string; number: number; merge_method: string }>;
+    }>("GET", "/api/v1/github/mock/merge-attempts");
+    return response.attempts ?? [];
+  }
+
   async mockGitHubAddIssues(issues: MockIssue[]): Promise<void> {
     await this.request("POST", "/api/v1/github/mock/issues", { issues });
     await this.seedMockGitHubRepositoryAccess(issues);
@@ -1674,12 +1761,19 @@ export class ApiClient {
     base_branch: string;
     author_login: string;
     state?: string;
+    head_sha?: string;
     review_state?: string;
     checks_state?: string;
     mergeable_state?: string;
     merge_queue_state?: string;
     merge_queue_position?: number | null;
+    merge_queue_entry_id?: string;
+    merge_queue_entry_head_sha?: string;
     merge_queue_estimated_time_to_merge_seconds?: number | null;
+    merge_queue_last_removal_id?: string;
+    merge_queue_last_removed_at?: string;
+    merge_queue_last_removal_reason?: string;
+    merge_queue_last_removal_before_sha?: string;
     additions?: number;
     deletions?: number;
     review_count?: number;
@@ -1689,7 +1783,12 @@ export class ApiClient {
     checks_passing?: number;
     unresolved_review_threads?: number;
   }): Promise<void> {
-    await this.request("POST", "/api/v1/github/mock/task-prs", data);
+    const workspaceId = data.workspace_id?.trim() || (await this.activeWorkspaceId());
+    await this.request(
+      "POST",
+      "/api/v1/github/mock/task-prs",
+      workspaceId ? { ...data, workspace_id: workspaceId } : data,
+    );
   }
 
   async associateGitHubTaskPR(data: {

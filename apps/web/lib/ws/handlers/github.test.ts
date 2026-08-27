@@ -19,6 +19,20 @@ const DEFAULT_CI_AUTO_FIX_PROMPT = "Default prompt";
 const TASK_ID = "task-1";
 const INITIAL_UPDATED_AT = "2026-08-11T10:00:00Z";
 const NEWER_UPDATED_AT = "2026-08-11T10:01:00Z";
+const ACTIVE_WORKSPACE_ID = "workspace-b";
+const FOREIGN_WORKSPACE_ID = "workspace-a";
+const EXISTING_ASSOCIATION_ID = "association-b";
+
+function seedTaskPRScope(store: ReturnType<typeof createAppStore>) {
+  store.getState().setActiveWorkspace(ACTIVE_WORKSPACE_ID);
+  store.getState().setTaskPRs(
+    { [TASK_ID]: [{ id: EXISTING_ASSOCIATION_ID, task_id: TASK_ID } as never] },
+    {
+      workspaceId: ACTIVE_WORKSPACE_ID,
+      workspaceContextGeneration: store.getState().workspaceContextGeneration,
+    },
+  );
+}
 
 describe("registerGitHubHandlers CI options", () => {
   it("does not let a delayed CI-options event replace newer state", () => {
@@ -96,6 +110,41 @@ describe("registerGitHubHandlers CI options", () => {
 });
 
 describe("registerGitHubHandlers", () => {
+  it("ignores a task PR update owned by another workspace", () => {
+    const store = createAppStore();
+    seedTaskPRScope(store);
+
+    const handler = registerGitHubHandlers(store)["github.task_pr.updated"]!;
+    handler({
+      payload: {
+        id: "association-a",
+        task_id: TASK_ID,
+        workspace_id: FOREIGN_WORKSPACE_ID,
+      },
+    } as Parameters<typeof handler>[0]);
+
+    expect(store.getState().taskPRs.byTaskId[TASK_ID]?.map((pr) => pr.id)).toEqual([
+      EXISTING_ASSOCIATION_ID,
+    ]);
+  });
+
+  it("ignores an unattributed task PR update", () => {
+    const store = createAppStore();
+    seedTaskPRScope(store);
+
+    const handler = registerGitHubHandlers(store)["github.task_pr.updated"]!;
+    handler({
+      payload: {
+        id: "association-without-workspace",
+        task_id: TASK_ID,
+      },
+    } as Parameters<typeof handler>[0]);
+
+    expect(store.getState().taskPRs.byTaskId[TASK_ID]?.map((pr) => pr.id)).toEqual([
+      EXISTING_ASSOCIATION_ID,
+    ]);
+  });
+
   it("removes the detached PR association without touching sibling PRs", () => {
     const store = createAppStore();
     const first = {

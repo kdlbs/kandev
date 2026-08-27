@@ -19,7 +19,7 @@ owners:
 
 #### Acceptance criteria
 
-- **AC-PLATFORM-GO-DEV-LAUNCHER-001.1:** Inside a Kandev task workspace — signalled by `KANDEV_TASK_ID` being set, or by the repo root living under `~/.kandev/tasks/` — any inherited `KANDEV_DATABASE_PATH` is assumed to be leaked from the parent backend and is cleared, so the backend derives its DB from `KANDEV_HOME_DIR`. The launcher prints that it detected a task workspace.
+- **AC-PLATFORM-GO-DEV-LAUNCHER-001.1:** Inside a Kandev task workspace — signalled by `KANDEV_TASK_ID` being set, or by the repo root living under `~/.kandev/tasks/` — the launcher replaces any inherited `KANDEV_DATABASE_PATH` with the task-local path and passes it with `KANDEV_HOME_DIR`. The launcher prints that it detected a task workspace.
 - **AC-PLATFORM-GO-DEV-LAUNCHER-001.2:** Otherwise an explicit `KANDEV_DATABASE_PATH` is honored as an escape hatch.
 - **AC-PLATFORM-GO-DEV-LAUNCHER-001.3:** Otherwise the DB is `<repoRoot>/.kandev-dev/data/kandev.db`.
 - **AC-PLATFORM-GO-DEV-LAUNCHER-001.4:** **GIVEN** a host with non-loopback LAN and Tailscale IPv4 addresses, **WHEN** the `dev`, `start`, or `run` launcher prints its startup banner, **THEN** it prints one `network:` URL for each address using the backend port.
@@ -27,6 +27,7 @@ owners:
 - **AC-PLATFORM-GO-DEV-LAUNCHER-001.6:** **GIVEN** a host with an IPv6 address, **WHEN** the startup banner is printed, **THEN** the address is rendered as `http://[<address>]:<port>`.
 - **AC-PLATFORM-GO-DEV-LAUNCHER-001.7:** **GIVEN** interface enumeration returns an error, **WHEN** the launcher starts, **THEN** it continues startup and prints the localhost URL without a `network:` line.
 - **AC-PLATFORM-GO-DEV-LAUNCHER-001.8:** **GIVEN** `KANDEV_SERVER_HOST` is a loopback or specific bind address, **WHEN** the startup banner is printed, **THEN** it omits unrelated network addresses.
+- **AC-PLATFORM-GO-DEV-LAUNCHER-001.9:** **WHEN** the `dev`, `start`, or `run` launcher prints its startup banner, it shall include a `version:` line whose value is the same build version printed by `--version` for that binary. An unstamped build shall print `dev`.
 
 ## Migrated source detail
 
@@ -88,14 +89,31 @@ Dev mode roots Kandev at `<repoRoot>/.kandev-dev` so `make dev` never mutates th
 for a parent containing both `apps/backend` and `apps/web`; failing to find one is a
 usage error, not a silent fallback.
 
+Dev resolves one database target, with provenance, before any backup, output,
+supervisor setup, or backend launch. That exact target is passed explicitly to
+the backend child so these consumers cannot resolve different databases. The
+launcher also pins the child's `KANDEV_HOME_DIR` to the selected dev-state home
+(repo-local by default, or explicit YAML `homeDir`) so ambient parent state
+cannot diverge from supervisor state when an explicit database is selected.
+
 `KANDEV_DATABASE_PATH` resolution keeps its current three-way rule:
 
 - Inside a Kandev task workspace — signalled by `KANDEV_TASK_ID` being set, or by the
-  repo root living under `~/.kandev/tasks/` — any inherited `KANDEV_DATABASE_PATH` is
-  assumed to be leaked from the parent backend and is cleared, so the backend derives
-  its DB from `KANDEV_HOME_DIR`. The launcher prints that it detected a task workspace.
-- Otherwise an explicit `KANDEV_DATABASE_PATH` is honored as an escape hatch.
+  repo root living under `~/.kandev/tasks/` — the launcher replaces any inherited
+  `KANDEV_DATABASE_PATH` with the task-local path and passes it with `KANDEV_HOME_DIR`.
+  The launcher prints that it detected a task workspace.
+- Otherwise an explicit `KANDEV_DATABASE_PATH`, whether selected through the
+  environment or YAML, is honored as an escape hatch. It takes precedence over
+  an ambient `KANDEV_HOME_DIR`.
 - Otherwise the DB is `<repoRoot>/.kandev-dev/data/kandev.db`.
+
+An ambient `KANDEV_HOME_DIR` alone is parent-process context, not an
+authorization to redirect dev state: plain dev keeps its database, bootstrap
+home, and supervisor state repo-local. A working-directory or system YAML
+`homeDir` remains explicit configuration. Repo-local targets are rejected if
+they leave `.kandev-dev/data` or traverse a symlink; external targets require
+explicit database or YAML-home provenance and fail closed before the launcher
+opens or copies a database.
 
 Dev mode always sets `KANDEV_DEBUG_DEV_MODE=true`, which is the profile selector; the
 concrete dev defaults stay in `profiles.yaml`. The launcher must not restate them.
@@ -141,6 +159,13 @@ wraps IPv6 hosts in brackets. Network-address discovery is best effort: if the h
 cannot enumerate its interfaces, the launcher still starts and prints the localhost
 URL. When `KANDEV_SERVER_HOST` restricts the backend to loopback or specific addresses,
 the banner omits unreachable interface addresses and only advertises matching binds.
+
+### Startup output advertises the build version
+
+The startup banner for `dev`, `start`, and `run` also prints a `version:` line. Its
+value is the launcher build version, the same value returned by `--version`; an
+unstamped local binary reports `dev`. The line is informational and does not alter
+the existing header, URL, database, or log-level lines.
 
 ### Backend restart from the UI still rebuilds
 
@@ -220,6 +245,7 @@ them: building and serving the web app (Vite), the published npm shim, and repo 
 | Repo root not found from CWD | Exit 2 with a message telling the user to run from the repo. |
 | Explicit backend or web port occupied | Exit 1 naming the port and its source (flag vs. env). No browser is opened. |
 | Production DB backup fails | Exit 1 before the backend starts; the message names the DB path. |
+| Repo-local DB path escapes `.kandev-dev/data` or a symlink | Exit 1 before any database access or backend start; the message names the path. |
 | Backend fails health within 600s | Print the captured backend output, shut down the tree, exit 1. |
 | Vite never becomes ready | Shut down the tree, exit 1. |
 | Either child exits | Shut down the tree; exit with that child's code, or 0 if it was signalled. |
@@ -230,7 +256,7 @@ them: building and serving the web app (Vite), the published npm shim, and repo 
 ## Persistence guarantees
 
 - `.kandev-dev/` is the only state `make dev` writes, unless the user explicitly sets
-  `KANDEV_DATABASE_PATH` outside a task workspace.
+  `KANDEV_DATABASE_PATH` or a YAML `homeDir` outside a task workspace.
 - `dev-prod-db-*.db` snapshots are retained five deep in `~/.kandev/data/backups/` and
   never prune other backup families.
 - The supervisor manifest and control socket live under
@@ -250,3 +276,10 @@ them: building and serving the web app (Vite), the published npm shim, and repo 
   **THEN** it continues startup and prints the localhost URL without a `network:` line.
 - **GIVEN** `KANDEV_SERVER_HOST` is a loopback or specific bind address, **WHEN** the
   startup banner is printed, **THEN** it omits unrelated network addresses.
+- **GIVEN** a stamped or unstamped launcher binary, **WHEN** `dev`, `start`, or `run`
+  prints its startup banner, **THEN** the banner includes `version:` with the same
+  value that `--version` prints, using `dev` for an unstamped binary.
+
+## System design
+
+The technical design for launcher startup identity is in [Go dev launcher and startup version](../system-design/go-dev-launcher.md).

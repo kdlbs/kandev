@@ -20,7 +20,7 @@ This catalog is the entry point for the system-oriented specification layout. Ea
 | System page | [README](system-page/README.md) | complete | 3 requirements, 5 designs |
 | Tasks | [README](tasks/README.md) | complete | 69 requirements, 12 designs |
 | UI | [README](ui/README.md) | complete | 96 requirements, 12 designs |
-| Workspaces | [README](workspaces/README.md) | complete | 10 requirements, 2 designs |
+| Workspaces | [README](workspaces/README.md) | complete | 11 requirements, 3 designs |
 
 ## Migration record
 

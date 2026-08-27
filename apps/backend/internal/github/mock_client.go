@@ -64,6 +64,24 @@ type mergedPR struct {
 	MergeMethod string `json:"merge_method"`
 }
 
+// mockPRMergeQueueState is the provider-side queue snapshot used by the E2E
+// controller. The in-memory client exposes it through GetPRStatus so the
+// normal TaskPR sync and automation event flow remains under test.
+type mockPRMergeQueueState struct {
+	HeadSHA                     string
+	State                       string
+	Position                    *int
+	EntryID                     string
+	EntryHeadSHA                string
+	EstimatedTimeToMergeSeconds *int
+	LastRemovalID               string
+	LastRemovedAt               *time.Time
+	LastRemovalReason           string
+	LastRemovalBeforeSHA        string
+	QueueObserved               bool
+	RecoveryObserved            bool
+}
+
 // repoKey is a composite key for per-repo lookups by owner/repo.
 type repoKey struct {
 	Owner string
@@ -870,10 +888,46 @@ func (m *MockClient) SetReposUnavailable(unavailable bool) {
 func (m *MockClient) AddPR(pr *PR) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if pr.MergeQueueState != "" || pr.MergeQueuePosition != nil ||
+		pr.MergeQueueEntryID != "" || pr.MergeQueueEntryHeadSHA != "" {
+		pr.mergeQueuePopulated = true
+	}
+	if pr.MergeQueueLastRemovalID != "" || pr.MergeQueueLastRemovedAt != nil ||
+		pr.MergeQueueLastRemovalReason != "" || pr.MergeQueueLastRemovalBeforeSHA != "" {
+		pr.mergeQueueRecoveryPopulated = true
+	}
 	m.prs[prKey{pr.RepoOwner, pr.RepoName, pr.Number}] = pr
 	if pr.HeadBranch != "" {
 		m.prsByBranch[branchKey{pr.RepoOwner, pr.RepoName, pr.HeadBranch}] = pr
 	}
+}
+
+// SetPRMergeQueue replaces the provider-side queue snapshot for a PR and can
+// advance its head. It is intentionally separate from AddPR so E2E tests can
+// drive removal and requeue transitions without replacing the whole fixture.
+func (m *MockClient) SetPRMergeQueue(owner, repo string, number int, state mockPRMergeQueueState) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	pr, ok := m.prs[prKey{owner, repo, number}]
+	if !ok {
+		return fmt.Errorf("mock: PR %s/%s#%d not found", owner, repo, number)
+	}
+	if state.HeadSHA != "" {
+		pr.HeadSHA = state.HeadSHA
+	}
+	pr.MergeQueueState = state.State
+	pr.MergeQueuePosition = state.Position
+	pr.MergeQueueEntryID = state.EntryID
+	pr.MergeQueueEntryHeadSHA = state.EntryHeadSHA
+	pr.MergeQueueEstimatedTimeToMergeSeconds = state.EstimatedTimeToMergeSeconds
+	pr.MergeQueueLastRemovalID = state.LastRemovalID
+	pr.MergeQueueLastRemovedAt = state.LastRemovedAt
+	pr.MergeQueueLastRemovalReason = state.LastRemovalReason
+	pr.MergeQueueLastRemovalBeforeSHA = state.LastRemovalBeforeSHA
+	pr.mergeQueuePopulated = state.QueueObserved
+	pr.mergeQueueRecoveryPopulated = state.RecoveryObserved
+	pr.UpdatedAt = time.Now().UTC()
+	return nil
 }
 
 func (m *MockClient) AddIssue(issue *Issue) {

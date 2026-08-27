@@ -2,6 +2,7 @@ package worktree
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -83,7 +84,10 @@ func TestPullBaseBranch_PullFailureKeepsLocalCommits(t *testing.T) {
 	mgr.pullTimeout = 0
 
 	var events []SyncProgressEvent
-	resolved := mgr.pullBaseBranch(context.Background(), repoPath, "main", captureSyncProgress(&events))
+	resolved, err := mgr.pullBaseBranch(context.Background(), repoPath, "main", captureSyncProgress(&events))
+	if err != nil {
+		t.Fatalf("pullBaseBranch() error = %v", err)
+	}
 	if resolved == "" {
 		t.Fatal("pullBaseBranch returned an empty ref")
 	}
@@ -112,6 +116,128 @@ func TestPullBaseBranch_PullFailureKeepsLocalCommits(t *testing.T) {
 				"a failed pull must not move the worktree base backwards onto origin/main",
 			resolved, resolvedSHA, localHead,
 		)
+	}
+}
+
+func TestResolveBaseRefWithFallback_RequiredRefreshFailureStopsPreparation(t *testing.T) {
+	repoPath, _ := initGitRepoWithOriginAheadLocal(t)
+	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+	scriptDir := writeFakeGitScript(t, `
+case "${1:-}" in
+  fetch)
+    echo "fatal: Authentication failed" >&2
+    exit 1
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`)
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	req := CreateRequest{
+		RepositoryPath: repoPath, BaseBranch: "main", PullBeforeWorktree: true,
+	}
+	var events []SyncProgressEvent
+	req.OnSyncProgress = captureSyncProgress(&events)
+	_, _, _, err = mgr.resolveBaseRefWithFallback(context.Background(), &req)
+	if err == nil {
+		t.Fatal("resolveBaseRefWithFallback() succeeded after required refresh failure")
+	}
+	if len(events) != 2 || events[0].Status != SyncProgressRunning || events[1].Status != SyncProgressFailed {
+		t.Fatalf("required refresh progress = %#v, want running then failed", events)
+	}
+	if events[1].Error == "" || strings.Contains(events[1].Error, "Authentication") {
+		t.Fatalf("required refresh progress exposed unsafe error detail: %#v", events[1])
+	}
+}
+
+func TestPreferRefreshedRemoteRefSelectsSafeContainingRef(t *testing.T) {
+	t.Run("local contains remote", func(t *testing.T) {
+		repoPath, _ := initGitRepoWithOriginAheadLocal(t)
+		mgr := newRecreateTestManager(t)
+
+		resolved, err := mgr.preferRefreshedRemoteRef(context.Background(), repoPath, "main")
+		if err != nil {
+			t.Fatalf("preferRefreshedRemoteRef() error: %v", err)
+		}
+		if resolved != "main" {
+			t.Fatalf("resolved ref = %q, want local main", resolved)
+		}
+	})
+
+	t.Run("remote contains local", func(t *testing.T) {
+		repoPath := initGitRepoWithRemote(t)
+		otherPath := filepath.Join(t.TempDir(), "other")
+		originURL := strings.TrimSpace(runGit(t, repoPath, "remote", "get-url", "origin"))
+		runGit(t, filepath.Dir(otherPath), "clone", originURL, otherPath)
+		runGit(t, otherPath, "config", "user.email", "other@example.com")
+		runGit(t, otherPath, "config", "user.name", "Other User")
+		runGit(t, otherPath, "config", "commit.gpgsign", "false")
+		writeRepoFile(t, otherPath, "remote-only.txt", "pushed\n")
+		runGit(t, otherPath, "add", "remote-only.txt")
+		runGit(t, otherPath, "commit", "-m", "remote-only commit")
+		runGit(t, otherPath, "push", "origin", "main")
+		runGit(t, repoPath, "fetch", "origin", "main")
+
+		mgr := newRecreateTestManager(t)
+		resolved, err := mgr.preferRefreshedRemoteRef(context.Background(), repoPath, "main")
+		if err != nil {
+			t.Fatalf("preferRefreshedRemoteRef() error: %v", err)
+		}
+		if resolved != "origin/main" {
+			t.Fatalf("resolved ref = %q, want origin/main", resolved)
+		}
+	})
+}
+
+func TestPreferRefreshedRemoteRefRejectsDivergedRefs(t *testing.T) {
+	repoPath := initGitRepoWithRemote(t)
+	writeRepoFile(t, repoPath, "local-only.txt", "local\n")
+	runGit(t, repoPath, "add", "local-only.txt")
+	runGit(t, repoPath, "commit", "-m", "local-only commit")
+
+	otherPath := filepath.Join(t.TempDir(), "other")
+	originURL := strings.TrimSpace(runGit(t, repoPath, "remote", "get-url", "origin"))
+	runGit(t, filepath.Dir(otherPath), "clone", originURL, otherPath)
+	runGit(t, otherPath, "config", "user.email", "other@example.com")
+	runGit(t, otherPath, "config", "user.name", "Other User")
+	runGit(t, otherPath, "config", "commit.gpgsign", "false")
+	writeRepoFile(t, otherPath, "remote-only.txt", "remote\n")
+	runGit(t, otherPath, "add", "remote-only.txt")
+	runGit(t, otherPath, "commit", "-m", "remote-only commit")
+	runGit(t, otherPath, "push", "origin", "main")
+	runGit(t, repoPath, "fetch", "origin", "main")
+
+	mgr := newRecreateTestManager(t)
+	if _, err := mgr.preferRefreshedRemoteRef(context.Background(), repoPath, "main"); err == nil {
+		t.Fatal("preferRefreshedRemoteRef() accepted diverged local and remote refs")
+	}
+}
+
+func TestPreferRefreshedRemoteRefRejectsUncertainAncestry(t *testing.T) {
+	scriptDir := writeFakeGitScript(t, `
+case "${1:-}" in
+  rev-parse)
+    exit 0
+    ;;
+  merge-base)
+    echo "fatal: unable to inspect repository" >&2
+    exit 128
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`)
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	mgr := newRecreateTestManager(t)
+	if _, err := mgr.preferRefreshedRemoteRef(context.Background(), t.TempDir(), "main"); err == nil {
+		t.Fatal("preferRefreshedRemoteRef() accepted an ancestry probe failure")
 	}
 }
 
@@ -152,7 +278,10 @@ func TestPullBaseBranch_SuccessfulPullStillAdoptsRemoteCommits(t *testing.T) {
 		t.Fatalf("NewManager failed: %v", err)
 	}
 
-	resolved := mgr.pullBaseBranch(context.Background(), repoPath, "main", nil)
+	resolved, err := mgr.pullBaseBranch(context.Background(), repoPath, "main", nil)
+	if err != nil {
+		t.Fatalf("pullBaseBranch() error = %v", err)
+	}
 	resolvedSHA := strings.TrimSpace(runGit(t, repoPath, "rev-parse", resolved))
 	if resolvedSHA != remoteHead {
 		t.Fatalf(

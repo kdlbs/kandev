@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/kandev/kandev/internal/db/dialect"
@@ -98,10 +99,17 @@ type stepTransitionInput struct {
 }
 
 // recordStepTransition writes exactly one ledger row when the step actually
-// changed and returns its immutable ledger identifier. It is a no-op when
-// fromStepID == toStepID (position-only reorder, re-issued move to the current
-// step) and when both sides are empty (a task with no workflow at all — a row
-// with both sides NULL is forbidden).
+// changed and returns that row's own immutable ledger identifier. Callers
+// that need the step-entry requirement's entry identity (AC-OFFICE-STEP-
+// ENTRY-001.2, .7) derive it from this id via formatEntryID; callers that
+// need the identifier for models.Task.WorkflowStepTransitionID use it
+// directly. It is a no-op (id 0, nil error) when fromStepID == toStepID
+// (position-only reorder, re-issued move to the current step) and when both
+// sides are empty (a task with no workflow at all — a row with both sides
+// NULL is forbidden). Retrieval of the identifier is dialect-appropriate
+// (ADR-0027): Postgres uses RETURNING id, SQLite uses the exec result's
+// LastInsertId, both inside the same statement that commits the row so no
+// separate count-then-use read can race it.
 //
 // The missing-table case needs no detection code and must not get any: if
 // the CREATE TABLE was silently swallowed by the migration runner, the
@@ -109,7 +117,7 @@ type stepTransitionInput struct {
 // returns unchanged, and the enclosing transaction rolls back — which is
 // precisely the spec's required behaviour (the step change does not commit
 // with no row). Never log-and-continue on this error.
-func (r *Repository) recordStepTransition(ctx context.Context, tx stepTransitionTx, in stepTransitionInput) (int64, error) {
+func (r *Repository) recordStepTransition(ctx context.Context, tx stepTransitionTx, in stepTransitionInput) (id int64, err error) {
 	if in.fromWorkflowStepID == in.toWorkflowStepID {
 		return 0, nil
 	}
@@ -126,7 +134,12 @@ func (r *Repository) recordStepTransition(ctx context.Context, tx stepTransition
 	}
 
 	attribution := steptelemetry.FromContext(ctx)
-	args := []interface{}{
+	insertSQL := `
+		INSERT INTO task_step_transitions
+			(task_id, session_id, from_workflow_id, from_workflow_step_id, to_workflow_id, to_workflow_step_id, trigger, actor_kind, actor_id, contract_version, occurred_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`
+	args := []any{
 		in.taskID,
 		nullableString(attribution.SessionID),
 		nullableString(in.fromWorkflowID),
@@ -139,31 +152,22 @@ func (r *Repository) recordStepTransition(ctx context.Context, tx stepTransition
 		steptelemetry.ContractVersion,
 		occurredAt,
 	}
-	var id int64
+
 	if dialect.IsPostgres(r.db.DriverName()) {
-		err := tx.QueryRowContext(ctx, r.db.Rebind(`
-		INSERT INTO task_step_transitions
-			(task_id, session_id, from_workflow_id, from_workflow_step_id, to_workflow_id, to_workflow_step_id, trigger, actor_kind, actor_id, contract_version, occurred_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		RETURNING id
-	`), args...).Scan(&id)
-		if err != nil {
+		if err := tx.QueryRowContext(ctx, r.db.Rebind(insertSQL+" RETURNING id"), args...).Scan(&id); err != nil {
 			return 0, err
 		}
 	} else {
-		result, err := tx.ExecContext(ctx, r.db.Rebind(`
-			INSERT INTO task_step_transitions
-				(task_id, session_id, from_workflow_id, from_workflow_step_id, to_workflow_id, to_workflow_step_id, trigger, actor_kind, actor_id, contract_version, occurred_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`), args...)
-		if err != nil {
-			return 0, err
+		result, execErr := tx.ExecContext(ctx, r.db.Rebind(insertSQL), args...)
+		if execErr != nil {
+			return 0, execErr
 		}
 		id, err = result.LastInsertId()
 		if err != nil {
 			return 0, err
 		}
 	}
+
 	// Counted at INSERT time, not at commit: a later statement in the same
 	// caller-owned transaction failing after this point (rare — e.g. the
 	// runner sync in UpdateTask) rolls the row back but the counter still
@@ -172,6 +176,17 @@ func (r *Repository) recordStepTransition(ctx context.Context, tx stepTransition
 	// trail; the ledger table itself is that audit trail.
 	steptelemetry.RecordLedgerRow(r.log, attribution.Trigger)
 	return id, nil
+}
+
+// formatEntryID converts recordStepTransition's ledger identifier into the
+// step-entry requirement's entry identity string (AC-OFFICE-STEP-ENTRY-
+// 001.2, .7). id 0 means recordStepTransition was a no-op — dispatchStepEntry
+// relies on "" (not "0") to detect that case, so it must not be formatted.
+func formatEntryID(id int64) string {
+	if id == 0 {
+		return ""
+	}
+	return strconv.FormatInt(id, 10)
 }
 
 // genesisAttribution is the task-creation ledger row's attribution: the

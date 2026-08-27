@@ -68,6 +68,10 @@ type pluginHost struct {
 	sessionCodeStats sessionCodeStatsSource
 	messageData      messageDataSource
 	interactionData  interactionDataSource
+	taskPRs          taskPRSource
+	// taskPRsDep resolves the source at read time so a host created before
+	// SetTaskPRSource still observes the late wiring.
+	taskPRsDep func() taskPRSource
 
 	// taskWriter backs the CreateTask/UpdateTask write RPCs (ADR 0043
 	// phase 2, capability api_write:tasks). Wired via SetDataSources like the

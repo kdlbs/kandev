@@ -36,7 +36,7 @@ func TestLogStartupPrintsNetworkAddress(t *testing.T) {
 	}
 
 	output := captureLauncherStdout(t, func() {
-		logStartup("test", portConfig{
+		logStartup("test", "", portConfig{
 			BackendPort: 38429,
 			BackendURL:  "http://localhost:38429",
 		}, "", "")
@@ -228,7 +228,7 @@ func TestLogStartupKeepsLocalhostWhenNetworkDiscoveryFails(t *testing.T) {
 	}
 
 	output := captureLauncherStdout(t, func() {
-		logStartup("test", portConfig{
+		logStartup("test", "", portConfig{
 			BackendPort: 38429,
 			BackendURL:  "http://localhost:38429",
 		}, "", "")
@@ -257,7 +257,7 @@ func TestLogStartupSuppressesNetworkAddressesForLoopbackBind(t *testing.T) {
 	}
 
 	output := captureLauncherStdout(t, func() {
-		logStartup("test", portConfig{
+		logStartup("test", "", portConfig{
 			BackendPort: 38429,
 			BackendURL:  "http://localhost:38429",
 		}, "", "")

@@ -188,12 +188,25 @@ func officeWorkspaceScopeMiddleware(
 			c.Next()
 			return
 		}
+		// The comment endpoint has its own task-relation guard for agent
+		// callers. Let that guard decide every target so missing, foreign, and
+		// unrelated tasks all produce the same forbidden response.
+		if isAgentCommentRead(c) {
+			c.Next()
+			return
+		}
 		if err := authorizeOfficeRequest(c, taskSvc, officeRepo, resolvers); err != nil {
 			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
 			return
 		}
 		c.Next()
 	}
+}
+
+func isAgentCommentRead(c *gin.Context) bool {
+	return c.Request.Method == http.MethodGet &&
+		c.FullPath() == officeRoutePrefix+"/tasks/:id/comments" &&
+		officeagents.ClaimsFromContext(c) != nil
 }
 
 // authorizeOfficeRequest returns nil only when the caller is allowed to reach
@@ -505,10 +518,11 @@ func mountOfficeRoutes(
 	authSvc *auth.Service,
 	taskSvc *taskservice.Service,
 	officeRepo *officesqlite.Repository,
+	handoffSvc *taskservice.HandoffService,
 	log *logger.Logger,
 ) {
 	api := router.Group(officeRoutePrefix)
 	api.Use(officeagents.AgentAuthMiddleware(svcs.Agents))
 	api.Use(officeWorkspaceScopeMiddleware(authSvc, taskSvc, officeRepo))
-	office.RegisterAllRoutes(api, svcs, log)
+	office.RegisterAllRoutes(api, svcs, handoffSvc, log)
 }

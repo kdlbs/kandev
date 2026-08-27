@@ -16,7 +16,8 @@ func itoa(n int) string { return strconv.Itoa(n) }
 
 var errTestHealth = errors.New("test health failure")
 
-func TestRunDevLaunchesBackendThenWebAndOpensBrowser(t *testing.T) {
+func TestRunDevBuildVersionAndLaunchesBackendThenWebAndOpensBrowser(t *testing.T) {
+	clearLauncherConfigurationEnvironment(t)
 	repo := makeRepoTree(t)
 	t.Chdir(repo)
 	t.Setenv("KANDEV_TASK_ID", "")
@@ -89,9 +90,15 @@ func TestRunDevLaunchesBackendThenWebAndOpensBrowser(t *testing.T) {
 		return &managedProcess{}, func() {}, nil
 	}
 
-	code := runDev(context.Background(), Options{Command: CommandDev})
+	var code int
+	output := captureLauncherStdout(t, func() {
+		code = runDev(context.Background(), Options{Command: CommandDev}, BuildInfo{Version: "1.2.3"})
+	})
 	if code != 0 {
 		t.Fatalf("runDev() = %d, want 0", code)
+	}
+	if !strings.Contains(output, "[kandev] version: 1.2.3\n") {
+		t.Fatalf("startup output = %q, missing build version", output)
 	}
 	want := []string{
 		"new-supervisor",
@@ -124,7 +131,7 @@ func TestRunDevLaunchesBackendThenWebAndOpensBrowser(t *testing.T) {
 		"KANDEV_WEB_INTERNAL_URL=http://localhost:" + itoa(backendCfg.Ports.WebPort),
 		"KANDEV_DEBUG_DEV_MODE=true",
 		"KANDEV_HOME_DIR=" + filepath.Join(repo, ".kandev-dev"),
-		"KANDEV_DATABASE_PATH=",
+		"KANDEV_DATABASE_PATH=" + filepath.Join(repo, ".kandev-dev", "data", "kandev.db"),
 		"KANDEV_BACKEND_PID_FILE=" + filepath.Join(repo, ".kandev-dev", "supervisor", "backend.pid"),
 	} {
 		if !strings.Contains(backendEnv, expected) {
@@ -212,7 +219,7 @@ func TestRunDevUsesConfiguredHealthTimeoutForBackendAndWeb(t *testing.T) {
 		return &managedProcess{}, func() {}, nil
 	}
 
-	if code := runDev(context.Background(), Options{Command: CommandDev}); code != 0 {
+	if code := runDev(context.Background(), Options{Command: CommandDev}, BuildInfo{}); code != 0 {
 		t.Fatalf("runDev() = %d, want 0", code)
 	}
 	want := 12345 * time.Millisecond
@@ -222,6 +229,7 @@ func TestRunDevUsesConfiguredHealthTimeoutForBackendAndWeb(t *testing.T) {
 }
 
 func TestRunDevHeadlessSkipsBrowser(t *testing.T) {
+	clearLauncherConfigurationEnvironment(t)
 	repo := makeRepoTree(t)
 	t.Chdir(repo)
 	t.Setenv("KANDEV_TASK_ID", "")
@@ -266,7 +274,7 @@ func TestRunDevHeadlessSkipsBrowser(t *testing.T) {
 		return &managedProcess{}, func() {}, nil
 	}
 
-	code := runDev(context.Background(), Options{Command: CommandDev, Headless: true})
+	code := runDev(context.Background(), Options{Command: CommandDev, Headless: true}, BuildInfo{})
 	if code != 0 {
 		t.Fatalf("runDev(headless) = %d, want 0", code)
 	}
@@ -276,9 +284,19 @@ func TestRunDevHeadlessSkipsBrowser(t *testing.T) {
 }
 
 func TestRunDevAbortsOnBackupFailureBeforeLaunch(t *testing.T) {
+	clearLauncherConfigurationEnvironment(t)
 	repo := makeRepoTree(t)
 	t.Chdir(repo)
 	t.Setenv("KANDEV_TASK_ID", "")
+	ambientHome := t.TempDir()
+	sentinel := filepath.Join(ambientHome, "data", "kandev.db")
+	if err := os.MkdirAll(filepath.Dir(sentinel), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sentinel, []byte("must not be backed up"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KANDEV_HOME_DIR", ambientHome)
 	// A path without a .kandev-dev segment is treated as production; making it
 	// a directory forces the copy to fail so the abort path runs.
 	t.Setenv("HOME", t.TempDir())
@@ -296,16 +314,20 @@ func TestRunDevAbortsOnBackupFailureBeforeLaunch(t *testing.T) {
 		return nil, nil, nil
 	}
 
-	code := runDev(context.Background(), Options{Command: CommandDev})
+	code := runDev(context.Background(), Options{Command: CommandDev}, BuildInfo{})
 	if code != 1 {
 		t.Fatalf("runDev() = %d, want 1", code)
 	}
 	if launched {
 		t.Fatal("backend launched despite a failed production-db backup")
 	}
+	if got, err := os.ReadFile(sentinel); err != nil || string(got) != "must not be backed up" {
+		t.Fatalf("ambient-home sentinel changed or became unreadable: %q, %v", got, err)
+	}
 }
 
 func TestRunDevShutsDownTreeOnBackendHealthFailure(t *testing.T) {
+	clearLauncherConfigurationEnvironment(t)
 	repo := makeRepoTree(t)
 	t.Chdir(repo)
 	t.Setenv("KANDEV_TASK_ID", "")
@@ -350,7 +372,7 @@ func TestRunDevShutsDownTreeOnBackendHealthFailure(t *testing.T) {
 		return nil, nil, nil
 	}
 
-	code := runDev(context.Background(), Options{Command: CommandDev})
+	code := runDev(context.Background(), Options{Command: CommandDev}, BuildInfo{})
 	if code != 1 {
 		t.Fatalf("runDev() = %d, want 1", code)
 	}
@@ -415,7 +437,7 @@ func TestRunDevShutsDownTreeOnBackendReadinessFailure(t *testing.T) {
 		return nil, nil, nil
 	}
 
-	code := runDev(context.Background(), Options{Command: CommandDev})
+	code := runDev(context.Background(), Options{Command: CommandDev}, BuildInfo{})
 	if code != 1 {
 		t.Fatalf("runDev() = %d, want 1", code)
 	}
@@ -428,6 +450,7 @@ func TestRunDevShutsDownTreeOnBackendReadinessFailure(t *testing.T) {
 }
 
 func TestRunDevShutsDownTreeWhenWebChildExits(t *testing.T) {
+	clearLauncherConfigurationEnvironment(t)
 	repo := makeRepoTree(t)
 	t.Chdir(repo)
 	t.Setenv("KANDEV_TASK_ID", "")
@@ -480,7 +503,7 @@ func TestRunDevShutsDownTreeWhenWebChildExits(t *testing.T) {
 	// signal waitForAppExit selects on.
 	close(webDone)
 
-	code := runDev(context.Background(), Options{Command: CommandDev, Headless: true})
+	code := runDev(context.Background(), Options{Command: CommandDev, Headless: true}, BuildInfo{})
 	if code != 7 {
 		t.Fatalf("runDev() = %d, want the web child's exit code 7", code)
 	}
@@ -490,9 +513,10 @@ func TestRunDevShutsDownTreeWhenWebChildExits(t *testing.T) {
 }
 
 func TestRunDevFailsWhenRepoRootNotFound(t *testing.T) {
+	clearLauncherConfigurationEnvironment(t)
 	t.Chdir(t.TempDir())
 
-	code := runDev(context.Background(), Options{Command: CommandDev})
+	code := runDev(context.Background(), Options{Command: CommandDev}, BuildInfo{})
 	if code != 2 {
 		t.Fatalf("runDev() = %d, want 2", code)
 	}

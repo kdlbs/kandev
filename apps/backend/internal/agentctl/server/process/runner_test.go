@@ -123,6 +123,27 @@ func TestProcessRunnerStopLogsSignalAttempts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to start process: %v", err)
 	}
+
+	ready := false
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		proc, ok := runner.Get(info.ID, true)
+		if ok {
+			for _, chunk := range proc.Output {
+				if strings.Contains(chunk.Data, "fixture ready") {
+					ready = true
+					break
+				}
+			}
+		}
+		if ready {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !ready {
+		t.Fatal("signal-ignoring fixture did not become ready")
+	}
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cleanupCancel()
@@ -145,7 +166,7 @@ func TestProcessRunnerStopLogsSignalAttempts(t *testing.T) {
 		}
 	}
 
-	deadline := time.Now().Add(2 * time.Second)
+	deadline = time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		if _, ok := runner.Get(info.ID, false); !ok {
 			return

@@ -34,7 +34,7 @@ func TestSyncTaskPRPersistsMergeQueueObservationAndPublishesChange(t *testing.T)
 	}
 }
 
-func TestSyncTaskPRPreservesQueueOnQueueUnawareRead(t *testing.T) {
+func TestSyncTaskPRClearsQueueOnQueueUnawareRead(t *testing.T) {
 	svc, store, _ := setupSyncTest(t)
 	ctx := context.Background()
 	position := 6
@@ -53,7 +53,7 @@ func TestSyncTaskPRPreservesQueueOnQueueUnawareRead(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("queue-unaware SyncTaskPR: %v", err)
 	}
-	assertTaskPRMergeQueueFields(t, "queue-unaware SyncTaskPR", mustGetTaskPR(t, store, ctx, taskPR.ID), "queued", &position, &estimate)
+	assertTaskPRMergeQueueFields(t, "queue-unaware SyncTaskPR", mustGetTaskPR(t, store, ctx, taskPR.ID), "", nil, nil)
 }
 
 func TestSyncTaskPRClearsQueueOnAuthoritativeExitAndTerminalState(t *testing.T) {

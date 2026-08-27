@@ -100,7 +100,13 @@ export function derivePRTaskStatusSummary(
     deriveMergeRow(pr, readyToMerge),
   ].filter((row): row is PRTaskSummaryRow => row !== null);
 
-  return { number: pr.pr_number, title: pr.pr_title, rows };
+  const author = pr.author_login.trim();
+  return {
+    number: pr.pr_number,
+    title: pr.pr_title,
+    ...(author ? { author } : {}),
+    rows,
+  };
 }
 
 export function PRTaskStatusSummary({ summaries }: { summaries: PRTaskStatusSummaryData[] }) {
