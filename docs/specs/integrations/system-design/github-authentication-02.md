@@ -75,6 +75,9 @@ post-signature processing failures produce `failing`; a later valid successful d
   the desired `github.com` origin. It queries host-specific `gh` configuration before global
   configuration and defaults to SSH when neither query returns a supported protocol. The resolver
   is called again for every launch and resume. Backend startup stores no protocol result.
+- The prepared-workspace path resolves the same repository set before it returns or starts an
+  agent. An existing running-executor record does not bypass managed-checkout origin
+  reconciliation.
 - Broker issuance and redemption use the same persisted repository identity fields. A local Git
   checkout and its `origin` are materialization data, not authorization data.
 - A public `github.com` remote can supply an in-memory origin when persisted provider-host metadata
