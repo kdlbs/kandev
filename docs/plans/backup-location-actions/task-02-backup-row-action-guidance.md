@@ -20,13 +20,13 @@ system_design:
 
 ## Summary
 
-Add localized hover and focus tooltips to each backup row action.
+Add localized operation-only hover and focus tooltips to each backup row action.
 Keep the same actions visible and directly usable on coarse pointers.
 
 ## In scope
 
 - Add Tooltip wrappers for Download, Restore, and Delete.
-- Reuse the localized accessible labels as tooltip content.
+- Use localized operation labels as tooltip content and keep snapshot-specific accessible names.
 - Keep the download control as an anchor.
 - Add 44-pixel coarse-pointer targets.
 - Add component, desktop E2E, and mobile E2E evidence.
@@ -39,8 +39,8 @@ Keep the same actions visible and directly usable on coarse pointers.
 
 ## Acceptance
 
-- Hover or keyboard focus shows the correct operation and snapshot name.
-- Each button keeps its accessible name and existing action.
+- Hover or keyboard focus shows only the correct operation in the tooltip.
+- Each button keeps an accessible name that identifies its snapshot and keeps its existing action.
 - Coarse-pointer targets are at least 44 pixels and cause no horizontal page scroll.
 
 ## Verification
@@ -95,3 +95,4 @@ Passed.
 - `pnpm --filter @kandev/web run i18n:check` passed with the repository's existing advisory orphan-catalog warnings.
 - `python3 scripts/lint-spec-files.py --all` passed.
 - `git diff --check` passed.
+- Tooltip refinement passed: visible tooltips now contain only the localized operation, while accessible names retain the snapshot name.

@@ -33,7 +33,7 @@ The UI system supplies the shared tooltip and responsive primitives.
 
 - **AC-SYSTEM-PAGE-BACKUP-GUIDANCE-001.1:** When SQLite database information is available, the Backups section shall show the full resolved backup directory.
 - **AC-SYSTEM-PAGE-BACKUP-GUIDANCE-001.2:** When a custom SQLite path is active, the shown directory shall be the `backups` sibling of that file.
-- **AC-SYSTEM-PAGE-BACKUP-GUIDANCE-001.3:** When an authorized user hovers or focuses a row action, the interface shall identify Download, Restore, or Delete and its snapshot.
+- **AC-SYSTEM-PAGE-BACKUP-GUIDANCE-001.3:** When an authorized user hovers or focuses a row action, the tooltip shall identify only Download, Restore, or Delete. The control's accessible name shall continue to identify the snapshot.
 - **AC-SYSTEM-PAGE-BACKUP-GUIDANCE-001.4:** When a user uses a coarse pointer, each visible row action shall remain directly usable through a target of at least 44 pixels.
 - **AC-SYSTEM-PAGE-BACKUP-GUIDANCE-001.5:** When a long backup path or snapshot name is shown, the Backups section shall not cause horizontal page scrolling.
 - **AC-SYSTEM-PAGE-BACKUP-GUIDANCE-001.6:** When database information is unavailable or the driver has no local backup directory, the interface shall not show a guessed filesystem path.

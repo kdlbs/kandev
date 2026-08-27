@@ -62,6 +62,9 @@ function BackupRowActions({
   const downloadLabel = t("system:backupsDownloadLabel", { name: row.name });
   const restoreLabel = t("system:backupsRestoreLabel", { name: row.name });
   const deleteLabel = t("system:backupsDeleteLabel", { name: row.name });
+  const downloadTooltip = t("task:download");
+  const restoreTooltip = t("task:restore");
+  const deleteTooltip = t("task:delete");
   return (
     <div className="flex items-center justify-end gap-1">
       <Tooltip>
@@ -80,7 +83,7 @@ function BackupRowActions({
             </a>
           </Button>
         </TooltipTrigger>
-        <TooltipContent className="max-w-xs break-words">{downloadLabel}</TooltipContent>
+        <TooltipContent className="max-w-xs break-words">{downloadTooltip}</TooltipContent>
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
@@ -95,7 +98,7 @@ function BackupRowActions({
             <IconRotateClockwise className="h-3.5 w-3.5" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent className="max-w-xs break-words">{restoreLabel}</TooltipContent>
+        <TooltipContent className="max-w-xs break-words">{restoreTooltip}</TooltipContent>
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
@@ -110,7 +113,7 @@ function BackupRowActions({
             <IconTrash className="h-3.5 w-3.5" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent className="max-w-xs break-words">{deleteLabel}</TooltipContent>
+        <TooltipContent className="max-w-xs break-words">{deleteTooltip}</TooltipContent>
       </Tooltip>
     </div>
   );

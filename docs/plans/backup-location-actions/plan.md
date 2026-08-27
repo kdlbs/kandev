@@ -53,7 +53,8 @@ Keep `BACKUP_SQL_COMMAND` as a stable interpolated command value.
 ### Action tooltips
 
 Wrap each control in `BackupRowActions` with the shared Tooltip primitives.
-Reuse each localized `aria-label` as the tooltip content.
+Use localized operation-only labels as tooltip content. Keep each
+snapshot-specific `aria-label` on the interactive control.
 
 Add pointer-specific 44-pixel minimum dimensions to the three controls.
 Keep the current compact dimensions for fine-pointer desktop use.

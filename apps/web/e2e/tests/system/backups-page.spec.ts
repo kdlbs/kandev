@@ -62,7 +62,8 @@ test.describe("System Backups page", () => {
       const action = row.getByTestId(testId);
       await expect(action).toHaveAttribute("aria-label", `${operation} ${name}`);
       await action.hover();
-      await expect(tooltip).toContainText(`${operation} ${name}`);
+      await expect(tooltip).toContainText(operation);
+      await expect(tooltip).not.toContainText(name!);
     }
   });
 

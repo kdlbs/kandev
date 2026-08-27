@@ -44,8 +44,9 @@ The frontend does not reconstruct paths or show `<data-dir>/backups/` as a fallb
 `BackupRowActions` keeps the existing Download, Restore, and Delete buttons.
 Each button becomes a `TooltipTrigger` with a `TooltipContent` sibling.
 
-The tooltip reuses the localized accessible label for the button.
-The label names the operation and the snapshot, so no new translation key is necessary.
+The tooltip uses a localized operation-only label from the existing task copy.
+It intentionally omits the snapshot name. The button keeps its localized
+accessible name, which identifies both the operation and the snapshot.
 
 The tooltip opens on fine-pointer hover and keyboard focus.
 The icon button and its accessible name remain the primary interaction contract.

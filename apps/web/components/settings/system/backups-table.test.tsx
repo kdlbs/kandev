@@ -133,18 +133,20 @@ describe("BackupsTable", () => {
     renderBackupsTable();
 
     const actions = [
-      [DOWNLOAD_TEST_ID, `Download ${SNAPSHOT.name}`],
-      [RESTORE_TEST_ID, `Restore ${SNAPSHOT.name}`],
-      [DELETE_TEST_ID, `Delete ${SNAPSHOT.name}`],
+      [DOWNLOAD_TEST_ID, "Download", `Download ${SNAPSHOT.name}`],
+      [RESTORE_TEST_ID, "Restore", `Restore ${SNAPSHOT.name}`],
+      [DELETE_TEST_ID, "Delete", `Delete ${SNAPSHOT.name}`],
     ] as const;
-    for (const [testId, label] of actions) {
+    for (const [testId, operation, label] of actions) {
       const action = screen.getByTestId(testId);
       expect(action.getAttribute("aria-label")).toBe(label);
       expect(action.className).toContain("[@media(pointer:coarse)]:h-11");
       expect(action.className).toContain("[@media(pointer:coarse)]:w-11");
 
       fireEvent.focus(action);
-      expect((await screen.findByRole("tooltip")).textContent).toContain(label);
+      const tooltip = await screen.findByRole("tooltip");
+      expect(tooltip.textContent).toBe(operation);
+      expect(tooltip.textContent).not.toContain(SNAPSHOT.name);
       fireEvent.blur(action);
     }
   });
