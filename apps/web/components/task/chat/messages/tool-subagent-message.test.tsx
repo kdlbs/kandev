@@ -281,10 +281,9 @@ describe("ToolSubagentMessage", () => {
   });
 
   it("shows Working after spawn completes while the nested Codex task is still pendingInit", () => {
-    renderSubagent(
-      subagentMessage({ metadataStatus: COMPLETE, payloadStatus: "pendingInit" }),
-      { isContainingTurnActive: true },
-    );
+    renderSubagent(subagentMessage({ metadataStatus: COMPLETE, payloadStatus: "pendingInit" }), {
+      isContainingTurnActive: true,
+    });
 
     expect(screen.getByRole("status", { name: "Loading" })).toBeTruthy();
     expect(screen.getByText(WORKING)).toBeTruthy();
@@ -292,10 +291,9 @@ describe("ToolSubagentMessage", () => {
   });
 
   it("shows Working after spawn completes while the nested Claude task is still async_launched", () => {
-    renderSubagent(
-      subagentMessage({ metadataStatus: COMPLETE, payloadStatus: "async_launched" }),
-      { isContainingTurnActive: true },
-    );
+    renderSubagent(subagentMessage({ metadataStatus: COMPLETE, payloadStatus: "async_launched" }), {
+      isContainingTurnActive: true,
+    });
 
     expect(screen.getByRole("status", { name: "Loading" })).toBeTruthy();
     expect(screen.getByText(WORKING)).toBeTruthy();
