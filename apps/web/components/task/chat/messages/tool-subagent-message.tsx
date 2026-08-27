@@ -57,7 +57,7 @@ export function isSubagentEffectivelyActive(
   if (!isContainingTurnActive) return false;
 
   if (status === "in_progress" || isSubagentPayloadLive(payloadStatus)) return true;
-  return normalized === "complete" && isSubagentPayloadLive(payloadStatus);
+  return false;
 }
 
 // The result is what the subagent was dispatched to produce, so it is shown
