@@ -63,8 +63,10 @@ function makeHostFactory(pluginId: string): PluginHostApi {
       set: async () => ({ updatedAt: "" }),
       delete: async () => {},
       list: async () => [],
+      listByKey: async () => ({ entries: [], truncated: false }),
       subscribe: () => () => {},
     },
+    taskFilters: { getSelection: () => [], setSelection: () => {}, subscribe: () => () => {} },
   };
 }
 

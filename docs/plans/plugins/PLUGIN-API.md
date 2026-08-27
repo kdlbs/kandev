@@ -6,11 +6,7 @@ diverge without updating this file.
 ## Loading model
 
 1. Backend boot payload gains `plugins: ActivePlugin[]` where
-   `ActivePlugin = { id: string; name: string; bundleUrl: string; styleUrls?: string[];
-repositoryProviderIds?: string[] }`. `repositoryProviderIds` is JSON
-   `repositoryProviderIds`, copied from manifest `repository_providers`. It is optional
-   only for additive compatibility with older boot payloads; a present empty list means
-   the plugin declared no repository providers.
+   `ActivePlugin = { id: string; name: string; bundleUrl: string; styleUrls?: string[] }`.
    `bundleUrl` = `/api/plugins/{id}/bundle` — kandev serves this **directly from the
    extracted package directory** on local disk
    (`~/.kandev/plugins/<id>/<version>/ui/...`, per manifest `ui.bundle`). There is no
@@ -18,14 +14,7 @@ repositoryProviderIds?: string[] }`. `repositoryProviderIds` is JSON
    be running to serve the UI bundle, since installation already extracted the file.
 2. On SPA boot, the **plugin host** (`apps/web/lib/plugins/host.ts`) iterates
    `bootPayload.plugins`, injects any `styleUrls` as `<link>`, and dynamically
-   `import(/* @vite-ignore */ bundleUrl)` each bundle as a native ES module. Before a
-   bundle can initialize, the loader supplies its `repositoryProviderIds` to the
-   registry (for example `setDeclaredRepositoryProviderIds(pluginId, ids)`). The scoped
-   registry then rejects `registerRepositoryProvider` or `registerReviewProvider` IDs
-   outside that declared set. An omitted field preserves older-host compatibility;
-   it does not invent provider ownership. Provider IDs are canonical lowercase
-   identifiers: the manifest validator and frontend registry reject uppercase or
-   otherwise non-canonical variants instead of creating case-dependent ownership.
+   `import(/* @vite-ignore */ bundleUrl)` each bundle as a native ES module.
 3. Each bundle, when evaluated, calls the global:
    ```ts
    window.registerKandevPlugin(pluginId, {
@@ -39,15 +28,6 @@ repositoryProviderIds?: string[] }`. `repositoryProviderIds` is JSON
    initialization finishes. Slow or failed reloads do not by themselves revoke
    open or saved task panels. On explicit plugin disable/uninstall the host calls
    `destroy?.()`, removes the plugin's registrations, and closes its panels.
-   Each initialization attempt is transactional for plugin-owned runtime state:
-   failure or timeout aborts plugin-owned work and fences callbacks from the
-   expired generation. The same generation owns host-created subscriptions,
-   modal and task-link handles, toasts, and review surfaces; the loader closes or
-   unsubscribes them before calling `destroy` exactly once. Requests and callbacks
-   from an expired generation cannot mutate the replacement generation. Failure or
-   timeout does **not** unregister `registry` contributions (nav items, routes,
-   etc.) already made before the failure — those persist, and only the plugin's
-   lifecycle status becomes failed, until the plugin's _next_ load revokes them.
 
 ## Global entry point
 
@@ -55,73 +35,28 @@ repositoryProviderIds?: string[] }`. `repositoryProviderIds` is JSON
 host before any bundle loads. Bundles are authored with React as an **external**;
 they must use `host.React` (NOT bundle their own React) to share the host instance.
 
-The independently consumable frontend type contract is the runtime-free
-`@kandev/plugin-sdk` package in `apps/packages/plugin-sdk`. Official plugins import
-these types instead of re-declaring this document or importing `apps/web` internals.
-The host has a compile-time assignability test, and the real Bitbucket package is a
-required exact-head compatibility consumer.
-
 ## `host: PluginHostApi`
 
 ```ts
 interface PluginHostApi {
   pluginId: string;
-  React: typeof import("react"); // host React instance (shared)
-  jsx: typeof React.createElement; // convenience alias (h)
-  context: {
-    // Versioned provider-neutral reads; never exposes private AppState slices.
-    getActiveWorkspaceId(): string | undefined;
-    subscribeActiveWorkspace(listener): () => void;
-    getWorkspaceIds(): readonly string[];
-    subscribeWorkspaces(listener): () => void;
-    getTaskCreationContext(workspaceId: string): TaskCreationContext | null;
-    subscribeTaskCreationContext(workspaceId: string, listener): () => void;
-    resolveRepositoryId(identity: RepositoryIdentityInput): string | undefined;
+  React: typeof import("react");            // host React instance (shared)
+  jsx: typeof React.createElement;          // convenience alias (h)
+  store: {                                   // kandev app store (zustand StoreApi)
+    getState(): AppState;
+    setState(partial): void;
+    subscribe(listener): () => void;
   };
-  // Compatibility only for older bundles. Deliberately absent from
-  // @kandev/plugin-sdk; new/official plugins must use host.context.
-  store: Pick<StoreApi<AppState>, "getState" | "setState" | "subscribe">;
   api: {
-    // Low-level request scoped to this plugin's host path. It MUST NOT target a
-    // public webhook path or be used for authenticated provider commands.
+    // fetch scoped to this plugin's backend via kandev proxy:
+    // GET/POST {method} /api/plugins/{id}/... ; returns parsed JSON
     fetch(path: string, init?: RequestInit): Promise<Response>;
-    // Authenticated action declared in this plugin's manifest. The host verifies the
-    // indicated resource and passes it to the plugin separately from body JSON. This
-    // is the only browser-to-plugin command path; never call a public webhook route.
-    invokeAction<TResponse>(
-      key: string,
-      input?: {
-        workspaceId?: string;
-        taskId?: string;
-        sessionId?: string;
-        repositoryId?: string;
-        body?: unknown;
-      },
-      options?: { signal?: AbortSignal },
-    ): Promise<TResponse>;
     // Backend API origin ("" when SPA and API share an origin) — for reaching
     // first-party kandev REST endpoints without re-deriving the split-origin
     // dev/desktop base URL from window internals.
     baseUrl: string;
   };
-  ui: PluginUIApi; // named curated host components; no open Record index
-  // Plugin-scoped locale and translation API. Components use the reactive
-  // hook; registry getters may use the imperative translator.
-  i18n: {
-    readonly locale: string;
-    t(
-      key: string,
-      options?: {
-        defaultValue?: string;
-        count?: number;
-        values?: Readonly<Record<string, string | number>>;
-      },
-    ): string;
-    useTranslation(): {
-      readonly locale: string;
-      t: PluginHostApi["i18n"]["t"];
-    };
-  };
+  ui: Record<string, unknown>;              // curated @kandev/ui components + app UI (see below)
   // The resolved light/dark theme, read live on every access. `host` is built
   // once per plugin load, so copying this into a variable that outlives a
   // render freezes it; read it during render, and pair it with onThemeChange
@@ -137,17 +72,9 @@ interface PluginHostApi {
   // (e.g. /t/{taskId}) without a full reload.
   navigate(href: string, options?: { replace?: boolean }): void;
   // Imperatively opens a modal window rendered by the host's <PluginModalHost/>
-  // (mounted once at the app root with its own tooltip provider and isolated
-  // behind its own error boundary).
+  // (mounted once at the app root, isolated behind its own error boundary).
   // Independent of keybindings — any plugin code path may call it.
   openModal(options: PluginModalOptions): PluginModalHandle;
-  // Opens Kandev's native one-field task change-request linking workflow.
-  // Provider code supplies copy, parsing, and mutation only; the host owns
-  // validation placement, submitting state, footer, toast, and close behavior.
-  openTaskLinkDialog(options: PluginTaskLinkDialogOptions): PluginModalHandle;
-  // Opens a registered provider review in the native desktop dock panel or
-  // current mobile session review. Plugins do not reach into host layout stores.
-  openTaskReview(options: PluginTaskReviewOptions): void;
   // Sonner's imperative toast. The host mounts the single <Toaster/>, so
   // there is nothing to render and nothing to wire — and because it is
   // imperative rather than a component, it works from inside a plugin modal
@@ -156,34 +83,18 @@ interface PluginHostApi {
   // Shared helpers — plain functions, so they live here rather than in `ui`
   // (a component map). See the "host.utils" section below.
   utils: PluginUtilsApi;
-  // Registers one plugin-owned contributor with the native settings save bar.
-  // The host prefixes the contributor id with `plugin:<pluginId>:` before it
-  // reaches the shared coordinator, so ids only need to be unique inside the
-  // plugin. The contributor owns persistence and draft state.
-  useSettingsSaveContributor(contributor: SettingsSaveContributor): void;
-  // Publishes one integration registration's live enabled state for one
-  // workspace. The value is memory-only; persist it with host.storage and
-  // republish it for every workspace after plugin load.
-  setIntegrationEnabled(
-    integrationId: string,
-    workspaceId: string,
-    enabled: boolean,
-  ): void;
   // Authenticated, per-user key/value storage backed by
   // /api/plugins/{id}/user-state/... — see the "host.storage" section below.
   // Requires the plugin manifest to declare capabilities.user_state: true.
   storage: PluginStorageApi;
+  // Drives the selection for this plugin's own registerTaskFilter
+  // registrations — see "Task filters" below.
+  taskFilters: PluginTaskFilterSelectionApi;
 }
 
-interface PluginStorageEntry {
-  key: string;
-  value: unknown;
-  updatedAt: string;
-}
+interface PluginStorageEntry { key: string; value: unknown; updatedAt: string; }
 
 interface PluginStorageSetOptions {
-  // Abort the request when the owning surface or plugin generation ends.
-  signal?: AbortSignal;
   // Optimistic-concurrency guard: the updatedAt the caller last read. The
   // write is rejected (the returned promise rejects with a
   // PluginStorageConflictError) if the stored row was modified after this
@@ -207,39 +118,28 @@ interface PluginStorageSetOptions {
 }
 
 // Mirrors the backend's user-state route scopes.
-type PluginStorageScope =
-  | "instance"
-  | "workspace"
-  | "task"
-  | "session"
-  | "repository";
+type PluginStorageScope = "instance" | "workspace" | "task" | "session" | "repository";
 
 interface PluginStorageApi {
-  get(
-    scope: PluginStorageScope,
-    scopeId: string,
-    key: string,
-    options?: { signal?: AbortSignal },
-  ): Promise<PluginStorageEntry | undefined>;
+  get(scope: PluginStorageScope, scopeId: string, key: string): Promise<PluginStorageEntry | undefined>;
   set(
-    scope: PluginStorageScope,
-    scopeId: string,
-    key: string,
-    value: unknown,
+    scope: PluginStorageScope, scopeId: string, key: string, value: unknown,
     options?: PluginStorageSetOptions,
   ): Promise<{ updatedAt: string }>;
   delete(
-    scope: PluginStorageScope,
-    scopeId: string,
-    key: string,
-    options?: Pick<PluginStorageSetOptions, "writerId" | "signal">,
+    scope: PluginStorageScope, scopeId: string, key: string,
+    options?: Pick<PluginStorageSetOptions, "writerId">,
   ): Promise<void>;
   // Every entry under (scope, scopeId), ordered by key. Not paginated.
-  list(
-    scope: PluginStorageScope,
-    scopeId: string,
-    options?: { signal?: AbortSignal },
-  ): Promise<PluginStorageEntry[]>;
+  list(scope: PluginStorageScope, scopeId: string): Promise<PluginStorageEntry[]>;
+  // Every entry across every scopeId for a fixed (scope, key), ordered by
+  // scopeId — e.g. every task carrying a given tag id. Backed by the
+  // cross-scope scan route; server-side capped (options.limit requests a
+  // smaller cap, never a larger one). truncated is true when more entries
+  // exist than were returned.
+  listByKey(
+    scope: PluginStorageScope, key: string, options?: { limit?: number },
+  ): Promise<{ entries: PluginStorageScopeEntry[]; truncated: boolean }>;
   // Subscribes to live updates for this plugin's own storage made from
   // another tab, device, or surface — e.g. the kanban Edit modal and the
   // task panel both editing the same document. filter.scope/scopeId/key
@@ -256,27 +156,9 @@ interface PluginStorageApi {
   // it would incorrectly suppress each other's legitimate writes as if they
   // were one surface's own echo.
   subscribe(
-    filter: {
-      scope?: PluginStorageScope;
-      scopeId?: string;
-      key?: string;
-      writerId?: string;
-    },
+    filter: { scope?: PluginStorageScope; scopeId?: string; key?: string; writerId?: string },
     handler: (change: PluginUserStateChange) => void,
   ): () => void;
-}
-
-type SettingsSaveRevision = string | number;
-
-interface SettingsSaveContributor {
-  id: string;
-  order?: number;
-  revision: SettingsSaveRevision;
-  isDirty: boolean;
-  canSave?: boolean;
-  invalidReason?: string;
-  save(revision: SettingsSaveRevision): Promise<void> | void;
-  discard(revision?: SettingsSaveRevision): Promise<void> | void;
 }
 
 interface PluginUserStateChange {
@@ -287,57 +169,30 @@ interface PluginUserStateChange {
   deleted?: boolean; // true when the change was a delete rather than a set
 }
 
+interface PluginStorageScopeEntry { scopeId: string; value: unknown; updatedAt: string; }
+
+// Lets a plugin's own UI (e.g. a top-bar dropdown) set and observe the
+// selection for its registerTaskFilter registrations — the same selection
+// state the built-in display/filter dropdown reads. Every id is namespaced
+// internally to `${pluginId}:${id}`, so a plugin can only ever read/write
+// its own filters, never another plugin's.
+interface PluginTaskFilterSelectionApi {
+  getSelection(id: string): string[]; // current selection for this plugin's filter id, or [] if unset
+  setSelection(id: string, values: string[]): void; // empty values clears (equivalent to "All")
+  subscribe(listener: () => void): () => void; // notified when any plugin filter changes; read this plugin's ids for relevant updates
+}
+
 interface PluginModalOptions {
-  title?: string; // rendered in a DialogHeader/DialogTitle; omit for no header title
-  description?: string; // rendered below the title in the host-owned header
+  title?: string;                          // rendered in a DialogHeader/DialogTitle; omit for no header title
   content: React.ComponentType<{ slotProps?: unknown }>; // reuses the slot-component contract
-  size?: "sm" | "md" | "lg" | "xl"; // maps to the host's Dialog width classes; default "md"
-  dismissible?: boolean; // overlay click / Escape close the modal; default true
-  presentation?: "dialog" | "drawer"; // default dialog; use drawer for native phone actions
+  size?: "sm" | "md" | "lg" | "xl";         // maps to the host's Dialog width classes; default "md"
+  dismissible?: boolean;                    // overlay click / Escape close the modal; default true
 }
 
 interface PluginModalHandle {
   close(): void; // closes this modal instance; no-op if already closed
 }
-
-interface PluginTaskLinkDialogOptions {
-  title: string;
-  description: string;
-  inputLabel: string;
-  placeholder?: string;
-  emptyError: string;
-  failureMessage: string;
-  successMessage: string;
-  inputTestId?: string;
-  errorTestId?: string;
-  submitTestId?: string;
-  // The host aborts this signal when the user cancels or closes the dialog.
-  onSubmit(reference: string, signal: AbortSignal): Promise<void>;
-}
-
-interface PluginTaskReviewOptions {
-  providerId: string;
-  reviewKey: string;
-  title?: string;
-  presentation: "desktop" | "mobile";
-  sessionId?: string;
-}
 ```
-
-For `host.api.invokeAction`, workspace-scoped actions accept only `workspaceId`;
-repository-scoped actions accept `workspaceId` plus `repositoryId`; task-scoped
-actions require `taskId`, may include a matching `workspaceId`, and may include
-`repositoryId` only when that persisted repository is attached to the verified task.
-A task action may also include `sessionId`; the host verifies it belongs to that task.
-When both session and repository selectors are present, the host resolves the exact
-non-empty worktree branch and exposes it only in the backend verified action context.
-Resource selectors never become part of the untrusted action body.
-
-An action handler may return an HTTP status from 200 through 599; zero preserves the
-legacy 200 response. The host forwards only safe response headers (`Content-Type`,
-`Cache-Control`, `ETag`, and `Retry-After`). Invalid statuses become 502, while
-transport/runtime errors become 503 without exposing internal error text. Plugins
-should use explicit statuses only for safe domain outcomes that callers can act on.
 
 `host.ui` contents: shadcn primitives (Accordion*, Alert*, Badge, Button,
 Card*, Checkbox, Collapsible*, Dialog*, DropdownMenu*, Empty*, Input, Kbd,
@@ -348,115 +203,15 @@ Tooltip*, including `TooltipProvider`), the recharts wrappers (`ChartContainer`,
 `ChartStyle`), plus first-party app UI: `PageTopbar` (the kandev title bar, for
 routes that opt out of the default chrome and own their layout),
 `TaskCreateDialog` (kandev's real create-task modal, prefilled via
-`initialValues`), `Combobox` (the app's Command+Popover picker), and the
-provider-neutral code-host dashboard set: `ChangeRequestList`,
-`ChangeRequestRow`, `ChangeRequestDetail`, `IntegrationListToolbar`, `IntegrationScopeBar`,
-`IntegrationSaveQueryDialog`, `IntegrationRepositoryFilter`, `IntegrationCursorPagination`,
-`IntegrationStartTaskMenu`, `IntegrationIcon`, `IntegrationChangeRequestStatus`, and
-`TaskRowIndicator`, plus native integration settings surfaces:
-`IntegrationAuthStatusBanner`, `IntegrationEnabledControl`, `SettingsSection`,
-`SettingsCard`, and `WorkspaceScopedSection`. The authoritative list is
+`initialValues`), `Combobox` (the app's Command+Popover picker), and
+`RichTextEditor`/`RichTextReadOnly` (narrow wrappers over the Plan panel's
+tiptap markdown editor — see below). The authoritative list is
 `apps/web/lib/plugins/host-api.ts` (`PLUGIN_UI`).
-
-In create mode, `TaskCreateDialog` accepts this optional transport seam:
-
-```ts
-createTask?: (
-  payload: Parameters<typeof createTask>[0],
-) => Promise<CreateTaskResponse>;
-```
-
-When omitted, the dialog uses the normal `/api/v1/tasks` REST client. A trusted
-plugin wrapper may provide it to send the unchanged native payload through
-`Host Tasks.Create`; the same callback handles both the initial submission and
-the one allowed fresh-branch re-consent retry. Edit and session modes ignore it.
-The browser callback must not manufacture a repository-provider descriptor. It sends
-only native task choices plus an idempotency identifier to an authenticated plugin
-action; the plugin resolves repository identity from its live provider connection.
-Scope idempotency to one open dialog so retry does not create duplicates while a later
-intentional launch for the same change request still can.
-
-Code-host plugins use that dashboard set as one contract. The plugin supplies
-normalized change-request data, filter state, task presets, and callbacks; the
-host owns row density, external-title behavior, responsive task menus,
-linked-task navigation, and loading/error/empty treatment. A row's sole workflow CTA
-is the shared **Task** preset menu, whose selection opens `TaskCreateDialog`
-directly. Review belongs to the registered task review-provider surface, not a
-parallel dashboard button or plugin-specific launch modal. `IntegrationIcon` maps
-semantic names (`pull-request`, `pull-request-closed`, `merged`, `filter`) to the same
-host Tabler glyphs used by first-party code-host pages; plugins do not copy their SVG
-paths. Runtime components stay in the Kandev host and are versioned with `host.ui`.
-A task preset may provide a semantic `iconName`; the host maps `eye`, `message`, and
-`tool` to the exact first-party **Review**, **Address feedback**, and **Fix CI** icons.
-`ReviewItemSummary.taskStatus` is the normal code-host status integration. Once a
-registered review provider publishes it, Kandev automatically mounts the exact shared
-topbar button, composer CI chip, desktop hover popover, and mobile drawer. Each rendered
-linked-task row acquires one deduplicated provider refresh so its indicator color is live
-before hover; hover/focus can refresh again, while active topbar/composer status refreshes
-every 90 seconds. Plugins must not register
-a visual slot or a second poller for these surfaces. Linked-task indicators also derive
-the same semantic color hierarchy from normalized state, review, and pipeline fields;
-providers do not send CSS classes or provider-specific color tokens. While the initial
-task detail request is pending, the indicator remains muted; publishing the snapshot
-updates both its summary and color. `IntegrationChangeRequestStatus` remains exposed for non-review-
-provider composition only.
-
-`ChangeRequestDetail` is the exact provider-neutral detail component consumed by
-Kandev's GitHub panel. A review provider supplies its normalized model and advertised
-callbacks; Kandev owns header, branches, state/review badges, description, review/check/
-comment sections, add-to-context controls, scrolling, loading/error states, and native
-mobile sizing. Code-host plugins must use it instead of recreating the review page.
-A future SDK package may contain types or pure helpers, but not duplicate React/Radix
-runtime components.
-The curated surface also includes `RichTextEditor`/`RichTextReadOnly`, narrow
-wrappers over the Plan panel's tiptap markdown editor (see below).
 
 Plugins must use these host instances — bundling copies of anything
 Radix/portal/context-based would split React context across instances and
 break refs/`asChild`. Pure-React libs (e.g. `@tabler/icons-react`) bundle
 fine.
-
-### Persisted repository branch action
-
-A manifest-owned repository provider that participates in Kandev's native task branch
-picker declares this standardized action:
-
-```yaml
-actions:
-  - key: "repositories.branches"
-    scope: "workspace"
-    max_body_bytes: 16384
-```
-
-Browser-invoked actions may additionally declare `access: "admin"`. Omitting
-`access` preserves the default `authenticated` policy. The host rejects a
-non-administrator before it forwards any request body to an admin action.
-
-This action is invoked by the host backend, not the browser callback. Kandev resolves the
-active plugin that owns the repository's persisted provider ID and supplies a verified
-workspace context plus this snake-case body:
-
-```json
-{
-  "repository": {
-    "provider_id": "example-provider",
-    "provider_host": "https://code.example.com",
-    "provider_scope": "https://code.example.com/context-a",
-    "provider_repository_id": "owner/repository",
-    "owner_or_project": "owner",
-    "name": "repository",
-    "clone_url": "https://code.example.com/owner/repository.git",
-    "default_branch": "main"
-  }
-}
-```
-
-Every field comes from the persisted workspace repository. The plugin returns
-`{"branches":[{"name":"main","commit":"optional","is_default":true}]}`. Kandev
-enforces the manifest request cap, a 15-second timeout, a 1 MiB response cap, at most
-10,000 branches, non-empty names, and name deduplication. Missing ownership, an inactive
-plugin, an undeclared/wrong-scope action, or malformed output fails closed. Providers
-must not require browser-supplied repository authority on this path.
 
 The host wraps plugin routes, slots, and `openModal` content in a
 `TooltipProvider`, so a plain `Tooltip` works anywhere without one.
@@ -503,59 +258,16 @@ interface PluginUtilsApi {
   // The host's clsx + tailwind-merge combiner, so class merging matches the
   // components it styles.
   cn(...inputs: unknown[]): string;
-  // Non-security UUID with a fallback for supported insecure HTTP origins.
-  generateUUID(): string;
   // Locale-aware relative time ("3 hours ago", "in 2 days", "yesterday") via
   // Intl.RelativeTimeFormat in the user's active locale; "" for unparseable
   // input. Prefer it over a hand-rolled ladder, which is English-only by
   // construction and goes untranslated for every non-English user.
   formatRelativeTime(value: string | number | Date): string;
-  // Polling interval used by native integration health controls.
-  integrationStatusRefreshMs: number;
 }
 ```
 
-These are functions, so they sit beside `navigate`/`openModal` rather than in
+Both are functions, so they sit beside `navigate`/`openModal` rather than in
 `ui`, which is a component map.
-
-### Native integration settings state
-
-`registerIntegrationSettings` may provide an `action` component. The host mounts
-the action in the detail `SettingsSection` header and in the native integrations
-index card. The host passes the routed `workspaceId` and a `surface` value of
-`"detail"` or `"index"`. Use the workspace value for workspace-scoped reads and
-writes. Do not use `getActiveWorkspaceId()` for a routed settings page.
-
-`host.setIntegrationEnabled(integrationId, workspaceId, enabled)` publishes a
-live value for one registration and workspace. The host checks that the
-registration belongs to the current plugin. The value is not durable and is
-cleared when the plugin unloads. Persist the source of truth with
-`host.storage`, then republish it after load:
-
-```ts
-function publishAll(
-  host: PluginHostApi,
-  integrationId: string,
-  enabledByWorkspace: Map<string, boolean>,
-) {
-  for (const workspaceId of host.context.getWorkspaceIds()) {
-    host.setIntegrationEnabled(
-      integrationId,
-      workspaceId,
-      enabledByWorkspace.get(workspaceId) === true,
-    );
-  }
-}
-
-const unsubscribe = host.context.subscribeWorkspaces((workspaceIds) => {
-  // Load or refresh the durable value for the changed workspace ids.
-});
-```
-
-`host.useSettingsSaveContributor` connects plugin drafts to the native save
-bar. Contributor ids are local to the plugin because the host adds the
-`plugin:<pluginId>:` namespace before registration. Save and discard remain
-plugin-owned.
 
 ### `host.ui.RichTextEditor` / `host.ui.RichTextReadOnly`
 
@@ -573,11 +285,7 @@ interface RichTextEditorProps {
   testId?: string;
 }
 // RichTextReadOnly: renders markdown read-only, no taskId dependency.
-interface RichTextReadOnlyProps {
-  value: string;
-  className?: string;
-  testId?: string;
-}
+interface RichTextReadOnlyProps { value: string; className?: string; testId?: string; }
 ```
 
 Deliberately narrow — not the plan editor's `comments`, `onSelectionChange`,
@@ -634,41 +342,22 @@ own write).
 
 ```ts
 // icon: curated icon name (apps/web/lib/plugins/icons.ts — "ticket", "chart",
-// "robot", "database", ...) or a plugin-owned component rendered with host
-// React. Unknown/missing names render a puzzle glyph in the sidebar.
+// "robot", "database", ...); unknown/missing names render a puzzle glyph in
+// the sidebar.
 // section: "main" (default) renders as a top-level sidebar entry;
 // "integrations" renders inside the sidebar's Integrations section alongside
-// the first-party integration links (GitHub, Jira, ...); "sidebar-footer"
-// renders as an icon button in the sidebar footer's icon row and as a
-// labelled row in the phone menu's Utilities group, subject to the footer's
-// inline budget — an over-budget item is reached through the footer's
-// overflow menu instead of an inline button; "settings" is accepted but
-// renders on no surface. Hosts predating a section value, or seeing an
-// unrecognised one, simply degrade to "main"'s placement — nothing is ever
-// silently dropped.
-type PluginIcon = string | React.ComponentType<{ className?: string }>;
-export type PluginNavSection =
-  | "main"
-  | "settings"
-  | "integrations"
-  | "sidebar-footer";
-
-interface NavItem {
-  id: string;
-  label: string;
-  path: string;
-  icon?: PluginIcon;
-  section?: PluginNavSection;
-}
+// the first-party integration links (GitHub, Jira, ...). Hosts predating a
+// section value simply don't render items targeting it (additive change).
+interface NavItem { id: string; label: string; path: string; icon?: string; section?: "main" | "settings" | "integrations"; }
 
 // Configuration for the kandev-style title bar the host renders above a plugin
 // route. All fields optional; defaults are derived (see registerRoute below).
 interface PluginPageChrome {
-  title?: string; // default: nav-item label for the same path, else plugin name
-  subtitle?: string; // muted text next to the title
-  icon?: PluginIcon; // default: matching nav item's icon
-  backHref?: string; // back-link target (host default "/")
-  backLabel?: string; // back-link label (host default "Kandev")
+  title?: string;      // default: nav-item label for the same path, else plugin name
+  subtitle?: string;   // muted text next to the title
+  icon?: string;       // curated icon name; default: matching nav item's icon
+  backHref?: string;   // back-link target (host default "/")
+  backLabel?: string;  // back-link label (host default "Kandev")
   actions?: React.ComponentType; // rendered on the right side of the topbar
 }
 
@@ -679,23 +368,12 @@ interface PluginRouteOptions {
 }
 
 interface PluginRegistry {
-  // Installs flat locale catalogs under this plugin's isolated namespace.
-  // English is required as the fallback. Registration is atomic; unload
-  // removes all catalog bundles and locale changes invalidate host consumers.
-  registerTranslations(
-    catalogs: Readonly<Record<string, Readonly<Record<string, string>>>>,
-  ): void;
-
   // Top-level SPA route, e.g. "/jira". Component rendered by the SPA route resolver
   // when window.location path === path (exact match; trailing segments via ":param" not
   // required for v1 — exact + startsWith("/plugins/{id}") allowed). The host wraps the
   // page in kandev chrome (PageTopbar + scrollable content area) by default —
   // configure or opt out via options.topbar.
-  registerRoute(
-    path: string,
-    Component: React.ComponentType,
-    options?: PluginRouteOptions,
-  ): void;
+  registerRoute(path: string, Component: React.ComponentType, options?: PluginRouteOptions): void;
 
   // Sidebar/main nav entry. Rendered by <PluginNavItems/> in the app sidebar,
   // and by <MobilePluginNavSection/> in the phone menu sheet (the sidebar is
@@ -707,20 +385,11 @@ interface PluginRegistry {
   // The settings shell already provides its own topbar chrome — no options here.
   registerSettingsRoute(path: string, Component: React.ComponentType): void;
 
-  // Native Settings > Integrations contribution. The host adds index/navigation
-  // entries and wraps this component in the shared settings section.
-  registerIntegrationSettings(
-    registration: IntegrationSettingsRegistration,
-  ): void;
-
   // Named slot injection. Host renders all components registered for a slot via
   // <PluginSlot name="..." slotProps={...}/>. Initial slots: "task-sidebar",
-  // "settings-nav", "chat-input-actions", "task-create-input-actions",
-  // "new-session-input-actions", "chat-top-bar",
+  // "settings-nav", "chat-input-actions", "chat-top-bar",
   // "main-top-bar", "app-status-bar-left", "app-status-bar-right",
-  // "plugin-settings", "task-card-indicators", "task-card-tags",
-  // "task-row-metadata", and
-  // "sidebar-workspace-actions".
+  // "plugin-settings", "task-card-indicators", and "task-card-tags".
   // "task-card-indicators" renders a small icon/badge beside the PR status
   // icon on every kanban card and forwards
   // `{ taskId, workspaceId, workflowStepId }` as `slotProps`. Not a closed
@@ -731,34 +400,18 @@ interface PluginRegistry {
   // same `{ taskId: string, workspaceId: string | null, workflowStepId: string | null }`
   // shape as `slotProps` (`workspaceId` is null with no active workspace, and
   // `workflowStepId` is null when the task has no workflow step assigned).
-  // "task-row-metadata" renders compact, read-only metadata on the sidebar
-  // task tree and `/tasks` list. It forwards
-  // `{ taskId, workspaceId, workflowStepId, surface }`, where `surface` is
-  // "sidebar" or "task-list". The slot is plugin-agnostic.
-  // "chat-input-actions", "task-create-input-actions", and
-  // "new-session-input-actions" render composer actions for task/Quick Chat,
-  // task creation, and new-session creation. Each forwards the typed
-  // `PluginComposerSlotProps`, including native insert/focus/submit capabilities.
+  // "chat-input-actions" renders icon buttons in the chat composer toolbar
+  // (beside the model picker, mic, and send) and forwards
+  // `{ taskId, taskTitle, activeSessionId, sessionIds }` as `slotProps`.
   // "chat-top-bar" renders status in the session top bar (beside the
   // document/editor/debug controls) and forwards
   // `{ taskId, taskTitle, workspaceId, activeSessionId, sessionIds }`. Both
   // carry the active session plus every kandev session id on the task.
   // "main-top-bar" renders status/actions in the default app top bar on the
   // Home / Kanban / Tasks views (beside the CPU/DB metrics and the view/display
-  // controls) and forwards `{ workspaceId, workspaceLabel, currentPage,
-  // presentation }`, where presentation is "desktop" or "mobile". On a phone,
-  // contributions join the horizontally scrollable middle action strip between
-  // the fixed Kandev link and menu button. Documented host ui.Button icon
-  // contributions are normalized to a 32px box with a 16px SVG icon on phones;
-  // desktop contribution sizing is unchanged. It is the app-wide,
-  // task-agnostic counterpart to "chat-top-bar", so it carries no task/session
-  // ids.
-  // "sidebar-workspace-actions" renders icon buttons after the built-in Quick
-  // Terminal and Quick Chat actions in the desktop sidebar's New Task row and
-  // in the shared phone navigation sheet. It forwards
-  // `SidebarWorkspaceActionsSlotProps` as `slotProps`, with `presentation` set
-  // to "desktop" or "mobile". The mobile presentation must use a touch target
-  // of at least 44px in its active dimension.
+  // controls) and forwards `{ workspaceId, workspaceLabel, currentPage }`. It is
+  // the app-wide, task-agnostic counterpart to "chat-top-bar", so it carries no
+  // task/session ids.
   // Resolving a session id to an agent/ACP transcript id (e.g. to key
   // tokscale cost data on a session) is the plugin's job, done server-side in
   // the plugin backend via the Host data API; the host only propagates ids.
@@ -769,28 +422,17 @@ interface PluginRegistry {
   // registered by the plugin currently being viewed, so your card appears on
   // your own settings page and never on another plugin's — no per-id gating
   // needed in your component.
-  registerComponent(
-    slot: string,
-    Component: React.ComponentType<{ slotProps?: unknown }>,
-  ): void;
+  registerComponent(slot: string, Component: React.ComponentType<{ slotProps?: unknown }>): void;
 
   // WS action handler. Bridged into the existing lib/ws dispatch; called with the
   // decoded message payload for that action string.
   registerWsHandler(action: string, handler: (payload: unknown) => void): void;
 
   // Binds a handler to a keybinding declared in this plugin's manifest
-  // (ui.keybindings[].id — { id, default, description, allow_in_editor? },
-  // see manifest schema).
+  // (ui.keybindings[].id — { id, default, description }, see manifest schema).
   // The host resolves the effective combo (user override if the user
   // rebound it, else the manifest default) and dispatches globally, skipping
-  // editable targets the same way core app shortcuts do — unless that entry
-  // declared `allow_in_editor: true`, which lets it fire while an input,
-  // textarea or contenteditable has focus. That opt-in exists for bindings
-  // whose whole job is to act on the focused composer (dictation); the
-  // manifest validator only accepts it on a combo carrying a
-  // ctrl/cmd/mod/alt modifier, and the dispatcher re-checks the *resolved*
-  // combo, so a user override that drops the modifier silently falls back to
-  // skipping editables rather than swallowing ordinary keystrokes. Combos are
+  // editable targets the same way core app shortcuts do. Combos are
   // user-overridable in Settings > Keyboard Shortcuts, namespaced
   // `plugin:{pluginId}:{id}`. Binding an id the manifest didn't declare still
   // stores the handler (a console warning is logged) since the dispatcher's
@@ -805,21 +447,10 @@ interface PluginRegistry {
   // the manifest validator and the frontend parser reject it.
   registerKeybinding(id: string, handler: (event: KeyboardEvent) => void): void;
 
-  // Requires manifest ownership of provider.id. One active plugin owns one provider;
-  // unload revokes it and aborts in-flight provider work. inspectURL returns a complete
-  // credential-free HTTPS descriptor—host does not parse plugin provider URLs.
-  registerRepositoryProvider(provider: RepositoryProviderRegistration): void;
-
-  // Native task-menu contribution. placement "link" renders in Link menus on desktop
-  // and visible mobile action surfaces; host closes the menu before handler invocation.
-  registerTaskAction(action: TaskActionRegistration): void;
-
-  // Native desktop/mobile review integration. Use external-store callbacks, never a
-  // plugin hook, so enable/disable does not alter host hook ordering.
-  registerReviewProvider(provider: ReviewProviderRegistration): void;
-
-  // Contributes a panel to the task workspace "+" menu and, when enabled,
-  // the phone Panels picker.
+  // Contributes a panel to the task workspace "+" (add panel) menu (dockview
+  // desktop) and, when mobileEnabled, the phone bottom nav. Panel identity
+  // lives in the dockview params (pluginId/panelKey); the panel id is
+  // `plugin:{pluginId}:{panelKey}`. See "Task panels" below.
   registerTaskPanel(registration: TaskPanelRegistration): void;
 
   // Contributes an item to the kanban card's Edit submenu (group "edit") or
@@ -831,253 +462,9 @@ interface PluginRegistry {
   // dropdown, alongside the built-in Workflow/Repository sections. See
   // "Task filters" below.
   registerTaskFilter(registration: TaskFilterRegistration): void;
-  registerTaskListFacet(registration: TaskListFacetRegistration): void;
-}
-
-interface IntegrationSettingsRegistration {
-  id: string;
-  label: string;
-  description: string;
-  icon?: PluginIcon;
-  Component: React.ComponentType<{ workspaceId?: string }>;
-  // Optional action for the detail section header and integrations index card.
-  // The surface identifies the host location and the workspace id identifies
-  // the settings target.
-  action?: React.ComponentType<IntegrationSettingsActionProps>;
-}
-
-type IntegrationSettingsActionSurface = "detail" | "index";
-
-interface IntegrationSettingsActionProps {
-  workspaceId?: string;
-  surface: IntegrationSettingsActionSurface;
-}
-
-// Integration settings render at /settings/integrations/{id} and
-// /settings/workspaces/{workspaceId}/integrations/{id}. IDs are URL-safe, cannot
-// shadow first-party integrations, and have one active owner; unload revokes them.
-
-interface RepositoryProviderRegistration {
-  id: string;
-  label: string;
-  icon?: PluginIcon;
-  listRepositories(context: {
-    workspaceId: string;
-    /** Optional server-side search text. */
-    query?: string;
-    /** Opaque cursor returned by this provider for the same query. */
-    cursor?: string;
-    /** Requested page size; a provider may return fewer items. */
-    limit?: number;
-    signal: AbortSignal;
-  }): Promise<RepositoryInspection[] | RepositoryProviderPage>;
-  // Optional synchronous performance hint. It never establishes ownership.
-  matchesURL?(url: string): boolean;
-  listBranches(context: {
-    workspaceId: string;
-    repository: RepositoryInspection;
-    signal: AbortSignal;
-  }): Promise<RepositoryProviderBranch[]>;
-  inspectURL(context: {
-    workspaceId: string;
-    url: string;
-    signal: AbortSignal;
-  }): Promise<RepositoryInspection | null>;
-  supportsDraft?: boolean; // default true; false hides the native draft option
-  // Kandev pushes the verified checkout branch before invoking this callback.
-  createChangeRequest?(context: {
-    workspaceId: string;
-    taskId: string;
-    sessionId: string; // session whose checkout Kandev pushed
-    repositoryId: string;
-    repository: PluginHostRepository; // persisted host repository, not browser authority
-    title: string;
-    body: string;
-    baseBranch?: string;
-    draft: boolean;
-    signal: AbortSignal;
-  }): Promise<RepositoryChangeRequestCreateResult>;
-}
-
-interface RepositoryProviderPage {
-  repositories: RepositoryInspection[];
-  nextCursor?: string;
-}
-
-// The host binds every returned RepositoryInspection.providerId to the
-// registration's manifest-owned id; result data cannot spoof another namespace.
-// Legacy arrays remain valid. The host follows page cursors and rejects a cursor
-// repeated by a broken provider instead of looping forever.
-interface PluginHostRepository {
-  id: string;
-  workspace_id: string;
-  name: string;
-  provider: string;
-  source_type?: string;
-  provider_repo_id?: string;
-  provider_host?: string;
-  provider_scope?: string;
-  provider_owner?: string;
-  provider_name?: string;
-  remote_url?: string;
-  default_branch?: string;
-}
-interface RepositoryProviderBranch {
-  name: string;
-}
-interface RepositoryChangeRequestCreateResult {
-  url: string;
-  provider?: string;
-  output?: string;
-  // False means remote creation succeeded but task association did not.
-  linked?: boolean;
-  // Safe detail shown with recovery guidance. Never retry remote creation.
-  associationError?: string;
-}
-interface RepositoryInspection {
-  providerId: string;
-  providerHost: string;
-  // Opaque, credential-free connection identity. Required when one authority
-  // can host multiple independent provider roots.
-  providerScope?: string;
-  ownerOrProject: string;
-  repositoryId: string;
-  repositoryName: string;
-  cloneUrl: string;
-  defaultBranch?: string;
-  baseBranch?: string;
-  headBranch?: string;
-  pullRequest?: { number: number; title: string };
-}
-interface TaskActionRegistration {
-  id: string;
-  label: string;
-  icon?: PluginIcon;
-  placement: "link";
-  group?: string;
-  visible?(context: PluginTaskActionContext): boolean;
-  singleTaskOnly?: boolean;
-  run(context: PluginTaskActionContext): Promise<void>;
-}
-interface PluginTaskActionContext {
-  workspaceId: string;
-  taskId: string;
-  repositories: readonly PluginHostRepository[];
-  pathname: string;
-  presentation: "desktop" | "mobile";
-}
-interface ReviewProviderRegistration {
-  id: string;
-  label: string;
-  icon?: PluginIcon;
-  changeRequestNoun: string;
-  order: number;
-  getSnapshot(taskId: string): readonly ReviewItemSummary[];
-  subscribe(taskId: string, listener: () => void): () => void;
-  refresh(taskId: string, signal: AbortSignal): Promise<void>;
-  // Implement all three association callbacks together. The host performs one
-  // workspace-bounded association refresh and renders native task-list/card
-  // indicators. Each rendered linked task leases refresh(taskId), deduplicated
-  // with topbar/panel consumers; hover/focus may refresh it again.
-  getAssociationSnapshot?(
-    workspaceId: string,
-  ): readonly ReviewTaskAssociation[];
-  subscribeAssociations?(workspaceId: string, listener: () => void): () => void;
-  refreshAssociations?(workspaceId: string, signal: AbortSignal): Promise<void>;
-  // Removes only this task link; it never deletes the remote change request.
-  unlink?(context: {
-    workspaceId: string;
-    taskId: string;
-    reviewKey: string;
-    signal: AbortSignal;
-  }): Promise<void>;
-  ReviewPanel: React.ComponentType<PluginReviewPanelProps>;
-  Selector?: React.ComponentType;
-  EmptyState?: React.ComponentType;
-}
-interface ReviewTaskAssociation {
-  providerId: string;
-  taskId: string;
-  reviewKey: string;
-  connectionScope: string;
-  repositoryId: string;
-  changeRequestNumber: string | number;
-}
-interface ReviewItemSummary {
-  providerId: string;
-  reviewKey: string;
-  title: string;
-  url: string;
-  connectionScope: string;
-  repositoryId: string;
-  changeRequestNumber: string | number;
-  // open/opened/draft participates in native Create PR eligibility.
-  state: string;
-  statusBadge?: { label: string; tone?: string };
-  taskStatus?: ReviewTaskStatus;
-}
-type ReviewTaskPipelineState = "success" | "failure" | "pending" | "neutral";
-interface ReviewTaskStatus {
-  number: number | string;
-  state: "open" | "merged" | "closed" | "draft";
-  pipelineState: ReviewTaskPipelineState;
-  checks: readonly {
-    id: string;
-    label: string;
-    state: ReviewTaskPipelineState;
-    detail?: string;
-    url?: string;
-  }[];
-  review?: {
-    state: "approved" | "changes_requested" | "pending";
-    approved: number;
-    required?: number;
-    requested?: number;
-  };
-  unresolvedComments?: number;
-  loading?: boolean;
-  error?: string;
-  updatedAt?: number;
-}
-interface PluginReviewPanelProps {
-  panelId: string;
-  presentation: "desktop" | "mobile";
-  workspaceId: string;
-  taskId: string;
-  sessionId?: string;
-  reviewKey: string;
-  connectionScope: string;
-  repositoryId: string;
-  changeRequestNumber: string | number;
 }
 
 type PluginPresentation = "desktop" | "mobile";
-
-type PluginComposerSurface =
-  | "task-chat"
-  | "quick-chat"
-  | "task-create"
-  | "new-session";
-interface PluginComposerCapability {
-  insertText(text: string): { status: "inserted" | "ignored" | "unavailable" };
-  focus(): { status: "focused" | "unavailable" };
-  submit(): Promise<{
-    status: "submitted" | "blocked" | "unavailable";
-    reason?: string;
-  }>;
-}
-interface PluginComposerSlotProps {
-  surface: PluginComposerSurface;
-  presentation: PluginPresentation;
-  taskId: string | null;
-  taskTitle?: string;
-  activeSessionId: string | null;
-  sessionIds: string[];
-  disabled: boolean;
-  submittable: boolean;
-  disabledReason?: string;
-  composer: PluginComposerCapability;
-}
 
 interface PluginTaskPanelProps {
   panelId: string; // this registration's panel id, so one Component can back multiple panels
@@ -1087,14 +474,19 @@ interface PluginTaskPanelProps {
 }
 
 interface TaskPanelRegistration {
-  id: string; // plugin-local panel id (unique within the plugin, not globally)
-  title: string; // add-panel-menu row label and dockview tab title
-  icon?: PluginIcon;
+  id: string;          // plugin-local panel id (unique within the plugin, not globally)
+  title: string;        // add-panel-menu row label and dockview tab title
+  icon?: string;         // curated icon name (apps/web/lib/plugins/icons.ts)
   Component: React.ComponentType<PluginTaskPanelProps>; // wrapped in a PluginErrorBoundary
   mobileEnabled?: boolean; // include in the phone's grouped Panels picker. Default: false.
 }
 
 interface PluginTaskMenuContext {
+  // "" when no workspace is active (Home/all-workspaces board, or a render
+  // before workspace hydration completes) — never null/undefined. A plugin
+  // using this as a host.storage scopeId must guard "" itself (an empty
+  // scopeId fails the backend's validation). TaskCardTagsSlotProps
+  // .workspaceId is string | null instead — guard both shapes the same way.
   workspaceId: string;
   taskId: string;
   taskTitle: string;
@@ -1125,19 +517,20 @@ interface PluginTaskFilterOption {
 }
 
 interface TaskFilterRegistration {
-  id: string; // plugin-local filter id (unique within the plugin, not globally)
+  id: string;   // plugin-local filter id (unique within the plugin, not globally)
   label: string; // filter section label shown in the dropdown
+  // Omit this filter's section from the built-in display/filter dropdown —
+  // for a plugin driving its own dedicated filter UI (e.g. a top-bar
+  // dropdown) via host.taskFilters instead. The filter still gates cards
+  // exactly as before via matches(); only where its controls render
+  // changes. Default: false (shown in the built-in dropdown).
+  hidden?: boolean;
   getOptions(): PluginTaskFilterOption[];
   // Called only when `selected` is non-empty — an empty selection is
   // implicit "All" and always matches without invoking this method.
   matches(context: PluginTaskFilterContext, selected: string[]): boolean;
 }
 ```
-
-The host treats `matchesURL` only as a coarse candidate filter. It runs every
-remaining provider's cancellable, workspace-scoped `inspectURL`; `null` means the
-configured provider does not own the URL. One structured result wins, more than one
-is an ambiguity error, and registration order never decides ownership.
 
 ### App-status-bar slots
 
@@ -1161,8 +554,7 @@ interface AppStatusBarSlotProps {
 `placement` matches registration slot. `presentation` identifies the mounted host;
 the host mounts only one presentation at once. `density` is `full` on desktop and
 phone drawer, `compact` on tablet. `pathname` and active IDs are current-context
-hints, not entity payloads. Use a typed `host.context` read or host-verified action;
-do not inspect private store slices from a released plugin.
+hints, not entity payloads; read complete records from `host.store`.
 
 Before customization, registration order is render order within each default side.
 Users can Cmd-drag on macOS or Ctrl-drag elsewhere with a mouse to move any item
@@ -1223,10 +615,11 @@ console, and the menu still closes either way (Radix's own close-on-select,
 independent of the async result).
 
 Group `"primary"` renders each visible action as its own flat, top-level menu
-item instead of nesting it under `Edit`. It appears on cards and on the shared
-desktop/mobile task-row menu. Group `"edit"` remains card-only. Visibility
-filtering, registration order, and `run()`/error handling are identical; the
-two groups are independent lists (an action only ever belongs to one).
+item instead of nesting it under `Edit` — positioned between the "Move
+to"/"Send to workflow" submenus and the "Link" submenu. Visibility filtering,
+registration order, and `run()`/error handling are identical to the `"edit"`
+group; the two groups are independent lists (an action only ever belongs to
+one).
 
 `"task-card-indicators"` (documented above with the other slots) is the
 matching read-only surface: a small icon/badge rendered beside the PR status
@@ -1237,11 +630,6 @@ context — same `{ taskId, workspaceId, workflowStepId }` shape — but mounted
 in its own row on the card instead of the cramped title row
 `"task-card-indicators"` shares with `PRTaskIcon`. Use it for a contribution
 that needs its own width, e.g. a row of tag chips.
-
-`"task-row-metadata"` is a separate, plugin-agnostic slot for compact,
-read-only metadata in the sidebar task tree and `/tasks` list. Its shape is
-`{ taskId, workspaceId, workflowStepId, surface }`, with `surface` equal to
-`"sidebar"` or `"task-list"`. The host emits no wrapper when the slot is empty.
 
 ### Task filters
 
@@ -1264,18 +652,13 @@ mirroring how Workflow/Repository combine with the search query today. If
 `matches()` throws, the task is treated as non-matching and the error is
 logged (mirroring `TaskMenuActionRegistration.visible`'s error handling).
 
-### Task-list facets
-
-`registerTaskListFacet({ id, label, getValues, subscribe? })` adds a choice to `/tasks` Sort and
-Group controls. `getValues({ taskId, workspaceId })` synchronously returns `{ value, label,
-color? }[]`; `subscribe` invalidates the loaded page. Return each value at most once for a task,
-and keep one label and color for a value across all tasks. Facet sorting uses the first value label
-after a case-insensitive alphabetical comparison. Facets are page-local: no facet selection is
-persisted or sent to the backend. The host catches callback errors and revokes registrations and
-active subscriptions when the owning plugin unloads. A task with multiple values appears in each
-matching group; a task without a value appears in the host's `Ungrouped` section. Parent/child
-indentation is preserved only within a group both tasks match, so a matching child without its
-parent is rendered at that group's root.
+Setting `hidden: true` removes a registration's section from the built-in
+dropdown without touching gating: `matches()` is still called exactly as
+above. A plugin doing this owns rendering its own filter UI elsewhere (e.g. a
+`main-top-bar` slot dropdown) and drives the shared selection through
+`host.taskFilters.getSelection`/`setSelection`/`subscribe` — the same
+selection state the built-in dropdown reads, namespaced to
+`${pluginId}:${id}` so one plugin can never read or set another's.
 
 ## Registry internals (host side)
 
@@ -1290,13 +673,6 @@ for derived page-chrome titles), `getTaskPanels()` / `getTaskPanel(pluginId, id)
 and `getTaskMenuActions(group?)`. `unregisterWsHandler(pluginId, action, handler)`
 removes exactly one WS handler (used by `host.storage.subscribe`'s returned
 unsubscribe) without disturbing the plugin's other registrations.
-
-Before `initialize`, the loader records `ActivePlugin.repositoryProviderIds` for the
-plugin ID. A present declaration is an allowlist for provider/review registration; an
-absent declaration is tolerated only for older payload compatibility. Disable/unload
-removes this declaration with the plugin's registrations. Failed/timed-out activation
-performs the same cleanup and an attempt token prevents late async registrations from
-reappearing.
 
 Plugin top-level routes render inside `PluginPageFrame`
 (`apps/web/components/plugins/plugin-page.tsx`): a `PageTopbar` title bar above
@@ -1319,10 +695,8 @@ defaults, or the bare component when the route opted out (`topbar: false`).
   The chat composer toolbar
   (`components/task/chat/chat-input-toolbar-desktop.tsx` and
   `-mobile.tsx`, via `chat-input-plugin-actions.tsx`) hosts the
-  `chat-input-actions` slot for task and Quick Chat, passing the typed
-  `PluginComposerSlotProps`. Task creation and new-session creation mount
-  `task-create-input-actions` and `new-session-input-actions` with the same
-  capability contract. `kanban-card-plugin-slots.tsx`
+  `chat-input-actions` slot, passing
+  `{ taskId, taskTitle, activeSessionId, sessionIds }`. `kanban-card-plugin-slots.tsx`
   hosts `task-card-indicators` beside `PRTaskIcon` and `task-card-tags` as its
   own row, both mounted from `kanban-card-content.tsx`'s `KanbanCardBody`.
 - `components/task/dockview-shared.tsx` / `dockview-panel-content.tsx` /
@@ -1357,9 +731,8 @@ Plugin JS runs in the kandev origin with store access — this is the accepted
 tradeoff of option C. v1 mitigations: only **active, operator-installed** plugins
 load; bundles are served by kandev from the extracted package directory (same-origin,
 no third-party CDN, no upstream network hop); host wraps `initialize` in try/catch so
-a broken plugin can't crash boot; failed/timed-out activation is rolled back; and
-registrations are namespaced + bulk-revocable per plugin. No credentials are ever
-displayed to the operator — installing a plugin (via
+a broken plugin can't crash boot; registrations namespaced + bulk-revocable per
+plugin. No credentials are ever displayed to the operator — installing a plugin (via
 URL or upload) has nothing to copy or reveal, unlike the old register flow's one-time
 API key/webhook secret. Sandboxing plugin JS (worker/realms) is explicit future work.
 

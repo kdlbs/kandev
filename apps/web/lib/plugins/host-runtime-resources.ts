@@ -147,6 +147,7 @@ export function generationFencedHost(
     toast: generationFencedToast(host.toast, isCurrent, resources),
     utils: host.utils,
     storage: generationFencedStorage(host.storage, isCurrent, resources),
+    taskFilters: host.taskFilters,
     useSettingsSaveContributor: host.useSettingsSaveContributor,
     setIntegrationEnabled: (integrationId, workspaceId, enabled) => {
       if (isCurrent()) host.setIntegrationEnabled(integrationId, workspaceId, enabled);
@@ -246,6 +247,8 @@ function generationFencedStorage(
             storage.list(scope, scopeId, { ...options, signal }),
           )
         : unavailable(),
+    listByKey: (scope, key, options) =>
+      isCurrent() ? storage.listByKey(scope, key, options) : unavailable(),
     subscribe: (filter, handler) => {
       if (!isCurrent()) return () => {};
       return resources.track(

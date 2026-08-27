@@ -8,7 +8,6 @@ import type { StoreApi } from "zustand";
 import type { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { AppState } from "@/lib/state/store";
 import type * as PluginSDK from "@kandev/plugin-sdk";
-import type { PluginUIApi } from "@kandev/plugin-sdk";
 export type {
   IntegrationSettingsActionProps,
   IntegrationSettingsActionSurface,
@@ -304,7 +303,23 @@ export type PluginTaskPanelProps = PluginSDK.PluginTaskPanelProps;
 export type TaskPanelRegistration = PluginSDK.TaskPanelRegistration;
 
 /** Read-only context passed to `TaskMenuActionRegistration.visible`/`run`. */
-export type PluginTaskMenuContext = PluginSDK.PluginTaskMenuContext;
+export interface PluginTaskMenuContext {
+  /**
+   * The active workspace id, or `""` when no workspace is active (e.g. the
+   * Home / all-workspaces board, or a render before workspace hydration
+   * completes) — the host always passes a string, never `null`/`undefined`,
+   * so a plugin using this value as a `host.storage` scopeId must check for
+   * `""` itself before calling `storage.get`/`set` (an empty scopeId fails
+   * the backend's scopeId validation). This mirrors `TaskCardTagsSlotProps
+   * .workspaceId`, which is `string | null` instead — a plugin reading both
+   * shapes needs the same "no active workspace" guard for each.
+   */
+  workspaceId: string;
+  taskId: string;
+  taskTitle: string;
+  workflowStepId: string | null;
+  presentation: PluginPresentation;
+}
 
 /**
  * Registration accepted by `PluginRegistry.registerTaskMenuAction`:
@@ -331,7 +346,34 @@ export type PluginTaskFilterRegistrationKey = `${string}:${string}`;
  * in the board's in-memory state — there is no host-side pagination or
  * backend query for this filter.
  */
-export type TaskFilterRegistration = PluginSDK.TaskFilterRegistration;
+export interface TaskFilterRegistration {
+  /** Plugin-local filter id; the host namespaces it as `pluginId:id`. */
+  id: string;
+  /** Filter section label shown in the dropdown. */
+  label: string;
+  /**
+   * Omit this filter's section from the host's built-in display/filter
+   * dropdown — for a plugin driving its own dedicated filter UI (e.g. a
+   * top-bar dropdown) instead. The filter still gates cards exactly as
+   * before via `matches`/`host.taskFilters`; only where its controls render
+   * changes. Default: false (shown in the built-in dropdown, today's
+   * behavior).
+   */
+  hidden?: boolean;
+  /**
+   * Options offered by this filter's multi-select, e.g. tag values. An
+   * empty selection means "All" (no filtering applied) — the plugin decides
+   * how to represent a sentinel like "untagged" as a normal option value; the
+   * host does not special-case any option value.
+   */
+  getOptions(): PluginTaskFilterOption[];
+  /**
+   * Whether `context.taskId` should remain visible given the current
+   * `selected` option values. Called only when `selected` is non-empty (an
+   * empty selection always matches, without invoking this method).
+   */
+  matches(context: PluginTaskFilterContext, selected: string[]): boolean;
+}
 
 /** A plugin-provided, client-side facet for sorting and grouping `/tasks`. */
 export type TaskListFacetRegistration = PluginSDK.TaskListFacetRegistration;
@@ -346,6 +388,13 @@ export type PluginStorageSetOptions = NonNullable<Parameters<PluginSDK.PluginSto
 /** Per-user plugin storage scope — mirrors the backend's user-state routes. */
 export type PluginStorageScope = PluginSDK.PluginStorageScope;
 
+/** One entry returned by `host.storage.listByKey`, scanning across every scopeId for a fixed key. */
+export interface PluginStorageScopeEntry {
+  scopeId: string;
+  value: unknown;
+  updatedAt: string;
+}
+
 /**
  * `host.storage` — authenticated, per-user key/value storage backed by
  * `/api/plugins/{id}/user-state/...`. Every read/write is scoped to the
@@ -353,7 +402,66 @@ export type PluginStorageScope = PluginSDK.PluginStorageScope;
  * each other's value. Requires the plugin manifest to declare
  * `capabilities.user_state: true`.
  */
-export type PluginStorageApi = PluginSDK.PluginStorageApi;
+export interface PluginStorageApi {
+  get(
+    scope: PluginStorageScope,
+    scopeId: string,
+    key: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<PluginStorageEntry | undefined>;
+  set(
+    scope: PluginStorageScope,
+    scopeId: string,
+    key: string,
+    value: unknown,
+    options?: PluginStorageSetOptions,
+  ): Promise<{ updatedAt: string }>;
+  delete(
+    scope: PluginStorageScope,
+    scopeId: string,
+    key: string,
+    options?: Pick<PluginStorageSetOptions, "writerId" | "signal">,
+  ): Promise<void>;
+  /** Every entry under (scope, scopeId), ordered by key. Not paginated. */
+  list(
+    scope: PluginStorageScope,
+    scopeId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<PluginStorageEntry[]>;
+  /**
+   * Every entry across every scopeId for a fixed (scope, key), ordered by
+   * scopeId — e.g. every task carrying a given tag id. Backed by the
+   * cross-scope scan route; capped server-side (`options.limit` requests a
+   * smaller cap, never a larger one). `truncated` is true when more entries
+   * exist than were returned.
+   */
+  listByKey(
+    scope: PluginStorageScope,
+    key: string,
+    options?: { limit?: number },
+  ): Promise<{ entries: PluginStorageScopeEntry[]; truncated: boolean }>;
+  /**
+   * Subscribes to live updates for this plugin's own storage made from
+   * another tab, device, or surface (approach F1) — e.g. the kanban `Edit`
+   * modal and the task panel both editing the same document. `filter.scope`/
+   * `scopeId`/`key` narrow to a specific tuple; omit a field to match any
+   * value.
+   *
+   * `filter.writerId`, if given, must be the same value this surface passes
+   * to `set`/`delete`'s own `writerId` option — a notification carrying that
+   * exact id is this surface's own echo and is skipped (AC25), so its editor
+   * never clobbers its own caret/selection reacting to its own write. Omit
+   * to fall back to the shared per-tab default (today's behavior): correct
+   * for a plugin with only one surface, but two independent surfaces of the
+   * same plugin (e.g. an open task panel and a kanban quick-action) both
+   * omitting it would incorrectly suppress each other's legitimate writes as
+   * if they were one surface's own echo.
+   */
+  subscribe(
+    filter: { scope?: PluginStorageScope; scopeId?: string; key?: string; writerId?: string },
+    handler: (change: PluginUserStateChange) => void,
+  ): () => void;
+}
 
 /** Payload delivered to a `host.storage.subscribe` handler. */
 export type PluginUserStateChange = PluginSDK.PluginUserStateChange;
@@ -390,10 +498,91 @@ export type PluginHostApi = PluginSDK.PluginHostApi & {
   jsx: typeof ReactType.createElement;
   /** Legacy internal-store bridge. External plugins must use `host.context`. */
   store: Pick<StoreApi<AppState>, "getState" | "setState" | "subscribe">;
+  api: {
+    /** fetch scoped to `/api/plugins/{id}/...` via the kandev reverse proxy. */
+    fetch(path: string, init?: RequestInit): Promise<Response>;
+    /**
+     * Backend API origin ("" when the SPA and API share an origin). Lets a
+     * plugin reach first-party kandev REST endpoints without re-deriving the
+     * split-origin dev/desktop base URL from window internals.
+     */
+    baseUrl: string;
+  };
+  /**
+   * Curated subset of `@kandev/ui` components (Button, Card, Badge, Input,
+   * Tabs, Dialog, Table, Popover, Progress, Accordion, Chart, ...) plus
+   * first-party app UI (PageTopbar, TaskCreateDialog, RichTextEditor,
+   * RichTextReadOnly). See `lib/plugins/host-api.ts` for the full list.
+   */
+  ui: Record<string, unknown>;
+  /**
+   * The resolved light/dark theme, read live on every access — a plugin's
+   * `host` object is built once, so this must not be captured into a local
+   * variable that outlives a render if you want it to stay current.
+   * Components that read it during render re-read it on every re-render;
+   * anything that paints imperatively (canvas, inline SVG colors) should pair
+   * it with `onThemeChange`.
+   */
+  readonly theme: "light" | "dark";
+  /**
+   * Subscribes to light/dark changes — the settings picker, its live preview,
+   * and an OS `prefers-color-scheme` flip while the app is on "system".
+   * Returns an unsubscribe function; call it on teardown (component unmount,
+   * `KandevPlugin.destroy`) or the listener outlives the surface that owns it.
+   */
+  onThemeChange(listener: (theme: "light" | "dark") => void): () => void;
+  /** Soft SPA navigation (history push/replace + re-render), same as the app's router. */
+  navigate(href: string, options?: { replace?: boolean }): void;
+  /**
+   * Imperatively opens a modal window rendered by the host's `<PluginModalHost/>`
+   * (mounted once at the app root). Independent of keybindings — a keybinding
+   * handler may call it, but it works from any plugin code path.
+   */
+  openModal(options: PluginModalOptions): PluginModalHandle;
+  /**
+   * Sonner's imperative `toast`, scoped to this plugin. The host mounts the
+   * single `<Toaster/>`, so there is nothing to render:
+   * `host.toast.success(...)` / `.error(...)` / `.warning(...)` work from any
+   * plugin code path, including inside a modal.
+   *
+   * `.error` additionally logs to the browser console as
+   * `[plugins] toast.error from "<pluginId>":`. It does **not** file a report
+   * into kandev's frontend error log — that log is for kandev's own
+   * application errors, and a plugin toasting an expected condition (a failed
+   * poll, say) would otherwise record one every cycle.
+   */
+  toast: PluginToastApi;
+  /** Shared helpers — plain functions, not components. See `PluginUtilsApi`. */
+  utils: PluginUtilsApi;
+  /** Authenticated, per-user key/value storage. See `PluginStorageApi`. */
+  storage: PluginStorageApi;
+  /**
+   * Drives the selection for this plugin's own `registerTaskFilter`
+   * registrations (typically paired with `hidden: true`, when the plugin
+   * renders its own filter UI instead of the built-in dropdown section).
+   * Namespaced internally to `${pluginId}:${id}` so a plugin can only ever
+   * read/write its own filters' selections, never another plugin's.
+   */
+  taskFilters: PluginTaskFilterSelectionApi;
   /** Concrete Kandev components backing the SDK's curated structural UI map. */
-  ui: PluginUIApi & Record<string, unknown>;
   useResponsiveBreakpoint: typeof useResponsiveBreakpoint;
+  useSettingsSaveContributor: PluginSDK.PluginHostApi["useSettingsSaveContributor"];
+  setIntegrationEnabled: PluginSDK.PluginHostApi["setIntegrationEnabled"];
 };
+
+/**
+ * `host.taskFilters` — lets a plugin's own UI (e.g. a top-bar dropdown) set
+ * and observe the selection for its `registerTaskFilter` registrations,
+ * the same selection state the built-in display/filter dropdown reads.
+ */
+export interface PluginTaskFilterSelectionApi {
+  /** Current selected option values for this plugin's filter `id`, or `[]` if unset. */
+  getSelection(id: string): string[];
+  /** Empty `values` clears the selection (equivalent to "All"). */
+  setSelection(id: string, values: string[]): void;
+  /** Notified when any plugin task-filter selection changes; read this plugin's ids to detect relevant updates. */
+  subscribe(listener: () => void): () => void;
+}
 
 /**
  * `host.toast` — sonner's `toast`. Typed structurally rather than as
@@ -419,7 +608,9 @@ export type PluginUtilsApi = PluginSDK.PluginHostApi["utils"];
  * registrations are tracked internally so the host can bulk-revoke them on
  * disable (see `apps/web/lib/plugins/registry.ts`).
  */
-export type PluginRegistry = PluginSDK.PluginRegistry;
+export type PluginRegistry = Omit<PluginSDK.PluginRegistry, "registerTaskFilter"> & {
+  registerTaskFilter(registration: TaskFilterRegistration): void;
+};
 
 /** Shape every plugin bundle registers via `window.registerKandevPlugin(id, plugin)`. */
 export interface KandevPlugin {

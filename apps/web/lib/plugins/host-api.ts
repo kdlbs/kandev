@@ -144,6 +144,7 @@ import { reviewItemId } from "@/components/task/review-selection";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { pluginModalManager } from "./modal-manager";
 import { pluginRegistry } from "./registry";
+import { pluginTaskFilterStore } from "./task-filter-selections";
 import { readResolvedTheme, subscribeToThemeChanges } from "./theme";
 import { composeWriterId, subscribeToUserStateChanges } from "./user-state-sync";
 import { buildPluginContextApi } from "./plugin-context-api";
@@ -164,6 +165,8 @@ import {
   type PluginStorageApi,
   type PluginStorageEntry,
   type PluginStorageScope,
+  type PluginStorageScopeEntry,
+  type PluginTaskFilterSelectionApi,
 } from "./types";
 
 const LazyChangeRequestDetail = React.lazy(async () => {
@@ -521,9 +524,27 @@ export function buildHostApi(pluginId: string, storeApi: StoreApi<AppState>): Pl
     toast: createPluginToast(pluginId),
     utils: PLUGIN_UTILS,
     storage: buildStorageApi(pluginId),
+    taskFilters: buildTaskFiltersApi(pluginId),
     useSettingsSaveContributor: createPluginSettingsSaveContributorHook(pluginId),
     setIntegrationEnabled: (integrationId, workspaceId, enabled) =>
       pluginRegistry.setIntegrationEnabled(pluginId, integrationId, workspaceId, enabled),
+  };
+}
+
+/**
+ * Builds `host.taskFilters` (`PluginTaskFilterSelectionApi`), namespacing
+ * every id to `${pluginId}:${id}` against the shared `pluginTaskFilterStore`
+ * — the same key `pluginTaskFilterRegistrationKey` derives from a
+ * registration's `pluginId`/`id`, so a plugin driving its own filter UI
+ * reads/writes the exact selection the built-in dropdown and board
+ * filtering pipeline already use, and can never reach another plugin's.
+ */
+function buildTaskFiltersApi(pluginId: string): PluginTaskFilterSelectionApi {
+  const filterKey = (id: string) => `${pluginId}:${id}`;
+  return {
+    getSelection: (id) => pluginTaskFilterStore.getSelection(filterKey(id)),
+    setSelection: (id, values) => pluginTaskFilterStore.setFilterSelection(filterKey(id), values),
+    subscribe: (listener) => pluginTaskFilterStore.subscribe(listener),
   };
 }
 
@@ -626,6 +647,17 @@ function buildStorageApi(pluginId: string): PluginStorageApi {
       if (!res.ok) throw new Error(`plugin storage: list failed with status ${res.status}`);
       const body = (await res.json()) as { entries: PluginStorageEntry[] };
       return body.entries;
+    },
+    async listByKey(scope, key, options) {
+      const params = new URLSearchParams({ key });
+      if (options?.limit !== undefined) params.set("limit", String(options.limit));
+      const res = await fetchPluginApi(
+        pluginId,
+        `/user-state/${encodeURIComponent(scope)}?${params.toString()}`,
+      );
+      if (!res.ok) throw new Error(`plugin storage: listByKey failed with status ${res.status}`);
+      const body = (await res.json()) as { entries: PluginStorageScopeEntry[]; truncated: boolean };
+      return { entries: body.entries, truncated: body.truncated };
     },
     subscribe: (filter, handler) =>
       subscribeToUserStateChanges(pluginId, TAB_WRITER_ID, filter, handler),

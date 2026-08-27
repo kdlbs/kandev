@@ -1,56 +1,18 @@
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 import { pluginRegistry, pluginTaskFilterRegistrationKey } from "@/lib/plugins/registry";
+import {
+  pluginTaskFilterStore,
+  resetPluginTaskFilterSelectionsForTests,
+  type PluginTaskFilterSelections,
+} from "@/lib/plugins/task-filter-selections";
 import type { PluginTaskFilterContext } from "@/lib/plugins/types";
 
-/** Selected option values, keyed by owning plugin plus `TaskFilterRegistration.id`. */
-export type PluginTaskFilterSelections = Record<string, string[]>;
-
-/**
- * Singleton, in-memory selection store for plugin-registered task filters
- * (`registerTaskFilter`) — shared across every `usePluginTaskFilters()` call
- * site in the app (the kanban display dropdown and the board's filtering
- * pipeline are separate components, so a plain `useState` local to one of
- * them would not be visible to the other). Never persisted to backend user
- * settings, unlike the Workflow/Repository filters.
- */
-class PluginTaskFilterStore {
-  private selections: PluginTaskFilterSelections = {};
-  private listeners = new Set<() => void>();
-
-  subscribe = (listener: () => void): (() => void) => {
-    this.listeners.add(listener);
-    return () => {
-      this.listeners.delete(listener);
-    };
-  };
-
-  getSelections = (): PluginTaskFilterSelections => this.selections;
-
-  setFilterSelection(filterKey: string, values: string[]): void {
-    if (values.length === 0) {
-      if (!(filterKey in this.selections)) return;
-      const next = { ...this.selections };
-      delete next[filterKey];
-      this.selections = next;
-    } else {
-      this.selections = { ...this.selections, [filterKey]: values };
-    }
-    this.notify();
-  }
-
-  private notify(): void {
-    this.listeners.forEach((listener) => listener());
-  }
-}
-
-const pluginTaskFilterStore = new PluginTaskFilterStore();
-
-/** Test-only: clears all selection state so specs don't leak into each other. */
-export function resetPluginTaskFilterSelectionsForTests(): void {
-  for (const filterId of Object.keys(pluginTaskFilterStore.getSelections())) {
-    pluginTaskFilterStore.setFilterSelection(filterId, []);
-  }
-}
+// The store singleton and its selection type live in lib/plugins/ so
+// host-api.ts (host.taskFilters) can import them without a
+// hooks/ -> lib/plugins/ -> hooks/ cycle; re-exported here so this hook's
+// public surface is unchanged for existing callers.
+export type { PluginTaskFilterSelections };
+export { resetPluginTaskFilterSelectionsForTests };
 
 /**
  * Reactive hook over the shared `pluginTaskFilterStore` plus the currently
@@ -71,6 +33,12 @@ export function usePluginTaskFilters() {
   );
 
   const filters = useMemo(() => pluginRegistry.getTaskFilters(), [registryVersion]);
+  // `hidden` filters (a plugin driving its own dedicated UI, e.g. a top-bar
+  // dropdown, instead of the built-in display/filter section) stay in
+  // `filters` for gating purposes — taskMatchesPluginFilters below must keep
+  // evaluating every registered filter — but drop out of what the built-in
+  // KanbanDisplayDropdown renders.
+  const visibleFilters = useMemo(() => filters.filter((filter) => !filter.hidden), [filters]);
 
   const setFilterSelection = useCallback((filterKey: string, values: string[]) => {
     pluginTaskFilterStore.setFilterSelection(filterKey, values);
@@ -100,5 +68,5 @@ export function usePluginTaskFilters() {
     [filters, selections],
   );
 
-  return { filters, selections, setFilterSelection, taskMatchesPluginFilters };
+  return { filters, visibleFilters, selections, setFilterSelection, taskMatchesPluginFilters };
 }

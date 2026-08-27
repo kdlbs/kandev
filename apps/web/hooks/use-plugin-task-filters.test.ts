@@ -29,6 +29,49 @@ describe("usePluginTaskFilters", () => {
     expect(result.current.filters[0]).toMatchObject({ id: "tags", pluginId: PLUGIN_ID });
   });
 
+  it("visibleFilters excludes hidden filters, but filters retains them for gating", () => {
+    pluginRegistry.forPlugin(PLUGIN_ID).registerTaskFilter({
+      id: "tags",
+      label: "Tags",
+      hidden: true,
+      getOptions: () => [{ value: "bug", label: "Bug" }],
+      matches: () => true,
+    });
+
+    const { result } = renderHook(() => usePluginTaskFilters());
+
+    expect(result.current.filters).toHaveLength(1);
+    expect(result.current.visibleFilters).toHaveLength(0);
+  });
+
+  it("visibleFilters includes a filter with hidden left unset or false", () => {
+    pluginRegistry.forPlugin(PLUGIN_ID).registerTaskFilter({
+      id: "tags",
+      label: "Tags",
+      getOptions: () => [{ value: "bug", label: "Bug" }],
+      matches: () => true,
+    });
+
+    const { result } = renderHook(() => usePluginTaskFilters());
+
+    expect(result.current.visibleFilters).toHaveLength(1);
+  });
+
+  it("taskMatchesPluginFilters still gates on a hidden filter's selection", () => {
+    pluginRegistry.forPlugin(PLUGIN_ID).registerTaskFilter({
+      id: "tags",
+      label: "Tags",
+      hidden: true,
+      getOptions: () => [{ value: "bug", label: "Bug" }],
+      matches: (_context, selected) => selected.includes("bug"),
+    });
+
+    const { result } = renderHook(() => usePluginTaskFilters());
+    act(() => result.current.setFilterSelection(FILTER_KEY, ["feature"]));
+
+    expect(result.current.taskMatchesPluginFilters({ taskId: "task-1" })).toBe(false);
+  });
+
   it("reacts when plugins register and unregister task filters after mount", () => {
     const { result } = renderHook(() => usePluginTaskFilters());
 
