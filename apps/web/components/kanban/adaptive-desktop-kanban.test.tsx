@@ -12,6 +12,12 @@ function renderBoard() {
       renderColumn={() => (
         <div>
           <div data-testid={blankColumnSpaceTestId} />
+          <div role="list">
+            <div data-testid="blank-list-space" />
+          </div>
+          <div tabIndex={-1}>
+            <div data-testid="blank-focus-container-space" />
+          </div>
           <button type="button" data-testid="card-action">
             <svg data-testid="card-action-icon" />
           </button>
@@ -69,7 +75,7 @@ describe("AdaptiveDesktopKanban mouse panning", () => {
     fireEvent.mouseMove(window, { buttons: 2, clientX: 100 });
     expect(window.scrollLeft).toBe(400);
 
-    fireEvent.mouseDown(screen.getByTestId(blankColumnSpaceTestId), { button: 0, clientX: 200 });
+    fireEvent.mouseDown(screen.getByTestId("blank-list-space"), { button: 0, clientX: 200 });
     fireEvent.mouseMove(window, { buttons: 1, clientX: 196 });
     expect(window.scrollLeft).toBe(400);
   });
@@ -89,6 +95,22 @@ describe("AdaptiveDesktopKanban mouse panning", () => {
     fireEvent.mouseDown(screen.getByTestId("draggable-card"), { button: 0, clientX: 200 });
     fireEvent.mouseMove(window, { buttons: 1, clientX: 100 });
     expect(window.scrollLeft).toBe(400);
+  });
+
+  it("@covers AC-1 allows panning through structural and programmatic-focus wrappers", () => {
+    const window = renderBoard();
+    window.scrollLeft = 400;
+
+    fireEvent.mouseDown(screen.getByTestId(blankColumnSpaceTestId), { button: 0, clientX: 200 });
+    fireEvent.mouseMove(window, { buttons: 1, clientX: 100 });
+    expect(window.scrollLeft).toBe(500);
+
+    fireEvent.mouseDown(screen.getByTestId("blank-focus-container-space"), {
+      button: 0,
+      clientX: 200,
+    });
+    fireEvent.mouseMove(window, { buttons: 1, clientX: 100 });
+    expect(window.scrollLeft).toBe(600);
   });
 
   it("@covers AC-3 AC-4 cancels on mouse-up and does not resume after leaving", () => {

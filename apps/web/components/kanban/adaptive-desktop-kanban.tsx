@@ -24,8 +24,8 @@ const INTERACTIVE_TARGET_SELECTOR = [
   "[contenteditable]",
   "[draggable='true']",
   "[data-kanban-card]",
-  "[role]",
-  "[tabindex]",
+  "[role='button'], [role='link'], [role='checkbox'], [role='radio'], [role='menuitem'], [role='option'], [role='switch'], [role='tab'], [role='combobox'], [role='textbox'], [role='gridcell'], [role='treeitem']",
+  "[tabindex]:not([tabindex='-1'])",
 ].join(", ");
 
 type PanStart = {
