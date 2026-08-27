@@ -11,19 +11,16 @@ owners:
 
 ## Purpose
 
-The UI system owns presentation behavior for the web application, including
-responsive desktop and mobile surfaces.
+The UI system owns web presentation behavior for desktop and mobile surfaces.
 
 ## Ownership
 
-This system owns navigation, settings presentation, boards, task and review
-surfaces, walkthroughs, chat controls, visual feedback, and responsive
-interaction contracts that do not own backend state.
+This system owns navigation, settings, boards, task/review surfaces,
+walkthroughs, chat controls, visual feedback, and responsive interaction
+contracts without backend-state ownership.
 
-A control is not UI-owned only because it appears in the web application. A
-provider or task system keeps ownership when the control configures or displays
-that system's state. The UI system owns only the independent presentation
-contract that other capabilities can reuse.
+Controls that configure or display provider/task state remain owned by that
+system. The UI system owns only independent, reusable presentation contracts.
 
 ## Exclusions
 
@@ -181,8 +178,8 @@ contract that other capabilities can reuse.
 
 ## Migration record
 
-Migration remains in progress while legacy source detail is extracted from the
-canonical requirement and system-design documents above.
+Legacy source detail is still moving to the canonical requirement and
+system-design documents above.
 
 ## Related systems
 
