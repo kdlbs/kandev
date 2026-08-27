@@ -79,6 +79,25 @@ func TestAmbientGitHubEnvCoversEveryPackageEnvRead(t *testing.T) {
 	}
 }
 
+func TestEnvReadCallsResolvesOSImportAlias(t *testing.T) {
+	fileSet := token.NewFileSet()
+	file, err := parser.ParseFile(fileSet, "aliased.go", `package github
+
+import stdos "os"
+
+func readToken() string {
+	return stdos.Getenv("GH_TOKEN")
+}
+`, 0)
+	if err != nil {
+		t.Fatalf("parse aliased source: %v", err)
+	}
+
+	if got := len(envReadCalls(file)); got != 1 {
+		t.Fatalf("envReadCalls() found %d calls, want 1", got)
+	}
+}
+
 // parseNonTestSources parses every production file of the package, which is
 // the code whose environment reads the scrub has to keep up with.
 func parseNonTestSources(t *testing.T, fileSet *token.FileSet) []*ast.File {
@@ -133,8 +152,26 @@ func stringConstants(files []*ast.File) map[string]string {
 	return constants
 }
 
+func osPackageName(file *ast.File) (string, bool) {
+	for _, spec := range file.Imports {
+		path, err := strconv.Unquote(spec.Path.Value)
+		if err != nil || path != "os" {
+			continue
+		}
+		if spec.Name != nil {
+			return spec.Name.Name, spec.Name.Name != "_" && spec.Name.Name != "."
+		}
+		return "os", true
+	}
+	return "", false
+}
+
 // envReadCalls collects every os.Getenv / os.LookupEnv call in a file.
 func envReadCalls(file *ast.File) []*ast.CallExpr {
+	osName, ok := osPackageName(file)
+	if !ok {
+		return nil
+	}
 	var calls []*ast.CallExpr
 	ast.Inspect(file, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
@@ -146,7 +183,7 @@ func envReadCalls(file *ast.File) []*ast.CallExpr {
 			return true
 		}
 		pkgIdent, ok := selector.X.(*ast.Ident)
-		if !ok || pkgIdent.Name != "os" {
+		if !ok || pkgIdent.Name != osName {
 			return true
 		}
 		if selector.Sel.Name == "Getenv" || selector.Sel.Name == "LookupEnv" {

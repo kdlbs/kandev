@@ -380,9 +380,8 @@ jobs:
       - name: Run GitHub-facing package under a poisoned ambient environment
         env:
           GH_TOKEN: ghp-ambient-ci-not-a-real-token
-          GITHUB_TOKEN: ghp-ambient-ci-not-a-real-token-legacy
           KANDEV_MOCK_GITHUB: "true"
-        run: go test -race ./internal/github/...
+        run: GITHUB_TOKEN=ghp-ambient-ci-not-a-real-token-legacy go test -race ./internal/github/...
 
   # The required check. Runs on every event, including the ones where every job
   # above is correctly skipped, so the merge queue always has a conclusion to
