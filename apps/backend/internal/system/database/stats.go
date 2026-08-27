@@ -35,12 +35,13 @@ const (
 // exists. Serialising a zero time.Time as "0001-01-01T00:00:00Z" would
 // defeat the frontend's "Never" fallback in database-stats-card.tsx.
 type Stats struct {
-	Driver        string     `json:"driver"`
-	Path          string     `json:"path"`
-	SizeBytes     int64      `json:"size_bytes"`
-	WALSizeBytes  int64      `json:"wal_size_bytes"`
-	SchemaVersion string     `json:"schema_version"`
-	LastBackupAt  *time.Time `json:"last_backup_at"`
+	Driver          string     `json:"driver"`
+	Path            string     `json:"path"`
+	BackupDirectory string     `json:"backup_directory"`
+	SizeBytes       int64      `json:"size_bytes"`
+	WALSizeBytes    int64      `json:"wal_size_bytes"`
+	SchemaVersion   string     `json:"schema_version"`
+	LastBackupAt    *time.Time `json:"last_backup_at"`
 }
 
 // ResetDirs lists the on-disk directories factory-reset wipes. The Service
@@ -98,6 +99,7 @@ func (s *Service) Stats() (Stats, error) {
 	out := Stats{Driver: driver}
 	if driver == databaseDriverSQLite {
 		out.Path = s.databasePath
+		out.BackupDirectory = s.backupsDir()
 	}
 
 	if s.pool != nil {

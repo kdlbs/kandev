@@ -24,6 +24,44 @@ test.describe("System Backups page", () => {
     await deleteAllManualBackups(apiClient);
   });
 
+  test("shows the resolved backup directory from database stats", async ({
+    testPage,
+    apiClient,
+  }) => {
+    const response = await apiClient.rawRequest("GET", "/api/v1/system/database");
+    const database = (await response.json()) as { backup_directory?: string };
+    const backupDirectory = database.backup_directory;
+    expect(backupDirectory).toBeTruthy();
+
+    await testPage.goto("/settings/system/data-storage");
+    await expect(
+      testPage.getByText(`VACUUM INTO snapshots stored under ${backupDirectory}.`),
+    ).toBeVisible();
+  });
+
+  test("explains each backup row action on hover", async ({ testPage }) => {
+    test.setTimeout(60_000);
+
+    await testPage.goto("/settings/system/data-storage");
+    await testPage.getByTestId("system-backups-create").click();
+    await expect(testPage.getByTestId("system-backups-table")).toBeVisible({ timeout: 15_000 });
+
+    const row = testPage.locator('[data-testid="system-backups-row"]').first();
+    const name = await row.getAttribute("data-name");
+    expect(name).toBeTruthy();
+    const tooltip = testPage.locator('[data-slot="tooltip-content"]:not([data-state="closed"])');
+    for (const [testId, operation] of [
+      ["system-backups-download", "Download"],
+      ["system-backups-restore", "Restore"],
+      ["system-backups-delete", "Delete"],
+    ] as const) {
+      const action = row.getByTestId(testId);
+      await expect(action).toHaveAttribute("aria-label", `${operation} ${name}`);
+      await action.hover();
+      await expect(tooltip).toContainText(`${operation} ${name}`);
+    }
+  });
+
   test("create a manual backup, see it in the table, then delete it back to the empty state", async ({
     testPage,
   }) => {
