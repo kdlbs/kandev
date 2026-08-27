@@ -106,10 +106,19 @@ This design preserves the technical source detail for `REQ-INTEGRATIONS-GITHUB-A
   **THEN** it explains that Git calls Kandev's `agentctl` credential helper for attached GitHub
   HTTPS repositories, the helper redeems a scoped broker lease on demand, `gh` uses a broker-aware
   shim, and credentials are not written into the repository.
-- **GIVEN** the host `gh` clone protocol is SSH and a Kandev-managed GitHub checkout currently has
-  an HTTPS `origin`, **WHEN** the workspace selects executor inheritance and launches a Local or
-  Worktree task, **THEN** Kandev changes that managed checkout's `origin` to the canonical SSH URL
-  before task preparation so matching Git conditional includes apply.
+- **GIVEN** host-specific `github.com` `gh` configuration selects SSH while global configuration
+  selects HTTPS. The Kandev-managed GitHub checkout has an HTTPS `origin`. **WHEN** the workspace
+  uses executor inheritance and launches or resumes a Local or Worktree task. **THEN** Kandev uses
+  the host-specific value. Kandev changes the managed checkout to canonical SSH before task
+  preparation, so matching Git conditional includes apply.
+- **GIVEN** host-specific `github.com` `gh` clone-protocol configuration is unavailable. **WHEN**
+  Local or Worktree preparation constructs an executor-inherited managed-checkout origin. **THEN**
+  Kandev uses the supported global protocol. Kandev defaults to SSH when neither scope returns
+  `ssh` or `https`.
+- **GIVEN** a Local or Worktree task previously launched with one host `gh` clone protocol.
+  **WHEN** the host-specific or global protocol changes and the task launches or resumes without a
+  Kandev restart. **THEN** origin reconciliation uses the new effective protocol, not the earlier
+  process value.
 - **GIVEN** a Kandev-managed GitHub checkout currently has an SSH `origin`, **WHEN** the workspace
   selects managed credentials and launches a Local or Worktree task, **THEN** Kandev changes that
   managed checkout's `origin` to canonical HTTPS before task preparation.

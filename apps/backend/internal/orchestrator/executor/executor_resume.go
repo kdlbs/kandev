@@ -303,7 +303,7 @@ func (e *Executor) refreshManagedRepositoryForSession(
 	if cloneURL == "" {
 		var err error
 		cloneURL, err = e.repoCloner.BuildCloneURLWithHost(
-			repo.Provider, repo.ProviderHost, repo.ProviderOwner, repo.ProviderName,
+			ctx, repo.Provider, repo.ProviderHost, repo.ProviderOwner, repo.ProviderName,
 		)
 		if err != nil || cloneURL == "" {
 			return ErrNoCloneURL
@@ -415,7 +415,7 @@ func (e *Executor) ensureRepoClonedForSession(
 	if cloneURL == "" {
 		var urlErr error
 		cloneURL, urlErr = e.repoCloner.BuildCloneURLWithHost(
-			repo.Provider, repo.ProviderHost, repo.ProviderOwner, repo.ProviderName,
+			ctx, repo.Provider, repo.ProviderHost, repo.ProviderOwner, repo.ProviderName,
 		)
 		if urlErr != nil || cloneURL == "" {
 			return "", ErrNoCloneURL
@@ -473,7 +473,7 @@ func (e *Executor) reconcileGitHubCheckoutOrigin(
 		}
 		policy = resolved
 	}
-	originURL, err := gitHubCheckoutOriginURL(repo, policy, e.repoCloner)
+	originURL, err := gitHubCheckoutOriginURL(ctx, repo, policy, e.repoCloner)
 	if err != nil {
 		return err
 	}
@@ -493,11 +493,11 @@ func isGitHubRepository(repo *models.Repository) bool {
 }
 
 func gitHubCheckoutOriginURL(
-	repo *models.Repository, policy TaskGitCredentialPolicy, cloner RepoCloner,
+	ctx context.Context, repo *models.Repository, policy TaskGitCredentialPolicy, cloner RepoCloner,
 ) (string, error) {
 	if policy.Mode == taskGitCredentialsModeExecutor {
 		originURL, err := cloner.BuildCloneURLWithHost(
-			repo.Provider, repo.ProviderHost, repo.ProviderOwner, repo.ProviderName,
+			ctx, repo.Provider, repo.ProviderHost, repo.ProviderOwner, repo.ProviderName,
 		)
 		if err != nil {
 			return "", fmt.Errorf("build executor GitHub checkout origin: %w", err)

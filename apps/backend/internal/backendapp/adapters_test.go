@@ -535,6 +535,67 @@ func TestResolveForReviewRedetectsStoredMasterAfterClonePath(t *testing.T) {
 	}
 }
 
+func TestRepositoryResolverAdapterUsesCurrentGitProtocol(t *testing.T) {
+	harness := newBootStateTestHarness(t)
+	ctx := context.Background()
+	workspace, err := harness.taskSvc.CreateWorkspace(ctx, &taskservice.CreateWorkspaceRequest{
+		Name: "Workspace",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	paths := []string{filepath.Join(t.TempDir(), "one"), filepath.Join(t.TempDir(), "two")}
+	for _, path := range paths {
+		runGit(t, "", "init", "--quiet", path)
+	}
+	cloner := &recordingReviewRepositoryCloner{protocol: repoclone.ProtocolSSH, paths: paths}
+	adapter := &repositoryResolverAdapter{
+		cloner:  cloner,
+		taskSvc: harness.taskSvc,
+		logger:  newTestLogger(),
+	}
+
+	if _, _, err := adapter.ResolveForReview(ctx, workspace.ID, "github", "owner", "one", ""); err != nil {
+		t.Fatalf("first ResolveForReview: %v", err)
+	}
+	cloner.protocol = repoclone.ProtocolHTTPS
+	if _, _, err := adapter.ResolveForReview(ctx, workspace.ID, "github", "owner", "two", ""); err != nil {
+		t.Fatalf("second ResolveForReview: %v", err)
+	}
+
+	want := []string{
+		"git@github.com:owner/one.git",
+		"https://github.com/owner/two.git",
+	}
+	if !reflect.DeepEqual(cloner.cloneURLs, want) {
+		t.Fatalf("clone URLs = %v, want %v", cloner.cloneURLs, want)
+	}
+}
+
+type recordingReviewRepositoryCloner struct {
+	protocol  string
+	paths     []string
+	cloneURLs []string
+}
+
+func (c *recordingReviewRepositoryCloner) EnsureWorkspaceCloned(
+	_ context.Context, _, _, _, _, name string,
+) (string, error) {
+	path := c.paths[0]
+	c.paths = c.paths[1:]
+	return path, nil
+}
+
+func (c *recordingReviewRepositoryCloner) BuildCloneURLWithHost(
+	_ context.Context, provider, host, owner, name string,
+) (string, error) {
+	cloneURL, err := repoclone.CloneURLWithHost(provider, host, owner, name, c.protocol)
+	if err == nil {
+		c.cloneURLs = append(c.cloneURLs, cloneURL)
+	}
+	return cloneURL, err
+}
+
 type staticRepoCloneCredential struct{}
 
 func (staticRepoCloneCredential) ResolveGitCredential(
