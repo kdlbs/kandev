@@ -102,6 +102,16 @@ async function expectTopbarReadyState(
 }
 
 test.describe("PR status badge", () => {
+  // seedBadgeTest selects a temporary workflow and changes preview behavior.
+  // Restore the fixture defaults so those changes do not leak between tests.
+  test.afterEach(async ({ apiClient, seedData }) => {
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: seedData.workflowId,
+      enable_preview_on_click: false,
+    });
+  });
+
   test("hydrates the sidebar PR badge on /tasks when details are off", async ({
     testPage,
     apiClient,
@@ -109,7 +119,7 @@ test.describe("PR status badge", () => {
   }) => {
     test.setTimeout(120_000);
     const baselineShowDetails =
-      (await apiClient.getUserSettings()).settings.tasks_list_show_details === true;
+      (await apiClient.getUserSettings()).settings.tasks_list_show_details ?? false;
 
     try {
       const { task } = await seedBadgeTest(
