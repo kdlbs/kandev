@@ -499,6 +499,10 @@ type Service struct {
 	// safe: both call sites guard on it. See SetSubagentContextRecorder.
 	subagentContexts SubagentContextRecorder
 
+	// agentProfileRecentUseRecorder optionally persists the task_create profile
+	// selected by a deferred launch after its agent starts successfully.
+	agentProfileRecentUseRecorder AgentProfileRecentUseRecorder
+
 	// Turn service for managing session turns
 	turnService TurnService
 

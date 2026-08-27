@@ -129,6 +129,10 @@ const (
 	// its own intents and keeps a WIP-only intent from being read as a chain
 	// step (and vice versa).
 	DeferredLaunchStartWhenUnblockedKey = "start_when_unblocked"
+	// DeferredLaunchUserIDKey preserves the authenticated creator so a
+	// deferred task-create launch can update that user's task_create history
+	// after the launch is promoted by the workflow engine.
+	DeferredLaunchUserIDKey = "user_id"
 	// MetaKeyWorkspacePath is the optional host folder for repo-less tasks
 	// (set by CreateTask, read by the orchestrator when building a session).
 	// Centralised here so the set/read sites can't drift apart.

@@ -12,6 +12,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	commonlogger "github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/user/models"
@@ -26,9 +27,10 @@ const (
 )
 
 type sqliteRepository struct {
-	db     *sqlx.DB // writer
-	ro     *sqlx.DB // reader
-	ownsDB bool
+	db              *sqlx.DB // writer
+	ro              *sqlx.DB // reader
+	ownsDB          bool
+	recentUseLogger *commonlogger.Logger
 }
 
 var _ Repository = (*sqliteRepository)(nil)
@@ -130,6 +132,13 @@ func (r *sqliteRepository) Close() error {
 		return nil
 	}
 	return r.db.Close()
+}
+
+// SetAgentProfileRecentUseLogger wires diagnostics for malformed persisted
+// profile-history rows. The user service installs its scoped logger during
+// construction; the repository remains usable without one in low-level tests.
+func (r *sqliteRepository) SetAgentProfileRecentUseLogger(log *commonlogger.Logger) {
+	r.recentUseLogger = log
 }
 
 const userColumns = "id, email, display_name, role, status, created_at, updated_at"

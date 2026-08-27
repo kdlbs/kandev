@@ -112,6 +112,11 @@ type SystemMetricsDisplaySettingsPatch struct {
 // and logger.
 func NewService(repo store.Repository, eventBus bus.EventBus, log *logger.Logger) *Service {
 	recentUseRepo, _ := repo.(store.AgentProfileRecentUseRepository)
+	if recentUseLogger, ok := repo.(interface {
+		SetAgentProfileRecentUseLogger(*logger.Logger)
+	}); ok {
+		recentUseLogger.SetAgentProfileRecentUseLogger(log.WithFields(zap.String("component", "user-store")))
+	}
 	return &Service{
 		repo:          repo,
 		recentUseRepo: recentUseRepo,

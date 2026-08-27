@@ -7,7 +7,10 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 
+	commonlogger "github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/user/models"
 )
 
@@ -141,6 +144,12 @@ func TestSQLiteRepositoryListSkipsMalformedContextRows(t *testing.T) {
 		t.Fatalf("create repository: %v", err)
 	}
 	t.Cleanup(func() { _ = cleanup() })
+	core, logs := observer.New(zap.WarnLevel)
+	log, err := commonlogger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("create observer logger: %v", err)
+	}
+	repo.SetAgentProfileRecentUseLogger(log)
 	ctx := context.Background()
 	if _, err := repo.UpsertAgentProfileRecentUse(ctx, &models.AgentProfileRecentUse{
 		UserID:     DefaultUserID,
@@ -166,6 +175,13 @@ func TestSQLiteRepositoryListSkipsMalformedContextRows(t *testing.T) {
 	}
 	if records[0].Context != models.AgentProfileRecentUseQuickChat || records[0].ProfileIDs[0] != "profile-valid" {
 		t.Fatalf("listed record = %+v, want valid quick-chat context", records[0])
+	}
+	entries := logs.FilterMessage("skipping malformed agent profile recent-use row").All()
+	if len(entries) != 1 {
+		t.Fatalf("malformed-row diagnostics = %d, want one", len(entries))
+	}
+	if got := entries[0].ContextMap()["context"]; got != string(models.AgentProfileRecentUseConfigChat) {
+		t.Fatalf("malformed-row context = %v, want %q", got, models.AgentProfileRecentUseConfigChat)
 	}
 }
 

@@ -223,7 +223,7 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		response.AgentExecutionID = launchResp.AgentExecutionID
 		response.AgentProfileID = launchResp.AgentProfileID
 		if launchResp.Success {
-			h.recordSuccessfulTaskCreateProfile(ctx, launchResp.AgentProfileID)
+			h.recordSuccessfulTaskCreateProfileAsync(ctx, launchResp.AgentProfileID)
 		}
 	}
 	h.recordTaskCreateLastUsed(ctx, httpCreateTaskRequest{

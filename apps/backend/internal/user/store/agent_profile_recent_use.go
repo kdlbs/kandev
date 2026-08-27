@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/kandev/kandev/internal/user/models"
 )
 
@@ -52,6 +54,16 @@ func (r *sqliteRepository) ListAgentProfileRecentUse(
 			// A malformed context row must not make the other independent
 			// selector histories unavailable. Skip only this row and let the
 			// cursor continue to the remaining contexts.
+			if r.recentUseLogger != nil {
+				fields := []zap.Field{
+					zap.String("user_id", userID),
+					zap.Error(scanErr),
+				}
+				if record != nil && record.Context != "" {
+					fields = append(fields, zap.String("context", string(record.Context)))
+				}
+				r.recentUseLogger.Warn("skipping malformed agent profile recent-use row", fields...)
+			}
 			continue
 		}
 		records = append(records, record)
@@ -147,13 +159,13 @@ func scanAgentProfileRecentUse(scanner interface{ Scan(dest ...any) error }) (*m
 	}
 	record.Context = models.AgentProfileRecentUseContext(contextValue)
 	if err := json.Unmarshal([]byte(profileIDsJSON), &record.ProfileIDs); err != nil {
-		return nil, fmt.Errorf("decode agent profile recent-use: %w", err)
+		return record, fmt.Errorf("decode agent profile recent-use: %w", err)
 	}
 	if record.ProfileIDs == nil {
 		record.ProfileIDs = []string{}
 	}
 	if err := validateAgentProfileRecentUseRecord(record); err != nil {
-		return nil, err
+		return record, err
 	}
 	return record, nil
 }

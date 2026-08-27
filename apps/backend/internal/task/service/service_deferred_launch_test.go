@@ -5,13 +5,42 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/stretchr/testify/require"
 )
 
 const deferredLaunchTaskID = "task-deferred"
+
+func TestCreateTaskPersistsDeferredLaunchOriginUserID(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := authn.WithIdentity(context.Background(), authn.Identity{UserID: "user-created"})
+
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-origin", Name: "Origin"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-origin", WorkspaceID: "ws-origin", Name: "flow"}))
+
+	result, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-origin",
+		WorkflowID:  "wf-origin",
+		Title:       "Deferred task",
+		StartAgent:  true,
+		DeferredLaunch: map[string]interface{}{
+			"intent":           "start",
+			"agent_profile_id": "profile-1",
+			"prompt":           "run this later",
+		},
+	})
+	require.NoError(t, err)
+
+	launch, ok := result.Task.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
+	require.True(t, ok, "created task must retain its deferred launch intent")
+	if got := launch[models.DeferredLaunchUserIDKey]; got != "user-created" {
+		t.Fatalf("deferred launch user_id = %v, want user-created", got)
+	}
+}
 
 // seedDeferredLaunchTask creates a task carrying a pending start-when-unblocked
 // deferred launch, matching what create_task_kandev with blocked_by leaves.

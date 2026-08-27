@@ -1369,6 +1369,7 @@ func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eve
 		AgentProfileID    string                 `json:"agent_profile_id"`
 		ExecutorID        string                 `json:"executor_id"`
 		ExecutorProfileID string                 `json:"executor_profile_id"`
+		UserID            string                 `json:"user_id"`
 		Prompt            string                 `json:"prompt"`
 		PlanMode          bool                   `json:"plan_mode"`
 		Attachments       []v1.MessageAttachment `json:"attachments"`
@@ -1387,13 +1388,16 @@ func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eve
 		if !claimOK {
 			return
 		}
-		_, launchErr := s.LaunchSession(launchCtx, &LaunchSessionRequest{
+		launchResp, launchErr := s.LaunchSession(launchCtx, &LaunchSessionRequest{
 			TaskID: task.ID, Intent: launchIntent, AgentProfileID: intent.AgentProfileID,
 			ExecutorID: intent.ExecutorID, ExecutorProfileID: intent.ExecutorProfileID,
 			WorkflowStepID: task.WorkflowStepID, Prompt: intent.Prompt,
 			PlanMode: intent.PlanMode, Attachments: intent.Attachments, LaunchWorkspace: true,
 		})
-		if launchErr != nil {
+		if launchErr != nil || launchResp == nil || !launchResp.Success {
+			if launchErr == nil {
+				launchErr = errors.New("deferred launch returned an unsuccessful response")
+			}
 			s.logger.Error(eventName+": failed to launch deferred task", zap.String("task_id", task.ID), zap.Error(launchErr))
 			s.restoreDeferredLaunch(launchCtx, task.ID, raw, eventName, metadataClaimed)
 			if restoreQueuePromotion {
@@ -1401,6 +1405,7 @@ func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eve
 			}
 			return
 		}
+		s.recordSuccessfulDeferredTaskProfileAsync(launchCtx, intent.UserID, launchResp.AgentProfileID)
 		delete(task.Metadata, models.MetaKeyDeferredLaunch)
 		if metadataClaimed {
 			task.UpdatedAt = time.Now().UTC()
