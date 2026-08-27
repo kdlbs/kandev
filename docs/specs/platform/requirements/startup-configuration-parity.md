@@ -28,6 +28,17 @@ Kandev has two startup configuration paths. Some settings use typed YAML and env
 - **AC-PLATFORM-STARTUP-CONFIGURATION-PARITY-001.7:** **GIVEN** `database.path` is set in the selected file, **WHEN** the launcher starts the backend, **THEN** the backend uses that path.
 - **AC-PLATFORM-STARTUP-CONFIGURATION-PARITY-001.8:** **GIVEN** a stable startup secret is set in YAML, **WHEN** Kandev starts, **THEN** the owning component receives it and logs do not expose it.
 
+### REQ-PLATFORM-STARTUP-CONFIGURATION-PARITY-002: Database selection continuity
+
+**Intent:** Preserve an installation's existing SQLite data when startup moves from a legacy default location to the current default location, without overriding an operator's explicit database selection.
+
+#### Acceptance criteria
+
+- **AC-PLATFORM-STARTUP-CONFIGURATION-PARITY-002.1:** **GIVEN** no database path is explicitly configured, the current default database is absent, and a valid database exists at the legacy default location, **WHEN** Kandev starts, **THEN** it starts with the legacy database's data instead of initializing an empty database.
+- **AC-PLATFORM-STARTUP-CONFIGURATION-PARITY-002.2:** **GIVEN** the current default database has no task history and the legacy default database has task history, **WHEN** Kandev cannot prove which database is authoritative, **THEN** startup stops before modifying either database and identifies both candidates for recovery.
+- **AC-PLATFORM-STARTUP-CONFIGURATION-PARITY-002.3:** **GIVEN** an operator explicitly configures `database.path` or `KANDEV_DATABASE_PATH`, **WHEN** Kandev starts, **THEN** it uses only that database and does not substitute a default-location candidate.
+- **AC-PLATFORM-STARTUP-CONFIGURATION-PARITY-002.4:** **GIVEN** Kandev adopts a legacy default database, **WHEN** adoption completes, **THEN** the original database remains recoverable until the replacement has been validated and installed successfully.
+
 ## Migrated source detail
 
 ## Why
@@ -207,6 +218,8 @@ users receive the same source and lock behavior.
 - YAML keys for credentials managed in the product UI or database.
 - Replacing standard platform detection when an existing typed setting already
   controls the result, such as `DOCKER_HOST` with `docker.host`.
+- Automatically switching to or merging a legacy database when the current
+  default database already contains task history.
 
 Decision:
 [Startup configuration uses one typed source model](../../../decisions/2026-08-20-startup-configuration-source-parity.md).
