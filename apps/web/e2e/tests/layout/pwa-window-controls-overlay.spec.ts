@@ -67,6 +67,8 @@ test.describe("desktop PWA window controls overlay", () => {
     testPage,
   }) => {
     await testPage.setViewportSize({ width: 1600, height: 900 });
+    await testPage.emulateMedia({ colorScheme: "light" });
+    await testPage.addInitScript(() => window.localStorage.setItem("theme", "dark"));
     await installWindowControlsOverlay(testPage, { x: 72, y: 0, width: 1528, height: 40 });
     await testPage.goto("/");
 
@@ -74,6 +76,11 @@ test.describe("desktop PWA window controls overlay", () => {
     const sidebarHeader = testPage.locator('[data-window-controls-overlay-region="sidebar"]');
     const pageHeader = testPage.locator('[data-window-controls-overlay-region="content"]').first();
     await expect(shell).toHaveAttribute("data-window-controls-overlay", "visible");
+    await expect(testPage.locator('meta[name="theme-color"]')).toHaveCount(1);
+    await expect(testPage.locator('meta[name="theme-color"]')).toHaveAttribute(
+      "content",
+      "#181818",
+    );
     await expect(sidebarHeader).toBeVisible();
     await expect(pageHeader).toBeVisible();
 

@@ -42,6 +42,11 @@ overlay 的实时几何信息。复用现有 40px 桌面侧栏、页面和任务
 - `apps/web/app/globals.css`：仅在根节点 overlay 可见状态下应用 overlay 高度、左右安全内边距、
   拖动/非拖动区域、主题背景及溢出保护。使用 Shell 提供的几何变量；状态缺失或隐藏时保留
   当前 class 行为。
+- `apps/web/components/theme-provider.tsx`：把当前解析后的应用主题同步到活动的
+  `meta[name="theme-color"]`，使浏览器绘制的窗口控制区与 Kandev 主题一致；不再让该区域只
+  依赖操作系统的 `prefers-color-scheme`。
+- `apps/web/components/theme-provider.test.tsx`：覆盖系统浅色但应用深色、运行时切回浅色以及
+  清理静态媒体条件的主题色契约。
 - `apps/web/e2e/tests/layout/pwa-window-controls-overlay.spec.ts`：导航前安装确定性的
   `navigator.windowControlsOverlay` fake，验证展开/折叠侧栏的左侧控件几何、页面/任务操作的
   右侧控件几何、实时 `geometrychange`、交互控件的可点击/非拖动属性，以及 API 缺失时的桌面
@@ -71,6 +76,8 @@ overlay 的实时几何信息。复用现有 40px 桌面侧栏、页面和任务
 - **实时几何：** 触发 `geometrychange` 后安全布局边界无需刷新即可移动，同时保持
   `documentElement.scrollWidth <= clientWidth`。
 - **普通桌面浏览器：** API 缺失或 `visible=false` 时，根 Shell/顶栏几何与现有桌面布局一致。
+- **主题同步：** 系统颜色偏好与应用主题相反时，活动 `theme-color` 仍使用应用解析后的主题
+  背景；应用内切换主题后立即更新。文件：`apps/web/components/theme-provider.test.tsx`。
 
 全部场景位于 `apps/web/e2e/tests/layout/pwa-window-controls-overlay.spec.ts`，使用桌面
 `chromium` project。根据用户明确范围，不增加移动端或平板测试。
@@ -112,7 +119,11 @@ Wave 2（顺序执行，依赖 Task 01）：
 
 - [x] [Task 02：融合桌面标题栏布局](task-02-fused-desktop-titlebar-layout.md)
 
-两个任务共享根 Shell 和前端契约上下文，因此在主会话中顺序执行，不计划使用 subagent。
+Wave 3（顺序执行，依赖 Task 02）：
+
+- [x] [Task 03：同步融合标题栏主题色](task-03-sync-titlebar-theme-color.md)
+
+三个任务共享根 Shell 和前端契约上下文，因此在主会话中顺序执行，不计划使用 subagent。
 
 ## 风险
 
