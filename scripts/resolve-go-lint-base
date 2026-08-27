@@ -33,6 +33,6 @@ else
 	fi
 fi
 
-git check-ref-format --branch "$base_ref" >/dev/null 2>&1 || die "configured base ref does not have a safe ref format: $base_ref"
+git check-ref-format "$base_ref" >/dev/null 2>&1 || die "configured base ref does not have a safe ref format: $base_ref"
 git rev-parse --verify --quiet "$base_ref^{commit}" >/dev/null || die "base ref does not resolve locally: $base_ref"
 printf '%s\n' "$base_ref"
