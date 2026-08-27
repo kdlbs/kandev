@@ -157,7 +157,7 @@ test.describe("Kanban board", () => {
     await testPage.mouse.move(reentryX, startY);
     await expect.poll(() => scrollWindow.evaluate((element) => element.scrollLeft)).toBe(0);
     await testPage.mouse.up();
-    await expect(scrollWindow).toHaveClass(/cursor-grab/);
+    await expect(scrollWindow).not.toHaveClass(/cursor-grab/);
     await testPage.mouse.move(startX - 140, startY);
     await expect.poll(() => scrollWindow.evaluate((element) => element.scrollLeft)).toBe(0);
     await expect
