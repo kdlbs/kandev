@@ -604,7 +604,8 @@ func (si *SchedulerIntegration) launchAgent(
 // event-driven ones that work today — was silently finished with no
 // launch (WO-35 Review round 1, Finding 1).
 //
-// SCOPE-1 decision: docs/specs/office/scheduler.md:110,332,687 says a
+// SCOPE-1 decision: docs/specs/office/requirements/scheduler.md and
+// docs/specs/office/system-design/scheduler-01.md say a
 // lightweight (taskless) routine fire is meant to produce a real agent
 // run. This card does not implement that launch: doing so requires a
 // taskless session seam (task_sessions.task_id is currently NOT NULL),
@@ -646,14 +647,22 @@ func (si *SchedulerIntegration) failTasklessRun(
 	// row must already exist by the time that refetch lands or the UI
 	// would show a repeat taskless failure that a later event never
 	// corrects (PR Fixup round 1, WO-35).
-	hasPrior, err := si.svc.repo.HasPriorTasklessFailedRun(ctx, agent.ID, run.ID)
+	hasPrior, err := si.svc.repo.HasPriorTasklessFailedRun(
+		ctx, agent.ID, run.ContinuationScope, run.ID,
+	)
 	if err != nil {
-		si.logger.Error("failed to check prior taskless failures for agent",
-			zap.String("run_id", run.ID), zap.String("agent_id", agent.ID), zap.Error(err))
+		si.logger.Error("failed to check prior taskless failures for scope",
+			zap.String("run_id", run.ID),
+			zap.String("agent_id", agent.ID),
+			zap.String("continuation_scope", run.ContinuationScope),
+			zap.Error(err))
 	} else if hasPrior {
 		if err := si.svc.repo.DismissInboxItem(ctx, autoDismissUserID, InboxKindAgentRunFailed, run.ID); err != nil {
 			si.logger.Error("failed to auto-dismiss repeat taskless failure",
-				zap.String("run_id", run.ID), zap.String("agent_id", agent.ID), zap.Error(err))
+				zap.String("run_id", run.ID),
+				zap.String("agent_id", agent.ID),
+				zap.String("continuation_scope", run.ContinuationScope),
+				zap.Error(err))
 		}
 	}
 

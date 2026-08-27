@@ -251,6 +251,9 @@ func TestSchedulerTick_TasklessRunFailure_PublishesResolvableWorkspaceEvent(t *t
 			t.Errorf("workspace_id = %v, want ws-1 — the WS gateway cannot resolve one from "+
 				"task_id on a taskless run, so it must be set explicitly", data["workspace_id"])
 		}
+		if errorMessage, _ := data["error_message"].(string); errorMessage == "" {
+			t.Error("expected a non-empty error_message in the processed event")
+		}
 	default:
 		t.Fatalf("expected OfficeRunProcessed event for the failed taskless run; got none")
 	}
@@ -344,11 +347,22 @@ func TestSchedulerTick_RepeatTasklessFailures_OnlyFirstStaysInInbox(t *testing.T
 	}
 
 	const fires = 3
+	var firstRunID string
 	for i := 0; i < fires; i++ {
 		if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
 			t.Fatalf("queue taskless run %d: %v", i, err)
 		}
 		service.RunSchedulerTick(svc, ctx)
+		if i == 0 {
+			runs, err := svc.ListRuns(ctx, "ws-1")
+			if err != nil {
+				t.Fatalf("list first run: %v", err)
+			}
+			if len(runs) != 1 {
+				t.Fatalf("run count after first fire = %d, want 1", len(runs))
+			}
+			firstRunID = runs[0].ID
+		}
 	}
 
 	runs, err := svc.ListRuns(ctx, "ws-1")
@@ -371,5 +385,84 @@ func TestSchedulerTick_RepeatTasklessFailures_OnlyFirstStaysInInbox(t *testing.T
 	if len(rows) != 1 {
 		t.Fatalf("inbox rows = %d, want 1 — only the first taskless failure should stay "+
 			"visible, the rest auto-dismissed", len(rows))
+	}
+	if rows[0].RunID != firstRunID {
+		t.Fatalf("inbox run ID = %s, want first failed run %s", rows[0].RunID, firstRunID)
+	}
+}
+
+// TestSchedulerTick_RepeatTasklessFailures_StayVisiblePerRoutineScope proves
+// that one routine cannot hide another routine's first failure when both
+// routines run on the same agent. ContinuationScope is persisted at run
+// creation in production. The test updates it after QueueRun to model two
+// routine wakeups without starting the full wakeup dispatcher.
+func TestSchedulerTick_RepeatTasklessFailures_StayVisiblePerRoutineScope(t *testing.T) {
+	mock := &mockTaskStarter{}
+	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
+	ctx := context.Background()
+
+	agent := &models.AgentInstance{
+		ID:                 "coordinator-wo35-scopes",
+		WorkspaceID:        "ws-1",
+		Name:               "coordinator-wo35-scopes",
+		Role:               models.AgentRoleCEO,
+		Status:             models.AgentStatusIdle,
+		ExecutorPreference: `{"type":"worktree"}`,
+	}
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	queueRoutineFailure := func(scope, idempotencyKey string) string {
+		t.Helper()
+		if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, idempotencyKey); err != nil {
+			t.Fatalf("queue routine %s: %v", scope, err)
+		}
+		runs, err := svc.ListRuns(ctx, "ws-1")
+		if err != nil {
+			t.Fatalf("list runs for routine %s: %v", scope, err)
+		}
+		var runID string
+		for _, run := range runs {
+			if run.IdempotencyKey != nil && *run.IdempotencyKey == idempotencyKey {
+				runID = run.ID
+				break
+			}
+		}
+		if runID == "" {
+			t.Fatalf("queued run for routine %s not found", scope)
+		}
+		svc.ExecSQL(t, `UPDATE runs SET continuation_scope = ? WHERE id = ?`, scope, runID)
+		service.RunSchedulerTick(svc, ctx)
+		return runID
+	}
+
+	firstRoutineA := queueRoutineFailure("routine:routine-a", "routine-a-1")
+	firstRoutineB := queueRoutineFailure("routine:routine-b", "routine-b-1")
+	repeatRoutineA := queueRoutineFailure("routine:routine-a", "routine-a-2")
+
+	rows, err := svc.ListFailedRunInboxRows(ctx, "ws-1", "some-user-who-dismissed-nothing")
+	if err != nil {
+		t.Fatalf("list inbox rows: %v", err)
+	}
+	visible := make(map[string]bool, len(rows))
+	for _, row := range rows {
+		visible[row.RunID] = true
+	}
+	if len(rows) != 2 {
+		t.Fatalf("inbox rows = %d, want one visible failure per routine", len(rows))
+	}
+	if !visible[firstRoutineA] || !visible[firstRoutineB] {
+		t.Fatalf("visible run IDs = %v, want first failures %s and %s", visible, firstRoutineA, firstRoutineB)
+	}
+	if visible[repeatRoutineA] {
+		t.Fatalf("repeat failure %s remains visible", repeatRoutineA)
+	}
+	dismissed, err := svc.IsInboxItemDismissed(ctx, "_auto", service.InboxKindAgentRunFailed, repeatRoutineA)
+	if err != nil {
+		t.Fatalf("check repeat dismissal: %v", err)
+	}
+	if !dismissed {
+		t.Fatalf("repeat failure %s was not auto-dismissed", repeatRoutineA)
 	}
 }

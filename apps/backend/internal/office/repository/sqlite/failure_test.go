@@ -610,7 +610,7 @@ func TestHasPriorTasklessFailedRun(t *testing.T) {
 		"2026-01-01 09:00:00", "", "2026-01-01 10:00:00", "{}")
 
 	// Before any prior failure exists (excluding itself), the answer is false.
-	has, err := repo.HasPriorTasklessFailedRun(ctx, "agent-a", "tl-1")
+	has, err := repo.HasPriorTasklessFailedRun(ctx, "agent-a", "agent:agent-a", "tl-1")
 	if err != nil {
 		t.Fatalf("HasPriorTasklessFailedRun: %v", err)
 	}
@@ -621,7 +621,7 @@ func TestHasPriorTasklessFailedRun(t *testing.T) {
 	// A second taskless failure now sees tl-1 as a prior one.
 	seedSummaryRun(t, repo, "tl-2", "agent-a", "failed",
 		"2026-01-02 09:00:00", "", "2026-01-02 10:00:00", "{}")
-	has, err = repo.HasPriorTasklessFailedRun(ctx, "agent-a", "tl-2")
+	has, err = repo.HasPriorTasklessFailedRun(ctx, "agent-a", "agent:agent-a", "tl-2")
 	if err != nil {
 		t.Fatalf("HasPriorTasklessFailedRun (second): %v", err)
 	}
@@ -634,7 +634,7 @@ func TestHasPriorTasklessFailedRun(t *testing.T) {
 		"2026-01-01 09:00:00", "", "2026-01-01 10:00:00", `{"task_id":"t-1"}`)
 	seedSummaryRun(t, repo, "tl-b", "agent-b", "failed",
 		"2026-01-02 09:00:00", "", "2026-01-02 10:00:00", "{}")
-	has, err = repo.HasPriorTasklessFailedRun(ctx, "agent-b", "tl-b")
+	has, err = repo.HasPriorTasklessFailedRun(ctx, "agent-b", "agent:agent-b", "tl-b")
 	if err != nil {
 		t.Fatalf("HasPriorTasklessFailedRun (task-scoped prior excluded): %v", err)
 	}
@@ -647,12 +647,61 @@ func TestHasPriorTasklessFailedRun(t *testing.T) {
 		"2026-01-01 09:00:00", "", "2026-01-01 10:00:00", "{}")
 	seedSummaryRun(t, repo, "tl-c2", "agent-c", "failed",
 		"2026-01-02 09:00:00", "", "2026-01-02 10:00:00", "{}")
-	has, err = repo.HasPriorTasklessFailedRun(ctx, "agent-c", "tl-c2")
+	has, err = repo.HasPriorTasklessFailedRun(ctx, "agent-c", "agent:agent-c", "tl-c2")
 	if err != nil {
 		t.Fatalf("HasPriorTasklessFailedRun (non-failed prior excluded): %v", err)
 	}
 	if has {
 		t.Error("has = true, want false — the only other run for agent-c isn't failed")
+	}
+}
+
+func TestHasPriorTasklessFailedRun_IsolatedByContinuationScope(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	seedSummaryRunWithScope(t, repo, "scope-a-1", "agent-a", "failed",
+		"2026-01-01 09:00:00", "", "2026-01-01 10:00:00", "{}", "routine:routine-a")
+
+	// A failure from routine-a must not hide the first failure from routine-b.
+	has, err := repo.HasPriorTasklessFailedRun(ctx, "agent-a", "routine:routine-b", "scope-b-1")
+	if err != nil {
+		t.Fatalf("HasPriorTasklessFailedRun (other routine): %v", err)
+	}
+	if has {
+		t.Error("has = true, want false — a different routine scope must not count")
+	}
+
+	seedSummaryRunWithScope(t, repo, "scope-b-1", "agent-a", "failed",
+		"2026-01-02 09:00:00", "", "2026-01-02 10:00:00", "{}", "routine:routine-b")
+	has, err = repo.HasPriorTasklessFailedRun(ctx, "agent-a", "routine:routine-b", "scope-b-1")
+	if err != nil {
+		t.Fatalf("HasPriorTasklessFailedRun (same routine): %v", err)
+	}
+	if has {
+		t.Error("has = true, want false — scope-b-1 is its own only failure")
+	}
+
+	seedSummaryRunWithScope(t, repo, "scope-b-2", "agent-a", "failed",
+		"2026-01-03 09:00:00", "", "2026-01-03 10:00:00", "{}", "routine:routine-b")
+	has, err = repo.HasPriorTasklessFailedRun(ctx, "agent-a", "routine:routine-b", "scope-b-2")
+	if err != nil {
+		t.Fatalf("HasPriorTasklessFailedRun (repeat): %v", err)
+	}
+	if !has {
+		t.Error("has = false, want true — scope-b-1 is a prior failure in routine-b")
+	}
+}
+
+func seedSummaryRunWithScope(
+	t *testing.T, repo *sqlite.Repository,
+	id, agentID, status, requestedAt, claimedAt, finishedAt, payload, scope string,
+) {
+	t.Helper()
+	seedSummaryRun(t, repo, id, agentID, status, requestedAt, claimedAt, finishedAt, payload)
+	if _, err := repo.ExecRaw(context.Background(),
+		`UPDATE runs SET continuation_scope = ? WHERE id = ?`, scope, id); err != nil {
+		t.Fatalf("set continuation scope for %s: %v", id, err)
 	}
 }
 

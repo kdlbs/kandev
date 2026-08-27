@@ -33,7 +33,7 @@ func TestPostgresHasPriorTasklessFailedRun(t *testing.T) {
 	}
 
 	seedPostgresRun(t, ctx, repo, "pg-tl-1", "agent-a", "failed", time.Now().Add(-time.Hour), "{}")
-	has, err := repo.HasPriorTasklessFailedRun(ctx, "agent-a", "pg-tl-1")
+	has, err := repo.HasPriorTasklessFailedRun(ctx, "agent-a", "agent:agent-a", "pg-tl-1")
 	if err != nil {
 		t.Fatalf("HasPriorTasklessFailedRun: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestPostgresHasPriorTasklessFailedRun(t *testing.T) {
 	}
 
 	seedPostgresRun(t, ctx, repo, "pg-tl-2", "agent-a", "failed", time.Now(), "{}")
-	has, err = repo.HasPriorTasklessFailedRun(ctx, "agent-a", "pg-tl-2")
+	has, err = repo.HasPriorTasklessFailedRun(ctx, "agent-a", "agent:agent-a", "pg-tl-2")
 	if err != nil {
 		t.Fatalf("HasPriorTasklessFailedRun (second): %v", err)
 	}
@@ -52,7 +52,7 @@ func TestPostgresHasPriorTasklessFailedRun(t *testing.T) {
 
 	seedPostgresRun(t, ctx, repo, "pg-task", "agent-b", "failed", time.Now().Add(-time.Hour), `{"task_id":"t-1"}`)
 	seedPostgresRun(t, ctx, repo, "pg-b", "agent-b", "failed", time.Now(), "{}")
-	has, err = repo.HasPriorTasklessFailedRun(ctx, "agent-b", "pg-b")
+	has, err = repo.HasPriorTasklessFailedRun(ctx, "agent-b", "agent:agent-b", "pg-b")
 	if err != nil {
 		t.Fatalf("HasPriorTasklessFailedRun (task-scoped prior excluded): %v", err)
 	}
