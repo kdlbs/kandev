@@ -2,7 +2,10 @@ import type {
   AgentProfileRecentUseApiRecord,
   AgentProfileRecentUseContext,
 } from "@/lib/types/http-agent-profile-recent-use";
-import { recordAgentProfileRecentUse } from "@/lib/api/domains/agent-profile-recent-use-api";
+import {
+  fetchAgentProfileRecentUse,
+  recordAgentProfileRecentUse,
+} from "@/lib/api/domains/agent-profile-recent-use-api";
 
 export const MAX_AGENT_PROFILE_RECENT_USE_IDS = 10;
 
@@ -21,10 +24,20 @@ export type AgentProfileRecentUseState = {
   loaded: boolean;
 };
 
+type AgentProfileRecentUseStore = {
+  getState: () => {
+    agentProfileRecentUse: AgentProfileRecentUseState;
+    setAgentProfileRecentUse: (state: AgentProfileRecentUseState) => void;
+  };
+};
+
+const recentUseLoadRequests = new WeakMap<AgentProfileRecentUseStore, Promise<void>>();
+
 /** Orders a source list by its bounded, already-authorized recent IDs. */
 export function orderAgentProfilesByRecentUse<T extends { id: string }>(
   profiles: readonly T[],
   recentProfileIds: readonly string[] | undefined,
+  selectedProfileId?: string,
 ): T[] {
   const profilesById = new Map(profiles.map((profile) => [profile.id, profile]));
   const ordered: T[] = [];
@@ -40,7 +53,31 @@ export function orderAgentProfilesByRecentUse<T extends { id: string }>(
     ordered.push(profile);
     seen.add(profile.id);
   }
+  if (selectedProfileId) {
+    const selected = profiles.find((profile) => profile.id === selectedProfileId);
+    if (selected) return [selected, ...ordered.filter((profile) => profile.id !== selected.id)];
+  }
   return ordered;
+}
+
+/** Loads recency once per app store when boot hydration did not provide it. */
+export function ensureAgentProfileRecentUseLoaded(
+  store: AgentProfileRecentUseStore,
+): Promise<void> {
+  if (store.getState().agentProfileRecentUse.loaded) return Promise.resolve();
+  const existing = recentUseLoadRequests.get(store);
+  if (existing) return existing;
+
+  const request = fetchAgentProfileRecentUse()
+    .then((records) => {
+      store.getState().setAgentProfileRecentUse(mapAgentProfileRecentUseApiRecords(records));
+    })
+    .catch(() => undefined)
+    .finally(() => {
+      recentUseLoadRequests.delete(store);
+    });
+  recentUseLoadRequests.set(store, request);
+  return request;
 }
 
 /** Maps one API record into the camel-cased store shape. */

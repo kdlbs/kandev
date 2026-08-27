@@ -29,6 +29,12 @@ let mockStore: MockStore = {
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: MockStore) => unknown) => selector(mockStore),
+  useAppStoreApi: () => ({
+    getState: () => ({
+      agentProfileRecentUse: mockStore.agentProfileRecentUse,
+      setAgentProfileRecentUse: vi.fn(),
+    }),
+  }),
 }));
 
 function setAvailableAgents(items: AvailableAgent[]) {

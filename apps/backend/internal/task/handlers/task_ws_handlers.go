@@ -221,6 +221,10 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		}
 		response.TaskSessionID = launchResp.SessionID
 		response.AgentExecutionID = launchResp.AgentExecutionID
+		response.AgentProfileID = launchResp.AgentProfileID
+		if launchResp.Success {
+			h.recordSuccessfulTaskCreateProfile(ctx, launchResp.AgentProfileID)
+		}
 	}
 	h.recordTaskCreateLastUsed(ctx, httpCreateTaskRequest{
 		WorkspaceID:       req.WorkspaceID,

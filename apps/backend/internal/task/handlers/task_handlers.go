@@ -31,18 +31,19 @@ type handlerRepo interface {
 }
 
 type TaskHandlers struct {
-	service                    *service.Service
-	orchestrator               OrchestratorStarter
-	foregroundActivity         dto.ForegroundActivityProvider
-	cancellationPending        dto.CancellationPendingProvider
-	repo                       handlerRepo
-	planService                *service.PlanService
-	handoffSvc                 *service.HandoffService
-	workspaceRestorer          WorkspaceQuarantineRestorer
-	unarchiveRecoveryTimeout   time.Duration
-	taskCreateLastUsedRecorder taskCreateLastUsedRecorder
-	onTaskCreatedWithPR        func(ctx context.Context, taskID, sessionID, prURL, branch string)
-	logger                     *logger.Logger
+	service                       *service.Service
+	orchestrator                  OrchestratorStarter
+	foregroundActivity            dto.ForegroundActivityProvider
+	cancellationPending           dto.CancellationPendingProvider
+	repo                          handlerRepo
+	planService                   *service.PlanService
+	handoffSvc                    *service.HandoffService
+	workspaceRestorer             WorkspaceQuarantineRestorer
+	unarchiveRecoveryTimeout      time.Duration
+	taskCreateLastUsedRecorder    taskCreateLastUsedRecorder
+	agentProfileRecentUseRecorder agentProfileRecentUseRecorder
+	onTaskCreatedWithPR           func(ctx context.Context, taskID, sessionID, prURL, branch string)
+	logger                        *logger.Logger
 }
 
 const defaultUnarchiveRecoveryTimeout = 30 * time.Second
@@ -60,6 +61,14 @@ type WorkspaceQuarantineRestorer interface {
 
 type taskCreateLastUsedRecorder interface {
 	RecordTaskCreateLastUsed(ctx context.Context, patch usermodels.TaskCreateLastUsed) error
+}
+
+type agentProfileRecentUseRecorder interface {
+	RecordAgentProfileRecentUse(
+		ctx context.Context,
+		contextValue usermodels.AgentProfileRecentUseContext,
+		profileID string,
+	) (*usermodels.AgentProfileRecentUse, error)
 }
 
 // SetHandoffService wires the office task-handoffs service used by the
@@ -88,6 +97,10 @@ func (h *TaskHandlers) SetWorkspaceQuarantineRestorer(restorer WorkspaceQuaranti
 
 func (h *TaskHandlers) SetTaskCreateLastUsedRecorder(recorder taskCreateLastUsedRecorder) {
 	h.taskCreateLastUsedRecorder = recorder
+}
+
+func (h *TaskHandlers) SetAgentProfileRecentUseRecorder(recorder agentProfileRecentUseRecorder) {
+	h.agentProfileRecentUseRecorder = recorder
 }
 
 // SetOnTaskCreatedWithPR sets a callback invoked when a task is created with a PR URL

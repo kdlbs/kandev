@@ -1059,7 +1059,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		return
 	}
 
-	h.dispatchTaskSession(taskDTO.ID, taskDTO.Description, body, dispatch)
+	h.dispatchTaskSession(c.Request.Context(), taskDTO.ID, taskDTO.Description, body, dispatch)
 	h.recordTaskCreateLastUsed(c.Request.Context(), body, repos)
 
 	// Associate PR with task if any repository input contains a PR URL
@@ -1491,7 +1491,9 @@ func (h *TaskHandlers) prepareStartAgentSession(
 	}
 	sessionID := prepResp.SessionID
 	response.TaskSessionID = sessionID
-	response.AgentProfileID = firstNonEmpty(prepResp.AgentProfileID, body.AgentProfileID)
+	// The follow-up start resolves workflow and dynamic-profile overrides. Do
+	// not expose the requested profile as effective in this response; the async
+	// launch records the profile returned by the successful start.
 	if updatedTask, updateErr := h.service.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); updateErr != nil {
 		h.logger.Warn("failed to mark task scheduling after preparing start session",
 			zap.Error(updateErr),
@@ -1506,7 +1508,12 @@ func (h *TaskHandlers) prepareStartAgentSession(
 // dispatchTaskSession launches the agent asynchronously (create-sequence
 // step 8). Callers MUST only invoke this after settlement has succeeded —
 // dispatch is nil whenever there was nothing prepared to dispatch.
-func (h *TaskHandlers) dispatchTaskSession(taskID, description string, body httpCreateTaskRequest, dispatch *startAgentDispatch) {
+func (h *TaskHandlers) dispatchTaskSession(
+	ctx context.Context,
+	taskID, description string,
+	body httpCreateTaskRequest,
+	dispatch *startAgentDispatch,
+) {
 	if dispatch == nil {
 		return
 	}
@@ -1514,7 +1521,7 @@ func (h *TaskHandlers) dispatchTaskSession(taskID, description string, body http
 	// Launch agent asynchronously so the HTTP request can return immediately.
 	// The frontend will receive WebSocket updates when the agent actually starts.
 	go func() {
-		startCtx, cancel := context.WithTimeout(context.Background(), constants.AgentLaunchTimeout)
+		startCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), constants.AgentLaunchTimeout)
 		defer cancel()
 		launchResp, err := h.orchestrator.LaunchSession(startCtx, &orchestrator.LaunchSessionRequest{
 			TaskID:            taskID,
@@ -1530,11 +1537,31 @@ func (h *TaskHandlers) dispatchTaskSession(taskID, description string, body http
 			h.logger.Error("failed to start agent for task (async)", zap.Error(err), zap.String("task_id", taskID), zap.String("session_id", sessionID))
 			return
 		}
+		if launchResp == nil || !launchResp.Success {
+			h.logger.Warn("agent start returned no successful launch response",
+				zap.String("task_id", taskID), zap.String("session_id", sessionID))
+			return
+		}
 		h.logger.Info("agent started for task (async)",
 			zap.String("task_id", taskID),
 			zap.String("session_id", launchResp.SessionID),
 			zap.String("execution_id", launchResp.AgentExecutionID))
+		h.recordSuccessfulTaskCreateProfile(startCtx, launchResp.AgentProfileID)
 	}()
+}
+
+func (h *TaskHandlers) recordSuccessfulTaskCreateProfile(ctx context.Context, profileID string) {
+	if h.agentProfileRecentUseRecorder == nil || profileID == "" {
+		return
+	}
+	if _, err := h.agentProfileRecentUseRecorder.RecordAgentProfileRecentUse(
+		ctx,
+		usermodels.AgentProfileRecentUseTaskCreate,
+		profileID,
+	); err != nil {
+		h.logger.Warn("failed to record agent profile recent use after successful task launch",
+			zap.String("profile_id", profileID), zap.Error(err))
+	}
 }
 
 type httpUpdateTaskRequest struct {

@@ -16,10 +16,6 @@ import type { Repository } from "@/lib/types/http";
 import type { SubtaskWorkspaceMode, useSubtaskFormState } from "./new-subtask-form-state";
 import { toContextItems, useDialogAttachments } from "./session-dialog-shared";
 import { t } from "@/lib/i18n";
-import {
-  recordAgentProfileRecentUseBestEffort,
-  type AgentProfileRecentUseRecord,
-} from "@/lib/agent-profile-recent-use";
 
 type UseSubtaskSubmitOpts = {
   fs: ReturnType<typeof useSubtaskFormState>;
@@ -59,7 +55,6 @@ type CreateSubtaskArgs = {
   onClose: () => void;
   setActiveTask: (taskId: string) => void;
   setActiveSession: (taskId: string, sessionId: string) => void;
-  applyAgentProfileRecentUse: (context: "task_create", record: AgentProfileRecentUseRecord) => void;
 };
 
 async function createSubtask({
@@ -80,7 +75,6 @@ async function createSubtask({
   onClose,
   setActiveTask,
   setActiveSession,
-  applyAgentProfileRecentUse,
 }: CreateSubtaskArgs) {
   const repositories =
     workspaceMode === "inherit_parent"
@@ -113,13 +107,6 @@ async function createSubtask({
     autopilot: autopilot || undefined,
   });
   const newSessionId = response.session_id ?? response.primary_session_id ?? null;
-  if (newSessionId) {
-    recordAgentProfileRecentUseBestEffort(
-      "task_create",
-      response.agent_profile_id ?? (fs.agentProfileId || defaultProfileId),
-      (record) => applyAgentProfileRecentUse("task_create", record),
-    );
-  }
   // Close the dialog before navigation. Navigation can remount the sidebar
   // that owns the dialog state, which makes a later close update a stale owner.
   onClose();
@@ -157,7 +144,6 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
   const { toast } = useToast();
   const setActiveTask = useAppStore((s) => s.setActiveTask);
   const setActiveSession = useAppStore((s) => s.setActiveSession);
-  const applyAgentProfileRecentUse = useAppStore((s) => s.applyAgentProfileRecentUse);
   // Synchronous guard: setIsCreating(true) won't reflect into the disabled
   // submit button until React commits, so a fast double-submit (Enter + click,
   // double-click) can re-enter handleSubmit and call createTask twice.
@@ -193,7 +179,6 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
           onClose,
           setActiveTask,
           setActiveSession,
-          applyAgentProfileRecentUse,
         });
       } catch (error) {
         toast({
@@ -220,7 +205,6 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
       attachments,
       setActiveTask,
       setActiveSession,
-      applyAgentProfileRecentUse,
       workspaceMode,
       isLocalExecutor,
       freshBranchEnabled,

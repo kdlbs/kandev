@@ -134,6 +134,41 @@ func TestSQLiteRepositoryRejectsInvalidRecentUseJSON(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepositoryListSkipsMalformedContextRows(t *testing.T) {
+	conn := openRecentUseSQLite(t)
+	repo, cleanup, err := Provide(conn, conn)
+	if err != nil {
+		t.Fatalf("create repository: %v", err)
+	}
+	t.Cleanup(func() { _ = cleanup() })
+	ctx := context.Background()
+	if _, err := repo.UpsertAgentProfileRecentUse(ctx, &models.AgentProfileRecentUse{
+		UserID:     DefaultUserID,
+		Context:    models.AgentProfileRecentUseQuickChat,
+		ProfileIDs: []string{"profile-valid"},
+		Revision:   1,
+		UpdatedAt:  time.Now().UTC(),
+	}, 0); err != nil {
+		t.Fatalf("insert valid record: %v", err)
+	}
+	if _, err := conn.Exec(`INSERT INTO user_agent_profile_recent_use
+		(user_id, context, profile_ids, revision, updated_at) VALUES (?, ?, ?, ?, ?)`,
+		DefaultUserID, models.AgentProfileRecentUseConfigChat, "{}", 1, time.Now().UTC()); err != nil {
+		t.Fatalf("insert malformed record: %v", err)
+	}
+
+	records, err := repo.ListAgentProfileRecentUse(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("list records: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("listed records = %d, want one valid context", len(records))
+	}
+	if records[0].Context != models.AgentProfileRecentUseQuickChat || records[0].ProfileIDs[0] != "profile-valid" {
+		t.Fatalf("listed record = %+v, want valid quick-chat context", records[0])
+	}
+}
+
 func openRecentUseSQLite(t *testing.T) *sqlx.DB {
 	t.Helper()
 	conn, err := sqlx.Open("sqlite3", ":memory:")

@@ -54,7 +54,11 @@ function QuickChatFormBody({ state }: { state: FormState }) {
   const selectableProfiles = state.agentProfiles.filter((profile) =>
     isSelectableAgentProfile(profile, dynamicRoutingEnabled),
   );
-  const orderedProfiles = orderAgentProfilesByRecentUse(selectableProfiles, state.recentProfileIds);
+  const orderedProfiles = orderAgentProfilesByRecentUse(
+    selectableProfiles,
+    state.recentProfileIds,
+    selectedAgentId,
+  );
   return (
     <div className="p-4 space-y-4">
       <p className="text-sm text-muted-foreground">{t("chat:quickChatDialogIntro")}</p>

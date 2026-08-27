@@ -513,9 +513,9 @@ describe("useTaskSubmitHandlers — handleCreateSubmit (CLI-mode parity)", () =>
       }),
     );
     expect(createTaskRetryMock).not.toHaveBeenCalled();
-    expect(recordRecentUseMock).toHaveBeenCalledWith(
+    expect(recordRecentUseMock).not.toHaveBeenCalledWith(
       "task_create",
-      "agent-effective",
+      expect.anything(),
       expect.any(Function),
     );
   });

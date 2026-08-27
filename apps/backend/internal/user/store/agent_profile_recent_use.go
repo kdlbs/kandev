@@ -49,7 +49,10 @@ func (r *sqliteRepository) ListAgentProfileRecentUse(
 	for rows.Next() {
 		record, scanErr := scanAgentProfileRecentUse(rows)
 		if scanErr != nil {
-			return nil, scanErr
+			// A malformed context row must not make the other independent
+			// selector histories unavailable. Skip only this row and let the
+			// cursor continue to the remaining contexts.
+			continue
 		}
 		records = append(records, record)
 	}

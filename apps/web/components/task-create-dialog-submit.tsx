@@ -16,7 +16,6 @@ import { useFreshBranchConsent } from "@/components/task-create-dialog-fresh-bra
 import { queueTaskCreateLastUsedFromPayload } from "@/components/task-create-dialog-handlers";
 import { ApiError } from "@/lib/api/client";
 import { recordAgentProfileRecentUseBestEffort } from "@/lib/agent-profile-recent-use";
-import type { AgentProfileRecentUseRecord } from "@/lib/agent-profile-recent-use";
 
 const GENERIC_ERROR_KEY = "common:anErrorOccurred";
 
@@ -42,16 +41,6 @@ function notifyQueuedTask(
     title: t("task:taskQueued"),
     description: t("task:taskQueuedWipLimit"),
   });
-}
-
-function recordTaskCreateProfileUse(
-  enabled: boolean,
-  sessionId: string | null,
-  profileId: string,
-  onSuccess: (record: AgentProfileRecentUseRecord) => void,
-) {
-  if (!enabled || !sessionId) return;
-  recordAgentProfileRecentUseBestEffort("task_create", profileId, onSuccess);
 }
 
 function shouldNavigateAfterTaskCreate(
@@ -531,12 +520,6 @@ export function useTaskSubmitHandlers({
       if (!taskResponse) return;
       notifyQueuedTask(taskResponse, toast);
       const newSessionId = taskResponse.session_id ?? taskResponse.primary_session_id ?? null;
-      recordTaskCreateProfileUse(
-        opts.withAgent,
-        newSessionId,
-        taskResponse.agent_profile_id ?? agentProfileId,
-        (record) => applyAgentProfileRecentUse("task_create", record),
-      );
       const willNavigate = shouldNavigateAfterTaskCreate(
         opts.withAgent,
         isPassthroughProfile,
@@ -582,7 +565,6 @@ export function useTaskSubmitHandlers({
       router,
       getRepositoriesPayload,
       createTaskWithFreshBranchRetry,
-      applyAgentProfileRecentUse,
     ],
   );
 
