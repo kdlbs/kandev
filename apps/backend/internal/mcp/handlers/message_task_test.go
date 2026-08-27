@@ -64,6 +64,17 @@ type fakeOrchestrator struct {
 	interruptSkippedNoError bool
 }
 
+// lifecycleRetryFakeOrchestrator exposes the orchestrator-owned cancellation
+// context used by direct-delivery acceptance terminalization.
+type lifecycleRetryFakeOrchestrator struct {
+	*fakeOrchestrator
+	retryCtx context.Context
+}
+
+func (f *lifecycleRetryFakeOrchestrator) DeliveryAcceptanceRetryContext() context.Context {
+	return f.retryCtx
+}
+
 type failingQueueSnapshotRepository struct {
 	messagequeue.Repository
 	failSessionID string
@@ -99,6 +110,8 @@ type flakyMarkDirectDeliveryAcceptanceUncertainRepository struct {
 	mu        sync.Mutex
 	failsLeft int
 	callCount int
+	called    chan struct{}
+	callOnce  sync.Once
 }
 
 func (r *flakyMarkDirectDeliveryAcceptanceUncertainRepository) MarkDirectDeliveryAcceptanceUncertain(
@@ -106,6 +119,9 @@ func (r *flakyMarkDirectDeliveryAcceptanceUncertainRepository) MarkDirectDeliver
 ) (*messagequeue.Delivery, error) {
 	r.mu.Lock()
 	r.callCount++
+	if r.called != nil {
+		r.callOnce.Do(func() { close(r.called) })
+	}
 	if r.failsLeft > 0 {
 		r.failsLeft--
 		r.mu.Unlock()
@@ -1547,6 +1563,46 @@ func TestHandleMessageTask_WaitingRetryBudgetExhaustionKeepsReceiptNonReplayable
 	calls := alwaysFailing.calls()
 	assert.GreaterOrEqual(t, calls, 5,
 		"the marker retry loop must keep retrying past initial failures (got %d calls)", calls)
+}
+
+func TestDirectDeliveryAcceptanceRetryStopsWithOrchestratorLifecycle(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	queueDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(queueDB, queueDB)
+	require.NoError(t, err)
+	ledger := queueRepo.(messagequeue.DeliveryLedger)
+	called := make(chan struct{})
+	flaky := &flakyMarkDirectDeliveryAcceptanceUncertainRepository{
+		Repository: queueRepo, DeliveryLedger: ledger, failsLeft: 1_000, called: called,
+	}
+	orch.queue = messagequeue.NewService(flaky, 1, testLogger(t))
+	lifecycleCtx, stop := context.WithCancel(context.Background())
+	t.Cleanup(stop)
+	h.sessionLauncher = &lifecycleRetryFakeOrchestrator{fakeOrchestrator: orch, retryCtx: lifecycleCtx}
+
+	dispatch := &taskMessageDirectDeliveryDispatch{deliveryID: "missing-delivery", leaseOwner: "lease-owner"}
+	callbackCtx := context.WithValue(ctx, taskMessageDirectDeliveryContextKey{}, dispatch)
+	callback := h.directDeliveryAcceptedCallback(callbackCtx)
+	require.NotNil(t, callback)
+
+	done := make(chan error, 1)
+	go func() { done <- callback() }()
+	select {
+	case <-called:
+	case <-time.After(time.Second):
+		t.Fatal("acceptance marker retry did not begin")
+	}
+
+	stop()
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("acceptance marker retry outlived orchestrator shutdown")
+	}
+	assert.False(t, dispatch.snapshot().accepted, "cancelled terminalization must not report acceptance")
 }
 
 func TestHandleMessageTask_RejectedBusyTargetDoesNotPersistDeliveryReceipt(t *testing.T) {

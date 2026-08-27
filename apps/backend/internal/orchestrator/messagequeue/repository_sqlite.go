@@ -1265,7 +1265,21 @@ func (r *sqliteRepository) reserveHead(ctx context.Context, sessionID string, re
 				return nil, true, err
 			}
 			if ambiguous {
-				return nil, false, nil
+				result, deleteErr := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM queued_messages WHERE id = ? AND session_id = ? AND metadata_json = ?`), msg.ID, sessionID, storedMetadataJSON)
+				if deleteErr != nil {
+					return nil, true, fmt.Errorf("remove ambiguous lifecycle head: %w", deleteErr)
+				}
+				affected, rowsErr := result.RowsAffected()
+				if rowsErr != nil {
+					return nil, true, fmt.Errorf("remove ambiguous lifecycle head rows affected: %w", rowsErr)
+				}
+				if affected != 1 {
+					return nil, true, ErrEntryNotFound
+				}
+				if commitErr := tx.Commit(); commitErr != nil {
+					return nil, true, fmt.Errorf("commit ambiguous lifecycle head removal: %w", commitErr)
+				}
+				return nil, true, nil
 			}
 		}
 		reserved, err := r.reserveLifecycleHead(ctx, tx, msg, storedMetadataJSON)

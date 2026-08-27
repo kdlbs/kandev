@@ -272,10 +272,19 @@ func TestSQLiteRepository_AmbiguousPeerReservationIsNotReplayedAfterRestart(t *t
 	}
 	// The executor might already have accepted this prompt. The retained
 	// receipt is visible to authorized callers, but a restart must never guess
-	// that replaying it is safe.
+	// that replaying it is safe. Remove the ambiguous FIFO head so it cannot
+	// permanently block later ordinary work.
+	following := &QueuedMessage{SessionID: "s1", TaskID: "t1", Content: "later work", QueuedBy: QueuedByUser}
+	if err := repo.Insert(ctx, following, 0); err != nil {
+		t.Fatalf("insert following: %v", err)
+	}
+	skipped, err := repo.ReserveHead(ctx, "s1")
+	if err != nil || skipped != nil {
+		t.Fatalf("skip ambiguous reserve = (%+v, %v), want nil", skipped, err)
+	}
 	replayed, err := repo.ReserveHead(ctx, "s1")
-	if err != nil || replayed != nil {
-		t.Fatalf("restart reserve = (%+v, %v), want nil", replayed, err)
+	if err != nil || replayed == nil || replayed.ID != following.ID {
+		t.Fatalf("reserve following work = (%+v, %v), want %q", replayed, err, following.ID)
 	}
 	stored, err := ledger.GetDelivery(ctx, delivery.ID)
 	if err != nil {

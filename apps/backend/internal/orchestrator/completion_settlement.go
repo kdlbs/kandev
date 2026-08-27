@@ -249,6 +249,16 @@ func (s *Service) completionIntentExecutionWasReplaced(ctx context.Context, inte
 	if err != nil {
 		return false, fmt.Errorf("look up running execution for session %s: %w", intent.SessionID, err)
 	}
+	if intent.PromptGeneration > 0 {
+		generationOwner, ok := s.agentManager.(interface {
+			OwnsPromptGeneration(sessionID, executionID string, generation uint64) bool
+		})
+		// A generation-bearing completion intent is only safe to settle while
+		// the runtime still assigns that exact prompt cycle to its execution.
+		if !ok || !generationOwner.OwnsPromptGeneration(intent.SessionID, intent.AgentExecutionID, uint64(intent.PromptGeneration)) {
+			return true, nil
+		}
+	}
 	if running == nil || running.AgentExecutionID == "" {
 		return false, nil
 	}

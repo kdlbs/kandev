@@ -213,9 +213,14 @@ type SessionLauncher interface {
 	RenameSession(ctx context.Context, sessionID, name string) error
 }
 
-// acceptedPromptCallbackLauncher is an optional stronger dispatch seam. The
-// production orchestrator invokes callback synchronously when agentctl accepts
-// the prompt; lightweight handler fakes retain the ordinary PromptTask path.
+// deliveryAcceptanceRetryContextProvider supplies the lifecycle context that
+// owns durable post-acceptance receipt terminalization.
+type deliveryAcceptanceRetryContextProvider interface {
+	DeliveryAcceptanceRetryContext() context.Context
+}
+
+// acceptedPromptCallbackLauncher is an optional stronger dispatch seam.
+// The production orchestrator invokes callback synchronously when agentctl accepts.
 type acceptedPromptCallbackLauncher interface {
 	PromptTaskWithAcceptedCallback(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool, afterDispatch func() error) (*orchestrator.PromptResult, error)
 }
@@ -4035,10 +4040,12 @@ func (h *Handlers) directDeliveryAcceptedCallback(ctx context.Context) func() er
 	if dispatch == nil {
 		return nil
 	}
-	// CREATED-session acceptance happens in the launch goroutine after this
-	// MCP handler can return. Preserve trusted request values but do not let a
-	// completed transport request cancel durable receipt terminalization.
-	callbackCtx := context.WithoutCancel(ctx)
+	// CREATED-session acceptance happens after the transport handler returns.
+	// Retry under the orchestrator-owned lifetime so shutdown cancels it.
+	callbackCtx := ctx
+	if owner, ok := h.sessionLauncher.(deliveryAcceptanceRetryContextProvider); ok {
+		callbackCtx = owner.DeliveryAcceptanceRetryContext()
+	}
 	return func() error {
 		if err := h.markDirectDeliveryAcceptanceUncertainWithRetry(callbackCtx, dispatch.deliveryID, dispatch.leaseOwner); err != nil {
 			return err

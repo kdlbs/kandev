@@ -113,7 +113,9 @@ func (s *Service) processClaimedDelivery(ctx context.Context, ledger DeliveryLed
 		return
 	}
 	if found {
-		s.acknowledgeDeliveryQueueAdmission(ctx, ledger, delivery, workerID, queueEntryID)
+		if !s.acknowledgeDeliveryQueueAdmission(ctx, ledger, delivery, workerID, queueEntryID) {
+			return
+		}
 		// A prior worker may have inserted this FIFO row and then died before it
 		// published the queue mutation. Replaying the notification is safe and
 		// lets an already-idle target drain the recovered entry.
@@ -133,7 +135,9 @@ func (s *Service) processClaimedDelivery(ctx context.Context, ledger DeliveryLed
 		s.deferClaimedDelivery(ctx, ledger, delivery, workerID, now, err)
 		return
 	}
-	s.acknowledgeDeliveryQueueAdmission(ctx, ledger, delivery, workerID, queued.ID)
+	if !s.acknowledgeDeliveryQueueAdmission(ctx, ledger, delivery, workerID, queued.ID) {
+		return
+	}
 	if s.queuePromotionNotifier != nil {
 		s.queuePromotionNotifier(ctx, delivery.TargetSessionID)
 	}
@@ -157,11 +161,17 @@ func (s *Service) findQueueEntryForDelivery(ctx context.Context, sessionID, deli
 	return "", false, nil
 }
 
-func (s *Service) acknowledgeDeliveryQueueAdmission(ctx context.Context, ledger DeliveryLedger, delivery Delivery, workerID, queueEntryID string) {
+func (s *Service) acknowledgeDeliveryQueueAdmission(ctx context.Context, ledger DeliveryLedger, delivery Delivery, workerID, queueEntryID string) bool {
 	if _, err := ledger.MarkDeliveryQueued(ctx, delivery.ID, workerID, queueEntryID); err != nil {
 		s.logger.Error("delivery queue admission acknowledgement failed",
 			zap.String("delivery_id", delivery.ID), zap.String("queue_entry_id", queueEntryID), zap.Error(err))
+		if deleteErr := s.repo.AcknowledgeByID(ctx, delivery.TargetSessionID, queueEntryID); deleteErr != nil && !errors.Is(deleteErr, ErrEntryNotFound) {
+			s.logger.Error("failed to remove unacknowledged delivery queue entry",
+				zap.String("delivery_id", delivery.ID), zap.String("queue_entry_id", queueEntryID), zap.Error(deleteErr))
+		}
+		return false
 	}
+	return true
 }
 
 func (s *Service) deferClaimedDelivery(ctx context.Context, ledger DeliveryLedger, delivery Delivery, workerID string, now time.Time, cause error) {

@@ -145,12 +145,14 @@ func TestProcessDueDeliveriesNotifiesOnQueuePromotion(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, DeliveryQueued, stored.State)
 
-	// Reprocessing an already-queued receipt takes the acknowledgement-gap
-	// recovery path: a prior worker inserted the FIFO row then crashed before
-	// either receipt acknowledgement or notification. It must wake an idle
-	// target once it has repaired the receipt linkage.
+	// A stale worker cannot reacquire this receipt with worker-b. The failed
+	// acknowledgement must remove its FIFO row and suppress notification rather
+	// than dispatching a cancelled or lease-lost delivery.
 	service.processClaimedDelivery(ctx, ledger, *stored, "worker-b", now)
-	assert.Equal(t, []string{"target-session", "target-session"}, notified)
+	assert.Equal(t, []string{"target-session"}, notified)
+	entries, err := repo.ListBySession(ctx, "target-session")
+	require.NoError(t, err)
+	assert.Empty(t, entries, "a lease-lost receipt must not remain dispatchable")
 }
 
 func TestAcceptedQueuedDeliveryDoesNotReplayAfterRestart(t *testing.T) {
@@ -216,6 +218,10 @@ func TestProcessDueDeliveriesReusesExistingQueueEntryAfterAcknowledgementFailure
 	require.Equal(t, DeliveryReserved, stored.State)
 	require.False(t, stored.LeaseExpiresAt.IsZero())
 
+	entries, err := baseRepo.ListBySession(ctx, "target-session")
+	require.NoError(t, err)
+	assert.Empty(t, entries, "a lost delivery lease must not leave a FIFO entry")
+
 	repo.failQueueAcknowledgement = false
 	processed, err = service.ProcessDueDeliveries(ctx, stored.LeaseExpiresAt, "worker-b")
 	require.NoError(t, err)
@@ -224,7 +230,7 @@ func TestProcessDueDeliveriesReusesExistingQueueEntryAfterAcknowledgementFailure
 	require.NoError(t, err)
 	require.Equal(t, DeliveryQueued, stored.State)
 
-	entries, err := baseRepo.ListBySession(ctx, "target-session")
+	entries, err = baseRepo.ListBySession(ctx, "target-session")
 	require.NoError(t, err)
 	require.Len(t, entries, 1)
 	assert.Equal(t, stored.QueueEntryID, entries[0].ID)

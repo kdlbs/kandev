@@ -1922,6 +1922,21 @@ func (s *Service) resetReservedPromptCallbacks() {
 	previous.stop()
 }
 
+// DeliveryAcceptanceRetryContext returns the orchestrator-owned context used for
+// acceptance terminalization. Stop cancels this owner before tearing down runtime
+// dependencies, so a database retry cannot strand a prompt-launch goroutine.
+func (s *Service) DeliveryAcceptanceRetryContext() context.Context {
+	s.reservedPromptCallbacksMu.Lock()
+	owner := s.reservedPromptCallbacks
+	if owner == nil {
+		owner = newReservedPromptCallbackOwner()
+		s.reservedPromptCallbacks = owner
+	}
+	ctx := owner.ctx
+	s.reservedPromptCallbacksMu.Unlock()
+	return ctx
+}
+
 func (s *Service) stopReservedPromptCallbacks() {
 	s.reservedPromptCallbacksMu.Lock()
 	owner := s.reservedPromptCallbacks
