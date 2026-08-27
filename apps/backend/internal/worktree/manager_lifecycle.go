@@ -198,8 +198,17 @@ func (m *Manager) reuseRequiredWorktree(ctx context.Context, req CreateRequest) 
 	if wt == nil || wt.Status != StatusActive ||
 		wt.RepositoryID != req.RepositoryID ||
 		wt.TaskEnvironmentID != req.TaskEnvironmentID ||
-		(requestedBranchSlug != "" && SanitizeBranchSlug(wt.BranchSlug) != requestedBranchSlug) ||
-		!m.IsValid(wt.Path) {
+		(requestedBranchSlug != "" && SanitizeBranchSlug(wt.BranchSlug) != requestedBranchSlug) {
+		return nil, ErrReuseWorktreeUnavailable
+	}
+	handle, valid, err := m.openReusableWorktreePath(wt.Path, wt)
+	if err != nil {
+		return nil, err
+	}
+	if handle != nil {
+		defer func() { _ = handle.Close() }()
+	}
+	if !valid {
 		return nil, ErrReuseWorktreeUnavailable
 	}
 	return wt, nil
@@ -220,7 +229,14 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 	if req.SessionID != "" {
 		existing, err := m.GetBySessionAndRepo(ctx, req.SessionID, req.RepositoryID, reuseSlug)
 		if err == nil && existing != nil {
-			if m.IsValid(existing.Path) {
+			handle, valid, err := m.openReusableWorktreePath(existing.Path, existing)
+			if err != nil {
+				return nil, true, err
+			}
+			if handle != nil {
+				defer func() { _ = handle.Close() }()
+			}
+			if valid {
 				if err := m.validateReusableContribution(ctx, req, existing); err != nil {
 					return nil, true, err
 				}
@@ -246,7 +262,14 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 	if req.WorktreeID != "" {
 		existing, err := m.GetByID(ctx, req.WorktreeID)
 		if err == nil && existing != nil {
-			if m.IsValid(existing.Path) {
+			handle, valid, err := m.openReusableWorktreePath(existing.Path, existing)
+			if err != nil {
+				return nil, true, err
+			}
+			if handle != nil {
+				defer func() { _ = handle.Close() }()
+			}
+			if valid {
 				if err := m.validateReusableContribution(ctx, req, existing); err != nil {
 					return nil, true, err
 				}
@@ -272,6 +295,147 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 	}
 
 	return nil, false, nil
+}
+
+// validateWorktreePathSafe opens a persisted worktree path through no-follow
+// directory handles. The handle is returned to the caller so the same
+// directory identity is used for ownership and reuse decisions. Missing paths
+// remain eligible for the normal recreate flow, while symlinked components
+// fail closed.
+func (m *Manager) validateWorktreePathSafe(worktreePath string) (storageworkspaces.DirectoryHandle, error) {
+	if worktreePath == "" {
+		return nil, nil
+	}
+	tasksBase, err := m.config.ExpandedTasksBasePath()
+	if err != nil {
+		return nil, fmt.Errorf("resolve tasks base path: %w", err)
+	}
+	tasksBase = filepath.Clean(tasksBase)
+	// Paths outside the tasks base use the legacy flat layout. They do not have
+	// a task-root ownership marker, but still get a no-follow handle so reuse
+	// cannot follow a replacement link while checking the checkout.
+	relativePath, err := filepath.Rel(tasksBase, worktreePath)
+	if err != nil || relativePath == "." || relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
+		// Legacy paths are not below tasksBase, but they still get a pinned
+		// no-follow handle so IsValid cannot be redirected by a symlink race.
+		return m.openNoFollowWorktreePath(worktreePath)
+	}
+	if _, err := os.Lstat(tasksBase); errors.Is(err, os.ErrNotExist) {
+		// A removed task base has no components to follow. Normal reuse will
+		// recreate the persisted managed root before adding the worktree;
+		// attach-only reuse still rejects the missing checkout via IsValid.
+		return nil, nil
+	} else if err != nil {
+		return nil, fmt.Errorf("inspect tasks base path: %w", err)
+	}
+	return m.openNoFollowWorktreePath(worktreePath)
+}
+
+func (m *Manager) openNoFollowWorktreePath(worktreePath string) (storageworkspaces.DirectoryHandle, error) {
+	cleanPath := filepath.Clean(worktreePath)
+	if !filepath.IsAbs(cleanPath) {
+		return nil, nil
+	}
+	handle, err := storageworkspaces.OpenDirectoryNoFollow(filepath.Dir(cleanPath), cleanPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("unsafe worktree path: %w", err)
+	}
+	if err := handle.VerifyPath(cleanPath); err != nil {
+		_ = handle.Close()
+		return nil, fmt.Errorf("worktree path changed during validation: %w", err)
+	}
+	return handle, nil
+}
+
+func (m *Manager) openReusableWorktreePath(worktreePath string, wt *Worktree) (storageworkspaces.DirectoryHandle, bool, error) {
+	handle, err := m.validateWorktreePathSafe(worktreePath)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := m.validateExistingWorktreePathOwner(worktreePath, wt); err != nil {
+		if handle != nil {
+			_ = handle.Close()
+		}
+		return nil, false, err
+	}
+	if handle == nil || !handle.IsValidWorktree() {
+		if handle != nil {
+			_ = handle.Close()
+		}
+		return nil, false, nil
+	}
+	if err := handle.VerifyPath(filepath.Clean(worktreePath)); err != nil {
+		_ = handle.Close()
+		return nil, false, fmt.Errorf("worktree path changed during reuse validation: %w", err)
+	}
+	return handle, true, nil
+}
+
+func worktreeOwnershipIdentity(wt *Worktree) (string, bool) {
+	if wt != nil && wt.TaskDirName != "" {
+		return wt.TaskDirName, true
+	}
+	if wt != nil {
+		// Older in-memory and persisted records may not project TaskDirName.
+		// Keep their existing ownership check until they are refreshed.
+		return wt.TaskID, false
+	}
+	return "", false
+}
+
+// validateExistingWorktreePathOwner rejects a stale record whose stored path
+// now lies under another task's marked root. It deliberately runs before both
+// reuse and recreate: recreate removes the recorded path before adding a new
+// worktree, so checking only the reusable path could delete a live checkout.
+// Paths outside Kandev's task root and legacy unmarked task roots remain
+// eligible for their existing compatibility behavior.
+func (m *Manager) validateExistingWorktreePathOwner(worktreePath string, wt *Worktree) error {
+	if worktreePath == "" {
+		return nil
+	}
+	tasksBase, err := m.config.ExpandedTasksBasePath()
+	if err != nil {
+		return fmt.Errorf("resolve tasks base path: %w", err)
+	}
+	// Normalize: ExpandedTasksBasePath returns the configured value verbatim
+	// (incl. trailing slashes or doubled separators), while filepath.Dir
+	// always yields a cleaned form. Without this, the path computation below
+	// may miscompute the task-root segment.
+	tasksBase = filepath.Clean(tasksBase)
+	relativePath, err := filepath.Rel(tasksBase, worktreePath)
+	if err != nil || relativePath == "." || relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
+		return nil
+	}
+	recordIdentity, stableTaskDirName := worktreeOwnershipIdentity(wt)
+	if recordIdentity == "" {
+		return nil
+	}
+	// The task-root ownership marker always lives at the first path segment
+	// below tasksBase (i.e. <tasksBase>/<taskDirName>/). Walking all levels
+	// up from worktreePath is wrong: a descendant repository that legitimately
+	// contains its own .kandev-workspace.json (e.g. a nested project) would be
+	// mistaken for the task-root marker. Derive the task root from the
+	// relative path and inspect only that one directory.
+	taskRoot := filepath.Join(tasksBase, strings.SplitN(relativePath, string(filepath.Separator), 2)[0])
+	owner, found, err := storageworkspaces.ReadOwnershipMarker(taskRoot)
+	if err != nil {
+		return fmt.Errorf("inspect worktree task root ownership: %w", err)
+	}
+	// Validate against the environment's stable task directory name, not the
+	// mutable task ID. Shared environments can transfer ownership while their
+	// physical task root and marker remain unchanged. Older records without the
+	// projected directory name retain the task-ID compatibility check.
+	ownerMatches := owner.TaskDirName == recordIdentity
+	if !stableTaskDirName {
+		ownerMatches = owner.TaskID == recordIdentity
+	}
+	if found && !ownerMatches {
+		return fmt.Errorf("%w: path %q belongs to task %q", ErrWorktreePathOwnedByAnotherTask, worktreePath, owner.TaskID)
+	}
+	return nil
 }
 
 func (m *Manager) validateReusableContribution(ctx context.Context, req CreateRequest, existing *Worktree) error {
@@ -1410,6 +1574,75 @@ func (m *Manager) copyConfiguredFiles(ctx context.Context, req CreateRequest, wt
 	wt.CopyFilesWarnings = warnings
 }
 
+// removeRecreatedWorktreePath deletes only a managed worktree path through
+// no-follow directory handles. Legacy paths outside tasksBase retain their
+// existing behavior because they are not controlled by the managed root.
+func (m *Manager) removeRecreatedWorktreePath(ctx context.Context, worktreePath string) error {
+	tasksBase, err := m.config.ExpandedTasksBasePath()
+	if err != nil {
+		return fmt.Errorf("resolve tasks base path for recreate removal: %w", err)
+	}
+	tasksBase = filepath.Clean(tasksBase)
+	relativePath, err := filepath.Rel(tasksBase, worktreePath)
+	if err != nil || relativePath == "." || relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
+		if err := os.RemoveAll(worktreePath); err != nil {
+			return fmt.Errorf("remove existing worktree path: %w", err)
+		}
+		return nil
+	}
+	if err := storageworkspaces.RemoveDirectoryNoFollow(ctx, tasksBase, worktreePath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove existing worktree path without following links: %w", err)
+	}
+	return nil
+}
+
+// restoreMissingTasksBaseForRecreate rebuilds the task-root directory only when
+// the configured managed base disappeared. The persisted task directory name
+// fixes the root identity, while a fresh symlink validation protects the newly
+// created path before Git is allowed to populate it.
+func (m *Manager) restoreMissingTasksBaseForRecreate(worktreePath string, existing *Worktree) error {
+	tasksBase, err := m.config.ExpandedTasksBasePath()
+	if err != nil {
+		return fmt.Errorf("resolve tasks base path for recreate: %w", err)
+	}
+	tasksBase = filepath.Clean(tasksBase)
+	relativePath, err := filepath.Rel(tasksBase, worktreePath)
+	if err != nil || relativePath == "." || relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
+		return nil
+	}
+	if _, err := os.Lstat(tasksBase); !errors.Is(err, os.ErrNotExist) {
+		if err != nil {
+			return fmt.Errorf("inspect tasks base path for recreate: %w", err)
+		}
+		return nil
+	}
+
+	taskDirName := strings.SplitN(relativePath, string(filepath.Separator), 2)[0]
+	if existing.TaskDirName != "" && existing.TaskDirName != taskDirName {
+		return fmt.Errorf("cannot recreate worktree: persisted task root %q does not match path root %q", existing.TaskDirName, taskDirName)
+	}
+	taskRoot := filepath.Join(tasksBase, taskDirName)
+	// Build the missing base and task root through no-follow directory handles.
+	// This keeps a concurrent replacement of tasksBase from redirecting marker
+	// creation into an external directory.
+	taskRootHandle, err := storageworkspaces.CreateDirectoryNoFollow(tasksBase, taskRoot, 0o755)
+	if err != nil {
+		return fmt.Errorf("recreate missing tasks base: %w", err)
+	}
+	defer func() { _ = taskRootHandle.Close() }()
+	if err := taskRootHandle.VerifyPath(taskRoot); err != nil {
+		return fmt.Errorf("recreated task root changed during recovery: %w", err)
+	}
+	markerTaskDirName := taskDirName
+	if err := storageworkspaces.WriteOwnershipMarkerNoFollow(taskRootHandle, storageworkspaces.OwnershipMarker{
+		TaskID: existing.TaskID, TaskDirName: markerTaskDirName,
+		LayoutVersion: storageworkspaces.LayoutVersionSemantic,
+	}); err != nil {
+		return fmt.Errorf("mark recreated task directory ownership: %w", err)
+	}
+	return nil
+}
+
 // recreate recreates a worktree from stored metadata.
 func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRequest) (*Worktree, error) {
 	if err := m.refreshRepositoryForMaterialization(ctx, &req); err != nil {
@@ -1425,10 +1658,12 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 		}
 	}
 
-	// Clean up existing directory if present
+	// Clean up the recorded directory through no-follow descriptors. Reuse
+	// validation can race with a local rename, so path-based RemoveAll here
+	// could otherwise be redirected into another task root.
 	if existing.Path != "" {
-		if err := os.RemoveAll(existing.Path); err != nil {
-			m.logger.Debug("failed to remove existing worktree path", zap.Error(err))
+		if err := m.removeRecreatedWorktreePath(ctx, existing.Path); err != nil {
+			return nil, err
 		}
 	}
 
@@ -1452,6 +1687,9 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 	worktreePath := existing.Path
 	if worktreePath == "" {
 		return nil, fmt.Errorf("cannot recreate worktree: existing record has no path")
+	}
+	if err := m.restoreMissingTasksBaseForRecreate(worktreePath, existing); err != nil {
+		return nil, err
 	}
 
 	// Archive deletes the local branch (removeWorktree runs `git branch -D`),

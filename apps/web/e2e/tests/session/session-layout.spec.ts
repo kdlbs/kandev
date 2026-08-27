@@ -119,7 +119,12 @@ test.describe("Session layout", () => {
     await sessionB.showSessionContext(30_000);
     await sessionB.waitForChatIdle({ timeout: 30_000 });
 
-    // Task B should have default (non-maximized) layout
+    // Git updates can legitimately focus Changes while the task settles. The
+    // maximize invariant is about group visibility, so select Files before
+    // asserting the default right-column panel.
+    await sessionB.clickTab("Files");
+
+    // Task B should have default (non-maximized) layout.
     await sessionB.expectDefaultLayout();
 
     // Navigate back to Task A's session URL — this triggers a full page load,

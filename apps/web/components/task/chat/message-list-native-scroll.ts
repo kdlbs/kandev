@@ -1,3 +1,5 @@
+/* eslint-disable max-lines -- pagination, scroll anchoring, and retry state share one boundary. */
+
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useAppStoreApi } from "@/components/state-provider";
@@ -348,6 +350,8 @@ export function useAutoScroll(params: {
   const storeApi = useAppStoreApi();
   const isNearBottomRef = useRef(true);
   const prevIsWorkingRef = useRef(isWorking);
+  const prevEnabledRef = useRef(enabled);
+  const frozenScrollTopRef = useRef<number | null>(null);
 
   const resyncIsNearBottom = useCallback(() => {
     const el = scrollRef.current;
@@ -374,6 +378,7 @@ export function useAutoScroll(params: {
      * coalesced persistence of the scroll position. */
     const onScroll = () => {
       resyncIsNearBottom();
+      if (!enabled) frozenScrollTopRef.current = el.scrollTop;
       coalescer.schedule();
     };
     el.addEventListener("scroll", onScroll, { passive: true });
@@ -385,7 +390,29 @@ export function useAutoScroll(params: {
       // if a coalesced write above was still pending.
       coalescer.flush();
     };
-  }, [scrollRef, sessionId, storeApi, resyncIsNearBottom]);
+  }, [scrollRef, sessionId, storeApi, resyncIsNearBottom, enabled]);
+
+  // Own the disabled offset across every transcript layout update. Sending a
+  // prompt can briefly shrink the scroll range before the new message row is
+  // committed, which makes the browser clamp scrollTop even with
+  // overflow-anchor disabled. Keep the pre-update offset and reapply it after
+  // each message/working-state render so that transient clamp cannot move the
+  // reader. Real user scroll events update the owned offset above.
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const wasEnabled = prevEnabledRef.current;
+    prevEnabledRef.current = enabled;
+    if (enabled) {
+      frozenScrollTopRef.current = null;
+      return;
+    }
+    if (wasEnabled || frozenScrollTopRef.current === null) {
+      frozenScrollTopRef.current = el.scrollTop;
+      return;
+    }
+    el.scrollTop = frozenScrollTopRef.current;
+  }, [enabled, isWorking, messages, scrollRef]);
 
   // When isWorking transitions to true, force scroll to bottom (unless
   // disabled, locked, or a layout rebuild scroll restore is pending).

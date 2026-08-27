@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
-import { useVisualViewportOffset } from "./use-visual-viewport-offset";
+import {
+  resolveVisualViewportPosition,
+  useVisualViewportOffset,
+} from "./use-visual-viewport-offset";
 
 class MockVisualViewport extends EventTarget {
   height = 800;
@@ -117,5 +120,29 @@ describe("useVisualViewportOffset", () => {
     expect(result.current.bottomOffset).toBe(0);
     expect(result.current.keyboardOpen).toBe(false);
     expect(result.current.viewportBottom).toBe(0);
+  });
+});
+
+describe("resolveVisualViewportPosition", () => {
+  it("anchors a bar above the visual viewport when the keyboard is open", () => {
+    expect(
+      resolveVisualViewportPosition({
+        keyboardOpen: true,
+        viewportBottom: 650,
+        barHeight: 56,
+        baseBottomOffset: "3.25rem",
+      }),
+    ).toEqual({ top: "594px", bottom: "auto" });
+  });
+
+  it("uses the safe-area-aware base offset when the keyboard is closed", () => {
+    expect(
+      resolveVisualViewportPosition({
+        keyboardOpen: false,
+        viewportBottom: 650,
+        barHeight: 56,
+        baseBottomOffset: "3.25rem",
+      }),
+    ).toEqual({ bottom: "calc(3.25rem + env(safe-area-inset-bottom, 0px))" });
   });
 });

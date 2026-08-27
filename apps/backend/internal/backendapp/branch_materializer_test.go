@@ -336,6 +336,9 @@ func seedMaterializerTask(t *testing.T, ctx context.Context, repo *sqliterepo.Re
 		WorkspacePath: primaryPath,
 		ExecutorType:  "worktree", Status: "ready",
 		CreatedAt: now, UpdatedAt: now,
+		Repos: []*models.TaskEnvironmentRepo{
+			{ID: "env-1-repo-primary", RepositoryID: "repo-1", WorktreePath: primaryPath, CreatedAt: now},
+		},
 	}); err != nil {
 		t.Fatalf("CreateTaskEnvironment: %v", err)
 	}

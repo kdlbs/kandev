@@ -112,11 +112,13 @@ function AutoScrollHarness({
   hasUnreadDivider,
   messages = TEST_MESSAGES,
   markRef,
+  enabled = true,
 }: {
   isWorking: boolean;
   hasUnreadDivider: boolean;
   messages?: Message[];
   markRef?: { current?: () => void };
+  enabled?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const { markNotNearBottom } = useAutoScroll({
@@ -124,7 +126,7 @@ function AutoScrollHarness({
     messages,
     isWorking,
     sessionId: null,
-    enabled: true,
+    enabled,
     hasUnreadDivider,
     isProgrammaticScrollLocked: NEVER_LOCKED,
   });
@@ -403,6 +405,33 @@ describe("useScrollToDividerOrBottom — anchored-bar offset", () => {
     );
 
     expect(scrollContainer.scrollTop).toBe(123);
+  });
+
+  it("restores the disabled offset after a transient layout clamp", () => {
+    const { rerender } = render(
+      <AutoScrollHarness isWorking={false} hasUnreadDivider={false} enabled />,
+    );
+    const scrollContainer = document.querySelector<HTMLElement>(
+      '[data-testid="auto-scroll-container"]',
+    );
+    if (!scrollContainer) throw new Error("auto-scroll container did not render");
+    setScrollMetrics(scrollContainer);
+    scrollContainer.scrollTop = 600;
+
+    rerender(<AutoScrollHarness isWorking={false} hasUnreadDivider={false} enabled={false} />);
+    // Model the browser temporarily reducing the maximum scroll offset while
+    // the composer clears, before the appended transcript row is committed.
+    scrollContainer.scrollTop = 568;
+    rerender(
+      <AutoScrollHarness
+        isWorking
+        hasUnreadDivider={false}
+        enabled={false}
+        messages={[...TEST_MESSAGES, {} as Message]}
+      />,
+    );
+
+    expect(scrollContainer.scrollTop).toBe(600);
   });
 
   it("never re-scrolls once the reader has started scrolling, even if the anchored bar's height changes afterward", () => {
