@@ -215,6 +215,9 @@ export function TaskDescriptionEditable({
   // after its `await` without closing over a stale value typed during the
   // in-flight request (AC-17 vs AC-42).
   const draftRef = useRef("");
+  // Invalidated when taskId changes so an old request cannot update the
+  // replacement task's editor state.
+  const saveGenerationRef = useRef(0);
 
   const isDirty = draft.trim() !== baseline;
   const hasRunningSession = sessions.some((s) => s.state === "RUNNING");
@@ -230,6 +233,7 @@ export function TaskDescriptionEditable({
   // draft never lingers over the new task.
   useEffect(() => {
     return () => {
+      saveGenerationRef.current += 1;
       closeFieldEditor(taskId, "description");
       setIsEditing(false);
       setIsSaving(false);
@@ -281,7 +285,9 @@ export function TaskDescriptionEditable({
     if (isSaving || !isDirty) return;
     setIsSaving(true);
     const trimmed = draft.trim();
+    const saveGeneration = saveGenerationRef.current;
     const result = await commitDescription(taskId, trimmed);
+    if (saveGeneration !== saveGenerationRef.current) return;
     setIsSaving(false);
     if (!result.ok) return; // stays open, draft intact (AC-18)
     if (draftRef.current.trim() === trimmed) {

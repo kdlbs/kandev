@@ -288,9 +288,9 @@ export function useTaskOptimisticHelpers(
 
   const applyTaskPatch = useCallback(
     (patch: Partial<Task>) => {
-      setTask((prev) => (prev ? { ...prev, ...patch } : prev));
+      setTask((prev) => (prev && prev.id === id ? { ...prev, ...patch } : prev));
     },
-    [setTask],
+    [id, setTask],
   );
 
   // AC-27/49/50/71: apply a field's canonical value to the displayed task
@@ -306,7 +306,9 @@ export function useTaskOptimisticHelpers(
   useEffect(() => {
     let unmounted = false;
     const unsubTitle = subscribeField(id, "title", (value) => {
-      setTask((prev) => (prev && prev.title !== value ? { ...prev, title: value } : prev));
+      setTask((prev) =>
+        prev && prev.id === id && prev.title !== value ? { ...prev, title: value } : prev,
+      );
       const current = storeApi.getState().office.tasks.items.find((t) => t.id === id);
       if (current && current.title !== value) {
         storeApi.getState().patchTaskInStore(id, { title: value });
@@ -315,7 +317,9 @@ export function useTaskOptimisticHelpers(
     });
     const unsubDescription = subscribeField(id, "description", (value) => {
       setTask((prev) =>
-        prev && (prev.description ?? "") !== value ? { ...prev, description: value } : prev,
+        prev && prev.id === id && (prev.description ?? "") !== value
+          ? { ...prev, description: value }
+          : prev,
       );
       const current = storeApi.getState().office.tasks.items.find((t) => t.id === id);
       if (current && (current.description ?? "") !== value) {
@@ -387,10 +391,12 @@ export function useTaskOptimisticHelpers(
   const restoreTask = useCallback(
     (snapshot: Task) => {
       setTask((prev) =>
-        prev ? { ...snapshot, title: prev.title, description: prev.description } : snapshot,
+        prev && prev.id === id
+          ? { ...snapshot, title: prev.title, description: prev.description }
+          : prev,
       );
     },
-    [setTask],
+    [id, setTask],
   );
 
   return { applyTaskPatch, restoreTask };
@@ -539,7 +545,9 @@ export function useIssueData(id: string) {
           // overwrite those two fields — same merge pattern as `refetchTask`
           // and `onTaskRefetch` below.
           setTask((prev) =>
-            prev ? { ...freshTask, title: prev.title, description: prev.description } : freshTask,
+            prev && prev.id === id
+              ? { ...freshTask, title: prev.title, description: prev.description }
+              : freshTask,
           );
           if (res.timeline) setTimeline(res.timeline);
           // AC-59: the initial load seeds each field's canonical value.

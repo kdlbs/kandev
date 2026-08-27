@@ -424,6 +424,48 @@ describe("TaskDescriptionEditable taskId change while editing (P1 review fix, CO
     expect(screen.queryByTestId(TEXTAREA_TESTID)).toBeNull();
     expect(screen.getByTestId(READ_TESTID).textContent).toBe("Other task description");
   });
+
+  it("ignores an old save result after the replacement task editor opens", async () => {
+    let resolveUpdate: (value: never) => void = () => {};
+    mockedUpdateTask.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveUpdate = resolve;
+        }),
+    );
+    const { rerender } = render(
+      <Wrapper>
+        <TaskDescriptionEditable taskId="t-1" description={ORIGINAL_DESCRIPTION} sessions={[]} />
+      </Wrapper>,
+    );
+    fireEvent.click(screen.getByTestId(READ_TESTID));
+    const textarea = screen.getByTestId(TEXTAREA_TESTID) as HTMLTextAreaElement;
+    changeDraft(textarea, CHANGED_DESCRIPTION);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId(SAVE_TESTID));
+      await Promise.resolve();
+    });
+
+    rerender(
+      <Wrapper>
+        <TaskDescriptionEditable taskId="t-2" description="Other task description" sessions={[]} />
+      </Wrapper>,
+    );
+    fireEvent.click(screen.getByTestId(READ_TESTID));
+    expect((screen.getByTestId(TEXTAREA_TESTID) as HTMLTextAreaElement).value).toBe(
+      "Other task description",
+    );
+
+    await act(async () => {
+      resolveUpdate({ description: CHANGED_DESCRIPTION, updated_at: UPDATED_AT } as never);
+    });
+
+    expect((screen.getByTestId(TEXTAREA_TESTID) as HTMLTextAreaElement).value).toBe(
+      "Other task description",
+    );
+    expect((screen.getByTestId(SAVE_TESTID) as HTMLButtonElement).disabled).toBe(true);
+  });
 });
 
 describe("TaskDescriptionEditable running-session note", () => {

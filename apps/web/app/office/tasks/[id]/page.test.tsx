@@ -99,8 +99,8 @@ function taskFixture(overrides: Partial<Task> = {}): Task {
   };
 }
 
-function makeTaskRefSetter() {
-  const taskRef: { current: Task | null } = { current: taskFixture() };
+function makeTaskRefSetter(initialTask: Task = taskFixture()) {
+  const taskRef: { current: Task | null } = { current: initialTask };
   const setTask: React.Dispatch<React.SetStateAction<Task | null>> = (updater) => {
     taskRef.current =
       typeof updater === "function"
@@ -360,5 +360,109 @@ describe("useTaskOptimisticHelpers — unmount cleanup order (AC-68)", () => {
 
     expect(taskRef.current?.title).toBe("Live Title");
     expect(taskRef.current?.priority).toBe("high");
+  });
+});
+
+describe("useTaskOptimisticHelpers — task id changes with pending writes", () => {
+  function renderTaskHelpers() {
+    const oldTask = taskFixture({ id: "t-1", title: "Old title", description: "Old description" });
+    const newTask = taskFixture({ id: "t-2", title: "New title", description: "New description" });
+    const { taskRef, setTask } = makeTaskRefSetter(oldTask);
+    const setTimeline = vi.fn();
+    const Wrapper = makeStoreWrapper([]);
+    const rendered = renderHook(
+      ({ taskId }: { taskId: string }) => useTaskOptimisticHelpers(taskId, setTask, setTimeline),
+      { initialProps: { taskId: "t-1" }, wrapper: Wrapper },
+    );
+    return { ...rendered, oldTask, newTask, taskRef };
+  }
+
+  it("does not apply an old task's deferred title to the replacement task", () => {
+    const sequence = nextTaskSequence("t-1");
+    beginWrite("t-1", TITLE_FIELD, sequence);
+    const { rerender, unmount, newTask, taskRef } = renderTaskHelpers();
+
+    taskRef.current = newTask;
+    rerender({ taskId: "t-2" });
+
+    act(() => {
+      recordWriteSuccess(
+        "t-1",
+        TITLE_FIELD,
+        "Old title from server",
+        "2026-05-01T00:00:05Z",
+        sequence,
+      );
+      endWrite("t-1", TITLE_FIELD, sequence);
+    });
+
+    expect(taskRef.current).toEqual(newTask);
+    unmount();
+  });
+
+  it("does not apply an old task's captured patch or restore to the replacement task", () => {
+    const { result, rerender, unmount, newTask, oldTask, taskRef } = renderTaskHelpers();
+    const oldApplyPatch = result.current.applyTaskPatch;
+    const oldRestoreTask = result.current.restoreTask;
+
+    taskRef.current = newTask;
+    rerender({ taskId: "t-2" });
+
+    act(() => {
+      oldApplyPatch({ title: "Old optimistic title" });
+      oldRestoreTask({ ...oldTask, title: "Old restored title", priority: "high" });
+    });
+
+    expect(taskRef.current).toEqual(newTask);
+    unmount();
+  });
+});
+
+describe("useIssueData — initial load task identity", () => {
+  it("does not preserve the previous task's guarded fields after a route change", async () => {
+    mockListActivityForTarget.mockResolvedValue({ activity: [] });
+    mockListComments.mockResolvedValue({ comments: [] });
+    mockListTaskSessions.mockResolvedValue({ sessions: [] });
+    const firstLoad = deferred<{ task: OfficeTask; timeline: [] }>();
+    const secondLoad = deferred<{ task: OfficeTask; timeline: [] }>();
+    mockGetTask.mockImplementation((taskId: string) =>
+      taskId === "t-1" ? firstLoad.promise : secondLoad.promise,
+    );
+
+    const Wrapper = makeStoreWrapper([
+      { ...officeTaskFixture, title: "First task", description: "First description" },
+    ]);
+    const { result, rerender } = renderHook(
+      ({ taskId }: { taskId: string }) => useIssueData(taskId),
+      { initialProps: { taskId: "t-1" }, wrapper: Wrapper },
+    );
+
+    act(() => {
+      firstLoad.resolve({
+        task: { ...officeTaskFixture, title: "First task", description: "First description" },
+        timeline: [],
+      });
+    });
+    await waitFor(() => expect(result.current.task?.id).toBe("t-1"));
+    rerender({ taskId: "t-2" });
+    openFieldEditor("t-2", TITLE_FIELD);
+    await act(async () => {
+      secondLoad.resolve({
+        task: {
+          ...officeTaskFixture,
+          id: "t-2",
+          identifier: "TASK-2",
+          title: "Second task",
+          description: "Second description",
+        },
+        timeline: [],
+      });
+      await secondLoad.promise;
+    });
+    await waitFor(() => expect(result.current.task?.id).toBe("t-2"));
+
+    expect(result.current.task?.title).toBe("Second task");
+    expect(result.current.task?.description).toBe("Second description");
+    closeFieldEditor("t-2", TITLE_FIELD);
   });
 });
