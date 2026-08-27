@@ -109,7 +109,6 @@ func TestEnsureRepoLocalPathReevaluatesGitHubProtocol(t *testing.T) {
 	}
 }
 
-
 // @covers AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.11
 // @covers AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.12
 func TestLaunchPreparedSession_ExistingWorkspace_ReconcilesGitHubOriginsBeforeAgentStart(t *testing.T) {

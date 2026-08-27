@@ -1,6 +1,6 @@
 ---
 created: 2026-08-27
-status: in_progress
+status: done
 requirements:
   - REQ-INTEGRATIONS-GITHUB-AUTHENTICATION-001
 system_design:
@@ -21,8 +21,7 @@ moves the existing repository-resolution pass before the prepared-workspace bran
 launch path then reuses the same result.
 
 This order closes the fast-path gap without another repository pass. The launch-order work is
-implemented, but the plan remains in progress until #3069's dynamic, host-aware Git protocol
-resolution lands and this change is rebased onto it.
+implemented on top of #3069's dynamic, host-aware Git protocol resolution from PR #3078.
 
 ## Confirmed root cause
 
@@ -72,13 +71,14 @@ to `configureExistingWorkspace` or duplicate policy resolution.
 
 ### Coordination with #3069
 
-Implement this work after #3069 lands or rebase it onto the #3069 result. Executor-mode origin
-selection must call the dynamic, host-aware protocol seam from #3069. This work must not add a
-second protocol cache, detector, or host lookup.
+This branch is rebased onto PR #3078, commit `b976260e69b5abf421cfa9742dfc5c37d533ac0f`, which
+provides the dynamic, host-aware protocol resolver and context-aware `RepoCloner` contract.
+Executor-mode origin selection uses that seam. This work adds no second protocol cache, detector,
+or host lookup.
 
 ## Tests
 
-- `AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.9`: add
+- `AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.11`: add
   `TestLaunchPreparedSession_ExistingWorkspace_ReconcilesGitHubOriginsBeforeAgentStart` in
   `apps/backend/internal/orchestrator/executor/executor_resume_clone_transport_test.go`.
 - Exercise `LaunchPreparedSession` with a running row and an in-memory execution. Do not call the
@@ -90,7 +90,7 @@ second protocol cache, detector, or host lookup.
 - Wrap the real cloner to count `SetOriginURL` calls. At agent start, assert that both origins are
   canonical and each managed repository received one call for this launch.
 - Keep `TestEnsureRepoLocalPath_DoesNotRewriteUserManagedOrigin` as coverage for
-  `AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.10` and the local-checkout exclusion.
+  `AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.12` and the local-checkout exclusion.
 
 ## Work orders
 
@@ -98,8 +98,9 @@ second protocol cache, detector, or host lookup.
 
 ## Verification results
 
-Implemented the launch-order correction and the real prepared-workspace regression. The focused
-regression passed, followed by the complete executor and repoclone package command:
+Implemented the launch-order correction and the real prepared-workspace regression on top of the
+#3069 resolver contract. The focused regression passed, followed by the complete executor and
+repoclone package command:
 
 ```text
 go test -tags fts5 ./internal/orchestrator/executor -run 'TestLaunchPreparedSession_ExistingWorkspace_ReconcilesGitHubOriginsBeforeAgentStart$' -count=1
@@ -109,15 +110,22 @@ go test -tags fts5 ./internal/orchestrator/executor ./internal/repoclone
 Go test: 620 passed in 2 packages
 ```
 
-`python3 scripts/lint-spec-files.py --all` also passed. Issue #3069 remains open, so the
-executor-mode transport prerequisite is not yet satisfied. This change intentionally consumes
-the existing `RepoCloner.BuildCloneURLWithHost` seam and adds no protocol detection; rebase this
-plan and its implementation after #3069 lands before marking the plan complete.
+The dynamic protocol reevaluation regression from #3069 also passed:
+
+```text
+go test -tags fts5 ./internal/orchestrator/executor -run 'TestEnsureRepoLocalPathReevaluatesGitHubProtocol$' -count=1
+Go test: 1 passed in 1 packages
+```
+
+`python3 scripts/lint-spec-files.py --all` also passed. PR #3078 supplies the dynamic,
+host-aware protocol resolver and context-aware `RepoCloner.BuildCloneURLWithHost` contract; this
+branch is rebased onto commit `b976260e69b5abf421cfa9742dfc5c37d533ac0f` and adds no protocol
+detection.
 
 ## Risks
 
-- #3069 can change the `RepoCloner` protocol-resolution seam before implementation starts. Rebase
-  first and adapt the regression fixture to the landed interface.
+- The context-aware protocol-resolution seam from #3069 is now integrated. Future changes to that
+  contract must update this regression fixture and its adapter together.
 - Repository preparation can now stop an existing-workspace launch before agent start. This is the
   required fail-closed behavior, but it makes stale checkout ownership and Git errors visible on
   this path.

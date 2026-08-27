@@ -8,8 +8,8 @@ plan: "plan.md"
 requirements:
   - REQ-INTEGRATIONS-GITHUB-AUTHENTICATION-001
 acceptance_criteria:
-  - AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.9
-  - AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.10
+  - AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.11
+  - AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.12
 system_design:
   - ../../specs/integrations/system-design/github-authentication-01.md
   - ../../specs/integrations/system-design/github-authentication-02.md
@@ -36,7 +36,7 @@ full launch path.
 
 ## Out of scope
 
-- Implementing or changing #3069 protocol detection.
+- Implementing or changing #3069 protocol detection, which is supplied by PR #3078.
 - Adding #3072 host `gh` credential bridging.
 - Changing `repoclone.Cloner.SetOriginURL` no-op or serialization behavior.
 - Changing user-managed local checkout behavior.
@@ -64,14 +64,15 @@ Run these commands from `apps/backend`.
 
 ## Dependencies
 
-- #3069 must land first, or its branch must be present during implementation. Use its dynamic,
-  host-aware protocol resolver through the landed `RepoCloner` contract.
+- PR #3078, commit `b976260e69b5abf421cfa9742dfc5c37d533ac0f`, supplies the dynamic, host-aware
+  protocol resolver. Use its context-aware `RepoCloner` contract.
 
 ## Risks
 
 - The asynchronous agent-start test needs a bounded completion signal. It must not use a fixed
   sleep.
-- The #3069 interface can change the test cloner shape.
+- The context-aware #3069 contract is now integrated; the regression fixture must continue to pass
+  the launch context through protocol-aware clone URL construction.
 
 ## Parallelism
 
@@ -79,7 +80,7 @@ Run these commands from `apps/backend`.
 
 ## Inputs
 
-- `REQ-INTEGRATIONS-GITHUB-AUTHENTICATION-001` and its acceptance criteria 001.9 and 001.10.
+- `REQ-INTEGRATIONS-GITHUB-AUTHENTICATION-001` and its acceptance criteria 001.11 and 001.12.
 - The repository-preparation and task-resolution sections in the three GitHub authentication
   system-design documents.
 - `LaunchPreparedSession`, `startAgentOnExistingWorkspace`, and
@@ -102,5 +103,6 @@ Verification passed:
 ```text
 go test -tags fts5 ./internal/orchestrator/executor -run 'TestLaunchPreparedSession_ExistingWorkspace_ReconcilesGitHubOriginsBeforeAgentStart$' -count=1
 go test -tags fts5 ./internal/orchestrator/executor ./internal/repoclone
+go test -tags fts5 ./internal/orchestrator/executor -run 'TestEnsureRepoLocalPathReevaluatesGitHubProtocol$' -count=1
 python3 scripts/lint-spec-files.py --all
 ```
