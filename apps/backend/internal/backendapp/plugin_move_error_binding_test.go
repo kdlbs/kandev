@@ -13,6 +13,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/plugins"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
@@ -36,6 +37,7 @@ type pluginMoveErrorBindingHarness struct {
 	repo        *sqliterepo.Repository
 	workflowSvc *workflowservice.Service
 	db          *sqlx.DB
+	eventBus    *bus.MemoryEventBus
 }
 
 func newPluginMoveErrorBindingHarness(t *testing.T) *pluginMoveErrorBindingHarness {
@@ -59,6 +61,7 @@ func newPluginMoveErrorBindingHarness(t *testing.T) *pluginMoveErrorBindingHarne
 	if err != nil {
 		t.Fatalf("logger: %v", err)
 	}
+	eventBus := bus.NewMemoryEventBus(log)
 	taskSvc := taskservice.NewService(taskservice.Repos{
 		Workspaces:       taskRepo,
 		Tasks:            taskRepo,
@@ -74,7 +77,7 @@ func newPluginMoveErrorBindingHarness(t *testing.T) *pluginMoveErrorBindingHarne
 		TaskEnvironments: taskRepo,
 		Reviews:          taskRepo,
 		ResourceCleanups: taskRepo,
-	}, bus.NewMemoryEventBus(log), log, taskservice.RepositoryDiscoveryConfig{})
+	}, eventBus, log, taskservice.RepositoryDiscoveryConfig{})
 	workflowSvc := workflowservice.NewService(workflowRepo, log)
 	taskSvc.SetWorkflowStepGetter(&workflowStepGetterAdapter{svc: workflowSvc})
 	// Matches production wiring (backendapp.wireServices calls
@@ -98,6 +101,7 @@ func newPluginMoveErrorBindingHarness(t *testing.T) *pluginMoveErrorBindingHarne
 		repo:        taskRepo,
 		workflowSvc: workflowSvc,
 		db:          database,
+		eventBus:    eventBus,
 	}
 }
 
@@ -142,6 +146,22 @@ func (h *pluginMoveErrorBindingHarness) lastSessionStepHistoryTrigger(t *testing
 	return trigger
 }
 
+// requireTaskUnmoved reads taskID back from the real repository and asserts
+// its workflow/step are still exactly h.createTask's defaults (wf-home /
+// step-home). Every rejected-move subtest below drives a real task through
+// h.adapter.MoveTask and only ever asserts the returned error — never that
+// the DB row was left untouched. A regression that validates then writes
+// unconditionally (or writes before validating) would still pass every
+// existing assertion in this file; this closes that gap by proving a
+// rejection has zero persisted side effects, not just a non-nil error.
+func requireTaskUnmoved(t *testing.T, h *pluginMoveErrorBindingHarness, taskID string) {
+	t.Helper()
+	task, err := h.repo.GetTask(context.Background(), taskID)
+	require.NoError(t, err)
+	require.Equal(t, "wf-home", task.WorkflowID, "a rejected move must not persist a workflow change")
+	require.Equal(t, "step-home", task.WorkflowStepID, "a rejected move must not persist a step change")
+}
+
 // TestClassifyPluginMoveError_BindsToRealValidatorStrings pins AC-004.6: the
 // binding error-mapping table in classifyPluginMoveError must be exercised
 // against errors the real validateTaskMove/GetWorkflow/GetStep code paths
@@ -169,6 +189,7 @@ func TestClassifyPluginMoveError_BindsToRealValidatorStrings(t *testing.T) {
 		st := status.Convert(err)
 		require.Equal(t, codes.FailedPrecondition, st.Code())
 		require.Equal(t, "task is archived and cannot be moved", st.Message())
+		requireTaskUnmoved(t, h, "task-archived")
 	})
 
 	t.Run("active session, AC-001.8", func(t *testing.T) {
@@ -184,6 +205,7 @@ func TestClassifyPluginMoveError_BindsToRealValidatorStrings(t *testing.T) {
 		require.Equal(t, codes.FailedPrecondition, st.Code())
 		require.Equal(t, "task has an active session and cannot be moved", st.Message())
 		require.NotContains(t, st.Message(), "RUNNING", "message must not leak the session's internal state value")
+		requireTaskUnmoved(t, h, "task-live-session")
 	})
 
 	t.Run("unknown workflow, AC-001.6", func(t *testing.T) {
@@ -197,6 +219,7 @@ func TestClassifyPluginMoveError_BindsToRealValidatorStrings(t *testing.T) {
 		require.Equal(t, codes.InvalidArgument, st.Code())
 		require.Equal(t, invalidArgMsg, st.Message())
 		require.NotContains(t, st.Message(), missing, "message must not leak the requested workflow id")
+		requireTaskUnmoved(t, h, "task-unknown-wf")
 	})
 
 	t.Run("different workspace, AC-001.6", func(t *testing.T) {
@@ -210,6 +233,7 @@ func TestClassifyPluginMoveError_BindsToRealValidatorStrings(t *testing.T) {
 		require.Equal(t, codes.InvalidArgument, st.Code())
 		require.Equal(t, invalidArgMsg, st.Message())
 		require.NotContains(t, st.Message(), other, "message must not leak the target workflow id")
+		requireTaskUnmoved(t, h, "task-cross-workspace")
 	})
 
 	t.Run("unknown step, AC-001.6", func(t *testing.T) {
@@ -223,6 +247,7 @@ func TestClassifyPluginMoveError_BindsToRealValidatorStrings(t *testing.T) {
 		require.Equal(t, codes.InvalidArgument, st.Code())
 		require.Equal(t, invalidArgMsg, st.Message())
 		require.NotContains(t, st.Message(), missingStep, "message must not leak the requested step id")
+		requireTaskUnmoved(t, h, "task-unknown-step")
 	})
 
 	t.Run("step not in workflow, AC-001.6", func(t *testing.T) {
@@ -237,6 +262,7 @@ func TestClassifyPluginMoveError_BindsToRealValidatorStrings(t *testing.T) {
 		require.Equal(t, invalidArgMsg, st.Message())
 		require.NotContains(t, st.Message(), "step-home", "message must not leak the requested step id")
 		require.NotContains(t, st.Message(), "wf-home", "message must not leak the task's actual workflow id")
+		requireTaskUnmoved(t, h, "task-step-wrong-workflow")
 	})
 
 	t.Run("task not found, AC-005.6", func(t *testing.T) {
@@ -350,4 +376,43 @@ func TestPluginMoveWithLiveNonBlockingSessionRecordsPluginMoveTrigger(t *testing
 	trigger := h.lastSessionStepHistoryTrigger(t, "session-waiting")
 	require.Equal(t, string(wfmodels.StepTransitionTriggerPluginMove), trigger,
 		"a plugin move against a task with a live session must record plugin_move, not fall back to manual")
+}
+
+// TestPluginMovePublishesTaskMovedEvent closes the test-rigor gap flagged
+// alongside the round-5 CAS fix: the whole point of routing plugin moves
+// through MoveTaskWithOptions (rather than the old UpdateTask WorkflowStepID
+// path) is that a move publishes task.moved so the orchestrator runs
+// on_enter/on_exit step actions. No existing test subscribes to the event
+// bus to prove a plugin-initiated move actually publishes it — every other
+// test in this file only asserts the DB row or the audit trigger. This
+// subscribes before the move and asserts the handler observed the event
+// synchronously (MemoryEventBus.Publish dispatches subscribers inline) with
+// the expected task/step identifiers.
+func TestPluginMovePublishesTaskMovedEvent(t *testing.T) {
+	h := newPluginMoveErrorBindingHarness(t)
+	h.createTask(t, "task-publishes-move", false)
+	wf := "wf-target"
+
+	var received *bus.Event
+	sub, err := h.eventBus.Subscribe(events.TaskMoved, func(_ context.Context, event *bus.Event) error {
+		received = event
+		return nil
+	})
+	require.NoError(t, err)
+	defer func() { _ = sub.Unsubscribe() }()
+
+	_, err = h.adapter.MoveTask(context.Background(), plugins.TaskMoveInput{
+		TaskID: "task-publishes-move", WorkflowStepID: "step-target", WorkflowID: &wf, Source: "plugin:acme",
+	})
+	require.NoError(t, err)
+
+	require.NotNil(t, received, "a plugin move must publish task.moved so on_enter/on_exit step actions fire")
+	require.Equal(t, events.TaskMoved, received.Type)
+	data, ok := received.Data.(map[string]interface{})
+	require.True(t, ok, "task.moved event data must be a map")
+	require.Equal(t, "task-publishes-move", data["task_id"])
+	require.Equal(t, "wf-home", data["from_workflow_id"])
+	require.Equal(t, "wf-target", data["to_workflow_id"])
+	require.Equal(t, "step-home", data["from_step_id"])
+	require.Equal(t, "step-target", data["to_step_id"])
 }

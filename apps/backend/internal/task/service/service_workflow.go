@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
@@ -432,10 +433,17 @@ type MoveTaskOptions struct {
 
 // ErrWorkflowResolutionConflict indicates a caller's pre-resolved "current
 // workflow" (see MoveTaskOptions.ExpectedWorkflowID) no longer matches the
-// task's actual workflow by the time the move is applied — a concurrent
-// reassignment won the race. The move is rejected rather than silently
-// reverting that reassignment.
-var ErrWorkflowResolutionConflict = errors.New("task workflow changed since resolution")
+// task's actual workflow — a concurrent reassignment won the race. The move
+// is rejected rather than silently reverting that reassignment.
+//
+// This is an alias for repoerrors.ErrWorkflowResolutionConflict, not a
+// separate sentinel: the same check now also runs atomically inside the
+// repository's write transaction (UpdateTaskIfWorkflowMatches,
+// UpdateTaskWithWorkflowStepAdmissionAndState), which returns the repoerrors
+// value directly. Keeping one sentinel means callers using errors.Is against
+// either name catch both the pre-write fast-fail below and the write-time
+// guard that actually closes the race.
+var ErrWorkflowResolutionConflict = repoerrors.ErrWorkflowResolutionConflict
 
 type workflowMoveLimitsRepository interface {
 	CountTasksByWorkflowStepExcludingTask(ctx context.Context, stepID, excludeTaskID string) (int, error)
@@ -461,7 +469,19 @@ type workflowMoveAdmissionWithStateRepository interface {
 		limit int,
 		admittedState *v1.TaskState,
 		queueExitPending bool,
+		expectedWorkflowID string,
 	) (bool, error)
+}
+
+// workflowMoveConflictRepository is the same-step counterpart of
+// workflowMoveAdmissionWithStateRepository's expectedWorkflowID guard: when a
+// move does not change workflow step, updateMovedTask writes through plain
+// UpdateTask, which has no expected-workflow parameter (it is called from
+// many unrelated, non-move sites). A caller that set
+// MoveTaskOptions.ExpectedWorkflowID must instead route through this
+// narrower method so the atomic in-transaction recheck still applies.
+type workflowMoveConflictRepository interface {
+	UpdateTaskIfWorkflowMatches(ctx context.Context, task *models.Task, expectedWorkflowID string) error
 }
 
 type workflowQueuedTaskPromoter interface {
@@ -503,6 +523,13 @@ func (s *Service) MoveTaskWithOptions(
 		return nil, err
 	}
 	if opts.ExpectedWorkflowID != nil && task.WorkflowID != *opts.ExpectedWorkflowID {
+		// Cheap fast-fail only: this GetTask is not inside a lock, so it
+		// cannot by itself rule out a race landing between this read and the
+		// eventual write below. That race is closed by the atomic,
+		// in-transaction recheck updateMovedTask now performs at write time
+		// (UpdateTaskIfWorkflowMatches / UpdateTaskWithWorkflowStepAdmissionAndState).
+		// This early check only spares validateTaskMove and the session/state
+		// lookups below when the mismatch is already visible from a plain read.
 		return nil, fmt.Errorf("%w: resolved %q, task is now in %q",
 			ErrWorkflowResolutionConflict, *opts.ExpectedWorkflowID, task.WorkflowID)
 	}
@@ -587,7 +614,7 @@ func (s *Service) MoveTaskWithOptions(
 		})
 	}
 
-	_, err = s.updateMovedTask(moveCtx, task, oldStepID, targetStep, admittedState)
+	_, err = s.updateMovedTask(moveCtx, task, oldStepID, targetStep, admittedState, opts)
 	if err != nil {
 		s.logger.Error("failed to move task", zap.String("task_id", id), zap.Error(err))
 		return nil, err
@@ -1097,21 +1124,79 @@ func skippedTaskIDs(skipped map[string]struct{}) []string {
 	return ids
 }
 
-func (s *Service) updateMovedTask(ctx context.Context, task *models.Task, oldStepID string, targetStep *wfmodels.WorkflowStep, admittedState *v1.TaskState) (bool, error) {
+func (s *Service) updateMovedTask(
+	ctx context.Context,
+	task *models.Task,
+	oldStepID string,
+	targetStep *wfmodels.WorkflowStep,
+	admittedState *v1.TaskState,
+	opts MoveTaskOptions,
+) (bool, error) {
 	if targetStep == nil || oldStepID == targetStep.ID {
-		if err := s.tasks.UpdateTask(ctx, task); err != nil {
+		return s.updateMovedTaskSameStep(ctx, task, opts)
+	}
+	return s.updateMovedTaskCrossStep(ctx, task, targetStep, admittedState, opts)
+}
+
+// updateMovedTaskSameStep handles the no-step-change branch of updateMovedTask
+// (a reorder, or a plugin move that names the task's current step): it writes
+// through the plain repository UpdateTask, not one of the WIP-admission call
+// sites, since there is no admission decision to make when the step is
+// unchanged.
+func (s *Service) updateMovedTaskSameStep(ctx context.Context, task *models.Task, opts MoveTaskOptions) (bool, error) {
+	if opts.ExpectedWorkflowID != nil {
+		// Same-step writes go through plain UpdateTask, which has no
+		// expected-workflow parameter (it is the general-purpose writer
+		// used by many unrelated call sites). A caller carrying a CAS
+		// guard must route through the narrower method instead, or the
+		// guard would silently stop applying for the same-step case —
+		// see workflowMoveConflictRepository's doc.
+		conflictRepo, ok := s.tasks.(workflowMoveConflictRepository)
+		if !ok {
+			return false, fmt.Errorf("workflow conflict guard repository unavailable for task %s", task.ID)
+		}
+		if err := conflictRepo.UpdateTaskIfWorkflowMatches(ctx, task, *opts.ExpectedWorkflowID); err != nil {
 			return false, err
 		}
 		return task.WIPAdmitted, nil
 	}
+	if err := s.tasks.UpdateTask(ctx, task); err != nil {
+		return false, err
+	}
+	return task.WIPAdmitted, nil
+}
+
+// updateMovedTaskCrossStep handles the step-changing branch of
+// updateMovedTask: it runs the target step's WIP admission decision (queuing
+// the task instead of moving it when the step is at capacity) and persists
+// the result.
+func (s *Service) updateMovedTaskCrossStep(
+	ctx context.Context,
+	task *models.Task,
+	targetStep *wfmodels.WorkflowStep,
+	admittedState *v1.TaskState,
+	opts MoveTaskOptions,
+) (bool, error) {
 	admissionRepo, ok := s.tasks.(workflowMoveAdmissionRepository)
 	if !ok {
 		return false, fmt.Errorf("workflow step admission repository unavailable for step %s", targetStep.ID)
 	}
+	expectedWorkflowID := ""
+	if opts.ExpectedWorkflowID != nil {
+		expectedWorkflowID = *opts.ExpectedWorkflowID
+	}
 	if admissionWithState, ok := s.tasks.(workflowMoveAdmissionWithStateRepository); ok {
 		return admissionWithState.UpdateTaskWithWorkflowStepAdmissionAndState(
-			ctx, task, targetStep.ID, targetStep.WIPLimit, admittedState, true,
+			ctx, task, targetStep.ID, targetStep.WIPLimit, admittedState, true, expectedWorkflowID,
 		)
+	}
+	if expectedWorkflowID != "" {
+		// The CAS-guarded caller (plugin moves) always runs against a
+		// production repository, which implements the atomic variant above.
+		// A repository that only exposes the legacy admission method has no
+		// way to honor the guard, so fail closed instead of silently
+		// dropping it.
+		return false, fmt.Errorf("workflow conflict guard unavailable on legacy admission repository for step %s", targetStep.ID)
 	}
 
 	// Keep compatibility with narrow test/dry-run repositories that expose

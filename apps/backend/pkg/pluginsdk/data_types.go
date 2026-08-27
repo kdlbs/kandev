@@ -1198,8 +1198,13 @@ func pluginTaskLaunchOptionsFromProto(p *pluginv1.PluginTaskLaunchOptions) *Plug
 // UpdateTaskInput is the Go-native mirror of
 // kandev.plugin.v1.UpdateTaskRequest. Every field except ID is optional: a nil
 // pointer leaves that field untouched, a non-nil pointer overwrites it. The
-// conservative field surface (title/description/state/workflow_step_id) is the
-// documented plugin-writable mask.
+// conservative field surface (title/description/state) is the documented
+// plugin-writable mask. WorkflowStepID is rejected when non-nil — it exists
+// on this struct only for wire-shape symmetry with UpdateTaskRequest; use
+// TaskReader.Move (see host.go) to transition a task between workflow steps,
+// which routes through the same validation, WIP admission, task.moved
+// publication, auto-start gates, and queue reconciliation the board's own
+// move uses.
 type UpdateTaskInput struct {
 	ID             string
 	Title          *string

@@ -501,23 +501,23 @@ subscription vocabulary and wildcard rules are in the
 
 ### Host API matrix
 
-| Host surface   | Methods                                          | Required manifest capability                                                | Notes                                                                                                                                                                                       |
-| -------------- | ------------------------------------------------ | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| State          | GetState, SetState, DeleteState, ListState       | state: true                                                                 | Plugin-scoped JSON objects keyed by scope/scopeID/key; no transactions                                                                                                                      |
-| Config         | GetConfig                                        | None                                                                        | Reads this plugin's validated config_schema; secret fields are cleartext in the subprocess; config updates restart active plugins                                                           |
-| Secrets        | RevealSecret, GetSecret, SetSecret, DeleteSecret | secrets: true                                                               | Encrypted vault; plugin-owned keys are namespaced; never log values                                                                                                                         |
-| Tasks          | Tasks().List, Tasks().Get                        | api_read: tasks                                                             | Typed DTOs and opaque pagination cursor                                                                                                                                                     |
-| Tasks writes   | Tasks().Create, Tasks().Update                   | api_write: tasks                                                            | Implemented; routed through Kandev services so events/WS updates fire                                                                                                                       |
-| Sessions       | Sessions().List, Sessions().CodeStats            | api_read: sessions                                                          | Typed session and computed code-stat records                                                                                                                                                |
-| Workspaces     | Workspaces().List                                | api_read: workspaces                                                        | Instance-visible workspaces                                                                                                                                                                 |
-| Workflows      | Workflows().List, Workflows().ListSteps          | api_read: workflows                                                         | List steps by workflow id                                                                                                                                                                   |
-| Agent profiles | AgentProfiles().List                             | api_read: agent_profiles                                                    | Global agent profiles exposed by the Host data API                                                                                                                                          |
-| Repositories   | Repositories().List                              | api_read: repositories                                                      | List by workspace id                                                                                                                                                                        |
-| Messages       | Messages().List                                  | api_read: messages                                                          | Historical user/agent content; Kandev system blocks are stripped                                                                                                                            |
-| Message send   | Messages().Send                                  | api_write: messages                                                         | Sends a prompt to a task session and records plugin:<id> author                                                                                                                             |
-| Interactions   | Interactions().ListPending, Interactions().Get   | api_read: interactions                                                      | Durable record of agent requests still owed a human answer; Get resolves resolved ones too                                                                                                  |
-| Interaction responses | Interactions().RespondToPermission, .AnswerClarification, .CancelClarification | api_write: interactions           | Routed through the services the native UI drives; first terminal response wins                                                                                                             |
-| Utility agent  | InvokeUtilityAgent(ctx, prompt)                  | agent_invoke: true plus config_schema.utility_agent (format: utility-agent) | One-shot completion using the selected utility-agent ID; Kandev resolves that utility's enabled profile, permissions, and launch settings. Missing or stale bindings are FailedPrecondition |
+| Host surface          | Methods                                                                        | Required manifest capability                                                | Notes                                                                                                                                                                                       |
+| --------------------- | ------------------------------------------------------------------------------ | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| State                 | GetState, SetState, DeleteState, ListState                                     | state: true                                                                 | Plugin-scoped JSON objects keyed by scope/scopeID/key; no transactions                                                                                                                      |
+| Config                | GetConfig                                                                      | None                                                                        | Reads this plugin's validated config_schema; secret fields are cleartext in the subprocess; config updates restart active plugins                                                           |
+| Secrets               | RevealSecret, GetSecret, SetSecret, DeleteSecret                               | secrets: true                                                               | Encrypted vault; plugin-owned keys are namespaced; never log values                                                                                                                         |
+| Tasks                 | Tasks().List, Tasks().Get                                                      | api_read: tasks                                                             | Typed DTOs and opaque pagination cursor                                                                                                                                                     |
+| Tasks writes          | Tasks().Create, Tasks().Update, Tasks().Move                                   | api_write: tasks                                                            | Implemented; routed through Kandev services so events/WS updates fire. Update rejects a workflow step change; Move is the only path that moves a task between steps                         |
+| Sessions              | Sessions().List, Sessions().CodeStats                                          | api_read: sessions                                                          | Typed session and computed code-stat records                                                                                                                                                |
+| Workspaces            | Workspaces().List                                                              | api_read: workspaces                                                        | Instance-visible workspaces                                                                                                                                                                 |
+| Workflows             | Workflows().List, Workflows().ListSteps                                        | api_read: workflows                                                         | List steps by workflow id                                                                                                                                                                   |
+| Agent profiles        | AgentProfiles().List                                                           | api_read: agent_profiles                                                    | Global agent profiles exposed by the Host data API                                                                                                                                          |
+| Repositories          | Repositories().List                                                            | api_read: repositories                                                      | List by workspace id                                                                                                                                                                        |
+| Messages              | Messages().List                                                                | api_read: messages                                                          | Historical user/agent content; Kandev system blocks are stripped                                                                                                                            |
+| Message send          | Messages().Send                                                                | api_write: messages                                                         | Sends a prompt to a task session and records plugin:<id> author                                                                                                                             |
+| Interactions          | Interactions().ListPending, Interactions().Get                                 | api_read: interactions                                                      | Durable record of agent requests still owed a human answer; Get resolves resolved ones too                                                                                                  |
+| Interaction responses | Interactions().RespondToPermission, .AnswerClarification, .CancelClarification | api_write: interactions                                                     | Routed through the services the native UI drives; first terminal response wins                                                                                                              |
+| Utility agent         | InvokeUtilityAgent(ctx, prompt)                                                | agent_invoke: true plus config_schema.utility_agent (format: utility-agent) | One-shot completion using the selected utility-agent ID; Kandev resolves that utility's enabled profile, permissions, and launch settings. Missing or stale bindings are FailedPrecondition |
 
 The Go signatures, filters, DTOs, and pagination types live in
 apps/backend/pkg/pluginsdk/host.go and data_types.go. api_write task/message
@@ -652,7 +652,7 @@ type Host interface {
 
     // Tasks/Sessions/Workspaces/Workflows/AgentProfiles/Repositories return
 	// Host data accessors. List/Get operations require their own api_read
-	// resource; task Create/Update require api_write:tasks.
+	// resource; task Create/Update/Move require api_write:tasks.
 	Tasks() TaskReader
 	Sessions() SessionReader
 	Workspaces() WorkspaceReader
@@ -829,8 +829,9 @@ with a message naming the missing capability; declare what you use.
 ### Live Host writes
 
 `api_write` is live, not advisory. Declare only the exact resource you mutate:
-`api_write: ["tasks"]` enables `host.Tasks().Create(ctx, CreateTaskInput{...})`
-and `.Update(ctx, UpdateTaskInput{...})`; `api_write: ["messages"]` enables
+`api_write: ["tasks"]` enables `host.Tasks().Create(ctx, CreateTaskInput{...})`,
+`.Update(ctx, UpdateTaskInput{...})`, and `.Move(ctx, MoveTaskInput{...})`;
+`api_write: ["messages"]` enables
 `host.Messages().Send(ctx, taskID, sessionID, text)`;
 `api_write: ["interactions"]` enables the interaction response methods above. A blank
 `sessionID` targets the task's primary session. Send queues behind a running
@@ -839,11 +840,16 @@ session or resumes/starts it when appropriate, returning `queued`, `sent`, or
 
 Task writes use Kandev's first-party service layer, so normal task events and
 browser updates occur. Kandev stamps the source as `plugin:<id>` and reserves
-the `metadata.source` key; plugin metadata is stored under that source. A task
-write can update only title, description, state, and workflow step. Creating a
-task can select an existing repository or provide a complete, credential-free
-remote descriptor only when the plugin owns that `repository_providers` id.
-Treat all write calls as user-visible mutations and honor `ctx.Done()`.
+the `metadata.source` key; plugin metadata is stored under that source. `.Update`
+writes only title, description, and state: it rejects a workflow step change.
+Moving a task between workflow steps goes through `.Move` instead, which routes
+through the same path the board's own drag-and-drop move uses (validation, WIP
+admission, `task.moved` publication, auto-start gates, queue reconciliation),
+so a plugin-driven move triggers `on_enter`/`on_exit` step actions the same way
+a manual move does. Creating a task can select an existing repository or
+provide a complete, credential-free remote descriptor only when the plugin
+owns that `repository_providers` id. Treat all write calls as user-visible
+mutations and honor `ctx.Done()`.
 
 ## Authenticated declared actions
 

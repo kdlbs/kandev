@@ -272,6 +272,82 @@ func TestSharedMovePath_SameStepMoveReportsNoTransitionAndEmptyFromStepID(t *tes
 	}
 }
 
+// TestSharedMovePath_SameStepMovePreservesWIPAdmissionFieldsAgainstRealDB
+// closes the test-rigor gap alongside the round-5 CAS fix: updateMovedTask's
+// same-step branch (service_workflow.go, oldStepID == targetStep.ID) returns
+// task.WIPAdmitted straight from the in-memory struct it was handed and never
+// touches WIPAdmitted/QueuedForStepID itself, so every existing assertion of
+// "the field survives" was really just asserting Go's zero-mutation
+// semantics on a struct field — never proving the plain s.tasks.UpdateTask
+// write this branch performs actually persists (rather than clobbers) those
+// two columns. This drives real admission (a WIP-limited step, one task
+// admitted, one queued) through the real sqlite repository, performs a
+// same-step reorder on each via the shared move path, and re-reads both rows
+// from the real DB — not a hand-constructed models.Task fixture — to prove
+// the write round-trips the admission state unchanged.
+func TestSharedMovePath_SameStepMovePreservesWIPAdmissionFieldsAgainstRealDB(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	svc.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+		"step-source":  {ID: "step-source", WorkflowID: "wf-source", Name: "Source", Position: 0},
+		"step-limited": {ID: "step-limited", WorkflowID: "wf-source", Name: "Limited", Position: 1, WIPLimit: 1},
+	}})
+	createMoveTask(t, ctx, repo, "task-admitted", "wf-source", "step-source", nil)
+	createMoveTask(t, ctx, repo, "task-overflow", "wf-source", "step-source", nil)
+
+	// Drive real admission through the shared move path: the first arrival
+	// at the WIP-limited step is admitted, the second overflows and queues.
+	if _, err := svc.MoveTaskWithOptions(pluginMoveContext("plugin:acme"), "task-admitted", "wf-source", "step-limited", 0, pluginMoveOptions()); err != nil {
+		t.Fatalf("MoveTaskWithOptions(task-admitted): %v", err)
+	}
+	if _, err := svc.MoveTaskWithOptions(pluginMoveContext("plugin:acme"), "task-overflow", "wf-source", "step-limited", 1, pluginMoveOptions()); err != nil {
+		t.Fatalf("MoveTaskWithOptions(task-overflow): %v", err)
+	}
+
+	admittedBefore, err := repo.GetTask(ctx, "task-admitted")
+	if err != nil {
+		t.Fatalf("GetTask(task-admitted) before reorder: %v", err)
+	}
+	if !admittedBefore.WIPAdmitted || admittedBefore.QueuedForStepID != "" {
+		t.Fatalf("task-admitted before reorder: admitted=%v queued_for=%q, want admitted with no queue target",
+			admittedBefore.WIPAdmitted, admittedBefore.QueuedForStepID)
+	}
+	overflowBefore, err := repo.GetTask(ctx, "task-overflow")
+	if err != nil {
+		t.Fatalf("GetTask(task-overflow) before reorder: %v", err)
+	}
+	if overflowBefore.WIPAdmitted || overflowBefore.QueuedForStepID != "step-limited" {
+		t.Fatalf("task-overflow before reorder: admitted=%v queued_for=%q, want queued for step-limited",
+			overflowBefore.WIPAdmitted, overflowBefore.QueuedForStepID)
+	}
+
+	// Same-step reorders (position change only) must not disturb admission.
+	if _, err := svc.MoveTaskWithOptions(pluginMoveContext("plugin:acme"), "task-admitted", "wf-source", "step-limited", 1, pluginMoveOptions()); err != nil {
+		t.Fatalf("MoveTaskWithOptions same-step reorder(task-admitted): %v", err)
+	}
+	if _, err := svc.MoveTaskWithOptions(pluginMoveContext("plugin:acme"), "task-overflow", "wf-source", "step-limited", 0, pluginMoveOptions()); err != nil {
+		t.Fatalf("MoveTaskWithOptions same-step reorder(task-overflow): %v", err)
+	}
+
+	admittedAfter, err := repo.GetTask(ctx, "task-admitted")
+	if err != nil {
+		t.Fatalf("GetTask(task-admitted) after reorder: %v", err)
+	}
+	if !admittedAfter.WIPAdmitted || admittedAfter.QueuedForStepID != "" {
+		t.Fatalf("task-admitted after same-step reorder: admitted=%v queued_for=%q, want the pre-reorder admission state unchanged",
+			admittedAfter.WIPAdmitted, admittedAfter.QueuedForStepID)
+	}
+	overflowAfter, err := repo.GetTask(ctx, "task-overflow")
+	if err != nil {
+		t.Fatalf("GetTask(task-overflow) after reorder: %v", err)
+	}
+	if overflowAfter.WIPAdmitted || overflowAfter.QueuedForStepID != "step-limited" {
+		t.Fatalf("task-overflow after same-step reorder: admitted=%v queued_for=%q, want the pre-reorder queued state unchanged (a reorder must not silently admit it)",
+			overflowAfter.WIPAdmitted, overflowAfter.QueuedForStepID)
+	}
+}
+
 // lastStepTransitionActor reads back the actor_kind/actor_id columns of the
 // most recent task_step_transitions row for taskID, mirroring
 // stepTransitionTriggers' direct-SQL approach since the ledger has no
