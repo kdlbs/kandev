@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -513,7 +514,18 @@ func TestPluginHost_Workflows_SucceedsWithCapability(t *testing.T) {
 		"ws-1": {{ID: "wf-1", WorkspaceID: "ws-1", Name: "Default"}},
 	}
 	d.steps.steps = map[string][]*wfmodels.WorkflowStep{
-		"wf-1": {{ID: "step-1", WorkflowID: "wf-1", Name: "Todo", Position: 0, StageType: wfmodels.StageType("work")}},
+		"wf-1": {
+			{ID: "step-1", WorkflowID: "wf-1", Name: "Todo", Position: 0, StageType: wfmodels.StageType("work")},
+			{
+				ID: "step-2", WorkflowID: "wf-1", Name: "Work", Position: 1, StageType: wfmodels.StageType("custom"),
+				Events: wfmodels.StepEvents{
+					OnEnter: []wfmodels.OnEnterAction{
+						{Type: wfmodels.OnEnterAutoStartAgent},
+						{Type: wfmodels.OnEnterRunCodeReview, Config: map[string]interface{}{"agent_profile_id": "profile-1"}},
+					},
+				},
+			},
+		},
 	}
 
 	workflows, _, err := d.host.Workflows().List(context.Background(), "ws-1", pluginsdk.Page{})
@@ -528,8 +540,15 @@ func TestPluginHost_Workflows_SucceedsWithCapability(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSteps() unexpected error: %v", err)
 	}
-	if len(steps) != 1 || steps[0].StageType != "work" {
-		t.Fatalf("ListSteps() = %+v, want one step with StageType=work", steps)
+	if len(steps) != 2 || steps[0].StageType != "work" {
+		t.Fatalf("ListSteps() = %+v, want two steps, first with StageType=work", steps)
+	}
+	if steps[0].OnEnterActionTypes != nil {
+		t.Fatalf("steps[0].OnEnterActionTypes = %+v, want nil for a step with no on_enter actions", steps[0].OnEnterActionTypes)
+	}
+	wantTypes := []string{"auto_start_agent", "run_code_review"}
+	if !reflect.DeepEqual(steps[1].OnEnterActionTypes, wantTypes) {
+		t.Fatalf("steps[1].OnEnterActionTypes = %+v, want %+v", steps[1].OnEnterActionTypes, wantTypes)
 	}
 }
 

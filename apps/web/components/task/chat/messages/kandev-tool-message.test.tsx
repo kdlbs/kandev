@@ -39,7 +39,11 @@ function kandevToolCall(opts: {
           input: opts.input,
           output:
             opts.resultJson !== undefined
-              ? [{ type: "text", text: JSON.stringify(opts.resultJson) }]
+              ? {
+                  _meta: null,
+                  content: [{ type: "text", text: JSON.stringify(opts.resultJson) }],
+                  structuredContent: null,
+                }
               : undefined,
         },
       },

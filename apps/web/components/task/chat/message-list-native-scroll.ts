@@ -1,11 +1,17 @@
+/* eslint-disable max-lines -- pagination, scroll anchoring, and retry state share one boundary. */
+
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useAppStoreApi } from "@/components/state-provider";
 import { getStoredAutoScrollTop } from "@/lib/local-storage";
-import { useLazyLoadSentinel as useSharedLazyLoadSentinel } from "@/hooks/use-lazy-load-sentinel";
+import {
+  useLazyLoadSentinel as useSharedLazyLoadSentinel,
+  type LazyLoadSentinelSettleResult,
+} from "@/hooks/use-lazy-load-sentinel";
 import type { Message } from "@/lib/types/http";
 import { TASK_DESCRIPTION_SYNTHETIC_ID, type RenderItem } from "@/hooks/use-processed-messages";
 import { getItemKey, shouldAutoScrollToBottom } from "./message-list-shared";
+import { getOldestVisibleBoundaryKey } from "./message-list-native-boundary";
 import {
   isPrependUpdate,
   hasTranscriptProgressedPastView,
@@ -15,6 +21,56 @@ import {
   createFrameCoalescer,
 } from "./transcript-auto-scroll";
 import { scheduleClampedScrollRestore } from "./clamped-scroll-restore";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
+
+const paginationDebug = createDebugLogger("messages:pagination");
+
+type PaginationRequest = {
+  boundaryBefore: string | null;
+  debug?: {
+    generation: number;
+    scrollTopBefore: number | null;
+    scrollHeightBefore: number | null;
+  };
+};
+
+type PaginationStopReason =
+  | "visible-boundary-unchanged"
+  | "visible-boundary-added"
+  | "exhausted"
+  | "no-progress"
+  | "sentinel-left-preload"
+  | "disarmed"
+  | "blocked"
+  | "stale"
+  | "not-rearmed";
+
+export function resolvePaginationStopReason(
+  boundaryUnchanged: boolean,
+  hasMore: boolean,
+): PaginationStopReason {
+  if (!hasMore) return "exhausted";
+  return boundaryUnchanged ? "visible-boundary-unchanged" : "visible-boundary-added";
+}
+
+function resolvePaginationSettleReason(
+  result: LazyLoadSentinelSettleResult,
+  boundaryUnchanged: boolean,
+  hasMore: boolean,
+): PaginationStopReason | null {
+  switch (result.continuation) {
+    case "continued":
+      return null;
+    case "rejected":
+    case "no-progress":
+      return "no-progress";
+    case "caller-stopped":
+    case "no-more":
+      return resolvePaginationStopReason(boundaryUnchanged, hasMore);
+    default:
+      return result.continuation;
+  }
+}
 
 /**
  * Continuously captures scroll state via scroll listener.
@@ -135,22 +191,119 @@ function capturePrependScrollState(scrollRoot: HTMLElement, anchorKey: string | 
 
 /**
  * Observes a sentinel element at the top of the list to trigger lazy loading.
- * Delegates to the shared useLazyLoadSentinel hook with positive-result
- * automatic re-arming enabled. The transcript still does not join an
- * in-flight request: it waits for its current page before observing the next
- * one. The explicit button remains the recovery path for errors and no-op
- * responses.
+ * Re-arms only while older pages leave the committed visible boundary
+ * unchanged, which crosses collapsed activity without cascading through
+ * standalone messages. The transcript does not join an in-flight request.
+ * The explicit button remains the recovery path for errors and no-op pages.
  */
-function useLazyLoadSentinel(
-  scrollRef: React.RefObject<HTMLDivElement | null>,
-  hasMore: boolean,
-  blocked: boolean,
-  isLoadingMore: boolean,
-  loadMore: () => Promise<number>,
-) {
-  return useSharedLazyLoadSentinel(scrollRef, hasMore, blocked, isLoadingMore, loadMore, {
+function useLazyLoadSentinel(params: {
+  scrollRef: React.RefObject<HTMLDivElement | null>;
+  items: RenderItem[];
+  sessionId: string | null;
+  hasMore: boolean;
+  blocked: boolean;
+  isLoadingMore: boolean;
+  loadMore: () => Promise<number>;
+}) {
+  const { scrollRef, items, sessionId, hasMore, blocked, isLoadingMore, loadMore } = params;
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  const hasMoreRef = useRef(hasMore);
+  hasMoreRef.current = hasMore;
+  const requestGenerationRef = useRef(0);
+  const requestRef = useRef<PaginationRequest | null>(null);
+
+  const reportSettle = useCallback(
+    (result: LazyLoadSentinelSettleResult) => {
+      if (!isDebug()) return;
+      const request = requestRef.current;
+      const requestDebug = request?.debug;
+      if (!request || !requestDebug) return;
+      const boundaryAfter = getOldestVisibleBoundaryKey(itemsRef.current);
+      const scroller = scrollRef.current;
+      const boundaryUnchanged = request.boundaryBefore === boundaryAfter;
+      paginationDebug("older page settled", {
+        sessionId,
+        trigger: "top-intersection",
+        generation: requestDebug.generation,
+        loadedCount: result.count,
+        boundaryBefore: request.boundaryBefore,
+        boundaryAfter,
+        scrollTopBefore: requestDebug.scrollTopBefore,
+        scrollTopAfter: scroller?.scrollTop ?? null,
+        scrollHeightBefore: requestDebug.scrollHeightBefore,
+        scrollHeightAfter: scroller?.scrollHeight ?? null,
+        continued: result.continuation === "continued",
+        stopReason: resolvePaginationSettleReason(result, boundaryUnchanged, hasMoreRef.current),
+        continuation: result.continuation,
+      });
+    },
+    [scrollRef, sessionId],
+  );
+
+  const loadPage = useCallback(async () => {
+    const request: PaginationRequest = {
+      boundaryBefore: getOldestVisibleBoundaryKey(itemsRef.current),
+    };
+    requestRef.current = request;
+    if (isDebug()) {
+      const scroller = scrollRef.current;
+      request.debug = {
+        generation: ++requestGenerationRef.current,
+        scrollTopBefore: scroller?.scrollTop ?? null,
+        scrollHeightBefore: scroller?.scrollHeight ?? null,
+      };
+      paginationDebug("older page started", {
+        sessionId,
+        trigger: "top-intersection",
+        generation: request.debug.generation,
+        boundaryBefore: request.boundaryBefore,
+        scrollTopBefore: request.debug.scrollTopBefore,
+        scrollHeightBefore: request.debug.scrollHeightBefore,
+      });
+    }
+    return loadMore();
+  }, [loadMore, scrollRef, sessionId]);
+
+  const shouldContinueWhileIntersecting = useCallback(() => {
+    const request = requestRef.current;
+    if (!request) return false;
+    const boundaryAfter = getOldestVisibleBoundaryKey(itemsRef.current);
+    const boundaryUnchanged = request.boundaryBefore === boundaryAfter;
+    return boundaryUnchanged && hasMoreRef.current;
+  }, []);
+
+  return useSharedLazyLoadSentinel(scrollRef, hasMore, blocked, isLoadingMore, loadPage, {
     rearmWhileIntersecting: true,
+    shouldContinueWhileIntersecting,
+    onLoadSettled: isDebug() ? reportSettle : undefined,
   });
+}
+
+/**
+ * Treats an actual upward movement as fresh pagination intent. This is
+ * modality-independent (wheel, keyboard, scrollbar, or touch) and only calls
+ * the shared sentinel's guarded retry path; normal armed scrolling remains
+ * owned by IntersectionObserver.
+ */
+function useRetryPaginationOnUpwardScroll(
+  scrollRef: React.RefObject<HTMLDivElement | null>,
+  onUserGesture: () => void,
+  isProgrammaticScrollLocked: () => boolean,
+) {
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    let previousScrollTop = scroller.scrollTop;
+    const onScroll = () => {
+      const nextScrollTop = scroller.scrollTop;
+      const movedUp = nextScrollTop < previousScrollTop;
+      previousScrollTop = nextScrollTop;
+      if (movedUp && !isProgrammaticScrollLocked()) onUserGesture();
+    };
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    return () => scroller.removeEventListener("scroll", onScroll);
+  }, [isProgrammaticScrollLocked, onUserGesture, scrollRef]);
 }
 
 /** Duration a programmatic scroll's guard stays held if the browser never
@@ -197,6 +350,8 @@ export function useAutoScroll(params: {
   const storeApi = useAppStoreApi();
   const isNearBottomRef = useRef(true);
   const prevIsWorkingRef = useRef(isWorking);
+  const prevEnabledRef = useRef(enabled);
+  const frozenScrollTopRef = useRef<number | null>(null);
 
   const resyncIsNearBottom = useCallback(() => {
     const el = scrollRef.current;
@@ -223,6 +378,7 @@ export function useAutoScroll(params: {
      * coalesced persistence of the scroll position. */
     const onScroll = () => {
       resyncIsNearBottom();
+      if (!enabled) frozenScrollTopRef.current = el.scrollTop;
       coalescer.schedule();
     };
     el.addEventListener("scroll", onScroll, { passive: true });
@@ -234,7 +390,29 @@ export function useAutoScroll(params: {
       // if a coalesced write above was still pending.
       coalescer.flush();
     };
-  }, [scrollRef, sessionId, storeApi, resyncIsNearBottom]);
+  }, [scrollRef, sessionId, storeApi, resyncIsNearBottom, enabled]);
+
+  // Own the disabled offset across every transcript layout update. Sending a
+  // prompt can briefly shrink the scroll range before the new message row is
+  // committed, which makes the browser clamp scrollTop even with
+  // overflow-anchor disabled. Keep the pre-update offset and reapply it after
+  // each message/working-state render so that transient clamp cannot move the
+  // reader. Real user scroll events update the owned offset above.
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const wasEnabled = prevEnabledRef.current;
+    prevEnabledRef.current = enabled;
+    if (enabled) {
+      frozenScrollTopRef.current = null;
+      return;
+    }
+    if (wasEnabled || frozenScrollTopRef.current === null) {
+      frozenScrollTopRef.current = el.scrollTop;
+      return;
+    }
+    el.scrollTop = frozenScrollTopRef.current;
+  }, [enabled, isWorking, messages, scrollRef]);
 
   // When isWorking transitions to true, force scroll to bottom (unless
   // disabled, locked, or a layout rebuild scroll restore is pending).
@@ -631,13 +809,16 @@ export function useNativeScrollManagement(params: {
   );
   const handleScrollToMessage = useScrollToMessage(scrollRef, runGuardedScroll);
   useScrollPositionOnPrepend(scrollRef, items, isLoadingMore, isProgrammaticScrollLocked);
-  const { sentinelRef } = useLazyLoadSentinel(
+  const { sentinelRef, onUserGesture } = useLazyLoadSentinel({
     scrollRef,
+    items,
+    sessionId,
     hasMore,
-    messagesLoading,
+    blocked: messagesLoading,
     isLoadingMore,
     loadMore,
-  );
+  });
+  useRetryPaginationOnUpwardScroll(scrollRef, onUserGesture, isProgrammaticScrollLocked);
   useInitialScrollPosition(scrollRef, items.length, sessionId, enabled, isNearBottomRef);
 
   return { handleScrollToMessage, sentinelRef, resyncIsNearBottom, markNotNearBottom };

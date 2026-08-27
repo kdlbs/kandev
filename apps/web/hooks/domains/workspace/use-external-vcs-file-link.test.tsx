@@ -66,6 +66,7 @@ function repository(overrides: Partial<Repository> = {}): Repository {
 function githubPR(overrides: Partial<TaskPR> = {}): TaskPR {
   return {
     id: "pr-link-1",
+    workspace_id: WORKSPACE_ID,
     task_id: TASK_ID,
     repository_id: GITHUB_REPOSITORY_ID,
     owner: "acme",

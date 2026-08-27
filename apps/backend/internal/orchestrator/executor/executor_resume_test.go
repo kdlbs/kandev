@@ -49,6 +49,39 @@ func TestResumeSession_RejectsArchivedTask(t *testing.T) {
 	}
 }
 
+func TestResumeSession_PropagatesTaskEnvironmentPersistenceFailure(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	attachManagedGitHubRepositoryForResume(t, repo)
+	persistErr := errors.New("inventory write failed")
+	repo.createTaskEnvironmentRepoErr = persistErr
+	repo.taskEnvironments["env-1"] = &models.TaskEnvironment{
+		ID:           "env-1",
+		TaskID:       "task-1",
+		ExecutorType: string(models.ExecutorTypeLocal),
+		Status:       models.TaskEnvironmentStatusReady,
+	}
+	repo.sessions["sess-1"].TaskEnvironmentID = "env-1"
+
+	agentManager := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, _ *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			return &LaunchAgentResponse{
+				AgentExecutionID: "exec-new",
+				WorktreePath:     "/workspace/task-1",
+				Worktrees: []RepoWorktreeResult{{
+					RepositoryID: "repo-1", WorktreeID: "wt-1", WorktreePath: "/workspace/task-1",
+				}},
+			}, nil
+		},
+	}
+	exec := newTestExecutor(t, agentManager, repo)
+
+	_, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], false)
+	if !errors.Is(err, persistErr) {
+		t.Fatalf("ResumeSession error = %v, want %v", err, persistErr)
+	}
+}
+
 // setupLiveResumeTestFixture seeds a repo + task + session + executor-running
 // record suitable for exercising the ResumeSession launch path.
 func setupLiveResumeTestFixture(repo *mockRepository) {

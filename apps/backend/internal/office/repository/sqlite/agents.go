@@ -406,6 +406,25 @@ func (r *Repository) AgentInstanceExistsByName(
 	return exists, err
 }
 
+// AgentProfileExists reports whether an agent_profiles row with id exists
+// and is not soft-deleted, regardless of whether it is an Office agent
+// (workspace_id != ”) or a shallow Kanban profile (workspace_id = ”).
+// The workflow engine's quorum guard uses this to detect a seat whose agent
+// profile has been deleted since the seat was cast (REQ-OFFICE-REVIEW-SEATS-004.3).
+//
+// Deliberately does NOT use agentInstanceFilter: a seat's agent_profile_id
+// can come from the casting resolution's runner fallback
+// (REQ-OFFICE-REVIEW-SEATS-002's "empty candidate list" path), and a task's
+// runner is not guaranteed to be an Office agent. Scoping this check to
+// workspace_id != ” would make the quorum guard treat a live Kanban runner
+// as a deleted agent, dropping the seat it was written to protect.
+func (r *Repository) AgentProfileExists(ctx context.Context, id string) (bool, error) {
+	query := `SELECT EXISTS(SELECT 1 FROM agent_profiles WHERE id = ? AND deleted_at IS NULL)`
+	var exists bool
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(query), id).Scan(&exists)
+	return exists, err
+}
+
 // DeleteAgentInstance hard-deletes an agent instance by ID. The unified
 // agent_profiles table uses soft-deletion via deleted_at — we set it here so
 // office reads (which all filter `deleted_at IS NULL`) immediately stop

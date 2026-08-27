@@ -6,11 +6,12 @@ import type { Message } from "@/lib/types/http";
 import type { RenderItem } from "@/hooks/use-processed-messages";
 
 const sharedSentinelCalls = vi.hoisted(() => [] as unknown[][]);
+const sharedSentinelUserGesture = vi.hoisted(() => vi.fn());
 
 vi.mock("@/hooks/use-lazy-load-sentinel", () => ({
   useLazyLoadSentinel: (...args: unknown[]) => {
     sharedSentinelCalls.push(args);
-    return { sentinelRef: () => {}, onUserGesture: () => {} };
+    return { sentinelRef: () => {}, onUserGesture: sharedSentinelUserGesture };
   },
 }));
 
@@ -30,6 +31,7 @@ vi.mock("@/components/state-provider", () => ({
 
 import { useScrollToDividerOrBottom } from "./message-list-native";
 import {
+  resolvePaginationStopReason,
   useAutoScroll,
   useNativeScrollManagement,
   useScrollToMessage,
@@ -110,11 +112,13 @@ function AutoScrollHarness({
   hasUnreadDivider,
   messages = TEST_MESSAGES,
   markRef,
+  enabled = true,
 }: {
   isWorking: boolean;
   hasUnreadDivider: boolean;
   messages?: Message[];
   markRef?: { current?: () => void };
+  enabled?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const { markNotNearBottom } = useAutoScroll({
@@ -122,7 +126,7 @@ function AutoScrollHarness({
     messages,
     isWorking,
     sessionId: null,
-    enabled: true,
+    enabled,
     hasUnreadDivider,
     isProgrammaticScrollLocked: NEVER_LOCKED,
   });
@@ -139,6 +143,7 @@ function setScrollMetrics(element: HTMLElement) {
 afterEach(() => {
   cleanup();
   sharedSentinelCalls.length = 0;
+  sharedSentinelUserGesture.mockReset();
   vi.restoreAllMocks();
 });
 
@@ -146,12 +151,18 @@ function transcriptMessage(id: string): RenderItem {
   return { type: "message", message: { id } as Message };
 }
 
+function transcriptActivity(id: string, turnId = id): RenderItem {
+  return { type: "turn_group", id, turnId, messages: [] };
+}
+
 function NativeScrollManagementHarness({
   items,
   metrics,
+  loadMore = async () => 0,
 }: {
   items: RenderItem[];
   metrics?: { scrollHeight: number; scrollTop: number; clientHeight: number };
+  loadMore?: () => Promise<number>;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   useNativeScrollManagement({
@@ -165,7 +176,7 @@ function NativeScrollManagementHarness({
     messagesLoading: false,
     hasMore: true,
     isLoadingMore: false,
-    loadMore: async () => 0,
+    loadMore,
   });
   useLayoutEffect(() => {
     const element = scrollRef.current;
@@ -185,12 +196,84 @@ function NativeScrollManagementHarness({
   return <div data-testid="native-scroll-management-container" ref={scrollRef} />;
 }
 
+describe("resolvePaginationStopReason", () => {
+  it.each([
+    { boundaryUnchanged: true, hasMore: true, expected: "visible-boundary-unchanged" },
+    { boundaryUnchanged: false, hasMore: true, expected: "visible-boundary-added" },
+    { boundaryUnchanged: true, hasMore: false, expected: "exhausted" },
+    { boundaryUnchanged: false, hasMore: false, expected: "exhausted" },
+  ])(
+    "resolves pagination stop reason for $expected",
+    ({ boundaryUnchanged, hasMore, expected }) => {
+      expect(resolvePaginationStopReason(boundaryUnchanged, hasMore)).toBe(expected);
+    },
+  );
+});
+
 describe("useNativeScrollManagement transcript pagination", () => {
-  it("re-arms the native sentinel without joining its in-flight request", () => {
+  it("retries a disarmed short page on the next upward scroll", () => {
+    const metrics = { scrollHeight: 1000, scrollTop: 100, clientHeight: 400 };
+    render(<NativeScrollManagementHarness items={[]} metrics={metrics} />);
+    const scroller = screen.getByTestId("native-scroll-management-container");
+
+    act(() => {
+      metrics.scrollTop = 80;
+      scroller.dispatchEvent(new Event("scroll"));
+    });
+    expect(sharedSentinelUserGesture).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      metrics.scrollTop = 120;
+      scroller.dispatchEvent(new Event("scroll"));
+    });
+    expect(sharedSentinelUserGesture).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-arms the native sentinel with a visible-boundary continuation decision", () => {
     render(<NativeScrollManagementHarness items={[]} />);
 
     const options = sharedSentinelCalls[0]?.[5];
-    expect(options).toEqual({ rearmWhileIntersecting: true });
+    expect(options).toEqual({
+      rearmWhileIntersecting: true,
+      shouldContinueWhileIntersecting: expect.any(Function),
+      onLoadSettled: expect.any(Function),
+    });
+  });
+
+  it("continues only while an older page keeps the same visible boundary", async () => {
+    const loadMore = vi.fn(async () => 20);
+    const newest = transcriptMessage("newest");
+    const { rerender } = render(
+      <NativeScrollManagementHarness
+        items={[transcriptActivity("activity-before", "turn-1"), newest]}
+        loadMore={loadMore}
+      />,
+    );
+    const wrappedLoadMore = sharedSentinelCalls.at(-1)?.[4] as () => Promise<number>;
+
+    await wrappedLoadMore();
+    rerender(
+      <NativeScrollManagementHarness
+        items={[transcriptActivity("activity-after", "turn-1"), newest]}
+        loadMore={loadMore}
+      />,
+    );
+    let options = sharedSentinelCalls.at(-1)?.[5] as {
+      shouldContinueWhileIntersecting: () => boolean;
+    };
+    expect(options.shouldContinueWhileIntersecting()).toBe(true);
+
+    await wrappedLoadMore();
+    rerender(
+      <NativeScrollManagementHarness
+        items={[transcriptActivity("activity-new", "turn-2"), newest]}
+        loadMore={loadMore}
+      />,
+    );
+    options = sharedSentinelCalls.at(-1)?.[5] as {
+      shouldContinueWhileIntersecting: () => boolean;
+    };
+    expect(options.shouldContinueWhileIntersecting()).toBe(false);
   });
 
   it("anchors a prepend below a fixed task description row", () => {
@@ -322,6 +405,33 @@ describe("useScrollToDividerOrBottom — anchored-bar offset", () => {
     );
 
     expect(scrollContainer.scrollTop).toBe(123);
+  });
+
+  it("restores the disabled offset after a transient layout clamp", () => {
+    const { rerender } = render(
+      <AutoScrollHarness isWorking={false} hasUnreadDivider={false} enabled />,
+    );
+    const scrollContainer = document.querySelector<HTMLElement>(
+      '[data-testid="auto-scroll-container"]',
+    );
+    if (!scrollContainer) throw new Error("auto-scroll container did not render");
+    setScrollMetrics(scrollContainer);
+    scrollContainer.scrollTop = 600;
+
+    rerender(<AutoScrollHarness isWorking={false} hasUnreadDivider={false} enabled={false} />);
+    // Model the browser temporarily reducing the maximum scroll offset while
+    // the composer clears, before the appended transcript row is committed.
+    scrollContainer.scrollTop = 568;
+    rerender(
+      <AutoScrollHarness
+        isWorking
+        hasUnreadDivider={false}
+        enabled={false}
+        messages={[...TEST_MESSAGES, {} as Message]}
+      />,
+    );
+
+    expect(scrollContainer.scrollTop).toBe(600);
   });
 
   it("never re-scrolls once the reader has started scrolling, even if the anchored bar's height changes afterward", () => {

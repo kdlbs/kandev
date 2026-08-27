@@ -38,6 +38,7 @@ import (
 	analyticsmodels "github.com/kandev/kandev/internal/analytics/models"
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	"github.com/kandev/kandev/pkg/pluginsdk"
 )
 
@@ -413,4 +414,50 @@ func TestPluginHostData_Wire_SessionsPagination(t *testing.T) {
 	require.NotNil(t, secondPageInfo)
 	require.False(t, secondPageInfo.HasMore)
 	require.Empty(t, secondPageInfo.NextCursor)
+}
+
+// TestPluginHostData_Wire_WorkflowSteps_OnEnterActionTypes proves the full
+// model -> DTO -> proto -> gRPC wire -> pluginsdk chain for WorkflowStep's
+// on_enter_action_types field: a step with several on_enter actions reports
+// their types in authored order, a step with none reports nil (not an empty
+// slice) at every hop, and action Config never travels — pluginsdk.WorkflowStep
+// has no Config field at all, so there is no wire shape for it to leak
+// through.
+func TestPluginHostData_Wire_WorkflowSteps_OnEnterActionTypes(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"workflows"}})
+	d.steps.steps = map[string][]*wfmodels.WorkflowStep{
+		"wf-1": {
+			{
+				ID:         "step-work",
+				WorkflowID: "wf-1",
+				Name:       "Work",
+				Position:   0,
+				StageType:  wfmodels.StageType("work"),
+				Events: wfmodels.StepEvents{
+					OnEnter: []wfmodels.OnEnterAction{
+						{Type: wfmodels.OnEnterAutoStartAgent, Config: map[string]interface{}{"agent_profile_id": "profile-1"}},
+						{Type: wfmodels.OnEnterRunCodeReview},
+					},
+				},
+			},
+			{
+				ID:         "step-todo",
+				WorkflowID: "wf-1",
+				Name:       "Todo",
+				Position:   1,
+				StageType:  wfmodels.StageType("custom"),
+			},
+		},
+	}
+	host := dialPluginHostOverWire(t, d.host)
+
+	steps, err := host.Workflows().ListSteps(context.Background(), "wf-1")
+	require.NoError(t, err)
+	require.Len(t, steps, 2)
+
+	require.Equal(t, "step-work", steps[0].ID)
+	require.Equal(t, []string{"auto_start_agent", "run_code_review"}, steps[0].OnEnterActionTypes)
+
+	require.Equal(t, "step-todo", steps[1].ID)
+	require.Nil(t, steps[1].OnEnterActionTypes)
 }

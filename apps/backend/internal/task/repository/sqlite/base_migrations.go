@@ -268,6 +268,16 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("idx_task_review_findings_task_status", `CREATE INDEX IF NOT EXISTS idx_task_review_findings_task_status ON task_review_findings(task_id, status)`)
 	r.migrate.Apply("idx_task_review_findings_anchor", `CREATE INDEX IF NOT EXISTS idx_task_review_findings_anchor ON task_review_findings(task_id, repository_name, file_path)`)
 
+	// entry_id carries the step-transition ledger row identifier of the
+	// step-entry action that requested a run_code_review pass
+	// (AC-OFFICE-STEP-ENTRY-001.10). The partial unique index is the durable
+	// backstop: a redelivery of the same entry must not create a second run
+	// row even if a caller races the FindRunByEntryID pre-check. Must run
+	// after the ADD COLUMN — see AGENTS.md "Schema & migrations".
+	r.migrate.Apply("task_review_runs.entry_id", `ALTER TABLE task_review_runs ADD COLUMN entry_id TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("idx_task_review_runs_entry_id",
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_task_review_runs_entry_id ON task_review_runs(entry_id) WHERE entry_id != ''`)
+
 	// ADR 0005 Wave F — ensure the runner-projection tables exist so
 	// task SELECTs that reference them via correlated subquery don't
 	// fail. Required for tests and any environment where the workflow

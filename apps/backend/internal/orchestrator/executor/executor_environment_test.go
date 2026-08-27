@@ -140,20 +140,39 @@ func TestReuseExistingEnvironment_WorktreeSkippedWhenNotRequested(t *testing.T) 
 }
 
 func TestWorkspaceReuseAllowedRequiresMatchingExecutorType(t *testing.T) {
-	env := &models.TaskEnvironment{ExecutorType: string(models.ExecutorTypeLocal)}
-	if workspaceReuseAllowed(env, string(models.ExecutorTypeWorktree), true) {
+	env := &models.TaskEnvironment{
+		ExecutorType: string(models.ExecutorTypeLocal),
+		Repos:        []*models.TaskEnvironmentRepo{{RepositoryID: "repo-1"}},
+	}
+	if workspaceReuseAllowed(env, string(models.ExecutorTypeWorktree), true, true) {
 		t.Fatal("workspace reuse should be disabled when the executor type changes")
 	}
-	if !workspaceReuseAllowed(env, string(models.ExecutorTypeLocal), true) {
+	if !workspaceReuseAllowed(env, string(models.ExecutorTypeLocal), true, true) {
 		t.Fatal("workspace reuse should remain enabled for the owning executor type")
 	}
-	if workspaceReuseAllowed(&models.TaskEnvironment{}, string(models.ExecutorTypeWorktree), true) {
+	if workspaceReuseAllowed(&models.TaskEnvironment{}, string(models.ExecutorTypeWorktree), true, true) {
 		t.Fatal("legacy environments without a physical worktree should not be reused by worktree launches")
 	}
 	if !workspaceReuseAllowed(&models.TaskEnvironment{
 		Repos: []*models.TaskEnvironmentRepo{{WorktreeID: "legacy-worktree", Status: "active"}},
-	}, string(models.ExecutorTypeWorktree), true) {
+	}, string(models.ExecutorTypeWorktree), true, true) {
 		t.Fatal("legacy environments with a physical worktree should remain reusable")
+	}
+}
+
+func TestWorkspaceReuseAllowedRequiresInventoryForRepoBackedExecutors(t *testing.T) {
+	for _, executorType := range []string{
+		string(models.ExecutorTypeLocal),
+		string(models.ExecutorTypeLocalDocker),
+		string(models.ExecutorTypeSSH),
+		string(models.ExecutorTypeWorktree),
+	} {
+		t.Run(executorType, func(t *testing.T) {
+			env := &models.TaskEnvironment{ExecutorType: executorType}
+			if workspaceReuseAllowed(env, executorType, true, true) {
+				t.Fatalf("workspace reuse allowed for %s with empty repository inventory", executorType)
+			}
+		})
 	}
 }
 
@@ -345,6 +364,156 @@ func TestPersistTaskEnvironment_FinalizesCreatingEnvironmentWithInventory(t *tes
 	}
 	if got := repo.taskEnvironmentRepos[env.ID]; len(got) != 1 || got[0].WorktreeID != "wt-1" {
 		t.Fatalf("canonical inventory = %#v, want one finalized worktree", got)
+	}
+}
+
+func TestPersistTaskEnvironment_RestoresMaterializationClaimOnFinalizeFailure(t *testing.T) {
+	repo := newMockRepository()
+	persistErr := errors.New("finalize failed")
+	repo.finalizeTaskEnvironmentErr = persistErr
+	env := &models.TaskEnvironment{
+		ID:                       "env-1",
+		TaskID:                   "task-1",
+		ExecutorType:             string(models.ExecutorTypeWorktree),
+		Status:                   models.TaskEnvironmentStatusCreating,
+		MaterializationSessionID: "session-1",
+	}
+	repo.taskEnvironments[env.ID] = env
+	e := newTestExecutor(t, &mockAgentManager{}, repo)
+	session := &models.TaskSession{ID: "session-1", TaskID: "task-1", TaskEnvironmentID: env.ID}
+
+	err := e.persistTaskEnvironment(context.Background(), "task-1", session, env,
+		&LaunchAgentRequest{TaskID: "task-1", ExecutorType: string(models.ExecutorTypeWorktree)},
+		&LaunchAgentResponse{WorktreePath: "/tasks/task-1/repo", Worktrees: []RepoWorktreeResult{{
+			RepositoryID: "repo-1", WorktreeID: "wt-1", WorktreePath: "/tasks/task-1/repo", WorktreeBranch: "feature/task-1",
+		}}},
+		executorConfig{ExecutorID: models.ExecutorIDWorktree})
+
+	if !errors.Is(err, persistErr) {
+		t.Fatalf("persistTaskEnvironment error = %v, want %v", err, persistErr)
+	}
+	if env.Status != models.TaskEnvironmentStatusCreating || env.MaterializationSessionID != session.ID {
+		t.Fatalf("materialization claim = status %q owner %q, want creating with original owner", env.Status, env.MaterializationSessionID)
+	}
+}
+
+// TestPersistTaskEnvironment_NonMaterializerSiblingPersistsReposBeforeReady
+// pins the fix for the "ready status precedes inventory commit" hazard: a
+// non-initial-materializer sibling must write its per-repo rows before
+// flipping the environment to ready, so a crash or concurrent read between
+// the two writes can never observe a ready environment whose canonical
+// inventory is still empty or stale.
+func TestPersistTaskEnvironment_NonMaterializerSiblingPersistsReposBeforeReady(t *testing.T) {
+	repo := newMockRepository()
+	env := &models.TaskEnvironment{
+		ID:           "env-1",
+		TaskID:       "task-1",
+		ExecutorType: string(models.ExecutorTypeWorktree),
+		Status:       models.TaskEnvironmentStatusReady,
+	}
+	repo.taskEnvironments[env.ID] = env
+	repo.taskRepositories["task-repo-1"] = &models.TaskRepository{ID: "task-repo-1", TaskID: "task-1", RepositoryID: "repo-1"}
+	e := newTestExecutor(t, &mockAgentManager{}, repo)
+	session := &models.TaskSession{ID: "session-2", TaskID: "task-1", TaskEnvironmentID: env.ID}
+
+	if err := e.persistTaskEnvironment(context.Background(), "task-1", session, env,
+		&LaunchAgentRequest{TaskID: "task-1", ExecutorType: string(models.ExecutorTypeWorktree)},
+		&LaunchAgentResponse{WorktreePath: "/tasks/task-1/repo", Worktrees: []RepoWorktreeResult{{
+			RepositoryID: "repo-1", WorktreeID: "wt-2", WorktreePath: "/tasks/task-1/repo", WorktreeBranch: "feature/task-1",
+		}}},
+		executorConfig{ExecutorID: models.ExecutorIDWorktree}); err != nil {
+		t.Fatalf("persistTaskEnvironment: %v", err)
+	}
+
+	if len(repo.writeCallLog) < 2 {
+		t.Fatalf("write call log = %v, want at least a repo write followed by an env update", repo.writeCallLog)
+	}
+	repoIdx, envIdx := -1, -1
+	for i, call := range repo.writeCallLog {
+		switch call {
+		case "create_repo":
+			if repoIdx == -1 {
+				repoIdx = i
+			}
+		case "update_env":
+			if envIdx == -1 {
+				envIdx = i
+			}
+		}
+	}
+	if repoIdx == -1 || envIdx == -1 || repoIdx > envIdx {
+		t.Fatalf("write order = %v, want create_repo before update_env", repo.writeCallLog)
+	}
+	if got := repo.taskEnvironments[env.ID].Status; got != models.TaskEnvironmentStatusReady {
+		t.Fatalf("status = %q, want ready once inventory is persisted", got)
+	}
+}
+
+func TestPersistTaskEnvironment_LeavesEnvironmentUnchangedOnRepoWriteFailure(t *testing.T) {
+	repo := newMockRepository()
+	persistErr := errors.New("inventory write failed")
+	repo.createTaskEnvironmentRepoErr = persistErr
+	env := &models.TaskEnvironment{
+		ID:           "env-1",
+		TaskID:       "task-1",
+		ExecutorType: string(models.ExecutorTypeWorktree),
+		Status:       models.TaskEnvironmentStatusReady,
+	}
+	repo.taskEnvironments[env.ID] = env
+	repo.taskRepositories["task-repo-1"] = &models.TaskRepository{ID: "task-repo-1", TaskID: "task-1", RepositoryID: "repo-1"}
+	e := newTestExecutor(t, &mockAgentManager{}, repo)
+	session := &models.TaskSession{ID: "session-2", TaskID: "task-1", TaskEnvironmentID: env.ID}
+
+	err := e.persistTaskEnvironment(context.Background(), "task-1", session, env,
+		&LaunchAgentRequest{TaskID: "task-1", ExecutorType: string(models.ExecutorTypeWorktree)},
+		&LaunchAgentResponse{WorktreePath: "/tasks/task-1/repo", Worktrees: []RepoWorktreeResult{{
+			RepositoryID: "repo-1", WorktreeID: "wt-2", WorktreePath: "/tasks/task-1/repo", WorktreeBranch: "feature/task-1",
+		}}},
+		executorConfig{ExecutorID: models.ExecutorIDWorktree})
+
+	if !errors.Is(err, persistErr) {
+		t.Fatalf("persistTaskEnvironment error = %v, want %v", err, persistErr)
+	}
+	if session.TaskEnvironmentID != env.ID {
+		t.Fatalf("session TaskEnvironmentID = %q, want unchanged %q", session.TaskEnvironmentID, env.ID)
+	}
+	if len(repo.updateTaskEnvironmentCalls) != 0 {
+		t.Fatalf("UpdateTaskEnvironment calls = %d, want none after inventory failure", len(repo.updateTaskEnvironmentCalls))
+	}
+}
+
+// TestPersistTaskEnvironment_NonMaterializerSiblingWithEmptyReposDoesNotSetReady
+// covers the companion invariant: when this sibling's own launch produced no
+// repos and the environment had none recorded either, a repo-backed task's
+// environment must not be forced to ready — that would publish an empty
+// canonical inventory that permanently bricks reuse.
+func TestPersistTaskEnvironment_NonMaterializerSiblingWithEmptyReposDoesNotSetReady(t *testing.T) {
+	repo := newMockRepository()
+	env := &models.TaskEnvironment{
+		ID:           "env-1",
+		TaskID:       "task-1",
+		ExecutorType: string(models.ExecutorTypeSSH),
+		Status:       models.TaskEnvironmentStatusCreating,
+	}
+	repo.taskEnvironments[env.ID] = env
+	repo.taskRepositories["task-repo-1"] = &models.TaskRepository{ID: "task-repo-1", TaskID: "task-1", RepositoryID: "repo-1"}
+	e := newTestExecutor(t, &mockAgentManager{}, repo)
+	session := &models.TaskSession{ID: "session-2", TaskID: "task-1", TaskEnvironmentID: env.ID}
+
+	if err := e.persistTaskEnvironment(context.Background(), "task-1", session, env,
+		&LaunchAgentRequest{TaskID: "task-1", ExecutorType: string(models.ExecutorTypeSSH)},
+		&LaunchAgentResponse{},
+		executorConfig{ExecutorID: "ssh"}); err != nil {
+		t.Fatalf("persistTaskEnvironment: %v", err)
+	}
+
+	for _, call := range repo.writeCallLog {
+		if call == "create_repo" {
+			t.Fatalf("write call log = %v, want no repo rows created for an empty prepare result", repo.writeCallLog)
+		}
+	}
+	if got := repo.taskEnvironments[env.ID].Status; got != models.TaskEnvironmentStatusCreating {
+		t.Fatalf("status = %q, want status left untouched instead of forced to ready with empty inventory", got)
 	}
 }
 
@@ -668,6 +837,87 @@ func TestReuseExistingEnvironment_ReuseRequiredSSHUsesCanonicalRemoteTaskDir(t *
 	}
 	if req.PreviousExecutionID != "" {
 		t.Fatalf("PreviousExecutionID = %q, want empty for attach-only reuse", req.PreviousExecutionID)
+	}
+}
+
+// TestReuseExistingEnvironment_ReuseNotRequiredSSHSkipsStaleRemoteTaskDir
+// pins the fix for the empty-inventory SSH reuse hazard: when
+// workspaceReuseAllowed has already forced a fresh materialization (reuse
+// not required), reuseExistingEnvironment must not forward the old
+// env.WorkspacePath, or the SSH executor's attach-only path would trust a
+// possibly incomplete or stale checkout instead of preparing a fresh one.
+func TestReuseExistingEnvironment_ReuseNotRequiredSSHSkipsStaleRemoteTaskDir(t *testing.T) {
+	e := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	req := &LaunchAgentRequest{
+		TaskID:                 "task-1",
+		ExecutorType:           string(models.ExecutorTypeSSH),
+		WorkspaceReuseRequired: false,
+	}
+	env := &models.TaskEnvironment{
+		ID:            "environment-1",
+		ExecutorType:  string(models.ExecutorTypeSSH),
+		WorkspacePath: "/home/kandev/.kandev/tasks/task-1",
+	}
+
+	e.reuseExistingEnvironment(context.Background(), req, env)
+
+	if got, ok := req.Metadata[lifecycle.MetadataKeySSHRemoteTaskDir]; ok {
+		t.Fatalf("remote task directory = %v, want unset for a non-reuse launch", got)
+	}
+}
+
+func TestReuseExistingEnvironment_FreshRepoRecoveryDoesNotAdoptSiblingExecution(t *testing.T) {
+	repo := newMockRepository()
+	repo.taskRepositories["task-repo-1"] = &models.TaskRepository{
+		ID: "task-repo-1", TaskID: "task-1", RepositoryID: "repo-1",
+	}
+	repo.sessions["session-old"] = &models.TaskSession{
+		ID: "session-old", TaskID: "task-1", TaskEnvironmentID: "env-1",
+	}
+	repo.executorsRunning["session-old"] = &models.ExecutorRunning{
+		SessionID:        "session-old",
+		AgentExecutionID: "exec-old",
+	}
+	e := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{
+		TaskID:                 "task-1",
+		ExecutorType:           string(models.ExecutorTypeSSH),
+		WorkspaceReuseRequired: false,
+	}
+	env := &models.TaskEnvironment{ID: "env-1", TaskID: "task-1", ExecutorType: string(models.ExecutorTypeSSH)}
+
+	e.reuseExistingEnvironment(context.Background(), req, env)
+
+	if req.PreviousExecutionID != "" {
+		t.Fatalf("PreviousExecutionID = %q, want empty during fresh repo recovery", req.PreviousExecutionID)
+	}
+}
+
+func TestReuseExistingEnvironment_FreshRepoRecoveryDropsContainerHandle(t *testing.T) {
+	repo := newMockRepository()
+	repo.taskRepositories["task-repo-1"] = &models.TaskRepository{
+		ID: "task-repo-1", TaskID: "task-1", RepositoryID: "repo-1",
+	}
+	e := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{
+		TaskID:                 "task-1",
+		ExecutorType:           string(models.ExecutorTypeLocalDocker),
+		WorkspaceReuseRequired: false,
+	}
+	env := &models.TaskEnvironment{
+		ID:           "env-1",
+		TaskID:       "task-1",
+		ExecutorType: string(models.ExecutorTypeLocalDocker),
+		ContainerID:  "container-stale",
+	}
+
+	e.reuseExistingEnvironment(context.Background(), req, env)
+
+	if req.PreviousExecutionID != "" {
+		t.Fatalf("PreviousExecutionID = %q, want empty during fresh repo recovery", req.PreviousExecutionID)
+	}
+	if req.Metadata != nil {
+		t.Fatalf("metadata = %#v, want no stale container handle during fresh recovery", req.Metadata)
 	}
 }
 

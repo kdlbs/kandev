@@ -229,6 +229,7 @@ export type MergeQueueState =
 
 export type TaskPR = {
   id: string;
+  workspace_id: string;
   task_id: string;
   /** ID of the task repository this PR belongs to. Empty for legacy single-repo
    *  tasks persisted before multi-repo support. */

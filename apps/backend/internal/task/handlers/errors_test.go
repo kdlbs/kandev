@@ -115,6 +115,28 @@ func TestErrorsAreClassifiable(t *testing.T) {
 	})
 }
 
+func TestMoveConflictCode(t *testing.T) {
+	cases := []struct {
+		name string
+		err  string
+		want string
+	}{
+		{"active session", "task has an active session (running)", moveConflictCodeActiveSession},
+		{"archived task", "archived tasks cannot be moved", moveConflictCodeArchived},
+		{"different workspace", "target workflow is in a different workspace", moveConflictCodeDifferentWorkspace},
+		{"workflow step", "target workflow step does not belong to target workflow", moveConflictCodeWorkflowStep},
+		{"WIP limit", "WIP limit exceeded for workflow step", moveConflictCodeWIPLimit},
+		{"unrelated", "database is locked", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := moveConflictCode(errors.New(tc.err)); got != tc.want {
+				t.Fatalf("moveConflictCode(%q) = %q, want %q", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestIsTimeoutError pins the UX-classification contract for the prompt
 // error-message renderer. The pre-refactor substring check on "timeout"
 // covered three classes of producer; the typed-sentinel rewrite must keep

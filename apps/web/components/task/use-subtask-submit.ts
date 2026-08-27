@@ -52,6 +52,7 @@ type CreateSubtaskArgs = {
   workspaceMode: SubtaskWorkspaceMode;
   isLocalExecutor: boolean;
   freshBranchEnabled: boolean;
+  onClose: () => void;
   setActiveTask: (taskId: string) => void;
   setActiveSession: (taskId: string, sessionId: string) => void;
 };
@@ -71,6 +72,7 @@ async function createSubtask({
   workspaceMode,
   isLocalExecutor,
   freshBranchEnabled,
+  onClose,
   setActiveTask,
   setActiveSession,
 }: CreateSubtaskArgs) {
@@ -104,6 +106,9 @@ async function createSubtask({
     workspace_mode: workspaceMode,
     autopilot: autopilot || undefined,
   });
+  // Close the dialog before navigation. Navigation can remount the sidebar
+  // that owns the dialog state, which makes a later close update a stale owner.
+  onClose();
   const newSessionId = response.session_id ?? response.primary_session_id ?? null;
   if (newSessionId) {
     setActiveTask(response.id);
@@ -171,10 +176,10 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
           workspaceMode,
           isLocalExecutor,
           freshBranchEnabled,
+          onClose,
           setActiveTask,
           setActiveSession,
         });
-        onClose();
       } catch (error) {
         toast({
           title: t("task:failedToCreateSubtask"),

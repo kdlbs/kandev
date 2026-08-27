@@ -61,6 +61,8 @@ type WorkflowStepperProps = {
   taskId?: string | null;
   workflowId?: string | null;
   isArchived?: boolean;
+  onMoveStart?: () => void;
+  onMoveError?: (error: unknown) => void;
 };
 
 const WorkflowStepper = memo(function WorkflowStepper({
@@ -69,10 +71,16 @@ const WorkflowStepper = memo(function WorkflowStepper({
   taskId,
   workflowId,
   isArchived,
+  onMoveStart,
+  onMoveError,
 }: WorkflowStepperProps) {
   const { t } = useTranslation();
   const [movingToStepId, setMovingToStepId] = useState<string | null>(null);
   const disablePlanMode = useDisablePlanMode();
+  // Only the in-flight step's own button is disabled, so every other step stays
+  // clickable and two moves can overlap. This counter marks which one is the
+  // latest; a slower predecessor must not own the banner or the loading state.
+  const moveRequestRef = useRef(0);
 
   const sortedSteps = useMemo(() => [...steps].sort((a, b) => a.position - b.position), [steps]);
 
@@ -84,7 +92,9 @@ const WorkflowStepper = memo(function WorkflowStepper({
   const handleMove = useCallback(
     async (stepId: string): Promise<boolean> => {
       if (!taskId || !workflowId) return false;
+      onMoveStart?.();
       disablePlanMode();
+      const requestId = ++moveRequestRef.current;
       setMovingToStepId(stepId);
       try {
         await moveTask(taskId, {
@@ -95,12 +105,13 @@ const WorkflowStepper = memo(function WorkflowStepper({
         return true;
       } catch (err) {
         console.error("[WorkflowStepper] Failed to move task:", err);
+        if (requestId === moveRequestRef.current) onMoveError?.(err);
         return false;
       } finally {
-        setMovingToStepId(null);
+        if (requestId === moveRequestRef.current) setMovingToStepId(null);
       }
     },
-    [taskId, workflowId, disablePlanMode],
+    [taskId, workflowId, disablePlanMode, onMoveStart, onMoveError],
   );
 
   // Collapse to a minimal view when the full stepper can't fit (w-full keeps the measurement track-driven).

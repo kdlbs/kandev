@@ -497,6 +497,8 @@
   "taskAutoFixPrompt": "任务自动修复提示词",
   "taskGitAccess": "任务 Git 访问",
   "taskLabelled": "任务：{{title}}",
+  "taskPrDetailsLoading": "正在加载拉取请求详情...",
+  "taskPrDetailsUnavailable": "拉取请求详情不可用",
   "taskPrompt": "任务提示词",
   "tasks": "任务",
   "tasksCreatedByThisWatcherLand": "此监控创建的任务会进入所选工作区。",

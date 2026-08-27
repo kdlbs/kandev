@@ -612,7 +612,15 @@ function hydrateGitHub(draft: Draft<AppState>, state: HydrationState): void {
   if (state.githubAppRegistrations) {
     mergeWithLoading(draft.githubAppRegistrations, state.githubAppRegistrations);
   }
-  if (state.taskPRs) deepMerge(draft.taskPRs, state.taskPRs);
+  if (state.taskPRs) {
+    deepMerge(draft.taskPRs, state.taskPRs);
+    // Older boot payloads contain only byTaskId. Stamp those records with the
+    // workspace context that was hydrated alongside them so a later workspace
+    // switch cannot treat them as current data.
+    draft.taskPRs.workspaceId = state.taskPRs.workspaceId ?? draft.workspaces.activeId;
+    draft.taskPRs.workspaceContextGeneration =
+      state.taskPRs.workspaceContextGeneration ?? draft.workspaceContextGeneration;
+  }
   if (state.azureDevOpsTaskPullRequests) {
     deepMerge(draft.azureDevOpsTaskPullRequests, state.azureDevOpsTaskPullRequests);
   }

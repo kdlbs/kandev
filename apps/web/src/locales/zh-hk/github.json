@@ -497,6 +497,8 @@
   "taskAutoFixPrompt": "任務自動修復提示詞",
   "taskGitAccess": "任務 Git 存取",
   "taskLabelled": "任務：{{title}}",
+  "taskPrDetailsLoading": "正在載入拉取請求詳情...",
+  "taskPrDetailsUnavailable": "拉取請求詳情不可用",
   "taskPrompt": "任務提示詞",
   "tasks": "任務",
   "tasksCreatedByThisWatcherLand": "此監控建立的任務會進入所選工作區。",

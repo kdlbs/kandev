@@ -48,6 +48,17 @@ The automation is the object; its runs are its history. The surface is a list an
   nav lists automations.
 - The section fetches only while it is on screen — a collapsed rail or a folded
   section issues no requests, since the sidebar is mounted on every page.
+- While the section is expanded in the desktop rail, `AutomationsSection` uses
+  the shared 10-second live-refresh cadence to re-read
+  `automation.summaries`. `useAutomationSummaries` retains its request-order
+  guard, so a slower earlier response cannot overwrite a later refresh. Folding
+  the section, collapsing the rail, or unmounting the desktop-only rail disables
+  the cadence.
+- `buildAutomationRows` remains the single health-state derivation. An idle or
+  paused row keeps its existing health dot; a running row renders an animated
+  loader in the same compact slot. The loader is decorative and the existing
+  localized state label remains the screen-reader contract, so animation does
+  not replace the semantic Running state.
 
 **`/automations` — the agenda, not an index**
 
@@ -248,6 +259,8 @@ The action is workspace-scoped: the caller must be authorized for `workspace_id`
 | Workspace changes while the list is open | Rows from the previous workspace are never shown under the new one, not even for one frame |
 | Workspace changes while a detail page is open | The page leaves for `/automations`. An automation belongs to one workspace, so continuing to show it under a sidebar that says otherwise is a lie about where the user is |
 | A run finishes while the page is open | The page stops calling it running without a reload. Polling runs only while something is open, so an idle workspace issues no repeat requests |
+| A run starts after the Automations sidebar section is opened | The visible section re-reads health summaries on the live-refresh cadence and replaces the row's health dot with the running indicator without a reload |
+| The Automations sidebar section is folded or the desktop rail is collapsed | Health-summary refresh stops; reopening the visible section performs an authoritative read before displaying current health |
 | A visible run is still reported as open while the health summary says there are no open runs | The detail rail/drawer continues reading until the visible run receives a terminal status, then moves it to Completed without a reload |
 | An open run falls outside the page's own run window | The open count comes from the server, not from the loaded window, so the page still reports work in flight and keeps polling |
 | A user stops a running reused turn | The action addresses its stored run/session/turn identity, cancels that exact turn, and marks only that run failed. |
@@ -289,6 +302,8 @@ The action is workspace-scoped: the caller must be authorized for `workspace_id`
 - **GIVEN** an automation run finished successfully, **WHEN** the user opens it and replies, **THEN** the agent continues in the same session and worktree rather than reporting that the session has ended.
 - **GIVEN** an automation whose newest run is older than the workspace feed's cap reaches back, **WHEN** its row renders, **THEN** it still shows that run's outcome rather than "No runs yet".
 - **GIVEN** a run is in flight, **WHEN** the user leaves the page open, **THEN** it stops reading "Running" once the run finishes, without a reload.
+- **GIVEN** an idle automation is visible in the desktop sidebar, **WHEN** its schedule starts a run, **THEN** the same row shows the animated running indicator and localized Running state without a reload.
+- **GIVEN** a running automation is visible in the desktop sidebar, **WHEN** its last open run finishes, **THEN** the same row returns to its non-running health indicator without a reload.
 - **GIVEN** the detail rail or drawer shows a run as Running while the health summary reports zero open runs, **WHEN** that run receives a terminal status, **THEN** the run moves to Completed without the user reloading the page.
 - **GIVEN** an automation with an open run older than its own capped run window, **WHEN** its detail page renders, **THEN** it still reports that something is running and keeps polling, because the count comes from the server rather than from the window.
 - **GIVEN** the user switches to another workspace while a detail page is open, **WHEN** the switch lands, **THEN** the page leaves for `/automations` rather than showing another workspace's automation.
