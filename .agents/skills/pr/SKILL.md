@@ -71,15 +71,16 @@ explicitly requests task tracking.
    when the user explicitly requests separate PRs. Use `--draft` if requested,
    otherwise create as ready-for-review.
 
+   **Architecture and scope gate:** Before running any PR creation command, check
+   large changes for a linked issue with maintainer discussion. If it is missing,
+   stop and report the blocker. Do not open a PR to start the discussion. Prefer
+   one logical change and the smallest practical diff; split unrelated cleanup,
+   refactoring, and feature work into separate PRs.
+
    **PR title** must follow Conventional Commits format (see `/commit` for full rules). CI validates via `pr-title.yml` — the PR title becomes the squash-merge commit used for release notes.
 
    **PR body** must be built from `.github/pull_request_template.md`; fail fast if it is missing. Read the whole template before writing the body. Treat HTML comments as authoring instructions for the agent, not as output:
    - Fill the template's required sections from the actual diff, commits, and verification performed.
-   - For a large architectural change, require a linked issue with maintainer
-     discussion before creating the PR. If the issue or discussion is missing,
-     stop and report the blocker. Do not open a PR to start the discussion.
-   - Prefer one logical change and the smallest practical diff. Split unrelated
-     cleanup, refactoring, and feature work into separate PRs.
    - Remove optional sections that add no value for this change.
    - Preserve static required sections such as checklists exactly as the template provides them; do not pre-fill unchecked boxes.
    - For docs-only PRs, keep code-centric checklist items unchanged when they do not apply, and list the docs-safe validation commands actually run.
