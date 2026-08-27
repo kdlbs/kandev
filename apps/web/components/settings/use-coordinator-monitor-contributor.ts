@@ -64,16 +64,17 @@ export function useCoordinatorMonitorContributor({
   workspaceId,
 }: CoordinatorMonitorContributorArgs) {
   const { toast } = useToast();
+  const isTemporaryWorkflow = workflowId.startsWith(TEMP_WORKFLOW_PREFIX);
   const [draftConfig, setDraftConfig] = useState<MonitorConfigMap>({});
   const [savedConfig, setSavedConfig] = useState<MonitorConfigMap>({});
-  const [loading, setLoading] = useState(!workflowId.startsWith(TEMP_WORKFLOW_PREFIX));
+  const [loading, setLoading] = useState(!isTemporaryWorkflow);
   const draftConfigRef = useRef(draftConfig);
   draftConfigRef.current = draftConfig;
   const savedConfigRef = useRef(savedConfig);
   savedConfigRef.current = savedConfig;
 
   useEffect(() => {
-    if (workflowId.startsWith(TEMP_WORKFLOW_PREFIX)) {
+    if (isTemporaryWorkflow) {
       setDraftConfig({});
       setSavedConfig({});
       setLoading(false);
@@ -104,7 +105,7 @@ export function useCoordinatorMonitorContributor({
     };
   }, [workflowId, toast]);
 
-  const isDirty = !configMapsEqual(draftConfig, savedConfig);
+  const isDirty = !isTemporaryWorkflow && !configMapsEqual(draftConfig, savedConfig);
   const revision = JSON.stringify(draftConfig);
 
   useSettingsSaveContributor({
@@ -112,6 +113,7 @@ export function useCoordinatorMonitorContributor({
     revision,
     isDirty,
     save: async () => {
+      if (isTemporaryWorkflow) return;
       const entries = configMapToEntries(draftConfigRef.current);
       const res = await setCoordinatorMonitoringAction(workflowId, {
         workspace_id: workspaceId,

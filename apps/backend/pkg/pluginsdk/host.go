@@ -319,7 +319,7 @@ type AgentConversationManager interface {
 	// for in-flight turns, skipped for busy-session coalesced drops).
 	// Returns "skipped_busy" when the session is mid-turn and the dispatch
 	// was coalesced rather than queued. Other statuses come from the existing
-	// launch/prompt delivery path and are currently "started" and "queued".
+	// launch/prompt delivery path and are currently "started" and "sent".
 	Dispatch(ctx context.Context, workspaceID, conversationKey, text, occurrenceKey string) (AgentConversationDispatch, error)
 
 	// Delete removes all conversations matching the workspace and key owned

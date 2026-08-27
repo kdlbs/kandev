@@ -1117,7 +1117,7 @@ message DispatchAgentConversationRequest {
 // DispatchAgentConversationResponse carries the dispatch result.
 message DispatchAgentConversationResponse {
   string session_id = 1;
-  // One of "started", "queued", "duplicate_occurrence", or "skipped_busy".
+  // One of "started", "sent", "duplicate_occurrence", or "skipped_busy".
   string status = 2;
   AgentConversationDescriptor conv_descriptor = 3;
 }

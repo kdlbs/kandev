@@ -656,7 +656,7 @@ plugin provides `workspace_id`, `conversation_key`, `text`, and a stable
 `occurrence_key` for idempotency (e.g. a hash of the trigger event and due
 timestamp). An already-claimed key returns the prior dispatch result silently.
 If the backing session is busy, the prompt is queued; if idle, the agent is
-prompted. Returns the `session_id`, a `status` string (`started`, `queued`,
+prompted. Returns the `session_id`, a `status` string (`started`, `sent`,
 `duplicate_occurrence`, or `skipped_busy`), and the
 `AgentConversationDescriptor`.
 

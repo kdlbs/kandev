@@ -5,7 +5,11 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/kandev/kandev/internal/coordinator"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
@@ -165,6 +169,35 @@ func TestHandleStopTask_RequiresCurrentPrincipalSessionAndAuditsGrant(t *testing
 	if audit.PrincipalID != "principal" || audit.ActorTaskID != "agent" || audit.ActorSessionID != "current" {
 		t.Fatalf("audit provenance = %#v", audit)
 	}
+}
+
+func TestHandleStopTask_AllowsAutomationPrincipal(t *testing.T) {
+	tasks := map[string]*models.Task{
+		"target": {ID: "target", WorkspaceID: "ws-1"},
+	}
+	stopper := &recordingTaskStopper{result: orchestrator.CoordinatorTaskStopResult{Status: orchestrator.CoordinatorTaskStopStatusStopped}}
+	h := stopTaskTestHandler(t, tasks, nil, stopper)
+	ctx := mcpscope.WithPrincipal(context.Background(), mcpscope.Principal{
+		AutomationID:    "automation-1",
+		WorkspaceID:     "ws-1",
+		CallerTaskID:    "automation-run",
+		CallerSessionID: "automation-session",
+		Surface:         mcpprofile.SurfaceAutomation,
+	})
+	msg := makeWSMessage(t, ws.ActionMCPStopTask, map[string]interface{}{
+		"task_id": "target", "sender_task_id": "automation-run", "sender_session_id": "automation-session",
+	})
+
+	resp, err := h.handleStopTask(ctx, msg)
+	require.NoError(t, err)
+	var payload struct {
+		TaskID string                                 `json:"task_id"`
+		Status orchestrator.CoordinatorTaskStopStatus `json:"status"`
+	}
+	require.NoError(t, resp.ParsePayload(&payload))
+	require.Equal(t, "target", payload.TaskID)
+	require.Equal(t, orchestrator.CoordinatorTaskStopStatusStopped, payload.Status)
+	require.Equal(t, []string{"target"}, stopper.calls)
 }
 
 func TestHandleStopTask_ValidatesPayload(t *testing.T) {

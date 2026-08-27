@@ -94,6 +94,29 @@ describe("useCoordinatorMonitorContributor: loading", () => {
     expect(view.result.current.draftConfig).toEqual({});
   });
 
+
+  it("treats temporary workflows as non-editable and non-savable", async () => {
+    const view = renderHook(() =>
+      useCoordinatorMonitorContributor({
+        workflowId: "temp-workflow-abc",
+        workspaceId: WORKSPACE_ID,
+      }),
+    );
+
+    await Promise.resolve();
+    expect(view.result.current.loading).toBe(false);
+    expect(contributor().isDirty).toBe(false);
+
+    act(() => {
+      view.result.current.setDraftConfig(configMap(EDITED_PROMPT));
+    });
+
+    await act(async () => contributor().save(contributor().revision));
+
+    expect(contributor().isDirty).toBe(false);
+    expect(setCoordinatorMonitoringAction).not.toHaveBeenCalled();
+  });
+
   it("shows an error toast when loading fails", async () => {
     vi.mocked(getCoordinatorMonitoringAction).mockRejectedValueOnce(new Error("network error"));
 

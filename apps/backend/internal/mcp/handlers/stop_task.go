@@ -53,10 +53,14 @@ func (h *Handlers) handleStopTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 		return lookupError.response, lookupError.err
 	}
 
-	decision, err := h.authorizeCoordinatorAction(ctx, sender, target, req.SenderSessionID, "stop_task", coordinator.CapabilityOrchestrate)
-	if err != nil || !decision.Allowed {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden,
-			"only a task's direct parent in the same workspace can stop it", nil)
+	decision := coordinator.Decision{Allowed: true, Basis: coordinator.BasisDirectParent}
+	var err error
+	if !automationCaller {
+		decision, err = h.authorizeCoordinatorAction(ctx, sender, target, req.SenderSessionID, "stop_task", coordinator.CapabilityOrchestrate)
+		if err != nil || !decision.Allowed {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden,
+				"only a task's direct parent in the same workspace can stop it", nil)
+		}
 	}
 	if h.taskStopper == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "task stop is not configured", nil)

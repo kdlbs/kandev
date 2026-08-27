@@ -462,6 +462,9 @@ type SetCoordinatorMonitoringRequest struct {
 // GetCoordinatorMonitoring returns the saved coordinator-monitoring
 // configuration for a workflow.
 func (c *Controller) GetCoordinatorMonitoring(ctx context.Context, workflowID string) (*ListCoordinatorMonitoringResponse, error) {
+	if err := c.svc.AuthorizeWorkflow(ctx, workflowID); err != nil {
+		return nil, err
+	}
 	entries, err := c.svc.GetCoordinatorMonitoring(ctx, workflowID)
 	if err != nil {
 		return nil, err
@@ -473,6 +476,9 @@ func (c *Controller) GetCoordinatorMonitoring(ctx context.Context, workflowID st
 // for a workflow. The workflow must be mutable (not GitHub-synced, not in a
 // read-only Improve workspace), matching the guard applied to step CRUD.
 func (c *Controller) SetCoordinatorMonitoring(ctx context.Context, req SetCoordinatorMonitoringRequest) (*ListCoordinatorMonitoringResponse, error) {
+	if err := c.svc.AuthorizeWorkflow(ctx, req.WorkflowID); err != nil {
+		return nil, err
+	}
 	if err := c.svc.EnsureWorkflowMutable(ctx, req.WorkflowID); err != nil {
 		return nil, err
 	}

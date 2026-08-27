@@ -8684,7 +8684,7 @@ func (x *DispatchAgentConversationRequest) GetOccurrenceKey() string {
 type DispatchAgentConversationResponse struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	SessionId string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	// One of "started", "queued", "duplicate_occurrence", or "skipped_busy".
+	// One of "started", "sent", "duplicate_occurrence", or "skipped_busy".
 	Status         string                       `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
 	ConvDescriptor *AgentConversationDescriptor `protobuf:"bytes,3,opt,name=conv_descriptor,json=convDescriptor,proto3" json:"conv_descriptor,omitempty"`
 	unknownFields  protoimpl.UnknownFields
