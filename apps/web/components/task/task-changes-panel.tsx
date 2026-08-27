@@ -31,11 +31,13 @@ import {
 import type { SelectedDiff } from "./task-layout";
 import { useIsTaskArchived, ArchivedPanelPlaceholder } from "./task-archived-context";
 import { useTranslation } from "react-i18next";
+import type { GitChangeLayer } from "@/lib/state/slices/session-runtime/types";
 
 type TaskChangesPanelProps = {
   mode?: "all" | "file";
   filePath?: string;
   fileRepositoryName?: string;
+  changeLayer?: GitChangeLayer;
   prKey?: string;
   selectedDiff: SelectedDiff | null;
   onClearSelected: () => void;
@@ -338,6 +340,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
   mode = "all",
   filePath,
   fileRepositoryName,
+  changeLayer,
   prKey,
   selectedDiff,
   onClearSelected,
@@ -355,14 +358,13 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
   const relevantPRLoading = usesPRDiff && view.prDiffLoading;
   const actions = useChangesActions(view.activeSessionId, view.allFiles, wordWrapProp);
   const handleRequestWalkthrough = useWalkthroughRequest(view.activeSessionId, view.allFiles);
+  const fileTarget = { filePath, fileRepositoryName, prKey, changeLayer };
   const visible = useVisibleDiffState({
     allFiles: view.allFiles,
     rawPRFiles: view.rawPRFiles,
     mode,
-    filePath,
-    fileRepositoryName,
+    ...fileTarget,
     sourceFilter,
-    prKey,
     fileRefs: view.fileRefs,
     reviewedFiles: view.reviewedFiles,
     staleFiles: view.staleFiles,

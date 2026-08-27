@@ -1,6 +1,16 @@
 import { djb2Hash } from "@/lib/utils/hash";
 import { t } from "@/lib/i18n";
 import type { FileChangeStatus } from "@/lib/utils/file-change-status";
+import type { GitChangeLayer } from "@/lib/state/slices/session-runtime/types";
+
+export type ReviewChangeFacet = {
+  diff: string;
+  status: FileChangeStatus;
+  additions: number;
+  deletions: number;
+  old_path?: string;
+  diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
+};
 
 export type ReviewFile = {
   path: string;
@@ -12,6 +22,10 @@ export type ReviewFile = {
   source: "uncommitted" | "committed" | "pr";
   old_path?: string;
   diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
+  staged_change?: ReviewChangeFacet;
+  unstaged_change?: ReviewChangeFacet;
+  /** Frontend-only layer selected from a mixed uncommitted file. */
+  change_layer?: GitChangeLayer;
   /**
    * Repository this file belongs to. Set on multi-repo task changes so the
    * file tree groups files under per-repo top-level nodes. Optional for

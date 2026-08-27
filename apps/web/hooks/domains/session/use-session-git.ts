@@ -25,6 +25,7 @@ import { useMultiRepoSummary } from "./use-session-git-summary";
 import { deriveComparisonValues, deriveSessionGitValues } from "./use-session-git-derived";
 import { useScopedStageOperations } from "./use-scoped-stage-operations";
 import { normalizeGitStatusFiles } from "@/lib/state/slices/session-runtime/git-status-normalizer";
+import { splitFilesByChangeLayer } from "./git-change-facets";
 
 /**
  * Per-repo result emitted by frontend-side fan-outs (commit, push, pull,
@@ -626,8 +627,10 @@ function useFileDerivations(
       allFilesCount: allFiles.length,
     });
   }, [statusByRepo, gitStatus, allFiles]);
-  const unstagedFiles = useMemo(() => allFiles.filter((f) => !f.staged), [allFiles]);
-  const stagedFiles = useMemo(() => allFiles.filter((f) => f.staged), [allFiles]);
+  const { stagedFiles, unstagedFiles } = useMemo(
+    () => splitFilesByChangeLayer(allFiles),
+    [allFiles],
+  );
   const repoForPath = useMemo(() => {
     const m = new Map<string, string>();
     for (const f of allFiles) {

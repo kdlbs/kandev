@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-WORKSPACE-GIT-STATUS-001
 created: 2026-07-19
-updated: 2026-08-19
+updated: 2026-08-27
 owners:
   - kandev
 ---
@@ -18,7 +18,7 @@ This design preserves the technical source detail for `REQ-PLATFORM-WORKSPACE-GI
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-PLATFORM-WORKSPACE-GIT-STATUS-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-PLATFORM-WORKSPACE-GIT-STATUS-001` | [Migrated source detail](#migrated-source-detail), [Mixed index and working-tree changes](#mixed-index-and-working-tree-changes), [API surface](#api-surface) |
 
 ## Migrated source detail
 
@@ -34,10 +34,51 @@ Users opening or focusing Changes and Review need a current workspace snapshot w
 - Every non-cancelled caller receives the same completed snapshot or error from a shared observation. A caller whose own context is cancelled returns promptly without cancelling or otherwise poisoning the result for other callers.
 - Tracker shutdown or the bounded shared-observation deadline cancels the underlying work. Cancelled work does not publish or cache a partial snapshot.
 - After Git output is parsed, changed-file and synthetic untracked-diff enrichment performs work proportional to the number of changed entries plus the bounded content processed.
-- Existing diff limits remain in force: 10 MiB maximum source file size, 256 KiB maximum emitted diff per file, and a 2 MiB enrichment threshold per status snapshot. Because the threshold is checked before enriching each file, the final accepted file may preserve the existing overshoot of up to the 256 KiB per-file cap. Existing skip reasons remain unchanged.
+- Existing diff limits remain in force: 10 MiB maximum source file size, 256 KiB maximum per emitted diff representation, and a 2 MiB enrichment threshold per status snapshot. Every flattened or layer-specific representation participates in that threshold. Because the threshold is checked before enriching each representation, the final accepted representation may preserve the existing overshoot of up to the 256 KiB cap. Existing skip reasons remain unchanged.
 - Large changed sets retain every path and its status metadata. Once the total diff budget is exhausted, files that are not enriched retain `budget_exceeded` as their diff skip reason.
 - Multi-repository responses retain repository identity and partial-success behavior.
 - Verification tooling preserves shared managed Go and lint caches for reuse while keeping invocation scratch and command output outside repository worktrees. The root-level `.verify-cache` and `.tmp` paths are ignored as safeguards against legacy or misconfigured verification runs.
+
+### Mixed index and working-tree changes
+
+Git porcelain reports two independent status columns for each path: the index state (`X`) and the
+working-tree state (`Y`). A path such as `MM README.md` or `AM new-file.txt` is one file identity with
+two change facets. The workspace model MUST preserve both columns instead of selecting one as the
+file's only state.
+
+`GitStatusUpdate.Files` remains keyed once by repository-relative path. `FileInfo` retains its
+flattened fields as a compatibility projection and adds optional `staged_change` and
+`unstaged_change` objects. Each object carries the facet's status, additions, deletions, old path,
+diff, and diff skip reason. Agentctl emits the facet objects for a mixed path; a path with only one
+layer continues to use the existing flattened representation. Consumers MUST accept both shapes.
+
+For a mixed path, agentctl computes three intentional views:
+
+- the flattened compatibility view compares `HEAD` with the working tree and preserves the existing
+  worktree-priority `staged=false` classification for older consumers;
+- `staged_change` compares `HEAD` with the index using `git diff --cached`; and
+- `unstaged_change` compares the index with the working tree using `git diff` without a base ref.
+
+All serialized diff strings, including the compatibility projection, participate in the existing
+snapshot-wide enrichment budget. Each representation retains the existing output cap and skip
+reasons. Budget exhaustion may omit one representation without discarding either facet's status
+metadata.
+
+The frontend keeps the raw file map unique by `(repository_name, path)` for task badges, Review
+aggregation, mutation routing, and change-file totals. Changes derives two temporary `FileInfo`
+views from a mixed entry, one per facet, and falls back to the flattened fields when facet objects
+are absent. Stage, unstage, and discard operations continue to send only the repository-qualified
+path, never the temporary view identity.
+
+Diff navigation adds the change layer to its target identity. Desktop preview and pinned diff tabs
+use `(repository_name, path, layer)` so the staged and unstaged views of one path cannot alias each
+other. The mobile full-height diff drawer carries the same layer while retaining its existing sheet,
+touch-target, and scroll behavior. Review's all-files source remains a single combined uncommitted
+file; only a layer-qualified Changes selection projects a facet-specific diff.
+
+Status equality, editor synchronization signatures, and Changes focus fingerprints include the
+optional facet fields. A snapshot that changes only one facet must therefore publish and render.
+This contract follows [ADR-2026-08-27-mixed-git-change-facets](../../../decisions/2026-08-27-mixed-git-change-facets.md).
 
 ### Base-commit staleness and refresh
 
@@ -73,6 +114,7 @@ Existing Git-status routes remain in place. Their result and stream payloads add
 - `GET /api/v1/git/status/multi?fresh=<bool>` returns the existing `MultiRepoGitStatusResult` shape containing `PerRepoGitStatus` entries.
 - The `fresh` query parameter continues to select a live observation rather than a cached tracker snapshot.
 - A repository status MAY include `comparison_target` with its credential-free display identity and `comparison_error_code` when the explicit target is unavailable.
+- A mixed-path `FileInfo` MAY include `staged_change` and `unstaged_change`. Each facet uses the same bounded status, line-total, rename, diff, and skip-reason vocabulary as the flattened file fields. Their absence preserves the legacy single-layer shape.
 - Commit and cumulative-diff requests use agentctl's configured repository-qualified ref when present. A caller-supplied branch name cannot override it.
 - The internal agentctl control API adds a per-repository comparison-target update alongside the existing base-branch update. It validates identities and refs, materializes the exact ref, replaces tracker state, and triggers a refresh.
 - The bounded task Git summary adds `comparison_unavailable`; when true, additions/deletions are not rendered as authoritative task-card statistics.
@@ -83,6 +125,8 @@ Existing Git-status routes remain in place. Their result and stream payloads add
 |---|---|
 | Primary branch or porcelain observation fails | The live observation fails and the prior cached snapshot remains available. |
 | Secondary diff enrichment fails | The established same-HEAD carry-forward behavior is preserved. |
+| A path has both index and working-tree changes | One raw file entry carries both facets. Changes renders one row in Staged and one in Unstaged, while overall file totals count the path once. |
+| A mixed path's layer diff exceeds its cap or the snapshot budget | The affected facet retains status metadata and reports the existing `truncated` or `budget_exceeded` skip reason; the other facet remains independently usable. |
 | One caller cancels while a shared observation is running | That caller returns its context cancellation promptly; other callers remain eligible to receive the shared result. |
 | The tracker stops or the shared deadline expires | Underlying work is cancelled and no partial result is published or cached. |
 | One repository fails during a multi-repository request | Successful repository entries remain available and the failure is reported on its repository entry. |
@@ -104,6 +148,9 @@ Existing Git-status routes remain in place. Their result and stream payloads add
 - **GIVEN** one waiter cancels during a shared observation, **WHEN** other waiters remain, **THEN** the cancelled waiter returns promptly and the remaining waiters receive the completed result.
 - **GIVEN** tracker shutdown or the shared-observation deadline while enrichment is running, **WHEN** cancellation reaches the observation, **THEN** filesystem iteration stops and no partial snapshot is cached.
 - **GIVEN** approximately 15,000 untracked text files, **WHEN** fresh status is computed, **THEN** every path is present, emitted diff content obeys the existing limits, files not enriched after total-budget exhaustion have `budget_exceeded`, and post-porcelain enrichment remains linear in the number of entries.
+- **GIVEN** a tracked file with one staged edit and a different unstaged edit, **WHEN** fresh status is computed, **THEN** its one path entry contains staged and unstaged facets with independent line totals and `HEAD -> index` and `index -> working tree` diffs.
+- **GIVEN** a newly added staged file that receives another unstaged edit, **WHEN** Changes opens on desktop or mobile, **THEN** the same path appears in both Staged and Unstaged, selecting each row shows only that layer, and the overall changed-file count remains one.
+- **GIVEN** a mixed path visible in both sections, **WHEN** the user stages or unstages it, **THEN** one repository-qualified Git mutation runs and the next snapshot shows only the facet that remains.
 - **GIVEN** one invalid repository in a multi-repository request, **WHEN** other repositories succeed, **THEN** the response retains the successful entries and reports the failure only on the invalid repository.
 - **GIVEN** verification needs writable scratch space, **WHEN** it selects a location, **THEN** the location is outside every Git worktree and existing shared caches remain reusable; if a legacy run creates root-level `.verify-cache` or `.tmp`, Git status ignores it.
 - **GIVEN** a session whose stored `base_commit_sha` is a strict ancestor of `merge-base(HEAD, <resolved integration candidate>)` (for example a stacked-PR parent branch that has since merged into the integration branch and lost its upstream ref), **WHEN** the commits panel is requested, **THEN** the enumerated commit count matches `git rev-list --first-parent --count $(git merge-base HEAD <resolved integration candidate>)..HEAD` and excludes the commits that already landed on the integration branch.
@@ -131,7 +178,10 @@ Existing Git-status routes remain in place. Their result and stream payloads add
 - Granting a new Git credential scope for a private comparison repository.
 - Periodically fetching a moving target branch on every status poll. Targets are refreshed on association, retarget, launch/resume, and explicit comparison refresh.
 - Automatically changing the checkout, push remote, upstream, or `origin` because a comparison target changes.
+- Redesigning the desktop Changes panel or compressing it into the mobile layout.
+- Adding hunk-level staging or changing the existing whole-file stage, unstage, and discard semantics.
+- Defining new behavior for Git's unmerged/conflict porcelain states; those continue to follow their existing handling.
 
 ## Implementation plan
 
-See [Workspace Git Status Scalability plan](../../../plans/workspace-git-status-scalability/plan.md) and [Fork PR Comparison Targets plan](../../../plans/fork-pr-comparison-targets/plan.md).
+See [Workspace Git Status Scalability plan](../../../plans/workspace-git-status-scalability/plan.md), [Fork PR Comparison Targets plan](../../../plans/fork-pr-comparison-targets/plan.md), and [Mixed Staged and Unstaged Changes plan](../../../plans/mixed-staged-unstaged-changes/plan.md).

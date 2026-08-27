@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, type MutableRefObject, type RefObject } from "react";
 import { reviewFileKey, splitReviewFileKey, type ReviewFile } from "@/components/review/types";
 import type { ReviewSource } from "@/hooks/domains/session/use-review-sources";
+import type { GitChangeLayer } from "@/lib/state/slices/session-runtime/types";
 
 export function shouldDeferReviewStateForPR(
   hasSelectedPR: boolean,
@@ -104,13 +105,40 @@ type FilterVisibleFilesOpts = {
   sourceFilter: "all" | ReviewSource;
   rawPRFiles?: ReviewFile[];
   prKey?: string;
+  changeLayer?: GitChangeLayer;
 };
+
+function projectReviewFileLayer(file: ReviewFile, layer: GitChangeLayer): ReviewFile | null {
+  if (file.source !== "uncommitted") return file;
+  const facet = layer === "staged" ? file.staged_change : file.unstaged_change;
+  if (!facet) {
+    if (file.staged !== (layer === "staged")) return null;
+    return { ...file, change_layer: layer };
+  }
+  return {
+    ...file,
+    ...facet,
+    staged: layer === "staged",
+    change_layer: layer,
+  };
+}
+
+function projectRequestedLayer(
+  files: ReviewFile[],
+  mode: FilterVisibleFilesOpts["mode"],
+  changeLayer: GitChangeLayer | undefined,
+): ReviewFile[] {
+  if (mode !== "file" || !changeLayer) return files;
+  return files
+    .map((file) => projectReviewFileLayer(file, changeLayer))
+    .filter((file): file is ReviewFile => file !== null);
+}
 
 export function filterVisibleFiles(
   allFiles: ReviewFile[],
   opts: FilterVisibleFilesOpts,
 ): ReviewFile[] {
-  const { mode, filePath, fileRepositoryName, sourceFilter, rawPRFiles, prKey } = opts;
+  const { mode, filePath, fileRepositoryName, sourceFilter, rawPRFiles, prKey, changeLayer } = opts;
   const repositoryFilter = prKey && sourceFilter === "pr" ? undefined : fileRepositoryName;
   if (mode === "file" && filePath && sourceFilter === "pr" && rawPRFiles?.length) {
     let prFiles = rawPRFiles.filter((file) => file.path === filePath && file.source === "pr");
@@ -128,7 +156,7 @@ export function filterVisibleFiles(
     }
   }
   if (sourceFilter !== "all") files = files.filter((file) => file.source === sourceFilter);
-  return files;
+  return projectRequestedLayer(files, mode, changeLayer);
 }
 
 export function useVisibleDiffState(opts: {
@@ -139,6 +167,7 @@ export function useVisibleDiffState(opts: {
   fileRepositoryName: string | undefined;
   sourceFilter: "all" | ReviewSource;
   prKey: string | undefined;
+  changeLayer: GitChangeLayer | undefined;
   fileRefs: Map<string, RefObject<HTMLDivElement | null>>;
   reviewedFiles: Set<string>;
   staleFiles: Set<string>;
@@ -151,6 +180,7 @@ export function useVisibleDiffState(opts: {
     fileRepositoryName,
     sourceFilter,
     prKey,
+    changeLayer,
     fileRefs,
     reviewedFiles,
     staleFiles,
@@ -164,8 +194,9 @@ export function useVisibleDiffState(opts: {
         sourceFilter,
         rawPRFiles,
         prKey,
+        changeLayer,
       }),
-    [allFiles, mode, filePath, fileRepositoryName, sourceFilter, rawPRFiles, prKey],
+    [allFiles, mode, filePath, fileRepositoryName, sourceFilter, rawPRFiles, prKey, changeLayer],
   );
   const repositoryFilter = prKey && sourceFilter === "pr" ? undefined : fileRepositoryName;
   const visibleFileRefs = useMemo(() => {
