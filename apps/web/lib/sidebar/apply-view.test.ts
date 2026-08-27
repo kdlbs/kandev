@@ -180,6 +180,25 @@ describe("applyFilters — repository (#1213)", () => {
     const out = applyFilters(tasks, [C({ dimension: "repository", op: "is", value: optionValue })]);
     expect(out.map((t) => t.id)).toEqual(["a"]);
   });
+
+  it("filters projected multi-repository tasks by their primary repository", () => {
+    const out = applyFilters(
+      [
+        task({
+          id: "multi",
+          repositoryPath: "org/primary",
+          repositories: ["org/primary", "org/secondary"],
+          repositoryLinks: [
+            { repository_id: "repo-primary", position: 0 },
+            { repository_id: "repo-secondary", position: 1 },
+          ],
+        }),
+      ],
+      [C({ dimension: "repository", op: "is", value: "org/primary" })],
+    );
+
+    expect(out.map((item) => item.id)).toEqual(["multi"]);
+  });
 });
 
 describe("applyFilters — titleMatch + combos", () => {
@@ -414,6 +433,58 @@ describe("applyGroup — repository combinations", () => {
     expect(out.groups[0].key).toBe("__multi__");
     expect(out.groups[0].label).toBe("Multi-repo");
     expect(out.groups[0].tasks.map((item) => item.id)).toEqual(["incomplete"]);
+  });
+});
+
+describe("applyGroup — repository combination edge cases", () => {
+  it("accepts duplicate canonical slugs when each repository link resolves", () => {
+    const repositories = ["org/api", "org/api"];
+    const out = applyGroup(
+      [
+        task({
+          id: "duplicate-slug",
+          repositories,
+          repositoryLinks: [
+            { repository_id: "repo-local-api", position: 0 },
+            { repository_id: "repo-remote-api", position: 1 },
+          ],
+        }),
+      ],
+      "repository",
+    );
+
+    expect(out.groups).toHaveLength(1);
+    expect(out.groups[0]).toMatchObject({
+      key: `__repo_combination__:${JSON.stringify(repositories)}`,
+      label: "org/api, org/api",
+    });
+  });
+
+  it("sorts combination groups before single-repo groups and unassigned last", () => {
+    const repositories = ["org/one", "org/two"];
+    const out = applyGroup(
+      [
+        task({ id: "single", repositoryPath: "org/three" }),
+        task({ id: "single-other", repositoryPath: "org/four" }),
+        task({ id: "unassigned" }),
+        task({
+          id: "combo",
+          repositories,
+          repositoryLinks: [
+            { repository_id: "repo-one", position: 0 },
+            { repository_id: "repo-two", position: 1 },
+          ],
+        }),
+      ],
+      "repository",
+    );
+
+    expect(out.groups.map((group) => group.key)).toEqual([
+      `__repo_combination__:${JSON.stringify(repositories)}`,
+      "org/four",
+      "org/three",
+      "__unassigned__",
+    ]);
   });
 });
 

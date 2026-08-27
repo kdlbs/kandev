@@ -14,6 +14,14 @@ function link(repository_id: string, position?: number): SidebarTaskRepositoryLi
 }
 
 describe("resolveTaskRepositorySlugs", () => {
+  it("returns empty for null, undefined, and empty input", () => {
+    const repositorySlugs = new Map([[REPO_A, REPO_A_SLUG]]);
+
+    expect(resolveTaskRepositorySlugs(null, repositorySlugs)).toEqual([]);
+    expect(resolveTaskRepositorySlugs(undefined, repositorySlugs)).toEqual([]);
+    expect(resolveTaskRepositorySlugs([], repositorySlugs)).toEqual([]);
+  });
+
   it("sorts by attachment position and removes duplicate repositories", () => {
     const repositoryLinks = [link(REPO_B, 2), link(REPO_A, 1), link(REPO_A, 3), link("repo-c")];
     const repositorySlugs = new Map([

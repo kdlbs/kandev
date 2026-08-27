@@ -57,7 +57,9 @@ const dimensionExtractors: Record<FilterDimension, DimensionExtractor> = {
   workflow: (t) => t.workflowId,
   workflowStep: (t) => t.workflowStepId,
   executorType: (t) => t.remoteExecutorType,
-  repository: (t) => (t.repositories && t.repositories.length > 1 ? "__multi__" : t.repositoryPath),
+  // Repository filters keep the primary compatibility value. Grouping uses
+  // the complete combination separately in `groupExtractors` below.
+  repository: (t) => t.repositoryPath,
   hasDiff: (t) => {
     const ds = t.diffStats;
     return !!ds && (ds.additions > 0 || ds.deletions > 0);
@@ -240,11 +242,7 @@ function repositoryLinkIds(task: TaskSwitcherItem): string[] {
 function isCompleteRepositoryCombination(task: TaskSwitcherItem): boolean {
   const repositories = task.repositories ?? [];
   const linkedRepositoryIds = repositoryLinkIds(task);
-  return (
-    repositories.length >= 2 &&
-    repositories.length === linkedRepositoryIds.length &&
-    new Set(repositories).size === repositories.length
-  );
+  return repositories.length >= 2 && repositories.length === linkedRepositoryIds.length;
 }
 
 function hasMultipleRepositoryLinks(task: TaskSwitcherItem): boolean {

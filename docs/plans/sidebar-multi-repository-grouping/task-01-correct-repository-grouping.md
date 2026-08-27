@@ -91,12 +91,12 @@ None.
 
 RED: the initial projection/grouping regression run failed with five assertions. Both sidebar projectors returned no `repositories`, complete combinations were classified as the generic `__multi__` group, equal and reversed combinations were not separated, and incomplete metadata could fall into `__unassigned__`.
 
-GREEN: added the shared ordered slug resolver, projected `repositories` and retained `repositoryLinks` in desktop and mobile items, and added collision-safe ordered-combination keys with a generic hydration fallback. The final focused run passed 6 files and 107 tests. TypeScript passed, and web lint passed with zero warnings.
+GREEN: added the shared ordered slug resolver, projected `repositories` and retained `repositoryLinks` in desktop and mobile items, and added collision-safe ordered-combination keys with a generic hydration fallback. The final focused run passed 6 files and 111 tests. TypeScript passed, and web lint passed with zero warnings. Repository filters continue to use the primary compatibility value, and complete combinations retain duplicate canonical slugs.
 
 Verification:
 
 ```text
-cd apps && pnpm --filter @kandev/web exec vitest run lib/sidebar/sidebar-task-repositories.test.ts components/task/task-session-sidebar-item.test.ts components/task/mobile/session-task-switcher-sheet-item.test.ts components/task/mobile/session-task-switcher-sheet-hooks.test.ts lib/sidebar/apply-view.test.ts lib/sidebar/apply-view-labels.test.ts  # 6 files, 107 tests passed
+cd apps && pnpm --filter @kandev/web exec vitest run lib/sidebar/sidebar-task-repositories.test.ts components/task/task-session-sidebar-item.test.ts components/task/mobile/session-task-switcher-sheet-item.test.ts components/task/mobile/session-task-switcher-sheet-hooks.test.ts lib/sidebar/apply-view.test.ts lib/sidebar/apply-view-labels.test.ts  # 6 files, 111 tests passed
 cd apps/web && pnpm run typecheck  # passed
 cd apps/web && pnpm run lint  # passed with zero warnings
 cd apps/web && pnpm run i18n:check  # passed

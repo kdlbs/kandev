@@ -54,11 +54,13 @@ The helper accepts task repository links and a repository-slug map. It sorts by 
 
 Both projectors set `repositories` from this helper. Both projectors keep `repositoryLinks` for the full attachment count.
 
+Repository filters continue to read the primary `repositoryPath` compatibility value. The complete slug array changes repository grouping only.
+
 ### Repository grouping
 
 Update the repository extractor in `apply-view.ts`. Use a named combination when all repository links resolve to two or more slugs.
 
-Build the label with comma-space separators. Build the key with a fixed prefix and `JSON.stringify(repositories)`.
+Build the label with comma-space separators. Build the key with a fixed prefix and `JSON.stringify(repositories)`, including repeated canonical slugs when distinct links resolve to the same slug.
 
 Keep `__multi__` only as the incomplete-metadata fallback. Update repository-group sorting to recognize named combination keys.
 
@@ -93,7 +95,7 @@ Keep `__multi__` only as the incomplete-metadata fallback. Update repository-gro
 
 ## Verification results
 
-- `cd apps && pnpm --filter @kandev/web exec vitest run lib/sidebar/sidebar-task-repositories.test.ts components/task/task-session-sidebar-item.test.ts components/task/mobile/session-task-switcher-sheet-item.test.ts components/task/mobile/session-task-switcher-sheet-hooks.test.ts lib/sidebar/apply-view.test.ts lib/sidebar/apply-view-labels.test.ts`: passed, 6 files and 107 tests.
+- `cd apps && pnpm --filter @kandev/web exec vitest run lib/sidebar/sidebar-task-repositories.test.ts components/task/task-session-sidebar-item.test.ts components/task/mobile/session-task-switcher-sheet-item.test.ts components/task/mobile/session-task-switcher-sheet-hooks.test.ts lib/sidebar/apply-view.test.ts lib/sidebar/apply-view-labels.test.ts`: passed, 6 files and 111 tests.
 - `cd apps/web && pnpm run typecheck`: passed.
 - `cd apps/web && pnpm run lint`: passed with zero warnings.
 - `cd apps/web && pnpm run i18n:check`: passed.

@@ -34,13 +34,13 @@ Each sidebar projector resolves every task repository through the workspace repo
 
 The projector writes the resolved slugs to `TaskSwitcherItem.repositories`. It also keeps `repositoryLinks` so grouping can detect incomplete metadata.
 
-The existing `repositoryPath` remains the single-repository and compatibility value. A pull-request summary can continue to supply this value.
+The existing `repositoryPath` remains the single-repository and compatibility value. Repository filters continue to use this primary value. A pull-request summary can continue to supply it.
 
 ## Group identity
 
 For one repository, `applyGroup` keeps the canonical slug as the key and label. This behavior preserves existing single-repository groups.
 
-For a complete repository combination, the label uses `repositories.join(", ")`. The internal key uses a fixed prefix and a JSON array encoding.
+For a complete repository combination, the label uses `repositories.join(", ")`. The internal key uses a fixed prefix and a JSON array encoding. Distinct links can retain the same canonical slug, so the ordered array is not deduplicated by display value.
 
 This encoding prevents collisions when a repository slug contains a separator. It also keeps distinct ordered combinations in distinct groups.
 
@@ -77,4 +77,3 @@ The new combination key is deterministic for the same ordered slugs. Existing si
 ## Security
 
 The UI uses repository names that the workspace repository store already exposes. This design adds no new data source or permission boundary.
-
