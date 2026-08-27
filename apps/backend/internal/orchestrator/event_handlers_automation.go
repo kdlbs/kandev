@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,10 +12,12 @@ import (
 
 	"go.uber.org/zap"
 
+	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
 )
@@ -76,6 +79,14 @@ func (s *Service) StopAutomationRun(ctx context.Context, taskID, sessionID, turn
 // live permission blocker remains open. Missing runtime state is not enough to
 // keep a parked/stale binding open forever.
 func (s *Service) AutomationRunLive(ctx context.Context, taskID, sessionID, turnID string) (bool, error) {
+	live, err := s.automationRunLive(ctx, taskID, sessionID, turnID)
+	if automationRunExecutionGone(err) {
+		return false, nil
+	}
+	return live, err
+}
+
+func (s *Service) automationRunLive(ctx context.Context, taskID, sessionID, turnID string) (bool, error) {
 	if taskID == "" || sessionID == "" || turnID == "" || s.turnService == nil {
 		return false, nil
 	}
@@ -97,6 +108,12 @@ func (s *Service) AutomationRunLive(ctx context.Context, taskID, sessionID, turn
 		return true, nil
 	}
 	return s.hasPendingCoordinatorPermissions(ctx, sessionID)
+}
+
+func automationRunExecutionGone(err error) bool {
+	return runtimeapi.IsNotFound(err) ||
+		errors.Is(err, executor.ErrExecutionNotFound) ||
+		errors.Is(err, sql.ErrNoRows)
 }
 
 func (s *Service) automationTurnMatches(ctx context.Context, taskID, sessionID, turnID string, requireStoppable bool) (bool, error) {
