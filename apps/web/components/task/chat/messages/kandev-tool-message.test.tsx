@@ -39,7 +39,11 @@ function kandevToolCall(opts: {
           input: opts.input,
           output:
             opts.resultJson !== undefined
-              ? [{ type: "text", text: JSON.stringify(opts.resultJson) }]
+              ? {
+                  _meta: null,
+                  content: [{ type: "text", text: JSON.stringify(opts.resultJson) }],
+                  structuredContent: null,
+                }
               : undefined,
         },
       },
@@ -373,7 +377,9 @@ describe("KandevToolMessage document & question renderers", () => {
     );
     expect(html).toContain("Pick one");
     // Selected option gets the "default" Badge variant; unselected stays "outline".
-    expect(html).toMatch(/data-variant="default"[^>]*>A<\/span>/);
+    const root = document.createElement("div");
+    root.innerHTML = html;
+    expect(root.querySelector('[data-variant="default"]')?.textContent).toBe("A");
   });
 
   it("does not render anything when the renderer is missing", () => {

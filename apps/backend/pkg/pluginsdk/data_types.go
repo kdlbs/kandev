@@ -110,12 +110,78 @@ type Task struct {
 	IsEphemeral  bool
 	Repositories []TaskRepository
 	Metadata     map[string]any
-	Labels       []string
-	// WorkflowStepID is the opaque workflow-step identifier recording the
-	// task's current placement, passed verbatim from the internal task
-	// model. Plugins use it for equality checks and reconciliation; resolve
-	// a display name via ListWorkflowSteps — no resolution happens here.
-	WorkflowStepID string
+	// ArchivedAt is nil for a live task. Only ever populated when the read asked
+	// for archived tasks (TaskFilter.IncludeArchived).
+	ArchivedAt *string
+	// PullRequests are the changes opened for this task, newest first. The link
+	// is not derivable from any other field on Task: CheckoutBranch is the BASE
+	// branch, and a PR title is rewritten to conventional-commit form.
+	PullRequests []TaskPullRequest
+	// WorkflowStepID is where on the board the task stands. State says how it is
+	// going; this says where it is.
+	WorkflowStepID         string
+	Position               int32
+	AssigneeAgentProfileID string
+	Labels                 []string
+	Autopilot              bool
+	WIPAdmitted            bool
+	QueuedForStepID        string
+	QueuedAt               *string
+	ProjectID              string
+	ExternalID             string
+}
+
+// TaskPullRequest is one change opened for a task. Provider-neutral by design:
+// review metadata specific to one forge stays out of the plugin contract.
+type TaskPullRequest struct {
+	Number     int64
+	URL        string
+	Title      string
+	State      string // "open" | "closed" | "merged"
+	HeadBranch string
+	BaseBranch string
+	IsDraft    bool
+	Provider   string // "github" | "gitlab"
+	MergedAt   *string
+	ClosedAt   *string
+	// Readiness, already synced by kandev's PR watcher. Carried so a plugin
+	// asking "what can merge" does not re-fetch all of it from the forge.
+	ReviewState             string
+	ChecksState             string
+	MergeableState          string
+	UnresolvedReviewThreads int32
+	ChecksTotal             int32
+	ChecksPassing           int32
+	Additions               int32
+	Deletions               int32
+	AuthorLogin             string
+}
+
+func (r TaskPullRequest) toProto() *pluginv1.TaskPullRequest {
+	return &pluginv1.TaskPullRequest{
+		Number: r.Number, Url: r.URL, Title: r.Title, State: r.State,
+		HeadBranch: r.HeadBranch, BaseBranch: r.BaseBranch, IsDraft: r.IsDraft,
+		Provider: r.Provider, MergedAt: r.MergedAt, ClosedAt: r.ClosedAt,
+		ReviewState: r.ReviewState, ChecksState: r.ChecksState,
+		MergeableState: r.MergeableState, UnresolvedReviewThreads: r.UnresolvedReviewThreads,
+		ChecksTotal: r.ChecksTotal, ChecksPassing: r.ChecksPassing,
+		Additions: r.Additions, Deletions: r.Deletions, AuthorLogin: r.AuthorLogin,
+	}
+}
+
+func taskPullRequestFromProto(p *pluginv1.TaskPullRequest) TaskPullRequest {
+	if p == nil {
+		return TaskPullRequest{}
+	}
+	return TaskPullRequest{
+		Number: p.GetNumber(), URL: p.GetUrl(), Title: p.GetTitle(), State: p.GetState(),
+		HeadBranch: p.GetHeadBranch(), BaseBranch: p.GetBaseBranch(), IsDraft: p.GetIsDraft(),
+		Provider: p.GetProvider(), MergedAt: p.MergedAt, ClosedAt: p.ClosedAt,
+		ReviewState: p.GetReviewState(), ChecksState: p.GetChecksState(),
+		MergeableState: p.GetMergeableState(), UnresolvedReviewThreads: p.GetUnresolvedReviewThreads(),
+		ChecksTotal: p.GetChecksTotal(), ChecksPassing: p.GetChecksPassing(),
+		Additions: p.GetAdditions(), Deletions: p.GetDeletions(), AuthorLogin: p.GetAuthorLogin(),
+	}
 }
 
 func (t Task) toProto() (*pluginv1.Task, error) {
@@ -131,26 +197,59 @@ func (t Task) toProto() (*pluginv1.Task, error) {
 		}
 	}
 	return &pluginv1.Task{
-		Id:             t.ID,
-		WorkspaceId:    t.WorkspaceID,
-		WorkflowId:     t.WorkflowID,
-		Title:          t.Title,
-		Description:    t.Description,
-		State:          t.State,
-		Priority:       t.Priority,
-		CreatedBy:      t.CreatedBy,
-		CreatedAt:      t.CreatedAt,
-		UpdatedAt:      t.UpdatedAt,
-		StartedAt:      t.StartedAt,
-		CompletedAt:    t.CompletedAt,
-		ParentId:       t.ParentID,
-		Identifier:     t.Identifier,
-		IsEphemeral:    t.IsEphemeral,
-		Repositories:   repos,
-		Metadata:       metadata,
-		Labels:         t.Labels,
-		WorkflowStepId: t.WorkflowStepID,
+		Id:           t.ID,
+		WorkspaceId:  t.WorkspaceID,
+		WorkflowId:   t.WorkflowID,
+		Title:        t.Title,
+		Description:  t.Description,
+		State:        t.State,
+		Priority:     t.Priority,
+		CreatedBy:    t.CreatedBy,
+		CreatedAt:    t.CreatedAt,
+		UpdatedAt:    t.UpdatedAt,
+		StartedAt:    t.StartedAt,
+		CompletedAt:  t.CompletedAt,
+		ParentId:     t.ParentID,
+		Identifier:   t.Identifier,
+		IsEphemeral:  t.IsEphemeral,
+		Repositories: repos,
+		Metadata:     metadata,
+
+		ArchivedAt:             t.ArchivedAt,
+		PullRequests:           taskPullRequestsToProto(t.PullRequests),
+		WorkflowStepId:         t.WorkflowStepID,
+		Position:               t.Position,
+		AssigneeAgentProfileId: t.AssigneeAgentProfileID,
+		Labels:                 t.Labels,
+		Autopilot:              t.Autopilot,
+		WipAdmitted:            t.WIPAdmitted,
+		QueuedForStepId:        t.QueuedForStepID,
+		QueuedAt:               t.QueuedAt,
+		ProjectId:              t.ProjectID,
+		ExternalId:             t.ExternalID,
 	}, nil
+}
+
+func taskPullRequestsToProto(in []TaskPullRequest) []*pluginv1.TaskPullRequest {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]*pluginv1.TaskPullRequest, len(in))
+	for i := range in {
+		out[i] = in[i].toProto()
+	}
+	return out
+}
+
+func taskPullRequestsFromProto(in []*pluginv1.TaskPullRequest) []TaskPullRequest {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]TaskPullRequest, len(in))
+	for i, r := range in {
+		out[i] = taskPullRequestFromProto(r)
+	}
+	return out
 }
 
 func taskFromProto(p *pluginv1.Task) (Task, error) {
@@ -169,25 +268,36 @@ func taskFromProto(p *pluginv1.Task) (Task, error) {
 		}
 	}
 	return Task{
-		ID:             p.GetId(),
-		WorkspaceID:    p.GetWorkspaceId(),
-		WorkflowID:     p.GetWorkflowId(),
-		Title:          p.GetTitle(),
-		Description:    p.GetDescription(),
-		State:          p.GetState(),
-		Priority:       p.GetPriority(),
-		CreatedBy:      p.GetCreatedBy(),
-		CreatedAt:      p.GetCreatedAt(),
-		UpdatedAt:      p.GetUpdatedAt(),
-		StartedAt:      p.StartedAt,
-		CompletedAt:    p.CompletedAt,
-		ParentID:       p.ParentId,
-		Identifier:     p.GetIdentifier(),
-		IsEphemeral:    p.GetIsEphemeral(),
-		Repositories:   repos,
-		Metadata:       metadata,
-		Labels:         p.GetLabels(),
-		WorkflowStepID: p.GetWorkflowStepId(),
+		ID:           p.GetId(),
+		WorkspaceID:  p.GetWorkspaceId(),
+		WorkflowID:   p.GetWorkflowId(),
+		Title:        p.GetTitle(),
+		Description:  p.GetDescription(),
+		State:        p.GetState(),
+		Priority:     p.GetPriority(),
+		CreatedBy:    p.GetCreatedBy(),
+		CreatedAt:    p.GetCreatedAt(),
+		UpdatedAt:    p.GetUpdatedAt(),
+		StartedAt:    p.StartedAt,
+		CompletedAt:  p.CompletedAt,
+		ParentID:     p.ParentId,
+		Identifier:   p.GetIdentifier(),
+		IsEphemeral:  p.GetIsEphemeral(),
+		Repositories: repos,
+		Metadata:     metadata,
+
+		ArchivedAt:             p.ArchivedAt,
+		PullRequests:           taskPullRequestsFromProto(p.GetPullRequests()),
+		WorkflowStepID:         p.GetWorkflowStepId(),
+		Position:               p.GetPosition(),
+		AssigneeAgentProfileID: p.GetAssigneeAgentProfileId(),
+		Labels:                 p.GetLabels(),
+		Autopilot:              p.GetAutopilot(),
+		WIPAdmitted:            p.GetWipAdmitted(),
+		QueuedForStepID:        p.GetQueuedForStepId(),
+		QueuedAt:               p.QueuedAt,
+		ProjectID:              p.GetProjectId(),
+		ExternalID:             p.GetExternalId(),
 	}, nil
 }
 
@@ -228,6 +338,12 @@ type TaskFilter struct {
 	States           []string
 	ParentID         *string
 	IncludeEphemeral bool
+	// IncludeArchived defaults false, matching the behaviour before this field
+	// existed: a plugin that does not ask still sees only live tasks. A plugin
+	// reporting on delivery needs true — an archived task is usually a
+	// delivered one, and omitting it makes finished work look like it never
+	// happened.
+	IncludeArchived bool
 }
 
 func (f TaskFilter) toProto() *pluginv1.TaskFilter {
@@ -237,6 +353,7 @@ func (f TaskFilter) toProto() *pluginv1.TaskFilter {
 		States:           f.States,
 		ParentId:         f.ParentID,
 		IncludeEphemeral: f.IncludeEphemeral,
+		IncludeArchived:  f.IncludeArchived,
 	}
 }
 
@@ -250,6 +367,7 @@ func taskFilterFromProto(p *pluginv1.TaskFilter) TaskFilter {
 		States:           p.GetStates(),
 		ParentID:         p.ParentId,
 		IncludeEphemeral: p.GetIncludeEphemeral(),
+		IncludeArchived:  p.GetIncludeArchived(),
 	}
 }
 
@@ -383,15 +501,36 @@ type WorkflowStep struct {
 	Name       string
 	Position   int32
 	StageType  string
+	// Color is the step's own presentation colour. A plugin rendering a board
+	// reads it rather than inventing a palette, so its columns match the ones
+	// the operator already sees in kandev.
+	Color          string
+	IsStartStep    bool
+	WIPLimit       int32 // 0 means unlimited
+	AgentProfileID string
+	// OnEnterActionTypes lists the on_enter action types configured on this
+	// step, as authored. This lists what is configured, not a guarantee that
+	// every listed type executes on every transition path. The ordinary move
+	// path handles auto_start_agent, configure_session, enable_plan_mode,
+	// set_session_mode and reset_agent_context. Other action types can run only
+	// on applicable workflow-engine paths. Config maps are deliberately not
+	// exposed. Nil when the step has no on_enter actions, never an empty
+	// non-nil slice. Callers must ignore action types they do not recognize.
+	OnEnterActionTypes []string
 }
 
 func (s WorkflowStep) toProto() *pluginv1.WorkflowStep {
 	return &pluginv1.WorkflowStep{
-		Id:         s.ID,
-		WorkflowId: s.WorkflowID,
-		Name:       s.Name,
-		Position:   s.Position,
-		StageType:  s.StageType,
+		Id:                 s.ID,
+		WorkflowId:         s.WorkflowID,
+		Name:               s.Name,
+		Position:           s.Position,
+		StageType:          s.StageType,
+		Color:              s.Color,
+		IsStartStep:        s.IsStartStep,
+		WipLimit:           s.WIPLimit,
+		AgentProfileId:     s.AgentProfileID,
+		OnEnterActionTypes: s.OnEnterActionTypes,
 	}
 }
 
@@ -400,12 +539,27 @@ func workflowStepFromProto(p *pluginv1.WorkflowStep) WorkflowStep {
 		return WorkflowStep{}
 	}
 	return WorkflowStep{
-		ID:         p.GetId(),
-		WorkflowID: p.GetWorkflowId(),
-		Name:       p.GetName(),
-		Position:   p.GetPosition(),
-		StageType:  p.GetStageType(),
+		ID:                 p.GetId(),
+		WorkflowID:         p.GetWorkflowId(),
+		Name:               p.GetName(),
+		Position:           p.GetPosition(),
+		StageType:          p.GetStageType(),
+		OnEnterActionTypes: nonEmptyStrings(p.GetOnEnterActionTypes()),
+		Color:              p.GetColor(),
+		IsStartStep:        p.GetIsStartStep(),
+		WIPLimit:           p.GetWipLimit(),
+		AgentProfileID:     p.GetAgentProfileId(),
 	}
+}
+
+// nonEmptyStrings enforces the documented nil-not-empty invariant at the SDK
+// decode boundary, independent of what a caller happened to serialize onto
+// the wire.
+func nonEmptyStrings(s []string) []string {
+	if len(s) == 0 {
+		return nil
+	}
+	return s
 }
 
 func workflowStepsFromProto(items []*pluginv1.WorkflowStep) []WorkflowStep {
@@ -911,11 +1065,11 @@ func (in CreateTaskInput) toProto() (*pluginv1.CreateTaskRequest, error) {
 		Description:    in.Description,
 		ParentId:       in.ParentID,
 		StartAgent:     in.StartAgent,
-		Priority:       in.Priority,
-		Labels:         in.Labels,
 		Repositories:   pluginTaskRepositoriesToProto(in.Repositories),
 		Launch:         in.Launch.toProto(),
 		Metadata:       metadata,
+		Priority:       in.Priority,
+		Labels:         in.Labels,
 	}, nil
 }
 
@@ -935,11 +1089,11 @@ func createTaskInputFromProto(p *pluginv1.CreateTaskRequest) (CreateTaskInput, e
 		Description:    p.GetDescription(),
 		ParentID:       p.ParentId,
 		StartAgent:     p.GetStartAgent(),
-		Priority:       p.GetPriority(),
-		Labels:         p.GetLabels(),
 		Repositories:   pluginTaskRepositoriesFromProto(p.GetRepositories()),
 		Launch:         pluginTaskLaunchOptionsFromProto(p.GetLaunch()),
 		Metadata:       metadata,
+		Priority:       p.GetPriority(),
+		Labels:         p.GetLabels(),
 	}, nil
 }
 
@@ -1049,8 +1203,9 @@ func pluginTaskLaunchOptionsFromProto(p *pluginv1.PluginTaskLaunchOptions) *Plug
 
 // UpdateTaskInput is the Go-native mirror of
 // kandev.plugin.v1.UpdateTaskRequest. Every field except ID is optional: a nil
-// pointer leaves that field untouched, a non-nil pointer overwrites it. Labels
-// use *[]string so nil means unchanged and a non-nil empty slice clears them.
+// pointer leaves that field untouched, a non-nil pointer overwrites it. The
+// conservative field surface (title/description/state/workflow_step_id) is the
+// documented plugin-writable mask.
 type UpdateTaskInput struct {
 	ID             string
 	Title          *string

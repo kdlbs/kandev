@@ -120,22 +120,6 @@ export function getFirstUserMessageId(messages: Message[]): string | null {
   return first ? first.id : null;
 }
 
-export type TranscriptNavigationTarget = "last_prompt" | "start";
-
-/**
- * Whether resolving a transcript-navigation target needs another older page.
- * The latest prompt may sit before a long agent response; the true start can
- * only be known after the pagination cursor is exhausted.
- */
-export function shouldLoadMoreForTranscriptTarget(
-  target: TranscriptNavigationTarget,
-  messages: Message[],
-  hasMore: boolean,
-): boolean {
-  if (!hasMore) return false;
-  return target === "start" || getLastUserMessageId(messages) === null;
-}
-
 /**
  * Whether the transcript's auto-follow-bottom behavior should force a scroll
  * to the bottom right now. `false` whenever a user-initiated programmatic

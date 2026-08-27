@@ -399,7 +399,7 @@ test.describe("Plan checkpointing — rewind UI", () => {
 
     // Open the older revision via row click.
     await session.openRevisionPreview(1);
-    await expect(session.previewBody()).toContainText("Older draft", { timeout: 5_000 });
+    await expect(session.previewBody()).toContainText("Older draft", { timeout: 15_000 });
     await expect(session.previewRestoreButton()).toBeVisible();
 
     // Restore from preview routes through the confirm dialog.

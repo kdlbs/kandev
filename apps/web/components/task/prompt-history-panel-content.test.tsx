@@ -770,8 +770,8 @@ describe("PromptHistoryPanelContent — auto-load sentinel", () => {
     expect(pagination.loadMore).toHaveBeenCalledTimes(1);
   });
 
-  it("removes the sentinel once prompt #1 is loaded, with no button", () => {
-    pagination.hasMore = true;
+  it("removes the sentinel when the shared hook reports the first-prompt boundary", () => {
+    pagination.hasMore = false;
     messagesBySession[SESSION_A] = [
       message({ id: "first", prompt_index: 1, content: "first prompt" }),
       message({ id: "newest", prompt_index: 2, content: "newest prompt", created_at: LATER_TIME }),

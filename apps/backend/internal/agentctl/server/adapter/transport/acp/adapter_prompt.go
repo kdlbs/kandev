@@ -265,7 +265,6 @@ func (a *Adapter) sendPrompt(
 	}
 
 	// Emit complete event via the stream, including the StopReason from the agent.
-	// This normalizes ACP behavior to match other adapters (stream-json, amp, copilot, opencode).
 	a.logger.Debug("emitting complete event after prompt",
 		zap.String("session_id", sessionID),
 		zap.String("stop_reason", stopReason))

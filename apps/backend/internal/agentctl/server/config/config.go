@@ -223,7 +223,8 @@ type InstanceConfig struct {
 
 	// ContinueCommand is the command template for follow-up prompts in one-shot agents.
 	// When set, the adapter spawns a new process per prompt using this command for
-	// continuation (thread ID appended at runtime). Only used by Amp.
+	// continuation (thread ID appended at runtime). No production adapter is
+	// one-shot today; see OneShotAdapter in adapter/adapter.go.
 	ContinueCommand string
 
 	// ContinueArgs is the structured argv for ContinueCommand.

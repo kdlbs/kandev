@@ -1299,20 +1299,12 @@ export class SessionPage {
       .waitFor({ state: "hidden", timeout });
   }
 
-  /**
-   * Wait for the terminal shell to be connected (buffer has content from
-   * the prompt), then type a command and press Enter.
-   */
+  /** Wait for the terminal WebSocket to connect, then type a command and press Enter. */
   async typeInTerminal(command: string): Promise<void> {
     await this.expectTerminalConnected();
-    await expect
-      .poll(async () => (await this.readXtermBuffer("terminal-panel")).length > 0, {
-        timeout: TERMINAL_READY_TIMEOUT,
-        message: "Waiting for terminal shell to connect",
-      })
-      .toBe(true);
 
     const xterm = this.activePanel("terminal-panel").locator(".xterm");
+    await expect(xterm).toBeVisible();
     await xterm.click();
     await this.page.keyboard.type(command);
     await this.page.keyboard.press("Enter");

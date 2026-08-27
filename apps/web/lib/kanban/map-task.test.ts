@@ -117,6 +117,34 @@ describe("toKanbanTask — HTTP DTO / WS payload parity", () => {
     expect(toKanbanTask(wsPayload()).repositoryId).toBe("repo-a");
   });
 
+  it("preserves branch policy snapshot fields through HTTP and WS mapping", () => {
+    const repositories = [
+      {
+        repository_id: "repo-a",
+        base_branch: "main",
+        checkout_branch: "feature/ship-it",
+        branch_policy_id: "policy-a",
+        branch_policy_name: "Feature branches",
+        branch_policy_base_branch: "main",
+        branch_policy_branch_template: "feature/{title}-{suffix}",
+        branch_policy_pull_request_target: "develop",
+      },
+    ];
+    const http = toKanbanTask(httpDTO({ repositories }));
+    const ws = toKanbanTask(wsPayload({ repositories }));
+
+    expect(http.repositories?.[0]).toMatchObject({
+      branch_policy_id: "policy-a",
+      branch_policy_name: "Feature branches",
+      branch_policy_base_branch: "main",
+      branch_policy_branch_template: "feature/{title}-{suffix}",
+      branch_policy_pull_request_target: "develop",
+    });
+    expect(ws.repositories).toEqual(http.repositories);
+  });
+});
+
+describe("toKanbanTask — pending and status fields", () => {
   it("maps primary session pending action from HTTP and WS shapes", () => {
     const pendingAction = {
       primary_session_pending_action: "clarification",

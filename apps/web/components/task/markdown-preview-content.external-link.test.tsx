@@ -59,4 +59,24 @@ describe("MarkdownPreviewContent external file action", () => {
       size: "sm",
     });
   });
+
+  it("keeps source metadata on the shared table scroll root", () => {
+    render(
+      <TooltipProvider>
+        <MarkdownPreviewContent
+          path="table.md"
+          content={["| Left | Right |", "| --- | --- |", "| One | Two |"].join("\n")}
+          onTogglePreview={vi.fn()}
+        />
+      </TooltipProvider>,
+    );
+
+    const table = screen.getByRole("table");
+    const wrapper = table.parentElement;
+    expect(wrapper?.classList.contains("markdown-table-scroll")).toBe(true);
+    expect(wrapper?.classList.contains("overflow-x-auto")).toBe(true);
+    expect(wrapper?.getAttribute("data-md-source-start")).toBe("1");
+    expect(wrapper?.getAttribute("data-md-source-end")).toBe("3");
+    expect(wrapper?.querySelectorAll(".overflow-x-auto")).toHaveLength(0);
+  });
 });

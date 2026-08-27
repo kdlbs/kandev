@@ -2,6 +2,7 @@
 status: active
 system: ui
 created: 2026-08-06
+updated: 2026-08-26
 owners:
   - kandev
 ---
@@ -9,7 +10,9 @@ owners:
 
 ## Overview
 
-Task pull-request indicators currently flatten the PR title, review state, CI state, and mergeability into one pipe-delimited sentence. Long titles and several adjacent status values make the hover disclosure slow to scan during a brief pointer interaction.
+Task pull-request indicators show a compact structured summary of each linked
+pull request. The indicator must also work when a task row initially has only
+the bounded task-status projection and not the full pull-request record.
 
 ## Requirements
 
@@ -25,12 +28,19 @@ Task pull-request indicators currently flatten the PR title, review state, CI st
 - **AC-UI-PR-TASK-STATUS-SUMMARY-001.4:** Known GitHub states use concise user-facing copy such as **Approved**, **Passed**, **In progress**, **Changes requested**, **Conflicts**, and **Ready to merge**. An unrecognized non-empty provider value remains visible instead of being dropped.
 - **AC-UI-PR-TASK-STATUS-SUMMARY-001.5:** Ready-to-merge copy uses the existing strict `isPRReadyToMerge` rule. Draft, terminal, review, check, mergeability, aggregate icon color, and multi-PR attention precedence do not change.
 - **AC-UI-PR-TASK-STATUS-SUMMARY-001.6:** A task with several linked PRs shows one consistently structured entry per PR, separated clearly, while retaining the existing aggregate icon color, PR count, and ready-to-merge attributes.
-- **AC-UI-PR-TASK-STATUS-SUMMARY-001.7:** The disclosure uses localized copy, readable line height, restrained semantic colors, and a viewport-contained width. It remains informational: opening it does not navigate, mutate PR state, fetch new detail, or change task-row activation.
+- **AC-UI-PR-TASK-STATUS-SUMMARY-001.7:** The disclosure uses localized copy, readable line height, restrained semantic colors, and a viewport-contained width. Opening it does not navigate, mutate PR state, refresh the provider, or change task-row activation.
 - **AC-UI-PR-TASK-STATUS-SUMMARY-001.8:** The shared task PR indicator uses the same summary in the desktop sidebar, Kanban cards, and rich task-list rows.
 - **AC-UI-PR-TASK-STATUS-SUMMARY-001.9:** All status entries in one summary share label, icon, and status-text columns so Review, CI, merge, and terminal values start at the same horizontal position.
 - **AC-UI-PR-TASK-STATUS-SUMMARY-001.10:** Secondary detail, including merge-queue position and estimated merge time, starts under the status text instead of under the label or icon.
 - **AC-UI-PR-TASK-STATUS-SUMMARY-001.11:** Shared columns adapt to translated labels and wrapped values without a fixed label width that clips content.
 - **AC-UI-PR-TASK-STATUS-SUMMARY-001.12:** GitHub, GitLab, and registered change-request providers that use the shared summary component receive the same row alignment without changing provider-specific state derivation or copy.
+- **AC-UI-PR-TASK-STATUS-SUMMARY-001.13:** When hover or keyboard focus opens a GitHub PR indicator with only compact task-summary data, the disclosure shall appear. The system shall load the stored PR records for that task.
+- **AC-UI-PR-TASK-STATUS-SUMMARY-001.14:** While the task-scoped load is pending, the disclosure shall show a localized loading state. On success, it shall replace that state with the structured summary without another user action.
+- **AC-UI-PR-TASK-STATUS-SUMMARY-001.15:** Repeated or concurrent disclosure requests for the same task shall share one in-flight load. Loaded store data shall prevent later disclosure requests from starting another load.
+- **AC-UI-PR-TASK-STATUS-SUMMARY-001.16:** When the task-scoped load fails or returns no PR records, the disclosure shall show a localized unavailable state. A later disclosure shall retry the load.
+- **AC-UI-PR-TASK-STATUS-SUMMARY-001.17:** Each GitHub PR summary shall show the non-empty PR author login below the PR title. A missing author login shall not create an empty label.
+- **AC-UI-PR-TASK-STATUS-SUMMARY-001.18:** On a coarse pointer, the task row shall remain the primary touch target. After task navigation, the existing PR-status drawer shall show the same author login.
+- **AC-UI-PR-TASK-STATUS-SUMMARY-001.19:** TaskPR API and WebSocket payloads shall carry the owning workspace ID. The backend shall route typed PR events by that ID, and the frontend shall ignore missing or mismatched updates before changing the active workspace cache.
 
 ## Migrated source detail
 
@@ -68,8 +78,12 @@ do not align, and secondary merge-queue text begins under the icon instead of th
 - A task with several linked PRs shows one consistently structured entry per PR, separated clearly,
   while retaining the existing aggregate icon color, PR count, and ready-to-merge attributes.
 - The disclosure uses localized copy, readable line height, restrained semantic colors, and a
-  viewport-contained width. It remains informational: opening it does not navigate, mutate PR
-  state, fetch new detail, or change task-row activation.
+  viewport-contained width. It remains informational and does not mutate provider state.
+- If the browser has only compact task-summary data, hover or keyboard focus loads the stored PR
+  records for that task. The disclosure shows loading and unavailable states without closing.
+- Repeated requests for the same task share one in-flight load. Loaded task-store data prevents
+  another load.
+- Each GitHub PR entry shows its non-empty author login below the title.
 - The shared task PR indicator uses the same summary in the desktop sidebar, Kanban cards, and rich
   task-list rows.
 - GitHub, GitLab, and registered change-request providers that use the shared summary component get
@@ -103,13 +117,22 @@ do not align, and secondary merge-queue text begins under the icon instead of th
   **THEN** that detail starts under **Awaiting checks** and wraps within the status column.
 - **GIVEN** translated row labels have different lengths, **WHEN** the summary renders, **THEN** the
   longest available label defines the shared label column and no label or status is clipped.
+- **GIVEN** a task row has only compact PR status, **WHEN** a fine pointer hovers the PR indicator
+  or keyboard focus reaches it, **THEN** a loading disclosure opens and then shows the full stored
+  PR summary without another user action.
+- **GIVEN** two mounted surfaces request the same task PR details, **WHEN** their requests overlap,
+  **THEN** they share one in-flight load and preserve newer store data that arrives first.
+- **GIVEN** a stored PR has an author login, **WHEN** the task summary or mobile PR-status drawer
+  opens, **THEN** the author login appears below the PR title.
 - **GIVEN** a phone task-switcher drawer, **WHEN** a linked-PR task row renders and the user taps
   the row, **THEN** the existing task navigation and PR indicator remain usable without horizontal
   overflow or a new hover-dependent interaction.
 
 ## Out of scope
 
-- Changing polling, API contracts, persistence, or task-to-change-request associations.
+- Changing provider polling, persistence, or task-to-change-request associations.
+- Refreshing GitHub when the task-row disclosure opens.
+- Loading all workspace PR records to satisfy one task-row disclosure.
 - Adding check-run lists, reviewer lists, comments, merge controls, or other full PR-detail content
   to the task indicator summary.
 - Changing GitHub, GitLab, or registered-provider status derivation, icon precedence, or copy.
@@ -121,3 +144,5 @@ do not align, and secondary merge-queue text begins under the icon instead of th
 [PR task status summary plan](../../../plans/pr-task-status-summary/plan.md)
 
 [Sidebar task row presentation refinement](../../../plans/sidebar-task-row-presentation/plan.md)
+
+[PR task status hover hydration](../../../plans/pr-task-status-hover-hydration/plan.md)

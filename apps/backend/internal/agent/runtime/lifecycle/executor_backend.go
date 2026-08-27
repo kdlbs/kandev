@@ -233,6 +233,20 @@ const (
 	// host can use different shells; flows into req.Metadata via the
 	// standard executor-config merge in buildLaunchMetadata.
 	MetadataKeySSHShell = "ssh_shell"
+	// MetadataKeySSHReclaimTaskDir opts a profile in to removing the remote
+	// task directory once its owning task reaches a terminal outcome. Only
+	// the exact string "true" enables it; absent, empty, and every other
+	// value leave the pre-existing behavior of keeping the directory
+	// forever. Default-off is deliberate: existing hosts hold directories
+	// created under a documented promise that Kandev would not delete them,
+	// and an upgrade must not retroactively break that promise against data
+	// on a machine Kandev does not own.
+	//
+	// This is an *authoritative* profile key (see
+	// profileConfigAuthoritativeKeys in internal/orchestrator/executor) —
+	// task-supplied metadata can never enable it, because that would let a
+	// task arm a destructive remote operation its profile never approved.
+	MetadataKeySSHReclaimTaskDir = "ssh_reclaim_task_dir"
 )
 
 // persistentMetadataKeys lists metadata keys carried forward from a previous
@@ -262,6 +276,7 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeySSHIdentitySource:     true,
 	MetadataKeySSHIdentityFile:       true,
 	MetadataKeySSHShell:              true,
+	MetadataKeySSHReclaimTaskDir:     true,
 
 	// Executor type marker
 	MetadataKeyIsRemote: true,

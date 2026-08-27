@@ -121,6 +121,11 @@ vi.mock("@/components/state-provider", () => ({
       setRepositorySets: () => undefined,
       setRepositorySetsLoading: () => undefined,
     }),
+  useAppStoreApi: () => ({
+    getState: () => ({
+      repositoryBranchPolicies: { revisionByRepositoryId: {} },
+    }),
+  }),
 }));
 
 vi.mock("@/components/task-create-dialog-submit", () => ({
@@ -272,7 +277,9 @@ function buildMockFs(initialDescription = ORIGINAL_PROMPT): DialogFormState {
     currentDefaults: { name: "Task title", description: initialDescription },
     descriptionInputRef: createRef<TaskFormInputsHandle>(),
     repositories: [],
+    repositoriesDirty: false,
     setRepositories: () => undefined,
+    setRepositoriesDirty: () => undefined,
     addRepository: () => undefined,
     removeRepository: () => undefined,
     updateRepository: () => undefined,

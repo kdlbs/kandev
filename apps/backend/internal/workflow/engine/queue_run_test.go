@@ -9,13 +9,20 @@ import (
 
 // fakeRunQueue records every QueueRun call.
 type fakeRunQueue struct {
-	calls []QueueRunRequest
-	err   error
+	calls   []QueueRunRequest
+	err     error
+	outcome QueueOutcome
 }
 
-func (f *fakeRunQueue) QueueRun(_ context.Context, req QueueRunRequest) error {
+func (f *fakeRunQueue) QueueRun(_ context.Context, req QueueRunRequest) (QueueOutcome, error) {
 	f.calls = append(f.calls, req)
-	return f.err
+	if f.err != nil {
+		return "", f.err
+	}
+	if f.outcome == "" {
+		return QueueOutcomeQueued, nil
+	}
+	return f.outcome, nil
 }
 
 // fakePrimary returns a fixed agent profile id for any step.

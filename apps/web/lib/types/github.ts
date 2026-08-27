@@ -229,6 +229,7 @@ export type MergeQueueState =
 
 export type TaskPR = {
   id: string;
+  workspace_id: string;
   task_id: string;
   /** ID of the task repository this PR belongs to. Empty for legacy single-repo
    *  tasks persisted before multi-repo support. */
@@ -264,12 +265,20 @@ export type TaskPR = {
   closed_at: string | null;
   last_synced_at: string | null;
   updated_at: string;
+  /** Current pull-request head used to explain safe queue recovery. */
+  head_sha?: string;
   /** Empty when GitHub did not return an active merge-queue entry. */
   merge_queue_state?: MergeQueueState;
+  merge_queue_entry_id?: string;
+  merge_queue_entry_head_sha?: string;
   /** GitHub's one-based queue position, when available. */
   merge_queue_position?: number | null;
   /** GitHub's estimated time to merge in seconds, when available. */
   merge_queue_estimated_time_to_merge_seconds?: number | null;
+  merge_queue_last_removal_id?: string;
+  merge_queue_last_removed_at?: string | null;
+  merge_queue_last_removal_reason?: string;
+  merge_queue_last_removal_before_sha?: string;
   // The five PR-outcome-attribution fields below are always present on a
   // real API/WS payload (the backend sends every key, never omits one) — the
   // `?:` here follows this file's existing convention for nullable fields
@@ -301,6 +310,14 @@ export type TaskPRDeletedEvent = {
   association_id: string;
 };
 
+export type CIAutomationQueueRemovalCause =
+  | "checks_failed"
+  | "checks_timed_out"
+  | "conflict"
+  | "manual"
+  | "branch_protection"
+  | "unknown";
+
 export type TaskCIPRAutomationState = {
   task_id: string;
   repository_id: string;
@@ -313,6 +330,9 @@ export type TaskCIPRAutomationState = {
   auto_fix_exhausted_at: string | null;
   last_merge_signature: string;
   last_merge_attempt_at: string | null;
+  last_queue_attempt_head_sha?: string;
+  last_queue_fix_event_id?: string;
+  last_queue_removal_cause?: CIAutomationQueueRemovalCause | string;
   review_request_initialized?: boolean;
   last_review_requested?: boolean;
   last_observed_pr_state?: string;

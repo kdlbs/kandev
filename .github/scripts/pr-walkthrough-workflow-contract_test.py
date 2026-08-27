@@ -348,6 +348,8 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
         self.assertIn("scripts/pr-walkthrough-pr-body", self.link)
         self.assertIn("--github-response", self.link)
         self.assertIn("--input", self.link)
+        patch_call = self.link.split("gh api --method PATCH", 1)[1].split("echo", 1)[0]
+        self.assertIn("--silent", patch_call)
         self.assertIn(
             "PUBLIC_URL: ${{ needs.pr-walkthrough-publish.outputs.url }}",
             self.link,
@@ -360,6 +362,17 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("CLOUDFLARE_R2", self.link)
         self.assertNotIn("OPENCODE_API_KEY", self.link)
         self.assertTrue(PR_BODY_HELPER.is_file())
+
+    def test_link_job_retries_transient_github_api_responses(self) -> None:
+        for value in (
+            "pr_response_ok=false",
+            "for attempt in 1 2 3; do",
+            "python3 -c 'import json; json.load(open(\"pr-response.json\", encoding=\"utf-8\"))'",
+            'test "$pr_response_ok" = true',
+            "patch_ok=false",
+            'test "$patch_ok" = true',
+        ):
+            self.assertIn(value, self.link)
 
     def test_lint_workflow_runs_contract_and_body_helper_tests(self) -> None:
         lint_workflow = LINT_WORKFLOW.read_text(encoding="utf-8")

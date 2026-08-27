@@ -13,8 +13,10 @@ import {
   buildTaskFromKanban,
   hasResolvedTaskDetails,
   resolveEffectiveTask,
+  resolveTaskPullRequestProps,
   resolveTaskContentState,
   resolveTaskProps,
+  selectWorkspaceRepositories,
   syncActiveTaskSession,
 } from "./task-page-content-helpers";
 
@@ -142,6 +144,78 @@ describe("resolveTaskProps", () => {
     const props = resolveTaskProps({ id: "task-1", title: "Any" } as unknown as Task, null);
 
     expect(props.repositoryLabel).toBeNull();
+  });
+
+  it("exposes each repository policy pull request target to task flows", () => {
+    const repository = {
+      id: "repo-1",
+      name: "kandev",
+      provider_owner: "kdlbs",
+      provider_name: "kandev",
+    } as unknown as Repository;
+    const task = {
+      id: "task-1",
+      title: "Open a pull request",
+      repositories: [
+        { repository_id: "repo-1", branch_policy_pull_request_target: "release" },
+        { repository_id: "repo-2", branch_policy_pull_request_target: "develop" },
+      ],
+    } as unknown as Task;
+
+    const props = resolveTaskProps(task, repository, [
+      repository,
+      { id: "repo-2", name: "other" } as Repository,
+    ]);
+
+    expect(props.pullRequestTarget).toBe("release");
+    expect(props.pullRequestTargetsByRepository).toEqual({
+      "repo-1": "release",
+      "kdlbs/kandev": "release",
+      kandev: "release",
+      "repo-2": "develop",
+      other: "develop",
+    });
+  });
+});
+
+describe("resolveTaskPullRequestProps", () => {
+  it("supports the office task shape while preserving policy targets", () => {
+    const props = resolveTaskPullRequestProps(
+      {
+        title: "Open a pull request",
+        repositories: [
+          {
+            repository_id: "repo-1",
+            base_branch: "develop",
+            branch_policy_pull_request_target: "main",
+          },
+        ],
+      } as unknown as Task,
+      [{ id: "repo-1", name: "kandev" } as Repository],
+    );
+
+    expect(props).toMatchObject({
+      baseBranch: "develop",
+      pullRequestTarget: "main",
+      pullRequestTargetsByRepository: { "repo-1": "main", kandev: "main" },
+      taskTitle: "Open a pull request",
+    });
+  });
+});
+
+describe("selectWorkspaceRepositories", () => {
+  it("returns a stable empty value until the workspace repository slice is hydrated", () => {
+    const itemsByWorkspaceId: Record<string, Repository[]> = {};
+
+    expect(selectWorkspaceRepositories(itemsByWorkspaceId, "ws-missing")).toBe(
+      selectWorkspaceRepositories(itemsByWorkspaceId, "ws-missing"),
+    );
+  });
+
+  it("returns the hydrated repositories for the task workspace", () => {
+    const repositories = [{ id: "repo-1" }] as Repository[];
+
+    expect(selectWorkspaceRepositories({ "ws-1": repositories }, "ws-1")).toBe(repositories);
   });
 });
 

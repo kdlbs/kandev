@@ -27,6 +27,7 @@ The transcript can lose the original task prompt after a reload. Long activity g
 - **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.6:** Do not require another user action before a new standalone transcript entry appears.
 - **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.7:** Stop automatic loading in these cases:
 - **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.8:** Older content moves the load boundary above the preload region.
+- **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.9:** When the first user prompt of a session is loaded, the transcript shall not show an older-page control.
 
 ## Migrated source detail
 
@@ -113,4 +114,4 @@ prompt. This requirement includes sessions with more than 100 tool events.
 
 ## Implementation plan
 
-See [the implementation plan](../../../plans/task-prompt-transcript-visibility/plan.md).
+See [the implementation plan](../../../plans/hide-redundant-older-messages-control/plan.md).

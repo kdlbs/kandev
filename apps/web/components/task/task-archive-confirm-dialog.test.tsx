@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { StateProvider, useAppStore } from "@/components/state-provider";
 import { defaultState } from "@/lib/state/default-state";
+import { expectCompactWarning } from "./task-confirm-dialog.test-helpers";
 
 const mockGetSubtaskCount = vi.fn();
 
@@ -264,6 +265,22 @@ describe("TaskArchiveConfirmDialog cleanup copy", () => {
 });
 
 describe("TaskArchiveConfirmDialog still-working guard", () => {
+  it("keeps the in-flight warning visually subordinate to confirmation copy", () => {
+    renderWithTasks(
+      <TaskArchiveConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="My task"
+        taskId="task-1"
+        executorType="worktree"
+        onConfirm={() => {}}
+      />,
+      [{ id: "task-1", foregroundActivity: "generating" }],
+    );
+
+    expectCompactWarning(screen.getByTestId(WARNING_TESTID));
+  });
+
   it("warns when the task is generating", () => {
     renderWithTasks(
       <TaskArchiveConfirmDialog

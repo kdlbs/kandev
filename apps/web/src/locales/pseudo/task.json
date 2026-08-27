@@ -1726,6 +1726,12 @@
   "failedToStartImplementingPlan": "Ƒàĩĺēď ţō śţàŕţ ĩḿƥĺēḿēńţĩńĝ ţĥē ƥĺàń",
   "failedToStartImplementationSession": "Ƒàĩĺēď ţō śţàŕţ ĩḿƥĺēḿēńţàţĩōń śēśśĩōń",
   "failedToMoveTask": "Ƒàĩĺēď ţō ḿōvē ţàśķ",
+  "taskMoveErrorGeneric": "Ţĥē ţàśķ ćōũĺď ńōţ ƀē ḿōvēď. Ţŕŷ àĝàĩń.",
+  "taskMoveErrorActiveSession": "Śţōƥ ţĥē àćţĩvē śēśśĩōń ƀēƒōŕē ḿōvĩńĝ ţĥē ţàśķ.",
+  "taskMoveErrorArchived": "Àŕćĥĩvēď ţàśķś ćàńńōţ ƀē ḿōvēď.",
+  "taskMoveErrorDifferentWorkspace": "Ţĥē ţàśķ àńď ţàŕĝēţ ŵōŕķƒĺōŵ ḿũśţ ũśē ţĥē śàḿē ŵōŕķśƥàćē.",
+  "taskMoveErrorWorkflowStep": "Ţĥē ţàŕĝēţ śţēƥ ďōēś ńōţ ƀēĺōńĝ ţō ţĥē ţàŕĝēţ ŵōŕķƒĺōŵ.",
+  "taskMoveErrorWipLimit": "Ţĥē ţàŕĝēţ ŵōŕķƒĺōŵ śţēƥ ĩś àţ ĩţś ŴĨƤ ĺĩḿĩţ.",
   "movedTasksStepDescription_one": "Ţĥē ţàśķ ĩś ńōŵ ĩń ţĥē śēĺēćţēď śţēƥ.",
   "movedTasksStepDescription_other": "Ţĥē ţàśķś àŕē ńōŵ ĩń ţĥē śēĺēćţēď śţēƥ.",
   "movedTasksToStep_one": "Ḿōvēď ţàśķ ţō śţēƥ",
@@ -1875,5 +1881,12 @@
   "baseBranchNotSet": "Ɓàśē ƀŕàńćĥ ńōţ śēţ",
   "launchRecoveryFailed": "Ŕēćōvēŕŷ ćōũĺď ńōţ śţàŕţ",
   "tryRecoveryAgain": "Ţŕŷ ţĥē ŕēćōvēŕŷ àćţĩōń àĝàĩń.",
-  "launchFailedSeeDetails": "Ţĥē ţàśķ ĺàũńćĥ ƒàĩĺēď. Ōƥēń ţĥē ţàśķ ďēţàĩĺś ƒōŕ ŕēćōvēŕŷ àćţĩōńś."
+  "launchFailedSeeDetails": "Ţĥē ţàśķ ĺàũńćĥ ƒàĩĺēď. Ōƥēń ţĥē ţàśķ ďēţàĩĺś ƒōŕ ŕēćōvēŕŷ àćţĩōńś.",
+  "branchPoliciesGroup": "Ɓŕàńćĥ ƥōĺĩćĩēś",
+  "branchesGroup": "Ɓŕàńćĥēś",
+  "branchPolicyMarker": "Ƥōĺĩćŷ",
+  "branchPolicyOptionSummary": "ƒŕōḿ {{base}} ţō {{target}}",
+  "branchPolicySelected": "{{name}} (ƒŕōḿ {{base}})",
+  "branchPolicyUnavailable": "Ɓàśē ƀŕàńćĥ ũńàvàĩĺàƀĺē. Ŕēƒŕēśĥ ƀŕàńćĥēś ōŕ ēďĩţ ţĥĩś ƥōĺĩćŷ.",
+  "branchPolicyRequiresSingleRepository": "Ɓŕàńćĥ ƥōĺĩćĩēś ŕēqũĩŕē à śĩńĝĺē ŕēƥōśĩţōŕŷ ŵĩţĥ ţĥē ĺōćàĺ ēxēćũţōŕ."
 }

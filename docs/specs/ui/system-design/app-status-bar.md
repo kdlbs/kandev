@@ -4,7 +4,7 @@ system: ui
 requirements:
   - REQ-UI-APP-STATUS-BAR-001
 created: 2026-07-21
-updated: 2026-08-11
+updated: 2026-08-23
 owners:
   - kandev
 ---
@@ -33,8 +33,9 @@ Kandev has useful app-wide state, but it is scattered through route headers. A s
 - The portable **Show status bar** preference in Settings > Preferences > Appearance controls both general-purpose presentations and defaults off. Turning it on adds the desktop/tablet bar and ordinary phone Status entry points as soon as the shared Appearance save succeeds; no Kandev restart is required. An active [WebSocket connectivity warning](../requirements/ws-connectivity-warning.md) is the sole visibility exception: it uses problem-only fallback chrome and a connection-only phone drawer without mounting the bar, metrics, or plugin contributions. The preference changes visibility only; it does not stop connections, metrics collection requested by other clients, or plugin execution.
 - Built-ins are limited to Kandev-owned state:
   - Canonical connection state and error from `state.connection.status` / `state.connection.error`, with a restrained semantic dot, the connected detail **Connected to Kandev**, accessible text, and readable failure detail.
-  - Existing Kandev-host CPU/memory metrics, preserving enabled-metric order, formatting, thresholds, limits, and tooltips. The built-in surface does not render active-task, active-session, or executor metrics.
+  - Existing Kandev-host CPU/memory metrics, preserving enabled-metric order, formatting, thresholds, and tooltips. Desktop and tablet retain their density limits. The phone Status drawer renders every enabled host metric because its vertical surface does not need the bar's horizontal limit. The built-in surface does not render active-task, active-session, or executor metrics.
   - Resource metrics offer two persisted presentation styles. **Detailed** is the default and shows the host marker plus percentage meter bars. **Simplified** shows only each metric icon and formatted value, with no host marker or meter bars. The selected style applies consistently to the desktop/tablet bar, the pre-status-bar topbar fallback, and the phone Status drawer.
+  - Phone metrics use a width-aware grid instead of one horizontal strip. The detailed Host marker occupies its own leading line, then the grid chooses the number of columns that fit the available row width, uses two columns in the configured Pixel 5 viewport, and adds vertical rows as indicators increase (six indicators form two columns by three rows there). Every indicator remains inside the metrics item without clipping or horizontal scrolling.
 - `userSettings.systemMetricsDisplay.showInTopbar` remains the persisted/wire compatibility key. User-visible copy calls this the Status bar setting; no migration or API break occurs.
 - Existing composer-local `ChatStatusBar` remains separate. Queue, PR, share, and next-step affordances stay with chat.
 - The connection indicator, complete metrics cluster, and each plugin component registration are individual status items. Holding Cmd on macOS or Ctrl on other platforms while dragging with the mouse reorders an item horizontally across the full bar, including across its flexible spacer.
@@ -139,6 +140,7 @@ Visual interaction is a clean Kandev adaptation of Orca's public status-bar idea
 - **GIVEN** the detailed metrics style or no stored style preference, **WHEN** host metrics render in a status surface, **THEN** the host marker and percentage meter bars remain visible.
 - **GIVEN** the user selects **Simplified metrics** and saves Appearance settings, **WHEN** host metrics render in the desktop/tablet status bar or pre-status-bar topbar fallback, **THEN** each enabled metric shows its icon and formatted value without a host marker or percentage meter bar, and the choice survives reload.
 - **GIVEN** the simplified metrics preference, **WHEN** a phone user opens Status, **THEN** the metrics row shows the same icon-and-value presentation without a host marker or percentage meter bar.
+- **GIVEN** all host metrics are enabled on a phone, **WHEN** the user opens Status, **THEN** every host metric is visible in enabled order inside a width-aware grid; the configured Pixel 5 viewport uses two columns and additional metrics continue on later rows without widening the metrics item, drawer, or document.
 - **GIVEN** metrics preference disabled, or a phone Status drawer closed, **WHEN** the app runs, **THEN** no system-metrics WebSocket subscription is held by this feature.
 - **GIVEN** **Show status bar** is on for a phone user, **WHEN** they choose Status from a native entry point, **THEN** the drawer shows the same built-ins and plugin regions; dismissing it restores focus and leaves no persistent status bar.
 - **GIVEN** a user turns off **Show status bar** and saves Appearance, **WHEN** the save succeeds, **THEN** the bar/drawer and ordinary native Status triggers disappear immediately, remain absent after reload and on another client, and no restart is required.
@@ -165,3 +167,4 @@ Visual interaction is a clean Kandev adaptation of Orca's public status-bar idea
 
 - [Original App status bar plan](../../../plans/app-status-bar/plan.md)
 - [Status bar Appearance setting promotion plan](../../../plans/app-status-bar-appearance-setting/plan.md)
+- [Mobile Status metrics grid repair plan](../../../plans/mobile-status-metrics-grid/plan.md)

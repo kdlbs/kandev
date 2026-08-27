@@ -6,6 +6,7 @@ import type {
   Branch,
   RepositoryScript,
   RepositorySet,
+  RepositoryBranchPolicy,
   Message,
   TaskPendingAction,
   TaskPendingActionRevision,
@@ -114,6 +115,7 @@ export type AppState = KanbanSlice & {
   workspaces: (typeof defaultWorkspaceState)["workspaces"];
   repositories: (typeof defaultWorkspaceState)["repositories"];
   repositorySets: (typeof defaultWorkspaceState)["repositorySets"];
+  repositoryBranchPolicies: (typeof defaultWorkspaceState)["repositoryBranchPolicies"];
   repositoryBranches: (typeof defaultWorkspaceState)["repositoryBranches"];
   repositoryScripts: (typeof defaultWorkspaceState)["repositoryScripts"];
 
@@ -297,6 +299,14 @@ export type AppState = KanbanSlice & {
   upsertRepositorySet: (workspaceId: string, set: RepositorySet) => void;
   removeRepositorySet: (workspaceId: string, setId: string) => void;
   invalidateRepositorySets: (workspaceId: string) => void;
+  setRepositoryBranchPolicies: (
+    repositoryId: string,
+    policies: RepositoryBranchPolicy[],
+    expectedRevision?: number,
+  ) => void;
+  setRepositoryBranchPoliciesLoading: (repositoryId: string, loading: boolean) => void;
+  upsertRepositoryBranchPolicy: (policy: RepositoryBranchPolicy) => void;
+  removeRepositoryBranchPolicy: (repositoryId: string, policyId: string) => void;
   setSettingsData: (next: Partial<SettingsDataState>) => void;
   setEditors: (editors: EditorsState["items"]) => void;
   setEditorsLoading: (loading: boolean) => void;

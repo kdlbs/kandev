@@ -31,38 +31,52 @@ func TestPageInfoProtoRoundTrip(t *testing.T) {
 
 func TestTaskProtoRoundTrip(t *testing.T) {
 	task := Task{
-		ID:             "task-1",
-		WorkspaceID:    "ws-1",
-		WorkflowID:     "wf-1",
-		Title:          "Fix the bug",
-		Description:    "Details here",
-		State:          "in_progress",
-		Priority:       "high",
-		Labels:         []string{"bug", "plugin"},
-		WorkflowStepID: "step-7f3a9c2b-0001-4f42-a5d1-9c0e8b7d6a5f",
-		CreatedBy:      "user-1",
-		CreatedAt:      "2026-07-15T12:00:00Z",
-		UpdatedAt:      "2026-07-15T12:05:00Z",
-		StartedAt:      strPtr("2026-07-15T12:01:00Z"),
-		CompletedAt:    nil,
-		ParentID:       strPtr("task-0"),
-		Identifier:     "PROJ-42",
-		IsEphemeral:    false,
+		ID:          "task-1",
+		WorkspaceID: "ws-1",
+		WorkflowID:  "wf-1",
+		Title:       "Fix the bug",
+		Description: "Details here",
+		State:       "in_progress",
+		Priority:    "high",
+		CreatedBy:   "user-1",
+		CreatedAt:   "2026-07-15T12:00:00Z",
+		UpdatedAt:   "2026-07-15T12:05:00Z",
+		StartedAt:   strPtr("2026-07-15T12:01:00Z"),
+		CompletedAt: nil,
+		ParentID:    strPtr("task-0"),
+		Identifier:  "PROJ-42",
+		IsEphemeral: false,
 		Repositories: []TaskRepository{
 			{ID: "tr-1", RepositoryID: "repo-1", BaseBranch: "main", Position: 0, CheckoutBranch: "feature/fix"},
 			{ID: "tr-2", RepositoryID: "repo-2", BaseBranch: "develop", Position: 1},
 		},
-		Metadata: map[string]any{"source": "plugin:agent-stats", "count": float64(3)},
+		Metadata:   map[string]any{"source": "plugin:agent-stats", "count": float64(3)},
+		ArchivedAt: strPtr("2026-07-16T12:00:00Z"),
+		PullRequests: []TaskPullRequest{{
+			Number: 42, URL: "https://example.test/pulls/42", Title: "Fix the bug",
+			State: "open", HeadBranch: "feature/fix", BaseBranch: "main", IsDraft: true,
+			Provider: "github", MergedAt: strPtr("2026-07-16T11:00:00Z"),
+			ClosedAt: strPtr("2026-07-16T11:30:00Z"), ReviewState: "approved",
+			ChecksState: "success", MergeableState: "clean", UnresolvedReviewThreads: 1,
+			ChecksTotal: 5, ChecksPassing: 5, Additions: 12, Deletions: 3, AuthorLogin: "nova28",
+		}},
+		WorkflowStepID: "step-review", Position: 4, AssigneeAgentProfileID: "agent-1",
+		Labels: []string{"plugin", "ready"}, Autopilot: true, WIPAdmitted: true,
+		QueuedForStepID: "step-build", QueuedAt: strPtr("2026-07-16T10:00:00Z"),
+		ProjectID: "project-1", ExternalID: "external-1",
 	}
 
 	proto, err := task.toProto()
 	require.NoError(t, err)
 	require.Equal(t, "task-1", proto.GetId())
-	require.Equal(t, "step-7f3a9c2b-0001-4f42-a5d1-9c0e8b7d6a5f", proto.GetWorkflowStepId())
 	require.Equal(t, "2026-07-15T12:01:00Z", proto.GetStartedAt())
 	require.Nil(t, proto.CompletedAt)
 	require.Equal(t, "feature/fix", proto.GetRepositories()[0].GetCheckoutBranch())
 	require.Empty(t, proto.GetRepositories()[1].GetCheckoutBranch(), "empty checkout branches remain wire-compatible")
+	require.Equal(t, "step-review", proto.GetWorkflowStepId())
+	require.True(t, proto.GetAutopilot())
+	require.Len(t, proto.GetPullRequests(), 1)
+	require.Equal(t, int64(42), proto.GetPullRequests()[0].GetNumber())
 
 	back, err := taskFromProto(proto)
 	require.NoError(t, err)
@@ -85,6 +99,21 @@ func TestTaskProtoRoundTrip_NilOptionalsAndEmptyMetadata(t *testing.T) {
 	require.Equal(t, task, back)
 }
 
+func TestTaskPullRequestProtoRoundTrip(t *testing.T) {
+	pr := TaskPullRequest{
+		Number: 42, URL: "https://example.test/pulls/42", Title: "Fix the bug",
+		State: "merged", HeadBranch: "feature/fix", BaseBranch: "main", IsDraft: false,
+		Provider: "github", MergedAt: strPtr("2026-07-16T11:00:00Z"), ClosedAt: nil,
+		ReviewState: "approved", ChecksState: "success", MergeableState: "clean",
+		UnresolvedReviewThreads: 0, ChecksTotal: 5, ChecksPassing: 5,
+		Additions: 12, Deletions: 3, AuthorLogin: "nova28",
+	}
+
+	proto := pr.toProto()
+	require.Equal(t, pr, taskPullRequestFromProto(proto))
+	require.Nil(t, proto.ClosedAt)
+}
+
 func TestTaskFilterProtoRoundTrip(t *testing.T) {
 	filter := TaskFilter{
 		WorkspaceIDs:     []string{"ws-1", "ws-2"},
@@ -92,6 +121,7 @@ func TestTaskFilterProtoRoundTrip(t *testing.T) {
 		States:           []string{"todo", "in_progress"},
 		ParentID:         strPtr("task-0"),
 		IncludeEphemeral: true,
+		IncludeArchived:  true,
 	}
 	proto := filter.toProto()
 	require.Equal(t, filter, taskFilterFromProto(proto))
@@ -132,11 +162,28 @@ func TestWorkflowProtoRoundTrip(t *testing.T) {
 
 func TestWorkflowStepProtoRoundTrip(t *testing.T) {
 	step := WorkflowStep{
-		ID:         "step-1",
-		WorkflowID: "wf-1",
-		Name:       "Review",
-		Position:   1,
-		StageType:  "review",
+		ID:             "step-1",
+		WorkflowID:     "wf-1",
+		Name:           "Review",
+		Position:       1,
+		StageType:      "review",
+		Color:          "bg-indigo-500",
+		IsStartStep:    true,
+		WIPLimit:       3,
+		AgentProfileID: "agent-1",
+	}
+	proto := step.toProto()
+	require.Equal(t, step, workflowStepFromProto(proto))
+}
+
+func TestWorkflowStepProtoRoundTrip_OnEnterActionTypes(t *testing.T) {
+	step := WorkflowStep{
+		ID:                 "step-1",
+		WorkflowID:         "wf-1",
+		Name:               "Work",
+		Position:           1,
+		StageType:          "work",
+		OnEnterActionTypes: []string{"auto_start_agent", "run_code_review", "set_session_mode"},
 	}
 	proto := step.toProto()
 	require.Equal(t, step, workflowStepFromProto(proto))

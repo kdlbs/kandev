@@ -13,23 +13,35 @@ import type { TaskRemoteRepoRow, TaskRepoRow } from "@/components/task-create-di
  */
 export function useRepositoriesState() {
   const [repositories, setRepositories] = useState<TaskRepoRow[]>([]);
+  const [repositoriesDirty, setRepositoriesDirty] = useState(false);
   const nextKeyRef = useRef(0);
 
   const addRepository = useCallback(() => {
     nextKeyRef.current += 1;
     const key = `row-${nextKeyRef.current}`;
     setRepositories((rows) => [...rows, { key, branch: "" }]);
+    setRepositoriesDirty(true);
   }, []);
 
   const removeRepository = useCallback((key: string) => {
     setRepositories((rows) => rows.filter((r) => r.key !== key));
+    setRepositoriesDirty(true);
   }, []);
 
   const updateRepository = useCallback((key: string, patch: Partial<TaskRepoRow>) => {
     setRepositories((rows) => rows.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+    setRepositoriesDirty(true);
   }, []);
 
-  return { repositories, setRepositories, addRepository, removeRepository, updateRepository };
+  return {
+    repositories,
+    repositoriesDirty,
+    setRepositories,
+    setRepositoriesDirty,
+    addRepository,
+    removeRepository,
+    updateRepository,
+  };
 }
 
 /**

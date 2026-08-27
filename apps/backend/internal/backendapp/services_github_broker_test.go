@@ -36,6 +36,37 @@ type fakeContributionDestinationVerifier struct {
 	calls int
 }
 
+type factoryTestGitCredentialResolver struct{}
+
+func (factoryTestGitCredentialResolver) Supports(providerID string) bool {
+	return strings.EqualFold(providerID, "github")
+}
+
+func (factoryTestGitCredentialResolver) Binding(context.Context, gitcredentials.Scope) (string, error) {
+	return "generation-1", nil
+}
+
+func (factoryTestGitCredentialResolver) Resolve(context.Context, gitcredentials.Scope) (gitcredentials.Credential, error) {
+	return gitcredentials.Credential{Username: "x-access-token", Password: "secret"}, nil
+}
+
+type factoryTestGitHubCredentialSource struct {
+	verifier *fakeContributionDestinationVerifier
+}
+
+func (s *factoryTestGitHubCredentialSource) GitCredentialResolver() gitcredentials.Resolver {
+	return factoryTestGitCredentialResolver{}
+}
+
+func (s *factoryTestGitHubCredentialSource) VerifyContributionDestinationForWorkspace(
+	ctx context.Context,
+	workspaceID, sourceOwner, sourceRepo, sourceProviderID, targetOwner, targetRepo, targetProviderID string,
+) error {
+	return s.verifier.VerifyContributionDestinationForWorkspace(
+		ctx, workspaceID, sourceOwner, sourceRepo, sourceProviderID, targetOwner, targetRepo, targetProviderID,
+	)
+}
+
 func (f *fakeContributionDestinationVerifier) VerifyContributionDestinationForWorkspace(
 	context.Context, string, string, string, string, string, string, string,
 ) error {
@@ -329,8 +360,15 @@ func TestGitHubBrokerScopeAuthorizerAllowsOnlyTheBoundContributionDestination(t 
 	); err != nil {
 		t.Fatalf("bound destination identity was denied: %v", err)
 	}
-	if verifier.calls != 1 {
-		t.Fatalf("provider verification calls = %d, want 1", verifier.calls)
+	if err := authorizer.AuthorizeGitCredential(context.Background(), gitcredentials.Scope{
+		ProviderID: "github", WorkspaceID: "workspace-destination", TaskID: "task-destination", SessionID: "session-destination",
+		RepositoryID: "repository-destination", Host: "github.com", Path: "/automation/kandev.git",
+		IdentityProviderID: "200", ParentProviderID: "100",
+	}); err != nil {
+		t.Fatalf("authorized contribution-destination lease was denied: %v", err)
+	}
+	if verifier.calls != 2 {
+		t.Fatalf("provider verification calls = %d, want 2", verifier.calls)
 	}
 	if err := authorizer.AuthorizeGitHubRepositoryWithIdentity(
 		context.Background(), "workspace-destination", "task-destination", "session-destination", "repository-destination", "automation", "kandev", "201", "100",
@@ -344,6 +382,42 @@ func TestGitHubBrokerScopeAuthorizerAllowsOnlyTheBoundContributionDestination(t 
 	}
 	if err := authorizer.AuthorizeGitHubRepository(context.Background(), "workspace-destination", "task-destination", "session-destination", "repository-destination", "automation", "other"); err == nil || !strings.Contains(err.Error(), "identity does not match") {
 		t.Fatalf("unbound destination error = %v, want identity denial", err)
+	}
+}
+
+func TestGitCredentialBrokerFactoryWiresGitHubDestinationVerifier(t *testing.T) {
+	destination := taskmodels.ContributionDestination{
+		Version:  taskmodels.ContributionDestinationVersion,
+		Provider: taskmodels.ContributionDestinationProviderGitHub,
+		SourceRepository: taskmodels.ContributionDestinationRepository{
+			Host: "github.com", Path: "kdlbs/kandev", ProviderID: "100", RemoteURL: "https://github.com/kdlbs/kandev.git",
+		},
+		TargetRepository: taskmodels.ContributionDestinationRepository{
+			Host: "github.com", Path: "automation/kandev", ProviderID: "200", RemoteURL: "https://github.com/automation/kandev.git",
+		},
+	}
+	metadata := map[string]interface{}{}
+	if err := taskmodels.PutContributionDestination(metadata, &destination); err != nil {
+		t.Fatalf("PutContributionDestination() = %v", err)
+	}
+	repo := &fakeGitHubBrokerTaskRepository{
+		task:       &taskmodels.Task{ID: "task-factory", WorkspaceID: "workspace-factory"},
+		session:    &taskmodels.TaskSession{ID: "session-factory", TaskID: "task-factory", State: taskmodels.TaskSessionStateRunning},
+		repository: &taskmodels.Repository{ID: "repository-factory", WorkspaceID: "workspace-factory", Provider: "github", ProviderHost: "https://github.com", ProviderRepoID: "100", ProviderOwner: "kdlbs", ProviderName: "kandev"},
+		links:      []*taskmodels.TaskRepository{{TaskID: "task-factory", RepositoryID: "repository-factory", Metadata: metadata}},
+	}
+	verifier := &fakeContributionDestinationVerifier{}
+	broker := newGitCredentialBroker(&factoryTestGitHubCredentialSource{verifier: verifier}, nil, repo, "")
+
+	if _, err := broker.Issue(context.Background(), gitcredentials.Scope{
+		ProviderID: "github", WorkspaceID: "workspace-factory", TaskID: "task-factory", SessionID: "session-factory",
+		RepositoryID: "repository-factory", Host: "github.com", Path: "/automation/kandev.git",
+		IdentityProviderID: "200", ParentProviderID: "100",
+	}); err != nil {
+		t.Fatalf("managed fork lease issuance = %v", err)
+	}
+	if verifier.calls != 1 {
+		t.Fatalf("destination verifier calls = %d, want 1", verifier.calls)
 	}
 }
 

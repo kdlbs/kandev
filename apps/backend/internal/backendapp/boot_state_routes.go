@@ -62,7 +62,7 @@ func (b bootStateBuilder) tasksPageBootData(ctx context.Context, req *http.Reque
 		state["userSettings"] = mapUserSettingsState(settings, activeWorkspaceID)
 	}
 	if activeWorkspaceID == "" {
-		return state, map[string]any{"activeWorkspaceId": nil, "workflows": []any{}, "steps": []any{}, "repositories": []any{}, "repositorySets": []any{}, "tasks": []any{}, "total": 0, "tasksListSort": tasksListSort, "tasksListGroup": tasksListGroup}
+		return state, map[string]any{"activeWorkspaceId": nil, "workflows": []any{}, "steps": []any{}, "repositories": []any{}, "repositorySets": []any{}, "repositoryBranchPolicies": []any{}, "tasks": []any{}, "total": 0, "tasksListSort": tasksListSort, "tasksListGroup": tasksListGroup}
 	}
 	workflows, err := b.p.taskSvc.ListWorkflows(ctx, activeWorkspaceID, false)
 	if err != nil {
@@ -77,18 +77,20 @@ func (b bootStateBuilder) tasksPageBootData(ctx context.Context, req *http.Reque
 	}
 	repositories := b.repositoriesForState(ctx, activeWorkspaceID, state)
 	repositorySets := b.repositorySetsForState(ctx, activeWorkspaceID, state)
+	repositoryBranchPolicies := b.repositoryBranchPoliciesForState(ctx, activeWorkspaceID, state)
 	steps := b.workflowStepsForWorkspace(ctx, activeWorkspaceID)
 	tasks, total := b.tasksForWorkspace(ctx, activeWorkspaceID, activeWorkflowID, settingsRepositoryID, tasksListSort)
 	routeData := map[string]any{
-		"activeWorkspaceId": activeWorkspaceID,
-		"workflows":         workflowsToDTOs(workflows),
-		"steps":             steps,
-		"repositories":      repositories,
-		"repositorySets":    repositorySets,
-		"tasks":             tasks,
-		"total":             total,
-		"tasksListSort":     tasksListSort,
-		"tasksListGroup":    tasksListGroup,
+		"activeWorkspaceId":        activeWorkspaceID,
+		"workflows":                workflowsToDTOs(workflows),
+		"steps":                    steps,
+		"repositories":             repositories,
+		"repositorySets":           repositorySets,
+		"repositoryBranchPolicies": repositoryBranchPolicies,
+		"tasks":                    tasks,
+		"total":                    total,
+		"tasksListSort":            tasksListSort,
+		"tasksListGroup":           tasksListGroup,
 	}
 	return state, routeData
 }
@@ -128,7 +130,7 @@ func (b bootStateBuilder) routeContextBootData(ctx context.Context, req *http.Re
 		state["userSettings"] = mapUserSettingsState(settings, activeWorkspaceID)
 	}
 	if activeWorkspaceID == "" {
-		return state, map[string]any{"activeWorkspaceId": nil, "workflows": []any{}, "steps": []any{}, "repositories": []any{}, "repositorySets": []any{}}
+		return state, map[string]any{"activeWorkspaceId": nil, "workflows": []any{}, "steps": []any{}, "repositories": []any{}, "repositorySets": []any{}, "repositoryBranchPolicies": []any{}}
 	}
 	workflows, err := b.p.taskSvc.ListWorkflows(ctx, activeWorkspaceID, false)
 	if err != nil {
@@ -145,13 +147,15 @@ func (b bootStateBuilder) routeContextBootData(ctx context.Context, req *http.Re
 	}
 	repositories := b.repositoriesForState(ctx, activeWorkspaceID, state)
 	repositorySets := b.repositorySetsForState(ctx, activeWorkspaceID, state)
+	repositoryBranchPolicies := b.repositoryBranchPoliciesForState(ctx, activeWorkspaceID, state)
 	steps := b.workflowStepsForWorkspace(ctx, activeWorkspaceID)
 	return state, map[string]any{
-		"activeWorkspaceId": activeWorkspaceID,
-		"workflows":         workflowsToDTOs(workflows),
-		"steps":             steps,
-		"repositories":      repositories,
-		"repositorySets":    repositorySets,
+		"activeWorkspaceId":        activeWorkspaceID,
+		"workflows":                workflowsToDTOs(workflows),
+		"steps":                    steps,
+		"repositories":             repositories,
+		"repositorySets":           repositorySets,
+		"repositoryBranchPolicies": repositoryBranchPolicies,
 	}
 }
 
@@ -244,6 +248,64 @@ func (b bootStateBuilder) repositorySetsForState(
 	return items
 }
 
+// repositoryBranchPoliciesForState hydrates the repository-keyed policy slice
+// used by repository settings and the task-create picker.
+func (b bootStateBuilder) repositoryBranchPoliciesForState(
+	ctx context.Context,
+	workspaceID string,
+	state map[string]any,
+) []taskdto.RepositoryBranchPolicyDTO {
+	itemsByRepositoryID := map[string]any{}
+	loadingByRepositoryID := map[string]any{}
+	loadedByRepositoryID := map[string]any{}
+	items := make([]taskdto.RepositoryBranchPolicyDTO, 0)
+	repositories, err := b.p.taskSvc.ListRepositories(ctx, workspaceID)
+	if err != nil {
+		b.logBootError("list repositories for branch policies", err)
+		state["repositoryBranchPolicies"] = map[string]any{
+			"itemsByRepositoryId":   itemsByRepositoryID,
+			"loadingByRepositoryId": loadingByRepositoryID,
+			"loadedByRepositoryId":  loadedByRepositoryID,
+		}
+		return items
+	}
+	policies, err := b.p.taskSvc.ListRepositoryBranchPoliciesForWorkspace(ctx, workspaceID)
+	if err != nil {
+		b.logBootError("list repository branch policies", err)
+		for _, repository := range repositories {
+			if repository == nil {
+				continue
+			}
+			itemsByRepositoryID[repository.ID] = []taskdto.RepositoryBranchPolicyDTO{}
+			loadedByRepositoryID[repository.ID] = false
+			loadingByRepositoryID[repository.ID] = false
+		}
+	} else {
+		policiesByRepositoryID := make(map[string][]*taskmodels.RepositoryBranchPolicy)
+		for _, policy := range policies {
+			if policy != nil {
+				policiesByRepositoryID[policy.RepositoryID] = append(policiesByRepositoryID[policy.RepositoryID], policy)
+			}
+		}
+		for _, repository := range repositories {
+			if repository == nil {
+				continue
+			}
+			dtos := repositoryBranchPoliciesToDTOs(policiesByRepositoryID[repository.ID])
+			itemsByRepositoryID[repository.ID] = dtos
+			loadedByRepositoryID[repository.ID] = true
+			loadingByRepositoryID[repository.ID] = false
+			items = append(items, dtos...)
+		}
+	}
+	state["repositoryBranchPolicies"] = map[string]any{
+		"itemsByRepositoryId":   itemsByRepositoryID,
+		"loadingByRepositoryId": loadingByRepositoryID,
+		"loadedByRepositoryId":  loadedByRepositoryID,
+	}
+	return items
+}
+
 // repositorySetsState is the workspace-keyed slice shape the web store expects.
 // An empty workspace still keys an entry: an absent key reads as "not loaded" to
 // the client hook, which then refetches on every dialog open.
@@ -265,6 +327,16 @@ func repositorySetsToDTOs(sets []*taskmodels.RepositorySet) []taskdto.Repository
 	for _, set := range sets {
 		if set != nil {
 			items = append(items, taskdto.FromRepositorySet(set))
+		}
+	}
+	return items
+}
+
+func repositoryBranchPoliciesToDTOs(policies []*taskmodels.RepositoryBranchPolicy) []taskdto.RepositoryBranchPolicyDTO {
+	items := make([]taskdto.RepositoryBranchPolicyDTO, 0, len(policies))
+	for _, policy := range policies {
+		if policy != nil {
+			items = append(items, taskdto.FromRepositoryBranchPolicy(policy))
 		}
 	}
 	return items

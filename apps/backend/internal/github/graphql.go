@@ -175,6 +175,25 @@ type timelineClosedEventNode struct {
 	Actor *timelineActor `json:"actor"`
 }
 
+type mergeQueueRemovalEventNode struct {
+	ID           string    `json:"id"`
+	CreatedAt    time.Time `json:"createdAt"`
+	Reason       string    `json:"reason"`
+	BeforeCommit *struct {
+		OID string `json:"oid"`
+	} `json:"beforeCommit"`
+}
+
+type batchedMergeQueueEntry struct {
+	ID                   string `json:"id"`
+	State                string `json:"state"`
+	Position             *int   `json:"position"`
+	EstimatedTimeToMerge *int   `json:"estimatedTimeToMerge"`
+	HeadCommit           *struct {
+		OID string `json:"oid"`
+	} `json:"headCommit"`
+}
+
 // batchedPRResult is the decoded shape of one aliased pullRequest block.
 type batchedPRResult struct {
 	State string `json:"state"`
@@ -183,19 +202,15 @@ type batchedPRResult struct {
 	// IsDraft is a pointer: AC-12a requires distinguishing an upstream
 	// response that omits or nulls isDraft from one that genuinely reports
 	// false, and a plain bool can't tell the two apart after decode.
-	IsDraft         *bool  `json:"isDraft"`
-	Mergeable       string `json:"mergeable"`
-	MergeStatus     string `json:"mergeStateStatus"`
-	MergeQueueEntry *struct {
-		State                string `json:"state"`
-		Position             *int   `json:"position"`
-		EstimatedTimeToMerge *int   `json:"estimatedTimeToMerge"`
-	} `json:"mergeQueueEntry"`
-	HeadRefName string `json:"headRefName"`
-	BaseRefName string `json:"baseRefName"`
-	HeadRefOid  string `json:"headRefOid"`
-	Additions   int    `json:"additions"`
-	Deletions   int    `json:"deletions"`
+	IsDraft         *bool                   `json:"isDraft"`
+	Mergeable       string                  `json:"mergeable"`
+	MergeStatus     string                  `json:"mergeStateStatus"`
+	MergeQueueEntry *batchedMergeQueueEntry `json:"mergeQueueEntry"`
+	HeadRefName     string                  `json:"headRefName"`
+	BaseRefName     string                  `json:"baseRefName"`
+	HeadRefOid      string                  `json:"headRefOid"`
+	Additions       int                     `json:"additions"`
+	Deletions       int                     `json:"deletions"`
 	// ChangedFiles is a pointer for the same reason as IsDraft (AC-12a): 0 is
 	// a legitimate observation and must stay distinguishable from absent/null.
 	ChangedFiles *int `json:"changedFiles"`
@@ -243,6 +258,9 @@ type batchedPRResult struct {
 	TimelineItems struct {
 		Nodes []timelineClosedEventNode `json:"nodes"`
 	} `json:"timelineItems"`
+	MergeQueueRemovalEvents struct {
+		Nodes []mergeQueueRemovalEventNode `json:"nodes"`
+	} `json:"mergeQueueRemovalEvents"`
 }
 
 type batchedBranchPRNode struct {
@@ -418,14 +436,15 @@ func prFieldsBlock() string {
 	return `state title url isDraft mergeable mergeStateStatus ` +
 		`headRefName baseRefName headRefOid additions deletions changedFiles ` +
 		`author { login } mergedBy { login } autoMergeRequest { enabledAt } ` +
-		`mergeQueueEntry { state position estimatedTimeToMerge } ` +
+		`mergeQueueEntry { id state position estimatedTimeToMerge headCommit { oid } } ` +
 		`createdAt updatedAt mergedAt closedAt ` +
 		`reviews(last: 100) { nodes { state author { login } submittedAt } } ` +
 		`reviewRequests(first: 0) { totalCount } ` +
 		fmt.Sprintf(`reviewThreads(first: %d) { totalCount nodes { isResolved } pageInfo { hasNextPage endCursor } } `,
 			graphQLReviewThreadPageSize) +
 		`commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } ` +
-		`timelineItems(last: 1, itemTypes: CLOSED_EVENT) { nodes { ... on ClosedEvent { actor { login } } } }`
+		`timelineItems(last: 1, itemTypes: CLOSED_EVENT) { nodes { ... on ClosedEvent { actor { login } } } } ` +
+		`mergeQueueRemovalEvents: timelineItems(last: 1, itemTypes: REMOVED_FROM_MERGE_QUEUE_EVENT) { nodes { ... on RemovedFromMergeQueueEvent { id createdAt reason beforeCommit { oid } } } }`
 }
 
 // buildBatchedBranchQuery emits one aliased pullRequests(headRefName:) block
@@ -496,7 +515,8 @@ func convertBatchedPRResult(raw *batchedPRResult, owner, repo string, number int
 		}
 	}
 	closedByLogin, closureAttributionPopulated := closedEventActor(raw.TimelineItems.Nodes)
-	mergeQueueState, mergeQueuePosition, mergeQueueEstimate := convertMergeQueueEntry(raw.MergeQueueEntry)
+	mergeQueueState, mergeQueuePosition, mergeQueueEstimate, mergeQueueEntryID, mergeQueueEntryHeadSHA := convertMergeQueueEntry(raw.MergeQueueEntry)
+	removalID, removalAt, removalReason, removalBeforeSHA := convertMergeQueueRemoval(raw.MergeQueueRemovalEvents.Nodes)
 	return &PRStatus{
 		PR:                                    pr,
 		ReviewState:                           reviewState,
@@ -512,20 +532,40 @@ func convertBatchedPRResult(raw *batchedPRResult, owner, repo string, number int
 		ClosureAttributionPopulated:           closureAttributionPopulated,
 		MergeQueueState:                       mergeQueueState,
 		MergeQueuePosition:                    mergeQueuePosition,
+		MergeQueueEntryID:                     mergeQueueEntryID,
+		MergeQueueEntryHeadSHA:                mergeQueueEntryHeadSHA,
 		MergeQueueEstimatedTimeToMergeSeconds: mergeQueueEstimate,
+		MergeQueueLastRemovalID:               removalID,
+		MergeQueueLastRemovedAt:               removalAt,
+		MergeQueueLastRemovalReason:           removalReason,
+		MergeQueueLastRemovalBeforeSHA:        removalBeforeSHA,
 		mergeQueuePopulated:                   true,
+		mergeQueueRecoveryPopulated:           true,
 	}
 }
 
-func convertMergeQueueEntry(entry *struct {
-	State                string `json:"state"`
-	Position             *int   `json:"position"`
-	EstimatedTimeToMerge *int   `json:"estimatedTimeToMerge"`
-}) (string, *int, *int) {
+func convertMergeQueueEntry(entry *batchedMergeQueueEntry) (string, *int, *int, string, string) {
 	if entry == nil {
-		return "", nil, nil
+		return "", nil, nil, "", ""
 	}
-	return normalizeMergeQueueState(entry.State), positiveIntPtr(entry.Position), nonNegativeIntPtr(entry.EstimatedTimeToMerge)
+	headSHA := ""
+	if entry.HeadCommit != nil {
+		headSHA = entry.HeadCommit.OID
+	}
+	return normalizeMergeQueueState(entry.State), positiveIntPtr(entry.Position), nonNegativeIntPtr(entry.EstimatedTimeToMerge), entry.ID, headSHA
+}
+
+func convertMergeQueueRemoval(nodes []mergeQueueRemovalEventNode) (string, *time.Time, string, string) {
+	if len(nodes) == 0 {
+		return "", nil, "", ""
+	}
+	node := nodes[0]
+	var beforeSHA string
+	if node.BeforeCommit != nil {
+		beforeSHA = node.BeforeCommit.OID
+	}
+	removedAt := node.CreatedAt
+	return node.ID, &removedAt, node.Reason, beforeSHA
 }
 
 func normalizeMergeQueueState(raw string) string {

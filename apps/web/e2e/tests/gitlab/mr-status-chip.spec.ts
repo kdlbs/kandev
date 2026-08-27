@@ -71,10 +71,14 @@ async function openTask(
   await session.waitForLoad();
   // The shell hydrates the workspace MR map once per document. A link created
   // immediately before navigation can miss that first snapshot even though
-  // the task details already show the association. Reload once so the chip
-  // observes the same persisted link as the rest of the task page.
-  await testPage.reload();
-  await session.waitForLoad();
+  // the task details already show the association. Re-drive document
+  // hydration until the linked-MR chip observes the persisted map; one fixed
+  // reload can race the same snapshot again under CI load.
+  await expect(async () => {
+    await testPage.reload();
+    await session.waitForLoad();
+    await expect(session.mrStatusChip()).toBeVisible({ timeout: 5_000 });
+  }).toPass({ timeout: 30_000 });
 }
 
 test.describe("GitLab MR status chip", () => {
@@ -283,7 +287,10 @@ test.describe("GitLab MR status chip", () => {
 
     const chip = session.mrStatusChip();
     await expect(chip).toBeVisible({ timeout: 15_000 });
-    await expect(chip).toHaveAttribute("data-mr-count", "2");
+    // The shared workspace MR map hydrates after the task page mounts. Wait
+    // for the persisted two-MR state rather than treating the first visible
+    // chip render as complete.
+    await expect(chip).toHaveAttribute("data-mr-count", "2", { timeout: 15_000 });
     const autoFixBadge = chip.getByTestId("mr-status-auto-fix-chip");
     await expect(autoFixBadge).toBeVisible();
     // The round comes from the armed MR, which has no fix rounds yet.

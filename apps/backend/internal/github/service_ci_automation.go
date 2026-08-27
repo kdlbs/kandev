@@ -240,6 +240,15 @@ func (s *Service) RecordTaskCIMergeAttempt(ctx context.Context, attempt TaskCIMe
 	return s.store.RecordTaskCIMergeAttempt(ctx, attempt)
 }
 
+// RecordTaskCIMergeQueueObservation persists active queue membership and the
+// latest removal cause so automation can recover safely after a restart.
+func (s *Service) RecordTaskCIMergeQueueObservation(ctx context.Context, observation TaskCIMergeQueueObservation) error {
+	if s.store == nil {
+		return errStoreUnavailable
+	}
+	return s.store.RecordTaskCIMergeQueueObservation(ctx, observation)
+}
+
 // RecordTaskCIError records a CI automation error.
 func (s *Service) RecordTaskCIError(ctx context.Context, taskID, repositoryID string, prNumber int, message string) error {
 	if s.store == nil {

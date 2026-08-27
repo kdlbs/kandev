@@ -25,6 +25,7 @@ function makeTask(overrides: Partial<KanbanState["tasks"][number]>): KanbanState
 
 function makePR(overrides: Pick<TaskPR, "id" | "task_id">): TaskPR {
   return {
+    workspace_id: "workspace-1",
     owner: "o",
     repo: "r",
     pr_number: 1,
