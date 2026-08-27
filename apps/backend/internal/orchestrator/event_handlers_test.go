@@ -42,13 +42,14 @@ import (
 // mockStepGetter implements WorkflowStepGetter for testing.
 type mockStepGetter struct {
 	steps                  map[string]*wfmodels.WorkflowStep // stepID -> step
-	workflowAgentProfileID string                            // returned by GetWorkflowMeta
-	workflowAgentProfiles  []string                          // optional profiles returned per call
-	workflowPrompts        map[string]string                 // workflowID -> prompt
-	workflowMetaCalls      int                               // GetWorkflowMeta invocations
-	workflowMetaErr        error                             // optional error from GetWorkflowMeta
-	workflowMetaDelay      time.Duration                     // optional sleep before returning meta
-	workflowMetaMu         sync.Mutex                        // guards workflowMetaCalls for concurrent tests
+	getStepFunc            func(context.Context, string) (*wfmodels.WorkflowStep, error)
+	workflowAgentProfileID string            // returned by GetWorkflowMeta
+	workflowAgentProfiles  []string          // optional profiles returned per call
+	workflowPrompts        map[string]string // workflowID -> prompt
+	workflowMetaCalls      int               // GetWorkflowMeta invocations
+	workflowMetaErr        error             // optional error from GetWorkflowMeta
+	workflowMetaDelay      time.Duration     // optional sleep before returning meta
+	workflowMetaMu         sync.Mutex        // guards workflowMetaCalls for concurrent tests
 }
 
 func newMockStepGetter() *mockStepGetter {
@@ -58,7 +59,10 @@ func newMockStepGetter() *mockStepGetter {
 	}
 }
 
-func (m *mockStepGetter) GetStep(_ context.Context, stepID string) (*wfmodels.WorkflowStep, error) {
+func (m *mockStepGetter) GetStep(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error) {
+	if m.getStepFunc != nil {
+		return m.getStepFunc(ctx, stepID)
+	}
 	if s, ok := m.steps[stepID]; ok {
 		return s, nil
 	}
@@ -347,6 +351,11 @@ type mockAgentManager struct {
 	// failure (as opposed to the tolerated ErrNoExecutionForSession /
 	// ErrCancelEscalated sentinels handled inside cancelAgentSilent).
 	cancelAgentErr error
+	// cancelAgentForPromptFunc observes the identity-aware cancellation seam
+	// used by the stuck-signal watchdog. When unset, the test double keeps the
+	// legacy behavior by forwarding to CancelAgent.
+	cancelAgentForPromptFunc  func(context.Context, string, string, uint64, uint64) error
+	cancelAgentForPromptCalls atomic.Int32
 
 	currentPromptGeneration     atomic.Uint64
 	currentPromptActivityEpoch  atomic.Uint64
@@ -520,6 +529,18 @@ func (m *mockAgentManager) CancelAgent(ctx context.Context, sessionID string) er
 		return m.cancelAgentContextErr
 	}
 	return m.cancelAgentErr
+}
+
+func (m *mockAgentManager) CancelAgentForPrompt(
+	ctx context.Context,
+	sessionID, executionID string,
+	generation, activityEpoch uint64,
+) error {
+	m.cancelAgentForPromptCalls.Add(1)
+	if m.cancelAgentForPromptFunc != nil {
+		return m.cancelAgentForPromptFunc(ctx, sessionID, executionID, generation, activityEpoch)
+	}
+	return m.CancelAgent(ctx, sessionID)
 }
 func (m *mockAgentManager) RespondToPermissionBySessionID(_ context.Context, _, _, _ string, _ bool) error {
 	return nil

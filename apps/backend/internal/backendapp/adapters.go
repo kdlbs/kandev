@@ -119,6 +119,7 @@ var _ interface {
 	GetACPSessionIDForSession(sessionID string) (string, bool)
 	OwnsPromptActivity(sessionID, executionID string, generation, activityEpoch uint64) bool
 	GetPromptActivityForSession(ctx context.Context, sessionID string) (executionID string, generation, activityEpoch uint64, lastActivityAt time.Time, err error)
+	CancelAgentForPrompt(ctx context.Context, sessionID, executionID string, generation, activityEpoch uint64) error
 } = (*lifecycleAdapter)(nil)
 
 // newLifecycleAdapter creates a new lifecycle adapter
@@ -493,6 +494,10 @@ func (a *lifecycleAdapter) OwnsPromptActivity(sessionID, executionID string, gen
 
 func (a *lifecycleAdapter) GetPromptActivityForSession(ctx context.Context, sessionID string) (executionID string, generation, activityEpoch uint64, lastActivityAt time.Time, err error) {
 	return a.mgr.GetPromptActivityForSession(ctx, sessionID)
+}
+
+func (a *lifecycleAdapter) CancelAgentForPrompt(ctx context.Context, sessionID, executionID string, generation, activityEpoch uint64) error {
+	return a.mgr.CancelAgentForPrompt(ctx, sessionID, executionID, generation, activityEpoch)
 }
 
 // GetACPSessionIDForSession forwards to the lifecycle manager so

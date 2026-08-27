@@ -164,6 +164,30 @@ func (m *Manager) CancelAgent(ctx context.Context, executionID string) error {
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
+	return m.cancelAgentExecution(ctx, execution)
+}
+
+// CancelAgentForPrompt cancels the execution that owns a previously captured
+// prompt activity snapshot. It validates the complete identity while holding
+// the execution-store lock, then operates on that exact execution pointer so
+// a later session lookup cannot redirect cancellation to a successor.
+func (m *Manager) CancelAgentForPrompt(
+	ctx context.Context,
+	sessionID, executionID string,
+	generation, activityEpoch uint64,
+) error {
+	execution, err := m.executionStore.ClaimPromptActivity(sessionID, executionID, generation, activityEpoch)
+	if err != nil {
+		if errors.Is(err, ErrExecutionNotFound) {
+			return fmt.Errorf("session %q: %w", sessionID, ErrNoExecutionForSession)
+		}
+		return fmt.Errorf("session %q: %w", sessionID, err)
+	}
+	return m.cancelAgentExecution(ctx, execution)
+}
+
+func (m *Manager) cancelAgentExecution(ctx context.Context, execution *AgentExecution) error {
+	executionID := execution.ID
 
 	if execution.agentctl == nil {
 		return fmt.Errorf("execution %q has no agentctl client", executionID)

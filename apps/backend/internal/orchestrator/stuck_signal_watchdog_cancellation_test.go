@@ -255,3 +255,176 @@ func TestReclaimStuckSignalSessionIfDue_ConcurrentExplicitCancelJoinsInsteadOfDo
 			"a concurrent explicit cancel independently re-invoked CancelAgent instead of joining the watchdog's claimed operation (SEC-001 regression)", got)
 	}
 }
+
+// TestReclaimStuckSignalSessionIfDue_CancelsCapturedPromptIdentity prevents a
+// session lookup from retargeting cancellation at a replacement execution.
+// The watchdog must pass the execution, generation, and activity epoch that
+// made the reclaim eligible to the lifecycle manager.
+func TestReclaimStuckSignalSessionIfDue_CancelsCapturedPromptIdentity(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	setSessionExecID(t, repo, "s1", "exec-1")
+
+	stepGetter := newMockStepGetter()
+	seedStuckSignalWorkflow(stepGetter)
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo, isAgentRunning: true}
+	agentMgr.currentPromptExecutionID = "exec-1"
+	agentMgr.currentPromptGeneration.Store(7)
+	agentMgr.currentPromptActivityEpoch.Store(11)
+	agentMgr.currentPromptLastActivityAt = time.Now().UTC().Add(-15 * time.Minute)
+	var gotSession, gotExecution string
+	var gotGeneration, gotEpoch uint64
+	agentMgr.cancelAgentForPromptFunc = func(_ context.Context, sessionID, executionID string, generation, activityEpoch uint64) error {
+		gotSession, gotExecution = sessionID, executionID
+		gotGeneration, gotEpoch = generation, activityEpoch
+		return lifecycle.ErrCancelEscalated
+	}
+
+	svc := createEngineService(t, repo, stepGetter, agentMgr)
+	svc.turnService = &repoTurnService{repo: repo}
+	seedOverdueStuckSignal(t, repo, "s1")
+
+	svc.reclaimStuckSignalSessionsOnce(ctx)
+
+	if gotSession != "s1" || gotExecution != "exec-1" || gotGeneration != 7 || gotEpoch != 11 {
+		t.Fatalf("captured prompt identity = session %q execution %q generation %d epoch %d, want s1/exec-1/7/11",
+			gotSession, gotExecution, gotGeneration, gotEpoch)
+	}
+	if got := agentMgr.cancelAgentForPromptCalls.Load(); got != 1 {
+		t.Fatalf("identity-aware cancellation calls = %d, want 1", got)
+	}
+}
+
+func TestReclaimStuckSignalSessionIfDue_DoesNotSweepTurnWhenNoneWasCaptured(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	setSessionExecID(t, repo, "s1", "exec-1")
+
+	stepGetter := newMockStepGetter()
+	seedStuckSignalWorkflow(stepGetter)
+	turns := &repoTurnService{repo: repo}
+	var successor *models.Turn
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo, isAgentRunning: true}
+	agentMgr.currentPromptExecutionID = "exec-1"
+	agentMgr.currentPromptGeneration.Store(1)
+	agentMgr.currentPromptActivityEpoch.Store(1)
+	agentMgr.currentPromptLastActivityAt = time.Now().UTC().Add(-15 * time.Minute)
+	agentMgr.cancelAgentFunc = func(ctx context.Context, sessionID string) error {
+		var err error
+		successor, err = turns.StartTurn(ctx, sessionID)
+		if err != nil {
+			t.Errorf("start successor turn in cancel hook: %v", err)
+		}
+		return err
+	}
+
+	svc := createEngineService(t, repo, stepGetter, agentMgr)
+	svc.turnService = turns
+	seedOverdueStuckSignal(t, repo, "s1")
+
+	svc.reclaimStuckSignalSessionsOnce(ctx)
+
+	if got := agentMgr.cancelAgentCalls.Load(); got != 1 {
+		t.Fatalf("cancel calls = %d, want 1", got)
+	}
+	if successor == nil {
+		t.Fatal("cancel hook did not create a successor turn")
+	}
+	completed, err := turns.GetTurn(ctx, successor.ID)
+	if err != nil {
+		t.Fatalf("get successor turn: %v", err)
+	}
+	if completed.CompletedAt != nil {
+		t.Fatal("a successor turn must not be completed when no turn was captured before cancellation")
+	}
+	task, err := repo.GetTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if task.WorkflowStepID != "step1" {
+		t.Fatalf("task advanced to %q after an unscoped turn capture, want step1", task.WorkflowStepID)
+	}
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if session.State != models.TaskSessionStateRunning {
+		t.Fatalf("session state = %q, want RUNNING after fail-closed successor detection", session.State)
+	}
+}
+
+func TestReclaimStuckSignalSessionIfDue_JoinedCancelDoesNotCompleteSuccessorStep(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	setSessionExecID(t, repo, "s1", "exec-1")
+
+	stepGetter := newMockStepGetter()
+	seedStuckSignalWorkflow(stepGetter)
+	stepGetter.steps["step2"].CancelTriggersTurnComplete = true
+	stepGetter.steps["step2"].Events = wfmodels.StepEvents{OnTurnComplete: []wfmodels.OnTurnCompleteAction{{
+		Type: wfmodels.OnTurnCompleteMoveToNext,
+	}}}
+	stepGetter.steps["step3"] = &wfmodels.WorkflowStep{ID: "step3", WorkflowID: "wf1", Name: "Step 3", Position: 2}
+
+	turns := &repoTurnService{repo: repo}
+	if _, err := turns.StartTurn(ctx, "s1"); err != nil {
+		t.Fatalf("start stuck turn: %v", err)
+	}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo, isAgentRunning: true}
+	agentMgr.cancelAgentEntered = make(chan struct{}, 1)
+	agentMgr.cancelAgentBlock = make(chan struct{})
+	agentMgr.currentPromptExecutionID = "exec-1"
+	agentMgr.currentPromptGeneration.Store(1)
+	agentMgr.currentPromptActivityEpoch.Store(1)
+	agentMgr.currentPromptLastActivityAt = time.Now().UTC().Add(-15 * time.Minute)
+	svc := createEngineService(t, repo, stepGetter, agentMgr)
+	svc.turnService = turns
+	seedOverdueStuckSignal(t, repo, "s1")
+
+	watchdogDone := make(chan struct{})
+	go func() {
+		defer close(watchdogDone)
+		svc.reclaimStuckSignalSessionsOnce(ctx)
+	}()
+	select {
+	case <-agentMgr.cancelAgentEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for watchdog cancellation")
+	}
+	explicitDone := make(chan error, 1)
+	go func() { explicitDone <- svc.CancelAgent(ctx, "s1") }()
+	operation := svc.currentCancellation("s1")
+	if operation == nil {
+		t.Fatal("no shared cancellation operation registered")
+	}
+	select {
+	case <-operation.joined:
+	case <-time.After(2 * time.Second):
+		t.Fatal("explicit cancellation did not join watchdog operation")
+	}
+	close(agentMgr.cancelAgentBlock)
+	select {
+	case <-watchdogDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for watchdog")
+	}
+	select {
+	case err := <-explicitDone:
+		if err != nil {
+			t.Fatalf("joined explicit cancellation failed: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for joined cancellation")
+	}
+
+	task, err := repo.GetTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if task.WorkflowStepID != "step2" {
+		t.Fatalf("task step = %q, want step2 after one completion", task.WorkflowStepID)
+	}
+}

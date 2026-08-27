@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"go.uber.org/zap"
@@ -113,8 +115,52 @@ func (s *Service) reclaimStuckSignalSessionsOnce(ctx context.Context) {
 				zap.Int("candidates_deferred", len(sessions)-i))
 			return
 		}
+		if s.reconcileWaitingStuckSignalSessionIfDue(scanCtx, session, now) {
+			continue
+		}
 		s.reclaimStuckSignalSessionIfDue(scanCtx, session, now)
 	}
+}
+
+// reconcileWaitingStuckSignalSessionIfDue retries an accepted signal after a
+// prior reclaim already moved the session to WAITING_FOR_INPUT but could not
+// complete the workflow transition. The pending signal is durable, so a later
+// tick can safely retry without cancelling another agent turn.
+func (s *Service) reconcileWaitingStuckSignalSessionIfDue(ctx context.Context, session *models.TaskSession, now time.Time) bool {
+	if session == nil || session.State != models.TaskSessionStateWaitingForInput {
+		return false
+	}
+	signal, ok := models.LoadPendingStepSignal(session.Metadata)
+	if !ok || now.Sub(signal.SignaledAt) < stuckSignalWatchdogThreshold {
+		return false
+	}
+	task, err := s.repo.GetTask(ctx, session.TaskID)
+	if err != nil || task == nil || task.WorkflowStepID != signal.StepID || task.IsFromOffice || session.IsPassthrough {
+		return false
+	}
+	guard := s.lockCancelInFlightGuard(session.ID)
+	defer guard.release()
+	if s.isCancelInFlight(session.ID) {
+		return true
+	}
+	_, stillPending := s.stuckSignalWaitingStillPending(ctx, session.ID, signal.StepID)
+	if !stillPending {
+		return true
+	}
+	s.reconcileStepCompletionSignalLocked(ctx, task.ID, session.ID, signal.StepID)
+	return true
+}
+
+func (s *Service) stuckSignalWaitingStillPending(ctx context.Context, sessionID, stepID string) (*models.TaskSession, bool) {
+	latest, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || latest == nil || latest.State != models.TaskSessionStateWaitingForInput {
+		return nil, false
+	}
+	signal, ok := models.LoadPendingStepSignal(latest.Metadata)
+	if !ok || signal.StepID != stepID {
+		return nil, false
+	}
+	return latest, true
 }
 
 // reclaimStuckSignalSessionIfDue filters a single session against the
@@ -141,7 +187,8 @@ func (s *Service) reclaimStuckSignalSessionIfDue(ctx context.Context, session *m
 	if _, ok := s.stuckSignalStillPending(ctx, session.ID, signal.StepID); !ok {
 		return
 	}
-	if !s.stuckSignalInactiveLongEnough(ctx, session.ID, now) {
+	activity, inactive := s.stuckSignalInactiveLongEnough(ctx, session.ID, now)
+	if !inactive {
 		s.logger.Debug("stuck-signal watchdog: skipping reclaim, agent activity observed within the inactivity window",
 			zap.String("task_id", task.ID),
 			zap.String("session_id", session.ID),
@@ -182,7 +229,7 @@ func (s *Service) reclaimStuckSignalSessionIfDue(ctx context.Context, session *m
 	// runSilentCancellationOwned's own deferred guard.release() has already
 	// run (event_handlers_clarification.go); the outer defer guard.release()
 	// above is a harmless no-op once the owned call already released it.
-	reclaimErr := s.reclaimStuckSignalSessionOwned(ctx, task, session, signal, now, operation, guard)
+	reclaimErr := s.reclaimStuckSignalSessionOwned(ctx, task, session, signal, activity, now, operation, guard)
 	s.finishCancellationWithActions(ctx, session.ID, operation, reclaimErr)
 }
 
@@ -196,43 +243,21 @@ func (s *Service) reclaimStuckSignalSessionOwned(
 	task *models.Task,
 	session *models.TaskSession,
 	signal models.PendingStepCompletionSignal,
+	activity stuckSignalActivitySnapshot,
 	now time.Time,
 	operation *cancelOperation,
 	guard *lockedCancelInFlightGuard,
 ) error {
 	defer guard.release()
 
-	// Capture the active turn's identity before releasing the guard around
-	// CancelAgent below (mirroring prepareCancelAgent /
-	// runSilentCancellationOwned in task_operations.go /
-	// event_handlers_clarification.go). The turn that is stuck right now is
-	// the one this reclaim must settle; the checked completion below targets
-	// exactly this captured turn rather than whatever happens to be active
-	// once the wait returns.
-	identity, err := s.captureCancellationIdentity(ctx, session.ID)
+	identity, err := s.prepareStuckSignalCancellation(ctx, session, activity, operation)
 	if err != nil {
-		s.logger.Warn("stuck-signal watchdog: failed to capture turn identity before reclaim; skipping this tick",
+		s.logger.Warn("stuck-signal watchdog: failed to prepare reclaim; skipping this tick",
 			zap.String("task_id", task.ID),
 			zap.String("session_id", session.ID),
 			zap.Error(err))
 		return err
 	}
-	s.setCancellationIdentity(session.ID, operation, identity)
-
-	// A concurrent explicit cancel that joins this operation (SEC-001) needs
-	// completion eligibility populated, not just identity --
-	// reconcileJoinedExplicitCancellationLocked's cancellationPreparationSnapshot
-	// treats the operation as not-ready-to-reconcile until both are set. Mirror
-	// prepareCancelAgent's pairing of the two calls.
-	completionEligible, err := s.cancelTurnCompletionEligible(ctx, session, session.ID)
-	if err != nil {
-		s.logger.Warn("stuck-signal watchdog: failed to compute cancel-turn completion eligibility before reclaim; skipping this tick",
-			zap.String("task_id", task.ID),
-			zap.String("session_id", session.ID),
-			zap.Error(err))
-		return err
-	}
-	s.setCancellationCompletionEligible(session.ID, operation, completionEligible)
 
 	// The session's own lifecycle-level prompt wait (promptMu/promptDoneCh/
 	// promptFinished in agent/runtime/lifecycle) is never released by the
@@ -245,7 +270,7 @@ func (s *Service) reclaimStuckSignalSessionOwned(
 	// (ErrNoExecutionForSession, ErrCancelEscalated) means the execution
 	// could not be confirmed settled; fail closed and skip this tick rather
 	// than force-closing the turn anyway.
-	if err := s.cancelAgentWhileUnlocked(ctx, session.ID, guard.unlock, guard.relock); err != nil {
+	if err := s.cancelAgentWhileUnlockedForPrompt(ctx, session.ID, identity, guard.unlock, guard.relock); err != nil {
 		s.logger.Warn("stuck-signal watchdog: failed to settle stuck execution before reclaim; skipping this tick",
 			zap.String("task_id", task.ID),
 			zap.String("session_id", session.ID),
@@ -267,6 +292,15 @@ func (s *Service) reclaimStuckSignalSessionOwned(
 		zap.String("session_id", session.ID),
 		zap.String("step_id", signal.StepID),
 		zap.Duration("signal_age", now.Sub(signal.SignaledAt)))
+	if identity.turnID == "" && s.turnService != nil {
+		activeTurnID, err := s.peekActiveTurnID(ctx, session.ID)
+		if err != nil {
+			return fmt.Errorf("verify successor turn after unscoped capture: %w", err)
+		}
+		if activeTurnID != "" {
+			return fmt.Errorf("a successor turn %s appeared after no turn was captured", activeTurnID)
+		}
+	}
 
 	// Checked completion: close exactly the turn captured above, failing
 	// closed if a different turn is now active — e.g. a brand-new legitimate
@@ -282,9 +316,44 @@ func (s *Service) reclaimStuckSignalSessionOwned(
 			zap.Error(err))
 		return err
 	}
-	s.updateTaskSessionState(ctx, task.ID, session.ID, models.TaskSessionStateWaitingForInput, "", false, latest)
+	updated := s.updateTaskSessionState(ctx, task.ID, session.ID, models.TaskSessionStateWaitingForInput, "", false, latest)
+	if updated == nil || updated.State != models.TaskSessionStateWaitingForInput {
+		return errors.New("stuck-signal watchdog: failed to move session to WAITING_FOR_INPUT")
+	}
 	s.reconcileStepCompletionSignalLocked(ctx, task.ID, session.ID, signal.StepID)
+	// The watchdog has consumed this operation's workflow completion. A joined
+	// explicit cancel still records its user-facing artifact, but must not
+	// evaluate the successor step as a second cancellation completion.
+	s.setCancellationCompletionEligible(session.ID, operation, false)
 	return nil
+}
+
+func (s *Service) prepareStuckSignalCancellation(
+	ctx context.Context,
+	session *models.TaskSession,
+	activity stuckSignalActivitySnapshot,
+	operation *cancelOperation,
+) (cancellationIdentity, error) {
+	identity, err := s.captureCancellationIdentity(ctx, session.ID)
+	if err != nil {
+		return cancellationIdentity{}, fmt.Errorf("capture turn identity: %w", err)
+	}
+	if activity.executionID == "" {
+		identity.executionID = ""
+		identity.promptGeneration = 0
+		identity.activityEpoch = 0
+	} else {
+		identity.executionID = activity.executionID
+		identity.promptGeneration = activity.generation
+		identity.activityEpoch = activity.activityEpoch
+	}
+	s.setCancellationIdentity(session.ID, operation, identity)
+	completionEligible, err := s.cancelTurnCompletionEligible(ctx, session, session.ID)
+	if err != nil {
+		return cancellationIdentity{}, fmt.Errorf("compute completion eligibility: %w", err)
+	}
+	s.setCancellationCompletionEligible(session.ID, operation, completionEligible)
+	return identity, nil
 }
 
 // stuckSignalCandidate applies the unguarded eligibility filter: RUNNING or
@@ -352,6 +421,16 @@ type promptActivitySessionReader interface {
 	GetPromptActivityForSession(ctx context.Context, sessionID string) (executionID string, generation, activityEpoch uint64, lastActivityAt time.Time, err error)
 }
 
+type promptActivityCanceller interface {
+	CancelAgentForPrompt(ctx context.Context, sessionID, executionID string, generation, activityEpoch uint64) error
+}
+
+type stuckSignalActivitySnapshot struct {
+	executionID   string
+	generation    uint64
+	activityEpoch uint64
+}
+
 // stuckSignalInactiveLongEnough reports whether the session's tracked prompt
 // activity has been quiet for at least stuckSignalWatchdogThreshold — the
 // card's actual "no activity for N minutes" requirement. Called under the
@@ -393,17 +472,66 @@ type promptActivitySessionReader interface {
 //     within the window is left alone — this is the case a signal-age-only
 //     check, or an epoch-equality check across a sub-millisecond scan
 //     window, both get wrong.
-func (s *Service) stuckSignalInactiveLongEnough(ctx context.Context, sessionID string, now time.Time) bool {
+func (s *Service) stuckSignalInactiveLongEnough(ctx context.Context, sessionID string, now time.Time) (stuckSignalActivitySnapshot, bool) {
 	reader, ok := s.agentManager.(promptActivitySessionReader)
 	if !ok {
-		return false
+		return stuckSignalActivitySnapshot{}, false
 	}
-	_, _, _, lastActivityAt, err := reader.GetPromptActivityForSession(ctx, sessionID)
+	executionID, generation, activityEpoch, lastActivityAt, err := reader.GetPromptActivityForSession(ctx, sessionID)
 	if err != nil {
-		return executor.IsNoExecutionForSessionError(err)
+		return stuckSignalActivitySnapshot{}, executor.IsNoExecutionForSessionError(err)
 	}
 	if lastActivityAt.IsZero() {
-		return false
+		return stuckSignalActivitySnapshot{}, false
 	}
-	return now.Sub(lastActivityAt) >= stuckSignalWatchdogThreshold
+	return stuckSignalActivitySnapshot{
+		executionID:   executionID,
+		generation:    generation,
+		activityEpoch: activityEpoch,
+	}, now.Sub(lastActivityAt) >= stuckSignalWatchdogThreshold
+}
+
+func (s *Service) cancelAgentWhileUnlockedForPrompt(
+	ctx context.Context,
+	sessionID string,
+	identity cancellationIdentity,
+	unlockGuard, relockGuard func(),
+) error {
+	if identity.executionID == "" {
+		return s.cancelAgentWhileUnlocked(ctx, sessionID, unlockGuard, relockGuard)
+	}
+	canceller, ok := s.agentManager.(promptActivityCanceller)
+	if !ok {
+		return errors.New("agent manager cannot validate captured prompt activity")
+	}
+	if identity.promptGeneration == 0 || identity.activityEpoch == 0 {
+		return errors.New("captured prompt activity identity is incomplete")
+	}
+	unlockGuard()
+	cancelErr := canceller.CancelAgentForPrompt(
+		ctx,
+		sessionID,
+		identity.executionID,
+		identity.promptGeneration,
+		identity.activityEpoch,
+	)
+	relockGuard()
+	return s.normalizeCancelAgentError(cancelErr)
+}
+
+func (s *Service) normalizeCancelAgentError(cancelErr error) error {
+	if cancelErr == nil {
+		return nil
+	}
+	switch {
+	case executor.IsNoExecutionForSessionError(cancelErr):
+		s.logger.Error("agent process appears to have crashed: no live execution for session on cancel",
+			zap.Error(cancelErr))
+	case executor.IsCancelEscalatedError(cancelErr):
+		s.logger.Warn("agent did not acknowledge cancel; reconciling session state",
+			zap.Error(cancelErr))
+	default:
+		return fmt.Errorf("cancel agent: %w", cancelErr)
+	}
+	return nil
 }

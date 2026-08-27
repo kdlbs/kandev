@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -555,5 +556,65 @@ func TestReclaimStuckSignalSessionsOnce_SettlesStuckExecutionBeforeReclaiming(t 
 	}
 	if updatedTask.WorkflowStepID != "step2" {
 		t.Fatalf("expected the watchdog to still apply the pending transition to step2 after settling the execution, got %q", updatedTask.WorkflowStepID)
+	}
+}
+
+func TestReclaimStuckSignalSessionsOnce_RetriesWaitingSignalAfterReconcileFailure(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	stepGetter := newMockStepGetter()
+	seedStuckSignalWorkflow(stepGetter)
+	firstLookup := true
+	stepGetter.getStepFunc = func(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error) {
+		if firstLookup {
+			firstLookup = false
+			return nil, errors.New("transient workflow step lookup failure")
+		}
+		if step, ok := stepGetter.steps[stepID]; ok {
+			return step, nil
+		}
+		return nil, nil
+	}
+	// There is no tracked execution, so the lifecycle inactivity gate has
+	// positive evidence that the process is gone and the watchdog can reclaim.
+	svc := createEngineService(t, repo, stepGetter, &mockAgentManager{})
+	svc.turnService = &repoTurnService{repo: repo}
+	seedOverdueStuckSignal(t, repo, "s1")
+
+	svc.reclaimStuckSignalSessionsOnce(ctx)
+	task, err := repo.GetTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("get task after first tick: %v", err)
+	}
+	if task.WorkflowStepID != "step1" {
+		t.Fatalf("task advanced after failed reconciliation, got %q", task.WorkflowStepID)
+	}
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("get session after first tick: %v", err)
+	}
+	if session.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("session state after first tick = %q, want WAITING_FOR_INPUT", session.State)
+	}
+	if _, ok := models.LoadPendingStepSignal(session.Metadata); !ok {
+		t.Fatal("pending signal was lost after failed reconciliation")
+	}
+
+	svc.reclaimStuckSignalSessionsOnce(ctx)
+	task, err = repo.GetTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("get task after retry: %v", err)
+	}
+	if task.WorkflowStepID != "step2" {
+		t.Fatalf("task step after retry = %q, want step2", task.WorkflowStepID)
+	}
+	session, err = repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("get session after retry: %v", err)
+	}
+	if _, ok := models.LoadPendingStepSignal(session.Metadata); ok {
+		t.Fatal("pending signal remained after successful retry")
 	}
 }

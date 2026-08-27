@@ -940,3 +940,9 @@ func (e *Executor) CancelPermission(ctx context.Context, sessionID, requestID, p
 func IsNoExecutionForSessionError(err error) bool {
 	return errors.Is(err, lifecycle.ErrNoExecutionForSession)
 }
+
+// IsCancelEscalatedError reports whether the lifecycle manager locally
+// released a stuck prompt after the agent failed to acknowledge cancellation.
+func IsCancelEscalatedError(err error) bool {
+	return errors.Is(err, lifecycle.ErrCancelEscalated)
+}
