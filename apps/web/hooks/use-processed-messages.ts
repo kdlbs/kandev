@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   sessionId as toSessionId,
   taskId as toTaskId,
@@ -32,6 +32,7 @@ export {
 } from "./processed-message-filtering";
 
 const debug = createDebugLogger("messages:process");
+const PROCESSED_PIPELINE_DEBUG_INTERVAL_MS = 250;
 
 function countByType(messages: Message[]): Record<string, number> {
   const out: Record<string, number> = {};
@@ -49,24 +50,45 @@ function useDebugProcessedPipeline(args: {
   footerActionCount: number;
   groupedItems: RenderItem[];
 }) {
-  const { sessionId, messages, visibleMessages, footerActionCount, groupedItems } = args;
+  const latestArgsRef = useRef(args);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
+    latestArgsRef.current = args;
     if (!isDebug()) return;
-    debug("pipeline", {
-      sessionId,
-      input: { count: messages.length, byType: countByType(messages) },
-      afterFilter: { count: visibleMessages.length, byType: countByType(visibleMessages) },
-      droppedByFilter: messages.length - visibleMessages.length,
-      footerActionCount,
-      groupedItemKinds: groupedItems.reduce<Record<string, number>>((acc, item) => {
-        acc[item.type] = (acc[item.type] ?? 0) + 1;
-        return acc;
-      }, {}),
-      turnGroupSizes: groupedItems
-        .filter((i): i is TurnGroup => i.type === "turn_group")
-        .map((g) => ({ turnId: g.turnId, size: g.messages.length })),
-    });
-  }, [sessionId, messages, visibleMessages, footerActionCount, groupedItems]);
+    if (timerRef.current !== null) return;
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null;
+      const latest = latestArgsRef.current;
+      debug("pipeline", {
+        sessionId: latest.sessionId,
+        input: { count: latest.messages.length, byType: countByType(latest.messages) },
+        afterFilter: {
+          count: latest.visibleMessages.length,
+          byType: countByType(latest.visibleMessages),
+        },
+        droppedByFilter: latest.messages.length - latest.visibleMessages.length,
+        footerActionCount: latest.footerActionCount,
+        groupedItemKinds: latest.groupedItems.reduce<Record<string, number>>((acc, item) => {
+          acc[item.type] = (acc[item.type] ?? 0) + 1;
+          return acc;
+        }, {}),
+        turnGroupSizes: latest.groupedItems
+          .filter((i): i is TurnGroup => i.type === "turn_group")
+          .map((g) => ({ turnId: g.turnId, size: g.messages.length })),
+      });
+    }, PROCESSED_PIPELINE_DEBUG_INTERVAL_MS);
+  }, [args]);
+
+  useEffect(
+    () => () => {
+      if (timerRef.current !== null) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+    },
+    [],
+  );
 }
 
 const ACTIVITY_MESSAGE_TYPES: Set<MessageType> = new Set([

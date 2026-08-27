@@ -1,18 +1,26 @@
-import { encodedBytes, getLogBuffer, snapshotLogs, type LogEntry, type LogLevel } from "./buffer";
+import {
+  getLogBuffer,
+  prepareLogEntry,
+  snapshotLogs,
+  type LogEntry,
+  type LogLevel,
+  type PreparedLogEntry,
+} from "./buffer";
 import { IndexedDBLogStore } from "./indexeddb-store";
 
 const DRAIN_ENTRY_LIMIT = 50;
 const DRAIN_BYTE_LIMIT = 256 * 1024;
 const STAGING_ENTRY_LIMIT = 500;
 const STAGING_BYTE_LIMIT = 2 * 1024 * 1024;
+const COLLECTION_WINDOW_MS = 250;
 
-type Staged = { entry: LogEntry; bytes: number };
+type Staged = PreparedLogEntry;
 
 const store = new IndexedDBLogStore();
 let identityScope: string | null = "default-user";
 let staging: Staged[] = [];
 let stagingBytes = 0;
-let scheduled = false;
+let collectionTimer: ReturnType<typeof setTimeout> | null = null;
 let drainPromise: Promise<void> | null = null;
 let storageMode: "indexeddb" | "memory" = "indexeddb";
 let persistenceFailures = 0;
@@ -24,15 +32,15 @@ export function setLogIdentity(scope: string | null): void {
 
 export function stageLogEntry(entry: Omit<LogEntry, "identity_scope">): void {
   const scoped = { ...entry, identity_scope: identityScope ?? undefined };
-  if (!getLogBuffer().push(scoped)) return;
+  const prepared = prepareLogEntry(scoped);
+  if (!getLogBuffer().pushPrepared(prepared)) return;
   if (!identityScope || storageMode === "memory") return;
-  const bytes = encodedBytes(scoped);
-  if (!makeStagingRoom(entry.level, bytes)) {
+  if (!makeStagingRoom(prepared.entry.level, prepared.bytes)) {
     stagingDropped += 1;
     return;
   }
-  staging.push({ entry: scoped, bytes });
-  stagingBytes += bytes;
+  staging.push(prepared);
+  stagingBytes += prepared.bytes;
   scheduleDrain();
 }
 
@@ -86,17 +94,11 @@ function makeStagingRoom(level: LogLevel, bytes: number): boolean {
 }
 
 function scheduleDrain(): void {
-  if (scheduled || drainPromise) return;
-  scheduled = true;
-  const drain = () => {
-    scheduled = false;
+  if (collectionTimer !== null || drainPromise) return;
+  collectionTimer = setTimeout(() => {
+    collectionTimer = null;
     void requestDrain();
-  };
-  if (typeof requestIdleCallback === "function") {
-    requestIdleCallback(drain, { timeout: 1_000 });
-  } else {
-    setTimeout(drain, 250);
-  }
+  }, COLLECTION_WINDOW_MS);
 }
 
 function requestDrain(): Promise<void> {
@@ -128,7 +130,7 @@ async function drainBatch(): Promise<boolean> {
     bytes += next.bytes;
   }
   try {
-    await store.append(batch.map(({ entry }) => entry));
+    await store.append(batch);
   } catch {
     for (const item of batch.reverse()) {
       staging.unshift(item);
@@ -141,9 +143,16 @@ async function drainBatch(): Promise<boolean> {
 }
 
 async function flushStaging(): Promise<void> {
+  cancelCollectionTimer();
   while (drainPromise || (storageMode === "indexeddb" && staging.length > 0)) {
     await requestDrain();
   }
+}
+
+function cancelCollectionTimer(): void {
+  if (collectionTimer === null) return;
+  clearTimeout(collectionTimer);
+  collectionTimer = null;
 }
 
 function degradePersistence(): void {
@@ -162,10 +171,10 @@ function randomID(): string {
 }
 
 export function _resetRuntimeForTesting(): void {
+  cancelCollectionTimer();
   identityScope = "default-user";
   staging = [];
   stagingBytes = 0;
-  scheduled = false;
   drainPromise = null;
   storageMode = "indexeddb";
   persistenceFailures = 0;

@@ -2,9 +2,11 @@
 status: active
 system: ui
 created: 2026-07-30
+updated: 2026-08-27
 owners:
   - cfl
 ---
+
 # Transcript Auto-scroll Stability Requirements
 
 ## Overview
@@ -25,6 +27,10 @@ Users who turn off transcript auto-scroll expect the visible conversation to sta
 - **AC-UI-TRANSCRIPT-AUTO-SCROLL-001.4:** **GIVEN** an overflowing native transcript at its bottom with auto-scroll disabled, **WHEN** a new message is appended, **THEN** the transcript's `scrollTop` remains at the pre-append position.
 - **AC-UI-TRANSCRIPT-AUTO-SCROLL-001.5:** **GIVEN** an overflowing native transcript with auto-scroll enabled, **WHEN** new content arrives, **THEN** the transcript remains pinned to the bottom.
 - **AC-UI-TRANSCRIPT-AUTO-SCROLL-001.6:** **GIVEN** clarification recovery has accepted its retry prompt, **WHEN** its asynchronous dispatch is scheduled, **THEN** the recovery call completes before the intentionally blocked prompt is released.
+- **AC-UI-TRANSCRIPT-AUTO-SCROLL-001.7:** **GIVEN** an enabled transcript that is
+  pinned to the bottom, **WHEN** streamed content commits, **THEN** the
+  transcript remains pinned without a synchronous content-size read in the
+  message-commit path.
 
 ## Migrated source detail
 

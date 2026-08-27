@@ -427,6 +427,7 @@ export type AppState = KanbanSlice & {
   /** Records that the session's full persisted turn history is in the store. */
   markTurnsLoaded: (sessionId: string) => void;
   updateMessage: (message: Message) => void;
+  updateMessages: (messages: Message[]) => void;
   removeMessage: (sessionId: string, messageId: string) => void;
   prependMessages: (
     sessionId: string,

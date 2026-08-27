@@ -177,6 +177,7 @@ contract that other capabilities can reuse.
 - [Command-panel Sidebar Task Reveal](system-design/command-panel-sidebar-task-reveal.md)
 - [Terminal Rendering](system-design/terminal-rendering.md)
 - [Task Transcript History Visibility](system-design/task-prompt-transcript-visibility.md)
+- [Transcript Auto-scroll Stability](system-design/transcript-auto-scroll.md)
 
 ## Migration record
 
