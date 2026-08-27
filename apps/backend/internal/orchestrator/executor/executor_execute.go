@@ -1133,6 +1133,11 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	// Inject session handover context if there are previous sessions for this task.
 	prompt = e.injectHandoverIfNeeded(ctx, task.ID, sessionID, prompt)
 
+	allRepos, err := e.resolveAllRepoInfoForSession(ctx, task.ID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+
 	// Fast path: workspace already launched (executors_running row exists).
 	// Only start the agent subprocess if requested; otherwise return early.
 	// If startAgentOnExistingWorkspace returns ErrStaleExecution, the in-memory
@@ -1151,10 +1156,6 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 			zap.Error(err))
 	}
 
-	allRepos, err := e.resolveAllRepoInfoForSession(ctx, task.ID, sessionID)
-	if err != nil {
-		return nil, err
-	}
 	// Primary = first by Position. For repo-less tasks (e.g. quick chat), allRepos
 	// is empty and primary is a zero-value placeholder; downstream code already
 	// handles the missing-repo path.

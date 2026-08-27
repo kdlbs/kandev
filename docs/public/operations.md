@@ -112,6 +112,7 @@ To recover capacity in one session, expand its queue chip in the task workbench.
 | Path under Kandev home | Contents and recovery significance |
 | --- | --- |
 | `data/kandev.db`, `-wal`, `-shm` | Default SQLite database and transient WAL files |
+| `kandev.db`, `-wal`, `-shm` | Legacy default SQLite database checked during startup; Kandev retains it after adoption until you verify the current database |
 | `data/master.key` | Owner-only AES-256 key used to decrypt secrets stored in the database; a database copy without the matching key cannot recover those secret values |
 | `data/backups/` | SQLite snapshots when the database uses the default path |
 | `tasks/` and legacy `worktrees/` | Managed Git worktrees and per-task files; may contain uncommitted or untracked work |
@@ -236,6 +237,25 @@ the Kandev service first provides the clearest maintenance boundary.
 ### SQLite
 
 SQLite is the default and is appropriate for a desktop, CLI, service, or single-replica container installation. Kandev uses one writer connection and a read pool in WAL mode. Only one Kandev backend should own the file.
+
+#### Default database continuity and recovery
+
+When no explicit `database.path` or `KANDEV_DATABASE_PATH` is set, startup
+checks `<home>/data/kandev.db` and the legacy `<home>/kandev.db` before it
+creates the current default. If only the legacy database is valid, Kandev
+creates a validated snapshot at the current path. It retains the legacy
+database and its `-wal` and `-shm` sidecars. Do not remove the legacy files
+until you verify tasks and other required data in the current database.
+
+If the current default has no task history and the legacy default has task
+history, Kandev stops before modifying either database and reports both paths.
+If inspection or snapshot validation fails, startup also stops before creating
+the current database. To recover, stop other Kandev writers, preserve both
+candidate databases and all sidecars, then set `database.path` or
+`KANDEV_DATABASE_PATH` to the database you intend to use and restart. An
+explicit path skips legacy discovery. When both defaults contain task history,
+Kandev keeps the current default and does not merge the databases. Use a
+verified snapshot or a later deliberate recovery procedure to reconcile them.
 
 Open **Settings > System > Database** to see database size, WAL size, schema version, path, and the newest modification time among regular entries in the sibling `backups/` directory. That timestamp is a filesystem hint, not proof of a valid snapshot: an unrelated or temporary file in the directory can affect it. SQLite exposes three maintenance actions:
 

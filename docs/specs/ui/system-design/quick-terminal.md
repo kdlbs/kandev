@@ -4,7 +4,7 @@ system: ui
 requirements:
   - REQ-UI-QUICK-TERMINAL-001
 created: 2026-08-03
-updated: 2026-08-26
+updated: 2026-08-27
 owners:
   - kandev
 ---
@@ -18,7 +18,7 @@ This design preserves the technical source detail for `REQ-UI-QUICK-TERMINAL-001
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-UI-QUICK-TERMINAL-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-UI-QUICK-TERMINAL-001` | [Migrated source detail](#migrated-source-detail), [Launcher focus return](#launcher-focus-return) |
 
 ## Migrated source detail
 
@@ -86,6 +86,24 @@ them without losing work, and return to the most recent terminal without managin
   terminal owns the remaining content region.
 - The terminal on **Settings → Agents** retains its existing single-dialog presentation and
   stop-on-close behavior.
+
+## Launcher focus return
+
+`captureQuickChatLauncherFocus` records the element that opens the shared dialog.
+`restoreQuickChatLauncherFocus` returns focus to that element after the dialog closes.
+
+Launcher activations request a transient silent-focus marker before focus returns. A scoped style in
+`apps/web/app/globals.css` removes the outline, ring, shadow, and focus border while this marker is
+active. The marker does not change the focused element or the tooltip state. Global keyboard
+shortcuts and command-palette actions capture their origin for focus restoration but do not request
+the marker, so unrelated controls keep their normal focus appearance.
+
+The helper removes the marker when the launcher loses focus. Ordinary keyboard navigation can then
+show the normal focus indicator. If the launcher leaves the document before restoration, the helper
+does not add the marker or move focus.
+
+This contract applies to Quick Chat and Quick Terminal launchers that use the shared provider. It
+does not change pointer dismissal, Configuration Chat focus ownership, or unrelated controls.
 
 ## Data model
 
@@ -208,6 +226,8 @@ checks, and Agents-page authorization behavior remain unchanged.
   discard server-owned terminal tabs or change the active terminal.
 - Restoring focus after dialog dismissal must not reopen the sidebar terminal tooltip; pointer hover
   continues to show it.
+- A silent-focus marker must stay on the launcher only until focus leaves it. Later keyboard focus
+  must use the launcher's normal focus indicator.
 
 ## Persistence guarantees
 
@@ -276,7 +296,9 @@ checks, and Agents-page authorization behavior remain unchanged.
 - **GIVEN** the user opens the terminal on **Settings → Agents**, **WHEN** that dialog closes,
   **THEN** its PTY still stops immediately and no Quick Chat terminal tab is created.
 - **GIVEN** the shared dialog closes from a sidebar launcher, **WHEN** focus returns, **THEN** the
-  launcher is focused without an automatically reopened tooltip.
+  launcher is focused without a visible focus indicator or an automatically reopened tooltip.
+- **GIVEN** focus returned silently to a launcher, **WHEN** focus leaves and later returns through
+  keyboard navigation, **THEN** the launcher shows its normal focus indicator.
 
 ## Out of scope
 

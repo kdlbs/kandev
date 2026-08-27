@@ -128,6 +128,8 @@ This design preserves the technical source detail for `REQ-INTEGRATIONS-GITHUB-A
 - **GIVEN** a task with one or more attached repositories, **WHEN** launch or resume builds the
   primary, multi-repository, and credential configuration, **THEN** each repository is prepared
   once and the same resolved result is reused by all three consumers.
+- **GIVEN** a prepared workspace with a running executor, **WHEN** launch reuses that workspace,
+  **THEN** Kandev reconciles each attached managed GitHub checkout once before the agent starts.
 - **GIVEN** a managed checkout is owned by `brewuser` while the Kandev service runs as root,
   **WHEN** Git rejects origin inspection or reconciliation as dubious ownership, **THEN** task
   preparation stops and reports that the service account and managed repository owner disagree,

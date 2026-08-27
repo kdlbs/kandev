@@ -755,9 +755,21 @@ func (s *Service) handleTaskQueuePromoted(ctx context.Context, data watcher.Task
 		return
 	}
 	session, sessionErr := s.repo.GetActiveTaskSessionByTaskID(ctx, task.ID)
+	if errors.Is(sessionErr, models.ErrTaskSessionNotFound) {
+		// Queued tasks deliberately have no session until promotion. Continue
+		// into the no-session destination-entry path so deferred auto-start can run.
+		session = nil
+		sessionErr = nil
+	}
 	if sessionErr != nil {
 		s.logger.Warn("task.queue_promoted: failed to load active session",
 			zap.String("task_id", task.ID), zap.Error(sessionErr))
+		return
+	}
+	if session == nil && s.dependencyBlocksAutoStart(ctx, task.ID, "task.queue_promoted") {
+		// Promotion controls WIP admission, not dependency readiness. Keep both
+		// the promotion lifecycle token and deferred launch intent intact so the
+		// dependency-resolution path can start the task once its blockers clear.
 		return
 	}
 	if !s.claimTaskEventMetadata(ctx, task, models.MetaKeyQueuePromotionPending) {
@@ -1122,10 +1134,19 @@ func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, even
 	if s.dependencyBlocksAutoStart(ctx, taskID, eventName) {
 		return
 	}
+	if hasQueuePromotionPending(task) {
+		// A dependency may resolve after same-step WIP promotion was admitted.
+		// Resume through the promotion handler so destination-entry lifecycle is
+		// claimed and its token participates in deferred-launch failure recovery.
+		s.handleTaskQueuePromoted(ctx, watcher.TaskEventData{
+			TaskID: task.ID, StepTransitionID: stepTransitionID,
+		})
+		return
+	}
 	if task != nil && s.shouldSkipTerminalPRAutoStart(ctx, task) {
 		return
 	}
-	if s.launchDeferredTask(ctx, task, eventName) {
+	if s.launchDeferredTask(ctx, task, eventName, false) {
 		return
 	}
 
@@ -1148,7 +1169,7 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 	if s.shouldSkipTerminalPRAutoStart(ctx, task) {
 		return
 	}
-	if s.launchDeferredTask(ctx, task, eventName) {
+	if s.launchDeferredTask(ctx, task, eventName, restoreQueuePromotion) {
 		return
 	}
 	if step == nil || !step.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent) {
@@ -1331,7 +1352,7 @@ func (s *Service) handleAutoStartFailure(ctx context.Context, taskID, eventName 
 	s.setTaskAutoStartFailedMarker(ctx, taskID, eventName)
 }
 
-func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eventName string) bool {
+func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eventName string, restoreQueuePromotion bool) bool {
 	if task.Metadata == nil {
 		return false
 	}
@@ -1375,6 +1396,9 @@ func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eve
 		if launchErr != nil {
 			s.logger.Error(eventName+": failed to launch deferred task", zap.String("task_id", task.ID), zap.Error(launchErr))
 			s.restoreDeferredLaunch(launchCtx, task.ID, raw, eventName, metadataClaimed)
+			if restoreQueuePromotion {
+				s.restoreTaskLifecycleToken(launchCtx, task.ID, models.MetaKeyQueuePromotionPending, eventName)
+			}
 			return
 		}
 		delete(task.Metadata, models.MetaKeyDeferredLaunch)

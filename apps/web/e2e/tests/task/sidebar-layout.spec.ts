@@ -11,8 +11,83 @@
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import { dwell } from "../../helpers/causal-waits";
+import {
+  repositoryName,
+  seedSidebarCombinationRepository,
+  SIDEBAR_COMBINATION_REPOSITORY_NAME,
+} from "./sidebar-repository-grouping-helpers";
 
 test.describe("Sidebar layout — repo groups", () => {
+  test("multi-repository group shows the complete ordered label", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+    prCapture,
+  }) => {
+    const secondRepository = await seedSidebarCombinationRepository(
+      apiClient,
+      seedData.workspaceId,
+      backend.tmpDir,
+    );
+    const primaryRepositoryName = await repositoryName(
+      apiClient,
+      seedData.workspaceId,
+      seedData.repositoryId,
+    );
+    const expectedLabel = `${primaryRepositoryName}, ${SIDEBAR_COMBINATION_REPOSITORY_NAME}`;
+    const multiRepositoryTask = await apiClient.createTask(
+      seedData.workspaceId,
+      "Sidebar multi-repository task",
+      {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repositories: [
+          { repository_id: seedData.repositoryId },
+          { repository_id: secondRepository.id },
+        ],
+      },
+    );
+    await apiClient.createTask(seedData.workspaceId, "Sidebar primary repository task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+    const navigationTask = await apiClient.createTask(
+      seedData.workspaceId,
+      "Sidebar grouping navigation task",
+      {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+      },
+    );
+
+    await testPage.goto(`/t/${navigationTask.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    const combinationHeader = session.sidebar.locator(
+      `[data-testid="sidebar-group-header"][data-group-label="${expectedLabel}"]`,
+    );
+    await expect(combinationHeader).toHaveCount(1);
+    const combinationGroup = combinationHeader.locator("..");
+    await expect(
+      combinationGroup.locator(`[data-task-row-id="${multiRepositoryTask.id}"]`),
+    ).toBeVisible();
+
+    const primaryGroup = session.sidebar
+      .locator(`[data-testid="sidebar-group-header"][data-group-key="${primaryRepositoryName}"]`)
+      .locator("..");
+    await expect(primaryGroup).toHaveCount(1);
+    await expect(
+      primaryGroup.locator(`[data-task-row-id="${multiRepositoryTask.id}"]`),
+    ).toHaveCount(0);
+
+    await prCapture.screenshot("multi-repository-group-desktop", {
+      caption: "Desktop sidebar groups the task under its complete repository combination.",
+    });
+  });
+
   test("tasks grouped by repository with header showing label and count", async ({
     testPage,
     apiClient,

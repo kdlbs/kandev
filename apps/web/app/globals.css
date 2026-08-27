@@ -240,6 +240,12 @@
     border-color: color-mix(in oklab, var(--success) 35%, var(--border)) !important;
   }
 
+  [data-quick-chat-silent-focus="true"]:focus-visible {
+    outline: none !important;
+    box-shadow: none !important;
+    border-color: transparent !important;
+  }
+
   [data-workflow-replay-cycle="true"] {
     @apply ring-1 ring-warning/20;
     border-color: color-mix(in oklab, var(--warning) 65%, var(--border)) !important;
