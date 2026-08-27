@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 // TestResolveResumeTaskEnvironment_ReusesInheritedEnvironment is a regression
@@ -39,6 +40,11 @@ func TestResolveResumeTaskEnvironment_ReusesInheritedEnvironment(t *testing.T) {
 	if env == nil || env.ID != "env-parent" {
 		t.Fatalf("resolved env = %+v, want inherited env-parent", env)
 	}
+	// Provenance: the returned row must be the parent's, not a freshly created
+	// child-owned row that happened to reuse the inherited ID.
+	if env.TaskID != "task-parent" {
+		t.Fatalf("env.TaskID = %q, want task-parent (should be the inherited parent row)", env.TaskID)
+	}
 	if len(repo.createTaskEnvironmentCalls) != 0 {
 		t.Fatalf("expected no CreateTaskEnvironment calls, got %d", len(repo.createTaskEnvironmentCalls))
 	}
@@ -49,12 +55,18 @@ func TestResolveResumeTaskEnvironment_ReusesInheritedEnvironment(t *testing.T) {
 
 // TestResolveResumeTaskEnvironment_MissingReferenceFallsThroughToCreate covers a
 // session that references an env ID with no matching row (deleted env, or an env
-// that was never persisted). The referenced ID is free, so the resolver returns
-// nil and lets the caller create a fresh row using it — preserving the prior
-// resume behavior rather than failing the resume.
+// that was never persisted). The SQLite repo signals this with the production
+// ErrTaskEnvironmentNotFound sentinel (not a nil,nil miss), so the resolver must
+// treat that sentinel as absent, return nil, and let the caller create a fresh
+// row using the free ID — preserving resume rather than aborting it.
 func TestResolveResumeTaskEnvironment_MissingReferenceFallsThroughToCreate(t *testing.T) {
 	repo := newMockRepository()
 	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	// Mirror the sqlite repository, which returns ErrTaskEnvironmentNotFound
+	// (wrapped) rather than (nil, nil) when the referenced row is absent.
+	repo.getTaskEnvironmentFunc = func(_ context.Context, _ string) (*models.TaskEnvironment, error) {
+		return nil, repoerrors.ErrTaskEnvironmentNotFound
+	}
 
 	session := &models.TaskSession{
 		ID:                "sess-child",
