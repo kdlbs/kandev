@@ -9,11 +9,19 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/kandev/kandev/internal/common/config"
+	"github.com/kandev/kandev/internal/common/logger"
 )
 
 func seedLegacyTaskDatabase(t *testing.T, path string) []byte {
+	return seedTaskDatabase(t, path, "task-1", "legacy task")
+}
+
+func seedTaskDatabase(t *testing.T, path, id, title string) []byte {
 	t.Helper()
 	database, err := sqlx.Open("sqlite3", path)
 	if err != nil {
@@ -24,7 +32,7 @@ func seedLegacyTaskDatabase(t *testing.T, path string) []byte {
 		_ = database.Close()
 		t.Fatalf("create tasks: %v", err)
 	}
-	if _, err := database.Exec(`INSERT INTO tasks (id, title) VALUES ('task-1', 'legacy task')`); err != nil {
+	if _, err := database.Exec(`INSERT INTO tasks (id, title) VALUES (?, ?)`, id, title); err != nil {
 		_ = database.Close()
 		t.Fatalf("insert task: %v", err)
 	}
@@ -135,6 +143,37 @@ func TestProvideRejectsInvalidDefaultLegacyBeforeCreatingCurrent(t *testing.T) {
 	}
 }
 
+func TestProvideEstablishedCurrentDatabaseIgnoresInvalidLegacy(t *testing.T) {
+	homeDir := t.TempDir()
+	currentPath := filepath.Join(homeDir, "data", "kandev.db")
+	legacyPath := filepath.Join(homeDir, "kandev.db")
+	if err := os.MkdirAll(filepath.Dir(currentPath), 0o755); err != nil {
+		t.Fatalf("create current database directory: %v", err)
+	}
+	seedTaskDatabase(t, currentPath, "current-task", "current task")
+	legacyContents := []byte("stale invalid legacy database")
+	if err := os.WriteFile(legacyPath, legacyContents, 0o600); err != nil {
+		t.Fatalf("seed invalid legacy database: %v", err)
+	}
+
+	pool, cleanup, err := Provide(&config.Config{HomeDir: homeDir}, nil, "")
+	if err != nil {
+		t.Fatalf("Provide: %v", err)
+	}
+	t.Cleanup(func() { _ = cleanup() })
+
+	var title string
+	if err := pool.Reader().Get(&title, `SELECT title FROM tasks WHERE id = 'current-task'`); err != nil {
+		t.Fatalf("read established current task: %v", err)
+	}
+	if title != "current task" {
+		t.Fatalf("selected task title = %q, want %q", title, "current task")
+	}
+	if got := readFileForTest(t, legacyPath); string(got) != string(legacyContents) {
+		t.Fatalf("stale legacy database changed during current startup")
+	}
+}
+
 func TestProvideFailsClosedWhenEmptyCurrentConflictsWithLegacyHistory(t *testing.T) {
 	homeDir := t.TempDir()
 	legacyPath := filepath.Join(homeDir, "kandev.db")
@@ -210,7 +249,7 @@ func TestProvideRetainsCurrentDatabaseWhenBothCandidatesHaveHistory(t *testing.T
 	if err := os.MkdirAll(filepath.Dir(currentPath), 0o755); err != nil {
 		t.Fatalf("create current database directory: %v", err)
 	}
-	seedLegacyTaskDatabase(t, currentPath)
+	seedTaskDatabase(t, currentPath, "current-task", "current task")
 	legacyContents := seedLegacyTaskDatabase(t, legacyPath)
 
 	cfg := &config.Config{HomeDir: homeDir}
@@ -221,14 +260,50 @@ func TestProvideRetainsCurrentDatabaseWhenBothCandidatesHaveHistory(t *testing.T
 	t.Cleanup(func() { _ = cleanup() })
 
 	var title string
-	if err := pool.Reader().Get(&title, `SELECT title FROM tasks WHERE id = 'task-1'`); err != nil {
+	if err := pool.Reader().Get(&title, `SELECT title FROM tasks WHERE id = 'current-task'`); err != nil {
 		t.Fatalf("read current task: %v", err)
 	}
-	if title != "legacy task" {
-		t.Fatalf("selected current task title = %q, want %q", title, "legacy task")
+	if title != "current task" {
+		t.Fatalf("selected current task title = %q, want %q", title, "current task")
 	}
 	if got := readFileForTest(t, legacyPath); string(got) != string(legacyContents) {
 		t.Fatalf("legacy database changed while retaining current history")
+	}
+}
+
+func TestProvideLogsLegacyAdoptionCandidates(t *testing.T) {
+	homeDir := t.TempDir()
+	currentPath := filepath.Join(homeDir, "data", "kandev.db")
+	legacyPath := filepath.Join(homeDir, "kandev.db")
+	seedLegacyTaskDatabase(t, legacyPath)
+
+	core, logs := observer.New(zapcore.InfoLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("NewFromZap: %v", err)
+	}
+	poll, cleanup, err := Provide(&config.Config{HomeDir: homeDir}, log, "")
+	if err != nil {
+		t.Fatalf("Provide: %v", err)
+	}
+	t.Cleanup(func() { _ = cleanup() })
+	_ = poll
+
+	entries := logs.FilterMessage("SQLite database selected").All()
+	if len(entries) != 1 {
+		t.Fatalf("selection log entries = %d, want 1", len(entries))
+	}
+	fields := entries[0].ContextMap()
+	for field, want := range map[string]any{
+		"outcome":            string(sqliteSelectionLegacyAdopted),
+		"current_path":       currentPath,
+		"legacy_path":        legacyPath,
+		"current_task_count": int64(0),
+		"legacy_task_count":  int64(1),
+	} {
+		if got := fields[field]; got != want {
+			t.Fatalf("selection log %s = %#v, want %#v", field, got, want)
+		}
 	}
 }
 

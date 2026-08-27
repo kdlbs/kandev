@@ -29,6 +29,10 @@ type sqliteSelection struct {
 	path              string
 	existedBeforeOpen bool
 	outcome           sqliteSelectionOutcome
+	currentPath       string
+	legacyPath        string
+	currentTaskCount  int64
+	legacyTaskCount   int64
 }
 
 type sqliteCandidate struct {
@@ -84,6 +88,16 @@ func selectSQLiteDatabase(cfg *config.Config, log *logger.Logger) (sqliteSelecti
 	if err != nil {
 		return sqliteSelection{}, err
 	}
+	if current.exists && current.hasTaskHistory {
+		selection := sqliteSelection{
+			path:              currentPath,
+			existedBeforeOpen: true,
+			outcome:           sqliteSelectionExisting,
+		}
+		logSQLiteSelection(log, cfg.SourceFor("database.path"), selection)
+		return selection, nil
+	}
+
 	legacy := sqliteCandidate{}
 	if filepath.Clean(currentPath) != filepath.Clean(legacyPath) {
 		legacy, err = inspectSQLiteCandidate(legacyPath)
@@ -122,8 +136,12 @@ func selectSQLiteDatabase(cfg *config.Config, log *logger.Logger) (sqliteSelecti
 		return sqliteSelection{}, fmt.Errorf("adopt legacy sqlite database %q into %q: %w", legacyPath, currentPath, err)
 	}
 	selection := sqliteSelection{
-		path:    currentPath,
-		outcome: sqliteSelectionLegacyAdopted,
+		path:             currentPath,
+		outcome:          sqliteSelectionLegacyAdopted,
+		currentPath:      currentPath,
+		legacyPath:       legacyPath,
+		currentTaskCount: current.taskCount,
+		legacyTaskCount:  legacy.taskCount,
 	}
 	logSQLiteSelection(log, cfg.SourceFor("database.path"), selection)
 	return selection, nil
@@ -214,19 +232,12 @@ func adoptLegacySQLite(legacyPath, currentPath string, legacy sqliteCandidate) e
 	if err := os.MkdirAll(filepath.Dir(currentPath), 0o755); err != nil {
 		return fmt.Errorf("create data directory %q: %w", filepath.Dir(currentPath), err)
 	}
-	temporary, err := os.CreateTemp(filepath.Dir(currentPath), ".kandev-legacy-*.db")
+	stagingDir, err := os.MkdirTemp(filepath.Dir(currentPath), ".kandev-legacy-*")
 	if err != nil {
-		return fmt.Errorf("create staged sqlite path: %w", err)
+		return fmt.Errorf("create private sqlite staging directory: %w", err)
 	}
-	stagedPath := temporary.Name()
-	if err := temporary.Close(); err != nil {
-		_ = os.Remove(stagedPath)
-		return fmt.Errorf("close staged sqlite path: %w", err)
-	}
-	if err := os.Remove(stagedPath); err != nil {
-		return fmt.Errorf("prepare staged sqlite path: %w", err)
-	}
-	defer func() { _ = os.Remove(stagedPath) }()
+	defer func() { _ = os.RemoveAll(stagingDir) }()
+	stagedPath := filepath.Join(stagingDir, "kandev.db")
 
 	source, err := openSQLiteReadOnly(legacyPath)
 	if err != nil {
@@ -253,8 +264,8 @@ func adoptLegacySQLite(legacyPath, currentPath string, legacy sqliteCandidate) e
 }
 
 // installStagedSQLite creates the target without replacing a file that may
-// have appeared after candidate inspection. Both paths are in the same
-// directory, so the hard-link creation is atomic and the staged name can be
+// have appeared after candidate inspection. Both paths are on the same
+// filesystem, so the hard-link creation is atomic and the staged name can be
 // removed after installation.
 func installStagedSQLite(stagedPath, currentPath string) error {
 	if err := os.Link(stagedPath, currentPath); err != nil {
@@ -270,12 +281,21 @@ func logSQLiteSelection(log *logger.Logger, source config.SettingSource, selecti
 	if log == nil {
 		return
 	}
-	log.Info("SQLite database selected",
+	fields := []zap.Field{
 		zap.String("db_path", selection.path),
 		zap.String("source", string(source)),
 		zap.Bool("existed_before_open", selection.existedBeforeOpen),
 		zap.String("outcome", string(selection.outcome)),
-	)
+	}
+	if selection.outcome == sqliteSelectionLegacyAdopted {
+		fields = append(fields,
+			zap.String("current_path", selection.currentPath),
+			zap.String("legacy_path", selection.legacyPath),
+			zap.Int64("current_task_count", selection.currentTaskCount),
+			zap.Int64("legacy_task_count", selection.legacyTaskCount),
+		)
+	}
+	log.Info("SQLite database selected", fields...)
 }
 
 func logSQLiteConflict(log *logger.Logger, source config.SettingSource, conflict *SQLiteDatabaseSelectionConflictError) {
