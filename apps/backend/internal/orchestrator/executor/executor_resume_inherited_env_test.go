@@ -114,3 +114,78 @@ func TestResolveResumeTaskEnvironment_NoEnvironmentAndNoReference(t *testing.T) 
 		t.Fatalf("resolved env = %+v, want nil", env)
 	}
 }
+
+// TestPersistTaskEnvironment_GuestDoesNotMutateOwnerEnvironment is a regression
+// test for "persist task environment: ready status requires repository
+// inventory" on resume. A guest session (office inherit_parent / shared_group)
+// attaches to a canonical environment owned by a *different* task. The guest's
+// resume request carries no repo specs and the owner's inventory can be empty,
+// so the repo-backed ready-status guard used to fail a resume the guest has no
+// authority to fix. The guest must attach without touching the owner's row.
+func TestPersistTaskEnvironment_GuestDoesNotMutateOwnerEnvironment(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+	// The child is repo-backed, which is what previously tripped the guard.
+	repo.taskRepositories["tr-child"] = &models.TaskRepository{
+		ID: "tr-child", TaskID: "task-child", RepositoryID: "repo-a",
+	}
+	owner := &models.TaskEnvironment{
+		ID:           "env-parent",
+		TaskID:       "task-parent",
+		ExecutorType: string(models.ExecutorTypeLocal),
+		Status:       models.TaskEnvironmentStatusReady,
+	}
+	repo.taskEnvironments["env-parent"] = owner
+	session := &models.TaskSession{ID: "sess-child", TaskID: "task-child", TaskEnvironmentID: "env-parent"}
+	req := &LaunchAgentRequest{TaskID: "task-child", ExecutorType: string(models.ExecutorTypeLocal)}
+	resp := &LaunchAgentResponse{}
+
+	if err := exec.persistTaskEnvironment(context.Background(), "task-child", session, owner, req, resp, executorConfig{}); err != nil {
+		t.Fatalf("persistTaskEnvironment (guest): %v", err)
+	}
+	if len(repo.updateTaskEnvironmentCalls) != 0 {
+		t.Fatalf("guest must not update the owner env, got %d UpdateTaskEnvironment calls", len(repo.updateTaskEnvironmentCalls))
+	}
+	if len(repo.createTaskEnvironmentCalls) != 0 {
+		t.Fatalf("guest must not create an env, got %d CreateTaskEnvironment calls", len(repo.createTaskEnvironmentCalls))
+	}
+	if len(repo.finalizeTaskEnvironmentCalls) != 0 {
+		t.Fatalf("guest is not the materializer, got %d finalize calls", len(repo.finalizeTaskEnvironmentCalls))
+	}
+	if len(repo.writeCallLog) != 0 {
+		t.Fatalf("guest must not write repo rows, write log = %v", repo.writeCallLog)
+	}
+	if session.TaskEnvironmentID != "env-parent" {
+		t.Fatalf("session.TaskEnvironmentID = %q, want env-parent", session.TaskEnvironmentID)
+	}
+}
+
+// TestPersistTaskEnvironment_GuestMaterializerRunsFinalizePath proves the guest
+// short-circuit does not swallow the shared_group case where a member session is
+// elected to materialize a still-CREATING canonical environment. Even though the
+// environment is owned by a different task, the elected materializer must run the
+// normal finalize path so the group's inventory publishes atomically.
+func TestPersistTaskEnvironment_GuestMaterializerRunsFinalizePath(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+	owner := &models.TaskEnvironment{
+		ID:                       "env-group",
+		TaskID:                   "task-owner",
+		ExecutorType:             string(models.ExecutorTypeLocal),
+		Status:                   models.TaskEnvironmentStatusCreating,
+		MaterializationSessionID: "sess-member",
+	}
+	repo.taskEnvironments["env-group"] = owner
+	session := &models.TaskSession{ID: "sess-member", TaskID: "task-member", TaskEnvironmentID: "env-group"}
+	req := &LaunchAgentRequest{TaskID: "task-member", ExecutorType: string(models.ExecutorTypeLocal), RepositoryID: "repo-a"}
+	resp := &LaunchAgentResponse{WorktreeID: "wt-a", WorktreePath: "/tasks/group/repo-a", WorktreeBranch: "feat/x"}
+
+	if err := exec.persistTaskEnvironment(context.Background(), "task-member", session, owner, req, resp, executorConfig{}); err != nil {
+		t.Fatalf("persistTaskEnvironment (guest materializer): %v", err)
+	}
+	if len(repo.finalizeTaskEnvironmentCalls) != 1 {
+		t.Fatalf("elected materializer must finalize, got %d finalize calls", len(repo.finalizeTaskEnvironmentCalls))
+	}
+}

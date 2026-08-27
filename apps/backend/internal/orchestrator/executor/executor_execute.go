@@ -2238,6 +2238,23 @@ func (e *Executor) persistTaskEnvironment(
 	if existingEnv != nil {
 		materializationSessionID := existingEnv.MaterializationSessionID
 		isInitialMaterializer := existingEnv.Status == models.TaskEnvironmentStatusCreating && materializationSessionID == session.ID
+		// A session attaching to an environment owned by a *different* task is a
+		// guest: office inherit_parent / shared_group bind every member session
+		// to one canonical environment (see handoff_inheritance.go), and the
+		// members share the owner's worktree rather than owning any
+		// task_environment_repos rows of their own. The owner already
+		// materialized (or will materialize) that inventory, so a guest must not
+		// rewrite the owner's repo rows or re-evaluate its ready status. Doing so
+		// on resume tripped "ready status requires repository inventory": the
+		// guest's request carries no repo specs (repos empty) and, when the
+		// owner's canonical inventory is empty, the repo-backed guard below failed
+		// a resume the guest has no authority to fix. The one exception is a guest
+		// session elected to materialize a still-CREATING canonical environment
+		// (shared_group), which must run the normal finalize path below.
+		if existingEnv.TaskID != "" && existingEnv.TaskID != taskID && !isInitialMaterializer {
+			session.TaskEnvironmentID = existingEnv.ID
+			return nil
+		}
 		previousStatus := existingEnv.Status
 		previousMaterializationSessionID := existingEnv.MaterializationSessionID
 		repos := environmentReposForLaunch(req, resp)
