@@ -102,8 +102,9 @@ type TaskItemProps = {
   onToggleSubtasks?: () => void;
   /**
    * The task's repository as a stable slug (or name). A multi-repository task
-   * carries its primary repository here; enumerating the rest is deferred,
-   * since `TaskSwitcherItem.repositories` is not populated from live data.
+   * carries its primary repository here for compatibility. The complete
+   * ordered repository combination is projected through
+   * `TaskSwitcherItem.repositories` for sidebar grouping.
    */
   repositoryPath?: string;
   /**

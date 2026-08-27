@@ -328,6 +328,95 @@ describe("applyGroup — state", () => {
   });
 });
 
+describe("applyGroup — repository combinations", () => {
+  it("groups a projected multi-repository task by every repository slug", () => {
+    const repositories = ["owner/repo,one", "owner/repo-two"];
+    const out = applyGroup(
+      [
+        task({
+          id: "multi",
+          repositories,
+          repositoryLinks: [
+            { repository_id: "repo-one", position: 0 },
+            { repository_id: "repo-two", position: 1 },
+          ],
+        }),
+      ],
+      "repository",
+    );
+
+    expect(out.groups).toHaveLength(1);
+    expect(out.groups[0]).toMatchObject({
+      key: `__repo_combination__:${JSON.stringify(repositories)}`,
+      label: "owner/repo,one, owner/repo-two",
+    });
+    expect(out.groups[0].tasks.map((item) => item.id)).toEqual(["multi"]);
+  });
+
+  it("keeps equal combinations together and separates different ordered combinations", () => {
+    const first = ["owner/repo-a", "owner/repo-b"];
+    const reversed = [...first].reverse();
+    const out = applyGroup(
+      [
+        task({
+          id: "first",
+          repositories: first,
+          repositoryLinks: [
+            { repository_id: "repo-a", position: 0 },
+            { repository_id: "repo-b", position: 1 },
+          ],
+        }),
+        task({
+          id: "same",
+          repositories: [...first],
+          repositoryLinks: [
+            { repository_id: "repo-a", position: 0 },
+            { repository_id: "repo-b", position: 1 },
+          ],
+        }),
+        task({
+          id: "reversed",
+          repositories: reversed,
+          repositoryLinks: [
+            { repository_id: "repo-b", position: 0 },
+            { repository_id: "repo-a", position: 1 },
+          ],
+        }),
+      ],
+      "repository",
+    );
+
+    expect(out.groups).toHaveLength(2);
+    expect(out.groups.map((group) => group.key)).toEqual([
+      `__repo_combination__:${JSON.stringify(first)}`,
+      `__repo_combination__:${JSON.stringify(reversed)}`,
+    ]);
+    expect(out.groups[0].tasks.map((item) => item.id)).toEqual(["first", "same"]);
+    expect(out.groups[1].tasks.map((item) => item.id)).toEqual(["reversed"]);
+  });
+
+  it("keeps incomplete multi-repository metadata in the generic group", () => {
+    const out = applyGroup(
+      [
+        task({
+          id: "incomplete",
+          repositories: ["owner/repo-a"],
+          repositoryLinks: [
+            { repository_id: "repo-a", position: 0 },
+            { repository_id: "repo-missing", position: 1 },
+          ],
+        }),
+      ],
+      "repository",
+    );
+
+    expect(out.groups).toHaveLength(1);
+    expect(out.groups[0].key).toBe("__multi__");
+    expect(out.groups[0].label).toBe("Multi-repo");
+    expect(out.groups[0].tasks.map((item) => item.id)).toEqual(["incomplete"]);
+  });
+});
+
 describe("applyGroup", () => {
   it("wraps all tasks in single pseudo-group when group=none", () => {
     const tasks = [task({ id: "a" }), task({ id: "b" })];
@@ -358,6 +447,31 @@ describe("applyGroup", () => {
     expect(out.groups).toHaveLength(1);
     expect(out.groups[0].label).toBe("org/only");
     expect(out.groups[0].tasks).toHaveLength(2);
+  });
+
+  it("does not merge unassigned into a named repository combination group", () => {
+    const repositories = ["org/one", "org/two"];
+    const out = applyGroup(
+      [
+        task({
+          id: "multi",
+          repositories,
+          repositoryLinks: [
+            { repository_id: "repo-one", position: 0 },
+            { repository_id: "repo-two", position: 1 },
+          ],
+        }),
+        task({ id: "unassigned" }),
+      ],
+      "repository",
+    );
+
+    expect(out.groups.map((group) => group.key)).toEqual([
+      `__repo_combination__:${JSON.stringify(repositories)}`,
+      "__unassigned__",
+    ]);
+    expect(out.groups[0].tasks.map((item) => item.id)).toEqual(["multi"]);
+    expect(out.groups[1].tasks.map((item) => item.id)).toEqual(["unassigned"]);
   });
 
   it("separates subtasks from root tasks", () => {
