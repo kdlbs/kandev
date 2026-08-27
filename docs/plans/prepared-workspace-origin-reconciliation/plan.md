@@ -1,6 +1,6 @@
 ---
 created: 2026-08-27
-status: done
+status: in_progress
 requirements:
   - REQ-INTEGRATIONS-GITHUB-AUTHENTICATION-001
 system_design:
@@ -20,8 +20,9 @@ Every launch or resume must prepare each attached repository before an agent sta
 moves the existing repository-resolution pass before the prepared-workspace branch. The full
 launch path then reuses the same result.
 
-This order closes the fast-path gap without another repository pass. Implementation must first
-consume #3069's dynamic, host-aware Git protocol resolution.
+This order closes the fast-path gap without another repository pass. The launch-order work is
+implemented, but the plan remains in progress until #3069's dynamic, host-aware Git protocol
+resolution lands and this change is rebased onto it.
 
 ## Confirmed root cause
 
@@ -108,8 +109,10 @@ go test -tags fts5 ./internal/orchestrator/executor ./internal/repoclone
 Go test: 620 passed in 2 packages
 ```
 
-`python3 scripts/lint-spec-files.py --all` also passed. Issue #3069 remains open; this change
-consumes the existing `RepoCloner.BuildCloneURLWithHost` seam and adds no protocol detection.
+`python3 scripts/lint-spec-files.py --all` also passed. Issue #3069 remains open, so the
+executor-mode transport prerequisite is not yet satisfied. This change intentionally consumes
+the existing `RepoCloner.BuildCloneURLWithHost` seam and adds no protocol detection; rebase this
+plan and its implementation after #3069 lands before marking the plan complete.
 
 ## Risks
 
