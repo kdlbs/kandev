@@ -37,6 +37,31 @@ var (
 	errWorkflowAutoStartSessionTerminalized = errors.New("workflow auto-start session terminalized")
 )
 
+type workflowAutoStartSessionTerminalizedError struct {
+	state models.TaskSessionState
+}
+
+func (e *workflowAutoStartSessionTerminalizedError) Error() string {
+	return errWorkflowAutoStartSessionTerminalized.Error()
+}
+
+func (e *workflowAutoStartSessionTerminalizedError) Unwrap() error {
+	return errWorkflowAutoStartSessionTerminalized
+}
+
+func newWorkflowAutoStartSessionTerminalizedError(session *models.TaskSession) error {
+	var state models.TaskSessionState
+	if session != nil {
+		state = session.State
+	}
+	return &workflowAutoStartSessionTerminalizedError{state: state}
+}
+
+func workflowAutoStartWasCancelled(err error) bool {
+	var terminalized *workflowAutoStartSessionTerminalizedError
+	return errors.As(err, &terminalized) && terminalized.state == models.TaskSessionStateCancelled
+}
+
 type taskMetadataKeyRemover interface {
 	RemoveTaskMetadataKey(context.Context, string, string) (bool, error)
 }
@@ -2356,6 +2381,11 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		effectivePrompt := s.buildWorkflowPrompt(ctx, taskDescription, step, taskID, sessionID, isPassthrough)
 		if err := s.autoStartStepPrompt(ctx, taskID, session, step, effectivePrompt, hasPlanMode, true); err != nil {
 			if errors.Is(err, errWorkflowAutoStartSessionTerminalized) {
+				if workflowAutoStartWasCancelled(err) {
+					s.logger.Info("workflow auto-start cancelled before dispatch; not creating replacement",
+						zap.String("task_id", taskID), zap.String("session_id", sessionID))
+					return
+				}
 				s.logger.Info("creating fresh workflow session after reused session terminalized",
 					zap.String("task_id", taskID), zap.String("session_id", sessionID))
 				replacement, replacementErr := s.createNewSessionForStep(
@@ -2406,8 +2436,8 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 			//
 			// Before dispatching, reload the session under the cancel-in-flight guard
 			// to atomically detect concurrent terminalization. If the session is
-			// already terminal, create a replacement directly instead of attempting
-			// an auto-start that will fail and lose the hand-off.
+			// already terminal, create a replacement directly for automatic recovery states instead of attempting
+			// an auto-start that will fail and lose the hand-off. An explicit cancellation remains terminal.
 			go func() {
 				lock, release := s.acquireCancelInFlightGuard(sessionID)
 				lock.Lock()
@@ -2418,6 +2448,11 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 					if reloadErr != nil {
 						s.logger.Error("implicit profile switch: failed to reload session before dispatch",
 							zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(reloadErr))
+						return
+					}
+					if fresh != nil && fresh.State == models.TaskSessionStateCancelled {
+						s.logger.Info("implicit profile switch cancelled before dispatch; not creating replacement",
+							zap.String("task_id", taskID), zap.String("session_id", sessionID))
 						return
 					}
 					s.logger.Info("implicit profile switch: reused session terminalized before dispatch, creating replacement",
@@ -2449,6 +2484,11 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 				err := s.autoStartStepPrompt(ctx, taskID, fresh, step, effectivePrompt, planMode, true)
 				if err != nil {
 					if errors.Is(err, errWorkflowAutoStartSessionTerminalized) {
+						if workflowAutoStartWasCancelled(err) {
+							s.logger.Info("implicit profile switch cancelled during dispatch; not creating replacement",
+								zap.String("task_id", taskID), zap.String("session_id", sessionID))
+							return
+						}
 						s.logger.Info("implicit profile switch: reused session terminalized during dispatch, creating replacement",
 							zap.String("task_id", taskID), zap.String("session_id", sessionID))
 						replacement, replacementErr := s.createNewSessionForStep(
@@ -3182,7 +3222,7 @@ func (s *Service) autoStartStepPrompt(
 			lock.Unlock()
 			release()
 			requeueTaken()
-			return errWorkflowAutoStartSessionTerminalized
+			return newWorkflowAutoStartSessionTerminalizedError(fresh)
 		}
 		var releaseOnce sync.Once
 		heldRelease := func() {

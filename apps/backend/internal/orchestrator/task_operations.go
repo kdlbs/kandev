@@ -4054,7 +4054,7 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 			defer cancel()
 			s.rollbackForegroundDispatchOnFailure(failureCtx, taskID, sessionID, foregroundDispatch)
 			s.rollbackPromptClaim(failureCtx, taskID, sessionID, rollback)
-			return nil, errWorkflowAutoStartSessionTerminalized
+			return nil, newWorkflowAutoStartSessionTerminalizedError(fresh)
 		}
 		var releaseOnce sync.Once
 		originalRelease := releaseDispatchGuard
@@ -4215,7 +4215,7 @@ func (s *Service) loadNonterminalWorkflowAutoStartSession(
 		return nil, fmt.Errorf("reload workflow auto-start session: %w", err)
 	}
 	if session == nil || isTerminalSessionState(session.State) {
-		return nil, errWorkflowAutoStartSessionTerminalized
+		return nil, newWorkflowAutoStartSessionTerminalizedError(session)
 	}
 	return session, nil
 }
@@ -4690,7 +4690,7 @@ func (s *Service) claimSessionRunningForPrompt(
 		return nil, "", "", false, nil, errQueuedDispatchSuperseded
 	}
 	if requireNonterminalSession && isTerminalSessionState(freshSession.State) {
-		return nil, "", "", false, nil, errWorkflowAutoStartSessionTerminalized
+		return nil, "", "", false, nil, newWorkflowAutoStartSessionTerminalizedError(freshSession)
 	}
 	if promptErr := s.recheckPromptableWithForegroundClaim(
 		taskID, sessionID, freshSession.State, foregroundClaim,
@@ -4703,7 +4703,7 @@ func (s *Service) claimSessionRunningForPrompt(
 	// loses, so a cancellation landing after the promptability check is visible
 	// here as a terminal state.
 	if requireNonterminalSession && isTerminalSessionState(freshSession.State) {
-		return nil, "", "", false, nil, errWorkflowAutoStartSessionTerminalized
+		return nil, "", "", false, nil, newWorkflowAutoStartSessionTerminalizedError(freshSession)
 	}
 	if isTerminalSessionState(freshSession.State) && freshSession.State != models.TaskSessionStateCompleted {
 		return nil, "", "", false, nil, &executor.SessionStateSupersededError{

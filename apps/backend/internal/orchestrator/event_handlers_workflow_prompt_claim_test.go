@@ -373,6 +373,14 @@ func TestWorkflowAutoStartRollsBackPromptClaimWhenTerminalizedAfterClaim(t *test
 }
 
 func TestProcessOnEnterReplacesReusedSessionTerminalizedAfterPromptClaim(t *testing.T) {
+	testProcessOnEnterTerminalizedAfterPromptClaim(t, models.TaskSessionStateCompleted, true)
+}
+
+func TestProcessOnEnterPreservesCancelledReusedSessionTerminalizedAfterPromptClaim(t *testing.T) {
+	testProcessOnEnterTerminalizedAfterPromptClaim(t, models.TaskSessionStateCancelled, false)
+}
+
+func testProcessOnEnterTerminalizedAfterPromptClaim(t *testing.T, terminalState models.TaskSessionState, wantReplacement bool) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "task-terminalized-replacement", "session-source", "step-source")
@@ -456,12 +464,26 @@ func TestProcessOnEnterReplacesReusedSessionTerminalizedAfterPromptClaim(t *test
 	}()
 
 	<-barrierRepo.claimReached
-	requireNoError(t, repo.UpdateTaskSessionState(ctx, target.ID, models.TaskSessionStateCompleted, "finished concurrently"))
+	requireNoError(t, repo.UpdateTaskSessionState(ctx, target.ID, terminalState, "terminalized concurrently"))
 	close(barrierRepo.allowReload)
 	<-done
 
 	sessions, err := repo.ListTaskSessions(ctx, source.TaskID)
 	requireNoError(t, err)
+	if !wantReplacement {
+		if len(sessions) != 2 {
+			t.Fatalf("session count = %d, want no replacement after cancellation", len(sessions))
+		}
+		stored, err := repo.GetTaskSession(ctx, target.ID)
+		requireNoError(t, err)
+		if stored.State != models.TaskSessionStateCancelled {
+			t.Fatalf("cancelled target state = %s, want CANCELLED", stored.State)
+		}
+		if len(launchPrompts) != 0 {
+			t.Fatalf("launch prompts = %#v, want no replacement launch after cancellation", launchPrompts)
+		}
+		return
+	}
 	if len(sessions) != 3 {
 		t.Fatalf("session count = %d, want replacement after terminalized reuse", len(sessions))
 	}
@@ -645,6 +667,14 @@ func (r *terminalizeImplicitSwitchRepo) GetTask(ctx context.Context, taskID stri
 // that a reused session has terminalized before dispatch and creates a
 // replacement session via createNewSessionForStep.
 func TestProcessOnEnterImplicitProfileSwitchTerminalizedGuard(t *testing.T) {
+	testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(t, models.TaskSessionStateCompleted, true)
+}
+
+func TestProcessOnEnterImplicitProfileSwitchPreservesCancellation(t *testing.T) {
+	testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(t, models.TaskSessionStateCancelled, false)
+}
+
+func testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(t *testing.T, terminalState models.TaskSessionState, wantReplacement bool) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "task-implicit-switch", "session-implicit-switch-source", "step-source")
@@ -722,10 +752,22 @@ func TestProcessOnEnterImplicitProfileSwitchTerminalizedGuard(t *testing.T) {
 	// Terminalize the reused target session before the goroutine's guarded
 	// reload can detect it.
 	<-barrierRepo.promptCalled
-	requireNoError(t, repo.UpdateTaskSessionState(ctx, target.ID, models.TaskSessionStateCompleted, "concurrent completion"))
+	requireNoError(t, repo.UpdateTaskSessionState(ctx, target.ID, terminalState, "terminalized concurrently"))
 	close(barrierRepo.allowPrompt)
 
 	<-done
+
+	if !wantReplacement {
+		require.Eventually(t, func() bool {
+			sessions, err := repo.ListTaskSessions(ctx, source.TaskID)
+			if err != nil || len(sessions) != 2 {
+				return false
+			}
+			stored, err := repo.GetTaskSession(ctx, target.ID)
+			return err == nil && stored.State == models.TaskSessionStateCancelled
+		}, 5*time.Second, 50*time.Millisecond, "expected cancellation to prevent a replacement session")
+		return
+	}
 
 	// The inner goroutine (implicit profile switch) must finish before we can
 	// assert on its results. Wait on a progress observation: the replacement
