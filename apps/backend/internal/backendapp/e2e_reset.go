@@ -109,6 +109,16 @@ func handleE2EReset(
 
 		ctx := c.Request.Context()
 
+		// Capture every task before deleting review watches or automations. Those
+		// owners delete their tasks as part of their own cleanup, so a later task
+		// list cannot discover the resource-cleanup jobs they leave behind.
+		taskIDsForCleanup, err := listE2ETaskIDs(ctx, repo.DB(), workspaceID)
+		if err != nil {
+			log.Error("e2e reset: failed to capture task IDs", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
+			return
+		}
+
 		// Wipe routing state so the office-routing-* specs don't leak
 		// degraded health rows / route attempts / parked runs between
 		// each other. Office tables live in the same SQLite db so the
@@ -253,7 +263,7 @@ func handleE2EReset(
 			return
 		}
 		var deletedTasks int64
-		deletedTaskIDs := make([]string, 0, len(tasks))
+		deletedTaskIDs := append([]string(nil), taskIDsForCleanup...)
 		for _, t := range tasks {
 			if err := taskSvc.DeleteTask(ctx, t.ID); err != nil {
 				// Abort: leaving an undeleted task with its workflow gone
@@ -264,7 +274,9 @@ func handleE2EReset(
 				return
 			}
 			deletedTasks++
-			deletedTaskIDs = append(deletedTaskIDs, t.ID)
+			if !containsE2ETaskID(deletedTaskIDs, t.ID) {
+				deletedTaskIDs = append(deletedTaskIDs, t.ID)
+			}
 		}
 
 		// DeleteTask removes the task row synchronously but stops agents and
@@ -299,59 +311,50 @@ func waitForE2ETaskCleanup(ctx context.Context, database *sql.DB, taskIDs []stri
 	if database == nil || len(taskIDs) == 0 {
 		return nil
 	}
-
-	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(taskIDs)), ",")
-	query := `SELECT task_id, state, last_error
-		FROM task_resource_cleanup_jobs
-		WHERE task_id IN (` + placeholders + `)
-		  AND state IN (?, ?, ?, ?, ?)`
-	args := make([]any, 0, len(taskIDs)+5)
-	for _, taskID := range taskIDs {
-		args = append(args, taskID)
-	}
-	args = append(args,
-		taskmodels.TaskResourceCleanupStatePrepared,
-		taskmodels.TaskResourceCleanupStatePending,
-		taskmodels.TaskResourceCleanupStateRunning,
-		taskmodels.TaskResourceCleanupStateRetryWait,
-		taskmodels.TaskResourceCleanupStateFailed,
+	return waitForE2ETaskCleanupWithReader(
+		ctx,
+		taskIDs,
+		e2eTaskCleanupPollInterval,
+		func(ctx context.Context, ids []string) ([]e2eTaskCleanupStatus, error) {
+			return queryE2ETaskCleanupStatuses(ctx, database, ids)
+		},
 	)
+}
+
+type e2eTaskCleanupStatus struct {
+	taskID    string
+	state     taskmodels.TaskResourceCleanupState
+	lastError string
+}
+
+type e2eTaskCleanupStatusReader func(context.Context, []string) ([]e2eTaskCleanupStatus, error)
+
+func waitForE2ETaskCleanupWithReader(
+	ctx context.Context,
+	taskIDs []string,
+	pollInterval time.Duration,
+	readStatuses e2eTaskCleanupStatusReader,
+) error {
+	if len(taskIDs) == 0 {
+		return nil
+	}
 
 	waitCtx, cancel := context.WithTimeout(ctx, e2eTaskCleanupWaitTimeout)
 	defer cancel()
 	for {
-		rows, err := database.QueryContext(waitCtx, query, args...)
+		statuses, err := readStatuses(waitCtx, taskIDs)
 		if err != nil {
 			return fmt.Errorf("query task cleanup status: %w", err)
 		}
-		activeTaskIDs := make([]string, 0)
-		for rows.Next() {
-			var taskID string
-			var state taskmodels.TaskResourceCleanupState
-			var lastError string
-			if err := rows.Scan(&taskID, &state, &lastError); err != nil {
-				_ = rows.Close()
-				return fmt.Errorf("scan task cleanup status: %w", err)
-			}
-			if state == taskmodels.TaskResourceCleanupStateFailed {
-				_ = rows.Close()
-				if lastError == "" {
-					return fmt.Errorf("task cleanup failed for %s", taskID)
-				}
-				return fmt.Errorf("task cleanup failed for %s: %s", taskID, lastError)
-			}
-			activeTaskIDs = append(activeTaskIDs, taskID)
-		}
-		rowsErr := rows.Err()
-		_ = rows.Close()
-		if rowsErr != nil {
-			return fmt.Errorf("read task cleanup status: %w", rowsErr)
+		activeTaskIDs, err := activeE2ETaskCleanupIDs(statuses)
+		if err != nil {
+			return err
 		}
 		if len(activeTaskIDs) == 0 {
 			return nil
 		}
 
-		timer := time.NewTimer(e2eTaskCleanupPollInterval)
+		timer := time.NewTimer(pollInterval)
 		select {
 		case <-waitCtx.Done():
 			timer.Stop()
@@ -359,6 +362,105 @@ func waitForE2ETaskCleanup(ctx context.Context, database *sql.DB, taskIDs []stri
 		case <-timer.C:
 		}
 	}
+}
+
+func queryE2ETaskCleanupStatuses(
+	ctx context.Context,
+	database *sql.DB,
+	taskIDs []string,
+) ([]e2eTaskCleanupStatus, error) {
+	const taskIDBatchSize = 100
+	statuses := make([]e2eTaskCleanupStatus, 0)
+	for start := 0; start < len(taskIDs); start += taskIDBatchSize {
+		end := start + taskIDBatchSize
+		if end > len(taskIDs) {
+			end = len(taskIDs)
+		}
+		batch := taskIDs[start:end]
+		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(batch)), ",")
+		query := `SELECT task_id, state, last_error
+			FROM task_resource_cleanup_jobs
+			WHERE task_id IN (` + placeholders + `)
+			  AND state IN (?, ?, ?, ?, ?)`
+		args := make([]any, 0, len(batch)+5)
+		for _, taskID := range batch {
+			args = append(args, taskID)
+		}
+		args = append(args,
+			taskmodels.TaskResourceCleanupStatePrepared,
+			taskmodels.TaskResourceCleanupStatePending,
+			taskmodels.TaskResourceCleanupStateRunning,
+			taskmodels.TaskResourceCleanupStateRetryWait,
+			taskmodels.TaskResourceCleanupStateFailed,
+		)
+
+		rows, err := database.QueryContext(ctx, query, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var status e2eTaskCleanupStatus
+			if err := rows.Scan(&status.taskID, &status.state, &status.lastError); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			statuses = append(statuses, status)
+		}
+		rowsErr := rows.Err()
+		_ = rows.Close()
+		if rowsErr != nil {
+			return nil, rowsErr
+		}
+	}
+	return statuses, nil
+}
+
+func activeE2ETaskCleanupIDs(statuses []e2eTaskCleanupStatus) ([]string, error) {
+	activeTaskIDs := make([]string, 0, len(statuses))
+	seen := make(map[string]struct{}, len(statuses))
+	for _, status := range statuses {
+		if status.state == taskmodels.TaskResourceCleanupStateFailed {
+			if status.lastError == "" {
+				return nil, fmt.Errorf("task cleanup failed for %s", status.taskID)
+			}
+			return nil, fmt.Errorf("task cleanup failed for %s: %s", status.taskID, status.lastError)
+		}
+		if _, ok := seen[status.taskID]; ok {
+			continue
+		}
+		seen[status.taskID] = struct{}{}
+		activeTaskIDs = append(activeTaskIDs, status.taskID)
+	}
+	return activeTaskIDs, nil
+}
+
+func listE2ETaskIDs(ctx context.Context, database *sql.DB, workspaceID string) ([]string, error) {
+	rows, err := database.QueryContext(ctx, `SELECT id FROM tasks WHERE workspace_id = ?`, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	ids := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
+func containsE2ETaskID(taskIDs []string, taskID string) bool {
+	for _, id := range taskIDs {
+		if id == taskID {
+			return true
+		}
+	}
+	return false
 }
 
 func resetGitHubAppRegistrationsForE2E(
