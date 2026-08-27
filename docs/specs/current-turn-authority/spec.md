@@ -436,7 +436,7 @@ bug into unbounded data loss. Consequently:
   whose turn closed with no successor is superseded history anyway, so their observable outcome
   matches the intended contract even though the path to it is wrong. Named so their persistence is
   not mistaken for an incomplete fix.
-- The residual shrinks to zero as sessions age out; AC-1 prevents any new unmarked lifecycle turn.
+- The residual may shrink as eligible sessions expire; AC-1 prevents any new unmarked lifecycle turn.
 
 ---
 
