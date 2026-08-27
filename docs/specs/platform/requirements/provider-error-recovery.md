@@ -2,7 +2,7 @@
 status: draft
 system: platform
 created: 2026-08-08
-updated: 2026-08-17
+updated: 2026-08-27
 owners:
   - Kandev
 ---
@@ -28,6 +28,9 @@ Agent CLIs and providers report equivalent failures through different ACP frames
 - **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.6:** Adding a known provider message normally adds a sanitized fixture and catalogue rule. It does not add an orchestration or UI branch.
 - **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.7:** Classification is deterministic in this version. Calling a model to classify an error or extract timing data is deferred.
 - **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.8:** Automatic retry, reset waiting, or fallback requires evidence tied to the current invocation and a failure boundary that is known to be pre-result and effect-safe.
+- **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.9:** While an eligible interactive transient retry is pending, desktop and mobile task chat shall show the retry reason, provider, attempt count, countdown, and Cancel action only while the backend owns that retry.
+- **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.10:** When an interactive transient retry succeeds, is exhausted, reaches a terminal state, is stopped, or is cancelled, the system shall durably retire every outstanding retry notice for the session so that no notice reappears after the session becomes idle, the task changes, the page reloads, or another viewer observes the session.
+- **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.11:** After authorization, cancelling an interactive transient retry shall retire outstanding retry notices even when the retry loop has already ended. Cancelling an active loop shall also expose manual Resume and Start fresh recovery actions. A denied or foreign task-session pair shall not expose whether retry state or retry notices exist.
 
 ## System design
 

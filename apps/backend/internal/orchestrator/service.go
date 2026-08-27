@@ -113,6 +113,14 @@ type MessageCreator interface {
 	InvalidateModelCache(sessionID string)
 }
 
+// TransientRetryMessageService is the narrow task-service seam used to retire
+// persisted retry status messages. The task service owns authorization and
+// event-bus publication for both operations.
+type TransientRetryMessageService interface {
+	ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error)
+	DeleteMessage(ctx context.Context, id string) error
+}
+
 // SubagentContextRecorder persists a durable relational record of a subagent
 // (Task tool) invocation observed on a tool-call frame. It returns nothing —
 // a repository failure never fails the enclosing message write, turn, or
@@ -493,6 +501,10 @@ type Service struct {
 
 	// Message creator for saving agent responses
 	messageCreator MessageCreator
+
+	// transientRetryMessages owns durable cleanup of persisted retry notices.
+	// It is optional for focused tests and pre-composition callers.
+	transientRetryMessages TransientRetryMessageService
 
 	// subagentContexts optionally persists a relational record of subagent
 	// (Task tool) invocations recognized on the tool-call frame paths. Nil is
@@ -1286,6 +1298,12 @@ func NewService(
 // If not set: Agent messages won't be saved to the database (events will still be published).
 func (s *Service) SetMessageCreator(mc MessageCreator) {
 	s.messageCreator = mc
+}
+
+// SetTransientRetryMessageService wires the task service used to retire
+// persisted transient-retry status messages.
+func (s *Service) SetTransientRetryMessageService(service TransientRetryMessageService) {
+	s.transientRetryMessages = service
 }
 
 // SetSubagentContextRecorder wires the optional subagent-context writer.

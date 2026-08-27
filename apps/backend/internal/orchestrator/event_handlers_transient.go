@@ -458,14 +458,57 @@ func transientFailureExhaustedMessage(classified *routingerr.Error) string {
 	return condition + " after several retries. Resume to try again, or start a fresh session."
 }
 
-// resetTransientRetry clears a session's retry entry, cancels its timer, and
-// drops the cached prompt (which may hold large/sensitive attachment data).
-// Called on a successful turn, on cancel, and on exhaustion.
-func (s *Service) resetTransientRetry(sessionID string) {
+// clearTransientRetryState clears a session's retry entry, cancels its timer,
+// and drops the cached prompt (which may hold large/sensitive attachment data).
+func (s *Service) clearTransientRetryState(sessionID string) {
 	s.lastTurnPrompt.Delete(sessionID)
 	if v, ok := s.transientRetries.LoadAndDelete(sessionID); ok {
 		if entry, ok := v.(*transientRetryEntry); ok && entry.cancel != nil {
 			entry.cancel()
+		}
+	}
+}
+
+// resetTransientRetry clears in-memory retry state and retires the persisted
+// retry notice(s). The detached context keeps durable cleanup best effort even
+// when the event that ended the retry was cancelled by its caller.
+func (s *Service) resetTransientRetry(sessionID string) {
+	s.resetTransientRetryWithContext(context.Background(), sessionID)
+}
+
+func (s *Service) resetTransientRetryWithContext(ctx context.Context, sessionID string) {
+	s.clearTransientRetryState(sessionID)
+	s.resolveTransientRetryMessages(context.WithoutCancel(ctx), sessionID)
+}
+
+// resolveTransientRetryMessages removes every persisted retry status message
+// for a session. The task service owns the durable write and MessageDeleted
+// publication. Cleanup is intentionally non-fatal to the transition that
+// ended the retry loop.
+func (s *Service) resolveTransientRetryMessages(ctx context.Context, sessionID string) {
+	if s.transientRetryMessages == nil || sessionID == "" {
+		return
+	}
+	messages, err := s.transientRetryMessages.ListMessages(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to list transient retry status messages",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	for _, message := range messages {
+		if message == nil || message.Metadata == nil {
+			continue
+		}
+		retrying, ok := message.Metadata["retrying"].(bool)
+		if !ok || !retrying {
+			continue
+		}
+		if err := s.transientRetryMessages.DeleteMessage(ctx, message.ID); err != nil {
+			s.logger.Warn("failed to delete transient retry status message",
+				zap.String("session_id", sessionID),
+				zap.String("message_id", message.ID),
+				zap.Error(err))
 		}
 	}
 }

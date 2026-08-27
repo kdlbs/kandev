@@ -3039,16 +3039,12 @@ func (s *Service) stopTaskSessionForCoordinatorLocked(
 	}
 
 	s.taskRuntimeStateMu.Lock()
-	defer s.taskRuntimeStateMu.Unlock()
 	// Halt-only intent also disarms any provider-backoff retry. This must run
 	// even when the failed execution has already disappeared and the result is
 	// therefore not_running; otherwise its timer can launch replacement work.
-	s.resetTransientRetry(sessionID)
-	result, err := s.executor.StopSessionDetailed(ctx, session, coordinatorMCPStopReason, false)
-	if err != nil {
-		return result, false, fmt.Errorf("coordinator stop: session %q: %w", sessionID, err)
-	}
-	if result.Changed {
+	s.clearTransientRetryState(sessionID)
+	result, stopErr := s.executor.StopSessionDetailed(ctx, session, coordinatorMCPStopReason, false)
+	if stopErr == nil && result.Changed {
 		// Cancellation takes effect before detached runtime teardown. Tombstone
 		// the execution immediately so buffered agent frames cannot recreate
 		// session output after the coordinator has acknowledged the stop.
@@ -3059,6 +3055,11 @@ func (s *Service) stopTaskSessionForCoordinatorLocked(
 		result.ExecutionID,
 		executionTeardownIntentGraceful,
 	)
+	s.taskRuntimeStateMu.Unlock()
+	s.resolveTransientRetryMessages(context.WithoutCancel(ctx), sessionID)
+	if stopErr != nil {
+		return result, false, fmt.Errorf("coordinator stop: session %q: %w", sessionID, stopErr)
+	}
 	return result, teardownClaimed, nil
 }
 
