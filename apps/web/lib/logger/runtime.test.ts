@@ -11,6 +11,8 @@ const storeMocks = vi.hoisted(() => ({
   append: vi.fn(),
   snapshot: vi.fn(),
 }));
+const TEST_SOURCE = "test";
+const TEST_SCOPE = "default-user";
 
 vi.mock("./indexeddb-store", () => ({
   IndexedDBLogStore: class {
@@ -27,30 +29,23 @@ beforeEach(() => {
 });
 
 describe("browser logger collection", () => {
-  it("collects an idle log burst for 250 ms before one bounded append", async () => {
+  it("coalesces a log burst in one 250 ms window before one bounded append", async () => {
     vi.useFakeTimers();
-    let idleCallback: (() => void) | undefined;
-    vi.stubGlobal("requestIdleCallback", (callback: () => void) => {
-      idleCallback = callback;
-      return 1;
-    });
 
     try {
       stageLogEntry({
         timestamp: new Date().toISOString(),
         level: "info",
-        source: "test",
+        source: TEST_SOURCE,
         message: "first",
       });
       stageLogEntry({
         timestamp: new Date().toISOString(),
         level: "info",
-        source: "test",
+        source: TEST_SOURCE,
         message: "second",
       });
 
-      idleCallback?.();
-      await Promise.resolve();
       expect(storeMocks.append).not.toHaveBeenCalled();
 
       await vi.advanceTimersByTimeAsync(249);
@@ -65,7 +60,6 @@ describe("browser logger collection", () => {
         ]),
       );
     } finally {
-      vi.unstubAllGlobals();
       vi.runOnlyPendingTimers();
       vi.useRealTimers();
     }
@@ -73,13 +67,12 @@ describe("browser logger collection", () => {
 
   it("passes one prepared entry and canonical byte count to persistence", async () => {
     vi.useFakeTimers();
-    vi.stubGlobal("requestIdleCallback", undefined);
 
     try {
       stageLogEntry({
         timestamp: new Date().toISOString(),
         level: "info",
-        source: "test",
+        source: TEST_SOURCE,
         message: "prepared once",
         args: [{ detail: "value" }],
       });
@@ -96,7 +89,6 @@ describe("browser logger collection", () => {
       ]);
       expect(batch[0].bytes).toBe(encodedBytes(batch[0].entry));
     } finally {
-      vi.unstubAllGlobals();
       vi.runOnlyPendingTimers();
       vi.useRealTimers();
     }
@@ -104,6 +96,31 @@ describe("browser logger collection", () => {
 });
 
 describe("browser logger runtime", () => {
+  it("flushes a pending collection window before snapshotting", async () => {
+    vi.useFakeTimers();
+
+    try {
+      stageLogEntry({
+        timestamp: new Date().toISOString(),
+        level: "info",
+        source: TEST_SOURCE,
+        message: "flush before snapshot",
+      });
+
+      await vi.advanceTimersByTimeAsync(100);
+      expect(storeMocks.append).not.toHaveBeenCalled();
+
+      await snapshotBrowserLogs(TEST_SCOPE);
+      expect(storeMocks.append).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(150);
+      expect(storeMocks.append).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.runOnlyPendingTimers();
+      vi.useRealTimers();
+    }
+  });
+
   it("does not stage entries rejected by the bounded memory buffer", async () => {
     stageLogEntry({
       timestamp: new Date().toISOString(),
@@ -112,7 +129,7 @@ describe("browser logger runtime", () => {
       message: "x".repeat(MAX_ENTRY_BYTES + 1),
     });
 
-    await snapshotBrowserLogs("default-user");
+    await snapshotBrowserLogs(TEST_SCOPE);
 
     expect(storeMocks.append).not.toHaveBeenCalled();
   });
@@ -122,11 +139,11 @@ describe("browser logger runtime", () => {
     stageLogEntry({
       timestamp: new Date().toISOString(),
       level: "error",
-      source: "test",
+      source: TEST_SOURCE,
       message: "kept in memory",
     });
 
-    await expect(snapshotBrowserLogs("default-user")).resolves.toHaveLength(1);
+    await expect(snapshotBrowserLogs(TEST_SCOPE)).resolves.toHaveLength(1);
     expect(browserLogMetadata()).toMatchObject({
       storage_mode: "memory",
       persistence_failures: 1,
@@ -154,16 +171,16 @@ describe("browser logger runtime", () => {
       stageLogEntry({
         timestamp: new Date().toISOString(),
         level: "info",
-        source: "test",
+        source: TEST_SOURCE,
         message: "first",
       });
-      const snapshot = snapshotBrowserLogs("default-user");
+      const snapshot = snapshotBrowserLogs(TEST_SCOPE);
       await vi.waitFor(() => expect(storeMocks.append).toHaveBeenCalledTimes(1));
 
       stageLogEntry({
         timestamp: new Date().toISOString(),
         level: "info",
-        source: "test",
+        source: TEST_SOURCE,
         message: "second",
       });
       vi.runOnlyPendingTimers();
