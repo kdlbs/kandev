@@ -108,7 +108,7 @@ Each trigger firing creates a routine run record (`office_routine_runs`) with `r
 #### Heavy vs lightweight routines
 
 - **Lightweight** (`task_template` empty): fire produces a taskless agent run. Continuation summary keyed by `routine:<routine_id>`. Use case: "check upstream PRs" without a trackable artifact.
-- **Heavy** (`task_template` set): fire creates a fresh task in the `routine` workflow (a single auto-completing `in_progress -> done` step, system-flagged via `SystemWorkflowTemplateIDs` so heavy routine tasks inherit the hide-by-default UX), then a normal task-bound run. Use case: "daily review" where output should be a trackable item.
+- **Heavy** (`task_template` set): fire creates a task in the system `routine` workflow (one hidden `in_progress -> done` step). Its `task.created` event evaluates `auto_start_agent` and starts a task-bound run. Use case: "daily review" with trackable output.
 
 #### Concurrency policy
 
@@ -692,7 +692,7 @@ The scheduler reads all `queued` and unexpired-retry wakeup requests on boot and
 
 - **GIVEN** a parent task with subtasks [Spec (requires_approval, assigned to planner), Build (blocked_by Spec, assigned to developer)], **WHEN** the planner completes the Spec subtask, **THEN** Spec moves to `in_review`. **WHEN** the user approves, **THEN** Spec moves to `done`, Build's blocker resolves, and a `task_blockers_resolved` wakeup is queued for the developer agent. The developer starts working on Build automatically.
 
-- **GIVEN** a heavy routine "Daily Dep Update" with cron `0 9 * * *` in UTC and assignee "Frontend Worker", **WHEN** the clock reaches 09:00 UTC, **THEN** a task titled "Daily Dep Update - 2026-04-25" is created on the `routine` workflow, assigned to Frontend Worker, and a `task_assigned` wakeup is queued.
+- **GIVEN** a heavy routine "Daily Dep Update" with cron `0 9 * * *` and assignee "Frontend Worker", **WHEN** 09:00 UTC arrives, **THEN** its task is created on the `routine` workflow and `task.created` starts the normal task-bound session.
 
 - **GIVEN** a routine with `concurrency_policy=skip_if_active` and an active task from a previous run, **WHEN** the routine fires again, **THEN** no new task is created and the routine run is recorded with status `skipped`.
 
