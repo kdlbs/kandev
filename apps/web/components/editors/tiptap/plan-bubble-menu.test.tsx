@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   },
   bubbleMenu: {
     optionUpdateTransactions: 0,
+    renderCount: 0,
   },
 }));
 
@@ -62,6 +63,7 @@ vi.mock("@tiptap/react/menus", () => ({
     shouldShow?: (props: { editor: Editor; state: Editor["state"] }) => boolean;
     children: React.ReactNode;
   }) => {
+    mocks.bubbleMenu.renderCount += 1;
     const previousOptions = useRef(options);
     useEffect(() => {
       if (previousOptions.current === options) return;
@@ -167,6 +169,7 @@ afterEach(() => {
   mocks.viewport.bottomOffset = 0;
   mocks.viewport.viewportBottom = 800;
   mocks.bubbleMenu.optionUpdateTransactions = 0;
+  mocks.bubbleMenu.renderCount = 0;
 });
 
 describe("PlanBubbleMenu responsive presentation", () => {
@@ -231,7 +234,7 @@ describe("PlanBubbleMenu mobile selection behavior", () => {
 });
 
 describe("PlanBubbleMenu responsive layout", () => {
-  it("@covers AC-UI-RESPONSIVE-PLAN-FORMATTING-001.1: settles after a metadata transaction", () => {
+  it("@covers AC-UI-RESPONSIVE-PLAN-FORMATTING-001.1: deduplicates unchanged metadata transactions", () => {
     mocks.breakpoint.isFinePointer = true;
     mocks.breakpoint.isMobile = false;
     mocks.breakpoint.usesDesktopWorkbench = true;
@@ -244,7 +247,16 @@ describe("PlanBubbleMenu responsive layout", () => {
       editor.emit("focus");
     });
 
-    expect(mocks.bubbleMenu.optionUpdateTransactions).toBeLessThanOrEqual(1);
+    const renderCountAfterFocus = mocks.bubbleMenu.renderCount;
+    const optionUpdatesAfterFocus = mocks.bubbleMenu.optionUpdateTransactions;
+
+    act(() => {
+      editor.emit("transaction");
+    });
+
+    expect(mocks.bubbleMenu.renderCount).toBe(renderCountAfterFocus);
+    expect(mocks.bubbleMenu.optionUpdateTransactions).toBe(optionUpdatesAfterFocus);
+    expect(optionUpdatesAfterFocus).toBe(0);
   });
 
   it("keeps the dock visible while the link input owns focus", () => {

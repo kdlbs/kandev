@@ -62,6 +62,24 @@ type EditorSnapshot = {
 
 const PLAN_BUBBLE_MENU_OPTIONS = { placement: "top" } as const;
 
+const EDITOR_SNAPSHOT_KEYS = {
+  isFocused: "isFocused",
+  isCodeBlock: "isCodeBlock",
+  hasTextSelection: "hasTextSelection",
+  hasCommentSelection: "hasCommentSelection",
+  isBold: "isBold",
+  isItalic: "isItalic",
+  isUnderline: "isUnderline",
+  isStrike: "isStrike",
+  isCode: "isCode",
+  isHighlight: "isHighlight",
+  isLink: "isLink",
+} as const satisfies { [K in keyof EditorSnapshot]: K };
+
+const EDITOR_SNAPSHOT_KEY_VALUES = Object.values(EDITOR_SNAPSHOT_KEYS) as Array<
+  keyof EditorSnapshot
+>;
+
 function readEditorSnapshot(editor: Editor): EditorSnapshot {
   const { from, to } = editor.state.selection;
   const selectedText = editor.state.doc.textBetween(from, to, " ").trim();
@@ -82,19 +100,7 @@ function readEditorSnapshot(editor: Editor): EditorSnapshot {
 }
 
 function areEditorSnapshotsEqual(first: EditorSnapshot, second: EditorSnapshot): boolean {
-  return (
-    first.isFocused === second.isFocused &&
-    first.isCodeBlock === second.isCodeBlock &&
-    first.hasTextSelection === second.hasTextSelection &&
-    first.hasCommentSelection === second.hasCommentSelection &&
-    first.isBold === second.isBold &&
-    first.isItalic === second.isItalic &&
-    first.isUnderline === second.isUnderline &&
-    first.isStrike === second.isStrike &&
-    first.isCode === second.isCode &&
-    first.isHighlight === second.isHighlight &&
-    first.isLink === second.isLink
-  );
+  return EDITOR_SNAPSHOT_KEY_VALUES.every((key) => first[key] === second[key]);
 }
 
 function useEditorSnapshot(editor: Editor): EditorSnapshot {
