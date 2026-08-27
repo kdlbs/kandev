@@ -146,3 +146,5 @@ session. Keep the requirement, design, plan, and work-order statuses in sync.
 - The resource invalidates publication when its lease is gone or its workspace
   context is no longer current. WebSocket request timeouts remain owned by the
   existing client.
+- Unlink invalidates the scoped request generation after local removal, so an
+  in-flight response cannot restore the removed association.

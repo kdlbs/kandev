@@ -82,8 +82,9 @@ export function useTaskPR(taskId: string | null) {
       if (!taskId || !workspaceId) throw new Error("No active workspace is selected.");
       await deleteTaskPR(associationId, workspaceId);
       removeTaskPR(taskId, associationId, { workspaceId, workspaceContextGeneration });
+      if (scope) resource.invalidate(scope);
     },
-    [removeTaskPR, taskId, workspaceContextGeneration, workspaceId],
+    [removeTaskPR, resource, scope, taskId, workspaceContextGeneration, workspaceId],
   );
 
   return {

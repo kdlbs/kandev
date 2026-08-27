@@ -133,6 +133,10 @@ continues to expose:
 - `loaded`, true when either the resource has settled the scoped load or the
   scoped store already contains an association.
 
+After a successful unlink, the hook invalidates the scoped resource generation
+after removing the local association. A response already in flight can settle
+for its caller, but it cannot restore the removed association.
+
 Call sites do not change. All existing surfaces benefit from coordination
 through the hook boundary.
 

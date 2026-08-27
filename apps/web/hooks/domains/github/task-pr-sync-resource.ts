@@ -24,6 +24,7 @@ export type TaskPRSyncResourceOptions = {
 
 export type TaskPRSyncResource = {
   getSnapshot: (scope: TaskPRSyncScope) => boolean;
+  invalidate: (scope: TaskPRSyncScope) => void;
   refresh: (scope: TaskPRSyncScope) => Promise<void>;
   subscribe: (scope: TaskPRSyncScope, listener: () => void) => () => void;
 };
@@ -275,6 +276,12 @@ function startRequest(store: ResourceStore, entry: ResourceEntry): Promise<void>
   return promise;
 }
 
+function invalidate(store: ResourceStore, scope: TaskPRSyncScope): void {
+  const entry = store.entries.get(scopeKey(scope));
+  if (!entry) return;
+  entry.requestGeneration += 1;
+}
+
 function observeStore(store: ResourceStore, entry: ResourceEntry): void {
   entry.connectionStatus = storeState(store).connection.status;
   entry.stopStoreSubscription = store.appStore.subscribe((state) => {
@@ -335,6 +342,7 @@ function createResource(
   };
   return {
     getSnapshot: (scope) => resourceStore.entries.get(scopeKey(scope))?.loaded ?? false,
+    invalidate: (scope) => invalidate(resourceStore, scope),
     refresh: (scope) => startRequest(resourceStore, entryFor(resourceStore, scope)),
     subscribe: (scope, listener) => subscribe(resourceStore, scope, listener),
   };
