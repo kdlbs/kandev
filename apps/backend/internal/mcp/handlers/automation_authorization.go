@@ -44,6 +44,7 @@ var automationSurfaceActions = map[string]struct{}{
 	ws.ActionMCPListRelatedTasks:            {},
 	ws.ActionMCPGetTaskConversation:         {},
 	ws.ActionMCPListTaskSessions:            {},
+	ws.ActionMCPListTaskInbox:               {},
 	ws.ActionMCPCreateTask:                  {},
 	ws.ActionMCPUpdateTask:                  {},
 	ws.ActionMCPMoveTask:                    {},

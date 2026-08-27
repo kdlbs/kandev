@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
@@ -13,6 +15,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func taskInboxContext(taskID, sessionID string) context.Context {
+	return mcpscope.WithPrincipal(context.Background(), mcpscope.Principal{
+		CallerTaskID:    taskID,
+		CallerSessionID: sessionID,
+	})
+}
 
 // @covers AC-1, AC-4: inbox aggregation is task-bound and includes all of
 // the task's delivered inbound prompts without exposing another task.
@@ -36,7 +45,8 @@ func TestHandleListTaskInbox_AggregatesDeliveredMessagesForOwnTask(t *testing.T)
 		require.NoError(t, err)
 	}
 	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
-	resp, err := h.handleListTaskInbox(context.Background(), makeWSMessage(t, ws.ActionMCPListTaskInbox, map[string]interface{}{"task_id": task.ID, "caller_task_id": task.ID}))
+	ctx := taskInboxContext(task.ID, primary.ID)
+	resp, err := h.handleListTaskInbox(ctx, makeWSMessage(t, ws.ActionMCPListTaskInbox, map[string]interface{}{"task_id": task.ID, "caller_task_id": "spoofed"}))
 	require.NoError(t, err)
 	require.Equal(t, ws.MessageTypeResponse, resp.Type)
 	var payload struct {
@@ -47,6 +57,7 @@ func TestHandleListTaskInbox_AggregatesDeliveredMessagesForOwnTask(t *testing.T)
 	assert.Len(t, payload.Items, 2)
 	assert.Equal(t, 2, payload.Total)
 	assert.Equal(t, "transition-primary", payload.Items[0].TransitionID)
+	assert.True(t, payload.Items[0].IsCurrent)
 	assert.Equal(t, "visible", payload.Items[0].Content)
 	require.Len(t, payload.Items[0].Attachments, 1)
 	assert.Equal(t, "delivered.png", payload.Items[0].Attachments[0].Name)
@@ -89,7 +100,7 @@ func TestHandleListTaskInbox_PaginatesDeliveredMessagesWithCursor(t *testing.T) 
 		Cursor  string      `json:"cursor"`
 		HasMore bool        `json:"has_more"`
 	}
-	resp, err := h.handleListTaskInbox(ctx, request(""))
+	resp, err := h.handleListTaskInbox(taskInboxContext(task.ID, primary.ID), request(""))
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(resp.Payload, &firstPayload))
 	require.Len(t, firstPayload.Items, 1)
@@ -104,7 +115,7 @@ func TestHandleListTaskInbox_PaginatesDeliveredMessagesWithCursor(t *testing.T) 
 		Cursor  string      `json:"cursor"`
 		HasMore bool        `json:"has_more"`
 	}
-	resp, err = h.handleListTaskInbox(ctx, request(firstPayload.Cursor))
+	resp, err = h.handleListTaskInbox(taskInboxContext(task.ID, primary.ID), request(firstPayload.Cursor))
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(resp.Payload, &secondPayload))
 	require.Len(t, secondPayload.Items, 1)
@@ -133,7 +144,7 @@ func TestHandleListTaskInbox_ListsSafeQueuedPromptsWithoutMutatingQueue(t *testi
 	queued, err := orch.queue.QueueMessage(ctx, session.ID, task.ID, "queued prompt", "", "peer", false, []messagequeue.MessageAttachment{{AttachmentID: "att-1", Type: "image", Data: "secret-bytes", MimeType: "image/png", Name: "diagram.png", SizeBytes: 42}})
 	require.NoError(t, err)
 
-	resp, err := h.handleListTaskInbox(ctx, makeWSMessage(t, ws.ActionMCPListTaskInbox, map[string]interface{}{"task_id": task.ID, "caller_task_id": task.ID}))
+	resp, err := h.handleListTaskInbox(taskInboxContext(task.ID, session.ID), makeWSMessage(t, ws.ActionMCPListTaskInbox, map[string]interface{}{"task_id": task.ID, "caller_task_id": task.ID, "current_session_id": "spoofed"}))
 	require.NoError(t, err)
 	var payload struct {
 		Items []inboxItem `json:"items"`
@@ -171,4 +182,23 @@ func TestInboxLimitCapsOversizedPages(t *testing.T) {
 	assert.Equal(t, inboxDefaultLimit, inboxLimit(0))
 	assert.Equal(t, 7, inboxLimit(7))
 	assert.Equal(t, inboxMaxLimit, inboxLimit(inboxMaxLimit+1))
+}
+
+func TestHandleListTaskInbox_AllowsAutomationDispatch(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	_, task, session := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+	dispatcher := ws.NewDispatcher()
+	h.RegisterHandlers(dispatcher)
+	ctx := mcpscope.WithPrincipal(context.Background(), mcpscope.Principal{
+		AutomationID:    "automation-1",
+		WorkspaceID:     task.WorkspaceID,
+		CallerTaskID:    task.ID,
+		CallerSessionID: session.ID,
+		Surface:         mcpprofile.SurfaceAutomation,
+	})
+	resp, err := dispatcher.Dispatch(ctx, makeWSMessage(t, ws.ActionMCPListTaskInbox, map[string]interface{}{"task_id": task.ID}))
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
 }

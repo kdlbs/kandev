@@ -8,6 +8,7 @@ import (
 	"sort"
 	"time"
 
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
@@ -22,11 +23,12 @@ const (
 )
 
 type taskInboxRequest struct {
-	TaskID           string `json:"task_id"`
-	CallerTaskID     string `json:"caller_task_id"`
-	CurrentSessionID string `json:"current_session_id"`
-	Cursor           string `json:"cursor"`
-	Limit            int    `json:"limit"`
+	TaskID string `json:"task_id"`
+	Cursor string `json:"cursor"`
+	Limit  int    `json:"limit"`
+	// CurrentSessionID is filled from the trusted MCP principal, never from
+	// the request payload.
+	CurrentSessionID string `json:"-"`
 }
 
 type taskInboxCursor struct {
@@ -163,9 +165,11 @@ func (h *Handlers) parseTaskInboxRequest(ctx context.Context, msg *ws.Message) (
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return nil, nil, wsError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error())
 	}
-	if req.TaskID == "" || req.CallerTaskID == "" || req.TaskID != req.CallerTaskID {
+	principal, ok := mcpscope.PrincipalFromContext(ctx)
+	if !ok || req.TaskID == "" || req.TaskID != principal.CallerTaskID {
 		return nil, nil, wsError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task not found")
 	}
+	req.CurrentSessionID = principal.CallerSessionID
 	if req.Limit < 0 {
 		return nil, nil, wsError(msg.ID, msg.Action, ws.ErrorCodeValidation, "limit must be non-negative")
 	}
