@@ -38,6 +38,16 @@ Please create and open a Pull Request for the current branch using the GitHub CL
    - Request reviewers if applicable
    - Link to related issues
 
+**Architecture and scope gate:**
+- If the change adds a subsystem, changes a public API or protocol, changes
+  persistence or data models, adds an execution boundary, changes
+  authentication or permissions, or crosses multiple subsystems, confirm that
+  a linked issue records maintainer discussion before creating the PR.
+- If the issue or discussion is missing, stop and report the blocker. Do not
+  create a PR to start the discussion.
+- Prefer one logical change and a small diff. Split unrelated cleanup,
+  refactoring, and feature work into separate PRs.
+
 6. **Verify:**
    - Confirm the PR was created successfully
    - Provide the PR URL
