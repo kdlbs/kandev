@@ -29,6 +29,8 @@ GitHub credentials must not silently cross workspace boundaries. A local workspa
 - **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.8:** PAT and named CLI automation act as the verified human account. A separate `My GitHub` connection is only offered when workspace automation uses a GitHub App, because App installations are not people and cannot provide authenticated-viewer semantics.
 - **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.9:** When a Local or Worktree task inherits executor Git credentials, every Kandev-managed GitHub checkout shall use the current host `gh` clone protocol for `github.com`. Host-specific configuration takes precedence over global configuration, and SSH is used when neither scope provides a supported protocol.
 - **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.10:** Every Local or Worktree launch and resume shall re-evaluate the inherited clone protocol. The system shall reconcile the Kandev-managed checkout before task preparation continues. This behavior shall not require a backend restart. Kandev shall not rewrite the origin of a user-managed local checkout.
+- **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.11:** When a Local or Worktree task launches or resumes, the system shall inspect each attached Kandev-managed GitHub checkout before the agent starts. This behavior includes a prepared workspace that the task reuses.
+- **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.12:** The system shall reconcile each managed checkout to the canonical transport for the current task policy. It shall not rewrite an already-canonical origin or a user-managed local checkout.
 
 ## System design
 
