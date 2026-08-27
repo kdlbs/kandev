@@ -1124,6 +1124,26 @@ func (e *Executor) resolveResumeTaskEnvironment(ctx context.Context, taskID stri
 		return nil, fmt.Errorf("lookup existing task environment: %w", err)
 	}
 	if env == nil {
+		// Inherited-environment fallback (mirrors the launch path in
+		// executor_execute.go): a child task created by an office task-handoff
+		// may have had session.TaskEnvironmentID rewritten to point at the
+		// parent's / shared group's env row, which is owned by a *different*
+		// task. GetTaskEnvironmentByTaskID misses that row because it indexes by
+		// the child task id, so without this lookup the resume path treats the
+		// env as absent and persistTaskEnvironment tries to CREATE a new row
+		// using the inherited ID — which already exists, producing "UNIQUE
+		// constraint failed: task_environments.id". When the referenced row
+		// genuinely does not exist the ID is free, so we fall through to the
+		// create path (return nil) exactly as before.
+		if session.TaskEnvironmentID != "" {
+			inherited, inhErr := e.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
+			if inhErr != nil {
+				return nil, fmt.Errorf("lookup inherited task environment: %w", inhErr)
+			}
+			if inherited != nil {
+				return inherited, nil
+			}
+		}
 		return nil, nil
 	}
 	if session.TaskEnvironmentID != env.ID {
