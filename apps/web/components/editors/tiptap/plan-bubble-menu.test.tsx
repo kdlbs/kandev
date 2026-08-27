@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useEffect, useRef } from "react";
 import type { Editor } from "@tiptap/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -13,6 +14,9 @@ const mocks = vi.hoisted(() => ({
     bottomOffset: 0,
     keyboardOpen: false,
     viewportBottom: 800,
+  },
+  bubbleMenu: {
+    optionUpdateTransactions: 0,
   },
 }));
 
@@ -49,13 +53,25 @@ vi.mock("react-i18next", () => ({
 vi.mock("@tiptap/react/menus", () => ({
   BubbleMenu: ({
     editor,
+    options,
     shouldShow,
     children,
   }: {
     editor: Editor;
+    options?: object;
     shouldShow?: (props: { editor: Editor; state: Editor["state"] }) => boolean;
     children: React.ReactNode;
   }) => {
+    const previousOptions = useRef(options);
+    useEffect(() => {
+      if (previousOptions.current === options) return;
+      previousOptions.current = options;
+      mocks.bubbleMenu.optionUpdateTransactions += 1;
+      if (mocks.bubbleMenu.optionUpdateTransactions < 3) {
+        (editor as FakeEditor).emit("transaction");
+      }
+    }, [editor, options]);
+
     const isVisible = shouldShow?.({ editor, state: editor.state }) ?? true;
     return (
       <div data-testid="plan-selection-bubble" data-visible={isVisible ? "true" : "false"}>
@@ -150,6 +166,7 @@ afterEach(() => {
   mocks.viewport.keyboardOpen = false;
   mocks.viewport.bottomOffset = 0;
   mocks.viewport.viewportBottom = 800;
+  mocks.bubbleMenu.optionUpdateTransactions = 0;
 });
 
 describe("PlanBubbleMenu responsive presentation", () => {
@@ -214,6 +231,22 @@ describe("PlanBubbleMenu mobile selection behavior", () => {
 });
 
 describe("PlanBubbleMenu responsive layout", () => {
+  it("@covers AC-UI-RESPONSIVE-PLAN-FORMATTING-001.1: settles after a metadata transaction", () => {
+    mocks.breakpoint.isFinePointer = true;
+    mocks.breakpoint.isMobile = false;
+    mocks.breakpoint.usesDesktopWorkbench = true;
+    const editor = createEditor({ focused: false });
+
+    render(<PlanBubbleMenu editor={editor} />);
+
+    act(() => {
+      editor.setFocused(true);
+      editor.emit("focus");
+    });
+
+    expect(mocks.bubbleMenu.optionUpdateTransactions).toBeLessThanOrEqual(1);
+  });
+
   it("keeps the dock visible while the link input owns focus", () => {
     const editor = createEditor();
 
