@@ -84,6 +84,44 @@ func TestSQLiteStore_ReinitializesSchema(t *testing.T) {
 	}
 }
 
+func TestSQLiteStore_ProjectsStableTaskDirName(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	store.seedSessionWithEnvironment(t, "session-stable-root", "task-current-owner")
+	if _, err := store.db.ExecContext(ctx, `
+		UPDATE task_environments
+		SET task_dir_name = ?
+		WHERE id = ?
+	`, "original-task-root_abc", "env-session-stable-root"); err != nil {
+		t.Fatalf("set task directory name: %v", err)
+	}
+
+	wt := &Worktree{
+		ID:           "wt-stable-root",
+		SessionID:    "session-stable-root",
+		RepositoryID: "repo-stable-root",
+		Path:         "/tmp/stable-root/repo",
+		Branch:       "feature/stable-root",
+		Status:       StatusActive,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	if err := store.CreateWorktree(ctx, wt); err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+
+	got, err := store.GetWorktreeByID(ctx, wt.ID)
+	if err != nil {
+		t.Fatalf("get worktree: %v", err)
+	}
+	if got == nil {
+		t.Fatal("get worktree returned nil")
+	}
+	if got.TaskDirName != "original-task-root_abc" {
+		t.Fatalf("TaskDirName = %q, want original-task-root_abc", got.TaskDirName)
+	}
+}
+
 func TestSQLiteStore_ListActiveWorktreePaths(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()

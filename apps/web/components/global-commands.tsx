@@ -116,8 +116,12 @@ export function GlobalCommands() {
   const router = useRouter();
   const { resolvedTheme, setTheme } = useTheme();
   const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
-  const handleOpenQuickChat = useQuickChatLauncher(activeWorkspaceId);
-  const handleOpenConfigChat = useQuickChatLauncher(activeWorkspaceId, "config");
+  const handleOpenQuickChat = useQuickChatLauncher(activeWorkspaceId, "chat", {
+    silentFocusReturn: false,
+  });
+  const handleOpenConfigChat = useQuickChatLauncher(activeWorkspaceId, "config", {
+    silentFocusReturn: false,
+  });
 
   const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
   const quickChatShortcut = getShortcut("QUICK_CHAT", keyboardShortcuts);

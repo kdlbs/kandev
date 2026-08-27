@@ -254,7 +254,8 @@ describe("useSubtaskSubmit", () => {
   });
 
   it("sends the auto-title contract without a title", async () => {
-    const opts = makeSubmitOptions({ autoTitle: true });
+    const onClose = vi.fn();
+    const opts = makeSubmitOptions({ autoTitle: true, onClose });
     const { result } = renderHook(() => useSubtaskSubmit(opts));
 
     await act(async () => {
@@ -269,6 +270,9 @@ describe("useSubtaskSubmit", () => {
     expect(mockSetActiveTask).toHaveBeenCalledWith(CREATED_TASK_ID);
     expect(mockSetActiveSession).toHaveBeenCalledWith(CREATED_TASK_ID, CREATED_SESSION_ID);
     expect(mockReplaceTaskUrl).toHaveBeenCalledWith(CREATED_TASK_ID);
+    expect(onClose.mock.invocationCallOrder[0]).toBeLessThan(
+      mockReplaceTaskUrl.mock.invocationCallOrder[0],
+    );
   });
 
   it("sends the autopilot creation flag for a subtask", async () => {

@@ -354,6 +354,17 @@ func TestResolveRepositoryIDForSubpathMatchesSanitizedRepositoryName(t *testing.
 	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
 		ID: "env-1", TaskID: "task-1", ExecutorType: "worktree",
 		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+		Repos: []*models.TaskEnvironmentRepo{
+			{
+				ID:             "session-worktree-1",
+				RepositoryID:   "repo-1",
+				WorktreeID:     "worktree-1",
+				WorktreePath:   "/tmp/worktree",
+				WorktreeBranch: "feature/test",
+				BranchSlug:     "test",
+				Position:       0,
+			},
+		},
 	}); err != nil {
 		t.Fatalf("CreateTaskEnvironment: %v", err)
 	}
@@ -361,18 +372,6 @@ func TestResolveRepositoryIDForSubpathMatchesSanitizedRepositoryName(t *testing.
 		`UPDATE task_sessions SET task_environment_id = ? WHERE id = ?`),
 		"env-1", "session-1"); err != nil {
 		t.Fatalf("link session to env: %v", err)
-	}
-	if err := repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
-		ID:                "session-worktree-1",
-		TaskEnvironmentID: "env-1",
-		RepositoryID:      "repo-1",
-		WorktreeID:        "worktree-1",
-		WorktreePath:      "/tmp/worktree",
-		WorktreeBranch:    "feature/test",
-		BranchSlug:        "test",
-		Position:          0,
-	}); err != nil {
-		t.Fatalf("CreateTaskSessionWorktree: %v", err)
 	}
 
 	got := resolveRepositoryIDForSessionSubpath(ctx, repo, "session-1", "kdlbs-kandev", log)

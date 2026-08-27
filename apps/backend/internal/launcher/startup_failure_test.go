@@ -103,15 +103,14 @@ func TestBackendLogPathForDevConfigUsesEffectiveBackendHome(t *testing.T) {
 		t.Fatalf("default dev backend log = %q, want %q", got, want)
 	}
 
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	t.Setenv("HOME", t.TempDir())
 	databasePath := filepath.Join(t.TempDir(), "kandev.db")
 	t.Setenv("KANDEV_DATABASE_PATH", databasePath)
 	overrideExtra := devExtraForTest(t, repo)
 	got = backendLogPathForDevConfig(devLaunchConfig{startup: nil, extra: overrideExtra})
-	want = filepath.Join(home, ".kandev", "logs", "backend-logs.log")
+	want = filepath.Join(repo, ".kandev-dev", "logs", "backend-logs.log")
 	if got != want {
-		t.Fatalf("explicit database dev backend log = %q, want %q", got, want)
+		t.Fatalf("explicit database dev backend log = %q, want repo-local %q", got, want)
 	}
 }
 

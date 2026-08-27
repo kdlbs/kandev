@@ -40,6 +40,11 @@ type Worktree struct {
 	// Multiple worktrees can exist for the same task (one per agent session).
 	TaskID string `json:"task_id"`
 
+	// TaskDirName is the stable task-root identity used by filesystem
+	// ownership checks. It remains unchanged when a task environment changes
+	// owners, so it is intentionally not part of the public JSON contract.
+	TaskDirName string `json:"-"`
+
 	// TaskEnvironmentID is the task environment that owns this worktree.
 	// Physical worktree records live on task_environment_repos; sessions
 	// reference the environment through task_sessions.task_environment_id.

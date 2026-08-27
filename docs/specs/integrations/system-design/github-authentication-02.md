@@ -71,6 +71,10 @@ post-signature processing failures produce `failing`; a later valid successful d
 - Each attached repository is resolved once for an individual launch or resume. The resolved
   repository set is shared by task configuration and credential-snapshot construction rather than
   triggering repeated materialization or origin mutation.
+- Executor-inherited Local and Worktree preparation resolves the clone protocol while it constructs
+  the desired `github.com` origin. It queries host-specific `gh` configuration before global
+  configuration and defaults to SSH when neither query returns a supported protocol. The resolver
+  is called again for every launch and resume. Backend startup stores no protocol result.
 - Broker issuance and redemption use the same persisted repository identity fields. A local Git
   checkout and its `origin` are materialization data, not authorization data.
 - A public `github.com` remote can supply an in-memory origin when persisted provider-host metadata
@@ -151,6 +155,9 @@ post-signature processing failures produce `failing`; a later valid successful d
   truncating, partially merging, or executing a different block.
 - If executor inheritance is selected but no usable credential exists in that executor, Git/SSH
   reports its normal authentication failure. Kandev does not probe or guess the actor.
+- If host-specific `gh` clone-protocol configuration is unavailable or unsupported, resolution
+  tries the global value. If neither scope returns `ssh` or `https`, executor inheritance uses SSH.
+  A configuration lookup failure does not reuse an earlier process-cached result.
 - If host `gh` is absent, unauthenticated, or fails active-account validation while a workspace is
   created, the workspace remains disconnected for automation, retains executor task access, and
   creation succeeds.

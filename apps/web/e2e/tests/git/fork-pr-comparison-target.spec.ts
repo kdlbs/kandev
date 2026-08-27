@@ -4,7 +4,7 @@ import { SessionPage } from "../../pages/session-page";
 import { seedForkPRComparisonTask } from "./fork-pr-comparison-target-helpers";
 
 test.describe("Fork pull-request comparison target", () => {
-  test.describe.configure({ retries: 1, timeout: 120_000 });
+  test.describe.configure({ timeout: 120_000 });
 
   test("uses the upstream target for one fork commit and three files", async ({
     testPage,

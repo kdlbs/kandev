@@ -27,9 +27,9 @@ const (
 )
 
 type WorkspaceSourceInput struct {
-	Kind                                                                                                 WorkspaceSourceKind
-	RepositoryID, LocalPath, GitHubURL, RemoteURL, Provider, ProviderRepoID, ProviderOwner, ProviderName string
-	BaseBranch, CheckoutBranch, DisplayName                                                              string
+	Kind                                                                                                                              WorkspaceSourceKind
+	RepositoryID, LocalPath, GitHubURL, RemoteURL, Provider, ProviderHost, ProviderScope, ProviderRepoID, ProviderOwner, ProviderName string
+	BaseBranch, CheckoutBranch, DisplayName                                                                                           string
 }
 
 type AttachWorkspaceSourcesRequest struct {
@@ -391,7 +391,7 @@ func (s *Service) validateRepositoryWorkspaceSourceInput(ctx context.Context, ta
 }
 
 func (s *Service) resolveRepositoryWorkspaceSource(ctx context.Context, task *models.Task, input WorkspaceSourceInput) (string, string, string, error) {
-	id, base, created, err := s.ResolveRepositoryRef(ctx, task.WorkspaceID, TaskRepositoryInput{RepositoryID: input.RepositoryID, LocalPath: input.LocalPath, GitHubURL: input.GitHubURL, RemoteURL: input.RemoteURL, Provider: input.Provider, ProviderRepoID: input.ProviderRepoID, ProviderOwner: input.ProviderOwner, ProviderName: input.ProviderName, BaseBranch: input.BaseBranch, ResolveProviderDefaults: true})
+	id, base, created, err := s.ResolveRepositoryRef(ctx, task.WorkspaceID, TaskRepositoryInput{RepositoryID: input.RepositoryID, LocalPath: input.LocalPath, GitHubURL: input.GitHubURL, RemoteURL: input.RemoteURL, Provider: input.Provider, ProviderHost: input.ProviderHost, ProviderScope: input.ProviderScope, ProviderRepoID: input.ProviderRepoID, ProviderOwner: input.ProviderOwner, ProviderName: input.ProviderName, BaseBranch: input.BaseBranch, ResolveProviderDefaults: true})
 	if err != nil {
 		return "", "", "", classifyWorkspaceRepositoryError(err)
 	}

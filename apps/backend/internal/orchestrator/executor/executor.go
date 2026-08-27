@@ -876,7 +876,7 @@ type RepoCloner interface {
 	// SetOriginURL updates a Kandev-managed checkout remote without exposing credentials.
 	SetOriginURL(ctx context.Context, repositoryPath, originURL string) error
 	// BuildCloneURL constructs a protocol-aware clone URL for the given provider/owner/name.
-	BuildCloneURLWithHost(provider, host, owner, name string) (string, error)
+	BuildCloneURLWithHost(ctx context.Context, provider, host, owner, name string) (string, error)
 }
 
 type authenticatedRepoCloner interface {

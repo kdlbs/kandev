@@ -559,6 +559,15 @@ func TestCheckSessionPR(t *testing.T) {
 		if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
 			ID: "env1", TaskID: "t1", ExecutorType: "worktree",
 			WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+			Repos: []*models.TaskEnvironmentRepo{
+				{
+					ID:             "wt1",
+					WorktreeID:     "wtree1",
+					RepositoryID:   "repo1",
+					WorktreeBranch: branch,
+					CreatedAt:      now,
+				},
+			},
 		}); err != nil {
 			t.Fatalf("failed to create environment: %v", err)
 		}
@@ -569,17 +578,6 @@ func TestCheckSessionPR(t *testing.T) {
 		session.TaskEnvironmentID = "env1"
 		if err := repo.UpdateTaskSession(ctx, session); err != nil {
 			t.Fatalf("link session to environment: %v", err)
-		}
-		wt := &models.TaskEnvironmentRepo{
-			ID:                "wt1",
-			TaskEnvironmentID: "env1",
-			WorktreeID:        "wtree1",
-			RepositoryID:      "repo1",
-			WorktreeBranch:    branch,
-			CreatedAt:         now,
-		}
-		if err := repo.CreateTaskEnvironmentRepo(ctx, wt); err != nil {
-			t.Fatalf("failed to create worktree: %v", err)
 		}
 
 		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
@@ -1205,6 +1203,10 @@ func TestListTasksNeedingPRWatch(t *testing.T) {
 		if err := testRepo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
 			ID: "env-s1", TaskID: "t1", ExecutorType: "worktree",
 			WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+			Repos: []*models.TaskEnvironmentRepo{
+				{ID: "wt-1", WorktreeID: "wtree-1", RepositoryID: "repo-front", WorktreeBranch: "feat/frontend", CreatedAt: now},
+				{ID: "wt-2", WorktreeID: "wtree-2", RepositoryID: "repo-back", WorktreeBranch: "feat/backend", CreatedAt: now},
+			},
 		}); err != nil {
 			t.Fatalf("create environment: %v", err)
 		}
@@ -1215,15 +1217,6 @@ func TestListTasksNeedingPRWatch(t *testing.T) {
 		session.TaskEnvironmentID = "env-s1"
 		if err := testRepo.UpdateTaskSession(ctx, session); err != nil {
 			t.Fatalf("link session to environment: %v", err)
-		}
-		worktrees := []*models.TaskEnvironmentRepo{
-			{ID: "wt-1", TaskEnvironmentID: "env-s1", WorktreeID: "wtree-1", RepositoryID: "repo-front", WorktreeBranch: "feat/frontend", CreatedAt: now},
-			{ID: "wt-2", TaskEnvironmentID: "env-s1", WorktreeID: "wtree-2", RepositoryID: "repo-back", WorktreeBranch: "feat/backend", CreatedAt: now},
-		}
-		for _, wt := range worktrees {
-			if err := testRepo.CreateTaskEnvironmentRepo(ctx, wt); err != nil {
-				t.Fatalf("worktree %s: %v", wt.ID, err)
-			}
 		}
 
 		svc := createTestService(testRepo, newMockStepGetter(), newMockTaskRepo())
@@ -1300,6 +1293,10 @@ func TestEnsureSessionPRWatch_MultiRepo(t *testing.T) {
 	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
 		ID: "env-s1", TaskID: "t1", ExecutorType: "worktree",
 		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+		Repos: []*models.TaskEnvironmentRepo{
+			{ID: "wt-1", WorktreeID: "wtree-1", RepositoryID: "repo-front", WorktreeBranch: "feat/frontend", CreatedAt: now},
+			{ID: "wt-2", WorktreeID: "wtree-2", RepositoryID: "repo-back", WorktreeBranch: "feat/backend", CreatedAt: now},
+		},
 	}); err != nil {
 		t.Fatalf("create environment: %v", err)
 	}
@@ -1310,14 +1307,6 @@ func TestEnsureSessionPRWatch_MultiRepo(t *testing.T) {
 	session.TaskEnvironmentID = "env-s1"
 	if err := repo.UpdateTaskSession(ctx, session); err != nil {
 		t.Fatalf("link session to environment: %v", err)
-	}
-	for _, wt := range []*models.TaskEnvironmentRepo{
-		{ID: "wt-1", TaskEnvironmentID: "env-s1", WorktreeID: "wtree-1", RepositoryID: "repo-front", WorktreeBranch: "feat/frontend", CreatedAt: now},
-		{ID: "wt-2", TaskEnvironmentID: "env-s1", WorktreeID: "wtree-2", RepositoryID: "repo-back", WorktreeBranch: "feat/backend", CreatedAt: now},
-	} {
-		if err := repo.CreateTaskEnvironmentRepo(ctx, wt); err != nil {
-			t.Fatalf("worktree: %v", err)
-		}
 	}
 
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())

@@ -28,6 +28,12 @@ Quick Chat and Quick Terminal are both short-lived utilities reached from the sa
 - **AC-UI-QUICK-TERMINAL-001.6:** Chat and terminal tabs share one horizontal tab strip. Configuration indicators and workspace-local terminal labels such as `Terminal 1` and `Terminal 2` remain unchanged.
 - **AC-UI-QUICK-TERMINAL-001.7:** Renameable conversation tabs expose **Rename** from a context menu on fine-pointer devices and from a visible tab action on coarse-pointer devices. The backing-task rename persistence remains unchanged. Terminal labels stay fixed.
 - **AC-UI-QUICK-TERMINAL-001.8:** Multiple terminal tabs can run concurrently. Input, output, resize, exit, and error state belong to the selected terminal and must not affect sibling terminals.
+- **AC-UI-QUICK-TERMINAL-001.9:** When Escape closes the shared dialog, the system shall return focus to the launcher without a visible focus indicator. When focus later returns through ordinary keyboard navigation, the launcher shall show its normal focus indicator.
+
+## Out of scope
+
+- Changing pointer dismissal, tooltip behavior, or focus indicators on unrelated controls.
+- Changing the Quick Chat layout or its mobile touch controls.
 
 ### REQ-UI-QUICK-TERMINAL-002: Quick Chat Tab Organization
 

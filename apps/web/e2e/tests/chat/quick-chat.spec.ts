@@ -71,6 +71,67 @@ test.describe("Quick Chat", () => {
     await expect(overlay).not.toBeVisible();
   });
 
+  test("returns focus without a visible indicator", async ({ testPage }) => {
+    await testPage.goto("/");
+    await testPage.waitForLoadState("networkidle");
+    const dialog = await openQuickChatSetup(testPage, false);
+    const launcher = testPage.getByTestId("sidebar-quick-chat-shortcut");
+
+    await testPage.keyboard.press("Escape");
+
+    await expect(dialog).not.toBeVisible();
+    await expect(launcher).toBeFocused();
+    await expect(launcher).toHaveAttribute("data-quick-chat-silent-focus", "true");
+
+    const silentStyles = await launcher.evaluate((element) => {
+      const styles = getComputedStyle(element);
+      return {
+        outlineStyle: styles.outlineStyle,
+        boxShadow: styles.boxShadow,
+        borderColor: styles.borderColor,
+      };
+    });
+    expect(silentStyles.outlineStyle).toBe("none");
+    expect(silentStyles.boxShadow).toBe("none");
+    expect(silentStyles.borderColor).toBe("rgba(0, 0, 0, 0)");
+
+    await testPage.getByTestId("create-task-button").focus();
+    await expect(launcher).not.toHaveAttribute("data-quick-chat-silent-focus");
+
+    await testPage.keyboard.press("Tab");
+    await testPage.keyboard.press("Tab");
+    await expect(launcher).toBeFocused();
+
+    const normalFocusStyles = await launcher.evaluate((element) => {
+      const styles = getComputedStyle(element);
+      return {
+        outlineStyle: styles.outlineStyle,
+        boxShadow: styles.boxShadow,
+        borderColor: styles.borderColor,
+      };
+    });
+    expect(normalFocusStyles.outlineStyle).not.toBe("none");
+    expect(normalFocusStyles.borderColor).not.toBe(silentStyles.borderColor);
+  });
+
+  test("returns focus to a shortcut origin without a silent marker", async ({ testPage }) => {
+    await testPage.goto("/");
+    await testPage.waitForLoadState("networkidle");
+    const origin = testPage.getByTestId("create-task-button");
+    await origin.focus();
+
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    await testPage.keyboard.press(`${modifier}+Shift+q`);
+    const dialog = testPage.getByRole("dialog", { name: "Quick Chat" });
+    await expect(dialog).toBeVisible();
+
+    await testPage.keyboard.press("Escape");
+
+    await expect(dialog).not.toBeVisible();
+    await expect(origin).toBeFocused();
+    await expect(origin).not.toHaveAttribute("data-quick-chat-silent-focus");
+  });
+
   test("clarification shortcuts work after clicking the message surface", async ({ testPage }) => {
     const dialog = await openQuickChatWithAgent(testPage);
     await sendQuickChatMessage(dialog, testPage, "/e2e:clarification-multi");

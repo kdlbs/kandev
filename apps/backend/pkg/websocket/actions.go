@@ -693,5 +693,6 @@ const (
 	ErrorCodeForbidden     = "FORBIDDEN"
 	ErrorCodeValidation    = "VALIDATION_ERROR"
 	ErrorCodeConflict      = "CONFLICT"
+	ErrorCodeUnavailable   = "UNAVAILABLE"
 	ErrorCodeUnknownAction = "UNKNOWN_ACTION"
 )

@@ -863,8 +863,14 @@ test.describe("Mobile sidebar task actions", () => {
 
       const dialog = testPage.getByTestId("new-subtask-dialog");
       await dialog.getByTestId("subtask-workspace-mode-new").tap();
-      await dialog.getByTestId("executor-profile-selector").tap();
-      await testPage.getByRole("option", { name: new RegExp(localProfile.name) }).tap();
+      const executorSelector = dialog.getByTestId("executor-profile-selector");
+      await expect(async () => {
+        await executorSelector.tap();
+        await testPage
+          .getByRole("option", { name: new RegExp(localProfile.name) })
+          .tap({ force: true });
+        await expect(executorSelector).toContainText(localProfile.name, { timeout: 1_000 });
+      }).toPass({ timeout: 10_000 });
       await dialog.getByTestId("branch-chip-trigger").tap();
       await testPage.getByRole("option", { name: new RegExp(policy.name) }).tap({ force: true });
       await expect(dialog.getByTestId("fresh-branch-toggle")).toHaveAttribute(
@@ -873,7 +879,10 @@ test.describe("Mobile sidebar task actions", () => {
       );
       await dialog.getByTestId("subtask-title-input").fill(childTitle);
       await dialog.getByTestId("subtask-prompt-input").fill("/e2e:simple-message");
-      await dialog.getByRole("button", { name: "Create Subtask", exact: true }).tap();
+      const createSubtask = dialog.getByRole("button", { name: "Create Subtask", exact: true });
+      await expect(executorSelector).toContainText(localProfile.name);
+      await expect(createSubtask).toBeEnabled();
+      await createSubtask.tap();
       await expect(dialog).toBeHidden({ timeout: 30_000 });
       let childId: string | undefined;
       await expect

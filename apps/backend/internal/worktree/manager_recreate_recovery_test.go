@@ -115,6 +115,52 @@ esac
 	}
 }
 
+// TestRecreate_RejectsSymlinkedAncestorBeforeRemoval ensures recreate does not
+// delete through an ancestor that changed into a symlink after earlier reuse
+// validation.
+func TestRecreate_RejectsSymlinkedAncestorBeforeRemoval(t *testing.T) {
+	repoPath := initGitRepoWithRemote(t)
+	cfg := newTestConfig(t)
+	mgr, err := NewManager(cfg, newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	outside := t.TempDir()
+	liveWorktree := filepath.Join(outside, "repo-one")
+	if err := os.MkdirAll(liveWorktree, 0o755); err != nil {
+		t.Fatalf("mkdir live worktree: %v", err)
+	}
+	canary := filepath.Join(liveWorktree, "must-survive")
+	if err := os.WriteFile(canary, []byte("live task data"), 0o600); err != nil {
+		t.Fatalf("write canary: %v", err)
+	}
+	taskRoot := filepath.Join(cfg.TasksBasePath, "task-one")
+	if err := os.Symlink(outside, taskRoot); err != nil {
+		t.Fatalf("replace task root with symlink: %v", err)
+	}
+
+	_, err = mgr.recreate(context.Background(), &Worktree{
+		ID:           "wt-symlink-race",
+		TaskID:       "task-one",
+		TaskDirName:  "task-one",
+		RepositoryID: "repo-one",
+		Path:         filepath.Join(taskRoot, "repo-one"),
+		Branch:       "feature/pr-branch",
+		Status:       StatusActive,
+	}, CreateRequest{
+		TaskID:         "task-one",
+		RepositoryID:   "repo-one",
+		RepositoryPath: repoPath,
+	})
+	if err == nil {
+		t.Fatal("recreate() error = nil, want symlinked ancestor rejection")
+	}
+	if _, statErr := os.Stat(canary); statErr != nil {
+		t.Fatalf("recreate() touched live worktree through symlink: %v", statErr)
+	}
+}
+
 // TestRecreate_BranchGoneEverywhereReturnsUnrecoverable pins the degraded
 // path: local branch deleted AND the branch never made it to origin (or was
 // deleted there too). recreate must return ErrBranchUnrecoverable so callers

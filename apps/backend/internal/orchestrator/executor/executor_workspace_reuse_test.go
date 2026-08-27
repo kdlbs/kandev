@@ -15,6 +15,7 @@ func TestWorkspaceReuseAllowedRequiresLiveWorktreeRepo(t *testing.T) {
 		env              *models.TaskEnvironment
 		requestedType    string
 		reuseRequired    bool
+		repoBacked       bool
 		wantReuseAllowed bool
 	}{
 		{
@@ -119,7 +120,48 @@ func TestWorkspaceReuseAllowedRequiresLiveWorktreeRepo(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := workspaceReuseAllowed(tt.env, tt.requestedType, tt.reuseRequired); got != tt.wantReuseAllowed {
+			if got := workspaceReuseAllowed(tt.env, tt.requestedType, tt.reuseRequired, tt.repoBacked); got != tt.wantReuseAllowed {
+				t.Fatalf("workspaceReuseAllowed() = %t, want %t", got, tt.wantReuseAllowed)
+			}
+		})
+	}
+}
+
+// @covers AC-TASKS-RUNTIME-CLEANUP-001.7
+func TestWorkspaceReuseAllowedRequiresSSHInventory(t *testing.T) {
+	tests := []struct {
+		name             string
+		env              *models.TaskEnvironment
+		repoBacked       bool
+		wantReuseAllowed bool
+	}{
+		{
+			name:             "repo-backed with empty inventory forces fresh materialization",
+			env:              &models.TaskEnvironment{ExecutorType: string(models.ExecutorTypeSSH)},
+			repoBacked:       true,
+			wantReuseAllowed: false,
+		},
+		{
+			name: "repo-backed with recorded inventory reuses",
+			env: &models.TaskEnvironment{
+				ExecutorType: string(models.ExecutorTypeSSH),
+				Repos:        []*models.TaskEnvironmentRepo{{RepositoryID: "repo-1"}},
+			},
+			repoBacked:       true,
+			wantReuseAllowed: true,
+		},
+		{
+			name:             "repo-less task reuses despite empty inventory",
+			env:              &models.TaskEnvironment{ExecutorType: string(models.ExecutorTypeSSH)},
+			repoBacked:       false,
+			wantReuseAllowed: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := workspaceReuseAllowed(tt.env, string(models.ExecutorTypeSSH), true, tt.repoBacked)
+			if got != tt.wantReuseAllowed {
 				t.Fatalf("workspaceReuseAllowed() = %t, want %t", got, tt.wantReuseAllowed)
 			}
 		})

@@ -95,14 +95,19 @@ automation under different GitHub Apps without operating separate Kandev deploym
   actions because they leave Kandev for GitHub rather than saving a local connection draft.
 - For Kandev-managed GitHub checkouts used by Local and Worktree tasks, the selected task policy
   also controls the persisted `origin` transport. Managed routing uses canonical GitHub HTTPS.
-  Executor inheritance uses the host's detected `gh` clone protocol, including SSH, and reconciles
-  an existing managed checkout when the policy changes. This makes Git conditional includes based
-  on `remote.*.url` observe the same transport the task uses. Kandev never rewrites the remote of a
-  repository registered as a user-managed local checkout.
+  Executor inheritance resolves the current `github.com` protocol from host `gh` configuration at
+  the clone or origin-reconciliation boundary. Resolution accepts the host-specific value first,
+  then the global value, and defaults to SSH when neither scope supplies `ssh` or `https`. Launch
+  and resume do not use a backend-startup snapshot, so a later host configuration change applies
+  without restart. This makes Git conditional includes based on `remote.*.url` observe the same
+  transport the task uses. Kandev never rewrites the remote of a repository registered as a
+  user-managed local checkout.
 - Repository preparation resolves each attached repository once per launch or resume and reuses
   that result for primary-repository configuration, multi-repository configuration, and credential
-  routing. Origin reconciliation is serialized per managed checkout, compares the current and
-  desired canonical URLs, and performs no write when they already match.
+  routing. The clone-protocol resolver itself is stateless and injected at the repository URL
+  construction boundary. The long-lived cloner and review-repository adapter do not store a
+  resolved protocol. Origin reconciliation is serialized per managed checkout. It compares the
+  current and desired canonical URLs, and performs no write when they already match.
 - Repository preparation validates any contribution destination before issuing credentials, adds a
   collision-resistant dedicated fork remote, and reconstructs it on launch and resume. It never
   accepts a fork inferred from the checkout's current remotes or a caller-provided repository name.

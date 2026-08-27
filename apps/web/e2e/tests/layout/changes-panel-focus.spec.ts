@@ -174,6 +174,15 @@ async function moveChangesToChatGroupAndFocusChat(testPage: Page) {
 }
 
 test.describe("Changes panel focus behavior", () => {
+  test.beforeEach(({ backend, seedData }) => {
+    // Requesting seedData guarantees that the repository and its offline
+    // origin exist before this hook runs.
+    const git = new GitHelper(seedData.repositoryPath, makeGitEnv(backend.tmpDir));
+    const seedCommit = git.exec("git rev-list --max-parents=0 HEAD").trim();
+    git.exec(`git reset --hard ${seedCommit}`);
+    git.exec("git clean -fd");
+  });
+
   /**
    * Verifies the changes panel does NOT steal focus from the chat tab
    * on page refresh when the task has existing git changes/commits.

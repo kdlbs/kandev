@@ -93,6 +93,12 @@ var (
 	// find a valid canonical worktree. Callers must surface this as a workspace
 	// reuse failure; they must never fall through to git worktree add.
 	ErrReuseWorktreeUnavailable = errors.New("required worktree is unavailable for reuse")
+
+	// ErrWorktreePathOwnedByAnotherTask is returned when a persisted worktree
+	// record points at a task root whose ownership marker belongs to a
+	// different task. Reusing or recreating that record could attach to or
+	// delete the other task's live checkout.
+	ErrWorktreePathOwnedByAnotherTask = errors.New("worktree path is owned by another task")
 )
 
 // containsAuthFailure checks if git output indicates an authentication failure.

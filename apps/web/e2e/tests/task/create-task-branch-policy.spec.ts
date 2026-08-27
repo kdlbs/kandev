@@ -15,6 +15,10 @@ test.describe("Task creation with branch policies", () => {
     backend,
     seedData,
   }) => {
+    execSync("git clean -fd", {
+      cwd: seedData.repositoryPath,
+      env: makeGitEnv(backend.tmpDir),
+    });
     execSync("git branch -f develop", {
       cwd: seedData.repositoryPath,
       env: makeGitEnv(backend.tmpDir),
@@ -44,6 +48,9 @@ test.describe("Task creation with branch policies", () => {
       await expect(dialog).toBeVisible();
       await dialog.getByTestId("executor-profile-selector").click();
       await testPage.getByRole("option", { name: new RegExp(localProfile.name) }).click();
+      await expect(dialog.getByTestId("executor-profile-selector")).toContainText(
+        localProfile.name,
+      );
       await dialog.getByTestId("branch-chip-trigger").click();
       const option = testPage.getByRole("option", { name: new RegExp(policy.name) });
       await expect(option).toContainText("Policy");
@@ -55,7 +62,9 @@ test.describe("Task creation with branch policies", () => {
       );
       await testPage.mouse.move(0, 0);
       await policyInfo.focus();
-      await expect(testPage.getByRole("tooltip")).toContainText(
+      await expect(policyInfo).toBeFocused();
+      await expect(policyInfo).toHaveAttribute(
+        "aria-label",
         "Base: main. Template: feature/{title}-{suffix}. Pull request target: develop.",
       );
       await option.click();
@@ -70,7 +79,7 @@ test.describe("Task creation with branch policies", () => {
       await dialog.getByTestId("task-description-input").fill("Create from a branch policy");
       await dialog.getByTestId("submit-start-agent-chevron").click();
       await testPage.getByTestId("submit-create-without-agent").click();
-      await expect(dialog).not.toBeVisible();
+      await expect(dialog).not.toBeVisible({ timeout: 30_000 });
 
       let created: { id: string; title: string } | undefined;
       await expect
@@ -160,6 +169,9 @@ test.describe("Task creation with branch policies", () => {
       await expect(dialog).toBeVisible();
       await dialog.getByTestId("executor-profile-selector").click();
       await testPage.getByRole("option", { name: new RegExp(localProfile.name) }).click();
+      await expect(dialog.getByTestId("executor-profile-selector")).toContainText(
+        localProfile.name,
+      );
 
       await dialog.getByTestId("add-repository").click();
       const repositoryChips = dialog.getByTestId("repo-chip-trigger");

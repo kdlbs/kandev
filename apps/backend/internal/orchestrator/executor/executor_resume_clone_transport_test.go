@@ -65,6 +65,46 @@ func TestEnsureRepoLocalPath_ReconcilesGitHubOriginForCredentialPolicy(t *testin
 	}
 }
 
+func TestEnsureRepoLocalPathReevaluatesGitHubProtocol(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	repoPath := initGitRepoWithOrigin(t, "https://github.com/acme/widgets.git")
+	resolver := &mutableExecutorGitProtocolResolver{protocol: repoclone.ProtocolSSH}
+	cloner := repoclone.NewClonerWithProtocolResolver(
+		repoclone.Config{BasePath: t.TempDir()}, resolver, "", nil,
+	)
+	executor := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	executor.SetTaskGitCredentialPolicyResolver(fakeTaskGitCredentialPolicyResolver{
+		policy: TaskGitCredentialPolicy{Mode: taskGitCredentialsModeExecutor},
+	})
+	executor.SetRepoCloner(cloner, nil)
+	repository := &models.Repository{
+		WorkspaceID:   "workspace-1",
+		SourceType:    "provider",
+		Provider:      "github",
+		ProviderOwner: "acme",
+		ProviderName:  "widgets",
+		LocalPath:     repoPath,
+	}
+
+	if err := executor.ensureRepoLocalPath(context.Background(), repository); err != nil {
+		t.Fatalf("first ensureRepoLocalPath() error = %v", err)
+	}
+	if got := gitOriginURL(t, repoPath); got != "git@github.com:acme/widgets.git" {
+		t.Fatalf("first origin = %q, want SSH URL", got)
+	}
+
+	resolver.protocol = repoclone.ProtocolHTTPS
+	if err := executor.ensureRepoLocalPath(context.Background(), repository); err != nil {
+		t.Fatalf("second ensureRepoLocalPath() error = %v", err)
+	}
+	if got := gitOriginURL(t, repoPath); got != "https://github.com/acme/widgets.git" {
+		t.Fatalf("second origin = %q, want HTTPS URL", got)
+	}
+}
+
 func TestEnsureRepoLocalPath_DoesNotRewriteUserManagedOrigin(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
@@ -507,6 +547,14 @@ type cloneTransportTestCloner struct {
 	setOriginPaths          []string
 }
 
+type mutableExecutorGitProtocolResolver struct {
+	protocol string
+}
+
+func (r *mutableExecutorGitProtocolResolver) ResolveGitProtocol(context.Context, string) string {
+	return r.protocol
+}
+
 var _ authenticatedRepoCloner = (*cloneTransportTestCloner)(nil)
 
 func (c *cloneTransportTestCloner) EnsureWorkspaceClonedWithCredentialRequest(
@@ -557,7 +605,7 @@ func (c *cloneTransportTestCloner) SetOriginURL(ctx context.Context, repositoryP
 	return nil
 }
 
-func (c *cloneTransportTestCloner) BuildCloneURLWithHost(string, string, string, string) (string, error) {
+func (c *cloneTransportTestCloner) BuildCloneURLWithHost(context.Context, string, string, string, string) (string, error) {
 	return c.cloneURL, nil
 }
 

@@ -3,6 +3,10 @@ import { useAppStore } from "@/components/state-provider";
 import { captureQuickChatLauncherFocus } from "@/components/quick-chat/quick-chat-focus";
 import type { QuickChatSessionKind } from "@/lib/state/slices/ui/types";
 
+type QuickChatLauncherOptions = {
+  silentFocusReturn?: boolean;
+};
+
 /**
  * Hook to handle opening quick chat.
  * Just opens the modal - the user will select an agent from the picker.
@@ -10,14 +14,16 @@ import type { QuickChatSessionKind } from "@/lib/state/slices/ui/types";
 export function useQuickChatLauncher(
   workspaceId?: string | null,
   kind: QuickChatSessionKind = "chat",
+  options: QuickChatLauncherOptions = {},
 ) {
+  const silentFocusReturn = options.silentFocusReturn ?? true;
   const openQuickChat = useAppStore((state) => state.openQuickChat);
   const quickChatSessions = useAppStore((state) => state.quickChat.sessions);
   const activeSessionId = useAppStore((state) => state.quickChat.activeSessionId);
 
   const handleOpenQuickChat = useCallback(() => {
     if (!workspaceId) return;
-    captureQuickChatLauncherFocus();
+    captureQuickChatLauncherFocus({ silent: silentFocusReturn });
 
     // If there's an existing session, open it. Otherwise just open the modal with agent picker
     const matchingSessions = quickChatSessions.filter(
@@ -37,7 +43,7 @@ export function useQuickChatLauncher(
       // Open modal without a session - will show agent picker
       openQuickChat("", workspaceId, undefined, kind);
     }
-  }, [workspaceId, kind, quickChatSessions, activeSessionId, openQuickChat]);
+  }, [workspaceId, kind, quickChatSessions, activeSessionId, openQuickChat, silentFocusReturn]);
 
   return handleOpenQuickChat;
 }

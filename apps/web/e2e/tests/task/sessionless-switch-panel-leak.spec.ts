@@ -10,6 +10,7 @@ import {
   createStandardProfile,
 } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
+import { waitForLatestSessionDone } from "../../helpers/session";
 
 /**
  * Regression: switching from a task with env-scoped panels open (file-editor,
@@ -36,12 +37,16 @@ async function setupTaskWithFilePanel(args: {
     makeGitEnv(args.backendTmpDir),
   );
   const filename = "leak-fixture.ts";
+  // Local-executor specs can leave the worker-scoped seed clone on a task
+  // branch. Make this fixture independent of file execution order.
+  git.exec("git checkout main");
   git.createFile(filename, "// leak fixture\n");
   git.stageAll();
   git.commit("seed leak fixture");
+  git.exec("git push origin main");
 
   const profile = await createStandardProfile(args.apiClient, "panel-leak-source");
-  await args.apiClient.createTaskWithAgent(
+  const task = await args.apiClient.createTaskWithAgent(
     args.seedData.workspaceId,
     "Panel Leak Source",
     profile.id,
@@ -51,6 +56,12 @@ async function setupTaskWithFilePanel(args: {
       workflow_step_id: args.seedData.startStepId,
       repository_ids: [args.seedData.repositoryId],
     },
+  );
+  await waitForLatestSessionDone(
+    args.apiClient,
+    task.id,
+    1,
+    "source task did not finish preparing its workspace",
   );
 
   const session = await openTaskSession(args.testPage, "Panel Leak Source");
@@ -87,8 +98,6 @@ const NON_DEFAULT_ENV_SCOPED_COMPONENTS = [
 ];
 
 test.describe("Sessionless task switch — env-scoped panel cleanup", () => {
-  test.describe.configure({ retries: 1 });
-
   test("dropping into a sessionless task releases the previous task's env-scoped panels", async ({
     testPage,
     apiClient,

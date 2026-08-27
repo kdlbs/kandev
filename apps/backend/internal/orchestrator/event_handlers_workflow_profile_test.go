@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -114,6 +115,34 @@ func TestCreateNewSessionForStepKeepsCurrentSessionWhenWorkspaceAttachFails(t *t
 	if persisted.State != models.TaskSessionStateRunning || !persisted.IsPrimary {
 		t.Fatalf("current session after failed attach = state %q primary %t, want running primary", persisted.State, persisted.IsPrimary)
 	}
+}
+
+// terminalizeCandidateBeforePromotionRepo pauses a profile-switch promotion
+// after lookup so the test can terminalize the selected row before the
+// promotion write begins.
+type terminalizeCandidateBeforePromotionRepo struct {
+	sessionExecutorStore
+	promotionReached chan struct{}
+	allowPromotion   chan struct{}
+	once             sync.Once
+}
+
+func (r *terminalizeCandidateBeforePromotionRepo) waitForPromotion() {
+	r.once.Do(func() { close(r.promotionReached) })
+	<-r.allowPromotion
+}
+
+func (r *terminalizeCandidateBeforePromotionRepo) SetSessionPrimary(ctx context.Context, sessionID string) error {
+	r.waitForPromotion()
+	return r.sessionExecutorStore.SetSessionPrimary(ctx, sessionID)
+}
+
+func (r *terminalizeCandidateBeforePromotionRepo) SetSessionPrimaryIfNonterminal(
+	ctx context.Context,
+	sessionID string,
+) (bool, error) {
+	r.waitForPromotion()
+	return r.sessionExecutorStore.SetSessionPrimaryIfNonterminal(ctx, sessionID)
 }
 
 func seedAutopilotTaskAndSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID string, sessionState models.TaskSessionState) {
@@ -810,11 +839,14 @@ func TestSwitchSessionForStep(t *testing.T) {
 	})
 }
 
-// TestSwitchSessionForStep_ReusesExistingProfileSession verifies the core
-// requirement: when switching to a profile that already has a session on this
-// task, switchSessionForStep reuses it instead of creating a third session.
-// Covers the A→B→A round trip (and beyond) at the unit-test level.
-func TestSwitchSessionForStep_ReusesExistingProfileSession(t *testing.T) {
+// TestSwitchSessionForStep_ReusesNonterminalSession verifies the core
+// requirement: when switching to a profile that already has a *nonterminal*
+// session on this task, switchSessionForStep reuses it instead of creating a
+// third session. Covers the A→B→A round trip (and beyond) at the unit-test
+// level for the case where profile-A's prior session is still legitimately
+// active (WAITING_FOR_INPUT), e.g. it was previously launched and has a
+// resume token it should keep using.
+func TestSwitchSessionForStep_ReusesNonterminalSession(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
@@ -831,23 +863,28 @@ func TestSwitchSessionForStep_ReusesExistingProfileSession(t *testing.T) {
 	}
 	_ = repo.CreateTask(ctx, task)
 
-	// Prior session for profile-A — was active before, then completed when
-	// the workflow switched away from this profile last time.
-	completedAt := now.Add(-2 * time.Minute)
+	// Prior session for profile-A — still nonterminal (waiting for the next
+	// prompt) from the last time this profile was active on this task.
 	prior := &models.TaskSession{
 		ID:                "session-a",
 		TaskID:            "t1",
 		AgentProfileID:    "profile-a",
 		ExecutorID:        "exec-local",
 		ExecutorProfileID: "ep1",
-		State:             models.TaskSessionStateCompleted,
+		AgentExecutionID:  "ae-a",
+		State:             models.TaskSessionStateWaitingForInput,
 		IsPrimary:         false,
 		Metadata:          map[string]interface{}{"existing": "preserved"},
-		CompletedAt:       &completedAt,
 		StartedAt:         now.Add(-3 * time.Minute),
-		UpdatedAt:         completedAt,
+		UpdatedAt:         now.Add(-2 * time.Minute),
 	}
 	_ = repo.CreateTaskSession(ctx, prior)
+	_ = repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "er-a", SessionID: "session-a", TaskID: "t1",
+		ResumeToken: "acp-session-a",
+		Resumable:   true,
+		CreatedAt:   now.Add(-2 * time.Minute), UpdatedAt: now.Add(-2 * time.Minute),
+	})
 
 	// Currently-active session for profile-B — about to be switched away from.
 	current := &models.TaskSession{
@@ -874,6 +911,7 @@ func TestSwitchSessionForStep_ReusesExistingProfileSession(t *testing.T) {
 	log := testLogger()
 	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
 	sched := scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.SchedulerConfig{})
+	publisher := &recordingTaskUpdatedPublisher{}
 	svc := &Service{
 		logger:             log,
 		repo:               repo,
@@ -883,6 +921,7 @@ func TestSwitchSessionForStep_ReusesExistingProfileSession(t *testing.T) {
 		messageQueue:       messagequeue.NewServiceMemory(log),
 		executor:           exec,
 		scheduler:          sched,
+		taskEvents:         publisher,
 	}
 
 	revived, err := svc.switchSessionForStep(ctx, "t1", current, "profile-a")
@@ -904,18 +943,12 @@ func TestSwitchSessionForStep_ReusesExistingProfileSession(t *testing.T) {
 		t.Errorf("expected 2 sessions after reuse, got %d", len(sessions))
 	}
 
-	// The reused session must be back to a non-terminal state (so it can
-	// receive the next prompt) and be primary. Specifically, since the prior
-	// session has no executors_running record (never launched), it should
-	// flip to CREATED so autoStartStepPrompt routes through StartCreatedSession
-	// for a fresh launch (instead of hitting "no executor record" in
-	// ensureSessionRunning).
+	// The reused session must keep its nonterminal state (still WAITING, so
+	// PromptTask's ensureSessionRunning lazy-resumes it via ResumeSession) and
+	// become primary.
 	reused, _ := repo.GetTaskSession(ctx, "session-a")
-	if reused.State != models.TaskSessionStateCreated {
-		t.Errorf("never-launched reused session must be CREATED (so StartCreatedSession launches it fresh), got %s", reused.State)
-	}
-	if reused.CompletedAt != nil {
-		t.Error("reused session must have CompletedAt cleared")
+	if reused.State != models.TaskSessionStateWaitingForInput {
+		t.Errorf("nonterminal reused session must stay WAITING_FOR_INPUT, got %s", reused.State)
 	}
 	if !reused.IsPrimary {
 		t.Error("reused session must be primary")
@@ -935,14 +968,101 @@ func TestSwitchSessionForStep_ReusesExistingProfileSession(t *testing.T) {
 	if parked.IsPrimary {
 		t.Error("previous current session must no longer be primary")
 	}
+	if got := publisher.updatedTaskIDs; len(got) != 1 || got[0] != "t1" {
+		t.Errorf("task.updated publishes = %v, want [t1] after reused-session promotion", got)
+	}
 }
 
-// TestSwitchSessionForStep_ReusesPreviouslyLaunchedSession covers the other
-// branch of the revive: when the reused session has an executors_running
-// record (it was previously launched and has a resume token), it flips to
-// WAITING_FOR_INPUT so PromptTask's ensureSessionRunning lazy-resumes the
-// agent via ResumeSession (preserving its prior conversation context).
-func TestSwitchSessionForStep_ReusesPreviouslyLaunchedSession(t *testing.T) {
+func TestSwitchSessionForStep_CreatesFreshSessionWhenCandidateTerminalizesBeforePromotion(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+	repo := setupTestRepo(t)
+
+	requireNoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}))
+	requireNoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}))
+	requireNoError(t, repo.CreateTask(ctx, &models.Task{
+		ID: "t1", WorkflowID: "wf1", WorkflowStepID: "step1", Title: "Test", Description: "Test",
+		State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now,
+	}))
+
+	candidate := &models.TaskSession{
+		ID: "session-a", TaskID: "t1", AgentProfileID: "profile-a", ExecutorID: "exec-local",
+		ExecutorProfileID: "ep1", State: models.TaskSessionStateWaitingForInput,
+		StartedAt: now.Add(-time.Minute), UpdatedAt: now.Add(-time.Minute),
+	}
+	current := &models.TaskSession{
+		ID: "session-b", TaskID: "t1", AgentProfileID: "profile-b", ExecutorID: "exec-local",
+		ExecutorProfileID: "ep1", State: models.TaskSessionStateRunning, IsPrimary: true,
+		TaskEnvironmentID: "env-1",
+		StartedAt:         now, UpdatedAt: now,
+	}
+	requireNoError(t, repo.CreateTaskSession(ctx, candidate))
+	requireNoError(t, repo.CreateTaskSession(ctx, current))
+	requireNoError(t, repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{ID: "env-1", TaskID: "t1", ExecutorType: string(models.ExecutorTypeLocal), Status: models.TaskEnvironmentStatusReady}))
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["t1"] = &v1.Task{ID: "t1", WorkspaceID: "ws1", WorkflowID: "wf1", Title: "Test", Description: "Test", State: v1.TaskStateInProgress}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	log := testLogger()
+	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+	svc := &Service{
+		logger: log, workflowStepGetter: newMockStepGetter(), taskRepo: taskRepo, agentManager: agentMgr,
+		messageQueue: messagequeue.NewServiceMemory(log), executor: exec,
+		scheduler: scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.SchedulerConfig{}),
+	}
+	barrierRepo := &terminalizeCandidateBeforePromotionRepo{
+		sessionExecutorStore: repo,
+		promotionReached:     make(chan struct{}),
+		allowPromotion:       make(chan struct{}),
+	}
+	svc.repo = barrierRepo
+
+	resultCh := make(chan *models.TaskSession, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		result, err := svc.switchSessionForStep(ctx, "t1", current, "profile-a")
+		resultCh <- result
+		errCh <- err
+	}()
+
+	<-barrierRepo.promotionReached
+	requireNoError(t, repo.UpdateTaskSessionState(ctx, candidate.ID, models.TaskSessionStateCompleted, "finished concurrently"))
+	close(barrierRepo.allowPromotion)
+
+	if err := <-errCh; err != nil {
+		t.Fatalf("switch session: %v", err)
+	}
+	result := <-resultCh
+	if result == nil || result.ID == candidate.ID {
+		t.Fatalf("expected a fresh session after candidate terminalized, got %+v", result)
+	}
+
+	storedCandidate, err := repo.GetTaskSession(ctx, candidate.ID)
+	requireNoError(t, err)
+	if storedCandidate.State != models.TaskSessionStateCompleted {
+		t.Errorf("candidate state = %s, want COMPLETED", storedCandidate.State)
+	}
+	if storedCandidate.IsPrimary {
+		t.Error("terminalized candidate must not become primary")
+	}
+	fresh, err := repo.GetTaskSession(ctx, result.ID)
+	requireNoError(t, err)
+	if fresh.State != models.TaskSessionStateCreated || !fresh.IsPrimary {
+		t.Errorf("fresh session = state %s, primary %t; want CREATED primary", fresh.State, fresh.IsPrimary)
+	}
+}
+
+// TestSwitchSessionForStep_CompletedSessionNotReused locks in the corrective
+// fix: a COMPLETED session for the target profile must NOT be revived and
+// resumed. Reviving it would lazily resume its persisted ACP conversation,
+// which still contains the agent's earlier completion state — the live
+// incident this test guards against had the agent see the task routed back
+// to a step it had already completed and, reading its own prior "done"
+// context, infer the completion had been undone and move the task backward,
+// re-arming the same cycle on every re-entry. A fresh session must be
+// created instead, and the old COMPLETED session must be left immutable and
+// non-primary.
+func TestSwitchSessionForStep_CompletedSessionNotReused(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
@@ -959,10 +1079,9 @@ func TestSwitchSessionForStep_ReusesPreviouslyLaunchedSession(t *testing.T) {
 	}
 	_ = repo.CreateTask(ctx, task)
 
-	// Prior session for profile-A — was previously active and has the
-	// signals of a real launch: an executors_running record with a resume
-	// token. This should route through the WAITING_FOR_INPUT branch of
-	// reviveReusedSession.
+	// Prior QA session for profile-A: COMPLETED, and — like the live
+	// incident — it was previously launched and still carries a persisted
+	// ACP resume token via its executors_running record.
 	completedAt := now.Add(-2 * time.Minute)
 	prior := &models.TaskSession{
 		ID:                "session-a",
@@ -972,6 +1091,8 @@ func TestSwitchSessionForStep_ReusesPreviouslyLaunchedSession(t *testing.T) {
 		ExecutorProfileID: "ep1",
 		AgentExecutionID:  "ae-a-1",
 		State:             models.TaskSessionStateCompleted,
+		IsPrimary:         false,
+		Metadata:          map[string]interface{}{"existing": "preserved"},
 		CompletedAt:       &completedAt,
 		StartedAt:         now.Add(-3 * time.Minute),
 		UpdatedAt:         completedAt,
@@ -984,6 +1105,7 @@ func TestSwitchSessionForStep_ReusesPreviouslyLaunchedSession(t *testing.T) {
 		CreatedAt:   completedAt, UpdatedAt: completedAt,
 	})
 
+	// Currently-active session for profile-B — about to be switched away from.
 	current := &models.TaskSession{
 		ID:                "session-b",
 		TaskID:            "t1",
@@ -993,10 +1115,12 @@ func TestSwitchSessionForStep_ReusesPreviouslyLaunchedSession(t *testing.T) {
 		AgentExecutionID:  "ae-b",
 		State:             models.TaskSessionStateRunning,
 		IsPrimary:         true,
+		TaskEnvironmentID: "env-1",
 		StartedAt:         now,
 		UpdatedAt:         now,
 	}
 	_ = repo.CreateTaskSession(ctx, current)
+	_ = repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{ID: "env-1", TaskID: "t1", ExecutorType: string(models.ExecutorTypeLocal), Status: models.TaskEnvironmentStatusReady})
 
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks["t1"] = &v1.Task{
@@ -1019,28 +1143,94 @@ func TestSwitchSessionForStep_ReusesPreviouslyLaunchedSession(t *testing.T) {
 		scheduler:          sched,
 	}
 
-	revived, err := svc.switchSessionForStep(ctx, "t1", current, "profile-a")
+	fresh, err := svc.switchSessionForStep(ctx, "t1", current, "profile-a")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if revived == nil || revived.ID != "session-a" {
-		t.Fatalf("expected reused session-a, got %+v", revived)
+
+	// Critical: a brand-new session must be created — the COMPLETED session
+	// is never selected for reuse.
+	if fresh == nil || fresh.ID == "session-a" {
+		t.Fatalf("expected a fresh session distinct from the COMPLETED session-a, got %+v", fresh)
+	}
+	if fresh.AgentProfileID != "profile-a" {
+		t.Errorf("fresh session profile = %q, want profile-a", fresh.AgentProfileID)
+	}
+	// AC2: the fresh session starts through the CREATED/StartCreatedSession
+	// path, so it gets a new ACP conversation on first prompt.
+	if fresh.State != models.TaskSessionStateCreated {
+		t.Errorf("fresh session state = %s, want CREATED", fresh.State)
+	}
+	freshFromDB, err := repo.GetTaskSession(ctx, fresh.ID)
+	if err != nil {
+		t.Fatalf("failed to get fresh session: %v", err)
+	}
+	if !freshFromDB.IsPrimary {
+		t.Error("fresh session must be primary")
 	}
 
-	reused, _ := repo.GetTaskSession(ctx, "session-a")
-	if reused.State != models.TaskSessionStateWaitingForInput {
-		t.Errorf("previously-launched reused session must be WAITING_FOR_INPUT (so PromptTask lazy-resumes via ResumeSession), got %s", reused.State)
+	// AC3: the fresh session must not inherit the old session's resume token.
+	freshRunning, err := repo.GetExecutorRunningBySessionID(ctx, fresh.ID)
+	if err == nil || freshRunning != nil {
+		t.Errorf("fresh session must have no executors_running record (no inherited resume token), got running=%+v err=%v", freshRunning, err)
 	}
-	if got := reused.Metadata[models.SessionMetaKeyCreatedBy]; got != models.SessionCreatedByWorkflowSwitch {
-		t.Errorf("reused session created_by metadata = %v, want %q", got, models.SessionCreatedByWorkflowSwitch)
+
+	// Total session count is now 3: the old COMPLETED session-a, the parked
+	// session-b, and the fresh session.
+	sessions, err := repo.ListTaskSessions(ctx, "t1")
+	if err != nil {
+		t.Fatalf("failed to list sessions: %v", err)
+	}
+	if len(sessions) != 3 {
+		t.Errorf("expected 3 sessions (old completed + parked + fresh), got %d", len(sessions))
+	}
+
+	// AC3: the old COMPLETED session must remain terminal, non-primary, and
+	// historically intact — untouched by the switch.
+	oldSession, err := repo.GetTaskSession(ctx, "session-a")
+	if err != nil {
+		t.Fatalf("failed to get old session: %v", err)
+	}
+	if oldSession.State != models.TaskSessionStateCompleted {
+		t.Errorf("old session state = %s, want it to remain COMPLETED", oldSession.State)
+	}
+	if oldSession.IsPrimary {
+		t.Error("old COMPLETED session must remain non-primary")
+	}
+	if oldSession.CompletedAt == nil || !oldSession.CompletedAt.Equal(completedAt) {
+		t.Errorf("old session CompletedAt = %v, want unchanged %v", oldSession.CompletedAt, completedAt)
+	}
+	if got := oldSession.Metadata["existing"]; got != "preserved" {
+		t.Errorf("old session metadata must be untouched, got %v", got)
+	}
+
+	// The old session's resume token itself must remain on file (history is
+	// preserved) even though it is never handed to the fresh execution.
+	oldRunning, err := repo.GetExecutorRunningBySessionID(ctx, "session-a")
+	if err != nil {
+		t.Fatalf("failed to look up executor running for old session: %v", err)
+	}
+	if oldRunning == nil || oldRunning.ResumeToken != "acp-session-a" {
+		t.Errorf("old session's own resume token must remain intact, got %+v", oldRunning)
+	}
+
+	// The previous current session-b must now be COMPLETED, not primary.
+	parked, _ := repo.GetTaskSession(ctx, "session-b")
+	if parked.State != models.TaskSessionStateCompleted {
+		t.Errorf("previous current session must be COMPLETED, got %s", parked.State)
+	}
+	if parked.IsPrimary {
+		t.Error("previous current session must no longer be primary")
 	}
 }
 
-// TestSwitchSessionForStep_ReusesFailedSession exercises the requirement that
-// FAILED sessions are reused too. Without this, a previously-failed session
-// would be skipped and a fresh one created, leaving the FAILED one as a
-// duplicate tab in the UI showing its stale error banner.
-func TestSwitchSessionForStep_ReusesFailedSession(t *testing.T) {
+// TestSwitchSessionForStep_FailedSessionNotReused mirrors
+// TestSwitchSessionForStep_CompletedSessionNotReused for FAILED sessions.
+// FAILED is terminal too, and a failed ACP conversation can carry equally
+// stale or partial routing intent, so it must not be implicitly resumed
+// either — a fresh session is created and the FAILED session is left as
+// historical record (including its error message).
+func TestSwitchSessionForStep_FailedSessionNotReused(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
@@ -1088,10 +1278,12 @@ func TestSwitchSessionForStep_ReusesFailedSession(t *testing.T) {
 		AgentExecutionID:  "ae-b",
 		State:             models.TaskSessionStateRunning,
 		IsPrimary:         true,
+		TaskEnvironmentID: "env-1",
 		StartedAt:         now,
 		UpdatedAt:         now,
 	}
 	_ = repo.CreateTaskSession(ctx, current)
+	_ = repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{ID: "env-1", TaskID: "t1", ExecutorType: string(models.ExecutorTypeLocal), Status: models.TaskEnvironmentStatusReady})
 
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks["t1"] = &v1.Task{
@@ -1114,29 +1306,37 @@ func TestSwitchSessionForStep_ReusesFailedSession(t *testing.T) {
 		scheduler:          sched,
 	}
 
-	revived, err := svc.switchSessionForStep(ctx, "t1", current, "profile-a")
+	fresh, err := svc.switchSessionForStep(ctx, "t1", current, "profile-a")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if revived == nil || revived.ID != "session-a" {
-		t.Fatalf("expected reused FAILED session-a, got %+v", revived)
+	if fresh == nil || fresh.ID == "session-a" {
+		t.Fatalf("expected a fresh session distinct from the FAILED session-a, got %+v", fresh)
+	}
+	if fresh.State != models.TaskSessionStateCreated {
+		t.Errorf("fresh session state = %s, want CREATED", fresh.State)
 	}
 
-	// No duplicate session must be created.
+	// No session should be reused; a third session now exists.
 	sessions, _ := repo.ListTaskSessions(ctx, "t1")
-	if len(sessions) != 2 {
-		t.Errorf("expected 2 sessions, got %d (FAILED session was not reused)", len(sessions))
+	if len(sessions) != 3 {
+		t.Errorf("expected 3 sessions (old failed + parked + fresh), got %d", len(sessions))
 	}
 
-	reused, _ := repo.GetTaskSession(ctx, "session-a")
-	if reused.State != models.TaskSessionStateWaitingForInput {
-		t.Errorf("FAILED reused session must flip to WAITING_FOR_INPUT (lazy-resume via token), got %s", reused.State)
+	// The FAILED session must be left exactly as it was — including the
+	// error message, which a revive-in-place would have cleared.
+	oldSession, _ := repo.GetTaskSession(ctx, "session-a")
+	if oldSession.State != models.TaskSessionStateFailed {
+		t.Errorf("old session state = %s, want it to remain FAILED", oldSession.State)
 	}
-	if reused.ErrorMessage != "" {
-		t.Errorf("FAILED reused session must have ErrorMessage cleared, got %q", reused.ErrorMessage)
+	if oldSession.ErrorMessage != "execution already running" {
+		t.Errorf("old FAILED session ErrorMessage must be preserved, got %q", oldSession.ErrorMessage)
 	}
-	if reused.CompletedAt != nil {
-		t.Error("FAILED reused session must have CompletedAt cleared")
+	if oldSession.CompletedAt == nil || !oldSession.CompletedAt.Equal(failedAt) {
+		t.Errorf("old session CompletedAt = %v, want unchanged %v", oldSession.CompletedAt, failedAt)
+	}
+	if oldSession.IsPrimary {
+		t.Error("old FAILED session must remain non-primary")
 	}
 }
 
