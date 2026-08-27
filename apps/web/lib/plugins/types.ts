@@ -569,7 +569,7 @@ export type PluginHostApi = PluginSDK.PluginHostApi & {
   useResponsiveBreakpoint: typeof useResponsiveBreakpoint;
   useSettingsSaveContributor: PluginSDK.PluginHostApi["useSettingsSaveContributor"];
   setIntegrationEnabled: PluginSDK.PluginHostApi["setIntegrationEnabled"];
-}
+};
 
 /**
  * `host.taskFilters` — lets a plugin's own UI (e.g. a top-bar dropdown) set
