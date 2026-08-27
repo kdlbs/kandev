@@ -18,6 +18,9 @@ const mocks = vi.hoisted(() => ({
   bubbleMenu: {
     optionUpdateTransactions: 0,
     renderCount: 0,
+    testId: "plan-selection-bubble",
+    visibleValue: "true",
+    hiddenValue: "false",
   },
 }));
 
@@ -76,7 +79,10 @@ vi.mock("@tiptap/react/menus", () => ({
 
     const isVisible = shouldShow?.({ editor, state: editor.state }) ?? true;
     return (
-      <div data-testid="plan-selection-bubble" data-visible={isVisible ? "true" : "false"}>
+      <div
+        data-testid={mocks.bubbleMenu.testId}
+        data-visible={isVisible ? mocks.bubbleMenu.visibleValue : mocks.bubbleMenu.hiddenValue}
+      >
         {isVisible ? children : null}
       </div>
     );
@@ -86,11 +92,14 @@ vi.mock("@tiptap/react/menus", () => ({
 import { PlanBubbleMenu } from "./plan-bubble-menu";
 
 const PLAN_TOOLBAR_LABEL = "editors:planFormattingToolbar";
+const VISIBILITY_ATTRIBUTE = "data-visible";
 
 type FakeEditor = Editor & {
   emit: (event: string) => void;
   setSelection: (from: number, to: number, text?: string) => void;
   setFocused: (focused: boolean) => void;
+  setActiveMark: (name: string, active: boolean) => void;
+  setCodeBlock: (active: boolean) => void;
   chainMock: {
     focus: ReturnType<typeof vi.fn>;
     toggleBold: ReturnType<typeof vi.fn>;
@@ -113,6 +122,8 @@ function createEditor({
 } = {}): FakeEditor {
   const handlers = new Map<string, Set<() => void>>();
   const selection = { from, to };
+  let codeBlockState = codeBlock;
+  const activeMarks = new Set<string>();
   const chainMock = {
     focus: vi.fn(),
     toggleBold: vi.fn(),
@@ -127,7 +138,9 @@ function createEditor({
       selection,
       doc: { textBetween: vi.fn(() => text) },
     },
-    isActive: vi.fn((name: string) => name === "codeBlock" && codeBlock),
+    isActive: vi.fn((name: string) =>
+      name === "codeBlock" ? codeBlockState : activeMarks.has(name),
+    ),
     getAttributes: vi.fn(() => ({})),
     chain: vi.fn(() => chainMock),
     commands: { focus: vi.fn() },
@@ -155,6 +168,16 @@ function createEditor({
   editor.setFocused = (nextFocused) => {
     editor.isFocused = nextFocused;
   };
+  editor.setActiveMark = (name, active) => {
+    if (active) {
+      activeMarks.add(name);
+    } else {
+      activeMarks.delete(name);
+    }
+  };
+  editor.setCodeBlock = (active) => {
+    codeBlockState = active;
+  };
   editor.chainMock = chainMock;
   return editor;
 }
@@ -179,7 +202,7 @@ describe("PlanBubbleMenu responsive presentation", () => {
     render(<PlanBubbleMenu editor={editor} onComment={vi.fn()} mobileBottomOffset="3.25rem" />);
 
     expect(screen.getByRole("toolbar", { name: PLAN_TOOLBAR_LABEL })).toBeTruthy();
-    expect(screen.queryByTestId("plan-selection-bubble")).toBeNull();
+    expect(screen.queryByTestId(mocks.bubbleMenu.testId)).toBeNull();
   });
 });
 
@@ -323,10 +346,14 @@ describe("PlanBubbleMenu responsive layout", () => {
 
     render(<PlanBubbleMenu editor={editor} onComment={vi.fn()} />);
 
-    expect(screen.getByTestId("plan-selection-bubble").getAttribute("data-visible")).toBe("true");
+    expect(screen.getByTestId(mocks.bubbleMenu.testId).getAttribute(VISIBILITY_ATTRIBUTE)).toBe(
+      mocks.bubbleMenu.visibleValue,
+    );
     expect(screen.queryByRole("toolbar", { name: PLAN_TOOLBAR_LABEL })).toBeNull();
   });
+});
 
+describe("PlanBubbleMenu reactive editor state", () => {
   it("updates mobile visibility from editor focus and transaction events", () => {
     const editor = createEditor({ focused: false });
     render(<PlanBubbleMenu editor={editor} />);
@@ -344,6 +371,45 @@ describe("PlanBubbleMenu responsive layout", () => {
       editor.emit("blur");
     });
     expect(screen.queryByRole("toolbar", { name: PLAN_TOOLBAR_LABEL })).toBeNull();
+  });
+
+  it("updates active mark controls from transaction events", () => {
+    const editor = createEditor();
+    render(<PlanBubbleMenu editor={editor} />);
+
+    const bold = screen.getByRole("button", { name: "editors:boldCmdB" });
+    expect(bold.getAttribute("aria-pressed")).toBe(mocks.bubbleMenu.hiddenValue);
+
+    act(() => {
+      editor.setActiveMark("bold", true);
+      editor.emit("transaction");
+    });
+    expect(bold.getAttribute("aria-pressed")).toBe(mocks.bubbleMenu.visibleValue);
+
+    act(() => {
+      editor.setActiveMark("bold", false);
+      editor.emit("transaction");
+    });
+    expect(bold.getAttribute("aria-pressed")).toBe(mocks.bubbleMenu.hiddenValue);
+  });
+
+  it("updates mobile toolbar visibility from code-block transactions", () => {
+    const editor = createEditor();
+    render(<PlanBubbleMenu editor={editor} />);
+
+    expect(screen.getByRole("toolbar", { name: PLAN_TOOLBAR_LABEL })).toBeTruthy();
+
+    act(() => {
+      editor.setCodeBlock(true);
+      editor.emit("transaction");
+    });
+    expect(screen.queryByRole("toolbar", { name: PLAN_TOOLBAR_LABEL })).toBeNull();
+
+    act(() => {
+      editor.setCodeBlock(false);
+      editor.emit("transaction");
+    });
+    expect(screen.getByRole("toolbar", { name: PLAN_TOOLBAR_LABEL })).toBeTruthy();
   });
 });
 
@@ -364,6 +430,32 @@ describe("PlanBubbleMenu code-block suppression", () => {
 
     render(<PlanBubbleMenu editor={editor} onComment={vi.fn()} />);
 
-    expect(screen.getByTestId("plan-selection-bubble").getAttribute("data-visible")).toBe("false");
+    expect(screen.getByTestId(mocks.bubbleMenu.testId).getAttribute(VISIBILITY_ATTRIBUTE)).toBe(
+      mocks.bubbleMenu.hiddenValue,
+    );
+  });
+
+  it("updates desktop selection bubble visibility from code-block transactions", () => {
+    mocks.breakpoint.isFinePointer = true;
+    mocks.breakpoint.isMobile = false;
+    mocks.breakpoint.usesDesktopWorkbench = true;
+    const editor = createEditor();
+
+    render(<PlanBubbleMenu editor={editor} />);
+
+    const bubble = screen.getByTestId(mocks.bubbleMenu.testId);
+    expect(bubble.getAttribute(VISIBILITY_ATTRIBUTE)).toBe(mocks.bubbleMenu.visibleValue);
+
+    act(() => {
+      editor.setCodeBlock(true);
+      editor.emit("transaction");
+    });
+    expect(bubble.getAttribute(VISIBILITY_ATTRIBUTE)).toBe(mocks.bubbleMenu.hiddenValue);
+
+    act(() => {
+      editor.setCodeBlock(false);
+      editor.emit("transaction");
+    });
+    expect(bubble.getAttribute(VISIBILITY_ATTRIBUTE)).toBe(mocks.bubbleMenu.visibleValue);
   });
 });
