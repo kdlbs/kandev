@@ -215,6 +215,34 @@ const EFFECTIVELY_ACTIVE_CASES: Array<{
     isContainingTurnActive: true,
     expected: false,
   },
+  {
+    name: "errored nested payload settles even while the turn is active",
+    metadataStatus: "complete",
+    payloadStatus: "errored",
+    isContainingTurnActive: true,
+    expected: false,
+  },
+  {
+    name: "interrupted nested payload settles even while the turn is active",
+    metadataStatus: "complete",
+    payloadStatus: "interrupted",
+    isContainingTurnActive: true,
+    expected: false,
+  },
+  {
+    name: "shutdown nested payload settles even while the turn is active",
+    metadataStatus: "complete",
+    payloadStatus: "shutdown",
+    isContainingTurnActive: true,
+    expected: false,
+  },
+  {
+    name: "notFound nested payload settles even while the turn is active",
+    metadataStatus: "complete",
+    payloadStatus: "notFound",
+    isContainingTurnActive: true,
+    expected: false,
+  },
 ];
 
 describe("isSubagentEffectivelyActive", () => {
@@ -298,6 +326,16 @@ describe("ToolSubagentMessage", () => {
     expect(screen.getByRole("status", { name: "Loading" })).toBeTruthy();
     expect(screen.getByText(WORKING)).toBeTruthy();
     expect(screen.getByTitle("Working")).toBeTruthy();
+  });
+
+  it("does not keep Working after a nested Codex task settles as errored", () => {
+    renderSubagent(subagentMessage({ metadataStatus: COMPLETE, payloadStatus: "errored" }), {
+      isContainingTurnActive: true,
+    });
+
+    expect(screen.queryByRole("status", { name: "Loading" })).toBeNull();
+    expect(screen.queryByText(WORKING)).toBeNull();
+    expect(screen.getByLabelText("Completed")).toBeTruthy();
   });
 
   it("shows a completed check with a mapped hover after the turn settles", () => {

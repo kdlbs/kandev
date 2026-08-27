@@ -36,10 +36,27 @@ function arePropsEqual(
 
 const LIVE_SUBAGENT_PAYLOAD_STATUSES = new Set(["pendingInit", "started", "async_launched"]);
 
+// Mirrors backend subagentStatusTerminal: Codex session statuses that mean the
+// nested task has already settled, even while the parent turn is still active.
+const TERMINAL_SUBAGENT_PAYLOAD_STATUSES = new Set([
+  "completed",
+  "failed",
+  "cancelled",
+  "errored",
+  "interrupted",
+  "shutdown",
+  "notFound",
+]);
+
+function isSubagentPayloadTerminal(status: string | undefined): boolean {
+  if (!status) return false;
+  return TERMINAL_SUBAGENT_PAYLOAD_STATUSES.has(status) || isTerminalToolCallStatus(status);
+}
+
 function isSubagentPayloadLive(status: string | undefined): boolean {
   if (!status) return false;
   if (LIVE_SUBAGENT_PAYLOAD_STATUSES.has(status)) return true;
-  return !isTerminalToolCallStatus(status);
+  return !isSubagentPayloadTerminal(status);
 }
 
 export function isSubagentEffectivelyActive(
@@ -53,7 +70,7 @@ export function isSubagentEffectivelyActive(
   if (normalized === "error" || normalized === "cancelled") return false;
 
   const payloadStatus = metadata?.normalized?.subagent_task?.status;
-  if (payloadStatus && isTerminalToolCallStatus(payloadStatus)) return false;
+  if (payloadStatus && isSubagentPayloadTerminal(payloadStatus)) return false;
   if (!isContainingTurnActive) return false;
 
   if (status === "in_progress" || isSubagentPayloadLive(payloadStatus)) return true;
