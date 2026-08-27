@@ -38,7 +38,7 @@ func TestDynamicPreResultRequiresExplicitKnownEvidence(t *testing.T) {
 	for _, test := range unsafeCases {
 		t.Run(test.name, func(t *testing.T) {
 			if dynamicPreResultSafe(test.data) {
-				t.Fatal("usage-limit failure with unsafe evidence was allowed to route")
+				t.Fatalf("case %q was incorrectly treated as pre-result safe", test.name)
 			}
 		})
 	}
