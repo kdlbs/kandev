@@ -25,6 +25,13 @@ var ErrRepositoryNotFound = errors.New("repository not found")
 // ErrRepositorySetNotFound reports that no repository set row matched the supplied id.
 var ErrRepositorySetNotFound = errors.New("repository set not found")
 
+// ErrRepositoryBranchPolicyNotFound reports that no policy row matched the id.
+var ErrRepositoryBranchPolicyNotFound = errors.New("repository branch policy not found")
+
+// ErrRepositoryBranchPoliciesExist reports that a Gitflow starter cannot seed
+// a repository that already has one or more policies.
+var ErrRepositoryBranchPoliciesExist = errors.New("repository branch policies already exist")
+
 // ErrTaskEnvironmentNotFound reports that no task environment row matched the supplied id.
 var ErrTaskEnvironmentNotFound = errors.New("task environment not found")
 

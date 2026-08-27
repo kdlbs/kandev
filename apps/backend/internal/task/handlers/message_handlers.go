@@ -445,8 +445,15 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		}
 		requiresSignal := h.orchestrator != nil && h.orchestrator.StepRequiresCompletionSignal(ctx, req.TaskID)
 		referenceContext := orchestrator.EntityReferenceContext(req.EntityReferences)
+		var pullRequestTargetContext string
+		storedContent, pullRequestTargetContext = sysprompt.InjectPullRequestTargetContext(
+			storedContent, h.taskPullRequestTargets(ctx, task),
+		)
 		if task.IsFromOffice {
-			storedContent = sysprompt.InjectOfficeContextWithOptions(req.TaskID, req.TaskSessionID, storedContent, requiresSignal, referenceContext)
+			storedContent = sysprompt.InjectOfficeContextWithOptions(
+				req.TaskID, req.TaskSessionID, storedContent, requiresSignal,
+				referenceContext, pullRequestTargetContext,
+			)
 		} else {
 			storedContent = sysprompt.InjectKandevContextWithOptions(req.TaskID, req.TaskSessionID, storedContent, sysprompt.KandevContextOptions{
 				RequiresCompletionSignal:       requiresSignal,
@@ -455,7 +462,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 				Autopilot:                      task.Autopilot,
 				IncludeUserQuestionTool:        !task.Autopilot && !sessionResp.Session.IsPassthrough,
 				IncludeParentQuestionTool:      task.Autopilot && task.ParentID != "",
-			}, referenceContext)
+			}, referenceContext, pullRequestTargetContext)
 		}
 	}
 	req.Content = storedContent

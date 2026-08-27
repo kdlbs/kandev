@@ -217,6 +217,17 @@ func handleE2EReset(
 			return
 		}
 
+		// Automation deletion must run while its bound tasks still exist. It
+		// stops live turns before removing run rows and owns cleanup of hidden
+		// automation tasks. Deleting tasks first can strand an open run on a
+		// missing task and make the next test's reset fail.
+		deletedAutomations, autoErr := deleteAutomationsForReset(ctx, automationSvc, workspaceID)
+		if autoErr != nil {
+			log.Error("e2e reset: failed to delete automations", zap.Error(autoErr))
+			c.JSON(http.StatusInternalServerError, gin.H{errKey: autoErr.Error()})
+			return
+		}
+
 		// Route through the task service (rather than a raw SQL DELETE) so
 		// each delete spawns the async cleanup goroutine that stops the
 		// agentctl instance and releases its port. Without this, instances
@@ -256,13 +267,6 @@ func handleE2EReset(
 		if err != nil {
 			log.Error("e2e reset: failed to delete workflows", zap.Error(err))
 			c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
-			return
-		}
-
-		deletedAutomations, autoErr := deleteAutomationsForReset(ctx, automationSvc, workspaceID)
-		if autoErr != nil {
-			log.Error("e2e reset: failed to delete automations", zap.Error(autoErr))
-			c.JSON(http.StatusInternalServerError, gin.H{errKey: autoErr.Error()})
 			return
 		}
 

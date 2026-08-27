@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	agentsettingsdto "github.com/kandev/kandev/internal/agent/settings/dto"
+	githubsvc "github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -13,6 +14,23 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
+
+func TestPluginHost_Tasks_UpdateAttachesPullRequests(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
+	d.taskWriter.updated = &taskmodels.Task{ID: "task-1", Title: "updated"}
+	d.host.taskPRs = &stubPRSource{byTask: map[string][]*githubsvc.TaskPR{
+		"task-1": {{PRNumber: 43}},
+	}}
+
+	got, err := d.host.Tasks().Update(context.Background(), pluginsdk.UpdateTaskInput{ID: "task-1"})
+
+	if err != nil {
+		t.Fatalf("Update() unexpected error: %v", err)
+	}
+	if len(got.PullRequests) != 1 || got.PullRequests[0].Number != 43 {
+		t.Fatalf("Update() pull requests = %+v, want PR #43", got.PullRequests)
+	}
+}
 
 // ── Write gating: denied without api_write:<resource> ───────────────────
 
@@ -284,6 +302,28 @@ func TestPluginHost_PluginOwnedTaskTreeRejectsUserOwnedRoot(t *testing.T) {
 	_, err := d.host.PluginOwnedTaskTrees().Preview(context.Background(), "user-task")
 	if status.Code(err) != codes.PermissionDenied {
 		t.Fatalf("Preview() error = %v, want PermissionDenied for user-owned task", err)
+	}
+}
+
+func TestPluginHost_PluginOwnedTaskTreePreviewAttachesPullRequests(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
+	root := &taskmodels.Task{
+		ID: "root", WorkspaceID: "ws-1",
+		Metadata: map[string]any{taskSourceMetadataKey: "plugin:p1"},
+	}
+	d.tasks.tasksByID = map[string]*taskmodels.Task{"root": root}
+	d.tasks.tasksByWorkspace = map[string][]*taskmodels.Task{"ws-1": {root}}
+	d.host.taskPRs = &stubPRSource{byTask: map[string][]*githubsvc.TaskPR{
+		"root": {{PRNumber: 44}},
+	}}
+
+	preview, err := d.host.PluginOwnedTaskTrees().Preview(context.Background(), "root")
+
+	if err != nil {
+		t.Fatalf("Preview() unexpected error: %v", err)
+	}
+	if len(preview) != 1 || len(preview[0].PullRequests) != 1 || preview[0].PullRequests[0].Number != 44 {
+		t.Fatalf("Preview() pull requests = %+v, want PR #44", preview)
 	}
 }
 

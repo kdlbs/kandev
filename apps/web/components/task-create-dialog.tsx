@@ -52,6 +52,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
     onTaskNameChange,
     onRowRepositoryChange,
     onRowBranchChange,
+    onRowPolicyChange,
     onToggleRemote,
     onToggleFreshBranch,
     repositories,
@@ -73,6 +74,10 @@ function CreateModeBody(props: DialogFormBodyProps) {
         workspaceId={workspaceId}
         onRowRepositoryChange={onRowRepositoryChange}
         onRowBranchChange={onRowBranchChange}
+        onRowPolicyChange={onRowPolicyChange}
+        onPolicySelected={
+          isLocalExecutor && freshBranchAvailable ? () => onToggleFreshBranch(true) : undefined
+        }
         onToggleRemote={onToggleRemote}
         freshBranchAvailable={freshBranchAvailable}
         freshBranchEnabled={fs.freshBranchEnabled}

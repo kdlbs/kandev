@@ -9,6 +9,20 @@ async function openInitialDeleteConfirmation(page: Page) {
   return confirmation;
 }
 
+function longProfileDeleteConflict() {
+  return {
+    active_sessions: Array.from({ length: 40 }, (_, index) => ({
+      task_id: `overflow-task-${index}`,
+      task_title: `Overflow task ${index}`,
+      is_ephemeral: false,
+    })),
+    watchers: [],
+    routing_tiers: [],
+    automations: [],
+    utility_agents: [],
+  };
+}
+
 test.describe("Agent profile deletion", () => {
   test("deleting profile with no active sessions shows confirm dialog then succeeds", async ({
     testPage,
@@ -250,5 +264,112 @@ test.describe("Agent profile deletion", () => {
 
     // Should redirect to agents settings page
     await expect(testPage).toHaveURL(/\/settings\/agents$/, { timeout: 15_000 });
+  });
+
+  test("keeps conflict actions visible with many tasks", async ({ testPage, apiClient }) => {
+    test.setTimeout(60_000);
+
+    const { agents } = await apiClient.listAgents();
+    const agent = agents[0];
+    const profile = await apiClient.createAgentProfile(agent.id, "Overflow Profile", {
+      model: agent.profiles[0].model,
+    });
+    await testPage.route(`**/api/v1/agent-profiles/${profile.id}**`, async (route) => {
+      if (route.request().method() !== "DELETE") {
+        await route.continue();
+        return;
+      }
+      await route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify(longProfileDeleteConflict()),
+      });
+    });
+
+    await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
+    await expect(testPage.getByText("Delete profile", { exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
+
+    const confirmDialog = await openInitialDeleteConfirmation(testPage);
+    await confirmDialog.getByTestId("agent-profile-delete-confirm").click();
+
+    const conflictDialog = testPage.getByTestId("agent-profile-delete-conflict-dialog");
+    await expect(conflictDialog).toBeVisible({ timeout: 10_000 });
+    await conflictDialog.evaluate(async (element) => {
+      const animations = element.getAnimations({ subtree: true }).filter((animation) => {
+        if (animation.playState !== "running") {
+          return false;
+        }
+
+        const iterations = animation.effect?.getComputedTiming().iterations;
+        return typeof iterations === "number" && Number.isFinite(iterations);
+      });
+
+      await Promise.all(animations.map((animation) => animation.finished.catch(() => undefined)));
+    });
+    const body = conflictDialog.getByTestId("agent-profile-delete-conflict-body");
+    const footer = conflictDialog.getByTestId("agent-profile-delete-conflict-footer");
+    const title = conflictDialog.locator('[data-slot="alert-dialog-title"]');
+    const finalTask = body.getByText("Overflow task 39", { exact: true });
+
+    const scrollable = await body.evaluate((element) => ({
+      scrollHeight: element.scrollHeight,
+      clientHeight: element.clientHeight,
+    }));
+    expect(scrollable.scrollHeight).toBeGreaterThan(scrollable.clientHeight);
+
+    const viewportHeight = await testPage.evaluate(() => window.innerHeight);
+    const dialogBox = await conflictDialog.boundingBox();
+    const titleBox = await title.boundingBox();
+    const footerBox = await footer.boundingBox();
+    expect(dialogBox).not.toBeNull();
+    expect(titleBox).not.toBeNull();
+    expect(footerBox).not.toBeNull();
+    expect(dialogBox!.y).toBeGreaterThanOrEqual(0);
+    expect(dialogBox!.y + dialogBox!.height).toBeLessThanOrEqual(viewportHeight);
+    expect(titleBox!.y).toBeGreaterThanOrEqual(dialogBox!.y);
+    expect(titleBox!.y + titleBox!.height).toBeLessThanOrEqual(dialogBox!.y + dialogBox!.height);
+    expect(footerBox!.y).toBeGreaterThanOrEqual(dialogBox!.y);
+    expect(footerBox!.y + footerBox!.height).toBeLessThanOrEqual(dialogBox!.y + dialogBox!.height);
+
+    await body.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await expect.poll(() => body.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+
+    const finalTaskBox = await finalTask.boundingBox();
+    const footerAfterBox = await footer.boundingBox();
+    expect(finalTaskBox).not.toBeNull();
+    expect(footerAfterBox).not.toBeNull();
+    expect(finalTaskBox!.y).toBeGreaterThanOrEqual(dialogBox!.y);
+    expect(finalTaskBox!.y + finalTaskBox!.height).toBeLessThanOrEqual(
+      dialogBox!.y + dialogBox!.height,
+    );
+    expect(footerAfterBox!.y).toBeGreaterThanOrEqual(dialogBox!.y);
+    expect(footerAfterBox!.y + footerAfterBox!.height).toBeLessThanOrEqual(
+      dialogBox!.y + dialogBox!.height,
+    );
+
+    for (const label of ["Cancel", "Delete Anyway"]) {
+      const action = conflictDialog.getByRole("button", { name: label, exact: true });
+      await expect(action).toBeVisible();
+      await expect
+        .poll(async () =>
+          action.evaluate((element) => {
+            const rect = element.getBoundingClientRect();
+            const hit = document.elementFromPoint(
+              rect.left + rect.width / 2,
+              rect.top + rect.height / 2,
+            );
+            return hit === element || element.contains(hit);
+          }),
+        )
+        .toBe(true);
+    }
+
+    await conflictDialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(conflictDialog).not.toBeVisible();
+    await apiClient.deleteAgentProfile(profile.id, true);
   });
 });

@@ -3,6 +3,8 @@ import type {
   ListWorkspacesResponse,
   ListRepositoriesResponse,
   ListRepositorySetsResponse,
+  ListRepositoryBranchPoliciesResponse,
+  RepositoryBranchPolicy,
   RepositorySet,
   RepositoryBranchesResponse,
   ListRepositoryScriptsResponse,
@@ -100,6 +102,98 @@ export async function deleteRepositorySet(setId: string, options?: ApiRequestOpt
     ...options,
     init: { method: "DELETE", ...(options?.init ?? {}) },
   });
+}
+
+export async function listRepositoryBranchPolicies(
+  repositoryId: string,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<ListRepositoryBranchPoliciesResponse>(
+    `/api/v1/repositories/${encodeURIComponent(repositoryId)}/branch-policies`,
+    options,
+  );
+}
+
+export async function createRepositoryBranchPolicy(
+  repositoryId: string,
+  payload: Omit<RepositoryBranchPolicy, "id" | "repository_id" | "created_at" | "updated_at">,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<RepositoryBranchPolicy>(
+    `/api/v1/repositories/${encodeURIComponent(repositoryId)}/branch-policies`,
+    {
+      ...options,
+      init: {
+        method: "POST",
+        body: JSON.stringify(toBranchPolicyPayload(payload)),
+        ...(options?.init ?? {}),
+      },
+    },
+  );
+}
+
+export async function updateRepositoryBranchPolicy(
+  policyId: string,
+  payload: Partial<
+    Omit<RepositoryBranchPolicy, "id" | "repository_id" | "created_at" | "updated_at">
+  >,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<RepositoryBranchPolicy>(
+    `/api/v1/repository-branch-policies/${encodeURIComponent(policyId)}`,
+    {
+      ...options,
+      init: {
+        method: "PATCH",
+        body: JSON.stringify(toBranchPolicyPayload(payload)),
+        ...(options?.init ?? {}),
+      },
+    },
+  );
+}
+
+export async function deleteRepositoryBranchPolicy(policyId: string, options?: ApiRequestOptions) {
+  return fetchJson<void>(`/api/v1/repository-branch-policies/${encodeURIComponent(policyId)}`, {
+    ...options,
+    init: { method: "DELETE", ...(options?.init ?? {}) },
+  });
+}
+
+export async function createGitflowRepositoryBranchPolicies(
+  repositoryId: string,
+  payload: { productionBranch: string; developmentBranch: string },
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<ListRepositoryBranchPoliciesResponse>(
+    `/api/v1/repositories/${encodeURIComponent(repositoryId)}/branch-policies/gitflow`,
+    {
+      ...options,
+      init: {
+        method: "POST",
+        body: JSON.stringify({
+          production_branch: payload.productionBranch,
+          development_branch: payload.developmentBranch,
+        }),
+        ...(options?.init ?? {}),
+      },
+    },
+  );
+}
+
+function toBranchPolicyPayload(
+  payload: Partial<
+    Omit<RepositoryBranchPolicy, "id" | "repository_id" | "created_at" | "updated_at">
+  >,
+) {
+  return {
+    ...(payload.name !== undefined ? { name: payload.name } : {}),
+    ...(payload.description !== undefined ? { description: payload.description } : {}),
+    ...(payload.base_branch !== undefined ? { base_branch: payload.base_branch } : {}),
+    ...(payload.branch_template !== undefined ? { branch_template: payload.branch_template } : {}),
+    ...(payload.pull_request_target !== undefined
+      ? { pull_request_target: payload.pull_request_target }
+      : {}),
+  };
 }
 
 export async function initializeLocalRepository(

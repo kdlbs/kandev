@@ -32,6 +32,7 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"untracked-file-setup":    scenarioUntrackedFileSetup,
 	"untracked-file-modify":   scenarioUntrackedFileModify,
 	"clarification":           scenarioClarification,
+	"clarification-markdown":  scenarioClarificationMarkdown,
 	"clarification-multi":     scenarioClarificationMulti,
 	"clarification-timeout":   scenarioClarificationTimeout,
 	"multi-permission":        scenarioMultiPermission,
@@ -699,6 +700,7 @@ const (
 	clarificationDescKey    = "description"
 	clarificationPromptKey  = "prompt"
 	clarificationIDKey      = "id"
+	clarificationTitleKey   = "title"
 )
 
 func mockOption(label, description string) map[string]any {
@@ -718,6 +720,27 @@ func clarificationQuestionArgs() map[string]any {
 					mockOption("PostgreSQL", "Relational database with strong consistency"),
 					mockOption("MongoDB", "Document database for flexible schemas"),
 					mockOption("SQLite", "Embedded database for simplicity"),
+				},
+			},
+		},
+	}
+}
+
+// clarificationMarkdownQuestionArgs keeps a permanent real-protocol fixture
+// for the lightweight Markdown supported by clarification question fields.
+func clarificationMarkdownQuestionArgs() map[string]any {
+	return map[string]any{
+		"context": "Keep `context` literal.\n\nNo Markdown rendering here.",
+		"questions": []map[string]any{
+			{
+				clarificationIDKey:    "markdown",
+				clarificationTitleKey: "Use `DB`",
+				clarificationPromptKey: "Choose **one** storage mode:\n\n" +
+					"1. Prefer reliability\n2. Prefer speed\n\n" +
+					"Read [storage guidance](https://example.com/storage).",
+				clarificationOptionsKey: []map[string]any{
+					mockOption("`Postgres` [docs](https://example.com/postgres)", "Best for **production** workloads"),
+					mockOption("SQLite", "Best for *local* work"),
 				},
 			},
 		},
@@ -769,6 +792,22 @@ func scenarioClarification(e *emitter) {
 	e.text("Let me ask you a question about the project setup.")
 
 	result, err := callMCPTool("kandev", "ask_user_question_kandev", clarificationQuestionArgs())
+	if err != nil {
+		e.text(fmt.Sprintf("Question failed: %s", err))
+		return
+	}
+
+	fixedDelay(50)
+	e.text(fmt.Sprintf("You answered: %s", result))
+}
+
+// scenarioClarificationMarkdown exercises the restricted Markdown renderer
+// through the same blocking MCP round trip used by real clarification calls.
+func scenarioClarificationMarkdown(e *emitter) {
+	fixedDelay(100)
+	e.text("Let me ask you a formatted question about project storage.")
+
+	result, err := callMCPTool("kandev", "ask_user_question_kandev", clarificationMarkdownQuestionArgs())
 	if err != nil {
 		e.text(fmt.Sprintf("Question failed: %s", err))
 		return

@@ -6,6 +6,24 @@ The bar: an agent given only a spec (no source code) should be able to either re
 
 **Status:** `draft` (being written) · `approved` (accepted design, ready to build) · `building` (in active development) · `shipped` (implemented, spec matches code) · `archived` (deprecated).
 
+| System | Index | Migration | Canonical documents |
+| --- | --- | --- | --- |
+| Agents | [README](agents/README.md) | complete | 26 requirements, 16 designs |
+| Auth | [README](auth/README.md) | complete | 7 requirements, 2 designs |
+| CLI | [README](cli/README.md) | complete | 2 requirements, 0 designs |
+| Costs | [README](costs/README.md) | complete | 2 requirements, 0 designs |
+| Desktop | [README](desktop/README.md) | complete | 1 requirements, 1 designs |
+| Executors | [README](executors/README.md) | complete | 3 requirements, 6 designs |
+| Integrations | [README](integrations/README.md) | complete | 18 requirements, 21 designs |
+| Office | [README](office/README.md) | complete | 19 requirements, 38 designs |
+| Platform | [README](platform/README.md) | complete | 30 requirements, 10 designs |
+| Plugins | [README](plugins/README.md) | complete | 7 requirements, 9 designs |
+| Release | [README](release/README.md) | complete | 5 requirements, 0 designs |
+| System page | [README](system-page/README.md) | complete | 3 requirements, 5 designs |
+| Tasks | [README](tasks/README.md) | complete | 69 requirements, 12 designs |
+| UI | [README](ui/README.md) | complete | 96 requirements, 12 designs |
+| Workspaces | [README](workspaces/README.md) | complete | 11 requirements, 3 designs |
+
 **`needs-upgrade`** in a spec's frontmatter flags template sections that the original sources did not cover and should be filled in from code (Data model, API surface, State machine, Permissions, Failure modes, Persistence guarantees). All office specs have been brought to the implementability bar; this flag is only used for newly-drafted specs that need a code-driven fill-in pass.
 
 ---

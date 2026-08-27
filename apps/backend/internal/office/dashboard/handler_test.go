@@ -238,7 +238,7 @@ func newTestDeps(t *testing.T) *testDeps {
 
 	router := gin.New()
 	group := router.Group("/api/v1/office")
-	dashboard.RegisterRoutes(group, svc, repo, nil, log)
+	dashboard.RegisterRoutes(group, svc, repo, nil, nil, log)
 
 	return &testDeps{db: db, repo: repo, svc: svc, router: router, agents: agentSvc, wfRepo: wfRepo}
 }

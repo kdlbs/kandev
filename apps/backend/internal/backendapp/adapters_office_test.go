@@ -5,12 +5,14 @@ import (
 	"database/sql"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
+	officemodels "github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
@@ -18,6 +20,42 @@ import (
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/worktree"
 )
+
+type fakeOfficeCommentWindowReader struct {
+	comments []*officemodels.TaskComment
+	total    int
+}
+
+func (f *fakeOfficeCommentWindowReader) ListTaskCommentsWindow(
+	context.Context, string, int,
+) ([]*officemodels.TaskComment, int, error) {
+	return f.comments, f.total, nil
+}
+
+func TestOfficeCommentReaderAdapterMapsPersistenceRows(t *testing.T) {
+	createdAt := time.Date(2026, 1, 1, 2, 3, 4, 0, time.UTC)
+	adapter := officeCommentReaderAdapter{reader: &fakeOfficeCommentWindowReader{
+		comments: []*officemodels.TaskComment{{
+			ID: "comment-1", TaskID: "task-1", AuthorType: "agent", AuthorID: "agent-1",
+			Body: "done", Source: "run", ReplyChannelID: "private", CreatedAt: createdAt,
+		}},
+		total: 4,
+	}}
+
+	rows, total, err := adapter.ListTaskCommentsWindow(context.Background(), "task-1", 2)
+	if err != nil {
+		t.Fatalf("ListTaskCommentsWindow: %v", err)
+	}
+	if total != 4 {
+		t.Fatalf("total = %d, want 4", total)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("len(rows) = %d, want 1", len(rows))
+	}
+	if rows[0].ID != "comment-1" || rows[0].Body != "done" || !rows[0].CreatedAt.Equal(createdAt) {
+		t.Fatalf("row = %+v, want mapped comment", rows[0])
+	}
+}
 
 type adapterStartStepResolver struct {
 	repo *tasksqlite.Repository

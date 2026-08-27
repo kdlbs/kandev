@@ -257,13 +257,14 @@ response but stays `enabled`.
 
 ## Permissions
 
-- Browsing the catalog and installing from it require the same operator authority as
-  the existing plugin-management API — marketplace endpoints sit behind the same
-  auth as `POST /api/plugins/install`. Plugins ship unflagged in the base
-  product, so there is no feature gate in front of either.
-- Managing marketplace sources (add/remove/enable) is an operator action; adding a
-  source is an explicit act of trust in that source's maintainer, equivalent to
-  `brew tap`-ing a third-party tap.
+- Authenticated members may browse the catalog and inspect installed-plugin and
+  manifest metadata. Their UI is read-only: it omits install, update, enable,
+  disable, uninstall, auto-update, source-management, and plugin-configuration
+  controls.
+- Installing or updating a plugin and managing marketplace sources
+  (add/remove/enable) require administrator authority. Adding a source is an
+  explicit act of trust in that source's maintainer, equivalent to `brew tap`-ing
+  a third-party tap.
 - Appearing in the **official** source requires a maintainer to approve the
   registry-list PR. Third-party/corporate sources are governed by whoever controls
   that source repo, not by kandev.

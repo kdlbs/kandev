@@ -6,6 +6,7 @@ import { useTaskCIAutomationOptions } from "@/hooks/domains/github/use-task-ci-o
 import {
   findCIAutomationStateForPR,
   findPRAutomationOptionsForPR,
+  deriveCIAutomationQueueState,
 } from "@/lib/github/ci-automation";
 import type { TaskCIAutomationPatch, TaskPR } from "@/lib/types/github";
 import { CIAutomationPromptDialog } from "@/components/github/pr-ci-automation-prompt-dialog";
@@ -23,6 +24,7 @@ export function PRCIAutomationControls({ pr }: { pr: TaskPR }) {
   const [promptDraft, setPromptDraft] = useState("");
   const automationState = findCIAutomationStateForPR(options?.pr_states, pr);
   const prOptions = findPRAutomationOptionsForPR(options?.pr_options, pr);
+  const queueState = deriveCIAutomationQueueState(pr, prOptions, automationState);
 
   const openPromptEditor = useCallback(() => {
     setPromptDraft(options?.auto_fix_prompt_override ?? options?.effective_auto_fix_prompt ?? "");
@@ -77,7 +79,12 @@ export function PRCIAutomationControls({ pr }: { pr: TaskPR }) {
       data-testid="pr-ci-automation-controls"
       className="flex flex-col gap-1 border-t border-border/50 pt-2"
     >
-      <CIAutomationHeader pr={pr} disabled={!options} onEditPrompt={openPromptEditor} />
+      <CIAutomationHeader
+        pr={pr}
+        queueState={queueState}
+        disabled={!options}
+        onEditPrompt={openPromptEditor}
+      />
       <CIAutomationOptionRows
         pr={pr}
         prOptions={prOptions}

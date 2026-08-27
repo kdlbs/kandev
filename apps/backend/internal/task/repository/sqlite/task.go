@@ -234,10 +234,15 @@ func (r *Repository) CreateTaskWithWorkflowStepAdmission(
 		return err
 	}
 
-	if err := r.insertTaskTx(ctx, tx, task); err != nil {
+	entryID, err := r.insertTaskTx(ctx, tx, task)
+	if err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	r.dispatchStepEntry(ctx, task.ID, task.WorkflowID, task.WorkflowStepID, entryID)
+	return nil
 }
 
 func (r *Repository) applyAdmissionPlacement(
@@ -306,14 +311,19 @@ func (r *Repository) createTask(ctx context.Context, task *models.Task, targetSt
 		return err
 	}
 
-	if err := r.insertTaskTx(ctx, tx, task); err != nil {
+	entryID, err := r.insertTaskTx(ctx, tx, task)
+	if err != nil {
 		if rollbackErr := tx.Rollback(); rollbackErr != nil {
 			return fmt.Errorf("failed to rollback task insert: %w", rollbackErr)
 		}
 		return err
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	r.dispatchStepEntry(ctx, task.ID, task.WorkflowID, task.WorkflowStepID, entryID)
+	return nil
 }
 
 func (r *Repository) prepareTaskForCreate(task *models.Task) error {
@@ -335,7 +345,7 @@ func (r *Repository) prepareTaskForCreate(task *models.Task) error {
 	return nil
 }
 
-func (r *Repository) insertTaskTx(ctx context.Context, tx *sql.Tx, task *models.Task) error {
+func (r *Repository) insertTaskTx(ctx context.Context, tx *sql.Tx, task *models.Task) (entryID string, err error) {
 	metadata, err := json.Marshal(task.Metadata)
 	if err != nil {
 		metadata = []byte("{}")
@@ -350,9 +360,9 @@ func (r *Repository) insertTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 	`), task.ID, task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), dialect.BoolToInt(task.IsEphemeral), task.ParentID, dialect.BoolToInt(task.Autopilot), task.CreatedAt, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, externalID)
 	if err != nil {
 		if isExternalIDUniqueViolation(err) {
-			return fmt.Errorf("%w: %w", ErrExternalIDConflict, err)
+			return "", fmt.Errorf("%w: %w", ErrExternalIDConflict, err)
 		}
-		return err
+		return "", err
 	}
 	// Genesis ledger row. By this point applyAdmissionPlacement has already
 	// rewritten task.WorkflowStepID to the actual placement (feeder step when
@@ -366,13 +376,16 @@ func (r *Repository) insertTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 		occurredAt:       task.CreatedAt,
 	})
 	if err != nil {
-		return err
+		return "", err
 	}
 	task.WorkflowStepTransitionID = transitionID
+	entryID = formatEntryID(transitionID)
 	if task.AssigneeAgentProfileID != "" && task.WorkflowStepID != "" {
-		return upsertRunnerInTx(ctx, tx, r.db.Rebind, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID)
+		if err := upsertRunnerInTx(ctx, tx, r.db.Rebind, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
+			return "", err
+		}
 	}
-	return nil
+	return entryID, nil
 }
 
 func (r *Repository) lockWorkflowStepsForAdmission(ctx context.Context, tx *sql.Tx, targetStepID, feederStepID string) error {
@@ -517,17 +530,22 @@ func (r *Repository) UpdateTask(ctx context.Context, task *models.Task) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if err := r.updateTaskTx(ctx, tx, task, metadata); err != nil {
+	entryID, err := r.updateTaskTx(ctx, tx, task, metadata)
+	if err != nil {
 		return err
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	r.dispatchStepEntry(ctx, task.ID, task.WorkflowID, task.WorkflowStepID, entryID)
+	return nil
 }
 
-func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.Task, metadata []byte) error {
+func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.Task, metadata []byte) (entryID string, err error) {
 	fromWorkflowID, fromStepID, _, err := r.readTaskStepInTx(ctx, tx, task.ID)
 	if err != nil {
-		return err
+		return "", err
 	}
 	// Stamped after the transactional read/lock above, not before BeginTx: on
 	// Postgres, readTaskStepInTx's FOR UPDATE blocks until this transaction's
@@ -558,11 +576,11 @@ func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(updateQuery), task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.ID)
 	if err != nil {
-		return err
+		return "", err
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
+		return "", fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
 	}
 
 	transitionID, err := r.recordStepTransition(ctx, tx, stepTransitionInput{
@@ -574,11 +592,15 @@ func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 		occurredAt:         task.UpdatedAt,
 	})
 	if err != nil {
-		return err
+		return "", err
 	}
 	task.WorkflowStepTransitionID = transitionID
+	entryID = formatEntryID(transitionID)
 
-	return syncRunnerInTx(ctx, tx, r.db.Rebind, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID)
+	if err := syncRunnerInTx(ctx, tx, r.db.Rebind, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
+		return "", err
+	}
+	return entryID, nil
 }
 
 // UpdateTaskWithWorkflowStepAdmission atomically moves a task into a workflow
@@ -807,12 +829,14 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 	if err != nil {
 		metadata = []byte("{}")
 	}
-	if err := r.updateTaskTx(ctx, tx, task, metadata); err != nil {
+	entryID, err := r.updateTaskTx(ctx, tx, task, metadata)
+	if err != nil {
 		return false, false, err
 	}
 	if err := tx.Commit(); err != nil {
 		return false, false, err
 	}
+	r.dispatchStepEntry(ctx, task.ID, task.WorkflowID, task.WorkflowStepID, entryID)
 	return admitted, true, nil
 }
 
@@ -1260,10 +1284,15 @@ func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, ta
 		return err
 	}
 	task.WorkflowStepTransitionID = transitionID
+	entryID := formatEntryID(transitionID)
 	if err := syncRunnerInTx(ctx, tx, r.db.Rebind, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	r.dispatchStepEntry(ctx, task.ID, task.WorkflowID, task.WorkflowStepID, entryID)
+	return nil
 }
 
 // PromoteQueuedTaskIfWorkflowStepHasCapacity atomically claims a queued task
@@ -1358,12 +1387,14 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 		return false, err
 	}
 	task.WorkflowStepTransitionID = transitionID
+	entryID := formatEntryID(transitionID)
 	if err := syncRunnerInTx(ctx, tx, r.db.Rebind, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {
 		return false, err
 	}
+	r.dispatchStepEntry(ctx, task.ID, task.WorkflowID, task.WorkflowStepID, entryID)
 	return true, nil
 }
 
@@ -2681,6 +2712,7 @@ func (r *Repository) RestoreTaskMessageRollbackIfSessionState(
 		return false, err
 	}
 	task.WorkflowStepTransitionID = transitionID
+	entryID := formatEntryID(transitionID)
 	if err := syncRunnerInTx(ctx, tx, r.db.Rebind, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
 		return false, err
 	}
@@ -2688,6 +2720,7 @@ func (r *Repository) RestoreTaskMessageRollbackIfSessionState(
 		return false, err
 	}
 	task.UpdatedAt = updatedAt
+	r.dispatchStepEntry(ctx, task.ID, fromWorkflowID, task.WorkflowStepID, entryID)
 	return true, nil
 }
 

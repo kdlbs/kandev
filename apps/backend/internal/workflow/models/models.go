@@ -25,6 +25,15 @@ const (
 	OnEnterQueueRunForEachParticipant OnEnterActionType = "queue_run_for_each_participant"
 	OnEnterQueueRun                   OnEnterActionType = "queue_run"
 
+	// OnEnterEnsureParticipantSeat guarantees a decision-required seat exists
+	// for the declared role somewhere in the task's workflow before the
+	// generic fan-out queues a run for it (REQ-OFFICE-REVIEW-SEATS-001). The
+	// role is carried in the action Config under the "role" key. A missing,
+	// empty, or unrecognized role is a runtime condition the callback
+	// reports and skips, not a build-time compile failure — configuration is
+	// operator-editable and survives template changes.
+	OnEnterEnsureParticipantSeat OnEnterActionType = "ensure_participant_seat"
+
 	// OnEnterRunCodeReview starts a native code-review pass over the task's
 	// changed files when it enters the step, so a review can sit between an
 	// implement step and a human gate. The optional "agent_profile_id" config

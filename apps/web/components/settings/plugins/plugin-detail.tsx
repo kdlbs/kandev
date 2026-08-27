@@ -12,6 +12,7 @@ import Link from "@/components/routing/app-link";
 import { useRouter } from "@/lib/routing/client-router";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { usePlugins } from "@/hooks/domains/plugins/use-plugins";
+import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { PluginConfigForm } from "./plugin-config-form";
@@ -35,6 +36,7 @@ const PLUGINS_SETTINGS_HREF = "/settings/plugins";
  * GetConfig RPC.
  */
 export function PluginDetail({ pluginId }: { pluginId: string }) {
+  const canManage = useIsAdmin();
   const { items, loaded } = usePlugins();
   const router = useRouter();
   const { isFinePointer } = useResponsiveBreakpoint();
@@ -42,12 +44,12 @@ export function PluginDetail({ pluginId }: { pluginId: string }) {
   const plugin = items.find((p) => p.id === pluginId) ?? null;
   const [confirmingUninstall, setConfirmingUninstall] = useState(false);
   const uninstallAnchorRef = useRef<HTMLButtonElement>(null);
-  const form = usePluginConfigForm(plugin);
+  const form = usePluginConfigForm(canManage ? plugin : null);
   useSettingsSaveContributor({
     id: `plugin-config:${pluginId}`,
     revision: form.revision,
-    isDirty: form.isDirty,
-    canSave: form.canSave,
+    isDirty: canManage && form.isDirty,
+    canSave: canManage && form.canSave,
     invalidReason: form.invalidReason,
     save: form.handleSave,
     discard: form.discard,
@@ -62,43 +64,51 @@ export function PluginDetail({ pluginId }: { pluginId: string }) {
       <PluginDetailHeader plugin={plugin} />
       <Separator />
 
-      {/* Owner-scoped inline slot for the plugin's own settings UI, at the top (see PLUGIN-API.md). */}
-      <PluginSlot
-        name="plugin-settings"
-        ownerPluginId={plugin.id}
-        slotProps={{ pluginId: plugin.id, status: plugin.status }}
-      />
-      <PluginSettingsCard
-        plugin={plugin}
-        form={form}
-        busy={actions.busyId === plugin.id || actions.uninstallBusy}
-      />
+      {canManage && (
+        <>
+          {/* Owner-scoped inline slot for the plugin's own settings UI, at the top (see PLUGIN-API.md). */}
+          <PluginSlot
+            name="plugin-settings"
+            ownerPluginId={plugin.id}
+            slotProps={{ pluginId: plugin.id, status: plugin.status }}
+          />
+          <PluginSettingsCard
+            plugin={plugin}
+            form={form}
+            busy={actions.busyId === plugin.id || actions.uninstallBusy}
+          />
+        </>
+      )}
       <PluginManifestCard plugin={plugin} />
 
-      <PluginDangerZone
-        plugin={plugin}
-        actions={actions}
-        isFinePointer={isFinePointer}
-        confirmingUninstall={confirmingUninstall}
-        uninstallAnchorRef={uninstallAnchorRef}
-        onUninstall={() => {
-          setConfirmingUninstall(true);
-        }}
-      />
-      <PluginUninstallConfirmation
-        target={plugin}
-        open={confirmingUninstall}
-        isFinePointer={isFinePointer}
-        anchorRef={uninstallAnchorRef}
-        onOpenChange={setConfirmingUninstall}
-        onCancel={() => {
-          setConfirmingUninstall(false);
-        }}
-        onConfirm={async () => {
-          const uninstalled = await actions.confirmUninstall(plugin);
-          if (uninstalled) router.push(PLUGINS_SETTINGS_HREF);
-        }}
-      />
+      {canManage && (
+        <>
+          <PluginDangerZone
+            plugin={plugin}
+            actions={actions}
+            isFinePointer={isFinePointer}
+            confirmingUninstall={confirmingUninstall}
+            uninstallAnchorRef={uninstallAnchorRef}
+            onUninstall={() => {
+              setConfirmingUninstall(true);
+            }}
+          />
+          <PluginUninstallConfirmation
+            target={plugin}
+            open={confirmingUninstall}
+            isFinePointer={isFinePointer}
+            anchorRef={uninstallAnchorRef}
+            onOpenChange={setConfirmingUninstall}
+            onCancel={() => {
+              setConfirmingUninstall(false);
+            }}
+            onConfirm={async () => {
+              const uninstalled = await actions.confirmUninstall(plugin);
+              if (uninstalled) router.push(PLUGINS_SETTINGS_HREF);
+            }}
+          />
+        </>
+      )}
     </div>
   );
 }

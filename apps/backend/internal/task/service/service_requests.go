@@ -13,6 +13,7 @@ type TaskRepositoryInput struct {
 	RepositoryID   string `json:"repository_id"`
 	BaseBranch     string `json:"base_branch"`
 	CheckoutBranch string `json:"checkout_branch,omitempty"`
+	BranchPolicyID string `json:"branch_policy_id,omitempty"`
 	PRNumber       int    `json:"pr_number,omitempty"` // GitHub PR number when CheckoutBranch is a PR head; persisted into task_repositories.metadata["pr_number"].
 	LocalPath      string `json:"local_path,omitempty"`
 	Name           string `json:"name,omitempty"`
@@ -25,6 +26,13 @@ type TaskRepositoryInput struct {
 	ProviderRepoID string `json:"provider_repo_id,omitempty"`
 	ProviderOwner  string `json:"provider_owner,omitempty"`
 	ProviderName   string `json:"provider_name,omitempty"`
+
+	// PreserveBaseBranch keeps an effective branch produced after policy
+	// resolution (for example, the branch created by the local fresh-branch
+	// flow) when task repositories are recreated. It is internal-only: normal
+	// task creation must always anchor a policy-backed repository to the
+	// policy's immutable base branch.
+	PreserveBaseBranch bool `json:"-"`
 
 	// RemoteContribution is server-authored after provider resolution. It is
 	// intentionally excluded from JSON request surfaces; callers must not be
@@ -54,7 +62,8 @@ type TaskRepositoryInput struct {
 	// resolver. Plugin descriptors must come through the authenticated plugin
 	// Host Tasks.Create path, which sets this marker only after validating the
 	// active plugin's provider ownership and clone origin.
-	TrustedProviderDescriptor bool `json:"-"`
+	TrustedProviderDescriptor bool                           `json:"-"`
+	BranchPolicySnapshot      *models.RepositoryBranchPolicy `json:"-"`
 }
 
 // CreateTaskRequest contains the data for creating a new task

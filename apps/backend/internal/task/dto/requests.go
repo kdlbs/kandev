@@ -258,6 +258,7 @@ type TaskRepositoryInput struct {
 	RepositoryID   string
 	BaseBranch     string
 	CheckoutBranch string
+	BranchPolicyID string
 	PRNumber       int // GitHub PR number when CheckoutBranch is a PR head; persisted into task_repositories.metadata["pr_number"].
 	LocalPath      string
 	Name           string
@@ -268,6 +269,10 @@ type TaskRepositoryInput struct {
 	ProviderRepoID string
 	ProviderOwner  string
 	ProviderName   string
+	// PreserveBaseBranch is set only by the internal fresh-branch rewrite. It
+	// keeps the generated branch as the effective base when the association is
+	// recreated after policy resolution.
+	PreserveBaseBranch bool
 }
 
 type CreateTaskRequest struct {

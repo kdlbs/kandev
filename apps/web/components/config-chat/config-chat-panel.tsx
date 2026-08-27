@@ -12,7 +12,6 @@ import { QuickChatSessionView } from "@/components/quick-chat/quick-chat-session
 import { isQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
 import { ConfigChatSetup } from "./config-chat-setup";
 import { useConfigChat } from "./use-config-chat";
-import { cn } from "@/lib/utils";
 
 function useConfigChatPanelStore() {
   return useAppStore(
@@ -155,12 +154,7 @@ export const ConfigChatPanel = memo(function ConfigChatPanel({
           <PopoverTrigger asChild>
             <Button
               size="icon"
-              aria-hidden={panel.isOpen}
-              tabIndex={panel.isOpen ? -1 : undefined}
-              className={cn(
-                "fixed bottom-[calc(1.5rem+var(--app-status-bar-height))] right-6 z-50 h-12 w-12 cursor-pointer rounded-full shadow-lg",
-                panel.isOpen && "pointer-events-none opacity-0",
-              )}
+              className="fixed bottom-[calc(1.5rem+var(--app-status-bar-height))] right-6 z-50 h-12 w-12 cursor-pointer rounded-full shadow-lg"
               aria-label={t("common:configurationChat")}
             >
               <IconSparkles className="h-6 w-6" />
