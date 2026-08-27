@@ -55,6 +55,8 @@ long-lived runtime observes host configuration changes.
 rtk go test -race ./internal/repoclone ./internal/orchestrator/executor ./internal/backendapp -run 'Test(DetectGitProtocol|ClonerBuildCloneURLUsesCurrentProtocol|EnsureRepoLocalPathReevaluatesGitHubProtocol|RepositoryResolverAdapterUsesCurrentGitProtocol)' -count=1
 ```
 
+The targeted command passed with 11 tests in 3 packages, including the total-timeout regression.
+
 ## Files likely touched
 
 - `apps/backend/internal/repoclone/protocol.go`
@@ -98,8 +100,11 @@ None.
 ## Results
 
 - Replaced startup Git protocol snapshots with host-aware, context-bounded resolution. Host-specific
-  `gh` configuration takes precedence over global configuration, with SSH as the final default.
+  `gh` configuration takes precedence over global configuration, with SSH as the final default. One
+  five-second context bounds the complete host-plus-global lookup.
 - Injected the resolver into the long-lived repository cloner and review-repository adapter. Executor
   origin reconciliation now evaluates it on every applicable launch or resume.
-- Passed the targeted regression command with 10 tests in 3 packages and the full race-enabled
+- Passed the targeted regression command with 11 tests in 3 packages and the full race-enabled
   affected-package suites with 1,316 tests in 3 packages.
+- PR 3078 completed its fixup with 44 checks passed, no failures or pending checks, and no unresolved
+  review threads.

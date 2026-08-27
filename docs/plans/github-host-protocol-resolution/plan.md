@@ -1,6 +1,6 @@
 ---
 created: 2026-08-27
-status: in_progress
+status: complete
 requirements:
   - REQ-INTEGRATIONS-GITHUB-AUTHENTICATION-001
 system_design:
@@ -59,10 +59,11 @@ host-specific `github.com` `git_protocol=ssh`. The current detector reads `https
 - In `apps/backend/internal/repoclone/protocol.go`, make protocol resolution accept a context and a
   provider host. Query `gh config get -h <host> git_protocol` first. Then query
   `gh config get git_protocol`. Accept only `ssh` and `https`. Otherwise, return the existing SSH
-  default.
+  default. Bound the complete host-plus-global resolution operation with one five-second command
+  context.
 - Isolate command execution behind an injected runner. Unit tests control the results and assert
-  command order without reading the developer's `gh` configuration. Keep the existing command
-  timeout for each resolution call.
+  command order without reading the developer's `gh` configuration. Keep one five-second command
+  timeout for the complete resolution operation.
 
 ### Use-boundary resolution
 
@@ -104,8 +105,8 @@ host-specific `github.com` `git_protocol=ssh`. The current detector reads `https
 - [x] Update executor origin reconciliation and review-repository wiring.
 - [x] Add and pass the specified regression tests.
 - [x] Update plan/work-order verification results.
-- [ ] Commit with hooks, push the branch, and create a ready-for-review PR.
-- [ ] Wait 15 minutes, run PR fixup, and report the final PR state.
+- [x] Commit with hooks, push the branch, and create a ready-for-review PR.
+- [x] Wait 15 minutes, run PR fixup, and report the final PR state.
 
 ## Work orders
 
@@ -113,14 +114,16 @@ host-specific `github.com` `git_protocol=ssh`. The current detector reads `https
 
 ## Verification results
 
-- `rtk go test -race ./internal/repoclone ./internal/orchestrator/executor ./internal/backendapp -run 'Test(DetectGitProtocol|ClonerBuildCloneURLUsesCurrentProtocol|EnsureRepoLocalPathReevaluatesGitHubProtocol|RepositoryResolverAdapterUsesCurrentGitProtocol)' -count=1` passed with 10 tests in 3 packages.
+- `rtk go test -race ./internal/repoclone ./internal/orchestrator/executor ./internal/backendapp -run 'Test(DetectGitProtocol|ClonerBuildCloneURLUsesCurrentProtocol|EnsureRepoLocalPathReevaluatesGitHubProtocol|RepositoryResolverAdapterUsesCurrentGitProtocol)' -count=1` passed with 11 tests in 3 packages, including the total-timeout regression.
 - `rtk go test -race ./internal/repoclone ./internal/orchestrator/executor ./internal/backendapp` passed with 1,316 tests in 3 packages.
+- PR 3078 at `662d3c98d3ddd560ff46cab83e2d8cf965571f65` completed with 44 checks passed, 0 failed, 0 pending, and 0 unresolved review threads. GitHub reports `MERGEABLE / CLEAN`.
 
 ## Risks
 
 - Adding context to protocol-aware URL construction touches executor test fakes. All implementations
   must preserve the same host and operation context.
-- A `gh` lookup now occurs on each relevant URL construction. The existing five-second bound and
-  shared `gh` subprocess throttle limit the cost. Correctness requires no process cache.
+- A `gh` lookup now occurs on each relevant URL construction. One five-second bound covers the
+  complete host-plus-global resolution, and the shared `gh` subprocess throttle limits the cost.
+  Correctness requires no process cache.
 - Provider-host normalization must pass `github.com`, not an HTTPS URL, to `gh --host`. Clone URL
   construction must retain the canonical persisted provider origin.
