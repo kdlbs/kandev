@@ -116,14 +116,15 @@ func clarificationBundleQuery(drv, whereExtra string) string {
 	)
 	notParentQuestion := dialect.ExcludeTruthyMetadataPredicate(drv, "m.metadata", "parent_question")
 	nonTerminalSession := nonTerminalSessionPredicate("m")
+	predicate, orderBy := currentTurnAuthority(drv, "turn_row")
 	currentTurn := fmt.Sprintf(`m.turn_id = (
 			SELECT turn_row.id
 			FROM task_session_turns turn_row
 			WHERE turn_row.task_session_id = m.task_session_id
 			  AND %s
-			ORDER BY turn_row.started_at DESC, turn_row.created_at DESC, turn_row.id DESC
+			ORDER BY %s
 			LIMIT 1
-		  )`, turnAuthorityPredicate(drv, "turn_row"))
+		  )`, predicate, orderBy)
 	return fmt.Sprintf(`
 		SELECT b.pending_id, b.session_id, b.task_id, b.created_at
 		FROM (

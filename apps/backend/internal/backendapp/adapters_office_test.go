@@ -185,6 +185,64 @@ func TestCreateWorkspaceKanbanBootstrapCreatesUsableSteps(t *testing.T) {
 	}
 }
 
+// TestCreateOfficeTaskInWorkflowCarriesAssigneeIntoLaunchMetadata covers
+// WO-36's routine-launch-inputs gap: a materialized heavy routine run lands
+// on the Routine workflow's start step, which pins no agent (routine.yml).
+// The kanban auto-start path's only fallback for the agent to launch with is
+// task.Metadata[MetaKeyAgentProfileID] — AssigneeAgentProfileID alone (a
+// separate DB column) never reaches it. Without this, the routine's task
+// gets created but the orchestrator has no agent profile to start.
+//
+// It also covers WO-36 round 2: handleTaskCreated only evaluates a step's
+// on_enter for a freshly created task when the task carries the positive
+// MetaKeyAutoStartOnCreate opt-in (see event_handlers_workflow.go). This
+// method is that opt-in's only production setter, so both cases here —
+// with and without an assignee — must always stamp it true.
+func TestCreateOfficeTaskInWorkflowCarriesAssigneeIntoLaunchMetadata(t *testing.T) {
+	adapter, taskSvc := newOfficeTaskAdapterHarness(t)
+	ctx := context.Background()
+
+	workflows, err := taskSvc.ListWorkflows(ctx, "ws-1", true)
+	if err != nil || len(workflows) == 0 {
+		t.Fatalf("ListWorkflows: %v (len=%d)", err, len(workflows))
+	}
+	workflowID := workflows[0].ID
+
+	taskID, err := adapter.CreateOfficeTaskInWorkflow(
+		ctx, "ws-1", "", "routine-assignee", workflowID, "Routine run", "Materialized run",
+	)
+	if err != nil {
+		t.Fatalf("CreateOfficeTaskInWorkflow: %v", err)
+	}
+	task, err := taskSvc.GetTask(ctx, taskID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if got, _ := task.Metadata[models.MetaKeyAgentProfileID].(string); got != "routine-assignee" {
+		t.Errorf("task.Metadata[MetaKeyAgentProfileID] = %q, want routine-assignee", got)
+	}
+	if !models.HasAutoStartOnCreateIntent(task.Metadata) {
+		t.Errorf("task.Metadata[MetaKeyAutoStartOnCreate] not set, want true")
+	}
+
+	noAssigneeTaskID, err := adapter.CreateOfficeTaskInWorkflow(
+		ctx, "ws-1", "", "", workflowID, "Unassigned run", "Materialized run",
+	)
+	if err != nil {
+		t.Fatalf("CreateOfficeTaskInWorkflow (no assignee): %v", err)
+	}
+	noAssigneeTask, err := taskSvc.GetTask(ctx, noAssigneeTaskID)
+	if err != nil {
+		t.Fatalf("GetTask (no assignee): %v", err)
+	}
+	if _, ok := noAssigneeTask.Metadata[models.MetaKeyAgentProfileID]; ok {
+		t.Errorf("task.Metadata[MetaKeyAgentProfileID] set for an unassigned routine, want absent")
+	}
+	if !models.HasAutoStartOnCreateIntent(noAssigneeTask.Metadata) {
+		t.Errorf("task.Metadata[MetaKeyAutoStartOnCreate] not set for an unassigned routine, want true")
+	}
+}
+
 func newOfficeTaskAdapterHarness(t *testing.T) (*taskCreatorAdapter, *taskservice.Service) {
 	t.Helper()
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "office-adapter.db"))

@@ -50,6 +50,8 @@ type mockStepGetter struct {
 	workflowMetaErr        error             // optional error from GetWorkflowMeta
 	workflowMetaDelay      time.Duration     // optional sleep before returning meta
 	workflowMetaMu         sync.Mutex        // guards workflowMetaCalls for concurrent tests
+	getStepCalls           int               // GetStep invocations, guarded by getStepMu
+	getStepMu              sync.Mutex
 }
 
 func newMockStepGetter() *mockStepGetter {
@@ -60,6 +62,9 @@ func newMockStepGetter() *mockStepGetter {
 }
 
 func (m *mockStepGetter) GetStep(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error) {
+	m.getStepMu.Lock()
+	m.getStepCalls++
+	m.getStepMu.Unlock()
 	if m.getStepFunc != nil {
 		return m.getStepFunc(ctx, stepID)
 	}
@@ -67,6 +72,17 @@ func (m *mockStepGetter) GetStep(ctx context.Context, stepID string) (*wfmodels.
 		return s, nil
 	}
 	return nil, nil
+}
+
+// GetStepCalls reports how many times GetStep has been invoked. autoStartTaskForStep
+// calls GetStep synchronously, before any launch work is handed off to a detached
+// goroutine (see autoStartTaskForLoadedStep) — so a zero count is a race-free way for
+// a test to prove autoStartTaskForStep was never entered at all, without waiting on
+// or racing against async launch/DB-teardown timing.
+func (m *mockStepGetter) GetStepCalls() int {
+	m.getStepMu.Lock()
+	defer m.getStepMu.Unlock()
+	return m.getStepCalls
 }
 
 func (m *mockStepGetter) GetNextStepByPosition(_ context.Context, workflowID string, currentPosition int) (*wfmodels.WorkflowStep, error) {

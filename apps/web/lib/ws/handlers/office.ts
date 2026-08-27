@@ -7,6 +7,7 @@ import type {
   ProviderHealth,
   RouteAttempt,
 } from "@/lib/state/slices/office/types";
+import { isFieldGuarded } from "@/lib/state/office-task-content-sync";
 
 /**
  * Registers WS handlers for office domain events.
@@ -61,7 +62,7 @@ function buildTaskHandlers(
       if (!isCurrentWorkspace(p)) return;
       const taskId = (p.task_id ?? p.id) as string | undefined;
       if (!taskId) return;
-      updateTaskStatus(taskId, normalizeIssueFields(p));
+      updateTaskStatus(taskId, stripGuardedContentFields(taskId, normalizeIssueFields(p)));
       // Per-task channel — the detail page subscribes to refresh the
       // server-authoritative task DTO after a property mutation.
       triggerRefetch(`task:${taskId}`);
@@ -296,5 +297,20 @@ function normalizeIssueFields(p: Record<string, unknown>): Record<string, unknow
   if (p.priority != null) out.priority = p.priority;
   if (p.updated_at != null) out.updatedAt = p.updated_at;
   if (p.assignee_agent_profile_id != null) out.assigneeAgentProfileId = p.assignee_agent_profile_id;
+  return out;
+}
+
+/**
+ * AC-61: a guarded field (open editor or unresolved write) must not be
+ * overwritten by this unguarded WS fast path, even though this handler is
+ * shared with surfaces (list/board cards) where no editor is ever open.
+ */
+function stripGuardedContentFields(
+  taskId: string,
+  fields: Record<string, unknown>,
+): Record<string, unknown> {
+  const out = { ...fields };
+  if (isFieldGuarded(taskId, "title")) delete out.title;
+  if (isFieldGuarded(taskId, "description")) delete out.description;
   return out;
 }
