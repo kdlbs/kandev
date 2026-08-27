@@ -75,6 +75,23 @@ describe("useAutomationSummaries", () => {
     expect(result.current.loading).toBe(false);
   });
 
+  it("keeps the last successful summaries when a refresh fails", async () => {
+    mockList
+      .mockResolvedValueOnce([mkSummary(A1, 1)])
+      .mockRejectedValueOnce(new Error(SOCKET_CLOSED));
+
+    const { result } = renderHook(() => useAutomationSummaries(WORKSPACE));
+
+    await waitFor(() => expect(result.current.summaries[0]?.open_runs).toBe(1));
+
+    await act(async () => {
+      result.current.refresh();
+    });
+    await waitFor(() => expect(result.current.error).toBe(SOCKET_CLOSED));
+
+    expect(result.current.summaries).toEqual([mkSummary(A1, 1)]);
+  });
+
   it("clears a previous workspace's error when switching", async () => {
     mockList.mockRejectedValueOnce(new Error(SOCKET_CLOSED));
     const { result, rerender } = renderHook(({ ws }) => useAutomationSummaries(ws), {

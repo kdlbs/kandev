@@ -183,3 +183,49 @@ func TestQueueRunCallback_ParticipantRoleCrossTaskDoesNotLeakStaleStepRow(t *tes
 		t.Fatalf("expected 0 queue run calls (stale row must not leak), got %d: %#v", len(q.calls), q.calls)
 	}
 }
+
+// TestQueueRunForEachParticipantCallback_WakesInPositionThenAgentIDOrder is
+// AC-OFFICE-REVIEW-SEATS-003.3: the fan-out must iterate seats in ascending
+// position, then ascending agent profile id, and that order must hold in
+// the actual QueueRun call sequence — not just in some sorted view the
+// caller never observes. The template rows below are declared in the
+// opposite order from what AC-003.3 requires, so a fan-out that trusted the
+// underlying query's order would fail this test.
+func TestQueueRunForEachParticipantCallback_WakesInPositionThenAgentIDOrder(t *testing.T) {
+	q := &fakeRunQueue{}
+	parts := scopedParticipants{template: []ParticipantInfo{
+		{ID: "p-pos1-b", StepID: "step-review", Role: "reviewer", AgentProfileID: "rev-B", Position: 1},
+		{ID: "p-pos0-b", StepID: "step-review", Role: "reviewer", AgentProfileID: "rev-B0", Position: 0},
+		{ID: "p-pos1-a", StepID: "step-review", Role: "reviewer", AgentProfileID: "rev-A", Position: 1},
+		{ID: "p-pos0-a", StepID: "step-review", Role: "reviewer", AgentProfileID: "rev-A0", Position: 0},
+	}}
+	cb := QueueRunForEachParticipantCallback{Adapter: q, Participants: parts}
+	in := ActionInput{
+		Trigger:     TriggerOnEnter,
+		State:       MachineState{TaskID: "task-1", WorkflowID: "wf-1"},
+		Step:        StepSpec{ID: "step-review"},
+		OperationID: "op-1",
+		Action: Action{
+			Kind: ActionQueueRunForEachParticipant,
+			QueueRunForEachParticipant: &QueueRunForEachParticipantAction{
+				Role: "reviewer",
+			},
+		},
+	}
+	if _, err := cb.Execute(context.Background(), in); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(q.calls) != 4 {
+		t.Fatalf("expected 4 queue run calls, got %d: %#v", len(q.calls), q.calls)
+	}
+	got := make([]string, len(q.calls))
+	for i, c := range q.calls {
+		got[i] = c.AgentProfileID
+	}
+	want := []string{"rev-A0", "rev-B0", "rev-A", "rev-B"}
+	for i, w := range want {
+		if got[i] != w {
+			t.Fatalf("call order = %v, want %v (position asc, then agent profile id asc)", got, want)
+		}
+	}
+}

@@ -41,12 +41,6 @@ type DoFetchMessagesParams = {
     store: SessionMessageStore,
     isActive?: () => boolean,
   ) => Promise<Message[]>;
-  autoBackfillUntilUserMessage: (
-    sessionId: string,
-    store: SessionMessageStore,
-    isActive?: () => boolean,
-  ) => Promise<void>;
-  hasUserOrAgentMessage: (messages: Message[]) => boolean;
   onError?: (error: unknown) => void;
   isActive?: () => boolean;
 };
@@ -59,8 +53,6 @@ export async function doFetchMessages({
   initialFetchStartRef,
   lastFetchedSessionIdRef,
   fetchAndStoreMessages,
-  autoBackfillUntilUserMessage,
-  hasUserOrAgentMessage,
   onError,
   isActive,
 }: DoFetchMessagesParams): Promise<void> {
@@ -77,9 +69,6 @@ export async function doFetchMessages({
     if (isInactive(isActive)) return;
     lastFetchedSessionIdRef.current = taskSessionId;
     if (fetched.length > 0) setIsWaitingForInitialMessages(false);
-    if (fetched.length > 0 && !hasUserOrAgentMessage(fetched)) {
-      await autoBackfillUntilUserMessage(taskSessionId, store, isActive);
-    }
   } catch (error) {
     if (isInactive(isActive)) return;
     if (onError) onError(error);

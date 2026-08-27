@@ -101,7 +101,7 @@ parallel ones. The reuse is part of the contract because the guarantees below
 |---|---|
 | `task_blockers` table + BFS cycle detection (`office/dashboard.AddTaskBlocker`) | The dependency edge store and cycle validator, promoted from Office-only to a core task relationship. |
 | Deferred launch intent (`tasks.metadata.deferred_launch`, claimed atomically) | Storage and idempotent consumption of "start automatically when unblocked". |
-| The single auto-start chokepoint (`orchestrator.autoStartTaskForStep`) | Where the dependency gate lives and where dependency-triggered launches enter, so the existing auto-start claim guard prevents double launches. |
+| Automated launch guards (`orchestrator.autoStartTaskForStep` and `orchestrator.launchStart`) | `autoStartTaskForStep` gates workflow, queue, watcher, and dependency-resolution starts before claims. `launchStart` gates `LaunchSession` auto-starts, including `session.ensure`, and downgrades blocked requests to workspace-only prepare. |
 | WIP admission and queue promotion ([`tasks/wip-limit-pull-system`](wip-limit-pull-system.md)) | Decides whether an unblocked, auto-start-intent task launches now or on promotion. |
 
 Two existing behaviors are intentionally *not* changed:
@@ -419,8 +419,9 @@ Edges and blocking:
 Gating:
 
 - **GIVEN** B depends on an unfinished A and B's workflow step has
-  `on_enter: auto_start_agent`, **WHEN** B is moved into that step, **THEN** no
-  session is created and the skip is logged.
+  `on_enter: auto_start_agent`, **WHEN** B is moved into that step or its task
+  view sends `session.ensure`, **THEN** no agent starts. The move creates no
+  session; focus may create only a workspace-ready `CREATED` session.
 - **GIVEN** B depends on an unfinished A and B is queued for a WIP-limited
   auto-start step, **WHEN** capacity opens and B is promoted, **THEN** B is
   admitted, its queued badge clears, and no session is created.

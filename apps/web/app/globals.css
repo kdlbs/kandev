@@ -217,6 +217,10 @@
     animation: settings-target-highlight 1400ms ease-out;
   }
 
+  .task-sidebar-row-reveal {
+    animation: task-sidebar-row-reveal 1400ms ease-out;
+  }
+
   [data-settings-dirty="true"] {
     border-color: color-mix(in oklab, var(--success) 65%, var(--border)) !important;
   }
@@ -254,10 +258,28 @@
   }
 }
 
+@keyframes task-sidebar-row-reveal {
+  0%,
+  35% {
+    background-color: color-mix(in oklab, var(--primary) 28%, transparent);
+    box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--primary) 55%, transparent);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: inset 0 0 0 2px transparent;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   [data-settings-target-highlight="true"] {
     animation: none;
     background-color: color-mix(in oklab, var(--primary) 10%, transparent);
+    box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--primary) 55%, transparent);
+  }
+
+  .task-sidebar-row-reveal {
+    animation: none;
+    background-color: color-mix(in oklab, var(--primary) 28%, transparent);
     box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--primary) 55%, transparent);
   }
 }
@@ -964,6 +986,13 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
   margin-top: 0.5em;
 }
 
+.tiptap-plan-wrapper .ProseMirror::after {
+  content: "";
+  display: block;
+  /* The outer EditorContent owns scrolling, so the spacer extends its range. */
+  height: var(--plan-toolbar-clearance, 0px);
+}
+
 .markdown-body pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -1348,6 +1377,43 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
 
 .tiptap-plan-wrapper .tiptap:focus {
   outline: none;
+}
+
+.tiptap-plan-wrapper .tableWrapper {
+  position: relative;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.tiptap-plan-wrapper .tableWrapper :is(th, td) {
+  position: relative;
+}
+
+.tiptap-plan-wrapper .column-resize-handle {
+  position: absolute;
+  z-index: 20;
+  top: 0;
+  right: -0.3125rem;
+  bottom: -1px;
+  width: 0.625rem;
+  pointer-events: none;
+  touch-action: none;
+}
+
+.tiptap-plan-wrapper .column-resize-handle::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  content: "";
+  transform: translateX(-50%);
+  background: var(--primary);
+}
+
+.tiptap-plan-wrapper .resize-cursor,
+.tiptap-plan-wrapper .resize-cursor * {
+  cursor: col-resize !important;
 }
 
 /* Task lists (TipTap-specific data attribute) */

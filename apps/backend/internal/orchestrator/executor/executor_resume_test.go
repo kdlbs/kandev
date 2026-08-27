@@ -49,6 +49,39 @@ func TestResumeSession_RejectsArchivedTask(t *testing.T) {
 	}
 }
 
+func TestResumeSession_PropagatesTaskEnvironmentPersistenceFailure(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	attachManagedGitHubRepositoryForResume(t, repo)
+	persistErr := errors.New("inventory write failed")
+	repo.createTaskEnvironmentRepoErr = persistErr
+	repo.taskEnvironments["env-1"] = &models.TaskEnvironment{
+		ID:           "env-1",
+		TaskID:       "task-1",
+		ExecutorType: string(models.ExecutorTypeLocal),
+		Status:       models.TaskEnvironmentStatusReady,
+	}
+	repo.sessions["sess-1"].TaskEnvironmentID = "env-1"
+
+	agentManager := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, _ *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			return &LaunchAgentResponse{
+				AgentExecutionID: "exec-new",
+				WorktreePath:     "/workspace/task-1",
+				Worktrees: []RepoWorktreeResult{{
+					RepositoryID: "repo-1", WorktreeID: "wt-1", WorktreePath: "/workspace/task-1",
+				}},
+			}, nil
+		},
+	}
+	exec := newTestExecutor(t, agentManager, repo)
+
+	_, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], false)
+	if !errors.Is(err, persistErr) {
+		t.Fatalf("ResumeSession error = %v, want %v", err, persistErr)
+	}
+}
+
 // setupLiveResumeTestFixture seeds a repo + task + session + executor-running
 // record suitable for exercising the ResumeSession launch path.
 func setupLiveResumeTestFixture(repo *mockRepository) {
@@ -1168,6 +1201,47 @@ func TestResolveResumeBaseBranchKeepsLegacyValueWhenRepositoryRowsAreAmbiguous(t
 	})
 	if got != "session-base" {
 		t.Fatalf("base branch = %q, want session-base", got)
+	}
+}
+
+func TestResumeUsesTaskRepositoryBranchPolicyTemplateSnapshot(t *testing.T) {
+	for _, testCase := range []struct {
+		name     string
+		snapshot string
+		want     string
+	}{
+		{name: "policy snapshot overrides repository template", snapshot: "policy/{title}", want: "policy/{title}"},
+		{name: "empty snapshot falls back to repository template", want: "repository/{title}"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			repo := newMockRepository()
+			repo.repositories["repo-1"] = &models.Repository{
+				ID: "repo-1", WorkspaceID: "workspace-1", Name: "widgets", SourceType: sourceTypeLocal,
+				LocalPath: t.TempDir(), WorktreeBranchTemplate: "repository/{title}",
+			}
+			repo.taskRepositories["task-repo-1"] = &models.TaskRepository{
+				ID: "task-repo-1", TaskID: "task-1", RepositoryID: "repo-1",
+				BranchPolicyBranchTemplate: testCase.snapshot,
+			}
+			exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+			info, err := exec.resolveTaskRepoInfoForSession(context.Background(), "session-1", repo.taskRepositories["task-repo-1"])
+			if err != nil {
+				t.Fatalf("resolveTaskRepoInfoForSession: %v", err)
+			}
+			if info.WorktreeBranchTemplate != testCase.want {
+				t.Fatalf("resolved worktree template = %q, want %q", info.WorktreeBranchTemplate, testCase.want)
+			}
+
+			req := &LaunchAgentRequest{}
+			exec.applyResumeWorktreeConfig(
+				context.Background(), &v1.Task{ID: "task-1", Title: "Resume task"}, req,
+				repo.repositories["repo-1"], "repo-1", repo.repositories["repo-1"].LocalPath, "main", nil,
+			)
+			if req.WorktreeBranchTemplate != testCase.want {
+				t.Fatalf("resume request worktree template = %q, want %q", req.WorktreeBranchTemplate, testCase.want)
+			}
+		})
 	}
 }
 

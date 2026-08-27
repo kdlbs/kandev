@@ -54,6 +54,8 @@ export function branchToOption(b: Branch): PillOption {
     value: display,
     label: display,
     keywords: buildBranchKeywords(b.name, b.remote),
+    group: "branches",
+    groupLabel: t("task:branchesGroup"),
     renderLabel: () => (
       <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
         <span className="truncate" title={display}>

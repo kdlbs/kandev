@@ -10,6 +10,7 @@ import {
   type RefObject,
 } from "react";
 import { Button } from "@kandev/ui/button";
+import { cn } from "@/lib/utils";
 import {
   Popover,
   PopoverAnchor,
@@ -19,8 +20,11 @@ import {
   PopoverTitle,
 } from "@kandev/ui/popover";
 
+export type ActionConfirmPopoverSize = "default" | "wide";
+
 export type ActionConfirmPopoverProps = {
   open: boolean;
+  size?: ActionConfirmPopoverSize;
   disabled?: boolean;
   anchorRef: RefObject<HTMLElement | null>;
   focusReturnRef?: RefObject<HTMLElement | null>;
@@ -48,6 +52,7 @@ export type ActionConfirmPopoverProps = {
  */
 export function ActionConfirmPopover({
   open,
+  size = "default",
   disabled = false,
   anchorRef,
   focusReturnRef,
@@ -112,6 +117,7 @@ export function ActionConfirmPopover({
       {/* Radix accepts a null current value at runtime while its public type omits it. */}
       <PopoverAnchor virtualRef={anchorRef as RefObject<HTMLElement>} />
       <ActionConfirmPopoverContent
+        size={size}
         titleId={titleId}
         descriptionId={descriptionId}
         title={title}
@@ -137,6 +143,7 @@ export function ActionConfirmPopover({
 }
 
 type ActionConfirmPopoverContentProps = {
+  size: ActionConfirmPopoverSize;
   titleId: string;
   descriptionId: string;
   title: ReactNode;
@@ -159,6 +166,7 @@ type ActionConfirmPopoverContentProps = {
 };
 
 const ActionConfirmPopoverContent = memo(function ActionConfirmPopoverContent({
+  size,
   titleId,
   descriptionId,
   title,
@@ -189,7 +197,7 @@ const ActionConfirmPopoverContent = memo(function ActionConfirmPopoverContent({
       side="bottom"
       align="end"
       sideOffset={8}
-      className="w-64 gap-3 p-3"
+      className={cn("gap-3 p-3", size === "wide" ? "w-72 max-w-[calc(100vw-1rem)]" : "w-64")}
       onOpenAutoFocus={(event) => {
         event.preventDefault();
         cancelRef.current?.focus();

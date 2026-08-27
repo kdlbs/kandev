@@ -1,5 +1,6 @@
 // Filename starts with "mobile-" so this runs in the mobile-chrome project.
 import {
+  pointSeedRepositoryAtFailingOrigin,
   pointSeedRepositoryAtUnresolvedOrigin,
   restoreSeedRepositoryOrigin,
   test,
@@ -42,6 +43,10 @@ test.describe("mobile task launch failure recovery", () => {
       events: { on_enter: [{ type: "auto_start_agent" }] },
     });
 
+    await apiClient.updateRepository(seedData.repositoryId, {
+      default_branch: "mobile-default-branch-that-no-longer-exists",
+      pull_before_worktree: false,
+    });
     const task = await apiClient.createTask(
       seedData.workspaceId,
       "Mobile missing base branch recovery fixture",
@@ -63,9 +68,6 @@ test.describe("mobile task launch failure recovery", () => {
     const taskRepository = storedTask.repositories?.[0];
     if (!taskRepository) throw new Error("mobile fixture did not create a task repository row");
 
-    await apiClient.updateRepository(seedData.repositoryId, {
-      default_branch: "mobile-default-branch-that-no-longer-exists",
-    });
     pointSeedRepositoryAtUnresolvedOrigin(seedData, backend.tmpDir);
 
     try {
@@ -140,7 +142,121 @@ test.describe("mobile task launch failure recovery", () => {
       });
     } finally {
       restoreSeedRepositoryOrigin(seedData);
-      await apiClient.updateRepository(seedData.repositoryId, { default_branch: "main" });
+      await apiClient.updateRepository(seedData.repositoryId, {
+        default_branch: "main",
+        pull_before_worktree: true,
+      });
+    }
+  });
+
+  test("keeps a required refresh failure visible and retries on the phone", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }, testInfo) => {
+    test.setTimeout(150_000);
+
+    const workflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      `Mobile required refresh recovery ${Date.now()}`,
+    );
+    const waiting = await apiClient.createWorkflowStep(workflow.id, "Waiting", 0);
+    const review = await apiClient.createWorkflowStep(workflow.id, "Review", 1);
+    await apiClient.updateWorkflowStep(review.id, {
+      events: { on_enter: [{ type: "auto_start_agent" }] },
+    });
+
+    const task = await apiClient.createTask(
+      seedData.workspaceId,
+      "Mobile required refresh failure recovery fixture",
+      {
+        description: "/e2e:simple-message",
+        workflow_id: workflow.id,
+        workflow_step_id: waiting.id,
+        agent_profile_id: seedData.agentProfileId,
+        executor_profile_id: seedData.worktreeExecutorProfileId,
+        repositories: [{ repository_id: seedData.repositoryId, base_branch: "main" }],
+      },
+    );
+    const storedTask = await apiClient.getTask(task.id);
+    const taskRepository = storedTask.repositories?.[0];
+    if (!taskRepository)
+      throw new Error("mobile refresh fixture did not create a task repository row");
+
+    pointSeedRepositoryAtFailingOrigin(seedData, backend.tmpDir);
+    try {
+      await apiClient.moveTask(task.id, workflow.id, review.id);
+      await testPage.goto(`/t/${task.id}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await expect
+        .poll(
+          async () => {
+            const { tasks } = await apiClient.listTasks(seedData.workspaceId);
+            const error = tasks.find((candidate) => candidate.id === task.id)?.status_summary
+              ?.active_error;
+            return Boolean(error?.stamp && error.category === "generic_launch_failure");
+          },
+          { timeout: 60_000, message: "waiting for the mobile required refresh launch error" },
+        )
+        .toBe(true);
+
+      const launchError = (await apiClient.listTasks(seedData.workspaceId)).tasks.find(
+        (candidate) => candidate.id === task.id,
+      )?.status_summary?.active_error;
+      expect(launchError?.task_repository_id).toBe(taskRepository.id);
+
+      const card = testPage.getByTestId("task-launch-error-entry");
+      await expect(card).toHaveCount(1, { timeout: 30_000 });
+      await expect(card).toContainText("The task could not start.");
+      await testPage.reload();
+      await session.waitForLoad();
+      await expect(testPage.getByTestId("task-launch-error-entry")).toHaveCount(1);
+
+      restoreSeedRepositoryOrigin(seedData);
+      const pickBranch = testPage.getByTestId("task-launch-pick_base_branch-button");
+      await pickBranch.tap();
+      await expect(testPage.getByTestId("task-launch-branch-picker-mobile")).toBeVisible({
+        timeout: 30_000,
+      });
+      const branchOption = testPage.getByTestId("task-launch-branch-picker-option-main");
+      await expect(branchOption).toBeVisible({ timeout: 30_000 });
+      await expect(branchOption).toBeInViewport();
+      await branchOption.tap();
+      await expect(testPage.getByTestId("task-launch-branch-picker-mobile")).toHaveCount(0);
+
+      await expect
+        .poll(
+          async () => {
+            const { tasks } = await apiClient.listTasks(seedData.workspaceId);
+            return (
+              tasks.find((candidate) => candidate.id === task.id)?.status_summary?.active_error ??
+              null
+            );
+          },
+          { timeout: 60_000, message: "waiting for the mobile required refresh error to clear" },
+        )
+        .toBeNull();
+      await expect
+        .poll(
+          async () => {
+            const { sessions } = await apiClient.listTaskSessions(task.id);
+            return sessions.some((item) =>
+              ["RUNNING", "WAITING_FOR_INPUT", "IDLE", "COMPLETED"].includes(item.state),
+            );
+          },
+          { timeout: 60_000, message: "waiting for the mobile refresh retry to launch" },
+        )
+        .toBe(true);
+
+      await assertNoDocumentHorizontalOverflow(testPage, "mobile required refresh recovery");
+      await testPage.screenshot({
+        path: testInfo.outputPath("required-refresh-recovery-mobile.png"),
+        fullPage: true,
+      });
+    } finally {
+      restoreSeedRepositoryOrigin(seedData);
     }
   });
 });

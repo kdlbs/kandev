@@ -4,11 +4,13 @@ import { useEffect, useCallback, useRef, useState } from "react";
 import { deleteTaskPR, listWorkspaceTaskPRs } from "@/lib/api/domains/github-api";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useAppStore } from "@/components/state-provider";
+import { getTaskPRsForCurrentWorkspace } from "./use-task-pr-tooltip-hydration";
 import type { TaskPR } from "@/lib/types/github";
 
 /** Fetch all PR associations for a workspace. */
 export function useWorkspacePRs(workspaceId: string | null) {
   const setTaskPRs = useAppStore((state) => state.setTaskPRs);
+  const workspaceContextGeneration = useAppStore((state) => state.workspaceContextGeneration);
   const fetchedRef = useRef<string | null>(null);
   const requestRef = useRef(0);
 
@@ -25,14 +27,17 @@ export function useWorkspacePRs(workspaceId: string | null) {
     listWorkspaceTaskPRs(workspaceId, { cache: "no-store" })
       .then((response) => {
         if (requestRef.current !== requestId) return;
-        setTaskPRs(response?.task_prs ?? {});
+        setTaskPRs(response?.task_prs ?? {}, {
+          workspaceId,
+          workspaceContextGeneration,
+        });
       })
       .catch(() => {
         if (requestRef.current === requestId) {
           fetchedRef.current = null; // allow retry on failure
         }
       });
-  }, [workspaceId, setTaskPRs]);
+  }, [workspaceContextGeneration, setTaskPRs, workspaceId]);
 }
 
 const SYNC_RETRY_DELAY = 5_000; // 5 seconds
@@ -73,11 +78,14 @@ type SyncResponse = { prs?: TaskPR[]; permanent?: boolean } | TaskPR | null | un
 
 /** Fetch a single task's PR associations, with on-demand sync via WS. */
 export function useTaskPR(taskId: string | null) {
-  const prs = useAppStore((state) => (taskId ? (state.taskPRs.byTaskId[taskId] ?? null) : null));
+  const prs = useAppStore((state) =>
+    taskId ? getTaskPRsForCurrentWorkspace(state, taskId) : null,
+  );
   const pr = getPrimaryTaskPR(prs ?? undefined);
   const setTaskPR = useAppStore((state) => state.setTaskPR);
   const removeTaskPR = useAppStore((state) => state.removeTaskPR);
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const workspaceContextGeneration = useAppStore((state) => state.workspaceContextGeneration);
   const connectionStatus = useAppStore((state) => state.connection.status);
   const retryRef = useRef(0);
   const permanentRef = useRef(false);
@@ -133,8 +141,9 @@ export function useTaskPR(taskId: string | null) {
         const list = normalizeSyncResponse(result);
         setLoadedTaskId(requestedTaskId);
         if (list.length === 0) return;
+        const scope = { workspaceId, workspaceContextGeneration };
         for (const pr of list) {
-          if (pr.task_id) setTaskPR(requestedTaskId, pr);
+          if (pr.task_id) setTaskPR(requestedTaskId, pr, scope);
         }
         retryRef.current = 0;
       })
@@ -146,15 +155,15 @@ export function useTaskPR(taskId: string | null) {
           setLoadedTaskId(requestedTaskId);
         }
       });
-  }, [taskId, setTaskPR]);
+  }, [taskId, setTaskPR, workspaceContextGeneration, workspaceId]);
 
   const unlink = useCallback(
     async (associationId: string) => {
       if (!taskId || !workspaceId) throw new Error("No active workspace is selected.");
       await deleteTaskPR(associationId, workspaceId);
-      removeTaskPR(taskId, associationId);
+      removeTaskPR(taskId, associationId, { workspaceId, workspaceContextGeneration });
     },
-    [removeTaskPR, taskId, workspaceId],
+    [removeTaskPR, taskId, workspaceContextGeneration, workspaceId],
   );
 
   // Reset retry/permanent state when taskId changes. Bumping requestRef
@@ -240,6 +249,6 @@ export function useActiveTaskPR(): TaskPR | null {
   return useAppStore((s) => {
     const taskId = s.tasks.activeTaskId;
     if (!taskId) return null;
-    return getPrimaryTaskPR(s.taskPRs.byTaskId[taskId]);
+    return getPrimaryTaskPR(getTaskPRsForCurrentWorkspace(s, taskId) ?? undefined);
   });
 }

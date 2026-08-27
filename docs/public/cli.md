@@ -231,6 +231,8 @@ The launcher derives readiness targets and the access URL from the effective `se
 
 When it can enumerate non-loopback interfaces, the launcher also prints `network:` URLs for each unique non-loopback, non-link-local address on the same port, including local-network and Tailscale addresses. IPv6 addresses are shown in brackets. If the effective bind restricts the listener, the launcher only prints matching addresses. These lines are informational and are omitted if interface discovery is unavailable.
 
+The `dev`, `start`, and `run` startup banners also print a `version:` line. Its value matches `kandev --version`; an unstamped local build reports `dev`.
+
 The backend's default `server.host` is `0.0.0.0`. That can expose Kandev to other machines on the network, and the current local product path is not an authenticated multi-user boundary. The launcher uses `localhost` for its default local access URL, but the backend still listens on every interface. Bind it to loopback unless remote access is deliberately protected:
 
 ```bash

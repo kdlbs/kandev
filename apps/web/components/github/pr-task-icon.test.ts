@@ -13,8 +13,8 @@ import {
 } from "./pr-task-icon";
 import type { TaskPR } from "@/lib/types/github";
 
-const SKY_400 = "text-sky-400";
-const RED_500 = "text-red-500";
+const SKY_400 = "text-sky-400",
+  RED_500 = "text-red-500";
 const YELLOW_500 = "text-yellow-500";
 const EMERALD_400 = "text-emerald-400";
 const GREEN_500 = "text-green-500";
@@ -51,7 +51,7 @@ function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
     closed_at: null,
     last_synced_at: null,
     updated_at: "",
-    ...overrides,
+    ...{ workspace_id: "workspace-1", ...overrides },
   };
 }
 

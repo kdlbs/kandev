@@ -114,8 +114,10 @@ Multiple sessions in the *same* task share the same worktree on disk (same files
   the same workspace placeholders as preparation. Ordinary Stop and backend restart preserve both
   the workspace and cleanup hook for resume. Cleanup failure is reported in logs but does not prevent
   controller teardown.
-- The task directory remains after controller teardown so a later resume keeps history; automatic
-  task-directory deletion remains out of scope.
+- The task directory remains after controller teardown so a later resume keeps history. Built-in
+  reclamation is never part of the stop path; terminal cleanup hooks may still run there. Built-in
+  reclamation is an opt-in phase of the durable task-resource cleanup job, specified in
+  [Remote task-directory reclamation](requirements/remote-task-directory-reclamation.md).
 
 ### agentctl binary upload with content-hash cache
 
@@ -212,7 +214,7 @@ Multiple sessions in the *same* task share the same worktree on disk (same files
 - **Pushing local uncommitted changes to the remote.** Like Sprites, the remote clones from the git URL — we do not rsync the user's working tree.
 - **Auto-installing dependencies on the remote.** If the user's prepare script needs `node`/`go`/`python`/`docker`, those must already be on the host. We do not bootstrap toolchains.
 - **Multi-user-per-host with isolation guarantees.** v1 assumes the single SSH user on each host is trusted with everything that user can see; we do not sandbox sessions from each other beyond per-session runtime dirs.
-- **Orphaned task-dir cleanup as a background job.** If a task is deleted in kandev, the remote `<workdir_root>/tasks/<task-dir-name>/` is left on disk. A v2 housekeeper can sweep stale dirs.
+- **A background sweep of pre-existing orphaned task dirs.** Reclaiming the remote `<workdir_root>/tasks/<task-dir-name>/` when a task reaches a terminal outcome is no longer out of scope: it is specified in [Remote task-directory reclamation](requirements/remote-task-directory-reclamation.md), which supersedes this bullet. What remains out of scope is a scheduled sweep of directories left behind by tasks Kandev no longer has a row for.
 - **GUI editor for `~/.ssh/config`.** We read existing config; users edit it in their text editor.
 - **Bring-your-own-agentctl** (skip upload, point at an existing install). Always uploaded + content-hash-cached in v1.
 - **Kubernetes / pod-exec transport.** The `k8s` executor type is its own future feature.
@@ -226,7 +228,8 @@ Multiple sessions in the *same* task share the same worktree on disk (same files
 - **"Push working tree" mode** for users who want to test uncommitted changes against a remote (rsync the worktree instead of cloning).
 - **Pooled host capacity**: configure 3 SSH hosts as a pool, kandev round-robins / load-balances tasks across them.
 - **SSH-tunneled MCP servers**: expose a user's local MCP servers to a remote-running agent via reverse forward.
-- **Orphan task-dir housekeeper** as a backend background job.
+- **Orphan task-dir sweeper** as a backend background job, for directories with no surviving task
+  row. The terminal-outcome reclamation itself is now specified rather than deferred.
 - **Byte-for-byte live prepare output streaming.** SSH reports bounded preparation progress and the
   final diagnostic tail, but matching Sprites' continuous stdout/stderr streaming can be added later.
 

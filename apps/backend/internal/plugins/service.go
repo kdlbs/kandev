@@ -123,7 +123,10 @@ type Service struct {
 	sessionCodeStats sessionCodeStatsSource
 	messageData      messageDataSource
 	interactionData  interactionDataSource
-	taskWriter       taskWriter
+	// taskPRs is guarded by mu and read through taskPRSourceDep, because hosts can
+	// outlive the late SetTaskPRSource wiring.
+	taskPRs    taskPRSource
+	taskWriter taskWriter
 
 	// Utility agent invocation (ADR 0048), wired via SetUtilityAgent.
 	utilityAgents utilityAgentSource
@@ -428,6 +431,24 @@ func (s *Service) SetDataSources(
 // StartActivePlugins has spawned boot-active plugins — so hosts read it live
 // via interactionResponderDep rather than snapshotting it. A nil responder
 // leaves the write RPCs returning Unimplemented; the reads are unaffected.
+// SetTaskPRSource wires the optional pull-request lookup behind
+// Task.PullRequests. It is separate from SetDataSources because GitHub is an
+// optional service; nil leaves tasks with no PullRequests rather than failing
+// the read.
+func (s *Service) SetTaskPRSource(src taskPRSource) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.taskPRs = src
+}
+
+// taskPRSourceDep returns the currently wired pull-request source. Hosts call
+// this accessor at read time so late wiring reaches already-running plugins.
+func (s *Service) taskPRSourceDep() taskPRSource {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.taskPRs
+}
+
 func (s *Service) SetInteractionResponder(responder interactionResponder) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -630,6 +651,7 @@ func (s *Service) hostForPlugin(pluginID string) pluginsdk.Host {
 		sessionCodeStats:    s.sessionCodeStats,
 		messageData:         s.messageData,
 		interactionData:     s.interactionData,
+		taskPRsDep:          s.taskPRSourceDep,
 		taskWriter:          s.taskWriter,
 		utilityDeps:         s.utilityAgentDeps,
 		writeDeps:           s.writeDependencies,

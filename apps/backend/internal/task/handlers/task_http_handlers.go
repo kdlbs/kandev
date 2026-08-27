@@ -693,6 +693,7 @@ type httpTaskRepositoryInput struct {
 	RepositoryID   string `json:"repository_id"`
 	BaseBranch     string `json:"base_branch"`
 	CheckoutBranch string `json:"checkout_branch"`
+	BranchPolicyID string `json:"branch_policy_id,omitempty"`
 	PRNumber       int    `json:"pr_number,omitempty"`
 	LocalPath      string `json:"local_path"`
 	Name           string `json:"name"`
@@ -1197,7 +1198,7 @@ func (h *TaskHandlers) commitFreshBranch(
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve task repository"})
 		return false
 	}
-	if !h.applyFreshBranch(c, title, inputs, repos, task.Repositories) {
+	if !h.applyFreshBranch(c, title, task, inputs, repos, task.Repositories) {
 		h.rollbackFreshBranchTask(c.Request.Context(), taskID)
 		return false
 	}
@@ -1237,6 +1238,7 @@ func (h *TaskHandlers) rollbackFreshBranchTask(ctx context.Context, taskID strin
 func (h *TaskHandlers) applyFreshBranch(
 	c *gin.Context,
 	taskTitle string,
+	task *models.Task,
 	inputs []httpTaskRepositoryInput,
 	repos []dto.TaskRepositoryInput,
 	persisted []*models.TaskRepository,
@@ -1256,7 +1258,7 @@ func (h *TaskHandlers) applyFreshBranch(
 			// User didn't pick one — fall back to the repo's checked-out branch.
 			baseBranch, _ = h.service.RepositoryCurrentBranch(ctx, repositoryID)
 		}
-		newBranch := resolveFreshBranchName(raw.NewBranchName, taskTitle)
+		newBranch := resolveFreshBranchNameForTask(raw.NewBranchName, taskTitle, task, persisted[i])
 		err := h.service.PerformFreshBranch(ctx, service.FreshBranchRequest{
 			RepositoryID:        repositoryID,
 			BaseBranch:          baseBranch,
@@ -1270,6 +1272,7 @@ func (h *TaskHandlers) applyFreshBranch(
 		}
 		repos[i].BaseBranch = newBranch
 		repos[i].CheckoutBranch = ""
+		repos[i].PreserveBaseBranch = true
 	}
 	return true
 }
@@ -1284,6 +1287,25 @@ func resolveFreshBranchName(rawNewBranch, taskTitle string) string {
 		return name
 	}
 	return worktree.SemanticWorktreeName(taskTitle, worktree.SmallSuffix(3))
+}
+
+func resolveFreshBranchNameForTask(rawNewBranch, taskTitle string, task *models.Task, taskRepository *models.TaskRepository) string {
+	if name := strings.TrimSpace(rawNewBranch); name != "" {
+		return name
+	}
+	if task != nil && taskRepository != nil && taskRepository.BranchPolicyBranchTemplate != "" {
+		branch, err := worktree.RenderTaskBranchName(worktree.BranchNameTemplateInput{
+			Template: taskRepository.BranchPolicyBranchTemplate,
+			TaskID:   task.ID,
+			Title:    taskTitle,
+			Ticket:   worktree.TicketForBranchName(task.Identifier, task.Metadata),
+			Suffix:   worktree.SmallSuffix(3),
+		})
+		if err == nil {
+			return branch
+		}
+	}
+	return resolveFreshBranchName("", taskTitle)
 }
 
 func (h *TaskHandlers) respondFreshBranchError(c *gin.Context, err error) {
@@ -1332,6 +1354,7 @@ func convertCreateTaskRepositories(c *gin.Context, inputs []httpTaskRepositoryIn
 			RepositoryID:   r.RepositoryID,
 			BaseBranch:     r.BaseBranch,
 			CheckoutBranch: r.CheckoutBranch,
+			BranchPolicyID: r.BranchPolicyID,
 			PRNumber:       r.PRNumber,
 			LocalPath:      r.LocalPath,
 			Name:           r.Name,
@@ -1559,6 +1582,7 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 				RepositoryID:   r.RepositoryID,
 				BaseBranch:     r.BaseBranch,
 				CheckoutBranch: r.CheckoutBranch,
+				BranchPolicyID: r.BranchPolicyID,
 				PRNumber:       r.PRNumber,
 				LocalPath:      r.LocalPath,
 				Name:           r.Name,

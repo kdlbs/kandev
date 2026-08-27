@@ -33,6 +33,7 @@ import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import type { MobileWorkflowNavigation } from "@/lib/kanban/view-registry";
 import { resolveMobileColumnIndex } from "@/lib/kanban/mobile-column-index";
 import { compareTasksByCreatedDesc } from "@/lib/kanban/task-order";
+import { getTaskMoveErrorMessage } from "@/components/task/task-move-error-message";
 import { countAdmittedTasks } from "@/lib/kanban/wip-limit";
 import { areAllEmptyStepsAutoHidden } from "@/lib/kanban/auto-hide-empty-columns";
 import {
@@ -133,7 +134,7 @@ function useSwimlaneKanbanDnd({ tasks, workflowId, onMoveError }: SwimlaneKanban
             .getState()
             .setWorkflowSnapshot(workflowId, { ...currentSnapshot, tasks: originalTasks });
         }
-        const message = error instanceof Error ? error.message : t("task:failedToMoveTask");
+        const message = getTaskMoveErrorMessage(error, t("task:taskMoveErrorGeneric"), t);
         onMoveError?.({ message, taskId, sessionId: task.primarySessionId ?? null });
       }
     },

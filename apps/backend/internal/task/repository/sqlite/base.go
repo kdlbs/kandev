@@ -56,8 +56,17 @@ type Repository struct {
 	// insert in its own transaction before attempting the rollup would leave a
 	// row behind here, while the real single-transaction implementation rolls
 	// it back with everything else.
-	failUsageEventRollupAttempts int
-	failUsageEventRollupErr      error
+	// failParticipantSeatReconcileAttempts is a test-only failpoint for the
+	// participant-seat reconciler's AC-OFFICE-REVIEW-SEATS-005.9 bounded
+	// retry loop: while > 0, tryHealParticipantSeatRow reports a synthetic
+	// concurrent-modification retry without touching the database, and
+	// decrements the counter. A genuine SQLite write race is not
+	// reproducible deterministically against this package's
+	// single-connection test repositories (SetMaxOpenConns(1) serializes
+	// all writes), so this stands in for one.
+	failParticipantSeatReconcileAttempts int
+	failUsageEventRollupAttempts         int
+	failUsageEventRollupErr              error
 	// usageEventPreRollupHook is a test-only synchronization seam, called (if
 	// set) inside insertUsageEventAndRollup's transaction at the same point as
 	// the failUsageEventRollup* failpoint - after the ledger row insert
@@ -72,6 +81,12 @@ type Repository struct {
 	// than only the injected failpoint errors). Nil in production and in
 	// every test but the one that sets it.
 	usageEventPreRollupHook func()
+	// stepEntryDispatcher fires a step's session-independent on_enter
+	// sequence after a registered step-transition writer commits. Nil-safe
+	// (see dispatchStepEntry in step_entry_dispatch.go): unset in every
+	// test that doesn't exercise it, and in production until
+	// SetStepEntryDispatcher is called during boot wiring.
+	stepEntryDispatcher StepEntryDispatcher
 }
 
 func (r *Repository) nowUTC() time.Time {
