@@ -192,13 +192,46 @@ func seedStuckParentNoAssignee(t *testing.T, svc *service.Service, wsID, parentI
 	}
 }
 
+// seedStuckParentDanglingAssignee is seedStuckParent but points the runner
+// participant row at an agent_profile_id with no matching agent_profiles
+// row — R3-B's sticky case: a dangling reference that a LEFT JOIN against
+// agent_profiles let through as COALESCE'd-to-idle, occupying a LIMIT slot
+// forever since nothing about a dangling reference ever resolves itself.
+func seedStuckParentDanglingAssignee(t *testing.T, svc *service.Service, wsID, parentID string) {
+	t.Helper()
+	insertTestTask(t, svc, parentID, wsID)
+	setTestTaskAssignee(t, svc, parentID, parentID+"-dangling-agent")
+	states := []string{"COMPLETED", "COMPLETED", "CANCELLED"}
+	for i, state := range states {
+		childID := fmt.Sprintf("%s-child-%d", parentID, i)
+		insertTestTask(t, svc, childID, wsID)
+		svc.ExecSQL(t, `UPDATE tasks SET parent_id = ?, state = ? WHERE id = ?`,
+			parentID, state, childID)
+	}
+}
+
 // TestParentWakeReconciler_UnresolvedAndPausedDoNotStarveHealthyParent is
-// R2-A's regression test. An unresolved-runner or paused-agent candidate is
-// sticky: nothing about it ever changes tick to tick (no receipt or run is
-// ever written for it), so before this fix it permanently occupied one of
-// ListStuckParents' LIMIT slots on every single tick, forever — five such
-// candidates were enough to starve a genuinely healthy stuck parent behind
-// them across every subsequent tick, not just the first.
+// R2-A's regression test, tightened by R3-C after review proved it vacuous:
+// deleting both SQL assignee predicates and re-running left it unchanged
+// green, because ORDER BY parent_task_id already put "healthy-parent" ahead
+// of every "stuck-*"/"zz-*" candidate (h < s, h < z) regardless of whether
+// the fix was present. The healthy parent is now named to sort strictly
+// after every sticky candidate ("zz-healthy-parent" > "stuck-*"), so this
+// test goes red against a reintroduced ordering-only guard instead of
+// passing by accident.
+//
+// The unresolved-runner and paused-agent candidates are excluded by
+// ListStuckParents' WHERE clause before its LIMIT is applied, so — now
+// that both live in SQL — they cost no LIMIT slot at all and cannot by
+// themselves starve anything; they stay here purely as regression coverage
+// that this fix does not regress. The 5 dangling-agent-profile candidates
+// are what actually drives this test red against R3-B's unfixed LEFT JOIN:
+// a LEFT JOIN against agent_profiles COALESCEs a dangling reference's NULL
+// status to 'idle', which passes the assignee filter and — unlike the
+// unresolved/paused cases — genuinely consumes a LIMIT slot, is exactly as
+// sticky (nothing about a dangling reference ever starts resolving), and
+// five of them alone are enough to fill maxWakeReconcilePerTick (5) ahead
+// of "zz-healthy-parent" on every tick, forever.
 func TestParentWakeReconciler_UnresolvedAndPausedDoNotStarveHealthyParent(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
@@ -218,10 +251,14 @@ func TestParentWakeReconciler_UnresolvedAndPausedDoNotStarveHealthyParent(t *tes
 			t.Fatalf("pause agent %s: %v", agentID, err)
 		}
 	}
-	// The one genuinely healthy stuck parent, seeded last (behind the 5
-	// sticky candidates above) so an unordered LIMIT 5 scan reaches it
-	// last, exactly like TestListStuckParents_LimitDoesNotStarveLaterCandidates.
-	seedStuckParent(t, svc, "ws-1", "healthy-parent", "healthy-worker")
+	// 5 candidates with a dangling agent_profile_id (R3-B) — enough on
+	// their own to fill maxWakeReconcilePerTick ahead of the healthy parent.
+	for i := 0; i < 5; i++ {
+		seedStuckParentDanglingAssignee(t, svc, "ws-1", fmt.Sprintf("stuck-dangling-%d", i))
+	}
+	// The one genuinely healthy stuck parent, named to sort strictly after
+	// every sticky candidate above so an ordered scan reaches it last.
+	seedStuckParent(t, svc, "ws-1", "zz-healthy-parent", "zz-healthy-worker")
 
 	handler := service.NewParentWakeReconciler(service.NewSchedulerIntegration(svc, 0))
 	for tick := 0; tick < 3; tick++ {
@@ -235,9 +272,9 @@ func TestParentWakeReconciler_UnresolvedAndPausedDoNotStarveHealthyParent(t *tes
 		t.Fatalf("list runs: %v", err)
 	}
 	for _, run := range runs {
-		if run.Reason == service.RunReasonTaskChildrenCompleted && strings.Contains(run.Payload, "healthy-parent") {
+		if run.Reason == service.RunReasonTaskChildrenCompleted && strings.Contains(run.Payload, "zz-healthy-parent") {
 			return
 		}
 	}
-	t.Fatalf("healthy-parent was never woken across 3 ticks behind 5 sticky candidates: %#v", runs)
+	t.Fatalf("zz-healthy-parent was never woken across 3 ticks behind 10 sticky candidates: %#v", runs)
 }

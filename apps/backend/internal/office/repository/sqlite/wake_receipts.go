@@ -43,15 +43,27 @@ type StuckParentCandidate struct {
 //   - the LEFT JOIN against parent_child_wake_receipts drops a candidate
 //     whose stored receipt already matches its current child set — the
 //     receipt is purely this "has the child set changed" discriminator.
-//   - the NOT EXISTS against runs drops a candidate that already has an
-//     active or finished task_children_completed run, regardless of who
-//     queued it — queueChildrenCompletedRun and cascadeChildrenCompleted
-//     (the edge-triggered delivery paths) never write a receipt, so the
-//     receipt alone cannot tell a healthy edge-delivered wake from a lost
-//     one; evidence of delivery has to come from runs itself.
+//   - the NOT EXISTS against runs drops a candidate with a queued or
+//     claimed task_children_completed run (still in flight, regardless of
+//     which child set it was requested for — wait for it to resolve rather
+//     than race a duplicate) or a finished one requested at or after
+//     newest_child_updated_at (it already reflects the current child set).
+//     A finished run requested *before* the newest child update does NOT
+//     block: that run saw a stale child set, so it must not be treated as
+//     having delivered this one — this is R3-A's fix, replacing a plain
+//     "any finished run ever" check that let one finished run permanently
+//     immunize a parent against every later child-set change.
+//     queueChildrenCompletedRun and cascadeChildrenCompleted (the
+//     edge-triggered delivery paths) never write a receipt, so the receipt
+//     alone cannot tell a healthy edge-delivered wake from a lost one;
+//     evidence of delivery has to come from runs itself.
 //   - requiring a non-empty assignee_agent_profile_id drops a candidate
-//     with no resolvable runner, and the LEFT JOIN against agent_profiles
-//     drops one whose runner is paused, stopped, or pending approval.
+//     with no resolvable runner, and the INNER JOIN against agent_profiles
+//     drops one whose runner is paused, stopped, pending approval, or
+//     altogether missing (a dangling assignee_agent_profile_id with no
+//     matching row) — R3-B's fix: a LEFT JOIN treated "no matching row" as
+//     COALESCE'd-to-idle, which passed a dangling reference straight
+//     through as a sticky, unresolvable, LIMIT-slot-consuming candidate.
 //
 // This is an invariant, not four independent filters: any predicate that
 // can stay true for the same parent across consecutive ticks MUST be
@@ -78,7 +90,11 @@ func (r *Repository) ListStuckParents(ctx context.Context, reason string, limit 
 						WHERE parent_id = p.id AND archived_at IS NULL
 						ORDER BY id
 					) c
-				), '') AS child_set_key
+				), '') AS child_set_key,
+				(
+					SELECT MAX(c.updated_at) FROM tasks c
+					WHERE c.parent_id = p.id AND c.archived_at IS NULL
+				) AS newest_child_updated_at
 			FROM tasks p
 			WHERE p.archived_at IS NULL
 			  AND p.is_ephemeral = 0
@@ -97,15 +113,18 @@ func (r *Repository) ListStuckParents(ctx context.Context, reason string, limit 
 		SELECT s.parent_task_id, s.assignee_agent_profile_id, s.workflow_step_id, s.child_set_key
 		FROM stuck s
 		LEFT JOIN parent_child_wake_receipts r ON r.parent_task_id = s.parent_task_id
-		LEFT JOIN agent_profiles ap ON ap.id = s.assignee_agent_profile_id
+		INNER JOIN agent_profiles ap ON ap.id = s.assignee_agent_profile_id
 		WHERE s.assignee_agent_profile_id != ''
-		  AND COALESCE(ap.status, 'idle') NOT IN ('paused', 'stopped', 'pending_approval')
+		  AND ap.status NOT IN ('paused', 'stopped', 'pending_approval')
 		  AND r.child_set_key IS NOT s.child_set_key
 		  AND NOT EXISTS (
 		      SELECT 1 FROM runs w
 		      WHERE json_extract(w.payload, '$.task_id') = s.parent_task_id
 		        AND w.reason = ?
-		        AND w.status IN ('queued', 'claimed', 'finished')
+		        AND (
+		            w.status IN ('queued', 'claimed')
+		            OR (w.status = 'finished' AND w.requested_at >= s.newest_child_updated_at)
+		        )
 		  )
 		ORDER BY s.parent_task_id
 		LIMIT ?

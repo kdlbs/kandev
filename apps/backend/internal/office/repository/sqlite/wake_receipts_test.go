@@ -9,11 +9,12 @@ import (
 )
 
 // seedWakeCandidate creates a parent task with one non-archived, terminal
-// (COMPLETED) child and a resolvable runner, so it satisfies every one of
-// ListStuckParents' predicates on its own — including the assignee filter
-// (R2-A) — and would actually be woken end-to-end by the full reconciler,
-// not just accepted by this SQL layer in isolation. Returns the
-// child_set_key ListStuckParents will compute for it.
+// (COMPLETED) child and a resolvable runner backed by a real agent_profiles
+// row, so it satisfies every one of ListStuckParents' predicates on its
+// own — including the assignee filter (R2-A) and the INNER JOIN against
+// agent_profiles (R3-B) — and would actually be woken end-to-end by the
+// full reconciler, not just accepted by this SQL layer in isolation.
+// Returns the child_set_key ListStuckParents will compute for it.
 func seedWakeCandidate(t *testing.T, repo *sqlite.Repository, ctx context.Context, wsID, parentID string) string {
 	t.Helper()
 	insertTask(t, repo, ctx, parentID, wsID, "Parent", "", "")
@@ -24,13 +25,30 @@ func seedWakeCandidate(t *testing.T, repo *sqlite.Repository, ctx context.Contex
 	); err != nil {
 		t.Fatalf("set child state: %v", err)
 	}
+	agentID := parentID + "-agent"
+	seedWakeAgentProfile(t, repo, ctx, agentID, "idle")
 	if _, err := repo.ExecRaw(ctx, `
 		INSERT INTO workflow_step_participants (id, step_id, task_id, role, agent_profile_id)
 		VALUES (?, '', ?, 'runner', ?)
-	`, "p-runner-"+parentID, parentID, parentID+"-agent"); err != nil {
+	`, "p-runner-"+parentID, parentID, agentID); err != nil {
 		t.Fatalf("seed runner: %v", err)
 	}
 	return childID + ":COMPLETED"
+}
+
+// seedWakeAgentProfile inserts (or, for a second call against the same
+// agentID, replaces) an agent_profiles row with the given status, using
+// the same columns TestListStuckParents_ExcludesUnresolvedOrPausedAssignee
+// always has: agent_profiles is created by settingsstore.Provide (see
+// newSearchTestRepo) with its full production schema and NOT NULL columns.
+func seedWakeAgentProfile(t *testing.T, repo *sqlite.Repository, ctx context.Context, agentID, status string) {
+	t.Helper()
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT OR REPLACE INTO agent_profiles (id, agent_id, name, agent_display_name, status, created_at, updated_at)
+		VALUES (?, '', ?, ?, ?, datetime('now'), datetime('now'))
+	`, agentID, agentID, agentID, status); err != nil {
+		t.Fatalf("seed agent profile %s: %v", agentID, err)
+	}
 }
 
 // seedWakeReceipt records a receipt for parentID as already delivered for
@@ -50,11 +68,65 @@ func seedWakeReceipt(t *testing.T, repo *sqlite.Repository, ctx context.Context,
 // this parent without going through the full reconciler.
 func seedWakeRun(t *testing.T, repo *sqlite.Repository, ctx context.Context, runID, parentID, reason, status string) {
 	t.Helper()
-	if _, err := repo.ExecRaw(ctx, `
+	seedWakeRunAt(t, repo, ctx, runID, parentID, reason, status, "datetime('now')")
+}
+
+// seedWakeRunAt is seedWakeRun with an explicit requested_at expression
+// (a SQL literal or expression, not a bound parameter — callers pass
+// either "datetime('now')" or a quoted absolute timestamp literal), so
+// tests can control a run's ordering relative to child updates without
+// relying on wall-clock delay between statements.
+func seedWakeRunAt(t *testing.T, repo *sqlite.Repository, ctx context.Context, runID, parentID, reason, status, requestedAtExpr string) {
+	t.Helper()
+	if _, err := repo.ExecRaw(ctx, fmt.Sprintf(`
 		INSERT INTO runs (id, agent_profile_id, reason, payload, status, requested_at)
-		VALUES (?, 'agent-x', ?, ?, ?, datetime('now'))
-	`, runID, reason, fmt.Sprintf(`{"task_id":%q}`, parentID), status); err != nil {
+		VALUES (?, 'agent-x', ?, ?, ?, %s)
+	`, requestedAtExpr), runID, reason, fmt.Sprintf(`{"task_id":%q}`, parentID), status); err != nil {
 		t.Fatalf("seed run: %v", err)
+	}
+}
+
+// insertTaskAt is insertTask with an explicit created_at/updated_at
+// timestamp, so tests can control a child's ordering relative to a run's
+// requested_at without relying on wall-clock delay between statements.
+func insertTaskAt(t *testing.T, repo *sqlite.Repository, ctx context.Context, id, wsID, timestamp string) {
+	t.Helper()
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO tasks (id, workspace_id, title, description, identifier, created_at, updated_at)
+		VALUES (?, ?, 'Task', '', '', ?, ?)
+	`, id, wsID, timestamp, timestamp); err != nil {
+		t.Fatalf("insert task %s: %v", id, err)
+	}
+}
+
+// setChildStateAt sets a child's parent, state, and updated_at in one
+// statement, mirroring production's state-transition writes (which always
+// bump updated_at alongside state) rather than the plain
+// `UPDATE tasks SET parent_id = ?, state = ?` other helpers in this package
+// use — those are fine for tests that don't assert on timestamps, but a
+// timestamp-comparison predicate needs a child's updated_at to actually
+// move when its state does.
+func setChildStateAt(t *testing.T, repo *sqlite.Repository, ctx context.Context, parentID, childID, state, timestamp string) {
+	t.Helper()
+	if _, err := repo.ExecRaw(ctx,
+		`UPDATE tasks SET parent_id = ?, state = ?, updated_at = ? WHERE id = ?`,
+		parentID, state, timestamp, childID,
+	); err != nil {
+		t.Fatalf("set child state: %v", err)
+	}
+}
+
+// seedRunner inserts a workflow_step_participants runner row for parentID,
+// the same shape seedWakeCandidate writes, factored out so callers that
+// build up a candidate's children by hand can still get a resolvable
+// runner without duplicating this insert.
+func seedRunner(t *testing.T, repo *sqlite.Repository, ctx context.Context, parentID string) {
+	t.Helper()
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO workflow_step_participants (id, step_id, task_id, role, agent_profile_id)
+		VALUES (?, '', ?, 'runner', ?)
+	`, "p-runner-"+parentID, parentID, parentID+"-agent"); err != nil {
+		t.Fatalf("seed runner: %v", err)
 	}
 }
 
@@ -200,15 +272,26 @@ func TestListStuckParents_ExcludesUnresolvedOrPausedAssignee(t *testing.T) {
 		t.Fatalf("set child state: %v", err)
 	}
 
-	// Runner resolves, but the agent_profiles row says paused. agent_profiles
-	// is created by settingsstore.Provide (see newTestRepo), so it already
-	// exists here with its full production schema and NOT NULL columns.
+	// Runner resolves, but the agent_profiles row says paused. seedWakeCandidate
+	// already inserted an 'idle' row for parent-paused-agent; seedWakeAgentProfile's
+	// INSERT OR REPLACE overwrites it with 'paused'.
 	seedWakeCandidate(t, repo, ctx, "ws-1", "parent-paused")
+	seedWakeAgentProfile(t, repo, ctx, "parent-paused-agent", "paused")
+
+	// Runner resolves to an agent_profile_id with no matching agent_profiles
+	// row at all (R3-B): a dangling reference, not merely a paused one.
+	insertTask(t, repo, ctx, "parent-dangling", "ws-1", "Parent", "", "")
+	insertTask(t, repo, ctx, "parent-dangling-child-0", "ws-1", "Child", "", "")
+	if _, err := repo.ExecRaw(ctx,
+		`UPDATE tasks SET parent_id = 'parent-dangling', state = 'COMPLETED' WHERE id = 'parent-dangling-child-0'`,
+	); err != nil {
+		t.Fatalf("set child state: %v", err)
+	}
 	if _, err := repo.ExecRaw(ctx, `
-		INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, status, created_at, updated_at)
-		VALUES ('parent-paused-agent', '', 'paused-agent', 'paused-agent', 'paused', datetime('now'), datetime('now'))
+		INSERT INTO workflow_step_participants (id, step_id, task_id, role, agent_profile_id)
+		VALUES ('p-runner-parent-dangling', '', 'parent-dangling', 'runner', 'parent-dangling-nonexistent-agent')
 	`); err != nil {
-		t.Fatalf("seed paused agent: %v", err)
+		t.Fatalf("seed dangling runner: %v", err)
 	}
 
 	// Control: a normal, healthy candidate.
@@ -220,6 +303,59 @@ func TestListStuckParents_ExcludesUnresolvedOrPausedAssignee(t *testing.T) {
 	}
 	if len(candidates) != 1 || candidates[0].ParentTaskID != "parent-normal" {
 		t.Fatalf("candidates = %#v, want exactly [parent-normal]", candidates)
+	}
+}
+
+// TestListStuckParents_RecoversAfterChildSetChangesPastFinishedRun is R3-A's
+// regression test: a parent whose task_children_completed wake was already
+// delivered by a finished run must become a candidate again once its child
+// set changes afterward. Before this fix, the NOT EXISTS against runs
+// treated any 'finished' run for the parent+reason as permanent evidence of
+// delivery, regardless of which child set it was requested for, so a
+// second child completing after that run finished could never re-trigger
+// the sweep — the exact "lost wake, no recovery path" failure mode this
+// reconciler exists to fix, but for a wake it delivered itself.
+func TestListStuckParents_RecoversAfterChildSetChangesPastFinishedRun(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	const (
+		parentID = "parent-1"
+		wsID     = "ws-1"
+		oldTime  = "2026-01-01 00:00:00"
+		runTime  = "2026-01-01 00:05:00"
+		newTime  = "2026-01-01 00:10:00"
+	)
+
+	insertTaskAt(t, repo, ctx, parentID, wsID, oldTime)
+	child0 := parentID + "-child-0"
+	insertTaskAt(t, repo, ctx, child0, wsID, oldTime)
+	setChildStateAt(t, repo, ctx, parentID, child0, "COMPLETED", oldTime)
+	seedWakeAgentProfile(t, repo, ctx, parentID+"-agent", "idle")
+	seedRunner(t, repo, ctx, parentID)
+
+	seedWakeRunAt(t, repo, ctx, "run-1", parentID, "task_children_completed", "finished", fmt.Sprintf("'%s'", runTime))
+
+	before, err := repo.ListStuckParents(ctx, "task_children_completed", 5)
+	if err != nil {
+		t.Fatalf("ListStuckParents (before child set changed): %v", err)
+	}
+	if len(before) != 0 {
+		t.Fatalf("before child set changed: candidates = %#v, want none (the finished run already reflects this child set)", before)
+	}
+
+	// A second child completes after the run finished: the child set has
+	// changed, and no run reflects it yet.
+	child1 := parentID + "-child-1"
+	insertTaskAt(t, repo, ctx, child1, wsID, newTime)
+	setChildStateAt(t, repo, ctx, parentID, child1, "COMPLETED", newTime)
+
+	after, err := repo.ListStuckParents(ctx, "task_children_completed", 5)
+	if err != nil {
+		t.Fatalf("ListStuckParents (after child set changed): %v", err)
+	}
+	if len(after) != 1 || after[0].ParentTaskID != parentID {
+		t.Fatalf("LOST WAKE NOT RECOVERABLE: after the child set changed, ListStuckParents returned %#v; want exactly [%s]", after, parentID)
 	}
 }
 
