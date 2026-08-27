@@ -304,7 +304,9 @@ test.describe("Quick Chat", () => {
     const configTab = dialog
       .getByTestId("quick-chat-tab")
       .filter({ has: testPage.getByRole("img", { name: "Configuration chat" }) });
-    await configTab.getByRole("button").first().click();
+    await configTab
+      .getByRole("button", { name: /Configuration chat \/e2e:simple-message/ })
+      .click();
     await expect(configTab).toHaveClass(/bg-background/);
 
     await dialog.getByTestId("quick-chat-add-menu-trigger").click();
