@@ -37,6 +37,7 @@ plugin security boundaries.
 - [Plugin Marketplace](requirements/marketplace.md)
 - [Plugin nav items in the sidebar footer icon row](requirements/plugin-nav-sidebar-footer.md)
 - [Plugin System](requirements/plugins.md)
+- [Plugin Repository Task Creation](requirements/repository-provider-task-creation.md)
 - [Voice Plugin Host Prerequisites](requirements/voice-extraction-host.md)
 - [Voice Mode Leaves Core](requirements/voice-extraction.md)
 
@@ -53,6 +54,7 @@ plugin security boundaries.
 - [Plugin System System Design Part 2](system-design/plugins-02.md)
 - [Plugin System System Design Part 3](system-design/plugins-03.md)
 - [Plugin System System Design Part 4](system-design/plugins-04.md)
+- [Plugin Repository Task Creation](system-design/repository-provider-task-creation.md)
 
 ## Migration record
 

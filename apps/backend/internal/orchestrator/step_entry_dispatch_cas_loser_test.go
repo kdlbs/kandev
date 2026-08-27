@@ -79,8 +79,8 @@ func TestProcessOnEnter_ClearDecisionsPriorFailure_BlocksRetryFromDispatchingSub
 	// Review transition above (no other entry allocation happens before
 	// it in this fixture).
 	const retryEntryID = int64(1)
-	hasAutoStart := f.svc.dispatchOnEnterActions(ctx, "t1", session, reviewStep, retryEntryID, false, false)
-	if hasAutoStart {
+	dispatchResult := f.svc.dispatchOnEnterActions(ctx, "t1", session, reviewStep, retryEntryID, false, false)
+	if dispatchResult.hasAutoStart {
 		t.Errorf("hasAutoStart = true, want false (Review declares no auto_start_agent)")
 	}
 
@@ -165,8 +165,8 @@ func TestProcessOnEnter_ConcurrentDispatchLosesLiveClaim_AbandonsEntryWithoutSki
 
 	// The concurrent, would-be-loser dispatch: same entry, same session,
 	// racing while the winner above is still parked inside clear_decisions.
-	hasAutoStart := f.svc.dispatchOnEnterActions(ctx, "t1", session, reviewStep, entryID, false, false)
-	if hasAutoStart {
+	dispatchResult := f.svc.dispatchOnEnterActions(ctx, "t1", session, reviewStep, entryID, false, false)
+	if dispatchResult.hasAutoStart {
 		t.Errorf("hasAutoStart = true, want false (Review declares no auto_start_agent)")
 	}
 	if got := f.runQueue.callCount(); got != 0 {
@@ -238,8 +238,8 @@ func TestProcessOnEnter_RedispatchAfterEntryAlreadyDone_IsANoOp(t *testing.T) {
 	// entryID 1: same fully-completed entry the fireOnTurnComplete call above
 	// just processed; both of its on_enter positions are now MarkerDone.
 	const entryID = int64(1)
-	hasAutoStart := f.svc.dispatchOnEnterActions(ctx, "t1", session, reviewStep, entryID, false, false)
-	if hasAutoStart {
+	dispatchResult := f.svc.dispatchOnEnterActions(ctx, "t1", session, reviewStep, entryID, false, false)
+	if dispatchResult.hasAutoStart {
 		t.Errorf("hasAutoStart = true, want false (Review declares no auto_start_agent)")
 	}
 

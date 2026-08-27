@@ -2,10 +2,11 @@
 status: active
 system: platform
 created: 2026-08-01
-updated: 2026-08-19
+updated: 2026-08-27
 owners:
   - kandev
 ---
+
 # Bounded Task Status Delivery Requirements
 
 ## Overview
@@ -28,6 +29,10 @@ Task rows currently obtain compact status indicators by observing large, session
 - **AC-PLATFORM-BOUNDED-TASK-STATUS-DELIVERY-001.6:** Correlated WebSocket responses and errors are prioritized over unsolicited notifications and cannot be silently dropped by notification pressure.
 - **AC-PLATFORM-BOUNDED-TASK-STATUS-DELIVERY-001.7:** One session's streaming text or reasoning cannot monopolize persistence, notification delivery, or browser state work. Intermediate replacement updates are bounded while the final transcript remains lossless.
 - **AC-PLATFORM-BOUNDED-TASK-STATUS-DELIVERY-001.8:** `message.add` uses a stable client-generated message ID so an uncertain send can be reconciled or retried without creating or dispatching a duplicate.
+- **AC-PLATFORM-BOUNDED-TASK-STATUS-DELIVERY-001.9:** One frontend animation-frame
+  flush shall apply all accepted `session.message.updated` replacements in one
+  store transaction while preserving semantic barriers and final transcript
+  content.
 
 ## System design
 

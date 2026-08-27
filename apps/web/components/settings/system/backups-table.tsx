@@ -9,6 +9,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Spinner } from "@kandev/ui/spinner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
 import { IconDownload, IconTrash, IconArchive, IconRotateClockwise } from "@tabler/icons-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
 import { useBackups } from "@/hooks/domains/system/use-backups";
 import { buildBackupDownloadUrl, createBackup, deleteBackup } from "@/lib/api/domains/system-api";
@@ -32,6 +33,8 @@ const BACKUP_CREATE_POLL_MS = 250;
  * hardcoding the English plural.
  */
 const BACKUP_RETENTION_COUNT = 2;
+const BACKUP_ROW_ACTION_CLASS_NAME =
+  "h-6 w-6 cursor-pointer p-0 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11";
 
 function formatTimestamp(iso: string): string {
   if (!iso) return "-";
@@ -56,45 +59,62 @@ function BackupRowActions({
   onDelete: (name: string) => void;
 }) {
   const { t } = useTranslation();
+  const downloadLabel = t("system:backupsDownloadLabel", { name: row.name });
+  const restoreLabel = t("system:backupsRestoreLabel", { name: row.name });
+  const deleteLabel = t("system:backupsDeleteLabel", { name: row.name });
+  const downloadTooltip = t("task:download");
+  const restoreTooltip = t("task:restore");
+  const deleteTooltip = t("task:delete");
   return (
     <div className="flex items-center justify-end gap-1">
-      <Button
-        asChild
-        size="sm"
-        variant="ghost"
-        className="cursor-pointer"
-        data-testid="system-backups-download"
-      >
-        {/* These three are icon-only, so the aria-label is their only
-            accessible name. It names the snapshot it acts on. */}
-        <a
-          href={buildBackupDownloadUrl(row.name)}
-          download
-          aria-label={t("system:backupsDownloadLabel", { name: row.name })}
-        >
-          <IconDownload className="h-3.5 w-3.5" />
-        </a>
-      </Button>
-      <Button
-        size="sm"
-        variant="ghost"
-        className="cursor-pointer"
-        onClick={() => onRestore(row.name)}
-        aria-label={t("system:backupsRestoreLabel", { name: row.name })}
-        data-testid="system-backups-restore"
-      >
-        <IconRotateClockwise className="h-3.5 w-3.5" />
-      </Button>
-      <Button
-        size="sm"
-        variant="ghost"
-        className="cursor-pointer text-destructive"
-        onClick={() => onDelete(row.name)}
-        aria-label={t("system:backupsDeleteLabel", { name: row.name })}
-        data-testid="system-backups-delete"
-      >
-        <IconTrash className="h-3.5 w-3.5" />
-      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            asChild
+            size="sm"
+            variant="ghost"
+            className={BACKUP_ROW_ACTION_CLASS_NAME}
+            data-testid="system-backups-download"
+          >
+            {/* These three are icon-only, so the aria-label is their only
+                accessible name. It names the snapshot it acts on. */}
+            <a href={buildBackupDownloadUrl(row.name)} download aria-label={downloadLabel}>
+              <IconDownload className="h-3.5 w-3.5" />
+            </a>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-xs break-words">{downloadTooltip}</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            size="sm"
+            variant="ghost"
+            className={BACKUP_ROW_ACTION_CLASS_NAME}
+            onClick={() => onRestore(row.name)}
+            aria-label={restoreLabel}
+            data-testid="system-backups-restore"
+          >
+            <IconRotateClockwise className="h-3.5 w-3.5" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-xs break-words">{restoreTooltip}</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            size="sm"
+            variant="ghost"
+            className={`${BACKUP_ROW_ACTION_CLASS_NAME} text-destructive`}
+            onClick={() => onDelete(row.name)}
+            aria-label={deleteLabel}
+            data-testid="system-backups-delete"
+          >
+            <IconTrash className="h-3.5 w-3.5" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-xs break-words">{deleteTooltip}</TooltipContent>
+      </Tooltip>
     </div>
   );
 }

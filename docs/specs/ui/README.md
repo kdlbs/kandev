@@ -11,19 +11,16 @@ owners:
 
 ## Purpose
 
-The UI system owns presentation behavior for the web application, including
-responsive desktop and mobile surfaces.
+The UI system owns web presentation behavior for desktop and mobile surfaces.
 
 ## Ownership
 
-This system owns navigation, settings presentation, boards, task and review
-surfaces, walkthroughs, chat controls, visual feedback, and responsive
-interaction contracts that do not own backend state.
+This system owns navigation, settings, boards, task/review surfaces,
+walkthroughs, chat controls, visual feedback, and responsive interaction
+contracts without backend-state ownership.
 
-A control is not UI-owned only because it appears in the web application. A
-provider or task system keeps ownership when the control configures or displays
-that system's state. The UI system owns only the independent presentation
-contract that other capabilities can reuse.
+Controls that configure or display provider/task state remain owned by that
+system. The UI system owns only independent, reusable presentation contracts.
 
 ## Exclusions
 
@@ -121,6 +118,7 @@ contract that other capabilities can reuse.
 - [Sidebar empty task alignment](requirements/sidebar-empty-task-alignment.md)
 - [Sidebar Last Activity Sort](requirements/sidebar-last-activity-sort.md)
 - [Sidebar Queued Prompt Count Badge](requirements/sidebar-queued-prompt-count.md)
+- [Repository Groups](requirements/sidebar-repository-grouping.md)
 - [Sidebar Task Focus](requirements/sidebar-task-focus.md)
 - [Sidebar Task Completion Icons](requirements/sidebar-task-completion-icons.md)
 - [Sidebar Task Row Presentation](requirements/sidebar-task-row-presentation.md)
@@ -165,6 +163,7 @@ contract that other capabilities can reuse.
 - [Kandev MCP Tool Results](system-design/kandev-mcp-tool-results.md)
 - [Mobile Task Chrome](system-design/mobile-task-chrome.md)
 - [Persistent status motion](system-design/persistent-status-motion.md)
+- [Repository Groups](system-design/sidebar-repository-grouping.md)
 - [Sidebar Task Focus](system-design/sidebar-task-focus.md)
 - [PR Task Status Summary](system-design/pr-task-status-summary.md)
 - [Prompt History Panel](system-design/prompt-history-panel.md)
@@ -177,11 +176,12 @@ contract that other capabilities can reuse.
 - [Command-panel Sidebar Task Reveal](system-design/command-panel-sidebar-task-reveal.md)
 - [Terminal Rendering](system-design/terminal-rendering.md)
 - [Task Transcript History Visibility](system-design/task-prompt-transcript-visibility.md)
+- [Transcript Auto-scroll Stability](system-design/transcript-auto-scroll.md)
 
 ## Migration record
 
-Migration remains in progress while legacy source detail is extracted from the
-canonical requirement and system-design documents above.
+Legacy source detail is still moving to the canonical requirement and
+system-design documents above.
 
 ## Related systems
 

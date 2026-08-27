@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -314,5 +315,37 @@ func TestProcessOnEnter_ClearDecisionsFailure_BlocksSubsequentOnEnterActions(t *
 	}
 	if cause, _ := fields["cause"].(string); cause == "" {
 		t.Errorf("AC-C2 error missing cause field: %+v", fields)
+	}
+}
+
+// TestProcessOnEnter_ClearDecisionsFailure_DoesNotLaunchEarlierAutoStart
+// covers AC-C2 when auto_start_agent appears before clear_decisions. The
+// auto-start action keeps its fixed final execution position, so a failed
+// clear must abort the launch as well as later engine-owned actions.
+func TestProcessOnEnter_ClearDecisionsFailure_DoesNotLaunchEarlierAutoStart(t *testing.T) {
+	ctx := context.Background()
+	f := newReviewLoopFixture(t)
+	f.svc.SetEngineDecisionStore(&failingDecisionStore{})
+
+	stepGetter, ok := f.svc.workflowStepGetter.(*mockStepGetter)
+	if !ok {
+		t.Fatalf("workflow step getter type = %T, want *mockStepGetter", f.svc.workflowStepGetter)
+	}
+	reviewStep := stepGetter.steps[f.nameToID["Review"]]
+	reviewStep.Prompt = "review prompt"
+	reviewStep.Events.OnEnter = []wfmodels.OnEnterAction{
+		{Type: wfmodels.OnEnterAutoStartAgent},
+		{Type: wfmodels.OnEnterClearDecisions},
+	}
+
+	if !f.fireOnTurnComplete(t, ctx) {
+		t.Fatalf("expected a transition from Work -> Review, got none")
+	}
+
+	f.agentMgr.mu.Lock()
+	promptCount := len(f.agentMgr.capturedPrompts)
+	f.agentMgr.mu.Unlock()
+	if promptCount != 0 {
+		t.Fatalf("auto-start prompt count after clear_decisions failure = %d, want 0", promptCount)
 	}
 }

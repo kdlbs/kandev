@@ -1,5 +1,6 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 import type { SnapshotInfo } from "@/lib/types/system";
 
 const mocks = vi.hoisted(() => ({
@@ -57,6 +58,14 @@ function bodyCellCount(): number {
   return screen.getByTestId("system-backups-row").querySelectorAll("td").length;
 }
 
+function renderBackupsTable() {
+  return render(
+    <TooltipProvider delayDuration={0}>
+      <BackupsTable />
+    </TooltipProvider>,
+  );
+}
+
 describe("BackupsTable", () => {
   afterEach(cleanup);
 
@@ -76,7 +85,7 @@ describe("BackupsTable", () => {
     currentRole = "member";
     currentMode = "enabled";
 
-    render(<BackupsTable />);
+    renderBackupsTable();
 
     expect(screen.queryByTestId(CREATE_TEST_ID)).toBeNull();
     expect(screen.queryByTestId(DOWNLOAD_TEST_ID)).toBeNull();
@@ -93,7 +102,7 @@ describe("BackupsTable", () => {
     currentRole = "admin";
     currentMode = "enabled";
 
-    render(<BackupsTable />);
+    renderBackupsTable();
 
     expect(screen.getByTestId(CREATE_TEST_ID)).toBeTruthy();
     expect(screen.getByTestId(DOWNLOAD_TEST_ID)).toBeTruthy();
@@ -109,11 +118,36 @@ describe("BackupsTable", () => {
     currentRole = undefined;
     currentMode = "disabled";
 
-    render(<BackupsTable />);
+    renderBackupsTable();
 
     expect(screen.getByTestId(CREATE_TEST_ID)).toBeTruthy();
     expect(screen.getByTestId(DOWNLOAD_TEST_ID)).toBeTruthy();
     expect(screen.getByTestId(RESTORE_TEST_ID)).toBeTruthy();
     expect(screen.getByTestId(DELETE_TEST_ID)).toBeTruthy();
+  });
+
+  it("describes each row action and keeps its accessible name on the touch target", async () => {
+    currentRole = "admin";
+    currentMode = "enabled";
+
+    renderBackupsTable();
+
+    const actions = [
+      [DOWNLOAD_TEST_ID, "Download", `Download ${SNAPSHOT.name}`],
+      [RESTORE_TEST_ID, "Restore", `Restore ${SNAPSHOT.name}`],
+      [DELETE_TEST_ID, "Delete", `Delete ${SNAPSHOT.name}`],
+    ] as const;
+    for (const [testId, operation, label] of actions) {
+      const action = screen.getByTestId(testId);
+      expect(action.getAttribute("aria-label")).toBe(label);
+      expect(action.className).toContain("[@media(pointer:coarse)]:h-11");
+      expect(action.className).toContain("[@media(pointer:coarse)]:w-11");
+
+      fireEvent.focus(action);
+      const tooltip = await screen.findByRole("tooltip");
+      expect(tooltip.textContent).toBe(operation);
+      expect(tooltip.textContent).not.toContain(SNAPSHOT.name);
+      fireEvent.blur(action);
+    }
   });
 });

@@ -33,7 +33,36 @@ import (
 
 type turnCompletionCause string
 
-var errDeferredMoveAlreadyApplied = errors.New("deferred move already applied")
+var (
+	errDeferredMoveAlreadyApplied           = errors.New("deferred move already applied")
+	errReusableSessionNoLongerActive        = errors.New("reusable session is no longer active")
+	errWorkflowAutoStartSessionTerminalized = errors.New("workflow auto-start session terminalized")
+)
+
+type workflowAutoStartSessionTerminalizedError struct {
+	state models.TaskSessionState
+}
+
+func (e *workflowAutoStartSessionTerminalizedError) Error() string {
+	return errWorkflowAutoStartSessionTerminalized.Error()
+}
+
+func (e *workflowAutoStartSessionTerminalizedError) Unwrap() error {
+	return errWorkflowAutoStartSessionTerminalized
+}
+
+func newWorkflowAutoStartSessionTerminalizedError(session *models.TaskSession) error {
+	var state models.TaskSessionState
+	if session != nil {
+		state = session.State
+	}
+	return &workflowAutoStartSessionTerminalizedError{state: state}
+}
+
+func workflowAutoStartWasCancelled(err error) bool {
+	var terminalized *workflowAutoStartSessionTerminalizedError
+	return errors.As(err, &terminalized) && terminalized.state == models.TaskSessionStateCancelled
+}
 
 type taskMetadataKeyRemover interface {
 	RemoveTaskMetadataKey(context.Context, string, string) (bool, error)
@@ -728,9 +757,21 @@ func (s *Service) handleTaskQueuePromoted(ctx context.Context, data watcher.Task
 		return
 	}
 	session, sessionErr := s.repo.GetActiveTaskSessionByTaskID(ctx, task.ID)
+	if errors.Is(sessionErr, models.ErrTaskSessionNotFound) {
+		// Queued tasks deliberately have no session until promotion. Continue
+		// into the no-session destination-entry path so deferred auto-start can run.
+		session = nil
+		sessionErr = nil
+	}
 	if sessionErr != nil {
 		s.logger.Warn("task.queue_promoted: failed to load active session",
 			zap.String("task_id", task.ID), zap.Error(sessionErr))
+		return
+	}
+	if session == nil && s.dependencyBlocksAutoStart(ctx, task.ID, "task.queue_promoted") {
+		// Promotion controls WIP admission, not dependency readiness. Keep both
+		// the promotion lifecycle token and deferred launch intent intact so the
+		// dependency-resolution path can start the task once its blockers clear.
 		return
 	}
 	if !s.claimTaskEventMetadata(ctx, task, models.MetaKeyQueuePromotionPending) {
@@ -1095,10 +1136,19 @@ func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, even
 	if s.dependencyBlocksAutoStart(ctx, taskID, eventName) {
 		return
 	}
+	if hasQueuePromotionPending(task) {
+		// A dependency may resolve after same-step WIP promotion was admitted.
+		// Resume through the promotion handler so destination-entry lifecycle is
+		// claimed and its token participates in deferred-launch failure recovery.
+		s.handleTaskQueuePromoted(ctx, watcher.TaskEventData{
+			TaskID: task.ID, StepTransitionID: stepTransitionID,
+		})
+		return
+	}
 	if task != nil && s.shouldSkipTerminalPRAutoStart(ctx, task) {
 		return
 	}
-	if s.launchDeferredTask(ctx, task, eventName) {
+	if s.launchDeferredTask(ctx, task, eventName, false) {
 		return
 	}
 
@@ -1121,7 +1171,7 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 	if s.shouldSkipTerminalPRAutoStart(ctx, task) {
 		return
 	}
-	if s.launchDeferredTask(ctx, task, eventName) {
+	if s.launchDeferredTask(ctx, task, eventName, restoreQueuePromotion) {
 		return
 	}
 	if step == nil || !step.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent) {
@@ -1304,7 +1354,7 @@ func (s *Service) handleAutoStartFailure(ctx context.Context, taskID, eventName 
 	s.setTaskAutoStartFailedMarker(ctx, taskID, eventName)
 }
 
-func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eventName string) bool {
+func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eventName string, restoreQueuePromotion bool) bool {
 	if task.Metadata == nil {
 		return false
 	}
@@ -1348,6 +1398,9 @@ func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eve
 		if launchErr != nil {
 			s.logger.Error(eventName+": failed to launch deferred task", zap.String("task_id", task.ID), zap.Error(launchErr))
 			s.restoreDeferredLaunch(launchCtx, task.ID, raw, eventName, metadataClaimed)
+			if restoreQueuePromotion {
+				s.restoreTaskLifecycleToken(launchCtx, task.ID, models.MetaKeyQueuePromotionPending, eventName)
+			}
 			return
 		}
 		delete(task.Metadata, models.MetaKeyDeferredLaunch)
@@ -1906,10 +1959,14 @@ func (s *Service) tagSessionAsWorkflowSwitched(ctx context.Context, sessionID st
 }
 
 // switchSessionForStep activates a session for the new agent profile.
-// If an existing session on this task already uses the target profile it is
-// reused (re-promoted to primary, brought out of COMPLETED if it had been
-// switched away from previously). Otherwise a new session is prepared.
-// In both cases the previous session is stopped and marked COMPLETED.
+// If a nonterminal session on this task already uses the target profile, it
+// is reused (re-promoted to primary). Otherwise a new session is prepared —
+// including when the only matching session is terminal (COMPLETED, FAILED,
+// or CANCELLED): workflow re-entry never resumes a terminal session's ACP
+// conversation, because prior-completion state in that conversation can
+// mislead the agent into replaying stale routing intent (see
+// findReusableSessionForProfile). In both cases the previous session is
+// stopped and marked COMPLETED.
 func (s *Service) switchSessionForStep(ctx context.Context, taskID string, currentSession *models.TaskSession, newAgentProfileID string) (*models.TaskSession, error) {
 	s.logger.Info("switching session for workflow step agent profile change",
 		zap.String("task_id", taskID),
@@ -1953,16 +2010,35 @@ func (s *Service) switchSessionForStep(ctx context.Context, taskID string, curre
 	}
 
 	if existing != nil {
-		return s.reuseSessionForStep(ctx, taskID, currentSession, existing)
+		reused, err := s.reuseSessionForStep(ctx, taskID, currentSession, existing)
+		if err == nil {
+			return reused, nil
+		}
+		if !errors.Is(err, errReusableSessionNoLongerActive) {
+			return nil, err
+		}
+		s.logger.Info("reusable session became terminal before workflow promotion; creating fresh session",
+			zap.String("task_id", taskID),
+			zap.String("session_id", existing.ID),
+			zap.String("agent_profile_id", newAgentProfileID))
 	}
 
 	return s.createNewSessionForStep(ctx, taskID, currentSession, newAgentProfileID)
 }
 
-// findReusableSessionForProfile returns the most-recently-updated session on
-// this task that uses the target profile (and is not the session being
-// switched away from), or nil if none exists. Failed/cancelled sessions are
-// excluded — those are dead and shouldn't be revived implicitly.
+// findReusableSessionForProfile returns the most-recently-updated
+// *nonterminal* session on this task that uses the target profile (and is
+// not the session being switched away from), or nil if none exists.
+//
+// Terminal sessions (COMPLETED, FAILED, CANCELLED) are always excluded —
+// they are historical endpoints, not workflow-reusable. A prior incident
+// showed why: reviving a COMPLETED session lazily resumed its persisted ACP
+// conversation, which still contained the agent's earlier completion state.
+// Seeing the task routed back to that step, the agent reasonably inferred
+// its prior completion had been cancelled and moved the task backward,
+// re-arming the same cycle on the next re-entry. Terminal-profile re-entry
+// always goes through createNewSessionForStep instead, which gets a fresh
+// ACP conversation and the canonical current task/workflow context.
 func (s *Service) findReusableSessionForProfile(ctx context.Context, taskID, profileID, excludeSessionID string) (*models.TaskSession, error) {
 	if profileID == "" {
 		return nil, nil
@@ -1979,11 +2055,7 @@ func (s *Service) findReusableSessionForProfile(ctx context.Context, taskID, pro
 		if sess.AgentProfileID != profileID {
 			continue
 		}
-		// Skip user-cancelled sessions — those are explicit stops and
-		// shouldn't be auto-revived. FAILED sessions are reused (the failure
-		// may have been transient; either way the user expects "one session
-		// per profile per task" so we revive rather than orphan a duplicate).
-		if sess.State == models.TaskSessionStateCancelled {
+		if isTerminalSessionState(sess.State) {
 			continue
 		}
 		if best == nil || sess.UpdatedAt.After(best.UpdatedAt) {
@@ -1993,19 +2065,15 @@ func (s *Service) findReusableSessionForProfile(ctx context.Context, taskID, pro
 	return best, nil
 }
 
-// reuseSessionForStep promotes an existing session to primary, brings it out
-// of COMPLETED/FAILED if needed, and stops + completes the previous session.
-// The agent for the reused session is not relaunched here — when a prompt
-// arrives, the autoStart/PromptTask paths handle the launch.
-//
-// Previously-launched sessions (executors_running record exists, has resume
-// token) are flipped to WAITING_FOR_INPUT so PromptTask's ensureSessionRunning
-// lazy-resumes them via ResumeSession.
-//
-// Never-launched sessions (e.g. PrepareSession created the row but the
-// workflow switched away before the agent started) have no executors_running
-// record. They go to CREATED so autoStartStepPrompt routes through
-// StartCreatedSession → LaunchPreparedSession (a full fresh launch).
+// reuseSessionForStep promotes an existing nonterminal session to primary
+// and stops + completes the previous session. The agent for the reused
+// session is not relaunched here — when a prompt arrives, the
+// autoStart/PromptTask paths handle the launch (including lazy-resume via
+// ResumeSession for a session that was previously launched and is currently
+// WAITING_FOR_INPUT). Before it promotes the candidate, it atomically checks
+// that the persisted row is still nonterminal. This closes the lookup-to-
+// promotion race where an agent completion could otherwise make a stale ACP
+// conversation primary again.
 func (s *Service) reuseSessionForStep(ctx context.Context, taskID string, currentSession, existing *models.TaskSession) (*models.TaskSession, error) {
 	s.logger.Info("reusing existing session for profile",
 		zap.String("task_id", taskID),
@@ -2014,16 +2082,20 @@ func (s *Service) reuseSessionForStep(ctx context.Context, taskID string, curren
 		zap.String("reused_profile", existing.AgentProfileID),
 		zap.String("reused_state", string(existing.State)))
 
-	if existing.State == models.TaskSessionStateCompleted || existing.State == models.TaskSessionStateFailed {
-		s.reviveReusedSession(ctx, existing)
+	promoted, err := s.setNonterminalSessionPrimary(ctx, existing.ID)
+	if err != nil {
+		return nil, fmt.Errorf("conditional primary promotion: %w", err)
 	}
-
+	if !promoted {
+		return nil, errReusableSessionNoLongerActive
+	}
+	if task, taskErr := s.repo.GetTask(ctx, taskID); taskErr != nil {
+		s.logger.Warn("failed to load task after promoting reused session",
+			zap.String("task_id", taskID), zap.Error(taskErr))
+	} else if task != nil {
+		s.publishTaskUpdated(ctx, task)
+	}
 	s.tagSessionAsWorkflowSwitched(ctx, existing.ID)
-
-	if err := s.SetPrimarySession(ctx, existing.ID); err != nil {
-		s.logger.Warn("failed to set reused session as primary",
-			zap.String("session_id", existing.ID), zap.Error(err))
-	}
 
 	// Transfer any queued message and pending move from the session being
 	// switched away from to the reused session — without this, a hand-off
@@ -2044,33 +2116,10 @@ func (s *Service) reuseSessionForStep(ctx context.Context, taskID string, curren
 	return existing, nil
 }
 
-// reviveReusedSession flips a terminal (COMPLETED/FAILED) session back to a
-// state where the downstream autoStart/PromptTask paths can launch its agent.
-// The target state depends on whether the session was ever launched:
-//   - Has executors_running record → WAITING_FOR_INPUT, lazy-resume from token
-//   - No record → CREATED, fresh launch via StartCreatedSession
-//
-// The previous error message (from a prior FAILED state) is cleared so the
-// frontend stops surfacing stale red banners on a now-active session.
-func (s *Service) reviveReusedSession(ctx context.Context, session *models.TaskSession) {
-	wasLaunched := false
-	if running, err := s.repo.GetExecutorRunningBySessionID(ctx, session.ID); err == nil && running != nil {
-		wasLaunched = true
-	}
-	if wasLaunched {
-		session.State = models.TaskSessionStateWaitingForInput
-	} else {
-		session.State = models.TaskSessionStateCreated
-	}
-	session.CompletedAt = nil
-	session.ErrorMessage = ""
-	session.UpdatedAt = time.Now().UTC()
-	if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
-		s.logger.Warn("failed to revive reused session out of COMPLETED",
-			zap.String("session_id", session.ID),
-			zap.String("target_state", string(session.State)),
-			zap.Error(err))
-	}
+// setNonterminalSessionPrimary promotes a workflow-reused session only when
+// its persisted state is still nonterminal.
+func (s *Service) setNonterminalSessionPrimary(ctx context.Context, sessionID string) (bool, error) {
+	return s.repo.SetSessionPrimaryIfNonterminal(ctx, sessionID)
 }
 
 // createNewSessionForStep is the original switch-and-create-fresh-session path,
@@ -2282,8 +2331,13 @@ func (s *Service) maybySwitchSessionForProfile(
 // winner's clear_decisions delete commits). This is a normal outcome, not
 // a fault, so the loop stops silently (no WARNING/ERROR) rather than via
 // AC-C2's error-logged abort.
-func (s *Service) dispatchOnEnterActions(ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, entryID int64, isPassthrough, hasPlanMode bool) bool {
-	hasAutoStart := false
+type onEnterDispatchResult struct {
+	hasAutoStart bool
+	aborted      bool
+}
+
+func (s *Service) dispatchOnEnterActions(ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, entryID int64, isPassthrough, hasPlanMode bool) onEnterDispatchResult {
+	result := onEnterDispatchResult{}
 dispatchLoop:
 	for i, action := range step.Events.OnEnter {
 		switch action.Type {
@@ -2297,7 +2351,7 @@ dispatchLoop:
 			mode, _ := action.Config["mode"].(string)
 			s.applyStepSessionMode(ctx, session, mode, isPassthrough)
 		case wfmodels.OnEnterAutoStartAgent:
-			hasAutoStart = true
+			result.hasAutoStart = true
 		case wfmodels.OnEnterResetAgentContext, wfmodels.OnEnterConfigureSession:
 			// Already handled earlier in processOnEnter (context reset must run
 			// before auto_start_agent; session config runs right after it).
@@ -2310,6 +2364,7 @@ dispatchLoop:
 					zap.String("task_id", taskID),
 					zap.String("action_type", string(action.Type)),
 				)
+				result.aborted = true
 				break dispatchLoop
 			}
 			if failed && action.Type == wfmodels.OnEnterClearDecisions {
@@ -2319,6 +2374,7 @@ dispatchLoop:
 					zap.String("task_id", taskID),
 					zap.String("cause", cause),
 				)
+				result.aborted = true
 				break dispatchLoop
 			}
 		case wfmodels.OnEnterQueueRun, wfmodels.OnEnterRunCodeReview:
@@ -2337,7 +2393,7 @@ dispatchLoop:
 			)
 		}
 	}
-	return hasAutoStart
+	return result
 }
 
 // processOnEnter processes the on_enter events for a step after transitioning to it.
@@ -2407,9 +2463,12 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 	// auto-start prompt is dispatched. It never switches or creates a tab.
 	s.applyWorkflowSessionConfigOnEnter(ctx, taskID, session, step)
 
-	hasAutoStart := s.dispatchOnEnterActions(ctx, taskID, session, step, entryID, isPassthrough, hasPlanMode)
+	dispatchResult := s.dispatchOnEnterActions(ctx, taskID, session, step, entryID, isPassthrough, hasPlanMode)
+	if dispatchResult.aborted {
+		return
+	}
 
-	s.launchAfterOnEnterDispatch(ctx, taskID, session, step, taskDescription, hasPlanMode, hasAutoStart, sessionSwitched)
+	s.launchAfterOnEnterDispatch(ctx, taskID, session, step, taskDescription, hasPlanMode, dispatchResult.hasAutoStart, sessionSwitched)
 }
 
 // launchAfterOnEnterDispatch runs the auto-start decision that follows
@@ -2417,6 +2476,8 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 // profile-switch fallback launch, and the plain wait-for-input path.
 // Extracted from processOnEnter to keep that function's complexity within
 // the repo's lint thresholds.
+//
+//nolint:cyclop,funlen,gocognit // profile-switch recovery has independent terminal and retry branches.
 func (s *Service) launchAfterOnEnterDispatch(
 	ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep,
 	taskDescription string, hasPlanMode, hasAutoStart, sessionSwitched bool,
@@ -2447,6 +2508,35 @@ func (s *Service) launchAfterOnEnterDispatch(
 		// autoStartStepPrompt sends the prompt directly via PromptTask.
 		effectivePrompt := s.buildWorkflowPrompt(ctx, taskDescription, step, taskID, sessionID, isPassthrough)
 		if err := s.autoStartStepPrompt(ctx, taskID, session, step, effectivePrompt, hasPlanMode, true); err != nil {
+			if errors.Is(err, errWorkflowAutoStartSessionTerminalized) {
+				if workflowAutoStartWasCancelled(err) {
+					s.logger.Info("workflow auto-start cancelled before dispatch; not creating replacement",
+						zap.String("task_id", taskID), zap.String("session_id", sessionID))
+					return
+				}
+				s.logger.Info("creating fresh workflow session after reused session terminalized",
+					zap.String("task_id", taskID), zap.String("session_id", sessionID))
+				replacement, replacementErr := s.createNewSessionForStep(
+					ctx, taskID, session, session.AgentProfileID,
+				)
+				if replacementErr != nil {
+					s.logger.Error("failed to create replacement after reused session terminalized",
+						zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(replacementErr))
+					return
+				}
+				replacementPrompt := s.buildWorkflowPrompt(
+					ctx, taskDescription, step, taskID, replacement.ID, isPassthrough,
+				)
+				if replacementErr = s.autoStartStepPrompt(
+					ctx, taskID, replacement, step, replacementPrompt, hasPlanMode, true,
+				); replacementErr != nil {
+					s.logger.Error("failed to auto-start replacement after reused session terminalized",
+						zap.String("task_id", taskID), zap.String("session_id", replacement.ID), zap.Error(replacementErr))
+					s.setSessionWaitingForInput(ctx, taskID, replacement.ID, replacement)
+					s.publishSessionWaitingEvent(ctx, taskID, replacement.ID, step.ID, replacement)
+				}
+				return
+			}
 			s.logger.Error("failed to auto-start agent for step",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),
@@ -2457,107 +2547,128 @@ func (s *Service) launchAfterOnEnterDispatch(
 		}
 
 	default:
-		s.launchAfterProfileSwitchOrWait(ctx, taskID, session, step, taskDescription, hasPlanMode, sessionSwitched, isPassthrough)
+		// When the session was just switched (agent profile change) but the step
+		// has no auto_start_agent, launch the agent anyway — the profile override
+		// implies the user wants this agent to run on this step.
+		if sessionSwitched && step.Prompt != "" {
+			effectivePrompt := s.buildWorkflowPrompt(ctx, taskDescription, step, taskID, sessionID, isPassthrough)
+			planMode := hasPlanMode
+			stepID := step.ID
+			s.logger.Info("auto-launching agent after profile switch (no explicit auto_start)",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.String("step_name", step.Name))
+			// Launch asynchronously because processOnEnter may also be called
+			// synchronously from finalizeStepEnter (manual task move). In that path,
+			// autoStartStepPrompt would block the caller's goroutine.
+			//
+			// Before dispatching, reload the session under the cancel-in-flight guard
+			// to atomically detect concurrent terminalization. If the session is
+			// already terminal, create a replacement directly for automatic recovery states instead of attempting
+			// an auto-start that will fail and lose the hand-off. An explicit cancellation remains terminal.
+			go func() {
+				asyncCtx := context.WithoutCancel(ctx)
+				lock, release := s.acquireCancelInFlightGuard(sessionID)
+				lock.Lock()
+				fresh, reloadErr := s.repo.GetTaskSession(asyncCtx, sessionID)
+				if reloadErr != nil || fresh == nil || isTerminalSessionState(fresh.State) {
+					lock.Unlock()
+					release()
+					if reloadErr != nil {
+						s.logger.Error("implicit profile switch: failed to reload session before dispatch",
+							zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(reloadErr))
+						return
+					}
+					if fresh != nil && fresh.State == models.TaskSessionStateCancelled {
+						s.logger.Info("implicit profile switch cancelled before dispatch; not creating replacement",
+							zap.String("task_id", taskID), zap.String("session_id", sessionID))
+						return
+					}
+					s.logger.Info("implicit profile switch: reused session terminalized before dispatch, creating replacement",
+						zap.String("task_id", taskID), zap.String("session_id", sessionID))
+					replacement, replacementErr := s.createNewSessionForStep(
+						asyncCtx, taskID, session, session.AgentProfileID,
+					)
+					if replacementErr != nil {
+						s.logger.Error("failed to create replacement after terminalized profile switch",
+							zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(replacementErr))
+						return
+					}
+					replacementPrompt := s.buildWorkflowPrompt(
+						asyncCtx, taskDescription, step, taskID, replacement.ID, isPassthrough,
+					)
+					if replacementErr = s.autoStartStepPrompt(
+						asyncCtx, taskID, replacement, step, replacementPrompt, planMode, true,
+					); replacementErr != nil {
+						s.logger.Error("failed to auto-start replacement after terminalized profile switch",
+							zap.String("task_id", taskID), zap.String("session_id", replacement.ID), zap.Error(replacementErr))
+						s.setSessionWaitingForInput(asyncCtx, taskID, replacement.ID, replacement)
+						s.publishSessionWaitingEvent(asyncCtx, taskID, replacement.ID, stepID, replacement)
+					}
+					return
+				}
+				lock.Unlock()
+				release()
+
+				err := s.autoStartStepPrompt(asyncCtx, taskID, fresh, step, effectivePrompt, planMode, true)
+				if err != nil {
+					if errors.Is(err, errWorkflowAutoStartSessionTerminalized) {
+						if workflowAutoStartWasCancelled(err) {
+							s.logger.Info("implicit profile switch cancelled during dispatch; not creating replacement",
+								zap.String("task_id", taskID), zap.String("session_id", sessionID))
+							return
+						}
+						s.logger.Info("implicit profile switch: reused session terminalized during dispatch, creating replacement",
+							zap.String("task_id", taskID), zap.String("session_id", sessionID))
+						replacement, replacementErr := s.createNewSessionForStep(
+							asyncCtx, taskID, fresh, fresh.AgentProfileID,
+						)
+						if replacementErr != nil {
+							s.logger.Error("failed to create replacement after terminalized dispatch",
+								zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(replacementErr))
+							return
+						}
+						replacementPrompt := s.buildWorkflowPrompt(
+							asyncCtx, taskDescription, step, taskID, replacement.ID, isPassthrough,
+						)
+						if replacementErr = s.autoStartStepPrompt(
+							asyncCtx, taskID, replacement, step, replacementPrompt, planMode, true,
+						); replacementErr != nil {
+							s.logger.Error("failed to auto-start replacement after terminalized dispatch",
+								zap.String("task_id", taskID), zap.String("session_id", replacement.ID), zap.Error(replacementErr))
+							s.setSessionWaitingForInput(asyncCtx, taskID, replacement.ID, replacement)
+							s.publishSessionWaitingEvent(asyncCtx, taskID, replacement.ID, stepID, replacement)
+						}
+						return
+					}
+					s.logger.Error("failed to launch agent after profile switch",
+						zap.String("task_id", taskID),
+						zap.String("session_id", sessionID),
+						zap.Error(err))
+					s.setSessionWaitingForInput(asyncCtx, taskID, sessionID, fresh)
+					s.publishSessionWaitingEvent(asyncCtx, taskID, sessionID, stepID, fresh)
+					s.drainQueuedMessageForPromptableSession(asyncCtx, sessionID)
+				}
+			}()
+			return
+		}
+		if session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting {
+			return
+		}
+		s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
+		s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
+		// handleAgentReady early-returns when a workflow transition occurs (#677),
+		// so user-queued messages would otherwise stick forever on transitions to
+		// steps without auto_start_agent (e.g. Review). Drain here to match the
+		// pre-#677 behavior where handleAgentReady always drained after returning
+		// from inline processOnEnter.
+		s.drainQueuedMessageForPromptableSession(ctx, sessionID)
 	}
+
 }
 
-// launchAfterProfileSwitchOrWait handles the no-auto-start fallback: launch
-// the agent anyway when the profile was just switched, otherwise settle the
-// session into WAITING_FOR_INPUT and drain any queued message.
-func (s *Service) launchAfterProfileSwitchOrWait(
-	ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep,
-	taskDescription string, hasPlanMode, sessionSwitched, isPassthrough bool,
-) {
-	sessionID := session.ID
-	// When the session was just switched (agent profile change) but the step
-	// has no auto_start_agent, launch the agent anyway — the profile override
-	// implies the user wants this agent to run on this step.
-	if sessionSwitched && step.Prompt != "" {
-		effectivePrompt := s.buildWorkflowPrompt(ctx, taskDescription, step, taskID, sessionID, isPassthrough)
-		planMode := hasPlanMode
-		stepID := step.ID
-		s.logger.Info("auto-launching agent after profile switch (no explicit auto_start)",
-			zap.String("task_id", taskID),
-			zap.String("session_id", sessionID),
-			zap.String("step_name", step.Name))
-		// Launch asynchronously because processOnEnter may also be called
-		// synchronously from finalizeStepEnter (manual task move). In that path,
-		// autoStartStepPrompt would block the caller's goroutine.
-		go func() {
-			asyncCtx := context.WithoutCancel(ctx)
-			err := s.autoStartStepPrompt(asyncCtx, taskID, session, step, effectivePrompt, planMode, true)
-			if err != nil {
-				s.logger.Error("failed to launch agent after profile switch",
-					zap.String("task_id", taskID),
-					zap.String("session_id", sessionID),
-					zap.Error(err))
-				s.setSessionWaitingForInput(asyncCtx, taskID, sessionID, session)
-				s.publishSessionWaitingEvent(asyncCtx, taskID, sessionID, stepID, session)
-				s.drainQueuedMessageForPromptableSession(asyncCtx, sessionID)
-			}
-		}()
-		return
-	}
-	// Same active-turn guard as the no-on_enter branch in processOnEnter: if
-	// the agent is still mid-turn, leave state alone so handleAgentReady can
-	// run on turn end. See that branch for the full rationale.
-	if session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting {
-		return
-	}
-	s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
-	s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
-	// handleAgentReady early-returns when a workflow transition occurs (#677),
-	// so user-queued messages would otherwise stick forever on transitions to
-	// steps without auto_start_agent (e.g. Review). Drain here to match the
-	// pre-#677 behavior where handleAgentReady always drained after returning
-	// from inline processOnEnter.
-	s.drainQueuedMessageForPromptableSession(ctx, sessionID)
-}
-
-// dispatchEngineOwnedOnEnterAction executes a clear_decisions or
-// queue_run_for_each_participant on_enter declaration through the Phase 2
-// engine callback registry (see workflow_callbacks.go), guarded by the
-// step-entry CAS marker so a given step-entry executes the action at most
-// once (AC-D3/AC-D4).
-//
-// entryID==0 means the caller resolved this transition without allocating a
-// step entry — currently only finalizeStepEnter's legacy manual-move/
-// on_turn_start/complete path, which has not opted into step-entry
-// allocation this Build round (see workflow_store.applyTransition). This is
-// a deliberate, scoped-down gap (E2/E3/E5 in the task plan's scope note),
-// not a regression: dispatch through those paths is a no-op until a later
-// round wires their write sites the same way applyEngineTransition's is.
-//
-// abandon reports whether this call lost a *live* claim on this exact
-// position: the marker already has a row and is still in_progress, so
-// whoever holds it may still be executing or committing the action. Per
-// AC-F1 the loser must abandon the whole step entry here, not just this
-// action — dispatchOnEnterActions stops walking step.Events.OnEnter rather
-// than advancing to a later position, because that later action could run
-// (and, for queue_run_for_each_participant, enqueue its fan-out) before the
-// winner's clear_decisions delete AC-A3 requires to precede it commits.
-// This is a normal outcome, not a fault: callers must not log a WARNING or
-// ERROR for it. abandon is false when the existing marker is already done
-// — a legitimate resumption case (e.g. an AC-B9 recovery scan re-entering
-// this function from position 0 after an earlier position already
-// committed must be free to continue past it) — or already failed, which
-// is failed's concern below instead.
-//
-// failed reports whether this call ended (or left) the action in a
-// non-done outcome — either the callback itself returned an error, the
-// marker couldn't even be claimed due to a repository error, or the marker
-// was already claimed and terminally failed by an earlier attempt at this
-// exact position — so the caller (dispatchOnEnterActions, AC-C2) cannot
-// assume the action ran. failed is false for the no-op paths above and for
-// "already claimed, still in progress or already done" (abandon's concern,
-// not a fresh failure to react to here). cause is the underlying error
-// string when failed is true, empty otherwise.
-//
-// For clear_decisions specifically, once claimed this tries the AC-B6
-// atomic path (dispatchClearDecisionsAtomic) before falling back to the
-// generic callback.Execute + CompleteStepEntryMarker sequence below, which
-// is correct but — for clear_decisions only — not atomic across a crash
-// between the two calls.
+// dispatchEngineOwnedOnEnterAction executes an engine-owned on_enter action
+// once for this step-entry. The marker CAS prevents duplicate execution.
 func (s *Service) dispatchEngineOwnedOnEnterAction(
 	ctx context.Context, taskID string, step *wfmodels.WorkflowStep, action wfmodels.OnEnterAction, position int, entryID int64,
 ) (abandon, failed bool, cause string) {
@@ -2573,8 +2684,7 @@ func (s *Service) dispatchEngineOwnedOnEnterAction(
 		return false, false, ""
 	}
 	operationID := fmt.Sprintf("step_entry:%d:%d", entryID, position)
-	now := time.Now()
-	claimed, err := s.repo.ClaimStepEntryMarker(ctx, entryID, position, string(action.Type), operationID, now)
+	claimed, err := s.repo.ClaimStepEntryMarker(ctx, entryID, position, string(action.Type), operationID, time.Now())
 	if err != nil {
 		s.logger.Error("processOnEnter: claim step entry marker failed",
 			zap.Error(err), zap.String("task_id", taskID), zap.String("step_id", step.ID),
@@ -2582,35 +2692,16 @@ func (s *Service) dispatchEngineOwnedOnEnterAction(
 		return false, true, err.Error()
 	}
 	if !claimed {
-		// Already claimed by a concurrent or prior attempt, or already
-		// terminal — AC-D3/AC-D4's at-most-once guarantee for this
-		// step-entry. GetStepEntryMarkerState is the only read that can
-		// tell apart the three outcomes this covers (see its doc comment):
-		// still in progress elsewhere, already done, or already failed.
 		priorState, priorCause, found, stateErr := s.repo.GetStepEntryMarkerState(ctx, entryID, position)
 		if stateErr != nil || !found {
-			// Read failed, or the row vanished between the failed claim
-			// and this read (nothing deletes marker rows, so this
-			// shouldn't happen). Fall back to the pre-existing lenient
-			// default rather than abandoning on an inconclusive read.
 			return false, false, ""
 		}
 		switch priorState {
 		case stepentry.MarkerFailed:
-			// A prior attempt for this exact position already recorded a
-			// terminal failure. Silently returning "not failed" would let
-			// dispatchOnEnterActions fall through to the next on_enter
-			// action as if clear_decisions had never failed — the same
-			// fall-through AC-C2's break exists to close for a fresh
-			// failure. Surface the stored failure so the caller aborts the
-			// remaining actions here too, instead of only on a failure it
-			// just witnessed itself.
 			return false, true, priorCause
 		case stepentry.MarkerInProgress:
 			return true, false, ""
 		default:
-			// MarkerDone: this position already ran to completion in an
-			// earlier attempt. Safe, and required, to continue past it.
 			return false, false, ""
 		}
 	}
@@ -2635,18 +2726,6 @@ func (s *Service) dispatchEngineOwnedOnEnterAction(
 			zap.Error(execErr), zap.String("task_id", taskID), zap.String("step_id", step.ID),
 			zap.String("action_type", string(action.Type)))
 	}
-	// This write's own failure is deliberately not turned into abandon/failed
-	// for the caller: state already reflects whether the actual effect (the
-	// clear_decisions delete, or the fan-out) ran, and that already
-	// committed independently of this marker bookkeeping — clear_decisions
-	// specifically is atomic with its delete only on the AC-B6 path above,
-	// not here. Reporting this write failure as an action failure would be
-	// wrong when the effect itself succeeded. The residual cost is a marker
-	// stranded at in_progress with no live claimant, indistinguishable from
-	// a genuine live peer to a later dispatch of this entry (this call's own
-	// abandon path above), until a future round's AC-B9 startup recovery
-	// scan adds the epoch/staleness reconciliation step_entries.go's header
-	// comment already documents as deferred.
 	if err := s.repo.CompleteStepEntryMarker(ctx, entryID, position, state, execCause, time.Now()); err != nil {
 		s.logger.Error("processOnEnter: complete step entry marker failed",
 			zap.Error(err), zap.String("task_id", taskID), zap.String("step_id", step.ID),
@@ -3377,7 +3456,37 @@ func (s *Service) autoStartStepPrompt(
 	// preparation from a blocked auto-start). PromptTask will reject CREATED sessions,
 	// so use StartCreatedSession which properly launches the agent on the prepared workspace.
 	// Pass skipMessageRecord=true since recordAutoStartMessage above already recorded it.
+	// Guard against concurrent terminalization before dispatching to a CREATED
+	// session. By the time a nonterminal session was selected, promoted, and the
+	// prompt built, a concurrent completion/cancellation may have terminalized
+	// it. Reload under the cancel-in-flight guard and bail out with the
+	// standard terminalization error so the caller can create a replacement.
+	// The guard is held through the entire StartCreatedSession call to prevent
+	// terminalization between the reload and the admission of the launch.
 	if session.State == models.TaskSessionStateCreated {
+		lock, release := s.acquireCancelInFlightGuard(sessionID)
+		lock.Lock()
+		fresh, reloadErr := s.repo.GetTaskSession(ctx, sessionID)
+		if reloadErr != nil {
+			lock.Unlock()
+			release()
+			requeueTaken()
+			return reloadErr
+		}
+		if fresh == nil || isTerminalSessionState(fresh.State) {
+			lock.Unlock()
+			release()
+			requeueTaken()
+			return newWorkflowAutoStartSessionTerminalizedError(fresh)
+		}
+		var releaseOnce sync.Once
+		heldRelease := func() {
+			releaseOnce.Do(func() {
+				lock.Unlock()
+				release()
+			})
+		}
+
 		s.logger.Info("auto-start: session is CREATED, launching agent via StartCreatedSession",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
@@ -3386,6 +3495,10 @@ func (s *Service) autoStartStepPrompt(
 			ctx, taskID, sessionID, session.AgentProfileID,
 			recordedPrompt, true, planMode, true, attachments, references,
 		)
+		// Release the guard as soon as StartCreatedSession has admitted the
+		// launch (succeeded or failed definitively). The deferred release
+		// via heldRelease ensures the guard is always released even on panic.
+		defer heldRelease()
 		if err != nil {
 			s.handleCreatedAutoStartLaunchFailure(
 				ctx, taskID, sessionID, stepName, prompt, err,
@@ -3398,9 +3511,15 @@ func (s *Service) autoStartStepPrompt(
 
 	const maxRetryAttempts = 5
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
-		_, err := s.PromptTask(ctx, taskID, sessionID, recordedPrompt, "", planMode, attachments, false)
+		_, err := s.promptTask(ctx, taskID, sessionID, recordedPrompt, "", planMode, attachments, false, promptTaskOptions{
+			requireNonterminalSession: true,
+		})
 		if err == nil {
 			return nil
+		}
+		if errors.Is(err, errWorkflowAutoStartSessionTerminalized) {
+			requeueTaken()
+			return err
 		}
 
 		// ErrExecutionNotFound means ResumeSession landed on an execution that

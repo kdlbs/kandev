@@ -58,6 +58,12 @@ Architecture notes and per-area conventions live alongside the code they describ
 - Lean on the dependencies already in the project before writing your own implementation or adding packages. Do not assume a library lacks a capability without checking its documentation and types.
 - Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later.
 
+### Engineering language
+
+Use English for all engineering text, including specs, plans, PRs, docs,
+comments, and docstrings. Translate non-English input before recording it.
+Only required product localization and product data can use another language.
+
 ### Commit Conventions (enforced by CI)
 
 Commits to `main` **must** follow [Conventional Commits](https://www.conventionalcommits.org/) (`type: description`). PRs are squash-merged - the PR title becomes the commit, validated by CI. Changelog is auto-generated from these via git-cliff (`cliff.toml`). See `.agents/skills/commit/SKILL.md` for allowed types and examples.
