@@ -19,6 +19,7 @@ func seedLegacyTaskDatabase(t *testing.T, path string) []byte {
 	if err != nil {
 		t.Fatalf("open legacy database: %v", err)
 	}
+	t.Cleanup(func() { _ = database.Close() })
 	if _, err := database.Exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, title TEXT NOT NULL)`); err != nil {
 		_ = database.Close()
 		t.Fatalf("create tasks: %v", err)
@@ -292,6 +293,7 @@ func seedEmptySQLiteDatabase(t *testing.T, path string) []byte {
 	if err != nil {
 		t.Fatalf("open empty database: %v", err)
 	}
+	t.Cleanup(func() { _ = database.Close() })
 	if err := ensureMetaTable(database); err != nil {
 		_ = database.Close()
 		t.Fatalf("create metadata table: %v", err)
@@ -308,8 +310,8 @@ func openWALLegacyTaskDatabase(t *testing.T, path string) *sqlx.DB {
 	if err != nil {
 		t.Fatalf("open WAL legacy database: %v", err)
 	}
-	database.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = database.Close() })
+	database.SetMaxOpenConns(1)
 	if _, err := database.Exec(`PRAGMA journal_mode=WAL`); err != nil {
 		t.Fatalf("enable WAL: %v", err)
 	}

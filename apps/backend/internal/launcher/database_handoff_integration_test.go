@@ -75,6 +75,7 @@ func seedLauncherLegacyTaskDatabase(t *testing.T, path string) {
 	if err != nil {
 		t.Fatalf("open legacy database: %v", err)
 	}
+	t.Cleanup(func() { _ = database.Close() })
 	if _, err := database.Exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, title TEXT NOT NULL)`); err != nil {
 		_ = database.Close()
 		t.Fatalf("create legacy tasks: %v", err)
