@@ -4,10 +4,11 @@ system: platform
 requirements:
   - REQ-PLATFORM-BOUNDED-TASK-STATUS-DELIVERY-001
 created: 2026-08-01
-updated: 2026-08-19
+updated: 2026-08-27
 owners:
   - kandev
 ---
+
 # Bounded Task Status Delivery System Design
 
 ## Purpose and boundaries
@@ -16,8 +17,8 @@ This design preserves the technical source detail for `REQ-PLATFORM-BOUNDED-TASK
 
 ## Requirement mapping
 
-| Requirement | Design section |
-| --- | --- |
+| Requirement                                     | Design section                                    |
+| ----------------------------------------------- | ------------------------------------------------- |
 | `REQ-PLATFORM-BOUNDED-TASK-STATUS-DELIVERY-001` | [Migrated source detail](#migrated-source-detail) |
 
 ## Migrated source detail
@@ -64,16 +65,16 @@ detail surface.
 The wire field is `status_summary`; the frontend maps it to `statusSummary`.
 The initial contract is:
 
-| Field                                          | Meaning                                                             | Bound                                |
-| ---------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------ |
-| `revision`, `updated_at`                       | Monotonic task-local version and projection time                    | Constant                             |
-| `last_activity_at`                             | Latest durable task, user-prompt, or turn milestone                 | Constant                             |
-| `primary_session`                              | Primary session ID and lifecycle state                              | One session                          |
-| `foreground_activity`, `active_subagent_count` | Existing task-level busy aggregate                                  | Constant                             |
-| `pending_action`                               | `permission`, `clarification`, or absent                            | Constant                             |
+| Field                                          | Meaning                                                                               | Bound                                       |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------- | ------------------------------------------- |
+| `revision`, `updated_at`                       | Monotonic task-local version and projection time                                      | Constant                                    |
+| `last_activity_at`                             | Latest durable task, user-prompt, or turn milestone                                   | Constant                                    |
+| `primary_session`                              | Primary session ID and lifecycle state                                                | One session                                 |
+| `foreground_activity`, `active_subagent_count` | Existing task-level busy aggregate                                                    | Constant                                    |
+| `pending_action`                               | `permission`, `clarification`, or absent                                              | Constant                                    |
 | `active_error`                                 | Optional session and task-repository IDs, stamp, time, preview, category, and actions | One preview and at most three known actions |
-| `git`                                          | Aggregate additions, deletions, changed files, ahead, and behind    | Numeric totals only                  |
-| `pull_request`                                 | Count, bounded representative identity, and aggregate display state | Constant regardless of PR count      |
+| `git`                                          | Aggregate additions, deletions, changed files, ahead, and behind                      | Numeric totals only                         |
+| `pull_request`                                 | Count, bounded representative identity, and aggregate display state                   | Constant regardless of PR count             |
 
 `pull_request.aggregate_state` is one of `failure`, `blocked`, `pending`,
 `awaiting_review`, `ready`, `passing`, `draft`, `merged`, `closed`, or
@@ -233,11 +234,17 @@ delivered because the database remains authoritative.
 
 The frontend applies the same defense at the render boundary. It keeps only the
 newest `session.message.updated` payload for each message during one animation
-frame and performs one store update per changed message when the frame flushes.
-Message add/delete and turn-settle events remain ordered barriers. Intentional
-multi-session detail surfaces may subscribe to every session they display, but
-rerendering or refetching equivalent session objects must not tear down and
-recreate unchanged subscription membership.
+frame. The frame flush converts every accepted payload first, then applies all
+message replacements in one Zustand and Immer transaction. The transaction
+preserves first-key insertion order and changes only the affected session
+arrays and message objects. This produces at most one subscriber notification
+for the frame, so derived transcript processing also runs at most once.
+
+Message add/delete and turn-settle events remain ordered barriers. A barrier
+flushes the pending replacement batch before it applies its semantic action.
+Intentional multi-session detail surfaces may subscribe to every session they
+display, but rerendering or refetching equivalent session objects must not tear
+down and recreate unchanged subscription membership.
 
 Overload handling is observable. Structured metrics/logs identify the client,
 session, action, queue class, coalesced chunk count, replacement count, and

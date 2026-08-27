@@ -4,6 +4,7 @@ import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 import { statusSummaryActiveErrorPreview } from "@/lib/task-status-summary";
 import { workflowStepTitle } from "./task-session-sidebar-aggregate";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
+import { resolveTaskRepositorySlugs } from "@/lib/sidebar/sidebar-task-repositories";
 
 type SidebarItemContext = {
   repositorySlugById: Map<string, string | undefined>;
@@ -151,6 +152,7 @@ export function buildSidebarItem(
     parentTaskTitle: task.parentTaskId ? context.titleById.get(task.parentTaskId) : undefined,
     parentTaskId: task.parentTaskId ?? undefined,
     workspaceMode: task.workspaceMode,
+    repositories: resolveTaskRepositorySlugs(task.repositories, context.repositorySlugById),
     repositoryLinks: task.repositories,
     isPRReview: task.isPRReview ?? false,
     isIssueWatch: task.isIssueWatch ?? false,

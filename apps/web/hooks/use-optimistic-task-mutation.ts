@@ -6,6 +6,15 @@ import { useAppStoreApi } from "@/components/state-provider";
 import type { Task } from "@/app/office/tasks/[id]/types";
 import type { OfficeTask } from "@/lib/state/slices/office/types";
 import { t } from "@/lib/i18n";
+import { updateTask } from "@/lib/api/domains/kanban-api";
+import {
+  beginWrite,
+  endWrite,
+  getCanonicalValue,
+  nextTaskSequence,
+  recordWriteSuccess,
+  shouldRestoreAfterFailedWrite,
+} from "@/lib/state/office-task-content-sync";
 
 /**
  * Context for the local (page-level) task representation. The office store
@@ -64,13 +73,21 @@ export function useOptimisticTaskMutation() {
       try {
         await apiCall();
       } catch (err) {
-        // Rollback both layers.
+        // Rollback both layers. This hook never patches title/description
+        // (see `toOfficeTaskPatch` above), so the rollback must not touch
+        // them either — those two fields are governed exclusively by the
+        // per-field guard in office-task-content-sync.ts and have their own
+        // dedicated writers (useCommitTaskTitle/useCommitTaskDescription).
+        // Restoring the full pre-mutation snapshot here would silently
+        // revert a confirmed title/description edit whenever an unrelated
+        // picker mutation fails (AC-61: exactly two writers may touch a
+        // guarded field).
         ctx.restore(snapshot);
         if (storeSnapshot) {
-          storeApi.getState().patchTaskInStore(taskId, storeSnapshot);
+          const { title: _title, description: _description, ...storeRollback } = storeSnapshot;
+          storeApi.getState().patchTaskInStore(taskId, storeRollback);
         }
-        const message = err instanceof Error ? err.message : t("task:updateFailed");
-        toast.error(message);
+        toastUpdateFailure(err);
         throw err;
       }
     },
@@ -94,4 +111,100 @@ function toOfficeTaskPatch(patch: Partial<Task>): Partial<OfficeTask> {
   if (patch.labels !== undefined) out.labels = patch.labels;
   if (patch.blockedBy !== undefined) out.blockedBy = patch.blockedBy;
   return out;
+}
+
+function toastUpdateFailure(err: unknown): void {
+  const message = err instanceof Error ? err.message : t("task:updateFailed");
+  toast.error(message);
+}
+
+/**
+ * Commits a title edit (AC-3, AC-9, AC-11, AC-44, AC-53, AC-54, AC-55, AC-64,
+ * AC-65). Optimistic at issue time: the local task and the Office task store
+ * entry are patched with the trimmed draft before the request resolves. On
+ * failure, restores the field's *currently recorded* canonical value — never
+ * a commit-time snapshot — but only when `shouldRestoreAfterFailedWrite`
+ * says this commit is still the "last word standing" for the field.
+ */
+export function useCommitTaskTitle() {
+  const ctx = useTaskOptimisticContext();
+  const storeApi = useAppStoreApi();
+
+  return useCallback(
+    async (taskId: string, trimmedTitle: string): Promise<void> => {
+      const sequence = nextTaskSequence(taskId);
+      beginWrite(taskId, "title", sequence);
+      ctx.applyPatch({ title: trimmedTitle });
+      storeApi.getState().patchTaskInStore(taskId, { title: trimmedTitle });
+
+      try {
+        const updated = await updateTask(taskId, { title: trimmedTitle });
+        recordWriteSuccess(taskId, "title", updated.title, updated.updated_at, sequence);
+        endWrite(taskId, "title", sequence);
+      } catch (err) {
+        const shouldRestore = shouldRestoreAfterFailedWrite(taskId, "title", sequence);
+        endWrite(taskId, "title", sequence);
+        if (shouldRestore) {
+          const canonical = getCanonicalValue(taskId, "title");
+          if (canonical !== undefined) {
+            ctx.applyPatch({ title: canonical });
+            storeApi.getState().patchTaskInStore(taskId, { title: canonical });
+          }
+        }
+        toastUpdateFailure(err);
+      }
+    },
+    [ctx, storeApi],
+  );
+}
+
+/**
+ * Commits a description save (AC-16, AC-17, AC-18, AC-42, AC-56). Not
+ * optimistic: neither the local task nor the Office task store entry is
+ * patched until the write succeeds, and a failure needs no rollback because
+ * nothing was applied. The caller (the description editor) is responsible
+ * for AC-17/AC-42's "did the draft change while the save was in flight"
+ * comparison against the returned value.
+ */
+export function useCommitTaskDescription() {
+  const ctx = useTaskOptimisticContext();
+  const storeApi = useAppStoreApi();
+
+  return useCallback(
+    async (
+      taskId: string,
+      trimmedDescription: string,
+    ): Promise<{ ok: true; value: string } | { ok: false }> => {
+      const sequence = nextTaskSequence(taskId);
+      beginWrite(taskId, "description", sequence);
+
+      try {
+        const updated = await updateTask(taskId, { description: trimmedDescription });
+        const accepted = recordWriteSuccess(
+          taskId,
+          "description",
+          updated.description,
+          updated.updated_at,
+          sequence,
+        );
+        endWrite(taskId, "description", sequence);
+        if (!accepted) {
+          // A newer write or refetch already superseded this response
+          // (AC-60/AC-62): applying it here would show a stale description.
+          // The already-recorded newer value reaches the page/store via the
+          // subscribeField deferred-apply listener once the guard clears.
+          const canonical = getCanonicalValue(taskId, "description") ?? updated.description;
+          return { ok: true, value: canonical };
+        }
+        ctx.applyPatch({ description: updated.description });
+        storeApi.getState().patchTaskInStore(taskId, { description: updated.description });
+        return { ok: true, value: updated.description };
+      } catch (err) {
+        endWrite(taskId, "description", sequence);
+        toastUpdateFailure(err);
+        return { ok: false };
+      }
+    },
+    [ctx, storeApi],
+  );
 }

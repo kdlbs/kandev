@@ -20,6 +20,9 @@ func TestContinuationScopeMigrationBackfillsLegacyRunsAndReplays(t *testing.T) {
 	if _, err := sqlite.NewWithDB(db, db, nil); err != nil {
 		t.Fatalf("create current schema: %v", err)
 	}
+	if _, err := db.Exec(`DROP INDEX IF EXISTS idx_run_failure_scope_status`); err != nil {
+		t.Fatalf("drop continuation scope index from legacy schema: %v", err)
+	}
 	if _, err := db.Exec(`ALTER TABLE runs DROP COLUMN continuation_scope`); err != nil {
 		t.Fatalf("drop continuation_scope from legacy schema: %v", err)
 	}

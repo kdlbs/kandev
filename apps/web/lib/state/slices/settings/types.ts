@@ -437,6 +437,7 @@ export type UserSettingsState = {
   systemMetricsDisplay: { showInTopbar: boolean; simplified: boolean };
   appStatusBarEnabled: boolean;
   appStatusBarOrder: AppStatusBarOrderState;
+  quickChatTabOrderByWorkspace: Record<string, string[]>;
   hiddenWorkflowStepIds: Record<string, string[]>;
   workflowIdsWithAutoHideEmptySteps: string[];
   loaded: boolean;

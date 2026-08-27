@@ -237,6 +237,8 @@ func convertToServiceRepos(repos []dto.TaskRepositoryInput) []service.TaskReposi
 			GitHubURL:          r.GitHubURL,
 			RemoteURL:          r.RemoteURL,
 			Provider:           r.Provider,
+			ProviderHost:       r.ProviderHost,
+			ProviderScope:      r.ProviderScope,
 			ProviderRepoID:     r.ProviderRepoID,
 			ProviderOwner:      r.ProviderOwner,
 			ProviderName:       r.ProviderName,

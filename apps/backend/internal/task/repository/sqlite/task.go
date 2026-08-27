@@ -597,6 +597,14 @@ func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 	task.WorkflowStepTransitionID = transitionID
 	entryID = formatEntryID(transitionID)
 
+	// Both sides kept. pr-2907's allocateStepEntryIfPending is a write with its
+	// own concern; #3043's entryID is a pure format of transitionID (line above),
+	// so neither subsumes the other and dropping either loses real behaviour.
+	// The two-value return is #3043's signature, which this function now carries.
+	if err := r.allocateStepEntryIfPending(ctx, tx, task.ID, task.UpdatedAt); err != nil {
+		return "", err
+	}
+
 	if err := syncRunnerInTx(ctx, tx, r.db.Rebind, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
 		return "", err
 	}

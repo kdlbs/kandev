@@ -937,6 +937,58 @@ does not own. Exactly one structured inspection may succeed. Multiple successes
 are rejected as ambiguous instead of selecting registration order, while a real
 inspection failure is surfaced when no provider establishes ownership.
 
+### First-use repository task creation
+
+The browser `inspectURL` callback supports the repository picker. Its result is
+display data and is not trusted for a native task write. To support a native task
+that uses a repository not yet saved in the workspace, declare this action:
+
+```yaml
+actions:
+  - key: "repositories.inspect"
+    scope: "workspace"
+    max_body_bytes: 16384
+```
+
+Kandev invokes the active manifest owner from the backend. It supplies a verified
+workspace context and a body with only the submitted URL:
+
+```json
+{"url":"https://code.example.com/owner/repository"}
+```
+
+The preferred response nests the complete descriptor under `repository`:
+
+```json
+{
+  "repository": {
+    "provider_id": "acme",
+    "provider_host": "https://code.example.com",
+    "provider_scope": "workspace-a",
+    "provider_repository_id": "owner/repository",
+    "owner_or_project": "owner",
+    "name": "repository",
+    "clone_url": "https://code.example.com/owner/repository.git",
+    "default_branch": "main"
+  }
+}
+```
+
+The host also accepts the descriptor fields at the top level for compatibility.
+Return `{"matched":false}` when the provider does not own the URL. The host
+requires a matching `provider_id`, a valid HTTPS provider origin, a scope of at
+most 512 bytes, and complete repository identity fields. The clone URL must be
+HTTPS, contain no credentials, and use the same origin as `provider_host`.
+Provider and repository identity fields must not contain NUL bytes. The host
+also checks any provider scope or repository ID hint that came from the picker.
+
+The action has a 15-second deadline and a 1 MiB response limit. Do not return
+credentials or provider error details. Invalid output maps to a validation error,
+`{"matched":false}` maps to not found, and provider or transport failures map to
+an unavailable error. After successful inspection, Kandev persists the validated
+descriptor with the normal native task flow. Existing repository IDs and built-in
+provider URLs continue to use their existing paths.
+
 A code-host review provider may publish normalized task chrome on each snapshot:
 
 ```ts

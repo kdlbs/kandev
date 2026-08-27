@@ -59,6 +59,8 @@ type workspaceSourceJSON struct {
 	GitHubURL      string `json:"github_url"`
 	RemoteURL      string `json:"remote_url"`
 	Provider       string `json:"provider"`
+	ProviderHost   string `json:"provider_host"`
+	ProviderScope  string `json:"provider_scope"`
 	ProviderRepoID string `json:"provider_repo_id"`
 	ProviderOwner  string `json:"provider_owner"`
 	ProviderName   string `json:"provider_name"`
@@ -2071,7 +2073,7 @@ func parseWorkspaceSources(raw []json.RawMessage) ([]service.WorkspaceSourceInpu
 		allowed := map[string]bool{"kind": true, "local_path": true}
 		switch kind {
 		case string(service.WorkspaceSourceRepository):
-			for _, key := range []string{"repository_id", "remote_url", "github_url", "provider", "provider_repo_id", "provider_owner", "provider_name", "base_branch", "checkout_branch"} {
+			for _, key := range []string{"repository_id", "remote_url", "github_url", "provider", "provider_host", "provider_scope", "provider_repo_id", "provider_owner", "provider_name", "base_branch", "checkout_branch"} {
 				allowed[key] = true
 			}
 		case string(service.WorkspaceSourceFolder):
@@ -2088,7 +2090,7 @@ func parseWorkspaceSources(raw []json.RawMessage) ([]service.WorkspaceSourceInpu
 		if err := json.Unmarshal(item, &source); err != nil {
 			return nil, err
 		}
-		sources = append(sources, service.WorkspaceSourceInput{Kind: service.WorkspaceSourceKind(source.Kind), RepositoryID: source.RepositoryID, LocalPath: source.LocalPath, GitHubURL: source.GitHubURL, RemoteURL: source.RemoteURL, Provider: source.Provider, ProviderRepoID: source.ProviderRepoID, ProviderOwner: source.ProviderOwner, ProviderName: source.ProviderName, BaseBranch: source.BaseBranch, CheckoutBranch: source.CheckoutBranch, DisplayName: source.DisplayName})
+		sources = append(sources, service.WorkspaceSourceInput{Kind: service.WorkspaceSourceKind(source.Kind), RepositoryID: source.RepositoryID, LocalPath: source.LocalPath, GitHubURL: source.GitHubURL, RemoteURL: source.RemoteURL, Provider: source.Provider, ProviderHost: source.ProviderHost, ProviderScope: source.ProviderScope, ProviderRepoID: source.ProviderRepoID, ProviderOwner: source.ProviderOwner, ProviderName: source.ProviderName, BaseBranch: source.BaseBranch, CheckoutBranch: source.CheckoutBranch, DisplayName: source.DisplayName})
 	}
 	return sources, nil
 }

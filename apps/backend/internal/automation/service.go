@@ -62,12 +62,6 @@ var ErrInvalidContinuationPolicy = errors.New("automation: invalid continuation 
 // launch work for this run.
 var ErrAutomationRunNotDispatchable = errors.New("automation: run is not dispatchable")
 
-// ErrAutomationRunNotLive is returned by the orchestrator when an exact run
-// binding is no longer the live turn. The service maps that outcome to the
-// same not-found result as a missing or terminal run, so a stale stop request
-// cannot affect a newer turn in a shared session.
-var ErrAutomationRunNotLive = errors.New("automation: run is not live")
-
 // RunStopper cancels one exact task/session/turn binding. The bool is false
 // when the binding is already terminal or stale; that is not an internal
 // failure and must not cancel a successor turn.
@@ -916,15 +910,20 @@ func (s *Service) StopRun(ctx context.Context, automationID, runID string) (*Aut
 		if s.runStopper == nil {
 			return nil, errors.New("automation run stopper is not configured")
 		}
-		stopped, stopErr := s.runStopper.StopAutomationRun(ctx, run.TaskID, run.SessionID, run.TurnID)
+		_, stopErr := s.runStopper.StopAutomationRun(ctx, run.TaskID, run.SessionID, run.TurnID)
 		if stopErr != nil {
 			return nil, stopErr
 		}
-		if !stopped {
-			return nil, ErrAutomationNotFound
-		}
 	}
 	if err := s.store.MarkRunTerminal(ctx, run.ID, run.SessionID, run.TurnID, RunStatusFailed, "stopped by user"); err != nil {
+		// The completion path can settle the run after the initial open check but
+		// before this terminal write. Treat that race as an idempotent success.
+		stored, getErr := s.store.GetRun(ctx, run.ID)
+		if getErr == nil && stored != nil && stored.Status != RunStatusTriggered && stored.Status != RunStatusTaskCreated {
+			run.Status = stored.Status
+			run.ErrorMessage = stored.ErrorMessage
+			return run, nil
+		}
 		return nil, err
 	}
 	run.Status = RunStatusFailed

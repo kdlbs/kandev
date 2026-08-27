@@ -238,6 +238,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		if githubSvc != nil {
 			pluginsSvc.SetTaskPRSource(githubSvc)
 		}
+		taskSvc.SetRepositorySelectionResolver(pluginRepositorySelectionResolver{inspector: pluginsSvc})
 	}
 	gitCredentialBroker := newGitCredentialBroker(githubSvc, pluginsSvc, repos.Task, cfg.GitHubCredentialBroker.ReissueSigningKey)
 	if pluginsSvc != nil {

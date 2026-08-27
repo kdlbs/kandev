@@ -93,6 +93,7 @@ export const QuickChatPickerDialog = memo(function QuickChatPickerDialog({
   const { t } = useTranslation();
   const { toast } = useToast();
   const openQuickChat = useAppStore((s) => s.openQuickChat);
+  const agentGeneratedTaskTitles = useAppStore((s) => s.userSettings.agentGeneratedTaskTitles);
   const [isStarting, setIsStarting] = useState(false);
   const [selectedRepoId, setSelectedRepoId] = useState<string>("");
   const [selectedAgentId, setSelectedAgentId] = useState<string>("");
@@ -106,6 +107,7 @@ export const QuickChatPickerDialog = memo(function QuickChatPickerDialog({
       const response = await startQuickChat(workspaceId, {
         repository_id: selectedRepoId || undefined,
         agent_profile_id: selectedAgentId || undefined,
+        ...(agentGeneratedTaskTitles ? { auto_title: true } : {}),
       });
       onOpenChange(false);
       // Open the quick chat modal with the new session
@@ -123,6 +125,7 @@ export const QuickChatPickerDialog = memo(function QuickChatPickerDialog({
     workspaceId,
     selectedRepoId,
     selectedAgentId,
+    agentGeneratedTaskTitles,
     isStarting,
     onOpenChange,
     openQuickChat,

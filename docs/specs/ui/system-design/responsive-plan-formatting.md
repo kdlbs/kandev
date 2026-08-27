@@ -100,6 +100,23 @@ The desktop BubbleMenu retains its non-empty-selection visibility condition.
 It consumes the same reactive active-mark snapshot as the docked strip so
 pressed styling follows selection and command transactions in both variants.
 
+## Render and transaction stability
+
+The desktop BubbleMenu receives stable option and callback identities when
+their values do not change. Tiptap dispatches a metadata transaction when its
+menu options change. A new options object on each render can create a feedback
+loop between that transaction and the editor snapshot subscription.
+
+The editor snapshot subscription compares each derived snapshot with the
+current snapshot. It publishes state only when focus, selection, code-block
+context, or active marks change. Metadata-only transactions do not cause a
+render. Selection and formatting transactions still publish the changed
+snapshot.
+
+These two controls keep the desktop selection bubble reactive without making
+Tiptap option updates part of the React render cycle. The mobile presentation
+uses the same deduplicated editor snapshot.
+
 ## Viewport and scroll contract
 
 The docked strip has a stable measured height. Its position resolves as follows:

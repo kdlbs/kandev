@@ -144,6 +144,7 @@ func provideOrchestrator(
 
 	msgCreator := &messageCreatorAdapter{svc: taskSvc, logger: log}
 	orchestratorSvc.SetMessageCreator(msgCreator)
+	orchestratorSvc.SetTransientRetryMessageService(taskSvc)
 	orchestratorSvc.SetSubagentContextRecorder(&subagentContextAdapter{svc: taskSvc})
 
 	orchestratorSvc.SetTurnService(newTurnServiceAdapter(taskSvc))
@@ -231,10 +232,9 @@ func provideOrchestrator(
 	// Wire repository resolver for auto-cloning repos during review task creation
 	if repoCloner != nil {
 		orchestratorSvc.SetRepositoryResolver(&repositoryResolverAdapter{
-			cloner:   repoCloner,
-			protocol: repoclone.DetectGitProtocol(),
-			taskSvc:  taskSvc,
-			logger:   log,
+			cloner:  repoCloner,
+			taskSvc: taskSvc,
+			logger:  log,
 		})
 
 		// Wire repo cloner into executor for provider-backed repos with no local path
@@ -971,10 +971,14 @@ func (u *repoLocalPathUpdater) UpdateTaskRepositoryBaseBranch(ctx context.Contex
 
 // repositoryResolverAdapter resolves GitHub repos by cloning + finding/creating DB records.
 type repositoryResolverAdapter struct {
-	cloner   *repoclone.Cloner
-	protocol string
-	taskSvc  *taskservice.Service
-	logger   *logger.Logger
+	cloner  reviewRepositoryCloner
+	taskSvc *taskservice.Service
+	logger  *logger.Logger
+}
+
+type reviewRepositoryCloner interface {
+	EnsureWorkspaceCloned(context.Context, string, string, string, string, string) (string, error)
+	BuildCloneURLWithHost(context.Context, string, string, string, string) (string, error)
 }
 
 // ResolveForReview implements orchestrator.RepositoryResolver.
@@ -1000,7 +1004,7 @@ func (a *repositoryResolverAdapter) ResolveForReview(
 		return existing.ID, baseBranch, nil
 	}
 
-	cloneURL, err := repoclone.CloneURL(provider, owner, name, a.protocol)
+	cloneURL, err := a.cloner.BuildCloneURLWithHost(ctx, provider, providerHost, owner, name)
 	if err != nil {
 		return "", "", fmt.Errorf("unsupported provider: %w", err)
 	}

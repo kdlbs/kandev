@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	"github.com/kandev/kandev/internal/workflow/stepentry"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -307,6 +308,21 @@ func (s *workflowStore) applyTransition(ctx context.Context, taskID, sessionID, 
 	transitionCtx := ctx
 	if !steptelemetry.HasTrigger(transitionCtx) {
 		transitionCtx = engineTransitionAttribution(transitionCtx, sessionID, trigger)
+	}
+	// Only attach a PendingAllocation when the caller already opted in by
+	// wrapping ctx with a ResultHolder (applyEngineTransition does this for
+	// the engine-driven on_turn_complete path). Attaching it unconditionally
+	// would allocate workflow_step_entries rows for every transition into a
+	// step with engine-owned on_enter actions, including the callers (manual
+	// move, deferred move) that don't yet dispatch through them this Build
+	// round — see docs/specs/workflow-on-enter-action-dispatch/spec.md and
+	// the task plan's scope note for why those entry paths are deferred.
+	if targetStep != nil {
+		if _, wantsAllocation := stepentry.ResultHolderFromContext(ctx); wantsAllocation {
+			if pending, ok := stepentry.BuildPendingAllocation(targetStep.ID, targetStep.Events.OnEnter); ok {
+				transitionCtx = stepentry.WithPendingAllocation(transitionCtx, pending)
+			}
+		}
 	}
 	if err := s.updateTransitionTask(transitionCtx, task, targetStep); err != nil {
 		return fmt.Errorf("update task workflow step: %w", err)

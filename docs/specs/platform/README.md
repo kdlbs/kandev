@@ -86,6 +86,7 @@ localization, feature toggles, health, and shared session recovery services.
 - [Provider Error Recovery](system-design/provider-error-recovery.md)
 - [Workspace Git Status](system-design/workspace-git-status.md)
 - [Go dev launcher and startup version](system-design/go-dev-launcher.md)
+- [Startup database selection continuity](system-design/startup-database-selection-continuity.md)
 
 ## Migration record
 

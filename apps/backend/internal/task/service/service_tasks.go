@@ -62,13 +62,13 @@ var ErrInvalidTaskWorkflow = errors.New("invalid task workflow")
 // aborting the whole operation.
 var ErrTaskAlreadyArchived = errors.New("task is already archived")
 
-// ErrAutoTitlePromptRequired is returned when prompt-first creation has no
-// prompt from which to derive a provisional title.
-var ErrAutoTitlePromptRequired = errors.New("description is required when auto_title is enabled")
+// ErrAutoTitlePromptRequired is returned when auto-title creation has neither
+// a prompt nor a usable provisional title.
+var ErrAutoTitlePromptRequired = errors.New("description or title is required when auto_title is enabled")
 
-// ErrAutoTitleUnsupportedForOffice is returned when prompt-first title
-// generation is requested for an Office task. Office agents use a restricted
-// MCP surface that does not expose the one-shot title tool.
+// ErrAutoTitleUnsupportedForOffice is returned when auto-title generation is
+// requested for an Office task. Office agents use a restricted MCP surface
+// that does not expose the one-shot title tool.
 var ErrAutoTitleUnsupportedForOffice = errors.New("auto_title is not supported for Office tasks")
 
 type pendingTaskTitleSetter interface {
@@ -252,6 +252,9 @@ func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskReq
 	if err := s.inheritParentRepositories(ctx, req); err != nil {
 		return nil, err
 	}
+	if err := s.preflightRepositorySelections(ctx, req); err != nil {
+		return nil, err
+	}
 	if err := s.validateTaskRepositoryPolicies(ctx, req.WorkspaceID, req.Repositories); err != nil {
 		return nil, err
 	}
@@ -426,6 +429,19 @@ func prepareAutoTitle(req *CreateTaskRequest) error {
 	}
 	if isOfficeRequest(req) {
 		return ErrAutoTitleUnsupportedForOffice
+	}
+	if isConfigTaskMetadata(req.Metadata) {
+		return nil
+	}
+	if req.IsEphemeral && strings.TrimSpace(req.Description) == "" {
+		if strings.TrimSpace(req.Title) == "" {
+			return ErrAutoTitlePromptRequired
+		}
+		if req.Metadata == nil {
+			req.Metadata = make(map[string]interface{})
+		}
+		req.Metadata[models.MetaKeyAgentTitlePending] = true
+		return nil
 	}
 	title, err := deriveProvisionalTaskTitle(req.Description)
 	if err != nil {
@@ -1605,6 +1621,11 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	if err != nil {
 		return nil, err
 	}
+	if req.Repositories != nil {
+		if err := s.preflightRepositoryInputs(ctx, task.WorkspaceID, req.Repositories); err != nil {
+			return nil, err
+		}
+	}
 	oldWorkflowStepID := task.WorkflowStepID
 	var oldState *v1.TaskState
 	stateChanged := false
@@ -1723,7 +1744,7 @@ func (s *Service) reloadTaskAfterMutation(ctx context.Context, id string, fallba
 	return fallback
 }
 
-// SetPendingAgentTitle replaces a prompt-first provisional title exactly once.
+// SetPendingAgentTitle replaces a pending provisional title exactly once.
 // Only the atomically claimed owner session may resolve it. A missing pending
 // marker is an idempotent no-op so a human rename or an earlier agent call
 // always wins a late request.
@@ -3362,7 +3383,11 @@ func parsePRQuery(query string) (int, bool) {
 // `json_extract(metadata, '$.config_mode') IS NOT 1` filter). JSON-decoded
 // numbers arrive as float64, so accept both numeric 1 and bool true.
 func isConfigTask(task *models.Task) bool {
-	switch v := task.Metadata["config_mode"].(type) {
+	return isConfigTaskMetadata(task.Metadata)
+}
+
+func isConfigTaskMetadata(metadata map[string]interface{}) bool {
+	switch v := metadata["config_mode"].(type) {
 	case float64:
 		return v == 1
 	case int:

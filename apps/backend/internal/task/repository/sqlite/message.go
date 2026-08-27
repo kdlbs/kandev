@@ -582,13 +582,14 @@ func (r *Repository) FindMessagesByPendingID(ctx context.Context, pendingID stri
 // cleanup; they never become current input authority.
 func (r *Repository) FindActiveClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*models.Message, error) {
 	drv := r.ro.DriverName()
+	predicate, orderBy := currentTurnAuthority(drv, "turn_row")
 	query := fmt.Sprintf(`
 		WITH current_turn AS (
 			SELECT turn_row.id
 			FROM task_session_turns turn_row
 			WHERE turn_row.task_session_id = ?
 			  AND %s
-			ORDER BY turn_row.started_at DESC, turn_row.created_at DESC, turn_row.id DESC
+			ORDER BY %s
 			LIMIT 1
 		)
 		SELECT m.id, m.task_session_id, m.task_id, m.turn_id, m.author_type, m.author_id,
@@ -599,7 +600,7 @@ func (r *Repository) FindActiveClarificationMessagesBySessionID(ctx context.Cont
 		  AND m.type = 'clarification_request'
 		  AND COALESCE(%s, '') IN ('', 'pending')
 		ORDER BY m.created_at ASC, m.id ASC
-	`, turnAuthorityPredicate(drv, "turn_row"), dialect.JSONExtract(drv, "m.metadata", "status"))
+	`, predicate, orderBy, dialect.JSONExtract(drv, "m.metadata", "status"))
 	// First sessionID selects current-turn authority; second scopes messages so
 	// a malformed cross-session turn reference cannot leak another session's row.
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), sessionID, sessionID)
@@ -661,6 +662,7 @@ func pendingActionsBySessionQuery(driverName string, placeholders []string) stri
 	// Terminal sessions quarantine pending history even when best-effort expiry
 	// persistence failed. Both message CTEs inherit the requested-session
 	// boundary through their task_session_id and turn_id joins to current_turn.
+	predicate, orderBy := currentTurnAuthority(driverName, "turn_row")
 	return fmt.Sprintf(`
 		WITH current_turn AS (
 			SELECT task_session_id, id AS turn_id
@@ -669,7 +671,7 @@ func pendingActionsBySessionQuery(driverName string, placeholders []string) stri
 				       id,
 				       ROW_NUMBER() OVER (
 				         PARTITION BY task_session_id
-				         ORDER BY started_at DESC, created_at DESC, id DESC
+				         ORDER BY %s
 				       ) AS rn
 				FROM task_session_turns turn_row
 				WHERE turn_row.task_session_id IN (%s)
@@ -706,7 +708,7 @@ func pendingActionsBySessionQuery(driverName string, placeholders []string) stri
 		SELECT task_session_id, 'permission' AS action
 		FROM latest_permissions
 		WHERE rn = 1 AND status IN ('', 'pending')
-	`, placeholderList, turnAuthorityPredicate(driverName, "turn_row"),
+	`, orderBy, placeholderList, predicate,
 		nonTerminalSessionPredicate("turn_row"), statusExpr, statusExpr, permissionOrderExpr)
 }
 

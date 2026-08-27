@@ -49,6 +49,8 @@ type mockStepGetter struct {
 	workflowMetaErr        error                             // optional error from GetWorkflowMeta
 	workflowMetaDelay      time.Duration                     // optional sleep before returning meta
 	workflowMetaMu         sync.Mutex                        // guards workflowMetaCalls for concurrent tests
+	getStepCalls           int                               // GetStep invocations, guarded by getStepMu
+	getStepMu              sync.Mutex
 }
 
 func newMockStepGetter() *mockStepGetter {
@@ -59,10 +61,24 @@ func newMockStepGetter() *mockStepGetter {
 }
 
 func (m *mockStepGetter) GetStep(_ context.Context, stepID string) (*wfmodels.WorkflowStep, error) {
+	m.getStepMu.Lock()
+	m.getStepCalls++
+	m.getStepMu.Unlock()
 	if s, ok := m.steps[stepID]; ok {
 		return s, nil
 	}
 	return nil, nil
+}
+
+// GetStepCalls reports how many times GetStep has been invoked. autoStartTaskForStep
+// calls GetStep synchronously, before any launch work is handed off to a detached
+// goroutine (see autoStartTaskForLoadedStep) — so a zero count is a race-free way for
+// a test to prove autoStartTaskForStep was never entered at all, without waiting on
+// or racing against async launch/DB-teardown timing.
+func (m *mockStepGetter) GetStepCalls() int {
+	m.getStepMu.Lock()
+	defer m.getStepMu.Unlock()
+	return m.getStepCalls
 }
 
 func (m *mockStepGetter) GetNextStepByPosition(_ context.Context, workflowID string, currentPosition int) (*wfmodels.WorkflowStep, error) {
@@ -288,8 +304,9 @@ type mockAgentManager struct {
 	// Prompt tracking — capturedPrompts records prompts only (legacy, several
 	// tests assert on it directly). capturedPromptCalls records the same with
 	// the execution ID so callers can filter by the agent that received it.
-	capturedPrompts     []string
-	capturedPromptCalls []promptCall
+	capturedPrompts              []string
+	capturedPromptCalls          []promptCall
+	setExecutionDescriptionCalls []promptCall
 	// Steer tracking. capturedSteerCalls records every SteerAgentWithDispatchCallback
 	// invocation; steerErr, when set, is returned instead of dispatching. Having
 	// this method also makes the mock satisfy the executor's optional
@@ -594,7 +611,13 @@ func (m *mockAgentManager) RestartAgentProcess(_ context.Context, agentExecution
 func (m *mockAgentManager) ResetAgentContext(ctx context.Context, agentExecutionID string) error {
 	return m.RestartAgentProcess(ctx, agentExecutionID)
 }
-func (m *mockAgentManager) SetExecutionDescription(_ context.Context, _, _ string) error {
+func (m *mockAgentManager) SetExecutionDescription(_ context.Context, executionID, description string) error {
+	m.mu.Lock()
+	m.setExecutionDescriptionCalls = append(m.setExecutionDescriptionCalls, promptCall{
+		ExecutionID: executionID,
+		Prompt:      description,
+	})
+	m.mu.Unlock()
 	return nil
 }
 func (m *mockAgentManager) SetExecutionEnv(_ context.Context, _ string, _ map[string]string) error {
