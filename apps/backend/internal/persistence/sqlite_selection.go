@@ -32,10 +32,11 @@ type sqliteSelection struct {
 }
 
 type sqliteCandidate struct {
-	path       string
-	exists     bool
-	tasksTable bool
-	taskCount  int64
+	path           string
+	exists         bool
+	tasksTable     bool
+	hasTaskHistory bool
+	taskCount      int64
 }
 
 // SQLiteDatabaseSelectionConflictError identifies the two default candidates
@@ -57,6 +58,8 @@ func (e *SQLiteDatabaseSelectionConflictError) Error() string {
 	)
 }
 
+// selectSQLiteDatabase runs after backend runtime-state ownership is acquired.
+// The lock isolates selection and adoption from other Kandev instances.
 func selectSQLiteDatabase(cfg *config.Config, log *logger.Logger) (sqliteSelection, error) {
 	if databasePathIsExplicit(cfg) {
 		path := strings.TrimSpace(cfg.Database.Path)
@@ -77,7 +80,7 @@ func selectSQLiteDatabase(cfg *config.Config, log *logger.Logger) (sqliteSelecti
 
 	currentPath := filepath.Join(cfg.ResolvedDataDir(), "kandev.db")
 	legacyPath := filepath.Join(cfg.ResolvedHomeDir(), "kandev.db")
-	current, err := inspectSQLiteCandidate(currentPath)
+	current, err := inspectSQLiteCandidateLightweight(currentPath)
 	if err != nil {
 		return sqliteSelection{}, err
 	}
@@ -90,7 +93,7 @@ func selectSQLiteDatabase(cfg *config.Config, log *logger.Logger) (sqliteSelecti
 	}
 
 	if current.exists {
-		if current.taskCount == 0 && legacy.taskCount > 0 {
+		if !current.hasTaskHistory && legacy.hasTaskHistory {
 			conflict := &SQLiteDatabaseSelectionConflictError{
 				CurrentPath:      currentPath,
 				LegacyPath:       legacyPath,
@@ -130,6 +133,8 @@ func databasePathIsExplicit(cfg *config.Config) bool {
 	if cfg == nil || strings.TrimSpace(cfg.Database.Path) == "" {
 		return false
 	}
+	// Configuration-file paths are explicit too; they cross the managed
+	// boundary through the internal config-file handoff.
 	switch cfg.SourceFor("database.path") {
 	case config.SourceConfiguration, config.SourceEnvironment:
 		return true
@@ -139,6 +144,14 @@ func databasePathIsExplicit(cfg *config.Config) bool {
 }
 
 func inspectSQLiteCandidate(path string) (sqliteCandidate, error) {
+	return inspectSQLiteCandidateWithMode(path, true)
+}
+
+func inspectSQLiteCandidateLightweight(path string) (sqliteCandidate, error) {
+	return inspectSQLiteCandidateWithMode(path, false)
+}
+
+func inspectSQLiteCandidateWithMode(path string, checkIntegrity bool) (sqliteCandidate, error) {
 	candidate := sqliteCandidate{path: path}
 	info, err := os.Stat(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -158,19 +171,26 @@ func inspectSQLiteCandidate(path string) (sqliteCandidate, error) {
 	}
 	defer func() { _ = reader.Close() }()
 
-	var integrity string
-	if err := reader.Get(&integrity, `PRAGMA integrity_check`); err != nil {
-		return candidate, fmt.Errorf("check sqlite candidate %q integrity: %w", path, err)
-	}
-	if integrity != "ok" {
-		return candidate, fmt.Errorf("check sqlite candidate %q integrity: %s", path, integrity)
+	if checkIntegrity {
+		var integrity string
+		if err := reader.Get(&integrity, `PRAGMA integrity_check`); err != nil {
+			return candidate, fmt.Errorf("check sqlite candidate %q integrity: %w", path, err)
+		}
+		if integrity != "ok" {
+			return candidate, fmt.Errorf("check sqlite candidate %q integrity: %s", path, integrity)
+		}
 	}
 	if err := reader.Get(&candidate.tasksTable, `SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'tasks')`); err != nil {
 		return candidate, fmt.Errorf("inspect sqlite candidate %q task table: %w", path, err)
 	}
 	if candidate.tasksTable {
-		if err := reader.Get(&candidate.taskCount, `SELECT COUNT(*) FROM tasks`); err != nil {
-			return candidate, fmt.Errorf("count sqlite candidate %q tasks: %w", path, err)
+		if checkIntegrity {
+			if err := reader.Get(&candidate.taskCount, `SELECT COUNT(*) FROM tasks`); err != nil {
+				return candidate, fmt.Errorf("count sqlite candidate %q tasks: %w", path, err)
+			}
+			candidate.hasTaskHistory = candidate.taskCount > 0
+		} else if err := reader.Get(&candidate.hasTaskHistory, `SELECT EXISTS (SELECT 1 FROM tasks LIMIT 1)`); err != nil {
+			return candidate, fmt.Errorf("inspect sqlite candidate %q task history: %w", path, err)
 		}
 	}
 	return candidate, nil
@@ -190,6 +210,7 @@ func openSQLiteReadOnly(path string) (*sqlx.DB, error) {
 }
 
 func adoptLegacySQLite(legacyPath, currentPath string, legacy sqliteCandidate) error {
+	// The caller holds runtime-state ownership for the legacy and current paths.
 	if err := os.MkdirAll(filepath.Dir(currentPath), 0o755); err != nil {
 		return fmt.Errorf("create data directory %q: %w", filepath.Dir(currentPath), err)
 	}
@@ -225,8 +246,22 @@ func adoptLegacySQLite(legacyPath, currentPath string, legacy sqliteCandidate) e
 	if staged.taskCount != legacy.taskCount {
 		return fmt.Errorf("staged sqlite database task count = %d, want %d", staged.taskCount, legacy.taskCount)
 	}
-	if err := os.Rename(stagedPath, currentPath); err != nil {
-		return fmt.Errorf("install staged sqlite database: %w", err)
+	if err := installStagedSQLite(stagedPath, currentPath); err != nil {
+		return err
+	}
+	return nil
+}
+
+// installStagedSQLite creates the target without replacing a file that may
+// have appeared after candidate inspection. Both paths are in the same
+// directory, so the hard-link creation is atomic and the staged name can be
+// removed after installation.
+func installStagedSQLite(stagedPath, currentPath string) error {
+	if err := os.Link(stagedPath, currentPath); err != nil {
+		return fmt.Errorf("install staged sqlite database without replacing existing target: %w", err)
+	}
+	if err := os.Remove(stagedPath); err != nil {
+		return fmt.Errorf("remove staged sqlite path after installation: %w", err)
 	}
 	return nil
 }

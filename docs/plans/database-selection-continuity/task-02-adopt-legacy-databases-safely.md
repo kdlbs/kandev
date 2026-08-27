@@ -91,6 +91,10 @@ node scripts/validate-public-docs.mjs
 - Added launcher-to-persistence, WAL adoption, invalid-candidate,
   empty-current conflict, explicit-path, established-current, and failed
   installation coverage.
+- Hardened installation with an atomic no-replace target operation and made
+  established-current inspection use a lightweight task-history probe.
+- Updated Docker and Kubernetes upgrade guidance and marked the implemented
+  system design as current.
 - Updated the public configuration and operations guides with continuity and
   recovery behavior.
 - Verification passed:

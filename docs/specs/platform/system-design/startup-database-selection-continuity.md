@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: platform
 requirements:
   - REQ-PLATFORM-STARTUP-CONFIGURATION-PARITY-002
@@ -47,7 +47,7 @@ Candidate inspection is read-only. It reports whether the file exists, whether i
 
 ## Legacy adoption
 
-Adoption never renames or deletes the legacy source. Kandev opens it under the already-held runtime-state lock, creates a transaction-consistent snapshot at a unique temporary path beside the current default target, and validates the staged database with SQLite integrity checking. It applies owner-only file permissions where supported and atomically renames the staged file to the absent target.
+Adoption never renames or deletes the legacy source. Kandev opens it under the already-held runtime-state lock, creates a transaction-consistent snapshot at a unique temporary path beside the current default target, and validates the staged database with SQLite integrity checking. It applies owner-only file permissions where supported and atomically installs the staged file at the absent target without replacing a file that appears late.
 
 Any error removes only the staged file. The legacy database and its WAL and SHM sidecars remain untouched. The normal pre-migration backup then evaluates the adopted target before repository schema initialization.
 

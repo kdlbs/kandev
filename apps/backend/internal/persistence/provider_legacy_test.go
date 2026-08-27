@@ -263,6 +263,29 @@ func TestAdoptLegacySQLiteRetainsSourceWhenInstallationFails(t *testing.T) {
 	}
 }
 
+func TestInstallStagedSQLiteDoesNotReplaceExistingTarget(t *testing.T) {
+	dir := t.TempDir()
+	stagedPath := filepath.Join(dir, "staged.db")
+	currentPath := filepath.Join(dir, "current.db")
+	if err := os.WriteFile(stagedPath, []byte("staged database"), 0o600); err != nil {
+		t.Fatalf("seed staged database: %v", err)
+	}
+	if err := os.WriteFile(currentPath, []byte("late target"), 0o600); err != nil {
+		t.Fatalf("seed late target: %v", err)
+	}
+
+	err := installStagedSQLite(stagedPath, currentPath)
+	if err == nil {
+		t.Fatal("installStagedSQLite replaced an existing target")
+	}
+	if got := readFileForTest(t, currentPath); string(got) != "late target" {
+		t.Fatalf("late target changed after failed installation: %q", got)
+	}
+	if got := readFileForTest(t, stagedPath); string(got) != "staged database" {
+		t.Fatalf("staged database changed after rejected installation: %q", got)
+	}
+}
+
 func seedEmptySQLiteDatabase(t *testing.T, path string) []byte {
 	t.Helper()
 	database, err := sqlx.Open("sqlite3", path)

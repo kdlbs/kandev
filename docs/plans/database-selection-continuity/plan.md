@@ -64,7 +64,9 @@ Log database source and selection outcome without content. Update the public con
 
 Task 01 and Task 02 complete. Launcher provenance, staged WAL-safe adoption,
 conflict handling, explicit-path isolation, diagnostics, tests, and public
-recovery guidance are implemented and verified.
+recovery guidance are implemented and verified. Review follow-up hardening
+also covers no-replace installation, lightweight warm-start inspection, and
+deployment documentation.
 
 ## Risks
 
