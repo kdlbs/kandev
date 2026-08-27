@@ -11,13 +11,16 @@ owners:
 
 ## Purpose
 
-The UI system owns reusable web presentation and responsive interaction
-contracts that do not own backend state.
+The UI system owns web presentation for desktop/mobile surfaces.
 
 ## Ownership
 
-Another system keeps ownership when a control configures or shows that system's
-state. A visible control is not UI-owned only because it appears in the web app.
+This system owns navigation, settings, boards, task/review surfaces,
+walkthroughs, chat controls, visual feedback, and responsive interaction
+contracts without backend-state ownership.
+
+Controls that configure or display provider/task state remain owned by that
+system. The UI system owns only independent, reusable presentation contracts.
 
 ## Exclusions
 
@@ -175,11 +178,12 @@ state. A visible control is not UI-owned only because it appears in the web app.
 - [Command-panel Sidebar Task Reveal](system-design/command-panel-sidebar-task-reveal.md)
 - [Terminal Rendering](system-design/terminal-rendering.md)
 - [Task Transcript History Visibility](system-design/task-prompt-transcript-visibility.md)
+- [Transcript Auto-scroll Stability](system-design/transcript-auto-scroll.md)
 
 ## Migration record
 
-Migration remains in progress while legacy source detail is extracted from the
-canonical requirement and system-design documents above.
+Legacy source detail is still moving to the canonical requirement and
+system-design documents above.
 
 ## Related systems
 
