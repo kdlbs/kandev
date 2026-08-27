@@ -62,7 +62,7 @@ def lint_specs(root: Path, config: dict | None = None) -> list[Violation]:
     violations: list[Violation] = []
     requirement_definitions: dict[str, list[tuple[Path, int]]] = {}
     acceptance_definitions: dict[str, list[tuple[Path, int]]] = {}
-    design_references: list[tuple[str, Path, int]] = []
+    design_references: list[tuple[str, Path, int, str | None]] = []
     systems_with_new_artifacts: set[str] = set()
     system_indexes: set[str] = set()
 
@@ -157,7 +157,7 @@ def lint_specs(root: Path, config: dict | None = None) -> list[Violation]:
             references = metadata.get("requirements", [])
             if isinstance(references, list):
                 for reference in references:
-                    design_references.append((str(reference), path, 1))
+                    design_references.append((str(reference), path, 1, system))
 
     for system in sorted(systems_with_new_artifacts - system_indexes):
         violations.append(
@@ -172,7 +172,7 @@ def lint_specs(root: Path, config: dict | None = None) -> list[Violation]:
     violations.extend(check_duplicate_ids("requirement", requirement_definitions))
     violations.extend(check_duplicate_ids("acceptance", acceptance_definitions))
     known_requirements = set(requirement_definitions)
-    for requirement, path, line in design_references:
+    for requirement, path, line, design_system in design_references:
         if requirement not in known_requirements:
             violations.append(
                 Violation(
@@ -180,6 +180,19 @@ def lint_specs(root: Path, config: dict | None = None) -> list[Violation]:
                     path,
                     line,
                     f"system design references unknown requirement {requirement}",
+                )
+            )
+            continue
+        definition_path, _ = requirement_definitions[requirement][0]
+        _, requirement_system = classify_path(definition_path.relative_to(root))
+        if requirement_system != design_system:
+            violations.append(
+                Violation(
+                    "cross-system-requirement-reference",
+                    path,
+                    line,
+                    f"system design in `{design_system}` cannot claim requirement {requirement} "
+                    f"owned by `{requirement_system}`; link to the owning system instead",
                 )
             )
 

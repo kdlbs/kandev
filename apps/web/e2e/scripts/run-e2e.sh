@@ -106,7 +106,7 @@ build_fe() {
 build_backend_host() {
   log "building backend (host)"
   local targets=(build)
-  # The Playwright project is `containers`; `KANDEV_E2E_DOCKER` remains only an env alias.
+  # PROJECT is normalized above, so this also covers the deprecated `docker` alias.
   [[ "$PROJECT" == containers ]] && targets+=(build-agentctl-linux build-mock-agent-linux)
   make -C "$BACKEND_DIR" "${targets[@]}" >/dev/null || die "backend build failed"
 }
@@ -174,6 +174,7 @@ while [[ $# -gt 0 ]]; do
     --no-build) DO_BUILD=0 ;;
     --no-strict) STRICT=0 ;;
     --project) [[ "${2:-}" =~ ^[a-zA-Z0-9_-]+$ ]] || die "invalid --project name: '${2:-}'"; PROJECT="$2"; shift ;;
+    --project=*) PROJECT="${1#--project=}"; [[ "$PROJECT" =~ ^[a-zA-Z0-9_-]+$ ]] || die "invalid --project name: '$PROJECT'" ;;
     --) shift; PW_ARGS+=("$@"); break ;;
     *) PW_ARGS+=("$1") ;;
   esac
@@ -181,6 +182,15 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ "$SUBCMD" == clean ]]; then clean_artifacts; log "clean done"; exit 0; fi
+
+# `docker` is a deprecated alias for the `containers` Playwright project
+# (playwright.config.ts only defines `containers`); normalize once so every
+# downstream check — build targets, env export, and the `--project` value
+# handed to Playwright itself — only ever has to know about `containers`.
+if [[ "$PROJECT" == docker ]]; then
+  log "--project docker is deprecated; using containers"
+  PROJECT=containers
+fi
 
 # Resolve mode
 if [[ "$MODE" == auto ]]; then
@@ -204,14 +214,18 @@ run_host() {
   prepare_pr_assets
   [[ "$DO_BUILD" == 1 ]] && { build_backend_host; build_fe; build_plugin_package; }
   local base_args=(playwright test --config e2e/playwright.config.ts --project="$PROJECT")
+  # `env FOO=bar cmd` inherits the rest of the parent shell's environment as-is,
+  # so a KANDEV_E2E_CONTAINERS/KANDEV_E2E_DOCKER left over from an earlier
+  # containers run in the same shell would otherwise leak into an ordinary
+  # run and make global setup demand Linux helper binaries it never built.
   if [[ "$SHARDS" -le 1 ]]; then
-    ( cd "$WEB_DIR" && env ${STRICT_ENV[@]+"${STRICT_ENV[@]}"} ${CONTAINER_ENV[@]+"${CONTAINER_ENV[@]}"} pnpm exec "${base_args[@]}" ${PW_ARGS[@]+"${PW_ARGS[@]}"} )
+    ( cd "$WEB_DIR" && env -u KANDEV_E2E_CONTAINERS -u KANDEV_E2E_DOCKER ${STRICT_ENV[@]+"${STRICT_ENV[@]}"} ${CONTAINER_ENV[@]+"${CONTAINER_ENV[@]}"} pnpm exec "${base_args[@]}" ${PW_ARGS[@]+"${PW_ARGS[@]}"} )
     return $?
   fi
   log "running $SHARDS host shards (distinct E2E_PORT_OFFSET + output dirs)"
   local pids=() rc=0 i
   for ((i=1; i<=SHARDS; i++)); do
-    ( cd "$WEB_DIR" && env ${STRICT_ENV[@]+"${STRICT_ENV[@]}"} ${CONTAINER_ENV[@]+"${CONTAINER_ENV[@]}"} E2E_PORT_OFFSET=$((i-1)) \
+    ( cd "$WEB_DIR" && env -u KANDEV_E2E_CONTAINERS -u KANDEV_E2E_DOCKER ${STRICT_ENV[@]+"${STRICT_ENV[@]}"} ${CONTAINER_ENV[@]+"${CONTAINER_ENV[@]}"} E2E_PORT_OFFSET=$((i-1)) \
         pnpm exec "${base_args[@]}" --shard="$i/$SHARDS" --output="e2e/test-results-shard-$i" ${PW_ARGS[@]+"${PW_ARGS[@]}"} \
         > "/tmp/e2e-host-shard-$i.log" 2>&1 ) &
     pids+=("$!")

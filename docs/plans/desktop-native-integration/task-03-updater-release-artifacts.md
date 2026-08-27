@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-native-shell-commands"]
 plan: "plan.md"
-spec: "../../specs/desktop-tauri-app/spec.md"
+spec: "../../specs/desktop/requirements/desktop-tauri-app.md"
 ---
 
 # Task 03: Signed Updater Release Artifacts

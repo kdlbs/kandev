@@ -43,8 +43,22 @@ Do not create a generic `spec.md` file.
 Read `docs/specs/README.md` and the likely system `README.md`. If the system has
 not migrated, use `docs/specs/INDEX.md` to locate the legacy source.
 
-Choose the system that owns the concepts and contract. Other systems reference
-that source. They do not copy it.
+Search all system indexes, requirements, and designs for the capability name
+and its main nouns. Update an existing capability when it owns the same actor,
+lifecycle, and contract.
+
+Choose the system that owns the source of truth and durable contract. Do not
+choose an owner from the code directories that change. Record one sentence in
+the working notes that states why the selected system owns the capability.
+
+User visibility does not make a capability UI-owned. Keep provider state, task
+state, permissions, persistence, and recovery with their owning systems. Put
+desktop, mobile, accessibility, and visible failure outcomes in that owner's
+requirement. Create a UI requirement only for an independent and reusable
+presentation contract.
+
+The same system owns the requirement and its design. Other systems link to that
+source. They do not copy it or claim its requirement IDs in design frontmatter.
 
 If no system owns the behavior, define the new system boundary before you write
 requirements. A new system needs a `README.md` based on the system template.
@@ -74,6 +88,10 @@ Use user stories only when they clarify a natural actor and outcome. Do not put
 files, functions, database queries, or implementation sequences in a
 requirement.
 
+Keep one cohesive vertical outcome together. Do not create separate backend and
+UI requirements for the same feature. Split only when actors, lifecycles, or
+contracts are independent.
+
 ### 4. Write system design
 
 Create or update this file when the change needs a technical design:
@@ -90,6 +108,11 @@ Describe stable components, models, contracts, flow, failure behavior,
 persistence, security, and observability when they apply. Link to global ADRs.
 Do not copy requirement or ADR text.
 
+Cover all runtime boundaries that implement the owned outcome. A provider-owned
+design can include backend services, storage, projections, frontend components,
+responsive behavior, and tests. Do not create a parallel UI design for those
+same requirements.
+
 ### 5. Update the system index
 
 Add the new documents to the system `README.md`. State the system boundary and
@@ -99,6 +122,18 @@ During migration, name the new source as authoritative. Replace the old source
 with a link or archive it. Do not leave two editable sources of truth.
 
 ### 6. Validate
+
+Review the artifacts before you run the linter:
+
+- One system owns each requirement and its design.
+- No adjacent system contains a copied requirement or UI-only duplicate.
+- Requirements contain observable behavior, not storage, control flow, or file
+  details.
+- Every acceptance criterion states a testable behavior. No criterion delegates
+  its meaning to migrated source detail.
+- Designs map requirement IDs without copying requirement text.
+- New files do not copy the legacy `Migrated source detail` wrapper.
+- New artifacts appear in the owning system index.
 
 Run:
 

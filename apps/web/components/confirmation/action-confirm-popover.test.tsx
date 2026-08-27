@@ -9,9 +9,11 @@ const deleteTitle = "Delete item?";
 function Harness({
   onConfirm = vi.fn(),
   confirmDisabled = false,
+  size,
 }: {
   onConfirm?: () => void | Promise<void>;
   confirmDisabled?: boolean;
+  size?: "wide";
 }) {
   const [open, setOpen] = useState(true);
   const [showAnchor, setShowAnchor] = useState(true);
@@ -34,6 +36,7 @@ function Harness({
         cancelLabel="Cancel"
         confirmLabel="Delete"
         confirmDisabled={confirmDisabled}
+        size={size}
         onOpenChange={setOpen}
         onConfirm={onConfirm}
       />
@@ -53,6 +56,17 @@ describe("ActionConfirmPopover", () => {
     expect(
       within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }).className,
     ).toContain("min-h-11");
+  });
+
+  it("supports a wider bounded surface without changing the default width", async () => {
+    render(<Harness />);
+    expect(screen.getByRole("dialog").className).toContain("w-64");
+
+    cleanup();
+    render(<Harness size="wide" />);
+    const wideDialog = screen.getByRole("dialog");
+    expect(wideDialog.className).toContain("w-72");
+    expect(wideDialog.className).toContain("max-w-[calc(100vw-1rem)]");
   });
 
   it("closes before invoking an unresolved confirmation and returns focus on cancel", async () => {

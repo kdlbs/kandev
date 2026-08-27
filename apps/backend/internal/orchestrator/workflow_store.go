@@ -101,6 +101,7 @@ type workflowStore struct {
 	stepHistoryRecorder StepHistoryRecorder
 	guardedLifecycle    guardedTransitionLifecycle
 	appliedOps          sync.Map
+	stepCache           *stepSpecCache
 }
 
 func newWorkflowStore(
@@ -145,6 +146,7 @@ func newWorkflowStore(
 		publishStateChanged: stateChanged,
 		logger:              log,
 		stepHistoryRecorder: history,
+		stepCache:           newStepSpecCache(),
 	}
 }
 
@@ -179,34 +181,67 @@ func (s *workflowStore) LoadState(ctx context.Context, taskID, sessionID string)
 	return assembleMachineState(task, session, isPassthrough), nil
 }
 
+// LoadStep returns stepID's compiled spec, serving it from the process-local
+// stepCache when fresh. On a miss, concurrent callers for the same stepID
+// coalesce onto one DB read + compile via stepCache's singleflight group. The
+// returned StepSpec is shared across callers and must be treated as
+// immutable — see stepSpecCache's doc comment.
 func (s *workflowStore) LoadStep(ctx context.Context, _, stepID string) (engine.StepSpec, error) {
-	step, err := s.workflowStepGetter.GetStep(ctx, stepID)
-	if err != nil {
-		return engine.StepSpec{}, fmt.Errorf("load step %s: %w", stepID, err)
+	fetch := func() (engine.StepSpec, error) {
+		step, err := s.workflowStepGetter.GetStep(ctx, stepID)
+		if err != nil {
+			return engine.StepSpec{}, fmt.Errorf("load step %s: %w", stepID, err)
+		}
+		if step == nil {
+			return engine.StepSpec{}, fmt.Errorf("step %s not found", stepID)
+		}
+		return engine.CompileStep(step), nil
 	}
-	return engine.CompileStep(step), nil
+	if s.stepCache == nil {
+		return fetch()
+	}
+	return s.stepCache.getOrLoadStep(stepID, fetch)
 }
 
+// LoadNextStep returns the compiled spec of the step after currentPosition in
+// workflowID, serving it from stepCache when fresh and coalescing concurrent
+// misses on the same position. See LoadStep on cache sharing/immutability.
 func (s *workflowStore) LoadNextStep(ctx context.Context, workflowID string, currentPosition int) (engine.StepSpec, error) {
-	step, err := s.workflowStepGetter.GetNextStepByPosition(ctx, workflowID, currentPosition)
-	if err != nil {
-		return engine.StepSpec{}, fmt.Errorf("load next step after position %d: %w", currentPosition, err)
+	fetch := func() (engine.StepSpec, error) {
+		step, err := s.workflowStepGetter.GetNextStepByPosition(ctx, workflowID, currentPosition)
+		if err != nil {
+			return engine.StepSpec{}, fmt.Errorf("load next step after position %d: %w", currentPosition, err)
+		}
+		if step == nil {
+			return engine.StepSpec{}, fmt.Errorf("no next step after position %d in workflow %s", currentPosition, workflowID)
+		}
+		return engine.CompileStep(step), nil
 	}
-	if step == nil {
-		return engine.StepSpec{}, fmt.Errorf("no next step after position %d in workflow %s", currentPosition, workflowID)
+	if s.stepCache == nil {
+		return fetch()
 	}
-	return engine.CompileStep(step), nil
+	return s.stepCache.getOrLoadPos(workflowID, posDirectionNext, currentPosition, fetch)
 }
 
+// LoadPreviousStep returns the compiled spec of the step before
+// currentPosition in workflowID, serving it from stepCache when fresh and
+// coalescing concurrent misses on the same position. See LoadStep on cache
+// sharing/immutability.
 func (s *workflowStore) LoadPreviousStep(ctx context.Context, workflowID string, currentPosition int) (engine.StepSpec, error) {
-	step, err := s.workflowStepGetter.GetPreviousStepByPosition(ctx, workflowID, currentPosition)
-	if err != nil {
-		return engine.StepSpec{}, fmt.Errorf("load previous step before position %d: %w", currentPosition, err)
+	fetch := func() (engine.StepSpec, error) {
+		step, err := s.workflowStepGetter.GetPreviousStepByPosition(ctx, workflowID, currentPosition)
+		if err != nil {
+			return engine.StepSpec{}, fmt.Errorf("load previous step before position %d: %w", currentPosition, err)
+		}
+		if step == nil {
+			return engine.StepSpec{}, fmt.Errorf("no previous step before position %d in workflow %s", currentPosition, workflowID)
+		}
+		return engine.CompileStep(step), nil
 	}
-	if step == nil {
-		return engine.StepSpec{}, fmt.Errorf("no previous step before position %d in workflow %s", currentPosition, workflowID)
+	if s.stepCache == nil {
+		return fetch()
 	}
-	return engine.CompileStep(step), nil
+	return s.stepCache.getOrLoadPos(workflowID, posDirectionPrev, currentPosition, fetch)
 }
 
 func (s *workflowStore) ApplyTransition(ctx context.Context, taskID, sessionID, fromStepID, toStepID string, trigger engine.Trigger) error {

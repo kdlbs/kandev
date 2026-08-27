@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/integrations/mcp-tool-argument-validation.md"
+spec: "../../specs/integrations/requirements/mcp-tool-argument-validation.md"
 ---
 
 # Task 01: Make Walkthrough Call Recovery Actionable
@@ -49,7 +49,7 @@ git diff --check
 - `apps/backend/config/prompts/kandev-context.md`
 - `apps/backend/config/prompts/changes-walkthrough.md`
 - `docs/public/automation-and-mcp.md`
-- `docs/specs/integrations/mcp-tool-argument-validation.md`
+- `docs/specs/integrations/requirements/mcp-tool-argument-validation.md`
 - `docs/specs/INDEX.md`
 - `docs/plans/mcp-walkthrough-call-recovery/plan.md`
 - `docs/plans/mcp-walkthrough-call-recovery/task-01-actionable-walkthrough-call-recovery.md`
@@ -65,7 +65,7 @@ documentation form one regression repair.
 
 ## Inputs
 
-- [MCP Tool Argument Validation spec](../../specs/integrations/mcp-tool-argument-validation.md)
+- [MCP Tool Argument Validation spec](../../specs/integrations/requirements/mcp-tool-argument-validation.md)
 - [Fix plan](plan.md)
 - `docs/decisions/2026-08-01-validate-mcp-tool-arguments.md`
 - `sanitizedToolArgumentError`, `firstKeywordFailure`, and

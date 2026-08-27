@@ -1785,6 +1785,58 @@ func TestPublishPromptUsage_RepublishedCompletionReusesUsageEventID(t *testing.T
 		"republishing the same completion must reuse the same usage_event_id so the DB unique index catches the duplicate")
 }
 
+// TestPublishPromptUsage_RepublishedCompletionWithoutPromptGenerationMintsDistinctUsageEventIDs
+// is the integration-level counterpart to TestUsageEventIDFor's unit-level
+// promptGeneration==0 assertion, and the random-identifier-class counterpart
+// to TestPublishPromptUsage_RepublishedCompletionReusesUsageEventID's
+// deterministic-class coverage (docs/specs/task-cost-ledger/spec.md AC-22).
+// A generation-less transport's "same" redelivered completion frame mints a
+// fresh random usage_event_id on every publish, so the two publishes carry
+// DIFFERENT ids: office/costs already documents that those rows are
+// intentionally not deduplicated, and this proves that end to end rather
+// than just at usageEventIDFor's own return value.
+func TestPublishPromptUsage_RepublishedCompletionWithoutPromptGenerationMintsDistinctUsageEventIDs(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "")
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.turnService = &repoTurnService{repo: repo}
+	eb := &recordingEventBus{}
+	svc.eventBus = eb
+
+	_, err := svc.turnService.StartTurn(ctx, "s1")
+	require.NoError(t, err)
+	svc.markExecutionCompleted("s1", "exec-1")
+	svc.completeTurnForSession(ctx, "s1")
+
+	frame := func() *lifecycle.AgentStreamEventPayload {
+		return &lifecycle.AgentStreamEventPayload{
+			TaskID:      "t1",
+			SessionID:   "s1",
+			ExecutionID: "exec-1",
+			Data: &lifecycle.AgentStreamEventData{
+				Type:             agentEventComplete,
+				PromptGeneration: 0,
+				Usage:            &streams.PromptUsage{InputTokens: 10, OutputTokens: 5},
+			},
+		}
+	}
+
+	// Simulates the same buffered stream frame being delivered twice on a
+	// generation-less transport - same session and execution, but no
+	// prompt-generation tracking either time.
+	svc.handleAgentStreamEvent(ctx, frame())
+	svc.handleAgentStreamEvent(ctx, frame())
+
+	published := findAllPromptUsageEvents(t, eb, "s1")
+	require.Len(t, published, 2, "expected both republished frames to publish a prompt-usage event")
+	require.NotEmpty(t, published[0].UsageEventID)
+	require.NotEmpty(t, published[1].UsageEventID)
+	require.NotEqual(t, published[0].UsageEventID, published[1].UsageEventID,
+		"a generation-less transport must mint a fresh id per publish, so this redelivery is recorded as a new row and its rollup applied - not deduplicated")
+}
+
 func TestCompleteStreamFromCompletedExecutionSkipsDuplicateOfficeTeardown(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

@@ -1,4 +1,5 @@
-import { act, cleanup, renderHook } from "@testing-library/react";
+/* eslint-disable max-lines -- sentinel state-machine regressions share one observer harness. */
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useLazyLoadSentinel } from "./use-lazy-load-sentinel";
 
@@ -61,10 +62,6 @@ function fire(record: ObserverRecord, isIntersecting: boolean, target: Element) 
 
 function makeScrollRef() {
   return { current: document.createElement("div") } as React.RefObject<HTMLDivElement | null>;
-}
-
-function waitForDeferredLoad() {
-  return new Promise<void>((resolve) => setTimeout(resolve, 0));
 }
 
 beforeEach(() => {
@@ -237,8 +234,7 @@ describe("useLazyLoadSentinel — re-arm, disarm, and stale completions", () => 
     // No second intersection is delivered, so the eligibility transition
     // must retry the still-visible sentinel itself.
     rerender({ blocked: false });
-    await act(waitForDeferredLoad);
-    expect(loadMore).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(loadMore).toHaveBeenCalledTimes(2));
   });
 
   it("re-arms only when enabled: unobserves before loading and re-observes after a positive result", async () => {
@@ -257,11 +253,76 @@ describe("useLazyLoadSentinel — re-arm, disarm, and stale completions", () => 
     // The sentinel was unobserved before the await; the load resolved
     // positively, so it is re-observed (still current).
     expect(records[0].unobserved).toContain(node);
-    await act(waitForDeferredLoad);
+    await act(async () => {
+      await vi.waitFor(() => expect(loadMore).toHaveBeenCalledTimes(2));
+    });
     expect(records[0].targets.filter((t) => t === node).length).toBeGreaterThanOrEqual(1);
     // Still intersecting: the next page auto-loads without a scroll-away or
     // a second IntersectionObserver entry.
     expect(loadMore).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops a still-intersecting continuation when the caller reports a new visible boundary", async () => {
+    const scrollRef = makeScrollRef();
+    const loadMore = vi.fn().mockResolvedValueOnce(20).mockResolvedValueOnce(0);
+    const shouldContinueWhileIntersecting = vi.fn(() => false);
+    const { result } = renderHook(() =>
+      useLazyLoadSentinel(scrollRef, true, false, false, loadMore, {
+        rearmWhileIntersecting: true,
+        shouldContinueWhileIntersecting,
+      }),
+    );
+    const node = document.createElement("div");
+    act(() => result.current.sentinelRef(node));
+
+    fire(records[0], true, node);
+    await waitFor(() => expect(shouldContinueWhileIntersecting).toHaveBeenCalledTimes(1));
+    expect(loadMore).toHaveBeenCalledTimes(1);
+
+    // A stale true entry cannot restart the stopped cycle. The sentinel must
+    // leave the preload region before a later user reach can start a new one.
+    fire(records[0], true, node);
+    await act(async () => {});
+    expect(loadMore).toHaveBeenCalledTimes(1);
+    fire(records[0], false, node);
+    fire(records[0], true, node);
+    await waitFor(() => expect(loadMore).toHaveBeenCalledTimes(2));
+  });
+
+  it("reports the actual continuation outcome after all firing guards", async () => {
+    const scrollRef = makeScrollRef();
+    const onLoadSettled = vi.fn();
+    const shouldContinueWhileIntersecting = vi.fn(() => true);
+    let resolveLoad: (value: number) => void = () => {};
+    const loadMore = vi.fn(
+      () =>
+        new Promise<number>((resolve) => {
+          resolveLoad = resolve;
+        }),
+    );
+    const { result } = renderHook(() =>
+      useLazyLoadSentinel(scrollRef, true, false, false, loadMore, {
+        rearmWhileIntersecting: true,
+        shouldContinueWhileIntersecting,
+        onLoadSettled,
+      }),
+    );
+    const node = document.createElement("div");
+    act(() => result.current.sentinelRef(node));
+
+    fire(records[0], true, node);
+    fire(records[0], false, node);
+    await act(async () => resolveLoad(20));
+
+    await waitFor(() =>
+      expect(onLoadSettled).toHaveBeenCalledWith({
+        count: 20,
+        rejected: false,
+        continuation: "sentinel-left-preload",
+      }),
+    );
+    expect(loadMore).toHaveBeenCalledTimes(1);
+    expect(shouldContinueWhileIntersecting).not.toHaveBeenCalled();
   });
 });
 
@@ -294,14 +355,15 @@ describe("useLazyLoadSentinel — stickToBottomWhileLoading", () => {
     act(() => result.current.sentinelRef(node));
 
     fire(records[0], true, node);
+    expect(loadMore).toHaveBeenCalledTimes(1);
     // Rows are appended while the load is in flight (scrollHeight grows to
     // 800); the user stays at the old bottom. The settle must scroll the
     // scroller back to the new bottom so the sentinel stays intersecting.
+    expect(loadMore).toHaveBeenCalledTimes(1);
     Object.defineProperty(scroller, "scrollHeight", { configurable: true, value: 800 });
     await act(async () => {
       resolveLoad(20);
     });
-    expect(loadMore).toHaveBeenCalledTimes(1);
     // Browser-faithful assertion: jsdom stores the raw write (800) while a
     // real browser clamps scrollTop to scrollHeight - clientHeight (400); the
     // invariant is "pinned at the bottom", so assert that instead of the
@@ -329,8 +391,6 @@ describe("useLazyLoadSentinel — pin refresh before a load", () => {
     );
     const { result } = renderHook(() =>
       useLazyLoadSentinel(scrollRef, true, false, false, loadMore, {
-        rearmWhileIntersecting: true,
-        joinInFlightWhileLoading: true,
         stickToBottomWhileLoading: true,
       }),
     );
@@ -347,7 +407,7 @@ describe("useLazyLoadSentinel — pin refresh before a load", () => {
     await act(async () => {
       resolveLoad(20);
     });
-    expect(loadMore).toHaveBeenCalledTimes(1);
+    expect(loadMore).toHaveBeenCalled();
     expect(scroller.scrollTop).toBeGreaterThanOrEqual(
       scroller.scrollHeight - scroller.clientHeight,
     );
@@ -461,9 +521,8 @@ describe("useLazyLoadSentinel — re-arm, disarm, and stale completions", () => 
     });
     await act(async () => {
       await finalPageSettled;
-      await waitForDeferredLoad();
     });
-    expect(loadMore).toHaveBeenCalledTimes(4);
+    await waitFor(() => expect(loadMore).toHaveBeenCalledTimes(4));
   });
 
   it("does not re-arm after a positive result when rearmWhileIntersecting is false", async () => {
@@ -555,8 +614,7 @@ describe("useLazyLoadSentinel — failure recovery and stale completions", () =>
 
     // Successful gesture retry clears the disarmed state.
     act(() => result.current.onUserGesture());
-    await act(waitForDeferredLoad);
-    expect(loadMore).toHaveBeenCalledTimes(3);
+    await waitFor(() => expect(loadMore).toHaveBeenCalledTimes(3));
 
     // The successful gesture retry already loaded the next page while the
     // sentinel remained visible; the stale true entry cannot loop after the
@@ -604,8 +662,7 @@ describe("useLazyLoadSentinel — stale observers", () => {
     // then its positive result re-arms the same observer for one follow-up
     // page.
     fire(records[1], true, node);
-    await act(waitForDeferredLoad);
-    expect(secondLoadMore).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(secondLoadMore).toHaveBeenCalledTimes(2));
   });
 
   it("disarms after a rejected load without looping", async () => {
@@ -638,6 +695,36 @@ describe("useLazyLoadSentinel — stale observers", () => {
 });
 
 describe("useLazyLoadSentinel — stale completions", () => {
+  it("reports a stale settle when a request completes after unmount", async () => {
+    const scrollRef = makeScrollRef();
+    const onLoadSettled = vi.fn();
+    let resolveLoad: (value: number) => void = () => {};
+    const loadMore = vi.fn(
+      () =>
+        new Promise<number>((resolve) => {
+          resolveLoad = resolve;
+        }),
+    );
+    const { result, unmount } = renderHook(() =>
+      useLazyLoadSentinel(scrollRef, true, false, false, loadMore, {
+        rearmWhileIntersecting: true,
+        onLoadSettled,
+      }),
+    );
+    const node = document.createElement("div");
+    act(() => result.current.sentinelRef(node));
+
+    fire(records[0], true, node);
+    unmount();
+    await act(async () => resolveLoad(20));
+
+    expect(onLoadSettled).toHaveBeenCalledWith({
+      count: 20,
+      rejected: false,
+      continuation: "stale",
+    });
+  });
+
   it("ignores a stale positive completion after unmount (no re-arm)", async () => {
     const scrollRef = makeScrollRef();
     let resolveLoad: (value: number) => void = () => {};

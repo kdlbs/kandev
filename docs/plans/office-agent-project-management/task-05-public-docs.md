@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-project-cli", "03-office-capability-context"]
 plan: "plan.md"
-spec: "../../specs/office/agents.md"
+spec: "../../specs/office/requirements/agents.md"
 ---
 
 # Task 05: Document Office agent project commands

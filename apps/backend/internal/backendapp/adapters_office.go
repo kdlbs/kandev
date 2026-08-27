@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/office/configloader"
 	officedashboard "github.com/kandev/kandev/internal/office/dashboard"
 	officeengineadapters "github.com/kandev/kandev/internal/office/engine_adapters"
+	officemodels "github.com/kandev/kandev/internal/office/models"
 	officeonboarding "github.com/kandev/kandev/internal/office/onboarding"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	officeroutines "github.com/kandev/kandev/internal/office/routines"
@@ -19,6 +20,43 @@ import (
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
+
+type officeCommentWindowReader interface {
+	ListTaskCommentsWindow(ctx context.Context, taskID string, limit int) ([]*officemodels.TaskComment, int, error)
+}
+
+// officeCommentReaderAdapter keeps Office persistence models at the backend
+// composition boundary. The task service receives its own neutral records.
+type officeCommentReaderAdapter struct {
+	reader officeCommentWindowReader
+}
+
+func (a *officeCommentReaderAdapter) ListTaskCommentsWindow(
+	ctx context.Context, taskID string, limit int,
+) ([]taskservice.CommentRecord, int, error) {
+	rows, total, err := a.reader.ListTaskCommentsWindow(ctx, taskID, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	records := make([]taskservice.CommentRecord, 0, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		records = append(records, taskservice.CommentRecord{
+			ID:         row.ID,
+			TaskID:     row.TaskID,
+			AuthorType: row.AuthorType,
+			AuthorID:   row.AuthorID,
+			Source:     row.Source,
+			Body:       row.Body,
+			CreatedAt:  row.CreatedAt,
+		})
+	}
+	return records, total, nil
+}
+
+var _ taskservice.CommentReader = (*officeCommentReaderAdapter)(nil)
 
 // taskWorkspaceCreatorAdapter adapts the task service to the office
 // WorkspaceCreator interface for dual workspace creation.

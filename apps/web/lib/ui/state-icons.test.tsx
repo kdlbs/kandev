@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { isValidElement, type ReactNode } from "react";
 import { render } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
+import { CompositorSpin } from "@kandev/ui/compositor-spin";
 import {
   IconCheck,
   IconCircleCheck,
@@ -19,8 +20,15 @@ import {
   shouldShowTaskRunningSpinner,
 } from "./state-icons";
 
+const WILL_CHANGE_TRANSFORM = "will-change-transform";
+const SPIN_CLASS = "animate-spin";
+const SPIN_SELECTOR = `.${SPIN_CLASS}`;
+
 function iconType(node: ReactNode) {
   if (!isValidElement(node)) throw new Error("Expected React element");
+  if (node.type === CompositorSpin) {
+    return iconType((node.props as { children: ReactNode }).children);
+  }
   return node.type;
 }
 
@@ -30,6 +38,47 @@ function iconClassName(node: ReactNode): string {
 }
 
 describe("getTaskStateIcon", () => {
+  it("uses a compositor transform animation when Web Animations are available", () => {
+    const originalAnimate = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "animate");
+    const animate = vi.fn(() => ({ cancel: vi.fn() }) as unknown as Animation);
+    Object.defineProperty(HTMLElement.prototype, "animate", {
+      configurable: true,
+      value: animate,
+    });
+
+    try {
+      const { container } = render(
+        <TooltipProvider>{getTaskStateIcon("IN_PROGRESS")}</TooltipProvider>,
+      );
+      const wrapper = container.querySelector(SPIN_SELECTOR) as HTMLElement;
+
+      expect(wrapper.style.animation).toBe("none");
+      expect(animate).toHaveBeenCalledWith(
+        [{ transform: "rotate(0deg)" }, { transform: "rotate(360deg)" }],
+        expect.objectContaining({ duration: 1_000, easing: "linear", iterations: Infinity }),
+      );
+    } finally {
+      if (originalAnimate) {
+        Object.defineProperty(HTMLElement.prototype, "animate", originalAnimate);
+      } else {
+        Reflect.deleteProperty(HTMLElement.prototype, "animate");
+      }
+    }
+  });
+
+  it("animates an HTML wrapper while keeping the status SVG static", () => {
+    const { container } = render(
+      <TooltipProvider>{getTaskStateIcon("IN_PROGRESS")}</TooltipProvider>,
+    );
+    const animated = container.querySelector(SPIN_SELECTOR);
+
+    expect(animated?.tagName).toBe("SPAN");
+    expect(animated?.classList.contains(WILL_CHANGE_TRANSFORM)).toBe(true);
+    const svg = animated?.querySelector("svg");
+    expect(svg).not.toBeNull();
+    expect(svg?.classList.contains(SPIN_CLASS)).toBe(false);
+  });
+
   it("uses the question icon for waiting-for-input task state", () => {
     expect(iconType(getTaskStateIcon("WAITING_FOR_INPUT"))).toBe(IconMessageQuestion);
   });
@@ -331,7 +380,7 @@ describe("getSessionStateIcon — fine-grained busy tri-state", () => {
     // running affordance is deliberately left as it always was (static dot).
     const a = getSessionStateIcon("RUNNING", undefined, "generating");
     expect(iconType(a)).toBe(IconCircleFilled);
-    expect(iconClassName(a)).not.toContain("animate-spin");
+    expect(iconClassName(a)).not.toContain(SPIN_CLASS);
   });
 
   it("(a) defaults to the running dot when the substate is unknown", () => {
@@ -340,17 +389,34 @@ describe("getSessionStateIcon — fine-grained busy tri-state", () => {
     expect(iconType(getSessionStateIcon("RUNNING", undefined, null))).toBe(IconCircleFilled);
   });
 
+  it("animates a STARTING session on an HTML wrapper", () => {
+    const { container } = render(<>{getSessionStateIcon("STARTING")}</>);
+    const animated = container.querySelector(SPIN_SELECTOR);
+
+    expect(animated?.tagName).toBe("SPAN");
+    expect(animated?.classList.contains(WILL_CHANGE_TRANSFORM)).toBe(true);
+    const svg = animated?.querySelector("svg");
+    expect(svg).not.toBeNull();
+    expect(svg?.classList.contains(SPIN_CLASS)).toBe(false);
+  });
+
   it("(b) shows a working spinner — never the done checkmark — while background work runs", () => {
     const b = getSessionStateIcon("WAITING_FOR_INPUT", undefined, "background");
     expect(iconType(b)).toBe(IconLoader2);
     expect(iconType(b)).not.toBe(IconCircleCheck);
-    expect(iconClassName(b)).toContain("animate-spin");
+    const { container } = render(<>{b}</>);
+    const animated = container.querySelector(SPIN_SELECTOR);
+    expect(animated).not.toBeNull();
+    expect(animated?.tagName).toBe("SPAN");
+    const svg = animated?.querySelector("svg");
+    expect(svg).not.toBeNull();
+    expect(svg?.classList.contains(SPIN_CLASS)).toBe(false);
   });
 
-  it("(b) is visually distinct from (a) so the operator can tell them apart", () => {
+  it("(b) shares (a)'s hue while shape and motion distinguish them", () => {
     const a = iconClassName(getSessionStateIcon("RUNNING", undefined, "generating"));
     const b = iconClassName(getSessionStateIcon("RUNNING", undefined, "background"));
-    expect(a).not.toBe(b);
+    expect(a).toBe(b);
   });
 
   it("(c) flips to the done checkmark once background activity is cleared", () => {

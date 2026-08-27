@@ -303,7 +303,11 @@ func BearerToken(r *http.Request) string {
 func isPublicPath(method, path string) bool {
 	switch path {
 	case "/health":
-		// CLI + desktop readiness probes poll before any session can exist.
+		// CLI + desktop liveness probes poll before any session can exist.
+		return method == http.MethodGet
+	case "/ready":
+		// Kubernetes readinessProbe and the e2e fixture poll before any
+		// session can exist, same as /health.
 		return method == http.MethodGet
 	case "/api/v1/features", "/api/v1/app-state":
 		// SPA bootstrap reads; app-state returns the auth-aware boot payload

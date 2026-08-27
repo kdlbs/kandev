@@ -2,7 +2,6 @@
 package sqlite
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -45,79 +44,9 @@ func (r *Repository) migrateSessionsAddCostColumns() {
 	// session (the reported bug measured up to 98,805,109 on one already-
 	// completed task). SQLite's INTEGER is 64-bit regardless, but on Postgres
 	// INTEGER is int4 - an overflowing session would abort the single
-	// multi-column UPDATE in IncrementTaskSessionUsage and the single
-	// table-wide UPDATE in BackfillSessionTokensCachedIn, silently taking
+	// multi-column UPDATE in IncrementTaskSessionUsage, silently taking
 	// tokens_in/tokens_out/cost_subcents down with it for that session.
 	r.migrate.Apply("task_sessions.tokens_cached_in", `ALTER TABLE task_sessions ADD COLUMN tokens_cached_in BIGINT NOT NULL DEFAULT 0`)
-}
-
-// BackfillSessionTokensCachedIn recomputes task_sessions.tokens_cached_in from
-// the office_cost_events ledger. The rollup is purely derived from the ledger,
-// so recomputing from it is restoring data, not inventing it.
-//
-// Deliberately NOT called from runMigrations(): office_cost_events is owned and
-// created by internal/office/repository/sqlite, a separate repository that
-// shares this database but initializes independently, and on a fresh boot the
-// task repository's own migrations run first (internal/backendapp/storage.go).
-// An earlier version of this method guarded on the ledger table's existence to
-// tolerate that ordering from inside runMigrations(); that guard, and the table
-// existence it checked, both went away in favor of the caller in
-// internal/backendapp/storage.go, which only invokes this after office.Provide
-// has already succeeded — construction order guarantees office_cost_events
-// exists by then, so no guard is needed here. This keeps the task repository
-// from having to know office's schema/table-existence details, and lets the
-// office_cost_events(session_id) index it depends on live with the table it
-// indexes (internal/office/repository/sqlite/base.go createCostTables).
-//
-// Deliberately unconditional per session it touches (assignment, not
-// increment, so it is idempotent across replays) rather than gated on
-// "already nonzero": the rollup can go out of sync with the ledger without
-// erroring — a live IncrementTaskSessionUsage call is a best-effort
-// UPDATE ... WHERE id = ? that silently matches zero rows if the session row
-// doesn't exist yet (see the "missing row" case in
-// TestIncrementTaskSessionUsage_UnknownSessionNoError), and
-// event_subscribers.go only logs a Warn when the rollup write fails while the
-// ledger insert has already committed. A "skip if nonzero" guard would make
-// exactly that drift permanent instead of self-healing it on the next boot.
-// (If the ledger for a session was deleted separately from the session row
-// itself - see the two-transaction delete in workspace_deletion.go - this
-// recompute correctly zeroes that session's tokens_cached_in, since an empty
-// ledger sums to zero; the rollup's only contract is to equal the ledger sum.)
-//
-// The WHERE clause below is a boot-cost optimization, not a correctness gate:
-// it restricts the write to sessions that either have ledger rows (need a
-// possible recompute) or already hold a nonzero value (need a possible
-// zeroing, per the paragraph above). Every row it excludes has
-// tokens_cached_in = 0 AND no ledger rows, so the unconditional
-// COALESCE(NULL, 0) = 0 this statement would otherwise compute for it is
-// already what the row holds — excluding it is a provable no-op, never a
-// skip of a row that needs correcting. This runs unconditionally on every
-// boot (no run-once tracking - see MigrateLogger.Apply, which this method
-// deliberately does not use so a real failure propagates instead of being
-// swallowed as a Warn), so office_cost_events(session_id) must already be
-// indexed: an unindexed correlated subquery here is quadratic in
-// (sessions x ledger rows), measured at 76.72s at a modest 4,000 sessions /
-// 80,000 events versus 0.17s indexed.
-//
-// Returns the number of task_sessions rows the WHERE clause matched, so a
-// caller can log it for boot-time observability; not otherwise used for
-// correctness.
-func (r *Repository) BackfillSessionTokensCachedIn(ctx context.Context) (int64, error) {
-	result, err := r.db.ExecContext(ctx, `
-		UPDATE task_sessions
-		   SET tokens_cached_in = COALESCE(
-		       (SELECT SUM(e.tokens_cached_in) FROM office_cost_events e
-		         WHERE e.session_id = task_sessions.id), 0)
-		 WHERE EXISTS (SELECT 1 FROM office_cost_events e WHERE e.session_id = task_sessions.id)
-		    OR tokens_cached_in <> 0`)
-	if err != nil {
-		return 0, fmt.Errorf("backfill task_sessions.tokens_cached_in: %w", err)
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return 0, fmt.Errorf("backfill task_sessions.tokens_cached_in: rows affected: %w", err)
-	}
-	return affected, nil
 }
 
 // runMigrations applies idempotent ALTER TABLE migrations for schema evolution.
@@ -129,6 +58,9 @@ func (r *Repository) runMigrations() error {
 		return err
 	}
 	if err := r.ensureRepositorySetsSchema(); err != nil {
+		return err
+	}
+	if err := r.ensureRepositoryBranchPoliciesSchema(); err != nil {
 		return err
 	}
 	r.migrate.Apply("task_sessions.execution_profile_id", `ALTER TABLE task_sessions ADD COLUMN execution_profile_id TEXT NOT NULL DEFAULT ''`)
@@ -148,6 +80,11 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("executors_running.local_pid", `ALTER TABLE executors_running ADD COLUMN local_pid INTEGER DEFAULT 0`)
 	r.migrate.Apply("tasks.is_ephemeral", `ALTER TABLE tasks ADD COLUMN is_ephemeral INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("task_repositories.checkout_branch", `ALTER TABLE task_repositories ADD COLUMN checkout_branch TEXT DEFAULT ''`)
+	r.migrate.Apply("task_repositories.branch_policy_id", `ALTER TABLE task_repositories ADD COLUMN branch_policy_id TEXT DEFAULT ''`)
+	r.migrate.Apply("task_repositories.branch_policy_name", `ALTER TABLE task_repositories ADD COLUMN branch_policy_name TEXT DEFAULT ''`)
+	r.migrate.Apply("task_repositories.branch_policy_base_branch", `ALTER TABLE task_repositories ADD COLUMN branch_policy_base_branch TEXT DEFAULT ''`)
+	r.migrate.Apply("task_repositories.branch_policy_branch_template", `ALTER TABLE task_repositories ADD COLUMN branch_policy_branch_template TEXT DEFAULT ''`)
+	r.migrate.Apply("task_repositories.branch_policy_pull_request_target", `ALTER TABLE task_repositories ADD COLUMN branch_policy_pull_request_target TEXT DEFAULT ''`)
 	// Multi-branch support: drop the old UNIQUE(task_id, repository_id) and
 	// replace it with UNIQUE(task_id, repository_id, checkout_branch) so the
 	// same repo can appear multiple times in a task on different branches.
@@ -187,6 +124,9 @@ func (r *Repository) runMigrations() error {
 	}
 	// Must run BEFORE migrateTaskEnvironmentsRemoveAgentExecutionID, which copies task_dir_name into the recreated table.
 	r.migrate.Apply("task_environments.task_dir_name", `ALTER TABLE task_environments ADD COLUMN task_dir_name TEXT DEFAULT ''`)
+	r.migrate.Apply("task_environments.materialization_session_id", `ALTER TABLE task_environments ADD COLUMN materialization_session_id TEXT DEFAULT ''`)
+	r.migrate.Apply("task_environments.container_bootstrap_nonce_secret_id", `ALTER TABLE task_environments ADD COLUMN container_bootstrap_nonce_secret_id TEXT DEFAULT ''`)
+	r.migrate.Apply("task_environments.container_control_auth_token_secret_id", `ALTER TABLE task_environments ADD COLUMN container_control_auth_token_secret_id TEXT DEFAULT ''`)
 	if err := r.migrateTaskEnvironmentsRemoveAgentExecutionID(); err != nil {
 		return err
 	}
@@ -256,10 +196,10 @@ func (r *Repository) runMigrations() error {
 	// task_sessions rebuilds above so it repairs legacy DBs whose schema can no
 	// longer trigger a rebuild (see migrateSessionsAddCostColumns).
 	r.migrateSessionsAddCostColumns()
-	// BackfillSessionTokensCachedIn is deliberately NOT called here - see its
-	// doc comment. It runs from internal/backendapp/storage.go, after both
-	// this repository and the office repository (which owns office_cost_events)
-	// have finished initializing.
+	// AC-28: widen the three still-INTEGER rollup columns to BIGINT (Postgres
+	// only). Must run after migrateSessionsAddCostColumns so a legacy DB has
+	// the columns to widen before this ALTERs their type.
+	r.migrateTaskSessionsRollupColumnsToBigint()
 
 	// Office task extensions - net-new columns on existing main tables.
 	// Idempotent ALTERs; main upgrades pick them up at first boot.
@@ -327,6 +267,16 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("idx_task_review_findings_run", `CREATE INDEX IF NOT EXISTS idx_task_review_findings_run ON task_review_findings(run_id)`)
 	r.migrate.Apply("idx_task_review_findings_task_status", `CREATE INDEX IF NOT EXISTS idx_task_review_findings_task_status ON task_review_findings(task_id, status)`)
 	r.migrate.Apply("idx_task_review_findings_anchor", `CREATE INDEX IF NOT EXISTS idx_task_review_findings_anchor ON task_review_findings(task_id, repository_name, file_path)`)
+
+	// entry_id carries the step-transition ledger row identifier of the
+	// step-entry action that requested a run_code_review pass
+	// (AC-OFFICE-STEP-ENTRY-001.10). The partial unique index is the durable
+	// backstop: a redelivery of the same entry must not create a second run
+	// row even if a caller races the FindRunByEntryID pre-check. Must run
+	// after the ADD COLUMN — see AGENTS.md "Schema & migrations".
+	r.migrate.Apply("task_review_runs.entry_id", `ALTER TABLE task_review_runs ADD COLUMN entry_id TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("idx_task_review_runs_entry_id",
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_task_review_runs_entry_id ON task_review_runs(entry_id) WHERE entry_id != ''`)
 
 	// ADR 0005 Wave F — ensure the runner-projection tables exist so
 	// task SELECTs that reference them via correlated subquery don't
@@ -658,6 +608,15 @@ func (r *Repository) ensureRepositorySetsSchema() error {
 	return nil
 }
 
+// ensureRepositoryBranchPoliciesSchema replays the policy DDL for databases
+// created before repository branch policies existed.
+func (r *Repository) ensureRepositoryBranchPoliciesSchema() error {
+	if _, err := r.db.Exec(repositoryBranchPoliciesSchemaDDL); err != nil {
+		return fmt.Errorf("create repository branch policies schema: %w", err)
+	}
+	return nil
+}
+
 // recreateTable checks whether tableName's DDL contains triggerPhrase and, if so,
 // runs statements inside a transaction with FK enforcement disabled.
 // This is the standard SQLite pattern for dropping columns or FK constraints,
@@ -980,11 +939,14 @@ func (r *Repository) migrateTaskEnvironmentsRemoveAgentExecutionID() error {
 			executor_profile_id TEXT DEFAULT '',
 			control_port INTEGER DEFAULT 0,
 			status TEXT NOT NULL DEFAULT 'creating',
+			materialization_session_id TEXT DEFAULT '',
 			worktree_id TEXT DEFAULT '',
 			worktree_path TEXT DEFAULT '',
 			worktree_branch TEXT DEFAULT '',
 			workspace_path TEXT DEFAULT '',
 			container_id TEXT DEFAULT '',
+			container_bootstrap_nonce_secret_id TEXT DEFAULT '',
+			container_control_auth_token_secret_id TEXT DEFAULT '',
 			sandbox_id TEXT DEFAULT '',
 			task_dir_name TEXT DEFAULT '',
 			created_at TIMESTAMP NOT NULL,
@@ -993,8 +955,8 @@ func (r *Repository) migrateTaskEnvironmentsRemoveAgentExecutionID() error {
 		)`,
 		`INSERT INTO task_environments_new SELECT
 			id, task_id, repository_id, executor_type, executor_id, executor_profile_id,
-			control_port, status, worktree_id, worktree_path, worktree_branch,
-			workspace_path, container_id, sandbox_id,
+			control_port, status, '', worktree_id, worktree_path, worktree_branch,
+			workspace_path, container_id, COALESCE(container_bootstrap_nonce_secret_id, ''), COALESCE(container_control_auth_token_secret_id, ''), sandbox_id,
 			COALESCE(task_dir_name, ''), created_at, updated_at
 		FROM task_environments`,
 		`DROP TABLE task_environments`,
@@ -1123,6 +1085,11 @@ func (r *Repository) recreateTaskRepositoriesForMultiBranch(trigger string) erro
 				repository_id TEXT NOT NULL,
 				base_branch TEXT DEFAULT '',
 				checkout_branch TEXT DEFAULT '',
+				branch_policy_id TEXT DEFAULT '',
+				branch_policy_name TEXT DEFAULT '',
+				branch_policy_base_branch TEXT DEFAULT '',
+				branch_policy_branch_template TEXT DEFAULT '',
+				branch_policy_pull_request_target TEXT DEFAULT '',
 				position INTEGER DEFAULT 0,
 				metadata TEXT DEFAULT '{}',
 				created_at TIMESTAMP NOT NULL,
@@ -1134,6 +1101,9 @@ func (r *Repository) recreateTaskRepositoriesForMultiBranch(trigger string) erro
 			`INSERT INTO task_repositories_new SELECT
 				id, task_id, repository_id, base_branch,
 				COALESCE(checkout_branch, ''),
+				COALESCE(branch_policy_id, ''), COALESCE(branch_policy_name, ''),
+				COALESCE(branch_policy_base_branch, ''), COALESCE(branch_policy_branch_template, ''),
+				COALESCE(branch_policy_pull_request_target, ''),
 				position, metadata, created_at, updated_at
 			FROM task_repositories`,
 			`DROP TABLE task_repositories`,

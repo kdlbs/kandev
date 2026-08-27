@@ -13,6 +13,7 @@ export function TaskItemLeadingBadges({
   isPinned,
   taskId,
   prInfo,
+  showChangeRequestStatus = true,
   issueInfo,
   agentErrorMessage,
 }: {
@@ -20,6 +21,7 @@ export function TaskItemLeadingBadges({
   isPinned?: boolean;
   taskId?: string;
   prInfo?: { number: number; state: string; aggregateState?: string };
+  showChangeRequestStatus?: boolean;
   issueInfo?: { url: string; number: number };
   agentErrorMessage?: string | null;
 }) {
@@ -32,8 +34,10 @@ export function TaskItemLeadingBadges({
           className="h-3 w-3 shrink-0 text-muted-foreground/60"
         />
       )}
-      <TaskContributionIcons taskId={taskId} prInfo={prInfo} />
-      {taskId ? <RegisteredChangeRequestTaskIcon taskId={taskId} /> : null}
+      {showChangeRequestStatus && <TaskContributionIcons taskId={taskId} prInfo={prInfo} />}
+      {showChangeRequestStatus && taskId ? (
+        <RegisteredChangeRequestTaskIcon taskId={taskId} />
+      ) : null}
       {issueInfo && <IssueTaskIcon issueInfo={issueInfo} />}
       {agentErrorMessage && <TaskAgentErrorIcon message={agentErrorMessage} />}
     </>

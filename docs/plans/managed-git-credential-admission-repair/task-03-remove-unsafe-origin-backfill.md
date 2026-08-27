@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-centralize-session-admission"]
 plan: "plan.md"
-spec: "../../specs/integrations/github-authentication.md"
+spec: "../../specs/integrations/requirements/github-authentication.md"
 ---
 
 # Task 03: Remove Unsafe Origin Backfill

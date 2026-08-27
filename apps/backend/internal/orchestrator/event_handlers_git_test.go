@@ -221,6 +221,12 @@ func seedBranchSwitchSession(t *testing.T, startBranch string) (*Service, *mockG
 	if err := testRepo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
 		ID: "env-s1", TaskID: "t1", ExecutorType: "worktree",
 		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+		Repos: []*models.TaskEnvironmentRepo{
+			{
+				ID: "wt-s1", WorktreeID: "wtree-s1", RepositoryID: "repo1",
+				WorktreeBranch: startBranch, CreatedAt: now,
+			},
+		},
 	}); err != nil {
 		t.Fatalf("create environment: %v", err)
 	}
@@ -232,14 +238,6 @@ func seedBranchSwitchSession(t *testing.T, startBranch string) (*Service, *mockG
 	session.RepositoryID = "repo1"
 	if err := testRepo.UpdateTaskSession(ctx, session); err != nil {
 		t.Fatalf("link session to environment: %v", err)
-	}
-	wt := &models.TaskEnvironmentRepo{
-		ID: "wt-s1", TaskEnvironmentID: "env-s1",
-		WorktreeID: "wtree-s1", RepositoryID: "repo1",
-		WorktreeBranch: startBranch, CreatedAt: now,
-	}
-	if err := testRepo.CreateTaskEnvironmentRepo(ctx, wt); err != nil {
-		t.Fatalf("create worktree: %v", err)
 	}
 
 	svc := createTestService(testRepo, newMockStepGetter(), newMockTaskRepo())

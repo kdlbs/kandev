@@ -230,7 +230,7 @@ type IssueWatch struct {
 	PollIntervalSeconds int    `json:"pollIntervalSeconds" db:"poll_interval_seconds"`
 	// MaxInflightTasks caps how many open watcher-created tasks this watch can
 	// hold at once. nil = uncapped. Values <= 0 are rejected at the API layer.
-	// See docs/specs/throttle-watcher-fanout/spec.md for the open-task definition.
+	// See docs/specs/tasks/system-design/wip-limit-pull-system.md for the open-task definition.
 	MaxInflightTasks *int       `json:"maxInflightTasks,omitempty" db:"max_inflight_tasks"`
 	LastPolledAt     *time.Time `json:"lastPolledAt,omitempty" db:"last_polled_at"`
 	// LastError / LastErrorAt are stamped when the dispatch pipeline self-

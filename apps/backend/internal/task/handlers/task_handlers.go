@@ -166,6 +166,11 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.POST("/tasks/:id/unarchive", h.httpUnarchiveTask)
 	api.GET("/tasks/:id/subtask-count", h.httpTaskSubtaskCount)
 
+	// Task-cost-ledger read surface (docs/specs/task-cost-ledger/spec.md
+	// AC-18): per-task and per-session usage/cost totals.
+	api.GET("/tasks/:id/usage", h.httpGetTaskUsageTotals)
+	api.GET("/tasks/:id/sessions/:sessionId/usage", h.httpGetTaskSessionUsageTotals)
+
 	// Task dependencies ("this task is blocked by that one"). Task-scoped
 	// equivalents of the Office-only blocker routes; both go through the single
 	// validator in the task service.
@@ -221,19 +226,23 @@ func convertToServiceRepos(repos []dto.TaskRepositoryInput) []service.TaskReposi
 	result := make([]service.TaskRepositoryInput, len(repos))
 	for i, r := range repos {
 		result[i] = service.TaskRepositoryInput{
-			RepositoryID:   r.RepositoryID,
-			BaseBranch:     r.BaseBranch,
-			CheckoutBranch: r.CheckoutBranch,
-			PRNumber:       r.PRNumber,
-			LocalPath:      r.LocalPath,
-			Name:           r.Name,
-			DefaultBranch:  r.DefaultBranch,
-			GitHubURL:      r.GitHubURL,
-			RemoteURL:      r.RemoteURL,
-			Provider:       r.Provider,
-			ProviderRepoID: r.ProviderRepoID,
-			ProviderOwner:  r.ProviderOwner,
-			ProviderName:   r.ProviderName,
+			RepositoryID:       r.RepositoryID,
+			BaseBranch:         r.BaseBranch,
+			CheckoutBranch:     r.CheckoutBranch,
+			BranchPolicyID:     r.BranchPolicyID,
+			PRNumber:           r.PRNumber,
+			LocalPath:          r.LocalPath,
+			Name:               r.Name,
+			DefaultBranch:      r.DefaultBranch,
+			GitHubURL:          r.GitHubURL,
+			RemoteURL:          r.RemoteURL,
+			Provider:           r.Provider,
+			ProviderHost:       r.ProviderHost,
+			ProviderScope:      r.ProviderScope,
+			ProviderRepoID:     r.ProviderRepoID,
+			ProviderOwner:      r.ProviderOwner,
+			ProviderName:       r.ProviderName,
+			PreserveBaseBranch: r.PreserveBaseBranch,
 		}
 	}
 	return result

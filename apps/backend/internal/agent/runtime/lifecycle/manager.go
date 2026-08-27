@@ -92,6 +92,16 @@ type Manager struct {
 	// resolves executions by environment ID. Nil = no scoping.
 	environmentAccessCheck func(ctx context.Context, environmentID string) error
 
+	// taskAccessCheck is the task-keyed sibling of sessionAccessCheck, used by
+	// the task-keyed SSR terminal list which reads terminal rows by task ID
+	// without resolving an execution at all. Nil = no scoping.
+	taskAccessCheck func(ctx context.Context, taskID string) error
+
+	// taskEnvironmentAccessCheck authorizes a (task, environment) pair for
+	// surfaces that merge state keyed by both, where authorizing each ID on
+	// its own would not establish that they belong together. Nil = no scoping.
+	taskEnvironmentAccessCheck func(ctx context.Context, taskID, environmentID string) error
+
 	// singleflight deduplicates concurrent GetOrEnsureExecution calls for the same session
 	ensureExecutionGroup singleflight.Group
 
@@ -172,9 +182,6 @@ type Manager struct {
 	// managedRuntimeSelections supplies exact versions for host-local managed
 	// npm runtimes. Remote/container runtimes intentionally do not consult it.
 	managedRuntimeSelections managedruntime.SelectionReader
-	// managedRuntimeCacheInvalidator removes one trusted npm execution tree
-	// during bounded host-local startup recovery.
-	managedRuntimeCacheInvalidator ManagedRuntimeCacheInvalidator
 
 	activityCoordinator *activity.Coordinator
 	activityMu          sync.Mutex
@@ -190,13 +197,6 @@ type ManagedGoCacheEnvironmentProvider interface {
 	ExecutionEnvironment(ctx context.Context) (map[string]string, error)
 }
 
-// ManagedRuntimeCacheInvalidator owns the host npm cache boundary. Lifecycle
-// recovery never discovers or deletes cache paths directly.
-type ManagedRuntimeCacheInvalidator interface {
-	InvalidateExecutionCache(context.Context, string) error
-	InvalidateExecutionCacheVersion(ctx context.Context, packageName, version string) error
-}
-
 // SetManagedGoCacheEnvironmentProvider wires install-wide managed cache settings.
 func (m *Manager) SetManagedGoCacheEnvironmentProvider(provider ManagedGoCacheEnvironmentProvider) {
 	m.managedGoCache = provider
@@ -206,12 +206,6 @@ func (m *Manager) SetManagedGoCacheEnvironmentProvider(provider ManagedGoCacheEn
 // resolver used by standalone managed-agent launches.
 func (m *Manager) SetManagedRuntimeSelectionStore(store managedruntime.SelectionReader) {
 	m.managedRuntimeSelections = store
-}
-
-// SetManagedRuntimeCacheInvalidator wires the settings-owned exact cache
-// deletion boundary. It is optional for embedded/test managers.
-func (m *Manager) SetManagedRuntimeCacheInvalidator(invalidator ManagedRuntimeCacheInvalidator) {
-	m.managedRuntimeCacheInvalidator = invalidator
 }
 
 // SetActivityCoordinator wires the install-wide host-resource activity gate.
@@ -427,6 +421,13 @@ func (m *Manager) SetMCPIdentityScoper(scoper MCPIdentityScoper) {
 	m.streamManager.mcpIdentityScoper = scoper
 }
 
+// SetMCPPrincipalScoper installs the trusted in-session MCP principal resolver.
+// The resolver derives automation identity and workspace boundaries from the
+// execution's own task and session, never from the agent request payload.
+func (m *Manager) SetMCPPrincipalScoper(scoper MCPPrincipalScoper) {
+	m.streamManager.mcpPrincipalScoper = scoper
+}
+
 // SetSessionAccessChecker installs the per-user session visibility check used
 // by GetOrEnsureExecution and EnsurePassthroughExecution. The checker must
 // return nil for contexts without a request identity (internal callers). Set
@@ -450,6 +451,20 @@ func (m *Manager) SetEnvironmentAccessChecker(check func(ctx context.Context, en
 	m.environmentAccessCheck = check
 }
 
+// SetTaskAccessChecker installs the per-user task visibility check used by
+// the task-keyed SSR terminal route. The checker must return nil for contexts
+// without a request identity (internal callers).
+func (m *Manager) SetTaskAccessChecker(check func(ctx context.Context, taskID string) error) {
+	m.taskAccessCheck = check
+}
+
+// SetTaskEnvironmentAccessChecker installs the per-user check for a
+// (task, environment) pair, used by the task-keyed SSR terminal route which
+// merges terminals from the task with unmanaged shells from the environment.
+func (m *Manager) SetTaskEnvironmentAccessChecker(check func(ctx context.Context, taskID, environmentID string) error) {
+	m.taskEnvironmentAccessCheck = check
+}
+
 // CheckSessionAccess authorizes a session-scoped operation for the ctx
 // identity. Handlers that resolve an execution by a bare in-memory lookup
 // (vscode/port reverse proxies) must call this before serving, since only the
@@ -471,6 +486,29 @@ func (m *Manager) CheckEnvironmentAccess(ctx context.Context, taskEnvironmentID 
 		return nil
 	}
 	return m.environmentAccessCheck(ctx, taskEnvironmentID)
+}
+
+// CheckTaskAccess authorizes a task-scoped operation for the ctx identity.
+// The task-keyed sibling of CheckSessionAccess, for handlers that read
+// task-owned state (the SSR terminal list) without going through an
+// execution. No-op when no checker is set.
+func (m *Manager) CheckTaskAccess(ctx context.Context, taskID string) error {
+	if m.taskAccessCheck == nil {
+		return nil
+	}
+	return m.taskAccessCheck(ctx, taskID)
+}
+
+// CheckTaskEnvironmentAccess authorizes a (task, environment) pair for the ctx
+// identity: both IDs visible, and the environment actually bound to the task.
+// Handlers that merge state keyed by both must use this rather than the two
+// single-ID checks, which pass independently for an unrelated pair. No-op when
+// no checker is set.
+func (m *Manager) CheckTaskEnvironmentAccess(ctx context.Context, taskID, taskEnvironmentID string) error {
+	if m.taskEnvironmentAccessCheck == nil {
+		return nil
+	}
+	return m.taskEnvironmentAccessCheck(ctx, taskID, taskEnvironmentID)
 }
 
 // SetWorkspaceInfoProvider sets the provider for workspace information.

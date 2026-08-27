@@ -102,6 +102,71 @@ async function expectTopbarReadyState(
 }
 
 test.describe("PR status badge", () => {
+  // seedBadgeTest selects a temporary workflow and changes preview behavior.
+  // Restore the fixture defaults so those changes do not leak between tests.
+  test.afterEach(async ({ apiClient, seedData }) => {
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: seedData.workflowId,
+      enable_preview_on_click: false,
+    });
+  });
+
+  test("hydrates the sidebar PR badge on /tasks when details are off", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const baselineShowDetails =
+      (await apiClient.getUserSettings()).settings.tasks_list_show_details ?? false;
+
+    try {
+      const { task } = await seedBadgeTest(
+        apiClient,
+        seedData.workspaceId,
+        seedData.agentProfileId,
+        seedData.repositoryId,
+        "Direct tasks sidebar PR badge",
+      );
+      await apiClient.saveUserSettings({ tasks_list_show_details: false });
+      await apiClient.mockGitHubAssociateTaskPR({
+        task_id: task.id,
+        owner: "testorg",
+        repo: "testrepo",
+        pr_number: 100,
+        pr_url: "https://github.com/testorg/testrepo/pull/100",
+        pr_title: "Hydrate sidebar badge on direct tasks load",
+        head_branch: "fix/direct-tasks-hydration",
+        base_branch: "main",
+        author_login: "test-user",
+        state: "open",
+        review_state: "approved",
+        checks_state: "success",
+        mergeable_state: "clean",
+      });
+      await waitForTaskPRFields(apiClient, task.id, {
+        state: "open",
+        review_state: "approved",
+        checks_state: "success",
+        mergeable_state: "clean",
+      });
+
+      await testPage.goto("/tasks");
+      await expect(testPage.getByTestId("tasks-list")).toBeVisible();
+
+      const sidebar = testPage.getByTestId("app-sidebar");
+      const taskRow = sidebar.getByTestId("sidebar-task-item").filter({ hasText: task.title });
+      const icon = taskRow.getByTestId(`pr-task-icon-${task.id}`);
+      await expect(icon).toBeVisible();
+      await expect(icon).toHaveAttribute("data-pr-count", "1");
+      await expect(icon).toHaveAttribute("data-pr-state", "open");
+      await expect(icon).toHaveAttribute("data-pr-ready-to-merge", "true");
+    } finally {
+      await apiClient.saveUserSettings({ tasks_list_show_details: baselineShowDetails });
+    }
+  });
+
   /**
    * Regression for the "CI pending" bug: GitHub reports all checks passed
    * (one skipped, many successful). We used to compute "pending" because
@@ -368,6 +433,19 @@ test.describe("PR status badge", () => {
       seedData.repositoryId,
       taskTitle,
     );
+    const settings = await apiClient.getUserSettings();
+    const sidebarViews = settings.settings.sidebar_views as Array<Record<string, unknown>>;
+    await apiClient.saveUserSettings({
+      sidebar_views: sidebarViews.map((view) => ({
+        ...view,
+        task_row: {
+          details_enabled: true,
+          detail_order: ["relative_time", "repository", "pull_request_number"],
+          visible_details: ["relative_time", "repository", "pull_request_number"],
+          trailing: "change_request_status",
+        },
+      })),
+    });
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
@@ -395,6 +473,8 @@ test.describe("PR status badge", () => {
 
     const taskRow = testPage.getByTestId("sidebar-task-item").filter({ hasText: taskTitle });
     await expect(taskRow).toBeVisible({ timeout: 15_000 });
+    const trailingStatus = taskRow.getByTestId("sidebar-task-change-request-status");
+    await expect(trailingStatus).toBeVisible();
     const icon = taskRow.getByTestId(`pr-task-icon-${task.id}`);
     await expect(icon).toHaveAttribute("data-pr-ready-to-merge", "true");
     await icon.hover();
@@ -435,9 +515,8 @@ test.describe("PR status badge", () => {
     ).toBe(true);
 
     await taskRow.focus();
-    // Tab once lands on the row's title-preview trigger (now keyboard-operable,
-    // see task-title-hover-card.tsx), tab again reaches the PR badge.
-    await testPage.keyboard.press("Tab");
+    // The sidebar no longer mounts the task-title preview, so the first tab
+    // after the row reaches the PR badge.
     await testPage.keyboard.press("Tab");
     await expect(icon).toBeFocused();
     const focusedSummary = visibleTaskPRSummary(testPage);

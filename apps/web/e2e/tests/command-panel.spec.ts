@@ -300,8 +300,11 @@ test.describe("Command Panel", () => {
     // Type the task name — task search requires ≥2 characters
     await dialog.locator("input").fill("Searchable");
 
-    // Should show the task in a "Tasks" group (inline search, debounced)
-    await expect(dialog.getByText("Tasks")).toBeVisible({ timeout: 10_000 });
+    // Should show the task in a "Tasks" group (inline search, debounced).
+    // Scope the heading lookup: "Tasks" is also the label of the Tasks tab.
+    await expect(dialog.getByTestId("command-panel-task-preview")).toBeVisible({
+      timeout: 10_000,
+    });
     await expect(dialog.getByText("Searchable E2E Task")).toBeVisible({ timeout: 5_000 });
   });
 

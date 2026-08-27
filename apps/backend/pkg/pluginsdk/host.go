@@ -236,6 +236,9 @@ type PluginOwnedTaskTreeManager interface {
 	Delete(ctx context.Context, rootTaskID string) ([]string, error)
 }
 
+// The third optional Host extension, InteractionHost (pending agent
+// interactions and their responses), lives in interactions.go.
+
 // PluginOwnedTaskTrees returns the optional provenance-safe task-tree manager.
 func PluginOwnedTaskTrees(host Host) (PluginOwnedTaskTreeManager, bool) {
 	manager, ok := host.(PluginOwnedTaskTreeHost)

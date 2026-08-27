@@ -102,6 +102,30 @@ type initialRuntimeSeedTaskSessionCreator interface {
 	CreateTaskSessionWithInitialRuntimeSeed(context.Context, *models.TaskSession) error
 }
 
+// taskEnvironmentMaterializationFinalizer publishes a successfully prepared
+// canonical environment only after its complete repository inventory is saved.
+// It is kept narrow so legacy test stores retain the existing fallback path.
+type taskEnvironmentMaterializationFinalizer interface {
+	FinalizeTaskEnvironmentMaterialization(context.Context, *models.TaskEnvironment, []*models.TaskEnvironmentRepo, string) error
+}
+
+// workspaceBindingTaskSessionCreator elects the single materializing session
+// and inserts its creating environment in the same transaction as the session.
+// It is optional for lightweight test/legacy stores; production repositories
+// must implement it so a concurrent sibling cannot enter lifecycle setup
+// without a durable canonical workspace binding.
+type workspaceBindingTaskSessionCreator interface {
+	CreateTaskSessionWithWorkspaceBinding(context.Context, *models.TaskSession, *models.TaskEnvironment) error
+}
+
+// sharedGroupWorkspaceBindingTaskSessionCreator elects the sole first
+// materializer for a shared workspace group while inserting its session and
+// creating environment. Later members observe the same durable claim instead
+// of independently creating task-local workspaces.
+type sharedGroupWorkspaceBindingTaskSessionCreator interface {
+	CreateTaskSessionWithSharedGroupWorkspaceBinding(context.Context, *models.TaskSession, *models.TaskEnvironment, string) error
+}
+
 type primarySessionTaskStateStore interface {
 	UpdateTaskStateIfPrimarySessionState(
 		context.Context,
@@ -344,9 +368,12 @@ type LaunchAgentRequest struct {
 	WorkspaceID       string // Kandev workspace ID — used to build scratch dir for repo-less tasks
 	SessionID         string
 	TaskEnvironmentID string // Env owning this session (shared across sessions in the same task)
-	TaskTitle         string // Human-readable task title for semantic worktree naming
-	AgentProfileID    string
-	TurnID            string // Durable Kandev turn for the initial prompt, when present
+	// WorkspaceReuseRequired selects attach-only preparation of an already-ready
+	// task environment. It must never be inferred from a sibling execution ID.
+	WorkspaceReuseRequired bool
+	TaskTitle              string // Human-readable task title for semantic worktree naming
+	AgentProfileID         string
+	TurnID                 string // Durable Kandev turn for the initial prompt, when present
 	// OfficeAgentProfileID is the stable Office identity. AgentProfileID stays
 	// the concrete execution profile inside the executor for compatibility.
 	OfficeAgentProfileID string
@@ -412,6 +439,9 @@ type LaunchAgentRequest struct {
 	WorktreeBranchTicket    string // External ticket value for branch templates
 	PullBeforeWorktree      bool   // Whether to pull from remote before creating the worktree
 	RemoteSyncHandled       bool   // Provider-authenticated origin refresh already completed
+	// RefreshRepository is an optional provider-authenticated refresh deferred
+	// until worktree materialization. A valid reusable worktree bypasses it.
+	RefreshRepository func(context.Context) error
 
 	// Task directory mode: place worktree at ~/.kandev/tasks/{TaskDirName}/{RepoName}/
 	TaskDirName string // Semantic task directory name (e.g. "fix-bug_ab12")
@@ -460,9 +490,12 @@ type RepoSpec struct {
 	WorktreeBranchTicket    string
 	PullBeforeWorktree      bool
 	RemoteSyncHandled       bool
-	RepoSetupScript         string
-	RepoCleanupScript       string
-	CopyFiles               string
+	// RefreshRepository is an optional provider-authenticated refresh deferred
+	// until worktree materialization. A valid reusable worktree bypasses it.
+	RefreshRepository func(context.Context) error
+	RepoSetupScript   string
+	RepoCleanupScript string
+	CopyFiles         string
 	// BranchSlug, when non-empty, suffixes the repo dir so the same repo can
 	// host multiple branch worktrees as siblings within one task. Set by the
 	// orchestrator when buildRepoSpecs detects multiple rows sharing a
@@ -486,8 +519,12 @@ const McpModeTaskTitlePending = "task-title-pending"
 // McpModeOffice restricts the MCP toolset for office (autonomous) agents to
 // interaction + plan tools. Office agents manage tasks via the kandev CLI
 // (exposed through agentctl + $KANDEV_CLI), not MCP — see
-// docs/specs/office-agent-cli/spec.md.
+// docs/specs/office/system-design/agents-03.md.
 const McpModeOffice = "office"
+
+// McpModeAutomation selects the fixed coordinator MCP surface for tasks
+// created by a user-configured automation.
+const McpModeAutomation = "automation"
 
 // LaunchOptions contains optional parameters for LaunchPreparedSession.
 type LaunchOptions struct {
@@ -499,7 +536,7 @@ type LaunchOptions struct {
 	PriorACPSession      string // ACP session ID to resume for the same concrete profile
 	WorkflowStepID       string
 	StartAgent           bool
-	McpMode              string // MCP tool mode: empty task default, McpModeTaskTitlePending, McpModeConfig, or McpModeOffice
+	McpMode              string // MCP tool mode: empty task default, McpModeTaskTitlePending, McpModeConfig, McpModeOffice, or McpModeAutomation
 	McpProfile           *mcpprofile.Context
 	Attachments          []v1.MessageAttachment
 	Env                  map[string]string
@@ -578,6 +615,7 @@ type TaskExecution struct {
 	TaskID           string
 	AgentExecutionID string
 	AgentProfileID   string
+	TurnID           string
 	StartedAt        time.Time
 	SessionState     v1.TaskSessionState
 	LastUpdate       time.Time
@@ -838,7 +876,7 @@ type RepoCloner interface {
 	// SetOriginURL updates a Kandev-managed checkout remote without exposing credentials.
 	SetOriginURL(ctx context.Context, repositoryPath, originURL string) error
 	// BuildCloneURL constructs a protocol-aware clone URL for the given provider/owner/name.
-	BuildCloneURLWithHost(provider, host, owner, name string) (string, error)
+	BuildCloneURLWithHost(ctx context.Context, provider, host, owner, name string) (string, error)
 }
 
 type authenticatedRepoCloner interface {
@@ -846,6 +884,13 @@ type authenticatedRepoCloner interface {
 		ctx context.Context, workspaceID, provider, providerHost,
 		cloneURL, owner, name, username, password string,
 	) (string, error)
+}
+
+type strictAuthenticatedRepoCloner interface {
+	RefreshWorkspaceRepositoryWithBasicAuth(
+		ctx context.Context, workspaceID, provider, providerHost,
+		cloneURL, owner, name, repositoryPath, username, password string,
+	) error
 }
 
 const providerAzureDevOps = "azure_devops"

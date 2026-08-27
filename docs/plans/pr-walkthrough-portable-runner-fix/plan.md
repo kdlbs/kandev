@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/pr-walkthrough/spec.md
+spec: docs/specs/ui/requirements/pr-walkthrough.md
 created: 2026-08-22
 status: done
 ---

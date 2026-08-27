@@ -70,13 +70,6 @@ func provideRepositories(ctx context.Context, cfg *config.Config, log *logger.Lo
 		return nil, nil, nil, fmt.Errorf("office repo: %w", err)
 	}
 	cleanups = append(cleanups, officeCleanup)
-	// Must run after office.Provide succeeds: it reconciles task_sessions
-	// against office's office_cost_events ledger, and construction order is
-	// what guarantees that table exists now - see the doc comment on
-	// sqlite.Repository.BackfillSessionTokensCachedIn.
-	if err := backfillSessionCachedTokens(ctx, taskRepoImpl, log); err != nil {
-		return nil, nil, nil, err
-	}
 	terminalRepoImpl, err := terminalrepo.NewWithDB(writer, reader, log)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("terminal repo: %w", err)
@@ -131,30 +124,6 @@ func provideRepositories(ctx context.Context, cfg *config.Config, log *logger.Lo
 		Auth:          authRepo,
 	}
 	return pool, repos, cleanups, nil
-}
-
-// sessionCachedTokenBackfiller is the narrow slice of *sqlite.Repository
-// (internal/task/repository/sqlite) this composition root needs, defined
-// locally so this file doesn't have to import that subpackage just for one
-// call. See sqlite.Repository.BackfillSessionTokensCachedIn's doc comment
-// for why this call lives here rather than inside the task repository's own
-// runMigrations(): it reconciles task_sessions against the office
-// repository's office_cost_events ledger, and only this composition root
-// knows both repositories have finished initializing.
-type sessionCachedTokenBackfiller interface {
-	BackfillSessionTokensCachedIn(ctx context.Context) (int64, error)
-}
-
-// backfillSessionCachedTokens triggers the task repository's cached-token
-// reconciliation and logs how many task_sessions rows it reconciled.
-// Extracted out of provideRepositories to keep it within the funlen limit.
-func backfillSessionCachedTokens(ctx context.Context, taskRepo sessionCachedTokenBackfiller, log *logger.Logger) error {
-	affected, err := taskRepo.BackfillSessionTokensCachedIn(ctx)
-	if err != nil {
-		return err
-	}
-	log.Info("reconciled task_sessions.tokens_cached_in against office_cost_events", zap.Int64("rows", affected))
-	return nil
 }
 
 // supportRepositorySet groups the lighter-weight support repositories

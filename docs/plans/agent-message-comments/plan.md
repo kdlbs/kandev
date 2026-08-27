@@ -2,7 +2,7 @@
 
 Status: complete
 
-Spec: [`docs/specs/ui/agent-message-comments.md`](../../specs/ui/agent-message-comments.md)
+Spec: [`docs/specs/ui/requirements/agent-message-comments.md`](../../specs/ui/requirements/agent-message-comments.md)
 
 ## Constraints
 

@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/claude-fork-review-allowlist/spec.md"
+spec: "../../specs/integrations/requirements/claude-fork-review-allowlist.md"
 ---
 
 # Task 01: Persist fork approval labels
@@ -41,7 +41,7 @@ git diff --check
 - `.github/workflows/lint-action-pinning.yml`
 - `.github/scripts/preview-env-workflow-contract_test.py`
 - `.github/scripts/opencode-code-review-workflow-contract_test.py`
-- `docs/specs/claude-fork-review-allowlist/spec.md`
+- `docs/specs/integrations/requirements/claude-fork-review-allowlist.md`
 - `docs/decisions/2026-08-07-claude-allowlist-label-bridge.md`
 - `docs/decisions/2026-08-22-persistent-fork-approval-labels.md`
 - `docs/decisions/INDEX.md`
@@ -57,7 +57,7 @@ coupled change.
 
 ## Inputs
 
-- `docs/specs/claude-fork-review-allowlist/spec.md`
+- `docs/specs/integrations/requirements/claude-fork-review-allowlist.md`
 - `docs/decisions/2026-08-07-claude-allowlist-label-bridge.md`
 - `docs/decisions/2026-08-22-persistent-fork-approval-labels.md`
 - `.github/AGENTS.md`

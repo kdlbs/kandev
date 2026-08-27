@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-correct-branch-messaging"]
 plan: "plan.md"
-spec: "../../specs/office/tasks.md"
+spec: "../../specs/office/requirements/tasks.md"
 ---
 
 # Task 02: Prove Responsive Behavior

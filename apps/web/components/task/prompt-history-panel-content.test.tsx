@@ -1,5 +1,5 @@
 /* eslint-disable max-lines -- single spec for the prompt-history panel content accumulating row, numbering, and auto-load suites; splitting would orphan the plan's named test file. */
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import i18n from "i18next";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Message, Turn } from "@/lib/types/http";
@@ -140,10 +140,6 @@ function fireIntersection(isIntersecting: boolean, target?: Element) {
       ),
     );
   }
-}
-
-function waitForDeferredLoad() {
-  return new Promise<void>((resolve) => setTimeout(resolve, 0));
 }
 
 class CapturingResizeObserver {
@@ -721,12 +717,14 @@ describe("PromptHistoryPanelContent — auto-load behavior", () => {
   it("sticks to the bottom after a load while the user is pinned, so older pages keep loading", async () => {
     pagination.hasMore = true;
     let resolveLoad: (value: number) => void = () => {};
-    pagination.loadMore.mockImplementation(
-      () =>
-        new Promise<number>((resolve) => {
-          resolveLoad = resolve;
-        }),
-    );
+    pagination.loadMore
+      .mockImplementationOnce(
+        () =>
+          new Promise<number>((resolve) => {
+            resolveLoad = resolve;
+          }),
+      )
+      .mockResolvedValueOnce(0);
     messagesBySession[SESSION_A] = [message({ id: "m1", prompt_index: 2, content: "prompt" })];
     render(<PromptHistoryPanelContent />);
     const scroller = screen.getByTestId(SCROLL_TEST_ID) as HTMLElement;
@@ -744,7 +742,7 @@ describe("PromptHistoryPanelContent — auto-load behavior", () => {
     await act(async () => {
       resolveLoad(20);
     });
-    expect(pagination.loadMore).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(pagination.loadMore).toHaveBeenCalledTimes(2));
     // Browser-faithful: a real browser clamps scrollTop to
     // scrollHeight - clientHeight, so assert the "pinned at the bottom"
     // invariant rather than the raw jsdom write.
@@ -772,8 +770,8 @@ describe("PromptHistoryPanelContent — auto-load sentinel", () => {
     expect(pagination.loadMore).toHaveBeenCalledTimes(1);
   });
 
-  it("removes the sentinel once prompt #1 is loaded, with no button", () => {
-    pagination.hasMore = true;
+  it("removes the sentinel when the shared hook reports the first-prompt boundary", () => {
+    pagination.hasMore = false;
     messagesBySession[SESSION_A] = [
       message({ id: "first", prompt_index: 1, content: "first prompt" }),
       message({ id: "newest", prompt_index: 2, content: "newest prompt", created_at: LATER_TIME }),
@@ -823,8 +821,7 @@ describe("PromptHistoryPanelContent — auto-load sentinel", () => {
     fireIntersection(true);
     // Positive progress re-arms: the still-intersecting sentinel automatically
     // fires the next page after prepend/layout work settles.
-    await act(waitForDeferredLoad);
-    expect(pagination.loadMore).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(pagination.loadMore).toHaveBeenCalledTimes(2));
   });
 
   it("does not loop after a zero-result load and retries on scroll-out/scroll-back or wheel", async () => {

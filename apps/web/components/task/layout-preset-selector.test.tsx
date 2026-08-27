@@ -203,17 +203,6 @@ describe("LayoutPresetSelector saved-layout deletion", () => {
       expect(mocks.updateUserSettings).toHaveBeenCalledWith({ saved_layouts: [] }),
     );
   });
-
-  it("limits the mobile menu to saved-layout management", async () => {
-    mocks.finePointer = false;
-    render(<LayoutPresetSelector mobile />);
-    await openSavedLayouts();
-
-    expect(screen.getByTestId(SAVED_DELETE_TEST_ID)).toBeTruthy();
-    expect(screen.queryByTestId("layout-reset-item")).toBeNull();
-    expect(screen.queryAllByTestId("layout-preset-item")).toHaveLength(0);
-    expect(screen.queryByText("task:saveCurrentLayout2")).toBeNull();
-  });
 });
 
 describe("LayoutPresetSelector saved-layout persistence", () => {

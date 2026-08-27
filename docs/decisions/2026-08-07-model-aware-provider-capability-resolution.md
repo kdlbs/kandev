@@ -103,4 +103,4 @@ keeps discovery isolated.
 ## Follow-up
 
 The behavioral contract and implementation work are specified in
-[`Dynamic Provider Model Options`](../specs/agents/dynamic-provider-options.md).
+[`Dynamic Provider Model Options`](../specs/agents/requirements/dynamic-provider-options.md).

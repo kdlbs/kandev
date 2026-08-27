@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/terminal-close-feedback.md
+spec: docs/specs/ui/requirements/terminal-close-feedback.md
 created: 2026-08-14
 status: shipped
 ---

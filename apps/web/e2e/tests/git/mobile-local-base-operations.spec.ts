@@ -14,7 +14,8 @@ test.describe("Mobile local-only Git operations", () => {
     restoreLocalBaseRepository(seedData, backend);
   });
 
-  test("rebases a local base without origin", async ({
+  // Existing Changes behavior now documents @covers AC-UI-MOBILE-TASK-CHROME-001.4.
+  test("rebases a local base without origin from Changes", async ({
     testPage,
     apiClient,
     seedData,
@@ -42,15 +43,14 @@ test.describe("Mobile local-only Git operations", () => {
     const session = await openTaskSession(testPage, task.id);
     await session.waitForChatIdle({ timeout: 45_000 });
 
-    const gitActions = testPage.getByTestId("mobile-git-actions");
-    await expect(gitActions).toBeVisible();
-    await gitActions.tap();
+    await testPage.getByRole("button", { name: "Changes" }).tap();
+    const changes = testPage.getByTestId("mobile-changes-panel");
+    const pullMenuTrigger = changes.getByRole("button", { name: /^Pull/ });
+    await expect(pullMenuTrigger).toBeVisible();
+    await pullMenuTrigger.tap();
     const menu = testPage.locator('[data-slot="dropdown-menu-content"][data-state="open"]');
     await expect(menu).toBeVisible();
-    await menu
-      .locator('[data-slot="dropdown-menu-item"]')
-      .filter({ hasText: /^Rebase/ })
-      .tap();
+    await menu.getByRole("menuitem", { name: "Rebase", exact: true }).tap();
 
     await waitForGitSuccess(testPage, "Rebase");
     assertBaseCommitReachable(scenario.git, scenario.baseHead);

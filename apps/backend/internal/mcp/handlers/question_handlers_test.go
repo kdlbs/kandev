@@ -10,6 +10,8 @@ import (
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/events/bus"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
@@ -24,14 +26,24 @@ import (
 type recordingBundleLister struct {
 	gotOpts models.ListClarificationBundlesOptions
 	page    *models.ClarificationBundlePage
+	pages   []*models.ClarificationBundlePage
+	calls   int
 	msgs    map[string][]*models.Message
 	listErr error
 }
 
 func (r *recordingBundleLister) ListUnresolvedClarificationBundles(_ context.Context, opts models.ListClarificationBundlesOptions) (*models.ClarificationBundlePage, error) {
 	r.gotOpts = opts
+	r.calls++
 	if r.listErr != nil {
 		return nil, r.listErr
+	}
+	if len(r.pages) > 0 {
+		page := r.pages[r.calls-1]
+		if page == nil {
+			return &models.ClarificationBundlePage{}, nil
+		}
+		return page, nil
 	}
 	if r.page == nil {
 		return &models.ClarificationBundlePage{}, nil
@@ -182,6 +194,43 @@ func TestHandleListPendingQuestions_EmptyResult_NoErrorEmptyEnvelope(t *testing.
 
 	// L11: bundles must be an empty array, never a null/omitted key.
 	require.Contains(t, string(resp.Payload), `"bundles":[]`)
+}
+
+func TestHandleListPendingQuestions_AutomationPaginatesPastSelfBundle(t *testing.T) {
+	svc, _ := newTestTaskService(t)
+	first := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	second := first.Add(time.Minute)
+	lister := &recordingBundleLister{
+		pages: []*models.ClarificationBundlePage{
+			{Bundles: []models.ClarificationBundleSummary{{
+				PendingID: "self-pending", TaskID: "automation-task", SessionID: "self-session", CreatedAt: first,
+			}}, HasMore: true},
+			{Bundles: []models.ClarificationBundleSummary{{
+				PendingID: "foreign-pending", TaskID: "foreign-task", SessionID: "foreign-session", CreatedAt: second,
+			}}},
+		},
+		msgs: map[string][]*models.Message{
+			"foreign-pending": {questionMessage("foreign-pending", "q1", "pending", 0, nil)},
+		},
+	}
+	h := &Handlers{taskSvc: svc, clarificationBundles: lister, logger: testLogger(t)}
+	ctx := mcpscope.WithPrincipal(context.Background(), mcpscope.Principal{
+		AutomationID: "automation-1", WorkspaceID: "ws-1",
+		CallerTaskID: "automation-task", CallerSessionID: "automation-session",
+		Surface: mcpprofile.SurfaceAutomation,
+	})
+
+	resp, err := h.handleListPendingQuestions(ctx, makeWSMessage(t, ws.ActionMCPListPendingQuestions, map[string]interface{}{
+		"limit": 1,
+	}))
+	require.NoError(t, err)
+	var body listPendingQuestionsResponse
+	require.NoError(t, json.Unmarshal(resp.Payload, &body))
+	require.Equal(t, 1, body.Count)
+	require.Equal(t, "foreign-pending", body.Bundles[0].PendingID)
+	require.Equal(t, 2, lister.calls)
+	require.Equal(t, "self-pending", lister.gotOpts.CursorPendingID)
+	require.Empty(t, body.NextCursor)
 }
 
 // TestHandleListPendingQuestions_L3L4ResponseShape proves the L11 envelope
@@ -339,7 +388,7 @@ func (stubDetachedResumer) ResumeDetachedClarification(context.Context, clarific
 func newTestResolver(t *testing.T, store *clarification.Store, repo *sqliterepo.Repository, svc *service.Service) *clarification.Resolver {
 	t.Helper()
 	resumer := stubDetachedResumer{}
-	return clarification.NewResolver(store, repo, &svcMessageUpdater{Service: svc}, svc, resumer, resumer, testLogger(t))
+	return clarification.NewResolver(store, repo, &svcMessageUpdater{Service: svc}, svc, resumer, resumer, nil, testLogger(t))
 }
 
 // seedBundle creates a task/session/turn and a two-question clarification
