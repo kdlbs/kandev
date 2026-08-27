@@ -170,6 +170,60 @@ func TestGetChildSummaries_NoChildren(t *testing.T) {
 	}
 }
 
+func TestListChildStates(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	insertTask(t, repo, ctx, "parent-1", "ws-1", "Parent Task", "", "")
+	insertTask(t, repo, ctx, "child-z", "ws-1", "Child Z", "", "")
+	insertTask(t, repo, ctx, "child-a", "ws-1", "Child A", "", "")
+	insertTask(t, repo, ctx, "child-null", "ws-1", "Child Null", "", "")
+	if _, err := repo.ExecRaw(ctx, `
+		UPDATE tasks
+		SET parent_id = 'parent-1', state = CASE id
+			WHEN 'child-z' THEN 'CANCELLED'
+			WHEN 'child-a' THEN 'COMPLETED'
+			WHEN 'child-null' THEN NULL
+		END
+		WHERE id IN ('child-z', 'child-a', 'child-null')
+	`); err != nil {
+		t.Fatalf("set child states: %v", err)
+	}
+
+	states, err := repo.ListChildStates(ctx, "parent-1")
+	if err != nil {
+		t.Fatalf("ListChildStates: %v", err)
+	}
+	if len(states) != 3 {
+		t.Fatalf("child state count = %d, want 3", len(states))
+	}
+	want := []struct {
+		id    string
+		state string
+	}{
+		{id: "child-a", state: "COMPLETED"},
+		{id: "child-null", state: ""},
+		{id: "child-z", state: "CANCELLED"},
+	}
+	for i, got := range states {
+		if got.TaskID != want[i].id || got.State != want[i].state {
+			t.Errorf("state[%d] = {%q, %q}, want {%q, %q}",
+				i, got.TaskID, got.State, want[i].id, want[i].state)
+		}
+	}
+
+	empty, err := repo.ListChildStates(ctx, "missing-parent")
+	if err != nil {
+		t.Fatalf("ListChildStates empty: %v", err)
+	}
+	if empty == nil {
+		t.Fatal("empty child state result is nil")
+	}
+	if len(empty) != 0 {
+		t.Fatalf("empty child state count = %d, want 0", len(empty))
+	}
+}
+
 func TestListBlockersForTasks(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()

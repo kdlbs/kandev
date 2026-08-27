@@ -395,19 +395,21 @@ func (ss *SchedulerService) cascadeChildrenCompleted(
 	if err != nil || parentAssignee == "" {
 		return
 	}
-	// NOTE: ListChildStates is a separate read from AreAllChildrenTerminal,
-	// with no enclosing transaction. A concurrent child insert between the
-	// two reads can produce a key over a not-actually-all-terminal
-	// snapshot. The parent gets a spurious wake but is woken again (with a
-	// correct key) once the real all-terminal condition is reached, so
-	// this is an accepted race, not a correctness bug — it just makes the
-	// key marginally less precise, never wrong in the direction of
-	// silently dropping a wake.
+	// ListChildStates is a separate read from AreAllChildrenTerminal, with no
+	// enclosing transaction. A concurrent child insert between the two reads
+	// can produce a snapshot that is no longer all-terminal. Do not queue from
+	// that snapshot. A newly inserted child then adds its ID to the later
+	// terminal snapshot, so that transition can queue a distinct wake.
 	children, err := ss.repo.ListChildStates(ctx, task.ParentID)
 	if err != nil {
 		ss.logger.Error("list child states failed",
 			zap.String("parent_id", task.ParentID), zap.Error(err))
 		return
+	}
+	for _, child := range children {
+		if child.State != "COMPLETED" && child.State != "CANCELLED" {
+			return
+		}
 	}
 	queue(parentAssignee, RunContext{
 		Reason:         RunReasonTaskChildrenCompleted,

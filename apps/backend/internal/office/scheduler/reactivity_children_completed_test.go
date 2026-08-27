@@ -261,3 +261,33 @@ func TestCascadeChildrenCompleted_ChildTerminalStateEdited_DoesNotPersistNewRun(
 		t.Fatalf("after terminal-to-terminal edit: persisted runs = %d, want 1 (unchanged child set must not re-wake)", got)
 	}
 }
+
+// TestCascadeChildrenCompleted_NonterminalSnapshotDoesNotQueueWake covers the
+// inconsistent-read shape where the terminal check succeeds but the child
+// snapshot contains a nonterminal row. A NULL state is normalized to an empty
+// state by ListChildStates and is not terminal for the completion contract.
+func TestCascadeChildrenCompleted_NonterminalSnapshotDoesNotQueueWake(t *testing.T) {
+	repo := newReactivityTestRepo(t)
+	ss := newChildrenCompletedTestScheduler(t, repo)
+	createChildrenCompletedAgent(t, repo, "agent-1")
+	setupChildrenCompletedParent(t, ss, "parent-1", "agent-1")
+	ctx := context.Background()
+
+	insertChildTask(t, ss, "child-1", "parent-1", "COMPLETED")
+	if _, err := ss.repo.ExecRaw(ctx, `
+		INSERT INTO tasks (id, workspace_id, parent_id, state)
+		VALUES ('child-2', 'ws-1', 'parent-1', NULL)
+	`); err != nil {
+		t.Fatalf("insert child-2: %v", err)
+	}
+
+	var queued int
+	queue := func(_ string, _ RunContext) { queued++ }
+	ss.cascadeChildrenCompleted(ctx, &TaskSnapshot{
+		ID: "child-1", WorkspaceID: "ws-1", ParentID: "parent-1",
+	}, queue)
+
+	if queued != 0 {
+		t.Fatalf("queued wakes = %d, want 0 when the child snapshot is nonterminal", queued)
+	}
+}
