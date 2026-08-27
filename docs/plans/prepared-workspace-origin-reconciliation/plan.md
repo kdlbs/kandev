@@ -71,10 +71,10 @@ to `configureExistingWorkspace` or duplicate policy resolution.
 
 ### Coordination with #3069
 
-This branch is rebased onto PR #3078, commit `b976260e69b5abf421cfa9742dfc5c37d533ac0f`, which
-provides the dynamic, host-aware protocol resolver and context-aware `RepoCloner` contract.
-Executor-mode origin selection uses that seam. This work adds no second protocol cache, detector,
-or host lookup.
+PR #3078, originally headed by commit `b976260e69b5abf421cfa9742dfc5c37d533ac0f`, is now
+integrated into `main` as `e4d17b3925`. It provides the dynamic, host-aware protocol resolver and
+context-aware `RepoCloner` contract. Executor-mode origin selection uses that seam. This work adds
+no second protocol cache, detector, or host lookup.
 
 ## Tests
 
@@ -118,9 +118,8 @@ Go test: 1 passed in 1 packages
 ```
 
 `python3 scripts/lint-spec-files.py --all` also passed. PR #3078 supplies the dynamic,
-host-aware protocol resolver and context-aware `RepoCloner.BuildCloneURLWithHost` contract; this
-branch is rebased onto commit `b976260e69b5abf421cfa9742dfc5c37d533ac0f` and adds no protocol
-detection.
+host-aware protocol resolver and context-aware `RepoCloner.BuildCloneURLWithHost` contract; it is
+merged into `main` as `e4d17b3925`, and this branch adds no protocol detection.
 
 ## Risks
 

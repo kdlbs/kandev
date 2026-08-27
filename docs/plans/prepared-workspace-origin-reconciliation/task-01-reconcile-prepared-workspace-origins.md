@@ -64,8 +64,9 @@ Run these commands from `apps/backend`.
 
 ## Dependencies
 
-- PR #3078, commit `b976260e69b5abf421cfa9742dfc5c37d533ac0f`, supplies the dynamic, host-aware
-  protocol resolver. Use its context-aware `RepoCloner` contract.
+- PR #3078, originally headed by commit `b976260e69b5abf421cfa9742dfc5c37d533ac0f`, is merged
+  into `main` as `e4d17b3925` and supplies the dynamic, host-aware protocol resolver. Use its
+  context-aware `RepoCloner` contract.
 
 ## Risks
 
