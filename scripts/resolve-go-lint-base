@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# resolve-go-lint-base prints the local remote-tracking ref used by the
+# pre-commit Go lint hook. Fork worktrees conventionally retain the canonical
+# repository as `upstream`; do not silently fall back when the base is unclear.
+set -euo pipefail
+
+die() {
+	echo "Go lint base resolution failed: $*" >&2
+	exit 1
+}
+
+configured_refs=()
+while IFS= read -r ref; do
+	[ -n "$ref" ] && configured_refs+=("$ref")
+done < <(git config --get-all kandev.lintBaseRef || true)
+
+if [ "${#configured_refs[@]}" -gt 1 ]; then
+	die "ambiguous kandev.lintBaseRef values: ${configured_refs[*]}"
+fi
+
+if [ "${#configured_refs[@]}" -eq 1 ]; then
+	base_ref=${configured_refs[0]}
+else
+	origin_head=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD || true)
+	[ -n "$origin_head" ] || die "origin's default branch is unavailable; set kandev.lintBaseRef to a local remote-tracking ref"
+	base_branch=${origin_head#origin/}
+	[ "$base_branch" != "$origin_head" ] && [ -n "$base_branch" ] || die "origin's default ref is invalid: $origin_head"
+
+	if git rev-parse --verify --quiet "upstream/$base_branch^{commit}" >/dev/null; then
+		base_ref="upstream/$base_branch"
+	else
+		base_ref="$origin_head"
+	fi
+fi
+
+git check-ref-format --branch "$base_ref" >/dev/null 2>&1 || die "configured base ref does not have a safe ref format: $base_ref"
+git rev-parse --verify --quiet "$base_ref^{commit}" >/dev/null || die "base ref does not resolve locally: $base_ref"
+printf '%s\n' "$base_ref"
