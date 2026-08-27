@@ -1,6 +1,6 @@
 ---
 id: "03-sync-titlebar-theme-color"
-title: "同步融合标题栏主题色"
+title: "Synchronize fused title-bar theme color"
 status: done
 wave: 3
 depends_on: ["02-fused-desktop-titlebar-layout"]
@@ -8,38 +8,38 @@ plan: "plan.md"
 spec: "../../specs/pwa-window-controls-overlay/spec.md"
 ---
 
-# Task 03：同步融合标题栏主题色
+# Task 03: synchronize fused title-bar theme color
 
-## 根因
+## Root cause
 
-`index.html` 的两个 `theme-color` 仅按操作系统 `prefers-color-scheme` 选择，而 Kandev 的主题
-可以独立设置。当系统为浅色、应用为深色时，Vivaldi 等浏览器绘制的窗口控制区仍取浅色值，
-因此融合后的标题栏两侧出现白边。
+`index.html` had two `theme-color` entries selected only by the operating system `prefers-color-scheme` value. Kandev can set its theme independently.
 
-## 验收条件
+When the system uses light mode and the application uses dark mode, browsers such as Vivaldi still use the light value for the window-control area. The fused title bar then shows light edges.
 
-- 浏览器活动的 `theme-color` 始终匹配 Kandev 当前解析后的浅色或深色主题。
-- 应用内切换主题后无需刷新或重启 PWA 即可更新浏览器窗口控制区颜色。
-- 不改变移动端或平板布局，也不增加用户可见文案。
+## Acceptance criteria
 
-## TDD 与验证
+- The dynamic overlay `theme-color` matches Kandev's resolved light or dark theme while the overlay is visible.
+- A theme change updates the browser window-control color without a page refresh or PWA restart.
+- Static media-specific `theme-color` entries remain available for ordinary browser windows.
+- Mobile and tablet layouts stay unchanged, and no user-visible copy is added.
 
-先在 `apps/web/components/theme-provider.test.tsx` 写入系统浅色但应用深色的回归场景，并确认
-当前实现仍保留浅色 `theme-color` 而按预期 RED。完成最小实现后执行：
+## TDD and verification
+
+Add a regression case in `apps/web/components/theme-provider.test.tsx` for a light system with a dark application theme. Confirm that the current implementation keeps the light `theme-color` and produces the expected RED result. Run the focused checks after the smallest implementation:
 
 ```bash
 cd apps && pnpm --filter @kandev/web test -- --run components/theme-provider.test.tsx
 cd apps/web && pnpm e2e:run tests/layout/pwa-window-controls-overlay.spec.ts
 ```
 
-随后执行任务要求的仓库级命令：
+Then run the repository checks required by the task:
 
 ```bash
 make fmt
 make typecheck test lint
 ```
 
-## 可能修改的文件
+## Possible files to change
 
 - `apps/web/index.html`
 - `apps/web/components/theme-provider.tsx`
@@ -49,23 +49,15 @@ make typecheck test lint
 - `docs/plans/pwa-window-controls-overlay/plan.md`
 - `docs/plans/pwa-window-controls-overlay/task-03-sync-titlebar-theme-color.md`
 
-## 输出契约
+## Output contract
 
-记录 RED/GREEN 证据、真实 Vivaldi PWA 深色视觉复验、定向测试及仓库级验证结果；只改 PC
-融合标题栏相关契约。
+Record RED and GREEN evidence, installed-Vivaldi dark-theme visual evidence, focused tests, repository checks, blockers, and risks. Change only the desktop fused-title-bar contract.
 
-## 结果
+## Results
 
-- RED：`pnpm --filter @kandev/web test -- --run components/theme-provider.test.tsx` 按预期失败，
-  深色应用主题下仍存在两个按系统 `prefers-color-scheme` 选择的 `theme-color`。
-- GREEN：格式化后的最终 Vitest 为 2 个文件、3 个测试通过，覆盖系统浅色与应用深色相反、
-  深色 `#181818`、运行时切回浅色 `#ffffff` 以及静态媒体条件清理。
-- Playwright 生产构建的桌面 `chromium` project 为 2 个场景全部通过；融合场景明确模拟系统
-  浅色、应用深色和可见 Overlay API，并验证活动 `theme-color` 为 `#181818`。
-- `make fmt` 使用仓库锁定的 `pnpm@9.15.9` 执行后通过；全量 typecheck 通过，Web lint 通过。
-- `make typecheck test lint` 中全量后端测试仍受本机既有环境/基础线问题影响，包括 npm cache
-  根路径、ACP probe、Git 中文输出和安装路径元数据；后端 lint 因本机缺少 `golangci-lint`
-  未启动。这些失败均不在本任务修改路径内。
-- 用户的二级 Vivaldi PWA 实例仍在 `http://localhost:18702` 运行，Vite 已接收
-  `theme-provider.tsx` HMR 更新；最终宿主窗口视觉颜色由用户在 Test Phase 复验。
-- 仅在 `navigator.windowControlsOverlay` 存在时同步宿主主题色，未修改移动端或平板布局。
+- RED: `pnpm --filter @kandev/web test -- --run components/theme-provider.test.tsx` failed as expected because the dark application theme still left two system-selected `theme-color` entries.
+- GREEN: The final focused Vitest suite passed four files and eight tests. It covers an opposite system and application theme, dark `#181818`, runtime change to light `#ffffff`, static media fallback preservation, and dynamic override cleanup.
+- The desktop `chromium` Playwright project passed three scenarios. The fused scenario simulates a light system, a dark application theme, and a visible Overlay API. It verifies the dynamic `theme-color` value is `#181818`.
+- The implementation keeps static media-specific metadata for ordinary browser windows. It adds one dynamic metadata element only while `navigator.windowControlsOverlay.visible` is true and removes it when the overlay hides.
+- Typecheck and Web lint passed for the final implementation. A visual check in an installed Vivaldi PWA remains an environment-specific follow-up.
+- Mobile and tablet layouts remain unchanged, and no user-visible copy was added.

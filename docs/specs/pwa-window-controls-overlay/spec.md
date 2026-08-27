@@ -4,54 +4,41 @@ created: 2026-08-26
 owner: kandev
 ---
 
-# 桌面 PWA 融合标题栏
+# Desktop PWA fused title bar
 
 ## Why
 
-当前安装后的桌面 PWA 会在 Kandev 自身应用顶栏上方显示浏览器标题栏。这条额外的全宽区域
-占用了垂直空间，却没有提供有用的 Kandev 控件，也削弱了安装后应用与操作系统的融合感。
+An installed desktop PWA currently shows a browser title bar above Kandev's application top bar. This extra full-width row uses vertical space without adding useful Kandev controls.
+
+This extra row also weakens the visual connection between the installed app and the operating system.
 
 ## What
 
-- 在支持该能力的已安装桌面 PWA 中，Kandev 现有顶部应用栏作为可拖动窗口标题栏，不再为
-  浏览器标题单独保留一行。
-- 系统关闭、最小化、最大化按钮和浏览器菜单保持可见，且不会与 Kandev 品牌、工作区选择器、
-  侧栏开关、页面定位信息、任务控件或页面操作重叠。
-- 融合标题栏中的按钮、链接、输入框、菜单及其他交互控件仍可点击，且不会触发窗口拖动。
-- 融合标题栏在启动后继续跟随窗口控件几何变化，包括窗口尺寸变化及操作系统决定的左侧或
-  右侧控件布局，并且不会产生页面横向溢出。
-- 浏览器绘制的窗口控制区背景跟随 Kandev 当前解析后的浅色或深色主题，而不是仅跟随操作
-  系统的颜色偏好；应用内切换主题后无需重启 PWA 即可同步。
-- 桌面侧栏展开或折叠时，其标题栏控件始终可访问。
-- 普通浏览器标签页、未安装的应用窗口或不支持 Window Controls Overlay 的浏览器保留当前
-  桌面布局和行为。
-- 该功能不增加设置、持久化、后端契约或用户可见文案。
+- In an installed desktop PWA that supports this capability, the existing Kandev top bar becomes the draggable window title bar. The browser title no longer uses a separate row.
+- The system close, minimize, and maximize buttons remain visible. The browser menu also remains visible. These controls do not overlap the Kandev brand, workspace picker, sidebar toggle, breadcrumbs, task controls, or page actions.
+- Buttons, links, inputs, menus, and other interactive controls in the fused title bar remain clickable. They do not start window dragging.
+- The fused title bar follows window-control geometry changes after startup. It handles window size changes and left or right system-control placement without horizontal overflow.
+- The browser window-control background follows Kandev's resolved light or dark theme. A theme change updates the dynamic overlay color without a PWA restart. Ordinary browser windows keep the existing media-specific `theme-color` fallback.
+- Sidebar title-bar controls remain accessible when the desktop sidebar expands or collapses.
+- Ordinary browser tabs, uninstalled app windows, and browsers without Window Controls Overlay keep the current desktop layout and behavior.
+- The feature adds no settings, persistence, backend contract, or user-visible copy.
 
 ## Scenarios
 
-- **GIVEN** Kandev 以已安装桌面 PWA 启动，Window Controls Overlay 可见且系统窗口控件位于
-  左侧，**WHEN** 应用以展开或折叠侧栏呈现，**THEN** 现有侧栏及页面/任务顶栏占用标题栏行，
-  且所有 Kandev 控件都位于系统控件排除区之外。
-- **GIVEN** Kandev 以已安装桌面 PWA 启动且系统窗口控件位于右侧，**WHEN** 带右对齐顶栏
-  操作的页面呈现，**THEN** 这些操作在系统控件排除区之前结束，并且仍然可操作。
-- **GIVEN** 桌面 PWA 正在使用融合标题栏，**WHEN** 浏览器报告标题栏几何变化，**THEN**
-  安全内边距无需刷新即可更新，且文档不会产生横向溢出。
-- **GIVEN** 指针从融合标题栏的空白区域开始，**WHEN** 用户拖动，**THEN** 操作系统窗口可以
-  移动；**GIVEN** 指针从 Kandev 交互控件开始，**WHEN** 用户点击，**THEN** 执行控件原有操作，
-  而不是拖动窗口。
-- **GIVEN** Window Controls Overlay 不存在或不可见，**WHEN** Kandev 在普通桌面浏览器环境中
-  呈现，**THEN** 当前 40px 侧栏/页面顶栏及全部既有布局几何保持不变。
-- **GIVEN** 操作系统使用浅色外观且 Kandev 单独使用深色主题，**WHEN** Window Controls
-  Overlay 可见或用户在应用内切换主题，**THEN** 浏览器窗口控制区使用 Kandev 的深色背景，
-  不会在融合标题栏两侧留下浅色边缘；浅色主题同理恢复浅色背景。
+- **GIVEN** Kandev starts as an installed desktop PWA with Window Controls Overlay visible and system controls on the left, **WHEN** the app shows an expanded or collapsed sidebar, **THEN** the sidebar and page or task top bars occupy the title-bar row, and all Kandev controls stay outside the system-control exclusion area.
+- **GIVEN** Kandev starts as an installed desktop PWA with system controls on the right, **WHEN** a page with right-aligned top-bar actions appears, **THEN** the actions end before the system-control exclusion area and remain usable.
+- **GIVEN** the desktop PWA uses the fused title bar, **WHEN** the browser reports a title-bar geometry change, **THEN** safe padding updates without a refresh and the document has no horizontal overflow.
+- **GIVEN** the pointer starts in empty fused-title-bar space, **WHEN** the user drags, **THEN** the operating system moves the window. **GIVEN** the pointer starts on a Kandev interactive control, **WHEN** the user clicks, **THEN** the control keeps its existing action and does not move the window.
+- **GIVEN** Window Controls Overlay is missing or hidden, **WHEN** Kandev renders in an ordinary desktop browser, **THEN** the existing 40px sidebar and page top bars and all existing layout geometry remain unchanged.
+- **GIVEN** the operating system uses a light appearance and Kandev uses a dark theme, **WHEN** Window Controls Overlay is visible or the user changes the app theme, **THEN** the dynamic browser window-control color uses Kandev's dark background without light edges. Static media-specific colors remain available when the overlay is hidden. The light theme follows the same rule.
 
 ## Out of scope
 
-- 移动端和平板布局变更或移动端 Playwright 覆盖。
-- 原生 Tauri 桌面标题栏、菜单、生命周期或 bridge 的变更。
-- 自定义替代操作系统窗口控件。
-- 用于启用或停用融合标题栏的用户设置。
+- Mobile and tablet layout changes or mobile Playwright coverage.
+- Changes to the native Tauri desktop title bar, menus, lifecycle, or bridge.
+- Custom replacement operating-system window controls.
+- User settings that enable or disable the fused title bar.
 
 ## Implementation plan
 
-参见 [`../../plans/pwa-window-controls-overlay/plan.md`](../../plans/pwa-window-controls-overlay/plan.md)。
+See [`../../plans/pwa-window-controls-overlay/plan.md`](../../plans/pwa-window-controls-overlay/plan.md).
