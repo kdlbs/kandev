@@ -5,6 +5,7 @@ import (
 	"runtime"
 
 	"github.com/kandev/kandev/internal/user/dto"
+	"github.com/kandev/kandev/internal/user/models"
 	"github.com/kandev/kandev/internal/user/service"
 )
 
@@ -45,6 +46,38 @@ func (c *Controller) GetUserSettings(ctx context.Context) (dto.UserSettingsRespo
 		Settings:     dto.FromUserSettings(settings),
 		ShellOptions: shellOptionsForOS(),
 	}, nil
+}
+
+// GetAgentProfileRecentUse returns the current user's independent operational
+// profile histories.
+func (c *Controller) GetAgentProfileRecentUse(ctx context.Context) ([]dto.AgentProfileRecentUseDTO, error) {
+	records, err := c.svc.GetAgentProfileRecentUse(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]dto.AgentProfileRecentUseDTO, 0, len(records))
+	for _, record := range records {
+		result = append(result, dto.FromAgentProfileRecentUse(record))
+	}
+	return result, nil
+}
+
+// RecordAgentProfileRecentUse records one successful profile launch in the
+// requested operational selector context.
+func (c *Controller) RecordAgentProfileRecentUse(
+	ctx context.Context,
+	contextValue string,
+	req dto.RecordAgentProfileRecentUseRequest,
+) (dto.AgentProfileRecentUseDTO, error) {
+	record, err := c.svc.RecordAgentProfileRecentUse(
+		ctx,
+		models.AgentProfileRecentUseContext(contextValue),
+		req.AgentProfileID,
+	)
+	if err != nil {
+		return dto.AgentProfileRecentUseDTO{}, err
+	}
+	return dto.FromAgentProfileRecentUse(record), nil
 }
 
 // UpdateUserSettings applies a partial settings patch and returns the

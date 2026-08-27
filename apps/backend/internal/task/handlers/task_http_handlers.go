@@ -767,6 +767,7 @@ type createTaskResponse struct {
 	dto.TaskDTO
 	TaskSessionID    string `json:"session_id,omitempty"`
 	AgentExecutionID string `json:"agent_execution_id,omitempty"`
+	AgentProfileID   string `json:"agent_profile_id,omitempty"`
 	// Deduplicated and CreationComplete are required booleans (not
 	// presence-only markers) on every create-idempotency outcome, per
 	// docs/specs/tasks/requirements/external-id-idempotency.md. Deduplicated is true
@@ -1450,6 +1451,7 @@ func (h *TaskHandlers) prepareTaskSession(
 			h.logger.Error("failed to prepare session for task", zap.Error(err), zap.String("task_id", taskID))
 		} else {
 			response.TaskSessionID = resp.SessionID
+			response.AgentProfileID = firstNonEmpty(resp.AgentProfileID, body.AgentProfileID)
 		}
 		return nil
 	}
@@ -1489,6 +1491,7 @@ func (h *TaskHandlers) prepareStartAgentSession(
 	}
 	sessionID := prepResp.SessionID
 	response.TaskSessionID = sessionID
+	response.AgentProfileID = firstNonEmpty(prepResp.AgentProfileID, body.AgentProfileID)
 	if updatedTask, updateErr := h.service.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); updateErr != nil {
 		h.logger.Warn("failed to mark task scheduling after preparing start session",
 			zap.Error(updateErr),
@@ -1897,8 +1900,9 @@ func (body *httpStartQuickChatRequest) validateRepositories() error {
 
 // httpStartQuickChatResponse is returned when a quick chat session is created.
 type httpStartQuickChatResponse struct {
-	TaskID    string `json:"task_id"`
-	SessionID string `json:"session_id"`
+	TaskID         string `json:"task_id"`
+	SessionID      string `json:"session_id"`
+	AgentProfileID string `json:"agent_profile_id,omitempty"`
 }
 
 // quickChatParams holds resolved parameters for creating a quick chat session.
@@ -2046,8 +2050,9 @@ func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 		zap.String("workspace_id", workspaceID))
 
 	c.JSON(http.StatusOK, httpStartQuickChatResponse{
-		TaskID:    task.ID,
-		SessionID: resp.SessionID,
+		TaskID:         task.ID,
+		SessionID:      resp.SessionID,
+		AgentProfileID: firstNonEmpty(resp.AgentProfileID, params.agentProfileID),
 	})
 }
 
@@ -2200,8 +2205,9 @@ func (h *TaskHandlers) httpStartConfigChat(c *gin.Context) {
 		zap.String("workspace_id", workspaceID))
 
 	c.JSON(http.StatusOK, httpStartQuickChatResponse{
-		TaskID:    task.ID,
-		SessionID: sessionID,
+		TaskID:         task.ID,
+		SessionID:      sessionID,
+		AgentProfileID: firstNonEmpty(resp.AgentProfileID, agentProfileID),
 	})
 }
 

@@ -70,6 +70,15 @@ func (r *sqliteRepository) initSchema() error {
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
 	);
+	CREATE TABLE IF NOT EXISTS user_agent_profile_recent_use (
+		user_id TEXT NOT NULL,
+		context TEXT NOT NULL,
+		profile_ids TEXT NOT NULL DEFAULT '[]',
+		revision BIGINT NOT NULL DEFAULT 0,
+		updated_at TIMESTAMP NOT NULL,
+		PRIMARY KEY (user_id, context),
+		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+	);
 	`
 	if _, err := r.db.Exec(schema); err != nil {
 		return err

@@ -8,6 +8,7 @@ import type {
   TaskCreateLastUsedApi,
   MCPTaskAgentProfileDefault,
   RepositoryBranchPolicy,
+  AgentProfileRecentUseApiRecord,
 } from "../../lib/types/http";
 import type { Agent, AgentProfile } from "../../lib/types/http-agents";
 import { normalizeAgentProfile } from "../../lib/api/domains/agent-profile-normalize";
@@ -546,6 +547,10 @@ export class ApiClient {
   async deleteAgentProfile(profileId: string, force?: boolean): Promise<void> {
     const qs = force ? "?force=true" : "";
     await this.request("DELETE", `/api/v1/agent-profiles/${profileId}${qs}`);
+  }
+
+  async listAgentProfileRecentUse(): Promise<AgentProfileRecentUseApiRecord[]> {
+    return this.request("GET", "/api/v1/user/agent-profile-recent-use");
   }
 
   /**

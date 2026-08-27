@@ -204,6 +204,7 @@ export function useDialogComputed({
   lockedWorkflow,
   lastUsedWorkflowIdsByWorkspace,
   userSettingsLoaded,
+  agentProfileRecentUseContext,
 }: DialogComputedArgs): DialogComputedValues {
   const { effectiveWorkflowId, workflowAgentProfileId } = resolveDialogWorkflowSelection({
     selectedWorkflowId: fs.selectedWorkflowId,
@@ -265,7 +266,10 @@ export function useDialogComputed({
     agentProfiles,
     pickExecutorDisabledReason(fs.noRepository, isMultiRepoSelection),
   );
-  const agentProfileOptions = useAgentProfileOptions(exec.compatibleAgentProfiles);
+  const agentProfileOptions = useAgentProfileOptions(
+    exec.compatibleAgentProfiles,
+    agentProfileRecentUseContext,
+  );
   const executorHint = useExecutorHint(executors, fs.executorId, selectedRepoCount);
   const isLocalExecutor = useIsLocalExecutor(executors, fs.executorId);
   const { headerRepositoryOptions } = useRepositoryOptions(repositories, fs.discoveredRepositories);

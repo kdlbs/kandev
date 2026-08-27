@@ -6,6 +6,7 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { t } from "@/lib/i18n";
 import { updateWorkspaceAction } from "@/app/actions/workspaces";
 import { startConfigChat } from "@/lib/api/domains/workspace-api";
+import { recordAgentProfileRecentUseBestEffort } from "@/lib/agent-profile-recent-use";
 import { getQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
 import { persistQuickChatRename } from "@/lib/quick-chat/rename";
 import {
@@ -137,6 +138,12 @@ async function saveDefaultConfigProfile(
   }
 }
 
+function recordConfigChatProfileUse(profileId: string, storeApi: AppStoreApi) {
+  recordAgentProfileRecentUseBestEffort("config_chat", profileId, (record) =>
+    storeApi.getState().applyAgentProfileRecentUse("config_chat", record),
+  );
+}
+
 export function useConfigChat(workspaceId: string) {
   const store = useConfigChatStore();
   const storeApi = useAppStoreApi();
@@ -191,19 +198,21 @@ export function useConfigChat(workspaceId: string) {
           await deleteSupersededConfigChatTask(response.task_id);
           return undefined;
         }
+        const effectiveProfileId = response.agent_profile_id ?? agentProfileId;
+        recordConfigChatProfileUse(effectiveProfileId, storeApi);
         registerStartedSession({
           store,
           storeApi,
           response,
           workspaceId,
-          agentProfileId,
+          agentProfileId: effectiveProfileId,
           prompt,
           isPassthrough,
           openInQuickChat: options.openInQuickChat !== false,
         });
         await saveDefaultConfigProfile(
           workspaceId,
-          agentProfileId,
+          effectiveProfileId,
           Boolean(workspace?.default_config_agent_profile_id),
           updateWorkspaceInStore,
         );

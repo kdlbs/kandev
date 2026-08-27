@@ -40,6 +40,10 @@ export type {
   UserSettingsUpdatePayload,
 } from "./http-user-settings";
 export type {
+  AgentProfileRecentUseApiRecord,
+  AgentProfileRecentUseContext,
+} from "./http-agent-profile-recent-use";
+export type {
   AttachTaskWorkspaceSourcesRequest,
   AttachTaskWorkspaceSourcesResponse,
   RepositoryBranchPolicy,
@@ -440,6 +444,7 @@ export const isFromOffice = (task: Task | null | undefined): boolean => !!task?.
 export type CreateTaskResponse = Task & {
   session_id?: string;
   agent_execution_id?: string;
+  agent_profile_id?: AgentProfileId;
 };
 
 // Backend workflow step DTO (flat fields, as returned from API)
