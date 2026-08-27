@@ -1,19 +1,11 @@
 "use client";
 
 import { memo, useCallback, useEffect, useRef, useState } from "react";
-import type {
-  ChangeEvent,
-  FocusEvent,
-  KeyboardEvent,
-  MouseEvent,
-  ReactNode,
-  RefObject,
-} from "react";
+import type { ChangeEvent, FocusEvent, KeyboardEvent, ReactNode, RefObject } from "react";
 import {
   IconChevronLeft,
   IconChevronRight,
   IconDots,
-  IconGripVertical,
   IconSparkles,
   IconX,
 } from "@tabler/icons-react";
@@ -35,7 +27,7 @@ import { GridSpinner } from "@/components/grid-spinner";
 import type { QuickChatSessionKind } from "@/lib/state/slices/ui/types";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 
-export type QuickChatTabDragHandleProps = {
+export type QuickChatTabDragProps = {
   attributes: DraggableAttributes;
   listeners: DraggableSyntheticListeners;
   setActivatorNodeRef: (node: HTMLElement | null) => void;
@@ -112,35 +104,6 @@ export function QuickChatTabActionMenu({
   );
 }
 
-export function QuickChatTabDragHandle({
-  name,
-  dragHandleProps,
-}: {
-  name: string;
-  dragHandleProps?: QuickChatTabDragHandleProps;
-}) {
-  const { t } = useTranslation();
-  const { isFinePointer } = useResponsiveBreakpoint();
-  if (!dragHandleProps) return null;
-
-  return (
-    <button
-      type="button"
-      ref={dragHandleProps.setActivatorNodeRef}
-      {...dragHandleProps.attributes}
-      {...dragHandleProps.listeners}
-      aria-label={t("chat:reorderQuickChatTab", { name })}
-      title={t("chat:reorderQuickChatTab", { name })}
-      data-testid="quick-chat-tab-drag-handle"
-      className={`flex shrink-0 cursor-grab items-center justify-center opacity-60 hover:opacity-100 active:cursor-grabbing ${
-        isFinePointer ? "h-6 w-6" : "h-11 w-11"
-      }`}
-    >
-      <IconGripVertical className="h-3.5 w-3.5" aria-hidden />
-    </button>
-  );
-}
-
 export type QuickChatTabMoveButtonsProps = {
   name: string;
   onMoveLeft: () => void;
@@ -195,7 +158,7 @@ type QuickChatTabItemProps = {
   onMoveRight?: () => void;
   canMoveLeft?: boolean;
   canMoveRight?: boolean;
-  dragHandleProps?: QuickChatTabDragHandleProps;
+  dragProps?: QuickChatTabDragProps;
 };
 
 function RenameContextMenu({ children, onRename }: { children: ReactNode; onRename: () => void }) {
@@ -253,7 +216,7 @@ function QuickChatTabBody({
         onChange={onDraftChange}
         onBlur={onBlur}
         onKeyDown={onKeyDown}
-        className="h-11 max-w-[160px] rounded border border-input bg-background px-2.5 py-1 text-base outline-none focus:border-ring focus:ring-2 focus:ring-ring sm:h-6 sm:text-xs"
+        className="h-11 max-w-[160px] rounded border border-primary bg-accent/60 px-2.5 py-1 text-base outline-none ring-2 ring-primary/30 focus:border-ring focus:ring-2 focus:ring-ring sm:h-6 sm:text-xs"
       />
     );
   }
@@ -288,10 +251,7 @@ type QuickChatTabActionsProps = {
   onMoveRight?: () => void;
   canMoveLeft: boolean;
   canMoveRight: boolean;
-  onCommit: () => void;
-  onCancel: () => void;
   onClose: () => void;
-  keepInputFocused: (event: MouseEvent<HTMLButtonElement>) => void;
 };
 
 function QuickChatTabActions({
@@ -303,17 +263,16 @@ function QuickChatTabActions({
   onMoveRight,
   canMoveLeft,
   canMoveRight,
-  onCommit,
-  onCancel,
   onClose,
-  keepInputFocused,
 }: QuickChatTabActionsProps) {
   const { t } = useTranslation();
   const { isFinePointer } = useResponsiveBreakpoint();
 
+  if (isEditing) return null;
+
   return (
     <div className="flex shrink-0 items-center">
-      {!isEditing && !isFinePointer && (
+      {!isFinePointer && (
         <QuickChatTabActionMenu
           name={name}
           isRenameable={isRenameable}
@@ -325,7 +284,7 @@ function QuickChatTabActions({
           onClose={onClose}
         />
       )}
-      {!isEditing && isFinePointer && onMoveLeft && onMoveRight && (
+      {isFinePointer && onMoveLeft && onMoveRight && (
         <QuickChatTabMoveButtons
           name={name}
           onMoveLeft={onMoveLeft}
@@ -334,29 +293,7 @@ function QuickChatTabActions({
           canMoveRight={canMoveRight}
         />
       )}
-      {isEditing && (
-        <>
-          <button
-            type="button"
-            aria-label={t("common:save")}
-            className="h-11 min-w-11 shrink-0 cursor-pointer px-2 text-xs hover:bg-muted sm:h-6 sm:min-w-0 sm:px-1.5"
-            onMouseDown={keepInputFocused}
-            onClick={onCommit}
-          >
-            {t("common:save")}
-          </button>
-          <button
-            type="button"
-            aria-label={t("common:cancel")}
-            className="h-11 min-w-11 shrink-0 cursor-pointer px-2 text-xs hover:bg-muted sm:h-6 sm:min-w-0 sm:px-1.5"
-            onMouseDown={keepInputFocused}
-            onClick={onCancel}
-          >
-            {t("common:cancel")}
-          </button>
-        </>
-      )}
-      {!isEditing && isFinePointer && (
+      {isFinePointer && (
         <button
           type="button"
           aria-label={t("chat:close", { name })}
@@ -375,7 +312,7 @@ type QuickChatTabContentProps = {
   editContainerRef: RefObject<HTMLDivElement | null>;
   bodyProps: QuickChatTabBodyProps;
   actionsProps: QuickChatTabActionsProps;
-  dragHandleProps?: QuickChatTabDragHandleProps;
+  dragProps?: QuickChatTabDragProps;
 };
 
 function QuickChatTabContent({
@@ -383,21 +320,26 @@ function QuickChatTabContent({
   editContainerRef,
   bodyProps,
   actionsProps,
-  dragHandleProps,
+  dragProps,
 }: QuickChatTabContentProps) {
+  let tabStateClassName = "text-muted-foreground hover:bg-muted";
+  if (bodyProps.isEditing) {
+    tabStateClassName =
+      "border border-primary bg-accent/40 text-foreground shadow-sm ring-1 ring-primary/30";
+  } else if (isActive) {
+    tabStateClassName = "bg-background text-foreground shadow-sm";
+  }
+
   const content = (
     <div
-      ref={bodyProps.isEditing ? editContainerRef : undefined}
+      ref={bodyProps.isEditing ? editContainerRef : dragProps?.setActivatorNodeRef}
+      {...(bodyProps.isEditing ? {} : (dragProps?.attributes ?? {}))}
+      {...(bodyProps.isEditing ? {} : (dragProps?.listeners ?? {}))}
       data-testid="quick-chat-tab"
-      className={`flex items-center gap-1 rounded transition-colors whitespace-nowrap ${
-        isActive
-          ? "bg-background text-foreground shadow-sm"
-          : "text-muted-foreground hover:bg-muted"
+      className={`flex items-center gap-1 rounded whitespace-nowrap transition-colors ${tabStateClassName} ${
+        dragProps && !bodyProps.isEditing ? "cursor-grab active:cursor-grabbing" : ""
       }`}
     >
-      {!bodyProps.isEditing && (
-        <QuickChatTabDragHandle name={bodyProps.name} dragHandleProps={dragHandleProps} />
-      )}
       <div className="flex items-center">
         <QuickChatTabBody {...bodyProps} />
       </div>
@@ -418,7 +360,7 @@ function useQuickChatTabRename({
   const [draft, setDraft] = useState(name);
   const inputRef = useRef<HTMLInputElement>(null);
   const editContainerRef = useRef<HTMLDivElement>(null);
-  // Blur, Enter, Save, Escape, and Cancel can all finish the same edit. Guard
+  // Blur, Enter, and Escape can all finish the same edit. Guard
   // the transition so one edit can produce at most one rename or restore.
   const editResultRef = useRef<"open" | "committed" | "cancelled">("open");
 
@@ -464,10 +406,6 @@ function useQuickChatTabRename({
     [commit],
   );
 
-  const keepInputFocused = useCallback((event: MouseEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-  }, []);
-
   const handleDraftChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
     setDraft(event.target.value);
   }, []);
@@ -493,11 +431,8 @@ function useQuickChatTabRename({
     draft,
     inputRef,
     editContainerRef,
-    commit,
-    cancel,
     handleStartEdit,
     handleInputBlur,
-    keepInputFocused,
     handleDraftChange,
     handleKeyDown,
   };
@@ -517,18 +452,15 @@ export const QuickChatTabItem = memo(function QuickChatTabItem({
   onMoveRight,
   canMoveLeft = true,
   canMoveRight = true,
-  dragHandleProps,
+  dragProps,
 }: QuickChatTabItemProps) {
   const {
     isEditing,
     draft,
     inputRef,
     editContainerRef,
-    commit,
-    cancel,
     handleStartEdit,
     handleInputBlur,
-    keepInputFocused,
     handleDraftChange,
     handleKeyDown,
   } = useQuickChatTabRename({ name, isRenameable, onRename });
@@ -560,12 +492,9 @@ export const QuickChatTabItem = memo(function QuickChatTabItem({
         onMoveRight,
         canMoveLeft,
         canMoveRight,
-        onCommit: commit,
-        onCancel: cancel,
         onClose,
-        keepInputFocused,
       }}
-      dragHandleProps={dragHandleProps}
+      dragProps={dragProps}
     />
   );
 });

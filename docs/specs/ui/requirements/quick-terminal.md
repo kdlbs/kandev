@@ -2,7 +2,7 @@
 status: active
 system: ui
 created: 2026-08-03
-updated: 2026-08-26
+updated: 2026-08-27
 owners:
   - kandev
 ---
@@ -43,7 +43,7 @@ Quick Chat and Quick Terminal are both short-lived utilities reached from the sa
 - **AC-UI-QUICK-TERMINAL-002.4:** The system ignores unknown, duplicate, and stale saved tab references. It appends new persisted tabs in a stable baseline order. Temporary setup tabs remain at the trailing edge and do not enter the saved order.
 - **AC-UI-QUICK-TERMINAL-002.5:** A failed order save leaves every tab available and keeps the active tab selected. The dialog shows a user-visible save error. A later load can restore the last order that the backend accepted.
 - **AC-UI-QUICK-TERMINAL-002.6:** A working-state grid spinner has at least 6 CSS pixels of horizontal space before its tab title.
-- **AC-UI-QUICK-TERMINAL-002.7:** Rename mode shows a bordered input with a visible focus state and text selection. It replaces the tab close action with explicit **Save** and **Cancel** actions. Enter or **Save** commits a trimmed name. Escape or **Cancel** restores the previous name.
+- **AC-UI-QUICK-TERMINAL-002.7:** Rename mode visibly distinguishes the tab with an edit-state background and border, shows a focused bordered input with selected text, and omits inline **Save** and **Cancel** actions. Enter commits a trimmed name, Escape restores the previous name, and blur commits without a duplicate rename.
 - **AC-UI-QUICK-TERMINAL-002.8:** On phone and tablet viewports, the tab strip contains its own horizontal overflow. The selected content remains the dialog scroll owner, and the feature does not cause document horizontal overflow.
 
 ## System design

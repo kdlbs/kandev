@@ -31,7 +31,10 @@ async function waitForQuickChatWidth(dialog: Locator) {
 
 async function dragQuickChatTab(page: Page, source: Locator, target: Locator) {
   const [sourceBox, targetBox] = await Promise.all([
-    source.getByTestId("quick-chat-tab-drag-handle").boundingBox(),
+    source
+      .locator('[data-testid="quick-chat-tab"], [data-testid="quick-terminal-tab"]')
+      .first()
+      .boundingBox(),
     target.boundingBox(),
   ]);
   expect(sourceBox).not.toBeNull();
@@ -750,7 +753,7 @@ test.describe("Quick Chat", () => {
     const renameInput = secondTab.getByRole("textbox", { name: "Rename chat" });
     await expect(renameInput).toBeVisible();
     await renameInput.fill("Cache follow-up");
-    await secondTab.getByRole("button", { name: "Save", exact: true }).click();
+    await renameInput.press("Enter");
     await expect(secondTab.getByTestId("quick-chat-tab-name")).toHaveText("Cache follow-up");
 
     // Drag the terminal ahead of both conversations. This exercises the real

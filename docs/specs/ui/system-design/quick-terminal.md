@@ -5,7 +5,7 @@ requirements:
   - REQ-UI-QUICK-TERMINAL-001
   - REQ-UI-QUICK-TERMINAL-002
 created: 2026-08-03
-updated: 2026-08-26
+updated: 2026-08-27
 owners:
   - kandev
 ---
@@ -83,20 +83,22 @@ Decision: [Store Quick Chat Tab Order as a User Preference](../../../decisions/2
 
 ### Interaction and accessibility
 
-The sortable strip uses the existing dnd-kit packages. A mouse drag starts after 8 CSS pixels of
-movement. A touch drag starts after a 250 millisecond hold with 5 CSS pixels of movement tolerance.
-The touch delay preserves horizontal swipe scrolling and ordinary tab activation. The keyboard
-sensor uses horizontal sortable coordinates.
+The sortable strip uses the existing dnd-kit packages. The tab surface is the pointer and touch
+drag activator; it has no separate visible drag-handle control. A mouse drag starts after 8 CSS
+pixels of movement. A touch drag starts after a 250 millisecond hold with 5 CSS pixels of movement
+tolerance. The touch delay preserves horizontal swipe scrolling and ordinary tab activation. The
+keyboard sensor uses horizontal sortable coordinates.
 
 Fine-pointer tabs keep direct close, double-click rename, and context-menu actions. Coarse-pointer
 tabs expose a visible action button. Its responsive menu contains **Rename** for conversation tabs,
 directional move actions, and **Close**. Directional move actions also provide a precise fallback
 when touch drag is difficult. Terminal tabs omit **Rename**.
 
-Rename mode presents a clear input border, background, caret, focus ring, and selected text. It
-replaces the close action with **Save** and **Cancel**. The input uses at least 16 CSS pixels of text
-on coarse-pointer devices to prevent automatic mobile zoom. Enter and **Save** share one commit
-path. Escape and **Cancel** share one restore path. Blur cannot cause a second commit.
+Rename mode presents a distinct tab background and border plus a clear input border, background,
+caret, focus ring, and selected text. It omits inline **Save** and **Cancel** actions while editing.
+The input uses at least 16 CSS pixels of text on coarse-pointer devices to prevent automatic mobile
+zoom. Enter commits through the same path as blur. Escape restores the previous name. Blur cannot
+cause a second commit.
 
 The working-state grid spinner and title use an explicit gap of at least 6 CSS pixels. The gap does
 not depend on the title text or spinner animation.
@@ -106,8 +108,9 @@ not depend on the title text or spinner animation.
 - **Entry point:** The existing Quick Chat launchers open the same responsive dialog.
 - **Phone surface:** The existing full-height dynamic-viewport dialog remains in place. Tablet and
   desktop keep the existing large floating dialog.
-- **Interaction:** Mouse uses distance-activated drag. Touch uses hold-activated drag. The visible
-  coarse-pointer menu provides rename, move, and close actions without hover or a hidden gesture.
+- **Interaction:** Mouse uses distance-activated drag from the tab surface. Touch uses hold-activated
+  drag from the tab surface. The visible coarse-pointer menu provides rename, move, and close
+  actions without hover or a hidden gesture.
 - **Scrolling:** The tab strip owns horizontal overflow. The selected chat or terminal owns the
   remaining content scroll region. The document must not gain horizontal overflow.
 - **Parity:** All viewports use the same order resolver, optimistic state, and persistence path.
@@ -130,7 +133,8 @@ is pending uses the latest optimistic list as the next serialized save input.
 
 Unit tests cover order resolution, stale and duplicate references, stable append behavior, save
 serialization, rename commit and cancel paths, and the active-tab invariant. Component tests assert
-the spinner-to-title gap and visible edit controls.
+the spinner-to-title gap, tab-surface drag activation, and the visually distinct edit state without
+inline Save or Cancel controls.
 
 Desktop Playwright coverage drags mixed chat and terminal tabs, reloads, and checks the same order.
 It replaces the current test that expects activity-based reorder after reload. Mobile Playwright

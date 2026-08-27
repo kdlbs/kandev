@@ -94,7 +94,7 @@ test.describe("mobile quick chat tabs", () => {
       const renameInput = firstTab.getByRole("textbox", { name: "Rename chat" });
       await expect(renameInput).toBeVisible();
       await renameInput.fill("Phone renamed");
-      await firstTab.getByRole("button", { name: "Save", exact: true }).tap();
+      await renameInput.press("Enter");
       await expect(firstTab.getByTestId("quick-chat-tab-name")).toHaveText("Phone renamed");
 
       const controls = dialog.locator(

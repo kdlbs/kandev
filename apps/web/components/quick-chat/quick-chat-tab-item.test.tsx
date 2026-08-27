@@ -1,6 +1,6 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { cleanup, render, fireEvent } from "@testing-library/react";
-import { QuickChatTabItem, type QuickChatTabDragHandleProps } from "./quick-chat-tab-item";
+import { QuickChatTabItem, type QuickChatTabDragProps } from "./quick-chat-tab-item";
 
 const responsiveMock = vi.hoisted(() => ({ isFinePointer: true }));
 
@@ -88,26 +88,30 @@ describe("QuickChatTabItem rename", () => {
     expect(getByLabelText("Configuration chat")).toBeTruthy();
   });
 
-  it("keeps tab activation separate from the sortable keyboard activator", () => {
+  it("uses the tab surface as the sortable activator without a visible drag handle", () => {
     const onActivate = vi.fn();
-    const dragHandleProps = {
+    const onDragStart = vi.fn();
+    const setActivatorNodeRef = vi.fn();
+    const dragProps = {
       attributes: { "aria-roledescription": "sortable" },
-      listeners: {},
-      setActivatorNodeRef: vi.fn(),
-    } as unknown as QuickChatTabDragHandleProps;
+      listeners: { onPointerDown: onDragStart },
+      setActivatorNodeRef,
+    } as unknown as QuickChatTabDragProps;
 
-    const { getByRole, getByTestId } = render(
-      <QuickChatTabItem {...makeProps({ onActivate })} dragHandleProps={dragHandleProps} />,
+    const { getByRole, getByTestId, queryByTestId } = render(
+      <QuickChatTabItem {...makeProps({ onActivate })} dragProps={dragProps} />,
     );
 
-    const tabButton = getByRole("button", { name: "Original" });
-    expect(tabButton.getAttribute("aria-roledescription")).toBeNull();
-    expect(getByTestId("quick-chat-tab-drag-handle").getAttribute("aria-roledescription")).toBe(
-      "sortable",
-    );
+    const tabSurface = getByTestId("quick-chat-tab");
+    const tabButton = getByRole("button", { name: /^Original$/ });
+    expect(tabSurface.getAttribute("aria-roledescription")).toBe("sortable");
+    expect(queryByTestId("quick-chat-tab-drag-handle")).toBeNull();
+    expect(setActivatorNodeRef).toHaveBeenCalledWith(tabSurface);
 
     fireEvent.click(tabButton);
     expect(onActivate).toHaveBeenCalledOnce();
+    fireEvent.pointerDown(tabSurface);
+    expect(onDragStart).toHaveBeenCalledOnce();
   });
 });
 
@@ -158,52 +162,55 @@ describe("QuickChatTabItem rename actions", () => {
     expect(onRename).toHaveBeenCalledWith("New name");
   });
 
-  it("commits the rename with Save and replaces close with edit actions", () => {
+  it("shows edit mode clearly without Save or Cancel buttons", () => {
     const onRename = vi.fn();
-    const { getByText, getByLabelText, getByRole, queryByLabelText, queryByRole } = render(
+    const { getByText, getByLabelText, getByTestId, queryByRole, queryByLabelText } = render(
       <QuickChatTabItem {...makeProps({ onRename })} />,
     );
     startEditing(getByText("Original"));
 
     const input = getByLabelText(RENAME_LABEL) as HTMLInputElement;
-    expect(input.className).toContain("border-input");
+    expect(input.className).toContain("border-primary");
+    expect(input.className).toContain("bg-accent");
     expect(input.className).toContain("text-base");
+    const tabSurface = getByTestId("quick-chat-tab");
+    expect(tabSurface.className).toContain("border-primary");
+    expect(tabSurface.className).toContain("bg-accent");
+    expect(queryByRole("button", { name: "Save" })).toBeNull();
+    expect(queryByRole("button", { name: "Cancel" })).toBeNull();
+
     fireEvent.change(input, { target: { value: "  Saved name  " } });
-    fireEvent.click(getByRole("button", { name: "Save" }));
+    fireEvent.keyDown(input, { key: "Enter" });
 
     expect(onRename).toHaveBeenCalledTimes(1);
     expect(onRename).toHaveBeenCalledWith("Saved name");
     expect(queryByLabelText(RENAME_LABEL)).toBeNull();
-    expect(queryByRole("button", { name: "Close Original" })).toBeTruthy();
   });
 
-  it("restores the previous name with Cancel without calling onRename", () => {
+  it("restores the previous name with Escape without calling onRename", () => {
     const onRename = vi.fn();
-    const { getByText, getByLabelText, getByRole, queryByLabelText } = render(
+    const { getByText, getByLabelText, queryByLabelText } = render(
       <QuickChatTabItem {...makeProps({ onRename })} />,
     );
     startEditing(getByText("Original"));
 
-    fireEvent.change(getByLabelText(RENAME_LABEL), { target: { value: "Draft" } });
-    fireEvent.click(getByRole("button", { name: "Cancel" }));
+    const input = getByLabelText(RENAME_LABEL);
+    fireEvent.change(input, { target: { value: "Draft" } });
+    fireEvent.keyDown(input, { key: "Escape" });
 
     expect(onRename).not.toHaveBeenCalled();
     expect(queryByLabelText(RENAME_LABEL)).toBeNull();
     expect(getByText("Original")).toBeTruthy();
   });
 
-  it("does not commit twice when focus moves to Save", () => {
+  it("commits once when editing ends through blur", () => {
     const onRename = vi.fn();
-    const { getByText, getByLabelText, getByRole } = render(
-      <QuickChatTabItem {...makeProps({ onRename })} />,
-    );
+    const { getByText, getByLabelText } = render(<QuickChatTabItem {...makeProps({ onRename })} />);
     startEditing(getByText("Original"));
 
     const input = getByLabelText(RENAME_LABEL) as HTMLInputElement;
     fireEvent.change(input, { target: { value: "Saved once" } });
-    const save = getByRole("button", { name: "Save" });
-    fireEvent.blur(input, { relatedTarget: save });
-    fireEvent.click(save);
+    fireEvent.blur(input);
 
     expect(onRename).toHaveBeenCalledTimes(1);
     expect(onRename).toHaveBeenCalledWith("Saved once");

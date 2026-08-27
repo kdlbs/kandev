@@ -28,7 +28,7 @@ import { isQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-sess
 import type { QuickChatSession, QuickTerminalTab } from "@/lib/state/slices/ui/types";
 import type { TFunction } from "i18next";
 import { cn } from "@/lib/utils";
-import { QuickChatTabItem, type QuickChatTabDragHandleProps } from "./quick-chat-tab-item";
+import { QuickChatTabItem, type QuickChatTabDragProps } from "./quick-chat-tab-item";
 import { QuickTerminalTabItem } from "./quick-terminal-tab-item";
 import { QuickTabAddMenu } from "./quick-tab-add-menu";
 import { conversationTabReference, terminalTabReference } from "./use-quick-chat-tab-order";
@@ -58,7 +58,7 @@ function QuickChatConversationTab({
   onMoveRight?: () => void;
   canMoveLeft?: boolean;
   canMoveRight?: boolean;
-  dragHandleProps?: QuickChatTabDragHandleProps;
+  dragProps?: QuickChatTabDragProps;
 }) {
   const isWorking = useAppStore((state) =>
     selectQuickChatSessionIsWorking(state, session.sessionId),
@@ -70,14 +70,14 @@ function QuickChatConversationTab({
       isRenameable={!isQuickChatSetupSessionId(session.sessionId)}
       isWorking={!isQuickChatSetupSessionId(session.sessionId) && isWorking}
       kind={session.kind}
-      dragHandleProps={props.dragHandleProps}
+      dragProps={props.dragProps}
     />
   );
 }
 
 type SortableQuickChatTabProps = {
   reference: string;
-  children: (dragHandleProps: QuickChatTabDragHandleProps) => ReactNode;
+  children: (dragProps: QuickChatTabDragProps) => ReactNode;
 };
 
 function SortableQuickChatTab({ reference, children }: SortableQuickChatTabProps) {
@@ -172,7 +172,7 @@ function QuickChatSortableTabItem({
 }: QuickChatSortableTabItemProps) {
   return (
     <SortableQuickChatTab reference={reference}>
-      {(dragHandleProps) => {
+      {(dragProps) => {
         if (session) {
           return (
             <QuickChatConversationTab
@@ -186,7 +186,7 @@ function QuickChatSortableTabItem({
               onMoveRight={() => moveTab(reference, 1)}
               canMoveLeft={canMoveLeft}
               canMoveRight={canMoveRight}
-              dragHandleProps={dragHandleProps}
+              dragProps={dragProps}
             />
           );
         }
@@ -202,7 +202,7 @@ function QuickChatSortableTabItem({
             onMoveRight={() => moveTab(reference, 1)}
             canMoveLeft={canMoveLeft}
             canMoveRight={canMoveRight}
-            dragHandleProps={dragHandleProps}
+            dragProps={dragProps}
           />
         );
       }}
