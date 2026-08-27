@@ -37,18 +37,21 @@ function handleNonSessionSuccessor(
   if (!panel.id.startsWith("session:") && isActiveSessionPanelGone) {
     const remainingSessionPanel = api.panels.find((p) => p.id.startsWith("session:"));
     if (remainingSessionPanel) {
+      const target = resolveSessionTabSyncTarget({
+        panelId: remainingSessionPanel.id,
+        activeTaskId: state.tasks.activeTaskId,
+        activeSessionId: state.tasks.activeSessionId,
+        taskSessionsById: state.taskSessions.items,
+        environmentIdBySessionId: state.environmentIdBySessionId,
+      });
+      if (!target) return false;
       if (isDebug()) {
         debug("setupSessionTabSync: activating remaining session panel", {
           remainingPanelId: remainingSessionPanel.id,
           closedActiveSessionId: state.tasks.activeSessionId,
         });
       }
-      if (state.tasks.activeTaskId) {
-        state.setActiveSession(
-          state.tasks.activeTaskId,
-          remainingSessionPanel.id.slice("session:".length),
-        );
-      }
+      state.setActiveSession(target.taskId, target.sessionId);
       return true;
     }
   }

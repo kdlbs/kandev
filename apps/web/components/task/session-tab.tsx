@@ -203,7 +203,7 @@ function useSessionTabActions(
     remove: handleDelete,
   } = useSessionActions({ sessionId, taskId, onDeleted: handleCloseTab });
   const handleCloseOthers = useCallback(() => {
-    const toClose = containerApi.panels.filter(
+    const toClose = api.group.panels.filter(
       (panel) => panel.id !== api.id && panel.id.startsWith("session:"),
     );
     for (const panel of toClose) containerApi.removePanel(panel);

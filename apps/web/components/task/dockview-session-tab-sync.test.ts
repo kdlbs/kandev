@@ -44,6 +44,7 @@ function makeSessionTabSyncHarness(args: {
   activeTaskId: string;
   activeSessionId: string;
   otherSessionId: string;
+  otherSessionTaskId?: string;
   includeOtherEnv?: boolean;
 }) {
   let activePanelChange: ((panel: { id: string } | null) => void) | null = null;
@@ -77,7 +78,10 @@ function makeSessionTabSyncHarness(args: {
       taskSessions: {
         items: {
           [args.activeSessionId]: { id: args.activeSessionId, task_id: args.activeTaskId },
-          [args.otherSessionId]: { id: args.otherSessionId, task_id: args.activeTaskId },
+          [args.otherSessionId]: {
+            id: args.otherSessionId,
+            task_id: args.otherSessionTaskId ?? args.activeTaskId,
+          },
         },
       },
       environmentIdBySessionId,
@@ -205,6 +209,20 @@ describe("setupSessionTabSync", () => {
     expect(harness.setActiveSession).toHaveBeenCalledWith(TASK_ID, OTHER_SESSION_ID);
   });
 
+  it("does not pin a previous task's remaining session after a non-session successor", () => {
+    const harness = makeSessionTabSyncHarness({
+      activeTaskId: TASK_ID,
+      activeSessionId: ACTIVE_SESSION_ID,
+      otherSessionId: OTHER_SESSION_ID,
+      otherSessionTaskId: "task-B",
+    });
+
+    startSessionTabSync(harness);
+    harness.api.panels.splice(0, 1);
+    harness.fireActivePanelChange("files");
+
+    expect(harness.setActiveSession).not.toHaveBeenCalled();
+  });
   it("does not activate a stale session when panel is non-session but active session panel still exists", () => {
     const harness = makeDefaultSessionTabSyncHarness();
 
