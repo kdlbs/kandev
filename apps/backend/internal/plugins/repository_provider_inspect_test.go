@@ -10,8 +10,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/plugins/pkgtar/pkgtartest"
 	"github.com/kandev/kandev/pkg/pluginsdk"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func TestInspectRepositoryProviderUsesOwnedDeclaredActionAndVerifiedWorkspace(t *testing.T) {
@@ -150,6 +154,92 @@ func TestInspectRepositoryProviderRejectsRedirectResponse(t *testing.T) {
 			return &pluginsdk.PluginActionResponse{Status: 302, Body: validInspectionResponse()}, nil
 		})
 	assertRepositoryProviderError(t, err, RepositoryProviderErrorUnavailable)
+}
+
+func TestInspectRepositoryProviderLogsSanitizedOutcome(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	if _, err := svc.Install(t.Context(), repositoryInspectPackage(t, "workspace")); err != nil {
+		t.Fatalf("install provider plugin: %v", err)
+	}
+	core, observed := observer.New(zapcore.InfoLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("create observed logger: %v", err)
+	}
+	svc.log = log
+
+	request := RepositoryProviderInspectionRequest{
+		Provider: "bitbucket", URL: "https://bitbucket.example.test/acme/widgets",
+	}
+	tests := []struct {
+		name        string
+		invoke      repositoryActionInvoker
+		wantShape   string
+		wantFailure string
+		wantError   RepositoryProviderErrorCode
+	}{
+		{
+			name: "success",
+			invoke: func(context.Context, string, pluginDispatchGeneration, *pluginsdk.PluginActionRequest) (*pluginsdk.PluginActionResponse, error) {
+				return &pluginsdk.PluginActionResponse{Body: validInspectionResponse()}, nil
+			},
+			wantShape:   "nested_descriptor",
+			wantFailure: "none",
+		},
+		{
+			name: "invalid descriptor",
+			invoke: func(context.Context, string, pluginDispatchGeneration, *pluginsdk.PluginActionRequest) (*pluginsdk.PluginActionResponse, error) {
+				return &pluginsdk.PluginActionResponse{Body: []byte(`{"repository":{"provider_id":"bitbucket"}}`)}, nil
+			},
+			wantShape:   "nested_descriptor",
+			wantFailure: "invalid",
+			wantError:   RepositoryProviderErrorInvalid,
+		},
+		{
+			name: "provider unavailable",
+			invoke: func(context.Context, string, pluginDispatchGeneration, *pluginsdk.PluginActionRequest) (*pluginsdk.PluginActionResponse, error) {
+				return nil, context.DeadlineExceeded
+			},
+			wantShape:   "none",
+			wantFailure: "unavailable",
+			wantError:   RepositoryProviderErrorUnavailable,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			before := observed.Len()
+			_, err := svc.inspectRepositoryProvider(t.Context(), "workspace-1", request, test.invoke)
+			if test.wantError == "" {
+				if err != nil {
+					t.Fatalf("inspectRepositoryProvider: %v", err)
+				}
+			} else {
+				assertRepositoryProviderError(t, err, test.wantError)
+			}
+			entries := observed.All()
+			if len(entries) != before+1 {
+				t.Fatalf("log entries = %d, want %d", len(entries), before+1)
+			}
+			fields := entries[before].ContextMap()
+			for key, want := range map[string]string{
+				"provider_id":      "bitbucket",
+				"plugin_id":        "kandev-plugin-bitbucket",
+				"workspace_id":     "workspace-1",
+				"response_shape":   test.wantShape,
+				"failure_category": test.wantFailure,
+			} {
+				if got := fmt.Sprint(fields[key]); got != want {
+					t.Errorf("%s = %q, want %q", key, got, want)
+				}
+			}
+			if _, ok := fields["duration"]; !ok {
+				t.Error("duration field is missing")
+			}
+			if strings.Contains(entries[before].Message, request.URL) || strings.Contains(fmt.Sprint(fields), request.URL) {
+				t.Errorf("inspection log leaked repository URL: %s", request.URL)
+			}
+		})
+	}
 }
 
 func assertRepositoryProviderError(t *testing.T, err error, want RepositoryProviderErrorCode) {

@@ -81,6 +81,12 @@ export function taskSubmitErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : t(GENERIC_ERROR_KEY);
 }
 
+function isRepositorySelectionError(error: unknown): boolean {
+  return (
+    error instanceof ApiError && Boolean(REPOSITORY_SELECTION_ERROR_KEYS[error.errorCode ?? ""])
+  );
+}
+
 // eslint-disable-next-line max-lines-per-function
 export function useTaskSubmitHandlers({
   isSessionMode,
@@ -390,7 +396,9 @@ export function useTaskSubmitHandlers({
 
       onSuccess?.(updatedTask, "edit", { taskSessionId });
     } catch (error) {
-      closeDialog = !(await refreshStaleBranchPolicies(error));
+      closeDialog = !(
+        isRepositorySelectionError(error) || (await refreshStaleBranchPolicies(error))
+      );
       toast({
         title: t("task:failedToUpdateTask"),
         description: taskSubmitErrorMessage(error),
@@ -422,7 +430,9 @@ export function useTaskSubmitHandlers({
       if (!result) return;
       onSuccess?.(result.updatedTask, "edit");
     } catch (error) {
-      closeDialog = !(await refreshStaleBranchPolicies(error));
+      closeDialog = !(
+        isRepositorySelectionError(error) || (await refreshStaleBranchPolicies(error))
+      );
       toast({
         title: t("task:failedToUpdateTask"),
         description: taskSubmitErrorMessage(error),

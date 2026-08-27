@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/pkg/pluginsdk"
+	"go.uber.org/zap"
 )
 
 const (
@@ -17,6 +18,7 @@ const (
 	repositoryInspectActionTimeout   = 15 * time.Second
 	maxRepositoryProviderScopeBytes  = 512
 	nullJSONValue                    = "null"
+	repositoryProviderInspectionNone = "none"
 )
 
 // RepositoryProviderInspectionRequest contains the untrusted URL and optional
@@ -88,7 +90,28 @@ func (s *Service) inspectRepositoryProvider(
 	workspaceID string,
 	request RepositoryProviderInspectionRequest,
 	invoke repositoryActionInvoker,
-) (*RepositoryProviderInspection, error) {
+) (inspection *RepositoryProviderInspection, err error) {
+	started := time.Now()
+	providerID := strings.TrimSpace(request.Provider)
+	pluginID := ""
+	responseShape := "not_sent"
+	defer func() {
+		if s.log == nil {
+			return
+		}
+		failureCategory := repositoryProviderInspectionNone
+		if err != nil {
+			failureCategory = repositoryProviderInspectionFailureCategory(err)
+		}
+		s.log.Info("plugin repository inspection",
+			zap.String("provider_id", providerID),
+			zap.String("plugin_id", pluginID),
+			zap.String("workspace_id", workspaceID),
+			zap.Duration("duration", time.Since(started)),
+			zap.String("response_shape", responseShape),
+			zap.String("failure_category", failureCategory))
+	}()
+
 	request.Provider = strings.TrimSpace(request.Provider)
 	request.URL = strings.TrimSpace(request.URL)
 	if strings.TrimSpace(workspaceID) == "" || request.Provider == "" || request.URL == "" {
@@ -98,6 +121,7 @@ func (s *Service) inspectRepositoryProvider(
 	if err != nil {
 		return nil, newRepositoryProviderError(RepositoryProviderErrorUnavailable, err)
 	}
+	pluginID = record.ID
 	body, err := json.Marshal(map[string]string{"url": request.URL})
 	if err != nil || action.MaxBodyBytes <= 0 || len(body) > action.MaxBodyBytes {
 		return nil, newRepositoryProviderError(RepositoryProviderErrorInvalid, err)
@@ -109,17 +133,60 @@ func (s *Service) inspectRepositoryProvider(
 		Context:   pluginsdk.VerifiedActionContext{WorkspaceID: workspaceID},
 		Body:      body,
 	})
+	responseShape = repositoryProviderInspectionResponseShape(response)
 	if err != nil {
 		return nil, newRepositoryProviderError(RepositoryProviderErrorUnavailable, err)
 	}
+	return parseRepositoryProviderActionResponse(response, request)
+}
+
+func parseRepositoryProviderActionResponse(
+	response *pluginsdk.PluginActionResponse, request RepositoryProviderInspectionRequest,
+) (*RepositoryProviderInspection, error) {
 	if response != nil && response.Status != 0 && (response.Status < 200 || response.Status >= 300) {
 		return nil, repositoryProviderStatusError(response.Status)
 	}
-	inspection, err := parseRepositoryProviderInspection(response, request)
-	if err != nil {
-		return nil, err
+	return parseRepositoryProviderInspection(response, request)
+}
+
+func repositoryProviderInspectionFailureCategory(err error) string {
+	var providerErr *RepositoryProviderError
+	if errors.As(err, &providerErr) && providerErr.Code != "" {
+		return string(providerErr.Code)
 	}
-	return inspection, nil
+	return "unknown"
+}
+
+func repositoryProviderInspectionResponseShape(response *pluginsdk.PluginActionResponse) string {
+	if response == nil {
+		return repositoryProviderInspectionNone
+	}
+	if response.Status != 0 && (response.Status < 200 || response.Status >= 300) {
+		return "http_status"
+	}
+	if len(response.Body) == 0 {
+		return "empty"
+	}
+	if len(response.Body) > maxRepositoryInspectResponseSize {
+		return "oversized"
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(response.Body, &raw); err != nil {
+		return "invalid_json"
+	}
+	if matched, exists := raw["matched"]; exists {
+		var value bool
+		if err := json.Unmarshal(matched, &value); err != nil {
+			return "invalid_matched"
+		}
+		if !value {
+			return "matched_false"
+		}
+	}
+	if _, nested := raw["repository"]; nested {
+		return "nested_descriptor"
+	}
+	return "direct_descriptor"
 }
 
 func parseRepositoryProviderInspection(
