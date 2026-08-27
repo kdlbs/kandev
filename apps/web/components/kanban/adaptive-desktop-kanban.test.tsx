@@ -2,13 +2,16 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { AdaptiveDesktopKanban } from "./adaptive-desktop-kanban";
 
+const blankColumnSpaceTestId = "blank-column-space";
+const grabbingCursorClass = "cursor-grabbing";
+
 function renderBoard() {
   render(
     <AdaptiveDesktopKanban
       steps={[{ id: "backlog", title: "Backlog", color: "bg-blue-500" }]}
       renderColumn={() => (
         <div>
-          <div data-testid="blank-column-space" />
+          <div data-testid={blankColumnSpaceTestId} />
           <button type="button" data-testid="card-action">
             <svg data-testid="card-action-icon" />
           </button>
@@ -25,12 +28,28 @@ function renderBoard() {
 }
 
 function startPan(window: HTMLElement, clientX = 200) {
-  fireEvent.mouseDown(screen.getByTestId("blank-column-space"), { button: 0, clientX });
+  fireEvent.mouseDown(screen.getByTestId(blankColumnSpaceTestId), { button: 0, clientX });
   fireEvent.mouseMove(window, { buttons: 1, clientX: clientX - 20 });
 }
 
 afterEach(cleanup);
 describe("AdaptiveDesktopKanban mouse panning", () => {
+  it("shows a grabbing cursor only while holding an eligible board background", () => {
+    const window = renderBoard();
+
+    expect(window.classList.contains("cursor-grab")).toBe(false);
+    expect(window.classList.contains(grabbingCursorClass)).toBe(false);
+
+    fireEvent.mouseDown(screen.getByTestId(blankColumnSpaceTestId), { button: 0, clientX: 200 });
+    expect(window.classList.contains(grabbingCursorClass)).toBe(true);
+
+    fireEvent.mouseUp(window);
+    expect(window.classList.contains(grabbingCursorClass)).toBe(false);
+
+    fireEvent.mouseDown(screen.getByTestId("task-card-shell-child"), { button: 0, clientX: 200 });
+    expect(window.classList.contains(grabbingCursorClass)).toBe(false);
+  });
+
   it("@covers AC-1 AC-2 pans from the original pointer and scroll baseline", () => {
     const window = renderBoard();
     window.scrollLeft = 400;
@@ -46,11 +65,11 @@ describe("AdaptiveDesktopKanban mouse panning", () => {
     const window = renderBoard();
     window.scrollLeft = 400;
 
-    fireEvent.mouseDown(screen.getByTestId("blank-column-space"), { button: 2, clientX: 200 });
+    fireEvent.mouseDown(screen.getByTestId(blankColumnSpaceTestId), { button: 2, clientX: 200 });
     fireEvent.mouseMove(window, { buttons: 2, clientX: 100 });
     expect(window.scrollLeft).toBe(400);
 
-    fireEvent.mouseDown(screen.getByTestId("blank-column-space"), { button: 0, clientX: 200 });
+    fireEvent.mouseDown(screen.getByTestId(blankColumnSpaceTestId), { button: 0, clientX: 200 });
     fireEvent.mouseMove(window, { buttons: 1, clientX: 196 });
     expect(window.scrollLeft).toBe(400);
   });

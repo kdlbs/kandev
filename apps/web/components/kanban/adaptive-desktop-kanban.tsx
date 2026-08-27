@@ -40,11 +40,13 @@ export function AdaptiveDesktopKanban({
 }: AdaptiveDesktopKanbanProps) {
   const scrollWindowRef = useRef<HTMLDivElement | null>(null);
   const panStartRef = useRef<PanStart | null>(null);
+  const [isPanCandidate, setIsPanCandidate] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
 
   const cancelPan = () => {
     panStartRef.current = null;
     scrollWindowRef.current?.style.removeProperty("scroll-snap-type");
+    setIsPanCandidate(false);
     setIsPanning(false);
   };
 
@@ -55,6 +57,7 @@ export function AdaptiveDesktopKanban({
       clientX: event.clientX,
       scrollLeft: event.currentTarget.scrollLeft,
     };
+    setIsPanCandidate(true);
   };
 
   const handleMouseMove = (event: MouseEvent<HTMLDivElement>) => {
@@ -83,8 +86,8 @@ export function AdaptiveDesktopKanban({
         ref={scrollWindowRef}
         data-testid="desktop-kanban-scroll-window"
         className={`h-full min-h-0 min-w-0 overflow-x-auto snap-x snap-mandatory ${
-          isPanning ? "cursor-grabbing select-none" : "cursor-grab"
-        }`}
+          isPanCandidate ? "cursor-grabbing" : ""
+        } ${isPanning ? "select-none" : ""}`}
         style={{ scrollSnapType: isPanning ? "none" : undefined }}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
