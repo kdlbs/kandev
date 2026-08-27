@@ -113,11 +113,13 @@ Red-Green-Refactor evidence:
 - The selection-callback test failed before the shared callback was wired.
 - The helper tests failed before the new helper module was created.
 - Both suites passed after implementation.
+- PR fixup added a regression test for Plan's filtered baseline position. It
+  failed before the fix and passed after the rank helper captured that index.
 
 Verification:
 
 - `cd apps && pnpm install --frozen-lockfile` passed.
-- `cd apps/web && pnpm test -- lib/chat-mention-recency.test.ts components/task/chat/tiptap-suggestion.test.ts` passed (2 files, 24 tests).
+- `cd apps/web && pnpm test -- lib/chat-mention-recency.test.ts components/task/chat/tiptap-suggestion.test.ts` passed (2 files, 25 tests).
 - `cd apps/web && pnpm e2e:run tests/chat/mention-recency.spec.ts` passed (1 test).
 - `cd apps/web && pnpm e2e:run --project mobile-chrome tests/chat/mobile-mention-recency.spec.ts` passed (1 test).
 - `cd apps/web && pnpm run typecheck` passed.

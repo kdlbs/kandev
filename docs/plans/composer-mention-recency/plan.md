@@ -110,7 +110,8 @@ changes and record their expected failures in the work-order results.
 - Red-Green-Refactor passed. The new selection-callback test failed before the
   callback wiring existed, and the new helper tests failed before the helper
   module existed.
-- Focused web unit tests passed: 2 files, 24 tests.
+- Focused web unit tests passed: 2 files, 25 tests, including the filtered-query
+  Plan-position regression found during PR fixup.
 - Managed production-build desktop and `mobile-chrome` E2E tests passed: 1 test
   each. Desktop coverage includes same-device reload persistence.
 - Web typecheck and targeted web lint passed with no errors or warnings.

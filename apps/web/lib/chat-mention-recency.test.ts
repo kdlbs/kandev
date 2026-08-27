@@ -100,6 +100,18 @@ describe("chat mention recency", () => {
     ).toEqual([recent, plan, first]);
   });
 
+  it("uses Plan's filtered baseline position for non-empty queries", () => {
+    const filtered = makeItem("task", "task:filtered", "Unrelated task", "filtered");
+    const plan = makeItem("plan", "__plan__", "Plan");
+    const recent = makeItem("prompt", "prompt-recent", "Plan prompt");
+
+    expect(
+      rankMentionItems([filtered, plan, recent], "plan", WORKSPACE_ID, [
+        { kind: "prompt", id: recent.id },
+      ]),
+    ).toEqual([plan, recent]);
+  });
+
   it("scopes file identities to the active workspace", () => {
     const sharedPath = makeItem("file", FILE_PATH, FILE_PATH);
     const otherPath = makeItem("file", "src/other.ts", "src/other.ts");

@@ -162,7 +162,8 @@ export function rankMentionItems(
   const recentPositions = new Map(
     normalizedRecentEntries.map((entry, index) => [recentEntryKey(entry), index]),
   );
-  const plan = baseline.find(({ item }) => item.kind === "plan");
+  const planIndex = baseline.findIndex(({ item }) => item.kind === "plan");
+  const plan = planIndex >= 0 ? baseline[planIndex] : undefined;
   const candidates = baseline.filter(({ item }) => item.kind !== "plan");
 
   candidates.sort((a, b) => {
@@ -180,6 +181,6 @@ export function rankMentionItems(
 
   const ranked = candidates.map(({ item }) => item);
   if (!plan) return ranked;
-  ranked.splice(Math.min(plan.baselineIndex, ranked.length), 0, plan.item);
+  ranked.splice(Math.min(planIndex, ranked.length), 0, plan.item);
   return ranked;
 }
