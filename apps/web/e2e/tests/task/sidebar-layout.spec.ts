@@ -66,9 +66,9 @@ test.describe("Sidebar layout — repo groups", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
-    const combinationHeader = session.sidebar
-      .getByTestId("sidebar-group-header")
-      .filter({ hasText: expectedLabel });
+    const combinationHeader = session.sidebar.locator(
+      `[data-testid="sidebar-group-header"][data-group-label="${expectedLabel}"]`,
+    );
     await expect(combinationHeader).toHaveCount(1);
     const combinationGroup = combinationHeader.locator("..");
     await expect(

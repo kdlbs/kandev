@@ -146,9 +146,9 @@ test.describe("Mobile sidebar — view system", () => {
     });
 
     const sheet = await seedAndOpenSheet(testPage, apiClient, seedData, []);
-    const combinationHeader = sheet
-      .getByTestId("sidebar-group-header")
-      .filter({ hasText: expectedLabel });
+    const combinationHeader = sheet.locator(
+      `[data-testid="sidebar-group-header"][data-group-label="${expectedLabel}"]`,
+    );
     await expect(combinationHeader).toHaveCount(1);
     const combinationGroup = combinationHeader.locator("..");
     await expect(
