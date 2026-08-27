@@ -40,6 +40,13 @@ function useTaskPRWithStore(taskId: string | null) {
   return { result, store };
 }
 
+function useTwoTaskPRs(taskId: string | null) {
+  return {
+    first: useTaskPR(taskId),
+    second: useTaskPR(taskId),
+  };
+}
+
 const linkedPR = { id: "association-1", task_id: "task-1" } as TaskPR;
 
 function unlinkState(workspaceId: string | null): Partial<AppState> {
@@ -132,6 +139,31 @@ describe("useTaskPR — loading state", () => {
     });
     expect(requestMock).toHaveBeenCalledTimes(7);
     expect(result.current.loaded).toBe(true);
+  });
+});
+
+describe("useTaskPR — shared synchronization", () => {
+  // @covers AC-INTEGRATIONS-GITHUB-TASK-PR-SYNC-COORDINATION-001.1
+  it("shares initial and retry requests across consumers in one store", async () => {
+    requestMock.mockResolvedValue({ prs: [] });
+
+    const { result } = renderHook(() => useTwoTaskPRs("task-1"), {
+      wrapper: createStateWrapper({
+        workspaces: { items: [], activeId: "workspace-1" },
+      }),
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(requestMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(requestMock).toHaveBeenCalledTimes(2);
+    expect(result.current.first.loaded).toBe(true);
+    expect(result.current.second.loaded).toBe(true);
   });
 });
 
