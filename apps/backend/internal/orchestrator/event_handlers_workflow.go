@@ -1370,6 +1370,7 @@ func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eve
 		ExecutorID        string                 `json:"executor_id"`
 		ExecutorProfileID string                 `json:"executor_profile_id"`
 		UserID            string                 `json:"user_id"`
+		RecordRecentUse   bool                   `json:"record_recent_use"`
 		Prompt            string                 `json:"prompt"`
 		PlanMode          bool                   `json:"plan_mode"`
 		Attachments       []v1.MessageAttachment `json:"attachments"`
@@ -1405,7 +1406,9 @@ func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eve
 			}
 			return
 		}
-		s.recordSuccessfulDeferredTaskProfileAsync(launchCtx, intent.UserID, launchResp.AgentProfileID)
+		if intent.RecordRecentUse {
+			s.recordSuccessfulDeferredTaskProfileAsync(launchCtx, intent.UserID, launchResp.AgentProfileID)
+		}
 		delete(task.Metadata, models.MetaKeyDeferredLaunch)
 		if metadataClaimed {
 			task.UpdatedAt = time.Now().UTC()

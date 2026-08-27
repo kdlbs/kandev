@@ -130,9 +130,16 @@ const (
 	// step (and vice versa).
 	DeferredLaunchStartWhenUnblockedKey = "start_when_unblocked"
 	// DeferredLaunchUserIDKey preserves the authenticated creator so a
-	// deferred task-create launch can update that user's task_create history
-	// after the launch is promoted by the workflow engine.
+	// selector-backed deferred task-create launch can update that user's
+	// task_create history after the launch is promoted by the workflow engine.
+	// It is server-owned state inside the protected deferred launch record and
+	// must not be accepted from task metadata request surfaces.
 	DeferredLaunchUserIDKey = "user_id"
+	// DeferredLaunchRecordRecentUseKey marks a deferred launch that originated
+	// from a selector-backed task-create surface and is therefore eligible to
+	// update task_create profile history after promotion. It is server-owned
+	// state and is omitted from task DTOs.
+	DeferredLaunchRecordRecentUseKey = "record_recent_use"
 	// MetaKeyWorkspacePath is the optional host folder for repo-less tasks
 	// (set by CreateTask, read by the orchestrator when building a session).
 	// Centralised here so the set/read sites can't drift apart.
@@ -2398,7 +2405,7 @@ func (t *Task) ToAPI() *v1.Task {
 		Repositories:    repositories,
 		CreatedAt:       t.CreatedAt,
 		UpdatedAt:       t.UpdatedAt,
-		Metadata:        t.Metadata,
+		Metadata:        PublicTaskMetadata(t.Metadata),
 		Interrupted:     t.Metadata[MetaKeyInterruptedAt] != nil,
 		AutoStartFailed: t.Metadata[MetaKeyAutoStartFailed] != nil,
 		IsEphemeral:     t.IsEphemeral,

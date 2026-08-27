@@ -77,6 +77,9 @@ picker interaction.
   that launch as recent use.
 - **AC-AGENTS-PROFILE-RECENT-USE-002.4:** A failure to save recent use after a
   successful launch shall not fail, undo, or delay the launched operation.
+- **AC-AGENTS-PROFILE-RECENT-USE-002.5:** A programmatic launch that supplies
+  an agent profile without an explicit selector-backed attribution shall not
+  update operational recent use.
 
 ### REQ-AGENTS-PROFILE-RECENT-USE-003: Portable bounded history
 

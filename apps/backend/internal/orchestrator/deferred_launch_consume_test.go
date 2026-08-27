@@ -118,6 +118,7 @@ func TestDeferredTaskCreateLaunchRecordsThePersistedCreatorAfterSuccess(t *testi
 	require.NoError(t, err)
 	launch := task.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
 	launch[models.DeferredLaunchUserIDKey] = "creator-1"
+	launch[models.DeferredLaunchRecordRecentUseKey] = true
 	require.NoError(t, repo.UpdateTask(ctx, task))
 
 	recorder := &deferredRecentUseRecorder{calls: make(chan deferredRecentUseCall, 1)}
@@ -135,6 +136,33 @@ func TestDeferredTaskCreateLaunchRecordsThePersistedCreatorAfterSuccess(t *testi
 	awaitLaunchedSession(t, repo, deferredChainTaskID)
 }
 
+// A deferred launch without the selector attribution marker models an MCP
+// create: the agent profile is operational launch input, not a UI selection.
+// It must not reorder task_create history even if an old or forged record also
+// contains a user ID.
+func TestDeferredMCPLaunchDoesNotRecordRecencyWithoutSelectorAttribution(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedChainStepTask(t, repo, deferredChainTaskID)
+	task, err := repo.GetTask(ctx, deferredChainTaskID)
+	require.NoError(t, err)
+	launch := task.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
+	launch[models.DeferredLaunchUserIDKey] = "mcp-user"
+	require.NoError(t, repo.UpdateTask(ctx, task))
+
+	recorder := &deferredRecentUseRecorder{calls: make(chan deferredRecentUseCall, 1)}
+	svc := newDeferredLaunchTestService(t, repo, newLaunchCounter())
+	svc.SetAgentProfileRecentUseRecorder(recorder)
+
+	require.True(t, svc.launchDeferredTask(ctx, task, "test.deferred_mcp_launch", false))
+	awaitLaunchedSession(t, repo, deferredChainTaskID)
+	select {
+	case call := <-recorder.calls:
+		t.Fatalf("MCP deferred launch recorded profile %q for user %q", call.profileID, call.userID)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
 func TestFailedDeferredTaskCreateLaunchDoesNotRecordRecency(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -143,6 +171,7 @@ func TestFailedDeferredTaskCreateLaunchDoesNotRecordRecency(t *testing.T) {
 	require.NoError(t, err)
 	launch := task.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
 	launch[models.DeferredLaunchUserIDKey] = "creator-1"
+	launch[models.DeferredLaunchRecordRecentUseKey] = true
 	require.NoError(t, repo.UpdateTask(ctx, task))
 
 	taskRepo := newMockTaskRepo()
@@ -473,6 +502,7 @@ func TestQueuePromotionOfBlockedWIPOverflowDoesNotLaunch(t *testing.T) {
 	require.NoError(t, err)
 	createdLaunch := createdTask.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
 	createdLaunch[models.DeferredLaunchUserIDKey] = "creator-1"
+	createdLaunch[models.DeferredLaunchRecordRecentUseKey] = true
 	require.NoError(t, repo.UpdateTask(ctx, createdTask))
 
 	counter := newLaunchCounter()
@@ -561,6 +591,7 @@ func TestFailedPromotedDeferredLaunchRestoresTokenAndRetries(t *testing.T) {
 	require.NoError(t, err)
 	launch := task.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
 	launch[models.DeferredLaunchUserIDKey] = "creator-1"
+	launch[models.DeferredLaunchRecordRecentUseKey] = true
 	task.WorkflowStepID = "step-draft"
 	task.WIPAdmitted = true
 	require.NoError(t, baseRepo.UpdateTask(ctx, task))

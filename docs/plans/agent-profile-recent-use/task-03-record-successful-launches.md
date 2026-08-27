@@ -15,6 +15,7 @@ acceptance_criteria:
   - AC-AGENTS-PROFILE-RECENT-USE-002.2
   - AC-AGENTS-PROFILE-RECENT-USE-002.3
   - AC-AGENTS-PROFILE-RECENT-USE-002.4
+  - AC-AGENTS-PROFILE-RECENT-USE-002.5
 system_design:
   - ../../specs/agents/system-design/profile-recent-use.md
 ---
@@ -95,7 +96,9 @@ cd apps/web && pnpm run typecheck
 
 Connected task creation, subtask creation, task sessions, handoff/session
 launches, quick chat, and configuration chat to best-effort success-only
-recording with effective profile IDs and supersession checks. Verified with:
+recording with effective profile IDs and supersession checks. Deferred
+task-create attribution is explicit and protected from MCP profile input and
+generic task metadata replacement. Verified with:
 
 ```bash
 cd apps && pnpm --filter @kandev/web test -- --run components/task-create-dialog-submit.test.tsx components/task/use-subtask-submit.test.ts components/task/new-session-form-actions.test.ts components/quick-chat/use-quick-chat-modal.test.ts components/config-chat/use-config-chat.test.ts

@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -743,16 +742,20 @@ func (s *Service) buildTask(ctx context.Context, req *CreateTaskRequest, workflo
 		// so callers (e.g. onboarding) can omit it.
 		priority = defaultPriority
 	}
-	metadata := req.Metadata
+	metadata := cloneTaskMetadata(req.Metadata)
+	delete(metadata, models.MetaKeyDeferredLaunch)
 	if req.DeferredLaunch != nil {
 		if metadata == nil {
 			metadata = make(map[string]interface{})
 		}
-		launch := make(map[string]interface{}, len(req.DeferredLaunch)+1)
-		maps.Copy(launch, req.DeferredLaunch)
+		launch := cloneTaskMetadata(req.DeferredLaunch)
 		delete(launch, models.DeferredLaunchUserIDKey)
-		if identity, ok := authn.IdentityFromContext(ctx); ok && identity.UserID != "" {
-			launch[models.DeferredLaunchUserIDKey] = identity.UserID
+		delete(launch, models.DeferredLaunchRecordRecentUseKey)
+		if req.RecordAgentProfileRecentUse {
+			if identity, ok := authn.IdentityFromContext(ctx); ok && identity.UserID != "" {
+				launch[models.DeferredLaunchUserIDKey] = identity.UserID
+				launch[models.DeferredLaunchRecordRecentUseKey] = true
+			}
 		}
 		if ResolveStartWhenUnblocked(req) {
 			// Mark the intent as a dependency-chain step. The record is the same
@@ -1653,7 +1656,7 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 		task.Position = *req.Position
 	}
 	if req.Metadata != nil {
-		task.Metadata = req.Metadata
+		task.Metadata = protectedTaskMetadataUpdate(task.Metadata, req.Metadata)
 	}
 	if req.Title != nil {
 		task.Title = *req.Title

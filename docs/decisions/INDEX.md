@@ -212,4 +212,5 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-26-quick-chat-tab-order | [Store Quick Chat Tab Order as a User Preference](2026-08-26-quick-chat-tab-order.md) | accepted | backend, frontend, protocol | 2026-08-26 |
 | 2026-08-26-quick-chat-agent-titles | [Apply Agent-Generated Titles to Quick Chat](2026-08-26-quick-chat-agent-titles.md) | accepted | backend, frontend, protocol | 2026-08-26 |
 | 2026-08-27-bounded-agent-profile-recency | [Store Agent Profile Recency in Bounded Context Rows](2026-08-27-bounded-agent-profile-recency.md) | accepted | backend, frontend, protocol | 2026-08-27 |
+| 2026-08-27-protect-deferred-launch-attribution | [Protect Deferred Launch Attribution](2026-08-27-protect-deferred-launch-attribution.md) | accepted | backend, protocol | 2026-08-27 |
 | 2026-08-27-preserve-legacy-sqlite-before-default-initialization | [Preserve Legacy SQLite Data Before Default Initialization](2026-08-27-preserve-legacy-sqlite-before-default-initialization.md) | accepted | backend, cli, operations | 2026-08-27 |

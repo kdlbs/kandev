@@ -370,6 +370,11 @@ func (s *Service) UpdateTaskMetadata(ctx context.Context, id string, metadata ma
 		task.Metadata = make(map[string]interface{})
 	}
 	for k, v := range metadata {
+		// Deferred launch ownership is server-managed. Preserve it even if a
+		// future metadata endpoint forwards the whole request map here.
+		if k == models.MetaKeyDeferredLaunch {
+			continue
+		}
 		task.Metadata[k] = v
 	}
 	task.UpdatedAt = time.Now().UTC()

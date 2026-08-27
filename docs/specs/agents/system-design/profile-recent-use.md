@@ -106,16 +106,21 @@ it before delivery. Reusing the already-first profile publishes nothing.
 2. The caller resolves the effective profile ID from the backend response,
    falling back to the submitted ID only where the response omits it.
 3. Supersession checks run before recording. A discarded quick-chat or
-   configuration-chat launch exits without a recency mutation.
-4. The frontend starts the focused mutation without awaiting it in the primary
-   launch/navigation path.
-5. The service reads the context row. If the requested ID is already first, it
-   returns the current record with no database update or event.
-6. Otherwise it removes any prior occurrence, prepends the ID, truncates the
-   array to ten, and conditionally writes the next revision. A conflicting
-   revision rereads and retries up to the existing bounded CAS attempt limit.
-7. The response and compact event update frontend state only when their
-   revision is newer than the stored revision.
+  configuration-chat launch exits without a recency mutation.
+4. Deferred task-create launches carry an explicit, selector-backed attribution
+   marker. HTTP and WebSocket task/subtask selectors set it; programmatic MCP
+   profile input does not. The marker's creator identity remains in the
+   server-owned portion of the deferred intent and is not client-editable or
+   returned in task DTOs.
+5. The frontend starts the focused mutation without awaiting it in the primary
+  launch/navigation path.
+6. The service reads the context row. If the requested ID is already first, it
+  returns the current record with no database update or event.
+7. Otherwise it removes any prior occurrence, prepends the ID, truncates the
+  array to ten, and conditionally writes the next revision. A conflicting
+  revision rereads and retries up to the existing bounded CAS attempt limit.
+8. The response and compact event update frontend state only when their
+  revision is newer than the stored revision.
 
 Mutation failure is logged and leaves the last committed order intact. It does
 not surface as a launch failure and does not delete successful work.
@@ -179,6 +184,15 @@ accept a user ID in the URL or body. Reads, mutations, boot state, and events
 are isolated to that user. The closed context set, narrow body cap, ten-ID
 retention cap, and 255-byte profile-ID cap bound storage controlled by a client.
 
+Deferred task-create attribution is a server-owned subfield of the deferred
+launch intent. The task service strips client-provided deferred intents and
+attribution during create, preserves the existing intent during generic task
+metadata replacement, and only accepts the explicit attribution flag from the
+HTTP/WebSocket selector handlers. Public task projections redact the creator
+identity and internal marker. MCP may request a deferred profile launch, but it
+does not carry selector attribution and therefore cannot reorder task-create
+history.
+
 ## Observability
 
 Repository, validation, and event publication failures use the existing user
@@ -192,3 +206,4 @@ routing.
 - [ADR 0041: Backend-Owned Portable User Settings](../../../decisions/0041-backend-owned-portable-user-settings.md)
 - [ADR 0028: Backend-Owned Task-Create Last-Used Preferences](../../../decisions/0028-task-create-last-used-source-of-truth.md)
 - [ADR 2026-08-27: Store Agent Profile Recency in Bounded Context Rows](../../../decisions/2026-08-27-bounded-agent-profile-recency.md)
+- [ADR 2026-08-27: Protect Deferred Launch Attribution](../../../decisions/2026-08-27-protect-deferred-launch-attribution.md)
