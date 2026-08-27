@@ -62,7 +62,7 @@ interface MarkdownPreviewToolbarProps {
   repositoryName?: string;
   showExternalVcsLink: boolean;
   onDownload?: () => void;
-  onTogglePreview: () => void;
+  onTogglePreview?: () => void;
 }
 
 function MarkdownPreviewToolbar({
@@ -111,20 +111,22 @@ function MarkdownPreviewToolbar({
               <span>{t("task:commentCount", { count: commentCount })}</span>
             </div>
           )}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={onTogglePreview}
-                className="h-6 w-6 p-0 cursor-pointer text-foreground max-md:h-11 [@media(pointer:coarse)]:h-11 max-md:w-11 [@media(pointer:coarse)]:w-11"
-                data-testid="markdown-preview-toggle"
-              >
-                <IconCode className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("task:showCode")}</TooltipContent>
-          </Tooltip>
+          {onTogglePreview && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={onTogglePreview}
+                  className="h-8 w-8 p-0 cursor-pointer text-foreground"
+                  data-testid="markdown-preview-toggle"
+                >
+                  <IconCode className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t("task:showCode")}</TooltipContent>
+            </Tooltip>
+          )}
         </div>
       }
     />
@@ -143,7 +145,7 @@ interface MarkdownPreviewContentProps {
   enableComments?: boolean;
   showExternalVcsLink?: boolean;
   onDownload?: () => void;
-  onTogglePreview: () => void;
+  onTogglePreview?: () => void;
 }
 
 type PositionedNode = {

@@ -2,7 +2,16 @@
 
 /* eslint-disable max-lines -- this file intentionally owns the complete mobile session composition. */
 
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import { SessionMobileTopBar } from "./session-mobile-top-bar";
 import { SessionMobileBottomNav } from "./session-mobile-bottom-nav";
 import { MobileFileViewerPanel } from "./mobile-file-viewer-panel";
@@ -24,7 +33,13 @@ import { fetchAndOpenFile } from "../file-browser-hooks";
 import { MobileReviewPanel } from "./mobile-review-panel";
 import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
 import type { OpenFileTab } from "@/lib/types/backend";
+import type { FileChangeNotificationPayload, MarkdownFileMode } from "@/lib/types/workspace-files";
+import { isMarkdownFile } from "@/lib/utils/file-types";
+import type { MobileFileSavedSnapshot } from "./mobile-file-viewer-panel";
+import { calculateHash } from "@/lib/utils/file-diff";
 import { useAppStore } from "@/components/state-provider";
+import { getWebSocketClient } from "@/lib/ws/connection";
+import { requestFileContent } from "@/lib/ws/workspace-files";
 import { useNormalizedTaskReviewsState } from "../review-panel-provider";
 import type {
   PluginOpenMessageResult,
@@ -184,11 +199,15 @@ type MobilePanelAreaProps = {
   isPassthroughMode: boolean;
   effectiveSessionId: string | null;
   selectedFile: OpenFileTab | null;
-  selectedFilePreview: boolean;
+  selectedFileMode?: MarkdownFileMode;
   selectedDiff: { path: string; content?: string } | null;
   handleOpenFileFromChat: (path: string, repo?: string, preview?: boolean) => void;
   handleClearSelectedDiff: () => void;
   handleOpenFile: (file: OpenFileTab) => void;
+  handleSelectedFileChange?: (content: string) => void;
+  handleSelectedFileSaved?: (snapshot: MobileFileSavedSnapshot) => void;
+  handleSelectedFileModeChange?: (mode: MarkdownFileMode) => void;
+  handleSelectedFileReload?: () => void;
   handlePanelChangeAndClearSheet: (panel: MobileSessionPanel) => void;
   onNavigateToPrompt: (messageId: string) => PluginOpenMessageResult;
   onScrollTargetConsumed?: (messageId: string) => void;
@@ -199,6 +218,51 @@ type MobilePanelAreaProps = {
   selectedReview: ReviewItemSummary | null;
   onSelectReview: (review: ReviewItemSummary) => void;
 };
+
+type MobileFilesPanelProps = Pick<
+  MobilePanelAreaProps,
+  | "selectedFile"
+  | "selectedFileMode"
+  | "effectiveSessionId"
+  | "handleOpenFile"
+  | "handleSelectedFileChange"
+  | "handleSelectedFileSaved"
+  | "handleSelectedFileModeChange"
+  | "handleSelectedFileReload"
+  | "handlePanelChangeAndClearSheet"
+>;
+
+function MobileFilesPanel({
+  selectedFile,
+  selectedFileMode,
+  effectiveSessionId,
+  handleOpenFile,
+  handleSelectedFileChange,
+  handleSelectedFileSaved,
+  handleSelectedFileModeChange,
+  handleSelectedFileReload,
+  handlePanelChangeAndClearSheet,
+}: MobileFilesPanelProps) {
+  return (
+    <div className="flex-1 min-h-0 flex flex-col">
+      {selectedFile ? (
+        <MobileFileViewerPanel
+          key={`${selectedFile.repo ?? ""}\u0000${selectedFile.path}`}
+          file={selectedFile}
+          sessionId={effectiveSessionId}
+          initialMarkdownMode={selectedFileMode}
+          onFileChange={handleSelectedFileChange}
+          onFileSaved={handleSelectedFileSaved}
+          onModeChange={handleSelectedFileModeChange}
+          onReloadFromAgent={handleSelectedFileReload}
+          onClose={() => handlePanelChangeAndClearSheet("files")}
+        />
+      ) : (
+        <TaskFilesPanel onOpenFile={handleOpenFile} />
+      )}
+    </div>
+  );
+}
 
 /** Keeps terminal content's visible bottom glued to the keybar top. When the
  *  keyboard is up, the content area already pads for the bottom nav (which
@@ -240,11 +304,15 @@ export function MobilePanelArea({
   isPassthroughMode,
   effectiveSessionId,
   selectedFile,
-  selectedFilePreview,
+  selectedFileMode,
   selectedDiff,
   handleOpenFileFromChat,
   handleClearSelectedDiff,
   handleOpenFile,
+  handleSelectedFileChange = () => {},
+  handleSelectedFileSaved = () => {},
+  handleSelectedFileModeChange = () => {},
+  handleSelectedFileReload = () => {},
   handlePanelChangeAndClearSheet,
   onNavigateToPrompt,
   onScrollTargetConsumed = () => {},
@@ -291,19 +359,17 @@ export function MobilePanelArea({
         </div>
       )}
       {currentMobilePanel === "files" && (
-        <div className="flex-1 min-h-0 flex flex-col" data-testid="files-panel">
-          {selectedFile ? (
-            <MobileFileViewerPanel
-              key={`${selectedFile.repo ?? ""}\u0000${selectedFile.path}`}
-              file={selectedFile}
-              sessionId={effectiveSessionId}
-              initialRenderedPreview={selectedFilePreview}
-              onClose={() => handlePanelChangeAndClearSheet("files")}
-            />
-          ) : (
-            <TaskFilesPanel onOpenFile={handleOpenFile} />
-          )}
-        </div>
+        <MobileFilesPanel
+          selectedFile={selectedFile}
+          selectedFileMode={selectedFileMode}
+          effectiveSessionId={effectiveSessionId}
+          handleOpenFile={handleOpenFile}
+          handleSelectedFileChange={handleSelectedFileChange}
+          handleSelectedFileSaved={handleSelectedFileSaved}
+          handleSelectedFileModeChange={handleSelectedFileModeChange}
+          handleSelectedFileReload={handleSelectedFileReload}
+          handlePanelChangeAndClearSheet={handlePanelChangeAndClearSheet}
+        />
       )}
       {currentMobilePanel === "terminal" && (
         <MobileTerminalPanel
@@ -486,31 +552,13 @@ export function useMobilePanelHandlers({
 }) {
   const { toast } = useToast();
   const [selectedFile, setSelectedFile] = useState<OpenFileTab | null>(null);
-  const [selectedFilePreview, setSelectedFilePreview] = useState(false);
-  const [trackedSessionId, setTrackedSessionId] = useState<string | null>(effectiveSessionId);
-  const latestRequestIdRef = useRef(0);
-  const openFileAbortRef = useRef<AbortController | null>(null);
-
-  // Reset viewer when switching sessions — adjust state during render per
-  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
-  if (trackedSessionId !== effectiveSessionId) {
-    setTrackedSessionId(effectiveSessionId);
-    setSelectedFile(null);
-    setSelectedFilePreview(false);
-  }
-
-  useLayoutEffect(() => {
-    latestRequestIdRef.current += 1;
-    openFileAbortRef.current?.abort();
-    openFileAbortRef.current = null;
-  }, [effectiveSessionId]);
-
-  useEffect(
-    () => () => {
-      openFileAbortRef.current?.abort();
-      openFileAbortRef.current = null;
-    },
-    [],
+  const [selectedFileMode, setSelectedFileMode] = useState<MarkdownFileMode | undefined>(undefined);
+  const selectedFileRef = useRef<OpenFileTab | null>(selectedFile);
+  selectedFileRef.current = selectedFile;
+  const { latestRequestIdRef, openFileAbortRef } = useMobileFileSessionLifecycle(
+    effectiveSessionId,
+    setSelectedFile,
+    setSelectedFileMode,
   );
 
   const handleOpenFileFromChat = useCallback(
@@ -526,8 +574,10 @@ export function useMobilePanelHandlers({
           path,
           (file) => {
             if (requestId !== latestRequestIdRef.current || controller.signal.aborted) return;
-            setSelectedFile(file);
-            setSelectedFilePreview(preview);
+            let markdownMode: MarkdownFileMode | undefined;
+            if (isMarkdownFile(file.path)) markdownMode = preview ? "preview" : "source";
+            setSelectedFile(markdownMode ? { ...file, markdownMode } : file);
+            setSelectedFileMode(markdownMode);
             handlePanelChange("files");
           },
           toast,
@@ -547,8 +597,9 @@ export function useMobilePanelHandlers({
       latestRequestIdRef.current += 1;
       openFileAbortRef.current?.abort();
       openFileAbortRef.current = null;
-      setSelectedFile(file);
-      setSelectedFilePreview(false);
+      const markdownMode = isMarkdownFile(file.path) ? (file.markdownMode ?? "source") : undefined;
+      setSelectedFile(markdownMode ? { ...file, markdownMode } : file);
+      setSelectedFileMode(markdownMode);
       handlePanelChange("files");
     },
     [handlePanelChange],
@@ -560,18 +611,218 @@ export function useMobilePanelHandlers({
       openFileAbortRef.current?.abort();
       openFileAbortRef.current = null;
       setSelectedFile(null);
-      setSelectedFilePreview(false);
+      setSelectedFileMode(undefined);
       handlePanelChange(panel);
     },
     [handlePanelChange],
   );
 
+  const { handleSelectedFileChange, handleSelectedFileSaved, handleSelectedFileModeChange } =
+    useSelectedMobileFileCallbacks(setSelectedFile, setSelectedFileMode);
+  const handleSelectedFileReload = useMobileSelectedFileReload(selectedFile, setSelectedFile);
+  useMobileSelectedFileWorkspaceSync(effectiveSessionId, selectedFileRef, setSelectedFile);
+
   return {
     selectedFile,
-    selectedFilePreview,
+    selectedFileMode,
     handleOpenFileFromChat,
     handleOpenFile,
+    handleSelectedFileChange,
+    handleSelectedFileSaved,
+    handleSelectedFileModeChange,
+    handleSelectedFileReload,
     handlePanelChangeAndClearSheet,
+  };
+}
+
+function useMobileFileSessionLifecycle(
+  effectiveSessionId: string | null,
+  setSelectedFile: Dispatch<SetStateAction<OpenFileTab | null>>,
+  setSelectedFileMode: Dispatch<SetStateAction<MarkdownFileMode | undefined>>,
+) {
+  const [trackedSessionId, setTrackedSessionId] = useState<string | null>(effectiveSessionId);
+  const latestRequestIdRef = useRef(0);
+  const openFileAbortRef = useRef<AbortController | null>(null);
+
+  if (trackedSessionId !== effectiveSessionId) {
+    setTrackedSessionId(effectiveSessionId);
+    setSelectedFile(null);
+    setSelectedFileMode(undefined);
+  }
+
+  useLayoutEffect(() => {
+    latestRequestIdRef.current += 1;
+    openFileAbortRef.current?.abort();
+    openFileAbortRef.current = null;
+  }, [effectiveSessionId]);
+
+  useEffect(
+    () => () => {
+      openFileAbortRef.current?.abort();
+      openFileAbortRef.current = null;
+    },
+    [],
+  );
+
+  return { latestRequestIdRef, openFileAbortRef };
+}
+
+function useMobileSelectedFileReload(
+  selectedFile: OpenFileTab | null,
+  setSelectedFile: Dispatch<SetStateAction<OpenFileTab | null>>,
+) {
+  return useCallback(() => {
+    const current = selectedFile;
+    if (!current?.hasRemoteUpdate || current.remoteContent === undefined) return;
+    const remoteContent = current.remoteContent;
+    void (
+      current.remoteOriginalHash
+        ? Promise.resolve(current.remoteOriginalHash)
+        : calculateHash(remoteContent)
+    ).then((remoteHash) => {
+      setSelectedFile((latest) => {
+        if (!latest || latest !== current) return latest;
+        return {
+          ...latest,
+          content: remoteContent,
+          originalContent: remoteContent,
+          originalHash: remoteHash,
+          isDirty: false,
+          hasRemoteUpdate: false,
+          remoteContent: undefined,
+          remoteOriginalHash: undefined,
+        };
+      });
+    });
+  }, [selectedFile, setSelectedFile]);
+}
+
+function useMobileSelectedFileWorkspaceSync(
+  sessionId: string | null,
+  selectedFileRef: React.MutableRefObject<OpenFileTab | null>,
+  setSelectedFile: Dispatch<SetStateAction<OpenFileTab | null>>,
+) {
+  useEffect(() => {
+    const client = getWebSocketClient();
+    if (!client || !sessionId) return;
+    let requestVersion = 0;
+
+    const handleFileChanges = (message: { payload: FileChangeNotificationPayload }) => {
+      if (message.payload.session_id !== sessionId) return;
+      const current = selectedFileRef.current;
+      if (!current || !hasSelectedMobileFileChange(current, message.payload.changes)) return;
+      const version = ++requestVersion;
+      void requestFileContent(client, sessionId, current.path, current.repo)
+        .then(async (response) => {
+          const remoteHash = await calculateHash(response.content);
+          if (version !== requestVersion) return;
+          setSelectedFile((latest) => {
+            if (!latest || getMobileFileIdentity(latest) !== getMobileFileIdentity(current)) {
+              return latest;
+            }
+            return reconcileMobileFileUpdate(
+              latest,
+              response.content,
+              remoteHash,
+              response.is_binary,
+            );
+          });
+        })
+        .catch(() => {
+          // Keep the current buffer when a notification arrives before the workspace is ready.
+        });
+    };
+
+    const unsubscribe = client.on("session.workspace.file.changes", handleFileChanges);
+    return () => {
+      requestVersion += 1;
+      unsubscribe();
+    };
+  }, [selectedFileRef, sessionId, setSelectedFile]);
+}
+
+function hasSelectedMobileFileChange(
+  file: Pick<OpenFileTab, "path" | "repo">,
+  changes: readonly { path: string; operation: string; repository_name?: string }[],
+): boolean {
+  return changes.some((change) => {
+    if ((change.repository_name ?? "") !== (file.repo ?? "")) return false;
+    return change.operation === "refresh" || change.path === file.path;
+  });
+}
+
+function getMobileFileIdentity(file: Pick<OpenFileTab, "path" | "repo">): string {
+  return `${file.repo ?? ""}\u0000${file.path}`;
+}
+
+function reconcileMobileFileUpdate(
+  current: OpenFileTab,
+  remoteContent: string,
+  remoteHash: string,
+  isBinary?: boolean,
+): OpenFileTab {
+  if (current.isDirty && current.content !== remoteContent) {
+    if (current.hasRemoteUpdate && current.remoteContent === remoteContent) return current;
+    return {
+      ...current,
+      hasRemoteUpdate: true,
+      remoteContent,
+      remoteOriginalHash: remoteHash,
+    };
+  }
+  return {
+    ...current,
+    content: remoteContent,
+    originalContent: remoteContent,
+    originalHash: remoteHash,
+    isDirty: false,
+    isBinary,
+    hasRemoteUpdate: false,
+    remoteContent: undefined,
+    remoteOriginalHash: undefined,
+  };
+}
+
+function useSelectedMobileFileCallbacks(
+  setSelectedFile: Dispatch<SetStateAction<OpenFileTab | null>>,
+  setSelectedFileMode: Dispatch<SetStateAction<MarkdownFileMode | undefined>>,
+) {
+  const handleSelectedFileChange = useCallback(
+    (content: string) => {
+      setSelectedFile((current) =>
+        current ? { ...current, content, isDirty: content !== current.originalContent } : current,
+      );
+    },
+    [setSelectedFile],
+  );
+  const handleSelectedFileSaved = useCallback(
+    (snapshot: MobileFileSavedSnapshot) => {
+      setSelectedFile((current) =>
+        current
+          ? {
+              ...current,
+              ...snapshot,
+              isDirty: false,
+              hasRemoteUpdate: false,
+              remoteContent: undefined,
+              remoteOriginalHash: undefined,
+            }
+          : current,
+      );
+    },
+    [setSelectedFile],
+  );
+  const handleSelectedFileModeChange = useCallback(
+    (mode: MarkdownFileMode) => {
+      setSelectedFileMode(mode);
+      setSelectedFile((current) => (current ? { ...current, markdownMode: mode } : current));
+    },
+    [setSelectedFile, setSelectedFileMode],
+  );
+  return {
+    handleSelectedFileChange,
+    handleSelectedFileSaved,
+    handleSelectedFileModeChange,
   };
 }
 
@@ -667,9 +918,13 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
   } = useSessionLayoutState({ sessionId: props.sessionId });
   const {
     selectedFile,
-    selectedFilePreview,
+    selectedFileMode,
     handleOpenFileFromChat,
     handleOpenFile,
+    handleSelectedFileChange,
+    handleSelectedFileSaved,
+    handleSelectedFileModeChange,
+    handleSelectedFileReload,
     handlePanelChangeAndClearSheet,
   } = useMobilePanelHandlers({ effectiveSessionId, handlePanelChange });
   const workflowFocusRequest = useAppStore((state) => {
@@ -756,11 +1011,15 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
         isPassthroughMode={isPassthroughMode}
         effectiveSessionId={effectiveSessionId}
         selectedFile={selectedFile}
-        selectedFilePreview={selectedFilePreview}
+        selectedFileMode={selectedFileMode}
         selectedDiff={selectedDiff}
         handleOpenFileFromChat={handleOpenFileFromChat}
         handleClearSelectedDiff={handleClearSelectedDiff}
         handleOpenFile={handleOpenFile}
+        handleSelectedFileChange={handleSelectedFileChange}
+        handleSelectedFileSaved={handleSelectedFileSaved}
+        handleSelectedFileModeChange={handleSelectedFileModeChange}
+        handleSelectedFileReload={handleSelectedFileReload}
         handlePanelChangeAndClearSheet={handlePanelChangeAndClearTarget}
         onNavigateToPrompt={handleNavigateToPrompt}
         onScrollTargetConsumed={handleMobileScrollTargetConsumed}

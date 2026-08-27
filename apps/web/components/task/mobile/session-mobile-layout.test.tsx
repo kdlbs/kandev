@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, renderHook, act, screen } from "@testing-library/react";
+import { render, renderHook, act, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import type { OpenFileTab } from "@/lib/types/backend";
 import type { ReviewItemSummary } from "@/lib/plugins/types";
@@ -9,8 +9,24 @@ vi.mock("@/components/toast-provider", () => ({
 }));
 
 const fetchAndOpenFileMock = vi.fn();
+const getWebSocketClientMock = vi.fn();
+const requestFileContentMock = vi.fn();
+const websocketClientMock = {
+  on: vi.fn<(type: string, handler: (message: unknown) => void) => () => void>(
+    () => () => undefined,
+  ),
+  onConnectionStatus: vi.fn(() => () => undefined),
+};
 vi.mock("../file-browser-hooks", () => ({
   fetchAndOpenFile: (...args: unknown[]) => fetchAndOpenFileMock(...args),
+}));
+
+vi.mock("@/lib/ws/connection", () => ({
+  getWebSocketClient: () => getWebSocketClientMock(),
+}));
+
+vi.mock("@/lib/ws/workspace-files", () => ({
+  requestFileContent: (...args: unknown[]) => requestFileContentMock(...args),
 }));
 
 vi.mock("../task-plan-panel", () => ({
@@ -119,9 +135,15 @@ function renderHandlers(initialSid: string | null = "s1") {
   return { handlePanelChange, ...view };
 }
 
+// eslint-disable-next-line max-lines-per-function -- these tests cover the mobile file selection lifecycle.
 describe("useMobilePanelHandlers", () => {
   beforeEach(() => {
     fetchAndOpenFileMock.mockReset();
+    getWebSocketClientMock.mockReset();
+    getWebSocketClientMock.mockReturnValue(websocketClientMock);
+    websocketClientMock.on.mockReset();
+    websocketClientMock.on.mockImplementation(() => () => undefined);
+    requestFileContentMock.mockReset();
   });
 
   it("handleOpenFile sets selectedFile and switches to files panel", () => {
@@ -169,8 +191,137 @@ describe("useMobilePanelHandlers", () => {
     act(() => openFile({ ...MOCK_FILE, path: "README.md", name: "README.md" }));
 
     expect(result.current.selectedFile).toMatchObject({ path: "README.md" });
-    expect(result.current.selectedFilePreview).toBe(true);
+    expect(result.current.selectedFileMode).toBe("preview");
     expect(handlePanelChange).toHaveBeenCalledWith("files");
+  });
+
+  it("opens a Markdown file from the Files panel in Source mode", () => {
+    const { result } = renderHandlers();
+    act(() =>
+      result.current.handleOpenFile({ ...MOCK_FILE, path: "README.md", name: "README.md" }),
+    );
+
+    expect(result.current.selectedFileMode).toBe("source");
+    expect(result.current.selectedFile?.markdownMode).toBe("source");
+  });
+
+  it("updates the selected mobile buffer and mode without changing file identity", () => {
+    const { result } = renderHandlers();
+    act(() =>
+      result.current.handleOpenFile({ ...MOCK_FILE, path: "README.md", name: "README.md" }),
+    );
+
+    act(() => result.current.handleSelectedFileModeChange("edit"));
+    act(() => result.current.handleSelectedFileChange("# changed"));
+
+    expect(result.current.selectedFile).toMatchObject({
+      path: "README.md",
+      content: "# changed",
+      isDirty: true,
+      markdownMode: "edit",
+    });
+  });
+
+  it("reloads a remote Markdown update into the clean mobile buffer", async () => {
+    const { result } = renderHandlers();
+    act(() =>
+      result.current.handleOpenFile({
+        ...MOCK_FILE,
+        path: "README.md",
+        name: "README.md",
+        content: "# local",
+        originalContent: "# base",
+        isDirty: true,
+        hasRemoteUpdate: true,
+        remoteContent: "# remote",
+        remoteOriginalHash: "remote-hash",
+      }),
+    );
+
+    await act(async () => result.current.handleSelectedFileReload());
+
+    expect(result.current.selectedFile).toMatchObject({
+      path: "README.md",
+      content: "# remote",
+      originalContent: "# remote",
+      originalHash: "remote-hash",
+      isDirty: false,
+      hasRemoteUpdate: false,
+      remoteContent: undefined,
+      remoteOriginalHash: undefined,
+    });
+  });
+
+  it("refreshes a clean selected file after a workspace notification", async () => {
+    requestFileContentMock.mockResolvedValue({ content: "# remote" });
+    const { result } = renderHandlers();
+    act(() =>
+      result.current.handleOpenFile({
+        ...MOCK_FILE,
+        path: "README.md",
+        name: "README.md",
+        content: "# local",
+        originalContent: "# local",
+      }),
+    );
+
+    const handler = websocketClientMock.on.mock.calls[0]?.[1] as (message: unknown) => void;
+    act(() => {
+      handler({
+        payload: {
+          session_id: "s1",
+          changes: [{ path: "README.md", operation: "write" }],
+        },
+      });
+    });
+    expect(requestFileContentMock).toHaveBeenCalledWith(
+      websocketClientMock,
+      "s1",
+      "README.md",
+      undefined,
+    );
+    await waitFor(() => expect(result.current.selectedFile?.content).toBe("# remote"));
+
+    expect(result.current.selectedFile).toMatchObject({
+      content: "# remote",
+      originalContent: "# remote",
+      isDirty: false,
+      hasRemoteUpdate: false,
+    });
+  });
+
+  it("preserves a dirty selected file and exposes a workspace reload", async () => {
+    requestFileContentMock.mockResolvedValue({ content: "# remote" });
+    const { result } = renderHandlers();
+    act(() =>
+      result.current.handleOpenFile({
+        ...MOCK_FILE,
+        path: "README.md",
+        name: "README.md",
+        content: "# local",
+        originalContent: "# base",
+        isDirty: true,
+      }),
+    );
+
+    const handler = websocketClientMock.on.mock.calls[0]?.[1] as (message: unknown) => void;
+    act(() => {
+      handler({
+        payload: {
+          session_id: "s1",
+          changes: [{ path: "README.md", operation: "write" }],
+        },
+      });
+    });
+    await waitFor(() => expect(result.current.selectedFile?.remoteContent).toBe("# remote"));
+
+    expect(result.current.selectedFile).toMatchObject({
+      content: "# local",
+      originalContent: "# base",
+      isDirty: true,
+      hasRemoteUpdate: true,
+      remoteContent: "# remote",
+    });
   });
 
   it("passes repo through when opening a walkthrough file from mobile", () => {
@@ -368,7 +519,7 @@ describe("MobilePanelArea PR identity", () => {
           isPassthroughMode={false}
           effectiveSessionId="session-1"
           selectedFile={null}
-          selectedFilePreview={false}
+          selectedFileMode={undefined}
           selectedDiff={null}
           handleOpenFileFromChat={vi.fn()}
           handleClearSelectedDiff={vi.fn()}
@@ -404,7 +555,7 @@ describe("MobilePanelArea Plan formatting offset", () => {
         isPassthroughMode={false}
         effectiveSessionId="session-1"
         selectedFile={null}
-        selectedFilePreview={false}
+        selectedFileMode={undefined}
         selectedDiff={null}
         handleOpenFileFromChat={vi.fn()}
         handleClearSelectedDiff={vi.fn()}
@@ -435,7 +586,7 @@ function renderMobilePanel(currentMobilePanel: string) {
       isPassthroughMode={false}
       effectiveSessionId="session-1"
       selectedFile={null}
-      selectedFilePreview={false}
+      selectedFileMode={undefined}
       selectedDiff={null}
       handleOpenFileFromChat={vi.fn()}
       handleClearSelectedDiff={vi.fn()}

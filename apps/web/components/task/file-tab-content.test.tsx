@@ -10,11 +10,13 @@ vi.mock("./file-editor-content", () => ({
   FileEditorContent: ({
     previewKind,
     renderedPreview,
+    markdownMode,
     worktreePath,
     onTogglePreview,
   }: {
     previewKind?: string;
     renderedPreview?: boolean;
+    markdownMode?: "preview" | "edit" | "source";
     worktreePath?: string;
     onTogglePreview?: () => void;
   }) => (
@@ -22,10 +24,27 @@ vi.mock("./file-editor-content", () => ({
       data-testid="file-editor-content"
       data-preview-kind={previewKind}
       data-rendered-preview={String(renderedPreview)}
+      data-markdown-mode={markdownMode}
       data-worktree-path={worktreePath}
     >
       <button type="button" onClick={onTogglePreview}>
         Toggle preview
+      </button>
+    </div>
+  ),
+}));
+
+vi.mock("./markdown-file-editor", () => ({
+  MarkdownFileEditor: ({
+    mode,
+    onModeChange,
+  }: {
+    mode: "preview" | "edit" | "source";
+    onModeChange: (mode: "preview" | "edit" | "source") => void;
+  }) => (
+    <div data-testid="markdown-file-editor" data-markdown-mode={mode}>
+      <button type="button" onClick={() => onModeChange("source")}>
+        Toggle mode
       </button>
     </div>
   ),
@@ -50,13 +69,14 @@ const file: OpenFileTab = {
   originalHash: "hash",
   isDirty: false,
   renderedPreview: true,
+  markdownMode: "preview",
 };
 
 afterEach(cleanup);
 
 describe("FileTabContent Markdown preview", () => {
   it("renders a Markdown tab in preview mode and forwards the toggle", () => {
-    const onTogglePreview = vi.fn();
+    const onToggleMarkdownPreview = vi.fn();
 
     render(
       <FileTabContent
@@ -68,24 +88,21 @@ describe("FileTabContent Markdown preview", () => {
         onFileChange={vi.fn()}
         onFileSave={vi.fn()}
         onFileDelete={vi.fn()}
-        onTogglePreview={onTogglePreview}
+        onMarkdownModeChange={onToggleMarkdownPreview}
       />,
     );
 
-    expect(screen.getByTestId(FILE_EDITOR_CONTENT_TEST_ID).getAttribute("data-preview-kind")).toBe(
-      "markdown",
+    expect(screen.getByTestId("markdown-file-editor").getAttribute("data-markdown-mode")).toBe(
+      "preview",
     );
-    expect(
-      screen.getByTestId(FILE_EDITOR_CONTENT_TEST_ID).getAttribute("data-rendered-preview"),
-    ).toBe("true");
-    fireEvent.click(screen.getByRole("button", { name: "Toggle preview" }));
-    expect(onTogglePreview).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "Toggle mode" }));
+    expect(onToggleMarkdownPreview).toHaveBeenCalledWith("source");
   });
 
   it("uses the effective workspace path for desktop file viewers", () => {
     render(
       <FileTabContent
-        tab={file}
+        tab={{ ...file, path: "README.txt", name: "README.txt" }}
         activeSession={{
           workspace_path: "/tmp/task-root",
           worktree_path: "/tmp/task-root/kandev",

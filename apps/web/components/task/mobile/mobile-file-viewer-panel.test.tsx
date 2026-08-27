@@ -1,6 +1,18 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { TooltipProvider } from "@kandev/ui/tooltip";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ReactNode } from "react";
+
+const getWebSocketClientMock = vi.hoisted(() => vi.fn(() => ({})));
+const updateFileContentMock = vi.hoisted(() => vi.fn());
+const MOBILE_EDIT_CONTENT = "# mobile edit";
+const MOBILE_MARKDOWN_PATH = "README.md";
+const MOBILE_MARKDOWN_CONTENT = "# README";
+const TRUE_VALUE = true;
+const SELECTED_ATTRIBUTE = String(TRUE_VALUE);
+const EDITABLE_ATTRIBUTE = "data-editable";
+const FILE_CONTENT_TEST_ID = "file-content";
+const REPORT_PATH = "reports/index.html";
+const REPORT_CONTENT = "<h1>Report</h1>";
 
 const htmlPreview = vi.hoisted(() => ({
   isPublishing: false,
@@ -48,6 +60,18 @@ vi.mock("@/components/state-provider", () => ({
   useAppStoreApi: () => storeApi,
 }));
 
+vi.mock("@/components/toast-provider", () => ({
+  useToast: () => ({ toast: vi.fn() }),
+}));
+
+vi.mock("@/lib/ws/connection", () => ({
+  getWebSocketClient: getWebSocketClientMock,
+}));
+
+vi.mock("@/lib/ws/workspace-files", () => ({
+  updateFileContent: (...args: unknown[]) => updateFileContentMock(...args),
+}));
+
 vi.mock("@/components/editors/external-vcs-file-link", () => ({
   ExternalVcsFileLink: (props: Record<string, unknown>) => (
     <span data-testid="external-vcs-file-link-props" data-props={JSON.stringify(props)} />
@@ -56,11 +80,49 @@ vi.mock("@/components/editors/external-vcs-file-link", () => ({
 }));
 
 vi.mock("../file-viewer-content", () => ({
-  FileViewerContent: () => <span data-testid={FILE_CONTENT_TEST_ID} />,
+  FileViewerContent: ({
+    editable,
+    onChange,
+  }: {
+    editable?: boolean;
+    onChange?: (content: string) => void;
+  }) => (
+    <div data-testid="file-content" data-editable={String(editable)}>
+      <button type="button" onClick={() => onChange?.(MOBILE_EDIT_CONTENT)}>
+        Change mobile source
+      </button>
+    </div>
+  ),
+}));
+vi.mock("@kandev/ui/tooltip", () => ({
+  Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
+  TooltipContent: ({ children }: { children: ReactNode }) => <>{children}</>,
+  TooltipTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
+}));
+vi.mock("@/components/editors/markdown/hybrid-markdown-editor", () => ({
+  HybridMarkdownEditor: ({
+    onChange,
+    onSourceFallback,
+  }: {
+    onChange: (content: string) => void;
+    onSourceFallback?: () => void;
+  }) => (
+    <div data-testid="mobile-hybrid-editor">
+      <button type="button" onClick={() => onChange("# hybrid mobile edit")}>
+        Change mobile hybrid
+      </button>
+      <button type="button" onClick={() => onSourceFallback?.()}>
+        Fallback to source
+      </button>
+    </div>
+  ),
 }));
 vi.mock("../markdown-preview-content", () => ({
-  MarkdownPreviewContent: ({ onTogglePreview }: { onTogglePreview: () => void }) => (
-    <div data-testid="markdown-preview">
+  MarkdownPreviewContent: () => <span data-testid="markdown-preview" />,
+}));
+vi.mock("../html-preview-content", () => ({
+  HtmlPreviewContent: ({ onTogglePreview }: { onTogglePreview: () => void }) => (
+    <div data-testid="html-preview-frame">
       <button type="button" onClick={onTogglePreview}>
         Show code
       </button>
@@ -85,21 +147,19 @@ afterEach(cleanup);
 describe("MobileFileViewerPanel workspace path", () => {
   it("uses the effective workspace path for binary file viewers", () => {
     render(
-      <TooltipProvider>
-        <MobileFileViewerPanel
-          file={{
-            path: "dist/archive.zip",
-            name: "archive.zip",
-            content: "",
-            originalContent: "",
-            originalHash: "hash",
-            isDirty: false,
-            isBinary: true,
-          }}
-          sessionId="session-1"
-          onClose={vi.fn()}
-        />
-      </TooltipProvider>,
+      <MobileFileViewerPanel
+        file={{
+          path: "dist/archive.zip",
+          name: "archive.zip",
+          content: "",
+          originalContent: "",
+          originalHash: "hash",
+          isDirty: false,
+          isBinary: TRUE_VALUE,
+        }}
+        sessionId="session-1"
+        onClose={vi.fn()}
+      />,
     );
 
     expect(screen.getByTestId("binary-viewer").getAttribute("data-worktree-path")).toBe(
@@ -108,24 +168,172 @@ describe("MobileFileViewerPanel workspace path", () => {
   });
 });
 
+// eslint-disable-next-line max-lines-per-function -- this fixture covers the complete mobile editor workflow.
+describe("MobileFileViewerPanel Markdown editing", () => {
+  it("opens a Markdown file in Source mode with an editable mobile surface", () => {
+    render(
+      <MobileFileViewerPanel
+        file={{
+          path: MOBILE_MARKDOWN_PATH,
+          name: MOBILE_MARKDOWN_PATH,
+          content: MOBILE_MARKDOWN_CONTENT,
+          originalContent: MOBILE_MARKDOWN_CONTENT,
+          originalHash: "hash",
+          isDirty: false,
+          markdownMode: "source",
+        }}
+        sessionId="session-1"
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId(FILE_CONTENT_TEST_ID).getAttribute(EDITABLE_ATTRIBUTE)).toBe(
+      SELECTED_ATTRIBUTE,
+    );
+    expect(screen.getByTestId("mobile-markdown-mode-source")).toBeTruthy();
+  });
+
+  it("switches between mobile Source and Edit while keeping changes in the file buffer", () => {
+    const onFileChange = vi.fn();
+    render(
+      <MobileFileViewerPanel
+        file={{
+          path: MOBILE_MARKDOWN_PATH,
+          name: MOBILE_MARKDOWN_PATH,
+          content: MOBILE_MARKDOWN_CONTENT,
+          originalContent: MOBILE_MARKDOWN_CONTENT,
+          originalHash: "hash",
+          isDirty: false,
+          markdownMode: "source",
+        }}
+        sessionId="session-1"
+        onClose={vi.fn()}
+        onFileChange={onFileChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("mobile-markdown-mode-edit"));
+    expect(screen.getByTestId("mobile-hybrid-editor")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Change mobile hybrid" }));
+    expect(onFileChange).toHaveBeenCalledWith("# hybrid mobile edit");
+    expect((screen.getByTestId("mobile-file-save") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("saves the canonical mobile buffer and clears the dirty state", async () => {
+    updateFileContentMock.mockResolvedValue({
+      path: MOBILE_MARKDOWN_PATH,
+      success: TRUE_VALUE,
+      new_hash: "saved-hash",
+    });
+    const onFileSaved = vi.fn();
+    render(
+      <MobileFileViewerPanel
+        file={{
+          path: MOBILE_MARKDOWN_PATH,
+          name: MOBILE_MARKDOWN_PATH,
+          content: MOBILE_MARKDOWN_CONTENT,
+          originalContent: MOBILE_MARKDOWN_CONTENT,
+          originalHash: "hash",
+          isDirty: false,
+          markdownMode: "source",
+        }}
+        sessionId="session-1"
+        onClose={vi.fn()}
+        onFileSaved={onFileSaved}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Change mobile source" }));
+    fireEvent.click(screen.getByTestId("mobile-file-save"));
+
+    await waitFor(() =>
+      expect(updateFileContentMock).toHaveBeenCalledWith(
+        {},
+        "session-1",
+        expect.objectContaining({
+          path: MOBILE_MARKDOWN_PATH,
+          originalHash: "hash",
+          desiredContent: MOBILE_EDIT_CONTENT,
+        }),
+      ),
+    );
+    await waitFor(() =>
+      expect((screen.getByTestId("mobile-file-save") as HTMLButtonElement).disabled).toBe(
+        TRUE_VALUE,
+      ),
+    );
+    expect(onFileSaved).toHaveBeenCalledWith({
+      content: MOBILE_EDIT_CONTENT,
+      originalContent: MOBILE_EDIT_CONTENT,
+      originalHash: "saved-hash",
+    });
+  });
+
+  it("keeps Preview available for MDX but does not expose Edit", () => {
+    render(
+      <MobileFileViewerPanel
+        file={{
+          path: "README.mdx",
+          name: "README.mdx",
+          content: MOBILE_MARKDOWN_CONTENT,
+          originalContent: MOBILE_MARKDOWN_CONTENT,
+          originalHash: "hash",
+          isDirty: false,
+          markdownMode: "preview",
+        }}
+        sessionId="session-1"
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId("mobile-markdown-mode-preview")).toBeTruthy();
+    expect(screen.getByTestId("mobile-markdown-mode-source")).toBeTruthy();
+    expect(screen.queryByTestId("mobile-markdown-mode-edit")).toBeNull();
+  });
+
+  it("falls back to editable Source mode when the hybrid editor reports an error", () => {
+    render(
+      <MobileFileViewerPanel
+        file={{
+          path: MOBILE_MARKDOWN_PATH,
+          name: MOBILE_MARKDOWN_PATH,
+          content: MOBILE_MARKDOWN_CONTENT,
+          originalContent: MOBILE_MARKDOWN_CONTENT,
+          originalHash: "hash",
+          isDirty: false,
+          markdownMode: "edit",
+        }}
+        sessionId="session-1"
+        onClose={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Fallback to source" }));
+    expect(screen.getByTestId(FILE_CONTENT_TEST_ID).getAttribute(EDITABLE_ATTRIBUTE)).toBe(
+      SELECTED_ATTRIBUTE,
+    );
+    expect(screen.getByTestId("mobile-markdown-mode-source").getAttribute("aria-pressed")).toBe(
+      SELECTED_ATTRIBUTE,
+    );
+  });
+});
+
 describe("MobileFileViewerPanel external file action", () => {
   it("renders a touch-sized action scoped to the open file's repository", () => {
     render(
-      <TooltipProvider>
-        <MobileFileViewerPanel
-          file={{
-            path: "src/new.ts",
-            name: "new.ts",
-            repo: "frontend",
-            content: "",
-            originalContent: "",
-            originalHash: "hash",
-            isDirty: false,
-          }}
-          sessionId="session-1"
-          onClose={vi.fn()}
-        />
-      </TooltipProvider>,
+      <MobileFileViewerPanel
+        file={{
+          path: "src/new.ts",
+          name: "new.ts",
+          repo: "frontend",
+          content: "",
+          originalContent: "",
+          originalHash: "hash",
+          isDirty: false,
+        }}
+        sessionId="session-1"
+        onClose={vi.fn()}
+      />,
     );
 
     const props = JSON.parse(
@@ -140,26 +348,22 @@ describe("MobileFileViewerPanel external file action", () => {
       size: "touch",
     });
   });
-});
 
-describe("MobileFileViewerPanel Markdown preview mode", () => {
   it("opens a Markdown file directly in preview mode when requested", () => {
     render(
-      <TooltipProvider>
-        <MobileFileViewerPanel
-          file={{
-            path: README_PATH,
-            name: README_PATH,
-            content: README_CONTENT,
-            originalContent: README_CONTENT,
-            originalHash: "hash",
-            isDirty: false,
-          }}
-          sessionId="session-1"
-          onClose={vi.fn()}
-          initialRenderedPreview
-        />
-      </TooltipProvider>,
+      <MobileFileViewerPanel
+        file={{
+          path: MOBILE_MARKDOWN_PATH,
+          name: MOBILE_MARKDOWN_PATH,
+          content: MOBILE_MARKDOWN_CONTENT,
+          originalContent: MOBILE_MARKDOWN_CONTENT,
+          originalHash: "hash",
+          isDirty: false,
+        }}
+        sessionId="session-1"
+        onClose={vi.fn()}
+        initialMarkdownPreview
+      />,
     );
 
     expect(screen.getByTestId("markdown-preview")).toBeTruthy();
@@ -168,42 +372,38 @@ describe("MobileFileViewerPanel Markdown preview mode", () => {
 
   it("resets preview mode when the same path is opened from another repository", () => {
     const { rerender } = render(
-      <TooltipProvider>
-        <MobileFileViewerPanel
-          file={{
-            path: README_PATH,
-            name: README_PATH,
-            repo: "frontend",
-            content: README_CONTENT,
-            originalContent: README_CONTENT,
-            originalHash: "hash",
-            isDirty: false,
-          }}
-          sessionId="session-1"
-          onClose={vi.fn()}
-        />
-      </TooltipProvider>,
+      <MobileFileViewerPanel
+        file={{
+          path: MOBILE_MARKDOWN_PATH,
+          name: MOBILE_MARKDOWN_PATH,
+          repo: "frontend",
+          content: MOBILE_MARKDOWN_CONTENT,
+          originalContent: MOBILE_MARKDOWN_CONTENT,
+          originalHash: "hash",
+          isDirty: false,
+        }}
+        sessionId="session-1"
+        onClose={vi.fn()}
+      />,
     );
 
     fireEvent.click(screen.getByTestId("markdown-preview-toggle"));
     expect(screen.getByTestId("markdown-preview")).toBeTruthy();
 
     rerender(
-      <TooltipProvider>
-        <MobileFileViewerPanel
-          file={{
-            path: README_PATH,
-            name: README_PATH,
-            repo: "backend",
-            content: README_CONTENT,
-            originalContent: README_CONTENT,
-            originalHash: "hash",
-            isDirty: false,
-          }}
-          sessionId="session-1"
-          onClose={vi.fn()}
-        />
-      </TooltipProvider>,
+      <MobileFileViewerPanel
+        file={{
+          path: MOBILE_MARKDOWN_PATH,
+          name: MOBILE_MARKDOWN_PATH,
+          repo: "backend",
+          content: MOBILE_MARKDOWN_CONTENT,
+          originalContent: MOBILE_MARKDOWN_CONTENT,
+          originalHash: "hash",
+          isDirty: false,
+        }}
+        sessionId="session-1"
+        onClose={vi.fn()}
+      />,
     );
 
     expect(screen.getByTestId(FILE_CONTENT_TEST_ID)).toBeTruthy();
@@ -214,25 +414,23 @@ describe("MobileFileViewerPanel Markdown preview mode", () => {
 describe("MobileFileViewerPanel HTML preview mode", () => {
   it("previews an HTML file and returns to the source viewer", () => {
     render(
-      <TooltipProvider>
-        <MobileFileViewerPanel
-          file={{
-            path: REPORT_PATH,
-            name: "index.html",
-            content: REPORT_CONTENT,
-            originalContent: REPORT_CONTENT,
-            originalHash: "hash",
-            isDirty: false,
-          }}
-          sessionId="session-1"
-          onClose={vi.fn()}
-        />
-      </TooltipProvider>,
+      <MobileFileViewerPanel
+        file={{
+          path: REPORT_PATH,
+          name: "index.html",
+          content: REPORT_CONTENT,
+          originalContent: REPORT_CONTENT,
+          originalHash: "hash",
+          isDirty: false,
+        }}
+        sessionId="session-1"
+        onClose={vi.fn()}
+      />,
     );
 
     const toggle = screen.getByTestId("html-preview-toggle");
     expect(toggle.className).toContain("h-11");
-    expect(toggle.className).toContain("w-11");
+    expect(toggle.className).toContain("min-w-11");
     fireEvent.click(toggle);
     expect(htmlPreview.publish).toHaveBeenCalledWith({
       path: REPORT_PATH,
@@ -246,21 +444,19 @@ describe("MobileFileViewerPanel HTML preview mode", () => {
 
   it("does not restore persisted in-place preview state for HTML", () => {
     render(
-      <TooltipProvider>
-        <MobileFileViewerPanel
-          file={{
-            path: REPORT_PATH,
-            name: "index.html",
-            content: REPORT_CONTENT,
-            originalContent: REPORT_CONTENT,
-            originalHash: "hash",
-            isDirty: false,
-          }}
-          sessionId="session-1"
-          onClose={vi.fn()}
-          initialRenderedPreview
-        />
-      </TooltipProvider>,
+      <MobileFileViewerPanel
+        file={{
+          path: REPORT_PATH,
+          name: "index.html",
+          content: REPORT_CONTENT,
+          originalContent: REPORT_CONTENT,
+          originalHash: "hash",
+          isDirty: false,
+        }}
+        sessionId="session-1"
+        onClose={vi.fn()}
+        initialRenderedPreview
+      />,
     );
 
     expect(screen.getByTestId(FILE_CONTENT_TEST_ID)).toBeTruthy();

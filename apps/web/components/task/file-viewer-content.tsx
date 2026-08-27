@@ -20,6 +20,8 @@ type FileViewerContentProps = {
   repo?: string;
   sessionId?: string;
   className?: string;
+  editable?: boolean;
+  onChange?: (newContent: string) => void;
 };
 
 export function FileViewerContent({
@@ -28,11 +30,13 @@ export function FileViewerContent({
   repo,
   sessionId,
   className,
+  editable = false,
+  onChange,
 }: FileViewerContentProps) {
   const langExt = getCodeMirrorExtensionFromPath(path);
   const extensions: Extension[] = [
     EditorView.lineWrapping,
-    EditorView.editable.of(false),
+    EditorView.editable.of(editable),
     codeMirrorCursorFlashExtension,
   ];
   if (langExt) {
@@ -86,7 +90,8 @@ export function FileViewerContent({
         height="100%"
         theme={vscodeDark}
         extensions={extensions}
-        readOnly
+        readOnly={!editable}
+        onChange={editable ? onChange : undefined}
         onCreateEditor={handleCreateEditor}
         basicSetup={{
           lineNumbers: true,

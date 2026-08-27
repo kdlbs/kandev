@@ -5,10 +5,12 @@ import { FileEditorContent } from "./file-editor-content";
 import { FileImageViewer } from "./file-image-viewer";
 import { FileBinaryViewer } from "./file-binary-viewer";
 import type { OpenFileTab } from "@/lib/types/backend";
-import { getFileCategory, getFilePreviewKind } from "@/lib/utils/file-types";
+import { getFileCategory, getFilePreviewKind, isMarkdownFile } from "@/lib/utils/file-types";
 import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
 import { FileViewerExternalLink } from "./file-viewer-header";
 import { getFileTabKey } from "./task-center-panel-file-tabs";
+import { defaultMarkdownFileMode, type MarkdownFileMode } from "./markdown-file-mode";
+import { MarkdownFileEditor } from "./markdown-file-editor";
 
 function resolveTabCategory(tab: OpenFileTab): "image" | "binary" | "text" {
   if (!tab.isBinary) return "text";
@@ -25,6 +27,7 @@ export function FileTabContent({
   onFileSave,
   onFileDelete,
   onTogglePreview,
+  onMarkdownModeChange,
 }: {
   tab: OpenFileTab;
   activeSession: {
@@ -39,6 +42,7 @@ export function FileTabContent({
   onFileSave: (path: string, repo?: string) => void;
   onFileDelete: (path: string, repo?: string) => void;
   onTogglePreview?: () => void;
+  onMarkdownModeChange?: (mode: MarkdownFileMode) => void;
 }) {
   const category = resolveTabCategory(tab);
   const previewKind = getFilePreviewKind(tab.path, !!tab.isBinary);
@@ -72,28 +76,47 @@ export function FileTabContent({
           headerActions={externalLink}
         />
       )}
-      {category === "text" && (
-        <FileEditorContent
-          isSymlink={!!tab.resolvedPath}
-          path={tab.path}
-          content={tab.content}
-          originalContent={tab.originalContent}
-          isDirty={tab.isDirty}
-          isSaving={isSaving}
-          sessionId={activeSessionId || undefined}
-          taskId={taskId}
-          repositoryId={activeSession?.repository_id ?? undefined}
-          worktreePath={workspacePath}
-          repo={tab.repo}
-          enableComments={!!activeSessionId}
-          previewKind={previewKind}
-          renderedPreview={previewKind === "markdown" && !!tab.renderedPreview}
-          onTogglePreview={previewKind === "markdown" ? onTogglePreview : undefined}
-          onChange={(newContent) => onFileChange(tab.path, newContent, tab.repo)}
-          onSave={() => onFileSave(tab.path, tab.repo)}
-          onDelete={() => onFileDelete(tab.path, tab.repo)}
-        />
-      )}
+      {category === "text" &&
+        (isMarkdownFile(tab.path) ? (
+          <MarkdownFileEditor
+            path={tab.path}
+            content={tab.content}
+            originalContent={tab.originalContent}
+            isDirty={tab.isDirty}
+            isSaving={isSaving}
+            sessionId={activeSessionId}
+            taskId={taskId}
+            repositoryId={activeSession?.repository_id}
+            worktreePath={workspacePath}
+            repo={tab.repo}
+            enableComments={!!activeSessionId}
+            mode={tab.markdownMode ?? defaultMarkdownFileMode(tab.path) ?? "source"}
+            onModeChange={onMarkdownModeChange ?? (() => undefined)}
+            onChange={(newContent) => onFileChange(tab.path, newContent, tab.repo)}
+            onSave={() => onFileSave(tab.path, tab.repo)}
+            onDelete={() => onFileDelete(tab.path, tab.repo)}
+          />
+        ) : (
+          <FileEditorContent
+            path={tab.path}
+            content={tab.content}
+            originalContent={tab.originalContent}
+            isDirty={tab.isDirty}
+            isSaving={isSaving}
+            sessionId={activeSessionId || undefined}
+            taskId={taskId}
+            repositoryId={activeSession?.repository_id ?? undefined}
+            worktreePath={workspacePath}
+            repo={tab.repo}
+            enableComments={!!activeSessionId}
+            previewKind={previewKind}
+            renderedPreview={!!tab.renderedPreview}
+            onTogglePreview={onTogglePreview}
+            onChange={(newContent) => onFileChange(tab.path, newContent, tab.repo)}
+            onSave={() => onFileSave(tab.path, tab.repo)}
+            onDelete={() => onFileDelete(tab.path, tab.repo)}
+          />
+        ))}
     </TabsContent>
   );
 }
