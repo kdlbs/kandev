@@ -7,6 +7,7 @@ afterEach(() => {
 });
 
 describe("quick chat launcher focus", () => {
+  // @covers AC-UI-QUICK-TERMINAL-001.9
   it("restores focus through the animation frame after closing", () => {
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
       callback(0);
@@ -21,6 +22,11 @@ describe("quick chat launcher focus", () => {
     restoreQuickChatLauncherFocus();
 
     expect(document.activeElement).toBe(launcher);
+    expect(launcher.getAttribute("data-quick-chat-silent-focus")).toBe("true");
+
+    launcher.blur();
+
+    expect(launcher.getAttribute("data-quick-chat-silent-focus")).toBeNull();
   });
 
   it("does not focus a launcher that was removed while the dialog was open", () => {
@@ -37,5 +43,6 @@ describe("quick chat launcher focus", () => {
     restoreQuickChatLauncherFocus();
 
     expect(document.activeElement).not.toBe(launcher);
+    expect(launcher.getAttribute("data-quick-chat-silent-focus")).toBeNull();
   });
 });
