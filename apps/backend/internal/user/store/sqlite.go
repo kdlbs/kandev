@@ -562,7 +562,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 	if keyboardShortcuts == nil {
 		keyboardShortcuts = map[string]interface{}{}
 	}
-	quickChatTabOrderByWorkspace := cloneStringSliceMap(settings.QuickChatTabOrderByWorkspace)
+	quickChatTabOrderByWorkspace := CloneStringSliceMap(settings.QuickChatTabOrderByWorkspace)
 	return json.Marshal(map[string]interface{}{
 		"workspace_id":                             settings.WorkspaceID,
 		"kanban_view_mode":                         settings.KanbanViewMode,
@@ -988,9 +988,10 @@ func normalizeSidebarTaskPrefs(prefs models.SidebarTaskPrefs) models.SidebarTask
 	return prefs
 }
 
-// cloneStringSliceMap copies a per-workspace string-list map before it is
-// encoded so callers cannot mutate the settings model through the payload.
-func cloneStringSliceMap(source map[string][]string) map[string][]string {
+// CloneStringSliceMap copies a per-workspace string-list map before it is
+// encoded or assigned so callers cannot mutate the settings model through the
+// payload.
+func CloneStringSliceMap(source map[string][]string) map[string][]string {
 	if source == nil {
 		return map[string][]string{}
 	}

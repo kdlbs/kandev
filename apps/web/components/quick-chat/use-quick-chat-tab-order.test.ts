@@ -171,3 +171,30 @@ describe("useQuickChatTabOrder", () => {
     });
   });
 });
+
+describe("useQuickChatTabOrder — workspace isolation", () => {
+  it("does not resend another workspace's failed optimistic order", async () => {
+    const otherWorkspaceId = "workspace-2";
+    const persistedOtherOrder = ["conversation:other-server"];
+    const failedOtherOrder = ["terminal:other-failed"];
+    mockAppState.userSettings.quickChatTabOrderByWorkspace = {
+      [otherWorkspaceId]: persistedOtherOrder,
+    };
+    mockAppState.quickChat.tabOrderByWorkspace = {
+      [otherWorkspaceId]: failedOtherOrder,
+    };
+
+    const localOrder = [TERMINAL_TAB_REFERENCE, CHAT_TAB_REFERENCE];
+    const { result } = renderHook(() => useQuickChatTabOrder(WORKSPACE_ID, sessions, terminalTabs));
+
+    act(() => result.current.persistOrder(localOrder));
+    await waitFor(() => expect(mockUpdateUserSettings).toHaveBeenCalledOnce());
+
+    expect(mockUpdateUserSettings).toHaveBeenCalledWith({
+      quick_chat_tab_order_by_workspace: {
+        [WORKSPACE_ID]: localOrder,
+        [otherWorkspaceId]: persistedOtherOrder,
+      },
+    });
+  });
+});

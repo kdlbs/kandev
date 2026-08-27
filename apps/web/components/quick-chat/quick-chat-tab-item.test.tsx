@@ -1,6 +1,6 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { cleanup, render, fireEvent } from "@testing-library/react";
-import { QuickChatTabItem } from "./quick-chat-tab-item";
+import { QuickChatTabItem, type QuickChatTabDragHandleProps } from "./quick-chat-tab-item";
 
 const responsiveMock = vi.hoisted(() => ({ isFinePointer: true }));
 
@@ -86,6 +86,28 @@ describe("QuickChatTabItem rename", () => {
     );
 
     expect(getByLabelText("Configuration chat")).toBeTruthy();
+  });
+
+  it("keeps tab activation separate from the sortable keyboard activator", () => {
+    const onActivate = vi.fn();
+    const dragHandleProps = {
+      attributes: { "aria-roledescription": "sortable" },
+      listeners: {},
+      setActivatorNodeRef: vi.fn(),
+    } as unknown as QuickChatTabDragHandleProps;
+
+    const { getByRole, getByTestId } = render(
+      <QuickChatTabItem {...makeProps({ onActivate })} dragHandleProps={dragHandleProps} />,
+    );
+
+    const tabButton = getByRole("button", { name: "Original" });
+    expect(tabButton.getAttribute("aria-roledescription")).toBeNull();
+    expect(getByTestId("quick-chat-tab-drag-handle").getAttribute("aria-roledescription")).toBe(
+      "sortable",
+    );
+
+    fireEvent.click(tabButton);
+    expect(onActivate).toHaveBeenCalledOnce();
   });
 });
 

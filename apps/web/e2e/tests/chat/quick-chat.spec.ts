@@ -6,6 +6,7 @@ import { attachAvailableCommandsCapture } from "../../helpers/ws-capture";
 import {
   openQuickChatSetup,
   openQuickChatWithAgent,
+  quickChatTabReferences,
   selectAgentIfNeeded,
   sendQuickChatMessage,
   startQuickChatFromSetup,
@@ -28,18 +29,11 @@ async function waitForQuickChatWidth(dialog: Locator) {
     .toBeLessThan(2);
 }
 
-function quickChatTabReferences(dialog: Locator): Promise<string[]> {
-  return dialog
-    .getByTestId("quick-chat-sortable-tab")
-    .evaluateAll((tabs) =>
-      tabs
-        .map((tab) => tab.getAttribute("data-tab-reference"))
-        .filter((reference): reference is string => Boolean(reference)),
-    );
-}
-
 async function dragQuickChatTab(page: Page, source: Locator, target: Locator) {
-  const [sourceBox, targetBox] = await Promise.all([source.boundingBox(), target.boundingBox()]);
+  const [sourceBox, targetBox] = await Promise.all([
+    source.getByTestId("quick-chat-tab-drag-handle").boundingBox(),
+    target.boundingBox(),
+  ]);
   expect(sourceBox).not.toBeNull();
   expect(targetBox).not.toBeNull();
   if (!sourceBox || !targetBox) throw new Error("quick chat tab geometry unavailable");
@@ -156,7 +150,9 @@ test.describe("Quick Chat", () => {
 
     // The tab bar sits outside quick-chat-content (the clarification's
     // shortcut scope), e.g. the resize handles or a mouse-focused tab.
-    await dialog.locator('[data-testid="quick-chat-tab"] button[title]').focus();
+    await dialog
+      .locator('[data-testid="quick-chat-tab"] button[title="Double-click to rename"]')
+      .focus();
 
     await testPage.keyboard.press("Escape");
 
@@ -632,6 +628,27 @@ test.describe("Quick Chat", () => {
     });
   });
 
+  test("exposes tab actions on a coarse-pointer touch tablet", async ({ tabletTestPage }) => {
+    expect(await tabletTestPage.evaluate(() => window.innerWidth)).toBe(900);
+    expect(
+      await tabletTestPage.evaluate(() => window.matchMedia("(pointer: coarse)").matches),
+    ).toBe(true);
+
+    const dialog = await openQuickChatWithAgent(tabletTestPage);
+    const actionTrigger = dialog.getByRole("button", { name: /^Actions for / });
+    await expect(actionTrigger).toBeVisible();
+    await expect(actionTrigger).toHaveClass(/h-11/);
+    await expect(actionTrigger).toHaveClass(/w-11/);
+
+    await actionTrigger.tap();
+    await expect(
+      tabletTestPage.getByRole("menuitem", { name: "Rename", exact: true }),
+    ).toBeVisible();
+    await expect(tabletTestPage.getByRole("menuitem", { name: /^Move .* left$/ })).toBeVisible();
+    await expect(tabletTestPage.getByRole("menuitem", { name: /^Move .* right$/ })).toBeVisible();
+    await expect(tabletTestPage.getByRole("menuitem", { name: /^Close .*$/ })).toBeVisible();
+  });
+
   test("preserves mixed tab order, generated title, and rename after reload", async ({
     testPage,
     apiClient,
@@ -687,7 +704,9 @@ test.describe("Quick Chat", () => {
     const firstTab = dialog.locator(
       `[data-tab-reference="${firstReference}"] [data-testid="quick-chat-tab"]`,
     );
-    await expect(firstTab.locator("span")).toHaveText(generatedTitle, { timeout: 30_000 });
+    await expect(firstTab.getByTestId("quick-chat-tab-name")).toHaveText(generatedTitle, {
+      timeout: 30_000,
+    });
 
     // Add a terminal between the first chat and the next chat.
     await dialog.getByTestId("quick-chat-add-menu-trigger").click();
@@ -724,13 +743,13 @@ test.describe("Quick Chat", () => {
     const secondTab = dialog.locator(
       `[data-tab-reference="${secondReference}"] [data-testid="quick-chat-tab"]`,
     );
-    await secondTab.locator("button[title]").click({ button: "right" });
+    await secondTab.locator('button[title="Double-click to rename"]').click({ button: "right" });
     await testPage.getByRole("menuitem", { name: "Rename", exact: true }).click();
     const renameInput = secondTab.getByRole("textbox", { name: "Rename chat" });
     await expect(renameInput).toBeVisible();
     await renameInput.fill("Cache follow-up");
     await secondTab.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(secondTab.locator("span")).toHaveText("Cache follow-up");
+    await expect(secondTab.getByTestId("quick-chat-tab-name")).toHaveText("Cache follow-up");
 
     // Drag the terminal ahead of both conversations. This exercises the real
     // pointer sensor and persists the mixed conversation/terminal order.
@@ -802,12 +821,12 @@ test.describe("Quick Chat", () => {
       .toEqual([terminalReference, firstReference, secondReference]);
     await expect(
       restoredDialog.locator(
-        `[data-tab-reference="${firstReference}"] [data-testid="quick-chat-tab"] span`,
+        `[data-tab-reference="${firstReference}"] [data-testid="quick-chat-tab-name"]`,
       ),
     ).toHaveText(generatedTitle);
     await expect(
       restoredDialog.locator(
-        `[data-tab-reference="${secondReference}"] [data-testid="quick-chat-tab"] span`,
+        `[data-tab-reference="${secondReference}"] [data-testid="quick-chat-tab-name"]`,
       ),
     ).toHaveText("Cache follow-up");
     await expect(restoredDialog.getByTestId("quick-chat-setup")).not.toBeVisible();

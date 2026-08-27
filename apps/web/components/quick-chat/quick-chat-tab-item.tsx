@@ -13,6 +13,7 @@ import {
   IconChevronLeft,
   IconChevronRight,
   IconDots,
+  IconGripVertical,
   IconSparkles,
   IconX,
 } from "@tabler/icons-react";
@@ -111,6 +112,76 @@ export function QuickChatTabActionMenu({
   );
 }
 
+export function QuickChatTabDragHandle({
+  name,
+  dragHandleProps,
+}: {
+  name: string;
+  dragHandleProps?: QuickChatTabDragHandleProps;
+}) {
+  const { t } = useTranslation();
+  const { isFinePointer } = useResponsiveBreakpoint();
+  if (!dragHandleProps) return null;
+
+  return (
+    <button
+      type="button"
+      ref={dragHandleProps.setActivatorNodeRef}
+      {...dragHandleProps.attributes}
+      {...dragHandleProps.listeners}
+      aria-label={t("chat:reorderQuickChatTab", { name })}
+      title={t("chat:reorderQuickChatTab", { name })}
+      data-testid="quick-chat-tab-drag-handle"
+      className={`flex shrink-0 cursor-grab items-center justify-center opacity-60 hover:opacity-100 active:cursor-grabbing ${
+        isFinePointer ? "h-6 w-6" : "h-11 w-11"
+      }`}
+    >
+      <IconGripVertical className="h-3.5 w-3.5" aria-hidden />
+    </button>
+  );
+}
+
+export type QuickChatTabMoveButtonsProps = {
+  name: string;
+  onMoveLeft: () => void;
+  onMoveRight: () => void;
+  canMoveLeft: boolean;
+  canMoveRight: boolean;
+};
+
+export function QuickChatTabMoveButtons({
+  name,
+  onMoveLeft,
+  onMoveRight,
+  canMoveLeft,
+  canMoveRight,
+}: QuickChatTabMoveButtonsProps) {
+  const { t } = useTranslation();
+
+  return (
+    <>
+      <button
+        type="button"
+        aria-label={t("chat:moveQuickChatTabLeft", { name })}
+        className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center opacity-70 hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30 sm:hidden"
+        disabled={!canMoveLeft}
+        onClick={onMoveLeft}
+      >
+        <IconChevronLeft className="h-4 w-4" aria-hidden />
+      </button>
+      <button
+        type="button"
+        aria-label={t("chat:moveQuickChatTabRight", { name })}
+        className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center opacity-70 hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30 sm:hidden"
+        disabled={!canMoveRight}
+        onClick={onMoveRight}
+      >
+        <IconChevronRight className="h-4 w-4" aria-hidden />
+      </button>
+    </>
+  );
+}
+
 type QuickChatTabItemProps = {
   name: string;
   isActive: boolean;
@@ -155,7 +226,6 @@ type QuickChatTabBodyProps = {
   onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void;
   onActivate: () => void;
   onStartEdit: () => void;
-  dragHandleProps?: QuickChatTabDragHandleProps;
 };
 
 function QuickChatTabBody({
@@ -171,7 +241,6 @@ function QuickChatTabBody({
   onKeyDown,
   onActivate,
   onStartEdit,
-  dragHandleProps,
 }: QuickChatTabBodyProps) {
   const { t } = useTranslation();
 
@@ -192,9 +261,6 @@ function QuickChatTabBody({
   return (
     <button
       type="button"
-      ref={dragHandleProps?.setActivatorNodeRef}
-      {...dragHandleProps?.attributes}
-      {...dragHandleProps?.listeners}
       onClick={onActivate}
       onDoubleClick={onStartEdit}
       title={isRenameable ? t("chat:doubleClickToRename") : undefined}
@@ -206,7 +272,9 @@ function QuickChatTabBody({
           <IconSparkles className="h-3 w-3" aria-hidden />
         </span>
       )}
-      <span className="max-w-[160px] truncate">{name}</span>
+      <span data-testid="quick-chat-tab-name" className="max-w-[160px] truncate">
+        {name}
+      </span>
     </button>
   );
 }
@@ -258,26 +326,13 @@ function QuickChatTabActions({
         />
       )}
       {!isEditing && isFinePointer && onMoveLeft && onMoveRight && (
-        <>
-          <button
-            type="button"
-            aria-label={t("chat:moveQuickChatTabLeft", { name })}
-            className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center opacity-70 hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30 sm:hidden"
-            disabled={!canMoveLeft}
-            onClick={onMoveLeft}
-          >
-            <IconChevronLeft className="h-4 w-4" aria-hidden />
-          </button>
-          <button
-            type="button"
-            aria-label={t("chat:moveQuickChatTabRight", { name })}
-            className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center opacity-70 hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30 sm:hidden"
-            disabled={!canMoveRight}
-            onClick={onMoveRight}
-          >
-            <IconChevronRight className="h-4 w-4" aria-hidden />
-          </button>
-        </>
+        <QuickChatTabMoveButtons
+          name={name}
+          onMoveLeft={onMoveLeft}
+          onMoveRight={onMoveRight}
+          canMoveLeft={canMoveLeft}
+          canMoveRight={canMoveRight}
+        />
       )}
       {isEditing && (
         <>
@@ -320,6 +375,7 @@ type QuickChatTabContentProps = {
   editContainerRef: RefObject<HTMLDivElement | null>;
   bodyProps: QuickChatTabBodyProps;
   actionsProps: QuickChatTabActionsProps;
+  dragHandleProps?: QuickChatTabDragHandleProps;
 };
 
 function QuickChatTabContent({
@@ -327,6 +383,7 @@ function QuickChatTabContent({
   editContainerRef,
   bodyProps,
   actionsProps,
+  dragHandleProps,
 }: QuickChatTabContentProps) {
   const content = (
     <div
@@ -338,6 +395,9 @@ function QuickChatTabContent({
           : "text-muted-foreground hover:bg-muted"
       }`}
     >
+      {!bodyProps.isEditing && (
+        <QuickChatTabDragHandle name={bodyProps.name} dragHandleProps={dragHandleProps} />
+      )}
       <div className="flex items-center">
         <QuickChatTabBody {...bodyProps} />
       </div>
@@ -490,7 +550,6 @@ export const QuickChatTabItem = memo(function QuickChatTabItem({
         onKeyDown: handleKeyDown,
         onActivate,
         onStartEdit: handleStartEdit,
-        dragHandleProps,
       }}
       actionsProps={{
         name,
@@ -506,6 +565,7 @@ export const QuickChatTabItem = memo(function QuickChatTabItem({
         onClose,
         keepInputFocused,
       }}
+      dragHandleProps={dragHandleProps}
     />
   );
 });

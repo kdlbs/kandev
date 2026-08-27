@@ -11,6 +11,15 @@ import type { QuickChatSession, QuickTerminalTab } from "@/lib/state/slices/ui/t
 export const conversationTabReference = (sessionId: string) => `conversation:${sessionId}`;
 export const terminalTabReference = (tabId: string) => `terminal:${tabId}`;
 
+export function adjacentQuickChatTabReference(
+  order: readonly string[],
+  reference: string,
+): string | undefined {
+  const index = order.indexOf(reference);
+  if (index < 0) return undefined;
+  return order[index + 1] ?? order[index - 1];
+}
+
 type QuickChatTabOrderActions = {
   setQuickChatTabOrder: (workspaceId: string, order: string[]) => void;
   clearQuickChatTabOrder: (workspaceId: string, expectedOrder: string[]) => void;
@@ -70,11 +79,6 @@ export function useQuickChatTabOrder(
       const nextOrder = [...order];
       const current = appStore.getState();
       const nextMap = cloneTabOrderMap(current.userSettings.quickChatTabOrderByWorkspace);
-      for (const [savedWorkspaceId, savedOrder] of Object.entries(
-        current.quickChat.tabOrderByWorkspace,
-      )) {
-        nextMap[savedWorkspaceId] = [...savedOrder];
-      }
       nextMap[workspaceId] = nextOrder;
       state.setQuickChatTabOrder(workspaceId, nextOrder);
       state.setQuickChatTabOrderSyncState(workspaceId, { pending: true, error: null });

@@ -54,6 +54,7 @@
   "moveQuickChatTabLeft": "将 {{name}} 左移",
   "moveQuickChatTabRight": "将 {{name}} 右移",
   "quickChatTabActions": "{{name}} 的操作",
+  "reorderQuickChatTab": "重新排序 {{name}}",
   "noTodosYet": "暂无待办。",
   "removeQueuedMessage": "移除排队中的消息",
   "reorderQueuedMessage": "重新排序队列消息",

@@ -170,6 +170,62 @@ func TestWSAddMessagePendingQuickChatOwnerGetsTitleContextAgainWhilePending(t *t
 	for _, message := range repo.messages {
 		require.Equal(t, 1, strings.Count(message.Content, "set_task_title_kandev"))
 	}
+	require.Equal(t, 2, repo.taskGetCalls, "the task fetched for state transition is reused for title injection")
+}
+
+func TestWSAddMessagePendingQuickChatPassthroughCreatedSessionKeepsFirstPromptVerbatim(t *testing.T) {
+	repo := &messageAddSwitchRepo{
+		tasks: map[string]*models.Task{"task-quick": {
+			ID:          "task-quick",
+			WorkspaceID: "ws-quick",
+			State:       v1.TaskStateInProgress,
+			IsEphemeral: true,
+			Metadata: map[string]interface{}{
+				models.MetaKeyAgentTitlePending:        true,
+				models.MetaKeyAgentTitleOwnerSessionID: "s1",
+			},
+		}},
+		sessions: map[string]*models.TaskSession{"s1": {
+			ID:             "s1",
+			TaskID:         "task-quick",
+			State:          models.TaskSessionStateCreated,
+			IsPassthrough:  true,
+			AgentProfileID: "profile-1",
+			UpdatedAt:      time.Now().UTC(),
+		}},
+		primaryID: "s1",
+	}
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	require.NoError(t, err)
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	h := NewMessageHandlers(svc, nil, log)
+
+	firstReq, err := ws.NewRequest("passthrough-created", ws.ActionMessageAdd, map[string]interface{}{
+		"task_id": "task-quick", "session_id": "s1", "content": "hello from passthrough",
+	})
+	require.NoError(t, err)
+	_, err = h.wsAddMessage(context.Background(), firstReq)
+	require.NoError(t, err)
+	require.Len(t, repo.messages, 1)
+	require.Equal(t, "hello from passthrough", repo.messages[0].Content)
+
+	// Once the eager session is waiting, the title owner receives the
+	// instruction on a later prompt while the first prompt remains verbatim.
+	repo.sessions["s1"].State = models.TaskSessionStateWaitingForInput
+	secondReq, err := ws.NewRequest("passthrough-follow-up", ws.ActionMessageAdd, map[string]interface{}{
+		"task_id": "task-quick", "session_id": "s1", "content": "follow up",
+	})
+	require.NoError(t, err)
+	_, err = h.wsAddMessage(context.Background(), secondReq)
+	require.NoError(t, err)
+	require.Len(t, repo.messages, 2)
+	require.Contains(t, repo.messages[1].Content, "Before doing any other work, call set_task_title_kandev")
 }
 
 func TestWSAddMessagePendingQuickChatDoesNotAssignTitleOwner(t *testing.T) {

@@ -1,16 +1,15 @@
 "use client";
 
 import { memo } from "react";
-import {
-  IconAlertCircle,
-  IconChevronLeft,
-  IconChevronRight,
-  IconTerminal2,
-  IconX,
-} from "@tabler/icons-react";
+import { IconAlertCircle, IconTerminal2, IconX } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
-import { QuickChatTabActionMenu, type QuickChatTabDragHandleProps } from "./quick-chat-tab-item";
+import {
+  QuickChatTabActionMenu,
+  QuickChatTabDragHandle,
+  QuickChatTabMoveButtons,
+  type QuickChatTabDragHandleProps,
+} from "./quick-chat-tab-item";
 
 type QuickTerminalTabItemProps = {
   sequence: number;
@@ -53,11 +52,9 @@ export const QuickTerminalTabItem = memo(function QuickTerminalTabItem({
           : "text-muted-foreground hover:bg-muted"
       }`}
     >
+      <QuickChatTabDragHandle name={label} dragHandleProps={dragHandleProps} />
       <button
         type="button"
-        ref={dragHandleProps?.setActivatorNodeRef}
-        {...dragHandleProps?.attributes}
-        {...dragHandleProps?.listeners}
         onClick={onActivate}
         aria-label={label}
         aria-current={isActive ? "page" : undefined}
@@ -80,26 +77,13 @@ export const QuickTerminalTabItem = memo(function QuickTerminalTabItem({
           />
         )}
         {isFinePointer && onMoveLeft && onMoveRight && (
-          <>
-            <button
-              type="button"
-              aria-label={t("chat:moveQuickChatTabLeft", { name: label })}
-              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center opacity-70 hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30 sm:hidden"
-              disabled={!canMoveLeft}
-              onClick={onMoveLeft}
-            >
-              <IconChevronLeft className="h-4 w-4" aria-hidden />
-            </button>
-            <button
-              type="button"
-              aria-label={t("chat:moveQuickChatTabRight", { name: label })}
-              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center opacity-70 hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30 sm:hidden"
-              disabled={!canMoveRight}
-              onClick={onMoveRight}
-            >
-              <IconChevronRight className="h-4 w-4" aria-hidden />
-            </button>
-          </>
+          <QuickChatTabMoveButtons
+            name={label}
+            onMoveLeft={onMoveLeft}
+            onMoveRight={onMoveRight}
+            canMoveLeft={canMoveLeft}
+            canMoveRight={canMoveRight}
+          />
         )}
         {isFinePointer && (
           <button

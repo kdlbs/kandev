@@ -109,6 +109,7 @@ func (h *MessageHandlers) claimTaskTitleSession(ctx context.Context, task *model
 func (h *MessageHandlers) resolveMessageTaskAndTitleOwner(
 	ctx context.Context,
 	msg *ws.Message,
+	task *models.Task,
 	taskID string,
 	sessionID string,
 	configMode bool,
@@ -116,14 +117,7 @@ func (h *MessageHandlers) resolveMessageTaskAndTitleOwner(
 	hasMessageContent bool,
 ) (*models.Task, bool, *ws.Message) {
 	if !startCreatedSession && (configMode || !hasMessageContent) {
-		return nil, false, nil
-	}
-
-	task, err := h.service.GetTask(ctx, taskID)
-	if err != nil {
-		h.logger.Error("failed to resolve first-turn MCP capabilities", zap.String("task_id", taskID), zap.Error(err))
-		wsErr, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task", nil)
-		return nil, false, wsErr
+		return task, false, nil
 	}
 	if configMode {
 		return task, false, nil
@@ -437,7 +431,8 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	}
 
 	// Transition task from REVIEW → IN_PROGRESS if needed
-	if err := h.ensureTaskInProgress(ctx, req.TaskID); err != nil {
+	task, err := h.ensureTaskInProgress(ctx, req.TaskID)
+	if err != nil {
 		h.logger.Error("failed to get task", zap.String("task_id", req.TaskID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task", nil)
 	}
@@ -510,11 +505,10 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// wall of MCP-tool boilerplate prepended to "hello".
 	storedContent := orchestrator.AppendEntityReferenceContext(req.Content, req.EntityReferences)
 	configMode, _ := sessionResp.Session.Metadata["config_mode"].(bool)
-	var task *models.Task
 	titleOwner := false
 	hasMessageContent := req.Content != "" || len(req.Attachments) > 0
 	task, titleOwner, wsErr = h.resolveMessageTaskAndTitleOwner(
-		ctx, msg, req.TaskID, req.TaskSessionID, configMode, startCreatedSession, hasMessageContent,
+		ctx, msg, task, req.TaskID, req.TaskSessionID, configMode, startCreatedSession, hasMessageContent,
 	)
 	if wsErr != nil {
 		return wsErr, nil
@@ -542,7 +536,6 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		Metadata:      meta.ToMap(),
 	}
 	var message *models.Message
-	var err error
 	if req.ClientMessageID != "" {
 		message, err = h.service.CreateMessageIdempotent(ctx, req.ClientMessageID, createRequest)
 	} else {
@@ -739,14 +732,15 @@ func (h *MessageHandlers) logBlockedRunningSession(sessionID string, state model
 }
 
 // ensureTaskInProgress fetches the task and transitions it from REVIEW → IN_PROGRESS if needed.
-// Returns an error only when the task cannot be fetched.
-func (h *MessageHandlers) ensureTaskInProgress(ctx context.Context, taskID string) error {
+// The fetched task is returned so message context injection can reuse the same
+// snapshot instead of issuing another repository lookup.
+func (h *MessageHandlers) ensureTaskInProgress(ctx context.Context, taskID string) (*models.Task, error) {
 	task, err := h.service.GetTask(ctx, taskID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if task.State != v1.TaskStateReview {
-		return nil
+		return task, nil
 	}
 	if _, err := h.service.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress); err != nil {
 		h.logger.Error("failed to transition task from REVIEW to IN_PROGRESS",
@@ -756,7 +750,7 @@ func (h *MessageHandlers) ensureTaskInProgress(ctx context.Context, taskID strin
 		h.logger.Info("task transitioned from REVIEW to IN_PROGRESS",
 			zap.String("task_id", taskID))
 	}
-	return nil
+	return task, nil
 }
 
 // dispatchPromptAsync forwards the message to the agent as a prompt in a

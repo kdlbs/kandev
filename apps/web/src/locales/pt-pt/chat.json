@@ -54,6 +54,7 @@
   "moveQuickChatTabLeft": "Mover {{name}} para a esquerda",
   "moveQuickChatTabRight": "Mover {{name}} para a direita",
   "quickChatTabActions": "Ações para {{name}}",
+  "reorderQuickChatTab": "Reordenar {{name}}",
   "noTodosYet": "Ainda não há tarefas por fazer.",
   "newChatTab": "Novo chat",
   "newQuickChat": "Novo chat rápido",

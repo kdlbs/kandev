@@ -234,6 +234,27 @@ func TestHTTPStartQuickChatForwardsAutoTitleAndKeepsProvisionalTitle(t *testing.
 	assert.Len(t, orch.requests, 1)
 }
 
+func TestHTTPStartQuickChatWithoutAutoTitleDoesNotMarkPendingTitle(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h, orch, repo := newQuickChatHandlerForTest(t)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/workspaces/ws-1/quick-chat", strings.NewReader(`{
+		"title":"Ordinary quick chat",
+		"agent_profile_id":"profile-1",
+		"auto_title":false
+	}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Params = gin.Params{{Key: "id", Value: "ws-1"}}
+
+	h.httpStartQuickChat(c)
+
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+	require.NotNil(t, repo.task)
+	assert.False(t, models.IsAgentTitlePending(repo.task.Metadata))
+	assert.Len(t, orch.requests, 1)
+}
+
 // TestStartAgentForNewTask_SetsDeferredStart pins the call-site half of the
 // passthrough start_agent prompt-delivery fix: the synchronous prepare must
 // carry DeferredStart=true so launchPrepare does not eagerly upgrade a

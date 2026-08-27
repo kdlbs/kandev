@@ -54,6 +54,7 @@
   "moveQuickChatTabLeft": "Move {{name}} left",
   "moveQuickChatTabRight": "Move {{name}} right",
   "quickChatTabActions": "Actions for {{name}}",
+  "reorderQuickChatTab": "Reorder {{name}}",
   "noTodosYet": "No todos yet.",
   "newChatTab": "New Chat",
   "newQuickChat": "New Quick Chat",

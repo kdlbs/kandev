@@ -1,17 +1,7 @@
 import { type Locator, type Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
-import { startQuickChatFromSetup } from "./quick-chat-helpers";
-
-function quickChatTabReferences(dialog: Locator): Promise<string[]> {
-  return dialog
-    .getByTestId("quick-chat-sortable-tab")
-    .evaluateAll((tabs) =>
-      tabs
-        .map((tab) => tab.getAttribute("data-tab-reference"))
-        .filter((reference): reference is string => Boolean(reference)),
-    );
-}
+import { quickChatTabReferences, startQuickChatFromSetup } from "./quick-chat-helpers";
 
 async function openMobileQuickChat(page: Page): Promise<Locator> {
   await page.goto("/");
@@ -48,6 +38,9 @@ test.describe("mobile quick chat tabs", () => {
   }) => {
     test.setTimeout(120_000);
     const dialog = await openMobileQuickChat(testPage);
+    expect(await testPage.evaluate(() => window.matchMedia("(pointer: coarse)").matches)).toBe(
+      true,
+    );
 
     try {
       const firstStart = testPage.waitForResponse(
@@ -102,7 +95,7 @@ test.describe("mobile quick chat tabs", () => {
       await expect(renameInput).toBeVisible();
       await renameInput.fill("Phone renamed");
       await firstTab.getByRole("button", { name: "Save", exact: true }).tap();
-      await expect(firstTab.locator("span")).toHaveText("Phone renamed");
+      await expect(firstTab.getByTestId("quick-chat-tab-name")).toHaveText("Phone renamed");
 
       const controls = dialog.locator(
         '[data-testid="quick-chat-tab"] button, [data-testid="quick-terminal-tab"] button',

@@ -308,6 +308,40 @@ describe("useQuickChatModal — persisted config lifecycle", () => {
     consoleError.mockRestore();
   });
 
+  it("activates the adjacent mixed tab after closing the active conversation", async () => {
+    mockAppState.quickChat.sessions = [
+      {
+        sessionId: SESSION_ONE_ID,
+        workspaceId: WORKSPACE_ID,
+        kind: "chat",
+        taskId: "chat-task",
+      },
+    ];
+    mockAppState.quickChat.terminalTabs = [
+      {
+        tabId: TERMINAL_ONE_ID,
+        workspaceId: WORKSPACE_ID,
+        sessionId: "terminal-session",
+        sequence: 1,
+        status: "running",
+      },
+    ];
+    mockAppState.quickChat.activeKind = "conversation";
+    mockAppState.quickChat.activeSessionId = SESSION_ONE_ID;
+    mockAppState.userSettings.quickChatTabOrderByWorkspace = {
+      [WORKSPACE_ID]: [`terminal:${TERMINAL_ONE_ID}`, `conversation:${SESSION_ONE_ID}`],
+    };
+    mockDeleteTask.mockResolvedValue(undefined);
+
+    const { result } = renderHook(() => useQuickChatModal(WORKSPACE_ID));
+
+    act(() => result.current.handleCloseTab(SESSION_ONE_ID));
+    await act(async () => result.current.handleConfirmClose());
+
+    expect(mockAppState.removeQuickChatSession).toHaveBeenCalledWith(SESSION_ONE_ID);
+    expect(mockAppState.activateQuickTerminal).toHaveBeenCalledWith(TERMINAL_ONE_ID, WORKSPACE_ID);
+  });
+
   it("exposes only sessions from the hydrated workspace", () => {
     mockAppState.quickChat.sessions = [
       { sessionId: "session-a", workspaceId: WORKSPACE_ID, kind: "chat" },
