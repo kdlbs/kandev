@@ -16,7 +16,7 @@ Lock the successful-completion header in the existing `/e2e:subagent` flow on de
 
 ## Acceptance
 
-- After chat idle on `/e2e:subagent`, the single `subagent-card` has no `role=status` named Loading, no `Working...` text, and no success-check label. Existing type, description, and metadata-chip assertions stay.
+- After chat idle on `/e2e:subagent`, the single `subagent-card` has no `role=status` named Loading, no `Working...` text, and one `Completed` label. Existing type, description, and metadata-chip assertions stay.
 - The same settled-header assertions run on `mobile-chrome` via `mobile-subagent.spec.ts`.
 - No new mock-agent scenario, no new i18n keys, no new Playwright file.
 
@@ -54,7 +54,7 @@ Summary, files changed, tests run, blockers, risks, and this task plus `plan.md`
 
 ## Results
 
-Done. After metadata is visible, both specs assert the card has no Loading status, no `Working...`, and no `Command succeeded` label.
+Done. After metadata is visible, both specs assert the card has no Loading status, no `Working...`, and one `Completed` label.
 
 - Desktop: `pnpm e2e:run --host --project chromium -- tests/chat/subagent.spec.ts` — 1 passed (19.7s).
 - Mobile: `pnpm e2e:run --host --project mobile-chrome -- tests/chat/mobile-subagent.spec.ts` — 1 passed (14.4s).

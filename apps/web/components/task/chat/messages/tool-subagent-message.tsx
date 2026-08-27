@@ -59,18 +59,45 @@ function isSubagentPayloadLive(status: string | undefined): boolean {
   return !isSubagentPayloadTerminal(status);
 }
 
+type SubagentTerminalStatus = "complete" | "error" | "cancelled";
+
+function normalizeSubagentTerminalStatus(
+  status: string | undefined,
+): SubagentTerminalStatus | undefined {
+  if (status === "errored" || status === "notFound") return "error";
+  if (status === "interrupted" || status === "shutdown") return "cancelled";
+
+  const normalized = normalizeToolCallStatus(status);
+  if (normalized === "complete" || normalized === "error" || normalized === "cancelled") {
+    return normalized;
+  }
+  return undefined;
+}
+
+function resolveSubagentTerminalStatus(
+  metadataStatus: ToolCallMetadata["status"] | undefined,
+  payloadStatus: string | undefined,
+): SubagentTerminalStatus {
+  const payloadTerminal = normalizeSubagentTerminalStatus(payloadStatus);
+  const metadataTerminal = normalizeSubagentTerminalStatus(metadataStatus);
+  if (payloadTerminal && payloadTerminal !== "complete") return payloadTerminal;
+  if (metadataTerminal && metadataTerminal !== "complete") return metadataTerminal;
+  return payloadTerminal ?? metadataTerminal ?? "complete";
+}
+
 export function isSubagentEffectivelyActive(
   metadata: ToolCallMetadata | undefined,
   isContainingTurnActive: boolean,
 ): boolean {
+  const payloadStatus = metadata?.normalized?.subagent_task?.status;
+  if (payloadStatus && isSubagentPayloadTerminal(payloadStatus)) return false;
+
   const status = metadata?.status;
   if (status === "running") return true;
 
   const normalized = normalizeToolCallStatus(status);
   if (normalized === "error" || normalized === "cancelled") return false;
 
-  const payloadStatus = metadata?.normalized?.subagent_task?.status;
-  if (payloadStatus && isSubagentPayloadTerminal(payloadStatus)) return false;
   if (!isContainingTurnActive) return false;
 
   if (status === "in_progress" || isSubagentPayloadLive(payloadStatus)) return true;
@@ -150,6 +177,7 @@ type SubagentHeaderProps = {
   description: string;
   isActive: boolean;
   status?: ToolCallMetadata["status"];
+  payloadStatus?: string;
   childCount: number;
   hasExpandableContent: boolean;
   onToggle: () => void;
@@ -158,9 +186,11 @@ type SubagentHeaderProps = {
 function SubagentStatusIcon({
   isActive,
   status,
+  payloadStatus,
 }: {
   isActive: boolean;
   status?: ToolCallMetadata["status"];
+  payloadStatus?: string;
 }) {
   const { t } = useTranslation();
   if (isActive) {
@@ -172,7 +202,7 @@ function SubagentStatusIcon({
       </span>
     );
   }
-  const normalized = normalizeToolCallStatus(status);
+  const normalized = resolveSubagentTerminalStatus(status, payloadStatus);
   if (normalized === "error" || normalized === "cancelled") {
     const label = normalized === "cancelled" ? t("task:statusCancelled") : t("task:failed");
     return (
@@ -195,6 +225,7 @@ function SubagentHeader({
   description,
   isActive,
   status,
+  payloadStatus,
   childCount,
   hasExpandableContent,
   onToggle,
@@ -231,7 +262,7 @@ function SubagentHeader({
           {shownDescription}
         </span>
       )}
-      <SubagentStatusIcon isActive={isActive} status={status} />
+      <SubagentStatusIcon isActive={isActive} status={status} payloadStatus={payloadStatus} />
       {childCount > 0 && (
         <span
           data-testid="subagent-child-count"
@@ -369,6 +400,7 @@ export const ToolSubagentMessage = memo(function ToolSubagentMessage({
         description={description}
         isActive={isActive}
         status={metadata?.status}
+        payloadStatus={subagentTask?.status}
         childCount={childCount}
         hasExpandableContent={hasExpandableContent}
         onToggle={handleToggle}

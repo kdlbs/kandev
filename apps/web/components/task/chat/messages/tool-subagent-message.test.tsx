@@ -153,6 +153,13 @@ const EFFECTIVELY_ACTIVE_CASES: Array<{
     expected: true,
   },
   {
+    name: "terminal nested payload overrides running metadata",
+    metadataStatus: "running",
+    payloadStatus: "errored",
+    isContainingTurnActive: true,
+    expected: false,
+  },
+  {
     name: "started payload stays active after spawn completes during its turn",
     metadataStatus: COMPLETE,
     payloadStatus: STARTED,
@@ -335,7 +342,25 @@ describe("ToolSubagentMessage", () => {
 
     expect(screen.queryByRole("status", { name: "Loading" })).toBeNull();
     expect(screen.queryByText(WORKING)).toBeNull();
-    expect(screen.getByLabelText("Completed")).toBeTruthy();
+    expect(screen.getByLabelText(FAILED)).toBeTruthy();
+  });
+
+  it("shows a failed nested payload when spawn metadata is complete", () => {
+    renderSubagent(subagentMessage({ metadataStatus: COMPLETE, payloadStatus: "failed" }), {
+      isContainingTurnActive: true,
+    });
+
+    expect(screen.getByLabelText(FAILED)).toBeTruthy();
+    expect(screen.queryByLabelText(COMPLETED)).toBeNull();
+  });
+
+  it("shows a cancelled nested payload when spawn metadata is complete", () => {
+    renderSubagent(subagentMessage({ metadataStatus: COMPLETE, payloadStatus: "cancelled" }), {
+      isContainingTurnActive: true,
+    });
+
+    expect(screen.getByLabelText(CANCELLED)).toBeTruthy();
+    expect(screen.queryByLabelText(COMPLETED)).toBeNull();
   });
 
   it("shows a completed check with a mapped hover after the turn settles", () => {
@@ -465,7 +490,7 @@ describe("subagent header status", () => {
     expect(screen.getByRole("status", LOADING)).toBeTruthy();
   });
 
-  it("shows no Working, spinner, failed mark, or success check on a completed card with children", () => {
+  it("shows a completed check without Working or a spinner on a completed card with children", () => {
     renderSubagent(subagentMessage({ metadataStatus: COMPLETE, payloadStatus: COMPLETE }), {
       childMessages: [childTool("child-1", FIRST_CHILD), childTool("child-2", SECOND_CHILD)],
     });
@@ -474,7 +499,7 @@ describe("subagent header status", () => {
     expect(screen.queryByRole("status", LOADING)).toBeNull();
     expect(screen.queryByLabelText("Failed")).toBeNull();
     expect(screen.queryByLabelText("Cancelled")).toBeNull();
-    expect(screen.queryByLabelText("Command succeeded")).toBeNull();
+    expect(screen.getByLabelText(COMPLETED)).toBeTruthy();
   });
 
   it("marks a failed card with a Failed label and no spinner", () => {
